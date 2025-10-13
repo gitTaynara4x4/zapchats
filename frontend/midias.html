@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="has-sidebar prepaint">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Mídias – ZapChats</title>
+
+  <!-- Shell global (injeta head-base + loader + tema + sidebar) -->
+  <script src="/frontend/js/app-base.js" defer></script>
+  <script src="/frontend/js/auth.js" defer></script>
+
+  <!-- Anti-flash -->
+  <style>
+    html.prepaint body{visibility:hidden}
+    html.prepaint[data-head-ready][data-loader-ready] body{visibility:visible}
+  </style>
+
+  <!-- Ícones -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+
+  <!-- CSS da página -->
+  <link rel="stylesheet" href="/frontend/css/midias.css"/>
+</head>
+<body>
+  <!-- Sidebar (carregada via app-base.js) -->
+  <aside id="sidebar"
+         data-src="/frontend/partials/sidebar.html"
+         data-src-mobile="/frontend/partials/sidebar-mobile.html"></aside>
+
+  <main class="main">
+    <div class="section-title">
+      <h1>
+        <i class="fa fa-folder-open title-ico"></i>
+        <span class="title-text">Mídias</span>
+
+        <!-- seletor de instâncias -->
+        <button id="instMenuBtn" type="button" class="inst-trigger" aria-haspopup="listbox"
+                aria-expanded="false" aria-controls="inst-menu">
+          <span id="instMenuLabel">Todas as instâncias</span>
+          <span class="chev">▾</span>
+        </button>
+
+        <!-- Meus Arquivos ao lado do seletor -->
+        <button id="btn-meus-arquivos" type="button" class="btn">
+          <i class="fa fa-user-gear"></i>
+          <span class="hide-xs">Meus Arquivos</span>
+          <span class="show-xs">Meus</span>
+        </button>
+      </h1>
+
+      <div class="top-meta"><strong id="midias-meta">0</strong> itens</div>
+
+      <!-- menu do seletor de instâncias -->
+      <div id="inst-menu" class="inst-menu" role="listbox" aria-hidden="true" aria-label="Selecionar instância">
+        <div class="head">WhatsApps</div>
+        <ul id="instMenuList"><!-- itens via JS --></ul>
+      </div>
+    </div>
+
+    <!-- Filtros -->
+    <section class="filter" aria-label="Filtros de mídias">
+      <div class="group group-search">
+        <label for="q">Buscar:</label>
+        <input class="input" id="q" type="text" placeholder="nome, tag..." autocomplete="off"/>
+      </div>
+
+      <div class="group group-tabs">
+        <div class="tabs" role="tablist" aria-label="Tipo de mídia">
+          <button class="tab" id="tab-all"  role="tab" aria-selected="true"  data-type="all">Tudo</button>
+          <button class="tab" id="tab-docs" role="tab" aria-selected="false" data-type="documento">
+            <i class="fa fa-file-lines" style="margin-right:.35rem"></i> Documentos
+          </button>
+          <button class="tab" id="tab-imgs" role="tab" aria-selected="false" data-type="imagem">Imagens</button>
+          <button class="tab" id="tab-vids" role="tab" aria-selected="false" data-type="video">Vídeos</button>
+          <button class="tab" id="tab-auds" role="tab" aria-selected="false" data-type="audio">Áudio</button>
+        </div>
+      </div>
+
+      <div class="group group-order">
+        <label for="ordenar">Ordenar:</label>
+        <select class="select" id="ordenar">
+          <option value="recent">Mais recentes</option>
+          <option value="old">Mais antigas</option>
+          <option value="az">A–Z</option>
+          <option value="za">Z–A</option>
+        </select>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="group group-actions">
+        <button id="btn-upload" class="btn primary"><i class="fa fa-upload"></i> <span>Enviar</span></button>
+        <button id="btn-limpar"  class="btn"><i class="fa fa-eraser"></i> <span>Limpar</span></button>
+      </div>
+    </section>
+
+    <section class="box">
+      <div id="empty" class="empty"><div>
+        <p>Nenhum arquivo encontrado.</p>
+        <small>Dica: ajuste os filtros acima ou envie novos arquivos.</small>
+      </div></div>
+
+      <div id="midias-list" class="grid" aria-live="polite" aria-busy="false"></div>
+    </section>
+  </main>
+
+  <!-- Toast -->
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <!-- JS da página -->
+  <script src="/frontend/js/pages/midias.js" defer></script>
+
+</body>
+</html>

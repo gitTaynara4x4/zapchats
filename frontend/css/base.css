@@ -1,0 +1,238 @@
+/* =========================================================
+   ZapChats UI — Base.css
+   Padrão visual compartilhado entre todas as páginas
+   (tema, tipografia, layout com sidebar, título, filtros,
+    inputs, botões, boxes, tabelas e responsivo)
+   ========================================================= */
+
+/* --- Anti-flash opcional (se preferir global via CSS) --- */
+/* html.prepaint body { visibility: hidden !important; } */
+
+/* ---------------------- Tokens/Tema ---------------------- */
+
+:root{
+  /* dimensões recorrentes */
+  --topbar-h: 44px;
+  --sbw: 16.5rem;          /* sidebar width */
+  --radius: 12px;
+  --shadow: 0 10px 30px rgba(0,0,0,.35);
+
+  /* tipografia */
+  --font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+             Roboto, "Helvetica Neue", Arial, "Noto Sans",
+             "Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol", sans-serif;
+
+  /* cores – DARK (padrão) alinhado ao Dashboard */
+  --bg:#0f0f10; --fg:#e5e7eb; --muted:#9ca3af;
+  --card:#161617; --surface:#161617; --border:#27272a;
+  --hover:rgba(255,255,255,.04); --hover-strong:rgba(255,255,255,.06);
+
+  /* realces */
+  --ring:#4f83ff;          /* foco/realce */
+  --brand:#4f83ff;         /* botões primários */
+  --ok:#16a34a; --danger:#ef4444; --warn:#f59e0b; --info:#3b82f6;
+}
+
+/* tema claro */
+html:not(.dark){
+  --bg:#f9fafb; --fg:#1f2937; --muted:#6b7280;
+  --card:#ffffff; --surface:#ffffff; --border:#e5e7eb;
+  --hover:rgba(0,0,0,.04); --hover-strong:rgba(0,0,0,.06);
+  --ring:#93c5fd; --brand:#4f83ff;
+  --ok:#16a34a; --danger:#dc2626; --warn:#d97706; --info:#2563eb;
+}
+
+/* ---------------------- Reset base ----------------------- */
+
+*{ box-sizing: border-box }
+html, body { height: 100% }
+body{
+  margin:0; min-height:100vh; display:flex;
+  background:var(--bg); color:var(--fg);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  font-synthesis-weight:none; font-optical-sizing:auto;
+}
+a{ color:inherit; text-decoration:none }
+img,svg,canvas,video{ max-width:100%; height:auto }
+
+::selection{
+  background: color-mix(in oklab, var(--ring) 35%, transparent);
+  color: var(--fg);
+}
+
+/* -------------------- Controles base --------------------- */
+
+button,input,select,textarea{
+  font:inherit; color:inherit; background:var(--card);
+  border:1px solid var(--border); border-radius:.6rem;
+}
+button{ cursor:pointer; padding:.55rem .85rem; box-shadow:0 1px 0 rgba(255,255,255,.05) inset; }
+button:focus, input:focus, select:focus, textarea:focus{
+  outline:0; box-shadow:0 0 0 3px var(--ring); border-color:transparent;
+}
+
+/* ----------------------- Layout -------------------------- */
+
+#sidebar{ display:block; width:var(--sbw); min-height:100vh; }
+.main{ flex:1; display:flex; flex-direction:column; padding:1.25rem 1.5rem; }
+
+/* (opcionais, caso use) */
+.topline-bar{
+  position:fixed; inset:0 0 auto 0; height:var(--topbar-h);
+  background:var(--surface); border-bottom:1px solid var(--border);
+  display:flex; align-items:center; padding:0 .75rem; z-index:40;
+}
+.app-sidebar{
+  position:fixed; top:var(--topbar-h); left:0; bottom:0; width:var(--sbw);
+  background:var(--surface); border-right:1px solid var(--border);
+  overflow:auto; -webkit-overflow-scrolling:touch;
+}
+nav a.active, nav a[aria-current="page"]{ background:var(--hover-strong); font-weight:600; }
+
+/* ------------------- Título padrão ----------------------- */
+
+.section-title{
+  display:flex; align-items:center; gap:.75rem;
+  margin:.25rem 0 1rem 0; position:relative;
+}
+.section-title h1{
+  margin:0; font-size:1.25rem; font-weight:700;
+  line-height:1.1;
+  display:flex; align-items:center; gap:.5rem;
+}
+.title-ico{ font-size:1rem; margin-right:.25rem; vertical-align:-1px; }
+
+/* usado no dashboard (badge de total à direita) */
+.top-total{ margin-left:auto; color:var(--muted); font-weight:600; font-size:.95rem; }
+
+/* ---------------- Barra de filtros padrão ---------------- */
+
+.filter{
+  display:flex; align-items:center; gap:1rem; margin-bottom:1rem; font-size:.95rem;
+  position:sticky; top:.5rem; z-index:10;
+}
+.filter label{ color:var(--fg); font-weight:600; }
+
+.input,.select{
+  height:2.5rem; font-size:.95rem; padding:.55rem .75rem; border-radius:.6rem;
+  background:var(--card); color:var(--fg); border:1px solid var(--border); outline:none;
+}
+.input:focus,.select:focus{ box-shadow:0 0 0 3px var(--ring); border-color:transparent; }
+
+.filter .count{ margin-left:auto; color:var(--muted); font-weight:600; }
+
+/* ------------------------ Botões ------------------------- */
+
+.btn{
+  inline-size:fit-content;
+  display:inline-flex; align-items:center; gap:.45rem; height:2.5rem;
+  border-radius:1rem; padding:0 .95rem; font-weight:700; cursor:pointer; border:1px solid transparent;
+  transition: filter .12s ease, transform .04s ease; font-size:.95rem;
+}
+.btn:active{ transform: translateY(1px) }
+.btn-primary{ background:var(--brand); color:#0b0b0b; }
+.btn-primary:hover{ filter:brightness(1.05) }
+.btn-ghost{ background:transparent; color:var(--fg); border-color:var(--border) }
+.btn-ghost:hover{ background:var(--hover) }
+
+/* --------------------- Boxes / Cards --------------------- */
+
+.box{
+  background:var(--card);
+  border:1px solid color-mix(in oklab, var(--border) 80%, transparent);
+  box-shadow:0 6px 16px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.04);
+  border-radius:var(--radius); padding:14px; position:relative;
+}
+
+/* ------------------------- Tabelas ----------------------- */
+
+.table-wrap{ overflow:auto; }
+table{ width:100%; border-collapse:collapse; font-size:.92rem; min-width:640px; }
+thead{ background:var(--hover-strong); }
+th,td{ padding:.85rem .75rem; text-align:left; border-bottom:1px solid var(--border); }
+tbody tr:hover{ background:var(--hover); }
+
+/* utilitárias */
+.muted{ color:var(--muted) }
+.card{
+  background:var(--card);
+  border:1px solid color-mix(in oklab, var(--border) 80%, transparent);
+  border-radius:var(--radius);
+  box-shadow:0 6px 16px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.04);
+}
+.hoverable:hover{ background:var(--hover) }
+.ring{ box-shadow:0 0 0 3px var(--ring) }
+
+/* ---------- Animação suave de entrada de rota ----------- */
+@media (prefers-reduced-motion: no-preference) {
+  .route-enter {
+    animation: route-fade-up .24s cubic-bezier(.2,.8,.2,1) both;
+    will-change: opacity, transform, filter;
+  }
+  @keyframes route-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(.995);
+      filter: saturate(96%);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+      filter: none;
+    }
+  }
+}
+
+/* ----------------------- Responsivo ---------------------- */
+
+/* ≤1024px: mesmo comportamento do Dashboard */
+@media (max-width:1024px){
+  #sidebar{ display:none !important; }
+  .main{ padding:1rem; padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
+  .main::after{ content:""; display:block; height: calc(96px + env(safe-area-inset-bottom)); }
+
+  .section-title{ flex-wrap:wrap; gap:.5rem; }
+  .section-title h1{ font-size:1.1rem; }
+
+  .filter{
+    flex-wrap:wrap; gap:.5rem; background:var(--bg);
+    padding:.6rem .7rem; border-radius:.9rem;
+    border:1px solid rgba(255,255,255,.08); position:static;
+  }
+  html:not(.dark) .filter{ border-color:rgba(0,0,0,.08); }
+
+  .input{ min-width:0; width:100%; }
+  table{ min-width:0; }
+}
+
+/* ≤720px: tabela vira "cards" verticais
+   - Se quiser rótulos automáticos, adicione data-th="Nome da Coluna" no <td>.
+*/
+@media (max-width:720px){
+  table{ border:0; min-width:0; }
+  thead{ display:none; }
+  tbody{ display:block; }
+  tbody tr{
+    display:block; background:var(--card);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:.8rem; padding:.55rem .7rem; margin:.5rem 0;
+  }
+  html:not(.dark) tbody tr{ border-color:rgba(0,0,0,.08); }
+  tbody tr:hover{ background:var(--card); }
+  tbody td{
+    display:flex; align-items:center; justify-content:space-between;
+    gap:.65rem; padding:.45rem 0; border-bottom:1px dashed rgba(255,255,255,.08);
+  }
+  html:not(.dark) tbody td{ border-bottom-color:rgba(0,0,0,.08); }
+  tbody td:last-child{ border-bottom:0; }
+
+  /* rótulo opcional por célula (se houver data-th) */
+  tbody td[data-th]::before{
+    content: attr(data-th);
+    color:var(--muted); font-weight:600; margin-right: .75rem;
+  }
+
+  /* empurra conteúdo para a direita quando houver rótulo */
+  tbody td > *:not(:first-child){ margin-left:auto; }
+}

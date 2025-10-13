@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Login – ZapChats</title>
+
+  <!-- Precarrega o tema (Padrão: DARK quando não houver cache) -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('theme');
+        if (!t || t === 'dark') {
+          document.documentElement.classList.add('dark');
+        }
+      } catch {}
+    })();
+  </script>
+
+  <!-- Tailwind CDN -->
+  <link rel="stylesheet" href="/frontend/css/tw.css">
+  <script> tailwind.config = { darkMode: 'class' }; </script>
+
+  <style>
+    :root{ --topbar-h:44px; }
+    .topline-bar{
+      position:fixed; inset:0 0 auto 0; height:var(--topbar-h);
+      display:flex; align-items:center; justify-content:flex-end; gap:.75rem; padding:0 14px;
+      background: linear-gradient(180deg, rgba(0,0,0,.06), rgba(22,22,23,0));
+      z-index:50; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    html:not(.dark) .topline-bar{ background: linear-gradient(180deg, rgba(0,0,0,.04), rgba(255,255,255,0)); }
+    .topline-bar::before{
+      content:""; position:absolute; left:0; right:0; top:0; height:3px;
+      background: linear-gradient(90deg,#22c55e,#06b6d4,#6366f1); opacity:.95;
+    }
+
+    .theme-toggle{
+      --w:78px; --h:34px; --p:3px; --k:28px; --dx: calc(var(--w) - var(--k) - var(--p)*2);
+      position:relative; width:var(--w); height:var(--h); padding:var(--p); border-radius:999px;
+      cursor:pointer; outline:none; border:1px solid; display:inline-block; isolation:isolate;
+      background:#eceff3; border-color:#d5d9e0;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,.06), inset 0 -1px 2px rgba(0,0,0,.05);
+      transition: background .3s ease, border-color .3s ease, box-shadow .3s ease;
+    }
+    html.dark .theme-toggle{
+      background:#2f323a; border-color:#3a3e46;
+      box-shadow: inset 0 2px 5px rgba(0,0,0,.35), inset 0 -1px 2px rgba(255,255,255,.03);
+    }
+    .theme-toggle .slot{ position:absolute; top:50%; width:28px; height:28px; margin-top:-14px; display:grid; place-items:center; pointer-events:none; opacity:.75; }
+    .theme-toggle .slot svg{ width:18px; height:18px; }
+    .theme-toggle .slot.left{ left:8px; } .theme-toggle .slot.right{ right:8px; }
+    .theme-toggle .slot svg *{ stroke:#9aa3af; } html.dark .theme-toggle .slot svg *{ stroke:#8a93a1; }
+    .theme-toggle .thumb{
+      position:absolute; top:var(--p); left:var(--p); width:var(--k); height:var(--k); border-radius:999px;
+      transform: translateX(0);
+      transition: transform .38s cubic-bezier(.28,1.2,.43,1), box-shadow .2s ease, background .3s ease;
+      display:grid; place-items:center; overflow:hidden;
+      background: radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%, rgba(255,255,255,.08) 65%),
+                  linear-gradient(180deg,#f8c266,#f59e0b);
+      box-shadow: 0 4px 8px rgba(0,0,0,.18), inset 0 0 0 1px rgba(255,255,255,.25);
+    }
+    .thumb svg{ width:22px; height:22px; display:block; }
+    .thumb .thumb-sun{ display:block; } .thumb .thumb-moon{ display:none; }
+    html.dark .theme-toggle .thumb{
+      transform: translateX(var(--dx));
+      background: radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%, rgba(255,255,255,.08) 65%),
+                  linear-gradient(180deg,#6ba6ff,#2563eb);
+      box-shadow: 0 6px 10px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.22);
+    }
+    html.dark .thumb .thumb-sun{ display:none; } html.dark .thumb .thumb-moon{ display:block; }
+    .theme-toggle:active .thumb{ transform:translateX(0) scale(.96); } html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) scale(.96); }
+    .theme-toggle:focus-visible{ box-shadow: 0 0 0 3px rgba(99,102,241,.35); }
+    .theme-toggle.t-anim::after{
+      content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+      background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.45) 50%, transparent 70%);
+      animation: sweep .55s ease both;
+    }
+    @keyframes sweep{ 0%{ transform: translateX(-120%); opacity:0;} 30%{ opacity:.9;} 100%{ transform: translateX(120%); opacity:0;} }
+
+    body{ padding-top: var(--topbar-h); }
+
+    /* Anti-Inspect Overlay */
+    #devtools-guard { position: fixed; inset: 0; display: none; place-items: center;
+      background: rgba(0,0,0,.75); backdrop-filter: blur(6px); z-index: 9999; }
+    #devtools-guard .panel { width: min(560px, 92vw); border-radius: 16px; padding: 22px 20px;
+      background: #101012; color: #e5e7eb; border: 1px solid rgba(255,255,255,.08);
+      box-shadow: 0 10px 30px rgba(0,0,0,.45); text-align: center; }
+    #devtools-guard .panel h3{ font-size: 1.125rem; margin: 0 0 6px; }
+    #devtools-guard .panel p{ opacity: .9; margin: 0 0 14px; }
+    #devtools-guard .panel button{ padding: .55rem 1rem; border-radius: 10px; font-weight: 600;
+      border: 1px solid #16a34a; background: #22c55e; color: white; cursor: pointer; }
+    html.guard-active, html.guard-active body { user-select: none !important; }
+  </style>
+</head>
+
+<body class="min-h-screen bg-green-50 dark:bg-neutral-950 flex items-center justify-center text-neutral-800 dark:text-neutral-200">
+  <!-- TOPBAR com toggle de tema -->
+  <div class="topline-bar">
+    <button id="themeSwitch" class="theme-toggle" aria-label="Alternar tema" aria-pressed="false">
+      <span class="slot left" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3.5" fill="none"/>
+          <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
+          <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
+          <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
+          <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
+        </svg>
+      </span>
+      <span class="slot right" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8z" fill="none"/>
+        </svg>
+      </span>
+      <span class="thumb" aria-hidden="true">
+        <svg class="thumb-sun" viewBox="0 0 24 24">
+          <defs><radialGradient id="sunGrad" cx="30%" cy="30%" r="80%"><stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#f8c266"/><stop offset="100%" stop-color="#f59e0b"/></radialGradient></defs>
+          <circle cx="12" cy="12" r="6.3" fill="url(#sunGrad)"/>
+        </svg>
+        <svg class="thumb-moon" viewBox="0 0 24 24">
+          <defs><radialGradient id="moonGrad" cx="30%" cy="30%" r="80%"><stop offset="0%" stop-color="#9fc3ff"/><stop offset="60%" stop-color="#6ba6ff"/><stop offset="100%" stop-color="#2563eb"/></radialGradient></defs>
+          <circle cx="12" cy="12" r="11" fill="url(#moonGrad)"/>
+        </svg>
+      </span>
+    </button>
+  </div>
+
+  <div class="w-full max-w-4xl bg-white dark:bg-neutral-900 rounded-2xl shadow-lg dark:shadow-black/40 overflow-hidden flex flex-col md:flex-row border border-transparent dark:border-neutral-800">
+    <!-- Ilustração -->
+    <div class="hidden md:flex md:w-1/2 bg-green-100 dark:bg-neutral-800 items-center justify-center p-8">
+      <img src="img/login-illustration.png" alt="Ilustração" class="object-contain h-100">
+    </div>
+
+    <!-- Formulário -->
+    <div class="w-full md:w-1/2 p-8">
+      <div class="mb-6 text-center">
+        <img src="img/Logo.png"       alt="ZapChats" class="mx-auto h-14 mb-4 dark:hidden">
+        <img src="img/Logo-white.png" alt="ZapChats" class="mx-auto h-14 mb-4 hidden dark:block">
+        <h2 class="text-3xl font-bold text-gray-800 dark:text-white">Acesse sua conta</h2>
+        <p class="text-gray-500 dark:text-gray-400">Faça login para continuar</p>
+      </div>
+
+      <form id="form-login" class="space-y-4" autocomplete="on">
+        <div>
+          <label class="block text-gray-700 dark:text-gray-200 font-medium mb-1">E-mail</label>
+          <input id="email" type="text" name="email" required
+                 pattern="^[^\\s]+@[^\\s]+$"
+                 title="O e-mail deve conter @ e não pode ter espaços"
+                 class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400 bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700 text-neutral-800 dark:text-neutral-100"
+                 placeholder="usuario@dominio">
+        </div>
+
+        <div class="relative">
+          <label class="block text-gray-700 dark:text-gray-200 font-medium mb-1">Senha</label>
+          <input id="senha" type="password" name="senha" required
+                 class="w-full px-4 py-2 border rounded-lg pr-10 focus:outline-none focus:ring-2 focus:ring-green-400 bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700 text-neutral-800 dark:text-neutral-100"
+                 placeholder="••••••••">
+          <button type="button" id="togglePassBtn"
+                  class="absolute right-3 top-9 text-gray-500 dark:text-gray-400 select-none">👁</button>
+        </div>
+
+        <!-- Lembrar de mim + Esqueci senha -->
+        <div class="flex justify-between items-center text-sm">
+          <label class="inline-flex items-center gap-2 text-gray-700 dark:text-gray-200">
+            <input id="remember" type="checkbox" class="h-4 w-4 rounded border-gray-300 dark:border-neutral-700">
+            Lembrar de mim
+          </label>
+
+          <a href="/frontend/esqueci_senha.html" class="text-green-500 hover:underline font-medium">
+            Esqueci minha senha
+          </a>
+        </div>
+
+        <div id="erro" class="hidden text-red-500 text-sm"></div>
+
+        <button id="btn-login" type="submit"
+                class="w-full py-2 rounded-lg bg-green-500 text-white font-semibold hover:bg-green-600 transition disabled:opacity-60 disabled:cursor-not-allowed">
+          Entrar
+        </button>
+      </form>
+
+      <p class="mt-8 text-center text-gray-600 dark:text-gray-300">
+        Ainda não tem conta?
+        <a href="/criar-empresa.html" class="text-green-500 hover:underline font-medium">Cadastre-se</a>
+      </p>
+    </div>
+  </div>
+
+  <!-- Overlay anti-inspect -->
+  <div id="devtools-guard" role="dialog" aria-modal="true" aria-labelledby="guard-title">
+    <div class="panel">
+      <h3 id="guard-title">Ação bloqueada</h3>
+      <p>Por segurança, inspeção e atalhos do navegador estão desativados nesta página.</p>
+      <button type="button" id="guard-close">Entendi</button>
+    </div>
+  </div>
+
+  <!-- Guard global (anti-inspect) -->
+  <script src="/frontend/assets/guard-devtools.js" defer></script>
+  <!-- Script separado -->
+  <script src="/frontend/js/pages/login.js" defer></script>>
+</body>
+</html>

@@ -1,0 +1,45 @@
+/* ===== MINI-RAIL LATERAL COM TOOLTIP (ícones) ===== */
+.zc-rail{
+  position: fixed; left:0; top:0; bottom:0; width:56px;
+  background:#111b21; border-right:1px solid #222d2f;
+  display:flex; flex-direction:column; align-items:center; gap:8px;
+  padding:10px 6px; z-index: 9990;
+}
+.zc-rail__spacer{ display:block; margin-top:auto; height:1px; width:1px; }
+
+.zc-rail__btn{
+  width:40px; height:40px; border-radius:10px; border:1px solid transparent;
+  display:grid; place-items:center; color:#c8d3da; background:transparent;
+  cursor:pointer; position:relative; outline:0; text-decoration:none;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.zc-rail__btn i{ font-size:18px; line-height:1; }
+.zc-rail__btn:hover{ background:rgba(255,255,255,.08); color:#fff; }
+.zc-rail__btn:focus-visible{ box-shadow:0 0 0 3px rgba(56,189,248,.55) inset; }
+
+.zc-rail__btn.is-active{
+  background: rgba(37,211,102,.14); color:#e8fff1;
+  border-color: rgba(37,211,102,.28);
+}
+.zc-rail__btn.is-active i{ color:#25d366; }
+
+.zc-rail__btn--danger{ color:#ef4444; }
+.zc-rail__btn--danger:hover{ background:rgba(239,68,68,.12); color:#fecaca; }
+
+/* tooltip com o nome */
+.zc-rail__btn::after{
+  content: attr(data-label);
+  position:absolute; left: calc(100% + 8px); top:50%;
+  transform: translateY(-50%) scale(.96);
+  background:#111b21; color:#e5e7eb; border:1px solid #222d2f;
+  padding:6px 8px; border-radius:8px; white-space:nowrap;
+  opacity:0; pointer-events:none; transition: opacity .12s ease, transform .12s ease;
+  box-shadow: 0 6px 16px rgba(0,0,0,.35); font-size:12.5px;
+}
+.zc-rail__btn:hover::after{ opacity:1; transform: translateY(-50%) scale(1); }
+
+html:not(.dark) .zc-rail{ background:#fff; border-right-color:#e5e7eb; }
+html:not(.dark) .zc-rail__btn:hover{ background:rgba(2,6,23,.06); color:#0f172a; }
+html:not(.dark) .zc-rail__btn::after{
+  background:#fff; color:#0f172a; border-color:#e5e7eb;
+}

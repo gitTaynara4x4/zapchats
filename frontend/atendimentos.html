@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Painel de Atendimento – ZapChats</title>
+
+  <!-- Tema antes do CSS (evita flash) -->
+  <script>
+    (function () {
+      try {
+        const saved = localStorage.getItem('zc:theme');
+        const prefersDark = matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.setAttribute('data-theme', saved || (prefersDark ? 'dark' : 'light'));
+      } catch {}
+    })();
+  </script>
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="/frontend/css/tw.css">
+  <link rel="stylesheet" href="/frontend/css/atendimentos.css">
+
+  <!-- libs -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <!-- Ajustes só para MOBILE (kebab ao lado da logo) -->
+  <style>
+    /* por padrão (desktop) o kebab do header da lista fica oculto */
+    #btnKebabHeader{ display:none; }
+
+    @media (max-width:920px){
+      /* Esconde a barra lateral inteira no mobile para não duplicar o “⋮” */
+      .wpp-leftbar{ display:none !important; }
+
+      /* Mostra o kebab ao lado da logo */
+      #btnKebabHeader{
+        display:inline-grid;
+        place-items:center;
+        width:32px; height:32px;
+        margin-right:6px;
+        border-radius:8px;
+        background:transparent; color:var(--text-2);
+        transition:background .15s,color .15s,transform .08s;
+      }
+      #btnKebabHeader:hover{ background:rgba(255,255,255,.06); color:#fff; }
+      #btnKebabHeader:active{ transform:translateY(1px); }
+      #btnKebabHeader i{ font-size:18px; line-height:1; }
+    }
+  </style>
+</head>
+<body style="display:none">
+  <!-- Autologin básico -->
+  <script>
+    (function () {
+      const EMPRESA_ID = Number(localStorage.getItem('empresa_id'));
+      if (!EMPRESA_ID) location.href = '/login';
+      else document.body.style.display = 'block';
+    })();
+  </script>
+
+  <div class="wpp-root h-[100vh] w-full">
+    <!-- Lateral (desktop mantém o botão aqui) -->
+    <nav class="wpp-leftbar" aria-label="Menu do atendimento">
+      <button id="menuOnlyBtn" class="menu-only-btn" title="Menu" aria-label="Abrir menu"
+              aria-haspopup="dialog" aria-controls="zcSidebarHost" aria-expanded="false">
+        <i class="fa-solid fa-ellipsis-vertical"></i>
+      </button>
+    </nav>
+
+    <!-- Flyout do menu -->
+    <div id="zcSidebarHost" class="zc-flyout" aria-hidden="true">
+      <div role="dialog" aria-label="Menu lateral"></div>
+      <button class="zc-flyout__backdrop" tabindex="-1" aria-hidden="true"></button>
+    </div>
+
+    <!-- Coluna de chats -->
+    <aside class="flex flex-col">
+      <div class="wpp-header-externo">
+        <div class="wpp-header-titulo-row">
+          <!-- Kebab (só aparece no mobile via CSS acima) -->
+          <button id="btnKebabHeader" title="Menu" aria-label="Abrir menu"
+                  aria-haspopup="dialog" aria-controls="zcSidebarHost">
+            <i class="fa fa-ellipsis-vertical"></i>
+          </button>
+
+          <img class="wpp-header-logo logo-dark"  src="/frontend/img/Logo-white.png"   alt="ZapChats (dark)">
+          <img class="wpp-header-logo logo-light" src="/frontend/img/logo-s-fundo.png" alt="ZapChats (light)">
+
+          <!-- A agenda será injetada via /frontend/js/atendimentos/ui/agenda.js -->
+          <div class="wpp-header-icons">
+            <!-- (agenda/contatos removido do HTML) -->
+            <button class="wpp-header-icon" id="btn-sidemodal-nova-conversa" title="Nova conversa">
+              <i class="fa fa-plus"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="wpp-header-search-row">
+          <i class="fa fa-search"></i>
+          <input type="text" class="wpp-header-search" id="wpp-header-search" placeholder="Pesquisar ou começar uma nova conversa">
+        </div>
+
+        <div id="search-results" class="search-results hidden"></div>
+
+        <!-- seletor de instâncias -->
+        <div id="inst-switch"></div>
+
+        <div class="wpp-header-filtros-row">
+          <button class="wpp-header-filtro ativo">Em atendimento</button>
+          <button class="wpp-header-filtro">Aguardando</button>
+          <button class="wpp-header-filtro">No bot</button>
+          <button class="wpp-header-filtro">Grupos</button>
+        </div>
+        <select id="filtro-departamento" style="display:none"></select>
+      </div>
+
+      <ul id="lista-clientes"></ul>
+    </aside>
+
+    <!-- Área de chat -->
+    <main class="flex flex-col">
+      <header id="chat-header" class="h-16 flex items-center px-4 gap-3 shadow-sm" style="display:none;">
+        <div class="flex items-center gap-2 relative">
+          <span id="chat-avatar"></span>
+          <h2 id="chat-title" class="font-medium truncate text-[1.09em]"></h2>
+
+          <!-- Botão de notas: conteúdo (ícone + dot) é injetado por /atendimentos/ui/notes-drawer.js -->
+          <button id="btn-sobre" class="hdr-icon-btn" title="Notas do cliente" aria-label="Notas do cliente"></button>
+        </div>
+
+        <span id="status-bateria" class="text-xs ml-auto"></span>
+      </header>
+
+      <!-- Boas-vindas -->
+      <section id="welcome-screen" class="absolute inset-0 flex flex-col items-center justify-center text-center z-10">
+        <img src="/frontend/img/wpp.png" class="w-52 h-auto mb-6 opacity-100" alt="ZapChats Logo">
+        <h2 class="text-lg font-semibold mt-2">Mantenha seu celular conectado</h2>
+        <p class="max-w-md">O ZapChats conecta ao seu telefone para sincronizar suas mensagens.<br>Mantenha seu dispositivo conectado à internet para não perder conversas.</p>
+      </section>
+
+      <!-- Histórico -->
+      <section id="historico" style="display:none;"></section>
+
+      <!-- Loading overlay -->
+      <div id="chat-loading" class="hidden absolute inset-0 z-[50] flex items-center justify-center">
+        <div class="flex items-center gap-3">
+          <span class="w-5 h-5 rounded-full border-2 animate-spin"></span>
+          <span class="text-sm">Carregando conversa…</span>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <footer id="chat-footer" class="flex items-center gap-3 px-4 py-3" style="display:none;">
+        <button type="button" class="text-xl" id="btn-clipe" title="Enviar arquivo"><i class="fa fa-paperclip"></i></button>
+        <input id="input-arquivo" type="file" style="display:none" />
+        <input id="mensagem" placeholder="Digite sua resposta…" class="flex-1 outline-none px-3 py-2 rounded" autocomplete="off"/>
+        <button id="btn-enviar" class="send-btn" title="Enviar" aria-label="Enviar">
+          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
+        </button>
+      </footer>
+    </main>
+  </div>
+
+  <!-- Boot principal -->
+  <script type="module" src="/frontend/js/atendimentos/boot/main.js"></script>
+  <script type="module" src="/frontend/js/atendimentos/ui/filtros.js"></script>
+  <script src="/frontend/js/pages/atendimentos-auto-open.js"></script>
+  <script>
+      window.ENV = window.ENV || {};
+      window.ENV.EVOLUTION = Object.assign({}, window.ENV.EVOLUTION, {
+        apiUrl: "{{ EVOLUTION_URL }}",            // do .env
+        apiKey: "{{ EVOLUTION_APIKEY }}",         // do .env
+        defaultInstance: "{{ EVOLUTION_DEFAULT_INSTANCE }}" // defina no backend
+      });
+    </script>
+  <!-- Agenda (injeta botão e drawer automaticamente) -->
+  <script src="/frontend/js/atendimentos/ui/agenda.js"></script>
+</body>
+</html>

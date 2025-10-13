@@ -1,0 +1,14 @@
+fastapi[all]
+psycopg2-binary
+sqlalchemy
+python-dotenv
+uvicorn
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+python-dotenv
+bcrypt
+PyJWT
+python-slugify
+requests

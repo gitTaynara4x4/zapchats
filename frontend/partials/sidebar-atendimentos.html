@@ -1,0 +1,473 @@
+<!-- /frontend/partials/sidebar-atendimentos.html -->
+<!-- DESKTOP/MOBILE — carregado dentro do flyout; sem referência a .zc-flyout__panel -->
+
+<!-- Preload logos -->
+<link rel="preload" as="image" href="/img/logo-s-fundo.png">
+<link rel="preload" as="image" href="/img/logo-white.png">
+<link rel="preload" as="image" href="/img/fav-icon.png">
+
+<style>
+  :root{
+    --topbar-h:44px;
+
+    --card:#161617; --border:#27272a; --fg:#e5e7eb; --muted:#9ca3af; --hover:rgba(255,255,255,.06);
+    --ring:#4f83ff; --danger:#ef4444; --overlay:rgba(0,0,0,.55);
+
+    --icon:#9ca3af;
+    --icon-active-light:#000000;
+    --icon-active-dark:#ffffff;
+  }
+  html:not(.dark){
+    --card:#fff; --border:#e5e7eb; --fg:#1f2937; --muted:#6b7280; --hover:rgba(0,0,0,.06); --overlay:rgba(0,0,0,.45);
+  }
+
+  /* Painel interno ocupa 100% da largura disponível do flyout */
+  .app-sidebar{
+    width:100%; min-height:100%;
+    background:var(--card); border-right:0 !important;
+    padding:1rem .75rem calc(1rem + env(safe-area-inset-bottom));
+    padding-top:calc(var(--topbar-h) + .75rem);
+    display:flex; flex-direction:column; overflow:auto; position:relative;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; letter-spacing:-.01em;
+  }
+
+  .app-sidebar nav{display:flex;flex-direction:column;gap:.5rem; position:relative; z-index:1;}
+  .app-sidebar nav a{
+    display:flex;align-items:center;gap:.75rem; padding:.7rem .85rem;border-radius:.8rem;
+    color:var(--muted); border:1px solid transparent; transition:background .15s,color .15s,border-color .15s;
+    font-weight:500; font-size:15.5px; text-decoration:none;
+  }
+  .app-sidebar nav a:hover{background:var(--hover);color:var(--fg)}
+  .app-sidebar nav a.active, .app-sidebar nav a[aria-current="page"]{
+    color:var(--fg); background:rgba(255,255,255,.06); border-color:var(--border);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.04); font-weight:600;
+  }
+  html:not(.dark) .app-sidebar nav a.active, html:not(.dark) .app-sidebar nav a[aria-current="page"]{
+    background:rgba(0,0,0,.06); box-shadow:inset 0 1px 0 rgba(255,255,255,.75),0 0 0 1px rgba(0,0,0,.04);
+  }
+
+  .nav-icon{ width:26px; height:26px; flex:0 0 26px; display:inline-grid; place-items:center; color:var(--icon); }
+  .nav-icon-svg{ width:22px; height:22px; display:block; }
+  html.dark .app-sidebar nav a.active .nav-icon,
+  html.dark .app-sidebar nav a[aria-current="page"] .nav-icon{ color:var(--icon-active-dark); }
+  html:not(.dark) .app-sidebar nav a.active .nav-icon,
+  html:not(.dark) .app-sidebar nav a[aria-current="page"] .nav-icon{ color:var(--icon-active-light); }
+
+  .label{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  .sb-sep{ height:1px; background:var(--border); margin:.7rem 0 .5rem; opacity:.95; }
+  .sb-footer{ margin-top:auto; display:flex; flex-direction:column; gap:.6rem; }
+
+  .logo{ height:56px; margin:0 0 1rem; display:grid; place-items:center; position:relative; z-index:1; }
+  .logo img{ max-height:50px; }
+
+  .user-chip{
+    display:flex; align-items:center; gap:.55rem; padding:.55rem .75rem; border:1px solid var(--border);
+    border-radius:999px; background: var(--card); color:var(--muted); font-weight:600; font-size:14px; cursor:pointer; user-select:none;
+  }
+  .user-chip:focus-visible{ outline:2px solid var(--ring); outline-offset:2px; }
+  .user-chip .user-email{ max-width:26ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--fg); }
+  .user-chip .avatar{ width:22px; height:22px; border-radius:999px; object-fit:cover; display:none; box-shadow:0 0 0 1px var(--border); }
+  html:not(.dark) .user-chip{ background:#fff; }
+
+  .theme-toggle{
+    --w:78px; --h:34px; --p:3px; --k:28px; --dx: calc(var(--w) - var(--k) - var(--p)*2);
+    position:relative; width:var(--w); height:var(--h); padding:var(--p); border-radius:999px; border:1px solid;
+    display:inline-block; background:#eceff3; border-color:#d5d9e0; cursor:pointer; user-select:none;
+  }
+  html.dark .theme-toggle{ background:#2f323a; border-color:#3a3e46; }
+  .theme-toggle input{ position:absolute; inset:0; opacity:0; cursor:pointer; }
+  .theme-toggle .slot{ position:absolute; top:50%; width:28px; height:28px; margin-top:-14px; display:grid; place-items:center; pointer-events:none; opacity:.8; }
+  .theme-toggle .slot svg{ width:18px; height:18px; }
+  .theme-toggle .slot.left{ left:8px; } .theme-toggle .slot.right{ right:8px; }
+  .theme-toggle .slot svg *{ stroke:#9aa3af; } html.dark .theme-toggle .slot svg *{ stroke:#8a93a1; }
+  .theme-toggle .thumb{ position:absolute; top:var(--p); left:var(--p); width:var(--k); height:var(--k); border-radius:999px; transform:translateX(0); transition: transform .28s cubic-bezier(.28,1.2,.43,1); background:linear-gradient(180deg,#f8c266,#f59e0b); box-shadow:0 3px 6px rgba(0,0,0,.25), inset 0 0 0 1px rgba(255,255,255,.25); }
+  .theme-toggle.is-dark .thumb{ transform: translateX(var(--dx)); background:linear-gradient(180deg,#6ba6ff,#2563eb); }
+
+  .logout{ color:#ef4444 !important; font-weight:600; }
+  .logout:hover{ background:rgba(239,68,68,.12) !important; color:#fecaca !important }
+</style>
+
+<aside class="app-sidebar" id="appSidebarAtt" aria-label="Menu lateral">
+  <div class="logo">
+    <img class="logo-fav"  src="/img/fav-icon.png" alt="favicon" width="32" height="32">
+  </div>
+
+  <nav>
+    <a href="/dashboard">
+      <span class="nav-icon" aria-hidden="true">
+        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+          <path d="M224,98H182V56a6,6,0,0,0-6-6H54V40a6,6,0,0,0-12,0V216a6,6,0,0,0,12,0V206h90a6,6,0,0,0,6-6V158h74a6,6,0,0,0,6-6V104A6,6,0,0,0,224,98ZM170,62V98H54V62ZM138,194H54V158h84Zm80-48H54V110H218Z"/>
+        </svg>
+      </span>
+      <span class="label">Dashboard</span>
+    </a>
+
+    <a href="/atendimentos">
+      <span class="nav-icon" aria-hidden="true">
+        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+          <path d="M225.88,30.12a13.83,13.83,0,0,0-13.7-3.58l-.11,0L20.14,84.77A14,14,0,0,0,18,110.85l85.56,41.64L145.12,238a13.87,13.87,0,0,0,12.61,8c.4,0,.81,0,1.21-.05a13.9,13.9,0,0,0,12.29-10.09l58.2-191.93,0-.11A13.83,13.83,0,0,0,225.88,30.12Zm-8,10.4L159.73,232.43l0,.11a2,2,0,0,1-3.76.26l-40.68-83.58,49-49a6,6,0,1,0-8.49-8.49l-49,49L23.15,100a2,2,0,0,1,.31-3.74l.11,0L215.48,38.08a1.94,1.94,0,0,1,1.92.52A2,2,0,0,1,217.92,40.52Z"/>
+        </svg>
+      </span>
+      <span class="label">Atendimentos</span>
+    </a>
+
+    <a href="/midias" title="Arquivos">
+      <span class="nav-icon" aria-hidden="true">
+        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+          <path d="M243.36,111.81A14,14,0,0,0,232,106H214V88a14,14,0,0,0-14-14H130L101.74,52.8a14.06,14.06,0,0,0-8.4-2.8H40A14,14,0,0,0,26,64V208a6,6,0,0,0,6,6H211.1a6,6,0,0,0,5.69-4.1l28.49-85.47A14,14,0,0,0,243.36,111.81ZM40,62H93.34a2,2,0,0,1,1.2.4L124.4,84.8A6,6,0,0,0,128,86h72a2,2,0,0,1,2,2v18H69.77a14,14,0,0,0-13.28,9.57L38,171V64A2,2,0,0,1,40,62Zm193.9,58.63L206.78,202H40.33l27.54-82.63a2,2,0,0,1,1.9-1.37H232a2,2,0,0,1,1.9,2.63Z"/>
+        </svg>
+      </span>
+      <span class="label">Arquivos</span>
+    </a>
+
+    <a href="/chat-interno">
+      <span class="nav-icon" aria-hidden="true">
+        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+          <path d="M229.93,186.58A78,78,0,0,0,168.16,74.42,78,78,0,1,0,26.07,138.58L18.58,164A14,14,0,0,0,36,181.42l25.46-7.49a78,78,0,0,0,26.39,7.63,78,78,0,0,0,106.77,40.37L220,229.42A14,14,0,0,0,237.42,212ZM62,161.5a6.05,6.05,0,0,0-1.69.24l-27.77,8.17a2,2,0,0,1-2.48-2.48l8.17-27.77a6.05,6.05,0,0,0-.47-4.53,66,66,0,1,1,27.08,27.08A6,6,0,0,0,62,161.5Zm155.71,26.16,8.17,27.77a2,2,0,0,1-2.48,2.48l-27.77-8.17a6.06,6.06,0,0,0-4.53.47,66,66,0,0,1-90-28.4,77.92,77.92,0,0,0,71-94.68,66,66,0,0,1,46.07,96A6.05,6.05,0,0,0,217.74,187.66Z"/>
+        </svg>
+      </span>
+      <span class="label">Chat Interno</span>
+    </a>
+
+    <a href="/clientes">
+      <span class="nav-icon" aria-hidden="true">
+        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+          <path d="M154,80a6,6,0,0,1,6-6h88a6,6,0,0,1,0,12H160A6,6,0,0,1,154,80Zm94,42H160a6,6,0,0,0,0,12h88a6,6,0,0,0,0-12Zm0,48H184a6,6,0,0,0,0,12h64a6,6,0,0,0,0-12Zm-98.19,20.5a6,6,0,1,1-11.62,3C131.7,168.29,107.23,150,80,150s-51.7,18.29-58.19,43.49a6,6,0,1,1-11.62-3c5.74-22.28,23-40.07,44.67-48a46,46,0,1,1,50.28,0C126.79,150.43,144.08,168.22,149.81,190.5ZM80,138a34,34,0,1,0-34-34A34,34,0,0,0,80,138Z"/>
+        </svg>
+      </span>
+      <span class="label">Clientes</span>
+    </a>
+
+    <a href="/colaboradores">
+      <span class="nav-icon" aria-hidden="true">
+        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+          <path d="M243.6,148.8a6,6,0,0,1-8.4-1.2A53.58,53.58,0,0,0,192,126a6,6,0,0,1,0-12,26,26,0,1,0,-25.18-32.5,6,6,0,0,1-11.62-3,38,38,0,1,1,59.91,39.63A65.69,65.69,0,0,1,244.8,140.4,6,6,0,0,1,243.6,148.8ZM189.19,213a6,6,0,0,1-2.19,8.2,5.9,5.9,0,0,1-3,.81,6,6,0,0,1-5.2-3,59,59,0,0,0-101.62,0,6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"/>
+        </svg>
+      </span>
+      <span class="label">Colaboradores</span>
+    </a>
+
+    <a href="/departamentos">
+      <span class="nav-icon" aria-hidden="true">
+        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+          <path d="M248,210H230V94h2a6,6,0,0,0,0-12H182V46h2a6,6,0,0,0,0-12H40a6,6,0,0,0,0,12h2V210H24a6,6,0,0,0,0,12H248a6,6,0,0,0,0-12ZM218,94V210H182V94ZM54,46H170V210H142V160a6,6,0,0,0-6-6H88a6,6,0,0,0-6,6v50H54Zm76,164H94V166h36ZM74,80a6,6,0,0,1,6-6H96a6,6,0,0,1,0,12H80A6,6,0,0,1,74,80Zm48,0a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,80ZM80,126a6,6,0,0,1,0-12H96a6,6,0,0,1,0,12Zm42-6a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,120Z"/>
+        </svg>
+      </span>
+      <span class="label">Departamentos</span>
+    </a>
+
+    <a href="/chatbot">
+      <span class="nav-icon" aria-hidden="true">
+        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+          <path d="M222,114.56a54,54,0,0,0-58.67-74.73,54,54,0,0,0-94,13.46A54,54,0,0,0,34,141.44a54,54,0,0,0,35.56,73.65A54.54,54.54,0,0,0,83.59,217a52.86,52.86,0,0,0,9.06-.78,54,54,0,0,0,94-13.46A54,54,0,0,0,222,114.56ZM183.37,52.5a42,42,0,0,1,29.21,53.14,54.84,54.84,0,0,0-5.08-3.33L163,76.62a6,6,0,0,0-6,0l-47,27.13V80.66l41.5-24A41.73,41.73,0,0,1,183.37,52.5ZM146,138.39l-18,10.39-18-10.39V117.61l18-10.39,18,10.39ZM78,72a42,42,0,0,1,72.92-28.43,56.18,56.18,0,0,0-5.42,2.74L101,72a6,6,0,0,0-3,5.19v54.27L78,119.92ZM39.13,85.93a41.75,41.75,0,0,1,27.22-20A55.09,55.09,0,0,0,66,72v51.38a6,6,0,0,0,3,5.2l47,27.13L96,167.26l-41.5-24A42,42,0,0,1,39.13,85.93ZM72.63,203.5a42,42,0,0,1-29.21-53.14,54.84,54.84,0,0,0,5.08,3.33L93,179.38a6,6,0,0,0,6,0l47-27.13v23.09l-41.5,24A41.73,41.73,0,0,1,72.63,203.5ZM178,184a42,42,0,0,1-72.92,28.43,56.18,56.18,0,0,0,5.42-2.74L155,184a6,6,0,0,0,3-5.19V124.54l20,11.54Zm38.87-13.93a41.75,41.75,0,0,1-27.22,20A55.09,55.09,0,0,0,190,184V132.62a6,6,0,0,1-3-5.2l-47-27.13,20-11.55,41.5,24A42,42,0,0,1,216.87,170.07Z"/>
+        </svg>
+      </span>
+      <span class="label">Chatbot</span>
+    </a>
+
+    <a href="/conectar">
+      <span class="nav-icon" aria-hidden="true">
+        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+          <path d="M104,42H56A14,14,0,0,0,42,56v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,200,42Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-2,34H56a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V152A14,14,0,0,0,104,138Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V152a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2ZM200,42H152a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,200,42Zm2,62a2,2,0,0,1-2,2H152a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-64,72V144a6,6,0,0,1,12,0v32a6,6,0,0,1-12,0Zm76-16a6,6,0,0,1-6,6H182v42a6,6,0,0,1-6,6H144a6,6,0,0,1,0-12h26V144a6,6,0,0,1,12,0v10h26A6,6,0,0,1,214,160Zm0,32v16a6,6,0,0,1-12,0V192a6,6,0,0,1,12,0Z"/>
+        </svg>
+      </span>
+      <span class="label">Conectar WhatsApp</span>
+    </a>
+
+    <a href="/configuracoes">
+      <span class="nav-icon" aria-hidden="true">
+        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+          <path d="M128,82a46,46,0,1,0,46,46A46.06,46.06,0,0,0,128,82Zm0,80a34,34,0,1,1,34-34A34,34,0,0,1,128,162ZM214,130.84c.06-1.89.06-3.79,0-5.68L229.33,106a6,6,0,0,0,1.11-5.29A105.34,105.34,0,0,0,219.76,74.9a6,6,0,0,0-4.53-3l-24.45-2.71q-1.93-2.07-4-4l-2.72-24.46a6,6,0,0,0-3-4.53,105.65,105.65,0,0,0-25.77-10.66A6,6,0,0,0,150,26.68l-19.2,15.37c-1.89-.06-3.79-.06-5.68,0L106,26.67a6,6,0,0,0-5.29-1.11A105.34,105.34,0,0,0,74.9,36.24a6,6,0,0,0-3,4.53L69.23,65.22q-2.07,1.94-4,4L40.76,72a6,6,0,0,0-4.53,3,105.65,105.65,0,0,0-10.66,25.77A6,6,0,0,0,26.68,106l15.37,19.2c-.06,1.89-.06,3.79,0,5.68L26.67,150.05a6,6,0,0,0-1.11,5.29A105.34,105.34,0,0,0,36.24,181.1a6,6,0,0,0,4.53,3l24.45,2.71q1.94,2.07,4,4L72,215.24a6,6,0,0,0,3,4.53,105.65,105.65,0,0,0,25.77,10.66,6,6,0,0,0,5.29-1.11L125.16,214c1.89.06,3.79.06,5.68,0l19.21,15.38a6,6,0,0,0,3.75,1.31,6.2,6.2,0,0,0,1.54-.2,105.34,105.34,0,0,0,25.76-10.68,6,6,0,0,0,3-4.53l2.71-24.45q2.07-1.93,4-4l24.46-2.72a6,6,0,0,0,4.53-3,105.49,105.49,0,0,0,10.66-25.77,6,6,0,0,0-1.11-5.29Zm-3.1,41.63-23.64,2.63a6,6,0,0,0-3.82,2,75.14,75.14,0,0,1-6.31,6.31,6,6,0,0,0-2,3.82l-2.63,23.63A94.28,94.28,0,0,1,155.14,218l-18.57-14.86a6,6,0,0,0-3.75-1.31h-.36a78.07,78.07,0,0,1-8.92,0,6,6,0,0,0-4.11,1.3L100.87,218a94.13,94.13,0,0,1-17.34-7.17L80.9,187.21a6,6,0,0,0-2-3.82,75.14,75.14,0,0,1-6.31-6.31,6,6,0,0,0-3.82-2l-23.63-2.63A94.28,94.28,0,0,1,38,155.14l14.86-18.57a6,6,0,0,0,1.3-4.11,78.07,78.07,0,0,1,0-8.92,6,6,0,0,0-1.3-4.11L38,100.87a94.13,94.13,0,0,1,7.17-17.34L68.79,80.9a6,6,0,0,0,3.82-2,75.14,75.14,0,0,1,6.31-6.31,6,6,0,0,0,2-3.82l2.63-23.63A94.28,94.28,0,0,1,100.86,38l18.57,14.86a6,6,0,0,0,4.11,1.3,78.07,78.07,0,0,1,8.92,0,6,6,0,0,0,4.11-1.3L155.13,38a94.13,94.13,0,0,1,17.34,7.17l2.63,23.64a6,6,0,0,0,2,3.82,75.14,75.14,0,0,1,6.31,6.31,6,6,0,0,0,3.82,2l23.63,2.63A94.28,94.28,0,0,1,218,100.86l-14.86,18.57a6,6,0,0,0,1.3,4.11,78,78,0,0,1,0,8.92,6,6,0,0,0,1.3,4.11L218,155.13A94.13,94.13,0,0,1,210.85,172.47Z"/>
+        </svg>
+      </span>
+      <span class="label">Configurações</span>
+    </a>
+
+    <div class="sb-sep"></div>
+
+    <div class="sb-footer">
+      <div class="user-chip" id="userChipAtt" role="button" tabindex="0" aria-haspopup="dialog" aria-controls="pfModalAtt" title="">
+        <img id="userAvatarAtt" class="avatar" alt="Foto do usuário" referrerpolicy="no-referrer" />
+        <i class="fa-regular fa-circle-user" id="userIconAtt"></i>
+        <span class="user-email" id="userEmailLabelAtt">Usuário</span>
+      </div>
+
+      <label id="themeSwitchAtt" class="theme-toggle" aria-label="Alternar tema">
+        <input type="checkbox" id="themeCheckboxAtt">
+        <span class="slot left" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3.5"/>
+            <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
+            <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
+            <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
+            <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
+          </svg>
+        </span>
+        <span class="slot right" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8z"/>
+          </svg>
+        </span>
+        <span class="thumb" aria-hidden="true"></span>
+      </label>
+
+      <a href="#" id="sidebarLogoutAtt" class="logout">
+        <span class="nav-icon" aria-hidden="true">
+          <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+            <path d="M232,218H206V40a14,14,0,0,0-14-14H64A14,14,0,0,0,50,40V218H24a6,6,0,0,0,0,12H232a6,6,0,0,0,0-12ZM194,40V218H174V38h18A2,2,0,0,1,194,40ZM62,40a2,2,0,0,1,2-2h98V218H62Zm80,92a10,10,0,1,1-10-10A10,10,0,0,1,142,132Z"/>
+          </svg>
+        </span>
+        <span class="label">Sair</span>
+      </a>
+    </div>
+  </nav>
+</aside>
+
+<!-- MODAL PERFIL (movido para <body> automaticamente) -->
+<div id="pfModalAtt" class="pf-modal" aria-hidden="true" style="display:none; position:fixed; inset:0; align-items:center; justify-content:center; background:var(--overlay); z-index:100020;">
+  <div class="pf-dialog" role="dialog" aria-modal="true" aria-labelledby="pfTitleAtt" style="width:min(680px,92vw); background:var(--card); border:1px solid var(--border); border-radius:1rem; box-shadow:0 20px 50px rgba(0,0,0,.35); overflow:hidden;">
+    <div class="pf-hd" style="display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid var(--border);">
+      <h3 id="pfTitleAtt" style="margin:0; font-size:1rem;">Meu perfil</h3>
+      <button class="pf-close" id="pfCloseAtt" aria-label="Fechar" style="background:transparent; border:none; font-size:22px; cursor:pointer; color:var(--muted);">&times;</button>
+    </div>
+    <div class="pf-body" style="padding:16px; display:grid; grid-template-columns:160px 1fr; gap:16px;">
+      <div class="pf-avatar-wrap" style="display:flex; flex-direction:column; align-items:center; gap:.5rem;">
+        <img id="pfPreviewAtt" class="pf-avatar" alt="Avatar" style="width:120px; height:120px; border-radius:999px; object-fit:cover; background:var(--hover); box-shadow:0 0 0 1px var(--border);">
+        <label class="pf-upload" style="display:inline-block; font-size:.9rem; padding:.45rem .7rem; border-radius:.6rem; border:1px solid var(--border); background:var(--card); cursor:pointer;">
+          <input id="pfFileAtt" type="file" accept="image/*" style="display:none">
+          <i class="fa fa-image" style="margin-right:.35rem"></i> Alterar foto
+        </label>
+      </div>
+      <div class="pf-grid" style="display:grid; gap:.75rem;">
+        <div class="pf-field"><label for="pfNomeAtt" style="display:block; font-size:.9rem; color:var(--muted); margin-bottom:.25rem;">Nome</label><input id="pfNomeAtt" type="text" placeholder="Seu nome" style="width:100%; padding:.65rem .75rem; border-radius:.6rem; border:1px solid var(--border); background:var(--card); color:var(--fg); outline:none; font-size:14px;"></div>
+        <div class="pf-field"><label for="pfEmailAtt" style="display:block; font-size:.9rem; color:var(--muted); margin-bottom:.25rem;">E-mail</label><input id="pfEmailAtt" type="email" readonly style="width:100%; padding:.65rem .75rem; border-radius:.6rem; border:1px solid var(--border); background:var(--card); color:var(--fg); outline:none; font-size:14px;"></div>
+        <div class="pf-field"><label for="pfDeptAtt" style="display:block; font-size:.9rem; color:var(--muted); margin-bottom:.25rem;">Departamento (opcional)</label><input id="pfDeptAtt" type="text" placeholder="Departamento" style="width:100%; padding:.65rem .75rem; border-radius:.6rem; border:1px solid var(--border); background:var(--card); color:var(--fg); outline:none; font-size:14px;"></div>
+        <div id="pfMsgAtt" class="pf-msg" style="padding:2px 0; font-size:.95rem; color:var(--muted);"></div>
+      </div>
+    </div>
+    <div class="pf-actions" style="display:flex; gap:.5rem; justify-content:flex-end; padding:12px 16px; border-top:1px solid var(--border);">
+      <button class="pf-btn" id="pfCancelAtt" style="padding:.6rem 1rem; border-radius:.6rem; border:1px solid var(--border); background:var(--card); color:var(--fg); cursor:pointer; font-weight:600;">Cancelar</button>
+      <button class="pf-btn primary" id="pfSaveAtt" style="padding:.6rem 1rem; border-radius:.6rem; border:1px solid #10b981; background:#10b981; color:white; cursor:pointer; font-weight:600;">Salvar alterações</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // ===== THEME ENGINE: unifica .dark + data-theme + localStorage =====
+  (function ThemeEngine(){
+    const html = document.documentElement;
+    const label = document.getElementById('themeSwitchAtt');
+    const cb    = document.getElementById('themeCheckboxAtt');
+
+    function updateSwitch(isDark){
+      if (cb) cb.checked = isDark;
+      if (label) label.classList.toggle('is-dark', isDark);
+    }
+    function applyTheme(mode){
+      const isDark = mode === 'dark';
+      html.classList.toggle('dark', isDark);
+      html.setAttribute('data-theme', mode);
+      try {
+        localStorage.setItem('zc:theme', mode);
+        localStorage.setItem('theme',   mode);
+      } catch {}
+      updateSwitch(isDark);
+    }
+    function currentPreference(){
+      const saved = localStorage.getItem('zc:theme') || localStorage.getItem('theme');
+      if (saved) return saved;
+      return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+    }
+    applyTheme(currentPreference());
+    if (cb) cb.addEventListener('change', ()=> applyTheme(cb.checked ? 'dark' : 'light'));
+    window.addEventListener('storage', (e)=>{
+      if (e.key === 'zc:theme' || e.key === 'theme') {
+        applyTheme((e.newValue === 'dark') ? 'dark' : 'light');
+      }
+    });
+    window.__ThemeApply = applyTheme;
+  })();
+
+  // Render dados do usuário no chip
+  (function(){
+    function pick(){ for(var i=0;i<arguments.length;i++){ var k=arguments[i]; try{
+      var v=localStorage.getItem(k); if(!v) continue;
+      if((v.startsWith('{')&&v.endsWith('}'))||(v.startsWith('[')&&v.endsWith(']'))){ try{ return JSON.parse(v);}catch{} }
+      return v;
+    }catch{}} return ''; }
+    function jwt(){ try{
+      var tok=pick('access_token','token'); if(!tok||!tok.includes('.')) return {};
+      return JSON.parse(atob(tok.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')))||{};
+    }catch{ return {}; } }
+    function info(){
+      var nome=pick('nome','name','displayName','usuario_nome'); if(typeof nome==='object') nome=nome.nome||nome.name||nome.displayName||'';
+      var dept=pick('departamento','usuario_departamento'); if(typeof dept==='object') dept=dept.departamento||'';
+      var email=pick('email','userEmail','loginEmail');
+      var obj=pick('usuario','user','me','auth_user','profile','auth');
+      if(obj&&typeof obj==='object'){
+        email=email||obj.email||(obj.user&&obj.user.email)||'';
+        nome=nome||obj.nome||obj.name||(obj.user&&(obj.user.nome||obj.user.name))||'';
+        dept=dept||obj.departamento||(obj.user&&obj.user.departamento)||'';
+      }
+      var j=jwt(); email=email||j.email||j.preferred_username||j.sub||''; nome=nome||j.name||j.given_name||j.nickname||'';
+      return {nome:(nome||'').trim(), dept:(dept||'').trim(), email:(email||'').trim()};
+    }
+    function avatar(){ var a=localStorage.getItem('usuario_avatar')||localStorage.getItem('avatar_url')||''; if(!a){ var j=jwt(); a=(j&&j.picture)||''; } return a; }
+    function render(){
+      var label=document.getElementById('userEmailLabelAtt');
+      var img=document.getElementById('userAvatarAtt');
+      var icn=document.getElementById('userIconAtt');
+      var chip=document.getElementById('userChipAtt');
+      if(!label||!img||!icn||!chip) return;
+      var u=info(); var txt=[u.nome,u.dept].filter(Boolean).join(' · ')||u.email||'Usuário';
+      label.textContent=txt;
+      chip.title=u.email||u.nome||'';
+      var av=avatar();
+      if(av){ img.src=av; img.style.display='block'; icn.style.display='none'; }
+      else { img.removeAttribute('src'); img.style.display='none'; icn.style.display=''; }
+    }
+    render();
+    window.addEventListener('auth:change', render);
+    window.addEventListener('storage', function(ev){
+      if (['usuario_nome','nome','name','displayName','usuario_departamento','departamento','email','userEmail','loginEmail','usuario_avatar','avatar_url','usuario','user','me','auth_user','profile','auth','access_token','token'].includes(ev.key)){ render(); }
+    });
+  })();
+
+  // Pré-carrega avatar do servidor (se ainda não existir no localStorage)
+  (async function(){
+    if (localStorage.getItem('usuario_avatar')) return;
+    var token=localStorage.getItem('access_token')||localStorage.getItem('token'); if(!token) return;
+    try{
+      var res=await fetch('/api/usuarios/me/avatar',{credentials:'include',headers:{Authorization:'Bearer '+token}});
+      if(!res.ok) return;
+      var blob=await res.blob(); var r=new FileReader();
+      r.onloadend=function(){
+        try{localStorage.setItem('usuario_avatar', r.result);}catch{}
+        var img=document.getElementById('userAvatarAtt'); var icn=document.getElementById('userIconAtt');
+        if(img){img.src=r.result; img.style.display='block';}
+        if(icn) icn.style.display='none';
+      };
+      r.readAsDataURL(blob);
+    }catch{}
+  })();
+
+  // ===== Modal Perfil =====
+  (function(){
+    var modal=document.getElementById('pfModalAtt');
+    var fileInput=document.getElementById('pfFileAtt');
+    var preview=document.getElementById('pfPreviewAtt');
+    var nomeInput=document.getElementById('pfNomeAtt');
+    var emailInput=document.getElementById('pfEmailAtt');
+    var deptInput=document.getElementById('pfDeptAtt');
+    var msg=document.getElementById('pfMsgAtt');
+
+    // move modal para <body> (independente do host)
+    if (modal && modal.parentElement !== document.body) {
+      document.body.appendChild(modal);
+    }
+
+    function jwt(){ try{ var t=localStorage.getItem('access_token')||localStorage.getItem('token')||''; if(!t||!t.includes('.')) return {}; return JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')))||{}; }catch{ return {}; } }
+    function me(){ var n=localStorage.getItem('nome')||''; var e=localStorage.getItem('email')||''; var d=localStorage.getItem('departamento')||localStorage.getItem('usuario_departamento')||''; var j=jwt(); if(!n) n=j.name||j.given_name||''; if(!e) e=j.email||j.preferred_username||''; return {nome:n,email:e,dept:d}; }
+
+    function openPf(){
+      var u=me();
+      nomeInput.value=u.nome||''; emailInput.value=u.email||''; deptInput.value=u.dept||''; msg.textContent='';
+      var av=localStorage.getItem('usuario_avatar')||''; if(av) preview.src=av; else preview.removeAttribute('src');
+      modal.style.display='flex'; modal.setAttribute('aria-hidden','false');
+      try{ nomeInput.focus(); }catch{}
+    }
+    function closePf(){
+      modal.style.display='none'; modal.setAttribute('aria-hidden','true');
+    }
+
+    window.PfModal = { open: openPf, close: closePf };
+
+    document.getElementById('pfCloseAtt')?.addEventListener('click', function(e){ e.preventDefault(); closePf(); });
+    document.getElementById('pfCancelAtt')?.addEventListener('click', function(e){ e.preventDefault(); closePf(); });
+    document.getElementById('pfSaveAtt')?.addEventListener('click', function(e){ e.preventDefault(); save(); });
+
+    fileInput?.addEventListener('change', function(){
+      var f=fileInput.files&&fileInput.files[0]; if(!f) return;
+      var fr=new FileReader(); fr.onload=function(){ preview.src=fr.result; }; fr.readAsDataURL(f);
+    });
+
+    async function uploadAvatarIfNeeded(){
+      var f=fileInput.files&&fileInput.files[0];
+      if(!f) return true;
+      msg.textContent='Enviando foto...';
+      var token=localStorage.getItem('access_token')||localStorage.getItem('token')||'';
+      var fd=new FormData(); fd.append('file', f, f.name);
+      try{
+        var res=await fetch('/api/usuarios/me/avatar',{method:'POST',credentials:'include',headers: token?{Authorization:'Bearer '+token}:{},body:fd});
+        if(!res.ok){ msg.textContent='Não foi possível enviar a foto ('+res.status+').'; return false; }
+        await new Promise(function(resolve){
+          var r=new FileReader();
+          r.onloadend=function(){
+            try{localStorage.setItem('usuario_avatar', r.result);}catch{}; 
+            var img=document.getElementById('userAvatarAtt'); var icn=document.getElementById('userIconAtt');
+            if(img){img.src=r.result; img.style.display='block';} if(icn) icn.style.display='none';
+            resolve();
+          };
+          r.readAsDataURL(f);
+        });
+        msg.textContent='Foto atualizada.'; return true;
+      }catch{
+        msg.textContent='Erro ao enviar foto.'; return false;
+      }
+    }
+
+    async function save(){
+      msg.textContent='Salvando...';
+      try{
+        var n=(nomeInput.value||'').trim();
+        var d=(deptInput.value||'').trim();
+        if(n) localStorage.setItem('nome', n);
+        if(d) localStorage.setItem('departamento', d);
+      }catch{}
+      var token=localStorage.getItem('access_token')||localStorage.getItem('token')||'';
+      if(token){
+        try{
+          var payload={nome:(nomeInput.value||'').trim(),departamento:(deptInput.value||'').trim()};
+          await fetch('/api/usuarios/me',{method:'PATCH',credentials:'include',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify(payload)});
+        }catch{}
+      }
+      var ok=await uploadAvatarIfNeeded(); if(!ok) return;
+      var label=document.getElementById('userEmailLabelAtt');
+      var n2=(nomeInput.value||'').trim(); var d2=(deptInput.value||'').trim(); var e2=(emailInput.value||'').trim();
+      label.textContent=[n2||null,d2||null].filter(Boolean).join(' · ')||e2||'Usuário';
+      msg.textContent='Informações salvas.'; setTimeout(closePf, 600);
+    }
+
+    // Abrir modal pelo chip
+    document.addEventListener('click', function (e) {
+      var chip = e.target.closest('#userChipAtt');
+      if (chip) { e.preventDefault(); window.PfModal && PfModal.open(); }
+    });
+    document.addEventListener('click', function (e) {
+      if (modal.style.display === 'none') return;
+      if (e.target === modal) { e.preventDefault(); window.PfModal && PfModal.close(); }
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { window.PfModal && PfModal.close(); }
+    });
+  })();
+
+  // Logout (idempotente)
+  (function(){
+    var out=document.getElementById('sidebarLogoutAtt');
+    if (!out || out.dataset.bound) return;
+    out.dataset.bound='1';
+    out.addEventListener('click', function(ev){
+      ev.preventDefault();
+      try {
+        ['token','access_token','refresh_token','email','role','empresa_id','user_id','nome','departamento','usuario','user','me','auth_user','profile','auth','usuario_avatar','avatar_url']
+          .forEach(function(k){ localStorage.removeItem(k); });
+        sessionStorage.clear();
+      } catch {}
+      location.href='/frontend/login';
+    });
+  })();
+})();
+</script>

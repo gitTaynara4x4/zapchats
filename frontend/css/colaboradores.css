@@ -1,0 +1,154 @@
+/* ==== Colaboradores (padrão Dashboard) ==== */
+
+/* ---------- Utils ---------- */
+.empty-bordered{
+  display:none; align-items:center; justify-content:center;
+  color:var(--muted); padding:2rem; border:1px dashed var(--border); border-radius:.9rem;
+}
+
+/* Permissões (grid reaproveitada no modal de perfil em edição) */
+.perms-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:.5rem; margin-top:.6rem; }
+.chk-line{ display:flex; gap:.45rem; align-items:center; font-weight:700; }
+
+/* Lista: ações da tabela */
+.td-actions{ display:flex; gap:.45rem; }
+.td-actions .btn.btn-ghost{ border-radius:12px; padding:.45rem .55rem; }
+
+/* Tabela responsiva (mobile) */
+@media (max-width:720px){
+  tbody td:nth-child(1)::before{ content:"#"; }
+  tbody td:nth-child(2)::before{ content:"Nome"; }
+  tbody td:nth-child(3)::before{ content:"E-mail"; }
+  tbody td:nth-child(4)::before{ content:"Departamento"; }
+  tbody td:nth-child(5)::before{ content:"Ações"; }
+  tbody td::before{
+    color:var(--muted); font-weight:600; display:block; margin-bottom:.25rem;
+  }
+}
+
+/* =======================
+   MODAL PERFIL (ver/editar/criar)
+   ======================= */
+#modal-perfil.modal-back{
+  position: fixed; inset: 0; display: none; place-items: center;
+  background: var(--overlay, rgba(0,0,0,.55)); z-index: 2147483000; padding: 16px;
+}
+#modal-perfil[aria-hidden="false"]{ display: grid; }
+
+#modal-perfil .modal-card{
+  width: min(1060px, 100%);
+  max-height: min(90vh, 980px);
+  display: flex; flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 20px 70px rgba(0,0,0,.45);
+  overflow: hidden;
+}
+#modal-perfil .modal-head{
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 14px 16px; gap:.8rem; border-bottom:1px solid var(--border);
+}
+#modal-perfil .modal-body{ padding: 12px 16px; overflow: auto; }
+#modal-perfil .foot{
+  display:flex; align-items:center; justify-content:flex-end;
+  gap:.6rem; padding: 12px 16px; border-top:1px solid var(--border);
+}
+
+/* trava scroll do body quando modal aberto */
+html.modal-open{ overflow: hidden; }
+
+/* Mobile: usa mais altura e borda menor */
+@media (max-width: 720px){
+  #modal-perfil .modal-card{ width: 100%; max-height: 92vh; border-radius: 10px; }
+}
+
+/* ===== Toast ===== */
+#toast{
+  position: fixed; top: 16px; right: 16px; z-index: 2147483647;
+  min-width: 260px; max-width: min(420px, 90vw);
+  padding: 12px 14px; border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35); color: #fff;
+  display: grid; grid-auto-flow: column; gap: 10px; align-items: center;
+  pointer-events: none; opacity: 0; transform: translateY(-8px);
+  transition: opacity .22s ease, transform .22s ease;
+  background: transparent;
+}
+#toast.toast-ok   { background:#065f46; }
+#toast.toast-warn { background:#78350f; }
+#toast.toast-err  { background:#7f1d1d; }
+#toast.show{ opacity:1; transform: translateY(0); }
+#toast i { opacity:.95; }
+#toast .toast-msg{ line-height: 1.25; white-space: pre-line; font-weight: 600; }
+@media (prefers-reduced-motion: reduce){ #toast{ transition: none; } }
+
+/* esconde o "Fechar" do cabeçalho (só aparece em edição) */
+#modal-perfil #perfil-fechar{ display: none !important; }
+
+/* === Avatar clicável + feedback drag&drop === */
+.avatar-wrap { cursor: pointer; }
+.avatar-wrap.drag-over{
+  outline: 2px dashed var(--primary, #2563eb);
+  outline-offset: 4px;
+}
+/* Hint compacto */
+.avatar-hint .txt { display: grid; gap: .2rem; }
+
+/* =======================
+   FILTROS – caret + botão verde ZapChats
+   ======================= */
+:root{
+  --zap-green: #008b32;
+  --zap-green-dark: #006826;
+  --zap-green-ring: #00bd3d;
+}
+
+/* Container de filtros (garante alinhamento básico) */
+.filter{
+  display:flex; flex-wrap:wrap; align-items:center; gap:.6rem;
+}
+
+/* Botão primário verde com texto branco (dark e light) */
+.filter .btn.btn-primary{
+  background: var(--zap-green) !important;
+  border-color: var(--zap-green-dark) !important;
+  color:#fff !important;
+}
+.filter .btn.btn-primary i{ color:#fff !important; }
+.filter .btn.btn-primary:hover{ filter:brightness(1.05); }
+.filter .btn.btn-primary:active{ filter:brightness(.95); }
+.filter .btn.btn-primary:focus-visible{
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--zap-green-ring) 35%, transparent);
+}
+
+/* Select com caret consistente */
+.filter .select{
+  appearance:none; -webkit-appearance:none; -moz-appearance:none;
+  padding-right: 2rem;
+  background-repeat: no-repeat;
+  background-position: right .6rem center;
+  background-size: 12px 8px;
+  background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'>\
+<path fill='%239ca3af' d='M10.59.59 6 5.17 1.41.59 0 2l6 6 6-6z'/>\
+</svg>");
+}
+
+/* Caret em botões com [data-caret] */
+.filter .btn[data-caret]{ position:relative; padding-right: 1.9rem; }
+.filter .btn[data-caret]::after{
+  content:""; position:absolute; right:.6rem; top:50%; transform:translateY(-50%);
+  width:12px; height:8px; opacity:.9;
+  background-repeat:no-repeat; background-size:12px 8px;
+  background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'>\
+<path fill='%239ca3af' d='M10.59.59 6 5.17 1.41.59 0 2l6 6 6-6z'/>\
+</svg>");
+}
+/* Caret branco quando o botão é primário (verde) */
+.filter .btn.btn-primary[data-caret]::after{
+  background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'>\
+<path fill='%23ffffff' d='M10.59.59 6 5.17 1.41.59 0 2l6 6 6-6z'/>\
+</svg>");
+}

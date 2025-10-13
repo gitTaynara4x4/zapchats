@@ -1,0 +1,274 @@
+# backend/integrations/rabbit_consumer.py
+from __future__ import annotations
+
+"""
+RabbitMQ consumer para eventos da Evolution.
+
+Recursos:
+- Exchange configurável (RABBITMQ_EXCHANGE, default 'evolution').
+- Fila única do app (RABBITMQ_QUEUE_NAME) com binds de todas as routing keys (recomendado).
+- Ou multi-fila (uma fila por routing key) se QUEUE_NAME não for definido.
+- Autocreate opcional (RABBITMQ_AUTOCREATE=true) com 'classic' ou 'quorum'.
+- Prefetch, timeout do handler e requeue configuráveis.
+- Reconexão com backoff exponencial.
+- Despacho assíncrono para handlers registrados em HANDLERS (EvoEvent).
+"""
+
+import os
+import json
+import threading
+import time
+import functools
+from typing import Dict, Callable, Awaitable, Any
+from enum import Enum
+
+import pika
+from pika.exceptions import ChannelClosedByBroker
+
+# -------------------------
+# Routing keys padrão (Evolution)
+# -------------------------
+DEFAULT_ROUTING_KEYS = [
+    "evolution.qrcode.updated",
+    "evolution.connection.update",
+    "evolution.messages.set",
+    "evolution.messages.upsert",
+    "evolution.messages.update",
+    "evolution.messages.delete",
+    "evolution.contacts.set",
+    "evolution.contacts.upsert",
+    "evolution.contacts.update",
+    "evolution.chats.set",
+    "evolution.chats.upsert",
+    "evolution.chats.update",
+    "evolution.chats.delete",
+    "evolution.presence.update",
+    "evolution.groups.upsert",
+    "evolution.groups.update",
+    "evolution.group.update",                 # alguns builds usam alternância singular
+    "evolution.group.participants.update",
+    "evolution.groups.participants.update",   # e outros plural
+]
+
+# Mapa (routing key) -> (nome do Enum EvoEvent)
+EVO_EVENT_MAP = {
+    "evolution.qrcode.updated": "QRCODE_UPDATED",
+    "evolution.connection.update": "CONNECTION_UPDATE",
+    "evolution.messages.set": "MESSAGES_SET",
+    "evolution.messages.upsert": "MESSAGES_UPSERT",
+    "evolution.messages.update": "MESSAGES_UPDATE",
+    "evolution.messages.delete": "MESSAGES_DELETE",
+    "evolution.contacts.set": "CONTACTS_SET",
+    "evolution.contacts.upsert": "CONTACTS_UPSERT",
+    "evolution.contacts.update": "CONTACTS_UPDATE",
+    "evolution.chats.set": "CHATS_SET",
+    "evolution.chats.upsert": "CHATS_UPSERT",
+    "evolution.chats.update": "CHATS_UPDATE",
+    "evolution.chats.delete": "CHATS_DELETE",
+    "evolution.presence.update": "PRESENCE_UPDATE",
+    "evolution.groups.upsert": "GROUPS_UPSERT",
+    "evolution.groups.update": "GROUPS_UPDATE",
+    "evolution.group.update": "GROUPS_UPDATE",  # compat
+    "evolution.group.participants.update": "GROUP_PARTICIPANTS_UPDATE",
+    "evolution.groups.participants.update": "GROUP_PARTICIPANTS_UPDATE",  # compat
+}
+
+def _log(*a: Any) -> None:
+    print("\033[95m[RABBIT]\033[0m", *a)
+
+def _bool(env_name: str, default: bool = False) -> bool:
+    v = os.getenv(env_name, "")
+    if v == "":
+        return default
+    return str(v).strip().lower() in ("1", "true", "yes", "y", "on")
+
+def _norm_event(name: str | None) -> str:
+    # "messages.upsert" | "MESSAGES-UPSERT" -> "MESSAGES_UPSERT"
+    return (name or "").replace(".", "_").replace("-", "_").upper()
+
+def start_rabbit_consumer(
+    loop,
+    handlers: Dict[Enum, Callable[[str, Any], Awaitable[None]]],
+    EvoEventEnum: type[Enum]
+) -> None:
+    """
+    Sobe uma thread que:
+      1) Conecta no RabbitMQ (RABBITMQ_URI)
+      2) Declara exchange/fila(s) (se AUTOCREATE)
+      3) Consome mensagens e despacha para `handlers[EvoEvent]`
+    """
+    amqp_uri = os.getenv("RABBITMQ_URI")
+    if not amqp_uri:
+        _log("RABBITMQ_URI não configurado; consumer não iniciado.")
+        return
+
+    exchange = os.getenv("RABBITMQ_EXCHANGE", "evolution").strip() or "evolution"
+    autocreate = _bool("RABBITMQ_AUTOCREATE", True)
+    queue_name = (os.getenv("RABBITMQ_QUEUE_NAME") or "").strip()  # se vazio -> multi-fila
+    queue_type = (os.getenv("RABBITMQ_QUEUE_TYPE", "classic") or "classic").strip().lower()
+    durable = _bool("RABBITMQ_DURABLE", True)
+    requeue_on_error = _bool("RABBITMQ_REQUEUE_ON_ERROR", False)
+    prefetch = int(os.getenv("RABBITMQ_PREFETCH", "50"))
+    handler_timeout = int(os.getenv("RABBITMQ_HANDLER_TIMEOUT", "15"))
+
+    # routing keys vindas do .env; se vazio, usamos a lista default
+    queues_env = os.getenv("RABBITMQ_QUEUES", "")
+    routing_keys = [q.strip() for q in queues_env.split(",") if q.strip()] or DEFAULT_ROUTING_KEYS
+
+    def _worker():
+        backoff = 2
+        while True:
+            conn = None
+            ch = None
+            try:
+                _log(f"Conectando em {amqp_uri} | exchange: {exchange} | "
+                     f"mode: {'single-queue' if queue_name else 'multi-queue'}")
+                params = pika.URLParameters(amqp_uri)
+                params.heartbeat = 30
+                params.blocked_connection_timeout = 300
+                conn = pika.BlockingConnection(params)
+                ch = conn.channel()
+                ch.basic_qos(prefetch_count=prefetch)
+
+                # Declara exchange se AUTOCREATE (durable topic)
+                if autocreate:
+                    ch.exchange_declare(exchange=exchange, exchange_type="topic", durable=True)
+
+                if queue_name:
+                    # ------------- Fila única -------------
+                    args = {}
+                    if queue_type in ("classic", "quorum"):
+                        args["x-queue-type"] = queue_type
+                    if autocreate:
+                        ch.queue_declare(queue=queue_name, durable=durable, arguments=args)
+                        for rk in routing_keys:
+                            ch.queue_bind(exchange=exchange, queue=queue_name, routing_key=rk)
+                    else:
+                        # assume que a fila já existe
+                        ch.queue_declare(queue=queue_name, passive=True)
+
+                    cb = functools.partial(_on_msg, loop, handlers, EvoEventEnum, handler_timeout, requeue_on_error)
+                    ch.basic_consume(queue=queue_name, on_message_callback=cb, auto_ack=False)
+                    _log("Consumindo fila única:", queue_name, "| bindings:", routing_keys)
+
+                else:
+                    # ------------- Multi-fila (nome = routing key) -------------
+                    ok_queues = []
+                    for qname in routing_keys:
+                        try:
+                            if autocreate:
+                                args = {}
+                                if queue_type in ("classic", "quorum"):
+                                    args["x-queue-type"] = queue_type
+                                ch.queue_declare(queue=qname, durable=durable, arguments=args)
+                                ch.queue_bind(exchange=exchange, queue=qname, routing_key=qname)
+                            else:
+                                ch.queue_declare(queue=qname, passive=True)
+
+                            cb = functools.partial(_on_msg, loop, handlers, EvoEventEnum, handler_timeout, requeue_on_error)
+                            ch.basic_consume(queue=qname, on_message_callback=cb, auto_ack=False)
+                            ok_queues.append(qname)
+
+                        except ChannelClosedByBroker as e:
+                            code = getattr(e, "reply_code", None)
+                            _log(f"Fila indisponível, pulando: {qname} (reply_code={code})")
+                            # Broker fechou o canal (ex.: 406 PRECONDITION_FAILED por tipo diferente)
+                            # reabre o canal para continuar
+                            ch = conn.channel()
+                            ch.basic_qos(prefetch_count=prefetch)
+                            continue
+
+                    if not ok_queues:
+                        _log("Nenhuma fila válida para consumir. Aguardando 10s…")
+                        time.sleep(10)
+                        continue
+
+                    _log("Consumindo filas:", ok_queues)
+
+                backoff = 2
+                ch.start_consuming()
+
+            except Exception as e:
+                _log("Erro na conexão/consumo:", repr(e))
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 30)
+            finally:
+                try:
+                    if ch and ch.is_open:
+                        ch.close()
+                except Exception:
+                    pass
+                try:
+                    if conn and conn.is_open:
+                        conn.close()
+                except Exception:
+                    pass
+
+    def _on_msg(loop, handlers, EvoEventEnum, handler_timeout, requeue_on_error, ch, method, properties, body):
+        routing = method.routing_key or method.consumer_tag or ""
+        event_name = EVO_EVENT_MAP.get(routing)
+
+        # tentar derivar do routing se não encontrar no mapa
+        if not event_name and routing.startswith("evolution."):
+            parts = routing.split(".")
+            if len(parts) >= 3:
+                event_name = f"{parts[1]}_{parts[2]}".upper()  # e.g., messages.upsert -> MESSAGES_UPSERT
+
+        # parse do payload
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except Exception:
+            payload = {}
+
+        # tenta do payload['event'] se ainda não achou
+        if not event_name:
+            event_name = _norm_event(payload.get("event"))
+
+        # instance + data no formato Evolution
+        inst = None
+        data: Any = None
+        if isinstance(payload, dict):
+            inst = payload.get("instance") or payload.get("instanceName") or payload.get("instanceId")
+            data = payload.get("data", payload)
+        elif isinstance(payload, list):
+            data = payload  # algumas integrações empilham direto a lista
+
+        # marca origem (útil p/ handlers evitarem broadcast duplicado)
+        if isinstance(data, dict):
+            data["__from_rabbit"] = True
+
+        if not event_name:
+            _log("Evento desconhecido na fila:", routing, "| ack (ignorado)")
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            return
+
+        # resolve Enum
+        try:
+            evo_enum = getattr(EvoEventEnum, event_name)
+        except Exception:
+            _log("Evento não mapeado no seu EvoEvent:", event_name, "| ack (ignorado)")
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            return
+
+        handler = handlers.get(evo_enum)
+        if not handler:
+            _log("Sem handler para", event_name, "| ack (ignorado)")
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            return
+
+        # executa o handler no loop principal
+        try:
+            import asyncio
+            fut = asyncio.run_coroutine_threadsafe(handler(inst, data), loop)
+            fut.result(timeout=handler_timeout)
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+        except Exception as e:
+            _log("Erro no handler:", event_name, repr(e))
+            try:
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=requeue_on_error)
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    _log("Thread do consumer iniciada.")

@@ -1,0 +1,326 @@
+# backend/routers/atendimento_chat.py
+from __future__ import annotations
+
+from typing import Optional, List, Dict, Any, Tuple
+
+from datetime import timezone
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+
+from backend.database import get_db
+from backend import models
+from backend.routers.auth import get_current_user
+
+# =========================================================
+# Router
+# =========================================================
+# Mantém as rotas sob /api/atendimento/...
+router = APIRouter(prefix="", tags=["Atendimento – Chat"])
+
+
+# =========================================================
+# Utils locais (evitam import circular e centralizam regras)
+# =========================================================
+def _assert_mesma_empresa(empresa_do_token: int, empresa_da_query: int | None) -> int:
+    """
+    Retorna o empresa_id que deve ser usado na query.
+    Se empresa_da_query existir, valida que é igual ao do token.
+    Caso contrário, usa o do token.
+    """
+    if empresa_da_query is None:
+        return empresa_do_token
+    if empresa_da_query != empresa_do_token:
+        raise HTTPException(status_code=403, detail="Empresa inválida para este recurso")
+    return empresa_da_query
+
+
+def _normalize_phone(numero: Optional[str]) -> Optional[str]:
+    if not numero:
+        return None
+    s = "".join(ch for ch in str(numero) if ch.isdigit())
+    if not s:
+        return None
+    if s.startswith("0"):
+        s = s[1:]
+    if not s.startswith("55"):
+        s = "55" + s
+    if len(s) >= 6:
+        ddd = s[2:4]
+        restante = s[4:]
+        if len(restante) == 8 and not restante.startswith("9"):
+            restante = "9" + restante
+        s = f"55{ddd}{restante}"
+    return s
+
+
+def _format_phone_br(numero: Optional[str]) -> str:
+    if not numero:
+        return "—"
+    n = "".join(filter(str.isdigit, numero))
+    if len(n) == 13:
+        return f"+{n[:2]} {n[2:4]} {n[4:9]}-{n[9:]}"
+    if len(n) == 12:
+        return f"+{n[:2]} {n[2:4]} {n[4:8]}-{n[8:]}"
+    return f"+{n[:2]} {n[2:]}" if len(n) > 2 else n
+
+
+def _display_name_or_phone(
+    db: Session,
+    empresa_id: int,
+    telefone: Optional[str],
+    push_name: Optional[str] = None,
+    models=None
+) -> str:
+    tel_fmt = _format_phone_br(telefone)
+    if not telefone or models is None:
+        return push_name or tel_fmt
+    cli = (
+        db.query(models.Cliente)
+        .filter_by(empresa_id=empresa_id, telefone=telefone)
+        .first()
+    )
+    nome = getattr(cli, "nome_whatsapp", None) or getattr(cli, "nome", None) or push_name
+    return (nome or tel_fmt)
+
+
+def _resolve_instancia_id(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: Optional[int],
+    instance: Optional[str]
+) -> Tuple[Optional[int], Optional[str]]:
+    """
+    Resolve a instância a partir de instancia_id (numérico) ou instance (slug/nome).
+    Retorna (instancia_id_resolvido, instance_name_resolvido)
+    """
+    if instancia_id is not None:
+        row = (
+            db.query(models.EmpresaInstancia)
+            .filter(
+                models.EmpresaInstancia.empresa_id == empresa_id,
+                models.EmpresaInstancia.id == instancia_id,
+            )
+            .first()
+        )
+        if row:
+            return row.id, row.instance_name
+        # se não existir, tratamos como "sem instância"
+        return None, None
+
+    if instance:
+        row = (
+            db.query(models.EmpresaInstancia)
+            .filter(
+                models.EmpresaInstancia.empresa_id == empresa_id,
+                models.EmpresaInstancia.instance_name == instance,
+            )
+            .first()
+        )
+        if row:
+            return row.id, row.instance_name
+        return None, None
+
+    return None, None
+
+
+def _iso_utc(ts) -> str:
+    """
+    Garante retorno ISO-8601 com timezone.
+    """
+    try:
+        if hasattr(ts, "tzinfo") and ts.tzinfo is None:
+            return ts.replace(tzinfo=timezone.utc).isoformat(timespec="microseconds")
+        if hasattr(ts, "isoformat"):
+            return ts.isoformat(timespec="microseconds")
+        return str(ts)
+    except Exception:
+        return str(ts)
+
+
+# =========================================================
+# REST: listar mensagens da conversa (com filtro de instância)
+# =========================================================
+@router.get("/conversas/{cliente_id}/mensagens")
+def listar_mensagens(
+    cliente_id: int,
+    empresa_id: int | None = Query(None, description="(Opcional) Empresa. Se omitido, usa a do token."),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    instancia_id: int | None = Query(None, description="(Opcional) Filtra mensagens por instância (id numérico)"),
+    instance: str | None = Query(None, description="(Opcional) Filtra mensagens por instância (slug/nome)"),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Devolve o histórico de mensagens de um cliente.
+
+    • Suporta filtro de instância via ?instancia_id=ID ou ?instance=SLUG
+    • Aceita paginação via ?limit & ?offset
+    • Retorna em ORDEM CRONOLÓGICA (ASC) para o front rolar pro fim.
+    • Formato esperado pelo front:
+      {
+        "items": [
+          {
+            "msg_id": "...",
+            "conteudo": "...",
+            "tipo": "saida"|"entrada",
+            "ack": 0|1|2|null,
+            "timestamp": "...",
+            "instancia_id": 1,
+            "instance_name": "minha-inst",
+            "midias": [{ "id": 123, "mimetype": "...", "filename": "...", "size": 12345 }]
+          }
+        ]
+      }
+    • Mantém compat: inclui também "mensagens": items
+    """
+    # empresa efetiva (valida com token)
+    empresa_id = _assert_mesma_empresa(user.empresa_id, empresa_id)
+
+    # valida cliente/empresa
+    cli = (
+        db.query(models.Cliente)
+        .filter(models.Cliente.id == cliente_id, models.Cliente.empresa_id == empresa_id)
+        .first()
+    )
+    if not cli:
+        raise HTTPException(404, "Cliente não encontrado nessa empresa.")
+
+    # resolve instância (id e nome), se vier
+    resolved_inst_id, resolved_inst_name = _resolve_instancia_id(
+        db,
+        empresa_id=empresa_id,
+        instancia_id=instancia_id,
+        instance=instance,
+    )
+
+    # base: mais recentes primeiro (DESC) para paginação performática
+    q = (
+        db.query(
+            models.Mensagem.id,
+            models.Mensagem.msg_id,
+            models.Mensagem.conteudo,
+            models.Mensagem.tipo,
+            models.Mensagem.ack,
+            models.Mensagem.timestamp,
+            models.Mensagem.instancia_id,
+            models.EmpresaInstancia.instance_name.label("instance_name"),
+        )
+        .outerjoin(
+            models.EmpresaInstancia,
+            models.EmpresaInstancia.id == models.Mensagem.instancia_id,
+        )
+        .filter(
+            models.Mensagem.empresa_id == empresa_id,
+            models.Mensagem.cliente_id == cliente_id,
+        )
+        .order_by(models.Mensagem.timestamp.desc(), models.Mensagem.id.desc())
+    )
+
+    if resolved_inst_id is not None:
+        q = q.filter(models.Mensagem.instancia_id == resolved_inst_id)
+
+    rows = q.limit(limit).offset(offset).all()
+
+    # --------- midias por mensagem (batch) ---------
+    midias_by_msg: Dict[int, List[Dict[str, Any]]] = {}
+    try:
+        # Tabela provável de vínculo: MensagemMidia (ajuste o nome se diferente)
+        msg_ids = [r.id for r in rows]
+        if msg_ids:
+            mids = (
+                db.query(models.MensagemMidia)
+                .filter(
+                    models.MensagemMidia.empresa_id == empresa_id,
+                    models.MensagemMidia.cliente_id == cliente_id,
+                    models.MensagemMidia.mensagem_id.in_(msg_ids),
+                )
+                .all()
+            )
+            for mm in mids or []:
+                midias_by_msg.setdefault(mm.mensagem_id, []).append({
+                    "id": getattr(mm, "id", None),
+                    "mimetype": getattr(mm, "mimetype", None) or getattr(mm, "mime", None),
+                    "filename": getattr(mm, "filename", None) or getattr(mm, "name", None),
+                    "size": getattr(mm, "size", None) or getattr(mm, "bytes", None),
+                })
+    except Exception:
+        # Fallback: se houver relação ORM Mensagem.midias
+        try:
+            for r in rows:
+                arr = []
+                for a in getattr(r, "midias", []) or []:
+                    arr.append({
+                        "id": getattr(a, "id", None),
+                        "mimetype": getattr(a, "mimetype", None) or getattr(a, "mime", None),
+                        "filename": getattr(a, "filename", None) or getattr(a, "name", None),
+                        "size": getattr(a, "size", None) or getattr(a, "bytes", None),
+                    })
+                if arr:
+                    midias_by_msg[r.id] = arr
+        except Exception:
+            pass
+    # -----------------------------------------------
+
+    # monta payload (DESC local → vai inverter depois)
+    mensagens_desc: List[Dict[str, Any]] = []
+    for r in rows:
+        mensagens_desc.append({
+            "id": r.id,
+            "msg_id": r.msg_id,
+            "conteudo": r.conteudo,
+            "tipo": r.tipo,
+            "ack": r.ack,
+            "timestamp": _iso_utc(r.timestamp),
+            "instancia_id": r.instancia_id,
+            "instance_name": r.instance_name,
+            "midias": midias_by_msg.get(r.id, []),
+        })
+
+    # log útil para ver o filtro de instância aplicado
+    print(
+        f"[ATENDIMENTO] [/conversas/{cliente_id}/mensagens] "
+        f"emp={empresa_id} inst={resolved_inst_id or instancia_id or instance} "
+        f"limit={limit} offset={offset} "
+    )
+
+    # O front quer ASC: invertendo a lista (pois a query está DESC para eficiência)
+    mensagens_asc = list(reversed(mensagens_desc))
+
+    # compat + novo formato
+    return {
+        "items": mensagens_asc,
+        "mensagens": mensagens_asc,  # compat legado
+    }
+
+
+# =========================================================
+# ALIAS compatível: /historico/{cliente_id}
+# =========================================================
+@router.get("/historico/{cliente_id}")
+def listar_mensagens_alias_historico(
+    cliente_id: int,
+    empresa_id: int | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    instancia_id: int | None = Query(None),
+    instance: str | None = Query(None),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Alias para o endpoint principal de mensagens.
+    Mantido por compatibilidade com o front (scroll-up).
+    """
+    empresa_id = _assert_mesma_empresa(user.empresa_id, empresa_id)
+    return listar_mensagens(
+        cliente_id=cliente_id,
+        empresa_id=empresa_id,
+        limit=limit,
+        offset=offset,
+        instancia_id=instancia_id,
+        instance=instance,
+        db=db,
+        user=user,  # repassa o usuário (já validado)
+    )

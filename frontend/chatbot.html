@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Chatbot – Funcionalidades</title>
+
+  <script>
+    (function(){try{
+      const t = localStorage.getItem('theme') || 'dark';
+      document.documentElement.classList.toggle('dark', t === 'dark');
+    }catch{}})();
+  </script>
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <link rel="stylesheet" href="/frontend/css/chatbot.css"/>
+
+  <style>
+    .inst-trigger{display:inline-flex;align-items:center;gap:.5rem;padding:.4rem .7rem;border-radius:.6rem;font-weight:600;font-size:.9rem;background:var(--card);border:1px solid var(--border);color:var(--fg);cursor:pointer;margin-left:.5rem}
+    .inst-trigger:hover{background:var(--hover)}
+    .inst-trigger .chev{font-size:.9rem;opacity:.85}
+    .inst-menu{position:absolute;top:100%;left:0;margin-top:.5rem;z-index:50;min-width:260px;max-height:340px;overflow:auto;background:var(--card);color:var(--fg);border:1px solid var(--border);border-radius:.75rem;box-shadow:0 12px 32px rgba(0,0,0,.45);display:none}
+    .inst-menu[aria-hidden="false"]{display:block}
+    .inst-menu .head{position:sticky;top:0;background:var(--card);padding:.6rem .75rem;font-weight:700;font-size:.9rem;border-bottom:1px solid var(--border)}
+    .inst-menu ul{list-style:none;margin:0;padding:.4rem}
+    .inst-menu li{margin:0;padding:0}
+    .inst-item{width:100%;text-align:left;border:0;background:transparent;color:inherit;padding:.55rem .6rem;border-radius:.55rem;display:flex;align-items:center;gap:.55rem;cursor:pointer}
+    .inst-item:hover{background:var(--hover)}
+    .inst-item[aria-selected="true"]{outline:2px solid var(--ring);outline-offset:0;background:color-mix(in oklab, var(--ring) 6%, transparent)}
+    .inst-item .radio{width:16px;height:16px;border-radius:999px;border:2px solid var(--border);display:inline-flex;align-items:center;justify-content:center}
+    .inst-item[aria-selected="true"] .radio{border-color:var(--ring)}
+    .inst-item[aria-selected="true"] .radio::after{content:"";width:8px;height:8px;border-radius:999px;background:var(--ring);display:block}
+
+    /* horários */
+    .sched{margin:.35rem 0 .5rem;display:none}
+    .sched.show{display:block}
+    .time-grid{display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:.5rem}
+    .time-grid label{display:block;font-size:.8rem;color:var(--muted)}
+    .time-grid input[type="time"]{width:100%;padding:.5rem .6rem;border:1px solid var(--border);background:var(--card);color:var(--fg);border-radius:.5rem}
+    .time-grid input[disabled]{opacity:.6;cursor:not-allowed}
+
+    /* chips de sugestões (departamentos) */
+    .chips{display:flex;flex-wrap:wrap;gap:.4rem;margin:.35rem 0}
+    .chip{padding:.3rem .6rem;border-radius:.6rem;border:1px solid var(--border);background:var(--bg);cursor:pointer;font-size:.85rem}
+    .chip:hover{background:var(--hover)}
+  </style>
+
+  <script src="/frontend/js/app-base.js" defer></script>
+  <script src="/frontend/js/auth.js" defer></script>
+  <script src="/frontend/js/pages/chatbot.js" defer></script>
+</head>
+<body>
+  <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
+
+  <main class="main">
+    <div class="section-title" style="position:relative">
+      <h1><i class="fa-solid fa-robot title-ico"></i> Chatbot</h1>
+      <span class="tag tag-ia">Funcionalidades</span>
+
+      <!-- dropdown de instâncias -->
+      <button id="instMenuBtnChat" type="button" role="button" class="inst-trigger"
+              aria-haspopup="listbox" aria-expanded="false" aria-controls="inst-menu-chat">
+        <span id="instMenuLabelChat">Todas as instâncias</span>
+        <span class="chev">▾</span>
+      </button>
+      <div id="inst-menu-chat" class="inst-menu" role="listbox" aria-hidden="true" aria-label="Selecionar instância">
+        <div class="head">WhatsApps</div>
+        <ul id="instMenuListChat"></ul>
+      </div>
+    </div>
+
+    <section class="stack" aria-label="Funcionalidades do chatbot">
+      <!-- ========== BLOCO 1 ========== -->
+      <article class="item" id="it-auto">
+        <header class="head" data-toggle="auto" role="button" aria-expanded="false">
+          <div class="ico"><i class="fa-solid fa-comments"></i></div>
+          <div>
+            <div class="title">Mensagens automáticas</div>
+            <div class="desc">Ative cada uma e defina seus horários.</div>
+          </div>
+          <div class="right">
+            <span id="pillAutoHdr" class="pill off">off</span>
+            <label class="tswitch" id="swAutoHdr" data-on="false" title="Ativar/desativar mensagens automáticas" tabindex="0" aria-pressed="false">
+              <input type="checkbox" aria-label="Ativar/desativar mensagens automáticas">
+              <span class="track"></span>
+              <span class="label off">off</span>
+              <span class="label on">on</span>
+              <span class="knob"></span>
+            </label>
+            <i class="fa-solid fa-chevron-down chev"></i>
+          </div>
+        </header>
+
+        <div class="body" id="body-auto" aria-hidden="true" style="height:0;opacity:0;pointer-events:none">
+          <div class="body-inner">
+            <div class="cols">
+              <!-- Boas-vindas -->
+              <div class="col-card">
+                <div class="block-head">
+                  <div class="block-title">Boas-vindas</div>
+                  <div class="block-ctrl">
+                    <span id="pillWelcome" class="pill off">off</span>
+                    <label class="tswitch" id="swWelcome" data-on="false" title="toggle welcome" tabindex="0">
+                      <input type="checkbox" aria-label="toggle welcome">
+                      <span class="track"></span>
+                      <span class="label off">off</span>
+                      <span class="label on">on</span>
+                      <span class="knob"></span>
+                    </label>
+                  </div>
+                </div>
+
+                <div id="schedWelcome" class="sched">
+                  <div class="time-grid">
+                    <div>
+                      <label for="wStart">Início</label>
+                      <input type="time" id="wStart" value="08:00">
+                    </div>
+                    <div>
+                      <label for="wEnd">Fim</label>
+                      <input type="time" id="wEnd" value="18:00">
+                    </div>
+                  </div>
+                </div>
+
+                <textarea id="msgWelcome" placeholder="Olá! 👋 Como posso ajudar?" disabled></textarea>
+                <div class="counter" id="wcCount">0 caracteres</div>
+              </div>
+
+              <!-- Fora do horário -->
+              <div class="col-card">
+                <div class="block-head">
+                  <div class="block-title">Fora do horário</div>
+                  <div class="block-ctrl">
+                    <span id="pillOff" class="pill off">off</span>
+                    <label class="tswitch" id="swOff" data-on="false" title="toggle off-hours" tabindex="0">
+                      <input type="checkbox" aria-label="toggle off-hours">
+                      <span class="track"></span>
+                      <span class="label off">off</span>
+                      <span class="label on">on</span>
+                      <span class="knob"></span>
+                    </label>
+                  </div>
+                </div>
+
+                <div id="schedOff" class="sched">
+                  <div class="time-grid">
+                    <div>
+                      <label for="oStart">Início</label>
+                      <input type="time" id="oStart" value="18:00">
+                    </div>
+                    <div>
+                      <label for="oEnd">Fim</label>
+                      <input type="time" id="oEnd" value="08:00">
+                    </div>
+                  </div>
+                </div>
+
+                <textarea id="msgOff" placeholder="Atendemos de 08:00 às 18:00. Deixe sua mensagem e responderemos no próximo expediente." disabled></textarea>
+                <div class="counter" id="offCount">0 caracteres</div>
+              </div>
+            </div>
+
+            <div class="preview" aria-label="Pré-visualização">
+              <div class="muted" style="margin-bottom:.4rem"><i class="fa-solid fa-eye"></i> Preview</div>
+              <div class="bubble" id="prevW" style="margin-bottom:.5rem"><div id="prevWText">—</div></div>
+              <div class="bubble" id="prevO">—</div>
+            </div>
+
+            <div style="margin-top:.75rem;display:flex;gap:.5rem;justify-content:flex-end">
+              <button class="btn" id="cancelAuto"><i class="fa-solid fa-ban"></i> Cancelar</button>
+              <button class="btn primary" id="saveAuto"><i class="fa-solid fa-save"></i> Salvar</button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ========== BLOCO 2 ========== -->
+      <article class="item" id="it-auto-dept">
+        <header class="head" data-toggle="auto-dept" role="button" aria-expanded="false">
+          <div class="ico"><i class="fa-solid fa-layer-group"></i></div>
+          <div>
+            <div class="title">Mensagens automáticas — Departamentos</div>
+            <div class="desc">Mensagem única de boas-vindas aplicada por departamento.</div>
+          </div>
+          <div class="right">
+            <span id="pillDeptHdr" class="pill off">off</span>
+            <label class="tswitch" id="swDeptHdr" data-on="false" title="Ativar/desativar por departamento" tabindex="0" aria-pressed="false">
+              <input type="checkbox" aria-label="Ativar/desativar por departamento">
+              <span class="track"></span>
+              <span class="label off">off</span>
+              <span class="label on">on</span>
+              <span class="knob"></span>
+            </label>
+            <i class="fa-solid fa-chevron-down chev"></i>
+          </div>
+        </header>
+
+        <div class="body" id="body-auto-dept" aria-hidden="true" style="height:0;opacity:0;pointer-events:none">
+          <div class="body-inner">
+            <div class="col-card">
+              <div class="block-head">
+                <div class="block-title">Boas-vindas</div>
+                <div class="block-ctrl">
+                  <span id="pillDeptWelcome" class="pill off">off</span>
+                  <label class="tswitch" id="swDeptWelcome" data-on="false" title="toggle dept welcome" tabindex="0">
+                    <input type="checkbox" aria-label="toggle dept welcome">
+                    <span class="track"></span>
+                    <span class="label off">off</span>
+                    <span class="label on">on</span>
+                    <span class="knob"></span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- horários da mensagem de departamentos -->
+              <div id="schedDeptWelcome" class="sched">
+                <div class="time-grid">
+                  <div>
+                    <label for="dwStart">Início</label>
+                    <input type="time" id="dwStart" value="08:00">
+                  </div>
+                  <div>
+                    <label for="dwEnd">Fim</label>
+                    <input type="time" id="dwEnd" value="18:00">
+                  </div>
+                </div>
+              </div>
+
+              <!-- sugestões de setores (preenchidas via JS) -->
+              <div id="deptChips" class="chips" aria-label="Sugestões de setores"></div>
+
+              <!-- texto da mensagem de boas-vindas (departamentos) -->
+              <textarea id="msgDeptWelcome" placeholder="Mensagem de boas-vindas por departamento" disabled></textarea>
+              <div class="counter" id="dwCount">0 caracteres</div>
+            </div>
+
+            <div style="margin-top:.75rem;display:flex;gap:.5rem;justify-content:flex-end">
+              <button class="btn" id="cancelDept"><i class="fa-solid fa-ban"></i> Cancelar</button>
+              <button class="btn primary" id="saveDept"><i class="fa-solid fa-save"></i> Salvar</button>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

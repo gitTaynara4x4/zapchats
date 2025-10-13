@@ -1,0 +1,16 @@
+<!-- /frontend/partials/sidebar-flyout.html -->
+<!-- Botão no trilho de ícones (coloque perto do topo do seu trilho) -->
+<button id="openZcSidebar"
+        class="wpp-leftbar-btn"
+        aria-label="Abrir menu"
+        title="Abrir menu"
+        style="width:44px;height:44px;display:grid;place-items:center;border-radius:12px;border:0;background:transparent;cursor:pointer">
+  <i class="fa fa-bars" aria-hidden="true"></i>
+</button>
+
+<!-- Host do flyout (painel + backdrop). O conteúdo do seu /frontend/partials/sidebar.html
+     será carregado aqui automaticamente pelo JS -->
+<div id="zcSidebarHost" class="zc-flyout" aria-hidden="true">
+  <div class="zc-flyout__panel" role="dialog" aria-label="Menu lateral"></div>
+  <button class="zc-flyout__backdrop" tabindex="-1" aria-hidden="true"></button>
+</div>

@@ -1,0 +1,123 @@
+<!-- 0) SEGURA A PINTURA O MAIS CEDO POSSÍVEL -->
+<script>
+  (function () {
+    try {
+      // aplica tema antes de pintar
+      var saved = localStorage.getItem('theme'); // 'dark'|'light'
+      if (saved) {
+        document.documentElement.classList.toggle('dark', saved === 'dark');
+      } else {
+        var prefers = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.classList.toggle('dark', !!prefers);
+      }
+      // trava pintura global (removido pelo app-base quando o shell ficar pronto)
+      document.documentElement.classList.add('prepaint');
+    } catch {}
+  })();
+</script>
+
+<!-- 1) CSS globais compartilhados -->
+<link rel="stylesheet" href="/frontend/css/tw.css"> <!-- se você usa; senão remova -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- 2) TOKENS + BASE + ANTIFLASH -->
+<style>
+  /* trava pintura: some com o conteúdo até o app-base sinalizar */
+  html.prepaint body { visibility: hidden !important; }
+
+  :root{
+    --topbar-h: 44px; --sbw: 16.5rem;
+
+    /* DARK (padrão) — alinhado ao Dashboard */
+    --bg:#0f0f10; --fg:#e5e7eb; --muted:#9ca3af;
+    --card:#161617; --surface:#161617; --border:#27272a;
+    --hover:rgba(255,255,255,.04); --hover-strong:rgba(255,255,255,.06);
+
+    --ring:#4f83ff; --ok:#16a34a; --danger:#ef4444; --warn:#f59e0b; --info:#3b82f6;
+
+    --radius:12px; --shadow:0 10px 30px rgba(0,0,0,.35);
+
+    --font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+               Roboto, "Helvetica Neue", Arial, "Noto Sans",
+               "Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol", sans-serif;
+  }
+  html:not(.dark){
+    --bg:#f9fafb; --fg:#1f2937; --muted:#6b7280;
+    --card:#ffffff; --surface:#ffffff; --border:#e5e7eb;
+    --hover:rgba(0,0,0,.04); --hover-strong:rgba(0,0,0,.06);
+    --ring:#93c5fd; --ok:#16a34a; --danger:#dc2626; --warn:#d97706; --info:#2563eb;
+  }
+
+  *{ box-sizing: border-box }
+  html, body { height: 100% }
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family: var(--font-ui);
+    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+    font-synthesis-weight:none; font-optical-sizing:auto;
+  }
+  a{ color:inherit; text-decoration:none }
+  img,svg,canvas,video{ max-width:100%; height:auto }
+
+  ::selection{ background: color-mix(in oklab, var(--ring) 35%, transparent); color: var(--fg); }
+
+  /* Controles base suaves */
+  button,input,select,textarea{
+    font:inherit; color:inherit; background:var(--card);
+    border:1px solid var(--border); border-radius:.6rem;
+  }
+  button{ cursor:pointer; padding:.55rem .85rem; box-shadow:0 1px 0 rgba(255,255,255,.05) inset; }
+  button:focus, input:focus, select:focus, textarea:focus{
+    outline:0; box-shadow:0 0 0 3px var(--ring); border-color:transparent;
+  }
+
+  /* Tabela base */
+  table{ border-collapse:collapse; width:100% }
+  th,td{ border-bottom:1px solid var(--border); padding:.75rem }
+  thead{ background:var(--hover-strong) }
+
+  /* Utilitárias */
+  .muted{ color:var(--muted) }
+  .card{
+    background:var(--card);
+    border:1px solid color-mix(in oklab, var(--border) 80%, transparent);
+    border-radius:var(--radius);
+    box-shadow:0 6px 16px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.04);
+  }
+  .hoverable:hover{ background:var(--hover) }
+  .ring{ box-shadow:0 0 0 3px var(--ring) }
+
+  /* Estruturas opcionais */
+  .topline-bar{
+    position:fixed; inset:0 0 auto 0; height:var(--topbar-h);
+    background:var(--surface); border-bottom:1px solid var(--border);
+    display:flex; align-items:center; padding:0 .75rem; z-index:40;
+  }
+  .app-sidebar{
+    position:fixed; top:var(--topbar-h); left:0; bottom:0; width:var(--sbw);
+    background:var(--surface); border-right:1px solid var(--border);
+    overflow:auto; -webkit-overflow-scrolling:touch;
+  }
+  nav a.active, nav a[aria-current="page"]{ background:var(--hover-strong); font-weight:600; }
+
+  /* ===== Animação global de entrada da rota (fade + up) ===== */
+  @media (prefers-reduced-motion: no-preference) {
+    .route-enter {
+      animation: route-fade-up .24s cubic-bezier(.2,.8,.2,1) both;
+      will-change: opacity, transform, filter;
+    }
+    @keyframes route-fade-up {
+      from {
+        opacity: 0;
+        transform: translateY(6px) scale(.995);
+        filter: saturate(96%);
+      }
+      to {
+        opacity: 1;
+        transform: none;
+        filter: none;
+      }
+    }
+  }
+</style>

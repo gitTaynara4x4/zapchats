@@ -1,0 +1,298 @@
+<!-- /frontend/ia/atendimento-ia.html -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>IA – ZapChats (módulo)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>
+    // Impede render "em branco" se alguém abrir esse arquivo direto no browser.
+    // O conteúdo é montado via JS abaixo.
+    document.documentElement.style.background = "#111b21";
+  </script>
+</head>
+<body></body>
+
+<script type="module">
+/* ============================================================
+   Atendimento IA (single-file): HTML + CSS + JS
+   - Monta o modal no documento atual
+   - Exponde window.IA { open, close }
+   - Usa seus endpoints:
+      POST /api/atendimento/ia/resumo
+      POST /api/atendimento/ia/melhorar
+   - Depende do DOM do atendimento:
+      #historico[data-cliente-id], #mensagem
+   ============================================================ */
+
+// ---------- Helpers ----------
+const $ = (s, r=document) => r.querySelector(s);
+const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
+
+function getEmpresaId(){
+  return Number(localStorage.getItem('empresa_id') || 0);
+}
+function getClienteId(){
+  return Number($('#historico')?.dataset?.clienteId || 0);
+}
+function coletarDialogoDoDOM(){
+  const sels = ['#historico [data-role="msg"]','#historico [data-msg]','#historico .msg','#historico [data-author]'];
+  let nodes=[];
+  for (const sel of sels){ nodes = Array.from(document.querySelectorAll(sel)); if (nodes.length) break; }
+  const linhas=[];
+  for (const n of nodes){
+    const author = (n.dataset?.from || n.dataset?.author || '').toLowerCase();
+    let quem = 'Agente';
+    if (author.includes('cliente') || author === 'user' || author === 'cliente') quem = 'Cliente';
+    if (author === 'agent' || author === 'agente' || author === 'operator') quem = 'Agente';
+    const txt = (n.textContent || '').replace(/\s+/g,' ').trim();
+    if (!txt) continue;
+    linhas.push(`${quem}: ${txt}`);
+  }
+  return linhas.join('\n');
+}
+
+// ---------- Injeção de CSS + HTML ----------
+const style = document.createElement('style');
+style.textContent = `
+  :root { --ia-nudge:-2px; }
+  #ia-modal-backdrop.hidden, #ia-modal.hidden { display:none; }
+  #ia-modal{ border-radius:12px; border:1px solid #26343a; background:#1f2c33; color:#e9edef; }
+  #ia-modal-body{ max-height:70vh; overflow:auto; }
+  .ia-section-title{ display:flex; align-items:center; gap:8px; font-weight:600; }
+  .ia-chip{ font-size:11px; padding:2px 8px; border-radius:9999px; background:#233238; border:1px solid #2b424a; color:#aebac1; }
+  .ia-sec-actions{ display:flex; align-items:center; gap:8px; }
+  .btn-soft{ display:inline-flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px; border:1px solid #2a3942; background:#0b141a; color:#e9edef; }
+  .btn-soft:hover{ background:#0f171c; border-color:#33515d; }
+  .ia-spinner{ width:16px; height:16px; border:2px solid #9fb2bb66; border-top-color:#25d366; border-radius:9999px; animation:ia-spin .9s linear infinite; }
+  @keyframes ia-spin{ to{ transform:rotate(360deg); } }
+  .ia-badge{ width:22px; height:22px; object-fit:contain; display:block; filter: drop-shadow(0 0 6px rgba(63,208,255,.6)); position:relative; top:1px; }
+`;
+document.head.appendChild(style);
+
+const mount = document.createElement('div');
+mount.innerHTML = `
+  <div id="ia-modal-backdrop" class="fixed inset-0 bg-black/50 z-[9998] hidden"></div>
+  <div id="ia-modal" class="fixed z-[9999] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(780px,94vw)] bg-[#1f2c33] text-[#e9edef] border border-[#26343a] rounded-xl shadow-xl hidden">
+    <div class="flex items-center justify-between px-4 py-3 border-b border-[#26343a]">
+      <div class="flex items-center gap-2">
+        <img src="/frontend/img/ia-glow.png" class="ia-badge" alt="">
+        <h3 class="font-semibold">Ferramentas de IA</h3>
+        <span class="ia-chip">Beta</span>
+      </div>
+      <button id="ia-fechar" class="text-gray-400 hover:text-white" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+
+    <div id="ia-modal-body" class="px-5 py-4 text-sm leading-6 space-y-6">
+      <!-- Resumo -->
+      <section>
+        <div class="flex items-center justify-between mb-2">
+          <div class="ia-section-title">
+            <img src="/frontend/img/ia-glow.png" class="ia-badge" alt="">
+            <span>Resumo IA</span>
+          </div>
+          <div class="ia-sec-actions">
+            <button id="ia-resumo-gerar" class="btn-soft"><i class="fa-solid fa-wand-magic-sparkles"></i> Gerar resumo</button>
+            <button id="ia-resumo-copiar" class="btn-soft hidden"><i class="fa-regular fa-copy"></i> Copiar</button>
+            <span id="ia-resumo-loading" class="hidden ia-spinner"></span>
+          </div>
+        </div>
+        <div id="ia-resumo-content" class="hidden">
+          <p id="ia-resumo-texto" class="mb-3"></p>
+          <ul id="ia-resumo-bullets" class="list-disc pl-5 space-y-1"></ul>
+          <div class="mt-3 text-xs text-[#aebac1]" id="ia-resumo-meta"></div>
+        </div>
+      </section>
+
+      <hr class="border-[#26343a]">
+
+      <!-- Resposta melhorada -->
+      <section>
+        <div class="flex items-center justify-between mb-2">
+          <div class="ia-section-title">
+            <img src="/frontend/img/ia-glow.png" class="ia-badge" alt="">
+            <span>Resposta melhorada com IA</span>
+          </div>
+          <div class="ia-sec-actions">
+            <button id="ia-gerar-resposta" class="btn-soft"><i class="fa-solid fa-wand-magic-sparkles"></i> Gerar resposta</button>
+            <button id="ia-copiar-resposta" class="btn-soft hidden"><i class="fa-regular fa-copy"></i> Copiar</button>
+            <button id="ia-colar-no-chat" class="btn-soft hidden"><i class="fa-regular fa-paper-plane"></i> Colar no chat</button>
+            <span id="ia-resposta-loading" class="hidden ia-spinner"></span>
+          </div>
+        </div>
+
+        <div class="grid gap-2">
+          <textarea id="ia-draft" rows="4" class="w-full p-3 rounded bg-[#0b141a] text-[#e9edef] border border-[#2a3942] outline-none" placeholder="Escreva sua resposta ou deixe em branco para a IA sugerir com base no diálogo recente…"></textarea>
+
+          <div id="ia-resposta-box" class="hidden">
+            <div class="text-xs text-[#aebac1] mb-1">Sugestão da IA</div>
+            <div id="ia-resposta-texto" class="p-3 rounded bg-[#0b141a] border border-[#2a3942] whitespace-pre-wrap"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+`;
+document.body.appendChild(mount);
+
+// ---------- Refs ----------
+const iaBackdrop    = $('#ia-modal-backdrop');
+const iaModal       = $('#ia-modal');
+const iaFechar      = $('#ia-fechar');
+const resumoGerar   = $('#ia-resumo-gerar');
+const resumoCopiar  = $('#ia-resumo-copiar');
+const resumoLoading = $('#ia-resumo-loading');
+const resumoBox     = $('#ia-resumo-content');
+const resumoTxt     = $('#ia-resumo-texto');
+const resumoBullets = $('#ia-resumo-bullets');
+const resumoMeta    = $('#ia-resumo-meta');
+const gerarRespBtn  = $('#ia-gerar-resposta');
+const respLoading   = $('#ia-resposta-loading');
+const respBox       = $('#ia-resposta-box');
+const respTxt       = $('#ia-resposta-texto');
+const colarBtn      = $('#ia-colar-no-chat');
+const copiarBtn     = $('#ia-copiar-resposta');
+const draftInput    = $('#ia-draft');
+
+// ---------- Open/Close ----------
+function openIA(){
+  // limpa estado a cada abertura
+  draftInput.value = $('#mensagem')?.value || '';
+  resumoTxt.textContent = '';
+  resumoBullets.innerHTML = '';
+  resumoMeta.textContent = '';
+  resumoBox.classList.add('hidden');
+  resumoCopiar.classList.add('hidden');
+  resumoLoading.classList.add('hidden');
+
+  respTxt.textContent = '';
+  respBox.classList.add('hidden');
+  copiarBtn.classList.add('hidden');
+  colarBtn.classList.add('hidden');
+  respLoading.classList.add('hidden');
+
+  iaBackdrop.classList.remove('hidden');
+  iaModal.classList.remove('hidden');
+}
+function closeIA(){
+  iaBackdrop.classList.add('hidden');
+  iaModal.classList.add('hidden');
+}
+on(iaFechar, 'click', closeIA);
+on(iaBackdrop, 'click', closeIA);
+
+// ---------- Resumo ----------
+on(resumoGerar, 'click', async ()=>{
+  const emp = getEmpresaId();
+  const cid = getClienteId();
+  if (!emp || !cid){ alert('Selecione um cliente.'); return; }
+
+  resumoLoading.classList.remove('hidden');
+  resumoBox.classList.add('hidden');
+  resumoTxt.textContent = '';
+  resumoBullets.innerHTML = '';
+  resumoMeta.textContent = '';
+  resumoCopiar.classList.add('hidden');
+
+  const dialogoVisivel = coletarDialogoDoDOM();
+
+  try{
+    const url = `/api/atendimento/ia/resumo?empresa_id=${emp}&cliente_id=${cid}&full=false&janela_dias=30&limit=800&include_dialogo=true&redact=true&max_chars=8000`;
+    const body = dialogoVisivel ? { dialogo_override: dialogoVisivel } : null;
+    const r = await fetch(url, { method:'POST', headers: body ? { 'Content-Type':'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
+    const j = await r.json();
+    const res = (j && j.resumo) || {};
+    resumoTxt.textContent = res.resumo_curto || 'Sem conteúdo.';
+    if (Array.isArray(res.pontos_chave)){
+      res.pontos_chave.forEach(t=>{
+        const li=document.createElement('li'); li.textContent=String(t); resumoBullets.appendChild(li);
+      });
+    }
+    const meta=[];
+    if (res.topico)   meta.push(`Tópico: ${res.topico}`);
+    if (res.urgencia) meta.push(`Urgência: ${res.urgencia}`);
+    if (res.confianca!=null) meta.push(`Confiança: ${Math.round((Number(res.confianca)||0)*100)}%`);
+    if (res.amostra)  meta.push('—', `Amostra: ${String(res.amostra).slice(0,240)}${String(res.amostra).length>240?'…':''}`);
+    resumoMeta.textContent = meta.join('  |  ');
+
+    resumoBox.classList.remove('hidden');
+    resumoCopiar.classList.remove('hidden');
+  }catch(e){
+    console.error('[IA RESUMO]', e);
+    resumoTxt.textContent = 'Não foi possível gerar o resumo agora.';
+    resumoBox.classList.remove('hidden');
+  }finally{
+    resumoLoading.classList.add('hidden');
+  }
+});
+
+on(resumoCopiar, 'click', async ()=>{
+  const bullets = [...resumoBullets.querySelectorAll('li')].map(li=>'- '+li.textContent).join('\n');
+  const txt = `${resumoTxt.textContent||''}${bullets?'\n'+bullets:''}${resumoMeta.textContent?'\n'+resumoMeta.textContent:''}`.trim();
+  try{
+    await navigator.clipboard.writeText(txt);
+    resumoCopiar.innerHTML = '<i class="fa-regular fa-clipboard-check"></i> Copiado';
+    setTimeout(()=> resumoCopiar.innerHTML = '<i class="fa-regular fa-copy"></i> Copiar', 1500);
+  }catch{}
+});
+
+// ---------- Resposta melhorada ----------
+on(gerarRespBtn, 'click', async ()=>{
+  const emp = getEmpresaId();
+  const cid = getClienteId();
+  if (!emp || !cid){ alert('Selecione um cliente.'); return; }
+
+  respLoading.classList.remove('hidden');
+  respBox.classList.add('hidden');
+  respTxt.textContent = '';
+  copiarBtn.classList.add('hidden');
+  colarBtn.classList.add('hidden');
+
+  try{
+    const draft = draftInput?.value || null;
+    const url  = `/api/atendimento/ia/melhorar?empresa_id=${emp}&cliente_id=${cid}`;
+    const r = await fetch(url, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ draft }) });
+    const j = await r.json();
+    const texto = j?.resposta || j?.sugestao || j?.texto || 'Não foi possível gerar agora.';
+    respTxt.textContent = texto;
+    respBox.classList.remove('hidden');
+    copiarBtn.classList.remove('hidden');
+    colarBtn.classList.remove('hidden');
+  }catch(e){
+    console.error('[IA RESPOSTA]', e);
+    respTxt.textContent = 'Não foi possível gerar agora.';
+    respBox.classList.remove('hidden');
+  }finally{
+    respLoading.classList.add('hidden');
+  }
+});
+
+on(colarBtn, 'click', ()=>{
+  if (!respTxt.textContent) return;
+  const input = $('#mensagem');
+  if (input) input.value = respTxt.textContent;
+  closeIA(); input?.focus();
+});
+
+on(copiarBtn, 'click', async ()=>{
+  if (!respTxt.textContent) return;
+  try{
+    await navigator.clipboard.writeText(respTxt.textContent);
+    copiarBtn.innerHTML = '<i class="fa-regular fa-clipboard-check"></i> Copiado';
+    setTimeout(()=> copiarBtn.innerHTML = '<i class="fa-regular fa-copy"></i> Copiar', 1500);
+  }catch{}
+});
+
+// ---------- API pública ----------
+window.IA = {
+  open: openIA,
+  close: closeIA,
+};
+
+// Se a página principal já tiver um botão #btn-ia (e este arquivo for importado direto),
+// fazemos o binding automaticamente (não conflita com o seu).
+$('#btn-ia')?.addEventListener('click', () => window.IA.open());
+
+console.debug('[IA] módulo carregado');
+</script>
+</html>

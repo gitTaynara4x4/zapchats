@@ -1,0 +1,412 @@
+:root{
+  --topbar-h:44px;
+
+  /* base */
+  --bg:#0f0f10; --fg:#e5e7eb; --muted:#9ca3af;
+  --card:#161617; --card2:#121315; --border:#27272a;
+  --hover:rgba(255,255,255,.04); --hover-strong:rgba(255,255,255,.06);
+
+  /* feedback */
+  --ring:#4f83ff; --ok:#16a34a; --accent:#6366f1; --danger:#dc2626;
+}
+html:not(.dark){
+  --bg:#f9fafb; --fg:#1f2937; --muted:#6b7280;
+  --card:#ffffff; --card2:#f3f4f6; --border:#e5e7eb;
+  --hover:rgba(0,0,0,.04); --hover-strong:rgba(0,0,0,.06);
+  --ring:#93c5fd; --ok:#16a34a; --accent:#2563eb; --danger:#dc2626;
+}
+
+*{ box-sizing:border-box }
+html,body{ height:100% }
+body{
+  margin:0; min-height:100vh; display:flex;
+  background:var(--bg); color:var(--fg);
+  font-family:Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+  padding-top:var(--topbar-h);
+}
+a{ color:inherit; text-decoration:none }
+
+/* Enquanto estiver app-wait, esconde tudo menos o overlay */
+html.app-wait body > :not(#app-loading){ visibility:hidden !important; }
+
+/* Sidebar (injetada pelo app-base) */
+#sidebar{
+  width:16.5rem; min-height:100vh; background:var(--card);
+  border-right:1px solid var(--border); visibility:hidden;
+}
+html:not(.sidebar-wait) #sidebar{ visibility:visible; }
+
+/* Main */
+.main{ flex:1; display:flex; flex-direction:column; padding:1.5rem 2rem; gap:1rem }
+.section-title{ display:flex; align-items:center; justify-content:space-between; gap:1rem }
+.section-title h1{ margin:0; font-size:1.125rem; font-weight:800; display:flex; gap:.5rem; align-items:center }
+.title-ico{ font-size:1rem }
+.top-meta{ color:var(--muted); font-weight:700 }
+
+/* Filtros */
+.filters{
+  display:flex; flex-wrap:wrap; align-items:center;
+  gap:.75rem 1rem; margin: .25rem 0 0;
+  font-size:.95rem
+}
+.filters .row{ display:flex; align-items:center; gap:.5rem }
+.filters label{ color:var(--fg); font-weight:700 }
+.input,.select{
+  padding:.55rem .8rem; border-radius:.7rem; background:var(--card); color:var(--fg);
+  border:1px solid var(--border); outline:none; transition:box-shadow .15s, border-color .15s; height:38px;
+}
+.input:focus,.select:focus{ box-shadow:0 0 0 3px var(--ring); border-color:transparent; }
+.input[type="date"]{ min-width:190px; padding-right:2rem }
+.input[type="search"]{ min-width:260px }
+.date-wrap{ position:relative; display:inline-flex; align-items:center }
+
+/* Chip do calendário fixo */
+.date-wrap .chip{
+  position:absolute; right:.3rem; top:50%;
+  height:28px; transform:translateY(-50%) !important;
+  z-index:1; transition:background .15s, color .15s;
+}
+.date-wrap .chip:hover,
+.date-wrap .chip:active{ transform:translateY(-50%) !important; }
+
+/* Datas + Filtrar lado a lado */
+.filters .row-dates{
+  display:flex; align-items:center; gap:.6rem 1rem; flex-wrap:wrap; width:100%;
+}
+.filters .row-dates .btn-filtrar-inline{ margin-left:.25rem; white-space:nowrap; }
+.filters .row-dates .spacer{ flex:1 1 auto; }
+.filters .row-dates .actions-right{ display:flex; gap:.5rem; flex-wrap:wrap }
+
+/* Botões base */
+.btn{
+  --bg1:#1ea553; --bg2:#168a44; --bd:#0f7333;
+  background:linear-gradient(180deg,var(--bg1),var(--bg2));
+  color:#fff; border:1px solid var(--bd);
+  padding:.55rem .9rem; border-radius:.7rem; font-weight:700;
+  cursor:pointer; box-shadow:0 2px 0 rgba(0,0,0,.14);
+  line-height:1; height:38px; display:inline-flex; align-items:center; gap:.45rem;
+}
+.btn:active{ transform:translateY(1px); }
+.btn.ghost{
+  --bd:var(--border);
+  background:transparent; color:var(--fg); border-color:var(--bd); box-shadow:none;
+}
+.btn.ghost:hover{ background:var(--hover) }
+.btn.danger{ --bg1:#dc2626; --bg2:#b91c1c; --bd:#991b1b }
+.btn-group{ display:flex; gap:.5rem; flex-wrap:wrap }
+
+/* Chips */
+.chip{
+  display:inline-flex; align-items:center; gap:.35rem; padding:.35rem .7rem; border-radius:999px;
+  border:1px solid var(--border); background:var(--hover-strong); color:var(--fg);
+  font-size:.83rem; font-weight:700; cursor:pointer; user-select:none;
+  transition:background .15s, transform .06s, color .15s; height:28px;
+}
+.chip:hover{ background:var(--hover); transform:translateY(-1px) }
+
+/* Tabela */
+.box{ background:var(--card); border:1px solid var(--border); border-radius:.9rem; padding:1rem }
+.box h3{ margin:0 0 1rem 0; font-size:1rem; font-weight:800 }
+.table-wrap{ overflow:auto }
+table{ width:100%; border-collapse:collapse; font-size:.93rem; min-width:980px }
+thead{ background:var(--hover-strong) }
+th,td{ padding:.9rem .75rem; text-align:left; border-bottom:1px solid var(--border) }
+tbody tr:hover{ background:var(--hover) }
+.td-actions{ display:flex; gap:.45rem; flex-wrap:wrap }
+.date-badge{
+  display:inline-block; padding:.25rem .55rem; border:1px solid var(--border);
+  background:var(--hover-strong); border-radius:.55rem; color:var(--muted); font-weight:800;
+}
+
+/* <<< NOVO: UX da linha clicável / seleção >>> */
+tbody tr.cliente-row { cursor: pointer; }
+tbody tr.cliente-row .td-actions,
+tbody tr.cliente-row .td-actions * { cursor: default; }
+tbody tr.cliente-row .row-check { cursor: pointer; }
+
+/* Destaque quando selecionada (checkbox marcado) */
+tbody tr.cliente-row:has(.row-check:checked){
+  background: color-mix(in oklab, var(--hover-strong) 75%, transparent);
+  outline: 2px solid color-mix(in oklab, var(--ring) 40%, transparent);
+  outline-offset: -2px;
+}
+/* >>> */
+
+/* Popover antigo (se existir) */
+.popover{ display:none !important }
+
+/* Loader global */
+#app-loading{
+  position:fixed; inset:0; z-index:99999; display:none; align-items:center; justify-content:center;
+  background:rgba(0,0,0,.86);
+  -webkit-backdrop-filter:blur(6px) saturate(1.05);
+  backdrop-filter:blur(6px) saturate(1.05);
+}
+#app-loading.show{ display:flex }
+#app-loading .pill{
+  display:inline-flex; align-items:center; gap:.55rem; min-width:200px; justify-content:center;
+  color:#fff; font:700 15px/1.2 Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  background:rgba(17,17,17,.9);
+  border:1px solid rgba(255,255,255,.16);
+  border-radius:.9rem; padding:.7rem 1rem; box-shadow:0 18px 80px rgba(0,0,0,.55), 0 2px 0 rgba(0,0,0,.15);
+}
+#app-loading .anim{ width:32px; height:32px; display:grid; place-items:center }
+#app-loading .spinner{
+  width:22px; height:22px; border-radius:50%;
+  border:3px solid rgba(255,255,255,.35); border-top-color:rgba(255,255,255,.95);
+  animation:spin .9s linear infinite;
+}
+@keyframes spin{ to{ transform:rotate(1turn) } }
+
+/* Modais */
+.modal-backdrop{
+  position:fixed; inset:0; z-index:10000; display:none; place-items:center; background:rgba(0,0,0,.55);
+  -webkit-backdrop-filter:saturate(1.05) blur(2px);
+  backdrop-filter:saturate(1.05) blur(2px);
+}
+.modal-backdrop.show{ display:grid }
+.modal{
+  width:min(520px,92vw);
+  background:var(--card); border:1px solid var(--border);
+  border-radius:1rem; box-shadow:0 30px 80px rgba(0,0,0,.45);
+  animation:pop .15s ease-out;
+}
+@keyframes pop{ from{ transform:scale(.97); opacity:.6 } to{ transform:scale(1); opacity:1 } }
+.modal header{ padding:1rem 1rem .5rem 1rem; font:800 1rem/1 Inter }
+.modal .body{ padding:.25rem 1rem 1rem 1rem; display:grid; gap:.6rem }
+.modal footer{ padding:.8rem 1rem 1rem 1rem; display:flex; gap:.5rem; justify-content:flex-end }
+.modal .row{ display:grid; gap:.35rem }
+.modal .muted{ color:var(--muted) }
+.modal label{ display:flex; align-items:center; gap:.6rem }
+
+/* Botão X do modal (opcional) */
+.modal { position: relative; }
+.modal-close{
+  position:absolute; top:.35rem; right:.6rem; border:0; background:transparent;
+  color:var(--muted); font-size:1.4rem; line-height:1; cursor:pointer;
+}
+.modal-close:hover{ color:var(--fg); transform:scale(1.03) }
+
+/* Tipografia mais fina */
+:root{ --btn-wght:550; --chip-wght:550; }
+body[data-page="clientes"] .btn,
+body[data-page="clientes"] .btn.ghost,
+body[data-page="clientes"] .btn.danger,
+body[data-page="clientes"] .btn-group .btn,
+body[data-page="clientes"] .td-actions .btn{ font-weight:var(--btn-wght) !important; letter-spacing:.2px; }
+body[data-page="clientes"] .chip,
+body[data-page="clientes"] .btn-depto{ font-weight:var(--chip-wght) !important; letter-spacing:.2px; }
+
+/* Botões neutros (só “Novo cliente” colorido) */
+body[data-page="clientes"] .btn{
+  background:transparent !important;
+  color:var(--fg) !important;
+  border:1px solid var(--border) !important;
+  box-shadow:none !important;
+  transform:none !important;
+}
+body[data-page="clientes"] .btn:hover{ background:var(--hover) !important; }
+body[data-page="clientes"] .btn:active{ transform:translateY(0) !important; }
+body[data-page="clientes"] .btn.ghost,
+body[data-page="clientes"] .btn.danger,
+body[data-page="clientes"] .btn.secondary,
+body[data-page="clientes"] .td-actions .btn{
+  background:transparent !important;
+  color:var(--fg) !important;
+  border:1px solid var(--border) !important;
+  box-shadow:none !important;
+}
+body[data-page="clientes"] #btn-add-cliente{
+  --bg1:#1ea553; --bg2:#168a44; --bd:#0f7333;
+  background:linear-gradient(180deg,var(--bg1),var(--bg2)) !important;
+  color:#fff !important; border:1px solid var(--bd) !important;
+  box-shadow:0 2px 0 rgba(0,0,0,.14) !important;
+}
+body[data-page="clientes"] #btn-add-cliente:hover{ filter:brightness(1.05); }
+body[data-page="clientes"] #btn-add-cliente:active{ transform:translateY(1px) !important; }
+
+/* Ícone nativo do date: esconde quando showPicker existe */
+html[data-showpicker="1"] body[data-page="clientes"] input[type="date"]{ background-image:none !important; }
+html[data-showpicker="1"] body[data-page="clientes"] input[type="date"]::-webkit-calendar-picker-indicator{
+  display:none !important; opacity:0 !important; pointer-events:none !important;
+}
+html[data-showpicker="1"] body[data-page="clientes"] input[type="date"]::-webkit-clear-button,
+html[data-showpicker="1"] body[data-page="clientes"] input[type="date"]::-webkit-inner-spin-button{
+  display:none !important;
+}
+/* Sem showPicker (Firefox/Safari antigo): some com o chip para não duplicar */
+html[data-showpicker="0"] body[data-page="clientes"] .date-wrap .chip{ display:none !important; }
+
+/* Empty state + toast */
+#empty-state{
+  display:none; align-items:center; justify-content:center; padding:2rem;
+  color:var(--muted); border:1px dashed var(--border); border-radius:.8rem; margin-top:1rem;
+}
+#toast{
+  position:fixed; right:16px; bottom:16px; background:#065f46; color:#fff;
+  padding:.7rem 1rem; border-radius:.7rem; font-weight:700; box-shadow:0 10px 40px rgba(0,0,0,.35);
+  display:none; z-index:999999;
+}
+
+/* =========================
+   MOBILE – até 900px (inputs fluidos)
+   ========================= */
+@media (max-width: 900px){
+  .main{ padding:1rem }
+  .input, .select, .btn{ height:40px }
+  .filters{ gap:.6rem }
+  .filters .row{ width:100% } /* linhas ocupam largura toda */
+  .filters .row-dates .spacer{ display:none }
+  .filters .row-dates .actions-right{ width:100%; justify-content:stretch }
+  .filters .row-dates .actions-right .btn{ flex:1 1 auto }
+  .input[type="search"]{ min-width:0; width:100% }
+  .date-wrap{ flex:1 }
+  .date-wrap input{ width:100% }
+  #select-depto{ width:100% }
+}
+
+/* Cards em vez de tabela <= 720px */
+@media (max-width: 720px){
+  .table-wrap{ overflow:visible }
+  table{ display:block; min-width:0; border:0 }
+  thead{ display:none }
+  tbody{ display:grid; gap:.75rem }
+  tbody tr{
+    display:grid; gap:.4rem;
+    background:var(--card); border:1px solid var(--border);
+    border-radius:.9rem; padding:.8rem;
+  }
+  tbody td{
+    display:flex; align-items:center; justify-content:space-between;
+    gap:1rem; padding:.35rem 0; border:0;
+  }
+  tbody td::before{
+    content:attr(data-th);
+    color:var(--muted); font-weight:800; letter-spacing:.2px; font-size:.86rem;
+  }
+  .td-actions{ justify-content:flex-start }
+  .td-actions .btn{ flex:1 1 auto } /* botões ocupam largura e quebram em linhas */
+
+  /* <<< NOVO: feedback da seleção em cards (mobile) >>> */
+  tbody tr.cliente-row{ border-color: color-mix(in oklab, var(--border) 70%, transparent); }
+  tbody tr.cliente-row:has(.row-check:checked){
+    border-color: color-mix(in oklab, var(--ring) 55%, var(--border));
+  }
+}
+
+/* Muito pequeno (≤380px): botões ainda mais fluidos */
+@media (max-width: 380px){
+  .td-actions{ gap:.4rem }
+  .td-actions .btn{ width:100% }
+}
+
+/* =========================
+   Botão "Carregar mais"
+   ========================= */
+.loadmore-wrap{
+  display:flex; justify-content:center; padding:.75rem 0 0;
+}
+#btnMore.is-loading{ opacity:.7; pointer-events:none }
+#btnMore.is-loading i{ animation:spin .9s linear infinite }
+
+/* ===========================================================
+   DENSIDADE COMPACTA / CLEAN (overrides finais)
+   =========================================================== */
+body[data-page="clientes"]{
+  --font-size-base: 0.92rem;
+  --radius: .55rem;
+  font-size: var(--font-size-base);
+}
+body[data-page="clientes"] .section-title h1{ font-size:1rem }
+body[data-page="clientes"] .box{ padding:.8rem; border-radius:.8rem }
+
+/* Inputs / selects / chips compactos */
+body[data-page="clientes"] .input,
+body[data-page="clientes"] .select{ height:34px; padding:.4rem .65rem; border-radius: var(--radius) }
+body[data-page="clientes"] .input[type="date"]{ min-width:170px }
+body[data-page="clientes"] .input[type="search"]{ min_width:220px }
+body[data-page="clientes"] .chip{ height:24px; padding:.22rem .55rem; font-size:.78rem }
+
+/* Botões compactos */
+body[data-page="clientes"] .btn{ height:32px; padding:.42rem .6rem; border-radius: var(--radius); font-weight:600; gap:.35rem }
+body[data-page="clientes"] .btn.ghost,
+body[data-page="clientes"] .btn.secondary,
+body[data-page="clientes"] .td-actions .btn{ height:30px; padding:.35rem .5rem }
+
+/* Grupo de botões mais próximo */
+body[data-page="clientes"] .btn-group{ gap:.4rem }
+body[data-page="clientes"] #btn-add-cliente{ height:32px; padding:.42rem .7rem }
+
+/* Tabela mais seca (DESKTOP apenas) */
+@media (min-width: 721px){
+  body[data-page="clientes"] table{ font-size:.90rem; min-width:900px }
+}
+body[data-page="clientes"] th,
+body[data-page="clientes"] td{ padding:.55rem .6rem }
+body[data-page="clientes"] thead{ background:transparent }
+body[data-page="clientes"] thead th{ background:var(--hover-strong); font-weight:800 }
+
+/* Ações compactas */
+body[data-page="clientes"] .td-actions{ gap:.35rem; flex-wrap:nowrap }
+body[data-page="clientes"] .td-actions .btn{
+  font-size:.85rem; padding:.28rem .45rem; height:28px; border-radius:.5rem;
+}
+body[data-page="clientes"] .td-actions .btn i{ font-size:.85em }
+
+/* Empty e load more compactos */
+body[data-page="clientes"] #empty-state{ padding:1.2rem }
+body[data-page="clientes"] .loadmore-wrap{ padding:.5rem 0 0 }
+body[data-page="clientes"] #btnMore{ height:32px; padding:.42rem .7rem }
+
+/* Mobile: um pouco mais alto pro toque */
+@media (max-width: 720px){
+  body[data-page="clientes"] .input,
+  body[data-page="clientes"] .select,
+  body[data-page="clientes"] .btn{ height:38px }
+  body[data-page="clientes"] tbody tr{ padding:.6rem; border-radius:.75rem }
+  body[data-page="clientes"] tbody td{ padding:.28rem 0 }
+  body[data-page="clientes"] .td-actions .btn{ flex:1 1 auto; height:36px }
+}
+
+/* ====== RESPONSÁVEL: "Todos" pequeno; selecionado = largura pelo nome ====== */
+body[data-page="clientes"] #select-resp{
+  -webkit-appearance:none; -moz-appearance:none; appearance:none;
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  height: 34px;
+  padding: .4rem .65rem;
+  border-radius: .35rem;
+  line-height: 1.2;
+
+  /* seta colada ao texto */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='7' viewBox='0 0 11 7'%3E%3Cpath d='M1.25 1.25L5.5 5.5 9.75 1.25' fill='none' stroke='%239ca3af' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right .45rem center;
+  padding-right: 1.6rem;
+
+  width: auto;                    /* largura controlada via JS */
+  max-width: 420px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  transition: width .18s ease, border-radius .18s ease, padding .18s ease;
+  will-change: width, border-radius;
+}
+/* borda e largura menores em "Todos" */
+body[data-page="clientes"] #select-resp.is-all{
+  width: 84px;
+  border-radius: .25rem;
+}
+/* quando tiver um responsável escolhido, borda um pouco maior */
+body[data-page="clientes"] #select-resp.has-value{
+  border-radius: .55rem;
+}
+/* Mobile: ocupa a linha toda */
+@media (max-width: 900px){
+  body[data-page="clientes"] #select-resp{
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}

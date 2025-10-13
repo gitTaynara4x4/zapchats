@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Redefinir Senha – ZapChats</title>
+
+  <!-- Tema inicial -->
+  <script>
+    (function(){ try{var t=localStorage.getItem('theme'); if(!t||t==='dark') document.documentElement.classList.add('dark');}catch{} })();
+  </script>
+
+  <!-- Tailwind -->
+  <link rel="stylesheet" href="/frontend/css/tw.css">
+  <script>tailwind.config={darkMode:'class'};</script>
+
+  <style>
+    :root{ --topbar-h:44px; }
+    .topline-bar{ position:fixed; inset:0 0 auto 0; height:var(--topbar-h); display:flex; align-items:center; justify-content:flex-end; gap:.75rem; padding:0 14px; background:linear-gradient(180deg,rgba(0,0,0,.06),rgba(22,22,23,0)); z-index:50; backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);}
+    html:not(.dark) .topline-bar{ background:linear-gradient(180deg,rgba(0,0,0,.04),rgba(255,255,255,0)); }
+    .topline-bar::before{ content:""; position:absolute; left:0; right:0; top:0; height:3px; background:linear-gradient(90deg,#22c55e,#06b6d4,#6366f1); opacity:.95;}
+
+    .theme-toggle{ --w:78px; --h:34px; --p:3px; --k:28px; --dx:calc(var(--w) - var(--k) - var(--p)*2); position:relative; width:var(--w); height:var(--h); padding:var(--p); border-radius:999px; cursor:pointer; border:1px solid; background:#eceff3; border-color:#d5d9e0;}
+    html.dark .theme-toggle{ background:#2f323a; border-color:#3a3e46;}
+    .theme-toggle .slot{ position:absolute; top:50%; width:28px; height:28px; margin-top:-14px; display:grid; place-items:center; pointer-events:none; opacity:.75;}
+    .hidden{ display:none; }
+
+    /* Botão com carregamento interno */
+    .btn-progress{
+      position:relative; overflow:hidden; isolation:isolate;
+      --prog:0%; --ok:#22c55e; --idle:#16a34a;
+      background:var(--idle); border-radius:.5rem;
+    }
+    .btn-progress::before{
+      content:""; position:absolute; inset:0; width:var(--prog);
+      background:var(--ok); transition:width .18s ease; border-radius:.5rem; z-index:0;
+    }
+    .btn-progress .btn-text{ position:relative; z-index:1; }
+  </style>
+</head>
+<body class="min-h-screen bg-green-50 dark:bg-neutral-950 flex items-center justify-center text-neutral-800 dark:text-neutral-200">
+
+  <!-- TOPBAR -->
+  <div class="topline-bar">
+    <button id="themeSwitch" class="theme-toggle" aria-label="Alternar tema" aria-pressed="false">
+      <span class="slot left" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3.5" fill="none"/>
+          <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
+          <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
+          <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
+          <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
+        </svg>
+      </span>
+      <span class="slot right" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8z" fill="none"/>
+        </svg>
+      </span>
+    </button>
+  </div>
+
+  <!-- CARD -->
+  <div class="w-full max-w-lg bg-white dark:bg-neutral-900 rounded-2xl shadow-lg dark:shadow-black/40 overflow-hidden border border-transparent dark:border-neutral-800">
+    <div class="p-8 md:p-10">
+
+      <div class="text-center mb-6">
+        <img src="/img/Logo.png" class="mx-auto h-12 mb-3 dark:hidden" alt="ZapChats">
+        <img src="/img/Logo-white.png" class="mx-auto h-12 mb-3 hidden dark:block" alt="ZapChats">
+        <h2 class="text-3xl font-bold text-gray-800 dark:text-white">Redefinir Senha</h2>
+        <p class="text-gray-500 dark:text-gray-400">Receba um token no e-mail e crie uma nova senha.</p>
+      </div>
+
+      <!-- Toast (erros e avisos) -->
+      <div id="toast" class="hidden mb-4 rounded-lg border px-4 py-3 text-sm"></div>
+
+      <!-- Passo 1 -->
+      <form id="form-forgot" class="space-y-4" autocomplete="off" novalidate>
+        <div>
+          <label class="block font-medium mb-1 text-gray-700 dark:text-gray-200">E-mail</label>
+          <input id="email" type="email" required
+                 class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400
+                        bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700
+                        text-neutral-800 dark:text-neutral-100"
+                 placeholder="seuemail@empresa.com"/>
+        </div>
+
+        <button id="btn-forgot" type="submit"
+                class="btn-progress w-full py-2 text-white font-semibold disabled:opacity-60 disabled:cursor-not-allowed">
+          <span class="btn-text">Enviar Token</span>
+        </button>
+
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+          Obs.: por segurança, evite muitas tentativas seguidas.
+        </p>
+      </form>
+
+      <!-- Dicas (após envio OK) -->
+      <div id="tips" class="hidden mt-5 text-sm text-gray-600 dark:text-gray-300">
+        <div class="rounded-lg border px-4 py-3 bg-emerald-50/60 dark:bg-emerald-900/20 dark:border-emerald-800">
+          <p class="font-medium text-emerald-700 dark:text-emerald-300 mb-1">
+            Se este e-mail estiver cadastrado, enviamos um token agora.
+          </p>
+          <ul class="list-disc pl-5 leading-6">
+            <li>Verifique a <b>Caixa de entrada</b>, <b>Spam</b> e aba <b>Promoções</b>.</li>
+            <li>O assunto é <i>“Redefinição de senha - ZapChats”</i>.</li>
+            <li>Atalhos:
+              <a class="text-emerald-700 dark:text-emerald-300 underline" href="https://mail.google.com/" target="_blank" rel="noreferrer">Gmail</a> ·
+              <a class="text-emerald-700 dark:text-emerald-300 underline" href="https://outlook.live.com/mail/0/inbox" target="_blank" rel="noreferrer">Outlook</a> ·
+              <a class="text-emerald-700 dark:text-emerald-300 underline" href="https://mail.yahoo.com/" target="_blank" rel="noreferrer">Yahoo</a>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Passo 2 -->
+      <div id="reset-section" class="hidden mt-8">
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Cole o token que recebeu e crie uma nova senha.</p>
+        <form id="form-reset" class="space-y-4" autocomplete="off" novalidate>
+          <div>
+            <label class="block font-medium mb-1 text-gray-700 dark:text-gray-200">Token</label>
+            <input id="token" type="text" required
+                   class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400
+                          bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700
+                          text-neutral-800 dark:text-neutral-100"
+                   placeholder="Cole o token aqui"/>
+          </div>
+          <div>
+            <div class="flex items-center justify-between">
+              <label class="block font-medium mb-1 text-gray-700 dark:text-gray-200">Nova Senha</label>
+              <button type="button" id="toggle-pass" class="text-xs px-2 py-1 rounded border
+                          border-gray-300 dark:border-neutral-700 hover:bg-gray-50 dark:hover:bg-neutral-800">
+                Mostrar
+              </button>
+            </div>
+            <input id="nova_senha" type="password" required minlength="8"
+                   class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400
+                          bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700
+                          text-neutral-800 dark:text-neutral-100"
+                   placeholder="••••••••"/>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Mínimo 8 caracteres. Use letras, números e símbolos.</p>
+          </div>
+
+          <button id="btn-reset" type="submit"
+                  class="w-full py-2 rounded-lg bg-blue-500 text-white font-semibold transition
+                         hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed">
+            <span class="btn-text">Redefinir Senha</span>
+          </button>
+        </form>
+      </div>
+
+      <p class="mt-8 text-center text-gray-600 dark:text-gray-300">
+        <a href="/login" class="text-green-500 hover:underline font-medium">Voltar ao login</a>
+      </p>
+    </div>
+  </div>
+
+  <script>
+    // Tema
+    (function(){
+      var html=document.documentElement, btn=document.getElementById('themeSwitch');
+      try{var saved=localStorage.getItem('theme'); if(saved) html.classList.toggle('dark',saved==='dark');}catch{}
+      if(btn){ const sync=()=>btn.setAttribute('aria-pressed',String(html.classList.contains('dark')));
+        sync(); btn.addEventListener('click',()=>{ const willDark=!html.classList.contains('dark');
+          html.classList.toggle('dark',willDark); try{localStorage.setItem('theme',willDark?'dark':'light');}catch{}; sync();});
+      }
+    })();
+
+    // Toast
+    const toast = document.getElementById('toast');
+    function showToast(msg, variant='error'){
+      const styles={
+        error:'border-red-300 bg-red-50 text-red-800 dark:bg-red-900/25 dark:border-red-800 dark:text-red-200',
+        warn :'border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-200'
+      };
+      toast.className='mb-4 rounded-lg border px-4 py-3 text-sm '+(styles[variant]||styles.error);
+      toast.textContent=msg; toast.classList.remove('hidden');
+    }
+    function hideToast(){ toast.classList.add('hidden'); toast.textContent=''; }
+
+    // Progress helpers
+    function setBtnProg(btn,pct){ btn.style.setProperty('--prog',Math.max(0,Math.min(100,pct))+'%'); }
+    function startProgress(btn){
+      let pct=0, t0=performance.now(), raf=0;
+      const tick=(now)=>{
+        const dt=(now-t0)/1000;         // s
+        const target=Math.min(0.98, dt/6.0); // ~98% em ~6s
+        const wobble=0.012*Math.sin(now/500);
+        pct=Math.max(pct,Math.min(0.985,target+wobble));
+        setBtnProg(btn,Math.floor(pct*100));
+        raf=requestAnimationFrame(tick);
+      };
+      raf=requestAnimationFrame(tick);
+      return ()=>cancelAnimationFrame(raf);
+    }
+    function finishProgress(btn){ setBtnProg(btn,100); setTimeout(()=>setBtnProg(btn,0),900); }
+    const minDelay=(ms)=>new Promise(r=>setTimeout(r,ms));
+
+    // Throttle local (máx. 5 envios por e-mail até liberar novamente)
+    const LS_KEY = (email)=>`fp:tries:${(email||'').toLowerCase()}`;
+    function getTries(email){
+      try{ const raw=localStorage.getItem(LS_KEY(email)); if(!raw) return {n:0,ts:Date.now()};
+        const obj=JSON.parse(raw); return {n:obj.n|0, ts:obj.ts|0}; }catch{ return {n:0,ts:Date.now()}; }
+    }
+    function setTries(email,n){ try{ localStorage.setItem(LS_KEY(email), JSON.stringify({n,ts:Date.now()})); }catch{} }
+    function incTries(email){ const t=getTries(email); setTries(email, t.n+1); return t.n+1; }
+    function resetTries(email){ try{ localStorage.removeItem(LS_KEY(email)); }catch{} }
+
+    // Passo 1
+    const formForgot = document.getElementById('form-forgot');
+    const btnForgot  = document.getElementById('btn-forgot');
+    const btnText    = btnForgot.querySelector('.btn-text');
+    const emailInput = document.getElementById('email');
+    const tips       = document.getElementById('tips');
+
+    formForgot.addEventListener('submit', async (e)=>{
+      e.preventDefault(); hideToast();
+      const email=(emailInput.value||'').trim().toLowerCase();
+      if(!email){ showToast('Informe um e-mail válido.','warn'); return; }
+
+      // limite local: 5 tentativas por e-mail (não mostra tempo)
+      const tries = incTries(email);
+      if(tries>5){ showToast('Muitas tentativas. Tente novamente mais tarde.','warn'); return; }
+
+      btnForgot.disabled=true;
+      const oldText=btnText.textContent; btnText.textContent='Enviando para você…';
+      const stop = startProgress(btnForgot);
+
+      try{
+        // aguarda resposta e pelo menos 3.5s de animação
+        const fetchPromise = fetch('/api/auth/forgot-password',{
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({email})
+        });
+
+        const res = await Promise.race([fetchPromise, fetchPromise]); // só pra reusar a mesma promise
+        await minDelay(3500);
+
+        // 429 (muitas tentativas no servidor)
+        if(res.status===429){
+          stop(); finishProgress(btnForgot); await minDelay(1000);
+          showToast('Muitas tentativas. Tente novamente mais tarde.','warn');
+          return;
+        }
+
+        // 404 → e-mail não cadastrado (mensagem explícita)
+        if(res.status===404){
+          stop(); finishProgress(btnForgot); await minDelay(1000);
+          showToast('E-mail não cadastrado.');
+          return;
+        }
+
+        // outros erros
+        if(!res.ok){
+          stop(); finishProgress(btnForgot); await minDelay(1000);
+          let msg='Não foi possível enviar agora.';
+          try{ const j=await res.json(); msg=j.detail||msg; }catch{}
+          showToast(msg);
+          return;
+        }
+
+        // sucesso → mostra dicas e passo 2
+        stop(); finishProgress(btnForgot); await minDelay(1000);
+        tips.classList.remove('hidden');
+        document.getElementById('reset-section').classList.remove('hidden');
+        document.getElementById('token').focus();
+      }catch{
+        stop(); setBtnProg(btnForgot,0);
+        showToast('Erro de conexão. Tente novamente.');
+      }finally{
+        btnForgot.disabled=false; btnText.textContent=oldText;
+      }
+    });
+
+    // Passo 2
+    const formReset=document.getElementById('form-reset');
+    const btnReset=document.getElementById('btn-reset');
+    const inputPass=document.getElementById('nova_senha');
+    const inputTok=document.getElementById('token');
+
+    document.getElementById('toggle-pass').addEventListener('click',()=>{
+      const btn=document.getElementById('toggle-pass');
+      const on=inputPass.type==='text'; inputPass.type=on?'password':'text'; btn.textContent=on?'Mostrar':'Ocultar';
+    });
+
+    // pré-preenche token via URL (?token=...)
+    (function(){
+      try{ const u=new URL(location.href); const t=u.searchParams.get('token');
+        if(t){ document.getElementById('reset-section').classList.remove('hidden'); inputTok.value=t; inputPass.focus(); }
+      }catch{}
+    })();
+
+    formReset.addEventListener('submit', async (e)=>{
+      e.preventDefault(); hideToast();
+      const token=inputTok.value.trim(), nova_senha=inputPass.value.trim();
+      btnReset.disabled=true; const t=btnReset.querySelector('.btn-text'); const old=t.textContent; t.textContent='Atualizando…';
+      try{
+        const res=await fetch('/api/auth/reset-password',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({token,nova_senha}) });
+        if(!res.ok){ let msg='Não foi possível redefinir a senha.'; try{const j=await res.json(); msg=j.detail||msg;}catch{} showToast(msg); return; }
+        alert('Senha redefinida! Você já pode entrar com a nova senha.');
+        // como deu certo, “perdoa” tentativas locais desse e-mail
+        resetTries((emailInput.value||'').trim().toLowerCase());
+        window.location.href='/login';
+      }catch{ showToast('Falha de conexão. Tente novamente.'); }
+      finally{ btnReset.disabled=false; t.textContent=old; }
+    });
+  </script>
+</body>
+</html>

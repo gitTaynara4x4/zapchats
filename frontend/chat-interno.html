@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="has-sidebar prepaint">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Chat Interno – ZapChats</title>
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="/frontend/css/chat-interno.css"/>
+
+  <!-- Shell global (externos) -->
+  <script src="/frontend/js/app-base.js" defer></script>
+  <script src="/frontend/js/auth.js" defer></script>
+  <script src="/frontend/js/page-guard.js" defer></script>
+
+  <!-- Página (JS abaixo) -->
+  <script src="/frontend/js/pages/chat-interno.js" defer></script>
+</head>
+<body data-pane="list">
+  <!-- Sidebar -->
+  <aside id="sidebar"
+         data-src="/frontend/partials/sidebar.html"
+         data-src-mobile="/frontend/partials/sidebar-mobile.html"></aside>
+
+  <main class="main" role="main" aria-label="Chat Interno">
+    <div class="section-title">
+      <h1><i class="fa fa-comments title-ico"></i> Chat Interno</h1>
+      <div class="top-total"><span id="totalConversas">—</span> conversas</div>
+    </div>
+
+    <section class="grid-chat" aria-label="Área do chat">
+      <!-- Lista -->
+      <aside class="box pane-list" aria-label="Lista de conversas">
+        <div class="list-head">
+          <div class="search" role="search">
+            <svg aria-hidden="true" viewBox="0 0 256 256" fill="currentColor">
+              <path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/>
+            </svg>
+            <input id="inpSearch" type="search" placeholder="Procurar conversa ou pessoa" aria-label="Procurar"/>
+          </div>
+
+          <!-- + -->
+          <button class="icon-btn" id="btnNewChannel" title="Nova conversa" aria-label="Nova conversa">
+            <svg viewBox="0 0 256 256" fill="currentColor">
+              <path d="M254,136a6,6,0,0,1-6,6H230v18a6,6,0,0,1-12,0V142H200a6,6,0,0,1,0-12h18V112a6,6,0,0,1,12,0v18h18A6,6,0,0,1,254,136Zm-57.41,60.14a6,6,0,1,1-9.18,7.72C166.9,179.45,138.69,166,108,166s-58.89,13.45-79.41,37.86a6,6,0,0,1-9.18-7.72C35.14,177.41,55,164.48,77,158.25a66,66,0,1,1,62,0C161,164.48,180.86,177.41,196.59,196.14ZM108,154a54,54,0,1,0-54-54A54.06,54.06,0,0,0,108,154Z"/>
+            </svg>
+          </button>
+        </div>
+
+        <ul class="list" role="listbox" aria-label="Conversas" id="listaConversas"></ul>
+      </aside>
+
+      <!-- Chat -->
+      <section class="box pane-chat" aria-label="Conversa ativa">
+        <header class="chat-head">
+          <button id="btnBackList" class="icon-btn btn-back" aria-label="Voltar para lista">
+            <svg viewBox="0 0 256 256" fill="currentColor">
+              <path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/>
+            </svg>
+          </button>
+
+          <div class="peer">
+            <div class="avatar" aria-hidden="true"></div>
+            <div class="who">
+              <div class="name" id="peerName">Selecionar conversa</div>
+              <div class="status" id="peerStatus">—</div>
+            </div>
+          </div>
+
+          <button class="icon-btn" id="btnKebabHeader" aria-haspopup="menu" aria-expanded="false" title="Mais opções">
+            <svg class="ico-closed" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
+              <path d="M222,128a6,6,0,0,1-6,6H112a6,6,0,0,1,0-12H216A6,6,0,0,1,222,128ZM112,70H216a6,6,0,0,0,0-12H112a6,6,0,0,0,0,12ZM216,186H40a6,6,0,0,0,0,12H216a6,6,0,0,0,0-12ZM72,142a6,6,0,0,0,4.24-10.24L40.49,96,76.24,60.24a6,6,0,0,0-8.48-8.48l-40,40a6,6,0,0,0,0,8.48l-40,40A6,6,0,0,0,72,142Z"/>
+            </svg>
+            <svg class="ico-open" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
+              <path d="M222,128a6,6,0,0,1-6,6H112a6,6,0,0,1,0-12H216A6,6,0,0,1,222,128ZM112,70H216a6,6,0,0,0,0-12H112a6,6,0,0,0,0,12ZM216,186H40a6,6,0,0,0,0,12H216a6,6,0,0,0,0-12ZM35.76,140.24a6,6,0,0,0,8.48,0l40-40a6,6,0,0,0,0-8.48l-40-40a6,6,0,0,0-8.48,8.48L71.51,96,35.76,131.76A6,6,0,0,0,35.76,140.24Z"/>
+            </svg>
+          </button>
+        </header>
+
+        <div class="msgs" id="msgsScroll" aria-live="polite">
+          <div class="empty" id="emptyState">Selecione uma conversa para começar.</div>
+        </div>
+
+        <footer class="composer" aria-label="Enviar mensagem">
+          <button class="attach" id="btnAttach" title="Anexar" aria-label="Anexar">
+            <svg viewBox="0 0 256 256" fill="currentColor"><path d="M205.66,122.34l-82,82a54,54,0,0,1-76.36-76.36l96-96a38,38,0,1,1,53.74,53.74l-96,96a22,22,0,0,1-31.12-31.12l82-82a6,6,0,0,1,8.48,8.48l-82,82a34,34,0,0,0,48.08,48.08l96-96a26,26,0,0,0-36.76-36.76l-96,96a10,10,0,1,0,14.14,14.14l82-82a6,6,0,0,1,8.48,8.48Z"/></svg>
+          </button>
+          <div class="input-wrap">
+            <label class="sr-only" for="txtMsg">Mensagem</label>
+            <textarea id="txtMsg" placeholder="Escreva uma mensagem…" rows="1"></textarea>
+          </div>
+          <button class="send" id="btnSend" title="Enviar" aria-label="Enviar">
+            <svg viewBox="0 0 256 256" fill="currentColor"><path d="M230.91,123.55l-176-96A14,14,0,0,0,34,39.41V120a6,6,0,0,0,6,6h92a6,6,0,0,1,0,12H40a6,6,0,0,0-6,6v80.59A14,14,0,0,0,54.91,228l176-96a14,14,0,0,0,0-24.89Z"/></svg>
+          </button>
+        </footer>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

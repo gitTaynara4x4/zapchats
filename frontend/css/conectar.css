@@ -1,0 +1,236 @@
+/* === Anti-flash (prepaint) === */
+html.prepaint body { visibility: hidden; }
+html.prepaint[data-head-ready][data-loader-ready] body { visibility: visible; }
+
+/* === Base / Reset leve === */
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+:root{
+  --accent: #008B32;
+  --ok: #008B32;
+  --accent-fg: #ffffff; /* texto em botões/abas selecionadas */
+}
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-synthesis-weight: none;
+  font-optical-sizing: auto;
+}
+a { color: inherit; text-decoration: none; }
+
+/* Sidebar placeholder (real vem do app-base.js) */
+#sidebar { display: block; width: 16.5rem; min-height: 100vh; }
+
+/* === Layout === */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem 1.75rem 2.25rem;
+  gap: 1.25rem;
+}
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: .25rem 0 .25rem 0;
+}
+.section-title h1 {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  letter-spacing: .01em;
+}
+.title-ico { font-size: 1rem; margin-right: .25rem; vertical-align: -1px; }
+.top-total { margin-left: auto; color: var(--muted); font-weight: 700; font-size: .95rem; }
+
+/* === Cartões/boxes === */
+.box {
+  background: var(--card);
+  border: none !important;
+  border-radius: 14px;
+  box-shadow: 0 10px 28px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.04);
+  padding: 18px 18px 20px;
+  position: relative;
+}
+
+.muted { color: var(--muted); font-size: .9rem; }
+
+/* === Cabeçalho do card principal (Tabs) === */
+.tabs {
+  display: flex; gap: 1.25rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0 .25rem; margin: .25rem 0 1.1rem 0;
+}
+.tab-btn {
+  padding: .65rem .9rem; border: 0; background: transparent; color: var(--muted);
+  font-weight: 800; letter-spacing: .01em; border-bottom: 2px solid transparent; cursor: pointer;
+  border-radius: .35rem .35rem 0 0;
+}
+.tab-btn[aria-selected="true"] { color: var(--accent-fg); border-color: var(--accent); }
+
+/* === Ações / Botões === */
+.actions {
+  display: flex; gap: .75rem; flex-wrap: wrap;
+  margin: .25rem 0 1rem 0;
+}
+.btn {
+  display: inline-flex; align-items: center; gap: .55rem;
+  font-weight: 800; font-size: .95rem; letter-spacing: .01em;
+  padding: .7rem 1rem; border-radius: .75rem;
+  border: 1px solid var(--border); background: var(--card);
+  transition: background .15s ease, box-shadow .15s ease, transform .02s ease, filter .15s ease;
+  box-shadow: 0 1px 0 rgba(0,0,0,.02);
+  cursor: pointer;
+}
+.btn[disabled] { opacity: .6; cursor: not-allowed; }
+.btn:focus-visible, .kebab-btn:focus-visible { outline: 3px solid var(--ring, #4f83ff80); outline-offset: 2px; }
+
+/* Botão primário – verde exato #008B32 */
+.btn--primary{
+  border-color: #008B32;
+  background: #008B32;
+  color: #fff;
+}
+.btn--primary:hover:not([disabled]) {
+  filter: brightness(1.02);
+  box-shadow: 0 4px 18px rgba(0, 139, 50, .22);
+}
+.btn--primary:active:not([disabled]){ transform: translateY(1px); }
+
+/* Botão “OK” quando habilitado – verde exato #008B32 */
+.btn--ok{
+  border-color: #008B32;
+  background: #008B32;
+  color: #fff;
+}
+#btn-open-modal.btn--ok:hover:not([disabled]) {
+  background: #008B32;
+  box-shadow: 0 4px 18px rgba(0, 139, 50, .22);
+}
+#btn-open-modal:active:not([disabled]) { transform: translateY(1px); }
+
+/* === Tabela === */
+.table-wrap { overflow: auto; }
+table {
+  width: 100%; border-collapse: collapse; font-size: .98rem; min-width: 760px;
+  border-spacing: 0;
+}
+thead { background: var(--hover-strong); }
+thead th {
+  font-weight: 700;
+  letter-spacing: .01em;
+}
+th, td {
+  padding: 1rem .9rem;
+  text-align: left; border-bottom: 1px solid var(--border);
+}
+tbody td { font-weight: 500; }
+tbody tr:hover { background: var(--hover); transition: background .12s ease; }
+th:last-child, td:last-child { text-align: right; }
+
+/* Pílula do plano */
+.plan-pill{
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 48px; padding: .28rem .65rem; border-radius: 999px;
+  font-size: .8rem; font-weight: 800; letter-spacing: .02em;
+  background: var(--hover-strong);
+  border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
+}
+
+/* Status dot */
+.dot { width: .65rem; height: .65rem; border-radius: 999px; display: inline-block; background: #9ca3af; }
+.dot.ok { background: var(--ok); }
+
+/* Kebab */
+.kebab-btn {
+  border: 1px solid var(--border); border-radius: .7rem; padding: .5rem .7rem; background: var(--card);
+}
+.kebab-menu{
+  position: absolute; right: .75rem; margin-top: .6rem; background: var(--card);
+  border: 1px solid var(--border); border-radius: .85rem; box-shadow: 0 14px 36px rgba(0,0,0,.45);
+  min-width: 190px; z-index: 60; display: none;
+}
+.kebab-menu.show { display: block; }
+.kebab-item { width: 100%; text-align: left; padding: .8rem .9rem; background: transparent; border: 0; font-size: .95rem; }
+.kebab-item:hover { background: var(--hover); cursor: pointer; }
+
+/* === QR === */
+#qr-area{
+  width: 100%; display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 18px; border-radius: 12px;
+  background: color-mix(in oklab, var(--card) 86%, transparent);
+  border: 1px solid color-mix(in oklab, var(--border) 86%, transparent);
+  margin-top: .25rem;
+}
+#qr-illustration { width: 420px; height: 420px; opacity: .9; max-width: 100%; }
+
+/* Loaders */
+.wpp-loader { display: flex; align-items: center; justify-content: center; padding: 26px 0; gap: .7rem; }
+.loader-spin {
+  border: 4px solid #e5e7eb22; border-top: 4px solid var(--accent); border-radius: 50%; width: 36px; height: 36px; animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* === Sincronização (banner + overlay) === */
+#sync-banner{
+  display: none; position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: 22px; background: var(--card); color: var(--fg);
+  border: 0; border-radius: 12px; padding: 12px 16px; box-shadow: 0 12px 30px rgba(0,0,0,.35);
+  z-index: 9999; min-width: 300px;
+}
+#sync-bar { height: 8px; background: var(--hover-strong); border-radius: 9999px; overflow: hidden; }
+#sync-bar > div { height: 100%; width: 0%; background: var(--accent); }
+
+#sync-overlay.hidden { display: none !important; }
+#sync-overlay { position: fixed; inset: 0; z-index: 999999; display: grid; place-items: center; }
+#sync-overlay .sync-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.65); backdrop-filter: blur(2px); }
+#sync-overlay .sync-card{
+  position: relative; z-index: 1; width: min(580px,92vw); border-radius: 16px; padding: 22px;
+  border: 1px solid rgba(255,255,255,.16); box-shadow: 0 22px 64px rgba(0,0,0,.45); background: #0f172a; color: #e5e7eb;
+}
+#sync-overlay .sync-progress { height: 10px; border-radius: 9999px; overflow: hidden; background: rgba(255,255,255,.1); }
+#sync-overlay .sync-progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg,#3b82f6,#008B32); transition: width .25s ease; }
+
+/* === Modal === */
+#modal, #modal-remover-numero { cursor: pointer; }
+#modal .card, #modal-remover-numero .card { cursor: auto; }
+
+/* === Mobile === */
+@media (max-width: 1024px) {
+  #sidebar { display: none !important; }
+  .main { padding: 1rem; padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
+  .main::after { content: ""; display: block; height: calc(96px + env(safe-area-inset-bottom)); }
+  table { min-width: 640px; }
+}
+@media (max-width: 720px) {
+  table { border: 0; min-width: 0; }
+  thead { display: none; }
+  tbody { display: block; }
+  tbody tr{
+    display: block; background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: .9rem; padding: .65rem .8rem; margin: .6rem 0;
+  }
+  tbody td{
+    display: flex; align-items: center; justify-content: space-between;
+    gap: .7rem; padding: .5rem 0; border-bottom: 1px dashed var(--border);
+    font-weight: 500;
+  }
+  tbody td:last-child { border-bottom: 0; }
+  tbody td:nth-child(1)::before { content: "Apelido";  color: var(--muted); font-weight: 700; }
+  tbody td:nth-child(2)::before { content: "Número";   color: var(--muted); font-weight: 700; }
+  tbody td:nth-child(3)::before { content: "Plano";    color: var(--muted); font-weight: 700; }
+  tbody td:nth-child(4)::before { content: "Status";   color: var(--muted); font-weight: 700; }
+  tbody td:nth-child(5)::before { content: "Ações";    color: var(--muted); font-weight: 700; }
+}
+
+/* === Utilitários === */
+.hidden { display: none !important; }

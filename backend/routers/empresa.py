@@ -1,0 +1,236 @@
+# backend/routers/empresa.py
+from __future__ import annotations
+
+from datetime import timezone
+from typing import Optional, Dict, Any, List
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from backend.database import get_db
+from backend import models
+from backend.utils.plans import (
+    plan_status_payload,
+    effective_tier,
+    plan_limit,
+)
+
+router = APIRouter(prefix="/api/empresas", tags=["Empresas"])
+
+
+# =========================
+# Utils simples
+# =========================
+def _iso(dt):
+    if not dt:
+        return None
+    try:
+        return dt.astimezone(timezone.utc).isoformat()
+    except Exception:
+        try:
+            return dt.isoformat()
+        except Exception:
+            return None
+
+
+def _only_digits(s: Optional[str]) -> str:
+    return "".join(ch for ch in (s or "") if ch.isdigit())
+
+
+def _norm_instance_name(s: Optional[str]) -> Optional[str]:
+    s = (s or "").strip()
+    return s or None
+
+
+def _norm_instance_number(s: Optional[str]) -> Optional[str]:
+    """
+    Normaliza para numérico puro (ex.: '5531999999999').
+    Não adiciona DDI/DDD — apenas remove não-dígitos.
+    """
+    d = _only_digits(s)
+    return d or None
+
+
+# =========================
+# Resolução de instância
+# =========================
+def resolve_instancia_id(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: Optional[int] = None,
+    instance_name: Optional[str] = None,
+    numero_instancia: Optional[str] = None,
+) -> Optional[int]:
+    """
+    Resolve o id de empresas_instancias para a empresa dada.
+
+    1) Se instancia_id pertencer à empresa → retorna.
+    2) Senão, tenta por instance_name (ex.: 'exas-9237').
+    3) Senão, tenta por numero_instancia (ex.: '55319...').
+
+    Retorna None se não encontrar.
+    """
+    q = db.query(models.EmpresaInstancia).filter(
+        models.EmpresaInstancia.empresa_id == empresa_id
+    )
+
+    # 1) id interno informado
+    if instancia_id:
+        inst = q.filter(models.EmpresaInstancia.id == instancia_id).first()
+        if inst:
+            return inst.id
+
+    # 2) instance_name
+    name = _norm_instance_name(instance_name)
+    if name:
+        inst = q.filter(models.EmpresaInstancia.instance_name == name).first()
+        if inst:
+            return inst.id
+
+    # 3) numero_instancia
+    num = _norm_instance_number(numero_instancia)
+    if num:
+        inst = q.filter(models.EmpresaInstancia.numero_instancia == num).first()
+        if inst:
+            return inst.id
+
+    return None
+
+
+def resolve_instancia_id_from_event(
+    db: Session,
+    *,
+    empresa_id: int,
+    event: Dict[str, Any],
+) -> Optional[int]:
+    """
+    Conveniência para eventos (Evolution/Webhook/Rabbit).
+
+    Extrai de nomes comuns:
+      - 'instancia_id' | 'instanceId'
+      - 'instance_name' | 'instanceName'
+      - 'instance_number' | 'instanceNumber' | 'numero_instancia'
+    """
+    inst_id = event.get("instancia_id") or event.get("instanceId")
+    try:
+        inst_id = int(inst_id) if inst_id is not None else None
+    except Exception:
+        inst_id = None
+
+    name = event.get("instance_name") or event.get("instanceName")
+    number = (
+        event.get("instance_number")
+        or event.get("instanceNumber")
+        or event.get("numero_instancia")
+    )
+
+    return resolve_instancia_id(
+        db,
+        empresa_id=empresa_id,
+        instancia_id=inst_id,
+        instance_name=name,
+        numero_instancia=number,
+    )
+
+
+# =========================
+# Schemas
+# =========================
+class UpdateApelidoIn(BaseModel):
+    apelido: str | None = None
+
+
+# =========================
+# Rotas
+# =========================
+@router.get("/{empresa_id}")
+def get_empresa(empresa_id: int, db: Session = Depends(get_db)):
+    emp = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
+    if not emp:
+        raise HTTPException(404, "Empresa não encontrada")
+
+    # Tier efetivo/limite (usa utils)
+    tier = effective_tier(emp)
+    limite = plan_limit(tier)
+
+    return {
+        "id": emp.id,
+        "nome": emp.nome,
+        "telefone": emp.telefone,
+        "assinatura": emp.assinatura,
+        "trial_tier": getattr(emp, "trial_tier", None),
+        "trial_expires_at": _iso(getattr(emp, "trial_expires_at", None))
+        if getattr(emp, "trial_expires_at", None)
+        else None,
+        "trial_active": getattr(emp, "trial_active", False),
+        "effective_tier": tier,
+        "limite_instancias": limite,
+        "quantidade_instancias": len(emp.instancias or []),
+        "avatar_url": emp.avatar_url,
+        "status_numero": emp.status_numero,
+        "created_at": _iso(emp.created_at),
+        "nome_adm": emp.nome_adm,
+    }
+
+
+@router.get("/{empresa_id}/whatsapp")
+def info_whatsapp(empresa_id: int, db: Session = Depends(get_db)):
+    """
+    Lista todas as instâncias com seus metadados e devolve
+    o status/limite pelo plano para o front travar o botão de adicionar.
+
+    Importante:
+    - Exibimos 'apelido' como rótulo no front.
+    - Filtramos sempre por 'instancia_id'.
+    - Mantemos 'id' por compatibilidade.
+    """
+    emp = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
+    if not emp:
+        raise HTTPException(404, "Empresa não encontrada")
+
+    insts: List[Dict[str, Any]] = []
+    ativos = 0
+    for i in emp.instancias or []:
+        item = {
+            "id": i.id,  # compat
+            "instancia_id": i.id,  # <- usado para filtro no front
+            "apelido": i.apelido,  # <- rótulo exibido
+            "instance_name": i.instance_name,  # fallback técnico
+            "numero_instancia": i.numero_instancia,
+            "connected": bool(i.connected),
+            "last_seen": _iso(i.last_seen) if i.last_seen else None,
+            "historico_restaurar": i.historico_restaurar,
+        }
+        insts.append(item)
+        if i.connected:
+            ativos += 1
+
+    total = len(insts)
+
+    status = plan_status_payload(emp, current_instances=total)
+    status.update(
+        {
+            "ativos": ativos,
+            "inativos": total - ativos,
+            "instancias": insts,
+        }
+    )
+    return status
+
+
+@router.patch("/instancias/{instancia_id}/apelido")
+def update_apelido(
+    instancia_id: int, body: UpdateApelidoIn, db: Session = Depends(get_db)
+):
+    inst = (
+        db.query(models.EmpresaInstancia)
+        .filter(models.EmpresaInstancia.id == instancia_id)
+        .first()
+    )
+    if not inst:
+        raise HTTPException(404, "Instância não encontrada")
+    inst.apelido = (body.apelido or None)
+    db.commit()
+    return {"ok": True, "id": inst.id, "apelido": inst.apelido}

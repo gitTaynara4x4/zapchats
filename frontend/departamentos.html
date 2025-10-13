@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="has-sidebar prepaint">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Departamentos – ZapChats</title>
+
+  <!-- Shell global -->
+  <script src="/frontend/js/app-base.js" defer></script>
+  <script src="/frontend/js/auth.js" defer></script>
+
+  <!-- Anti-flash -->
+  <style>
+    html.prepaint body{visibility:hidden}
+    html.prepaint[data-head-ready][data-loader-ready] body{visibility:visible}
+  </style>
+
+  <!-- CSS da página -->
+  <link rel="stylesheet" href="/frontend/css/departamentos.css"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+</head>
+<body>
+  <!-- Sidebar -->
+  <aside id="sidebar"
+         data-src="/frontend/partials/sidebar.html"
+         data-src-mobile="/frontend/partials/sidebar-mobile.html"></aside>
+
+  <main class="main">
+    <div class="section-title">
+      <h1><i class="fa-solid fa-building-flag title-ico"></i> Departamentos</h1>
+    </div>
+
+    <section class="filter" aria-label="Filtros">
+      <label for="filtro">Buscar:</label>
+      <input id="filtro" class="input" type="search" placeholder="Nome do departamento…" spellcheck="false" autocomplete="off"/>
+
+      <span class="spacer"></span>
+
+      <div class="view-toggle" role="tablist" aria-label="Visualização">
+        <button id="btn-view-table" class="btn" role="tab" aria-selected="true" type="button">
+          <i class="fa-solid fa-table"></i> Tabela
+        </button>
+        <button id="btn-view-org" class="btn" role="tab" aria-selected="false" type="button">
+          <i class="fa-solid fa-diagram-project"></i> Organograma
+        </button>
+      </div>
+
+      <span class="spacer"></span>
+
+      <button id="btn-expand" class="btn" type="button" title="Expandir tudo">
+        <i class="fa-solid fa-angles-down"></i> Expandir
+      </button>
+      <button id="btn-collapse" class="btn" type="button" title="Recolher tudo">
+        <i class="fa-solid fa-angles-up"></i> Recolher
+      </button>
+
+      <span class="spacer"></span>
+
+      <button id="btn-add" class="btn primary" type="button">
+        <i class="fa-solid fa-plus"></i> Novo
+      </button>
+    </section>
+
+    <!-- Tabela -->
+    <section aria-label="Árvore de departamentos" id="section-table">
+      <div class="box">
+        <div class="tree-wrap">
+          <table aria-label="Tabela de departamentos hierárquicos" class="tree-table">
+            <thead>
+              <tr>
+                <th style="width:48px">#</th>
+                <th>Departamento</th>
+                <th style="width:220px">Caminho</th>
+                <th style="width:140px">Código</th>
+                <th style="width:90px">Ativo</th>
+                <th style="width:220px">Ações</th>
+              </tr>
+            </thead>
+            <tbody id="tb-deptos"></tbody>
+          </table>
+        </div>
+        <div id="empty" class="empty">
+          <span><i class="fa-solid fa-inbox" style="margin-right:.5rem"></i>Nenhum departamento encontrado.</span>
+          <button id="btn-add-empty" class="btn primary" type="button"><i class="fa-solid fa-plus"></i> Criar primeiro</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Organograma -->
+    <section aria-label="Organograma de departamentos" id="section-org" style="display:none">
+      <div class="box">
+        <div id="org-container" class="orgchart" aria-live="polite"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <!-- Modal -->
+  <div id="modal-depto" class="modal-back" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-head">
+        <div class="title"><i class="fa-solid fa-sitemap"></i><span id="modal-title">Novo departamento</span></div>
+        <button id="modal-fechar" class="close-x" type="button" aria-label="Fechar modal">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-depto" autocomplete="off">
+          <input type="hidden" name="id"/>
+
+          <div class="fi fi-nome">
+            <label for="d-nome">Nome do departamento</label>
+            <input id="d-nome" class="input" type="text" placeholder="Ex.: Suporte" maxlength="120" required autocomplete="off" aria-describedby="h-nome" aria-expanded="false" aria-owns="nome-dropdown" role="combobox" list="departamento-sugestoes"/>
+            <datalist id="departamento-sugestoes"></datalist>
+            <div id="nome-dropdown" class="dropdown-suggestions" role="listbox" aria-label="Sugestões de nomes"></div>
+            <small id="h-nome" class="hint">Como será exibido para a equipe.</small>
+          </div>
+
+          <div class="fi">
+            <label for="d-parent">Departamento superior</label>
+            <select id="d-parent" class="input" aria-describedby="h-parent">
+              <option value="">Empresa (raiz)</option>
+            </select>
+            <small id="h-parent" class="hint">Escolha o departamento imediatamente acima. Para topo, deixe “Empresa (raiz)”.</small>
+          </div>
+
+          <div class="fi">
+            <label class="switch">
+              <input id="d-ativo" type="checkbox" checked/>
+              <span>Mostrar para a equipe</span>
+            </label>
+            <small class="hint">Se desligar, esse setor não aparece nas seleções.</small>
+          </div>
+
+          <!-- === WhatsApps permitidos (instâncias) === -->
+          <div class="fi" id="fi-whats">
+            <label for="whats-btn">Esse cliente pode ter quais WhatsApps? <span class="muted">(instâncias)</span></label>
+
+            <div class="multi" id="whats">
+              <!-- abre/fecha o dropdown -->
+              <button type="button" class="input" id="whats-btn" aria-expanded="false" aria-controls="whats-panel">
+                Selecione as instâncias...
+              </button>
+
+              <!-- dropdown com busca + lista -->
+              <div class="dropdown-suggestions" id="whats-panel" role="listbox" aria-multiselectable="true">
+                <div class="dd-search" style="padding:.5rem .6rem;">
+                  <input type="search" class="input" id="whats-search" placeholder="Buscar instância..." style="width:100%">
+                </div>
+                <div class="dd-list" id="whats-list"></div>
+              </div>
+
+              <!-- chips com as selecionadas -->
+              <div class="selected-chips" id="whats-chips" aria-live="polite"></div>
+            </div>
+
+            <small class="hint">Selecione as instâncias de WhatsApp permitidas para os departamentos deste cliente.</small>
+          </div>
+          <!-- === /WhatsApps permitidos === -->
+
+          <details class="details">
+            <summary><i class="fa-solid fa-sliders"></i> Opções avançadas</summary>
+            <div class="details-body">
+              <div class="fi">
+                <label for="d-codigo">Sigla / código interno (opcional)</label>
+                <input id="d-codigo" class="input" type="text" maxlength="64" placeholder="Ex.: FIN, TI-SUP" aria-describedby="h-codigo"/>
+                <small id="h-codigo" class="hint">Para integrações e filtros. Se não souber, deixe em branco.</small>
+              </div>
+
+              <div class="fi">
+                <label for="d-desc">Descrição (opcional)</label>
+                <textarea id="d-desc" class="input" rows="3" maxlength="300" placeholder="Ex.: Usado para chamados de suporte técnico." aria-describedby="h-desc"></textarea>
+                <small id="h-desc" class="hint">Ajuda a equipe a escolher o lugar certo.</small>
+              </div>
+            </div>
+          </details>
+
+          <div class="fi" id="path-preview" style="display:none">
+            <label>Prévia</label>
+            <div class="chips" style="font-size:.95rem; opacity:.9">
+              <code id="path-preview-code">—</code>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="foot">
+        <button id="modal-cancelar" class="btn" type="button">Cancelar</button>
+        <button id="modal-salvar" class="btn primary" type="button">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Guard + página -->
+  <script src="/frontend/js/page-guard.js" defer></script>
+  <script src="/frontend/js/pages/departamentos.js" defer></script>
+</body>
+</html>

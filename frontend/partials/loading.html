@@ -1,0 +1,194 @@
+<!-- Overlay escopável (cobre container escolhido) e também fullscreen (scope:'body') -->
+<div id="page-loading" role="status" aria-live="polite" aria-label="Carregando">
+  <div class="pill">
+    <span class="spinner" aria-hidden="true"></span>
+    <span class="text" id="page-loading-text">Carregando…</span>
+  </div>
+</div>
+
+<style>
+  /* overlay fixo; por padrão cobrimos o retângulo calculado via JS (escopo) */
+  #page-loading{
+    position: fixed;
+    inset: 0; /* será ajustado via JS p/ escopo; em fullscreen permanece 0 */
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999; /* reforçado; app-base também força inline se faltar */
+    pointer-events: none;
+  }
+  #page-loading.show{ display: flex; }
+
+  #page-loading::before{
+    content:""; position:absolute; inset:0;
+    background: color-mix(in oklab, var(--bg, #0f0f10) 70%, transparent);
+    backdrop-filter: saturate(120%) blur(2px);
+    border: 1px solid color-mix(in oklab, var(--border, #27272a) 40%, transparent);
+    border-radius: 12px;
+  }
+
+  #page-loading .pill{
+    position: relative; display: inline-flex; align-items:center; gap:.6rem;
+    background: var(--card, #161617); color: var(--fg, #e5e7eb);
+    border: 1px solid var(--border, #27272a); padding: .7rem .9rem;
+    border-radius: .7rem; font-weight: 700; z-index: 1;
+    box-shadow: 0 10px 30px rgba(0,0,0,.25);
+  }
+  #page-loading .text{ white-space: nowrap; }
+
+  #page-loading .spinner{
+    width: 18px; height: 18px; border-radius: 999px; display:inline-block;
+    border: 3px solid color-mix(in oklab, var(--fg, #e5e7eb) 30%, transparent);
+    border-top-color: var(--brand, #25d366);
+    animation: pgspin .9s linear infinite;
+  }
+  @keyframes pgspin{ to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce){
+    #page-loading .spinner{ animation: none; border-top-color: currentColor; }
+  }
+</style>
+
+<script>
+/* PageLoading global
+   Uso:
+     PageLoading.show('Carregando…', { scope: '.main' }); // cobre apenas a .main
+     PageLoading.show('Carregando…', { scope: 'body' });  // cobre a tela inteira
+     PageLoading.hide();
+*/
+(function(){
+  const OVERLAY_ID = 'page-loading';
+  const TXT_ID     = 'page-loading-text';
+
+  let count = 0;
+  let scopeEl = null;
+  let ticking = false;
+  let enabled = false;
+
+  // Controle simples de lock do scroll (com contador)
+  function lockScroll(){
+    const html = document.documentElement;
+    const n = +(html.dataset.pageLoadingLock || 0) + 1;
+    html.dataset.pageLoadingLock = String(n);
+    html.style.overflow = 'hidden';
+  }
+  function unlockScroll(){
+    const html = document.documentElement;
+    const n = Math.max(+(html.dataset.pageLoadingLock || 1) - 1, 0);
+    if (n === 0) {
+      delete html.dataset.pageLoadingLock;
+      html.style.overflow = '';
+    } else {
+      html.dataset.pageLoadingLock = String(n);
+    }
+  }
+
+  function $(sel, root){ return (root||document).querySelector(sel); }
+  function findScopeEl(optScope){
+    if (!optScope) return document.querySelector('main, .main') || document.body;
+    if (optScope === 'body') return document.body;
+    if (typeof optScope === 'string') return document.querySelector(optScope) || document.body;
+    if (optScope instanceof Element)  return optScope;
+    return document.body;
+  }
+
+  function positionOverlay(){
+    if (!enabled) return;
+    const overlay = document.getElementById(OVERLAY_ID);
+    if (!overlay || !scopeEl) return;
+
+    // fullscreen: inset:0 e sem bounding manual
+    if (scopeEl === document.body) {
+      overlay.style.inset = '0';
+      overlay.style.left = overlay.style.top = overlay.style.width = overlay.style.height = '';
+      return;
+    }
+
+    // escopo: cobre o bounding do elemento (viewport-relative)
+    const r = scopeEl.getBoundingClientRect();
+    overlay.style.inset  = ''; // evita conflito
+    overlay.style.left   = r.left  + 'px';
+    overlay.style.top    = r.top   + 'px';
+    overlay.style.width  = r.width + 'px';
+    overlay.style.height = r.height+ 'px';
+  }
+
+  function schedulePos(){
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(()=>{ positionOverlay(); ticking = false; });
+  }
+
+  function onWinChange(){ schedulePos(); }
+  function mountListeners(){
+    window.addEventListener('resize', onWinChange, { passive:true });
+    window.addEventListener('scroll', onWinChange, { passive:true });
+  }
+  function unmountListeners(){
+    window.removeEventListener('resize', onWinChange);
+    window.removeEventListener('scroll', onWinChange);
+  }
+
+  window.PageLoading = {
+    show(text = 'Carregando…', opts = {}){
+      const overlay = document.getElementById(OVERLAY_ID);
+      if (!overlay) return;
+
+      const label = document.getElementById(TXT_ID);
+      if (label) label.textContent = String(text || 'Carregando…');
+
+      scopeEl = findScopeEl(opts.scope);
+      enabled = true;
+
+      // Tema (apenas para futuras variações visuais, se precisar)
+      try{
+        const isDark = document.documentElement.classList.contains('dark');
+        overlay.setAttribute('data-theme', isDark ? 'dark' : 'light');
+      }catch{}
+
+      // Segurança visual extra
+      overlay.style.position = 'fixed';
+      overlay.style.zIndex = overlay.style.zIndex || '9999';
+
+      overlay.classList.add('show');
+      overlay.style.pointerEvents = 'auto';
+
+      mountListeners();
+      positionOverlay();
+      lockScroll();
+      return ++count;
+    },
+    hide(){
+      const overlay = document.getElementById(OVERLAY_ID);
+      if (!overlay) return;
+      if (count > 0) count--;
+
+      if (count === 0) {
+        enabled = false;
+        overlay.classList.remove('show');
+        overlay.style.pointerEvents = 'none';
+        unmountListeners();
+        unlockScroll();
+        // reset texto
+        const label = document.getElementById(TXT_ID);
+        if (label) label.textContent = 'Carregando…';
+      }
+      return count;
+    },
+    reset(){
+      count = 0;
+      this.hide();
+      return count;
+    },
+    isVisible(){
+      const overlay = document.getElementById(OVERLAY_ID);
+      return !!(overlay && overlay.classList.contains('show'));
+    },
+    setScope(nextScope){
+      if (!enabled) return;
+      scopeEl = findScopeEl(nextScope);
+      positionOverlay();
+    },
+    get count(){ return count; }
+  };
+})();
+</script>

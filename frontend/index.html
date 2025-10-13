@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Portal ZAPchats</title>
+  <script>
+    const token = localStorage.getItem('token');
+    if (token) {
+      location.href = '/inicio';
+    } else {
+      location.href = '/criar-empresa';
+    }
+  </script>
+</head>
+<body></body>
+</html>

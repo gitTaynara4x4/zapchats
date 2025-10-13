@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="has-sidebar prepaint">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Colaboradores – ZapChats</title>
+
+  <!-- Shell global + auth + guard -->
+  <script src="/frontend/js/app-base.js" defer></script>
+  <script src="/frontend/js/auth.js" defer></script>
+  <script src="/frontend/js/page-guard.js" defer></script>
+
+  <!-- Anti-flash -->
+  <style>
+    html.prepaint body{visibility:hidden}
+    html.prepaint[data-head-ready][data-loader-ready] body{visibility:visible}
+  </style>
+
+  <!-- CSS baseline + página -->
+  <link rel="stylesheet" href="/frontend/css/base.css">
+  <link rel="stylesheet" href="/frontend/css/colaboradores.css">
+  <link rel="stylesheet" href="/frontend/css/colaborador-perfil.css">
+
+  <!-- Ícones -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+</head>
+<body data-page="colaboradores">
+  <!-- Sidebar padrão -->
+  <aside id="sidebar"
+         data-src="/frontend/partials/sidebar.html"
+         data-src-mobile="/frontend/partials/sidebar-mobile.html"></aside>
+
+  <main class="main">
+    <!-- Título -->
+    <div class="section-title">
+      <h1><i class="fa fa-user-friends title-ico" aria-hidden="true"></i> Colaboradores</h1>
+    </div>
+
+    <!-- Filtros -->
+    <section class="filter" aria-label="Filtros de colaboradores">
+      <label for="filtro">Buscar:</label>
+      <input id="filtro" class="input" type="search" placeholder="Nome ou e-mail…"/>
+
+      <label for="filtro-depto">Departamento:</label>
+      <select id="filtro-depto" class="select"><option value="">Todos</option></select>
+
+      <button id="btn-filtrar" class="btn btn-ghost"><i class="fa fa-filter"></i> Filtrar</button>
+      <button id="btn-add-colaborador" class="btn btn-primary"><i class="fa fa-user-plus"></i> Novo colaborador</button>
+
+      <span class="count"><span id="count-colaboradores">0</span> colaborador(es)</span>
+    </section>
+
+    <!-- Lista -->
+    <section aria-label="Lista de colaboradores">
+      <div class="box">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th><th>Nome</th><th>E-mail</th><th>Departamento</th><th style="width:150px">Ações</th>
+              </tr>
+            </thead>
+            <tbody id="tabela-colaboradores"></tbody>
+          </table>
+        </div>
+
+        <div id="empty-state" class="empty empty-bordered">
+          <span><i class="fa fa-inbox" aria-hidden="true"></i> Nenhum colaborador para os filtros aplicados.</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ================= Modal PERFIL (visual + edição inline + criação) ================= -->
+  <div id="modal-perfil" class="modal-back" aria-hidden="true">
+    <div class="modal-card perfil-modal-card" role="dialog" aria-modal="true" aria-labelledby="perfil-title">
+      <div class="modal-head">
+        <div class="title">
+          <i class="fa-solid fa-id-badge"></i>
+          <span id="perfil-title">—</span>
+        </div>
+        <div style="display:flex;gap:.5rem;">
+          <button id="perfil-salvar" class="btn btn-primary" style="display:none"><i class="fa fa-check"></i> Salvar</button>
+          <button id="perfil-cancelar" class="btn btn-ghost" style="display:none">Cancelar</button>
+          <button id="perfil-editar" class="btn btn-primary"><i class="fa fa-pen"></i> Editar</button>
+          <button id="perfil-fechar" class="btn btn-ghost" type="button">Fechar</button>
+        </div>
+      </div>
+
+      <div class="modal-body">
+        <div class="grid-two">
+          <!-- Coluna esquerda: foto + CTA + status -->
+          <aside class="card profile-card">
+            <div class="avatar-wrap" id="avatar-wrap">
+              <img id="p-avatar" alt="Avatar">
+              <div id="p-mono">AZ</div>
+            </div>
+
+            <!-- CTA (somente no modo "novo"): texto simples + input escondido -->
+            <div id="avatar-hint" class="avatar-hint" style="display:none">
+              <div class="txt">
+                <strong>Adicione uma foto de perfil</strong>
+                <span>Ajuda o time a reconhecer você</span>
+              </div>
+              <input id="p-avatar-input" type="file" accept="image/*,.svg" hidden />
+            </div>
+
+            <!-- Status debaixo da foto -->
+            <div class="status-left">
+              <span class="status-dot" id="p-status" title="Status"></span>
+              <span id="p-status-text">Disponível</span>
+            </div>
+          </aside>
+
+          <!-- Coluna direita -->
+          <section class="card">
+            <div class="details-head">
+              <h3>Status</h3>
+            </div>
+
+            <dl class="details-grid" id="details-grid">
+              <!-- Nome (topo) -->
+              <div class="full">
+                <dt>Nome completo</dt>
+                <dd><div class="fieldbox" id="fb-nome"><span id="v-nome">—</span></div></dd>
+              </div>
+
+              <!-- Email / Empresa -->
+              <div class="half">
+                <dt>E-mail</dt>
+                <dd><div class="fieldbox" id="fb-email"><a id="v-email" href="#">—</a></div></dd>
+              </div>
+              <div class="half">
+                <dt>Empresa</dt>
+                <dd><div class="fieldbox" id="fb-empresa"><span id="v-empresa">—</span></div></dd>
+              </div>
+
+              <!-- Departamento -->
+              <div class="full">
+                <dt>Departamento</dt>
+                <dd><div class="fieldbox" id="fb-depto"><span id="v-depto">—</span></div></dd>
+              </div>
+
+              <!-- Telefone / Cargo -->
+              <div class="half">
+                <dt>Telefone</dt>
+                <dd><div class="fieldbox" id="fb-tel"><a id="v-tel" href="#">—</a></div></dd>
+              </div>
+              <div class="half">
+                <dt>Cargo</dt>
+                <dd><div class="fieldbox" id="fb-cargo"><span id="v-cargo">—</span></div></dd>
+              </div>
+
+              <!-- Permissões -->
+              <div class="full">
+                <dt>Permissões</dt>
+                <dd>
+                  <div class="chips" id="d-perms"></div>
+                  <div id="e-perms" class="perms-grid" style="display:none;margin-top:.6rem;"></div>
+                </dd>
+              </div>
+            </dl>
+          </section>
+        </div>
+      </div>
+
+      <div class="foot">
+        <div></div>
+        <button id="perfil-fechar2" class="btn btn-primary" type="button">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <!-- JS da página -->
+  <script src="/frontend/js/pages/colaboradores.js" type="module"></script>
+</body>
+</html>

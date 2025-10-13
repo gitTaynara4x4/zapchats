@@ -1,0 +1,431 @@
+/* =========================
+   Perfil do Colaborador
+   ========================= */
+
+/* Valores padrão (bons pro dark) */
+:root{
+  --border-hairline: rgba(255,255,255,.08);
+  --border-hairline-strong: rgba(255,255,255,.12);
+  --green: #008b32;
+  --green-border: #006826;
+  --green-ring: #00bd3d;
+
+  /* fallback de cores */
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --card: #111827;
+  --card2: #0b1220;
+  --border: rgba(255,255,255,.12);
+  --primary: #60a5fa;
+}
+
+/* Ajustes para o tema claro SEM arquivo extra */
+[data-theme="light"]{
+  --text: #3b3b3b;                         /* menos “preto” */
+  --muted: #6b7280;
+  --card: #ffffff;
+  --card2: #f9fafb;
+  --border: rgba(0,0,0,.12);
+  --border-hairline: rgba(0,0,0,.10);
+  --border-hairline-strong: rgba(0,0,0,.18);
+  --primary: #2563eb;
+}
+
+/* Layout */
+.grid-two{
+  display:grid;
+  grid-template-columns: 360px 1fr;
+  gap:1rem;
+  align-items:start;
+}
+@media (max-width: 980px){
+  .grid-two{ grid-template-columns:1fr; }
+}
+
+/* Cards */
+.card{
+  background: var(--card);
+  border: 1px solid var(--border-hairline);
+  border-radius: 18px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.18);
+  padding: 16px;
+  color: var(--text);
+}
+
+/* Coluna esquerda */
+.profile-card{ display:grid; gap:.8rem; align-self:start; }
+
+.avatar-wrap{
+  width:180px; height:180px;
+  border-radius:24px;
+  display:grid; place-items:center; overflow:hidden;
+  background: var(--card2, var(--card));
+  border: 1px solid var(--border-hairline);
+  justify-self:center;
+  cursor: pointer;
+}
+#p-avatar{ display:none; width:100%; height:100%; object-fit:cover; }
+#p-mono{ font-family: var(--font-display, system-ui); font-weight:600; font-size:3rem; opacity:.95; }
+
+/* Feedback drag&drop no avatar */
+.avatar-wrap.drag-over{
+  outline: 2px dashed var(--primary);
+  outline-offset: 4px;
+}
+
+/* CTA de foto (apenas no novo colaborador) — CENTRALIZADO */
+.avatar-hint{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  gap:.35rem;
+
+  border:1px dashed var(--border-hairline-strong);
+  border-radius:12px;
+  padding:.7rem .9rem;
+  background: var(--card);
+
+  width:100%;
+  max-width: 320px;
+  margin: .5rem auto 0;
+  justify-self:center;
+}
+/* Mostra somente o texto solicitado */
+.avatar-hint > i,
+#btn-add-avatar{
+  display:none !important;
+}
+.avatar-hint .txt{
+  display:grid; gap:.25rem;
+}
+.avatar-hint .txt strong{
+  font-size:.95rem; font-weight:700;
+}
+.avatar-hint .txt span{
+  font-size:.88rem; color:var(--muted);
+}
+
+/* Status embaixo da foto (com título "Status") */
+.status-left{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:.2rem;
+  flex-wrap:wrap;
+  font-weight:300;
+  opacity:.95;
+  color: var(--text);
+}
+.status-left::before{
+  content:"Status";
+  flex-basis:100%;
+  text-align:center;
+  font-size:.78rem;
+  font-weight:300;
+  opacity:.65;
+  line-height:1;
+  margin-bottom:.1rem;
+}
+.status-dot{
+  width:10px; height:10px; border-radius:9999px;
+  background: var(--green);
+  border: 1px solid var(--green-border);
+}
+
+/* Cabeçalho direita */
+.details-head{
+  display:flex; align-items:center; justify-content:space-between; gap:.6rem;
+  border-bottom:1px solid var(--border-hairline);
+  padding-bottom:10px; margin-bottom:12px;
+  color: var(--text);
+}
+.details-head h3{ margin:0; font-family: var(--font-display, system-ui); font-size:1.06rem; font-weight:600; }
+
+/* Grid de detalhes */
+.details-grid{
+  display:grid;
+  grid-template-columns: 1fr;
+  gap:12px 24px;
+  color: var(--text);
+}
+.details-grid > .full{ grid-column:1/-1; }
+@media (min-width:980px){
+  .details-grid{ grid-template-columns: repeat(2, 1fr); }
+  .details-grid > .half{ grid-column:auto; }
+  .details-grid > .full{ grid-column:1/-1; }
+}
+.details-grid dt{ font-size:.82rem; color:var(--muted); font-weight:600; margin:0 0 .35rem; }
+
+/* Caixinha (visual de input) */
+.fieldbox{
+  min-height: 40px;
+  padding: 10px 12px;
+  display:flex; align-items:center;
+  border:1px solid var(--border-hairline-strong);
+  border-radius:10px;
+  background: var(--card);
+  font-weight:500; line-height:1.25; overflow-wrap:anywhere;
+  color: var(--text);
+}
+.fieldbox a{ color:var(--text); text-decoration:none; }
+.fieldbox a:hover{ text-decoration:underline; }
+
+/* Se um <input> ficar dentro da fieldbox, removemos a borda interna para não dar “borda dupla” */
+.fieldbox .input{ border:0; background:transparent; padding:0; box-shadow:none; }
+
+/* Chips */
+.chips{ display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+.chip{
+  padding:.24rem .56rem; border-radius:9999px;
+  border:1px dashed var(--border-hairline-strong);
+  background:transparent; font-weight:500; font-size:.84rem; white-space:nowrap;
+  color: var(--text);
+}
+
+/* Ajustes do modal */
+.perfil-modal-card .modal-body{ padding:12px 16px; }
+.perfil-modal-card .card{ border-color: var(--border-hairline); }
+.perfil-modal-card .details-head{ border-color: var(--border-hairline); }
+
+@media (max-width:980px){
+  .avatar-wrap{ width:160px; height:160px; border-radius:22px; }
+}
+
+/* === Fix alinhamento dos campos no perfil === */
+.details-grid dd{ margin:0; }
+.details-grid .half > dd > *{ width:100%; }
+
+/* Normaliza altura/visual de todos os tipos (view e edição) */
+.details-grid .fieldbox,
+.details-grid .input,
+.details-grid .select{
+  box-sizing:border-box;
+  width:100%;
+  height:40px;
+  min-height:40px;
+  padding:10px 12px;
+  border-radius:10px !important;
+  border:1px solid var(--border-hairline-strong) !important;
+  background:var(--card) !important;   /* base */
+  line-height:1.25;
+  display:flex; align-items:center;
+  box-shadow:none !important;
+  color: var(--text);
+  font-weight: 400;                    /* menos pesado no light */
+}
+
+/* select costuma ter altura diferente; normaliza */
+.details-grid .select{
+  appearance:none;
+  -webkit-appearance:none;
+  padding-right:34px;
+  background-repeat:no-repeat;
+  background-position:right .6rem center;
+  background-size:12px 8px;
+  background-image:url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'>\
+<path fill='%239ca3af' d='M10.59.59 6 5.17 1.41.59 0 2l6 6 6-6z'/>\
+</svg>");
+}
+
+/* títulos com espaçamento consistente */
+.details-grid dt{
+  margin:0 0 .35rem 0;
+  font-size:.82rem; color:var(--muted); font-weight:600;
+}
+
+/* ===== Remover borda dupla quando a fieldbox vira input (edição) ===== */
+.fieldbox.is-editing{
+  border-color: transparent;
+  background: transparent;
+  padding: 0;
+}
+/* *** AQUI resolve o “bloco branco” ao digitar (telefone/cargo) *** */
+.fieldbox.is-editing .input,
+.fieldbox.is-editing .select{
+  height: 40px;
+  min-height: 40px;
+  background: transparent !important;  /* força transparente em edição */
+  border: 0 !important;
+  box-shadow: none !important;
+  color: var(--text);
+}
+
+/* ===== BOTÕES (edição) ===== */
+#modal-perfil #perfil-fechar{ display:none; } /* por padrão, esconde o "Fechar" do cabeçalho */
+
+#modal-perfil .foot #perfil-salvar-foot,
+#modal-perfil .foot #perfil-cancelar-foot{ display:none; }
+
+#modal-perfil.editing #perfil-fechar{ display:inline-flex; } /* mostra Fechar no topo em edição */
+#modal-perfil.editing #perfil-salvar,
+#modal-perfil.editing #perfil-cancelar{ display:none !important; }
+
+#modal-perfil.editing .foot #perfil-fechar2{ display:none !important; }
+#modal-perfil.editing .foot #perfil-salvar-foot,
+#modal-perfil.editing .foot #perfil-cancelar-foot{ display:inline-flex; }
+
+/* Status ainda mais leve */
+#p-status-text{ font-weight:300; }
+
+/* ==========================================
+   Erro: sublinhado vermelho nos campos inválidos
+   (só aparece quando JS adiciona .invalid)
+   ========================================== */
+:root{
+  --danger: #dc2626;
+  --danger-weak: rgba(220,38,38,.15);
+}
+
+/* inputs/selects em edição (inválidos) */
+.details-grid .input.invalid,
+.details-grid .select.invalid{
+  border-color: transparent !important;
+  box-shadow: inset 0 -2px 0 var(--danger) !important; /* sublinhado vermelho */
+  outline: none;
+  transition: box-shadow .18s ease, border-color .18s ease;
+}
+
+/* foco do campo inválido (um leve halo) */
+.details-grid .input.invalid:focus,
+.details-grid .select.invalid:focus{
+  box-shadow:
+    inset 0 -2px 0 var(--danger),
+    0 0 0 3px var(--danger-weak) !important;
+}
+
+/* se o WRAPPER (.fieldbox) for marcado inválido (ex.: select), sublinha o bloco inteiro */
+.fieldbox.invalid{
+  border-color: transparent !important;
+  box-shadow: inset 0 -2px 0 var(--danger) !important;
+  transition: box-shadow .18s ease, border-color .18s ease;
+}
+
+/* ==== Colaboradores (padrão Dashboard) ==== */
+
+.empty-bordered{
+  display:none; align-items:center; justify-content:center;
+  color:var(--muted); padding:2rem; border:1px dashed var(--border); border-radius:.9rem;
+}
+
+/* Permissões (grid reaproveitada no modal de perfil em edição) */
+.perms-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:.5rem; margin-top:.6rem; }
+.chk-line{ display:flex; gap:.45rem; align-items:center; font-weight:600; color: var(--text); }
+
+/* Lista: ações da tabela */
+.td-actions{ display:flex; gap:.45rem; }
+.td-actions .btn.btn-ghost{
+  border-radius:12px; padding:.45rem .55rem;
+}
+
+/* Tabela responsiva (mobile) */
+@media (max-width:720px){
+  tbody td:nth-child(1)::before{ content:"#"; }
+  tbody td:nth-child(2)::before{ content:"Nome"; }
+  tbody td:nth-child(3)::before{ content:"E-mail"; }
+  tbody td:nth-child(4)::before{ content:"Departamento"; }
+  tbody td:nth-child(5)::before{ content:"Ações"; }
+  tbody td::before{
+    color:var(--muted); font-weight:600; display:block; margin-bottom:.25rem;
+  }
+}
+
+/* ===== MODAL PERFIL (visualização + edição inline + criação) ===== */
+#modal-perfil.modal-back{
+  position: fixed; inset: 0; display: none; place-items: center;
+  background: var(--overlay, rgba(0,0,0,.55)); z-index: 2147483000; padding: 16px;
+}
+#modal-perfil[aria-hidden="false"]{ display: grid; }
+#modal-perfil .modal-card{
+  width: min(1060px, 100%);
+  max-height: min(90vh, 980px);
+  display: flex; flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 20px 70px rgba(0,0,0,.45);
+  overflow: hidden;
+  color: var(--text);
+}
+#modal-perfil .modal-head{
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 14px 16px; gap:.8rem; border-bottom:1px solid var(--border);
+  color: var(--text);
+}
+#modal-perfil .modal-body{ padding: 12px 16px; overflow: auto; }
+#modal-perfil .foot{
+  display:flex; align-items:center; justify-content:flex-end;
+  gap:.6rem; padding: 12px 16px; border-top:1px solid var(--border);
+}
+
+/* trava scroll do body quando modal aberto */
+html.modal-open{ overflow: hidden; }
+
+/* Mobile: usa mais altura e borda menor */
+@media (max-width: 720px){
+  #modal-perfil .modal-card{
+    width: 100%; max-height: 92vh; border-radius: 10px;
+  }
+}
+
+/* ===== Toast ===== */
+#toast{
+  position: fixed; top: 16px; right: 16px; z-index: 2147483647;
+  min-width: 260px; max-width: min(420px, 90vw);
+  padding: 12px 14px; border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35); color: #fff;
+  display: grid; grid-auto-flow: column; gap: 10px; align-items: center;
+  pointer-events: none; opacity: 0; transform: translateY(-8px);
+  transition: opacity .22s ease, transform .22s ease;
+  background: transparent;
+}
+#toast.toast-ok   { background:#065f46; }
+#toast.toast-warn { background:#78350f; }
+#toast.toast-err  { background:#7f1d1d; }
+#toast.show{ opacity:1; transform: translateY(0); }
+#toast i { opacity:.95; }
+#toast .toast-msg{ line-height: 1.25; white-space: pre-line; font-weight: 600; }
+@media (prefers-reduced-motion: reduce){ #toast{ transition: none; } }
+
+/* esconde o "Fechar" do cabeçalho (só aparece em edição) */
+#modal-perfil #perfil-fechar{
+  display: none !important;
+}
+
+/* NOVO: Avatar clicável + feedback drag&drop */
+.avatar-wrap { cursor: pointer; }
+.avatar-wrap.drag-over {
+  outline: 2px dashed var(--primary);
+  outline-offset: 4px;
+}
+.avatar-hint .txt { display: grid; gap: .2rem; }
+
+/* ====== ZapChats: botões do MODAL em verde + caret ====== */
+.perfil-modal-card .btn.btn-primary,
+#modal-perfil .btn.btn-primary{
+  background: var(--green) !important;
+  border-color: var(--green-border) !important;
+  color:#fff !important;
+}
+.perfil-modal-card .btn.btn-primary i,
+#modal-perfil .btn.btn-primary i{ color:#fff !important; }
+.perfil-modal-card .btn.btn-primary:focus-visible,
+#modal-perfil .btn.btn-primary:focus-visible{
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--green-ring) 35%, transparent);
+}
+
+/* Caret nos selects do modal */
+.perfil-modal-card .select,
+#modal-perfil .select{
+  appearance:none; -webkit-appearance:none;
+  padding-right: 2rem;
+  background-repeat: no-repeat;
+  background-position: right .6rem center;
+  background-size: 12px 8px;
+  background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'>\
+<path fill='%239ca3af' d='M10.59.59 6 5.17 1.41.59 0 2l6 6 6-6z'/>\
+</svg>");
+}
