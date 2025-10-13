@@ -6,21 +6,25 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Dependências nativas se precisar compilar libs
+# libs nativas mínimas (psycopg2 usa libpq)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential && rm -rf /var/lib/apt/lists/*
+    libpq5 ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+# deps python
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copia o projeto
-COPY . /app
+# código
+COPY . .
 
-# Usuário não-root
-RUN useradd -ms /bin/bash appuser
-USER appuser
+# garantir imports "backend.main:app"
+ENV PYTHONPATH=/app \
+    ENV=prod
 
-# ...
+# pasta para uploads (se você monta volume aqui, mantém dados entre deploys)
+RUN mkdir -p /app/uploads
+
 EXPOSE 8000
-ENV PYTHONPATH=/app
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
