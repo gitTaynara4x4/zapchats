@@ -1,14 +1,21 @@
-fastapi[all]
-psycopg2-binary
-sqlalchemy
-python-dotenv
-uvicorn
+cd "C:\Users\Taynara\Documents\Zapchats"
+
+# se já existir requirements.txt, só garanta estas linhas dentro dele:
+@"
 fastapi
 uvicorn[standard]
-sqlalchemy
-psycopg2-binary
 python-dotenv
-bcrypt
-PyJWT
-python-slugify
-requests
+SQLAlchemy>=2.0
+psycopg2-binary
+passlib[bcrypt]
+python-jose[cryptography]
+aio-pika
+httpx
+"@ | Set-Content -Encoding utf8 requirements.txt
+
+# garante que o pacote backend é “importável”
+if (!(Test-Path backend\__init__.py)) { ni backend\__init__.py -Force | Out-Null }
+
+git add requirements.txt backend/__init__.py
+git commit -m "chore: add dependencies (passlib, jose etc.)"
+git push
