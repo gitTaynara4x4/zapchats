@@ -20,6 +20,7 @@ COPY . /app
 RUN useradd -ms /bin/bash appuser
 USER appuser
 
+# ...
 EXPOSE 8000
-# Ajuste "main:app" para o caminho correto (ex.: backend.main:app)
+ENV PYTHONPATH=/app
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
