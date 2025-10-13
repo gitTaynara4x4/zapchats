@@ -10,18 +10,21 @@ ENV PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+# libs mínimas (psycopg2 usa libpq)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 ca-certificates curl && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+# venv para cachear dependências
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt \
-    && pip install "gunicorn>=21.2" "uvicorn[standard]>=0.30"
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt && \
+    pip install "gunicorn>=21.2" "uvicorn[standard]>=0.30"
 
 ########################
 # 2) Runtime
@@ -32,22 +35,31 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     ENV=prod \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    # <- ajuste aqui se quiser trocar o caminho do cache
+    MEDIA_CACHE_DIR=/var/cache/zapchats
 
+# libs runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 ca-certificates curl && \
     rm -rf /var/lib/apt/lists/*
 
+# venv do builder
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 COPY . .
 
+# pastas necessárias + __init__ do backend
 RUN mkdir -p /app/uploads && \
     [ -f backend/__init__.py ] || printf "" > backend/__init__.py
 
-RUN useradd -r -s /sbin/nologin appuser && chown -R appuser:appuser /app
+# **cria e dá permissão nas pastas que o app escreve**
+RUN mkdir -p /var/cache/zapchats /app/uploads && \
+    groupadd -r appuser && useradd -r -g appuser -s /sbin/nologin appuser && \
+    chown -R appuser:appuser /var/cache/zapchats /app
+
 USER appuser
 
 EXPOSE 8000
@@ -55,4 +67,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8000/healthz || exit 1
 
+# Produção: gunicorn com worker do uvicorn
 CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "-w", "2", "-b", "0.0.0.0:8000", "--timeout", "120", "backend.main:app"]
