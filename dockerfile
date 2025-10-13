@@ -20,6 +20,6 @@ COPY . /app
 RUN useradd -ms /bin/bash appuser
 USER appuser
 
-EXPOSE 2011
+EXPOSE 8000
 # Ajuste "main:app" para o caminho correto (ex.: backend.main:app)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "2011"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
