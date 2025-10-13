@@ -1,21 +1,15 @@
-cd "C:\Users\Taynara\Documents\Zapchats"
+fastapi>=0.110
+uvicorn[standard]>=0.30
+python-dotenv>=1.0
 
-# se já existir requirements.txt, só garanta estas linhas dentro dele:
-@"
-fastapi
-uvicorn[standard]
-python-dotenv
 SQLAlchemy>=2.0
-psycopg2-binary
-passlib[bcrypt]
-python-jose[cryptography]
-aio-pika
-httpx
-"@ | Set-Content -Encoding utf8 requirements.txt
+psycopg2-binary>=2.9
 
-# garante que o pacote backend é “importável”
-if (!(Test-Path backend\__init__.py)) { ni backend\__init__.py -Force | Out-Null }
+# Auth / JWT / senha
+passlib[bcrypt]>=1.7
+python-jose[cryptography]>=3.3
+python-multipart>=0.0.9
 
-git add requirements.txt backend/__init__.py
-git commit -m "chore: add dependencies (passlib, jose etc.)"
-git push
+# Integrações/async
+aio-pika>=9.4
+httpx>=0.27
