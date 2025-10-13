@@ -16,4 +16,14 @@ reportlab==4.4.4
 Requests==2.32.5
 SQLAlchemy==1.4.54
 starlette==0.48.0
-psycopg2-binary==2.9.9
+
+
+# novo p/ validar e-mails do Pydantic:
+email-validator==2.1.1
+
+# (recomendado) runtime/http server explícitos:
+uvicorn[standard]==0.30.6
+gunicorn==23.0.0
+
+# (provável que você use upload de arquivos em FastAPI)
+python-multipart==0.0.9
