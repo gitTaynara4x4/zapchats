@@ -202,11 +202,11 @@
 
       // nome pode vir como "apelido", "instance_name", "slug", etc.
       const slugLike = String(i.instance_name ?? i.slug ?? '').trim();
-      const nome = String(
+      const preferido =
         i.apelido ?? i.nome ?? i.name ?? i.alias ?? i.label ??
-        i.sessionName ?? i.instance ?? i.titulo ?? slugLike || (id ? `Instância ${id}` : '')
-      ).trim();
+        i.sessionName ?? i.instance ?? i.titulo ?? slugLike;
 
+      const nome = (preferido ? String(preferido).trim() : '') || (id ? `Instância ${id}` : '');
       // número também muda de chave em APIs diferentes
       const numero = String(
         i.numero_instancia ?? i.numero ?? i.number ?? i.phone ??
@@ -903,7 +903,9 @@
     }catch(e){
       console.error(e);
       toast(e?.data?.detail || 'Não foi possível remover.','err');
-    }finally{ Loader.hide(); }
+    }finally{
+      Loader.hide();
+    }
   }
 
   // ===== Whats (UI) =====

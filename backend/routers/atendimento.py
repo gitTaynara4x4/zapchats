@@ -500,10 +500,11 @@ def listar_conversas(
         cached = _cache_get_json(cache_key)
         if cached:
             deleted_set = set(_cache_get_json(_k_deleted(empresa_id)) or [])
-            # pins por usuário (DB -> cache) OU fallback Redis (global)
-            pins_user = _pins_get_cached(db, empresa_id=int(empresa_id), user_id=int(user.id)) if _has_model_pinned() else set()
-            if not pins_user:
-                pins_user = set(_cache_get_json(_k_pin(empresa_id)) or [])  # legado (global)
+            # pins por usuário (se houver tabela) senão fallback Redis global
+            if _has_model_pinned():
+                pins_user = _pins_get_cached(db, int(empresa_id), int(user.id))
+            else:
+                pins_user = set(_cache_get_json(_k_pin(empresa_id)) or [])
 
             items = [it for it in cached.get("items", []) if int(it["cliente_id"]) not in deleted_set]
             for it in items:
@@ -574,9 +575,10 @@ def listar_conversas(
 
         # flags
         deleted_set = set(_cache_get_json(_k_deleted(empresa_id)) or [])
-        pins_user = _pins_get_cached(db, empresa_id=int(empresa_id), user_id=int(user.id)) if _has_model_pinned() else set()
-        if not pins_user:
-            pins_user = set(_cache_get_json(_k_pin(empresa_id)) or [])  # legado
+        if _has_model_pinned():
+            pins_user = _pins_get_cached(db, int(empresa_id), int(user.id))
+        else:
+            pins_user = set(_cache_get_json(_k_pin(empresa_id)) or [])
 
         # Monta na mesma ordem do page set
         items = []
@@ -872,6 +874,10 @@ def fixar_conversa(
             if int(cliente_id) in s:
                 s.discard(int(cliente_id))
                 _pins_put_cached(int(empresa_id), int(user.id), s)
+
+        # limpa chave global legada para evitar “ressuscitar” pins antigos
+        _cache_del(_k_pin(empresa_id))
+
     else:
         # fallback legado (global, Redis) — mantém compat até criar a tabela
         pinned = set(_cache_get_json(_k_pin(empresa_id)) or [])
@@ -1038,4 +1044,4 @@ def etiquetar_conversa(
                                        empresa_id=empresa_id))
     except Exception:
         pass
-    return {"ok": True, "labels": labels, "labels_ex": [{"name": s, "color_hex": None} for s in labels]}
+    return {"ok": True, "labels": labels, "labels_ex": [{"name": s, "color_hex": None} for s in labels]} 
