@@ -52,8 +52,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /app
 COPY . .
 
-# Falhar se houver marcadores de merge no código copiado
-RUN ! grep -R -nE '<<<<<<<|=======|>>>>>>>' -- . || (echo '❌ Merge markers encontrados. Corrija antes do build.' && exit 1)
+# Falhar se houver marcadores de merge no código copiado (ancorado + exclui dirs ruidosos)
+RUN ! grep -R -nE '^(<{7}( |$)|={7}$|>{7}( |$))' \
+      --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build -- . \
+    || (echo '❌ Merge markers encontrados. Corrija antes do build.' && exit 1)
 
 # garantir pacote e pastas de escrita
 RUN mkdir -p /app/uploads "${MEDIA_CACHE_DIR}" && \
