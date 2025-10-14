@@ -5,7 +5,8 @@
 ########################
 FROM python:3.12-slim AS builder
 
-ENV PIP_NO_CACHE_DIR=1 \
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -31,7 +32,8 @@ RUN pip install --upgrade pip && \
 ########################
 FROM python:3.12-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     ENV=prod \
@@ -49,6 +51,9 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 COPY . .
+
+# Falhar se houver marcadores de merge no código copiado
+RUN ! grep -R -nE '<<<<<<<|=======|>>>>>>>' -- . || (echo '❌ Merge markers encontrados. Corrija antes do build.' && exit 1)
 
 # garantir pacote e pastas de escrita
 RUN mkdir -p /app/uploads "${MEDIA_CACHE_DIR}" && \
