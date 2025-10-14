@@ -1,10 +1,7 @@
 from __future__ import annotations
 from typing import Any, Dict, Optional
-from datetime import time as dtime
-import os
-import logging
-import traceback
 
+from datetime import time as dtime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, and_
 from sqlalchemy.orm import Session
@@ -12,13 +9,18 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.database import get_db
 from backend import models
+import os
+import uuid
+import json
+import time as _time
+import logging
 
 router = APIRouter(prefix="/api/chatbot", tags=["ChatBot – Config"])
 
 # =========================
 # logging
 # =========================
-_LOGLEVEL = os.getenv("CHATBOT_CFG_LOGLEVEL", "INFO").upper()
+_LOGLEVEL = os.getenv("CHATBOT_CONFIG_LOGLEVEL", "INFO").upper()
 logger = logging.getLogger("chatbot_config")
 if not logger.handlers:
     logging.basicConfig(
@@ -28,13 +30,29 @@ if not logger.handlers:
 logger.setLevel(getattr(logging, _LOGLEVEL, logging.INFO))
 
 
-def _fmt_err(e: Exception) -> str:
-    base = f"{e.__class__.__name__}: {e}"
+def _ctx_str(**k) -> str:
+    safe = []
+    for key, val in k.items():
+        if key in ("empresa_id", "instancia_id", "cid"):
+            safe.append(f"{key}={val}")
+        else:
+            # não poluir log com tudo
+            try:
+                s = str(val)
+                if len(s) > 64:
+                    s = s[:61] + "..."
+                safe.append(f"{key}={s}")
+            except Exception:
+                safe.append(f"{key}=?")
+    return " | " + " ".join(safe)
+
+
+def _json_preview(obj: Any, limit: int = 1200) -> str:
     try:
-        tb = "".join(traceback.format_exception(type(e), e, e.__traceback__))[-800:]
-        return f"{base}\n{tb}"
+        s = json.dumps(obj, ensure_ascii=False)
+        return s if len(s) <= limit else (s[:limit] + "…")
     except Exception:
-        return base
+        return "<json-fail>"
 
 
 # =========================
@@ -55,6 +73,10 @@ def _exclusive_server_guard(cfg: Dict[str, Any]) -> None:
     dp_enabled = bool(dp.get("enabled"))
 
     if au_enabled and dp_enabled:
+        logger.info(
+            "EXCLUSIVE guard: auto_messages priorizado; desabilitando auto_messages_departments%s",
+            _ctx_str(),
+        )
         dp["enabled"] = False
 
 
@@ -129,12 +151,13 @@ def _prune_for_storage(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if ad_enabled and "setores" in cfg:
         data["setores"] = cfg["setores"]
 
+    logger.debug("PRUNE result=%s", _json_preview(data))
     return data
 
 
 def _safe_select_chatbot_config(db: Session, empresa_id: int, instancia_id: int):
     try:
-        return db.execute(
+        row = db.execute(
             select(models.ChatbotConfig).where(
                 and_(
                     models.ChatbotConfig.empresa_id == empresa_id,
@@ -142,8 +165,17 @@ def _safe_select_chatbot_config(db: Session, empresa_id: int, instancia_id: int)
                 )
             )
         ).scalar_one_or_none()
+        logger.debug(
+            "SELECT chatbot_config ok%s",
+            _ctx_str(empresa_id=empresa_id, instancia_id=instancia_id, has=bool(row)),
+        )
+        return row
     except Exception as e:
-        logger.warning("[CHATBOT_CONFIG] select falhou: %s", _fmt_err(e))
+        logger.warning(
+            "SELECT chatbot_config falhou%s err=%s",
+            _ctx_str(empresa_id=empresa_id, instancia_id=instancia_id),
+            repr(e),
+        )
         return None
 
 
@@ -158,9 +190,7 @@ def _parse_hhmm(val: Optional[str]) -> Optional[dtime]:
         return None
     try:
         h, m = map(int, s.split(":", 1))
-        if 0 <= h <= 23 and 0 <= m <= 59:
-            return dtime(h, m)
-        return None
+        return dtime(h, m)
     except Exception:
         return None
 
@@ -189,7 +219,7 @@ def _extract_auto_fields(cfg_in: Dict[str, Any]) -> dict:
     w = am.get("welcome", {}) or {}
     o = am.get("off_hours", {}) or {}
 
-    return {
+    fields = {
         "tz": _tz_from_config(cfg_in),
         "welcome_enabled": bool(w.get("enabled", False)),
         "welcome_start": _parse_hhmm(w.get("start")),
@@ -198,35 +228,28 @@ def _extract_auto_fields(cfg_in: Dict[str, Any]) -> dict:
         "off_start": _parse_hhmm(o.get("start")),
         "off_end": _parse_hhmm(o.get("end")),
     }
+    logger.debug("EXTRACT columns=%s", fields)
+    return fields
 
 
 def _apply_columns_from_config(row: models.ChatbotConfig, cfg_in: Dict[str, Any]) -> None:
     """
     Aplica os campos extraídos do JSON nas colunas do modelo.
-    • Quando uma seção estiver OFF, zera start/end (evita violações).
     """
     fields = _extract_auto_fields(cfg_in)
 
-    # timezone (se sua coluna for NOT NULL e você quiser fallback garantido, descomente a linha seguinte)
-    row.tz = fields["tz"]  # or os.getenv("APP_TZ") or os.getenv("TZ") or "Etc/UTC"
+    # timezone (pode ser None se não veio)
+    row.tz = fields["tz"]
 
     # welcome
     row.welcome_enabled = fields["welcome_enabled"]
-    if row.welcome_enabled:
-        row.welcome_start = fields["welcome_start"]
-        row.welcome_end = fields["welcome_end"]
-    else:
-        row.welcome_start = None
-        row.welcome_end = None
+    row.welcome_start   = fields["welcome_start"]
+    row.welcome_end     = fields["welcome_end"]
 
     # off-hours
-    row.off_enabled = fields["off_enabled"]
-    if row.off_enabled:
-        row.off_start = fields["off_start"]
-        row.off_end = fields["off_end"]
-    else:
-        row.off_start = None
-        row.off_end = None
+    row.off_enabled     = fields["off_enabled"]
+    row.off_start       = fields["off_start"]
+    row.off_end         = fields["off_end"]
 
 
 # =========================
@@ -242,12 +265,16 @@ def get_config(
     Retorna exatamente o que está no banco (ou {} se não houver).
     NÃO faz merge com defaults. O front aplica seus próprios defaults.
     """
+    cid = str(uuid.uuid4())
+    t0 = _time.perf_counter()
+    logger.info("GET /api/chatbot/config begin%s", _ctx_str(cid=cid, empresa_id=empresa_id, instancia_id=instancia_id))
+
     row = _safe_select_chatbot_config(db, empresa_id, instancia_id)
     cfg_raw = row.config if row and getattr(row, "config", None) else {}
-    logger.info(
-        "GET /api/chatbot/config emp=%s inst=%s -> has=%s",
-        empresa_id, instancia_id, bool(cfg_raw),
-    )
+    logger.debug("GET config raw=%s%s", _json_preview(cfg_raw), _ctx_str(cid=cid))
+
+    dt = (_time.perf_counter() - t0) * 1000
+    logger.info("GET /api/chatbot/config ok in %.1fms%s", dt, _ctx_str(cid=cid))
     return {"empresa_id": empresa_id, "instancia_id": instancia_id, "config": cfg_raw or {}}
 
 
@@ -264,35 +291,33 @@ def put_config(
 
     O front continua mandando: { "config": { features: { auto_messages: {...} } } }.
     """
-    logger.info("PUT /api/chatbot/config emp=%s inst=%s", empresa_id, instancia_id)
+    cid = str(uuid.uuid4())
+    t0 = _time.perf_counter()
+    logger.info("PUT /api/chatbot/config begin%s", _ctx_str(cid=cid, empresa_id=empresa_id, instancia_id=instancia_id))
+    logger.debug("PUT payload=%s%s", _json_preview(payload), _ctx_str(cid=cid))
 
     if not isinstance(payload, dict) or "config" not in payload:
-        logger.warning("PUT config payload inválido: sem 'config'")
+        logger.warning("PUT invalid payload (sem 'config')%s", _ctx_str(cid=cid))
         raise HTTPException(status_code=400, detail="Envie um objeto { config: {...} }")
 
     cfg_in = payload.get("config") or {}
     if not isinstance(cfg_in, dict):
-        logger.warning("PUT config campo 'config' não é objeto")
+        logger.warning("PUT invalid 'config' type%s", _ctx_str(cid=cid))
         raise HTTPException(status_code=400, detail="Campo 'config' inválido")
 
-    # 1) Exclusividade entre blocos (server-side safety)
+    # 1) Exclusividade entre blocos
     _exclusive_server_guard(cfg_in)
 
     # 2) Reduz o que será guardado no JSON
     to_store = _prune_for_storage(cfg_in)
-
-    logger.debug(
-        "PUT config (sanitized): ativo=%s au=%s ad=%s",
-        cfg_in.get("ativo", None),
-        bool(to_store.get("features", {}).get("auto_messages")),
-        bool(to_store.get("features", {}).get("auto_messages_departments")),
-    )
+    logger.debug("PUT to_store=%s%s", _json_preview(to_store), _ctx_str(cid=cid))
 
     # 3) Upsert + refletir colunas
     row = _safe_select_chatbot_config(db, empresa_id, instancia_id)
     creating = row is None
 
     if creating:
+        logger.info("PUT creating row%s", _ctx_str(cid=cid))
         row = models.ChatbotConfig(
             empresa_id=empresa_id,
             instancia_id=instancia_id,
@@ -302,6 +327,7 @@ def put_config(
         _apply_columns_from_config(row, cfg_in)
         db.add(row)
     else:
+        logger.info("PUT updating row%s", _ctx_str(cid=cid))
         row.config = to_store
         row.ativo = bool(cfg_in.get("ativo", row.ativo))
         _apply_columns_from_config(row, cfg_in)
@@ -310,29 +336,23 @@ def put_config(
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        msg = f"Falha ao salvar config (violação de integridade)."
-        logger.error("%s emp=%s inst=%s err=%s", msg, empresa_id, instancia_id, _fmt_err(e))
-        # devolve detalhes úteis pro front formatar
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "message": msg,
-                "db_error": str(getattr(e, "orig", e)),
-            },
-        )
+        logger.error("PUT commit IntegrityError%s err=%s", _ctx_str(cid=cid), repr(e))
+        raise HTTPException(status_code=400, detail=f"Falha ao salvar config: {e.orig}")
     except Exception as e:
         db.rollback()
-        msg = "Erro inesperado ao salvar config."
-        logger.exception("%s emp=%s inst=%s err=%s", msg, empresa_id, instancia_id, _fmt_err(e))
-        raise HTTPException(
-            status_code=500,
-            detail={"message": msg, "error": str(e)},
-        )
+        logger.exception("PUT commit Exception%s", _ctx_str(cid=cid))
+        raise HTTPException(status_code=500, detail=f"Erro ao salvar config: {repr(e)}")
 
     try:
         db.refresh(row)
     except Exception:
         pass
 
-    logger.info("PUT config OK emp=%s inst=%s creating=%s", empresa_id, instancia_id, creating)
+    dt = (_time.perf_counter() - t0) * 1000
+    logger.info(
+        "PUT /api/chatbot/config ok in %.1fms%s",
+        dt,
+        _ctx_str(cid=cid, created=creating, ativo=row.ativo, tz=row.tz),
+    )
+    logger.debug("PUT final config stored=%s%s", _json_preview(row.config or {}), _ctx_str(cid=cid))
     return {"empresa_id": empresa_id, "instancia_id": instancia_id, "config": row.config or {}}

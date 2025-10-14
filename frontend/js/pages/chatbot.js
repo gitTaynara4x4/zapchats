@@ -1,76 +1,30 @@
-// Chatbot Config – UX limpa: sem alerts, sem logs no console, toasts/modais bonitos.
+// Chatbot — acordeões fechados; tudo OFF por padrão; master ON abre acordeão;
+// dropdown de instâncias ao lado de “Funcionalidades”; switches com preventDefault.
 (() => {
   'use strict';
 
+  // ===== debug/log =====
+  const DEBUG = (window.DEBUG_CHATBOT ?? true);
+  const log   = (...a)=>{ if(DEBUG) console.debug('[CHATBOT_CFG]', ...a); };
+  const warn  = (...a)=>{ if(DEBUG) console.warn('[CHATBOT_CFG]', ...a); };
+  const error = (...a)=>{ console.error('[CHATBOT_CFG]', ...a); };
+
   // ===== sessão/fetch =====
   const LS = localStorage;
-  const EMPRESA_ID   = () => Number(LS.getItem('empresa_id') || 0);
-  const EMPRESA_NOME = () => (LS.getItem('empresa_nome') || '[Empresa]').trim();
-  const TOKEN        = () => LS.getItem('token') || LS.getItem('auth_token') || '';
+  const getEmpresaId   = () => Number(LS.getItem('empresa_id') || 0);
+  const getEmpresaNome = () => (LS.getItem('empresa_nome') || '[Nome da Empresa]').trim();
+  const getToken       = () => LS.getItem('token') || LS.getItem('auth_token') || '';
+
   async function authFetch(input, init = {}) {
-    const t = TOKEN();
+    const t = getToken();
     const headers = { ...(init.headers||{}), ...(t ? { Authorization: `Bearer ${t}` } : {}) };
-    return fetch(input, { ...init, headers, credentials: 'include' });
-  }
-
-  // ===== helpers UI =====
-  function ce(tag, cls){ const el=document.createElement(tag); if(cls) el.className=cls; return el; }
-  function ensureToastHost(){
-    let host=document.getElementById('toast-host');
-    if(!host){
-      host=ce('div','toast-host');
-      host.id='toast-host';
-      host.style.position='fixed';
-      host.style.right='16px';
-      host.style.top='16px';
-      host.style.zIndex='99999';
-      host.style.display='flex';
-      host.style.flexDirection='column';
-      host.style.gap='8px';
-      document.body.appendChild(host);
-    }
-    return host;
-  }
-  function toast(msg, kind='success'){
-    const host=ensureToastHost();
-    const box=ce('div','toast');
-    box.style.minWidth='280px';
-    box.style.maxWidth='440px';
-    box.style.padding='12px 14px';
-    box.style.borderRadius='12px';
-    box.style.boxShadow='0 8px 28px rgba(0,0,0,.25)';
-    box.style.color= (kind==='error'?'#fff':'#0f172a');
-    box.style.background = (kind==='error'?'#ef4444':'#c7d2fe');
-    box.style.font='14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-    box.textContent = msg;
-    host.appendChild(box);
-    setTimeout(()=>{ box.style.opacity='0'; box.style.transform='translateY(-6px)'; setTimeout(()=>box.remove(), 260); }, 2600);
-  }
-  function showErrorModal(title, message){
-    let overlay=ce('div'); overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100000;display:flex;align-items:center;justify-content:center';
-    const card=ce('div'); card.style.cssText='width:min(560px,92vw);background:#0b0b13;color:#e5e7eb;border:1px solid #1f2937;border-radius:16px;padding:18px 18px 14px;box-shadow:0 10px 40px rgba(0,0,0,.45)';
-    const h=ce('div'); h.style.cssText='font-weight:700;font-size:16px;margin-bottom:8px'; h.textContent=title||'Erro';
-    const p=ce('pre'); p.style.cssText='white-space:pre-wrap;margin:0;background:#0f172a;border:1px solid #1f2937;border-radius:10px;padding:10px;max-height:38vh;overflow:auto;font-size:12px'; p.textContent=message||'';
-    const footer=ce('div'); footer.style.cssText='display:flex;justify-content:flex-end;margin-top:12px';
-    const ok=ce('button'); ok.textContent='OK'; ok.style.cssText='padding:8px 14px;border-radius:10px;background:#c7d2fe;color:#111827;border:0;font-weight:600;cursor:pointer';
-    ok.addEventListener('click',()=>overlay.remove());
-    footer.appendChild(ok);
-    card.append(h,p,footer);
-    overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
-    overlay.appendChild(card);
-    document.body.appendChild(overlay);
-  }
-
-  function humanizeErrorDetail(detail){
-    try{
-      if(typeof detail === 'string') return detail;
-      if(detail && typeof detail === 'object'){
-        if(detail.message && detail.db_error) return `${detail.message}\n\n${detail.db_error}`;
-        if(detail.message) return detail.message;
-        return JSON.stringify(detail, null, 2);
-      }
-    }catch{}
-    return String(detail||'Erro desconhecido');
+    const url = (typeof input === 'string') ? input : (input?.toString?.() || '<obj>');
+    const t0 = performance.now();
+    log('fetch→', url, { method: init.method || 'GET' });
+    const resp = await fetch(input, { ...init, headers, credentials: 'include' });
+    const dt = (performance.now() - t0).toFixed(1);
+    log('fetch✓', url, resp.status, `${dt}ms`);
+    return resp;
   }
 
   // ===== dropdown de instâncias =====
@@ -79,16 +33,8 @@
   const instMenu  = document.getElementById('inst-menu-chat');
   const instList  = document.getElementById('instMenuListChat');
 
-  function getActiveInstId(){
-    const raw = window.__INST_ID ?? '';
-    const id = Number(String(raw).replace(/\D/g,''));
-    return Number.isFinite(id) && id > 0 ? id : 0;
-  }
-  function requireActiveInstId(){
-    const id = getActiveInstId();
-    if(!id) throw new Error('INST_REQUIRED');
-    return id;
-  }
+  function getActiveInstId(){ const raw = window.__INST_ID ?? ''; const id = Number(String(raw).replace(/\D/g,'')); return Number.isFinite(id)&&id>0? id:0; }
+  function requireActiveInstId(){ const id = getActiveInstId(); if(!id) throw new Error('INST_REQUIRED'); return id; }
   function lockUI(locked,msg){
     const controls = document.querySelectorAll('.tswitch input, textarea, input[type="time"], #saveAuto, #saveDept, button, select');
     controls.forEach(el=>el.disabled=!!locked);
@@ -101,6 +47,7 @@
         document.querySelector('.section-title')?.after(banner);
       } else banner.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> ${msg||'Selecione uma instância para configurar o chatbot.'}`;
     } else if(banner){ banner.remove(); }
+    log('lockUI', locked, msg || '');
   }
 
   // ===== refs =====
@@ -132,7 +79,7 @@
   const saveAuto = document.getElementById('saveAuto');
   const cancelAuto = document.getElementById('cancelAuto');
 
-  // Departamentos
+  // ===== Departamentos (Boas-vindas única) =====
   const headAutoDept = document.querySelector('[data-toggle="auto-dept"]');
   const bodyAutoDept = document.getElementById('body-auto-dept');
   const saveDept = document.getElementById('saveDept');
@@ -186,20 +133,22 @@
   async function getDepartamentos(){
     if(_deptCache) return _deptCache;
     const url = new URL('/api/atendimento/clientes/departamentos', location.origin);
-    url.searchParams.set('empresa_id', String(EMPRESA_ID()));
+    url.searchParams.set('empresa_id', String(getEmpresaId()));
     const r = await authFetch(url.toString());
-    if(!r.ok){ _deptCache=[]; return _deptCache; }
+    if(!r.ok){ _deptCache=[]; warn('departamentos GET !ok', r.status); return _deptCache; }
     const j = await r.json();
     _deptCache = Array.isArray(j) ? j : (Array.isArray(j?.items) ? j.items : []);
+    log('departamentos loaded', _deptCache.length);
     return _deptCache;
   }
 
+  // exemplo padrão solicitado (com numeração)
   function buildDeptWelcomeExample(list){
-    const empresa = EMPRESA_NOME();
+    const empresa = getEmpresaNome();
     const header = [
       `Olá. Seja bem-vindo(a) à ${empresa}.`,
       `Em que setor deseja atendimento?`,
-      ``,
+      ``
     ];
     let nomes;
     if(Array.isArray(list)&&list.length){
@@ -210,7 +159,7 @@
         'Suporte Técnico',
         'Cobrança/Financeiro',
         'Agendamentos/Instalação',
-        'Ouvidoria/Atendimento humano',
+        'Ouvidoria/Atendimento humano'
       ];
     }
     const linhas = nomes.map((n,i)=> `${i+1} - ${n}`);
@@ -254,6 +203,7 @@
       const depts=await getDepartamentos();
       targetTextarea.value = buildDeptWelcomeExample(depts);
       targetTextarea.dispatchEvent(new Event('input',{bubbles:true}));
+      log('dept exemplo gerado');
     });
     shelf.appendChild(gen);
 
@@ -267,6 +217,7 @@
     body.style.opacity = open ? '1' : '0';
     body.style.pointerEvents = open ? 'auto' : 'none';
     body.setAttribute('aria-hidden', open ? 'false' : 'true');
+    log('accordion', head?.dataset?.toggle || head?.id, open);
   }
   function bindAccordion(head, body){ head?.addEventListener('click',()=>{ const open=head.getAttribute('aria-expanded')==='true'; setAccordionOpen(head,body,!open); }); }
 
@@ -283,6 +234,8 @@
     const masterDeptOn = getSwitch(swDeptHdr);
     const deptWOn = masterDeptOn && getSwitch(swDeptWelcome);
     if(schedDeptWelcome) schedDeptWelcome.classList.toggle('show', deptWOn);
+
+    log('schedVisibility', { masterAutoOn, welcomeOn, offOn, masterDeptOn, deptWOn });
   }
   function setAutoChildrenEnabled(enabled){
     swWelcome?.classList.toggle('disabled',!enabled);
@@ -321,6 +274,7 @@
       setAccordionOpen(headAuto,bodyAuto,true);
       setAutoChildrenEnabled(true); setDeptChildrenEnabled(false);
       renderWelcomePreview(); renderOffPreview(); updateSaveButtons(); updateScheduleVisibility();
+      log('exclusive→auto');
     }else if(which==='dept'){
       setHeaderSwitch(swDeptHdr,pillDeptHdr,true);
       setHeaderSwitch(swAutoHdr,pillAutoHdr,false);
@@ -333,6 +287,7 @@
       setAccordionOpen(headAutoDept,bodyAutoDept,true);
       setAutoChildrenEnabled(false); setDeptChildrenEnabled(true);
       renderWelcomePreview(); renderOffPreview(); updateSaveButtons(); updateScheduleVisibility();
+      log('exclusive→dept');
     }
   }
 
@@ -353,6 +308,8 @@
     labelEl.addEventListener('click', (e)=>{
       e.preventDefault(); e.stopPropagation();
       const newVal = !input.checked; setSwitch(labelEl,newVal,pillEl); onToggle?.(newVal);
+
+      log('switch', labelEl.id || '(no-id)', newVal);
 
       if(labelEl===swAutoHdr){
         if(newVal) enforceExclusive('auto'); else { cfg.features.auto_messages.enabled=false; setAutoChildrenEnabled(false); renderWelcomePreview(); renderOffPreview(); updateSaveButtons(); }
@@ -387,40 +344,37 @@
   // ===== API config =====
   async function getConfig(){
     const url = new URL('/api/chatbot/config', location.origin);
-    url.searchParams.set('empresa_id', String(EMPRESA_ID()));
+    url.searchParams.set('empresa_id', String(getEmpresaId()));
     url.searchParams.set('instancia_id', String(requireActiveInstId()));
     const r = await authFetch(url.toString());
-    if(!r.ok) throw new Error(`GET config ${r.status}`);
+    if(!r.ok){ throw new Error(`GET config ${r.status}`); }
     const data = await r.json();
-    return deepMerge(structuredClone(LOCAL_DEFAULTS), data?.config || {});
+    const merged = deepMerge(structuredClone(LOCAL_DEFAULTS), data?.config || {});
+    log('GET config merged', merged);
+    return merged;
   }
   async function putConfig(data){
     const url = new URL('/api/chatbot/config', location.origin);
-    url.searchParams.set('empresa_id', String(EMPRESA_ID()));
+    url.searchParams.set('empresa_id', String(getEmpresaId()));
     url.searchParams.set('instancia_id', String(requireActiveInstId()));
-    const r = await authFetch(url.toString(), {
-      method:'PUT',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({config:data})
-    });
-    let body = null;
-    try { body = await r.json(); } catch { body = await r.text(); }
-    if(!r.ok){
-      const detail = typeof body === 'object' && body?.detail ? body.detail : body;
-      throw new Error(humanizeErrorDetail(detail));
-    }
-    return body;
+    log('PUT config payload', data);
+    const r = await authFetch(url.toString(), { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({config:data}) });
+    if(!r.ok){ const txt = await r.text().catch(()=>String(r.status)); error('PUT config !ok', r.status, txt); throw new Error(`PUT config ${r.status}`); }
+    const j = await r.json();
+    log('PUT config ok', j);
+    return j;
   }
 
   // ===== render/load =====
   async function loadAll(){
+    log('loadAll begin');
     cfg = await getConfig(); ensureMasters(cfg);
 
     // masters
     setHeaderSwitch(swAutoHdr, pillAutoHdr, !!cfg.features.auto_messages.enabled);
     setHeaderSwitch(swDeptHdr, pillDeptHdr, !!cfg.features.auto_messages_departments.enabled);
 
-    // bloco 1 — Automáticas
+    // bloco 1 — Mensagens automáticas (SEM departamentos!)
     const w = cfg.features.auto_messages.welcome || {};
     setSwitch(swWelcome, !!w.enabled, pillWelcome);
     if(msgWelcome) msgWelcome.value = w.text ?? 'Olá! 👋 Como posso ajudar?';
@@ -438,12 +392,14 @@
     setAutoChildrenEnabled(!!cfg.features.auto_messages.enabled);
     renderWelcomePreview(); renderOffPreview();
 
-    // bloco 2 — Departamentos
+    // bloco 2 — Departamentos (com exemplo padrão)
     const dw = cfg.features.auto_messages_departments.welcome || {};
     setSwitch(swDeptWelcome, !!dw.enabled, pillDeptWelcome);
     if(msgDeptWelcome){
       msgDeptWelcome.value = (dw.text ?? '').trim();
-      if(!msgDeptWelcome.value){ msgDeptWelcome.value = buildDeptWelcomeExample(null); }
+      if(!msgDeptWelcome.value){ // se vazio, aplica o exemplo padrão
+        msgDeptWelcome.value = buildDeptWelcomeExample(null);
+      }
       if(dwCount) dwCount.textContent = `${msgDeptWelcome.value.length} caracteres`;
     }
     if(dwStart) dwStart.value = dw.start ?? '08:00';
@@ -451,8 +407,11 @@
 
     setDeptChildrenEnabled(!!cfg.features.auto_messages_departments.enabled);
 
-    attachDeptSuggestions(msgDeptWelcome).catch(()=>{});
+    // chips e "Gerar exemplo" APENAS no bloco Departamentos
+    attachDeptSuggestions(msgDeptWelcome).catch(error);
+
     updateScheduleVisibility(); updateSaveButtons();
+    log('loadAll done');
   }
 
   // ===== save =====
@@ -472,12 +431,9 @@
       start:(oStart&&oStart.value)||'18:00',
       end:(oEnd&&oEnd.value)||'08:00'
     };
-    try{
-      await putConfig(cfg);
-      toast('Mensagens automáticas salvas (exclusivas).','success');
-    }catch(e){
-      showErrorModal('Falha ao salvar', e.message || String(e));
-    }
+    log('saveAutoBlock→payload', cfg);
+    await putConfig(cfg);
+    toast('Mensagens automáticas salvas (exclusivas).');
   }
 
   async function saveDeptBlock(){
@@ -489,13 +445,12 @@
       start:(dwStart&&dwStart.value)||'08:00',
       end:(dwEnd&&dwEnd.value)||'18:00'
     };
-    try{
-      await putConfig(cfg);
-      toast('Mensagem de boas-vindas por departamento salva (exclusiva).','success');
-    }catch(e){
-      showErrorModal('Falha ao salvar', e.message || String(e));
-    }
+    log('saveDeptBlock→payload', cfg);
+    await putConfig(cfg);
+    toast('Mensagem de boas-vindas por departamento salva (exclusiva).');
   }
+
+  function toast(msg){ if(window.PageToast?.show) return PageToast.show(msg,{kind:'success'}); console.log('[toast]',msg); }
 
   // ===== eventos/boot =====
   function bindUI(){
@@ -511,7 +466,7 @@
 
     msgWelcome?.addEventListener('input',()=>{ if(wcCount) wcCount.textContent = `${msgWelcome.value.length} caracteres`; renderWelcomePreview(); });
     wStart?.addEventListener('change',()=> (cfg.features.auto_messages.welcome.start = wStart.value));
-    wEnd?.addEventListener('change',()=> (cfg.features.auto_messages.welcome.end   = wEnd.value));
+    wEnd  ?.addEventListener('change',()=> (cfg.features.auto_messages.welcome.end   = wEnd.value));
 
     msgOff?.addEventListener('input',()=>{ if(offCount) offCount.textContent = `${msgOff.value.length} caracteres`; renderOffPreview(); });
     oStart?.addEventListener('change',()=> (cfg.features.auto_messages.off_hours.start = oStart.value));
@@ -521,10 +476,10 @@
     dwStart?.addEventListener('change',()=> (cfg.features.auto_messages_departments.welcome.start = dwStart.value));
     dwEnd  ?.addEventListener('change',()=> (cfg.features.auto_messages_departments.welcome.end   = dwEnd.value));
 
-    saveAuto?.addEventListener('click',()=> saveAutoBlock());
-    cancelAuto?.addEventListener('click',()=> loadAll());
-    saveDept?.addEventListener('click',()=> saveDeptBlock());
-    cancelDept?.addEventListener('click',()=> loadAll());
+    saveAuto?.addEventListener('click',()=> saveAutoBlock().catch(err=>{ error(err); alert(err.message); }));
+    cancelAuto?.addEventListener('click',()=> loadAll().catch(err=>{ error(err); alert(err.message); }));
+    saveDept?.addEventListener('click',()=> saveDeptBlock().catch(err=>{ error(err); alert(err.message); }));
+    cancelDept?.addEventListener('click',()=> loadAll().catch(err=>{ error(err); alert(err.message); }));
   }
 
   async function initInstDropdown(){
@@ -547,7 +502,7 @@
     }
     instBtn.addEventListener('click',toggleMenu);
 
-    const empresaId=EMPRESA_ID();
+    const empresaId=getEmpresaId();
     const instValue=(i)=> i.instancia_id ?? i.id ?? i.instance_id ?? i.session ?? i.sessionName ?? '';
     const instLabel2=(i,v)=> i.apelido || i.nome || i.instance_name || String(v) || 'Instância';
 
@@ -563,12 +518,14 @@
       const active=instList.querySelector(`.inst-item[data-value="${CSS.escape(value)}"]`);
       if(active) instMenu.setAttribute('aria-activedescendant', active.id || (active.id='inst-opt-chat-'+String(value||'x')));
       instLabel.textContent = text || (value ? `Instância ${value}` : 'Selecione uma instância');
+      log('inst setActive', { value, text });
     }
 
     function selectValue(value,text){
       window.__INST_ID = value ? Number(String(value).replace(/\D/g,'')) : '';
       setActiveUI(value,text);
-      if(window.__INST_ID){ lockUI(false); loadAll().catch(err=>showErrorModal('Erro', String(err?.message||err))); }
+      log('inst selected', window.__INST_ID);
+      if(window.__INST_ID){ lockUI(false); loadAll().catch(err=>{error(err); alert('Falha ao carregar configurações do chatbot.');}); }
       else { lockUI(true,'Selecione uma instância para configurar o chatbot.'); }
       closeMenu(); instBtn.focus();
     }
@@ -577,13 +534,16 @@
       instList.innerHTML=''; let items=[];
       if(empresaId){
         try{
-          const r=await fetch(`/api/empresas/${empresaId}/whatsapp`,{credentials:'include'}); if(!r.ok) throw 0;
+          const r=await fetch(`/api/empresas/${empresaId}/whatsapp`,{credentials:'include'});
+          if(!r.ok) throw 0;
           const j=await r.json(); items = Array.isArray(j.instancias)? j.instancias : [];
+          log('inst list via empresas/whatsapp', items.length);
         }catch{
           try{
             const r2=await fetch(`/api/instancias/list?empresa_id=${empresaId}`,{credentials:'include'});
             const j2=await r2.json(); items = Array.isArray(j2)? j2 : (Array.isArray(j2?.instancias) ? j2.instancias : []);
-          }catch{}
+            log('inst list via fallback /instancias/list', items.length);
+          }catch(e){ warn('inst list fallback erro', e); }
         }
       }
 
@@ -606,6 +566,8 @@
 
     await loadList();
   }
+
+  function toast(msg){ if(window.PageToast?.show) return PageToast.show(msg,{kind:'success'}); console.log('[toast]',msg); }
 
   function bindUI(){
     bindAccordion(headAuto, bodyAuto);
@@ -630,10 +592,10 @@
     dwStart?.addEventListener('change',()=> (cfg.features.auto_messages_departments.welcome.start = dwStart.value));
     dwEnd  ?.addEventListener('change',()=> (cfg.features.auto_messages_departments.welcome.end   = dwEnd.value));
 
-    saveAuto?.addEventListener('click',()=> saveAutoBlock());
-    cancelAuto?.addEventListener('click',()=> loadAll());
-    saveDept?.addEventListener('click',()=> saveDeptBlock());
-    cancelDept?.addEventListener('click',()=> loadAll());
+    saveAuto?.addEventListener('click',()=> saveAutoBlock().catch(err=>{ error(err); alert(err.message); }));
+    cancelAuto?.addEventListener('click',()=> loadAll().catch(err=>{ error(err); alert(err.message); }));
+    saveDept?.addEventListener('click',()=> saveDeptBlock().catch(err=>{ error(err); alert(err.message); }));
+    cancelDept?.addEventListener('click',()=> loadAll().catch(err=>{ error(err); alert(err.message); }));
   }
 
   async function boot(){
@@ -644,9 +606,10 @@
       if(!id){ lockUI(true,'Selecione uma instância para configurar o chatbot.'); return; }
       lockUI(false);
       await loadAll();
+      log('boot ok');
     }catch(e){
       if(String(e&&e.message)==='INST_REQUIRED'){ lockUI(true,'Selecione uma instância para configurar o chatbot.'); return; }
-      showErrorModal('Falha ao carregar', e?.message || String(e));
+      error('boot fail', e); alert('Falha ao carregar configurações do chatbot.');
     }
   }
 

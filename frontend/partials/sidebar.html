@@ -589,14 +589,28 @@
   (function(){
     var out=document.getElementById('sidebarLogout'); if(!out || out.dataset.bound) return;
     out.dataset.bound='1';
-    out.addEventListener('click', function(ev){
+    out.addEventListener('click', async function(ev){
       ev.preventDefault();
-      try{
-        ['token','access_token','refresh_token','email','role','empresa_id','user_id','nome','departamento','usuario','user','me','auth_user','profile','auth','usuario_avatar','avatar_url']
-          .forEach(function(k){ localStorage.removeItem(k); });
-        sessionStorage.clear();
-      }catch{}
-      location.href='/frontend/login.html';
+
+      // 1) pede ao backend pra apagar cookies HttpOnly
+      try { await fetch('/api/auth/logout', { method:'POST', credentials:'include' }); } catch {}
+
+      // 2) limpa cookies acessíveis via JS (best-effort)
+      (function nukeCookies(){
+        const past='Thu, 01 Jan 1970 00:00:00 GMT';
+        const names=(document.cookie||'').split(/;\s*/).filter(Boolean).map(c=>c.split('=')[0]);
+        for(const name of names){
+          document.cookie = `${name}=; Expires=${past}; Path=/`;
+        }
+      })();
+
+      // 3) limpa storages/caches
+      try { localStorage.clear(); sessionStorage.clear(); } catch {}
+      if ('caches' in window) { try { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); } catch {} }
+
+      // 4) redireciona para a RAIZ (que mostra o login)
+      window.location.replace('/'); // ou: location.assign('/')
+      // se seu app estiver atrás de subcaminho, use: window.location.replace(location.origin + '/');
     });
   })();
 })();
