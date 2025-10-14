@@ -74,6 +74,15 @@ const hist = document.getElementById('historico');
   .bubble .msg-call .sep{ opacity:.55; }
   .bubble .msg-call .dir{ opacity:.9; }
   .bubble .msg-call .st{ opacity:.7; font-weight:500; }
+
+  /* ======= Byline (responsável acima da bolha) ======= */
+  .msg-row .byline{
+    font-size:.72rem; color: var(--muted,#aebac1);
+    margin:0 6px 3px; opacity:.95; user-select:none;
+  }
+  .msg-row.msg-sent .byline{ text-align:right; }
+  .msg-row.msg-received .byline{ display:none; }
+  .msg-row .byline small{ margin-left:.5rem; opacity:.8; }
   `;
   const s = document.createElement('style');
   s.id = id; s.textContent = css;
@@ -257,6 +266,20 @@ export function salvarNoCache(clienteId, novos){
 const MARKER_RE = /^\[(Imagem|Vídeo|Video|Áudio\/ptt|Áudio|Audio|Documento|Figurinha|Localização|Contatos?|M[íi]dia)\]/i;
 const CALL_RE = /^\s*\[Ligação\]\s*(.+?)\s*[–-]\s*(enviada|recebida)\s*\(([^)]+)\)\s*$/i;
 
+/* ======= Byline helpers (responsável acima da bolha) ======= */
+function _autorDaMensagem(m){
+  // Preferência: whatsapp físico (quando vier marcado) → 'WhatsApp físico'
+  const origem = String(m?.origem || '').toLowerCase();
+  const fisico = origem === 'whatsapp_fisico' || !!m?.from_phone ||
+                 /f[ií]sico/i.test(String(m?.instance_name||''));
+  if (fisico) return 'WhatsApp físico';
+
+  // Nome do atendente, se existir; senão, o usuário logado
+  const nome = m?.atendente_nome || m?.autor_nome ||
+               (window.OperatorLine?.getName?.() || 'Operador(a)');
+  return nome;
+}
+
 /* ========= render de 1 mensagem ========= */
 export function criarHTMLDaMensagem(m){
   const isSaida = (m.tipo === 'saida') || (m.from_me === true) || (m.origem === 'atendente');
@@ -391,12 +414,17 @@ export function criarHTMLDaMensagem(m){
       }</span>`
     : '';
 
+  // ======= Byline (acima da bolha, só em saídas) =======
+  const bylineTxt = isSaida ? _autorDaMensagem(m) : '';
+  const timeTxt   = formatChatTime(m.timestamp || m.data || m.created_at || '');
+
   return `<div class="msg-row ${isSaida ? 'msg-sent' : 'msg-received'}" data-id="${msgIdAttr}" data-msg-id="${msgIdAttr}">
+    ${isSaida ? `<div class="byline">${escapeHtml(bylineTxt)} <small>${escapeHtml(timeTxt)}</small></div>` : ''}
     <div class="bubble ${isSaida ? 'bubble-out' : 'bubble-in'}" data-msg-id="${msgIdAttr}">
       ${callHeader}${mediaHtml}${textHtml}
       <div class="meta">
         ${ackHtml}
-        <span class="msg-time">${formatChatTime(m.timestamp || m.data || m.created_at || '')}</span>
+        <span class="msg-time">${timeTxt}</span>
       </div>
     </div>
   </div>`;

@@ -1,4 +1,3 @@
-// /frontend/js/pages/colaboradores.js
 // Colaboradores – lista + modal de perfil (visualização/edição) e fluxo de criação
 (function ColaboradoresPage(){
   'use strict';

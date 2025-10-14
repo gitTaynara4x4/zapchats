@@ -638,6 +638,14 @@
       });
       if (res.status === 403) { notify({title:'Sem permissão', msg:'Apenas administradores podem fixar.', type:'error'}); return; }
       if (!res.ok) throw new Error(await res.text().catch(()=> ''));
+
+      // ✅ Sincroniza estado + força re-fetch sem cache agora
+      try { window.Lista?.setPinned?.(clienteId, willPin); } catch {}
+      try { await window.carregarClientes?.({ force: true }); } catch {}
+
+      // ✅ Garante que um F5 imediato também venha sem cache
+      try { sessionStorage.setItem('convForceReload', '1'); } catch {}
+
       notify({title: willPin ? 'Conversa fixada' : 'Conversa desafixada', type:'ok'});
     }catch(e){
       // rollback

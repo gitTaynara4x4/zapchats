@@ -1,4 +1,5 @@
 // WebSocket da EMPRESA: nova mensagem, ACK (formatos variados), reload, backoff + heartbeat
+// + suporte a conv.pin / unpin (fixar/desafixar) com atualização imediata de UI/estado
 
 import { tsToMillis } from '../core/time.js';
 import { renderHistoricoDoCache } from '../domain/historico.js';
@@ -208,7 +209,7 @@ function appendToHistCache(inst, cliente_id, msg){
   }
 }
 
-/* ========================= handlers ========================= */
+/* ========================= handlers: ACK & MSG ========================= */
 function handleAckGeneric(payload){
   const inst = pickInstanciaId(payload);
   const cliente_id = pickClienteId(payload);
@@ -249,15 +250,25 @@ function handleNovaMensagem(payload){
   const msgId = pickMsgId(payload) || null;
   const ackV  = (tipo === 'saida') ? (pickAck(payload) ?? 0) : null;
 
+  const origem = payload.origem
+    || (payload.from_phone ? 'whatsapp_fisico' : (tipo === 'saida' ? 'atendente' : 'cliente'));
+  const autor_nome = payload.atendente_nome
+    || payload.user_nome
+    || payload.operador_nome
+    || payload.autor_nome
+    || null;
+
   const msg = {
     id: msgId, msg_id: msgId,
     texto: textoRaw, conteudo: textoRaw,
     tipo, timestamp: tsIso, ts: tsToMillis(tsIso) || Date.now(),
     ack: ackV, midias: Array.isArray(payload.midias) ? payload.midias : undefined,
-    instancia_id: inst
+    instancia_id: inst,
+    origem,
+    autor_nome
   };
 
-  // Se for saída com id, tenta fundir com bubble temporário (eco local)
+  // Saída com id: tenta fundir com o "eco local"
   let merged = false;
   if (tipo === 'saida' && msg.msg_id) {
     merged = squashPendingLocalEcho(inst, cliente_id, msg);
@@ -273,6 +284,9 @@ function handleNovaMensagem(payload){
     if (DEBUG_WS) console.debug('[WS MSG][RENDER]', { cliente_id, inst, append: !merged, openNow, canFixDom });
     renderHistoricoDoCache(cliente_id, /*append*/!merged ? true : false);
     if (msg.ack != null) window.applyAckUpdate?.({ instancia_id: inst ?? null, cliente_id, msg_id: msg.msg_id, ack: msg.ack });
+    if (tipo === 'saida') {
+      try { window.OperatorLine?.set(msg.conteudo, tsIso, { origem, autor_nome }); } catch {}
+    }
   } else if (DEBUG_WS) {
     const oc = getOpenContext();
     console.debug('[WS MSG][SKIP RENDER]', { cliente_id, inst, open_ctx: oc });
@@ -289,10 +303,10 @@ function handleNovaMensagem(payload){
   } catch {}
 
   try { window.syncPreviewFromCache?.(cliente_id); } catch {}
-  if (DEBUG_WS) console.debug('[WS MSG]', { cliente_id, inst, merged, passesInst, openNow, texto: msg.conteudo });
+  if (DEBUG_WS) console.debug('[WS MSG]', { cliente_id, inst, merged, passesInst, openNow, texto: msg.conteudo, origem, autor_nome });
 }
 
-/* === NOVO: status da conversa vindo do backend (bot/no_bot/automático etc.) === */
+/* === NOVO: status da conversa (bot/no_bot/automático etc.) === */
 function normalizeConvStatus(s){
   const v = String(s || '').toLowerCase();
   if (['bot','no_bot','automatico','automático'].includes(v)) return 'bot';
@@ -308,23 +322,56 @@ function handleConvStatus(payload){
   const openNow = isOpenChat(cliente_id, inst);
   if (!ALWAYS_ACCEPT_WS && !passesInst && !openNow) return;
 
-  // atualiza caches de lista
   let c = findCliente(cliente_id) || { id: Number(cliente_id), cliente_id: Number(cliente_id), conversation_id: Number(cliente_id) };
   c.status = status;
   c.statusatendimento = status;
   const [g, s] = bothCaches(); upsertIn(g, c); upsertIn(s, c);
 
-  // seta no DOM para o fallback dos filtros
   try{
     const li = document.querySelector(`li.chat-item[data-id="${cliente_id}"]`);
     if (li) li.dataset.status = status;
   }catch{}
 
-  // avisa a lista / UI
   try { window.Lista?.updatePreview?.(cliente_id, { status, statusatendimento: status }); } catch {}
   try { document.dispatchEvent(new CustomEvent('ws:conv_status', { detail: { cliente_id, instancia_id: inst, status }})); } catch {}
 
   if (DEBUG_WS) console.debug('[WS CONV_STATUS]', { cliente_id, inst, status });
+}
+
+/* === NOVO: fixar/desafixar conversa em tempo real === */
+function inferPinFlag(p){
+  if (typeof p.pin === 'boolean') return p.pin;
+  if (typeof p.pinned === 'boolean') return p.pinned;
+  if (p.fixado != null) return !!p.fixado;
+  const a = String(p.action || p.act || p.event || p.type || '').toLowerCase();
+  if (a.includes('unpin') || a.includes('desfix') || a.includes('desafix')) return false;
+  if (a.includes('pin') || a.includes('fix')) return true;
+  return null;
+}
+function handleConvPin(payload){
+  const inst = pickInstanciaId(payload);
+  const cliente_id = pickClienteId(payload);
+  if (!cliente_id) return;
+
+  const flag = inferPinFlag(payload);
+  if (flag == null) return;
+
+  // atualiza caches
+  let c = findCliente(cliente_id) || { id: Number(cliente_id), cliente_id: Number(cliente_id), conversation_id: Number(cliente_id) };
+  c.pinned = !!flag;
+  const [g, s] = bothCaches(); upsertIn(g, c); upsertIn(s, c);
+
+  // atualiza DOM/Lista imediatamente
+  try { window.Lista?.setPinned?.(cliente_id, !!flag); } catch {}
+  try {
+    const li = document.querySelector(`li.chat-item[data-id="${cliente_id}"]`);
+    if (li) li.classList.toggle('is-pinned', !!flag);
+  } catch {}
+
+  // garante que um F5 próximo venha sem cache
+  try { sessionStorage.setItem('convForceReload', '1'); } catch {}
+
+  if (DEBUG_WS) console.debug('[WS CONV_PIN]', { cliente_id, inst, pinned: !!flag, raw: payload });
 }
 
 /* ========================= dispatcher ========================= */
@@ -336,7 +383,9 @@ function handleMessage(ev){
   if (data.type === 'history_sync_start'){ document.dispatchEvent(new CustomEvent('ws:history_sync_start')); return; }
   if (data.type === 'history_sync_done'){ document.dispatchEvent(new CustomEvent('ws:history_sync_done')); return; }
   if (data.type === 'reload_clientes' || data.type === 'reload_grupos'){
-    document.dispatchEvent(new CustomEvent('ws:reload_clientes', { detail: data })); return;
+    document.dispatchEvent(new CustomEvent('ws:reload_clientes', { detail: data }));
+    try { sessionStorage.setItem('convForceReload', '1'); window.carregarClientes?.({ force:true }); } catch {}
+    return;
   }
 
   // ⚠️ NÃO recarrega a página em reload genérico (evita loop)
@@ -353,8 +402,14 @@ function handleMessage(ev){
     return;
   }
 
-  // === NOVO: status de conversa
+  // === NOVOS tipos: conv_status e conv.pin
   if (data.type === 'conv_status'){ handleConvStatus(data); return; }
+
+  const t = String(data.type || '').toLowerCase();
+  if (t === 'conv.pin' || t === 'conv_unpin' || t === 'conv.unpin' || t === 'convfix' || t === 'conv_unfix' || t === 'conv.unfix'
+      || t === 'pin' || t === 'unpin' || (t === 'conv' && (String(data.action||'').toLowerCase().includes('pin')))) {
+    handleConvPin(data); return;
+  }
 
   // processa ACK (mesmo se vier junto com texto)
   const maybeAck = pickAck(data);

@@ -22,7 +22,13 @@
 //   clear(inst?, convId?)                     // limpa uma conversa, uma instância ou tudo
 //
 // Convenções de mensagem normalizada:
-//   { msg_id, conteudo, tipo, timestamp, ack|null, midias[], instancia_id|null, instance_name|null, ts:number(ms) }
+//   {
+//     msg_id, conteudo, tipo, timestamp, ack|null, midias[],
+//     instancia_id|null, instance_name|null, ts:number(ms),
+//     // meta p/ UI (OperatorLine, etc.):
+//     origem|null,          // 'atendente' | 'whatsapp_fisico' | 'cliente' | ...
+//     autor_nome|null       // nome do atendente/autor quando disponível
+//   }
 
 import { cacheGet, cacheSet, cacheDel } from '../core/cache.js';
 
@@ -58,6 +64,15 @@ function normMsg(m) {
 
   const midias = Array.isArray(m?.midias) ? m.midias : [];
 
+  // ======= META usada pelo banner/UX =======
+  const origem =
+    (m?.origem != null)
+      ? m.origem
+      : ((tipo === 'saida' || m?.from_me === true) ? 'atendente' : 'cliente');
+
+  const autor_nome =
+    m?.autor_nome ?? m?.atendente_nome ?? m?.user_nome ?? null;
+
   return {
     msg_id: msg_id || null,
     conteudo: m?.conteudo ?? m?.texto ?? m?.mensagem ?? '',
@@ -67,7 +82,10 @@ function normMsg(m) {
     midias,
     instancia_id: m?.instancia_id ?? null,
     instance_name: m?.instance_name ?? null,
-    ts
+    ts,
+    // meta p/ OperatorLine / render
+    origem: origem ?? null,
+    autor_nome: autor_nome ?? null,
   };
 }
 
@@ -147,6 +165,9 @@ function _mergeOrPushOne(out, seen, m) {
     const prev = out[idxTmp];
     const merged = { ...prev, ...m };
     merged.msg_id = m.msg_id || prev.msg_id;
+    // Preserve meta (origem/autor_nome) se chegar agora
+    if (m.origem != null) merged.origem = m.origem;
+    if (m.autor_nome != null) merged.autor_nome = m.autor_nome;
     if (m.timestamp) merged.timestamp = m.timestamp;
     merged.ts = toMillis(merged.timestamp) || _tsOf(merged);
     out[idxTmp] = merged;

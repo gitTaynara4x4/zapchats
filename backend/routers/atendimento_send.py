@@ -270,6 +270,7 @@ async def _broadcast_msg_saida(
     msg: models.Mensagem,
     midias: Optional[List[Dict[str, Any]]] = None,
     instance_name: Optional[str] = None,
+    atendente_nome: Optional[str] = None,  # ⬅️ NOVO: nome do atendente que enviou
 ):
     payload = {
         "empresa_id": empresa.id,
@@ -286,6 +287,7 @@ async def _broadcast_msg_saida(
         "ack": 0,
         "instancia_id": msg.instancia_id,
         "instance_name": instance_name,
+        "atendente_nome": atendente_nome,  # ⬅️ NOVO: enviado ao front
     }
     if midias:
         payload["midias"] = midias
@@ -364,7 +366,7 @@ class ReactionKey(BaseModel):
     fromMe: bool = True
     id: str
 
-class SendReactionReq(BaseModel):
+class SendReactionReq(BaseSend):
     empresa_id: Optional[int] = None
     instance: Optional[str] = None
     instancia_id: Optional[int] = None
@@ -419,7 +421,13 @@ async def send_text(
         msg_id=msg_id,
         instancia_id=inst_id,
     )
-    await _broadcast_msg_saida(empresa, cliente, msg, instance_name=inst_name)
+    await _broadcast_msg_saida(
+        empresa,
+        cliente,
+        msg,
+        instance_name=inst_name,
+        atendente_nome=getattr(user, "nome", None),  # ⬅️ NOVO
+    )
     return {
         "evolution": evo,
         "db": {"mensagem_id": msg.id, "cliente_id": cliente.id, "instancia_id": inst_id},
@@ -483,6 +491,7 @@ async def send_audio(
         msg,
         midias=[{"tipo": "audio", "mimetype": "audio/ogg", "filename": "", "url": audio_url}],
         instance_name=inst_name,
+        atendente_nome=getattr(user, "nome", None),  # ⬅️ NOVO
     )
     return {
         "evolution": evo,
@@ -560,7 +569,14 @@ async def send_media(
         "url": media_url,
     }]
 
-    await _broadcast_msg_saida(empresa, cliente, msg, midias=midias, instance_name=inst_name)
+    await _broadcast_msg_saida(
+        empresa,
+        cliente,
+        msg,
+        midias=midias,
+        instance_name=inst_name,
+        atendente_nome=getattr(user, "nome", None),  # ⬅️ NOVO
+    )
     return {
         "evolution": evo,
         "db": {"mensagem_id": msg.id, "cliente_id": cliente.id, "instancia_id": inst_id},
@@ -612,7 +628,13 @@ async def send_sticker(
         msg_id=msg_id,
         instancia_id=inst_id,
     )
-    await _broadcast_msg_saida(empresa, cliente, msg, instance_name=inst_name)
+    await _broadcast_msg_saida(
+        empresa,
+        cliente,
+        msg,
+        instance_name=inst_name,
+        atendente_nome=getattr(user, "nome", None),  # ⬅️ NOVO
+    )
     return {
         "evolution": evo,
         "db": {"mensagem_id": msg.id, "cliente_id": cliente.id, "instancia_id": inst_id},
@@ -654,7 +676,13 @@ async def send_contact(
         msg_id=msg_id,
         instancia_id=inst_id,
     )
-    await _broadcast_msg_saida(empresa, cliente, msg, instance_name=inst_name)
+    await _broadcast_msg_saida(
+        empresa,
+        cliente,
+        msg,
+        instance_name=inst_name,
+        atendente_nome=getattr(user, "nome", None),  # ⬅️ NOVO
+    )
     return {
         "evolution": evo,
         "db": {"mensagem_id": msg.id, "cliente_id": cliente.id, "instancia_id": inst_id},

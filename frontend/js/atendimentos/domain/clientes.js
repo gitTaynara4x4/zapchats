@@ -294,7 +294,14 @@ export async function carregarClientes({ force=false } = {}){
   const key = `conversas:v1:${EMPRESA_ID}:${instKey}`;
   const url = `/api/atendimento/conversas?empresa_id=${EMPRESA_ID}&limit=20${_instQuery()}`;
 
-  const raw = await fetchWithCache(url, { ttlMs: 30_000, key, bust: force });
+  // 🔥 se alguém marcar pra bustar (ex.: após pin/unpin), forçamos sem cache
+  const forceFlag = force || (sessionStorage.getItem('convForceReload') === '1');
+  if (forceFlag) { try { sessionStorage.removeItem('convForceReload'); } catch {} }
+
+  const raw = await fetchWithCache(
+    url,
+    { ttlMs: forceFlag ? 0 : 30_000, key, bust: forceFlag }
+  );
   const items = Array.isArray(raw?.items) ? raw.items : [];
   const next  = raw?.next_cursor ?? null;
 
@@ -580,6 +587,13 @@ if (!window.Lista) {
       const idx = _findClienteIndex(clienteId);
       if (idx < 0) return;
       state.clientesCache[idx].novas = 0;
+      _reRender();
+    },
+    // ✅ novo: atualiza o flag pinned no estado + reordena imediatamente
+    setPinned(clienteId, isPinned){
+      const idx = _findClienteIndex(clienteId);
+      if (idx < 0) return;
+      state.clientesCache[idx].pinned = !!isPinned;
       _reRender();
     }
   };

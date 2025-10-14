@@ -8,6 +8,9 @@ import { abrirPerfilAtual } from '../ui/perfil.js';
 // Base unificada de histórico local
 import { hasHistory, primeWith, getHist } from '../domain/hist-cache.js';
 
+// ====== Flag global: esconder banner do topo (Operadora: …) ======
+window.SHOW_TOP_OPERATOR_BANNER = false;
+
 /* ================= Helpers de prontidão (Splash) ================= */
 function readyPart(key){
   if (window.AppReady && typeof window.AppReady.mark === 'function') {
@@ -69,19 +72,24 @@ function readyPart(key){
     const w = window, LS = w.localStorage || {};
     return (w.Auth?.user?.nome) || (w.CURRENT_USER?.nome) || LS.getItem('user_nome') || 'Operadora';
   }
-  function normalize(s){ return String(s||'').replace(/\s+/g,' ').trim().slice(0,180); }
-  function fmtTime(iso){
-    try{
-      const d = iso ? new Date(iso) : new Date();
-      return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-    }catch{ return ''; }
+  const normalize = (s)=> String(s||'').replace(/\s+/g,' ').trim().slice(0,180);
+  const fmtTime   = (iso)=> { try{ const d = iso?new Date(iso):new Date(); return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});}catch{return '';} };
+
+  // Decide o “nome” mostrado no banner a partir da meta
+  function deriveName(meta){
+    // meta: { origem?: 'atendente'|'whatsapp_fisico'|'cliente'|..., autor_nome?: string }
+    if (meta && meta.origem === 'whatsapp_fisico') return 'WhatsApp físico';
+    if (meta && meta.autor_nome) return meta.autor_nome;
+    return getUserName();
   }
 
-  function setOpHeadline(text, whenISO){
+  // Aceita meta opcional para decidir o rótulo (nome/WhatsApp físico)
+  function setOpHeadline(text, whenISO, meta){
+    if (window.SHOW_TOP_OPERATOR_BANNER === false) return; // banner desligado
     const box = ensureHeadline();
     const preview = normalize(text);
     if (!preview){ box.hidden = true; box.textContent = ''; return; }
-    const nome = getUserName();
+    const nome = deriveName(meta || {});
     const time = whenISO ? `<small>${fmtTime(whenISO)}</small>` : '';
     box.innerHTML = `${nome}: ${preview} ${time}`;
     box.hidden = false;
@@ -89,6 +97,13 @@ function readyPart(key){
   function clearOpHeadline(){
     const box = document.getElementById('op-headline');
     if (box){ box.hidden = true; box.textContent = ''; }
+  }
+
+  // se a flag estiver desligada, garante oculto por CSS (defensivo)
+  if (window.SHOW_TOP_OPERATOR_BANNER === false) {
+    const s = document.createElement('style');
+    s.textContent = `#op-headline{display:none!important}`;
+    document.head.appendChild(s);
   }
 
   window.OperatorLine = { set: setOpHeadline, clear: clearOpHeadline, getName: getUserName };
@@ -161,15 +176,26 @@ async function ensureMensagensCarregadas(conversationId) {
   const data = await r.json();
 
   const items = Array.isArray(data?.items) ? data.items : [];
-  const mapped = items.map(m => ({
-    msg_id:    m.msg_id || m.id || null,
-    conteudo:  m.texto ?? m.conteudo ?? '',
-    tipo:      m.tipo || (m.remetente === 'agente' ? 'saida' : 'entrada'),
-    timestamp: m.ts || m.timestamp || new Date().toISOString(),
-    ack:       (m.tipo === 'saida' || m.remetente === 'agente') ? (typeof m.ack === 'number' ? m.ack : 0) : null,
-    midias:    Array.isArray(m.midias) ? m.midias : [],
-    instancia_id: m.instancia_id ?? (inst || null)
-  }));
+  const mapped = items.map(m => {
+    const tipoMsg = m.tipo || (m.remetente === 'agente' ? 'saida' : 'entrada');
+    // origem derivada para o banner: se veio do agente → atendente; se não souber → cliente
+    const origem = (m.origem)
+      ? m.origem
+      : (tipoMsg === 'saida' ? 'atendente' : 'cliente');
+
+    return {
+      msg_id:    m.msg_id || m.id || null,
+      conteudo:  m.texto ?? m.conteudo ?? '',
+      tipo:      tipoMsg,
+      timestamp: m.ts || m.timestamp || new Date().toISOString(),
+      ack:       (tipoMsg === 'saida') ? (typeof m.ack === 'number' ? m.ack : 0) : null,
+      midias:    Array.isArray(m.midias) ? m.midias : [],
+      instancia_id: m.instancia_id ?? (inst || null),
+      // meta para OperatorLine
+      origem,
+      autor_nome: m.autor_nome ?? m.atendente_nome ?? null,
+    };
+  });
 
   // salva em ambos caches (compat) e base unificada
   try { salvarNoCache(conversationId, mapped); } catch {}
@@ -192,16 +218,23 @@ async function ensureMensagensCarregadas(conversationId) {
 
 /* ======= Helper: atualizar banner da operadora pela última "saida" ======= */
 function updateOperatorBannerForConversation(convId){
+  if (window.SHOW_TOP_OPERATOR_BANNER === false) return; // banner desligado
   try{
     const inst = getInstanciaForFetch(convId);
-    const arr = getHist(inst, convId) || ((window.cacheHistoricos || {})[convId] || []);
+    const arr  = getHist(inst, convId) || ((window.cacheHistoricos || {})[convId] || []);
     const lastOut = [...arr].reverse().find(m =>
       (m?.tipo === 'saida') || (m?.from_me === true) || (m?.origem === 'atendente')
     );
     if (lastOut) {
       const texto = lastOut.conteudo || lastOut.texto || lastOut.mensagem || '';
-      const ts = lastOut.timestamp || lastOut.ts || null;
-      window.OperatorLine?.set(texto, ts);
+      const ts    = lastOut.timestamp || lastOut.ts || null;
+      const meta  = {
+        origem: (lastOut.origem)
+          ? lastOut.origem
+          : ((lastOut.tipo === 'saida' || lastOut.from_me === true) ? 'atendente' : 'cliente'),
+        autor_nome: lastOut.autor_nome || lastOut.atendente_nome || lastOut.user_nome || null,
+      };
+      window.OperatorLine?.set(texto, ts, meta);
     } else {
       window.OperatorLine?.clear();
     }
@@ -295,7 +328,7 @@ async function selecionarClienteObj(id) {
   const inst = getInstanciaForFetch(id);
   state.mensagensOffset[id] = (getHist(inst, id) || []).length;
 
-  // banner da operadora com a última saida
+  // banner da operadora com a última saida (agora com meta)
   updateOperatorBannerForConversation(id);
 
   // mantém a linha na lista sincronizada com o cache

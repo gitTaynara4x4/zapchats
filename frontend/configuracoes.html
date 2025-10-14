@@ -1,319 +1,245 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-BR" class="has-sidebar prepaint">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Configuração – ZapChats</title>
 
-  <!-- Tema (mantido só para evitar flash caso já exista no resto do app) -->
-  <script>
-    (function () {
-      try {
-        const t = localStorage.getItem('theme') || 'dark';
-        document.documentElement.classList.toggle('dark', t === 'dark');
-      } catch {}
-    })();
-  </script>
+  <!-- Shell global (injeta head-base + loader + tema + sidebar) -->
+  <script src="/frontend/js/app-base.js" defer></script>
+  <script src="/frontend/js/auth.js" defer></script>
 
-  <!-- Fontes e ícones iguais ao restante do seu painel -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <!-- Anti-flash (mesmo padrão das outras páginas) -->
+  <style>
+    html.prepaint body{visibility:hidden}
+    html.prepaint[data-head-ready][data-loader-ready] body{visibility:visible}
+  </style>
+
+  <!-- Ícones (como em Mídias) -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 
+  <!-- Reuso do “base” visual (tokens, .main, .section-title, .btn, .tab, etc.) -->
+  <link rel="stylesheet" href="/frontend/css/midias.css"/>
+
+  <!-- Estilos mínimos específicos da página de Configuração -->
   <style>
-    :root{
-      --topbar-h:44px;
-      --bg:#0f0f10; --fg:#e5e7eb; --muted:#9ca3af; --card:#161617; --border:#27272a;
-      --hover:rgba(255,255,255,.04); --hover-strong:rgba(255,255,255,.06); --ring:#4f83ff; --ok:#16a34a; --red:#ef4444;
+    .form-grid{
+      display:grid; grid-template-columns: 1fr 1fr; gap: 1rem;
     }
-    html:not(.dark){
-      --bg:#f9fafb; --fg:#1f2937; --muted:#6b7280; --card:#fff; --border:#e5e7eb;
-      --hover:rgba(0,0,0,.04); --hover-strong:rgba(0,0,0,.06); --ring:#93c5fd;
+    .form-box{
+      background: var(--card); border:1px solid var(--border);
+      border-radius: 12px; padding: 14px;
     }
-    *{box-sizing:border-box}
-    html,body{height:100%}
-    body{
-      margin:0; min-height:100vh; display:flex;
-      background:var(--bg); color:var(--fg);
-      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
-      padding-top: var(--topbar-h);
+    .field{ display:flex; flex-direction:column; gap:.4rem; margin:.5rem 0; }
+    .field label{ font-weight:700; font-size:.92rem; }
+    .field .help{ color:var(--muted); font-size:.86rem; }
+    .switch-row{ display:flex; align-items:center; gap:.6rem; margin:.35rem 0; }
+    #logo_preview{
+      margin-top:.75rem; padding:.6rem; border:1px solid var(--border); border-radius:.6rem;
+      background:var(--card2); display:flex; gap:.75rem; align-items:center; max-width:520px;
     }
-    a{color:inherit;text-decoration:none}
-
-    /* Sidebar (partial) */
-    #sidebar{ width: 16.5rem; min-height: 100vh; background: var(--card);
-      border-right: 1px solid var(--border); display:block; }
-
-    /* Conteúdo */
-    .main{flex:1;display:flex;flex-direction:column;padding:1.5rem 2rem;opacity:0;transform: translateY(4px);
-      transition: opacity .18s ease, transform .18s ease;}
-    html.ready .main{opacity:1; transform:none;}
-    .section-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}
-    .section-title h1{margin:0;font-size:1.125rem;font-weight:600;display:flex;align-items:center}
-
-    /* Components */
-    .tabs{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem}
-    .tabs button{
-      border:1px solid var(--border); background:var(--card); color:var(--muted);
-      padding:.5rem .75rem; border-radius:.6rem; font-weight:600; cursor:pointer;
-    }
-    .tabs button.active{ color:var(--fg); background:var(--hover-strong); }
-    .grid{display:grid;gap:1rem}
-    @media (min-width: 960px){ .grid-2{grid-template-columns:1fr 1fr;} }
-
-    .box{ background:var(--card); border:1px solid var(--border); border-radius:.75rem; padding:1rem; }
-    .box h3{margin:.25rem 0 1rem 0;font-size:1rem;font-weight:600}
-    .muted{color:var(--muted); font-size:.92rem}
-
-    .input, select, textarea{
-      width:100%; padding:.6rem .75rem; border-radius:.6rem; border:1px solid var(--border);
-      background:var(--bg); color:var(--fg); outline:none;
-    }
-    textarea{ min-height: 86px; resize: vertical; }
-    .input:focus, select:focus, textarea:focus{ box-shadow:0 0 0 3px var(--ring); border-color:transparent; }
-
-    .row{display:grid; gap:.75rem; grid-template-columns: 1fr 1fr; }
-    .row > div > label{ display:block; font-weight:600; margin-bottom:.35rem; }
-
-    .btn{
-      background:var(--ok); color:#fff; border:1px solid transparent;
-      padding:.6rem .9rem; border-radius:.6rem; font-weight:700; cursor:pointer;
-    }
-    .btn.secondary{ background:transparent; color:var(--fg); border-color:var(--border); }
-    .btn.danger{ background:var(--red); }
-    .btn:disabled{ opacity:.6; cursor:not-allowed; }
-
-    .switch{ display:inline-flex; align-items:center; gap:.6rem; cursor:pointer; user-select:none; }
-    .switch input{ display:none; }
-    .switch .track{ width:46px; height:24px; padding:2px; border-radius:999px; background:var(--hover-strong); border:1px solid var(--border); position:relative; }
-    .switch .knob{ position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:999px; background:#fff1; box-shadow: inset 0 0 0 1px var(--border); transform: translateX(0); transition:.25s; }
-    .switch input:checked + .track .knob{ transform: translateX(22px); background:#22c55e; box-shadow:none; }
-
-    .help{ font-size:.85rem; color:var(--muted); margin-top:.3rem; }
-
-    /* Toast */
-    .toast{ position:fixed; right:16px; bottom:16px; background:var(--card); color:var(--fg);
-      border:1px solid var(--border); border-radius:.6rem; padding:.6rem .8rem; display:none; z-index:99999; }
-    .toast.show{ display:block; animation: fade .18s ease; }
-    @keyframes fade{ from{opacity:0; transform: translateY(3px);} to{opacity:1; transform:none;} }
-
-    /* Preview da logo */
-    .logo-preview{
-      display:flex; align-items:center; gap:.75rem; margin-top:.5rem;
-    }
-    .logo-preview img{
-      width:120px; height:120px; object-fit:contain; border:1px solid var(--border);
-      border-radius:.5rem; background:var(--bg);
+    #logo_preview img{ width:84px; height:84px; object-fit:contain; background:var(--hover); border-radius:.5rem; }
+    #tabbar{ display:flex; gap:.5rem; flex-wrap:wrap; }
+    .panel-actions{ display:flex; justify-content:flex-end; gap:.5rem; margin-top:1rem; }
+    .weekday-grid{ display:grid; grid-template-columns: repeat(7, 1fr); gap:.4rem; }
+    .weekday-grid label{ display:flex; align-items:center; gap:.4rem; background:var(--chip); border:1px solid var(--border); border-radius:.6rem; padding:.45rem .55rem; font-weight:700; }
+    #workhours_group.disabled{ opacity:.6; pointer-events:none; }
+    @media (max-width:1024px){
+      .form-grid{ grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
+  <!-- Sidebar (carregada via app-base.js) -->
+  <aside id="sidebar"
+         data-src="/frontend/partials/sidebar.html"
+         data-src-mobile="/frontend/partials/sidebar-mobile.html"></aside>
 
-  <!-- Sidebar via partial -->
-  <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
-
-  <!-- Conteúdo -->
-  <main class="main" id="page-content">
+  <main class="main">
     <div class="section-title">
-      <h1>Configuração</h1>
-      <div class="toolbar">
-        <button id="btn-salvar" class="btn"><i class="fa fa-save"></i> Salvar alterações</button>
+      <h1>
+        <i class="fa fa-gear title-ico"></i>
+        <span class="title-text">Configuração</span>
+      </h1>
+      <div class="top-meta"></div>
+    </div>
+
+    <!-- Tabs (mesmo componente visual das outras páginas) -->
+    <section class="box" aria-label="Abas">
+      <div id="tabbar" class="tabs" role="tablist" aria-label="Seções de configuração">
+        <button class="tab" role="tab" aria-selected="true"  data-tab="empresa">Empresa</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="horario">Horário comercial</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="mensagens">Mensagens automáticas</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="notificacoes">Notificações</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="privacidade">Privacidade / LGPD</button>
       </div>
-    </div>
+    </section>
 
-    <!-- Abas -->
-    <div class="tabs" id="tabbar">
-      <button data-tab="empresa" class="active">Empresa</button>
-      <button data-tab="horario">Horário comercial</button>
-      <button data-tab="mensagens">Mensagens automáticas</button>
-      <button data-tab="notificacoes">Notificações</button>
-      <button data-tab="privacidade">Privacidade / LGPD</button>
-    </div>
-
-    <!-- Empresa -->
-    <section class="box" data-panel="empresa">
-      <h3>Empresa</h3>
-      <div class="grid grid-2">
-        <div>
-          <label for="org_name">Nome da empresa</label>
-          <input id="org_name" class="input" placeholder="Ex.: ZapChats LTDA"/>
+    <!-- Painel: Empresa -->
+    <section class="form-box" data-panel="empresa">
+      <h2 style="margin:0 0 .5rem 0;">Empresa</h2>
+      <div class="form-grid">
+        <div class="field">
+          <label for="empresa_nome">Nome da empresa</label>
+          <input id="empresa_nome" class="input" type="text" placeholder="Ex.: ZapChats LTDA"/>
         </div>
-        <div>
+        <div class="field">
           <label for="support_email">E-mail de suporte</label>
-          <input id="support_email" type="email" class="input" placeholder="suporte@empresa.com.br"/>
+          <input id="support_email" class="input" type="email" placeholder="suporte@empresa.com.br"/>
         </div>
+      </div>
 
-        <div style="grid-column: 1 / -1;">
-          <label for="logo_file">Logo (upload único)</label>
-          <input id="logo_file" type="file" class="input" accept="image/*" aria-describedby="logo_help"/>
-          <div id="logo_help" class="help">Use PNG/SVG com fundo transparente quando possível. Uma prévia será exibida abaixo.</div>
-          <div class="logo-preview" id="logo_preview" hidden>
-            <img id="logo_img" alt="Prévia da logo da empresa"/>
-            <span class="muted" id="logo_meta"></span>
+      <div class="form-grid">
+        <div class="field">
+          <label for="default_department">Departamento padrão</label>
+          <select id="default_department" class="select">
+            <option>Carregando…</option>
+          </select>
+          <div class="help">Usado quando não for possível identificar o setor a partir do fluxo.</div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="logo_file">Logo (upload único)</label>
+        <input id="logo_file" type="file" accept="image/*"/>
+        <div class="help">Use PNG/SVG com fundo transparente quando possível. Uma prévia será exibida abaixo.</div>
+
+        <div id="logo_preview" hidden>
+          <img id="logo_img" alt="Prévia da logo da empresa"/>
+          <div>
+            <strong>Prévia da logo</strong>
+            <div id="logo_meta" class="help"></div>
+            <div style="margin-top:.4rem;">
+              <button id="logo_reset" class="btn">Remover prévia</button>
+            </div>
           </div>
         </div>
       </div>
+
+      <div class="panel-actions">
+        <button id="btn_save" class="btn primary"><i class="fa fa-floppy-disk"></i> Salvar alterações</button>
+      </div>
     </section>
 
-    <!-- Horário comercial -->
-    <section class="box" data-panel="horario" hidden>
-      <h3>Horário comercial (padrão)</h3>
-      <div class="muted">Você pode personalizar por departamento depois.</div>
-      <div class="row">
-        <div>
-          <label>Dias da semana</label>
-          <div class="grid" style="grid-template-columns:repeat(7, minmax(0,1fr)); gap:.5rem;">
-            <label class="switch"><input id="d1" type="checkbox" checked><span class="track"><span class="knob"></span></span><span>Seg</span></label>
-            <label class="switch"><input id="d2" type="checkbox" checked><span class="track"><span class="knob"></span></span><span>Ter</span></label>
-            <label class="switch"><input id="d3" type="checkbox" checked><span class="track"><span class="knob"></span></span><span>Qua</span></label>
-            <label class="switch"><input id="d4" type="checkbox" checked><span class="track"><span class="knob"></span></span><span>Qui</span></label>
-            <label class="switch"><input id="d5" type="checkbox" checked><span class="track"><span class="knob"></span></span><span>Sex</span></label>
-            <label class="switch"><input id="d6" type="checkbox"><span class="track"><span class="knob"></span></span><span>Sáb</span></label>
-            <label class="switch"><input id="d0" type="checkbox"><span class="track"><span class="knob"></span></span><span>Dom</span></label>
+    <!-- Painel: Horário comercial -->
+    <section class="form-box" data-panel="horario" hidden>
+      <h2 style="margin:0 0 .5rem 0;">Horário comercial</h2>
+
+      <div class="switch-row">
+        <input id="workhours_enabled" type="checkbox"/>
+        <label for="workhours_enabled">Ativar horário comercial</label>
+      </div>
+
+      <div id="workhours_group">
+        <div class="weekday-grid" style="margin:.6rem 0 1rem;">
+          <label><input id="wd_dom" type="checkbox"/> Dom</label>
+          <label><input id="wd_seg" type="checkbox"/> Seg</label>
+          <label><input id="wd_ter" type="checkbox"/> Ter</label>
+          <label><input id="wd_qua" type="checkbox"/> Qua</label>
+          <label><input id="wd_qui" type="checkbox"/> Qui</label>
+          <label><input id="wd_sex" type="checkbox"/> Sex</label>
+          <label><input id="wd_sab" type="checkbox"/> Sáb</label>
+        </div>
+
+        <div class="form-grid">
+          <div class="field">
+            <label for="work_start">Início</label>
+            <input id="work_start" class="input" type="time" value="09:00"/>
+          </div>
+          <div class="field">
+            <label for="work_end">Fim</label>
+            <input id="work_end" class="input" type="time" value="18:00"/>
           </div>
         </div>
-        <div>
-          <label>Janela de atendimento</label>
-          <div class="row">
-            <div><input id="h_start" type="time" class="input" value="08:00"/></div>
-            <div><input id="h_end" type="time" class="input" value="18:00"/></div>
-          </div>
-          <div class="help">Conversas fora da janela recebem a mensagem “fora do horário”.</div>
+
+        <div class="field">
+          <label for="msg_offhours">Mensagem fora do horário</label>
+          <textarea id="msg_offhours" class="input" rows="3" placeholder="Ex.: Nosso atendimento é de seg a sex das 9h às 18h. Assim que possível retornaremos."></textarea>
         </div>
       </div>
-      <div style="margin-top: .75rem">
-        <label for="default_department">Departamento padrão</label>
-        <select id="default_department" class="input">
-          <option value="">Carregando…</option>
-        </select>
+
+      <div class="panel-actions">
+        <button id="btn_save" class="btn primary"><i class="fa fa-floppy-disk"></i> Salvar alterações</button>
       </div>
     </section>
 
-    <!-- Mensagens automáticas -->
-    <section class="box" data-panel="mensagens" hidden>
-      <h3>Mensagens automáticas</h3>
-      <div class="grid grid-2">
-        <div>
-          <label for="msg_greeting">Saudação</label>
-          <textarea id="msg_greeting" class="input" placeholder="Olá! Como podemos ajudar?"></textarea>
-          <div class="help">Variáveis: {{nome}}, {{departamento}}</div>
-        </div>
-        <div>
-          <label for="msg_off">Fora do horário</label>
-          <textarea id="msg_off" class="input" placeholder="No momento estamos offline. Retornaremos no próximo dia útil."></textarea>
-        </div>
-        <div>
-          <label for="msg_survey">Pós-atendimento (pesquisa)</label>
-          <textarea id="msg_survey" class="input" placeholder="Como avaliaria nosso atendimento de 1 a 5?"></textarea>
-        </div>
+    <!-- Painel: Mensagens automáticas -->
+    <section class="form-box" data-panel="mensagens" hidden>
+      <h2 style="margin:0 0 .5rem 0;">Mensagens automáticas</h2>
+
+      <div class="field">
+        <label for="msg_greeting">Saudação inicial</label>
+        <textarea id="msg_greeting" class="input" rows="3" placeholder="Ex.: Olá! Como podemos ajudar?"></textarea>
+      </div>
+
+      <div class="field">
+        <label for="msg_welcome">Boas-vindas (novos contatos)</label>
+        <textarea id="msg_welcome" class="input" rows="3" placeholder="Ex.: Bem-vindo(a) à ZapChats!"></textarea>
+      </div>
+
+      <div class="field">
+        <label for="msg_absence">Ausência (fora do expediente/feriado)</label>
+        <textarea id="msg_absence" class="input" rows="3" placeholder="Ex.: Estamos ausentes no momento, responderemos assim que possível."></textarea>
+      </div>
+
+      <div class="panel-actions">
+        <button id="btn_save" class="btn primary"><i class="fa fa-floppy-disk"></i> Salvar alterações</button>
       </div>
     </section>
 
-    <!-- Notificações -->
-    <section class="box" data-panel="notificacoes" hidden>
-      <h3>Notificações</h3>
-      <div class="row">
-        <div>
-          <label>Notificações do navegador</label>
-          <label class="switch">
-            <input id="notif_browser" type="checkbox" checked>
-            <span class="track"><span class="knob"></span></span><span>Ativar</span>
-          </label>
-          <div class="help">Nova conversa, menção e SLA (futuro).</div>
-        </div>
-        <div>
-          <label>Notificações por e-mail</label>
-          <label class="switch">
-            <input id="notif_email" type="checkbox">
-            <span class="track"><span class="knob"></span></span><span>Ativar</span>
-          </label>
-        </div>
+    <!-- Painel: Notificações -->
+    <section class="form-box" data-panel="notificacoes" hidden>
+      <h2 style="margin:0 0 .5rem 0;">Notificações</h2>
+
+      <div class="switch-row">
+        <input id="notify_email" type="checkbox"/>
+        <label for="notify_email">Notificar por e-mail</label>
+      </div>
+
+      <div class="switch-row">
+        <input id="notify_push" type="checkbox"/>
+        <label for="notify_push">Notificações push</label>
+      </div>
+
+      <div class="switch-row">
+        <input id="notify_sound" type="checkbox"/>
+        <label for="notify_sound">Som de nova mensagem</label>
+      </div>
+
+      <div class="panel-actions">
+        <button id="btn_save" class="btn primary"><i class="fa fa-floppy-disk"></i> Salvar alterações</button>
       </div>
     </section>
 
-    <!-- Privacidade -->
-    <section class="box" data-panel="privacidade" hidden>
-      <h3>Privacidade & LGPD</h3>
-      <div class="row">
-        <div>
-          <label for="privacy_retention">Retenção de mensagens (dias)</label>
-          <input id="privacy_retention" type="number" min="1" class="input" value="180"/>
-        </div>
-        <div>
-          <label>Permitir exportar dados (ZIP/JSON)</label>
-          <label class="switch">
-            <input id="privacy_export" type="checkbox" checked>
-            <span class="track"><span class="knob"></span></span><span>Ativar</span>
-          </label>
-        </div>
+    <!-- Painel: Privacidade -->
+    <section class="form-box" data-panel="privacidade" hidden>
+      <h2 style="margin:0 0 .5rem 0;">Privacidade / LGPD</h2>
+
+      <div class="switch-row">
+        <input id="privacy_read_receipts" type="checkbox"/>
+        <label for="privacy_read_receipts">Exibir “lido” (recibo de leitura)</label>
       </div>
 
-      <div style="margin-top:1rem">
-        <button id="btn-delete-data" class="btn danger" type="button"><i class="fa fa-trash"></i> Solicitar limpeza de dados</button>
-        <div class="help">A limpeza anonimiza conteúdos após revisão de um administrador.</div>
+      <div class="switch-row">
+        <input id="privacy_online_status" type="checkbox"/>
+        <label for="privacy_online_status">Mostrar status online</label>
       </div>
+
+      <div class="panel-actions">
+        <button id="btn_save" class="btn primary"><i class="fa fa-floppy-disk"></i> Salvar alterações</button>
+      </div>
+    </section>
+
+    <!-- Log opcional (para debug visual, usado pelo configuracoes.js) -->
+    <section class="box" style="margin-top:1rem;">
+      <pre id="cfg_logs" style="margin:0; max-height:180px; overflow:auto; font-size:.85rem; background:var(--card2); border:1px solid var(--border); border-radius:.6rem; padding:.6rem;"></pre>
     </section>
   </main>
 
   <!-- Toast -->
-  <div id="toast" class="toast"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
 
-  <!-- Loader do partial (mantido) -->
-  <script>
-  (function(){
-    const host = document.getElementById('sidebar');
-    if (!host) return;
-    const CACHE_KEY = 'sidebar:html:v1';
-
-    function afterInject(){
-      const aside = document.querySelector('.app-sidebar');
-      if (aside){
-        const nowFull = location.pathname.replace(/\/+$/,'');
-        const nowFile = nowFull.split('/').pop();
-        aside.querySelectorAll('nav a[href]').forEach(a=>{
-          const pFull = new URL(a.getAttribute('href'), location.origin).pathname.replace(/\/+$/,'');
-          const pFile = pFull.split('/').pop();
-          if (pFull === nowFull || pFile === nowFile) { a.classList.add('active'); a.setAttribute('aria-current','page'); }
-          a.addEventListener('mouseenter', ()=>{ try{
-            const u=new URL(a.href, location.href); if(u.origin===location.origin){
-              const l=document.createElement('link'); l.rel='prefetch'; l.href=u.href; document.head.appendChild(l);
-            }}catch{} }, {once:true});
-        });
-      }
-      const htmlEl = document.documentElement;
-      const btn = document.getElementById('themeSwitch');
-      if (btn){
-        btn.setAttribute('aria-pressed', String(htmlEl.classList.contains('dark')));
-        btn.addEventListener('click', () => {
-          const willDark = !htmlEl.classList.contains('dark');
-          htmlEl.classList.toggle('dark', willDark);
-          try{ localStorage.setItem('theme', willDark ? 'dark' : 'light'); }catch{}
-          btn.setAttribute('aria-pressed', String(willDark));
-        });
-      }
-      document.documentElement.classList.add('ready');
-    }
-
-    const cached = localStorage.getItem(CACHE_KEY);
-    if (cached){
-      host.insertAdjacentHTML('afterend', cached); host.remove(); afterInject();
-    }
-    (async () => {
-      const candidates = [
-        host.getAttribute('data-src'),
-        '/frontend/partials/sidebar.html','partials/sidebar.html','../partials/sidebar.html'
-      ].filter(Boolean);
-      let html=null;
-      for (const url of candidates){
-        try{ const res = await fetch(url, {cache:'no-cache'}); if(!res.ok) throw 0; html = await res.text(); break; }catch{}
-      }
-      if(!html) return;
-      localStorage.setItem(CACHE_KEY, html);
-      if(!cached){ host.insertAdjacentHTML('afterend', html); host.remove(); afterInject(); }
-    })();
-  })();
-  </script>
-
-  <!-- JS da página -->
-  <script src="/frontend/js/pages/configuracoes.js"></script>
+  <!-- JS desta página -->
+  <script src="/frontend/js/pages/configuracoes.js" defer></script>
 </body>
 </html>
