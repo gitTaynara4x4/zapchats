@@ -43,12 +43,19 @@ function scoreRecencia(c){
   return ts * 1_000_000 + mid * 1_000 + ack * 10 + ava;
 }
 
+// 🔼 PINS primeiro, depois recência
 function ordenarConversasDesc(arr){
   const A = Array.isArray(arr) ? arr.slice() : [];
   return A.sort((a,b)=>{
-    const sb = scoreRecencia(b);
-    const sa = scoreRecencia(a);
-    if (sb !== sa) return sb - sa;
+    // 1) PINS no topo
+    const pinCmp = Number(b?.pinned ? 1 : 0) - Number(a?.pinned ? 1 : 0);
+    if (pinCmp !== 0) return pinCmp;
+
+    // 2) Recência (usa o mesmo score que você já tinha)
+    const recCmp = scoreRecencia(b) - scoreRecencia(a);
+    if (recCmp !== 0) return recCmp;
+
+    // 3) Desempate estável por id
     const ib = Number(b.id ?? b.conversation_id ?? b.cliente_id ?? 0);
     const ia = Number(a.id ?? a.conversation_id ?? a.cliente_id ?? 0);
     return ib - ia;
@@ -60,6 +67,7 @@ function ordenarConversasDesc(arr){
  * 1) chave canônica (instância, preferredId = conversation_id || cliente_id || id)
  * 2) telefone válido (instância + tel_norm)
  * 3) nome (instância + nomeNorm) **apenas** se um lado não tem telefone — preserva SEMPRE o que tem telefone
+ *    ⚠️ Sempre propaga `pinned = pinned_a || pinned_b`
  */
 function dedupeConversas(arr){
   if (!Array.isArray(arr)) return [];
@@ -75,7 +83,11 @@ function dedupeConversas(arr){
                : `noid:${Math.random()}`;
     const key = `${inst}:${pref}`;
     const cur = byKey.get(key);
-    if (!cur || scoreRecencia(c) > scoreRecencia(cur)) byKey.set(key, c);
+    if (!cur || scoreRecencia(c) > scoreRecencia(cur)) {
+      byKey.set(key, { ...c, pinned: Boolean(c.pinned || cur?.pinned) });
+    } else if (cur) {
+      cur.pinned = Boolean(cur.pinned || c.pinned);
+    }
   }
 
   const byFone = new Map();
@@ -86,7 +98,11 @@ function dedupeConversas(arr){
     if (!telNorm) { semFone.push(c); continue; }
     const fkey = `${inst}:${telNorm}`;
     const cur = byFone.get(fkey);
-    if (!cur || scoreRecencia(c) > scoreRecencia(cur)) byFone.set(fkey, c);
+    if (!cur || scoreRecencia(c) > scoreRecencia(cur)) {
+      byFone.set(fkey, { ...c, pinned: Boolean(c.pinned || cur?.pinned) });
+    } else if (cur) {
+      cur.pinned = Boolean(cur.pinned || c.pinned);
+    }
   }
 
   const byInstNomeComFone = new Map();
@@ -97,7 +113,11 @@ function dedupeConversas(arr){
     if (!nomeNorm) continue;
     const nmMap = byInstNomeComFone.get(inst) || new Map();
     const cur = nmMap.get(nomeNorm);
-    if (!cur || scoreRecencia(val) > scoreRecencia(cur)) nmMap.set(nomeNorm, val);
+    if (!cur || scoreRecencia(val) > scoreRecencia(cur)) {
+      nmMap.set(nomeNorm, { ...val, pinned: Boolean(val.pinned || cur?.pinned) });
+    } else if (cur) {
+      cur.pinned = Boolean(cur.pinned || val.pinned);
+    }
     byInstNomeComFone.set(inst, nmMap);
   }
 
@@ -109,7 +129,11 @@ function dedupeConversas(arr){
     if (!nomeNorm){
       const key = `${inst}:__no_phone__:${c.id ?? c.conversation_id ?? Math.random()}`;
       const cur = byFone.get(key);
-      if (!cur || scoreRecencia(c) > scoreRecencia(cur)) byFone.set(key, c);
+      if (!cur || scoreRecencia(c) > scoreRecencia(cur)) {
+        byFone.set(key, { ...c, pinned: Boolean(c.pinned || cur?.pinned) });
+      } else if (cur) {
+        cur.pinned = Boolean(cur.pinned || c.pinned);
+      }
       continue;
     }
 
@@ -131,10 +155,16 @@ function dedupeConversas(arr){
           comFone.last_ack = Math.max(Number(comFone.last_ack||0), Number(c.last_ack||0));
         }
       }
+      // sempre preserve pin
+      comFone.pinned = Boolean(comFone.pinned || c.pinned);
     } else {
       const onlyMap = byInstNomeOnly.get(inst) || new Map();
       const cur = onlyMap.get(nomeNorm);
-      if (!cur || scoreRecencia(c) > scoreRecencia(cur)) onlyMap.set(nomeNorm, c);
+      if (!cur || scoreRecencia(c) > scoreRecencia(cur)) {
+        onlyMap.set(nomeNorm, { ...c, pinned: Boolean(c.pinned || cur?.pinned) });
+      } else if (cur) {
+        cur.pinned = Boolean(cur.pinned || c.pinned);
+      }
       byInstNomeOnly.set(inst, onlyMap);
     }
   }
@@ -143,7 +173,11 @@ function dedupeConversas(arr){
     for (const [nomeNorm, item] of onlyMap.entries()){
       const key = `${inst}:__name_only__:${nomeNorm}`;
       const cur = byFone.get(key);
-      if (!cur || scoreRecencia(item) > scoreRecencia(cur)) byFone.set(key, item);
+      if (!cur || scoreRecencia(item) > scoreRecencia(cur)) {
+        byFone.set(key, { ...item, pinned: Boolean(item.pinned || cur?.pinned) });
+      } else if (cur) {
+        cur.pinned = Boolean(cur.pinned || item.pinned);
+      }
     }
   }
 
@@ -190,7 +224,10 @@ export function normalizeCliente(c){
     last_ack:  c.ultima_ack  ?? c.last_ack  ?? c.ack  ?? null,
 
     instancia_id: inst,
-    instancia: inst
+    instancia: inst,
+
+    // NEW: vem do backend (/conversas). Also accept legados.
+    pinned: Boolean(c.pinned || c.fixado || c.pin || false),
   };
 }
 
@@ -263,7 +300,7 @@ export async function carregarClientes({ force=false } = {}){
 
   let cs = items.map(normalizeCliente).filter(_matchInstancia);
 
-  // preserva campos do cache anterior (ack/preview/hora) e canônica de hora
+  // preserva campos do cache anterior (ack/preview/hora/pinned) e canônica de hora
   const antigo = Array.isArray(state.clientesCache)?state.clientesCache:[];
   cs.forEach(n=>{
     const a = antigo.find(x=> (x.id??x.conversation_id) === n.id);
@@ -297,9 +334,12 @@ export async function carregarClientes({ force=false } = {}){
       if (!temValor(n.last_ack)) n.last_ack = a.last_ack;
       else n.last_ack = Math.max(Number(n.last_ack)||0, Number(a.last_ack)||0);
     }
+
+    // preserve PIN vindo do backend OU do cache local
+    n.pinned = Boolean(n.pinned || a?.pinned);
   });
 
-  // DEDUPE FORTE
+  // DEDUPE FORTE (preserva .pinned)
   cs = dedupeConversas(cs);
 
   state.clientesCache = cs;
@@ -364,7 +404,10 @@ export async function loadMoreConversas(){
   const map = new Map(state.clientesCache.map(c => [String((c.conversation_id ?? c.id)), c]));
   for (const it of mais){
     const key = String(it.conversation_id ?? it.id);
-    map.set(key, { ...(map.get(key)||{}), ...it });
+    const prev = map.get(key) || {};
+    const merged = { ...prev, ...it };
+    merged.pinned = Boolean((prev && prev.pinned) || it.pinned); // garante que não descrafinha o pin
+    map.set(key, merged);
   }
 
   const arr = dedupeConversas([...map.values()]);
@@ -454,8 +497,10 @@ export function renderListaClientes(data){
       ? `<span class="avatar"><img src="${c.avatar_url}" alt="" onerror="this.onerror=null;this.parentElement.classList.add('placeholder');this.remove();" /></span>`
       : `<span class="avatar placeholder"><i class="fa fa-user-circle"></i></span>`;
 
+    const pinClass = c.pinned ? ' is-pinned' : '';
+
     return `
-      <li class="chat-item cliente-item"
+      <li class="chat-item cliente-item${pinClass}"
           id="chat-${c.id}"
           data-id="${c.id}"
           data-last-outbound="${outbound ? '1' : '0'}"
@@ -542,6 +587,6 @@ if (!window.Lista) {
 
 /* === Exports globais úteis (alguns módulos chamam via window) === */
 try {
-  window.renderListaClientes = renderListaClientes;
+  window.renderListaClientes?.(window.state?.clientesCache || []);
   window.carregarClientes = carregarClientes;
 } catch {}

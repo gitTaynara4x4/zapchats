@@ -194,17 +194,27 @@
               : [];
 
     return raw.map(i=>{
+      // id pode vir com vários nomes
       const id =
-        Number(i.id ?? i.instance_id ?? i.ID ?? i.pk ?? i.instancia_id ?? i.whatsapp_id);
+        Number(
+          i.id ?? i.instance_id ?? i.instancia_id ?? i.ID ?? i.pk ?? i.whatsapp_id
+        );
+
+      // nome pode vir como "apelido", "instance_name", "slug", etc.
+      const slugLike = String(i.instance_name ?? i.slug ?? '').trim();
       const nome = String(
-        i.nome ?? i.name ?? i.alias ?? i.label ?? i.sessionName ?? i.instance ?? i.titulo ?? `Instância ${id || ''}`
+        i.apelido ?? i.nome ?? i.name ?? i.alias ?? i.label ??
+        i.sessionName ?? i.instance ?? i.titulo ?? slugLike || (id ? `Instância ${id}` : '')
       ).trim();
+
+      // número também muda de chave em APIs diferentes
       const numero = String(
-        i.numero ?? i.number ?? i.phone ?? i.msisdn ?? i.whatsapp ?? i.msisdn_number ?? ''
+        i.numero_instancia ?? i.numero ?? i.number ?? i.phone ??
+        i.msisdn ?? i.whatsapp ?? i.msisdn_number ?? ''
       ).replace(/[^\d+]/g,'');
 
-      return { id, nome, numero };
-    }).filter(x => Number.isFinite(x.id));
+      return (Number.isFinite(id) || nome) ? { id, nome, numero } : null;
+    }).filter(Boolean);
   }
 
   async function loadInstanciasWhats(){
@@ -997,24 +1007,43 @@
   }
 
   function bindWhats(){
-    // ancoragem segura do dropdown dentro do bloco
-    $('#fi-whats .multi')?.style && ($('#fi-whats .multi').style.position = 'relative');
+    // garante o posicionamento do dropdown
+    const multi = $('#fi-whats .multi');
+    if (multi && multi.style) multi.style.position = 'relative';
 
-    // 🔧 listener ÚNICO do botão — carrega antes de abrir
-    whatsBtn?.addEventListener('click', async () => {
-      if (!state.instanciasLoaded) await loadInstanciasWhats(); // carrega se ainda não carregou
-      toggleWhatsPanel(); // abre/fecha
-      if (whatsPanel.classList.contains('open')) whatsSearch?.focus();
+    // 🔒 evita registrar mais de uma vez
+    if (bindWhats._bound) return;
+    bindWhats._bound = true;
+
+    // Abre/fecha ao clicar no botão (delegação global)
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest?.('#whats-btn');
+      if (!btn) return;
+
+      // abre imediatamente
+      toggleWhatsPanel();
+
+      // carrega em paralelo, sem travar o abrir
+      if (!state.instanciasLoaded) {
+        loadInstanciasWhats().catch(console.error);
+      }
+
+      // foca a busca se abriu
+      if (whatsPanel?.classList.contains('open')) {
+        whatsSearch?.focus();
+      }
     });
 
+    // Busca no dropdown
     whatsSearch?.addEventListener('input', debounce(renderWhatsList, 80));
 
-    // fechar ao clicar fora / scrollar / ESC
+    // Fecha ao clicar fora / rolar / ESC / resize
     const ddCloseIfOutside = (e)=>{
       if (!whatsPanel?.classList.contains('open')) return;
       if (!e.target.closest?.('#fi-whats')) toggleWhatsPanel(false);
     };
     document.addEventListener('pointerdown', ddCloseIfOutside);
+
     const modalBody = document.querySelector('#modal-depto .modal-body');
     modalBody?.addEventListener('scroll', ()=> toggleWhatsPanel(false));
     document.addEventListener('keydown', (e)=>{ if (e.key==='Escape') toggleWhatsPanel(false); });

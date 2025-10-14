@@ -1,8 +1,10 @@
-# backend/routers/chatbot_config.py
 from __future__ import annotations
 from typing import Any, Dict, Optional
-
 from datetime import time as dtime
+import os
+import logging
+import traceback
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, and_
 from sqlalchemy.orm import Session
@@ -10,9 +12,30 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.database import get_db
 from backend import models
-import os
 
 router = APIRouter(prefix="/api/chatbot", tags=["ChatBot – Config"])
+
+# =========================
+# logging
+# =========================
+_LOGLEVEL = os.getenv("CHATBOT_CFG_LOGLEVEL", "INFO").upper()
+logger = logging.getLogger("chatbot_config")
+if not logger.handlers:
+    logging.basicConfig(
+        level=getattr(logging, _LOGLEVEL, logging.INFO),
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
+logger.setLevel(getattr(logging, _LOGLEVEL, logging.INFO))
+
+
+def _fmt_err(e: Exception) -> str:
+    base = f"{e.__class__.__name__}: {e}"
+    try:
+        tb = "".join(traceback.format_exception(type(e), e, e.__traceback__))[-800:]
+        return f"{base}\n{tb}"
+    except Exception:
+        return base
+
 
 # =========================
 # helpers (gerais)
@@ -120,7 +143,7 @@ def _safe_select_chatbot_config(db: Session, empresa_id: int, instancia_id: int)
             )
         ).scalar_one_or_none()
     except Exception as e:
-        print("\033[33m[CHATBOT_CONFIG] WARN select falhou:", repr(e), "\033[0m")
+        logger.warning("[CHATBOT_CONFIG] select falhou: %s", _fmt_err(e))
         return None
 
 
@@ -135,7 +158,9 @@ def _parse_hhmm(val: Optional[str]) -> Optional[dtime]:
         return None
     try:
         h, m = map(int, s.split(":", 1))
-        return dtime(h, m)
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            return dtime(h, m)
+        return None
     except Exception:
         return None
 
@@ -150,8 +175,6 @@ def _tz_from_config(cfg: Dict[str, Any]) -> Optional[str]:
         tz = (cfg.get("features", {}).get("auto_messages", {}) or {}).get("timezone")
     if tz:
         return str(tz)
-    # fallback opcional (apenas se você quiser sempre salvar algo):
-    # return os.getenv("APP_TZ") or os.getenv("TZ") or "America/Sao_Paulo"
     return None
 
 
@@ -180,21 +203,30 @@ def _extract_auto_fields(cfg_in: Dict[str, Any]) -> dict:
 def _apply_columns_from_config(row: models.ChatbotConfig, cfg_in: Dict[str, Any]) -> None:
     """
     Aplica os campos extraídos do JSON nas colunas do modelo.
+    • Quando uma seção estiver OFF, zera start/end (evita violações).
     """
     fields = _extract_auto_fields(cfg_in)
 
-    # timezone (pode ser None se não veio)
-    row.tz = fields["tz"]
+    # timezone (se sua coluna for NOT NULL e você quiser fallback garantido, descomente a linha seguinte)
+    row.tz = fields["tz"]  # or os.getenv("APP_TZ") or os.getenv("TZ") or "Etc/UTC"
 
     # welcome
     row.welcome_enabled = fields["welcome_enabled"]
-    row.welcome_start   = fields["welcome_start"]
-    row.welcome_end     = fields["welcome_end"]
+    if row.welcome_enabled:
+        row.welcome_start = fields["welcome_start"]
+        row.welcome_end = fields["welcome_end"]
+    else:
+        row.welcome_start = None
+        row.welcome_end = None
 
     # off-hours
-    row.off_enabled     = fields["off_enabled"]
-    row.off_start       = fields["off_start"]
-    row.off_end         = fields["off_end"]
+    row.off_enabled = fields["off_enabled"]
+    if row.off_enabled:
+        row.off_start = fields["off_start"]
+        row.off_end = fields["off_end"]
+    else:
+        row.off_start = None
+        row.off_end = None
 
 
 # =========================
@@ -212,6 +244,10 @@ def get_config(
     """
     row = _safe_select_chatbot_config(db, empresa_id, instancia_id)
     cfg_raw = row.config if row and getattr(row, "config", None) else {}
+    logger.info(
+        "GET /api/chatbot/config emp=%s inst=%s -> has=%s",
+        empresa_id, instancia_id, bool(cfg_raw),
+    )
     return {"empresa_id": empresa_id, "instancia_id": instancia_id, "config": cfg_raw or {}}
 
 
@@ -228,18 +264,29 @@ def put_config(
 
     O front continua mandando: { "config": { features: { auto_messages: {...} } } }.
     """
+    logger.info("PUT /api/chatbot/config emp=%s inst=%s", empresa_id, instancia_id)
+
     if not isinstance(payload, dict) or "config" not in payload:
+        logger.warning("PUT config payload inválido: sem 'config'")
         raise HTTPException(status_code=400, detail="Envie um objeto { config: {...} }")
 
     cfg_in = payload.get("config") or {}
     if not isinstance(cfg_in, dict):
+        logger.warning("PUT config campo 'config' não é objeto")
         raise HTTPException(status_code=400, detail="Campo 'config' inválido")
 
-    # 1) Exclusividade entre blocos
+    # 1) Exclusividade entre blocos (server-side safety)
     _exclusive_server_guard(cfg_in)
 
     # 2) Reduz o que será guardado no JSON
     to_store = _prune_for_storage(cfg_in)
+
+    logger.debug(
+        "PUT config (sanitized): ativo=%s au=%s ad=%s",
+        cfg_in.get("ativo", None),
+        bool(to_store.get("features", {}).get("auto_messages")),
+        bool(to_store.get("features", {}).get("auto_messages_departments")),
+    )
 
     # 3) Upsert + refletir colunas
     row = _safe_select_chatbot_config(db, empresa_id, instancia_id)
@@ -252,7 +299,6 @@ def put_config(
             config=to_store,
             ativo=bool(cfg_in.get("ativo", True)),
         )
-        # refletir colunas a partir do JSON bruto (não o prunado)
         _apply_columns_from_config(row, cfg_in)
         db.add(row)
     else:
@@ -264,15 +310,29 @@ def put_config(
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        # Erro de integridade (ex.: NOT NULL). Exponha com 400 p/ o front tratar.
-        raise HTTPException(status_code=400, detail=f"Falha ao salvar config: {e.orig}")
+        msg = f"Falha ao salvar config (violação de integridade)."
+        logger.error("%s emp=%s inst=%s err=%s", msg, empresa_id, instancia_id, _fmt_err(e))
+        # devolve detalhes úteis pro front formatar
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": msg,
+                "db_error": str(getattr(e, "orig", e)),
+            },
+        )
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Erro ao salvar config: {repr(e)}")
+        msg = "Erro inesperado ao salvar config."
+        logger.exception("%s emp=%s inst=%s err=%s", msg, empresa_id, instancia_id, _fmt_err(e))
+        raise HTTPException(
+            status_code=500,
+            detail={"message": msg, "error": str(e)},
+        )
 
     try:
         db.refresh(row)
     except Exception:
         pass
 
+    logger.info("PUT config OK emp=%s inst=%s creating=%s", empresa_id, instancia_id, creating)
     return {"empresa_id": empresa_id, "instancia_id": instancia_id, "config": row.config or {}}

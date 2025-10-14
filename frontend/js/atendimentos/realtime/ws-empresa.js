@@ -1,4 +1,3 @@
-// /frontend/js/atendimentos/realtime/ws-empresa.js
 // WebSocket da EMPRESA: nova mensagem, ACK (formatos variados), reload, backoff + heartbeat
 
 import { tsToMillis } from '../core/time.js';
@@ -293,6 +292,41 @@ function handleNovaMensagem(payload){
   if (DEBUG_WS) console.debug('[WS MSG]', { cliente_id, inst, merged, passesInst, openNow, texto: msg.conteudo });
 }
 
+/* === NOVO: status da conversa vindo do backend (bot/no_bot/automático etc.) === */
+function normalizeConvStatus(s){
+  const v = String(s || '').toLowerCase();
+  if (['bot','no_bot','automatico','automático'].includes(v)) return 'bot';
+  return v || 'bot';
+}
+function handleConvStatus(payload){
+  const inst = pickInstanciaId(payload);
+  const cliente_id = pickClienteId(payload);
+  if (!cliente_id) return;
+  const status = normalizeConvStatus(payload?.status);
+
+  const passesInst = _matchInstancia({ instancia_id: inst });
+  const openNow = isOpenChat(cliente_id, inst);
+  if (!ALWAYS_ACCEPT_WS && !passesInst && !openNow) return;
+
+  // atualiza caches de lista
+  let c = findCliente(cliente_id) || { id: Number(cliente_id), cliente_id: Number(cliente_id), conversation_id: Number(cliente_id) };
+  c.status = status;
+  c.statusatendimento = status;
+  const [g, s] = bothCaches(); upsertIn(g, c); upsertIn(s, c);
+
+  // seta no DOM para o fallback dos filtros
+  try{
+    const li = document.querySelector(`li.chat-item[data-id="${cliente_id}"]`);
+    if (li) li.dataset.status = status;
+  }catch{}
+
+  // avisa a lista / UI
+  try { window.Lista?.updatePreview?.(cliente_id, { status, statusatendimento: status }); } catch {}
+  try { document.dispatchEvent(new CustomEvent('ws:conv_status', { detail: { cliente_id, instancia_id: inst, status }})); } catch {}
+
+  if (DEBUG_WS) console.debug('[WS CONV_STATUS]', { cliente_id, inst, status });
+}
+
 /* ========================= dispatcher ========================= */
 function handleMessage(ev){
   if (typeof ev?.data === 'string' && (ev.data === 'pong' || ev.data === 'ping')) return;
@@ -318,6 +352,9 @@ function handleMessage(ev){
     try { window.loadInstances?.(EMPRESA_ID); } catch {}
     return;
   }
+
+  // === NOVO: status de conversa
+  if (data.type === 'conv_status'){ handleConvStatus(data); return; }
 
   // processa ACK (mesmo se vier junto com texto)
   const maybeAck = pickAck(data);

@@ -36,6 +36,16 @@
       background:var(--ok); transition:width .18s ease; border-radius:.5rem; z-index:0;
     }
     .btn-progress .btn-text{ position:relative; z-index:1; }
+
+    /* Dialog elegante (substitui alert) */
+    .soft-modal{ position:fixed; inset:0; z-index:60; display:grid; place-items:center; padding:16px; background:rgba(0,0,0,.45); backdrop-filter:blur(2px); }
+    .soft-panel{ width:100%; max-width:460px; border-radius:18px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.45); }
+    .soft-panel .hd{ padding:16px 18px; font-weight:700; background:linear-gradient(180deg,rgba(99,102,241,.25),rgba(99,102,241,.05)); color:#fff; }
+    .soft-panel .bd{ padding:18px; background:#0b0b0e; color:#e5e7eb; }
+    .soft-panel .ft{ padding:14px 18px; background:#0b0b0e; display:flex; justify-content:flex-end; gap:8px; border-top:1px solid rgba(255,255,255,.07); }
+    html:not(.dark) .soft-panel .bd, html:not(.dark) .soft-panel .ft{ background:#ffffff; color:#1f2937; }
+    .btn-primary{ background:#ec4899; color:white; font-weight:700; padding:10px 16px; border-radius:12px; }
+    .btn-primary:disabled{ opacity:.7; cursor:not-allowed; }
   </style>
 </head>
 <body class="min-h-screen bg-green-50 dark:bg-neutral-950 flex items-center justify-center text-neutral-800 dark:text-neutral-200">
@@ -71,7 +81,7 @@
         <p class="text-gray-500 dark:text-gray-400">Receba um token no e-mail e crie uma nova senha.</p>
       </div>
 
-      <!-- Toast (erros e avisos) -->
+      <!-- Toast (erros, avisos e sucesso) -->
       <div id="toast" class="hidden mb-4 rounded-lg border px-4 py-3 text-sm"></div>
 
       <!-- Passo 1 -->
@@ -155,6 +165,21 @@
     </div>
   </div>
 
+  <!-- Dialog container -->
+  <div id="ok-dialog" class="hidden soft-modal">
+    <div class="soft-panel ring-1 ring-white/10 dark:ring-white/10">
+      <div class="hd">zapchats.com.br</div>
+      <div class="bd">
+        <div id="ok-dialog-msg" class="leading-relaxed">
+          <!-- message injected -->
+        </div>
+      </div>
+      <div class="ft">
+        <button id="ok-dialog-btn" class="btn-primary">OK</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     // Tema
     (function(){
@@ -170,13 +195,26 @@
     const toast = document.getElementById('toast');
     function showToast(msg, variant='error'){
       const styles={
-        error:'border-red-300 bg-red-50 text-red-800 dark:bg-red-900/25 dark:border-red-800 dark:text-red-200',
-        warn :'border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-200'
+        error  :'border-red-300 bg-red-50 text-red-800 dark:bg-red-900/25 dark:border-red-800 dark:text-red-200',
+        warn   :'border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-200',
+        success:'border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/25 dark:border-emerald-800 dark:text-emerald-200'
       };
       toast.className='mb-4 rounded-lg border px-4 py-3 text-sm '+(styles[variant]||styles.error);
       toast.textContent=msg; toast.classList.remove('hidden');
     }
     function hideToast(){ toast.classList.add('hidden'); toast.textContent=''; }
+
+    // Dialog (substitui alert)
+    const dlg = document.getElementById('ok-dialog');
+    const dlgMsg = document.getElementById('ok-dialog-msg');
+    const dlgBtn = document.getElementById('ok-dialog-btn');
+    function openDialog(message, onOk){
+      dlgMsg.textContent = message || '';
+      dlg.classList.remove('hidden');
+      function close(){ dlg.classList.add('hidden'); dlgBtn.removeEventListener('click', handler); }
+      function handler(){ close(); if(typeof onOk==='function') onOk(); }
+      dlgBtn.addEventListener('click', handler);
+    }
 
     // Progress helpers
     function setBtnProg(btn,pct){ btn.style.setProperty('--prog',Math.max(0,Math.min(100,pct))+'%'); }
@@ -227,43 +265,37 @@
       const stop = startProgress(btnForgot);
 
       try{
-        // aguarda resposta e pelo menos 3.5s de animação
         const fetchPromise = fetch('/api/auth/forgot-password',{
           method:'POST', headers:{'Content-Type':'application/json'},
           body:JSON.stringify({email})
         });
 
-        const res = await Promise.race([fetchPromise, fetchPromise]); // só pra reusar a mesma promise
+        const res = await Promise.race([fetchPromise, fetchPromise]);
         await minDelay(3500);
 
-        // 429 (muitas tentativas no servidor)
         if(res.status===429){
-          stop(); finishProgress(btnForgot); await minDelay(1000);
+          stop(); finishProgress(btnForgot); await minDelay(800);
           showToast('Muitas tentativas. Tente novamente mais tarde.','warn');
           return;
         }
-
-        // 404 → e-mail não cadastrado (mensagem explícita)
         if(res.status===404){
-          stop(); finishProgress(btnForgot); await minDelay(1000);
+          stop(); finishProgress(btnForgot); await minDelay(800);
           showToast('E-mail não cadastrado.');
           return;
         }
-
-        // outros erros
         if(!res.ok){
-          stop(); finishProgress(btnForgot); await minDelay(1000);
+          stop(); finishProgress(btnForgot); await minDelay(800);
           let msg='Não foi possível enviar agora.';
           try{ const j=await res.json(); msg=j.detail||msg; }catch{}
           showToast(msg);
           return;
         }
 
-        // sucesso → mostra dicas e passo 2
-        stop(); finishProgress(btnForgot); await minDelay(1000);
+        stop(); finishProgress(btnForgot); await minDelay(600);
         tips.classList.remove('hidden');
         document.getElementById('reset-section').classList.remove('hidden');
         document.getElementById('token').focus();
+        showToast('Se o e-mail existir, o token foi enviado.','success');
       }catch{
         stop(); setBtnProg(btnForgot,0);
         showToast('Erro de conexão. Tente novamente.');
@@ -295,14 +327,28 @@
       const token=inputTok.value.trim(), nova_senha=inputPass.value.trim();
       btnReset.disabled=true; const t=btnReset.querySelector('.btn-text'); const old=t.textContent; t.textContent='Atualizando…';
       try{
-        const res=await fetch('/api/auth/reset-password',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({token,nova_senha}) });
-        if(!res.ok){ let msg='Não foi possível redefinir a senha.'; try{const j=await res.json(); msg=j.detail||msg;}catch{} showToast(msg); return; }
-        alert('Senha redefinida! Você já pode entrar com a nova senha.');
-        // como deu certo, “perdoa” tentativas locais desse e-mail
+        const res=await fetch('/api/auth/reset-password',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({token,nova_senha})
+        });
+        if(!res.ok){
+          let msg='Não foi possível redefinir a senha.';
+          try{const j=await res.json(); msg=j.detail||msg;}catch{}
+          showToast(msg);
+          return;
+        }
+
+        // sucesso: dialog bonito (sem alert do navegador)
         resetTries((emailInput.value||'').trim().toLowerCase());
-        window.location.href='/login';
-      }catch{ showToast('Falha de conexão. Tente novamente.'); }
-      finally{ btnReset.disabled=false; t.textContent=old; }
+        openDialog('Senha redefinida! Você já pode entrar com a nova senha.', function(){
+          window.location.href='/login';
+        });
+      }catch{
+        showToast('Falha de conexão. Tente novamente.');
+      } finally {
+        btnReset.disabled=false; t.textContent=old;
+      }
     });
   </script>
 </body>

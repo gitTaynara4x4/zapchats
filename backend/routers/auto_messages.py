@@ -1,4 +1,3 @@
-# backend/routers/auto_messages.py
 # ─────────────────────────────────────────────────────────────────────────────
 # Módulo de "auto mensagens" SEM rotas HTTP (webhook). Uso interno por WS/Rabbit.
 # Chame:
@@ -25,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import SessionLocal
 from backend import models
+from backend.websocket_manager import conexoes_ativas  # ← WS para emitir conv_status
 
 # --------------------------------------------------------------------------
 # Redis helpers (no-op se não houver Redis)
@@ -152,7 +152,7 @@ def is_within(start_hhmm: str, end_hhmm: str, now_dt: datetime) -> bool:
 def _hms_or_none(v) -> Optional[str]:
     """
     Converte coluna (Time/str) para "HH:MM" ou None.
-    - Aceita datetime.time, "HH:MM" ou None/"".
+    - Aceita datetime.time, "HH:MM" ou None/""
     """
     if v is None:
         return None
@@ -245,6 +245,32 @@ def _last_activity_at_for_atendimento(db: Session, atendimento_id: int) -> Optio
     ).scalar_one_or_none()
     logger.debug("last_activity via atendimento.updated_at=%s%s", base, _ctx_str(atendimento_id=atendimento_id))
     return base
+
+# Persistência “soft” do status bot (não toca atendimentos; tenta tabela conversas)
+def _persist_bot_status_soft(
+    db: Session, *, empresa_id: int, instancia_id: int, cliente_id: int
+) -> bool:
+    """
+    Tenta marcar a conversa como 'bot' na tabela 'conversas' (se existir).
+    Não altera 'atendimentos' para evitar conflito com enums.
+    Retorna True se alguma linha foi atualizada.
+    """
+    try:
+        res = db.execute(
+            sqltext("""
+                UPDATE conversas
+                   SET status = :st, updated_at = NOW()
+                 WHERE empresa_id = :emp
+                   AND instancia_id = :inst
+                   AND cliente_id = :cli
+            """),
+            {"st": "bot", "emp": empresa_id, "inst": instancia_id, "cli": cliente_id},
+        )
+        db.commit()
+        return bool(getattr(res, "rowcount", 0) and res.rowcount > 0)
+    except Exception:
+        db.rollback()
+        return False
 
 # --------------------------------------------------------------------------
 # Carregar config direto do BD (uso interno WS/Rabbit)
@@ -401,6 +427,7 @@ async def maybe_send_auto_message_async(
     • Envia SOMENTE na primeira mensagem de entrada do cliente (cnt == 1).
     • Após enviar, seta um flag no Redis para o evo_handlers ignorar a
       promoção de status causada por essa auto-mensagem específica.
+    • Também emite WS "conv_status" = "bot" para a conversa.
     """
     corr = str(uuid.uuid4())
     logger.info("MAYBE begin%s", _ctx_str(cid=corr, empresa_id=empresa_id, instancia_id=instancia_id,
@@ -460,6 +487,29 @@ async def maybe_send_auto_message_async(
                 logger.debug("MAYBE set ignore flag ttl=%s%s", _AUTO_IGNORE_TTL, _ctx_str(cid=corr, key=key))
             except Exception:
                 logger.debug("MAYBE ignore flag falhou (segue sem bloquear promoção)%s", _ctx_str(cid=corr))
+
+            # 6.2) 🔔 WS: marcar conversa como "bot" para aparecer no filtro "No bot"
+            try:
+                await conexoes_ativas.send_message(
+                    f"emp:{empresa_id}",
+                    {
+                        "type": "conv_status",
+                        "cliente_id": cliente_id,
+                        "instancia_id": instancia_id,
+                        "status": "bot",
+                        "origin": "auto_messages"
+                    }
+                )
+            except Exception:
+                logger.exception("MAYBE conv_status WS falhou%s", _ctx_str(cid=corr))
+
+            # 6.3) Persistência “soft” (se houver tabela conversas)
+            try:
+                ok = _persist_bot_status_soft(db, empresa_id=empresa_id, instancia_id=instancia_id, cliente_id=cliente_id)
+                if not ok:
+                    logger.debug("MAYBE persist_bot: nenhuma linha atualizada (tabela conversas ausente?)%s", _ctx_str(cid=corr))
+            except Exception:
+                logger.exception("MAYBE persist_bot erro%s", _ctx_str(cid=corr))
 
             return {"sent": True, "text": text, "result": result}
         except Exception as e:

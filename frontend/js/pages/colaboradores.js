@@ -80,6 +80,9 @@
     // criação via modal de perfil
     newAvatarFile: null,    // arquivo escolhido no hint (modo "novo")
 
+    // instâncias (WhatsApp)
+    instsCache: null,       // [{id, slug, name, number, connected}]
+
     // exibir erros de validação só depois da 1ª tentativa de salvar
     showErrors: false
   };
@@ -126,11 +129,11 @@
 
   // Modal PERFIL
   const perfilModal  = $('#modal-perfil');
-  const pClose       = $('#perfil-fechar');
+  const pClose       = $('#perfil-fechar');    // (fica oculto; usamos fechar do rodapé)
   const pClose2      = $('#perfil-fechar2');
   const pEdit        = $('#perfil-editar');
-  const pSave        = $('#perfil-salvar');
-  const pCancel      = $('#perfil-cancelar');
+  const pSave        = $('#perfil-salvar');    // topo (oculto no layout)
+  const pCancel      = $('#perfil-cancelar');  // topo (oculto no layout)
   const pTitle       = $('#perfil-title');
 
   // avatar + status
@@ -167,7 +170,7 @@
       pSaveFoot.type = 'button';
       pSaveFoot.innerHTML = '<i class="fa fa-check"></i> Salvar';
       pSaveFoot.addEventListener('click', saveInline);
-      footEl.insertBefore(pSaveFoot, footEl.lastElementChild);
+      footEl.insertBefore(pSaveFoot, footEl.lastElementChild); // antes do fechar padrão
     }
     if (!pCancelFoot){
       pCancelFoot = document.createElement('button');
@@ -222,7 +225,192 @@
     s.className='chip'; s.textContent=text; return s;
   }
 
-  // Mapeia nomes alternativos vindos da API
+  // ====== Instâncias (WhatsApp) ======
+  function normInstances(items){
+    if (!Array.isArray(items)) return [];
+    return items.map(x=>{
+      const id   = (x.id!=null) ? Number(x.id)
+                : (x.instancia_id!=null ? Number(x.instancia_id) : null);
+      const slug = String(x.instance_name ?? x.slug ?? x.nome ?? '').trim();
+      const name = String((x.apelido ?? x.name ?? x.nome ?? slug) || '').trim();
+      const number = x.numero_instancia ?? x.numero ?? null;
+      const connected = !!x.connected || !!x.online || (String(x.status||'').toLowerCase()==='connected');
+      return (id || slug) ? { id, slug, name: name || slug, number, connected } : null;
+    }).filter(Boolean);
+  }
+  async function fetchInstances(){
+    if (state.instsCache) return state.instsCache;
+    let arr = [];
+    if (EMPRESA_ID){
+      try{
+        const data = await apiGet(`/api/empresas/${EMPRESA_ID}/whatsapp`);
+        arr = normInstances(Array.isArray(data?.instancias) ? data.instancias : (Array.isArray(data) ? data : []));
+      }catch(e){ console.warn('instancias whatsapp', e); }
+    }
+    if (!arr.length){
+      const fallbacks = ['/api/atendimento/instances','/api/instances'];
+      for (const url of fallbacks){
+        try{
+          const d = await apiGet(url);
+          const items = Array.isArray(d?.items) ? d.items : (Array.isArray(d) ? d : []);
+          arr = normInstances(items);
+          if (arr.length) break;
+        }catch{}
+      }
+    }
+    state.instsCache = arr;
+    return arr;
+  }
+  function coalesceInstIds(c){
+    // aceita vários formatos vindos do back
+    const raw = c?.instancias_ids ?? c?.instances_ids ?? c?.whatsapp_instancias_ids
+             ?? c?.whatsapp_ids ?? c?.whatsapps_ids ?? c?.instancias ?? c?.instances ?? null;
+    if (!raw) return [];
+    if (Array.isArray(raw)){
+      if (raw.length && typeof raw[0] === 'object'){
+        return raw.map(x=> Number(x.id ?? x.instancia_id ?? x.instance_id ?? x.value))
+                  .filter(n=> !Number.isNaN(n));
+      }
+      return raw.map(x=> Number(x)).filter(n=> !Number.isNaN(n));
+    }
+    if (typeof raw === 'string'){
+      try{
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) return arr.map(Number).filter(n=> !Number.isNaN(n));
+      }catch{}
+      return raw.split(',').map(s=>Number(s.trim())).filter(n=>!Number.isNaN(n));
+    }
+    return [];
+  }
+  function getInstsSelecionadasEdit(){
+    return [...document.querySelectorAll('#e-insts input[name="inst-edit"]:checked')]
+      .map(i => Number(i.value))
+      .filter(n => !Number.isNaN(n));
+  }
+  async function saveInsts(id, ids){
+    // Tenta salvar pelo endpoint dedicado; se não tiver, envia no PUT do colaborador
+    try{
+      await apiJSON(`/api/colaboradores/${id}/instancias`, 'PUT', { instancias_ids: ids });
+      return true;
+    }catch(e1){
+      try{
+        await apiJSON(`/api/colaboradores/${id}`, 'PUT', { instancias_ids: ids });
+        return true;
+      }catch(e2){
+        try{
+          await apiJSON(`/api/colaboradores/${id}/whatsapp`, 'PUT', { instancias_ids: ids });
+          return true;
+        }catch(e3){
+          console.warn('falha ao salvar instancias', e1, e2, e3);
+          return false;
+        }
+      }
+    }
+  }
+
+  // cria/garante a seção (títulos, área de visualização e de edição)
+  function ensureInstsSection(){
+    let wrap = document.getElementById('insts-wrap');
+    if (!wrap){
+      wrap = document.createElement('div');
+      wrap.id = 'insts-wrap';
+      wrap.className = 'fieldbox';
+      wrap.innerHTML = `
+        <label style="display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap">
+          Este atendente pode ter acesso às conversas de quais WhatsApps?
+          <span class="muted">(marque um ou mais — opcional)</span>
+        </label>
+
+        <div id="inst-actions" style="display:none;gap:.5rem;margin:.35rem 0 .5rem 0">
+          <button type="button" id="inst-select-all" class="btn btn-ghost" style="padding:.25rem .5rem;font-size:.85rem">Selecionar todos</button>
+          <button type="button" id="inst-clear" class="btn btn-ghost" style="padding:.25rem .5rem;font-size:.85rem">Limpar</button>
+        </div>
+
+        <div id="e-insts" style="display:none;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.5rem"></div>
+        <div id="d-insts" class="chips" style="display:flex;flex-wrap:wrap;gap:.5rem"></div>
+      `;
+      // insere antes do bloco de permissões (se existir)
+      if (ePerms && ePerms.parentElement){
+        ePerms.parentElement.insertBefore(wrap, ePerms);
+      } else {
+        perfilModal?.querySelector('.body')?.appendChild(wrap);
+      }
+    }
+    return wrap;
+  }
+  async function renderInstsView(colab){
+    const wrap = ensureInstsSection();
+    const chipsWrap = wrap.querySelector('#d-insts');
+    const editGrid  = wrap.querySelector('#e-insts');
+    const actions   = wrap.querySelector('#inst-actions');
+    // modo visualização
+    actions.style.display = 'none';
+    editGrid.style.display = 'none';
+    chipsWrap.style.display = 'flex';
+    chipsWrap.innerHTML = '';
+    const ids = coalesceInstIds(colab);
+    if (!ids.length){
+      chipsWrap.textContent = '—';
+      return;
+    }
+    const items = await fetchInstances();
+    ids.forEach(id=>{
+      const obj = items.find(x => Number(x.id)===Number(id));
+      const lbl = obj ? `${obj.name || obj.slug}${obj.number ? ' • '+obj.number : ''}` : `#${id}`;
+      chipsWrap.appendChild(chip(lbl));
+    });
+  }
+  async function ensureInstsEdit(){
+    const wrap = ensureInstsSection();
+    const chipsWrap = wrap.querySelector('#d-insts');
+    const editGrid  = wrap.querySelector('#e-insts');
+    const actions   = wrap.querySelector('#inst-actions');
+
+    chipsWrap.style.display = 'none';
+    editGrid.style.display  = 'grid';
+    actions.style.display   = 'flex';
+    editGrid.innerHTML = '<div class="muted">Carregando instâncias…</div>';
+
+    const items = await fetchInstances();
+    editGrid.innerHTML = '';
+
+    const current = new Set(coalesceInstIds(state.viewing).map(String));
+    if (!items.length){
+      editGrid.innerHTML = '<div class="muted">Nenhuma instância encontrada.</div>';
+    } else {
+      // conectadas primeiro
+      items.sort((a,b)=> (a.connected===b.connected) ? String(a.name).localeCompare(String(b.name),'pt-BR') : (a.connected? -1 : 1));
+      items.forEach(i=>{
+        if (i.id == null) return;
+        const lab = document.createElement('label');
+        lab.className = 'chk-line';
+        const labelTxt = [
+          i.name || i.slug,
+          i.number ? ` • ${i.number}` : '',
+          i.connected ? '' : ' • offline'
+        ].join('');
+        lab.innerHTML = `
+          <input type="checkbox" name="inst-edit" value="${i.id}">
+          <span>${labelTxt}</span>
+        `;
+        const cb = lab.querySelector('input');
+        if (cb && current.has(String(i.id))) cb.checked = true;
+        editGrid.appendChild(lab);
+      });
+    }
+
+    // ações
+    const selectAllBtn = wrap.querySelector('#inst-select-all');
+    const clearBtn     = wrap.querySelector('#inst-clear');
+    if (selectAllBtn){
+      selectAllBtn.onclick = ()=> editGrid.querySelectorAll('input[name="inst-edit"]').forEach(cb=> cb.checked = true);
+    }
+    if (clearBtn){
+      clearBtn.onclick = ()=> editGrid.querySelectorAll('input[name="inst-edit"]').forEach(cb=> cb.checked = false);
+    }
+  }
+
+  // ====== Mapeia nomes alternativos vindos da API ======
   function coalescePhone(c){
     return c.telefone ?? c.telefone_norm ?? c.phone ?? c.celular ?? c.whatsapp ?? c.fone
         ?? c.usuario?.telefone ?? c.user?.phone ?? '';
@@ -263,6 +451,9 @@
       badge.className = 'chip chip-admin';
       badge.textContent = 'Administrador';
       badge.style.marginLeft = '8px';
+      // borda verde
+      badge.style.border = '1px solid #22c55e';
+      badge.style.color  = '#22c55e';
       label.appendChild(badge);
     }
     badge.style.display = isAdminFlag(colab) ? '' : 'none';
@@ -309,7 +500,7 @@
   // ====== Render lista ======
   function renderSetores(){
     const filtroDepto = $('#filtro-depto');
-    const fSetor = $('#c-setor');
+    const fSetor = $('#c-setor'); // compat
     if (filtroDepto){
       const first = filtroDepto.querySelector('option');
       filtroDepto.innerHTML=''; if (first) filtroDepto.appendChild(first);
@@ -362,6 +553,7 @@
       pMono.parentElement.style.background = hashColor(nome||'ZapChats');
     }
   }
+  // Preferir avatar do colaborador; depois do usuário; por fim avatar_url do payload
   async function fetchAvatarURLFor(colab){
     try{
       const r1 = await authFetch(withEmpresa(`/api/colaboradores/${colab.id}/avatar`));
@@ -446,6 +638,9 @@
     if (permsList.length) permsList.forEach(p => dPerms.appendChild(chip(p)));
     else dPerms.textContent = '—';
 
+    // Instâncias (visual)
+    await renderInstsView(colab);
+
     // hint de avatar só no modo "create"
     avatarHint.style.display = (perfilModal.dataset.mode === 'create') ? 'grid' : 'none';
 
@@ -466,7 +661,7 @@
   function swapFieldbox(boxId, html){
     const wrap = document.getElementById(boxId);
     if (!wrap) return null;
-    if (!wrap.dataset.viewHtml) wrap.dataset.viewHtml = wrap.innerHTML;
+    if (!wrap.dataset.viewHtml) wrap.dataset.viewHtml = wrap.innerHTML; // cache
     wrap.classList.add('is-editing');
     wrap.innerHTML = html.trim();
     return wrap.firstElementChild;
@@ -480,6 +675,7 @@
     }
   }
 
+  // ---- validação ----
   function markValidity(input, isValid){
     if (!input) return;
     const wrap = input.closest('.fieldbox');
@@ -518,7 +714,7 @@
     const telDigits = digits(tel);
     const nomeOk  = nome.length >= 2;
     const setorOk = !!setor;
-    const telOk   = telDigits.length >= 10;
+    const telOk   = telDigits.length >= 10;   // 10/11 dígitos
     const cargoOk = cargo.length >= 2;
 
     if (!nomeOk)  msgs.push('• Nome completo (mín. 2 letras)');
@@ -527,6 +723,7 @@
     if (!telOk)   msgs.push('• Telefone com DDD (10–11 dígitos)');
     if (!cargoOk) msgs.push('• Cargo (mín. 2 letras)');
 
+    // marca visual apenas se deve mostrar
     markValidity(eNome,  show ? nomeOk  : true);
     markValidity(eEmail, show ? emailOk : true);
     if (eSetor) {
@@ -586,16 +783,19 @@
     state.inlineEdit = true;
     state.showErrors = false;
 
+    // Topo: só "Fechar" (mantemos oculto pelo CSS); usamos rodapé dinâmico
     pEdit.style.display   = 'none';
     pSave.style.display   = 'none';
     pCancel.style.display = 'none';
     if (pClose) pClose.style.display = '';
 
+    // Rodapé: Salvar/Cancelar no lugar do Fechar
     ensureFooterButtons();
     if (pSaveFoot)   pSaveFoot.style.display = '';
     if (pCancelFoot) pCancelFoot.style.display = '';
     if (pClose2)     pClose2.style.display = 'none';
 
+    // Botão "Salvar" vira "Criar" no modo novo
     if (perfilModal.dataset.mode === 'create') {
       pSaveFoot.innerHTML = '<i class="fa fa-check"></i> Criar';
     } else {
@@ -604,6 +804,7 @@
 
     perfilModal.classList.add('editing');
 
+    // ---- campos editáveis ----
     swapFieldbox('fb-nome',  `<input id="e-nome" class="input" type="text" maxlength="120" required autocomplete="off" placeholder="Seu nome completo">`);
     swapFieldbox('fb-email', `<input id="e-email" class="input" type="email" maxlength="160" required autocomplete="off" placeholder="nome@empresa.com">`);
 
@@ -618,23 +819,26 @@
     swapFieldbox('fb-tel', `<input id="e-tel" class="input" type="tel" required inputmode="numeric" placeholder="(DD) 9 9999-9999">`);
     swapFieldbox('fb-cargo', `<input id="e-cargo" class="input" type="text" maxlength="80" required placeholder="Cargo">`);
 
+    // preencher valores atuais (edição) / vazios (criação)
     $('#e-nome').value  = coalesceName(state.viewing) || '';
     $('#e-email').value = coalesceEmail(state.viewing) || '';
     $('#e-tel').value   = (coalescePhone(state.viewing) ? maskPhoneBR(coalescePhone(state.viewing)) : '');
     $('#e-cargo').value = coalesceCargo(state.viewing) || '';
 
+    // badge Admin também no modo edição (segue cargo digitado)
     renderAdminBadge({ ...state.viewing, cargo: $('#e-cargo').value });
 
+    // Máscaras e saneamentos
     $('#e-nome')?.addEventListener('input', ()=>{
       const el = $('#e-nome');
-      let v = el.value.replace(/[0-9]/g,'');
+      let v = el.value.replace(/[0-9]/g,'');      // sem dígitos no nome
       v = v.replace(/\s{2,}/g,' ');
       el.value = v;
       validateFormLive();
     });
     $('#e-email')?.addEventListener('input', ()=>{
       const el = $('#e-email');
-      el.value = el.value.replace(/\s+/g,'').toLowerCase();
+      el.value = el.value.replace(/\s+/g,'').toLowerCase(); // sem espaço e minúsculo
       validateFormLive();
     });
     $('#e-tel')?.addEventListener('input', ()=>{
@@ -648,15 +852,21 @@
     });
     sel?.addEventListener('change', ()=> validateFormLive());
 
+    // Permissões (se for criação, já mostra)
     if (perfilModal.dataset.mode === 'create'){
       ensurePermsEdit();
       ePerms.style.display = 'grid';
     }
 
+    // Instâncias (WhatsApp) – sempre mostrar no modo edição
+    ensureInstsEdit();
+
+    // Iniciar com validação aplicada (sem mostrar erros ainda)
     validateFormLive(false);
   }
 
   function exitInlineEdit(restore=true){
+    // restaura wrappers
     restoreFieldbox('fb-nome');
     restoreFieldbox('fb-email');
     restoreFieldbox('fb-depto');
@@ -666,11 +876,13 @@
     state.inlineEdit = false;
     state.showErrors = false;
 
+    // Topo: volta ao normal
     pEdit.style.display   = '';
     pSave.style.display   = 'none';
     pCancel.style.display = 'none';
     if (pClose) pClose.style.display = 'none';
 
+    // Rodapé: volta Fechar; esconde botões de ação
     if (pClose2)     pClose2.style.display = '';
     if (pSaveFoot)   pSaveFoot.style.display = 'none';
     if (pCancelFoot) pCancelFoot.style.display = 'none';
@@ -681,6 +893,7 @@
   }
 
   async function saveInline(){
+    // 1) valida “silencioso”
     validateFormLive(false);
 
     const mode = perfilModal.dataset.mode || 'view';
@@ -693,6 +906,7 @@
     const tel   = eTel?.value || '';
     const cargo = eCargo?.value || '';
 
+    // 2) valida final + exibe erro via toast e sublinhado
     state.showErrors = true;
     const check = validateFormLive(true);
 
@@ -701,7 +915,11 @@
       return;
     }
 
+    // Instâncias marcadas
+    const instsSel = getInstsSelecionadasEdit();
+
     if (mode === 'create'){
+      // Criação: envia FormData (inclui avatar, permissões e instâncias)
       const fd = new FormData();
       fd.append('nome', nome);
       fd.append('email', email);
@@ -711,7 +929,7 @@
 
       const permsCreate = getPermsSelecionadasEdit();
       if (permsCreate.length) fd.append('permissoes', JSON.stringify(permsCreate));
-      // fd.append('criar_usuario', 'true'); fd.append('senha', 'temp@123');
+      if (instsSel.length)    fd.append('instancias_ids', JSON.stringify(instsSel));
 
       if (state.newAvatarFile) fd.append('avatar', state.newAvatarFile);
 
@@ -719,12 +937,16 @@
         const created = await apiForm('/api/colaboradores/', 'POST', fd);
         toast('Colaborador criado.');
 
+        // reseta estado "novo"
         state.newAvatarFile = null;
         state.showErrors = false;
 
         perfilModal.dataset.mode = 'view';
         perfilModal.dataset.currentId = String(created?.id||'');
         const fresh = await loadColabFull(created.id);
+        // força instâncias visualizadas após criar
+        fresh.instancias_ids = instsSel;
+
         state.viewing = fresh;
         await loadColaboradores(); renderLista();
         await renderPerfilView(fresh);
@@ -737,17 +959,20 @@
       return;
     }
 
+    // Edição normal
     const payload = {
       nome, email,
       setor_id: Number(setor),
       telefone: telE164(tel),
       cargo: (cargo||'').trim(),
+      instancias_ids: instsSel, // se o back ignorar, salvamos via fallback saveInsts()
       atualizar_usuario: !!state.viewing?.usuario_id
     };
 
     try{
       await apiJSON(`/api/colaboradores/${id}`, 'PUT', payload);
 
+      // se permissões estiverem ativas:
       let permsUpdated = false;
       if (ePerms.style.display !== 'none'){
         const arr = getPermsSelecionadasEdit();
@@ -755,10 +980,23 @@
         if (permsUpdated) state.viewing.permissoes = arr;
       }
 
-      state.showErrors = false;
-      toast(permsUpdated ? 'Alterações e permissões salvas.' : 'Alterações salvas.');
+      // salvar instâncias via endpoint dedicado (fallback)
+      let instsUpdated = true;
+      try{
+        instsUpdated = await saveInsts(id, instsSel);
+      }catch{ instsUpdated = false; }
 
+      state.showErrors = false;
+      const msg = [
+        'Alterações salvas.',
+        permsUpdated ? 'Permissões OK.' : '',
+        instsUpdated ? 'Instâncias OK.' : ''
+      ].filter(Boolean).join(' ');
+      toast(msg || 'Alterações salvas.');
+
+      // Revalida com o servidor
       const fresh = await loadColabFull(id);
+      fresh.instancias_ids = instsSel; // garante espelho no front mesmo se o back não devolver já
       state.viewing = fresh;
       await loadColaboradores(); renderLista();
       renderPerfilView(fresh);
@@ -807,17 +1045,20 @@
 
   async function openNovo(){
     if (!hasPerm(EDIT_PERM)) { toast('Sem permissão para criar.','warn'); return; }
-    const blank = { id:null, nome:'', email:'', telefone:'', cargo:'', setor_id:null, permissoes:[] };
+    // objeto vazio
+    const blank = { id:null, nome:'', email:'', telefone:'', cargo:'', setor_id:null, permissoes:[], instancias_ids:[] };
     perfilModal.dataset.mode = 'create';
     perfilModal.dataset.currentId = '';
     state.showErrors = false;
     await renderPerfilView(blank);
 
+    // ativa listeners do hint
     if (btnAddAvatar && pAvatarInput){
       btnAddAvatar.onclick = ()=> pAvatarInput.click();
       pAvatarInput.onchange = ()=> handleAvatarFile(pAvatarInput.files && pAvatarInput.files[0]);
     }
 
+    // clicar no avatar para escolher arquivo + drag&drop (só no create)
     const avatarWrap = $('#avatar-wrap');
     if (avatarWrap && pAvatarInput){
       avatarWrap.onclick = ()=>{ if (perfilModal.dataset.mode === 'create') pAvatarInput.click(); };
@@ -843,13 +1084,15 @@
       });
     }
 
+    // abre modal e entra em edição
     perfilModal.setAttribute('aria-hidden','false');
     document.documentElement.classList.add('modal-open');
-    enterInlineEdit();
+    enterInlineEdit(); // entra em edição após abrir (com validação live)
   }
 
   // ====== Events ======
   function bind(){
+    // filtros
     filtroTxt?.addEventListener('input', debounce(()=>{
       state.filtroTexto = filtroTxt.value.trim();
       renderLista();
@@ -857,8 +1100,10 @@
     filtroDepto?.addEventListener('change', ()=>{ state.filtroSetorId = filtroDepto.value; renderLista(); });
     btnFiltrar?.addEventListener('click', renderLista);
 
+    // novo
     btnAdd?.addEventListener('click', openNovo);
 
+    // Ações da tabela
     document.addEventListener('click', (e)=>{
       const b = e.target.closest('[data-action]'); if (!b) return;
       const id = Number(b.dataset.id);
@@ -872,6 +1117,7 @@
       }
     }, { capture:true });
 
+    // Perfil modal – botões
     pClose?.addEventListener('click', closePerfil);
     pClose2?.addEventListener('click', closePerfil);
     pEdit?.addEventListener('click', ()=>{
@@ -882,14 +1128,16 @@
       if (perfilModal?.dataset.mode === 'create') closePerfil();
       else exitInlineEdit(true);
     });
-    pSave?.addEventListener('click', saveInline);
+    pSave?.addEventListener('click', saveInline); // (topo oculto, mantemos por segurança)
 
+    // clicar fora fecha
     perfilModal?.addEventListener('mousedown', (ev)=>{
       const card = perfilModal.querySelector('.modal-card');
       if (card && !card.contains(ev.target)) closePerfil();
     });
     perfilModal?.querySelector('.modal-card')?.addEventListener('mousedown', ev => ev.stopPropagation());
 
+    // ESC fecha modal
     document.addEventListener('keydown', (e)=>{
       if (e.key === 'Escape' && perfilModal?.getAttribute('aria-hidden') === 'false'){
         closePerfil();

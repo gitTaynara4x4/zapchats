@@ -425,7 +425,7 @@
       /* Visual de fixado */
       .is-pinned{ border:1px solid rgba(250,204,21,.35); border-radius:10px }
       .chat-item.is-pinned{ order:-1; }
-      .chat-item.is-pinned .chat-title::after{ content:'📌'; margin-left:6px; opacity:.95; font-size:.95em }
+      .chat-item.is-pinned .chat-name::after{ content:'📌'; margin-left:6px; opacity:.95; font-size:.95em }
     `;
     const style = document.createElement('style');
     style.id = 'zc-ctxmenu-css';

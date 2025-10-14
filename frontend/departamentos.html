@@ -18,6 +18,42 @@
   <!-- CSS da página -->
   <link rel="stylesheet" href="/frontend/css/departamentos.css"/>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+
+  <!-- CSS mínimo do seletor de Whats -->
+  <style>
+    /* container do campo */
+    #fi-whats .multi{ position:relative; }
+    /* botão que abre o dropdown */
+    #whats-btn.input{ width:100%; text-align:left; }
+    /* dropdown fechado/aberto */
+    #fi-whats .dropdown-suggestions{ 
+      display:none; position:absolute; top:100%; left:0; right:0; z-index:50;
+      max-height:280px; overflow:auto; background:#0f1115; border:1px solid #2a2f3a;
+      border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.35);
+    }
+    #fi-whats .dropdown-suggestions.open{ display:block; }
+    /* barra de busca fixa no topo do dropdown */
+    #fi-whats .dropdown-suggestions .dd-search{ 
+      position:sticky; top:0; background:#0f1115; border-bottom:1px solid #2a2f3a;
+    }
+    /* itens da lista */
+    #fi-whats .dropdown-suggestions .dd-item{
+      display:flex; align-items:center; gap:.55rem; padding:.5rem .75rem; cursor:pointer;
+    }
+    #fi-whats .dropdown-suggestions .dd-item:hover{ background:#171b22; }
+    #fi-whats .dropdown-suggestions .dd-item input[type="checkbox"]{ margin:0; }
+    /* chips das selecionadas */
+    #whats-chips.selected-chips{
+      display:flex; flex-wrap:wrap; gap:.45rem; margin-top:.5rem;
+    }
+    #whats-chips .chip{
+      display:inline-flex; align-items:center; gap:.35rem; padding:.25rem .5rem;
+      background:#1b2230; border:1px solid #2a2f3a; border-radius:999px;
+    }
+    #whats-chips .chip button{
+      border:0; background:transparent; cursor:pointer; font-weight:900; line-height:1; padding:0 .25rem;
+    }
+  </style>
 </head>
 <body>
   <!-- Sidebar -->
@@ -133,7 +169,7 @@
 
           <!-- === WhatsApps permitidos (instâncias) === -->
           <div class="fi" id="fi-whats">
-            <label for="whats-btn">Esse cliente pode ter quais WhatsApps? <span class="muted">(instâncias)</span></label>
+            <label for="whats-btn">Este departamento pode usar quais WhatsApps? <span class="muted">(instâncias)</span></label>
 
             <div class="multi" id="whats">
               <!-- abre/fecha o dropdown -->
@@ -153,7 +189,7 @@
               <div class="selected-chips" id="whats-chips" aria-live="polite"></div>
             </div>
 
-            <small class="hint">Selecione as instâncias de WhatsApp permitidas para os departamentos deste cliente.</small>
+            <small class="hint">Selecione as instâncias de WhatsApp permitidas para este departamento.</small>
           </div>
           <!-- === /WhatsApps permitidos === -->
 
