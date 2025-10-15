@@ -73,4 +73,8 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 # 🚀 Rode gunicorn SEM shell e com caminho absoluto
 ENTRYPOINT ["/opt/venv/bin/python","-m","gunicorn"]
+<<<<<<< HEAD
 CMD ["-k","uvicorn.workers.UvicornWorker","-w","1","-b","0.0.0.0:8000","--timeout","180","backend.main:app"]
+=======
+CMD ["-k","uvicorn.workers.UvicornWorker","-w","1","-b","0.0.0.0:8000","--timeout","180","backend.main:app"]
+>>>>>>> e7c78cbbb3c83313b23e3bfdb4030a11f203ffdb
