@@ -89,7 +89,6 @@
 
           <!-- A agenda será injetada via /frontend/js/atendimentos/ui/agenda.js -->
           <div class="wpp-header-icons">
-            <!-- (agenda/contatos removido do HTML) -->
             <button class="wpp-header-icon" id="btn-sidemodal-nova-conversa" title="Nova conversa">
               <i class="fa fa-plus"></i>
             </button>
@@ -125,7 +124,7 @@
           <span id="chat-avatar"></span>
           <h2 id="chat-title" class="font-medium truncate text-[1.09em]"></h2>
 
-          <!-- Botão de notas: conteúdo (ícone + dot) é injetado por /atendimentos/ui/notes-drawer.js -->
+          <!-- Botão de notas: conteúdo é injetado por /atendimentos/ui/notes-drawer.js -->
           <button id="btn-sobre" class="hdr-icon-btn" title="Notas do cliente" aria-label="Notas do cliente"></button>
         </div>
 
@@ -166,14 +165,17 @@
   <script type="module" src="/frontend/js/atendimentos/boot/main.js"></script>
   <script type="module" src="/frontend/js/atendimentos/ui/filtros.js"></script>
   <script src="/frontend/js/pages/atendimentos-autoopen.js"></script>
+
+  <!-- Config do Evolution vinda do backend (.env injetado no template) -->
   <script>
-      window.ENV = window.ENV || {};
-      window.ENV.EVOLUTION = Object.assign({}, window.ENV.EVOLUTION, {
-        apiUrl: "{{ EVOLUTION_URL }}",            // do .env
-        apiKey: "{{ EVOLUTION_APIKEY }}",         // do .env
-        defaultInstance: "{{ EVOLUTION_DEFAULT_INSTANCE }}" // defina no backend
-      });
-    </script>
+    window.ENV = window.ENV || {};
+    window.ENV.EVOLUTION = Object.assign({}, window.ENV.EVOLUTION, {
+      apiUrl: "{{ EVOLUTION_URL }}",
+      apiKey: "{{ EVOLUTION_APIKEY }}",
+      defaultInstance: "{{ EVOLUTION_DEFAULT_INSTANCE }}"
+    });
+  </script>
+
   <!-- Agenda (injeta botão e drawer automaticamente) -->
   <script src="/frontend/js/atendimentos/ui/agenda.js"></script>
 </body>

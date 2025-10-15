@@ -261,7 +261,6 @@
     return arr;
   }
   function coalesceInstIds(c){
-    // aceita vários formatos vindos do back
     const raw = c?.instancias_ids ?? c?.instances_ids ?? c?.whatsapp_instancias_ids
              ?? c?.whatsapp_ids ?? c?.whatsapps_ids ?? c?.instancias ?? c?.instances ?? null;
     if (!raw) return [];
@@ -287,7 +286,6 @@
       .filter(n => !Number.isNaN(n));
   }
   async function saveInsts(id, ids){
-    // Tenta salvar pelo endpoint dedicado; se não tiver, envia no PUT do colaborador
     try{
       await apiJSON(`/api/colaboradores/${id}/instancias`, 'PUT', { instancias_ids: ids });
       return true;
@@ -307,16 +305,16 @@
     }
   }
 
-  // cria/garante a seção (títulos, área de visualização e de edição)
   function ensureInstsSection(){
     let wrap = document.getElementById('insts-wrap');
     if (!wrap){
       wrap = document.createElement('div');
       wrap.id = 'insts-wrap';
       wrap.className = 'fieldbox';
+      wrap.style.marginTop = '10px';           // respiro extra
       wrap.innerHTML = `
         <label style="display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap">
-          Este atendente pode ter acesso às conversas de quais WhatsApps?
+          Quais WhatsApps este atendente pode acessar?
           <span class="muted">(marque um ou mais — opcional)</span>
         </label>
 
@@ -328,21 +326,31 @@
         <div id="e-insts" style="display:none;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.5rem"></div>
         <div id="d-insts" class="chips" style="display:flex;flex-wrap:wrap;gap:.5rem"></div>
       `;
-      // insere antes do bloco de permissões (se existir)
-      if (ePerms && ePerms.parentElement){
-        ePerms.parentElement.insertBefore(wrap, ePerms);
+
+      // ⚠️ insere APÓS o .fieldbox de permissões (não dentro)
+      const permsBox =
+        ePerms?.closest('.fieldbox') ||
+        dPerms?.closest('.fieldbox') ||
+        ePerms?.parentElement ||
+        dPerms?.parentElement;
+
+      if (permsBox && permsBox.parentElement){
+        permsBox.parentElement.insertBefore(wrap, permsBox.nextSibling);
       } else {
-        perfilModal?.querySelector('.body')?.appendChild(wrap);
+        // fallback: adiciona ao corpo do modal
+        perfilModal?.querySelector('.modal-body')?.appendChild(wrap);
       }
     }
     return wrap;
   }
+
+
+
   async function renderInstsView(colab){
     const wrap = ensureInstsSection();
     const chipsWrap = wrap.querySelector('#d-insts');
     const editGrid  = wrap.querySelector('#e-insts');
     const actions   = wrap.querySelector('#inst-actions');
-    // modo visualização
     actions.style.display = 'none';
     editGrid.style.display = 'none';
     chipsWrap.style.display = 'flex';
@@ -377,7 +385,6 @@
     if (!items.length){
       editGrid.innerHTML = '<div class="muted">Nenhuma instância encontrada.</div>';
     } else {
-      // conectadas primeiro
       items.sort((a,b)=> (a.connected===b.connected) ? String(a.name).localeCompare(String(b.name),'pt-BR') : (a.connected? -1 : 1));
       items.forEach(i=>{
         if (i.id == null) return;
@@ -398,7 +405,6 @@
       });
     }
 
-    // ações
     const selectAllBtn = wrap.querySelector('#inst-select-all');
     const clearBtn     = wrap.querySelector('#inst-clear');
     if (selectAllBtn){
@@ -450,7 +456,6 @@
       badge.className = 'chip chip-admin';
       badge.textContent = 'Administrador';
       badge.style.marginLeft = '8px';
-      // borda verde
       badge.style.border = '1px solid #22c55e';
       badge.style.color  = '#22c55e';
       label.appendChild(badge);
@@ -460,21 +465,13 @@
 
   // ====== Data ======
   async function loadSetores(){
-    const tries = [
-      '/api/departamentos',
-      '/api/departamentos/tree',
-      '/api/atendimento/clientes/departamentos',
-      '/api/atendimento/clientes/departamentos/tree',
-    ];
+    const tries = ['/api/departamentos','/api/departamentos/tree','/api/atendimento/clientes/departamentos','/api/atendimento/clientes/departamentos/tree'];
     for (const u of tries){
       try{
         const data = await apiGet(u);
         const arr = Array.isArray(data) ? data : (data?.items || data?.data || []);
         if (arr?.length){
-          state.setores = arr.map(x=>({
-            id: String(x.id ?? x.dep_id ?? x.value ?? x.ID),
-            nome: x.nome ?? x.name ?? x.titulo ?? x.label ?? '—'
-          }));
+          state.setores = arr.map(x=>({ id: String(x.id ?? x.dep_id ?? x.value ?? x.ID), nome: x.nome ?? x.name ?? x.titulo ?? x.label ?? '—' }));
           renderSetores(); return;
         }
       }catch{}
@@ -552,7 +549,6 @@
       pMono.parentElement.style.background = hashColor(nome||'ZapChats');
     }
   }
-  // Preferir avatar do colaborador; depois do usuário; por fim avatar_url do payload
   async function fetchAvatarURLFor(colab){
     try{
       const r1 = await authFetch(withEmpresa(`/api/colaboradores/${colab.id}/avatar`));
@@ -594,7 +590,6 @@
     state.viewing = colab;
     state.showErrors = false;
 
-    // título + avatar + status
     pTitle.textContent = perfilModal.dataset.mode === 'create'
       ? 'Novo colaborador'
       : (coalesceName(colab) || 'Perfil do colaborador');
@@ -605,7 +600,6 @@
     dStatus.style.background = '#008b32';
     dStatusText.textContent = 'Disponível';
 
-    // valores (com mapeamento de campos)
     const nome  = coalesceName(colab);
     const email = coalesceEmail(colab);
 
@@ -623,15 +617,11 @@
     vTelA.textContent = telDisp;
     vTelA.href        = telRaw ? `tel:${telE164(telRaw)}` : '#';
 
-    // 👇 se for admin, esconde o texto "admin" e deixa só a badge
     const cargoVal = coalesceCargo(colab);
     const adm = isAdminFlag(colab);
     vCargo.textContent = adm ? '' : (cargoVal || '—');
-
-    // badge de Administrador
     renderAdminBadge(colab);
 
-    // permissões (chips)
     dPerms.innerHTML = '';
     const permsList = (colab.permissoes||[]).map(x => (x.id||x).toString());
     if (permsList.length) permsList.forEach(p => dPerms.appendChild(chip(p)));
@@ -640,10 +630,8 @@
     // Instâncias (visual)
     await renderInstsView(colab);
 
-    // hint de avatar só no modo "create"
     avatarHint.style.display = (perfilModal.dataset.mode === 'create') ? 'grid' : 'none';
 
-    // permissões na criação
     if (perfilModal.dataset.mode === 'create'){
       ePerms.style.display = 'grid';
       await ensurePermsEdit();
@@ -652,7 +640,6 @@
       ePerms.innerHTML = '';
     }
 
-    // edição inline desligada por padrão (vamos ligar no modo "create")
     exitInlineEdit(false);
   }
 
@@ -660,7 +647,7 @@
   function swapFieldbox(boxId, html){
     const wrap = document.getElementById(boxId);
     if (!wrap) return null;
-    if (!wrap.dataset.viewHtml) wrap.dataset.viewHtml = wrap.innerHTML; // cache
+    if (!wrap.dataset.viewHtml) wrap.dataset.viewHtml = wrap.innerHTML;
     wrap.classList.add('is-editing');
     wrap.innerHTML = html.trim();
     return wrap.firstElementChild;
@@ -674,7 +661,6 @@
     }
   }
 
-  // ---- validação ----
   function markValidity(input, isValid){
     if (!input) return;
     const wrap = input.closest('.fieldbox');
@@ -690,13 +676,7 @@
     });
   }
   function getEditInputs(){
-    return {
-      eNome:  $('#e-nome'),
-      eEmail: $('#e-email'),
-      eSetor: $('#e-setor'),
-      eTel:   $('#e-tel'),
-      eCargo: $('#e-cargo'),
-    };
+    return { eNome:$('#e-nome'), eEmail:$('#e-email'), eSetor:$('#e-setor'), eTel:$('#e-tel'), eCargo:$('#e-cargo') };
   }
   function validateFormLive(forceShow){
     const show = (typeof forceShow === 'boolean') ? forceShow : state.showErrors;
@@ -713,7 +693,7 @@
     const telDigits = digits(tel);
     const nomeOk  = nome.length >= 2;
     const setorOk = !!setor;
-    const telOk   = telDigits.length >= 10;   // 10/11 dígitos
+    const telOk   = telDigits.length >= 10;
     const cargoOk = cargo.length >= 2;
 
     if (!nomeOk)  msgs.push('• Nome completo (mín. 2 letras)');
@@ -722,7 +702,6 @@
     if (!telOk)   msgs.push('• Telefone com DDD (10–11 dígitos)');
     if (!cargoOk) msgs.push('• Cargo (mín. 2 letras)');
 
-    // marca visual apenas se deve mostrar
     markValidity(eNome,  show ? nomeOk  : true);
     markValidity(eEmail, show ? emailOk : true);
     if (eSetor) {
@@ -782,19 +761,16 @@
     state.inlineEdit = true;
     state.showErrors = false;
 
-    // Topo: só "Fechar" (mantemos oculto pelo CSS); usamos rodapé dinâmico
     pEdit.style.display   = 'none';
     pSave.style.display   = 'none';
     pCancel.style.display = 'none';
     if (pClose) pClose.style.display = '';
 
-    // Rodapé: Salvar/Cancelar no lugar do Fechar
     ensureFooterButtons();
     if (pSaveFoot)   pSaveFoot.style.display = '';
     if (pCancelFoot) pCancelFoot.style.display = '';
     if (pClose2)     pClose2.style.display = 'none';
 
-    // Botão "Salvar" vira "Criar" no modo novo
     if (perfilModal.dataset.mode === 'create') {
       pSaveFoot.innerHTML = '<i class="fa fa-check"></i> Criar';
     } else {
@@ -803,7 +779,6 @@
 
     perfilModal.classList.add('editing');
 
-    // ---- campos editáveis ----
     swapFieldbox('fb-nome',  `<input id="e-nome" class="input" type="text" maxlength="120" required autocomplete="off" placeholder="Seu nome completo">`);
     swapFieldbox('fb-email', `<input id="e-email" class="input" type="email" maxlength="160" required autocomplete="off" placeholder="nome@empresa.com">`);
 
@@ -818,26 +793,23 @@
     swapFieldbox('fb-tel', `<input id="e-tel" class="input" type="tel" required inputmode="numeric" placeholder="(DD) 9 9999-9999">`);
     swapFieldbox('fb-cargo', `<input id="e-cargo" class="input" type="text" maxlength="80" required placeholder="Cargo">`);
 
-    // preencher valores atuais (edição) / vazios (criação)
     $('#e-nome').value  = coalesceName(state.viewing) || '';
     $('#e-email').value = coalesceEmail(state.viewing) || '';
     $('#e-tel').value   = (coalescePhone(state.viewing) ? maskPhoneBR(coalescePhone(state.viewing)) : '');
     $('#e-cargo').value = coalesceCargo(state.viewing) || '';
 
-    // badge Admin também no modo edição (segue cargo digitado)
     renderAdminBadge({ ...state.viewing, cargo: $('#e-cargo').value });
 
-    // Máscaras e saneamentos
     $('#e-nome')?.addEventListener('input', ()=>{
       const el = $('#e-nome');
-      let v = el.value.replace(/[0-9]/g,'');      // sem dígitos no nome
+      let v = el.value.replace(/[0-9]/g,'');
       v = v.replace(/\s{2,}/g,' ');
       el.value = v;
       validateFormLive();
     });
     $('#e-email')?.addEventListener('input', ()=>{
       const el = $('#e-email');
-      el.value = el.value.replace(/\s+/g,'').toLowerCase(); // sem espaço e minúsculo
+      el.value = el.value.replace(/\s+/g,'').toLowerCase();
       validateFormLive();
     });
     $('#e-tel')?.addEventListener('input', ()=>{
@@ -851,7 +823,6 @@
     });
     sel?.addEventListener('change', ()=> validateFormLive());
 
-    // Permissões (se for criação, já mostra)
     if (perfilModal.dataset.mode === 'create'){
       ensurePermsEdit();
       ePerms.style.display = 'grid';
@@ -860,12 +831,10 @@
     // Instâncias (WhatsApp) – sempre mostrar no modo edição
     ensureInstsEdit();
 
-    // Iniciar com validação aplicada (sem mostrar erros ainda)
     validateFormLive(false);
   }
 
   function exitInlineEdit(restore=true){
-    // restaura wrappers
     restoreFieldbox('fb-nome');
     restoreFieldbox('fb-email');
     restoreFieldbox('fb-depto');
@@ -875,13 +844,11 @@
     state.inlineEdit = false;
     state.showErrors = false;
 
-    // Topo: volta ao normal
     pEdit.style.display   = '';
     pSave.style.display   = 'none';
     pCancel.style.display = 'none';
     if (pClose) pClose.style.display = 'none';
 
-    // Rodapé: volta Fechar; esconde botões de ação
     if (pClose2)     pClose2.style.display = '';
     if (pSaveFoot)   pSaveFoot.style.display = 'none';
     if (pCancelFoot) pCancelFoot.style.display = 'none';
@@ -892,7 +859,6 @@
   }
 
   async function saveInline(){
-    // 1) valida “silencioso”
     validateFormLive(false);
 
     const mode = perfilModal.dataset.mode || 'view';
@@ -905,20 +871,16 @@
     const tel   = eTel?.value || '';
     const cargo = eCargo?.value || '';
 
-    // 2) valida final + exibe erro via toast e sublinhado
     state.showErrors = true;
     const check = validateFormLive(true);
-
     if (!check.ok){
       toast('Corrija os campos:\n' + check.msgs.join('\n'),'warn');
       return;
     }
 
-    // Instâncias marcadas
     const instsSel = getInstsSelecionadasEdit();
 
     if (mode === 'create'){
-      // Criação: envia FormData (inclui avatar, permissões e instâncias)
       const fd = new FormData();
       fd.append('nome', nome);
       fd.append('email', email);
@@ -929,21 +891,18 @@
       const permsCreate = getPermsSelecionadasEdit();
       if (permsCreate.length) fd.append('permissoes', JSON.stringify(permsCreate));
       if (instsSel.length)    fd.append('instancias_ids', JSON.stringify(instsSel));
-
       if (state.newAvatarFile) fd.append('avatar', state.newAvatarFile);
 
       try{
         const created = await apiForm('/api/colaboradores/', 'POST', fd);
         toast('Colaborador criado.');
 
-        // reseta estado "novo"
         state.newAvatarFile = null;
         state.showErrors = false;
 
         perfilModal.dataset.mode = 'view';
         perfilModal.dataset.currentId = String(created?.id||'');
         const fresh = await loadColabFull(created.id);
-        // força instâncias visualizadas após criar
         fresh.instancias_ids = instsSel;
 
         state.viewing = fresh;
@@ -958,20 +917,18 @@
       return;
     }
 
-    // Edição normal
     const payload = {
       nome, email,
       setor_id: Number(setor),
       telefone: telE164(tel),
       cargo: (cargo||'').trim(),
-      instancias_ids: instsSel, // se o back ignorar, salvamos via fallback saveInsts()
+      instancias_ids: instsSel,
       atualizar_usuario: !!state.viewing?.usuario_id
     };
 
     try{
       await apiJSON(`/api/colaboradores/${id}`, 'PUT', payload);
 
-      // se permissões estiverem ativas:
       let permsUpdated = false;
       if (ePerms.style.display !== 'none'){
         const arr = getPermsSelecionadasEdit();
@@ -979,7 +936,6 @@
         if (permsUpdated) state.viewing.permissoes = arr;
       }
 
-      // salvar instâncias via endpoint dedicado (fallback)
       let instsUpdated = true;
       try{
         instsUpdated = await saveInsts(id, instsSel);
@@ -993,9 +949,8 @@
       ].filter(Boolean).join(' ');
       toast(msg || 'Alterações salvas.');
 
-      // Revalida com o servidor
       const fresh = await loadColabFull(id);
-      fresh.instancias_ids = instsSel; // garante espelho no front mesmo se o back não devolver já
+      fresh.instancias_ids = instsSel;
       state.viewing = fresh;
       await loadColaboradores(); renderLista();
       renderPerfilView(fresh);
@@ -1031,7 +986,6 @@
     $('#avatar-wrap')?.classList.remove('drag-over');
   }
 
-  // Helper para validar e aplicar arquivo de avatar
   function handleAvatarFile(file){
     if (!file) return;
     if (!/image\//.test(file.type) && !/\.svg$/i.test(file.name)){
@@ -1044,20 +998,17 @@
 
   async function openNovo(){
     if (!hasPerm(EDIT_PERM)) { toast('Sem permissão para criar.','warn'); return; }
-    // objeto vazio
     const blank = { id:null, nome:'', email:'', telefone:'', cargo:'', setor_id:null, permissoes:[], instancias_ids:[] };
     perfilModal.dataset.mode = 'create';
     perfilModal.dataset.currentId = '';
     state.showErrors = false;
     await renderPerfilView(blank);
 
-    // ativa listeners do hint
     if (btnAddAvatar && pAvatarInput){
       btnAddAvatar.onclick = ()=> pAvatarInput.click();
       pAvatarInput.onchange = ()=> handleAvatarFile(pAvatarInput.files && pAvatarInput.files[0]);
     }
 
-    // clicar no avatar para escolher arquivo + drag&drop (só no create)
     const avatarWrap = $('#avatar-wrap');
     if (avatarWrap && pAvatarInput){
       avatarWrap.onclick = ()=>{ if (perfilModal.dataset.mode === 'create') pAvatarInput.click(); };
@@ -1083,15 +1034,13 @@
       });
     }
 
-    // abre modal e entra em edição
     perfilModal.setAttribute('aria-hidden','false');
     document.documentElement.classList.add('modal-open');
-    enterInlineEdit(); // entra em edição após abrir (com validação live)
+    enterInlineEdit();
   }
 
   // ====== Events ======
   function bind(){
-    // filtros
     filtroTxt?.addEventListener('input', debounce(()=>{
       state.filtroTexto = filtroTxt.value.trim();
       renderLista();
@@ -1099,10 +1048,8 @@
     filtroDepto?.addEventListener('change', ()=>{ state.filtroSetorId = filtroDepto.value; renderLista(); });
     btnFiltrar?.addEventListener('click', renderLista);
 
-    // novo
     btnAdd?.addEventListener('click', openNovo);
 
-    // Ações da tabela
     document.addEventListener('click', (e)=>{
       const b = e.target.closest('[data-action]'); if (!b) return;
       const id = Number(b.dataset.id);
@@ -1116,7 +1063,6 @@
       }
     }, { capture:true });
 
-    // Perfil modal – botões
     pClose?.addEventListener('click', closePerfil);
     pClose2?.addEventListener('click', closePerfil);
     pEdit?.addEventListener('click', ()=>{
@@ -1127,16 +1073,14 @@
       if (perfilModal?.dataset.mode === 'create') closePerfil();
       else exitInlineEdit(true);
     });
-    pSave?.addEventListener('click', saveInline); // (topo oculto, mantemos por segurança)
+    pSave?.addEventListener('click', saveInline);
 
-    // clicar fora fecha
     perfilModal?.addEventListener('mousedown', (ev)=>{
       const card = perfilModal.querySelector('.modal-card');
       if (card && !card.contains(ev.target)) closePerfil();
     });
     perfilModal?.querySelector('.modal-card')?.addEventListener('mousedown', ev => ev.stopPropagation());
 
-    // ESC fecha modal
     document.addEventListener('keydown', (e)=>{
       if (e.key === 'Escape' && perfilModal?.getAttribute('aria-hidden') === 'false'){
         closePerfil();

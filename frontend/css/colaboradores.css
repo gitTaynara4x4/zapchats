@@ -307,14 +307,28 @@ html.modal-open{ overflow: hidden; }
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--green-ring) 35%, transparent);
 }
 
-/* ---------- Fix: seção de Instâncias (WhatsApp) ---------- */
+/* ---------- Instâncias (WhatsApp) ---------- */
 #insts-wrap.fieldbox{
-  display:flex; flex-direction:column; align-items:stretch; gap:.5rem; min-height:auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: .5rem;
+  height: auto !important;        /* <- solta o 40px */
+  min-height: auto !important;    /* <- idem */
+  padding: 12px;                  /* mantém o mesmo padding */
+  margin-top: .6rem;              /* respiro em cima */
 }
+
+
+#insts-wrap.fieldbox label .muted{
+  font-weight: 400;
+  opacity: .9;
+}
+
+
 #insts-wrap > label{
   display:flex; gap:.5rem; align-items:baseline; flex-wrap:wrap;
 }
-
 #insts-wrap #e-insts{
   display:none; /* o JS liga pra 'grid' só no modo edição */
   grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
@@ -324,7 +338,6 @@ html.modal-open{ overflow: hidden; }
   display:none; /* o JS liga pra 'flex' só no modo edição */
   gap:.5rem; margin:.35rem 0 .5rem 0;
 }
-
 #insts-wrap #d-insts{ display:flex; flex-wrap:wrap; gap:.5rem; }
 #insts-wrap .chk-line{ font-weight:600; }
 

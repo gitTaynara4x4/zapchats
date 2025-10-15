@@ -9,228 +9,22 @@
   <script src="/frontend/js/app-base.js" defer></script>
   <script src="/frontend/js/auth.js" defer></script>
 
-  <!-- Libs da página -->
+  <!-- Libs -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/airbnb.css">
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/pt.js"></script>
 
-  <!-- Anti-flash: segura a pintura até head-base + loader estarem prontos -->
-  <style>
-    html.prepaint body{visibility:hidden}
-    html.prepaint[data-head-ready][data-loader-ready] body{visibility:visible}
-  </style>
+  <!-- CSS externo do Dashboard -->
+  <link rel="stylesheet" href="/frontend/css/dashboard.css">
 
-  <style>
-    /* ===== Estilos específicos do dashboard ===== */
-    *{ box-sizing: border-box }
-    html,body{ height:100% }
-    body{
-      margin:0; min-height:100vh; display:flex;
-      background:var(--bg); color:var(--fg);
-      font-family: var(--font-ui);
-      font-synthesis-weight:none;
-      font-optical-sizing:auto;
+  <!-- Chart.js: respeitar altura do container -->
+  <script>
+    if (window.Chart) {
+      Chart.defaults.responsive = true;
+      Chart.defaults.maintainAspectRatio = false;
     }
-    a{ color:inherit; text-decoration:none }
-    .stat, th, td { font-variant-numeric: tabular-nums; }
-
-    /* Placeholder do sidebar (real injetado via app-base.js) */
-    #sidebar{ display:block; width:16.5rem; min-height:100vh; }
-
-    /* Conteúdo */
-    .main{ flex:1; display:flex; flex-direction:column; padding:1.25rem 1.5rem; }
-    .section-title{
-      display:flex; align-items:center; gap:.75rem; margin:.25rem 0 1rem 0; position:relative;
-    }
-    .section-title h1{
-      margin:0; font-size:1.25rem; font-weight:700;
-      display:flex; align-items:center; gap:.5rem;
-    }
-
-    /* ===== Ícone do título idêntico ao sidebar ===== */
-    .section-title .title-ico{
-      width:26px; height:26px; flex:0 0 26px;
-      display:inline-grid; place-items:center;
-      color: var(--icon, var(--muted)); /* usa vars do sidebar; fallback em --muted */
-      margin-right:.25rem;
-    }
-    .section-title .title-ico-svg{ width:22px; height:22px; display:block; }
-    html.dark .section-title .title-ico.is-active{ color: var(--icon-active-dark, #ffffff); }
-    html:not(.dark) .section-title .title-ico.is-active{ color: var(--icon-active-light, #000000); }
-
-    .top-total{ margin-left:auto; color:var(--muted); font-weight:600; font-size:.95rem; }
-
-    .filter{
-      display:flex; align-items:center; gap:1rem; margin-bottom:1rem; font-size:.95rem;
-      position:sticky; top:.5rem; z-index:10;
-    }
-    .filter label{ color:var(--fg); font-weight:600; }
-    .filter .fp-input{
-      padding:.55rem .75rem; border-radius:.6rem;
-      background:var(--card); color:var(--fg);
-      border:1px solid var(--border); outline:none;
-      min-width:220px; width:220px;
-    }
-    .filter .fp-input:focus{ box-shadow:0 0 0 3px var(--ring); border-color:transparent; }
-    .filter .count{ margin-left:auto; color:var(--muted); font-weight:600; display:none; }
-
-    .cards,.charts,.last{ display:grid; gap:1rem; }
-    .cards{ grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); margin-bottom:1rem; }
-    .charts{ grid-template-columns:1fr; margin-bottom:1rem; }
-    @media (min-width:900px){ .charts{ grid-template-columns:1fr 1fr; } }
-
-    .box{
-      background:var(--card);
-      border:1px solid color-mix(in oklab, var(--border) 80%, transparent);
-      box-shadow:0 6px 16px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.04);
-      border-radius:12px; padding:14px 14px 44px; position:relative;
-    }
-    .box h3{ margin:0 0 .75rem 0; font-size:1rem; font-weight:600; }
-    .muted{ color:var(--muted); font-size:.82rem; margin-bottom:.25rem; }
-    .stat{ font-size:2rem; line-height:1.1; font-weight:700; letter-spacing:-.01em; }
-    .ok{ color:var(--ok); font-weight:600; }
-
-    .table-wrap{ overflow:auto; }
-    table{ width:100%; border-collapse:collapse; font-size:.92rem; min-width:640px; }
-    thead{ background:var(--hover-strong); }
-    th,td{ padding:.85rem .75rem; text-align:left; border-bottom:1px solid var(--border); }
-    tbody tr:hover{ background:var(--hover); }
-
-    /* ===== Dropdown de Instâncias (ao lado do título) ===== */
-    .inst-trigger{
-      display:inline-flex; align-items:center; gap:.5rem;
-      padding:.4rem .7rem; border-radius:.6rem; font-weight:600; font-size:.9rem;
-      background:var(--card); border:1px solid var(--border); color:var(--fg);
-      cursor:pointer;
-    }
-    .inst-trigger:hover{ background:var(--hover); }
-    .inst-trigger .chev{ font-size:.9rem; opacity:.85; }
-
-    .inst-menu{
-      position:absolute; top:100%; left:0; margin-top:.5rem; z-index:50;
-      min-width:260px; max-height:340px; overflow:auto;
-      background:var(--card); color:var(--fg);
-      border:1px solid var(--border); border-radius:.75rem;
-      box-shadow:0 12px 32px rgba(0,0,0,.45);
-      display:none;
-    }
-    .inst-menu[aria-hidden="false"]{ display:block; }
-
-    .inst-menu .head{
-      position:sticky; top:0; background:var(--card);
-      padding:.6rem .75rem; font-weight:700; font-size:.9rem; border-bottom:1px solid var(--border);
-    }
-    .inst-menu ul{ list-style:none; margin:0; padding:.4rem; }
-    .inst-menu li{ margin:0; padding:0; }
-    .inst-item{
-      width:100%; text-align:left; border:0; background:transparent; color:inherit;
-      padding:.55rem .6rem; border-radius:.55rem; display:flex; align-items:center; gap:.55rem; cursor:pointer;
-    }
-    .inst-item:hover{ background:var(--hover); }
-    .inst-item[aria-selected="true"]{ outline:2px solid var(--ring); outline-offset:0; background:color-mix(in oklab, var(--ring) 6%, transparent); }
-    .inst-item .radio{
-      width:16px; height:16px; border-radius:999px; border:2px solid var(--border); display:inline-flex; align-items:center; justify-content:center;
-    }
-    .inst-item[aria-selected="true"] .radio{ border-color:var(--ring); }
-    .inst-item[aria-selected="true"] .radio::after{ content:""; width:8px; height:8px; border-radius:999px; background:var(--ring); display:block; }
-
-    /* ===== MOBILE (≤1024px) ===== */
-    @media (max-width:1024px){
-      #sidebar{ display:none !important; }
-      .main{ padding:1rem; padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
-      .main::after{ content:""; display:block; height: calc(96px + env(safe-area-inset-bottom)); }
-
-      .section-title{ flex-wrap:wrap; gap:.5rem; }
-      .section-title h1{ font-size:1.1rem; }
-      .top-total{ order:2; width:100%; text-align:right; }
-
-      .filter{
-        flex-wrap:wrap; gap:.5rem;
-        background:var(--bg); padding:.6rem .7rem; border-radius:.9rem;
-        border:1px solid rgba(255,255,255,.08); position:static;
-      }
-      html:not(.dark) .filter{ border-color:rgba(0,0,0,.08); }
-      .filter .fp-input{ min-width:0; width:100%; }
-
-      .charts{ grid-template-columns:1fr !important; }
-      .charts .box{ padding-bottom:18px; }
-      .charts .box h3{ margin-bottom:.6rem; }
-      .charts .box > div[style]{ height:auto !important; }
-      .charts canvas{
-        display:block; width:100% !important; height:auto !important;
-        max-height:240px; aspect-ratio:1/1; margin:0 auto .5rem auto;
-      }
-      .charts .box canvas + *{
-        margin-top:.25rem; font-size:.85rem; line-height:1.25; opacity:.95;
-      }
-
-      .last{ margin-bottom:.75rem; }
-      .table-wrap{ padding-bottom:.5rem; }
-    }
-
-    /* ≤720px: tabela vira cartões */
-    @media (max-width:720px){
-      .cards{ grid-template-columns:1fr 1fr; }
-      @media (max-width:420px){ .cards{ grid-template-columns:1fr; } }
-
-      table{ border:0; min-width:0; }
-      thead{ display:none; }
-      tbody{ display:block; }
-      tbody tr{
-        display:block; background:var(--card);
-        border:1px solid rgba(255,255,255,.08);
-        border-radius:.8rem; padding:.55rem .7rem; margin:.5rem 0;
-      }
-      html:not(.dark) tbody tr{ border-color:rgba(0,0,0,.08); }
-      tbody tr:hover{ background:var(--card); }
-      tbody td{
-        display:flex; align-items:center; justify-content:space-between;
-        gap:.65rem; padding:.45rem 0; border-bottom:1px dashed rgba(255,255,255,.08);
-      }
-      html:not(.dark) tbody td{ border-bottom-color:rgba(0,0,0,.08); }
-      tbody td:last-child{ border-bottom:0; }
-
-      tbody td:nth-child(1)::before{ content:"Cliente"; color:var(--muted); font-weight:600; }
-      tbody td:nth-child(2)::before{ content:"Telefone"; color:var(--muted); font-weight:600; }
-      tbody td:nth-child(3)::before{ content:"Status"; color:var(--muted); font-weight:600; }
-      tbody td:nth-child(4)::before{ content:"Horário"; color:var(--muted); font-weight:600; }
-      tbody td:nth-child(5)::before{ content:"Data"; color:var(--muted); font-weight:600; }
-      tbody td > *:not(:first-child){ margin-left:auto; }
-    }
-
-    /* ≤560px */
-    @media (max-width:560px){
-      .section-title h1{ font-size:1rem; }
-      .charts canvas{ height:210px; }
-    }
-
-    /* Flatpickr dark */
-    .dark .flatpickr-calendar{
-      background:#151516; border:1px solid #2a2a2e; box-shadow:0 8px 30px rgba(0,0,0,.45);
-      color:#e5e7eb;
-    }
-    .dark .flatpickr-day{ color:#e5e7eb; }
-    .dark .flatpickr-day.flatpickr-disabled{ color:#6b7280; }
-    .dark .flatpickr-day.today{ border-color:#4f83ff; }
-    .dark .flatpickr-day.selected{ background:#3b82f6; border-color:#3b82f6; }
-    .dark .flatpickr-monthDropdown-months, .dark .flatpickr-weekday{ color:#e5e7eb; }
-
-    /* ===== extras ===== */
-    .demo-badge{
-      position:absolute; right:12px; top:12px;
-      font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
-      background:color-mix(in oklab, var(--accent) 24%, transparent);
-      border:1px solid color-mix(in oklab, var(--accent) 55%, var(--border));
-      padding:.2rem .45rem; border-radius:.5rem; opacity:.9;
-    }
-    .card-wpp-status.ok .status-text{ color:var(--ok); }
-    .card-wpp-status.ok .status-dot{ background:var(--ok); }
-    .card-wpp-status.bad .status-text{ color:var(--danger); }
-    .card-wpp-status.bad .status-dot{ background:var(--danger); }
-    .card-wpp-status.warn .status-text{ color:#f59e0b; }
-    .card-wpp-status.warn .status-dot{ background:#f59e0b; }
-  </style>
+  </script>
 </head>
 <body>
   <!-- Sidebar (carregado via app-base.js) -->
@@ -241,14 +35,13 @@
   <main class="main">
     <div class="section-title">
       <h1>
-        <!-- Ícone do título (SVG igual ao do item Dashboard no sidebar) -->
         <span class="title-ico is-active" aria-hidden="true">
           <svg class="title-ico-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
             <path d="M224,98H182V56a6,6,0,0,0-6-6H54V40a6,6,0,0,0-12,0V216a6,6,0,0,0,12,0V206h90a6,6,0,0,0,6-6V158h74a6,6,0,0,0,6-6V104A6,6,0,0,0,224,98ZM170,62V98H54V62ZM138,194H54V158h84Zm80-48H54V110H218Z"/>
           </svg>
         </span>
         Dashboard
-        <!-- Botão do dropdown de instâncias -->
+        <!-- Dropdown de instâncias -->
         <button id="instMenuBtn" type="button" role="button" class="inst-trigger"
                 aria-haspopup="listbox" aria-expanded="false" aria-controls="inst-menu">
           <span id="instMenuLabel">Todas as instâncias</span>
@@ -267,6 +60,14 @@
     <section class="filter" aria-label="Filtros do dashboard">
       <label for="filtroData">Filtrar por dia:</label>
       <input type="text" id="filtroData" placeholder="dd/mm/aaaa" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Selecionar data"/>
+
+      <!-- Ações rápidas -->
+      <div class="quick">
+        <button type="button" id="btnHoje"   class="btn-ghost">Hoje</button>
+        <button type="button" id="btnOntem"  class="btn-ghost">Ontem</button>
+        <button type="button" id="btnLimpar" class="btn-ghost">Limpar</button>
+      </div>
+
       <span class="count"><span id="qtdAtendimentos_legacy">--</span> atendimentos</span>
     </section>
 
@@ -278,26 +79,43 @@
       <div class="box card-wpp-status">
         <div class="muted">Status WhatsApp</div>
         <div style="display:flex;align-items:center;gap:.5rem;font-weight:600">
-          <span class="status-dot" aria-hidden="true"
-                style="width:.7rem;height:.7rem;border-radius:999px;display:inline-block;background:#999"></span>
+          <span class="status-dot" aria-hidden="true"></span>
           <span class="status-text">Checando…</span>
         </div>
       </div>
     </section>
 
     <section class="charts" aria-label="Gráficos">
-      <div class="box"><h3>Distribuição de Atendimentos</h3><div style="height:320px"><canvas id="pizzaAtendimento"></canvas></div></div>
-      <div class="box"><h3>Funil de Conversas</h3><div style="height:320px"><canvas id="funilAtendimento"></canvas></div></div>
+      <div class="box">
+        <h3>Distribuição de Atendimentos</h3>
+        <div class="chart-h"><canvas id="pizzaAtendimento"></canvas></div>
+      </div>
+      <div class="box">
+        <h3>Funil de Conversas</h3>
+        <div class="chart-h"><canvas id="funilAtendimento"></canvas></div>
+      </div>
     </section>
 
     <section class="last" aria-label="Últimos atendimentos">
-      <div class="box">
+      <div class="box" id="lastBox">
         <h3>Últimos Atendimentos</h3>
+
         <div class="table-wrap">
           <table id="tabelaAtendimentos">
-            <thead><tr><th>Cliente</th><th>Telefone</th><th>Status</th><th>Horário</th><th>Data</th></tr></thead>
+            <thead>
+              <tr><th>Cliente</th><th>Telefone</th><th>Status</th><th>Horário</th><th>Data</th></tr>
+            </thead>
             <tbody><!-- preenchido via JS --></tbody>
           </table>
+        </div>
+
+        <!-- Estado vazio amigável -->
+        <div id="lastEmpty" class="empty-list" aria-live="polite" hidden>
+          <i class="fa-solid fa-inbox" aria-hidden="true"></i>
+          <div>
+            <strong>Nenhum atendimento no período</strong>
+            <div class="muted">Escolha outra data ou selecione outra instância.</div>
+          </div>
         </div>
       </div>
     </section>
@@ -338,7 +156,7 @@
     })();
   </script>
 
-  <!-- Dropdown de Instâncias: busca no backend, decide default pelo BD e seta window.__INST_ID -->
+  <!-- Dropdown de Instâncias (com fetch guardado p/ 401/403) -->
   <script>
     (function(){
       function getEmpresaId(){
@@ -425,16 +243,19 @@
         listEl.innerHTML = '';
         listEl.appendChild(itemTpl('Todas as instâncias','', false));
 
+        // >>> usa guardFetch/authFetch para não vazar dados em anônimo
+        const F = (window.ZAuth?.guardFetch || window.ZAuth?.authFetch || fetch);
+
         let items = [];
         if (empresaId){
           try{
-            let r = await fetch(`/api/empresas/${empresaId}/whatsapp`, { credentials:'include' });
+            let r = await F(`/api/empresas/${empresaId}/whatsapp`, { credentials:'include' });
             if (!r.ok) throw 0;
             const j = await r.json();
             items = Array.isArray(j.instancias) ? j.instancias : [];
           }catch{
             try {
-              const r2 = await fetch(`/api/instancias/list?empresa_id=${empresaId}`, { credentials:'include' });
+              const r2 = await F(`/api/instancias/list?empresa_id=${empresaId}`, { credentials:'include' });
               const j2 = await r2.json();
               items = Array.isArray(j2) ? j2 : (Array.isArray(j2?.instancias) ? j2.instancias : []);
             }catch{}
@@ -447,7 +268,6 @@
           listEl.appendChild(itemTpl(t, v, false));
         });
 
-        // default vindo do BD: primeiro conectado, senão a primeira
         if (window.__INST_ID == null || window.__INST_ID === ''){
           const firstConnected = items.find(x => !!(x.connected || x.conectada || x.status === 'CONNECTED'));
           const firstAny       = items[0];
@@ -456,8 +276,8 @@
         }
 
         if (window.__INST_ID){
-          const sel = listEl.querySelector(`.inst-item[data-value="${CSS.escape(String(window.__INST_ID))}"]`);
-          const text= sel?.dataset?.label || `Instância ${window.__INST_ID}`;
+          const sel  = listEl.querySelector(`.inst-item[data-value="${CSS.escape(String(window.__INST_ID))}"]`);
+          const text = sel?.dataset?.label || `Instância ${window.__INST_ID}`;
           setActiveUI(String(window.__INST_ID), text);
         } else {
           setActiveUI('', 'Todas as instâncias');

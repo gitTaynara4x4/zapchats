@@ -5,7 +5,8 @@
 ########################
 FROM python:3.12-slim AS builder
 
-ENV PIP_NO_CACHE_DIR=1 \
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -31,7 +32,8 @@ RUN pip install --upgrade pip && \
 ########################
 FROM python:3.12-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     ENV=prod \
@@ -50,6 +52,11 @@ ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /app
 COPY . .
 
+# Falhar se houver marcadores de merge no código copiado (ancorado + exclui dirs ruidosos)
+RUN ! grep -R -nE '^(<{7}( |$)|={7}$|>{7}( |$))' \
+      --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build -- . \
+    || (echo '❌ Merge markers encontrados. Corrija antes do build.' && exit 1)
+
 # garantir pacote e pastas de escrita
 RUN mkdir -p /app/uploads "${MEDIA_CACHE_DIR}" && \
     [ -f backend/__init__.py ] || printf "" > backend/__init__.py
@@ -66,8 +73,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 # 🚀 Rode gunicorn SEM shell e com caminho absoluto
 ENTRYPOINT ["/opt/venv/bin/python","-m","gunicorn"]
-<<<<<<< HEAD
 CMD ["-k","uvicorn.workers.UvicornWorker","-w","1","-b","0.0.0.0:8000","--timeout","180","backend.main:app"]
-=======
-CMD ["-k","uvicorn.workers.UvicornWorker","-w","1","-b","0.0.0.0:8000","--timeout","180","backend.main:app"]
->>>>>>> b003c8753b5ed59a65e96c585d897a14d258d7f1

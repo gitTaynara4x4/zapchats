@@ -1,36 +1,89 @@
 // === Toggle de tema ===
+// === Guard: se já está logado, não mostra /login ===
+(function alreadyLoggedGuard(){
+  function hasSessionCookie() {
+    // ajuste o nome do cookie se o seu backend usar outro (ex.: "access_token", "sessionid", etc.)
+    return /(?:^|;\s*)session=/.test(document.cookie);
+  }
+
+  function redirectHome(){
+    const params = new URLSearchParams(location.search);
+    const next = params.get('next');
+    const target = next && /^\/[^\s]*$/.test(next) ? next : '/dashboard';
+    // replace para tirar /login do histórico
+    window.location.replace(target);
+  }
+
+  const hasToken = !!(localStorage.getItem('access_token') || localStorage.getItem('token'));
+  if (hasToken || hasSessionCookie()) redirectHome();
+
+  // quando voltar do histórico (bfcache), roda de novo
+  window.addEventListener('pageshow', function (e) {
+    if (e.persisted || performance.getEntriesByType('navigation')[0]?.type === 'back_forward') {
+      const againHasToken = !!(localStorage.getItem('access_token') || localStorage.getItem('token')) || hasSessionCookie();
+      if (againHasToken) redirectHome();
+    }
+  });
+})();
+
 (function(){
   var html = document.documentElement;
   try {
     var saved = localStorage.getItem('theme');
-    if (saved) html.classList.toggle('dark', saved === 'dark');
+    if (saved === 'dark') html.classList.add('dark');
+    if (saved === 'light') html.classList.remove('dark');
   } catch {}
+
+  function setPressed(btn){
+    if (!btn) return;
+    btn.setAttribute('aria-pressed', String(html.classList.contains('dark')));
+  }
+  function setTheme(mode){
+    var willDark = (mode === 'dark');
+    html.classList.toggle('dark', willDark);
+    try { localStorage.setItem('theme', willDark ? 'dark' : 'light'); } catch {}
+  }
+  window.addEventListener('storage', function(e){
+    if (e.key === 'theme') {
+      var v = (e.newValue || '').toLowerCase();
+      setTheme(v === 'dark' ? 'dark' : 'light');
+      setPressed(document.getElementById('themeSwitch'));
+    }
+  });
 
   var btn = document.getElementById('themeSwitch');
   if (btn){
-    function syncPressed(){
-      btn.setAttribute('aria-pressed', String(html.classList.contains('dark')));
-    }
-    syncPressed();
+    setPressed(btn);
     btn.addEventListener('click', function(){
       var willDark = !html.classList.contains('dark');
-      html.classList.toggle('dark', willDark);
-      try { localStorage.setItem('theme', willDark ? 'dark' : 'light'); } catch {}
+      setTheme(willDark ? 'dark' : 'light');
       btn.classList.remove('t-anim'); void btn.offsetWidth; btn.classList.add('t-anim');
       setTimeout(function(){ btn.classList.remove('t-anim'); }, 580);
-      syncPressed();
+      setPressed(btn);
     });
   }
 })();
 
-// === Mostrar/Ocultar senha ===
+// === Mostrar/Ocultar senha (sincroniza ícones) ===
 (function(){
   const btn = document.getElementById('togglePassBtn');
   const input = document.getElementById('senha');
+  const eyeOpen = document.getElementById('eye-open');
+  const eyeOff  = document.getElementById('eye-off');
+
+  function updateIcon(){
+    const isPassword = input.type === 'password';
+    eyeOpen?.classList.toggle('hidden', !isPassword);
+    eyeOff?.classList.toggle('hidden', isPassword);
+    btn?.setAttribute('aria-label', isPassword ? 'Mostrar senha' : 'Ocultar senha');
+  }
+
   if (btn && input) {
     btn.addEventListener('click', () => {
       input.type = input.type === 'password' ? 'text' : 'password';
+      updateIcon();
     });
+    updateIcon();
   }
 })();
 
@@ -44,7 +97,7 @@ function jwtPictureFrom(token) {
   } catch { return ''; }
 }
 
-// === baixa/salva avatar em localStorage('usuario_avatar') ===
+// === baixa/salva avatar ===
 async function cacheAvatar(d) {
   if (d && d.avatar_url) { try { localStorage.setItem('usuario_avatar', d.avatar_url); } catch {} return; }
   const token = localStorage.getItem('access_token') || localStorage.getItem('token') || '';
@@ -65,7 +118,7 @@ async function cacheAvatar(d) {
   } catch {}
 }
 
-// === Helpers de UI (toast / erro) ===
+// === UI helpers ===
 function notifyWarn(msg){
   if (typeof window.showToast === 'function') { try { showToast(msg, 'warn'); return; } catch {} }
   const box = document.getElementById('erro');
@@ -77,7 +130,7 @@ function clearNotify(){
   if (box){ box.textContent = ''; box.classList.add('hidden'); }
 }
 
-// === Lock local por e-mail (sem mostrar tempo) ===
+// === Lock local por e-mail ===
 const LS_LOCK_KEY = (email) => `login:lock:${(email||'').toLowerCase()}`;
 function setLocalLock(email, seconds){
   const until = Math.floor(Date.now()/1000) + Math.max(1, seconds|0);
@@ -94,18 +147,17 @@ function isLocked(email){
 }
 function clearLocalLock(email){ try { localStorage.removeItem(LS_LOCK_KEY(email)); } catch {} }
 
-// === Handler do submit ===
+// === Submit ===
 (function(){
   const form = document.getElementById('form-login');
   const erro = document.getElementById('erro');
   const btn  = document.getElementById('btn-login');
   const emailInput = document.getElementById('email');
   const senhaInput = document.getElementById('senha');
-  const rememberInput = document.getElementById('remember'); // opcional
+  const rememberInput = document.getElementById('remember');
 
   if (!form) return;
 
-  // Prefill "lembrar de mim" (se existir checkbox)
   (function prefillRemember(){
     try {
       const remembered = localStorage.getItem('remember_login') === '1';
@@ -161,7 +213,7 @@ function clearLocalLock(email){ try { localStorage.removeItem(LS_LOCK_KEY(email)
         method : 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify({ email, senha, remember }) // envia remember
+        body   : JSON.stringify({ email, senha, remember })
       });
 
       if (!res.ok) {
@@ -221,7 +273,7 @@ function clearLocalLock(email){ try { localStorage.removeItem(LS_LOCK_KEY(email)
             headers: token ? { 'Authorization': `Bearer ${token}` } : {}
           });
           if (instRes.ok) {
-            const instData = await instRes.json();
+            const instData = await res.json();
             if (instData?.nome) localStorage.setItem('instance_name', instData.nome);
           }
         } catch (instErr) {
@@ -241,13 +293,9 @@ function clearLocalLock(email){ try { localStorage.removeItem(LS_LOCK_KEY(email)
         }
       } catch {}
 
-      // ===== Redirecionamento POS-LOGIN =====
-      // Se ZAuth (auth.js) estiver carregado, deixe ele decidir a primeira rota permitida:
       if (window.ZAuth?.routeAfterLogin) {
         return void window.ZAuth.routeAfterLogin();
       }
-
-      // Fallback: respeita ?next= e cai em /dashboard
       const params = new URLSearchParams(window.location.search);
       const next = params.get('next');
       const target = next && /^\/[^\s]*$/.test(next) ? next : '/dashboard';

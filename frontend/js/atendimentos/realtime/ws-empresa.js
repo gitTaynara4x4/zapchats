@@ -1,5 +1,10 @@
-// WebSocket da EMPRESA: nova mensagem, ACK (formatos variados), reload, backoff + heartbeat
-// + suporte a conv.pin / unpin (fixar/desafixar) com atualização imediata de UI/estado
+// ====================================================================
+// WebSocket da EMPRESA (tempo real + backoff + heartbeat + lag badge)
+// - Trata: nova mensagem, ACK, reloads segmentados, conv_status, pin/unpin
+// - Reconexão com backoff exponencial (com jitter), heartbeat (ping/pong)
+// - "Lag" visível na UI usando #realtime-badge, se existir no DOM
+// - Idempotência básica (merge de "eco local" por texto+janela de tempo)
+// ====================================================================
 
 import { tsToMillis } from '../core/time.js';
 import { renderHistoricoDoCache } from '../domain/historico.js';
@@ -8,11 +13,12 @@ import { pushOneNew, getHist, primeWith } from '../domain/hist-cache.js';
 
 const EMPRESA_ID = Number(window.EMPRESA_ID || localStorage.getItem('empresa_id') || 0);
 
-// Aceita tudo; a UI filtra por instância
+// Aceita eventos de todas as instâncias (UI filtra quando necessário)
 const ALWAYS_ACCEPT_WS = true;
+// Ative/desative logs rápidos no console
 const DEBUG_WS = (window.DEBUG_WS ?? true);
 
-/* ========================= caches de lista ========================= */
+// ========================= util: caches de clientes =========================
 function ensureCaches() {
   if (!Array.isArray(window.clientesCache)) window.clientesCache = [];
   if (window.state && !Array.isArray(window.state.clientesCache)) window.state.clientesCache = [];
@@ -35,19 +41,23 @@ function findCliente(id) {
       || null;
 }
 
-/* ========================= contexto aberto (cliente + instância) ========================= */
+// ========================= contexto aberto (cliente + instância) =========================
 function getOpenContext(){
   try{
     const hist    = document.getElementById('historico');
     const cidDom  = hist?.dataset?.clienteId ?? hist?.getAttribute?.('data-cliente-id') ?? null;
     const instDom = hist?.dataset?.instanciaId ?? hist?.getAttribute?.('data-instancia-id') ?? null;
+
     const cidState  = Number(window.state?.clienteSel?.id ?? window.clienteSel?.id ?? NaN);
     const instState = (window.state?.clienteSel?.instancia_id ?? window.INSTANCIA_ATIVA ?? null);
+
     return {
       cliente_id: Number.isFinite(Number(cidDom)) ? Number(cidDom) : (Number.isFinite(cidState) ? cidState : null),
       instancia_id: (instDom ?? instState ?? null)
     };
-  }catch{ return { cliente_id:null, instancia_id:null }; }
+  }catch{
+    return { cliente_id:null, instancia_id:null };
+  }
 }
 function isOpenChat(cliente_id, instancia_id){
   const oc = getOpenContext();
@@ -63,7 +73,7 @@ function isChatActive(cliente_id, instancia_id){
   }catch{ return false; }
 }
 
-/* — se o DOM ainda não setou instancia_id, seta aqui p/ não perder render — */
+// Se o DOM ainda não setou instancia_id, seta aqui pra não perder render.
 function ensureDomContextFor(cliente_id, instancia_id){
   try{
     const hist = document.getElementById('historico');
@@ -76,22 +86,72 @@ function ensureDomContextFor(cliente_id, instancia_id){
   }catch{ return false; }
 }
 
-/* ========================= WS infra ========================= */
+// ========================= WS infra =========================
 function wsUrlEmpresa(id){
   const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
+  // servidor deve expor rota tipo /ws/emp:{id}
   return `${proto}://${location.host}/ws/emp:${id}`;
 }
-let sock=null, hbTimer=null, retryMs=800, closedByMe=false;
-function heartbeat(){ try { sock?.send?.('ping'); } catch {} }
-function scheduleHeartbeat(){ clearInterval(hbTimer); hbTimer = setInterval(heartbeat, 30_000); }
-function backoff(fn){ const wait = Math.min(retryMs, 10_000); setTimeout(fn, wait); retryMs = Math.min(retryMs * 1.6, 10_000); }
+
+let sock = null;
+let hbTimer = null;
+let lagTimer = null;
+let retryBase = 800; // ms
+let closedByMe = false;
+let lastServerTs = 0; // ms epoch (heartbeat ou qualquer evento)
+
+// envia "ping" app-level; servidor deve responder "pong" ou devolver serverTimestamp
+function heartbeat(){
+  try { sock?.send?.(JSON.stringify({ type:"PING", clientTs: Date.now() })); } catch {}
+}
+
+function scheduleHeartbeat(){
+  clearInterval(hbTimer);
+  hbTimer = setInterval(heartbeat, 30_000); // 30s
+}
+
+function jitter(ms){
+  const delta = Math.round(ms * 0.2); // ±20%
+  return ms + Math.round((Math.random()*2 - 1) * delta);
+}
+
+function backoff(fn){
+  const wait = Math.min(retryBase, 10_000);
+  const withJitter = Math.max(250, jitter(wait));
+  setTimeout(fn, withJitter);
+  retryBase = Math.min(retryBase * 1.6, 10_000);
+}
+
 function safeJson(d){ try { return JSON.parse(d); } catch { return null; } }
 
-/* ========================= preview/lista ========================= */
+function badge(text, cls){
+  try{
+    const el = document.getElementById('realtime-badge');
+    if (!el) return;
+    if (text != null) el.textContent = text;
+    if (cls){
+      el.classList.remove('ok','warn','crit','loading');
+      el.classList.add(cls);
+    }
+  }catch{}
+}
+
+function startLagTimer(){
+  clearInterval(lagTimer);
+  lagTimer = setInterval(() => {
+    if (!lastServerTs) return;
+    const lag = Date.now() - lastServerTs;
+    if (lag < 5_000) badge("Tempo real", "ok");
+    else if (lag < 15_000) badge(`Atraso ${Math.round(lag/1000)}s`, "warn");
+    else badge(`Atraso ${Math.round(lag/1000)}s`, "crit");
+  }, 1000);
+}
+
+// ========================= preview/lista =========================
 function upsertClientePreview({ cliente_id, texto, ts, tipo='entrada', ack=null, instancia_id=null, instance_name=null }) {
   let c = findCliente(cliente_id);
 
-  const instSel  = window.INSTANCIA_ATIVA || window.state?.instanciaSelecionada || window.clienteSel?.instancia_id || null;
+  const instSel   = window.INSTANCIA_ATIVA || window.state?.instanciaSelecionada || window.clienteSel?.instancia_id || null;
   const instToUse = (instancia_id != null) ? instancia_id : (c?.instancia_id ?? instSel);
   const nameToUse = (instance_name) ? instance_name : (c?.instance_name ?? window.state?.instanciaSelecionadaNome ?? null);
 
@@ -127,7 +187,7 @@ function upsertClientePreview({ cliente_id, texto, ts, tipo='entrada', ack=null,
   if (DEBUG_WS) console.debug('[LISTA] preview', { cliente_id, texto, ts, tipo, ack, instancia_id: instToUse });
 }
 
-/* ========================= normalizadores ========================= */
+// ========================= normalizadores =========================
 function pickMsgId(p){ return (p?.msg_id ?? p?.msgId ?? p?.message_id ?? p?.messageId ?? p?.id ?? null); }
 function mapStatusToAck(status){ if (!status) return null; const s=String(status).toUpperCase(); if (s.includes('READ')) return 2; if (s.includes('DELIVER')) return 1; if (s.includes('SERVER')||s.includes('SENT')) return 0; return null; }
 function mapEventToAck(ev){ if (!ev) return null; const e=String(ev).toUpperCase(); if (e.includes('READ')) return 2; if (e.includes('DELIVERY')) return 1; return null; }
@@ -136,18 +196,35 @@ function pickAck(p){
   if (p?.delivery_ack != null) return Number(p.delivery_ack);
   if (p?.status_ack != null) return Number(p.status_ack);
   const fromStatus = mapStatusToAck(p?.status || p?.state); if (fromStatus != null) return fromStatus;
-  const fromEvent = mapEventToAck(p?.event || p?.type);     if (fromEvent != null) return fromEvent;
+  const fromEvent  = mapEventToAck(p?.event || p?.type);    if (fromEvent  != null) return fromEvent;
   return null;
 }
+// ws-empresa.js
 function pickInstanciaId(payload){
+  // 1) veio no payload? use
   const direct = payload?.instancia_id ?? payload?.instancia ?? null;
   if (direct != null) return String(direct);
+
+  // 2) tente pelo cliente em cache
   const cid = Number(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? NaN);
+  if (Number.isFinite(cid)) {
+    const c = findCliente(cid);
+    const cached = c?.instancia_id ?? c?.instancia ?? null;
+    if (cached != null) return String(cached);
+  }
+
+  // 3) se o chat aberto for deste cliente, use a instância do DOM
   const oc = getOpenContext();
-  if (Number.isFinite(cid) && Number(oc.cliente_id) === cid && oc.instancia_id) return String(oc.instancia_id);
+  if (Number.isFinite(cid) && Number(oc?.cliente_id) === cid && oc?.instancia_id) {
+    return String(oc.instancia_id);
+  }
+
+  // 4) por último MESMO, caia na selecionada global
+  if (window.state?.instanciaSelecionada) return String(window.state.instanciaSelecionada);
   if (window.INSTANCIA_ATIVA) return String(window.INSTANCIA_ATIVA);
   return null;
 }
+
 function pickClienteId(payload){
   const fromPayload = Number(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? NaN);
   if (Number.isFinite(fromPayload)) return fromPayload;
@@ -155,7 +232,7 @@ function pickClienteId(payload){
   return Number.isFinite(Number(oc.cliente_id)) ? Number(oc.cliente_id) : null;
 }
 
-/* ========================= Funde o "eco local" com a mensagem WS ========================= */
+// ========================= eco local (merge) =========================
 function mirrorLegacyF5(instKey, cid){
   try{
     const arr = getHist(instKey, cid) || [];
@@ -198,7 +275,7 @@ function squashPendingLocalEcho(inst, cliente_id, msg){
   }catch{ return false; }
 }
 
-/* ========================= hist-cache append + espelho F5-safe ========================= */
+// ========================= hist-cache append + espelho =========================
 function appendToHistCache(inst, cliente_id, msg){
   const instKey = inst ?? pickInstanciaId({ cliente_id }) ?? window.INSTANCIA_ATIVA ?? null;
   try {
@@ -209,7 +286,7 @@ function appendToHistCache(inst, cliente_id, msg){
   }
 }
 
-/* ========================= handlers: ACK & MSG ========================= */
+// ========================= handlers: ACK & MSG =========================
 function handleAckGeneric(payload){
   const inst = pickInstanciaId(payload);
   const cliente_id = pickClienteId(payload);
@@ -306,7 +383,7 @@ function handleNovaMensagem(payload){
   if (DEBUG_WS) console.debug('[WS MSG]', { cliente_id, inst, merged, passesInst, openNow, texto: msg.conteudo, origem, autor_nome });
 }
 
-/* === NOVO: status da conversa (bot/no_bot/automático etc.) === */
+// ========================= conv_status & pin =========================
 function normalizeConvStatus(s){
   const v = String(s || '').toLowerCase();
   if (['bot','no_bot','automatico','automático'].includes(v)) return 'bot';
@@ -338,7 +415,6 @@ function handleConvStatus(payload){
   if (DEBUG_WS) console.debug('[WS CONV_STATUS]', { cliente_id, inst, status });
 }
 
-/* === NOVO: fixar/desafixar conversa em tempo real === */
 function inferPinFlag(p){
   if (typeof p.pin === 'boolean') return p.pin;
   if (typeof p.pinned === 'boolean') return p.pinned;
@@ -374,11 +450,16 @@ function handleConvPin(payload){
   if (DEBUG_WS) console.debug('[WS CONV_PIN]', { cliente_id, inst, pinned: !!flag, raw: payload });
 }
 
-/* ========================= dispatcher ========================= */
+// ========================= dispatcher =========================
 function handleMessage(ev){
   if (typeof ev?.data === 'string' && (ev.data === 'pong' || ev.data === 'ping')) return;
+
   const data = (typeof ev?.data === 'string') ? safeJson(ev.data) : ev?.data;
   if (!data || typeof data !== 'object') return;
+
+  // use serverTimestamp (se vier) p/ medir LAG
+  const sTs = Number(data.serverTimestamp ?? 0);
+  if (Number.isFinite(sTs) && sTs > 0) lastServerTs = sTs;
 
   if (data.type === 'history_sync_start'){ document.dispatchEvent(new CustomEvent('ws:history_sync_start')); return; }
   if (data.type === 'history_sync_done'){ document.dispatchEvent(new CustomEvent('ws:history_sync_done')); return; }
@@ -391,8 +472,7 @@ function handleMessage(ev){
   // ⚠️ NÃO recarrega a página em reload genérico (evita loop)
   if (data.reload || data.action === 'reload'){
     console.warn('[WS] reload genérico ignorado');
-    document.dispatchEvent(new CustomEvent('ws:generic_reload', { detail: data }));
-    return;
+    document.dispatchEvent(new CustomEvent('ws:generic_reload', { detail: data })); return;
   }
 
   // Reload específico de WhatsApp/instâncias (recarrega só as instâncias)
@@ -416,8 +496,8 @@ function handleMessage(ev){
   if (data.type === 'ack' || maybeAck != null) handleAckGeneric(data);
 
   // nova mensagem (texto/mídias)
-  const hasText   = (data.mensagem != null) || (data.texto != null) || (data.message != null) || (data.body != null);
-  const hasMidias = Array.isArray(data.midias) && data.midias.length > 0;
+  const hasText    = (data.mensagem != null) || (data.texto != null) || (data.message != null) || (data.body != null);
+  const hasMidias  = Array.isArray(data.midias) && data.midias.length > 0;
   const hasCliente = (data.cliente_id != null) || (data.client_id != null) || (data.conversation_id != null);
 
   if (hasCliente && (hasText || hasMidias)){ handleNovaMensagem(data); return; }
@@ -425,7 +505,7 @@ function handleMessage(ev){
   if (DEBUG_WS) console.debug('[WS IGNORADO]', data);
 }
 
-/* ========================= lifecycle ========================= */
+// ========================= lifecycle =========================
 function connectEmpresaWS(){
   if (!EMPRESA_ID) return;
   try { sock?.close(); } catch {}
@@ -434,16 +514,59 @@ function connectEmpresaWS(){
   const url = wsUrlEmpresa(EMPRESA_ID);
   sock = new WebSocket(url);
 
-  sock.addEventListener('open', () => { retryMs = 800; scheduleHeartbeat(); if (DEBUG_WS) console.debug('[WS OPEN]', url); });
-  sock.addEventListener('message', handleMessage);
-  sock.addEventListener('close', () => { clearInterval(hbTimer); if (!closedByMe){ if (DEBUG_WS) console.debug('[WS CLOSE] retry'); backoff(connectEmpresaWS); } });
-  sock.addEventListener('error', () => { try { sock.close(); } catch {} });
-}
-function disconnectEmpresaWS(){ closedByMe = true; clearInterval(hbTimer); try { sock?.close(); } catch {}; sock = null; }
+  sock.addEventListener('open', () => {
+    retryBase = 800;
+    scheduleHeartbeat();
+    startLagTimer();
+    lastServerTs = Date.now();
+    badge("Tempo real", "ok");
+    if (DEBUG_WS) console.debug('[WS OPEN]', url);
+  });
 
+  sock.addEventListener('message', (ev) => {
+    // se payload tiver timestamp mas não tiver serverTimestamp, ainda assim atualiza lag
+    if (typeof ev?.data === 'string') {
+      try {
+        const parsed = JSON.parse(ev.data);
+        const ts = Number(parsed?.serverTimestamp
+          ?? parsed?.ts
+          ?? (parsed?.timestamp ? tsToMillis(parsed.timestamp) : 0));
+        if (Number.isFinite(ts) && ts > 0) lastServerTs = Math.max(lastServerTs || 0, ts);
+      } catch {}
+    }
+    handleMessage(ev);
+  });
+
+  sock.addEventListener('close', () => {
+    clearInterval(hbTimer);
+    badge("Reconectando…", "loading");
+    if (!closedByMe){
+      if (DEBUG_WS) console.debug('[WS CLOSE] retry');
+      backoff(connectEmpresaWS);
+    }
+  });
+
+  sock.addEventListener('error', () => {
+    try { sock.close(); } catch {}
+  });
+}
+
+function disconnectEmpresaWS(){
+  closedByMe = true;
+  clearInterval(hbTimer);
+  clearInterval(lagTimer);
+  try { sock?.close(); } catch {};
+  sock = null;
+  badge("Desconectado", "crit");
+}
+
+// auto-boot on DOM ready
 try {
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => connectEmpresaWS());
-  else connectEmpresaWS();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => connectEmpresaWS());
+  } else {
+    connectEmpresaWS();
+  }
 } catch {}
 
 export { connectEmpresaWS, disconnectEmpresaWS };

@@ -17,14 +17,15 @@
     hide(){ if (window.PageLoading?.hide) PageLoading.hide(); else if (window.Loading?.hide) Loading.hide(); else if (window.ready) ready(); }
   };
 
-  const authFetch = (url, opt={}) => {
-    const f = (window.ZAuth && ZAuth.authFetch) ? ZAuth.authFetch : fetch;
+  // ✅ usa guardFetch se existir (melhor UX em 401/403)
+  const authFetch = (url, opt = {}) => {
+    const F = window.ZAuth?.guardFetch || window.ZAuth?.authFetch || fetch;
     const headers = Object.assign(
       { 'Accept':'application/json' },
       opt.headers || {},
       EMPRESA_ID ? { 'X-Empresa-Id': String(EMPRESA_ID) } : {}
     );
-    return f(url, { credentials:'include', ...opt, headers });
+    return F(url, { credentials:'include', ...opt, headers });
   };
 
   function withEmpresaIdQuery(path){
@@ -87,7 +88,7 @@
     q: '',
     editing: null,
     expanded: new Set(),
-    view: 'org',          // desktop: org; mobile: table (ajustado no init)
+    view: 'org',          // vai ser ajustado no init antes de carregar
     companyName: null,
     zoom: 1, tx: 0, ty: 0, _pzInit: false,
 
@@ -210,7 +211,7 @@
       // número também muda de chave em APIs diferentes
       const numero = String(
         i.numero_instancia ?? i.numero ?? i.number ?? i.phone ??
-        i.msisdn ?? i.whatsapp ?? i.msisdn_number ?? ''
+        i.msisdn ?? i.whatsapp ?? ''
       ).replace(/[^\d+]/g,'');
 
       return (Number.isFinite(id) || nome) ? { id, nome, numero } : null;
@@ -861,7 +862,7 @@
       parent_id: selParent.value ? Number(selParent.value) : null,
       codigo: (inpCodigo.value||'').trim() || null,
       ativo: !!chkAtivo.checked,
-      whatsapp_instancias: Array.from(state.whatsSelected) // <<<<<< mantém as instâncias selecionadas
+      whatsapp_instancias: Array.from(state.whatsSelected) // mantém as instâncias selecionadas
     };
 
     if (btnSalva) btnSalva.disabled = true;
@@ -1136,6 +1137,10 @@
     // Whats
     bindWhats();
 
+    // ✅ Prévia atualiza ao digitar/trocar o pai
+    inpNome.addEventListener('input', updatePathPreview);
+    selParent.addEventListener('change', updatePathPreview);
+
     window.addEventListener('resize', debounce(()=>{
       if (state.view==='org') queueWireDraw();
     }, 140));
@@ -1203,17 +1208,8 @@
 
     bind();
 
-    btnX.addEventListener('click', closeModal);
-    btnCanc.addEventListener('click', closeModal);
-    btnSalva.addEventListener('click', salvar);
-    form.addEventListener('submit', (e)=>{ e.preventDefault(); salvar(); });
-
-    await loadEmpresaName();
-    await loadTree();
-
-    // ======== DEFAULT VIEW POR DISPOSITIVO ========
+    // ✅ DECIDE A VIEW PRIMEIRO (antes de carregar dados)
     if (IS_MOBILE){
-      // Mobile: TABELA fixa, Organograma oculto, sem expand/colapse
       state.view = 'table';
 
       if (btnViewOrg){
@@ -1223,24 +1219,35 @@
       }
       if (sectionOrg) sectionOrg.style.display = 'none';
 
-      // tudo expandido por padrão
-      state.flat.forEach(d => state.expanded.add(d.id));
-
+      // tudo expandido por padrão (melhor navegação)
+      // (o render respeita isso)
+      // será populado após loadTree
       btnViewTable.classList.add('is-active'); btnViewTable.setAttribute('aria-selected','true');
       sectionTable.style.display = '';
-      renderTable();
     } else {
-      // Desktop: Organograma padrão
       state.view = 'org';
       btnViewTable.classList.remove('is-active'); btnViewTable.setAttribute('aria-selected','false');
       btnViewOrg.classList.add('is-active');      btnViewOrg.setAttribute('aria-selected','true');
       sectionTable.style.display = 'none';
       sectionOrg.style.display   = '';
-      renderOrg();
+    }
+
+    btnX.addEventListener('click', closeModal);
+    btnCanc.addEventListener('click', closeModal);
+    btnSalva.addEventListener('click', salvar);
+    form.addEventListener('submit', (e)=>{ e.preventDefault(); salvar(); });
+
+    await loadEmpresaName();
+    await loadTree();
+
+    if (IS_MOBILE){
+      // após ter a árvore, expande tudo
+      state.flat.forEach(d => state.expanded.add(d.id));
+      renderTable();
     }
   }
 
-  // Gate / Start
+  // Gate / Start (usa Page.guarded se disponível)
   const run = () => (window.Page?.guarded?.(
     'departamentos.gerenciar',
     init,

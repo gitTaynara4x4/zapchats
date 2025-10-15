@@ -1,4 +1,3 @@
-# backend/integrations/rabbit_consumer.py
 from __future__ import annotations
 
 import os
@@ -9,8 +8,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Coroutine, Optional, Tuple, Dict
 
 import aio_pika
+from aio_pika import Message, DeliveryMode
 from aio_pika.abc import AbstractChannel, AbstractQueue, AbstractIncomingMessage
-
 
 # =========================
 # Helpers de ENV e URI
@@ -18,10 +17,9 @@ from aio_pika.abc import AbstractChannel, AbstractQueue, AbstractIncomingMessage
 def _env(name: str, default: str = "") -> str:
     return os.getenv(name, default)
 
-
 def _uri() -> str:
     """
-    Prioriza RABBITMQ_URI (jÃ¡ com vhost). SenÃ£o monta a partir dos DEFAULT_*.
+    Prioriza RABBITMQ_URI (já com vhost). Senão monta a partir dos DEFAULT_*.
     Aceita vhost "/" (codificado como %2F).
     """
     uri = _env("RABBITMQ_URI")
@@ -36,7 +34,6 @@ def _uri() -> str:
     vq = "%2F" if vhost == "/" else urllib.parse.quote(vhost, safe="")
     return f"amqp://{user}:{pw}@{host}:{port}/{vq}"
 
-
 # =========================
 # Estado
 # =========================
@@ -47,43 +44,120 @@ class _RabbitState:
     queue: Optional[AbstractQueue] = None
     consumer_tag: Optional[str] = None
     stop_event: Optional[asyncio.Event] = None
-
+    # extras para DLX/Retry
+    dlx_ex: Optional[aio_pika.Exchange] = None
+    retry_queue_name: Optional[str] = None
+    dlq_queue_name: Optional[str] = None
+    max_retries: int = 5
 
 # =========================
 # Topologia
 # =========================
-async def _ensure_topology(ch: AbstractChannel) -> Tuple[aio_pika.Exchange, AbstractQueue]:
+async def _ensure_topology(
+    ch: AbstractChannel,
+) -> Tuple[aio_pika.Exchange, AbstractQueue, aio_pika.Exchange, Dict[str, str]]:
     """
-    Garante exchange/queue/bindings.
-    - Exchange: topic, durable
-    - Queue: durable, quorum (com fallback p/ classic se broker nÃ£o suportar)
+    Garante exchange/queue/bindings + DLX/Retry/DLQ.
+    - Exchange principal: topic, durable
+    - DLX (ex_name + ".dlx"): topic, durable
+    - Fila principal:
+        * PASSIVE se já existir (não muda args → evita PRECONDITION_FAILED)
+        * Se não existir, cria com quorum (x-queue-type=quorum)
+        * Binds com routing keys configuradas
+    - Fila de retry: TTL + dead-letter de volta p/ exchange principal
+    - DLQ final: recebe mensagens "desistidas"
     """
     ex_name = _env("RABBITMQ_EXCHANGE_NAME", "evolution_exchange")
     queue_name = _env("RABBITMQ_QUEUE_NAME", "zapchats.backend")
     bindings = [s.strip() for s in _env("RABBITMQ_BINDINGS", "#").split(",") if s.strip()]
 
-    exchange = await ch.declare_exchange(ex_name, aio_pika.ExchangeType.TOPIC, durable=True)
+    # params de retry/DLQ (topologia auxiliar; DLX também pode vir por policy)
+    ttl_ms = int(_env("RABBITMQ_RETRY_TTL_MS", "5000") or "5000")
+    retry_key = _env("RABBITMQ_RETRY_ROUTING", "retry.5s")
+    back_key = _env("RABBITMQ_RETRY_BACK_ROUTING", "events")  # rota de retorno p/ exchange principal
+    retry_queue_name = _env("RABBITMQ_RETRY_QUEUE", f"{queue_name}.retry")
+    dlq_queue_name = _env("RABBITMQ_DLQ_NAME", f"{queue_name}.dlq")
+    use_quorum = (_env("RABBITMQ_USE_QUORUM", "true").lower() == "true")
+    use_sac = (_env("RABBITMQ_USE_SAC", "false").lower() == "true")
 
+    # limites/overflow (opcionais) – só usados se a fila for criada do zero
+    max_len = _env("RABBITMQ_MAX_LENGTH", "")
+    max_bytes = _env("RABBITMQ_MAX_BYTES", "")
+    overflow = _env("RABBITMQ_OVERFLOW", "")  # ex: reject-publish
+
+    # Exchanges
+    main_ex = await ch.declare_exchange(ex_name, aio_pika.ExchangeType.TOPIC, durable=True)
+    dlx_ex = await ch.declare_exchange(f"{ex_name}.dlx", aio_pika.ExchangeType.TOPIC, durable=True)
+
+    # Fila principal:
+    # 1) tenta PASSIVE (não altera argumentos já existentes)
     try:
-        queue = await ch.declare_queue(
-            queue_name,
-            durable=True,
-            arguments={"x-queue-type": "quorum"},
-        )
+        main_q = await ch.declare_queue(queue_name, passive=True)
     except Exception:
-        queue = await ch.declare_queue(queue_name, durable=True)
+        # 2) não existe → cria com quorum e demais limites (DLX fica por policy)
+        main_args: Dict[str, Any] = {}
+        if use_quorum:
+            main_args["x-queue-type"] = "quorum"
+        if use_sac:
+            main_args["x-single-active-consumer"] = True
+        if max_len:
+            main_args["x-max-length"] = int(max_len)
+        if max_bytes:
+            main_args["x-max-length-bytes"] = int(max_bytes)
+        if overflow:
+            main_args["x-overflow"] = overflow  # e.g. "reject-publish"
+        try:
+            main_q = await ch.declare_queue(queue_name, durable=True, arguments=main_args)
+        except Exception:
+            # fallback ultra-minimalista se o broker rejeitar algum arg
+            main_q = await ch.declare_queue(queue_name, durable=True)
 
+    # Bindings (idempotentes na prática)
     for rk in bindings:
         try:
-            await queue.bind(exchange, routing_key=rk)
+            await main_q.bind(main_ex, routing_key=rk)
         except Exception as e:
             print(f"[RABBIT] Falha ao bind '{rk}': {e}")
 
-    return exchange, queue
+    # fila de retry (TTL + DLX de volta p/ a exchange principal)
+    retry_args: Dict[str, Any] = {
+        "x-message-ttl": ttl_ms,
+        "x-dead-letter-exchange": ex_name,
+        "x-dead-letter-routing-key": back_key,
+    }
+    if use_quorum:
+        retry_args["x-queue-type"] = "quorum"
 
+    try:
+        retry_q = await ch.declare_queue(retry_queue_name, durable=True, arguments=retry_args)
+    except Exception:
+        retry_args.pop("x-queue-type", None)
+        retry_q = await ch.declare_queue(retry_queue_name, durable=True, arguments=retry_args)
+
+    await retry_q.bind(dlx_ex, routing_key=retry_key)
+
+    # DLQ final (mensagens "desistidas")
+    dlq_args: Dict[str, Any] = {}
+    if use_quorum:
+        dlq_args["x-queue-type"] = "quorum"
+
+    try:
+        dlq_q = await ch.declare_queue(dlq_queue_name, durable=True, arguments=dlq_args)
+    except Exception:
+        dlq_q = await ch.declare_queue(dlq_queue_name, durable=True)
+
+    await dlq_q.bind(dlx_ex, routing_key="final")
+
+    topo = {
+        "retry_key": retry_key,
+        "back_key": back_key,
+        "retry_queue": retry_queue_name,
+        "dlq_queue": dlq_queue_name,
+    }
+    return main_ex, main_q, dlx_ex, topo
 
 # =========================
-# Helpers de normalizaÃ§Ã£o
+# Helpers de normalização
 # =========================
 def _norm_event_name(ev: Optional[str]) -> str:
     ev = (ev or "").strip()
@@ -91,10 +165,9 @@ def _norm_event_name(ev: Optional[str]) -> str:
         return ""
     return ev.replace(".", "_").replace("-", "_").upper()
 
-
 def _find_instance(js: Any) -> str:
     """
-    Tenta achar o identificador da instÃ¢ncia em diversos formatos
+    Tenta achar o identificador da instância em diversos formatos
     (dict raiz, dict em 'data', ou em objetos qrcode etc.).
     """
     if isinstance(js, dict):
@@ -126,7 +199,6 @@ def _find_instance(js: Any) -> str:
 
     return ""
 
-
 # =========================
 # Runner principal
 # =========================
@@ -137,21 +209,27 @@ async def _runner(
 ) -> None:
     """
     Conecta, garante topologia, consome e aguarda stop_event.
-    Faz shutdown limpo no finally (cancela consume, fecha canal e conexÃ£o).
+    Faz shutdown limpo no finally (cancela consume, fecha canal e conexão).
     """
     uri = _uri()
     print("[RABBIT] Conectando em:", uri)
 
-    state.conn = await aio_pika.connect_robust(uri)
-    state.channel = await state.conn.channel()
+    # Heartbeat para evitar conexões zumbis
+    heartbeat = int(_env("RABBITMQ_HEARTBEAT", "15") or "15")
+    state.conn = await aio_pika.connect_robust(uri, heartbeat=heartbeat)
 
-    prefetch = int(_env("RABBITMQ_QOS", "50") or "50")
+    # Publisher confirms para garantir publicação, e permitir mandatory
+    state.channel = await state.conn.channel(publisher_confirms=True)
+
+    prefetch = int(_env("RABBITMQ_QOS", "64") or "64")
     await state.channel.set_qos(prefetch_count=prefetch)
 
-    _, state.queue = await _ensure_topology(state.channel)
+    main_ex, state.queue, state.dlx_ex, topo = await _ensure_topology(state.channel)
+    state.retry_queue_name = topo["retry_queue"]
+    state.dlq_queue_name = topo["dlq_queue"]
+    state.max_retries = int(_env("RABBITMQ_MAX_RETRIES", "5") or "5")
 
-    # Alguns brokers/instalaÃ§Ãµes usam nomes com pequenas variaÃ§Ãµes;
-    # mapeamos aliases comuns para os enums do backend.
+    # aliases comuns para enums
     def _alias(ev_key: str) -> str:
         if ev_key == "GROUPS_UPDATE":
             return "GROUP_UPDATE"
@@ -159,56 +237,116 @@ async def _runner(
             return "MESSAGES_UPDATE"
         return ev_key
 
+    def _attempts_from_xdeath(msg: AbstractIncomingMessage) -> int:
+        """
+        Conta tentativas com base no header x-death para a fila de retry.
+        """
+        try:
+            headers = msg.headers or {}
+        except Exception:
+            return 0
+        xdeath = headers.get("x-death")
+        total = 0
+        if isinstance(xdeath, list):
+            for d in xdeath:
+                if isinstance(d, dict) and d.get("queue") == state.retry_queue_name:
+                    try:
+                        total += int(d.get("count", 1))
+                    except Exception:
+                        total += 1
+        return total
+
+    async def _publish_dlx_copy(body: bytes, headers: Dict[str, Any], routing_key: str = "final") -> None:
+        """
+        Publica cópia na DLX final com confirms + mandatory.
+        """
+        if not state.dlx_ex:
+            return
+        msg = Message(
+            body or b"",
+            headers=headers or {},
+            delivery_mode=DeliveryMode.PERSISTENT,
+        )
+        await state.dlx_ex.publish(msg, routing_key=routing_key, mandatory=True)
+
     async def on_message(msg: AbstractIncomingMessage) -> None:
-        async with msg.process(requeue=False):
-            raw = ""
-            js: Any = {}
+        # processamento manual para decidir ack/nack/publicação na DLQ final
+        raw = ""
+        js: Any = {}
+        try:
+            raw = msg.body.decode("utf-8", "ignore") if msg.body else ""
+            js = json.loads(raw) if raw else {}
+        except Exception as e:
+            print("[RABBIT] JSON inválido:", e)
+            # mensagem malformada → ack + manda pra DLQ final com contexto
             try:
-                raw = msg.body.decode("utf-8", "ignore") if msg.body else ""
-                js = json.loads(raw) if raw else {}
-            except Exception as e:
-                print("[RABBIT] JSON invÃ¡lido:", e)
-                return
+                await msg.ack()
+                await _publish_dlx_copy(
+                    msg.body or b"",
+                    {**(msg.headers or {}), "reason": "json-parse-error", "error": str(e)},
+                )
+            except Exception as pe:
+                print("[RABBIT] Falha ao publicar em DLQ final:", pe)
+            return
 
-            # identifica o evento
-            ev_raw = None
-            if isinstance(js, dict):
-                ev_raw = js.get("event") or js.get("type") or js.get("eventName")
-            ev_key = _norm_event_name(ev_raw or msg.routing_key)
-            ev_key = _alias(ev_key)
+        # identifica o evento
+        ev_raw = None
+        if isinstance(js, dict):
+            ev_raw = js.get("event") or js.get("type") or js.get("eventName")
+        ev_key = _alias(_norm_event_name(ev_raw or msg.routing_key))
 
-            # resolve Enum
-            try:
-                evt = EvoEvent[ev_key]
-            except Exception:
-                # evento desconhecido
-                return
+        # resolve Enum
+        try:
+            evt = EvoEvent[ev_key]
+        except Exception:
+            # evento desconhecido → apenas ACK para não ciclar
+            await msg.ack()
+            return
 
-            handler = HANDLERS.get(evt)
-            if not handler:
-                return
+        handler = HANDLERS.get(evt)
+        if not handler:
+            await msg.ack()
+            return
 
-            inst = _find_instance(js)
+        inst = _find_instance(js)
 
-            # >>> ENVELOPA SEMPRE (mesmo se jÃ¡ for dict) <<<
-            # Isso evita "AttributeError: 'list' object has no attribute 'get'"
-            # em handlers que esperam sempre um payload dict com chave "data".
-            payload = {"instance": inst, "data": js}
+        # Sempre envelopa como {"instance":..., "data":...}
+        payload = {"instance": inst, "data": js}
+        first_arg = inst or msg.routing_key or ""
 
-            first_arg = inst or msg.routing_key or ""
-
-            try:
-                coro = handler(first_arg, payload)
-                if asyncio.iscoroutine(coro):
-                    await coro
-            except Exception as e:
-                print(f"[RABBIT] Erro no handler {ev_key}: {e}")
+        try:
+            coro = handler(first_arg, payload)
+            if asyncio.iscoroutine(coro):
+                await coro
+            await msg.ack()
+        except Exception as e:
+            # Decide retry (TTL) ou DLQ final
+            attempts = _attempts_from_xdeath(msg)
+            if attempts < state.max_retries:
+                # NACK sem requeue → vai p/ DLX (retry.<ttl>) e volta após TTL
+                await msg.reject(requeue=False)
+            else:
+                # Parou de tentar: ACK e publica uma cópia na DLQ final com contexto
+                await msg.ack()
+                try:
+                    await _publish_dlx_copy(
+                        msg.body or b"",
+                        {
+                            **(msg.headers or {}),
+                            "reason": "max-retries",
+                            "error": str(e),
+                            "event": ev_key,
+                            "attempts": attempts,
+                        },
+                    )
+                except Exception as pe:
+                    print("[RABBIT] Falha ao publicar em DLQ final:", pe)
 
     # registrar consumidor e guardar o consumer_tag para cancelar depois
     state.consumer_tag = await state.queue.consume(on_message, no_ack=False)
-    print("[RABBIT] Consumindoâ€¦")
+    print("[RABBIT] Consumindo…")
 
-    # espera atÃ© alguÃ©m pedir stop()
+    # espera até alguém pedir stop()
     state.stop_event = state.stop_event or asyncio.Event()
     try:
         await state.stop_event.wait()
@@ -232,9 +370,8 @@ async def _runner(
         except Exception:
             pass
 
-
 # =========================
-# API pÃºblica
+# API pública
 # =========================
 def start_rabbit_consumer(
     loop: asyncio.AbstractEventLoop,

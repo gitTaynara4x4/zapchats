@@ -1,19 +1,18 @@
+// /frontend/js/pages/dashboard.js
 (function DashboardPage(){
   'use strict';
 
   // ======== CONFIG: Evolution direto (VISÍVEL NO FRONT!) ========
-  // Se não quiser expor chave no cliente, deixe string vazia que o código ignora o modo direto.
-  const EVOLUTION_URL    = ""; // ex: "https://evolution.seu-dominio.com" (sem barra no fim)
+  const EVOLUTION_URL    = ""; // ex: "https://evolution.seu-dominio.com"
   const EVOLUTION_APIKEY = ""; // ex: "xxxxx"
   // ===============================================================
 
   // ===== helpers base =====
   const $  = (s, r=document)=> r.querySelector(s);
   const LS = localStorage;
-
   const onlyDigits = (s) => String(s ?? '').replace(/\D/g, '');
 
-  // EMPRESA (instância ativa vem do runtime: window.__INST_ID / __INST_NAME)
+  // EMPRESA
   const EMPRESA_ID = Number(LS.getItem('empresa_id') || 0) || '';
 
   function getInstAtiva(){
@@ -26,13 +25,15 @@
     return n || '';
   }
 
-  // cache local do mapa id -> instance_name (para quando o dropdown não passar o nome)
-  let INST_MAP = null; // { [id:number]: {instance_name, apelido, ...} }
+  // cache local do mapa id -> instance_name
+  let INST_MAP = null;
 
   async function ensureInstMap(){
     if (INST_MAP) return INST_MAP;
     try{
-      const r = await fetch(`/api/empresas/${EMPRESA_ID}/whatsapp`, { credentials:'include' });
+      // usa guardFetch/authFetch para respeitar 401/403
+      const F = (window.ZAuth?.guardFetch || window.ZAuth?.authFetch || fetch);
+      const r = await F(`/api/empresas/${EMPRESA_ID}/whatsapp`, { credentials:'include' });
       const j = await r.json();
       const arr = Array.isArray(j.instancias) ? j.instancias : [];
       INST_MAP = {};
@@ -41,14 +42,11 @@
         const nm  = String(it.instance_name ?? it.instancia_slug ?? it.session ?? it.sessionName ?? it.apelido ?? it.nome ?? '').trim();
         INST_MAP[id||0] = { instance_name: nm, raw: it };
       }
-    }catch{
-      INST_MAP = {};
-    }
+    }catch{ INST_MAP = {}; }
     return INST_MAP;
   }
 
   // chamado pelo dropdown ao selecionar manualmente
-  // agora aceita (idOuSlug, instanceNameOpcional)
   window.setInstanciaAtivaDashboard = function(idOuSlug, instanceName){
     window.__INST_ID = idOuSlug ? Number(String(idOuSlug).replace(/\D/g,'')) : '';
     window.__INST_NAME = (instanceName || '').trim();
@@ -93,9 +91,15 @@
     }
   }
 
+  // >>> jfetch COM guard 401/403
   async function jfetch(url, opt={}){
-    const f = (window.ZAuth && ZAuth.authFetch) ? ZAuth.authFetch : fetch;
-    const res = await f(url, { ...opt, headers: { 'Accept':'application/json', ...(opt.headers||{}) }, credentials:'include' });
+    const F = (window.ZAuth?.guardFetch)
+      ? ZAuth.guardFetch          // 401/403: redireciona para login/sem-permissao
+      : (window.ZAuth?.authFetch) // 401: redireciona para login
+        ? ZAuth.authFetch
+        : fetch;
+
+    const res = await F(url, { ...opt, headers: { 'Accept':'application/json', ...(opt.headers||{}) }, credentials:'include' });
     if (!res.ok) throw new Error(`${res.status}`);
     const ct = res.headers.get('content-type')||'';
     return /json/i.test(ct) ? res.json() : res.text();
@@ -111,6 +115,9 @@
   const elWppCard = document.querySelector('.card-wpp-status');
   const elWppTxt  = elWppCard?.querySelector('.status-text') || null;
   const elWppDot  = elWppCard?.querySelector('.status-dot')  || null;
+
+  const lastBox    = document.getElementById('lastBox');
+  const lastEmpty  = document.getElementById('lastEmpty');
 
   let chartPizza = null, chartFunil = null, DEMO_ACTIVE = false;
 
@@ -153,7 +160,7 @@
 
   function renderTable(list){
     if (!elTableBody) return;
-    if (DEMO_ACTIVE) { elTableBody.innerHTML = ''; return; }
+    if (DEMO_ACTIVE) { elTableBody.innerHTML = ''; toggleEmptyState(true); return; }
 
     const optsTime = { hour:'2-digit', minute:'2-digit', hour12:false, timeZone:'America/Sao_Paulo' };
     const optsDate = { day:'2-digit', month:'2-digit', year:'numeric', timeZone:'America/Sao_Paulo' };
@@ -171,6 +178,13 @@
     }).join('');
 
     elTableBody.innerHTML = rows || '';
+    toggleEmptyState(!(rows && rows.length));
+  }
+
+  function toggleEmptyState(empty){
+    if (!lastBox || !lastEmpty) return;
+    lastBox.classList.toggle('is-empty', !!empty);
+    lastEmpty.hidden = !empty;
   }
 
   function upsertChart(ctx, prev, cfg){
@@ -241,7 +255,6 @@
     return 0;
   }
 
-  // Filtro de instância — manda só se houver __INST_ID
   function instParams(){
     const inst = getInstAtiva();
     if (!inst) return {};
@@ -267,7 +280,7 @@
       return { connected, state };
     }catch(e){
       console.warn('Evolution direct failed:', e);
-      return null; // pode ser CORS
+      return null;
     }
   }
 
@@ -291,18 +304,13 @@
     else { elWppCard.classList.add('bad'); elWppDot.classList.add('bad'); }
   }
 
-  // ===== estratégia de status: preferir Evolution direto; senão, backend =====
   async function updateWhatsappCard(){
-    // 1) tenta Evolution direto se temos nome
     let instName = getInstName();
-
     if (!instName){
-      // tenta mapear pelo ID uma única vez
       const map = await ensureInstMap();
       const id = getInstAtiva();
       if (id && map[id]?.instance_name) instName = map[id].instance_name;
     }
-
     let used = false;
     if (instName){
       const direct = await fetchEvolutionState(instName);
@@ -311,7 +319,6 @@
         renderWppStatus({ online: !!direct.connected, detalhes:[{ id:getInstAtiva(), connected: !!direct.connected }]});
       }
     }
-    // 2) fallback: usa backend
     if (!used){
       const status = await fetchWppStatus({ empresa_id: EMPRESA_ID, ...instParams() });
       if (status) renderWppStatus(status);
@@ -357,7 +364,6 @@
       renderTable(ultimos);
       setCount( realTotalFrom(data, cards) );
 
-      // Status WhatsApp (preferir Evolution direto, fallback backend)
       await updateWhatsappCard();
 
     }catch(e){
@@ -368,10 +374,25 @@
       renderFunil({labels:['Sem dados'], data:[0]});
       renderTable([]);
       setCount(0);
-      // tenta pelo menos pintar o status
       try{ await updateWhatsappCard(); }catch{}
     }finally{
       Loader.hide?.();
+    }
+  }
+
+  // ===== util: setar data do flatpickr e disparar change =====
+  function setDateISO(el, iso){
+    if (!el) return;
+    try{
+      if (el._flatpickr) {
+        el._flatpickr.setDate(iso || null, true); // true => dispara onChange
+      } else {
+        el.value = iso || '';
+        el.dispatchEvent(new Event('change', { bubbles:true }));
+      }
+    }catch{
+      el.value = iso || '';
+      el.dispatchEvent(new Event('change', { bubbles:true }));
     }
   }
 
@@ -380,6 +401,18 @@
     const elDate = document.getElementById('filtroData');
     if (elDate && !elDate.value) elDate.value = todayISO;
     elDate && elDate.addEventListener('change', ()=> loadAll(elDate.value || todayISO));
+
+    // Botões rápidos
+    const btnHoje   = document.getElementById('btnHoje');
+    const btnOntem  = document.getElementById('btnOntem');
+    const btnLimpar = document.getElementById('btnLimpar');
+
+    btnHoje?.addEventListener('click', ()=> setDateISO(elDate, todayISO));
+    btnOntem?.addEventListener('click', ()=>{
+      const d = new Date(); d.setDate(d.getDate() - 1);
+      setDateISO(elDate, fmtDateISO(d));
+    });
+    btnLimpar?.addEventListener('click', ()=> setDateISO(elDate, ''));
 
     const doLoad = ()=> loadAll(elDate?.value || todayISO);
     if (window.ZAuth?.softEnsureAuth) ZAuth.softEnsureAuth().finally(doLoad);

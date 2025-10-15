@@ -9,6 +9,17 @@ html, body { height: 100%; }
   --accent: #008B32;
   --ok: #008B32;
   --accent-fg: #ffffff; /* texto em botões/abas selecionadas */
+
+  /* ===== Vars de LIGHT mode para dar contraste no branco ===== */
+  --bg: #f6f7fb;            /* fundo geral (não-brancão) */
+  --fg: #111827;            /* texto principal */
+  --muted: #667085;         /* textos suaves/legendas */
+  --card: #ffffff;          /* cartões/boxes */
+  --hover: #f9fafb;         /* hover de linhas */
+  --hover-strong: #f3f4f6;  /* cabeçalho de tabela/faixas */
+  --border: #d1d5db;        /* bordas mais visíveis no claro */
+  --ring: #4f83ff80;        /* foco acessível */
+  --font-ui: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
 }
 body {
   margin: 0;
@@ -234,3 +245,16 @@ th:last-child, td:last-child { text-align: right; }
 
 /* === Utilitários === */
 .hidden { display: none !important; }
+
+/* Light: remove o brilho branco interno e dá uma borda sutil */
+html:not(.dark) .box{
+  box-shadow: 0 10px 24px rgba(0,0,0,.08); /* sem o inset branco */
+  border: 1px solid var(--border);
+  --accent-fg: var(--fg);
+}
+
+/* (opcional) mantém o efeito no dark igual estava */
+html.dark .box{
+  box-shadow: 0 10px 28px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.04);
+  border: none !important;
+}

@@ -1,10 +1,9 @@
-// /frontend/js/atendimentos/boot/main.js
 /* ====================================================================
  * ZapChats – Painel de Atendimento
- * boot/main.js
+ * /frontend/js/atendimentos/boot/main.js
  *
- * Ponto de entrada ES Module. Carrega todos os módulos em ordem.
- * Não exporta nada. Apenas chama o boot.
+ * Ponto de entrada ES Module. Carrega todos os módulos em ordem e
+ * dá o boot da aplicação quando o DOM estiver pronto.
  * ==================================================================== */
 
 // -------- CORE (infra/úteis) -----------------------------------------
@@ -28,19 +27,20 @@ import '../domain/media-render.js'; // criação de HTML de mídias, players, fa
 import '../realtime/ws-empresa.js'; // connectEmpresaWS + eventos (ack, reload, nova msg)
 
 // -------- UI (componentes/controles) --------------------------------
-import '../ui/splash.js';       // splash “Protegida com a criptografia…” (agora externo)
-import '../ui/envio.js';        // barra de envio: texto, anexos, gravação de áudio
-import '../ui/notif.js';        // áudio/desktop notifications + contador de não lidas
-import '../ui/perfil.js';       // shim de perfil: abrirPerfilAtual()
-import '../ui/perfil_quick.js';   // painel rápido (Evolution) ao clicar no nome/foto
-import '../ui/search.js';       // busca global e dentro do chat (F3/Ctrl+G)
-import '../ui/flyout.js';       // 3 pontinhos + flyout lateral
-import '../ui/inst-switch.js';  // seletor de instâncias "WhatsApps (N)"
-import '../ui/notes-drawer.js'; // drawer lateral “Sobre o cliente” (blindado)
-import '../ui/ia.js';           // modal/ferramentas de IA (botão 24x24 no header)
+import '../ui/splash.js';           // splash “Protegida com a criptografia…”
+import '../ui/envio.js';            // barra de envio: texto, anexos, gravação de áudio
+import '../ui/notif.js';            // áudio/desktop notifications + contador de não lidas
+import '../ui/perfil.js';           // shim de perfil: abrirPerfilAtual()
+import '../ui/perfil_quick.js';     // painel rápido (Evolution) ao clicar no nome/foto
+import '../ui/search.js';           // busca global e dentro do chat (F3/Ctrl+G)
+import '../ui/flyout.js';           // 3 pontinhos + flyout lateral
+import '../ui/inst-switch.js';      // seletor de instâncias "WhatsApps (N)"
+import '../ui/notes-drawer.js';     // drawer lateral “Sobre o cliente”
+import '../ui/ia.js';               // modal/ferramentas de IA
 import '../ui/context-menu.js';
 import '../ui/new-chat.js';
 import '../ui/filtros.js';
+
 // -------- BOOT (liga tudo ao carregar a página) ---------------------
 import { boot } from './init.js';
 

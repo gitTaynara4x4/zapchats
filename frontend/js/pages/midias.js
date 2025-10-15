@@ -4,15 +4,63 @@
   const PERM_REQUIRED = 'arquivos.ver';
   const GUARD_TIMEOUT_MS = 3500;
 
-  // ===== Sessão / Fetch =====
+  // ===== Sessão / Fetch / Storage =====
   const LS = localStorage;
+  const STATE_KEY = 'midiasState:v1'; // cache desta página
   const getEmpresaId = () => LS.getItem('empresa_id') || '';
   const getToken     = () => LS.getItem('token') || LS.getItem('auth_token') || '';
+  const KEY_INST     = (empresa) => `instAtiva:${empresa || ''}`; // cache do seletor de instância
+
+  // LIMPA APENAS EM 401 (sem login). Em 403, não limpamos.
+  function clearAuthScopedState(){
+    try{ LS.removeItem(STATE_KEY); }catch{}
+    try{ LS.removeItem(KEY_INST(getEmpresaId())); }catch{}
+  }
+
+  // redireciona quando não temos guardFetch (ou se ele não interceptar)
+  function gotoLogin(){
+    if (window.ZAuth?.goLogin) { try{ ZAuth.goLogin(); return; }catch{} }
+    location.replace('/login');
+  }
+  function gotoSemPermissao(){
+    location.replace('/sem-permissao');
+  }
+  function handleAuthStatus(res){
+    if (!res) return false;
+    if (res.status === 401){
+      clearAuthScopedState();
+      gotoLogin();
+      return true;
+    }
+    if (res.status === 403){
+      gotoSemPermissao();
+      return true;
+    }
+    return false;
+  }
+
+  // fetch autenticado (preferindo guardFetch). Se cair no fetch nativo, tratamos 401/403 manualmente.
   async function authFetch(input, init = {}) {
-    if (window.ZAuth?.authFetch) return ZAuth.authFetch(input, init);
+    const useGuard = !!(window.ZAuth?.guardFetch);
+    const useAuth  = !!(window.ZAuth?.authFetch);
+    const F        = useGuard ? ZAuth.guardFetch : (useAuth ? ZAuth.authFetch : fetch);
+
+    const useNative = !(useGuard || useAuth);
     const t = getToken();
-    const headers = { ...(init.headers||{}), ...(t ? { Authorization: `Bearer ${t}` } : {}) };
-    return fetch(input, { ...init, headers, credentials: 'include' });
+    const baseHeaders = init.headers || {};
+    const headers = useNative && t ? { ...baseHeaders, Authorization: `Bearer ${t}` } : baseHeaders;
+
+    try {
+      const res = await F(input, { ...init, headers: { 'Accept':'application/json', ...headers }, credentials: 'include' });
+      // se usamos nativo, tratar 401/403 aqui
+      if (useNative && (res.status === 401 || res.status === 403)) handleAuthStatus(res);
+      return res;
+    } catch (err) {
+      // se o guard redirecionou/abortou, marque e deixe quem chamou calar o toast
+      const e = err || {};
+      e.__authRedirect = true;
+      throw e;
+    }
   }
 
   // ===== Loader / Toast =====
@@ -46,14 +94,10 @@
     btnUpload: document.getElementById('btn-upload'),
     btnLimpar: document.getElementById('btn-limpar'),
     btnMeus: document.getElementById('btn-meus-arquivos'),
-
-    // seletor de instância
     instBtn:   document.getElementById('instMenuBtn'),
     instMenu:  document.getElementById('inst-menu'),
     instList:  document.getElementById('instMenuList'),
     instLabel: document.getElementById('instMenuLabel'),
-
-    // container p/ botão "mostrar mais"
     box: document.querySelector('.box'),
     btnMore: null,
     moreWrap: null,
@@ -63,15 +107,9 @@
   const IMGS=['PNG','JPG','JPEG','WEBP','GIF','BMP','SVG','AVIF','HEIC','HEIF'];
   const VIDS=['MP4','WEBM','OGG','MOV','M4V','MKV','AVI'];
   const AUDS=['MP3','WAV','M4A','AAC','OGG','FLAC','OPUS'];
-  const DOC_GROUPS={
-    all:null, pdf:['PDF'], word:['DOC','DOCX'], excel:['XLS','XLSX','CSV'],
-    ppt:['PPT','PPTX'], text:['TXT','LOG'], code:['JSON','XML','HTML','HTM','MD'], zip:['ZIP','RAR','7Z']
-  };
+  const DOC_GROUPS={ all:null, pdf:['PDF'], word:['DOC','DOCX'], excel:['XLS','XLSX','CSV'], ppt:['PPT','PPTX'], text:['TXT','LOG'], code:['JSON','XML','HTML','HTM','MD'], zip:['ZIP','RAR','7Z'] };
 
-  // ===== Helpers de dado =====
-  const extFromName = (n='') => {
-    const p=(n||'').split('.'); return p.length<2?'':(p.pop()||'').toUpperCase();
-  };
+  const extFromName = (n='') => { const p=(n||'').split('.'); return p.length<2?'':(p.pop()||'').toUpperCase(); };
   const kindFromNameOrMime = (name,mime='')=>{
     const e = extFromName(name);
     if (IMGS.includes(e)) return 'imagem';
@@ -85,87 +123,35 @@
   };
   const formatDateTime = (ts)=> new Date(ts||Date.now()).toLocaleString('pt-BR',{hour12:false});
 
-  // ===== Nome amigável (FRONT-ONLY) =====
   const UGLY_HASH_RE = /^[A-F0-9]{16,}$/i;
   const GENERIC_RE   = /^(?:IMG|VID|PXL|PTT|FILE|IMAGE|VIDEO|AUDIO)[-_ ]?\d{4,}$/i;
 
-  function isUglyName(name=''){
-    if(!name) return true;
-    const base = String(name).replace(/\.[^.]+$/, '');
-    return UGLY_HASH_RE.test(base) || GENERIC_RE.test(base);
-  }
-  function labelByKind(kind){
-    switch((kind||'').toLowerCase()){
-      case 'imagem': return 'Imagem';
-      case 'video': return 'Vídeo';
-      case 'audio': return 'Áudio';
-      case 'documento': return 'Documento';
-      default: return 'Arquivo';
-    }
-  }
-  function guessExtByMime(mime=''){
-    const mt = mime.toLowerCase();
-    if (mt.startsWith('image/jpeg')) return '.jpg';
-    if (mt.startsWith('image/png'))  return '.png';
-    if (mt.startsWith('image/webp')) return '.webp';
-    if (mt.startsWith('image/gif'))  return '.gif';
-    if (mt.startsWith('video/mp4'))  return '.mp4';
-    if (mt.startsWith('video/webm')) return '.webm';
-    if (mt.startsWith('audio/ogg'))  return '.ogg';
-    if (mt.startsWith('audio/mpeg')) return '.mp3';
-    if (mt === 'application/pdf')    return '.pdf';
-    return '';
-  }
-  function guessExt(item){
-    const raw = (item?.nome || '').trim();
-    const dot = raw.lastIndexOf('.');
-    if (dot > -1 && raw.length - dot <= 5) return raw.slice(dot).toLowerCase();
-    return guessExtByMime(item?.tipo || '');
-  }
-  function extOf(it){
-    const ex = extFromName(it?.nome||'');
-    return ex || (guessExtByMime(it?.tipo||'').replace('.','').toUpperCase()) || 'ARQ';
-  }
-  function formatDateBR(ts){
-    const d = new Date(ts || Date.now());
-    const dStr = d.toLocaleDateString('pt-BR', { timeZone:'America/Sao_Paulo' });
-    const tStr = d.toLocaleTimeString('pt-BR', { timeZone:'America/Sao_Paulo', hour12:false, hour:'2-digit', minute:'2-digit' });
-    return `${dStr} ${tStr}`;
-  }
-  function friendlyName(item){
-    const raw = (item?.nome || '').trim();
-    if (!raw || isUglyName(raw)) {
-      const kind = kindFromNameOrMime(item?.nome||'', item?.tipo||'');
-      const label = labelByKind(kind);
-      const ext   = guessExt(item);
-      return `${label} ${formatDateBR(item?.timestamp)}${ext}`;
-    }
-    return raw;
-  }
+  function isUglyName(name=''){ if(!name) return true; const base = String(name).replace(/\.[^.]+$/, ''); return UGLY_HASH_RE.test(base) || GENERIC_RE.test(base); }
+  function labelByKind(kind){ switch((kind||'').toLowerCase()){ case 'imagem':return 'Imagem'; case 'video':return 'Vídeo'; case 'audio':return 'Áudio'; case 'documento':return 'Documento'; default:return 'Arquivo'; } }
+  function guessExtByMime(mime=''){ const mt = mime.toLowerCase(); if (mt.startsWith('image/jpeg')) return '.jpg'; if (mt.startsWith('image/png')) return '.png'; if (mt.startsWith('image/webp')) return '.webp'; if (mt.startsWith('image/gif')) return '.gif'; if (mt.startsWith('video/mp4')) return '.mp4'; if (mt.startsWith('video/webm')) return '.webm'; if (mt.startsWith('audio/ogg')) return '.ogg'; if (mt.startsWith('audio/mpeg')) return '.mp3'; if (mt === 'application/pdf') return '.pdf'; return ''; }
+  function guessExt(item){ const raw = (item?.nome || '').trim(); const dot = raw.lastIndexOf('.'); if (dot > -1 && raw.length - dot <= 5) return raw.slice(dot).toLowerCase(); return guessExtByMime(item?.tipo || ''); }
+  function extOf(it){ const ex = extFromName(it?.nome||''); return ex || (guessExtByMime(it?.tipo||'').replace('.','').toUpperCase()) || 'ARQ'; }
+  function formatDateBR(ts){ const d = new Date(ts || Date.now()); const dStr = d.toLocaleDateString('pt-BR', { timeZone:'America/Sao_Paulo' }); const tStr = d.toLocaleTimeString('pt-BR', { timeZone:'America/Sao_Paulo', hour12:false, hour:'2-digit', minute:'2-digit' }); return `${dStr} ${tStr}`; }
+  function friendlyName(item){ const raw = (item?.nome || '').trim(); if (!raw || isUglyName(raw)) { const kind = kindFromNameOrMime(item?.nome||'', item?.tipo||''); const label = labelByKind(kind); const ext = guessExt(item); return `${label} ${formatDateBR(item?.timestamp)}${ext}`; } return raw; }
   function escapeHtml(s=''){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
-  const idOf = (it={}) =>
-    it.id ?? it._id ?? it.midias_id ?? it.media_id ?? it.uuid ?? it.key ?? it.chave ?? it.arquivo_id ?? it.file_id ?? it.ID ??
-    (it.url ? `url:${it.url}` : Math.random().toString(36).slice(2));
+  const idOf = (it={}) => it.id ?? it._id ?? it.midias_id ?? it.media_id ?? it.uuid ?? it.key ?? it.chave ?? it.arquivo_id ?? it.file_id ?? it.ID ?? (it.url ? `url:${it.url}` : Math.random().toString(36).slice(2));
 
   // ===== Estado / Query =====
-  const PAGE_LIMIT = 5; // 5 por vez
+  const PAGE_LIMIT = 5;
   let lastItems = [];
-  const byId = new Map(); // id -> item
-  const selected = new Set(); // ids selecionados
-  let lastClickedIndex = -1;  // p/ seleção por bloco (Shift)
+  const byId = new Map();
+  const selected = new Set();
+  let lastClickedIndex = -1;
 
   const paging = { limit: PAGE_LIMIT, offset: 0, loading: false, more: true };
 
-  // ESCOPOS:
   let scope = { type:'inst', clienteId:null }; // 'meus' ou 'inst'
   let currentType = 'all';
   let currentDocGroup = 'all';
-  let selectedInst = ''; // '' = Todas as instâncias
+  let selectedInst = '';
   const isScopeMeus = () => scope.type === 'meus';
 
-  // ===== Persistência (localStorage) =====
-  const STATE_KEY = 'midiasState:v1';
-
+  // persistência
   function makeQueryKeyObj(){
     const emp = getEmpresaId();
     return {
@@ -180,22 +166,9 @@
     };
   }
   const queryKeyToStr = obj => { try{ return JSON.stringify(obj); }catch{ return ''; } };
-
-  function saveState(extra = {}){
-    const keyObj = makeQueryKeyObj();
-    const state = {
-      key: queryKeyToStr(keyObj),
-      ...keyObj,
-      loadedCount: lastItems.length,
-      scrollY: window.scrollY || 0,
-      ts: Date.now(),
-      ...extra,
-    };
-    try { LS.setItem(STATE_KEY, JSON.stringify(state)); } catch {}
-    return state;
-  }
+  function saveState(extra = {}){ const keyObj = makeQueryKeyObj(); const state = { key: queryKeyToStr(keyObj), ...keyObj, loadedCount: lastItems.length, scrollY: window.scrollY || 0, ts: Date.now(), ...extra }; try { LS.setItem(STATE_KEY, JSON.stringify(state)); } catch {} return state; }
   function loadState(){ try{ const raw = LS.getItem(STATE_KEY); return raw?JSON.parse(raw):null; }catch{ return null; } }
-  function clearState(){ try{ LS.removeItem(STATE_KEY); }catch{} }
+  function clearStateLocal(){ try{ LS.removeItem(STATE_KEY); }catch{} }
 
   function restoreFiltersFromState(st){
     if (!st) return;
@@ -206,13 +179,15 @@
     currentDocGroup = st.currentDocGroup || 'all';
     setTabSelected(currentType);
   }
-
   async function restoreFromStateIfSameQuery(){
     const saved = loadState();
     if (!saved) return false;
 
     const currentKeyObj = makeQueryKeyObj();
-    if (queryKeyToStr(saved) !== queryKeyToStr({ ...saved, key:undefined, ts:undefined, loadedCount:undefined, scrollY:undefined })) {
+    const savedComparable = { ...saved };
+    delete savedComparable.key; delete savedComparable.ts; delete savedComparable.loadedCount; delete savedComparable.scrollY;
+
+    if (queryKeyToStr(savedComparable) !== queryKeyToStr(currentKeyObj)) {
       restoreFiltersFromState(saved);
     }
     if (saved.key !== queryKeyToStr(makeQueryKeyObj())) return false;
@@ -233,43 +208,25 @@
   // ===== Helpers UI =====
   const toggleEmpty = show => els.empty?.classList.toggle('show', !!show);
 
-  // Monta query para LISTA (GET) e também base para UPLOAD
   function buildQuery({forUpload=false} = {}){
-    const qs = new URLSearchParams({
-      limit: String(paging.limit),
-      offset: String(paging.offset),
-    });
+    const qs = new URLSearchParams({ limit: String(paging.limit), offset: String(paging.offset) });
+    const emp = getEmpresaId(); if (emp) qs.set('empresa_id', String(emp));
 
-    const emp = getEmpresaId();
-    if (emp) qs.set('empresa_id', String(emp));
-
-    if (isScopeMeus()){
-      qs.set('sem_cliente','true'); // só pessoais
-    } else {
-      if (selectedInst) {
-        qs.set('instancia_id', selectedInst);
-        qs.set('instancia', selectedInst);
-        qs.set('whatsapp_id', selectedInst);
-        qs.set('session', selectedInst);
-        qs.set('sessionName', selectedInst);
-      } else {
-        qs.set('sem_cliente','false');
-      }
+    if (isScopeMeus()){ qs.set('sem_cliente','true'); }
+    else {
+      if (selectedInst) { ['instancia_id','instancia','whatsapp_id','session','sessionName'].forEach(k=>qs.set(k, selectedInst)); }
+      else qs.set('sem_cliente','false');
     }
-
     if (!forUpload){
       const q=(els.q?.value||'').trim(); if(q) qs.set('q', q);
       const ord=els.ordenar?.value; if(ord) qs.set('ordenar', ord);
       if (currentType && currentType!=='all') qs.set('tipo', currentType);
       if (currentType==='documento' && currentDocGroup!=='all') qs.set('doc', currentDocGroup);
     }
-
     return qs.toString();
   }
 
-  // ===== Normalização =====
-  const dig = (obj, pathArr)=>
-    pathArr.reduce((acc,k)=> (acc && acc[k] != null) ? acc[k] : undefined, obj);
+  const dig = (obj, pathArr)=> pathArr.reduce((acc,k)=> (acc && acc[k] != null) ? acc[k] : undefined, obj);
 
   function normalizeItems(raw){
     const list =
@@ -281,7 +238,6 @@
       Array.isArray(raw?.rows) ? raw.rows :
       Array.isArray(raw?.midias) ? raw.midias :
       [];
-
     return list.map(it => {
       const nome = it.nome ?? it.name ?? it.filename ?? it.titulo ?? it.title ?? '-';
       const url  = it.url ?? it.arquivo_url ?? it.file_url ?? it.public_url ?? it.signed_url ?? it.link ?? it.href ?? it.path ?? it.arquivo ?? '';
@@ -292,7 +248,6 @@
     }).filter(it => it.nome);
   }
 
-  // ===== Ícones para documentos =====
   function iconForDoc(ext){
     if (ext === 'PDF') return '/frontend/img/file-pdf.svg';
     if (ext === 'DOC' || ext === 'DOCX') return '/frontend/img/file-word.svg';
@@ -300,10 +255,7 @@
     return null;
   }
 
-  // ===== Modal =====
-  let modal=null, modalTitle=null, modalBody=null, modalOpen=null, modalDownload=null, modalClose=null, modalRename=null;
-
-  // --- helpers para áudio ---
+  // ===== Helpers de áudio / rename / modal =====
   function audioMimeByExt(ext){
     const e = (ext||'').toLowerCase();
     if (e === 'mp3') return 'audio/mpeg';
@@ -347,7 +299,6 @@
     return div;
   }
 
-  // ===== CSS do editor inline (injetado) =====
   function injectRenameCSS(){
     if (document.getElementById('__mm_rename_css__')) return;
     const css = `
@@ -366,7 +317,7 @@
     document.head.appendChild(style);
   }
 
-  // ===== Renomear: helpers =====
+  let modal=null, modalTitle=null, modalBody=null, modalOpen=null, modalDownload=null, modalClose=null, modalRename=null;
   let _renameUI = null;
 
   function updateCardTitle(item){
@@ -375,11 +326,11 @@
     if (card){
       const title = card.querySelector('.media-title');
       const cap   = card.querySelector('.thumb-cap');
-      title && (title.textContent = ui);
+      if (title) title.textContent = ui;
       if (cap){ cap.textContent = ui; cap.title = item.nome; }
       card.title = item.nome;
     }
-    modalTitle.textContent = ui;
+    if (modalTitle) modalTitle.textContent = ui;
   }
 
   function stopInlineRename(){
@@ -402,6 +353,33 @@
     if (i > 0 && base.length - i <= 5) base = base.slice(0, i);
     if (!base) base = 'arquivo';
     return base + (originalExtLower(item) || '');
+  }
+
+  async function apiRename(item, newName){
+    const emp = getEmpresaId();
+    if (!emp) { toast('empresa_id não definido'); return false; }
+
+    const url = `/api/midias/${encodeURIComponent(item.id)}?empresa_id=${encodeURIComponent(emp)}`;
+    try{
+      const r = await authFetch(url, {
+        method:'PATCH',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ nome: newName })
+      });
+      if (r.status === 401 || r.status === 403) return false; // já tratamos redirect
+      if (!r.ok){
+        console.warn('rename fail', r.status, await r.text().catch(()=>'')); 
+        return false;
+      }
+      const updated = await r.json().catch(()=>null);
+      if (updated?.nome) item.nome = updated.nome; else item.nome = newName;
+      if (updated?.timestamp) item.timestamp = updated.timestamp;
+      if (updated?.url) item.url = updated.url;
+      return true;
+    }catch(e){
+      if (e?.__authRedirect || e?.name === 'AbortError') return false;
+      return false;
+    }
   }
 
   function startInlineRename(item){
@@ -506,54 +484,9 @@
     modalDownload.onclick=null;
     modalRename.onclick=null;
   }
-
-  // ====== Renomear (API com fallbacks) ======
-  async function apiRename(item, newName){
-    const emp = getEmpresaId();
-    if (!emp) { toast('empresa_id não definido'); return false; }
-
-    const url = `/api/midias/${encodeURIComponent(item.id)}?empresa_id=${encodeURIComponent(emp)}`;
-    try{
-      const r = await authFetch(url, {
-        method:'PATCH',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ nome: newName })
-      });
-      if (!r.ok){
-        console.warn('rename fail', r.status, await r.text().catch(()=>'')); 
-        return false;
-      }
-      const updated = await r.json().catch(()=>null);
-      if (updated?.nome) item.nome = updated.nome; else item.nome = newName;
-      if (updated?.timestamp) item.timestamp = updated.timestamp;
-      if (updated?.url) item.url = updated.url;
-      return true;
-    }catch{
-      return false;
-    }
+  function downloadUrl(url, filename){
+    const a=document.createElement('a'); a.href=url; a.download=filename||''; document.body.appendChild(a); a.click(); a.remove();
   }
-
-  // ====== Excluir em lote (API com fallbacks) ======
-  async function apiDeleteMany(ids=[]){
-    const emp = getEmpresaId();
-    if (!emp) { toast('empresa_id não definido'); return false; }
-
-    for (const id of ids){
-      try{
-        const url = `/api/midias/${encodeURIComponent(id)}?empresa_id=${encodeURIComponent(emp)}`;
-        const r = await authFetch(url, { method:'DELETE' });
-        if (!r.ok) {
-          console.warn('delete fail', id, r.status, await r.text().catch(()=>'')); 
-          return false;
-        }
-      }catch{
-        return false;
-      }
-    }
-    return true;
-  }
-
-  // ===== Modal: abrir e wire =====
   async function openModal(it){
     clearModal();
     const nomeUi  = friendlyName(it);
@@ -589,8 +522,6 @@
 
     modalOpen.onclick = ()=>window.open(it.url,'_blank');
     modalDownload.onclick = ()=>downloadUrl(it.url, nomeRaw);
-
-    // clique no lápis => editar inline no cabeçalho
     modalRename.onclick = () => startInlineRename(it);
 
     modal.classList.add('open');
@@ -603,7 +534,7 @@
 
     const frag = document.createDocumentFragment();
 
-    items.forEach((it, idx)=>{
+    items.forEach((it)=>{
       const id = idOf(it);
       byId.set(id, it);
 
@@ -619,7 +550,7 @@
       badge.style.cssText='position:absolute;top:8px;left:8px;z-index:2;background:#0fa27c;color:#fff;font-weight:800;font-size:.75rem;padding:.2rem .45rem;border-radius:.45rem;letter-spacing:.02em;border:1px solid rgba(255,255,255,.15)';
       prev.appendChild(badge);
 
-      // Botão de seleção (flag)
+      // botão de seleção
       const pick = document.createElement('button');
       pick.type='button'; pick.className='media-pick'; pick.setAttribute('aria-pressed','false'); pick.innerHTML='✓';
       pick.addEventListener('click', (e)=>{
@@ -655,11 +586,8 @@
       body.innerHTML=`<div class="media-title" title="${escapeHtml(nomeRaw)}">${escapeHtml(nomeUi)}</div>
                       <div class="media-meta"><span>${ext}</span><span>•</span><span>${formatDateTime(it.timestamp)}</span></div>`;
 
-      // clique no card abre modal (mas se estiver selecionando, não)
-      card.addEventListener('click',()=>{
-        if (card.classList.contains('selected')) return;
-        openModal(it);
-      });
+      // clique no card abre modal (se não estiver selecionando)
+      card.addEventListener('click',()=>{ if (!card.classList.contains('selected')) openModal(it); });
 
       card.title = nomeRaw;
       card.appendChild(prev); card.appendChild(body);
@@ -693,11 +621,7 @@
     return list;
   }
 
-  function downloadUrl(url, filename){
-    const a=document.createElement('a'); a.href=url; a.download=filename||''; document.body.appendChild(a); a.click(); a.remove();
-  }
-
-  // ===== Botão "Mostrar mais" (seta) =====
+  // ===== Botão "Mostrar mais" =====
   function ensureLoadMore(){
     if (!els.box || els.btnMore) return;
     const wrap = document.createElement('div');
@@ -736,16 +660,11 @@
     els.ordenar?.addEventListener('change', ()=>{ fetchPage({ reset:true }).then(()=>saveState()); });
     els.q?.addEventListener('keydown', e=>{ if(e.key==='Enter'){ fetchPage({ reset:true }).then(()=>saveState()); }});
 
-    // “Limpar” agora: seleção + confirmação + exclusão
     els.btnLimpar?.addEventListener('click', ()=>{
-      if (selected.size === 0){
-        toast('Selecione arquivos no ✓ para limpar.');
-        return;
-      }
+      if (selected.size === 0){ toast('Selecione arquivos no ✓ para limpar.'); return; }
       openConfirm();
     });
 
-    // Upload respeita escopo atual (somente MEUS ARQUIVOS)
     els.btnUpload?.addEventListener('click', async ()=>{
       if (els.btnUpload.disabled) return;
       const tmp = document.createElement('input');
@@ -759,7 +678,6 @@
       tmp.click();
     });
 
-    // "Meus Arquivos": força escopo pessoal
     els.btnMeus?.addEventListener('click', ()=>{
       scope.type = 'meus';
       selectedInst = '';
@@ -768,7 +686,6 @@
       toast('Você está vendo apenas Meus Arquivos.');
     });
 
-    // atalho: Shift+clique faz seleção em bloco
     els.grid?.addEventListener('click', e=>{
       const card = e.target.closest?.('.media-card');
       if (!card) return;
@@ -781,22 +698,13 @@
     window.addEventListener('beforeunload', ()=> saveState());
   }
 
-  // Upload apenas em "Meus Arquivos"
-  function updateUploadState(){
-    if (!els.btnUpload) return;
-    els.btnUpload.disabled = !isScopeMeus(); // desabilita se não for "Meus Arquivos"
-  }
+  function updateUploadState(){ if (!els.btnUpload) return; els.btnUpload.disabled = !isScopeMeus(); }
 
   // ===== Dropdown de Instâncias =====
   const KEY = id => `instAtiva:${id}`;
   function getSavedInst(empresa){ return empresa ? (localStorage.getItem(KEY(empresa)) || '') : ''; }
   function setSavedInst(empresa, v){ try{ if (empresa) localStorage.setItem(KEY(empresa), v || ''); }catch{} }
-  function ensureCSSEscape(){
-    if (typeof window.CSS === 'undefined') window.CSS = {};
-    if (typeof window.CSS.escape !== 'function') {
-      window.CSS.escape = s => String(s).replace(/["\\]/g,'\\$&').replace(/\s/g,'\\ ');
-    }
-  }
+  function ensureCSSEscape(){ if (typeof window.CSS === 'undefined') window.CSS = {}; if (typeof window.CSS.escape !== 'function') { window.CSS.escape = s => String(s).replace(/["\\]/g,'\\$&').replace(/\s/g,'\\ '); } }
   function instValue(i){
     return i.instancia_id ?? i.instancia ?? i.instancia_slug ??
            i.instance_id  ?? i.instance  ?? i.session ??
@@ -838,7 +746,7 @@
       scope.type = 'inst';
       setActiveUI(value, text);
       setSavedInst(empresaId, value);
-      updateUploadState(); // trava upload fora de Meus Arquivos
+      updateUploadState();
       document.dispatchEvent(new CustomEvent('midias:instancia-set', { detail:{ value } }));
       closeMenu(); btn.focus();
     }
@@ -887,7 +795,8 @@
       if (empresaId){
         try{
           const r = await authFetch(`/api/empresas/${empresaId}/whatsapp`, { credentials:'include' });
-          const j = await r.json();
+          if (r.status === 401 || r.status === 403) return; // já redirecionou
+          const j = await r.json().catch(()=>({}));
           items = Array.isArray(j.instancias) ? j.instancias : (Array.isArray(j) ? j : []);
         }catch{}
       }
@@ -907,24 +816,22 @@
     loadList();
   }
 
-  // troca de instância => reseta paginação e salva
   document.addEventListener('midias:instancia-set', () => { fetchPage({ reset:true }).then(()=>saveState()); });
 
   // ===== Upload =====
   async function uploadFiles(files){
     if(!files||!files.length) return;
     const fd=new FormData(); Array.from(files).forEach(f=>fd.append('files', f));
-
-    // Upload somente em "Meus Arquivos"
-    fd.append('sem_cliente','true');
+    fd.append('sem_cliente','true'); // upload só em "Meus Arquivos"
 
     showLoading(true);
     try{
       const qs = buildQuery({forUpload:true});
       const r = await authFetch(`/api/midias/upload?${qs}`, { method:'POST', body:fd });
+      if (r.status === 401 || r.status === 403) return; // redirecionado
       if(!r.ok) toast('Falha no upload.');
       else { await r.json().catch(()=>null); await fetchPage({ reset:true }); toast('Upload concluído.'); saveState(); }
-    }catch{ toast('Erro no upload.'); }
+    }catch(e){ if (!e?.__authRedirect) toast('Erro no upload.'); }
     finally{ showLoading(false); }
   }
 
@@ -934,12 +841,10 @@
     if (!paging.more && !reset) return;
 
     if (reset) {
-      paging.offset = 0;
-      paging.more = true;
-      lastItems = [];
+      paging.offset = 0; paging.more = true; lastItems = [];
       byId.clear(); selected.clear(); lastClickedIndex = -1;
-      els.grid && (els.grid.innerHTML = '');
-      els.meta && (els.meta.textContent = '0');
+      if (els.grid) els.grid.innerHTML = '';
+      if (els.meta) els.meta.textContent = '0';
       toggleEmpty(true);
       ensureLoadMore();
       setMoreVisibility(true);
@@ -954,18 +859,10 @@
 
     try {
       const r = await authFetch(`/api/midias?${buildQuery()}`);
-      if (r.status === 401 || r.status === 403) {
-        toast('Sem permissão para listar mídias.');
-        paging.more = false;
-        toggleEmpty(true);
-        setMoreVisibility(false);
-        return;
-      }
+      if (r.status === 401 || r.status === 403) return; // já redirecionou
       if (!r.ok) {
         toast(`Erro ${r.status} ao buscar mídias.`);
-        paging.more = false;
-        toggleEmpty(true);
-        setMoreVisibility(false);
+        paging.more = false; toggleEmpty(true); setMoreVisibility(false);
         return;
       }
       const raw = await r.json().catch(()=>[]);
@@ -975,22 +872,22 @@
       appendCards(pageFiltered);
       lastItems = lastItems.concat(pageFiltered);
 
-      els.meta && (els.meta.textContent = String(lastItems.length));
+      if (els.meta) els.meta.textContent = String(lastItems.length);
       toggleEmpty(lastItems.length === 0);
 
       if (pageAll.length < paging.limit) {
-        paging.more = false;
-        setMoreVisibility(false);
+        paging.more = false; setMoreVisibility(false);
       } else {
-        paging.more = true;
-        paging.offset += paging.limit;
-        setMoreVisibility(true);
+        paging.more = true; paging.offset += paging.limit; setMoreVisibility(true);
       }
+
     } catch (e) {
+      if (e?.__authRedirect || e?.name === 'AbortError' || /aborted|cancel/i.test(e?.message||'')) {
+        // silêncio
+        return;
+      }
       console.warn('[Mídias] erro fetch', e);
       toast('Erro ao carregar mídias.');
-      paging.more = false;
-      setMoreVisibility(false);
     } finally {
       paging.loading = false;
       els.grid?.setAttribute('aria-busy', 'false');
@@ -999,7 +896,7 @@
     }
   }
 
-  // ===== Seleção (flag ✓) =====
+  // ===== Seleção / Limpar =====
   function toggleSelect(card, on=true, { index, shiftKey } = {}){
     const id = card.dataset.id;
     const cards = Array.from(els.grid.querySelectorAll('.media-card'));
@@ -1031,7 +928,7 @@
     }
   }
 
-  // ===== Modal de confirmação (Limpar) =====
+  // ===== Modal de confirmação (Limpar) / DELETE API =====
   let confirmModal=null, cmBody=null, cmOk=null, cmCancel=null;
   function ensureConfirm(){
     if (confirmModal) return;
@@ -1073,18 +970,39 @@
       });
       ids.forEach(id=> selected.delete(id));
       updateBulkUI();
-      els.meta && (els.meta.textContent = String(els.grid.querySelectorAll('.media-card').length));
+      if (els.meta) els.meta.textContent = String(els.grid.querySelectorAll('.media-card').length);
       toggleEmpty(els.grid.querySelectorAll('.media-card').length===0);
       toast('Arquivos removidos.');
     };
     confirmModal.classList.add('open');
   }
 
-  // ===== Permissão (fallback) =====
+  async function apiDeleteMany(ids=[]){
+    const emp = getEmpresaId();
+    if (!emp) { toast('empresa_id não definido'); return false; }
+
+    for (const id of ids){
+      try{
+        const url = `/api/midias/${encodeURIComponent(id)}?empresa_id=${encodeURIComponent(emp)}`;
+        const r = await authFetch(url, { method:'DELETE' });
+        if (r.status === 401 || r.status === 403) return false;
+        if (!r.ok) {
+          console.warn('delete fail', id, r.status, await r.text().catch(()=>'')); 
+          return false;
+        }
+      }catch(e){
+        if (e?.__authRedirect || e?.name === 'AbortError') return false;
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // ===== Permissão (fallback quando não há Page.guarded) =====
   async function ensurePermission(){
     try {
       const r = await authFetch('/api/permissoes/minhas', { headers:{ 'Accept':'application/json' } });
-      if (r.status === 401 || r.status === 403) return false;
+      if (r.status === 401 || r.status === 403) return false; // já redirecionado
       if (!r.ok) return false;
       const data = await r.json().catch(()=>[]);
       const list = Array.isArray(data) ? data : (Array.isArray(data?.permissoes) ? data.permissoes : []);
@@ -1093,11 +1011,7 @@
   }
 
   // ===== Boot =====
-  function bindPageEvents(){
-    bindFilterEvents();
-    wireInstDropdown();
-    ensureLoadMore();
-  }
+  function bindPageEvents(){ bindFilterEvents(); wireInstDropdown(); ensureLoadMore(); }
 
   async function boot(){
     if (window.ZAuth?.softEnsureAuth) await ZAuth.softEnsureAuth();
@@ -1115,7 +1029,7 @@
   // ===== Runner com guard =====
   async function legacyRun(){
     const ok = await ensurePermission();
-    if (!ok) return location.replace('/sem-permissao');
+    if (!ok) return; // redirecionado em 401 ou 403
     await boot();
   }
   const run = () => {
@@ -1131,7 +1045,7 @@
         await boot();
       }, {
         loading: 'Carregando…',
-        onDeny(){ resolved = true; clearTimeout(timer); location.replace('/sem-permissao'); }
+        onDeny(){ resolved = true; clearTimeout(timer); gotoSemPermissao(); }
       });
     }catch{
       resolved = true; clearTimeout(timer);
