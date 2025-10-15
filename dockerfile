@@ -56,4 +56,8 @@ EXPOSE 8000
 
 # 🚀 Rode gunicorn SEM shell e com caminho absoluto
 ENTRYPOINT ["/opt/venv/bin/python","-m","gunicorn"]
+<<<<<<< HEAD
 CMD ["-k","uvicorn.workers.UvicornWorker","-w","1","-b","0.0.0.0:8000","--timeout","180","backend.main:app"]
+=======
+CMD ["-k","uvicorn.workers.UvicornWorker","-w","1","-b","0.0.0.0:8000","--timeout","180","backend.main:app"]
+>>>>>>> cc1c9ef3faf532d258ae883f638e5fa6d47dd4f1

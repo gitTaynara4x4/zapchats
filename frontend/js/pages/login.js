@@ -1,6 +1,10 @@
 // === Guard: se já está logado, não mostra /login ===
 (function alreadyLoggedGuard(){
   function hasSessionCookie() {
+<<<<<<< HEAD
+=======
+    // ajuste o nome do cookie se o backend usar outro
+>>>>>>> cc1c9ef3faf532d258ae883f638e5fa6d47dd4f1
     return /(?:^|;\s*)session=/.test(document.cookie);
   }
   function redirectHome(){
@@ -19,9 +23,21 @@
   });
 })();
 
+<<<<<<< HEAD
 // ===== Tema (robusto, sem Tailwind) =====
 (() => {
   const html = document.documentElement;
+=======
+// === Toggle de tema ===
+(function(){
+  const html = document.documentElement;
+
+  try {
+    const saved = localStorage.getItem('theme');
+    if (saved === 'dark') html.classList.add('dark');
+    if (saved === 'light') html.classList.remove('dark');
+  } catch {}
+>>>>>>> cc1c9ef3faf532d258ae883f638e5fa6d47dd4f1
 
   function apply(mode) {
     const dark = mode === 'dark';
@@ -46,9 +62,34 @@
   function wire() {
     const btn = document.getElementById('themeSwitch');
     if (!btn) return;
+<<<<<<< HEAD
     btn.setAttribute('aria-pressed', html.classList.contains('dark') ? 'true' : 'false');
     btn.addEventListener('click', () => {
       const next = html.classList.contains('dark') ? 'light' : 'dark';
+=======
+    btn.setAttribute('aria-pressed', String(html.classList.contains('dark')));
+  }
+  function setTheme(mode){
+    const willDark = (mode === 'dark');
+    html.classList.toggle('dark', willDark);
+    try { localStorage.setItem('theme', willDark ? 'dark' : 'light'); } catch {}
+  }
+
+  window.addEventListener('storage', function(e){
+    if (e.key === 'theme') {
+      const v = (e.newValue || '').toLowerCase();
+      setTheme(v === 'dark' ? 'dark' : 'light');
+      setPressed(document.getElementById('themeSwitch'));
+    }
+  });
+
+  const btn = document.getElementById('themeSwitch');
+  if (btn){
+    setPressed(btn);
+    btn.addEventListener('click', function(){
+      const willDark = !html.classList.contains('dark');
+      setTheme(willDark ? 'dark' : 'light');
+>>>>>>> cc1c9ef3faf532d258ae883f638e5fa6d47dd4f1
       btn.classList.remove('t-anim'); void btn.offsetWidth; btn.classList.add('t-anim');
       setTimeout(() => btn.classList.remove('t-anim'), 580);
       apply(next);
@@ -273,7 +314,12 @@ function clearLocalLock(email){ try { localStorage.removeItem(LS_LOCK_KEY(email)
             headers: token ? { 'Authorization': `Bearer ${token}` } : {}
           });
           if (instRes.ok) {
+<<<<<<< HEAD
             const instData = await instRes.json(); // (fix: era res.json)
+=======
+            // BUG corrigido: era res.json() (variável errada)
+            const instData = await instRes.json();
+>>>>>>> cc1c9ef3faf532d258ae883f638e5fa6d47dd4f1
             if (instData?.nome) localStorage.setItem('instance_name', instData.nome);
           }
         } catch (instErr) {
