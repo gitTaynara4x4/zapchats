@@ -9,30 +9,27 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-# libs mínimas (psycopg2 usa libpq)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 ca-certificates curl && \
-    rm -rf /var/lib/apt/lists/*
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 
 # venv cacheável
 RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
 
+# Só requirements no builder
 COPY requirements.txt .
 
 # Falha cedo se houver marcadores de merge no requirements.txt
 RUN ! grep -qE '^(<<<<<<<|=======|>>>>>>>)' requirements.txt || (echo '❌ requirements.txt tem marcadores de merge'; exit 1)
 
-RUN pip install --upgrade pip && \
-    pip install -r requirements.txt && \
-    pip install gunicorn uvicorn[standard]
+# Instala deps (sem cache, preferindo wheels)
+RUN /opt/venv/bin/pip install --upgrade pip && \
+    /opt/venv/bin/pip install --no-cache-dir --prefer-binary -r requirements.txt && \
+    /opt/venv/bin/pip install --no-cache-dir --prefer-binary gunicorn uvicorn[standard]
 
 ########################
-# 2) Runtime
+# 2) Runtime (leve)
 ########################
 FROM python:3.12-slim
 
@@ -41,9 +38,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH"
 
-# runtime leve
+# Somente libs de runtime (libpq para psycopg2-binary)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 ca-certificates curl && \
+    libpq5 ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -54,10 +51,6 @@ COPY . .
 
 EXPOSE 8000
 
-# 🚀 Rode gunicorn SEM shell e com caminho absoluto
+# 🚀 Gunicorn + UvicornWorker
 ENTRYPOINT ["/opt/venv/bin/python","-m","gunicorn"]
-<<<<<<< HEAD
 CMD ["-k","uvicorn.workers.UvicornWorker","-w","1","-b","0.0.0.0:8000","--timeout","180","backend.main:app"]
-=======
-CMD ["-k","uvicorn.workers.UvicornWorker","-w","1","-b","0.0.0.0:8000","--timeout","180","backend.main:app"]
->>>>>>> cc1c9ef3faf532d258ae883f638e5fa6d47dd4f1
