@@ -4,23 +4,20 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Login – ZapChats</title>
+  <meta name="color-scheme" content="light dark">
 
-  <!-- Preload do tema -->
+  <!-- Preload do tema: aplica html.dark antes de pintar -->
   <script>
     (function () {
       try {
         var t = localStorage.getItem('theme');
-        if (!t || t === 'dark') document.documentElement.classList.add('dark');
-        else document.documentElement.classList.remove('dark');
+        document.documentElement.classList.toggle('dark', !t || t === 'dark');
       } catch {}
     })();
   </script>
 
-  <script>
-    window.tailwind = window.tailwind || {};
-    window.tailwind.config = { darkMode: 'class' };
-  </script>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind local (CSS gerado pelo CLI) -->
+  <link rel="stylesheet" href="/frontend/assets/tailwind.css?v=1"/>
 
   <style>
     :root{ --topbar-h:44px; }
@@ -38,7 +35,7 @@
       background: linear-gradient(90deg,#22c55e,#06b6d4,#6366f1); opacity:.95;
     }
 
-    /* Toggle de tema (seu original) */
+    /* Toggle de tema */
     .theme-toggle{
       --w:78px; --h:34px; --p:3px; --k:28px; --dx: calc(var(--w) - var(--k) - var(--p)*2);
       position:relative; width:var(--w); height:var(--h); padding:var(--p); border-radius:999px;
@@ -96,8 +93,8 @@
     input:-webkit-autofill,
     input:-webkit-autofill:hover,
     input:-webkit-autofill:focus {
-      -webkit-text-fill-color: #111827;               /* text-gray-900 */
-      box-shadow: 0 0 0px 1000px #ffffff inset !important;  /* bg-white */
+      -webkit-text-fill-color: #111827;
+      box-shadow: 0 0 0px 1000px #ffffff inset !important;
       transition: background-color 9999s ease-out, color 9999s ease-out;
       caret-color: #111827;
       border-radius: .5rem;
@@ -105,12 +102,12 @@
     html.dark input:-webkit-autofill,
     html.dark input:-webkit-autofill:hover,
     html.dark input:-webkit-autofill:focus {
-      -webkit-text-fill-color: #e5e7eb;               /* text-gray-200 */
-      box-shadow: 0 0 0px 1000px #0a0a0a inset !important;  /* bg-neutral-950 aprox */
+      -webkit-text-fill-color: #e5e7eb;
+      box-shadow: 0 0 0px 1000px #0a0a0a inset !important;
       caret-color: #e5e7eb;
       border-radius: .5rem;
     }
-    html.dark ::placeholder { color: #9ca3af; }       /* placeholder no dark */
+    html.dark ::placeholder { color: #9ca3af; }
   </style>
 </head>
 
@@ -172,14 +169,13 @@
                    placeholder="usuario@dominio">
           </div>
 
-          <!-- Campo SENHA: wrapper relativo apenas no input -->
+          <!-- Campo SENHA -->
           <div>
             <label class="block text-gray-700 dark:text-gray-200 font-medium mb-1">Senha</label>
             <div class="relative">
               <input id="senha" type="password" name="senha" required
                      class="h-12 w-full px-4 border rounded-lg pr-12 focus:outline-none focus:ring-2 focus:ring-green-400 bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700 text-neutral-800 dark:text-neutral-100"
                      placeholder="••••••••">
-              <!-- Olho centralizado -->
               <button type="button" id="togglePassBtn"
                       class="absolute right-2 top-1/2 -translate-y-1/2 grid place-items-center h-8 w-8 rounded-md text-gray-500 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/5 focus:outline-none focus:ring-2 focus:ring-green-400 transition"
                       aria-label="Mostrar senha">
