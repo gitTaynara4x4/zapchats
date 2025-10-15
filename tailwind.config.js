@@ -4,19 +4,10 @@ module.exports = {
   content: [
     './index.html',
     './frontend/**/*.html',
-    './frontend/**/*.js',
-    './frontend/**/*.ts',
-    './frontend/pages/**/*.html',
-    './frontend/partials/**/*.html',
-    './src/**/*.html',
-    './src/**/*.js',
-    './templates/**/*.html',
-  ],
-  safelist: [
-    'dark:bg-neutral-950','dark:text-neutral-200','dark:bg-neutral-900',
-    'dark:border-neutral-700','dark:border-neutral-800','dark:shadow-black/40',
-    'dark:text-white','dark:text-gray-400','dark:hidden','dark:block',
+    './frontend/**/*.{js,ts}',
+    './src/**/*.{html,js,ts,jsx,tsx}',
+    './templates/**/*.html'
   ],
   theme: { extend: {} },
-  plugins: [],
+  plugins: []
 };
