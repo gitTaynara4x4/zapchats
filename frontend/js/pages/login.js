@@ -1,23 +1,17 @@
-// === Toggle de tema ===
 // === Guard: se já está logado, não mostra /login ===
 (function alreadyLoggedGuard(){
   function hasSessionCookie() {
-    // ajuste o nome do cookie se o seu backend usar outro (ex.: "access_token", "sessionid", etc.)
+    // ajuste o nome do cookie se o backend usar outro
     return /(?:^|;\s*)session=/.test(document.cookie);
   }
-
   function redirectHome(){
     const params = new URLSearchParams(location.search);
     const next = params.get('next');
     const target = next && /^\/[^\s]*$/.test(next) ? next : '/dashboard';
-    // replace para tirar /login do histórico
     window.location.replace(target);
   }
-
   const hasToken = !!(localStorage.getItem('access_token') || localStorage.getItem('token'));
   if (hasToken || hasSessionCookie()) redirectHome();
-
-  // quando voltar do histórico (bfcache), roda de novo
   window.addEventListener('pageshow', function (e) {
     if (e.persisted || performance.getEntriesByType('navigation')[0]?.type === 'back_forward') {
       const againHasToken = !!(localStorage.getItem('access_token') || localStorage.getItem('token')) || hasSessionCookie();
@@ -26,10 +20,12 @@
   });
 })();
 
+// === Toggle de tema ===
 (function(){
-  var html = document.documentElement;
+  const html = document.documentElement;
+
   try {
-    var saved = localStorage.getItem('theme');
+    const saved = localStorage.getItem('theme');
     if (saved === 'dark') html.classList.add('dark');
     if (saved === 'light') html.classList.remove('dark');
   } catch {}
@@ -39,23 +35,24 @@
     btn.setAttribute('aria-pressed', String(html.classList.contains('dark')));
   }
   function setTheme(mode){
-    var willDark = (mode === 'dark');
+    const willDark = (mode === 'dark');
     html.classList.toggle('dark', willDark);
     try { localStorage.setItem('theme', willDark ? 'dark' : 'light'); } catch {}
   }
+
   window.addEventListener('storage', function(e){
     if (e.key === 'theme') {
-      var v = (e.newValue || '').toLowerCase();
+      const v = (e.newValue || '').toLowerCase();
       setTheme(v === 'dark' ? 'dark' : 'light');
       setPressed(document.getElementById('themeSwitch'));
     }
   });
 
-  var btn = document.getElementById('themeSwitch');
+  const btn = document.getElementById('themeSwitch');
   if (btn){
     setPressed(btn);
     btn.addEventListener('click', function(){
-      var willDark = !html.classList.contains('dark');
+      const willDark = !html.classList.contains('dark');
       setTheme(willDark ? 'dark' : 'light');
       btn.classList.remove('t-anim'); void btn.offsetWidth; btn.classList.add('t-anim');
       setTimeout(function(){ btn.classList.remove('t-anim'); }, 580);
@@ -273,7 +270,8 @@ function clearLocalLock(email){ try { localStorage.removeItem(LS_LOCK_KEY(email)
             headers: token ? { 'Authorization': `Bearer ${token}` } : {}
           });
           if (instRes.ok) {
-            const instData = await res.json();
+            // BUG corrigido: era res.json() (variável errada)
+            const instData = await instRes.json();
             if (instData?.nome) localStorage.setItem('instance_name', instData.nome);
           }
         } catch (instErr) {
