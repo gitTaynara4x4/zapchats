@@ -23,6 +23,10 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY requirements.txt .
+
+# Falha cedo se houver marcadores de merge no requirements.txt
+RUN ! grep -qE '^(<<<<<<<|=======|>>>>>>>)' requirements.txt || (echo '❌ requirements.txt tem marcadores de merge'; exit 1)
+
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt && \
     pip install gunicorn uvicorn[standard]
