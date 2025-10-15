@@ -35,46 +35,21 @@ FROM python:3.12-slim
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    ENV=prod \
-    PYTHONPATH=/app \
-    MEDIA_CACHE_DIR=/var/cache/zapchats \
-    PYTHONIOENCODING=UTF-8 LANG=C.UTF-8 LC_ALL=C.UTF-8
+    PATH="/opt/venv/bin:$PATH"
 
+# runtime leve
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 ca-certificates curl && \
     rm -rf /var/lib/apt/lists/*
 
-# venv do builder
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
 WORKDIR /app
+
+# venv + código
+COPY --from=builder /opt/venv /opt/venv
 COPY . .
-
-# Falhar se houver marcadores de merge no código copiado (ancorado + exclui dirs ruidosos)
-RUN ! grep -R -nE '^(<{7}( |$)|={7}$|>{7}( |$))' \
-      --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build -- . \
-    || (echo '❌ Merge markers encontrados. Corrija antes do build.' && exit 1)
-
-# garantir pacote e pastas de escrita
-RUN mkdir -p /app/uploads "${MEDIA_CACHE_DIR}" && \
-    [ -f backend/__init__.py ] || printf "" > backend/__init__.py
-
-# usuário não-root + permissões
-RUN groupadd -r appuser && useradd -r -g appuser -s /usr/sbin/nologin appuser && \
-    chown -R appuser:appuser /app "${MEDIA_CACHE_DIR}"
-USER appuser
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:8000/healthz || exit 1
-
 # 🚀 Rode gunicorn SEM shell e com caminho absoluto
 ENTRYPOINT ["/opt/venv/bin/python","-m","gunicorn"]
-<<<<<<< HEAD
 CMD ["-k","uvicorn.workers.UvicornWorker","-w","1","-b","0.0.0.0:8000","--timeout","180","backend.main:app"]
-=======
-CMD ["-k","uvicorn.workers.UvicornWorker","-w","1","-b","0.0.0.0:8000","--timeout","180","backend.main:app"]
->>>>>>> e7c78cbbb3c83313b23e3bfdb4030a11f203ffdb
