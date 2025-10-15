@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Login – ZapChats</title>
 
-  <!-- Preload do tema (igual ao seu) -->
+  <!-- Preload do tema -->
   <script>
     (function () {
       try {
@@ -16,58 +16,14 @@
     })();
   </script>
 
-<<<<<<< HEAD
-  <!-- ===== CSS base (sem Tailwind) ===== -->
-=======
   <script>
     window.tailwind = window.tailwind || {};
     window.tailwind.config = { darkMode: 'class' };
   </script>
   <script src="https://cdn.tailwindcss.com"></script>
 
->>>>>>> cc1c9ef3faf532d258ae883f638e5fa6d47dd4f1
   <style>
-    :root{
-      --topbar-h:44px;
-
-      /* Cores (claro) */
-      --bg: #f0fdf4;                 /* green-50 */
-      --card: #ffffff;               /* white */
-      --muted: #6b7280;              /* gray-500 */
-      --text: #1f2937;               /* gray-800 */
-      --text-strong:#111827;         /* gray-900 */
-      --border: #d1d5db;             /* gray-300 */
-      --border-2: #d1d5db;
-      --ring: #4ade80;               /* green-400 */
-      --green-100:#dcfce7;
-      --green-500:#22c55e;
-      --green-600:#16a34a;
-      --shadow-2xl: 0 25px 50px -12px rgba(0,0,0,.25);
-      --shadow-dark: 0 25px 50px -12px rgba(0,0,0,.4);
-    }
-    html.dark{
-      --bg: #0a0a0a;                 /* neutral-950 */
-      --card:#171717;                 /* neutral-900 aprox */
-      --muted:#9ca3af;               /* gray-400 */
-      --text:#e5e7eb;                /* gray-200 */
-      --text-strong:#ffffff;
-      --border:#404040;              /* neutral-700 */
-      --border-2:#262626;            /* neutral-800 */
-      --green-100:#232323;           /* bg em ilustração */
-      --shadow-2xl: var(--shadow-dark);
-    }
-
-    /* Reset/estrutura mínima */
-    *{box-sizing:border-box}
-    html,body{height:100%}
-    body{
-      margin:0; font: 16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif;
-      background:var(--bg); color:var(--text);
-    }
-    img{max-width:100%; display:block}
-    a{color: #22c55e; text-decoration:none}
-    a:hover{text-decoration:underline}
-    .hidden{display:none !important}
+    :root{ --topbar-h:44px; }
 
     /* Topbar */
     .topline-bar{
@@ -82,7 +38,7 @@
       background: linear-gradient(90deg,#22c55e,#06b6d4,#6366f1); opacity:.95;
     }
 
-    /* Toggle de tema (mesmo visual do seu) */
+    /* Toggle de tema (seu original) */
     .theme-toggle{
       --w:78px; --h:34px; --p:3px; --k:28px; --dx: calc(var(--w) - var(--k) - var(--p)*2);
       position:relative; width:var(--w); height:var(--h); padding:var(--p); border-radius:999px;
@@ -113,33 +69,35 @@
       box-shadow: 0 6px 10px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.22);
     }
     html.dark .thumb .thumb-sun{ display:none; } html.dark .thumb .thumb-moon{ display:block; }
-    .theme-toggle:active .thumb{ transform:translateX(0) scale(.96); }
-    html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) scale(.96); }
+    .theme-toggle:active .thumb{ transform:translateX(0) scale(.96); } html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) scale(.96); }
     .theme-toggle:focus-visible{ box-shadow: 0 0 0 3px rgba(99,102,241,.35); }
     .theme-toggle.t-anim::after{
       content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
       background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.45) 50%, transparent 70%);
       animation: sweep .55s ease both;
     }
-    @keyframes sweep { from{opacity:0; transform:translateX(-20%)} to{opacity:1; transform:translateX(0)} }
 
-    /* Shell responsivo */
+    /* Shell responsivo com safe-area */
     .page-shell{
+      padding:
+        calc(16px + env(safe-area-inset-top, 0px))
+        calc(16px + env(safe-area-inset-right, 0px))
+        calc(20px + env(safe-area-inset-bottom, 0px))
+        calc(16px + env(safe-area-inset-left, 0px));
+      padding-top: calc(var(--topbar-h) + 16px + env(safe-area-inset-top, 0px));
       min-height: 100dvh;
-      display:flex; align-items:center; justify-content:center;
-      padding: calc(var(--topbar-h) + 16px) 16px 20px 16px;
-      gap:16px;
+      display:flex; align-items:center; justify-content:center; gap:16px;
     }
     @media (min-width: 768px){
-      .page-shell{ padding: calc(var(--topbar-h) + 24px) 24px 24px; }
+      .page-shell{ padding: 24px; padding-top: calc(var(--topbar-h) + 24px); }
     }
 
-    /* Autofill claro/escuro */
+    /* ==== FIX: autofill claro/escuro ==== */
     input:-webkit-autofill,
     input:-webkit-autofill:hover,
     input:-webkit-autofill:focus {
-      -webkit-text-fill-color: #111827;
-      box-shadow: 0 0 0px 1000px #ffffff inset !important;
+      -webkit-text-fill-color: #111827;               /* text-gray-900 */
+      box-shadow: 0 0 0px 1000px #ffffff inset !important;  /* bg-white */
       transition: background-color 9999s ease-out, color 9999s ease-out;
       caret-color: #111827;
       border-radius: .5rem;
@@ -147,134 +105,16 @@
     html.dark input:-webkit-autofill,
     html.dark input:-webkit-autofill:hover,
     html.dark input:-webkit-autofill:focus {
-      -webkit-text-fill-color: #e5e7eb;
-      box-shadow: 0 0 0px 1000px #0a0a0a inset !important;
+      -webkit-text-fill-color: #e5e7eb;               /* text-gray-200 */
+      box-shadow: 0 0 0px 1000px #0a0a0a inset !important;  /* bg-neutral-950 aprox */
       caret-color: #e5e7eb;
       border-radius: .5rem;
     }
-
-    /* Cartão */
-    .auth-card{
-      width:100%;
-      max-width:448px;             /* "max-w-[28rem]" */
-      background:var(--card);
-      color:var(--text);
-      border:1px solid transparent;
-      border-radius: 16px;          /* rounded-2xl */
-      box-shadow: var(--shadow-2xl);
-      overflow:hidden;
-      display:flex; flex-direction:column;
-      margin-left:auto; margin-right:auto;
-    }
-    html.dark .auth-card{ border-color: var(--border-2); }
-
-    @media (min-width:768px){
-      .auth-card{ max-width:1024px; flex-direction:row; }
-    }
-
-    /* Coluna esquerda (ilustração) */
-    .illustration{
-      display:none;
-      background: var(--green-100);
-      align-items:center; justify-content:center;
-      padding:32px;
-    }
-    @media (min-width:768px){
-      .illustration{ display:flex; width:50%; }
-    }
-
-    /* Coluna direita (form) */
-    .form-pane{ width:100%; padding:24px; }
-    @media (min-width:640px){ .form-pane{ padding:32px; } }
-    @media (min-width:768px){ .form-pane{ width:50%; } }
-
-    .title-wrap{ text-align:center; margin-bottom:24px; }
-    .title-wrap h1{
-      margin:0 0 6px 0;
-      font-weight:800; color:var(--text-strong);
-      font-size: 1.875rem; /* 3xl */
-    }
-    @media (min-width:768px){ .title-wrap h1{ font-size:2.25rem; } } /* 4xl */
-    .title-wrap p{ margin:0; color:var(--muted); }
-
-    /* Lo/go claro/escuro (emulando dark:hidden / dark:block) */
-    .dark\:hidden { /* só referência ao nome; no claro, não faz nada */ }
-    html.dark .dark\:hidden{ display:none !important; }
-    .dark\:block { display:none; }
-    html.dark .dark\:block{ display:block; }
-
-    /* Form */
-    .vstack > * + *{ margin-top:1rem; }  /* space-y-4 */
-    label{ display:block; margin-bottom:4px; font-weight:600; color:var(--text); }
-    input[type="text"], input[type="password"]{
-      height:48px; width:100%;
-      padding:0 16px;
-      border-radius: 10px;            /* rounded-lg */
-      border:1px solid var(--border);
-      background: #ffffff;
-      color: #1f2937;
-      outline: none;
-      transition: box-shadow .2s ease, border-color .2s ease, background .2s ease, color .2s ease;
-    }
-    html.dark input[type="text"], html.dark input[type="password"]{
-      background:#111111; color:#e5e7eb; border-color:#404040;
-    }
-    input[type="text"]:focus, input[type="password"]:focus{
-      box-shadow: 0 0 0 3px rgba(74, 222, 128, .45);
-      border-color: #86efac;
-    }
-
-    .row{
-      display:flex; flex-direction:column; gap:12px;
-    }
-    @media (min-width:640px){
-      .row{ flex-direction:row; align-items:center; justify-content:space-between; }
-    }
-    .checkbox{
-      display:inline-flex; gap:.5rem; align-items:center; color:var(--text);
-      font-size:.95rem;
-    }
-    .checkbox input{
-      width:16px; height:16px; border-radius:4px; border:1px solid var(--border); background:#fff;
-    }
-    html.dark .checkbox input{ border-color:#404040; background:#111; }
-
-    .link{ color:#22c55e; font-weight:600; }
-
-    .erro{ color:#ef4444; font-size:.9rem; display:none; }
-    .erro.show{ display:block; }
-
-    .btn{
-      height:48px; width:100%;
-      border:none; border-radius:10px;
-      background:#22c55e; color:white; font-weight:600;
-      transition: filter .15s ease, opacity .15s ease, transform .02s ease;
-      cursor:pointer;
-    }
-    .btn:hover{ filter:brightness(0.95); background:#16a34a; }
-    .btn:disabled{ opacity:.6; cursor:not-allowed; }
-
-    /* Botão olho (centralizado no input) */
-    .input-wrap{ position:relative; }
-    .pass-btn{
-      position:absolute; right:8px; top:50%; transform:translateY(-50%);
-      display:grid; place-items:center;
-      height:32px; width:32px; border-radius:8px;
-      color:#6b7280; background:transparent; border:none; cursor:pointer;
-      transition: background .15s ease;
-    }
-    .pass-btn:hover{ background: rgba(0,0,0,.05); }
-    html.dark .pass-btn{ color:#9ca3af; }
-    html.dark .pass-btn:hover{ background: rgba(255,255,255,.06); }
-
-    /* Cartão borda/sombra para claro/escuro */
-    .shadow-2xl{ box-shadow: var(--shadow-2xl); }
-    .border-transparent{ border-color:transparent; }
-    html.dark .border-neutral-800{ border-color:#262626; }
+    html.dark ::placeholder { color: #9ca3af; }       /* placeholder no dark */
   </style>
 </head>
 
-<body>
+<body class="bg-green-50 dark:bg-neutral-950 text-neutral-800 dark:text-neutral-200">
   <!-- TOPBAR -->
   <div class="topline-bar">
     <button id="themeSwitch" class="theme-toggle" aria-label="Alternar tema" aria-pressed="false">
@@ -295,50 +135,61 @@
       <span class="thumb" aria-hidden="true">
         <svg class="thumb-sun" viewBox="0 0 24 24">
           <defs><radialGradient id="sunGrad" cx="30%" cy="30%" r="80%"><stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#f8c266"/><stop offset="100%" stop-color="#f59e0b"/></radialGradient></defs>
-        <circle cx="12" cy="12" r="6.3" fill="url(#sunGrad)"/></svg>
+          <circle cx="12" cy="12" r="6.3" fill="url(#sunGrad)"/>
+        </svg>
         <svg class="thumb-moon" viewBox="0 0 24 24">
           <defs><radialGradient id="moonGrad" cx="30%" cy="30%" r="80%"><stop offset="0%" stop-color="#9fc3ff"/><stop offset="60%" stop-color="#6ba6ff"/><stop offset="100%" stop-color="#2563eb"/></radialGradient></defs>
-        <circle cx="12" cy="12" r="11" fill="url(#moonGrad)"/></svg>
+          <circle cx="12" cy="12" r="11" fill="url(#moonGrad)"/>
+        </svg>
       </span>
     </button>
   </div>
 
   <!-- Conteúdo -->
   <main class="page-shell">
-    <div class="auth-card shadow-2xl border-transparent border-neutral-800">
+    <div class="w-full max-w-[28rem] md:max-w-5xl bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl dark:shadow-black/40 overflow-hidden flex flex-col md:flex-row border border-transparent dark:border-neutral-800 mx-auto">
       <!-- Ilustração (>= md) -->
-      <div class="illustration">
+      <div class="hidden md:flex md:w-1/2 bg-green-100 dark:bg-neutral-800 items-center justify-center p-8">
         <img src="/img/login-illustration.png" alt="Ilustração" class="object-contain h-100">
       </div>
 
       <!-- Formulário -->
-      <div class="form-pane">
-        <div class="title-wrap">
-          <img src="/img/Logo.png" alt="ZapChats" class="mx-auto h-14 dark:hidden" style="height:56px; margin-inline:auto; margin-bottom:16px;">
-          <img src="/img/Logo-white.png" alt="ZapChats" class="mx-auto h-14 dark:block" style="height:56px; margin-inline:auto; margin-bottom:16px;">
-          <h1>Acesse sua conta</h1>
-          <p>Faça login para continuar</p>
+      <div class="w-full md:w-1/2 p-6 sm:p-8">
+        <div class="mb-6 text-center">
+          <img src="/img/Logo.png" alt="ZapChats" class="mx-auto h-14 mb-4 dark:hidden">
+          <img src="/img/Logo-white.png" alt="ZapChats" class="mx-auto h-14 mb-4 hidden dark:block">
+          <h1 class="text-3xl md:text-4xl font-extrabold text-gray-800 dark:text-white">Acesse sua conta</h1>
+          <p class="text-gray-500 dark:text-gray-400">Faça login para continuar</p>
         </div>
 
-        <form id="form-login" class="vstack" autocomplete="on">
+        <form id="form-login" class="space-y-4" autocomplete="on">
           <div>
-            <label for="email">E-mail</label>
+            <label class="block text-gray-700 dark:text-gray-200 font-medium mb-1">E-mail</label>
             <input id="email" type="text" name="email" required
-                   pattern="^[^\s]+@[^\s]+$"
+                   pattern="^[^\\s]+@[^\\s]+$"
                    title="O e-mail deve conter @ e não pode ter espaços"
+                   class="h-12 w-full px-4 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400 bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700 text-neutral-800 dark:text-neutral-100"
                    placeholder="usuario@dominio">
           </div>
 
+          <!-- Campo SENHA: wrapper relativo apenas no input -->
           <div>
-            <label for="senha">Senha</label>
-            <div class="input-wrap">
-              <input id="senha" type="password" name="senha" required placeholder="••••••••" style="padding-right:48px;">
-              <button type="button" id="togglePassBtn" class="pass-btn" aria-label="Mostrar senha">
-                <svg id="eye-open" viewBox="0 0 24 24" class="" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
+            <label class="block text-gray-700 dark:text-gray-200 font-medium mb-1">Senha</label>
+            <div class="relative">
+              <input id="senha" type="password" name="senha" required
+                     class="h-12 w-full px-4 border rounded-lg pr-12 focus:outline-none focus:ring-2 focus:ring-green-400 bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700 text-neutral-800 dark:text-neutral-100"
+                     placeholder="••••••••">
+              <!-- Olho centralizado -->
+              <button type="button" id="togglePassBtn"
+                      class="absolute right-2 top-1/2 -translate-y-1/2 grid place-items-center h-8 w-8 rounded-md text-gray-500 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/5 focus:outline-none focus:ring-2 focus:ring-green-400 transition"
+                      aria-label="Mostrar senha">
+                <!-- aberto -->
+                <svg id="eye-open" viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/>
                   <circle cx="12" cy="12" r="3.2"/>
                 </svg>
-                <svg id="eye-off" viewBox="0 0 24 24" class="hidden" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
+                <!-- fechado -->
+                <svg id="eye-off" viewBox="0 0 24 24" class="h-5 w-5 hidden" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-6.5 0-10-7-10-7a19.5 19.5 0 0 1 5.11-5.79M9.9 4.24A10.8 10.8 0 0 1 12 4c6.5 0 10 8 10 8a19.7 19.7 0 0 1-3.06 3.95"/>
                   <path d="M1 1l22 22"/>
                 </svg>
@@ -346,22 +197,27 @@
             </div>
           </div>
 
-          <div class="row" style="font-size:14px;">
-            <label class="checkbox">
-              <input id="remember" type="checkbox">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between text-sm">
+            <label class="inline-flex items-center gap-2 text-gray-700 dark:text-gray-200">
+              <input id="remember" type="checkbox" class="h-4 w-4 rounded border-gray-300 dark:border-neutral-700">
               Lembrar de mim
             </label>
-            <a id="link-forgot" href="/esqueci_senha" class="link">Esqueci minha senha</a>
+            <a id="link-forgot" href="/esqueci_senha" class="text-green-500 hover:underline font-medium self-start sm:self-auto">
+              Esqueci minha senha
+            </a>
           </div>
 
-          <div id="erro" class="erro"></div>
+          <div id="erro" class="hidden text-red-500 text-sm"></div>
 
-          <button id="btn-login" type="submit" class="btn">Entrar</button>
+          <button id="btn-login" type="submit"
+                  class="h-12 w-full rounded-lg bg-green-500 text-white font-semibold hover:bg-green-600 transition disabled:opacity-60 disabled:cursor-not-allowed">
+            Entrar
+          </button>
         </form>
 
-        <p style="margin-top:32px; text-align:center; color:var(--muted);">
+        <p class="mt-8 text-center text-gray-600 dark:text-gray-300">
           Ainda não tem conta?
-          <a href="/criar-empresa.html" class="link">Cadastre-se</a>
+          <a href="/criar-empresa.html" class="text-green-500 hover:underline font-medium">Cadastre-se</a>
         </p>
       </div>
     </div>
