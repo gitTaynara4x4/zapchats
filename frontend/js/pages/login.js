@@ -1,23 +1,16 @@
-// === Toggle de tema ===
 // === Guard: se já está logado, não mostra /login ===
 (function alreadyLoggedGuard(){
   function hasSessionCookie() {
-    // ajuste o nome do cookie se o seu backend usar outro (ex.: "access_token", "sessionid", etc.)
     return /(?:^|;\s*)session=/.test(document.cookie);
   }
-
   function redirectHome(){
     const params = new URLSearchParams(location.search);
     const next = params.get('next');
     const target = next && /^\/[^\s]*$/.test(next) ? next : '/dashboard';
-    // replace para tirar /login do histórico
     window.location.replace(target);
   }
-
   const hasToken = !!(localStorage.getItem('access_token') || localStorage.getItem('token'));
   if (hasToken || hasSessionCookie()) redirectHome();
-
-  // quando voltar do histórico (bfcache), roda de novo
   window.addEventListener('pageshow', function (e) {
     if (e.persisted || performance.getEntriesByType('navigation')[0]?.type === 'back_forward') {
       const againHasToken = !!(localStorage.getItem('access_token') || localStorage.getItem('token')) || hasSessionCookie();
@@ -26,42 +19,49 @@
   });
 })();
 
-(function(){
-  var html = document.documentElement;
-  try {
-    var saved = localStorage.getItem('theme');
-    if (saved === 'dark') html.classList.add('dark');
-    if (saved === 'light') html.classList.remove('dark');
-  } catch {}
+// ===== Tema (robusto, sem Tailwind) =====
+(() => {
+  const html = document.documentElement;
 
-  function setPressed(btn){
+  function apply(mode) {
+    const dark = mode === 'dark';
+    html.classList.toggle('dark', dark);
+    try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch {}
+    const btn = document.getElementById('themeSwitch');
+    if (btn) btn.setAttribute('aria-pressed', dark ? 'true' : 'false');
+  }
+
+  // Estado inicial (salvo ou prefers-color-scheme)
+  (function initEarly() {
+    try {
+      let saved = localStorage.getItem('theme');
+      if (!saved) {
+        saved = (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches)
+          ? 'dark' : 'light';
+      }
+      apply(saved === 'dark' ? 'dark' : 'light');
+    } catch {}
+  })();
+
+  function wire() {
+    const btn = document.getElementById('themeSwitch');
     if (!btn) return;
-    btn.setAttribute('aria-pressed', String(html.classList.contains('dark')));
-  }
-  function setTheme(mode){
-    var willDark = (mode === 'dark');
-    html.classList.toggle('dark', willDark);
-    try { localStorage.setItem('theme', willDark ? 'dark' : 'light'); } catch {}
-  }
-  window.addEventListener('storage', function(e){
-    if (e.key === 'theme') {
-      var v = (e.newValue || '').toLowerCase();
-      setTheme(v === 'dark' ? 'dark' : 'light');
-      setPressed(document.getElementById('themeSwitch'));
-    }
-  });
-
-  var btn = document.getElementById('themeSwitch');
-  if (btn){
-    setPressed(btn);
-    btn.addEventListener('click', function(){
-      var willDark = !html.classList.contains('dark');
-      setTheme(willDark ? 'dark' : 'light');
+    btn.setAttribute('aria-pressed', html.classList.contains('dark') ? 'true' : 'false');
+    btn.addEventListener('click', () => {
+      const next = html.classList.contains('dark') ? 'light' : 'dark';
       btn.classList.remove('t-anim'); void btn.offsetWidth; btn.classList.add('t-anim');
-      setTimeout(function(){ btn.classList.remove('t-anim'); }, 580);
-      setPressed(btn);
+      setTimeout(() => btn.classList.remove('t-anim'), 580);
+      apply(next);
     });
   }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
+
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'theme') {
+      const v = (e.newValue || '').toLowerCase();
+      apply(v === 'dark' ? 'dark' : 'light');
+    }
+  });
 })();
 
 // === Mostrar/Ocultar senha (sincroniza ícones) ===
@@ -122,12 +122,12 @@ async function cacheAvatar(d) {
 function notifyWarn(msg){
   if (typeof window.showToast === 'function') { try { showToast(msg, 'warn'); return; } catch {} }
   const box = document.getElementById('erro');
-  if (box){ box.textContent = msg; box.classList.remove('hidden'); }
+  if (box){ box.textContent = msg; box.classList.add('show'); }
 }
 function clearNotify(){
   if (typeof window.hideToast === 'function') { try { hideToast(); return; } catch {} }
   const box = document.getElementById('erro');
-  if (box){ box.textContent = ''; box.classList.add('hidden'); }
+  if (box){ box.textContent = ''; box.classList.remove('show'); }
 }
 
 // === Lock local por e-mail ===
@@ -170,7 +170,7 @@ function clearLocalLock(email){ try { localStorage.removeItem(LS_LOCK_KEY(email)
   })();
 
   function disable(){ if(btn){ btn.disabled = true; btn.classList.add('cursor-not-allowed'); } }
-  function enable(){ if(btn){ btn.disabled = false; btn.classList.remove('cursor-not-allowed'); btn.textContent = 'Entrar'; } }
+  function enable(){ if(btn){ btn.disabled = false; btn.textContent = 'Entrar'; } }
 
   function applyLockState(){
     const email = (emailInput?.value || '').trim().toLowerCase();
@@ -237,7 +237,7 @@ function clearLocalLock(email){ try { localStorage.removeItem(LS_LOCK_KEY(email)
 
         let msg = 'Credenciais inválidas';
         try { const err = await res.json(); msg = err.detail || msg; } catch {}
-        if (erro) { erro.textContent = msg; erro.classList.remove('hidden'); }
+        if (erro) { erro.textContent = msg; erro.classList.add('show'); }
         enable();
         return;
       }
@@ -273,7 +273,7 @@ function clearLocalLock(email){ try { localStorage.removeItem(LS_LOCK_KEY(email)
             headers: token ? { 'Authorization': `Bearer ${token}` } : {}
           });
           if (instRes.ok) {
-            const instData = await res.json();
+            const instData = await instRes.json(); // (fix: era res.json)
             if (instData?.nome) localStorage.setItem('instance_name', instData.nome);
           }
         } catch (instErr) {
@@ -303,7 +303,7 @@ function clearLocalLock(email){ try { localStorage.removeItem(LS_LOCK_KEY(email)
 
     } catch (err) {
       console.error(err);
-      if (erro) { erro.textContent = 'Erro de conexão com o servidor'; erro.classList.remove('hidden'); }
+      notifyWarn('Erro de conexão com o servidor');
       enable();
     }
   });

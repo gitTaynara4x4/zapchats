@@ -5,54 +5,136 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Redefinir Senha – ZapChats</title>
 
-  <!-- Tema antes de pintar -->
+  <!-- Tema ANTES de pintar (igual ao login) -->
   <script>
-    (function(){
-      try{
+    (function () {
+      try {
         var t = localStorage.getItem('theme');
-        if(!t || t==='dark') document.documentElement.classList.add('dark');
-      }catch{}
+        if (!t || t === 'dark') document.documentElement.classList.add('dark');
+        else document.documentElement.classList.remove('dark');
+      } catch {}
     })();
   </script>
 
-  <!-- Tailwind via CDN (ou troque pelo seu build) -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config = { darkMode: 'class' };</script>
-
   <style>
-    :root{ --topbar-h:44px; }
-    /* Topbar + toggle igual do login */
+    /* =================== Design tokens =================== */
+    :root{
+      --topbar-h:44px;
+
+      /* Light */
+      --bg: #f0fdf4;           /* green-50 */
+      --card:#ffffff;
+      --text:#1f2937;          /* gray-800 */
+      --text-strong:#111827;   /* gray-900 */
+      --muted:#6b7280;         /* gray-500 */
+      --border:#d1d5db;        /* gray-300 */
+      --border-2:#e5e7eb;      /* gray-200 */
+      --ring:#4ade80;          /* green-400 */
+      --green-500:#22c55e;
+      --green-600:#16a34a;
+      --blue-500:#3b82f6;
+      --blue-600:#2563eb;
+
+      --toast-err-bg:#fef2f2; --toast-err-bd:#fecaca; --toast-err-fg:#991b1b;
+      --toast-warn-bg:#fffbeb; --toast-warn-bd:#fde68a; --toast-warn-fg:#92400e;
+      --toast-ok-bg:#ecfdf5;   --toast-ok-bd:#a7f3d0;  --toast-ok-fg:#065f46;
+
+      --shadow-2xl: 0 25px 50px -12px rgba(0,0,0,.25);
+      --shadow-dark: 0 25px 50px -12px rgba(0,0,0,.4);
+    }
+    html.dark{
+      --bg:#0a0a0a;            /* neutral-950 */
+      --card:#171717;          /* neutral-900 aprox */
+      --text:#e5e7eb;          /* gray-200 */
+      --text-strong:#ffffff;
+      --muted:#9ca3af;         /* gray-400 */
+      --border:#404040;        /* neutral-700 */
+      --border-2:#262626;      /* neutral-800 */
+
+      --toast-err-bg:#7f1d1d; --toast-err-bd:#991b1b; --toast-err-fg:#fecaca;
+      --toast-warn-bg:#78350f; --toast-warn-bd:#92400e; --toast-warn-fg:#fde68a;
+      --toast-ok-bg:#064e3b;   --toast-ok-bd:#065f46;  --toast-ok-fg:#a7f3d0;
+
+      --shadow-2xl: var(--shadow-dark);
+    }
+
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif;
+      background:var(--bg); color:var(--text);
+    }
+    a{color:#22c55e; text-decoration:none}
+    a:hover{text-decoration:underline}
+    .hidden{display:none!important}
+
+    /* ========= Topbar + toggle (idêntico ao login) ========= */
     .topline-bar{
       position:fixed; inset:0 0 auto 0; height:var(--topbar-h);
       display:flex; align-items:center; justify-content:flex-end; gap:.75rem; padding:0 14px;
-      background:linear-gradient(180deg, rgba(0,0,0,.06), rgba(22,22,23,0));
-      z-index:50; backdrop-filter: blur(6px);
+      background: linear-gradient(180deg, rgba(0,0,0,.06), rgba(22,22,23,0));
+      z-index:50; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
     }
-    html:not(.dark) .topline-bar{ background:linear-gradient(180deg, rgba(0,0,0,.04), rgba(255,255,255,0)); }
+    html:not(.dark) .topline-bar{
+      background: linear-gradient(180deg, rgba(0,0,0,.04), rgba(255,255,255,0));
+    }
     .topline-bar::before{
       content:""; position:absolute; left:0; right:0; top:0; height:3px;
-      background:linear-gradient(90deg,#22c55e,#06b6d4,#6366f1); opacity:.95;
+      background: linear-gradient(90deg,#22c55e,#06b6d4,#6366f1); opacity:.95;
     }
+
     .theme-toggle{
       --w:78px; --h:34px; --p:3px; --k:28px; --dx: calc(var(--w) - var(--k) - var(--p)*2);
       position:relative; width:var(--w); height:var(--h); padding:var(--p); border-radius:999px;
       cursor:pointer; outline:none; border:1px solid; display:inline-block; isolation:isolate;
       background:#eceff3; border-color:#d5d9e0;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,.06), inset 0 -1px 2px rgba(0,0,0,.05);
+      transition: background .3s ease, border-color .3s ease, box-shadow .3s ease;
     }
-    html.dark .theme-toggle{ background:#2f323a; border-color:#3a3e46; }
+    html.dark .theme-toggle{
+      background:#2f323a; border-color:#3a3e46;
+      box-shadow: inset 0 2px 5px rgba(0,0,0,.35), inset 0 -1px 2px rgba(255,255,255,.03);
+    }
+    .theme-toggle .slot{
+      position:absolute; top:50%; width:28px; height:28px; margin-top:-14px;
+      display:grid; place-items:center; pointer-events:none; opacity:.75;
+    }
+    .theme-toggle .slot svg{ width:18px; height:18px; }
+    .theme-toggle .slot.left{ left:8px; } .theme-toggle .slot.right{ right:8px; }
+    .theme-toggle .slot svg *{ stroke:#9aa3af; } html.dark .theme-toggle .slot svg *{ stroke:#8a93a1; }
+
     .theme-toggle .thumb{
-      position:absolute; top:3px; left:3px; width:28px; height:28px; border-radius:999px; transition:.38s;
+      position:absolute; top:var(--p); left:var(--p); width:var(--k); height:var(--k); border-radius:999px;
+      transform: translateX(0);
+      transition: transform .38s cubic-bezier(.28,1.2,.43,1), box-shadow .2s ease, background .3s ease;
+      display:grid; place-items:center; overflow:hidden;
       background: radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%, rgba(255,255,255,.08) 65%),
                   linear-gradient(180deg,#f8c266,#f59e0b);
       box-shadow: 0 4px 8px rgba(0,0,0,.18), inset 0 0 0 1px rgba(255,255,255,.25);
     }
+    .thumb svg{ width:22px; height:22px; display:block; }
+    .thumb .thumb-sun{ display:block; } .thumb .thumb-moon{ display:none; }
+
     html.dark .theme-toggle .thumb{
-      transform: translateX(calc(78px - 28px - 3px*2));
+      transform: translateX(var(--dx));
       background: radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%, rgba(255,255,255,.08) 65%),
                   linear-gradient(180deg,#6ba6ff,#2563eb);
+      box-shadow: 0 6px 10px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.22);
     }
+    html.dark .thumb .thumb-sun{ display:none; } html.dark .thumb .thumb-moon{ display:block; }
 
-    /* Shell com safe area */
+    .theme-toggle:active .thumb{ transform:translateX(0) scale(.96); }
+    html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) scale(.96); }
+    .theme-toggle:focus-visible{ box-shadow: 0 0 0 3px rgba(99,102,241,.35); }
+
+    .theme-toggle.t-anim::after{
+      content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+      background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.45) 50%, transparent 70%);
+      animation: sweep .55s ease both;
+    }
+    @keyframes sweep { from{opacity:0; transform:translateX(-20%)} to{opacity:1; transform:translateX(0)} }
+
+    /* =============== Layout base =============== */
     .page-shell{
       padding:
         calc(16px + env(safe-area-inset-top, 0px))
@@ -64,171 +146,229 @@
       display:flex; align-items:center; justify-content:center;
     }
 
-    /* Botão com barra de progresso interna */
-    .btn-progress{ position:relative; overflow:hidden; isolation:isolate; --prog:0%; --ok:#22c55e; --idle:#16a34a; background:var(--idle); border-radius:.5rem; }
-    .btn-progress::before{ content:""; position:absolute; inset:0; width:var(--prog); background:var(--ok); transition:width .18s ease; border-radius:.5rem; z-index:0; }
-    .btn-progress .btn-text{ position:relative; z-index:1; }
-<<<<<<< HEAD
+    .auth-card{
+      width:100%; max-width:32rem; background:var(--card); color:var(--text);
+      border:1px solid transparent; border-radius:16px; box-shadow: var(--shadow-2xl);
+      overflow:hidden; margin-inline:auto;
+    }
+    html.dark .auth-card{ border-color:var(--border-2); }
+    .pad{ padding:24px; } @media (min-width:640px){ .pad{ padding:32px; } } @media (min-width:768px){ .pad{ padding:40px; } }
 
-    /* ========== MODAL ==========
-       Acessível, com blur, animação e foco preso  */
+    .center{ text-align:center; }
+    .title{ margin:0 0 6px 0; font-size:1.875rem; font-weight:800; color:var(--text-strong); }
+    .muted{ color:var(--muted); }
+    .logo{ height:48px; margin-inline:auto; margin-bottom:12px; }
+    .only-light{ display:block; } html.dark .only-light{ display:none!important; }
+    .only-dark{ display:none; } html.dark .only-dark{ display:block; }
+
+    /* =============== Inputs & forms =============== */
+    .vstack > * + *{ margin-top:1rem; }
+    label{ display:block; margin-bottom:6px; font-weight:600; color:var(--text); }
+    input[type="email"], input[type="password"], input[type="text"]{
+      height:48px; width:100%; padding:0 16px; border-radius:10px; border:1px solid var(--border);
+      background:#fff; color:#1f2937; outline:none; transition: box-shadow .2s ease, border-color .2s ease, background .2s ease, color .2s ease;
+    }
+    html.dark input[type="email"], html.dark input[type="password"], html.dark input[type="text"]{
+      background:#111; color:#e5e7eb; border-color:#404040;
+    }
+    input:focus{ box-shadow:0 0 0 3px rgba(74,222,128,.45); border-color:#86efac; }
+
+    /* Autofill fix */
+    input:-webkit-autofill,
+    input:-webkit-autofill:hover,
+    input:-webkit-autofill:focus {
+      -webkit-text-fill-color: #111827;
+      box-shadow: 0 0 0px 1000px #ffffff inset !important;
+      transition: background-color 9999s ease-out, color 9999s ease-out;
+      caret-color: #111827; border-radius:.5rem;
+    }
+    html.dark input:-webkit-autofill,
+    html.dark input:-webkit-autofill:hover,
+    html.dark input:-webkit-autofill:focus {
+      -webkit-text-fill-color: #e5e7eb;
+      box-shadow: 0 0 0px 1000px #0a0a0a inset !important;
+      caret-color: #e5e7eb; border-radius:.5rem;
+    }
+
+    /* Botões */
+    .btn-progress{
+      position:relative; overflow:hidden; isolation:isolate;
+      --prog:0%; --ok:#22c55e; --idle:#16a34a;
+      height:48px; width:100%; color:#fff; font-weight:600;
+      background:var(--idle); border:none; border-radius:10px; cursor:pointer;
+      transition: filter .15s ease, opacity .15s ease;
+    }
+    .btn-progress:hover{ filter:brightness(0.95); }
+    .btn-progress:disabled{ opacity:.6; cursor:not-allowed; }
+    .btn-progress::before{
+      content:""; position:absolute; inset:0; width:var(--prog); background:var(--ok);
+      transition:width .18s ease; border-radius:10px; z-index:0;
+    }
+    .btn-text{ position:relative; z-index:1; }
+
+    .btn-blue{
+      height:48px; width:100%;
+      border:none; border-radius:10px; color:#fff; font-weight:600;
+      background:var(--blue-500); cursor:pointer; transition:filter .15s ease, opacity .15s ease;
+    }
+    .btn-blue:hover{ background:var(--blue-600); }
+    .btn-blue:disabled{ opacity:.6; cursor:not-allowed; }
+
+    /* Ícone olho dentro do input */
+    .input-wrap{ position:relative; }
+    .pass-btn{
+      position:absolute; right:8px; top:50%; transform:translateY(-50%);
+      display:grid; place-items:center; height:32px; width:32px; border-radius:8px;
+      color:#6b7280; background:transparent; border:none; cursor:pointer; transition: background .15s ease;
+    }
+    .pass-btn:hover{ background: rgba(0,0,0,.05); }
+    html.dark .pass-btn{ color:#9ca3af; }
+    html.dark .pass-btn:hover{ background: rgba(255,255,255,.06); }
+    .h5{ width:20px; height:20px; }
+
+    /* Toast */
+    #toast{ display:none; margin-bottom:16px; border:1px solid; border-radius:10px; padding:12px 14px; font-size:.95rem; }
+    #toast.show{ display:block; }
+    #toast.err{ background:var(--toast-err-bg); border-color:var(--toast-err-bd); color:var(--toast-err-fg); }
+    #toast.warn{ background:var(--toast-warn-bg); border-color:var(--toast-warn-bd); color:var(--toast-warn-fg); }
+    #toast.ok{ background:var(--toast-ok-bg); border-color:var(--toast-ok-bd); color:var(--toast-ok-fg); }
+
+    /* Modal */
     .modal-overlay{
       position:fixed; inset:0; display:none; place-items:center;
-      background: rgba(0,0,0,.45); backdrop-filter: blur(6px);
-      z-index: 100;
+      background: rgba(0,0,0,.45); backdrop-filter: blur(6px); z-index: 100;
     }
     .modal-overlay[data-open="true"]{ display:grid; }
     .modal{
       width:min(520px, 92vw); border-radius:16px; overflow:hidden;
-      background:#111214; color:#e5e7eb; border:1px solid #2b2f36;
+      background:#fff; color:#111827; border:1px solid var(--border-2);
       box-shadow: 0 20px 60px rgba(0,0,0,.55);
-      transform: translateY(14px) scale(.98);
-      opacity:0; transition:.2s ease;
+      transform: translateY(14px) scale(.98); opacity:0; transition:.2s ease;
     }
-    html:not(.dark) .modal{ background:#fff; color:#111827; border-color:#e5e7eb; }
+    html.dark .modal{ background:#111214; color:#e5e7eb; border-color:#2b2f36; }
     .modal-overlay[data-open="true"] .modal{ transform: translateY(0) scale(1); opacity:1; }
-    .modal .head{ display:flex; align-items:center; gap:.75rem; padding:14px 16px; border-bottom:1px solid rgba(255,255,255,.06); }
-    html:not(.dark) .modal .head{ border-bottom-color:#f1f5f9; }
-    .modal .body{ padding:16px; }
-    .modal .foot{ display:flex; gap:.5rem; justify-content:flex-end; padding:14px 16px; border-top:1px solid rgba(255,255,255,.06); }
-    html:not(.dark) .modal .foot{ border-top-color:#f1f5f9; }
+    .modal .head{ display:flex; align-items:center; gap:.75rem; padding:14px 16px; border-bottom:1px solid var(--border-2); }
+    html.dark .modal .head{ border-bottom-color:rgba(255,255,255,.08); }
+    .modal .body{ padding:16px; font-size:.95rem; line-height:1.55; }
+    .modal .foot{ display:flex; gap:.5rem; justify-content:flex-end; padding:14px 16px; border-top:1px solid var(--border-2); }
+    html.dark .modal .foot{ border-top-color:rgba(255,255,255,.08); }
     .btn{ padding:10px 14px; border-radius:10px; font-weight:700; }
     .btn-primary{ background:#22c55e; color:#052012; border:1px solid #16a34a; }
-    .btn-ghost{ background:transparent; border:1px solid #3a3e46; color:#cbd5e1; }
-    html:not(.dark) .btn-ghost{ border-color:#e2e8f0; color:#334155; }
+    .btn-ghost{ background:transparent; border:1px solid #e2e8f0; color:#334155; }
+    html.dark .btn-ghost{ border-color:#3a3e46; color:#cbd5e1; }
 
-    /* Ícones inline simples */
     .ic{ width:18px; height:18px; display:inline-block; vertical-align:-3px; margin-right:6px; }
-=======
->>>>>>> e7c78cbbb3c83313b23e3bfdb4030a11f203ffdb
   </style>
 </head>
 
-<body class="bg-green-50 dark:bg-neutral-950 text-neutral-800 dark:text-neutral-200">
+<body>
   <!-- TOPBAR -->
   <div class="topline-bar">
-    <button id="themeSwitch" class="theme-toggle" aria-label="Alternar tema" aria-pressed="false"><span class="thumb"></span></button>
+    <button id="themeSwitch" class="theme-toggle" aria-label="Alternar tema" aria-pressed="false">
+      <span class="slot left" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3.5" fill="none"/>
+          <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
+          <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
+          <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
+          <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
+        </svg>
+      </span>
+      <span class="slot right" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8z" fill="none"/>
+        </svg>
+      </span>
+      <span class="thumb" aria-hidden="true">
+        <svg class="thumb-sun" viewBox="0 0 24 24">
+          <defs><radialGradient id="sunGrad" cx="30%" cy="30%" r="80%"><stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#f8c266"/><stop offset="100%" stop-color="#f59e0b"/></radialGradient></defs>
+          <circle cx="12" cy="12" r="6.3" fill="url(#sunGrad)"/>
+        </svg>
+        <svg class="thumb-moon" viewBox="0 0 24 24">
+          <defs><radialGradient id="moonGrad" cx="30%" cy="30%" r="80%"><stop offset="0%" stop-color="#9fc3ff"/><stop offset="60%" stop-color="#6ba6ff"/><stop offset="100%" stop-color="#2563eb"/></radialGradient></defs>
+          <circle cx="12" cy="12" r="11" fill="url(#moonGrad)"/>
+        </svg>
+      </span>
+    </button>
   </div>
 
-<<<<<<< HEAD
   <!-- CONTEÚDO -->
   <main class="page-shell">
-    <div class="w-full max-w-lg bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl dark:shadow-black/40 overflow-hidden border border-transparent dark:border-neutral-800">
-      <div class="p-6 sm:p-8 md:p-10">
-        <div class="text-center mb-6">
-          <img src="/img/Logo.png" class="mx-auto h-12 mb-3 dark:hidden" alt="ZapChats">
-          <img src="/img/Logo-white.png" class="mx-auto h-12 mb-3 hidden dark:block" alt="ZapChats">
-          <h1 class="text-3xl font-extrabold text-gray-800 dark:text-white">Redefinir Senha</h1>
-          <p class="text-gray-500 dark:text-gray-400">Informe seu e-mail para receber o token.</p>
-=======
-  <!-- CARD -->
-  <div class="w-full max-w-lg bg-white dark:bg-neutral-900 rounded-2xl shadow-lg dark:shadow-black/40 overflow-hidden border border-transparent dark:border-neutral-800">
-    <div class="p-8 md:p-10">
-
-      <div class="text-center mb-6">
-        <img src="/img/Logo.png" class="mx-auto h-12 mb-3 dark:hidden" alt="ZapChats">
-        <img src="/img/Logo-white.png" class="mx-auto h-12 mb-3 hidden dark:block" alt="ZapChats">
-        <h2 class="text-3xl font-bold text-gray-800 dark:text-white">Redefinir Senha</h2>
-        <p class="text-gray-500 dark:text-gray-400">Receba um token no e-mail e crie uma nova senha.</p>
-      </div>
-
-      <!-- Toast (erros e avisos) -->
-      <div id="toast" class="hidden mb-4 rounded-lg border px-4 py-3 text-sm"></div>
-
-      <!-- Passo 1 -->
-      <form id="form-forgot" class="space-y-4" autocomplete="off" novalidate>
-        <div>
-          <label class="block font-medium mb-1 text-gray-700 dark:text-gray-200">E-mail</label>
-          <input id="email" type="email" required
-                 class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400
-                        bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700
-                        text-neutral-800 dark:text-neutral-100"
-                 placeholder="seuemail@empresa.com"/>
->>>>>>> e7c78cbbb3c83313b23e3bfdb4030a11f203ffdb
+    <div class="auth-card">
+      <div class="pad">
+        <div class="center" style="margin-bottom:24px;">
+          <img src="/img/Logo.png" class="logo only-light" alt="ZapChats">
+          <img src="/img/Logo-white.png" class="logo only-dark" alt="ZapChats">
+          <h1 class="title">Redefinir Senha</h1>
+          <p class="muted">Informe seu e-mail para receber o token.</p>
         </div>
 
-        <!-- Toast simples (continua disponível) -->
-        <div id="toast" class="hidden mb-4 rounded-lg border px-4 py-3 text-sm"></div>
+        <!-- Toast -->
+        <div id="toast" class=""></div>
 
         <!-- PASSO 1 -->
-        <form id="form-forgot" class="space-y-4" novalidate>
+        <form id="form-forgot" class="vstack" novalidate>
           <div>
-            <label class="block font-medium mb-1 text-gray-700 dark:text-gray-200">E-mail</label>
-            <input id="email" type="email" required
-                   class="h-12 w-full px-4 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400
-                          bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700
-                          text-neutral-800 dark:text-neutral-100"
-                   placeholder="seuemail@empresa.com"/>
+            <label for="email">E-mail</label>
+            <input id="email" type="email" required placeholder="seuemail@empresa.com"/>
           </div>
 
-          <button id="btn-forgot" type="submit"
-                  class="btn-progress h-12 w-full text-white font-semibold disabled:opacity-60 disabled:cursor-not-allowed">
-            <span class="btn-text">Enviar Token</span>
-          </button>
+        <button id="btn-forgot" type="submit" class="btn-progress">
+          <span class="btn-text">Enviar Token</span>
+        </button>
         </form>
 
-        <!-- PASSO 2 -->
-        <div id="reset-section" class="hidden mt-8">
-          <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Cole o token e crie sua nova senha.</p>
+        <div id="tips" class="muted hidden" style="font-size:.9rem; margin-top:10px;">
+          Verifique sua caixa de entrada (e o spam). O token expira após alguns minutos.
+        </div>
 
-<<<<<<< HEAD
-          <form id="form-reset" class="space-y-4" novalidate>
+        <!-- PASSO 2 -->
+        <div id="reset-section" class="hidden" style="margin-top:32px;">
+          <p class="muted" style="font-size:.9rem; margin-bottom:12px;">Cole o token e crie sua nova senha.</p>
+
+          <form id="form-reset" class="vstack" novalidate>
             <div>
-              <label class="block font-medium mb-1 text-gray-700 dark:text-gray-200">Token</label>
-              <input id="token" type="text" required
-                     class="h-12 w-full px-4 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400
-                            bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700
-                            text-neutral-800 dark:text-neutral-100"
-                     placeholder="Cole o token aqui"/>
+              <label for="token">Token</label>
+              <input id="token" type="text" required placeholder="Cole o token aqui"/>
             </div>
 
             <div>
-              <label class="block font-medium mb-1 text-gray-700 dark:text-gray-200">Nova Senha</label>
-              <div class="relative">
-                <input id="nova_senha" type="password" minlength="8" required
-                       class="h-12 w-full px-4 border rounded-lg pr-12 focus:outline-none focus:ring-2 focus:ring-green-400
-                              bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700
-                              text-neutral-800 dark:text-neutral-100"
-                       placeholder="••••••••"/>
-                <button type="button" id="toggle-pass"
-                        class="absolute right-2 top-1/2 -translate-y-1/2 grid place-items-center h-8 w-8 rounded-md
-                               text-gray-500 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/5
-                               focus:outline-none focus:ring-2 focus:ring-green-400"
-                        aria-label="Mostrar senha">
-                  <svg id="eye-open" viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <label for="nova_senha">Nova Senha</label>
+              <div class="input-wrap">
+                <input id="nova_senha" type="password" minlength="8" required placeholder="••••••••" style="padding-right:48px;">
+                <button type="button" id="toggle-pass" class="pass-btn" aria-label="Mostrar senha">
+                  <svg id="eye-open" class="h5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3.2"/>
                   </svg>
-                  <svg id="eye-off" viewBox="0 0 24 24" class="h-5 w-5 hidden" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <svg id="eye-off" class="h5 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-6.5 0-10-7-10-7a19.5 19.5 0 0 1 5.11-5.79M9.9 4.24A10.8 10.8 0 0 1 12 4c6.5 0 10 8 10 8a19.7 19.7 0 0 1-3.06 3.95"/><path d="M1 1l22 22"/>
                   </svg>
                 </button>
               </div>
-              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Mínimo 8 caracteres. Use letras, números e símbolos.</p>
+              <p class="muted" style="font-size:.8rem; margin-top:6px;">Mínimo 8 caracteres. Use letras, números e símbolos.</p>
             </div>
 
-            <button id="btn-reset" type="submit"
-                    class="h-12 w-full rounded-lg bg-blue-500 text-white font-semibold transition hover:bg-blue-600
-                           disabled:opacity-60 disabled:cursor-not-allowed">
+            <button id="btn-reset" type="submit" class="btn-blue">
               <span class="btn-text">Redefinir Senha</span>
             </button>
           </form>
         </div>
 
-        <p class="mt-8 text-center text-gray-600 dark:text-gray-300">
-          <a href="/login" class="text-green-500 hover:underline font-medium">Voltar ao login</a>
+        <p class="center muted" style="margin-top:32px;">
+          <a href="/login">Voltar ao login</a>
         </p>
       </div>
     </div>
   </main>
 
-  <!-- ===== MODAL de Notificações ===== -->
+  <!-- MODAL -->
   <div id="notifyModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="notify-title" data-open="false">
     <div class="modal" role="document">
       <div class="head">
-        <div id="notify-icon"></div>
+        <div id="notify-icon" aria-hidden="true"></div>
         <h3 id="notify-title" class="text-lg font-bold">Notificação</h3>
       </div>
-      <div id="notify-body" class="body text-sm leading-6"></div>
+      <div id="notify-body" class="body">.</div>
       <div class="foot">
         <button id="notify-cancel" class="btn btn-ghost">Fechar</button>
         <button id="notify-ok" class="btn btn-primary">Ok</button>
@@ -237,158 +377,6 @@
   </div>
 
   <!-- JS da página -->
-  <script src="/frontend/js/pages/esqueci_senha.js" defer></script>
-=======
-  <script>
-    // Tema
-    (function(){
-      var html=document.documentElement, btn=document.getElementById('themeSwitch');
-      try{var saved=localStorage.getItem('theme'); if(saved) html.classList.toggle('dark',saved==='dark');}catch{}
-      if(btn){ const sync=()=>btn.setAttribute('aria-pressed',String(html.classList.contains('dark')));
-        sync(); btn.addEventListener('click',()=>{ const willDark=!html.classList.contains('dark');
-          html.classList.toggle('dark',willDark); try{localStorage.setItem('theme',willDark?'dark':'light');}catch{}; sync();});
-      }
-    })();
-
-    // Toast
-    const toast = document.getElementById('toast');
-    function showToast(msg, variant='error'){
-      const styles={
-        error:'border-red-300 bg-red-50 text-red-800 dark:bg-red-900/25 dark:border-red-800 dark:text-red-200',
-        warn :'border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-200'
-      };
-      toast.className='mb-4 rounded-lg border px-4 py-3 text-sm '+(styles[variant]||styles.error);
-      toast.textContent=msg; toast.classList.remove('hidden');
-    }
-    function hideToast(){ toast.classList.add('hidden'); toast.textContent=''; }
-
-    // Progress helpers
-    function setBtnProg(btn,pct){ btn.style.setProperty('--prog',Math.max(0,Math.min(100,pct))+'%'); }
-    function startProgress(btn){
-      let pct=0, t0=performance.now(), raf=0;
-      const tick=(now)=>{
-        const dt=(now-t0)/1000;         // s
-        const target=Math.min(0.98, dt/6.0); // ~98% em ~6s
-        const wobble=0.012*Math.sin(now/500);
-        pct=Math.max(pct,Math.min(0.985,target+wobble));
-        setBtnProg(btn,Math.floor(pct*100));
-        raf=requestAnimationFrame(tick);
-      };
-      raf=requestAnimationFrame(tick);
-      return ()=>cancelAnimationFrame(raf);
-    }
-    function finishProgress(btn){ setBtnProg(btn,100); setTimeout(()=>setBtnProg(btn,0),900); }
-    const minDelay=(ms)=>new Promise(r=>setTimeout(r,ms));
-
-    // Throttle local (máx. 5 envios por e-mail até liberar novamente)
-    const LS_KEY = (email)=>`fp:tries:${(email||'').toLowerCase()}`;
-    function getTries(email){
-      try{ const raw=localStorage.getItem(LS_KEY(email)); if(!raw) return {n:0,ts:Date.now()};
-        const obj=JSON.parse(raw); return {n:obj.n|0, ts:obj.ts|0}; }catch{ return {n:0,ts:Date.now()}; }
-    }
-    function setTries(email,n){ try{ localStorage.setItem(LS_KEY(email), JSON.stringify({n,ts:Date.now()})); }catch{} }
-    function incTries(email){ const t=getTries(email); setTries(email, t.n+1); return t.n+1; }
-    function resetTries(email){ try{ localStorage.removeItem(LS_KEY(email)); }catch{} }
-
-    // Passo 1
-    const formForgot = document.getElementById('form-forgot');
-    const btnForgot  = document.getElementById('btn-forgot');
-    const btnText    = btnForgot.querySelector('.btn-text');
-    const emailInput = document.getElementById('email');
-    const tips       = document.getElementById('tips');
-
-    formForgot.addEventListener('submit', async (e)=>{
-      e.preventDefault(); hideToast();
-      const email=(emailInput.value||'').trim().toLowerCase();
-      if(!email){ showToast('Informe um e-mail válido.','warn'); return; }
-
-      // limite local: 5 tentativas por e-mail (não mostra tempo)
-      const tries = incTries(email);
-      if(tries>5){ showToast('Muitas tentativas. Tente novamente mais tarde.','warn'); return; }
-
-      btnForgot.disabled=true;
-      const oldText=btnText.textContent; btnText.textContent='Enviando para você…';
-      const stop = startProgress(btnForgot);
-
-      try{
-        // aguarda resposta e pelo menos 3.5s de animação
-        const fetchPromise = fetch('/api/auth/forgot-password',{
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({email})
-        });
-
-        const res = await Promise.race([fetchPromise, fetchPromise]); // só pra reusar a mesma promise
-        await minDelay(3500);
-
-        // 429 (muitas tentativas no servidor)
-        if(res.status===429){
-          stop(); finishProgress(btnForgot); await minDelay(1000);
-          showToast('Muitas tentativas. Tente novamente mais tarde.','warn');
-          return;
-        }
-
-        // 404 → e-mail não cadastrado (mensagem explícita)
-        if(res.status===404){
-          stop(); finishProgress(btnForgot); await minDelay(1000);
-          showToast('E-mail não cadastrado.');
-          return;
-        }
-
-        // outros erros
-        if(!res.ok){
-          stop(); finishProgress(btnForgot); await minDelay(1000);
-          let msg='Não foi possível enviar agora.';
-          try{ const j=await res.json(); msg=j.detail||msg; }catch{}
-          showToast(msg);
-          return;
-        }
-
-        // sucesso → mostra dicas e passo 2
-        stop(); finishProgress(btnForgot); await minDelay(1000);
-        tips.classList.remove('hidden');
-        document.getElementById('reset-section').classList.remove('hidden');
-        document.getElementById('token').focus();
-      }catch{
-        stop(); setBtnProg(btnForgot,0);
-        showToast('Erro de conexão. Tente novamente.');
-      }finally{
-        btnForgot.disabled=false; btnText.textContent=oldText;
-      }
-    });
-
-    // Passo 2
-    const formReset=document.getElementById('form-reset');
-    const btnReset=document.getElementById('btn-reset');
-    const inputPass=document.getElementById('nova_senha');
-    const inputTok=document.getElementById('token');
-
-    document.getElementById('toggle-pass').addEventListener('click',()=>{
-      const btn=document.getElementById('toggle-pass');
-      const on=inputPass.type==='text'; inputPass.type=on?'password':'text'; btn.textContent=on?'Mostrar':'Ocultar';
-    });
-
-    // pré-preenche token via URL (?token=...)
-    (function(){
-      try{ const u=new URL(location.href); const t=u.searchParams.get('token');
-        if(t){ document.getElementById('reset-section').classList.remove('hidden'); inputTok.value=t; inputPass.focus(); }
-      }catch{}
-    })();
-
-    formReset.addEventListener('submit', async (e)=>{
-      e.preventDefault(); hideToast();
-      const token=inputTok.value.trim(), nova_senha=inputPass.value.trim();
-      btnReset.disabled=true; const t=btnReset.querySelector('.btn-text'); const old=t.textContent; t.textContent='Atualizando…';
-      try{
-        const res=await fetch('/api/auth/reset-password',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({token,nova_senha}) });
-        if(!res.ok){ let msg='Não foi possível redefinir a senha.'; try{const j=await res.json(); msg=j.detail||msg;}catch{} showToast(msg); return; }
-        alert('Senha redefinida! Você já pode entrar com a nova senha.');
-        // como deu certo, “perdoa” tentativas locais desse e-mail
-        resetTries((emailInput.value||'').trim().toLowerCase());
-        window.location.href='/login';
-      }catch{ showToast('Falha de conexão. Tente novamente.'); }
-      finally{ btnReset.disabled=false; t.textContent=old; }
-    });
-  </script>
->>>>>>> e7c78cbbb3c83313b23e3bfdb4030a11f203ffdb
+  <script src="/frontend/js/pages/esqueci_senha.js"></script>
 </body>
 </html>

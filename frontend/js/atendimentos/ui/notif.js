@@ -1,4 +1,3 @@
-// /frontend/js/atendimentos/ui/notif.js
 // som/prime, fallback beep, Web Notifications e badge global (recomputeUnread)
 
 (function(){
@@ -68,9 +67,10 @@
   }
 
   /* ==================== Som ==================== */
+  const ALWAYS_BEEP = localStorage.getItem('zc:notify:always_beep') === '1'; // opcional
   function tocarNotificacao(clienteId) {
-    // só toca se NÃO estiver na conversa ativa e/ou a aba estiver oculta
-    if (document.hidden || !isChatActive(clienteId)) {
+    // toca se: (config) sempre, OU aba oculta, OU chat não é o ativo
+    if (ALWAYS_BEEP || document.hidden || !isChatActive(clienteId)) {
       try { audioNotificacao.currentTime = 0; } catch {}
       audioNotificacao.play().catch(playBeepFallback);
       try { navigator.vibrate && navigator.vibrate(40); } catch {}
@@ -119,7 +119,6 @@
     const unread = Math.max(0, Number(total)||0);
     document.title = unread > 0 ? `(${unread}) ${__titleBase}` : __titleBase;
 
-    // opcional: badge num header (se existir)
     const badgeEl = document.getElementById('notif-badge');
     if (badgeEl){
       badgeEl.textContent = unread > 99 ? '99+' : (unread ? String(unread) : '');
@@ -127,7 +126,6 @@
     }
   }
 
-  // soma c.novas do cache atual (state ou window)
   function recomputeUnread(){
     try{
       const arr = Array.isArray(window.state?.clientesCache) ? window.state.clientesCache
@@ -157,27 +155,22 @@
         if (cl && cl.novas>0){
           cl.novas = 0;
           window.salvarCache?.();
-          // re-render e recalc
           window.renderListaClientes?.(window.state?.clientesCache || window.clientesCache || []);
           recomputeUnread();
         }
-        // marca como visto no servidor
         fetch(`/api/atendimento/clientes/${Number(window.clienteSel.id)}/seen?empresa_id=${EMPRESA_ID}`, { method:'POST' }).catch(()=>{});
       }catch{}
     }
   }
 
-  // Quando a aba volta a ficar visível
   document.addEventListener('visibilitychange', ()=>{
     if (!document.hidden) clearUnreadOfOpenChatAndPingServer();
   });
 
-  // Quando a janela recebe foco
   window.addEventListener('focus', ()=>{
     clearUnreadOfOpenChatAndPingServer();
     recomputeUnread();
   }, { passive:true });
 
-  // Primeira passagem (depois que a UI sobe)
   setTimeout(recomputeUnread, 300);
 })();

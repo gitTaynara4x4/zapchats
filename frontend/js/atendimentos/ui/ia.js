@@ -275,6 +275,95 @@
     refs.modal.classList.add('hidden');
   }
 
+  // ---------- Normalizadores ----------
+  function normalizeResumoResponse(j){
+    // aceita: {resumo:{...}}, objeto plano {...}, array [{json:{...}}] ou [{text:"{...}"}],
+    // string JSON ou texto puro
+    function fromText(t){
+      return {
+        resumo_curto: String(t || 'Sem conteúdo.'),
+        pontos_chave: [],
+        topico: null,
+        urgencia: 'baixa',
+        confianca: 0,
+        amostra: null
+      };
+    }
+
+    try{
+      if (Array.isArray(j)) {
+        const first = j[0]?.json ?? j[0] ?? null;
+        return normalizeResumoResponse(first);
+      }
+
+      if (typeof j === 'string') {
+        try { return normalizeResumoResponse(JSON.parse(j)); }
+        catch { return fromText(j); }
+      }
+
+      if (j && typeof j === 'object') {
+        // formato esperado já normalizado
+        if (j.resumo && typeof j.resumo === 'object') return j.resumo;
+        if ('resumo_curto' in j || 'pontos_chave' in j) return j;
+
+        // n8n/LLM costuma vir como { json: {...} } ou { text: "<json string>" }
+        if (j.json && typeof j.json === 'object') {
+          return normalizeResumoResponse(j.json);
+        }
+        if (typeof j.text === 'string') {
+          try { return normalizeResumoResponse(JSON.parse(j.text)); }
+          catch { return fromText(j.text); }
+        }
+
+        // outras chaves possíveis
+        if (typeof j.body === 'string') {
+          try { return normalizeResumoResponse(JSON.parse(j.body)); }
+          catch { return fromText(j.body); }
+        }
+        if (typeof j.data === 'string') {
+          try { return normalizeResumoResponse(JSON.parse(j.data)); }
+          catch { return fromText(j.data); }
+        }
+
+        // último recurso: devolver como está
+        return fromText(JSON.stringify(j));
+      }
+    }catch(_e){}
+
+    return fromText('Sem conteúdo.');
+  }
+
+  function normalizeMelhorarResponse(out){
+    // aceita: string, objeto, array [{json:{...}}] ou [{text:"{...}"}]
+    try{
+      if (Array.isArray(out)) {
+        const first = out[0]?.json ?? out[0] ?? null;
+        return normalizeMelhorarResponse(first);
+      }
+
+      if (typeof out === 'string') {
+        try { const j = JSON.parse(out); return normalizeMelhorarResponse(j); }
+        catch { return out; }
+      }
+
+      if (out && typeof out === 'object') {
+        if (typeof out.text === 'string') {
+          try {
+            const j = JSON.parse(out.text);
+            return j.texto || j.melhorado || j.resposta || j.sugestao || out.text;
+          } catch {
+            return out.text;
+          }
+        }
+        if (out.json && typeof out.json === 'object') {
+          return normalizeMelhorarResponse(out.json);
+        }
+        return out.texto || out.melhorado || out.resposta || out.sugestao || out.text || out.raw || JSON.stringify(out);
+      }
+    }catch(_e){}
+
+    return '';
+  }
   // ---------- IA: Resumo (do BD) ----------
   async function gerarResumo(){
     const emp = getEmpresaId(), cid = getClienteId();
@@ -293,8 +382,13 @@
       const r = await fetch(url, { method:'POST', credentials:'include' });
       const j = await asJsonOrText(r);
 
-      const res = (j && j.resumo) || j || {};
-      const resumoCurto = (typeof res === 'object') ? (res.resumo_curto || 'Sem conteúdo.') : String(res || '');
+      if (!r.ok) {
+        const msg = (typeof j === 'string') ? j : (j?.detail?.message || JSON.stringify(j));
+        throw new Error(msg || `HTTP ${r.status}`);
+      }
+
+      const res = normalizeResumoResponse(j);
+      const resumoCurto = res?.resumo_curto || 'Sem conteúdo.';
 
       refs.resumoTxt.textContent = resumoCurto;
 
@@ -344,15 +438,12 @@
       });
 
       const out = await asJsonOrText(r);
-
-      // Normaliza para string final
-      let texto = '';
-      if (typeof out === 'string') {
-        texto = out;
-      } else if (out && typeof out === 'object') {
-        texto = out.melhorado || out.resposta || out.sugestao || out.text || out.raw || '';
-        if (!texto) try { texto = JSON.stringify(out); } catch {}
+      if (!r.ok) {
+        const msg = (typeof out === 'string') ? out : (out?.detail?.message || JSON.stringify(out));
+        throw new Error(msg || `HTTP ${r.status}`);
       }
+
+      const texto = normalizeMelhorarResponse(out);
 
       refs.respTxt.textContent = texto || 'Não foi possível gerar agora.';
       refs.respBox.classList.remove('hidden');

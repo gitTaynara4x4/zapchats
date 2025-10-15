@@ -12,7 +12,7 @@
   <!-- Lib da página (QR) -->
   <script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js" defer></script>
 
-  <!-- CSS externo extraído dos <style> -->
+  <!-- CSS externo -->
   <link rel="stylesheet" href="/frontend/css/conectar.css">
 </head>
 <body>
@@ -38,7 +38,6 @@
 
       <!-- Ações -->
       <div class="actions">
-        <!-- (removido) Adicionar número virtualizado -->
         <button id="btn-open-modal" type="button" class="btn">
           Adicionar novo número ZapChats
         </button>
@@ -92,28 +91,7 @@
       </div>
     </section>
 
-    <!-- ===== Banner de sincronização (mini) ===== -->
-    <div id="sync-banner" role="status" aria-live="polite">
-      <div id="sync-title" style="font-weight:800; margin-bottom:.45rem;">Sincronizando…</div>
-      <div id="sync-bar"><div></div></div>
-      <div id="sync-sub" class="muted" style="margin-top:.45rem">Preparando…</div>
-    </div>
-
-    <!-- ===== Overlay de sincronização ===== -->
-    <div id="sync-overlay" class="hidden" aria-modal="true" role="dialog" aria-labelledby="sync-overlay-title" aria-live="polite">
-      <div class="sync-backdrop"></div>
-      <div class="sync-card" role="document">
-        <div style="display:flex; align-items:center; gap:.7rem; margin-bottom:.6rem;">
-          <div class="loader-spin" style="width:26px; height:26px; border-width:3px"></div>
-          <h2 id="sync-overlay-title" style="margin:0; font-size:1rem;">Sincronizando seus dados…</h2>
-        </div>
-        <p id="sync-overlay-sub" class="muted" style="margin:.25rem 0 .85rem;">Preparando…</p>
-        <div class="sync-progress">
-          <div id="sync-overlay-bar" class="sync-progress-bar" style="width:0%"></div>
-        </div>
-        <p class="muted" style="margin-top:.7rem; font-size:.84rem;">Para garantir consistência, a navegação está temporariamente desativada.</p>
-      </div>
-    </div>
+    <!-- ⚠️ Removido: banner/overlay de "Sincronizando..." (sumiu 100%) -->
 
     <!-- ===== Modal: Conectar ===== -->
     <div id="modal" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:10000;">
@@ -172,7 +150,7 @@
             <span class="muted" style="font-size:.95rem;">Usar <strong>Pairing Code</strong> em vez de QR (se disponível)</span>
           </label>
 
-          <!-- QR -->
+          <!-- QR (mantido exatamente como antes) -->
           <div id="qr-area">
             <p id="qr-instru" class="muted hidden" style="font-size:.86rem;">Após fazer a leitura do QR Code, aguarde.</p>
 
@@ -194,7 +172,6 @@
             </button>
           </div>
 
-          <!-- CTA -->
           <button type="submit" id="btn-gerar-qr" class="btn btn--primary" style="width:100%; justify-content:center; margin-top:.1rem;">
             Gerar QR Code
           </button>
@@ -208,7 +185,7 @@
       </div>
     </div>
 
-    <!-- ===== Modal: Remover número ===== -->
+    <!-- Modal Remover número (inalterado) -->
     <div id="modal-remover-numero" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:10000;">
       <div class="card" style="background:var(--card); color:var(--fg); border:1px solid var(--border); border-radius:14px; width:min(560px,92vw);">
         <div style="padding:1rem 1.1rem; border-bottom:1px solid var(--border); font-weight:800;">Remover número</div>
@@ -241,7 +218,7 @@
   <script src="/frontend/js/page-guard.js" defer></script>
   <script src="/frontend/js/pages/conectar.js" defer></script>
 
-  <!-- A11y tabs (sincroniza aria-selected com clique) -->
+  <!-- Tabs a11y -->
   <script>
     (function(){
       const tabs = document.querySelectorAll('.tab-btn[role="tab"]');
@@ -251,74 +228,6 @@
           b.setAttribute('aria-selected','true');
         });
       });
-    })();
-  </script>
-
-  <!-- Hook do banner + overlay de sincronização (igual ao padrão) -->
-  <script>
-    (function(){
-      const syncState = { contacts:{total:0,imported:0,done:false}, history:{total:0,imported:0,done:false} };
-      const elBanner = document.getElementById("sync-banner");
-      const elBarW   = document.querySelector("#sync-bar > div");
-      const elTitle  = document.getElementById("sync-title");
-      const elSub    = document.getElementById("sync-sub");
-      const ovl      = document.getElementById("sync-overlay");
-      const ovlBar   = document.getElementById("sync-overlay-bar");
-      const ovlSub   = document.getElementById("sync-overlay-sub");
-
-      function pct(n){ return Math.max(0, Math.min(100, Math.round(n))); }
-      function totals(){
-        const a=syncState.contacts,b=syncState.history;
-        const t=(a.total||0)+(b.total||0), d=(a.imported||0)+(b.imported||0);
-        const all=(a.done&&b.done)||(t>0&&d>=t); return {t,d,all};
-      }
-      function render(){
-        const {t,d,all}=totals(), p=t>0?(d/t)*100:0;
-        if (t>0&&!all){
-          elBanner.style.display="block";
-          elTitle&&(elTitle.textContent="Sincronizando…");
-          elBarW&&(elBarW.style.width=pct(p)+"%");
-          const parts=[];
-          if(syncState.contacts.total) parts.push(`Contatos ${syncState.contacts.imported}/${syncState.contacts.total}`);
-          if(syncState.history.total)  parts.push(`Mensagens ${syncState.history.imported}/${syncState.history.total}`);
-          elSub&&(elSub.textContent=parts.length?parts.join(" • "):"Preparando…");
-
-          ovl.classList.remove('hidden');
-          ovlBar&&(ovlBar.style.width=pct(p)+"%");
-          ovlSub&&(ovlSub.textContent=elSub.textContent);
-        }else{
-          elBanner.style.display="none";
-          setTimeout(()=>ovl.classList.add('hidden'),300);
-        }
-      }
-      function attachToWS(ws){
-        if(!ws||ws.__syncOverlayPatched) return; ws.__syncOverlayPatched=true;
-        const old=ws.onmessage;
-        ws.onmessage=function(ev){
-          try{
-            const m=JSON.parse(ev.data);
-            if(m.type==="contacts_sync_start"){ syncState.contacts={total:+(m.total||0),imported:0,done:false}; render(); }
-            if(m.type==="contacts_sync_progress"){ syncState.contacts.total=+(m.total||syncState.contacts.total||0); syncState.contacts.imported=+(m.imported||0); render(); }
-            if(m.type==="contacts_sync_done"){ syncState.contacts.imported=+(m.imported ?? syncState.contacts.total ?? 0); syncState.contacts.done=true; render(); }
-            if(m.type==="history_sync_start"){ syncState.history={total:+(m.total||0),imported:0,done:false}; render(); }
-            if(m.type==="history_sync_progress"){ syncState.history.total=+(m.total||syncState.history.total||0); syncState.history.imported=+(m.imported||0); render(); }
-            if(m.type==="history_sync_done"){ syncState.history.imported=+(m.imported ?? syncState.history.total ?? 0); syncState.history.done=true; render(); }
-          }catch(e){}
-          if(typeof old==="function"){ try{ old.call(ws,ev); }catch(e){} }
-        };
-      }
-      window.__attachSyncBanner=attachToWS;
-      if(window.wsEmpresa) attachToWS(window.wsEmpresa);
-      else{
-        const empresaId=(document.cookie.match(/(?:^|; )empresa_id=([^;]+)/)||[])[1]||(document.cookie.match(/(?:^|; )EMPRESA_ID=([^;]+)/)||[])[1];
-        if(empresaId&&!window.wsEmpresa){
-          try{
-            const proto=location.protocol==="https:"?"wss":"ws";
-            window.wsEmpresa=new WebSocket(`${proto}://${location.host}/ws/emp:${decodeURIComponent(empresaId)}`);
-            attachToWS(window.wsEmpresa);
-          }catch(e){}
-        }
-      }
     })();
   </script>
 </body>

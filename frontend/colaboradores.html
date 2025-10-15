@@ -150,6 +150,31 @@
                 <dd><div class="fieldbox" id="fb-cargo"><span id="v-cargo">—</span></div></dd>
               </div>
 
+              <!-- ===== Acesso ao sistema (NOVO BLOCO) ===== -->
+              <div class="full">
+                <dt>Acesso ao sistema</dt>
+                <dd>
+                  <div class="fieldbox" id="fb-acesso">
+                    <label class="chk-line" style="gap:.5rem">
+                      <input id="chk-criar-usuario" type="checkbox">
+                      <span>Criar acesso (login) para este colaborador</span>
+                    </label>
+
+                    <div id="wrap-senha" style="display:none; margin-top:.5rem; gap:.5rem; align-items:center;">
+                      <input id="e-senha" class="input" type="password" autocomplete="new-password"
+                             placeholder="Senha inicial (mín. 6 caracteres)" minlength="6" style="flex:1;">
+                      <button id="toggle-senha" class="btn btn-ghost" type="button" aria-label="Mostrar senha">
+                        <i class="fa fa-eye"></i>
+                      </button>
+                    </div>
+
+                    <p class="muted" style="margin-top:.25rem">
+                      Se marcado, criaremos também o usuário. Ele poderá trocar a senha depois.
+                    </p>
+                  </div>
+                </dd>
+              </div>
+
               <!-- Permissões -->
               <div class="full">
                 <dt>Permissões</dt>

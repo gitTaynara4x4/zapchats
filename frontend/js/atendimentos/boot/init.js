@@ -1,4 +1,3 @@
-// /frontend/js/atendimentos/boot/init.js
 import { state, persist, setClienteSel } from '../state/store.js';
 import { EMPRESA_ID } from '../core/env.js';
 import { carregarClientes } from '../domain/clientes.js';
@@ -16,7 +15,6 @@ function readyPart(key){
   if (window.AppReady && typeof window.AppReady.mark === 'function') {
     window.AppReady.mark(key);
   } else {
-    // fallback: ainda permite acompanhar progresso
     window.dispatchEvent(new CustomEvent('ready:part', { detail: key }));
   }
 }
@@ -75,17 +73,14 @@ function readyPart(key){
   const normalize = (s)=> String(s||'').replace(/\s+/g,' ').trim().slice(0,180);
   const fmtTime   = (iso)=> { try{ const d = iso?new Date(iso):new Date(); return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});}catch{return '';} };
 
-  // Decide o “nome” mostrado no banner a partir da meta
   function deriveName(meta){
-    // meta: { origem?: 'atendente'|'whatsapp_fisico'|'cliente'|..., autor_nome?: string }
     if (meta && meta.origem === 'whatsapp_fisico') return 'WhatsApp físico';
     if (meta && meta.autor_nome) return meta.autor_nome;
     return getUserName();
   }
 
-  // Aceita meta opcional para decidir o rótulo (nome/WhatsApp físico)
   function setOpHeadline(text, whenISO, meta){
-    if (window.SHOW_TOP_OPERATOR_BANNER === false) return; // banner desligado
+    if (window.SHOW_TOP_OPERATOR_BANNER === false) return;
     const box = ensureHeadline();
     const preview = normalize(text);
     if (!preview){ box.hidden = true; box.textContent = ''; return; }
@@ -99,7 +94,6 @@ function readyPart(key){
     if (box){ box.hidden = true; box.textContent = ''; }
   }
 
-  // se a flag estiver desligada, garante oculto por CSS (defensivo)
   if (window.SHOW_TOP_OPERATOR_BANNER === false) {
     const s = document.createElement('style');
     s.textContent = `#op-headline{display:none!important}`;
@@ -135,10 +129,9 @@ function closeChatMobile() {
   document.body.classList.remove('is-chat-open');
 }
 
-// 🔢 util local
 const onlyDigits = (s) => String(s||'').replace(/\D+/g,'');
 
-/* ===== Helpers de instância (para montar URLs corretamente) ===== */
+/* ===== Helpers de instância ===== */
 function getInstanciaForFetch(clienteId) {
   const sel = state?.clienteSel;
   if (sel && (sel.id === clienteId || sel.conversation_id === clienteId)) {
@@ -159,14 +152,12 @@ async function ensureMensagensCarregadas(conversationId) {
 
   const inst = getInstanciaForFetch(conversationId);
 
-  // 1) Já temos histórico local? então só retorna.
   if (hasHistory(inst, conversationId)) {
     state.mensagensOffset[conversationId] = (getHist(inst, conversationId) || []).length;
     persist();
     return getHist(inst, conversationId) || [];
   }
 
-  // 2) Não tem histórico: PRIME (50) do BD apenas uma vez
   const qs = new URLSearchParams({ empresa_id: String(EMPRESA_ID), limit: '50' });
   if (inst) qs.set('instancia_id', inst);
   const url = `/api/atendimento/conversas/${conversationId}/mensagens?` + qs.toString();
@@ -178,7 +169,6 @@ async function ensureMensagensCarregadas(conversationId) {
   const items = Array.isArray(data?.items) ? data.items : [];
   const mapped = items.map(m => {
     const tipoMsg = m.tipo || (m.remetente === 'agente' ? 'saida' : 'entrada');
-    // origem derivada para o banner: se veio do agente → atendente; se não souber → cliente
     const origem = (m.origem)
       ? m.origem
       : (tipoMsg === 'saida' ? 'atendente' : 'cliente');
@@ -191,13 +181,11 @@ async function ensureMensagensCarregadas(conversationId) {
       ack:       (tipoMsg === 'saida') ? (typeof m.ack === 'number' ? m.ack : 0) : null,
       midias:    Array.isArray(m.midias) ? m.midias : [],
       instancia_id: m.instancia_id ?? (inst || null),
-      // meta para OperatorLine
       origem,
       autor_nome: m.autor_nome ?? m.atendente_nome ?? null,
     };
   });
 
-  // salva em ambos caches (compat) e base unificada
   try { salvarNoCache(conversationId, mapped); } catch {}
   primeWith(inst, conversationId, mapped, {
     oldest: data?.prev_cursor ?? null,
@@ -216,9 +204,9 @@ async function ensureMensagensCarregadas(conversationId) {
   return getHist(inst, conversationId) || [];
 }
 
-/* ======= Helper: atualizar banner da operadora pela última "saida" ======= */
+/* ======= Atualiza banner com a última saída ======= */
 function updateOperatorBannerForConversation(convId){
-  if (window.SHOW_TOP_OPERATOR_BANNER === false) return; // banner desligado
+  if (window.SHOW_TOP_OPERATOR_BANNER === false) return;
   try{
     const inst = getInstanciaForFetch(convId);
     const arr  = getHist(inst, convId) || ((window.cacheHistoricos || {})[convId] || []);
@@ -260,7 +248,6 @@ async function selecionarClienteObj(id) {
   if (head) head.style.display = 'flex';
   if (foot) foot.style.display = 'flex';
 
-  // UI principal está visível; pode marcar 'ui' na primeira vez
   readyPart('ui');
 
   const byId = (x) => x?.conversation_id === id || x?.id === id || x?.cliente_id === id;
@@ -271,7 +258,6 @@ async function selecionarClienteObj(id) {
   if (!c) return;
   setClienteSel(c);
 
-  // fixa instância ativa (para URLs de fetch e WS auxiliares)
   try{
     const instCand = c.instancia_id ?? c.instancia ?? null;
     if (instCand != null && instCand !== '') {
@@ -280,24 +266,16 @@ async function selecionarClienteObj(id) {
     }
   }catch{}
 
-  // 🆕 Expor telefone no DOM para o perfil_quick.js
+  // expor telefone pro perfil_quick.js
   try {
     const phone =
-      c.telefone ??
-      c.tel ??
-      c.phone ??
-      c.whatsapp ??
-      c.telefone_norm ??
-      c.numero ??
-      c.number ??
-      null;
+      c.telefone ?? c.tel ?? c.phone ?? c.whatsapp ?? c.telefone_norm ?? c.numero ?? c.number ?? null;
 
     const digits = onlyDigits(phone);
     if (digits) {
-      if (hist) hist.dataset.telefone = digits;           // #historico.dataset.telefone
-      if (head) head.setAttribute('data-phone', digits);  // #chat-header[data-phone]
+      if (hist) hist.dataset.telefone = digits;
+      if (head) head.setAttribute('data-phone', digits);
     } else {
-      // garante limpeza se não houver
       if (hist) delete hist.dataset.telefone;
       if (head) head.removeAttribute('data-phone');
     }
@@ -319,7 +297,7 @@ async function selecionarClienteObj(id) {
     if (av) { av.style.cursor = 'pointer'; av.onclick = openPerfil; }
   } catch {}
 
-  await ensureMensagensCarregadas(id);   // PRIME (50) se faltar cache
+  await ensureMensagensCarregadas(id);
   renderHistoricoDoCache(id);
 
   if (!state.mensagensOffset || typeof state.mensagensOffset !== 'object') {
@@ -328,13 +306,24 @@ async function selecionarClienteObj(id) {
   const inst = getInstanciaForFetch(id);
   state.mensagensOffset[id] = (getHist(inst, id) || []).length;
 
-  // banner da operadora com a última saida (agora com meta)
   updateOperatorBannerForConversation(id);
 
-  // mantém a linha na lista sincronizada com o cache
   try { window.syncPreviewFromCache?.(id); } catch {}
 
   await markChatAsSeen(id);
+
+  // 🆕 Zera “bolinha” (unread) local imediatamente ao abrir
+  try {
+    window.Lista?.resetUnread?.(id);
+    window.recomputeUnread?.();
+  } catch {
+    // fallback: ajusta direto no cache e re-render
+    try {
+      const arr = window.state?.clientesCache || window.clientesCache || [];
+      const idx = arr.findIndex(x => Number(x.id ?? x.conversation_id ?? x.cliente_id) === Number(id));
+      if (idx >= 0) { arr[idx].novas = 0; window.renderListaClientes?.(arr); window.recomputeUnread?.(); }
+    } catch {}
+  }
 
   if (isMobile) {
     document.body.classList.add('is-chat-open');
@@ -356,34 +345,27 @@ export function wireInstanciaChips() {
 /* ================= BOOT ================= */
 export async function boot() {
   try {
-    // Requisitos mínimos pro agregador de prontidão
     if (window.AppReady?.setRequired) {
       window.AppReady.setRequired(['ui','clientes','boot']);
     }
 
-    // UI esqueleto está pronto
     readyPart('ui');
 
     try {
       await carregarClientes({ force: true, reason: 'boot' });
-      // sinaliza que a lista veio
       readyPart('clientes');
     } catch (e) {
       console.error('[boot] carregarClientes falhou:', e);
-      // mesmo com falha, não deixa a tela travar
       readyPart('clientes');
     }
 
-    // Boot básico concluído
     readyPart('boot');
   } catch (e) {
     console.error('[boot]', e);
-    // Mesmo com erro, sinaliza boot para não travar
     readyPart('boot');
     readyPart('clientes');
   }
 
-  // Navegação mobile (voltar fecha o chat aberto)
   window.addEventListener('popstate', (e) => {
     const isMobile = window.matchMedia('(max-width: 920px)').matches;
     if (!isMobile) return;

@@ -2,12 +2,10 @@
 (function () {
   'use strict';
 
-  // ===== Flags/estado globais do módulo =====
-  let wantQR = false;             // usado pelos handlers de WebSocket para decidir se deve renderizar QR
-  let currentInstance = null;     // instância atual (também espelhada em window.currentInstance)
-  let timerId = null;             // timer do QR
-  let localOverlay = 0;           // travas locais do overlay (carregamentos gerais)
-  window.__syncActive = false;    // exposto p/ sabermos se há sync (hist/contatos) em progresso
+  // ===== Estado global mínimo =====
+  let wantQR = false;
+  let currentInstance = null;
+  let timerId = null;
 
   // ===== Helpers =====
   const $  = (sel, ctx=document) => ctx.querySelector(sel);
@@ -97,7 +95,7 @@
 
     tabAtivos:   $('button[data-tab="ativos"]'),
     tabInativos: $('button[data-tab="inativos"]'),
-    loader:      $('#zap-loader'),           // será oculto por CSS
+    loader:      $('#zap-loader'),
     placeholder: $('#placeholder-zap'),
     table:       $('#lista-zap'),
     tbody:       $('#lista-zap tbody'),
@@ -129,11 +127,6 @@
     btnRemYes:     $('#btn-confirmar-remover'),
     btnRemNo:      $('#btn-cancelar-remover'),
     remConsent:    $('#rem-consent'),
-
-    // overlay (se existir no HTML)
-    syncOverlay:   $('#sync-overlay'),
-    syncSub:       $('#sync-overlay-sub'),
-    syncBar:       $('#sync-overlay-bar'),
   };
 
   // ===== Modal helpers =====
@@ -172,58 +165,95 @@
     }
   }
 
-  // ===== Overlay mínimo (fail-safe caso HTML não tenha) =====
-  (function ensureOverlay(){
-    if (els.syncOverlay) return;
-    const ovl = document.createElement('div');
+  // ===== Overlay de 1 minuto (somente após conectar) =====
+  const PREP_LOTTIE_DATA = {"v":"4.6.8","fr":29.97,"ip":0,"op":40,"w":256,"h":256,"nm":"Comp 1","ddd":0,"assets":[],"layers":[{"ddd":0,"ind":1,"ty":4,"nm":"Shape Layer 3","ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":1,"k":[{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":20,"s":[208.6,127.969,0],"e":[208.6,88,0],"to":[0,-6.66145849227905,0],"ti":[0,-0.00520833348855,0]},{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":30,"s":[208.6,88,0],"e":[208.6,128,0],"to":[0,0.00520833348855,0],"ti":[0,-6.66666650772095,0]},{"t":40}]},"a":{"a":0,"k":[-70,-0.5,0]},"s":{"a":0,"k":[75,75,100]}},"ao":0,"shapes":[{"ty":"gr","it":[{"d":1,"ty":"el","s":{"a":0,"k":[33.75,34.5]},"p":{"a":0,"k":[0,0]},"nm":"Ellipse Path 1"},{"ty":"fl","c":{"a":0,"k":[0.9843137,0.5490196,0,1]},"o":{"a":0,"k":100},"r":1,"nm":"Fill 1"},{"ty":"tr","p":{"a":0,"k":[-70.125,-0.5]},"a":{"a":0,"k":[0,0]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0},"o":{"a":0,"k":100},"sk":{"a":0,"k":0},"sa":{"a":0,"k":0},"nm":"Transform"}],"nm":"Ellipse 1","np":3,"cix":2,"ix":1}],"ip":0,"op":300,"st":0,"bm":0,"sr":1},{"ddd":0,"ind":2,"ty":4,"nm":"Shape Layer 2","ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":1,"k":[{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":15,"s":[168.6,128,0],"e":[168.6,88,0],"to":[0,-6.66666650772095,0],"ti":[0,0,0]},{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":25,"s":[168.6,88,0],"e":[168.6,128,0],"to":[0,0,0],"ti":[0,-6.66666650772095,0]},{"t":35}]},"a":{"a":0,"k":[-70,-0.5,0]},"s":{"a":0,"k":[75,75,100]}},"ao":0,"shapes":[{"ty":"gr","it":[{"d":1,"ty":"el","s":{"a":0,"k":[33.75,34.5]},"p":{"a":0,"k":[0,0]},"nm":"Ellipse Path 1"},{"ty":"fl","c":{"a":0,"k":[0.9921569,0.8470588,0.2078431,1]},"o":{"a":0,"k":100},"r":1,"nm":"Fill 1"},{"ty":"tr","p":{"a":0,"k":[-70.125,-0.5]},"a":{"a":0,"k":[0,0]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0},"o":{"a":0,"k":100},"sk":{"a":0,"k":0},"sa":{"a":0,"k":0},"nm":"Transform"}],"nm":"Ellipse 1","np":3,"cix":2,"ix":1}],"ip":0,"op":300,"st":0,"bm":0,"sr":1},{"ddd":0,"ind":3,"ty":4,"nm":"Shape Layer 1","ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":1,"k":[{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":10,"s":[128.594,127.969,0],"e":[128.594,88,0],"to":[0,-6.66145849227905,0],"ti":[0,-0.00520833348855,0]},{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":20,"s":[128.594,88,0],"e":[128.594,128,0],"to":[0,0.00520833348855,0],"ti":[0,-6.66666650772095,0]},{"t":30}]},"a":{"a":0,"k":[-70,-0.5,0]},"s":{"a":0,"k":[75,75,100]}},"ao":0,"shapes":[{"ty":"gr","it":[{"d":1,"ty":"el","s":{"a":0,"k":[33.75,34.5]},"p":{"a":0,"k":[0,0]},"nm":"Ellipse Path 1"},{"ty":"fl","c":{"a":0,"k":[0.2627451,0.627451,0.2784314,1]},"o":{"a":0,"k":100},"r":1,"nm":"Fill 1"},{"ty":"tr","p":{"a":0,"k":[-70.125,-0.5]},"a":{"a":0,"k":[0,0]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0},"o":{"a":0,"k":100},"sk":{"a":0,"k":0},"sa":{"a":0,"k":0},"nm":"Transform"}],"nm":"Ellipse 1","np":3,"cix":2,"ix":1}],"ip":0,"op":300,"st":0,"bm":0,"sr":1},{"ddd":0,"ind":4,"ty":4,"nm":"Shape Layer 4","ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":1,"k":[{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":5,"s":[88.6,127.969,0],"e":[88.6,88,0],"to":[0,-6.66145849227905,0],"ti":[0,-0.00520833348855,0]},{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":15,"s":[88.6,88,0],"e":[88.6,128,0],"to":[0,0.00520833348855,0],"ti":[0,-6.66666650772095,0]},{"t":25}]},"a":{"a":0,"k":[-70,-0.5,0]},"s":{"a":0,"k":[75,75,100]}},"ao":0,"shapes":[{"ty":"gr","it":[{"d":1,"ty":"el","s":{"a":0,"k":[33.75,34.5]},"p":{"a":0,"k":[0,0]},"nm":"Ellipse Path 1"},{"ty":"fl","c":{"a":0,"k":[0.1176471,0.5333334,0.8980392,1]},"o":{"a":0,"k":100},"r":1,"nm":"Fill 1"},{"ty":"tr","p":{"a":0,"k":[-70.125,-0.5]},"a":{"a":0,"k":[0,0]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0},"o":{"a":0,"k":100},"sk":{"a":0,"k":0},"sa":{"a":0,"k":0},"nm":"Transform"}],"nm":"Ellipse 1","np":3,"cix":2,"ix":1}],"ip":0,"op":300,"st":0,"bm":0,"sr":1},{"ddd":0,"ind":5,"ty":4,"nm":"Shape Layer 5","ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":1,"k":[{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":0,"s":[48.6,127.969,0],"e":[48.6,88,0],"to":[0,-6.66145849227905,0],"ti":[0,-0.00520833348855,0]},{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":10,"s":[48.6,88,0],"e":[48.6,128,0],"to":[0,0.00520833348855,0],"ti":[0,-6.66666650772095,0]},{"t":20}]},"a":{"a":0,"k":[-70,-0.5,0]},"s":{"a":0,"k":[75,75,100]}},"ao":0,"shapes":[{"ty":"gr","it":[{"d":1,"ty":"el","s":{"a":0,"k":[33.75,34.5]},"p":{"a":0,"k":[0,0]},"nm":"Ellipse Path 1"},{"ty":"fl","c":{"a":0,"k":[0.8980392,0.2235294,0.2078431,1]},"o":{"a":0,"k":100},"r":1,"nm":"Fill 1"},{"ty":"tr","p":{"a":0,"k":[-70.125,-0.5]},"a":{"a":0,"k":[0,0]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0},"o":{"a":0,"k":100},"sk":{"a":0,"k":0},"sa":{"a":0,"k":0},"nm":"Transform"}],"nm":"ADBE Vector Group"}],"ip":0,"op":300,"st":0,"bm":0,"sr":1}]} ;
+
+  function loadLottie(){
+    return new Promise((resolve) => {
+      if (window.lottie && window.lottie.loadAnimation) return resolve(window.lottie);
+      const sc = document.createElement('script');
+      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js';
+      sc.onload = () => resolve(window.lottie);
+      sc.onerror = () => resolve(null);
+      document.head.appendChild(sc);
+    });
+  }
+
+  const prepBlock = {
+    active: false,
+    left: 0,
+    tmr: null,
+    anim: null,
+  };
+
+  function ensureOverlay(){
+    let ovl = document.getElementById('sync-overlay'); // reaproveita id
+    if (ovl) return ovl;
+    ovl = document.createElement('div');
     ovl.id = 'sync-overlay';
     ovl.className = 'hidden';
-    ovl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:9999;color:#fff;font:500 16px system-ui, -apple-system, Segoe UI, Roboto';
-    ovl.innerHTML = `
-      <div style="background:#111827;border:1px solid #374151;border-radius:14px;padding:18px 20px;min-width:260px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.4);">
-        <div style="font-size:15px;margin-bottom:10px">Sincronizando…</div>
-        <div id="sync-overlay-sub" style="font-size:13px;opacity:.8;margin-bottom:10px">Preparando</div>
-        <div style="height:8px;background:#1f2937;border-radius:999px;overflow:hidden">
-          <div id="sync-overlay-bar" style="height:100%;width:0%;background:#22c55e;transition:width .25s ease"></div>
-        </div>
-      </div>`;
+    ovl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:9999;color:#fff';
     document.body.appendChild(ovl);
-    els.syncOverlay = ovl;
-    els.syncSub = $('#sync-overlay-sub', ovl);
-    els.syncBar = $('#sync-overlay-bar', ovl);
-  })();
-
-  // util p/ overlay
-  function showSyncOverlay(done = 0, total = 0, label = 'Mensagens'){
-    if (!els.syncOverlay) return;
-    const pct = total > 0 ? Math.min(100, Math.floor((done/total) * 100)) : (label ? 24 : 0); // indeterminado ≈ 24%
-    els.syncOverlay.classList.remove('hidden');
-    if (els.syncSub) els.syncSub.textContent = label ? `${label}${total ? ` ${done}/${total}` : ''}` : '';
-    if (els.syncBar) els.syncBar.style.width = `${pct}%`;
-    document.body.style.overflow = 'hidden';
+    return ovl;
   }
-  function hideSyncOverlay(){
-    if (!els.syncOverlay) return;
-    // Só esconda quando não houver sync ativo e nenhuma trava local
-    if (window.__syncActive || localOverlay > 0) return;
-    els.syncOverlay.classList.add('hidden');
+
+  function setOverlayToPrep(){
+    const ovl = ensureOverlay();
+    ovl.innerHTML = `
+      <div class="sync-card" style="position:relative;z-index:1;width:min(560px,92vw);border-radius:16px;padding:22px;border:1px solid rgba(255,255,255,.16);box-shadow:0 22px 64px rgba(0,0,0,.45);background:#0f172a;color:#e5e7eb;text-align:center">
+        <div style="font-weight:800;font-size:1.05rem;margin-bottom:.25rem">Estamos preparando tudo para você…</div>
+        <div id="prep-ovl-time" style="opacity:.85;margin-bottom:.65rem">~ 01:00</div>
+        <div id="prep-ovl-lottie" style="width:120px;height:120px;margin:6px auto 2px"></div>
+        <div style="opacity:.8;font-size:.9rem;margin-top:.5rem">Segure um instante — já liberamos o app.</div>
+      </div>
+    `;
+  }
+  function paintPrepTime(){
+    const mm = String(Math.floor(prepBlock.left/60)).padStart(2,'0');
+    const ss = String(prepBlock.left%60).padStart(2,'0');
+    const el = $('#prep-ovl-time', document);
+    if (el) el.textContent = `~ ${mm}:${ss}`;
+  }
+  async function showPrepOverlayOneMinute(){
+    if (prepBlock.active) return; // não reinicia
+    prepBlock.active = true;
+    prepBlock.left = 60;
+    setOverlayToPrep();
+    const ovl = ensureOverlay();
+    ovl.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+
+    const slot = $('#prep-ovl-lottie', ovl);
+    const lottie = await loadLottie();
+    if (lottie && slot) {
+      prepBlock.anim = lottie.loadAnimation({ container: slot, renderer:'svg', loop:true, autoplay:true, animationData: PREP_LOTTIE_DATA });
+    }
+    paintPrepTime();
+    clearInterval(prepBlock.tmr);
+    prepBlock.tmr = setInterval(() => {
+      prepBlock.left -= 1;
+      if (prepBlock.left <= 0){
+        hidePrepOverlay();
+      } else {
+        paintPrepTime();
+      }
+    }, 1000);
+  }
+  function hidePrepOverlay(){
+    const ovl = ensureOverlay();
+    prepBlock.active = false;
+    clearInterval(prepBlock.tmr);
+    prepBlock.tmr = null;
+    try { prepBlock.anim?.destroy?.(); } catch {}
+    prepBlock.anim = null;
+    ovl.classList.add('hidden');
     document.body.style.overflow = '';
   }
-  function lockLocalOverlay(label){
-    localOverlay++;
-    showSyncOverlay(0, 0, label);
-  }
-  function unlockLocalOverlay(){
-    localOverlay = Math.max(0, localOverlay - 1);
-    hideSyncOverlay();
-  }
 
-  // ===== (Opcional) CSS extra rápido para states visuais =====
+  // ===== CSS rápido =====
   (function injectCSS(){
     const css = `
-      /* Oculta o spinner antigo de "Carregando números..." */
       #zap-loader{ display:none !important; }
-
       .plan-pill{display:inline-flex;align-items:center;justify-content:center;min-width:48px;padding:2px 8px;border-radius:999px;font-size:12px;line-height:1;letter-spacing:.02em;background:#f4f4f5;color:#111827;border:1px solid #e5e7eb;}
       html.dark .plan-pill{ background:#1f2937; color:#e5e7eb; border-color:#374151; }
       .kebab-btn{ border:1px solid #e5e7eb; border-radius:8px; padding:6px 10px; background:#fff; display:inline-flex; align-items:center; justify-content:center; }
@@ -299,7 +329,6 @@
       });
     }
   }
-  // Fechar menus clicando fora
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.kebab-btn') && !e.target.closest('.kebab-menu')) {
       $$('.kebab-menu').forEach(m => m.classList.remove('show'));
@@ -328,7 +357,6 @@
     els.tbody.appendChild(frag);
   }
 
-  // Badges/Tabs
   function setBadge(tier, used, limit){
     const label = `${tier} ${used}/${limit}`;
     if (els.headerBadgeWrap){
@@ -427,13 +455,15 @@
     if (qr.pairingCode) { renderQRFromText(qr.pairingCode, qr.limit); return true; }
     return false;
   }
+
+  // ===== Conectado → fecha modal e abre overlay de 1 min =====
   function handleConnected(instanceFromMsg){
     if (currentInstance && instanceFromMsg && instanceFromMsg !== currentInstance) return;
     clearInterval(timerId);
     hideQR();
     try { hideModal(); } catch {}
-    toast('Conectado! Sincronizando em segundo plano…');
     wantQR = false;
+    showPrepOverlayOneMinute(); // 🚀 bloqueia 1 minuto, SEM “sincronizando”
   }
 
   // ===== Tabs =====
@@ -452,7 +482,7 @@
   els.tabAtivos?.addEventListener('click', () => activateTab('ativos'));
   els.tabInativos?.addEventListener('click', () => activateTab('inativos'));
 
-  // ===== WebSockets + Heartbeats =====
+  // ===== WebSockets (somente QR/connected; ignora TODO resto) =====
   let empWS = null;
   const instWS = new Map();
 
@@ -472,7 +502,6 @@
     instHb.delete(instance);
   }
 
-  // Debounce/coalescing
   let loadTmr = null;
   let inFlight = false;
   let pendingReload = false;
@@ -497,85 +526,30 @@
     empWS.onclose = () => { stopEmpHb(); setTimeout(() => ensureEmpWS(), 800); };
     empWS.onerror = () => { try { empWS?.close(); } catch {} };
 
-    // Estado local de sync (evitar flickers)
-    const syncing = { history:false, contacts:false, histTotal:0, histImported:0 };
-
-    function updateActive(){
-      window.__syncActive = syncing.history || syncing.contacts;
-      if (!window.__syncActive && localOverlay === 0) hideSyncOverlay();
-    }
-
     empWS.onmessage = (ev) => {
       let m = null; try{ m = JSON.parse(ev.data); }catch{ m = { raw: ev.data }; }
 
-      // --- HISTÓRICO ---
-      if (m?.type === 'history_sync_start') {
-        syncing.history = true;
-        syncing.histImported = 0;
-        syncing.histTotal = Number(m.total||0);
-        showSyncOverlay(0, syncing.histTotal, 'Mensagens');
-        updateActive();
-        return;
-      }
-      if (m?.type === 'history_sync_progress') {
-        syncing.history = true;
-        syncing.histImported = Number(m.imported||0);
-        syncing.histTotal    = Number(m.total||syncing.histTotal||0);
-        showSyncOverlay(syncing.histImported, syncing.histTotal, 'Mensagens');
-        updateActive();
-        return;
-      }
-      if (m?.type === 'history_sync_done') {
-        syncing.history = false;
-        scheduleLoad(200);
-        updateActive();
-        return;
-      }
-
-      // --- CONTATOS ---
-      if (m?.type === 'contacts_sync_start') {
-        syncing.contacts = true;
-        if (!syncing.history) showSyncOverlay(0, Number(m.total||0), 'Contatos');
-        updateActive();
-        return;
-      }
-      if (m?.type === 'contacts_sync_progress') {
-        syncing.contacts = true;
-        const imported = Number(m.imported||0), total = Number(m.total||0);
-        if (!syncing.history) showSyncOverlay(imported, total, 'Contatos');
-        updateActive();
-        return;
-      }
-      if (m?.type === 'contacts_sync_done') {
-        syncing.contacts = false;
-        scheduleLoad(200);
-        updateActive();
-        return;
-      }
-
-      // --- LISTA / RELOADS ---
+      // Somente o que interessa:
       if (m?.reload_whatsapp || m?.type === 'reload_whatsapp') {
         scheduleLoad();
         return;
       }
-
-      // --- QR ---
       if (m?.type === 'qrcode' && wantQR){
         const ttl = m.qr_limit ?? m.expires_in ?? m.ttl ?? 60;
         if (m.base64)           renderQRFromBase64(m.base64, ttl);
         else if (m.pairingCode) renderQRFromText(m.pairingCode, ttl);
         return;
       }
-
-      // --- CONEXÃO ---
       if (m?.type === 'connection' || m?.type === 'connected' || m?.status || m?.state || m?.inst_status){
         if (isConnectedPayload(m)) {
           const instName = (m.inst_status?.instance) || m.instance || m.instance_name || m.instancia || null;
           handleConnected(instName);
-          scheduleLoad();
+          scheduleLoad(200);
         }
         return;
       }
+
+      // qualquer outro evento é ignorado (nada de sync!)
     };
 
     window.wsEmpresa = empWS;
@@ -597,6 +571,7 @@
 
     ws.onmessage = (ev) => {
       let m = null; try{ m = JSON.parse(ev.data); }catch{ m = { raw: ev.data }; }
+
       if (m?.type === 'qrcode' && wantQR){
         const ttl = m.qr_limit ?? m.expires_in ?? m.ttl ?? 60;
         if (m.base64)           renderQRFromBase64(m.base64, ttl);
@@ -605,22 +580,21 @@
       if (m?.type === 'connection' || m?.type === 'connected' || m?.status || m?.state){
         if (isConnectedPayload(m)) {
           handleConnected(m.instance || m.instance_name || m.instancia || null);
-          scheduleLoad();
+          scheduleLoad(200);
         }
       }
+
+      // demais eventos: ignorar
     };
     return ws;
   }
 
-  // ===== Carga principal =====
+  // ===== Carga principal (sem overlay de "carregando") =====
   async function loadWhatsAppStatus(){
     if (!empresaId) return;
     if (inFlight) { pendingReload = true; return; }
     inFlight = true;
     pendingReload = false;
-
-    // Usar overlay ao invés de spinner local
-    lockLocalOverlay('Atualizando números…');
 
     try{
       const js = await apiGet(`/api/empresas/${empresaId}/whatsapp`);
@@ -638,7 +612,6 @@
         last_seen: i.last_seen || null
       })) : [];
 
-      // guarda e renderiza
       allItems = list;
       lastPlanLabel = tier;
 
@@ -649,7 +622,6 @@
 
       const canAdd = (limit === 0) ? false : (used < limit);
 
-      // pinta o botão quando puder
       if (els.btnAdd) {
         els.btnAdd.disabled = !canAdd;
         els.btnAdd.classList.toggle('btn--ok', canAdd);
@@ -664,7 +636,6 @@
       console.error(e);
     }finally{
       inFlight = false;
-      unlockLocalOverlay();
       if (pendingReload) {
         pendingReload = false;
         scheduleLoad(200);
@@ -672,14 +643,14 @@
     }
   }
 
-  // ===== Submit (novo) =====
+  // ===== Submit (novo) – mantém sua ilustração/loader =====
   async function handleConnectSubmit(ev){
     ev.preventDefault?.();
 
     showQRError('');
     hideQR();
     els.qrLoader?.classList.remove('hidden');
-    showIllustration();   // mostra o qrcode.png enquanto prepara
+    showIllustration();
 
     const apelido   = els.inApelido?.value?.trim() || '';
     const numero    = onlyDigits(els.inNumero?.value);
@@ -709,7 +680,7 @@
 
       if (currentInstance) ensureInstanceWS(currentInstance);
 
-      wantQR = true; // agora os sockets podem renderizar QR
+      wantQR = true;
 
       const rendered = renderQRFromResponse(js?.qrcode || {});
       els.qrLoader?.classList.add('hidden');
@@ -721,7 +692,6 @@
         els.btnRefresh?.classList.remove('hidden');
         els.qrInstru?.classList.remove('hidden');
       } else {
-        // mantém a ilustração visível até chegar QR por WS
         els.btnGerarQR?.classList.remove('hidden');
         els.btnRefresh?.classList.add('hidden');
         els.qrInstru?.classList.remove('hidden');
@@ -785,7 +755,6 @@
       showQRError('Não foi possível atualizar o QR.');
     }
   }
-
   async function gerarPrimeiroQR(){ await refreshQR(); }
 
   // ===== Listeners =====
@@ -794,7 +763,6 @@
       alert('Você atingiu o limite do seu plano. Remova um número ou faça upgrade.');
       return;
     }
-    // Abrir modal já mostrando a ilustração e limpando estados
     showModal();
     showIllustration();
     showQRError('');
@@ -878,6 +846,7 @@
     if (!box) return;
     box.textContent = msg;
     box.classList.remove('hidden');
+    box.style.display = 'block';
     box.style.background = '#16a34a';
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => box.classList.add('hidden'), 3200);
@@ -891,10 +860,10 @@
     loadWhatsAppStatus();
   }
 
-  // encerramento elegante ao sair
+  // encerramento
   window.addEventListener('beforeunload', () => {
     try { clearInterval(empHb); empWS?.close(); } catch {}
     instWS.forEach((ws, key) => { try{ stopInstHb(key); ws?.close(); }catch{} });
+    try { prepBlock.anim?.destroy?.(); } catch {}
   });
-
 })();

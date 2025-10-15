@@ -2,17 +2,20 @@
 from __future__ import annotations
 
 import os
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, select
 
 from backend.database import get_db_session
 import backend.models as models
 from backend.routers.auth import get_current_identity
 
+log = logging.getLogger(__name__)
+
 # ────────────────────────────────────────────────────────────
 # Config
-# ─────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────
 router = APIRouter(prefix="/empresas", tags=["WhatsApp / Instâncias"])
 
 # Se TRUE (default), confia no ON DELETE CASCADE do banco.
@@ -29,6 +32,31 @@ EVOLUTION_KEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_KEY")
 def _ensure_same_company(identity: dict, empresa_id: int) -> None:
     if int(identity.get("empresa_id")) != int(empresa_id):
         raise HTTPException(status_code=403, detail="Proibido")
+
+
+def _lock_instance_for_update(db: Session, *, by_id: int | None = None, by_slug: str | None = None) -> models.EmpresaInstancia:
+    """
+    Carrega a instância com FOR UPDATE para evitar remoção concorrente.
+    """
+    if by_id is not None:
+        stmt = (
+            select(models.EmpresaInstancia)
+            .where(models.EmpresaInstancia.id == by_id)
+            .with_for_update()
+        )
+    elif by_slug is not None:
+        stmt = (
+            select(models.EmpresaInstancia)
+            .where(models.EmpresaInstancia.instance_name == by_slug)
+            .with_for_update()
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Parâmetro inválido")
+
+    inst = db.execute(stmt).scalars().first()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instância não encontrada")
+    return inst
 
 
 def _has_bound_data(db: Session, instancia_id: int) -> bool:
@@ -86,7 +114,10 @@ def _delete_remote_evolution(instance_name: str) -> None:
     """Opcional: tenta deletar instância na Evolution (silent-fail)."""
     if not (EVOLUTION_URL and EVOLUTION_KEY and instance_name):
         return
-    import requests
+    try:
+        import requests
+    except Exception:
+        return
 
     headers = {"apikey": EVOLUTION_KEY, "Content-Type": "application/json"}
     sess = requests.Session()
@@ -113,11 +144,15 @@ def _delete_remote_evolution(instance_name: str) -> None:
 
 
 def _recalc_empresa_counter(db: Session, empresa_id: int) -> int:
+    """
+    Atualiza e retorna quantidade_instancias da empresa.
+    """
     total_restantes = (
         db.query(models.EmpresaInstancia)
         .filter(models.EmpresaInstancia.empresa_id == empresa_id)
         .count()
     )
+    # autflush garante refletir a remoção anterior
     emp = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
     if emp:
         emp.quantidade_instancias = total_restantes
@@ -153,6 +188,9 @@ def _remover_instancia_tx(
         )
 
     try:
+      # Envolvemos tudo numa transação explícita
+      # (a Session de FastAPI já tem transactional scope, mas deixamos claro)
+      # O commit/rollback continua controlado manualmente.
         if cascade:
             # ✅ Simples e robusto: o banco apaga tudo ligado por FK CASCADE.
             db.delete(inst)
@@ -161,6 +199,9 @@ def _remover_instancia_tx(
         else:
             # ─────────────────────────────────────────────────────────
             # Fallback manual (para bancos sem CASCADE configurado)
+            # Ordem pensada para evitar violação de FK e varrer dependências:
+            # midias -> mensagens -> midias soltas -> mensagens_grupo (diretas e via grupos)
+            # -> grupos -> atendimentos -> chatbot_configs -> clientes (dessa instância) -> instância
             # ─────────────────────────────────────────────────────────
 
             # 1) Mídias atreladas às mensagens 1:1 desta instância
@@ -245,18 +286,36 @@ def _remover_instancia_tx(
             restantes = _recalc_empresa_counter(db, empresa_id)
             db.commit()
 
-        # (opcional) deletar também na Evolution
+        # (opcional) deletar também na Evolution — fora da transação local
         if delete_remote and inst.instance_name:
-            _delete_remote_evolution(inst.instance_name)
+            try:
+                _delete_remote_evolution(inst.instance_name)
+            except Exception:
+                # silencioso; remoção local já foi confirmada
+                pass
 
-        return {"ok": True, "apagado": True, "restantes": restantes}
+        return {
+            "ok": True,
+            "apagado": True,
+            "restantes": restantes,
+            "instancia_id": instancia_id,
+            "instance_name": inst.instance_name,
+        }
 
+    except HTTPException:
+        # re-raise HTTPExceptions (409 etc.)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        raise
     except Exception as e:
         try:
             db.rollback()
         except Exception:
             pass
-        raise HTTPException(status_code=500, detail=f"Falha ao remover: {e}")
+        log.exception("Falha ao remover instância %s", instancia_id)
+        raise HTTPException(status_code=500, detail="Falha ao remover") from e
 
 
 # ─────────────────────────────────────────────────────────────
@@ -283,13 +342,8 @@ def remover_por_id(
     Remove TUDO daquela instância.
     Protegido: não apaga se houver dados vinculados, a menos que force=1.
     """
-    inst = (
-        db.query(models.EmpresaInstancia)
-        .filter(models.EmpresaInstancia.id == instancia_id)
-        .first()
-    )
-    if not inst:
-        raise HTTPException(status_code=404, detail="Instância não encontrada")
+    # lock da linha para evitar remoção concorrente
+    inst = _lock_instance_for_update(db, by_id=instancia_id)
 
     _ensure_same_company(identity, inst.empresa_id)
 
@@ -320,13 +374,8 @@ def remover_por_slug(
     Mesmo que acima, mas pelo slug (instance_name).
     Protegido: não apaga se houver dados, a menos que force=1.
     """
-    inst = (
-        db.query(models.EmpresaInstancia)
-        .filter(models.EmpresaInstancia.instance_name == instance_name)
-        .first()
-    )
-    if not inst:
-        raise HTTPException(status_code=404, detail="Instância não encontrada")
+    # lock da linha para evitar remoção concorrente
+    inst = _lock_instance_for_update(db, by_slug=instance_name)
 
     _ensure_same_company(identity, inst.empresa_id)
 
