@@ -21,7 +21,7 @@
   --shadow-lg: 0 35px 90px rgba(0,0,0,.58), 0 0 0 1px rgba(255,255,255,.03);
 }
 
-/* ===== Dark com neutral-950/900 (seu pedido) ===== */
+/* ===== Dark com neutral-950/900 ===== */
 html.dark{
   --neutral-950:#0a0a0a;     /* fundo */
   --neutral-900:#171717;     /* superfícies */
@@ -127,15 +127,19 @@ html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) sca
 
 /* ========= Layout ========= */
 .page-shell{
-  padding: calc(var(--topbar-h) + 14px) 14px 18px 14px;
-  min-height: 100dvh;
-  display:flex; align-items:flex-start; justify-content:center;
+  /* centralizado no meio da tela */
+  min-height: calc(100dvh - var(--topbar-h));
+  padding: 14px;
+  padding-top: calc(var(--topbar-h) + 10px);
+  display:flex;
+  align-items:center;     /* centro vertical */
+  justify-content:center; /* centro horizontal */
 }
 
 /* ========= Card ========= */
 .auth-card{
   width:100%;
-  max-width: 760px;             /* só um pouco mais largo */
+  max-width: 720px;            /* um pouco mais estreito */
   border-radius: 12px;
   border: 1px solid var(--card-border);
   overflow:hidden;
@@ -143,22 +147,22 @@ html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) sca
   box-shadow: var(--shadow-lg);
   margin-inline:auto;
 }
-.auth-card__inner{ padding: 22px 18px; } /* menos “gordo” */
+.auth-card__inner{ padding: 20px 16px; } /* menos “gordo” */
 
 .hero{ text-align:center; margin-bottom: 14px; }
 .hero-img{ height: 164px; margin: 0 auto 6px; opacity:.95 }
-.title{ margin:2px 0 0; font-weight:900; font-size:26px; line-height:1.12; color:var(--text-primary) }
-.subtitle{ margin:2px 0 14px; color:var(--text-secondary); font-size:13px }
+.title{ margin:2px 0 0; font-weight:900; font-size:25px; line-height:1.12; color:var(--text-primary) }
+.subtitle{ margin:2px 0 14px; color:var(--text-secondary); font-size:12.5px }
 
 /* ========= Form/Inputs ========= */
-.vspace > * + * { margin-top: 14px; }
+.vspace > * + * { margin-top: 12px; }
 .field{ margin-bottom: 12px }
-.label{ display:block; font-weight:700; color:var(--text-primary); margin-bottom:6px; font-size:14px }
+.label{ display:block; font-weight:700; color:var(--text-primary); margin-bottom:5px; font-size:13.5px }
 
 .input{
-  height:44px;                  /* mais fino */
+  height:42px;                  /* mais fino */
   width:100%;
-  padding:0 12px;
+  padding:0 11px;
   background:var(--input-bg);
   border:1px solid var(--input-bd);
   color:var(--input-text);
@@ -168,7 +172,7 @@ html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) sca
 }
 .input::placeholder{ color:var(--text-secondary); opacity:.9; }
 .input:focus{ border-color:var(--brand-500); box-shadow:0 0 0 2px rgba(0,189,61,.32); }
-.input--padR{ padding-right:88px; }
+.input--padR{ padding-right:84px; }
 
 .hint{ margin:6px 2px 0; color:var(--text-secondary); font-size:12px }
 .help-err{ margin:6px 2px 0; color:#ef4444; font-size:12px }
@@ -176,11 +180,11 @@ html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) sca
 
 .input-wrap{ position:relative }
 .input-actions{
-  position:absolute; right:6px; top:50%; transform:translateY(-50%);
+  position:absolute; right:5px; top:50%; transform:translateY(-50%);
   display:flex; gap:6px; align-items:center;
 }
 .link-btn{
-  appearance:none; background:transparent; border:0; padding:5px 8px;
+  appearance:none; background:transparent; border:0; padding:4px 7px;
   border-radius:8px; font-size:12.5px; cursor:pointer; color:#596273;
 }
 .link-btn:hover{ background:rgba(0,0,0,.06) }
@@ -191,14 +195,14 @@ html.dark .link-btn.strong{ color:#7dd3fc }
 
 /* ========= Botões ========= */
 .btn{
-  height:44px;                  /* mais fino */
+  height:42px;                  /* mais fino */
   width:auto;
-  padding:0 14px;
+  padding:0 12px;
   border-radius:10px; 
   font-weight:800; border:0; cursor:pointer;
   transition:filter .12s ease, opacity .12s ease, transform .03s ease;
 }
-.btn--block{ width:100%; }     /* use quando precisar ocupar a linha toda (ex.: submit) */
+.btn--block{ width:100%; }     /* usar quando precisar ocupar a linha toda (ex.: submit) */
 .btn:active{ transform: translateY(1px); }
 .btn[disabled]{ opacity:.6; cursor:not-allowed }
 .btn[data-variant="green"]{ background:var(--brand-500); color:#fff }
