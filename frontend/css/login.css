@@ -1,3 +1,7 @@
+/* ==========================================================================
+   ZapChats – Login (CSS puro, Inter-only)
+   ========================================================================== */
+
 /* ====================== Tokens ====================== */
 :root{
   --brand-500:#00bd3d;
@@ -29,6 +33,9 @@
   --title-fs: 26px;     /* mobile */
   --subtitle-fs: 13px;  /* mobile */
   --logo-w: 120px;      /* mobile */
+
+  /* largura do card (pode ser alterada via atributo data-login-size no <html>) */
+  --card-max: 920px;
 }
 
 /* === Dark (iguais ao cadastro) === */
@@ -59,7 +66,7 @@ html, body{
 
 body{
   margin:0;
-  font-size:15px;                 /* ↓ base mais compacta */
+  font-size:15px;                 /* base mais compacta */
   line-height:1.45;
   background:var(--page-bg);
   color:var(--text-primary);
@@ -67,9 +74,9 @@ body{
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  overflow: hidden; /* evita scroll da página */
 }
 img{ max-width:100%; display:block }
-
 input, button, select, textarea{ font: inherit; }
 
 /* ========= Topbar ========= */
@@ -89,7 +96,11 @@ html:not(.dark) .topline-bar{
 
 /* ========= Toggle de tema (compact) ========= */
 .theme-toggle{
-  --w:66px; --h:30px; --p:3px; --k:24px; --dx: calc(var(--w) - var(--k) - var(--p)*2);
+  --w: 80px; /* largura */
+  --h: 36px; /* altura */
+  --p: 4px;  /* padding interno */
+  --k: 28px; /* diâmetro do "thumb" */
+  --dx: calc(var(--w) - var(--k) - var(--p)*2);
   position:relative; width:var(--w); height:var(--h); padding:var(--p); border-radius:999px;
   cursor:pointer; outline:none; border:1px solid; display:inline-block; isolation:isolate;
   background:#eceff3; border-color:#d5d9e0;
@@ -98,12 +109,12 @@ html:not(.dark) .topline-bar{
 }
 html.dark .theme-toggle{ background:#2f323a; border-color:#3a3e46; }
 .theme-toggle .slot{
-  position:absolute; top:50%; width:24px; height:24px; margin-top:-12px;
+  position:absolute; top:50%; width:28px; height:28px; margin-top:-14px;
   display:grid; place-items:center; pointer-events:none; opacity:.75;
 }
 .theme-toggle .slot.left{ left:6px; }
 .theme-toggle .slot.right{ right:6px; }
-.theme-toggle .slot svg{ width:16px; height:16px; }
+.theme-toggle .slot svg{ width:18px; height:18px; }
 .theme-toggle .slot svg *{ stroke:#9aa3af; }
 html.dark .theme-toggle .slot svg *{ stroke:#8a93a1; }
 .theme-toggle .thumb{
@@ -116,7 +127,7 @@ html.dark .theme-toggle .slot svg *{ stroke:#8a93a1; }
     linear-gradient(180deg,#f8c266,#f59e0b);
   box-shadow: 0 3px 7px rgba(0,0,0,.18), inset 0 0 0 1px rgba(255,255,255,.25);
 }
-.theme-toggle .thumb svg{ width:18px; height:18px; display:block; }
+.theme-toggle .thumb svg{ width:20px; height:20px; display:block; }
 .theme-toggle .thumb .thumb-sun{ display:block; }
 .theme-toggle .thumb .thumb-moon{ display:none; }
 html.dark .theme-toggle .thumb{
@@ -130,7 +141,10 @@ html.dark .thumb .thumb-sun{ display:none; }
 html.dark .thumb .thumb-moon{ display:block; }
 .theme-toggle:active .thumb{ transform:translateX(0) scale(.96); }
 html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) scale(.96); }
-.theme-toggle:focus-visible{ box-shadow: 0 0 0 3px rgba(99,102,241,.35); }
+.theme-toggle:focus-visible{
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0,189,61,.40);
+}
 .theme-toggle.t-anim::after{
   content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
   background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.45) 50%, transparent 70%);
@@ -147,15 +161,24 @@ html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) sca
     calc(12px + env(safe-area-inset-left, 0px));
   padding-top: calc(var(--topbar-h) + 12px + env(safe-area-inset-top, 0px));
   min-height: 100dvh;
-  display:flex; align-items:center; justify-content:center; gap:12px;
+  display:grid; place-items:center; gap:12px;
 }
 
-/* =======================================================
-   MOBILE FIRST (<= 639px)
-   ======================================================= */
+/* ========= Card / Conteúdo ========= */
+
+/* Largura dinâmica por atributo no <html> (slim/normal/wide) */
+.login-card{ width:min(92vw, var(--card-max)); }
+
+/* ajuste rápido via HTML:
+   <html data-login-size="slim">   → --card-max: 760px
+   <html data-login-size="normal"> → --card-max: 920px (padrão)
+   <html data-login-size="wide">   → --card-max: 1040px
+*/
+html[data-login-size="slim"]  { --card-max: 760px; }
+html[data-login-size="normal"]{ --card-max: 920px; }
+html[data-login-size="wide"]  { --card-max: 1040px; }
+
 .login-card{
-  width:100%;
-  max-width: 520px;                /* ↓ menor */
   border-radius: var(--radius-card);
   border: 1px solid var(--card-border);
   overflow:hidden;
@@ -165,16 +188,28 @@ html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) sca
   box-shadow: var(--shadow-lg);
   margin-inline:auto;
 }
+
 .login-illustration{ display:none; }
+
 .login-form{
   background: var(--card-bg);
   display:flex; flex-direction:column; align-items:center;
   padding: var(--pad-form-y) var(--pad-form-x);
+
+  /* cabe dentro da viewport; se faltar altura, scrolla internamente */
+  max-height: calc(100dvh - var(--topbar-h) - 28px);
+  overflow: auto;
+  overscroll-behavior: contain;
 }
+
 .head-block, .form, .footer-note{ width:100%; max-width:100%; margin-inline:auto; }
 .head-block{ margin-bottom:14px; text-align:center; }
+
 .logo, .logo-dark{ width:var(--logo-w); height:auto; margin:0 auto 4px; display:block }
-.logo-dark{ display:none } html.dark .logo{ display:none } html.dark .logo-dark{ display:block }
+.logo-dark{ display:none } 
+html.dark .logo{ display:none } 
+html.dark .logo-dark{ display:block }
+
 .title{ margin:2px 0 0; font-weight:900; font-size:var(--title-fs); line-height:1.12; color:var(--text-primary) }
 .subtitle{ margin:4px 0 14px; color:var(--text-secondary); font-size:var(--subtitle-fs) }
 
@@ -205,17 +240,21 @@ html.dark .input::placeholder{ color:#a1a1aa; }
   display:grid; place-items:center; height:28px; width:28px; border-radius:8px;
   color:var(--text-secondary); background:transparent; border:0; cursor:pointer;
 }
-.icon-btn:hover{ background:rgba(0,0,0,.06) } html.dark .icon-btn:hover{ background:rgba(255,255,255,.06) }
+.icon-btn:hover{ background:rgba(0,0,0,.06) } 
+html.dark .icon-btn:hover{ background:rgba(255,255,255,.06) }
 .icon-btn svg{ width:18px; height:18px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round }
 
 .row-between{ display:flex; flex-direction:column; gap:8px; font-size:13px; color:var(--text-secondary) }
-.link{ color:var(--brand-500); text-decoration:none; font-weight:700 } .link:hover{ text-decoration:underline }
+.link{ color:var(--brand-500); text-decoration:none; font-weight:700 } 
+.link:hover{ text-decoration:underline }
+.muted{ color:var(--text-secondary); }
 
 .btn{
   height:var(--btn-h); width:100%; border-radius:10px; font-weight:800; border:0;
   cursor:pointer; transition:filter .12s ease, opacity .12s ease
 }
-.btn-primary{ background:var(--brand-500); color:#fff } .btn-primary:hover{ filter:brightness(.96) }
+.btn-primary{ background:var(--brand-500); color:#fff } 
+.btn-primary:hover{ filter:brightness(.96) }
 .btn[disabled]{ opacity:.6; cursor:not-allowed }
 
 .error{ color:#ef4444; font-size:13px; margin-top:6px }
@@ -234,10 +273,14 @@ input:-webkit-autofill:focus{
 }
 
 /* =======================================================
+   MOBILE FIRST (<= 639px)
+   ======================================================= */
+/* (já atendido pelos valores base) */
+
+/* =======================================================
    TABLET (640px – 1023px)
    ======================================================= */
 @media (min-width:640px){
-  .login-card{ max-width: 660px; }
   .login-illustration{ display:block; background:var(--left-bg); padding:18px; min-height:280px }
   .login-form{ padding: 24px 20px; }
   .title{ font-size:28px }
@@ -249,13 +292,11 @@ input:-webkit-autofill:focus{
    ======================================================= */
 @media (min-width:1024px){
   .login-card{
-    max-width: 860px;                /* ↓ menor que 980 */
-    border-radius: var(--radius-card);
-    grid-template-columns: 420px 1fr; /* ↓ coluna esquerda */
+    grid-template-columns: 420px 1fr; /* coluna esquerda + form */
   }
   .login-illustration{ display:grid; place-items:center; padding:20px; min-height:420px }
   .login-form{ padding: 26px 30px; }
-  .head-block, .form, .footer-note{ width:420px }
+  .head-block, .form, .footer-note{ width:420px; margin-inline:0; }
   .title{ font-size:32px }
   .subtitle{ font-size:13px; margin-bottom:18px }
   .logo, .logo-dark{ width:134px; margin-bottom:6px }
@@ -268,7 +309,6 @@ input:-webkit-autofill:focus{
    ======================================================= */
 @media (min-width:1360px){
   .login-card{
-    max-width: 920px;                 /* ↓ menor que 1040 */
     grid-template-columns: 440px 1fr;
   }
   .login-illustration{ min-height:460px; padding:22px }
@@ -276,4 +316,38 @@ input:-webkit-autofill:focus{
   .head-block, .form, .footer-note{ width:440px }
   .title{ font-size:34px }           /* ↓ 40 → 34 */
   .logo, .logo-dark{ width:138px }
+}
+
+/* =======================================================
+   COMPACTAÇÃO POR ALTURA (sem scroll chato)
+   ======================================================= */
+
+/* ≤ 800px de altura → compacto */
+@media (max-height: 800px){
+  :root{
+    --pad-form-y: 16px;
+    --pad-form-x: 16px;
+    --input-h: 38px;
+    --btn-h: 40px;
+    --title-fs: 22px;
+    --subtitle-fs: 12px;
+    --logo-w: 104px;
+  }
+  .head-block{ margin-bottom: 10px; }
+  .subtitle{ margin-bottom: 12px; }
+  .field{ margin-bottom: 10px; }
+  .login-illustration{ display:none !important; } /* some a coluna esquerda pra caber */
+}
+
+/* ≤ 680px de altura → ultra-compacto */
+@media (max-height: 680px){
+  :root{
+    --pad-form-y: 12px;
+    --pad-form-x: 14px;
+    --input-h: 36px;
+    --btn-h: 38px;
+    --title-fs: 20px;
+    --logo-w: 96px;
+  }
+  .row-between{ gap:6px; font-size:12.5px; }
 }
