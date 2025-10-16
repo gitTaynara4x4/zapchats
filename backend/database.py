@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session, declarative_base
 
-# 🔹 Carrega variáveis de ambiente (.env)
+# 🔹 Carrega variáveis de ambiente (.env
 load_dotenv()
 
 # 🔹 URL do banco (ex.: postgresql+psycopg2://user:pass@host:5432/dbname)

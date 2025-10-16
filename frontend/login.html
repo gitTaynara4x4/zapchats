@@ -76,10 +76,8 @@
         <form id="form-login" class="form" autocomplete="on">
           <div class="field">
             <label class="label">E-mail</label>
-            <input id="email" type="text" name="email" required
-                   pattern="^[^\\s]+@[^\\s]+$"
-                   title="O e-mail deve conter @ e não pode ter espaços"
-                   class="input" placeholder="usuario@dominio">
+            <input id="email" type="text" name="email" required class="input" placeholder="usuario@dominio">
+            <small id="email-help" class="muted" style="display:block;margin-top:6px"></small>
           </div>
 
           <div class="field">
@@ -125,5 +123,7 @@
 
   <!-- JS próprio -->
   <script src="/frontend/js/pages/login.js" defer></script>
+  <script src="/frontend/assets/guard-devtools.js" defer></script>
+
 </body>
 </html>
