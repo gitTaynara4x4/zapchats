@@ -17,14 +17,9 @@ typing_extensions>=4.12.2
 
 python-dateutil==2.9.0.post0
 pytz==2025.2
-redis==6.4.0
+redis>=5.0,<6
 reportlab==4.4.4
 psycopg2-binary==2.9.9
 SQLAlchemy==1.4.54
-starlette==0.48.0
 email-validator==2.1.1
-<<<<<<< HEAD
 python-multipart==0.0.9
-=======
-python-multipart==0.0.9
->>>>>>> cc1c9ef3faf532d258ae883f638e5fa6d47dd4f1
