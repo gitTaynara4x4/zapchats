@@ -35,7 +35,7 @@ from backend.routers import dashboard as dashboard_router
 from backend.routers.colaboradores import router as colaboradores_router
 from backend.routers.permissoes import router as permissoes_router
 
-# ⚠️ Importa os DOIS routers de mídias com nomes distintos
+# ⚠️ Importa os DOIS routers de mídias com nomes distin
 from backend.routers.atendimento_midias import router as atendimento_midias_router  # rotas absolutas /api/atendimento/midias/...
 from backend.routers.midias import router as midias_router                          # prefix="/api/midias" (lista/upload/etc)
 
