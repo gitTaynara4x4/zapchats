@@ -1,13 +1,13 @@
 // === Guard: se já está logado, não mostra /login ===
 (function alreadyLoggedGuard(){
   function hasSessionCookie() {
-    // ajuste o nome do cookie se o backend usar outro
     return /(?:^|;\s*)session=/.test(document.cookie);
   }
   function redirectHome(){
     const params = new URLSearchParams(location.search);
     const next = params.get('next');
-    const target = next && /^\/[^\s]*$/.test(next) ? next : '/dashboard';
+    // aceita apenas paths absolutos internos: "/algo"
+    const target = (next && /^\/[^\s]*$/.test(next)) ? next : '/dashboard';
     window.location.replace(target);
   }
   const hasToken = !!(localStorage.getItem('access_token') || localStorage.getItem('token'));
@@ -23,7 +23,6 @@
 // === Toggle de tema ===
 (function(){
   const html = document.documentElement;
-
   try {
     const saved = localStorage.getItem('theme');
     if (saved === 'dark') html.classList.add('dark');
@@ -61,7 +60,7 @@
   }
 })();
 
-// === Mostrar/Ocultar senha (sincroniza ícones) ===
+// === Mostrar/Ocultar senha ===
 (function(){
   const btn = document.getElementById('togglePassBtn');
   const input = document.getElementById('senha');
@@ -117,12 +116,10 @@ async function cacheAvatar(d) {
 
 // === UI helpers ===
 function notifyWarn(msg){
-  if (typeof window.showToast === 'function') { try { showToast(msg, 'warn'); return; } catch {} }
   const box = document.getElementById('erro');
   if (box){ box.textContent = msg; box.classList.remove('hidden'); }
 }
 function clearNotify(){
-  if (typeof window.hideToast === 'function') { try { hideToast(); return; } catch {} }
   const box = document.getElementById('erro');
   if (box){ box.textContent = ''; box.classList.add('hidden'); }
 }
@@ -166,8 +163,8 @@ function clearLocalLock(email){ try { localStorage.removeItem(LS_LOCK_KEY(email)
     } catch {}
   })();
 
-  function disable(){ if(btn){ btn.disabled = true; btn.classList.add('cursor-not-allowed'); } }
-  function enable(){ if(btn){ btn.disabled = false; btn.classList.remove('cursor-not-allowed'); btn.textContent = 'Entrar'; } }
+  function disable(){ if(btn){ btn.disabled = true; } }
+  function enable(){ if(btn){ btn.disabled = false; btn.textContent = 'Entrar'; } }
 
   function applyLockState(){
     const email = (emailInput?.value || '').trim().toLowerCase();
@@ -270,7 +267,6 @@ function clearLocalLock(email){ try { localStorage.removeItem(LS_LOCK_KEY(email)
             headers: token ? { 'Authorization': `Bearer ${token}` } : {}
           });
           if (instRes.ok) {
-            // BUG corrigido: era res.json() (variável errada)
             const instData = await instRes.json();
             if (instData?.nome) localStorage.setItem('instance_name', instData.nome);
           }
@@ -296,7 +292,7 @@ function clearLocalLock(email){ try { localStorage.removeItem(LS_LOCK_KEY(email)
       }
       const params = new URLSearchParams(window.location.search);
       const next = params.get('next');
-      const target = next && /^\/[^\s]*$/.test(next) ? next : '/dashboard';
+      const target = (next && /^\/[^\s]*$/.test(next)) ? next : '/dashboard';
       window.location.replace(target);
 
     } catch (err) {

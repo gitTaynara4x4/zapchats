@@ -1,226 +1,147 @@
 <!DOCTYPE html>
-<html lang="pt-BR" class="">
+<html lang="pt-BR">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Redefinir Senha – ZapChats</title>
 
-  <!-- Tema antes de pintar -->
+  <!-- Preload do tema (evita FOUC) -->
   <script>
-    (function(){
-      try{
+    (function () {
+      try {
         var t = localStorage.getItem('theme');
-        if(!t || t==='dark') document.documentElement.classList.add('dark');
-      }catch{}
+        if (!t || t === 'dark') document.documentElement.classList.add('dark');
+        else document.documentElement.classList.remove('dark');
+      } catch {}
     })();
   </script>
 
-  <!-- Tailwind via CDN (ou troque pelo seu build) -->
-  <link rel="stylesheet" href="/frontend/css/tw.css">
-  <script>tailwind.config = { darkMode: 'class' };</script>
-
-  <style>
-    :root{ --topbar-h:44px; }
-    /* Topbar + toggle igual do login */
-    .topline-bar{
-      position:fixed; inset:0 0 auto 0; height:var(--topbar-h);
-      display:flex; align-items:center; justify-content:flex-end; gap:.75rem; padding:0 14px;
-      background:linear-gradient(180deg, rgba(0,0,0,.06), rgba(22,22,23,0));
-      z-index:50; backdrop-filter: blur(6px);
-    }
-    html:not(.dark) .topline-bar{ background:linear-gradient(180deg, rgba(0,0,0,.04), rgba(255,255,255,0)); }
-    .topline-bar::before{
-      content:""; position:absolute; left:0; right:0; top:0; height:3px;
-      background:linear-gradient(90deg,#22c55e,#06b6d4,#6366f1); opacity:.95;
-    }
-    .theme-toggle{
-      --w:78px; --h:34px; --p:3px; --k:28px; --dx: calc(var(--w) - var(--k) - var(--p)*2);
-      position:relative; width:var(--w); height:var(--h); padding:var(--p); border-radius:999px;
-      cursor:pointer; outline:none; border:1px solid; display:inline-block; isolation:isolate;
-      background:#eceff3; border-color:#d5d9e0;
-    }
-    html.dark .theme-toggle{ background:#2f323a; border-color:#3a3e46; }
-    .theme-toggle .thumb{
-      position:absolute; top:3px; left:3px; width:28px; height:28px; border-radius:999px; transition:.38s;
-      background: radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%, rgba(255,255,255,.08) 65%),
-                  linear-gradient(180deg,#f8c266,#f59e0b);
-      box-shadow: 0 4px 8px rgba(0,0,0,.18), inset 0 0 0 1px rgba(255,255,255,.25);
-    }
-    html.dark .theme-toggle .thumb{
-      transform: translateX(calc(78px - 28px - 3px*2));
-      background: radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%, rgba(255,255,255,.08) 65%),
-                  linear-gradient(180deg,#6ba6ff,#2563eb);
-    }
-
-    /* Shell com safe area */
-    .page-shell{
-      padding:
-        calc(16px + env(safe-area-inset-top, 0px))
-        calc(16px + env(safe-area-inset-right, 0px))
-        calc(20px + env(safe-area-inset-bottom, 0px))
-        calc(16px + env(safe-area-inset-left, 0px));
-      padding-top: calc(var(--topbar-h) + 16px + env(safe-area-inset-top, 0px));
-      min-height: 100dvh;
-      display:flex; align-items:center; justify-content:center;
-    }
-
-    /* Botão com barra de progresso interna */
-    .btn-progress{ position:relative; overflow:hidden; isolation:isolate; --prog:0%; --ok:#22c55e; --idle:#16a34a; background:var(--idle); border-radius:.5rem; }
-    .btn-progress::before{ content:""; position:absolute; inset:0; width:var(--prog); background:var(--ok); transition:width .18s ease; border-radius:.5rem; z-index:0; }
-    .btn-progress .btn-text{ position:relative; z-index:1; }
-
-    /* ========== MODAL ==========
-       Acessível, com blur, animação e foco preso  */
-    .modal-overlay{
-      position:fixed; inset:0; display:none; place-items:center;
-      background: rgba(0,0,0,.45); backdrop-filter: blur(6px);
-      z-index: 100;
-    }
-    .modal-overlay[data-open="true"]{ display:grid; }
-    .modal{
-      width:min(520px, 92vw); border-radius:16px; overflow:hidden;
-      background:#111214; color:#e5e7eb; border:1px solid #2b2f36;
-      box-shadow: 0 20px 60px rgba(0,0,0,.55);
-      transform: translateY(14px) scale(.98);
-      opacity:0; transition:.2s ease;
-    }
-    html:not(.dark) .modal{ background:#fff; color:#111827; border-color:#e5e7eb; }
-    .modal-overlay[data-open="true"] .modal{ transform: translateY(0) scale(1); opacity:1; }
-    .modal .head{ display:flex; align-items:center; gap:.75rem; padding:14px 16px; border-bottom:1px solid rgba(255,255,255,.06); }
-    html:not(.dark) .modal .head{ border-bottom-color:#f1f5f9; }
-    .modal .body{ padding:16px; }
-    .modal .foot{ display:flex; gap:.5rem; justify-content:flex-end; padding:14px 16px; border-top:1px solid rgba(255,255,255,.06); }
-    html:not(.dark) .modal .foot{ border-top-color:#f1f5f9; }
-    .btn{ padding:10px 14px; border-radius:10px; font-weight:700; }
-    .btn-primary{ background:#22c55e; color:#052012; border:1px solid #16a34a; }
-    .btn-ghost{ background:transparent; border:1px solid #3a3e46; color:#cbd5e1; }
-    html:not(.dark) .btn-ghost{ border-color:#e2e8f0; color:#334155; }
-
-    /* Ícones inline simples */
-    .ic{ width:18px; height:18px; display:inline-block; vertical-align:-3px; margin-right:6px; }
-  </style>
+  <link rel="stylesheet" href="/frontend/css/esqueci_senha.css">
 </head>
 
-<body class="bg-green-50 dark:bg-neutral-950 text-neutral-800 dark:text-neutral-200">
+<body>
   <!-- TOPBAR -->
   <div class="topline-bar">
-    <button id="themeSwitch" class="theme-toggle" aria-label="Alternar tema" aria-pressed="false"><span class="thumb"></span></button>
+    <!-- Toggle de tema: MESMA marcação do login -->
+    <button id="themeSwitch" class="theme-toggle" aria-label="Alternar tema" aria-pressed="false">
+      <span class="slot left" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3.5" fill="none"/>
+          <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
+          <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
+          <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
+          <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
+        </svg>
+      </span>
+      <span class="slot right" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8z" fill="none"/>
+        </svg>
+      </span>
+      <span class="thumb" aria-hidden="true">
+        <svg class="thumb-sun" viewBox="0 0 24 24">
+          <defs><radialGradient id="sunGrad" cx="30%" cy="30%" r="80%"><stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#f8c266"/><stop offset="100%" stop-color="#f59e0b"/></radialGradient></defs>
+        <circle cx="12" cy="12" r="6.3" fill="url(#sunGrad)"/></svg>
+        <svg class="thumb-moon" viewBox="0 0 24 24">
+          <defs><radialGradient id="moonGrad" cx="30%" cy="30%" r="80%"><stop offset="0%" stop-color="#9fc3ff"/><stop offset="60%" stop-color="#6ba6ff"/><stop offset="100%" stop-color="#2563eb"/></radialGradient></defs>
+        <circle cx="12" cy="12" r="11" fill="url(#moonGrad)"/></svg>
+      </span>
+    </button>
   </div>
 
-  <!-- CARD -->
-  <div class="w-full max-w-lg bg-white dark:bg-neutral-900 rounded-2xl shadow-lg dark:shadow-black/40 overflow-hidden border border-transparent dark:border-neutral-800">
-    <div class="p-8 md:p-10">
-
-      <div class="text-center mb-6">
-        <img src="/img/Logo.png" class="mx-auto h-12 mb-3 dark:hidden" alt="ZapChats">
-        <img src="/img/Logo-white.png" class="mx-auto h-12 mb-3 hidden dark:block" alt="ZapChats">
-        <h2 class="text-3xl font-bold text-gray-800 dark:text-white">Redefinir Senha</h2>
-        <p class="text-gray-500 dark:text-gray-400">Receba um token no e-mail e crie uma nova senha.</p>
-      </div>
-
-      <!-- Toast (erros e avisos) -->
-      <div id="toast" class="hidden mb-4 rounded-lg border px-4 py-3 text-sm"></div>
-
-      <!-- Passo 1 -->
-      <form id="form-forgot" class="space-y-4" autocomplete="off" novalidate>
-        <div>
-          <label class="block font-medium mb-1 text-gray-700 dark:text-gray-200">E-mail</label>
-          <input id="email" type="email" required
-                 class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400
-                        bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700
-                        text-neutral-800 dark:text-neutral-100"
-                 placeholder="seuemail@empresa.com"/>
+  <main class="page-shell">
+    <!-- CARD -->
+    <div class="auth-card">
+      <div class="auth-card__inner">
+        <div class="hero">
+          <img src="/img/Logo.png" class="logo only-light" alt="ZapChats">
+          <img src="/img/Logo-white.png" class="logo only-dark"  alt="ZapChats">
+          <h2 class="title">Redefinir Senha</h2>
+          <p class="subtitle">Receba um token no e-mail e crie uma nova senha.</p>
         </div>
 
-        <!-- Toast simples (continua disponível) -->
-        <div id="toast" class="hidden mb-4 rounded-lg border px-4 py-3 text-sm"></div>
+        <!-- Toast -->
+        <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
         <!-- PASSO 1 -->
-        <form id="form-forgot" class="space-y-4" novalidate>
-          <div>
-            <label class="block font-medium mb-1 text-gray-700 dark:text-gray-200">E-mail</label>
-            <input id="email" type="email" required
-                   class="h-12 w-full px-4 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400
-                          bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700
-                          text-neutral-800 dark:text-neutral-100"
-                   placeholder="seuemail@empresa.com"/>
+        <form id="form-forgot" class="form vspace" autocomplete="off" novalidate>
+          <div class="field">
+            <label for="email" class="label">E-mail</label>
+            <input id="email" type="email" required class="input" placeholder="seuemail@empresa.com"/>
           </div>
 
-          <button id="btn-forgot" type="submit"
-                  class="btn-progress h-12 w-full text-white font-semibold disabled:opacity-60 disabled:cursor-not-allowed">
+          <button id="btn-forgot" type="submit" class="btn btn-progress" data-variant="green">
             <span class="btn-text">Enviar Token</span>
           </button>
         </form>
 
         <!-- PASSO 2 -->
         <div id="reset-section" class="hidden mt-8">
-          <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Cole o token e crie sua nova senha.</p>
+          <p class="muted">Cole o token e crie sua nova senha.</p>
 
-          <form id="form-reset" class="space-y-4" novalidate>
-            <div>
-              <label class="block font-medium mb-1 text-gray-700 dark:text-gray-200">Token</label>
-              <input id="token" type="text" required
-                     class="h-12 w-full px-4 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400
-                            bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700
-                            text-neutral-800 dark:text-neutral-100"
-                     placeholder="Cole o token aqui"/>
+          <form id="form-reset" class="form vspace" novalidate>
+            <div class="field">
+              <label for="token" class="label">Token</label>
+              <input id="token" type="text" required class="input" placeholder="Cole o token aqui"/>
             </div>
 
-            <div>
-              <label class="block font-medium mb-1 text-gray-700 dark:text-gray-200">Nova Senha</label>
-              <div class="relative">
-                <input id="nova_senha" type="password" minlength="8" required
-                       class="h-12 w-full px-4 border rounded-lg pr-12 focus:outline-none focus:ring-2 focus:ring-green-400
-                              bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700
-                              text-neutral-800 dark:text-neutral-100"
-                       placeholder="••••••••"/>
-                <button type="button" id="toggle-pass"
-                        class="absolute right-2 top-1/2 -translate-y-1/2 grid place-items-center h-8 w-8 rounded-md
-                               text-gray-500 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/5
-                               focus:outline-none focus:ring-2 focus:ring-green-400"
-                        aria-label="Mostrar senha">
-                  <svg id="eye-open" viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3.2"/>
+            <div class="field">
+              <label for="nova_senha" class="label">Nova Senha</label>
+              <div class="input-wrap">
+                <input id="nova_senha" type="password" minlength="8" required class="input" placeholder="••••••••"/>
+                <button type="button" id="toggle-pass" class="icon-btn" aria-label="Mostrar senha">
+                  <svg id="eye-open" viewBox="0 0 24 24">
+                    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/>
+                    <circle cx="12" cy="12" r="3.2"/>
                   </svg>
-                  <svg id="eye-off" viewBox="0 0 24 24" class="h-5 w-5 hidden" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-6.5 0-10-7-10-7a19.5 19.5 0 0 1 5.11-5.79M9.9 4.24A10.8 10.8 0 0 1 12 4c6.5 0 10 8 10 8a19.7 19.7 0 0 1-3.06 3.95"/><path d="M1 1l22 22"/>
+                  <svg id="eye-off" viewBox="0 0 24 24" class="hidden">
+                    <path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-6.5 0-10-7-10-7a19.5 19.5 0 0 1 5.11-5.79M9.9 4.24A10.8 10.8 0 0 1 12 4c6.5 0 10 8 10 8a19.7 19.7 0 0 1-3.06 3.95"/>
+                    <path d="M1 1l22 22"/>
                   </svg>
                 </button>
               </div>
-              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Mínimo 8 caracteres. Use letras, números e símbolos.</p>
+              <p class="hint">Mínimo 8 caracteres. Use letras, números e símbolos.</p>
             </div>
 
-            <button id="btn-reset" type="submit"
-                    class="h-12 w-full rounded-lg bg-blue-500 text-white font-semibold transition hover:bg-blue-600
-                           disabled:opacity-60 disabled:cursor-not-allowed">
+            <button id="btn-reset" type="submit" class="btn" data-variant="blue">
               <span class="btn-text">Redefinir Senha</span>
             </button>
           </form>
         </div>
 
-        <p class="mt-8 text-center text-gray-600 dark:text-gray-300">
-          <a href="/login" class="text-green-500 hover:underline font-medium">Voltar ao login</a>
+        <p class="back-login">
+          <a href="/login" class="link">Voltar ao login</a>
         </p>
       </div>
     </div>
   </main>
 
-  <!-- ===== MODAL de Notificações ===== -->
+  <!-- MODAL -->
   <div id="notifyModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="notify-title" data-open="false">
     <div class="modal" role="document">
       <div class="head">
         <div id="notify-icon"></div>
-        <h3 id="notify-title" class="text-lg font-bold">Notificação</h3>
+        <h3 id="notify-title" class="title-sm">Notificação</h3>
       </div>
-      <div id="notify-body" class="body text-sm leading-6"></div>
+      <div id="notify-body" class="body"></div>
       <div class="foot">
-        <button id="notify-cancel" class="btn btn-ghost">Fechar</button>
-        <button id="notify-ok" class="btn btn-primary">Ok</button>
+        <button id="notify-cancel" class="btn" data-variant="ghost">Fechar</button>
+        <button id="notify-ok" class="btn" data-variant="green">Ok</button>
       </div>
     </div>
   </div>
 
-  <!-- JS da página -->
+  <!-- JS da página (o seu) -->
   <script src="/frontend/js/pages/esqueci_senha.js" defer></script>
+  <script>
+    // brilho rápido no toggle – igual login
+    (function(){
+      var btn = document.getElementById('themeSwitch');
+      if(!btn) return;
+      btn.addEventListener('click', function(){
+        btn.classList.remove('t-anim'); void btn.offsetWidth; btn.classList.add('t-anim');
+      });
+    })();
+  </script>
 </body>
 </html>

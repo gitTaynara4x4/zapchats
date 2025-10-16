@@ -21,24 +21,50 @@
       var willDark = !html.classList.contains('dark');
       setTheme(willDark ? 'dark' : 'light');
       setPressed(btn);
+      // efeito de brilho igual ao login
+      btn.classList.remove('t-anim'); void btn.offsetWidth; btn.classList.add('t-anim');
     });
   }
 })();
 
-// === Toast helpers (ainda disponível) ===
+// === Helpers de toast (sem Tailwind) ===
 const toast = document.getElementById('toast');
 function showToast(msg, variant='error'){
-  const styles = {
-    error:'border-red-300 bg-red-50 text-red-800 dark:bg-red-900/25 dark:border-red-800 dark:text-red-200',
-    warn :'border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-200',
-    ok   :'border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/25 dark:border-emerald-800 dark:text-emerald-200'
-  };
-  toast.className = 'mb-4 rounded-lg border px-4 py-3 text-sm ' + (styles[variant]||styles.error);
-  toast.textContent = msg; toast.classList.remove('hidden');
+  const v = (variant==='ok') ? 'ok' : (variant==='warn') ? 'warn' : 'error';
+  toast.className = 'toast ' + v;   // usa .toast.ok/.warn/.error do CSS
+  toast.innerHTML = msg;            // aceita HTML (p/ múltiplos erros)
+  toast.classList.remove('hidden');
 }
-function hideToast(){ toast.classList.add('hidden'); toast.textContent=''; }
+function hideToast(){ toast.className = 'toast hidden'; toast.textContent=''; }
 
-// === MODAL de Notificações (sem usar notificações do navegador) ===
+// === Normalização de erros do FastAPI ===
+function isValidEmail(v){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+
+async function extractApiError(res, fallback='Não foi possível completar a operação.'){
+  try{
+    const data = await res.json();
+    const d = data?.detail;
+
+    if(!d) return fallback;
+    if(typeof d === 'string') return d;
+
+    if(Array.isArray(d)){
+      // RequestValidationError (422) etc.
+      return d.map(it => {
+        const m = it?.msg || it?.message || it?.detail;
+        if(!m) return JSON.stringify(it);
+        return m.replace('value is not a valid email address','E-mail inválido');
+      }).join('<br>');
+    }
+
+    if(typeof d === 'object'){
+      return (d.message || d.msg || d.detail) ?? JSON.stringify(d);
+    }
+  }catch{}
+  return fallback;
+}
+
+// === MODAL de Notificações ===
 const modal = (function(){
   const overlay = document.getElementById('notifyModal');
   const titleEl = document.getElementById('notify-title');
@@ -66,11 +92,8 @@ const modal = (function(){
     okHandler = onOk;
 
     overlay.dataset.open = 'true';
-    // foco
     setTimeout(()=> okBtn.focus(), 0);
-    // esc fecha
     window.addEventListener('keydown', onKey);
-    // trap básico
     overlay.addEventListener('keydown', trap);
   }
 
@@ -81,9 +104,7 @@ const modal = (function(){
     if (lastFocus && lastFocus.focus) setTimeout(()=> lastFocus.focus(), 0);
   }
 
-  function onKey(e){
-    if (e.key === 'Escape'){ e.preventDefault(); close(); }
-  }
+  function onKey(e){ if (e.key === 'Escape'){ e.preventDefault(); close(); } }
 
   function trap(e){
     if (e.key !== 'Tab') return;
@@ -132,7 +153,7 @@ function setTries(email,n){ try{ localStorage.setItem(LS_KEY(email), JSON.string
 function incTries(email){ const t=getTries(email); setTries(email, t.n+1); return t.n+1; }
 function resetTries(email){ try{ localStorage.removeItem(LS_KEY(email)); }catch{} }
 
-// === Passo 1: solicitar token (sem conteúdo de e-mail) ===
+// === Passo 1: solicitar token ===
 const formForgot = document.getElementById('form-forgot');
 const btnForgot  = document.getElementById('btn-forgot');
 const btnText    = btnForgot.querySelector('.btn-text');
@@ -141,7 +162,11 @@ const emailInput = document.getElementById('email');
 formForgot.addEventListener('submit', async (e)=>{
   e.preventDefault(); hideToast();
   const email=(emailInput.value||'').trim().toLowerCase();
-  if(!email){ modal.open({title:'Atenção', message:'Informe um e-mail válido.', variant:'warn'}); return; }
+
+  if(!email || !isValidEmail(email)){
+    modal.open({title:'Atenção', message:'Informe um <b>e-mail válido</b>.', variant:'warn'});
+    return;
+  }
 
   if(incTries(email) > 5){
     modal.open({title:'Muitas tentativas', message:'Tente novamente mais tarde.', variant:'warn'});
@@ -158,26 +183,16 @@ formForgot.addEventListener('submit', async (e)=>{
       body:JSON.stringify({email})
     });
 
-    await minDelay(1200);
+    await minDelay(800);
 
-    if(res.status===429){
-      stop(); finishProgress(btnForgot); await minDelay(600);
-      modal.open({title:'Muitas tentativas', message:'Tente novamente mais tarde.', variant:'warn'});
-      return;
-    }
-    if(res.status===404){
-      stop(); finishProgress(btnForgot); await minDelay(600);
-      modal.open({title:'E-mail não cadastrado', message:'Confira o endereço e tente novamente.', variant:'error'});
-      return;
-    }
     if(!res.ok){
-      stop(); finishProgress(btnForgot); await minDelay(600);
-      let msg='Não foi possível enviar agora.'; try{ const j=await res.json(); msg=j.detail||msg; }catch{}
-      modal.open({title:'Erro', message:msg, variant:'error'});
+      stop(); finishProgress(btnForgot);
+      const message = await extractApiError(res, 'Não foi possível enviar agora.');
+      modal.open({title:'Erro', message, variant:'error'});
       return;
     }
 
-    stop(); finishProgress(btnForgot); await minDelay(400);
+    stop(); finishProgress(btnForgot);
     modal.open({
       title:'Verifique seu e-mail',
       message:'Se o endereço existir, enviamos o <b>token</b> agora. Confira Caixa de Entrada, Spam e Promoções.',
@@ -232,15 +247,23 @@ const inputTok  = document.getElementById('token');
 formReset.addEventListener('submit', async (e)=>{
   e.preventDefault(); hideToast();
   const token=inputTok.value.trim(), nova_senha=inputPass.value.trim();
-  if (!token || !nova_senha){ modal.open({title:'Campos obrigatórios', message:'Preencha token e nova senha.', variant:'warn'}); return; }
+  if (!token || !nova_senha){
+    modal.open({title:'Campos obrigatórios', message:'Preencha token e nova senha.', variant:'warn'});
+    return;
+  }
 
   btnReset.disabled=true; const t=btnReset.querySelector('.btn-text')||btnReset; const old=t.textContent; t.textContent='Atualizando…';
   try{
-    const res=await fetch('/api/auth/reset-password',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({token,nova_senha}) });
+    const res=await fetch('/api/auth/reset-password',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token,nova_senha})
+    });
+
     if(!res.ok){
-      let msg='Não foi possível redefinir a senha.'; try{const j=await res.json(); msg=j.detail||msg;}catch{}
+      const msg = await extractApiError(res, 'Não foi possível redefinir a senha.');
       modal.open({title:'Erro', message:msg, variant:'error'}); return;
     }
+
     resetTries((emailInput.value||'').trim().toLowerCase());
     modal.open({
       title:'Tudo certo!',
