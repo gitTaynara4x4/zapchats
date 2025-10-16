@@ -45,8 +45,9 @@ html.dark{
 html,body{ height:100% }
 body{
   margin:0;
-  font: 15px/1.5 "Inter", system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial;
-  font-feature-settings:"cv05","cv06","cv10","ss01";
+  font-family: "Inter", sans-serif;   /* Inter como padrão */
+  font-size:15px;
+  line-height:1.5;
   background:var(--page-bg);
   color:var(--text-primary);
 }
@@ -126,8 +127,8 @@ html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) sca
 @keyframes sweep{ from{transform:translateX(-40%);opacity:0}35%{opacity:1}to{transform:translateX(40%);opacity:0} }
 
 /* ========= Layout ========= */
+/* Centralizado no MEIO da tela */
 .page-shell{
-  /* centralizado no meio da tela */
   min-height: calc(100dvh - var(--topbar-h));
   padding: 14px;
   padding-top: calc(var(--topbar-h) + 10px);
@@ -139,7 +140,7 @@ html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) sca
 /* ========= Card ========= */
 .auth-card{
   width:100%;
-  max-width: 720px;            /* um pouco mais estreito */
+  max-width: 520px;            /* mesmo “fino” do modal */
   border-radius: 12px;
   border: 1px solid var(--card-border);
   overflow:hidden;
@@ -147,22 +148,22 @@ html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) sca
   box-shadow: var(--shadow-lg);
   margin-inline:auto;
 }
-.auth-card__inner{ padding: 20px 16px; } /* menos “gordo” */
+.auth-card__inner{ padding: 18px 14px; } /* compacto */
 
-.hero{ text-align:center; margin-bottom: 14px; }
-.hero-img{ height: 164px; margin: 0 auto 6px; opacity:.95 }
-.title{ margin:2px 0 0; font-weight:900; font-size:25px; line-height:1.12; color:var(--text-primary) }
-.subtitle{ margin:2px 0 14px; color:var(--text-secondary); font-size:12.5px }
+.hero{ text-align:center; margin-bottom: 12px; }
+.hero-img{ height: 140px; margin: 0 auto 6px; opacity:.95 }
+.title{ margin:2px 0 0; font-weight:900; font-size:24px; line-height:1.12; color:var(--text-primary) }
+.subtitle{ margin:2px 0 12px; color:var(--text-secondary); font-size:12px }
 
 /* ========= Form/Inputs ========= */
-.vspace > * + * { margin-top: 12px; }
-.field{ margin-bottom: 12px }
+.vspace > * + * { margin-top: 10px; }
+.field{ margin-bottom: 10px }
 .label{ display:block; font-weight:700; color:var(--text-primary); margin-bottom:5px; font-size:13.5px }
 
 .input{
-  height:42px;                  /* mais fino */
+  height:40px;                  /* mais fino */
   width:100%;
-  padding:0 11px;
+  padding:0 10px;
   background:var(--input-bg);
   border:1px solid var(--input-bd);
   color:var(--input-text);
@@ -172,7 +173,7 @@ html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) sca
 }
 .input::placeholder{ color:var(--text-secondary); opacity:.9; }
 .input:focus{ border-color:var(--brand-500); box-shadow:0 0 0 2px rgba(0,189,61,.32); }
-.input--padR{ padding-right:84px; }
+.input--padR{ padding-right:78px; }
 
 .hint{ margin:6px 2px 0; color:var(--text-secondary); font-size:12px }
 .help-err{ margin:6px 2px 0; color:#ef4444; font-size:12px }
@@ -180,11 +181,11 @@ html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) sca
 
 .input-wrap{ position:relative }
 .input-actions{
-  position:absolute; right:5px; top:50%; transform:translateY(-50%);
+  position:absolute; right:4px; top:50%; transform:translateY(-50%);
   display:flex; gap:6px; align-items:center;
 }
 .link-btn{
-  appearance:none; background:transparent; border:0; padding:4px 7px;
+  appearance:none; background:transparent; border:0; padding:4px 6px;
   border-radius:8px; font-size:12.5px; cursor:pointer; color:#596273;
 }
 .link-btn:hover{ background:rgba(0,0,0,.06) }
@@ -195,7 +196,7 @@ html.dark .link-btn.strong{ color:#7dd3fc }
 
 /* ========= Botões ========= */
 .btn{
-  height:42px;                  /* mais fino */
+  height:40px;                  /* mais fino */
   width:auto;
   padding:0 12px;
   border-radius:10px; 
@@ -228,19 +229,19 @@ html.dark .toast.warn { border-color:#5c3a05; background:rgba(217,119,6,.16); co
 html.dark .toast.ok   { border-color:#14532d; background:rgba(34,197,94,.14); color:#bdf7cf }
 
 /* ========= Link voltar ========= */
-.back-login{ margin-top:16px; text-align:center; color:var(--text-secondary); font-size:13.5px }
+.back-login{ margin-top:14px; text-align:center; color:var(--text-secondary); font-size:13.5px }
 
 /* ========= Avatar ========= */
-.avatar-uploader{ display:flex; gap:14px; align-items:center }
+.avatar-uploader{ display:flex; gap:12px; align-items:center }
 .avatar-tile{
-  position:relative; height:92px; width:92px; border-radius:999px; border:2px dashed var(--input-bd);
+  position:relative; height:88px; width:88px; border-radius:999px; border:2px dashed var(--input-bd);
   display:grid; place-items:center; background:#f8fafc; color:#94a3b8; cursor:pointer; overflow:hidden;
   transition:border-color .15s ease, background .15s ease;
 }
 html.dark .avatar-tile{ background:#141414; color:#9ca3af; border-color:#262626 }
 .avatar-tile:hover{ border-color:var(--brand-500); background:#effdf4 }
 html.dark .avatar-tile:hover{ background:#1a1a1a }
-.avatar-ph{ width:38px; height:38px }
+.avatar-ph{ width:36px; height:36px }
 .avatar-img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; border-radius:inherit; display:block }
 .avatar-cta{
   position:absolute; bottom:4px; left:50%; transform:translateX(-50%);
