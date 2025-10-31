@@ -10,9 +10,11 @@ from sqlalchemy.exc import IntegrityError  # ← NEW
 from backend.database import SessionLocal
 from backend import models
 from backend.routers.auto_messages import maybe_send_auto_message_async
-
+from backend.integrations.qrcode import qr_sign, qr_should_emit, qr_force_lock_acquire
 from backend.websocket_manager import conexoes_ativas
 from backend.models import StatusAtendimento  # ← NEW
+# 🔹 importa o cancel_auto_cleanup do onboarding (pra cancelar o timer ao conectar)
+from backend.routers.cliente_onboarding import cancel_auto_cleanup
 
 # =========================
 # Config / ENV
@@ -27,7 +29,6 @@ SYNC_CHATS_ON_CONNECT    = (os.getenv("SYNC_CHATS_ON_CONNECT", "true").lower() =
 ENABLE_MESSAGES_SET      = (os.getenv("ENABLE_MESSAGES_SET", "true").lower() == "true")
 
 EVOLUTION_FORCE_QR_ON_WS = (os.getenv("EVOLUTION_FORCE_QR_ON_WS", "true").lower() == "true")
-QR_DEDUP_WINDOW_MS       = int(os.getenv("EVOLUTION_QR_DEDUP_WINDOW_MS", "1200") or "1200")
 
 HISTORY_LIMIT_HOURS           = int(os.getenv("HISTORY_LIMIT_HOURS", "0") or "0")
 HISTORY_IGNORE_AFTER_DONE_MIN = int(os.getenv("HISTORY_IGNORE_AFTER_DONE_MIN", "15") or "15")
@@ -41,16 +42,119 @@ except Exception:
     # fallback: se zoneinfo não estiver disponível, usa UTC
     APP_TZ = timezone.utc
 
+# ======= Histórico – limites e flags =======
+ALLOW_HISTORY_7D          = (os.getenv("ALLOW_HISTORY_7D", "false").lower() == "true")
+HISTORY_MAX_IMPORT        = int(os.getenv("HISTORY_MAX_IMPORT", "3000") or "3000")    # CAP por rodada
+HISTORY_BATCH_COMMIT      = int(os.getenv("HISTORY_BATCH_COMMIT", "250") or "250")    # commit a cada N
+HISTORY_SLEEP_EVERY       = int(os.getenv("HISTORY_SLEEP_EVERY", "500") or "500")     # ceder loop a cada N
+DISABLE_MEDIA_ON_HISTORY  = (os.getenv("DISABLE_MEDIA_ON_HISTORY", "true").lower() == "true")
+
+# ======= Listas de eventos completos (ligados só após CONNECTED) =======
+FULL_EVENTS_WS = [
+    "QRCODE_UPDATED", "CONNECTION_UPDATE",
+    "MESSAGES_SET", "MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE",
+    "SEND_MESSAGE",
+    "CONTACTS_SET", "CONTACTS_UPSERT", "CONTACTS_UPDATE",
+    "PRESENCE_UPDATE",
+    "GROUPS_UPSERT", "GROUP_UPDATE", "GROUP_PARTICIPANTS_UPDATE",
+]
+FULL_EVENTS_RABBIT = [
+    "MESSAGES_SET", "MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE",
+    "SEND_MESSAGE",
+    "CONTACTS_SET", "CONTACTS_UPSERT", "CONTACTS_UPDATE",
+    "PRESENCE_UPDATE",
+    "GROUPS_UPSERT", "GROUP_UPDATE", "GROUP_PARTICIPANTS_UPDATE",
+]
+
+RABBIT_EXCHANGE = os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange")
+RABBIT_BINDINGS = [b.strip() for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#").split(",") if b.strip()]
+
+import time, random
+try:
+    from psycopg2.errors import DeadlockDetected as _PGDeadlock
+except Exception:
+    _PGDeadlock = None
+
+def _try_acquire_hist_lock(db: Session, empresa_id: int, instancia_id: int) -> bool:
+    try:
+        return bool(db.execute(
+            text("SELECT pg_try_advisory_lock(:a, :b)"),
+            {"a": int(empresa_id), "b": int(instancia_id)}
+        ).scalar())
+    except Exception:
+        return True
+
+def _release_hist_lock(db: Session, empresa_id: int, instancia_id: int) -> None:
+    try:
+        db.execute(text("SELECT pg_advisory_unlock(:a, :b)"),
+                   {"a": int(empresa_id), "b": int(instancia_id)})
+    except Exception:
+        pass
+
+def _is_deadlock_error(e: Exception) -> bool:
+    base = getattr(e, "orig", e)
+    if _PGDeadlock and isinstance(base, _PGDeadlock):
+        return True
+    return "deadlock detected" in str(base).lower()
+
+def _retry_deadlock(db: Session, func, *, attempts: int = 5, base_delay: float = 0.10):
+    for i in range(attempts):
+        try:
+            return func()
+        except Exception as e:
+            if _is_deadlock_error(e):
+                try: db.rollback()
+                except Exception: pass
+                time.sleep(base_delay * (2 ** i) + random.random() * 0.05)
+                continue
+            raise
+
+
 # =========================
 # Log util (prefix fixo)
 # =========================
 def LOG(*args): print("[EVO]", *args)
+
+
+def _is_textual_content(s: str | None) -> bool:
+    if not s:
+        return False
+    t = s.strip()
+    # placeholders do Baileys/Evolution geralmente são [Coisa]
+    if t.startswith("[") and t.endswith("]"):
+        return False
+    return True
+
+def _log_msg_event(*, telefone: str | None, from_me: bool, conteudo: str | None,
+                   ack: int | None, lida: bool | None, ts: datetime | None, msg_id: str | None):
+    num_fmt = formatar_telefone_br(telefone) if telefone else "-"
+    eu_str = "sim" if from_me else "não"
+
+    # regra: saída usa ACK; entrada usa flag lida
+    is_read = (ack or 0) >= ACK_READ if from_me else bool(lida)
+    lido_str = "sim" if is_read else "não"
+
+    ts_str = _iso_utc(ts or _now_utc())
+
+    base = f'[MSG] numero="{num_fmt}" eu={eu_str} lido={lido_str} id={msg_id or "-"} ts={ts_str}'
+
+    if _is_textual_content(conteudo):
+        txt = (conteudo or "").replace("\n", " ").strip()
+        if len(txt) > 200:
+            txt = txt[:200] + "…"
+        base += f' conteudo="{txt}"'
+
+    print(base, flush=True)
+
 
 # =========================
 # Datas / Horários helpers (unificação)
 # =========================
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+def _server_ts_ms() -> int:
+    return int(_now_utc().timestamp() * 1000)
 
 def _to_dt_utc(ts_like) -> datetime:
     """
@@ -188,6 +292,38 @@ def handler(evt: EvoEvent):
 # =========================
 # Phone helpers
 # =========================
+
+# === [DEBUG / LOG HELPERS] ====================================================
+EVO_DEBUG_MESSAGES = (os.getenv("EVO_DEBUG_MESSAGES", "true").lower() == "true")
+
+def _short(x, n: int = 140) -> str:
+    try:
+        s = str(x if x is not None else "")
+    except Exception:
+        s = repr(x)
+    return (s[:n] + "…") if len(s) > n else s
+
+def _dbg_enabled() -> bool:
+    return EVO_DEBUG_MESSAGES
+
+def _log_ctx(prefix: str, **ctx):
+    if not _dbg_enabled():
+        return
+    parts = []
+    for k, v in ctx.items():
+        if isinstance(v, (dict, list, tuple, set)):
+            parts.append(f"{k}={_short(json.dumps(v, ensure_ascii=False), 160)}")
+        else:
+            parts.append(f"{k}={_short(v, 160)}")
+    LOG(prefix, " | ".join(parts))
+
+def _log_skip(why: str, **ctx):
+    if not _dbg_enabled():
+        return
+    _log_ctx(f"[UPsert][skip] {why}", **ctx)
+
+# ==============================================================================
+
 def _jid_strip_device(j: str | None) -> str:
     if not j: return ""
     base = str(j)
@@ -225,17 +361,11 @@ def _remote_to_num(remote_jid: str | None) -> str | None:
     return f"55{ddd}{restante}"
 
 def _resolve_counterparty_num_1to1(data: dict, me_num: str | None) -> tuple[str | None, str | None]:
-    """
-    Descobre o número do OUTRO participante numa conversa 1:1.
-    Suporta payloads Evolution/Baileys e o novo campo 'senderPn'.
-    Retorna (telefone_normalizado, jid_usado_para_telefone) ou (None, <jid original>).
-    """
     if not isinstance(data, dict):
         return None, None
 
     key = data.get("key") or {}
 
-    # JID "oficial" do chat
     remote_jid = (
         key.get("remoteJid") or key.get("remote_jid") or
         data.get("remoteJid") or data.get("jid") or data.get("chatId")
@@ -246,40 +376,69 @@ def _resolve_counterparty_num_1to1(data: dict, me_num: str | None) -> tuple[str 
 
     # 1) tenta pelo remote_jid
     tel = _num_of(remote_jid)
-
-    # Se já obtivemos um telefone válido e ele NÃO é o meu, retornamos
     if tel and (not me_num or tel != me_num):
         return tel, remote_jid
 
-    # 2) Caso contrário, tentamos candidatos alternativos
+    # 2) alternativos: string **ou dict** (Evolution às vezes manda objetos aqui)
     alt_fields = ("senderPn", "senderpn", "participant", "author", "from", "sender", "user")
+
+    def _first_str_from_obj(o: dict) -> str | None:
+        for k2 in ("id","jid","wid","user","from","peer","participant","phone","phoneNumber","number"):
+            v2 = o.get(k2)
+            if isinstance(v2, str) and v2.strip():
+                return v2
+        return None
 
     for field in alt_fields:
         alt = key.get(field) or data.get(field)
-        alt_num = _num_of(alt if isinstance(alt, str) else None)
+        cand = alt if isinstance(alt, str) else (_first_str_from_obj(alt) if isinstance(alt, dict) else None)
+        alt_num = _num_of(cand)
         if alt_num and alt_num != me_num:
-            return alt_num, alt  # achamos o outro participante
+            return alt_num, cand
 
-    # 3) Não foi possível resolver — devolvemos o que tivermos
     return (tel if tel else None), (remote_jid if isinstance(remote_jid, str) else None)
 
 
 def formatar_telefone_br(n: str) -> str:
-    n = "".join(filter(str.isdigit, n))
-    if len(n) == 13: return f"+{n[:2]} {n[2:4]} {n[4:9]}-{n[9:]}"
-    if len(n) == 12: return f"+{n[:2]} {n[2:4]} {n[4:8]}-{n[8:]}"
-    return f"+{n[:2]} {n[2:]}"
+    d = re.sub(r"\D", "", str(n or ""))
+
+    # se veio só DDD+local (10/11), assume Brasil e prefixa 55 só para exibir
+    if len(d) in (10, 11):
+        d = "55" + d
+
+    if len(d) == 13:  # 55 + DDD(2) + 9 + xxxx(8)
+        return f"+{d[:2]} {d[2:4]} {d[4:9]}-{d[9:]}"
+    if len(d) == 12:  # 55 + DDD(2) + xxxx(8)
+        return f"+{d[:2]} {d[2:4]} {d[4:8]}-{d[8:]}"
+    return f"+{d}" if d else ""
 
 # ========= normalização p/ decidir UPSERT + SQL de UPSERT =========
 def _br_tel_norm_for_upsert(raw: str | None) -> str | None:
-    if not raw: return None
-    s = str(raw)
-    if "@" in s:           # qualquer JID (inclusive grupos) -> não criar cliente
+    if not raw:
         return None
+    s = str(raw)
+    if "@" in s:  # qualquer JID -> não criar cliente
+        return None
+
     d = re.sub(r"\D", "", s)
-    if d.startswith("55") and len(d) > 11:
+
+    # tira zeros à esquerda
+    d = d.lstrip("0")
+
+    # tira DDI 55 repetidamente enquanto estiver maior que 11 e ainda começar com 55
+    while d.startswith("55") and len(d) > 11:
         d = d[2:]
-    return d if len(d) in (10, 11) else None
+
+    # se ainda estiver maior que 11, fica com os últimos 11 (DDD+9+8)
+    if len(d) > 11:
+        d = d[-11:]
+
+    # agora valida (10 = fixo, 11 = móvel)
+    if len(d) in (10, 11):
+        return d
+
+    return None
+
 
 UPSERT_CLIENTE_SQL = text("""
   INSERT INTO public.clientes (empresa_id, instancia_id, telefone, nome, nome_whatsapp, avatar_url)
@@ -293,25 +452,33 @@ UPSERT_CLIENTE_SQL = text("""
   RETURNING id;
 """)
 
-def upsert_cliente(db: Session, *, empresa_id: int, instancia_id: int | None,
-                   telefone_raw: str | None, nome: str | None,
-                   nome_whatsapp: str | None, avatar_url: str | None) -> int | None:
-    """Cria/mescla cliente por (empresa_id, instancia_id, telefone_norm). Ignora grupos/JIDs."""
+def upsert_cliente(
+    db: Session, *,
+    empresa_id: int,
+    instancia_id: int | None,
+    telefone_raw: str | None,
+    nome: str | None,
+    nome_whatsapp: str | None,
+    avatar_url: str | None
+) -> int | None:
+    """Cria/mescla cliente por (empresa_id, telefone_norm). Ignora grupos/JIDs."""
     tel_norm = _br_tel_norm_for_upsert(telefone_raw)
     if not tel_norm:
         return None
+
     row = db.execute(
         UPSERT_CLIENTE_SQL,
         {
             "empresa_id":   int(empresa_id),
             "instancia_id": int(instancia_id) if instancia_id is not None else None,
-            "telefone":     telefone_raw or tel_norm,   # DB calcula telefone_norm
+            "telefone":     telefone_raw or tel_norm,
             "nome":         nome,
             "nome_whatsapp":nome_whatsapp,
             "avatar_url":   avatar_url,
         }
     ).first()
     return int(row[0]) if row else None
+
 
 def _fetch_cliente(db: Session, cliente_id: int) -> models.Cliente | None:
     try:
@@ -800,34 +967,104 @@ def _iter_all_nodes(root) -> Iterable[Any]:
         elif isinstance(cur, list): q.extend(cur)
 
 def _looks_like_message(d: dict) -> bool:
-    if not isinstance(d, dict): return False
-    if "key" in d and isinstance(d["key"], dict): return True
-    if "message" in d and isinstance(d["message"], dict): return True
-    if "messageType" in d: return True
-    if "conversation" in (_unwrap_baileys_layers(d) or {}): return True
+    if not isinstance(d, dict):
+        return False
+    # válido se for o objeto "completo" (tem cabeçalho)…
+    if isinstance(d.get("key"), dict):
+        return True
+    # …ou se tiver JID em nível superior (alguns providers mandam assim)
+    jid = d.get("remoteJid") or d.get("remote_jid") or d.get("jid") or d.get("chatId")
+    if isinstance(jid, str) and jid:
+        return True
+    # NÃO considerar nós internos do campo 'message' (só conversation/caption/etc.)
     return False
 
 def extract_messages_any_shape(data) -> list[dict]:
-    if isinstance(data, list) and all(isinstance(x, dict) for x in data): return data
-    if isinstance(data, dict):
+    """
+    Extrai uma lista de mensagens a partir de payloads em formatos variados.
+    Deduplica por msg_id considerando **key.id** ou **id** de nível superior
+    e mantém a versão mais "rica" (com mais campos/conteúdo).
+    Requer _iter_all_nodes(...) e _looks_like_message(...) já definidos.
+    """
+
+    def _msg_id_any(m: dict) -> str | None:
+        if not isinstance(m, dict):
+            return None
+        # Locais comuns onde o id pode aparecer
+        for path in [
+            ("key", "id"),
+            ("id",),
+            ("keyId",),
+            ("message", "key", "id"),
+            ("messageId",),
+        ]:
+            cur = m
+            ok = True
+            for p in path:
+                if isinstance(cur, dict) and p in cur:
+                    cur = cur[p]
+                else:
+                    ok = False
+                    break
+            if ok and isinstance(cur, str) and cur.strip():
+                return cur.strip()
+        return None
+
+    def _richness(m: dict) -> int:
+        # Heurística simples: número de chaves + bônus por ter "message" e timestamp
+        if not isinstance(m, dict):
+            return 0
+        score = len(m)
+        if "message" in m: score += 50
+        if "messageTimestamp" in m or "timestamp" in m: score += 5
+        # se "message" for dict, adiciona o tamanho dele também
+        msg = m.get("message")
+        if isinstance(msg, dict):
+            score += len(msg)
+        return score
+
+    # 1) Casos diretos (lista/objeto com campo-lista)
+    if isinstance(data, list) and all(isinstance(x, dict) for x in data):
+        candidates = data
+    elif isinstance(data, dict):
+        found = None
         for k in ("messages","msgs","items","result","rows","data","list","payload","store"):
             v = data.get(k)
-            if isinstance(v, list) and v and all(isinstance(x, dict) for x in v): return v
-    out = []
-    for node in _iter_all_nodes(data):
-        if isinstance(node, list) and node and all(isinstance(x, dict) for x in node):
-            likes = sum(1 for x in node if _looks_like_message(x))
-            if likes >= max(1, len(node)//3): out.extend(node)
-        elif isinstance(node, dict) and _looks_like_message(node):
-            out.append(node)
-    seen = set(); final = []
-    for m in out:
-        mid = (m.get("key") or {}).get("id") if isinstance(m, dict) else None
+            if isinstance(v, list) and v and all(isinstance(x, dict) for x in v):
+                found = v; break
+        candidates = found if found is not None else []
+    else:
+        candidates = []
+
+    # 2) Varredura total quando não achou claramente
+    if not candidates:
+        out = []
+        for node in _iter_all_nodes(data):
+            if isinstance(node, list) and node and all(isinstance(x, dict) for x in node):
+                likes = sum(1 for x in node if _looks_like_message(x))
+                if likes >= max(1, len(node)//3):
+                    out.extend(node)
+            elif isinstance(node, dict) and _looks_like_message(node):
+                out.append(node)
+        candidates = out
+
+    # 3) Dedup por msg_id (key.id OU id topo), preferindo a versão mais rica
+    uniq: dict[str, dict] = {}
+    noid_bucket: list[dict] = []
+    for m in candidates:
+        if not isinstance(m, dict):
+            continue
+        mid = _msg_id_any(m)
         if mid:
-            if mid in seen: continue
-            seen.add(mid)
-        final.append(m)
+            old = uniq.get(mid)
+            if old is None or _richness(m) > _richness(old):
+                uniq[mid] = m
+        else:
+            noid_bucket.append(m)  # mantém mensagens sem id (raras: p.ex. protocolMessage)
+
+    final = list(uniq.values()) + noid_bucket
     return final
+
 
 def extract_contacts_any_shape(data) -> list[dict]:
     if isinstance(data, list): return [x for x in data if isinstance(x, dict)]
@@ -889,41 +1126,77 @@ def _ack_from_status(status_or_ack) -> int:
 # =========================
 # QR helpers
 # =========================
-_QR_LAST: dict[str, tuple[int, str]] = {}  # inst -> (ts_ms, signature)
-
-def _qr_signature(base64_img: str | None, pairing: str | None, limit: int | None = None) -> str:
-    if pairing: return f"pair:{pairing}:{limit or 0}"
-    if base64_img:
-        try:
-            payload = base64_img.split(",",1)[-1]
-            return f"b64:{len(payload)}:{payload[:16]}:{limit or 0}"
-        except Exception:
-            return f"b64:{len(base64_img)}:{limit or 0}"
-    return f"empty:{limit or 0}"
-
-def _qr_should_emit(inst: str, sign: str) -> bool:
-    now = int(_now_utc().timestamp()*1000)
-    last = _QR_LAST.get(inst)
-    if not last:
-        _QR_LAST[inst] = (now, sign); return True
-    ts, prev = last
-    if prev != sign or (now - ts) > QR_DEDUP_WINDOW_MS:
-        _QR_LAST[inst] = (now, sign); return True
-    return False
 
 async def _emit_qr(inst_id: str, base64_img: str | None, pairing_code: str | None, limit: int | None = None):
+    """
+    Emite QRCODE_UPDATED para a instância (e também para a empresa),
+    com dedup e snapshot em Redis para replay quando o WS conectar depois.
+    """
     try:
-        sign = _qr_signature(base64_img, pairing_code)
-        if not _qr_should_emit(inst_id, sign): return
-        payload = {"type": "qrcode","base64": base64_img or "","pairingCode": pairing_code,"instance": inst_id,"qr_limit": limit}
+        # assinatura estável do QR (pairing_code + prefixo do base64)
+        sign = qr_sign(base64_img=base64_img, pairing_code=pairing_code)
+        if not qr_should_emit(inst_id, sign):
+            LOG(f"[QR] dedup suprimido inst={inst_id}")
+            return
+
+        payload = {
+            "type": "qrcode",
+            "base64": base64_img or "",
+            "pairingCode": pairing_code,
+            "instance": inst_id,
+            "qr_limit": limit,
+            "serverTimestamp": _server_ts_ms(),
+        }
+
+        # TTL do snapshot (converte heurística parecida com o front)
+        def _to_secs(lim) -> int:
+            try:
+                n = int(lim)
+            except Exception:
+                return 60
+            if n > 300:   # provavelmente ms
+                return max(30, min(600, n // 1000))
+            if n <= 5:    # provavelmente minutos
+                return max(30, min(600, n * 60))
+            return max(30, min(600, n))
+
+        ttl_sec = _to_secs(limit) + 15  # uma gordurinha
+
+        # Snapshot para REPLAY: salva no Redis
+        try:
+            _rset(_rk("qr", "last", "inst", inst_id), payload, ttl=ttl_sec)
+        except Exception:
+            pass
+
+        # WS: instância
         await conexoes_ativas.send_message(f"inst:{inst_id}", payload)
+
+        # WS: também para a empresa (para telas abertas só no tópico da empresa)
+        try:
+            with SessionLocal() as db:
+                inst_row = _get_inst_row(db, inst_id)
+                if inst_row:
+                    emp_topic = f"emp:{inst_row.empresa_id}"
+                    await conexoes_ativas.send_message(emp_topic, payload)
+                    # (opcional) snapshot por empresa+instância
+                    try:
+                        _rset(_rk("qr", "last", "emp", str(inst_row.empresa_id), "inst", inst_id), payload, ttl=ttl_sec)
+                    except Exception:
+                        pass
+        except Exception as e:
+            LOG(f"[QR] falha ao emitir para empresa: {e}")
+
         size = 0
         try:
-            if base64_img: size = len(base64_img.split(",", 1)[-1])
-        except Exception: pass
-        LOG(f"[QR] emitido inst={inst_id} img={'yes' if base64_img else 'no'} code={'yes' if pairing_code else 'no'}")
+            if base64_img:
+                size = len((base64_img.split(",", 1)[-1]) if "," in base64_img else base64_img)
+        except Exception:
+            pass
+
+        LOG(f"[QR] emitido inst={inst_id} img={'yes' if base64_img else 'no'} code={'yes' if pairing_code else 'no'} (size={size})")
     except Exception as e:
         LOG(f"[QR] erro ao emitir: {e}")
+
 
 def _extract_qr_fields(js: dict) -> tuple[str | None, str | None, int | None]:
     q = js.get("qrcode") if isinstance(js, dict) else None
@@ -939,6 +1212,36 @@ def _extract_qr_fields(js: dict) -> tuple[str | None, str | None, int | None]:
         pc  = q.get("pairingCode") or q.get("code")
         return b64, pc, _lim(q)
     return (js.get("base64") or js.get("image")), (js.get("pairingCode") or js.get("code")), _lim(js if isinstance(js, dict) else {})
+
+# =========================
+# Helpers para expandir eventos (ligar DEPOIS do CONNECTED)
+# =========================
+def _evo_expand_websocket(instance: str) -> None:
+    if not (EVOLUTION_URL and EVOLUTION_KEY and instance):
+        return
+    body = {"websocket": {"enabled": True, "events": FULL_EVENTS_WS}}
+    try:
+        requests.post(f"{EVOLUTION_URL}/websocket/set/{instance}", headers=HEADERS, json=body, timeout=15)
+        LOG(f"[WS] expandido para inst={instance} -> {len(FULL_EVENTS_WS)} eventos")
+    except Exception as e:
+        LOG(f"[WS] falha ao expandir: {e}")
+
+def _evo_expand_rabbit(instance: str) -> None:
+    if not (EVOLUTION_URL and EVOLUTION_KEY and instance):
+        return
+    body = {
+        "rabbitmq": {
+            "enabled": True,
+            "exchange": RABBIT_EXCHANGE,
+            "bindings": RABBIT_BINDINGS,
+            "events": FULL_EVENTS_RABBIT,
+        }
+    }
+    try:
+        requests.post(f"{EVOLUTION_URL}/rabbitmq/set/{instance}", headers=HEADERS, json=body, timeout=20)
+        LOG(f"[Rabbit] expandido para inst={instance} -> {len(FULL_EVENTS_RABBIT)} eventos")
+    except Exception as e:
+        LOG(f"[Rabbit] falha ao expandir: {e}")
 
 # =========================
 # HANDLERS
@@ -964,7 +1267,7 @@ async def on_qrcode_updated(first: str, payload: dict):
         try:
             await conexoes_ativas.send_message(
                 f"inst:{inst_id}",
-                {"type": "qrcode", "waiting": True, "instance": inst_id, "qr_limit": limit}
+                {"type": "qrcode", "waiting": True, "instance": inst_id, "qr_limit": limit, "serverTimestamp": _server_ts_ms()}
             )
         except Exception as e:
             LOG(f"[QR EVT] Falha ao emitir estado 'waiting' para inst:{inst_id}: {e}")
@@ -1005,34 +1308,36 @@ async def on_conn_update(first: str, payload: dict):
         _mark_disconnected(inst_id)
 
     if conectado:
-        # cancela auto-cleanup, se existir
-        fn = globals().get("cancel_auto_cleanup")
-        if callable(fn):
-            try:
-                fn(inst_id)  # se na sua base for async: await fn(inst_id)
-            except Exception as e:
-                LOG(f"[CLEANUP] falha ao cancelar auto cleanup: {e}")
+        # 0) cancela auto-cleanup do onboarding
+        try:
+            cancel_auto_cleanup(inst_id)
+        except Exception as e:
+            LOG(f"[CLEANUP] falha ao cancelar auto cleanup: {e}")
 
-        # mostrar overlay APENAS se vai haver importação de histórico
+        # 1) mostrar overlay APENAS se vai haver importação de histórico
         if historico_opcao in ("24h", "7d") or (HISTORY_LIMIT_HOURS > 0):
             try:
                 await conexoes_ativas.send_message(
-                    f"emp:{empresa_id}", {"type": "history_sync_start", "total": 0}
+                    f"emp:{empresa_id}", {"type": "history_sync_start", "total": 0, "serverTimestamp": _server_ts_ms()}
                 )
                 await conexoes_ativas.send_message(
-                    f"emp:{empresa_id}", {"type": "history_sync_progress", "imported": 0, "total": 0}
+                    f"emp:{empresa_id}", {"type": "history_sync_progress", "imported": 0, "total": 0, "serverTimestamp": _server_ts_ms()}
                 )
             except Exception as e:
                 LOG(f"[SYNC] falha ao emitir start/progress inicial: {e}")
 
+        # 2) EXPANDE ASSINATURAS (anti-tempestade: só agora “abre a torneira”)
+        _evo_expand_websocket(inst_id)
+        _evo_expand_rabbit(inst_id)
+
     # eventos de conexão para instância e empresa
     await conexoes_ativas.send_message(
         f"inst:{inst_id}",
-        {"type": "connection", "status": "CONNECTED" if conectado else "DISCONNECTED"}
+        {"type": "connection", "status": "CONNECTED" if conectado else "DISCONNECTED", "serverTimestamp": _server_ts_ms()}
     )
     await conexoes_ativas.send_message(
         f"emp:{empresa_id}",
-        {"type": "connection", "inst_status": {"connected": bool(conectado), "instance": inst_id}, "reload_whatsapp": True}
+        {"type": "connection", "inst_status": {"connected": bool(conectado), "instance": inst_id}, "reload_whatsapp": True, "serverTimestamp": _server_ts_ms()}
     )
 
     # dispara syncs no primeiro CONNECTED
@@ -1067,8 +1372,8 @@ def _mark_disconnected(instance: str):
 
             try:
                 asyncio.create_task(
-                    conexoes_ativas.send_message(f"emp:{row.empresa_id}", {"type":"reload_whatsapp"}
-                ))
+                    conexoes_ativas.send_message(f"emp:{row.empresa_id}", {"type":"reload_whatsapp", "serverTimestamp": _server_ts_ms()})
+                )
             except Exception:
                 pass
     finally:
@@ -1081,334 +1386,262 @@ HANDLERS[EvoEvent.LOGOUT_INSTANCE] = on_logout_instance
 HANDLERS[EvoEvent.INSTANCE_DELETE] = on_logout_instance
 HANDLERS[EvoEvent.REMOVE_INSTANCE] = on_logout_instance
 
+# === [HANDLER: MESSAGES_UPSERT]  =============================================
 @handler(EvoEvent.MESSAGES_UPSERT)
-async def on_messages_upsert(first: str, payload: dict | list):
-    inst_id = _inst_from(payload) or first
-    record_rabbit_event("MESSAGES_UPSERT", inst_id)
-
-    # 1) normaliza qualquer formato do Evolution/Baileys
-    base = (payload.get("data") if isinstance(payload, dict) else payload)
-    msgs = extract_messages_any_shape(base)
-    if not msgs:
-        msgs = extract_messages_any_shape(payload)
-    if not msgs:
-        LOG("[UPSERT] sem mensagens para processar (payload não reconhecido).")
-        return
-
+async def on_messages_upsert(inst_id: str, data):
+    """
+    Mensagens novas/atualizadas (1:1).
+    Agora com LOG detalhado e **emissão em tempo real** no WS da empresa,
+    inclusive quando a mensagem já existir (dedupe pelo msg_id).
+    """
     with SessionLocal() as db:
         inst = _get_inst_row(db, inst_id)
         if not inst:
-            LOG("[UPSERT] Instância não encontrada no BD:", inst_id)
+            LOG(f"[UPsert] instância não encontrada: {inst_id}")
             return
 
         empresa_id = inst.empresa_id
-        me_num = _me_number_by_inst(inst)
+        me_number  = _me_number_by_inst(inst)
 
-        for item in msgs:
+        mensagens = extract_messages_any_shape(data)
+        _log_ctx("[UPsert] batch",
+                 inst=inst_id, empresa_id=empresa_id,
+                 total=len(mensagens), type_data=type(data).__name__)
+
+        if not mensagens:
+            LOG("[UPsert] nenhum item reconhecido em payload.")
+            return
+
+        novas = 0
+
+        for idx, m in enumerate(mensagens, start=1):
             try:
-                data = item["data"] if (isinstance(item, dict) and "data" in item and isinstance(item["data"], dict)) else item
-                if not isinstance(data, dict):
+                if not isinstance(m, dict):
+                    _log_skip("m não é dict", idx=idx, type_m=type(m).__name__)
                     continue
 
-                key = data.get("key") or {}
-                remote_jid = (
-                    key.get("remoteJid")
-                    or key.get("remote_jid")
-                    or data.get("remoteJid")
-                    or data.get("jid")
-                    or data.get("chatId")
+                key = m.get("key") or {}
+                # 1) remote_jid pode vir em key.* ou no nível da mensagem (m.*)
+                raw_remote = (
+                    key.get("remoteJid") or key.get("remote_jid") or
+                    m.get("remoteJid") or m.get("jid") or m.get("chatId") or ""
                 )
+                msg_id  = key.get("id") or m.get("id")
+                ts_raw  = m.get("messageTimestamp") or m.get("timestamp") or 0
+                status  = m.get("status")
 
-                if not isinstance(remote_jid, str) or not remote_jid:
+                _log_ctx("[UPsert][in]",
+                         idx=idx, msg_id=msg_id, raw_remote=raw_remote,
+                         keys=list(m.keys())[:15], ts_raw=ts_raw, status=status)
+
+                if not raw_remote:
+                    _log_skip("sem remoteJid", idx=idx, msg_id=msg_id)
                     continue
 
-                original_jid = remote_jid  # guarda pra tratar LID
-                resolved_jid = _resolve_remote_jid(inst_id, remote_jid)
-
-                # Se for LID e não resolveu, tenta FALLBACK por campos de autoria/participante
+                # 2) resolver @lid logo no início (Evolution/Redis) + fallback 1:1
+                original_jid = raw_remote
+                resolved_jid = _resolve_remote_jid(inst_id, raw_remote)
                 if _is_lid_jid(original_jid) and not resolved_jid:
-                    tel_fallback, alt_jid = _resolve_counterparty_num_1to1(data, me_num)
+                    tel_fallback, alt = _resolve_counterparty_num_1to1(m, me_number)
+                    _log_ctx("[UPsert][lid-fallback]",
+                             idx=idx, msg_id=msg_id, tel_fallback=tel_fallback, alt=_short(alt, 64))
                     if tel_fallback:
-                        # sintetiza jid e semeia mapping (memória + Redis)
                         resolved_jid = f"{tel_fallback}@s.whatsapp.net"
                         _LID_CACHE.setdefault(inst_id, {})[_jid_strip_device(original_jid)] = resolved_jid
                         try:
                             _lid_map_set(empresa_id, inst.id, _jid_strip_device(original_jid), resolved_jid)
-                        except Exception:
-                            pass
-                    else:
-                        # sem fallback: coloca pendente e segue
-                        try:
-                            conteudo = extract_text_from_baileys(data)
-                            msg_id   = key.get("id") or data.get("id")
-                            ts_dt    = _to_dt_utc(data.get("messageTimestamp") or data.get("timestamp") or 0)
-
-                            _lid_pend_append(empresa_id, inst.id, original_jid, {
-                                "msg_id": msg_id, "text": conteudo, "ts": _int_unix(ts_dt)
-                            })
-
-                            await conexoes_ativas.send_message(
-                                f"emp:{empresa_id}",
-                                {
-                                    "type": "lid_pending",
-                                    "instance": inst_id,       # nome da instância Evolution
-                                    "instancia_id": inst.id,   # id no banco
-                                    "lid": original_jid,
-                                    "preview": (conteudo or "")[:140],
-                                    "msg_id": msg_id,
-                                    "timestamp": _iso_utc(ts_dt),
-                                    "timestamp_local": _iso_local(ts_dt),
-                                    "can_reply": False
-                                }
-                            )
                         except Exception as e:
-                            LOG(f"[UPSERT][LID] erro ao enfileirar/emitir: {e}")
-                        LOG(f"[UPSERT] ignorando @lid sem mapping: {original_jid}")
-                        continue  # prossiga para próxima mensagem
+                            _log_ctx("[UPsert][lid-cache-fail]", err=str(e))
+                    else:
+                        _log_skip("JID @lid sem mapping", idx=idx, msg_id=msg_id,
+                                  preview=_short(extract_text_from_baileys(m)))
+                        continue
 
-                # troca para o JID resolvido (ou original se já era s.whatsapp/g.us)
                 remote_jid = resolved_jid or original_jid
-
-                # ======== GRUPO ========
                 if remote_jid.endswith("@g.us"):
-                    try:
-                        from_me  = bool(key.get("fromMe", data.get("fromMe", False)))
-                        author_j = key.get("participant") or data.get("participant") or ""
-                        conteudo = extract_text_from_baileys(data)
-                        ts_dt    = _to_dt_utc(data.get("messageTimestamp") or data.get("timestamp") or 0)
-                        ts_int   = _int_unix(ts_dt)
-                        msg_id   = key.get("id") or data.get("id")
-
-                        grupo = _grupo_row_by_remote(db, empresa_id, _jid_strip_device(remote_jid),
-                                                     instancia_id=inst.id, inst_obj=inst)
-                        name   = _name_from_contact_like(data) or data.get("pushName")
-                        avatar = _avatar_from_contact_like(data)
-                        if name   and (grupo.nome or "") != name:       grupo.nome = name
-                        if avatar and (grupo.avatar_url or "") != avatar: grupo.avatar_url = avatar
-                        _carimbar_inst(grupo, inst)
-
-                        if msg_id and db.query(models.MensagemGrupo.id).filter_by(grupo_id=grupo.id, msg_id=msg_id).first():
-                            continue
-
-                        msgg = models.MensagemGrupo(
-                            empresa_id=empresa_id, grupo_id=grupo.id,
-                            instancia_id=inst.id,
-                            author_jid=author_j, from_me=from_me,
-                            conteudo=conteudo, message_type=data.get("messageType"),
-                            lida=from_me, timestamp=ts_int, msg_id=msg_id,
-                            ack=_ack_from_status(data.get("status")) if from_me else None
-                        )
-                        _carimbar_inst(msgg, inst)
-                        db.add(msgg); db.commit()
-
-                        await conexoes_ativas.send_message(
-                            f"emp:{empresa_id}",
-                            {"type":"grupo_msg","empresa_id":empresa_id,"grupo_id":grupo.id,
-                             "remote_jid":grupo.remote_jid,"grupo_nome":grupo.nome,
-                             "author":author_j,"conteudo":conteudo,"from_me":from_me,
-                             "timestamp": ts_int,
-                             "timestamp_iso": _iso_utc(ts_dt),
-                             "timestamp_local": _iso_local(ts_dt),
-                             "msg_id": msg_id}
-                        )
-                    except Exception as e:
-                        print("[UPSERT][GRUPO] erro:", e, flush=True)
+                    _log_skip("grupo", idx=idx, msg_id=msg_id, remote_jid=remote_jid)
                     continue
 
-                # ======== 1:1 (cliente) ========
+                # 3) extrai telefone; evita eco (meu próprio número)
                 telefone = _remote_to_num(remote_jid)
                 if not telefone:
-                    continue
-                if me_num and telefone == me_num:
+                    _log_skip("telefone inválido", idx=idx, msg_id=msg_id, remote_jid=remote_jid)
                     continue
 
-                from_me    = bool(key.get("fromMe", data.get("fromMe", False)))
-                push_name  = (_name_from_contact_like(data) or data.get("pushName") or "").strip()
-                conteudo   = extract_text_from_baileys(data)
-                media_meta = extract_media_meta(data)
-                msg_id     = key.get("id") or data.get("id")
-                formatted  = formatar_telefone_br(telefone)
-                ts_dt      = _to_dt_utc(data.get("messageTimestamp") or data.get("timestamp") or 0)
+                if me_number and telefone == me_number:
+                    _log_skip("eco do meu número", idx=idx, msg_id=msg_id, telefone=telefone)
+                    continue
 
-                cli_id = upsert_cliente(
-                    db,
-                    empresa_id=empresa_id,
-                    instancia_id=inst.id,
-                    telefone_raw=telefone,
-                    nome=(formatted if from_me else (push_name or formatted)),
-                    nome_whatsapp=(formatted if from_me else (push_name or formatted)),
-                    avatar_url=None
-                )
+                # 4) from_me pode vir em key.* ou m.*
+                from_me   = bool(key.get("fromMe", m.get("fromMe", False)))
+                push_name = m.get("pushName") or m.get("senderName")
+                formatted = formatar_telefone_br(telefone)
+                ts_msg    = _to_dt_utc(ts_raw)
+                conteudo  = extract_text_from_baileys(m)
+
+                _log_ctx("[UPsert][resolved]",
+                         idx=idx, msg_id=msg_id, remote_jid=remote_jid, telefone=telefone,
+                         from_me=from_me, push_name=_short(push_name, 60),
+                         ts=_iso_utc(ts_msg), preview=_short(conteudo))
+
+                # 5) upsert cliente (retry deadlock) — nome varia se from_me
+                def _up():
+                    return upsert_cliente(
+                        db,
+                        empresa_id=empresa_id,
+                        instancia_id=inst.id,
+                        telefone_raw=telefone,
+                        nome=(formatted if from_me else (push_name or formatted)),
+                        nome_whatsapp=(formatted if from_me else (push_name or formatted)),
+                        avatar_url=None
+                    )
+                cli_id = _retry_deadlock(db, _up)
                 if not cli_id:
+                    _log_skip("upsert_cliente retornou None", idx=idx, msg_id=msg_id, telefone=telefone)
                     continue
 
-                # Se havia pendências para um LID que acabou de resolver, avisa o front
-                if _is_lid_jid(original_jid) and resolved_jid:
-                    pend = _lid_pend_takeall(empresa_id, inst.id, original_jid)
-                    if pend:
-                        try:
-                            await conexoes_ativas.send_message(
-                                f"emp:{empresa_id}",
-                                {
-                                    "type": "lid_resolved",
-                                    "instance": inst_id,
-                                    "instancia_id": inst.id,
-                                    "lid": original_jid,
-                                    "phone": telefone,
-                                    "phone_fmt": formatted,
-                                    "cliente_id": cli_id,
-                                    "moved_count": len(pend)
-                                }
-                            )
-                        except Exception as e:
-                            LOG(f"[LID] falha ao emitir lid_resolved: {e}")
-
-                # evita duplicata por msg_id
+                # 6) dedup por msg_id — **emitir WS mesmo quando duplicada**
                 if msg_id and db.query(models.Mensagem.id).filter_by(cliente_id=cli_id, msg_id=msg_id).first():
+                    _log_skip("duplicada (msg_id)", idx=idx, msg_id=msg_id, cliente_id=cli_id)
+                    # 🔸 Mesmo duplicada no BD, o front precisa receber para:
+                    #    - atualizar preview/lista
+                    #    - tocar badge de não lida (entrada)
+                    #    - renderizar no chat aberto
+                    try:
+                        cliente = _fetch_cliente(db, cli_id)
+                        await conexoes_ativas.send_message(
+                            f"emp:{empresa_id}",
+                            {
+                                # contexto / roteamento
+                                "empresa_id":  empresa_id,
+                                "cliente_id":  cli_id,
+                                "instancia_id": inst.id,
+                                "instance_name": getattr(inst, "instance_name", None),
+
+                                # dados para a lista/preview
+                                "telefone": formatar_telefone_br(telefone),
+                                "avatar_url": getattr(cliente, "avatar_url", None) if cliente else None,
+                                "push_name": getattr(cliente, "nome_whatsapp", None) if cliente else None,
+                                "nome": getattr(cliente, "nome", None) if cliente else formatted,
+
+                                # conteúdo que o front espera
+                                "mensagem":  conteudo,
+                                "tipo":      ("saida" if from_me else "entrada"),
+                                "origem":    ("atendente" if from_me else "cliente"),
+                                "timestamp": _iso_utc(ts_msg),
+
+                                # chaves de conciliação/RT
+                                "msg_id": msg_id,
+                                "ack":    (_ack_from_status(status) if from_me else None),
+
+                                # relógio do servidor para lag/badge
+                                "serverTimestamp": int(_now_utc().timestamp() * 1000),
+                            }
+                        )
+                    except Exception as e:
+                        LOG(f"[UPsert][ws-dup] falha ao emitir: {e}")
+                    # não insere novamente; segue para próxima mensagem
                     continue
 
-                # ✅ NÃO sair do modo bot por causa da PRÓPRIA mensagem automática:
-                ignore_auto_out = False
-                try:
-                    key_redis = _rk("auto", "ignore_next_outgoing", "emp", empresa_id, "inst", inst.id, "cli", cli_id)
-                    ignore_auto_out = bool(_rget(key_redis))
-                    if ignore_auto_out:
-                        _rdel(key_redis)  # consome o flag
-                except Exception:
-                    ignore_auto_out = False
-
-                # 🔸 abre (ou pega) atendimento
-                # Se for saída E o flag estiver setado, tratamos como "entrada"
-                # para NÃO promover o status (fica aguardando/bot).
-                direcao = "entrada" if (from_me and ignore_auto_out) else ("saida" if from_me else "entrada")
-
-                atend = _get_or_open_atendimento(
-                    db,
-                    empresa_id=empresa_id,
-                    instancia_id=inst.id,
-                    cliente_id=cli_id,
-                    direcao=direcao,
-                    ts_dt=ts_dt,
-                    operador_id=None,
-                )
-
-                ack_initial = _ack_from_status(data.get("status"))
+                # 7) ack inicial (apenas para saída) e INSERT
+                ack_initial = _ack_from_status(status)
                 ack_initial = ack_initial if from_me else None
 
-                msg_model = models.Mensagem(
-                    empresa_id=empresa_id, cliente_id=cli_id, conteudo=conteudo,
-                    tipo="saida" if from_me else "entrada",
-                    lida=from_me, ack=ack_initial,
-                    timestamp=ts_dt,
-                    msg_id=msg_id, instancia_id=inst.id
-                )
-                _carimbar_inst(msg_model, inst)
-                db.add(msg_model); db.flush()
+                def _ins_msg():
+                    msg_model = models.Mensagem(
+                        empresa_id=empresa_id,
+                        cliente_id=cli_id,
+                        conteudo=conteudo,
+                        tipo="saida" if from_me else "entrada",
+                        lida=from_me,
+                        ack=ack_initial,
+                        timestamp=ts_msg,
+                        msg_id=msg_id,
+                        instancia_id=inst.id
+                    )
+                    _carimbar_inst(msg_model, inst)
+                    db.add(msg_model); db.flush()
+                    return msg_model.id
 
-                # carimba o vínculo mensagem → atendimento (se existir)
-                if _HAS_MSG_ATD_FIELD:
-                    try:
-                        setattr(msg_model, "atendimento_id", int(atend.id))
-                        db.flush()
-                    except Exception:
-                        pass
+                msg_db_id = _retry_deadlock(db, _ins_msg)
+                novas += 1
 
-                # mídia (se houver)
-                if media_meta:
-                    try:
-                        raw = None
-                        real_name = media_meta.get("filename") or (f"{msg_id}.bin" if msg_id else "file")
-                        real_ct   = media_meta.get("mimetype")
-                        real_len  = None
+                _log_ctx("[UPsert][saved]",
+                         idx=idx, msg_id=msg_id, saved_id=msg_db_id,
+                         tipo=("saida" if from_me else "entrada"),
+                         ack=ack_initial, ts=_iso_utc(ts_msg),
+                         preview=_short(conteudo))
 
-                        if msg_id:
-                            try:
-                                conv = True if (media_meta and media_meta.get("tipo") == "video") else None
-                                evo_raw, evo_name, evo_ct, evo_len = _evo_get_base64_media(inst_id, msg_id, convert_to_mp4=conv)
-                                raw, real_len = evo_raw, evo_len
-                                if evo_ct:   real_ct = evo_ct
-                                if evo_name: real_name = evo_name
-                            except Exception as e:
-                                LOG(f"[MIDIA] ({msg_id}) base64 falhou: {e}")
-
-                        if raw is None:
-                            b64 = media_meta.get("base64")
-                            if b64:
-                                raw, mt_from = _b64_to_bytes(b64)
-                                if mt_from: real_ct = mt_from
-                                real_len = len(raw) if raw else None
-
-                        if raw is None and msg_id:
-                            dl_bytes, dl_name, dl_ct, dl_len = _download_media_bytes(inst_id, msg_id, None)
-                            raw, real_len = dl_bytes, dl_len
-                            if dl_ct and dl_ct.lower() != "application/octet-stream": real_ct = dl_ct
-                            if dl_name and not dl_name.lower().endswith(".enc"): real_name = dl_name
-
-                        if raw:
-                            real_ct_norm = _normalize_mimetype(media_meta["tipo"], real_name, real_ct)
-                            _save_midia_db(
-                                db, empresa_id=empresa_id, cliente_id=cli_id, mensagem_id=msg_model.id,
-                                tipo=media_meta["tipo"], filename=real_name or "file",
-                                mimetype_=real_ct_norm, raw=raw, url_origem=None, content_length=real_len,
-                                instancia_id=inst.id
-                            )
-                    except Exception as e:
-                        LOG(f"[MIDIA] ({msg_id}) falha ao salvar: {e}")
-
-                db.commit()
-
-                # invalida caches de listas
+                # 7.1) **EMITIR EM TEMPO REAL** para o WS da empresa
                 try:
-                    _invalidate_emp_cache(empresa_id)
-                except Exception:
-                    pass
+                    cliente = _fetch_cliente(db, cli_id)
+                    await conexoes_ativas.send_message(
+                        f"emp:{empresa_id}",
+                        {
+                            # contexto / roteamento
+                            "empresa_id":  empresa_id,
+                            "cliente_id":  cli_id,
+                            "instancia_id": inst.id,
+                            "instance_name": getattr(inst, "instance_name", None),
 
-                # log/WS
-                cliente = _fetch_cliente(db, cli_id)
-                EU_fmt  = formatar_telefone_br(me_num or "?")
-                CLI_fmt = formatar_telefone_br(telefone)
-                txt = (conteudo or "[mídia]")[:120]
-                print(f"[DIR][{'out' if from_me else 'in '}] "
-                      f"{'EU('+EU_fmt+') → CLIENTE('+CLI_fmt+')' if from_me else 'CLIENTE('+CLI_fmt+') → EU('+EU_fmt+')'} "
-                      f"id={msg_id} ts={_iso_utc(ts_dt)} txt={txt}", flush=True)
+                            # dados para a lista/preview
+                            "telefone": formatar_telefone_br(telefone),
+                            "avatar_url": getattr(cliente, "avatar_url", None) if cliente else None,
+                            "push_name": getattr(cliente, "nome_whatsapp", None) if cliente else None,
+                            "nome": getattr(cliente, "nome", None) if cliente else formatted,
 
-                # 🔔 Auto-mensagens (welcome/off-hours) — dispara só para ENTRADA 1:1
-                try:
-                    if not from_me and telefone:
-                        import asyncio
-                        from backend.routers.auto_messages import maybe_send_auto_message_async
-                        asyncio.create_task(
-                            maybe_send_auto_message_async(
-                                empresa_id=empresa_id,
-                                instancia_id=inst.id,  # ID interno da instância
-                                instance_slug=getattr(inst, "instance_name", None) or getattr(inst, "nome", None) or str(inst_id),
-                                cliente_id=cli_id,
-                                number=telefone,       # E.164
-                                is_group=False,
-                            )
-                        )
+                            # conteúdo que o front espera
+                            "mensagem":  conteudo,
+                            "tipo":      ("saida" if from_me else "entrada"),
+                            "origem":    ("atendente" if from_me else "cliente"),
+                            "timestamp": _iso_utc(ts_msg),
+
+                            # chaves de conciliação/RT
+                            "msg_id": msg_id or str(msg_db_id),
+                            "ack":    (ack_initial if from_me else None),
+
+                            # para badge de lag
+                            "serverTimestamp": int(_now_utc().timestamp() * 1000),
+                        }
+                    )
                 except Exception as e:
-                    LOG(f"[AUTO] schedule error: {e}")
+                    LOG(f"[UPsert][ws] falha ao emitir: {e}")
 
-                await conexoes_ativas.send_message(
-                    f"emp:{empresa_id}",
-                    {"empresa_id":empresa_id,"cliente_id":cli_id,"telefone":CLI_fmt,
-                     "avatar_url":getattr(cliente,"avatar_url",None) if cliente else None,
-                     "push_name": (push_name or None),
-                     "nome": (cliente.nome if cliente else (push_name or formatted)),
-                     "mensagem":conteudo, "tipo":"saida" if from_me else "entrada",
-                     "origem":"atendente" if from_me else "cliente",
-                     "timestamp": _iso_utc(ts_dt),
-                     "timestamp_local": _iso_local(ts_dt),
-                     "msg_id": msg_id or str(msg_model.id),
-                     "ack": getattr(msg_model,"ack",0) if from_me else None,
-                     "instancia_id": inst.id,
-                     "atendimento_id": getattr(atend, "id", None)}
-                )
+                # commits periódicos para reduzir lock time
+                if (novas % max(1, HISTORY_BATCH_COMMIT)) == 0:
+                    try:
+                        db.commit()
+                        _log_ctx("[UPsert][commit]", count=novas)
+                    except Exception as e:
+                        if _is_deadlock_error(e):
+                            try: db.rollback()
+                            except Exception: pass
+                            _log_ctx("[UPsert][commit-deadlock-rollback]", err=str(e))
+                        else:
+                            raise
+
+                if (novas % 500) == 0:
+                    await asyncio.sleep(0)
 
             except Exception as e:
-                print("[UPSERT][1:1] erro:", e, flush=True)
+                if _is_deadlock_error(e):
+                    _log_ctx("[UPsert][deadlock-skip]", idx=idx, err=str(e))
+                    continue
+                LOG(f"[UPsert] erro em mensagem idx={idx}: {e}")
 
+        # final do lote
+        try:
+            db.commit()
+            _log_ctx("[UPsert][commit-final]", novas=novas)
+        except Exception as e:
+            if _is_deadlock_error(e):
+                try: db.rollback()
+                except Exception: pass
+                _log_ctx("[UPsert][commit-final-deadlock-rollback]", err=str(e))
+            else:
+                raise
+
+        LOG(f"[UPsert] inst={inst_id} novas={novas}")
 
 
 @handler(EvoEvent.CALL)
@@ -1437,14 +1670,17 @@ async def on_call(first: str, payload: dict | list):
 
         if not items:
             try:
-                await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "call", "instance": inst_name, "items": [], "raw": None})
+                await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "call", "instance": inst_name, "items": [], "raw": None, "serverTimestamp": _server_ts_ms()})
             except Exception as e:
                 LOG(f"[CALL] Falha ao emitir WS vazio: {e}")
             return
 
         def _num_of(s: str | None) -> str | None:
-            if not isinstance(s, str): return None
-            if "@s.whatsapp.net" in s: s = s.split("@", 1)[0]
+            if not isinstance(s, str):
+                return None
+            s = _jid_strip_device(s)
+            if s.endswith("@s.whatsapp.net"):
+                s = s.split("@", 1)[0]
             return normalizar_telefone(s)
 
         def _fmt_kind(kind: str | None) -> str:
@@ -1554,7 +1790,8 @@ async def on_call(first: str, payload: dict | list):
                      "timestamp": _iso_utc(ts_dt),
                      "timestamp_local": _iso_local(ts_dt),
                      "msg_id": msg_id or str(m.id),
-                     "ack": None, "instancia_id": inst_row.id}
+                     "ack": None, "instancia_id": inst_row.id,
+                     "serverTimestamp": _server_ts_ms()}
                 )
             except Exception as e:
                 LOG(f"[CALL] Falha ao emitir WS (linha mensagem): {e}")
@@ -1571,7 +1808,7 @@ async def on_call(first: str, payload: dict | list):
             pass
 
     try:
-        await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "call", "instance": inst_name, "items": ws_items})
+        await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "call", "instance": inst_name, "items": ws_items, "serverTimestamp": _server_ts_ms()})
     except Exception as e:
         LOG(f"[CALL] Falha ao emitir WS resumo CALL: {e}")
 
@@ -1605,73 +1842,116 @@ def _avatar_from_contact_like(c: dict) -> str | None:
         or None
     )
 
+
+# -------------------------------------------------------------------------------
+
 @handler(EvoEvent.CONTACTS_UPSERT)
 @handler(EvoEvent.CONTACTS_UPDATE)
 @handler(EvoEvent.CONTACTS_SET)
 async def on_contacts_event(first: str, payload: dict | list):
-    if isinstance(payload, list):    norm = {"data": payload, "instance": first}
-    elif isinstance(payload, dict):  norm = payload if "data" in payload else {"data": payload, "instance": first}
-    else:                            norm = {"data": [payload], "instance": first}
+    # normaliza payload
+    if isinstance(payload, list):
+        norm = {"data": payload, "instance": first}
+    elif isinstance(payload, dict):
+        norm = payload if "data" in payload else {"data": payload, "instance": first}
+    else:
+        norm = {"data": [payload], "instance": first}
 
     inst_id = (_inst_from(norm) or first)
     record_rabbit_event("CONTACTS_UPDATE", inst_id)
 
     data = norm.get("data")
     contatos = extract_contacts_any_shape(data)
-    if not contatos: return
+    if not contatos:
+        return
 
     with SessionLocal() as db:
         inst = _get_inst_row(db, inst_id)
-        if not inst: return
+        if not inst:
+            return
         empresa_id = inst.empresa_id
 
         me_num = _me_number_by_inst(inst)
         mudou = False
+        processed = 0
 
         for c in contatos:
-            if not isinstance(c, dict): continue
+            if not isinstance(c, dict):
+                continue
+
             remote = (c.get("remoteJid") or c.get("id") or c.get("wid") or "")
-            # resolve @lid
+
+            # resolve @lid → @s.whatsapp.net (cache/Evolution/Redis)
             if isinstance(remote, str) and remote.endswith("@lid"):
                 mapped = _resolve_remote_jid(inst_id, remote)
                 if mapped:
                     remote = mapped
                 else:
-                    # tenta também Redis se houver registro antigo
+                    # tenta Redis (mapeamento aprendido anteriormente)
                     try:
                         rd = _lid_map_get(empresa_id, inst.id, _jid_strip_device(remote))
-                        if rd: 
+                        if rd:
                             _LID_CACHE.setdefault(inst_id, {})[_jid_strip_device(remote)] = rd
                             remote = rd
                     except Exception:
                         pass
 
             numero = _remote_to_num(remote)
-            if not numero or (me_num and numero == me_num): continue
+            # se não conseguir extrair número válido OU for meu próprio número → ignora
+            if not numero or (me_num and numero == me_num):
+                continue
 
             nome_push = _name_from_contact_like(c)
             avatar = _avatar_from_contact_like(c)
             nome_default = nome_push or formatar_telefone_br(numero)
 
-            cli_id = upsert_cliente(
-                db,
-                empresa_id=empresa_id,
-                instancia_id=inst.id,
-                telefone_raw=numero,
-                nome=nome_default,
-                nome_whatsapp=nome_push,
-                avatar_url=avatar
-            )
-            if cli_id:
-                mudou = True
+            # 🔒 upsert com retry em caso de deadlock
+            try:
+                cli_id = _retry_deadlock(db, lambda: upsert_cliente(
+                    db,
+                    empresa_id=empresa_id,
+                    instancia_id=inst.id,
+                    telefone_raw=numero,
+                    nome=nome_default,
+                    nome_whatsapp=nome_push,
+                    avatar_url=avatar
+                ))
+                if cli_id:
+                    mudou = True
+            except Exception as e:
+                # MUITO IMPORTANTE: rollback para limpar a transação
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                print(f"[CONTACTS] erro no upsert_cliente: {e}")
+                continue
+
+            processed += 1
+            # cede o loop periodicamente em lotes grandes
+            if (processed % 500) == 0:
+                await asyncio.sleep(0)
 
         if mudou:
-            db.commit()
-            await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "reload_clientes"})
+            try:
+                db.commit()
+            except Exception as e:
+                if _is_deadlock_error(e):
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                else:
+                    raise
+
+            # avisa o front e invalida caches
+            await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "reload_clientes", "serverTimestamp": _server_ts_ms()})
             try:
                 _invalidate_emp_cache(empresa_id)
             except Exception:
                 pass
+
+
 
 def _upsert_grupos_from_chats(db: Session, empresa_id: int, chats: list[dict], inst: models.EmpresaInstancia) -> int:
     imported = 0
@@ -1700,8 +1980,13 @@ def _upsert_grupos_from_chats(db: Session, empresa_id: int, chats: list[dict], i
 
 _HISTORY_DONE_AT: dict[str, float] = {}
 
+# === [HANDLER: MESSAGES_SET / histórico]  ====================================
 @handler(EvoEvent.MESSAGES_SET)
 async def on_messages_set(inst_id: str, data):
+    """
+    Import de histórico com LOG detalhado + overlay.
+    NÃO emite cada mensagem no WS (para não lotar), apenas progresso/done.
+    """
     if not ENABLE_MESSAGES_SET:
         LOG("[MESSAGES_SET] Ignorado (ENABLE_MESSAGES_SET=false).")
         return
@@ -1723,11 +2008,23 @@ async def on_messages_set(inst_id: str, data):
         empresa_id = inst.empresa_id
         historico_opcao = (inst.historico_restaurar or "none").lower()
 
+        # downgrade do 7d via env
+        if historico_opcao == "7d" and not ALLOW_HISTORY_7D:
+            _log_ctx("[HIST] downgrade 7d→24h", inst=inst_id)
+            historico_opcao = "24h"
+
         mensagens = extract_messages_any_shape(data)
         total = len(mensagens)
 
+        _log_ctx("[HIST] start",
+                 inst=inst_id, empresa_id=empresa_id,
+                 historico_opcao=historico_opcao, total=total,
+                 DISABLE_MEDIA_ON_HISTORY=DISABLE_MEDIA_ON_HISTORY,
+                 HISTORY_MAX_IMPORT=HISTORY_MAX_IMPORT,
+                 HISTORY_BATCH_COMMIT=HISTORY_BATCH_COMMIT)
+
         try:
-            await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "history_sync_start", "total": total})
+            await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "history_sync_start", "total": total, "serverTimestamp": _server_ts_ms()})
         except Exception:
             pass
 
@@ -1735,199 +2032,286 @@ async def on_messages_set(inst_id: str, data):
             try:
                 await conexoes_ativas.send_message(
                     f"emp:{empresa_id}",
-                    {"type": "history_sync_done", "total": total, "imported": 0}
+                    {"type": "history_sync_done", "total": total, "imported": 0, "serverTimestamp": _server_ts_ms()}
                 )
             except Exception:
                 pass
             return
 
-        if HISTORY_LIMIT_HOURS > 0:
-            limite_tempo = _now_utc() - timedelta(hours=HISTORY_LIMIT_HOURS)
-        else:
-            dias = 1 if historico_opcao == "24h" else (7 if historico_opcao == "7d" else 0)
-            limite_tempo = _now_utc() - timedelta(days=dias)
+        got_lock = _try_acquire_hist_lock(db, empresa_id, inst.id)
+        if not got_lock:
+            LOG(f"[MESSAGES_SET] lock ocupado para emp={empresa_id} inst={inst.id} — outro import rodando; saindo.")
+            return
 
-        novas = 0
-        me_num = _me_number_by_inst(inst)
+        try:
+            # limite temporal
+            if HISTORY_LIMIT_HOURS > 0:
+                limite_tempo = _now_utc() - timedelta(hours=HISTORY_LIMIT_HOURS)
+            else:
+                dias = 1 if historico_opcao == "24h" else (7 if historico_opcao == "7d" else 0)
+                limite_tempo = _now_utc() - timedelta(days=dias)
 
-        for m in mensagens:
-            if not isinstance(m, dict):
-                continue
+            novas = 0
+            me_num = _me_number_by_inst(inst)
+            cap = max(1, int(HISTORY_MAX_IMPORT))
 
-            ts_raw = m.get("messageTimestamp")
-            if not ts_raw:
-                continue
-            try:
-                ts_msg = _to_dt_utc(ts_raw)
-            except Exception:
-                continue
+            _log_ctx("[HIST] janela/limites",
+                     limite_utc=_iso_utc(limite_tempo),
+                     cap=cap)
 
-            if ts_msg < limite_tempo:
-                continue
+            for idx, m in enumerate(mensagens, start=1):
+                if novas >= cap:
+                    _log_ctx("[HIST] cap atingido", novas=novas, cap=cap)
+                    break
 
-            key = (m.get("key") or {})
-            remote_jid = key.get("remoteJid") or key.get("remote_jid")
-            if not remote_jid:
-                continue
+                if not isinstance(m, dict):
+                    _log_ctx("[HIST][skip] m não é dict", idx=idx, type_m=type(m).__name__)
+                    continue
 
-            # resolve @lid (com fallback)
-            original_jid = remote_jid
-            resolved_jid = _resolve_remote_jid(inst_id, remote_jid)
-            if _is_lid_jid(original_jid) and not resolved_jid:
-                tel_fallback, _ = _resolve_counterparty_num_1to1(m, me_num)
-                if tel_fallback:
-                    resolved_jid = f"{tel_fallback}@s.whatsapp.net"
-                    _LID_CACHE.setdefault(inst_id, {})[_jid_strip_device(original_jid)] = resolved_jid
+                key = (m.get("key") or {})
+                remote_jid = key.get("remoteJid") or key.get("remote_jid") or m.get("remoteJid") or m.get("jid") or m.get("chatId")
+                msg_id = key.get("id") or m.get("id")
+                ts_raw = m.get("messageTimestamp") or m.get("timestamp") or 0
+
+                try:
+                    ts_msg = _to_dt_utc(ts_raw)
+                except Exception:
+                    _log_ctx("[HIST][skip] ts inválido", idx=idx, msg_id=msg_id, ts_raw=ts_raw)
+                    continue
+
+                if ts_msg < limite_tempo:
+                    _log_ctx("[HIST][skip] fora da janela", idx=idx, msg_id=msg_id, ts=_iso_utc(ts_msg))
+                    continue
+
+                if not remote_jid:
+                    _log_ctx("[HIST][skip] sem remoteJid", idx=idx, msg_id=msg_id)
+                    continue
+
+                original_jid = remote_jid
+                resolved_jid = _resolve_remote_jid(inst_id, remote_jid)
+                if _is_lid_jid(original_jid) and not resolved_jid:
+                    tel_fallback, _ = _resolve_counterparty_num_1to1(m, me_num)
+                    _log_ctx("[HIST][lid-fallback]",
+                             idx=idx, msg_id=msg_id, tel_fallback=tel_fallback)
+                    if tel_fallback:
+                        resolved_jid = f"{tel_fallback}@s.whatsapp.net"
+                        _LID_CACHE.setdefault(inst_id, {})[_jid_strip_device(original_jid)] = resolved_jid
+                        try:
+                            _lid_map_set(empresa_id, inst.id, _jid_strip_device(original_jid), resolved_jid)
+                        except Exception as e:
+                            _log_ctx("[HIST][lid-cache-fail]", err=str(e))
+                    else:
+                        _log_ctx("[HIST][skip] @lid sem mapping", idx=idx, msg_id=msg_id)
+                        continue
+
+                remote_jid = resolved_jid or original_jid
+
+                # ===== GRUPO =====
+                if remote_jid.endswith("@g.us"):
+                    from_me   = bool(key.get("fromMe", False))
+                    author_j  = key.get("participant") or m.get("participant") or ""
+                    conteudo  = extract_text_from_baileys(m)
+                    ts_int    = _int_unix(ts_msg)
+
+                    grupo = _grupo_row_by_remote(db, empresa_id, _jid_strip_device(remote_jid), instancia_id=inst.id, inst_obj=inst)
+                    name = _name_from_contact_like(m) or m.get("pushName")
+                    avatar = _avatar_from_contact_like(m)
+                    if name and (grupo.nome or "") != name:
+                        grupo.nome = name
+                    if avatar and (grupo.avatar_url or "") != avatar:
+                        grupo.avatar_url = avatar
+                    _carimbar_inst(grupo, inst)
+
+                    if msg_id and db.query(models.MensagemGrupo.id).filter_by(grupo_id=grupo.id, msg_id=msg_id).first():
+                        _log_ctx("[HIST][skip] duplicada (grupo)", idx=idx, msg_id=msg_id, grupo_id=grupo.id)
+                        continue
+
+                    def _ins_grupo():
+                        msgg = models.MensagemGrupo(
+                            empresa_id=empresa_id, grupo_id=grupo.id, author_jid=author_j, from_me=from_me,
+                            conteudo=conteudo, message_type=m.get("messageType"), lida=from_me,
+                            timestamp=ts_int, msg_id=msg_id, ack=_ack_from_status(m.get("status")) if from_me else None,
+                            instancia_id=inst.id
+                        )
+                        _carimbar_inst(msgg, inst)
+                        db.add(msgg); db.flush()
+                        return msgg.id
+
+                    msgg_id = _retry_deadlock(db, _ins_grupo)
+                    novas += 1
+                    _log_ctx("[HIST][saved][grupo]", idx=idx, msg_id=msg_id, saved_id=msgg_id,
+                             ts=_iso_utc(ts_msg), preview=_short(conteudo))
+
+                else:
+                    # ===== 1:1 =====
+                    telefone = _remote_to_num(remote_jid)
+                    if not telefone:
+                        _log_ctx("[HIST][skip] telefone inválido", idx=idx, msg_id=msg_id, remote_jid=remote_jid)
+                        continue
+
+                    from_me   = bool(key.get("fromMe", False))
+                    conteudo  = extract_text_from_baileys(m)
+
+                    media_meta = None if DISABLE_MEDIA_ON_HISTORY else extract_media_meta(m)
+
+                    def _up():
+                        return upsert_cliente(
+                            db,
+                            empresa_id=empresa_id,
+                            instancia_id=inst.id,
+                            telefone_raw=telefone,
+                            nome=formatar_telefone_br(telefone),
+                            nome_whatsapp=None,
+                            avatar_url=None
+                        )
+                    cli_id = _retry_deadlock(db, _up)
+                    if not cli_id:
+                        _log_ctx("[HIST][skip] upsert_cliente None", idx=idx, msg_id=msg_id, telefone=telefone)
+                        continue
+
+                    if msg_id and db.query(models.Mensagem.id).filter_by(cliente_id=cli_id, msg_id=msg_id).first():
+                        _log_ctx("[HIST][skip] duplicada (1:1)", idx=idx, msg_id=msg_id, cliente_id=cli_id)
+                        continue
+
+                    ack_initial = _ack_from_status(m.get("status"))
+                    ack_initial = ack_initial if from_me else None
+
+                    def _ins_msg():
+                        msg_model = models.Mensagem(
+                            empresa_id=empresa_id, cliente_id=cli_id, conteudo=conteudo,
+                            tipo="saida" if from_me else "entrada", lida=from_me, ack=ack_initial,
+                            timestamp=ts_msg, msg_id=msg_id, instancia_id=inst.id
+                        )
+                        _carimbar_inst(msg_model, inst)
+                        db.add(msg_model); db.flush()
+                        return msg_model.id
+
+                    msg_db_id = _retry_deadlock(db, _ins_msg)
+                    novas += 1
+                    _log_ctx("[HIST][saved][1:1]", idx=idx, msg_id=msg_id, saved_id=msg_db_id,
+                             telefone=telefone, ts=_iso_utc(ts_msg), preview=_short(conteudo),
+                             media=("off" if DISABLE_MEDIA_ON_HISTORY else ("on" if media_meta else "none")))
+
+                    # mídia (se habilitada)
+                    if media_meta:
+                        try:
+                            raw = None
+                            real_name = media_meta.get("filename") or (f"{msg_id}.bin" if msg_id else "file")
+                            real_ct   = media_meta.get("mimetype")
+                            real_len  = None
+
+                            if msg_id:
+                                try:
+                                    conv = True if (media_meta and media_meta.get("tipo") == "video") else None
+                                    evo_raw, evo_name, evo_ct, evo_len = _evo_get_base64_media(inst_id, msg_id, convert_to_mp4=conv)
+                                    raw, real_len = evo_raw, evo_len
+                                    if evo_ct:   real_ct = evo_ct
+                                    if evo_name: real_name = evo_name
+                                except Exception as e:
+                                    _log_ctx("[HIST][midia] base64 falhou", idx=idx, msg_id=msg_id, err=str(e))
+
+                            if raw is None:
+                                b64 = media_meta.get("base64")
+                                if b64:
+                                    raw, mt_from = _b64_to_bytes(b64)
+                                    if mt_from: real_ct = mt_from
+                                    real_len = len(raw) if raw else None
+
+                            if raw is None and msg_id:
+                                try:
+                                    dl_bytes, dl_name, dl_ct, dl_len = _download_media_bytes(inst_id, msg_id, None)
+                                    raw, real_len = dl_bytes, dl_len
+                                    if dl_ct and dl_ct.lower() != "application/octet-stream": real_ct = dl_ct
+                                    if dl_name and not dl_name.lower().endswith(".enc"): real_name = dl_name
+                                except Exception as e:
+                                    _log_ctx("[HIST][midia] download falhou", idx=idx, msg_id=msg_id, err=str(e))
+
+                            if raw:
+                                real_ct_norm = _normalize_mimetype(media_meta["tipo"], real_name, real_ct)
+                                _save_midia_db(
+                                    db, empresa_id=empresa_id, cliente_id=cli_id, mensagem_id=msg_db_id,
+                                    tipo=media_meta["tipo"], filename=real_name or "file",
+                                    mimetype_=real_ct_norm, raw=raw, url_origem=None, content_length=real_len,
+                                    instancia_id=inst.id
+                                )
+                                _log_ctx("[HIST][midia] salva", idx=idx, msg_id=msg_id, name=real_name, mimetype=real_ct_norm, size=real_len)
+                        except Exception as e:
+                            _log_ctx("[HIST][midia] erro ao salvar", idx=idx, msg_id=msg_id, err=str(e))
+
+                # progresso/log periódico
+                if novas % PROG_STEP == 0:
                     try:
-                        _lid_map_set(empresa_id, inst.id, _jid_strip_device(original_jid), resolved_jid)
+                        await conexoes_ativas.send_message(
+                            f"emp:{empresa_id}",
+                            {"type": "history_sync_progress", "imported": novas, "total": total, "serverTimestamp": _server_ts_ms()}
+                        )
                     except Exception:
                         pass
-                else:
-                    continue
-            remote_jid = resolved_jid or original_jid
+                    _log_ctx("[HIST] progress", imported=novas, total=total)
 
-            if remote_jid.endswith("@g.us"):
-                # ===== Grupo =====
-                from_me   = bool(key.get("fromMe", False))
-                author_j  = key.get("participant") or m.get("participant") or ""
-                conteudo  = extract_text_from_baileys(m)
-                msg_id    = key.get("id")
-                ts_int    = _int_unix(ts_msg)
-
-                grupo = _grupo_row_by_remote(db, empresa_id, _jid_strip_device(remote_jid), instancia_id=inst.id, inst_obj=inst)
-                name = _name_from_contact_like(m) or m.get("pushName")
-                if name and (grupo.nome or "") != name:
-                    grupo.nome = name
-                avatar = _avatar_from_contact_like(m)
-                if avatar and (grupo.avatar_url or "") != avatar:
-                    grupo.avatar_url = avatar
-                _carimbar_inst(grupo, inst)
-
-                if msg_id and db.query(models.MensagemGrupo.id).filter_by(grupo_id=grupo.id, msg_id=msg_id).first():
-                    continue
-
-                msgg = models.MensagemGrupo(
-                    empresa_id=empresa_id, grupo_id=grupo.id, author_jid=author_j, from_me=from_me,
-                    conteudo=conteudo, message_type=m.get("messageType"), lida=from_me,
-                    timestamp=ts_int, msg_id=msg_id, ack=_ack_from_status(m.get("status")) if from_me else None,
-                    instancia_id=inst.id
-                )
-                _carimbar_inst(msgg, inst)
-                db.add(msgg)
-                novas += 1
-
-            else:
-                # ===== 1:1 =====
-                telefone = _remote_to_num(remote_jid)
-                if not telefone:
-                    continue
-
-                from_me   = bool(key.get("fromMe", False))
-                conteudo  = extract_text_from_baileys(m)
-                media_meta = extract_media_meta(m)
-
-                cli_id = upsert_cliente(
-                    db,
-                    empresa_id=empresa_id,
-                    instancia_id=inst.id,
-                    telefone_raw=telefone,
-                    nome=formatar_telefone_br(telefone),
-                    nome_whatsapp=None,
-                    avatar_url=None
-                )
-                if not cli_id:
-                    continue
-
-                msg_id = key.get("id")
-                if msg_id and db.query(models.Mensagem.id).filter_by(cliente_id=cli_id, msg_id=msg_id).first():
-                    continue
-
-                ack_initial = _ack_from_status(m.get("status"))
-                ack_initial = ack_initial if from_me else None
-                msg_model = models.Mensagem(
-                    empresa_id=empresa_id, cliente_id=cli_id, conteudo=conteudo,
-                    tipo="saida" if from_me else "entrada", lida=from_me, ack=ack_initial,
-                    timestamp=ts_msg, msg_id=msg_id, instancia_id=inst.id
-                )
-                _carimbar_inst(msg_model, inst)
-                db.add(msg_model); db.flush()
-                novas += 1
-
-                if media_meta:
+                # commits pequenos
+                if novas % max(1, HISTORY_BATCH_COMMIT) == 0:
                     try:
-                        raw = None
-                        real_name = media_meta.get("filename") or (f"{msg_id}.bin" if msg_id else "file")
-                        real_ct   = media_meta.get("mimetype")
-                        real_len  = None
-
-                        if msg_id:
-                            try:
-                                conv = True if (media_meta and media_meta.get("tipo") == "video") else None
-                                evo_raw, evo_name, evo_ct, evo_len = _evo_get_base64_media(inst_id, msg_id, convert_to_mp4=conv)
-                                raw, real_len = evo_raw, evo_len
-                                if evo_ct: real_ct = evo_ct
-                                if evo_name: real_name = evo_name
-                            except Exception as e:
-                                LOG(f"[MIDIA/SET] ({msg_id}) base64 falhou: {e}")
-
-                        if raw is None:
-                            b64 = media_meta.get("base64")
-                            if b64:
-                                raw, mt_from = _b64_to_bytes(b64)
-                                if mt_from: real_ct = mt_from
-                                real_len = len(raw) if raw else None
-
-                        if raw is None and msg_id:
-                            dl_bytes, dl_name, dl_ct, dl_len = _download_media_bytes(inst_id, msg_id, None)
-                            raw, real_len = dl_bytes, dl_len
-                            if dl_ct and dl_ct.lower() != "application/octet-stream": real_ct = dl_ct
-                            if dl_name and not dl_name.lower().endswith(".enc"): real_name = dl_name
-
-                        if raw:
-                            real_ct_norm = _normalize_mimetype(media_meta["tipo"], real_name, real_ct)
-                            _save_midia_db(
-                                db, empresa_id=empresa_id, cliente_id=cli_id, mensagem_id=msg_model.id,
-                                tipo=media_meta["tipo"], filename=real_name or "file",
-                                mimetype_=real_ct_norm, raw=raw, url_origem=None, content_length=real_len,
-                                instancia_id=inst.id
-                            )
+                        db.commit()
+                        _log_ctx("[HIST] commit", imported=novas)
                     except Exception as e:
-                        LOG(f"[MIDIA/SET] ({msg_id}) falha ao salvar: {e}")
+                        if _is_deadlock_error(e):
+                            try: db.rollback()
+                            except Exception: pass
+                            time.sleep(0.1)
+                            _log_ctx("[HIST] commit-deadlock-rollback]", err=str(e))
+                        else:
+                            raise
 
-            if novas % PROG_STEP == 0:
-                try:
-                    await conexoes_ativas.send_message(
-                        f"emp:{empresa_id}",
-                        {"type": "history_sync_progress", "imported": novas, "total": total}
-                    )
-                except Exception:
-                    pass
+                if novas % max(1, HISTORY_SLEEP_EVERY) == 0:
+                    await asyncio.sleep(0)
 
-        db.commit()
-        try:
-            await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "reload_clientes"})
-        except Exception:
-            pass
-        try:
-            await conexoes_ativas.send_message(
-                f"emp:{empresa_id}",
-                {"type": "history_sync_done", "total": total, "imported": novas}
-            )
-        except Exception:
-            pass
+            # final
+            try:
+                db.commit()
+                _log_ctx("[HIST] commit-final", imported=novas)
+            except Exception as e:
+                if _is_deadlock_error(e):
+                    try: db.rollback()
+                    except Exception: pass
+                    _log_ctx("[HIST] commit-final-deadlock-rollback]", err=str(e))
+                else:
+                    raise
 
-        try:
-            _invalidate_emp_cache(empresa_id)
-        except Exception:
-            pass
+            try:
+                await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "reload_clientes", "serverTimestamp": _server_ts_ms()})
+            except Exception:
+                pass
+            try:
+                await conexoes_ativas.send_message(
+                    f"emp:{empresa_id}",
+                    {"type": "history_sync_done", "total": total, "imported": novas, "serverTimestamp": _server_ts_ms()}
+                )
+            except Exception:
+                pass
 
-        if historico_opcao != "none" and novas > 0:
-            _HISTORY_DONE_AT[inst_id] = now_s
+            try:
+                _invalidate_emp_cache(empresa_id)
+            except Exception:
+                pass
+
+            if historico_opcao != "none" and novas > 0:
+                _HISTORY_DONE_AT[inst_id] = now_s
+
+        finally:
+            # sempre solta o lock
+            try:
+                _release_hist_lock(db, empresa_id, inst.id)
+            except Exception:
+                pass
+
+
 
 @handler(EvoEvent.MESSAGES_UPDATE)
 async def on_messages_update(first: str, payload: dict | list):
     """
     Recebe atualizações de status/ack do Evolution/Baileys.
+    Publica WS 'type: ack' (com serverTimestamp) para emp:{empresa} e inst:{inst}.
     """
     raw = payload
     data = raw["data"] if isinstance(raw, dict) and isinstance(raw.get("data"), (dict, list)) else raw
@@ -1981,7 +2365,7 @@ async def on_messages_update(first: str, payload: dict | list):
                                  END
                      WHERE {where}
                 """),
-                params,
+                params,  # executemany
             )
             db.commit()
         except Exception as e:
@@ -1996,14 +2380,17 @@ async def on_messages_update(first: str, payload: dict | list):
 
         # --- mapear msg_id -> cliente_id para incluir no WS ---
         try:
+            from sqlalchemy import bindparam  # import local p/ evitar depender do topo do arquivo
             msg_ids = tuple({p["msg_id"] for p in params})
             if msg_ids:
-                q = "SELECT msg_id, cliente_id FROM mensagens WHERE msg_id IN :ids"
-                args = {"ids": msg_ids}
+                base = "SELECT msg_id, cliente_id FROM mensagens WHERE msg_id IN :ids"
+                args = {"ids": list(msg_ids)}
                 if emp_id:
-                    q += " AND empresa_id = :emp_id"
+                    base += " AND empresa_id = :emp_id"
                     args["emp_id"] = int(emp_id)
-                rows = db.execute(text(q), args).fetchall()
+
+                q = text(base).bindparams(bindparam("ids", expanding=True))
+                rows = db.execute(q, args).fetchall()
                 for r in rows or []:
                     try:
                         mid, cid = str(r[0]), int(r[1]) if r[1] is not None else None
@@ -2029,12 +2416,15 @@ async def on_messages_update(first: str, payload: dict | list):
             "msg_id": p["msg_id"],
             "ack": p["new_ack"],
             "cliente_id": cli_by_msg.get(p["msg_id"]),
+            "serverTimestamp": _server_ts_ms(),
         }
         for target in targets:
             try:
                 await conexoes_ativas.send_message(target, payload_ws)
             except Exception as e:
                 print(f"[ACK DEBUG] Falha ao emitir WS para {target}: {e}")
+
+
 
 @handler(EvoEvent.PRESENCE_UPDATE)
 async def on_presence_update(first: str, payload: dict | list):
@@ -2061,7 +2451,7 @@ async def _sync_contatos_completos(inst_id: str):
             LOG(f"[CONTACTS] erro ao buscar: {e}"); return
 
         total = len(contatos); imported = 0
-        await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type":"contacts_sync_start","total": total})
+        await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type":"contacts_sync_start","total": total, "serverTimestamp": _server_ts_ms()})
 
         me_num = _me_number_by_inst(inst)
         mudou = False
@@ -2082,7 +2472,7 @@ async def _sync_contatos_completos(inst_id: str):
                         pass
 
             numero = _remote_to_num(remote)
-            if not numero or (me_num and numero == me_num): 
+            if not numero or (me_num and numero == me_num):
                 continue
 
             nome_push = _name_from_contact_like(c)
@@ -2103,11 +2493,11 @@ async def _sync_contatos_completos(inst_id: str):
                 mudou = True
 
             if idx % 25 == 0:
-                await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type":"contacts_sync_progress","total": total,"imported": imported})
+                await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type":"contacts_sync_progress","total": total,"imported": imported, "serverTimestamp": _server_ts_ms()})
 
         if mudou: db.commit()
-        await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type":"contacts_sync_done","total": total,"imported": imported})
-        await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type":"reload_clientes"})
+        await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type":"contacts_sync_done","total": total,"imported": imported, "serverTimestamp": _server_ts_ms()})
+        await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type":"reload_clientes", "serverTimestamp": _server_ts_ms()})
 
         try:
             _invalidate_emp_cache(empresa_id)
@@ -2138,13 +2528,19 @@ async def _sync_chats_completos(inst_id: str):
         db.commit()
         after = db.query(models.Grupo).filter(models.Grupo.empresa_id==empresa_id).count()
         if after != before:
-            await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type":"reload_grupos","total": after})
+            await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type":"reload_grupos","total": after, "serverTimestamp": _server_ts_ms()})
 
 # =========================
 # Forçar QR no WS (usado pelo main)
 # =========================
 async def force_qr_now_async(inst_id: str):
-    if not EVOLUTION_FORCE_QR_ON_WS: return
+    if not EVOLUTION_FORCE_QR_ON_WS:
+        return
+    # ---- Lock leve para evitar rajadas (reconexões, múltiplas abas)
+    if not qr_force_lock_acquire(inst_id, ttl_sec=3):
+        LOG(f"[QR WS] force_qr ignorado por lock (inst={inst_id})")
+        return
+    # ---- segue fluxo atual
     try:
         js = await asyncio.to_thread(_evo_connect, inst_id)
         if isinstance(js, dict):

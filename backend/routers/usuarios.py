@@ -1,18 +1,21 @@
+# backend/routers/usuarios.py
 from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Response, status
+from fastapi import (
+    APIRouter, Depends, UploadFile, File, HTTPException, Response, status
+)
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models import Usuario, Departamento, Empresa
-from backend.routers.auth import get_current_user  # garante usuário autenticado (admin, no seu wrapper)
+from backend.routers.auth import get_current_user  # garante usuário autenticado (admin)
 from backend.routers.auth import hash_pwd          # mesmo hash usado no auth
 
 
-router = APIRouter(prefix="/usuarios", tags=["Usuários"])
+router = APIRouter(prefix="/usuarios", tags=["Usuarios"])
 
 
 # =========================
@@ -90,14 +93,14 @@ def criar_usuario(
 
 @router.get("/me", status_code=status.HTTP_200_OK)
 def obter_me(current_user: Usuario = Depends(get_current_user)):
-    """Retorna dados do usuário autenticado."""
+    """Retorna dados do usuário autenticado (admin)."""
     return {
         "id": current_user.id,
         "empresa_id": current_user.empresa_id,
         "nome": current_user.nome,
         "email": current_user.email,
-        "cargo": current_user.cargo,
-        "is_admin": current_user.is_admin,
+        "cargo": getattr(current_user, "cargo", None),
+        "is_admin": getattr(current_user, "is_admin", False),
     }
 
 
@@ -137,9 +140,13 @@ async def upload_avatar(
 )
 def get_avatar_me(current_user: Usuario = Depends(get_current_user)):
     """Retorna a imagem do avatar do usuário (apenas Admin)."""
-    if not current_user.avatar_data:
+    if not getattr(current_user, "avatar_data", None):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Sem avatar")
-    data = current_user.avatar_data.tobytes() if isinstance(current_user.avatar_data, memoryview) else current_user.avatar_data
+    data = (
+        current_user.avatar_data.tobytes()
+        if isinstance(current_user.avatar_data, memoryview)
+        else current_user.avatar_data
+    )
     return Response(content=data, media_type=current_user.avatar_mime or "application/octet-stream")
 
 
@@ -157,10 +164,10 @@ def get_usuario_avatar_by_id(
     if not u:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Usuário não encontrado")
 
-    if not u.avatar_data:
+    if not getattr(u, "avatar_data", None):
         # Sem avatar salvo → 204; front usa monograma
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     data = u.avatar_data.tobytes() if isinstance(u.avatar_data, memoryview) else u.avatar_data
-    mime = u.avatar_mime or "image/png"
+    mime = getattr(u, "avatar_mime", None) or "image/png"
     return Response(content=data, media_type=mime)

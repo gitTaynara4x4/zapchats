@@ -1,4 +1,6 @@
-// Colaboradores – lista + modal de perfil (visualização/edição) e fluxo de criação
+/* Colaboradores – lista + modal de perfil (visualização/edição) e fluxo de criação
+   (versão com: troca de senha em edição, validação opcional da senha, salvamento de instâncias
+   e correção de refs DOM recriadas nas fieldboxes) */
 (function ColaboradoresPage(){
   'use strict';
 
@@ -70,19 +72,15 @@
     colaboradores: [],
     filtroTexto: '',
     filtroSetorId: '',
-    permsSet: null,         // minhas permissões efetivas
+    permsSet: null,
 
-    // perfil
-    viewing: null,          // objeto colaborador atual
+    viewing: null,
     inlineEdit: false,
 
-    // criação via modal de perfil
-    newAvatarFile: null,    // arquivo escolhido no hint (modo "novo")
+    newAvatarFile: null,
 
-    // instâncias (WhatsApp)
-    instsCache: null,       // [{id, slug, name, number, connected}]
+    instsCache: null,
 
-    // exibir erros de validação só depois da 1ª tentativa de salvar
     showErrors: false
   };
 
@@ -117,7 +115,7 @@
     toast._t = setTimeout(()=> toastEl.classList.remove('show'), 3200);
   }
 
-  // ====== Elements ======
+  // ====== Elements (estáveis/no topo do modal) ======
   const filtroTxt   = $('#filtro');
   const filtroDepto = $('#filtro-depto');
   const btnFiltrar  = $('#btn-filtrar');
@@ -128,11 +126,11 @@
 
   // Modal PERFIL
   const perfilModal  = $('#modal-perfil');
-  const pClose       = $('#perfil-fechar');    // (fica oculto; usamos fechar do rodapé)
+  const pClose       = $('#perfil-fechar');
   const pClose2      = $('#perfil-fechar2');
   const pEdit        = $('#perfil-editar');
-  const pSave        = $('#perfil-salvar');    // topo (oculto no layout)
-  const pCancel      = $('#perfil-cancelar');  // topo (oculto no layout)
+  const pSave        = $('#perfil-salvar');
+  const pCancel      = $('#perfil-cancelar');
   const pTitle       = $('#perfil-title');
 
   // avatar + status
@@ -141,18 +139,12 @@
   const dStatus  = $('#p-status');
   const dStatusText = $('#p-status-text');
 
-  // hint/CTA avatar (apenas modo "novo")
+  // hint/CTA avatar (modo "novo")
   const avatarHint   = $('#avatar-hint');
   const btnAddAvatar = $('#btn-add-avatar');
   const pAvatarInput = $('#p-avatar-input');
 
-  // Fieldboxes (view)
-  const vNome    = $('#v-nome');
-  const vEmailA  = $('#v-email');
-  const vEmpresa = $('#v-empresa');
-  const vDepto   = $('#v-depto');
-  const vTelA    = $('#v-tel');
-  const vCargo   = $('#v-cargo');
+  // Permissões (estáveis)
   const dPerms   = $('#d-perms');
   const ePerms   = $('#e-perms');
 
@@ -169,7 +161,7 @@
       pSaveFoot.type = 'button';
       pSaveFoot.innerHTML = '<i class="fa fa-check"></i> Salvar';
       pSaveFoot.addEventListener('click', saveInline);
-      footEl.insertBefore(pSaveFoot, footEl.lastElementChild); // antes do fechar padrão
+      footEl.insertBefore(pSaveFoot, footEl.lastElementChild);
     }
     if (!pCancelFoot){
       pCancelFoot = document.createElement('button');
@@ -177,7 +169,7 @@
       pCancelFoot.className = 'btn btn-ghost';
       pCancelFoot.type = 'button';
       pCancelFoot.textContent = 'Cancelar';
-      pCancelFoot.addEventListener('click', ()=> {
+      pCancelFoot.addEventListener('click', ()=>{
         if (perfilModal?.dataset.mode === 'create') closePerfil();
         else exitInlineEdit(true);
       });
@@ -225,37 +217,26 @@
   }
 
   // ====== Instâncias (WhatsApp) ======
-  function normInstances(items){
-    if (!Array.isArray(items)) return [];
-    return items.map(x=>{
-      const id   = (x.id!=null) ? Number(x.id)
-                : (x.instancia_id!=null ? Number(x.instancia_id) : null);
-      const slug = String(x.instance_name ?? x.slug ?? x.nome ?? '').trim();
-      const name = String((x.apelido ?? x.name ?? x.nome ?? slug) || '').trim();
-      const number = x.numero_instancia ?? x.numero ?? null;
-      const connected = !!x.connected || !!x.online || (String(x.status||'').toLowerCase()==='connected');
-      return (id || slug) ? { id, slug, name: name || slug, number, connected } : null;
-    }).filter(Boolean);
-  }
   async function fetchInstances(){
     if (state.instsCache) return state.instsCache;
     let arr = [];
     if (EMPRESA_ID){
       try{
         const data = await apiGet(`/api/empresas/${EMPRESA_ID}/whatsapp`);
+        const normInstances = (items)=>{
+          if (!Array.isArray(items)) return [];
+          return items.map(x=>{
+            const id   = (x.id!=null) ? Number(x.id)
+                      : (x.instancia_id!=null ? Number(x.instancia_id) : null);
+            const slug = String(x.instance_name ?? x.slug ?? x.nome ?? '').trim();
+            const name = String((x.apelido ?? x.name ?? x.nome ?? slug) || '').trim();
+            const number = x.numero_instancia ?? x.numero ?? null;
+            const connected = !!x.connected || !!x.online || (String(x.status||'').toLowerCase()==='connected');
+            return (id || slug) ? { id, slug, name: name || slug, number, connected } : null;
+          }).filter(Boolean);
+        };
         arr = normInstances(Array.isArray(data?.instancias) ? data.instancias : (Array.isArray(data) ? data : []));
-      }catch(e){ console.warn('instancias whatsapp', e); }
-    }
-    if (!arr.length){
-      const fallbacks = ['/api/atendimento/instances','/api/instances'];
-      for (const url of fallbacks){
-        try{
-          const d = await apiGet(url);
-          const items = Array.isArray(d?.items) ? d.items : (Array.isArray(d) ? d : []);
-          arr = normInstances(items);
-          if (arr.length) break;
-        }catch{}
-      }
+      }catch(e){ /* ignora */ }
     }
     state.instsCache = arr;
     return arr;
@@ -304,48 +285,46 @@
       }
     }
   }
-
   function ensureInstsSection(){
-    let wrap = document.getElementById('insts-wrap');
-    if (!wrap){
-      wrap = document.createElement('div');
-      wrap.id = 'insts-wrap';
-      wrap.className = 'fieldbox';
-      wrap.style.marginTop = '10px';           // respiro extra
-      wrap.innerHTML = `
-        <label style="display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap">
-          Quais WhatsApps este atendente pode acessar?
-          <span class="muted">(marque um ou mais — opcional)</span>
-        </label>
+    let full = document.getElementById('insts-full');
+    if (!full){
+      full = document.createElement('div');
+      full.id = 'insts-full';
+      full.className = 'full';
+      full.innerHTML = `
+        <dt>WhatsApps</dt>
+        <dd>
+          <div id="insts-wrap" class="fieldbox">
+            <label style="display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap">
+              Quais WhatsApps este atendente pode acessar?
+              <span class="muted">(marque um ou mais — opcional)</span>
+            </label>
 
-        <div id="inst-actions" style="display:none;gap:.5rem;margin:.35rem 0 .5rem 0">
-          <button type="button" id="inst-select-all" class="btn btn-ghost" style="padding:.25rem .5rem;font-size:.85rem">Selecionar todos</button>
-          <button type="button" id="inst-clear" class="btn btn-ghost" style="padding:.25rem .5rem;font-size:.85rem">Limpar</button>
-        </div>
+            <div id="inst-actions" style="display:none;gap:.5rem;margin:.35rem 0 .5rem 0">
+              <button type="button" id="inst-select-all" class="btn btn-ghost" style="padding:.25rem .5rem;font-size:.85rem">Selecionar todos</button>
+              <button type="button" id="inst-clear" class="btn btn-ghost" style="padding:.25rem .5rem;font-size:.85rem">Limpar</button>
+            </div>
 
-        <div id="e-insts" style="display:none;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.5rem"></div>
-        <div id="d-insts" class="chips" style="display:flex;flex-wrap:wrap;gap:.5rem"></div>
+            <div id="e-insts" style="display:none;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.5rem"></div>
+            <div id="d-insts" class="chips" style="display:flex;flex-wrap:wrap;gap:.5rem"></div>
+          </div>
+        </dd>
       `;
+      const permFull =
+        dPerms?.closest('.full') ||
+        ePerms?.closest('.full') ||
+        dPerms?.parentElement?.closest('.full') ||
+        ePerms?.parentElement?.closest('.full');
 
-      // ⚠️ insere APÓS o .fieldbox de permissões (não dentro)
-      const permsBox =
-        ePerms?.closest('.fieldbox') ||
-        dPerms?.closest('.fieldbox') ||
-        ePerms?.parentElement ||
-        dPerms?.parentElement;
-
-      if (permsBox && permsBox.parentElement){
-        permsBox.parentElement.insertBefore(wrap, permsBox.nextSibling);
-      } else {
-        // fallback: adiciona ao corpo do modal
-        perfilModal?.querySelector('.modal-body')?.appendChild(wrap);
+      const grid = document.querySelector('#details-grid, .details-grid');
+      if (permFull && permFull.parentElement){
+        permFull.parentElement.insertBefore(full, permFull);
+      } else if (grid){
+        grid.appendChild(full);
       }
     }
-    return wrap;
+    return full.querySelector('#insts-wrap');
   }
-
-
-
   async function renderInstsView(colab){
     const wrap = ensureInstsSection();
     const chipsWrap = wrap.querySelector('#d-insts');
@@ -415,7 +394,7 @@
     }
   }
 
-  // ====== Mapeia nomes alternativos vindos da API ======
+  // ====== Coalesce helpers ======
   function coalescePhone(c){
     return c.telefone ?? c.telefone_norm ?? c.phone ?? c.celular ?? c.whatsapp ?? c.fone
         ?? c.usuario?.telefone ?? c.user?.phone ?? '';
@@ -479,7 +458,6 @@
     state.setores = [];
     renderSetores();
   }
-
   async function loadColaboradores(){
     const p = new URLSearchParams();
     if (state.filtroTexto) p.set('q', state.filtroTexto);
@@ -501,7 +479,6 @@
       const first = filtroDepto.querySelector('option');
       filtroDepto.innerHTML=''; if (first) filtroDepto.appendChild(first);
       state.setores.forEach(s => filtroDepto.appendChild(new Option(s.nome,s.id)));
-      if (state.filtroSetorId) filtroDepto.value = state.filtroSetorId;
     }
     if (fSetor){
       fSetor.innerHTML = '';
@@ -515,10 +492,13 @@
       .filter(c => !q || [c.nome,c.email,coalescePhone(c),c.cargo].some(v => String(v||'').toLowerCase().includes(q)))
       .filter(c => !depId || String(coalesceDeptId(c) ?? '') === depId);
 
-    countEl.textContent = rows.length;
-    tbody.innerHTML = '';
-    if (!rows.length){ emptyState.style.display='flex'; return; }
-    emptyState.style.display='none';
+    if (countEl) countEl.textContent = rows.length;
+    if (tbody) tbody.innerHTML = '';
+    if (!rows.length){
+      if (emptyState) emptyState.style.display='flex';
+      return;
+    }
+    if (emptyState) emptyState.style.display='none';
 
     rows.forEach((c,i)=>{
       const depName = coalesceDeptName(c)
@@ -531,22 +511,66 @@
         <td>${c.email||'-'}</td>
         <td>${depName}</td>
         <td class="td-actions">
-          <button class="btn btn-ghost" data-action="view" data-id="${c.id}" title="Ver perfil"><i class="fa fa-pen"></i></button>
-          <button class="btn btn-ghost" data-action="del" data-id="${c.id}" title="Remover"><i class="fa fa-trash"></i></button>
+          <button class="btn btn-ghost" data-action="view" data-id="${c.id ?? ''}" title="Ver perfil"><i class="fa fa-pen"></i></button>
+          <button class="btn btn-ghost" data-action="del" data-id="${c.id ?? ''}" title="Remover"><i class="fa fa-trash"></i></button>
         </td>
       `.trim();
       tbody.appendChild(tr);
     });
   }
 
-  // ====== Avatar (perfil/hint) ======
+  // ====== Avatar ======
+  function replaceExt(name, ext){
+    return (name || 'avatar').replace(/\.[^.]+$/, '') + ext;
+  }
+  function convertToPng(file){
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        try{
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          canvas.toBlob((blob) => {
+            if (!blob) return reject(new Error('toBlob falhou'));
+            const out = new File([blob], replaceExt(file.name, '.png'), { type: 'image/png' });
+            URL.revokeObjectURL(url);
+            resolve(out);
+          }, 'image/png', 0.92);
+        }catch(e){
+          URL.revokeObjectURL(url);
+          reject(e);
+        }
+      };
+      img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+      img.src = url;
+    });
+  }
+  async function uploadAvatarTo(url, file){
+    const fieldNames = ['avatar','file','upload'];
+    for (const name of fieldNames){
+      const fd = new FormData();
+      fd.append(name, file);
+      try {
+        await apiForm(url, 'PUT', fd);
+        return true;
+      } catch(e) { /* tenta o próximo */ }
+    }
+    return false;
+  }
   function setPerfilAvatar(nome, url){
     if (url){
-      pAvatar.src=url; pAvatar.style.display='block'; pMono.style.display='none';
+      if (pAvatar){ pAvatar.src=url; pAvatar.style.display='block'; }
+      if (pMono)  pMono.style.display='none';
     } else {
-      pMono.textContent = initials(nome);
-      pMono.style.display='grid'; pAvatar.removeAttribute('src'); pAvatar.style.display='none';
-      pMono.parentElement.style.background = hashColor(nome||'ZapChats');
+      if (pMono){
+        pMono.textContent = initials(nome);
+        pMono.style.display='grid';
+        pMono.parentElement && (pMono.parentElement.style.background = hashColor(nome||'ZapChats'));
+      }
+      if (pAvatar){ pAvatar.removeAttribute('src'); pAvatar.style.display='none'; }
     }
   }
   async function fetchAvatarURLFor(colab){
@@ -569,6 +593,90 @@
     return colab.avatar_url || null;
   }
 
+  // <<< handleAvatarFile
+  async function handleAvatarFile(file){
+    if (!file) return;
+
+    const okByMime = /^image\//i.test(file.type || '');
+    const okByExt  = /\.(png|jpe?g|webp|gif|bmp|svg|avif|heic|heif)$/i.test(file.name || '');
+    if (!okByMime && !okByExt){
+      toast('Envie uma imagem (PNG, JPG, WEBP, GIF, SVG, AVIF, HEIC).','warn');
+      return;
+    }
+    const needConvert = /image\/(webp|avif|heic|heif)/i.test(file.type || '') ||
+                        /\.(webp|avif|heic|heif)$/i.test(file.name || '');
+    if (needConvert){
+      try { file = await convertToPng(file); } catch(e){ /* segue com original */ }
+    }
+    state.newAvatarFile = file;
+    const url = URL.createObjectURL(file);
+    setPerfilAvatar($('#e-nome')?.value || coalesceName(state.viewing) || 'Novo Colaborador', url);
+  }
+
+  // === Arrastar/soltar + Colar imagem (criar e editar) ===
+  function bindAvatarDnDAndPaste(){
+    const avatarWrap = $('#avatar-wrap');
+    const fileInput  = $('#p-avatar-input');
+    if (!avatarWrap) return;
+
+    // clique abre seletor (sempre)
+    if (fileInput){
+      fileInput.setAttribute('accept','image/*,.svg,.webp,.avif,.heic,.heif');
+      avatarWrap.onclick = () => { fileInput.value = ''; fileInput.click(); };
+      fileInput.onchange = () => handleAvatarFile(fileInput.files?.[0] || null);
+    }
+
+    // evita duplicar binds
+    if (avatarWrap.dataset.dndBound !== '1'){
+      avatarWrap.dataset.dndBound = '1';
+
+      const onDragOver = (e)=>{ e.preventDefault(); e.stopPropagation(); avatarWrap.classList.add('drag-over'); };
+      const onDragLeave= (e)=>{ e.preventDefault(); e.stopPropagation(); avatarWrap.classList.remove('drag-over'); };
+      const onDrop = (e)=>{
+        e.preventDefault(); e.stopPropagation();
+        avatarWrap.classList.remove('drag-over');
+        const f = e.dataTransfer?.files?.[0];
+        if (f) handleAvatarFile(f);
+      };
+      ['dragenter','dragover'].forEach(ev=> avatarWrap.addEventListener(ev, onDragOver));
+      ['dragleave','dragend'].forEach(ev=> avatarWrap.addEventListener(ev, onDragLeave));
+      avatarWrap.addEventListener('drop', onDrop);
+    }
+
+    // colar (global – uma única vez)
+    if (!window.__avatarPasteBound){
+      window.__avatarPasteBound = true;
+      window.addEventListener('paste', async (e)=>{
+        const files = e.clipboardData?.files;
+        if (files && files.length){
+          handleAvatarFile(files[0]);
+          return;
+        }
+        const items = e.clipboardData?.items || [];
+        for (const it of items){
+          if (it.type && it.type.indexOf('image') === 0){
+            const blob = it.getAsFile();
+            if (blob) {
+              handleAvatarFile(new File([blob], 'clipboard.png', { type: blob.type || 'image/png' }));
+              return;
+            }
+          }
+          if (it.type === 'text/plain'){
+            const url = await new Promise(r => it.getAsString(r));
+            if (/^https?:\/\/.+\.(png|jpe?g|webp|gif|svg|avif|heic|heif)(\?.*)?$/i.test(url)){
+              try{
+                const res = await fetch(url);
+                const b   = await res.blob();
+                const name = url.split('/').pop()?.split('?')[0] || 'image';
+                handleAvatarFile(new File([b], name, { type: b.type || 'image/png' }));
+              }catch{/* CORS/NETWORK: ignora */}
+            }
+          }
+        }
+      });
+    }
+  }
+
   async function loadEmpresa(){
     if (!EMPRESA_ID) return null;
     try{ return await apiGet(`/api/empresas/${EMPRESA_ID}`); }catch{ return null; }
@@ -584,61 +692,95 @@
     return c;
   }
 
+  // ====== View placeholders – requery sempre ======
+  function setPlaceholderPerfil(){
+    const vNome   = $('#v-nome');
+    const vEmailA = $('#v-email');
+    const vEmpresa= $('#v-empresa');
+    const vDepto  = $('#v-depto');
+    const vTelA   = $('#v-tel');
+    const vCargo  = $('#v-cargo');
+
+    if (pTitle) pTitle.textContent = 'Carregando…';
+    if (vNome)  vNome.textContent = '—';
+    if (vEmailA){ vEmailA.textContent = '—'; vEmailA.href = '#'; }
+    if (vEmpresa) vEmpresa.textContent = '—';
+    if (vDepto) vDepto.textContent = '—';
+    if (vTelA){ vTelA.textContent = '—'; vTelA.href = '#'; }
+    if (vCargo) vCargo.textContent = '—';
+  }
+
+  // ====== Render perfil (view) – requery elementos a cada render ======
   async function renderPerfilView(colab){
+    const vNome   = $('#v-nome');
+    const vEmailA = $('#v-email');
+    const vEmpresa= $('#v-empresa');
+    const vDepto  = $('#v-depto');
+    const vTelA   = $('#v-tel');
+    const vCargo  = $('#v-cargo');
+
     const empresa = await loadEmpresa();
     if (!state.setores.length) { try{ await loadSetores(); }catch{} }
     state.viewing = colab;
     state.showErrors = false;
 
-    pTitle.textContent = perfilModal.dataset.mode === 'create'
+    if (pTitle) pTitle.textContent = perfilModal.dataset.mode === 'create'
       ? 'Novo colaborador'
       : (coalesceName(colab) || 'Perfil do colaborador');
 
     const photoURL = await fetchAvatarURLFor(colab);
     setPerfilAvatar(coalesceName(colab), photoURL);
 
-    dStatus.style.background = '#008b32';
-    dStatusText.textContent = 'Disponível';
+    if (dStatus) dStatus.style.background = '#008b32';
+    if (dStatusText) dStatusText.textContent = 'Disponível';
 
     const nome  = coalesceName(colab);
     const email = coalesceEmail(colab);
 
-    vNome.textContent     = nome || '—';
-    vEmailA.textContent   = email || '—';
-    vEmailA.href          = email ? `mailto:${email}` : '#';
-    vEmpresa.textContent  = empresa?.nome || '—';
+    if (vNome)    vNome.textContent     = nome || '—';
+    if (vEmailA){ vEmailA.textContent   = email || '—'; vEmailA.href = email ? `mailto:${email}` : '#'; }
+    if (vEmpresa) vEmpresa.textContent  = empresa?.nome || '—';
 
     const depId   = coalesceDeptId(colab);
     const depName = coalesceDeptName(colab) || state.setores.find(s => String(s.id)===String(depId))?.nome;
-    vDepto.textContent    = depName || '—';
+    if (vDepto) vDepto.textContent = depName || '—';
 
     const telRaw  = coalescePhone(colab);
     const telDisp = telRaw ? maskPhoneDisplay(telRaw.replace(/^\+/,'')) : '—';
-    vTelA.textContent = telDisp;
-    vTelA.href        = telRaw ? `tel:${telE164(telRaw)}` : '#';
+    if (vTelA){ vTelA.textContent = telDisp; vTelA.href = telRaw ? `tel:${telE164(telRaw)}` : '#'; }
 
     const cargoVal = coalesceCargo(colab);
     const adm = isAdminFlag(colab);
-    vCargo.textContent = adm ? '' : (cargoVal || '—');
+    if (vCargo) vCargo.textContent = adm ? '' : (cargoVal || '—');
     renderAdminBadge(colab);
 
-    dPerms.innerHTML = '';
-    const permsList = (colab.permissoes||[]).map(x => (x.id||x).toString());
-    if (permsList.length) permsList.forEach(p => dPerms.appendChild(chip(p)));
-    else dPerms.textContent = '—';
+    if (dPerms){
+      dPerms.innerHTML = '';
+      const permsList = (colab.permissoes||[]).map(x => (x.id||x).toString());
+      if (permsList.length) permsList.forEach(p => dPerms.appendChild(chip(p)));
+      else dPerms.textContent = '—';
+    }
 
-    // Instâncias (visual)
     await renderInstsView(colab);
 
-    avatarHint.style.display = (perfilModal.dataset.mode === 'create') ? 'grid' : 'none';
+    if (avatarHint) avatarHint.style.display = (perfilModal.dataset.mode === 'create') ? 'grid' : 'none';
 
     if (perfilModal.dataset.mode === 'create'){
-      ePerms.style.display = 'grid';
-      await ensurePermsEdit();
+      if (dPerms) dPerms.style.display = 'none';
+      if (ePerms){ ePerms.style.display = 'grid'; await ensurePermsEdit(); }
     } else {
-      ePerms.style.display = 'none';
-      ePerms.innerHTML = '';
+      if (dPerms) dPerms.style.display = '';
+      if (ePerms){ ePerms.style.display = 'none'; ePerms.innerHTML = ''; }
     }
+
+    const wrapSenha = $('#wrap-senha');
+    const senhaHelp = $('#senha-help');
+    const isCreate  = (perfilModal.dataset.mode === 'create');
+    if (wrapSenha) wrapSenha.style.display = (isCreate || state.inlineEdit) ? 'flex' : 'none';
+    if (senhaHelp) senhaHelp.style.display = isCreate ? '' : 'none';
+
+    // habilita DnD + colar no avatar (sempre que abrir o perfil)
+    bindAvatarDnDAndPaste();
 
     exitInlineEdit(false);
   }
@@ -668,11 +810,11 @@
     input.setAttribute('aria-invalid', String(!isValid));
     if (wrap) wrap.classList.toggle('invalid', !isValid);
   }
-  function setSaveEnabled(_ok){
+  function setSaveEnabled(ok){
     [pSaveFoot, pSave].forEach(btn=>{
       if (!btn) return;
-      btn.disabled = false;
-      btn.removeAttribute('aria-disabled');
+      btn.disabled = !ok;
+      btn.setAttribute('aria-disabled', String(!ok));
     });
   }
   function getEditInputs(){
@@ -714,12 +856,35 @@
     markValidity(eTel,   show ? telOk   : true);
     markValidity(eCargo, show ? cargoOk : true);
 
-    const ok = nomeOk && emailOk && setorOk && telOk && cargoOk;
+    // senha: obrigatório no create; opcional no edit
+    let senhaOk = true;
+    const senhaEl = document.querySelector('#e-senha');
+    const isCreate = (perfilModal.dataset.mode === 'create');
+
+    if (senhaEl) {
+      const s = (senhaEl.value || '').trim();
+      if (isCreate) {
+        senhaOk = s.length >= 6 && s.length <= 72;
+        if (!senhaOk) msgs.push('• Senha (mín. 6 caracteres)');
+        markValidity(senhaEl, show ? senhaOk : true);
+      } else {
+        if (s.length > 0) {
+          senhaOk = s.length >= 6 && s.length <= 72;
+          if (!senhaOk) msgs.push('• Senha (mín. 6 caracteres)');
+          markValidity(senhaEl, show ? senhaOk : true);
+        } else {
+          markValidity(senhaEl, true);
+        }
+      }
+    }
+
+    const ok = nomeOk && emailOk && setorOk && telOk && cargoOk && senhaOk;
     setSaveEnabled(ok);
     return { ok, msgs };
   }
 
   async function ensurePermsEdit(){
+    if (!ePerms) return;
     ePerms.innerHTML = '';
     ePerms.style.display = 'grid';
     try{
@@ -761,20 +926,20 @@
     state.inlineEdit = true;
     state.showErrors = false;
 
-    pEdit.style.display   = 'none';
-    pSave.style.display   = 'none';
-    pCancel.style.display = 'none';
-    if (pClose) pClose.style.display = '';
+    if (pEdit)   pEdit.style.display   = 'none';
+    if (pSave)   pSave.style.display   = 'none';
+    if (pCancel) pCancel.style.display = 'none';
+    if (pClose)  pClose.style.display  = '';
 
     ensureFooterButtons();
     if (pSaveFoot)   pSaveFoot.style.display = '';
     if (pCancelFoot) pCancelFoot.style.display = '';
     if (pClose2)     pClose2.style.display = 'none';
 
-    if (perfilModal.dataset.mode === 'create') {
-      pSaveFoot.innerHTML = '<i class="fa fa-check"></i> Criar';
-    } else {
-      pSaveFoot.innerHTML = '<i class="fa fa-check"></i> Salvar';
+    if (pSaveFoot){
+      pSaveFoot.innerHTML = (perfilModal.dataset.mode === 'create')
+        ? '<i class="fa fa-check"></i> Criar'
+        : '<i class="fa fa-check"></i> Salvar';
     }
 
     perfilModal.classList.add('editing');
@@ -825,11 +990,33 @@
 
     if (perfilModal.dataset.mode === 'create'){
       ensurePermsEdit();
-      ePerms.style.display = 'grid';
+      if (ePerms) ePerms.style.display = 'grid';
+      if (dPerms) dPerms.style.display = 'none';
     }
 
-    // Instâncias (WhatsApp) – sempre mostrar no modo edição
     ensureInstsEdit();
+
+    const wrapSenha = $('#wrap-senha');
+    const senhaHelp = $('#senha-help');
+    const toggle = $('#toggle-senha');
+    if (wrapSenha) wrapSenha.style.display = 'flex';
+    if (senhaHelp) senhaHelp.style.display = 'none';
+    if (toggle){
+      const input = $('#e-senha');
+      toggle.onclick = () => {
+        if (!input) return;
+        input.type = (input.type === 'password') ? 'text' : 'password';
+        const ico = toggle.querySelector('i');
+        if (ico){
+          ico.classList.toggle('fa-eye');
+          ico.classList.toggle('fa-eye-slash');
+        }
+        input.focus();
+      };
+    }
+
+    // garante DnD/colar ativo também durante a edição
+    bindAvatarDnDAndPaste();
 
     validateFormLive(false);
   }
@@ -844,10 +1031,10 @@
     state.inlineEdit = false;
     state.showErrors = false;
 
-    pEdit.style.display   = '';
-    pSave.style.display   = 'none';
-    pCancel.style.display = 'none';
-    if (pClose) pClose.style.display = 'none';
+    if (pEdit)   pEdit.style.display   = '';
+    if (pSave)   pSave.style.display   = 'none';
+    if (pCancel) pCancel.style.display = 'none';
+    if (pClose)  pClose.style.display  = 'none';
 
     if (pClose2)     pClose2.style.display = '';
     if (pSaveFoot)   pSaveFoot.style.display = 'none';
@@ -862,7 +1049,7 @@
     validateFormLive(false);
 
     const mode = perfilModal.dataset.mode || 'view';
-    const id = Number(perfilModal.dataset.currentId||'0')||0;
+    const id = Number(perfilModal.dataset.currentId || '0') || 0;
 
     const { eNome, eEmail, eSetor, eTel, eCargo } = getEditInputs();
     const nome  = eNome?.value.trim();
@@ -888,14 +1075,33 @@
       fd.append('telefone', telE164(tel));
       fd.append('cargo', (cargo||'').trim());
 
+      const senhaInp  = document.querySelector('#e-senha');
+      const s = (senhaInp?.value || '').trim();
+      if (s.length < 6 || s.length > 72) {
+        toast('Defina uma senha entre 6 e 72 caracteres.', 'warn');
+        return;
+      }
+      fd.append('senha', s);
+
       const permsCreate = getPermsSelecionadasEdit();
-      if (permsCreate.length) fd.append('permissoes', JSON.stringify(permsCreate));
-      if (instsSel.length)    fd.append('instancias_ids', JSON.stringify(instsSel));
+      permsCreate.forEach(p => fd.append('permissoes[]', String(p)));
+      instsSel.forEach(n => fd.append('instancias_ids[]', String(n)));
+
       if (state.newAvatarFile) fd.append('avatar', state.newAvatarFile);
 
       try{
         const created = await apiForm('/api/colaboradores/', 'POST', fd);
         toast('Colaborador criado.');
+
+        if (state.newAvatarFile) {
+          let upOK = false;
+          if (created?.usuario_id){
+            upOK = await uploadAvatarTo(`/api/usuarios/${created.usuario_id}/avatar`, state.newAvatarFile);
+          }
+          if (!upOK && created?.id){
+            upOK = await uploadAvatarTo(`/api/colaboradores/${created.id}/avatar`, state.newAvatarFile);
+          }
+        }
 
         state.newAvatarFile = null;
         state.showErrors = false;
@@ -910,13 +1116,16 @@
         await renderPerfilView(fresh);
         exitInlineEdit(false);
       }catch(e){
-        console.error(e);
+        console.error('[create error]', e.status, e.data);
+        const msg = (e?.data && (e.data.detail || e.data.message || (typeof e.data === 'string' ? e.data : ''))) || null;
         if (e.status===409) return toast('E-mail já cadastrado.','warn');
-        toast('Erro ao criar.','err');
+        if (e.status===422) return toast(msg || 'Dados inválidos (422).','warn');
+        toast(msg || 'Erro ao criar.','err');
       }
       return;
     }
 
+    // >>> edição
     const payload = {
       nome, email,
       setor_id: Number(setor),
@@ -926,20 +1135,37 @@
       atualizar_usuario: !!state.viewing?.usuario_id
     };
 
+    const senhaEl = document.querySelector('#e-senha');
+    const newPass = (senhaEl?.value || '').trim();
+    if (newPass) {
+      payload.senha = newPass;
+      payload.atualizar_usuario = true;
+    }
+
     try{
       await apiJSON(`/api/colaboradores/${id}`, 'PUT', payload);
 
+      // se mudou avatar durante a edição, sobe agora
+      if (state.newAvatarFile){
+        let upOK = false;
+        if (state.viewing?.usuario_id){
+          upOK = await uploadAvatarTo(`/api/usuarios/${state.viewing.usuario_id}/avatar`, state.newAvatarFile);
+        }
+        if (!upOK){
+          upOK = await uploadAvatarTo(`/api/colaboradores/${id}/avatar`, state.newAvatarFile);
+        }
+        if (upOK) state.newAvatarFile = null;
+      }
+
       let permsUpdated = false;
-      if (ePerms.style.display !== 'none'){
+      if (ePerms && ePerms.style.display !== 'none'){
         const arr = getPermsSelecionadasEdit();
         permsUpdated = await savePerms(id, arr);
         if (permsUpdated) state.viewing.permissoes = arr;
       }
 
       let instsUpdated = true;
-      try{
-        instsUpdated = await saveInsts(id, instsSel);
-      }catch{ instsUpdated = false; }
+      try{ instsUpdated = await saveInsts(id, instsSel); }catch{ instsUpdated = false; }
 
       state.showErrors = false;
       const msg = [
@@ -965,13 +1191,19 @@
   // ====== Flow de abrir perfil/novo ======
   async function openPerfil(id){
     try{
+      if (Number.isNaN(Number(id)) || !Number(id)){
+        toast('ID do colaborador inválido.','err');
+        return;
+      }
       perfilModal.dataset.mode = 'view';
+      perfilModal.setAttribute('aria-hidden','false');
+      document.documentElement.classList.add('modal-open');
+      setPlaceholderPerfil();
+
       const colab = await loadColabFull(id);
       await renderPerfilView(colab);
       perfilModal.dataset.currentId = String(id);
-      if (hasPerm(EDIT_PERM)) pEdit.style.display = ''; else pEdit.style.display = 'none';
-      perfilModal.setAttribute('aria-hidden','false');
-      document.documentElement.classList.add('modal-open');
+      if (pEdit) pEdit.style.display = hasPerm('colaboradores.gerenciar') ? '' : 'none';
     }catch(e){
       console.error(e);
       toast('Não foi possível abrir o perfil.','err');
@@ -985,17 +1217,6 @@
     state.showErrors = false;
     $('#avatar-wrap')?.classList.remove('drag-over');
   }
-
-  function handleAvatarFile(file){
-    if (!file) return;
-    if (!/image\//.test(file.type) && !/\.svg$/i.test(file.name)){
-      toast('Envie uma imagem.','warn'); return;
-    }
-    state.newAvatarFile = file;
-    const url = URL.createObjectURL(file);
-    setPerfilAvatar($('#e-nome')?.value || 'Novo Colaborador', url);
-  }
-
   async function openNovo(){
     if (!hasPerm(EDIT_PERM)) { toast('Sem permissão para criar.','warn'); return; }
     const blank = { id:null, nome:'', email:'', telefone:'', cargo:'', setor_id:null, permissoes:[], instancias_ids:[] };
@@ -1004,34 +1225,32 @@
     state.showErrors = false;
     await renderPerfilView(blank);
 
-    if (btnAddAvatar && pAvatarInput){
-      btnAddAvatar.onclick = ()=> pAvatarInput.click();
-      pAvatarInput.onchange = ()=> handleAvatarFile(pAvatarInput.files && pAvatarInput.files[0]);
+    if (pAvatarInput){
+      pAvatarInput.setAttribute('accept','image/*,.svg,.webp,.avif,.heic,.heif');
+      pAvatarInput.onchange = () => handleAvatarFile(pAvatarInput.files?.[0] || null);
+    }
+    if (btnAddAvatar){
+      btnAddAvatar.onclick = () => { if (pAvatarInput){ pAvatarInput.value=''; pAvatarInput.click(); } };
     }
 
-    const avatarWrap = $('#avatar-wrap');
-    if (avatarWrap && pAvatarInput){
-      avatarWrap.onclick = ()=>{ if (perfilModal.dataset.mode === 'create') pAvatarInput.click(); };
-      ['dragenter','dragover'].forEach(ev=>{
-        avatarWrap.addEventListener(ev, (e)=> {
-          if (perfilModal.dataset.mode !== 'create') return;
-          e.preventDefault(); e.stopPropagation();
-          avatarWrap.classList.add('drag-over');
-        });
-      });
-      ['dragleave','dragend','drop'].forEach(ev=>{
-        avatarWrap.addEventListener(ev, (e)=> {
-          if (perfilModal.dataset.mode !== 'create') return;
-          e.preventDefault(); e.stopPropagation();
-          if (ev !== 'drop') avatarWrap.classList.remove('drag-over');
-        });
-      });
-      avatarWrap.addEventListener('drop', (e)=>{
-        if (perfilModal.dataset.mode !== 'create') return;
-        const f = e.dataTransfer?.files?.[0];
-        avatarWrap.classList.remove('drag-over');
-        handleAvatarFile(f);
-      });
+    // DnD + colar também ao criar
+    bindAvatarDnDAndPaste();
+
+    const wrapSenha = document.querySelector('#wrap-senha');
+    const toggle = document.querySelector('#toggle-senha');
+    if (wrapSenha) wrapSenha.style.display = 'flex';
+    if (toggle){
+      const input = document.querySelector('#e-senha');
+      toggle.onclick = () => {
+        if (!input) return;
+        input.type = (input.type === 'password') ? 'text' : 'password';
+        const ico = toggle.querySelector('i');
+        if (ico){
+          ico.classList.toggle('fa-eye');
+          ico.classList.toggle('fa-eye-slash');
+        }
+        input.focus();
+      };
     }
 
     perfilModal.setAttribute('aria-hidden','false');
@@ -1052,10 +1271,17 @@
 
     document.addEventListener('click', (e)=>{
       const b = e.target.closest('[data-action]'); if (!b) return;
-      const id = Number(b.dataset.id);
-      if (b.dataset.action === 'view') return openPerfil(id);
+      const raw = b.dataset.id;
+      const id  = Number(raw);
+
+      if (b.dataset.action === 'view'){
+        if (!raw || Number.isNaN(id) || !id){ toast('ID do colaborador inválido.','err'); return; }
+        openPerfil(id);
+        return;
+      }
       if (b.dataset.action === 'del'){
         if (!hasPerm(EDIT_PERM)) return toast('Sem permissão para remover.','warn');
+        if (!raw || Number.isNaN(id) || !id){ toast('ID do colaborador inválido.','err'); return; }
         if (!confirm('Remover este colaborador?')) return;
         apiJSON(`/api/colaboradores/${id}`, 'DELETE', {}).then(async ()=>{
           toast('Removido.'); await loadColaboradores(); renderLista();
@@ -1127,4 +1353,104 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run, { once:true });
   else run();
 
+})();
+
+/* ===== Dark/Light dropdown: mesmo fundo da superfície ===== */
+(() => {
+  if (document.body.dataset.page !== 'colaboradores') return;
+
+  function getSurfaceColor(el){
+    let n = el;
+    while (n && n !== document.documentElement){
+      const bg = getComputedStyle(n).backgroundColor;
+      if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') return bg;
+      n = n.parentElement;
+    }
+    return getComputedStyle(document.body).backgroundColor;
+  }
+
+  function enhanceSelect(sel){
+    if (!sel || sel.dataset.enhanced) return;
+    sel.dataset.enhanced = '1';
+    sel.classList.add('select--replaced');
+
+    const wrap = document.createElement('div');
+    wrap.className = 'x-select';
+    sel.parentNode.insertBefore(wrap, sel);
+    wrap.appendChild(sel);
+
+    wrap.style.setProperty('--x-surface', getSurfaceColor(wrap));
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'x-sel-btn';
+    btn.setAttribute('aria-haspopup','listbox');
+    btn.setAttribute('aria-expanded','false');
+    wrap.appendChild(btn);
+
+    const list = document.createElement('ul');
+    list.className = 'x-sel-list';
+    list.setAttribute('role','listbox');
+    wrap.appendChild(list);
+
+    function render(){
+      btn.textContent = sel.options[sel.selectedIndex]?.text || 'Selecione…';
+      list.innerHTML = '';
+      Array.from(sel.options).forEach(opt => {
+        const li = document.createElement('li');
+        li.className = 'x-sel-opt';
+        li.setAttribute('role','option');
+        li.dataset.value = opt.value;
+        li.textContent = opt.text;
+        if (opt.selected) li.setAttribute('aria-selected','true');
+        li.addEventListener('click', () => {
+          sel.value = opt.value;
+          sel.dispatchEvent(new Event('change', { bubbles:true }));
+          btn.textContent = opt.text;
+          close();
+        });
+        list.appendChild(li);
+      });
+    }
+
+    function open(){
+      wrap.classList.add('open');
+      btn.setAttribute('aria-expanded','true');
+      const cur = list.querySelector('[aria-selected="true"]');
+      if (cur) cur.scrollIntoView({ block:'nearest' });
+      window.addEventListener('click', onDocClick, { once:true });
+    }
+    function close(){
+      wrap.classList.remove('open');
+      btn.setAttribute('aria-expanded','false');
+    }
+    function onDocClick(e){ if (!wrap.contains(e.target)) close(); }
+
+    btn.addEventListener('click', () => wrap.classList.contains('open') ? close() : open());
+    sel.addEventListener('change', render);
+
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault(); open();
+      } else if (e.key === 'Escape') {
+        close();
+      }
+    });
+
+    const syncDisabled = () => { btn.disabled = sel.disabled; };
+    const mo = new MutationObserver(syncDisabled);
+    mo.observe(sel, { attributes:true, attributeFilter:['disabled'] });
+    syncDisabled();
+
+    render();
+  }
+
+  // melhora os selects já existentes
+  document.querySelectorAll('#modal-perfil .select, .details-grid .select').forEach(enhanceSelect);
+
+  // e os que surgirem depois (ex: ao entrar em edição)
+  const rootObs = new MutationObserver(() => {
+    document.querySelectorAll('#modal-perfil .select:not([data-enhanced]), .details-grid .select:not([data-enhanced])').forEach(enhanceSelect);
+  });
+  rootObs.observe(document.body, { childList:true, subtree:true });
 })();

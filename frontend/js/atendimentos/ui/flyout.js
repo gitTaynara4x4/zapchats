@@ -1,8 +1,9 @@
 // /frontend/js/atendimentos/ui/flyout.js
 // Flyout lateral do atendimento (carrega /frontend/partials/sidebar-atendimentos.html)
-// - Suporta múltiplos gatilhos (#menuOnlyBtn, #btnKebabHeader, etc.)
+// - Suporta múltiplos gatilhos (#menuOnlyBtn, #btnKebabHeader)
+// - Kebab fixado no lado direito do header (desktop e mobile)
 // - Delegação por data-attributes (não depende de scripts do partial)
-// - Se o partial tiver <script>, reexecuta (normal e type="module")
+// - Reexecuta <script> do partial (inclui type="module")
 // - Acessibilidade: aria/inert, foco cíclico, fechar com backdrop/ESC/rota
 // - Hardening mobile: backdrop fechado não captura clique (display:none)
 
@@ -22,10 +23,72 @@ const PARTIAL_URL = '/frontend/partials/sidebar-atendimentos.html';
     host.querySelector('.zc-flyout__backdrop') ||
     host.querySelector('[tabindex="-1"]');
 
-  // Gatilhos (desktop + mobile)
-  const triggers = Array.from(
-    document.querySelectorAll('#menuOnlyBtn, #btnKebabHeader')
-  ).filter(Boolean);
+  // ====== helpers para garantir os botões corretos ======
+
+  // Garante um "slot" de ícones à direita do header e injeta o kebab lá dentro.
+  function ensureHeaderKebab(){
+    const row =
+      document.querySelector('.wpp-header-externo .wpp-header-titulo-row') ||
+      document.querySelector('header');
+
+    if (!row) return null;
+
+    // container de ícones no lado direito
+    let slot = row.querySelector('.wpp-header-icons');
+    if (!slot) {
+      slot = document.createElement('div');
+      slot.className = 'wpp-header-icons';
+      slot.style.display    = 'flex';
+      slot.style.gap        = '4px';
+      slot.style.marginLeft = 'auto';
+      row.appendChild(slot);
+    }
+
+    // cria/recupera o botão do header
+    let btn = document.getElementById('btnKebabHeader');
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.id = 'btnKebabHeader';
+      btn.type = 'button';
+      btn.className = 'hdr-icon-btn';
+      btn.setAttribute('aria-label','Mais opções');
+      btn.innerHTML =
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+          '<circle cx="5" cy="12" r="2"/>' +
+          '<circle cx="12" cy="12" r="2"/>' +
+          '<circle cx="19" cy="12" r="2"/>' +
+        '</svg>';
+    }
+    if (btn.parentElement !== slot) slot.appendChild(btn);
+
+    // força mostrar no desktop e mobile
+    try {
+      btn.style.setProperty('display','inline-grid','important');
+      btn.style.removeProperty('visibility');
+      btn.style.removeProperty('opacity');
+    } catch {}
+
+    return btn;
+  }
+
+  // Opcional: se existir um kebab na leftbar, mantemos oculto p/ evitar duplicado
+  function ensureLeftbarKebab(){
+    const btn = document.getElementById('menuOnlyBtn');
+    if (!btn) return null;
+    try {
+      btn.style.setProperty('display','none','important');
+      btn.style.visibility = 'hidden';
+      btn.style.opacity    = '0';
+    } catch {}
+    return btn;
+  }
+
+  // injeta/organiza antes de capturar gatilhos
+  const headerBtn  = ensureHeaderKebab();
+  ensureLeftbarKebab();
+
+  // Gatilhos (desktop + mobile) — após garantir o headerBtn
+  const triggers = [headerBtn, document.getElementById('menuOnlyBtn')].filter(Boolean);
 
   if (!panel || !backdrop || triggers.length === 0) return;
 
@@ -132,11 +195,7 @@ const PARTIAL_URL = '/frontend/partials/sidebar-atendimentos.html';
 
   // Impede clique dentro do painel de fechar
   ['mousedown', 'mouseup', 'click', 'touchstart', 'touchend'].forEach((ev) => {
-    panel.addEventListener(
-      ev,
-      (e) => e.stopPropagation(),
-      true // captura
-    );
+    panel.addEventListener(ev, (e) => e.stopPropagation(), true);
   });
 
   // Fechar ao navegar
@@ -149,9 +208,7 @@ const PARTIAL_URL = '/frontend/partials/sidebar-atendimentos.html';
     if (loaded) return;
     loaded = true;
     try {
-      const html = await fetch(PARTIAL_URL, { credentials: 'include' }).then(
-        (r) => r.text()
-      );
+      const html = await fetch(PARTIAL_URL, { credentials: 'include' }).then((r) => r.text());
       panel.innerHTML = html;
 
       // 1) Delegação (data-action)
@@ -206,9 +263,7 @@ const PARTIAL_URL = '/frontend/partials/sidebar-atendimentos.html';
           location.href = '/frontend/clientes.html';
           break;
         case 'new-conversation':
-          try {
-            window.dispatchEvent(new CustomEvent('nova:conversa'));
-          } catch {}
+          try { window.dispatchEvent(new CustomEvent('nova:conversa')); } catch {}
           closeFlyout();
           break;
         case 'toggle-theme':
@@ -279,14 +334,13 @@ const PARTIAL_URL = '/frontend/partials/sidebar-atendimentos.html';
     });
   }
 
-  // ===== Alinhamento opcional do botão lateral =====
+  // ===== Alinhamento opcional do botão lateral (mantido, mas oculto) =====
   function alignDots() {
     try {
       const leftBtn = document.getElementById('menuOnlyBtn');
-      const row = document.querySelector(
-        '.wpp-header-externo .wpp-header-titulo-row'
-      );
-      if (!leftBtn || !row) return;
+      if (!leftBtn) return;
+      const row = document.querySelector('.wpp-header-externo .wpp-header-titulo-row');
+      if (!row) return;
       const r1 = row.getBoundingClientRect();
       const r2 = leftBtn.getBoundingClientRect();
       leftBtn.style.marginTop =
@@ -300,6 +354,15 @@ const PARTIAL_URL = '/frontend/partials/sidebar-atendimentos.html';
       document.querySelector('.wpp-header-externo') || document.body
     );
   } catch {}
+
+  // Rerender do header (ex.: breakpoint/mobile) — recoloca o kebab na direita
+  (function watchHeader(){
+    const root = document.querySelector('.wpp-header-externo') || document.querySelector('header');
+    if (!root) return;
+    const mo = new MutationObserver(() => { try { ensureHeaderKebab(); } catch {} });
+    mo.observe(root, { childList: true, subtree: true });
+    ensureHeaderKebab();
+  })();
 
   // Fail-safe: backdrop oculto no boot
   hideBackdrop();

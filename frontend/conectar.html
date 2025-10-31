@@ -1,3 +1,4 @@
+<!-- /frontend/pages/conectar.html -->
 <!DOCTYPE html>
 <html lang="pt-BR" class="has-sidebar prepaint">
 <head>
@@ -91,8 +92,6 @@
       </div>
     </section>
 
-    <!-- ⚠️ Removido: banner/overlay de "Sincronizando..." (sumiu 100%) -->
-
     <!-- ===== Modal: Conectar ===== -->
     <div id="modal" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:10000;">
       <div class="card" style="background:var(--card); color:var(--fg); border:1px solid var(--border); border-radius:14px; width:min(760px,92vw);">
@@ -150,7 +149,7 @@
             <span class="muted" style="font-size:.95rem;">Usar <strong>Pairing Code</strong> em vez de QR (se disponível)</span>
           </label>
 
-          <!-- QR (mantido exatamente como antes) -->
+          <!-- QR -->
           <div id="qr-area">
             <p id="qr-instru" class="muted hidden" style="font-size:.86rem;">Após fazer a leitura do QR Code, aguarde.</p>
 
@@ -185,7 +184,7 @@
       </div>
     </div>
 
-    <!-- Modal Remover número (inalterado) -->
+    <!-- Modal Remover número -->
     <div id="modal-remover-numero" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:10000;">
       <div class="card" style="background:var(--card); color:var(--fg); border:1px solid var(--border); border-radius:14px; width:min(560px,92vw);">
         <div style="padding:1rem 1.1rem; border-bottom:1px solid var(--border); font-weight:800;">Remover número</div>
@@ -216,7 +215,9 @@
 
   <!-- Guard + página -->
   <script src="/frontend/js/page-guard.js" defer></script>
-  <script src="/frontend/js/pages/conectar.js" defer></script>
+
+  <!-- Página (ESM) -->
+  <script type="module" src="/frontend/js/pages/conectar.js"></script>
 
   <!-- Tabs a11y -->
   <script>

@@ -12,7 +12,6 @@ from backend import models
 
 router = APIRouter(prefix="/api/permissoes", tags=["Permissões"])
 
-
 # ===== Catálogo de permissões (exibido no front) =====
 PERMISSOES_CATALOGO = [
     {"id": "dashboard.ver",            "label": "Ver Dashboard"},
@@ -29,7 +28,6 @@ PERMISSOES_CATALOGO = [
     {"id": "atendimento.enviar",       "label": "Enviar mensagens no Atendimento"},
     {"id": "arquivos.ver",             "label": "Ver Mídias/Arquivos"},
 ]
-
 
 def _all_perm_ids() -> List[str]:
     return [p["id"] for p in PERMISSOES_CATALOGO]
@@ -58,7 +56,7 @@ def syncar_catalogo(user=Depends(get_current_user), db: Session = Depends(get_db
     _sync_catalog_to_db(db)
     return
 
-# ======= NOVO: minhas_permissoes sem bypass, com fallback só se não houver espelho =======
+# ===== Minhas permissões (sem bypass; com fallback para admin sem espelho) =====
 @router.get("/minhas", response_model=List[str])
 def minhas_permissoes(identity = Depends(get_current_identity), db: Session = Depends(get_db)):
     """
@@ -66,7 +64,7 @@ def minhas_permissoes(identity = Depends(get_current_identity), db: Session = De
     Regras:
       - Se houver colaborador correspondente (espelho), retorna o que estiver na tabela colaboradores_permissoes;
       - NÃO há bypass automático só por ser admin;
-      - Somente se for admin e NÃO existir colaborador espelho (caso legado), cai em fallback = todas as permissões.
+      - Somente se for admin e NÃO existir colaborador espelho, fallback = todas as permissões.
     """
     empresa_id = identity.get("empresa_id")
     kind       = identity.get("kind")       # "usuario" ou "colaborador"
@@ -91,23 +89,21 @@ def minhas_permissoes(identity = Depends(get_current_identity), db: Session = De
         rows = db.execute(
             text("""
                 SELECT p.id
-                FROM colaboradores_permissoes cp
-                JOIN permissoes p ON p.id = cp.permissao_id
-                WHERE cp.colaborador_id = :cid
-                ORDER BY p.id
+                  FROM colaboradores_permissoes cp
+                  JOIN permissoes p ON p.id = cp.permissao_id
+                 WHERE cp.colaborador_id = :cid
+                 ORDER BY p.id
             """),
             {"cid": colab.id},
         ).fetchall()
         return [r[0] for r in rows]
 
     # 3) Sem colaborador espelho:
-    #    - Se for admin, dá fallback para "todas" (até você criar/popular o espelho);
-    #    - Se não for admin, sem permissões.
     if is_admin:
         return _all_perm_ids()
     return []
 
-# ====== endpoints para ver/alterar permissões de um colaborador ======
+# ===== Endpoints para ver/alterar permissões de um colaborador =====
 @router.get("/colaboradores/{colab_id}", response_model=List[str])
 def permissoes_do_colaborador(
     colab_id: int,
@@ -120,9 +116,9 @@ def permissoes_do_colaborador(
     rows = db.execute(
         text("""
             SELECT permissao_id
-            FROM colaboradores_permissoes
-            WHERE colaborador_id = :cid
-            ORDER BY permissao_id
+              FROM colaboradores_permissoes
+             WHERE colaborador_id = :cid
+             ORDER BY permissao_id
         """),
         {"cid": colab_id},
     ).fetchall()

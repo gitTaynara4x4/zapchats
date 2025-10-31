@@ -10,14 +10,13 @@
         var prefers = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
         document.documentElement.classList.toggle('dark', !!prefers);
       }
-      // trava pintura global (removido pelo app-base quando o shell ficar pronto)
+      // trava pintura global (removido quando o shell ficar pronto)
       document.documentElement.classList.add('prepaint');
     } catch {}
   })();
 </script>
 
 <!-- 1) CSS globais compartilhados -->
-<link rel="stylesheet" href="/frontend/css/tw.css"> <!-- se você usa; senão remova -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
@@ -121,3 +120,98 @@
     }
   }
 </style>
+
+<!-- 3) Boot do WebSocket GLOBAL da EMPRESA -->
+<script type="module">
+  import { ensureEmpresaWS, onEmpresaMessage } from '/frontend/js/realtime/ws-core.js';
+
+  async function getEmpresaId() {
+    if (window.APP_EMPRESA_ID) return window.APP_EMPRESA_ID;
+    try {
+      const r = await fetch('/api/auth/me', { credentials: 'include' });
+      if (r.ok) {
+        const me = await r.json();
+        const id = me?.empresa_id ?? me?.empresa?.id ?? me?.empresaId ?? me?.empresaID ?? null;
+        if (id) { window.APP_EMPRESA_ID = id; return id; }
+      }
+    } catch {}
+    return null;
+  }
+
+  (async () => {
+    const empresaId = await getEmpresaId();
+    if (!empresaId) return;
+
+    // Abre (e mantém) a conexão por empresa
+    ensureEmpresaWS(empresaId);
+
+    // (Opcional) Ouça eventos globais para badges/toasts
+    onEmpresaMessage(empresaId, (evt) => {
+      // exemplo:
+      // if (evt?.data?.type === 'WHATSAPP_STATUS') { ... }
+    });
+  })();
+</script>
+
+<!-- 4) Hidratar nome e avatar do usuário em TODAS as páginas
+     Use elementos como:
+       <img data-user-avatar class="avatar hidden" alt="Minha foto">
+       <span data-user-name></span>
+-->
+<script type="module">
+  function setAvatarFallback(imgEl, nome) {
+    imgEl.src = '/frontend/img/user-default.png'; // garanta esse arquivo
+    imgEl.alt = (nome || 'Usuário');
+  }
+
+  async function hydrateUserUI() {
+    try {
+      const r = await fetch('/api/auth/me', { credentials: 'include' });
+      if (!r.ok) return;
+      const me = await r.json();
+
+      const nome =
+        me?.nome ??
+        me?.name ??
+        me?.usuario?.nome ??
+        me?.user?.name ??
+        'Usuário';
+
+      const avatar =
+        me?.avatar_url ??
+        me?.avatar ??
+        me?.usuario?.avatar_url ??
+        '';
+
+      // Nome (preenche todos)
+      document.querySelectorAll('[data-user-name]').forEach(el => {
+        el.textContent = nome;
+        el.title = nome;
+      });
+
+      // Avatar (preenche todos)
+      document.querySelectorAll('img[data-user-avatar]').forEach(img => {
+        if (avatar && typeof avatar === 'string' && avatar.length > 6) {
+          img.src = avatar;
+          img.alt = nome;
+          img.classList.remove('hidden');
+          img.addEventListener('error', () => setAvatarFallback(img, nome), { once: true });
+        } else {
+          setAvatarFallback(img, nome);
+          img.classList.remove('hidden');
+        }
+      });
+    } catch {
+      document.querySelectorAll('img[data-user-avatar]').forEach(img => setAvatarFallback(img, 'Usuário'));
+    }
+  }
+
+  hydrateUserUI();
+</script>
+
+<!-- 5) Libera a pintura assim que o DOM estiver pronto -->
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    try { document.documentElement.classList.remove('prepaint'); } catch {}
+  });
+</script>

@@ -1,3 +1,4 @@
+// /frontend/js/atendimentos/boot/init.js
 import { state, persist, setClienteSel } from '../state/store.js';
 import { EMPRESA_ID } from '../core/env.js';
 import { carregarClientes } from '../domain/clientes.js';
@@ -167,21 +168,25 @@ async function ensureMensagensCarregadas(conversationId) {
   const data = await r.json();
 
   const items = Array.isArray(data?.items) ? data.items : [];
+
+  // ✅ normaliza tipo e ACK (string → número; clamp 0..3; só em SAÍDAS)
   const mapped = items.map(m => {
     const tipoMsg = m.tipo || (m.remetente === 'agente' ? 'saida' : 'entrada');
-    const origem = (m.origem)
-      ? m.origem
-      : (tipoMsg === 'saida' ? 'atendente' : 'cliente');
+    const isSaida = (tipoMsg === 'saida') || m.from_me === true || m.origem === 'atendente';
+
+    let ackNum = Number(m.ack ?? m.status ?? m.ack_status ?? m.meta?.ack ?? 0);
+    if (!Number.isFinite(ackNum)) ackNum = 0;
+    ackNum = Math.min(3, Math.max(0, ackNum));
 
     return {
       msg_id:    m.msg_id || m.id || null,
       conteudo:  m.texto ?? m.conteudo ?? '',
       tipo:      tipoMsg,
       timestamp: m.ts || m.timestamp || new Date().toISOString(),
-      ack:       (tipoMsg === 'saida') ? (typeof m.ack === 'number' ? m.ack : 0) : null,
+      ack:       isSaida ? ackNum : null,
       midias:    Array.isArray(m.midias) ? m.midias : [],
       instancia_id: m.instancia_id ?? (inst || null),
-      origem,
+      origem:    m.origem ?? (isSaida ? 'atendente' : 'cliente'),
       autor_nome: m.autor_nome ?? m.atendente_nome ?? null,
     };
   });
@@ -263,6 +268,8 @@ async function selecionarClienteObj(id) {
     if (instCand != null && instCand !== '') {
       window.INSTANCIA_ATIVA = String(instCand);
       window.setInstanceChip?.(String(instCand));
+      // >>> FIX: carimba no DOM para o histórico ler a mesma instância (ID numérico)
+      if (hist) hist.dataset.instanciaId = String(instCand);
     }
   }catch{}
 
@@ -312,12 +319,11 @@ async function selecionarClienteObj(id) {
 
   await markChatAsSeen(id);
 
-  // 🆕 Zera “bolinha” (unread) local imediatamente ao abrir
+  // zera “unread” local
   try {
     window.Lista?.resetUnread?.(id);
     window.recomputeUnread?.();
   } catch {
-    // fallback: ajusta direto no cache e re-render
     try {
       const arr = window.state?.clientesCache || window.clientesCache || [];
       const idx = arr.findIndex(x => Number(x.id ?? x.conversation_id ?? x.cliente_id) === Number(id));

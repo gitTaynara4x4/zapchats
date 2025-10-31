@@ -1,79 +1,57 @@
-/* guard-devtools.js — best-effort: bloqueia atalhos e avisa. Não é segurança real. */
-(function(){
-  const MSG = 'Ação bloqueada por segurança. Inspecionar/desenvolvedor não é permitido.';
+// /frontend/assets/guard-devtools.js
+(function () {
+  try {
+    if (sessionStorage.getItem('DEVGUARD_SHOWN') === '1') return;
 
-  // exibe aviso: usa showToast se disponível; senão cria um banner; senão alert.
-  function notify(msg){
-    if (typeof window.showToast === 'function') {
-      try { showToast(msg, 'warn'); return; } catch {}
+    var shown = false;
+    var THRESH = 160; // heurística de viewport ao abrir DevTools docked
+
+    function checkOpen() {
+      var w = (window.outerWidth - window.innerWidth) > THRESH;
+      var h = (window.outerHeight - window.innerHeight) > THRESH;
+
+      // técnica do profile (alguns browsers tornam a chamada mais lenta com DevTools)
+      var t0 = performance.now();
+      console.profile && console.profile();
+      console.profileEnd && console.profileEnd();
+      var slow = (performance.now() - t0) > 20;
+
+      if (!shown && (w || h || slow)) {
+        shown = true;
+        sessionStorage.setItem('DEVGUARD_SHOWN', '1');
+
+        var msg = [
+          "ATENÇÃO!",
+          "Não cole códigos que você não entende no Console do navegador.",
+          "Isso pode comprometer sua conta e dados.",
+          "Se precisar, revise antes de executar."
+        ].join(" ");
+
+        try { console.warn("%c" + msg, "font-size:14px;color:#f59e0b"); } catch {}
+
+        // Banner leve (sem reload)
+        try {
+          var div = document.createElement('div');
+          div.style.position = 'fixed';
+          div.style.zIndex = '2147483647';
+          div.style.left = '50%';
+          div.style.top = '16px';
+          div.style.transform = 'translateX(-50%)';
+          div.style.background = '#111827';
+          div.style.color = '#fde68a';
+          div.style.border = '1px solid #374151';
+          div.style.borderRadius = '10px';
+          div.style.padding = '10px 14px';
+          div.style.boxShadow = '0 6px 24px rgba(0,0,0,.35)';
+          div.style.fontFamily = 'system-ui,Segoe UI,Roboto,Arial,sans-serif';
+          div.textContent = "Aviso: cuidado ao colar comandos no Console do navegador.";
+          document.body.appendChild(div);
+          setTimeout(function(){ div.remove(); }, 8000);
+        } catch {}
+      }
     }
-    let bar = document.getElementById('__guard_bar__');
-    if (!bar) {
-      bar = document.createElement('div');
-      bar.id = '__guard_bar__';
-      bar.setAttribute('role', 'status');
-      bar.style.position = 'fixed';
-      bar.style.zIndex = '999999';
-      bar.style.left = '50%';
-      bar.style.top = '12px';
-      bar.style.transform = 'translateX(-50%)';
-      bar.style.maxWidth = '92vw';
-      bar.style.background = 'rgba(234,179,8,0.95)'; // âmbar
-      bar.style.color = '#111827';
-      bar.style.border = '1px solid rgba(180,120,8,0.9)';
-      bar.style.borderRadius = '10px';
-      bar.style.padding = '10px 14px';
-      bar.style.boxShadow = '0 10px 25px rgba(0,0,0,.15)';
-      bar.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, Arial';
-      bar.style.fontSize = '14px';
-      bar.style.lineHeight = '1.3';
-      bar.style.pointerEvents = 'none';
-      document.body.appendChild(bar);
-    }
-    bar.textContent = msg;
-    bar.style.opacity = '1';
-    clearTimeout(bar.__t);
-    bar.__t = setTimeout(()=>{ bar.style.opacity = '0'; }, 3000);
-  }
 
-  const warn = () => notify(MSG);
-
-  // 1) Bloquear clique direito (menu de contexto)
-  document.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    warn();
-  }, { capture: true });
-
-  // 2) Bloquear atalhos comuns (F12, Ctrl+Shift+I/J/C/K, Meta+Alt+I, Ctrl+U/S/P)
-  document.addEventListener('keydown', (e) => {
-    const k = (e.key || '').toLowerCase();
-    const ctrl = e.ctrlKey || e.metaKey;
-    const alt  = e.altKey;
-    const shift= e.shiftKey;
-
-    if (k === 'f12') { e.preventDefault(); e.stopPropagation(); return warn(); }
-    if ((ctrl && shift && ['i','j','c','k'].includes(k)) || (e.metaKey && alt && k === 'i')) {
-      e.preventDefault(); e.stopPropagation(); return warn();
-    }
-    if (ctrl && ['u','s','p'].includes(k)) {
-      e.preventDefault(); e.stopPropagation(); return warn();
-    }
-  }, { capture: true });
-
-  // 3) Sondagem simples de DevTools (diferença entre outer e inner window)
-  let lastWarn = 0;
-  setInterval(() => {
-    const vwGap = Math.abs((window.outerWidth  || 0) - (window.innerWidth  || 0));
-    const vhGap = Math.abs((window.outerHeight || 0) - (window.innerHeight || 0));
-    const suspicious = vwGap > 160 || vhGap > 160;
-    const now = Date.now();
-    if (suspicious && now - lastWarn > 4000) {
-      lastWarn = now;
-      warn();
-    }
-  }, 1200);
-
-  // 4) Opcional: desabilitar arrastar/selecionar (cuidado com UX; deixe comentado se atrapalhar)
-  // document.addEventListener('dragstart', e => { e.preventDefault(); }, { capture: true });
-  // document.addEventListener('selectstart', e => { e.preventDefault(); }, { capture: true });
+    // Checa a cada 1s — nada de redirecionar ou recarregar
+    setInterval(checkOpen, 1000);
+  } catch {}
 })();

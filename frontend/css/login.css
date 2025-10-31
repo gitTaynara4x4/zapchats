@@ -1,5 +1,6 @@
 /* ==========================================================================
    ZapChats – Login (CSS puro, Inter-only)
+   (versão com alinhamento e largura iguais ao CRIAR-EMPRESA + SLIDE lateral)
    ========================================================================== */
 
 /* ====================== Tokens ====================== */
@@ -34,23 +35,29 @@
   --subtitle-fs: 13px;  /* mobile */
   --logo-w: 120px;      /* mobile */
 
-  /* largura do card (pode ser alterada via atributo data-login-size no <html>) */
-  --card-max: 920px;
+  /* LARGURA GLOBAL (igual ao criar-empresa) */
+  --auth-card-max: 920px;
+
+  /* Altura mínima do card p/ igualar ao criar-empresa (ajuste se usar 680px) */
+  --auth-card-min-h: 640px;
+
+  /* Duração das transições */
+  --xfade-ms: 320ms;
 }
 
 /* === Dark (iguais ao cadastro) === */
 html.dark{
-  --page-bg:#0a0a0a;      /* fundo da página */
-  --card-bg:#171717;      /* cartões/superfícies */
-  --card-border:#262626;  /* bordas */
-  --left-bg:#1f1f1f;      /* coluna esquerda/ilustração */
+  --page-bg:#0a0a0a;
+  --card-bg:#171717;
+  --card-border:#262626;
+  --left-bg:#1f1f1f;
 
-  --text-primary:#e5e7eb;   /* texto principal */
-  --text-secondary:#a1a1aa; /* texto secundário */
+  --text-primary:#e5e7eb;
+  --text-secondary:#a1a1aa;
 
-  --input-bg:#171717;     /* fundo do input */
-  --input-bd:#3f3f46;     /* borda do input */
-  --input-text:#e5e7eb;   /* texto do input */
+  --input-bg:#171717;
+  --input-bd:#3f3f46;
+  --input-text:#e5e7eb;
 
   --shadow-lg:0 32px 84px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.03);
 }
@@ -58,15 +65,12 @@ html.dark{
 /* ====================== Base ====================== */
 *{ box-sizing:border-box }
 html,body{ height:100% }
-
-/* Força Inter em toda a UI */
 html, body{
   font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Arial, sans-serif;
 }
-
 body{
   margin:0;
-  font-size:15px;                 /* base mais compacta */
+  font-size:15px;
   line-height:1.45;
   background:var(--page-bg);
   color:var(--text-primary);
@@ -96,11 +100,7 @@ html:not(.dark) .topline-bar{
 
 /* ========= Toggle de tema (compact) ========= */
 .theme-toggle{
-  --w: 80px; /* largura */
-  --h: 36px; /* altura */
-  --p: 4px;  /* padding interno */
-  --k: 28px; /* diâmetro do "thumb" */
-  --dx: calc(var(--w) - var(--k) - var(--p)*2);
+  --w: 80px; --h: 36px; --p: 4px; --k: 28px; --dx: calc(var(--w) - var(--k) - var(--p)*2);
   position:relative; width:var(--w); height:var(--h); padding:var(--p); border-radius:999px;
   cursor:pointer; outline:none; border:1px solid; display:inline-block; isolation:isolate;
   background:#eceff3; border-color:#d5d9e0;
@@ -123,7 +123,7 @@ html.dark .theme-toggle .slot svg *{ stroke:#8a93a1; }
   transition: transform .38s cubic-bezier(.28,1.2,.43,1), box-shadow .2s ease, background .3s ease;
   display:grid; place-items:center; overflow:hidden;
   background:
-    radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%, rgba(255,255,255,.08) 65%),
+    radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%),
     linear-gradient(180deg,#f8c266,#f59e0b);
   box-shadow: 0 3px 7px rgba(0,0,0,.18), inset 0 0 0 1px rgba(255,255,255,.25);
 }
@@ -133,7 +133,7 @@ html.dark .theme-toggle .slot svg *{ stroke:#8a93a1; }
 html.dark .theme-toggle .thumb{
   transform: translateX(var(--dx));
   background:
-    radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%, rgba(255,255,255,.08) 65%),
+    radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%),
     linear-gradient(180deg,#6ba6ff,#2563eb);
   box-shadow: 0 4px 9px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.22);
 }
@@ -153,30 +153,46 @@ html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) sca
 @keyframes sweep{ from{transform:translateX(-40%);opacity:0}35%{opacity:1}to{transform:translateX(40%);opacity:0} }
 
 /* ========= Layout wrapper ========= */
+/* Centraliza o conteúdo considerando a topbar + animações de página */
 .page-shell{
   padding:
     calc(12px + env(safe-area-inset-top, 0px))
     calc(12px + env(safe-area-inset-right, 0px))
     calc(16px + env(safe-area-inset-bottom, 0px))
     calc(12px + env(safe-area-inset-left, 0px));
-  padding-top: calc(var(--topbar-h) + 12px + env(safe-area-inset-top, 0px));
-  min-height: 100dvh;
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
+  min-height: calc(100dvh - var(--topbar-h));
   display:grid; place-items:center; gap:12px;
+
+  /* === SLIDE lateral (entra da direita) === */
+  opacity: 0; transform: translateX(24px);
+  animation: page-in var(--xfade-ms) ease-out forwards;
+}
+.page-shell.leaving{
+  /* === Saída lateral (vai para a esquerda) === */
+  animation: page-out calc(var(--xfade-ms) - 40ms) ease-in forwards;
+}
+@keyframes page-in{
+  from{ opacity:0; transform:translateX(24px) }
+  to  { opacity:1; transform:translateX(0) }
+}
+@keyframes page-out{
+  from{ opacity:1; transform:translateX(0) }
+  to  { opacity:0; transform:translateX(-24px) }
+}
+@media (prefers-reduced-motion: reduce){
+  .page-shell, .page-shell.leaving{ animation-duration:0ms; transform:none; opacity:1 }
 }
 
 /* ========= Card / Conteúdo ========= */
 
-/* Largura dinâmica por atributo no <html> (slim/normal/wide) */
-.login-card{ width:min(92vw, var(--card-max)); }
+/* Atalhos de largura (opcional) */
+html[data-auth-size="slim"]  { --auth-card-max: 760px; }
+html[data-auth-size="normal"]{ --auth-card-max: 920px; }
+html[data-auth-size="wide"]  { --auth-card-max: 1040px; }
 
-/* ajuste rápido via HTML:
-   <html data-login-size="slim">   → --card-max: 760px
-   <html data-login-size="normal"> → --card-max: 920px (padrão)
-   <html data-login-size="wide">   → --card-max: 1040px
-*/
-html[data-login-size="slim"]  { --card-max: 760px; }
-html[data-login-size="normal"]{ --card-max: 920px; }
-html[data-login-size="wide"]  { --card-max: 1040px; }
+/* Largura unificada */
+.login-card{ width:min(92vw, var(--auth-card-max)); }
 
 .login-card{
   border-radius: var(--radius-card);
@@ -187,6 +203,10 @@ html[data-login-size="wide"]  { --card-max: 1040px; }
   background: var(--card-bg);
   box-shadow: var(--shadow-lg);
   margin-inline:auto;
+
+  /* IGUALAR ALTURA AO CRIAR-EMPRESA */
+  min-height: var(--auth-card-min-h);
+  margin-block: 0;
 }
 
 .login-illustration{ display:none; }
@@ -273,11 +293,6 @@ input:-webkit-autofill:focus{
 }
 
 /* =======================================================
-   MOBILE FIRST (<= 639px)
-   ======================================================= */
-/* (já atendido pelos valores base) */
-
-/* =======================================================
    TABLET (640px – 1023px)
    ======================================================= */
 @media (min-width:640px){
@@ -292,7 +307,7 @@ input:-webkit-autofill:focus{
    ======================================================= */
 @media (min-width:1024px){
   .login-card{
-    grid-template-columns: 420px 1fr; /* coluna esquerda + form */
+    grid-template-columns: 420px 1fr;
   }
   .login-illustration{ display:grid; place-items:center; padding:20px; min-height:420px }
   .login-form{ padding: 26px 30px; }
@@ -308,21 +323,17 @@ input:-webkit-autofill:focus{
    DESKTOP (>= 1360px)
    ======================================================= */
 @media (min-width:1360px){
-  .login-card{
-    grid-template-columns: 440px 1fr;
-  }
+  .login-card{ grid-template-columns: 440px 1fr; }
   .login-illustration{ min-height:460px; padding:22px }
   .login-form{ padding: 28px 34px }
   .head-block, .form, .footer-note{ width:440px }
-  .title{ font-size:34px }           /* ↓ 40 → 34 */
+  .title{ font-size:34px }
   .logo, .logo-dark{ width:138px }
 }
 
 /* =======================================================
-   COMPACTAÇÃO POR ALTURA (sem scroll chato)
+   COMPACTAÇÃO POR ALTURA
    ======================================================= */
-
-/* ≤ 800px de altura → compacto */
 @media (max-height: 800px){
   :root{
     --pad-form-y: 16px;
@@ -336,10 +347,8 @@ input:-webkit-autofill:focus{
   .head-block{ margin-bottom: 10px; }
   .subtitle{ margin-bottom: 12px; }
   .field{ margin-bottom: 10px; }
-  .login-illustration{ display:none !important; } /* some a coluna esquerda pra caber */
+  .login-illustration{ display:none !important; }
 }
-
-/* ≤ 680px de altura → ultra-compacto */
 @media (max-height: 680px){
   :root{
     --pad-form-y: 12px;
@@ -350,4 +359,5 @@ input:-webkit-autofill:focus{
     --logo-w: 96px;
   }
   .row-between{ gap:6px; font-size:12.5px; }
+  .login-card{ min-height: auto; }
 }

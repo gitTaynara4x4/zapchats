@@ -1,4 +1,37 @@
+# backend/rabbit_consumer.py
 from __future__ import annotations
+
+"""
+RabbitMQ consumer robusto:
+- RobustConnection/RobustChannel (reconecta sozinho)
+- Backoff para a conexão inicial
+- Topologia idempotente (exchange topic, fila principal, retry via DLX+TTL, DLQ final)
+- Consumer com ack/nack + retries limitados (x-death)
+- Publisher confirms e mandatory nas cópias para DLX final
+- Encerramento limpo via stop()
+
+ENV principais:
+  RABBITMQ_URI                amqp://user:pass@host:5672/vhost   (prioritário)
+  RABBITMQ_DEFAULT_*          (user/pass/host/port/vhost)        (fallback p/ montar a URI)
+  RABBITMQ_EXCHANGE_NAME      evolution_exchange
+  RABBITMQ_QUEUE_NAME         zapchats.backend
+  RABBITMQ_BINDINGS           #  (routing keys separados por vírgula)
+  RABBITMQ_HEARTBEAT          15
+  RABBITMQ_QOS                64
+  RABBITMQ_USE_QUORUM         true
+  RABBITMQ_USE_SAC            false   (x-single-active-consumer)
+  RABBITMQ_ATTACH_DLX         true    (adiciona x-dead-letter-exchange na fila nova)
+  RABBITMQ_MAX_LENGTH         ""      (opcional)
+  RABBITMQ_MAX_BYTES          ""      (opcional)
+  RABBITMQ_OVERFLOW           ""      (ex.: reject-publish)
+
+  RABBITMQ_RETRY_TTL_MS       5000
+  RABBITMQ_RETRY_ROUTING      retry.5s
+  RABBITMQ_RETRY_BACK_ROUTING events
+  RABBITMQ_RETRY_QUEUE        <queue>.retry
+  RABBITMQ_DLQ_NAME           <queue>.dlq
+  RABBITMQ_MAX_RETRIES        5
+"""
 
 import os
 import json
@@ -11,11 +44,13 @@ import aio_pika
 from aio_pika import Message, DeliveryMode
 from aio_pika.abc import AbstractChannel, AbstractQueue, AbstractIncomingMessage
 
+
 # =========================
 # Helpers de ENV e URI
 # =========================
 def _env(name: str, default: str = "") -> str:
     return os.getenv(name, default)
+
 
 def _uri() -> str:
     """
@@ -34,6 +69,7 @@ def _uri() -> str:
     vq = "%2F" if vhost == "/" else urllib.parse.quote(vhost, safe="")
     return f"amqp://{user}:{pw}@{host}:{port}/{vq}"
 
+
 # =========================
 # Estado
 # =========================
@@ -50,6 +86,7 @@ class _RabbitState:
     dlq_queue_name: Optional[str] = None
     max_retries: int = 5
 
+
 # =========================
 # Topologia
 # =========================
@@ -62,8 +99,8 @@ async def _ensure_topology(
     - DLX (ex_name + ".dlx"): topic, durable
     - Fila principal:
         * PASSIVE se já existir (não muda args → evita PRECONDITION_FAILED)
-        * Se não existir, cria com quorum (x-queue-type=quorum)
-        * Binds com routing keys configuradas
+        * Se não existir, cria com quorum (x-queue-type=quorum), SAC opcional
+          e, se configurado, anexa x-dead-letter-exchange para a DLX.
     - Fila de retry: TTL + dead-letter de volta p/ exchange principal
     - DLQ final: recebe mensagens "desistidas"
     """
@@ -79,6 +116,7 @@ async def _ensure_topology(
     dlq_queue_name = _env("RABBITMQ_DLQ_NAME", f"{queue_name}.dlq")
     use_quorum = (_env("RABBITMQ_USE_QUORUM", "true").lower() == "true")
     use_sac = (_env("RABBITMQ_USE_SAC", "false").lower() == "true")
+    attach_dlx = (_env("RABBITMQ_ATTACH_DLX", "true").lower() == "true")
 
     # limites/overflow (opcionais) – só usados se a fila for criada do zero
     max_len = _env("RABBITMQ_MAX_LENGTH", "")
@@ -94,18 +132,22 @@ async def _ensure_topology(
     try:
         main_q = await ch.declare_queue(queue_name, passive=True)
     except Exception:
-        # 2) não existe → cria com quorum e demais limites (DLX fica por policy)
+        # 2) não existe → cria com quorum e demais limites
         main_args: Dict[str, Any] = {}
         if use_quorum:
             main_args["x-queue-type"] = "quorum"
         if use_sac:
             main_args["x-single-active-consumer"] = True
+        if attach_dlx:
+            main_args["x-dead-letter-exchange"] = f"{ex_name}.dlx"
+            main_args["x-dead-letter-routing-key"] = retry_key
         if max_len:
             main_args["x-max-length"] = int(max_len)
         if max_bytes:
             main_args["x-max-length-bytes"] = int(max_bytes)
         if overflow:
             main_args["x-overflow"] = overflow  # e.g. "reject-publish"
+
         try:
             main_q = await ch.declare_queue(queue_name, durable=True, arguments=main_args)
         except Exception:
@@ -156,6 +198,7 @@ async def _ensure_topology(
     }
     return main_ex, main_q, dlx_ex, topo
 
+
 # =========================
 # Helpers de normalização
 # =========================
@@ -164,6 +207,7 @@ def _norm_event_name(ev: Optional[str]) -> str:
     if not ev:
         return ""
     return ev.replace(".", "_").replace("-", "_").upper()
+
 
 def _find_instance(js: Any) -> str:
     """
@@ -199,8 +243,9 @@ def _find_instance(js: Any) -> str:
 
     return ""
 
+
 # =========================
-# Runner principal
+# Runner principal (com backoff de conexão)
 # =========================
 async def _runner(
     state: _RabbitState,
@@ -214,15 +259,27 @@ async def _runner(
     uri = _uri()
     print("[RABBIT] Conectando em:", uri)
 
-    # Heartbeat para evitar conexões zumbis
     heartbeat = int(_env("RABBITMQ_HEARTBEAT", "15") or "15")
-    state.conn = await aio_pika.connect_robust(uri, heartbeat=heartbeat)
+    qos = int(_env("RABBITMQ_QOS", "64") or "64")
+
+    # ===== conexão inicial com backoff (caso o broker ainda não esteja pronto) =====
+    attempt = 0
+    while True:
+        try:
+            state.conn = await aio_pika.connect_robust(uri, heartbeat=heartbeat)
+            break
+        except Exception as e:
+            attempt += 1
+            delay = min(30, 1 + attempt * 2)
+            print(f"[RABBIT] Falha ao conectar ({e}). Tentando novamente em {delay}s…")
+            # se alguém pediu stop durante o backoff, sai
+            if state.stop_event and state.stop_event.is_set():
+                return
+            await asyncio.sleep(delay)
 
     # Publisher confirms para garantir publicação, e permitir mandatory
     state.channel = await state.conn.channel(publisher_confirms=True)
-
-    prefetch = int(_env("RABBITMQ_QOS", "64") or "64")
-    await state.channel.set_qos(prefetch_count=prefetch)
+    await state.channel.set_qos(prefetch_count=qos)
 
     main_ex, state.queue, state.dlx_ex, topo = await _ensure_topology(state.channel)
     state.retry_queue_name = topo["retry_queue"]
@@ -267,7 +324,10 @@ async def _runner(
             headers=headers or {},
             delivery_mode=DeliveryMode.PERSISTENT,
         )
-        await state.dlx_ex.publish(msg, routing_key=routing_key, mandatory=True)
+        try:
+            await state.dlx_ex.publish(msg, routing_key=routing_key, mandatory=True)
+        except Exception as e:
+            print("[RABBIT] Unroutable/erro ao publicar na DLX final:", e)
 
     async def on_message(msg: AbstractIncomingMessage) -> None:
         # processamento manual para decidir ack/nack/publicação na DLQ final
@@ -369,6 +429,7 @@ async def _runner(
                 await state.conn.close()
         except Exception:
             pass
+
 
 # =========================
 # API pública

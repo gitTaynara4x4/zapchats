@@ -59,14 +59,14 @@ class Empresa(Base):
     nome     = Column(String, nullable=False)
     telefone = Column(String, nullable=False)
 
-    # Plano atual selecionado (pago ou FREE)
+    # Plano atual selecionado (pago ou FREE) – (WhatsApp/instâncias)
     assinatura = Column(String, nullable=False, server_default="FREE")
 
-    # Trial opcional (ex.: PRATA por 7 dias)
+    # Trial opcional (ex.: PRATA por 7 dias) – (WhatsApp/instâncias)
     trial_tier       = Column(String, nullable=True)
     trial_expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
-    # ✅ Validade do plano PAGO (se estiver setado e no futuro, o pago prevalece)
+    # ✅ Validade do plano PAGO (se estiver setado e no futuro, o pago prevalece) – (WhatsApp/instâncias)
     plano_expira_em  = Column(TIMESTAMP(timezone=True), nullable=True)
 
     quantidade_instancias = Column(Integer, nullable=False, server_default="0")
@@ -78,7 +78,24 @@ class Empresa(Base):
 
     cnpj_cpf = Column(String, nullable=True, index=True)
 
-    # relacionamentos
+    # =========================
+    # Módulo de E-mail (cotas independentes das instâncias WhatsApp)
+    # =========================
+    # Plano PAGO de E-mail (ex.: PRATA/OURO/...)
+    email_assinatura       = Column(String, nullable=True)
+    email_plano_expira_em  = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    # Trial de E-mail (opcional; você libera manualmente quando quiser)
+    email_trial_tier       = Column(String, nullable=True)
+    email_trial_expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    # Override numérico de cota de caixas (prioridade máxima).
+    # NULL => usa plano/trial. 0 => bloqueia geral.
+    max_email_accounts_override = Column(Integer, nullable=True)
+
+    # =========================
+    # Relacionamentos
+    # =========================
     clientes        = relationship("Cliente", back_populates="empresa", cascade="all, delete-orphan")
     usuarios        = relationship("Usuario", back_populates="empresa", cascade="all, delete-orphan")
     departamentos   = relationship("Departamento", back_populates="empresa", cascade="all, delete-orphan")
@@ -95,8 +112,15 @@ class Empresa(Base):
         passive_deletes=True,
     )
 
-    # ---------- Helpers de plano ----------
+    # Contas de e-mail conectadas (módulo E-mail)
+    email_accounts = relationship(
+        "EmailAccount",
+        back_populates="empresa",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
+    # ---------- Helpers de plano (WhatsApp/instâncias) ----------
     @property
     def plano(self) -> str:
         """Alias para compat: lê o campo `assinatura`."""
@@ -138,6 +162,54 @@ class Empresa(Base):
         if self.trial_active:
             return str(self.trial_tier).upper()
         return "FREE"
+
+    # ---------- Helpers do Módulo de E-mail ----------
+    @property
+    def email_paid_active(self) -> bool:
+        """Plano PAGO de e-mail está ativo? (assinatura setada e não expirada)"""
+        if not self.email_assinatura:
+            return False
+        if not self.email_plano_expira_em:
+            return True
+        return datetime.now(timezone.utc) < self.email_plano_expira_em
+
+    @property
+    def email_trial_active(self) -> bool:
+        """Trial de e-mail ativo? (se você usar trial manualmente)"""
+        if not (self.email_trial_tier and self.email_trial_expires_at):
+            return False
+        return datetime.now(timezone.utc) < self.email_trial_expires_at
+
+    @property
+    def email_quota_effective(self) -> int:
+        """
+        Cota efetiva de caixas de e-mail: override -> plano pago -> trial -> 0.
+        Mantém o mapeamento de cotas embutido para não depender de constantes externas.
+        """
+        # 1) Override manda (inclusive 0 para bloquear)
+        if self.max_email_accounts_override is not None:
+            return int(self.max_email_accounts_override)
+
+        # 2) Plano pago
+        if self.email_paid_active:
+            tier = (self.email_assinatura or "").upper()
+        # 3) Trial
+        elif self.email_trial_active:
+            tier = (self.email_trial_tier or "").upper()
+        else:
+            return 0
+
+        # Mapeamento interno de cotas por tier (ajuste se quiser)
+        limits = {
+            "PRATA": 1,
+            "OURO": 2,
+            "PLATINA": 5,
+            "DIAMANTE": 10,
+            "RADIANTE": 50,
+            "ASCENDENTE": 20,
+            "IMORTAL": 100,
+        }
+        return limits.get(tier, 0)
 
 
 # =========================
@@ -210,7 +282,7 @@ class EmpresaInstancia(Base):
 class Cliente(Base):
     __tablename__ = "clientes"
     __table_args__ = (
-        UniqueConstraint("empresa_id", "telefone", "instancia_id", name="u_empresa_cli_inst"),
+        UniqueConstraint("empresa_id", "telefone_norm", name="u_emp_cli_tel_norm"),
         Index("ix_clientes_empresa_inst", "empresa_id", "instancia_id"),
         Index("ix_clientes_tel_norm", "telefone_norm"),  # índice p/ buscas por número normalizado
     )
@@ -801,3 +873,36 @@ class DepartamentoACL(Base):
     def __repr__(self) -> str:
         ef = "ALLOW" if self.effect else "DENY"
         return f"<DepartamentoACL dep={self.departamento_id} {self.resource}.{self.action} {self.scope}={ef}>"
+
+class EmailAccount(Base):
+    __tablename__ = "email_accounts"
+    __table_args__ = (
+        # evita duplicar mesma caixa por empresa/provedor/e-mail
+        UniqueConstraint("empresa_id", "provider", "email_address", name="uq_email_account_emp_provider_email"),
+        Index("ix_email_acc_emp", "empresa_id"),
+        Index("ix_email_acc_emp_status", "empresa_id", "status"),
+        Index("ix_email_acc_provider", "provider"),
+        Index("ix_email_acc_email", "email_address"),
+    )
+
+    id             = Column(Integer, primary_key=True, index=True)
+    empresa_id     = Column(Integer, ForeignKey("empresas.id", ondelete="CASCADE"), nullable=False, index=True)
+    colaborador_id = Column(Integer, ForeignKey("colaboradores.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    provider       = Column(String(32), nullable=False, default="gmail")
+    email_address  = Column(String(255), nullable=False)
+
+    # tokens (refresh criptografado no app)
+    refresh_token_enc = Column(Text, nullable=False)
+    access_token      = Column(Text, nullable=True)
+    token_expiry      = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    status        = Column(String(32), nullable=False, default="active")  # 'active' conta na cota
+    created_at    = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    # relationships
+    empresa       = relationship("Empresa", back_populates="email_accounts")
+    colaborador   = relationship("Colaborador", foreign_keys=[colaborador_id])
+
+    def __repr__(self) -> str:
+        return f"<EmailAccount id={self.id} emp={self.empresa_id} {self.provider}:{self.email_address}>"

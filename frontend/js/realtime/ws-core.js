@@ -1,0 +1,197 @@
+/* ws-core.js — gestor único de WebSockets com idempotência forte */
+const _topics = new Map(); // topic -> { ws, listeners:Set, wantOpen, lastOpenAt, retries, hbTimer }
+const _baseRetry = 800;    // ms
+const _maxRetry  = 10000;  // ms
+const _pingEach  = 30000;  // ms (ping app-level)
+
+function _getCID() {
+  try {
+    let cid = localStorage.getItem('ws_cid');
+    if (!cid) {
+      cid = (crypto?.randomUUID?.() || Math.random().toString(36).slice(2)) + '-' + Date.now().toString(36);
+      localStorage.setItem('ws_cid', cid);
+    }
+    return cid;
+  } catch {
+    return (Math.random().toString(36).slice(2)) + '-' + Date.now().toString(36);
+  }
+}
+
+function _topicState(topic) {
+  let st = _topics.get(topic);
+  if (!st) {
+    st = { ws: null, listeners: new Set(), wantOpen: false, lastOpenAt: 0, retries: 0, hbTimer: null };
+    _topics.set(topic, st);
+  }
+  return st;
+}
+
+function _jitter(ms) {
+  const delta = Math.round(ms * 0.2);
+  return ms + Math.round((Math.random() * 2 - 1) * delta);
+}
+
+function _scheduleReopen(topic) {
+  const st = _topicState(topic);
+  if (!st.wantOpen) return;
+  const wait = Math.min(_baseRetry * Math.max(1, Math.pow(1.6, st.retries || 0)), _maxRetry);
+  const withJitter = Math.max(250, _jitter(wait));
+  setTimeout(() => _open(topic, st._opts || {}), withJitter);
+  st.retries = Math.min((st.retries || 0) + 1, 20);
+}
+
+function _wsURLForTopic(topic, opts = {}) {
+  const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
+  const enc   = encodeURIComponent(topic);
+  const cid   = _getCID();
+  const want  = (opts.wantQR ? '&want_qr=1' : '');
+  return `${proto}://${location.host}/ws/${enc}?cid=${encodeURIComponent(cid)}${want}`;
+}
+
+function _safeJson(x) {
+  try { return JSON.parse(x); } catch { return null; }
+}
+
+function _emit(topic, payload) {
+  const st = _topicState(topic);
+  st.listeners.forEach(fn => {
+    try { fn(payload); } catch {}
+  });
+}
+
+function _startHB(topic) {
+  const st = _topicState(topic);
+  clearInterval(st.hbTimer);
+  st.hbTimer = setInterval(() => {
+    try {
+      if (st.ws && st.ws.readyState === WebSocket.OPEN) {
+        st.ws.send('ping');
+      }
+    } catch {}
+  }, _pingEach);
+}
+
+function _stopHB(topic) {
+  const st = _topicState(topic);
+  clearInterval(st.hbTimer);
+  st.hbTimer = null;
+}
+
+function _open(topic, opts = {}) {
+  const st = _topicState(topic);
+
+  // fecha o que tiver antes de abrir outro
+  try { st.ws?.close?.(); } catch {}
+
+  const url = _wsURLForTopic(topic, opts);
+  const ws = new WebSocket(url);
+  st.ws = ws;
+  st.lastOpenAt = Date.now();
+  st._opts = opts;
+
+  ws.addEventListener('open', () => {
+    st.retries = 0;
+    _startHB(topic);
+    _emit(topic, { type: 'open' });
+  });
+
+  ws.addEventListener('close', () => {
+    _stopHB(topic);
+    _emit(topic, { type: 'close' });
+    st.ws = null;
+    if (st.wantOpen) _scheduleReopen(topic);
+  });
+
+  ws.addEventListener('error', () => {
+    try { ws.close(); } catch {}
+    _emit(topic, { type: 'error' });
+  });
+
+  ws.addEventListener('message', (ev) => {
+    if (typeof ev?.data === 'string' && (ev.data === 'pong' || ev.data === 'ping')) {
+      _emit(topic, { type: 'heartbeat', data: ev.data });
+      return;
+    }
+    const data = typeof ev?.data === 'string' ? _safeJson(ev.data) : ev?.data;
+    _emit(topic, { type: 'message', data });
+  });
+}
+
+function _ensure(topic, opts = {}) {
+  const st = _topicState(topic);
+
+  // já conectado ou conectando? não abre outro
+  if (st.ws && (st.ws.readyState === WebSocket.CONNECTING || st.ws.readyState === WebSocket.OPEN)) {
+    st.wantOpen = true;
+    st._opts = opts;
+    return;
+  }
+
+  // anti-rajada: só deixa abrir a cada 2s
+  const now = Date.now();
+  if (st.lastOpenAt && (now - st.lastOpenAt) < 2000) {
+    st.wantOpen = true;
+    st._opts = opts;
+    return;
+  }
+
+  st.wantOpen = true;
+  st._opts = opts;
+  _open(topic, opts);
+}
+
+function _close(topic) {
+  const st = _topicState(topic);
+  st.wantOpen = false;
+  _stopHB(topic);
+  try { st.ws?.close?.(); } catch {}
+  st.ws = null;
+}
+
+function _on(topic, fn) {
+  const st = _topicState(topic);
+  st.listeners.add(fn);
+  return () => { try { st.listeners.delete(fn); } catch {} };
+}
+
+/* ====== API pública ====== */
+export function ensureEmpresaWS(empresaId) {
+  if (!empresaId) return;
+  _ensure(`emp:${empresaId}`);
+}
+export function closeEmpresaWS(empresaId) {
+  if (!empresaId) return;
+  _close(`emp:${empresaId}`);
+}
+export function onEmpresaMessage(empresaId, handler) {
+  if (!empresaId || typeof handler !== 'function') return () => {};
+  return _on(`emp:${empresaId}`, handler);
+}
+
+export function ensureInstWS(instance, opts = {}) {
+  if (!instance) return;
+  _ensure(`inst:${instance}`, opts);
+}
+export function closeInstWS(instance) {
+  if (!instance) return;
+  _close(`inst:${instance}`);
+}
+export function onInstMessage(instance, handler) {
+  if (!instance || typeof handler !== 'function') return () => {};
+  return _on(`inst:${instance}`, handler);
+}
+
+export function getWSStatus() {
+  const out = {};
+  _topics.forEach((st, topic) => {
+    out[topic] = {
+      open: !!(st.ws && st.ws.readyState === WebSocket.OPEN),
+      readyState: st.ws ? st.ws.readyState : -1,
+      wantOpen: !!st.wantOpen,
+      listeners: st.listeners.size,
+      lastOpenAt: st.lastOpenAt,
+      retries: st.retries || 0,
+    };
+  });
+  return out;
+}

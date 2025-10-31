@@ -1,99 +1,194 @@
-// js/atendimentos/core/env.js
+// frontend/js/atendimentos/domain/ack.js
+// Estilo WhatsApp Web + ACK SEMPRE DEPOIS DO HORÁRIO + persistência no LS
 
-// ===============================
-// Identidade da empresa (frontend)
-// ===============================
-const rawEmpresa = (typeof localStorage !== 'undefined')
-  ? localStorage.getItem('empresa_id')
-  : null;
+'use strict';
 
-export const EMPRESA_ID = Number.parseInt(rawEmpresa, 10);
-
-// Validação básica e fallback para login
-if (!Number.isFinite(EMPRESA_ID) || EMPRESA_ID <= 0) {
-  console.error('[ERRO] Empresa não definida. Redirecionando para login.');
-  if (typeof window !== 'undefined' && typeof location !== 'undefined') {
-    location.href = '/login';
-  }
-  throw new Error('Sem login, interrompendo execução');
+/* ============================ Helpers ============================ */
+export function normalizeAck(v){
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(0, Math.min(2, n)) : 0;
 }
 
-// Fuso horário padrão da aplicação
-export const APP_TZ = 'America/Sao_Paulo';
-
-// ===============================
-// Evolution (config do frontend)
-// Lida de meta tags / window / localStorage
-// ===============================
-function readMeta(name) {
-  try {
-    if (typeof document === 'undefined') return '';
-    const el = document.querySelector(`meta[name="${name}"]`);
-    return (el?.getAttribute('content') || '').trim();
-  } catch {
-    return '';
+const HistAPI = {
+  get(inst, id){
+    try{
+      if (typeof window.getHist === 'function') return window.getHist(inst, id) || [];
+      if (window.HistCache?.get) return window.HistCache.get(inst, id) || [];
+      if (window.cacheHistoricos && window.cacheHistoricos[id]) return window.cacheHistoricos[id] || [];
+    }catch{}
+    return [];
+  },
+  set(inst, id, arr){
+    try{
+      if (typeof window.setHist === 'function') return window.setHist(inst, id, arr);
+      if (window.HistCache?.set) return window.HistCache.set(inst, id, arr);
+      // fallback: primeWith funciona como "set"
+      if (typeof window.primeWith === 'function') return window.primeWith(inst, id, arr, null);
+    }catch{}
   }
+};
+
+function ensureAckCss(){
+  if (document.getElementById('ack-css')) return;
+  const s = document.createElement('style');
+  s.id = 'ack-css';
+  s.textContent = `
+    :root{ --ack-grey:#8696a0; --ack-blue:#53bdeb; }
+    .msg-ack{ display:inline-flex; align-items:center; gap:0; vertical-align:-0.15em; line-height:1; height:1em; user-select:none }
+    .msg-ack svg{ width:14px; height:14px; display:block }
+    .msg-ack .tick{ fill:currentColor }
+    .msg-ack .tick.second{ margin-left:-6px }
+    .msg-ack[data-ack="0"]{ color:var(--ack-grey); opacity:.95 }
+    .msg-ack[data-ack="1"]{ color:var(--ack-grey); opacity:.95 }
+    .msg-ack[data-ack="2"]{ color:var(--ack-blue);  opacity:1 }
+    .msg-ack .clock{ stroke:currentColor; fill:none; stroke-width:1.6 }
+    .msg-ack .clock-hand{ stroke:currentColor; stroke-width:1.6; stroke-linecap:round }
+
+    /* layout da meta: hora + ack (ack sempre depois da hora) */
+    .bubble .meta{ display:flex; align-items:center; gap:.35rem; white-space:nowrap }
+    .bubble-out .meta{ justify-content:flex-end }
+    .bubble .meta .time, .bubble .meta .msg-time{ order:1 }
+    .bubble .meta .msg-ack{ order:2 }
+    .bubble-in  .msg-ack{ display:none !important } /* ACK só em saída */
+  `;
+  document.head.appendChild(s);
 }
 
-const fromWinENV = (p) =>
-  (typeof window !== 'undefined' && window.ENV && window.ENV.EVOLUTION && window.ENV.EVOLUTION[p]) || '';
+/* ============================ SVGs ============================ */
+function svgClock(){ return `
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <circle class="clock" cx="12" cy="12" r="8.75"></circle>
+    <path class="clock-hand" d="M12 7.5v4.6l3 1.8"></path>
+  </svg>`; }
+function svgSingleCheck(cls=''){ return `
+  <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+    <path class="tick ${cls}" d="M6.7 10.9l-2.4-2.4a1 1 0 0 1 1.4-1.4l1.7 1.7 6-6a1 1 0 1 1 1.4 1.4l-6.7 6.7a1 1 0 0 1-1.4 0z"/>
+  </svg>`; }
+function svgDoubleCheck(){ return svgSingleCheck('first') + svgSingleCheck('second'); }
 
-const fromWinEVO = (p) =>
-  (typeof window !== 'undefined' && window.EVOLUTION && window.EVOLUTION[p]) || '';
+/* ============================ Render ============================ */
+function labelFor(a){ return a===2?'lida':(a===1?'entregue':'enviando'); }
+function iconMarkup(ack){
+  ensureAckCss();
+  const a = normalizeAck(ack);
+  return a === 0 ? svgClock() : svgDoubleCheck();
+}
 
-const EVO_URL = (
-  readMeta('evo-api-url') ||
-  fromWinENV('apiUrl') ||
-  fromWinEVO('apiUrl') ||
-  ''
-).replace(/\/+$/, '');
+export function renderAckSpan(ack, msgId){
+  const a = normalizeAck(ack);
+  const idAttr = msgId ? ` data-msg-id="${String(msgId)}"` : '';
+  const title = a===2?'Mensagem lida':(a===1?'Mensagem entregue':'Enviando…');
+  return `<span class="msg-ack" data-ack="${a}"${idAttr} aria-label="${labelFor(a)}" title="${title}">${iconMarkup(a)}</span>`;
+}
+export function getAckIcon(v){ return renderAckSpan(v); }
 
-const EVO_KEY = (
-  readMeta('evo-api-key') ||
-  fromWinENV('apiKey') ||
-  fromWinEVO('apiKey') ||
-  (typeof localStorage !== 'undefined' ? localStorage.getItem('evo_api_key') : '') ||
-  ''
-);
+/* ============================ Posicionamento (sempre após a hora) ============================ */
+function findMetaContainer(bubble){
+  return bubble.querySelector('.meta, .msg-meta, .bubble-meta, .footer, .tail') || bubble;
+}
+function findTimeEl(scope){
+  let t = scope.querySelector('.msg-time, .time, time[datetime], time[data-role="msg-time"], [data-time]');
+  if (t) return t;
+  // fallback: procura HH:MM
+  let last=null;
+  scope.querySelectorAll('*').forEach(el=>{
+    if (el.children.length===0){
+      const txt=(el.textContent||'').trim();
+      if (/\b\d{1,2}:\d{2}\b/.test(txt)) last=el;
+    }
+  });
+  return last;
+}
+function isOutgoingBubble(bubble){
+  if (!bubble) return false;
+  if (bubble.classList.contains('bubble-out')) return true;
+  const row = bubble.closest('.msg-row');
+  return row?.classList.contains('msg-sent') || false;
+}
+function ensureAfterTime(ackEl){
+  try{
+    const bubble = ackEl.closest('.bubble');
+    if (!bubble || !isOutgoingBubble(bubble)) return; // só em saída
+    const meta = findMetaContainer(bubble);
+    const timeEl = findTimeEl(meta);
+    if (!timeEl) { // sem .time: joga no fim da meta
+      if (ackEl.parentElement!==meta) meta.appendChild(ackEl);
+      return;
+    }
+    if (timeEl.nextSibling!==ackEl){ timeEl.after(ackEl); }
+  }catch{}
+}
+function scheduleEnsure(el){
+  ensureAfterTime(el);
+  try{ requestAnimationFrame(()=>ensureAfterTime(el)); }catch{ setTimeout(()=>ensureAfterTime(el),0); }
+}
 
-const EVO_INSTANCE = (
-  readMeta('evo-default-instance') ||
-  fromWinENV('defaultInstance') ||
-  fromWinEVO('defaultInstance') ||
-  (typeof localStorage !== 'undefined' ? localStorage.getItem('evo_default_instance') : '') ||
-  ''
-);
+/* ============================ Apply (DOM + cache + lista + persist) ============================ */
+export function applyAckUpdate(p = {}){
+  const clienteId = Number(p.cliente_id || p.conversation_id || p.id || 0);
+  const inst = (p.instancia_id==null || p.instancia_id==='') ? null : String(p.instancia_id);
+  const msgId = (p.msg_id ?? p.message_id ?? p.id ?? '').toString();
+  const ack = normalizeAck(p.ack);
+  if (!clienteId || !msgId) return false;
 
-// Objeto consolidado
-export const EVOLUTION = Object.freeze({
-  apiUrl: EVO_URL,
-  apiKey: EVO_KEY,
-  defaultInstance: EVO_INSTANCE,
-});
+  // ===== cache
+  let touched = false;
+  try{
+    const arr = HistAPI.get(inst, clienteId) || [];
+    const idx = arr.findIndex(m => String(m?.msg_id||'') === msgId);
+    if (idx >= 0){
+      const prevAck = Number(arr[idx].ack||0);
+      arr[idx].ack = Math.max(prevAck, ack);
+      HistAPI.set(inst, clienteId, arr);
+      touched = true;
+    }
+  }catch{}
 
-// ===============================
-// Bridge para scripts legados (inline/IIFEs)
-// Publica EMPRESA_ID, APP_TZ e EVOLUTION no window
-// ===============================
-try {
-  if (typeof window !== 'undefined') {
-    // Garante o namespace
-    window.ENV = window.ENV || {};
-    window.ENV.EVOLUTION = Object.assign({}, window.ENV.EVOLUTION, EVOLUTION);
+  // ===== DOM
+  try{
+    const sel = `.msg-ack[data-msg-id="${CSS.escape(msgId)}"]`;
+    document.querySelectorAll(sel).forEach(el=>{
+      el.setAttribute('data-ack', String(ack));
+      el.setAttribute('aria-label', labelFor(ack));
+      el.setAttribute('title', ack===2?'Mensagem lida':(ack===1?'Mensagem entregue':'Enviando…'));
+      el.innerHTML = iconMarkup(ack);
+      scheduleEnsure(el);
+    });
+  }catch{}
 
-    if (typeof window.EMPRESA_ID === 'undefined') window.EMPRESA_ID = EMPRESA_ID;
-    if (typeof window.APP_TZ === 'undefined') window.APP_TZ = APP_TZ;
+  // ===== espelha no mirror + salva em LS (sobrevive ao F5)
+  try{
+    const mirror = (window.cacheHistoricos ||= {});
+    mirror[clienteId] = HistAPI.get(inst, clienteId) || mirror[clienteId] || [];
+    window.salvarCache?.();
+  }catch{}
 
-    // Compat opcional: também expõe em window.EVOLUTION sem sobrescrever se já existir
-    if (typeof window.EVOLUTION === 'undefined') {
-      window.EVOLUTION = { ...EVOLUTION };
-    } else {
-      // Só preenche o que estiver faltando
-      window.EVOLUTION.apiUrl = window.EVOLUTION.apiUrl || EVOLUTION.apiUrl;
-      window.EVOLUTION.apiKey = window.EVOLUTION.apiKey || EVOLUTION.apiKey;
-      window.EVOLUTION.defaultInstance = window.EVOLUTION.defaultInstance || EVOLUTION.defaultInstance;
+  // ===== lista (preview/ícone)
+  try{
+    window.Lista?.updatePreview?.(clienteId, { ack, texto: undefined });
+    window.Lista?.setAck?.(clienteId, ack);
+  }catch{}
+
+  return touched;
+}
+
+/* ============================ Observer ============================ */
+const _ackObserver = new MutationObserver(muts=>{
+  for(const m of muts){
+    for(const n of m.addedNodes){
+      if(!(n instanceof Element)) continue;
+      if (n.matches?.('.msg-ack')) scheduleEnsure(n);
+      n.querySelectorAll?.('.msg-ack').forEach(scheduleEnsure);
+      if (n.matches?.('.bubble-out')) n.querySelectorAll?.('.msg-ack').forEach(scheduleEnsure);
     }
   }
-} catch {
-  // Ambientes sem window (SSR/tests): ignore
-}
+});
+try{ _ackObserver.observe(document.documentElement, { childList:true, subtree:true }); }catch{}
+
+/* ============================ Globais ============================ */
+try{
+  window.normalizeAck = normalizeAck;
+  window.getAckIcon = getAckIcon;
+  window.renderAckSpan = renderAckSpan;
+  window.applyAckUpdate = applyAckUpdate;
+}catch{}

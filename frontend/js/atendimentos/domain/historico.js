@@ -1,21 +1,19 @@
-// /frontend/js/atendimentos/domain/historico.js
-// Histórico com paginação “puxar pra cima”, loader no topo e clamp de texto tipo WPP.
+// Histórico com paginação “puxar pra cima” + ACK único + persistência LS + merge de ACK
+// ⚠️ Agora o elemento #historico é buscado *dinamicamente* (H()) em todas as funções.
 
 import { formatChatTime, parseAtendimentoDate } from '../core/time.js';
 import { getHist, primeWith, mergeOld } from '../domain/hist-cache.js';
 import { EMPRESA_ID } from '../core/env.js';
 
 export const HISTORICO_LIMIT = 50;
-const hist = document.getElementById('historico');
+const H = () => document.getElementById('historico'); // << dinâmico
 
-/* ========== Loader + ReadMore + Call CSS ========== */
-(function injectCSS(){
-  const id = 'hist-misc-css';
+/* ========== Loader “puxar pra cima” (CSS inline + helpers) ========== */
+(function injectLoaderCSS(){
+  const id = 'hist-loader-css';
   if (document.getElementById(id)) return;
   const css = `
   #historico { position: relative; }
-
-  /* Loader topo (quando carrega mensagens antigas) */
   #historico .hist-loader {
     position: sticky; top: 0; z-index: 2;
     display: none; align-items: center; justify-content: center;
@@ -34,63 +32,14 @@ const hist = document.getElementById('historico');
     user-select: none;
   }
   @keyframes histSpin { to { transform: rotate(360deg); } }
-
-  /* ======= Ler mais (estilo WPP) ======= */
-  .bubble .msg-text-wrap { position: relative; }
-  .bubble .msg-text { white-space: pre-wrap; word-wrap: break-word; }
-
-  /* estado colapsado */
-  .bubble .msg-text.clamped {
-    overflow: hidden;
-    max-height: var(--rm-max-h, 260px); /* ajustável via CSS var */
-  }
-  .bubble .msg-text.clamped::after{
-    content:"";
-    position:absolute; left:0; right:0; bottom:0; height:48px;
-    background: linear-gradient(to bottom, rgba(0,0,0,0), rgba(0,0,0,.18));
-    pointer-events:none;
-  }
-
-  /* botão */
-  .bubble .rm-toggle{
-    position:absolute; right:8px; bottom:4px;
-    border:0; background:transparent; color:#c7d0d5;
-    font-size:.92em; font-weight:600; cursor:pointer;
-    text-decoration: none;
-  }
-  .bubble .rm-toggle:hover{ text-decoration: underline; }
-
-  /* ======= Ligação badge ======= */
-  .bubble .msg-call {
-    display:flex; align-items:center; gap:8px;
-    font-weight:600; margin-bottom:6px;
-    color: var(--call-fg, #d1e2ff);
-  }
-  .bubble .msg-call .ico{
-    line-height:1; font-size:1.06em;
-    filter: drop-shadow(0 1px 0 rgba(0,0,0,.15));
-  }
-  .bubble .msg-call .kind{ opacity:.95; text-transform:capitalize; }
-  .bubble .msg-call .sep{ opacity:.55; }
-  .bubble .msg-call .dir{ opacity:.9; }
-  .bubble .msg-call .st{ opacity:.7; font-weight:500; }
-
-  /* ======= Byline (responsável acima da bolha) ======= */
-  .msg-row .byline{
-    font-size:.72rem; color: var(--muted,#aebac1);
-    margin:0 6px 3px; opacity:.95; user-select:none;
-  }
-  .msg-row.msg-sent .byline{ text-align:right; }
-  .msg-row.msg-received .byline{ display:none; }
-  .msg-row .byline small{ margin-left:.5rem; opacity:.8; }
   `;
   const s = document.createElement('style');
   s.id = id; s.textContent = css;
   (document.head || document.documentElement).appendChild(s);
 })();
 
-/* ========== Loader helpers ========== */
 function ensureTopLoader(){
+  const hist = H();
   if (!hist) return null;
   let l = hist.querySelector('.hist-loader');
   if (!l){
@@ -101,67 +50,15 @@ function ensureTopLoader(){
   }
   return l;
 }
-function showTopLoader(){ ensureTopLoader(); if (hist) hist.setAttribute('data-loading-old','1'); }
-function hideTopLoader(){ if (hist) hist.removeAttribute('data-loading-old'); }
-
-/* ========== ReadMore helpers ========== */
-const MAX_TEXT_HEIGHT_PX = 260; // << ajuste aqui para mudar o limite
-
-function buildReadMoreWrap(html){
-  // envolve o texto em um contêiner com botão; botão inicia oculto e aparece se necessário
-  return `
-    <div class="msg-text-wrap" data-has-rm="1">
-      ${html}
-      <button class="rm-toggle" type="button" hidden>Ler mais</button>
-    </div>
-  `;
+function showTopLoader(){
+  const hist = H(); if (!hist) return;
+  ensureTopLoader(); hist.setAttribute('data-loading-old', '1');
+}
+function hideTopLoader(){
+  const hist = H(); if (!hist) return;
+  hist.removeAttribute('data-loading-old');
 }
 
-function clampIfNeeded(wrap){
-  if (!wrap) return;
-  const textEl = wrap.querySelector('.msg-text');
-  const btn = wrap.querySelector('.rm-toggle');
-  if (!textEl || !btn) return;
-
-  // Reseta antes de medir
-  textEl.classList.remove('clamped');
-  wrap.removeAttribute('data-expanded');
-  btn.hidden = true;
-
-  // Mede usando scrollHeight
-  // (max-height via CSS só aplica quando 'clamped'; medimos o conteúdo real)
-  const needClamp = textEl.scrollHeight > MAX_TEXT_HEIGHT_PX + 8; // folga
-  if (needClamp){
-    textEl.style.setProperty('--rm-max-h', MAX_TEXT_HEIGHT_PX+'px');
-    textEl.classList.add('clamped');
-    btn.textContent = 'Ler mais';
-    btn.hidden = false;
-  }
-}
-
-function toggleClamp(btn){
-  const wrap = btn.closest('.msg-text-wrap');
-  const textEl = wrap?.querySelector('.msg-text');
-  if (!wrap || !textEl) return;
-  const expanded = wrap.getAttribute('data-expanded') === '1';
-  if (expanded){
-    // voltar a colapsar
-    textEl.classList.add('clamped');
-    wrap.setAttribute('data-expanded','0');
-    btn.textContent = 'Ler mais';
-  } else {
-    textEl.classList.remove('clamped');
-    wrap.setAttribute('data-expanded','1');
-    btn.textContent = 'Ver menos';
-  }
-}
-
-function clampAllIn(container){
-  if (!container) return;
-  container.querySelectorAll('.msg-text-wrap[data-has-rm="1"]').forEach(clampIfNeeded);
-}
-
-/* ========== Cache + utils ========== */
 if (!window.cacheHistoricos) window.cacheHistoricos = {};
 if (!window.salvarCache) {
   window.salvarCache = () => {
@@ -171,6 +68,34 @@ if (!window.salvarCache) {
     } catch {}
   };
 }
+
+/* ====== Hidrata cache do LS pra sobreviver ao F5 ====== */
+(function hydrateHistFromLocalStorage(){
+  try{
+    const LS_HIST = `cacheHistoricos:${EMPRESA_ID}`;
+    const raw = localStorage.getItem(LS_HIST);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') return;
+
+    window.cacheHistoricos = data;
+
+    Object.keys(data).forEach(cidStr=>{
+      const cid = Number(cidStr);
+      const arr = Array.isArray(data[cidStr]) ? data[cidStr] : [];
+      const groups = new Map();
+      for (const m of arr){
+        const inst = (m && (m.instancia_id ?? m.instancia)) ?? null;
+        const key = `${inst}::${cid}`;
+        if (!groups.has(key)) groups.set(key, {inst, items:[]});
+        groups.get(key).items.push(m);
+      }
+      groups.forEach(({inst, items})=>{
+        try{ primeWith(inst, cid, items, null); }catch{}
+      });
+    });
+  }catch{}
+})();
 
 function ensureArray(a){ return Array.isArray(a) ? a : []; }
 function ordenarMensagens(arr){
@@ -219,13 +144,15 @@ function buildCanonUrlByMsgId(msg_id){
   return `/api/atendimento/midias/msg/${encodeURIComponent(msg_id)}?empresa_id=${EMPRESA_ID}`;
 }
 
-/* ========= instancia ativa ========= */
+/* ========= instancia ativa (para chavear hist-cache) ========= */
 function getInstanciaForFetch() {
   try {
     return (
-      window.state?.clienteSel?.instancia_id ??
-      window.state?.clienteSel?.instancia ??
-      window.INSTANCIA_ATIVA ?? null
+      H()?.dataset?.instanciaId
+      ?? window.state?.clienteSel?.instancia_id
+      ?? window.state?.clienteSel?.instancia
+      ?? window.INSTANCIA_ATIVA
+      ?? null
     )?.toString() || null;
   } catch { return null; }
 }
@@ -262,24 +189,6 @@ export function salvarNoCache(clienteId, novos){
   window.salvarCache?.();
 }
 
-/* ========= helpers de detecção ========= */
-const MARKER_RE = /^\[(Imagem|Vídeo|Video|Áudio\/ptt|Áudio|Audio|Documento|Figurinha|Localização|Contatos?|M[íi]dia)\]/i;
-const CALL_RE = /^\s*\[Ligação\]\s*(.+?)\s*[–-]\s*(enviada|recebida)\s*\(([^)]+)\)\s*$/i;
-
-/* ======= Byline helpers (responsável acima da bolha) ======= */
-function _autorDaMensagem(m){
-  // Preferência: whatsapp físico (quando vier marcado) → 'WhatsApp físico'
-  const origem = String(m?.origem || '').toLowerCase();
-  const fisico = origem === 'whatsapp_fisico' || !!m?.from_phone ||
-                 /f[ií]sico/i.test(String(m?.instance_name||''));
-  if (fisico) return 'WhatsApp físico';
-
-  // Nome do atendente, se existir; senão, o usuário logado
-  const nome = m?.atendente_nome || m?.autor_nome ||
-               (window.OperatorLine?.getName?.() || 'Operador(a)');
-  return nome;
-}
-
 /* ========= render de 1 mensagem ========= */
 export function criarHTMLDaMensagem(m){
   const isSaida = (m.tipo === 'saida') || (m.from_me === true) || (m.origem === 'atendente');
@@ -288,7 +197,6 @@ export function criarHTMLDaMensagem(m){
   const msgIdAttr = m.msg_id || '';
   let mediaHtml = '';
 
-  // anexos…
   let anexos = [];
   if (Array.isArray(m.midias) && m.midias.length) anexos.push(...m.midias.filter(Boolean));
   else if (m.midia && typeof m.midia === 'object') anexos.push(m.midia);
@@ -348,6 +256,7 @@ export function criarHTMLDaMensagem(m){
 
   mediaHtml = anexos.map(renderAnexo).join('');
 
+  const MARKER_RE = /^\[(Imagem|Vídeo|Video|Áudio\/ptt|Áudio|Audio|Documento|Figurinha|Localização|Contatos?|M[íi]dia)\]/i;
   if (!mediaHtml && m.msg_id && MARKER_RE.test(texto)) {
     const src = buildCanonUrlByMsgId(m.msg_id);
     const kind = texto.replace(/^\[|\].*$/g,'').toLowerCase();
@@ -375,56 +284,20 @@ export function criarHTMLDaMensagem(m){
     }
   }
 
-  // ======= Cabeçalho especial de ligação =======
-  let callHeader = '';
-  let callIsMatch = false;
-  let bodyText = texto; // texto que será exibido (podemos limpar o marcador)
-
-  const mCall = CALL_RE.exec(texto);
-  if (mCall) {
-    callIsMatch = true;
-    const kind = (mCall[1] || '').trim();      // vídeo/voz/etc
-    const dir  = (mCall[2] || '').trim();      // enviada/recebida
-    const st   = (mCall[3] || '').trim();      // finalizada/perdida/…
-    // Remove do corpo para evitar duplicar com o cabeçalho
-    bodyText = texto.replace(CALL_RE, '').trim();
-    callHeader = `
-      <div class="msg-call" title="Ligação">
-        <span class="ico" aria-hidden="true">📞</span>
-        <span class="kind">${escapeHtml(kind)}</span>
-        <span class="sep">—</span>
-        <span class="dir">${escapeHtml(dir)}</span>
-        <span class="st">(${escapeHtml(st)})</span>
-      </div>
-    `;
-  }
-
   const hasMedia = mediaHtml.trim().length > 0;
-  const hasText  = !!bodyText;
+  const hasText  = !!texto;
+  const textHtml = hasText ? `<div class="msg-text">${escapeHtml(texto)}</div>` : (!hasMedia ? `<div class="msg-text">&nbsp;</div>` : '');
 
-  // <<< texto: envolve para suportar "Ler mais" (não aplica clamp no cabeçalho de ligação)
-  const textHtmlRaw = hasText
-    ? `<div class="msg-text">${escapeHtml(bodyText)}</div>`
-    : (!hasMedia && !callIsMatch ? `<div class="msg-text">&nbsp;</div>` : '');
-  const textHtml = hasText ? buildReadMoreWrap(textHtmlRaw) : textHtmlRaw;
-
-  const ackHtml = isSaida
-    ? `<span class="msg-ack" data-ack="${ackVal}" data-msg-id="${msgIdAttr}">${
-        (typeof window.getAckIcon === 'function') ? window.getAckIcon(ackVal) : ''
-      }</span>`
+  const ackHtml = (isSaida && typeof window.getAckIcon === 'function')
+    ? window.getAckIcon(ackVal).replace('<span class="msg-ack"', `<span class="msg-ack" data-msg-id="${msgIdAttr}"`)
     : '';
 
-  // ======= Byline (acima da bolha, só em saídas) =======
-  const bylineTxt = isSaida ? _autorDaMensagem(m) : '';
-  const timeTxt   = formatChatTime(m.timestamp || m.data || m.created_at || '');
-
   return `<div class="msg-row ${isSaida ? 'msg-sent' : 'msg-received'}" data-id="${msgIdAttr}" data-msg-id="${msgIdAttr}">
-    ${isSaida ? `<div class="byline">${escapeHtml(bylineTxt)} <small>${escapeHtml(timeTxt)}</small></div>` : ''}
     <div class="bubble ${isSaida ? 'bubble-out' : 'bubble-in'}" data-msg-id="${msgIdAttr}">
-      ${callHeader}${mediaHtml}${textHtml}
+      ${mediaHtml}${textHtml}
       <div class="meta">
         ${ackHtml}
-        <span class="msg-time">${timeTxt}</span>
+        <span class="msg-time">${formatChatTime(m.timestamp || m.data || m.created_at || '')}</span>
       </div>
     </div>
   </div>`;
@@ -432,37 +305,48 @@ export function criarHTMLDaMensagem(m){
 
 /* ========= render ========= */
 export function renderHistoricoDoCache(clienteId, append=false){
-  if (!hist || hist.dataset.clienteId !== String(clienteId)) return;
+  const hist = H(); if (!hist) return;
+  if (hist.dataset.clienteId !== String(clienteId)) return;
 
-  const inst = getInstanciaForFetch();
+  const inst = (hist?.dataset?.instanciaId && hist.dataset.instanciaId !== 'null')
+    ? hist.dataset.instanciaId
+    : getInstanciaForFetch();
+
   const msgs = ordenarMensagens(ensureArray(getHist(inst, Number(clienteId))));
 
-  ensureTopLoader(); // garante loader existente
+  ensureTopLoader();
 
   if (!append){
-    hist.innerHTML='';
-    ensureTopLoader(); // re-adiciona pós-clean
-    msgs.forEach(m=> hist.insertAdjacentHTML('beforeend', criarHTMLDaMensagem(m)));
+    hist.innerHTML=''; ensureTopLoader();
+    const html = msgs.map(criarHTMLDaMensagem).join('');
+    hist.insertAdjacentHTML('beforeend', html);
     hist.querySelectorAll('.msg-row.msg-received .msg-ack, .bubble-in .msg-ack').forEach(n=>n.remove());
     hist.scrollTop = hist.scrollHeight;
   } else {
-    const seenSel = (m) => `.msg-row[data-msg-id="${m.msg_id}"], .msg-row[data-id="${m.msg_id}"]`;
-    const novas = msgs.filter(m => !hist.querySelector(seenSel(m)));
+    const existingIds = new Set(
+      Array.from(hist.querySelectorAll('.msg-row')).map(n => n.getAttribute('data-msg-id') || n.getAttribute('data-id') || '')
+    );
+    const hasNoIdInDom  = existingIds.has('');
+    const hasNoIdInList = msgs.some(m => !m.msg_id || String(m.msg_id).trim() === '');
 
-    const lastRow = hist.querySelector('.msg-row:last-of-type');
-    novas.forEach(m=>{
-      if (lastRow) lastRow.insertAdjacentHTML('afterend', criarHTMLDaMensagem(m));
-      else hist.insertAdjacentHTML('beforeend', criarHTMLDaMensagem(m));
-    });
-
+    if (hasNoIdInDom || hasNoIdInList) {
+      hist.innerHTML = '';
+      ensureTopLoader();
+      const html = msgs.map(criarHTMLDaMensagem).join('');
+      hist.insertAdjacentHTML('beforeend', html);
+    } else {
+      const novas = msgs.filter(m => !existingIds.has(String(m.msg_id)));
+      if (novas.length){
+        const html = novas.map(criarHTMLDaMensagem).join('');
+        const lastRow = hist.querySelector('.msg-row:last-of-type');
+        if (lastRow) lastRow.insertAdjacentHTML('afterend', html);
+        else hist.insertAdjacentHTML('beforeend', html);
+      }
+    }
     hist.querySelectorAll('.msg-row.msg-received .msg-ack, .bubble-in .msg-ack').forEach(n=>n.remove());
     hist.scrollTop = hist.scrollHeight;
   }
 
-  // aplica "ler mais" nas que precisarem
-  clampAllIn(hist);
-
-  // pinta acks que já existam
   try{ window.reconcilePendingAcks?.(); }catch{}
 }
 
@@ -497,7 +381,7 @@ function getInstQuery(){
 
 /* ========= abrir primeira página do histórico ========= */
 export async function abrirHistorico(id){
-  if (!hist) return false;
+  const hist = H(); if (!hist) return false;
   hist.dataset.clienteId = String(id);
   hist.dataset.noMore = '0';
   setOffset(id, 0);
@@ -509,12 +393,27 @@ export async function abrirHistorico(id){
     const data = await r.json();
     const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
 
-    primeWith(getInstanciaForFetch(), Number(id), items, null);
-    window.cacheHistoricos[id] = ordenarMensagens(items);
+    const inst = getInstanciaForFetch();
+    const existing = ensureArray(getHist(inst, Number(id)));
+    const byId = new Map(existing.map(m => [String(m?.msg_id||''), m]));
+
+    const merged = (Array.isArray(items)?items:[]).map(it=>{
+      const k = String(it?.msg_id || '');
+      if (k && byId.has(k)) {
+        const prev = byId.get(k);
+        const ack = Math.max(Number(prev?.ack||0), Number(it?.ack||0));
+        return { ...it, ack };
+      }
+      return it;
+    });
+
+    primeWith(inst, Number(id), merged, null);
+
+    window.cacheHistoricos[id] = ordenarMensagens(merged);
     window.salvarCache?.();
 
     renderHistoricoDoCache(id, false);
-    setOffset(id, items.length);
+    setOffset(id, merged.length);
     return true;
   }catch(e){
     console.error('[historico] abrirHistorico', e);
@@ -525,6 +424,7 @@ export async function abrirHistorico(id){
 /* ========= paginação (scroll up) ========= */
 let loadingOld = false;
 export async function carregarMaisHistorico(id){
+  const hist = H();
   if (loadingOld) return false;
   if (!id) return false;
   if (!hist || hist.dataset.clienteId !== String(id)) return false;
@@ -546,9 +446,15 @@ export async function carregarMaisHistorico(id){
     if (!n){ hist.dataset.noMore='1'; return false; }
 
     const beforeHeight = hist.scrollHeight;
+
     mergeOld(getInstanciaForFetch(), Number(id), items);
 
-    // re-render preservando posição
+    try{
+      const inst = getInstanciaForFetch();
+      window.cacheHistoricos[id] = ensureArray(getHist(inst, Number(id)));
+      window.salvarCache?.();
+    }catch{}
+
     const prevBottom = beforeHeight - hist.scrollTop;
     renderHistoricoDoCache(id, false);
     hist.scrollTop = hist.scrollHeight - prevBottom;
@@ -564,28 +470,38 @@ export async function carregarMaisHistorico(id){
   }
 }
 
-/* ========= Scroll & events ========= */
-(function bindScrollAndClicks(){
-  if (!hist) return;
-  if (!hist.__boundScroll){
+/* ========= Scroll binding (dinâmico) ========= */
+(function bindScroll(){
+  const tryBind = ()=>{
+    const hist = H();
+    if (!hist || hist.__boundScroll) return;
     hist.addEventListener('scroll', ()=> {
       if (hist.scrollTop <= 60){
         carregarMaisHistorico(Number(hist.dataset.clienteId || 0));
       }
     }, { passive:true });
     hist.__boundScroll = true;
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', tryBind);
+  } else {
+    tryBind();
   }
-  if (!hist.__boundReadMore){
-    hist.addEventListener('click', (ev)=>{
-      const btn = ev.target.closest('.rm-toggle');
-      if (btn) toggleClamp(btn);
-    });
-    hist.__boundReadMore = true;
-  }
+
+  // observa caso o #historico seja inserido depois
+  const mo = new MutationObserver(tryBind);
+  mo.observe(document.documentElement, { childList: true, subtree: true });
 })();
 
-/* ========= debug globals ========= */
+/* ========= debug/global helpers ========= */
 window.renderHistoricoDoCache = renderHistoricoDoCache;
 window.salvarNoCache = salvarNoCache;
 window.abrirHistorico = abrirHistorico;
-window.clampAllIn = clampAllIn; // opcional para debugar/reaplicar manualmente
+
+// compat
+try {
+  window.getHist  = getHist;
+  window.primeWith = primeWith;
+  window.mergeOld = mergeOld;
+} catch {}

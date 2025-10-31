@@ -1,4 +1,3 @@
-// frontend/js/pages/atendimentos-autoopen.js
 (function AutoOpenConversa(){
   'use strict';
 
@@ -161,7 +160,6 @@
           ${isoToTime(m.timestamp || m.data || m.created_at || '')}${isOut && m.ack!=null ? ` • ✓${Number(m.ack)>=2?'✓':''}`:''}
         </div>
       `;
-      // mídias (links simples)
       if (Array.isArray(m.midias) && m.midias.length){
         m.midias.forEach(md=>{
           const a = document.createElement('a');
@@ -174,7 +172,6 @@
       }
       thread.appendChild(bubble);
     });
-    // scroll bottom
     thread.scrollTop = thread.scrollHeight + 999;
   }
 
@@ -184,7 +181,6 @@
     const clienteId = Number(qs.get('cliente_id') || qs.get('cliente') || '');
     if (!clienteId) return;
 
-    // aceita instancia_id (num) e instancia/instance (slug)
     const instIdParam  = qs.get('instancia_id') || qs.get('instance_id');
     const instSlugParam= qs.get('instancia') || qs.get('instance');
     const inst = (instIdParam && String(instIdParam).trim()) || (instSlugParam && String(instSlugParam).trim()) || LS.getItem('INSTANCIA_ATIVA') || '';
@@ -200,13 +196,11 @@
     };
 
     try{
-      // 1) Cliente (header)
       const cli = await apiGet(`/api/clientes/${clienteId}`);
       if (cli) setHeader(cli, String(inst));
 
       // 2) Se existir historico.js, usa ele (melhor experiência)
       if (typeof window.abrirHistorico === 'function'){
-        // garante container #historico
         let hist = document.getElementById('historico');
         if (!hist){
           const main = $('#chatMain') || $('.main') || document.body;
@@ -215,33 +209,30 @@
           hist.style.minHeight = '240px';
           main.appendChild(hist);
         }
-        // some com “vazio” se houver
         document.body.dataset.chatOpen = '1';
         $('#chat-empty')?.remove();
         $('#empty-hero')?.remove();
         $('#composer')?.removeAttribute?.('disabled');
 
         await window.abrirHistorico(clienteId);
-        // foca o input
         const input = $('#composerInput') || $('#chatInput') || $('textarea, input[type="text"]');
         input?.focus?.();
         return;
       }
 
-      // 3) Fallback: carrega mensagens direto e renderiza
+      // 3) Fallback: carrega mensagens direto e renderiza (limit leve!)
       const url = new URL(`/api/atendimento/conversas/${clienteId}/mensagens`, location.origin);
       if (EMPRESA_ID) url.searchParams.set('empresa_id', String(EMPRESA_ID));
-      // passa a instância corretamente:
       if (instIdParam && /^\d+$/.test(String(instIdParam))) {
         url.searchParams.set('instancia_id', String(instIdParam));
       } else if (instSlugParam) {
         url.searchParams.set('instance', String(instSlugParam));
       } else if (inst) {
-        // último recurso: tenta usar o que veio/ficou salvo
         if (/^\d+$/.test(String(inst))) url.searchParams.set('instancia_id', String(inst));
         else url.searchParams.set('instance', String(inst));
       }
-      url.searchParams.set('limit','50');
+      // 👇 antes era 50; deixa leve e consistente com HISTORICO_LIMIT
+      url.searchParams.set('limit','30');
 
       const data = await apiGet(url.toString());
       const mensagens = (data && (data.items || data.mensagens)) || [];

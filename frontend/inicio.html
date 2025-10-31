@@ -15,75 +15,21 @@
     })();
   </script>
 
-  <!-- Tailwind -->
-  <link rel="stylesheet" href="/frontend/css/tw.css">
-  <script> tailwind.config = { darkMode: 'class' }; </script>
-
-  <style>
-    html, body { height: 100%; }
-
-    /* ====== LOGO ====== */
-    .logo { height: 44px; width: auto; }
-    @media (min-width: 640px) { .logo { height: 48px; } }
-    /* troca de logo por tema */
-    .logo-dark { display: none; }
-    .dark .logo-light { display: none; }
-    .dark .logo-dark { display: inline-block; }
-
-    /* ===== Toggle de tema – idêntico aos outros arquivos ===== */
-    .theme-toggle{
-      --w:78px; --h:34px; --p:3px; --k:28px; --dx: calc(var(--w) - var(--k) - var(--p)*2);
-      position:relative; width:var(--w); height:var(--h); padding:var(--p);
-      border-radius:999px; cursor:pointer; outline:none; border:1px solid;
-      display:inline-block; isolation:isolate;
-      background:#eceff3; border-color:#d5d9e0;
-      box-shadow: inset 0 2px 4px rgba(0,0,0,.06), inset 0 -1px 2px rgba(0,0,0,.05);
-      transition: background .3s ease, border-color .3s ease, box-shadow .3s ease;
-    }
-    html.dark .theme-toggle{
-      background:#2f323a; border-color:#3a3e46;
-      box-shadow: inset 0 2px 5px rgba(0,0,0,.35), inset 0 -1px 2px rgba(255,255,255,.03);
-    }
-    .theme-toggle .slot{ position:absolute; top:50%; width:28px; height:28px; transform: translateY(-50%); display:grid; place-items:center; pointer-events:none; opacity:.75; }
-    .theme-toggle .slot.left{ left:8px; } .theme-toggle .slot.right{ right:8px; }
-    .theme-toggle .slot svg{ width:18px; height:18px; }
-    .theme-toggle .slot svg *{ stroke:#9aa3af; } html.dark .theme-toggle .slot svg *{ stroke:#8a93a1; }
-    .theme-toggle .thumb{ position:absolute; top:var(--p); left:var(--p); width:var(--k); height:var(--k); border-radius:999px; transform: translateX(0); transition: transform .38s cubic-bezier(.28,1.2,.43,1), box-shadow .2s ease, background .3s ease; display:grid; place-items:center; overflow:hidden;
-      background: radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%, rgba(255,255,255,.08) 65%), linear-gradient(180deg,#f8c266,#f59e0b);
-      box-shadow: 0 4px 8px rgba(0,0,0,.18), inset 0 0 0 1px rgba(255,255,255,.25);
-    }
-    .thumb svg{ width:22px; height:22px; display:block; }
-    .thumb .thumb-sun{ display:block; } .thumb .thumb-moon{ display:none; }
-    html.dark .theme-toggle .thumb{ transform: translateX(var(--dx)); background: radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%, rgba(255,255,255,.08) 65%), linear-gradient(180deg,#6ba6ff,#2563eb); box-shadow: 0 6px 10px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.22); }
-    html.dark .thumb .thumb-sun{ display:none; } html.dark .thumb .thumb-moon{ display:block; }
-    .theme-toggle:active .thumb{ transform:translateX(0) scale(.96); }
-    html.dark .theme-toggle:active .thumb{ transform:translateX(calc(var(--dx))) scale(.96); }
-    .theme-toggle:focus-visible{ box-shadow: 0 0 0 3px rgba(99,102,241,.35); }
-    .theme-toggle.t-anim::after{ content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none; background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.55) 50%, transparent 70%); animation: sweep .55s ease both; }
-    @keyframes sweep{ 0%{ transform: translateX(-120%); opacity:0; } 40%{ opacity:.9; } 100%{ transform: translateX(120%); opacity:0; } }
-
-    /* ===== Visual geral ===== */
-    .glass { backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); background: rgba(255,255,255,.7); }
-    .dark .glass { background: rgba(10,10,10,.6); }
-    .card { border-radius: 1rem; border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.70); }
-    .dark .card { background: rgba(255,255,255,.03); border-color: rgba(255,255,255,.08); }
-    .chip { font-size:.75rem; padding:.125rem .5rem; border-radius:999px; }
-    .chip-ok { background:#d1fae5; color:#065f46; }
-    .dark .chip-ok { background:rgba(16,185,129,.18); color:#a7f3d0; }
-  </style>
+  <!-- CSS sem Tailwind -->
+  <link rel="stylesheet" href="/frontend/css/inicio.css">
 </head>
 
-<body class="min-h-screen bg-gradient-to-b from-emerald-50 to-white dark:from-[#0b1311] dark:to-[#050807] text-gray-800 dark:text-gray-100">
+<body class="min-h-screen bg-gradient-to-b from-emerald-50 to-white text-gray-800">
 
   <!-- Topbar -->
-  <header class="sticky top-0 z-20 border-b border-gray-200 dark:border-white/10 bg-white/70 dark:bg-[#0a0f0e]/70 backdrop-blur">
+  <header class="sticky top-0 z-20 border-b border-gray-200 bg-white/70 backdrop-blur">
     <div class="mx-auto max-w-6xl px-4">
       <div class="h-14 flex items-center justify-between">
         <div class="flex items-center gap-3">
           <!-- DUAS LOGOS: light e dark -->
           <img src="img/logo-s-fundo.png" class="logo logo-light" alt="ZapChats" />
           <img src="img/Logo-white.png" class="logo logo-dark" alt="ZapChats" />
-          <span class="hidden sm:inline text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">início</span>
+          <span class="hidden sm:inline text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 badge-inicio">início</span>
         </div>
 
         <div class="flex items-center gap-3">
@@ -132,21 +78,20 @@
               </svg>
             </span>
           </button>
-          <!-- (sem botões Dashboard / Sair) -->
         </div>
       </div>
     </div>
   </header>
 
-  <!-- Hero (sem CTAs/sem “atendimento em tempo real”) -->
+  <!-- Hero -->
   <section class="mx-auto max-w-6xl px-4 mt-6">
-    <div class="relative overflow-hidden rounded-3xl glass border border-gray-200 dark:border-white/10">
+    <div class="relative overflow-hidden rounded-3xl glass border border-gray-200">
       <div class="grid md:grid-cols-2 gap-6 p-6 md:p-10">
         <div class="flex flex-col justify-center">
           <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">
-            Bem-vindo ao <span class="text-emerald-600 dark:text-emerald-400">ZapChats</span>!
+            Bem-vindo ao <span class="text-emerald-600">ZapChats</span>!
           </h1>
-          <p class="mt-3 text-gray-600 dark:text-gray-300 leading-relaxed">
+          <p class="mt-3 text-gray-600 leading-relaxed">
             Centralize seus atendimentos do WhatsApp, organize sua equipe e responda mais rápido. Siga os passos abaixo para deixar tudo pronto.
           </p>
         </div>
@@ -157,7 +102,7 @@
     </div>
   </section>
 
-  <!-- Trilha completa de passos -->
+  <!-- Trilha de passos -->
   <section class="mx-auto max-w-6xl px-4 mt-10 mb-16">
     <h2 class="text-xl font-bold mb-4">Passo a passo de configuração</h2>
 
@@ -165,140 +110,99 @@
       <!-- 1 -->
       <div class="card p-5">
         <div class="flex items-center justify-between">
-          <div class="text-sm font-medium text-gray-500 dark:text-gray-400">Passo 1</div>
+          <div class="text-sm font-medium text-gray-500">Passo 1</div>
           <div class="chip chip-ok">Obrigatório</div>
         </div>
         <h3 class="mt-2 text-lg font-semibold">Conectar WhatsApp</h3>
-        <p class="mt-1 text-gray-600 dark:text-gray-300">Escaneie o QR ou use o código de pareamento.</p>
-        <a href="conectar.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 bg-emerald-600 text-white hover:bg-emerald-700 transition">Abrir Conexão</a>
+        <p class="mt-1 text-gray-600">Escaneie o QR ou use o código de pareamento.</p>
+        <a href="conectar.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-primary">Abrir Conexão</a>
       </div>
 
       <!-- 2 -->
       <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500 dark:text-gray-400">Passo 2</div>
+        <div class="text-sm font-medium text-gray-500">Passo 2</div>
         <h3 class="mt-2 text-lg font-semibold">Criar Departamentos</h3>
-        <p class="mt-1 text-gray-600 dark:text-gray-300">Comercial, Suporte, Financeiro…</p>
-        <a href="departamentos.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-white/5 transition">Configurar Setores</a>
+        <p class="mt-1 text-gray-600">Comercial, Suporte, Financeiro…</p>
+        <a href="departamentos.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Configurar Setores</a>
       </div>
 
       <!-- 3 -->
       <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500 dark:text-gray-400">Passo 3</div>
+        <div class="text-sm font-medium text-gray-500">Passo 3</div>
         <h3 class="mt-2 text-lg font-semibold">Adicionar Colaboradores</h3>
-        <p class="mt-1 text-gray-600 dark:text-gray-300">Crie usuários da equipe e defina setores.</p>
-        <a href="colaboradores.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-white/5 transition">Gerenciar Equipe</a>
+        <p class="mt-1 text-gray-600">Crie usuários da equipe e defina setores.</p>
+        <a href="colaboradores.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Gerenciar Equipe</a>
       </div>
 
       <!-- 4 -->
       <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500 dark:text-gray-400">Passo 4</div>
+        <div class="text-sm font-medium text-gray-500">Passo 4</div>
         <h3 class="mt-2 text-lg font-semibold">Definir Permissões</h3>
-        <p class="mt-1 text-gray-600 dark:text-gray-300">Controle o que cada função pode ver e fazer.</p>
-        <a href="colaboradores.html#permissoes" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-white/5 transition">Atribuir Permissões</a>
+        <p class="mt-1 text-gray-600">Controle o que cada função pode ver e fazer.</p>
+        <a href="colaboradores.html#permissoes" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Atribuir Permissões</a>
       </div>
 
       <!-- 5 -->
       <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500 dark:text-gray-400">Passo 5</div>
+        <div class="text-sm font-medium text-gray-500">Passo 5</div>
         <h3 class="mt-2 text-lg font-semibold">Configurar Chatbot</h3>
-        <p class="mt-1 text-gray-600 dark:text-gray-300">Saudação, horários e menu de setores.</p>
-        <a href="chatbot.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-white/5 transition">Abrir Chatbot</a>
+        <p class="mt-1 text-gray-600">Saudação, horários e menu de setores.</p>
+        <a href="chatbot.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Abrir Chatbot</a>
       </div>
 
       <!-- 6 -->
       <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500 dark:text-gray-400">Passo 6</div>
+        <div class="text-sm font-medium text-gray-500">Passo 6</div>
         <h3 class="mt-2 text-lg font-semibold">Personalizar Empresa</h3>
-        <p class="mt-1 text-gray-600 dark:text-gray-300">Logo, timezone, webhooks e token de API.</p>
-        <a href="configuracoes.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-white/5 transition">Abrir Configurações</a>
+        <p class="mt-1 text-gray-600">Logo, timezone, webhooks e token de API.</p>
+        <a href="configuracoes.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Abrir Configurações</a>
       </div>
 
       <!-- 7 -->
       <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500 dark:text-gray-400">Passo 7</div>
+        <div class="text-sm font-medium text-gray-500">Passo 7</div>
         <h3 class="mt-2 text-lg font-semibold">Cadastrar Clientes</h3>
-        <p class="mt-1 text-gray-600 dark:text-gray-300">Cadastre contatos para iniciar atendimentos.</p>
-        <a href="clientes.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-white/5 transition">Gerenciar Clientes</a>
+        <p class="mt-1 text-gray-600">Cadastre contatos para iniciar atendimentos.</p>
+        <a href="clientes.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Gerenciar Clientes</a>
       </div>
 
       <!-- 8 -->
       <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500 dark:text-gray-400">Passo 8</div>
+        <div class="text-sm font-medium text-gray-500">Passo 8</div>
         <h3 class="mt-2 text-lg font-semibold">Testar Envio/Recebimento</h3>
-        <p class="mt-1 text-gray-600 dark:text-gray-300">Envie uma mensagem de teste e confirme ✅✅.</p>
-        <a href="atendimentos.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-white/5 transition">Abrir Atendimentos</a>
+        <p class="mt-1 text-gray-600">Envie uma mensagem de teste e confirme ✅✅.</p>
+        <a href="atendimentos.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Abrir Atendimentos</a>
       </div>
 
       <!-- 9 -->
       <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500 dark:text-gray-400">Passo 9</div>
+        <div class="text-sm font-medium text-gray-500">Passo 9</div>
         <h3 class="mt-2 text-lg font-semibold">Explorar Mídias</h3>
-        <p class="mt-1 text-gray-600 dark:text-gray-300">Fotos, áudios e documentos em um só lugar.</p>
-        <a href="midias.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-white/5 transition">Abrir Mídias</a>
+        <p class="mt-1 text-gray-600">Fotos, áudios e documentos em um só lugar.</p>
+        <a href="midias.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Abrir Mídias</a>
       </div>
 
       <!-- 10 -->
       <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500 dark:text-gray-400">Passo 10</div>
+        <div class="text-sm font-medium text-gray-500">Passo 10</div>
         <h3 class="mt-2 text-lg font-semibold">Dashboard & Relatórios</h3>
-        <p class="mt-1 text-gray-600 dark:text-gray-300">Acompanhe volume, picos e desempenho.</p>
-        <a href="dashboard.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-white/5 transition">Ir ao Dashboard</a>
+        <p class="mt-1 text-gray-600">Acompanhe volume, picos e desempenho.</p>
+        <a href="dashboard.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Ir ao Dashboard</a>
       </div>
     </div>
 
     <div class="mt-8 flex flex-wrap gap-3">
-      <button id="btn-finalizar" class="rounded-2xl px-4 py-2.5 bg-gray-900 text-white dark:bg-white dark:text-gray-900 hover:opacity-90 transition">Marcar início como concluído</button>
-      <a href="dashboard.html" class="rounded-2xl px-4 py-2.5 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-white/5 transition">Ir ao Dashboard</a>
+      <button id="btn-finalizar" class="rounded-2xl px-4 py-2.5 btn btn-strong">Marcar início como concluído</button>
+      <a href="dashboard.html" class="rounded-2xl px-4 py-2.5 btn btn-outline">Ir ao Dashboard</a>
     </div>
   </section>
 
-  <footer class="border-t border-gray-200 dark:border-white/10">
-    <div class="mx-auto max-w-6xl px-4 py-6 text-sm text-gray-500 dark:text-gray-400 flex flex-wrap items-center justify-between gap-3">
+  <footer class="border-t border-gray-200">
+    <div class="mx-auto max-w-6xl px-4 py-6 text-sm text-gray-500 flex flex-wrap items-center justify-between gap-3">
       <span>© <span id="year"></span> ZapChats</span>
     </div>
   </footer>
 
-  <script>
-    // Guarda de sessão
-    (function sessionGuard() {
-      const token = localStorage.getItem('token') || localStorage.getItem('access_token');
-      const empresaId = localStorage.getItem('empresa_id');
-      if (!token || !empresaId) location.href = '/login.html';
-    })();
-
-    const html = document.documentElement;
-
-    // Toggle de tema (padrão do projeto)
-    (function(){
-      var btn = document.getElementById('themeSwitch');
-      if (btn && !btn.dataset.bound){
-        btn.dataset.bound = '1';
-        function syncPressed(){ btn.setAttribute('aria-pressed', String(html.classList.contains('dark'))); }
-        syncPressed();
-        btn.addEventListener('click', function(){
-          var willDark = !html.classList.contains('dark');
-          html.classList.toggle('dark', willDark);
-          try { localStorage.setItem('theme', willDark ? 'dark' : 'light'); } catch {}
-          btn.classList.remove('t-anim'); void btn.offsetWidth; btn.classList.add('t-anim');
-          setTimeout(function(){ btn.classList.remove('t-anim'); }, 580);
-          syncPressed();
-        });
-      }
-    })();
-
-    // Ano no rodapé
-    (function(){ try { document.getElementById('year').textContent = new Date().getFullYear(); } catch {} })();
-
-    // Finalizar início
-    document.getElementById('btn-finalizar')?.addEventListener('click', () => {
-      try {
-        localStorage.setItem('inicio_done', '1');
-        const btn = document.getElementById('btn-finalizar');
-        btn.disabled = true;
-        btn.textContent = 'Concluído! Redirecionando...';
-        setTimeout(() => { location.href = '/dashboard.html'; }, 1000);
-      } catch (e) { console.error(e); alert('Não foi possível concluir agora. Tente novamente.'); }
-    });
-  </script>
+  <script src="/frontend/js/pages/inicio.js"></script>
 </body>
 </html>

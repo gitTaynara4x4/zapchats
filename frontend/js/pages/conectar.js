@@ -1,4 +1,17 @@
-/* frontend/js/pages/conectar.js */
+// /frontend/js/pages/conectar.js  (ES module)
+import {
+  ensureEmpresaWS,
+  onEmpresaMessage,
+  ensureInstWS,
+  onInstMessage,
+  closeEmpresaWS,
+  closeInstWS,
+  getWSStatus
+} from '/frontend/js/realtime/ws-core.js';
+
+// URL do JSON da animação Lottie
+const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
+
 (function () {
   'use strict';
 
@@ -6,6 +19,7 @@
   let wantQR = false;
   let currentInstance = null;
   let timerId = null;
+  let lastRestoreRequested = false; // se usuário escolheu restaurar histórico
 
   // ===== Helpers =====
   const $  = (sel, ctx=document) => ctx.querySelector(sel);
@@ -34,7 +48,7 @@
         || String(m?.type || '').toLowerCase() === 'connected';
   }
 
-  // ===== Fail-safe do "prepaint" =====
+  // Fail-safe do prepaint
   window.addEventListener('load', () => {
     const html = document.documentElement;
     if (html.classList.contains('prepaint')
@@ -165,92 +179,7 @@
     }
   }
 
-  // ===== Overlay de 1 minuto (somente após conectar) =====
-  const PREP_LOTTIE_DATA = {"v":"4.6.8","fr":29.97,"ip":0,"op":40,"w":256,"h":256,"nm":"Comp 1","ddd":0,"assets":[],"layers":[{"ddd":0,"ind":1,"ty":4,"nm":"Shape Layer 3","ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":1,"k":[{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":20,"s":[208.6,127.969,0],"e":[208.6,88,0],"to":[0,-6.66145849227905,0],"ti":[0,-0.00520833348855,0]},{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":30,"s":[208.6,88,0],"e":[208.6,128,0],"to":[0,0.00520833348855,0],"ti":[0,-6.66666650772095,0]},{"t":40}]},"a":{"a":0,"k":[-70,-0.5,0]},"s":{"a":0,"k":[75,75,100]}},"ao":0,"shapes":[{"ty":"gr","it":[{"d":1,"ty":"el","s":{"a":0,"k":[33.75,34.5]},"p":{"a":0,"k":[0,0]},"nm":"Ellipse Path 1"},{"ty":"fl","c":{"a":0,"k":[0.9843137,0.5490196,0,1]},"o":{"a":0,"k":100},"r":1,"nm":"Fill 1"},{"ty":"tr","p":{"a":0,"k":[-70.125,-0.5]},"a":{"a":0,"k":[0,0]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0},"o":{"a":0,"k":100},"sk":{"a":0,"k":0},"sa":{"a":0,"k":0},"nm":"Transform"}],"nm":"Ellipse 1","np":3,"cix":2,"ix":1}],"ip":0,"op":300,"st":0,"bm":0,"sr":1},{"ddd":0,"ind":2,"ty":4,"nm":"Shape Layer 2","ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":1,"k":[{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":15,"s":[168.6,128,0],"e":[168.6,88,0],"to":[0,-6.66666650772095,0],"ti":[0,0,0]},{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":25,"s":[168.6,88,0],"e":[168.6,128,0],"to":[0,0,0],"ti":[0,-6.66666650772095,0]},{"t":35}]},"a":{"a":0,"k":[-70,-0.5,0]},"s":{"a":0,"k":[75,75,100]}},"ao":0,"shapes":[{"ty":"gr","it":[{"d":1,"ty":"el","s":{"a":0,"k":[33.75,34.5]},"p":{"a":0,"k":[0,0]},"nm":"Ellipse Path 1"},{"ty":"fl","c":{"a":0,"k":[0.9921569,0.8470588,0.2078431,1]},"o":{"a":0,"k":100},"r":1,"nm":"Fill 1"},{"ty":"tr","p":{"a":0,"k":[-70.125,-0.5]},"a":{"a":0,"k":[0,0]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0},"o":{"a":0,"k":100},"sk":{"a":0,"k":0},"sa":{"a":0,"k":0},"nm":"Transform"}],"nm":"Ellipse 1","np":3,"cix":2,"ix":1}],"ip":0,"op":300,"st":0,"bm":0,"sr":1},{"ddd":0,"ind":3,"ty":4,"nm":"Shape Layer 1","ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":1,"k":[{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":10,"s":[128.594,127.969,0],"e":[128.594,88,0],"to":[0,-6.66145849227905,0],"ti":[0,-0.00520833348855,0]},{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":20,"s":[128.594,88,0],"e":[128.594,128,0],"to":[0,0.00520833348855,0],"ti":[0,-6.66666650772095,0]},{"t":30}]},"a":{"a":0,"k":[-70,-0.5,0]},"s":{"a":0,"k":[75,75,100]}},"ao":0,"shapes":[{"ty":"gr","it":[{"d":1,"ty":"el","s":{"a":0,"k":[33.75,34.5]},"p":{"a":0,"k":[0,0]},"nm":"Ellipse Path 1"},{"ty":"fl","c":{"a":0,"k":[0.2627451,0.627451,0.2784314,1]},"o":{"a":0,"k":100},"r":1,"nm":"Fill 1"},{"ty":"tr","p":{"a":0,"k":[-70.125,-0.5]},"a":{"a":0,"k":[0,0]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0},"o":{"a":0,"k":100},"sk":{"a":0,"k":0},"sa":{"a":0,"k":0},"nm":"Transform"}],"nm":"Ellipse 1","np":3,"cix":2,"ix":1}],"ip":0,"op":300,"st":0,"bm":0,"sr":1},{"ddd":0,"ind":4,"ty":4,"nm":"Shape Layer 4","ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":1,"k":[{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":5,"s":[88.6,127.969,0],"e":[88.6,88,0],"to":[0,-6.66145849227905,0],"ti":[0,-0.00520833348855,0]},{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":15,"s":[88.6,88,0],"e":[88.6,128,0],"to":[0,0.00520833348855,0],"ti":[0,-6.66666650772095,0]},{"t":25}]},"a":{"a":0,"k":[-70,-0.5,0]},"s":{"a":0,"k":[75,75,100]}},"ao":0,"shapes":[{"ty":"gr","it":[{"d":1,"ty":"el","s":{"a":0,"k":[33.75,34.5]},"p":{"a":0,"k":[0,0]},"nm":"Ellipse Path 1"},{"ty":"fl","c":{"a":0,"k":[0.1176471,0.5333334,0.8980392,1]},"o":{"a":0,"k":100},"r":1,"nm":"Fill 1"},{"ty":"tr","p":{"a":0,"k":[-70.125,-0.5]},"a":{"a":0,"k":[0,0]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0},"o":{"a":0,"k":100},"sk":{"a":0,"k":0},"sa":{"a":0,"k":0},"nm":"Transform"}],"nm":"Ellipse 1","np":3,"cix":2,"ix":1}],"ip":0,"op":300,"st":0,"bm":0,"sr":1},{"ddd":0,"ind":5,"ty":4,"nm":"Shape Layer 5","ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":1,"k":[{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":0,"s":[48.6,127.969,0],"e":[48.6,88,0],"to":[0,-6.66145849227905,0],"ti":[0,-0.00520833348855,0]},{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"n":"0p667_1_0p333_0","t":10,"s":[48.6,88,0],"e":[48.6,128,0],"to":[0,0.00520833348855,0],"ti":[0,-6.66666650772095,0]},{"t":20}]},"a":{"a":0,"k":[-70,-0.5,0]},"s":{"a":0,"k":[75,75,100]}},"ao":0,"shapes":[{"ty":"gr","it":[{"d":1,"ty":"el","s":{"a":0,"k":[33.75,34.5]},"p":{"a":0,"k":[0,0]},"nm":"Ellipse Path 1"},{"ty":"fl","c":{"a":0,"k":[0.8980392,0.2235294,0.2078431,1]},"o":{"a":0,"k":100},"r":1,"nm":"Fill 1"},{"ty":"tr","p":{"a":0,"k":[-70.125,-0.5]},"a":{"a":0,"k":[0,0]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0},"o":{"a":0,"k":100},"sk":{"a":0,"k":0},"sa":{"a":0,"k":0},"nm":"Transform"}],"nm":"ADBE Vector Group"}],"ip":0,"op":300,"st":0,"bm":0,"sr":1}]} ;
-
-  function loadLottie(){
-    return new Promise((resolve) => {
-      if (window.lottie && window.lottie.loadAnimation) return resolve(window.lottie);
-      const sc = document.createElement('script');
-      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js';
-      sc.onload = () => resolve(window.lottie);
-      sc.onerror = () => resolve(null);
-      document.head.appendChild(sc);
-    });
-  }
-
-  const prepBlock = {
-    active: false,
-    left: 0,
-    tmr: null,
-    anim: null,
-  };
-
-  function ensureOverlay(){
-    let ovl = document.getElementById('sync-overlay'); // reaproveita id
-    if (ovl) return ovl;
-    ovl = document.createElement('div');
-    ovl.id = 'sync-overlay';
-    ovl.className = 'hidden';
-    ovl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:9999;color:#fff';
-    document.body.appendChild(ovl);
-    return ovl;
-  }
-
-  function setOverlayToPrep(){
-    const ovl = ensureOverlay();
-    ovl.innerHTML = `
-      <div class="sync-card" style="position:relative;z-index:1;width:min(560px,92vw);border-radius:16px;padding:22px;border:1px solid rgba(255,255,255,.16);box-shadow:0 22px 64px rgba(0,0,0,.45);background:#0f172a;color:#e5e7eb;text-align:center">
-        <div style="font-weight:800;font-size:1.05rem;margin-bottom:.25rem">Estamos preparando tudo para você…</div>
-        <div id="prep-ovl-time" style="opacity:.85;margin-bottom:.65rem">~ 01:00</div>
-        <div id="prep-ovl-lottie" style="width:120px;height:120px;margin:6px auto 2px"></div>
-        <div style="opacity:.8;font-size:.9rem;margin-top:.5rem">Segure um instante — já liberamos o app.</div>
-      </div>
-    `;
-  }
-  function paintPrepTime(){
-    const mm = String(Math.floor(prepBlock.left/60)).padStart(2,'0');
-    const ss = String(prepBlock.left%60).padStart(2,'0');
-    const el = $('#prep-ovl-time', document);
-    if (el) el.textContent = `~ ${mm}:${ss}`;
-  }
-  async function showPrepOverlayOneMinute(){
-    if (prepBlock.active) return; // não reinicia
-    prepBlock.active = true;
-    prepBlock.left = 60;
-    setOverlayToPrep();
-    const ovl = ensureOverlay();
-    ovl.classList.remove('hidden');
-    document.body.style.overflow = 'hidden';
-
-    const slot = $('#prep-ovl-lottie', ovl);
-    const lottie = await loadLottie();
-    if (lottie && slot) {
-      prepBlock.anim = lottie.loadAnimation({ container: slot, renderer:'svg', loop:true, autoplay:true, animationData: PREP_LOTTIE_DATA });
-    }
-    paintPrepTime();
-    clearInterval(prepBlock.tmr);
-    prepBlock.tmr = setInterval(() => {
-      prepBlock.left -= 1;
-      if (prepBlock.left <= 0){
-        hidePrepOverlay();
-      } else {
-        paintPrepTime();
-      }
-    }, 1000);
-  }
-  function hidePrepOverlay(){
-    const ovl = ensureOverlay();
-    prepBlock.active = false;
-    clearInterval(prepBlock.tmr);
-    prepBlock.tmr = null;
-    try { prepBlock.anim?.destroy?.(); } catch {}
-    prepBlock.anim = null;
-    ovl.classList.add('hidden');
-    document.body.style.overflow = '';
-  }
-
-  // ===== CSS rápido =====
+  // ===== CSS rápido (inclui animação BREATHE contínua no status) =====
   (function injectCSS(){
     const css = `
       #zap-loader{ display:none !important; }
@@ -272,6 +201,18 @@
       #btn-open-modal[disabled]{ cursor:not-allowed; box-shadow:none; }
       button[data-tab]{ cursor:pointer; }
       button[data-tab]:hover{ filter:brightness(1.05); }
+
+      /* ===== Overlay ===== */
+      @keyframes prepFade { from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:none} }
+      @keyframes statusBreathe {
+        0%   { transform:scale(0.985); opacity:.88; text-shadow:0 0 0 rgba(34,197,94,0); }
+        50%  { transform:scale(1.02);  opacity:1;   text-shadow:0 0 16px rgba(34,197,94,.25); }
+        100% { transform:scale(0.985); opacity:.88; text-shadow:0 0 0 rgba(34,197,94,0); }
+      }
+      #prep-ovl-status.think { animation: statusBreathe 1.8s ease-in-out infinite; }
+      #prep-ovl-status.fade { animation: prepFade .55s ease; }
+      #prep-ovl-status { font-weight:700; letter-spacing:.01em; }
+      #prep-ovl-time { font-variant-numeric: tabular-nums; letter-spacing:.02em; }
     `;
     const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s);
   })();
@@ -371,13 +312,6 @@
   }
 
   // ===== QR helpers =====
-  function secondsFromLimit(raw){
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n <= 0) return 60;
-    if (n > 300) return Math.round(n / 1000);
-    if (n <= 5)  return Math.round(n * 60);
-    return Math.round(n);
-  }
   function hideIllustration(){ els.qrIllustration?.classList.add('hidden'); }
   function showIllustration(){ els.qrIllustration?.classList.remove('hidden'); }
 
@@ -428,7 +362,7 @@
     els.qrImg.src = src;
     els.qrImg.classList.remove('hidden');
     els.qrInstru?.classList.remove('hidden');
-    if (limit) startTimer(secondsFromLimit(limit));
+    if (limit) startTimer(limit);
     els.btnGerarQR?.classList.add('hidden');
     els.btnRefresh?.classList.remove('hidden');
   }
@@ -442,7 +376,7 @@
       els.qrCanvas.classList.remove('hidden');
       els.qrImg?.classList.add('hidden');
       els.qrInstru?.classList.remove('hidden');
-      if (limit) startTimer(secondsFromLimit(limit));
+      if (limit) startTimer(limit);
       els.btnGerarQR?.classList.add('hidden');
       els.btnRefresh?.classList.remove('hidden');
     }catch(e){
@@ -451,19 +385,190 @@
   }
   function renderQRFromResponse(qr){
     if (!qr || typeof qr !== 'object') return false;
-    if (qr.base64) { renderQRFromBase64(qr.base64, qr.limit); return true; }
-    if (qr.pairingCode) { renderQRFromText(qr.pairingCode, qr.limit); return true; }
+    const lim = normalizeLimit(qr.limit || qr.qr_limit || qr.expires_in || qr.ttl);
+    if (qr.base64)     { renderQRFromBase64(qr.base64, lim); return true; }
+    if (qr.pairingCode){ renderQRFromText(qr.pairingCode, lim); return true; }
     return false;
   }
+  function normalizeLimit(raw){
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) return 60;
+    if (n > 300) return Math.round(n / 1000);
+    if (n <= 5)  return Math.round(n * 60);
+    return Math.round(n);
+  }
 
-  // ===== Conectado → fecha modal e abre overlay de 1 min =====
+  // ===== Overlay (Lottie grande, sem borda) – mensagens rotativas condicionais =====
+  const PREP_TITLE        = 'Estamos organizando tudo para você.';
+  const PREP_SUBTITLE     = 'Esta ação pode demorar um pouco.';
+  const PREP_SECONDS      = 60;   // total (s)
+  const STATUS_ROTATE_MS  = 7000; // intervalo entre mensagens (ms)
+
+  function buildSteps(opts){
+    const restore = !!opts?.restore;
+    if (!restore) return ['Sincronizando seus contatos…'];
+    return [
+      'Sincronizando suas mensagens…',
+      'Sincronizando seus contatos…',
+      'Sincronizando suas imagens…',
+      'Sincronizando seus arquivos…',
+      'Sincronizando seus áudios…',
+    ];
+  }
+
+  function loadLottie(){
+    return new Promise((resolve) => {
+      if (window.lottie && window.lottie.loadAnimation) return resolve(window.lottie);
+      const sc = document.createElement('script');
+      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js';
+      sc.async = true;
+      sc.onload = () => resolve(window.lottie);
+      sc.onerror = () => resolve(null);
+      document.head.appendChild(sc);
+    });
+  }
+
+  const prepBlock = {
+    active:false, left:0, tmr:null, anim:null,
+    statusTmr:null, statusIdx:0, steps:[]
+  };
+
+  function ensureOverlay(){
+    let ovl = document.getElementById('sync-overlay');
+    if (ovl) return ovl;
+    ovl = document.createElement('div');
+    ovl.id = 'sync-overlay';
+    ovl.className = 'hidden';
+    ovl.style.cssText = `
+      position:fixed; inset:0; z-index:9999;
+      display:flex; align-items:center; justify-content:center;
+      background:radial-gradient(1200px 1200px at 50% 40%, rgba(8,8,8,.92), rgba(0,0,0,.95));
+      color:#e5e7eb;
+    `;
+    document.body.appendChild(ovl);
+    return ovl;
+  }
+
+  function setOverlayToPrep(){
+    const ovl = ensureOverlay();
+    ovl.innerHTML = `
+      <div class="sync-card" role="dialog" aria-live="polite"
+           style="position:relative; width:min(1040px,96vw); max-width:1040px;
+                  padding:clamp(16px,2.8vw,28px) clamp(16px,3.2vw,40px) clamp(18px,3vw,32px);
+                  border-radius:28px; background:transparent; text-align:center;">
+        <div id="prep-ovl-lottie"
+             style="width:min(64vw,740px); height:min(44vh,420px); margin:2vh auto 1.2rem"></div>
+
+        <div id="prep-ovl-status" class="think"
+             style="min-height:1.25rem; opacity:.95; margin:.1rem auto .55rem"></div>
+
+        <div id="prep-ovl-text" style="font-weight:800; font-size:clamp(16px,1.4vw,18px); margin-bottom:.25rem">
+          ${htmlEscape(PREP_TITLE)}
+        </div>
+        <div style="opacity:.85; font-size:clamp(13px,1.2vw,15px); margin-bottom:.65rem">
+          ${htmlEscape(PREP_SUBTITLE)}
+        </div>
+
+        <div id="prep-ovl-time"
+             style="opacity:.75; font-size:clamp(12px,1.1vw,14px); margin-top:.2rem;"></div>
+      </div>
+    `;
+  }
+
+  function paintPrepTime(){
+    const mm = String(Math.floor(prepBlock.left/60)).padStart(2,'0');
+    const ss = String(prepBlock.left%60).padStart(2,'0');
+    const el = document.getElementById('prep-ovl-time');
+    if (el) el.textContent = `${mm}:${ss}`;
+  }
+
+  function paintStatus(){
+    const el = document.getElementById('prep-ovl-status');
+    if (!el || prepBlock.steps.length === 0) return;
+    el.textContent = prepBlock.steps[prepBlock.statusIdx % prepBlock.steps.length];
+    // mantém o "think" (breathe infinito) e só reaplica o fade a cada troca
+    el.classList.remove('fade');
+    void el.offsetWidth; // reflow
+    el.classList.add('fade');
+  }
+
+  function startStatusRotation(intervalMs=STATUS_ROTATE_MS){
+    stopStatusRotation();
+    if (prepBlock.steps.length <= 1){
+      paintStatus(); // estático, mas com breathe infinito
+      return;
+    }
+    paintStatus();
+    prepBlock.statusTmr = setInterval(() => {
+      prepBlock.statusIdx = (prepBlock.statusIdx + 1) % prepBlock.steps.length; // loop infinito
+      paintStatus();
+    }, intervalMs);
+  }
+  function stopStatusRotation(){
+    if (prepBlock.statusTmr) clearInterval(prepBlock.statusTmr);
+    prepBlock.statusTmr = null;
+  }
+
+  async function showPrepOverlayOneMinute(seconds = PREP_SECONDS, opts = { restore: lastRestoreRequested }){
+    if (prepBlock.active) return;
+    prepBlock.active = true;
+    prepBlock.left = Math.max(1, Math.floor(seconds));
+    prepBlock.steps = buildSteps(opts);
+    prepBlock.statusIdx = 0;
+
+    setOverlayToPrep();
+    const ovl = ensureOverlay();
+    ovl.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+
+    // Lottie
+    const slot = document.getElementById('prep-ovl-lottie');
+    try {
+      const lottie = await loadLottie();
+      if (lottie && slot) {
+        const data = await fetch(PREP_LOTTIE_URL, { cache:'no-store' }).then(r => r.json());
+        prepBlock.anim = lottie.loadAnimation({
+          container: slot, renderer: 'svg', loop: true, autoplay: true, animationData: data
+        });
+        try { prepBlock.anim.setSpeed?.(0.9); } catch {}
+      }
+    } catch {}
+
+    // tempo + status
+    paintPrepTime();
+    startStatusRotation(STATUS_ROTATE_MS);
+
+    clearInterval(prepBlock.tmr);
+    prepBlock.tmr = setInterval(() => {
+      prepBlock.left -= 1;
+      if (prepBlock.left <= 0) {
+        hidePrepOverlay();
+      } else {
+        paintPrepTime();
+      }
+    }, 1000);
+  }
+
+  function hidePrepOverlay(){
+    const ovl = ensureOverlay();
+    prepBlock.active = false;
+    clearInterval(prepBlock.tmr); prepBlock.tmr = null;
+    stopStatusRotation();
+    try { prepBlock.anim?.destroy?.(); } catch {}
+    prepBlock.anim = null;
+    ovl.classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+
+  // ===== Conectado → fecha modal e abre overlay =====
   function handleConnected(instanceFromMsg){
     if (currentInstance && instanceFromMsg && instanceFromMsg !== currentInstance) return;
     clearInterval(timerId);
     hideQR();
     try { hideModal(); } catch {}
     wantQR = false;
-    showPrepOverlayOneMinute(); // 🚀 bloqueia 1 minuto, SEM “sincronizando”
+    showPrepOverlayOneMinute(PREP_SECONDS, { restore: lastRestoreRequested });
+    scheduleLoad(200);
   }
 
   // ===== Tabs =====
@@ -482,26 +587,7 @@
   els.tabAtivos?.addEventListener('click', () => activateTab('ativos'));
   els.tabInativos?.addEventListener('click', () => activateTab('inativos'));
 
-  // ===== WebSockets (somente QR/connected; ignora TODO resto) =====
-  let empWS = null;
-  const instWS = new Map();
-
-  let empHb = null;
-  const instHb = new Map();
-
-  const startEmpHb = () => { clearInterval(empHb); empHb = setInterval(() => { try{ empWS?.send('ping'); }catch{} }, 30_000); };
-  const stopEmpHb  = () => { clearInterval(empHb); };
-
-  function startInstHb(instance, ws){
-    clearInterval(instHb.get(instance));
-    const id = setInterval(() => { try{ ws?.send('ping'); }catch{} }, 30_000);
-    instHb.set(instance, id);
-  }
-  function stopInstHb(instance){
-    clearInterval(instHb.get(instance));
-    instHb.delete(instance);
-  }
-
+  // ===== Scheduler de carregamento =====
   let loadTmr = null;
   let inFlight = false;
   let pendingReload = false;
@@ -515,81 +601,80 @@
     }, ms);
   }
 
-  function ensureEmpWS(){
+  // ===== WebSockets via ws-core (empresa + instância) =====
+  let offEmp = null;     // unsubscribe da empresa
+  let offInst = null;    // unsubscribe da instância atual
+
+  function attachEmpresaWS() {
     if (!empresaId) return;
-    if (empWS && empWS.readyState === WebSocket.OPEN) return empWS;
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${location.host}/ws/emp:${empresaId}`;
-    empWS = new WebSocket(url);
 
-    empWS.onopen = () => { startEmpHb(); };
-    empWS.onclose = () => { stopEmpHb(); setTimeout(() => ensureEmpWS(), 800); };
-    empWS.onerror = () => { try { empWS?.close(); } catch {} };
+    ensureEmpresaWS(empresaId);
 
-    empWS.onmessage = (ev) => {
-      let m = null; try{ m = JSON.parse(ev.data); }catch{ m = { raw: ev.data }; }
+    if (offEmp) { try { offEmp(); } catch {} offEmp = null; }
 
-      // Somente o que interessa:
+    offEmp = onEmpresaMessage(empresaId, (evt) => {
+      if (evt.type !== 'message') return;
+      const m = evt.data || {};
+
       if (m?.reload_whatsapp || m?.type === 'reload_whatsapp') {
-        scheduleLoad();
+        scheduleLoad(200);
         return;
       }
-      if (m?.type === 'qrcode' && wantQR){
-        const ttl = m.qr_limit ?? m.expires_in ?? m.ttl ?? 60;
+
+      if (m?.type === 'qrcode' && wantQR) {
+        if (m.waiting) {
+          els.qrLoader?.classList.remove('hidden');
+          showIllustration(); hideQR();
+          return;
+        }
+        const ttl = normalizeLimit(m.qr_limit ?? m.expires_in ?? m.ttl ?? 60);
         if (m.base64)           renderQRFromBase64(m.base64, ttl);
         else if (m.pairingCode) renderQRFromText(m.pairingCode, ttl);
         return;
       }
+
       if (m?.type === 'connection' || m?.type === 'connected' || m?.status || m?.state || m?.inst_status){
         if (isConnectedPayload(m)) {
           const instName = (m.inst_status?.instance) || m.instance || m.instance_name || m.instancia || null;
           handleConnected(instName);
           scheduleLoad(200);
         }
+      }
+    });
+  }
+
+  function attachInstWS(instance) {
+    if (offInst) { try { offInst(); } catch {} offInst = null; }
+    if (!instance) return;
+
+    ensureInstWS(instance);
+
+    offInst = onInstMessage(instance, (evt) => {
+      if (evt.type !== 'message') return;
+      const m = evt.data || {};
+
+      if (m?.type === 'qrcode' && wantQR) {
+        if (m.waiting) {
+          els.qrLoader?.classList.remove('hidden');
+          showIllustration(); hideQR();
+          return;
+        }
+        const ttl = normalizeLimit(m.qr_limit ?? m.expires_in ?? m.ttl ?? 60);
+        if (m.base64)           renderQRFromBase64(m.base64, ttl);
+        else if (m.pairingCode) renderQRFromText(m.pairingCode, ttl);
         return;
       }
 
-      // qualquer outro evento é ignorado (nada de sync!)
-    };
-
-    window.wsEmpresa = empWS;
-    return empWS;
-  }
-
-  function ensureInstanceWS(instance){
-    if (!instance) return;
-    const existing = instWS.get(instance);
-    if (existing && existing.readyState === WebSocket.OPEN) return existing;
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${location.host}/ws/inst:${encodeURIComponent(instance)}`;
-    const ws = new WebSocket(url);
-    instWS.set(instance, ws);
-
-    ws.onopen  = () => { startInstHb(instance, ws); };
-    ws.onclose = () => { stopInstHb(instance); setTimeout(() => ensureInstanceWS(instance), 1200); };
-    ws.onerror = () => { try { ws.close(); } catch {} };
-
-    ws.onmessage = (ev) => {
-      let m = null; try{ m = JSON.parse(ev.data); }catch{ m = { raw: ev.data }; }
-
-      if (m?.type === 'qrcode' && wantQR){
-        const ttl = m.qr_limit ?? m.expires_in ?? m.ttl ?? 60;
-        if (m.base64)           renderQRFromBase64(m.base64, ttl);
-        else if (m.pairingCode) renderQRFromText(m.pairingCode, ttl);
-      }
-      if (m?.type === 'connection' || m?.type === 'connected' || m?.status || m?.state){
+      if (m?.type === 'connection' || m?.type === 'connected' || m?.status || m?.state) {
         if (isConnectedPayload(m)) {
           handleConnected(m.instance || m.instance_name || m.instancia || null);
           scheduleLoad(200);
         }
       }
-
-      // demais eventos: ignorar
-    };
-    return ws;
+    });
   }
 
-  // ===== Carga principal (sem overlay de "carregando") =====
+  // ===== Carga principal =====
   async function loadWhatsAppStatus(){
     if (!empresaId) return;
     if (inFlight) { pendingReload = true; return; }
@@ -643,7 +728,7 @@
     }
   }
 
-  // ===== Submit (novo) – mantém sua ilustração/loader =====
+  // ===== Submit (novo) =====
   async function handleConnectSubmit(ev){
     ev.preventDefault?.();
 
@@ -657,6 +742,9 @@
     const ddi       = onlyDigits(els.selPais?.value) || '55';
     const historico = els.selHist?.value || 'none';
     const usePairing = !!els.chkPairing?.checked;
+
+    // guarda se vai restaurar
+    lastRestoreRequested = String(historico || '').toLowerCase() !== 'none';
 
     if (!numero){
       els.qrLoader?.classList.add('hidden');
@@ -678,7 +766,7 @@
       currentInstance = js?.instance || null;
       window.currentInstance = currentInstance;
 
-      if (currentInstance) ensureInstanceWS(currentInstance);
+      if (currentInstance) attachInstWS(currentInstance);
 
       wantQR = true;
 
@@ -709,6 +797,9 @@
     currentInstance = item.instance_name;
     window.currentInstance = currentInstance;
 
+    // reconexão NÃO restaura histórico por padrão
+    lastRestoreRequested = false;
+
     setModalTitle('Reconecte seu número de WhatsApp');
     const histRow = fieldRowOf(els.selHist);
     if (histRow) histRow.classList.add('hidden');
@@ -720,7 +811,7 @@
     showModal();
     showIllustration(); showQRError(''); hideQR();
 
-    ensureInstanceWS(currentInstance);
+    attachInstWS(currentInstance);
 
     els.qrLoader?.classList.remove('hidden');
     try {
@@ -770,6 +861,8 @@
     wantQR = false;
     currentInstance = null;
     window.currentInstance = null;
+    if (els.selHist) els.selHist.value = 'none';
+    lastRestoreRequested = false;
   });
   els.btnCloseMd?.addEventListener('click', hideModal);
   els.btnCancel?.addEventListener('click', hideModal);
@@ -856,14 +949,55 @@
   if (!empresaId){
     console.warn('empresa_id ausente no localStorage; não foi possível carregar a lista.');
   } else {
-    ensureEmpWS();
+    attachEmpresaWS();
     loadWhatsAppStatus();
   }
 
-  // encerramento
+  // ===== Teardown quando sair da /conectar (SPA) =====
+  function teardownConectar() {
+    try { offEmp?.(); offEmp = null; } catch {}
+    try { offInst?.(); offInst = null; } catch {}
+
+    try { if (empresaId) closeEmpresaWS(empresaId); } catch {}
+    try { if (currentInstance) closeInstWS(currentInstance); } catch {}
+
+    clearTimeout(loadTmr); loadTmr = null; inFlight = false; pendingReload = false;
+
+    try { hidePrepOverlay(); } catch {}
+    document.body.style.overflow = '';
+  }
+
+  (function watchLeave(){
+    const isHere = () => !!document.getElementById('form-conectar') || location.pathname.includes('/conectar');
+    const stopIfGone = () => { if (!isHere()) { teardownConectar(); obs?.disconnect?.(); document.removeEventListener('visibilitychange', stopIfGone); } };
+    const obs = new MutationObserver(stopIfGone);
+    obs.observe(document.body, { childList:true, subtree:true });
+    document.addEventListener('visibilitychange', stopIfGone);
+  })();
+
   window.addEventListener('beforeunload', () => {
-    try { clearInterval(empHb); empWS?.close(); } catch {}
-    instWS.forEach((ws, key) => { try{ stopInstHb(key); ws?.close(); }catch{} });
-    try { prepBlock.anim?.destroy?.(); } catch {}
+    teardownConectar();
   });
+
+  // ===== Botão DEV: testar overlay (alterna restaura ↔ sem restauro) =====
+  (function devTestOverlay(){
+    try {
+      const btn = document.createElement('button');
+      btn.textContent = 'Testar overlay (restaura)';
+      btn.style.cssText = `
+        position:fixed; right:16px; bottom:16px; z-index:99999;
+        background:#16a34a; color:#fff; border:0; border-radius:10px; padding:10px 14px;
+        box-shadow:0 8px 24px rgba(0,0,0,.25); cursor:pointer; font-weight:600;
+      `;
+      btn.dataset.restore = '1';
+      btn.addEventListener('click', () => {
+        const restore = btn.dataset.restore === '1';
+        showPrepOverlayOneMinute(PREP_SECONDS, { restore });
+        btn.dataset.restore = restore ? '0' : '1';
+        btn.textContent = restore ? 'Testar overlay (sem restauro)' : 'Testar overlay (restaura)';
+      });
+      document.body.appendChild(btn);
+    } catch {}
+  })();
+
 })();

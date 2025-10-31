@@ -9,8 +9,12 @@
 
   --text: #e5e7eb;
   --muted: #9ca3af;
+
+  --bg: #0e0f12;
+  --panel: #121318;
   --card: #111827;
   --card2: #0b1220;
+
   --border: rgba(255,255,255,.12);
   --primary: #60a5fa;
 
@@ -22,44 +26,142 @@
   /* feedback de erro */
   --danger: #dc2626;
   --danger-weak: rgba(220,38,38,.15);
+
+  --overlay: rgba(0,0,0,.55);
+
+  /* força controles nativos no dark quando forem usados */
+  color-scheme: dark;
 }
 
-/* Tema claro (sem arquivo extra) */
+/* Tema claro */
 [data-theme="light"]{
-  --text: #3b3b3b;
+  --text: #1f2937;
   --muted: #6b7280;
+
+  --bg: #f3f4f6;
+  --panel: #f5f6f8;
   --card: #ffffff;
   --card2: #f9fafb;
+
   --border: rgba(0,0,0,.12);
   --border-hairline: rgba(0,0,0,.10);
   --border-hairline-strong: rgba(0,0,0,.18);
   --primary: #2563eb;
+
+  --overlay: rgba(0,0,0,.45);
+
+  color-scheme: light;
 }
 
-/* ---------- Utilidades / estados vazios ---------- */
+/* ---------- Escopo da página ---------- */
+body[data-page="colaboradores"]{
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Normaliza superfícies */
+body[data-page="colaboradores"] .card,
+body[data-page="colaboradores"] .table-wrap,
+body[data-page="colaboradores"] .filtros,
+body[data-page="colaboradores"] .filter,
+body[data-page="colaboradores"] .box{
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+}
+
+/* Hotfix utilitárias fixas */
+body[data-page="colaboradores"] [class*="bg-white"]{ background: var(--card) !important; }
+body[data-page="colaboradores"] [class*="text-black"]{ color: var(--text) !important; }
+body[data-page="colaboradores"] [class*="border-gray-200"]{ border-color: var(--border) !important; }
+
+/* ---------- Utilidades ---------- */
 .empty-bordered{
   display:none; align-items:center; justify-content:center;
   color:var(--muted); padding:2rem; border:1px dashed var(--border); border-radius:.9rem;
 }
 
-/* ---------- Lista (tabela) ---------- */
+/* ====================================================================
+   LISTA (TABELA)
+   ==================================================================== */
+.table-wrap{
+  padding: 12px;
+  background: var(--card);
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.table-wrap .table-scroller{
+  overflow:auto;
+  max-height: min(70vh, 920px);
+  border-radius: 10px;
+}
+table.colabs{
+  width:100%;
+  border-collapse: collapse;
+  background: var(--card);
+  color: var(--text);
+  table-layout: auto;
+}
+table.colabs thead th{
+  position: sticky; top: 0;
+  background: var(--card2);
+  color: var(--text);
+  z-index: 1;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-weight: 700;
+  padding: 10px 12px;
+  white-space: nowrap;
+}
+table.colabs th, table.colabs td{
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+  vertical-align: middle;
+}
+table.colabs tbody tr:nth-child(odd){ background: var(--card); }
+table.colabs tbody tr:nth-child(even){ background: var(--card2); }
+table.colabs tbody tr:hover{
+  outline: 1px solid var(--border-hairline-strong);
+  outline-offset: -1px;
+}
 .td-actions{ display:flex; gap:.45rem; }
 .td-actions .btn.btn-ghost{ border-radius:12px; padding:.45rem .55rem; }
 
+/* Responsivo: tabela vira cartões */
 @media (max-width:720px){
+  .table-wrap{ padding: 8px; }
+  table.colabs thead{ display:none; }
+  table.colabs, table.colabs tbody, table.colabs tr, table.colabs td{ display:block; width:100%; }
+  table.colabs tr{ border: 1px solid var(--border-hairline); border-radius: 12px; margin: 10px 0; overflow:hidden; }
+  table.colabs td{
+    border:0; border-bottom:1px solid var(--border-hairline);
+    display:flex; justify-content:space-between; align-items:center;
+    gap:.75rem; padding: .8rem .9rem;
+    background: transparent;
+  }
+  table.colabs td:last-child{ border-bottom:0; }
   tbody td:nth-child(1)::before{ content:"#"; }
   tbody td:nth-child(2)::before{ content:"Nome"; }
   tbody td:nth-child(3)::before{ content:"E-mail"; }
   tbody td:nth-child(4)::before{ content:"Departamento"; }
   tbody td:nth-child(5)::before{ content:"Ações"; }
   tbody td::before{
-    color:var(--muted); font-weight:600; display:block; margin-bottom:.25rem;
+    color:var(--muted); font-weight:600; display:block; margin-right:.75rem;
   }
 }
 
-/* ---------- Filtros: caret + botão ZapChats ---------- */
+/* ====================================================================
+   FILTROS / TOOLBAR
+   ==================================================================== */
 .filter{
   display:flex; flex-wrap:wrap; align-items:center; gap:.6rem;
+  background: var(--card);
+  padding: 10px 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  margin-bottom: 10px;
 }
 .filter .btn.btn-primary{
   background: var(--green) !important;
@@ -72,7 +174,9 @@
 .filter .btn.btn-primary:focus-visible{
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--green-ring) 35%, transparent);
 }
-.filter .select{
+
+/* Select base (casos sem custom) */
+.select{
   appearance:none; -webkit-appearance:none; -moz-appearance:none;
   padding-right: 2rem;
   background-repeat: no-repeat;
@@ -82,24 +186,13 @@
 <svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'>\
 <path fill='%239ca3af' d='M10.59.59 6 5.17 1.41.59 0 2l6 6 6-6z'/></svg>");
 }
-.filter .btn[data-caret]{ position:relative; padding-right: 1.9rem; }
-.filter .btn[data-caret]::after{
-  content:""; position:absolute; right:.6rem; top:50%; transform:translateY(-50%);
-  width:12px; height:8px; opacity:.9; background-repeat:no-repeat; background-size:12px 8px;
-  background-image: url("data:image/svg+xml;utf8,\
-<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'>\
-<path fill='%239ca3af' d='M10.59.59 6 5.17 1.41.59 0 2l6 6 6-6z'/></svg>");
-}
-.filter .btn.btn-primary[data-caret]::after{
-  background-image: url("data:image/svg+xml;utf8,\
-<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'>\
-<path fill='%23ffffff' d='M10.59.59 6 5.17 1.41.59 0 2l6 6 6-6z'/></svg>");
-}
 
-/* ---------- Modal Perfil (estrutura) ---------- */
+/* ====================================================================
+   MODAL PERFIL
+   ==================================================================== */
 #modal-perfil.modal-back{
   position: fixed; inset: 0; display: none; place-items: center;
-  background: var(--overlay, rgba(0,0,0,.55)); z-index: 2147483000; padding: 16px;
+  background: var(--overlay); z-index: 2147483000; padding: 16px;
 }
 #modal-perfil[aria-hidden="false"]{ display: grid; }
 #modal-perfil .modal-card{
@@ -122,16 +215,15 @@
   display:flex; align-items:center; justify-content:flex-end;
   gap:.6rem; padding: 12px 16px; border-top:1px solid var(--border);
 }
-/* trava scroll do body quando modal aberto */
 html.modal-open{ overflow: hidden; }
-/* Mobile */
 @media (max-width: 720px){
   #modal-perfil .modal-card{ width: 100%; max-height: 92vh; border-radius: 10px; }
 }
-/* Esconde o "Fechar" do cabeçalho por padrão */
 #modal-perfil #perfil-fechar{ display: none !important; }
 
-/* ---------- Toast ---------- */
+/* ====================================================================
+   TOAST
+   ==================================================================== */
 #toast{
   position: fixed; top: 16px; right: 16px; z-index: 2147483647;
   min-width: 260px; max-width: min(420px, 90vw);
@@ -146,10 +238,11 @@ html.modal-open{ overflow: hidden; }
 #toast.toast-err  { background:#7f1d1d; }
 #toast.show{ opacity:1; transform: translateY(0); }
 #toast i { opacity:.95; }
-#toast .toast-msg{ line-height: 1.25; white-space: pre-line; font-weight: 600; }
 @media (prefers-reduced-motion: reduce){ #toast{ transition: none; } }
 
-/* ---------- Perfil: layout e cartões ---------- */
+/* ====================================================================
+   PERFIL — layout e cartões
+   ==================================================================== */
 .grid-two{
   display:grid; grid-template-columns: 360px 1fr; gap:1rem; align-items:start;
 }
@@ -165,7 +258,7 @@ html.modal-open{ overflow: hidden; }
 .avatar-wrap{
   width:180px; height:180px; border-radius:24px;
   display:grid; place-items:center; overflow:hidden;
-  background: var(--card2, var(--card));
+  background: var(--card2);
   border: 1px solid var(--border-hairline);
   justify-self:center; cursor: pointer;
 }
@@ -173,7 +266,6 @@ html.modal-open{ overflow: hidden; }
 #p-mono{ font-family: var(--font-display, system-ui); font-weight:600; font-size:3rem; opacity:.95; }
 .avatar-wrap.drag-over{ outline: 2px dashed var(--primary); outline-offset: 4px; }
 
-/* CTA de avatar (modo "novo") */
 .avatar-hint{
   display:flex; flex-direction:column; align-items:center; justify-content:center;
   text-align:center; gap:.35rem; border:1px dashed var(--border-hairline-strong);
@@ -201,8 +293,9 @@ html.modal-open{ overflow: hidden; }
 }
 .details-head h3{ margin:0; font-family: var(--font-display, system-ui); font-size:1.06rem; font-weight:600; }
 
+/* Respiro geral nos campos */
 .details-grid{
-  display:grid; grid-template-columns: 1fr; gap:12px 24px; color: var(--text);
+  display:grid; grid-template-columns: 1fr; gap:16px 28px; color: var(--text);
 }
 .details-grid > .full{ grid-column:1/-1; }
 @media (min-width:980px){
@@ -210,11 +303,11 @@ html.modal-open{ overflow: hidden; }
   .details-grid > .half{ grid-column:auto; }
   .details-grid > .full{ grid-column:1/-1; }
 }
-.details-grid dt{ font-size:.82rem; color:var(--muted); font-weight:600; margin:0 0 .35rem; }
+.details-grid dt{ font-size:.82rem; color:var(--muted); font-weight:600; margin:0 0 .45rem; }
 .details-grid dd{ margin:0; }
 .details-grid .half > dd > *{ width:100%; }
 
-/* Caixinhas/inputs normalizados (view + edição) */
+/* Caixinhas/inputs */
 .fieldbox{
   min-height: 40px; padding: 10px 12px; display:flex; align-items:center;
   border:1px solid var(--border-hairline-strong); border-radius:10px;
@@ -233,7 +326,7 @@ html.modal-open{ overflow: hidden; }
   box-shadow:none !important; color: var(--text); font-weight: 400;
 }
 
-/* Select caret consistente no modal */
+/* Select caret consistente */
 .details-grid .select,
 .perfil-modal-card .select,
 #modal-perfil .select{
@@ -245,18 +338,18 @@ html.modal-open{ overflow: hidden; }
 }
 
 /* Chips */
-.chips{ display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+.chips{ display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; }
 .chip{
-  padding:.24rem .56rem; border-radius:9999px;
+  padding:.28rem .66rem; border-radius:9999px;
   border:1px dashed var(--border-hairline-strong);
   background:transparent; font-weight:500; font-size:.84rem; white-space:nowrap; color: var(--text);
 }
 
-/* Grid de permissões (reaproveitada) */
-.perms-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:.5rem; margin-top:.6rem; }
+/* Grid de permissões */
+.perms-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:.6rem; margin-top:.6rem; }
 .chk-line{ display:flex; gap:.45rem; align-items:center; font-weight:600; color: var(--text); }
 
-/* Edição inline: remove borda dupla da fieldbox */
+/* Edição inline: remove borda dupla */
 .fieldbox.is-editing{ border-color: transparent; background: transparent; padding: 0; }
 .fieldbox.is-editing .input,
 .fieldbox.is-editing .select{
@@ -276,7 +369,7 @@ html.modal-open{ overflow: hidden; }
 
 #p-status-text{ font-weight:300; }
 
-/* Validação (sublinhado vermelho) */
+/* Validação */
 .details-grid .input.invalid,
 .details-grid .select.invalid{
   border-color: transparent !important;
@@ -293,7 +386,9 @@ html.modal-open{ overflow: hidden; }
   transition: box-shadow .18s ease, border-color .18s ease;
 }
 
-/* ---------- Botões primários do MODAL em verde ---------- */
+/* ====================================================================
+   BOTÕES PRIMÁRIOS
+   ==================================================================== */
 .perfil-modal-card .btn.btn-primary,
 #modal-perfil .btn.btn-primary{
   background: var(--green) !important;
@@ -307,41 +402,164 @@ html.modal-open{ overflow: hidden; }
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--green-ring) 35%, transparent);
 }
 
-/* ---------- Instâncias (WhatsApp) ---------- */
+/* ====================================================================
+   INSTÂNCIAS (WhatsApp)
+   ==================================================================== */
 #insts-wrap.fieldbox{
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: .5rem;
-  height: auto !important;        /* <- solta o 40px */
-  min-height: auto !important;    /* <- idem */
-  padding: 12px;                  /* mantém o mesmo padding */
-  margin-top: .6rem;              /* respiro em cima */
+  height: auto !important;
+  min-height: auto !important;
+  padding: 12px;
+  margin-top: .6rem;
 }
-
-
-#insts-wrap.fieldbox label .muted{
-  font-weight: 400;
-  opacity: .9;
-}
-
-
+#insts-wrap.fieldbox label .muted{ font-weight: 400; opacity: .9; }
 #insts-wrap > label{
   display:flex; gap:.5rem; align-items:baseline; flex-wrap:wrap;
 }
 #insts-wrap #e-insts{
-  display:none; /* o JS liga pra 'grid' só no modo edição */
+  display:none;
   grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
   gap:.5rem;
 }
 #insts-wrap #inst-actions{
-  display:none; /* o JS liga pra 'flex' só no modo edição */
+  display:none;
   gap:.5rem; margin:.35rem 0 .5rem 0;
 }
 #insts-wrap #d-insts{ display:flex; flex-wrap:wrap; gap:.5rem; }
 #insts-wrap .chk-line{ font-weight:600; }
 
-/* ---------- Responsivo extra ---------- */
+/* ====================================================================
+   SENHA
+   ==================================================================== */
+#fb-senha{
+  display:block; padding:0; border:0; background:transparent; min-height:0;
+  margin-bottom: 1.9rem;
+}
+#fb-senha .input-group{
+  position:relative; display:flex; align-items:center; min-height:40px;
+  border:1px solid var(--border-hairline-strong); border-radius:10px;
+  background:var(--card); overflow:hidden;
+}
+#fb-senha .input-group > .input{
+  width:100%; height:40px; min-height:40px; padding:10px 2.6rem 10px 12px;
+  border:0; background:transparent; box-shadow:none; color: var(--text);
+}
+#fb-senha .icon-btn{
+  position:absolute; top:50%; right:.5rem; transform:translateY(-50%);
+  display:grid; place-items:center; width:2rem; height:2rem;
+  border:0; background:transparent; border-radius:.5rem; cursor:pointer; color: var(--text);
+}
+#fb-senha .icon-btn:hover{ background: rgba(255,255,255,.08); }
+#fb-senha .icon-btn:focus-visible{ outline:2px solid var(--primary); outline-offset:2px; }
+#fb-senha .help-text{ display:block; margin:.45rem 0 0 .25rem; font-size:.86rem; color:var(--muted); }
+#fb-senha.fieldbox.invalid{ box-shadow:none !important; }
+#fb-senha.fieldbox.invalid .input-group{
+  border-color: transparent !important; box-shadow: inset 0 -2px 0 var(--danger) !important;
+}
+#fb-senha .input.invalid:focus{
+  box-shadow: inset 0 -2px 0 var(--danger), 0 0 0 3px var(--danger-weak) !important;
+}
+
+/* Help genérico */
+.details-grid dd .help-text{
+  display:block; margin:.35rem .25rem 0; color:var(--muted); font-weight:500; font-size:.86rem;
+}
+
+/* ====================================================================
+   PERMISSÕES
+   ==================================================================== */
+#e-perms{
+  display:none; margin-top:.5rem; padding:12px;
+  border:1px solid var(--border-hairline-strong); border-radius:10px; background:var(--card);
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); column-gap:1.2rem; row-gap:.8rem;
+}
+#e-perms .chk-line{ align-items:flex-start; gap:.55rem; line-height:1.35; padding:.12rem 0; }
+#e-perms .chk-line input{ width:18px; height:18px; margin-top:.05rem; }
+
+#insts-full{ margin-bottom: .55rem; }
+#insts-full + .full{ margin-top:.25rem; }
+
 @media (max-width:980px){
   .avatar-wrap{ width:160px; height:160px; border-radius:22px; }
+  #e-perms{ grid-template-columns: 1fr; }
+}
+
+/* ====================================================================
+   Inputs padrão (fallback)
+   ==================================================================== */
+body[data-page="colaboradores"] input[type="text"],
+body[data-page="colaboradores"] input[type="email"],
+body[data-page="colaboradores"] input[type="number"],
+body[data-page="colaboradores"] input[type="tel"],
+body[data-page="colaboradores"] input[type="password"],
+body[data-page="colaboradores"] select,
+body[data-page="colaboradores"] textarea{
+  background: var(--card);
+  border:1px solid var(--border-hairline-strong);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+body[data-page="colaboradores"] input::placeholder,
+body[data-page="colaboradores"] textarea::placeholder{ color: var(--muted); }
+
+/* ====================================================================
+   Scrollbar (opcional)
+   ==================================================================== */
+body[data-page="colaboradores"] ::-webkit-scrollbar{ height:12px; width:12px; }
+body[data-page="colaboradores"] ::-webkit-scrollbar-thumb{
+  background: var(--border-hairline-strong); border-radius: 10px; border: 3px solid transparent; background-clip: content-box;
+}
+body[data-page="colaboradores"] ::-webkit-scrollbar-track{ background: transparent; }
+
+/* ====================================================================
+   Custom Select (usa a mesma cor da superfície)
+   ==================================================================== */
+.x-select{ position:relative; width:100%; --x-surface: var(--card); }
+
+.x-sel-btn{
+  width:100%; min-height:40px; padding:10px 34px 10px 12px;
+  background:var(--x-surface); color:var(--text);
+  border:1px solid var(--border-hairline-strong); border-radius:10px;
+  display:flex; align-items:center; justify-content:space-between; gap:.6rem;
+}
+.x-sel-btn:after{
+  content:""; flex:none; width:12px; height:8px; opacity:.9;
+  background-repeat:no-repeat; background-size:12px 8px;
+  background-image:url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'>\
+<path fill='%239ca3af' d='M10.59.59 6 5.17 1.41.59 0 2l6 6 6-6z'/></svg>");
+}
+.x-sel-btn:focus-visible{ outline:2px solid var(--primary); outline-offset:2px; }
+
+.x-sel-list{
+  position:absolute; top:calc(100% + 6px); left:0; right:0;
+  max-height:240px; overflow:auto; z-index:2147483600;
+  background:var(--x-surface); color:var(--text);
+  border:1px solid var(--border-hairline-strong);
+  border-radius:10px; box-shadow:0 20px 40px rgba(0,0,0,.45);
+  display:none; list-style:none; margin:0; padding:0;
+}
+.x-select.open .x-sel-list{ display:block; }
+
+.x-sel-opt{
+  padding:.65rem .75rem; cursor:pointer; user-select:none;
+  border-bottom:1px solid var(--border-hairline);
+}
+.x-sel-opt:last-child{ border-bottom:0; }
+
+.x-sel-opt:hover{
+  background: color-mix(in oklab, var(--primary) 10%, var(--x-surface));
+}
+.x-sel-opt[aria-selected="true"]{
+  background: color-mix(in oklab, var(--primary) 18%, var(--x-surface));
+}
+
+/* esconde o select nativo mas mantém no form */
+.select--replaced{
+  position:absolute !important; width:1px !important; height:1px !important;
+  opacity:0 !important; pointer-events:none !important; margin:0 !important;
 }

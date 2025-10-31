@@ -1,5 +1,6 @@
 # backend/main.py
 from __future__ import annotations
+
 import os, secrets, asyncio
 from typing import Any
 from datetime import datetime, timezone
@@ -18,15 +19,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 # Routers / Integrations
+from backend.routers import atendimento_conversas
 from backend.routers import internal_chat as internal_chat_router
 from backend.integrations.remove_instance import router as remove_instance_router
 from backend.integrations import remove_instance
 from backend.database import Base, engine, SessionLocal, get_db
 from backend import models
+from backend.websocket_manager import router as ws_router
 from backend.websocket_manager import conexoes_ativas
 from backend.routers import atendimentoia as atendimento_ia_router
 from backend.routers import atendimento_chat as atendimento_chat_router
-
+from backend.routers.clients_central import router as clients_central_router
 from backend.routers import (
     auth, usuarios, clientes, atendimento,
     cliente_onboarding, empresa, atendimento_busca
@@ -35,9 +38,9 @@ from backend.routers import dashboard as dashboard_router
 from backend.routers.colaboradores import router as colaboradores_router
 from backend.routers.permissoes import router as permissoes_router
 
-# ⚠️ Importa os DOIS routers de mídias com nomes distin
-from backend.routers.atendimento_midias import router as atendimento_midias_router  # rotas absolutas /api/atendimento/midias/...
-from backend.routers.midias import router as midias_router                          # prefix="/api/midias" (lista/upload/etc)
+# ⚠️ Importa os DOIS routers de mídias com nomes distintos
+from backend.routers.atendimento_midias import router as atendimento_midias_router  # /api/atendimento/midias/...
+from backend.routers.midias import router as midias_router                          # prefix="/api/midias"
 
 from backend.routers.atendimento_send import router as atendimento_send_router
 from backend.routers import departamentos as departamentos_router
@@ -65,6 +68,9 @@ def LOG(*args): print("[MAIN]", *args)
 
 load_dotenv()
 
+# === Versão do build (mude BUILD_ID a cada deploy; ou passe pelo ENV) ===
+BUILD_ID = os.getenv("BUILD_ID") or datetime.utcnow().strftime("%Y%m%d%H%M%S")
+
 # Caminhos do frontend
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -86,17 +92,22 @@ PROD_ORIGINS = ["https://zapschat.com.br", "https://www.zapschat.com.br"]
 ALLOW_ORIGINS = DEV_ORIGINS if ENV == "dev" else PROD_ORIGINS
 
 # Cookies / CSRF
-COOKIE_SECURE       = (os.getenv("COOKIE_SECURE", "false").lower() in ("1","true","yes","on"))
-COOKIE_SAMESITE     = (os.getenv("COOKIE_SAMESITE", "lax").lower())
+# Obs.: para os cookies de sessão (login) já usamos lógica automática no auth.py.
+# Aqui mantemos apenas VARs de CSRF e nome do cookie de sessão para o gate.
+ACCESS_COOKIE_NAME = os.getenv("ACCESS_COOKIE_NAME", "access_token")
+COOKIE_SAMESITE     = (os.getenv("COOKIE_SAMESITE", "lax").lower())  # "lax" | "strict" | "none"
 CSRF_COOKIE_NAME    = os.getenv("CSRF_COOKIE_NAME", "csrf_token")
 CSRF_COOKIE_PATH    = os.getenv("CSRF_COOKIE_PATH", "/api/auth/refresh")
 CSRF_COOKIE_MAX_AGE = int(os.getenv("CSRF_COOKIE_MAX_AGE", str(60*60*24*30)))
 
-ACCESS_COOKIE_NAME = os.getenv("ACCESS_COOKIE_NAME", "access_token")
-
 # Trusted hosts (Traefik/EasyPanel já define Host; mantenha localhost p/ dev)
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS",
                           "localhost,127.0.0.1,zapschat.com.br,www.zapschat.com.br").split(",")
+
+def _is_https(request: Request) -> bool:
+    """Detecta HTTPS atrás de proxy (Traefik/Nginx/EasyPanel) ou direto."""
+    proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "").lower()
+    return proto == "https"
 
 # =======================================
 # FastAPI app
@@ -118,7 +129,7 @@ app.add_middleware(
         "Authorization","Content-Type","X-CSRF-Token",
         "X-Empresa-Id",
     ],
-    expose_headers=["Retry-After"],
+    expose_headers=["Retry-After", "X-Auth-Gate"],
 )
 
 # Cookie de CSRF (double-submit) só no /api/auth/refresh
@@ -129,11 +140,12 @@ async def ensure_csrf_cookie(request: Request, call_next):
     resp: StarletteResponse = await call_next(request)
     if needs_csrf and not has_cookie:
         token = secrets.token_urlsafe(32)
+        # Secure = True somente se for HTTPS (auto)
         resp.set_cookie(
             key=CSRF_COOKIE_NAME, value=token,
             httponly=False,  # JS lê para enviar no header
-            secure=COOKIE_SECURE,
-            samesite=COOKIE_SAMESITE,
+            secure=_is_https(request),
+            samesite=("none" if COOKIE_SAMESITE == "none" else "lax"),
             max_age=CSRF_COOKIE_MAX_AGE,
             path=CSRF_COOKIE_PATH,
         )
@@ -144,22 +156,42 @@ async def ensure_csrf_cookie(request: Request, call_next):
     resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     return resp
 
+# ✅ Auto-redirect do /login quando já autenticado
+@app.middleware("http")
+async def login_autoredirect(request: Request, call_next):
+    p = request.url.path
+    if p in ("/login", "/login.html"):
+        token = request.cookies.get(ACCESS_COOKIE_NAME)
+        emp   = request.cookies.get("empresa_id") or request.cookies.get("EMPRESA_ID")
+        if token and emp:
+            next_url = request.query_params.get("next") or "/dashboard"
+            return RedirectResponse(url=next_url, status_code=302)
+    return await call_next(request)
+
 # =======================================
 # BLOQUEIO de acesso direto a /frontend/*
 # (bloqueia HTML/partials para anônimos; libera JS/CSS/img)
+# ✅ Allowlist para parciais públicos usados por login/boot
 # =======================================
+PUBLIC_FRONTEND_PARTIALS = {
+    "/frontend/partials/loading.html",
+    "/frontend/partials/head-base.html",
+}
+
 @app.middleware("http")
 async def block_direct_frontend(request: Request, call_next):
     p = request.url.path
     if p.startswith("/frontend/"):
-        is_html = p.endswith(".html") or "/partials/" in p
-        if is_html:
+        is_html_like = p.endswith(".html") or "/partials/" in p
+        if is_html_like and (p not in PUBLIC_FRONTEND_PARTIALS):
             token = request.cookies.get(ACCESS_COOKIE_NAME)
             empresa_cookie = request.cookies.get("empresa_id") or request.cookies.get("EMPRESA_ID")
             if token and empresa_cookie:
                 return await call_next(request)
             next_url = p + (("?" + request.url.query) if request.url.query else "")
-            return RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
+            resp = RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
+            resp.headers["X-Auth-Gate"] = "missing-cookie-frontend"
+            return resp
         return await call_next(request)
     return await call_next(request)
 
@@ -213,6 +245,7 @@ def _is_public(path: str) -> bool:
         "/favicon", "/robots.txt", "/manifest",
         "/ws",
         "/healthz", "/ping",
+        "/version.json",
     )
     if path in PUBLIC_HTML_PATHS:
         return True
@@ -250,7 +283,9 @@ async def auth_html_gate(request: Request, call_next):
     empresa_cookie = request.cookies.get("empresa_id") or request.cookies.get("EMPRESA_ID")
     if not (token and empresa_cookie):
         next_url = path + (("?" + request.url.query) if request.url.query else "")
-        return RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
+        resp = RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
+        resp.headers["X-Auth-Gate"] = "missing-cookie"
+        return resp
 
     # checagem de permissão por página (se houver)
     norm = _norm_path_for_perm(path)
@@ -265,7 +300,9 @@ async def auth_html_gate(request: Request, call_next):
         payload = auth_router._decode_token(token)
     except HTTPException:
         next_url = path + (("?" + request.url.query) if request.url.query else "")
-        return RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
+        resp = RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
+        resp.headers["X-Auth-Gate"] = "bad-token"
+        return resp
 
     sub = payload.get("sub")
     role = (payload.get("role") or "").lower()
@@ -313,13 +350,13 @@ async def auth_html_gate(request: Request, call_next):
 app.include_router(auth.router, prefix="/api")
 app.include_router(usuarios.router, prefix="/api", tags=["Usuarios"])
 app.include_router(clientes.router, prefix="/api", tags=["Clientes"])
-
+app.include_router(atendimento_conversas.router, prefix="/api")
 # Atendimento principal
 app.include_router(atendimento.router, prefix="/api/atendimento", tags=["Atendimento"])
 
 # ✅ Router REST específico do chat (conversas/mensagens)
 app.include_router(atendimento_chat_router.router, prefix="/api/atendimento", tags=["Atendimento – Chat"])
-
+app.include_router(ws_router)
 app.include_router(cliente_onboarding.router,   prefix="/api/onboarding", tags=["Onboarding"])
 app.include_router(empresa.router, tags=["Empresas"])
 app.include_router(atendimento_busca.router, prefix="/api", tags=["Busca"])
@@ -336,6 +373,7 @@ app.include_router(dashboard_router.router, prefix="/api", tags=["Dashboard"])
 app.include_router(chatbot_config_router.router)
 app.include_router(remove_instance_router, prefix="/api")
 app.include_router(internal_chat_router.router)
+app.include_router(clients_central_router)
 
 # =======================================
 # uploads públicos + arquivos estáticos
@@ -392,6 +430,12 @@ def robots():
         return HTMLResponse("User-agent: *\nDisallow: /\n", media_type="text/plain")
     return HTMLResponse("User-agent: *\nAllow: /\nSitemap: https://zapschat.com.br/sitemap.xml\n", media_type="text/plain")
 
+# === Versão do build (cache-buster) ===
+@app.get("/version.json")
+def version_json():
+    # no-store garante que o browser SEMPRE consulte o servidor
+    return JSONResponse({"build": BUILD_ID}, headers={"Cache-Control": "no-store"})
+
 # =======================================
 # Rotas de mídia (binário direto)
 # =======================================
@@ -410,40 +454,6 @@ def serve_media_bin(midia_id: int, db: Session = Depends(get_db)):
             "Accept-Ranges": "bytes",
         },
     )
-
-# =======================================
-# WebSockets internos
-# =======================================
-@app.websocket("/ws/emp:{empresa_id}")
-async def ws_empresa(websocket: WebSocket, empresa_id: int):
-    group = f"emp:{empresa_id}"
-    await conexoes_ativas.connect(websocket, group)
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        pass
-    finally:
-        await conexoes_ativas.disconnect(websocket, group)
-
-@app.websocket("/ws/inst:{inst_id}")
-async def instancia_ws(websocket: WebSocket, inst_id: str):
-    group = f"inst:{inst_id}"
-    await conexoes_ativas.connect(websocket, group)
-
-    # força QR assim que o WS da instância abre
-    try:
-        asyncio.create_task(force_qr_for_instance(inst_id))
-    except Exception as e:
-        print(f"[QR WS] falha ao acionar force_qr_now_async: {e}")
-
-    try:
-        while True:
-            _ = await websocket.receive_text()
-    except WebSocketDisconnect:
-        pass
-    finally:
-        await conexoes_ativas.disconnect(websocket, group)
 
 @app.get("/api/env/evolution")
 def evolution_env():
@@ -535,8 +545,9 @@ async def _start_integrations():
     app.state.rabbit_task = rabbit_task
     app.state.rabbit_stop = rabbit_stop
 
-    evo_ret = start_evo_ws_listener(loop, HANDLERS, EvoEvent)
-    if isinstance(evo_ret, tuple) and len(evo_ret) == 2:
+    # 🔹 AGUARDA o listener do Evolution (não bloqueia: ele retorna (task, stop))
+    evo_ret = await start_evo_ws_listener(loop, HANDLERS, EvoEvent)
+    if isinstance(evo_ret, tuple) and len(evo_ret) == 2 and evo_ret[0] is not None:
         app.state.evo_task, app.state.evo_stop = evo_ret
 
     LOG("[STARTUP] RabbitMQ consumer + Evo WS listener ligados.")
@@ -580,6 +591,8 @@ async def _stop_integrations():
 # =======================================
 @app.get("/frontend/partials/{path:path}")
 def partial(path: str):
+    # ⚠️ Se o arquivo estiver na allowlist PUBLIC_FRONTEND_PARTIALS,
+    # o middleware já permitiu o acesso sem cookie.
     return FileResponse(
         FRONTEND_DIR / "partials" / path,
         media_type="text/html; charset=utf-8"

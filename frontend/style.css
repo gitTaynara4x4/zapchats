@@ -1,0 +1,249 @@
+/* ---------------------------------------------------------
+   style.css – WhatsApp-like
+   Não requer Tailwind build, é puro CSS.
+---------------------------------------------------------- */
+:root{
+  --wp-green:#dcf8c6;     /* bolha do atendente */
+  --wp-blue-chip:#e1f2ff; /* separador de data */
+  --wp-bg:#ece5dd;        /* fundo clássico do WhatsApp */
+  --wp-gray:#e5e7eb;
+  --wp-dark:#6b7280;
+}
+
+body{
+  margin:0;
+  font-family:Helvetica,Arial,sans-serif;
+  background:#f0f2f5;
+  overflow:hidden;
+}
+
+/* --------------------------------------------- LISTA DE CHATS */
+.chat{
+  display:flex;align-items:center;gap:12px;
+  padding:10px 14px;border-radius:8px;cursor:pointer
+}
+.chat:hover      { background:rgba(0,0,0,.05) }
+.chat.active,
+li.bg-gray-100   { background:#f0f2f5 }       /* destaque linha ativa */
+
+.avatar{
+  width:40px;height:40px;flex-shrink:0;
+  border-radius:50%;object-fit:cover;
+  background:#8ed181;color:#fff;font-size:15px;
+  display:flex;align-items:center;justify-content:center;
+}
+
+.chat-info{flex:1;min-width:0}
+.chat-name{
+  font-weight:600;font-size:14px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.chat-last{
+  font-size:13px;color:var(--wp-dark);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.chat-extra{text-align:right}
+.chat-time{font-size:11px;color:var(--wp-dark)}
+.badge{
+  margin-top:4px;display:inline-block;
+  min-width:18px;height:18px;background:#25d366;color:#fff;
+  font-size:11px;font-weight:600;line-height:18px;text-align:center;
+  border-radius:9px;
+}
+
+/* --------------------------------------------- CONVERSA */
+#historico{
+  flex:1;display:flex;flex-direction:column;overflow-y:auto;
+  background:url("https://i.imgur.com/4Y0aEhm.png") repeat;
+}
+*::-webkit-scrollbar{width:6px;height:6px}
+*::-webkit-scrollbar-thumb{background:#bfbfbf;border-radius:3px}
+
+/* ⭐ LINHA DE MENSAGEM -------------------------------------------------- */
+.msg-row{
+  display:flex;
+  margin-bottom:6px;                   /* 6 px abaixo de cada linha */
+  line-height:1.32;font-size:14px;
+}
+/* evita colapso com a margem da linha anterior → total 12 px de respiro */
+.msg-row + .msg-row{ margin-top:6px }
+
+.msg-in { justify-content:flex-start }
+.msg-out{ justify-content:flex-end }
+
+/* ⭐ BOLHA -------------------------------------------------------------- */
+.bubble{
+  position:relative;
+  padding:8px 6px 6px 8px;
+  border-radius:8px;
+  max-width:75%;
+  word-break:break-word;
+  box-shadow:0 1px .5px rgba(0,0,0,.13);
+}
+.msg-in  .bubble{ background:#fff;color:#000 }
+.msg-out .bubble{ background:var(--wp-green);color:#000 }
+
+.bubble .time{
+  font-size:11px;color:#667781;
+  margin-left:6px;
+}
+
+/* rabinhos */
+.msg-in .bubble::after,
+.msg-out .bubble::after{
+  content:"";position:absolute;width:0;height:0;top:10px;border-style:solid
+}
+.msg-in .bubble::after{
+  left:-6px;border-width:6px 6px 6px 0;
+  border-color:transparent #fff transparent transparent;
+  filter:drop-shadow(-1px 0 0 rgba(0,0,0,.06));
+}
+.msg-out .bubble::after{
+  right:-6px;border-width:6px 0 6px 6px;
+  border-color:transparent transparent transparent var(--wp-green);
+}
+
+/* ⭐ SEPARADOR DE DATA -------------------------------------------------- */
+.date-chip{
+  align-self:center;
+  background:var(--wp-blue-chip);
+  color:#2a3942;
+  font-size:11px;
+  padding:2px 8px;
+  border-radius:6px;
+  margin:12px 0;
+}
+
+/* --------------------------------------------- INPUT */
+#bar{display:flex;padding:10px;background:#f7f7f7;border-top:1px solid #d1d7db}
+#mensagem{
+  flex:1;border:none;border-radius:20px;padding:9px 14px;font-size:14px;outline:none
+}
+#mensagem:focus{box-shadow:0 0 0 2px #25d36644}
+#btn-enviar{
+  margin-left:8px;background:#25d366;border:none;color:#fff;font-size:14px;
+  font-weight:600;border-radius:20px;padding:0 24px;cursor:pointer
+}
+#btn-enviar:hover{background:#20bd59}
+
+/* ==========================================================
+   Auth page (Login / Cadastrar)
+   Cole ao final do style.css – puro CSS, sem Tailwind
+   ========================================================== */
+
+/* Fundo degradê da página de autenticação */
+.auth-bg {
+  background: linear-gradient(180deg, #002142, #0f1f3a);
+}
+
+/* Container central transparente */
+.auth-container {
+  max-width: 400px;
+  margin: 4rem auto;
+  background: rgba(255,255,255,0.9);
+  border-radius: 1rem;
+  padding: 2rem;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+}
+
+/* Logo */
+.auth-logo {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+.auth-logo img {
+  height: 48px;
+}
+
+/* Abas Entrar / Cadastrar */
+.auth-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.auth-tabs button {
+  background: none;
+  border: none;
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  color: #555;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.auth-tabs button.active {
+  color: #002142;
+  border-color: #1e88e5;
+}
+
+/* Formulários */
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.auth-form.hidden {
+  display: none;
+}
+.form-group label {
+  font-weight: 500;
+  color: #333;
+}
+.form-group input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid #ccc;
+  border-radius: 0.5rem;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+.form-group input:focus {
+  border-color: #1e88e5;
+}
+
+/* Footer do form (lembre-me / esqueci a senha) */
+.form-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.875rem;
+  color: #555;
+}
+.form-footer a {
+  color: #1e88e5;
+  text-decoration: none;
+}
+.form-footer a:hover {
+  text-decoration: underline;
+}
+
+/* Botões */
+.btn {
+  padding: 0.75rem;
+  border: none;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-primary {
+  background-color: #1e88e5;
+  color: white;
+}
+.btn-primary:hover {
+  background-color: #1565c0;
+}
+.btn-success {
+  background-color: #43a047;
+  color: white;
+}
+.btn-success:hover {
+  background-color: #2e7d32;
+}
+
+/* Mensagem de erro */
+.form-error {
+  color: #d32f2f;
+  font-size: 0.875rem;
+  text-align: center;
+}

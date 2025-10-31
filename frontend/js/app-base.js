@@ -362,3 +362,21 @@
   setTimeout(markShellReady, 2500);
 
 })();
+
+// === Guard DevTools (carregar só fora do /login) ============================
+(function(){
+  try {
+    var p = (location.pathname || '').toLowerCase();
+    if (p === '/login' || p === '/login.html') return;
+
+    // Evita múltiplas injeções
+    if (document.getElementById('__guard_devtools_js')) return;
+
+    var v = window.APP_BUILD || localStorage.getItem('APP_BUILD') || 'dev';
+    var s = document.createElement('script');
+    s.id = '__guard_devtools_js';
+    s.src = '/frontend/assets/guard-devtools.js?_v=' + encodeURIComponent(v);
+    s.defer = true;
+    document.head.appendChild(s);
+  } catch {}
+})();

@@ -1,6 +1,7 @@
 (() => {
-  // ===== Helpers de rede/format =====
+  // ===== Helpers =====
   const $ = (sel) => document.querySelector(sel);
+
   async function j(url, init){
     const r = await fetch(url, { credentials:'include', ...(init||{}) });
     const ct = (r.headers.get('content-type')||'').toLowerCase();
@@ -9,6 +10,7 @@
     if (ct.includes('application/json')) return JSON.parse(txt);
     return { ok:r.ok, status:r.status, raw:txt };
   }
+
   const fmtTimeShort = (iso)=>{
     if (!iso) return '—';
     const d=new Date(iso), now=new Date();
@@ -19,11 +21,27 @@
     const timeStr = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
     return `${dateStr} ${timeStr}`;
   };
+
   const esc = (s)=> (s||'').toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[m]));
   const debounce = (fn,ms)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); } };
   const scrollBottom = ()=>{ const el = $('#msgsScroll'); if (el) el.scrollTop = el.scrollHeight; };
 
-  // ===== DOM refs =====
+  // ===== Toast (usa .toaststack/.toast do seu CSS) =====
+  function toast(msg, type='ok', ms=2600){
+    let stack = document.querySelector('.toaststack');
+    if (!stack) {
+      stack = document.createElement('div');
+      stack.className = 'toaststack';
+      document.body.appendChild(stack);
+    }
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.textContent = msg;
+    stack.appendChild(el);
+    setTimeout(()=>{ el.classList.add('hide'); setTimeout(()=>el.remove(), 240); }, ms);
+  }
+
+  // ===== DOM =====
   const listaEl          = $('#listaConversas');
   const msgsEl           = $('#msgsScroll');
   const peerNameEl       = $('#peerName');
@@ -38,12 +56,19 @@
 
   // ===== Estado =====
   let ME_ID = null;
+  let EMPRESA_ID = null;
   let ACTIVE = null;
-  const CONVS = new Map();
-  const MSGS  = new Map();
+
+  const CONVS = new Map(); // thread_id -> { thread_id, titulo, participantes, last_texto, last_created_at, unread_count }
+  const MSGS  = new Map(); // thread_id -> [{id, autor_id, texto, titulo, created_at, kind}]
   const MUTED  = new Set(JSON.parse(localStorage.getItem('muted_threads')  || '[]'));
   const PINNED = new Set(JSON.parse(localStorage.getItem('pinned_threads') || '[]'));
   const saveSet = (k,set)=> localStorage.setItem(k, JSON.stringify([...set]));
+
+  // ===== WS =====
+  let ws = null;
+  let wsTries = 0;
+  let wsPing = null;
 
   function trySetMeIdOnce(val){
     if (val == null) return;
@@ -52,12 +77,138 @@
       if (ACTIVE) drawMsgs(ACTIVE);
     }
   }
+  function isMsgMine(m){ return ME_ID != null && Number(m.autor_id) === Number(ME_ID); }
 
-  // tenta resolver ME_ID
-  try { trySetMeIdOnce((window.AUTH && (window.AUTH.id_colab || window.AUTH.id)) || null); } catch {}
-  if (ME_ID == null) trySetMeIdOnce(Number(localStorage.getItem('colab_id') || localStorage.getItem('user_id')) || null);
+  function wsUrl(empId){
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${proto}://${location.host}/api/internal-chat/ws/${empId}`;
+  }
 
-  // ===== UI =====
+  function openWS(empId){
+    if (!empId) return;
+    try { if (ws) { ws.close(); ws = null; } } catch {}
+    const url = wsUrl(empId);
+    ws = new WebSocket(url);
+
+    ws.addEventListener('open', () => {
+      wsTries = 0;
+      clearInterval(wsPing);
+      wsPing = setInterval(() => { try { ws?.readyState === 1 && ws.send('ping'); } catch {} }, 25000);
+    });
+
+    ws.addEventListener('message', (ev) => {
+      let data = null;
+      try { data = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data; }
+      catch { return; }
+      if (!data || typeof data !== 'object') return;
+      handleWS(data);
+    });
+
+    ws.addEventListener('close', () => {
+      clearInterval(wsPing);
+      wsPing = null;
+      const t = Math.min(30000, 1000 * Math.pow(2, wsTries++)) + Math.floor(Math.random()*500);
+      setTimeout(() => openWS(empId), t);
+    });
+
+    ws.addEventListener('error', () => { try { ws?.close(); } catch {} });
+  }
+
+  function handleWS(msg){
+    switch (msg.type) {
+      case 'thread.created':       onThreadCreated(msg); break;
+      case 'message.created':      onMessageCreated(msg); break;
+      case 'thread.renamed':       onThreadRenamed(msg); break;
+      case 'participants.updated': onParticipantsUpdated(msg); break;
+      case 'read.updated':         break;
+      case 'message.deleted':      onMessageDeleted(msg); break;
+      default: break;
+    }
+  }
+
+  function ensureMsgsArray(tid){
+    if (!MSGS.has(tid)) MSGS.set(tid, []);
+    return MSGS.get(tid);
+  }
+
+  function bumpConvMeta(tid, partial){
+    const cur = CONVS.get(tid) || { thread_id: tid, titulo: 'Conversa', unread_count: 0 };
+    const next = { ...cur, ...partial };
+    CONVS.set(tid, next);
+    drawConvs();
+  }
+
+  function onThreadCreated(e){
+    const { thread_id, titulo, participantes } = e;
+    if (!CONVS.has(thread_id)) {
+      CONVS.set(thread_id, {
+        thread_id, titulo: titulo || 'Conversa', participantes: participantes || [],
+        last_texto: '', last_created_at: null, unread_count: 0
+      });
+    } else {
+      const c = CONVS.get(thread_id);
+      c.titulo = titulo || c.titulo;
+      c.participantes = participantes || c.participantes || [];
+      CONVS.set(thread_id, c);
+    }
+    drawConvs();
+  }
+  function onThreadRenamed(e){
+    const { thread_id, titulo } = e;
+    if (!CONVS.has(thread_id)) return;
+    const c = CONVS.get(thread_id);
+    c.titulo = titulo || c.titulo;
+    CONVS.set(thread_id, c);
+    if (ACTIVE === thread_id && peerNameEl) peerNameEl.textContent = c.titulo || 'Conversa';
+    drawConvs();
+  }
+  function onParticipantsUpdated(e){
+    const { thread_id, participantes } = e;
+    const c = CONVS.get(thread_id);
+    if (c) {
+      c.participantes = participantes || [];
+      CONVS.set(thread_id, c);
+    }
+    if (ME_ID != null && !(participantes || []).includes(ME_ID)) {
+      CONVS.delete(thread_id);
+      MSGS.delete(thread_id);
+      if (ACTIVE === thread_id) {
+        ACTIVE = null;
+        if (msgsEl) msgsEl.innerHTML = '<div class="empty" id="emptyState">Selecione uma conversa para começar.</div>';
+      }
+    }
+    drawConvs();
+  }
+  function onMessageDeleted(e){
+    const { thread_id, id } = e;
+    if (ACTIVE === thread_id) {
+      const bubble = msgsEl?.querySelector(`.msg[data-id="${id}"]`);
+      if (bubble) bubble.remove();
+    }
+  }
+  function onMessageCreated(e){
+    const { thread_id, id, autor_id, texto, created_at } = e;
+    const arr = ensureMsgsArray(thread_id);
+    if (!arr.some(x => Number(x.id) === Number(id))) {
+      const m = { id, autor_id, texto, created_at, kind:'msg' };
+      arr.push(m);
+      if (ACTIVE === thread_id) {
+        appendMsgBubble(m);
+        $('#emptyState')?.remove?.();
+        scrollBottom();
+        markAsRead(thread_id);
+        const cc = CONVS.get(thread_id);
+        if (cc) { cc.unread_count = 0; CONVS.set(thread_id, cc); }
+      } else {
+        const cc = CONVS.get(thread_id) || { thread_id, titulo: 'Conversa', unread_count: 0 };
+        if (!isMsgMine(m)) cc.unread_count = Number(cc.unread_count || 0) + 1;
+        CONVS.set(thread_id, cc);
+      }
+    }
+    bumpConvMeta(thread_id, { last_texto: texto || '', last_created_at: created_at || new Date().toISOString() });
+  }
+
+  // ===== UI: lista e mensagens =====
   function drawConvs(listSrc){
     if (!listaEl) return;
     let arr = listSrc || Array.from(CONVS.values());
@@ -93,23 +244,19 @@
             border:1px solid var(--border); border-radius:8px; background:var(--card2); color:var(--fg); cursor:pointer; line-height:0;">⋯</button>
         </div>`;
 
-      // seleção
       li.addEventListener('click', (ev)=>{
         if (ev.target && ev.target.closest('.conv-opts')) return;
         selectThread(c.thread_id);
       });
 
-      // menu rápido
       li.querySelector('.conv-opts')?.addEventListener('click', (ev)=>{
         ev.stopPropagation();
         const rect = ev.currentTarget.getBoundingClientRect();
         openConvMenu(c.thread_id, rect.left, rect.bottom + 6);
       });
 
-      // clique direito
       li.addEventListener('contextmenu', (ev)=>{ ev.preventDefault(); openConvMenu(c.thread_id, ev.pageX, ev.pageY); });
 
-      // long press
       let pressTimer = null;
       li.addEventListener('pointerdown', (ev)=>{
         if (ev.button !== 0) return;
@@ -124,14 +271,13 @@
     if (totalConversasEl) totalConversasEl.textContent = arr.length;
   }
 
-  function isMsgMine(m){ return ME_ID != null && Number(m.autor_id) === Number(ME_ID); }
-
   function appendMsgBubble(m){
     if (!msgsEl) return;
     const me = isMsgMine(m);
     const wrap = document.createElement('div');
     wrap.className = 'msg' + (me ? ' me' : '');
     wrap.dataset.id = m.id;
+
     const text = (m.texto ?? m.titulo ?? '').toString();
     wrap.innerHTML = `
       <div class="bubble">
@@ -160,7 +306,7 @@
     scrollBottom();
   }
 
-  // ===== Menu contexto =====
+  // ===== Menu contexto da conversa =====
   let openMenuEl = null;
   function closeMenu(){ if(openMenuEl){ openMenuEl.remove(); openMenuEl=null; document.removeEventListener('click', onDocClickClose, true); document.removeEventListener('keydown', onEscClose, true); } }
   function onDocClickClose(e){ if (!openMenuEl) return; if (!openMenuEl.contains(e.target)) closeMenu(); }
@@ -207,7 +353,7 @@
     el.appendChild(mkBtn('Abrir', ()=> selectThread(tid)));
     el.appendChild(mkBtn(muted ? 'Ativar som' : 'Silenciar', ()=>{ muted ? MUTED.delete(tid) : MUTED.add(tid); saveSet('muted_threads', MUTED); drawConvs(); }));
     el.appendChild(mkBtn(pinned ? 'Desafixar do topo' : 'Fixar no topo', ()=>{ pinned ? PINNED.delete(tid) : PINNED.add(tid); saveSet('pinned_threads', PINNED); drawConvs(); }));
-    el.appendChild(mkBtn('Marcar como lida', async ()=>{ await j(`/api/internal-chat/conversations/${tid}/read`, { method:'POST' }); const cc = CONVS.get(tid); if (cc) { cc.unread_count = 0; CONVS.set(tid, cc); drawConvs(); } }));
+    el.appendChild(mkBtn('Marcar como lida', async ()=>{ await markAsRead(tid); const cc = CONVS.get(tid); if (cc) { cc.unread_count = 0; CONVS.set(tid, cc); drawConvs(); } }));
     el.appendChild(mkBtn('Renomear', ()=> promptRename(tid)));
     el.appendChild(mkBtn('Apagar p/ mim (sair)', async ()=>{
       if (ME_ID == null) {
@@ -225,7 +371,7 @@
     setTimeout(()=>{ document.addEventListener('click', onDocClickClose, true); document.addEventListener('keydown', onEscClose, true); }, 0);
   }
 
-  // ===== Ações =====
+  // ===== Ações de dados =====
   async function loadConvs(query){
     const q = query ? `&q=${encodeURIComponent(query)}` : '';
     const rows = await j(`/api/internal-chat/conversations?limit=50&offset=0${q}`);
@@ -238,7 +384,7 @@
     ACTIVE = tid;
     listaEl?.querySelectorAll('.conv').forEach(li => li.setAttribute('aria-selected', li.dataset.tid === tid ? 'true':'false'));
     const c = CONVS.get(tid);
-    if (peerNameEl) peerNameEl.textContent = (c && c.titulo) || 'Conversa';
+    if (peerNameEl)  peerNameEl.textContent  = (c && c.titulo) || 'Conversa';
     if (peerStatusEl) peerStatusEl.textContent = '—';
 
     const list = await j(`/api/internal-chat/conversations/${tid}/messages?limit=50`);
@@ -246,11 +392,15 @@
     MSGS.set(tid, asc);
     drawMsgs(tid);
 
-    await j(`/api/internal-chat/conversations/${tid}/read`, { method:'POST' });
+    await markAsRead(tid);
     const cc = CONVS.get(tid);
     if (cc) { cc.unread_count = 0; CONVS.set(tid, cc); drawConvs(); }
 
     document.body?.setAttribute('data-pane','chat');
+  }
+
+  async function markAsRead(tid){
+    try { await j(`/api/internal-chat/conversations/${tid}/read`, { method:'POST' }); } catch {}
   }
 
   async function sendActive(){
@@ -266,16 +416,150 @@
     }
   }
 
-  async function createChannelPromptFallback(){
-    const titulo = prompt('Nome da conversa:', 'Nova conversa');
-    if (!titulo) return;
-    const conv = await j('/api/internal-chat/conversations', {
-      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ titulo })
+  // ===== Utils de avatar =====
+  function getInitials(name){
+    const n = (name || '').trim().split(/\s+/).filter(Boolean);
+    if (n.length === 0) return '??';
+    if (n.length === 1) return n[0].slice(0,2).toUpperCase();
+    return (n[0][0] + n[n.length-1][0]).toUpperCase();
+  }
+
+  // ===== Modal: Nova conversa (com foto real) =====
+  function closeAnyModal(){
+    document.querySelectorAll('.modal-overlay').forEach(el => el.remove());
+  }
+
+  function buildNewChannelModal(colabs){
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.tabIndex = -1;
+
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = `
+      <header>Nova conversa</header>
+      <div class="content">
+        <p style="margin-bottom:.6rem">Escolha os participantes e, se quiser, defina um título.</p>
+        <label style="font-weight:600; display:block; margin:.25rem 0 .35rem">Título (opcional)</label>
+        <input type="text" id="nc-title" placeholder="Ex.: Suporte Nível 1" />
+        <div style="display:flex; align-items:center; gap:.5rem; margin:.8rem 0 .4rem">
+          <input id="nc-checkall" type="checkbox" />
+          <label for="nc-checkall" style="user-select:none; cursor:pointer">Selecionar todos</label>
+        </div>
+        <div class="search" role="search" style="margin:.35rem 0 .55rem">
+          <input id="nc-search" type="search" placeholder="Buscar colaborador…" aria-label="Buscar colaborador" />
+        </div>
+        <div id="nc-list" style="max-height:340px; overflow:auto; border:1px solid var(--border); border-radius:.5rem; padding:.2rem .2rem"></div>
+      </div>
+      <footer>
+        <button class="btn ghost" id="nc-cancel">Cancelar</button>
+        <button class="btn primary" id="nc-create">Criar conversa</button>
+      </footer>
+    `;
+    overlay.appendChild(modal);
+
+    // Fechar clicando fora ou ESC
+    overlay.addEventListener('click', (e)=>{ if (e.target === overlay) closeAnyModal(); });
+    document.addEventListener('keydown', escOnce);
+    function escOnce(ev){ if (ev.key === 'Escape') { closeAnyModal(); document.removeEventListener('keydown', escOnce); } }
+
+    const listEl = modal.querySelector('#nc-list');
+    const searchEl = modal.querySelector('#nc-search');
+    const checkAllEl = modal.querySelector('#nc-checkall');
+    const titleEl = modal.querySelector('#nc-title');
+
+    function renderList(filter=''){
+      listEl.innerHTML = '';
+      const f = filter.trim().toLowerCase();
+      const rows = !f ? colabs : colabs.filter(c => {
+        const n = (c.nome || c.name || c.nome_completo || '').toLowerCase();
+        const d = (c.setor_nome || c.departamento || c.depto || '').toLowerCase();
+        return n.includes(f) || d.includes(f);
+      });
+
+      rows.forEach(c => {
+        const id   = Number(c.id);
+        const nome = c.nome || c.name || c.nome_completo || ('Colaborador #' + id);
+        const dept = c.setor_nome || c.departamento || c.depto || '';
+        const ini  = getInitials(nome);
+        const avatarSrc = `/api/colaboradores/${id}/avatar`; // foto real do colaborador
+
+        const item = document.createElement('label');
+        item.style.display = 'grid';
+        item.style.gridTemplateColumns = '24px 28px 1fr';
+        item.style.alignItems = 'center';
+        item.style.gap = '.55rem';
+        item.style.padding = '.45rem .55rem';
+        item.style.borderBottom = '1px solid var(--border)';
+        item.style.cursor = 'pointer';
+
+        item.innerHTML = `
+          <input type="checkbox" data-id="${id}" />
+          <div class="ava" aria-hidden="true" style="
+              width:28px;height:28px;border-radius:999px;overflow:hidden;display:grid;place-items:center;
+              background:linear-gradient(135deg,#4f46e5,#22d3ee); color:#fff; font-weight:800; font-size:.8rem;">
+            <img src="${avatarSrc}" alt="" style="width:100%;height:100%;object-fit:cover;display:block"
+                 onload="if(!this.naturalWidth){this.onerror()}"
+                 onerror="this.remove(); this.nextElementSibling.style.display='grid';">
+            <div class="ava-fb" style="display:none;place-items:center;width:100%;height:100%;">${esc(ini)}</div>
+          </div>
+          <div style="min-width:0">
+            <div style="font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${esc(nome)}</div>
+            <div style="font-size:.86rem; color:var(--muted)">${esc(dept)}</div>
+          </div>
+        `;
+        listEl.appendChild(item);
+      });
+    }
+    renderList();
+
+    searchEl.addEventListener('input', debounce(() => renderList(searchEl.value||''), 180));
+    checkAllEl.addEventListener('change', ()=>{
+      listEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = checkAllEl.checked);
     });
-    await selectThread(conv.thread_id);
+
+    modal.querySelector('#nc-cancel').addEventListener('click', ()=> closeAnyModal());
+    modal.querySelector('#nc-create').addEventListener('click', async ()=>{
+      const ids = [...listEl.querySelectorAll('input[type="checkbox"]')].filter(cb => cb.checked).map(cb => Number(cb.dataset.id));
+      if (ids.length === 0) { toast('Selecione pelo menos 1 colaborador.', 'warn'); return; }
+      const titulo = (titleEl.value||'').trim() || undefined;
+      const body = titulo ? { titulo, participantes: ids } : { participantes: ids };
+      try{
+        const conv = await j('/api/internal-chat/conversations', {
+          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+        });
+        closeAnyModal();
+        toast('Conversa criada!', 'ok');
+        await selectThread(conv.thread_id);
+      }catch(e){
+        toast('Falha ao criar a conversa.', 'err');
+      }
+    });
+
+    document.body.appendChild(overlay);
+    titleEl.focus();
+  }
+
+  async function fetchColaboradores(){
+    // Usa o endpoint que você já tem
+    try {
+      const rows = await j('/api/colaboradores');
+      if (Array.isArray(rows)) return rows;
+    } catch {}
+    return [];
+  }
+
+  async function openNewChannelModal(){
+    const colabs = await fetchColaboradores();
+    if (!Array.isArray(colabs) || colabs.length === 0) {
+      toast('Não encontrei colaboradores para listar.', 'warn');
+      return;
+    }
+    buildNewChannelModal(colabs);
   }
 
   async function promptRename(tid){
+    // mantém prompt por enquanto (se quiser, converto pra mini-modal depois)
     const c = CONVS.get(tid);
     const novo = prompt('Renomear conversa para:', (c && c.titulo) || 'Conversa');
     if (!novo || !novo.trim()) return;
@@ -298,8 +582,8 @@
   btnAttach?.addEventListener('click', ()=>{ alert('Upload/anexo não implementado.'); });
   btnBackList?.addEventListener('click', ()=>{ document.body?.setAttribute('data-pane','list'); });
 
-  // (+) agora usa apenas prompt — sem modal
-  btnNewChannel?.addEventListener('click', createChannelPromptFallback);
+  // (+) MODAL com fotos reais
+  btnNewChannel?.addEventListener('click', openNewChannelModal);
 
   const doSearch = debounce(async () => {
     const q = (inpSearch?.value || '').trim();
@@ -313,17 +597,27 @@
     const density = localStorage.getItem('ui_density') || 'comfortable';
     document.body.classList.toggle('compact', density === 'compact');
 
-    try { const me = await j('/api/internal-chat/me'); trySetMeIdOnce(me?.colab_id); } catch {}
+    try {
+      const me = await j('/api/internal-chat/me');
+      trySetMeIdOnce(me?.colab_id);
+      if (me?.empresa_id) EMPRESA_ID = Number(me.empresa_id);
+    } catch {}
+
+    if (!EMPRESA_ID) {
+      const fromLS = Number(localStorage.getItem('empresa_id') || 0);
+      if (fromLS) EMPRESA_ID = fromLS;
+    }
+
+    if (EMPRESA_ID) openWS(EMPRESA_ID);
 
     try { await loadConvs(); } catch (e) { console.warn('Falha ao carregar conversas', e); }
 
-    // API interna opcional
     window.CHAT_INT = {
-      state(){ return { ACTIVE, CONVS, MSGS, ME_ID, MUTED:[...MUTED], PINNED:[...PINNED] }; },
+      state(){ return { ACTIVE, CONVS, MSGS, ME_ID, EMPRESA_ID, MUTED:[...MUTED], PINNED:[...PINNED] }; },
       selectThread,
-      createChannelPromptFallback,
-      promptRename,
+      openNewChannelModal,
       setMeId(v){ trySetMeIdOnce(v); },
+      _openWS: openWS
     };
   })();
 

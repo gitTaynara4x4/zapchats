@@ -17,7 +17,7 @@
     hide(){ if (window.PageLoading?.hide) PageLoading.hide(); else if (window.Loading?.hide) Loading.hide(); else if (window.ready) ready(); }
   };
 
-  // ✅ usa guardFetch se existir (melhor UX em 401/403)
+  // usa guardFetch se existir
   const authFetch = (url, opt = {}) => {
     const F = window.ZAuth?.guardFetch || window.ZAuth?.authFetch || fetch;
     const headers = Object.assign(
@@ -75,7 +75,7 @@
   // Whats (instâncias)
   let whatsBtn, whatsPanel, whatsSearch, whatsListEl, whatsChipsEl;
 
-  // ===== ÍCONES SVG (currentColor) =====
+  // ===== ÍCONES SVG =====
   const SVGS = {
     edit:  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 256 256"><path d="M225.9,74.78,181.21,30.09a14,14,0,0,0-19.8,0L38.1,153.41a13.94,13.94,0,0,0-4.1,9.9V208a14,14,0,0,0,14,14H92.69a13.94,13.94,0,0,0,9.9-4.1L225.9,94.58a14,14,0,0,0,0-19.8ZM94.1,209.41a2,2,0,0,1-1.41.59H48a2,2,0,0,1-2-2V163.31a2,2,0,0,1,.59-1.41L136,72.48,183.51,120ZM217.41,86.1,192,111.51,144.49,64,169.9,38.58a2,2,0,0,1,2.83,0l44.68,44.69a2,2,0,0,1,0,2.83Z"/></svg>',
     add:   '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 256 256"><path d="M222,128a6,6,0,0,1-6,6H134v82a6,6,0,0,1-12,0V134H40a6,6,0,0,1,0-12h82V40a6,6,0,0,1,12,0v82h82A6,6,0,0,1,222,128Z"/></svg>',
@@ -88,14 +88,14 @@
     q: '',
     editing: null,
     expanded: new Set(),
-    view: 'org',          // vai ser ajustado no init antes de carregar
+    view: 'org',
     companyName: null,
     zoom: 1, tx: 0, ty: 0, _pzInit: false,
 
     // Whats (instâncias)
-    instancias: [],           // [{id, nome, numero}]
+    instancias: [],
     instanciasLoaded: false,
-    whatsSelected: new Set(), // Set<number>
+    whatsSelected: new Set(),
   };
 
   const PZ = { MIN: 0.5, MAX: 2.5, STEP: 1.2 };
@@ -144,7 +144,6 @@
       const nomeRaw   = r.nome ?? r.name ?? r.titulo ?? r.label ?? (path[path.length-1] || '');
       const nome      = String(nomeRaw).trim();
 
-      // Whats: aceita vários formatos e normaliza para array numérico
       let whats = r.whatsapp_instancias ?? r.whatsapps ?? r.whats_ids ?? r.instances ?? [];
       if (!Array.isArray(whats)) whats = [whats];
       const whatsapp_instancias = whats.map(n => Number(n)).filter(Number.isFinite);
@@ -186,7 +185,6 @@
   }
 
   function normalizeInstancias(arr){
-    // desembrulha respostas {instancias:[]}, {results:[]}, {data:[]}, {items:[]}
     const raw = Array.isArray(arr) ? arr
               : Array.isArray(arr?.instancias) ? arr.instancias
               : Array.isArray(arr?.results)    ? arr.results
@@ -195,25 +193,16 @@
               : [];
 
     return raw.map(i=>{
-      // id pode vir com vários nomes
-      const id =
-        Number(
-          i.id ?? i.instance_id ?? i.instancia_id ?? i.ID ?? i.pk ?? i.whatsapp_id
-        );
-
-      // nome pode vir como "apelido", "instance_name", "slug", etc.
+      const id = Number(i.id ?? i.instance_id ?? i.instancia_id ?? i.ID ?? i.pk ?? i.whatsapp_id);
       const slugLike = String(i.instance_name ?? i.slug ?? '').trim();
       const preferido =
         i.apelido ?? i.nome ?? i.name ?? i.alias ?? i.label ??
         i.sessionName ?? i.instance ?? i.titulo ?? slugLike;
-
       const nome = (preferido ? String(preferido).trim() : '') || (id ? `Instância ${id}` : '');
-      // número também muda de chave em APIs diferentes
       const numero = String(
         i.numero_instancia ?? i.numero ?? i.number ?? i.phone ??
         i.msisdn ?? i.whatsapp ?? ''
       ).replace(/[^\d+]/g,'');
-
       return (Number.isFinite(id) || nome) ? { id, nome, numero } : null;
     }).filter(Boolean);
   }
@@ -223,8 +212,6 @@
     Loader.show('Carregando instâncias...');
     try{
       let data = null;
-
-      // PRIORIDADE: endpoint por empresa
       if (EMPRESA_ID){
         try{
           data = await apiGet(`/api/empresas/${EMPRESA_ID}/whatsapp`);
@@ -233,8 +220,6 @@
           else if (data && Array.isArray(data.data))    data = data.data;
         }catch(e){}
       }
-
-      // Fallbacks
       if (!Array.isArray(data) || data.length === 0){
         try{ data = await apiGet('/api/whatsapp/instancias'); }catch(e){}
       }
@@ -261,7 +246,6 @@
     }
   }
 
-  // Para editar: busca detalhes do depto se a lista de instâncias não veio no tree
   async function loadDeptoDetails(id){
     try{ return await apiGet(`/api/atendimento/clientes/departamentos/${id}`); }
     catch(_){ try{ return await apiGet(`/api/departamentos/${id}`); }
@@ -329,7 +313,6 @@
       const include = !q || (label || '').toLowerCase().includes(q) || hasMatchInSubtree(n, q);
       if (!include) return;
 
-      // 👉 no mobile: sempre expandido (sem toggle)
       const expanded = IS_MOBILE ? true : (state.expanded.has(n.id) || !!q);
 
       const tr = document.createElement('tr');
@@ -361,7 +344,6 @@
       `.trim();
       tbody.appendChild(tr);
 
-      // toggle só no desktop
       if (!IS_MOBILE){
         const twisty = tr.querySelector('.twisty');
         if (twisty && n.children.length){
@@ -437,7 +419,7 @@
     }
   }
 
-  // ===== Render — ORGANOGRAMA (desktop) =====
+  // ===== Render — ORGANOGRAMA =====
   let orgResizeObs = null;
   let wireRaf = 0;
 
@@ -469,6 +451,7 @@
     const inner = document.createElement('div');
     inner.className = 'org-inner';
 
+    // Raiz Empresa
     const rootLi = document.createElement('li');
     const rootCard = buildNodeCard({ id: 0, nome: state.companyName || 'Empresa', path: [], ativo:true }, true);
     rootLi.appendChild(rootCard);
@@ -537,19 +520,18 @@
     twist.type = 'button';
     twist.className = 'node-twisty' + ((n.children?.length) ? '' : ' is-leaf');
     twist.innerHTML = (n.children?.length ? '<i class="fa-solid fa-chevron-right" aria-hidden="true"></i>' : '');
-    twist.addEventListener('pointerdown', (ev)=>{ ev.stopPropagation(); });
 
-    if (!isRoot && state.expanded.has(n.id)) twist.classList.add('is-open');
-
-    if (!isRoot && n.children?.length){
-      twist.addEventListener('click', (ev)=>{
-        ev.stopPropagation();
-        const expanded = state.expanded.has(n.id);
-        if (expanded) state.expanded.delete(n.id);
-        else state.expanded.add(n.id);
-        renderOrg();
-      });
-    }
+    // só a setinha abre/fecha — clique perto não deve fazer nada
+    twist.addEventListener('click', (ev)=>{
+      ev.stopPropagation();
+      if (!n.children?.length) return;
+      const expanded = state.expanded.has(n.id);
+      if (expanded) state.expanded.delete(n.id);
+      else state.expanded.add(n.id);
+      renderOrg();
+    });
+    // bloquear “pointerdown” para não iniciar pan ao clicar na seta
+    twist.addEventListener('pointerdown', ev => ev.stopPropagation());
 
     head.appendChild(title); head.appendChild(twist);
 
@@ -683,7 +665,7 @@
     const INTERACTIVE = '.node-twisty, .node-actions .btn, .td-actions .btn, button, [role="button"], a, input, select, textarea';
 
     const onPointerDown = (e)=>{
-      if (e.target?.closest?.(INTERACTIVE)) return;
+      if (e.target?.closest?.(INTERACTIVE)) return; // não pan em áreas interativas
       if (e.pointerType === 'mouse'){
         if (e.button !== 0) return;
         viewport.setPointerCapture?.(e.pointerId);
@@ -802,7 +784,6 @@
     modalTit.textContent = 'Novo departamento';
     modal.classList.add('is-new');
 
-    // Whats
     await loadInstanciasWhats();
     resetWhatsSelection([]);
 
@@ -827,7 +808,6 @@
     if (Array.isArray(item.whatsapp_instancias) && item.whatsapp_instancias.length){
       sel = item.whatsapp_instancias;
     }else{
-      // tenta puxar detalhes do depto
       try{
         const det = await loadDeptoDetails(item.id);
         let w = det?.whatsapp_instancias ?? det?.whatsapps ?? det?.whats_ids ?? det?.instances ?? [];
@@ -862,7 +842,7 @@
       parent_id: selParent.value ? Number(selParent.value) : null,
       codigo: (inpCodigo.value||'').trim() || null,
       ativo: !!chkAtivo.checked,
-      whatsapp_instancias: Array.from(state.whatsSelected) // mantém as instâncias selecionadas
+      whatsapp_instancias: Array.from(state.whatsSelected)
     };
 
     if (btnSalva) btnSalva.disabled = true;
@@ -984,12 +964,11 @@
       chip.innerHTML = `${escapeHtml(it?.nome || String(id))}${it?.numero?` <small style="opacity:.75">${escapeHtml(it.numero)}</small>`:''} <button type="button" aria-label="Remover" style="border:0;background:transparent;cursor:pointer;font-weight:900">×</button>`;
       chip.querySelector('button').addEventListener('click', ()=>{
         state.whatsSelected.delete(id);
-        // desmarca no dropdown pelo id (evita colisão por nome igual)
         const cb = whatsListEl?.querySelector(`input[type="checkbox"][data-id="${id}"]`);
         if (cb) cb.checked = false;
         renderWhatsChips();
         setWhatsButtonText();
-        renderWhatsList(); // para refletir checkboxes
+        renderWhatsList();
       });
       whatsChipsEl.appendChild(chip);
     });
@@ -1000,47 +979,32 @@
     if (open === undefined) open = !whatsPanel.classList.contains('open');
 
     whatsPanel.classList.toggle('open', open);
-    // garante que aparece mesmo sem CSS
     whatsPanel.style.display = open ? 'block' : 'none';
-
-    // se abriu, (re)renderiza a lista (caso tenha sido filtrada antes)
     if (open) renderWhatsList();
-
     whatsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
 
   function bindWhats(){
-    // garante o posicionamento do dropdown
     const multi = $('#fi-whats .multi');
     if (multi && multi.style) multi.style.position = 'relative';
 
-    // 🔒 evita registrar mais de uma vez
     if (bindWhats._bound) return;
     bindWhats._bound = true;
 
-    // Abre/fecha ao clicar no botão (delegação global)
     document.addEventListener('click', (e) => {
       const btn = e.target.closest?.('#whats-btn');
       if (!btn) return;
-
-      // abre imediatamente
       toggleWhatsPanel();
-
-      // carrega em paralelo, sem travar o abrir
       if (!state.instanciasLoaded) {
         loadInstanciasWhats().catch(console.error);
       }
-
-      // foca a busca se abriu
       if (whatsPanel?.classList.contains('open')) {
         whatsSearch?.focus();
       }
     });
 
-    // Busca no dropdown
     whatsSearch?.addEventListener('input', debounce(renderWhatsList, 80));
 
-    // Fecha ao clicar fora / rolar / ESC / resize
     const ddCloseIfOutside = (e)=>{
       if (!whatsPanel?.classList.contains('open')) return;
       if (!e.target.closest?.('#fi-whats')) toggleWhatsPanel(false);
@@ -1122,7 +1086,6 @@
       }, 120);
     });
 
-    // FECHAMENTO extra do dropdown de nome
     const modalBody = document.querySelector('#modal-depto .modal-body');
     if (modalBody){
       modalBody.addEventListener('scroll', ()=> dd?.classList.remove('open'));
@@ -1137,7 +1100,7 @@
     // Whats
     bindWhats();
 
-    // ✅ Prévia atualiza ao digitar/trocar o pai
+    // Prévia
     inpNome.addEventListener('input', updatePathPreview);
     selParent.addEventListener('change', updatePathPreview);
 
@@ -1208,20 +1171,15 @@
 
     bind();
 
-    // ✅ DECIDE A VIEW PRIMEIRO (antes de carregar dados)
+    // Decide view antes de carregar
     if (IS_MOBILE){
       state.view = 'table';
-
       if (btnViewOrg){
         btnViewOrg.style.display = 'none';
         btnViewOrg.setAttribute('aria-hidden','true');
         btnViewOrg.tabIndex = -1;
       }
       if (sectionOrg) sectionOrg.style.display = 'none';
-
-      // tudo expandido por padrão (melhor navegação)
-      // (o render respeita isso)
-      // será populado após loadTree
       btnViewTable.classList.add('is-active'); btnViewTable.setAttribute('aria-selected','true');
       sectionTable.style.display = '';
     } else {
@@ -1241,13 +1199,11 @@
     await loadTree();
 
     if (IS_MOBILE){
-      // após ter a árvore, expande tudo
       state.flat.forEach(d => state.expanded.add(d.id));
       renderTable();
     }
   }
 
-  // Gate / Start (usa Page.guarded se disponível)
   const run = () => (window.Page?.guarded?.(
     'departamentos.gerenciar',
     init,

@@ -16,13 +16,64 @@
     })();
   </script>
 
-  <!-- CSS -->
-  <link rel="stylesheet" href="/frontend/css/tw.css">
+  <!-- Seu CSS global -->
   <link rel="stylesheet" href="/frontend/css/atendimentos.css">
 
   <!-- libs -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <!-- ====== CSS EXTRA EMBUTIDO: WALLPAPER SÓ NO #historico ====== -->
+  <style>
+    /* ============================================================
+       Papel de parede no histórico do chat (#historico)
+       - NÃO altera seu CSS externo; tudo aqui dentro do HTML.
+       - Use UMA das opções no <main>:
+         (A) Automático por tema: class="whatsapp-auto-bg"
+         (B) Forçar escuro:      class="whatsapp-bg-dark"
+         (C) Forçar claro:       class="whatsapp-bg-light"
+       - SCOPE: só #historico (não afeta header/footer/sidebar)
+       ============================================================ */
+
+    /* Base comum: garante repetição/posicionamento/prioridade */
+    main.whatsapp-auto-bg #historico,
+    main.whatsapp-bg-dark #historico,
+    main.whatsapp-bg-light #historico{
+      background-repeat: repeat !important;
+      background-position: 0 0 !important;
+      /* Ajuste o tamanho do tile conforme sua arte.
+         Se sua imagem já é “seamless”, pode tirar esta linha. */
+      background-size: 400px 400px !important;
+    }
+
+    /* (A) AUTOMÁTICO via data-theme/.dark ------------------------- */
+
+    /* DARK -> usa a imagem "escura" */
+    html[data-theme="dark"] main.whatsapp-auto-bg #historico,
+    html.dark              main.whatsapp-auto-bg #historico{
+      background-color:#0b141a !important;
+      background-image: url("/frontend/img/whatsapp-bg-dark.png") !important;
+    }
+
+    /* LIGHT -> usa a imagem "clara" */
+    html[data-theme="light"] main.whatsapp-auto-bg #historico,
+    html:not(.dark)        main.whatsapp-auto-bg #historico{
+      background-color:#efeae2 !important;
+      background-image: url("/frontend/img/whatsapp-bg-light.png") !important;
+    }
+
+    /* (B) MANUAL ESCURO ------------------------------------------ */
+    main.whatsapp-bg-dark #historico{
+      background-color:#0b141a !important;
+      background-image: url("/frontend/img/whatsapp-bg-dark.png") !important;
+    }
+
+    /* (C) MANUAL CLARO ------------------------------------------- */
+    main.whatsapp-bg-light #historico{
+      background-color:#efeae2 !important;
+      background-image: url("/frontend/img/whatsapp-bg-light.png") !important;
+    }
+  </style>
 
   <!-- Ajustes só para MOBILE (kebab ao lado da logo) -->
   <style>
@@ -118,7 +169,12 @@
     </aside>
 
     <!-- Área de chat -->
-    <main class="flex flex-col">
+    <!-- Escolha UMA classe:
+         - whatsapp-auto-bg  (recomendado: alterna conforme tema)
+         - whatsapp-bg-dark  (força imagem escura)
+         - whatsapp-bg-light (força imagem clara)
+    -->
+    <main class="flex flex-col whatsapp-bg-dark">
       <header id="chat-header" class="h-16 flex items-center px-4 gap-3 shadow-sm" style="display:none;">
         <div class="flex items-center gap-2 relative">
           <span id="chat-avatar"></span>

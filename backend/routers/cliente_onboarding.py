@@ -95,7 +95,11 @@ def _evo_wait_instance_ready(sess: requests.Session, instance: str, timeout_s: i
         time.sleep(0.4)
     return False
 
+# =============================
+# Listas de eventos
+# =============================
 def _events_minimal() -> List[str]:
+    # ← lista "normal" que você usa no dia-a-dia
     return [
         "MESSAGES_SET", "MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE",
         "SEND_MESSAGE",
@@ -104,9 +108,14 @@ def _events_minimal() -> List[str]:
         "GROUPS_UPSERT", "GROUP_UPDATE", "GROUP_PARTICIPANTS_UPDATE",
     ]
 
-def _ws_events() -> List[str]:
-    return ["QRCODE_UPDATED", "CONNECTION_UPDATE", *_events_minimal()]
+def _ws_events_initial() -> List[str]:
+    # ← durante o onboarding, PARA NÃO TRAVAR:
+    #    WebSocket só com QR e estado de conexão
+    return ["QRCODE_UPDATED", "CONNECTION_UPDATE"]
 
+# =============================
+# Evolution – criação e assinatura inicial (anti-tempestade)
+# =============================
 def _evo_create_instance(instance: str, use_pairing: bool) -> None:
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return
@@ -115,15 +124,17 @@ def _evo_create_instance(instance: str, use_pairing: bool) -> None:
         "instanceName": instance,
         "integration": "WHATSAPP-BAILEYS",
         "qrcode": (not use_pairing),
+        # Rabbit começa SEM eventos (evita tsunami ao ler QR)
         "rabbitmq": {
             "enabled": True,
             "exchange": os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange"),
             "bindings": [b.strip() for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#").split(",") if b.strip()],
-            "events": _events_minimal(),
+            "events": [],  # 👈 vazio no onboarding
         },
+        # WS começa só com QR/CONNECTION (evita chuva)
         "websocket": {
             "enabled": True,
-            "events": _ws_events(),
+            "events": _ws_events_initial(),  # 👈 só QR + conexão
         },
     }
     try:
@@ -134,7 +145,8 @@ def _evo_create_instance(instance: str, use_pairing: bool) -> None:
         pass
     _evo_wait_instance_ready(s, instance, timeout_s=8)
 
-def _evo_set_rabbit(instance: str) -> None:
+def _evo_set_rabbit_initial(instance: str) -> None:
+    # durante o onboarding: rabbit SEM eventos
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return
     s = _http()
@@ -143,7 +155,7 @@ def _evo_set_rabbit(instance: str) -> None:
             "enabled": True,
             "exchange": os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange"),
             "bindings": [b.strip() for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#").split(",") if b.strip()],
-            "events": _events_minimal(),
+            "events": [],  # 👈 vazio no onboarding
         }
     }
     try:
@@ -151,11 +163,12 @@ def _evo_set_rabbit(instance: str) -> None:
     except Exception:
         pass
 
-def _evo_set_websocket(instance: str) -> None:
+def _evo_set_websocket_initial(instance: str) -> None:
+    # durante o onboarding: ws só com QR/CONNECTION
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return
     s = _http()
-    body = {"websocket": {"enabled": True, "events": _ws_events()}}
+    body = {"websocket": {"enabled": True, "events": _ws_events_initial()}}
     try:
         s.post(f"{EVOLUTION_URL}/websocket/set/{instance}", json=body, timeout=15)
     except Exception:
@@ -222,7 +235,6 @@ def _has_bound_data(db: Session, inst_row: models.EmpresaInstancia) -> bool:
 def _was_ever_connected(inst_row: models.EmpresaInstancia) -> bool:
     """Algum sinal de conexão prévia / pareamento?"""
     return bool(inst_row.connected or inst_row.numero_instancia or inst_row.last_seen)
-
 
 def _cleanup_if_still_disconnected(instance: str):
     """
@@ -291,8 +303,6 @@ def _cleanup_if_still_disconnected(instance: str):
             pass
     _CLEANUP_TIMERS.pop(instance, None)
 
-
-
 def _schedule_cleanup(instance: str):
     if _CLEANUP_SECONDS <= 0:
         return
@@ -320,7 +330,7 @@ def conectar(payload: ConnectPayload, db: Session = Depends(get_db)):
     Fluxo:
       1) Checa limite (conta apenas connected=True).
       2) Reaproveita pendente do mesmo número (somente dígitos).
-      3) Garante Evolution (Rabbit/WS).
+      3) Garante Evolution (Rabbit/WS) — MODO INICIAL ENXUTO.
       4) Cria/atualiza row (connected=False).
       5) Connect → QR (WS manda QRCODE_UPDATED também).
       6) Agenda cleanup (apenas BD, blindado).
@@ -356,8 +366,9 @@ def conectar(payload: ConnectPayload, db: Session = Depends(get_db)):
             pendente.apelido = payload.apelido
         pendente.historico_restaurar = payload.historico_restaurar
         db.commit()
-        _evo_set_rabbit(pendente.instance_name)
-        _evo_set_websocket(pendente.instance_name)
+        # 👇 assinatura inicial enxuta
+        _evo_set_rabbit_initial(pendente.instance_name)
+        _evo_set_websocket_initial(pendente.instance_name)
         conn_json = _evo_connect(pendente.instance_name, number_digits)
         _schedule_cleanup(pendente.instance_name)
         qr = {}
@@ -407,10 +418,10 @@ def conectar(payload: ConnectPayload, db: Session = Depends(get_db)):
                 break
             i += 1
 
-    # Evolution
+    # Evolution – criação + assinatura inicial ENXUTA
     _evo_create_instance(inst, payload.use_pairing)
-    _evo_set_rabbit(inst)
-    _evo_set_websocket(inst)
+    _evo_set_rabbit_initial(inst)
+    _evo_set_websocket_initial(inst)
 
     # Registro local
     inst_row = db.query(models.EmpresaInstancia).filter(
@@ -453,8 +464,8 @@ def conectar(payload: ConnectPayload, db: Session = Depends(get_db)):
                 conflito.apelido = payload.apelido
             conflito.historico_restaurar = payload.historico_restaurar
             db.commit()
-            _evo_set_rabbit(conflito.instance_name)
-            _evo_set_websocket(conflito.instance_name)
+            _evo_set_rabbit_initial(conflito.instance_name)
+            _evo_set_websocket_initial(conflito.instance_name)
             conn_json = _evo_connect(conflito.instance_name, number_digits)
             _schedule_cleanup(conflito.instance_name)
             qr = {}
@@ -505,7 +516,7 @@ def refresh_qr(instance: str):
         raise HTTPException(400, "instance inválida.")
     js = _evo_try_refresh_qr(instance)
 
-    # extrai base64/pairing + limit (mesma lógica do conectar
+    # extrai base64/pairing + limit (mesma lógica do conectar)
     qr = {}
     if isinstance(js, dict):
         qrd = js.get("qrcode") or js

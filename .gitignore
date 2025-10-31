@@ -1,0 +1,33 @@
+# ===== Env / venv =====
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# ===== Node =====
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===== Build/Cache =====
+dist/
+build/
+
+# ===== App uploads/storage =====
+storage/
+uploads/
+media/
+
+# ===== IDE / SO =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

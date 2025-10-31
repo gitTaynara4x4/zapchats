@@ -22,11 +22,10 @@ from sqlalchemy import or_, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
-from passlib.hash import bcrypt
-
 from backend.database import get_db
 from backend import models
 from backend.routers.auth import get_current_user
+from backend.security.passwords import hash_pwd  # verify_pwd não é necessário aqui
 
 # este router costuma ser montado com prefixo "/api" no main.py
 router = APIRouter(prefix="/colaboradores", tags=["Colaboradores"])
@@ -112,10 +111,15 @@ def _parse_perms(value: Optional[str | list]) -> list[str]:
     return [p for p in re.split(r"[\s,;]+", s) if p]
 
 
+def _truthy(v) -> bool:
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() in ("1", "true", "on", "yes", "y")
+
+
 # ==========================
 # Pydantic Schemas
 # ==========================
-# --- Schemas ---
 class ColaboradorOut(BaseModel):
     id: int
     empresa_id: int
@@ -129,7 +133,7 @@ class ColaboradorOut(BaseModel):
     setor_nome: Optional[str] = None
     tem_usuario: bool = False
     avatar_url: Optional[str] = None
-    is_admin: bool = False          # 👈 NOVO
+    is_admin: bool = False  # campo adicional (se quiser usar)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -158,53 +162,54 @@ def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
     # ---- setor_nome (Setor OU Departamento) ----
     setor_nome: Optional[str] = None
     if getattr(c, "setor", None) is not None:
-      setor_nome = c.setor.nome
+        setor_nome = c.setor.nome
     elif c.setor_id:
-      s = db.query(models.Setor).filter_by(id=c.setor_id).first()
-      if s:
-        setor_nome = s.nome
-      else:
-        dep = db.query(models.Departamento).filter_by(id=c.setor_id, empresa_id=c.empresa_id).first()
-        if dep:
-          setor_nome = dep.nome
+        s = db.query(models.Setor).filter_by(id=c.setor_id).first()
+        if s:
+            setor_nome = s.nome
+        else:
+            dep = db.query(models.Departamento).filter_by(id=c.setor_id, empresa_id=c.empresa_id).first()
+            if dep:
+                setor_nome = dep.nome
 
     # ---- usuário (definir sempre para evitar UnboundLocalError) ----
     u = None
     uid = getattr(c, "usuario_id", None)
     need_user = (not c.nome) or (not c.email) or (not c.telefone) or (not c.cargo) or (setor_nome is None)
     if need_user and uid:
-      try:
-        u = db.query(models.Usuario).get(uid)
-      except Exception:
-        u = None
+        try:
+            u = db.query(models.Usuario).get(uid)
+        except Exception:
+            u = None
 
     # ---- campos com fallback no usuário ----
-    nome_plano     = c.nome or getattr(u, "nome", None)
-    email_plano    = c.email or getattr(u, "email", None)
+    nome_plano = c.nome or getattr(u, "nome", None)
+    email_plano = c.email or getattr(u, "email", None)
     telefone_plano = (
-      c.telefone
-      or getattr(u, "telefone", None)
-      or getattr(u, "whatsapp", None)
-      or getattr(u, "celular", None)
-      or getattr(u, "phone", None)
+        c.telefone
+        or getattr(u, "telefone", None)
+        or getattr(u, "whatsapp", None)
+        or getattr(u, "celular", None)
+        or getattr(u, "phone", None)
     )
-    cargo_plano    = c.cargo or getattr(u, "cargo", None)
+    cargo_plano = c.cargo or getattr(u, "cargo", None)
 
     avatar_url = build_avatar_url(nome_plano, email_plano)
 
     return ColaboradorOut(
-      id=c.id,
-      empresa_id=c.empresa_id,
-      setor_id=c.setor_id,
-      usuario_id=uid,
-      nome=nome_plano or "",
-      email=email_plano or "no-reply@local.invalid",
-      telefone=telefone_plano,
-      cargo=cargo_plano,
-      setor_nome=setor_nome,
-      tem_usuario=bool(uid),
-      avatar_url=avatar_url,
+        id=c.id,
+        empresa_id=c.empresa_id,
+        setor_id=c.setor_id,
+        usuario_id=uid,
+        nome=nome_plano or "",
+        email=email_plano or "no-reply@local.invalid",
+        telefone=telefone_plano,
+        cargo=cargo_plano,
+        setor_nome=setor_nome,
+        tem_usuario=bool(uid),
+        avatar_url=avatar_url,
     )
+
 
 # ==========================
 # Endpoints
@@ -265,8 +270,7 @@ async def criar_colaborador(
     setor_id: Optional[int] = Form(None),
     telefone: Optional[str] = Form(None),
     cargo: Optional[str] = Form(None),
-    criar_usuario: Optional[bool] = Form(False),
-    senha: Optional[str] = Form(None),
+    senha: str = Form(...),                     # ← senha agora é obrigatória
     permissoes: Optional[str] = Form(None),
     avatar: Optional[UploadFile] = File(None),
 ):
@@ -279,9 +283,12 @@ async def criar_colaborador(
             setor_id = payload.get("setor_id", setor_id)
             telefone = payload.get("telefone", telefone)
             cargo = payload.get("cargo", cargo)
-            criar_usuario = payload.get("criar_usuario", criar_usuario)
             senha = payload.get("senha", senha)
             permissoes = payload.get("permissoes", permissoes)
+
+    # valida senha (sempre)
+    if not senha or len(senha.encode("utf-8")) > 72 or len(senha) < 6:
+        raise HTTPException(status_code=422, detail="Senha deve ter entre 6 e 72 caracteres.")
 
     setor = _resolve_setor_or_departamento(db, user.empresa_id, setor_id) if setor_id else None
     if setor_id is not None and not setor:
@@ -292,37 +299,34 @@ async def criar_colaborador(
     if db.query(models.Colaborador).filter(models.Colaborador.email == str(email).lower()).first():
         raise HTTPException(status_code=409, detail="E-mail já cadastrado em colaboradores")
 
-    usuario_id = None
-    if criar_usuario:
-        if not senha:
-            raise HTTPException(status_code=422, detail="Senha é obrigatória para criar usuário")
-        u = models.Usuario(
-            empresa_id=user.empresa_id,
-            nome=nome.strip(),
-            email=str(email).lower(),
-            senha_hash=bcrypt.hash(senha),
-            cargo=cargo or None,
-            is_admin=False,
-        )
-        if avatar is not None:
-            data = await avatar.read()
-            if data:
-                u.avatar_data = data
-                u.avatar_mime = avatar.content_type or "application/octet-stream"
-        try:
-            db.add(u)
-            db.flush()
-            usuario_id = u.id
-        except IntegrityError:
-            db.rollback()
-            raise HTTPException(status_code=409, detail="E-mail já cadastrado em usuários")
+    # Cria sempre o usuário
+    u = models.Usuario(
+        empresa_id=user.empresa_id,
+        nome=nome.strip(),
+        email=str(email).lower(),
+        senha_hash=hash_pwd(senha),
+        cargo=cargo or None,
+        is_admin=False,
+    )
+    if avatar is not None:
+        data = await avatar.read()
+        if data:
+            u.avatar_data = data
+            u.avatar_mime = avatar.content_type or "application/octet-stream"
+    try:
+        db.add(u)
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="E-mail já cadastrado em usuários")
 
-    senha_colab_hash = bcrypt.hash(senha) if senha else bcrypt.hash("temp@123")
+    # senha do colaborador (espelho)
+    senha_colab_hash = hash_pwd(senha)
 
     colab = models.Colaborador(
         empresa_id=user.empresa_id,
         setor_id=(setor.id if setor else None),
-        usuario_id=usuario_id,
+        usuario_id=u.id,
         nome=nome.strip(),
         email=str(email).lower(),
         senha=senha_colab_hash,
@@ -389,11 +393,11 @@ def atualizar_colaborador(
 
     # --- senha (e sincroniza com usuário se solicitado) ---
     if payload.senha is not None and payload.senha != "":
-        colab.senha = bcrypt.hash(payload.senha)
+        colab.senha = hash_pwd(payload.senha)
         if payload.atualizar_usuario and colab.usuario_id:
             u = db.query(models.Usuario).get(colab.usuario_id)
             if u:
-                u.senha_hash = bcrypt.hash(payload.senha)
+                u.senha_hash = hash_pwd(payload.senha)
                 db.add(u)
 
     # --- sincronização com Usuario (nome/email/cargo) ---
@@ -419,7 +423,6 @@ def atualizar_colaborador(
         db.commit()
     except IntegrityError:
         db.rollback()
-        # pode ser UNIQUE de email em colaboradores ou usuarios
         raise HTTPException(status_code=409, detail="E-mail já cadastrado")
     except Exception:
         db.rollback()

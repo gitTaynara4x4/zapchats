@@ -1,4 +1,14 @@
 // /frontend/js/atendimentos/domain/clientes.js
+// =====================================================================
+// LISTA DE CONVERSAS (render, dedupe, preview, paginação)
+// - Normaliza resposta do backend (suporta `{items:[]}` ou `[]`)
+// - Dedupe em 3 fases (preserva .pinned), pin > recência
+// - Render do <ul id="lista-clientes"> com preview (ACK/hora)
+// - Integra com hist-cache para hora/preview "canônico"
+// - Infinite scroll (loadMoreConversas)
+// - Expõe window.carregarClientes e window.Lista (shim UI)
+// =====================================================================
+
 import { EMPRESA_ID } from '../core/env.js';
 import { fetchWithCache } from '../core/cache.js';
 import { _matchInstancia, _instQuery } from './instances.js';
@@ -14,13 +24,21 @@ import {
 } from '../domain/hist-cache.js';
 
 /* =========================================================
+   Toggle global: desliga prefetch de mensagens
+   ========================================================= */
+if (typeof window !== 'undefined') {
+  if (window.PREFETCH_HISTORIES === undefined) {
+    window.PREFETCH_HISTORIES = false; // deixe false para não buscar /mensagens sem abrir chat
+  }
+}
+
+/* =========================================================
    Helpers
    ========================================================= */
 function normalizaTelefoneBR(s){
   const raw = String(s ?? '');
   if (raw.includes('@')) return '';
   const d = raw.replace(/\D/g, '');
-  if (!d) return '';
   const sem55 = (d.startsWith('55') && d.length > 11) ? d.slice(2) : d;
   return (sem55.length === 10 || sem55.length === 11) ? sem55 : '';
 }
@@ -47,15 +65,10 @@ function scoreRecencia(c){
 function ordenarConversasDesc(arr){
   const A = Array.isArray(arr) ? arr.slice() : [];
   return A.sort((a,b)=>{
-    // 1) PINS no topo
     const pinCmp = Number(b?.pinned ? 1 : 0) - Number(a?.pinned ? 1 : 0);
     if (pinCmp !== 0) return pinCmp;
-
-    // 2) Recência (usa o mesmo score que você já tinha)
     const recCmp = scoreRecencia(b) - scoreRecencia(a);
     if (recCmp !== 0) return recCmp;
-
-    // 3) Desempate estável por id
     const ib = Number(b.id ?? b.conversation_id ?? b.cliente_id ?? 0);
     const ia = Number(a.id ?? a.conversation_id ?? a.cliente_id ?? 0);
     return ib - ia;
@@ -63,11 +76,7 @@ function ordenarConversasDesc(arr){
 }
 
 /**
- * Dedupe em 3 fases:
- * 1) chave canônica (instância, preferredId = conversation_id || cliente_id || id)
- * 2) telefone válido (instância + tel_norm)
- * 3) nome (instância + nomeNorm) **apenas** se um lado não tem telefone — preserva SEMPRE o que tem telefone
- *    ⚠️ Sempre propaga `pinned = pinned_a || pinned_b`
+ * Dedupe em 3 fases (preserva .pinned)
  */
 function dedupeConversas(arr){
   if (!Array.isArray(arr)) return [];
@@ -155,7 +164,6 @@ function dedupeConversas(arr){
           comFone.last_ack = Math.max(Number(comFone.last_ack||0), Number(c.last_ack||0));
         }
       }
-      // sempre preserve pin
       comFone.pinned = Boolean(comFone.pinned || c.pinned);
     } else {
       const onlyMap = byInstNomeOnly.get(inst) || new Map();
@@ -226,18 +234,17 @@ export function normalizeCliente(c){
     instancia_id: inst,
     instancia: inst,
 
-    // NEW: vem do backend (/conversas). Also accept legados.
     pinned: Boolean(c.pinned || c.fixado || c.pin || false),
   };
 }
 
 /* =========================================================
-   PRIME: baixar últimas 50 msgs por conversa (1ª vez)
+   PRIME: baixar últimas 30 msgs por conversa (prefetch leve)
    ========================================================= */
 function buildMsgsUrl(convId, instanciaId) {
   const qs = new URLSearchParams({
     empresa_id: String(EMPRESA_ID),
-    limit: '50'
+    limit: '30'
   });
   if (instanciaId != null && instanciaId !== '' && instanciaId !== 'all') {
     qs.set('instancia_id', String(instanciaId));
@@ -245,13 +252,12 @@ function buildMsgsUrl(convId, instanciaId) {
   return `/api/atendimento/conversas/${convId}/mensagens?` + qs.toString();
 }
 
-async function fetchConv50(convId, instanciaId){
+async function fetchConv30(convId, instanciaId){
   const url = buildMsgsUrl(convId, instanciaId);
   const r = await fetch(url, { credentials: 'include' });
   if (!r.ok) throw new Error('Falha ao carregar mensagens da conversa ' + convId);
   const data = await r.json();
-  const items = Array.isArray(data?.items) ? data.items : [];
-  // opcional: se backend devolver cursores, poderia usar aqui:
+  const items = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
   const cursors = {
     oldest: data?.prev_cursor ?? null,
     newest: data?.next_cursor ?? null
@@ -259,25 +265,24 @@ async function fetchConv50(convId, instanciaId){
   return { items, cursors };
 }
 
-// controla concorrência de fetch de 50 msgs
-async function primeHistories(convs, { concurrency = 6 } = {}){
-  const queue = [...convs];
+// controla concorrência de fetch de 30 msgs (prefetch leve: apenas top 8)
+async function primeHistories(convs, { concurrency = 2 } = {}){
+  if (!window.PREFETCH_HISTORIES) return;
+
+  const queue = [...(convs || [])].slice(0, 8);
   const runners = Array.from({ length: Math.max(1, Math.min(concurrency, queue.length)) }, async () => {
     while (queue.length){
       const c = queue.shift();
       const inst = c.instancia_id ?? c.instancia ?? null;
       try{
         if (hasHistory(inst, c.id)) {
-          // já tem histórico local → só garantir preview a partir do cache
           try { window.syncPreviewFromCache?.(c.id); } catch {}
           continue;
         }
-        const { items, cursors } = await fetchConv50(c.id, inst);
+        const { items, cursors } = await fetchConv30(c.id, inst);
         primeWith(inst, c.id, items, cursors);
-        // atualiza preview/time a partir do cache (evita “piscar”)
         try { window.syncPreviewFromCache?.(c.id); } catch {}
       }catch(e){
-        // se der erro, não trava o restante
         try { console.debug('[primeHistories] erro conv', c.id, e); } catch {}
       }
     }
@@ -286,92 +291,101 @@ async function primeHistories(convs, { concurrency = 6 } = {}){
 }
 
 /* =========================================================
-   Carregar primeira página (20 conversas) — usa /conversas
+   Carregar primeira página (20 conversas)
    ========================================================= */
+let _isWired = false;
+let _isLoadingMore = false;
+let __loadingConversas = false;
+
 export async function carregarClientes({ force=false } = {}){
-  // chave de cache leva o filtro de instância atual
-  const instKey = (_instQuery() || '').replace(/^[?&]+/, '') || 'all';
-  const key = `conversas:v1:${EMPRESA_ID}:${instKey}`;
-  const url = `/api/atendimento/conversas?empresa_id=${EMPRESA_ID}&limit=20${_instQuery()}`;
+  if (__loadingConversas) return state.clientesCache || [];
+  __loadingConversas = true;
 
-  // 🔥 se alguém marcar pra bustar (ex.: após pin/unpin), forçamos sem cache
-  const forceFlag = force || (sessionStorage.getItem('convForceReload') === '1');
-  if (forceFlag) { try { sessionStorage.removeItem('convForceReload'); } catch {} }
+  try {
+    const instKey = (_instQuery() || '').replace(/^[?&]+/, '') || 'all';
+    const key = `conversas:v1:${EMPRESA_ID}:${instKey}`;
+    const url = `/api/atendimento/conversas?empresa_id=${EMPRESA_ID}&limit=20${_instQuery()}`;
 
-  const raw = await fetchWithCache(
-    url,
-    { ttlMs: forceFlag ? 0 : 30_000, key, bust: forceFlag }
-  );
-  const items = Array.isArray(raw?.items) ? raw.items : [];
-  const next  = raw?.next_cursor ?? null;
+    const forceFlag = force || (sessionStorage.getItem('convForceReload') === '1');
+    if (forceFlag) { try { sessionStorage.removeItem('convForceReload'); } catch {} }
 
-  let cs = items.map(normalizeCliente).filter(_matchInstancia);
+    const raw = await fetchWithCache(
+      url,
+      { ttlMs: forceFlag ? 0 : 30_000, key, bust: forceFlag }
+    );
 
-  // preserva campos do cache anterior (ack/preview/hora/pinned) e canônica de hora
-  const antigo = Array.isArray(state.clientesCache)?state.clientesCache:[];
-  cs.forEach(n=>{
-    const a = antigo.find(x=> (x.id??x.conversation_id) === n.id);
+    // >>> PATCH: aceita array direto OU objeto com {items:[]}
+    const items = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : []);
+    const next  = raw?.next_cursor ?? null;
 
-    const oldTs = tsToMillis(a?.hora || a?.last_ts);
-    const newTs = tsToMillis(n.hora || n.last_ts);
-    const tsCanon = tsToMillis(n.hora || n.last_ts || a?.hora || a?.last_ts);
-    if (tsCanon) n.hora = tsCanon;
+    let cs = items.map(normalizeCliente).filter(_matchInstancia);
 
-    if (a && oldTs && newTs && oldTs > newTs) {
-      if (a.ultima_mensagem && String(a.ultima_mensagem).trim()) {
-        n.ultima_mensagem = a.ultima_mensagem;
+    // preserva campos do cache anterior (ack/preview/hora/pinned) e canônica de hora
+    const antigo = Array.isArray(state.clientesCache)?state.clientesCache:[];
+    cs.forEach(n=>{
+      const a = antigo.find(x=> (x.id??x.conversation_id) === n.id);
+
+      const oldTs = tsToMillis(a?.hora || a?.last_ts);
+      const newTs = tsToMillis(n.hora || n.last_ts);
+      const tsCanon = tsToMillis(n.hora || n.last_ts || a?.hora || a?.last_ts);
+      if (tsCanon) n.hora = tsCanon;
+
+      if (a && oldTs && newTs && oldTs > newTs) {
+        if (a.ultima_mensagem && String(a.ultima_mensagem).trim()) {
+          n.ultima_mensagem = a.ultima_mensagem;
+        }
+        if (a.last_tipo) n.last_tipo = a.last_tipo;
+        if (a.last_tipo === 'saida' && temValor(a.last_ack)) {
+          n.last_ack = Math.max(Number(n.last_ack||0), Number(a.last_ack)||0);
+        }
+        if (temValor(a.novas) && (Number(n.novas) || 0) === 0) {
+          n.novas = Number(a.novas) || 0;
+        }
+      } else {
+        if (a && (!n.ultima_mensagem || !String(n.ultima_mensagem).trim()) && a?.ultima_mensagem) {
+          n.ultima_mensagem = a.ultima_mensagem;
+        }
+        if (temValor(a?.novas) && (Number(n.novas) || 0) === 0) {
+          n.novas = Number(a.novas) || 0;
+        }
       }
-      if (a.last_tipo) n.last_tipo = a.last_tipo;
-      if (a.last_tipo === 'saida' && temValor(a.last_ack)) {
-        n.last_ack = Math.max(Number(n.last_ack||0), Number(a.last_ack)||0);
+
+      if (temValor(a?.last_ack)) {
+        if (!temValor(n.last_ack)) n.last_ack = a.last_ack;
+        else n.last_ack = Math.max(Number(n.last_ack)||0, Number(a.last_ack)||0);
       }
-      if (temValor(a.novas) && (Number(n.novas) || 0) === 0) {
-        n.novas = Number(a.novas) || 0;
-      }
-    } else {
-      if (a && (!n.ultima_mensagem || !String(n.ultima_mensagem).trim()) && a?.ultima_mensagem) {
-        n.ultima_mensagem = a.ultima_mensagem;
-      }
-      if (temValor(a?.novas) && (Number(n.novas) || 0) === 0) {
-        n.novas = Number(a.novas) || 0;
-      }
-    }
 
-    if (temValor(a?.last_ack)) {
-      if (!temValor(n.last_ack)) n.last_ack = a.last_ack;
-      else n.last_ack = Math.max(Number(n.last_ack)||0, Number(a.last_ack)||0);
-    }
+      n.pinned = Boolean(n.pinned || a?.pinned);
+    });
 
-    // preserve PIN vindo do backend OU do cache local
-    n.pinned = Boolean(n.pinned || a?.pinned);
-  });
+    // DEDUPE FORTE (preserva .pinned)
+    cs = dedupeConversas(cs);
 
-  // DEDUPE FORTE (preserva .pinned)
-  cs = dedupeConversas(cs);
+    state.clientesCache = cs;
+    state.nextCursor    = next;
+    persist();
 
-  state.clientesCache = cs;
-  state.nextCursor    = next;
-  persist();
+    // Render inicial
+    renderListaClientes(cs);
+    try { window.Lista?.render(cs); } catch {}
 
-  // Render inicial (ainda sem piscar, pq já vamos sincronizar do histórico)
-  renderListaClientes(cs);
-  try { window.Lista?.render(cs); } catch {}
+    // Sempre tentar sincronizar preview pelo histórico local
+    try { (state.clientesCache || []).forEach(c => window.syncPreviewFromCache?.(c.id)); } catch {}
 
-  // Sempre tentar sincronizar preview pelo histórico local, se já existir
-  try { (state.clientesCache || []).forEach(c => window.syncPreviewFromCache?.(c.id)); } catch {}
+    // PRIME leve (desligado por padrão)
+    // if (window.PREFETCH_HISTORIES) {
+    //   try { await primeHistories(state.clientesCache, { concurrency: 2 }); } catch {}
+    // }
 
-  // PRIME: baixar 50 mensagens para cada conversa que ainda não tem histórico local
-  try { await primeHistories(state.clientesCache, { concurrency: 6 }); } catch {}
-
-  return cs;
+    return cs;
+  } finally {
+    __loadingConversas = false;
+  }
 }
 
 /* =========================================================
    Carregar mais conversas (infinite scroll)
    ========================================================= */
-let _isWired = false;
-let _isLoadingMore = false;
-
 export function wireListaInfiniteScroll(){
   if (_isWired) return;
   _isWired = true;
@@ -403,7 +417,7 @@ export async function loadMoreConversas(){
   if (!r.ok) return;
   const data = await r.json();
 
-  const items = Array.isArray(data?.items) ? data.items : [];
+  const items = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
   const next  = data?.next_cursor ?? null;
 
   const mais = items.map(normalizeCliente).filter(_matchInstancia);
@@ -413,7 +427,7 @@ export async function loadMoreConversas(){
     const key = String(it.conversation_id ?? it.id);
     const prev = map.get(key) || {};
     const merged = { ...prev, ...it };
-    merged.pinned = Boolean((prev && prev.pinned) || it.pinned); // garante que não descrafinha o pin
+    merged.pinned = Boolean((prev && prev.pinned) || it.pinned);
     map.set(key, merged);
   }
 
@@ -429,12 +443,7 @@ export async function loadMoreConversas(){
   // sincroniza previews pelo histórico, se já houver
   try { (state.clientesCache || []).forEach(c => window.syncPreviewFromCache?.(c.id)); } catch {}
 
-  // PRIME dos recém-carregados (vamos pegar só os últimos 10 pra segurar carga)
-  try {
-    const novosIds = mais.map(m => m.id);
-    const novos = (state.clientesCache || []).filter(c => novosIds.includes(c.id));
-    await primeHistories(novos.slice(0, 10), { concurrency: 4 });
-  } catch {}
+  // PRIME dos recém-carregados (desligado por padrão)
 }
 
 /* =========================================================
@@ -456,7 +465,6 @@ export function renderListaClientes(data){
         ? c.nome.trim()
         : (c.push_name?.trim() || formatarNumeroBR(c.telefone));
 
-    // Fonte da verdade: histórico local (se existir)
     let when = formatChatTime(c.hora || c.last_ts) || '';
     let preview = (c.ultima_mensagem || '').trim();
     let outboundFlag = (c.last_tipo === 'saida');
@@ -466,7 +474,6 @@ export function renderListaClientes(data){
       const instCanon = (c.instancia_id ?? c.instancia ?? null) || null;
       const arrHist = window.cacheHistoricos?.[c.id] || getHist(instCanon, c.id);
       if (Array.isArray(arrHist) && arrHist.length) {
-        // arrHist já vem asc; última é a mais recente
         const last = arrHist[arrHist.length - 1];
         outboundFlag = (last?.tipo === 'saida') || !!last?.from_me || (last?.origem === 'atendente');
         ackValForIcon = outboundFlag ? Number(last?.ack||0) : 0;
@@ -561,7 +568,7 @@ if (!window.Lista) {
       if (typeof texto === 'string') c.ultima_mensagem = texto;
       if (temValor(ack)) {
         c.last_ack = Number(ack);
-        c.last_tipo = 'saida';
+        c.last_tipo = 'saida'; // garante que preview-ack aparece
       }
       if (unreadDelta) c.novas = Math.max(0, Number(c.novas||0) + Number(unreadDelta||0));
       _touchHora(c, ts);
@@ -571,9 +578,10 @@ if (!window.Lista) {
       const idx = _findClienteIndex(clienteId);
       if (idx < 0) return;
       const c = state.clientesCache[idx];
-      if (c.last_tipo !== 'saida') return;
+      c.last_tipo = 'saida';
       const novo = Math.max(Number(c.last_ack||0), Number(ack||0));
       c.last_ack = novo;
+      persist();
       _reRender();
     },
     bumpToTop(clienteId){
@@ -589,7 +597,6 @@ if (!window.Lista) {
       state.clientesCache[idx].novas = 0;
       _reRender();
     },
-    // ✅ novo: atualiza o flag pinned no estado + reordena imediatamente
     setPinned(clienteId, isPinned){
       const idx = _findClienteIndex(clienteId);
       if (idx < 0) return;
@@ -599,8 +606,83 @@ if (!window.Lista) {
   };
 }
 
-/* === Exports globais úteis (alguns módulos chamam via window) === */
+/* === Exports globais úteis === */
 try {
   window.renderListaClientes?.(window.state?.clientesCache || []);
   window.carregarClientes = carregarClientes;
 } catch {}
+
+/* ====== LISTA: booster de preview + ACK ====== */
+(function(){
+  'use strict';
+
+  function updatePreviewInline(clienteId, { texto, ack, ts, unreadDelta } = {}){
+    const li = document.querySelector(`li.chat-item[data-id="${clienteId}"]`);
+    if (!li) return;
+
+    if (typeof texto === 'string'){
+      const preview = li.querySelector('.preview-text');
+      if (preview) preview.textContent = texto;
+    }
+
+    try{
+      if (typeof window.getAckIcon === 'function' && (ack ?? null) !== null){
+        let wrap = li.querySelector('.preview-ack');
+        if (!wrap){
+          const last = li.querySelector('.chat-last') || li.querySelector('.last-line') || li;
+          wrap = document.createElement('span');
+          wrap.className = 'preview-ack';
+          last.prepend(wrap);
+          last.insertBefore(document.createTextNode(' '), wrap.nextSibling);
+        }
+        wrap.setAttribute('data-ack', String(ack));
+        wrap.innerHTML = window.getAckIcon(ack);
+      }
+    }catch{}
+
+    if (ts){
+      const el = li.querySelector('.chat-time, time');
+      if (el) el.textContent = ts;
+    }
+
+    if (unreadDelta){
+      const badgeEl = li.querySelector('.badge, .unread');
+      if (badgeEl){
+        const cur = Number(badgeEl.textContent || '0') || 0;
+        const val = Math.max(0, cur + Number(unreadDelta||0));
+        badgeEl.textContent = String(val);
+        badgeEl.hidden = val <= 0;
+      }
+    }
+  }
+
+  function setAckInline(clienteId, ack){
+    updatePreviewInline(clienteId, { ack });
+  }
+
+  const L = (window.Lista = window.Lista || {});
+  const prevUpdate = typeof L.updatePreview === 'function' ? L.updatePreview.bind(L) : null;
+  const prevSetAck = typeof L.setAck === 'function' ? L.setAck.bind(L) : null;
+
+  L.updatePreview = function(cid, payload){
+    try { updatePreviewInline(cid, payload || {}); } catch {}
+    return prevUpdate ? prevUpdate(cid, payload) : undefined;
+  };
+  L.setAck = function(cid, ack){
+    try { setAckInline(cid, ack); } catch {}
+    return prevSetAck ? prevSetAck(cid, ack) : undefined;
+  };
+
+  (function ensureListaAckCss(){
+    const id = 'lista-ack-css';
+    if (document.getElementById(id)) return;
+    const s = document.createElement('style');
+    s.id = id;
+    s.textContent = `
+      .chat-last .preview-ack { margin-right: .25rem; display: inline-flex; }
+      .preview-ack .msg-ack svg { width: 12px; height: 12px; }
+      .preview-ack .msg-ack { vertical-align: -0.1em; }
+    `;
+    document.head.appendChild(s);
+  })();
+})();

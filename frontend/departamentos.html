@@ -136,12 +136,10 @@
             <label for="whats-btn">Este departamento pode usar quais WhatsApps? <span class="muted">(instâncias)</span></label>
 
             <div class="multi" id="whats">
-              <!-- abre/fecha o dropdown -->
               <button type="button" class="input" id="whats-btn" aria-expanded="false" aria-controls="whats-panel">
                 Selecione as instâncias...
               </button>
 
-              <!-- dropdown com busca + lista -->
               <div class="dropdown-suggestions" id="whats-panel" role="listbox" aria-multiselectable="true">
                 <div class="dd-search" style="padding:.5rem .6rem;">
                   <input type="search" class="input" id="whats-search" placeholder="Buscar instância..." style="width:100%">
@@ -149,7 +147,6 @@
                 <div class="dd-list" id="whats-list"></div>
               </div>
 
-              <!-- chips com as selecionadas -->
               <div class="selected-chips" id="whats-chips" aria-live="polite"></div>
             </div>
 

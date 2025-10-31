@@ -181,10 +181,58 @@ def get_config(
     instancia_id: int = Query(..., description="ID da instância"),
     db: Session = Depends(get_db),
 ):
+    # config atual
     row = _safe_select_chatbot_config(db, empresa_id, instancia_id)
     cfg_raw = row.config if row and getattr(row, "config", None) else {}
-    logger.info("GET chatbot/config emp=%s inst=%s has_cfg=%s", empresa_id, instancia_id, bool(cfg_raw))
-    return {"empresa_id": empresa_id, "instancia_id": instancia_id, "config": cfg_raw or {}}
+
+    # nome da empresa
+    empresa = db.get(models.Empresa, empresa_id)
+    empresa_nome = (empresa.nome.strip() if empresa and empresa.nome else None)
+
+    # departamentos (preferindo vinculados à instância)
+    deps_rows = []
+    try:
+        deps_rows = db.execute(
+            select(models.Departamento.id, models.Departamento.nome)
+            .join(models.DepartamentoInstancia,
+                  and_(
+                      models.DepartamentoInstancia.departamento_id == models.Departamento.id,
+                      models.DepartamentoInstancia.empresa_id == empresa_id,
+                      models.DepartamentoInstancia.instancia_id == instancia_id,
+                  ))
+            .where(
+                models.Departamento.empresa_id == empresa_id,
+                models.Departamento.ativo == True,
+            )
+            .order_by(models.Departamento.nome.asc())
+        ).all()
+
+        if not deps_rows:
+            deps_rows = db.execute(
+                select(models.Departamento.id, models.Departamento.nome)
+                .where(
+                    models.Departamento.empresa_id == empresa_id,
+                    models.Departamento.ativo == True,
+                )
+                .order_by(models.Departamento.nome.asc())
+            ).all()
+    except Exception as e:
+        logger.warning("GET departamentos falhou: %s", _trace(e))
+        deps_rows = []
+
+    departamentos = [{"id": int(r[0]), "nome": str(r[1])} for r in deps_rows]
+
+    logger.info(
+        "GET chatbot/config emp=%s inst=%s has_cfg=%s deps=%s",
+        empresa_id, instancia_id, bool(cfg_raw), len(departamentos)
+    )
+    return {
+        "empresa_id": empresa_id,
+        "instancia_id": instancia_id,
+        "empresa_nome": empresa_nome,
+        "departamentos": departamentos,
+        "config": cfg_raw or {},
+    }
 
 
 @router.put("/config")

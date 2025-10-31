@@ -1,7 +1,7 @@
 // /frontend/js/atendimentos/ui/filtros.js
-import { getConversas } from '../state/store.js'; // ajuste para '../../store.js' se necessário
+import { getConversas } from '../state/store.js';
 
-(function FiltrosLista(){
+(function FiltrosLista() {
   const row = document.querySelector('.wpp-header-filtros-row');
   const ul  = document.getElementById('lista-clientes');
   if (!row || !ul) return;
@@ -9,64 +9,170 @@ import { getConversas } from '../state/store.js'; // ajuste para '../../store.js
   const btns = [...row.querySelectorAll('.wpp-header-filtro')];
   if (!btns.length) return;
 
-  // índice a partir do estado (store)
-  function makeIndex(){
-    const byId = new Map();
-    for (const c of (getConversas?.() || [])){
-      const id = Number(c.conversation_id ?? c.cliente_id ?? c.id ?? 0) || 0;
-      const aguardando = Number(c.novas || 0) > 0;
-      const isGroup    = !!c.is_group || /@g\.us$/i.test(String(c.telefone || ''));
-      const status     = String(c.statusatendimento || c.status || '').toLowerCase();
-      const botNow     = ['bot','no_bot','automatico','automático'].includes(status);
-      const emAtend    = !aguardando && !botNow && !isGroup;
-      byId.set(id, { aguardando, isGroup, botNow, emAtend });
+  // ----------------- estado do filtro (global p/ outros módulos chamarem) -----------------
+  const Filtros = (window.Filtros = window.Filtros || {});
+  let current = sessionStorage.getItem('filtroAtend') || 'Em atendimento';
+
+  Filtros.get = () => current;
+  Filtros.set = (kind) => {
+    if (!kind) return;
+    current = String(kind);
+    sessionStorage.setItem('filtroAtend', current);
+    marcarBotaoAtivo();
+    refilterList();
+  };
+  Filtros.refilterList = () => refilterList();
+
+  // ----------------- helpers -----------------
+  const byId = new Map(); // id -> tags calculadas
+  function isGroupByTel(tel) {
+    const t = String(tel || '');
+    return /@g\.us$/i.test(t) || /\bgrupo\b/i.test(t);
+  }
+  function matchInstancia(tagInstId) {
+    try {
+      // preferir helper global, se existir
+      if (typeof window._matchInstancia === 'function') return window._matchInstancia(tagInstId);
+      const ativa = (window.INSTANCIA_ATIVA == null || window.INSTANCIA_ATIVA === '') ? null : String(window.INSTANCIA_ATIVA);
+      if (!ativa) return true;
+      if (!tagInstId) return true;
+      return String(tagInstId).toLowerCase() === String(ativa).toLowerCase();
+    } catch {
+      return true;
     }
-    return byId;
+  }
+  function openClienteId() {
+    const hist = document.getElementById('historico');
+    const v = hist?.dataset?.clienteId;
+    return v ? Number(v) || 0 : 0;
+  }
+  function idFromLi(li) {
+    const d = li.dataset?.id;
+    if (d) return Number(d) || 0;
+    const m = /chat-(\d+)/.exec(li.id || '');
+    return m ? Number(m[1]) || 0 : 0;
+  }
+  function normalizarStatus(c) {
+    const raw = String(c.statusatendimento ?? c.status ?? '').trim().toLowerCase();
+    // Rótulos comuns
+    const BOT = ['bot','automático','automatico','auto','automatizado'];
+    if (BOT.includes(raw)) return 'bot';
+    // qualquer outro vira humano / no_bot
+    return 'no_bot';
   }
 
-  function applyFilter(kind){
-    // visual: ativo
-    btns.forEach(b => b.classList.toggle('ativo', b.textContent.trim() === kind));
+  // ----------------- indexador (lê o store) -----------------
+  function makeIndex() {
+    byId.clear();
+    const convs = (typeof getConversas === 'function' ? (getConversas() || []) : []);
+    for (const c of convs) {
+      const id = Number(c.conversation_id ?? c.cliente_id ?? c.id ?? 0) || 0;
+      if (!id) continue;
 
-    const idx = makeIndex();
+      const unread  = Number(c.novas ?? c.unread ?? 0) > 0;
+      const grupo   = Boolean(c.is_group) || isGroupByTel(c.telefone);
+      const statusN = normalizarStatus(c);
+      const isBot   = (statusN === 'bot');
+      const isNoBot = !isBot;
 
-    // aplica no DOM (com fallback via data-*)
-    ul.querySelectorAll('li.chat-item').forEach(li => {
-      const id  = Number(li.dataset.id || 0) || 0;
+      const instId  = c.instancia_id ?? c.instancia ?? c.instance_id ?? c.inst ?? null;
 
-      const fallbackAguard = Number(li.querySelector('.badge, .unread-badge')?.textContent || 0) > 0;
-      const fallbackGroup  = li.dataset.isGroup === '1' || /@g\.us$/i.test(String(li.dataset.tel || ''));
-      const fallbackBot    = ['bot','no_bot','automatico','automático'].includes((li.dataset.status||'').toLowerCase());
+      // Regras dos filtros:
+      // - Em atendimento: humano (no_bot) e NÃO grupo (NÃO depende de unread!)
+      // - Aguardando: tem não lidas
+      // - No bot: status bot
+      // - Grupos: é grupo
+      const tags = {
+        unread,
+        isGroup: grupo,
+        isBot,
+        isNoBot,
+        instId,
 
-      const tag = idx.get(id) || {
-        aguardando: fallbackAguard,
-        isGroup: fallbackGroup,
-        botNow: fallbackBot,
-        emAtend: !(fallbackAguard || fallbackGroup || fallbackBot),
+        emAtend: (isNoBot && !grupo),
+        aguardando: unread,
+        noBot: isBot,
+        grupos: grupo,
       };
-
-      let show = true;
-      if (kind === 'Aguardando') show = tag.aguardando;
-      else if (kind === 'Grupos') show = tag.isGroup;
-      else if (kind === 'No bot') show = tag.botNow;
-      else show = tag.emAtend; // 'Em atendimento'
-
-      li.style.display = show ? '' : 'none';
-    });
+      byId.set(id, tags);
+    }
   }
 
-  // clique nos botões
-  btns.forEach(btn => {
-    btn.addEventListener('click', () => applyFilter(btn.textContent.trim()));
+  // ----------------- aplicar filtro na UL -----------------
+  function shouldShow(id, tags) {
+    // manter o chat aberto sempre visível
+    if (id && id === openClienteId()) return true;
+
+    // respeitar instância ativa (se houver)
+    if (!matchInstancia(tags?.instId ?? null)) return false;
+
+    const kind = current;
+    if (kind === 'Em atendimento') return !!tags?.emAtend;
+    if (kind === 'Aguardando')     return !!tags?.aguardando;
+    if (kind === 'No bot')         return !!tags?.noBot;
+    if (kind === 'Grupos')         return !!tags?.grupos;
+
+    // fallback (se aparecer um rótulo diferente)
+    return true;
+  }
+
+  function refilterList() {
+    // sempre reconstrói o índice (novas chegam pelo WS)
+    makeIndex();
+
+    const lis = ul.querySelectorAll('li');
+    for (const li of lis) {
+      const id   = idFromLi(li);
+      const tags = byId.get(id) || null;
+      const show = id && tags ? shouldShow(id, tags) : true;
+      li.style.display = show ? '' : 'none';
+      li.classList.toggle('hidden-by-filter', !show);
+    }
+  }
+
+  function marcarBotaoAtivo() {
+    for (const b of btns) {
+      const on = (b.textContent.trim() === current);
+      b.classList.toggle('ativo', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+  }
+
+  // ----------------- eventos da UI -----------------
+  btns.forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const kind = btn.textContent.trim();
+      if (!kind || kind === current) return;
+      Filtros.set(kind);
+    });
   });
 
-  // estado inicial
-  applyFilter('Em atendimento');
-
-  // reaplicar quando a lista mudar (re-render)
+  // ----------------- observar mudanças na UL (itens, classes, badges) -----------------
   const mo = new MutationObserver(() => {
-    const active = (btns.find(b => b.classList.contains('ativo')) || btns[0]).textContent.trim();
-    applyFilter(active);
+    refilterList();
   });
-  mo.observe(ul, { childList: true, subtree: true });
+  mo.observe(ul, {
+    childList: true,
+    subtree: true,
+    characterData: true, // pega mudança de preview/badge
+    attributes: true,
+    attributeFilter: ['data-status','data-instancia-id','class','data-id']
+  });
+
+  // ----------------- reagir a eventos globais -----------------
+  document.addEventListener('ws:conv_status', () => refilterList());
+  document.addEventListener('ws:reload_clientes', () => refilterList());
+  document.addEventListener('inst:change', () => refilterList());
+
+  // ----------------- boot -----------------
+  // garante botão ativo conforme sessionStorage
+  marcarBotaoAtivo();
+  // aplica filtro inicial
+  refilterList();
+
+  // expõe no window (opcional)
+  try {
+    window.Filtros = Filtros;
+  } catch {}
 })();
