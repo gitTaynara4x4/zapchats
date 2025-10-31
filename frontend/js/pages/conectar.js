@@ -15,11 +15,10 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
 (function () {
   'use strict';
 
-  // ===== Estado global mínimo =====
+  // ===== Estado global =====
   let wantQR = false;
   let currentInstance = null;
   let timerId = null;
-  let lastRestoreRequested = false; // se usuário escolheu restaurar histórico
 
   // ===== Helpers =====
   const $  = (sel, ctx=document) => ctx.querySelector(sel);
@@ -48,7 +47,7 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
         || String(m?.type || '').toLowerCase() === 'connected';
   }
 
-  // Fail-safe do prepaint
+  // ===== Fail-safe do "prepaint" =====
   window.addEventListener('load', () => {
     const html = document.documentElement;
     if (html.classList.contains('prepaint')
@@ -179,7 +178,144 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
     }
   }
 
-  // ===== CSS rápido (inclui animação BREATHE contínua no status) =====
+  // ===== Overlay (Lottie + status pulsando) =====
+  async function loadLottie(){
+    return new Promise((resolve) => {
+      if (window.lottie && window.lottie.loadAnimation) return resolve(window.lottie);
+      const sc = document.createElement('script');
+      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js';
+      sc.async = true;
+      sc.onload = () => resolve(window.lottie);
+      sc.onerror = () => resolve(null);
+      document.head.appendChild(sc);
+    });
+  }
+
+  const PREP_TITLE    = 'Estamos organizando tudo para você.';
+  const PREP_SUBTITLE = 'Esta ação pode demorar um pouco.';
+
+  // velocidade do ciclo das mensagens (ms)
+  const CYCLE_MS = 6500;
+
+  const prepBlock = {
+    active:false, left:0, tmr:null, anim:null,
+    restore:false,
+    cycleTmr:null,
+    lastIdx:-1
+  };
+
+  function ensureOverlay(){
+    let ovl = document.getElementById('sync-overlay');
+    if (ovl) return ovl;
+
+    ovl = document.createElement('div');
+    ovl.id = 'sync-overlay';
+    ovl.className = 'hidden';
+    ovl.innerHTML = `
+      <div class="sync-wrap" role="dialog" aria-live="polite" aria-label="Sincronizando">
+        <div id="prep-ovl-lottie"></div>
+        <div id="prep-ovl-status" class="think"></div>
+        <div id="prep-ovl-title">${htmlEscape(PREP_TITLE)}</div>
+        <div id="prep-ovl-sub">${htmlEscape(PREP_SUBTITLE)}</div>
+        <div id="prep-ovl-time" class="time-pill">01:00</div>
+      </div>
+    `;
+    document.body.appendChild(ovl);
+    return ovl;
+  }
+
+  function setOverlayTexts(status){
+    const s = $('#prep-ovl-status');
+    if (s){
+      // mantém o "think" (batendo) sempre, e adiciona o fade a cada troca
+      s.classList.add('fade');
+      s.textContent = status || '';
+      setTimeout(()=>s.classList.remove('fade'), 550);
+    }
+  }
+
+  function cycleStatusStart(){
+    clearInterval(prepBlock.cycleTmr);
+    const restoreMsgs = [
+      'Sincronizando suas mensagens…',
+      'Sincronizando suas imagens…',
+      'Sincronizando seus documentos…',
+      'Sincronizando seus áudios…'
+    ];
+    const contactsOnly = ['Sincronizando seus contatos…'];
+    const list = prepBlock.restore ? restoreMsgs : contactsOnly;
+
+    // mostra um imediatamente
+    prepBlock.lastIdx = (prepBlock.lastIdx + 1) % list.length;
+    setOverlayTexts(list[prepBlock.lastIdx]);
+
+    // ciclo lento
+    prepBlock.cycleTmr = setInterval(() => {
+      prepBlock.lastIdx = (prepBlock.lastIdx + 1) % list.length;
+      setOverlayTexts(list[prepBlock.lastIdx]);
+    }, CYCLE_MS);
+  }
+  function cycleStatusStop(){
+    clearInterval(prepBlock.cycleTmr);
+    prepBlock.cycleTmr = null;
+  }
+
+  function paintPrepTime(){
+    const mm = String(Math.floor(prepBlock.left/60)).padStart(2,'0');
+    const ss = String(prepBlock.left%60).padStart(2,'0');
+    const el = $('#prep-ovl-time', document);
+    if (el) el.textContent = `${mm}:${ss}`;
+  }
+
+  async function showPrepOverlayOneMinute(seconds=60, { restore=false } = {}){
+    if (prepBlock.active) return;
+    prepBlock.active = true;
+    prepBlock.left = Math.max(1, Math.floor(seconds));
+    prepBlock.restore = !!restore;
+    prepBlock.lastIdx = -1;
+
+    const ovl = ensureOverlay();
+    ovl.classList.remove('hidden');
+    ovl.classList.add('show');
+    document.body.style.overflow = 'hidden';
+
+    try{
+      const lottie = await loadLottie();
+      const slot = $('#prep-ovl-lottie', ovl);
+      if (lottie && slot) {
+        const data = await fetch(PREP_LOTTIE_URL, { cache:'no-store' }).then(r => r.json());
+        prepBlock.anim = lottie.loadAnimation({
+          container: slot, renderer: 'svg', loop: true, autoplay: true, animationData: data
+        });
+      }
+    }catch(e){ console.warn('[Lottie] erro:', e); }
+
+    cycleStatusStart();
+    paintPrepTime();
+    clearInterval(prepBlock.tmr);
+    prepBlock.tmr = setInterval(() => {
+      prepBlock.left -= 1;
+      if (prepBlock.left <= 0){
+        hidePrepOverlay();
+      } else {
+        paintPrepTime();
+      }
+    }, 1000);
+  }
+
+  function hidePrepOverlay(){
+    const ovl = ensureOverlay();
+    prepBlock.active = false;
+    clearInterval(prepBlock.tmr); prepBlock.tmr = null;
+    cycleStatusStop();
+    try { prepBlock.anim?.destroy?.(); } catch {}
+    prepBlock.anim = null;
+    ovl.classList.remove('show');
+    ovl.classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+
+  // ===== CSS injetado =====
   (function injectCSS(){
     const css = `
       #zap-loader{ display:none !important; }
@@ -196,23 +332,65 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
       html.dark #lista-zap tbody tr{ background:#161617; }
       html.dark #lista-zap tbody tr:nth-child(even){ background:#121214; }
       .hidden{ display:none !important; }
-      #btn-open-modal:hover:not([disabled]){ background: rgba(34,197,94,.06); box-shadow:0 4px 18px rgba(34,197,94,.12); }
-      #btn-open-modal:focus-visible{ outline:3px solid rgba(79,131,255,.5); outline-offset:2px; }
-      #btn-open-modal[disabled]{ cursor:not-allowed; box-shadow:none; }
       button[data-tab]{ cursor:pointer; }
       button[data-tab]:hover{ filter:brightness(1.05); }
 
       /* ===== Overlay ===== */
-      @keyframes prepFade { from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:none} }
-      @keyframes statusBreathe {
-        0%   { transform:scale(0.985); opacity:.88; text-shadow:0 0 0 rgba(34,197,94,0); }
-        50%  { transform:scale(1.02);  opacity:1;   text-shadow:0 0 16px rgba(34,197,94,.25); }
-        100% { transform:scale(0.985); opacity:.88; text-shadow:0 0 0 rgba(34,197,94,0); }
+      #sync-overlay{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:9999;
+        background: radial-gradient(1200px 520px at 50% 30%, rgba(23,23,23,.88), rgba(0,0,0,.92));
+        backdrop-filter: blur(2px);
       }
-      #prep-ovl-status.think { animation: statusBreathe 1.8s ease-in-out infinite; }
-      #prep-ovl-status.fade { animation: prepFade .55s ease; }
-      #prep-ovl-status { font-weight:700; letter-spacing:.01em; }
-      #prep-ovl-time { font-variant-numeric: tabular-nums; letter-spacing:.02em; }
+      #sync-overlay.show{ display:flex; }
+      #sync-overlay .sync-wrap{
+        text-align:center; color:#e5e7eb; user-select:none;
+        background: transparent; border: 0;
+        padding: clamp(8px,2vw,12px) 8px 18px; border-radius: 28px;
+      }
+
+      #prep-ovl-lottie{
+        width: clamp(260px, 44vw, 460px);
+        height: clamp(260px, 44vw, 460px);
+        margin: 0 auto 10px;
+      }
+
+      #prep-ovl-status{ font-weight:800; letter-spacing:.01em; margin:.2rem 0 .45rem; font-size:clamp(17px,2.5vw,24px); }
+      #prep-ovl-title{ font-weight:800; letter-spacing:.01em; font-size:clamp(18px,2.1vw,24px); margin:.15rem 0 .15rem; }
+      #prep-ovl-sub{ opacity:.85; font-size:clamp(12px,1.7vw,14px); margin-bottom:.35rem; }
+      #prep-ovl-time{ font-variant-numeric: tabular-nums; letter-spacing:.02em; font-size:clamp(14px,2vw,16px); opacity:.95; }
+
+      .time-pill{
+        display:inline-flex; align-items:center; justify-content:center;
+        min-width:86px; padding:.22rem .6rem; border-radius:999px;
+        background:rgba(255,255,255,.06);
+      }
+
+      /* Batimento forte no TEXTO + glow leve */
+      @keyframes heartbeat {
+        0%   { transform:scale(1);     text-shadow:0 0 0 rgba(34,197,94,0);   opacity:.92; }
+        12%  { transform:scale(1.12);  text-shadow:0 0 22px rgba(34,197,94,.40); opacity:1; }
+        24%  { transform:scale(1.00);  text-shadow:0 0 0 rgba(34,197,94,0);   opacity:.95; }
+        38%  { transform:scale(1.14);  text-shadow:0 0 26px rgba(34,197,94,.45); opacity:1; }
+        55%  { transform:scale(1.00);  text-shadow:0 0 0 rgba(34,197,94,0);   opacity:.94; }
+        100% { transform:scale(1);     text-shadow:0 0 0 rgba(34,197,94,0);   opacity:.92; }
+      }
+      @keyframes prepFade { from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:none} }
+
+      /* O texto SEMPRE bate (think). E nas trocas aplica fade junto. */
+      #prep-ovl-status.think { will-change: transform, opacity; animation: heartbeat 2.4s ease-in-out infinite; }
+      #prep-ovl-status.fade  { animation: prepFade .55s ease; }
+      #prep-ovl-status.think.fade { animation: heartbeat 2.4s ease-in-out infinite, prepFade .55s ease 1; }
+
+      @media (prefers-reduced-motion: reduce) {
+        #prep-ovl-status.think { animation: none !important; }
+      }
+
+      /* FAB de teste */
+      #overlay-test-fab{
+        position: fixed; right: 16px; bottom: 16px; z-index: 10000;
+        background:#16a34a; color:#fff; border:0; border-radius:999px; padding:.6rem .9rem; font-weight:600;
+        box-shadow:0 10px 30px rgba(0,0,0,.25);
+      }
+      #overlay-test-fab:hover{ filter:brightness(1.05); }
     `;
     const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s);
   })();
@@ -312,6 +490,13 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
   }
 
   // ===== QR helpers =====
+  function secondsFromLimit(raw){
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) return 60;
+    if (n > 300) return Math.round(n / 1000);
+    if (n <= 5)  return Math.round(n * 60);
+    return Math.round(n);
+  }
   function hideIllustration(){ els.qrIllustration?.classList.add('hidden'); }
   function showIllustration(){ els.qrIllustration?.classList.remove('hidden'); }
 
@@ -362,7 +547,7 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
     els.qrImg.src = src;
     els.qrImg.classList.remove('hidden');
     els.qrInstru?.classList.remove('hidden');
-    if (limit) startTimer(limit);
+    if (limit) startTimer(secondsFromLimit(limit));
     els.btnGerarQR?.classList.add('hidden');
     els.btnRefresh?.classList.remove('hidden');
   }
@@ -376,7 +561,7 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
       els.qrCanvas.classList.remove('hidden');
       els.qrImg?.classList.add('hidden');
       els.qrInstru?.classList.remove('hidden');
-      if (limit) startTimer(limit);
+      if (limit) startTimer(secondsFromLimit(limit));
       els.btnGerarQR?.classList.add('hidden');
       els.btnRefresh?.classList.remove('hidden');
     }catch(e){
@@ -385,179 +570,9 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
   }
   function renderQRFromResponse(qr){
     if (!qr || typeof qr !== 'object') return false;
-    const lim = normalizeLimit(qr.limit || qr.qr_limit || qr.expires_in || qr.ttl);
-    if (qr.base64)     { renderQRFromBase64(qr.base64, lim); return true; }
-    if (qr.pairingCode){ renderQRFromText(qr.pairingCode, lim); return true; }
+    if (qr.base64) { renderQRFromBase64(qr.base64, qr.limit); return true; }
+    if (qr.pairingCode) { renderQRFromText(qr.pairingCode, qr.limit); return true; }
     return false;
-  }
-  function normalizeLimit(raw){
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n <= 0) return 60;
-    if (n > 300) return Math.round(n / 1000);
-    if (n <= 5)  return Math.round(n * 60);
-    return Math.round(n);
-  }
-
-  // ===== Overlay (Lottie grande, sem borda) – mensagens rotativas condicionais =====
-  const PREP_TITLE        = 'Estamos organizando tudo para você.';
-  const PREP_SUBTITLE     = 'Esta ação pode demorar um pouco.';
-  const PREP_SECONDS      = 60;   // total (s)
-  const STATUS_ROTATE_MS  = 7000; // intervalo entre mensagens (ms)
-
-  function buildSteps(opts){
-    const restore = !!opts?.restore;
-    if (!restore) return ['Sincronizando seus contatos…'];
-    return [
-      'Sincronizando suas mensagens…',
-      'Sincronizando seus contatos…',
-      'Sincronizando suas imagens…',
-      'Sincronizando seus arquivos…',
-      'Sincronizando seus áudios…',
-    ];
-  }
-
-  function loadLottie(){
-    return new Promise((resolve) => {
-      if (window.lottie && window.lottie.loadAnimation) return resolve(window.lottie);
-      const sc = document.createElement('script');
-      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js';
-      sc.async = true;
-      sc.onload = () => resolve(window.lottie);
-      sc.onerror = () => resolve(null);
-      document.head.appendChild(sc);
-    });
-  }
-
-  const prepBlock = {
-    active:false, left:0, tmr:null, anim:null,
-    statusTmr:null, statusIdx:0, steps:[]
-  };
-
-  function ensureOverlay(){
-    let ovl = document.getElementById('sync-overlay');
-    if (ovl) return ovl;
-    ovl = document.createElement('div');
-    ovl.id = 'sync-overlay';
-    ovl.className = 'hidden';
-    ovl.style.cssText = `
-      position:fixed; inset:0; z-index:9999;
-      display:flex; align-items:center; justify-content:center;
-      background:radial-gradient(1200px 1200px at 50% 40%, rgba(8,8,8,.92), rgba(0,0,0,.95));
-      color:#e5e7eb;
-    `;
-    document.body.appendChild(ovl);
-    return ovl;
-  }
-
-  function setOverlayToPrep(){
-    const ovl = ensureOverlay();
-    ovl.innerHTML = `
-      <div class="sync-card" role="dialog" aria-live="polite"
-           style="position:relative; width:min(1040px,96vw); max-width:1040px;
-                  padding:clamp(16px,2.8vw,28px) clamp(16px,3.2vw,40px) clamp(18px,3vw,32px);
-                  border-radius:28px; background:transparent; text-align:center;">
-        <div id="prep-ovl-lottie"
-             style="width:min(64vw,740px); height:min(44vh,420px); margin:2vh auto 1.2rem"></div>
-
-        <div id="prep-ovl-status" class="think"
-             style="min-height:1.25rem; opacity:.95; margin:.1rem auto .55rem"></div>
-
-        <div id="prep-ovl-text" style="font-weight:800; font-size:clamp(16px,1.4vw,18px); margin-bottom:.25rem">
-          ${htmlEscape(PREP_TITLE)}
-        </div>
-        <div style="opacity:.85; font-size:clamp(13px,1.2vw,15px); margin-bottom:.65rem">
-          ${htmlEscape(PREP_SUBTITLE)}
-        </div>
-
-        <div id="prep-ovl-time"
-             style="opacity:.75; font-size:clamp(12px,1.1vw,14px); margin-top:.2rem;"></div>
-      </div>
-    `;
-  }
-
-  function paintPrepTime(){
-    const mm = String(Math.floor(prepBlock.left/60)).padStart(2,'0');
-    const ss = String(prepBlock.left%60).padStart(2,'0');
-    const el = document.getElementById('prep-ovl-time');
-    if (el) el.textContent = `${mm}:${ss}`;
-  }
-
-  function paintStatus(){
-    const el = document.getElementById('prep-ovl-status');
-    if (!el || prepBlock.steps.length === 0) return;
-    el.textContent = prepBlock.steps[prepBlock.statusIdx % prepBlock.steps.length];
-    // mantém o "think" (breathe infinito) e só reaplica o fade a cada troca
-    el.classList.remove('fade');
-    void el.offsetWidth; // reflow
-    el.classList.add('fade');
-  }
-
-  function startStatusRotation(intervalMs=STATUS_ROTATE_MS){
-    stopStatusRotation();
-    if (prepBlock.steps.length <= 1){
-      paintStatus(); // estático, mas com breathe infinito
-      return;
-    }
-    paintStatus();
-    prepBlock.statusTmr = setInterval(() => {
-      prepBlock.statusIdx = (prepBlock.statusIdx + 1) % prepBlock.steps.length; // loop infinito
-      paintStatus();
-    }, intervalMs);
-  }
-  function stopStatusRotation(){
-    if (prepBlock.statusTmr) clearInterval(prepBlock.statusTmr);
-    prepBlock.statusTmr = null;
-  }
-
-  async function showPrepOverlayOneMinute(seconds = PREP_SECONDS, opts = { restore: lastRestoreRequested }){
-    if (prepBlock.active) return;
-    prepBlock.active = true;
-    prepBlock.left = Math.max(1, Math.floor(seconds));
-    prepBlock.steps = buildSteps(opts);
-    prepBlock.statusIdx = 0;
-
-    setOverlayToPrep();
-    const ovl = ensureOverlay();
-    ovl.classList.remove('hidden');
-    document.body.style.overflow = 'hidden';
-
-    // Lottie
-    const slot = document.getElementById('prep-ovl-lottie');
-    try {
-      const lottie = await loadLottie();
-      if (lottie && slot) {
-        const data = await fetch(PREP_LOTTIE_URL, { cache:'no-store' }).then(r => r.json());
-        prepBlock.anim = lottie.loadAnimation({
-          container: slot, renderer: 'svg', loop: true, autoplay: true, animationData: data
-        });
-        try { prepBlock.anim.setSpeed?.(0.9); } catch {}
-      }
-    } catch {}
-
-    // tempo + status
-    paintPrepTime();
-    startStatusRotation(STATUS_ROTATE_MS);
-
-    clearInterval(prepBlock.tmr);
-    prepBlock.tmr = setInterval(() => {
-      prepBlock.left -= 1;
-      if (prepBlock.left <= 0) {
-        hidePrepOverlay();
-      } else {
-        paintPrepTime();
-      }
-    }, 1000);
-  }
-
-  function hidePrepOverlay(){
-    const ovl = ensureOverlay();
-    prepBlock.active = false;
-    clearInterval(prepBlock.tmr); prepBlock.tmr = null;
-    stopStatusRotation();
-    try { prepBlock.anim?.destroy?.(); } catch {}
-    prepBlock.anim = null;
-    ovl.classList.add('hidden');
-    document.body.style.overflow = '';
   }
 
   // ===== Conectado → fecha modal e abre overlay =====
@@ -567,7 +582,7 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
     hideQR();
     try { hideModal(); } catch {}
     wantQR = false;
-    showPrepOverlayOneMinute(PREP_SECONDS, { restore: lastRestoreRequested });
+    showPrepOverlayOneMinute(60, { restore: prepBlock.restore });
     scheduleLoad(200);
   }
 
@@ -601,9 +616,9 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
     }, ms);
   }
 
-  // ===== WebSockets via ws-core (empresa + instância) =====
-  let offEmp = null;     // unsubscribe da empresa
-  let offInst = null;    // unsubscribe da instância atual
+  // ===== WebSockets =====
+  let offEmp = null;
+  let offInst = null;
 
   function attachEmpresaWS() {
     if (!empresaId) return;
@@ -627,7 +642,7 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
           showIllustration(); hideQR();
           return;
         }
-        const ttl = normalizeLimit(m.qr_limit ?? m.expires_in ?? m.ttl ?? 60);
+        const ttl = m.qr_limit ?? m.expires_in ?? m.ttl ?? 60;
         if (m.base64)           renderQRFromBase64(m.base64, ttl);
         else if (m.pairingCode) renderQRFromText(m.pairingCode, ttl);
         return;
@@ -659,7 +674,7 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
           showIllustration(); hideQR();
           return;
         }
-        const ttl = normalizeLimit(m.qr_limit ?? m.expires_in ?? m.ttl ?? 60);
+        const ttl = m.qr_limit ?? m.expires_in ?? m.ttl ?? 60;
         if (m.base64)           renderQRFromBase64(m.base64, ttl);
         else if (m.pairingCode) renderQRFromText(m.pairingCode, ttl);
         return;
@@ -743,9 +758,6 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
     const historico = els.selHist?.value || 'none';
     const usePairing = !!els.chkPairing?.checked;
 
-    // guarda se vai restaurar
-    lastRestoreRequested = String(historico || '').toLowerCase() !== 'none';
-
     if (!numero){
       els.qrLoader?.classList.add('hidden');
       showQRError('Informe um número de telefone válido.');
@@ -765,6 +777,9 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
 
       currentInstance = js?.instance || null;
       window.currentInstance = currentInstance;
+
+      // se for restaurar (24h/7d) ⇒ ciclo completo de mídias; se "none" ⇒ só contatos
+      prepBlock.restore = (String(historico || 'none').toLowerCase() !== 'none');
 
       if (currentInstance) attachInstWS(currentInstance);
 
@@ -791,14 +806,11 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
     }
   }
 
-  // ===== Reconectar existente =====
+  // ===== Reconectar =====
   async function openReconnect(item){
     if (!item?.instance_name) return;
     currentInstance = item.instance_name;
     window.currentInstance = currentInstance;
-
-    // reconexão NÃO restaura histórico por padrão
-    lastRestoreRequested = false;
 
     setModalTitle('Reconecte seu número de WhatsApp');
     const histRow = fieldRowOf(els.selHist);
@@ -812,6 +824,9 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
     showIllustration(); showQRError(''); hideQR();
 
     attachInstWS(currentInstance);
+
+    // reconexão não restaura histórico
+    prepBlock.restore = false;
 
     els.qrLoader?.classList.remove('hidden');
     try {
@@ -861,8 +876,6 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
     wantQR = false;
     currentInstance = null;
     window.currentInstance = null;
-    if (els.selHist) els.selHist.value = 'none';
-    lastRestoreRequested = false;
   });
   els.btnCloseMd?.addEventListener('click', hideModal);
   els.btnCancel?.addEventListener('click', hideModal);
@@ -876,7 +889,7 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
     if (e.key === 'Escape' && !els.modal?.classList.contains('hidden')) hideModal();
   });
 
-  // ===== Remoção com aceite =====
+  // ===== Remoção =====
   let toRemove = null;
   function openRemoveModal(item){
     toRemove = item || null;
@@ -953,7 +966,7 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
     loadWhatsAppStatus();
   }
 
-  // ===== Teardown quando sair da /conectar (SPA) =====
+  // ===== Teardown =====
   function teardownConectar() {
     try { offEmp?.(); offEmp = null; } catch {}
     try { offInst?.(); offInst = null; } catch {}
@@ -979,25 +992,18 @@ const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
     teardownConectar();
   });
 
-  // ===== Botão DEV: testar overlay (alterna restaura ↔ sem restauro) =====
-  (function devTestOverlay(){
-    try {
-      const btn = document.createElement('button');
-      btn.textContent = 'Testar overlay (restaura)';
-      btn.style.cssText = `
-        position:fixed; right:16px; bottom:16px; z-index:99999;
-        background:#16a34a; color:#fff; border:0; border-radius:10px; padding:10px 14px;
-        box-shadow:0 8px 24px rgba(0,0,0,.25); cursor:pointer; font-weight:600;
-      `;
-      btn.dataset.restore = '1';
-      btn.addEventListener('click', () => {
-        const restore = btn.dataset.restore === '1';
-        showPrepOverlayOneMinute(PREP_SECONDS, { restore });
-        btn.dataset.restore = restore ? '0' : '1';
-        btn.textContent = restore ? 'Testar overlay (sem restauro)' : 'Testar overlay (restaura)';
-      });
-      document.body.appendChild(btn);
-    } catch {}
+  // ===== FAB de teste do overlay =====
+  (function installOverlayTestFab(){
+    if (document.getElementById('overlay-test-fab')) return;
+    const b = document.createElement('button');
+    b.id = 'overlay-test-fab';
+    b.type = 'button';
+    b.textContent = 'Testar overlay';
+    b.addEventListener('click', () => {
+      const val = String(els.selHist?.value || 'none').toLowerCase();
+      const restore = (val !== 'none');
+      showPrepOverlayOneMinute(60, { restore });
+    });
+    document.body.appendChild(b);
   })();
-
 })();

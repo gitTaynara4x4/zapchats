@@ -5,7 +5,7 @@ import os, secrets, asyncio
 from typing import Any
 from datetime import datetime, timezone
 from pathlib import Path
-
+from backend.routers.email import router as email_router
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, APIRouter, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -353,7 +353,7 @@ app.include_router(clientes.router, prefix="/api", tags=["Clientes"])
 app.include_router(atendimento_conversas.router, prefix="/api")
 # Atendimento principal
 app.include_router(atendimento.router, prefix="/api/atendimento", tags=["Atendimento"])
-
+app.include_router(email_router)
 # ✅ Router REST específico do chat (conversas/mensagens)
 app.include_router(atendimento_chat_router.router, prefix="/api/atendimento", tags=["Atendimento – Chat"])
 app.include_router(ws_router)

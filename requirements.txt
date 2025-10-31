@@ -3,7 +3,11 @@ anyio==4.9.0
 fastapi==0.119.0
 httpx==0.28.1
 openpyxl==3.1.5
-passlib==1.7.4
+
+# Senhas
+passlib[bcrypt]==1.7.4
+bcrypt==4.2.0
+
 pydantic==2.12.0
 PyJWT==2.10.1
 python-dotenv==1.1.1
@@ -23,3 +27,7 @@ psycopg2-binary==2.9.9
 SQLAlchemy==1.4.54
 email-validator==2.1.1
 python-multipart==0.0.9
+
+# Server
+gunicorn==23.0.0
+uvicorn[standard]==0.30.6

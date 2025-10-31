@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="h-full">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Caixas de E-mail • ZapChats</title>
+
+  <!-- Tema (evita FOUC) -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('theme');
+        if (!t || t === 'dark') document.documentElement.classList.add('dark');
+        else document.documentElement.classList.remove('dark');
+      } catch {}
+    })();
+  </script>
+
+  <!-- Inter (se já vier no head-base.html, ok manter duplicado) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+  <style>
+    :root{
+      --brand-500:#00bd3d; --brand-600:#00a337; --brand-700:#008b32;
+    }
+    html,body{height:100%}
+    body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif}
+    .card{background:var(--card-bg,#fff);border-radius:16px;padding:16px;box-shadow:0 6px 20px rgba(0,0,0,.06)}
+    .dark .card{--card-bg:#111827}
+    .btn{display:inline-flex;align-items:center;gap:8px;border-radius:12px;padding:10px 14px;font-weight:600}
+    .btn-primary{background:var(--brand-600);color:#fff}
+    .btn-ghost{background:transparent;border:1px solid rgba(0,0,0,.08)}
+    .dark .btn-ghost{border-color:rgba(255,255,255,.12);color:#e5e7eb}
+    .grid{display:grid;gap:16px}
+    .grid-cols{grid-template-columns: 1fr}
+    @media(min-width:1024px){.grid-cols{grid-template-columns: 360px 1fr}}
+    .tag{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid rgba(0,0,0,.08)}
+    .dark .tag{border-color:rgba(255,255,255,.12);color:#e5e7eb}
+    .progress{height:8px;border-radius:999px;background:rgba(0,0,0,.08);overflow:hidden}
+    .progress > span{display:block;height:100%;background:var(--brand-600)}
+    .list{display:flex;flex-direction:column;gap:10px}
+    .row{display:flex;justify-content:space-between;gap:12px;padding:12px;border-radius:12px;border:1px solid rgba(0,0,0,.06)}
+    .row:hover{background:rgba(0,0,0,.03)}
+    .dark .row{border-color:rgba(255,255,255,.08)}
+    .muted{opacity:.7}
+    .input, select{width:100%;border:1px solid rgba(0,0,0,.12);border-radius:12px;padding:10px 12px;background:#fff}
+    .dark .input, .dark select{background:#0b0f19;border-color:rgba(255,255,255,.14);color:#e5e7eb}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap}
+    .toolbar .grow{flex:1}
+    .hidden{display:none !important}
+    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;padding:16px;z-index:60}
+    .modal{max-width:900px;width:100%;background:var(--card-bg,#fff);border-radius:16px;padding:16px}
+    .pill{padding:4px 10px;border-radius:999px;background:rgba(0,0,0,.06)}
+    .dark .pill{background:rgba(255,255,255,.1)}
+    .kpi{display:flex;flex-direction:column;gap:6px}
+    .kpi .v{font-weight:800;font-size:28px}
+    .kpi .l{font-size:12px;opacity:.7}
+    .inline-form{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    @media(max-width:720px){.inline-form{grid-template-columns:1fr}}
+  </style>
+</head>
+<body class="h-full bg-[#f7f7fb] dark:bg-[#0b0f19] text-[#0b1223] dark:text-[#e5e7eb]">
+
+  <!-- Sidebar (carregada por app-base.js) -->
+  <aside id="sidebar"
+         data-src="/frontend/partials/sidebar.html"
+         data-src-mobile="/frontend/partials/sidebar-mobile.html"></aside>
+
+  <!-- Conteúdo -->
+  <main id="main" class="max-w-[1200px] mx-auto px-4 py-6 grid grid-cols gap-4">
+    <!-- Header -->
+    <header class="flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-extrabold">E-mail</h1>
+        <p class="text-sm muted">Gerencie suas caixas de e-mail e visualize mensagens.</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="btnAddAccount" class="btn btn-primary">Adicionar conta</button>
+        <button id="btnRefreshAll" class="btn btn-ghost">Atualizar</button>
+      </div>
+    </header>
+
+    <!-- Coluna esquerda: Quota + Contas -->
+    <section class="grid gap-4">
+      <!-- Quota -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-bold text-lg">Cota</h2>
+          <span id="quotaTag" class="tag">—</span>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr; gap:12px;">
+          <div class="kpi"><div class="l">Permitidas</div><div id="kpiAllowed" class="v">—</div></div>
+          <div class="kpi"><div class="l">Usadas</div><div id="kpiUsed" class="v">—</div></div>
+          <div class="kpi"><div class="l">Restantes</div><div id="kpiRemaining" class="v">—</div></div>
+          <div class="kpi"><div class="l">Overrides de armazenamento</div><div id="kpiOverrides" class="v">—</div></div>
+        </div>
+        <div class="mt-4 progress"><span id="quotaBar" style="width:0%"></span></div>
+      </div>
+
+      <!-- Contas -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-bold text-lg">Contas</h2>
+          <div class="toolbar">
+            <select id="filterStatus" class="input" style="width:auto">
+              <option value="">Status: todas</option>
+              <option value="active">Ativas</option>
+              <option value="disabled">Desativadas</option>
+              <option value="deleted">Removidas</option>
+            </select>
+          </div>
+        </div>
+        <div id="accountsList" class="list"></div>
+        <div id="accountsEmpty" class="muted hidden">Nenhuma conta ainda.</div>
+      </div>
+
+      <!-- Adicionar Conta -->
+      <div id="addAccountCard" class="card hidden">
+        <h2 class="font-bold text-lg mb-3">Nova conta</h2>
+        <form id="formAddAccount" class="grid gap-3">
+          <div class="inline-form">
+            <div>
+              <label class="text-sm muted">Provedor</label>
+              <select name="provider" class="input" required>
+                <option value="gmail">Gmail</option>
+                <option value="outlook">Outlook</option>
+                <option value="imap">IMAP</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-sm muted">E-mail</label>
+              <input name="email_address" type="email" class="input" placeholder="ex: suporte@empresa.com" required>
+            </div>
+          </div>
+
+          <div>
+            <label class="text-sm muted">Refresh Token (criptografado)</label>
+            <input name="refresh_token_enc" type="text" class="input" placeholder="token seguro" required>
+          </div>
+
+          <div class="inline-form">
+            <div>
+              <label class="text-sm muted">Access Token (opcional)</label>
+              <input name="access_token" type="text" class="input" placeholder="—">
+            </div>
+            <div>
+              <label class="text-sm muted">Expira em (opcional)</label>
+              <input name="token_expiry" type="datetime-local" class="input">
+            </div>
+          </div>
+
+          <div class="inline-form">
+            <div>
+              <label class="text-sm muted">Status</label>
+              <select name="status" class="input">
+                <option value="active">Ativa</option>
+                <option value="disabled">Desativada</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-sm muted">Override de armazenamento (bytes, opcional)</label>
+              <input name="storage_override_bytes" type="number" class="input" placeholder="ex: 1073741824 (1GB)">
+            </div>
+          </div>
+
+          <div class="flex items-center gap-8 mt-1">
+            <button class="btn btn-primary" type="submit">Criar</button>
+            <button id="btnCancelAdd" class="btn btn-ghost" type="button">Cancelar</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- Coluna direita: Mensagens -->
+    <section class="grid gap-4">
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-bold text-lg">Mensagens</h2>
+          <div class="toolbar" style="min-width:40%">
+            <select id="filterAccount" class="input" style="width:auto"><option value="">Conta: todas</option></select>
+            <input id="searchQ" class="input grow" placeholder="Buscar (assunto, trecho, de)..." />
+            <button id="btnSearch" class="btn btn-ghost">Buscar</button>
+          </div>
+        </div>
+        <div id="messagesList" class="list"></div>
+        <div id="messagesEmpty" class="muted hidden">Nenhuma mensagem.</div>
+
+        <div class="flex items-center justify-between mt-3">
+          <button id="btnPrev" class="btn btn-ghost">« Anteriores</button>
+          <span id="pageInfo" class="muted text-sm">—</span>
+          <button id="btnNext" class="btn btn-ghost">Próximas »</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal de Mensagem -->
+  <div id="msgModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal">
+      <div class="flex items-start justify-between mb-2">
+        <h3 id="msgModalTitle" class="font-bold text-lg">Mensagem</h3>
+        <button id="msgModalClose" class="btn btn-ghost">Fechar</button>
+      </div>
+      <div id="msgMeta" class="text-sm muted mb-3">—</div>
+      <div id="msgSnippet" class="mb-3"></div>
+      <div id="msgAttachments" class="grid gap-2"></div>
+    </div>
+  </div>
+
+  <!-- Base + página -->
+  <script src="/frontend/js/app-base.js"></script>
+  <script>
+    // Permissão exigida (seu app-base pode usar isso)
+    window.PERM_REQUIRED = 'email.ver';
+  </script>
+  <script src="/frontend/js/pages/email.js"></script>
+</body>
+</html>
