@@ -5,9 +5,10 @@ from typing import Optional, List
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Body, Response
+from fastapi.responses import StreamingResponse, PlainTextResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, EmailStr, ConfigDict
 from sqlalchemy import select, func, and_, or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from backend.database import get_db
@@ -25,15 +26,14 @@ class EmailAccountCreate(BaseModel):
     refresh_token_enc: str
     access_token: Optional[str] = None
     token_expiry: Optional[datetime] = None
-    storage_override_bytes: Optional[int] = None
     status: str = "active"  # 'active' conta na cota
+    colaborador_id: Optional[int] = None
 
 class EmailAccountUpdate(BaseModel):
     provider: Optional[str] = None
     status: Optional[str] = None  # 'active' | 'disabled' | 'deleted'
     access_token: Optional[str] = None
     token_expiry: Optional[datetime] = None
-    storage_override_bytes: Optional[int] = None
     colaborador_id: Optional[int] = None
 
 class EmailAccountOut(BaseModel):
@@ -44,14 +44,11 @@ class EmailAccountOut(BaseModel):
     status: str
     created_at: datetime
     colaborador_id: Optional[int] = None
-    storage_override_bytes: Optional[int] = None
 
 class EmailQuotaOut(BaseModel):
     allowed_accounts: int
     used_accounts: int
     remaining_accounts: int
-    company_storage_limit: Optional[int] = None
-    account_storage_overrides: int
 
 class EmailMessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -77,6 +74,14 @@ class EmailAttachmentOut(BaseModel):
     storage_url: Optional[str] = None
     # não trazemos data (bytea) no list
 
+class EmailSendIn(BaseModel):
+    account_id: int
+    to: List[str]
+    cc: Optional[List[str]] = None
+    bcc: Optional[List[str]] = None
+    subject: Optional[str] = None
+    body_text: Optional[str] = None
+
 # =========================
 # Helpers
 # =========================
@@ -88,10 +93,9 @@ def _empresa_or_404(db: Session, user) -> models.Empresa:
 
 def _friendly_integrity_error(e: IntegrityError) -> HTTPException:
     msg = str(e.orig) if getattr(e, "orig", None) else str(e)
-    # Cotas (trigger): 23514 (check_violation) ou P0001 (raise_exception)
     if "Limite de contas de e-mail atingido" in msg or "23514" in msg or "P0001" in msg:
         return HTTPException(status_code=400, detail="Limite de contas de e-mail atingido para a sua empresa.")
-    if "uq_email_account_emp_provider_email" in msg or "email_accounts" in msg and "already exists" in msg:
+    if "uq_email_account_emp_provider_email" in msg or ("email_accounts" in msg and "already exists" in msg):
         return HTTPException(status_code=409, detail="Já existe uma conta com este e-mail/provedor na empresa.")
     return HTTPException(status_code=400, detail="Não foi possível salvar. Erro de integridade.")
 
@@ -107,7 +111,38 @@ def health():
     return {"ok": True, "module": "email"}
 
 # =========================
-# QUOTA
+# LIMITS (para o front habilitar/desabilitar botões)
+# =========================
+@router.get("/limits")
+def email_limits(
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    emp = _empresa_or_404(db, user)
+
+    allowed = _compute_allowed_accounts(emp)
+    used = db.scalar(
+        select(func.count(models.EmailAccount.id))
+        .where(models.EmailAccount.empresa_id == emp.id)
+        .where(models.EmailAccount.status == "active")
+    ) or 0
+
+    remaining = max(allowed - used, 0)
+    can_compose = used > 0
+
+    return {
+        "allowed": allowed,
+        "used": used,
+        "remaining": remaining,
+        "can_connect": remaining > 0,
+        "can_compose": can_compose,
+        "tier_effective": emp.effective_tier,
+        "email_plan_paid_active": emp.email_paid_active,
+        "email_trial_active": emp.email_trial_active,
+    }
+
+# =========================
+# QUOTA (forma resumida)
 # =========================
 @router.get("/quota", response_model=EmailQuotaOut)
 def get_quota(
@@ -122,20 +157,12 @@ def get_quota(
         .where(and_(models.EmailAccount.empresa_id == emp.id,
                     models.EmailAccount.status == "active"))
     ) or 0
-
-    overrides = db.scalar(
-        select(func.count(models.EmailAccount.id))
-        .where(and_(models.EmailAccount.empresa_id == emp.id,
-                    models.EmailAccount.storage_override_bytes.isnot(None)))
-    ) or 0
-
     remaining = max(0, allowed - used)
+
     return EmailQuotaOut(
         allowed_accounts=allowed,
         used_accounts=used,
         remaining_accounts=remaining,
-        company_storage_limit=emp.email_storage_override_bytes,
-        account_storage_overrides=overrides,
     )
 
 # =========================
@@ -162,8 +189,8 @@ def create_account(
 ):
     emp = _empresa_or_404(db, user)
 
-    # Checagem pró-ativa de cota (DB ainda é a autoridade via trigger)
-    if payload.status == "active":
+    # Checagem pró-ativa de cota (DB ainda é a autoridade se houver trigger)
+    if (payload.status or "active") == "active":
         allowed = _compute_allowed_accounts(emp)
         used = db.scalar(
             select(func.count(models.EmailAccount.id))
@@ -181,7 +208,7 @@ def create_account(
         access_token=payload.access_token,
         token_expiry=payload.token_expiry,
         status=payload.status or "active",
-        storage_override_bytes=payload.storage_override_bytes,
+        colaborador_id=payload.colaborador_id,
     )
     db.add(acc)
     try:
@@ -264,7 +291,6 @@ def list_messages(
         .where(models.EmailMessage.empresa_id == emp.id)
 
     if account_id:
-        # valida a conta
         acc = db.get(models.EmailAccount, account_id)
         if not acc or acc.empresa_id != emp.id:
             raise HTTPException(status_code=404, detail="Conta não encontrada")
@@ -280,6 +306,7 @@ def list_messages(
             )
         )
 
+    # ⚠️ NÃO ordene por created_at se sua tabela não possui essa coluna.
     query = query.order_by(models.EmailMessage.received_at.desc())\
                  .limit(limit).offset(offset)
 
@@ -316,10 +343,6 @@ def list_message_attachments(
 
     return [EmailAttachmentOut.model_validate(a) for a in db.scalars(q).all()]
 
-# (opcional) download binário — só se você estiver gravando em bytea.
-# Caso use storage_url para S3/Local, sirva via nginx/static e só retorne o link.
-from fastapi.responses import StreamingResponse, PlainTextResponse
-
 @router.get("/attachments/{attachment_id}/download")
 def download_attachment(
     attachment_id: int,
@@ -331,7 +354,7 @@ def download_attachment(
     if not att or att.empresa_id != emp.id:
         raise HTTPException(status_code=404, detail="Anexo não encontrado")
 
-    if att.data:
+    if getattr(att, "data", None):
         mime = att.mimetype or "application/octet-stream"
         filename = att.filename or "anexo.bin"
         return StreamingResponse(
@@ -341,7 +364,65 @@ def download_attachment(
         )
 
     if att.storage_url:
-        # Retorne o link bruto ou faça proxy; aqui devolvemos a URL (texto)
         return PlainTextResponse(att.storage_url)
 
     raise HTTPException(status_code=404, detail="Anexo sem dados disponíveis")
+
+# =========================
+# COMPOSE / SEND (mínimo viável)
+# =========================
+@router.post("/send")
+def send_email(
+    payload: EmailSendIn,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    """
+    MVP de envio: valida conta, persiste uma mensagem de saída na tabela.
+    Integração real com Gmail/SMTP pode ser plugada aqui (fila/worker).
+    """
+    emp = _empresa_or_404(db, user)
+
+    acc = db.get(models.EmailAccount, payload.account_id)
+    if not acc or acc.empresa_id != emp.id:
+        raise HTTPException(status_code=404, detail="Conta não encontrada")
+
+    if not payload.to:
+        raise HTTPException(status_code=400, detail="Informe pelo menos um destinatário.")
+
+    body = (payload.body_text or "").strip()
+    snippet = (body[:180] + ("…" if len(body) > 180 else "")) if body else None
+
+    # Persistimos como "mensagem" para o histórico (tipo OUTBOX conceitual)
+    msg = models.EmailMessage(
+        empresa_id = emp.id,
+        account_id = acc.id,
+        external_id = None,  # preencher quando enviar de fato via provedor
+        subject = (payload.subject or "").strip() or None,
+        snippet = snippet,
+        from_addr = acc.email_address,
+        to_addrs = "; ".join([s.strip() for s in payload.to if s.strip()]) or None,
+        cc_addrs = "; ".join([s.strip() for s in (payload.cc or []) if s.strip()]) or None,
+        bcc_addrs = "; ".join([s.strip() for s in (payload.bcc or []) if s.strip()]) or None,
+        received_at = datetime.now(timezone.utc),   # para ordenação imediata
+        size_bytes = len(body.encode("utf-8")) if body else 0,
+        has_attachments = False,
+        body_text = body or None,
+        body_html = None,
+    )
+    db.add(msg)
+    db.commit()
+
+    # Aqui você poderia enfileirar para um worker fazer o envio real.
+    return {"ok": True, "queued": True, "message_id": msg.id}
+
+# =========================
+# OAuth (placeholder)
+# =========================
+@router.get("/oauth/google/start")
+def oauth_google_start():
+    """
+    Endpoint placeholder para iniciar OAuth com Google.
+    Substitua por um RedirectResponse para a URL real do consent screen.
+    """
+    return JSONResponse({"ok": True, "message": "OAuth Google não configurado ainda."}, status_code=501)

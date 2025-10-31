@@ -1,0 +1,24 @@
+/* Herdar todo o layout/base do dashboard (grids, section-title, filter, box, table...) */
+@import url("/frontend/css/dashboard.css");
+
+/* Se quiser, também pode herdar tokens usados nas Mídias */
+@import url("/frontend/css/midias.css");
+
+/* ====== Específicos do modal de leitura ====== */
+.email-modal::backdrop{ background:rgba(0,0,0,.5); }
+.email-modal{ border:0; padding:0; }
+.email-modal__panel{
+  background:var(--card); color:var(--fg);
+  border:1px solid var(--border); border-radius:12px;
+  width:min(980px,95vw); max-height:88vh; display:flex; flex-direction:column;
+}
+.email-modal__header{
+  display:flex; align-items:center; gap:.75rem;
+  padding:.7rem .9rem; border-bottom:1px solid var(--border);
+}
+.email-modal__body{
+  padding:.9rem; overflow:auto; max-height:calc(88vh - 56px);
+}
+.email-meta{ color:var(--muted); font-size:.9rem; margin-bottom:.5rem; }
+.email-body{ line-height:1.6; }
+.email-body img{ max-width:100%; height:auto; }

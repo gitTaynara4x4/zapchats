@@ -1986,6 +1986,7 @@ async def on_messages_set(inst_id: str, data):
     """
     Import de histórico com LOG detalhado + overlay.
     NÃO emite cada mensagem no WS (para não lotar), apenas progresso/done.
+    >>> Patch: passa a emitir no WS mensagens RECENTES do histórico (<= HISTORY_RECENT_WS_SEC).
     """
     if not ENABLE_MESSAGES_SET:
         LOG("[MESSAGES_SET] Ignorado (ENABLE_MESSAGES_SET=false).")
@@ -2024,7 +2025,10 @@ async def on_messages_set(inst_id: str, data):
                  HISTORY_BATCH_COMMIT=HISTORY_BATCH_COMMIT)
 
         try:
-            await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "history_sync_start", "total": total, "serverTimestamp": _server_ts_ms()})
+            await conexoes_ativas.send_message(
+                f"emp:{empresa_id}",
+                {"type": "history_sync_start", "total": total, "serverTimestamp": _server_ts_ms()}
+            )
         except Exception:
             pass
 
@@ -2059,6 +2063,12 @@ async def on_messages_set(inst_id: str, data):
                      limite_utc=_iso_utc(limite_tempo),
                      cap=cap)
 
+            # janela para emitir mensagens recentes do histórico no WS
+            try:
+                RECENT_SEC = int(os.getenv("HISTORY_RECENT_WS_SEC", "120"))
+            except Exception:
+                RECENT_SEC = 120
+
             for idx, m in enumerate(mensagens, start=1):
                 if novas >= cap:
                     _log_ctx("[HIST] cap atingido", novas=novas, cap=cap)
@@ -2091,8 +2101,7 @@ async def on_messages_set(inst_id: str, data):
                 resolved_jid = _resolve_remote_jid(inst_id, remote_jid)
                 if _is_lid_jid(original_jid) and not resolved_jid:
                     tel_fallback, _ = _resolve_counterparty_num_1to1(m, me_num)
-                    _log_ctx("[HIST][lid-fallback]",
-                             idx=idx, msg_id=msg_id, tel_fallback=tel_fallback)
+                    _log_ctx("[HIST][lid-fallback]", idx=idx, msg_id=msg_id, tel_fallback=tel_fallback)
                     if tel_fallback:
                         resolved_jid = f"{tel_fallback}@s.whatsapp.net"
                         _LID_CACHE.setdefault(inst_id, {})[_jid_strip_device(original_jid)] = resolved_jid
@@ -2171,6 +2180,7 @@ async def on_messages_set(inst_id: str, data):
 
                     if msg_id and db.query(models.Mensagem.id).filter_by(cliente_id=cli_id, msg_id=msg_id).first():
                         _log_ctx("[HIST][skip] duplicada (1:1)", idx=idx, msg_id=msg_id, cliente_id=cli_id)
+                        # (do histórico) não emitimos duplicadas aqui
                         continue
 
                     ack_initial = _ack_from_status(m.get("status"))
@@ -2191,6 +2201,47 @@ async def on_messages_set(inst_id: str, data):
                     _log_ctx("[HIST][saved][1:1]", idx=idx, msg_id=msg_id, saved_id=msg_db_id,
                              telefone=telefone, ts=_iso_utc(ts_msg), preview=_short(conteudo),
                              media=("off" if DISABLE_MEDIA_ON_HISTORY else ("on" if media_meta else "none")))
+
+                    # >>>>> PATCH WS-LIVE (somente mensagens recentes do histórico) <<<<<
+                    try:
+                        is_recent = abs((_now_utc() - ts_msg).total_seconds()) <= RECENT_SEC
+                    except Exception:
+                        is_recent = False
+                    if is_recent:
+                        try:
+                            # mesmos campos que o on_messages_upsert emite (para o front tratar igual)
+                            cliente = db.query(models.Cliente).filter_by(id=cli_id).first()
+                            await conexoes_ativas.send_message(
+                                f"emp:{empresa_id}",
+                                {
+                                    # contexto / roteamento
+                                    "empresa_id":  empresa_id,
+                                    "cliente_id":  cli_id,
+                                    "instancia_id": inst.id,
+                                    "instance_name": getattr(inst, "instance_name", None),
+
+                                    # dados para a lista/preview
+                                    "telefone": formatar_telefone_br(telefone),
+                                    "avatar_url": getattr(cliente, "avatar_url", None) if cliente else None,
+                                    "push_name": getattr(cliente, "nome_whatsapp", None) if cliente else None,
+                                    "nome": getattr(cliente, "nome", None) if cliente else formatar_telefone_br(telefone),
+
+                                    # conteúdo que o front espera
+                                    "mensagem":  conteudo,
+                                    "tipo":      ("saida" if from_me else "entrada"),
+                                    "origem":    ("atendente" if from_me else "cliente"),
+                                    "timestamp": _iso_utc(ts_msg),
+
+                                    # chaves de conciliação/RT
+                                    "msg_id": (msg_id or str(msg_db_id)),
+                                    "ack":    (ack_initial if from_me else None),
+
+                                    # para badge de lag
+                                    "serverTimestamp": int(_now_utc().timestamp() * 1000),
+                                }
+                            )
+                        except Exception as e:
+                            _log_ctx("[HIST][ws-live] falha ao emitir", idx=idx, msg_id=msg_id, err=str(e))
 
                     # mídia (se habilitada)
                     if media_meta:
