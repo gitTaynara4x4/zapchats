@@ -160,8 +160,9 @@ function loadLottie(){
   });
 }
 
-// ===== Overlay (com ciclo e batimento) =====
+// ===== Overlay (dots estilo ChatGPT) =====
 const prep = { active:false, left:0, tmr:null, anim:null, seq:[], seqIdx:0, seqTmr:null, historico:'none' };
+
 function ensureOverlay(){
   let ovl = document.getElementById('sync-overlay');
   if (ovl) return ovl;
@@ -170,7 +171,7 @@ function ensureOverlay(){
   ovl.innerHTML = `
     <div class="sync-wrap" role="dialog" aria-live="polite">
       <div id="prep-ovl-lottie"></div>
-      <div id="prep-ovl-status" class="think">Sincronizando seus contatos...</div>
+      <div id="prep-ovl-status" class="think">Sincronizando seus contatos<span class="typing" aria-hidden="true"><span></span><span></span><span></span></span></div>
       <div id="prep-ovl-title">Estamos organizando tudo para você.</div>
       <div id="prep-ovl-sub">Esta ação pode demorar um pouco.</div>
       <div id="prep-ovl-time"><span class="time-pill">01:00</span></div>
@@ -184,12 +185,16 @@ function formatClock(s){
   const ss = String(s%60).padStart(2,'0');
   return `${mm}:${ss}`;
 }
+// monta o texto + “pontinhos” animados (estilo ChatGPT)
+function statusHTML(txt){
+  return `${htmlEscape(txt)}<span class="typing" aria-hidden="true"><span></span><span></span><span></span></span>`;
+}
 function setStatus(txt, fade=true){
   const el = $('#prep-ovl-status');
   if (!el) return;
-  el.textContent = txt;
+  el.innerHTML = statusHTML(txt);
   el.classList.remove('fade'); void el.offsetWidth;
-  if (fade) el.classList.add('fade'); // leve fade-in
+  if (fade) el.classList.add('fade');
 }
 function pickSequence(historico){
   if ((historico||'none') === 'none') return ['Sincronizando seus contatos...'];
@@ -208,11 +213,11 @@ function startStatusLoop(){
   if (!items.length) return;
   prep.seqIdx = 0;
   setStatus(items[0], true);
-  // ritmo mais lento
+  // ritmo mais lento (≈4s)
   prep.seqTmr = setInterval(() => {
     prep.seqIdx = (prep.seqIdx + 1) % items.length;
     setStatus(items[prep.seqIdx], true);
-  }, 3800);
+  }, 4000);
 }
 function paintTime(){
   const pill = $('#prep-ovl-time .time-pill');
@@ -228,7 +233,7 @@ async function showPrepOverlayOneMinute(seconds=60, opts={}){
   ovl.classList.add('show');
   document.body.style.overflow = 'hidden';
 
-  // Animação lottie
+  // Lottie
   try {
     const lottie = await loadLottie();
     const slot = $('#prep-ovl-lottie', ovl);
@@ -240,7 +245,7 @@ async function showPrepOverlayOneMinute(seconds=60, opts={}){
     }
   } catch {}
 
-  // Ciclo de mensagens
+  // Mensagens
   prep.seq = pickSequence(prep.historico);
   startStatusLoop();
 
@@ -299,12 +304,35 @@ function hidePrepOverlay(){
     margin: 0 auto 6px;
   }
 
-  /* ↓↓↓ Status MENOR, sem negrito e batimento LENTO ↓↓↓ */
+  /* Status – MENOR e sem negrito */
   #prep-ovl-status{
     font-weight:400;                 /* sem negrito */
-    letter-spacing:.01em;
-    margin:.15rem 0 .3rem;
-    font-size:clamp(14px,1.3vw,16px);/* menor que antes */
+    letter-spacing:.02em;
+    margin:.2rem 0 .35rem;
+    font-size:clamp(12px,1.1vw,13px);/* ainda menor */
+    opacity:.96;
+  }
+  #prep-ovl-status.fade{animation:prepFade .55s ease}
+  @keyframes prepFade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+  /* Pontinhos estilo ChatGPT */
+  .typing{ display:inline-flex; align-items:center; gap:4px; margin-left:6px; }
+  .typing span{
+    width:6px; height:6px; border-radius:50%;
+    background: currentColor; opacity:.35;
+    transform: translateY(0) scale(.9);
+    animation: typingBlink 1.2s infinite ease-in-out;
+  }
+  .typing span:nth-child(2){ animation-delay: .2s; }
+  .typing span:nth-child(3){ animation-delay: .4s; }
+  @keyframes typingBlink{
+    0%,20%   { opacity:.25; transform: translateY(0)    scale(.9); }
+    50%      { opacity:1;    transform: translateY(-2px) scale(1); }
+    80%,100% { opacity:.25; transform: translateY(0)    scale(.9); }
+  }
+  @media (prefers-reduced-motion: reduce){
+    .typing span{ animation:none !important; }
+    #prep-ovl-status.fade{ animation:none !important; }
   }
 
   #prep-ovl-title{  font-weight:800; letter-spacing:.01em; font-size:clamp(16px,1.6vw,20px); margin:.1rem 0 .1rem; }
@@ -315,24 +343,6 @@ function hidePrepOverlay(){
     min-width:70px; padding:.18rem .5rem; border-radius:999px;
     background:rgba(255,255,255,.06);
   }
-
-  /* Batimento (texto) – mais LENTO */
-  @keyframes heartbeat {
-    0%{transform:scale(1);text-shadow:0 0 0 rgba(34,197,94,0);opacity:.92}
-    12%{transform:scale(1.12);text-shadow:0 0 22px rgba(34,197,94,.40);opacity:1}
-    24%{transform:scale(1);text-shadow:0 0 0 rgba(34,197,94,0);opacity:.95}
-    38%{transform:scale(1.14);text-shadow:0 0 26px rgba(34,197,94,.45);opacity:1}
-    55%{transform:scale(1);text-shadow:0 0 0 rgba(34,197,94,0);opacity:.94}
-    100%{transform:scale(1);text-shadow:0 0 0 rgba(34,197,94,0);opacity:.92}
-  }
-  @keyframes prepFade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
-
-  /* duração aumentada para ~4.2s */
-  #prep-ovl-status.think{will-change:transform,opacity;animation:heartbeat 4.2s ease-in-out infinite}
-  #prep-ovl-status.fade{animation:prepFade .55s ease}
-  #prep-ovl-status.think.fade{animation:heartbeat 4.2s ease-in-out infinite,prepFade .55s ease 1}
-
-  @media (prefers-reduced-motion: reduce){ #prep-ovl-status.think{animation:none!important} }
 
   /* Dev button */
   .test-overlay-btn{
