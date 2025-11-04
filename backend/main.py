@@ -1,6 +1,5 @@
-# backend/main.py
+# backend/main.py.
 from __future__ import annotations
-
 import os, secrets, asyncio
 from typing import Any
 from datetime import datetime, timezone
