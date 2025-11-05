@@ -1,4 +1,3 @@
-# backend/main.py
 from __future__ import annotations
 import os, secrets, asyncio
 from typing import Any
@@ -286,7 +285,7 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
         and not path.startswith("/api")
         and not path.startswith("/frontend")
     ):
-        nice_path = path[:-5] if path.endswith(".html") else path
+        nice_path = path[:-5] if path.endswith(".html") else path  # (não exibido, só mantido)
 
         html = """<!doctype html>
 <html lang="pt-BR">
@@ -488,6 +487,10 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
     .icon{
       font-size:32px;
       margin-bottom:10px;
+      width:clamp(260px, 34vw, 340px);
+      height:clamp(260px, 34vw, 340px);
+      margin-left:auto;
+      margin-right:auto;
     }
     h1{
       font-size:22px;
@@ -498,16 +501,6 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
       line-height:1.6;
       color:var(--muted);
       margin-bottom:6px;
-    }
-    code{
-      background:rgba(15,23,42,.9);
-      padding:2px 6px;
-      border-radius:6px;
-      font-size:13px;
-      color:var(--fg);
-    }
-    html:not(.dark) code{
-      background:rgba(229,231,235,.9);
     }
     .actions{
       margin-top:16px;
@@ -524,14 +517,14 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
       border-radius:999px;
       font-size:14px;
       text-decoration:none;
-      border:1px solid #374151;
-      background:#111827;
-      color:#e5e7eb;
+      border:1px solid var(--border);
+      background:var(--card);
+      color:var(--fg);
     }
     html:not(.dark) a.btn{
-      background:#ffffff;
-      border-color:#d1d5db;
-      color:#111827;
+      background:var(--card);
+      border-color:var(--border);
+      color:var(--fg);
     }
   </style>
 </head>
@@ -580,7 +573,7 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
   <main class="wrap">
     <div id="lottie404" class="icon"></div>
     <h1>Não conseguimos encontrar essa página</h1>
-    <p>A rota <code>{nice_path}</code> não existe ou foi movida.</p>
+    <p>Não encontramos a página que você tentou acessar.</p>
     <p>Verifique se o endereço está correto ou volte para uma área existente do painel.</p>
     <div class="actions">
       <a href="/dashboard" class="btn">Ir para o Dashboard</a>
@@ -639,14 +632,50 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
   })();
   </script>
 
-  <script src="/frontend/js/404.json"></script>
+  <!-- Lottie player -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+  <!-- Carrega a animação 404.json -->
+  <script>
+  (async function () {
+    var container = document.getElementById('lottie404');
+    if (!container) return;
+
+    try {
+      var res = await fetch('/frontend/js/404.json', { cache: 'no-store' });
+      if (!res.ok) {
+        console.warn('404.json não encontrado');
+        return;
+      }
+      var data = await res.json();
+
+      var lottiePlayer = window.lottie || window.bodymovin;
+      if (!lottiePlayer || !lottiePlayer.loadAnimation) {
+        console.warn('Lottie não disponível');
+        return;
+      }
+
+      lottiePlayer.loadAnimation({
+        container: container,
+        renderer: 'svg',
+        loop: true,
+        autoplay: true,
+        animationData: data
+      });
+    } catch (e) {
+      console.error('Erro ao carregar Lottie 404:', e);
+    }
+  })();
+  </script>
 </body>
 </html>"""
         html = html.replace("{nice_path}", nice_path)
         return HTMLResponse(html, status_code=404)
-
     # Para qualquer outra coisa (inclui /api), usa handler padrão do FastAPI (JSON etc.)
     return await fastapi_http_exception_handler(request, exc)
+
+
 
 # Gate de autenticação + permissão por página (HTML)
 @app.middleware("http")
