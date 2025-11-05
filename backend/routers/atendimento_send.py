@@ -1,4 +1,3 @@
-# backend/routers/atendimento_send.py
 from __future__ import annotations
 
 import os
@@ -60,12 +59,14 @@ def normalizar_telefone(numero: str | None) -> str | None:
         restante = "9" + restante
     return f"55{ddd}{restante}"
 
+
 def _remote_to_num(remote_jid: str | None) -> str | None:
     """Recebe '5511999999999@s.whatsapp.net' (com ou sem :device) e devolve 55DDDN..."""
     if not remote_jid:
         return None
     user = str(remote_jid).split("@", 1)[0].split(":", 1)[0]
     return normalizar_telefone(user)
+
 
 def formatar_telefone_br(numero: str) -> str:
     numero = "".join(filter(str.isdigit, numero))
@@ -75,6 +76,7 @@ def formatar_telefone_br(numero: str) -> str:
         return f"+{numero[:2]} {numero[2:4]} {numero[4:8]}-{numero[8:]}"
     return f"+{numero[:2]} {numero[2:]}"
 
+
 def _now_sp() -> datetime:
     """
     Retorna **UTC com timezone** (tz-aware).
@@ -83,11 +85,13 @@ def _now_sp() -> datetime:
     """
     return datetime.now(timezone.utc)
 
+
 def _ensure_auth():
     if not EVOLUTION_KEY:
         raise HTTPException(500, "EVOLUTION_APIKEY/EVOLUTION_KEY não configurada no ambiente.")
     if not EVOLUTION_URL:
         raise HTTPException(500, "EVOLUTION_URL não configurada no ambiente.")
+
 
 def _evo_post(path: str, instance: str, payload: Dict[str, Any], timeout: int = 30) -> Dict[str, Any]:
     _ensure_auth()
@@ -99,6 +103,7 @@ def _evo_post(path: str, instance: str, payload: Dict[str, Any], timeout: int = 
         return r.json()
     except Exception:
         return {"raw": r.text}
+
 
 def _resolve_empresa_e_instancia(
     db: Session,
@@ -301,18 +306,22 @@ class QuoteKey(BaseModel):
     remoteJid: Optional[str] = None
     fromMe: Optional[bool] = None
 
+
 class QuoteMessage(BaseModel):
     conversation: Optional[str] = None
+
 
 class Quoted(BaseModel):
     key: QuoteKey
     message: Optional[QuoteMessage] = None
+
 
 class BaseSend(BaseModel):
     empresa_id: Optional[int] = Field(None, description="ID da empresa (ou use 'instance'/'instancia_id')")
     instance: Optional[str] = Field(None, description="Nome da instância (alternativa a empresa_id)")
     instancia_id: Optional[int] = Field(None, description="ID da instância (alternativa a instance)")
     number: str = Field(..., description="Número do cliente (somente dígitos; DDI+DDD+telefone)")
+
 
 class SendTextReq(BaseSend):
     text: str
@@ -322,6 +331,7 @@ class SendTextReq(BaseSend):
     mentioned: Optional[List[str]] = None
     quoted: Optional[Quoted] = None
 
+
 class SendAudioReq(BaseSend):
     audio: str  # URL http(s) ou base64
     delay: Optional[int] = None
@@ -329,6 +339,7 @@ class SendAudioReq(BaseSend):
     mentionsEveryOne: Optional[bool] = None
     mentioned: Optional[List[str]] = None
     quoted: Optional[Quoted] = None
+
 
 class SendMediaReq(BaseSend):
     media: str   # URL http(s) ou base64
@@ -342,6 +353,7 @@ class SendMediaReq(BaseSend):
     mentioned: Optional[List[str]] = None
     quoted: Optional[Quoted] = None
 
+
 class SendStickerReq(BaseSend):
     sticker: str  # URL/base64 (webp/png)
     delay: Optional[int] = None
@@ -349,6 +361,7 @@ class SendStickerReq(BaseSend):
     mentionsEveryOne: Optional[bool] = None
     mentioned: Optional[List[str]] = None
     quoted: Optional[Quoted] = None
+
 
 class ContactItem(BaseModel):
     fullName: Optional[str] = None
@@ -358,15 +371,18 @@ class ContactItem(BaseModel):
     email: Optional[str] = None
     url: Optional[str] = None
 
+
 class SendContactReq(BaseSend):
     contact: List[ContactItem]
+
 
 class ReactionKey(BaseModel):
     remoteJid: str
     fromMe: bool = True
     id: str
 
-class SendReactionReq(BaseSend):
+
+class SendReactionReq(BaseModel):
     empresa_id: Optional[int] = None
     instance: Optional[str] = None
     instancia_id: Optional[int] = None
@@ -770,6 +786,7 @@ async def send_text_by_instance(
     data = body or SendTextReq(empresa_id=None, instance=instance, number="", text="")
     data.instance = instance
     return await send_text(data, db, user)
+
 
 @router.post("/instancia/{instancia_id}/send/text")
 async def send_text_by_instancia_id(

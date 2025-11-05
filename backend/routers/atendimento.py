@@ -8,8 +8,8 @@ from typing import Optional, Dict, List, Tuple, Any, Iterable
 from datetime import datetime
 
 from dateutil import parser
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
-from sqlalchemy import func
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, Header
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -95,18 +95,23 @@ def _k_pin(empresa_id: int) -> str:
     # (usado só como fallback quando não houver tabela de PINs)
     return _k("conv", "pin", "emp", str(int(empresa_id)))
 
+
 def _k_pin_user(empresa_id: int, user_id: int) -> str:
     # pins por usuário (cache Redis)
     return _k("conv", "pin", "emp", str(int(empresa_id)), "user", str(int(user_id)))
 
+
 def _k_deleted(empresa_id: int) -> str:
     return _k("conv", "deleted", "emp", str(int(empresa_id)))
+
 
 def _k_labels(empresa_id: int, cliente_id: int) -> str:
     return _k("conv", "labels", "emp", str(int(empresa_id)), "cli", str(int(cliente_id)))
 
+
 def _ensure_list(x):
     return x if isinstance(x, list) else (list(x) if isinstance(x, (set, tuple)) else [])
+
 
 def _is_admin(user) -> bool:
     """
@@ -126,9 +131,22 @@ def _is_admin(user) -> bool:
         return False
 
 
+# ------- Helpers: empresa do usuário / validação -------
+def _empresa_do_user(user) -> Optional[int]:
+    return getattr(user, "empresa_id", None) or getattr(user, "empresa", None)
+
+
+def _assert_empresa_user(user, empresa_id: int) -> int:
+    emp = _empresa_do_user(user)
+    if emp is not None and int(emp) != int(empresa_id):
+        raise HTTPException(status_code=403, detail="Empresa inválida para este usuário")
+    return int(empresa_id)
+
+
 # ------- Helpers: PIN por usuário em DB (com fallback) -------
 def _has_model_pinned() -> bool:
     return hasattr(models, "AtendimentoPinnedConversa")
+
 
 def _pinned_set_db(db: Session, empresa_id: int, user_id: int) -> set[int]:
     """
@@ -139,11 +157,14 @@ def _pinned_set_db(db: Session, empresa_id: int, user_id: int) -> set[int]:
         return set()
     rows = (
         db.query(models.AtendimentoPinnedConversa.conversa_id)
-          .filter(models.AtendimentoPinnedConversa.empresa_id == int(empresa_id),
-                  models.AtendimentoPinnedConversa.user_id == int(user_id))
-          .all()
+        .filter(
+            models.AtendimentoPinnedConversa.empresa_id == int(empresa_id),
+            models.AtendimentoPinnedConversa.user_id == int(user_id),
+        )
+        .all()
     )
     return set(int(r[0]) for r in rows)
+
 
 def _pins_get_cached(db: Session, empresa_id: int, user_id: int) -> set[int]:
     c = _cache_get_json(_k_pin_user(empresa_id, user_id))
@@ -153,15 +174,18 @@ def _pins_get_cached(db: Session, empresa_id: int, user_id: int) -> set[int]:
         except Exception:
             pass
     s = _pinned_set_db(db, empresa_id, user_id)
-    _cache_set_json(_k_pin_user(empresa_id, user_id), sorted(s), ttl=30*24*3600)
+    _cache_set_json(_k_pin_user(empresa_id, user_id), sorted(s), ttl=30 * 24 * 3600)
     return s
 
+
 def _pins_put_cached(empresa_id: int, user_id: int, s: set[int]):
-    _cache_set_json(_k_pin_user(empresa_id, user_id), sorted(int(x) for x in s), ttl=30*24*3600)
+    _cache_set_json(_k_pin_user(empresa_id, user_id), sorted(int(x) for x in s), ttl=30 * 24 * 3600)
+
 
 # ------- Helpers: Labels com cor em DB (com fallback) -------
 def _has_model_labels() -> bool:
     return hasattr(models, "AtendimentoConversaLabel")
+
 
 def _normalize_hex(c: Optional[str]) -> Optional[str]:
     if not c:
@@ -172,44 +196,66 @@ def _normalize_hex(c: Optional[str]) -> Optional[str]:
     if not c.startswith("#"):
         c = "#" + c
     if len(c) == 4:  # #abc -> #aabbcc
-        c = "#" + "".join(ch*2 for ch in c[1:])
+        c = "#" + "".join(ch * 2 for ch in c[1:])
     return c[:7].lower()
+
 
 def _labels_db_list(db: Session, empresa_id: int, cliente_id: int) -> List[Dict[str, Optional[str]]]:
     if not _has_model_labels():
         return []
     rows = (
         db.query(models.AtendimentoConversaLabel)
-          .filter(models.AtendimentoConversaLabel.empresa_id == int(empresa_id),
-                  models.AtendimentoConversaLabel.cliente_id == int(cliente_id))
-          .order_by(models.AtendimentoConversaLabel.name.asc())
-          .all()
+        .filter(
+            models.AtendimentoConversaLabel.empresa_id == int(empresa_id),
+            models.AtendimentoConversaLabel.cliente_id == int(cliente_id),
+        )
+        .order_by(models.AtendimentoConversaLabel.name.asc())
+        .all()
     )
     return [{"name": r.name, "color_hex": r.color_hex} for r in rows]
 
-def _labels_db_upsert(db: Session, empresa_id: int, cliente_id: int, name: str, color_hex: Optional[str], created_by: Optional[int]) -> None:
+
+def _labels_db_upsert(
+    db: Session,
+    empresa_id: int,
+    cliente_id: int,
+    name: str,
+    color_hex: Optional[str],
+    created_by: Optional[int],
+) -> None:
     if not _has_model_labels():
         return
     row = (
         db.query(models.AtendimentoConversaLabel)
-          .filter(models.AtendimentoConversaLabel.empresa_id == int(empresa_id),
-                  models.AtendimentoConversaLabel.cliente_id == int(cliente_id),
-                  models.AtendimentoConversaLabel.name == name)
-          .first()
+        .filter(
+            models.AtendimentoConversaLabel.empresa_id == int(empresa_id),
+            models.AtendimentoConversaLabel.cliente_id == int(cliente_id),
+            models.AtendimentoConversaLabel.name == name,
+        )
+        .first()
     )
     if row:
         row.color_hex = color_hex
     else:
-        db.add(models.AtendimentoConversaLabel(
-            empresa_id=int(empresa_id),
-            cliente_id=int(cliente_id),
-            name=name,
-            color_hex=color_hex,
-            created_by=int(created_by) if created_by is not None else None
-        ))
+        db.add(
+            models.AtendimentoConversaLabel(
+                empresa_id=int(empresa_id),
+                cliente_id=int(cliente_id),
+                name=name,
+                color_hex=color_hex,
+                created_by=int(created_by) if created_by is not None else None,
+            )
+        )
     db.commit()
 
-def _labels_db_replace_all(db: Session, empresa_id: int, cliente_id: int, names: Iterable[str], created_by: Optional[int]) -> None:
+
+def _labels_db_replace_all(
+    db: Session,
+    empresa_id: int,
+    cliente_id: int,
+    names: Iterable[str],
+    created_by: Optional[int],
+) -> None:
     if not _has_model_labels():
         return
     names = [n for n in (names or []) if isinstance(n, str) and n.strip()]
@@ -217,7 +263,7 @@ def _labels_db_replace_all(db: Session, empresa_id: int, cliente_id: int, names:
     db.query(models.AtendimentoConversaLabel).filter(
         models.AtendimentoConversaLabel.empresa_id == int(empresa_id),
         models.AtendimentoConversaLabel.cliente_id == int(cliente_id),
-        ~models.AtendimentoConversaLabel.name.in_(names) if names else True
+        ~models.AtendimentoConversaLabel.name.in_(names) if names else True,
     ).delete(synchronize_session=False)
     # garante existência de todos os 'names' (sem cor definida)
     for n in names:
@@ -295,16 +341,32 @@ def _parse_timestamp(val) -> str:
         return str(val)
 
 
+# Chave de segurança para broadcast externo
+INTERNAL_BROADCAST_KEY = os.getenv("INTERNAL_BROADCAST_KEY")
+
+
 @router.post("/broadcast")
-async def broadcast_msg(dados: dict):
+async def broadcast_msg(
+    dados: dict,
+    x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
+):
     """
-    Recebe eventos externos e propaga via WebSocket.
+    Recebe eventos EXTERNOS e propaga via WebSocket.
+
+    ⚠ Segurança:
+    - Exige header X-Internal-Key igual à INTERNAL_BROADCAST_KEY (env).
+    - Sem chave válida => 403 (não permite que qualquer um mande evento
+      para qualquer empresa).
+
+    Comportamento:
     - Para ACK isolado (sem mensagem/tipo), inclui `cliente_id` no payload.
     - Para mensagens, inclui `midias` no mesmo formato usado pelo histórico.
-    - Faz *pass-through* opcional de `instancia_id` e `instance_name`.
+    - Faz pass-through de `instancia_id` e `instance_name`.
     - Invalida cache de conversas/clientes da empresa.
     """
-    from typing import List, Dict  # garante tipos quando o arquivo não tiver esses imports
+    if INTERNAL_BROADCAST_KEY:
+        if not x_internal_key or x_internal_key != INTERNAL_BROADCAST_KEY:
+            raise HTTPException(status_code=403, detail="Chave interna inválida para broadcast")
 
     mensagem = dados.get("mensagem") or dados.get("texto") or dados.get("message") or ""
     tipo = dados.get("tipo") or dados.get("direction") or ""  # "entrada" | "saida"
@@ -322,7 +384,7 @@ async def broadcast_msg(dados: dict):
             "empresa_id": dados.get("empresa_id"),
             "msg_id": dados.get("msg_id"),
             "ack": dados.get("ack"),
-            "cliente_id": cliente_id,      # <- ESSENCIAL p/ front atualizar em tempo real
+            "cliente_id": cliente_id,  # <- ESSENCIAL p/ front atualizar em tempo real
             "timestamp": ts_formatado,
             # pass-through de instância
             "instancia_id": dados.get("instancia_id") or dados.get("instance_id"),
@@ -426,7 +488,7 @@ def _resolve_instancia_id(
     *,
     empresa_id: int,
     instancia_id: Optional[int],
-    instance: Optional[str]
+    instance: Optional[str],
 ) -> Tuple[Optional[int], Optional[str]]:
     """
     Resolve a instância a partir de instancia_id (numérico) ou instance (slug/nome).
@@ -435,8 +497,10 @@ def _resolve_instancia_id(
     if instancia_id is not None:
         row = (
             db.query(models.EmpresaInstancia)
-            .filter(models.EmpresaInstancia.empresa_id == empresa_id,
-                    models.EmpresaInstancia.id == instancia_id)
+            .filter(
+                models.EmpresaInstancia.empresa_id == empresa_id,
+                models.EmpresaInstancia.id == instancia_id,
+            )
             .first()
         )
         if row:
@@ -446,8 +510,10 @@ def _resolve_instancia_id(
     if instance:
         row = (
             db.query(models.EmpresaInstancia)
-            .filter(models.EmpresaInstancia.empresa_id == empresa_id,
-                    models.EmpresaInstancia.instance_name == instance)
+            .filter(
+                models.EmpresaInstancia.empresa_id == empresa_id,
+                models.EmpresaInstancia.instance_name == instance,
+            )
             .first()
         )
         if row:
@@ -481,6 +547,9 @@ def listar_conversas(
     - 'deleted' (Redis) oculta
     - 'pinned'  (DB por usuário; fallback Redis se não houver tabela)
     """
+    # 🔒 trava empresa
+    empresa_id = _assert_empresa_user(user, empresa_id)
+
     try:
         if cursor is None and cursor_last_msg_id is not None:
             cursor = cursor_last_msg_id
@@ -495,8 +564,18 @@ def listar_conversas(
         cursor_key = str(cursor) if cursor is not None else "none"
 
         # --------- CACHE (GET) ----------
-        cache_key = _k("conv", "list", "emp", str(empresa_id),
-                       "inst", inst_key, "limit", str(limit), "cursor", cursor_key)
+        cache_key = _k(
+            "conv",
+            "list",
+            "emp",
+            str(empresa_id),
+            "inst",
+            inst_key,
+            "limit",
+            str(limit),
+            "cursor",
+            cursor_key,
+        )
         cached = _cache_get_json(cache_key)
         if cached:
             deleted_set = set(_cache_get_json(_k_deleted(empresa_id)) or [])
@@ -546,31 +625,32 @@ def listar_conversas(
             return payload
 
         cliente_ids = [int(p[0]) for p in pairs]
-        msg_ids     = [int(p[1]) for p in pairs]
+        msg_ids = [int(p[1]) for p in pairs]
 
         # 2) carregar clientes e mensagens em lote
         clientes = {
             c.id: c
             for c in db.query(models.Cliente)
-                      .filter(models.Cliente.empresa_id == empresa_id,
-                              models.Cliente.id.in_(cliente_ids)).all()
+            .filter(models.Cliente.empresa_id == empresa_id, models.Cliente.id.in_(cliente_ids))
+            .all()
         }
 
-        msgs = {
-            mm.id: mm
-            for mm in db.query(m)
-                        .filter(m.id.in_(msg_ids)).all()
-        }
+        msgs = {mm.id: mm for mm in db.query(m).filter(m.id.in_(msg_ids)).all()}
 
         # não lidas por cliente (apenas ENTRADA)
         novas_map: Dict[int, int] = {}
         if cliente_ids:
-            for cid, cnt in db.query(m.cliente_id, func.count(m.id)).filter(
-                m.empresa_id == empresa_id,
-                m.cliente_id.in_(cliente_ids),
-                m.tipo == "entrada",
-                m.lida == False,  # noqa: E712
-            ).group_by(m.cliente_id).all():
+            for cid, cnt in (
+                db.query(m.cliente_id, func.count(m.id))
+                .filter(
+                    m.empresa_id == empresa_id,
+                    m.cliente_id.in_(cliente_ids),
+                    m.tipo == "entrada",
+                    m.lida == False,  # noqa: E712
+                )
+                .group_by(m.cliente_id)
+                .all()
+            ):
                 novas_map[int(cid)] = int(cnt)
 
         # flags
@@ -592,23 +672,25 @@ def listar_conversas(
 
             ts_iso = msg.timestamp.isoformat() if msg.timestamp else None
 
-            items.append({
-                "id": c.id,
-                "conversation_id": c.id,
-                "cliente_id": c.id,
-                "nome": getattr(c, "nome_whatsapp", None) or c.nome,
-                "telefone": c.telefone,
-                "avatar_url": getattr(c, "avatar_url", None),
-                "ultima_msg_id": msg.id,
-                "ultima_mensagem": msg.conteudo or "",
-                "hora": ts_iso,      # front converte para ms
-                "last_ts": ts_iso,
-                "novas": novas_map.get(int(c.id), 0),
-                "last_tipo": msg.tipo,
-                "last_ack": int(getattr(msg, "ack", 0)) if msg.tipo == "saida" else None,
-                "instancia_id": getattr(msg, "instancia_id", None),
-                "pinned": int(cid) in pins_user,
-            })
+            items.append(
+                {
+                    "id": c.id,
+                    "conversation_id": c.id,
+                    "cliente_id": c.id,
+                    "nome": getattr(c, "nome_whatsapp", None) or c.nome,
+                    "telefone": c.telefone,
+                    "avatar_url": getattr(c, "avatar_url", None),
+                    "ultima_msg_id": msg.id,
+                    "ultima_mensagem": msg.conteudo or "",
+                    "hora": ts_iso,  # front converte para ms
+                    "last_ts": ts_iso,
+                    "novas": novas_map.get(int(c.id), 0),
+                    "last_tipo": msg.tipo,
+                    "last_ack": int(getattr(msg, "ack", 0)) if msg.tipo == "saida" else None,
+                    "instancia_id": getattr(msg, "instancia_id", None),
+                    "pinned": int(cid) in pins_user,
+                }
+            )
 
         # reordena: pins no topo (mantendo ordem relativa original)
         items_p = [it for it in items if it.get("pinned")]
@@ -635,6 +717,7 @@ def listar_clientes(
     empresa_id: int,
     departamento: Optional[str] = None,
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """
     Lista clientes que já possuem conversa (pelo menos uma mensagem),
@@ -643,6 +726,8 @@ def listar_clientes(
 
     Respeita 'deleted' (oculta).
     """
+    empresa_id = _assert_empresa_user(user, empresa_id)
+
     LOG("[clientes] Listando clientes para empresa_id", empresa_id)
 
     # --------- CACHE (GET) ----------
@@ -709,11 +794,7 @@ def listar_clientes(
         )
 
         # epoch em ms (o front entende de primeira)
-        ultima_ts_ms = (
-            int(ultima.timestamp.timestamp() * 1000)
-            if (ultima and ultima.timestamp)
-            else None
-        )
+        ultima_ts_ms = int(ultima.timestamp.timestamp() * 1000) if (ultima and ultima.timestamp) else None
 
         resultado.append(
             {
@@ -722,13 +803,11 @@ def listar_clientes(
                 "telefone": c.telefone,
                 "avatar_url": c.avatar_url,
                 "ultima_mensagem": (ultima.conteudo or "") if ultima else "",
-                "hora": ultima_ts_ms,     # usado no preview
+                "hora": ultima_ts_ms,  # usado no preview
                 "last_ts": ultima_ts_ms,  # alias lido pelo front
                 "novas": novas,
                 "last_tipo": ultima.tipo if ultima else None,  # decide ✓✓
-                "last_ack": int(getattr(ultima, "ack", 0))
-                if (ultima and ultima.tipo == "saida")
-                else None,
+                "last_ack": int(getattr(ultima, "ack", 0)) if (ultima and ultima.tipo == "saida") else None,
             }
         )
 
@@ -760,7 +839,7 @@ def _midia_to_dict(md: models.Midia) -> Dict[str, Any]:
         "mimetype": getattr(md, "mimetype", None),
         "tamanho": getattr(md, "tamanho", None),
         "nome_original": getattr(md, "nome_original", None),
-        "url_api": f"/api/atendimento/midias/{md.id}",   # rota resolutora (no atendimento_midias.py)
+        "url_api": f"/api/atendimento/midias/{md.id}",  # rota resolutora (no atendimento_midias.py)
         "filename": getattr(md, "filename", None) or getattr(md, "nome_original", None),
     }
 
@@ -773,19 +852,22 @@ async def marcar_lidas(
     cliente_id: int,
     empresa_id: int = Query(...),
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """
     Marca como lidas todas as mensagens de ENTRADA (recebidas) desse cliente.
     É idempotente. Após atualizar, emite 'reload_clientes' para sincronizar UIs.
     Também invalida caches de listas afetadas.
     """
+    empresa_id = _assert_empresa_user(user, empresa_id)
+
     total = (
         db.query(models.Mensagem)
         .filter(
             models.Mensagem.cliente_id == cliente_id,
             models.Mensagem.empresa_id == empresa_id,
             models.Mensagem.tipo == "entrada",
-            models.Mensagem.lida == False,          # noqa: E712
+            models.Mensagem.lida == False,  # noqa: E712
         )
         .update({models.Mensagem.lida: True}, synchronize_session=False)
     )
@@ -812,10 +894,7 @@ def listar_pins(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    # empresa do token deve bater com a query (se houver no token)
-    emp = getattr(user, "empresa_id", None) or getattr(user, "empresa", None) or None
-    if emp and int(emp) != int(empresa_id):
-        raise HTTPException(403, "Empresa inválida")
+    empresa_id = _assert_empresa_user(user, empresa_id)
 
     if _has_model_pinned():
         pinned = _pins_get_cached(db, empresa_id=int(empresa_id), user_id=int(user.id))
@@ -834,29 +913,29 @@ def fixar_conversa(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    empresa_id = _assert_empresa_user(user, empresa_id)
     want_pin = bool(payload.get("pin", True))
-
-    # valida empresa do usuário, se aplicável
-    emp = getattr(user, "empresa_id", None) or getattr(user, "empresa", None) or None
-    if emp and int(emp) != int(empresa_id):
-        raise HTTPException(403, "Empresa inválida")
 
     if _has_model_pinned():
         # por usuário no DB
         if want_pin:
             exists = (
                 db.query(models.AtendimentoPinnedConversa)
-                  .filter(models.AtendimentoPinnedConversa.empresa_id == int(empresa_id),
-                          models.AtendimentoPinnedConversa.user_id == int(user.id),
-                          models.AtendimentoPinnedConversa.conversa_id == int(cliente_id))
-                  .first()
+                .filter(
+                    models.AtendimentoPinnedConversa.empresa_id == int(empresa_id),
+                    models.AtendimentoPinnedConversa.user_id == int(user.id),
+                    models.AtendimentoPinnedConversa.conversa_id == int(cliente_id),
+                )
+                .first()
             )
             if not exists:
-                db.add(models.AtendimentoPinnedConversa(
-                    empresa_id=int(empresa_id),
-                    user_id=int(user.id),
-                    conversa_id=int(cliente_id)
-                ))
+                db.add(
+                    models.AtendimentoPinnedConversa(
+                        empresa_id=int(empresa_id),
+                        user_id=int(user.id),
+                        conversa_id=int(cliente_id),
+                    )
+                )
                 db.commit()
             # atualiza cache
             s = _pins_get_cached(db, int(empresa_id), int(user.id))
@@ -881,19 +960,23 @@ def fixar_conversa(
     else:
         # fallback legado (global, Redis) — mantém compat até criar a tabela
         pinned = set(_cache_get_json(_k_pin(empresa_id)) or [])
-        if want_pin: pinned.add(int(cliente_id))
-        else: pinned.discard(int(cliente_id))
-        _cache_set_json(_k_pin(empresa_id), list(pinned), ttl=7*24*3600)
+        if want_pin:
+            pinned.add(int(cliente_id))
+        else:
+            pinned.discard(int(cliente_id))
+        _cache_set_json(_k_pin(empresa_id), list(pinned), ttl=7 * 24 * 3600)
 
     # invalida listas de conversas para refletir ordenação
     _cache_del_pattern(_k("conv", "list", "emp", str(empresa_id)))
 
     # avisa UIs conectadas
     try:
-        asyncio.create_task(_broadcast(
-            {"type": "conv.pin", "cliente_id": int(cliente_id), "pin": want_pin, "user_id": int(user.id)},
-            empresa_id=empresa_id
-        ))
+        asyncio.create_task(
+            _broadcast(
+                {"type": "conv.pin", "cliente_id": int(cliente_id), "pin": want_pin, "user_id": int(user.id)},
+                empresa_id=empresa_id,
+            )
+        )
     except Exception:
         pass
 
@@ -906,9 +989,7 @@ def listar_deletados(
     empresa_id: int = Query(...),
     user=Depends(get_current_user),
 ):
-    emp = getattr(user, "empresa_id", None) or getattr(user, "empresa", None) or None
-    if emp and int(emp) != int(empresa_id):
-        raise HTTPException(403, "Empresa inválida")
+    empresa_id = _assert_empresa_user(user, empresa_id)
     deleted = _cache_get_json(_k_deleted(empresa_id)) or []
     return {"deleted": _ensure_list(deleted)}
 
@@ -920,11 +1001,14 @@ def apagar_conversa(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    empresa_id = _assert_empresa_user(user, empresa_id)
+
     if not _is_admin(user):
         raise HTTPException(403, "Apenas administradores")
+
     deleted = set(_cache_get_json(_k_deleted(empresa_id)) or [])
     deleted.add(int(cliente_id))
-    _cache_set_json(_k_deleted(empresa_id), list(deleted), ttl=7*24*3600)
+    _cache_set_json(_k_deleted(empresa_id), list(deleted), ttl=7 * 24 * 3600)
 
     # opcional: ao esconder conversa, remover pins do BD para todos os usuários
     try:
@@ -943,7 +1027,9 @@ def apagar_conversa(
     _cache_del_pattern(_k("conv", "list", "emp", str(empresa_id)))
     _cache_del(_k("clientes", "emp", str(empresa_id), "dep", ""))
     try:
-        asyncio.create_task(_broadcast({"type":"conv.deleted", "cliente_id": int(cliente_id)}, empresa_id=empresa_id))
+        asyncio.create_task(
+            _broadcast({"type": "conv.deleted", "cliente_id": int(cliente_id)}, empresa_id=empresa_id)
+        )
     except Exception:
         pass
     return {"ok": True, "deleted": list(deleted)}
@@ -953,7 +1039,7 @@ def apagar_conversa(
 class LabelsIn(BaseModel):
     add: Optional[str] = None
     set: Optional[List[str]] = None
-    color: Optional[str] = None       # aceita 'color' ou 'color_hex'
+    color: Optional[str] = None  # aceita 'color' ou 'color_hex'
     color_hex: Optional[str] = None
 
 
@@ -964,9 +1050,7 @@ def obter_etiquetas(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    emp = getattr(user, "empresa_id", None) or getattr(user, "empresa", None) or None
-    if emp and int(emp) != int(empresa_id):
-        raise HTTPException(403, "Empresa inválida")
+    empresa_id = _assert_empresa_user(user, empresa_id)
 
     if _has_model_labels():
         rows = _labels_db_list(db, empresa_id=int(empresa_id), cliente_id=int(cliente_id))
@@ -989,6 +1073,8 @@ def etiquetar_conversa(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    empresa_id = _assert_empresa_user(user, empresa_id)
+
     # manter exigência de admin (como era no legado) — ajuste se quiser liberar
     if not _is_admin(user):
         raise HTTPException(403, "Apenas administradores")
@@ -1000,12 +1086,24 @@ def etiquetar_conversa(
             _labels_db_replace_all(db, int(empresa_id), int(cliente_id), body.set, int(user.id))
             rows = _labels_db_list(db, int(empresa_id), int(cliente_id))
             try:
-                asyncio.create_task(_broadcast({"type":"conv.labels", "cliente_id": int(cliente_id),
-                                                "labels": [r["name"] for r in rows], "labels_ex": rows},
-                                               empresa_id=empresa_id))
+                asyncio.create_task(
+                    _broadcast(
+                        {
+                            "type": "conv.labels",
+                            "cliente_id": int(cliente_id),
+                            "labels": [r["name"] for r in rows],
+                            "labels_ex": rows,
+                        },
+                        empresa_id=empresa_id,
+                    )
+                )
             except Exception:
                 pass
-            return {"ok": True, "labels": [r["name"] for r in rows], "labels_ex": rows}
+            return {
+                "ok": True,
+                "labels": [r["name"] for r in rows],
+                "labels_ex": rows,
+            }
 
         if body.add:
             name = (body.add or "").strip()
@@ -1015,12 +1113,24 @@ def etiquetar_conversa(
             _labels_db_upsert(db, int(empresa_id), int(cliente_id), name, color_hex, int(user.id))
             rows = _labels_db_list(db, int(empresa_id), int(cliente_id))
             try:
-                asyncio.create_task(_broadcast({"type":"conv.labels", "cliente_id": int(cliente_id),
-                                                "labels": [r["name"] for r in rows], "labels_ex": rows},
-                                               empresa_id=empresa_id))
+                asyncio.create_task(
+                    _broadcast(
+                        {
+                            "type": "conv.labels",
+                            "cliente_id": int(cliente_id),
+                            "labels": [r["name"] for r in rows],
+                            "labels_ex": rows,
+                        },
+                        empresa_id=empresa_id,
+                    )
+                )
             except Exception:
                 pass
-            return {"ok": True, "labels": [r["name"] for r in rows], "labels_ex": rows}
+            return {
+                "ok": True,
+                "labels": [r["name"] for r in rows],
+                "labels_ex": rows,
+            }
 
         raise HTTPException(400, "Informe 'add' ou 'set'.")
 
@@ -1037,11 +1147,23 @@ def etiquetar_conversa(
     else:
         raise HTTPException(400, "Informe 'add' ou 'set'.")
 
-    _cache_set_json(key, labels, ttl=30*24*3600)
+    _cache_set_json(key, labels, ttl=30 * 24 * 3600)
     try:
-        asyncio.create_task(_broadcast({"type":"conv.labels", "cliente_id": int(cliente_id),
-                                        "labels": labels, "labels_ex": [{"name": s, "color_hex": None} for s in labels]},
-                                       empresa_id=empresa_id))
+        asyncio.create_task(
+            _broadcast(
+                {
+                    "type": "conv.labels",
+                    "cliente_id": int(cliente_id),
+                    "labels": labels,
+                    "labels_ex": [{"name": s, "color_hex": None} for s in labels],
+                },
+                empresa_id=empresa_id,
+            )
+        )
     except Exception:
         pass
-    return {"ok": True, "labels": labels, "labels_ex": [{"name": s, "color_hex": None} for s in labels]} 
+    return {
+        "ok": True,
+        "labels": labels,
+        "labels_ex": [{"name": s, "color_hex": None} for s in labels],
+    }

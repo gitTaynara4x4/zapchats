@@ -1,3 +1,4 @@
+# backend/routers/atendimentoia.py
 from __future__ import annotations
 
 import os
@@ -6,10 +7,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Body, Query
+from fastapi import APIRouter, HTTPException, Body, Query, Depends
 
 from backend.database import SessionLocal
 from backend import models
+from backend.routers.auth import get_current_user
 
 """
 Endpoints:
@@ -25,10 +27,10 @@ Recursos:
 - draft / prompt_user (Body) no /melhorar
 """
 
-router = APIRouter(prefix="/api/atendimento/ia", tags=["IA"]) 
+router = APIRouter(prefix="/api/atendimento/ia", tags=["IA"])
 
 # URLs separadas para cada workflow do n8n
-N8N_URL_RESUMO   = os.getenv("N8N_URL_RESUMO",   "https://zapchats-n8n.9ywrah.easypanel.host/webhook/ia-resumo")
+N8N_URL_RESUMO = os.getenv("N8N_URL_RESUMO", "https://zapchats-n8n.9ywrah.easypanel.host/webhook/ia-resumo")
 N8N_URL_MELHORAR = os.getenv("N8N_URL_MELHORAR", "https://zapchats-n8n.9ywrah.easypanel.host/webhook/ia-melhorar")
 N8N_KEY = os.getenv("N8N_KEY", "")  # opcional: header para validar no n8n
 ENV = os.getenv("ENV", "dev").lower()
@@ -179,6 +181,23 @@ def _build_dialogo(
     return base
 
 
+# --------- Helpers de segurança ---------
+def _empresa_do_user(user) -> Optional[int]:
+    """Tenta extrair o empresa_id de diferentes formas do objeto user."""
+    return getattr(user, "empresa_id", None) or getattr(user, "empresa", None)
+
+
+def _assert_empresa(user, empresa_id: int) -> int:
+    """
+    Garante que o empresa_id da query é o mesmo do usuário logado.
+    Evita que um usuário de uma empresa peça resumo/melhoria de outra.
+    """
+    emp = _empresa_do_user(user)
+    if emp is not None and int(emp) != int(empresa_id):
+        raise HTTPException(status_code=403, detail="Empresa inválida para este usuário")
+    return int(empresa_id)
+
+
 # --------- Endpoints ---------
 @router.post("/resumo")
 async def resumo(
@@ -193,7 +212,11 @@ async def resumo(
     max_chars: int = Query(9000, ge=0),  # 0 = sem truncar
     # Body opcional para sobrescrever o diálogo com o visível no DOM
     dialogo_override: Optional[str] = Body(None, embed=True),
+    user=Depends(get_current_user),
 ):
+    # 🔒 trava empresa: empresa_id tem que bater com a empresa do token
+    empresa_id = _assert_empresa(user, empresa_id)
+
     dialogo = _build_dialogo(
         empresa_id, cliente_id, janela_dias, limit, include_dialogo, redact, max_chars, dialogo_override
     )
@@ -228,7 +251,11 @@ async def melhorar(
     draft: Optional[str] = Body(None, embed=True),
     prompt_user: Optional[str] = Body(None, embed=True),
     dialogo_override: Optional[str] = Body(None, embed=True),
+    user=Depends(get_current_user),
 ):
+    # 🔒 trava empresa aqui também
+    empresa_id = _assert_empresa(user, empresa_id)
+
     dialogo = _build_dialogo(
         empresa_id, cliente_id, janela_dias, limit, include_dialogo, redact, max_chars, dialogo_override
     )

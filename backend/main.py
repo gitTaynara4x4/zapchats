@@ -1,4 +1,4 @@
-# backend/main.py.
+# backend/main.py
 from __future__ import annotations
 import os, secrets, asyncio
 from typing import Any
@@ -13,6 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response as StarletteResponse
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exception_handlers import http_exception_handler as fastapi_http_exception_handler
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -49,6 +51,7 @@ from backend.integrations.rabbit_consumer import start_rabbit_consumer
 from backend.integrations.evo_ws_listener import start_evo_ws_listener
 
 # JWT decode para gate de permissão
+from backend.routers.auth import get_current_user
 import backend.routers.auth as auth_router
 
 # Evo handlers/registry
@@ -265,6 +268,386 @@ def _no_cache_html(resp: StarletteResponse):
     except Exception:
         pass
 
+# =======================================
+# Handler global de 404 bonitinho (apenas páginas HTML)
+# =======================================
+@app.exception_handler(StarletteHTTPException)
+async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """
+    404 bonito para páginas HTML (/dashboard2, /qualquercoisa, etc).
+    Para /api/* e outros casos, mantém o comportamento padrão do FastAPI.
+    """
+    path = request.url.path
+
+    # Só troca a tela se for 404, for "página" (HTML) e não for /api nem /frontend
+    if (
+        exc.status_code == 404
+        and _wants_html(request)
+        and not path.startswith("/api")
+        and not path.startswith("/frontend")
+    ):
+        nice_path = path[:-5] if path.endswith(".html") else path
+
+        html = """<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <title>Página não encontrada • ZapChats</title>
+  <style>
+    :root{
+      --topbar-h:44px;
+      --card:#161617;
+      --border:#27272a;
+      --fg:#e5e7eb;
+      --muted:#9ca3af;
+    }
+    html:not(.dark){
+      --card:#fff;
+      --border:#e5e7eb;
+      --fg:#1f2937;
+      --muted:#6b7280;
+    }
+    html, body{
+      margin:0;
+      padding:0;
+      border:0;
+    }
+    html{
+      background:
+        linear-gradient(90deg,#22c55e 0%, #16a34a 50%, #10b981 100%) 0 0 / 100% 6px no-repeat,
+        var(--card);
+      background-attachment:fixed;
+    }
+    html:not(.dark){
+      background:
+        linear-gradient(90deg,#22c55e 0%, #16a34a 50%, #10b981 100%) 0 0 / 100% 6px no-repeat,
+        #fff;
+    }
+    body{
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+      color:var(--fg);
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:calc(var(--topbar-h) + 24px) 24px 24px;
+      box-sizing:border-box;
+    }
+    .topline-bar{
+      position:fixed;
+      top:0;
+      left:0;
+      right:0;
+      height:var(--topbar-h);
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap:.75rem;
+      padding:6px 14px 0;
+      background:transparent;
+      z-index:60;
+      border:0;
+      box-shadow:none;
+    }
+
+    /* === Toggle de tema (mesmo visual do sidebar) === */
+    .theme-toggle{
+      --w:78px;
+      --h:34px;
+      --p:3px;
+      --k:28px;
+      --dx: calc(var(--w) - var(--k) - var(--p)*2);
+      position:relative;
+      width:var(--w);
+      height:var(--h);
+      padding:var(--p);
+      border-radius:999px;
+      cursor:pointer;
+      outline:none;
+      border:1px solid;
+      display:inline-block;
+      isolation:isolate;
+      background:#eceff3;
+      border-color:#d5d9e0;
+      box-shadow:
+        inset 0 2px 4px rgba(0,0,0,.06),
+        inset 0 -1px 2px rgba(0,0,0,.05);
+      transition:
+        background .3s ease,
+        border-color .3s ease,
+        box-shadow .3s ease;
+      line-height:0;
+    }
+    html.dark .theme-toggle{
+      background:#2f323a;
+      border-color:#3a3e46;
+      box-shadow:
+        inset 0 2px 5px rgba(0,0,0,.35),
+        inset 0 -1px 2px rgba(255,255,255,.03);
+    }
+    .theme-toggle .slot{
+      position:absolute;
+      top:50%;
+      transform:translateY(-50%);
+      width:28px;
+      height:28px;
+      display:grid;
+      place-items:center;
+      pointer-events:none;
+      opacity:.75;
+    }
+    .theme-toggle .slot.left{ left:8px; }
+    .theme-toggle .slot.right{ right:8px; }
+    .theme-toggle .slot svg{
+      width:18px;
+      height:18px;
+      display:block;
+    }
+    .theme-toggle .slot svg *{
+      stroke:#9ca3af;
+    }
+    html.dark .theme-toggle .slot svg *{
+      stroke:#8a93a1;
+    }
+    .theme-toggle .thumb{
+      position:absolute;
+      left:var(--p);
+      top:50%;
+      width:var(--k);
+      height:var(--k);
+      border-radius:999px;
+      transform:translate(0,-50%);
+      transition:
+        transform .38s cubic-bezier(.28,1.2,.43,1),
+        box-shadow .2s ease,
+        background .3s ease;
+      display:grid;
+      place-items:center;
+      overflow:hidden;
+      background:
+        radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%, rgba(255,255,255,.08) 65%),
+        linear-gradient(180deg,#f8c266,#f59e0b);
+      box-shadow:
+        0 4px 8px rgba(0,0,0,.18),
+        inset 0 0 0 1px rgba(255,255,255,.25);
+    }
+    .theme-toggle .thumb svg{
+      width:22px;
+      height:22px;
+      display:block;
+      position:relative;
+      z-index:1;
+      pointer-events:none;
+    }
+    .theme-toggle .thumb .thumb-sun{ display:block; }
+    .theme-toggle .thumb .thumb-moon{ display:none; }
+    html.dark .theme-toggle .thumb{
+      transform:translate(var(--dx), -50%) !important;
+      background:
+        radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%, rgba(255,255,255,.08) 65%),
+        linear-gradient(180deg,#6ba6ff,#2563eb) !important;
+      box-shadow:
+        0 6px 10px rgba(0,0,0,.35),
+        inset 0 0 0 1px rgba(255,255,255,.22);
+    }
+    html.dark .theme-toggle .thumb .thumb-sun{
+      display:none !important;
+    }
+    html.dark .theme-toggle .thumb .thumb-moon{
+      display:block !important;
+    }
+    .theme-toggle:active .thumb{
+      transform: translate(0,-50%) scale(.96);
+    }
+    html.dark .theme-toggle:active .thumb{
+      transform: translate(calc(var(--dx)),-50%) scale(.96);
+    }
+    .theme-toggle:focus-visible{
+      box-shadow:0 0 0 3px rgba(99,102,241,.35);
+    }
+    .theme-toggle.t-anim::after{
+      content:"";
+      position:absolute;
+      inset:0;
+      border-radius:inherit;
+      pointer-events:none;
+      background:linear-gradient(115deg, transparent 30%, rgba(255,255,255,.45) 50%, transparent 70%);
+      animation:sweep .55s ease both;
+    }
+    @keyframes sweep {
+      from{opacity:.0}
+      to{opacity:1}
+    }
+
+    /* ===== Conteúdo 404 ===== */
+    main.wrap{
+      max-width:520px;
+      width:100%;
+      text-align:center;
+    }
+    .icon{
+      font-size:32px;
+      margin-bottom:10px;
+    }
+    h1{
+      font-size:22px;
+      margin-bottom:8px;
+    }
+    p{
+      font-size:14px;
+      line-height:1.6;
+      color:var(--muted);
+      margin-bottom:6px;
+    }
+    code{
+      background:rgba(15,23,42,.9);
+      padding:2px 6px;
+      border-radius:6px;
+      font-size:13px;
+      color:var(--fg);
+    }
+    html:not(.dark) code{
+      background:rgba(229,231,235,.9);
+    }
+    .actions{
+      margin-top:16px;
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      justify-content:center;
+    }
+    a.btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:8px 14px;
+      border-radius:999px;
+      font-size:14px;
+      text-decoration:none;
+      border:1px solid #374151;
+      background:#111827;
+      color:#e5e7eb;
+    }
+    html:not(.dark) a.btn{
+      background:#ffffff;
+      border-color:#d1d5db;
+      color:#111827;
+    }
+  </style>
+</head>
+<body>
+  <div class="topline-bar">
+    <button id="themeSwitch" class="theme-toggle" aria-label="Alternar tema" aria-pressed="false">
+      <span class="slot left" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3.5" fill="none"/>
+          <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
+          <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
+          <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
+          <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
+        </svg>
+      </span>
+      <span class="slot right" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8z" fill="none"/>
+        </svg>
+      </span>
+      <span class="thumb" aria-hidden="true">
+        <svg class="thumb-sun" viewBox="0 0 24 24">
+          <defs>
+            <radialGradient id="sunGrad-404" cx="30%" cy="30%" r="80%">
+              <stop offset="0%" stop-color="#ffd27a"/>
+              <stop offset="60%" stop-color="#f8c266"/>
+              <stop offset="100%" stop-color="#f59e0b"/>
+            </radialGradient>
+          </defs>
+          <circle cx="12" cy="12" r="6.3" fill="url(#sunGrad-404)"/>
+        </svg>
+        <svg class="thumb-moon" viewBox="0 0 24 24">
+          <defs>
+            <radialGradient id="moonGrad-404" cx="30%" cy="30%" r="80%">
+              <stop offset="0%" stop-color="#9fc3ff"/>
+              <stop offset="60%" stop-color="#6ba6ff"/>
+              <stop offset="100%" stop-color="#2563eb"/>
+            </radialGradient>
+          </defs>
+          <circle cx="12" cy="12" r="11" fill="url(#moonGrad-404)"/>
+        </svg>
+      </span>
+    </button>
+  </div>
+
+  <main class="wrap">
+    <div id="lottie404" class="icon"></div>
+    <h1>Não conseguimos encontrar essa página</h1>
+    <p>A rota <code>{nice_path}</code> não existe ou foi movida.</p>
+    <p>Verifique se o endereço está correto ou volte para uma área existente do painel.</p>
+    <div class="actions">
+      <a href="/dashboard" class="btn">Ir para o Dashboard</a>
+      <a href="/atendimentos" class="btn">Ir para Atendimentos</a>
+      <a href="/login" class="btn">Voltar para o login</a>
+    </div>
+  </main>
+
+  <script>
+  (function(){
+    var html = document.documentElement;
+
+    // tema inicial (AppTheme global ou localStorage), igual lógica do sidebar
+    try{
+      if (window.AppTheme && typeof window.AppTheme.current === 'function'){
+        html.classList.toggle('dark', window.AppTheme.current() === 'dark');
+      } else {
+        var saved = localStorage.getItem('theme');
+        if (saved){ html.classList.toggle('dark', saved === 'dark'); }
+      }
+    }catch(e){}
+
+    var btn = document.getElementById('themeSwitch');
+    if (!btn) return;
+
+    function syncPressed(){
+      btn.setAttribute('aria-pressed', String(html.classList.contains('dark')));
+    }
+    syncPressed();
+
+    btn.addEventListener('click', function(){
+      var willDark = !html.classList.contains('dark');
+      try{
+        if (window.AppTheme && typeof window.AppTheme.set === 'function'){
+          window.AppTheme.set(willDark ? 'dark' : 'light');
+        } else {
+          html.classList.toggle('dark', willDark);
+          localStorage.setItem('theme', willDark ? 'dark' : 'light');
+        }
+      }catch(e){}
+
+      btn.classList.remove('t-anim');
+      void btn.offsetWidth;
+      btn.classList.add('t-anim');
+      setTimeout(function(){ btn.classList.remove('t-anim'); }, 580);
+
+      syncPressed();
+    });
+
+    window.addEventListener('storage', function(e){
+      if (e.key === 'theme' && e.newValue){
+        html.classList.toggle('dark', e.newValue === 'dark');
+        syncPressed();
+      }
+    });
+  })();
+  </script>
+
+  <script src="/frontend/js/404.json"></script>
+</body>
+</html>"""
+        html = html.replace("{nice_path}", nice_path)
+        return HTMLResponse(html, status_code=404)
+
+    # Para qualquer outra coisa (inclui /api), usa handler padrão do FastAPI (JSON etc.)
+    return await fastapi_http_exception_handler(request, exc)
+
 # Gate de autenticação + permissão por página (HTML)
 @app.middleware("http")
 async def auth_html_gate(request: Request, call_next):
@@ -439,20 +822,23 @@ def version_json():
 # Rotas de mídia (binário direto)
 # =======================================
 @app.get("/media_bin/{midia_id}")
-def serve_media_bin(midia_id: int, db: Session = Depends(get_db)):
-    midia = db.query(models.Midia).filter_by(id=midia_id).first()
-    if not midia:
-        raise HTTPException(404)
-    mt = normalize_mimetype(midia.tipo, midia.filename, midia.mimetype)
-    return StarletteResponse(
-        content=midia.data,
-        media_type=mt,
-        headers={
-            "Content-Disposition": f'inline; filename="{midia.filename or "file"}"',
-            "Content-Length": str(len(midia.data)),
-            "Accept-Ranges": "bytes",
-        },
-    )
+def serve_media_bin(
+    midia_id: int,
+    request: Request,
+    user=Depends(get_current_user),
+):
+    """
+    Rota LEGACY de mídia. Agora ela apenas redireciona, com segurança,
+    para a rota nova de mídias do atendimento, que valida a empresa
+    usando o token do usuário.
+    """
+    # Monta URL da rota protegida
+    url = f"/api/atendimento/midias/{midia_id}"
+    # Preserva a querystring original (ex.: instancia_id), se houver
+    if request.url.query:
+        url = f"{url}?{request.url.query}"
+    # 307 mantém método e corpo (se algum dia usarmos POST aqui)
+    return RedirectResponse(url=url, status_code=307)
 
 @app.get("/api/env/evolution")
 def evolution_env():

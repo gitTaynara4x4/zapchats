@@ -15,6 +15,7 @@ from backend.utils.plans import (
     effective_tier,
     plan_limit,
 )
+from backend.routers.auth import get_current_user
 
 router = APIRouter(prefix="/api/empresas", tags=["Empresas"])
 
@@ -50,6 +51,16 @@ def _norm_instance_number(s: Optional[str]) -> Optional[str]:
     """
     d = _only_digits(s)
     return d or None
+
+
+def _assert_empresa_access(empresa_id: int, current_user) -> int:
+    """
+    Garante que o usuário só acesse a própria empresa.
+    (Se você tiver um super-admin multi-empresa, aqui seria o ponto de tratar.)
+    """
+    if empresa_id != current_user.empresa_id:
+        raise HTTPException(status_code=403, detail="Empresa não permitida")
+    return empresa_id
 
 
 # =========================
@@ -146,7 +157,13 @@ class UpdateApelidoIn(BaseModel):
 # Rotas
 # =========================
 @router.get("/{empresa_id}")
-def get_empresa(empresa_id: int, db: Session = Depends(get_db)):
+def get_empresa(
+    empresa_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    _assert_empresa_access(empresa_id, current_user)
+
     emp = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
     if not emp:
         raise HTTPException(404, "Empresa não encontrada")
@@ -176,7 +193,11 @@ def get_empresa(empresa_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{empresa_id}/whatsapp")
-def info_whatsapp(empresa_id: int, db: Session = Depends(get_db)):
+def info_whatsapp(
+    empresa_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
     """
     Lista todas as instâncias com seus metadados e devolve
     o status/limite pelo plano para o front travar o botão de adicionar.
@@ -186,6 +207,8 @@ def info_whatsapp(empresa_id: int, db: Session = Depends(get_db)):
     - Filtramos sempre por 'instancia_id'.
     - Mantemos 'id' por compatibilidade.
     """
+    _assert_empresa_access(empresa_id, current_user)
+
     emp = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
     if not emp:
         raise HTTPException(404, "Empresa não encontrada")
@@ -222,7 +245,10 @@ def info_whatsapp(empresa_id: int, db: Session = Depends(get_db)):
 
 @router.patch("/instancias/{instancia_id}/apelido")
 def update_apelido(
-    instancia_id: int, body: UpdateApelidoIn, db: Session = Depends(get_db)
+    instancia_id: int,
+    body: UpdateApelidoIn,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
     inst = (
         db.query(models.EmpresaInstancia)
@@ -231,6 +257,10 @@ def update_apelido(
     )
     if not inst:
         raise HTTPException(404, "Instância não encontrada")
+
+    # garante que o apelido só possa ser alterado pela própria empresa
+    _assert_empresa_access(inst.empresa_id, current_user)
+
     inst.apelido = (body.apelido or None)
     db.commit()
     return {"ok": True, "id": inst.id, "apelido": inst.apelido}

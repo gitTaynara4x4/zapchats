@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.database import get_db
 from backend import models
+from backend.routers.auth import get_current_user
 
 router = APIRouter(prefix="/api/chatbot", tags=["ChatBot – Config"])
 
@@ -58,11 +59,15 @@ def _prune_for_storage(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
         if isinstance(am.get("welcome"), dict) and am["welcome"].get("enabled") is True:
             w = am["welcome"]
-            am_store["welcome"] = {k: w[k] for k in ["enabled", "text", "start", "end"] if k in w}
+            am_store["welcome"] = {
+                k: w[k] for k in ["enabled", "text", "start", "end"] if k in w
+            }
 
         if isinstance(am.get("off_hours"), dict) and am["off_hours"].get("enabled") is True:
             o = am["off_hours"]
-            am_store["off_hours"] = {k: o[k] for k in ["enabled", "text", "start", "end"] if k in o}
+            am_store["off_hours"] = {
+                k: o[k] for k in ["enabled", "text", "start", "end"] if k in o
+            }
 
         features["auto_messages"] = am_store
 
@@ -126,7 +131,9 @@ def _parse_hhmm(val: Optional[str]) -> Optional[dtime]:
 
 
 def _tz_from_config(cfg: Dict[str, Any]) -> Optional[str]:
-    tz = cfg.get("timezone") or (cfg.get("features", {}).get("auto_messages", {}) or {}).get("timezone")
+    tz = cfg.get("timezone") or (
+        cfg.get("features", {}).get("auto_messages", {}) or {}
+    ).get("timezone")
     return str(tz) if tz else None
 
 
@@ -159,19 +166,19 @@ def _apply_columns_from_config(row: models.ChatbotConfig, cfg_in: Dict[str, Any]
     row.welcome_enabled = fields["welcome_enabled"]
     if row.welcome_enabled:
         row.welcome_start = fields["welcome_start"] or dtime(8, 0)
-        row.welcome_end   = fields["welcome_end"]   or dtime(18, 0)
+        row.welcome_end = fields["welcome_end"] or dtime(18, 0)
     else:
         row.welcome_start = None
-        row.welcome_end   = None
+        row.welcome_end = None
 
     # off-hours
     row.off_enabled = fields["off_enabled"]
     if row.off_enabled:
         row.off_start = fields["off_start"] or dtime(18, 0)
-        row.off_end   = fields["off_end"]   or dtime(8, 0)
+        row.off_end = fields["off_end"] or dtime(8, 0)
     else:
         row.off_start = None
-        row.off_end   = None
+        row.off_end = None
 
 
 # ========= routes =========
@@ -180,26 +187,53 @@ def get_config(
     empresa_id: int = Query(..., description="ID da empresa"),
     instancia_id: int = Query(..., description="ID da instância"),
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
+    """
+    Retorna a configuração de chatbot para uma instância específica.
+
+    Segurança multi-empresa:
+      - empresa_id deve ser igual a user.empresa_id
+      - instancia_id deve pertencer à mesma empresa.
+    """
+    if int(user.empresa_id) != int(empresa_id):
+        raise HTTPException(status_code=403, detail="Empresa não permitida")
+
+    inst = (
+        db.query(models.EmpresaInstancia)
+        .filter(
+            models.EmpresaInstancia.id == instancia_id,
+            models.EmpresaInstancia.empresa_id == empresa_id,
+        )
+        .first()
+    )
+    if not inst:
+        raise HTTPException(
+            status_code=404, detail="Instância não encontrada para esta empresa"
+        )
+
     # config atual
     row = _safe_select_chatbot_config(db, empresa_id, instancia_id)
     cfg_raw = row.config if row and getattr(row, "config", None) else {}
 
     # nome da empresa
     empresa = db.get(models.Empresa, empresa_id)
-    empresa_nome = (empresa.nome.strip() if empresa and empresa.nome else None)
+    empresa_nome = empresa.nome.strip() if empresa and empresa.nome else None
 
     # departamentos (preferindo vinculados à instância)
     deps_rows = []
     try:
         deps_rows = db.execute(
             select(models.Departamento.id, models.Departamento.nome)
-            .join(models.DepartamentoInstancia,
-                  and_(
-                      models.DepartamentoInstancia.departamento_id == models.Departamento.id,
-                      models.DepartamentoInstancia.empresa_id == empresa_id,
-                      models.DepartamentoInstancia.instancia_id == instancia_id,
-                  ))
+            .join(
+                models.DepartamentoInstancia,
+                and_(
+                    models.DepartamentoInstancia.departamento_id
+                    == models.Departamento.id,
+                    models.DepartamentoInstancia.empresa_id == empresa_id,
+                    models.DepartamentoInstancia.instancia_id == instancia_id,
+                ),
+            )
             .where(
                 models.Departamento.empresa_id == empresa_id,
                 models.Departamento.ativo == True,
@@ -224,7 +258,10 @@ def get_config(
 
     logger.info(
         "GET chatbot/config emp=%s inst=%s has_cfg=%s deps=%s",
-        empresa_id, instancia_id, bool(cfg_raw), len(departamentos)
+        empresa_id,
+        instancia_id,
+        bool(cfg_raw),
+        len(departamentos),
     )
     return {
         "empresa_id": empresa_id,
@@ -241,8 +278,32 @@ def put_config(
     empresa_id: int = Query(..., description="ID da empresa"),
     instancia_id: int = Query(..., description="ID da instância"),
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
+    """
+    Atualiza a configuração do chatbot para uma instância específica.
+
+    Segurança multi-empresa:
+      - empresa_id deve ser igual a user.empresa_id
+      - instancia_id deve pertencer à mesma empresa.
+    """
     logger.info("PUT chatbot/config emp=%s inst=%s", empresa_id, instancia_id)
+
+    if int(user.empresa_id) != int(empresa_id):
+        raise HTTPException(status_code=403, detail="Empresa não permitida")
+
+    inst = (
+        db.query(models.EmpresaInstancia)
+        .filter(
+            models.EmpresaInstancia.id == instancia_id,
+            models.EmpresaInstancia.empresa_id == empresa_id,
+        )
+        .first()
+    )
+    if not inst:
+        raise HTTPException(
+            status_code=404, detail="Instância não encontrada para esta empresa"
+        )
 
     if not isinstance(payload, dict) or "config" not in payload:
         raise HTTPException(status_code=400, detail="Envie { config: {...} }")
@@ -276,7 +337,12 @@ def put_config(
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        logger.error("PUT config IntegrityError emp=%s inst=%s\n%s", empresa_id, instancia_id, _trace(e))
+        logger.error(
+            "PUT config IntegrityError emp=%s inst=%s\n%s",
+            empresa_id,
+            instancia_id,
+            _trace(e),
+        )
         raise HTTPException(
             status_code=400,
             detail={
@@ -286,13 +352,29 @@ def put_config(
         )
     except Exception as e:
         db.rollback()
-        logger.exception("PUT config error emp=%s inst=%s\n%s", empresa_id, instancia_id, _trace(e))
-        raise HTTPException(status_code=500, detail={"message": "Erro inesperado", "error": str(e)})
+        logger.exception(
+            "PUT config error emp=%s inst=%s\n%s",
+            empresa_id,
+            instancia_id,
+            _trace(e),
+        )
+        raise HTTPException(
+            status_code=500, detail={"message": "Erro inesperado", "error": str(e)}
+        )
 
     try:
         db.refresh(row)
     except Exception:
         pass
 
-    logger.info("PUT chatbot/config OK emp=%s inst=%s creating=%s", empresa_id, instancia_id, creating)
-    return {"empresa_id": empresa_id, "instancia_id": instancia_id, "config": row.config or {}}
+    logger.info(
+        "PUT chatbot/config OK emp=%s inst=%s creating=%s",
+        empresa_id,
+        instancia_id,
+        creating,
+    )
+    return {
+        "empresa_id": empresa_id,
+        "instancia_id": instancia_id,
+        "config": row.config or {},
+    }

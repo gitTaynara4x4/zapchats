@@ -1,6 +1,4 @@
-# backend/websocket_manager.py
 from __future__ import annotations
-
 import os
 import asyncio
 import json
@@ -12,6 +10,8 @@ from collections import defaultdict
 from typing import Dict, Mapping, List, Iterable, Any, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+
+import backend.routers.auth as auth_router  # 🔒 para validar token
 
 log = logging.getLogger("ws")
 
@@ -26,6 +26,10 @@ def _get_float(env: str, default: float) -> float:
 SEND_TIMEOUT = _get_float("WS_SEND_TIMEOUT", 2.5)            # segundos
 KEEPALIVE_SEC = _get_float("WS_KEEPALIVE_SEC", 25)           # segundos
 SNAPSHOT_MAX_BYTES = int(float(os.getenv("WS_SNAPSHOT_MAX_BYTES", "1048576")))  # 1MB
+
+# mesmo nome de cookie usado em main.py
+ACCESS_COOKIE_NAME = os.getenv("ACCESS_COOKIE_NAME", "access_token")
+
 
 def _json_default(o: Any) -> str:
     try:
@@ -42,12 +46,14 @@ def _json_default(o: Any) -> str:
         pass
     return str(o)
 
+
 def _now_ms() -> int:
     try:
         import time
         return int(time.time() * 1000)
     except Exception:
         return 0
+
 
 def _inject_server_ts(data: Any) -> Any:
     """Adiciona serverTimestamp (ms) ao payload se for dict; não muta o original."""
@@ -60,6 +66,7 @@ def _inject_server_ts(data: Any) -> Any:
         return data
     # para listas/strings/binary não mexemos (frontend já trata)
     return data
+
 
 def _stable_auto_cid(ws: WebSocket, topic: str) -> str:
     """
@@ -80,6 +87,7 @@ def _stable_auto_cid(ws: WebSocket, topic: str) -> str:
     except Exception:
         # fallback totalmente aleatório (último caso)
         return f"anon-{uuid.uuid4().hex}"
+
 
 # ========================= Manager =========================
 class WebSocketManager:
@@ -238,6 +246,7 @@ class WebSocketManager:
 conexoes_ativas = WebSocketManager()
 router = APIRouter()
 
+
 @router.websocket("/ws/{topic:path}")
 async def ws_topic(
     ws: WebSocket,
@@ -255,6 +264,41 @@ async def ws_topic(
       - cid     : identificador estável por aba/cliente (evita conexões duplicadas)
       - want_qr : apenas para inst:, força emissão de QR no handshake quando True
     """
+
+    # 🔒 AUTENTICAÇÃO / ISOLAÇÃO POR EMPRESA
+    # Lê cookies de sessão, igual no main.py
+    token = ws.cookies.get(ACCESS_COOKIE_NAME)
+    empresa_cookie = ws.cookies.get("empresa_id") or ws.cookies.get("EMPRESA_ID")
+
+    if topic.startswith("emp:"):
+        # Para ouvir eventos de uma empresa, precisa:
+        # - ter token válido
+        # - ter empresa_id no cookie
+        # - empresa do cookie bater com emp:{id} do tópico
+        if not (token and empresa_cookie):
+            # 4401 = unauthorized (código "não oficial" mas comum)
+            await ws.close(code=4401)
+            return
+
+        # valida token (se for inválido, fecha)
+        try:
+            auth_router._decode_token(token)
+        except Exception:
+            await ws.close(code=4401)
+            return
+
+        try:
+            emp_from_topic = int(topic.split("emp:", 1)[1] or "0")
+            emp_from_cookie = int(empresa_cookie)
+        except Exception:
+            await ws.close(code=4403)  # forbidden
+            return
+
+        if emp_from_topic != emp_from_cookie:
+            # usuário de uma empresa tentando ouvir outra
+            await ws.close(code=4403)
+            return
+
     # Conecta (dedupe por cid; se não vier, geramos determinístico)
     cid_eff = await conexoes_ativas.connect(ws, topic, cid=cid)
 

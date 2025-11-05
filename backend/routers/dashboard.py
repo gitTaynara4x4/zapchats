@@ -11,6 +11,7 @@ from sqlalchemy import func, and_, desc
 
 from backend.database import get_db
 from backend import models
+from backend.routers.auth import get_current_user
 
 # Evolution (consulta direta, sem persistir)
 try:
@@ -19,6 +20,7 @@ except Exception:  # em caso de import antes de existir
     EvolutionClient = None  # type: ignore
 
 router = APIRouter()
+
 
 # ------------ helpers ------------
 def _parse_date(date_str: Optional[str]) -> Tuple[Optional[datetime], Optional[datetime]]:
@@ -31,26 +33,32 @@ def _parse_date(date_str: Optional[str]) -> Tuple[Optional[datetime], Optional[d
     except Exception:
         return None, None
 
+
 def _daterange_filter(col, d0: Optional[datetime], d1: Optional[datetime]):
     if d0 and d1:
         return and_(col >= d0, col < d1)
     return True  # no-op
 
+
 def _today_range():
     t0 = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     return t0, t0 + timedelta(days=1)
+
 
 def _maybe_inst(col, instancia_id: Optional[int]):
     """Retorna filtro por igualdade exata quando instancia_id for informado."""
     return (col == instancia_id) if instancia_id is not None else True
 
+
 # ========== Evolution live helpers (sem gravar no BD) ==========
 def _evo_enabled() -> bool:
     return bool(os.getenv("EVOLUTION_URL") and (os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_KEY")))
 
+
 def _connected_from_state(state: str | None) -> bool:
     s = (state or "").strip().lower()
     return s in {"open", "connected", "online"}
+
 
 def _evo_fetch_state(instance_name: str) -> Optional[Dict]:
     """
@@ -74,6 +82,17 @@ def _evo_fetch_state(instance_name: str) -> Optional[Dict]:
         # Mantemos silencioso para usar fallback BD
         return None
 
+
+def _assert_empresa_match(empresa_id: int, current_user) -> int:
+    """
+    Garante que o empresa_id da query é o mesmo do usuário logado.
+    Se não for, dispara 403.
+    """
+    if empresa_id != current_user.empresa_id:
+        raise HTTPException(status_code=403, detail="Empresa não permitida")
+    return empresa_id
+
+
 # ------------ /api/dashboard/cards ------------
 @router.get("/dashboard/cards")
 def dashboard_cards(
@@ -81,6 +100,7 @@ def dashboard_cards(
     date: Optional[str] = Query(None, description="YYYY-MM-DD"),
     instancia_id: Optional[int] = Query(None, description="Filtrar por ID exato da instância"),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
     """
     Cartões do topo:
@@ -90,6 +110,7 @@ def dashboard_cards(
       - total_atendimentos: nº de clientes com alguma mensagem no dia
     (sempre filtrando por empresa e, se vier, por instancia_id exato)
     """
+    empresa_id = _assert_empresa_match(empresa_id, current_user)
     d0, d1 = _parse_date(date) if date else _today_range()
 
     # mensagens no dia
@@ -115,7 +136,7 @@ def dashboard_cards(
     sub_last = (
         db.query(
             models.Mensagem.cliente_id.label("cid"),
-            func.max(models.Mensagem.timestamp).label("ts")
+            func.max(models.Mensagem.timestamp).label("ts"),
         )
         .filter(models.Mensagem.empresa_id == empresa_id)
         .filter(_daterange_filter(models.Mensagem.timestamp, d0, d1))
@@ -125,10 +146,13 @@ def dashboard_cards(
     )
     last_msgs = (
         db.query(models.Mensagem)
-        .join(sub_last, and_(
-            models.Mensagem.cliente_id == sub_last.c.cid,
-            models.Mensagem.timestamp == sub_last.c.ts
-        ))
+        .join(
+            sub_last,
+            and_(
+                models.Mensagem.cliente_id == sub_last.c.cid,
+                models.Mensagem.timestamp == sub_last.c.ts,
+            ),
+        )
         .filter(_maybe_inst(models.Mensagem.instancia_id, instancia_id))
         .all()
     )
@@ -152,6 +176,7 @@ def dashboard_cards(
         "total_atendimentos": total_atendimentos,
     }
 
+
 # ------------ /api/dashboard/distribuicao ------------
 @router.get("/dashboard/distribuicao")
 def dashboard_distribuicao(
@@ -159,6 +184,7 @@ def dashboard_distribuicao(
     date: Optional[str] = Query(None, description="YYYY-MM-DD"),
     instancia_id: Optional[int] = Query(None, description="Filtrar por ID exato da instância"),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
     """
     Distribuição por status simples (no dia):
@@ -167,13 +193,14 @@ def dashboard_distribuicao(
       - 'Concluídos'       : última no dia é 'saida'
       - 'Sem resposta'     : recebeu 'entrada' no dia mas nenhuma 'saida'
     """
+    empresa_id = _assert_empresa_match(empresa_id, current_user)
     d0, d1 = _parse_date(date) if date else _today_range()
 
     # últimos do dia por cliente
     sub_last = (
         db.query(
             models.Mensagem.cliente_id.label("cid"),
-            func.max(models.Mensagem.timestamp).label("ts")
+            func.max(models.Mensagem.timestamp).label("ts"),
         )
         .filter(models.Mensagem.empresa_id == empresa_id)
         .filter(_daterange_filter(models.Mensagem.timestamp, d0, d1))
@@ -183,10 +210,13 @@ def dashboard_distribuicao(
     )
     last_msgs = (
         db.query(models.Mensagem.cliente_id, models.Mensagem.tipo)
-        .join(sub_last, and_(
-            models.Mensagem.cliente_id == sub_last.c.cid,
-            models.Mensagem.timestamp == sub_last.c.ts
-        ))
+        .join(
+            sub_last,
+            and_(
+                models.Mensagem.cliente_id == sub_last.c.cid,
+                models.Mensagem.timestamp == sub_last.c.ts,
+            ),
+        )
         .filter(_maybe_inst(models.Mensagem.instancia_id, instancia_id))
         .all()
     )
@@ -196,7 +226,7 @@ def dashboard_distribuicao(
     sub_first = (
         db.query(
             models.Mensagem.cliente_id.label("cid"),
-            func.min(models.Mensagem.timestamp).label("ts")
+            func.min(models.Mensagem.timestamp).label("ts"),
         )
         .filter(models.Mensagem.empresa_id == empresa_id)
         .filter(_daterange_filter(models.Mensagem.timestamp, d0, d1))
@@ -206,10 +236,13 @@ def dashboard_distribuicao(
     )
     first_msgs = (
         db.query(models.Mensagem.cliente_id, models.Mensagem.tipo)
-        .join(sub_first, and_(
-            models.Mensagem.cliente_id == sub_first.c.cid,
-            models.Mensagem.timestamp == sub_first.c.ts
-        ))
+        .join(
+            sub_first,
+            and_(
+                models.Mensagem.cliente_id == sub_first.c.cid,
+                models.Mensagem.timestamp == sub_first.c.ts,
+            ),
+        )
         .filter(_maybe_inst(models.Mensagem.instancia_id, instancia_id))
         .all()
     )
@@ -217,7 +250,8 @@ def dashboard_distribuicao(
 
     # quem teve pelo menos uma 'entrada' e nenhuma 'saida'
     set_in = {
-        cid for (cid,) in db.query(models.Mensagem.cliente_id)
+        cid
+        for (cid,) in db.query(models.Mensagem.cliente_id)
         .filter(models.Mensagem.empresa_id == empresa_id)
         .filter(_daterange_filter(models.Mensagem.timestamp, d0, d1))
         .filter(_maybe_inst(models.Mensagem.instancia_id, instancia_id))
@@ -226,7 +260,8 @@ def dashboard_distribuicao(
         .all()
     }
     set_out = {
-        cid for (cid,) in db.query(models.Mensagem.cliente_id)
+        cid
+        for (cid,) in db.query(models.Mensagem.cliente_id)
         .filter(models.Mensagem.empresa_id == empresa_id)
         .filter(_daterange_filter(models.Mensagem.timestamp, d0, d1))
         .filter(_maybe_inst(models.Mensagem.instancia_id, instancia_id))
@@ -242,8 +277,9 @@ def dashboard_distribuicao(
 
     return {
         "labels": ["Novos", "Em atendimento", "Concluídos", "Sem resposta"],
-        "data":   [novos, em_atendimento, concluidos, sem_resposta],
+        "data": [novos, em_atendimento, concluidos, sem_resposta],
     }
+
 
 # ------------ /api/dashboard/funil ------------
 @router.get("/dashboard/funil")
@@ -252,6 +288,7 @@ def dashboard_funil(
     date: Optional[str] = Query(None, description="YYYY-MM-DD"),
     instancia_id: Optional[int] = Query(None, description="Filtrar por ID exato da instância"),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
     """
     Funil simples por dia:
@@ -260,10 +297,12 @@ def dashboard_funil(
       - Em Progresso  : últimos do dia são 'entrada'
       - Resolvidas    : últimos do dia são 'saida'
     """
+    empresa_id = _assert_empresa_match(empresa_id, current_user)
     d0, d1 = _parse_date(date) if date else _today_range()
 
     entradas = {
-        cid for (cid,) in db.query(models.Mensagem.cliente_id)
+        cid
+        for (cid,) in db.query(models.Mensagem.cliente_id)
         .filter(models.Mensagem.empresa_id == empresa_id)
         .filter(_daterange_filter(models.Mensagem.timestamp, d0, d1))
         .filter(_maybe_inst(models.Mensagem.instancia_id, instancia_id))
@@ -272,7 +311,8 @@ def dashboard_funil(
         .all()
     }
     saidas = {
-        cid for (cid,) in db.query(models.Mensagem.cliente_id)
+        cid
+        for (cid,) in db.query(models.Mensagem.cliente_id)
         .filter(models.Mensagem.empresa_id == empresa_id)
         .filter(_daterange_filter(models.Mensagem.timestamp, d0, d1))
         .filter(_maybe_inst(models.Mensagem.instancia_id, instancia_id))
@@ -284,7 +324,7 @@ def dashboard_funil(
     sub_last = (
         db.query(
             models.Mensagem.cliente_id.label("cid"),
-            func.max(models.Mensagem.timestamp).label("ts")
+            func.max(models.Mensagem.timestamp).label("ts"),
         )
         .filter(models.Mensagem.empresa_id == empresa_id)
         .filter(_daterange_filter(models.Mensagem.timestamp, d0, d1))
@@ -294,24 +334,28 @@ def dashboard_funil(
     )
     last_msgs = (
         db.query(models.Mensagem.cliente_id, models.Mensagem.tipo)
-        .join(sub_last, and_(
-            models.Mensagem.cliente_id == sub_last.c.cid,
-            models.Mensagem.timestamp == sub_last.c.ts
-        ))
+        .join(
+            sub_last,
+            and_(
+                models.Mensagem.cliente_id == sub_last.c.cid,
+                models.Mensagem.timestamp == sub_last.c.ts,
+            ),
+        )
         .filter(_maybe_inst(models.Mensagem.instancia_id, instancia_id))
         .all()
     )
     last_tipo = {cid: (tipo or "").lower() for cid, tipo in last_msgs}
 
-    recebidas    = len(entradas)
+    recebidas = len(entradas)
     qualificadas = len(entradas & saidas)
     em_progresso = sum(1 for t in last_tipo.values() if t == "entrada")
-    resolvidas   = sum(1 for t in last_tipo.values() if t == "saida")
+    resolvidas = sum(1 for t in last_tipo.values() if t == "saida")
 
     return {
         "labels": ["Recebidas", "Qualificadas", "Em Progresso", "Resolvidas"],
-        "data":   [recebidas, qualificadas, em_progresso, resolvidas],
+        "data": [recebidas, qualificadas, em_progresso, resolvidas],
     }
+
 
 # ------------ /api/atendimentos/ultimos ------------
 @router.get("/atendimentos/ultimos")
@@ -321,16 +365,18 @@ def atendimentos_ultimos(
     limit: int = Query(20, ge=1, le=200),
     instancia_id: Optional[int] = Query(None, description="Filtrar por ID exato da instância"),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
     """
     Últimas conversas do dia (uma linha por cliente, pela última mensagem do dia).
     """
+    empresa_id = _assert_empresa_match(empresa_id, current_user)
     d0, d1 = _parse_date(date) if date else _today_range()
 
     sub_last = (
         db.query(
             models.Mensagem.cliente_id.label("cid"),
-            func.max(models.Mensagem.timestamp).label("ts")
+            func.max(models.Mensagem.timestamp).label("ts"),
         )
         .filter(models.Mensagem.empresa_id == empresa_id)
         .filter(_daterange_filter(models.Mensagem.timestamp, d0, d1))
@@ -341,10 +387,13 @@ def atendimentos_ultimos(
 
     q = (
         db.query(models.Mensagem, models.Cliente)
-        .join(sub_last, and_(
-            models.Mensagem.cliente_id == sub_last.c.cid,
-            models.Mensagem.timestamp == sub_last.c.ts
-        ))
+        .join(
+            sub_last,
+            and_(
+                models.Mensagem.cliente_id == sub_last.c.cid,
+                models.Mensagem.timestamp == sub_last.c.ts,
+            ),
+        )
         .filter(_maybe_inst(models.Mensagem.instancia_id, instancia_id))
         .join(models.Cliente, models.Cliente.id == models.Mensagem.cliente_id)
         .order_by(desc(models.Mensagem.timestamp))
@@ -353,14 +402,19 @@ def atendimentos_ultimos(
 
     rows = []
     for msg, cli in q.all():
-        rows.append({
-            "nome": cli.nome or cli.nome_whatsapp or "-",
-            "telefone": cli.telefone or "-",
-            "status": "Finalizado" if (msg.tipo or "").lower() == "saida" else "Em atendimento",
-            "horario": msg.timestamp.strftime("%H:%M"),
-            "data": msg.timestamp.strftime("%Y-%m-%d"),
-        })
+        rows.append(
+            {
+                "nome": cli.nome or cli.nome_whatsapp or "-",
+                "telefone": cli.telefone or "-",
+                "status": "Finalizado"
+                if (msg.tipo or "").lower() == "saida"
+                else "Em atendimento",
+                "horario": msg.timestamp.strftime("%H:%M"),
+                "data": msg.timestamp.strftime("%Y-%m-%d"),
+            }
+        )
     return rows
+
 
 # ------------ /api/dashboard (consolidado) ------------
 @router.get("/dashboard")
@@ -369,16 +423,44 @@ def dashboard_consolidado(
     date: Optional[str] = Query(None, description="YYYY-MM-DD"),
     instancia_id: Optional[int] = Query(None, description="Filtrar por ID exato da instância"),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
     """
     Retorna num payload só: cards, distrib, funil e ultimos.
     O JS tenta este endpoint primeiro e, se der erro, chama os separados.
     (Todos filtráveis por empresa, data e, se informado, por instancia_id.)
     """
-    cards   = dashboard_cards(empresa_id=empresa_id, date=date, instancia_id=instancia_id, db=db)          # type: ignore
-    distrib = dashboard_distribuicao(empresa_id=empresa_id, date=date, instancia_id=instancia_id, db=db)   # type: ignore
-    funil   = dashboard_funil(empresa_id=empresa_id, date=date, instancia_id=instancia_id, db=db)          # type: ignore
-    ultimos = atendimentos_ultimos(empresa_id=empresa_id, date=date, instancia_id=instancia_id, limit=20, db=db)
+    empresa_id = _assert_empresa_match(empresa_id, current_user)
+
+    cards = dashboard_cards(
+        empresa_id=empresa_id,
+        date=date,
+        instancia_id=instancia_id,
+        db=db,
+        current_user=current_user,  # passa o mesmo usuário pro helper
+    )  # type: ignore
+    distrib = dashboard_distribuicao(
+        empresa_id=empresa_id,
+        date=date,
+        instancia_id=instancia_id,
+        db=db,
+        current_user=current_user,
+    )  # type: ignore
+    funil = dashboard_funil(
+        empresa_id=empresa_id,
+        date=date,
+        instancia_id=instancia_id,
+        db=db,
+        current_user=current_user,
+    )  # type: ignore
+    ultimos = atendimentos_ultimos(
+        empresa_id=empresa_id,
+        date=date,
+        instancia_id=instancia_id,
+        limit=20,
+        db=db,
+        current_user=current_user,
+    )
 
     return {
         "cards": cards,
@@ -392,6 +474,7 @@ def dashboard_consolidado(
         "clientes_online": cards.get("clientes_online", 0),
     }
 
+
 # ------------ /api/whatsapp/status (Evolution-first, sem persistir) ------------
 @router.get("/whatsapp/status")
 def whatsapp_status(
@@ -399,6 +482,7 @@ def whatsapp_status(
     instancia_id: Optional[int] = Query(None, description="Filtrar por ID exato da instância"),
     instance_name: Optional[str] = Query(None, description="Nome da instância (Evolution)"),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
     """
     Retorna status de conexão:
@@ -407,19 +491,23 @@ def whatsapp_status(
       3) Se Evolution não estiver configurada/der erro, cai no fallback: lê flags do BD (connected/last_seen).
     Estrutura de resposta compatível com o front.
     """
+    empresa_id = _assert_empresa_match(empresa_id, current_user)
+
     # --- quando vem o nome direto (preferível) ---
     if instance_name and _evo_enabled():
         evo = _evo_fetch_state(instance_name)
         if evo is not None:
             # Se também vier instancia_id, retorna detalhes “casados”
-            detalhes = [{
-                "id": instancia_id,
-                "apelido": instance_name,
-                "connected": bool(evo["connected"]),
-                "last_seen": None,
-                "instance_name": instance_name,
-                "state": evo.get("state"),
-            }]
+            detalhes = [
+                {
+                    "id": instancia_id,
+                    "apelido": instance_name,
+                    "connected": bool(evo["connected"]),
+                    "last_seen": None,
+                    "instance_name": instance_name,
+                    "state": evo.get("state"),
+                }
+            ]
             online = any(d["connected"] for d in detalhes)
             return {
                 "total_instancias": 1,
@@ -434,9 +522,11 @@ def whatsapp_status(
     if instancia_id is not None and _evo_enabled():
         inst_row = (
             db.query(models.EmpresaInstancia)
-              .filter(models.EmpresaInstancia.empresa_id == empresa_id,
-                      models.EmpresaInstancia.id == instancia_id)
-              .first()
+            .filter(
+                models.EmpresaInstancia.empresa_id == empresa_id,
+                models.EmpresaInstancia.id == instancia_id,
+            )
+            .first()
         )
         if not inst_row:
             raise HTTPException(status_code=404, detail="Instância não encontrada")
@@ -444,14 +534,16 @@ def whatsapp_status(
         if inst_name:
             evo = _evo_fetch_state(inst_name)
             if evo is not None:
-                detalhes = [{
-                    "id": inst_row.id,
-                    "apelido": inst_row.apelido,
-                    "connected": bool(evo["connected"]),
-                    "last_seen": None,
-                    "instance_name": inst_name,
-                    "state": evo.get("state"),
-                }]
+                detalhes = [
+                    {
+                        "id": inst_row.id,
+                        "apelido": inst_row.apelido,
+                        "connected": bool(evo["connected"]),
+                        "last_seen": None,
+                        "instance_name": inst_name,
+                        "state": evo.get("state"),
+                    }
+                ]
                 online = any(d["connected"] for d in detalhes)
                 return {
                     "total_instancias": 1,
@@ -466,8 +558,8 @@ def whatsapp_status(
     if instancia_id is None and _evo_enabled():
         rows: List[models.EmpresaInstancia] = (
             db.query(models.EmpresaInstancia)
-              .filter(models.EmpresaInstancia.empresa_id == empresa_id)
-              .all()
+            .filter(models.EmpresaInstancia.empresa_id == empresa_id)
+            .all()
         )
         if rows:
             detalhes = []
@@ -477,24 +569,28 @@ def whatsapp_status(
                 evo = _evo_fetch_state(inst_name) if inst_name else None
                 if evo is not None:
                     got_any = True
-                    detalhes.append({
-                        "id": i.id,
-                        "apelido": i.apelido,
-                        "connected": bool(evo["connected"]),
-                        "last_seen": None,
-                        "instance_name": inst_name,
-                        "state": evo.get("state"),
-                    })
+                    detalhes.append(
+                        {
+                            "id": i.id,
+                            "apelido": i.apelido,
+                            "connected": bool(evo["connected"]),
+                            "last_seen": None,
+                            "instance_name": inst_name,
+                            "state": evo.get("state"),
+                        }
+                    )
                 else:
                     # Se não conseguiu Evolution, ainda assim devolvemos algo neutro p/ esse item
-                    detalhes.append({
-                        "id": i.id,
-                        "apelido": i.apelido,
-                        "connected": False,
-                        "last_seen": (i.last_seen.isoformat() if i.last_seen else None),
-                        "instance_name": inst_name or None,
-                        "state": None,
-                    })
+                    detalhes.append(
+                        {
+                            "id": i.id,
+                            "apelido": i.apelido,
+                            "connected": False,
+                            "last_seen": (i.last_seen.isoformat() if i.last_seen else None),
+                            "instance_name": inst_name or None,
+                            "state": None,
+                        }
+                    )
             if got_any:
                 online = any(d["connected"] for d in detalhes)
                 return {
@@ -507,10 +603,7 @@ def whatsapp_status(
                 }
 
     # --- Fallback: BD (não grava nada, só lê) ---
-    q = (
-        db.query(models.EmpresaInstancia)
-        .filter(models.EmpresaInstancia.empresa_id == empresa_id)
-    )
+    q = db.query(models.EmpresaInstancia).filter(models.EmpresaInstancia.empresa_id == empresa_id)
     if instancia_id is not None:
         q = q.filter(models.EmpresaInstancia.id == instancia_id)
 

@@ -24,7 +24,21 @@ from backend import models
 # ✅ usa fonte única de plano/limite
 from backend.utils.plans import PLAN_LIMITS, effective_tier as plans_effective_tier
 
+# 🔒 auth para travar empresa
+from backend.routers.auth import get_current_user
+
 router = APIRouter(tags=["Onboarding"])  # montado como /api/onboarding/...
+
+# =============================
+# Helpers de segurança
+# =============================
+def _empresa_do_user(user) -> Optional[int]:
+    """
+    Tenta extrair empresa_id do usuário.
+    Se não tiver (ex.: super admin), devolve None e não trava por empresa.
+    """
+    return getattr(user, "empresa_id", None) or getattr(user, "empresa", None)
+
 
 # =============================
 # Evolution API (ENV)
@@ -308,8 +322,10 @@ def _schedule_cleanup(instance: str):
         return
     t = _CLEANUP_TIMERS.get(instance)
     if t:
-        try: t.cancel()
-        except Exception: pass
+        try:
+            t.cancel()
+        except Exception:
+            pass
     timer = threading.Timer(_CLEANUP_SECONDS, _cleanup_if_still_disconnected, args=(instance,))
     timer.daemon = True
     _CLEANUP_TIMERS[instance] = timer
@@ -318,14 +334,20 @@ def _schedule_cleanup(instance: str):
 def cancel_auto_cleanup(instance: str):
     t = _CLEANUP_TIMERS.pop(instance, None)
     if t:
-        try: t.cancel()
-        except Exception: pass
+        try:
+            t.cancel()
+        except Exception:
+            pass
 
 # =============================
 # Rotas
 # =============================
 @router.post("/empresas/conectar")
-def conectar(payload: ConnectPayload, db: Session = Depends(get_db)):
+def conectar(
+    payload: ConnectPayload,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """
     Fluxo:
       1) Checa limite (conta apenas connected=True).
@@ -338,6 +360,11 @@ def conectar(payload: ConnectPayload, db: Session = Depends(get_db)):
     if not EVOLUTION_URL or not EVOLUTION_KEY:
         raise HTTPException(500, "Evolution API não configurada (EVOLUTION_URL/KEY).")
 
+    # 🔒 trava empresa: empresa_id do payload precisa pertencer ao usuário (quando houver)
+    emp_user = _empresa_do_user(user)
+    if emp_user is not None and int(emp_user) != int(payload.empresa_id):
+        raise HTTPException(status_code=403, detail="Empresa inválida para este usuário")
+
     empresa = db.query(models.Empresa).filter(models.Empresa.id == payload.empresa_id).first()
     if not empresa:
         raise HTTPException(404, "Empresa não encontrada.")
@@ -349,7 +376,10 @@ def conectar(payload: ConnectPayload, db: Session = Depends(get_db)):
         models.EmpresaInstancia.connected.is_(True),
     ).count()
     if conectadas >= limite:
-        raise HTTPException(403, f"Limite de instâncias atingido para o plano. Plano permite {limite} instância(s).")
+        raise HTTPException(
+            403,
+            f"Limite de instâncias atingido para o plano. Plano permite {limite} instância(s).",
+        )
 
     number_digits = _only_digits(payload.whatsapp_numero)
     if not number_digits:
@@ -376,11 +406,15 @@ def conectar(payload: ConnectPayload, db: Session = Depends(get_db)):
             qrd = conn_json.get("qrcode") or conn_json
             if isinstance(qrd, dict):
                 if qrd.get("base64") or qrd.get("image"):
-                    qr = {"base64": qrd.get("base64") or qrd.get("image"),
-                          "limit": qrd.get("limit") or qrd.get("timeout")}
+                    qr = {
+                        "base64": qrd.get("base64") or qrd.get("image"),
+                        "limit": qrd.get("limit") or qrd.get("timeout"),
+                    }
                 if qrd.get("pairingCode") or qrd.get("code"):
-                    qr = {"pairingCode": qrd.get("pairingCode") or qrd.get("code"),
-                          "limit": qrd.get("limit") or qrd.get("timeout")}
+                    qr = {
+                        "pairingCode": qrd.get("pairingCode") or qrd.get("code"),
+                        "limit": qrd.get("limit") or qrd.get("timeout"),
+                    }
         return {
             "ok": True,
             "instance": pendente.instance_name,
@@ -392,7 +426,7 @@ def conectar(payload: ConnectPayload, db: Session = Depends(get_db)):
     # Já conectado em qualquer instância?
     numero_con = db.query(models.EmpresaInstancia).filter(
         models.EmpresaInstancia.numero_instancia == number_digits,
-        models.EmpresaInstancia.connected.is_(True)
+        models.EmpresaInstancia.connected.is_(True),
     ).first()
     if numero_con:
         raise HTTPException(409, "Este número já está conectado em outra instância.")
@@ -450,7 +484,7 @@ def conectar(payload: ConnectPayload, db: Session = Depends(get_db)):
         if hasattr(empresa, "quantidade_instancias"):
             empresa.quantidade_instancias = db.query(models.EmpresaInstancia).filter(
                 models.EmpresaInstancia.empresa_id == empresa.id,
-                models.EmpresaInstancia.connected.is_(True)
+                models.EmpresaInstancia.connected.is_(True),
             ).count()
 
         db.commit()
@@ -473,11 +507,15 @@ def conectar(payload: ConnectPayload, db: Session = Depends(get_db)):
                 qrd = conn_json.get("qrcode") or conn_json
                 if isinstance(qrd, dict):
                     if qrd.get("base64") or qrd.get("image"):
-                        qr = {"base64": qrd.get("base64") or qrd.get("image"),
-                              "limit": qrd.get("limit") or qrd.get("timeout")}
+                        qr = {
+                            "base64": qrd.get("base64") or qrd.get("image"),
+                            "limit": qrd.get("limit") or qrd.get("timeout"),
+                        }
                     if qrd.get("pairingCode") or qrd.get("code"):
-                        qr = {"pairingCode": qrd.get("pairingCode") or qrd.get("code"),
-                              "limit": qrd.get("limit") or qrd.get("timeout")}
+                        qr = {
+                            "pairingCode": qrd.get("pairingCode") or qrd.get("code"),
+                            "limit": qrd.get("limit") or qrd.get("timeout"),
+                        }
             return {
                 "ok": True,
                 "instance": conflito.instance_name,
@@ -496,11 +534,15 @@ def conectar(payload: ConnectPayload, db: Session = Depends(get_db)):
         qrd = conn_json.get("qrcode") or conn_json
         if isinstance(qrd, dict):
             if qrd.get("base64") or qrd.get("image"):
-                qr = {"base64": qrd.get("base64") or qrd.get("image"),
-                      "limit": qrd.get("limit") or qrd.get("timeout")}
+                qr = {
+                    "base64": qrd.get("base64") or qrd.get("image"),
+                    "limit": qrd.get("limit") or qrd.get("timeout"),
+                }
             if qrd.get("pairingCode") or qrd.get("code"):
-                qr = {"pairingCode": qrd.get("pairingCode") or qrd.get("code"),
-                      "limit": qrd.get("limit") or qrd.get("timeout")}
+                qr = {
+                    "pairingCode": qrd.get("pairingCode") or qrd.get("code"),
+                    "limit": qrd.get("limit") or qrd.get("timeout"),
+                }
 
     return {
         "ok": True,
@@ -511,9 +553,25 @@ def conectar(payload: ConnectPayload, db: Session = Depends(get_db)):
     }
 
 @router.post("/empresas/qr/refresh/{instance}")
-def refresh_qr(instance: str):
+def refresh_qr(
+    instance: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
     if not instance:
         raise HTTPException(400, "instance inválida.")
+
+    # 🔒 garante que a instância pertence à empresa do usuário
+    row = db.query(models.EmpresaInstancia).filter(
+        models.EmpresaInstancia.instance_name == instance
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Instância não encontrada.")
+
+    emp_user = _empresa_do_user(user)
+    if emp_user is not None and int(emp_user) != int(row.empresa_id):
+        raise HTTPException(status_code=403, detail="Instância não pertence à sua empresa")
+
     js = _evo_try_refresh_qr(instance)
 
     # extrai base64/pairing + limit (mesma lógica do conectar)
@@ -522,11 +580,15 @@ def refresh_qr(instance: str):
         qrd = js.get("qrcode") or js
         if isinstance(qrd, dict):
             if qrd.get("base64") or qrd.get("image"):
-                qr = {"base64": qrd.get("base64") or qrd.get("image"),
-                      "limit": qrd.get("limit") or qrd.get("timeout")}
+                qr = {
+                    "base64": qrd.get("base64") or qrd.get("image"),
+                    "limit": qrd.get("limit") or qrd.get("timeout"),
+                }
             if qrd.get("pairingCode") or qrd.get("code"):
-                qr = {"pairingCode": qrd.get("pairingCode") or qrd.get("code"),
-                      "limit": qrd.get("limit") or qrd.get("timeout")}
+                qr = {
+                    "pairingCode": qrd.get("pairingCode") or qrd.get("code"),
+                    "limit": qrd.get("limit") or qrd.get("timeout"),
+                }
     return {"ok": True, "instance": instance, "qrcode": (qr or None)}
 
 # ============================================================
@@ -543,7 +605,7 @@ def marcar_conectado_e_cancelar_cleanup(instance: str, db: Session):
         if emp and hasattr(emp, "quantidade_instancias"):
             emp.quantidade_instancias = db.query(models.EmpresaInstancia).filter(
                 models.EmpresaInstancia.empresa_id == emp.id,
-                models.EmpresaInstancia.connected.is_(True)
+                models.EmpresaInstancia.connected.is_(True),
             ).count()
         db.commit()
     cancel_auto_cleanup(instance)

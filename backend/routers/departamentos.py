@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend import models
+from backend.routers.auth import get_current_user
 
 # ==========================================================
 # Router "oficial" (fica montado em /api + este prefixo)
@@ -23,6 +24,7 @@ router = APIRouter(
 )
 
 # ========= Schemas =========
+
 
 class DepartamentoIn(BaseModel):
     nome: str = Field(min_length=1, max_length=80)
@@ -42,6 +44,7 @@ class DepartamentoIn(BaseModel):
     def strip_desc(cls, v):
         return v.strip() if isinstance(v, str) else v
 
+
 class DepartamentoOut(BaseModel):
     id: int
     nome: str
@@ -57,28 +60,45 @@ class DepartamentoOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
 class MoveIn(BaseModel):
     new_parent_id: int | None = Field(default=None)
 
+
 # ========= Helpers =========
 
+
 def resolve_empresa_id(
+    current_user=Depends(get_current_user),
     x_empresa_id: Optional[int] = Header(default=None, alias="X-Empresa-Id"),
     empresa_id_qs: Optional[int] = Query(default=None, alias="empresa_id"),
 ) -> int:
-    """Preferência para header X-Empresa-Id; fallback para ?empresa_id=."""
-    empresa_id = x_empresa_id or empresa_id_qs
+    """
+    Resolve o empresa_id a partir:
+      1) do usuário logado (sempre),
+      2) opcionalmente header X-Empresa-Id ou ?empresa_id=.
+
+    Se vier header/query diferente da empresa do usuário, bloqueia (403)
+    para evitar que uma empresa force ID de outra.
+    """
+    base_id = current_user.empresa_id
+    empresa_id = x_empresa_id or empresa_id_qs or base_id
     if not empresa_id:
         raise HTTPException(
             status_code=400,
-            detail="empresa_id é obrigatório (header X-Empresa-Id ou query ?empresa_id=)",
+            detail="empresa_id é obrigatório (usuário sem empresa ou header/query ausente)",
         )
-    return int(empresa_id)
+    empresa_id = int(empresa_id)
+    if empresa_id != base_id:
+        raise HTTPException(status_code=403, detail="Empresa não permitida")
+    return empresa_id
+
 
 def ensure_empresa_exists(db: Session, empresa_id: int):
     ok = db.query(models.Empresa.id).filter(models.Empresa.id == empresa_id).first()
     if not ok:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
 
 def ensure_nome_unico(db: Session, empresa_id: int, nome: str, ignore_id: Optional[int] = None):
     q = db.query(models.Departamento).filter(
@@ -89,6 +109,7 @@ def ensure_nome_unico(db: Session, empresa_id: int, nome: str, ignore_id: Option
         q = q.filter(models.Departamento.id != ignore_id)
     if db.query(q.exists()).scalar():
         raise HTTPException(status_code=409, detail="Já existe um departamento com este nome")
+
 
 def get_departamento_or_404(db: Session, empresa_id: int, dept_id: int) -> models.Departamento:
     dept = (
@@ -103,8 +124,10 @@ def get_departamento_or_404(db: Session, empresa_id: int, dept_id: int) -> model
         raise HTTPException(status_code=404, detail="Departamento não encontrado")
     return dept
 
+
 def has_column(model, attr: str) -> bool:
     return hasattr(model, attr)
+
 
 def dept_to_dict(row: Any) -> Dict[str, Any]:
     """Extrai campos, lidando com projetos que ainda não migraram colunas."""
@@ -130,6 +153,7 @@ def dept_to_dict(row: Any) -> Dict[str, Any]:
     # path pode ser coluna (ARRAY) — se não for, calculamos na rota /tree
     out["path"] = getattr(row, "path", None)
     return out
+
 
 def build_paths(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Garante que cada item tenha 'path' (lista de nomes), mesmo sem coluna no banco."""
@@ -162,6 +186,7 @@ def build_paths(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     return rows
 
+
 def assert_no_cycle(moving_id: int, new_parent_id: Optional[int], rows: List[Dict[str, Any]]):
     """Evita ciclos ao mover (new_parent não pode ser filho do moving)."""
     if new_parent_id is None:
@@ -175,11 +200,16 @@ def assert_no_cycle(moving_id: int, new_parent_id: Optional[int], rows: List[Dic
             break
         visited.add(cur["id"])
         if cur["id"] == moving_id:
-            raise HTTPException(status_code=400, detail="Não é permitido mover um departamento para dentro de si mesmo ou de um descendente.")
+            raise HTTPException(
+                status_code=400,
+                detail="Não é permitido mover um departamento para dentro de si mesmo ou de um descendente.",
+            )
         pid = cur.get("parent_id")
         cur = by_id.get(pid)
 
+
 # ========= Rotas =========
+
 
 @router.get("", response_model=List[DepartamentoOut])
 def listar(
@@ -201,6 +231,7 @@ def listar(
         out.append(DepartamentoOut(**d))
     return out
 
+
 @router.get("/tree", response_model=List[DepartamentoOut])
 def tree(
     empresa_id: int = Depends(resolve_empresa_id),
@@ -219,7 +250,9 @@ def tree(
     rows = [dept_to_dict(it) for it in itens]
 
     # calcula path em memória quando necessário
-    has_parent = any(r.get("parent_id") is not None for r in rows) or has_column(models.Departamento, "parent_id")
+    has_parent = any(r.get("parent_id") is not None for r in rows) or has_column(
+        models.Departamento, "parent_id"
+    )
     if not has_parent:
         # sem hierarquia: path é só [nome]
         for r in rows:
@@ -231,6 +264,7 @@ def tree(
     rows.sort(key=lambda r: " / ".join(r.get("path") or [r["nome"]]).lower())
     return [DepartamentoOut(**r) for r in rows]
 
+
 @router.get("/{dept_id}", response_model=DepartamentoOut)
 def obter(
     dept_id: int,
@@ -240,6 +274,7 @@ def obter(
     ensure_empresa_exists(db, empresa_id)
     dept = get_departamento_or_404(db, empresa_id, dept_id)
     return DepartamentoOut(**dept_to_dict(dept))
+
 
 @router.post("", response_model=DepartamentoOut, status_code=status.HTTP_201_CREATED)
 def criar(
@@ -271,6 +306,7 @@ def criar(
     db.refresh(novo)
     return DepartamentoOut(**dept_to_dict(novo))
 
+
 @router.put("/{dept_id}", response_model=DepartamentoOut)
 def atualizar(
     dept_id: int,
@@ -299,6 +335,7 @@ def atualizar(
     db.refresh(dept)
     return DepartamentoOut(**dept_to_dict(dept))
 
+
 @router.patch("/{dept_id}/move", status_code=status.HTTP_204_NO_CONTENT)
 def mover(
     dept_id: int,
@@ -312,11 +349,17 @@ def mover(
     """
     ensure_empresa_exists(db, empresa_id)
     if not has_column(models.Departamento, "parent_id"):
-        raise HTTPException(status_code=400, detail="Hierarquia não habilitada neste projeto (coluna parent_id ausente).")
+        raise HTTPException(
+            status_code=400,
+            detail="Hierarquia não habilitada neste projeto (coluna parent_id ausente).",
+        )
 
     dept = get_departamento_or_404(db, empresa_id, dept_id)
     if payload.new_parent_id == dept.id:
-        raise HTTPException(status_code=400, detail="Não é permitido definir o próprio departamento como superior.")
+        raise HTTPException(
+            status_code=400,
+            detail="Não é permitido definir o próprio departamento como superior.",
+        )
 
     # carrega todos para verificar ciclo
     itens = (
@@ -345,6 +388,7 @@ def mover(
     db.commit()
     return None
 
+
 @router.delete("/{dept_id}", status_code=status.HTTP_204_NO_CONTENT)
 def excluir(
     dept_id: int,
@@ -357,6 +401,7 @@ def excluir(
     db.delete(dept)
     db.commit()
     return None
+
 
 # ==========================================================
 # Router de COMPATIBILIDADE (mesmas rotas em /api/departamentos)

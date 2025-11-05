@@ -1,4 +1,3 @@
-# backend/routers/clientes.py
 from __future__ import annotations
 
 from datetime import date, datetime, time, timezone, timedelta
@@ -35,6 +34,7 @@ def tz_sao_paulo():
 # ===== Infra =====
 from backend.database import get_db
 from backend import models
+from backend.routers.auth import get_current_user  # 🔒 para validar empresa do usuário
 
 # ===== Redis cache util =====
 from backend.cache.redis_client import (
@@ -96,6 +96,25 @@ def _iso(dt):
     return str(dt)
 
 
+# 🔒 helpers de segurança: empresa do usuário precisa bater com empresa_id
+def _empresa_do_user(user) -> Optional[int]:
+    return getattr(user, "empresa_id", None) or getattr(user, "empresa", None)
+
+
+def get_empresa_autorizada(
+    empresa_id: int = Depends(resolve_empresa_id),
+    user=Depends(get_current_user),
+) -> int:
+    """
+    Garante que o empresa_id pedido na rota é o mesmo da empresa do usuário logado.
+    Evita que alguém, logado na empresa X, force X-Empresa-Id/Y=de outra empresa.
+    """
+    emp = _empresa_do_user(user)
+    if emp is not None and int(emp) != int(empresa_id):
+        raise HTTPException(status_code=403, detail="Empresa inválida para este usuário")
+    return int(empresa_id)
+
+
 # ======== helpers de IO (Export/Import) ========
 COLUMNS = ["nome", "telefone", "departamento", "sobre_cliente"]
 
@@ -133,7 +152,7 @@ def _xlsx_rows_to_dicts(ws):
 # ============================================================
 @router.get("")  # sem response_model
 def listar_clientes(
-    empresa_id: int = Depends(resolve_empresa_id),
+    empresa_id: int = Depends(get_empresa_autorizada),
     q: Optional[str] = Query(None),
     departamento: Optional[str] = Query(None),
     data_inicio: Optional[date] = Query(None),
@@ -274,7 +293,7 @@ def listar_clientes(
 # ============================================================
 @router.get("/colaboradores")
 def listar_colaboradores(
-    empresa_id: int = Depends(resolve_empresa_id),
+    empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
 ):
     """
@@ -295,7 +314,7 @@ def listar_colaboradores(
 @router.get("/{cliente_id}")
 def obter_cliente(
     cliente_id: int,
-    empresa_id: int = Depends(resolve_empresa_id),
+    empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
 ):
     """
@@ -353,7 +372,7 @@ def obter_cliente(
 def patch_cliente_profile(
     cliente_id: int,
     payload: PatchClienteProfile,
-    empresa_id: int = Depends(resolve_empresa_id),
+    empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
 ):
     c = (
@@ -382,7 +401,7 @@ def patch_cliente_profile(
 @router.post("/novo")
 def criar_cliente(
     body: PostNovoCliente,
-    empresa_id: int = Depends(resolve_empresa_id),
+    empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
 ):
     tel = _digits(body.telefone)
@@ -454,7 +473,7 @@ def criar_cliente(
 def exportar_clientes(
     fmt: str = Query("csv", pattern="^(csv|xlsx|pdf)$"),
     ids: Optional[str] = Query(None, description="IDs separados por vírgula (ex: 1,2,3)"),
-    empresa_id: int = Depends(resolve_empresa_id),
+    empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
 ):
     q = db.query(models.Cliente).filter(models.Cliente.empresa_id == empresa_id)
@@ -544,7 +563,7 @@ def exportar_clientes(
 def importar_clientes(
     arquivo: UploadFile = File(...),
     sobrescrever: bool = Query(False, description="Atualiza dados se telefone já existir"),
-    empresa_id: int = Depends(resolve_empresa_id),
+    empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
 ):
     name = (arquivo.filename or "").lower()
@@ -630,7 +649,7 @@ def importar_clientes(
 @router.post("/bulk/colaborador")
 def trocar_colaborador_em_massa(
     payload: BulkColaboradorIn,
-    empresa_id: int = Depends(resolve_empresa_id),
+    empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
 ):
     """
@@ -672,7 +691,7 @@ def trocar_colaborador_em_massa(
 def trocar_colaborador_unitario(
     cliente_id: int,
     novo_colaborador_id: Optional[int] = Query(None, description="ID do colaborador; null remove"),
-    empresa_id: int = Depends(resolve_empresa_id),
+    empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
 ):
     """
@@ -703,12 +722,12 @@ def trocar_colaborador_unitario(
 
 
 # ============================================================
-# ============ Atribuição de Departamento (BULK) =============
+# ============ Atribuição de Departamento (BULK) ============
 # ============================================================
 @router.post("/bulk/departamento")
 def trocar_departamento_em_massa(
     payload: BulkDepartamentoIn,
-    empresa_id: int = Depends(resolve_empresa_id),
+    empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
 ):
     """

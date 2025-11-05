@@ -1,3 +1,4 @@
+# backend/routers/midias.py
 from __future__ import annotations
 
 import os
@@ -26,7 +27,7 @@ JWT_ALG = os.getenv("JWT_ALGORITHM", "HS256")
 # Arquivos vão para storage/midias/{empresa_id}/
 STORAGE_DIR = os.getenv("MIDIAS_DIR", os.path.join("storage", "midias"))
 
-router = APIRouter(prefix="/api/midias", tags=["Mídias"]) 
+router = APIRouter(prefix="/api/midias", tags=["Mídias"])
 
 
 # ===== Auth helpers =====
@@ -54,7 +55,8 @@ def _has_perm(payload: dict, perm: str) -> bool:
     perms = payload.get("perms")
     if isinstance(perms, list):
         return perm in perms
-    return True  # soft-allow por compatibilidade
+    # fallback compatível (se não houver perms no token)
+    return True
 
 
 # ===== Utils =====
@@ -171,12 +173,15 @@ def list_midias(
     inicio: Optional[str] = Query(None, description="YYYY-MM-DD (UTC)"),
     fim: Optional[str] = Query(None, description="YYYY-MM-DD (UTC)"),
     cliente_id: Optional[int] = Query(None, description="Filtrar por cliente_id"),
-    # IMPORTAnte: None = não filtra; True = só pessoais; False (se presente) = excluir pessoais
-    sem_cliente: Optional[bool] = Query(None, description="true: cliente_id IS NULL; false (se presente): cliente_id IS NOT NULL"),
+    # IMPORTANTE: None = não filtra; True = só pessoais; False (se presente) = excluir pessoais
+    sem_cliente: Optional[bool] = Query(
+        None,
+        description="true: cliente_id IS NULL; false (se presente): cliente_id IS NOT NULL",
+    ),
     ordenar: str = Query("recent", description="recent|old|az|za"),
     # ↓↓↓ NOVO: filtros por tipo/grupo
     tipo: Optional[str] = Query(None, description="imagem|video|audio|documento|image|video|audio|document"),
-    doc: Optional[str]  = Query(None, description="pdf|word|excel|ppt|text|code|zip|all"),
+    doc: Optional[str] = Query(None, description="pdf|word|excel|ppt|text|code|zip|all"),
     # aliases de instância
     instancia: Optional[str] = Query(None),
     instance: Optional[str] = Query(None),
@@ -258,11 +263,17 @@ def list_midias(
 
     if t in {"image", "video", "audio", "document"}:
         if t == "image":
-            stmt = stmt.where(or_(Midia.tipo == "image", and_(Midia.tipo.is_(None), Midia.mimetype.ilike("image/%"))))
+            stmt = stmt.where(
+                or_(Midia.tipo == "image", and_(Midia.tipo.is_(None), Midia.mimetype.ilike("image/%")))
+            )
         elif t == "video":
-            stmt = stmt.where(or_(Midia.tipo == "video", and_(Midia.tipo.is_(None), Midia.mimetype.ilike("video/%"))))
+            stmt = stmt.where(
+                or_(Midia.tipo == "video", and_(Midia.tipo.is_(None), Midia.mimetype.ilike("video/%")))
+            )
         elif t == "audio":
-            stmt = stmt.where(or_(Midia.tipo == "audio", and_(Midia.tipo.is_(None), Midia.mimetype.ilike("audio/%"))))
+            stmt = stmt.where(
+                or_(Midia.tipo == "audio", and_(Midia.tipo.is_(None), Midia.mimetype.ilike("audio/%")))
+            )
         else:  # document
             stmt = stmt.where(or_(Midia.tipo == "document", and_(Midia.tipo.is_(None), doc_mime_pred)))
 
@@ -271,46 +282,57 @@ def list_midias(
             if d == "pdf":
                 stmt = stmt.where(Midia.mimetype.ilike("application/pdf"))
             elif d == "word":
-                stmt = stmt.where(or_(
-                    Midia.mimetype.ilike("application/msword"),
-                    Midia.mimetype.ilike("application/vnd.openxmlformats-officedocument.wordprocessingml%")
-                ))
+                stmt = stmt.where(
+                    or_(
+                        Midia.mimetype.ilike("application/msword"),
+                        Midia.mimetype.ilike("application/vnd.openxmlformats-officedocument.wordprocessingml%"),
+                    )
+                )
             elif d == "excel":
-                stmt = stmt.where(or_(
-                    Midia.mimetype.ilike("application/vnd.ms-excel"),
-                    Midia.mimetype.ilike("application/vnd.openxmlformats-officedocument.spreadsheetml%"),
-                    Midia.mimetype.ilike("text/csv")
-                ))
+                stmt = stmt.where(
+                    or_(
+                        Midia.mimetype.ilike("application/vnd.ms-excel"),
+                        Midia.mimetype.ilike("application/vnd.openxmlformats-officedocument.spreadsheetml%"),
+                        Midia.mimetype.ilike("text/csv"),
+                    )
+                )
             elif d == "ppt":
-                stmt = stmt.where(or_(
-                    Midia.mimetype.ilike("application/vnd.ms-powerpoint"),
-                    Midia.mimetype.ilike("application/vnd.openxmlformats-officedocument.presentationml%")
-                ))
+                stmt = stmt.where(
+                    or_(
+                        Midia.mimetype.ilike("application/vnd.ms-powerpoint"),
+                        Midia.mimetype.ilike("application/vnd.openxmlformats-officedocument.presentationml%"),
+                    )
+                )
             elif d == "text":
-                stmt = stmt.where(or_(
-                    Midia.mimetype.ilike("text/%"),
-                    Midia.mimetype.ilike("application/json"),
-                    Midia.mimetype.ilike("application/xml")
-                ))
+                stmt = stmt.where(
+                    or_(
+                        Midia.mimetype.ilike("text/%"),
+                        Midia.mimetype.ilike("application/json"),
+                        Midia.mimetype.ilike("application/xml"),
+                    )
+                )
             elif d == "code":
-                stmt = stmt.where(or_(
-                    Midia.mimetype.ilike("application/json"),
-                    Midia.mimetype.ilike("application/xml"),
-                    Midia.mimetype.ilike("text/html"),
-                    Midia.mimetype.ilike("text/markdown"),
-                    Midia.mimetype.ilike("application/javascript")
-                ))
+                stmt = stmt.where(
+                    or_(
+                        Midia.mimetype.ilike("application/json"),
+                        Midia.mimetype.ilike("application/xml"),
+                        Midia.mimetype.ilike("text/html"),
+                        Midia.mimetype.ilike("text/markdown"),
+                        Midia.mimetype.ilike("application/javascript"),
+                    )
+                )
             elif d == "zip":
-                stmt = stmt.where(or_(
-                    Midia.mimetype.ilike("application/zip"),
-                    Midia.mimetype.ilike("application/x-7z-compressed"),
-                    Midia.mimetype.ilike("application/x-rar-compressed"),
-                    Midia.mimetype.ilike("application/x-tar"),
-                    Midia.mimetype.ilike("application/gzip")
-                ))
+                stmt = stmt.where(
+                    or_(
+                        Midia.mimetype.ilike("application/zip"),
+                        Midia.mimetype.ilike("application/x-7z-compressed"),
+                        Midia.mimetype.ilike("application/x-rar-compressed"),
+                        Midia.mimetype.ilike("application/x-tar"),
+                        Midia.mimetype.ilike("application/gzip"),
+                    )
+                )
     else:
         # Sem ?tipo=: "Todas" traz TUDO (image, video, audio, document...).
-        # Se quiser restringir, reabilite o filtro antigo aqui.
         pass
 
     # Ordenação
@@ -483,7 +505,8 @@ def rename_midia(
 
     # --- SEMPRE mantém a extensão original (se existir) ---
     def _get_ext(s: str | None) -> str:
-        if not s: return ""
+        if not s:
+            return ""
         a = s.rsplit(".", 1)
         return f".{a[1]}" if len(a) == 2 else ""
 
