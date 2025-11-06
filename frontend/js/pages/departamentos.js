@@ -96,6 +96,10 @@
     instancias: [],
     instanciasLoaded: false,
     whatsSelected: new Set(),
+
+    // Animações
+    animateNext: false,     // ativa “stagger” na próxima render
+    highlightId: null       // id a destacar após salvar
   };
 
   const PZ = { MIN: 0.5, MAX: 2.5, STEP: 1.2 };
@@ -344,6 +348,9 @@
       `.trim();
       tbody.appendChild(tr);
 
+      // índice para delay em cascata (CSS usa --stg)
+      tr.style.setProperty('--stg', String(i - 1));
+
       if (!IS_MOBILE){
         const twisty = tr.querySelector('.twisty');
         if (twisty && n.children.length){
@@ -363,6 +370,27 @@
     };
 
     state.nested.forEach(n => drawNode(n, 0));
+
+    // ===== animação em cascata na render =====
+    if (state.animateNext) {
+      $$('#tb-deptos tr').forEach((tr, idx) => {
+        tr.classList.add('anim-enter');
+        tr.style.setProperty('--stg', String(idx));
+        tr.addEventListener('animationend', () => tr.classList.remove('anim-enter'), { once: true });
+      });
+      state.animateNext = false;
+    }
+
+    // ===== destaque do item novo/atualizado =====
+    if (state.highlightId) {
+      const tr = $(`#tb-deptos tr[data-id="${state.highlightId}"]`);
+      if (tr) {
+        tr.classList.add('flash-new');
+        tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => tr.classList.remove('flash-new'), 1600);
+      }
+      state.highlightId = null;
+    }
   }
 
   // ===== Drag & Drop (tabela)
@@ -848,17 +876,37 @@
     if (btnSalva) btnSalva.disabled = true;
     Loader.show('Salvando...');
     try{
+      let saved = null;
       if (!state.editing){
-        await apiJSON('/api/atendimento/clientes/departamentos', 'POST', payload)
+        saved = await apiJSON('/api/atendimento/clientes/departamentos', 'POST', payload)
           .catch(async()=> await apiJSON('/api/departamentos', 'POST', payload));
       }else{
         const id = state.editing.id;
-        await apiJSON(`/api/atendimento/clientes/departamentos/${id}`, 'PUT', payload)
+        saved = await apiJSON(`/api/atendimento/clientes/departamentos/${id}`, 'PUT', payload)
           .catch(async()=> await apiJSON(`/api/departamentos/${id}`, 'PUT', payload));
       }
       toast('Salvo com sucesso.');
       closeModal();
+
+      // prepara animações para a próxima render
+      state.animateNext = true;
+      const returnedId = Number(saved?.id ?? saved?.dep_id ?? saved?.depto_id ?? saved?.ID);
+      state.highlightId = Number.isFinite(returnedId) ? returnedId : (state.editing ? state.editing.id : null);
+
       await loadTree();
+
+      // se estiver no organograma, tenta destacar o card correspondente também
+      if (state.view === 'org' && state.highlightId){
+        setTimeout(() => {
+          const btn = document.querySelector(`.node-actions .btn[data-id="${state.highlightId}"]`);
+          const card = btn?.closest('.node-card');
+          if (card){
+            card.classList.add('flash-new');
+            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setTimeout(()=> card.classList.remove('flash-new'), 1600);
+          }
+        }, 40);
+      }
     }catch(e){
       console.error(e);
       const msg = e?.data?.detail

@@ -4,6 +4,7 @@
 // - Evita dados “fantasma” ao trocar de conversa (AbortController + token por cliente).
 // - Intercepta no CAPTURE e bloqueia outros handlers (não abre o drawer completo com “bairro”, etc).
 // - Atualiza o cache/UI com o que veio do BD após o merge, inclusive avatar/nome.
+// - Recarrega avatar automaticamente quando a imagem quebra (403/expirada), com cooldown.
 
 (() => {
   /* --------------- helpers --------------- */
@@ -97,17 +98,26 @@
   function updateHeaderAvatar(url){
     const av = document.getElementById('chat-avatar');
     if (!av) return;
+
     if (url) {
-      av.innerHTML = `<span class="avatar"><img src="${url}" alt=""
-        onerror="this.onerror=null;this.parentElement.classList.add('avatar-default');this.remove();"></span>`;
+      const cid = getClienteId() || Number(window.state?.clienteSel?.id || 0) || '';
+      const safe = String(url).replace(/"/g,'&quot;');
+      const cidAttr = cid ? ` data-cliente-id="${cid}"` : '';
+      av.innerHTML =
+        `<span class="avatar">
+           <img src="${safe}" alt=""${cidAttr}
+                onerror="window.handleAvatarError && window.handleAvatarError(this)">
+         </span>`;
     } else {
       av.innerHTML = `<span class="avatar avatar-default"><i class="fa fa-user-circle text-2xl text-gray-400"></i></span>`;
     }
   }
+
   function updateHeaderName(name){
     const t = document.getElementById('chat-title');
     if (t && name) t.textContent = name;
   }
+
   function patchClienteCache(clienteId, patch){
     try{
       const st = window.state || {};
@@ -128,6 +138,7 @@
       window.syncPreviewFromCache?.(Number(clienteId));
     }catch(e){ console.warn('[perfil_quick] patchClienteCache falhou:', e); }
   }
+
   async function syncWithDBAndPatchCaches(clienteId, prof){
     if (!clienteId || !EMPRESA_ID) return;
     try{
@@ -156,6 +167,77 @@
       patchClienteCache(clienteId, patch);
     }
   }
+
+  /* ---- atualização silenciosa de avatar (403 / expirado) ---- */
+  async function refreshAvatarFromEvolution(clienteId){
+    if (!clienteId) return;
+    try{
+      const prof = await fetchEvolutionProfile(clienteId, undefined);
+      await syncWithDBAndPatchCaches(clienteId, prof);
+    }catch(e){
+      console.warn('[perfil_quick] refreshAvatarFromEvolution erro:', e);
+    }
+  }
+  // expõe pro resto do front (lista, header, etc)
+  window.refreshAvatarFromEvolution = refreshAvatarFromEvolution;
+
+  /* ---- cooldown leve por cliente/trigger (localStorage) ---- */
+  const CD_MS = { list: 30 * 60 * 1000, chat: 10 * 60 * 1000, manual: 0 };
+  const cdKey = (clienteId, trigger) =>
+    `av_cd:v1:e${EMPRESA_ID}:c${Number(clienteId)}:t${trigger}`;
+
+  function canRunCooldown(clienteId, trigger){
+    try{
+      const ms = CD_MS[trigger] ?? 0;
+      if (ms <= 0) return true;
+      const last = Number(localStorage.getItem(cdKey(clienteId, trigger)) || 0);
+      return (Date.now() - last) > ms;
+    }catch{ return true; }
+  }
+  function markCooldown(clienteId, trigger){
+    try{ localStorage.setItem(cdKey(clienteId, trigger), String(Date.now())); }catch{}
+  }
+
+  /* ---- handlers globais para usar no onerror do <img> ---- */
+  window.handleListAvatarError = async function onListImgError(imgEl, clienteId){
+    try{
+      if (imgEl) {
+        imgEl.onerror = null;
+        imgEl.remove(); // remove a imagem quebrada
+        imgEl.parentElement?.classList?.add('placeholder');
+      }
+      if (!clienteId || !EMPRESA_ID) return;
+
+      // respeita cooldown de lista
+      if (!canRunCooldown(clienteId, 'list')) return;
+      markCooldown(clienteId, 'list');
+
+      await refreshAvatarFromEvolution(Number(clienteId));
+    }catch(e){ /* silencioso */ }
+  };
+
+  window.handleAvatarError = async function onHeaderImgError(imgEl){
+    try{
+      if (imgEl) {
+        imgEl.onerror = null;
+        imgEl.remove();
+        imgEl.parentElement?.classList?.add('avatar-default');
+      }
+
+      const cidFromAttr = Number(imgEl?.getAttribute('data-cliente-id') || 0);
+      const clienteId =
+        cidFromAttr ||
+        Number(window.state?.clienteSel?.id || window.state?.clienteSel?.conversation_id || 0);
+
+      if (!clienteId || !EMPRESA_ID) return;
+
+      // cooldown menor ao entrar no chat
+      if (!canRunCooldown(clienteId, 'chat')) return;
+      markCooldown(clienteId, 'chat');
+
+      await refreshAvatarFromEvolution(Number(clienteId));
+    }catch(e){ /* silencioso */ }
+  };
 
   /* --------------- CSS --------------- */
   (function injectCSS(){
@@ -256,7 +338,7 @@
     const statusTxt = (p.status && p.status.status) ? String(p.status.status) : '';
     const statusAt  = (p.status && p.status.setAt)  ? fmtDateTimeISO(p.status.setAt) : '';
     const pic = p.picture || '';
-    const desc = (p.description || '').trim();
+       const desc = (p.description || '').trim();
     const site = (p.website || '').trim();
     const phoneShown = ($('#historico')?.dataset?.telefone) || (p.wuid || '').replace('@s.whatsapp.net','');
 

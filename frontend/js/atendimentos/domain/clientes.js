@@ -1,4 +1,3 @@
-// /frontend/js/atendimentos/domain/clientes.js
 // =====================================================================
 // LISTA DE CONVERSAS (render, dedupe, preview, paginação)
 // - Normaliza resposta do backend (suporta `{items:[]}` ou `[]`)
@@ -59,6 +58,36 @@ function scoreRecencia(c){
   const ack = Number(c.last_ack || 0);
   const ava = c.avatar_url ? 1 : 0;
   return ts * 1_000_000 + mid * 1_000 + ack * 10 + ava;
+}
+
+// handler global para erro de avatar (403 / expirado / etc)
+if (typeof window !== 'undefined' && !window.handleAvatarError) {
+  window.handleAvatarError = function handleAvatarError(img){
+    try{
+      if (!img) return;
+      // evita loops
+      try { img.onerror = null; } catch {}
+
+      const li = img.closest('li.chat-item, li.cliente-item');
+      const cidAttr = img.dataset.clienteId || li?.dataset.id;
+      const cid = cidAttr ? Number(cidAttr) : null;
+
+      const parent = img.parentElement;
+      if (parent) {
+        parent.classList.add('placeholder');
+        parent.innerHTML = '<i class="fa fa-user-circle"></i>';
+      } else {
+        img.remove();
+      }
+
+      if (cid && typeof window.refreshAvatarFromEvolution === 'function') {
+        // tenta atualizar a foto via Evolution + BD
+        window.refreshAvatarFromEvolution(cid);
+      }
+    }catch(e){
+      try { console.warn('[handleAvatarError]', e); } catch {}
+    }
+  };
 }
 
 // 🔼 PINS primeiro, depois recência
@@ -208,6 +237,15 @@ export function normalizeCliente(c){
   const preview =
     c.ultima_texto ?? c.ultima_mensagem ?? c.ultima ?? c.last_text ?? '';
 
+  // tenta vários campos de foto
+  const foto =
+    c.avatar_url
+    || c.foto_url
+    || c.foto
+    || c.avatar
+    || c.profile_pic_url
+    || '';
+
   return {
     id,
     conversation_id: temValor(c.conversation_id) ? c.conversation_id : id,
@@ -220,7 +258,7 @@ export function normalizeCliente(c){
     telefone: c.telefone ?? c.number ?? c.wuid ?? c.numero ?? null,
     telefone_norm: normalizaTelefoneBR(c.telefone ?? c.number ?? c.wuid ?? c.numero ?? null),
 
-    avatar_url: c.avatar_url ?? c.foto ?? null,
+    avatar_url: foto && String(foto).trim() !== '' ? String(foto) : null,
 
     ultima_msg_id: c.ultima_msg_id ?? c.last_msg_id ?? null,
     ultima_mensagem: preview,
@@ -507,8 +545,10 @@ export function renderListaClientes(data){
       ? `<span class="preview-ack" data-ack="${ackVal}">${window.getAckIcon(ackVal)}</span> `
       : '';
 
-    const av = c.avatar_url
-      ? `<span class="avatar"><img src="${c.avatar_url}" alt="" onerror="this.onerror=null;this.parentElement.classList.add('placeholder');this.remove();" /></span>`
+    const avatarUrl = c.avatar_url ? String(c.avatar_url).replace(/"/g,'&quot;') : '';
+    const av = avatarUrl
+      ? `<span class="avatar"><img src="${avatarUrl}" alt="" data-cliente-id="${c.id}"
+                onerror="window.handleAvatarError && window.handleAvatarError(this)" /></span>`
       : `<span class="avatar placeholder"><i class="fa fa-user-circle"></i></span>`;
 
     const pinClass = c.pinned ? ' is-pinned' : '';

@@ -268,7 +268,7 @@ async function selecionarClienteObj(id) {
     if (instCand != null && instCand !== '') {
       window.INSTANCIA_ATIVA = String(instCand);
       window.setInstanceChip?.(String(instCand));
-      // >>> FIX: carimba no DOM para o histórico ler a mesma instância (ID numérico)
+      // carimba no DOM pro perfil_quick / historico saber a instância
       if (hist) hist.dataset.instanciaId = String(instCand);
     }
   }catch{}
@@ -292,12 +292,17 @@ async function selecionarClienteObj(id) {
   const av = document.getElementById('chat-avatar');
   if (t)  t.textContent = c.nome || c.push_name || '';
   if (av) {
-    av.innerHTML = c.avatar_url
-      ? `<span class="avatar"><img src="${c.avatar_url}" alt=""
-           onerror="this.onerror=null;this.parentElement.classList.add('avatar-default');this.remove();"></span>`
-      : `<span class="avatar avatar-default"><i class="fa fa-user-circle text-2xl text-gray-400"></i></span>`;
+    if (c.avatar_url) {
+      const safeUrl = String(c.avatar_url).replace(/"/g,'&quot;');
+      av.innerHTML = `<span class="avatar"><img src="${safeUrl}" alt="" data-cliente-id="${c.id}"
+           onerror="window.handleAvatarError && window.handleAvatarError(this)"></span>`;
+    } else {
+      av.innerHTML =
+        `<span class="avatar avatar-default"><i class="fa fa-user-circle text-2xl text-gray-400"></i></span>`;
+    }
   }
 
+  // ainda deixa o click abrindo o perfil "antigo" (perfil_quick intercepta se quiser)
   try {
     const openPerfil = () => abrirPerfilAtual && abrirPerfilAtual(false);
     if (t)  { t.style.cursor = 'pointer';  t.onclick  = openPerfil; }

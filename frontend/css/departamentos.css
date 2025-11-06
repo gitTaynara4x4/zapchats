@@ -187,9 +187,34 @@ tbody tr.drop-target{outline:2px dashed var(--ring);outline-offset:-2px}
 .org>li{display:flex;flex-direction:column;align-items:center}
 .org ul{padding-top:var(--branch);position:relative;display:flex;justify-content:center;gap:20px;flex-wrap:wrap}
 .org li{list-style:none;text-align:center;position:relative;padding:0 12px}
-.node-card{min-width:190px;max-width:240px;background:var(--card-bg);border:1px solid var(--card-border);border-radius:calc(var(--radius) - .1rem);padding:.7rem .8rem;box-shadow:var(--card-blur-shadow);display:grid;gap:.5rem;backface-visibility:hidden}
+
+/* cards do organograma */
+.node-card{
+  min-width:190px;
+  max-width:260px;
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+  border-radius:calc(var(--radius) - .1rem);
+  padding:.7rem .8rem;
+  box-shadow:var(--card-blur-shadow);
+  display:grid;
+  gap:.5rem;
+  backface-visibility:hidden;
+}
+
+/* raiz (empresa) pode ser maior */
+.node-card.is-root{ max-width:280px; }
+
 .node-head{display:grid;align-items:center;column-gap:.5rem;grid-template-columns:1fr 1.2rem}
-.node-title{min-width:0;font-weight:900;font-size:clamp(.98rem,2.7vw,1.02rem);text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node-title{
+  min-width:0;
+  font-weight:900;
+  font-size:clamp(.98rem,2.7vw,1.02rem);
+  text-align:left;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
 .node-title,.node-title:focus{outline:none!important;box-shadow:none!important;border:0!important}
 .node-path{font-family:ui-monospace;font-size:.85rem;opacity:.8;text-align:left}
 .node-actions{display:flex;justify-content:flex-end;gap:.35rem;flex-wrap:wrap}
@@ -200,7 +225,18 @@ tbody tr.drop-target{outline:2px dashed var(--ring);outline-offset:-2px}
 .node-twisty.is-leaf{opacity:.35;cursor:default}
 .node-card.is-root .node-twisty{display:none!important}
 .node-card.is-root .node-head{grid-template-columns:1fr;justify-items:center}
-.node-card.is-root .node-title{text-align:center;margin:0 auto}
+
+/* título da raiz: centralizado e com quebra */
+.node-card.is-root .node-title{
+  text-align:center;
+  margin:0 auto;
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+  line-height:1.3;
+  word-break:break-word;
+}
+
 .org>li>.node-card.is-root{margin-bottom:14px}
 .org-wires{position:absolute;inset:0;pointer-events:none}
 .org-wires path{vector-effect:non-scaling-stroke;stroke-width:var(--wire)}
@@ -219,6 +255,9 @@ tbody tr.drop-target{outline:2px dashed var(--ring);outline-offset:-2px}
   .fi.fi-nome .dropdown-suggestions{position:static;width:100%;max-height:220px;margin-top:6px;overflow:auto;z-index:auto}
   #fi-whats .multi,#fi-parent .multi{position:static}
   #whats-panel,#parent-panel{position:static;width:100%;max-height:240px;margin-top:6px;z-index:auto}
+
+  /* respiro entre o botão “Tabela” e a lista de cards */
+  .tree-wrap{overflow:visible; margin-top:.9rem;}
 }
 
 /* === MOBILE estreito === */
@@ -284,6 +323,10 @@ body[data-page="departamentos"] .node-actions .btn,body.compact-deptos .node-act
 body[data-page="departamentos"] .node-twisty,body.compact-deptos .node-twisty{width:1rem;height:1rem}
 body[data-page="departamentos"] .dropdown-suggestions .dd-item,body.compact-deptos .dropdown-suggestions .dd-item{padding:.45rem .6rem}
 
+/* raiz em modo compacto também pode ser mais larga */
+body[data-page="departamentos"] .node-card.is-root,
+body.compact-deptos .node-card.is-root{ max-width:260px; }
+
 /* PATCH: alinhamento dos fios */
 .org,.org ul{list-style:none;margin:0;padding:0}
 .org li{display:flex;flex-direction:column;align-items:center;padding:0;text-align:initial}
@@ -301,7 +344,7 @@ body[data-page="departamentos"] .dropdown-suggestions .dd-item,body.compact-dept
   .view-toggle{grid-area:toggle;width:100%}
   .view-toggle .btn{width:100%;justify-content:center;border-radius:.7rem}
   .filter .btn.primary{grid-area:new;position:static!important;height:42px;padding:0 14px;border-radius:.7rem;box-shadow:0 8px 18px rgba(0,0,0,.18)}
-  .tree-wrap{overflow:visible}
+  .tree-wrap{overflow:visible; margin-top:.9rem;}
   table.tree-table{min-width:0;width:100%;border-collapse:separate;border-spacing:0 .6rem}
   table.tree-table thead{display:none}
   .tree-table,.tree-table tbody,.tree-table tr,.tree-table td{display:block;width:100%}

@@ -98,6 +98,7 @@ const els = {
   table:       $('#lista-zap'),
   tbody:       $('#lista-zap tbody'),
   btnAdd:      $('#btn-open-modal'),
+  countPro:    $('#count-pro'),   // <<< topo OURO N/N
 
   modal:       $('#modal'),
   btnCloseMd:  $('#btn-close-modal'),
@@ -216,6 +217,7 @@ function startStatusLoop(){
   // ritmo mais lento (≈4s)
   prep.seqTmr = setInterval(() => {
     prep.seqIdx = (prep.seqIdx + 1) % items.length;
+    setStatus(prep.seqIdx, true);
     setStatus(items[prep.seqIdx], true);
   }, 4000);
 }
@@ -306,10 +308,10 @@ function hidePrepOverlay(){
 
   /* Status – MENOR e sem negrito */
   #prep-ovl-status{
-    font-weight:400;                 /* sem negrito */
+    font-weight:400;
     letter-spacing:.02em;
     margin:.2rem 0 .35rem;
-    font-size:clamp(12px,1.1vw,13px);/* ainda menor */
+    font-size:clamp(12px,1.1vw,13px);
     opacity:.96;
   }
   #prep-ovl-status.fade{animation:prepFade .55s ease}
@@ -430,10 +432,36 @@ function renderList(items, planLabel){
 let allItems = [];
 let currentTab = 'ativos';
 let lastPlanLabel = '—';
-function filterItemsByTab(list){ return currentTab === 'ativos' ? list.filter(i => !!i.connected) : list.filter(i => !i.connected); }
-function activateTab(tab){ currentTab = tab; renderList(filterItemsByTab(allItems), lastPlanLabel); }
+function filterItemsByTab(list){
+  return currentTab === 'ativos'
+    ? list.filter(i => !!i.connected)
+    : list.filter(i => !i.connected);
+}
+function activateTab(tab){
+  currentTab = tab;
+  renderList(filterItemsByTab(allItems), lastPlanLabel);
+}
 els.tabAtivos?.addEventListener('click', () => activateTab('ativos'));
 els.tabInativos?.addEventListener('click', () => activateTab('inativos'));
+
+// ===== Contadores (tabs + topo) =====
+function updateTabCounts(totalAtivos, totalInativos){
+  if (els.tabAtivos)   els.tabAtivos.textContent   = `Ativos (${totalAtivos})`;
+  if (els.tabInativos) els.tabInativos.textContent = `Inativos (${totalInativos})`;
+}
+function updateTopTotal(tier, payload, list){
+  if (!els.countPro) return;
+  const t = String(tier || 'FREE').toUpperCase();
+  const total = Array.isArray(list) ? list.length : 0;
+  const rawLimit =
+    payload?.limite_instancias ??
+    payload?.max_instancias ??
+    payload?.limite ??
+    null;
+  const limit = (typeof rawLimit === 'number' && rawLimit > 0) ? rawLimit : null;
+  if (limit) els.countPro.textContent = `${t} ${total}/${limit}`;
+  else       els.countPro.textContent = `${t} ${total}`;
+}
 
 // ===== Loader de status =====
 let loadTmr = null, inFlight = false, pendingReload = false;
@@ -447,15 +475,32 @@ async function loadWhatsAppStatus(){
   inFlight = true; pendingReload = false;
   try{
     const js = await apiGet(`/api/empresas/${empresaId}/whatsapp`);
-    const tier   = String(js?.effective_tier || js?.assinatura || 'FREE').toUpperCase();
-    const list = Array.isArray(js?.instancias) ? js.instancias.map(i => ({
-      id: i.id, instance_name: i.instance_name, apelido: i.apelido || '',
-      numero_instancia: i.numero_instancia || '', connected: !!i.connected, last_seen: i.last_seen || null
-    })) : [];
-    allItems = list; lastPlanLabel = tier;
+    const tier = String(js?.effective_tier || js?.assinatura || 'FREE').toUpperCase();
+
+    const list = Array.isArray(js?.instancias)
+      ? js.instancias.map(i => ({
+          id: i.id,
+          instance_name: i.instance_name,
+          apelido: i.apelido || '',
+          numero_instancia: i.numero_instancia || '',
+          connected: isConnectedPayload(i),
+          last_seen: i.last_seen || null
+        }))
+      : [];
+
+    allItems = list;
+    lastPlanLabel = tier;
+
+    const totalAtivos   = list.filter(it => it.connected).length;
+    const totalInativos = list.length - totalAtivos;
+
+    updateTabCounts(totalAtivos, totalInativos);
+    updateTopTotal(tier, js, list);
+
     renderList(filterItemsByTab(allItems), tier);
-  }catch(e){ console.error(e); }
-  finally{
+  }catch(e){
+    console.error(e);
+  } finally{
     inFlight = false;
     if (pendingReload) { pendingReload = false; scheduleLoad(200); }
   }
@@ -711,7 +756,15 @@ async function refreshQR(){
 async function gerarPrimeiroQR(){ await refreshQR(); }
 
 // Listeners
-els.btnAdd?.addEventListener('click', () => { showModal(); showIllustration(); showQRError(''); hideQR(); wantQR = false; currentInstance = null; window.currentInstance = null; });
+els.btnAdd?.addEventListener('click', () => {
+  showModal();
+  showIllustration();
+  showQRError('');
+  hideQR();
+  wantQR = false;
+  currentInstance = null;
+  window.currentInstance = null;
+});
 els.btnCloseMd?.addEventListener('click', hideModal);
 els.btnCancel?.addEventListener('click', hideModal);
 els.form?.addEventListener('submit', handleConnectSubmit);
@@ -741,7 +794,10 @@ els.remConsent?.addEventListener('change', () => {
 els.btnRemNo?.addEventListener('click', closeRemoveModal);
 els.btnRemYes?.addEventListener('click', async () => {
   if (!toRemove) return;
-  if (!els.remConsent?.checked){ alert('Para remover definitivamente, confirme que está ciente de que TODOS os dados desta instância serão apagados.'); return; }
+  if (!els.remConsent?.checked){
+    alert('Para remover definitivamente, confirme que está ciente de que TODOS os dados desta instância serão apagados.');
+    return;
+  }
   els.btnRemYes.disabled = true; els.btnRemNo.disabled  = true;
   try{
     const tries = [
@@ -756,9 +812,17 @@ els.btnRemYes?.addEventListener('click', async () => {
         else { lastErr = `DELETE ${u} → ${res.status}`; }
       }catch(e){ lastErr = String(e?.message || e); }
     }
-    if (!success) { alert(`Não foi possível remover este número agora.\n${lastErr || ''}`.trim()); return; }
-    closeRemoveModal(); toast('Instância e todos os dados vinculados foram removidos.'); await loadWhatsAppStatus();
-  } finally { els.btnRemYes.disabled = false; els.btnRemNo.disabled  = false; }
+    if (!success) {
+      alert(`Não foi possível remover este número agora.\n${lastErr || ''}`.trim());
+      return;
+    }
+    closeRemoveModal();
+    toast('Instância e todos os dados vinculados foram removidos.');
+    await loadWhatsAppStatus();
+  } finally {
+    els.btnRemYes.disabled = false;
+    els.btnRemNo.disabled  = false;
+  }
 });
 let toastTimer = null;
 function toast(msg){
@@ -768,8 +832,12 @@ function toast(msg){
 }
 
 // Init
-if (!empresaId){ console.warn('empresa_id ausente no localStorage; não foi possível carregar a lista.'); }
-else { attachEmpresaWS(); loadWhatsAppStatus(); }
+if (!empresaId){
+  console.warn('empresa_id ausente no localStorage; não foi possível carregar a lista.');
+} else {
+  attachEmpresaWS();
+  loadWhatsAppStatus();
+}
 
 // Teardown SPA
 function teardownConectar() {
@@ -783,7 +851,13 @@ function teardownConectar() {
 }
 (function watchLeave(){
   const isHere = () => !!document.getElementById('form-conectar') || location.pathname.includes('/conectar');
-  const stopIfGone = () => { if (!isHere()) { teardownConectar(); obs?.disconnect?.(); document.removeEventListener('visibilitychange', stopIfGone); } };
+  const stopIfGone = () => {
+    if (!isHere()) {
+      teardownConectar();
+      obs?.disconnect?.();
+      document.removeEventListener('visibilitychange', stopIfGone);
+    }
+  };
   const obs = new MutationObserver(stopIfGone);
   obs.observe(document.body, { childList:true, subtree:true });
   document.addEventListener('visibilitychange', stopIfGone);
