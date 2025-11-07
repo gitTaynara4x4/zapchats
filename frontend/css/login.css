@@ -120,7 +120,7 @@ html.dark .theme-toggle .slot svg *{ stroke:#8a93a1; }
 .theme-toggle .thumb{
   position:absolute; top:var(--p); left:var(--p); width:var(--k); height:var(--k); border-radius:999px;
   transform: translateX(0);
-  transition: transform .38s cubic-bezier(.28,1.2,.43,1), box-shadow .2s.ease, background .3s ease;
+  transition: transform .38s cubic-bezier(.28,1.2,.43,1), box-shadow .2s ease, background .3s ease;
   display:grid; place-items:center; overflow:hidden;
   background:
     radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%),
@@ -248,7 +248,7 @@ html.dark .logo-dark{ display:block }
   height:var(--input-h); width:100%; padding:0 12px;
   background:var(--input-bg); border:1px solid var(--input-bd);
   color:var(--input-text); border-radius:10px; outline:none;
-  transition: box-shadow .12s ease, border-color .12s.ease, background .12s ease;
+  transition: box-shadow .12s ease, border-color .12s ease, background .12s ease;
 }
 .input::placeholder{ color:var(--text-secondary); opacity:.9; }
 .input:focus{ border-color:var(--brand-500); box-shadow:0 0 0 2px rgba(0,189,61,.35); }
