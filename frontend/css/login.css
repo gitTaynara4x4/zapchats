@@ -120,7 +120,7 @@ html.dark .theme-toggle .slot svg *{ stroke:#8a93a1; }
 .theme-toggle .thumb{
   position:absolute; top:var(--p); left:var(--p); width:var(--k); height:var(--k); border-radius:999px;
   transform: translateX(0);
-  transition: transform .38s cubic-bezier(.28,1.2,.43,1), box-shadow .2s ease, background .3s ease;
+  transition: transform .38s cubic-bezier(.28,1.2,.43,1), box-shadow .2s.ease, background .3s ease;
   display:grid; place-items:center; overflow:hidden;
   background:
     radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%),
@@ -211,6 +211,14 @@ html[data-auth-size="wide"]  { --auth-card-max: 1040px; }
 
 .login-illustration{ display:none; }
 
+/* limita o tamanho da imagem da ilustração */
+.login-illustration img{
+  width:100%;
+  max-width:400px;
+  height:auto;
+  margin-inline:auto;
+}
+
 .login-form{
   background: var(--card-bg);
   display:flex; flex-direction:column; align-items:center;
@@ -240,7 +248,7 @@ html.dark .logo-dark{ display:block }
   height:var(--input-h); width:100%; padding:0 12px;
   background:var(--input-bg); border:1px solid var(--input-bd);
   color:var(--input-text); border-radius:10px; outline:none;
-  transition: box-shadow .12s ease, border-color .12s ease, background .12s ease;
+  transition: box-shadow .12s ease, border-color .12s.ease, background .12s ease;
 }
 .input::placeholder{ color:var(--text-secondary); opacity:.9; }
 .input:focus{ border-color:var(--brand-500); box-shadow:0 0 0 2px rgba(0,189,61,.35); }
@@ -278,7 +286,6 @@ html.dark .icon-btn:hover{ background:rgba(255,255,255,.06) }
   cursor:pointer;
   transition: filter .12s ease, opacity .12s ease;
 }
-
 .btn-primary{ background:var(--brand-500); color:#fff } 
 .btn-primary:hover{ filter:brightness(.96) }
 .btn[disabled]{ opacity:.6; cursor:not-allowed }
@@ -302,7 +309,14 @@ input:-webkit-autofill:focus{
    TABLET (640px – 1023px)
    ======================================================= */
 @media (min-width:640px){
-  .login-illustration{ display:block; background:var(--left-bg); padding:18px; min-height:280px }
+  .login-illustration{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:var(--left-bg);
+    padding:18px;
+    min-height:280px;
+  }
   .login-form{ padding: 24px 20px; }
   .title{ font-size:28px }
   .logo, .logo-dark{ width:128px }
@@ -315,7 +329,12 @@ input:-webkit-autofill:focus{
   .login-card{
     grid-template-columns: 420px 1fr;
   }
-  .login-illustration{ display:grid; place-items:center; padding:20px; min-height:420px }
+  .login-illustration{
+    display:grid;
+    place-items:center;
+    padding:20px;
+    min-height:420px;
+  }
   .login-form{ padding: 26px 30px; }
   .head-block, .form, .footer-note{ width:420px; margin-inline:0; }
   .title{ font-size:32px }
@@ -353,7 +372,7 @@ input:-webkit-autofill:focus{
   .head-block{ margin-bottom: 10px; }
   .subtitle{ margin-bottom: 12px; }
   .field{ margin-bottom: 10px; }
-  /* ❌ NÃO escondemos mais a ilustração aqui */
+  /* não escondemos mais a ilustração aqui */
 }
 
 /* Esconde a ilustração só em tela realmente pequena (baixa + estreita) */
@@ -374,4 +393,21 @@ input:-webkit-autofill:focus{
   }
   .row-between{ gap:6px; font-size:12.5px; }
   .login-card{ min-height: auto; }
+}
+
+/* =======================================================
+   AJUSTE PARA CELULAR (largura até 480px)
+   - Card um pouco mais baixo
+   - Conteúdo mais perto do topo
+   ======================================================= */
+@media (max-width: 480px){
+  :root{
+    --auth-card-min-h: 560px;
+  }
+
+  .page-shell{
+    place-items: start center;
+    padding-top: calc(8px + env(safe-area-inset-top, 0px));
+    padding-bottom: 12px;
+  }
 }
