@@ -212,6 +212,9 @@ REQUIRED_PERMS = {
     "/chatbot":              "chatbot.configurar",
     "/atendimentos":         "atendimento.ver",
     "/midias":               "arquivos.ver",
+
+    # 👇 NOVO: página de E-mail
+    "/email":                "email.ver",
 }
 
 def _norm_path_for_perm(path: str) -> str:

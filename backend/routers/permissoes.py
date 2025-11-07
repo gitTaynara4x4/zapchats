@@ -27,6 +27,9 @@ PERMISSOES_CATALOGO = [
     {"id": "atendimento.ver",          "label": "Ver Atendimento"},
     {"id": "atendimento.enviar",       "label": "Enviar mensagens no Atendimento"},
     {"id": "arquivos.ver",             "label": "Ver Mídias/Arquivos"},
+
+    # 👇 NOVA PERMISSÃO DO MÓDULO DE E-MAIL
+    {"id": "email.ver",                "label": "Ver E-mails"},
 ]
 
 def _all_perm_ids() -> List[str]:

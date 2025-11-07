@@ -188,6 +188,12 @@
     try{ el && typeof el.focus === 'function' && el.focus(); }catch{}
   }
 
+  // <<< NOVO: helper pra pegar o cliente completo do state
+  function getClienteFromState(id){
+    return state.clientes.find(c => Number(c.id) === Number(id)) || null;
+  }
+  // >>> FIM NOVO
+
   // ===== Cache local (por filtros)
   function cacheKey(){
     const k = {
@@ -868,9 +874,21 @@
         toast('Módulo de edição não carregou.', 'err');
         return;
       }
-      if (b.dataset.action === 'view'){ window.ClienteEditor.openView?.(id); return; }
-      if (b.dataset.action === 'edit'){ window.ClienteEditor.openEdit?.(id); return; }
-      if (b.dataset.action === 'msg'){  window.ClienteEditor.openMessage?.(id) ?? (location.href = `/frontend/atendimentos.html?cliente_id=${id}`); return; }
+
+      const cli = getClienteFromState(id); // <<< NOVO: cliente completo (pode ter cpf_cnpj, email, etc.)
+
+      if (b.dataset.action === 'view'){ 
+        window.ClienteEditor.openView?.(id, cli);  // <<< passa objeto
+        return; 
+      }
+      if (b.dataset.action === 'edit'){ 
+        window.ClienteEditor.openEdit?.(id, cli);  // <<< passa objeto
+        return; 
+      }
+      if (b.dataset.action === 'msg'){  
+        window.ClienteEditor.openMessage?.(id) ?? (location.href = `/frontend/atendimentos.html?cliente_id=${id}`); 
+        return; 
+      }
     });
 
     // showPicker chips

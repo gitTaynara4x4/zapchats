@@ -47,9 +47,37 @@ from backend.cache.redis_client import (
 router = APIRouter(prefix="/clientes", tags=["Clientes"])
 
 # ---------- Schemas ----------
+
+
 class PatchClienteProfile(BaseModel):
+    # já existentes
     departamento: Optional[str] = None
     sobre_cliente: Optional[str] = None
+
+    # novos campos básicos
+    nome: Optional[str] = None
+    telefone: Optional[str] = None
+
+    # documentos / contato
+    cpf_cnpj: Optional[str] = None
+    rg: Optional[str] = None
+    email: Optional[str] = None
+    data_nascimento: Optional[datetime] = None
+    genero: Optional[str] = None
+
+    # endereço
+    cep: Optional[str] = None
+    endereco: Optional[str] = None
+    numero: Optional[str] = None
+    complemento: Optional[str] = None
+    bairro: Optional[str] = None
+    cidade: Optional[str] = None
+    estado: Optional[str] = None
+
+    # outras infos
+    nome_completo: Optional[str] = None
+    website: Optional[str] = None
+    descricao: Optional[str] = None
 
 
 class PostNovoCliente(BaseModel):
@@ -318,7 +346,8 @@ def obter_cliente(
     db: Session = Depends(get_db),
 ):
     """
-    Retorna o detalhe do cliente, já incluindo `colaborador_nome` via join.
+    Retorna o detalhe do cliente, já incluindo `colaborador_nome` via join
+    e todos os campos relevantes do modelo Cliente.
     """
     Colab = aliased(models.Colaborador)
     r = (
@@ -335,6 +364,24 @@ def obter_cliente(
             models.Cliente.timestamp.label("timestamp"),
             models.Cliente.colaborador_id,
             Colab.nome.label("colaborador_nome"),
+            # ====== CAMPOS EXTRAS ======
+            models.Cliente.cpf_cnpj,
+            models.Cliente.rg,
+            models.Cliente.email,
+            models.Cliente.data_nascimento,
+            models.Cliente.genero,
+            models.Cliente.cep,
+            models.Cliente.endereco,
+            models.Cliente.numero,
+            models.Cliente.complemento,
+            models.Cliente.bairro,
+            models.Cliente.cidade,
+            models.Cliente.estado,
+            models.Cliente.nome_completo,
+            models.Cliente.website,
+            models.Cliente.descricao,
+            models.Cliente.is_business,
+            models.Cliente.status_whatsapp,
         )
         .outerjoin(
             Colab,
@@ -362,6 +409,24 @@ def obter_cliente(
         "timestamp": _iso(getattr(r, "timestamp", None)),
         "colaborador_id": r.colaborador_id,
         "colaborador_nome": r.colaborador_nome,
+        # ====== CAMPOS EXTRAS EXPOSTOS PARA O FRONT ======
+        "cpf_cnpj": r.cpf_cnpj,
+        "rg": r.rg,
+        "email": r.email,
+        "data_nascimento": _iso(r.data_nascimento),
+        "genero": r.genero,
+        "cep": r.cep,
+        "endereco": r.endereco,
+        "numero": r.numero,
+        "complemento": r.complemento,
+        "bairro": r.bairro,
+        "cidade": r.cidade,
+        "estado": r.estado,
+        "nome_completo": r.nome_completo,
+        "website": r.website,
+        "descricao": r.descricao,
+        "is_business": r.is_business,
+        "status_whatsapp": r.status_whatsapp,
     }
 
 
@@ -383,10 +448,66 @@ def patch_cliente_profile(
     if not c:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
+    # ====== CAMPOS ORIGINAIS ======
     if payload.departamento is not None:
         c.departamento = payload.departamento or None
     if payload.sobre_cliente is not None:
         c.sobre_cliente = payload.sobre_cliente or None
+
+    # ====== NOVOS CAMPOS ======
+    if payload.nome is not None:
+        c.nome = payload.nome or "Cliente"
+
+    if payload.telefone is not None:
+        tel = _digits(payload.telefone)
+        if not tel:
+            raise HTTPException(status_code=400, detail="Telefone inválido")
+        # garante unicidade usando telefone_norm, exceto o próprio cliente
+        dup = (
+            db.query(models.Cliente)
+            .filter(
+                models.Cliente.empresa_id == empresa_id,
+                models.Cliente.telefone_norm == tel,
+                models.Cliente.id != cliente_id,
+            )
+            .first()
+        )
+        if dup:
+            raise HTTPException(status_code=400, detail="Já existe um cliente com esse telefone.")
+        c.telefone = tel
+
+    if payload.cpf_cnpj is not None:
+        c.cpf_cnpj = payload.cpf_cnpj or None
+    if payload.rg is not None:
+        c.rg = payload.rg or None
+    if payload.email is not None:
+        c.email = payload.email or None
+    if payload.data_nascimento is not None:
+        c.data_nascimento = payload.data_nascimento
+    if payload.genero is not None:
+        c.genero = payload.genero or None
+
+    if payload.cep is not None:
+        c.cep = payload.cep or None
+    if payload.endereco is not None:
+        c.endereco = payload.endereco or None
+    if payload.numero is not None:
+        c.numero = payload.numero or None
+    if payload.complemento is not None:
+        c.complemento = payload.complemento or None
+    if payload.bairro is not None:
+        c.bairro = payload.bairro or None
+    if payload.cidade is not None:
+        c.cidade = payload.cidade or None
+    if payload.estado is not None:
+        c.estado = payload.estado or None
+
+    if payload.nome_completo is not None:
+        c.nome_completo = payload.nome_completo or None
+    if payload.website is not None:
+        c.website = payload.website or None
+    if payload.descricao is not None:
+        c.descricao = payload.descricao or None
 
     db.add(c)
     db.commit()
