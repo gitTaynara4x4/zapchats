@@ -270,9 +270,15 @@ html.dark .icon-btn:hover{ background:rgba(255,255,255,.06) }
 .muted{ color:var(--text-secondary); }
 
 .btn{
-  height:var(--btn-h); width:100%; border-radius:10px; font-weight:800; border:0;
-  cursor:pointer; transition:filter .12s ease, opacity .12s ease
+  height:var(--btn-h);
+  width:100%;
+  border-radius:10px;
+  font-weight:800;
+  border:0;
+  cursor:pointer;
+  transition: filter .12s ease, opacity .12s ease;
 }
+
 .btn-primary{ background:var(--brand-500); color:#fff } 
 .btn-primary:hover{ filter:brightness(.96) }
 .btn[disabled]{ opacity:.6; cursor:not-allowed }
@@ -347,8 +353,16 @@ input:-webkit-autofill:focus{
   .head-block{ margin-bottom: 10px; }
   .subtitle{ margin-bottom: 12px; }
   .field{ margin-bottom: 10px; }
-  .login-illustration{ display:none !important; }
+  /* ❌ NÃO escondemos mais a ilustração aqui */
 }
+
+/* Esconde a ilustração só em tela realmente pequena (baixa + estreita) */
+@media (max-height: 700px) and (max-width: 900px){
+  .login-illustration{
+    display:none !important;
+  }
+}
+
 @media (max-height: 680px){
   :root{
     --pad-form-y: 12px;
