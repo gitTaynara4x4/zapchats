@@ -1,11 +1,10 @@
 // /frontend/js/atendimentos/ui/perfil_quick.js
-// Painel RÁPIDO de perfil — abre só ao clicar no NOME/FOTO do header.
-// *** SOMENTE NOME do BD ***
-// - Lê apenas o BD: /api/atendimento/clientes/:id/profile?empresa_id=...
-// - NÃO chama Evolution aqui.
-// - NÃO atualiza avatar do header/lista (fluxo de avatar é outro).
-// - Atualiza apenas nome/nome_whatsapp no cache e no header ao abrir.
+// Painel RÁPIDO de perfil (Evolution) — abre só ao clicar no NOME/FOTO do header.
+// - Resolve instância de forma robusta (clienteSel > data-instancia-id > INSTANCIA_ATIVA).
 // - Evita dados “fantasma” ao trocar de conversa (AbortController + token por cliente).
+// - Intercepta no CAPTURE e bloqueia outros handlers (não abre o drawer completo com “bairro”, etc).
+// - Atualiza o cache/UI com o que veio do BD após o merge, inclusive avatar/nome.
+// - Recarrega avatar automaticamente quando a imagem quebra (403/expirada), com cooldown.
 
 (() => {
   /* --------------- helpers --------------- */
@@ -16,6 +15,7 @@
     if (window.toast) { window.toast({ title: type==='ok'?'Pronto':'Erro', msg, type: type==='ok'?'ok':'error' }); }
     else { if(type==='ok') console.log('[perfil]', msg); else alert(msg); }
   }
+  const onlyDigits = s => String(s||'').replace(/\D+/g,'');
   const getClienteId = () => Number($('#historico')?.dataset?.clienteId || 0);
 
   function fmtDateTimeISO(s){
@@ -46,51 +46,198 @@
     </div>
   `;
 
-  /* ----------------- SOMENTE NOME (do BD) ----------------- */
-  function updateHeaderNameFromBD(patch){
-    const t = document.getElementById('chat-title');
-    if (!t) return;
-    const display =
-      (patch?.nome_whatsapp && String(patch.nome_whatsapp).trim()) ? String(patch.nome_whatsapp).trim()
-      : (patch?.nome && String(patch.nome).trim()) ? String(patch.nome).trim()
-      : '';
-    t.textContent = display;
+  async function getTelefoneAsync(forClienteId){
+    const hist = $('#historico');
+    const cands = [hist?.dataset?.telefone, hist?.dataset?.phone, hist?.dataset?.number];
+    for (const v of cands){ if (v && /\d{10,}/.test(v)) return v; }
+
+    const h = $('#chat-header [data-phone]');
+    if (h){ const v = h.getAttribute('data-phone'); if (v) return v; }
+
+    const txt = $('#chat-header')?.textContent || '';
+    const m = txt.match(/(\d{10,15})/);
+    if (m) return m[1];
+
+    const cid = Number(forClienteId || getClienteId() || 0);
+    if (cid && EMPRESA_ID){
+      try{
+        const r = await fetch(`/api/atendimento/clientes/${cid}/profile?empresa_id=${EMPRESA_ID}`, { credentials:'include' });
+        if (r.ok){
+          const j = await r.json();
+          if (j?.telefone) return j.telefone;
+        }
+      }catch{}
+    }
+    return '';
   }
 
-  function patchClienteCacheNameOnly(clienteId, bd){
+  // ---- resolve instância de forma robusta ----
+  function resolveInstForPerfil() {
+    const st = window.state || {};
+    const sel = st.clienteSel;
+
+    if (sel?.instancia_id) return { instancia_id: Number(sel.instancia_id) };
+
+    const hist = document.getElementById('historico');
+    const dataInst = hist?.dataset?.instanciaId || hist?.dataset?.instancia_id;
+    if (dataInst && /^\d+$/.test(String(dataInst))) {
+      return { instancia_id: Number(dataInst) };
+    }
+
+    const g = window.INSTANCIA_ATIVA;
+    if (g && /^\d+$/.test(String(g))) return { instancia_id: Number(g) };
+    if (g && typeof g === 'object') {
+      const id = Number(g.id || g.instancia_id || 0) || undefined;
+      const name = g.instance_name || g.name || undefined;
+      return { instancia_id: id, instance_name: name };
+    }
+    return {};
+  }
+
+  /* ---- patch UI/cache ---- */
+  function updateHeaderAvatar(url){
+    const av = document.getElementById('chat-avatar');
+    if (!av) return;
+
+    if (url) {
+      const cid = getClienteId() || Number(window.state?.clienteSel?.id || 0) || '';
+      const safe = String(url).replace(/"/g,'&quot;');
+      const cidAttr = cid ? ` data-cliente-id="${cid}"` : '';
+      av.innerHTML =
+        `<span class="avatar">
+           <img src="${safe}" alt=""${cidAttr}
+                onerror="window.handleAvatarError && window.handleAvatarError(this)">
+         </span>`;
+    } else {
+      av.innerHTML = `<span class="avatar avatar-default"><i class="fa fa-user-circle text-2xl text-gray-400"></i></span>`;
+    }
+  }
+
+  function updateHeaderName(name){
+    const t = document.getElementById('chat-title');
+    if (t && name) t.textContent = name;
+  }
+
+  function patchClienteCache(clienteId, patch){
     try{
       const st = window.state || {};
-      const patch = {
-        // ❗ NÃO mexer em avatar aqui
-        nome: (bd?.nome ?? undefined),
-        nome_whatsapp: (bd?.nome_whatsapp ?? undefined),
-        is_business: (typeof bd?.is_business === 'boolean') ? bd.is_business : undefined,
-        status_whatsapp: bd?.status_text ?? undefined,
-        descricao:  bd?.description ?? undefined,
-        website:    bd?.website ?? undefined,
-        email:      bd?.email ?? undefined,
-      };
-
       const lists = [st.clientesCache, st.todosContatosCache];
       lists.forEach(arr => {
         if (!Array.isArray(arr)) return;
         const idx = arr.findIndex(x => (x?.id ?? x?.conversation_id) === Number(clienteId));
         if (idx >= 0) arr[idx] = { ...arr[idx], ...patch };
       });
-
-      if (st.clienteSel && (Number(st.clienteSel.id ?? st.clienteSel.conversation_id) === Number(clienteId))) {
+      if (st.clienteSel && (st.clienteSel.id === Number(clienteId) || st.clienteSel.conversation_id === Number(clienteId))) {
         Object.assign(st.clienteSel, patch);
       }
-
-      // ✅ só o NOME no header
-      updateHeaderNameFromBD(patch);
-
       if (typeof window.persist === 'function') window.persist();
-      // re-render lista para refletir o nome do BD
-      try { window.renderListaClientes?.(st.clientesCache || []); } catch {}
-      try { window.syncPreviewFromCache?.(Number(clienteId)); } catch {}
-    }catch(e){ console.warn('[perfil_quick] patchClienteCacheNameOnly falhou:', e); }
+
+      if ('avatar_url' in patch) updateHeaderAvatar(patch.avatar_url || '');
+      if (patch.nome || patch.nome_whatsapp) updateHeaderName(patch.nome || patch.nome_whatsapp);
+
+      window.syncPreviewFromCache?.(Number(clienteId));
+    }catch(e){ console.warn('[perfil_quick] patchClienteCache falhou:', e); }
   }
+
+  async function syncWithDBAndPatchCaches(clienteId, prof){
+    if (!clienteId || !EMPRESA_ID) return;
+    try{
+      const r = await fetch(`/api/atendimento/clientes/${clienteId}/profile?empresa_id=${EMPRESA_ID}`, { credentials:'include' });
+      let dbProf = null;
+      if (r.ok) dbProf = await r.json();
+
+      const patch = {
+        avatar_url: dbProf?.avatar_url ?? (prof.picture || null),
+        nome:       dbProf?.nome || undefined,
+        nome_whatsapp: dbProf?.nome_whatsapp ?? (prof.name || undefined),
+        is_business: (typeof dbProf?.is_business === 'boolean') ? dbProf.is_business : !!prof.isBusiness,
+        status_whatsapp: dbProf?.status_text ?? (prof?.status?.status || undefined),
+        descricao:  dbProf?.description || undefined,
+        website:    dbProf?.website || undefined,
+        email:      dbProf?.email || undefined,
+      };
+      patchClienteCache(clienteId, patch);
+    }catch{
+      const patch = {
+        avatar_url: prof.picture || null,
+        nome_whatsapp: prof.name || undefined,
+        is_business: !!prof.isBusiness,
+        status_whatsapp: prof?.status?.status || undefined,
+      };
+      patchClienteCache(clienteId, patch);
+    }
+  }
+
+  /* ---- atualização silenciosa de avatar (403 / expirado) ---- */
+  async function refreshAvatarFromEvolution(clienteId){
+    if (!clienteId) return;
+    try{
+      const prof = await fetchEvolutionProfile(clienteId, undefined);
+      await syncWithDBAndPatchCaches(clienteId, prof);
+    }catch(e){
+      console.warn('[perfil_quick] refreshAvatarFromEvolution erro:', e);
+    }
+  }
+  // expõe pro resto do front (lista, header, etc)
+  window.refreshAvatarFromEvolution = refreshAvatarFromEvolution;
+
+  /* ---- cooldown leve por cliente/trigger (localStorage) ---- */
+  const CD_MS = { list: 30 * 60 * 1000, chat: 10 * 60 * 1000, manual: 0 };
+  const cdKey = (clienteId, trigger) =>
+    `av_cd:v1:e${EMPRESA_ID}:c${Number(clienteId)}:t${trigger}`;
+
+  function canRunCooldown(clienteId, trigger){
+    try{
+      const ms = CD_MS[trigger] ?? 0;
+      if (ms <= 0) return true;
+      const last = Number(localStorage.getItem(cdKey(clienteId, trigger)) || 0);
+      return (Date.now() - last) > ms;
+    }catch{ return true; }
+  }
+  function markCooldown(clienteId, trigger){
+    try{ localStorage.setItem(cdKey(clienteId, trigger), String(Date.now())); }catch{}
+  }
+
+  /* ---- handlers globais para usar no onerror do <img> ---- */
+  window.handleListAvatarError = async function onListImgError(imgEl, clienteId){
+    try{
+      if (imgEl) {
+        imgEl.onerror = null;
+        imgEl.remove(); // remove a imagem quebrada
+        imgEl.parentElement?.classList?.add('placeholder');
+      }
+      if (!clienteId || !EMPRESA_ID) return;
+
+      // respeita cooldown de lista
+      if (!canRunCooldown(clienteId, 'list')) return;
+      markCooldown(clienteId, 'list');
+
+      await refreshAvatarFromEvolution(Number(clienteId));
+    }catch(e){ /* silencioso */ }
+  };
+
+  window.handleAvatarError = async function onHeaderImgError(imgEl){
+    try{
+      if (imgEl) {
+        imgEl.onerror = null;
+        imgEl.remove();
+        imgEl.parentElement?.classList?.add('avatar-default');
+      }
+
+      const cidFromAttr = Number(imgEl?.getAttribute('data-cliente-id') || 0);
+      const clienteId =
+        cidFromAttr ||
+        Number(window.state?.clienteSel?.id || window.state?.clienteSel?.conversation_id || 0);
+
+      if (!clienteId || !EMPRESA_ID) return;
+
+      // cooldown menor ao entrar no chat
+      if (!canRunCooldown(clienteId, 'chat')) return;
+      markCooldown(clienteId, 'chat');
+
+      await refreshAvatarFromEvolution(Number(clienteId));
+    }catch(e){ /* silencioso */ }
+  };
 
   /* --------------- CSS --------------- */
   (function injectCSS(){
@@ -146,7 +293,7 @@
     document.head.appendChild(st);
   })();
 
-  /* --------------- UI (drawer) --------------- */
+  /* --------------- UI --------------- */
   function buildDrawer(){
     if (document.getElementById('qcBackdrop')) return;
 
@@ -185,15 +332,15 @@
     };
   }
 
-  function renderProfileFromBD(bd){
-    const name = (bd?.nome_whatsapp || bd?.nome || '').trim();
-    const isBiz = !!bd?.is_business;
-    const statusTxt = (bd?.status_text || '').trim();
-    const statusAt  = bd?.status_at ? fmtDateTimeISO(bd.status_at) : '';
-    const pic = bd?.avatar_url || ''; // exibimos a foto do BD apenas dentro do painel
-    const desc = (bd?.description || bd?.descricao || '').trim();
-    const site = (bd?.website || '').trim();
-    const phoneShown = ($('#historico')?.dataset?.telefone) || '';
+  function renderProfile(p){
+    const name = (p.name || '').trim();
+    const isBiz = !!p.isBusiness;
+    const statusTxt = (p.status && p.status.status) ? String(p.status.status) : '';
+    const statusAt  = (p.status && p.status.setAt)  ? fmtDateTimeISO(p.status.setAt) : '';
+    const pic = p.picture || '';
+       const desc = (p.description || '').trim();
+    const site = (p.website || '').trim();
+    const phoneShown = ($('#historico')?.dataset?.telefone) || (p.wuid || '').replace('@s.whatsapp.net','');
 
     return `
       <div class="qcHero">
@@ -211,32 +358,50 @@
         ${statusAt ? `<div class="label" style="margin-top:6px">Atualizado em</div><div class="content">${statusAt}</div>` : ``}
       </div>
 
-      ${(isBiz || desc || site || bd?.email) ? `
+      ${(isBiz || desc || site || p.email) ? `
         <div class="qcCard">
           <div class="label">Informações públicas</div>
           ${desc ? `<div class="content" style="margin-bottom:8px">${desc}</div>` : ``}
           ${site ? `<div class="qcRow"><span class="label">Website</span><a class="qcLink" href="${site}" target="_blank" rel="noopener">Abrir</a></div>` : ``}
-          ${bd?.email ? `<div class="qcRow"><span class="label">E-mail</span><a class="qcLink" href="mailto:${bd.email}">Enviar</a></div>` : ``}
+          ${p.email ? `<div class="qcRow"><span class="label">E-mail</span><a class="qcLink" href="mailto:${p.email}">Enviar</a></div>` : ``}
         </div>
       ` : ``}
     `;
   }
 
-  // ===== Request guard (para não misturar perfis ao trocar de conversa) =====
+  // ===== Request guard =====
   let currentReq = { ctrl: null, token: null };
 
-  async function fetchBDProfile(clienteId, signal){
-    if (!clienteId || !EMPRESA_ID) throw new Error('Cliente/empresa inválidos.');
-    const r = await fetch(`/api/atendimento/clientes/${clienteId}/profile?empresa_id=${EMPRESA_ID}`, {
+  async function fetchEvolutionProfile(clienteId, signal){
+    const number = await getTelefoneAsync(clienteId);
+    if (!number){ throw new Error('Telefone do cliente não encontrado na tela.'); }
+
+    const instInfo = resolveInstForPerfil();
+
+    const body = {
+      number: onlyDigits(number),
+      empresa_id: EMPRESA_ID || undefined,
+      instancia_id: instInfo.instancia_id ?? undefined,
+      instance: instInfo.instance_name ?? undefined,
+    };
+
+    const r = await fetch('/api/evolution/fetchProfile', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
       credentials:'include',
+      body: JSON.stringify(body),
       signal
     });
+
     if (!r.ok){
       let raw = '';
       try { raw = await r.text(); } catch {}
       let detail = raw;
       try { const j = JSON.parse(raw); detail = j?.detail || j?.message || raw; } catch {}
-      throw new Error(`Falha ao buscar perfil no BD: ${detail || (r.status+' '+r.statusText)}`);
+      if (/Connection Closed|evolution.*(502|503)/i.test(String(detail))) {
+        throw new Error('Instância do WhatsApp desconectada ou Evolution indisponível.');
+      }
+      throw new Error(`Falha ao buscar perfil: ${detail || (r.status+' '+r.statusText)}`);
     }
     return r.json();
   }
@@ -248,21 +413,20 @@
     currentReq = { ctrl, token };
 
     try{
-      const bd = await fetchBDProfile(clienteId, ctrl.signal);
+      const prof = await fetchEvolutionProfile(clienteId, ctrl.signal);
       if (!currentReq.token || currentReq.token.clienteId !== Number(clienteId)) return;
       if (!window.__qcPerfil?.isOpen?.()) return;
 
-      // ✅ merge só de NOME (sem avatar) + header name
-      patchClienteCacheNameOnly(clienteId, bd);
+      await syncWithDBAndPatchCaches(clienteId, prof);
       if (!currentReq.token || currentReq.token.clienteId !== Number(clienteId)) return;
 
-      window.__qcPerfil.setBody( renderProfileFromBD(bd) );
+      window.__qcPerfil.setBody( renderProfile(prof) );
     }catch(err){
       if (err?.name === 'AbortError') return;
       console.error('[perfil_quick] erro', err);
       if (window.__qcPerfil?.isOpen?.()) {
         window.__qcPerfil.setBody(`<div class="qcCard"><div class="content">Não foi possível carregar o perfil.<br><small>${String(err.message||err)}</small></div></div>`);
-        ensureToast('Não foi possível carregar o perfil.', 'error');
+        ensureToast('Não foi possível carregar o perfil do WhatsApp.', 'error');
       }
     }
   }
@@ -303,7 +467,7 @@
     if (!hdr || hdr.dataset.qcBound === '1') return;
     hdr.dataset.qcBound = '1';
 
-    // CAPTURE FIRST: intercepta antes e bloqueia outros handlers
+    // CAPTURE FIRST: intercepta antes e bloqueia o drawer completo
     hdr.addEventListener('click', (e) => {
       const t = e.target;
       if (!t) return;
@@ -322,7 +486,7 @@
       abrirPerfilRapido();
     }, { capture:true, passive:false });
 
-    // Fallback no bubble (se nada bloqueou)
+    // Bubble como fallback — abre só se nada bloqueou
     hdr.addEventListener('click', (e) => {
       const t = e.target;
       if (!t || t.closest(BLOCK_OPEN_SELECTOR)) return;
