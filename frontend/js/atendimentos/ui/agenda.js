@@ -324,6 +324,8 @@
       ? dataState.items.map(htmlItem).join('')
       : `<div class="ag-empty">Nenhum contato encontrado.</div>`;
     bindItemClicks();
+    // 🔔 avisa quem está observando (lazy avatar)
+    document.dispatchEvent(new CustomEvent('agenda:render'));
     list.scrollTop = prevTop;
   }
 
@@ -451,4 +453,108 @@
     const trg = e.target && (e.target.closest?.('#btn-contatos,[data-role="btn-agenda"]'));
     if (trg){ e.preventDefault?.(); e.stopPropagation?.(); abrirAgenda(); }
   }, { passive:false });
+
+  /* ================== AGENDA: Lazy avatar (BD -> Evolution -> BD) ================== */
+  (function agendaAvatarHydrator(){
+    const doneKey = (id) => `ag:av_done:v1:e${EMPRESA_ID}:c${id}`;
+    const cdKey   = (id) => `ag:av_cd:v1:e${EMPRESA_ID}:c${id}`;
+    const COOLDOWN_MS = 30 * 60 * 1000; // 30min p/ não martelar Evolution
+
+    const canRun = (id) => {
+      try{
+        if (localStorage.getItem(doneKey(id)) === '1') return false; // já fez 1x
+        const last = Number(localStorage.getItem(cdKey(id)) || 0);
+        return (Date.now() - last) > COOLDOWN_MS;
+      }catch{ return true; }
+    };
+    const markRun = (id) => { try{ localStorage.setItem(doneKey(id), '1'); localStorage.setItem(cdKey(id), String(Date.now())); }catch{} };
+
+    async function fetchProfileBD(id){
+      const qs = new URLSearchParams({ empresa_id: String(EMPRESA_ID) });
+      const r = await fetch(`/api/atendimento/clientes/${id}/profile?`+qs.toString(), { credentials:'include' });
+      if (!r.ok) return null;
+      return r.json().catch(()=>null);
+    }
+
+    function setAvatarImg(container, url){
+      const box = container.querySelector('.ag-avatar');
+      if (!box) return;
+      box.classList.remove('ag-avatar--default');
+      box.innerHTML = url
+        ? `<img src="${String(url).replace(/"/g,'&quot;')}" alt="" loading="lazy"
+                 referrerpolicy="no-referrer" crossorigin="anonymous">`
+        : `<i class="fa fa-user-circle"></i>`;
+      const img = box.querySelector('img');
+      if (img) img.addEventListener('error', () => onImgError(container));
+    }
+
+    async function hydrateOne(container){
+      const id = Number(container?.getAttribute('data-id') || 0);
+      if (!id || !canRun(id)) return;
+
+      // 1) BD primeiro
+      let bd = await fetchProfileBD(id);
+      const fromBD = bd?.avatar_url && String(bd.avatar_url).trim() !== '' ? bd.avatar_url : null;
+
+      if (fromBD){
+        setAvatarImg(container, fromBD);
+        return markRun(id);
+      }
+
+      // 2) Não tem foto no BD → Evolution (salva no BD via refreshAvatarFromEvolution)
+      try{
+        if (typeof window.refreshAvatarFromEvolution === 'function'){
+          await window.refreshAvatarFromEvolution(id);
+        }
+      }catch{}
+
+      // 3) Reconsulta o BD e aplica
+      bd = await fetchProfileBD(id);
+      const nowBD = bd?.avatar_url && String(bd.avatar_url).trim() !== '' ? bd.avatar_url : null;
+      setAvatarImg(container, nowBD);
+      markRun(id);
+    }
+
+    async function onImgError(container){
+      // Quebrou (ex.: 403). Se ainda não deu “done”, tenta 1x Evolution e volta ao BD.
+      const id = Number(container?.getAttribute('data-id') || 0);
+      if (!id || localStorage.getItem(doneKey(id)) === '1') return;
+
+      try{
+        const box = container.querySelector('.ag-avatar');
+        if (box){ box.classList.add('ag-avatar--default'); box.innerHTML = `<i class="fa fa-user-circle"></i>`; }
+        if (typeof window.refreshAvatarFromEvolution === 'function'){
+          await window.refreshAvatarFromEvolution(id);
+        }
+      }catch{}
+
+      const bd = await fetchProfileBD(id);
+      const url = bd?.avatar_url && String(bd.avatar_url).trim() !== '' ? bd.avatar_url : null;
+      setAvatarImg(container, url);
+      markRun(id);
+    }
+
+    const io = new IntersectionObserver((entries)=>{
+      entries.forEach(e=>{
+        if (e.isIntersecting) { hydrateOne(e.target).catch(()=>{}); }
+      });
+    }, { root: document.querySelector('#agList') || null, rootMargin: '120px 0px', threshold: 0.01 });
+
+    function wireObserver(){
+      const list = document.getElementById('agList');
+      if (!list) return;
+      try{ io.disconnect(); }catch{}
+      list.querySelectorAll('.ag-item').forEach(it=>{
+        const img = it.querySelector('.ag-avatar img');
+        if (img) img.addEventListener('error', () => onImgError(it));
+        io.observe(it);
+      });
+    }
+
+    // Observa cada render da agenda
+    document.addEventListener('agenda:render', wireObserver);
+    // Primeira tentativa
+    setTimeout(wireObserver, 0);
+  })();
+
 })();

@@ -187,6 +187,23 @@ tbody tr.cliente-row:has(.row-check:checked){
 }
 .modal-close:hover{ color:var(--fg); transform:scale(1.03) }
 
+/* ========= MODAL DE CLIENTE: tamanho médio + scroll interno ========= */
+#novo-backdrop .modal{
+  max-height:80vh;              /* não passa de 80% da tela */
+  display:flex;
+  flex-direction:column;
+}
+#novo-backdrop .modal header,
+#novo-backdrop .modal footer{
+  flex:0 0 auto;                /* header/footer fixos */
+}
+#novo-backdrop .modal .body{
+  flex:1 1 auto;                /* corpo cresce */
+  overflow-y:auto;              /* rola por dentro */
+  min-height:0;
+  padding-right:.25rem;         /* folga pra barra de rolagem */
+}
+
 /* Tipografia mais fina */
 :root{ --btn-wght:550; --chip-wght:550; }
 body[data-page="clientes"] .btn,

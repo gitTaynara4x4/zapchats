@@ -1,5 +1,5 @@
-// cliente-editar.js
-(function ClienteEditarModule(){
+// /frontend/js/pages/cliente-editar.js
+(function ClienteEditorModule(){
   'use strict';
 
   // ==============================
@@ -7,6 +7,7 @@
   // ==============================
   const LS = localStorage;
   const EMPRESA_ID = Number(LS.getItem('empresa_id') || '') || null;
+  const $  = (s, r=document) => r.querySelector(s);
 
   const authFetch = (url, opt={}) => {
     const f = (window.ZAuth && ZAuth.authFetch) ? ZAuth.authFetch : fetch;
@@ -55,20 +56,42 @@
   // ==============================
   // DOM refs (reuso do modal de "Novo")
   // ==============================
-  const $  = (s, r=document) => r.querySelector(s);
-  const novoModal     = $('#novo-backdrop');
-  const novoNome      = $('#novoNome');
-  const novoTel       = $('#novoTel');
-  const novoDepto     = $('#novoDepto');
-  const novoDeptoList = $('#novoDeptoList');
-  const novoColab     = $('#novoColab');
-  const novoSobre     = $('#novoSobre');
-  const novoOkStatic  = $('#novoOk'); // manter referência inicial
-  const novoCancel    = $('#novoCancel');
-  const novoClose     = $('#novoClose');
-  const toastEl       = $('#toast');
+  const novoModal      = $('#novo-backdrop');
+  const novoNome       = $('#novoNome');
+  const novoTel        = $('#novoTel');
+  const novoDepto      = $('#novoDepto');
+  const novoDeptoList  = $('#novoDeptoList');
+  const novoColab      = $('#novoColab');
+  const novoSobre      = $('#novoSobre');
+  const novoOkOriginal = $('#novoOk');   // botão "Criar" original (novo cliente)
+  const novoCancel     = $('#novoCancel');
+  const novoClose      = $('#novoClose');
+  const toastEl        = $('#toast');
 
-  function getNovoOk(){ return document.getElementById('novoOk') || novoOkStatic; }
+  // Campos adicionais (HTML já preparado no modal)
+  const cliId           = $('#cliId');
+  const cliDataCadastro = $('#cliDataCadastro');
+
+  const extraFields = {
+    cpf_cnpj:        $('#cliCpfCnpj'),
+    rg:              $('#cliRg'),
+    email:           $('#cliEmail'),
+    nome_whatsapp:   $('#cliNomeWhatsapp'),
+    status_whatsapp: $('#cliStatusWhatsapp'),
+    descricao:       $('#cliDescricao'),
+    website:         $('#cliWebsite'),
+    nome_completo:   $('#cliNomeCompleto'),
+    cep:             $('#cliCep'),
+    endereco:        $('#cliEndereco'),
+    numero:          $('#cliNumero'),
+    complemento:     $('#cliComplemento'),
+    bairro:          $('#cliBairro'),
+    cidade:          $('#cliCidade'),
+    estado:          $('#cliEstado'),
+    genero:          $('#cliGenero'),
+    data_nascimento: $('#cliDataNascimento'),
+    is_business:     $('#cliIsBusiness')
+  };
 
   // ==============================
   // Estado local do módulo
@@ -96,11 +119,11 @@
     clearTimeout(toast._t);
     toast._t = setTimeout(()=>{ toastEl.style.display='none'; }, 2400);
   }
-  function openModal(el){ if (el) el.style.display='grid'; }
-  function closeModal(el){ if (el) el.style.display='none'; }
   function safeFocus(el){ try{ el && typeof el.focus === 'function' && el.focus(); }catch{} }
 
   function digits(s){ return String(s||'').replace(/\D+/g,''); }
+  function pad2(n){ return String(n).padStart(2,'0'); }
+
   function formatTelBR(v){
     const d = digits(v);
     if (!d) return '';
@@ -114,9 +137,21 @@
     }
     return d;
   }
+  function isoToInputDate(iso){
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(+d)) return '';
+    return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  }
+  function formatDateBR(iso){
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(+d)) return '';
+    return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()}`;
+  }
 
   // ==============================
-  // Carregamento de Setores/Responsáveis p/ selects do modal
+  // Carregamento de Setores/Responsáveis
   // ==============================
   async function loadSetores(){
     if (STATE.loaded.setores) return;
@@ -170,39 +205,123 @@
   }
 
   // ==============================
-  // Preenchimento / modos do modal
+  // Form helpers
   // ==============================
-  function setClienteForm(cli){
-    if (!cli) return;
-    if (novoNome)  novoNome.value  = (cli.nome || '').trim();
-    if (novoTel)   novoTel.value   = formatTelBR(cli.telefone || '');
-    if (novoDepto) novoDepto.value = (cli.setor_nome || cli.departamento || '').trim();
-    if (novoSobre) novoSobre.value = (cli.sobre || cli.sobre_cliente || '').trim();
-    if (novoColab) {
-      const id = cli.colaborador_id ?? cli.responsavel_id ?? null;
-      novoColab.value = (id == null ? '' : String(id));
-    }
-  }
   function resetClienteForm(){
     if (novoNome)  novoNome.value  = '';
     if (novoTel)   novoTel.value   = '';
     if (novoDepto) novoDepto.value = '';
     if (novoSobre) novoSobre.value = '';
     if (novoColab) novoColab.value = '';
+
+    Object.values(extraFields).forEach(el => {
+      if (!el) return;
+      if (el.type === 'checkbox') el.checked = false;
+      else el.value = '';
+    });
+
+    if (cliId)           cliId.value = '';
+    if (cliDataCadastro) cliDataCadastro.value = '';
   }
   function setFormDisabled(disabled){
     [novoNome, novoTel, novoDepto, novoSobre, novoColab]
       .filter(Boolean).forEach(el => el.disabled = !!disabled);
+    Object.values(extraFields).forEach(el => { if (el) el.disabled = !!disabled; });
   }
   function setModalTitle(t){
     const hdr = novoModal?.querySelector('header');
     if (hdr) hdr.textContent = t || 'Cliente';
   }
 
-  // Busca completo do cliente
-  async function fetchCliente(id){
-    const cli = await apiGet(`/api/clientes/${id}`);
-    return cli;
+  function normalizeCliente(cli){
+    if (!cli) return cli;
+    const out = { ...cli };
+    if (out.sobre == null && out.sobre_cliente != null) out.sobre = out.sobre_cliente;
+    if (out.sobre_cliente == null && out.sobre != null) out.sobre_cliente = out.sobre;
+    return out;
+  }
+
+  function fillClienteForm(cliRaw){
+    const cli = normalizeCliente(cliRaw);
+    if (!cli) return;
+
+    if (novoNome)  novoNome.value  = (cli.nome || '').trim();
+    if (novoTel)   novoTel.value   = formatTelBR(cli.telefone || '');
+    if (novoDepto) novoDepto.value = (cli.setor_nome || cli.departamento || '').trim();
+    if (novoSobre) novoSobre.value = (cli.sobre_cliente || cli.sobre || '').trim();
+    if (novoColab) {
+      const id = cli.colaborador_id ?? cli.responsavel_id ?? null;
+      novoColab.value = (id == null ? '' : String(id));
+    }
+
+    if (extraFields.cpf_cnpj)        extraFields.cpf_cnpj.value        = cli.cpf_cnpj || '';
+    if (extraFields.rg)              extraFields.rg.value              = cli.rg || '';
+    if (extraFields.email)           extraFields.email.value           = cli.email || '';
+    if (extraFields.nome_whatsapp)   extraFields.nome_whatsapp.value   = cli.nome_whatsapp || '';
+    if (extraFields.status_whatsapp) extraFields.status_whatsapp.value = cli.status_whatsapp || '';
+    if (extraFields.descricao)       extraFields.descricao.value       = cli.descricao || '';
+    if (extraFields.website)         extraFields.website.value         = cli.website || '';
+    if (extraFields.nome_completo)   extraFields.nome_completo.value   = cli.nome_completo || '';
+
+    if (extraFields.cep)             extraFields.cep.value             = cli.cep || '';
+    if (extraFields.endereco)        extraFields.endereco.value        = cli.endereco || '';
+    if (extraFields.numero)          extraFields.numero.value          = cli.numero || '';
+    if (extraFields.complemento)     extraFields.complemento.value     = cli.complemento || '';
+    if (extraFields.bairro)          extraFields.bairro.value          = cli.bairro || '';
+    if (extraFields.cidade)          extraFields.cidade.value          = cli.cidade || '';
+    if (extraFields.estado)          extraFields.estado.value          = cli.estado || '';
+    if (extraFields.genero)          extraFields.genero.value          = cli.genero || '';
+
+    if (extraFields.data_nascimento){
+      extraFields.data_nascimento.value = isoToInputDate(cli.data_nascimento);
+    }
+    if (extraFields.is_business){
+      extraFields.is_business.checked = !!cli.is_business;
+    }
+
+    if (cliId)           cliId.value           = cli.id != null ? String(cli.id) : '';
+    if (cliDataCadastro) cliDataCadastro.value = formatDateBR(cli.data_cadastro || cli.created_at || cli.dt_cadastro || cli.timestamp);
+  }
+
+  function buildPayloadFromForm(){
+    const payload = {};
+
+    if (novoNome)  payload.nome          = (novoNome.value || '').trim() || null;
+    if (novoTel)   payload.telefone      = digits(novoTel.value || '') || null;
+    if (novoDepto) payload.departamento  = (novoDepto.value || '').trim() || null;
+    if (novoSobre) payload.sobre_cliente = (novoSobre.value || '').trim() || null;
+    if (novoColab){
+      payload.colaborador_id =
+        (novoColab.value === '' ? null : Number(novoColab.value));
+    }
+
+    if (extraFields.cpf_cnpj)        payload.cpf_cnpj        = (extraFields.cpf_cnpj.value || '').trim() || null;
+    if (extraFields.rg)              payload.rg              = (extraFields.rg.value || '').trim() || null;
+    if (extraFields.email)           payload.email           = (extraFields.email.value || '').trim() || null;
+    if (extraFields.nome_whatsapp)   payload.nome_whatsapp   = (extraFields.nome_whatsapp.value || '').trim() || null;
+    if (extraFields.status_whatsapp) payload.status_whatsapp = (extraFields.status_whatsapp.value || '').trim() || null;
+    if (extraFields.descricao)       payload.descricao       = (extraFields.descricao.value || '').trim() || null;
+    if (extraFields.website)         payload.website         = (extraFields.website.value || '').trim() || null;
+    if (extraFields.nome_completo)   payload.nome_completo   = (extraFields.nome_completo.value || '').trim() || null;
+
+    if (extraFields.cep)         payload.cep         = (extraFields.cep.value || '').trim() || null;
+    if (extraFields.endereco)    payload.endereco    = (extraFields.endereco.value || '').trim() || null;
+    if (extraFields.numero)      payload.numero      = (extraFields.numero.value || '').trim() || null;
+    if (extraFields.complemento) payload.complemento = (extraFields.complemento.value || '').trim() || null;
+    if (extraFields.bairro)      payload.bairro      = (extraFields.bairro.value || '').trim() || null;
+    if (extraFields.cidade)      payload.cidade      = (extraFields.cidade.value || '').trim() || null;
+    if (extraFields.estado)      payload.estado      = (extraFields.estado.value || '').trim() || null;
+    if (extraFields.genero)      payload.genero      = (extraFields.genero.value || '').trim() || null;
+
+    if (extraFields.data_nascimento){
+      const v = (extraFields.data_nascimento.value || '').trim();
+      payload.data_nascimento = v || null; // backend converte yyyy-mm-dd
+    }
+    if (extraFields.is_business){
+      payload.is_business = !!extraFields.is_business.checked;
+    }
+
+    return payload;
   }
 
   // ==============================
@@ -232,33 +351,89 @@
   }
 
   // ==============================
+  // Helpers de modal p/ reaproveitar o botão "Criar"
+  // ==============================
+  function hideCreateButton(){
+    if (!novoOkOriginal) return;
+    novoOkOriginal.dataset._origDisplay = novoOkOriginal.dataset._origDisplay || novoOkOriginal.style.display || '';
+    novoOkOriginal.style.display = 'none';
+  }
+  function restoreCreateButton(){
+    if (!novoOkOriginal) return;
+    novoOkOriginal.style.display = novoOkOriginal.dataset._origDisplay || '';
+  }
+  function removeDynamicButtons(){
+    if (!novoModal) return;
+    novoModal.querySelectorAll('.cli-dyn-btn').forEach(b => b.remove());
+  }
+
+  function openModalFor(mode){
+    if (!novoModal) return;
+    clienteModalMode = mode || 'new';
+    novoModal.dataset.mode = clienteModalMode;
+    novoModal.style.display = 'grid';
+  }
+  function closeEditorModal(){
+    if (!novoModal) return;
+    const mode = novoModal.dataset.mode;
+
+    // Se não está em "view"/"edit", deixa o fluxo padrão do clientes.js cuidar
+    if (!mode || mode === 'new'){
+      novoModal.style.display = 'none';
+      return;
+    }
+
+    // Limpamos apenas quando estávamos em view/edit
+    novoModal.style.display = 'none';
+    clienteModalMode = 'new';
+    delete novoModal.dataset.mode;
+    removeDynamicButtons();
+    restoreCreateButton();
+    setModalTitle('Novo cliente');
+  }
+
+  // ==============================
   // VER / EDITAR
   // ==============================
+  async function fetchCliente(id){
+    const cli = await apiGet(`/api/clientes/${id}`);
+    return cli;
+  }
+
   async function openClienteView(id){
     if (!novoModal){ toast('Modal não encontrado.', 'err'); return; }
     try{
       await Promise.all([loadSetores(), loadResponsaveis()]);
       const cli = await fetchCliente(id);
 
-      clienteModalMode = 'view';
       clienteModalId = Number(id);
       resetClienteForm();
-      setClienteForm(cli);
+      fillClienteForm(cli);
       setFormDisabled(true);
       setModalTitle('Detalhes do cliente');
 
-      const ok = getNovoOk();
-      if (ok){ ok.textContent = 'Fechar'; ok.onclick = ()=> closeModal(novoModal); }
-      const footer = ok?.parentElement || novoModal?.querySelector('footer');
-      if (footer && !footer.querySelector('#viewEditBtn')){
-        const b = document.createElement('button');
-        b.id = 'viewEditBtn';
-        b.className = 'btn';
-        b.textContent = 'Editar';
-        b.onclick = ()=> openClienteEdit(id);
-        footer.insertBefore(b, ok);
+      hideCreateButton();
+      removeDynamicButtons();
+
+      const footer = novoModal.querySelector('footer');
+      if (footer){
+        const btnFechar = document.createElement('button');
+        btnFechar.type = 'button';
+        btnFechar.className = 'btn ghost cli-dyn-btn';
+        btnFechar.textContent = 'Fechar';
+        btnFechar.addEventListener('click', closeEditorModal);
+
+        const btnEditar = document.createElement('button');
+        btnEditar.type = 'button';
+        btnEditar.className = 'btn cli-dyn-btn';
+        btnEditar.textContent = 'Editar';
+        btnEditar.addEventListener('click', ()=> openClienteEdit(id));
+
+        footer.appendChild(btnFechar);
+        footer.appendChild(btnEditar);
       }
-      openModal(novoModal);
+
+      openModalFor('view');
     }catch(e){
       console.error(e);
       toast('Não foi possível abrir o cliente.','err');
@@ -271,20 +446,34 @@
       await Promise.all([loadSetores(), loadResponsaveis()]);
       const cli = await fetchCliente(id);
 
-      clienteModalMode = 'edit';
       clienteModalId = Number(id);
       resetClienteForm();
-      setClienteForm(cli);
+      fillClienteForm(cli);
       setFormDisabled(false);
       setModalTitle('Editar cliente');
 
-      const footer = novoModal?.querySelector('footer') || getNovoOk()?.parentElement;
-      footer?.querySelector?.('#viewEditBtn')?.remove?.();
+      hideCreateButton();
+      removeDynamicButtons();
 
-      const ok = getNovoOk();
-      if (ok){ ok.textContent = 'Salvar'; ok.onclick = handleEditSave; }
+      const footer = novoModal.querySelector('footer');
+      if (footer){
+        const btnCancelar = document.createElement('button');
+        btnCancelar.type = 'button';
+        btnCancelar.className = 'btn ghost cli-dyn-btn';
+        btnCancelar.textContent = 'Cancelar';
+        btnCancelar.addEventListener('click', closeEditorModal);
 
-      openModal(novoModal);
+        const btnSalvar = document.createElement('button');
+        btnSalvar.type = 'button';
+        btnSalvar.className = 'btn cli-dyn-btn';
+        btnSalvar.textContent = 'Salvar';
+        btnSalvar.addEventListener('click', handleEditSave);
+
+        footer.appendChild(btnCancelar);
+        footer.appendChild(btnSalvar);
+      }
+
+      openModalFor('edit');
     }catch(e){
       console.error(e);
       toast('Não foi possível abrir para edição.','err');
@@ -296,31 +485,31 @@
   // ==============================
   async function handleEditSave(){
     const id = clienteModalId;
-    if (!id){ toast('Cliente inválido.','err'); return; }
+    if (!id){
+      toast('Cliente inválido.','err');
+      return;
+    }
 
     const telDigits = digits(novoTel?.value || '');
     if (!telDigits || telDigits.length < 8){
       toast('Informe um telefone válido (mín. 8 dígitos).','warn');
-      safeFocus(novoTel); return;
+      safeFocus(novoTel);
+      return;
     }
 
-    const payload = {
-      nome: (novoNome?.value || '').trim() || null,
-      telefone: telDigits,
-      departamento: (novoDepto?.value || '').trim() || null,
-      sobre_cliente: (novoSobre?.value || '').trim() || null,
-      colaborador_id: (novoColab?.value === '' ? null : Number(novoColab?.value))
-    };
+    const payload = buildPayloadFromForm();
+    payload.telefone = telDigits;
 
-    const ok = getNovoOk();
-    const old = ok?.textContent;
-    if (ok){ ok.disabled = true; ok.textContent = 'Salvando…'; }
+    const btnSalvar = novoModal?.querySelector('footer .cli-dyn-btn:last-child');
+    const oldLabel = btnSalvar?.textContent;
+    if (btnSalvar){ btnSalvar.disabled = true; btnSalvar.textContent = 'Salvando…'; }
 
     try{
       await apiPatch(`/api/clientes/${id}`, payload).catch(()=>null);
+
       let cli = null;
       try{ cli = await apiGet(`/api/clientes/${id}`); }catch{}
-      cli = cli || { id, ...payload };
+      cli = normalizeCliente(cli || { id, ...payload });
 
       if (cli.colaborador_id != null){
         const r = STATE.responsaveis.find(x => x.id === Number(cli.colaborador_id));
@@ -331,19 +520,63 @@
       updateRowDOM(cli);
       emitUpdated(cli);
 
-      closeModal(novoModal);
+      closeEditorModal();
       toast('Cliente atualizado!');
     }catch(e){
       console.error(e);
       toast(e?.data?.detail || 'Falha ao salvar alterações.','err');
-    }finally{
-      if (ok){ ok.disabled = false; ok.textContent = old || 'Salvar'; }
+      if (btnSalvar){ btnSalvar.disabled = false; btnSalvar.textContent = oldLabel || 'Salvar'; }
     }
   }
 
   // ==============================
-  // ======== INSTÂNCIA ===========
+  // ======== INSTÂNCIA =========== (para botão "Mensagem")
   // ==============================
+  function setActiveInstance({ id, slug }){
+    if (!id && !slug) return;
+    window.INSTANCIA_ATIVA      = id ?? slug;
+    window.INSTANCIA_ATIVA_ID   = id ?? null;
+    window.INSTANCIA_ATIVA_SLUG = slug ?? null;
+    try{ LS.setItem('INSTANCIA_ATIVA', String(window.INSTANCIA_ATIVA)); }catch{}
+    try{ if (id!=null) LS.setItem('INSTANCIA_ATIVA_ID', String(id)); }catch{}
+    try{ if (slug)     LS.setItem('INSTANCIA_ATIVA_SLUG', String(slug)); }catch{}
+    try{
+      document.cookie = `INSTANCIA_ATIVA=${encodeURIComponent(String(window.INSTANCIA_ATIVA))}; path=/; max-age=${60*60*24*30}`;
+    }catch{}
+  }
+
+  function normInstances(items){
+    if (!Array.isArray(items)) return [];
+    return items.map(x=>{
+      const id   = (x.id!=null) ? Number(x.id)
+                : (x.instancia_id!=null ? Number(x.instancia_id) : null);
+      const slug = String(x.instance_name ?? x.slug ?? x.nome ?? '').trim();
+      const name = String((x.apelido ?? x.name ?? x.nome ?? slug) || "").trim();
+      const number = x.numero_instancia ?? x.numero ?? null;
+      const connected = !!x.connected || !!x.online || (String(x.status||'').toLowerCase()==='connected');
+      return (id || slug) ? { id, slug, name: name || slug, number, connected } : null;
+    }).filter(Boolean);
+  }
+
+  async function fetchInstances(){
+    if (!EMPRESA_ID) return [];
+    try{
+      const data = await apiGet(`/api/empresas/${EMPRESA_ID}/whatsapp`);
+      const arr = normInstances(Array.isArray(data?.instancias) ? data.instancias : (Array.isArray(data) ? data : []));
+      if (arr.length) return arr;
+    }catch(e){ console.warn('instancias whatsapp', e); }
+
+    const fallbacks = ['/api/atendimento/instances','/api/instances'];
+    for (const url of fallbacks){
+      try{
+        const d = await apiGet(url);
+        const items = Array.isArray(d?.items) ? d.items : (Array.isArray(d) ? d : []);
+        const arr = normInstances(items);
+        if (arr.length) return arr;
+      }catch{}
+    }
+    return [];
+  }
 
   function ensureInstanciaModal(){
     let back = document.getElementById('instancia-backdrop');
@@ -369,12 +602,10 @@
       </div>`;
     document.body.appendChild(back);
 
-    // fechar
     back.addEventListener('mousedown', e => { if (e.target === back) back.style.display='none'; });
     back.querySelector('#instClose').addEventListener('click', ()=> back.style.display='none');
     back.querySelector('#instCancel').addEventListener('click', ()=> back.style.display='none');
 
-    // teclado
     document.addEventListener('keydown', e=>{
       if (back.style.display !== 'grid') return;
       if (e.key === 'Escape') back.style.display='none';
@@ -386,67 +617,17 @@
     return back;
   }
 
-  function setActiveInstance({ id, slug }){
-    if (!id && !slug) return;
-    window.INSTANCIA_ATIVA      = id ?? slug; // vários códigos usam isso
-    window.INSTANCIA_ATIVA_ID   = id ?? null;
-    window.INSTANCIA_ATIVA_SLUG = slug ?? null;
-    try{ LS.setItem('INSTANCIA_ATIVA', String(window.INSTANCIA_ATIVA)); }catch{}
-    try{ if (id!=null) LS.setItem('INSTANCIA_ATIVA_ID', String(id)); }catch{}
-    try{ if (slug)     LS.setItem('INSTANCIA_ATIVA_SLUG', String(slug)); }catch{}
-    try{
-      document.cookie = `INSTANCIA_ATIVA=${encodeURIComponent(String(window.INSTANCIA_ATIVA))}; path=/; max-age=${60*60*24*30}`;
-    }catch{}
-  }
-
-  function normInstances(items){
-    if (!Array.isArray(items)) return [];
-    return items.map(x=>{
-      const id   = (x.id!=null) ? Number(x.id)
-                : (x.instancia_id!=null ? Number(x.instancia_id) : null);
-      const slug = String(x.instance_name ?? x.slug ?? x.nome ?? '').trim();
-      const name = String((x.apelido ?? x.name ?? x.nome ?? slug) || "").trim();
-      const number = x.numero_instancia ?? x.numero ?? null;
-      const connected = !!x.connected || !!x.online || (String(x.status||'').toLowerCase()==='connected');
-      return (id || slug) ? { id, slug, name: name || slug, number, connected } : null;
-    }).filter(Boolean);
-  }
-
-  // Busca do BD: /api/empresas/{EMPRESA_ID}/whatsapp
-  async function fetchInstances(){
-    if (!EMPRESA_ID) return [];
-    try{
-      const data = await apiGet(`/api/empresas/${EMPRESA_ID}/whatsapp`);
-      const arr = normInstances(Array.isArray(data?.instancias) ? data.instancias : (Array.isArray(data) ? data : []));
-      if (arr.length) return arr;
-    }catch(e){ console.warn('instancias whatsapp', e); }
-
-    // (fallbacks opcionais — se existirem em outra versão do seu back)
-    const fallbacks = ['/api/atendimento/instances','/api/instances'];
-    for (const url of fallbacks){
-      try{
-        const d = await apiGet(url);
-        const items = Array.isArray(d?.items) ? d.items : (Array.isArray(d) ? d : []);
-        const arr = normInstances(items);
-        if (arr.length) return arr;
-      }catch{}
-    }
-    return [];
-  }
-
   function renderInstanciasList(back, insts){
     const list = back.querySelector('#instList');
     const info = back.querySelector('#instInfo');
     list.innerHTML = '';
 
-    // ordena: conectadas primeiro, depois nome
     insts = insts.slice().sort((a,b)=>{
       if (a.connected !== b.connected) return a.connected ? -1 : 1;
       return String(a.name).localeCompare(String(b.name),'pt-BR');
     });
 
     const ativa = (LS.getItem('INSTANCIA_ATIVA_ID') || LS.getItem('INSTANCIA_ATIVA') || '').trim();
-    const ativaStr = String(ativa || '').trim();
 
     insts.forEach((i, idx) => {
       const id = `inst-opt-${i.id ?? i.slug ?? idx}`;
@@ -466,33 +647,25 @@
       row.style.userSelect = 'none';
 
       row.innerHTML = `
-        <input type="radio" name="instRadio" id="${id}" value="${i.id ?? ''}" data-slug="${i.slug||''}" style="accent-color:var(--accent)">
+        <input type="radio" name="instRadio" id="${id}" value="${i.id ?? ''}" data-slug="${i.slug||''}">
         <span>${label}</span>
       `;
       list.appendChild(row);
 
-      // marca ativa se casar por id ou slug
       const r = row.querySelector('input[type="radio"]');
-      if (ativaStr && (ativaStr === String(i.id) || ativaStr === String(i.slug))) {
+      if (ativa && (ativa === String(i.id) || ativa === String(i.slug))) {
         r.checked = true;
       }
     });
 
     if (!list.querySelector('input[type="radio"]:checked')){
-      // se nenhuma marcada, marca a primeira conectada ou a primeira da lista
       (list.querySelector('input[type="radio"]') || {}).checked = true;
-      const firstOnline = [...list.querySelectorAll('input[type="radio"]')].find(r => {
-        const slug = r.dataset.slug;
-        const obj = insts.find(x => String(x.slug)===String(slug) || String(x.id)===String(r.value));
-        return obj?.connected;
-      });
-      if (firstOnline) firstOnline.checked = true;
     }
 
     info.textContent = insts.length ? `Instâncias encontradas: ${insts.length}` : 'Nenhuma instância encontrada.';
   }
 
-  async function chooseInstanceId(clienteId){
+  async function chooseInstanceId(){
     if (!STATE.instancias){
       STATE.instancias = await fetchInstances().catch(()=>[]);
     }
@@ -508,7 +681,6 @@
       return one.id ?? null;
     }
 
-    // várias → modal
     const back = ensureInstanciaModal();
     renderInstanciasList(back, insts);
 
@@ -530,12 +702,11 @@
   }
 
   async function openClienteMensagem(clienteId){
-    const instancia_id = await chooseInstanceId(clienteId);
+    const instancia_id = await chooseInstanceId();
     if (!instancia_id){
       toast('Nenhuma instância selecionada.','warn');
       return;
     }
-    // redireciona incluindo instancia_id (front do chat usa esse ID)
     const u = new URL('/frontend/atendimentos.html', location.origin);
     u.searchParams.set('cliente_id', String(clienteId));
     u.searchParams.set('instancia_id', String(instancia_id));
@@ -543,48 +714,21 @@
   }
 
   // ==============================
-  // Ações da tabela (intercepta em CAPTURA)
+  // Wiring básico do modal (fechar)
   // ==============================
-  document.addEventListener('click', async (e)=>{
-    const b = e.target?.closest?.('[data-action]');
-    if (!b) return;
-
-    const action = b.dataset.action;
-    if (!action) return;
-
-    const id = Number(b.dataset.id);
-    if (!id) return;
-
-    if (action === 'view'){
-      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
-      openClienteView(id);
-      return;
-    }
-    if (action === 'edit'){
-      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
-      openClienteEdit(id);
-      return;
-    }
-    if (action === 'msg'){
-      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
-      openClienteMensagem(id);
-      return;
-    }
-  }, true /* capture */);
+  novoCancel?.addEventListener?.('click', closeEditorModal);
+  novoClose?.addEventListener?.('click',  closeEditorModal);
 
   // ==============================
-  // Wiring básico do modal
+  // Exports globais (usados em clientes.js)
   // ==============================
-  novoCancel?.addEventListener?.('click', ()=> closeModal(novoModal));
-  novoClose?.addEventListener?.('click',  ()=> closeModal(novoModal));
-
-  // ==============================
-  // Exports globais úteis
-  // ==============================
-  window.ClienteEditar = Object.freeze({
-    ver: openClienteView,
-    editar: openClienteEdit,
-    mensagem: openClienteMensagem
+  const api = Object.freeze({
+    openView:    openClienteView,
+    openEdit:    openClienteEdit,
+    openMessage: openClienteMensagem
   });
+
+  window.ClienteEditor = api;  // nome usado em clientes.js (ensureClienteEditorLoaded)
+  window.ClienteEditar = api;  // alias, caso algum código use esse nome
 
 })();

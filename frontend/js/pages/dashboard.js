@@ -185,6 +185,19 @@
     if (!lastBox || !lastEmpty) return;
     lastBox.classList.toggle('is-empty', !!empty);
     lastEmpty.hidden = !empty;
+
+    if (empty) {
+      const elDate = document.getElementById('filtroData');
+      const muted = lastEmpty.querySelector('.muted');
+      if (muted) {
+        const val = elDate?.value?.trim();
+        if (val) {
+          muted.textContent = `Escolha outra data ou selecione outra instância. (Período: ${val})`;
+        } else {
+          muted.textContent = 'Escolha outra data ou selecione outra instância.';
+        }
+      }
+    }
   }
 
   function upsertChart(ctx, prev, cfg){
