@@ -20,6 +20,23 @@
   }
 
   // =========================================================
+  // Helper: detecção padronizada de "layout mobile"
+  // =========================================================
+  function isMobileLayout() {
+    if (!window.matchMedia) return false;
+
+    // 1) Telas realmente estreitas (até 900px) sempre mobile
+    var narrow = window.matchMedia('(max-width: 900px)').matches;
+
+    // 2) Até 1024px com pointer coarse (touch: celular/tablet) também mobile
+    var tabletTouch = window.matchMedia('(max-width: 1024px) and (pointer: coarse)').matches;
+
+    return narrow || tabletTouch;
+  }
+
+  var IS_MOBILE = isMobileLayout();
+
+  // =========================================================
   // Pequena animação de entrada da página (fade + up)
   // =========================================================
   function playEnterAnimation() {
@@ -233,10 +250,11 @@
     host.dataset.loaded = '1';
 
     SIDEBAR_READY = (async function(){
-      var mq = window.matchMedia('(max-width:1024px)');
       var desktopSrc = host.getAttribute('data-src') || '/frontend/partials/sidebar.html';
       var mobileSrc  = host.getAttribute('data-src-mobile') || '/frontend/partials/sidebar-mobile.html';
-      var src        = mq.matches ? mobileSrc : desktopSrc;
+
+      // Usa detecção padronizada
+      var src = (IS_MOBILE && mobileSrc) ? mobileSrc : desktopSrc;
 
       try {
         var res  = await fetch(bust(src), { cache:'no-cache', credentials:'include' });
