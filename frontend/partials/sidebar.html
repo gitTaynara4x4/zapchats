@@ -9,7 +9,7 @@
   :root{
     --topbar-h:44px;
     --sbw:16.5rem;   /* largura do sidebar expandido */
-    --sbw-c:3.2rem;  /* largura do sidebar colapsado (usado só em mobile se quiser) */
+    --sbw-c:3.2rem;  /* largura do sidebar colapsado */
 
     /* Cores dos ícones */
     --icon:#9ca3af;
@@ -49,7 +49,61 @@
   .theme-toggle, .theme-toggle * { position:relative; z-index:0; }
 
   body{ padding-top:var(--topbar-h); }
-  @media (min-width:1024px){ body{ padding-left:var(--sbw-c); } }
+  @media (min-width:1024px){
+    body{ padding-left:var(--sbw-c); }
+  }
+
+  /* ===== Tablet / small desktop (901–1150px): sidebar sempre aberto ===== */
+  @media (max-width:1150px) and (min-width:901px){
+    body{ padding-left:var(--sbw); }
+
+    .app-sidebar{
+      width:var(--sbw);
+    }
+    .app-sidebar:hover{
+      width:var(--sbw);
+      padding-left:.45rem;
+      padding-right:.45rem;
+    }
+
+    /* nav/link sempre em modo "expandido" */
+    .app-sidebar nav{
+      align-items:stretch;
+    }
+    .app-sidebar nav a,
+    .app-sidebar:hover nav a{
+      justify-content:flex-start;
+      padding:.5rem .7rem .5rem .6rem;
+      gap:.75rem;
+    }
+
+    .label,
+    .app-sidebar:hover .label,
+    .app-sidebar:not(:hover) .label{
+      display:inline-block !important;
+      opacity:1 !important;
+      max-width:14rem !important;
+      transform:translateX(0) !important;
+    }
+
+    .app-sidebar:not(:hover) nav{
+      align-items:stretch;
+    }
+    .app-sidebar:not(:hover) nav a{
+      width:100%;
+      justify-content:flex-start;
+      padding:.5rem .7rem .5rem .6rem;
+      gap:.75rem;
+    }
+    .app-sidebar:not(:hover) .nav-icon{
+      margin:0;
+      display:inline-grid;
+      place-items:center;
+    }
+    .app-sidebar:not(:hover) .nav-icon-svg{
+      margin:0;
+    }
+  }
 
   /* ===== Sidebar ===== */
   .app-sidebar{
@@ -109,7 +163,7 @@
   .app-sidebar:hover .logo .logo-full{
     opacity:1; pointer-events:auto;
     animation:logoFadeIn .42s cubic-bezier(.2,.7,.2,1) both;
-    animation-delay:.06s;
+    animation-delay:.06s;                       /* começa logo que o hover abrir */
   }
   /* tema da logo cheia */
   html.dark .app-sidebar:hover .logo .logo-full.logo-dark{ opacity:1; }
@@ -117,6 +171,7 @@
   html:not(.dark) .app-sidebar:hover .logo .logo-full.logo-light{ opacity:1; }
   html:not(.dark) .app-sidebar:hover .logo .logo-full.logo-dark{ opacity:0; }
 
+  /* respeita redução de movimento do SO */
   @media (prefers-reduced-motion: reduce){
     .logo .logo-fav,
     .logo .logo-full{ transition:none !important; animation:none !important; filter:none !important; transform:none !important; }
@@ -137,6 +192,7 @@
   }
   .app-sidebar:hover nav a{ justify-content:flex-start; padding:.5rem .7rem .5rem .6rem; }
 
+  /* Ícone — tamanho constante */
   .nav-icon{ width:26px; height:26px; flex:0 0 26px; display:inline-grid; place-items:center; color:var(--icon); }
   .nav-icon-svg{ width:22px; height:22px; display:block; }
 
@@ -168,7 +224,7 @@
   .app-sidebar:not(:hover) .nav-icon{ margin:0 auto; display:grid; place-items:center; }
   .app-sidebar:not(:hover) .nav-icon-svg{ display:block; margin:0 auto; }
 
-  /* Chip usuário + toggle tema */
+  /* Chip usuário + toggle tema (inalterado) */
   .user-chip{
     display:flex; align-items:center; gap:.5rem; margin-right:6px;
     padding:.3rem .6rem; border:1px solid var(--border); border-radius:999px;
@@ -250,56 +306,6 @@
 
   .app-sidebar nav a:focus{ outline:none; }
   .app-sidebar:hover nav a:focus-visible{ outline:2px solid var(--ring); outline-offset:2px; }
-
-  /* === FORÇA SIDEBAR ABERTO NO DESKTOP (≥1024px) === */
-  @media (min-width:1024px){
-    body{
-      padding-left: var(--sbw); /* reserva espaço pro sidebar cheio */
-    }
-
-    .app-sidebar{
-      width: var(--sbw);
-      padding-left: .45rem;
-      padding-right: .45rem;
-      overflow:auto;
-    }
-
-    .app-sidebar:hover{
-      width: var(--sbw);
-    }
-
-    .app-sidebar nav{
-      align-items: flex-start;
-    }
-
-    .app-sidebar nav a{
-      justify-content: flex-start;
-      padding:.5rem .7rem .5rem .6rem;
-      gap:.75rem;
-    }
-
-    .label,
-    .app-sidebar:not(:hover) .label{
-      display:inline;
-      opacity:1;
-      max-width:14rem;
-      transform:none;
-    }
-
-    .app-sidebar:not(:hover) nav a{
-      width:auto;
-    }
-
-    .app-sidebar:not(:hover) .nav-icon{
-      margin:0;
-      display:inline-grid;
-      place-items:center;
-    }
-
-    .app-sidebar:not(:hover) .nav-icon-svg{
-      margin:0;
-    }
-  }
 </style>
 
 <!-- TOPBAR -->
@@ -374,6 +380,7 @@
       <span class="label">Arquivos</span>
     </a>
 
+    <!-- NOVO: E-mail -->
     <a href="/email" title="E-mail">
       <span class="nav-icon" aria-hidden="true">
         <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
@@ -494,6 +501,7 @@
   /* aplica o tema salvo ou o do AppTheme, se existir */
   try{
     if(window.AppTheme && typeof AppTheme.current==='function'){
+      html.classList.toggle('dark,', AppTheme.current()==='dark'); // legado
       html.classList.toggle('dark', AppTheme.current()==='dark');
     }else{
       var saved=localStorage.getItem('theme'); if(saved) html.classList.toggle('dark', saved==='dark');
