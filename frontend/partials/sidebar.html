@@ -49,7 +49,61 @@
   .theme-toggle, .theme-toggle * { position:relative; z-index:0; }
 
   body{ padding-top:var(--topbar-h); }
-  @media (min-width:1024px){ body{ padding-left:var(--sbw-c); } }
+  @media (min-width:1024px){
+    body{ padding-left:var(--sbw-c); }
+  }
+
+  /* ===== Tablet / small desktop (901–1150px): sidebar sempre aberto ===== */
+  @media (max-width:1150px) and (min-width:901px){
+    body{ padding-left:var(--sbw); }
+
+    .app-sidebar{
+      width:var(--sbw);
+    }
+    .app-sidebar:hover{
+      width:var(--sbw);
+      padding-left:.45rem;
+      padding-right:.45rem;
+    }
+
+    /* nav/link sempre em modo "expandido" */
+    .app-sidebar nav{
+      align-items:stretch;
+    }
+    .app-sidebar nav a,
+    .app-sidebar:hover nav a{
+      justify-content:flex-start;
+      padding:.5rem .7rem .5rem .6rem;
+      gap:.75rem;
+    }
+
+    .label,
+    .app-sidebar:hover .label,
+    .app-sidebar:not(:hover) .label{
+      display:inline-block !important;
+      opacity:1 !important;
+      max-width:14rem !important;
+      transform:translateX(0) !important;
+    }
+
+    .app-sidebar:not(:hover) nav{
+      align-items:stretch;
+    }
+    .app-sidebar:not(:hover) nav a{
+      width:100%;
+      justify-content:flex-start;
+      padding:.5rem .7rem .5rem .6rem;
+      gap:.75rem;
+    }
+    .app-sidebar:not(:hover) .nav-icon{
+      margin:0;
+      display:inline-grid;
+      place-items:center;
+    }
+    .app-sidebar:not(:hover) .nav-icon-svg{
+      margin:0;
+    }
+  }
 
   /* ===== Sidebar ===== */
   .app-sidebar{
@@ -326,7 +380,7 @@
       <span class="label">Arquivos</span>
     </a>
 
-    <!-- NOVO: E-mail (logo abaixo de Arquivos) -->
+    <!-- NOVO: E-mail -->
     <a href="/email" title="E-mail">
       <span class="nav-icon" aria-hidden="true">
         <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
@@ -447,7 +501,7 @@
   /* aplica o tema salvo ou o do AppTheme, se existir */
   try{
     if(window.AppTheme && typeof AppTheme.current==='function'){
-      html.classList.toggle('dark,', AppTheme.current()==='dark'); // fallback em apps com tema global
+      html.classList.toggle('dark,', AppTheme.current()==='dark'); // legado
       html.classList.toggle('dark', AppTheme.current()==='dark');
     }else{
       var saved=localStorage.getItem('theme'); if(saved) html.classList.toggle('dark', saved==='dark');
@@ -596,32 +650,31 @@
   })();
 
   /* logout */
-(function(){
-  var out=document.getElementById('sidebarLogout'); if(!out || out.dataset.bound) return;
-  out.dataset.bound='1';
-  out.addEventListener('click', async function(ev){
-    ev.preventDefault();
+  (function(){
+    var out=document.getElementById('sidebarLogout'); if(!out || out.dataset.bound) return;
+    out.dataset.bound='1';
+    out.addEventListener('click', async function(ev){
+      ev.preventDefault();
 
-    // 1) pede ao backend pra apagar cookies HttpOnly
-    try { await fetch('/api/auth/logout', { method:'POST', credentials:'include' }); } catch {}
+      // 1) pede ao backend pra apagar cookies HttpOnly
+      try { await fetch('/api/auth/logout', { method:'POST', credentials:'include' }); } catch {}
 
-    // 2) limpa cookies acessíveis via JS (best-effort)
-    (function nukeCookies(){
-      const past='Thu, 01 Jan 1970 00:00:00 GMT';
-      const names=(document.cookie||'').split(/;\s*/).filter(Boolean).map(c=>c.split('=')[0]);
-      for(const name of names){
-        document.cookie = `${name}=; Expires=${past}; Path=/`;
-      }
-    })();
+      // 2) limpa cookies acessíveis via JS (best-effort)
+      (function nukeCookies(){
+        const past='Thu, 01 Jan 1970 00:00:00 GMT';
+        const names=(document.cookie||'').split(/;\s*/).filter(Boolean).map(c=>c.split('=')[0]);
+        for(const name of names){
+          document.cookie = `${name}=; Expires=${past}; Path=/`;
+        }
+      })();
 
-    // 3) limpa storages/caches
-    try { localStorage.clear(); sessionStorage.clear(); } catch {}
-    if ('caches' in window) { try { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); } catch {} }
+      // 3) limpa storages/caches
+      try { localStorage.clear(); sessionStorage.clear(); } catch {}
+      if ('caches' in window) { try { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); } catch {} }
 
-    // 4) redireciona para a RAIZ (que mostra o login)
-    window.location.replace('/'); // ou: location.assign('/')
-    // se seu app estiver atrás de subcaminho, use: window.location.replace(location.origin + '/');
-  });
-})();
+      // 4) redireciona para a RAIZ (login)
+      window.location.replace('/');
+    });
+  })();
 })();
 </script>

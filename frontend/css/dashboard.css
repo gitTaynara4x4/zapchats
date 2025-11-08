@@ -87,6 +87,19 @@ html:not(.dark) .section-title .title-ico.is-active{ color: var(--icon-active-li
 .charts{ grid-template-columns:1fr; margin-bottom:1rem; }
 @media (min-width:900px){ .charts{ grid-template-columns:1fr 1fr; } }
 
+/* ===== Tablet / small desktop (901–1150px): ainda desktop, mas mais folgado ===== */
+@media (max-width:1150px) and (min-width:901px){
+  .main{
+    padding:1.25rem .75rem 1.25rem 1rem;
+  }
+  .cards{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .charts{
+    grid-template-columns:1fr !important; /* empilha gráficos */
+  }
+}
+
 /* Box */
 .box{
   background:var(--card);
@@ -257,7 +270,9 @@ tbody tr:hover{ background:var(--hover); }
 
 /* Flatpickr dark */
 .dark .flatpickr-calendar{
-  background:#151516; border:1px solid #2a2a2e; box-shadow:0 8px 30px rgba(0,0,0,.45);
+  background:#151516;
+  border:1px solid #2a2a2e;
+  box-shadow:0 8px 30px rgba(0,0,0,.45);
   color:#e5e7eb;
 }
 .dark .flatpickr-day{ color:#e5e7eb; }
