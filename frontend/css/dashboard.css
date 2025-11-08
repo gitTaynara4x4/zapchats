@@ -257,9 +257,7 @@ tbody tr:hover{ background:var(--hover); }
 
 /* Flatpickr dark */
 .dark .flatpickr-calendar{
-  background:#151516;
-  border:1px solid #2a2a2e;
-  box-shadow:0 8px 30px rgba(0,0,0,.45);
+  background:#151516; border:1px solid #2a2a2e; box-shadow:0 8px 30px rgba(0,0,0,.45);
   color:#e5e7eb;
 }
 .dark .flatpickr-day{ color:#e5e7eb; }
