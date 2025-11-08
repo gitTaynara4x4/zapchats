@@ -121,61 +121,57 @@ import { numeroE164 } from '../core/format.js';
 
   // Retorna erro enriquecido quando Evolution responde !=200 para permitir mensagens específicas
   async function evoCheckNumber(e164Digits) {
-    await ensureEvoConfig();
-    const instance = resolveInstanceSlug();
-    const url = `${EVO_URL}/chat/whatsappNumbers/${encodeURIComponent(instance)}`;
-    const headers = { 'Content-Type': 'application/json' };
-    if (EVO_KEY) headers['apikey'] = EVO_KEY;
+    const inst = (window.INSTANCIA_ATIVA && String(window.INSTANCIA_ATIVA).trim()) || '';
+    const body = {
+      numbers: [String(e164Digits)],
+      empresa_id: Number(window.EMPRESA_ID || 0) || undefined,
+      instancia_id: /^\d+$/.test(inst) ? Number(inst) : undefined,
+      instance: /^\d+$/.test(inst) ? undefined : (inst || undefined),
+    };
+    const r = await fetch('/api/evolution/whatsappNumbers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body)
+    });
+    const txt = await r.text();
+    let data = null; try { data = txt ? JSON.parse(txt) : null; } catch {}
 
-    const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ numbers: [e164Digits] }) });
-    const text = await resp.text();
-    let data = null; try { data = text ? JSON.parse(text) : null; } catch {}
-
-    if (!resp.ok) {
-      const err = new Error(`Evolution ${resp.status}`);
-      err.name = 'EvolutionError';
-      err.status = resp.status;
-      err.body = data || text;
-      err.instance = instance;
-      err.endpoint = url;
-      console.warn('[evoCheckNumber] HTTP', resp.status, 'instance=', instance, 'url=', url, 'body=', err.body);
+    if (!r.ok) {
+      const err = new Error(`Evolution proxy ${r.status}`);
+      err.status = r.status; err.body = data || txt;
       throw err;
     }
 
+    // Normaliza possíveis formatos do proxy
     let exists = false, jid = null;
-    const tryRead = (e) => {
-      if (!e) return;
-      if (jid == null && e.jid) jid = e.jid;
-      const v = (e.exists===true)||(e.isWA===true)||(e.isWhatsapp===true)||(e.valid===true)||
-                (e.available===true)||(e.canReceive===true)||
-                (/^(ok|true|valid|exists|available)$/i.test(String(e.status||'')));
-      if (v) exists = true;
-    };
-    [data, data?.results, data?.response, data?.numbers].some(b => {
-      if (Array.isArray(b) && b.length) { tryRead(b[0]); return true; }
-      if (b && !Array.isArray(b)) { tryRead(b); return true; }
-      return false;
-    });
-    try { localStorage.setItem('evo_instance', instance); } catch {}
-    const canonical = jid ? digitsFromJid(jid) : null;
-    return { exists: !!exists, canonical, jid: jid || null, raw: data };
+    const arr = Array.isArray(data?.results) ? data.results
+            : Array.isArray(data)           ? data
+            : (data?.numbers || data?.response || data ? [data] : []);
+    const first = arr[0] || {};
+    jid = first.jid || first.wuid || null;
+    exists = !!(first.exists || first.isWA || first.valid || first.available || /^ok|true$/i.test(String(first.status||'')));
+    const canonical = jid ? String(jid).replace(/@.*$/, '').replace(/\D/g,'') : null;
+    return { exists, canonical, jid: jid || null, raw: data };
   }
 
+
   async function evoFetchProfile(jid) {
-    await ensureEvoConfig();
-    const instance = resolveInstanceSlug();
-    const url = `${EVO_URL}/chat/fetchProfile/${encodeURIComponent(instance)}`;
-    const headers = { 'Content-Type': 'application/json' };
-    if (EVO_KEY) headers['apikey'] = EVO_KEY;
-
-    const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ wuid: String(jid) }) });
-    if (!r.ok) {
-      console.warn('[evoFetchProfile] HTTP', r.status, 'instance=', instance, 'url=', url);
-      throw new Error(`Evolution profile HTTP ${r.status}`);
-    }
+    const inst = (window.INSTANCIA_ATIVA && String(window.INSTANCIA_ATIVA).trim()) || '';
+    const body = {
+      wuid: String(jid),
+      empresa_id: Number(window.EMPRESA_ID || 0) || undefined,
+      instancia_id: /^\d+$/.test(inst) ? Number(inst) : undefined,
+      instance: /^\d+$/.test(inst) ? undefined : (inst || undefined),
+    };
+    const r = await fetch('/api/evolution/fetchProfile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error(`Evolution proxy profile ${r.status}`);
     const p = await r.json().catch(() => ({}));
-
-    try { localStorage.setItem('evo_instance', instance); } catch {}
     return {
       name: String(p?.name || '').trim() || null,
       picture: String(p?.picture || '').trim() || null,
@@ -183,7 +179,6 @@ import { numeroE164 } from '../core/format.js';
       raw: p
     };
   }
-
   // ---------------- backend utils ----------------
   async function getClienteDetalhe(id){
     const r = await fetch(`/api/clientes/${id}?empresa_id=${encodeURIComponent(String(EMPRESA_ID))}`, { credentials:'include' });

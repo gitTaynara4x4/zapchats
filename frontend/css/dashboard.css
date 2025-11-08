@@ -87,19 +87,6 @@ html:not(.dark) .section-title .title-ico.is-active{ color: var(--icon-active-li
 .charts{ grid-template-columns:1fr; margin-bottom:1rem; }
 @media (min-width:900px){ .charts{ grid-template-columns:1fr 1fr; } }
 
-/* ===== Tablet / small desktop (901–1150px): ainda desktop, mas mais folgado ===== */
-@media (max-width:1150px) and (min-width:901px){
-  .main{
-    padding:1.25rem .75rem 1.25rem 1rem;
-  }
-  .cards{
-    grid-template-columns:repeat(2,minmax(0,1fr));
-  }
-  .charts{
-    grid-template-columns:1fr !important; /* empilha gráficos */
-  }
-}
-
 /* Box */
 .box{
   background:var(--card);
