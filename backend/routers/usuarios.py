@@ -32,6 +32,14 @@ class UsuarioIn(BaseModel):
     departamento: Optional[str] = None  # nome do departamento (vamos resolver para id)
 
 
+class UsuarioMeUpdate(BaseModel):
+    """Payload para atualizar o próprio usuário (/usuarios/me)."""
+    nome: Optional[str] = None
+    cargo: Optional[str] = None
+    departamento_id: Optional[int] = None
+    departamento: Optional[str] = None  # nome do departamento
+
+
 # =========================
 # Helpers
 # =========================
@@ -101,6 +109,55 @@ def obter_me(current_user: Usuario = Depends(get_current_user)):
         "email": current_user.email,
         "cargo": getattr(current_user, "cargo", None),
         "is_admin": getattr(current_user, "is_admin", False),
+        "departamento_id": getattr(current_user, "departamento_id", None),
+    }
+
+
+@router.put("/me", status_code=status.HTTP_200_OK)
+def atualizar_me(
+    body: UsuarioMeUpdate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Atualiza campos básicos do usuário autenticado.
+    Usado pelo modal "Meu perfil" (nome / cargo / departamento).
+    """
+
+    # Nome
+    if body.nome is not None:
+        nome = body.nome.strip()
+        if not nome:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nome não pode ser vazio")
+        current_user.nome = nome
+
+    # Cargo (se você quiser permitir edição disso pelo próprio usuário)
+    if body.cargo is not None:
+        current_user.cargo = body.cargo or None
+        current_user.is_admin = (body.cargo or "").lower() == "admin"
+
+    # Departamento
+    if body.departamento_id is not None or body.departamento is not None:
+        dep_id = resolve_departamento_id(
+            db,
+            current_user.empresa_id,
+            body.departamento_id,
+            body.departamento,
+        )
+        current_user.departamento_id = dep_id
+
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
+
+    return {
+        "id": current_user.id,
+        "empresa_id": current_user.empresa_id,
+        "nome": current_user.nome,
+        "email": current_user.email,
+        "cargo": getattr(current_user, "cargo", None),
+        "is_admin": getattr(current_user, "is_admin", False),
+        "departamento_id": getattr(current_user, "departamento_id", None),
     }
 
 

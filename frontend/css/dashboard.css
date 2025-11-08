@@ -174,8 +174,8 @@ tbody tr:hover{ background:var(--hover); }
 #lastBox.is-empty #lastEmpty{ display:flex; }
 #lastEmpty[hidden]{ display:none !important; }
 
-/* ===== MOBILE (≤1024px) ===== */
-@media (max-width:1024px){
+/* ===== MOBILE (≤900px ou ≤1024px com touch) ===== */
+@media (max-width:900px), (max-width:1024px) and (pointer: coarse){
   #sidebar{ display:none !important; }
 
   /* Safe-area extra para bottom-nav fixa */

@@ -1,9 +1,9 @@
 // /frontend/js/atendimentos/ui/perfil_quick.js
 // Painel RÁPIDO de perfil — abre só ao clicar no NOME/FOTO do header.
 // *** AJUSTE: NOME vem SOMENTE do BD (sem Evolution) ***
-// - Ao abrir, chama /api/atendimento/clientes/:id/profile?empresa_id=...
+// - Ao abrir, chama /api/atendimento/clientes/:id/profile?empresa_id=... (apenas BD)
 // - Atualiza APENAS o nome no cache e no header (não mexe no avatar do header/lista).
-// - Mantém o fluxo existente de avatar (refresh via Evolution onerror), sem alterações.
+// - Mantém o fluxo existente de avatar (refresh via Evolution onerror), com guards p/ não gerar 400.
 // - Evita dados “fantasma” ao trocar de conversa (AbortController + token por cliente).
 
 (() => {
@@ -13,7 +13,7 @@
 
   function ensureToast(msg, type='ok'){
     if (window.toast) { window.toast({ title: type==='ok'?'Pronto':'Erro', msg, type: type==='ok'?'ok':'error' }); }
-    else { if(type==='ok') console.log('[perfil]', msg); else alert(msg); }
+    else { if(type==='ok') console.log('[perfil]', msg); else console.error(msg); }
   }
   const onlyDigits = s => String(s||'').replace(/\D+/g,'');
   const getClienteId = () => Number($('#historico')?.dataset?.clienteId || 0);
@@ -32,6 +32,20 @@
     }catch{ return ''; }
   }
 
+  // **NOVO**: instância segura (reusa lógica da Agenda)
+  function getInstanciaAtivaSafe(){
+    const sel = (window.state?.clienteSel) || null;
+    const inst = sel?.instancia_id ?? sel?.instancia ?? window.INSTANCIA_ATIVA ?? null;
+    if (inst == null || inst === '') return { instancia_id: undefined, instance: undefined };
+    if (typeof inst === 'object') {
+      const iid = Number(inst.id || inst.instancia_id || 0) || undefined;
+      const name = inst.instance_name || inst.name || undefined;
+      return { instancia_id: iid, instance: name };
+    }
+    const iid = /^\d+$/.test(String(inst)) ? Number(inst) : undefined;
+    return { instancia_id: iid, instance: undefined };
+  }
+
   const skeletonHTML = () => `
     <div class="qcHero">
       <div class="avatar qcSkeleton" style="width:64px;height:64px;border-radius:50%"></div>
@@ -46,6 +60,7 @@
     </div>
   `;
 
+  // tenta extrair telefone do DOM; se tiver clienteId, consulta BD como fallback
   async function getTelefoneAsync(forClienteId){
     const hist = $('#historico');
     const cands = [hist?.dataset?.telefone, hist?.dataset?.phone, hist?.dataset?.number];
@@ -58,6 +73,7 @@
     const m = txt.match(/(\d{10,15})/);
     if (m) return m[1];
 
+    // Prioriza o parâmetro recebido (Agenda chama com id do item)
     const cid = Number(forClienteId || getClienteId() || 0);
     if (cid && EMPRESA_ID){
       try{
@@ -79,7 +95,7 @@
       (patch?.nome_whatsapp && String(patch.nome_whatsapp).trim()) ? String(patch.nome_whatsapp).trim()
       : (patch?.nome && String(patch.nome).trim()) ? String(patch.nome).trim()
       : '';
-    t.textContent = display;
+    if (display) t.textContent = display;
   }
 
   function patchClienteCacheNameOnly(clienteId, bd){
@@ -89,7 +105,7 @@
         // ❗ NÃO tocar em avatar_url aqui
         nome: (bd?.nome ?? undefined),
         nome_whatsapp: (bd?.nome_whatsapp ?? undefined),
-        // campos extras OK de ler, mas não mexem no header/fluxo
+        // extras (não alteram header/fluxo)
         is_business: (typeof bd?.is_business === 'boolean') ? bd.is_business : undefined,
         status_whatsapp: bd?.status_text ?? undefined,
         descricao:  bd?.description ?? undefined,
@@ -112,7 +128,6 @@
       updateHeaderNameFromBD(patch);
 
       if (typeof window.persist === 'function') window.persist();
-      // re-render lista para refletir nome do BD
       try { window.renderListaClientes?.(st.clientesCache || []); } catch {}
       try { window.syncPreviewFromCache?.(Number(clienteId)); } catch {}
     }catch(e){ console.warn('[perfil_quick] patchClienteCacheNameOnly falhou:', e); }
@@ -212,7 +227,7 @@
   }
 
   // Painel renderizado com CAMPOS DO BD (nome/status/etc). A foto exibida aqui é a do BD,
-  // mas isso é *visual do painel* — não altera o avatar do header/lista.
+  // mas isso é visual do painel — não altera o avatar do header/lista.
   function renderProfileFromBD(bd){
     const name = (bd?.nome_whatsapp || bd?.nome || '').trim();
     const isBiz = !!bd?.is_business;
@@ -333,7 +348,7 @@
     if (!hdr || hdr.dataset.qcBound === '1') return;
     hdr.dataset.qcBound = '1';
 
-    // CAPTURE FIRST: intercepta antes e bloqueia outros handlers
+    // CAPTURE FIRST
     hdr.addEventListener('click', (e) => {
       const t = e.target;
       if (!t) return;
@@ -352,7 +367,7 @@
       abrirPerfilRapido();
     }, { capture:true, passive:false });
 
-    // Fallback no bubble (se nada bloqueou)
+    // Fallback bubble
     hdr.addEventListener('click', (e) => {
       const t = e.target;
       if (!t || t.closest(BLOCK_OPEN_SELECTOR)) return;
@@ -396,13 +411,8 @@
   })();
 
   /* =========================
-     ⚠️ AVATAR (sem mudanças)
-     =========================
-     Mantemos exatamente como você já tem:
-     - refreshAvatarFromEvolution + handlers (onerror) e cooldowns.
-     - NÃO chamamos Evolution no fluxo de nome. Nome é só BD.
-  */
-
+     ⚠️ AVATAR (com guards)
+     ========================= */
   // ---- cooldown leve por cliente/trigger (localStorage) ----
   const CD_MS = { list: 30 * 60 * 1000, chat: 10 * 60 * 1000, manual: 0 };
   const cdKey = (clienteId, trigger) =>
@@ -421,31 +431,20 @@
   }
 
   async function refreshAvatarFromEvolution(clienteId){
-    // mantém seu fluxo atual de Evolution para avatar
     try{
       const number = await getTelefoneAsync(clienteId);
-      if (!number) return;
+      if (!number) return; // sem telefone não tenta Evolution
 
-      const st = window.state || {};
-      const sel = st.clienteSel;
-      const hist = document.getElementById('historico');
-      const dataInst = hist?.dataset?.instanciaId || hist?.dataset?.instancia_id;
-      const g = window.INSTANCIA_ATIVA;
-
-      const instInfo = {};
-      if (sel?.instancia_id) instInfo.instancia_id = Number(sel.instancia_id);
-      else if (dataInst && /^\d+$/.test(String(dataInst))) instInfo.instancia_id = Number(dataInst);
-      else if (g && /^\d+$/.test(String(g))) instInfo.instancia_id = Number(g);
-      else if (g && typeof g === 'object') {
-        instInfo.instancia_id = Number(g.id || g.instancia_id || 0) || undefined;
-        instInfo.instance_name = g.instance_name || g.name || undefined;
-      }
+      // **NOVO**: pega instância de forma segura
+      const inst = getInstanciaAtivaSafe();
+      // sem instancia_id nem nome → não chama (evita 400)
+      if (!inst.instancia_id && !inst.instance) return;
 
       const body = {
         number: onlyDigits(number),
         empresa_id: EMPRESA_ID || undefined,
-        instancia_id: instInfo.instancia_id ?? undefined,
-        instance: instInfo.instance_name ?? undefined,
+        instancia_id: inst.instancia_id ?? undefined,
+        instance: inst.instance ?? undefined,
       };
 
       const r = await fetch('/api/evolution/fetchProfile', {
@@ -457,7 +456,7 @@
       if (!r.ok) return;
       const prof = await r.json();
 
-      // 🔄 Atualiza avatar no cache/header/lista **conforme seu fluxo existente**
+      // 🔄 Atualiza avatar no cache/header/lista
       try{
         const st2 = window.state || {};
         const lists = [st2.clientesCache, st2.todosContatosCache];
@@ -472,7 +471,7 @@
         }
         if (typeof window.persist === 'function') window.persist();
 
-        // atualiza header avatar
+        // atualiza header avatar (se tiver aberto)
         const av = document.getElementById('chat-avatar');
         if (av && patch.avatar_url){
           const safe = String(patch.avatar_url).replace(/"/g,'&quot;');
@@ -483,7 +482,6 @@
              </span>`;
         }
 
-        // re-render lista p/ refletir novo avatar
         try { window.renderListaClientes?.(st2.clientesCache || []); } catch {}
       }catch{}
     }catch{}

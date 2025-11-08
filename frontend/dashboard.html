@@ -232,9 +232,10 @@
 
       function selectValue(value, text){
         window.__INST_ID = value ? Number(String(value).replace(/\D/g,'')) : '';
+        window.__INST_NAME = (text || '').trim();
         setActiveUI(value, text);
         if (typeof window.setInstanciaAtivaDashboard === 'function') {
-          window.setInstanciaAtivaDashboard(value);
+          window.setInstanciaAtivaDashboard(value, text);
         }
         closeMenu(); btn.focus();
       }

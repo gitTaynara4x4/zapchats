@@ -1,6 +1,7 @@
 // /frontend/js/atendimentos/ui/agenda.js
 // Agenda (BD) — scroll infinito no feed normal;
-// chama o servidor SÓ quando estiver buscando (q).
+// Busca no servidor SÓ quando estiver pesquisando (q).
+// Lazy avatar: usa o que vier; só consulta BD/Evolution quando faltar/quebrar.
 
 (() => {
   /* ---------------- helpers ---------------- */
@@ -456,18 +457,19 @@
 
   /* ================== AGENDA: Lazy avatar (BD -> Evolution -> BD) ================== */
   (function agendaAvatarHydrator(){
-    const doneKey = (id) => `ag:av_done:v1:e${EMPRESA_ID}:c${id}`;
+    const doneKey = (id) => `ag:av_done:v2:e${EMPRESA_ID}:c${id}`; // v2: marca após onload
     const cdKey   = (id) => `ag:av_cd:v1:e${EMPRESA_ID}:c${id}`;
     const COOLDOWN_MS = 30 * 60 * 1000; // 30min p/ não martelar Evolution
 
     const canRun = (id) => {
       try{
-        if (localStorage.getItem(doneKey(id)) === '1') return false; // já fez 1x
+        if (localStorage.getItem(doneKey(id)) === '1') return false; // já fez 1x com sucesso
         const last = Number(localStorage.getItem(cdKey(id)) || 0);
         return (Date.now() - last) > COOLDOWN_MS;
       }catch{ return true; }
     };
-    const markRun = (id) => { try{ localStorage.setItem(doneKey(id), '1'); localStorage.setItem(cdKey(id), String(Date.now())); }catch{} };
+    const markCooldown = (id) => { try{ localStorage.setItem(cdKey(id), String(Date.now())); }catch{} };
+    const markDone = (id) => { try{ localStorage.setItem(doneKey(id), '1'); markCooldown(id); }catch{} };
 
     async function fetchProfileBD(id){
       const qs = new URLSearchParams({ empresa_id: String(EMPRESA_ID) });
@@ -476,32 +478,52 @@
       return r.json().catch(()=>null);
     }
 
-    function setAvatarImg(container, url){
+    function setAvatarImg(container, url, opts={}){
       const box = container.querySelector('.ag-avatar');
       if (!box) return;
       box.classList.remove('ag-avatar--default');
-      box.innerHTML = url
-        ? `<img src="${String(url).replace(/"/g,'&quot;')}" alt="" loading="lazy"
-                 referrerpolicy="no-referrer" crossorigin="anonymous">`
-        : `<i class="fa fa-user-circle"></i>`;
+      if (!url){
+        box.innerHTML = `<i class="fa fa-user-circle"></i>`;
+        return;
+      }
+      const safe = String(url).replace(/"/g,'&quot;');
+      box.innerHTML =
+        `<img src="${safe}" alt="" loading="lazy"
+              referrerpolicy="no-referrer" crossorigin="anonymous">`;
       const img = box.querySelector('img');
-      if (img) img.addEventListener('error', () => onImgError(container));
+      if (img){
+        img.addEventListener('error', () => onImgError(container));
+        // marca done apenas se carregou
+        img.addEventListener('load', () => { if (opts.markOnLoad) markDone(Number(container.getAttribute('data-id')||0)); }, { once:true });
+      }
     }
+
+    const isSuspectWhatsAppURL = (u) => /(^https?:\/\/pps\.whatsapp\.net)|(_nc_|\/v\/t61\.)/i.test(String(u||''));
 
     async function hydrateOne(container){
       const id = Number(container?.getAttribute('data-id') || 0);
       if (!id || !canRun(id)) return;
 
-      // 1) BD primeiro
-      let bd = await fetchProfileBD(id);
-      const fromBD = bd?.avatar_url && String(bd.avatar_url).trim() !== '' ? bd.avatar_url : null;
+      // Se já tem uma foto NÃO suspeita, só arma onerror e sai (zero chamadas extras)
+      const currentImg = container.querySelector('.ag-avatar img');
+      const avAttr = container.getAttribute('data-avatar') || currentImg?.getAttribute('src') || '';
+      const hasGoodImg = avAttr && !isSuspectWhatsAppURL(avAttr);
 
-      if (fromBD){
-        setAvatarImg(container, fromBD);
-        return markRun(id);
+      if (hasGoodImg){
+        if (currentImg) currentImg.addEventListener('error', () => onImgError(container));
+        return;
       }
 
-      // 2) Não tem foto no BD → Evolution (salva no BD via refreshAvatarFromEvolution)
+      // 1) BD primeiro (uma tentativa)
+      let bd = await fetchProfileBD(id);
+      const fromBD = bd?.avatar_url && String(bd.avatar_url).trim() ? bd.avatar_url : null;
+      if (fromBD && !isSuspectWhatsAppURL(fromBD)){
+        setAvatarImg(container, fromBD, { markOnLoad:true });
+        return; // markDone será feito no onload
+      }
+
+      // 2) Sem foto boa → Evolution (grava no BD). Protege com cooldown leve.
+      markCooldown(id);
       try{
         if (typeof window.refreshAvatarFromEvolution === 'function'){
           await window.refreshAvatarFromEvolution(id);
@@ -510,13 +532,17 @@
 
       // 3) Reconsulta o BD e aplica
       bd = await fetchProfileBD(id);
-      const nowBD = bd?.avatar_url && String(bd.avatar_url).trim() !== '' ? bd.avatar_url : null;
-      setAvatarImg(container, nowBD);
-      markRun(id);
+      const nowBD = bd?.avatar_url && String(bd.avatar_url).trim() ? bd.avatar_url : null;
+      if (nowBD && !isSuspectWhatsAppURL(nowBD)){
+        setAvatarImg(container, nowBD, { markOnLoad:true });
+      }else{
+        setAvatarImg(container, null); // placeholder
+      }
+      // (done é marcado no onload, se carregar)
     }
 
     async function onImgError(container){
-      // Quebrou (ex.: 403). Se ainda não deu “done”, tenta 1x Evolution e volta ao BD.
+      // Quebrou (ex.: 403 WhatsApp). Se ainda não deu “done”, tenta Evolution e volta ao BD.
       const id = Number(container?.getAttribute('data-id') || 0);
       if (!id || localStorage.getItem(doneKey(id)) === '1') return;
 
@@ -524,14 +550,16 @@
         const box = container.querySelector('.ag-avatar');
         if (box){ box.classList.add('ag-avatar--default'); box.innerHTML = `<i class="fa fa-user-circle"></i>`; }
         if (typeof window.refreshAvatarFromEvolution === 'function'){
+          markCooldown(id);
           await window.refreshAvatarFromEvolution(id);
         }
       }catch{}
 
       const bd = await fetchProfileBD(id);
-      const url = bd?.avatar_url && String(bd.avatar_url).trim() !== '' ? bd.avatar_url : null;
-      setAvatarImg(container, url);
-      markRun(id);
+      const url = bd?.avatar_url && String(bd.avatar_url).trim() ? bd.avatar_url : null;
+      if (url && !isSuspectWhatsAppURL(url)){
+        setAvatarImg(container, url, { markOnLoad:true });
+      }
     }
 
     const io = new IntersectionObserver((entries)=>{

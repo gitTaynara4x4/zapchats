@@ -56,7 +56,21 @@
   };
 
   const hasChart = () => typeof window.Chart === 'function';
-  const IS_MOBILE = window.matchMedia && window.matchMedia('(max-width: 1024px)').matches;
+
+  // ===== regra esperta de "mobile" =====
+  function isMobileLayout(){
+    if (!window.matchMedia) return false;
+
+    // Sempre mobile se for BEM estreito (≤900px)
+    const narrow = window.matchMedia('(max-width: 900px)').matches;
+
+    // Ou se for até 1024px E com pointer "coarse" (touch: celular/tablet)
+    const narrowTouch = window.matchMedia('(max-width: 1024px) and (pointer: coarse)').matches;
+
+    return narrow || narrowTouch;
+  }
+
+  const IS_MOBILE = isMobileLayout();
 
   const Loader = {
     show(text){
