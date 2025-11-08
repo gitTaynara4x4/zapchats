@@ -9,7 +9,7 @@
   const LS = localStorage;
   const EMPRESA_ID = Number(LS.getItem('empresa_id') || '') || null;
 
-  const MAX_LOCAL = 400;         // teto em memória local no front
+  const MAX_LOCAL = 400;
   const PAGE = { limit: 20, offset: 0, loading: false, done: false };
 
   // ===== Loader dinâmico do cliente-editar.js =====
@@ -19,7 +19,6 @@
     if (_editorLoading) return _editorLoading;
     _editorLoading = new Promise((resolve)=>{
       const s = document.createElement('script');
-      // ajuste o caminho conforme sua estrutura de pastas:
       s.src = '/frontend/js/pages/cliente-editar.js';
       s.async = true;
       s.onload  = ()=> resolve(true);
@@ -188,11 +187,9 @@
     try{ el && typeof el.focus === 'function' && el.focus(); }catch{}
   }
 
-  // <<< NOVO: helper pra pegar o cliente completo do state
   function getClienteFromState(id){
     return state.clientes.find(c => Number(c.id) === Number(id)) || null;
   }
-  // >>> FIM NOVO
 
   // ===== Cache local (por filtros)
   function cacheKey(){
@@ -438,7 +435,6 @@
     const checked = state.selected.has(c.id) ? 'checked' : '';
     const resp = (c.colaborador_nome ?? c.responsavel_nome) || '-';
 
-    // evita telefone virar "Nome"
     const nomeOk = (() => {
       const n = (c.nome || '').trim();
       const nd = digits(n);
@@ -589,10 +585,15 @@
     if (novoColab) novoColab.value = '';
   }
   function openNovoModal(){
-    if (!novoModal){ /* fallback opcional */ return; }
+    if (!novoModal) return;
     renderSetores();
     renderResponsaveis();
     resetNovoForm();
+
+    // todas as seções começam fechadas
+    const secs = novoModal.querySelectorAll('.cli-section');
+    secs.forEach(sec => sec.classList.remove('is-open'));
+
     openModal(novoModal);
     safeFocus(novoTel || novoNome);
   }
@@ -631,21 +632,19 @@
         return;
       }
 
-      // detalhe:
       let cli = null;
       try { cli = await apiGet(`/api/clientes/${id}`); } catch {}
 
       if (existed){
-        if (cli) upsertClienteLocal(cli, /*toTop*/false);
+        if (cli) upsertClienteLocal(cli, false);
         closeModal(novoModal);
         toast('Cliente já existia — exibindo registro.');
-        setSearchAndReload(telDigits); // mostra só aquele número
+        setSearchAndReload(telDigits);
         return;
       }
 
-      // Novo mesmo:
       if (cli){
-        upsertClienteLocal(cli, /*toTop*/true);
+        upsertClienteLocal(cli, true);
       }else{
         const now = new Date().toISOString();
         upsertClienteLocal({
@@ -658,7 +657,7 @@
           colaborador_nome: (colaborador_id ? (state.responsaveis.find(r=>r.id===colaborador_id)?.nome || '-') : null),
           timestamp: now,
           data_cadastro: now
-        }, /*toTop*/true);
+        }, true);
       }
 
       clearClientesCaches();
@@ -706,11 +705,11 @@
 
     selectDepto?.addEventListener('change', ()=>{
       state.filtro.deptoId = selectDepto.value;
-      renderFromScratch(); // depto é client-side
+      renderFromScratch();
     });
 
     selectResp?.addEventListener('change', ()=>{
-      state.filtro.respId = selectResp.value; // '' | '0' | id
+      state.filtro.respId = selectResp.value;
       resetAndLoad();
     });
 
@@ -854,12 +853,14 @@
       a.remove();
     });
 
-    // Importar (placeholder simples)
+    // Importar
     btnImp?.addEventListener('click', ()=> openModal(impModal));
     impCancel?.addEventListener('click', ()=> closeModal(impModal));
     impClose?.addEventListener('click', ()=> closeModal(impModal));
     impPick?.addEventListener('click', ()=> impFile?.click());
-    impFile?.addEventListener('change', ()=>{ if (impFileName) impFileName.textContent = (impFile.files?.[0]?.name || 'Nenhum arquivo escolhido'); });
+    impFile?.addEventListener('change', ()=>{
+      if (impFileName) impFileName.textContent = (impFile.files?.[0]?.name || 'Nenhum arquivo escolhido');
+    });
     impOk?.addEventListener('click', ()=>{ closeModal(impModal); toast('Importando…'); });
 
     // ===== Ações da tabela — delega para ClienteEditor
@@ -875,19 +876,19 @@
         return;
       }
 
-      const cli = getClienteFromState(id); // <<< NOVO: cliente completo (pode ter cpf_cnpj, email, etc.)
+      const cli = getClienteFromState(id);
 
-      if (b.dataset.action === 'view'){ 
-        window.ClienteEditor.openView?.(id, cli);  // <<< passa objeto
-        return; 
+      if (b.dataset.action === 'view'){
+        window.ClienteEditor.openView?.(id, cli);
+        return;
       }
-      if (b.dataset.action === 'edit'){ 
-        window.ClienteEditor.openEdit?.(id, cli);  // <<< passa objeto
-        return; 
+      if (b.dataset.action === 'edit'){
+        window.ClienteEditor.openEdit?.(id, cli);
+        return;
       }
-      if (b.dataset.action === 'msg'){  
-        window.ClienteEditor.openMessage?.(id) ?? (location.href = `/frontend/atendimentos.html?cliente_id=${id}`); 
-        return; 
+      if (b.dataset.action === 'msg'){
+        window.ClienteEditor.openMessage?.(id) ?? (location.href = `/frontend/atendimentos.html?cliente_id=${id}`);
+        return;
       }
     });
 
@@ -946,7 +947,7 @@
     window.addEventListener('cliente:updated', (ev)=>{
       const cli = ev?.detail;
       if (!cli || cli.id==null) return;
-      upsertClienteLocal(cli, /*toTop*/false); // mantém cache coeso
+      upsertClienteLocal(cli, false);
       saveCache();
     });
   }

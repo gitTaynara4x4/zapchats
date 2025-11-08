@@ -93,7 +93,8 @@
     zoom: 1, tx: 0, ty: 0, _pzInit: false,
 
     // Whats (instâncias)
-    instancias: [],
+    instâncias: [],
+    instancias: [],          // (mantém compatibilidade, usaremos só instancias)
     instanciasLoaded: false,
     whatsSelected: new Set(),
 
@@ -788,8 +789,11 @@
     document.removeEventListener('keydown', onEscClose);
     // fecha dropdowns abertos
     $('#nome-dropdown')?.classList.remove('open');
-    whatsPanel?.classList.remove('open');
-    whatsBtn?.setAttribute('aria-expanded','false');
+    if (whatsPanel) whatsPanel.classList.remove('open');
+    if (whatsBtn){
+      whatsBtn.setAttribute('aria-expanded','false');
+      whatsBtn.classList.remove('is-open');
+    }
   }
   function onEscClose(e){ if (e.key === 'Escape') closeModal(); }
 
@@ -941,7 +945,10 @@
   function setWhatsButtonText(){
     if (!whatsBtn) return;
     const n = state.whatsSelected.size;
-    if (!n){ whatsBtn.textContent = 'Selecione as instâncias...'; return; }
+    if (!n){
+      whatsBtn.textContent = 'Selecione as instâncias...';
+      return;
+    }
     if (n === 1){
       const id = [...state.whatsSelected][0];
       const it = state.instancias.find(x => x.id === id);
@@ -1026,9 +1033,15 @@
     if (!whatsPanel || !whatsBtn) return;
     if (open === undefined) open = !whatsPanel.classList.contains('open');
 
-    whatsPanel.classList.toggle('open', open);
-    whatsPanel.style.display = open ? 'block' : 'none';
-    if (open) renderWhatsList();
+    if (open) {
+      whatsPanel.classList.add('open');
+      whatsBtn.classList.add('is-open');
+      renderWhatsList();
+    } else {
+      whatsPanel.classList.remove('open');
+      whatsBtn.classList.remove('is-open');
+    }
+
     whatsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
 

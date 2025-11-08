@@ -85,13 +85,38 @@ import { numeroE164 } from '../core/format.js';
     if (!EVO_URL) throw new Error('Evolution URL ausente (configure em env.js ou /api/env/evolution).');
   }
 
+  // ⚠️ Prioriza slug/nome da instância; rejeita id numérico (ex.: "3")
   function resolveInstanceSlug() {
-    const mem = (typeof localStorage !== 'undefined' && localStorage.getItem('evo_instance')) || '';
     const act = (typeof window !== 'undefined') ? window.INSTANCIA_ATIVA : null;
-    const v = (act && String(act).trim()) || (mem && String(mem).trim()) ||
-              (DEFAULT_EVO_INSTANCE && String(DEFAULT_EVO_INSTANCE).trim()) || '';
-    if (!v || isTpl(v)) throw new Error('Evolution instance ausente.');
-    return v;
+
+    // Se for objeto, tenta os campos de nome/slug conhecidos
+    const fromObj = act && typeof act === 'object'
+      ? (act.instance_name || act.name || act.slug || act.slug_name || act.slugName || '')
+      : '';
+
+    // Se for string, usa só se não for id numérico
+    const fromStr = act && typeof act === 'string' ? String(act).trim() : '';
+
+    const mem = (typeof localStorage !== 'undefined' && localStorage.getItem('evo_instance')) || '';
+    const def = DEFAULT_EVO_INSTANCE || '';
+
+    const candidate =
+      (fromObj && String(fromObj).trim()) ||
+      (fromStr && !/^\d+$/.test(fromStr) ? fromStr : '') ||
+      (mem && !/^\d+$/.test(mem) ? mem : '') ||
+      (def && !/^\d+$/.test(def) ? def : '');
+
+    if (!candidate) {
+      console.warn('[evo] Instância ausente/ inválida. Configure slug (ex.: "zap01"), não id numérico.');
+      throw new Error('Evolution instance ausente.');
+    }
+    if (/^\d+$/.test(candidate)) {
+      console.warn('[evo] Valor de instância parece id numérico:', candidate, '— use o slug/nome (ex.: "zap01").');
+      throw new Error('Evolution instance inválida (id numérico).');
+    }
+
+    try { localStorage.setItem('evo_instance', candidate); } catch {}
+    return candidate;
   }
 
   // Retorna erro enriquecido quando Evolution responde !=200 para permitir mensagens específicas
@@ -113,6 +138,7 @@ import { numeroE164 } from '../core/format.js';
       err.body = data || text;
       err.instance = instance;
       err.endpoint = url;
+      console.warn('[evoCheckNumber] HTTP', resp.status, 'instance=', instance, 'url=', url, 'body=', err.body);
       throw err;
     }
 
@@ -143,7 +169,10 @@ import { numeroE164 } from '../core/format.js';
     if (EVO_KEY) headers['apikey'] = EVO_KEY;
 
     const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ wuid: String(jid) }) });
-    if (!r.ok) throw new Error(`Evolution profile HTTP ${r.status}`);
+    if (!r.ok) {
+      console.warn('[evoFetchProfile] HTTP', r.status, 'instance=', instance, 'url=', url);
+      throw new Error(`Evolution profile HTTP ${r.status}`);
+    }
     const p = await r.json().catch(() => ({}));
 
     try { localStorage.setItem('evo_instance', instance); } catch {}
@@ -275,7 +304,7 @@ import { numeroE164 } from '../core/format.js';
   function validatePhoneOrExplain(rawDigits){
     const digits = onlyDigits(String(rawDigits||''));
     if (!digits){
-      toast('Informe um telefone com DDI+DDD+Número. Ex.: 55 11 9 8888‑7777', false, 3200);
+      toast('Informe um telefone com DDI+DDD+Número. Ex.: 55 11 9 8888-7777', false, 3200);
       return null;
     }
 

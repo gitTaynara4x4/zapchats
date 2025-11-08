@@ -86,7 +86,7 @@
             <i class="fa fa-user-check"></i> Definir responsável
           </button>
 
-          <!-- NOVO: Definir departamento -->
+          <!-- Definir departamento -->
           <button id="btnDeptoBulk" class="btn ghost" disabled title="Definir departamento nos selecionados">
             <i class="fa fa-sitemap"></i> Definir departamento
           </button>
@@ -240,153 +240,206 @@
     </section>
   </div>
 
-  <!-- Modal "Novo cliente" — FECHADO POR PADRÃO -->
+  <!-- Modal "Novo cliente" — médio + seções dobráveis -->
   <div id="novo-backdrop" class="modal-backdrop" aria-hidden="true">
     <section class="modal" role="dialog" aria-modal="true" aria-labelledby="novo-title">
       <header id="novo-title">Novo cliente</header>
+
       <div class="body">
-        <!-- DADOS BÁSICOS (usados em NOVO e também em VER/EDITAR) -->
-        <div class="row">
-          <label for="novoNome">Nome</label>
-          <input id="novoNome" class="input" type="text" placeholder="Ex.: Maria Souza" autocomplete="name">
-        </div>
+        <div class="cli-sections">
 
-        <div class="row">
-          <label for="novoTel">Telefone <span class="req">*</span></label>
-          <input id="novoTel" class="input" type="tel" placeholder="(11) 9 9999-9999" autocomplete="tel" required>
-        </div>
+          <!-- SEÇÃO 1 – DADOS PRINCIPAIS (AGORA FECHADA POR PADRÃO) -->
+          <section class="cli-section">
+            <button type="button" class="cli-section-header cli-section-toggle">
+              <span>Dados principais</span>
+              <i class="fa fa-chevron-down cli-section-icon" aria-hidden="true"></i>
+            </button>
+            <div class="cli-section-body">
+              <div class="row">
+                <label for="novoNome">Nome</label>
+                <input id="novoNome" class="input" type="text" placeholder="Ex.: Maria Souza" autocomplete="name">
+              </div>
 
-        <div class="row">
-          <label for="novoDepto">Departamento</label>
-          <input id="novoDepto" class="input" type="text" placeholder="Ex.: Comercial" list="novoDeptoList" autocomplete="off">
-          <datalist id="novoDeptoList"></datalist>
-        </div>
+              <div class="row">
+                <label for="novoTel">Telefone <span class="req">*</span></label>
+                <input id="novoTel" class="input" type="tel" placeholder="(11) 9 9999-9999" autocomplete="tel" required>
+              </div>
 
-        <div class="row">
-          <label for="novoColab">Responsável</label>
-          <select id="novoColab" class="select"></select>
-        </div>
+              <div class="row">
+                <label for="novoDepto">Departamento</label>
+                <input id="novoDepto" class="input" type="text" placeholder="Ex.: Comercial" list="novoDeptoList" autocomplete="off">
+                <datalist id="novoDeptoList"></datalist>
+              </div>
 
-        <div class="row">
-          <label for="novoSobre">Sobre o cliente</label>
-          <textarea id="novoSobre" class="input" rows="3" placeholder="Observações importantes, preferências, etc."></textarea>
-        </div>
+              <div class="row">
+                <label for="novoColab">Responsável</label>
+                <select id="novoColab" class="select"></select>
+              </div>
 
-        <hr style="margin:1rem 0; border:none; border-top:1px solid var(--border-color,#ddd)">
+              <div class="row">
+                <label for="novoSobre">Sobre o cliente</label>
+                <textarea id="novoSobre" class="input" rows="3" placeholder="Observações importantes, preferências, etc."></textarea>
+              </div>
+            </div>
+          </section>
 
-        <!-- CAMPOS EXTRAS – VER / EDITAR -->
+          <!-- SEÇÃO 2 – DOCUMENTOS / CONTATO -->
+          <section class="cli-section">
+            <button type="button" class="cli-section-header cli-section-toggle">
+              <span>Documentos e contato</span>
+              <i class="fa fa-chevron-down cli-section-icon" aria-hidden="true"></i>
+            </button>
+            <div class="cli-section-body">
+              <div class="row">
+                <label for="cliNomeCompleto">Nome completo</label>
+                <input id="cliNomeCompleto" class="input" type="text" placeholder="Nome completo do cliente">
+              </div>
 
-        <div class="row">
-          <label for="cliNomeCompleto">Nome completo</label>
-          <input id="cliNomeCompleto" class="input" type="text" placeholder="Nome completo do cliente">
-        </div>
+              <div class="row">
+                <label for="cliCpfCnpj">CPF/CNPJ</label>
+                <input id="cliCpfCnpj" class="input" type="text" placeholder="Somente números">
+              </div>
 
-        <div class="row">
-          <label for="cliCpfCnpj">CPF/CNPJ</label>
-          <input id="cliCpfCnpj" class="input" type="text" placeholder="Somente números">
-        </div>
+              <div class="row">
+                <label for="cliRg">RG</label>
+                <input id="cliRg" class="input" type="text" placeholder="RG">
+              </div>
 
-        <div class="row">
-          <label for="cliRg">RG</label>
-          <input id="cliRg" class="input" type="text" placeholder="RG">
-        </div>
+              <div class="row">
+                <label for="cliEmail">E-mail</label>
+                <input id="cliEmail" class="input" type="email" placeholder="email@exemplo.com">
+              </div>
 
-        <div class="row">
-          <label for="cliEmail">E-mail</label>
-          <input id="cliEmail" class="input" type="email" placeholder="email@exemplo.com">
-        </div>
+              <div class="row">
+                <label for="cliWebsite">Website</label>
+                <input id="cliWebsite" class="input" type="url" placeholder="https://...">
+              </div>
+            </div>
+          </section>
 
-        <div class="row">
-          <label for="cliWebsite">Website</label>
-          <input id="cliWebsite" class="input" type="url" placeholder="https://...">
-        </div>
+          <!-- SEÇÃO 3 – WHATSAPP -->
+          <section class="cli-section">
+            <button type="button" class="cli-section-header cli-section-toggle">
+              <span>WhatsApp</span>
+              <i class="fa fa-chevron-down cli-section-icon" aria-hidden="true"></i>
+            </button>
+            <div class="cli-section-body">
+              <div class="row">
+                <label for="cliNomeWhatsapp">Nome no WhatsApp</label>
+                <input id="cliNomeWhatsapp" class="input" type="text" placeholder="Nome que aparece no WhatsApp">
+              </div>
 
-        <div class="row">
-          <label for="cliNomeWhatsapp">Nome no WhatsApp</label>
-          <input id="cliNomeWhatsapp" class="input" type="text" placeholder="Nome que aparece no WhatsApp">
-        </div>
+              <div class="row">
+                <label for="cliStatusWhatsapp">Status no WhatsApp</label>
+                <input id="cliStatusWhatsapp" class="input" type="text" placeholder="Ex.: Disponível, Em atendimento, etc.">
+              </div>
 
-        <div class="row">
-          <label for="cliStatusWhatsapp">Status no WhatsApp</label>
-          <input id="cliStatusWhatsapp" class="input" type="text" placeholder="Ex.: Disponível, Em atendimento, etc.">
-        </div>
+              <div class="row">
+                <label for="cliDescricao">Descrição / observações gerais</label>
+                <textarea id="cliDescricao" class="input" rows="3" placeholder="Descrição mais longa, notas internas, etc."></textarea>
+              </div>
+            </div>
+          </section>
 
-        <div class="row">
-          <label for="cliDescricao">Descrição / Observações gerais</label>
-          <textarea id="cliDescricao" class="input" rows="3" placeholder="Descrição mais longa, notas internas, etc."></textarea>
-        </div>
+          <!-- SEÇÃO 4 – ENDEREÇO -->
+          <section class="cli-section">
+            <button type="button" class="cli-section-header cli-section-toggle">
+              <span>Endereço</span>
+              <i class="fa fa-chevron-down cli-section-icon" aria-hidden="true"></i>
+            </button>
+            <div class="cli-section-body">
+              <div class="row">
+                <label for="cliCep">CEP</label>
+                <input id="cliCep" class="input" type="text" placeholder="Somente números">
+              </div>
 
-        <!-- ENDEREÇO -->
-        <div class="row">
-          <label for="cliCep">CEP</label>
-          <input id="cliCep" class="input" type="text" placeholder="Somente números">
-        </div>
+              <div class="row">
+                <label for="cliEndereco">Endereço</label>
+                <input id="cliEndereco" class="input" type="text" placeholder="Rua, avenida, etc.">
+              </div>
 
-        <div class="row">
-          <label for="cliEndereco">Endereço</label>
-          <input id="cliEndereco" class="input" type="text" placeholder="Rua, avenida, etc.">
-        </div>
+              <div class="row">
+                <label for="cliNumero">Número</label>
+                <input id="cliNumero" class="input" type="text" placeholder="Número">
+              </div>
 
-        <div class="row">
-          <label for="cliNumero">Número</label>
-          <input id="cliNumero" class="input" type="text" placeholder="Número">
-        </div>
+              <div class="row">
+                <label for="cliComplemento">Complemento</label>
+                <input id="cliComplemento" class="input" type="text" placeholder="Apto, bloco, sala, etc.">
+              </div>
 
-        <div class="row">
-          <label for="cliComplemento">Complemento</label>
-          <input id="cliComplemento" class="input" type="text" placeholder="Apto, bloco, sala, etc.">
-        </div>
+              <div class="row">
+                <label for="cliBairro">Bairro</label>
+                <input id="cliBairro" class="input" type="text" placeholder="Bairro">
+              </div>
 
-        <div class="row">
-          <label for="cliBairro">Bairro</label>
-          <input id="cliBairro" class="input" type="text" placeholder="Bairro">
-        </div>
+              <div class="row">
+                <label for="cliCidade">Cidade</label>
+                <input id="cliCidade" class="input" type="text" placeholder="Cidade">
+              </div>
 
-        <div class="row">
-          <label for="cliCidade">Cidade</label>
-          <input id="cliCidade" class="input" type="text" placeholder="Cidade">
-        </div>
+              <div class="row">
+                <label for="cliEstado">Estado</label>
+                <input id="cliEstado" class="input" type="text" placeholder="UF">
+              </div>
+            </div>
+          </section>
 
-        <div class="row">
-          <label for="cliEstado">Estado</label>
-          <input id="cliEstado" class="input" type="text" placeholder="UF">
-        </div>
+          <!-- SEÇÃO 5 – DADOS PESSOAIS -->
+          <section class="cli-section">
+            <button type="button" class="cli-section-header cli-section-toggle">
+              <span>Dados pessoais</span>
+              <i class="fa fa-chevron-down cli-section-icon" aria-hidden="true"></i>
+            </button>
+            <div class="cli-section-body">
+              <div class="row">
+                <label for="cliGenero">Gênero</label>
+                <input id="cliGenero" class="input" type="text" placeholder="Ex.: Masculino, Feminino, Outro...">
+              </div>
 
-        <!-- DADOS PESSOAIS -->
-        <div class="row">
-          <label for="cliGenero">Gênero</label>
-          <input id="cliGenero" class="input" type="text" placeholder="Ex.: Masculino, Feminino, Outro...">
-        </div>
+              <div class="row">
+                <label for="cliDataNascimento">Data de nascimento</label>
+                <input id="cliDataNascimento" class="input" type="date">
+              </div>
 
-        <div class="row">
-          <label for="cliDataNascimento">Data de nascimento</label>
-          <input id="cliDataNascimento" class="input" type="date">
-        </div>
+              <div class="row check-row">
+                <label class="check" for="cliIsBusiness">
+                  <input type="checkbox" id="cliIsBusiness">
+                  <span>Conta comercial / empresa</span>
+                </label>
+              </div>
+            </div>
+          </section>
 
-        <div class="row check-row">
-          <label class="check" for="cliIsBusiness">
-            <input type="checkbox" id="cliIsBusiness">
-            <span>Conta comercial / empresa</span>
-          </label>
-        </div>
+          <!-- SEÇÃO 6 – INFORMAÇÕES DO SISTEMA -->
+          <section class="cli-section">
+            <button type="button" class="cli-section-header cli-section-toggle">
+              <span>Informações do sistema</span>
+              <i class="fa fa-chevron-down cli-section-icon" aria-hidden="true"></i>
+            </button>
+            <div class="cli-section-body">
+              <div class="row">
+                <label for="cliId">ID do cliente</label>
+                <input id="cliId" class="input" type="text" readonly>
+              </div>
 
-        <!-- INFO DE SISTEMA (somente visual) -->
-        <div class="row">
-          <label for="cliId">ID do cliente</label>
-          <input id="cliId" class="input" type="text" readonly>
-        </div>
+              <div class="row">
+                <label for="cliDataCadastro">Data de cadastro</label>
+                <input id="cliDataCadastro" class="input" type="text" readonly>
+              </div>
+            </div>
+          </section>
 
-        <div class="row">
-          <label for="cliDataCadastro">Data de cadastro</label>
-          <input id="cliDataCadastro" class="input" type="text" readonly>
         </div>
       </div>
+
       <footer>
         <!-- Em "Novo" este botão é usado pelo clientes.js.
              Em "Ver/Editar" o cliente-editar.js esconde ele e cria botões próprios. -->
         <button class="btn ghost" id="novoCancel">Fechar</button>
         <button class="btn" id="novoOk"><i class="fa fa-floppy-disk"></i> Criar</button>
       </footer>
+
       <button class="modal-close" id="novoClose" aria-label="Fechar">&times;</button>
     </section>
   </div>

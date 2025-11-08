@@ -6,7 +6,7 @@
   const $$ = (s, r=document) => r.querySelectorAll(s);
 
   // Pequeno helper para fetch com cookies e erro claro
-  async function jfetch(url, opts={}){
+  async function jfetch(url, opts={}) {
     const res = await fetch(url, { credentials:'include', ...opts });
     if (!res.ok){
       const txt = await res.text().catch(()=> '');
@@ -21,8 +21,14 @@
     if (!iso) return '—';
     try{
       const d = new Date(iso);
-      return d.toLocaleString('pt-BR', { timeZone: tz, day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
-    }catch{ return iso; }
+      return d.toLocaleString('pt-BR', {
+        timeZone: tz,
+        day:'2-digit', month:'2-digit',
+        hour:'2-digit', minute:'2-digit'
+      });
+    }catch{
+      return iso;
+    }
   }
 
   // ========= Estado =========
@@ -57,11 +63,16 @@
 
   // ========= Acc Menu toggle =========
   function toggleAccMenu(show){
-    const visible = show ?? (accMenu.getAttribute('aria-hidden') === 'true');
+    const visible = (show !== undefined)
+      ? show
+      : (accMenu.getAttribute('aria-hidden') === 'true');
+
     accMenu.setAttribute('aria-hidden', visible ? 'false' : 'true');
     accTrigger.setAttribute('aria-expanded', visible ? 'true' : 'false');
   }
+
   accTrigger.addEventListener('click', () => toggleAccMenu());
+
   document.addEventListener('click', (e)=>{
     if (!accMenu.contains(e.target) && !accTrigger.contains(e.target)){
       accMenu.setAttribute('aria-hidden','true');
@@ -78,7 +89,8 @@
       topMeta.textContent = '—';
       return;
     }
-    accounts.forEach(acc=>{
+
+    accounts.forEach(acc => {
       const li = document.createElement('li');
       li.innerHTML = `
         <button class="inst-item" role="option"
@@ -87,16 +99,19 @@
           <span class="radio" aria-hidden="true"></span>
           <div style="display:flex;flex-direction:column;gap:.1rem">
             <strong>${acc.email_address}</strong>
-            <span style="color:var(--muted);font-size:.85rem">${acc.provider} • ${acc.status}</span>
+            <span style="color:var(--muted);font-size:.85rem">
+              ${acc.provider || 'email'} • ${acc.status || 'active'}
+            </span>
           </div>
         </button>
       `;
-      li.querySelector('button').addEventListener('click', ()=>{
+      const btn = li.querySelector('button');
+      btn.addEventListener('click', () => {
         currentAccountId = acc.id;
         accLabel.textContent = acc.email_address;
         // atualizar seleção visual
         $$('.inst-item', accList).forEach(b=>b.setAttribute('aria-selected','false'));
-        li.querySelector('button').setAttribute('aria-selected','true');
+        btn.setAttribute('aria-selected','true');
         // reset e carregar
         offset = 0; total = 0;
         tbody.innerHTML = '';
@@ -106,7 +121,7 @@
       accList.appendChild(li);
     });
 
-    // Se ainda não há seleção, pegar a primeira ativa
+    // Se ainda não há seleção, pegar a primeira
     if (!currentAccountId && accounts[0]){
       currentAccountId = accounts[0].id;
       accLabel.textContent = accounts[0].email_address;
@@ -122,11 +137,21 @@
       tr.innerHTML = `
         <td>${m.has_attachments ? '📎' : ''}</td>
         <td style="max-width:520px">
-          <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.subject||'(sem assunto)'}</div>
-          <div style="color:var(--muted);font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.snippet||''}</div>
+          <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+            ${m.subject || '(sem assunto)'}
+          </div>
+          <div style="color:var(--muted);font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+            ${m.snippet || ''}
+          </div>
         </td>
-        <td style="white-space:nowrap">${m.from_addr||'—'}</td>
-        <td style="white-space:nowrap">${Array.isArray(m.to_addrs)? m.to_addrs.join(', ') : (m.to_addrs||'—')}</td>
+        <td style="white-space:nowrap">${m.from_addr || '—'}</td>
+        <td style="white-space:nowrap">
+          ${
+            Array.isArray(m.to_addrs)
+              ? m.to_addrs.join(', ')
+              : (m.to_addrs || '—')
+          }
+        </td>
         <td style="white-space:nowrap">${fmtWhen(m.received_at)}</td>
         <td style="white-space:nowrap;text-align:center">${m.has_attachments ? 'Sim' : 'Não'}</td>
       `;
@@ -142,9 +167,20 @@
       PageLoading.show?.();
       const data = await jfetch(`/api/email/messages/${id}`);
       dlgSubject.textContent = data.subject || '(sem assunto)';
-      dlgMeta.textContent = `${data.from_addr||'—'} → ${Array.isArray(data.to_addrs)? data.to_addrs.join(', ') : (data.to_addrs||'—')} • ${fmtWhen(data.received_at)}`;
-      // Mostra HTML se tiver; senão texto
-      dlgBody.innerHTML = data.body_html || `<pre style="white-space:pre-wrap">${(data.body_text||'').replace(/[<>&]/g,s=>({ '<':'&lt;','>':'&gt;','&':'&amp;' }[s]))}</pre>`;
+      const toStr = Array.isArray(data.to_addrs)
+        ? data.to_addrs.join(', ')
+        : (data.to_addrs || '—');
+      dlgMeta.textContent = `${data.from_addr || '—'} → ${toStr} • ${fmtWhen(data.received_at)}`;
+
+      // Mostra HTML se tiver; senão texto puro escapado
+      if (data.body_html){
+        dlgBody.innerHTML = data.body_html;
+      } else {
+        const txt = (data.body_text || '')
+          .replace(/[<>&]/g, s => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[s]));
+        dlgBody.innerHTML = `<pre style="white-space:pre-wrap">${txt}</pre>`;
+      }
+
       dlg.showModal();
     }catch(err){
       console.error(err);
@@ -159,8 +195,13 @@
     if (loading || !currentAccountId) return;
     loading = true;
     try{
-      if (reset){ offset = 0; total = 0; tbody.innerHTML = ''; }
+      if (reset){
+        offset = 0;
+        total  = 0;
+        tbody.innerHTML = '';
+      }
       PageLoading.show?.();
+
       const params = new URLSearchParams({
         limit: String(limit),
         offset: String(offset),
@@ -168,14 +209,34 @@
         status: status || '',
         account_id: String(currentAccountId)
       });
+
       const resp = await jfetch(`/api/email/messages?${params.toString()}`);
-      const { items=[], total_count=0 } = resp || {};
+
+      // Compatível com:
+      //  - backend retornando só array
+      //  - backend retornando { items, total_count }
+      let items = [];
+      let total_count = 0;
+
+      if (Array.isArray(resp)){
+        items = resp;
+        // Se o backend antigo não manda total, chuta usando offset
+        total_count = offset + items.length;
+      } else if (resp && typeof resp === 'object'){
+        items       = resp.items || [];
+        total_count = (typeof resp.total_count === 'number')
+          ? resp.total_count
+          : items.length;
+      }
+
       total = total_count;
       renderRows(items);
       offset += items.length;
+
       countInfo.textContent = `${offset} / ${total}`;
-      topMeta.textContent = `${total} mensagens`;
-      btnLoadMore.disabled = offset >= total;
+      topMeta.textContent   = `${total} mensagens`;
+      btnLoadMore.disabled  = offset >= total;
+
     }catch(err){
       console.error(err);
       alert('Falha ao carregar mensagens.');
@@ -190,33 +251,56 @@
   // ========= Eventos de filtro =========
   qInput.addEventListener('keydown', (e)=> {
     if (e.key === 'Enter'){
-      q = qInput.value.trim(); offset = 0; loadMessages(true);
+      q = qInput.value.trim();
+      offset = 0;
+      loadMessages(true);
     }
   });
+
   statusSel.addEventListener('change', ()=>{
-    status = statusSel.value; offset = 0; loadMessages(true);
+    status = statusSel.value;
+    offset = 0;
+    loadMessages(true);
   });
+
   btnReload.addEventListener('click', ()=> loadMessages(true));
+
   btnClear.addEventListener('click', ()=>{
     q = ''; status = '';
-    qInput.value=''; statusSel.value='';
-    offset = 0; loadMessages(true);
+    qInput.value = '';
+    statusSel.value = '';
+    offset = 0;
+    loadMessages(true);
   });
+
   btnLoadMore.addEventListener('click', ()=> loadMessages(false));
 
   // ========= Boot =========
   (async function init(){
     try{
       PageLoading.show?.();
+
       // 1) Carrega contas conectadas
       const resp = await jfetch('/api/email/accounts');
-      accounts = resp?.items || [];
+
+      // Compatível com:
+      //  - backend retornando [ ... ]
+      //  - backend retornando { items: [ ... ] }
+      if (Array.isArray(resp)){
+        accounts = resp;
+      } else if (resp && typeof resp === 'object'){
+        accounts = resp.items || [];
+      } else {
+        accounts = [];
+      }
+
       renderAccounts();
+
       // 2) Se nenhuma contou, deixa a UI informativa
       if (!accounts.length){
         btnLoadMore.disabled = true;
         countInfo.textContent = '0 itens';
-        topMeta.textContent = 'Nenhuma conta';
+        topMeta.textContent   = 'Nenhuma conta';
       }
     }catch(err){
       console.error(err);
