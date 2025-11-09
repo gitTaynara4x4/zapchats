@@ -224,6 +224,7 @@ tbody tr.drop-target{outline:2px dashed var(--ring);outline-offset:-2px}
   background:rgba(0,0,0,.55);
   padding:18px;
   backdrop-filter:blur(2px);
+  box-sizing:border-box;
 }
 .modal-back.open,
 .modal-back[style*="display: block"]{
@@ -446,11 +447,7 @@ tbody tr.drop-target{outline:2px dashed var(--ring);outline-offset:-2px}
 #whats-panel.open .dd-item{
   opacity:0;
   transform:translateY(-4px);
-
-  /* duração maior da animação de cada item */
   animation:dd-item-down .45s ease-out forwards;
-
-  /* delay maior entre um item e outro */
   animation-delay:calc(var(--i,0) * 120ms);
 }
 @keyframes dd-item-down{
@@ -841,16 +838,17 @@ tbody tr.drop-target{outline:2px dashed var(--ring);outline-offset:-2px}
   .tree-wrap{overflow:visible!important}
   table{min-width:0!important;table-layout:fixed;width:100%}
   th,td{padding:.7rem .6rem}
+
+  /* 🔧 Esconde só ID, depto superior e ações – mantém instâncias visíveis */
   thead th:nth-child(1),
   tbody td:nth-child(1),
   thead th:nth-child(4),
   tbody td:nth-child(4),
-  thead th:nth-child(5),
-  tbody td:nth-child(5),
   thead th:nth-child(6),
   tbody td:nth-child(6){
     display:none!important;
   }
+
   td:nth-child(2) .label{
     display:block;
     white-space:nowrap;
@@ -1142,6 +1140,14 @@ body.compact-deptos .node-card.is-root{max-width:260px;}
   }
   .tree-table td:nth-child(3)::before{
     content:"Caminho";
+    display:block;
+    font-weight:700;
+    opacity:.65;
+    margin-bottom:.15rem;
+  }
+  /* 🔧 Label para coluna de instâncias no card (mobile) */
+  .tree-table td:nth-child(5)::before{
+    content:"WhatsApps";
     display:block;
     font-weight:700;
     opacity:.65;

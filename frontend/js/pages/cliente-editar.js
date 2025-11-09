@@ -151,6 +151,26 @@
   }
 
   // ==============================
+  // Acordeon das seções do cliente
+  // ==============================
+  function resetSectionsCollapsed(){
+    if (!novoModal) return;
+    const secs = novoModal.querySelectorAll('.cli-section');
+    secs.forEach(sec => sec.classList.remove('is-open'));
+  }
+
+  function bindCliSectionsAccordion(){
+    if (!novoModal) return;
+    novoModal.addEventListener('click', (e) => {
+      const btn = e.target.closest('.cli-section-toggle');
+      if (!btn) return;
+      const sec = btn.closest('.cli-section');
+      if (!sec) return;
+      sec.classList.toggle('is-open');
+    });
+  }
+
+  // ==============================
   // Carregamento de Setores/Responsáveis
   // ==============================
   async function loadSetores(){
@@ -408,6 +428,7 @@
 
       clienteModalId = Number(id);
       resetClienteForm();
+      resetSectionsCollapsed();
       fillClienteForm(cli);
       setFormDisabled(true);
       setModalTitle('Detalhes do cliente');
@@ -448,6 +469,7 @@
 
       clienteModalId = Number(id);
       resetClienteForm();
+      resetSectionsCollapsed();
       fillClienteForm(cli);
       setFormDisabled(false);
       setModalTitle('Editar cliente');
@@ -478,6 +500,25 @@
       console.error(e);
       toast('Não foi possível abrir para edição.','err');
     }
+  }
+
+  // ====== CAMPOS PERSONALIZADOS (atalho) ======
+  async function openClienteCustomFields(id){
+    if (!novoModal){ toast('Modal não encontrado.', 'err'); return; }
+
+    // Abre em modo edição normal
+    await openClienteEdit(id);
+
+    // Troca o título do modal
+    setModalTitle('Campos personalizados');
+
+    // Garante todas as seções fechadas; usuário abre clicando no título
+    resetSectionsCollapsed();
+
+    // Opcional: foca no título da 2ª seção (Documentos e contato), se existir
+    const headers = novoModal.querySelectorAll('.cli-section-header');
+    if (headers[1]) safeFocus(headers[1]);
+    else if (headers[0]) safeFocus(headers[0]);
   }
 
   // ==============================
@@ -714,18 +755,20 @@
   }
 
   // ==============================
-  // Wiring básico do modal (fechar)
+  // Wiring básico do modal (fechar) + acordeon
   // ==============================
   novoCancel?.addEventListener?.('click', closeEditorModal);
   novoClose?.addEventListener?.('click',  closeEditorModal);
+  bindCliSectionsAccordion();
 
   // ==============================
   // Exports globais (usados em clientes.js)
   // ==============================
   const api = Object.freeze({
-    openView:    openClienteView,
-    openEdit:    openClienteEdit,
-    openMessage: openClienteMensagem
+    openView:         openClienteView,
+    openEdit:         openClienteEdit,
+    openMessage:      openClienteMensagem,
+    openCustomFields: openClienteCustomFields
   });
 
   window.ClienteEditor = api;  // nome usado em clientes.js (ensureClienteEditorLoaded)

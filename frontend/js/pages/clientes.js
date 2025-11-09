@@ -458,13 +458,17 @@
       <td data-th="Responsável" class="td-colab">${escapeHtml(resp)}</td>
       <td data-th="Data Cadastro">${escapeHtml(dt || '-')}</td>
       <td data-th="Ações" class="td-actions">
-        <button class="btn secondary" data-action="view" data-id="${c.id}"><i class="fa fa-eye"></i> Ver</button>
-        <button class="btn secondary" data-action="edit" data-id="${c.id}"><i class="fa fa-pen"></i> Editar</button>
-        <button class="btn secondary" data-action="msg"  data-id="${c.id}"><i class="fa fa-paper-plane"></i> Mensagem</button>
+        <button class="btn secondary" data-action="custom" data-id="${c.id}">
+          <i class="fa fa-list"></i> Campos personalizados
+        </button>
+        <button class="btn secondary" data-action="msg" data-id="${c.id}">
+          <i class="fa fa-paper-plane"></i> Mensagem
+        </button>
       </td>
     `.trim();
     return tr;
   }
+
 
   function clearList(){ tbody.innerHTML = ''; }
 
@@ -864,6 +868,7 @@
     impOk?.addEventListener('click', ()=>{ closeModal(impModal); toast('Importando…'); });
 
     // ===== Ações da tabela — delega para ClienteEditor
+    // ===== Ações da tabela — delega para ClienteEditor
     document.addEventListener('click', async (e)=>{
       const b = e.target.closest?.('[data-action]');
       if (!b) return;
@@ -877,20 +882,34 @@
       }
 
       const cli = getClienteFromState(id);
+      const action = b.dataset.action;
 
-      if (b.dataset.action === 'view'){
+      // Novo: botão "Campos personalizados"
+      if (action === 'custom'){
+        if (window.ClienteEditor.openCustomFields){
+          window.ClienteEditor.openCustomFields(id, cli);
+        }else{
+          // fallback caso não exista ainda
+          window.ClienteEditor.openEdit?.(id, cli);
+        }
+        return;
+      }
+
+      // Compatibilidade com ações antigas (se ainda existirem em algum lugar)
+      if (action === 'view'){
         window.ClienteEditor.openView?.(id, cli);
         return;
       }
-      if (b.dataset.action === 'edit'){
+      if (action === 'edit'){
         window.ClienteEditor.openEdit?.(id, cli);
         return;
       }
-      if (b.dataset.action === 'msg'){
+      if (action === 'msg'){
         window.ClienteEditor.openMessage?.(id) ?? (location.href = `/frontend/atendimentos.html?cliente_id=${id}`);
         return;
       }
     });
+
 
     // showPicker chips
     if (HAS_SHOWPICKER) {

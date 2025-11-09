@@ -40,8 +40,10 @@ function isConnectedPayload(m){
 // Fail-safe do "prepaint"
 window.addEventListener('load', () => {
   const html = document.documentElement;
-  if (html.classList.contains('prepaint')
-      && !(html.hasAttribute('data-head-ready') && html.hasAttribute('data-loader-ready'))) {
+  if (
+    html.classList.contains('prepaint') &&
+    !(html.hasAttribute('data-head-ready') && html.hasAttribute('data-loader-ready'))
+  ) {
     html.classList.remove('prepaint');
   }
 });
@@ -58,7 +60,8 @@ async function apiGet(url){
   const r = await fetch(url, { headers: { ...authHeaders }, credentials:'include' });
   const ct = (r.headers.get('content-type') || '').toLowerCase();
   if (!ct.includes('application/json')) {
-    const t = await r.text(); throw new Error(`GET ${url} → ${r.status}: ${t.slice(0,150)}`);
+    const t = await r.text();
+    throw new Error(`GET ${url} → ${r.status}: ${t.slice(0,150)}`);
   }
   if (!r.ok) throw new Error(`GET ${url} → ${r.status}`);
   return r.json();
@@ -72,7 +75,9 @@ async function apiPost(url, body){
   });
   const ct = (r.headers.get('content-type') || '').toLowerCase();
   const js = ct.includes('application/json') ? await r.json() : {};
-  if (!r.ok || js?.ok === false) throw new Error(js?.detail || js?.message || `POST ${url} → ${r.status}`);
+  if (!r.ok || js?.ok === false) {
+    throw new Error(js?.detail || js?.message || `POST ${url} → ${r.status}`);
+  }
   return js;
 }
 async function apiDelete(url){
@@ -98,7 +103,7 @@ const els = {
   table:       $('#lista-zap'),
   tbody:       $('#lista-zap tbody'),
   btnAdd:      $('#btn-open-modal'),
-  countPro:    $('#count-pro'),   // <<< topo OURO N/N
+  countPro:    $('#count-pro'),   // topo “OURO 1/3”
 
   modal:       $('#modal'),
   btnCloseMd:  $('#btn-close-modal'),
@@ -126,14 +131,18 @@ const els = {
   btnRemNo:      $('#btn-cancelar-remover'),
   remConsent:    $('#rem-consent'),
 };
+
 const modalPanel = $('#modal .modal-panel, #modal .modal-card, #modal .card, #modal > div');
 const modalTitle = $('#modal [data-modal-title], #modal .modal-title, #modal h3, #modal h2');
+
 const setModalTitle = (t) => { if (modalTitle) modalTitle.textContent = t; };
+
 function showModal(){
   if (!els.modal) return;
   els.modal.classList.remove('hidden');
   if (modalPanel){
-    modalPanel.classList.remove('anim-out'); void modalPanel.offsetWidth;
+    modalPanel.classList.remove('anim-out');
+    void modalPanel.offsetWidth;
     modalPanel.classList.add('anim-in');
     setTimeout(()=>modalPanel.classList.remove('anim-in'), 180);
   }
@@ -141,8 +150,12 @@ function showModal(){
 function hideModal(){
   if (!els.modal) return;
   if (modalPanel){
-    modalPanel.classList.remove('anim-in'); modalPanel.classList.add('anim-out');
-    setTimeout(()=>{ els.modal.classList.add('hidden'); modalPanel.classList.remove('anim-out'); }, 160);
+    modalPanel.classList.remove('anim-in');
+    modalPanel.classList.add('anim-out');
+    setTimeout(()=>{
+      els.modal.classList.add('hidden');
+      modalPanel.classList.remove('anim-out');
+    }, 160);
   } else {
     els.modal.classList.add('hidden');
   }
@@ -151,7 +164,9 @@ function hideModal(){
 // ===== Lottie =====
 function loadLottie(){
   return new Promise((resolve) => {
-    if (window.lottie && window.lottie.loadAnimation) return resolve(window.lottie);
+    if (window.lottie && window.lottie.loadAnimation) {
+      return resolve(window.lottie);
+    }
     const sc = document.createElement('script');
     sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js';
     sc.async = true;
@@ -172,7 +187,9 @@ function ensureOverlay(){
   ovl.innerHTML = `
     <div class="sync-wrap" role="dialog" aria-live="polite">
       <div id="prep-ovl-lottie"></div>
-      <div id="prep-ovl-status" class="think">Sincronizando seus contatos<span class="typing" aria-hidden="true"><span></span><span></span><span></span></span></div>
+      <div id="prep-ovl-status" class="think">
+        Sincronizando seus contatos<span class="typing" aria-hidden="true"><span></span><span></span><span></span></span>
+      </div>
       <div id="prep-ovl-title">Estamos organizando tudo para você.</div>
       <div id="prep-ovl-sub">Esta ação pode demorar um pouco.</div>
       <div id="prep-ovl-time"><span class="time-pill">01:00</span></div>
@@ -186,6 +203,7 @@ function formatClock(s){
   const ss = String(s%60).padStart(2,'0');
   return `${mm}:${ss}`;
 }
+
 // monta o texto + “pontinhos” animados (estilo ChatGPT)
 function statusHTML(txt){
   return `${htmlEscape(txt)}<span class="typing" aria-hidden="true"><span></span><span></span><span></span></span>`;
@@ -194,7 +212,8 @@ function setStatus(txt, fade=true){
   const el = $('#prep-ovl-status');
   if (!el) return;
   el.innerHTML = statusHTML(txt);
-  el.classList.remove('fade'); void el.offsetWidth;
+  el.classList.remove('fade');
+  void el.offsetWidth;
   if (fade) el.classList.add('fade');
 }
 function pickSequence(historico){
@@ -217,7 +236,6 @@ function startStatusLoop(){
   // ritmo mais lento (≈4s)
   prep.seqTmr = setInterval(() => {
     prep.seqIdx = (prep.seqIdx + 1) % items.length;
-    setStatus(prep.seqIdx, true);
     setStatus(items[prep.seqIdx], true);
   }, 4000);
 }
@@ -242,7 +260,11 @@ async function showPrepOverlayOneMinute(seconds=60, opts={}){
     if (lottie && slot) {
       const data = await fetch(PREP_LOTTIE_URL, { cache:'no-store' }).then(r => r.json());
       prep.anim = lottie.loadAnimation({
-        container: slot, renderer: 'svg', loop: true, autoplay: true, animationData: data
+        container: slot,
+        renderer: 'svg',
+        loop: true,
+        autoplay: true,
+        animationData: data
       });
     }
   } catch {}
@@ -256,44 +278,90 @@ async function showPrepOverlayOneMinute(seconds=60, opts={}){
   clearInterval(prep.tmr);
   prep.tmr = setInterval(() => {
     prep.left -= 1;
-    if (prep.left <= 0) { hidePrepOverlay(); }
-    else { paintTime(); }
+    if (prep.left <= 0) {
+      hidePrepOverlay();
+    } else {
+      paintTime();
+    }
   }, 1000);
 }
 function hidePrepOverlay(){
   const ovl = ensureOverlay();
   prep.active = false;
-  clearInterval(prep.tmr); prep.tmr = null;
-  clearInterval(prep.seqTmr); prep.seqTmr = null;
+  clearInterval(prep.tmr);     prep.tmr = null;
+  clearInterval(prep.seqTmr);  prep.seqTmr = null;
   try { prep.anim?.destroy?.(); } catch {}
   prep.anim = null;
   ovl.classList.remove('show');
   document.body.style.overflow = '';
 }
 
-// ===== CSS =====
+// ===== CSS injetado (overlay + menus) =====
 (function injectCSS(){
   const css = `
-  /* Lista/UX */
   .hidden{ display:none !important; }
-  .kebab-btn{ border:1px solid #e5e7eb; border-radius:8px; padding:6px 10px; background:#fff; display:inline-flex; align-items:center; justify-content:center; }
-  html.dark .kebab-btn{ background:#161617; border-color:#27272a; color:#e5e7eb; }
-  .kebab-menu{ position:absolute; right:0; margin-top:8px; background:#fff; border:1px solid #e5e7eb; border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,.15); min-width:180px; z-index:50; display:none; }
+
+  .kebab-btn{
+    border:1px solid #e5e7eb;
+    border-radius:8px;
+    padding:6px 10px;
+    background:#fff;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+  }
+  html.dark .kebab-btn{
+    background:#161617;
+    border-color:#27272a;
+    color:#e5e7eb;
+  }
+  .kebab-menu{
+    position:absolute;
+    right:0;
+    margin-top:8px;
+    background:#fff;
+    border:1px solid #e5e7eb;
+    border-radius:10px;
+    box-shadow:0 10px 30px rgba(0,0,0,.15);
+    min-width:180px;
+    z-index:50;
+    display:none;
+  }
   .kebab-menu.show{ display:block; }
-  html.dark .kebab-menu{ background:#161617; border-color:#27272a; }
-  .kebab-item{ display:block; width:100%; text-align:left; padding:10px 12px; background:transparent; border:0; font-size:14px; }
+  html.dark .kebab-menu{
+    background:#161617;
+    border-color:#27272a;
+  }
+  .kebab-item{
+    display:block;
+    width:100%;
+    text-align:left;
+    padding:10px 12px;
+    background:transparent;
+    border:0;
+    font-size:14px;
+  }
   .kebab-item:hover{ background:rgba(0,0,0,.04); }
   html.dark .kebab-item:hover{ background:rgba(255,255,255,.06); }
 
   /* ===== Overlay ===== */
-  #sync-overlay{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:9999;
+  #sync-overlay{
+    position:fixed;
+    inset:0;
+    display:none;
+    align-items:center;
+    justify-content:center;
+    z-index:9999;
     background: radial-gradient(1000px 420px at 50% 30%, rgba(23,23,23,.88), rgba(0,0,0,.92));
     backdrop-filter: blur(2px);
   }
   #sync-overlay.show{ display:flex; }
   #sync-overlay .sync-wrap{
-    text-align:center; color:#e5e7eb; user-select:none;
-    background: transparent; border: 0;
+    text-align:center;
+    color:#e5e7eb;
+    user-select:none;
+    background: transparent;
+    border: 0;
     padding: clamp(6px,1.4vw,10px) 8px 14px;
     border-radius: 28px;
     max-width: min(680px, 92vw);
@@ -306,7 +374,6 @@ function hidePrepOverlay(){
     margin: 0 auto 6px;
   }
 
-  /* Status – MENOR e sem negrito */
   #prep-ovl-status{
     font-weight:400;
     letter-spacing:.02em;
@@ -315,13 +382,24 @@ function hidePrepOverlay(){
     opacity:.96;
   }
   #prep-ovl-status.fade{animation:prepFade .55s ease}
-  @keyframes prepFade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  @keyframes prepFade{
+    from{opacity:0;transform:translateY(4px)}
+    to{opacity:1;transform:none}
+  }
 
   /* Pontinhos estilo ChatGPT */
-  .typing{ display:inline-flex; align-items:center; gap:4px; margin-left:6px; }
+  .typing{
+    display:inline-flex;
+    align-items:center;
+    gap:4px;
+    margin-left:6px;
+  }
   .typing span{
-    width:6px; height:6px; border-radius:50%;
-    background: currentColor; opacity:.35;
+    width:6px;
+    height:6px;
+    border-radius:50%;
+    background: currentColor;
+    opacity:.35;
     transform: translateY(0) scale(.9);
     animation: typingBlink 1.2s infinite ease-in-out;
   }
@@ -337,24 +415,53 @@ function hidePrepOverlay(){
     #prep-ovl-status.fade{ animation:none !important; }
   }
 
-  #prep-ovl-title{  font-weight:800; letter-spacing:.01em; font-size:clamp(16px,1.6vw,20px); margin:.1rem 0 .1rem; }
-  #prep-ovl-sub{    opacity:.85; font-size:clamp(12px,1.2vw,13px); margin-bottom:.35rem; }
-  #prep-ovl-time{ font-variant-numeric: tabular-nums; letter-spacing:.02em; font-size:clamp(12px,1.2vw,13px); opacity:.95; }
+  #prep-ovl-title{
+    font-weight:800;
+    letter-spacing:.01em;
+    font-size:clamp(16px,1.6vw,20px);
+    margin:.1rem 0 .1rem;
+  }
+  #prep-ovl-sub{
+    opacity:.85;
+    font-size:clamp(12px,1.2vw,13px);
+    margin-bottom:.35rem;
+  }
+  #prep-ovl-time{
+    font-variant-numeric: tabular-nums;
+    letter-spacing:.02em;
+    font-size:clamp(12px,1.2vw,13px);
+    opacity:.95;
+  }
   .time-pill{
-    display:inline-flex; align-items:center; justify-content:center;
-    min-width:70px; padding:.18rem .5rem; border-radius:999px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:70px;
+    padding:.18rem .5rem;
+    border-radius:999px;
     background:rgba(255,255,255,.06);
   }
 
-  /* Dev button */
+  /* Classe de dev antiga (não há botão em produção) */
   .test-overlay-btn{
-    position:fixed; right:18px; bottom:18px; z-index:10000;
-    background:#16a34a; color:#fff; border:0; border-radius:999px; padding:10px 14px; font-weight:600;
-    box-shadow:0 10px 30px rgba(0,0,0,.2); cursor:pointer;
+    position:fixed;
+    right:18px;
+    bottom:18px;
+    z-index:10000;
+    background:#16a34a;
+    color:#fff;
+    border:0;
+    border-radius:999px;
+    padding:10px 14px;
+    font-weight:600;
+    box-shadow:0 10px 30px rgba(0,0,0,.2);
+    cursor:pointer;
   }
   .test-overlay-btn:hover{ filter:brightness(1.05); }
   `;
-  const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s);
+  const s = document.createElement('style');
+  s.textContent = css;
+  document.head.appendChild(s);
 })();
 
 // ===== Lista de instâncias =====
@@ -367,7 +474,7 @@ function rowHTML(item, planLabel){
   menuItems.push('<button class="kebab-item js-remove">Remover número</button>');
 
   return `
-    <tr class="border-b last:border-0 relative" data-id="${htmlEscape(String(item.id))}" data-instance="${htmlEscape(item.instance_name)}">
+    <tr class="border-b last:border-0 relative" data-id="${htmlEscape(String(item.id))}" data-instance="${htmlEscape(String(item.instance_name))}">
       <td class="py-2">${apelido || '—'}</td>
       <td class="py-2">${numero}</td>
       <td class="py-2"><span class="plan-pill">${htmlEscape(planLabel)}</span></td>
@@ -394,11 +501,17 @@ function bindRowEvents(tr, item){
   }
   const btnRem = $('.js-remove', tr);
   if (btnRem){
-    btnRem.addEventListener('click', () => { menu.classList.remove('show'); openRemoveModal(item); });
+    btnRem.addEventListener('click', () => {
+      menu.classList.remove('show');
+      openRemoveModal(item);
+    });
   }
   const btnRec = $('.js-reconnect', tr);
   if (btnRec){
-    btnRec.addEventListener('click', async () => { menu.classList.remove('show'); await openReconnect(item); });
+    btnRec.addEventListener('click', async () => {
+      menu.classList.remove('show');
+      await openReconnect(item);
+    });
   }
 }
 document.addEventListener('click', (e) => {
@@ -432,6 +545,7 @@ function renderList(items, planLabel){
 let allItems = [];
 let currentTab = 'ativos';
 let lastPlanLabel = '—';
+
 function filterItemsByTab(list){
   return currentTab === 'ativos'
     ? list.filter(i => !!i.connected)
@@ -444,35 +558,77 @@ function activateTab(tab){
 els.tabAtivos?.addEventListener('click', () => activateTab('ativos'));
 els.tabInativos?.addEventListener('click', () => activateTab('inativos'));
 
-// ===== Contadores (tabs + topo) =====
+// ===== Contadores / limite / botão adicionar =====
 function updateTabCounts(totalAtivos, totalInativos){
   if (els.tabAtivos)   els.tabAtivos.textContent   = `Ativos (${totalAtivos})`;
   if (els.tabInativos) els.tabInativos.textContent = `Inativos (${totalInativos})`;
 }
+
+// Helper central para pegar o limite de instâncias do payload
+function getInstanceLimit(payload){
+  const raw =
+    payload?.limite_instancias ??
+    payload?.max_instancias ??
+    payload?.limite;
+  const n = Number(raw);
+  // null = sem limite; 0,1,2... = limite real
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 function updateTopTotal(tier, payload, list){
   if (!els.countPro) return;
   const t = String(tier || 'FREE').toUpperCase();
   const total = Array.isArray(list) ? list.length : 0;
-  const rawLimit =
-    payload?.limite_instancias ??
-    payload?.max_instancias ??
-    payload?.limite ??
-    null;
-  const limit = (typeof rawLimit === 'number' && rawLimit > 0) ? rawLimit : null;
-  if (limit) els.countPro.textContent = `${t} ${total}/${limit}`;
-  else       els.countPro.textContent = `${t} ${total}`;
+  const limit = getInstanceLimit(payload);
+
+  if (limit !== null) {
+    // ex: OURO 1/3
+    els.countPro.textContent = `${t} ${total}/${limit}`;
+  } else {
+    // plano sem limite configurado
+    els.countPro.textContent = `${t} ${total}`;
+  }
+}
+
+function updateAddButton(payload, list){
+  if (!els.btnAdd) return;
+
+  const total = Array.isArray(list) ? list.length : 0;
+  const limit = getInstanceLimit(payload);
+  const hasLimit = (limit !== null);
+  const canAdd = !hasLimit || total < limit;  // se não tem limite OU ainda não bateu o limite
+
+  // habilita/desabilita de verdade
+  els.btnAdd.disabled = !canAdd;
+  els.btnAdd.setAttribute('aria-disabled', canAdd ? 'false' : 'true');
+
+  // Verde quando pode adicionar, neutro/cinza quando não pode
+  els.btnAdd.classList.toggle('btn--ok', canAdd);
+
+  // Tooltip amigável
+  if (canAdd) {
+    els.btnAdd.title = 'Adicionar novo número ZapChats';
+  } else {
+    els.btnAdd.title = 'Limite de números de WhatsApp atingido para o seu plano';
+  }
 }
 
 // ===== Loader de status =====
 let loadTmr = null, inFlight = false, pendingReload = false;
+
 function scheduleLoad(ms=500){
-  pendingReload = true; clearTimeout(loadTmr);
-  loadTmr = setTimeout(() => { if (!inFlight) void loadWhatsAppStatus(); }, ms);
+  pendingReload = true;
+  clearTimeout(loadTmr);
+  loadTmr = setTimeout(() => {
+    if (!inFlight) void loadWhatsAppStatus();
+  }, ms);
 }
+
 async function loadWhatsAppStatus(){
   if (!empresaId) return;
   if (inFlight) { pendingReload = true; return; }
-  inFlight = true; pendingReload = false;
+  inFlight = true;
+  pendingReload = false;
   try{
     const js = await apiGet(`/api/empresas/${empresaId}/whatsapp`);
     const tier = String(js?.effective_tier || js?.assinatura || 'FREE').toUpperCase();
@@ -496,13 +652,17 @@ async function loadWhatsAppStatus(){
 
     updateTabCounts(totalAtivos, totalInativos);
     updateTopTotal(tier, js, list);
+    updateAddButton(js, list);   // controla cor/estado do botão “Adicionar”
 
     renderList(filterItemsByTab(allItems), tier);
   }catch(e){
     console.error(e);
   } finally{
     inFlight = false;
-    if (pendingReload) { pendingReload = false; scheduleLoad(200); }
+    if (pendingReload) {
+      pendingReload = false;
+      scheduleLoad(200);
+    }
   }
 }
 
@@ -516,6 +676,7 @@ function secondsFromLimit(raw){
 }
 function hideIllustration(){ els.qrIllustration?.classList.add('hidden'); }
 function showIllustration(){ els.qrIllustration?.classList.remove('hidden'); }
+
 function hideQR(){
   els.qrImg?.classList.add('hidden');
   els.qrCanvas?.classList.add('hidden');
@@ -527,8 +688,13 @@ function hideQR(){
 }
 function showQRError(msg){
   if (!els.qrErro) return;
-  if (msg) { els.qrErro.textContent = msg; els.qrErro.classList.remove('hidden'); }
-  else { els.qrErro.textContent = ''; els.qrErro.classList.add('hidden'); }
+  if (msg) {
+    els.qrErro.textContent = msg;
+    els.qrErro.classList.remove('hidden');
+  } else {
+    els.qrErro.textContent = '';
+    els.qrErro.classList.add('hidden');
+  }
 }
 function startTimer(sec){
   clearInterval(timerId);
@@ -536,11 +702,15 @@ function startTimer(sec){
   let left = Math.floor(sec);
   els.qrTimerCnt.textContent = String(left);
   els.qrTimerWrap.classList.remove('hidden');
-  if (els.btnRefresh) { els.btnRefresh.disabled = true; els.btnRefresh.classList.add('opacity-60','cursor-not-allowed'); }
+  if (els.btnRefresh) {
+    els.btnRefresh.disabled = true;
+    els.btnRefresh.classList.add('opacity-60','cursor-not-allowed');
+  }
   timerId = setInterval(() => {
     left -= 1;
     if (left <= 0){
-      clearInterval(timerId); timerId=null;
+      clearInterval(timerId);
+      timerId=null;
       els.qrTimerCnt.textContent = '0';
       if (els.btnRefresh) {
         els.btnRefresh.disabled = false;
@@ -570,7 +740,12 @@ function renderQRFromText(text, limit){
   els.qrLoader?.classList.add('hidden');
   hideIllustration();
   try{
-    const qr = new QRious({ element: els.qrCanvas, value: String(text), size: 208, level: 'M' });
+    const qr = new QRious({
+      element: els.qrCanvas,
+      value: String(text),
+      size: 208,
+      level: 'M'
+    });
     void qr;
     els.qrCanvas.classList.remove('hidden');
     els.qrImg?.classList.add('hidden');
@@ -584,8 +759,14 @@ function renderQRFromText(text, limit){
 }
 function renderQRFromResponse(qr){
   if (!qr || typeof qr !== 'object') return false;
-  if (qr.base64) { renderQRFromBase64(qr.base64, qr.limit); return true; }
-  if (qr.pairingCode) { renderQRFromText(qr.pairingCode, qr.limit); return true; }
+  if (qr.base64) {
+    renderQRFromBase64(qr.base64, qr.limit);
+    return true;
+  }
+  if (qr.pairingCode) {
+    renderQRFromText(qr.pairingCode, qr.limit);
+    return true;
+  }
   return false;
 }
 
@@ -600,8 +781,9 @@ function handleConnected(instanceFromMsg){
   scheduleLoad(200);
 }
 
-// ===== WS =====
+// ===== WebSockets =====
 let offEmp = null, offInst = null;
+
 function attachEmpresaWS() {
   if (!empresaId) return;
   ensureEmpresaWS(empresaId);
@@ -609,9 +791,17 @@ function attachEmpresaWS() {
   offEmp = onEmpresaMessage(empresaId, (evt) => {
     if (evt.type !== 'message') return;
     const m = evt.data || {};
-    if (m?.reload_whatsapp || m?.type === 'reload_whatsapp') { scheduleLoad(200); return; }
+    if (m?.reload_whatsapp || m?.type === 'reload_whatsapp') {
+      scheduleLoad(200);
+      return;
+    }
     if (m?.type === 'qrcode' && wantQR) {
-      if (m.waiting) { els.qrLoader?.classList.remove('hidden'); showIllustration(); hideQR(); return; }
+      if (m.waiting) {
+        els.qrLoader?.classList.remove('hidden');
+        showIllustration();
+        hideQR();
+        return;
+      }
       const ttl = m.qr_limit ?? m.expires_in ?? m.ttl ?? 60;
       if (m.base64)           renderQRFromBase64(m.base64, ttl);
       else if (m.pairingCode) renderQRFromText(m.pairingCode, ttl);
@@ -619,7 +809,12 @@ function attachEmpresaWS() {
     }
     if (m?.type === 'connection' || m?.type === 'connected' || m?.status || m?.state || m?.inst_status){
       if (isConnectedPayload(m)) {
-        const instName = (m.inst_status?.instance) || m.instance || m.instance_name || m.instancia || null;
+        const instName =
+          (m.inst_status?.instance) ||
+          m.instance ||
+          m.instance_name ||
+          m.instancia ||
+          null;
         handleConnected(instName);
         scheduleLoad(200);
       }
@@ -634,7 +829,12 @@ function attachInstWS(instance) {
     if (evt.type !== 'message') return;
     const m = evt.data || {};
     if (m?.type === 'qrcode' && wantQR) {
-      if (m.waiting) { els.qrLoader?.classList.remove('hidden'); showIllustration(); hideQR(); return; }
+      if (m.waiting) {
+        els.qrLoader?.classList.remove('hidden');
+        showIllustration();
+        hideQR();
+        return;
+      }
       const ttl = m.qr_limit ?? m.expires_in ?? m.ttl ?? 60;
       if (m.base64)           renderQRFromBase64(m.base64, ttl);
       else if (m.pairingCode) renderQRFromText(m.pairingCode, ttl);
@@ -642,17 +842,25 @@ function attachInstWS(instance) {
     }
     if (m?.type === 'connection' || m?.type === 'connected' || m?.status || m?.state) {
       if (isConnectedPayload(m)) {
-        handleConnected(m.instance || m.instance_name || m.instancia || null);
+        const instName =
+          m.instance ||
+          m.instance_name ||
+          m.instancia ||
+          null;
+        handleConnected(instName);
         scheduleLoad(200);
       }
     }
   });
 }
 
-// ===== Carga principal =====
+// ===== Carga principal / submit =====
 async function handleConnectSubmit(ev){
   ev.preventDefault?.();
-  showQRError(''); hideQR(); els.qrLoader?.classList.remove('hidden'); showIllustration();
+  showQRError('');
+  hideQR();
+  els.qrLoader?.classList.remove('hidden');
+  showIllustration();
 
   const apelido   = els.inApelido?.value?.trim() || '';
   const numero    = onlyDigits(els.inNumero?.value);
@@ -660,7 +868,11 @@ async function handleConnectSubmit(ev){
   const historico = els.selHist?.value || 'none';
   const usePairing = !!els.chkPairing?.checked;
 
-  if (!numero){ els.qrLoader?.classList.add('hidden'); showQRError('Informe um número de telefone válido.'); return; }
+  if (!numero){
+    els.qrLoader?.classList.add('hidden');
+    showQRError('Informe um número de telefone válido.');
+    return;
+  }
   const e164 = `+${ddi}${numero}`;
 
   try{
@@ -702,6 +914,7 @@ async function handleConnectSubmit(ev){
     showQRError(e?.message || 'Falha ao iniciar conexão.');
   }
 }
+
 async function openReconnect(item){
   if (!item?.instance_name) return;
   currentInstance = item.instance_name;
@@ -715,17 +928,22 @@ async function openReconnect(item){
   if (histRow) histRow.classList.add('hidden');
 
   if (els.inApelido) els.inApelido.value = item.apelido || '';
-  if (els.selPais) els.selPais.value = '55';
-  if (els.inNumero) els.inNumero.value = onlyDigits(item.numero_instancia || '').slice(-11);
+  if (els.selPais)   els.selPais.value = '55';
+  if (els.inNumero)  els.inNumero.value = onlyDigits(item.numero_instancia || '').slice(-11);
 
   showModal();
-  showIllustration(); showQRError(''); hideQR();
+  showIllustration();
+  showQRError('');
+  hideQR();
 
   attachInstWS(currentInstance);
 
   els.qrLoader?.classList.remove('hidden');
   try {
-    const res = await apiPost(`/api/onboarding/empresas/qr/refresh/${encodeURIComponent(currentInstance)}`, {});
+    const res = await apiPost(
+      `/api/onboarding/empresas/qr/refresh/${encodeURIComponent(currentInstance)}`,
+      {}
+    );
     els.qrLoader?.classList.add('hidden');
     const ok = renderQRFromResponse(res?.qrcode || {});
     wantQR = true;
@@ -739,11 +957,17 @@ async function openReconnect(item){
   els.btnRefresh?.classList.remove('hidden');
   els.qrInstru?.classList.remove('hidden');
 }
+
 async function refreshQR(){
   if (!window.currentInstance) return;
   try{
-    hideQR(); els.qrLoader?.classList.remove('hidden'); showIllustration();
-    const res = await apiPost(`/api/onboarding/empresas/qr/refresh/${encodeURIComponent(window.currentInstance)}`, {});
+    hideQR();
+    els.qrLoader?.classList.remove('hidden');
+    showIllustration();
+    const res = await apiPost(
+      `/api/onboarding/empresas/qr/refresh/${encodeURIComponent(window.currentInstance)}`,
+      {}
+    );
     els.qrLoader?.classList.add('hidden');
     const ok = renderQRFromResponse(res?.qrcode || {});
     wantQR = true;
@@ -753,9 +977,11 @@ async function refreshQR(){
     showQRError('Não foi possível atualizar o QR.');
   }
 }
-async function gerarPrimeiroQR(){ await refreshQR(); }
+async function gerarPrimeiroQR(){
+  await refreshQR();
+}
 
-// Listeners
+// ===== Listeners de UI =====
 els.btnAdd?.addEventListener('click', () => {
   showModal();
   showIllustration();
@@ -764,6 +990,10 @@ els.btnAdd?.addEventListener('click', () => {
   wantQR = false;
   currentInstance = null;
   window.currentInstance = null;
+
+  // volta a mostrar seleção de histórico quando é “novo número”
+  const histRow = els.selHist?.closest('.form-row, .field, .mb-4, .mb-3, .grid, div') || null;
+  if (histRow) histRow.classList.remove('hidden');
 });
 els.btnCloseMd?.addEventListener('click', hideModal);
 els.btnCancel?.addEventListener('click', hideModal);
@@ -771,8 +1001,9 @@ els.form?.addEventListener('submit', handleConnectSubmit);
 els.btnRefresh?.addEventListener('click', refreshQR);
 els.btnGerarQR?.addEventListener('click', gerarPrimeiroQR);
 
-// Remoção
+// ===== Remoção de instância =====
 let toRemove = null;
+
 function openRemoveModal(item){
   toRemove = item || null;
   if (!els.modalRem) return;
@@ -783,7 +1014,11 @@ function openRemoveModal(item){
   }
   els.modalRem.classList.remove('hidden');
 }
-function closeRemoveModal(){ toRemove = null; els.modalRem?.classList.add('hidden'); }
+function closeRemoveModal(){
+  toRemove = null;
+  els.modalRem?.classList.add('hidden');
+}
+
 els.remConsent?.addEventListener('change', () => {
   const allowed = !!els.remConsent?.checked;
   if (!els.btnRemYes) return;
@@ -798,19 +1033,27 @@ els.btnRemYes?.addEventListener('click', async () => {
     alert('Para remover definitivamente, confirme que está ciente de que TODOS os dados desta instância serão apagados.');
     return;
   }
-  els.btnRemYes.disabled = true; els.btnRemNo.disabled  = true;
+  els.btnRemYes.disabled = true;
+  els.btnRemNo.disabled  = true;
   try{
     const tries = [
       `/api/empresas/instancias/${encodeURIComponent(toRemove.id)}`,
       `/api/empresas/whatsapp/${encodeURIComponent(toRemove.instance_name)}`
     ];
-    let success = false; let lastErr = '';
+    let success = false;
+    let lastErr = '';
     for (const u of tries){
       try{
         const res = await apiDelete(u);
-        if (res.ok === true && (res.status === 200 || res.status === 204)) { success = true; break; }
-        else { lastErr = `DELETE ${u} → ${res.status}`; }
-      }catch(e){ lastErr = String(e?.message || e); }
+        if (res.ok === true && (res.status === 200 || res.status === 204)) {
+          success = true;
+          break;
+        } else {
+          lastErr = `DELETE ${u} → ${res.status}`;
+        }
+      }catch(e){
+        lastErr = String(e?.message || e);
+      }
     }
     if (!success) {
       alert(`Não foi possível remover este número agora.\n${lastErr || ''}`.trim());
@@ -824,14 +1067,20 @@ els.btnRemYes?.addEventListener('click', async () => {
     els.btnRemNo.disabled  = false;
   }
 });
+
 let toastTimer = null;
 function toast(msg){
-  const box = $('#global-msg'); if (!box) return;
-  box.textContent = msg; box.classList.remove('hidden'); box.style.display = 'block'; box.style.background = '#16a34a';
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => box.classList.add('hidden'), 3200);
+  const box = $('#global-msg');
+  if (!box) return;
+  box.textContent = msg;
+  box.classList.remove('hidden');
+  box.style.display = 'block';
+  box.style.background = '#16a34a';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => box.classList.add('hidden'), 3200);
 }
 
-// Init
+// ===== Init =====
 if (!empresaId){
   console.warn('empresa_id ausente no localStorage; não foi possível carregar a lista.');
 } else {
@@ -839,18 +1088,25 @@ if (!empresaId){
   loadWhatsAppStatus();
 }
 
-// Teardown SPA
+// ===== Teardown SPA =====
 function teardownConectar() {
   try { offEmp?.(); offEmp = null; } catch {}
   try { offInst?.(); offInst = null; } catch {}
   try { if (empresaId) closeEmpresaWS(empresaId); } catch {}
   try { if (currentInstance) closeInstWS(currentInstance); } catch {}
-  clearTimeout(loadTmr); loadTmr = null; inFlight = false; pendingReload = false;
+  clearTimeout(loadTmr);
+  loadTmr = null;
+  inFlight = false;
+  pendingReload = false;
   try { hidePrepOverlay(); } catch {}
   document.body.style.overflow = '';
 }
+
 (function watchLeave(){
-  const isHere = () => !!document.getElementById('form-conectar') || location.pathname.includes('/conectar');
+  const isHere = () =>
+    !!document.getElementById('form-conectar') ||
+    location.pathname.includes('/conectar');
+
   const stopIfGone = () => {
     if (!isHere()) {
       teardownConectar();
@@ -858,19 +1114,12 @@ function teardownConectar() {
       document.removeEventListener('visibilitychange', stopIfGone);
     }
   };
+
   const obs = new MutationObserver(stopIfGone);
   obs.observe(document.body, { childList:true, subtree:true });
   document.addEventListener('visibilitychange', stopIfGone);
 })();
-window.addEventListener('beforeunload', () => { teardownConectar(); });
 
-// Botão de teste do overlay (dev)
-(function devTestBtn(){
-  if (document.getElementById('btn-test-overlay')) return;
-  const b = document.createElement('button');
-  b.id = 'btn-test-overlay';
-  b.className = 'test-overlay-btn';
-  b.textContent = 'Testar overlay';
-  b.addEventListener('click', () => showPrepOverlayOneMinute(60, { historico: '7d' }));
-  document.body.appendChild(b);
-})();
+window.addEventListener('beforeunload', () => {
+  teardownConectar();
+});

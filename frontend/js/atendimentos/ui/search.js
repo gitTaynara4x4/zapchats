@@ -6,8 +6,18 @@
   const searchInput = document.getElementById('wpp-header-search');
   const EMPRESA_ID  = Number(window.EMPRESA_ID || localStorage.getItem('empresa_id') || 0);
 
-  function _normalize(s){ return (s||'').toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim(); }
-  function escapeHtml(s){ return (s||'').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }
+  function _normalize(s){
+    return (s||'').toString()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g,'')
+      .toLowerCase()
+      .trim();
+  }
+  function escapeHtml(s){
+    return (s||'').replace(/[&<>"]/g, ch => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'
+    }[ch]));
+  }
   function formatarNumeroBR(numero){
     function onlyDigits(s){ return (s||'').replace(/\D/g,''); }
     if (!numero) return "";
@@ -28,7 +38,8 @@
     resultsEl.id='search-results';
     resultsEl.className='sr-container hidden';
     resultsEl.style.cssText='position:relative;padding:8px 8px 6px;color:#e9edef;background:#111b21;border-bottom:1px solid #223038;';
-    (searchInput?.closest('.wpp-header-search-row')||searchInput?.parentElement||document.body)?.insertAdjacentElement('afterend',resultsEl);
+    (searchInput?.closest('.wpp-header-search-row')||searchInput?.parentElement||document.body)
+      ?.insertAdjacentElement('afterend',resultsEl);
   }
   function srShowLoading(){
     resultsEl.classList.remove('hidden');
@@ -39,8 +50,14 @@
       </div>
       <style>@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}</style>`;
   }
-  function srHide(){ resultsEl.classList.add('hidden'); resultsEl.innerHTML=''; }
-  function srRender(html){ resultsEl.innerHTML=html||''; resultsEl.classList.toggle('hidden',!html); }
+  function srHide(){
+    resultsEl.classList.add('hidden');
+    resultsEl.innerHTML='';
+  }
+  function srRender(html){
+    resultsEl.innerHTML=html||'';
+    resultsEl.classList.toggle('hidden',!html);
+  }
 
   let _searchActive=false, _searchAbort=null;
 
@@ -53,7 +70,8 @@
     const url = `/api/atendimento/search?empresa_id=${EMPRESA_ID}&q=${encodeURIComponent(q)}&limit=${limit}${instQuery}`;
     const res = await fetch(url,{ signal:_searchAbort.signal, credentials:'include' });
     if (!res.ok){
-      const txt=await res.text().catch(()=> ''); throw new Error(`[search] HTTP ${res.status} ${txt?.slice(0,150)}`);
+      const txt=await res.text().catch(()=> '');
+      throw new Error(`[search] HTTP ${res.status} ${txt?.slice(0,150)}`);
     }
     const data = await res.json();
     return {
@@ -71,7 +89,8 @@
         <div class="sr-title" style="color:#7aa39a;font-size:12px;text-transform:uppercase;margin:6px 4px 4px;"><i class="fa fa-message"></i> Mensagens</div>
         <ul class="sr-list" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;">` +
         mensagens.slice(0,80).map(m=>{
-          const c = (window.todosContatosCache||window.clientesCache||[]).find(x=> Number(x.id)===Number(m.cliente_id)) || {};
+          const c = (window.todosContatosCache||window.clientesCache||[])
+            .find(x=> Number(x.id)===Number(m.cliente_id)) || {};
           const nome = c.push_name?.trim() || c.nome || formatarNumeroBR(c.telefone||'');
           const when = (window.formatChatTime||(()=>''))(m.hora||'') || '';
           const snipRaw = m.snippet || '';
@@ -129,7 +148,9 @@
   }
 
   // procurar dentro do chat renderizado
-  function _allRenderedMsgNodes(){ return Array.from(hist?.querySelectorAll('.bubble')||[]); }
+  function _allRenderedMsgNodes(){
+    return Array.from(hist?.querySelectorAll('.bubble')||[]);
+  }
   function _findInRendered(query, from=0){
     const q=_normalize(query); if(!q) return false;
     const nodes=_allRenderedMsgNodes();
@@ -190,7 +211,12 @@
   let _deb=null;
   async function onSearchInput(){
     const q=(searchInput?.value||'').trim();
-    if (!q){ srHide(); window.renderListaClientes?.(window.clientesCache||[]); _searchActive=false; return; }
+    if (!q){
+      srHide();
+      window.renderListaClientes?.(window.clientesCache||[]);
+      _searchActive=false;
+      return;
+    }
     srShowLoading();
     clearTimeout(_deb);
     _deb=setTimeout(async()=>{
@@ -239,11 +265,18 @@
     searchInput.addEventListener('input', onSearchInput);
     searchInput.addEventListener('keydown', e=>{
       if (e.key==='Enter'){ e.preventDefault(); onSearchEnter(); }
-      if (e.key==='Escape'){ searchInput.value=''; srHide(); window.renderListaClientes?.(window.clientesCache||[]); _searchActive=false; }
+      if (e.key==='Escape'){
+        searchInput.value='';
+        srHide();
+        window.renderListaClientes?.(window.clientesCache||[]);
+        _searchActive=false;
+      }
     });
   }
+
   document.addEventListener('keydown', async e=>{
-    if (e.key==='F3' || (e.key.toLowerCase()==='g' && (e.ctrlKey||e.metaKey))){
+    const key = (e.key || '').toLowerCase();
+    if (e.key==='F3' || (key==='g' && (e.ctrlKey||e.metaKey))){
       e.preventDefault();
       const q=searchInput?.value?.trim(); if (!q) return;
       if (_findInRendered(q, (_findInRendered._lastIndex??-1)+1)) return;

@@ -406,11 +406,20 @@ body[data-page="clientes"] thead{ background:transparent }
 body[data-page="clientes"] thead th{ background:var(--hover-strong); font-weight:800 }
 
 /* Ações compactas */
-body[data-page="clientes"] .td-actions{ gap:.35rem; flex-wrap:nowrap }
-body[data-page="clientes"] .td-actions .btn{
-  font-size:.85rem; padding:.28rem .45rem; height:28px; border-radius:.5rem;
+body[data-page="clientes"] .td-actions{
+  gap:.35rem;
+  flex-wrap:nowrap;
 }
-body[data-page="clientes"] .td-actions .btn i{ font-size:.85em }
+body[data-page="clientes"] .td-actions .btn{
+  font-size:.85rem;
+  padding:.3rem .8rem;
+  height:28px;
+  border-radius:.5rem;
+  white-space:nowrap; /* impede quebrar "Campos personalizados" em duas linhas */
+}
+body[data-page="clientes"] .td-actions .btn i{
+  font-size:.85em;
+}
 
 /* Empty e load more compactos */
 body[data-page="clientes"] #empty-state{ padding:1.2rem }
