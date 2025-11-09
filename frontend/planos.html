@@ -154,6 +154,22 @@
     }
     .btn-ghost{ background:transparent; border:1px solid var(--card-border); color:var(--text-primary) }
     .btn-ghost:hover{ filter: brightness(.98) }
+
+    /* linha de edição do plano (segue o mesmo estilo) */
+    .plan-edit-row{
+      margin-top:10px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+      font-size:13px;
+    }
+    .plan-edit-row label{
+      font-weight:700; color:var(--text-secondary);
+    }
+    #selPlano{
+      width:auto; min-width:170px; height:34px;
+      padding-inline:10px; font-size:13px;
+    }
+    #planoMsg{
+      font-size:12px;
+    }
   </style>
 </head>
 
@@ -175,7 +191,7 @@
             <p class="subtitle">Digite o documento e consulte os dados do cliente</p>
           </div>
 
-          <!-- PASSO 1 -->
+          <!-- PASSO 1 (NÃO MEXI) -->
           <section id="view-consulta" class="form">
             <div class="field">
               <label class="label">CPF ou CNPJ</label>
@@ -186,7 +202,7 @@
             <div id="erro-consulta" class="error hidden"></div>
           </section>
 
-          <!-- PASSO 2 (COM NOVO LAYOUT) -->
+          <!-- PASSO 2 (DETALHES) -->
           <section id="view-detalhes" class="form hidden" aria-live="polite" aria-busy="false">
             <!-- Barra de resumo (gruda no topo) -->
             <div class="summary-bar">
@@ -232,6 +248,33 @@
                     <div class="k">Trial</div><div class="v" id="eTrial">—</div>
                     <div class="k">Trial expira</div><div class="v" id="eTrialExp">—</div>
                     <div class="k">Dias restantes</div><div class="v" id="eDays">0</div>
+                  </div>
+
+                  <!-- Edição do plano pago -->
+                  <div class="plan-edit-row">
+                    <label for="selPlano" class="muted">
+                      Alterar plano pago:
+                    </label>
+                    <select id="selPlano"
+                            class="input"
+                            style="width:auto; min-width:170px; height:34px; padding-inline:10px; font-size:13px">
+                      <option value="">Selecione…</option>
+                      <option value="FREE">FREE</option>
+                      <option value="PRATA">PRATA</option>
+                      <option value="OURO">OURO</option>
+                      <option value="PLATINA">PLATINA</option>
+                      <option value="DIAMANTE">DIAMANTE</option>
+                      <option value="RADIANTE">RADIANTE</option>
+                    </select>
+
+                    <button id="btnAplicarPlano"
+                            type="button"
+                            class="btn btn-primary"
+                            style="height:34px; padding-inline:14px; font-size:13px">
+                      Aplicar plano
+                    </button>
+
+                    <span id="planoMsg" class="muted" style="font-size:12px"></span>
                   </div>
                 </div>
               </div>
@@ -338,10 +381,16 @@
 
     const $ = (s, r=document)=> r.querySelector(s);
     const LS = localStorage;
+    let CURRENT_EMPRESA_ID = null;
+
     const TOKEN = () => LS.getItem('token') || LS.getItem('auth_token') || '';
     async function authFetch(input, init = {}){
       const t = TOKEN();
-      const headers = { 'Accept':'application/json', ...(init.headers||{}), ...(t ? { Authorization: `Bearer ${t}` } : {}) };
+      const headers = {
+        'Accept':'application/json',
+        ...(init.headers||{}),
+        ...(t ? { Authorization: `Bearer ${t}` } : {})
+      };
       const res = await fetch(input, { ...init, headers, credentials:'include' });
       const txt = await res.text();
       let data; try{ data = txt ? JSON.parse(txt) : {}; }catch{ data = { raw: txt }; }
@@ -349,13 +398,27 @@
     }
 
     const pad2 = (n)=> String(n).padStart(2,'0');
-    const fmtISO = (s) => { if(!s) return '—'; const d = new Date(s); return isNaN(d) ? String(s) : `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+    const fmtISO = (s) => {
+      if(!s) return '—';
+      const d = new Date(s);
+      return isNaN(d)
+        ? String(s)
+        : `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    };
+
     function maskDoc(v){
       const n = (v||'').replace(/\D+/g,'').slice(0,14);
       if (n.length <= 11){
-        return n.replace(/^(\d{3})(\d)/,'$1.$2').replace(/^(\d{3})\.(\d{3})(\d)/,'$1.$2.$3').replace(/^(\d{3})\.(\d{3})\.(\d{3})(\d)/,'$1.$2.$3-$4');
+        return n
+          .replace(/^(\d{3})(\d)/,'$1.$2')
+          .replace(/^(\d{3})\.(\d{3})(\d)/,'$1.$2.$3')
+          .replace(/^(\d{3})\.(\d{3})\.(\d{3})(\d)/,'$1.$2.$3-$4');
       }else{
-        return n.replace(/^(\d{2})(\d)/,'$1.$2').replace(/^(\d{2})\.(\d{3})(\d)/,'$1.$2.$3').replace(/^(\d{2})\.(\d{3})\.(\d{3})(\d)/,'$1.$2.$3/$4').replace(/^(\d{2})\.(\d{3})\.(\d{3})\/(\d{4})(\d)/,'$1.$2.$3/$4-$5');
+        return n
+          .replace(/^(\d{2})(\d)/,'$1.$2')
+          .replace(/^(\d{2})\.(\d{3})(\d)/,'$1.$2.$3')
+          .replace(/^(\d{2})\.(\d{3})\.(\d{3})(\d)/,'$1.$2.$3/$4')
+          .replace(/^(\d{2})\.(\d{3})\.(\d{3})\/(\d{4})(\d)/,'$1.$2.$3/$4-$5');
       }
     }
 
@@ -383,6 +446,9 @@
       tabColabsBody: $('#tabColabs tbody'), colabsFoot: $('#colabsFoot'),
       tabDepsBody: $('#tabDeps tbody'), depsFoot: $('#depsFoot'),
       tabSetBody: $('#tabSetores tbody'), setFoot: $('#setFoot'),
+      selPlano: $('#selPlano'),
+      btnAplicarPlano: $('#btnAplicarPlano'),
+      planoMsg: $('#planoMsg'),
     };
 
     function setStatusChip(text, ok){
@@ -398,7 +464,8 @@
       viewDetalhes.classList.add('hidden');
       viewConsulta.classList.remove('hidden');
       app.setAttribute('data-mode','compact');
-      erro.classList.add('hidden'); setTimeout(()=>docInput?.focus(),10);
+      erro.classList.add('hidden');
+      setTimeout(()=>docInput?.focus(),10);
     }
 
     function renderInstancias(st){
@@ -412,7 +479,12 @@
           <td>${i.apelido ? `<span>${i.apelido}</span>` : '—'}</td>
           <td>${i.instance_name || '—'}</td>
           <td>${i.numero_instancia || '—'}</td>
-          <td><span style="display:inline-flex;align-items:center;gap:.45rem"><span style="width:8px;height:8px;border-radius:99px;background:${on?'#22c55e':'#9ca3af'};display:inline-block"></span>${on?'Conectada':'Off'}</span></td>
+          <td>
+            <span style="display:inline-flex;align-items:center;gap:.45rem">
+              <span style="width:8px;height:8px;border-radius:99px;background:${on?'#22c55e':'#9ca3af'};display:inline-block"></span>
+              ${on?'Conectada':'Off'}
+            </span>
+          </td>
           <td>${i.last_seen ? fmtISO(i.last_seen) : '—'}</td>
           <td>${i.historico_restaurar || 'none'}</td>`;
         els.tabInstsBody.appendChild(tr);
@@ -485,7 +557,8 @@
     }
 
     function renderBase(current){
-      const emp = current?.empresa || {}; const st = current?.status || {};
+      const emp = current?.empresa || {};
+      const st = current?.status || {};
       $('#eNome').textContent = emp.nome || '—';
       $('#eCnpj').textContent = emp.cnpj_cpf || '—';
       $('#eTel').textContent = emp.telefone || '—';
@@ -494,34 +567,49 @@
       $('#eStatusNum').textContent = emp.status_numero || '—';
       $('#eAvatar').textContent = emp.avatar_url || '—';
 
-      $('#eAssinatura').textContent = emp.assinatura || 'FREE';
-      $('#ePlanoExp').textContent = fmtISO(emp.plano_expira_em);
-      const triAct = (st.trial && st.trial.active) ? 'ATIVO' : (emp.trial_tier ? 'INATIVO' : 'NENHUM');
+      const assinatura   = (emp.assinatura || 'FREE').toUpperCase();
+      const planoExpira  = fmtISO(emp.plano_expira_em);
+
+      $('#eAssinatura').textContent = assinatura;
+      $('#ePlanoExp').textContent   = planoExpira;
+
+      const triAct  = (st.trial && st.trial.active) ? 'ATIVO' : (emp.trial_tier ? 'INATIVO' : 'NENHUM');
       const triTier = (st.trial && st.trial.tier) || emp.trial_tier || '—';
       $('#eTrial').textContent = `${triTier} • ${triAct}`;
       $('#eTrialExp').textContent = fmtISO(emp.trial_expires_at || (st.trial && st.trial.expires_at));
-      const eff = st.effective_tier || emp.effective_tier || emp.assinatura || 'FREE';
-      $('#eEffective').textContent = eff;
-      $('#eLimite').textContent = st.limite_instancias ?? emp.limite_instancias ?? '—';
-      $('#eCon').textContent = st.quantidade_instancias ?? emp.quantidade_instancias ?? '0';
-      $('#eDays').textContent = (st.trial && (st.trial.days_left ?? 0)) || 0;
 
-      KPI.tier.textContent = eff;
+      const eff = st.effective_tier || emp.effective_tier || assinatura || 'FREE';
+      $('#eEffective').textContent = eff;
+      $('#eLimite').textContent    = st.limite_instancias ?? emp.limite_instancias ?? '—';
+      $('#eCon').textContent       = st.quantidade_instancias ?? emp.quantidade_instancias ?? '0';
+      $('#eDays').textContent      = (st.trial && (st.trial.days_left ?? 0)) || 0;
+
+      KPI.tier.textContent  = eff;
       KPI.limit.textContent = String(st.limite_instancias ?? emp.limite_instancias ?? '—');
+
+      // Atualiza seletor de plano
+      if (els.selPlano){
+        els.selPlano.value = assinatura;
+      }
+      if (els.planoMsg){
+        els.planoMsg.textContent = '';
+        els.planoMsg.style.color = 'var(--text-secondary)';
+      }
+
       renderInstancias(st);
     }
 
     function applyOverview(ov){
       if (!ov) return;
       const c = ov.counts || {};
-      KPI.cli.textContent = c.clientes ?? '0';
-      KPI.usu.textContent = c.usuarios ?? '0';
-      KPI.col.textContent = c.colaboradores ?? '0';
-      KPI.dep.textContent = c.departamentos ?? '0';
-      KPI.set.textContent = c.setores ?? '0';
-      KPI.grp.textContent = c.grupos ?? '0';
-      KPI.msg.textContent = c.mensagens ?? '0';
-      KPI.mid.textContent = c.midias ?? '0';
+      KPI.cli.textContent    = c.clientes ?? '0';
+      KPI.usu.textContent    = c.usuarios ?? '0';
+      KPI.col.textContent    = c.colaboradores ?? '0';
+      KPI.dep.textContent    = c.departamentos ?? '0';
+      KPI.set.textContent    = c.setores ?? '0';
+      KPI.grp.textContent    = c.grupos ?? '0';
+      KPI.msg.textContent    = c.mensagens ?? '0';
+      KPI.mid.textContent    = c.midias ?? '0';
       KPI.atOpen.textContent = c.atendimentos_abertos ?? '0';
 
       // listas detalhadas
@@ -545,37 +633,117 @@
     }
 
     async function consultar(){
-      const raw = (docInput.value || '').trim();
+      const raw    = (docInput.value || '').trim();
       const digits = raw.replace(/\D+/g,'');
       if (!digits){
-        erro.textContent='Informe CPF ou CNPJ.'; erro.classList.remove('hidden'); return;
+        erro.textContent='Informe CPF ou CNPJ.';
+        erro.classList.remove('hidden');
+        return;
       }
-      erro.classList.add('hidden'); btnConsultar.classList.add('loading'); btnConsultar.disabled = true;
+      erro.classList.add('hidden');
+      btnConsultar.classList.add('loading');
+      btnConsultar.disabled = true;
 
       try{
         const r = await authFetch(`/api/admin/empresas/by-cnpj?cnpj=${encodeURIComponent(digits)}`);
-        if (!r.ok || r.data?.ok === false) throw new Error(r.data?.detail || `HTTP ${r.status}`);
+        if (!r.ok || r.data?.ok === false){
+          throw new Error(r.data?.detail || `HTTP ${r.status}`);
+        }
+
         const basic = r.data;
-        const empId = basic?.empresa?.id;
+        const empId = basic?.empresa?.id || null;
+        CURRENT_EMPRESA_ID = empId;
+
         const [emp, wa, ov] = await Promise.all([
-          empId ? hydrateEmpresaCompleta(empId) : null,
-          empId ? hydrateWhatsappStatus(empId) : null,
-          empId ? hydrateOverview(empId) : null,
+          empId ? hydrateEmpresaCompleta(empId)  : null,
+          empId ? hydrateWhatsappStatus(empId)  : null,
+          empId ? hydrateOverview(empId)        : null,
         ]);
-        const current = { empresa: {...basic.empresa, ...(emp||{})}, status: wa || basic.status, overview: ov || null };
+
+        const current = {
+          empresa: { ...(basic.empresa || {}), ...(emp || {}) },
+          status:  wa || basic.status,
+          overview: ov || null,
+        };
+
         renderBase(current);
+
         if (current.overview){
           // garante instâncias mais frescas:
           if (Array.isArray(current.overview.instancias)) current.status.instancias = current.overview.instancias;
           applyOverview(current.overview);
         }
+
         setStatusChip('OK', true);
-        goDetails();
+        if (window.goDetails) window.goDetails();
+        else goDetails();
       }catch(e){
+        console.error(e);
         setStatusChip('ERRO', false);
-        erro.textContent = 'Não encontrado ou erro na consulta.'; erro.classList.remove('hidden');
+        erro.textContent = 'Não encontrado ou erro na consulta.';
+        erro.classList.remove('hidden');
       }finally{
-        btnConsultar.classList.remove('loading'); btnConsultar.disabled = false;
+        btnConsultar.classList.remove('loading');
+        btnConsultar.disabled = false;
+      }
+    }
+
+    async function aplicarPlano(){
+      if (!CURRENT_EMPRESA_ID){
+        alert('Nenhuma empresa carregada. Consulte um CPF/CNPJ primeiro.');
+        return;
+      }
+      const sel = els.selPlano;
+      const msg = els.planoMsg;
+      const btn = els.btnAplicarPlano;
+
+      const novo = (sel?.value || '').trim().toUpperCase();
+      if (!novo){
+        if (msg){
+          msg.textContent = 'Escolha um plano para aplicar.';
+          msg.style.color = '#f97316';
+        }
+        return;
+      }
+
+      if (msg){
+        msg.textContent = 'Aplicando plano...';
+        msg.style.color = 'var(--text-secondary)';
+      }
+      if (btn){
+        btn.classList.add('loading');
+        btn.disabled = true;
+      }
+
+      try{
+        // AQUI troquei para a rota real do backend: /apply-plan (POST)
+        const r = await authFetch(`/api/admin/empresas/${CURRENT_EMPRESA_ID}/apply-plan`, {
+          method:'POST',
+          headers:{ 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assinatura: novo })
+        });
+
+        if (!r.ok || r.data?.ok === false){
+          throw new Error(r.data?.detail || `Erro HTTP ${r.status}`);
+        }
+
+        if (msg){
+          msg.textContent = 'Plano atualizado com sucesso. Recarregando dados...';
+          msg.style.color = '#22c55e';
+        }
+
+        await consultar();
+      }catch(e){
+        console.error(e);
+        if (msg){
+          msg.textContent = e.message || 'Erro ao aplicar plano.';
+          msg.style.color = '#ef4444';
+        }
+      }finally{
+        if (btn){
+          btn.classList.remove('loading');
+          btn.disabled = false;
+        }
       }
     }
 
@@ -617,7 +785,8 @@
         const nm = document.getElementById('eNome')?.textContent || '';
         const title = document.getElementById('summaryTitle');
         if (title && nm) title.textContent = nm;
-      }catch(e){}
+      }catch(e){ console.error(e); }
+
       (_goDetailsPrev || function(){
         document.getElementById('view-consulta')?.classList.add('hidden');
         document.getElementById('view-detalhes')?.classList.remove('hidden');
@@ -640,12 +809,21 @@
     btnConsultar?.addEventListener('click', consultar);
     docInput?.addEventListener('keydown', e=>{ if(e.key==='Enter') consultar(); });
     btnNova?.addEventListener('click', ()=>{
+      CURRENT_EMPRESA_ID = null;
       viewDetalhes.classList.add('hidden');
       viewConsulta.classList.remove('hidden');
       app.setAttribute('data-mode','compact');
       docInput.value=''; $('#doc-help').textContent='';
+      erro.classList.add('hidden');
+      if (els.planoMsg){
+        els.planoMsg.textContent='';
+        els.planoMsg.style.color='var(--text-secondary)';
+      }
       setTimeout(()=>docInput?.focus(),10);
     });
+
+    els.btnAplicarPlano?.addEventListener('click', aplicarPlano);
+
     setTimeout(()=>docInput?.focus(),0);
   })();
   </script>

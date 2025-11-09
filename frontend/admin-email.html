@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <title>Admin – Quota de E-mail (Empresas)</title>
+  <style>
+    *{box-sizing:border-box;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+    body{
+      margin:0;
+      padding:24px;
+      background:#0f172a;
+      color:#e5e7eb;
+      display:flex;
+      align-items:flex-start;
+      justify-content:center;
+    }
+    .card{
+      width:min(800px,100%);
+      background:#020617;
+      border:1px solid #1f2937;
+      border-radius:14px;
+      padding:18px 18px 20px;
+      box-shadow:0 18px 40px rgba(0,0,0,.45);
+    }
+    h1{
+      margin:0 0 4px;
+      font-size:20px;
+    }
+    p.desc{
+      margin:0 0 16px;
+      font-size:13px;
+      color:#9ca3af;
+    }
+    .grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+      gap:12px 16px;
+      margin-bottom:16px;
+    }
+    label{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      font-size:13px;
+    }
+    input, select, textarea{
+      border-radius:8px;
+      border:1px solid #1f2937;
+      padding:7px 10px;
+      font-size:13px;
+      background:#020617;
+      color:#e5e7eb;
+      outline:none;
+    }
+    input:focus, select:focus, textarea:focus{
+      border-color:#22c55e;
+      box-shadow:0 0 0 1px rgba(34,197,94,.3);
+    }
+    textarea{
+      width:100%;
+      resize:vertical;
+      min-height:90px;
+      font-family:ui-monospace,Menlo,Consolas,monospace;
+      white-space:pre;
+    }
+    .actions{
+      display:flex;
+      gap:8px;
+      margin-bottom:16px;
+    }
+    button{
+      border-radius:999px;
+      border:1px solid #16a34a;
+      background:linear-gradient(135deg,#22c55e,#16a34a);
+      color:#022c22;
+      padding:7px 16px;
+      font-size:13px;
+      cursor:pointer;
+      font-weight:600;
+    }
+    button.secondary{
+      border-color:#4b5563;
+      background:#020617;
+      color:#e5e7eb;
+    }
+    button:disabled{
+      opacity:.6;
+      cursor:not-allowed;
+    }
+    h2{
+      font-size:14px;
+      margin:12px 0 4px;
+    }
+    small.hint{
+      font-size:11px;
+      color:#9ca3af;
+    }
+    @media (max-width:640px){
+      body{padding:12px;}
+      .card{padding:14px;}
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Gerador de SQL – Quota de E-mail</h1>
+    <p class="desc">
+      Digite o CNPJ/CPF da empresa e os valores desejados. O sistema gera um
+      <code>SELECT</code> para conferência e um <code>UPDATE</code> para aplicar.
+    </p>
+
+    <div class="grid">
+      <label>
+        CNPJ/CPF da empresa
+        <input id="cnpj" placeholder="Ex.: 12.345.678/0001-90" autocomplete="off">
+      </label>
+
+      <label>
+        Override de contas de e-mail
+        <input id="override" type="number" min="0"
+               placeholder="Ex.: 3 (deixa o botão de adicionar ativo)">
+        <small class="hint">
+          Campo <code>max_email_accounts_override</code>. Se vazio, não altera.
+        </small>
+      </label>
+
+      <label>
+        Plano de e-mail (email_assinatura)
+        <select id="plan">
+          <option value="">(não alterar)</option>
+          <option value="MANUAL-ONLY">MANUAL-ONLY (sem cobrança)</option>
+          <option value="BRONZE">BRONZE</option>
+          <option value="PRATA">PRATA</option>
+          <option value="OURO">OURO</option>
+          <option value="DIAMANTE">DIAMANTE</option>
+        </select>
+        <small class="hint">
+          Se vazio, o campo não é alterado.
+        </small>
+      </label>
+
+      <label>
+        Máx. contas no plano pago
+        <input id="paidMax" type="number" min="0"
+               placeholder="Ex.: 5 (opcional)">
+        <small class="hint">
+          Campo <code>email_paid_max_accounts</code>. Se vazio, usa default do tier.
+        </small>
+      </label>
+
+      <label>
+        Trial de e-mail (email_trial_tier)
+        <select id="trialTier">
+          <option value="">(não alterar)</option>
+          <option value="TRIAL1">TRIAL1 (1 conta)</option>
+          <option value="TRIAL2">TRIAL2 (3 contas)</option>
+        </select>
+        <small class="hint">
+          Define o tipo de trial ativo. Expiração é outro campo.
+        </small>
+      </label>
+    </div>
+
+    <div class="actions">
+      <button id="btnGen" type="button">Gerar SQL</button>
+      <button id="btnClear" type="button" class="secondary">Limpar</button>
+    </div>
+
+    <h2>1. SELECT (para conferir antes/depois)</h2>
+    <textarea id="sqlSelect" readonly></textarea>
+
+    <h2>2. UPDATE (aplicar alterações)</h2>
+    <textarea id="sqlUpdate" readonly></textarea>
+
+    <p class="desc" style="margin-top:10px">
+      Copie os comandos e rode no seu Postgres (psql, DBeaver, Supabase, etc).
+      Faça sempre um backup ou um <code>BEGIN;</code> / <code>ROLLBACK;</code> se estiver testando.
+    </p>
+  </div>
+
+  <script>
+    (function(){
+      const $ = sel => document.querySelector(sel);
+
+      function normalizarCnpjCpf(v){
+        // remove tudo que não for dígito
+        return (v || "").replace(/[^\d]/g, "");
+      }
+
+      function gerarSQL(){
+        const rawCnpj = $('#cnpj').value.trim();
+        if (!rawCnpj){
+          alert('Informe o CNPJ/CPF da empresa.');
+          return;
+        }
+        const cnpj = normalizarCnpjCpf(rawCnpj);
+
+        const overrideVal = $('#override').value.trim();
+        const plan = $('#plan').value;
+        const paidMaxVal = $('#paidMax').value.trim();
+        const trialTier = $('#trialTier').value;
+
+        const sets = [];
+
+        if (overrideVal !== ""){
+          const n = parseInt(overrideVal, 10);
+          if (Number.isNaN(n) || n < 0){
+            alert('Override de contas deve ser um número inteiro maior ou igual a 0.');
+            return;
+          }
+          sets.push(`max_email_accounts_override = ${n}`);
+        }
+
+        if (plan !== ""){
+          sets.push(`email_assinatura = '${plan}'`);
+        }
+
+        if (paidMaxVal !== ""){
+          const m = parseInt(paidMaxVal, 10);
+          if (Number.isNaN(m) || m < 0){
+            alert('Máx. contas no plano pago deve ser número inteiro >= 0.');
+            return;
+          }
+          sets.push(`email_paid_max_accounts = ${m}`);
+        }
+
+        if (trialTier !== ""){
+          sets.push(`email_trial_tier = '${trialTier}'`);
+        }
+
+        if (!sets.length){
+          alert('Preencha pelo menos um campo (override, plano, etc.) para gerar o UPDATE.');
+          return;
+        }
+
+        const whereClause = `cnpj_cpf = '${cnpj}'`;
+
+        const selectSql =
+`SELECT id, nome, cnpj_cpf,
+       email_assinatura, email_assinatura_expira_em,
+       email_paid_max_accounts,
+       email_trial_tier, email_trial_expires_at,
+       max_email_accounts_override
+  FROM empresas
+ WHERE ${whereClause};`;
+
+        const updateSql =
+`UPDATE empresas
+   SET ${sets.join(',\n       ')}
+ WHERE ${whereClause};`;
+
+        $('#sqlSelect').value = selectSql;
+        $('#sqlUpdate').value = updateSql;
+      }
+
+      $('#btnGen').addEventListener('click', gerarSQL);
+
+      $('#btnClear').addEventListener('click', function(){
+        $('#cnpj').value = '';
+        $('#override').value = '';
+        $('#plan').value = '';
+        $('#paidMax').value = '';
+        $('#trialTier').value = '';
+        $('#sqlSelect').value = '';
+        $('#sqlUpdate').value = '';
+      });
+    })();
+  </script>
+</body>
+</html>

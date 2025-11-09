@@ -244,23 +244,60 @@ function toggleSendingUI(disabled){
   /* ===================== ENVIO SEM OTIMISMO ===================== */
   async function enviarTexto(){
     const text = (inputMsg.value||'').trim();
-    if (!text || !state.clienteSel) return;
+    if (!text) return;
+
+    // garante que tem cliente + telefone
+    const cli = state?.clienteSel || {};
+    const rawTel = cli.telefone || cli.whatsapp || cli.numero || '';
+    if (!rawTel){
+      toast('Contato sem telefone válido. Recarregue a tela ou edite o cadastro.', false);
+      console.warn('[send/text] clienteSel sem telefone', cli);
+      return;
+    }
+
+    const numE164 = numeroE164(rawTel);
+    if (!numE164){
+      toast('Telefone do contato inválido. Verifique o cadastro.', false);
+      console.warn('[send/text] numeroE164 retornou vazio', { rawTel, cli });
+      return;
+    }
 
     toggleSendingUI(true);
+
     try{
-      const body = {
-        empresa_id: EMPRESA_ID,
-        number: numeroE164(state.clienteSel.telefone||''),
+      const payload = {
+        empresa_id: EMPRESA_ID || undefined,
+        number: numE164,
         text,
         ...getInstPayload(),
       };
+
+      // ajuda pra debugar se der pau de novo
+      window.__debugLastSendPayload = payload;
+
       const r = await fetch('/api/atendimento/send/text', {
-        method:'POST', headers:{'Content-Type':'application/json'},
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(body)
+        body: JSON.stringify(payload),
       });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const resp = await r.json().catch(()=>null);
+
+      const respText = await r.text().catch(() => '');
+      let respJson = null;
+      try { respJson = respText ? JSON.parse(respText) : null; } catch {}
+
+      if (!r.ok) {
+        console.error('[send/text] HTTP', r.status, respText || respJson);
+        // tenta extrair mensagem amigável do backend
+        const msg =
+          (respJson && (respJson.detail || respJson.message || respJson.error)) ||
+          (r.status === 400 ? 'Dados inválidos (número ou instância).' : 'Falha ao enviar.');
+        toast(msg, false);
+        return;
+      }
+
+      // se chegou aqui, deu boa
+      const resp = respJson;
 
       const instName = resp?.instance_name ?? resp?.db?.instance_name ?? null;
       const instId   = resp?.db?.instancia_id ?? resp?.instancia_id ?? null;
@@ -269,15 +306,16 @@ function toggleSendingUI(disabled){
         try { window.setInstanceChip?.(instName ?? String(instId ?? '')); } catch {}
       }
 
-      inputMsg.value='';
+      inputMsg.value = '';
       toggleSendMic();
     }catch(e){
-      console.error('[send/text]', e);
+      console.error('[send/text] erro inesperado', e);
       toast('Falha ao enviar.', false);
     }finally{
       toggleSendingUI(false);
     }
   }
+
 
   btnSend.addEventListener('click', enviarTexto);
   inputMsg.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); enviarTexto(); } });

@@ -839,7 +839,7 @@ tbody tr.drop-target{outline:2px dashed var(--ring);outline-offset:-2px}
   table{min-width:0!important;table-layout:fixed;width:100%}
   th,td{padding:.7rem .6rem}
 
-  /* 🔧 Esconde só ID, depto superior e ações – mantém instâncias visíveis */
+  /* Esconde só ID, depto superior e ações — mantém instâncias (coluna 5) */
   thead th:nth-child(1),
   tbody td:nth-child(1),
   thead th:nth-child(4),
@@ -1145,7 +1145,7 @@ body.compact-deptos .node-card.is-root{max-width:260px;}
     opacity:.65;
     margin-bottom:.15rem;
   }
-  /* 🔧 Label para coluna de instâncias no card (mobile) */
+  /* Label pra coluna de instâncias nos cards */
   .tree-table td:nth-child(5)::before{
     content:"WhatsApps";
     display:block;
@@ -1159,4 +1159,70 @@ body.compact-deptos .node-card.is-root{max-width:260px;}
     padding-top:.35rem;
   }
   .indent,.twisty{display:none!important}
+}
+
+/* ========= UNIFICAR VISUAL DAS LISTAS (sugestões / whats / parent) ========= */
+.dropdown-suggestions,
+#whats-panel,
+#parent-panel{
+  display:none;
+  position:absolute;
+  z-index:60;
+  left:0;
+  top:calc(100% + 6px);
+  min-width:260px;
+  width:min(420px,100%);
+  max-height:240px;
+  overflow:auto;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:.6rem;
+  box-shadow:0 10px 30px rgba(0,0,0,.25);
+}
+
+.dropdown-suggestions.open,
+#whats-panel.open,
+#parent-panel.open{
+  display:block;
+  animation:dd-fade-down .22s ease-out;
+}
+
+/* itens iguais nas 3 listas */
+.dropdown-suggestions .dd-item,
+#whats-panel .dd-item,
+#parent-panel .dd-item{
+  padding:.55rem .75rem;
+  cursor:pointer;
+  border-bottom:1px solid color-mix(in oklab, var(--border) 70%, transparent);
+}
+.dropdown-suggestions .dd-item:last-child,
+#whats-panel .dd-item:last-child,
+#parent-panel .dd-item:last-child{
+  border-bottom:0;
+}
+.dropdown-suggestions .dd-item:hover,
+#whats-panel .dd-item:hover,
+#parent-panel .dd-item:hover{
+  background:var(--hover);
+}
+
+/* animação em cascata nas 3 */
+.dropdown-suggestions.open .dd-item,
+#whats-panel.open .dd-item,
+#parent-panel.open .dd-item{
+  opacity:0;
+  transform:translateY(-4px);
+  animation:dd-item-down .45s ease-out forwards;
+  animation-delay:calc(var(--i,0) * 120ms);
+}
+
+/* dentro do modal: tudo empurra o conteúdo */
+.modal-card .fi.fi-nome .dropdown-suggestions,
+.modal-card #whats-panel,
+.modal-card #parent-panel{
+  position:static!important;
+  width:100%;
+  max-height:300px;
+  margin-top:6px;
+  z-index:auto;
 }
