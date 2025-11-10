@@ -23,6 +23,7 @@ def _get_float(env: str, default: float) -> float:
     except Exception:
         return default
 
+
 SEND_TIMEOUT = _get_float("WS_SEND_TIMEOUT", 2.5)            # segundos
 KEEPALIVE_SEC = _get_float("WS_KEEPALIVE_SEC", 25)           # segundos
 SNAPSHOT_MAX_BYTES = int(float(os.getenv("WS_SNAPSHOT_MAX_BYTES", "1048576")))  # 1MB
@@ -59,7 +60,6 @@ def _inject_server_ts(data: Any) -> Any:
     """Adiciona serverTimestamp (ms) ao payload se for dict; não muta o original."""
     if isinstance(data, dict):
         if "serverTimestamp" not in data:
-            # shallow copy
             d = dict(data)
             d["serverTimestamp"] = _now_ms()
             return d
@@ -117,6 +117,7 @@ class WebSocketManager:
             old = bucket.get(cid_eff)
             bucket[cid_eff] = websocket
 
+        # fecha conexão antiga com o mesmo cid (dedupe)
         if old and old is not websocket:
             try:
                 await old.close()
@@ -315,22 +316,30 @@ async def ws_topic(
     # Keepalive (ping) — o cliente responde com 'pong'
     stop_keepalive = asyncio.Event()
 
-    async def _keepalive():
+    async def _keepalive() -> None:
+        if KEEPALIVE_SEC <= 0:
+            return
         try:
             while not stop_keepalive.is_set():
-                await asyncio.wait_for(stop_keepalive.wait(), timeout=KEEPALIVE_SEC)
-                if stop_keepalive.is_set():
-                    break
                 try:
-                    await ws.send_text("ping")
-                except Exception:
+                    # espera KEEPALIVE_SEC por um "stop"
+                    await asyncio.wait_for(stop_keepalive.wait(), timeout=KEEPALIVE_SEC)
+                    # se não deu TimeoutError, o evento foi setado -> sair
                     break
+                except asyncio.TimeoutError:
+                    # timeout normal -> manda ping
+                    try:
+                        await ws.send_text("ping")
+                    except Exception:
+                        break
         except asyncio.CancelledError:
             pass
         except Exception as e:
             log.debug("WS keepalive erro topic=%s cid=%s: %s", topic, cid_eff, e)
 
-    ka_task = asyncio.create_task(_keepalive())
+    ka_task: Optional[asyncio.Task] = None
+    if KEEPALIVE_SEC > 0:
+        ka_task = asyncio.create_task(_keepalive())
 
     try:
         while True:
@@ -350,21 +359,25 @@ async def ws_topic(
                 break
 
             txt = msg.get("text") if isinstance(msg, dict) else None
-            if isinstance(txt, str) and txt.strip().lower() == "ping":
-                try:
-                    await ws.send_text("pong")
-                except Exception:
-                    break
-            # (Se quiser, trate aqui mensagens do cliente -> servidor)
+            if isinstance(txt, str):
+                txt_l = txt.strip().lower()
+                if txt_l == "ping":
+                    # cliente pingando o servidor
+                    try:
+                        await ws.send_text("pong")
+                    except Exception:
+                        break
+                # aqui você pode tratar outras mensagens do cliente -> servidor
     except Exception as e:
         log.warning("WS error topic=%s cid=%s: %s", topic, cid_eff, e)
     finally:
         try:
             stop_keepalive.set()
-            try:
-                ka_task.cancel()
-            except Exception:
-                pass
+            if ka_task is not None:
+                try:
+                    ka_task.cancel()
+                except Exception:
+                    pass
             await conexoes_ativas.disconnect(ws, topic, cid=cid_eff)
         except Exception:
             pass
