@@ -18,7 +18,7 @@ from fastapi.exception_handlers import http_exception_handler as fastapi_http_ex
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-# Routers / Integrations
+# Routers / Integration
 from backend.routers import atendimento_conversas
 from backend.routers import internal_chat as internal_chat_router
 from backend.integrations.remove_instance import router as remove_instance_router
@@ -91,6 +91,14 @@ DEV_ORIGINS = [
 
 PROD_ORIGINS = ["https://zapschat.com.br", "https://www.zapschat.com.br"]
 ALLOW_ORIGINS = DEV_ORIGINS if ENV == "dev" else PROD_ORIGINS
+
+# ---- Flags de integração Evolution/Rabbit ----
+# Se tiver URI de Rabbit, ligamos o consumer (fonte oficial das mensagens)
+USE_RABBIT = bool(os.getenv("RABBITMQ_URI"))
+
+# WebSocket da Evolution só liga se essa env for "true"
+# (e mesmo assim, com FULL_EVENTS_WS sem MESSAGES_*, ele fica só pra QR/connection)
+USE_EVO_WS = os.getenv("EVOLUTION_WS_SUBSCRIBE", "true").lower() == "true"
 
 # Cookies / CSRF
 # Obs.: para os cookies de sessão (login) já usamos lógica automática no auth.py.
@@ -946,28 +954,51 @@ LOG("Handlers Evolution/WebSocket prontos (via HANDLERS do evo_handlers).")
 @app.on_event("startup")
 async def _start_integrations():
     import time
+    # 1) Garante DB de pé
     for i in range(10):
         try:
             with engine.begin() as conn:
                 conn.exec_driver_sql("SELECT 1")
                 Base.metadata.create_all(bind=conn)
-            LOG("[STARTUP] DB ok e tabelas garantidas."); break
+            LOG("[STARTUP] DB ok e tabelas garantidas.")
+            break
         except Exception as e:
-            LOG(f"[STARTUP][DB] tentativa {i+1}/10 falhou: {e}"); time.sleep(2)
+            LOG(f"[STARTUP][DB] tentativa {i+1}/10 falhou: {e}")
+            time.sleep(2)
 
     loop = asyncio.get_running_loop()
     app.state.loop = loop
 
-    rabbit_task, rabbit_stop = start_rabbit_consumer(loop, HANDLERS, EvoEvent)
-    app.state.rabbit_task = rabbit_task
-    app.state.rabbit_stop = rabbit_stop
+    # 2) RabbitMQ = fonte oficial das mensagens
+    if USE_RABBIT:
+        try:
+            rabbit_task, rabbit_stop = start_rabbit_consumer(loop, HANDLERS, EvoEvent)
+            app.state.rabbit_task = rabbit_task
+            app.state.rabbit_stop = rabbit_stop
+            LOG("[STARTUP] RabbitMQ consumer ligado.")
+        except Exception as e:
+            LOG(f"[STARTUP][Rabbit] falha ao iniciar consumer: {e}")
+    else:
+        LOG("[STARTUP] RabbitMQ desabilitado (sem RABBITMQ_URI).")
 
-    # 🔹 AGUARDA o listener do Evolution (não bloqueia: ele retorna (task, stop))
-    evo_ret = await start_evo_ws_listener(loop, HANDLERS, EvoEvent)
-    if isinstance(evo_ret, tuple) and len(evo_ret) == 2 and evo_ret[0] is not None:
-        app.state.evo_task, app.state.evo_stop = evo_ret
+    # 3) WebSocket da Evolution = opcional (QR / connection)
+    if USE_EVO_WS:
+        try:
+            evo_ret = await start_evo_ws_listener(loop, HANDLERS, EvoEvent)
+            if isinstance(evo_ret, tuple) and len(evo_ret) == 2 and evo_ret[0] is not None:
+                app.state.evo_task, app.state.evo_stop = evo_ret
+            LOG("[STARTUP] Evolution WS listener ligado.")
+        except Exception as e:
+            LOG(f"[STARTUP][EvoWS] falha ao iniciar listener: {e}")
+    else:
+        LOG("[STARTUP] Evolution WS listener desabilitado (EVOLUTION_WS_SUBSCRIBE != 'true').")
 
-    LOG("[STARTUP] RabbitMQ consumer + Evo WS listener ligados.")
+    # 4) Aviso se os dois estiverem ativos ao mesmo tempo
+    if USE_RABBIT and USE_EVO_WS:
+        LOG("⚠ RabbitMQ + Evolution WS ativos. "
+            "Mensagens já estão limitadas ao Rabbit; WS fica só para QR/connection.")
+
+
 
 @app.on_event("shutdown")
 async def _stop_integrations():

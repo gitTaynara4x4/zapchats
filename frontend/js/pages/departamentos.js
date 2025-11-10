@@ -94,13 +94,13 @@
 
     // Whats (instâncias)
     instâncias: [],
-    instancias: [],          // (mantém compatibilidade, usaremos só instancias)
+    instancias: [],          // compat
     instanciasLoaded: false,
     whatsSelected: new Set(),
 
     // Animações
-    animateNext: false,     // ativa “stagger” na próxima render
-    highlightId: null       // id a destacar após salvar
+    animateNext: false,
+    highlightId: null
   };
 
   const PZ = { MIN: 0.5, MAX: 2.5, STEP: 1.2 };
@@ -289,6 +289,13 @@
     };
     state.nested.forEach(n => push(n, 0));
     selParent.value = selVal;
+
+    // atualiza o botão do dropdown custom e a lista (se estiver aberta)
+    setParentButtonText();
+    const parentPanel = $('#parent-panel');
+    if (parentPanel && parentPanel.classList.contains('open')) {
+      renderParentList();
+    }
   }
 
   // ===== Render — TABELA =====
@@ -349,7 +356,6 @@
       `.trim();
       tbody.appendChild(tr);
 
-      // índice para delay em cascata (CSS usa --stg)
       tr.style.setProperty('--stg', String(i - 1));
 
       if (!IS_MOBILE){
@@ -372,7 +378,6 @@
 
     state.nested.forEach(n => drawNode(n, 0));
 
-    // ===== animação em cascata na render =====
     if (state.animateNext) {
       $$('#tb-deptos tr').forEach((tr, idx) => {
         tr.classList.add('anim-enter');
@@ -382,7 +387,6 @@
       state.animateNext = false;
     }
 
-    // ===== destaque do item novo/atualizado =====
     if (state.highlightId) {
       const tr = $(`#tb-deptos tr[data-id="${state.highlightId}"]`);
       if (tr) {
@@ -480,7 +484,6 @@
     const inner = document.createElement('div');
     inner.className = 'org-inner';
 
-    // Raiz Empresa
     const rootLi = document.createElement('li');
     const rootCard = buildNodeCard({ id: 0, nome: state.companyName || 'Empresa', path: [], ativo:true }, true);
     rootLi.appendChild(rootCard);
@@ -550,7 +553,6 @@
     twist.className = 'node-twisty' + ((n.children?.length) ? '' : ' is-leaf');
     twist.innerHTML = (n.children?.length ? '<i class="fa-solid fa-chevron-right" aria-hidden="true"></i>' : '');
 
-    // só a setinha abre/fecha — clique perto não deve fazer nada
     twist.addEventListener('click', (ev)=>{
       ev.stopPropagation();
       if (!n.children?.length) return;
@@ -559,7 +561,6 @@
       else state.expanded.add(n.id);
       renderOrg();
     });
-    // bloquear “pointerdown” para não iniciar pan ao clicar na seta
     twist.addEventListener('pointerdown', ev => ev.stopPropagation());
 
     head.appendChild(title); head.appendChild(twist);
@@ -694,7 +695,7 @@
     const INTERACTIVE = '.node-twisty, .node-actions .btn, .td-actions .btn, button, [role="button"], a, input, select, textarea';
 
     const onPointerDown = (e)=>{
-      if (e.target?.closest?.(INTERACTIVE)) return; // não pan em áreas interativas
+      if (e.target?.closest?.(INTERACTIVE)) return;
       if (e.pointerType === 'mouse'){
         if (e.button !== 0) return;
         viewport.setPointerCapture?.(e.pointerId);
@@ -787,13 +788,13 @@
     document.documentElement.classList.remove('modal-open');
     modal.classList.remove('is-new');
     document.removeEventListener('keydown', onEscClose);
-    // fecha dropdowns abertos
     $('#nome-dropdown')?.classList.remove('open');
     if (whatsPanel) whatsPanel.classList.remove('open');
     if (whatsBtn){
       whatsBtn.setAttribute('aria-expanded','false');
       whatsBtn.classList.remove('is-open');
     }
+    toggleParentPanel(false);
   }
   function onEscClose(e){ if (e.key === 'Escape') closeModal(); }
 
@@ -813,6 +814,7 @@
     txtDesc.value = '';
     chkAtivo.checked = true;
     selParent.value = parentId ? String(parentId) : '';
+    setParentButtonText();
     modalTit.textContent = 'Novo departamento';
     modal.classList.add('is-new');
 
@@ -831,6 +833,7 @@
     txtDesc.value = item.descricao || '';
     chkAtivo.checked = !!item.ativo;
     selParent.value = item.parent_id ? String(item.parent_id) : '';
+    setParentButtonText();
     modalTit.textContent = 'Editar departamento';
     modal.classList.remove('is-new');
 
@@ -892,14 +895,12 @@
       toast('Salvo com sucesso.');
       closeModal();
 
-      // prepara animações para a próxima render
       state.animateNext = true;
       const returnedId = Number(saved?.id ?? saved?.dep_id ?? saved?.depto_id ?? saved?.ID);
       state.highlightId = Number.isFinite(returnedId) ? returnedId : (state.editing ? state.editing.id : null);
 
       await loadTree();
 
-      // se estiver no organograma, tenta destacar o card correspondente também
       if (state.view === 'org' && state.highlightId){
         setTimeout(() => {
           const btn = document.querySelector(`.node-actions .btn[data-id="${state.highlightId}"]`);
@@ -1078,6 +1079,92 @@
     window.addEventListener('resize', ()=> toggleWhatsPanel(false));
   }
 
+  // ===== Departamento superior (dropdown simples, visual igual às listas) =====
+  function setParentButtonText(){
+    const btn = $('#parent-btn');
+    if (!btn || !selParent) return;
+    const opt = selParent.options[selParent.selectedIndex];
+    btn.textContent = opt ? opt.textContent : 'Empresa (raiz)';
+  }
+
+  function renderParentList(){
+    const panel = $('#parent-panel');
+    if (!panel || !selParent) return;
+
+    panel.innerHTML = '';
+
+    const makeItem = (text, value) => {
+      const div = document.createElement('div');
+      div.className = 'dd-item';
+      div.textContent = text;
+      div.dataset.value = value;
+
+      if (String(selParent.value || '') === String(value || '')) {
+        div.style.fontWeight = '700';
+      }
+
+      div.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        selParent.value = value;
+        setParentButtonText();
+        updatePathPreview();
+        toggleParentPanel(false);
+      });
+
+      panel.appendChild(div);
+    };
+
+    makeItem('Empresa (raiz)', '');
+
+    const dash = '\u2014 ';
+    const push = (n, level=0) => {
+      makeItem(`${dash.repeat(level)}${labelOf(n)}`, String(n.id));
+      n.children.forEach(c => push(c, level+1));
+    };
+    state.nested.forEach(n => push(n, 0));
+  }
+
+  function toggleParentPanel(open){
+    const panel = $('#parent-panel');
+    const btn = $('#parent-btn');
+    if (!panel || !btn) return;
+
+    if (open === undefined) open = !panel.classList.contains('open');
+
+    if (open){
+      panel.classList.add('open');
+      btn.classList.add('is-open');
+      renderParentList();
+    }else{
+      panel.classList.remove('open');
+      btn.classList.remove('is-open');
+    }
+
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  function bindParentDropdown(){
+    const btn = $('#parent-btn');
+    const panel = $('#parent-panel');
+    if (!btn || !panel) return;
+
+    btn.addEventListener('click', () => toggleParentPanel());
+
+    document.addEventListener('pointerdown', (e) => {
+      if (!panel.classList.contains('open')) return;
+      if (!e.target.closest?.('#fi-parent')) toggleParentPanel(false);
+    });
+
+    const modalBody = document.querySelector('#modal-depto .modal-body');
+    modalBody?.addEventListener('scroll', () => toggleParentPanel(false));
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') toggleParentPanel(false);
+    });
+
+    window.addEventListener('resize', () => toggleParentPanel(false));
+  }
+
   // ===== Bind =====
   function bind(){
     filtro.addEventListener('input', debounce(()=>{
@@ -1099,7 +1186,6 @@
       if (state.view==='org') queueWireDraw();
     });
 
-    // Toggle de visualização
     btnViewTable.addEventListener('click', ()=>{
       state.view = 'table';
       btnViewTable.classList.add('is-active'); btnViewTable.setAttribute('aria-selected','true');
@@ -1117,7 +1203,6 @@
       renderOrg();
     });
 
-    // ações dos botões (edit/add/delete)
     document.addEventListener('click', (e)=>{
       const b = e.target.closest?.('[data-action]');
       if (!b) return;
@@ -1132,7 +1217,6 @@
       }
     });
 
-    // Dropdown de sugestões (Nome)
     const dd = $('#nome-dropdown');
     const openDD = ()=>{
       openNomeDropdown();
@@ -1160,6 +1244,9 @@
 
     // Whats
     bindWhats();
+
+    // Departamento superior (dropdown custom)
+    bindParentDropdown();
 
     // Prévia
     inpNome.addEventListener('input', updatePathPreview);
@@ -1232,7 +1319,6 @@
 
     bind();
 
-    // Decide view antes de carregar
     if (IS_MOBILE){
       state.view = 'table';
       if (btnViewOrg){

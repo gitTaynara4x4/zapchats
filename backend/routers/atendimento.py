@@ -349,6 +349,7 @@ INTERNAL_BROADCAST_KEY = os.getenv("INTERNAL_BROADCAST_KEY")
 async def broadcast_msg(
     dados: dict,
     x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
+    db: Session = Depends(get_db),
 ):
     """
     Recebe eventos EXTERNOS e propaga via WebSocket.
@@ -359,32 +360,112 @@ async def broadcast_msg(
       para qualquer empresa).
 
     Comportamento:
-    - Para ACK isolado (sem mensagem/tipo), inclui `cliente_id` no payload.
+    - Para ACK isolado (sem mensagem/tipo), inclui `cliente_id` no payload
+      e agora também atualiza o ACK no banco.
     - Para mensagens, inclui `midias` no mesmo formato usado pelo histórico.
     - Faz pass-through de `instancia_id` e `instance_name`.
-    - Invalida cache de conversas/clientes da empresa.
     """
+
+    # --- segurança: chave interna obrigatória se configurada ---
     if INTERNAL_BROADCAST_KEY:
         if not x_internal_key or x_internal_key != INTERNAL_BROADCAST_KEY:
-            raise HTTPException(status_code=403, detail="Chave interna inválida para broadcast")
+            raise HTTPException(
+                status_code=403,
+                detail="Chave interna inválida para broadcast",
+            )
 
-    mensagem = dados.get("mensagem") or dados.get("texto") or dados.get("message") or ""
-    tipo = dados.get("tipo") or dados.get("direction") or ""  # "entrada" | "saida"
+    # normalização básica dos campos de mensagem
+    mensagem = (
+        dados.get("mensagem")
+        or dados.get("texto")
+        or dados.get("message")
+        or ""
+    )
+    # "entrada" | "saida"
+    tipo = dados.get("tipo") or dados.get("direction") or ""
+
+    # ACK isolado = veio ack mas não veio mensagem nem tipo
     is_ack_isolado = dados.get("ack") is not None and not mensagem and not tipo
 
-    ts_bruto = dados.get("timestamp") or dados.get("hora") or dados.get("created_at") or dados.get("ts")
+    ts_bruto = (
+        dados.get("timestamp")
+        or dados.get("hora")
+        or dados.get("created_at")
+        or dados.get("ts")
+    )
     ts_formatado = _parse_timestamp(ts_bruto)
 
     if is_ack_isolado:
+        # ------------------------------------------------------------------
+        # CASO 1: ACK isolado (sem mensagem)
+        # ------------------------------------------------------------------
+        empresa_id = dados.get("empresa_id")
+        msg_id = dados.get("msg_id")
+        ack_raw = dados.get("ack")
+
         # tenta carregar cliente_id do próprio payload
         cliente_id = dados.get("cliente_id")
 
+        # se não veio cliente_id, tenta descobrir via banco pelo msg_id
+        if cliente_id is None and empresa_id and msg_id:
+            try:
+                row = (
+                    db.query(models.Mensagem.cliente_id)
+                    .filter(
+                        models.Mensagem.empresa_id == int(empresa_id),
+                        models.Mensagem.msg_id == str(msg_id),
+                    )
+                    .order_by(models.Mensagem.id.desc())
+                    .first()
+                )
+                if row and row[0] is not None:
+                    cliente_id = int(row[0])
+            except Exception:
+                # se der erro aqui, só seguimos sem cliente_id
+                pass
+
+        # --- atualiza ACK no banco (para mensagens de SAÍDA) ---
+        try:
+            new_ack: Optional[int] = None
+            if ack_raw is not None:
+                # normalmente vem "0", "1", "2", "3"...
+                try:
+                    new_ack = int(ack_raw)
+                except Exception:
+                    new_ack = None
+
+            if (
+                new_ack is not None
+                and new_ack > 0
+                and empresa_id
+                and msg_id
+            ):
+                (
+                    db.query(models.Mensagem)
+                    .filter(
+                        models.Mensagem.empresa_id == int(empresa_id),
+                        models.Mensagem.msg_id == str(msg_id),
+                        models.Mensagem.tipo == "saida",
+                    )
+                    # só aumenta ACK, nunca regride
+                    .filter(func.coalesce(models.Mensagem.ack, 0) < new_ack)
+                    .update({"ack": new_ack}, synchronize_session=False)
+                )
+                db.commit()
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            print("[BROADCAST][ACK-ONLY][DB-ERROR]", e)
+
+        # payload que vai pro WS
         payload = {
             "type": "ack",
-            "empresa_id": dados.get("empresa_id"),
-            "msg_id": dados.get("msg_id"),
-            "ack": dados.get("ack"),
-            "cliente_id": cliente_id,  # <- ESSENCIAL p/ front atualizar em tempo real
+            "empresa_id": empresa_id,
+            "msg_id": msg_id,
+            "ack": ack_raw,
+            "cliente_id": cliente_id,  # ESSENCIAL p/ front atualizar em tempo real
             "timestamp": ts_formatado,
             # pass-through de instância
             "instancia_id": dados.get("instancia_id") or dados.get("instance_id"),
@@ -392,11 +473,14 @@ async def broadcast_msg(
         }
 
     else:
+        # ------------------------------------------------------------------
+        # CASO 2: mensagem “normal” (entrada/saída), opcionalmente com midias
+        # ------------------------------------------------------------------
         payload = {
             "empresa_id": dados.get("empresa_id"),
             "cliente_id": dados.get("cliente_id"),
             "mensagem": mensagem,
-            "tipo": tipo,
+            "tipo": tipo,  # "entrada" | "saida"
             "timestamp": ts_formatado,
             "msg_id": dados.get("msg_id"),
             "ack": dados.get("ack"),
@@ -427,10 +511,12 @@ async def broadcast_msg(
                     {
                         "tipo": (a.get("tipo") or a.get("type") or "").lower(),
                         "mimetype": (a.get("mimetype") or a.get("mime") or ""),
-                        "filename": a.get("filename")
-                        or a.get("name")
-                        or a.get("nome_original")
-                        or "",
+                        "filename": (
+                            a.get("filename")
+                            or a.get("name")
+                            or a.get("nome_original")
+                            or ""
+                        ),
                         "url": u,
                     }
                 )

@@ -50,20 +50,25 @@ HISTORY_SLEEP_EVERY       = int(os.getenv("HISTORY_SLEEP_EVERY", "500") or "500"
 DISABLE_MEDIA_ON_HISTORY  = (os.getenv("DISABLE_MEDIA_ON_HISTORY", "true").lower() == "true")
 
 # ======= Listas de eventos completos (ligados só após CONNECTED) =======
+# Evolution WebSocket: só coisas leves (sem mensagens)
 FULL_EVENTS_WS = [
-    "QRCODE_UPDATED", "CONNECTION_UPDATE",
-    "MESSAGES_SET", "MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE",
-    "SEND_MESSAGE",
-    "CONTACTS_SET", "CONTACTS_UPSERT", "CONTACTS_UPDATE",
-    "PRESENCE_UPDATE",
-    "GROUPS_UPSERT", "GROUP_UPDATE", "GROUP_PARTICIPANTS_UPDATE",
+    "QRCODE_UPDATED",
+    "CONNECTION_UPDATE",
 ]
+
 FULL_EVENTS_RABBIT = [
-    "MESSAGES_SET", "MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE",
+    "MESSAGES_SET",
+    "MESSAGES_UPSERT",
+    "MESSAGES_UPDATE",
+    "MESSAGES_DELETE",
     "SEND_MESSAGE",
-    "CONTACTS_SET", "CONTACTS_UPSERT", "CONTACTS_UPDATE",
+    "CONTACTS_SET",
+    "CONTACTS_UPSERT",
+    "CONTACTS_UPDATE",
     "PRESENCE_UPDATE",
-    "GROUPS_UPSERT", "GROUP_UPDATE", "GROUP_PARTICIPANTS_UPDATE",
+    "GROUPS_UPSERT",
+    "GROUP_UPDATE",
+    "GROUP_PARTICIPANTS_UPDATE",
 ]
 
 RABBIT_EXCHANGE = os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange")
@@ -1391,8 +1396,12 @@ HANDLERS[EvoEvent.REMOVE_INSTANCE] = on_logout_instance
 async def on_messages_upsert(inst_id: str, data):
     """
     Mensagens novas/atualizadas (1:1).
-    Agora com LOG detalhado e **emissão em tempo real** no WS da empresa,
-    inclusive quando a mensagem já existir (dedupe pelo msg_id).
+
+    Ajustes importantes:
+    - Quando a mensagem já existe (mesmo msg_id), além de emitir no WS,
+      atualiza o ACK no banco para não "regredir" depois do F5.
+    - Ao final do lote, se houver novas mensagens, invalida o cache de /conversas
+      da empresa para a lista da esquerda refletir o estado real.
     """
     with SessionLocal() as db:
         inst = _get_inst_row(db, inst_id)
@@ -1401,12 +1410,16 @@ async def on_messages_upsert(inst_id: str, data):
             return
 
         empresa_id = inst.empresa_id
-        me_number  = _me_number_by_inst(inst)
+        me_number = _me_number_by_inst(inst)
 
         mensagens = extract_messages_any_shape(data)
-        _log_ctx("[UPsert] batch",
-                 inst=inst_id, empresa_id=empresa_id,
-                 total=len(mensagens), type_data=type(data).__name__)
+        _log_ctx(
+            "[UPsert] batch",
+            inst=inst_id,
+            empresa_id=empresa_id,
+            total=len(mensagens),
+            type_data=type(data).__name__,
+        )
 
         if not mensagens:
             LOG("[UPsert] nenhum item reconhecido em payload.")
@@ -1423,16 +1436,26 @@ async def on_messages_upsert(inst_id: str, data):
                 key = m.get("key") or {}
                 # 1) remote_jid pode vir em key.* ou no nível da mensagem (m.*)
                 raw_remote = (
-                    key.get("remoteJid") or key.get("remote_jid") or
-                    m.get("remoteJid") or m.get("jid") or m.get("chatId") or ""
+                    key.get("remoteJid")
+                    or key.get("remote_jid")
+                    or m.get("remoteJid")
+                    or m.get("jid")
+                    or m.get("chatId")
+                    or ""
                 )
-                msg_id  = key.get("id") or m.get("id")
-                ts_raw  = m.get("messageTimestamp") or m.get("timestamp") or 0
-                status  = m.get("status")
+                msg_id = key.get("id") or m.get("id")
+                ts_raw = m.get("messageTimestamp") or m.get("timestamp") or 0
+                status = m.get("status")
 
-                _log_ctx("[UPsert][in]",
-                         idx=idx, msg_id=msg_id, raw_remote=raw_remote,
-                         keys=list(m.keys())[:15], ts_raw=ts_raw, status=status)
+                _log_ctx(
+                    "[UPsert][in]",
+                    idx=idx,
+                    msg_id=msg_id,
+                    raw_remote=raw_remote,
+                    keys=list(m.keys())[:15],
+                    ts_raw=ts_raw,
+                    status=status,
+                )
 
                 if not raw_remote:
                     _log_skip("sem remoteJid", idx=idx, msg_id=msg_id)
@@ -1443,18 +1466,34 @@ async def on_messages_upsert(inst_id: str, data):
                 resolved_jid = _resolve_remote_jid(inst_id, raw_remote)
                 if _is_lid_jid(original_jid) and not resolved_jid:
                     tel_fallback, alt = _resolve_counterparty_num_1to1(m, me_number)
-                    _log_ctx("[UPsert][lid-fallback]",
-                             idx=idx, msg_id=msg_id, tel_fallback=tel_fallback, alt=_short(alt, 64))
+                    _log_ctx(
+                        "[UPsert][lid-fallback]",
+                        idx=idx,
+                        msg_id=msg_id,
+                        tel_fallback=tel_fallback,
+                        alt=_short(alt, 64),
+                    )
                     if tel_fallback:
                         resolved_jid = f"{tel_fallback}@s.whatsapp.net"
-                        _LID_CACHE.setdefault(inst_id, {})[_jid_strip_device(original_jid)] = resolved_jid
+                        _LID_CACHE.setdefault(inst_id, {})[
+                            _jid_strip_device(original_jid)
+                        ] = resolved_jid
                         try:
-                            _lid_map_set(empresa_id, inst.id, _jid_strip_device(original_jid), resolved_jid)
+                            _lid_map_set(
+                                empresa_id,
+                                inst.id,
+                                _jid_strip_device(original_jid),
+                                resolved_jid,
+                            )
                         except Exception as e:
                             _log_ctx("[UPsert][lid-cache-fail]", err=str(e))
                     else:
-                        _log_skip("JID @lid sem mapping", idx=idx, msg_id=msg_id,
-                                  preview=_short(extract_text_from_baileys(m)))
+                        _log_skip(
+                            "JID @lid sem mapping",
+                            idx=idx,
+                            msg_id=msg_id,
+                            preview=_short(extract_text_from_baileys(m)),
+                        )
                         continue
 
                 remote_jid = resolved_jid or original_jid
@@ -1465,24 +1504,41 @@ async def on_messages_upsert(inst_id: str, data):
                 # 3) extrai telefone; evita eco (meu próprio número)
                 telefone = _remote_to_num(remote_jid)
                 if not telefone:
-                    _log_skip("telefone inválido", idx=idx, msg_id=msg_id, remote_jid=remote_jid)
+                    _log_skip(
+                        "telefone inválido",
+                        idx=idx,
+                        msg_id=msg_id,
+                        remote_jid=remote_jid,
+                    )
                     continue
 
                 if me_number and telefone == me_number:
-                    _log_skip("eco do meu número", idx=idx, msg_id=msg_id, telefone=telefone)
+                    _log_skip(
+                        "eco do meu número",
+                        idx=idx,
+                        msg_id=msg_id,
+                        telefone=telefone,
+                    )
                     continue
 
                 # 4) from_me pode vir em key.* ou m.*
-                from_me   = bool(key.get("fromMe", m.get("fromMe", False)))
+                from_me = bool(key.get("fromMe", m.get("fromMe", False)))
                 push_name = m.get("pushName") or m.get("senderName")
                 formatted = formatar_telefone_br(telefone)
-                ts_msg    = _to_dt_utc(ts_raw)
-                conteudo  = extract_text_from_baileys(m)
+                ts_msg = _to_dt_utc(ts_raw)
+                conteudo = extract_text_from_baileys(m)
 
-                _log_ctx("[UPsert][resolved]",
-                         idx=idx, msg_id=msg_id, remote_jid=remote_jid, telefone=telefone,
-                         from_me=from_me, push_name=_short(push_name, 60),
-                         ts=_iso_utc(ts_msg), preview=_short(conteudo))
+                _log_ctx(
+                    "[UPsert][resolved]",
+                    idx=idx,
+                    msg_id=msg_id,
+                    remote_jid=remote_jid,
+                    telefone=telefone,
+                    from_me=from_me,
+                    push_name=_short(push_name, 60),
+                    ts=_iso_utc(ts_msg),
+                    preview=_short(conteudo),
+                )
 
                 # 5) upsert cliente (retry deadlock) — nome varia se from_me
                 def _up():
@@ -1493,50 +1549,96 @@ async def on_messages_upsert(inst_id: str, data):
                         telefone_raw=telefone,
                         nome=(formatted if from_me else (push_name or formatted)),
                         nome_whatsapp=(formatted if from_me else (push_name or formatted)),
-                        avatar_url=None
+                        avatar_url=None,
                     )
+
                 cli_id = _retry_deadlock(db, _up)
                 if not cli_id:
-                    _log_skip("upsert_cliente retornou None", idx=idx, msg_id=msg_id, telefone=telefone)
+                    _log_skip(
+                        "upsert_cliente retornou None",
+                        idx=idx,
+                        msg_id=msg_id,
+                        telefone=telefone,
+                    )
                     continue
 
-                # 6) dedup por msg_id — **emitir WS mesmo quando duplicada**
-                if msg_id and db.query(models.Mensagem.id).filter_by(cliente_id=cli_id, msg_id=msg_id).first():
-                    _log_skip("duplicada (msg_id)", idx=idx, msg_id=msg_id, cliente_id=cli_id)
-                    # 🔸 Mesmo duplicada no BD, o front precisa receber para:
-                    #    - atualizar preview/lista
-                    #    - tocar badge de não lida (entrada)
-                    #    - renderizar no chat aberto
+                # 6) dedup por msg_id — emitir WS e **atualizar ACK no banco** se já existir
+                if msg_id and db.query(models.Mensagem.id).filter_by(
+                    cliente_id=cli_id, msg_id=msg_id
+                ).first():
+                    _log_skip(
+                        "duplicada (msg_id)", idx=idx, msg_id=msg_id, cliente_id=cli_id
+                    )
+
+                    # ⚠ NOVO: se for mensagem de saída, garantir que o ACK do banco
+                    # seja pelo menos o ACK atual dessa mensagem
+                    if from_me:
+                        try:
+                            new_ack = _ack_from_status(status)
+                            if new_ack > 0:
+                                db.execute(
+                                    text(
+                                        """
+                                        UPDATE mensagens
+                                           SET ack = CASE
+                                                       WHEN COALESCE(ack, 0) < :new_ack THEN :new_ack
+                                                       ELSE ack
+                                                     END
+                                         WHERE cliente_id = :cli_id
+                                           AND msg_id     = :msg_id
+                                           AND tipo       = 'saida'
+                                        """
+                                    ),
+                                    {
+                                        "cli_id": int(cli_id),
+                                        "msg_id": str(msg_id),
+                                        "new_ack": int(new_ack),
+                                    },
+                                )
+                                db.flush()
+                        except Exception as e:
+                            LOG(
+                                f"[UPsert][dup-ack-update-fail] msg_id={msg_id} cli={cli_id} err={e}"
+                            )
+
+                    # Mesmo duplicada no BD, o front precisa receber para:
+                    # - atualizar preview/lista
+                    # - tocar badge de não lida (entrada)
+                    # - renderizar no chat aberto
                     try:
                         cliente = _fetch_cliente(db, cli_id)
                         await conexoes_ativas.send_message(
                             f"emp:{empresa_id}",
                             {
                                 # contexto / roteamento
-                                "empresa_id":  empresa_id,
-                                "cliente_id":  cli_id,
+                                "empresa_id": empresa_id,
+                                "cliente_id": cli_id,
                                 "instancia_id": inst.id,
                                 "instance_name": getattr(inst, "instance_name", None),
-
                                 # dados para a lista/preview
                                 "telefone": formatar_telefone_br(telefone),
-                                "avatar_url": getattr(cliente, "avatar_url", None) if cliente else None,
-                                "push_name": getattr(cliente, "nome_whatsapp", None) if cliente else None,
-                                "nome": getattr(cliente, "nome", None) if cliente else formatted,
-
+                                "avatar_url": getattr(cliente, "avatar_url", None)
+                                if cliente
+                                else None,
+                                "push_name": getattr(cliente, "nome_whatsapp", None)
+                                if cliente
+                                else None,
+                                "nome": getattr(cliente, "nome", None)
+                                if cliente
+                                else formatted,
                                 # conteúdo que o front espera
-                                "mensagem":  conteudo,
-                                "tipo":      ("saida" if from_me else "entrada"),
-                                "origem":    ("atendente" if from_me else "cliente"),
+                                "mensagem": conteudo,
+                                "tipo": ("saida" if from_me else "entrada"),
+                                "origem": ("atendente" if from_me else "cliente"),
                                 "timestamp": _iso_utc(ts_msg),
-
                                 # chaves de conciliação/RT
                                 "msg_id": msg_id,
-                                "ack":    (_ack_from_status(status) if from_me else None),
-
+                                "ack": (
+                                    _ack_from_status(status) if from_me else None
+                                ),
                                 # relógio do servidor para lag/badge
-                                "serverTimestamp": int(_now_utc().timestamp() * 1000),
-                            }
+                                "serverTimestamp": _server_ts_ms(),
+                            },
                         )
                     except Exception as e:
                         LOG(f"[UPsert][ws-dup] falha ao emitir: {e}")
@@ -1557,52 +1659,60 @@ async def on_messages_upsert(inst_id: str, data):
                         ack=ack_initial,
                         timestamp=ts_msg,
                         msg_id=msg_id,
-                        instancia_id=inst.id
+                        instancia_id=inst.id,
                     )
                     _carimbar_inst(msg_model, inst)
-                    db.add(msg_model); db.flush()
+                    db.add(msg_model)
+                    db.flush()
                     return msg_model.id
 
                 msg_db_id = _retry_deadlock(db, _ins_msg)
                 novas += 1
 
-                _log_ctx("[UPsert][saved]",
-                         idx=idx, msg_id=msg_id, saved_id=msg_db_id,
-                         tipo=("saida" if from_me else "entrada"),
-                         ack=ack_initial, ts=_iso_utc(ts_msg),
-                         preview=_short(conteudo))
+                _log_ctx(
+                    "[UPsert][saved]",
+                    idx=idx,
+                    msg_id=msg_id,
+                    saved_id=msg_db_id,
+                    tipo=("saida" if from_me else "entrada"),
+                    ack=ack_initial,
+                    ts=_iso_utc(ts_msg),
+                    preview=_short(conteudo),
+                )
 
-                # 7.1) **EMITIR EM TEMPO REAL** para o WS da empresa
+                # 7.1) EMITIR EM TEMPO REAL para o WS da empresa
                 try:
                     cliente = _fetch_cliente(db, cli_id)
                     await conexoes_ativas.send_message(
                         f"emp:{empresa_id}",
                         {
                             # contexto / roteamento
-                            "empresa_id":  empresa_id,
-                            "cliente_id":  cli_id,
+                            "empresa_id": empresa_id,
+                            "cliente_id": cli_id,
                             "instancia_id": inst.id,
                             "instance_name": getattr(inst, "instance_name", None),
-
                             # dados para a lista/preview
                             "telefone": formatar_telefone_br(telefone),
-                            "avatar_url": getattr(cliente, "avatar_url", None) if cliente else None,
-                            "push_name": getattr(cliente, "nome_whatsapp", None) if cliente else None,
-                            "nome": getattr(cliente, "nome", None) if cliente else formatted,
-
+                            "avatar_url": getattr(cliente, "avatar_url", None)
+                            if cliente
+                            else None,
+                            "push_name": getattr(cliente, "nome_whatsapp", None)
+                            if cliente
+                            else None,
+                            "nome": getattr(cliente, "nome", None)
+                            if cliente
+                            else formatted,
                             # conteúdo que o front espera
-                            "mensagem":  conteudo,
-                            "tipo":      ("saida" if from_me else "entrada"),
-                            "origem":    ("atendente" if from_me else "cliente"),
+                            "mensagem": conteudo,
+                            "tipo": ("saida" if from_me else "entrada"),
+                            "origem": ("atendente" if from_me else "cliente"),
                             "timestamp": _iso_utc(ts_msg),
-
                             # chaves de conciliação/RT
                             "msg_id": msg_id or str(msg_db_id),
-                            "ack":    (ack_initial if from_me else None),
-
+                            "ack": (ack_initial if from_me else None),
                             # para badge de lag
-                            "serverTimestamp": int(_now_utc().timestamp() * 1000),
-                        }
+                            "serverTimestamp": _server_ts_ms(),
+                        },
                     )
                 except Exception as e:
                     LOG(f"[UPsert][ws] falha ao emitir: {e}")
@@ -1614,9 +1724,13 @@ async def on_messages_upsert(inst_id: str, data):
                         _log_ctx("[UPsert][commit]", count=novas)
                     except Exception as e:
                         if _is_deadlock_error(e):
-                            try: db.rollback()
-                            except Exception: pass
-                            _log_ctx("[UPsert][commit-deadlock-rollback]", err=str(e))
+                            try:
+                                db.rollback()
+                            except Exception:
+                                pass
+                            _log_ctx(
+                                "[UPsert][commit-deadlock-rollback]", err=str(e)
+                            )
                         else:
                             raise
 
@@ -1635,14 +1749,24 @@ async def on_messages_upsert(inst_id: str, data):
             _log_ctx("[UPsert][commit-final]", novas=novas)
         except Exception as e:
             if _is_deadlock_error(e):
-                try: db.rollback()
-                except Exception: pass
-                _log_ctx("[UPsert][commit-final-deadlock-rollback]", err=str(e))
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                _log_ctx(
+                    "[UPsert][commit-final-deadlock-rollback]", err=str(e)
+                )
             else:
                 raise
 
-        LOG(f"[UPsert] inst={inst_id} novas={novas}")
+        # ⚠ NOVO: se teve mensagem nova, invalida cache de /conversas da empresa
+        try:
+            if novas > 0 and empresa_id:
+                _invalidate_emp_cache(empresa_id)
+        except Exception:
+            pass
 
+        LOG(f"[UPsert] inst={inst_id} novas={novas}")
 
 @handler(EvoEvent.CALL)
 async def on_call(first: str, payload: dict | list):

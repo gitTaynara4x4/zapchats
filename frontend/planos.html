@@ -75,9 +75,15 @@
     .error{ color:#ef4444; font-size:13px; margin-top:6px }
 
     .kpis{ width:100%; max-width:980px; margin:10px auto 0; display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:.6rem; }
-    .kpi{ background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:.8rem .9rem; }
-    .kpi .lbl{ font-size:.82rem; color:var(--text-secondary); font-weight:800; letter-spacing:.02em }
-    .kpi .val{ font:800 1.05rem/1.2 ui-monospace,Menlo,Consolas,monospace }
+    .kpi{
+      /* deixei sem borda de card pra ficar mais "normal" */
+      background:transparent;
+      border:none;
+      border-radius:0;
+      padding:.15rem 0 .4rem;
+    }
+    .kpi .lbl{ font-size:.8rem; color:var(--text-secondary); font-weight:600; letter-spacing:.02em }
+    .kpi .val{ font:600 0.95rem/1.2 ui-monospace,Menlo,Consolas,monospace }
 
     .section{ width:100%; max-width:980px; margin:10px auto 0; border:1px solid var(--card-border); background:var(--card-bg); border-radius:12px; padding:14px; }
     .section h3{ margin:0 0 8px; font-weight:900; font-size:18px }
@@ -95,73 +101,131 @@
     @media (max-width: 860px){ .card{ grid-template-columns: 1fr } .illustration{ display:none } .app{ width:min(94vw, var(--max-details)) } .kpis{ grid-template-columns: repeat(2,minmax(0,1fr)); } .kv{ grid-template-columns: 1fr; } }
 
     /* ===== PASSO 2 – facelift (cards + tabs) ===== */
+
+    /* faz o bloco de detalhes "encostar" à esquerda dentro do painel */
+    #view-detalhes{
+      align-self:stretch;
+      max-width:100%;
+    }
+
     .summary-bar{
       position: sticky; top: 0; z-index: 5;
       display: flex; align-items: center; justify-content: space-between; gap: .8rem;
-      padding: 10px 12px; margin: 2px 0 10px;
-      border: 1px solid var(--card-border); background: var(--card-bg);
-      border-radius: 12px;
+      padding: 8px 0;              /* sem caixa, só um respiro em cima/baixo */
+      margin: 4px 0 10px;
+      border: none;                /* remove borda */
+      background: transparent;     /* sem card */
+      border-radius: 0;
     }
     .summary-left{ display:flex; align-items:center; gap:.8rem; min-width:0 }
     .company-title{
-      font-weight: 900; font-size: 18px; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      font-weight: 600;            /* fonte mais "normal" */
+      font-size: 16px;
+      line-height: 1.25;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .chips{ display:flex; flex-wrap:wrap; gap:.4rem }
+    .chips{ display:flex; flex-wrap:wrap; gap:.35rem; font-size:.8rem }
     .chip{
-      display:inline-flex; align-items:center; gap:.45rem; padding: .28rem .55rem;
-      border:1px solid var(--card-border); border-radius: 999px; font: 800 .78rem/1 Inter;
-      background: color-mix(in oklab, var(--card-bg) 92%, transparent);
+      display:inline-flex; align-items:center; gap:.3rem;
+      padding: 0;                  /* tira "pill" */
+      border:none;
+      border-radius:0;
+      font: 500 .8rem/1.1 Inter;   /* peso mais leve */
+      background: transparent;
+      color:var(--text-secondary);
     }
+    .chip strong{ font-weight:600; color:var(--text-primary); }
     .dot{ width:8px; height:8px; border-radius:999px; display:inline-block }
     .dot.ok{ background:#22c55e } .dot.off{ background:#9ca3af }
     .summary-right{ display:flex; gap:.5rem }
 
     .section-grid{
-      display:grid; grid-template-columns: 360px 1fr; gap: 12px; align-items:start;
+      display:grid; grid-template-columns: 360px 1fr; gap: 16px; align-items:flex-start;
+      margin-top: 4px;
     }
     @media (max-width: 980px){ .section-grid{ grid-template-columns: 1fr; } }
 
     .card-compact{
-      border:1px solid var(--card-border); background:var(--card-bg); border-radius:12px; padding:12px;
+      /* vira só um bloco simples, sem card */
+      border:none;
+      background:transparent;
+      border-radius:0;
+      padding:0;
+      margin-bottom:10px;
     }
-    .card-compact h3{ margin:0 0 8px; font-weight:900; font-size:16px }
+    .card-compact h3{
+      margin:0 0 4px;
+      font-weight:600;
+      font-size:15px;
+    }
     .kv.kv-tight{ grid-template-columns: 120px 1fr; font-size:13px }
     @media (max-width: 980px){ .kv.kv-tight{ grid-template-columns: 1fr } }
 
-    .kpis.kpis-compact{ grid-template-columns: repeat(4, minmax(0,1fr)); }
+    .kpis.kpis-compact{
+      grid-template-columns: repeat(4, minmax(0,1fr));
+      max-width:none;
+      margin: 4px 0 0;   /* alinhar com resto, sem aquele "cardzão" */
+    }
     @media (max-width: 1160px){ .kpis.kpis-compact{ grid-template-columns: repeat(3, minmax(0,1fr)); } }
     @media (max-width: 760px){ .kpis.kpis-compact{ grid-template-columns: repeat(2, minmax(0,1fr)); } }
 
-    .tabs{ display:flex; gap:6px; border-bottom:1px solid var(--card-border); margin: 8px 0 10px; overflow:auto; }
+    .tabs{
+      display:flex; gap:6px;
+      border-bottom:1px solid var(--card-border);
+      margin: 8px 0 10px;
+      overflow:auto;
+    }
     .tab-btn{
       appearance:none; border:0; cursor:pointer;
-      padding:.55rem .75rem; border-radius:10px 10px 0 0; font-weight:900;
-      color:var(--text-secondary); background: transparent;
+      padding:.4rem .6rem;
+      border-radius:6px 6px 0 0;
+      font-weight:600;
+      font-size:.85rem;
+      color:var(--text-secondary);
+      background: transparent;
     }
     .tab-btn[aria-selected="true"]{
       color: var(--text-primary);
-      background: var(--card-bg);
-      border:1px solid var(--card-border); border-bottom-color: var(--card-bg);
+      background: transparent;
+      border-bottom:2px solid var(--brand-500);
     }
     .tab-panel{ display:none }
     .tab-panel[data-active="true"]{ display:block }
 
-    .table-wrap.table-compact{ border-radius: 10px }
-    .list-head{ display:flex; justify-content:space-between; align-items:center; margin: 0 0 6px; font-size: .9rem; color: var(--text-secondary) }
-    .badge{
-      display:inline-flex; align-items:center; gap:.35rem; padding:.28rem .5rem;
-      border-radius:999px; border:1px solid var(--card-border); font:800 .74rem/1 Inter;
+    .table-wrap.table-compact{
+      border-radius:0;
+      border:none;           /* sem card em volta da tabela */
+      margin-top:4px;
     }
-    .btn-ghost{ background:transparent; border:1px solid var(--card-border); color:var(--text-primary) }
+    .list-head{
+      display:flex; justify-content:space-between; align-items:center;
+      margin: 0 0 4px;
+      font-size: .9rem;
+      color: var(--text-secondary);
+    }
+    .badge{
+      display:inline-flex; align-items:center; gap:.35rem; padding:.15rem .45rem;
+      border-radius:999px; border:1px solid var(--card-border);
+      font:600 .75rem/1 Inter;
+    }
+    .btn-ghost{
+      background:transparent;
+      border:1px solid var(--card-border);
+      color:var(--text-primary);
+      height:32px;
+      padding:0 10px;
+      font-weight:600;
+      border-radius:8px;
+    }
     .btn-ghost:hover{ filter: brightness(.98) }
 
-    /* linha de edição do plano (segue o mesmo estilo) */
+    /* linha de edição do plano (segue estilo mais simples) */
     .plan-edit-row{
       margin-top:10px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;
       font-size:13px;
     }
     .plan-edit-row label{
-      font-weight:700; color:var(--text-secondary);
+      font-weight:600; color:var(--text-secondary);
     }
     #selPlano{
       width:auto; min-width:170px; height:34px;
@@ -204,7 +268,7 @@
 
           <!-- PASSO 2 (DETALHES) -->
           <section id="view-detalhes" class="form hidden" aria-live="polite" aria-busy="false">
-            <!-- Barra de resumo (gruda no topo) -->
+            <!-- Barra de resumo (agora mais simples, sem card) -->
             <div class="summary-bar">
               <div class="summary-left">
                 <div style="display:grid; gap:2px; min-width:0">
@@ -213,7 +277,10 @@
                     <span class="chip" id="chipTier">Tier: <strong id="eEffective">—</strong></span>
                     <span class="chip">Limite: <strong id="eLimite">—</strong></span>
                     <span class="chip">Conectadas: <strong id="eCon">—</strong></span>
-                    <span class="chip"><span class="dot off" id="chipConnDot"></span><span id="statusChip">—</span></span>
+                    <span class="chip">
+                      <span class="dot off" id="chipConnDot"></span>
+                      <span id="statusChip">—</span>
+                    </span>
                   </div>
                 </div>
               </div>
@@ -716,7 +783,7 @@
       }
 
       try{
-        // AQUI troquei para a rota real do backend: /apply-plan (POST)
+        // rota real do backend: /apply-plan (POST)
         const r = await authFetch(`/api/admin/empresas/${CURRENT_EMPRESA_ID}/apply-plan`, {
           method:'POST',
           headers:{ 'Content-Type': 'application/json' },
@@ -803,7 +870,7 @@
     docInput?.addEventListener('input', (e)=>{
       const raw = e.target.value;
       e.target.value = maskDoc(raw);
-      const d = raw.replace(/\D+/g,'');
+      const d = raw.replace(/\D/g,'');
       $('#doc-help').textContent = d.length===11?'Detectado CPF':(d.length===14?'Detectado CNPJ':'');
     });
     btnConsultar?.addEventListener('click', consultar);

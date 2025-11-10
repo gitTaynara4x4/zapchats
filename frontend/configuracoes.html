@@ -47,9 +47,56 @@
     @media (max-width:1024px){
       .form-grid{ grid-template-columns: 1fr; }
     }
+
+    /* ====== BLOQUEIO EM MANUTENÇÃO (SÓ NO MAIN, NÃO NO SIDEBAR) ====== */
+    .main{
+      position: relative; /* para o overlay ficar só em cima do conteúdo */
+    }
+    .config-maint-overlay{
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      background: rgba(0,0,0,.55);
+      backdrop-filter: blur(3px);
+      z-index: 5;
+    }
+    .config-maint-card{
+      max-width: 480px;
+      width: 100%;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 1.5rem 1.75rem;
+      box-shadow: var(--card-blur-shadow);
+      text-align: center;
+    }
+    .config-maint-title{
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: .5rem;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:.5rem;
+    }
+    .config-maint-text{
+      color: var(--muted);
+      font-size: .95rem;
+      margin-bottom: 1rem;
+    }
+    .config-maint-actions{
+      display:flex;
+      justify-content:center;
+      gap:.75rem;
+      flex-wrap:wrap;
+    }
   </style>
 </head>
-<body>
+
+<body class="has-sidebar prepaint config-locked">
   <!-- Sidebar (carregada via app-base.js) -->
   <aside id="sidebar"
          data-src="/frontend/partials/sidebar.html"
@@ -110,14 +157,16 @@
             <strong>Prévia da logo</strong>
             <div id="logo_meta" class="help"></div>
             <div style="margin-top:.4rem;">
-              <button id="logo_reset" class="btn">Remover prévia</button>
+              <button id="logo_reset" class="btn"><i class="fa fa-xmark"></i> Remover prévia</button>
             </div>
           </div>
         </div>
       </div>
 
       <div class="panel-actions">
-        <button id="btn_save" class="btn primary"><i class="fa fa-floppy-disk"></i> Salvar alterações</button>
+        <button id="btn_save_empresa" class="btn primary">
+          <i class="fa fa-floppy-disk"></i> Salvar alterações
+        </button>
       </div>
     </section>
 
@@ -159,7 +208,9 @@
       </div>
 
       <div class="panel-actions">
-        <button id="btn_save" class="btn primary"><i class="fa fa-floppy-disk"></i> Salvar alterações</button>
+        <button id="btn_save_horario" class="btn primary">
+          <i class="fa fa-floppy-disk"></i> Salvar alterações
+        </button>
       </div>
     </section>
 
@@ -183,7 +234,9 @@
       </div>
 
       <div class="panel-actions">
-        <button id="btn_save" class="btn primary"><i class="fa fa-floppy-disk"></i> Salvar alterações</button>
+        <button id="btn_save_mensagens" class="btn primary">
+          <i class="fa fa-floppy-disk"></i> Salvar alterações
+        </button>
       </div>
     </section>
 
@@ -207,7 +260,9 @@
       </div>
 
       <div class="panel-actions">
-        <button id="btn_save" class="btn primary"><i class="fa fa-floppy-disk"></i> Salvar alterações</button>
+        <button id="btn_save_notificacoes" class="btn primary">
+          <i class="fa fa-floppy-disk"></i> Salvar alterações
+        </button>
       </div>
     </section>
 
@@ -226,7 +281,9 @@
       </div>
 
       <div class="panel-actions">
-        <button id="btn_save" class="btn primary"><i class="fa fa-floppy-disk"></i> Salvar alterações</button>
+        <button id="btn_save_privacidade" class="btn primary">
+          <i class="fa fa-floppy-disk"></i> Salvar alterações
+        </button>
       </div>
     </section>
 
@@ -234,6 +291,25 @@
     <section class="box" style="margin-top:1rem;">
       <pre id="cfg_logs" style="margin:0; max-height:180px; overflow:auto; font-size:.85rem; background:var(--card2); border:1px solid var(--border); border-radius:.6rem; padding:.6rem;"></pre>
     </section>
+
+    <!-- Overlay de manutenção (SÓ EM CIMA DO MAIN) -->
+    <div id="config-maint-overlay" class="config-maint-overlay" role="alertdialog" aria-modal="true" aria-labelledby="config-maint-title">
+      <div class="config-maint-card">
+        <div class="config-maint-title" id="config-maint-title">
+          <i class="fa fa-screwdriver-wrench"></i>
+          Área de configuração em manutenção
+        </div>
+        <p class="config-maint-text">
+          Esta tela ainda está sendo preparada. Se você precisar ajustar alguma configuração,
+          entre em contato com o suporte ZapChats.
+        </p>
+        <div class="config-maint-actions">
+          <a href="mailto:suporte@zapchats.com.br" class="btn primary">
+            <i class="fa fa-headset"></i> Falar com o suporte
+          </a>
+        </div>
+      </div>
+    </div>
   </main>
 
   <!-- Toast -->
@@ -241,5 +317,17 @@
 
   <!-- JS desta página -->
   <script src="/frontend/js/pages/configuracoes.js" defer></script>
+
+  <!-- Flag simples pra desligar o modo manutenção no futuro -->
+  <script>
+    // Quando quiser liberar, troca pra false ou remove esse script.
+    const CONFIG_EM_MANUTENCAO = true;
+
+    if (!CONFIG_EM_MANUTENCAO) {
+      const ov = document.getElementById('config-maint-overlay');
+      if (ov) ov.remove();
+      document.body.classList.remove('config-locked');
+    }
+  </script>
 </body>
 </html>

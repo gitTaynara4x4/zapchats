@@ -115,12 +115,40 @@
             <small id="h-nome" class="hint">Como será exibido para a equipe.</small>
           </div>
 
-          <div class="fi">
-            <label for="d-parent">Departamento superior</label>
-            <select id="d-parent" class="input" aria-describedby="h-parent">
+          <!-- Departamento superior – agora com dropdown igual às outras listas -->
+          <div class="fi" id="fi-parent">
+            <label for="parent-btn">Departamento superior</label>
+
+            <div class="multi">
+              <button
+                type="button"
+                class="input"
+                id="parent-btn"
+                aria-expanded="false"
+                aria-controls="parent-panel">
+                Empresa (raiz)
+              </button>
+
+              <div
+                class="dropdown-suggestions"
+                id="parent-panel"
+                role="listbox"
+                aria-label="Departamentos">
+              </div>
+            </div>
+
+            <!-- select continua existindo, só escondido, pra reaproveitar toda a lógica -->
+            <select
+              id="d-parent"
+              class="input"
+              aria-describedby="h-parent"
+              style="display:none">
               <option value="">Empresa (raiz)</option>
             </select>
-            <small id="h-parent" class="hint">Escolha o departamento imediatamente acima. Para topo, deixe “Empresa (raiz)”.</small>
+
+            <small id="h-parent" class="hint">
+              Escolha o departamento imediatamente acima. Para topo, deixe “Empresa (raiz)”.
+            </small>
           </div>
 
           <div class="fi">
