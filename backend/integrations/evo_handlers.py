@@ -71,7 +71,7 @@ FULL_EVENTS_RABBIT = [
 RABBIT_EXCHANGE = os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange")
 RABBIT_BINDINGS = [b.strip() for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#").split(",") if b.strip()]
 
-import time, random
+import random
 try:
     from psycopg2.errors import DeadlockDetected as _PGDeadlock, QueryCanceled as _PGQueryCanceled
 except Exception:
@@ -111,13 +111,13 @@ def _release_hist_lock(db: Session, empresa_id: int, instancia_id: int) -> None:
         pass
 
 
-def _retry_deadlock(db: Session, func, *, attempts: int = 5, base_delay: float = 0.02):
+async def _retry_deadlock(db: Session, func, *, attempts: int = 5, base_delay: float = 0.02):
     """
     Tenta executar `func` algumas vezes se detectar deadlock/timeout no Postgres.
 
-    ⚠ IMPORTANTE:
-    - Continua sendo síncrona (usa time.sleep), pra não ter que sair alterando tudo.
-    - Só reduzimos o delay base e o jitter, pra não travar o event loop por muito tempo.
+    Agora é assíncrona e usa asyncio.sleep para não travar o event loop.
+    - `func` deve ser uma função síncrona que faz a operação no DB.
+    - Em caso de deadlock/timeout, faz rollback, espera com backoff exponencial e tenta de novo.
     """
     for i in range(attempts):
         try:
@@ -128,10 +128,8 @@ def _retry_deadlock(db: Session, func, *, attempts: int = 5, base_delay: float =
                     db.rollback()
                 except Exception:
                     pass
-                # antes: base_delay=0.10 e jitter 0.05
-                # agora: base_delay menor e jitter bem baixo
                 wait = base_delay * (2 ** i) + random.random() * 0.01
-                time.sleep(wait)
+                await asyncio.sleep(wait)
                 continue
             # se não for deadlock, propaga
             raise
@@ -1576,7 +1574,7 @@ async def on_messages_upsert(inst_id: str, data):
                         avatar_url=None,
                     )
 
-                cli_id = _retry_deadlock(db, _up)
+                cli_id = await _retry_deadlock(db, _up)
                 if not cli_id:
                     _log_skip(
                         "upsert_cliente retornou None",
@@ -1625,7 +1623,7 @@ async def on_messages_upsert(inst_id: str, data):
                         db.flush()
                         return msg_model.id
 
-                    msg_db_id = _retry_deadlock(db, _ins_msg)
+                    msg_db_id = await _retry_deadlock(db, _ins_msg)
                     novas += 1
 
                     _log_ctx(
@@ -1998,7 +1996,7 @@ async def on_contacts_event(first: str, payload: dict | list):
 
             # 🔒 upsert com retry em caso de deadlock
             try:
-                cli_id = _retry_deadlock(db, lambda: upsert_cliente(
+                cli_id = await _retry_deadlock(db, lambda: upsert_cliente(
                     db,
                     empresa_id=empresa_id,
                     instancia_id=inst.id,
@@ -2237,7 +2235,7 @@ async def on_messages_set(inst_id: str, data):
                         db.add(msgg); db.flush()
                         return msgg.id
 
-                    msgg_id = _retry_deadlock(db, _ins_grupo)
+                    msgg_id = await _retry_deadlock(db, _ins_grupo)
                     novas += 1
                     _log_ctx("[HIST][saved][grupo]", idx=idx, msg_id=msg_id, saved_id=msgg_id,
                              ts=_iso_utc(ts_msg), preview=_short(conteudo))
@@ -2264,7 +2262,7 @@ async def on_messages_set(inst_id: str, data):
                             nome_whatsapp=None,
                             avatar_url=None
                         )
-                    cli_id = _retry_deadlock(db, _up)
+                    cli_id = await _retry_deadlock(db, _up)
                     if not cli_id:
                         _log_ctx("[HIST][skip] upsert_cliente None", idx=idx, msg_id=msg_id, telefone=telefone)
                         continue
@@ -2287,7 +2285,7 @@ async def on_messages_set(inst_id: str, data):
                         db.add(msg_model); db.flush()
                         return msg_model.id
 
-                    msg_db_id = _retry_deadlock(db, _ins_msg)
+                    msg_db_id = await _retry_deadlock(db, _ins_msg)
                     novas += 1
                     _log_ctx("[HIST][saved][1:1]", idx=idx, msg_id=msg_id, saved_id=msg_db_id,
                              telefone=telefone, ts=_iso_utc(ts_msg), preview=_short(conteudo),
@@ -2400,7 +2398,7 @@ async def on_messages_set(inst_id: str, data):
                         if _is_deadlock_error(e):
                             try: db.rollback()
                             except Exception: pass
-                            time.sleep(0.1)
+                            await asyncio.sleep(0.1)
                             _log_ctx("[HIST] commit-deadlock-rollback]", err=str(e))
                         else:
                             raise
