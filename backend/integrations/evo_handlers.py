@@ -1,4 +1,4 @@
-# backend/integrations/evo_handlers.py
+# backend/integrations/evo_handlers.py - primeiro
 from __future__ import annotations
 import os, re, json, base64, asyncio, mimetypes, requests
 from enum import StrEnum, auto
@@ -50,22 +50,41 @@ DISABLE_MEDIA_ON_HISTORY  = (os.getenv("DISABLE_MEDIA_ON_HISTORY", "true").lower
 
 # ======= Listas de eventos completos (ligados só após CONNECTED) =======
 # Evolution WebSocket: só coisas leves (sem mensagens)
+# ======= Listas de eventos completos (ligados só após CONNECTED) =======
+# Evolution WebSocket: só coisas leves (sem mensagens pesadas)
 FULL_EVENTS_WS = [
     "QRCODE_UPDATED",
     "CONNECTION_UPDATE",
 ]
 
+# Tudo que é pesado/volumoso vai só pelo RabbitMQ
 FULL_EVENTS_RABBIT = [
+    # mensagens / histórico
     "MESSAGES_SET",
     "MESSAGES_UPSERT",
     "MESSAGES_UPDATE",
     "MESSAGES_DELETE",
     "SEND_MESSAGE",
+
+    # presença / grupos
     "PRESENCE_UPDATE",
     "GROUPS_UPSERT",
-    "GROUP_UPDATE",
+    "GROUPS_UPDATE",
     "GROUP_PARTICIPANTS_UPDATE",
+
+    # contatos
+    "CONTACTS_SET",
+    "CONTACTS_UPSERT",
+    "CONTACTS_UPDATE",
+
+    # ligações / tokens / logout instância
+    "CALL",
+    "NEW_TOKEN",
+    "LOGOUT_INSTANCE",
+    "INSTANCE_DELETE",
+    "REMOVE_INSTANCE",
 ]
+
 
 
 RABBIT_EXCHANGE = os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange")
@@ -791,7 +810,7 @@ def extract_media_meta(msg_obj: dict) -> dict[str, Any] | None:
         vi = m["videoMessage"] or {}
         return {"tipo":"video","mimetype":vi.get("mimetype") or "video/mp4","filename":vi.get("fileName") or "video.mp4",
                 "url":vi.get("url") or vi.get("directPath"),"caption":vi.get("caption") or None,
-                "fileLength":vi.get("fileLength"),"base64":vi.get("base64") or vi.get("fileBase64") or vi.get("data") or None}
+                "fileLength":vi.get("fileLength"),"base64":vi.get("base64") or vi.get("fileBase64") or im.get("data") or None}
     if "audioMessage" in m:
         au = m["audioMessage"] or {}
         return {"tipo":"audio","mimetype":au.get("mimetype") or "audio/ogg","filename":"ptt.ogg" if au.get("ptt") else "audio.ogg",
@@ -1562,36 +1581,80 @@ async def on_messages_upsert(inst_id: str, data):
                     preview=_short(conteudo),
                 )
 
-                # 5) upsert cliente
-                def _up():
-                    return upsert_cliente(
-                        db,
-                        empresa_id=empresa_id,
-                        instancia_id=inst.id,
-                        telefone_raw=telefone,
-                        nome=(formatted if from_me else (push_name or formatted)),
-                        nome_whatsapp=(formatted if from_me else (push_name or formatted)),
-                        avatar_url=None,
+                # 5) CLIENTE: primeiro tenta achar, depois cria se não tiver
+                try:
+                    cli_id = (
+                        db.query(models.Cliente.id)
+                        .filter(
+                            models.Cliente.empresa_id == empresa_id,
+                            models.Cliente.telefone == telefone,
+                        )
+                        .scalar()
                     )
+                except Exception as e:
+                    LOG(
+                        f"[UPsert][erro select_cliente] "
+                        f"idx={idx} msg_id={msg_id} err={e}"
+                    )
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                    continue
 
-                cli_id = await _retry_deadlock(db, _up)
+                if not cli_id:
+                    try:
+                        cli_id = upsert_cliente(
+                            db,
+                            empresa_id=empresa_id,
+                            instancia_id=inst.id,
+                            telefone_raw=telefone,
+                            nome=(formatted if from_me else (push_name or formatted)),
+                            nome_whatsapp=(
+                                formatted if from_me else (push_name or formatted)
+                            ),
+                            avatar_url=None,
+                        )
+                    except Exception as e:
+                        LOG(
+                            f"[UPsert][erro upsert_cliente] "
+                            f"idx={idx} msg_id={msg_id} err={e}"
+                        )
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
+                        continue
+
                 if not cli_id:
                     _log_skip(
-                        "upsert_cliente retornou None",
+                        "cli_id vazio (select+upsert)",
                         idx=idx,
                         msg_id=msg_id,
                         telefone=telefone,
                     )
                     continue
 
-                # 6) vê se já existe no BD
+                # 6) vê se já existe mensagem no BD (por msg_id)
                 exists = False
                 if msg_id:
-                    exists = bool(
-                        db.query(models.Mensagem.id)
-                        .filter_by(cliente_id=cli_id, msg_id=msg_id)
-                        .first()
-                    )
+                    try:
+                        exists = bool(
+                            db.query(models.Mensagem.id)
+                            .filter_by(cliente_id=cli_id, msg_id=msg_id)
+                            .first()
+                        )
+                    except Exception as e:
+                        LOG(
+                            f"[UPsert][erro checando duplicada] "
+                            f"idx={idx} msg_id={msg_id} err={e}"
+                        )
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
+                        continue
+
                     if exists:
                         _log_skip(
                             "duplicada (msg_id)",
@@ -1605,8 +1668,7 @@ async def on_messages_upsert(inst_id: str, data):
 
                 msg_db_id = None
                 if not exists:
-                    # INSERT de fato
-                    def _ins_msg():
+                    try:
                         msg_model = models.Mensagem(
                             empresa_id=empresa_id,
                             cliente_id=cli_id,
@@ -1621,21 +1683,29 @@ async def on_messages_upsert(inst_id: str, data):
                         _carimbar_inst(msg_model, inst)
                         db.add(msg_model)
                         db.flush()
-                        return msg_model.id
+                        msg_db_id = msg_model.id
+                        novas += 1
 
-                    msg_db_id = await _retry_deadlock(db, _ins_msg)
-                    novas += 1
-
-                    _log_ctx(
-                        "[UPsert][saved]",
-                        idx=idx,
-                        msg_id=msg_id,
-                        saved_id=msg_db_id,
-                        tipo=("saida" if from_me else "entrada"),
-                        ack=ack_initial,
-                        ts=_iso_utc(ts_msg),
-                        preview=_short(conteudo),
-                    )
+                        _log_ctx(
+                            "[UPsert][saved]",
+                            idx=idx,
+                            msg_id=msg_id,
+                            saved_id=msg_db_id,
+                            tipo=("saida" if from_me else "entrada"),
+                            ack=ack_initial,
+                            ts=_iso_utc(ts_msg),
+                            preview=_short(conteudo),
+                        )
+                    except Exception as e:
+                        LOG(
+                            f"[UPsert][erro ao salvar mensagem] "
+                            f"idx={idx} msg_id={msg_id} err={e}"
+                        )
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
+                        continue
 
                 # 8) SEMPRE emitir no WS (tempo real), mesmo se exists=True
                 try:
@@ -1647,7 +1717,9 @@ async def on_messages_upsert(inst_id: str, data):
                             "empresa_id": empresa_id,
                             "cliente_id": cli_id,
                             "instancia_id": inst.id,
-                            "instance_name": getattr(inst, "instance_name", None),
+                            "instance_name": getattr(
+                                inst, "instance_name", None
+                            ),
 
                             # dados para a lista/preview
                             "telefone": formatar_telefone_br(telefone),
@@ -1684,43 +1756,34 @@ async def on_messages_upsert(inst_id: str, data):
                         db.commit()
                         _log_ctx("[UPsert][commit]", count=novas)
                     except Exception as e:
-                        if _is_deadlock_error(e):
-                            try:
-                                db.rollback()
-                            except Exception:
-                                pass
-                            _log_ctx(
-                                "[UPsert][commit-deadlock-rollback]", err=str(e)
-                            )
-                        else:
-                            raise
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
+                        LOG(f"[UPsert][commit-erro] {e}")
 
                 if (novas % 500) == 0:
                     await asyncio.sleep(0)
 
             except Exception as e:
-                if _is_deadlock_error(e):
-                    try:
-                        db.rollback()
-                    except Exception:
-                        pass
-                    _log_ctx("[UPsert][deadlock-skip]", idx=idx, err=str(e))
-                    continue
+                # Erro geral por mensagem
                 LOG(f"[UPsert] erro em mensagem idx={idx}: {e}")
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                continue
 
         # final do lote
         try:
             db.commit()
             _log_ctx("[UPsert][commit-final]", novas=novas)
         except Exception as e:
-            if _is_deadlock_error(e):
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
-                _log_ctx("[UPsert][commit-final-deadlock-rollback]", err=str(e))
-            else:
-                raise
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            LOG(f"[UPsert][commit-final-erro] {e}")
 
         # invalida cache de /conversas só se realmente teve novas
         try:
@@ -1730,7 +1793,6 @@ async def on_messages_upsert(inst_id: str, data):
             pass
 
         LOG(f"[UPsert] inst={inst_id} novas={novas}")
-
 
 
 @handler(EvoEvent.CALL)

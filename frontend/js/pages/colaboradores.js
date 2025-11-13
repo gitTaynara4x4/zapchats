@@ -803,13 +803,33 @@
     }
   }
 
-  function markValidity(input, isValid){
+  // marca inválido + mostra / esconde mensagem embaixo do campo
+  function markValidity(input, isValid, message){
     if (!input) return;
-    const wrap = input.closest('.fieldbox');
+    const wrap = input.closest('.fieldbox') || input.parentElement;
     input.classList.toggle('invalid', !isValid);
     input.setAttribute('aria-invalid', String(!isValid));
-    if (wrap) wrap.classList.toggle('invalid', !isValid);
+    if (wrap) {
+      wrap.classList.toggle('invalid', !isValid);
+      let err = wrap.querySelector('.field-error');
+      if (!err){
+        err = document.createElement('div');
+        err.className = 'field-error';
+        err.style.marginTop = '.25rem';
+        err.style.fontSize = '.78rem';
+        err.style.color = 'var(--danger,#f97373)';
+        wrap.appendChild(err);
+      }
+      if (!isValid && message){
+        err.textContent = message;
+        err.style.display = 'block';
+      } else {
+        err.textContent = '';
+        err.style.display = 'none';
+      }
+    }
   }
+
   function setSaveEnabled(ok){
     [pSaveFoot, pSave].forEach(btn=>{
       if (!btn) return;
@@ -844,17 +864,11 @@
     if (!telOk)   msgs.push('• Telefone com DDD (10–11 dígitos)');
     if (!cargoOk) msgs.push('• Cargo (mín. 2 letras)');
 
-    markValidity(eNome,  show ? nomeOk  : true);
-    markValidity(eEmail, show ? emailOk : true);
-    if (eSetor) {
-      const wrap = eSetor.closest('.fieldbox');
-      const ok = show ? setorOk : true;
-      eSetor.classList.toggle('invalid', !ok);
-      eSetor.setAttribute('aria-invalid', String(!ok));
-      if (wrap) wrap.classList.toggle('invalid', !ok);
-    }
-    markValidity(eTel,   show ? telOk   : true);
-    markValidity(eCargo, show ? cargoOk : true);
+    markValidity(eNome,  show ? nomeOk  : true,  nomeOk  ? '' : 'Nome completo (mín. 2 letras)');
+    markValidity(eEmail, show ? emailOk : true, emailOk ? '' : 'E-mail inválido');
+    markValidity(eSetor, show ? setorOk : true, setorOk ? '' : 'Selecione um departamento');
+    markValidity(eTel,   show ? telOk   : true, telOk   ? '' : 'Telefone com DDD (10–11 dígitos)');
+    markValidity(eCargo, show ? cargoOk : true, cargoOk ? '' : 'Cargo (mín. 2 letras)');
 
     // senha: obrigatório no create; opcional no edit
     let senhaOk = true;
@@ -866,14 +880,22 @@
       if (isCreate) {
         senhaOk = s.length >= 6 && s.length <= 72;
         if (!senhaOk) msgs.push('• Senha (mín. 6 caracteres)');
-        markValidity(senhaEl, show ? senhaOk : true);
+        markValidity(
+          senhaEl,
+          show ? senhaOk : true,
+          senhaOk ? '' : 'Senha (mín. 6 caracteres)'
+        );
       } else {
         if (s.length > 0) {
           senhaOk = s.length >= 6 && s.length <= 72;
           if (!senhaOk) msgs.push('• Senha (mín. 6 caracteres)');
-          markValidity(senhaEl, show ? senhaOk : true);
+          markValidity(
+            senhaEl,
+            show ? senhaOk : true,
+            senhaOk ? '' : 'Senha (mín. 6 caracteres)'
+          );
         } else {
-          markValidity(senhaEl, true);
+          markValidity(senhaEl, true, '');
         }
       }
     }
@@ -987,6 +1009,12 @@
       renderAdminBadge({ ...state.viewing, cargo: $('#e-cargo').value });
     });
     sel?.addEventListener('change', ()=> validateFormLive());
+
+    // senha também dispara validação live
+    const senhaInput = $('#e-senha');
+    if (senhaInput){
+      senhaInput.addEventListener('input', ()=> validateFormLive());
+    }
 
     if (perfilModal.dataset.mode === 'create'){
       ensurePermsEdit();
@@ -1356,7 +1384,7 @@
 })();
 
 /* ===== Dark/Light dropdown: mesmo fundo da superfície ===== */
-(() => {
+(()=>{
   if (document.body.dataset.page !== 'colaboradores') return;
 
   function getSurfaceColor(el){
