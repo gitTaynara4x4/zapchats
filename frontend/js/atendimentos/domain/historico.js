@@ -438,6 +438,9 @@ export async function abrirHistorico(id){
       setOffset(cid, delta);
     }
 
+    // sincroniza preview da lista a partir do cache
+    try { window.syncPreviewFromCache?.(cid); } catch {}
+
     return true;
   }catch(e){
     console.error('[historico] abrirHistorico', e);
@@ -484,6 +487,10 @@ export async function carregarMaisHistorico(id){
     hist.scrollTop = hist.scrollHeight - prevBottom;
 
     setOffset(id, off + n);
+
+    // também atualiza preview da lista quando carrega mais antigo (não costuma mudar, mas é seguro)
+    try { window.syncPreviewFromCache?.(Number(id)); } catch {}
+
     return true;
   }catch(e){
     console.error('[historico] carregarMaisHistorico', e);
@@ -517,6 +524,64 @@ export async function carregarMaisHistorico(id){
   const mo = new MutationObserver(tryBind);
   mo.observe(document.documentElement, { childList: true, subtree: true });
 })();
+
+/* ========= Sincroniza preview da lista a partir do hist-cache ========= */
+if (!window.syncPreviewFromCache) {
+  window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
+    try {
+      const cid = Number(clienteId);
+      if (!cid) return;
+
+      // 1) tenta pelo espelho em window.cacheHistoricos
+      let arr = Array.isArray(window.cacheHistoricos?.[cid])
+        ? window.cacheHistoricos[cid]
+        : null;
+
+      // 2) se não tiver, tenta buscar do hist-cache oficial por instância
+      if (!arr || !arr.length) {
+        let inst = null;
+        try {
+          const lista = (window.state?.clientesCache || window.clientesCache || []);
+          const c = lista.find(x =>
+            Number(x.id ?? x.conversation_id ?? x.cliente_id) === cid
+          );
+          inst = c?.instancia_id ?? c?.instancia ?? window.INSTANCIA_ATIVA ?? null;
+        } catch {}
+        arr = getHist(inst, cid) || [];
+      }
+
+      if (!arr || !arr.length) return;
+      const last = arr[arr.length - 1];
+
+      const textoRaw =
+        (last.conteudo ?? last.mensagem ?? last.texto ?? '').toString().trim();
+
+      const outbound =
+        (last.tipo === 'saida') ||
+        (last.from_me === true) ||
+        (last.origem === 'atendente');
+
+      const ackVal = outbound ? Number(last.ack ?? 0) || 0 : undefined;
+
+      let tsIso = last.timestamp || last.data || last.created_at || null;
+      if (!tsIso && last.ts) {
+        const d = new Date(last.ts);
+        if (!Number.isNaN(d.getTime())) tsIso = d.toISOString();
+      }
+      if (!tsIso) tsIso = new Date().toISOString();
+
+      if (window.Lista?.updatePreview) {
+        window.Lista.updatePreview(cid, {
+          texto: textoRaw,
+          ts: tsIso,
+          ack: ackVal
+        });
+      }
+    } catch (e) {
+      try { console.debug('[syncPreviewFromCache][erro]', e); } catch {}
+    }
+  };
+}
 
 /* ========= debug/global helpers ========= */
 window.renderHistoricoDoCache = renderHistoricoDoCache;
