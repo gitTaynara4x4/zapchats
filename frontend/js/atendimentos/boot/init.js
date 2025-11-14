@@ -144,7 +144,7 @@ function getInstanciaForFetch(clienteId) {
   return (cand == null || cand === '') ? null : String(cand);
 }
 
-/* ============ Carregar mensagens (prime 50 se não houver cache) ============ */
+/* ============ Carregar mensagens (sempre consulta backend) ============ */
 
 async function ensureMensagensCarregadas(conversationId) {
   if (!state.mensagensOffset || typeof state.mensagensOffset !== 'object') {
@@ -152,12 +152,6 @@ async function ensureMensagensCarregadas(conversationId) {
   }
 
   const inst = getInstanciaForFetch(conversationId);
-
-  if (hasHistory(inst, conversationId)) {
-    state.mensagensOffset[conversationId] = (getHist(inst, conversationId) || []).length;
-    persist();
-    return getHist(inst, conversationId) || [];
-  }
 
   const qs = new URLSearchParams({ empresa_id: String(EMPRESA_ID), limit: '50' });
   if (inst) qs.set('instancia_id', inst);
@@ -167,9 +161,10 @@ async function ensureMensagensCarregadas(conversationId) {
   if (!r.ok) throw new Error('Falha ao carregar mensagens');
   const data = await r.json();
 
-  const items = Array.isArray(data?.items) ? data.items : [];
+  // aceita tanto { items: [...] } quanto [ ... ]
+  const items = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
 
-  // ✅ normaliza tipo e ACK (string → número; clamp 0..3; só em SAÍDAS)
+  // normaliza tipo e ACK (string → número; clamp 0..3; só em SAÍDAS)
   const mapped = items.map(m => {
     const tipoMsg = m.tipo || (m.remetente === 'agente' ? 'saida' : 'entrada');
     const isSaida = (tipoMsg === 'saida') || m.from_me === true || m.origem === 'atendente';
@@ -179,34 +174,56 @@ async function ensureMensagensCarregadas(conversationId) {
     ackNum = Math.min(3, Math.max(0, ackNum));
 
     return {
-      msg_id:    m.msg_id || m.id || null,
-      conteudo:  m.texto ?? m.conteudo ?? '',
-      tipo:      tipoMsg,
-      timestamp: m.ts || m.timestamp || new Date().toISOString(),
-      ack:       isSaida ? ackNum : null,
-      midias:    Array.isArray(m.midias) ? m.midias : [],
+      msg_id:       m.msg_id || m.id || null,
+      conteudo:     m.texto ?? m.conteudo ?? m.mensagem ?? '',
+      tipo:         tipoMsg,
+      timestamp:    m.ts || m.timestamp || m.data || m.created_at || new Date().toISOString(),
+      ack:          isSaida ? ackNum : null,
+      midias:       Array.isArray(m.midias) ? m.midias : [],
       instancia_id: m.instancia_id ?? (inst || null),
-      origem:    m.origem ?? (isSaida ? 'atendente' : 'cliente'),
-      autor_nome: m.autor_nome ?? m.atendente_nome ?? null,
+      origem:       m.origem ?? (isSaida ? 'atendente' : 'cliente'),
+      autor_nome:   m.autor_nome ?? m.atendente_nome ?? null,
     };
   });
 
+  // merge incremental no cache unificado (dedup por msg_id/ts+conteúdo)
   try { salvarNoCache(conversationId, mapped); } catch {}
-  primeWith(inst, conversationId, mapped, {
+
+  const finalHist = getHist(inst, conversationId) || [];
+  primeWith(inst, conversationId, finalHist, {
     oldest: data?.prev_cursor ?? null,
     newest: data?.next_cursor ?? null
   });
 
+  // espelha no state (sobrevive a F5)
   state.cacheHistoricos = {
     ...(state.cacheHistoricos || {}),
     [conversationId]: (window.cacheHistoricos || {})[conversationId]
   };
-  state.mensagensOffset[conversationId] = (getHist(inst, conversationId) || []).length;
+  state.mensagensOffset[conversationId] = finalHist.length;
   persist();
 
-  try { console.debug('[ensureMensagensCarregadas][prime50]', conversationId, getHist(inst, conversationId)); } catch {}
+  // 🔥 garante que a LISTA de conversas reflita a última mensagem carregada
+  try {
+    const last = finalHist[finalHist.length - 1];
+    if (last && window.Lista?.updatePreview) {
+      const textoPrev = last.conteudo ?? last.texto ?? last.mensagem ?? '';
+      const tsIso     = last.timestamp || last.ts || last.data || last.created_at || new Date().toISOString();
+      const ackVal    = last.ack ?? null;
 
-  return getHist(inst, conversationId) || [];
+      window.Lista.updatePreview(conversationId, {
+        texto: textoPrev,
+        ts: tsIso,
+        ack: ackVal,
+      });
+    }
+    // fallback pra qualquer lógica extra baseada no cache
+    try { window.syncPreviewFromCache?.(conversationId); } catch {}
+  } catch {}
+
+  try { console.debug('[ensureMensagensCarregadas]', { conversationId, total: finalHist.length }); } catch {}
+
+  return finalHist;
 }
 
 /* ======= Atualiza banner com a última saída ======= */

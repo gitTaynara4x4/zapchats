@@ -11,7 +11,7 @@ from sqlalchemy import func, and_, desc
 
 from backend.database import get_db
 from backend import models
-from backend.routers.auth import get_current_user
+from backend.routers.auth import get_current_identity
 
 # Evolution (consulta direta, sem persistir)
 try:
@@ -83,14 +83,19 @@ def _evo_fetch_state(instance_name: str) -> Optional[Dict]:
         return None
 
 
-def _assert_empresa_match(empresa_id: int, current_user) -> int:
+def _assert_empresa_match(empresa_id: int, identity) -> int:
     """
-    Garante que o empresa_id da query é o mesmo do usuário logado.
-    Se não for, dispara 403.
+    Garante que o empresa_id da query é o mesmo do usuário logado
+    (funciona tanto para usuário quanto para colaborador).
     """
-    if empresa_id != current_user.empresa_id:
+    try:
+        emp_user = getattr(identity, "empresa_id", None) or getattr(identity, "empresa", None)
+    except Exception:
+        emp_user = None
+
+    if emp_user is not None and int(emp_user) != int(empresa_id):
         raise HTTPException(status_code=403, detail="Empresa não permitida")
-    return empresa_id
+    return int(empresa_id)
 
 
 # ------------ /api/dashboard/cards ------------
@@ -100,7 +105,7 @@ def dashboard_cards(
     date: Optional[str] = Query(None, description="YYYY-MM-DD"),
     instancia_id: Optional[int] = Query(None, description="Filtrar por ID exato da instância"),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     """
     Cartões do topo:
@@ -110,7 +115,7 @@ def dashboard_cards(
       - total_atendimentos: nº de clientes com alguma mensagem no dia
     (sempre filtrando por empresa e, se vier, por instancia_id exato)
     """
-    empresa_id = _assert_empresa_match(empresa_id, current_user)
+    empresa_id = _assert_empresa_match(empresa_id, identity)
     d0, d1 = _parse_date(date) if date else _today_range()
 
     # mensagens no dia
@@ -184,7 +189,7 @@ def dashboard_distribuicao(
     date: Optional[str] = Query(None, description="YYYY-MM-DD"),
     instancia_id: Optional[int] = Query(None, description="Filtrar por ID exato da instância"),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     """
     Distribuição por status simples (no dia):
@@ -193,7 +198,7 @@ def dashboard_distribuicao(
       - 'Concluídos'       : última no dia é 'saida'
       - 'Sem resposta'     : recebeu 'entrada' no dia mas nenhuma 'saida'
     """
-    empresa_id = _assert_empresa_match(empresa_id, current_user)
+    empresa_id = _assert_empresa_match(empresa_id, identity)
     d0, d1 = _parse_date(date) if date else _today_range()
 
     # últimos do dia por cliente
@@ -288,7 +293,7 @@ def dashboard_funil(
     date: Optional[str] = Query(None, description="YYYY-MM-DD"),
     instancia_id: Optional[int] = Query(None, description="Filtrar por ID exato da instância"),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     """
     Funil simples por dia:
@@ -297,7 +302,7 @@ def dashboard_funil(
       - Em Progresso  : últimos do dia são 'entrada'
       - Resolvidas    : últimos do dia são 'saida'
     """
-    empresa_id = _assert_empresa_match(empresa_id, current_user)
+    empresa_id = _assert_empresa_match(empresa_id, identity)
     d0, d1 = _parse_date(date) if date else _today_range()
 
     entradas = {
@@ -365,12 +370,12 @@ def atendimentos_ultimos(
     limit: int = Query(20, ge=1, le=200),
     instancia_id: Optional[int] = Query(None, description="Filtrar por ID exato da instância"),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     """
     Últimas conversas do dia (uma linha por cliente, pela última mensagem do dia).
     """
-    empresa_id = _assert_empresa_match(empresa_id, current_user)
+    empresa_id = _assert_empresa_match(empresa_id, identity)
     d0, d1 = _parse_date(date) if date else _today_range()
 
     sub_last = (
@@ -423,35 +428,35 @@ def dashboard_consolidado(
     date: Optional[str] = Query(None, description="YYYY-MM-DD"),
     instancia_id: Optional[int] = Query(None, description="Filtrar por ID exato da instância"),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     """
     Retorna num payload só: cards, distrib, funil e ultimos.
     O JS tenta este endpoint primeiro e, se der erro, chama os separados.
     (Todos filtráveis por empresa, data e, se informado, por instancia_id.)
     """
-    empresa_id = _assert_empresa_match(empresa_id, current_user)
+    empresa_id = _assert_empresa_match(empresa_id, identity)
 
     cards = dashboard_cards(
         empresa_id=empresa_id,
         date=date,
         instancia_id=instancia_id,
         db=db,
-        current_user=current_user,  # passa o mesmo usuário pro helper
+        identity=identity,  # passa o mesmo usuário para o helper
     )  # type: ignore
     distrib = dashboard_distribuicao(
         empresa_id=empresa_id,
         date=date,
         instancia_id=instancia_id,
         db=db,
-        current_user=current_user,
+        identity=identity,
     )  # type: ignore
     funil = dashboard_funil(
         empresa_id=empresa_id,
         date=date,
         instancia_id=instancia_id,
         db=db,
-        current_user=current_user,
+        identity=identity,
     )  # type: ignore
     ultimos = atendimentos_ultimos(
         empresa_id=empresa_id,
@@ -459,7 +464,7 @@ def dashboard_consolidado(
         instancia_id=instancia_id,
         limit=20,
         db=db,
-        current_user=current_user,
+        identity=identity,
     )
 
     return {
@@ -482,7 +487,7 @@ def whatsapp_status(
     instancia_id: Optional[int] = Query(None, description="Filtrar por ID exato da instância"),
     instance_name: Optional[str] = Query(None, description="Nome da instância (Evolution)"),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     """
     Retorna status de conexão:
@@ -491,7 +496,7 @@ def whatsapp_status(
       3) Se Evolution não estiver configurada/der erro, cai no fallback: lê flags do BD (connected/last_seen).
     Estrutura de resposta compatível com o front.
     """
-    empresa_id = _assert_empresa_match(empresa_id, current_user)
+    empresa_id = _assert_empresa_match(empresa_id, identity)
 
     # --- quando vem o nome direto (preferível) ---
     if instance_name and _evo_enabled():

@@ -1,4 +1,3 @@
-# backend/routers/atendimento.py
 from __future__ import annotations
 
 import os
@@ -16,7 +15,7 @@ from pydantic import BaseModel
 from backend import models
 from backend.database import get_db
 from backend.websocket_manager import conexoes_ativas
-from backend.routers.auth import get_current_user
+from backend.routers.auth import get_current_identity  # <- aqui
 
 # =========================================================
 # Redis (opcional) – cache leve para /conversas e /clientes
@@ -117,12 +116,19 @@ def _is_admin(user) -> bool:
     """
     Considera admin se: user.is_admin == True  OU  permissões conterem:
     'admin', 'root', 'clientes.gerenciar' ou 'atendimento.gerenciar'.
-    Fallback seguro: se não achar nada, retorna False.
+    Suporta tanto models.Usuario quanto o dict do get_current_identity.
     """
     try:
-        if getattr(user, "is_admin", False):
-            return True
-        perms = getattr(user, "permissoes", None) or getattr(user, "permissions", None) or []
+        # dict (identity)
+        if isinstance(user, dict):
+            if user.get("is_admin"):
+                return True
+            perms = user.get("permissoes") or user.get("permissions") or []
+        else:
+            if getattr(user, "is_admin", False):
+                return True
+            perms = getattr(user, "permissoes", None) or getattr(user, "permissions", None) or []
+
         if isinstance(perms, dict):
             perms = [k for k, v in perms.items() if v]
         perms = set(str(p).lower() for p in (perms or []))
@@ -133,6 +139,9 @@ def _is_admin(user) -> bool:
 
 # ------- Helpers: empresa do usuário / validação -------
 def _empresa_do_user(user) -> Optional[int]:
+    # Suporta tanto identity (dict) quanto models.Usuario
+    if isinstance(user, dict):
+        return user.get("empresa_id")
     return getattr(user, "empresa_id", None) or getattr(user, "empresa", None)
 
 
@@ -143,7 +152,7 @@ def _assert_empresa_user(user, empresa_id: int) -> int:
     return int(empresa_id)
 
 
-# ------- Helpers: PIN por usuário em DB (com fallback) -------
+# ------- Helpers: PIN por usuário em DB (com fallback) -------_
 def _has_model_pinned() -> bool:
     return hasattr(models, "AtendimentoPinnedConversa")
 
@@ -182,7 +191,7 @@ def _pins_put_cached(empresa_id: int, user_id: int, s: set[int]):
     _cache_set_json(_k_pin_user(empresa_id, user_id), sorted(int(x) for x in s), ttl=30 * 24 * 3600)
 
 
-# ------- Helpers: Labels com cor em DB (com fallback) -------
+# ------- Helpers: Labels com cor em DB (com fallback) -------_
 def _has_model_labels() -> bool:
     return hasattr(models, "AtendimentoConversaLabel")
 
@@ -366,7 +375,7 @@ async def broadcast_msg(
     - Faz pass-through de `instancia_id` e `instance_name`.
     """
 
-    # --- segurança: chave interna obrigatória se configurada ---
+    # --- segurança: chave interna obrigatória se configurada ---_
     if INTERNAL_BROADCAST_KEY:
         if not x_internal_key or x_internal_key != INTERNAL_BROADCAST_KEY:
             raise HTTPException(
@@ -424,7 +433,7 @@ async def broadcast_msg(
                 # se der erro aqui, só seguimos sem cliente_id
                 pass
 
-        # --- atualiza ACK no banco (para mensagens de SAÍDA) ---
+        # --- atualiza ACK no banco (para mensagens de SAÍDA) ---_
         try:
             new_ack: Optional[int] = None
             if ack_raw is not None:
@@ -490,7 +499,7 @@ async def broadcast_msg(
             "instance_name": dados.get("instance_name") or dados.get("instance"),
         }
 
-        # --- anexos/mídias no mesmo formato do histórico ---
+        # --- anexos/mídias no mesmo formato do histórico ---_
         midias: List[Dict] = []
 
         # 1) Já veio uma lista padronizada?
@@ -621,7 +630,7 @@ def listar_conversas(
     cursor: Optional[int] = Query(None, description="id da última Mensagem já carregada"),
     cursor_last_msg_id: Optional[int] = Query(None, description="alias legado"),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),  # <-- precisamos do usuário para PINS por usuário
+    identity=Depends(get_current_identity),  # <- agora identity
 ):
     """
     Retorna conversas (1/cliente) ordenadas pela última mensagem (desc),
@@ -634,7 +643,14 @@ def listar_conversas(
     - 'pinned'  (DB por usuário; fallback Redis se não houver tabela)
     """
     # 🔒 trava empresa
-    empresa_id = _assert_empresa_user(user, empresa_id)
+    empresa_id = _assert_empresa_user(identity, empresa_id)
+
+    # 🔐 permissão de atendimento
+    perms = set(identity.get("permissoes") or [])
+    if "atendimento.ver" not in perms:
+        raise HTTPException(status_code=403, detail="Sem permissão para ver atendimentos")
+
+    user_id = int(identity["id"])
 
     try:
         if cursor is None and cursor_last_msg_id is not None:
@@ -667,7 +683,7 @@ def listar_conversas(
             deleted_set = set(_cache_get_json(_k_deleted(empresa_id)) or [])
             # pins por usuário (se houver tabela) senão fallback Redis global
             if _has_model_pinned():
-                pins_user = _pins_get_cached(db, int(empresa_id), int(user.id))
+                pins_user = _pins_get_cached(db, int(empresa_id), user_id)
             else:
                 pins_user = set(_cache_get_json(_k_pin(empresa_id)) or [])
 
@@ -742,7 +758,7 @@ def listar_conversas(
         # flags
         deleted_set = set(_cache_get_json(_k_deleted(empresa_id)) or [])
         if _has_model_pinned():
-            pins_user = _pins_get_cached(db, int(empresa_id), int(user.id))
+            pins_user = _pins_get_cached(db, int(empresa_id), user_id)
         else:
             pins_user = set(_cache_get_json(_k_pin(empresa_id)) or [])
 
@@ -803,7 +819,7 @@ def listar_clientes(
     empresa_id: int,
     departamento: Optional[str] = None,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     """
     Lista clientes que já possuem conversa (pelo menos uma mensagem),
@@ -812,7 +828,7 @@ def listar_clientes(
 
     Respeita 'deleted' (oculta).
     """
-    empresa_id = _assert_empresa_user(user, empresa_id)
+    empresa_id = _assert_empresa_user(identity, empresa_id)
 
     LOG("[clientes] Listando clientes para empresa_id", empresa_id)
 
@@ -938,14 +954,14 @@ async def marcar_lidas(
     cliente_id: int,
     empresa_id: int = Query(...),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     """
     Marca como lidas todas as mensagens de ENTRADA (recebidas) desse cliente.
     É idempotente. Após atualizar, emite 'reload_clientes' para sincronizar UIs.
     Também invalida caches de listas afetadas.
     """
-    empresa_id = _assert_empresa_user(user, empresa_id)
+    empresa_id = _assert_empresa_user(identity, empresa_id)
 
     total = (
         db.query(models.Mensagem)
@@ -978,12 +994,12 @@ async def marcar_lidas(
 def listar_pins(
     empresa_id: int = Query(...),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
-    empresa_id = _assert_empresa_user(user, empresa_id)
+    empresa_id = _assert_empresa_user(identity, empresa_id)
 
     if _has_model_pinned():
-        pinned = _pins_get_cached(db, empresa_id=int(empresa_id), user_id=int(user.id))
+        pinned = _pins_get_cached(db, empresa_id=int(empresa_id), user_id=int(identity["id"]))
         return {"pinned": sorted(pinned)}
 
     # fallback legado (global, via Redis)
@@ -997,10 +1013,11 @@ def fixar_conversa(
     empresa_id: int = Query(...),
     payload: dict = Body(...),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
-    empresa_id = _assert_empresa_user(user, empresa_id)
+    empresa_id = _assert_empresa_user(identity, empresa_id)
     want_pin = bool(payload.get("pin", True))
+    user_id = int(identity["id"])
 
     if _has_model_pinned():
         # por usuário no DB
@@ -1009,7 +1026,7 @@ def fixar_conversa(
                 db.query(models.AtendimentoPinnedConversa)
                 .filter(
                     models.AtendimentoPinnedConversa.empresa_id == int(empresa_id),
-                    models.AtendimentoPinnedConversa.user_id == int(user.id),
+                    models.AtendimentoPinnedConversa.user_id == user_id,
                     models.AtendimentoPinnedConversa.conversa_id == int(cliente_id),
                 )
                 .first()
@@ -1018,27 +1035,27 @@ def fixar_conversa(
                 db.add(
                     models.AtendimentoPinnedConversa(
                         empresa_id=int(empresa_id),
-                        user_id=int(user.id),
+                        user_id=user_id,
                         conversa_id=int(cliente_id),
                     )
                 )
                 db.commit()
             # atualiza cache
-            s = _pins_get_cached(db, int(empresa_id), int(user.id))
+            s = _pins_get_cached(db, int(empresa_id), user_id)
             s.add(int(cliente_id))
-            _pins_put_cached(int(empresa_id), int(user.id), s)
+            _pins_put_cached(int(empresa_id), user_id, s)
         else:
             db.query(models.AtendimentoPinnedConversa).filter(
                 models.AtendimentoPinnedConversa.empresa_id == int(empresa_id),
-                models.AtendimentoPinnedConversa.user_id == int(user.id),
+                models.AtendimentoPinnedConversa.user_id == user_id,
                 models.AtendimentoPinnedConversa.conversa_id == int(cliente_id),
             ).delete(synchronize_session=False)
             db.commit()
             # atualiza cache
-            s = _pins_get_cached(db, int(empresa_id), int(user.id))
+            s = _pins_get_cached(db, int(empresa_id), user_id)
             if int(cliente_id) in s:
                 s.discard(int(cliente_id))
-                _pins_put_cached(int(empresa_id), int(user.id), s)
+                _pins_put_cached(int(empresa_id), user_id, s)
 
         # limpa chave global legada para evitar “ressuscitar” pins antigos
         _cache_del(_k_pin(empresa_id))
@@ -1059,7 +1076,7 @@ def fixar_conversa(
     try:
         asyncio.create_task(
             _broadcast(
-                {"type": "conv.pin", "cliente_id": int(cliente_id), "pin": want_pin, "user_id": int(user.id)},
+                {"type": "conv.pin", "cliente_id": int(cliente_id), "pin": want_pin, "user_id": user_id},
                 empresa_id=empresa_id,
             )
         )
@@ -1073,9 +1090,9 @@ def fixar_conversa(
 @router.get("/conversas/deleted")
 def listar_deletados(
     empresa_id: int = Query(...),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
-    empresa_id = _assert_empresa_user(user, empresa_id)
+    empresa_id = _assert_empresa_user(identity, empresa_id)
     deleted = _cache_get_json(_k_deleted(empresa_id)) or []
     return {"deleted": _ensure_list(deleted)}
 
@@ -1085,11 +1102,11 @@ def apagar_conversa(
     cliente_id: int,
     empresa_id: int = Query(...),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
-    empresa_id = _assert_empresa_user(user, empresa_id)
+    empresa_id = _assert_empresa_user(identity, empresa_id)
 
-    if not _is_admin(user):
+    if not _is_admin(identity):
         raise HTTPException(403, "Apenas administradores")
 
     deleted = set(_cache_get_json(_k_deleted(empresa_id)) or [])
@@ -1134,9 +1151,9 @@ def obter_etiquetas(
     cliente_id: int,
     empresa_id: int = Query(...),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
-    empresa_id = _assert_empresa_user(user, empresa_id)
+    empresa_id = _assert_empresa_user(identity, empresa_id)
 
     if _has_model_labels():
         rows = _labels_db_list(db, empresa_id=int(empresa_id), cliente_id=int(cliente_id))
@@ -1157,19 +1174,21 @@ def etiquetar_conversa(
     empresa_id: int = Query(...),
     body: LabelsIn = Body(...),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
-    empresa_id = _assert_empresa_user(user, empresa_id)
+    empresa_id = _assert_empresa_user(identity, empresa_id)
 
     # manter exigência de admin (como era no legado) — ajuste se quiser liberar
-    if not _is_admin(user):
+    if not _is_admin(identity):
         raise HTTPException(403, "Apenas administradores")
+
+    user_id = int(identity["id"])
 
     if _has_model_labels():
         # DB com cor
         if body.set is not None:
             # substitui o conjunto (sem cor definida nessa operação)
-            _labels_db_replace_all(db, int(empresa_id), int(cliente_id), body.set, int(user.id))
+            _labels_db_replace_all(db, int(empresa_id), int(cliente_id), body.set, user_id)
             rows = _labels_db_list(db, int(empresa_id), int(cliente_id))
             try:
                 asyncio.create_task(
@@ -1196,7 +1215,7 @@ def etiquetar_conversa(
             if not name:
                 raise HTTPException(400, "Nome de etiqueta inválido")
             color_hex = _normalize_hex(body.color_hex or body.color)
-            _labels_db_upsert(db, int(empresa_id), int(cliente_id), name, color_hex, int(user.id))
+            _labels_db_upsert(db, int(empresa_id), int(cliente_id), name, color_hex, user_id)
             rows = _labels_db_list(db, int(empresa_id), int(cliente_id))
             try:
                 asyncio.create_task(

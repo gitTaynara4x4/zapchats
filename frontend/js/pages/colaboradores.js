@@ -1,6 +1,7 @@
 /* Colaboradores – lista + modal de perfil (visualização/edição) e fluxo de criação
    (versão com: troca de senha em edição, validação opcional da senha, salvamento de instâncias,
-   correção de refs DOM recriadas nas fieldboxes + limpeza de erros ao trocar de colaborador) */
+   correção de refs DOM recriadas nas fieldboxes + limpeza de erros ao trocar de colaborador
+   + salvamento de PERMISSÕES por colaborador em /api/permissoes/colaboradores/{id}) */
 (function ColaboradoresPage(){
   'use strict';
 
@@ -850,42 +851,83 @@
     return { ok, msgs };
   }
 
+  // ====== Permissões (checkboxes por colaborador) ======
   async function ensurePermsEdit(){
     if (!ePerms) return;
+
     ePerms.innerHTML = '';
     ePerms.style.display = 'grid';
-    try{
-      const list = await apiGet('/api/permissoes');
-      const items = Array.isArray(list) ? list : (list?.items||[]);
-      const current = new Set((state.viewing?.permissoes||[]).map(x => (x.id||x)+''));      
-      items.forEach(p=>{
+
+    try {
+      const list  = await apiGet('/api/permissoes');
+      const items = Array.isArray(list) ? list : (list?.items || list?.data || []);
+
+      // permissões atuais do colaborador (podem vir como id ou objeto)
+      const current = new Set(
+        (state.viewing?.permissoes || []).map(x => String(x.id ?? x.value ?? x.key ?? x))
+      );
+
+      if (!items.length){
+        ePerms.innerHTML = '<div style="opacity:.75">Nenhuma permissão cadastrada.</div>';
+        return;
+      }
+
+      items.sort((a,b) =>
+        String(a.nome || a.id || '').localeCompare(String(b.nome || b.id || ''), 'pt-BR')
+      );
+
+      items.forEach(p => {
         const idRaw = p.id ?? p.value ?? p.key;
-        const label = p.nome || idRaw;
+        if (idRaw == null) return;
+
+        const label   = p.nome || idRaw;
+        const checked = current.has(String(idRaw));
+
         const el = document.createElement('label');
         el.className = 'chk-line';
-        el.innerHTML = `<input type="checkbox" name="perm-edit" value="${idRaw}" ${current.has(String(idRaw))?'checked':''}><span>${label}</span>`;
+        el.innerHTML = `
+          <input type="checkbox" name="perm-edit" value="${idRaw}" ${checked ? 'checked' : ''}>
+          <span>${label}</span>
+        `.trim();
         ePerms.appendChild(el);
       });
-    }catch{
-      ePerms.innerHTML = `<div style="opacity:.75">Permissões indisponíveis.</div>`;
+    } catch (e) {
+      console.warn('Falha ao carregar lista de permissões', e);
+      ePerms.innerHTML = '<div style="opacity:.75">Permissões indisponíveis.</div>';
     }
   }
+
   function getPermsSelecionadasEdit(){
-    return [...document.querySelectorAll('#e-perms input[name="perm-edit"]:checked')].map(i=> i.value);
+    return [...document.querySelectorAll('#e-perms input[name="perm-edit"]:checked')]
+      .map(i=> i.value);
   }
+
   async function savePerms(id, arr){
-    try{
-      await apiJSON(`/api/permissoes/colaboradores/${id}`, 'PUT', { permissoes: arr });
-      return true;
-    }catch(e1){
+    // sempre envia exatamente as permissões marcadas para ESTE colaborador
+    const payload = { permissoes: arr };
+
+    const tries = [
+      // endpoint principal
+      { path: `/api/permissoes/colaboradores/${id}`, method: 'PUT' },
+      // possíveis variações
+      { path: `/api/colaboradores/${id}/permissoes`, method: 'PUT' },
+      { path: `/api/colaboradores/${id}/permissoes`, method: 'POST' },
+      { path: `/api/colaboradores/${id}`,           method: 'PUT' },
+    ];
+
+    let lastError = null;
+
+    for (const t of tries){
       try{
-        await apiJSON(`/api/colaboradores/${id}`, 'PUT', { permissoes: arr });
+        await apiJSON(t.path, t.method, payload);
         return true;
-      }catch(e2){
-        console.warn('falha ao salvar perms', e1, e2);
-        return false;
+      }catch(e){
+        lastError = e;
       }
     }
+
+    console.warn('falha ao salvar perms', id, lastError);
+    return false;
   }
 
   // ====== Render perfil (view) – requery elementos a cada render ======
@@ -936,7 +978,7 @@
 
     if (dPerms){
       dPerms.innerHTML = '';
-      const permsList = (colab.permissoes||[]).map(x => (x.id||x).toString());
+      const permsList = (colab.permissoes||[]).map(x => String(x.id ?? x));
       if (permsList.length) permsList.forEach(p => dPerms.appendChild(chip(p)));
       else dPerms.textContent = '—';
     }
@@ -1037,19 +1079,23 @@
       senhaInput.addEventListener('input', ()=> validateFormLive());
     }
 
-    if (perfilModal.dataset.mode === 'create'){
+    // Permissões: sempre mostra e carrega checkboxes no modo edição
+    if (ePerms){
+      ePerms.style.display = 'grid';
       ensurePermsEdit();
-      if (ePerms) ePerms.style.display = 'grid';
-      if (dPerms) dPerms.style.display = 'none';
+    }
+    if (dPerms){
+      dPerms.style.display = 'none';
     }
 
+    // Instâncias (WhatsApp)
     ensureInstsEdit();
 
     const wrapSenha = $('#wrap-senha');
     const senhaHelp = $('#senha-help');
     const toggle = $('#toggle-senha');
     if (wrapSenha) wrapSenha.style.display = 'flex';
-    if (senhaHelp) senhaHelp.style.display = 'none';
+    if (senhaHelp) senhaHelp.style.display = (perfilModal.dataset.mode === 'create') ? '' : 'none';
     if (toggle){
       const input = $('#e-senha');
       toggle.onclick = () => {
@@ -1065,7 +1111,6 @@
     }
 
     bindAvatarDnDAndPaste();
-
     validateFormLive(false);
   }
 
@@ -1115,6 +1160,7 @@
     }
 
     const instsSel = getInstsSelecionadasEdit();
+    const permsSel = getPermsSelecionadasEdit();
 
     if (mode === 'create'){
       const fd = new FormData();
@@ -1132,14 +1178,19 @@
       }
       fd.append('senha', s);
 
-      const permsCreate = getPermsSelecionadasEdit();
-      permsCreate.forEach(p => fd.append('permissoes[]', String(p)));
+      permsSel.forEach(p => fd.append('permissoes[]', String(p)));
       instsSel.forEach(n => fd.append('instancias_ids[]', String(n)));
 
       if (state.newAvatarFile) fd.append('avatar', state.newAvatarFile);
 
       try{
         const created = await apiForm('/api/colaboradores/', 'POST', fd);
+
+        // garante que colaboradores_permissoes seja atualizado
+        if (created?.id != null){
+          try { await savePerms(created.id, permsSel); } catch(ePerm){ console.warn('perm create', ePerm); }
+        }
+
         toast('Colaborador criado.');
 
         if (state.newAvatarFile) {
@@ -1157,8 +1208,10 @@
 
         perfilModal.dataset.mode = 'view';
         perfilModal.dataset.currentId = String(created?.id||'');
+
         const fresh = await loadColabFull(created.id);
         fresh.instancias_ids = instsSel;
+        if (permsSel.length) fresh.permissoes = permsSel;
 
         state.viewing = fresh;
         await loadColaboradores(); renderLista();
@@ -1174,7 +1227,7 @@
       return;
     }
 
-    // edição
+    // ===== edição =====
     const payload = {
       nome, email,
       setor_id: Number(setor),
@@ -1205,11 +1258,15 @@
         if (upOK) state.newAvatarFile = null;
       }
 
-      let permsUpdated = false;
-      if (ePerms && ePerms.style.display !== 'none'){
-        const arr = getPermsSelecionadasEdit();
-        permsUpdated = await savePerms(id, arr);
-        if (permsUpdated) state.viewing.permissoes = arr;
+      let permsUpdated = true;
+      try{
+        permsUpdated = await savePerms(id, permsSel);
+        if (permsUpdated){
+          state.viewing.permissoes = permsSel;
+        }
+      }catch(ePerm){
+        permsUpdated = false;
+        console.warn('Erro ao salvar permissões (edit)', ePerm);
       }
 
       let instsUpdated = true;
@@ -1225,6 +1282,8 @@
 
       const fresh = await loadColabFull(id);
       fresh.instancias_ids = instsSel;
+      if (permsSel.length) fresh.permissoes = permsSel;
+
       state.viewing = fresh;
       await loadColaboradores(); renderLista();
       renderPerfilView(fresh);

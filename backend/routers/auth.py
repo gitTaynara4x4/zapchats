@@ -229,7 +229,7 @@ def get_current_identity(
     if not sub:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token inválido")
 
-    # colaborador?
+    # ───── Colaborador ─────
     if isinstance(sub, str) and sub.startswith("colab-"):
         try:
             colab_id = int(sub.split("colab-", 1)[1])
@@ -241,6 +241,29 @@ def get_current_identity(
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Usuário não encontrado")
 
         is_admin = (role == "admin") or ((colab.cargo or "").lower() == "admin")
+
+        # Carregar permissões do colaborador
+        perms: list[str] = []
+        try:
+            # Se tiver relacionamento ORM, usa ele
+            rel = getattr(colab, "permissoes", None)
+            if rel is not None:
+                for p in rel:
+                    pid = getattr(p, "id", None) or getattr(p, "token", None)
+                    if pid:
+                        perms.append(pid)
+            else:
+                # Fallback direto no join table
+                rows = db.execute(text("""
+                    SELECT permissao_id
+                    FROM colaboradores_permissoes
+                    WHERE colaborador_id = :cid
+                """), {"cid": colab.id}).fetchall()
+                perms = [r[0] for r in rows]
+        except Exception as e:
+            print("[AUTH] WARN ao carregar permissoes do colaborador:", e)
+            perms = []
+
         return {
             "kind": "colaborador",
             "id": colab.id,
@@ -249,12 +272,22 @@ def get_current_identity(
             "email": colab.email,
             "role": colab.cargo or role or "colaborador",
             "is_admin": is_admin,
+            "permissoes": perms,
         }
 
-    # senão, é Usuario (admin)
+    # ───── Usuario (admin) ─────
     user = db.query(models.Usuario).filter(models.Usuario.id == int(sub)).first()
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Usuário não encontrado")
+
+    # Admin normalmente tem tudo: pega todas as permissões cadastradas
+    perms_admin: list[str] = []
+    try:
+        rows = db.execute(text("SELECT id FROM permissoes")).fetchall()
+        perms_admin = [r[0] for r in rows]
+    except Exception as e:
+        print("[AUTH] WARN ao carregar permissoes admin:", e)
+        perms_admin = []
 
     return {
         "kind": "usuario",
@@ -264,7 +297,10 @@ def get_current_identity(
         "email": user.email,
         "role": role or "admin",
         "is_admin": True,
+        "permissoes": perms_admin,
     }
+
+
 
 def require_admin(identity = Depends(get_current_identity)):
     if not identity.get("is_admin"):

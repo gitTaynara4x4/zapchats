@@ -1,4 +1,3 @@
-# backend/routers/atendimento_conversas.py
 from __future__ import annotations
 
 from typing import Optional, List, Dict, Any, Tuple
@@ -9,7 +8,7 @@ from sqlalchemy import func, literal, and_
 
 from backend.database import get_db
 from backend import models
-from backend.routers.auth import get_current_user
+from backend.routers.auth import get_current_identity  # <- troca aqui
 
 # =========================================================
 # Router
@@ -94,7 +93,7 @@ def listar_conversas(
     instancia_id: int | None = Query(None, description="(Opcional) id numérico da instância"),
     instance: str | None = Query(None, description="(Opcional) slug/nome da instância"),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     """
     Retorna:
@@ -119,14 +118,19 @@ def listar_conversas(
       "next_cursor": 888   # menor last_msg_id retornado na página (para paginação)
     }
     """
-    # 1) valida empresa
-    empresa_id = _assert_mesma_empresa(user.empresa_id, empresa_id)
+    # 1) valida empresa (token vs query)
+    empresa_id = _assert_mesma_empresa(identity["empresa_id"], empresa_id)
+
+    # 2) checa permissão de atendimento
+    perms = set(identity.get("permissoes") or [])
+    if "atendimento.ver" not in perms:
+        raise HTTPException(status_code=403, detail="Sem permissão para ver atendimentos")
 
     C = models.Cliente
     M = models.Mensagem
     EI = models.EmpresaInstancia
 
-    # 2) resolve instância (se houver filtro)
+    # 3) resolve instância (se houver filtro)
     resolved_inst_id, _resolved_inst_name = _resolve_instancia_id(
         db,
         empresa_id=empresa_id,
@@ -134,7 +138,7 @@ def listar_conversas(
         instance=instance,
     )
 
-    # 3) cursor: se veio cursor_last_msg_id, vamos pegar seu timestamp
+    # 4) cursor: se veio cursor_last_msg_id, vamos pegar seu timestamp
     cursor_ts = None
     cursor_id = None
     if cursor_last_msg_id is not None:
@@ -147,7 +151,7 @@ def listar_conversas(
             cursor_id = int(row_cur.id)
             cursor_ts = row_cur.timestamp
 
-    # 4) subquery: última mensagem por cliente (com filtro de instância quando informado)
+    # 5) subquery: última mensagem por cliente (com filtro de instância quando informado)
     sub = (
         db.query(
             M.cliente_id.label("cid"),
@@ -159,7 +163,7 @@ def listar_conversas(
         sub = sub.filter(M.instancia_id == resolved_inst_id)
     sub = sub.group_by(M.cliente_id).subquery()
 
-    # 5) query principal: cliente + última mensagem + instância
+    # 6) query principal: cliente + última mensagem + instância
     #    ATENÇÃO: colunas opcionais (pinned/fixado) caem para literal(False)
     cols = [
         C.id.label("cliente_id"),
@@ -190,25 +194,24 @@ def listar_conversas(
         .filter(C.empresa_id == empresa_id)
     )
 
-    # 6) paginação por cursor: pega somente itens "mais antigos" que o cursor
+    # 7) paginação por cursor: pega somente itens "mais antigos" que o cursor
     #    regra: (timestamp, id) < (cursor_ts, cursor_id)
     if cursor_id is not None and cursor_ts is not None:
         q = q.filter(
             and_(
-                # (M.timestamp < cursor_ts) OR (M.timestamp = cursor_ts AND M.id < cursor_id)
                 (M.timestamp < cursor_ts)
                 | ((M.timestamp == cursor_ts) & (M.id < cursor_id))
             )
         )
 
-    # 7) ordenação (mais recentes primeiro), limit e fetch
+    # 8) ordenação (mais recentes primeiro), limit e fetch
     rows = (
         q.order_by(M.timestamp.desc(), M.id.desc())
         .limit(limit)
         .all()
     )
 
-    # 8) montar payload
+    # 9) montar payload
     items: List[Dict[str, Any]] = []
     for r in rows:
         # pinned/coalesce
@@ -241,7 +244,7 @@ def listar_conversas(
             "pinned": pinned_flag,
         })
 
-    # 9) próximo cursor = menor ultima_msg_id da página atual
+    # 10) próximo cursor = menor ultima_msg_id da página atual
     next_cursor = min((it["ultima_msg_id"] for it in items), default=None)
 
     return {"items": items, "next_cursor": next_cursor}
