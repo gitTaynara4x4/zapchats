@@ -129,7 +129,7 @@
     <aside class="flex flex-col">
       <div class="wpp-header-externo">
         <div class="wpp-header-titulo-row">
-          <!-- Kebab (só aparece no mobile via CSS acima) -->
+          <!-- Kebab (só aparece no mobile via CSS acima; o JS garante desktop também) -->
           <button id="btnKebabHeader" title="Menu" aria-label="Abrir menu"
                   aria-haspopup="dialog" aria-controls="zcSidebarHost">
             <i class="fa fa-ellipsis-vertical"></i>
@@ -216,6 +216,9 @@
       </footer>
     </main>
   </div>
+
+  <!-- Flyout lateral (NOVO) -->
+  <script src="/frontend/js/atendimentos/ui/flyout.js"></script>
 
   <!-- Boot principal -->
   <script type="module" src="/frontend/js/atendimentos/boot/main.js"></script>

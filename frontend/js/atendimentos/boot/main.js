@@ -40,7 +40,7 @@ import '../ui/ia.js';               // modal/ferramentas de IA
 import '../ui/context-menu.js';
 import '../ui/new-chat.js';
 import '../ui/filtros.js';
-
+import '../ui/apagar.js';
 // -------- BOOT (liga tudo ao carregar a página) ---------------------
 import { boot } from './init.js';
 

@@ -1,8 +1,14 @@
-// clientes.js
+// frontend/js/pages/clientes.js
 (function ClientesPage(){
   'use strict';
 
-  const PERM_REQUIRED_ANY = ['clientes.ver','clientes.gerenciar'];
+  // ===== Permissões do módulo de Clientes =====
+  const PERM_VIEW        = 'clientes.ver';
+  const PERM_CREATE      = 'clientes.criar';
+  const PERM_EDIT        = 'clientes.editar';
+  const PERM_IMP_EXP     = 'clientes.importar_exportar';
+  const PERM_DELETE      = 'clientes.excluir'; // reservado para quando existir delete
+  const PERM_REQUIRED_ANY = [PERM_VIEW];       // precisa pelo menos ver clientes
 
   const $  = (s, r=document) => r.querySelector(s);
   const $$ = (s, r=document) => [...r.querySelectorAll(s)];
@@ -141,8 +147,8 @@
 
   // ===== STATE
   const state = {
-    setores: [],
-    responsaveis: [],
+    setores: [],        // departamentos
+    responsaveis: [],   // colaboradores
     clientes: [],
     seen: new Set(),
     selected: new Set(),
@@ -171,7 +177,9 @@
     return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`;
   }
   function escapeHtml(s){
-    return String(s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    return String(s||'').replace(/[&<>"']/g, m => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[m]));
   }
   function toast(msg, type='ok'){
     if (!toastEl) return;
@@ -469,7 +477,6 @@
     return tr;
   }
 
-
   function clearList(){ tbody.innerHTML = ''; }
 
   function renderAppend(newItems){
@@ -563,8 +570,12 @@
     if (selCount)  selCount.textContent = String(n);
     if (selCount2) selCount2.textContent = String(n);
     if (bulkInfo)  bulkInfo.hidden = n === 0;
-    if (btnRespBulk)  btnRespBulk.disabled  = n === 0;
-    if (btnDeptoBulk) btnDeptoBulk.disabled = n === 0;
+
+    const canEdit = hasPerm(PERM_EDIT);
+
+    if (btnRespBulk)  btnRespBulk.disabled  = (n === 0 || !canEdit);
+    if (btnDeptoBulk) btnDeptoBulk.disabled = (n === 0 || !canEdit);
+
     if (expOnlySel){
       expOnlySel.disabled = n === 0;
       if (n === 0) expOnlySel.checked = false;
@@ -604,6 +615,12 @@
 
   async function handleNovoSave(){
     if (!novoModal) return;
+
+    if (!hasPerm(PERM_CREATE)){
+      toast('Você não tem permissão para criar clientes.','err');
+      return;
+    }
+
     const telDigits = digits(novoTel?.value || '');
     if (!telDigits || telDigits.length < 8){
       toast('Informe um telefone válido (mín. 8 dígitos).','warn');
@@ -755,6 +772,10 @@
     // Abrir modal colaborador (bulk)
     btnRespBulk?.addEventListener('click', ()=>{
       if (state.selected.size === 0) return;
+      if (!hasPerm(PERM_EDIT)){
+        toast('Você não tem permissão para editar clientes.','err');
+        return;
+      }
       openModal(respModal);
     });
     respCancel?.addEventListener('click', ()=> closeModal(respModal));
@@ -762,6 +783,11 @@
     respOk?.addEventListener('click', async ()=>{
       const ids = Array.from(state.selected);
       if (!ids.length) return;
+
+      if (!hasPerm(PERM_EDIT)){
+        toast('Você não tem permissão para editar clientes.','err');
+        return;
+      }
 
       const val = (selectRespModal?.value ?? '');
       const colabId   = (val === '') ? null : Number(val);
@@ -793,6 +819,10 @@
     // Abrir modal departamento (bulk)
     btnDeptoBulk?.addEventListener('click', ()=>{
       if (state.selected.size === 0) return;
+      if (!hasPerm(PERM_EDIT)){
+        toast('Você não tem permissão para editar clientes.','err');
+        return;
+      }
       openModal(deptoModal);
     });
     deptoCancel?.addEventListener('click', ()=> closeModal(deptoModal));
@@ -800,6 +830,11 @@
     deptoOk?.addEventListener('click', async ()=>{
       const ids = Array.from(state.selected);
       if (!ids.length) return;
+
+      if (!hasPerm(PERM_EDIT)){
+        toast('Você não tem permissão para editar clientes.','err');
+        return;
+      }
 
       const val = (selectDeptoModal?.value ?? '');
       const depId   = (val === '') ? null : Number(val);
@@ -828,6 +863,10 @@
 
     // ===== Botão "Novo cliente"
     btnAdd?.addEventListener('click', ()=>{
+      if (!hasPerm(PERM_CREATE)){
+        toast('Você não tem permissão para criar clientes.','err');
+        return;
+      }
       if (novoModal) openNovoModal();
     });
     novoCancel?.addEventListener?.('click', ()=> closeModal(novoModal));
@@ -839,10 +878,20 @@
     novoOk?.addEventListener?.('click', handleNovoSave);
 
     // Exportar
-    btnExp?.addEventListener('click', ()=> { openModal(expModal); updateSelUI(); });
+    btnExp?.addEventListener('click', ()=>{
+      if (!hasPerm(PERM_IMP_EXP)){
+        toast('Você não tem permissão para exportar clientes.','err');
+        return;
+      }
+      openModal(expModal); updateSelUI();
+    });
     expCancel?.addEventListener('click', ()=> closeModal(expModal));
     expClose?.addEventListener('click', ()=> closeModal(expModal));
     expOk?.addEventListener('click', ()=>{
+      if (!hasPerm(PERM_IMP_EXP)){
+        toast('Você não tem permissão para exportar clientes.','err');
+        return;
+      }
       const fmt = (document.querySelector('input[name="expfmt"]:checked')?.value || 'csv');
       let url = `/api/clientes/export?fmt=${encodeURIComponent(fmt)}`;
       if (expOnlySel && expOnlySel.checked && state.selected.size){
@@ -858,22 +907,51 @@
     });
 
     // Importar
-    btnImp?.addEventListener('click', ()=> openModal(impModal));
+    btnImp?.addEventListener('click', ()=>{
+      if (!hasPerm(PERM_IMP_EXP)){
+        toast('Você não tem permissão para importar clientes.','err');
+        return;
+      }
+      openModal(impModal);
+    });
     impCancel?.addEventListener('click', ()=> closeModal(impModal));
     impClose?.addEventListener('click', ()=> closeModal(impModal));
     impPick?.addEventListener('click', ()=> impFile?.click());
     impFile?.addEventListener('change', ()=>{
       if (impFileName) impFileName.textContent = (impFile.files?.[0]?.name || 'Nenhum arquivo escolhido');
     });
-    impOk?.addEventListener('click', ()=>{ closeModal(impModal); toast('Importando…'); });
+    impOk?.addEventListener('click', ()=>{
+      if (!hasPerm(PERM_IMP_EXP)){
+        toast('Você não tem permissão para importar clientes.','err');
+        return;
+      }
+      closeModal(impModal);
+      toast('Importando…');
+    });
 
-    // ===== Ações da tabela — delega para ClienteEditor
     // ===== Ações da tabela — delega para ClienteEditor
     document.addEventListener('click', async (e)=>{
       const b = e.target.closest?.('[data-action]');
       if (!b) return;
       const id = Number(b.dataset.id);
       if (!id) return;
+
+      const action = b.dataset.action;
+
+      // Permissão por ação
+      if (action === 'custom' || action === 'edit'){
+        if (!hasPerm(PERM_EDIT)){
+          toast('Você não tem permissão para editar clientes.','err');
+          return;
+        }
+      }
+      if (action === 'view'){
+        if (!hasPerm(PERM_VIEW)){
+          toast('Você não tem permissão para visualizar clientes.','err');
+          return;
+        }
+      }
+      // "msg" fica a cargo das permissões do módulo de atendimento
 
       const ok = await ensureClienteEditorLoaded();
       if (!ok || !window.ClienteEditor){
@@ -882,7 +960,6 @@
       }
 
       const cli = getClienteFromState(id);
-      const action = b.dataset.action;
 
       // Novo: botão "Campos personalizados"
       if (action === 'custom'){
@@ -909,7 +986,6 @@
         return;
       }
     });
-
 
     // showPicker chips
     if (HAS_SHOWPICKER) {
@@ -981,7 +1057,12 @@
 
     const cached = loadCache();
     if (cached && cached.length){
-      cached.forEach(c => { if (!state.seen.has(c.id)){ state.seen.add(c.id); state.clientes.push(c); }});
+      cached.forEach(c => {
+        if (!state.seen.has(c.id)){
+          state.seen.add(c.id);
+          state.clientes.push(c);
+        }
+      });
       hydrateColaboradorNome(state.clientes);
       hydrateDepartamentoNome(state.clientes);
       renderFromScratch();
@@ -1002,6 +1083,40 @@
     resetAndLoad();
   }
 
+  // Aplica os estados iniciais de UI conforme as permissões
+  function applyPermsUI(){
+    const canCreate  = hasPerm(PERM_CREATE);
+    const canEdit    = hasPerm(PERM_EDIT);
+    const canImpExp  = hasPerm(PERM_IMP_EXP);
+
+    if (btnAdd){
+      btnAdd.disabled = !canCreate;
+      btnAdd.classList.toggle('is-disabled', !canCreate);
+      if (!canCreate) btnAdd.title = 'Você não tem permissão para criar clientes.';
+    }
+
+    if (btnExp){
+      btnExp.disabled = !canImpExp;
+      btnExp.classList.toggle('is-disabled', !canImpExp);
+      if (!canImpExp) btnExp.title = 'Você não tem permissão para exportar clientes.';
+    }
+
+    if (btnImp){
+      btnImp.disabled = !canImpExp;
+      btnImp.classList.toggle('is-disabled', !canImpExp);
+      if (!canImpExp) btnImp.title = 'Você não tem permissão para importar clientes.';
+    }
+
+    if (btnRespBulk && !canEdit){
+      btnRespBulk.disabled = true;
+      btnRespBulk.title = 'Você não tem permissão para editar clientes.';
+    }
+    if (btnDeptoBulk && !canEdit){
+      btnDeptoBulk.disabled = true;
+      btnDeptoBulk.title = 'Você não tem permissão para editar clientes.';
+    }
+  }
+
   // ===== Boot
   async function init(){
     if (!hasAnyPerm(PERM_REQUIRED_ANY)){
@@ -1011,6 +1126,7 @@
     if (window.ZAuth?.softEnsureAuth) { try { await ZAuth.softEnsureAuth(); } catch {} }
 
     bindEvents();
+    applyPermsUI();
     await Promise.all([loadSetores(), loadResponsaveis()]);
     resetAndLoad();
     updateSelUI();
@@ -1073,15 +1189,24 @@
     const found = getAllPerms();
     const need  = (permsNeeded||[]).map(p=>String(p).toLowerCase());
     const ok = need.some(p => found.includes(p));
+    // Se ainda não tiver nenhuma perm salva (cenário antigo), libera
     return ok || found.length === 0;
   }
+
+  function hasPerm(p){
+    if (!p) return true;
+    return hasAnyPerm([p]);
+  }
+
   function renderNoPerm(){
     const main = document.querySelector('.main');
     if (!main) return;
     main.innerHTML = `
       <div class="box" style="margin:1rem auto; max-width:680px; text-align:center">
         <h2 style="margin:0 0 .5rem">Sem permissão</h2>
-        <p style="color:var(--muted)">Você precisa de <code>clientes.ver</code> ou <code>clientes.gerenciar</code> para acessar esta página.</p>
+        <p style="color:var(--muted)">
+          Você precisa da permissão <code>clientes.ver</code> para acessar esta página.
+        </p>
       </div>
     `;
   }

@@ -5,65 +5,87 @@
 // - Delegação por data-attributes (não depende de scripts do partial)
 // - Reexecuta <script> do partial (inclui type="module")
 // - Acessibilidade: aria/inert, foco cíclico, fechar com backdrop/ESC/rota
-// - Hardening mobile: backdrop fechado não captura clique (display:none)
+// - Desktop: sidebar fixa na lateral quando o usuário abrir.
+// - Mobile: comportamento de flyout/overlay.
 
 const PARTIAL_URL = '/frontend/partials/sidebar-atendimentos.html';
+const MOBILE_MAX_WIDTH = 920;
 
 (function () {
   const host = document.getElementById('zcSidebarHost');
   if (!host) return;
 
-  // NÃO usamos mais .zc-flyout__panel — buscamos por role="dialog"
   const panel =
     host.querySelector('[role="dialog"][aria-label]') ||
     host.querySelector('[role="dialog"]');
 
-  // Backdrop: tenta pela classe; se não existir, pega o botão tabindex="-1"
   const backdrop =
     host.querySelector('.zc-flyout__backdrop') ||
     host.querySelector('[tabindex="-1"]');
 
+  if (!panel || !backdrop) return;
+
+  // >>> GARANTE QUE COMEÇA FECHADO (HTML pode vir com .is-open de fábrica)
+  host.classList.remove('is-open', 'is-opening', 'is-closing');
+
+  // ===== Utils de viewport =====
+  function isMobileView() {
+    try {
+      if (window.matchMedia) {
+        return window.matchMedia(`(max-width:${MOBILE_MAX_WIDTH}px)`).matches;
+      }
+    } catch {}
+    return window.innerWidth <= MOBILE_MAX_WIDTH;
+  }
+
+  // mode: "modal" (overlay) | "pinned" (fixo na lateral)
+  function getMode() {
+    const attr = host.getAttribute('data-mode');
+    if (attr === 'pinned' || attr === 'modal') return attr;
+    return isMobileView() ? 'modal' : 'pinned';
+  }
+  function setMode(mode) {
+    host.setAttribute('data-mode', mode);
+  }
+
   // ====== helpers para garantir os botões corretos ======
 
-  // Garante um "slot" de ícones à direita do header e injeta o kebab lá dentro.
-  function ensureHeaderKebab(){
+  function ensureHeaderKebab() {
     const row =
       document.querySelector('.wpp-header-externo .wpp-header-titulo-row') ||
       document.querySelector('header');
 
     if (!row) return null;
 
-    // container de ícones no lado direito
     let slot = row.querySelector('.wpp-header-icons');
     if (!slot) {
       slot = document.createElement('div');
       slot.className = 'wpp-header-icons';
-      slot.style.display    = 'flex';
-      slot.style.gap        = '4px';
+      slot.style.display = 'flex';
+      slot.style.gap = '4px';
       slot.style.marginLeft = 'auto';
       row.appendChild(slot);
     }
 
-    // cria/recupera o botão do header
     let btn = document.getElementById('btnKebabHeader');
     if (!btn) {
       btn = document.createElement('button');
       btn.id = 'btnKebabHeader';
       btn.type = 'button';
       btn.className = 'hdr-icon-btn';
-      btn.setAttribute('aria-label','Mais opções');
+      btn.setAttribute('aria-label', 'Mais opções');
+      btn.title = 'Menu';
       btn.innerHTML =
         '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
-          '<circle cx="5" cy="12" r="2"/>' +
-          '<circle cx="12" cy="12" r="2"/>' +
-          '<circle cx="19" cy="12" r="2"/>' +
+        '<circle cx="5" cy="12" r="2"/>' +
+        '<circle cx="12" cy="12" r="2"/>' +
+        '<circle cx="19" cy="12" r="2"/>' +
         '</svg>';
     }
     if (btn.parentElement !== slot) slot.appendChild(btn);
 
-    // força mostrar no desktop e mobile
     try {
-      btn.style.setProperty('display','inline-grid','important');
+      btn.style.setProperty('display', 'inline-grid', 'important');
       btn.style.removeProperty('visibility');
       btn.style.removeProperty('opacity');
     } catch {}
@@ -71,30 +93,51 @@ const PARTIAL_URL = '/frontend/partials/sidebar-atendimentos.html';
     return btn;
   }
 
-  // Opcional: se existir um kebab na leftbar, mantemos oculto p/ evitar duplicado
-  function ensureLeftbarKebab(){
+  function ensureLeftbarKebab() {
     const btn = document.getElementById('menuOnlyBtn');
     if (!btn) return null;
     try {
-      btn.style.setProperty('display','none','important');
+      btn.style.setProperty('display', 'none', 'important');
       btn.style.visibility = 'hidden';
-      btn.style.opacity    = '0';
+      btn.style.opacity = '0';
     } catch {}
     return btn;
   }
 
-  // injeta/organiza antes de capturar gatilhos
-  const headerBtn  = ensureHeaderKebab();
+  const headerBtn = ensureHeaderKebab();
   ensureLeftbarKebab();
 
-  // Gatilhos (desktop + mobile) — após garantir o headerBtn
-  const triggers = [headerBtn, document.getElementById('menuOnlyBtn')].filter(Boolean);
+  const triggers = [headerBtn, document.getElementById('menuOnlyBtn')].filter(
+    Boolean
+  );
 
-  if (!panel || !backdrop || triggers.length === 0) return;
+  if (triggers.length === 0) return;
 
   let lastTrigger = null;
 
   // ===== Helpers visibilidade/backdrop =====
+  function applyPointerMode() {
+    const mode = getMode();
+    const mobile = isMobileView();
+    const isModal = mode === 'modal' && mobile;
+
+    if (!host.classList.contains('is-open')) {
+      host.style.pointerEvents = 'none';
+      panel.style.pointerEvents = 'auto';
+      return;
+    }
+
+    if (isModal) {
+      // overlay: host inteiro captura clique
+      host.style.pointerEvents = 'auto';
+      panel.style.pointerEvents = 'auto';
+    } else {
+      // sidebar fixa: só o painel captura cliques, o resto da tela continua normal
+      host.style.pointerEvents = 'none';
+      panel.style.pointerEvents = 'auto';
+    }
+  }
+
   function showBackdrop() {
     backdrop.classList?.remove('hidden');
     backdrop.removeAttribute?.('aria-hidden');
@@ -108,26 +151,38 @@ const PARTIAL_URL = '/frontend/partials/sidebar-atendimentos.html';
 
   // ===== A11y / estado =====
   const setA11y = (open) => {
+    const mode = getMode();
+    const isModal = mode === 'modal' && isMobileView();
+
     triggers.forEach((btn) =>
       btn.setAttribute('aria-expanded', open ? 'true' : 'false')
     );
     host.setAttribute('aria-hidden', open ? 'false' : 'true');
-    document.body.classList.toggle('no-scroll', open);
 
-    // inert no <main>
-    try {
-      const main = document.querySelector('main');
+    // Somente no mobile (overlay) a gente trava o fundo
+    const body = document.body;
+    const main = document.querySelector('main');
+
+    if (isModal) {
+      body.classList.toggle('no-scroll', open);
       if (main) {
         if (open) main.setAttribute('inert', '');
         else main.removeAttribute('inert');
       }
-    } catch {}
+    } else {
+      body.classList.remove('no-scroll');
+      if (main) main.removeAttribute('inert');
+    }
   };
 
-  // ===== Focus trap =====
+  // ===== Focus trap (só no mobile/modal) =====
   function trapFocus(e) {
     if (!host.classList.contains('is-open')) return;
     if (e.key !== 'Tab') return;
+
+    const mode = getMode();
+    const isModal = mode === 'modal' && isMobileView();
+    if (!isModal) return;
 
     const focusables = panel.querySelectorAll(
       'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])'
@@ -146,15 +201,29 @@ const PARTIAL_URL = '/frontend/partials/sidebar-atendimentos.html';
     }
   }
 
-  const openFlyout = () => {
+  const openFlyout = (opts = {}) => {
+    const mobile = isMobileView();
+    const mode = opts.mode || (mobile ? 'modal' : 'pinned');
+    setMode(mode);
+
     host.classList.remove('is-closing');
     host.classList.add('is-open', 'is-opening');
-    showBackdrop();
+
+    if (mode === 'modal' && mobile) {
+      showBackdrop();
+    } else {
+      hideBackdrop();
+    }
+
+    applyPointerMode();
     setA11y(true);
+
     setTimeout(() => host.classList.remove('is-opening'), 300);
 
-    // Foco inicial
     setTimeout(() => {
+      // No desktop/pinned não forçamos foco; deixamos natural.
+      if (mode === 'pinned' && !mobile) return;
+
       const focusable = panel.querySelector(
         '[autofocus], [href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])'
       );
@@ -162,45 +231,29 @@ const PARTIAL_URL = '/frontend/partials/sidebar-atendimentos.html';
     }, 10);
   };
 
-  const closeFlyout = () => {
+  const closeFlyout = (opts = {}) => {
+    const force = !!opts.force;
+    const mobile = isMobileView();
+    const mode = getMode();
+
+    // No desktop modo "pinned" a gente não fecha automaticamente,
+    // a não ser que venha um force:true (usuário clicou no botão).
+    if (mode === 'pinned' && !mobile && !force) {
+      return;
+    }
+
     host.classList.remove('is-opening');
     host.classList.add('is-closing');
+
     setTimeout(() => {
       host.classList.remove('is-open', 'is-closing');
       hideBackdrop();
+      applyPointerMode();
       setA11y(false);
       lastTrigger?.focus?.();
       lastTrigger = null;
     }, 230);
   };
-
-  // ===== Eventos básicos =====
-  triggers.forEach((btn) => {
-    btn.setAttribute('aria-haspopup', 'dialog');
-    btn.setAttribute('aria-controls', 'zcSidebarHost');
-    btn.setAttribute('aria-expanded', 'false');
-
-    btn.addEventListener('click', () => {
-      lastTrigger = btn;
-      openFlyout();
-      loadOnce();
-    });
-  });
-
-  backdrop.addEventListener('click', closeFlyout);
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeFlyout();
-    if (e.key === 'Tab') trapFocus(e);
-  });
-
-  // Impede clique dentro do painel de fechar
-  ['mousedown', 'mouseup', 'click', 'touchstart', 'touchend'].forEach((ev) => {
-    panel.addEventListener(ev, (e) => e.stopPropagation(), true);
-  });
-
-  // Fechar ao navegar
-  addEventListener('popstate', closeFlyout);
-  addEventListener('route:change', closeFlyout);
 
   // ===== Loader do partial =====
   let loaded = false;
@@ -208,17 +261,23 @@ const PARTIAL_URL = '/frontend/partials/sidebar-atendimentos.html';
     if (loaded) return;
     loaded = true;
     try {
-      const html = await fetch(PARTIAL_URL, { credentials: 'include' }).then((r) => r.text());
+      const html = await fetch(PARTIAL_URL, { credentials: 'include' }).then(
+        (r) => r.text()
+      );
       panel.innerHTML = html;
 
       // 1) Delegação (data-action)
       wireActions(panel);
 
-      // 2) Links fecham o flyout
+      // 2) Links fecham o flyout (apenas modal/mobile)
       panel.querySelectorAll('a[href]').forEach((a) => {
         a.addEventListener('click', () => {
           const href = (a.getAttribute('href') || '').trim();
-          if (href && !href.startsWith('#')) closeFlyout();
+          if (!href || href.startsWith('#')) return;
+          const mode = getMode();
+          if (mode === 'modal' && isMobileView()) {
+            closeFlyout({ force: true });
+          }
         });
       });
 
@@ -263,8 +322,10 @@ const PARTIAL_URL = '/frontend/partials/sidebar-atendimentos.html';
           location.href = '/frontend/clientes.html';
           break;
         case 'new-conversation':
-          try { window.dispatchEvent(new CustomEvent('nova:conversa')); } catch {}
-          closeFlyout();
+          try {
+            window.dispatchEvent(new CustomEvent('nova:conversa'));
+          } catch {}
+          closeFlyout({ force: true });
           break;
         case 'toggle-theme':
           toggleTheme();
@@ -287,14 +348,16 @@ const PARTIAL_URL = '/frontend/partials/sidebar-atendimentos.html';
       const next = cur === 'dark' ? 'light' : 'dark';
       el.setAttribute('data-theme', next);
       localStorage.setItem('zc:theme', next);
-      dispatchEvent(new CustomEvent('theme:changed', { detail: { theme: next } }));
+      dispatchEvent(
+        new CustomEvent('theme:changed', { detail: { theme: next } })
+      );
     } catch {}
   }
   function updateThemeLabel(root) {
-    const btn = root.querySelector('[data-action="toggle-theme"] .label');
-    if (!btn) return;
+    const labelSpan = root.querySelector('[data-action="toggle-theme"] .label');
+    if (!labelSpan) return;
     const cur = document.documentElement.getAttribute('data-theme') || 'dark';
-    btn.textContent = cur === 'dark' ? 'Tema claro' : 'Tema escuro';
+    labelSpan.textContent = cur === 'dark' ? 'Tema claro' : 'Tema escuro';
   }
 
   // ===== Reexecuta scripts do partial =====
@@ -339,12 +402,18 @@ const PARTIAL_URL = '/frontend/partials/sidebar-atendimentos.html';
     try {
       const leftBtn = document.getElementById('menuOnlyBtn');
       if (!leftBtn) return;
-      const row = document.querySelector('.wpp-header-externo .wpp-header-titulo-row');
+      const row = document.querySelector(
+        '.wpp-header-externo .wpp-header-titulo-row'
+      );
       if (!row) return;
       const r1 = row.getBoundingClientRect();
       const r2 = leftBtn.getBoundingClientRect();
       leftBtn.style.marginTop =
-        14 + Math.round(r1.top + r1.height / 2 - (r2.top + r2.height / 2)) + 'px';
+        14 +
+        Math.round(
+          r1.top + r1.height / 2 - (r2.top + r2.height / 2)
+        ) +
+        'px';
     } catch {}
   }
   addEventListener('load', alignDots);
@@ -356,14 +425,111 @@ const PARTIAL_URL = '/frontend/partials/sidebar-atendimentos.html';
   } catch {}
 
   // Rerender do header (ex.: breakpoint/mobile) — recoloca o kebab na direita
-  (function watchHeader(){
-    const root = document.querySelector('.wpp-header-externo') || document.querySelector('header');
+  (function watchHeader() {
+    const root =
+      document.querySelector('.wpp-header-externo') ||
+      document.querySelector('header');
     if (!root) return;
-    const mo = new MutationObserver(() => { try { ensureHeaderKebab(); } catch {} });
+    const mo = new MutationObserver(() => {
+      try {
+        ensureHeaderKebab();
+      } catch {}
+    });
     mo.observe(root, { childList: true, subtree: true });
     ensureHeaderKebab();
   })();
 
+  // ===== Eventos básicos =====
+  triggers.forEach((btn) => {
+    btn.setAttribute('aria-haspopup', 'dialog');
+    btn.setAttribute('aria-controls', 'zcSidebarHost');
+    btn.setAttribute('aria-expanded', 'false');
+
+    btn.addEventListener('click', () => {
+      lastTrigger = btn;
+      const isOpen = host.classList.contains('is-open');
+      const mode = getMode();
+      const mobile = isMobileView();
+
+      if (isOpen && mode === 'pinned' && !mobile) {
+        // desktop -> alterna (permite esconder se quiser)
+        closeFlyout({ force: true });
+      } else {
+        openFlyout();
+        loadOnce();
+      }
+    });
+  });
+
+  backdrop.addEventListener('click', () => closeFlyout({ force: true }));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeFlyout({ force: true });
+    if (e.key === 'Tab') trapFocus(e);
+  });
+
+  // Impede clique dentro do painel de fechar
+  ['mousedown', 'mouseup', 'click', 'touchstart', 'touchend'].forEach((ev) => {
+    panel.addEventListener(
+      ev,
+      (e) => e.stopPropagation(),
+      true
+    );
+  });
+
+  // Fechar ao navegar (apenas modal/mobile)
+  addEventListener('popstate', () => {
+    if (isMobileView() && getMode() === 'modal') {
+      closeFlyout({ force: true });
+    }
+  });
+  addEventListener('route:change', () => {
+    if (isMobileView() && getMode() === 'modal') {
+      closeFlyout({ force: true });
+    }
+  });
+
   // Fail-safe: backdrop oculto no boot
   hideBackdrop();
+  applyPointerMode();
+  setA11y(false);
+
+  // ===== Layout inicial: NÃO abre sozinho, só define o modo =====
+  function applyInitialLayout() {
+    setMode(isMobileView() ? 'modal' : 'pinned');
+    // continua fechado; só abre quando clicar
+  }
+  applyInitialLayout();
+
+  // Se mudar tamanho da tela (desktop <-> mobile), ajusta o modo
+  addEventListener('resize', () => {
+    const mobile = isMobileView();
+    const mode = getMode();
+    const isOpen = host.classList.contains('is-open');
+
+    if (!mobile && mode !== 'pinned') {
+      // virou desktop: ajusta para pinned
+      setMode('pinned');
+      if (isOpen) {
+        hideBackdrop();
+        applyPointerMode();
+        setA11y(true);
+      } else {
+        hideBackdrop();
+        applyPointerMode();
+        setA11y(false);
+      }
+    } else if (mobile && mode === 'pinned') {
+      // virou mobile: ajusta para modal
+      setMode('modal');
+      if (isOpen) {
+        showBackdrop();
+        applyPointerMode();
+        setA11y(true);
+      } else {
+        hideBackdrop();
+        applyPointerMode();
+        setA11y(false);
+      }
+    }
+  });
 })();

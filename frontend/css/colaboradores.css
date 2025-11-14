@@ -402,6 +402,26 @@ html.modal-open{ overflow: hidden; }
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--green-ring) 35%, transparent);
 }
 
+/* BOTÕES PRIMÁRIOS – estado desabilitado */
+.perfil-modal-card .btn.btn-primary[disabled],
+.perfil-modal-card .btn.btn-primary[aria-disabled="true"],
+#modal-perfil .btn.btn-primary[disabled],
+#modal-perfil .btn.btn-primary[aria-disabled="true"]{
+  background: var(--border-hairline-strong) !important;
+  border-color: var(--border-hairline-strong) !important;
+  color: var(--muted) !important;
+  cursor: not-allowed;
+  opacity: .8;
+  box-shadow: none !important;
+  filter: none !important;
+}
+.perfil-modal-card .btn.btn-primary[disabled] i,
+.perfil-modal-card .btn.btn-primary[aria-disabled="true"] i,
+#modal-perfil .btn.btn-primary[disabled] i,
+#modal-perfil .btn.btn-primary[aria-disabled="true"] i{
+  color: inherit !important;
+}
+
 /* ====================================================================
    INSTÂNCIAS (WhatsApp)
    ==================================================================== */
@@ -562,4 +582,17 @@ body[data-page="colaboradores"] ::-webkit-scrollbar-track{ background: transpare
 .select--replaced{
   position:absolute !important; width:1px !important; height:1px !important;
   opacity:0 !important; pointer-events:none !important; margin:0 !important;
+}
+/* estado "quase desabilitado": ainda clica, mas fica apagado */
+.perfil-modal-card .btn.btn-primary.btn-soft-disabled,
+#modal-perfil .btn.btn-primary.btn-soft-disabled{
+  opacity: .55;
+  cursor: not-allowed;
+  filter: grayscale(.15) brightness(.9);
+}
+.field-error{
+  margin: .25rem 0 0 .25rem;
+  font-size: .78rem;
+  color: var(--danger);
+  font-weight: 500;
 }

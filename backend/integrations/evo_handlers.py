@@ -1436,10 +1436,9 @@ async def on_messages_upsert(inst_id: str, data):
     """
     Mensagens novas/atualizadas (1:1).
 
-    Versão simplificada para:
-    - sempre garantir INSERT de mensagem nova no BD
-    - SEMPRE emitir no WebSocket (tempo real), mesmo se duplicada
-    - evitar lógicas muito agressivas que possam travar tudo
+    - Garante INSERT de mensagem nova no BD
+    - Sempre emite no WebSocket, mesmo se duplicada
+    - Liga mensagem a um Atendimento (campo atendimento_id) quando o campo existir
     """
 
     with SessionLocal() as db:
@@ -1564,6 +1563,8 @@ async def on_messages_upsert(inst_id: str, data):
 
                 # 4) from_me + dados básicos
                 from_me = bool(key.get("fromMe", m.get("fromMe", False)))
+                direcao = "saida" if from_me else "entrada"
+
                 push_name = m.get("pushName") or m.get("senderName")
                 formatted = formatar_telefone_br(telefone)
                 ts_msg = _to_dt_utc(ts_raw)
@@ -1635,7 +1636,31 @@ async def on_messages_upsert(inst_id: str, data):
                     )
                     continue
 
-                # 6) vê se já existe mensagem no BD (por msg_id)
+                # 6) Atendimento: abre/pega um atendimento em aberto (se o campo existir)
+                atendimento = None
+                if _HAS_MSG_ATD_FIELD:
+                    try:
+                        atendimento = _get_or_open_atendimento(
+                            db,
+                            empresa_id=empresa_id,
+                            instancia_id=inst.id,
+                            cliente_id=cli_id,
+                            direcao=direcao,
+                            ts_dt=ts_msg,
+                            operador_id=None,  # via Evolution não sabemos o operador
+                        )
+                    except Exception as e:
+                        LOG(
+                            f"[UPsert][erro_atendimento] "
+                            f"idx={idx} msg_id={msg_id} err={e}"
+                        )
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
+                        atendimento = None
+
+                # 7) vê se já existe mensagem no BD (por msg_id)
                 exists = False
                 if msg_id:
                     try:
@@ -1663,7 +1688,7 @@ async def on_messages_upsert(inst_id: str, data):
                             cliente_id=cli_id,
                         )
 
-                # 7) ack inicial (apenas saída)
+                # 8) ack inicial (apenas saída)
                 ack_initial = _ack_from_status(status) if from_me else None
 
                 msg_db_id = None
@@ -1673,13 +1698,18 @@ async def on_messages_upsert(inst_id: str, data):
                             empresa_id=empresa_id,
                             cliente_id=cli_id,
                             conteudo=conteudo,
-                            tipo="saida" if from_me else "entrada",
+                            tipo=direcao,
                             lida=from_me,
                             ack=ack_initial,
                             timestamp=ts_msg,
                             msg_id=msg_id,
                             instancia_id=inst.id,
                         )
+
+                        # liga à linha de atendimento, se existir o campo
+                        if atendimento is not None and _HAS_MSG_ATD_FIELD:
+                            setattr(msg_model, "atendimento_id", atendimento.id)
+
                         _carimbar_inst(msg_model, inst)
                         db.add(msg_model)
                         db.flush()
@@ -1691,7 +1721,7 @@ async def on_messages_upsert(inst_id: str, data):
                             idx=idx,
                             msg_id=msg_id,
                             saved_id=msg_db_id,
-                            tipo=("saida" if from_me else "entrada"),
+                            tipo=direcao,
                             ack=ack_initial,
                             ts=_iso_utc(ts_msg),
                             preview=_short(conteudo),
@@ -1707,7 +1737,7 @@ async def on_messages_upsert(inst_id: str, data):
                             pass
                         continue
 
-                # 8) SEMPRE emitir no WS (tempo real), mesmo se exists=True
+                # 9) SEMPRE emitir no WS (tempo real), mesmo se exists=True
                 try:
                     cliente = _fetch_cliente(db, cli_id)
                     await conexoes_ativas.send_message(
@@ -1717,9 +1747,10 @@ async def on_messages_upsert(inst_id: str, data):
                             "empresa_id": empresa_id,
                             "cliente_id": cli_id,
                             "instancia_id": inst.id,
-                            "instance_name": getattr(
-                                inst, "instance_name", None
-                            ),
+                            "instance_name": getattr(inst, "instance_name", None),
+
+                            # info de atendimento para o front (pode ser None)
+                            "atendimento_id": getattr(atendimento, "id", None),
 
                             # dados para a lista/preview
                             "telefone": formatar_telefone_br(telefone),
@@ -1735,7 +1766,7 @@ async def on_messages_upsert(inst_id: str, data):
 
                             # conteúdo
                             "mensagem": conteudo,
-                            "tipo": ("saida" if from_me else "entrada"),
+                            "tipo": direcao,
                             "origem": ("atendente" if from_me else "cliente"),
                             "timestamp": _iso_utc(ts_msg),
 
@@ -1793,6 +1824,143 @@ async def on_messages_upsert(inst_id: str, data):
             pass
 
         LOG(f"[UPsert] inst={inst_id} novas={novas}")
+
+
+# === [HANDLER: MESSAGES_DELETE] =============================================
+
+@handler(EvoEvent.MESSAGES_DELETE)
+async def on_messages_delete(inst_id: str, data):
+    """
+    Mensagens apagadas (delete para todos).
+
+    - NUNCA sobrescreve conteudo
+    - Marca:
+        apagada_cliente = True  (mensagem recebida do cliente)
+        apagada_usuario = True  (mensagem enviada pelo atendente)
+    """
+
+    mensagens = extract_messages_any_shape(data)
+    _log_ctx(
+        "[DEL] batch",
+        inst=inst_id,
+        total=len(mensagens),
+        type_data=type(data).__name__,
+    )
+
+    if not mensagens:
+        LOG("[DEL] nenhum item reconhecido em payload.")
+        return
+
+    with SessionLocal() as db:
+        inst = _get_inst_row(db, inst_id)
+        if not inst:
+            LOG(f"[DEL] instância não encontrada: {inst_id}")
+            return
+
+        encontrados = 0
+        alterados = 0
+
+        for idx, m in enumerate(mensagens, start=1):
+            try:
+                if not isinstance(m, dict):
+                    _log_ctx("[DEL][skip] m não é dict", idx=idx, type_m=type(m).__name__)
+                    continue
+
+                key = m.get("key") or {}
+                msg_id = key.get("id") or m.get("id")
+                from_me = bool(
+                    key.get("fromMe") if "fromMe" in key else (m.get("fromMe") or False)
+                )
+
+                _log_ctx(
+                    "[DEL][in]",
+                    idx=idx,
+                    msg_id=msg_id,
+                    from_me=from_me,
+                )
+
+                if not msg_id:
+                    _log_ctx("[DEL][skip] sem msg_id", idx=idx)
+                    continue
+
+                # Ajuste aqui pro nome correto do campo ID da mensagem no seu model:
+                row = (
+                    db.query(models.Mensagem)
+                    .filter(
+                        models.Mensagem.instancia_id == inst.id,
+                        models.Mensagem.msg_id == msg_id,   # ou .mensagem_id se for esse o nome
+                    )
+                    .first()
+                )
+
+                if not row:
+                    _log_ctx("[DEL][miss]", idx=idx, msg_id=msg_id)
+                    continue
+
+                encontrados += 1
+
+                tipo = getattr(row, "tipo", None)  # "entrada" / "saida", se você usa isso
+
+                apagou_cliente = False
+                apagou_usuario = False
+
+                if tipo == "entrada":
+                    apagou_cliente = True
+                elif tipo == "saida":
+                    apagou_usuario = True
+                else:
+                    # fallback: usa from_me se o tipo não estiver preenchido
+                    apagou_usuario = bool(from_me)
+                    apagou_cliente = not from_me
+
+                before_cli = getattr(row, "apagada_cliente", False)
+                before_usr = getattr(row, "apagada_usuario", False)
+
+                changed = False
+
+                if apagou_cliente and not before_cli:
+                    row.apagada_cliente = True
+                    changed = True
+
+                if apagou_usuario and not before_usr:
+                    row.apagada_usuario = True
+                    changed = True
+
+                if changed:
+                    alterados += 1
+
+                _log_ctx(
+                    "[DEL][hit]",
+                    idx=idx,
+                    msg_id=msg_id,
+                    tipo=tipo,
+                    apagada_cliente=row.apagada_cliente,
+                    apagada_usuario=row.apagada_usuario,
+                    preview=_short(getattr(row, "conteudo", ""), 80),
+                )
+
+            except Exception as e:
+                LOG(f"[DEL] erro inesperado no loop idx={idx}: {e}")
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+
+        if alterados:
+            try:
+                db.commit()
+            except Exception as e:
+                LOG(f"[DEL] erro ao dar commit nas mensagens apagadas: {e}")
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+
+    LOG(
+        f"[DEL] concluído batch inst={inst_id} "
+        f"total={len(mensagens)} encontrados={encontrados} alterados={alterados}"
+    )
+
 
 
 @handler(EvoEvent.CALL)

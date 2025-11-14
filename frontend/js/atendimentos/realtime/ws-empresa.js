@@ -293,10 +293,26 @@ function mirrorLegacyF5(instKey, cid){
     const arr = getHist(instKey, cid) || [];
     if (!window.cacheHistoricos) window.cacheHistoricos = {};
     window.cacheHistoricos[cid] = arr;
-    const EMP = Number(localStorage.getItem('empresa_id') || 0);
-    localStorage.setItem(`cacheHistoricos:${EMP}`, JSON.stringify(window.cacheHistoricos));
-  }catch{}
+
+    // ⚠ Usa a MESMA chave de empresa que o historico.js
+    const empWindow = Number(window.EMPRESA_ID || 0);
+    const empLs     = Number(localStorage.getItem('empresa_id') || 0);
+    const EMP       = empWindow || empLs || 0;
+    if (!EMP) return;
+
+    const key = `cacheHistoricos:${EMP}`;
+    localStorage.setItem(key, JSON.stringify(window.cacheHistoricos || {}));
+
+    // compat: se window.EMPRESA_ID e empresa_id do LS forem diferentes, grava nas duas
+    if (empWindow && empLs && empWindow !== empLs) {
+      localStorage.setItem(`cacheHistoricos:${empWindow}`, JSON.stringify(window.cacheHistoricos || {}));
+      localStorage.setItem(`cacheHistoricos:${empLs}`,     JSON.stringify(window.cacheHistoricos || {}));
+    }
+  }catch(e){
+    if (DEBUG_WS) console.warn('[HIST APPEND] mirrorLegacyF5 falhou', e);
+  }
 }
+
 function squashPendingLocalEcho(inst, cliente_id, msg){
   try{
     const instKey = inst ?? window.INSTANCIA_ATIVA ?? null;

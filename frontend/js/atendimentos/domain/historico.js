@@ -379,41 +379,65 @@ function getInstQuery(){
   return Number.isFinite(n) ? `&instancia_id=${n}` : `&instance=${encodeURIComponent(String(inst))}`;
 }
 
-/* ========= abrir primeira página do histórico ========= */
+/* ========= abrir histórico (com cursor since_ts) ========= */
 export async function abrirHistorico(id){
   const hist = H(); if (!hist) return false;
-  hist.dataset.clienteId = String(id);
+  const cid = Number(id);
+  hist.dataset.clienteId = String(cid);
   hist.dataset.noMore = '0';
-  setOffset(id, 0);
 
   try{
-    const url = `/api/atendimento/conversas/${id}/mensagens?empresa_id=${EMPRESA_ID}&limit=${HISTORICO_LIMIT}${getInstQuery()}`;
+    const inst = getInstanciaForFetch();
+    const existing = ensureArray(getHist(inst, cid));
+    const hasExisting = existing.length > 0;
+
+    let prevOffset = 0;
+    if (hasExisting) {
+      prevOffset = getOffset(cid);
+    } else {
+      setOffset(cid, 0);
+    }
+
+    // cursor baseado na última mensagem local
+    let sinceParam = '';
+    if (hasExisting) {
+      const last = existing[existing.length - 1];
+      let tsIso = last.timestamp || last.data || last.created_at || null;
+      if (!tsIso && last.ts) {
+        try { tsIso = new Date(last.ts).toISOString(); } catch {}
+      }
+      if (tsIso) {
+        sinceParam = `&since_ts=${encodeURIComponent(tsIso)}`;
+      }
+    }
+
+    const url =
+      `/api/atendimento/conversas/${cid}/mensagens` +
+      `?empresa_id=${EMPRESA_ID}` +
+      `&limit=${HISTORICO_LIMIT}` +
+      sinceParam +
+      getInstQuery();
+
     const r = await fetch(url, { credentials:'include' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
 
-    const inst = getInstanciaForFetch();
-    const existing = ensureArray(getHist(inst, Number(id)));
-    const byId = new Map(existing.map(m => [String(m?.msg_id||''), m]));
+    if (items.length) {
+      salvarNoCache(cid, items); // merge incremental no cache
+    }
 
-    const merged = (Array.isArray(items)?items:[]).map(it=>{
-      const k = String(it?.msg_id || '');
-      if (k && byId.has(k)) {
-        const prev = byId.get(k);
-        const ack = Math.max(Number(prev?.ack||0), Number(it?.ack||0));
-        return { ...it, ack };
-      }
-      return it;
-    });
+    renderHistoricoDoCache(cid, false);
 
-    primeWith(inst, Number(id), merged, null);
+    const delta = items.length;
+    if (sinceParam) {
+      // modo incremental: soma novas mensagens ao offset já conhecido
+      setOffset(cid, prevOffset + delta);
+    } else {
+      // primeira carga: offset é o número de mensagens que acabamos de buscar
+      setOffset(cid, delta);
+    }
 
-    window.cacheHistoricos[id] = ordenarMensagens(merged);
-    window.salvarCache?.();
-
-    renderHistoricoDoCache(id, false);
-    setOffset(id, merged.length);
     return true;
   }catch(e){
     console.error('[historico] abrirHistorico', e);

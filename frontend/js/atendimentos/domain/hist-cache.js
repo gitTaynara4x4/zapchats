@@ -55,7 +55,10 @@ function normMsg(m) {
     ts,
     origem: origem ?? null,
     autor_nome: autor_nome ?? null,
+    apagada_cliente: Boolean(m?.apagada_cliente),
+    apagada_usuario: Boolean(m?.apagada_usuario),
   };
+
 }
 
 const _norm = (v)=> (v ?? '').toString().trim();

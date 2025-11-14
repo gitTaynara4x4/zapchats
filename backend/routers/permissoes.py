@@ -15,7 +15,15 @@ router = APIRouter(prefix="/api/permissoes", tags=["Permissões"])
 # ===== Catálogo de permissões (exibido no front) =====
 PERMISSOES_CATALOGO = [
     {"id": "dashboard.ver",            "label": "Ver Dashboard"},
+
+    # ===== MÓDULO CLIENTES =====
     {"id": "clientes.ver",             "label": "Ver clientes"},
+    {"id": "clientes.criar",           "label": "Criar clientes"},
+    {"id": "clientes.editar",          "label": "Editar clientes"},
+    {"id": "clientes.importar_exportar","label": "Importar/Exportar clientes"},
+    {"id": "clientes.excluir",         "label": "Excluir clientes"},
+
+    # ===== OUTROS MÓDULOS =====
     {"id": "departamentos.gerenciar",  "label": "Gerenciar departamentos"},
     {"id": "usuarios.gerenciar",       "label": "Gerenciar usuários/equipe"},
     {"id": "colaboradores.ver",        "label": "Ver colaboradores"},

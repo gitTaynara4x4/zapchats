@@ -214,7 +214,8 @@
         $('#empty-hero')?.remove();
         $('#composer')?.removeAttribute?.('disabled');
 
-        await window.abrirHistorico(clienteId);
+        await window.abrirHistorico(clienteId, { forceReload: true });
+
         const input = $('#composerInput') || $('#chatInput') || $('textarea, input[type="text"]');
         input?.focus?.();
         return;

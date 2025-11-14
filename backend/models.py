@@ -370,14 +370,13 @@ class Cliente(Base):
 class Mensagem(Base):
     __tablename__ = "mensagens"
     __table_args__ = (
-        UniqueConstraint("instancia_id", "msg_id", name="uq_mensagens_inst_msgid"),
         Index("ix_mensagens_msg_id", "msg_id"),
         Index("ix_mensagens_empresa_cliente_ts", "empresa_id", "cliente_id", "timestamp"),
     )
 
-    id          = Column(Integer, primary_key=True, index=True)
-    empresa_id  = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
-    cliente_id  = Column(Integer, ForeignKey("clientes.id"),  nullable=False, index=True)
+    id         = Column(Integer, primary_key=True, index=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=False, index=True)
 
     instancia_id = Column(
         Integer,
@@ -386,20 +385,29 @@ class Mensagem(Base):
         index=True,
     )
 
-    conteudo    = Column(Text,    nullable=False)
-    tipo        = Column(String,  nullable=False)  # 'entrada' | 'saida'
-    lida        = Column(Boolean, default=False)
-    timestamp   = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    # 🔹 NOVO CAMPO: FK pro atendimento
+    atendimento_id = Column(
+        Integer,
+        ForeignKey("atendimentos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
-    msg_id      = Column(String, index=True)  # id do Baileys/Evolution
-    ack         = Column(Integer, default=0)
+    conteudo  = Column(Text,   nullable=False)
+    tipo      = Column(String, nullable=False)  # 'entrada' | 'saida'
+    lida      = Column(Boolean, default=False)
+    timestamp = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
-    cliente   = relationship("Cliente", back_populates="mensagens")
-    instancia = relationship("EmpresaInstancia", back_populates="mensagens")
+    msg_id = Column(String, index=True)  # id do Baileys/Evolution
+    ack    = Column(Integer, default=0)
 
+    cliente    = relationship("Cliente", back_populates="mensagens")
+    instancia  = relationship("EmpresaInstancia", back_populates="mensagens")
+    atendimento = relationship("Atendimento", back_populates="mensagens")
+    apagada_cliente = Column(Boolean, nullable=False, default=False)
+    apagada_usuario = Column(Boolean, nullable=False, default=False)
     def __repr__(self) -> str:
-        return f"<Mensagem id={self.id} cli={self.cliente_id} inst={self.instancia_id} tipo={self.tipo} ts={self.timestamp}>"
-
+        return f"<Mensagem id={self.id} cli={self.cliente_id} inst={self.instancia_id} atd={self.atendimento_id} tipo={self.tipo} ts={self.timestamp}>"
 
 # =========================
 # Midia
@@ -596,7 +604,7 @@ class AtendimentoPinnedConversa(Base):
     empresa  = relationship("Empresa")
     usuario  = relationship("Usuario")
     conversa = relationship("Cliente")
-
+    atendimento_id = Column(Integer, ForeignKey("atendimentos.id"), nullable=True)
     def __repr__(self) -> str:
         return f"<Pinned emp={self.empresa_id} user={self.user_id} conv={self.conversa_id}>"
 
@@ -676,9 +684,9 @@ class Usuario(Base):
 class Atendimento(Base):
     __tablename__ = "atendimentos"
 
-    id           = Column(Integer, primary_key=True)
-    cliente_id   = Column(Integer, index=True)
-    operador_id  = Column(Integer, index=True)
+    id          = Column(Integer, primary_key=True)
+    cliente_id  = Column(Integer, index=True)
+    operador_id = Column(Integer, index=True)
 
     instancia_id = Column(
         Integer,
@@ -687,7 +695,18 @@ class Atendimento(Base):
         index=True,
     )
 
-    criado_em    = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    criado_em = Column(
+        TIMESTAMP(timezone=True),
+        server_default=func.now(),
+    )
+
+    # opcional, mas ajuda o _get_or_open_atendimento a “tocar” o registro
+    atualizado_em = Column(
+        TIMESTAMP(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=True,
+    )
 
     status = Column(
         SqlEnum(
@@ -699,6 +718,16 @@ class Atendimento(Base):
         default=StatusAtendimento.NOVO,
         nullable=False,
     )
+
+    # relação com mensagens (cada atendimento pode ter várias mensagens)
+    mensagens = relationship(
+        "Mensagem",
+        back_populates="atendimento",
+        lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<Atendimento id={self.id} cli={self.cliente_id} inst={self.instancia_id} status={self.status}>"
 
 
 # =========================

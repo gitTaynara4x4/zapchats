@@ -1,6 +1,6 @@
 /* Colaboradores – lista + modal de perfil (visualização/edição) e fluxo de criação
-   (versão com: troca de senha em edição, validação opcional da senha, salvamento de instâncias
-   e correção de refs DOM recriadas nas fieldboxes) */
+   (versão com: troca de senha em edição, validação opcional da senha, salvamento de instâncias,
+   correção de refs DOM recriadas nas fieldboxes + limpeza de erros ao trocar de colaborador) */
 (function ColaboradoresPage(){
   'use strict';
 
@@ -710,82 +710,7 @@
     if (vCargo) vCargo.textContent = '—';
   }
 
-  // ====== Render perfil (view) – requery elementos a cada render ======
-  async function renderPerfilView(colab){
-    const vNome   = $('#v-nome');
-    const vEmailA = $('#v-email');
-    const vEmpresa= $('#v-empresa');
-    const vDepto  = $('#v-depto');
-    const vTelA   = $('#v-tel');
-    const vCargo  = $('#v-cargo');
-
-    const empresa = await loadEmpresa();
-    if (!state.setores.length) { try{ await loadSetores(); }catch{} }
-    state.viewing = colab;
-    state.showErrors = false;
-
-    if (pTitle) pTitle.textContent = perfilModal.dataset.mode === 'create'
-      ? 'Novo colaborador'
-      : (coalesceName(colab) || 'Perfil do colaborador');
-
-    const photoURL = await fetchAvatarURLFor(colab);
-    setPerfilAvatar(coalesceName(colab), photoURL);
-
-    if (dStatus) dStatus.style.background = '#008b32';
-    if (dStatusText) dStatusText.textContent = 'Disponível';
-
-    const nome  = coalesceName(colab);
-    const email = coalesceEmail(colab);
-
-    if (vNome)    vNome.textContent     = nome || '—';
-    if (vEmailA){ vEmailA.textContent   = email || '—'; vEmailA.href = email ? `mailto:${email}` : '#'; }
-    if (vEmpresa) vEmpresa.textContent  = empresa?.nome || '—';
-
-    const depId   = coalesceDeptId(colab);
-    const depName = coalesceDeptName(colab) || state.setores.find(s => String(s.id)===String(depId))?.nome;
-    if (vDepto) vDepto.textContent = depName || '—';
-
-    const telRaw  = coalescePhone(colab);
-    const telDisp = telRaw ? maskPhoneDisplay(telRaw.replace(/^\+/,'')) : '—';
-    if (vTelA){ vTelA.textContent = telDisp; vTelA.href = telRaw ? `tel:${telE164(telRaw)}` : '#'; }
-
-    const cargoVal = coalesceCargo(colab);
-    const adm = isAdminFlag(colab);
-    if (vCargo) vCargo.textContent = adm ? '' : (cargoVal || '—');
-    renderAdminBadge(colab);
-
-    if (dPerms){
-      dPerms.innerHTML = '';
-      const permsList = (colab.permissoes||[]).map(x => (x.id||x).toString());
-      if (permsList.length) permsList.forEach(p => dPerms.appendChild(chip(p)));
-      else dPerms.textContent = '—';
-    }
-
-    await renderInstsView(colab);
-
-    if (avatarHint) avatarHint.style.display = (perfilModal.dataset.mode === 'create') ? 'grid' : 'none';
-
-    if (perfilModal.dataset.mode === 'create'){
-      if (dPerms) dPerms.style.display = 'none';
-      if (ePerms){ ePerms.style.display = 'grid'; await ensurePermsEdit(); }
-    } else {
-      if (dPerms) dPerms.style.display = '';
-      if (ePerms){ ePerms.style.display = 'none'; ePerms.innerHTML = ''; }
-    }
-
-    const wrapSenha = $('#wrap-senha');
-    const senhaHelp = $('#senha-help');
-    const isCreate  = (perfilModal.dataset.mode === 'create');
-    if (wrapSenha) wrapSenha.style.display = (isCreate || state.inlineEdit) ? 'flex' : 'none';
-    if (senhaHelp) senhaHelp.style.display = isCreate ? '' : 'none';
-
-    // habilita DnD + colar no avatar (sempre que abrir o perfil)
-    bindAvatarDnDAndPaste();
-
-    exitInlineEdit(false);
-  }
-
-  // ====== Edição inline ======
+  // ====== Edição inline helpers/validação ======
   function swapFieldbox(boxId, html){
     const wrap = document.getElementById(boxId);
     if (!wrap) return null;
@@ -806,37 +731,57 @@
   // marca inválido + mostra / esconde mensagem embaixo do campo
   function markValidity(input, isValid, message){
     if (!input) return;
+
     const wrap = input.closest('.fieldbox') || input.parentElement;
     input.classList.toggle('invalid', !isValid);
     input.setAttribute('aria-invalid', String(!isValid));
-    if (wrap) {
-      wrap.classList.toggle('invalid', !isValid);
-      let err = wrap.querySelector('.field-error');
-      if (!err){
-        err = document.createElement('div');
-        err.className = 'field-error';
-        err.style.marginTop = '.25rem';
-        err.style.fontSize = '.78rem';
-        err.style.color = 'var(--danger,#f97373)';
-        wrap.appendChild(err);
-      }
-      if (!isValid && message){
-        err.textContent = message;
-        err.style.display = 'block';
-      } else {
-        err.textContent = '';
-        err.style.display = 'none';
-      }
+
+    if (!wrap) return;
+
+    // erro fica DEPOIS da fieldbox, não dentro
+    let err = wrap.nextElementSibling;
+    if (!err || !err.classList.contains('field-error')) {
+      err = document.createElement('div');
+      err.className = 'field-error';
+      wrap.insertAdjacentElement('afterend', err);
     }
+
+    wrap.classList.toggle('invalid', !isValid);
+
+    if (!isValid && message) {
+      err.textContent = message;
+      err.style.display = 'block';
+    } else {
+      err.textContent = '';
+      err.style.display = 'none';
+    }
+  }
+
+  // limpa erros do modal inteiro (chamado ao abrir outro colaborador/fechar)
+  function clearValidationErrors(){
+    document
+      .querySelectorAll('#modal-perfil .field-error')
+      .forEach(el => el.remove());
+
+    document
+      .querySelectorAll('#modal-perfil .input.invalid, #modal-perfil .select.invalid, #modal-perfil .fieldbox.invalid')
+      .forEach(el => {
+        el.classList.remove('invalid');
+        if (typeof el.removeAttribute === 'function') {
+          el.removeAttribute('aria-invalid');
+        }
+      });
   }
 
   function setSaveEnabled(ok){
     [pSaveFoot, pSave].forEach(btn=>{
       if (!btn) return;
-      btn.disabled = !ok;
+      // NÃO desabilita de verdade, só muda aparência / acessibilidade
+      btn.classList.toggle('btn-soft-disabled', !ok);
       btn.setAttribute('aria-disabled', String(!ok));
     });
   }
+
   function getEditInputs(){
     return { eNome:$('#e-nome'), eEmail:$('#e-email'), eSetor:$('#e-setor'), eTel:$('#e-tel'), eCargo:$('#e-cargo') };
   }
@@ -912,7 +857,7 @@
     try{
       const list = await apiGet('/api/permissoes');
       const items = Array.isArray(list) ? list : (list?.items||[]);
-      const current = new Set((state.viewing?.permissoes||[]).map(x => (x.id||x)+''));
+      const current = new Set((state.viewing?.permissoes||[]).map(x => (x.id||x)+''));      
       items.forEach(p=>{
         const idRaw = p.id ?? p.value ?? p.key;
         const label = p.nome || idRaw;
@@ -943,6 +888,83 @@
     }
   }
 
+  // ====== Render perfil (view) – requery elementos a cada render ======
+  async function renderPerfilView(colab){
+    clearValidationErrors();   // limpa erros que ficaram de outro colaborador
+    state.viewing = colab;
+    state.showErrors = false;
+
+    const vNome   = $('#v-nome');
+    const vEmailA = $('#v-email');
+    const vEmpresa= $('#v-empresa');
+    const vDepto  = $('#v-depto');
+    const vTelA   = $('#v-tel');
+    const vCargo  = $('#v-cargo');
+
+    const empresa = await loadEmpresa();
+    if (!state.setores.length) { try{ await loadSetores(); }catch{} }
+
+    if (pTitle) pTitle.textContent = perfilModal.dataset.mode === 'create'
+      ? 'Novo colaborador'
+      : (coalesceName(colab) || 'Perfil do colaborador');
+
+    const photoURL = await fetchAvatarURLFor(colab);
+    setPerfilAvatar(coalesceName(colab), photoURL);
+
+    if (dStatus) dStatus.style.background = '#008b32';
+    if (dStatusText) dStatusText.textContent = 'Disponível';
+
+    const nome  = coalesceName(colab);
+    const email = coalesceEmail(colab);
+
+    if (vNome)    vNome.textContent     = nome || '—';
+    if (vEmailA){ vEmailA.textContent   = email || '—'; vEmailA.href = email ? `mailto:${email}` : '#'; }
+    if (vEmpresa) vEmpresa.textContent  = empresa?.nome || '—';
+
+    const depId   = coalesceDeptId(colab);
+    const depName = coalesceDeptName(colab) || state.setores.find(s => String(s.id)===String(depId))?.nome;
+    if (vDepto) vDepto.textContent = depName || '—';
+
+    const telRaw  = coalescePhone(colab);
+    const telDisp = telRaw ? maskPhoneDisplay(telRaw.replace(/^\+/,'')) : '—';
+    if (vTelA){ vTelA.textContent = telDisp; vTelA.href = telRaw ? `tel:${telE164(telRaw)}` : '#'; }
+
+    const cargoVal = coalesceCargo(colab);
+    const adm = isAdminFlag(colab);
+    if (vCargo) vCargo.textContent = adm ? '' : (cargoVal || '—');
+    renderAdminBadge(colab);
+
+    if (dPerms){
+      dPerms.innerHTML = '';
+      const permsList = (colab.permissoes||[]).map(x => (x.id||x).toString());
+      if (permsList.length) permsList.forEach(p => dPerms.appendChild(chip(p)));
+      else dPerms.textContent = '—';
+    }
+
+    await renderInstsView(colab);
+
+    if (avatarHint) avatarHint.style.display = (perfilModal.dataset.mode === 'create') ? 'grid' : 'none';
+
+    if (perfilModal.dataset.mode === 'create'){
+      if (dPerms) dPerms.style.display = 'none';
+      if (ePerms){ ePerms.style.display = 'grid'; await ensurePermsEdit(); }
+    } else {
+      if (dPerms) dPerms.style.display = '';
+      if (ePerms){ ePerms.style.display = 'none'; ePerms.innerHTML = ''; }
+    }
+
+    const wrapSenha = $('#wrap-senha');
+    const senhaHelp = $('#senha-help');
+    const isCreate  = (perfilModal.dataset.mode === 'create');
+    if (wrapSenha) wrapSenha.style.display = (isCreate || state.inlineEdit) ? 'flex' : 'none';
+    if (senhaHelp) senhaHelp.style.display = isCreate ? '' : 'none';
+
+    bindAvatarDnDAndPaste();
+
+    exitInlineEdit(false);
+  }
+
+  // ====== Edição inline ======
   function enterInlineEdit(){
     if (!state.viewing || state.inlineEdit) return;
     state.inlineEdit = true;
@@ -1010,7 +1032,6 @@
     });
     sel?.addEventListener('change', ()=> validateFormLive());
 
-    // senha também dispara validação live
     const senhaInput = $('#e-senha');
     if (senhaInput){
       senhaInput.addEventListener('input', ()=> validateFormLive());
@@ -1043,7 +1064,6 @@
       };
     }
 
-    // garante DnD/colar ativo também durante a edição
     bindAvatarDnDAndPaste();
 
     validateFormLive(false);
@@ -1073,6 +1093,7 @@
     if (restore && state.viewing) renderPerfilView(state.viewing);
   }
 
+  // ====== Salvar (create + edit) ======
   async function saveInline(){
     validateFormLive(false);
 
@@ -1153,7 +1174,7 @@
       return;
     }
 
-    // >>> edição
+    // edição
     const payload = {
       nome, email,
       setor_id: Number(setor),
@@ -1173,7 +1194,6 @@
     try{
       await apiJSON(`/api/colaboradores/${id}`, 'PUT', payload);
 
-      // se mudou avatar durante a edição, sobe agora
       if (state.newAvatarFile){
         let upOK = false;
         if (state.viewing?.usuario_id){
@@ -1238,6 +1258,7 @@
     }
   }
   function closePerfil(){
+    clearValidationErrors(); // limpa erros ao fechar também
     perfilModal.setAttribute('aria-hidden','true');
     document.documentElement.classList.remove('modal-open');
     perfilModal.dataset.mode = 'view';
@@ -1261,7 +1282,6 @@
       btnAddAvatar.onclick = () => { if (pAvatarInput){ pAvatarInput.value=''; pAvatarInput.click(); } };
     }
 
-    // DnD + colar também ao criar
     bindAvatarDnDAndPaste();
 
     const wrapSenha = document.querySelector('#wrap-senha');
@@ -1473,10 +1493,8 @@
     render();
   }
 
-  // melhora os selects já existentes
   document.querySelectorAll('#modal-perfil .select, .details-grid .select').forEach(enhanceSelect);
 
-  // e os que surgirem depois (ex: ao entrar em edição)
   const rootObs = new MutationObserver(() => {
     document.querySelectorAll('#modal-perfil .select:not([data-enhanced]), .details-grid .select:not([data-enhanced])').forEach(enhanceSelect);
   });

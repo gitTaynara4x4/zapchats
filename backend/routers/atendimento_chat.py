@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional, List, Dict, Any, Tuple
 
-from datetime import timezone
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -139,7 +139,7 @@ def _iso_utc(ts) -> str:
 
 
 # =========================================================
-# REST: listar mensagens da conversa (com filtro de instância)
+# REST: listar mensagens da conversa (com filtro de instância + cursor)
 # =========================================================
 @router.get("/conversas/{cliente_id}/mensagens")
 def listar_mensagens(
@@ -149,6 +149,14 @@ def listar_mensagens(
     offset: int = Query(0, ge=0),
     instancia_id: int | None = Query(None, description="(Opcional) Filtra mensagens por instância (id numérico)"),
     instance: str | None = Query(None, description="(Opcional) Filtra mensagens por instância (slug/nome)"),
+    since_ts: datetime | None = Query(
+        None,
+        description="(Opcional) Cursor: traz apenas mensagens com timestamp > since_ts (ISO-8601)."
+    ),
+    since_id: int | None = Query(
+        None,
+        description="(Opcional) Cursor numérico: traz apenas mensagens com id > since_id."
+    ),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -156,8 +164,10 @@ def listar_mensagens(
     Devolve o histórico de mensagens de um cliente.
 
     • Suporta filtro de instância via ?instancia_id=ID ou ?instance=SLUG
-    • Aceita paginação via ?limit & ?offset
-    • Retorna em ORDEM CRONOLÓGICA (ASC) para o front rolar pro fim.
+    • Aceita paginação via ?limit & ?offset (modo 'histórico antigo')
+    • Aceita cursor incremental via ?since_ts=... e/ou ?since_id=...
+      - Quando since_ts/since_id vem, ignora offset e traz somente o delta (mensagens novas)
+      - Resultado sempre em ORDEM CRONOLÓGICA ASC (front só append)
     • Formato esperado pelo front:
       {
         "items": [
@@ -195,7 +205,7 @@ def listar_mensagens(
         instance=instance,
     )
 
-    # base: mais recentes primeiro (DESC) para paginação performática
+    # base sem ordenação (ordem será aplicada depois, dependendo do modo)
     q = (
         db.query(
             models.Mensagem.id,
@@ -215,13 +225,33 @@ def listar_mensagens(
             models.Mensagem.empresa_id == empresa_id,
             models.Mensagem.cliente_id == cliente_id,
         )
-        .order_by(models.Mensagem.timestamp.desc(), models.Mensagem.id.desc())
     )
 
     if resolved_inst_id is not None:
         q = q.filter(models.Mensagem.instancia_id == resolved_inst_id)
 
-    rows = q.limit(limit).offset(offset).all()
+    # -------------------------
+    #   FILTROS DE CURSOR
+    # -------------------------
+    if since_id is not None:
+        q = q.filter(models.Mensagem.id > since_id)
+
+    if since_ts is not None:
+        q = q.filter(models.Mensagem.timestamp > since_ts)
+
+    incremental = (since_ts is not None) or (since_id is not None)
+
+    # -------------------------
+    #   ORDEM / LIMIT / OFFSET
+    # -------------------------
+    if incremental:
+        # Modo "delta": traz APENAS o que é mais novo, ascendente (para o front só append)
+        q = q.order_by(models.Mensagem.timestamp.asc(), models.Mensagem.id.asc())
+        rows = q.limit(limit).all()
+    else:
+        # Modo antigo: paginação por offset, mais recentes primeiro (eficiente)
+        q = q.order_by(models.Mensagem.timestamp.desc(), models.Mensagem.id.desc())
+        rows = q.limit(limit).offset(offset).all()
 
     # --------- midias por mensagem (batch) ---------
     midias_by_msg: Dict[int, List[Dict[str, Any]]] = {}
@@ -263,10 +293,9 @@ def listar_mensagens(
             pass
     # -----------------------------------------------
 
-    # monta payload (DESC local → vai inverter depois)
-    mensagens_desc: List[Dict[str, Any]] = []
+    mensagens: List[Dict[str, Any]] = []
     for r in rows:
-        mensagens_desc.append({
+        mensagens.append({
             "id": r.id,
             "msg_id": r.msg_id,
             "conteudo": r.conteudo,
@@ -278,20 +307,22 @@ def listar_mensagens(
             "midias": midias_by_msg.get(r.id, []),
         })
 
-    # log útil para ver o filtro de instância aplicado
+    # No modo "histórico" (sem cursor), a query veio DESC → inverter para ASC pro front
+    if not incremental:
+        mensagens = list(reversed(mensagens))
+
+    # log útil para ver o filtro de instância + cursor aplicado
     print(
         f"[ATENDIMENTO] [/conversas/{cliente_id}/mensagens] "
         f"emp={empresa_id} inst={resolved_inst_id or instancia_id or instance} "
-        f"limit={limit} offset={offset} "
+        f"limit={limit} offset={offset} incremental={incremental} "
+        f"since_ts={since_ts} since_id={since_id}"
     )
-
-    # O front quer ASC: invertendo a lista (pois a query está DESC para eficiência)
-    mensagens_asc = list(reversed(mensagens_desc))
 
     # compat + novo formato
     return {
-        "items": mensagens_asc,
-        "mensagens": mensagens_asc,  # compat legado
+        "items": mensagens,
+        "mensagens": mensagens,  # compat legado
     }
 
 
@@ -306,12 +337,15 @@ def listar_mensagens_alias_historico(
     offset: int = Query(0, ge=0),
     instancia_id: int | None = Query(None),
     instance: str | None = Query(None),
+    since_ts: datetime | None = Query(None),
+    since_id: int | None = Query(None),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
     """
     Alias para o endpoint principal de mensagens.
     Mantido por compatibilidade com o front (scroll-up).
+    Permite também uso de cursor (?since_ts / ?since_id).
     """
     empresa_id = _assert_mesma_empresa(user.empresa_id, empresa_id)
     return listar_mensagens(
@@ -321,6 +355,8 @@ def listar_mensagens_alias_historico(
         offset=offset,
         instancia_id=instancia_id,
         instance=instance,
+        since_ts=since_ts,
+        since_id=since_id,
         db=db,
         user=user,  # repassa o usuário (já validado)
     )
