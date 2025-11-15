@@ -1,4 +1,3 @@
-# backend/routers/clientes.py
 from __future__ import annotations
 
 from datetime import date, datetime, time, timezone, timedelta
@@ -35,7 +34,7 @@ def tz_sao_paulo():
 # ===== Infra =====
 from backend.database import get_db
 from backend import models
-from backend.routers.auth import get_current_user  # 🔒 para validar empresa do usuário
+from backend.routers.auth import get_current_identity  # 🔒 usa identity (colab + perms)
 
 # ===== Redis cache util =====
 from backend.cache.redis_client import (
@@ -100,13 +99,18 @@ class BulkDepartamentoIn(BaseModel):
 
 
 # ---------- helpers ----------
+
+
 def resolve_empresa_id(
     x_empresa_id: Optional[int] = Header(default=None, alias="X-Empresa-Id"),
     empresa_id_qs: Optional[int] = Query(default=None, alias="empresa_id"),
 ) -> int:
     emp = x_empresa_id or empresa_id_qs
     if not emp:
-        raise HTTPException(status_code=400, detail="empresa_id é obrigatório (X-Empresa-Id ou ?empresa_id=)")
+        raise HTTPException(
+            status_code=400,
+            detail="empresa_id é obrigatório (X-Empresa-Id ou ?empresa_id=)",
+        )
     return int(emp)
 
 
@@ -125,22 +129,24 @@ def _iso(dt):
     return str(dt)
 
 
-# 🔒 helpers de segurança: empresa do usuário precisa bater com empresa_id
-def _empresa_do_user(user) -> Optional[int]:
-    return getattr(user, "empresa_id", None) or getattr(user, "empresa", None)
+def _get_perms(identity) -> set[str]:
+    return set(identity.get("permissoes") or [])
 
 
 def get_empresa_autorizada(
     empresa_id: int = Depends(resolve_empresa_id),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ) -> int:
     """
     Garante que o empresa_id pedido na rota é o mesmo da empresa do usuário logado.
-    Evita que alguém, logado na empresa X, force X-Empresa-Id/Y=de outra empresa.
+    Agora usando identity (funciona para colaborador também).
     """
-    emp = _empresa_do_user(user)
+    emp = identity.get("empresa_id")
     if emp is not None and int(emp) != int(empresa_id):
-        raise HTTPException(status_code=403, detail="Empresa inválida para este usuário")
+        raise HTTPException(
+            status_code=403,
+            detail="Empresa inválida para este usuário",
+        )
     return int(empresa_id)
 
 
@@ -191,11 +197,20 @@ def listar_clientes(
     limit: int = Query(20, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
 ):
     """
     Lista de clientes com paginação + cache.
     Inclui `colaborador_nome` e `departamento_id` no payload.
+    Precisa da permissão: clientes.ver
     """
+
+    perms = _get_perms(identity)
+    if "clientes.ver" not in perms:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem permissão para ver clientes (clientes.ver).",
+        )
 
     # ====== Cache key ======
     key_src = json.dumps(
@@ -324,10 +339,19 @@ def listar_clientes(
 def listar_colaboradores(
     empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
 ):
     """
     Retorna a lista de colaboradores da empresa (id, nome, email) para popular o select.
+    Precisa pelo menos de clientes.ver (ou clientes.editar, etc).
     """
+    perms = _get_perms(identity)
+    if "clientes.ver" not in perms and "clientes.editar" not in perms:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem permissão para listar colaboradores para clientes.",
+        )
+
     q = (
         db.query(models.Colaborador.id, models.Colaborador.nome, models.Colaborador.email)
         .filter(models.Colaborador.empresa_id == empresa_id)
@@ -345,11 +369,20 @@ def obter_cliente(
     cliente_id: int,
     empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
 ):
     """
     Retorna o detalhe do cliente, já incluindo `colaborador_nome` via join
     e todos os campos relevantes do modelo Cliente.
+    Permissão: clientes.ver
     """
+    perms = _get_perms(identity)
+    if "clientes.ver" not in perms:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem permissão para ver detalhes de clientes.",
+        )
+
     Colab = aliased(models.Colaborador)
     r = (
         db.query(
@@ -440,7 +473,15 @@ def patch_cliente_profile(
     payload: PatchClienteProfile,
     empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
 ):
+    perms = _get_perms(identity)
+    if "clientes.editar" not in perms:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem permissão para editar clientes (clientes.editar).",
+        )
+
     c = (
         db.query(models.Cliente)
         .filter(models.Cliente.id == cliente_id, models.Cliente.empresa_id == empresa_id)
@@ -525,7 +566,15 @@ def criar_cliente(
     body: PostNovoCliente,
     empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
 ):
+    perms = _get_perms(identity)
+    if "clientes.criar" not in perms:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem permissão para criar clientes (clientes.criar).",
+        )
+
     tel = _digits(body.telefone)
     if not tel:
         raise HTTPException(status_code=400, detail="Telefone inválido")
@@ -597,7 +646,15 @@ def exportar_clientes(
     ids: Optional[str] = Query(None, description="IDs separados por vírgula (ex: 1,2,3)"),
     empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
 ):
+    perms = _get_perms(identity)
+    if "clientes.importar_exportar" not in perms:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem permissão para exportar clientes (clientes.importar_exportar).",
+        )
+
     q = db.query(models.Cliente).filter(models.Cliente.empresa_id == empresa_id)
 
     ids_set: set[int] = set()
@@ -687,7 +744,15 @@ def importar_clientes(
     sobrescrever: bool = Query(False, description="Atualiza dados se telefone já existir"),
     empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
 ):
+    perms = _get_perms(identity)
+    if "clientes.importar_exportar" not in perms:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem permissão para importar clientes (clientes.importar_exportar).",
+        )
+
     name = (arquivo.filename or "").lower()
     content = arquivo.file.read()
     if not content:
@@ -773,11 +838,20 @@ def trocar_colaborador_em_massa(
     payload: BulkColaboradorIn,
     empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
 ):
     """
     Atribui (ou remove) o colaborador de vários clientes.
     - colaborador_id = null → remove colaborador
+    Permissão: clientes.editar
     """
+    perms = _get_perms(identity)
+    if "clientes.editar" not in perms:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem permissão para editar responsáveis dos clientes.",
+        )
+
     if not payload.ids:
         raise HTTPException(status_code=400, detail="Lista de IDs vazia.")
 
@@ -815,10 +889,19 @@ def trocar_colaborador_unitario(
     novo_colaborador_id: Optional[int] = Query(None, description="ID do colaborador; null remove"),
     empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
 ):
     """
     Troca o colaborador de um único cliente (útil para ações individuais).
+    Permissão: clientes.editar
     """
+    perms = _get_perms(identity)
+    if "clientes.editar" not in perms:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem permissão para editar responsáveis dos clientes.",
+        )
+
     cli = (
         db.query(models.Cliente)
         .filter(models.Cliente.id == cliente_id, models.Cliente.empresa_id == empresa_id)
@@ -851,12 +934,21 @@ def trocar_departamento_em_massa(
     payload: BulkDepartamentoIn,
     empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
 ):
     """
     Define (ou remove) o departamento de vários clientes.
     - departamento_id = null → remove departamento (limpa `departamento_id` e `departamento` texto)
     - Se o departamento existir na empresa, também atualiza o nome em `clientes.departamento`.
+    Permissão: clientes.editar
     """
+    perms = _get_perms(identity)
+    if "clientes.editar" not in perms:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem permissão para alterar departamentos dos clientes.",
+        )
+
     if not payload.ids:
         raise HTTPException(status_code=400, detail="Lista de IDs vazia.")
 

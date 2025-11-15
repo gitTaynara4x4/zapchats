@@ -384,6 +384,7 @@ function applyDeleteToHist(inst, cliente_id, msg_id, flags = {}) {
         m.midias = [];
       }
       changed = true;
+      break;
     }
 
     if (changed) {
@@ -668,7 +669,13 @@ function handleMessage(ev){
   }
 
   // 🔹 delete vindo do backend
-  if (t === 'messages_delete' || t === 'message_delete' || t === 'messages.delete' || t === 'messagedelete') {
+  if (
+    t === 'msg_deleted' ||        // tipo que sugeri no backend
+    t === 'messages_delete' ||
+    t === 'message_delete' ||
+    t === 'messages.delete' ||
+    t === 'messagedelete'
+  ) {
     handleDeleteMensagem(data);
     return;
   }

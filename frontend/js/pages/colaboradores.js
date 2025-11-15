@@ -1,8 +1,7 @@
 /* Colaboradores – lista + modal de perfil (visualização/edição) e fluxo de criação
    (versão com: troca de senha em edição, validação opcional da senha, salvamento de instâncias,
    correção de refs DOM recriadas nas fieldboxes + limpeza de erros ao trocar de colaborador
-   + salvamento de PERMISSÕES por colaborador em /api/permissoes/colaboradores/{id}
-   + fix departamento pré-selecionado no editar + evitar 422 no avatar de novo colaborador) */
+   + salvamento de PERMISSÕES por colaborador em /api/permissoes/colaboradores/{id}) */
 (function ColaboradoresPage(){
   'use strict';
 
@@ -575,13 +574,11 @@
       if (pAvatar){ pAvatar.removeAttribute('src'); pAvatar.style.display='none'; }
     }
   }
-
-  // === CORRIGIDO: não buscar avatar para id null ===
   async function fetchAvatarURLFor(colab){
-    if (!colab || colab.id == null || colab.id === 'null') {
-      return colab?.avatar_url || null;
+    // evita chamar /api/colaboradores/null/avatar quando ainda não tem id
+    if (!colab || !colab.id) {
+      return colab && colab.avatar_url ? colab.avatar_url : null;
     }
-
     try{
       const r1 = await authFetch(withEmpresa(`/api/colaboradores/${colab.id}/avatar`));
       if (r1.ok && r1.status === 200) {
@@ -957,11 +954,7 @@
       ? 'Novo colaborador'
       : (coalesceName(colab) || 'Perfil do colaborador');
 
-    // CORRIGIDO: só busca avatar se tiver id real
-    let photoURL = null;
-    if (colab && colab.id != null && colab.id !== 'null') {
-      try { photoURL = await fetchAvatarURLFor(colab); } catch {}
-    }
+    const photoURL = await fetchAvatarURLFor(colab);
     setPerfilAvatar(coalesceName(colab), photoURL);
 
     if (dStatus) dStatus.style.background = '#008b32';
@@ -992,19 +985,16 @@
       const permsList = (colab.permissoes||[]).map(x => String(x.id ?? x));
       if (permsList.length) permsList.forEach(p => dPerms.appendChild(chip(p)));
       else dPerms.textContent = '—';
+      dPerms.style.display = '';
+    }
+    if (ePerms){
+      ePerms.style.display = 'none';
+      ePerms.innerHTML = '';
     }
 
     await renderInstsView(colab);
 
     if (avatarHint) avatarHint.style.display = (perfilModal.dataset.mode === 'create') ? 'grid' : 'none';
-
-    if (perfilModal.dataset.mode === 'create'){
-      if (dPerms) dPerms.style.display = 'none';
-      if (ePerms){ ePerms.style.display = 'grid'; await ensurePermsEdit(); }
-    } else {
-      if (dPerms) dPerms.style.display = '';
-      if (ePerms){ ePerms.style.display = 'none'; ePerms.innerHTML = ''; }
-    }
 
     const wrapSenha = $('#wrap-senha');
     const senhaHelp = $('#senha-help');
@@ -1050,55 +1040,29 @@
       </select>`;
     const sel = swapFieldbox('fb-depto', selHtml);
 
-    // ---- preenchimento robusto do departamento ----
+    // ---- aqui é o pulo do gato: tentar por ID e depois por NOME ----
     const depIdRaw  = coalesceDeptId(state.viewing);
-    const depName   = coalesceDeptName(state.viewing) || $('#v-depto')?.textContent || '';
+    const depName   = coalesceDeptName(state.viewing);
     let   depValue  = '';
 
     if (depIdRaw != null) {
       depValue = String(depIdRaw);
-    }
-
-    // tenta aplicar pelo ID
-    let assigned = false;
-    if (sel && depValue) {
-      sel.value = depValue;
-      if (sel.value === depValue) {
-        assigned = true;
-      }
-    }
-
-    // se pelo ID não deu, tenta casar pelo nome exibido
-    if (sel && !assigned && depName && state.setores.length) {
+    } else if (depName && state.setores.length) {
       const alvo = String(depName).trim().toLowerCase();
       const found = state.setores.find(s =>
         String(s.nome || '').trim().toLowerCase() === alvo
       );
-      if (found) {
-        depValue = String(found.id);
-        sel.value = depValue;
-        if (sel.value === depValue) {
-          assigned = true;
-        }
-      }
+      if (found) depValue = String(found.id);
     }
 
-    // fallback: se ainda não achou e só tem 1 setor, usa ele
-    if (sel && !assigned && !depValue && state.setores.length === 1) {
-      depValue = String(state.setores[0].id);
+    console.debug('[colab edit] depIdRaw=', depIdRaw, 'depName=', depName, '=> depValue=', depValue);
+
+    if (sel && depValue) {
       sel.value = depValue;
-      if (sel.value === depValue) {
-        assigned = true;
-      }
-    }
-
-    if (assigned) {
+      // avisa o “select bonitinho” pra atualizar o texto
       sel.dispatchEvent(new Event('change', { bubbles:true }));
     }
-
-    console.log('[colab edit] depIdRaw=', depIdRaw, 'depName=', depName, '=> depValue=', depValue, 'assigned=', assigned);
-
-    // ------------------------------------------------
+    // ---------------------------------------------------------------
 
     swapFieldbox('fb-tel', `<input id="e-tel" class="input" type="tel" required inputmode="numeric" placeholder="(DD) 9 9999-9999">`);
     swapFieldbox('fb-cargo', `<input id="e-cargo" class="input" type="text" maxlength="80" required placeholder="Cargo">`);
@@ -1138,11 +1102,12 @@
       senhaInput.addEventListener('input', ()=> validateFormLive());
     }
 
-    if (perfilModal.dataset.mode === 'create'){
+    // Permissões: em modo edição (create ou edit) sempre mostra os checkboxes
+    if (ePerms){
+      ePerms.style.display = 'grid';
       ensurePermsEdit();
-      if (ePerms) ePerms.style.display = 'grid';
-      if (dPerms) dPerms.style.display = 'none';
     }
+    if (dPerms) dPerms.style.display = 'none';
 
     ensureInstsEdit();
 

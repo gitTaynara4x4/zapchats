@@ -1833,10 +1833,11 @@ async def on_messages_delete(inst_id: str, data):
     """
     Mensagens apagadas (delete para todos).
 
-    - NUNCA sobrescreve conteudo
+    - NUNCA sobrescreve conteudo no BD
     - Marca:
         apagada_cliente = True  (mensagem recebida do cliente)
         apagada_usuario = True  (mensagem enviada pelo atendente)
+    - Após atualizar o BD, notifica o frontend via WebSocket (type="msg_deleted")
     """
 
     mensagens = extract_messages_any_shape(data)
@@ -1851,14 +1852,23 @@ async def on_messages_delete(inst_id: str, data):
         LOG("[DEL] nenhum item reconhecido em payload.")
         return
 
-    # vamos acumular o que precisa ser emitido no WS depois do commit
-    eventos_ws: list[dict] = []
+    # vamos acumular tudo que precisar ser enviado pro WS depois do commit
+    to_notify = []
+    inst_db_id = None
+    empresa_id = None
+
+    from backend.database import SessionLocal  # se já tiver no topo, ignore
+    from backend import models
+    # from backend.ws import manager as ws_manager  # ajuste o import pro seu projeto
 
     with SessionLocal() as db:
         inst = _get_inst_row(db, inst_id)
         if not inst:
             LOG(f"[DEL] instância não encontrada: {inst_id}")
             return
+
+        inst_db_id = inst.id
+        empresa_id = inst.empresa_id
 
         encontrados = 0
         alterados = 0
@@ -1901,7 +1911,7 @@ async def on_messages_delete(inst_id: str, data):
 
                 encontrados += 1
 
-                tipo = getattr(row, "tipo", None)  # "entrada" / "saida", se você usa isso
+                tipo = getattr(row, "tipo", None)  # "entrada" / "saida"
 
                 apagou_cliente = False
                 apagou_usuario = False
@@ -1915,8 +1925,8 @@ async def on_messages_delete(inst_id: str, data):
                     apagou_usuario = bool(from_me)
                     apagou_cliente = not from_me
 
-                before_cli = getattr(row, "apagada_cliente", False)
-                before_usr = getattr(row, "apagada_usuario", False)
+                before_cli = bool(getattr(row, "apagada_cliente", False))
+                before_usr = bool(getattr(row, "apagada_usuario", False))
 
                 changed = False
 
@@ -1930,17 +1940,14 @@ async def on_messages_delete(inst_id: str, data):
 
                 if changed:
                     alterados += 1
-
-                    # guarda infos para mandar via WS depois do commit
-                    eventos_ws.append(
-                        {
-                            "empresa_id": row.empresa_id,
-                            "instancia_id": row.instancia_id,
-                            "cliente_id": row.cliente_id,
-                            "msg_id": row.msg_id,
-                            "apagada_cliente": bool(row.apagada_cliente),
-                            "apagada_usuario": bool(row.apagada_usuario),
-                        }
+                    # guarda info mínima pra mandar pro WS depois do commit
+                    to_notify.append(
+                        dict(
+                            cliente_id=row.cliente_id,
+                            msg_id=row.msg_id,
+                            apagada_cliente=row.apagada_cliente,
+                            apagada_usuario=row.apagada_usuario,
+                        )
                     )
 
                 _log_ctx(
@@ -1975,54 +1982,32 @@ async def on_messages_delete(inst_id: str, data):
         f"total={len(mensagens)} encontrados={encontrados} alterados={alterados}"
     )
 
-    # =========================
-    # WS: avisa o front que a msg foi apagada
-    # =========================
-    if not eventos_ws:
+    # ========== AVISO VIA WEBSOCKET (frontend) ==========
+    # se nada foi alterado, não precisa emitir evento
+    if not to_notify or not inst_db_id:
         return
 
-    # importe isso lá em cima do arquivo, se ainda não tiver:
-    # from backend.websocket_manager import conexoes_ativas
-    from datetime import datetime, timezone
+    # aqui eu assumo um manager com método broadcast_instancia
+    # ajuste o import / método conforme seu projeto
+    from backend.ws import manager as ws_manager  # AJUSTE AQUI se o caminho for diferente
 
-    async def _ws_broadcast(topic: str, payload: dict):
-        conns = conexoes_ativas.get(topic) or []
-        if not conns:
-            return
-        for ws in list(conns):
-            try:
-                await ws.send_json(payload)
-            except Exception:
-                # remove conexão morta
-                try:
-                    conns.remove(ws)
-                except Exception:
-                    try:
-                        conns.discard(ws)  # se for set
-                    except Exception:
-                        pass
-
-    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-
-    for ev in eventos_ws:
-        payload = {
-            "type": "msg_deleted",
-            "cliente_id": ev["cliente_id"],
-            "conversation_id": ev["cliente_id"],
-            "instancia_id": ev["instancia_id"],
-            "msg_id": ev["msg_id"],
-            "apagada_cliente": ev["apagada_cliente"],
-            "apagada_usuario": ev["apagada_usuario"],
-            "serverTimestamp": now_ms,
-        }
-
-        # canal da empresa
-        topic_emp = f"emp:{ev['empresa_id']}"
-        await _ws_broadcast(topic_emp, payload)
-
-        # se você quiser, pode também emitir no canal da instância:
-        topic_inst = f"inst:{ev['instancia_id']}"
-        await _ws_broadcast(topic_inst, payload)
+    for item in to_notify:
+        try:
+            payload_ws = {
+                "type": "msg_deleted",          # <- ws.js trata esse type
+                "empresa_id": empresa_id,
+                "instancia_id": inst_db_id,
+                "cliente_id": item["cliente_id"],
+                "msg_id": item["msg_id"],
+                "apagada_cliente": item["apagada_cliente"],
+                "apagada_usuario": item["apagada_usuario"],
+            }
+            await ws_manager.broadcast_instancia(inst_db_id, payload_ws)
+        except Exception as e:
+            LOG(
+                f"[DEL] erro ao notificar WS "
+                f"inst={inst_db_id} msg_id={item['msg_id']}: {e}"
+            )
 
 
 @handler(EvoEvent.CALL)

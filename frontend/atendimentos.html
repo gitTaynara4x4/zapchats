@@ -25,10 +25,6 @@
 
   <!-- ====== CSS EXTRA EMBUTIDO: WALLPAPER SÓ NO #historico ====== -->
   <style>
-    /* ============================================================
-       Papel de parede no histórico do chat (#historico)
-       ============================================================ */
-
     main.whatsapp-auto-bg #historico,
     main.whatsapp-bg-dark #historico,
     main.whatsapp-bg-light #historico{
@@ -71,41 +67,80 @@
   </script>
 
   <div class="wpp-root h-[100vh] w-full">
-    <!-- Lateral (desktop) -->
+
+    <!-- LEFTBAR (barra lateral esquerda) -->
     <nav class="wpp-leftbar" aria-label="Menu do atendimento">
-      <button id="menuOnlyBtn"
-              type="button"
-              class="menu-only-btn"
-              title="Menu"
-              aria-label="Abrir menu">
-        <i class="fa-solid fa-ellipsis-vertical"></i>
-      </button>
+      <div class="wpp-leftbar-icons">
+        <!-- Botão 3 pontinhos – abre o flyout -->
+        <button
+          id="btnSidebarFlyout"
+          type="button"
+          class="wpp-leftbar-icon"
+          title="Menu"
+          aria-label="Abrir menu lateral"
+        >
+          <i class="fa-solid fa-ellipsis-vertical"></i>
+          <span class="wpp-label">Menu</span>
+        </button>
+      </div>
+
+      <div class="wpp-leftbar-bottom">
+        <!-- se quiser ícones embaixo (config, etc) coloca aqui depois -->
+      </div>
     </nav>
 
-    <!-- Flyout do menu -->
+    <!-- FLYOUT DO MENU (overlay que recebe .app-sidebar) -->
     <div id="zcSidebarHost" class="zc-flyout" aria-hidden="true">
+      <!-- Painel lateral (o JS vai enfiar a .app-sidebar aqui dentro) -->
       <div role="dialog" aria-label="Menu lateral"></div>
-      <button class="zc-flyout__backdrop" tabindex="-1" aria-hidden="true"></button>
+
+      <!-- Backdrop: fecha ao clicar -->
+      <button
+        class="zc-flyout__backdrop"
+        type="button"
+        tabindex="-1"
+        aria-hidden="true">
+      </button>
     </div>
 
-    <!-- Coluna de chats -->
+    <!-- COLUNA DE LISTA DE CHATS -->
     <aside class="flex flex-col">
       <div class="wpp-header-externo">
         <div class="wpp-header-titulo-row">
           <img class="wpp-header-logo logo-dark"  src="/frontend/img/logo-white.png"   alt="ZapChats (dark)">
           <img class="wpp-header-logo logo-light" src="/frontend/img/logo-s-fundo.png" alt="ZapChats (light)">
 
-          <!-- A agenda será injetada via /frontend/js/atendimentos/ui/agenda.js -->
+          <!-- Ícones do header (nova conversa + menu no header) -->
           <div class="wpp-header-icons">
-            <button class="wpp-header-icon" id="btn-sidemodal-nova-conversa" title="Nova conversa">
+            <button
+              class="wpp-header-icon"
+              id="btn-sidemodal-nova-conversa"
+              title="Nova conversa"
+              aria-label="Nova conversa"
+            >
               <i class="fa fa-plus"></i>
+            </button>
+
+            <!-- Kebab NO HEADER (opcional, também abre o flyout) -->
+            <button
+              id="btnKebabHeader"
+              type="button"
+              class="wpp-header-icon"
+              title="Menu"
+              aria-label="Abrir menu"
+            >
+              <i class="fa-solid fa-ellipsis-vertical"></i>
             </button>
           </div>
         </div>
 
         <div class="wpp-header-search-row">
           <i class="fa fa-search"></i>
-          <input type="text" class="wpp-header-search" id="wpp-header-search" placeholder="Pesquisar ou começar uma nova conversa">
+          <input
+            type="text"
+            class="wpp-header-search"
+            id="wpp-header-search"
+            placeholder="Pesquisar ou começar uma nova conversa">
         </div>
 
         <div id="search-results" class="search-results hidden"></div>
@@ -125,7 +160,12 @@
       <ul id="lista-clientes"></ul>
     </aside>
 
-    <!-- Área de chat -->
+    <!-- ÁREA DO CHAT -->
+    <!-- Escolha UMA classe:
+         - whatsapp-auto-bg  (alterna conforme tema)
+         - whatsapp-bg-dark  (força imagem escura)
+         - whatsapp-bg-light (força imagem clara)
+    -->
     <main class="flex flex-col whatsapp-bg-dark">
       <header id="chat-header" class="h-16 flex items-center px-4 gap-3 shadow-sm" style="display:none;">
         <div class="flex items-center gap-2 relative">
@@ -133,17 +173,27 @@
           <h2 id="chat-title" class="font-medium truncate text-[1.09em]"></h2>
 
           <!-- Botão de notas: conteúdo é injetado por /atendimentos/ui/notes-drawer.js -->
-          <button id="btn-sobre" class="hdr-icon-btn" title="Notas do cliente" aria-label="Notas do cliente"></button>
+          <button
+            id="btn-sobre"
+            class="hdr-icon-btn"
+            title="Notas do cliente"
+            aria-label="Notas do cliente">
+          </button>
         </div>
 
         <span id="status-bateria" class="text-xs ml-auto"></span>
       </header>
 
-      <!-- Boas-vindas -->
-      <section id="welcome-screen" class="absolute inset-0 flex flex-col items-center justify-center text-center z-10">
+      <!-- Tela de boas-vindas -->
+      <section
+        id="welcome-screen"
+        class="absolute inset-0 flex flex-col items-center justify-center text-center z-10">
         <img src="/frontend/img/wpp.png" class="w-52 h-auto mb-6 opacity-100" alt="ZapChats Logo">
         <h2 class="text-lg font-semibold mt-2">Mantenha seu celular conectado</h2>
-        <p class="max-w-md">O ZapChats conecta ao seu telefone para sincronizar suas mensagens.<br>Mantenha seu dispositivo conectado à internet para não perder conversas.</p>
+        <p class="max-w-md">
+          O ZapChats conecta ao seu telefone para sincronizar suas mensagens.<br>
+          Mantenha seu dispositivo conectado à internet para não perder conversas.
+        </p>
       </section>
 
       <!-- Histórico -->
@@ -159,17 +209,37 @@
 
       <!-- Footer -->
       <footer id="chat-footer" class="flex items-center gap-3 px-4 py-3" style="display:none;">
-        <button type="button" class="text-xl" id="btn-clipe" title="Enviar arquivo"><i class="fa fa-paperclip"></i></button>
+        <button
+          type="button"
+          class="text-xl"
+          id="btn-clipe"
+          title="Enviar arquivo"
+          aria-label="Enviar arquivo">
+          <i class="fa fa-paperclip"></i>
+        </button>
+
         <input id="input-arquivo" type="file" style="display:none" />
-        <input id="mensagem" placeholder="Digite sua resposta…" class="flex-1 outline-none px-3 py-2 rounded" autocomplete="off"/>
-        <button id="btn-enviar" class="send-btn" title="Enviar" aria-label="Enviar">
-          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
+
+        <input
+          id="mensagem"
+          placeholder="Digite sua resposta…"
+          class="flex-1 outline-none px-3 py-2 rounded"
+          autocomplete="off"/>
+
+        <button
+          id="btn-enviar"
+          class="send-btn"
+          title="Enviar"
+          aria-label="Enviar">
+          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M2 21l21-9L2 3v7l15 2-15 2v7z"/>
+          </svg>
         </button>
       </footer>
     </main>
   </div>
 
-  <!-- Flyout lateral -->
+  <!-- FLYOUT JS -->
   <script src="/frontend/js/atendimentos/ui/flyout.js"></script>
 
   <!-- Boot principal -->

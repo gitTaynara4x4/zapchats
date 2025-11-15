@@ -145,6 +145,7 @@ function decorateRow(row) {
   const label = getDeleteLabel(msg);
   if (!label) return;
 
+  // bolha principal
   const bubble =
     row.querySelector('.bubble') ||
     row.querySelector('.msg-bubble') ||
@@ -161,22 +162,30 @@ function decorateRow(row) {
       el.style.display = 'none';
     });
 
+  // Tenta achar elemento de texto existente
   let textEl =
     bubble.querySelector('.msg-text') ||
     bubble.querySelector('.bubble-text') ||
     bubble.querySelector('.text');
 
+  const meta =
+    bubble.querySelector('.meta, .msg-meta, .msg-footer') || null;
+
   if (textEl) {
+    // Só troca o conteúdo e aplica classe
     textEl.textContent = label;
     textEl.classList.add('msg-text-deleted');
   } else {
+    // Fallback mais agressivo: cria um bloco de texto antes do meta
     const div = document.createElement('div');
     div.className = 'msg-text msg-text-deleted';
     div.textContent = label;
-    const meta =
-      bubble.querySelector('.meta, .msg-meta, .msg-footer') || null;
-    if (meta) {
+
+    if (meta && meta.parentElement === bubble) {
       meta.insertAdjacentElement('beforebegin', div);
+    } else if (meta) {
+      // se o meta estiver em outro sub-nó, insere no topo da bolha
+      bubble.insertBefore(div, bubble.firstChild);
     } else {
       bubble.insertAdjacentElement('afterbegin', div);
     }
@@ -200,6 +209,7 @@ function decorateRow(row) {
       conv: ensureIndex()?.cid,
       msg_id: msg.msg_id ?? null,
       quem: who,
+      label,
     });
   } catch {}
 }

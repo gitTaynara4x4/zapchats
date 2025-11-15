@@ -1022,7 +1022,7 @@ input.outline-none{ outline:0; }
 .menu-only-btn i{ color:#c8d3da !important; }
 .menu-only-btn:hover i{ color:#ffffff !important; }
 
-/* —— 3 pontinhos sem moldura no mobile —— */
+/* —— 3 pontinhos base (header + leftbar) —— */
 #menuOnlyBtn,
 #btnKebabHeader {
   all: unset;
@@ -1059,37 +1059,36 @@ button#btnKebabHeader {
   appearance: none !important;
 }
 
-/* ===================== KEBAB: NUNCA DUPLICAR (FINAL) ===================== */
-/* Desktop/Tablet: mostra o botão do header; esconde os de mobile */
-#btnKebabHeader{ display: grid !important; visibility: visible !important; opacity: 1 !important; }
-#menuOnlyBtn, .menu-only-btn{ display: none !important; }
+/* ===== PATCH DE VISIBILIDADE: onde aparece cada kebab ===== */
 
-/* Mobile (<=920px): inverte – mostra só o botão mobile */
-@media (max-width: 920px){
-  #btnKebabHeader{ display: none !important; }
-  #menuOnlyBtn, .menu-only-btn{
-    display: grid !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-  }
+/* Desktop/Tablet (>=921px): usa o kebab da LEFTBAR, esconde o do header */
+#btnKebabHeader{
+  display:none !important;
+  visibility:hidden !important;
+  opacity:0 !important;
 }
 
-/* ====== Kebab correto no header (desktop e mobile) ====== */
-.wpp-header-externo .wpp-header-titulo-row{ display:flex; align-items:center; }
-.wpp-header-externo .wpp-header-icons{ display:flex; gap:4px; margin-left:auto; }
-
-/* Sempre mostrar o kebab do header */
-#btnKebabHeader{ display: inline-grid !important; }
-@media (max-width: 920px){
-  #btnKebabHeader{ display: grid !important; }
-}
-
-/* NUNCA mostrar o kebab da leftbar (evita duplicado) */
 .wpp-leftbar #menuOnlyBtn,
 .wpp-leftbar .menu-only-btn{
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
+  display:grid !important;
+  visibility:visible !important;
+  opacity:1 !important;
+  margin-top:14px !important;
 }
+
+/* Mobile (<=920px): leftbar some, então usamos o kebab do HEADER */
+@media (max-width: 920px){
+  #btnKebabHeader{
+    display:grid !important;
+    visibility:visible !important;
+    opacity:1 !important;
+  }
+
+  /* a leftbar já está display:none nesse breakpoint */
+}
+
+/* Alinhamento do kebab no header */
+.wpp-header-externo .wpp-header-titulo-row{ display:flex; align-items:center; }
+.wpp-header-externo .wpp-header-icons{ display:flex; gap:4px; margin-left:auto; }
 
 /* ============================ FIM DO CSS ================================= */

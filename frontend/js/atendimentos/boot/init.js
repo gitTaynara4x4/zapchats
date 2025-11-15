@@ -3,10 +3,10 @@ import { state, persist, setClienteSel } from '../state/store.js';
 import { EMPRESA_ID } from '../core/env.js';
 import { carregarClientes } from '../domain/clientes.js';
 import { salvarNoCache, renderHistoricoDoCache } from '../domain/historico.js';
-import { abrirPerfilAtual } from '../ui/perfil.js';
 
 // Base unificada de histórico local
-import { hasHistory, primeWith, getHist } from '../domain/hist-cache.js';
+import { getHist } from '../domain/hist-cache.js';
+import { abrirPerfilAtual } from '../ui/perfil.js';
 
 // ====== Flag global: esconder banner do topo (Operadora: …) ======
 window.SHOW_TOP_OPERATOR_BANNER = false;
@@ -72,7 +72,14 @@ function readyPart(key){
     return (w.Auth?.user?.nome) || (w.CURRENT_USER?.nome) || LS.getItem('user_nome') || 'Operadora';
   }
   const normalize = (s)=> String(s||'').replace(/\s+/g,' ').trim().slice(0,180);
-  const fmtTime   = (iso)=> { try{ const d = iso?new Date(iso):new Date(); return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});}catch{return '';} };
+  const fmtTime   = (iso)=> {
+    try{
+      const d = iso ? new Date(iso) : new Date();
+      return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    }catch{
+      return '';
+    }
+  };
 
   function deriveName(meta){
     if (meta && meta.origem === 'whatsapp_fisico') return 'WhatsApp físico';
@@ -84,7 +91,11 @@ function readyPart(key){
     if (window.SHOW_TOP_OPERATOR_BANNER === false) return;
     const box = ensureHeadline();
     const preview = normalize(text);
-    if (!preview){ box.hidden = true; box.textContent = ''; return; }
+    if (!preview){
+      box.hidden = true;
+      box.textContent = '';
+      return;
+    }
     const nome = deriveName(meta || {});
     const time = whenISO ? `<small>${fmtTime(whenISO)}</small>` : '';
     box.innerHTML = `${nome}: ${preview} ${time}`;
@@ -92,7 +103,10 @@ function readyPart(key){
   }
   function clearOpHeadline(){
     const box = document.getElementById('op-headline');
-    if (box){ box.hidden = true; box.textContent = ''; }
+    if (box){
+      box.hidden = true;
+      box.textContent = '';
+    }
   }
 
   if (window.SHOW_TOP_OPERATOR_BANNER === false) {
@@ -123,7 +137,11 @@ function closeChatMobile() {
   const foot = document.getElementById('chat-footer');
 
   if (head) head.style.display = 'none';
-  if (hist) { hist.style.display = 'none'; hist.innerHTML = ''; hist.removeAttribute('data-cliente-id'); }
+  if (hist) {
+    hist.style.display = 'none';
+    hist.innerHTML = '';
+    hist.removeAttribute('data-cliente-id');
+  }
   if (foot) foot.style.display = 'none';
   if (ws)   ws.style.display   = 'none';
 
@@ -153,9 +171,7 @@ async function ensureMensagensCarregadas(conversationId) {
 
   const inst = getInstanciaForFetch(conversationId);
 
-  // 👇 SEM early-return com hasHistory:
   // sempre consulta o backend pra garantir que novas mensagens
-  // (que chegaram com a tela fechada) sejam carregadas.
   const qs = new URLSearchParams({ empresa_id: String(EMPRESA_ID), limit: '50' });
   if (inst) qs.set('instancia_id', inst);
   const url = `/api/atendimento/conversas/${conversationId}/mensagens?` + qs.toString();
@@ -192,10 +208,11 @@ async function ensureMensagensCarregadas(conversationId) {
   try { salvarNoCache(conversationId, mapped); } catch {}
 
   const finalHist = getHist(inst, conversationId) || [];
-  primeWith(inst, conversationId, finalHist, {
+  // cursores (se você usar paginação depois)
+  const cursors = {
     oldest: data?.prev_cursor ?? null,
     newest: data?.next_cursor ?? null
-  });
+  };
 
   // espelha no state (sobrevive a F5)
   state.cacheHistoricos = {
@@ -205,74 +222,13 @@ async function ensureMensagensCarregadas(conversationId) {
   state.mensagensOffset[conversationId] = finalHist.length;
   persist();
 
-  try { console.debug('[ensureMensagensCarregadas]', { conversationId, total: finalHist.length }); } catch {}
+  try {
+    console.debug('[ensureMensagensCarregadas]', { conversationId, total: finalHist.length, cursors });
+  } catch {}
 
   return finalHist;
 }
 
-/* ======= Booster: atualiza preview das conversas com novas > 0 ======= */
-async function refreshUnreadPreviewsFromHistory(){
-  try{
-    const arr = Array.isArray(state.clientesCache) ? state.clientesCache : [];
-    const targets = arr.filter(c => Number(c.novas || 0) > 0);
-    if (!targets.length) return;
-
-    for (const c of targets){
-      const convId = Number(c.id ?? c.conversation_id ?? c.cliente_id);
-      if (!convId) continue;
-
-      try{
-        // carrega últimas mensagens dessa conversa (sempre consulta o backend)
-        const hist = await ensureMensagensCarregadas(convId);
-        if (!Array.isArray(hist) || !hist.length) continue;
-
-        const last = hist[hist.length - 1];
-
-        // texto / placeholder de mídia
-        let texto = (last.conteudo ?? last.texto ?? last.mensagem ?? '').trim();
-        if (!texto){
-          const a = Array.isArray(last.midias) ? last.midias : [];
-          if (a.length){
-            const mime = String(a[0].mimetype || a[0].mime || '').toLowerCase();
-            texto =
-              mime.includes('image') ? '[Foto]'  :
-              mime.includes('video') ? '[Vídeo]' :
-              mime.includes('audio') ? '[Áudio]' :
-              mime.includes('pdf')   ? '[PDF]'   :
-              '[Arquivo]';
-          }
-        }
-
-        const isSaida =
-          (last.tipo === 'saida') ||
-          (last.from_me === true) ||
-          (last.origem === 'atendente');
-
-        let ackVal = null;
-        if (isSaida){
-          ackVal = Number(last.ack ?? 0);
-          if (!Number.isFinite(ackVal)) ackVal = 0;
-        }
-
-        // força a linha da lista a refletir a ÚLTIMA mensagem real
-        try{
-          window.Lista?.updatePreview?.(convId, {
-            texto,
-            ack: ackVal,
-            // sem ts pra não quebrar o formatChatTime inline;
-            // o horário continua vindo do /conversas.
-          });
-        } catch(e){
-          try { console.warn('[refreshUnreadPreviewsFromHistory] updatePreview erro', convId, e); } catch {}
-        }
-      }catch(e){
-        try { console.warn('[refreshUnreadPreviewsFromHistory] erro conv', c.id, e); } catch {}
-      }
-    }
-  }catch(e){
-    try { console.warn('[refreshUnreadPreviewsFromHistory] erro geral', e); } catch {}
-  }
-}
 
 /* ======= Atualiza banner com a última saída ======= */
 function updateOperatorBannerForConversation(convId){
@@ -397,7 +353,11 @@ async function selecionarClienteObj(id) {
     try {
       const arr = window.state?.clientesCache || window.clientesCache || [];
       const idx = arr.findIndex(x => Number(x.id ?? x.conversation_id ?? x.cliente_id) === Number(id));
-      if (idx >= 0) { arr[idx].novas = 0; window.renderListaClientes?.(arr); window.recomputeUnread?.(); }
+      if (idx >= 0) {
+        arr[idx].novas = 0;
+        window.renderListaClientes?.(arr);
+        window.recomputeUnread?.();
+      }
     } catch {}
   }
 
@@ -429,10 +389,6 @@ export async function boot() {
 
     try {
       await carregarClientes({ force: true, reason: 'boot' });
-
-      // 👇 novo booster: corrige previews de quem tem novas > 0
-      await refreshUnreadPreviewsFromHistory();
-
       readyPart('clientes');
     } catch (e) {
       console.error('[boot] carregarClientes falhou:', e);
