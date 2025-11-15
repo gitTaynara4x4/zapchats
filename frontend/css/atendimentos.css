@@ -551,7 +551,7 @@ body.is-chat-open #welcome-screen{ display:none !important; }
 
 /* Timestamp + ACK */
 .msg-time,.time,.tempo-mensagem{
-  font-size:11px; color:var(--text-2); margin-left:8px; margin-top:4px; display:flex; align-items:center; gap:4px; float:right;
+  font-size:11px; color:var(--text-2); margin-left:8px; margin-top:4px; display:flex; align-items:center; gap:4px;
 }
 .msg-ack{ font-size:.85em; color:var(--text-2); }
 
@@ -1091,7 +1091,5 @@ button#btnKebabHeader {
   visibility: hidden !important;
   opacity: 0 !important;
 }
-
-
 
 /* ============================ FIM DO CSS ================================= */

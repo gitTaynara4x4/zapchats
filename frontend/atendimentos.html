@@ -27,76 +27,36 @@
   <style>
     /* ============================================================
        Papel de parede no histórico do chat (#historico)
-       - NÃO altera seu CSS externo; tudo aqui dentro do HTML.
-       - Use UMA das opções no <main>:
-         (A) Automático por tema: class="whatsapp-auto-bg"
-         (B) Forçar escuro:      class="whatsapp-bg-dark"
-         (C) Forçar claro:       class="whatsapp-bg-light"
-       - SCOPE: só #historico (não afeta header/footer/sidebar)
        ============================================================ */
 
-    /* Base comum: garante repetição/posicionamento/prioridade */
     main.whatsapp-auto-bg #historico,
     main.whatsapp-bg-dark #historico,
     main.whatsapp-bg-light #historico{
       background-repeat: repeat !important;
       background-position: 0 0 !important;
-      /* Ajuste o tamanho do tile conforme sua arte.
-         Se sua imagem já é “seamless”, pode tirar esta linha. */
       background-size: 400px 400px !important;
     }
 
-    /* (A) AUTOMÁTICO via data-theme/.dark ------------------------- */
-
-    /* DARK -> usa a imagem "escura" */
     html[data-theme="dark"] main.whatsapp-auto-bg #historico,
     html.dark              main.whatsapp-auto-bg #historico{
       background-color:#0b141a !important;
       background-image: url("/frontend/img/whatsapp-bg-dark.png") !important;
     }
 
-    /* LIGHT -> usa a imagem "clara" */
     html[data-theme="light"] main.whatsapp-auto-bg #historico,
     html:not(.dark)        main.whatsapp-auto-bg #historico{
       background-color:#efeae2 !important;
       background-image: url("/frontend/img/whatsapp-bg-light.png") !important;
     }
 
-    /* (B) MANUAL ESCURO ------------------------------------------ */
     main.whatsapp-bg-dark #historico{
       background-color:#0b141a !important;
       background-image: url("/frontend/img/whatsapp-bg-dark.png") !important;
     }
 
-    /* (C) MANUAL CLARO ------------------------------------------- */
     main.whatsapp-bg-light #historico{
       background-color:#efeae2 !important;
       background-image: url("/frontend/img/whatsapp-bg-light.png") !important;
-    }
-  </style>
-
-  <!-- Ajustes só para MOBILE (kebab ao lado da logo) -->
-  <style>
-    /* por padrão (desktop) o kebab do header da lista fica oculto */
-    #btnKebabHeader{ display:none; }
-
-    @media (max-width:920px){
-      /* Esconde a barra lateral inteira no mobile para não duplicar o “⋮” */
-      .wpp-leftbar{ display:none !important; }
-
-      /* Mostra o kebab ao lado da logo */
-      #btnKebabHeader{
-        display:inline-grid;
-        place-items:center;
-        width:32px; height:32px;
-        margin-right:6px;
-        border-radius:8px;
-        background:transparent; color:var(--text-2);
-        transition:background .15s,color .15s,transform .08s;
-      }
-      #btnKebabHeader:hover{ background:rgba(255,255,255,.06); color:#fff; }
-      #btnKebabHeader:active{ transform:translateY(1px); }
-      #btnKebabHeader i{ font-size:18px; line-height:1; }
     }
   </style>
 </head>
@@ -111,10 +71,13 @@
   </script>
 
   <div class="wpp-root h-[100vh] w-full">
-    <!-- Lateral (desktop mantém o botão aqui) -->
+    <!-- Lateral (desktop) -->
     <nav class="wpp-leftbar" aria-label="Menu do atendimento">
-      <button id="menuOnlyBtn" class="menu-only-btn" title="Menu" aria-label="Abrir menu"
-              aria-haspopup="dialog" aria-controls="zcSidebarHost" aria-expanded="false">
+      <button id="menuOnlyBtn"
+              type="button"
+              class="menu-only-btn"
+              title="Menu"
+              aria-label="Abrir menu">
         <i class="fa-solid fa-ellipsis-vertical"></i>
       </button>
     </nav>
@@ -129,12 +92,6 @@
     <aside class="flex flex-col">
       <div class="wpp-header-externo">
         <div class="wpp-header-titulo-row">
-          <!-- Kebab (só aparece no mobile via CSS acima; o JS garante desktop também) -->
-          <button id="btnKebabHeader" title="Menu" aria-label="Abrir menu"
-                  aria-haspopup="dialog" aria-controls="zcSidebarHost">
-            <i class="fa fa-ellipsis-vertical"></i>
-          </button>
-
           <img class="wpp-header-logo logo-dark"  src="/frontend/img/logo-white.png"   alt="ZapChats (dark)">
           <img class="wpp-header-logo logo-light" src="/frontend/img/logo-s-fundo.png" alt="ZapChats (light)">
 
@@ -169,11 +126,6 @@
     </aside>
 
     <!-- Área de chat -->
-    <!-- Escolha UMA classe:
-         - whatsapp-auto-bg  (recomendado: alterna conforme tema)
-         - whatsapp-bg-dark  (força imagem escura)
-         - whatsapp-bg-light (força imagem clara)
-    -->
     <main class="flex flex-col whatsapp-bg-dark">
       <header id="chat-header" class="h-16 flex items-center px-4 gap-3 shadow-sm" style="display:none;">
         <div class="flex items-center gap-2 relative">
@@ -217,7 +169,7 @@
     </main>
   </div>
 
-  <!-- Flyout lateral (NOVO) -->
+  <!-- Flyout lateral -->
   <script src="/frontend/js/atendimentos/ui/flyout.js"></script>
 
   <!-- Boot principal -->

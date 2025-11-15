@@ -1,6 +1,7 @@
 // ====================================================================
 // WebSocket da EMPRESA + da INSTÂNCIA ATIVA (tempo real)
-// - Trata: nova mensagem, ACK, reloads segmentados, conv_status, pin/unpin, MESSAGES_DELETE
+// - Trata: nova mensagem, ACK, reloads segmentados, conv_status, pin/unpin
+// - Trata: messages_delete (apagada pelo cliente/usuário)
 // - Reconexão com backoff + heartbeat (ping/pong) + medidor de lag
 // - Idempotência básica (merge do eco local por texto+tempo)
 // - Ajustes: unwrap de payloads aninhados; mapear cliente por telefone
@@ -356,6 +357,45 @@ function appendToHistCache(inst, cliente_id, msg){
   }
 }
 
+// 🔹========================= delete no histórico =========================
+function applyDeleteToHist(inst, cliente_id, msg_id, flags = {}) {
+  try {
+    const instKey = inst ?? pickInstanciaFromAny({ cliente_id }) ?? window.INSTANCIA_ATIVA ?? resolveInstTopic() ?? null;
+    const cid = Number(cliente_id);
+    if (!instKey || !cid || !msg_id) return false;
+
+    const arr = getHist(instKey, cid) || [];
+    if (!arr.length) return false;
+
+    const idStr = String(msg_id);
+    let changed = false;
+
+    for (let i = 0; i < arr.length; i++) {
+      const m = arr[i];
+      if (!m) continue;
+      const mid = String(m.msg_id || m.id || '');
+      if (!mid || mid !== idStr) continue;
+
+      if ('apagada_cliente' in flags) m.apagada_cliente = !!flags.apagada_cliente;
+      if ('apagada_usuario' in flags) m.apagada_usuario = !!flags.apagada_usuario;
+
+      if (flags.clearContent) {
+        m.texto = m.conteudo = 'Mensagem apagada';
+        m.midias = [];
+      }
+      changed = true;
+    }
+
+    if (changed) {
+      try { primeWith(instKey, cid, arr, null); } catch {}
+      mirrorLegacyF5(instKey, cid);
+    }
+    return changed;
+  } catch {
+    return false;
+  }
+}
+
 // ========================= helpers: unwrap de payload =========================
 function unwrap(any){
   if (!any || typeof any !== 'object') return any;
@@ -367,7 +407,7 @@ function unwrap(any){
   return Object.assign({}, any, ...layers);
 }
 
-// ========================= handlers: ACK & MSG =========================
+// ========================= handlers: ACK & MSG & DELETE =========================
 function handleAckGeneric(payload){
   const inst = pickInstanciaFromAny(payload);
   const cliente_id = Number(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? NaN)
@@ -475,6 +515,52 @@ function handleNovaMensagem(payload){
   if (DEBUG_WS) console.debug('[WS MSG]', { cliente_id, inst, merged, openByCliente, texto: msg.conteudo, origem, autor_nome });
 }
 
+// 🔹 novo handler: delete
+function handleDeleteMensagem(payload){
+  const inst = pickInstanciaFromAny(payload);
+
+  let cliente_id = Number(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? NaN);
+  if (!cliente_id) {
+    cliente_id = findClienteIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || payload?.jid || '') || 0;
+  }
+  const msg_id = pickMsgId(payload);
+  if (!cliente_id || !msg_id) return;
+
+  const flags = {
+    apagada_cliente: payload.apagada_cliente,
+    apagada_usuario: payload.apagada_usuario,
+    clearContent: true,
+  };
+
+  const changed = applyDeleteToHist(inst, cliente_id, msg_id, flags);
+
+  const openByCliente = isOpenChat(cliente_id);
+  const canFixDom = ensureDomContextFor(cliente_id, inst);
+
+  if (changed && (openByCliente || canFixDom)) {
+    // re-render geral (não append) porque alteramos uma mensagem existente
+    renderHistoricoDoCache(cliente_id, false);
+  }
+
+  // Atualiza preview da lista
+  if (changed) {
+    const tsNow = Date.now();
+    upsertClientePreview({
+      cliente_id,
+      texto: 'Mensagem apagada',
+      ts: tsNow,
+      tipo: 'entrada',
+      ack: null,
+      instancia_id: inst,
+      instance_name: payload.instance_name ?? payload.instance ?? null,
+    });
+  }
+
+  if (DEBUG_WS) console.debug('[WS MSG_DELETE]', {
+    cliente_id, inst, msg_id, flags, changed
+  });
+}
+
 // ========================= conv_status & pin =========================
 function normalizeConvStatus(s){
   const v = String(s || '').toLowerCase();
@@ -541,150 +627,6 @@ function handleConvPin(payload){
   if (DEBUG_WS) console.debug('[WS CONV_PIN]', { cliente_id, inst, pinned: !!flag, raw: payload });
 }
 
-// ========================= MESSAGES_DELETE =========================
-function handleMessagesDelete(payload){
-  const inst = pickInstanciaFromAny(payload);
-
-  let cliente_id = Number(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? NaN);
-  if (!cliente_id) {
-    cliente_id = findClienteIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || payload?.jid || '') || 0;
-  }
-  if (!cliente_id) return;
-
-  const instKey = inst ?? pickInstanciaFromAny({ cliente_id }) ?? window.INSTANCIA_ATIVA ?? resolveInstTopic() ?? null;
-  const cid = Number(cliente_id);
-  const hist = getHist(instKey, cid) || [];
-  if (!hist.length) {
-    try { window.MESSAGES_DELETE?.({ cliente_id: cid, instancia_id: instKey, msg_ids: [], payload }); } catch {}
-    return;
-  }
-
-  const ids = new Set();
-  const addId = (v) => {
-    if (v == null) return;
-    const s = String(v).trim();
-    if (!s) return;
-    ids.add(s);
-  };
-
-  // Arrays diretas de ids
-  if (Array.isArray(payload.msg_ids))       payload.msg_ids.forEach(addId);
-  if (Array.isArray(payload.message_ids))   payload.message_ids.forEach(addId);
-  if (Array.isArray(payload.ids))          payload.ids.forEach(addId);
-
-  // messages[] com objetos
-  if (Array.isArray(payload.messages)) {
-    payload.messages.forEach(m => addId(pickMsgId(m)));
-  }
-
-  // id único no topo
-  addId(pickMsgId(payload));
-
-  const deleteAll = !!payload.delete_all || !!payload.all || !!payload.clear || !!payload.clear_history;
-  const hasIds = ids.size > 0;
-
-  if (!deleteAll && !hasIds) {
-    try { window.MESSAGES_DELETE?.({ cliente_id: cid, instancia_id: instKey, msg_ids: [], payload }); } catch {}
-    return;
-  }
-
-  let changed = false;
-  const filtered = hist.filter(m => {
-    const mid = pickMsgId(m);
-    if (deleteAll) {
-      changed = true;
-      return false;
-    }
-    if (!mid) return true;
-    if (hasIds && ids.has(String(mid))) {
-      changed = true;
-      return false;
-    }
-    return true;
-  });
-
-  if (!changed) {
-    try { window.MESSAGES_DELETE?.({ cliente_id: cid, instancia_id: instKey, msg_ids: [], payload }); } catch {}
-    return;
-  }
-
-  try { primeWith(instKey, cid, filtered, null); } catch {}
-  mirrorLegacyF5(instKey, cid);
-
-  const openByCliente = isOpenChat(cid);
-  const canFixDom = ensureDomContextFor(cid, instKey);
-
-  if (openByCliente || canFixDom) {
-    if (DEBUG_WS) console.debug('[WS MSG_DELETE][RENDER]', {
-      cliente_id: cid,
-      inst: instKey,
-      removed: hist.length - filtered.length
-    });
-    renderHistoricoDoCache(cid, /*append*/ false);
-  }
-
-  // Atualiza preview
-  try {
-    if (filtered.length) {
-      const last = filtered[filtered.length - 1];
-      const lastTxt  = String(last.conteudo || last.texto || '').trim();
-      const lastTs   = Number(last.ts || tsToMillis(last.timestamp) || Date.now());
-      const lastTipo = (last.tipo === 'saida') ? 'saida' : 'entrada';
-      const lastAck  = (lastTipo === 'saida') ? (last.ack ?? pickAck(last)) : null;
-
-      upsertClientePreview({
-        cliente_id: cid,
-        texto: lastTxt,
-        ts: lastTs,
-        tipo: lastTipo,
-        ack: lastAck,
-        instancia_id: instKey
-      });
-    } else {
-      // Sem mensagens restantes: zera preview
-      upsertClientePreview({
-        cliente_id: cid,
-        texto: '',
-        ts: Date.now(),
-        tipo: 'entrada',
-        ack: null,
-        instancia_id: instKey
-      });
-    }
-  } catch {}
-
-  // Eventos para outros módulos
-  try {
-    document.dispatchEvent(new CustomEvent('ws:messages_delete', {
-      detail: {
-        cliente_id: cid,
-        instancia_id: instKey,
-        msg_ids: Array.from(ids),
-        delete_all: deleteAll,
-        payload
-      }
-    }));
-  } catch {}
-
-  try {
-    window.MESSAGES_DELETE?.({
-      cliente_id: cid,
-      instancia_id: instKey,
-      msg_ids: Array.from(ids),
-      delete_all: deleteAll,
-      payload
-    });
-  } catch {}
-
-  if (DEBUG_WS) console.debug('[WS MSG_DELETE]', {
-    cliente_id: cid,
-    inst: instKey,
-    deleted: hist.length - filtered.length,
-    delete_all: deleteAll,
-    msg_ids: Array.from(ids)
-  });
-}
-
 // ========================= dispatcher =========================
 function handleMessage(ev){
   if (typeof ev?.data === 'string' && (ev.data === 'pong' || ev.data === 'ping')) return;
@@ -719,16 +661,16 @@ function handleMessage(ev){
 
   if (data.type === 'conv_status'){ handleConvStatus(data); return; }
 
-  const t = String(data.type || '').toLowerCase();
-
-  if (t === 'messages_delete' || t === 'messages.deleted' || t === 'message_delete' || t === 'message.deleted') {
-    handleMessagesDelete(data);
-    return;
-  }
-
+  const t = String(data.type || data.event || '').toLowerCase();
   if (t === 'conv.pin' || t === 'conv_unpin' || t === 'conv.unpin' || t === 'convfix' || t === 'conv_unfix' || t === 'conv.unfix'
       || t === 'pin' || t === 'unpin' || (t === 'conv' && (String(data.action||'').toLowerCase().includes('pin')))) {
     handleConvPin(data); return;
+  }
+
+  // 🔹 delete vindo do backend
+  if (t === 'messages_delete' || t === 'message_delete' || t === 'messages.delete' || t === 'messagedelete') {
+    handleDeleteMensagem(data);
+    return;
   }
 
   // processa ACK (mesmo se vier junto com texto)

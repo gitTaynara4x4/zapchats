@@ -27,45 +27,111 @@
       } catch {}
     }
 
-    async function ensure() {
-      // normaliza permissão
+    // --------- FETCH PERMISSIONS COM FALLBACK ---------
+    async function fetchPerms(){
+      // 1) Se houver ZAuth.getPerms, usa ele primeiro
+      if (global.ZAuth?.getPerms) {
+        try {
+          const p = await ZAuth.getPerms();
+          if (Array.isArray(p)) return p.map(String);
+          if (p && Array.isArray(p.permissoes)) return p.permissoes.map(String);
+        } catch (e) {
+          console.warn('[Page.guard] ZAuth.getPerms falhou, tentando backend direto…', e);
+        }
+      }
+
+      // 2) Tenta /api/permissoes/minhas
+      try {
+        const f = (global.ZAuth?.authFetch) ? ZAuth.authFetch : fetch;
+        const r = await f('/api/permissoes/minhas', {
+          credentials: 'include',
+          headers: { 'Accept': 'application/json' }
+        });
+        if (r.ok) {
+          const data = await r.json();
+          if (Array.isArray(data)) return data.map(String);
+          if (data && Array.isArray(data.permissoes)) return data.permissoes.map(String);
+        } else {
+          console.warn('[Page.guard] /api/permissoes/minhas -> HTTP', r.status);
+        }
+      } catch (e) {
+        console.warn('[Page.guard] Erro em /api/permissoes/minhas, usando /api/auth/me como fallback…', e);
+      }
+
+      // 3) Fallback final: /api/auth/me (que a gente já sabe que está certo)
+      try {
+        const f2 = (global.ZAuth?.authFetch) ? ZAuth.authFetch : fetch;
+        const r2 = await f2('/api/auth/me', {
+          credentials: 'include',
+          headers: { 'Accept': 'application/json' }
+        });
+        if (r2.ok) {
+          const me = await r2.json();
+          const arr =
+            (Array.isArray(me.permissoes) ? me.permissoes :
+            (Array.isArray(me.permissions) ? me.permissions : []));
+          return arr.map(String);
+        } else {
+          console.warn('[Page.guard] /api/auth/me -> HTTP', r2.status);
+        }
+      } catch (e) {
+        console.warn('[Page.guard] Erro em /api/auth/me, sem conseguir carregar permissões.', e);
+      }
+
+      // Se tudo falhar, volta lista vazia
+      return [];
+    }
+
+    // --------- NORMALIZA REQUISITO ---------
+    function normalizeNeed(perm){
       var needAny = [], needAll = [];
-      if (typeof perm === 'string') needAll = [perm];
-      else if (perm && typeof perm === 'object') {
+      if (typeof perm === 'string') {
+        needAll = [perm];
+      } else if (perm && typeof perm === 'object') {
         needAny = Array.isArray(perm.any) ? perm.any : [];
         needAll = Array.isArray(perm.all) ? perm.all : [];
       }
+      return { needAny, needAll };
+    }
 
-      // usa ZAuth.ensurePerm se existir; senão faz checagem manual
-      async function fetchPerms(){
-        if (global.ZAuth?.getPerms) {
-          return await ZAuth.getPerms();
-        }
-        const f = (global.ZAuth?.authFetch) ? ZAuth.authFetch : fetch;
-        const r = await f('/api/permissoes/minhas', { credentials:'include' });
-        if (!r.ok) throw new Error(String(r.status));
-        const data = await r.json();
-        return Array.isArray(data) ? data : (Array.isArray(data?.permissoes) ? data.permissoes : []);
-      }
+    function check(perms, need){
+      var needAny = need.needAny;
+      var needAll = need.needAll;
+      if (needAll.length && !needAll.every(function (p){ return perms.includes(p); })) return false;
+      if (needAny.length && !needAny.some(function (p){ return perms.includes(p); }))  return false;
+      if (!needAll.length && !needAny.length) return true; // sem requisito
+      return true;
+    }
 
-      function check(perms){
-        if (needAll.length && !needAll.every(p => perms.includes(p))) return false;
-        if (needAny.length && !needAny.some(p => perms.includes(p)))  return false;
-        if (!needAll.length && !needAny.length) return true; // sem requisito
-        return true;
-      }
+    async function ensure() {
+      const need = normalizeNeed(perm);
 
       try {
         showLoader(options.loading);
-        // ZAuth.ensurePerm já resolve isso? então delega:
+
+        // 1ª tentativa: se ZAuth.ensurePerm existir, usa, mas NÃO derruba tudo se falhar
         if (global.ZAuth?.ensurePerm) {
-          await ZAuth.ensurePerm(perm); // lança se negar
-          return true;
+          try {
+            await ZAuth.ensurePerm(perm); // deve lançar se negar
+            return true;
+          } catch (e) {
+            console.warn('[Page.guard] ZAuth.ensurePerm negou ou falhou, caindo no fallback manual…', e);
+            // cai pro fallback abaixo
+          }
         }
-        // fallback: busca e checa
+
+        // Fallback: busca permissões e checa na mão
         const perms = await fetchPerms();
-        return check(perms);
-      } catch {
+        const ok = check(perms, need);
+        if (!ok) {
+          console.warn('[Page.guard] Permissão negada pelo check manual.', {
+            required: need,
+            perms: perms
+          });
+        }
+        return ok;
+      } catch (e) {
+        console.warn('[Page.guard] Erro inesperado em ensure()', e);
         return false;
       } finally {
         hideLoader();
@@ -74,7 +140,7 @@
 
     async function denyDefault(){
       try { global.PageLoading?.show?.('Sem permissão', { scope:'body' }); } catch {}
-      // descobre 1ª rota liberada (você já tem isso em algumas páginas)
+
       async function firstAllowedRoute(){
         try {
           if (global.ZAuth?._internals?._fetchMinhasPerms) {
@@ -83,11 +149,14 @@
             const pick = ZAuth._internals._pickFirstAllowed(list);
             if (pick) return pick;
           }
-        } catch {}
+        } catch (e) {
+          console.warn('[Page.guard] Falha ao descobrir primeira rota liberada:', e);
+        }
         return '/sem-permissao';
       }
+
       const dest = await firstAllowedRoute();
-      setTimeout(()=> location.replace(dest), 600);
+      setTimeout(function(){ location.replace(dest); }, 600);
     }
 
     // run-once
@@ -96,8 +165,12 @@
 
     (async function(){
       const ok = await ensure();
-      if (ok) return void initFn?.();
-      if (typeof options.onDeny === 'function') return void options.onDeny();
+      if (ok) {
+        return void initFn?.();
+      }
+      if (typeof options.onDeny === 'function') {
+        return void options.onDeny();
+      }
       return void denyDefault();
     })();
   }

@@ -1851,6 +1851,9 @@ async def on_messages_delete(inst_id: str, data):
         LOG("[DEL] nenhum item reconhecido em payload.")
         return
 
+    # vamos acumular o que precisa ser emitido no WS depois do commit
+    eventos_ws: list[dict] = []
+
     with SessionLocal() as db:
         inst = _get_inst_row(db, inst_id)
         if not inst:
@@ -1883,12 +1886,11 @@ async def on_messages_delete(inst_id: str, data):
                     _log_ctx("[DEL][skip] sem msg_id", idx=idx)
                     continue
 
-                # Ajuste aqui pro nome correto do campo ID da mensagem no seu model:
                 row = (
                     db.query(models.Mensagem)
                     .filter(
                         models.Mensagem.instancia_id == inst.id,
-                        models.Mensagem.msg_id == msg_id,   # ou .mensagem_id se for esse o nome
+                        models.Mensagem.msg_id == msg_id,
                     )
                     .first()
                 )
@@ -1929,6 +1931,18 @@ async def on_messages_delete(inst_id: str, data):
                 if changed:
                     alterados += 1
 
+                    # guarda infos para mandar via WS depois do commit
+                    eventos_ws.append(
+                        {
+                            "empresa_id": row.empresa_id,
+                            "instancia_id": row.instancia_id,
+                            "cliente_id": row.cliente_id,
+                            "msg_id": row.msg_id,
+                            "apagada_cliente": bool(row.apagada_cliente),
+                            "apagada_usuario": bool(row.apagada_usuario),
+                        }
+                    )
+
                 _log_ctx(
                     "[DEL][hit]",
                     idx=idx,
@@ -1961,6 +1975,54 @@ async def on_messages_delete(inst_id: str, data):
         f"total={len(mensagens)} encontrados={encontrados} alterados={alterados}"
     )
 
+    # =========================
+    # WS: avisa o front que a msg foi apagada
+    # =========================
+    if not eventos_ws:
+        return
+
+    # importe isso lá em cima do arquivo, se ainda não tiver:
+    # from backend.websocket_manager import conexoes_ativas
+    from datetime import datetime, timezone
+
+    async def _ws_broadcast(topic: str, payload: dict):
+        conns = conexoes_ativas.get(topic) or []
+        if not conns:
+            return
+        for ws in list(conns):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                # remove conexão morta
+                try:
+                    conns.remove(ws)
+                except Exception:
+                    try:
+                        conns.discard(ws)  # se for set
+                    except Exception:
+                        pass
+
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    for ev in eventos_ws:
+        payload = {
+            "type": "msg_deleted",
+            "cliente_id": ev["cliente_id"],
+            "conversation_id": ev["cliente_id"],
+            "instancia_id": ev["instancia_id"],
+            "msg_id": ev["msg_id"],
+            "apagada_cliente": ev["apagada_cliente"],
+            "apagada_usuario": ev["apagada_usuario"],
+            "serverTimestamp": now_ms,
+        }
+
+        # canal da empresa
+        topic_emp = f"emp:{ev['empresa_id']}"
+        await _ws_broadcast(topic_emp, payload)
+
+        # se você quiser, pode também emitir no canal da instância:
+        topic_inst = f"inst:{ev['instancia_id']}"
+        await _ws_broadcast(topic_inst, payload)
 
 
 @handler(EvoEvent.CALL)

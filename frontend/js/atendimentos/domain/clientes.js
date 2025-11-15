@@ -374,7 +374,7 @@ export async function carregarClientes({ force=false } = {}){
         }
         if (a.last_tipo) n.last_tipo = a.last_tipo;
         if (a.last_tipo === 'saida' && temValor(a.last_ack)) {
-          n.last_ack = Math.max(Number(n.last_ack||0), Number(a.last_ack)||0);
+          n.last_ack = Math.max(Number(n.last_ack||0), Number(a.last_ack||0));
         }
         if (temValor(a.novas) && (Number(n.novas) || 0) === 0) {
           n.novas = Number(a.novas) || 0;
@@ -503,36 +503,61 @@ export function renderListaClientes(data){
         ? c.nome.trim()
         : (c.push_name?.trim() || formatarNumeroBR(c.telefone));
 
-    let when = formatChatTime(c.hora || c.last_ts) || '';
-    let preview = (c.ultima_mensagem || '').trim();
-    let outboundFlag = (c.last_tipo === 'saida');
-    let ackValForIcon = Number(c.last_ack ?? 0);
+    // ----- baseline: dados vindos da /conversas (server) -----
+    const serverMs = tsToMillis(c.hora || c.last_ts) || 0;
+    let when       = serverMs ? formatChatTime(serverMs) : '';
+    let preview    = (c.ultima_mensagem || '').trim();
+    let outboundFlag  = (c.last_tipo === 'saida');
+    let ackValForIcon = Number(c.last_ack ?? 0) || 0;
 
+    // ----- enriquecer com histórico, mas sem “apagar” a mensagem nova -----
     try {
       const instCanon = (c.instancia_id ?? c.instancia ?? null) || null;
-      const arrHist = window.cacheHistoricos?.[c.id] || getHist(instCanon, c.id);
+      const arrHist   = window.cacheHistoricos?.[c.id] || getHist(instCanon, c.id);
       if (Array.isArray(arrHist) && arrHist.length) {
-        const last = arrHist[arrHist.length - 1];
-        outboundFlag = (last?.tipo === 'saida') || !!last?.from_me || (last?.origem === 'atendente');
-        ackValForIcon = outboundFlag ? Number(last?.ack||0) : 0;
+        const last   = arrHist[arrHist.length - 1];
+        const histMs = Number(last?.ts || 0) || Date.parse(last?.timestamp || '') || 0;
+        const rawHistText = (last?.texto || last?.text || last?.conteudo || last?.mensagem || '').trim();
 
-        const ms = Number(last?.ts || 0) || Date.parse(last?.timestamp || '') || Date.now();
-        when = formatChatTime(ms);
+        // usa histórico só se ele for claramente MAIS novo que o server
+        const useHist =
+          (!serverMs && histMs) ||                           // só tenho hist
+          (histMs && serverMs && histMs > serverMs + 999) || // hist > server (~1s de folga)
+          (!preview && rawHistText);                         // server não trouxe texto
 
-        const raw = (last?.texto || last?.text || last?.conteudo || last?.mensagem || '').trim();
-        if (raw) {
-          preview = raw;
+        if (useHist) {
+          outboundFlag  = (last?.tipo === 'saida') || !!last?.from_me || (last?.origem === 'atendente');
+          ackValForIcon = outboundFlag ? (Number(last?.ack || 0) || 0) : 0;
+
+          if (histMs) {
+            when = formatChatTime(histMs);
+          }
+
+          if (rawHistText) {
+            preview = rawHistText;
+          } else {
+            const a = Array.isArray(last?.midias) ? last.midias : [];
+            const mime = String(a[0]?.mimetype || a[0]?.mime || '').toLowerCase();
+            const hasAny = a.length > 0;
+            preview = hasAny
+              ? (mime.includes('image') ? '[Foto]'
+                  : mime.includes('video') ? '[Vídeo]'
+                  : mime.includes('audio') ? '[Áudio]'
+                  : mime.includes('pdf')   ? '[PDF]'
+                  : '[Arquivo]')
+              : '';
+          }
         } else {
-          const a = Array.isArray(last?.midias) ? last.midias : [];
-          const mime = String(a[0]?.mimetype || a[0]?.mime || '').toLowerCase();
-          const hasAny = a.length > 0;
-          preview = hasAny
-            ? (mime.includes('image') ? '[Foto]'
-               : mime.includes('video') ? '[Vídeo]'
-               : mime.includes('audio') ? '[Áudio]'
-               : mime.includes('pdf')   ? '[PDF]'
-               : '[Arquivo]')
-            : '';
+          // hist é mais antigo: só aproveita ACK maior (ex.: mensagem enviada antes do reload)
+          const histAck = Number(last?.ack || 0) || 0;
+          if (histAck > ackValForIcon) {
+            ackValForIcon = histAck;
+          }
+        }
+
+        // se mesmo assim não tiver horário, cai pro server
+        if (!when && serverMs) {
+          when = formatChatTime(serverMs);
         }
       }
     } catch {}

@@ -1,7 +1,8 @@
 /* Colaboradores – lista + modal de perfil (visualização/edição) e fluxo de criação
    (versão com: troca de senha em edição, validação opcional da senha, salvamento de instâncias,
    correção de refs DOM recriadas nas fieldboxes + limpeza de erros ao trocar de colaborador
-   + salvamento de PERMISSÕES por colaborador em /api/permissoes/colaboradores/{id}) */
+   + salvamento de PERMISSÕES por colaborador em /api/permissoes/colaboradores/{id}
+   + fix departamento pré-selecionado no editar + evitar 422 no avatar de novo colaborador) */
 (function ColaboradoresPage(){
   'use strict';
 
@@ -574,7 +575,13 @@
       if (pAvatar){ pAvatar.removeAttribute('src'); pAvatar.style.display='none'; }
     }
   }
+
+  // === CORRIGIDO: não buscar avatar para id null ===
   async function fetchAvatarURLFor(colab){
+    if (!colab || colab.id == null || colab.id === 'null') {
+      return colab?.avatar_url || null;
+    }
+
     try{
       const r1 = await authFetch(withEmpresa(`/api/colaboradores/${colab.id}/avatar`));
       if (r1.ok && r1.status === 200) {
@@ -950,7 +957,11 @@
       ? 'Novo colaborador'
       : (coalesceName(colab) || 'Perfil do colaborador');
 
-    const photoURL = await fetchAvatarURLFor(colab);
+    // CORRIGIDO: só busca avatar se tiver id real
+    let photoURL = null;
+    if (colab && colab.id != null && colab.id !== 'null') {
+      try { photoURL = await fetchAvatarURLFor(colab); } catch {}
+    }
     setPerfilAvatar(coalesceName(colab), photoURL);
 
     if (dStatus) dStatus.style.background = '#008b32';
@@ -1038,8 +1049,56 @@
         ${state.setores.map(s=>`<option value="${s.id}">${s.nome}</option>`).join('')}
       </select>`;
     const sel = swapFieldbox('fb-depto', selHtml);
-    const depId = coalesceDeptId(state.viewing);
-    if (depId != null && sel) sel.value = String(depId);
+
+    // ---- preenchimento robusto do departamento ----
+    const depIdRaw  = coalesceDeptId(state.viewing);
+    const depName   = coalesceDeptName(state.viewing) || $('#v-depto')?.textContent || '';
+    let   depValue  = '';
+
+    if (depIdRaw != null) {
+      depValue = String(depIdRaw);
+    }
+
+    // tenta aplicar pelo ID
+    let assigned = false;
+    if (sel && depValue) {
+      sel.value = depValue;
+      if (sel.value === depValue) {
+        assigned = true;
+      }
+    }
+
+    // se pelo ID não deu, tenta casar pelo nome exibido
+    if (sel && !assigned && depName && state.setores.length) {
+      const alvo = String(depName).trim().toLowerCase();
+      const found = state.setores.find(s =>
+        String(s.nome || '').trim().toLowerCase() === alvo
+      );
+      if (found) {
+        depValue = String(found.id);
+        sel.value = depValue;
+        if (sel.value === depValue) {
+          assigned = true;
+        }
+      }
+    }
+
+    // fallback: se ainda não achou e só tem 1 setor, usa ele
+    if (sel && !assigned && !depValue && state.setores.length === 1) {
+      depValue = String(state.setores[0].id);
+      sel.value = depValue;
+      if (sel.value === depValue) {
+        assigned = true;
+      }
+    }
+
+    if (assigned) {
+      sel.dispatchEvent(new Event('change', { bubbles:true }));
+    }
+
+    console.log('[colab edit] depIdRaw=', depIdRaw, 'depName=', depName, '=> depValue=', depValue, 'assigned=', assigned);
+
+    // ------------------------------------------------
 
     swapFieldbox('fb-tel', `<input id="e-tel" class="input" type="tel" required inputmode="numeric" placeholder="(DD) 9 9999-9999">`);
     swapFieldbox('fb-cargo', `<input id="e-cargo" class="input" type="text" maxlength="80" required placeholder="Cargo">`);
@@ -1079,23 +1138,19 @@
       senhaInput.addEventListener('input', ()=> validateFormLive());
     }
 
-    // Permissões: sempre mostra e carrega checkboxes no modo edição
-    if (ePerms){
-      ePerms.style.display = 'grid';
+    if (perfilModal.dataset.mode === 'create'){
       ensurePermsEdit();
-    }
-    if (dPerms){
-      dPerms.style.display = 'none';
+      if (ePerms) ePerms.style.display = 'grid';
+      if (dPerms) dPerms.style.display = 'none';
     }
 
-    // Instâncias (WhatsApp)
     ensureInstsEdit();
 
     const wrapSenha = $('#wrap-senha');
     const senhaHelp = $('#senha-help');
     const toggle = $('#toggle-senha');
     if (wrapSenha) wrapSenha.style.display = 'flex';
-    if (senhaHelp) senhaHelp.style.display = (perfilModal.dataset.mode === 'create') ? '' : 'none';
+    if (senhaHelp) senhaHelp.style.display = 'none';
     if (toggle){
       const input = $('#e-senha');
       toggle.onclick = () => {
@@ -1111,6 +1166,7 @@
     }
 
     bindAvatarDnDAndPaste();
+
     validateFormLive(false);
   }
 

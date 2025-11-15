@@ -153,6 +153,9 @@ async function ensureMensagensCarregadas(conversationId) {
 
   const inst = getInstanciaForFetch(conversationId);
 
+  // 👇 SEM early-return com hasHistory:
+  // sempre consulta o backend pra garantir que novas mensagens
+  // (que chegaram com a tela fechada) sejam carregadas.
   const qs = new URLSearchParams({ empresa_id: String(EMPRESA_ID), limit: '50' });
   if (inst) qs.set('instancia_id', inst);
   const url = `/api/atendimento/conversas/${conversationId}/mensagens?` + qs.toString();
@@ -161,10 +164,9 @@ async function ensureMensagensCarregadas(conversationId) {
   if (!r.ok) throw new Error('Falha ao carregar mensagens');
   const data = await r.json();
 
-  // aceita tanto { items: [...] } quanto [ ... ]
-  const items = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
+  const items = Array.isArray(data?.items) ? data.items : [];
 
-  // normaliza tipo e ACK (string → número; clamp 0..3; só em SAÍDAS)
+  // normaliza tipo e ACK
   const mapped = items.map(m => {
     const tipoMsg = m.tipo || (m.remetente === 'agente' ? 'saida' : 'entrada');
     const isSaida = (tipoMsg === 'saida') || m.from_me === true || m.origem === 'atendente';
@@ -174,19 +176,19 @@ async function ensureMensagensCarregadas(conversationId) {
     ackNum = Math.min(3, Math.max(0, ackNum));
 
     return {
-      msg_id:       m.msg_id || m.id || null,
-      conteudo:     m.texto ?? m.conteudo ?? m.mensagem ?? '',
-      tipo:         tipoMsg,
-      timestamp:    m.ts || m.timestamp || m.data || m.created_at || new Date().toISOString(),
-      ack:          isSaida ? ackNum : null,
-      midias:       Array.isArray(m.midias) ? m.midias : [],
+      msg_id:    m.msg_id || m.id || null,
+      conteudo:  m.texto ?? m.conteudo ?? '',
+      tipo:      tipoMsg,
+      timestamp: m.ts || m.timestamp || new Date().toISOString(),
+      ack:       isSaida ? ackNum : null,
+      midias:    Array.isArray(m.midias) ? m.midias : [],
       instancia_id: m.instancia_id ?? (inst || null),
-      origem:       m.origem ?? (isSaida ? 'atendente' : 'cliente'),
-      autor_nome:   m.autor_nome ?? m.atendente_nome ?? null,
+      origem:    m.origem ?? (isSaida ? 'atendente' : 'cliente'),
+      autor_nome: m.autor_nome ?? m.atendente_nome ?? null,
     };
   });
 
-  // merge incremental no cache unificado (dedup por msg_id/ts+conteúdo)
+  // merge no cache unificado
   try { salvarNoCache(conversationId, mapped); } catch {}
 
   const finalHist = getHist(inst, conversationId) || [];
@@ -203,27 +205,73 @@ async function ensureMensagensCarregadas(conversationId) {
   state.mensagensOffset[conversationId] = finalHist.length;
   persist();
 
-  // 🔥 garante que a LISTA de conversas reflita a última mensagem carregada
-  try {
-    const last = finalHist[finalHist.length - 1];
-    if (last && window.Lista?.updatePreview) {
-      const textoPrev = last.conteudo ?? last.texto ?? last.mensagem ?? '';
-      const tsIso     = last.timestamp || last.ts || last.data || last.created_at || new Date().toISOString();
-      const ackVal    = last.ack ?? null;
-
-      window.Lista.updatePreview(conversationId, {
-        texto: textoPrev,
-        ts: tsIso,
-        ack: ackVal,
-      });
-    }
-    // fallback pra qualquer lógica extra baseada no cache
-    try { window.syncPreviewFromCache?.(conversationId); } catch {}
-  } catch {}
-
   try { console.debug('[ensureMensagensCarregadas]', { conversationId, total: finalHist.length }); } catch {}
 
   return finalHist;
+}
+
+/* ======= Booster: atualiza preview das conversas com novas > 0 ======= */
+async function refreshUnreadPreviewsFromHistory(){
+  try{
+    const arr = Array.isArray(state.clientesCache) ? state.clientesCache : [];
+    const targets = arr.filter(c => Number(c.novas || 0) > 0);
+    if (!targets.length) return;
+
+    for (const c of targets){
+      const convId = Number(c.id ?? c.conversation_id ?? c.cliente_id);
+      if (!convId) continue;
+
+      try{
+        // carrega últimas mensagens dessa conversa (sempre consulta o backend)
+        const hist = await ensureMensagensCarregadas(convId);
+        if (!Array.isArray(hist) || !hist.length) continue;
+
+        const last = hist[hist.length - 1];
+
+        // texto / placeholder de mídia
+        let texto = (last.conteudo ?? last.texto ?? last.mensagem ?? '').trim();
+        if (!texto){
+          const a = Array.isArray(last.midias) ? last.midias : [];
+          if (a.length){
+            const mime = String(a[0].mimetype || a[0].mime || '').toLowerCase();
+            texto =
+              mime.includes('image') ? '[Foto]'  :
+              mime.includes('video') ? '[Vídeo]' :
+              mime.includes('audio') ? '[Áudio]' :
+              mime.includes('pdf')   ? '[PDF]'   :
+              '[Arquivo]';
+          }
+        }
+
+        const isSaida =
+          (last.tipo === 'saida') ||
+          (last.from_me === true) ||
+          (last.origem === 'atendente');
+
+        let ackVal = null;
+        if (isSaida){
+          ackVal = Number(last.ack ?? 0);
+          if (!Number.isFinite(ackVal)) ackVal = 0;
+        }
+
+        // força a linha da lista a refletir a ÚLTIMA mensagem real
+        try{
+          window.Lista?.updatePreview?.(convId, {
+            texto,
+            ack: ackVal,
+            // sem ts pra não quebrar o formatChatTime inline;
+            // o horário continua vindo do /conversas.
+          });
+        } catch(e){
+          try { console.warn('[refreshUnreadPreviewsFromHistory] updatePreview erro', convId, e); } catch {}
+        }
+      }catch(e){
+        try { console.warn('[refreshUnreadPreviewsFromHistory] erro conv', c.id, e); } catch {}
+      }
+    }
+  }catch(e){
+    try { console.warn('[refreshUnreadPreviewsFromHistory] erro geral', e); } catch {}
+  }
 }
 
 /* ======= Atualiza banner com a última saída ======= */
@@ -381,6 +429,10 @@ export async function boot() {
 
     try {
       await carregarClientes({ force: true, reason: 'boot' });
+
+      // 👇 novo booster: corrige previews de quem tem novas > 0
+      await refreshUnreadPreviewsFromHistory();
+
       readyPart('clientes');
     } catch (e) {
       console.error('[boot] carregarClientes falhou:', e);

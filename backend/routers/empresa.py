@@ -15,7 +15,8 @@ from backend.utils.plans import (
     effective_tier,
     plan_limit,
 )
-from backend.routers.auth import get_current_user
+# IMPORTANTE: agora usamos get_current_identity
+from backend.routers.auth import get_current_identity
 
 router = APIRouter(prefix="/api/empresas", tags=["Empresas"])
 
@@ -53,14 +54,15 @@ def _norm_instance_number(s: Optional[str]) -> Optional[str]:
     return d or None
 
 
-def _assert_empresa_access(empresa_id: int, current_user) -> int:
+def _assert_empresa_access(empresa_id: int, identity) -> int:
     """
     Garante que o usuário só acesse a própria empresa.
-    (Se você tiver um super-admin multi-empresa, aqui seria o ponto de tratar.)
+    Funciona tanto para usuário quanto para colaborador.
     """
-    if empresa_id != current_user.empresa_id:
+    emp_user = getattr(identity, "empresa_id", None)
+    if emp_user is not None and int(emp_user) != int(empresa_id):
         raise HTTPException(status_code=403, detail="Empresa não permitida")
-    return empresa_id
+    return int(empresa_id)
 
 
 # =========================
@@ -160,9 +162,9 @@ class UpdateApelidoIn(BaseModel):
 def get_empresa(
     empresa_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
-    _assert_empresa_access(empresa_id, current_user)
+    _assert_empresa_access(empresa_id, identity)
 
     emp = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
     if not emp:
@@ -196,7 +198,7 @@ def get_empresa(
 def info_whatsapp(
     empresa_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     """
     Lista todas as instâncias com seus metadados e devolve
@@ -207,7 +209,7 @@ def info_whatsapp(
     - Filtramos sempre por 'instancia_id'.
     - Mantemos 'id' por compatibilidade.
     """
-    _assert_empresa_access(empresa_id, current_user)
+    _assert_empresa_access(empresa_id, identity)
 
     emp = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
     if not emp:
@@ -248,7 +250,7 @@ def update_apelido(
     instancia_id: int,
     body: UpdateApelidoIn,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     inst = (
         db.query(models.EmpresaInstancia)
@@ -259,7 +261,7 @@ def update_apelido(
         raise HTTPException(404, "Instância não encontrada")
 
     # garante que o apelido só possa ser alterado pela própria empresa
-    _assert_empresa_access(inst.empresa_id, current_user)
+    _assert_empresa_access(inst.empresa_id, identity)
 
     inst.apelido = (body.apelido or None)
     db.commit()
