@@ -28,6 +28,9 @@ PERMISSOES_CATALOGO = [
     {"id": "usuarios.gerenciar",       "label": "Gerenciar usuários/equipe"},
     {"id": "colaboradores.ver",        "label": "Ver colaboradores"},
     {"id": "colaboradores.gerenciar",  "label": "Gerenciar colaboradores"},
+    # <<< NOVA PERMISSÃO >>>
+    {"id": "colaboradores.redefinir_senha", "label": "Redefinir senha de colaboradores"},
+    # --------------------------
     {"id": "integracoes.whatsapp",     "label": "Gerenciar integrações WhatsApp"},
     {"id": "config.editar",            "label": "Editar configurações"},
     {"id": "chatinterno.ver",          "label": "Ver Chat Interno"},

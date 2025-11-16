@@ -23,78 +23,6 @@ router = APIRouter(
     tags=["Departamentos"],
 )
 
-# ==========================================================
-# Permissões
-# ==========================================================
-
-# mesma nomenclatura do PERMISSOES_CATALOGO em permissoes.py
-PERM_DEPT_GERENCIAR = "departamentos.gerenciar"
-PERM_CLIENTES_VER   = "clientes.ver"
-PERM_ATEND_VER      = "atendimento.ver"
-
-# quem pode LISTAR departamentos (combos dos módulos)
-PERM_LIST_ALLOW: Set[str] = {
-    PERM_DEPT_GERENCIAR,   # tela de Departamentos
-    PERM_CLIENTES_VER,     # tela de Clientes
-    PERM_ATEND_VER,        # tela de Atendimentos
-}
-
-
-def _is_admin(user) -> bool:
-    """
-    Mesma ideia usada em atendimento.py:
-    considera admin se user.is_admin == True OU
-    se as permissões conterem 'admin', 'root',
-    'clientes.gerenciar' ou 'atendimento.gerenciar'.
-    """
-    try:
-        if getattr(user, "is_admin", False):
-            return True
-        perms = getattr(user, "permissoes", None) or getattr(user, "permissions", None) or []
-        if isinstance(perms, dict):
-            perms = [k for k, v in perms.items() if v]
-        perms = set(str(p).lower() for p in (perms or []))
-        return any(
-            p in perms
-            for p in (
-                "admin",
-                "root",
-                "clientes.gerenciar",
-                "atendimento.gerenciar",
-            )
-        )
-    except Exception:
-        return False
-
-
-def _perms_set(user) -> Set[str]:
-    perms = getattr(user, "permissoes", None) or getattr(user, "permissions", None) or []
-    if isinstance(perms, dict):
-        perms = [k for k, v in perms.items() if v]
-    return {str(p).lower() for p in (perms or [])}
-
-
-def _require_any_perm(user, allowed: Set[str], detail: str = "Permissão insuficiente"):
-    """
-    Libera:
-      - admins (is_admin / root / clientes.gerenciar / atendimento.gerenciar)
-      - OU colaboradores que tenham pelo menos 1 perm em `allowed`.
-    """
-    if _is_admin(user):
-        return
-    perms = _perms_set(user)
-    if not perms.intersection({p.lower() for p in allowed}):
-        raise HTTPException(status_code=403, detail=detail)
-
-
-def _require_gerenciar_departamentos(user):
-    _require_any_perm(
-        user,
-        {PERM_DEPT_GERENCIAR},
-        detail="Permissão 'departamentos.gerenciar' é obrigatória para alterar departamentos.",
-    )
-
-
 # ========= Schemas =========
 
 
@@ -147,22 +75,29 @@ def resolve_empresa_id(
 ) -> int:
     """
     Resolve o empresa_id a partir:
-      1) do usuário logado (sempre),
+      1) da empresa do usuário logado (se tiver),
       2) opcionalmente header X-Empresa-Id ou ?empresa_id=.
 
-    Se vier header/query diferente da empresa do usuário, bloqueia (403)
-    para evitar que uma empresa force ID de outra.
+    Importante: se current_user.empresa_id estiver preenchido,
+    ele PRECISA bater com o ID pedido. Se for None (caso legado),
+    aceitamos o ID vindo de header/query.
     """
-    base_id = current_user.empresa_id
+    base_id = getattr(current_user, "empresa_id", None) or getattr(current_user, "empresa", None)
+
+    # tenta: query/header > empresa do usuário
     empresa_id = x_empresa_id or empresa_id_qs or base_id
     if not empresa_id:
         raise HTTPException(
             status_code=400,
             detail="empresa_id é obrigatório (usuário sem empresa ou header/query ausente)",
         )
+
     empresa_id = int(empresa_id)
-    if empresa_id != base_id:
+
+    # se o usuário já tem empresa_id definido, ELE é a verdade
+    if base_id is not None and int(base_id) != empresa_id:
         raise HTTPException(status_code=403, detail="Empresa não permitida")
+
     return empresa_id
 
 
@@ -286,22 +221,9 @@ def assert_no_cycle(moving_id: int, new_parent_id: Optional[int], rows: List[Dic
 @router.get("", response_model=List[DepartamentoOut])
 def listar(
     empresa_id: int = Depends(resolve_empresa_id),
-    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Lista todos os departamentos da empresa.
-
-    Permissão:
-      - admin/root/clientes.gerenciar/atendimento.gerenciar
-      - OU qualquer colaborador com pelo menos uma destas:
-        * departamentos.gerenciar
-        * clientes.ver
-        * atendimento.ver
-    Isso permite que a tela de Clientes/Atendimentos carregue os combos
-    de setores sem precisar dar permissão total de gerenciamento.
-    """
-    _require_any_perm(user, PERM_LIST_ALLOW)
+    """Lista todos os departamentos da empresa."""
     ensure_empresa_exists(db, empresa_id)
     itens = (
         db.query(models.Departamento)
@@ -320,14 +242,12 @@ def listar(
 @router.get("/tree", response_model=List[DepartamentoOut])
 def tree(
     empresa_id: int = Depends(resolve_empresa_id),
-    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
     Retorna lista plana com campos suficientes para montar árvore no front.
-    Mesma regra de permissão de `listar`.
+    Se o banco não tiver 'parent_id'/'path', o 'path' é calculado aqui.
     """
-    _require_any_perm(user, PERM_LIST_ALLOW)
     ensure_empresa_exists(db, empresa_id)
     itens = (
         db.query(models.Departamento)
@@ -356,10 +276,8 @@ def tree(
 def obter(
     dept_id: int,
     empresa_id: int = Depends(resolve_empresa_id),
-    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _require_any_perm(user, PERM_LIST_ALLOW)
     ensure_empresa_exists(db, empresa_id)
     dept = get_departamento_or_404(db, empresa_id, dept_id)
     return DepartamentoOut(**dept_to_dict(dept))
@@ -369,11 +287,9 @@ def obter(
 def criar(
     payload: DepartamentoIn,
     empresa_id: int = Depends(resolve_empresa_id),
-    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Cria um novo departamento (nome único por empresa)."""
-    _require_gerenciar_departamentos(user)
     ensure_empresa_exists(db, empresa_id)
     nome = payload.nome.strip()
     ensure_nome_unico(db, empresa_id, nome)
@@ -403,11 +319,9 @@ def atualizar(
     dept_id: int,
     payload: DepartamentoIn,
     empresa_id: int = Depends(resolve_empresa_id),
-    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Atualiza dados do departamento (nome/descrição e extras quando existirem)."""
-    _require_gerenciar_departamentos(user)
     ensure_empresa_exists(db, empresa_id)
     dept = get_departamento_or_404(db, empresa_id, dept_id)
 
@@ -434,14 +348,12 @@ def mover(
     dept_id: int,
     payload: MoveIn,
     empresa_id: int = Depends(resolve_empresa_id),
-    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
     Move o departamento para um novo superior (new_parent_id).
     Requer a coluna parent_id no modelo. Evita ciclos.
     """
-    _require_gerenciar_departamentos(user)
     ensure_empresa_exists(db, empresa_id)
     if not has_column(models.Departamento, "parent_id"):
         raise HTTPException(
@@ -488,11 +400,9 @@ def mover(
 def excluir(
     dept_id: int,
     empresa_id: int = Depends(resolve_empresa_id),
-    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Exclui um departamento."""
-    _require_gerenciar_departamentos(user)
     ensure_empresa_exists(db, empresa_id)
     dept = get_departamento_or_404(db, empresa_id, dept_id)
     db.delete(dept)
