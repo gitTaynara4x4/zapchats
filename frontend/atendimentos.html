@@ -68,10 +68,15 @@
 
   <div class="wpp-root h-[100vh] w-full">
 
-    <!-- LEFTBAR (barra lateral esquerda) -->
+    <!-- LEFTBAR (barra lateral esquerda) 
+         ÍCONES SÃO GERADOS AUTOMATICAMENTE A PARTIR DE /frontend/partials/sidebar-atendimentos.html -->
     <nav class="wpp-leftbar" aria-label="Menu do atendimento">
       <div class="wpp-leftbar-icons">
-        <!-- Botão 3 pontinhos – abre o flyout -->
+        <!-- preenchido via JS copiando de #appSidebarAtt nav (sidebar-atendimentos.html) -->
+      </div>
+
+      <div class="wpp-leftbar-bottom">
+        <!-- Botão para abrir o flyout completo (perfil, tema, etc) -->
         <button
           id="btnSidebarFlyout"
           type="button"
@@ -79,13 +84,9 @@
           title="Menu"
           aria-label="Abrir menu lateral"
         >
-          <i class="fa-solid fa-ellipsis-vertical"></i>
+          <i class="fa-regular fa-circle-user"></i>
           <span class="wpp-label">Menu</span>
         </button>
-      </div>
-
-      <div class="wpp-leftbar-bottom">
-        <!-- se quiser ícones embaixo (config, etc) coloca aqui depois -->
       </div>
     </nav>
 
@@ -259,5 +260,82 @@
 
   <!-- Agenda (injeta botão e drawer automaticamente) -->
   <script src="/frontend/js/atendimentos/ui/agenda.js"></script>
+
+  <!-- Sincroniza a barra fininha (wpp-leftbar) com o sidebar-atendimentos.html -->
+  <script>
+    (function setupMiniSidebarFromPartial(){
+      const host = document.getElementById('zcSidebarHost');
+      const container = document.querySelector('.wpp-leftbar .wpp-leftbar-icons');
+      if (!host || !container) return;
+
+      function buildFromSidebar(sidebarNav) {
+        container.innerHTML = '';
+
+        const links = sidebarNav.querySelectorAll('a[href]');
+        links.forEach(link => {
+          const href = link.getAttribute('href');
+          if (!href || href === '#') return; // pula links vazios
+
+          const labelEl = link.querySelector('.label');
+          const labelText = (labelEl && labelEl.textContent || link.textContent || '').trim();
+          const miniLink = document.createElement('a');
+          miniLink.href = href;
+          miniLink.className = 'wpp-leftbar-icon';
+
+          if (labelText) {
+            miniLink.title = labelText;
+            miniLink.setAttribute('aria-label', labelText);
+          }
+
+          // Clona o SVG do ícone
+          const iconSource = link.querySelector('.nav-icon svg') || link.querySelector('svg');
+          if (iconSource) {
+            const iconClone = iconSource.cloneNode(true);
+            iconClone.classList.remove('nav-icon-svg'); // opcional
+            miniLink.appendChild(iconClone);
+          }
+
+          // Label opcional (se o seu CSS esconder no mobile/hover, continua funcionando)
+          if (labelText) {
+            const labelSpan = document.createElement('span');
+            labelSpan.className = 'wpp-label';
+            labelSpan.textContent = labelText;
+            miniLink.appendChild(labelSpan);
+          }
+
+          container.appendChild(miniLink);
+        });
+
+        // Marca página atual
+        const path = (location.pathname.replace(/\/+$/, '') || '/');
+        Array.from(container.querySelectorAll('a[href]')).forEach(a => {
+          let href = a.getAttribute('href') || '';
+          href = href.replace(/\/+$/, '') || '/';
+          if (href === path) {
+            a.setAttribute('aria-current', 'page');
+          }
+        });
+      }
+
+      function tryInit() {
+        const sidebarNav = host.querySelector('#appSidebarAtt nav');
+        if (sidebarNav) {
+          buildFromSidebar(sidebarNav);
+          return true;
+        }
+        return false;
+      }
+
+      // Tenta imediatamente (caso o flyout já tenha carregado o partial)
+      if (!tryInit()) {
+        // Se ainda não, observa o host até o sidebar ser injetado
+        const obs = new MutationObserver(() => {
+          if (tryInit()) obs.disconnect();
+        });
+        obs.observe(host, { childList: true, subtree: true });
+        window.addEventListener('beforeunload', () => obs.disconnect());
+      }
+    })();
+  </script>
 </body>
 </html>

@@ -23,11 +23,12 @@ import {
 } from '../domain/hist-cache.js';
 
 /* =========================================================
-   Toggle global: desliga prefetch de mensagens
+   Toggle global: prefetch leve de mensagens (ligado por padrão)
    ========================================================= */
 if (typeof window !== 'undefined') {
   if (window.PREFETCH_HISTORIES === undefined) {
-    window.PREFETCH_HISTORIES = false; // deixe false para não buscar /mensagens sem abrir chat
+    // Vamos buscar mensagens pra alinhar preview/hora das conversas com novas > 0
+    window.PREFETCH_HISTORIES = true;
   }
 }
 
@@ -303,28 +304,43 @@ async function fetchConv30(convId, instanciaId){
   return { items, cursors };
 }
 
-// controla concorrência de fetch de 30 msgs (prefetch leve: apenas top 8)
-async function primeHistories(convs, { concurrency = 2 } = {}){
+// controla concorrência de fetch (AGORA: só conversas com novas > 0)
+const PREFETCH_LIMIT = 50; // máximo de conversas com não lidas para pré-carregar
+
+async function primeHistories(convs, { concurrency = 2 } = {}) {
   if (!window.PREFETCH_HISTORIES) return;
 
-  const queue = [...(convs || [])].slice(0, 8);
-  const runners = Array.from({ length: Math.max(1, Math.min(concurrency, queue.length)) }, async () => {
-    while (queue.length){
-      const c = queue.shift();
-      const inst = c.instancia_id ?? c.instancia ?? null;
-      try{
-        if (hasHistory(inst, c.id)) {
+  const lista = Array.isArray(convs) ? convs.slice() : [];
+
+  // 1) pega apenas conversas com mensagens não lidas (novas > 0)
+  const unread = lista
+    .filter(c => Number(c.novas || 0) > 0)
+    .slice(0, PREFETCH_LIMIT);
+
+  // se não tem nenhuma não lida, não faz nada
+  if (!unread.length) return;
+
+  // 2) fila só com as conversas não lidas
+  const queue = unread.slice();
+
+  const runners = Array.from(
+    { length: Math.max(1, Math.min(concurrency, queue.length)) },
+    async () => {
+      while (queue.length) {
+        const c = queue.shift();
+        const inst = c.instancia_id ?? c.instancia ?? null;
+
+        try {
+          const { items, cursors } = await fetchConv30(c.id, inst);
+          primeWith(inst, c.id, items, cursors);
           try { window.syncPreviewFromCache?.(c.id); } catch {}
-          continue;
+        } catch (e) {
+          try { console.debug('[primeHistories] erro conv', c.id, e); } catch {}
         }
-        const { items, cursors } = await fetchConv30(c.id, inst);
-        primeWith(inst, c.id, items, cursors);
-        try { window.syncPreviewFromCache?.(c.id); } catch {}
-      }catch(e){
-        try { console.debug('[primeHistories] erro conv', c.id, e); } catch {}
       }
     }
-  });
+  );
+
   await Promise.all(runners);
 }
 
@@ -410,10 +426,14 @@ export async function carregarClientes({ force=false } = {}){
     // Sempre tentar sincronizar preview pelo histórico local
     try { (state.clientesCache || []).forEach(c => window.syncPreviewFromCache?.(c.id)); } catch {}
 
-    // PRIME leve (desligado por padrão)
-    // if (window.PREFETCH_HISTORIES) {
-    //   try { await primeHistories(state.clientesCache, { concurrency: 2 }); } catch {}
-    // }
+    // PRIME leve: agora priorizando conversas com novas > 0
+    if (window.PREFETCH_HISTORIES) {
+      try {
+        await primeHistories(state.clientesCache, { concurrency: 2 });
+      } catch (e) {
+        try { console.debug('[carregarClientes] primeHistories erro', e); } catch {}
+      }
+    }
 
     return cs;
   } finally {
@@ -481,7 +501,7 @@ export async function loadMoreConversas(){
   // sincroniza previews pelo histórico, se já houver
   try { (state.clientesCache || []).forEach(c => window.syncPreviewFromCache?.(c.id)); } catch {}
 
-  // PRIME dos recém-carregados (desligado por padrão)
+  // PRIME dos recém-carregados (se quiser, dá pra ligar aqui no futuro também)
 }
 
 /* =========================================================

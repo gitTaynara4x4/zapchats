@@ -5,7 +5,7 @@ import { formatChatTime, parseAtendimentoDate } from '../core/time.js';
 import { getHist, primeWith, mergeOld } from '../domain/hist-cache.js';
 import { EMPRESA_ID } from '../core/env.js';
 
-export const HISTORICO_LIMIT = 50;
+export const HISTORICO_LIMIT = 20;
 const H = () => document.getElementById('historico'); // << dinâmico
 
 /* ========== Loader “puxar pra cima” (CSS inline + helpers) ========== */
@@ -379,43 +379,20 @@ function getInstQuery(){
   return Number.isFinite(n) ? `&instancia_id=${n}` : `&instance=${encodeURIComponent(String(inst))}`;
 }
 
-/* ========= abrir histórico (com cursor since_ts) ========= */
+/* ========= abrir histórico (sempre sincroniza do servidor) ========= */
 export async function abrirHistorico(id){
   const hist = H(); if (!hist) return false;
   const cid = Number(id);
+  if (!cid) return false;
+
   hist.dataset.clienteId = String(cid);
   hist.dataset.noMore = '0';
 
   try{
-    const inst = getInstanciaForFetch();
-    const existing = ensureArray(getHist(inst, cid));
-    const hasExisting = existing.length > 0;
-
-    let prevOffset = 0;
-    if (hasExisting) {
-      prevOffset = getOffset(cid);
-    } else {
-      setOffset(cid, 0);
-    }
-
-    // cursor baseado na última mensagem local
-    let sinceParam = '';
-    if (hasExisting) {
-      const last = existing[existing.length - 1];
-      let tsIso = last.timestamp || last.data || last.created_at || null;
-      if (!tsIso && last.ts) {
-        try { tsIso = new Date(last.ts).toISOString(); } catch {}
-      }
-      if (tsIso) {
-        sinceParam = `&since_ts=${encodeURIComponent(tsIso)}`;
-      }
-    }
-
     const url =
       `/api/atendimento/conversas/${cid}/mensagens` +
       `?empresa_id=${EMPRESA_ID}` +
       `&limit=${HISTORICO_LIMIT}` +
-      sinceParam +
       getInstQuery();
 
     const r = await fetch(url, { credentials:'include' });
@@ -423,20 +400,19 @@ export async function abrirHistorico(id){
     const data = await r.json();
     const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
 
+    // merge com o cache local, mas garantindo que o servidor é a verdade
     if (items.length) {
-      salvarNoCache(cid, items); // merge incremental no cache
+      salvarNoCache(cid, items);
     }
+
+    // offset passa a ser o total de mensagens que temos em cache
+    try{
+      const inst = getInstanciaForFetch();
+      const total = ensureArray(getHist(inst, cid)).length;
+      setOffset(cid, total);
+    }catch{}
 
     renderHistoricoDoCache(cid, false);
-
-    const delta = items.length;
-    if (sinceParam) {
-      // modo incremental: soma novas mensagens ao offset já conhecido
-      setOffset(cid, prevOffset + delta);
-    } else {
-      // primeira carga: offset é o número de mensagens que acabamos de buscar
-      setOffset(cid, delta);
-    }
 
     // sincroniza preview da lista a partir do cache
     try { window.syncPreviewFromCache?.(cid); } catch {}
@@ -532,6 +508,43 @@ if (!window.syncPreviewFromCache) {
       const cid = Number(clienteId);
       if (!cid) return;
 
+      // 0) pega a conversa atual da lista para saber o ts vindo do servidor
+      let convTsMs = 0;
+      let convObj = null;
+
+      try {
+        const lista = (window.state?.clientesCache || window.clientesCache || []);
+        convObj = lista.find(x =>
+          Number(x.id ?? x.conversation_id ?? x.cliente_id) === cid
+        ) || null;
+
+        if (convObj) {
+          const rawTs =
+            convObj.hora ?? 
+            convObj.last_ts ?? 
+            convObj.ultima_ts ?? 
+            convObj.updated_at ?? 
+            convObj.last_message_at ?? 
+            convObj.timestamp ?? 
+            null;
+
+          if (rawTs) {
+            let d = null;
+            try {
+              d = parseAtendimentoDate(rawTs);
+            } catch {
+              d = null;
+            }
+            if (!d || Number.isNaN(d.getTime())) {
+              d = new Date(rawTs);
+            }
+            if (d && !Number.isNaN(d.getTime())) {
+              convTsMs = d.getTime();
+            }
+          }
+        }
+      } catch {}
+
       // 1) tenta pelo espelho em window.cacheHistoricos
       let arr = Array.isArray(window.cacheHistoricos?.[cid])
         ? window.cacheHistoricos[cid]
@@ -542,7 +555,7 @@ if (!window.syncPreviewFromCache) {
         let inst = null;
         try {
           const lista = (window.state?.clientesCache || window.clientesCache || []);
-          const c = lista.find(x =>
+          const c = convObj || lista.find(x =>
             Number(x.id ?? x.conversation_id ?? x.cliente_id) === cid
           );
           inst = c?.instancia_id ?? c?.instancia ?? window.INSTANCIA_ATIVA ?? null;
@@ -552,6 +565,25 @@ if (!window.syncPreviewFromCache) {
 
       if (!arr || !arr.length) return;
       const last = arr[arr.length - 1];
+
+      // ts do histórico
+      let tsIso = last.timestamp || last.data || last.created_at || null;
+      if (!tsIso && last.ts) {
+        const d = new Date(last.ts);
+        if (!Number.isNaN(d.getTime())) tsIso = d.toISOString();
+      }
+      if (!tsIso) tsIso = new Date().toISOString();
+
+      let histTsMs = 0;
+      try {
+        let d = parseAtendimentoDate(tsIso);
+        if (!d || Number.isNaN(d.getTime())) {
+          d = new Date(tsIso);
+        }
+        if (d && !Number.isNaN(d.getTime())) {
+          histTsMs = d.getTime();
+        }
+      } catch {}
 
       const textoRaw =
         (last.conteudo ?? last.mensagem ?? last.texto ?? '').toString().trim();
@@ -563,13 +595,16 @@ if (!window.syncPreviewFromCache) {
 
       const ackVal = outbound ? Number(last.ack ?? 0) || 0 : undefined;
 
-      let tsIso = last.timestamp || last.data || last.created_at || null;
-      if (!tsIso && last.ts) {
-        const d = new Date(last.ts);
-        if (!Number.isNaN(d.getTime())) tsIso = d.toISOString();
+      // ⚠️ Se o histórico é MAIS antigo ou igual ao que a lista já tem, não sobrescreve
+      if (convTsMs && histTsMs && histTsMs <= convTsMs) {
+        // se quiser, podemos ainda subir só ACK pra lista:
+        if (window.Lista?.updatePreview && ackVal) {
+          window.Lista.updatePreview(cid, { ack: ackVal });
+        }
+        return;
       }
-      if (!tsIso) tsIso = new Date().toISOString();
 
+      // histórico é mais novo → pode mandar pro preview
       if (window.Lista?.updatePreview) {
         window.Lista.updatePreview(cid, {
           texto: textoRaw,

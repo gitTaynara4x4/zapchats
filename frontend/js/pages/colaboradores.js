@@ -1,7 +1,8 @@
 /* Colaboradores – lista + modal de perfil (visualização/edição) e fluxo de criação
    (versão com: troca de senha em edição, validação opcional da senha, salvamento de instâncias,
    correção de refs DOM recriadas nas fieldboxes + limpeza de erros ao trocar de colaborador
-   + salvamento de PERMISSÕES por colaborador em /api/permissoes/colaboradores/{id}) */
+   + salvamento de PERMISSÕES por colaborador em /api/permissoes/colaboradores/{id}
+   + respeito à permissão colaboradores.redefinir_senha para mexer em senha) */
 (function ColaboradoresPage(){
   'use strict';
 
@@ -65,8 +66,9 @@
   const debounce = (fn,ms=160)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
 
   // ====== Perms guard ======
-  const VIEW_PERM = 'colaboradores.ver';
-  const EDIT_PERM = 'colaboradores.gerenciar';
+  const VIEW_PERM       = 'colaboradores.ver';
+  const EDIT_PERM       = 'colaboradores.gerenciar';
+  const RESET_PASS_PERM = 'colaboradores.redefinir_senha';
 
   const state = {
     setores: [],
@@ -101,6 +103,7 @@
     if (typeof fn === 'function') return !!fn(p);
     return true;
   };
+  const canEditPassword = () => hasPerm(RESET_PASS_PERM);
 
   // ====== Toast ======
   const toastEl = $('#toast');
@@ -820,12 +823,13 @@
     markValidity(eTel,   show ? telOk   : true, telOk   ? '' : 'Telefone com DDD (10–11 dígitos)');
     markValidity(eCargo, show ? cargoOk : true, cargoOk ? '' : 'Cargo (mín. 2 letras)');
 
-    // senha: obrigatório no create; opcional no edit
+    // senha: obrigatório no create; opcional no edit; só se tiver permissão
     let senhaOk = true;
-    const senhaEl = document.querySelector('#e-senha');
+    const senhaEl  = document.querySelector('#e-senha');
     const isCreate = (perfilModal.dataset.mode === 'create');
+    const canPass  = canEditPassword();
 
-    if (senhaEl) {
+    if (senhaEl && canPass) {
       const s = (senhaEl.value || '').trim();
       if (isCreate) {
         senhaOk = s.length >= 6 && s.length <= 72;
@@ -848,6 +852,10 @@
           markValidity(senhaEl, true, '');
         }
       }
+    } else if (senhaEl) {
+      // sem permissão – ignora validação de senha
+      markValidity(senhaEl, true, '');
+      senhaOk = true;
     }
 
     const ok = nomeOk && emailOk && setorOk && telOk && cargoOk && senhaOk;
@@ -999,8 +1007,9 @@
     const wrapSenha = $('#wrap-senha');
     const senhaHelp = $('#senha-help');
     const isCreate  = (perfilModal.dataset.mode === 'create');
-    if (wrapSenha) wrapSenha.style.display = (isCreate || state.inlineEdit) ? 'flex' : 'none';
-    if (senhaHelp) senhaHelp.style.display = isCreate ? '' : 'none';
+    const canPass   = canEditPassword();
+    if (wrapSenha) wrapSenha.style.display = (canPass && (isCreate || state.inlineEdit)) ? 'flex' : 'none';
+    if (senhaHelp) senhaHelp.style.display = (canPass && isCreate) ? '' : 'none';
 
     bindAvatarDnDAndPaste();
 
@@ -1113,21 +1122,29 @@
 
     const wrapSenha = $('#wrap-senha');
     const senhaHelp = $('#senha-help');
-    const toggle = $('#toggle-senha');
-    if (wrapSenha) wrapSenha.style.display = 'flex';
-    if (senhaHelp) senhaHelp.style.display = 'none';
+    const toggle    = $('#toggle-senha');
+    const canPass   = canEditPassword();
+
+    if (wrapSenha) wrapSenha.style.display = canPass ? 'flex' : 'none';
+    if (senhaHelp) senhaHelp.style.display = (canPass && perfilModal.dataset.mode === 'create') ? '' : 'none';
+
     if (toggle){
       const input = $('#e-senha');
-      toggle.onclick = () => {
-        if (!input) return;
-        input.type = (input.type === 'password') ? 'text' : 'password';
-        const ico = toggle.querySelector('i');
-        if (ico){
-          ico.classList.toggle('fa-eye');
-          ico.classList.toggle('fa-eye-slash');
-        }
-        input.focus();
-      };
+      if (!canPass){
+        if (input) input.value = '';
+        toggle.onclick = null;
+      } else {
+        toggle.onclick = () => {
+          if (!input) return;
+          input.type = (input.type === 'password') ? 'text' : 'password';
+          const ico = toggle.querySelector('i');
+          if (ico){
+            ico.classList.toggle('fa-eye');
+            ico.classList.toggle('fa-eye-slash');
+          }
+          input.focus();
+        };
+      }
     }
 
     bindAvatarDnDAndPaste();
@@ -1165,6 +1182,7 @@
 
     const mode = perfilModal.dataset.mode || 'view';
     const id = Number(perfilModal.dataset.currentId || '0') || 0;
+    const canPass = canEditPassword();
 
     const { eNome, eEmail, eSetor, eTel, eCargo } = getEditInputs();
     const nome  = eNome?.value.trim();
@@ -1190,6 +1208,11 @@
       fd.append('setor_id', String(Number(setor)));
       fd.append('telefone', telE164(tel));
       fd.append('cargo', (cargo||'').trim());
+
+      if (!canPass){
+        toast('Você não tem permissão para definir senha deste colaborador.','warn');
+        return;
+      }
 
       const senhaInp  = document.querySelector('#e-senha');
       const s = (senhaInp?.value || '').trim();
@@ -1260,7 +1283,7 @@
 
     const senhaEl = document.querySelector('#e-senha');
     const newPass = (senhaEl?.value || '').trim();
-    if (newPass) {
+    if (canPass && newPass) {
       payload.senha = newPass;
       payload.atualizar_usuario = true;
     }
@@ -1348,6 +1371,8 @@
   }
   async function openNovo(){
     if (!hasPerm(EDIT_PERM)) { toast('Sem permissão para criar.','warn'); return; }
+    if (!canEditPassword()) { toast('Sem permissão para criar (requer permissão de redefinir senha).','warn'); return; }
+
     const blank = { id:null, nome:'', email:'', telefone:'', cargo:'', setor_id:null, permissoes:[], instancias_ids:[] };
     perfilModal.dataset.mode = 'create';
     perfilModal.dataset.currentId = '';
@@ -1366,19 +1391,25 @@
 
     const wrapSenha = document.querySelector('#wrap-senha');
     const toggle = document.querySelector('#toggle-senha');
-    if (wrapSenha) wrapSenha.style.display = 'flex';
+    const canPass = canEditPassword();
+    if (wrapSenha) wrapSenha.style.display = canPass ? 'flex' : 'none';
     if (toggle){
       const input = document.querySelector('#e-senha');
-      toggle.onclick = () => {
-        if (!input) return;
-        input.type = (input.type === 'password') ? 'text' : 'password';
-        const ico = toggle.querySelector('i');
-        if (ico){
-          ico.classList.toggle('fa-eye');
-          ico.classList.toggle('fa-eye-slash');
-        }
-        input.focus();
-      };
+      if (!canPass){
+        if (input) input.value = '';
+        toggle.onclick = null;
+      } else {
+        toggle.onclick = () => {
+          if (!input) return;
+          input.type = (input.type === 'password') ? 'text' : 'password';
+          const ico = toggle.querySelector('i');
+          if (ico){
+            ico.classList.toggle('fa-eye');
+            ico.classList.toggle('fa-eye-slash');
+          }
+          input.focus();
+        };
+      }
     }
 
     perfilModal.setAttribute('aria-hidden','false');
