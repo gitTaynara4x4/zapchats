@@ -103,7 +103,8 @@
     if (typeof fn === 'function') return !!fn(p);
     return true;
   };
-  const canEditPassword = () => hasPerm(RESET_PASS_PERM);
+  // 👇 AQUI É A MUDANÇA: permite redefinir senha SE tiver a perm nova OU a de gerenciar
+  const canEditPassword = () => hasPerm(RESET_PASS_PERM) || hasPerm(EDIT_PERM);
 
   // ====== Toast ======
   const toastEl = $('#toast');

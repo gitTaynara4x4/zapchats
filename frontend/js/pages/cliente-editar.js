@@ -63,12 +63,11 @@
   const novoDeptoList  = $('#novoDeptoList');
   const novoColab      = $('#novoColab');
   const novoSobre      = $('#novoSobre');
-  const novoOkOriginal = $('#novoOk');   // botão "Criar" original (novo cliente)
+  const novoOkOriginal = $('#novoOk');
   const novoCancel     = $('#novoCancel');
   const novoClose      = $('#novoClose');
   const toastEl        = $('#toast');
 
-  // Campos adicionais (HTML já preparado no modal)
   const cliId           = $('#cliId');
   const cliDataCadastro = $('#cliDataCadastro');
 
@@ -100,10 +99,10 @@
   let clienteModalId   = null;
 
   const STATE = {
-    setores: [],      // {id, nome}
-    responsaveis: [], // {id, nome}
+    setores: [],
+    responsaveis: [],
     loaded: { setores:false, responsaveis:false },
-    instancias: null  // [{id, slug, name, number, connected}] ou null
+    instancias: null
   };
 
   // ==============================
@@ -335,7 +334,7 @@
 
     if (extraFields.data_nascimento){
       const v = (extraFields.data_nascimento.value || '').trim();
-      payload.data_nascimento = v || null; // backend converte yyyy-mm-dd
+      payload.data_nascimento = v || null;
     }
     if (extraFields.is_business){
       payload.is_business = !!extraFields.is_business.checked;
@@ -397,13 +396,11 @@
     if (!novoModal) return;
     const mode = novoModal.dataset.mode;
 
-    // Se não está em "view"/"edit", deixa o fluxo padrão do clientes.js cuidar
     if (!mode || mode === 'new'){
       novoModal.style.display = 'none';
       return;
     }
 
-    // Limpamos apenas quando estávamos em view/edit
     novoModal.style.display = 'none';
     clienteModalMode = 'new';
     delete novoModal.dataset.mode;
@@ -506,16 +503,12 @@
   async function openClienteCustomFields(id){
     if (!novoModal){ toast('Modal não encontrado.', 'err'); return; }
 
-    // Abre em modo edição normal
     await openClienteEdit(id);
 
-    // Troca o título do modal
     setModalTitle('Campos personalizados');
 
-    // Garante todas as seções fechadas; usuário abre clicando no título
     resetSectionsCollapsed();
 
-    // Opcional: foca no título da 2ª seção (Documentos e contato), se existir
     const headers = novoModal.querySelectorAll('.cli-section-header');
     if (headers[1]) safeFocus(headers[1]);
     else if (headers[0]) safeFocus(headers[0]);
@@ -730,7 +723,7 @@
       const ok = back.querySelector('#instOk');
       ok.onclick = ()=>{
         const r = back.querySelector('input[name="instRadio"]:checked');
-        back.style.display = 'none';
+        back.style.display='none';
         if (!r){ resolve(null); return; }
         const id = r.value ? Number(r.value) : null;
         const slug = r.dataset.slug || null;
@@ -748,7 +741,9 @@
       toast('Nenhuma instância selecionada.','warn');
       return;
     }
-    const u = new URL('/frontend/atendimentos.html', location.origin);
+
+    // 👉 rota nova do painel de atendimento
+    const u = new URL('/atendimentos', location.origin);
     u.searchParams.set('cliente_id', String(clienteId));
     u.searchParams.set('instancia_id', String(instancia_id));
     location.href = u.toString();
@@ -771,7 +766,7 @@
     openCustomFields: openClienteCustomFields
   });
 
-  window.ClienteEditor = api;  // nome usado em clientes.js (ensureClienteEditorLoaded)
-  window.ClienteEditar = api;  // alias, caso algum código use esse nome
+  window.ClienteEditor = api;
+  window.ClienteEditar = api;
 
 })();

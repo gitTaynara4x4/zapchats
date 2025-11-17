@@ -1,5 +1,8 @@
+// /frontend/js/pages/atendimentos-autoopen.js
 (function AutoOpenConversa(){
   'use strict';
+
+  console.debug('[autoopen] script carregado');
 
   // ===== Helpers base / auth =====
   const LS = localStorage;
@@ -18,7 +21,7 @@
 
   function toast(msg, type='ok'){
     const el = document.getElementById('toast');
-    if (!el){ console.log('[autoopen]', msg); return; }
+    if (!el){ console.log('[autoopen-toast]', msg); return; }
     el.textContent = msg;
     el.style.display = 'block';
     el.style.background = type==='err' ? '#7f1d1d'
@@ -27,6 +30,7 @@
     clearTimeout(toast._t);
     toast._t = setTimeout(()=> el.style.display='none', 2200);
   }
+
   function digits(s){ return String(s||'').replace(/\D+/g,''); }
   function formatTelBR(v){
     const d = digits(v);
@@ -50,12 +54,13 @@
     const v = String(val).trim();
     window.INSTANCIA_ATIVA = v;
     try{ LS.setItem('INSTANCIA_ATIVA', v); }catch{}
-    try{ document.cookie = `INSTANCIA_ATIVA=${encodeURIComponent(v)}; path=/; max-age=${60*60*24*30}`; }catch{}
+    try{
+      document.cookie = `INSTANCIA_ATIVA=${encodeURIComponent(v)}; path=/; max-age=${60*60*24*30}`;
+    }catch{}
   }
 
   // ===== API =====
   async function apiGet(path){
-    // aceita path já com query; garante empresa_id
     let url;
     try{
       url = new URL(path, location.origin);
@@ -73,7 +78,7 @@
     return data;
   }
 
-  // ===== Fallback UI (se o layout não “pegar” os dados) =====
+  // ===== Fallback UI (se o layout padrão não “pegar” a conversa) =====
   function ensureFallbackContainers(){
     let wrap = document.getElementById('autoopen-wrap');
     if (wrap) return wrap;
@@ -114,7 +119,6 @@
   }
 
   function setHeader(cli, instanceTxt){
-    // tenta preencher seu header se existir
     const nameEl = $('.chat-header .name') || $('#chat-title') || $('#top-name');
     const phoneEl= $('.chat-header .phone')|| $('#top-phone');
     const avImg  = $('.chat-header .avatar img') || $('.chat-header img');
@@ -126,7 +130,6 @@
     if (phoneEl) phoneEl.textContent = tel;
     if (avImg && cli?.avatar_url) avImg.src = cli.avatar_url;
 
-    // fallback bonito
     const wrap = ensureFallbackContainers();
     wrap.querySelector('.nm').textContent = nome;
     wrap.querySelector('.sub').textContent = tel || '—';
@@ -175,19 +178,62 @@
     thread.scrollTop = thread.scrollHeight + 999;
   }
 
-  // ===== Auto abrir a partir dos parâmetros =====
-  async function autoOpen(){
+  // ===== abrir usando o historico.js (modo "oficial" do chat) =====
+  async function openWithHistorico(clienteId){
+    console.debug('[autoopen] abrindo com historico.js', clienteId);
+
+    let hist = document.getElementById('historico');
+    if (!hist){
+      const main = $('#chatMain') || $('.main') || document.getElementById('chat-main') || document.body;
+      hist = document.createElement('div');
+      hist.id = 'historico';
+      hist.style.minHeight = '240px';
+      hist.style.overflowY = 'auto';
+      main.appendChild(hist);
+    }
+
+    document.body.dataset.chatOpen = '1';
+    document.getElementById('chat-empty')?.remove();
+    document.getElementById('empty-hero')?.remove();
+    const welcome = document.getElementById('welcome-screen');
+    if (welcome) welcome.style.display = 'none';
+
+    const header = document.getElementById('chat-header');
+    const footer = document.getElementById('chat-footer');
+    if (header) header.style.display = '';
+    if (footer) footer.style.display = '';
+    hist.style.display = '';
+
+    try{
+      await window.abrirHistorico(clienteId, { forceReload:true });
+    }catch(e){
+      console.error('[autoopen] erro ao chamar abrirHistorico', e);
+    }
+
+    const input = $('#mensagem') || $('#composerInput') || $('#chatInput') || $('textarea, input[type="text"]');
+    input?.focus?.();
+  }
+
+  // ===== fluxo principal: ler querystring e tentar abrir =====
+  async function prepareAutoOpen(){
     const qs = new URLSearchParams(location.search);
     const clienteId = Number(qs.get('cliente_id') || qs.get('cliente') || '');
-    if (!clienteId) return;
+    if (!clienteId) {
+      console.debug('[autoopen] sem cliente_id na URL, nada pra fazer');
+      return;
+    }
 
-    const instIdParam  = qs.get('instancia_id') || qs.get('instance_id');
-    const instSlugParam= qs.get('instancia') || qs.get('instance');
-    const inst = (instIdParam && String(instIdParam).trim()) || (instSlugParam && String(instSlugParam).trim()) || LS.getItem('INSTANCIA_ATIVA') || '';
+    console.debug('[autoopen] cliente_id detectado:', clienteId);
+
+    const instIdParam   = qs.get('instancia_id') || qs.get('instance_id');
+    const instSlugParam = qs.get('instancia')   || qs.get('instance');
+    const inst = (instIdParam && String(instIdParam).trim())
+              || (instSlugParam && String(instSlugParam).trim())
+              || LS.getItem('INSTANCIA_ATIVA')
+              || '';
 
     if (inst) setActiveInstance(inst);
 
-    // expõe no state p/ historico.js usar
     window.state = window.state || {};
     window.state.clienteSel = {
       id: clienteId,
@@ -195,63 +241,63 @@
       instancia: (!instIdParam && instSlugParam) ? String(instSlugParam) : null
     };
 
+    // carrega dados básicos do cliente só pra preencher header
     try{
       const cli = await apiGet(`/api/clientes/${clienteId}`);
       if (cli) setHeader(cli, String(inst));
+    }catch(e){
+      console.warn('[autoopen] não conseguiu carregar cliente', e);
+    }
 
-      // 2) Se existir historico.js, usa ele (melhor experiência)
-      if (typeof window.abrirHistorico === 'function'){
-        let hist = document.getElementById('historico');
-        if (!hist){
-          const main = $('#chatMain') || $('.main') || document.body;
-          hist = document.createElement('div');
-          hist.id = 'historico';
-          hist.style.minHeight = '240px';
-          main.appendChild(hist);
-        }
-        document.body.dataset.chatOpen = '1';
-        $('#chat-empty')?.remove();
-        $('#empty-hero')?.remove();
-        $('#composer')?.removeAttribute?.('disabled');
+    // Agora tenta abrir de fato a conversa
+    const maxAttempts = 40;   // ~10s (40 * 250ms)
+    let attempts = 0;
 
-        await window.abrirHistorico(clienteId, { forceReload: true });
+    async function step(){
+      attempts++;
+      const hasHistorico = typeof window.abrirHistorico === 'function';
+      console.debug('[autoopen] step', { attempts, hasHistorico });
 
-        const input = $('#composerInput') || $('#chatInput') || $('textarea, input[type="text"]');
-        input?.focus?.();
+      if (hasHistorico){
+        await openWithHistorico(clienteId);
         return;
       }
 
-      // 3) Fallback: carrega mensagens direto e renderiza (limit leve!)
-      const url = new URL(`/api/atendimento/conversas/${clienteId}/mensagens`, location.origin);
-      if (EMPRESA_ID) url.searchParams.set('empresa_id', String(EMPRESA_ID));
-      if (instIdParam && /^\d+$/.test(String(instIdParam))) {
-        url.searchParams.set('instancia_id', String(instIdParam));
-      } else if (instSlugParam) {
-        url.searchParams.set('instance', String(instSlugParam));
-      } else if (inst) {
-        if (/^\d+$/.test(String(inst))) url.searchParams.set('instancia_id', String(inst));
-        else url.searchParams.set('instance', String(inst));
+      if (attempts >= maxAttempts){
+        console.warn('[autoopen] historico.js não apareceu, usando fallback simples');
+        try{
+          const url = new URL(`/api/atendimento/conversas/${clienteId}/mensagens`, location.origin);
+          if (EMPRESA_ID) url.searchParams.set('empresa_id', String(EMPRESA_ID));
+          if (instIdParam && /^\d+$/.test(String(instIdParam))) {
+            url.searchParams.set('instancia_id', String(instIdParam));
+          } else if (instSlugParam) {
+            url.searchParams.set('instance', String(instSlugParam));
+          } else if (inst) {
+            if (/^\d+$/.test(String(inst))) url.searchParams.set('instancia_id', String(inst));
+            else url.searchParams.set('instance', String(inst));
+          }
+          url.searchParams.set('limit','30');
+
+          const data = await apiGet(url.toString());
+          const mensagens = (data && (data.items || data.mensagens)) || [];
+          renderMessagesFallback(mensagens);
+        }catch(e){
+          console.error('[autoopen] fallback falhou', e);
+          toast(e?.data?.detail || 'Não foi possível carregar a conversa.','err');
+        }
+        return;
       }
-      // 👇 antes era 50; deixa leve e consistente com HISTORICO_LIMIT
-      url.searchParams.set('limit','30');
 
-      const data = await apiGet(url.toString());
-      const mensagens = (data && (data.items || data.mensagens)) || [];
-
-      renderMessagesFallback(mensagens);
-    }catch(e){
-      console.error('[autoopen] falhou:', e);
-      toast(e?.data?.detail || 'Não foi possível carregar a conversa.','err');
+      setTimeout(step, 250);
     }
+
+    step();
   }
 
-  if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', autoOpen, { once:true });
-  }else{
-    autoOpen();
-  }
+  // roda assim que o script carregar
+  prepareAutoOpen();
 
-  // CSS: quando o chat estiver “aberto”, some o hero vazio
+  // CSS: quando o chat estiver “aberto”, some o hero vazio + welcome
   (function injectCSS(){
     const id='auto-open-css';
     if (document.getElementById(id)) return;
@@ -259,8 +305,12 @@
     s.id=id;
     s.textContent = `
       body[data-chat-open="1"] #chat-empty,
-      body[data-chat-open="1"] #empty-hero{ display:none !important; }
+      body[data-chat-open="1"] #empty-hero,
+      body[data-chat-open="1"] #welcome-screen {
+        display:none !important;
+      }
     `;
     (document.head||document.documentElement).appendChild(s);
   })();
+
 })();

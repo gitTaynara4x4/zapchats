@@ -381,9 +381,25 @@ function getInstQuery(){
 
 /* ========= abrir histórico (sempre sincroniza do servidor) ========= */
 export async function abrirHistorico(id){
-  const hist = H(); if (!hist) return false;
+  const hist = H(); 
+  if (!hist) return false;
   const cid = Number(id);
   if (!cid) return false;
+
+  // --- garantir que a UI do chat apareça ---
+  try {
+    const header  = document.getElementById('chat-header');
+    const footer  = document.getElementById('chat-footer');
+    const welcome = document.getElementById('welcome-screen');
+
+    if (header)  header.style.display  = '';
+    if (footer)  footer.style.display  = '';
+    hist.style.display = '';
+
+    if (welcome) welcome.style.display = 'none';
+
+    document.body.dataset.chatOpen = '1';
+  } catch {}
 
   hist.dataset.clienteId = String(cid);
   hist.dataset.noMore = '0';
@@ -400,12 +416,10 @@ export async function abrirHistorico(id){
     const data = await r.json();
     const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
 
-    // merge com o cache local, mas garantindo que o servidor é a verdade
     if (items.length) {
       salvarNoCache(cid, items);
     }
 
-    // offset passa a ser o total de mensagens que temos em cache
     try{
       const inst = getInstanciaForFetch();
       const total = ensureArray(getHist(inst, cid)).length;
@@ -414,7 +428,6 @@ export async function abrirHistorico(id){
 
     renderHistoricoDoCache(cid, false);
 
-    // sincroniza preview da lista a partir do cache
     try { window.syncPreviewFromCache?.(cid); } catch {}
 
     return true;
@@ -464,7 +477,6 @@ export async function carregarMaisHistorico(id){
 
     setOffset(id, off + n);
 
-    // também atualiza preview da lista quando carrega mais antigo (não costuma mudar, mas é seguro)
     try { window.syncPreviewFromCache?.(Number(id)); } catch {}
 
     return true;
@@ -496,7 +508,6 @@ export async function carregarMaisHistorico(id){
     tryBind();
   }
 
-  // observa caso o #historico seja inserido depois
   const mo = new MutationObserver(tryBind);
   mo.observe(document.documentElement, { childList: true, subtree: true });
 })();
@@ -508,7 +519,6 @@ if (!window.syncPreviewFromCache) {
       const cid = Number(clienteId);
       if (!cid) return;
 
-      // 0) pega a conversa atual da lista para saber o ts vindo do servidor
       let convTsMs = 0;
       let convObj = null;
 
@@ -545,12 +555,10 @@ if (!window.syncPreviewFromCache) {
         }
       } catch {}
 
-      // 1) tenta pelo espelho em window.cacheHistoricos
       let arr = Array.isArray(window.cacheHistoricos?.[cid])
         ? window.cacheHistoricos[cid]
         : null;
 
-      // 2) se não tiver, tenta buscar do hist-cache oficial por instância
       if (!arr || !arr.length) {
         let inst = null;
         try {
@@ -566,7 +574,6 @@ if (!window.syncPreviewFromCache) {
       if (!arr || !arr.length) return;
       const last = arr[arr.length - 1];
 
-      // ts do histórico
       let tsIso = last.timestamp || last.data || last.created_at || null;
       if (!tsIso && last.ts) {
         const d = new Date(last.ts);
@@ -595,16 +602,13 @@ if (!window.syncPreviewFromCache) {
 
       const ackVal = outbound ? Number(last.ack ?? 0) || 0 : undefined;
 
-      // ⚠️ Se o histórico é MAIS antigo ou igual ao que a lista já tem, não sobrescreve
       if (convTsMs && histTsMs && histTsMs <= convTsMs) {
-        // se quiser, podemos ainda subir só ACK pra lista:
         if (window.Lista?.updatePreview && ackVal) {
           window.Lista.updatePreview(cid, { ack: ackVal });
         }
         return;
       }
 
-      // histórico é mais novo → pode mandar pro preview
       if (window.Lista?.updatePreview) {
         window.Lista.updatePreview(cid, {
           texto: textoRaw,
@@ -625,7 +629,7 @@ window.abrirHistorico = abrirHistorico;
 
 // compat
 try {
-  window.getHist  = getHist;
+  window.getHist   = getHist;
   window.primeWith = primeWith;
-  window.mergeOld = mergeOld;
+  window.mergeOld  = mergeOld;
 } catch {}

@@ -73,6 +73,48 @@
     });
   }
 
+  // ---------- Hover na mini-leftbar para abrir/fechar o flyout ----------
+  function bindHoverMini(host){
+    // raiz da barrinha vertical com os ícones (lado esquerdo do WhatsApp)
+    const mini = document.querySelector('.wpp-leftbar');
+    if (!mini || mini.dataset.zcFlyoutHoverBound) return;
+    mini.dataset.zcFlyoutHoverBound = '1';
+
+    // pequenos delays pra não ficar abrindo/fechando espasmando
+    let openTimer = null;
+    let closeTimer = null;
+
+    function scheduleOpen(){
+      clearTimeout(closeTimer);
+      openTimer = setTimeout(() => {
+        openFlyout(host, mini);
+      }, 60);
+    }
+
+    function scheduleClose(){
+      clearTimeout(openTimer);
+      closeTimer = setTimeout(() => {
+        // só fecha se o mouse não estiver nem na mini bar, nem no painel aberto
+        const overMini = mini.matches(':hover');
+        const overHost = host.matches(':hover');
+        if (!overMini && !overHost) {
+          closeFlyout(host);
+        }
+      }, 90);
+    }
+
+    mini.addEventListener('mouseenter', scheduleOpen);
+    mini.addEventListener('mouseleave', scheduleClose);
+
+    // se o mouse sai do painel para o conteúdo, fecha também
+    host.addEventListener('mouseleave', scheduleClose);
+
+    // se voltar pro painel, cancela fechamento
+    host.addEventListener('mouseenter', () => {
+      clearTimeout(closeTimer);
+    });
+  }
+
   // ---------- Mini barra (wpp-leftbar) baseada no partial ----------
   function buildMiniSidebarFromAside(aside) {
     const container = document.querySelector('.wpp-leftbar .wpp-leftbar-icons');
@@ -102,7 +144,7 @@
       }
 
       // Ícone: clona o mesmo SVG do sidebar
-      const iconSource = link.querySelector('.nav-icon svg') || link.querySelector('svg');
+      const iconSource = link.querySelector('.att-nav-icon svg') || link.querySelector('svg');
       if (iconSource) {
         const iconClone = iconSource.cloneNode(true);
         mini.appendChild(iconClone);
@@ -204,6 +246,7 @@
 
     const panelShell = host.querySelector('[role="dialog"]') || host;
     bindTriggers(host);
+    bindHoverMini(host);
     loadSidebarPartial(host, panelShell);
     log('inicializado');
   }

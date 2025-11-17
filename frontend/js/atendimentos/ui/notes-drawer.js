@@ -92,15 +92,123 @@
     }
   })();
 
+  // ---------- helpers de contexto (empresa/atendimento/cliente) ----------
+  function _safeLS(){
+    try{
+      return window.localStorage;
+    }catch{
+      return null;
+    }
+  }
+
+  function _getEmpresaId(){
+    const ls = _safeLS();
+    if (!ls) return null;
+    try{
+      return ls.getItem('empresa_id') || null;
+    }catch{
+      return null;
+    }
+  }
+
+  /**
+   * Lê o contexto atual a partir do #chat-header.
+   * Espera (se possível) data-cliente-id e/ou data-atendimento-id.
+   */
+  function _getNotesContext(){
+    const hdr = document.getElementById('chat-header');
+    if (!hdr) return null;
+
+    const ds = hdr.dataset || {};
+    const clienteId     = hdr.getAttribute('data-cliente-id')     || ds.clienteId     || null;
+    const atendimentoId = hdr.getAttribute('data-atendimento-id') || ds.atendimentoId || null;
+    const empresaId     = _getEmpresaId();
+
+    if (!clienteId && !atendimentoId) {
+      // Sem contexto específico → ainda assim devolve empresa se tiver
+      return empresaId ? { empresaId } : null;
+    }
+
+    return { empresaId, clienteId, atendimentoId };
+  }
+
+  function _ctxToStorageKey(ctx){
+    if (!ctx) return null;
+    const emp = ctx.empresaId     || 'emp';
+    const at  = ctx.atendimentoId || 'at';
+    const cl  = ctx.clienteId     || 'cli';
+    return `zcNotes:${emp}:${at}:${cl}`;
+  }
+
+  function _loadNoteIntoTextarea(){
+    const ta = document.getElementById('zcNotesText');
+    if (!ta) return;
+
+    const ls  = _safeLS();
+    const ctx = _getNotesContext();
+    const key = _ctxToStorageKey(ctx);
+
+    if (!ls || !key) {
+      // Sem contexto ou sem LS → não reaproveita nota anterior
+      ta.value = '';
+      return;
+    }
+
+    try{
+      ta.value = ls.getItem(key) || '';
+    }catch{
+      ta.value = '';
+    }
+  }
+
+  function _saveNoteFromTextarea(){
+    const ta = document.getElementById('zcNotesText');
+    if (!ta) return;
+
+    const txt = ta.value || '';
+    const ls  = _safeLS();
+    const ctx = _getNotesContext();
+    const key = _ctxToStorageKey(ctx);
+
+    console.log('[NOTES] salvar:', { txt, ctx, key });
+
+    if (ls && key) {
+      try{
+        if (txt.trim()) {
+          ls.setItem(key, txt);
+        } else {
+          // se ficou vazio, remove pra não acumular lixo
+          ls.removeItem(key);
+        }
+      }catch{
+        // ignora erro de quota/etc
+      }
+    }
+
+    // 🔗 Aqui é o ponto para plugar seu endpoint, ex:
+    // if (ctx && ctx.clienteId) {
+    //   fetch(`/api/atendimento/clientes/${ctx.clienteId}/notas`, {
+    //     method: 'PUT',
+    //     headers: { 'Content-Type':'application/json' },
+    //     body: JSON.stringify({ nota: txt })
+    //   }).catch(err => console.error('[NOTES] erro ao salvar no servidor', err));
+    // }
+  }
+
   // ---------- tema + SVG ----------
   function _getTheme(){
     try{
       const t = document.documentElement.getAttribute('data-theme');
       if (t) return t;
     }catch{}
-    try{ return (matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; }catch{}
+    try{
+      return (matchMedia && matchMedia('(prefers-color-scheme: dark)').matches)
+        ? 'dark'
+        : 'light';
+    }catch{}
     return 'dark';
   }
+
   // ÍCONE solicitado: dark -> #ffffff, light -> #080808 (24×24)
   function _iconSvg(theme){
     const fill = theme === 'light' ? '#080808' : '#ffffff';
@@ -146,11 +254,15 @@
     document.body.append(backdrop, drawer);
 
     function open(){
+      // sempre que abrir, carrega a nota do contexto atual (cliente/atendimento)
+      _loadNoteIntoTextarea();
+
       backdrop.classList.add('is-open');
       drawer.classList.add('is-open');
       try { document.querySelector('main')?.setAttribute('inert',''); } catch {}
       setTimeout(()=> document.getElementById('zcNotesText')?.focus(), 0);
     }
+
     function close(){
       backdrop.classList.remove('is-open');
       drawer.classList.remove('is-open');
@@ -163,9 +275,7 @@
     document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') close(); });
 
     document.getElementById('zcNotesSave')?.addEventListener('click', async () => {
-      const txt = document.getElementById('zcNotesText')?.value?.trim() || '';
-      console.log('[NOTES] salvar:', txt);
-      // TODO: plugue seu endpoint aqui.
+      _saveNoteFromTextarea();
       close();
     });
 
@@ -185,7 +295,11 @@
     btn.setAttribute('data-notes-open', '1');
     btn.innerHTML = `<span class="zcNotes-icon" aria-hidden="true">${_iconSvg(_getTheme())}</span>`;
 
-    btn.addEventListener('click', (e)=>{ e.preventDefault(); ensureDrawer(); window.zcNotes.open(); });
+    btn.addEventListener('click', (e)=>{
+      e.preventDefault();
+      ensureDrawer();
+      window.zcNotes.open();
+    });
 
     const updateBtnIcon = ()=> {
       const holder = btn.querySelector('.zcNotes-icon');
@@ -204,7 +318,8 @@
     const el = ev.target.closest('[data-notes-open]');
     if (!el) return;
     ev.preventDefault();
-    ensureDrawer(); window.zcNotes.open();
+    ensureDrawer();
+    window.zcNotes.open();
   });
 
   // Observa o header aparecer (ele vem com display:none até abrir um chat)
