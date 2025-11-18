@@ -737,15 +737,6 @@ html[data-theme="light"] .logo-dark{  display:none; }
 
 /* ============================== IA – HEADER ============================== */
 
-#btn-ia{
-  display:inline-grid; place-items:center;
-  width:24px; height:24px; margin-left:6px;
-  background:transparent; border:0; line-height:0; cursor:pointer;
-}
-#btn-ia .ia-logo{
-  width:24px; height:24px; object-fit:contain; object-position:center;
-  filter: drop-shadow(0 0 5px rgba(168,85,247,.50));
-}
 
 /* ================================ RESPONSIVO ============================= */
 

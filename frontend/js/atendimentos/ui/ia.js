@@ -66,57 +66,209 @@
       const style = document.createElement('style');
       style.id = 'ia-modal-css';
       style.textContent = `
-        /* Botão 24×24 fixo + glow roxo suave */
-        #btn-ia{
-          display:inline-grid;place-items:center;
-          width:24px;height:24px;margin-left:6px;
-          background:transparent;border:0;line-height:0;cursor:pointer
+        /* Modal (backdrop + caixa) */
+        #ia-modal-backdrop{
+          position:fixed;
+          inset:0;
+          background:rgba(0,0,0,.5);
+          z-index:9998;
         }
-        #btn-ia .ia-logo{
-          width:24px;height:24px; /* fixa 24×24 */
-          object-fit:contain;object-position:center;
-          filter: drop-shadow(0 0 5px rgba(168,85,247,.50));
+        #ia-modal-backdrop.hidden{ display:none; }
+
+        #ia-modal{
+          position:fixed;
+          top:50%;
+          left:50%;
+          transform:translate(-50%,-50%);
+          z-index:9999;
+          border-radius:12px;
+          border:1px solid #26343a;
+          background:#1f2c33;
+          color:#e9edef;
+          max-width:780px;
+          width:94vw;
+          box-shadow:0 18px 45px rgba(0,0,0,.6);
+          font-size:14px;
+        }
+        #ia-modal.hidden{ display:none; }
+
+        .ia-modal-header{
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          padding:12px 16px;
+          border-bottom:1px solid #26343a;
+        }
+        .ia-modal-header-main{
+          display:flex;
+          align-items:center;
+          gap:8px;
+        }
+        .ia-modal-title{
+          font-weight:600;
+          font-size:15px;
+        }
+        .ia-modal-close-btn{
+          border:0;
+          background:transparent;
+          color:#9ca3af;
+          cursor:pointer;
+          padding:4px;
+          border-radius:999px;
+        }
+        .ia-modal-close-btn:hover{
+          color:#ffffff;
+          background:rgba(255,255,255,.06);
         }
 
-        /* Modal */
-        #ia-modal-backdrop.hidden, #ia-modal.hidden { display:none; }
-        #ia-modal{
-          border-radius:12px; border:1px solid #26343a;
-          background:#1f2c33; color:#e9edef;
-          max-width:780px; width:94vw;
+        #ia-modal-body{
+          padding:16px 20px;
+          max-height:70vh;
+          overflow:auto;
         }
-        #ia-modal-body{ max-height:70vh; overflow:auto; }
-        .ia-section-title{ display:flex; align-items:center; gap:8px; font-weight:600; }
+
+        .ia-section{
+          margin-bottom:22px;
+        }
+        .ia-section-header{
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          margin-bottom:8px;
+        }
+        .ia-section-title{
+          display:flex;
+          align-items:center;
+          gap:8px;
+          font-weight:600;
+        }
         .ia-chip{
-          font-size:11px; padding:2px 8px; border-radius:9999px;
-          background:#233238; border:1px solid #2b424a; color:#aebac1;
+          font-size:11px;
+          padding:2px 8px;
+          border-radius:9999px;
+          background:#233238;
+          border:1px solid #2b424a;
+          color:#aebac1;
         }
-        .ia-sec-actions{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+        .ia-sec-actions{
+          display:flex;
+          align-items:center;
+          gap:8px;
+          flex-wrap:wrap;
+        }
 
         .btn-soft{
-          display:inline-flex; align-items:center; gap:8px; padding:8px 10px;
-          border-radius:8px; border:1px solid #2a3942; background:#0b141a; color:#e9edef;
+          display:inline-flex;
+          align-items:center;
+          gap:8px;
+          padding:8px 10px;
+          border-radius:8px;
+          border:1px solid #2a3942;
+          background:#0b141a;
+          color:#e9edef;
+          font-size:13px;
+          cursor:pointer;
         }
-        .btn-soft:hover{ background:#0f171c; border-color:#6b21a8; }
+        .btn-soft i{ font-size:13px; }
+        .btn-soft:hover{
+          background:#0f171c;
+          border-color:#6b21a8;
+        }
 
         .ia-spinner{
-          width:16px; height:16px; border:2px solid #9fb2bb66;
-          border-top-color:#a855f7; border-radius:9999px; animation:ia-spin .9s linear infinite;
+          width:16px;
+          height:16px;
+          border:2px solid #9fb2bb66;
+          border-top-color:#a855f7;
+          border-radius:9999px;
+          animation:ia-spin .9s linear infinite;
         }
         @keyframes ia-spin{ to{ transform:rotate(360deg) } }
 
-        /* Badges 24×24 */
         .ia-badge{
-          width:24px;height:24px;display:block;object-fit:contain;
+          width:24px;
+          height:24px;
+          display:block;
+          object-fit:contain;
           filter: drop-shadow(0 0 5px rgba(168,85,247,.50));
         }
 
-        /* ---------- Mobile tweaks ---------- */
+        #ia-draft{
+          width:100%;
+          min-height:90px;
+          padding:10px 12px;
+          border-radius:8px;
+          border:1px solid #2a3942;
+          background:#0b141a;
+          color:#e9edef;
+          resize:vertical;
+          outline:none;
+        }
+        #ia-draft::placeholder{
+          color:#9ca3af;
+        }
+        #ia-draft:focus{
+          border-color:#6b21a8;
+        }
+
+        #ia-resposta-box{
+          margin-top:8px;
+        }
+        #ia-resposta-texto{
+          padding:10px 12px;
+          border-radius:8px;
+          background:#0b141a;
+          border:1px solid #2a3942;
+          white-space:pre-wrap;
+        }
+
+        #ia-resumo-content{
+          margin-top:4px;
+        }
+        #ia-resumo-texto{
+          margin-bottom:6px;
+        }
+        #ia-resumo-bullets{
+          margin:0 0 4px 18px;
+          padding:0;
+          list-style:disc;
+        }
+        .ia-resumo-meta{
+          margin-top:6px;
+          font-size:12px;
+          color:#aebac1;
+        }
+
+        .ia-resposta-container{
+          display:flex;
+          flex-direction:column;
+          gap:8px;
+        }
+        .ia-resposta-label{
+          font-size:11px;
+          color:#aebac1;
+          margin-bottom:4px;
+        }
+        .ia-separator{
+          border:0;
+          border-top:1px solid #26343a;
+          margin:6px 0 16px;
+        }
+
         @media (max-width: 640px){
-          #ia-modal{ width:100vw; max-width:100vw; left:50%; transform:translateX(-50%) translateY(-50%); }
-          #ia-modal-body{ max-height:65vh; padding-left:12px; padding-right:12px; }
-          .btn-soft{ padding:8px 10px; }
-          #ia-draft{ min-height:112px; }
+          #ia-modal{
+            width:100vw;
+            max-width:100vw;
+            left:50%;
+            transform:translate(-50%,-50%);
+          }
+          #ia-modal-body{
+            max-height:65vh;
+            padding:12px 14px;
+          }
+          #ia-draft{
+            min-height:112px;
+          }
         }
       `;
       document.head.appendChild(style);
@@ -125,61 +277,71 @@
     const wrap = document.createElement('div');
     wrap.id = 'ia-modal-mount';
     wrap.innerHTML = `
-      <div id="ia-modal-backdrop" class="fixed inset-0 bg-black/50 z-[9998] hidden"></div>
-      <div id="ia-modal" class="fixed z-[9999] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#1f2c33] text-[#e9edef] border border-[#26343a] rounded-xl shadow-xl hidden" role="dialog" aria-modal="true" aria-label="Ferramentas de IA">
-        <div class="flex items-center justify-between px-4 py-3 border-b border-[#26343a]">
-          <div class="flex items-center gap-2">
+      <div id="ia-modal-backdrop" class="hidden"></div>
+      <div id="ia-modal" class="hidden" role="dialog" aria-modal="true" aria-label="Ferramentas de IA">
+        <div class="ia-modal-header">
+          <div class="ia-modal-header-main">
             <img src="" class="ia-badge" alt="IA">
-            <h3 class="font-semibold">Ferramentas de IA</h3>
+            <h3 class="ia-modal-title">Ferramentas de IA</h3>
             <span class="ia-chip">Beta</span>
           </div>
-          <button id="ia-fechar" class="text-gray-400 hover:text-white" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
+          <button id="ia-fechar" class="ia-modal-close-btn" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
         </div>
 
-        <div id="ia-modal-body" class="px-5 py-4 text-sm leading-6 space-y-6">
+        <div id="ia-modal-body">
           <!-- Resumo -->
-          <section>
-            <div class="flex items-center justify-between mb-2">
+          <section class="ia-section">
+            <div class="ia-section-header">
               <div class="ia-section-title">
                 <img src="" class="ia-badge" alt="IA">
                 <span>Resumo IA</span>
               </div>
               <div class="ia-sec-actions">
-                <button id="ia-resumo-gerar" class="btn-soft"><i class="fa-solid fa-wand-magic-sparkles"></i> Gerar resumo</button>
-                <button id="ia-resumo-copiar" class="btn-soft hidden"><i class="fa-regular fa-copy"></i> Copiar</button>
+                <button id="ia-resumo-gerar" class="btn-soft">
+                  <i class="fa-solid fa-wand-magic-sparkles"></i><span>Gerar resumo</span>
+                </button>
+                <button id="ia-resumo-copiar" class="btn-soft hidden">
+                  <i class="fa-regular fa-copy"></i><span>Copiar</span>
+                </button>
                 <span id="ia-resumo-loading" class="hidden ia-spinner"></span>
               </div>
             </div>
             <div id="ia-resumo-content" class="hidden">
-              <p id="ia-resumo-texto" class="mb-3"></p>
-              <ul id="ia-resumo-bullets" class="list-disc pl-5 space-y-1"></ul>
-              <div class="mt-3 text-xs text-[#aebac1]" id="ia-resumo-meta"></div>
+              <p id="ia-resumo-texto"></p>
+              <ul id="ia-resumo-bullets"></ul>
+              <div class="ia-resumo-meta" id="ia-resumo-meta"></div>
             </div>
           </section>
 
-          <hr class="border-[#26343a]">
+          <hr class="ia-separator">
 
           <!-- Resposta melhorada -->
-          <section>
-            <div class="flex items-center justify-between mb-2">
+          <section class="ia-section">
+            <div class="ia-section-header">
               <div class="ia-section-title">
                 <img src="" class="ia-badge" alt="IA">
                 <span>Resposta melhorada com IA</span>
               </div>
               <div class="ia-sec-actions">
-                <button id="ia-gerar-resposta" class="btn-soft"><i class="fa-solid fa-wand-magic-sparkles"></i> Gerar resposta</button>
-                <button id="ia-copiar-resposta" class="btn-soft hidden"><i class="fa-regular fa-copy"></i> Copiar</button>
-                <button id="ia-colar-no-chat" class="btn-soft hidden"><i class="fa-regular fa-paper-plane"></i> Colar no chat</button>
+                <button id="ia-gerar-resposta" class="btn-soft">
+                  <i class="fa-solid fa-wand-magic-sparkles"></i><span>Gerar resposta</span>
+                </button>
+                <button id="ia-copiar-resposta" class="btn-soft hidden">
+                  <i class="fa-regular fa-copy"></i><span>Copiar</span>
+                </button>
+                <button id="ia-colar-no-chat" class="btn-soft hidden">
+                  <i class="fa-regular fa-paper-plane"></i><span>Colar no chat</span>
+                </button>
                 <span id="ia-resposta-loading" class="hidden ia-spinner"></span>
               </div>
             </div>
 
-            <div class="grid gap-2">
-              <textarea id="ia-draft" rows="4" class="w-full p-3 rounded bg-[#0b141a] text-[#e9edef] border border-[#2a3942] outline-none" placeholder="Escreva sua resposta ou deixe em branco para a IA sugerir com base no diálogo recente…"></textarea>
+            <div class="ia-resposta-container">
+              <textarea id="ia-draft" rows="4" placeholder="Escreva sua resposta ou deixe em branco para a IA sugerir com base no diálogo recente…"></textarea>
 
               <div id="ia-resposta-box" class="hidden">
-                <div class="text-xs text-[#aebac1] mb-1">Sugestão da IA</div>
-                <div id="ia-resposta-texto" class="p-3 rounded bg-[#0b141a] border border-[#2a3942] whitespace-pre-wrap"></div>
+                <div class="ia-resposta-label">Sugestão da IA</div>
+                <div id="ia-resposta-texto"></div>
               </div>
             </div>
           </section>
@@ -223,19 +385,17 @@
 
   // ---------- Botão no header ----------
   function ensureHeaderButton(){
-    // tenta achar o container do header
     const hdr = $('#chat-header .flex.items-center.gap-2.relative')
-            || $('#chat-header .flex.items-center.gap-2')
-            || $('#chat-header');
+             || $('#chat-header .flex.items-center.gap-2')
+             || $('#chat-header');
+
     if (!hdr) return;
 
-    // pode já existir #btn-ia no HTML
     let btn = document.getElementById('btn-ia');
-
-    // se não existir, cria
     if (!btn) {
       btn = document.createElement('button');
       btn.id = 'btn-ia';
+      btn.type = 'button';
       btn.className = 'hdr-icon-btn';
       btn.title = 'Ferramentas de IA';
       btn.setAttribute('aria-label', 'Ferramentas de IA');
@@ -244,6 +404,17 @@
     }
 
     updateAllLogos();
+
+    // garante que o click está sempre amarrado
+    if (!btn._iaBound) {
+      btn._iaBound = true;
+      btn.addEventListener('click', function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        console.debug('[IA] clique em #btn-ia, abrindo modal');
+        openIA();
+      });
+    }
   }
 
   const hdrEl = document.getElementById('chat-header');
@@ -392,7 +563,9 @@
 
       const bullets = Array.isArray(res.pontos_chave) ? res.pontos_chave : [];
       bullets.forEach(t=>{
-        const li=document.createElement('li'); li.textContent=String(t); refs.resumoBullets.appendChild(li);
+        const li=document.createElement('li'); 
+        li.textContent=String(t); 
+        refs.resumoBullets.appendChild(li);
       });
 
       const meta=[];
@@ -478,20 +651,12 @@
     if (!refs.respTxt.textContent) return;
     const input = $('#mensagem');
     if (input) input.value = refs.respTxt.textContent;
-    closeIA(); input?.focus();
+    closeIA(); 
+    input?.focus();
   }
 
   // ---------- API pública ----------
   window.IA = { open: openIA, close: closeIA };
-
-  // Delegação global de clique no #btn-ia (pega click no <img> também)
-  document.addEventListener('click', function(ev){
-    const el = ev.target.closest('#btn-ia');
-    if (!el) return;
-    ev.preventDefault();
-    console.debug('[IA] clique em #btn-ia, abrindo modal');
-    openIA();
-  });
 
   // Se o header já estiver visível, injeta o botão agora
   if ($('#chat-header') && getComputedStyle($('#chat-header')).display !== 'none') {

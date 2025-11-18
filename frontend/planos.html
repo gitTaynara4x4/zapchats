@@ -68,6 +68,75 @@
     }
     html.dark .theme-toggle{ background:#2f323a; border-color:#3a3e46; }
 
+    /* ====== GATE DE SENHA ====== */
+    .password-gate{
+      position:fixed;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:radial-gradient(circle at top, rgba(0,0,0,.96), rgba(15,23,42,.96));
+      z-index:999;
+    }
+    html:not(.dark) .password-gate{
+      background:radial-gradient(circle at top, #ecfdf5, #bbf7d0);
+    }
+    .pw-card{
+      background:var(--card-bg);
+      border-radius:14px;
+      border:1px solid var(--card-border);
+      box-shadow:var(--shadow-lg);
+      padding:22px 20px 18px;
+      width:100%;
+      max-width:340px;
+    }
+    html:not(.dark) .pw-card{
+      background:#ffffff;
+    }
+    .pw-card h2{
+      margin:0 0 6px;
+      font-size:18px;
+      font-weight:800;
+    }
+    .pw-card p{
+      margin:0 0 14px;
+      font-size:13px;
+      color:var(--text-secondary);
+    }
+    .pw-field{
+      display:flex;
+      gap:8px;
+      align-items:center;
+    }
+    .pw-input{
+      flex:1;
+      height:var(--input-h);
+      border-radius:10px;
+      border:1px solid var(--input-bd);
+      background:var(--input-bg);
+      color:var(--input-text);
+      padding:0 10px;
+    }
+    .pw-btn{
+      height:var(--btn-h);
+      border-radius:10px;
+      border:0;
+      padding:0 14px;
+      font-weight:700;
+      cursor:pointer;
+      background:var(--brand-500);
+      color:#fff;
+      white-space:nowrap;
+    }
+    .pw-btn:hover{
+      filter:brightness(.96);
+    }
+    .pw-error{
+      margin-top:6px;
+      font-size:12px;
+      color:#ef4444;
+    }
+
     /* AGORA A PÁGINA NÃO CENTRALIZA MAIS O CARD */
     .page-shell{
       min-height: calc(100dvh - var(--topbar-h));
@@ -345,7 +414,21 @@
     <button id="themeSwitch" class="theme-toggle" aria-label="Alternar tema"><span class="thumb"></span></button>
   </div>
 
-  <main class="page-shell">
+  <!-- GATE DE SENHA -->
+  <div id="pwGate" class="password-gate">
+    <div class="pw-card">
+      <h2>Área restrita</h2>
+      <p>Digite a senha para acessar esta tela.</p>
+      <div class="pw-field">
+        <input id="pwInput" type="password" class="pw-input" placeholder="Senha" autocomplete="off">
+        <button id="pwBtn" type="button" class="pw-btn">Entrar</button>
+      </div>
+      <div id="pwError" class="pw-error hidden"></div>
+    </div>
+  </div>
+
+  <!-- Conteúdo protegido: começa escondido -->
+  <main class="page-shell" id="protectedContent" style="display:none">
     <div class="app" id="app" data-mode="compact">
       <div class="card" id="card">
         <div class="illustration">
@@ -532,6 +615,49 @@
     </div>
   </main>
 
+  <!-- Script do gate da senha -->
+  <script>
+    (function(){
+      'use strict';
+      const PW = 'promessa20';  // senha fixa
+
+      const gate    = document.getElementById('pwGate');
+      const content = document.getElementById('protectedContent');
+      const input   = document.getElementById('pwInput');
+      const btn     = document.getElementById('pwBtn');
+      const err     = document.getElementById('pwError');
+
+      function unlock(){
+        const val = (input && input.value || '').trim().toLowerCase();
+        if (val === PW){
+          if (gate) gate.style.display = 'none';
+          if (content) content.style.display = 'block';
+          if (err){
+            err.textContent = '';
+            err.classList.add('hidden');
+          }
+          // foca no campo de doc depois de liberar
+          setTimeout(()=> document.getElementById('doc')?.focus(), 60);
+        } else {
+          if (err){
+            err.textContent = 'Senha incorreta.';
+            err.classList.remove('hidden');
+          }
+          if (input){
+            input.value = '';
+            input.focus();
+          }
+        }
+      }
+
+      btn && btn.addEventListener('click', unlock);
+      input && input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') unlock();
+      });
+    })();
+  </script>
+
+  <!-- Script principal -->
   <script>
   (function(){
     'use strict';

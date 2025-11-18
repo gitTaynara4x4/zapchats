@@ -179,10 +179,6 @@ REQUIRED_PERMS = {
     "/chatbot":              "chatbot.configurar",
     "/atendimentos":         "atendimento.ver",
     "/midias":               "arquivos.ver",
-    "/email":                "email.ver",
-
-    # 👇 AQUI: Conectar WhatsApp exige integracoes.whatsapp
-    "/conectar":             "integracoes.whatsapp",
 }
 
 def _norm_path_for_perm(path: str) -> str:

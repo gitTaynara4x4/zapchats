@@ -191,20 +191,22 @@ PUBLIC_FRONTEND_PARTIALS = {
 @app.middleware("http")
 async def block_direct_frontend(request: Request, call_next):
     p = request.url.path
+
+    # 🔓 exceção: permitir abrir /frontend/admin-planos.html sem login
+    if p == "/frontend/admin-planos.html":
+        return await call_next(request)
+
     if p.startswith("/frontend/"):
-        is_html_like = p.endswith(".html") or "/partials/" in p
-        if is_html_like and (p not in PUBLIC_FRONTEND_PARTIALS):
+        is_html = p.endswith(".html") or "/partials/" in p
+        if is_html:
             token = request.cookies.get(ACCESS_COOKIE_NAME)
             empresa_cookie = request.cookies.get("empresa_id") or request.cookies.get("EMPRESA_ID")
             if token and empresa_cookie:
                 return await call_next(request)
             next_url = p + (("?" + request.url.query) if request.url.query else "")
-            resp = RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
-            resp.headers["X-Auth-Gate"] = "missing-cookie-frontend"
-            return resp
+            return RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
         return await call_next(request)
     return await call_next(request)
-
 # =======================================
 # Permissões por página (HTML)
 # =======================================
@@ -252,6 +254,11 @@ def _is_public(path: str) -> bool:
         "/login", "/login.html",
         "/criar-empresa", "/criar-empresa.html",
         "/esqueci_senha", "/esqueci_senha.html",
+
+        # 🔓 Admin • Planos acessível sem login
+        "/admin-planos", 
+        "/admin-planos.html",
+        "/frontend/admin-planos.html",  # caso você acesse direto pelo caminho do arquivo
     }
     PUBLIC_PREFIXES = (
         "/api/auth",
@@ -260,7 +267,6 @@ def _is_public(path: str) -> bool:
         "/favicon", "/robots.txt", "/manifest",
         "/ws",
         "/healthz", "/ping",
-        "/version.json",
     )
     if path in PUBLIC_HTML_PATHS:
         return True
