@@ -665,12 +665,15 @@
     const LS = localStorage;
     let CURRENT_EMPRESA_ID = null;
 
+    const ADMIN_PASS = 'promessa20'; // mesmo valor do backend (X-Admin-Pass)
+
     const TOKEN = () => LS.getItem('token') || LS.getItem('auth_token') || '';
     async function authFetch(input, init = {}){
       const t = TOKEN();
       const headers = {
         'Accept':'application/json',
         ...(init.headers||{}),
+        'X-Admin-Pass': ADMIN_PASS,
         ...(t ? { Authorization: `Bearer ${t}` } : {})
       };
       const res = await fetch(input, { ...init, headers, credentials:'include' });

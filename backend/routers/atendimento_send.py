@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend import models
 from backend.websocket_manager import conexoes_ativas
-from backend.routers.auth import get_current_user
+from backend.routers.auth import get_current_identity  # ⬅️ AGORA USA IDENTITY
 
 router = APIRouter(tags=["Atendimento – Envio"])
 
@@ -268,6 +268,38 @@ def _insert_msg_saida(
     return m
 
 
+def _identity_ctx(identity: Any) -> Tuple[int, Optional[str]]:
+    """
+    Extrai empresa_id + nome do atendente a partir do identity retornado
+    por get_current_identity. Aceita dict ou objeto com atributos.
+    """
+    if identity is None:
+        raise HTTPException(401, "Sessão inválida ou expirada.")
+
+    if isinstance(identity, dict):
+        def getter(k, default=None):
+            return identity.get(k, default)
+    else:
+        def getter(k, default=None):
+            return getattr(identity, k, default)
+
+    empresa_id = getter("empresa_id", None)
+    if not empresa_id:
+        raise HTTPException(403, "Empresa inválida para este token")
+    try:
+        empresa_id = int(empresa_id)
+    except Exception:
+        raise HTTPException(403, "Empresa inválida para este token")
+
+    atendente_nome = (
+        getter("nome", None)
+        or getter("nome_completo", None)
+        or getter("name", None)
+    )
+
+    return empresa_id, atendente_nome
+
+
 # -------- broadcast --------
 async def _broadcast_msg_saida(
     empresa: models.Empresa,
@@ -275,7 +307,7 @@ async def _broadcast_msg_saida(
     msg: models.Mensagem,
     midias: Optional[List[Dict[str, Any]]] = None,
     instance_name: Optional[str] = None,
-    atendente_nome: Optional[str] = None,  # ⬅️ NOVO: nome do atendente que enviou
+    atendente_nome: Optional[str] = None,  # nome do atendente que enviou
 ):
     payload = {
         "empresa_id": empresa.id,
@@ -292,7 +324,7 @@ async def _broadcast_msg_saida(
         "ack": 0,
         "instancia_id": msg.instancia_id,
         "instance_name": instance_name,
-        "atendente_nome": atendente_nome,  # ⬅️ NOVO: enviado ao front
+        "atendente_nome": atendente_nome,
     }
     if midias:
         payload["midias"] = midias
@@ -395,14 +427,16 @@ class SendReactionReq(BaseModel):
 async def send_text(
     body: SendTextReq,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     numero = normalizar_telefone(body.number)
     if not numero:
         raise HTTPException(400, "Número inválido.")
 
+    empresa_do_token, atendente_nome = _identity_ctx(identity)
+
     # valida empresa do token vs body
-    efetiva_empresa_id = _assert_mesma_empresa(user.empresa_id, body.empresa_id)
+    efetiva_empresa_id = _assert_mesma_empresa(empresa_do_token, body.empresa_id)
 
     empresa, inst_name, inst_id = _resolve_empresa_e_instancia(
         db,
@@ -411,7 +445,7 @@ async def send_text(
         instancia_id=body.instancia_id,
         numero_norm=numero,
     )
-    _assert_empresa_resolvida(user.empresa_id, empresa.id)
+    _assert_empresa_resolvida(empresa_do_token, empresa.id)
 
     cliente = _get_or_create_cliente(db, empresa, numero)
 
@@ -442,7 +476,7 @@ async def send_text(
         cliente,
         msg,
         instance_name=inst_name,
-        atendente_nome=getattr(user, "nome", None),  # ⬅️ NOVO
+        atendente_nome=atendente_nome,
     )
     return {
         "evolution": evo,
@@ -455,13 +489,14 @@ async def send_text(
 async def send_audio(
     body: SendAudioReq,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     numero = normalizar_telefone(body.number)
     if not numero:
         raise HTTPException(400, "Número inválido.")
 
-    efetiva_empresa_id = _assert_mesma_empresa(user.empresa_id, body.empresa_id)
+    empresa_do_token, atendente_nome = _identity_ctx(identity)
+    efetiva_empresa_id = _assert_mesma_empresa(empresa_do_token, body.empresa_id)
 
     empresa, inst_name, inst_id = _resolve_empresa_e_instancia(
         db,
@@ -470,7 +505,7 @@ async def send_audio(
         instancia_id=body.instancia_id,
         numero_norm=numero,
     )
-    _assert_empresa_resolvida(user.empresa_id, empresa.id)
+    _assert_empresa_resolvida(empresa_do_token, empresa.id)
 
     cliente = _get_or_create_cliente(db, empresa, numero)
 
@@ -507,7 +542,7 @@ async def send_audio(
         msg,
         midias=[{"tipo": "audio", "mimetype": "audio/ogg", "filename": "", "url": audio_url}],
         instance_name=inst_name,
-        atendente_nome=getattr(user, "nome", None),  # ⬅️ NOVO
+        atendente_nome=atendente_nome,
     )
     return {
         "evolution": evo,
@@ -520,13 +555,14 @@ async def send_audio(
 async def send_media(
     body: SendMediaReq,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     numero = normalizar_telefone(body.number)
     if not numero:
         raise HTTPException(400, "Número inválido.")
 
-    efetiva_empresa_id = _assert_mesma_empresa(user.empresa_id, body.empresa_id)
+    empresa_do_token, atendente_nome = _identity_ctx(identity)
+    efetiva_empresa_id = _assert_mesma_empresa(empresa_do_token, body.empresa_id)
 
     empresa, inst_name, inst_id = _resolve_empresa_e_instancia(
         db,
@@ -535,7 +571,7 @@ async def send_media(
         instancia_id=body.instancia_id,
         numero_norm=numero,
     )
-    _assert_empresa_resolvida(user.empresa_id, empresa.id)
+    _assert_empresa_resolvida(empresa_do_token, empresa.id)
 
     cliente = _get_or_create_cliente(db, empresa, numero)
 
@@ -591,7 +627,7 @@ async def send_media(
         msg,
         midias=midias,
         instance_name=inst_name,
-        atendente_nome=getattr(user, "nome", None),  # ⬅️ NOVO
+        atendente_nome=atendente_nome,
     )
     return {
         "evolution": evo,
@@ -604,13 +640,14 @@ async def send_media(
 async def send_sticker(
     body: SendStickerReq,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     numero = normalizar_telefone(body.number)
     if not numero:
         raise HTTPException(400, "Número inválido.")
 
-    efetiva_empresa_id = _assert_mesma_empresa(user.empresa_id, body.empresa_id)
+    empresa_do_token, atendente_nome = _identity_ctx(identity)
+    efetiva_empresa_id = _assert_mesma_empresa(empresa_do_token, body.empresa_id)
 
     empresa, inst_name, inst_id = _resolve_empresa_e_instancia(
         db,
@@ -619,7 +656,7 @@ async def send_sticker(
         instancia_id=body.instancia_id,
         numero_norm=numero,
     )
-    _assert_empresa_resolvida(user.empresa_id, empresa.id)
+    _assert_empresa_resolvida(empresa_do_token, empresa.id)
 
     cliente = _get_or_create_cliente(db, empresa, numero)
 
@@ -649,7 +686,7 @@ async def send_sticker(
         cliente,
         msg,
         instance_name=inst_name,
-        atendente_nome=getattr(user, "nome", None),  # ⬅️ NOVO
+        atendente_nome=atendente_nome,
     )
     return {
         "evolution": evo,
@@ -662,13 +699,14 @@ async def send_sticker(
 async def send_contact(
     body: SendContactReq,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     numero = normalizar_telefone(body.number)
     if not numero:
         raise HTTPException(400, "Número inválido.")
 
-    efetiva_empresa_id = _assert_mesma_empresa(user.empresa_id, body.empresa_id)
+    empresa_do_token, atendente_nome = _identity_ctx(identity)
+    efetiva_empresa_id = _assert_mesma_empresa(empresa_do_token, body.empresa_id)
 
     empresa, inst_name, inst_id = _resolve_empresa_e_instancia(
         db,
@@ -677,7 +715,7 @@ async def send_contact(
         instancia_id=body.instancia_id,
         numero_norm=numero,
     )
-    _assert_empresa_resolvida(user.empresa_id, empresa.id)
+    _assert_empresa_resolvida(empresa_do_token, empresa.id)
 
     cliente = _get_or_create_cliente(db, empresa, numero)
 
@@ -697,7 +735,7 @@ async def send_contact(
         cliente,
         msg,
         instance_name=inst_name,
-        atendente_nome=getattr(user, "nome", None),  # ⬅️ NOVO
+        atendente_nome=atendente_nome,
     )
     return {
         "evolution": evo,
@@ -710,10 +748,11 @@ async def send_contact(
 async def send_reaction(
     body: SendReactionReq,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     # Para reação, precisamos da instância para chamar a Evolution.
-    efetiva_empresa_id = _assert_mesma_empresa(user.empresa_id, body.empresa_id)
+    empresa_do_token, _ = _identity_ctx(identity)
+    efetiva_empresa_id = _assert_mesma_empresa(empresa_do_token, body.empresa_id)
 
     empresa = None
     inst_name = None
@@ -726,7 +765,7 @@ async def send_reaction(
             instancia_id=body.instancia_id,
             numero_norm=None,
         )
-        _assert_empresa_resolvida(user.empresa_id, empresa.id)
+        _assert_empresa_resolvida(empresa_do_token, empresa.id)
     elif body.empresa_id:
         # Se veio só empresa, exigir instância explicitamente
         raise HTTPException(400, "Para reação, informe 'instance' (nome) ou 'instancia_id'.")
@@ -780,12 +819,12 @@ async def send_text_by_instance(
     instance: str = Path(..., description="Nome da instância Evolution"),
     body: SendTextReq = None,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     # força a instância da URL e reutiliza a validação da rota principal
     data = body or SendTextReq(empresa_id=None, instance=instance, number="", text="")
     data.instance = instance
-    return await send_text(data, db, user)
+    return await send_text(body=data, db=db, identity=identity)
 
 
 @router.post("/instancia/{instancia_id}/send/text")
@@ -793,8 +832,8 @@ async def send_text_by_instancia_id(
     instancia_id: int = Path(..., description="ID da instância (empresas_instancias.id)"),
     body: SendTextReq = None,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     data = body or SendTextReq(empresa_id=None, instancia_id=instancia_id, number="", text="")
     data.instancia_id = instancia_id
-    return await send_text(data, db, user)
+    return await send_text(body=data, db=db, identity=identity)
