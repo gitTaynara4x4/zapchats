@@ -305,7 +305,7 @@ async function fetchConv30(convId, instanciaId){
 }
 
 // controla concorrência de fetch (AGORA: só conversas com novas > 0)
-const PREFETCH_LIMIT = 50; // máximo de conversas com não lidas para pré-carregar
+const PREFETCH_LIMIT = 10; // máximo de conversas com não lidas para pré-carregar
 
 async function primeHistories(convs, { concurrency = 2 } = {}) {
   if (!window.PREFETCH_HISTORIES) return;
