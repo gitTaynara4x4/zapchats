@@ -1,237 +1,307 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-BR" class="has-sidebar prepaint">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Sem permissão – ZapChats</title>
 
-  <!-- Tema antes de pintar -->
-  <script>
-    (function () {
-      try {
-        const t = localStorage.getItem('theme') || 'dark';
-        document.documentElement.classList.toggle('dark', t === 'dark');
-      } catch {}
-    })();
-  </script>
+  <!-- Shell global (head-base + loader + tema + sidebar) -->
+  <script src="/frontend/js/app-base.js" defer></script>
+  <script src="/frontend/js/auth.js" defer></script>
 
-  <!-- Auth (NOVO) -->
-  <script src="/frontend/js/auth.js"></script>
-
-  <!-- Inter -->
+  <!-- Fonte Inter (reforço, caso não venha do head-base) -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 
-  <!-- Lottie (opcional) -->
+  <!-- Lottie (animação) -->
   <script src="https://unpkg.com/@lottiefiles/dotlottie-wc@0.6.2/dist/dotlottie-wc.js" type="module"></script>
 
   <style>
-    :root{
-      --bg:#0b0c0f; --fg:#e5e7eb; --muted:#a1a1aa;
-      --ring:#4f83ff; --brand:#25d366; --brand-fg:#061b0d;
-    }
-    html:not(.dark){
-      --bg:#f6f7fb; --fg:#111827; --muted:#6b7280; --ring:#3b82f6;
-    }
+    /* ===== Layout da página de "Sem permissão" (namespaced em .semperm-page) ===== */
 
-    *{box-sizing:border-box}
-    html,body{height:100%}
+    .main.semperm-page{
+      /* ocupa toda a área útil do app, atrás do conteúdo */
+      position:relative;
+      min-height:100vh;
+      padding:32px 18px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      overflow:hidden;
 
-    body{
-      margin:0; display:grid; place-items:center; min-height:100vh;
-      font-family:"Inter",system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
-      color:var(--fg);
+      /* fundo com gradiente, mas respeitando o tema global */
       background:
         radial-gradient(1200px 800px at 100% 0%, rgba(79,131,255,.18), transparent 60%),
         radial-gradient(900px 600px at 0% 100%, rgba(37,211,102,.14), transparent 55%),
-        var(--bg);
-      overflow:hidden;
+        var(--bg, #020617);
+      font-family:"Inter",system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+      color:var(--fg, #e5e7eb);
     }
 
-    /* ruído sutil de fundo */
-    body::after{
-      content:""; position:fixed; inset:-20%;
+    .semperm-page::after{
+      content:"";
+      position:absolute;
+      inset:-20%;
       background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' opacity='0.06' width='160' height='160' viewBox='0 0 160 160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-      pointer-events:none; animation:drift 30s linear infinite;
+      pointer-events:none;
+      animation:semperm-drift 30s linear infinite;
+      z-index:0;
     }
-    @keyframes drift { to { transform:translate3d(2%, -2%, 0) } }
+    @keyframes semperm-drift { to { transform:translate3d(2%, -2%, 0) } }
 
-    /* container central sem card */
-    main{
-      width:min(780px, 92vw);
+    .semperm-inner{
       position:relative;
+      z-index:1;
+      width:min(780px, 100%);
       padding:12px 0 8px;
       text-align:center;
-      animation: rise .45s ease-out both;
+      animation:semperm-rise .45s ease-out both;
     }
-    @keyframes rise { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:translateY(0) } }
+    @keyframes semperm-rise{
+      from{ opacity:0; transform:translateY(8px); }
+      to  { opacity:1; transform:translateY(0); }
+    }
 
-    .badge{
-      position:absolute; top:0; right:0;
-      font-size:.75rem; font-weight:800; letter-spacing:.04em;
-      color:var(--muted);
+    .semperm-badge{
+      position:absolute;
+      top:0;
+      right:0;
+      font-size:.75rem;
+      font-weight:800;
+      letter-spacing:.04em;
+      color:var(--muted, #a1a1aa);
       background:linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.02));
-      border-radius:999px; padding:.28rem .6rem;
+      border-radius:999px;
+      padding:.28rem .6rem;
       user-select:none;
     }
 
-    /* Toggle de tema (opcional) */
-    .theme-toggle{
-      position:absolute; left:0; top:0; border-radius:999px; border:0;
-      background:linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03));
-      width:36px; height:36px; display:grid; place-items:center; cursor:pointer;
-    }
-    .theme-toggle svg{ width:18px; height:18px; }
-
     dotlottie-wc{
-      display:block; margin:10px auto 0; width:min(320px, 70vw); height:min(320px, 70vw);
+      display:block;
+      margin:10px auto 0;
+      width:min(320px, 70vw);
+      height:min(320px, 70vw);
       filter: drop-shadow(0 10px 24px rgba(0,0,0,.25));
     }
 
-    h1{ margin:18px 0 8px; font-size:1.6rem; font-weight:800; letter-spacing:-0.02em; }
-    p{ margin:0 auto 18px; color:var(--muted); line-height:1.6; max-width:56ch; }
-
-    .actions{ display:flex; justify-content:center; gap:.8rem; margin-top:12px; }
-    .btn{
-      appearance:none; border:0; background:rgba(255,255,255,.06);
-      color:var(--fg); padding:.72rem 1.05rem; border-radius:10px; font-weight:600;
-      cursor:pointer; transition: transform .12s ease, background-color .12s ease, filter .12s ease;
+    .semperm-title{
+      margin:18px 0 8px;
+      font-size:1.6rem;
+      font-weight:800;
+      letter-spacing:-0.02em;
     }
-    .btn:hover{ background:rgba(255,255,255,.10); transform: translateY(-1px); }
-    .btn:active{ transform: translateY(0); }
-    html:not(.dark) .btn{ background:rgba(0,0,0,.05); }
-    html:not(.dark) .btn:hover{ background:rgba(0,0,0,.09); }
 
-    .btn.brand{
-      background:var(--brand); color:var(--brand-fg);
+    .semperm-text-main{
+      margin:0 auto 6px;
+      color:var(--muted, #a1a1aa);
+      line-height:1.6;
+      max-width:56ch;
+      font-size:0.98rem;
     }
-    .btn.brand:hover{ filter:brightness(0.97); }
+    .semperm-text-sub{
+      margin:0 auto 18px;
+      color:var(--muted, #a1a1aa);
+      line-height:1.6;
+      max-width:60ch;
+      font-size:0.92rem;
+    }
 
-    .hint{ margin-top:16px; font-size:.92rem; color:var(--muted); }
-    :focus-visible{ outline:2px solid var(--ring); outline-offset:3px; border-radius:12px; }
+    .semperm-actions{
+      display:flex;
+      justify-content:center;
+      flex-wrap:wrap;
+      gap:.8rem;
+      margin-top:12px;
+    }
+
+    .semperm-btn{
+      appearance:none;
+      border:0;
+      background:rgba(255,255,255,.06);
+      color:var(--fg, #e5e7eb);
+      padding:.72rem 1.05rem;
+      border-radius:10px;
+      font-weight:600;
+      cursor:pointer;
+      transition:
+        transform .12s ease,
+        background-color .12s ease,
+        filter .12s ease,
+        box-shadow .12s ease;
+      font-size:0.94rem;
+    }
+    .semperm-btn:hover{
+      background:rgba(255,255,255,.10);
+      transform: translateY(-1px);
+      box-shadow:0 6px 12px rgba(0,0,0,.25);
+    }
+    .semperm-btn:active{
+      transform: translateY(0);
+      box-shadow:none;
+    }
+
+    html:not(.dark) .semperm-page .semperm-btn{
+      background:rgba(0,0,0,.05);
+      color:var(--fg, #111827);
+    }
+    html:not(.dark) .semperm-page .semperm-btn:hover{
+      background:rgba(0,0,0,.09);
+    }
+
+    .semperm-btn.primary{
+      background:var(--brand, #25d366);
+      color:var(--brand-fg, #061b0d);
+    }
+    .semperm-btn.primary:hover{
+      filter:brightness(0.97);
+      box-shadow:0 7px 16px rgba(0,0,0,.25);
+    }
+
+    .semperm-hint{
+      margin-top:16px;
+      font-size:.9rem;
+      color:var(--muted, #a1a1aa);
+    }
+
+    .semperm-page :focus-visible{
+      outline:2px solid var(--ring, #4f83ff);
+      outline-offset:3px;
+      border-radius:12px;
+    }
 
     @media (prefers-reduced-motion: reduce){
-      *{ animation:none !important; transition:none !important }
-      body::after{ display:none }
+      .semperm-page *{
+        animation:none !important;
+        transition:none !important;
+      }
+      .semperm-page::after{ display:none; }
     }
   </style>
 </head>
-<body>
-  <main role="alertdialog" aria-labelledby="t1" aria-describedby="d1">
-    <div class="badge" aria-hidden="true">403</div>
-    <button class="theme-toggle" id="theme-toggle" aria-label="Alternar tema">
-      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-        <path d="M21.64 13A9 9 0 1 1 11 2.36 7 7 0 1 0 21.64 13z"/>
-      </svg>
-    </button>
+<body data-page="sem-permissao">
+  <!-- Sidebar padrão (desktop + mobile), igual ao Dashboard -->
+  <aside id="sidebar"
+         data-src="/frontend/partials/sidebar.html"
+         data-src-mobile="/frontend/partials/sidebar-mobile.html"></aside>
 
-    <!-- Ilustração/Animação -->
-    <dotlottie-wc
-      src="https://lottie.host/8bf6d774-09bb-4771-8e10-923ebd5d587b/0lYmjhMV7y.lottie"
-      speed="1" autoplay loop>
-    </dotlottie-wc>
+  <!-- Conteúdo principal -->
+  <main class="main semperm-page">
+    <section class="semperm-inner" role="alertdialog" aria-labelledby="semperm-title" aria-describedby="semperm-desc">
+      <div class="semperm-badge" aria-hidden="true">403</div>
 
-    <h1 id="t1">Sem permissão</h1>
-    <p id="d1">Você não tem acesso a esta página. Fale com o administrador para solicitar a permissão necessária.</p>
+      <!-- Ilustração/Animação -->
+      <dotlottie-wc
+        src="https://lottie.host/8bf6d774-09bb-4771-8e10-923ebd5d587b/0lYmjhMV7y.lottie"
+        speed="1"
+        autoplay
+        loop>
+      </dotlottie-wc>
 
-    <div class="actions">
-      <button class="btn" id="btn-voltar" type="button">Voltar</button>
-      <button class="btn brand" id="btn-home" type="button">Ir para início</button>
-    </div>
+      <h1 id="semperm-title" class="semperm-title">Você não tem permissão</h1>
 
-    <div class="hint">Se acha que isso é um engano, tente recarregar sua sessão ou contatar o administrador.</div>
+      <!-- Texto principal (vai ser sobrescrito pelo ?motivo= se vier do backend) -->
+      <p id="semperm-main" class="semperm-text-main">
+        Você não tem acesso a esta página no momento.
+      </p>
+
+      <p id="semperm-desc" class="semperm-text-sub">
+        Se você acha que isso é um engano, fale com o administrador da sua empresa para liberar a permissão necessária.
+      </p>
+
+      <div class="semperm-actions">
+        <button type="button" id="btn-home"   class="semperm-btn primary">Ir para o início</button>
+        <button type="button" id="btn-logout" class="semperm-btn">Trocar de usuário</button>
+      </div>
+
+      <div class="semperm-hint">
+        Dica: se você acabou de ganhar uma permissão nova, tente entrar novamente com seu usuário.
+      </div>
+    </section>
   </main>
 
   <script>
   (function(){
-    const back   = document.getElementById('btn-voltar');
-    const home   = document.getElementById('btn-home');
-    const toggle = document.getElementById('theme-toggle');
+    const mainText   = document.getElementById('semperm-main');
+    const btnHome    = document.getElementById('btn-home');
+    const btnLogout  = document.getElementById('btn-logout');
 
-    // ====== CONFIG ======
-    const LAST_OK_KEY        = 'zap:last-ok-path';
-    const TOKEN_KEYS         = ['ZAP_TOKEN','access_token','auth_token']; // ajuste conforme seu app
-    const APP_HOME_FALLBACK  = '/dashboard';   // sua home real (rota)
-    const LOGIN_PATH         = '/login';       // sua página de login (rota)
-    const SESSION_ENDPOINT   = '/api/auth/session'; // se existir no backend
-    const SESSION_COOKIE_KEY = 'session=';     // nome parcial do cookie
-    // ====================
+    // ==== Lê motivo que veio do backend (?motivo=...) ====
+    (function applyMotivoFromQuery(){
+      try{
+        const params = new URLSearchParams(window.location.search);
+        let motivo   = params.get('motivo') || '';
+        if (!motivo) return;
 
-    function hasToken() {
-      try {
-        if (window.ZAuth?.getToken) return !!ZAuth.getToken();
-        return TOKEN_KEYS.some(k => !!localStorage.getItem(k));
-      } catch { return false; }
-    }
+        // backend usou quote_plus -> espaços viraram "+"
+        motivo = motivo.replace(/\+/g, ' ').trim();
 
-    function hasSessionCookie() {
-      try { return document.cookie.includes(SESSION_COOKIE_KEY); }
-      catch { return false; }
-    }
-
-    // Hidrata sessão silenciosamente (se o backend suportar)
-    (async function hydrateSession(){
-      try {
-        if (!hasSessionCookie() && hasToken()) {
-          const token = TOKEN_KEYS.map(k=>localStorage.getItem(k)).find(Boolean);
-          if (token) {
-            await fetch(SESSION_ENDPOINT, {
-              method: 'POST',
-              credentials: 'include',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-              body: '{}'
-            }).catch(()=>{});
-          }
+        if (motivo && mainText){
+          mainText.textContent = motivo;
         }
-      } catch {}
+      }catch(e){}
     })();
 
-    function goHomeSmart() {
-      const last = localStorage.getItem(LAST_OK_KEY);
-      if (last)             { location.href = last; return; }
-      if (hasToken())       { location.href = APP_HOME_FALLBACK; return; }
-      location.href = LOGIN_PATH;
+    // ==== Helpers de navegação e sessão ====
+    const LAST_OK_KEY       = 'zap:last-ok-path';
+    const TOKEN_KEYS        = ['ZAP_TOKEN','access_token','auth_token','token'];
+    const APP_HOME_FALLBACK = '/dashboard';
+    const LOGIN_PATH        = '/login';
+
+    function hasToken(){
+      try{
+        if (window.ZAuth && typeof ZAuth.getToken === 'function') {
+          return !!ZAuth.getToken();
+        }
+        return TOKEN_KEYS.some(k => !!localStorage.getItem(k));
+      }catch{ return false; }
     }
 
-    // VOLTAR: agora DESLOGA e manda pro LOGIN
-    back?.addEventListener('click', async () => {
-      try {
-        if (window.ZAuth && typeof ZAuth.logout === 'function') {
+    function goHomeSmart(){
+      try{
+        const last = localStorage.getItem(LAST_OK_KEY);
+        if (last) { window.location.href = last; return; }
+      }catch{}
+
+      if (hasToken()){
+        window.location.href = APP_HOME_FALLBACK;
+      } else {
+        window.location.href = LOGIN_PATH;
+      }
+    }
+
+    async function doLogout(){
+      // Se tiver ZAuth.logout, usa o fluxo oficial
+      try{
+        if (window.ZAuth && typeof ZAuth.logout === 'function'){
           await ZAuth.logout({ redirect: LOGIN_PATH });
           return;
         }
-      } catch (e) {
+      }catch(e){
         console.warn('Erro ao deslogar via ZAuth.logout:', e);
       }
 
-      // Fallback se não tiver ZAuth por algum motivo
-      try {
+      // Fallback: limpa alguns tokens básicos e vai pro login
+      try{
         localStorage.removeItem('token');
         localStorage.removeItem('access_token');
+        localStorage.removeItem('auth_token');
         localStorage.removeItem('ZAP_TOKEN');
         localStorage.removeItem('empresa_id');
-      } catch (e) {}
+      }catch(e){}
 
-      location.href = LOGIN_PATH;
-    });
-
-    home?.addEventListener('click', () => { goHomeSmart(); });
-
-    // ESC volta
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') back?.click(); });
-
-    // Toggle de tema (sincroniza com localStorage.theme)
-    function setIcon(){
-      const dark = document.documentElement.classList.contains('dark');
-      toggle.innerHTML = dark
-        ? `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.64 13A9 9 0 1 1 11 2.36 7 7 0 1 0 21.64 13z"/></svg>`
-        : `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6.76 4.84l-1.8-1.79L3.17 4.84l1.79 1.79 1.8-1.79zM1 13h3v-2H1v2zm10 10h2v-3h-2v3zm7.03-3.97l1.79 1.79 1.79-1.79-1.79-1.79-1.79 1.79zM20 11v2h3v-2h-3zM11 1h2v3h-2V1zM4.22 18.36l1.79 1.79 1.79-1.79-1.79-1.79-1.79 1.79zM17.24 4.84l1.79-1.79-1.79-1.79-1.79 1.79 1.79 1.79zM12 6a6 6 0 100 12 6 6 0 000-12z"/></svg>`;
+      window.location.href = LOGIN_PATH;
     }
-    toggle?.addEventListener('click', () => {
-      const isDark = document.documentElement.classList.toggle('dark');
-      try { localStorage.setItem('theme', isDark ? 'dark' : 'light'); } catch {}
-      setIcon();
-    });
-    setIcon();
+
+    // ==== Binds dos botões ====
+    btnHome  && btnHome.addEventListener('click', goHomeSmart);
+    btnLogout&& btnLogout.addEventListener('click', doLogout);
+
+    // ESC = Ir para o início
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape'){
+        e.preventDefault();
+        goHomeSmart();
+      }
+    }, { passive:true });
   })();
   </script>
 </body>

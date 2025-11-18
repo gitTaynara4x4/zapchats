@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os, secrets, asyncio
+from urllib.parse import quote_plus
 from typing import Any
 from datetime import datetime, timezone
 from pathlib import Path
@@ -220,10 +221,12 @@ REQUIRED_PERMS = {
     "/chatbot":              "chatbot.configurar",
     "/atendimentos":         "atendimento.ver",
     "/midias":               "arquivos.ver",
-
-    # 👇 NOVO: página de E-mail
     "/email":                "email.ver",
+
+    # 👇 AQUI: Conectar WhatsApp exige integracoes.whatsapp
+    "/conectar":             "integracoes.whatsapp",
 }
+
 
 def _norm_path_for_perm(path: str) -> str:
     p = path.split("?", 1)[0]
@@ -231,16 +234,16 @@ def _norm_path_for_perm(path: str) -> str:
         p = p[:-5]
     return p
 
-def _html_forbidden(msg: str) -> HTMLResponse:
-    return HTMLResponse(
-        f"""<!doctype html>
-<html><head><meta charset="utf-8"><title>Sem permissão</title>
-<style>body{{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;background:#0b0f14;color:#e2e8f0}}
-.card{{max-width:680px;margin:12vh auto;padding:24px;background:#111827;border:1px solid #1f2937;border-radius:12px}}
-h1{{margin:0 0 8px 0;font-size:20px}}p{{opacity:.9;line-height:1.5}}</style></head>
-<body><div class="card"><h1>Você não tem permissão</h1>
-<p>{msg}</p><p><a href="/dashboard">Voltar ao Dashboard</a></p></div></body></html>""",
-        status_code=403
+
+def _html_forbidden(msg: str):
+    """
+    Em vez de desenhar a tela aqui, só redireciona para /sem-permissao,
+    opcionalmente passando o motivo na querystring (?motivo=...)
+    """
+    motivo = quote_plus(msg)[:300]  # só pra não ficar gigante
+    return RedirectResponse(
+        url=f"/sem-permissao?motivo={motivo}",
+        status_code=302
     )
 
 def _is_public(path: str) -> bool:

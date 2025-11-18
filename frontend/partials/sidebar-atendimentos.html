@@ -10,25 +10,43 @@
   :root{
     --topbar-h:44px;
 
-    --card:#161617; --border:#27272a; --fg:#e5e7eb; --muted:#9ca3af; --hover:rgba(255,255,255,.06);
-    --ring:#4f83ff; --danger:#ef4444; --overlay:rgba(0,0,0,.55);
+    --card:#161617;
+    --border:#27272a;
+    --fg:#e5e7eb;
+    --muted:#9ca3af;
+    /* hover mais suave, parecido com o sidebar principal */
+    --hover:rgba(255,255,255,.04);
+    --ring:#4f83ff;
+    --danger:#ef4444;
+    --overlay:rgba(0,0,0,.55);
 
     --icon:#9ca3af;
     --icon-active-light:#000000;
     --icon-active-dark:#ffffff;
   }
   html:not(.dark){
-    --card:#fff; --border:#e5e7eb; --fg:#1f2937; --muted:#6b7280; --hover:rgba(0,0,0,.06); --overlay:rgba(0,0,0,.45);
+    --card:#fff;
+    --border:#e5e7eb;
+    --fg:#1f2937;
+    --muted:#6b7280;
+    --hover:rgba(0,0,0,.05);
+    --overlay:rgba(0,0,0,.45);
   }
 
   /* Painel interno ocupa 100% da largura disponível do flyout */
   .app-sidebar{
-    width:100%; min-height:100%;
-    background:var(--card); border-right:0 !important;
+    width:100%;
+    min-height:100%;
+    background:var(--card);
+    border-right:0 !important;
     padding:1rem .75rem calc(1rem + env(safe-area-inset-bottom));
     padding-top:calc(var(--topbar-h) + .75rem);
-    display:flex; flex-direction:column; overflow:auto; position:relative;
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; letter-spacing:-.01em;
+    display:flex;
+    flex-direction:column;
+    overflow:auto;
+    position:relative;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    letter-spacing:-.01em;
   }
 
   .app-sidebar nav{
@@ -62,6 +80,7 @@
       0 8px 20px rgba(15,23,42,.12);
   }
 
+  /* LINKS – agora sem translate / scale pra não mexer */
   .app-sidebar nav a{
     position:relative;
     z-index:1; /* fica acima do indicador */
@@ -69,42 +88,36 @@
     align-items:center;
     gap:.75rem;
     padding:.7rem .85rem;
-    padding-right:1.2rem; /* espaço pro texto sempre visível */
+    padding-right:1.2rem;
     border-radius:.8rem;
     color:var(--muted);
-    border:1px solid transparent;
+    border:0;
+    background:transparent;
+    box-shadow:none;
     text-decoration:none;
     font-weight:500;
     font-size:15.5px;
-    /* animação tipo sidebar principal */
     transition:
       background .18s ease,
       color .18s ease,
-      border-color .18s ease,
-      box-shadow .18s ease,
-      transform .18s ease;
+      box-shadow .18s ease;
   }
 
   .app-sidebar nav a:hover{
     background:var(--hover);
     color:var(--fg);
-    transform:translateX(1px);
-    box-shadow:0 0 0 1px rgba(0,0,0,.12);
+    box-shadow:0 0 0 1px rgba(0,0,0,.18);
   }
 
   .app-sidebar nav a:active{
-    transform:translateX(0) scale(.98);
-    box-shadow:inset 0 0 0 1px rgba(0,0,0,.25);
+    box-shadow:0 0 0 1px rgba(0,0,0,.3);
   }
 
   .app-sidebar nav a.active,
   .app-sidebar nav a[aria-current="page"]{
     color:var(--fg);
-    border-color:var(--border);
     font-weight:600;
-    /* quem destaca de verdade é o indicador animado */
-    background:transparent;
-    box-shadow:none;
+    background:transparent; /* quem destaca é o indicador atrás */
   }
 
   /* ÍCONES – mesmo tamanho do sidebar principal */
@@ -270,16 +283,17 @@
     color:#fecaca !important;
   }
 
-  /* ===== MINI LEFTBAR (whatsapp) COM MESMA ANIMAÇÃO DO SIDEBAR ===== */
+  /* ===== MINI LEFTBAR (whatsapp) FIXA, SEM DESCER AO ABRIR ===== */
   .wpp-leftbar{
     position:relative;
-    width:3.2rem;                 /* mesma largura colapsada */
+    width:3.2rem;                 /* largura colapsada */
     flex:0 0 3.2rem;
     padding:.4rem 0;
     background:#111827;           /* pode ajustar pra usar var(--card) se quiser */
     display:flex;
     flex-direction:column;
-    align-items:center;
+    align-items:flex-start !important;   /* trava no topo */
+    justify-content:flex-start !important;
     transition:width .22s ease;
     overflow:visible;
   }
@@ -290,25 +304,25 @@
     gap:.35rem;
     width:100%;
     align-items:stretch;
+    margin-top:0;                       /* não empurra nada pra baixo */
   }
 
+  /* FIXO: padding/justify não mudam ao abrir, só a largura da barra */
   .wpp-leftbar-icon{
     position:relative;
     display:flex;
     align-items:center;
+    justify-content:flex-start !important; /* nunca centraliza no meio */
     gap:.65rem;
     width:100%;
-    padding:.5rem 0;
+    padding:.5rem .7rem .5rem .6rem;       /* fixo */
     border-radius:.75rem;
     color:var(--muted);
     text-decoration:none;
-    justify-content:center;
     overflow:hidden;
     transition:
       background .15s ease,
-      color .15s ease,
-      padding .2s ease,
-      gap .2s ease;
+      color .15s ease;
   }
 
   .wpp-leftbar-icon svg{
@@ -334,10 +348,7 @@
     width:16.5rem;  /* mesma largura expandida do sidebar */
   }
 
-  .wpp-leftbar:hover .wpp-leftbar-icon{
-    justify-content:flex-start;
-    padding:.5rem .7rem .5rem .6rem;
-  }
+  /* não mexe mais no padding/justify aqui pra não empurrar nada pra baixo */
 
   .wpp-leftbar:hover .wpp-leftbar-icon svg{
     margin-right:.25rem;

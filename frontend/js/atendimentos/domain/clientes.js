@@ -280,14 +280,23 @@ export function normalizeCliente(c){
 /* =========================================================
    PRIME: baixar últimas 30 msgs por conversa (prefetch leve)
    ========================================================= */
-function buildMsgsUrl(convId, instanciaId) {
+function buildMsgsUrl(convId, instanciaId, extra = {}) {
   const qs = new URLSearchParams({
     empresa_id: String(EMPRESA_ID),
-    limit: '30'
+    limit: String(extra.limit || 30),
   });
+
   if (instanciaId != null && instanciaId !== '' && instanciaId !== 'all') {
     qs.set('instancia_id', String(instanciaId));
   }
+
+  if (extra.since_ts) {
+    qs.set('since_ts', String(extra.since_ts));
+  }
+  if (extra.since_id) {
+    qs.set('since_id', String(extra.since_id));
+  }
+
   return `/api/atendimento/conversas/${convId}/mensagens?` + qs.toString();
 }
 

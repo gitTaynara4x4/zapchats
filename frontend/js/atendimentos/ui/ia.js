@@ -223,21 +223,25 @@
 
   // ---------- Botão no header ----------
   function ensureHeaderButton(){
-    if ($('#btn-ia')) return;
-
+    // tenta achar o container do header
     const hdr = $('#chat-header .flex.items-center.gap-2.relative')
-             || $('#chat-header .flex.items-center.gap-2')
-             || $('#chat-header');
+            || $('#chat-header .flex.items-center.gap-2')
+            || $('#chat-header');
     if (!hdr) return;
 
-    const btn = document.createElement('button');
-    btn.id = 'btn-ia';
-    btn.className = 'hdr-icon-btn';
-    btn.title = 'Ferramentas de IA';
-    btn.setAttribute('aria-label', 'Ferramentas de IA');
-    btn.innerHTML = `<img class="ia-logo" alt="IA">`; // src setado por updateAllLogos()
-    on(btn, 'click', () => window.IA.open());
-    hdr.appendChild(btn);
+    // pode já existir #btn-ia no HTML
+    let btn = document.getElementById('btn-ia');
+
+    // se não existir, cria
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.id = 'btn-ia';
+      btn.className = 'hdr-icon-btn';
+      btn.title = 'Ferramentas de IA';
+      btn.setAttribute('aria-label', 'Ferramentas de IA');
+      btn.innerHTML = `<img class="ia-logo" alt="IA">`; // src setado por updateAllLogos()
+      hdr.appendChild(btn);
+    }
 
     updateAllLogos();
   }
@@ -277,8 +281,6 @@
 
   // ---------- Normalizadores ----------
   function normalizeResumoResponse(j){
-    // aceita: {resumo:{...}}, objeto plano {...}, array [{json:{...}}] ou [{text:"{...}"}],
-    // string JSON ou texto puro
     function fromText(t){
       return {
         resumo_curto: String(t || 'Sem conteúdo.'),
@@ -302,11 +304,9 @@
       }
 
       if (j && typeof j === 'object') {
-        // formato esperado já normalizado
         if (j.resumo && typeof j.resumo === 'object') return j.resumo;
         if ('resumo_curto' in j || 'pontos_chave' in j) return j;
 
-        // n8n/LLM costuma vir como { json: {...} } ou { text: "<json string>" }
         if (j.json && typeof j.json === 'object') {
           return normalizeResumoResponse(j.json);
         }
@@ -315,7 +315,6 @@
           catch { return fromText(j.text); }
         }
 
-        // outras chaves possíveis
         if (typeof j.body === 'string') {
           try { return normalizeResumoResponse(JSON.parse(j.body)); }
           catch { return fromText(j.body); }
@@ -325,7 +324,6 @@
           catch { return fromText(j.data); }
         }
 
-        // último recurso: devolver como está
         return fromText(JSON.stringify(j));
       }
     }catch(_e){}
@@ -334,7 +332,6 @@
   }
 
   function normalizeMelhorarResponse(out){
-    // aceita: string, objeto, array [{json:{...}}] ou [{text:"{...}"}]
     try{
       if (Array.isArray(out)) {
         const first = out[0]?.json ?? out[0] ?? null;
@@ -364,6 +361,7 @@
 
     return '';
   }
+
   // ---------- IA: Resumo (do BD) ----------
   async function gerarResumo(){
     const emp = getEmpresaId(), cid = getClienteId();
@@ -479,12 +477,21 @@
   function colarNoChat(){
     if (!refs.respTxt.textContent) return;
     const input = $('#mensagem');
-    if (input) input.value = refs.respTxt.textContent; // (fix) textContent
+    if (input) input.value = refs.respTxt.textContent;
     closeIA(); input?.focus();
   }
 
   // ---------- API pública ----------
   window.IA = { open: openIA, close: closeIA };
+
+  // Delegação global de clique no #btn-ia (pega click no <img> também)
+  document.addEventListener('click', function(ev){
+    const el = ev.target.closest('#btn-ia');
+    if (!el) return;
+    ev.preventDefault();
+    console.debug('[IA] clique em #btn-ia, abrindo modal');
+    openIA();
+  });
 
   // Se o header já estiver visível, injeta o botão agora
   if ($('#chat-header') && getComputedStyle($('#chat-header')).display !== 'none') {

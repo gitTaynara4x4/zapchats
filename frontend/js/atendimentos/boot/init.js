@@ -284,6 +284,18 @@ async function selecionarClienteObj(id) {
   if (!c) return;
   setClienteSel(c);
 
+  // 🔗 integra com o drawer de Notas — informa qual cliente está aberto
+  try {
+    if (window.zcNotesSetContextFromCliente) {
+      // helper definido em notes-drawer.js
+      window.zcNotesSetContextFromCliente(c);
+    } else if (head) {
+      // fallback: ainda marca o header manualmente
+      const cid = c.cliente_id ?? c.id ?? c.conversation_id ?? null;
+      if (cid != null) head.dataset.clienteId = String(cid);
+    }
+  } catch {}
+
   try{
     const instCand = c.instancia_id ?? c.instancia ?? null;
     if (instCand != null && instCand !== '') {
@@ -299,7 +311,7 @@ async function selecionarClienteObj(id) {
     const phone =
       c.telefone ?? c.tel ?? c.phone ?? c.whatsapp ?? c.telefone_norm ?? c.numero ?? c.number ?? null;
 
-    const digits = onlyDigits(phone);
+    const digits = String(phone || '').replace(/\D+/g,'');
     if (digits) {
       if (hist) hist.dataset.telefone = digits;
       if (head) head.setAttribute('data-phone', digits);

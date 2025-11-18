@@ -1848,18 +1848,13 @@ async def on_messages_delete(inst_id: str, data):
         type_data=type(data).__name__,
     )
 
-    if not mensagens:
-        LOG("[DEL] nenhum item reconhecido em payload.")
-        return
-
     # vamos acumular tudo que precisar ser enviado pro WS depois do commit
-    to_notify = []
-    inst_db_id = None
-    empresa_id = None
+    to_notify: list[dict] = []
+    inst_db_id: int | None = None
+    empresa_id: int | None = None
 
-    from backend.database import SessionLocal  # se já tiver no topo, ignore
+    from backend.database import SessionLocal  # já existe no topo, ok repetir aqui
     from backend import models
-    # from backend.ws import manager as ws_manager  # ajuste o import pro seu projeto
 
     with SessionLocal() as db:
         inst = _get_inst_row(db, inst_id)
@@ -1876,13 +1871,19 @@ async def on_messages_delete(inst_id: str, data):
         for idx, m in enumerate(mensagens, start=1):
             try:
                 if not isinstance(m, dict):
-                    _log_ctx("[DEL][skip] m não é dict", idx=idx, type_m=type(m).__name__)
+                    _log_ctx(
+                        "[DEL][skip] m não é dict",
+                        idx=idx,
+                        type_m=type(m).__name__,
+                    )
                     continue
 
                 key = m.get("key") or {}
                 msg_id = key.get("id") or m.get("id")
                 from_me = bool(
-                    key.get("fromMe") if "fromMe" in key else (m.get("fromMe") or False)
+                    key.get("fromMe")
+                    if "fromMe" in key
+                    else (m.get("fromMe") or False)
                 )
 
                 _log_ctx(
@@ -1911,7 +1912,8 @@ async def on_messages_delete(inst_id: str, data):
 
                 encontrados += 1
 
-                tipo = getattr(row, "tipo", None)  # "entrada" / "saida"
+                # tipo: "entrada" (cliente) / "saida" (atendente)
+                tipo = getattr(row, "tipo", None)
 
                 apagou_cliente = False
                 apagou_usuario = False
@@ -1923,23 +1925,23 @@ async def on_messages_delete(inst_id: str, data):
                 else:
                     # fallback: usa from_me se o tipo não estiver preenchido
                     apagou_usuario = bool(from_me)
-                    apagou_cliente = not from_me
-
-                before_cli = bool(getattr(row, "apagada_cliente", False))
-                before_usr = bool(getattr(row, "apagada_usuario", False))
+                    apagou_cliente = not bool(from_me)
 
                 changed = False
 
-                if apagou_cliente and not before_cli:
+                if apagou_cliente and not bool(getattr(row, "apagada_cliente", False)):
                     row.apagada_cliente = True
                     changed = True
 
-                if apagou_usuario and not before_usr:
+                if apagou_usuario and not bool(
+                    getattr(row, "apagada_usuario", False)
+                ):
                     row.apagada_usuario = True
                     changed = True
 
                 if changed:
                     alterados += 1
+
                     # guarda info mínima pra mandar pro WS depois do commit
                     to_notify.append(
                         dict(
@@ -1950,32 +1952,44 @@ async def on_messages_delete(inst_id: str, data):
                         )
                     )
 
+                    preview = (getattr(row, "conteudo", None) or getattr(row, "texto", "") or "")[:32]
+                    _log_ctx(
+                        "[DEL][hit]",
+                        idx=idx,
+                        msg_id=row.msg_id,
+                        tipo=tipo,
+                        apagada_cliente=row.apagada_cliente,
+                        apagada_usuario=row.apagada_usuario,
+                        preview=preview,
+                    )
+                else:
+                    _log_ctx(
+                        "[DEL][nochange]",
+                        idx=idx,
+                        msg_id=row.msg_id,
+                        tipo=tipo,
+                        apagada_cliente=row.apagada_cliente,
+                        apagada_usuario=row.apagada_usuario,
+                    )
+
+            except Exception as e:
                 _log_ctx(
-                    "[DEL][hit]",
+                    "[DEL][err_msg]",
                     idx=idx,
-                    msg_id=msg_id,
-                    tipo=tipo,
-                    apagada_cliente=row.apagada_cliente,
-                    apagada_usuario=row.apagada_usuario,
-                    preview=_short(getattr(row, "conteudo", ""), 80),
+                    exc=str(e),
                 )
+                # segue para as próximas mensagens
 
-            except Exception as e:
-                LOG(f"[DEL] erro inesperado no loop idx={idx}: {e}")
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
-
-        if alterados:
+        try:
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            _log_ctx("[DEL][db_err]", exc=str(e))
+            # não sobe exceção pra não matar o consumer
             try:
-                db.commit()
-            except Exception as e:
-                LOG(f"[DEL] erro ao dar commit nas mensagens apagadas: {e}")
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
+                LOG(f"[DEL][db_err] inst={inst_id} exc={e}")
+            except Exception:
+                pass
 
     LOG(
         f"[DEL] concluído batch inst={inst_id} "
@@ -1984,30 +1998,34 @@ async def on_messages_delete(inst_id: str, data):
 
     # ========== AVISO VIA WEBSOCKET (frontend) ==========
     # se nada foi alterado, não precisa emitir evento
-    if not to_notify or not inst_db_id:
+    if not to_notify or not empresa_id:
         return
 
-    # aqui eu assumo um manager com método broadcast_instancia
-    # ajuste o import / método conforme seu projeto
-    from backend.ws import manager as ws_manager  # AJUSTE AQUI se o caminho for diferente
-
+    # usa o mesmo manager das outras mensagens (conexoes_ativas)
     for item in to_notify:
         try:
-            payload_ws = {
-                "type": "msg_deleted",          # <- ws.js trata esse type
-                "empresa_id": empresa_id,
-                "instancia_id": inst_db_id,
-                "cliente_id": item["cliente_id"],
-                "msg_id": item["msg_id"],
-                "apagada_cliente": item["apagada_cliente"],
-                "apagada_usuario": item["apagada_usuario"],
-            }
-            await ws_manager.broadcast_instancia(inst_db_id, payload_ws)
+            await conexoes_ativas.send_message(
+                f"emp:{empresa_id}",
+                {
+                    "type": "msg_deleted",
+                    "empresa_id": empresa_id,
+                    "instancia_id": inst_db_id,
+                    "instancia": inst_id,
+                    "cliente_id": item["cliente_id"],
+                    "msg_id": item["msg_id"],
+                    "apagada_cliente": item["apagada_cliente"],
+                    "apagada_usuario": item["apagada_usuario"],
+                    "serverTimestamp": _server_ts_ms(),
+                },
+            )
         except Exception as e:
             LOG(
-                f"[DEL] erro ao notificar WS "
-                f"inst={inst_db_id} msg_id={item['msg_id']}: {e}"
+                f"[DEL][ws] erro ao notificar delete inst={inst_id} "
+                f"msg_id={item.get('msg_id')} err={e}"
             )
+
+
+
 
 
 @handler(EvoEvent.CALL)
