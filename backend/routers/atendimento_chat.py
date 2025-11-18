@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend import models
-from backend.routers.auth import get_current_user
+from backend.routers.auth import get_current_identity
 
 # =========================================================
 # Router
@@ -158,7 +158,7 @@ def listar_mensagens(
         description="(Opcional) Cursor numérico: traz apenas mensagens com id > since_id."
     ),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     """
     Devolve o histórico de mensagens de um cliente.
@@ -186,7 +186,12 @@ def listar_mensagens(
     • Mantém compat: inclui também "mensagens": items
     """
     # empresa efetiva (valida com token)
-    empresa_id = _assert_mesma_empresa(user.empresa_id, empresa_id)
+    empresa_id = _assert_mesma_empresa(identity["empresa_id"], empresa_id)
+
+    # checa permissão de ver atendimentos/mensagens
+    perms = set(identity.get("permissoes") or [])
+    if "atendimento.ver" not in perms:
+        raise HTTPException(status_code=403, detail="Sem permissão para ver mensagens de atendimento")
 
     # valida cliente/empresa
     cli = (
@@ -340,14 +345,14 @@ def listar_mensagens_alias_historico(
     since_ts: datetime | None = Query(None),
     since_id: int | None = Query(None),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     """
     Alias para o endpoint principal de mensagens.
     Mantido por compatibilidade com o front (scroll-up).
     Permite também uso de cursor (?since_ts / ?since_id).
     """
-    empresa_id = _assert_mesma_empresa(user.empresa_id, empresa_id)
+    empresa_id = _assert_mesma_empresa(identity["empresa_id"], empresa_id)
     return listar_mensagens(
         cliente_id=cliente_id,
         empresa_id=empresa_id,
@@ -358,5 +363,5 @@ def listar_mensagens_alias_historico(
         since_ts=since_ts,
         since_id=since_id,
         db=db,
-        user=user,  # repassa o usuário (já validado)
+        identity=identity,  # repassa a identidade (já validada)
     )
