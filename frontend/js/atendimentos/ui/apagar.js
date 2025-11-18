@@ -87,8 +87,7 @@ function ensureIndex() {
     }
 
     // fallback por ts+trecho de texto
-    const ts =
-      m.timestamp || m.ts || m.data || m.created_at || '';
+    const ts = m.timestamp || m.ts || m.data || m.created_at || '';
     const txt = (m.conteudo || m.texto || m.mensagem || '').slice(0, 64);
     const fk = `${ts}|${txt}`;
     if (!byFallback.has(fk)) byFallback.set(fk, m);

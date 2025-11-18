@@ -376,13 +376,10 @@ function applyDeleteToHist(inst, cliente_id, msg_id, flags = {}) {
       const mid = String(m.msg_id || m.id || '');
       if (!mid || mid !== idStr) continue;
 
-      if ('apagada_cliente' in flags) m.apagada_cliente = !!flags.apagada_cliente;
+      // 🔹 Só marcamos flags; NÃO mexemos em texto/mídias
+      if ('apagada_cliente' in flags)  m.apagada_cliente  = !!flags.apagada_cliente;
       if ('apagada_usuario' in flags) m.apagada_usuario = !!flags.apagada_usuario;
 
-      if (flags.clearContent) {
-        m.texto = m.conteudo = 'Mensagem apagada';
-        m.midias = [];
-      }
       changed = true;
       break;
     }
@@ -522,15 +519,18 @@ function handleDeleteMensagem(payload){
 
   let cliente_id = Number(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? NaN);
   if (!cliente_id) {
-    cliente_id = findClienteIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || payload?.jid || '') || 0;
+    cliente_id = findClienteIdByPhone(
+      payload?.telefone || payload?.phone || payload?.remoteJid || payload?.jid || ''
+    ) || 0;
   }
   const msg_id = pickMsgId(payload);
   if (!cliente_id || !msg_id) return;
 
+  // Flags vindas do backend (on_messages_delete)
   const flags = {
     apagada_cliente: payload.apagada_cliente,
     apagada_usuario: payload.apagada_usuario,
-    clearContent: true,
+    // ⚠️ não passamos clearContent: mantém o conteúdo original
   };
 
   const changed = applyDeleteToHist(inst, cliente_id, msg_id, flags);
