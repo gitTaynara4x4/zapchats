@@ -2,6 +2,14 @@ import { EMPRESA_ID } from '../core/env.js';
 import { numeroE164 } from '../core/format.js';
 import { state } from '../state/store.js';
 
+/* ====== Fallback pra window.addListener (caso alguém ainda use) ====== */
+if (typeof window !== 'undefined' && typeof window.addListener !== 'function') {
+  window.addListener = function (...args) {
+    console.warn('[envio.js] window.addListener fallback chamado', ...args);
+  };
+}
+
+/* ========= TOASTZINHO ========= */
 function toast(msg, ok = true) {
   let t = document.getElementById('__app_toast');
   if (!t) {
@@ -90,7 +98,6 @@ function inputDialog({ title, rows, okText='OK', cancelText='Cancelar' }) {
           <button class="zcBtn ok">${okText}</button>
         </div>
       </div>`);
-    const dlg = wrap.querySelector('.zcDlg');
     const [btnCancel, btnOk] = wrap.querySelectorAll('.zcBtn');
     const inputs = [...wrap.querySelectorAll('.in')];
     const close = (val) => { wrap.remove(); res(val); };
@@ -122,7 +129,7 @@ function confirmDialog({ title='Confirmar', msg='', okText='OK', cancelText='Can
     wrap.addEventListener('click', e=>{ if(e.target===wrap) close(false); });
     wrap.addEventListener('keydown', e => {
       if (e.key === 'Escape') { e.preventDefault(); close(false); }
-      if (e.key === 'Enter')  { e.preventDefault(); close(true);  }
+      if (e.key === 'Enter')  { e.preventDefault(); btnOk.click();  }
     });
   });
 }
@@ -153,6 +160,37 @@ function toggleSendingUI(disabled){
   if (btn)   btn.disabled   = !!disabled;
 }
 
+/* ====== Resolve telefone a partir do cliente ======
+   - tenta telefone / whatsapp / numero
+   - se não tiver, e nome parecer telefone (caso do cliente vindo só com nome "+55 31 ..."),
+     usa nome como fonte do número
+==================================================== */
+function resolveRawTel(cli){
+  if (!cli) return '';
+  if (cli.telefone) return cli.telefone;
+  if (cli.whatsapp) return cli.whatsapp;
+  if (cli.numero)   return cli.numero;
+
+  if (typeof cli.nome === 'string') {
+    const digits = cli.nome.replace(/\D/g,'');
+    if (digits.length >= 10) return cli.nome;
+  }
+  return '';
+}
+
+// garante que existe ALGUM telefone resolvível
+function ensureClienteSel(){
+  const cli = state?.clienteSel || {};
+  const rawTel = resolveRawTel(cli);
+  if (!rawTel){
+    toast('Selecione um contato.', false);
+    console.warn('[send] ensureClienteSel: clienteSel sem telefone', cli);
+    return false;
+  }
+  return true;
+}
+
+/* ===================== MAIN INIT ENVIO ===================== */
 (function initEnvio(){
   const footer = document.getElementById('chat-footer') || document.body;
   const form = footer.closest('form');
@@ -199,13 +237,6 @@ function toggleSendingUI(disabled){
   inputMsg.addEventListener('input', toggleSendMic);
   toggleSendMic();
 
-  function ensureClienteSel(){
-    if(!state.clienteSel?.telefone){
-      toast('Selecione um contato.', false);
-      return false;
-    }
-    return true;
-  }
   function toDataUrl(fileOrBlob){
     return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(fileOrBlob); });
   }
@@ -239,16 +270,21 @@ function toggleSendingUI(disabled){
     }
   }
   function stripUndefined(o){ Object.keys(o).forEach(k=> o[k]===undefined && delete o[k]); return o; }
-  const numberForApi = () => numeroE164(state.clienteSel?.telefone || '');
 
-  /* ===================== ENVIO SEM OTIMISMO ===================== */
+  // usa resolveRawTel + numeroE164
+  const numberForApi = () => {
+    const cli = state?.clienteSel || {};
+    const raw = resolveRawTel(cli);
+    return numeroE164(raw || '');
+  };
+
+  /* ===================== ENVIO TEXTO (SEM OTIMISMO) ===================== */
   async function enviarTexto(){
     const text = (inputMsg.value||'').trim();
     if (!text) return;
 
-    // garante que tem cliente + telefone
     const cli = state?.clienteSel || {};
-    const rawTel = cli.telefone || cli.whatsapp || cli.numero || '';
+    const rawTel = resolveRawTel(cli);
     if (!rawTel){
       toast('Contato sem telefone válido. Recarregue a tela ou edite o cadastro.', false);
       console.warn('[send/text] clienteSel sem telefone', cli);
@@ -272,7 +308,7 @@ function toggleSendingUI(disabled){
         ...getInstPayload(),
       };
 
-      // ajuda pra debugar se der pau de novo
+      // ajuda pra debugar se der pau
       window.__debugLastSendPayload = payload;
 
       const r = await fetch('/api/atendimento/send/text', {
@@ -288,7 +324,6 @@ function toggleSendingUI(disabled){
 
       if (!r.ok) {
         console.error('[send/text] HTTP', r.status, respText || respJson);
-        // tenta extrair mensagem amigável do backend
         const msg =
           (respJson && (respJson.detail || respJson.message || respJson.error)) ||
           (r.status === 400 ? 'Dados inválidos (número ou instância).' : 'Falha ao enviar.');
@@ -296,7 +331,6 @@ function toggleSendingUI(disabled){
         return;
       }
 
-      // se chegou aqui, deu boa
       const resp = respJson;
 
       const instName = resp?.instance_name ?? resp?.db?.instance_name ?? null;
@@ -315,7 +349,6 @@ function toggleSendingUI(disabled){
       toggleSendingUI(false);
     }
   }
-
 
   btnSend.addEventListener('click', enviarTexto);
   inputMsg.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); enviarTexto(); } });
@@ -411,6 +444,7 @@ function toggleSendingUI(disabled){
     }
   });
 
+  /* ===================== ENVIO DE ARQUIVOS / MÍDIA ===================== */
   async function enviarMediaArquivo(file, explicitType=null){
     if (!ensureClienteSel() || !file) return;
     const caption   = (inputMsg.value||'').trim() || undefined;
@@ -506,7 +540,6 @@ function toggleSendingUI(disabled){
       case 'doc':         fileDoc.click(); break;
       case 'media':       fileMedia.click(); break;
 
-      // força câmera no mobile (capture); desktop ignora 'capture'
       case 'camera': {
         const prevAccept = fileMedia.accept;
         const hadCapture = fileMedia.hasAttribute('capture');

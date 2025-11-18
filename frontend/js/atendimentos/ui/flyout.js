@@ -94,25 +94,29 @@
     function scheduleClose(){
       clearTimeout(openTimer);
       closeTimer = setTimeout(() => {
-        // só fecha se o mouse não estiver nem na mini bar, nem no painel aberto
+        // verifica se o mouse ainda está em cima da mini-barra ou do flyout
         const overMini = mini.matches(':hover');
-        const overHost = host.matches(':hover');
+        const overHost = host.matches(':hover'); // host = overlay inteiro (backdrop + painel)
+
+        // só fecha se o mouse NÃO estiver nem na mini bar, nem em qualquer parte do flyout
         if (!overMini && !overHost) {
           closeFlyout(host);
         }
-      }, 90);
+      }, 100);
     }
 
+    // abre quando entra na barrinha
     mini.addEventListener('mouseenter', scheduleOpen);
+    // começa a contagem pra fechar quando sai da barrinha
     mini.addEventListener('mouseleave', scheduleClose);
 
-    // se o mouse sai do painel para o conteúdo, fecha também
-    host.addEventListener('mouseleave', scheduleClose);
-
-    // se voltar pro painel, cancela fechamento
+    // se o mouse entrar em QUALQUER parte do flyout (painel ou backdrop), cancela o fechamento
     host.addEventListener('mouseenter', () => {
       clearTimeout(closeTimer);
     });
+
+    // se sair de qualquer parte do flyout, agenda fechamento
+    host.addEventListener('mouseleave', scheduleClose);
   }
 
   // ---------- Mini barra (wpp-leftbar) baseada no partial ----------
@@ -155,7 +159,7 @@
         mini.appendChild(i);
       }
 
-      // Label opcional (se o CSS esconder, beleza)
+      // Label opcional
       if (labelText) {
         const span = document.createElement('span');
         span.className = 'wpp-label';

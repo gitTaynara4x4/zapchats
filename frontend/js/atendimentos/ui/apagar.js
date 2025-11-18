@@ -1,7 +1,7 @@
 // /frontend/js/atendimentos/ui/apagar.js
 // UI de mensagens apagadas
 // - Lê flags apagada_cliente / apagada_usuario vindas do backend (via hist-cache)
-// - Não apaga nada do DOM, só troca o texto e aplica classe CSS
+// - NÃO apaga o conteúdo original: só adiciona um aviso/bandeirinha visual
 // - Funciona no carregamento inicial + conforme novas .msg-row aparecem
 
 import { getHist } from '../domain/hist-cache.js';
@@ -25,16 +25,16 @@ function boolFlag(v) {
   return ['1', 'true', 't', 'y', 'yes', 'sim'].includes(s);
 }
 
-// Decide o texto que vai aparecer no lugar do conteúdo original
+// Decide o texto do aviso que vai aparecer
 function getDeleteLabel(msg) {
   const flagCli =
     boolFlag(msg.apagada_cliente ?? msg.apagadaCliente ?? msg.deleted_by_client);
   const flagUsr =
     boolFlag(msg.apagada_usuario ?? msg.apagadaUsuario ?? msg.deleted_by_user);
 
-  if (flagCli && flagUsr) return 'Mensagem apagada pelo cliente e atendente';
-  if (flagCli) return 'Mensagem apagada pelo cliente';
-  if (flagUsr) return 'Mensagem apagada pelo atendente';
+  if (flagCli && flagUsr) return 'Esta mensagem foi apagada pelo cliente e atendente';
+  if (flagCli) return 'Esta mensagem foi apagada pelo cliente';
+  if (flagUsr) return 'Esta mensagem foi apagada pelo atendente';
 
   // Fallback: se o backend já trocou o texto pra "[Mensagem apagada]"
   const raw = (msg.conteudo || msg.texto || msg.mensagem || '').trim().toLowerCase();
@@ -45,7 +45,7 @@ function getDeleteLabel(msg) {
     raw === 'mensagem apagada pelo cliente' ||
     raw === 'mensagem apagada pelo atendente'
   ) {
-    return 'Mensagem apagada';
+    return 'Esta mensagem foi apagada';
   }
 
   return null;
@@ -153,43 +153,16 @@ function decorateRow(row) {
 
   if (!bubble) return;
 
-  // Esconde mídias/arquivos – igual WhatsApp quando apaga mensagem
-  bubble
-    .querySelectorAll(
-      '.msg-media, .msg-media-img, .msg-media-video, .msg-media-audio, .doc-card, .file-card'
-    )
-    .forEach((el) => {
-      el.style.display = 'none';
-    });
+  // 👉 NÃO escondemos mídias nem trocamos o texto.
+  // Vamos criar um "banner" em cima do conteúdo da bolha.
 
-  // Tenta achar elemento de texto existente
-  let textEl =
-    bubble.querySelector('.msg-text') ||
-    bubble.querySelector('.bubble-text') ||
-    bubble.querySelector('.text');
-
-  const meta =
-    bubble.querySelector('.meta, .msg-meta, .msg-footer') || null;
-
-  if (textEl) {
-    // Só troca o conteúdo e aplica classe
-    textEl.textContent = label;
-    textEl.classList.add('msg-text-deleted');
-  } else {
-    // Fallback mais agressivo: cria um bloco de texto antes do meta
-    const div = document.createElement('div');
-    div.className = 'msg-text msg-text-deleted';
-    div.textContent = label;
-
-    if (meta && meta.parentElement === bubble) {
-      meta.insertAdjacentElement('beforebegin', div);
-    } else if (meta) {
-      // se o meta estiver em outro sub-nó, insere no topo da bolha
-      bubble.insertBefore(div, bubble.firstChild);
-    } else {
-      bubble.insertAdjacentElement('afterbegin', div);
-    }
+  let banner = bubble.querySelector('.msg-delete-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.className = 'msg-delete-banner';
+    bubble.insertBefore(banner, bubble.firstChild);
   }
+  banner.textContent = label;
 
   row.classList.add('msg-deleted');
   row.dataset.deletedDecorated = '1';
@@ -230,10 +203,13 @@ function ensureCss() {
   style.textContent = `
   #historico .msg-row.msg-deleted .bubble,
   #historico .msg-row.msg-deleted {
-    opacity: .9;
+    opacity: .97;
   }
-  #historico .msg-row.msg-deleted .msg-text-deleted {
+  #historico .msg-row.msg-deleted .msg-delete-banner {
+    display: block;
+    font-size: .70rem;
     font-style: italic;
+    margin-bottom: .15rem;
     color: var(--muted, #aebac1);
   }
   #historico .msg-row.msg-deleted .msg-time,

@@ -1,5 +1,6 @@
 // /frontend/js/atendimentos/ui/notes-drawer.js
 // Drawer "Notas" + botão no header (#btn-sobre), alinhado e com feedback visual igual ao #btn-ia.
+// Agora: salva em BD (sobre_cliente) e busca nota existente por cliente.
 
 (function () {
   if (window.__zcNotesLoaded) return;
@@ -57,6 +58,18 @@
   }
   .zcNotes-btnGhost:hover{background:#152028}
 
+  /* Mensagem de status (sucesso/erro) */
+  .zcNotes-status{
+    font-size:12px;
+    color:#9ca3af;
+    margin-bottom:4px;
+    min-height:1em;
+    display:none;
+    transition:opacity .2s ease;
+  }
+  .zcNotes-status.ok{ color:#22c55e; }   /* verde */
+  .zcNotes-status.err{ color:#f97373; }  /* vermelho */
+
   /* Botão no header: mesma caixa/feedback do #btn-ia */
   #btn-sobre{
     display:inline-grid;place-items:center;
@@ -92,124 +105,16 @@
     }
   })();
 
-  // ---------- helpers de contexto (empresa/atendimento/cliente) ----------
-  function _safeLS(){
-    try{
-      return window.localStorage;
-    }catch{
-      return null;
-    }
-  }
-
-  function _getEmpresaId(){
-    const ls = _safeLS();
-    if (!ls) return null;
-    try{
-      return ls.getItem('empresa_id') || null;
-    }catch{
-      return null;
-    }
-  }
-
-  /**
-   * Lê o contexto atual a partir do #chat-header.
-   * Espera (se possível) data-cliente-id e/ou data-atendimento-id.
-   */
-  function _getNotesContext(){
-    const hdr = document.getElementById('chat-header');
-    if (!hdr) return null;
-
-    const ds = hdr.dataset || {};
-    const clienteId     = hdr.getAttribute('data-cliente-id')     || ds.clienteId     || null;
-    const atendimentoId = hdr.getAttribute('data-atendimento-id') || ds.atendimentoId || null;
-    const empresaId     = _getEmpresaId();
-
-    if (!clienteId && !atendimentoId) {
-      // Sem contexto específico → ainda assim devolve empresa se tiver
-      return empresaId ? { empresaId } : null;
-    }
-
-    return { empresaId, clienteId, atendimentoId };
-  }
-
-  function _ctxToStorageKey(ctx){
-    if (!ctx) return null;
-    const emp = ctx.empresaId     || 'emp';
-    const at  = ctx.atendimentoId || 'at';
-    const cl  = ctx.clienteId     || 'cli';
-    return `zcNotes:${emp}:${at}:${cl}`;
-  }
-
-  function _loadNoteIntoTextarea(){
-    const ta = document.getElementById('zcNotesText');
-    if (!ta) return;
-
-    const ls  = _safeLS();
-    const ctx = _getNotesContext();
-    const key = _ctxToStorageKey(ctx);
-
-    if (!ls || !key) {
-      // Sem contexto ou sem LS → não reaproveita nota anterior
-      ta.value = '';
-      return;
-    }
-
-    try{
-      ta.value = ls.getItem(key) || '';
-    }catch{
-      ta.value = '';
-    }
-  }
-
-  function _saveNoteFromTextarea(){
-    const ta = document.getElementById('zcNotesText');
-    if (!ta) return;
-
-    const txt = ta.value || '';
-    const ls  = _safeLS();
-    const ctx = _getNotesContext();
-    const key = _ctxToStorageKey(ctx);
-
-    console.log('[NOTES] salvar:', { txt, ctx, key });
-
-    if (ls && key) {
-      try{
-        if (txt.trim()) {
-          ls.setItem(key, txt);
-        } else {
-          // se ficou vazio, remove pra não acumular lixo
-          ls.removeItem(key);
-        }
-      }catch{
-        // ignora erro de quota/etc
-      }
-    }
-
-    // 🔗 Aqui é o ponto para plugar seu endpoint, ex:
-    // if (ctx && ctx.clienteId) {
-    //   fetch(`/api/atendimento/clientes/${ctx.clienteId}/notas`, {
-    //     method: 'PUT',
-    //     headers: { 'Content-Type':'application/json' },
-    //     body: JSON.stringify({ nota: txt })
-    //   }).catch(err => console.error('[NOTES] erro ao salvar no servidor', err));
-    // }
-  }
-
-  // ---------- tema + SVG ----------
+  // ---------- helpers de tema + ícone ----------
   function _getTheme(){
     try{
       const t = document.documentElement.getAttribute('data-theme');
       if (t) return t;
     }catch{}
-    try{
-      return (matchMedia && matchMedia('(prefers-color-scheme: dark)').matches)
-        ? 'dark'
-        : 'light';
-    }catch{}
+    try{ return (matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; }catch{}
     return 'dark';
   }
-
-  // ÍCONE solicitado: dark -> #ffffff, light -> #080808 (24×24)
+  // ÍCONE: dark -> #ffffff, light -> #080808 (24×24)
   function _iconSvg(theme){
     const fill = theme === 'light' ? '#080808' : '#ffffff';
     return `
@@ -217,6 +122,178 @@
         <path d="M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H156.69A15.92,15.92,0,0,0,168,219.31L219.31,168A15.92,15.92,0,0,0,224,156.69V48A16,16,0,0,0,208,32ZM96,88h64a8,8,0,0,1,0,16H96a8,8,0,0,1,0-16Zm32,80H96a8,8,0,0,1,0-16h32a8,8,0,0,1,0,16ZM96,136a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Zm64,68.69V160h44.7Z"></path>
       </svg>
     `;
+  }
+
+  // ---------- helpers de contexto / storage / fetch ----------
+  function getEmpresaId(){
+    try{
+      const raw = window.localStorage.getItem('empresa_id');
+      const n = raw ? parseInt(raw, 10) : null;
+      return Number.isFinite(n) ? n : null;
+    }catch{
+      return null;
+    }
+  }
+
+  // tenta descobrir o cliente atual:
+  // 1) #chat-header[data-cliente-id]
+  // 2) algum state global (caso você exponha window.ZC_AT_STATE.clienteSel.id, por ex.)
+  function getSelectedClienteId(){
+    const hdr = document.getElementById('chat-header');
+    if (hdr){
+      const cid = hdr.getAttribute('data-cliente-id') || (hdr.dataset && hdr.dataset.clienteId);
+      if (cid){
+        const n = parseInt(cid, 10);
+        if (Number.isFinite(n)) return n;
+      }
+    }
+    // opcional: se você expuser seu state global, isso já cobre
+    try{
+      if (window.ZC_AT_STATE && window.ZC_AT_STATE.clienteSel && window.ZC_AT_STATE.clienteSel.id){
+        const n = parseInt(window.ZC_AT_STATE.clienteSel.id, 10);
+        if (Number.isFinite(n)) return n;
+      }
+    }catch{}
+    return null;
+  }
+
+  function getCtx(){
+    const ctx = {
+      empresaId: getEmpresaId(),
+      clienteId: getSelectedClienteId(),
+    };
+    return ctx;
+  }
+
+  function makeKey(ctx){
+    const emp = ctx.empresaId != null ? String(ctx.empresaId) : 'noEmp';
+    const cli = ctx.clienteId != null ? String(ctx.clienteId) : 'noCli';
+    // chave AGORA é por cliente (não mais "zcNotes:2:at:cli")
+    return `zcNotes:${emp}:cli:${cli}`;
+  }
+
+  function loadFromStorage(ctx){
+    try{
+      const key = makeKey(ctx);
+      const raw = window.localStorage.getItem(key);
+      return raw || '';
+    }catch{
+      return '';
+    }
+  }
+
+  function saveToStorage(ctx, txt){
+    try{
+      const key = makeKey(ctx);
+      window.localStorage.setItem(key, txt || '');
+      return true;
+    }catch{
+      return false;
+    }
+  }
+
+  // fetch autenticado padrão (usa ZAuth.authFetch se existir)
+  function authFetchJson(url, opt = {}){
+    const baseFetch = (window.ZAuth && ZAuth.authFetch) ? ZAuth.authFetch : fetch;
+    const headers = Object.assign(
+      { 'Accept':'application/json', 'Content-Type':'application/json' },
+      opt.headers || {}
+    );
+    return baseFetch(url, Object.assign({}, opt, { headers }));
+  }
+
+  // ----- status (mensagem pra cliente) -----
+  let statusTimeout = null;
+
+  function getStatusEl(){
+    const drawerBody = document.querySelector('.zcNotes-body');
+    if (!drawerBody) return null;
+    let el = drawerBody.querySelector('#zcNotesStatus');
+    if (!el){
+      el = document.createElement('div');
+      el.id = 'zcNotesStatus';
+      el.className = 'zcNotes-status';
+      const actions = drawerBody.querySelector('.zcNotes-actions');
+      drawerBody.insertBefore(el, actions || drawerBody.lastChild);
+    }
+    return el;
+  }
+
+  function clearStatus(){
+    if (statusTimeout){
+      clearTimeout(statusTimeout);
+      statusTimeout = null;
+    }
+    const el = document.getElementById('zcNotesStatus');
+    if (!el) return;
+    el.textContent = '';
+    el.classList.remove('ok','err');
+    el.style.display = 'none';
+    el.style.opacity = '';
+  }
+
+  function showStatus(msg, kind){
+    const el = getStatusEl();
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.remove('ok','err');
+    if (kind === 'ok') el.classList.add('ok');
+    if (kind === 'err') el.classList.add('err');
+    el.style.display = 'block';
+    el.style.opacity = '1';
+    if (statusTimeout){
+      clearTimeout(statusTimeout);
+    }
+    statusTimeout = setTimeout(() => {
+      el.style.opacity = '0';
+      setTimeout(() => {
+        if (el.textContent === msg){ // não apaga se outra msg aparecer no meio
+          el.style.display = 'none';
+          el.style.opacity = '';
+        }
+      }, 400);
+    }, 2600);
+  }
+
+  // ----- BD: carregar nota existente (sobre_cliente) -----
+  async function loadFromBackend(ctx){
+    if (!ctx || !ctx.clienteId) return;
+    const expectedKey = makeKey(ctx);
+
+    try{
+      const res = await authFetchJson(`/api/atendimento/clientes/${ctx.clienteId}/profile`, {
+        method: 'GET'
+      });
+
+      if (!res.ok){
+        console.warn('[NOTES] erro ao buscar notas do BD:', res.status);
+        // silencioso pra não encher o saco, só avisa se você quiser:
+        // showStatus('Não foi possível carregar as notas deste cliente.', 'err');
+        return;
+      }
+
+      const data = await res.json().catch(() => null);
+      const note = (data && data.sobre_cliente) || '';
+
+      const ta = document.getElementById('zcNotesText');
+      if (!ta) return;
+
+      // se o contexto mudou enquanto carregava, ignora (evita sobrescrever outro cliente)
+      const ctxNow = getCtx();
+      if (makeKey(ctxNow) !== expectedKey){
+        console.log('[NOTES] contexto mudou durante loadFromBackend, ignorando resposta.');
+        return;
+      }
+
+      // só preenche se textarea ainda estiver vazia (pra não apagar digitação do usuário)
+      if (!ta.value.trim()){
+        ta.value = note || '';
+      }
+      saveToStorage(ctxNow, ta.value || '');
+    }catch(err){
+      console.error('[NOTES] erro ao carregar nota do BD:', err);
+      // showStatus('Falha ao carregar as notas do servidor.', 'err');
+    }
   }
 
   // ---------- cria o drawer uma vez ----------
@@ -254,12 +331,28 @@
     document.body.append(backdrop, drawer);
 
     function open(){
-      // sempre que abrir, carrega a nota do contexto atual (cliente/atendimento)
-      _loadNoteIntoTextarea();
-
       backdrop.classList.add('is-open');
       drawer.classList.add('is-open');
       try { document.querySelector('main')?.setAttribute('inert',''); } catch {}
+      clearStatus();
+
+      const ta = document.getElementById('zcNotesText');
+      if (ta){
+        ta.value = '';
+      }
+
+      const ctx = getCtx();
+      console.log('[NOTES] open ctx:', ctx, 'key:', makeKey(ctx));
+
+      // 1) carrega do localStorage (por cliente)
+      const txtLocal = loadFromStorage(ctx);
+      if (ta && txtLocal){
+        ta.value = txtLocal;
+      }
+
+      // 2) busca nota do BD (sobre_cliente) e sincroniza
+      loadFromBackend(ctx);
+
       setTimeout(()=> document.getElementById('zcNotesText')?.focus(), 0);
     }
 
@@ -267,6 +360,7 @@
       backdrop.classList.remove('is-open');
       drawer.classList.remove('is-open');
       try { document.querySelector('main')?.removeAttribute('inert'); } catch {}
+      // não apaga texto nem storage aqui; deixa como "rascunho"
     }
 
     document.getElementById('zcNotesClose')?.addEventListener('click', close);
@@ -274,9 +368,51 @@
     backdrop.addEventListener('click', (e)=>{ if (e.target === backdrop) close(); });
     document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') close(); });
 
+    // auto-save local ao digitar
+    const ta = document.getElementById('zcNotesText');
+    if (ta){
+      ta.addEventListener('input', () => {
+        const ctx = getCtx();
+        saveToStorage(ctx, ta.value || '');
+      });
+    }
+
     document.getElementById('zcNotesSave')?.addEventListener('click', async () => {
-      _saveNoteFromTextarea();
-      close();
+      const textarea = document.getElementById('zcNotesText');
+      const txt = (textarea?.value || '').trim();
+      const ctx = getCtx();
+      const key = makeKey(ctx);
+
+      const payload = { sobre_cliente: txt || null };
+      console.log('[NOTES] salvar payload:', { ctx, key, payload });
+
+      // sempre salva localmente (mesmo se não tiver clienteId)
+      saveToStorage(ctx, txt || '');
+
+      if (!ctx.clienteId){
+        showStatus('Não foi possível identificar o cliente. Nota salva apenas neste navegador.', 'err');
+        return;
+      }
+
+      try{
+        const res = await authFetchJson(`/api/atendimento/clientes/${ctx.clienteId}/profile`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json().catch(()=>null);
+
+        if (!res.ok || !data || data.ok !== true){
+          console.warn('[NOTES] erro ao salvar no BD:', res.status, data);
+          showStatus('Não foi possível salvar as notas no servidor.', 'err');
+          return;
+        }
+
+        showStatus('Notas salvas com sucesso.', 'ok');
+      }catch(err){
+        console.error('[NOTES] falha na requisição de salvar nota:', err);
+        showStatus('Erro de conexão ao salvar as notas.', 'err');
+      }
     });
 
     // expõe

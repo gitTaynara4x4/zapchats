@@ -4,7 +4,6 @@
 
   console.debug('[autoopen] script carregado');
 
-  // ===== Helpers base / auth =====
   const LS = localStorage;
   const EMPRESA_ID = Number(LS.getItem('empresa_id') || '') || null;
 
@@ -59,7 +58,6 @@
     }catch{}
   }
 
-  // ===== API =====
   async function apiGet(path){
     let url;
     try{
@@ -145,6 +143,42 @@
     }
   }
 
+  // >>>>>>> NOVO: hidratar state.clienteSel com telefone, nome etc.
+  function hydrateClienteSel(cli, opts){
+    window.state = window.state || {};
+    const prev = window.state.clienteSel || {};
+    const rawTel =
+      cli?.telefone ||
+      cli?.phone ||
+      cli?.numero ||
+      cli?.whatsapp ||
+      cli?.wa_id ||
+      '';
+
+    const telDigits = digits(rawTel);
+
+    const novo = {
+      ...prev,
+      id:          cli?.id ?? prev.id ?? opts?.clienteId,
+      cliente_id:  cli?.id ?? prev.cliente_id ?? prev.id ?? opts?.clienteId,
+      nome:        cli?.nome || cli?.nome_whatsapp || prev.nome,
+      nome_whatsapp: cli?.nome_whatsapp || prev.nome_whatsapp,
+      telefone:    telDigits,
+      telefone_raw: rawTel,
+      numero:      telDigits,
+      wa_id:       cli?.wa_id || cli?.whatsapp_id || prev.wa_id,
+      avatar_url:  cli?.avatar_url || prev.avatar_url,
+      instancia_id: prev.instancia_id ?? opts?.instancia_id ?? null,
+      instancia:    prev.instancia ?? opts?.instancia ?? null
+    };
+
+    window.state.clienteSel = novo;
+    // alguns códigos antigos podem usar isso:
+    window.CLIENTE_ATUAL = novo;
+
+    console.debug('[autoopen] clienteSel hidratado:', novo);
+  }
+
   function renderMessagesFallback(msgs){
     const thread = document.getElementById('autoopen-thread') || ensureFallbackContainers().querySelector('#autoopen-thread');
     thread.innerHTML = '';
@@ -178,7 +212,6 @@
     thread.scrollTop = thread.scrollHeight + 999;
   }
 
-  // ===== abrir usando o historico.js (modo "oficial" do chat) =====
   async function openWithHistorico(clienteId){
     console.debug('[autoopen] abrindo com historico.js', clienteId);
 
@@ -214,7 +247,6 @@
     input?.focus?.();
   }
 
-  // ===== fluxo principal: ler querystring e tentar abrir =====
   async function prepareAutoOpen(){
     const qs = new URLSearchParams(location.search);
     const clienteId = Number(qs.get('cliente_id') || qs.get('cliente') || '');
@@ -227,29 +259,38 @@
 
     const instIdParam   = qs.get('instancia_id') || qs.get('instance_id');
     const instSlugParam = qs.get('instancia')   || qs.get('instance');
-    const inst = (instIdParam && String(instIdParam).trim())
-              || (instSlugParam && String(instSlugParam).trim())
-              || LS.getItem('INSTANCIA_ATIVA')
-              || '';
+    const instValue = (instIdParam && String(instIdParam).trim())
+                   || (instSlugParam && String(instSlugParam).trim())
+                   || LS.getItem('INSTANCIA_ATIVA')
+                   || '';
 
-    if (inst) setActiveInstance(inst);
+    if (instValue) setActiveInstance(instValue);
 
+    // base mínima
     window.state = window.state || {};
     window.state.clienteSel = {
       id: clienteId,
+      cliente_id: clienteId,
       instancia_id: (instIdParam && Number(instIdParam)) || null,
       instancia: (!instIdParam && instSlugParam) ? String(instSlugParam) : null
     };
 
-    // carrega dados básicos do cliente só pra preencher header
+    // carrega dados básicos do cliente pra header E pra telefone
+    let cli = null;
     try{
-      const cli = await apiGet(`/api/clientes/${clienteId}`);
-      if (cli) setHeader(cli, String(inst));
+      cli = await apiGet(`/api/clientes/${clienteId}`);
+      if (cli) {
+        setHeader(cli, String(instValue || ''));
+        hydrateClienteSel(cli, {
+          clienteId,
+          instancia_id: (instIdParam && Number(instIdParam)) || null,
+          instancia: (!instIdParam && instSlugParam) ? String(instSlugParam) : null
+        });
+      }
     }catch(e){
       console.warn('[autoopen] não conseguiu carregar cliente', e);
     }
 
-    // Agora tenta abrir de fato a conversa
     const maxAttempts = 40;   // ~10s (40 * 250ms)
     let attempts = 0;
 
@@ -272,9 +313,9 @@
             url.searchParams.set('instancia_id', String(instIdParam));
           } else if (instSlugParam) {
             url.searchParams.set('instance', String(instSlugParam));
-          } else if (inst) {
-            if (/^\d+$/.test(String(inst))) url.searchParams.set('instancia_id', String(inst));
-            else url.searchParams.set('instance', String(inst));
+          } else if (instValue) {
+            if (/^\d+$/.test(String(instValue))) url.searchParams.set('instancia_id', String(instValue));
+            else url.searchParams.set('instance', String(instValue));
           }
           url.searchParams.set('limit','30');
 
@@ -294,10 +335,10 @@
     step();
   }
 
-  // roda assim que o script carregar
+  // dispara logo que o script carrega
   prepareAutoOpen();
 
-  // CSS: quando o chat estiver “aberto”, some o hero vazio + welcome
+  // CSS pra esconder hero/welcome quando um chat estiver aberto
   (function injectCSS(){
     const id='auto-open-css';
     if (document.getElementById(id)) return;

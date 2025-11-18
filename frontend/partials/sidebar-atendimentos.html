@@ -69,6 +69,7 @@
     align-items:center;
     gap:.75rem;
     padding:.7rem .85rem;
+    padding-right:1.2rem; /* espaço pro texto sempre visível */
     border-radius:.8rem;
     color:var(--muted);
     border:1px solid transparent;
@@ -135,32 +136,6 @@
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
-  }
-
-  /* Efeito “abrir” texto só em dispositivos com hover (desktop) */
-  @media (hover:hover){
-    .app-sidebar nav a .label{
-      max-width:0;
-      opacity:0;
-      transform:translateX(-4px);
-      transition:
-        max-width .22s cubic-bezier(.28,1.2,.43,1),
-        opacity .16s ease,
-        transform .18s ease;
-    }
-
-    .app-sidebar nav a:hover .label,
-    .app-sidebar nav a.active .label,
-    .app-sidebar nav a[aria-current="page"] .label{
-      max-width:160px;
-      opacity:1;
-      transform:translateX(0);
-    }
-
-    /* dá um pouco mais de respiro para o texto expandir */
-    .app-sidebar nav a{
-      padding-right:1.2rem;
-    }
   }
 
   .sb-sep{
@@ -715,7 +690,7 @@
       if(!res.ok) return;
       var blob=await res.blob(); var r=new FileReader();
       r.onloadend=function(){
-        try{localStorage.setItem('usuario_avatar', r.result);}catch{}; 
+        try{localStorage.setItem('usuario_avatar', r.result);}catch{};
         var img=document.getElementById('userAvatarAtt'); var icn=document.getElementById('userIconAtt');
         if(img){img.src=r.result; img.style.display='block';}
         if(icn) icn.style.display='none';
@@ -776,7 +751,7 @@
         await new Promise(function(resolve){
           var r=new FileReader();
           r.onloadend=function(){
-            try{localStorage.setItem('usuario_avatar', r.result);}catch{}; 
+            try{localStorage.setItem('usuario_avatar', r.result);}catch{};
             var img=document.getElementById('userAvatarAtt'); var icn=document.getElementById('userIconAtt');
             if(img){img.src=r.result; img.style.display='block';} if(icn) icn.style.display='none';
             resolve();

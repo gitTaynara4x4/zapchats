@@ -10,10 +10,71 @@
   <script src="/frontend/js/auth.js" defer></script>
   <script src="/frontend/js/page-guard.js" defer></script>
 
-  <!-- Anti-flash -->
+  <!-- Anti-flash + CSS do modal de confirmação -->
   <style>
     html.prepaint body{visibility:hidden}
     html.prepaint[data-head-ready][data-loader-ready] body{visibility:visible}
+
+    /* Modal de confirmação custom (remover colaborador) */
+    #zc-confirm.modal-back{
+      position:fixed;
+      inset:0;
+      display:none; /* escondido por padrão */
+      place-items:center;
+      background:var(--overlay, rgba(0,0,0,.55));
+      z-index:2147483600;
+      padding:16px;
+    }
+    #zc-confirm[aria-hidden="false"]{
+      display:grid; /* só aparece quando aria-hidden="false" */
+    }
+    #zc-confirm .modal-card{
+      width:min(420px,100%);
+      max-height:80vh;
+      display:flex;
+      flex-direction:column;
+      background:var(--card, #111827);
+      border:1px solid var(--border, rgba(255,255,255,.12));
+      border-radius:14px;
+      box-shadow:0 20px 70px rgba(0,0,0,.5);
+      color:var(--text,#e5e7eb);
+    }
+    #zc-confirm .modal-head{
+      display:flex;
+      align-items:center;
+      padding:12px 16px;
+      border-bottom:1px solid var(--border, rgba(255,255,255,.12));
+    }
+    #zc-confirm .modal-head .title{
+      display:flex;
+      align-items:center;
+      gap:.5rem;
+    }
+    #zc-confirm .modal-head .title i{
+      color:#f97316;
+    }
+    #zc-confirm .modal-body{
+      padding:14px 16px;
+    }
+    #zc-confirm .modal-body p{
+      margin:0;
+      font-size:.95rem;
+    }
+    #zc-confirm .foot{
+      display:flex;
+      justify-content:flex-end;
+      gap:.6rem;
+      padding:10px 16px 12px;
+      border-top:1px solid var(--border, rgba(255,255,255,.12));
+    }
+    #zc-confirm .btn.btn-primary{
+      background:#b91c1c !important;
+      border-color:#7f1d1d !important;
+      color:#fff !important;
+    }
+    #zc-confirm .btn.btn-primary:focus-visible{
+      box-shadow:0 0 0 3px rgba(239,68,68,.35);
+    }
   </style>
 
   <!-- CSS baseline + página -->
@@ -185,6 +246,27 @@
       <div class="foot">
         <div></div>
         <button id="perfil-fechar2" class="btn btn-primary" type="button">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Modal CONFIRMAÇÃO (remover colaborador) ================= -->
+  <div id="zc-confirm" class="modal-back zc-confirm" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="zc-confirm-title">
+      <div class="modal-head">
+        <div class="title">
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+          <span id="zc-confirm-title">Confirmar ação</span>
+        </div>
+      </div>
+
+      <div class="modal-body">
+        <p class="zc-confirm-message">Remover este colaborador?</p>
+      </div>
+
+      <div class="foot">
+        <button type="button" class="btn btn-ghost" data-confirm="no">Cancelar</button>
+        <button type="button" class="btn btn-primary" data-confirm="yes">Remover</button>
       </div>
     </div>
   </div>
