@@ -589,7 +589,7 @@
         .forEach(k=>localStorage.removeItem(k));
         sessionStorage.clear();
       }catch{}
-      location.href='/frontend/login';
+      window.location.href = '/login';
     });
   })();
 
