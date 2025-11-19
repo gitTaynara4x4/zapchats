@@ -8,6 +8,27 @@ import { EMPRESA_ID } from '../core/env.js';
 export const HISTORICO_LIMIT = 20;
 const H = () => document.getElementById('historico'); // << dinâmico
 
+/* ========== DEBUG HELPERS (SÓ LOG) ========== */
+const DEBUG_HIST = true; // se quiser desligar, põe false
+
+function dbg(...args){
+  try {
+    if (!DEBUG_HIST) return;
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[historico]', ...args);
+    }
+  } catch {}
+}
+
+function dbgError(...args){
+  try {
+    if (!DEBUG_HIST) return;
+    if (typeof console !== 'undefined' && console.error) {
+      console.error('[historico][ERRO]', ...args);
+    }
+  } catch {}
+}
+
 /* ========== Loader “puxar pra cima” (CSS inline + helpers) ========== */
 (function injectLoaderCSS(){
   const id = 'hist-loader-css';
@@ -65,7 +86,10 @@ if (!window.salvarCache) {
     try {
       const LS_HIST = `cacheHistoricos:${EMPRESA_ID}`;
       localStorage.setItem(LS_HIST, JSON.stringify(window.cacheHistoricos || {}));
-    } catch {}
+      dbg('salvarCache: gravado no LS', LS_HIST);
+    } catch(e) {
+      dbgError('salvarCache: erro ao gravar no LS', e);
+    }
   };
 }
 
@@ -74,9 +98,17 @@ if (!window.salvarCache) {
   try{
     const LS_HIST = `cacheHistoricos:${EMPRESA_ID}`;
     const raw = localStorage.getItem(LS_HIST);
-    if (!raw) return;
+    if (!raw) {
+      dbg('hydrateHistFromLocalStorage: sem cache para', LS_HIST);
+      return;
+    }
     const data = JSON.parse(raw);
     if (!data || typeof data !== 'object') return;
+
+    dbg('hydrateHistFromLocalStorage: carregando cache', {
+      key: LS_HIST,
+      convs: Object.keys(data).length
+    });
 
     window.cacheHistoricos = data;
 
@@ -91,10 +123,17 @@ if (!window.salvarCache) {
         groups.get(key).items.push(m);
       }
       groups.forEach(({inst, items})=>{
-        try{ primeWith(inst, cid, items, null); }catch{}
+        try{ 
+          primeWith(inst, cid, items, null); 
+          dbg('hydrateHistFromLocalStorage: primeWith', { inst, cid, count: items.length });
+        }catch(e){
+          dbgError('hydrateHistFromLocalStorage: erro no primeWith', { inst, cid, e });
+        }
       });
     });
-  }catch{}
+  }catch(e){
+    dbgError('hydrateHistFromLocalStorage: erro geral', e);
+  }
 })();
 
 function ensureArray(a){ return Array.isArray(a) ? a : []; }
@@ -141,26 +180,36 @@ function deriveFileName(a){
   return { fileName: `${base}.${ext}`, extUp: ext.toUpperCase(), extLower: String(ext).toLowerCase() };
 }
 function buildCanonUrlByMsgId(msg_id){
-  return `/api/atendimento/midias/msg/${encodeURIComponent(msg_id)}?empresa_id=${EMPRESA_ID}`;
+  const url = `/api/atendimento/midias/msg/${encodeURIComponent(msg_id)}?empresa_id=${EMPRESA_ID}`;
+  dbg('buildCanonUrlByMsgId', { msg_id, url });
+  return url;
 }
 
 /* ========= instancia ativa (para chavear hist-cache) ========= */
 function getInstanciaForFetch() {
   try {
-    return (
+    const inst =
       H()?.dataset?.instanciaId
       ?? window.state?.clienteSel?.instancia_id
       ?? window.state?.clienteSel?.instancia
       ?? window.INSTANCIA_ATIVA
-      ?? null
-    )?.toString() || null;
-  } catch { return null; }
+      ?? null;
+
+    const out = inst?.toString() || null;
+    dbg('getInstanciaForFetch', { instRaw: inst, inst: out });
+    return out;
+  } catch(e) {
+    dbgError('getInstanciaForFetch: erro', e);
+    return null;
+  }
 }
 
 /* ========= salvar cache unificado ========= */
 export function salvarNoCache(clienteId, novos){
   const cid = Number(clienteId);
   const inst = getInstanciaForFetch() || (Array.isArray(novos) ? (novos[0]?.instancia_id ?? null) : null) || null;
+
+  dbg('salvarNoCache IN', { cid, inst, novosCount: Array.isArray(novos) ? novos.length : 0 });
 
   const cur = ensureArray(getHist(inst, cid));
   const merged = [...cur, ...ensureArray(novos)];
@@ -184,12 +233,64 @@ export function salvarNoCache(clienteId, novos){
   }
   const finalArr = ordenarMensagens([ ...byId.values(), ...noId ]);
 
+  dbg('salvarNoCache OUT', { cid, inst, total: finalArr.length });
+
   primeWith(inst, cid, finalArr, null);
   window.cacheHistoricos[cid] = finalArr;
   window.salvarCache?.();
 }
 
 /* ========= render de 1 mensagem ========= */
+
+// helper pra debugar erro de mídia (áudio/imagem/vídeo)
+function attachMediaDebugHandlers(root){
+  if (!DEBUG_HIST) return;
+  if (!root) return;
+  try {
+    root.querySelectorAll('audio,video,img').forEach(el => {
+      if (el.__histDbgBound) return;
+      el.__histDbgBound = true;
+
+      // sucesso básico (pra ver se chegou a carregar)
+      if (el.tagName === 'AUDIO' || el.tagName === 'VIDEO') {
+        el.addEventListener('loadedmetadata', () => {
+          try {
+            dbg('MIDIA carregada', {
+              tag: el.tagName,
+              currentSrc: el.currentSrc || null,
+              srcAttr: el.getAttribute('src') || null
+            });
+          } catch(e) {
+            dbgError('attachMediaDebugHandlers loadedmetadata erro', e);
+          }
+        });
+      }
+
+      // erro de carregamento
+      el.addEventListener('error', () => {
+        try {
+          let src = el.currentSrc || el.getAttribute('src') || null;
+
+          if (!src && (el.tagName === 'AUDIO' || el.tagName === 'VIDEO')) {
+            const s = el.querySelector('source');
+            if (s) src = s.src || s.getAttribute('src') || null;
+          }
+
+          dbgError('MIDIA ERRO AO CARREGAR', {
+            tag: el.tagName,
+            src,
+            dataset: { ...el.dataset }
+          });
+        } catch(e) {
+          dbgError('attachMediaDebugHandlers error handler falhou', e);
+        }
+      });
+    });
+  } catch(e) {
+    dbgError('attachMediaDebugHandlers: erro geral', e);
+  }
+}
+
 export function criarHTMLDaMensagem(m){
   const isSaida = (m.tipo === 'saida') || (m.from_me === true) || (m.origem === 'atendente');
   const texto = String(m.conteudo ?? m.mensagem ?? m.texto ?? '').trim();
@@ -213,7 +314,17 @@ export function criarHTMLDaMensagem(m){
     const alts      = [];
     if (MSG_CANON) [a?.url_api, a?.url, a?.link, a?.path, idUrl].forEach(u=>u && alts.push(u));
     const s=new Set();
-    return [primary, ...alts].filter(u=>u && !s.has(u) && s.add(u));
+    const urls = [primary, ...alts].filter(u=>u && !s.has(u) && s.add(u));
+
+    dbg('resolveUrlsForMedia', {
+      msg_id: m?.msg_id || null,
+      midiaId: a?.id || null,
+      tipo: a?.tipo || null,
+      mime: a?.mimetype || a?.mime || null,
+      urls
+    });
+
+    return urls;
   }
 
   const renderAnexo = (a)=>{
@@ -235,6 +346,7 @@ export function criarHTMLDaMensagem(m){
               </video>`;
     }
     if (tipo.includes('áudio') || tipo.includes('audio') || tipo.includes('ptt') || mime.startsWith('audio/')){
+      dbg('renderAnexo AUDIO', { msg_id: m?.msg_id || null, urls });
       return `<audio controls preload="metadata" style="max-width:min(420px,70vw)">
                 ${urls.map(u=>`<source src="${u}">`).join('')}
               </audio>`;
@@ -260,11 +372,13 @@ export function criarHTMLDaMensagem(m){
   if (!mediaHtml && m.msg_id && MARKER_RE.test(texto)) {
     const src = buildCanonUrlByMsgId(m.msg_id);
     const kind = texto.replace(/^\[|\].*$/g,'').toLowerCase();
+    dbg('MARKER media fallback', { msg_id: m.msg_id, kind, src });
     if (kind.startsWith('imagem')) {
       mediaHtml = `<a class="msg-media-img" href="${src}" target="_blank" rel="noopener"><img src="${src}" alt="imagem" loading="lazy"></a>`;
     } else if (kind.startsWith('vídeo') || kind.startsWith('video')) {
       mediaHtml = `<video class="msg-media-video" controls preload="metadata"><source src="${src}"></video>`;
     } else if (kind.startsWith('áudio') || kind.startsWith('audio')) {
+      dbg('MARKER AUDIO', { msg_id: m.msg_id, src });
       mediaHtml = `<audio controls preload="metadata" style="max-width:min(420px,70vw)"><source src="${src}"></audio>`;
     } else if (kind.startsWith('figurinha')) {
       mediaHtml = `<img class="msg-sticker" src="${src}" alt="figurinha" loading="lazy">`;
@@ -292,6 +406,16 @@ export function criarHTMLDaMensagem(m){
     ? window.getAckIcon(ackVal).replace('<span class="msg-ack"', `<span class="msg-ack" data-msg-id="${msgIdAttr}"`)
     : '';
 
+  if (DEBUG_HIST) {
+    dbg('criarHTMLDaMensagem', {
+      msg_id: msgIdAttr || null,
+      isSaida,
+      hasMedia,
+      hasText,
+      ackVal
+    });
+  }
+
   return `<div class="msg-row ${isSaida ? 'msg-sent' : 'msg-received'}" data-id="${msgIdAttr}" data-msg-id="${msgIdAttr}">
     <div class="bubble ${isSaida ? 'bubble-out' : 'bubble-in'}" data-msg-id="${msgIdAttr}">
       ${mediaHtml}${textHtml}
@@ -314,6 +438,13 @@ export function renderHistoricoDoCache(clienteId, append=false){
 
   const msgs = ordenarMensagens(ensureArray(getHist(inst, Number(clienteId))));
 
+  dbg('renderHistoricoDoCache', {
+    clienteId,
+    inst,
+    append,
+    msgsCount: msgs.length
+  });
+
   ensureTopLoader();
 
   if (!append){
@@ -330,12 +461,17 @@ export function renderHistoricoDoCache(clienteId, append=false){
     const hasNoIdInList = msgs.some(m => !m.msg_id || String(m.msg_id).trim() === '');
 
     if (hasNoIdInDom || hasNoIdInList) {
+      dbg('renderHistoricoDoCache: rebuild total (mensagem sem msg_id)', {
+        hasNoIdInDom,
+        hasNoIdInList
+      });
       hist.innerHTML = '';
       ensureTopLoader();
       const html = msgs.map(criarHTMLDaMensagem).join('');
       hist.insertAdjacentHTML('beforeend', html);
     } else {
       const novas = msgs.filter(m => !existingIds.has(String(m.msg_id)));
+      dbg('renderHistoricoDoCache: append novas', { novasCount: novas.length });
       if (novas.length){
         const html = novas.map(criarHTMLDaMensagem).join('');
         const lastRow = hist.querySelector('.msg-row:last-of-type');
@@ -347,11 +483,17 @@ export function renderHistoricoDoCache(clienteId, append=false){
     hist.scrollTop = hist.scrollHeight;
   }
 
-  try{ window.reconcilePendingAcks?.(); }catch{}
+  // LOG de erros de mídia (áudio/imagem/vídeo) depois que o DOM foi montado
+  attachMediaDebugHandlers(hist);
+
+  try{ window.reconcilePendingAcks?.(); }catch(e){
+    dbgError('renderHistoricoDoCache: reconcilePendingAcks erro', e);
+  }
 }
 
 /* ========= append util ========= */
 export function appendToHistory(clienteId, msg){
+  dbg('appendToHistory', { clienteId, msgId: msg?.msg_id || null });
   salvarNoCache(clienteId, [msg]);
 }
 
@@ -363,28 +505,42 @@ function getOffsetsObj(){
 }
 function getOffset(id){
   const table = getOffsetsObj();
-  return (typeof table[id] === 'number') ? table[id] : HISTORICO_LIMIT;
+  const v = (typeof table[id] === 'number') ? table[id] : HISTORICO_LIMIT;
+  dbg('getOffset', { id, offset: v });
+  return v;
 }
 function setOffset(id, val){
   const table = getOffsetsObj();
   table[id] = Number(val)||0;
+  dbg('setOffset', { id, offset: table[id] });
   try { window.persist?.(); } catch {}
 }
 
 /* ========= FETCH helpers ========= */
 function getInstQuery(){
   const inst = getInstanciaForFetch();
-  if (!inst) return '';
+  if (!inst) {
+    dbg('getInstQuery: sem inst');
+    return '';
+  }
   const n = Number(inst);
-  return Number.isFinite(n) ? `&instancia_id=${n}` : `&instance=${encodeURIComponent(String(inst))}`;
+  const q = Number.isFinite(n) ? `&instancia_id=${n}` : `&instance=${encodeURIComponent(String(inst))}`;
+  dbg('getInstQuery', { inst, query: q });
+  return q;
 }
 
 /* ========= abrir histórico (sempre sincroniza do servidor) ========= */
 export async function abrirHistorico(id){
   const hist = H(); 
-  if (!hist) return false;
+  if (!hist) {
+    dbgError('abrirHistorico: sem #historico', { id });
+    return false;
+  }
   const cid = Number(id);
-  if (!cid) return false;
+  if (!cid) {
+    dbgError('abrirHistorico: id inválido', { id });
+    return false;
+  }
 
   // --- garantir que a UI do chat apareça ---
   try {
@@ -399,7 +555,9 @@ export async function abrirHistorico(id){
     if (welcome) welcome.style.display = 'none';
 
     document.body.dataset.chatOpen = '1';
-  } catch {}
+  } catch(e) {
+    dbgError('abrirHistorico: erro ao exibir UI', e);
+  }
 
   hist.dataset.clienteId = String(cid);
   hist.dataset.noMore = '0';
@@ -411,10 +569,16 @@ export async function abrirHistorico(id){
       `&limit=${HISTORICO_LIMIT}` +
       getInstQuery();
 
+    dbg('abrirHistorico: fetch', { url, cid });
+
     const r = await fetch(url, { credentials:'include' });
+    dbg('abrirHistorico: resposta HTTP', { status: r.status });
+
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+
+    dbg('abrirHistorico: itens recebidos', { cid, count: items.length });
 
     if (items.length) {
       salvarNoCache(cid, items);
@@ -423,15 +587,24 @@ export async function abrirHistorico(id){
     try{
       const inst = getInstanciaForFetch();
       const total = ensureArray(getHist(inst, cid)).length;
+      dbg('abrirHistorico: setOffset total', { cid, total, inst });
       setOffset(cid, total);
-    }catch{}
+    }catch(e){
+      dbgError('abrirHistorico: erro ao calcular offset', e);
+    }
 
     renderHistoricoDoCache(cid, false);
 
-    try { window.syncPreviewFromCache?.(cid); } catch {}
+    try { 
+      dbg('abrirHistorico: syncPreviewFromCache');
+      window.syncPreviewFromCache?.(cid); 
+    } catch(e){
+      dbgError('abrirHistorico: erro syncPreviewFromCache', e);
+    }
 
     return true;
   }catch(e){
+    dbgError('[historico] abrirHistorico erro', e);
     console.error('[historico] abrirHistorico', e);
     return false;
   }
@@ -441,10 +614,25 @@ export async function abrirHistorico(id){
 let loadingOld = false;
 export async function carregarMaisHistorico(id){
   const hist = H();
-  if (loadingOld) return false;
-  if (!id) return false;
-  if (!hist || hist.dataset.clienteId !== String(id)) return false;
-  if (hist.dataset.noMore === '1') return false;
+  if (loadingOld) {
+    dbg('carregarMaisHistorico: já carregando, ignorando');
+    return false;
+  }
+  if (!id) {
+    dbgError('carregarMaisHistorico: id inválido', { id });
+    return false;
+  }
+  if (!hist || hist.dataset.clienteId !== String(id)) {
+    dbg('carregarMaisHistorico: hist não bate com cliente', {
+      id,
+      histCid: hist?.dataset?.clienteId
+    });
+    return false;
+  }
+  if (hist.dataset.noMore === '1') {
+    dbg('carregarMaisHistorico: noMore=1, sem mais páginas', { id });
+    return false;
+  }
 
   loadingOld = true;
   showTopLoader();
@@ -454,12 +642,26 @@ export async function carregarMaisHistorico(id){
 
   try{
     const url = `/api/atendimento/conversas/${id}/mensagens?empresa_id=${EMPRESA_ID}&limit=${limit}&offset=${off}${getInstQuery()}`;
+    dbg('carregarMaisHistorico: fetch', { url, id, limit, offset: off });
+
     const r = await fetch(url, { credentials: 'include' });
-    if (!r.ok) { hist.dataset.noMore='1'; return false; }
+    dbg('carregarMaisHistorico: resposta HTTP', { status: r.status });
+
+    if (!r.ok) { 
+      hist.dataset.noMore='1'; 
+      dbg('carregarMaisHistorico: !ok, marcando noMore', { id, status: r.status });
+      return false; 
+    }
     const data = await r.json();
     const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
     const n = items.length;
-    if (!n){ hist.dataset.noMore='1'; return false; }
+    dbg('carregarMaisHistorico: itens recebidos', { id, n, offset: off });
+
+    if (!n){ 
+      hist.dataset.noMore='1'; 
+      dbg('carregarMaisHistorico: n=0, noMore=1', { id });
+      return false; 
+    }
 
     const beforeHeight = hist.scrollHeight;
 
@@ -468,8 +670,15 @@ export async function carregarMaisHistorico(id){
     try{
       const inst = getInstanciaForFetch();
       window.cacheHistoricos[id] = ensureArray(getHist(inst, Number(id)));
+      dbg('carregarMaisHistorico: cacheHistoricos atualizado', {
+        id,
+        inst,
+        total: window.cacheHistoricos[id]?.length || 0
+      });
       window.salvarCache?.();
-    }catch{}
+    }catch(e){
+      dbgError('carregarMaisHistorico: erro ao atualizar cache/salvar', e);
+    }
 
     const prevBottom = beforeHeight - hist.scrollTop;
     renderHistoricoDoCache(id, false);
@@ -477,10 +686,16 @@ export async function carregarMaisHistorico(id){
 
     setOffset(id, off + n);
 
-    try { window.syncPreviewFromCache?.(Number(id)); } catch {}
+    try { 
+      dbg('carregarMaisHistorico: syncPreviewFromCache');
+      window.syncPreviewFromCache?.(Number(id)); 
+    } catch(e){
+      dbgError('carregarMaisHistorico: erro syncPreviewFromCache', e);
+    }
 
     return true;
   }catch(e){
+    dbgError('[historico] carregarMaisHistorico erro', e);
     console.error('[historico] carregarMaisHistorico', e);
     return false;
   }finally{
@@ -494,8 +709,12 @@ export async function carregarMaisHistorico(id){
   const tryBind = ()=>{
     const hist = H();
     if (!hist || hist.__boundScroll) return;
+    dbg('bindScroll: binding scroll em #historico');
     hist.addEventListener('scroll', ()=> {
       if (hist.scrollTop <= 60){
+        dbg('bindScroll: topo alcançado, carregarMaisHistorico', {
+          clienteId: hist.dataset.clienteId
+        });
         carregarMaisHistorico(Number(hist.dataset.clienteId || 0));
       }
     }, { passive:true });
@@ -518,6 +737,8 @@ if (!window.syncPreviewFromCache) {
     try {
       const cid = Number(clienteId);
       if (!cid) return;
+
+      dbg('syncPreviewFromCache IN', { cid });
 
       let convTsMs = 0;
       let convObj = null;
@@ -553,7 +774,9 @@ if (!window.syncPreviewFromCache) {
             }
           }
         }
-      } catch {}
+      } catch(e) {
+        dbgError('syncPreviewFromCache: erro ao ler lista/convObj', e);
+      }
 
       let arr = Array.isArray(window.cacheHistoricos?.[cid])
         ? window.cacheHistoricos[cid]
@@ -567,11 +790,16 @@ if (!window.syncPreviewFromCache) {
             Number(x.id ?? x.conversation_id ?? x.cliente_id) === cid
           );
           inst = c?.instancia_id ?? c?.instancia ?? window.INSTANCIA_ATIVA ?? null;
-        } catch {}
+        } catch(e) {
+          dbgError('syncPreviewFromCache: erro ao inferir inst', e);
+        }
         arr = getHist(inst, cid) || [];
       }
 
-      if (!arr || !arr.length) return;
+      if (!arr || !arr.length) {
+        dbg('syncPreviewFromCache: sem mensagens no cache', { cid });
+        return;
+      }
       const last = arr[arr.length - 1];
 
       let tsIso = last.timestamp || last.data || last.created_at || null;
@@ -590,7 +818,9 @@ if (!window.syncPreviewFromCache) {
         if (d && !Number.isNaN(d.getTime())) {
           histTsMs = d.getTime();
         }
-      } catch {}
+      } catch(e) {
+        dbgError('syncPreviewFromCache: erro parse tsIso', { tsIso, e });
+      }
 
       const textoRaw =
         (last.conteudo ?? last.mensagem ?? last.texto ?? '').toString().trim();
@@ -602,14 +832,34 @@ if (!window.syncPreviewFromCache) {
 
       const ackVal = outbound ? Number(last.ack ?? 0) || 0 : undefined;
 
+      dbg('syncPreviewFromCache: last msg', {
+        cid,
+        tsIso,
+        textoRaw,
+        outbound,
+        ackVal,
+        convTsMs,
+        histTsMs
+      });
+
       if (convTsMs && histTsMs && histTsMs <= convTsMs) {
         if (window.Lista?.updatePreview && ackVal) {
+          dbg('syncPreviewFromCache: só atualizando ACK da lista', {
+            cid,
+            ackVal
+          });
           window.Lista.updatePreview(cid, { ack: ackVal });
         }
         return;
       }
 
       if (window.Lista?.updatePreview) {
+        dbg('syncPreviewFromCache: updatePreview lista', {
+          cid,
+          texto: textoRaw,
+          tsIso,
+          ackVal
+        });
         window.Lista.updatePreview(cid, {
           texto: textoRaw,
           ts: tsIso,
@@ -617,7 +867,9 @@ if (!window.syncPreviewFromCache) {
         });
       }
     } catch (e) {
-      try { console.debug('[syncPreviewFromCache][erro]', e); } catch {}
+      try { 
+        dbgError('[syncPreviewFromCache][erro]', e); 
+      } catch {}
     }
   };
 }

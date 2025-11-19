@@ -37,7 +37,7 @@ function toast(msg, ok = true) {
   }, 1600);
 }
 
-/* ========= MODAIS PRÓPRIOS SLIM ========= */
+/* ========= MODAIS PRÓPRIOS SLIM + CSS DO COMPOSER ========= */
 function ensureDialogCSS() {
   if (document.getElementById('zcDlgCSS')) return;
   const st = document.createElement('style');
@@ -101,78 +101,106 @@ function ensureDialogCSS() {
     .zpPrev-list{font-size:12px;color:#9ca3af;margin-top:6px;max-height:120px;overflow:auto;}
     .zpPrev-list ul{margin:0;padding-left:16px;}
 
-    /* ===== emoji picker (estilo WPP Web) ===== */
-    .emoji-btn{
-      border:0;
+    /* ===== chat footer estilo WhatsApp Web ===== */
+    #chat-footer{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 10px 10px;
       background:transparent;
-      color:#8696a0;
-      width:32px;
-      height:32px;
+    }
+    #chat-footer .clip-btn,
+    #chat-footer .mic-btn,
+    #chat-footer .send-btn{
+      width:40px;
+      height:40px;
+      border-radius:999px;
+      border:0;
       display:flex;
       align-items:center;
       justify-content:center;
-      margin-right:4px;
+      background:#202c33;
+      color:#aebac1;
       cursor:pointer;
+      flex-shrink:0;
     }
-    .emoji-btn:hover{
+    #chat-footer .clip-btn i,
+    #chat-footer .mic-btn i{
+      font-size:18px;
+    }
+    #chat-footer .send-btn svg{
+      width:18px;height:18px;
+    }
+    #chat-footer .composer-wrap{
+      flex:1;
+      display:flex;
+      align-items:center;
+      background:#202c33;
+      border-radius:24px;
+      padding:0 12px;
+      border:1px solid #202c33;
+      height:40px;
+    }
+    #chat-footer .emoji-btn{
+      width:32px;
+      height:32px;
+      border-radius:999px;
+      border:0;
+      background:transparent;
+      color:#aebac1;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      cursor:pointer;
+      margin-right:6px;
+      flex-shrink:0;
+    }
+    #chat-footer #mensagem{
+      flex:1;
+      background:transparent;
+      border:0;
       color:#e9edef;
+      font-size:14px;
+      padding:0;
+      height:36px;
+      line-height:36px; /* centraliza o texto/placeholder */
+    }
+    #chat-footer #mensagem::placeholder{
+      color:#8696a0;
     }
 
+    /* ===== emoji picker ===== */
     .emoji-pop{
       position:absolute;
       bottom:64px;
-      width:320px;
-      max-height:380px;
+      left:64px;
       background:#202c33;
       border-radius:16px;
       border:1px solid #202c33;
       box-shadow:0 12px 28px rgba(0,0,0,.35);
-      padding:0;
-      display:flex;
-      flex-direction:column;
-      z-index:50;
-      opacity:0;
-      transform:translateY(6px);
-      transition:opacity .15s, transform .15s;
+      padding:8px;
+      z-index:60;
+      display:none;
+      max-width:320px;
+      max-height:260px;
+      overflow:auto;
     }
-    .emoji-pop.show{opacity:1;transform:none}
-    .emoji-pop.hidden{display:none}
-
-    .emoji-head{
-      padding:8px 10px 6px;
-      border-bottom:1px solid #2a3942;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      font-size:13px;
-      color:#e9edef;
-    }
-    .emoji-head span{opacity:.9}
-
+    .emoji-pop.show{display:block;}
     .emoji-grid{
-      padding:6px 8px 8px;
-      display:flex;
-      flex-wrap:wrap;
-      gap:2px;
-      overflow-y:auto;
-      scrollbar-width:thin;
-      max-height:330px;
+      display:grid;
+      grid-template-columns:repeat(8,1fr);
+      gap:4px;
     }
-
-    .emoji-item{
-      width:32px;
-      height:32px;
-      border-radius:6px;
+    .emoji-btn-item{
+      width:32px;height:32px;
+      border-radius:8px;
       border:0;
       background:transparent;
-      font-size:22px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
+      font-size:20px;
       cursor:pointer;
     }
-    .emoji-item:hover{
-      background:rgba(255,255,255,.08);
+    .emoji-btn-item:hover{
+      background:rgba(255,255,255,.12);
     }
   `;
   document.head.appendChild(st);
@@ -297,32 +325,44 @@ function ensureClienteSel(){
   return true;
 }
 
+function insertAtCursor(el, text){
+  if (!el) return;
+  const start = el.selectionStart ?? (el.value || '').length;
+  const end   = el.selectionEnd ?? (el.value || '').length;
+  const v     = el.value || '';
+  el.value    = v.slice(0, start) + text + v.slice(end);
+  const pos   = start + text.length;
+  if (typeof el.setSelectionRange === 'function') {
+    el.setSelectionRange(pos, pos);
+  }
+  try { el.focus({ preventScroll:true }); } catch{ el.focus(); }
+}
+
 /* ===================== MAIN INIT ENVIO ===================== */
 (function initEnvio(){
   const footer = document.getElementById('chat-footer') || document.body;
   const form = footer.closest('form');
   if (form) form.addEventListener('submit', e => e.preventDefault());
 
-  // garante CSS global (preview + emoji)
   ensureDialogCSS();
 
   const btnClip = document.getElementById('btn-clipe') || (() => {
     const b = document.createElement('button');
-    b.id = 'btn-clipe'; b.className = 'clip-btn';
-    b.innerHTML = '<i class="fa fa-paperclip"></i>';
+    b.id = 'btn-clipe'; b.className = 'clip-btn'; b.type = 'button';
+    b.innerHTML = '<i class="fa-solid fa-plus"></i>';
     footer.appendChild(b); return b;
   })();
 
   const btnSend = document.getElementById('btn-enviar') || (() => {
     const b = document.createElement('button');
-    b.id = 'btn-enviar'; b.className = 'send-btn'; b.style.display = 'none';
-    b.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>';
+    b.id = 'btn-enviar'; b.className = 'send-btn'; b.style.display = 'none'; b.type='button';
+    b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>';
     footer.appendChild(b); return b;
   })();
 
   const btnMic = document.getElementById('btn-mic') || (() => {
     const b = document.createElement('button');
-    b.id = 'btn-mic'; b.className = 'mic-btn'; b.title = 'Gravar áudio';
+    b.id = 'btn-mic'; b.className = 'mic-btn'; b.title = 'Gravar áudio'; b.type='button';
     b.innerHTML = '<i class="fa-solid fa-microphone" aria-hidden="true"></i>';
     footer.appendChild(b); return b;
   })();
@@ -330,14 +370,37 @@ function ensureClienteSel(){
   const inputMsg = document.getElementById('mensagem') || (() => {
     const i = document.createElement('input');
     i.id = 'mensagem'; i.placeholder = 'Digite sua resposta…';
-    i.className = 'flex-1 outline-none px-3 py-2 rounded';
-    footer.insertBefore(i, btnSend); return i;
+    i.className = '';
+    footer.insertBefore(i, btnSend);
+    return i;
   })();
 
   // inputs ocultos
   const fileDoc   = document.getElementById('file-doc')   || (() => { const i=document.createElement('input'); i.type='file'; i.id='file-doc';   i.style.display='none'; i.accept='.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,application/*'; footer.appendChild(i); return i; })();
   const fileMedia = document.getElementById('file-media') || (() => { const i=document.createElement('input'); i.type='file'; i.id='file-media'; i.style.display='none'; i.accept='image/*,video/*'; footer.appendChild(i); return i; })();
   const fileAudio = document.getElementById('file-audio') || (() => { const i=document.createElement('input'); i.type='file'; i.id='file-audio'; i.style.display='none'; i.accept='audio/*'; footer.appendChild(i); return i; })();
+
+  // === layout tipo WPP: composer-wrap com emoji + input ===
+  let composerWrap = document.getElementById('composer-wrap');
+  if (!composerWrap){
+    composerWrap = document.createElement('div');
+    composerWrap.id = 'composer-wrap';
+    composerWrap.className = 'composer-wrap';
+    footer.insertBefore(composerWrap, btnMic);
+  }
+  composerWrap.appendChild(inputMsg);
+  footer.appendChild(btnSend);
+  footer.appendChild(btnMic);
+
+  const btnEmoji = document.getElementById('btn-emoji') || (() => {
+    const b = document.createElement('button');
+    b.id = 'btn-emoji';
+    b.className = 'emoji-btn';
+    b.type = 'button';
+    b.innerHTML = '<i class="fa-regular fa-face-smile"></i>';
+    composerWrap.insertBefore(b, inputMsg);
+    return b;
+  })();
 
   function toggleSendMic(){
     const hasText = (inputMsg.value || '').trim().length > 0;
@@ -429,7 +492,7 @@ function ensureClienteSel(){
     const capEl   = wrap.querySelector('.zpPrev-caption');
     const listUl  = wrap.querySelector('.zpPrev-ul');
     const btnCanc = wrap.querySelector('.zpPrev-cancel');
-    const btnSend = wrap.querySelector('.zpPrev-send');
+    const btnSendPrev = wrap.querySelector('.zpPrev-send');
 
     const first = files[0];
     const mime  = first.type || guessMimeFromExt(first.name);
@@ -469,17 +532,17 @@ function ensureClienteSel(){
       if (e.key === 'Escape') { e.preventDefault(); close(); }
     });
 
-    btnSend.addEventListener('click', async () => {
+    btnSendPrev.addEventListener('click', async () => {
       const caption = capEl.value.trim() || undefined;
-      btnSend.disabled = true;
-      btnSend.textContent = 'Enviando…';
+      btnSendPrev.disabled = true;
+      btnSendPrev.textContent = 'Enviando…';
       try {
         for (const f of files) {
           await enviarMediaArquivo(f, explicitType, caption);
         }
         close();
       } finally {
-        btnSend.disabled = false;
+        btnSendPrev.disabled = false;
       }
     });
 
@@ -598,17 +661,6 @@ function ensureClienteSel(){
     document.head.appendChild(s);
   })();
 
-  // lista básica de emojis (pode aumentar depois)
-  const EMOJI_LIST = [
-    '😀','😁','😂','🤣','😃','😄','😅','😆','😉','😊',
-    '😋','😎','😍','😘','😗','😙','😚','🙂','🤗','🤩',
-    '🤔','🤨','😐','😑','😶','🙄','😏','😣','😥','😮',
-    '🤐','😯','😪','😫','😴','😌','😛','😜','😝','🤤',
-    '😒','😓','😔','😕','🙃','🤑','😲','☹️','🙁','😖',
-    '😞','😟','😤','😢','😭','😦','😧','😨','😩','🤯',
-    '😬','😰','😱','😳','🤪','😵','😡','😠','🤬','😷'
-  ];
-
   let attachMenu = document.getElementById('attach-menu');
   if (!attachMenu){
     attachMenu = document.createElement('div');
@@ -649,43 +701,35 @@ function ensureClienteSel(){
     (footer.parentElement||footer).appendChild(attachMenu);
   }
 
-  let emojiMenu = document.getElementById('emoji-menu');
-  if (!emojiMenu) {
-    emojiMenu = document.createElement('div');
-    emojiMenu.id = 'emoji-menu';
-    emojiMenu.className = 'emoji-pop hidden';
-    emojiMenu.innerHTML = `
-      <div class="emoji-head">
-        <span>Emojis</span>
-      </div>
-      <div class="emoji-grid">
-        ${EMOJI_LIST.map(e =>
-          `<button type="button" class="emoji-item" aria-label="${e}">${e}</button>`
-        ).join('')}
-      </div>
-    `;
-    (footer.parentElement || footer).appendChild(emojiMenu);
+  // ===== Emoji picker =====
+  let emojiPop = document.getElementById('emoji-pop');
+  if (!emojiPop){
+    emojiPop = document.createElement('div');
+    emojiPop.id = 'emoji-pop';
+    emojiPop.className = 'emoji-pop';
+    emojiPop.innerHTML = '<div class="emoji-grid"></div>';
+    (footer.parentElement || footer).appendChild(emojiPop);
+
+    const grid = emojiPop.querySelector('.emoji-grid');
+    const EMOJIS = '😀 😃 😄 😁 😆 😅 😂 🤣 😊 😇 🙂 🙃 😉 😌 😍 🥰 😘 😗 😙 😚 😋 😛 😜 🤪 😝 🤑 🤗 🤭 🤫 🤔 🤐 🤨 😐 😑 😶 😏 😒 🙄 😬 🤥 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🤧 🥵 🥶 🥴 😵 🤯 🤠 🥳 😎 🤓 🧐 😕 😟 🙁 ☹️ 😮 😯 😲 😳 🥺 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 🤡 👋 🤚 ✋ 🖖 👌 🤌 🤏 ✌️ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 👍 👎 ✊ 👊 🤛 🤜 👏 🙌 👐 🤲 🤝 🙏';
+    EMOJIS.split(/\s+/).forEach(ch => {
+      if (!ch) return;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'emoji-btn-item';
+      b.textContent = ch;
+      b.addEventListener('click', () => {
+        insertAtCursor(inputMsg, ch);
+        inputMsg.dispatchEvent(new Event('input', { bubbles:true }));
+      });
+      grid.appendChild(b);
+    });
   }
 
-  const btnEmoji = document.getElementById('btn-emoji') || (() => {
-    const b = document.createElement('button');
-    b.id = 'btn-emoji';
-    b.className = 'emoji-btn';
-    b.type = 'button';
-    b.innerHTML = '<i class="fa-regular fa-face-smile"></i>';
-    // deixa o emoji antes do input, igual WPP
-    footer.insertBefore(b, inputMsg);
-    return b;
-  })();
-
-  // abre/fecha e ancora menus
+  // abre/fecha menus e ancora perto do clipe / emoji
   btnClip?.addEventListener('click', (ev)=>{
     ev.stopPropagation();
     attachMenu.classList.toggle('hidden');
-    // fecha emoji se abrir clipe
-    emojiMenu.classList.add('hidden');
-    emojiMenu.classList.remove('show');
-
     if (!attachMenu.classList.contains('hidden')) {
       const b = btnClip.getBoundingClientRect();
       const p = (attachMenu.parentElement||document.body).getBoundingClientRect();
@@ -697,57 +741,24 @@ function ensureClienteSel(){
     }
   });
 
-  btnEmoji?.addEventListener('click', (ev) => {
+  btnEmoji.addEventListener('click', (ev)=>{
     ev.stopPropagation();
-    emojiMenu.classList.toggle('hidden');
-    // fecha clipe se abrir emoji
-    attachMenu.classList.add('hidden');
-    attachMenu.classList.remove('show');
-
-    if (!emojiMenu.classList.contains('hidden')) {
+    emojiPop.classList.toggle('show');
+    if (emojiPop.classList.contains('show')) {
       const b = btnEmoji.getBoundingClientRect();
-      const p = (emojiMenu.parentElement || document.body).getBoundingClientRect();
-      emojiMenu.style.left = Math.max(12, Math.min(p.width-320, b.left - p.left)) + 'px';
-      emojiMenu.classList.add('show');
-      requestAnimationFrame(() => emojiMenu.classList.add('show'));
-    } else {
-      emojiMenu.classList.remove('show');
+      const p = (emojiPop.parentElement || document.body).getBoundingClientRect();
+      emojiPop.style.left = Math.max(8, b.left - p.left) + 'px';
     }
   });
 
   document.addEventListener('click', (ev)=>{
-    if (attachMenu && !attachMenu.contains(ev.target) && ev.target!==btnClip){
+    if (!attachMenu.contains(ev.target) && ev.target!==btnClip){
       attachMenu.classList.add('hidden');
       attachMenu.classList.remove('show');
     }
-    if (emojiMenu && !emojiMenu.contains(ev.target) && ev.target!==btnEmoji){
-      emojiMenu.classList.add('hidden');
-      emojiMenu.classList.remove('show');
+    if (emojiPop && !emojiPop.contains(ev.target) && ev.target !== btnEmoji){
+      emojiPop.classList.remove('show');
     }
-  });
-
-  function insertEmoji(emoji) {
-    if (!inputMsg) return;
-    const el = inputMsg;
-    const start = el.selectionStart ?? (el.value || '').length;
-    const end   = el.selectionEnd ?? (el.value || '').length;
-    const v     = el.value || '';
-    el.value = v.slice(0, start) + emoji + v.slice(end);
-    const pos = start + emoji.length;
-    if (typeof el.setSelectionRange === 'function') {
-      el.setSelectionRange(pos, pos);
-    }
-    el.focus();
-    toggleSendMic();
-  }
-
-  emojiMenu.addEventListener('click', (ev) => {
-    const btn = ev.target.closest('.emoji-item');
-    if (!btn) return;
-    ev.preventDefault();
-    const emoji = btn.textContent || '';
-    if (!emoji) return;
-    insertEmoji(emoji);
   });
 
   /* ===================== ENVIO DE ARQUIVOS / MÍDIA ===================== */
