@@ -702,6 +702,12 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
 async def auth_html_gate(request: Request, call_next):
     path = request.url.path
 
+    # 🔓 BYPASS TOTAL: admin-planos não exige login nem permissão
+    if path in ("/admin-planos", "/admin-planos.html", "/frontend/admin-planos.html"):
+        resp = await call_next(request)
+        _no_cache_html(resp)
+        return resp
+
     if request.method != "GET" or not _wants_html(request):
         return await call_next(request)
 
@@ -774,6 +780,10 @@ async def auth_html_gate(request: Request, call_next):
     resp = await call_next(request)
     _no_cache_html(resp)
     return resp
+
+
+
+
 
 # =======================================
 # Rotas / Routers
