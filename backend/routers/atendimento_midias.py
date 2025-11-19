@@ -12,7 +12,7 @@ from typing import Optional
 
 from backend.database import get_db
 from backend import models
-from backend.routers.auth import get_current_identity  # ⬅️ trocado
+from backend.routers.auth import get_current_identity  # ⬅️ AGORA USA IDENTITY
 
 router = APIRouter(tags=["Atendimento – Mídias"])
 
@@ -397,7 +397,7 @@ def midia_resolve(
     empresa_id: int | None = Query(None),
     instancia_id: int | None = Query(None),
     db: Session = Depends(get_db),
-    identity = Depends(get_current_identity),
+    identity = Depends(get_current_identity),  # ⬅️ AQUI
 ):
     """
     Rota legacy por midia_id — resolve msg_id e REDIRECIONA (307) para a rota por msg_id.
@@ -435,7 +435,7 @@ def midia_por_msg(
     empresa_id: int | None = Query(None),
     instancia_id: int | None = Query(None),
     db: Session = Depends(get_db),
-    identity = Depends(get_current_identity),
+    identity = Depends(get_current_identity),  # ⬅️ E AQUI
 ):
     """
     Canônico por msg_id (multi-instância):

@@ -192,8 +192,8 @@ PUBLIC_FRONTEND_PARTIALS = {
 async def block_direct_frontend(request: Request, call_next):
     p = request.url.path
 
-    # 🔓 exceção: permitir abrir /frontend/admin-planos.html sem login
-    if p == "/frontend/admin-planos.html":
+    # 🔓 exceções: permitir abrir certos HTML direto sem login
+    if p in ("/frontend/admin-planos.html", "/frontend/planos.html"):
         return await call_next(request)
 
     if p.startswith("/frontend/"):
@@ -206,7 +206,9 @@ async def block_direct_frontend(request: Request, call_next):
             next_url = p + (("?" + request.url.query) if request.url.query else "")
             return RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
         return await call_next(request)
+
     return await call_next(request)
+
 # =======================================
 # Permissões por página (HTML)
 # =======================================
@@ -249,17 +251,25 @@ def _html_forbidden(msg: str):
     )
 
 def _is_public(path: str) -> bool:
+    # normaliza para minúsculo e remove querystring
+    p = path.split("?", 1)[0]
+    p_l = p.lower()
+
     PUBLIC_HTML_PATHS = {
         "/",
         "/login", "/login.html",
         "/criar-empresa", "/criar-empresa.html",
         "/esqueci_senha", "/esqueci_senha.html",
 
-        # 🔓 Admin • Planos acessível sem login
-        "/admin-planos", 
+        # 🔓 telas públicas especiais
+        "/admin-planos",
         "/admin-planos.html",
-        "/frontend/admin-planos.html",  # caso você acesse direto pelo caminho do arquivo
+        "/planos",              # <= AQUI
+        "/planos.html",         # <= AQUI
+        "/frontend/admin-planos.html",
+        "/frontend/planos.html",
     }
+
     PUBLIC_PREFIXES = (
         "/api/auth",
         "/img", "/uploads",
@@ -268,9 +278,15 @@ def _is_public(path: str) -> bool:
         "/ws",
         "/healthz", "/ping",
     )
-    if path in PUBLIC_HTML_PATHS:
+
+    if p_l in PUBLIC_HTML_PATHS:
         return True
-    return any(path.startswith(p) for p in PUBLIC_PREFIXES)
+
+    return any(p_l.startswith(pref) for pref in PUBLIC_PREFIXES)
+
+
+
+
 
 def _wants_html(req: Request) -> bool:
     p = req.url.path
@@ -702,12 +718,6 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
 async def auth_html_gate(request: Request, call_next):
     path = request.url.path
 
-    # 🔓 BYPASS TOTAL: admin-planos não exige login nem permissão
-    if path in ("/admin-planos", "/admin-planos.html", "/frontend/admin-planos.html"):
-        resp = await call_next(request)
-        _no_cache_html(resp)
-        return resp
-
     if request.method != "GET" or not _wants_html(request):
         return await call_next(request)
 
@@ -780,10 +790,6 @@ async def auth_html_gate(request: Request, call_next):
     resp = await call_next(request)
     _no_cache_html(resp)
     return resp
-
-
-
-
 
 # =======================================
 # Rotas / Routers

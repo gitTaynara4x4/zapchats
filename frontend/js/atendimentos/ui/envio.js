@@ -67,6 +67,39 @@ function ensureDialogCSS() {
     .zcBtn.ok:hover{background:#0d2b24}
     .zcBtn.danger{border-color:#ef4444;background:#2a1111;color:#fca5a5}
     .zcMsg{font-size:13px;line-height:1.35;opacity:.95;padding:2px 0}
+
+    /* ===== preview de arquivos (tipo WPP) ===== */
+    .zcDlg.zcDlg-filePreview{
+      width:min(640px,96vw);
+      max-height:90vh;
+      display:flex;
+      flex-direction:column;
+    }
+    .zcDlg.zcDlg-filePreview .b{
+      max-height:calc(90vh - 92px);
+      overflow:auto;
+    }
+    .zpPrev{display:flex;flex-direction:column;gap:10px;}
+    .zpPrev-main{display:flex;gap:10px;align-items:flex-start;}
+    .zpPrev-thumb{
+      flex:0 0 120px;height:120px;border-radius:8px;overflow:hidden;
+      background:#020617;display:flex;align-items:center;justify-content:center;
+      font-size:32px;color:#64748b;
+    }
+    .zpPrev-thumb img{max-width:100%;max-height:100%;object-fit:contain;display:block;}
+    .zpPrev-meta{font-size:12px;color:#9ca3af;}
+    .zpPrev-name{font-size:13px;color:#e5e7eb;margin-bottom:2px;word-break:break-all;}
+    .zpPrev-caption-row{margin-top:8px;}
+    .zpPrev-caption-row textarea{
+      width:100%;min-height:64px;resize:vertical;border-radius:8px;
+      border:1px solid #25343c;background:#020617;color:#e5e7eb;
+      font:inherit;padding:6px 8px;outline:none;
+    }
+    .zpPrev-caption-row textarea:focus{
+      border-color:#00a884;box-shadow:0 0 0 2px rgba(0,168,132,.15);
+    }
+    .zpPrev-list{font-size:12px;color:#9ca3af;margin-top:6px;max-height:120px;overflow:auto;}
+    .zpPrev-list ul{margin:0;padding-left:16px;}
   `;
   document.head.appendChild(st);
 }
@@ -271,6 +304,111 @@ function ensureClienteSel(){
   }
   function stripUndefined(o){ Object.keys(o).forEach(k=> o[k]===undefined && delete o[k]); return o; }
 
+  const humanFileSize = (bytes) => {
+    if (bytes == null) return '';
+    const units = ['B','KB','MB','GB'];
+    let u = 0, v = bytes;
+    while (v >= 1024 && u < units.length - 1) { v /= 1024; u++; }
+    const fixed = v >= 10 || u === 0 ? v.toFixed(0) : v.toFixed(1);
+    return `${fixed} ${units[u]}`;
+  };
+
+  function openFilePreview(fileList, explicitType = null) {
+    const files = Array.from(fileList || []).filter(f => f && f.size >= 0);
+    if (!files.length) return;
+
+    const wrap = mountDialog(`
+      <div class="zcDlg zcDlg-filePreview" role="dialog" aria-label="Enviar arquivo">
+        <div class="h">Enviar ${files.length > 1 ? 'arquivos' : 'arquivo'}</div>
+        <div class="b">
+          <div class="zpPrev">
+            <div class="zpPrev-main">
+              <div class="zpPrev-thumb"></div>
+              <div class="zpPrev-meta">
+                <div class="zpPrev-name"></div>
+                <div class="zpPrev-info"></div>
+              </div>
+            </div>
+            <div class="zpPrev-caption-row">
+              <textarea class="zpPrev-caption" placeholder="Digite uma legenda (opcional)…"></textarea>
+            </div>
+            ${files.length > 1 ? `
+            <div class="zpPrev-list">
+              <div>${files.length} arquivos selecionados:</div>
+              <ul class="zpPrev-ul"></ul>
+            </div>` : ''}
+          </div>
+        </div>
+        <div class="f">
+          <button class="zcBtn ghost zpPrev-cancel">Cancelar</button>
+          <button class="zcBtn ok zpPrev-send">Enviar</button>
+        </div>
+      </div>
+    `);
+
+    const thumb   = wrap.querySelector('.zpPrev-thumb');
+    const nameEl  = wrap.querySelector('.zpPrev-name');
+    const infoEl  = wrap.querySelector('.zpPrev-info');
+    const capEl   = wrap.querySelector('.zpPrev-caption');
+    const listUl  = wrap.querySelector('.zpPrev-ul');
+    const btnCanc = wrap.querySelector('.zpPrev-cancel');
+    const btnSend = wrap.querySelector('.zpPrev-send');
+
+    const first = files[0];
+    const mime  = first.type || guessMimeFromExt(first.name);
+    const typeLabel = mime || 'arquivo';
+
+    nameEl.textContent = first.name || 'Arquivo';
+    infoEl.textContent = [humanFileSize(first.size), typeLabel].filter(Boolean).join(' • ');
+
+    thumb.innerHTML = '';
+    if (mime && mime.startsWith('image/')) {
+      const img = document.createElement('img');
+      img.alt = first.name || 'imagem';
+      const fr = new FileReader();
+      fr.onload = () => { img.src = fr.result; };
+      fr.readAsDataURL(first);
+      thumb.appendChild(img);
+    } else {
+      thumb.innerHTML = '<i class="fa-regular fa-file-lines"></i>';
+      thumb.style.fontSize = '28px';
+    }
+
+    if (listUl) {
+      files.forEach(f => {
+        const li = document.createElement('li');
+        li.textContent = `${f.name || 'Arquivo'} (${humanFileSize(f.size)})`;
+        listUl.appendChild(li);
+      });
+    }
+
+    const close = () => wrap.remove();
+
+    btnCanc.addEventListener('click', () => close());
+    wrap.addEventListener('click', (e) => {
+      if (e.target === wrap) close();
+    });
+    wrap.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+    });
+
+    btnSend.addEventListener('click', async () => {
+      const caption = capEl.value.trim() || undefined;
+      btnSend.disabled = true;
+      btnSend.textContent = 'Enviando…';
+      try {
+        for (const f of files) {
+          await enviarMediaArquivo(f, explicitType, caption);
+        }
+        close();
+      } finally {
+        btnSend.disabled = false;
+      }
+    });
+
+    setTimeout(() => capEl?.focus(), 30);
+  }
+
   // usa resolveRawTel + numeroE164
   const numberForApi = () => {
     const cli = state?.clienteSel || {};
@@ -445,9 +583,11 @@ function ensureClienteSel(){
   });
 
   /* ===================== ENVIO DE ARQUIVOS / MÍDIA ===================== */
-  async function enviarMediaArquivo(file, explicitType=null){
+  async function enviarMediaArquivo(file, explicitType = null, captionOverride = null){
     if (!ensureClienteSel() || !file) return;
-    const caption   = (inputMsg.value||'').trim() || undefined;
+    const caption = captionOverride != null
+      ? captionOverride
+      : (inputMsg.value||'').trim() || undefined;
     const number    = numberForApi();
     const mime      = file.type || guessMimeFromExt(file.name);
     const mediaType = explicitType || guessMediaType(mime);
@@ -472,7 +612,10 @@ function ensureClienteSel(){
           method:'POST', headers:{'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify(body)
         });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        if (caption) { inputMsg.value=''; toggleSendMic(); }
+        if (caption && captionOverride != null) { // legenda veio do preview
+          inputMsg.value='';
+          toggleSendMic();
+        }
       }
       toast('Arquivo enviado!', true);
     }catch(e){
@@ -481,9 +624,21 @@ function ensureClienteSel(){
     }
   }
 
-  fileDoc.addEventListener('change',  async (e)=>{ const f=e.target.files?.[0]; if(f){ await enviarMediaArquivo(f,'document'); e.target.value=''; }});
-  fileMedia.addEventListener('change',async (e)=>{ const f=e.target.files?.[0]; if(f){ await enviarMediaArquivo(f);          e.target.value=''; }});
-  fileAudio.addEventListener('change',async (e)=>{ const f=e.target.files?.[0]; if(f){ await enviarMediaArquivo(f,'audio');  e.target.value=''; }});
+  fileDoc.addEventListener('change', (e)=>{
+    const files = e.target.files;
+    if (files && files.length) openFilePreview(files, 'document');
+    e.target.value = '';
+  });
+  fileMedia.addEventListener('change', (e)=>{
+    const files = e.target.files;
+    if (files && files.length) openFilePreview(files, null);
+    e.target.value = '';
+  });
+  fileAudio.addEventListener('change', (e)=>{
+    const files = e.target.files;
+    if (files && files.length) openFilePreview(files, 'audio');
+    e.target.value = '';
+  });
 
   /* ====== Modais slim para Contato e Sticker ====== */
   async function openContactPrompt(){
@@ -702,7 +857,7 @@ function ensureClienteSel(){
       if (!dragging) hideOverlay();
     });
 
-    window.addEventListener('drop', async (ev) => {
+    window.addEventListener('drop', (ev) => {
       if (!hasFiles(ev)) return;
       ev.preventDefault();
       dragging = 0;
@@ -711,14 +866,7 @@ function ensureClienteSel(){
       const files = Array.from(ev.dataTransfer.files || []);
       if (!files.length) return;
 
-      for (const f of files) {
-        try {
-          await enviarMediaArquivo(f);
-        } catch (e) {
-          console.error('[drag&drop] erro ao enviar arquivo', e);
-          toast('Falha ao enviar arquivo.', false);
-        }
-      }
+      openFilePreview(files, null);
     });
   }
 
