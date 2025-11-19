@@ -17,7 +17,7 @@ from sqlalchemy.exc import ProgrammingError
 
 from backend.database import get_db
 from backend import models
-from backend.routers.auth import get_current_user
+from backend.routers.auth import get_current_identity
 
 router = APIRouter(tags=["Atendimento – Perfil / Evolution & Busca/Arquivo"])
 
@@ -215,7 +215,7 @@ FIELD_MAP = {
 def evolution_fetch_profile(
     payload: FetchProfileIn,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     """
     1) Chama Evolution: /chat/fetchProfile/{instance}
@@ -230,7 +230,8 @@ def evolution_fetch_profile(
     if not payload.number:
         raise HTTPException(400, "Campo 'number' é obrigatório.")
 
-    empresa_id_eff = _assert_mesma_empresa(user.empresa_id, payload.empresa_id)
+    empresa_id_token = int(identity["empresa_id"])
+    empresa_id_eff = _assert_mesma_empresa(empresa_id_token, payload.empresa_id)
     instance_name = _pick_instance_name(
         db,
         empresa_id_eff,
@@ -340,12 +341,14 @@ def evolution_fetch_profile(
 def get_cliente_profile(
     cliente_id: int,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     cli = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
     if not cli:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
-    if int(cli.empresa_id) != int(user.empresa_id):
+
+    empresa_id_token = int(identity["empresa_id"])
+    if int(cli.empresa_id) != empresa_id_token:
         raise HTTPException(403, "Cliente não pertence à sua empresa")
 
     return {
@@ -389,7 +392,7 @@ def merge_cliente_profile(
     cliente_id: int,
     payload: dict = Body(...),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     """
     Atualização NÃO-DESTRUTIVA:
@@ -401,7 +404,9 @@ def merge_cliente_profile(
     cli = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
     if not cli:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
-    if int(cli.empresa_id) != int(user.empresa_id):
+
+    empresa_id_token = int(identity["empresa_id"])
+    if int(cli.empresa_id) != empresa_id_token:
         raise HTTPException(403, "Cliente não pertence à sua empresa")
 
     norm = dict(payload or {})
@@ -446,12 +451,14 @@ def merge_cliente_profile(
 def cliente_get(
     cliente_id: int,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     cli = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
     if not cli:
         raise HTTPException(404, "Cliente não encontrado.")
-    if int(cli.empresa_id) != int(user.empresa_id):
+
+    empresa_id_token = int(identity["empresa_id"])
+    if int(cli.empresa_id) != empresa_id_token:
         raise HTTPException(403, "Cliente não pertence à sua empresa")
 
     return {
@@ -479,7 +486,7 @@ def cliente_put(
     cliente_id: int,
     payload: SaveCustomIn,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     """
     Atualiza campos custom do cliente (formulário do drawer) de forma NÃO-DESTRUTIVA.
@@ -489,7 +496,9 @@ def cliente_put(
     cli = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
     if not cli:
         raise HTTPException(404, "Cliente não encontrado.")
-    if int(cli.empresa_id) != int(user.empresa_id):
+
+    empresa_id_token = int(identity["empresa_id"])
+    if int(cli.empresa_id) != empresa_id_token:
         raise HTTPException(403, "Cliente não pertence à sua empresa")
 
     incoming = payload.model_dump(exclude_unset=True)
@@ -570,6 +579,7 @@ _RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)")
 
 def _open_local_file(path: str) -> Tuple[int, callable]:
     file_size = os.path.getsize(path)
+
     def _reader(start=0, end=None, chunk=1024 * 256):
         nonlocal path
         with open(path, "rb") as f:
@@ -586,6 +596,7 @@ def _open_local_file(path: str) -> Tuple[int, callable]:
                         yield data
                         break
                 yield data
+
     return file_size, _reader
 
 
@@ -620,7 +631,7 @@ def atendimento_search(
     instancia_id: int | None = Query(None),
     instance: str | None = Query(None),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     """
     Responde no shape esperado pelo front:
@@ -629,7 +640,8 @@ def atendimento_search(
       "mensagens": [{ cliente_id, snippet, hora }, ...]
     }
     """
-    empresa_id_eff = _assert_mesma_empresa(user.empresa_id, empresa_id)
+    empresa_id_token = int(identity["empresa_id"])
+    empresa_id_eff = _assert_mesma_empresa(empresa_id_token, empresa_id)
 
     qn = _normalize_text(q)
     if not qn:

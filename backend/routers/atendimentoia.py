@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Body, Query, Depends
 
 from backend.database import SessionLocal
 from backend import models
-from backend.routers.auth import get_current_user
+from backend.routers.auth import get_current_identity
 
 """
 Endpoints:
@@ -30,8 +30,14 @@ Recursos:
 router = APIRouter(prefix="/api/atendimento/ia", tags=["IA"])
 
 # URLs separadas para cada workflow do n8n
-N8N_URL_RESUMO = os.getenv("N8N_URL_RESUMO", "https://zapchats-n8n.9ywrah.easypanel.host/webhook/ia-resumo")
-N8N_URL_MELHORAR = os.getenv("N8N_URL_MELHORAR", "https://zapchats-n8n.9ywrah.easypanel.host/webhook/ia-melhorar")
+N8N_URL_RESUMO = os.getenv(
+    "N8N_URL_RESUMO",
+    "https://zapchats-n8n.9ywrah.easypanel.host/webhook/ia-resumo",
+)
+N8N_URL_MELHORAR = os.getenv(
+    "N8N_URL_MELHORAR",
+    "https://zapchats-n8n.9ywrah.easypanel.host/webhook/ia-melhorar",
+)
 N8N_KEY = os.getenv("N8N_KEY", "")  # opcional: header para validar no n8n
 ENV = os.getenv("ENV", "dev").lower()
 
@@ -42,11 +48,23 @@ def _redact_pii(text: str) -> str:
     if not text:
         return text
     # telefone BR (ex: 11 91234-5678, 11912345678, etc)
-    text = re.sub(r"\b(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?\d{4,5}-?\d{4}\b", "(**telefone**)", text)
+    text = re.sub(
+        r"\b(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?\d{4,5}-?\d{4}\b",
+        "(**telefone**)",
+        text,
+    )
     # e-mail
-    text = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "(**email**)", text)
+    text = re.sub(
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
+        "(**email**)",
+        text,
+    )
     # coordenadas lat,long (simples)
-    text = re.sub(r"(-?\d{1,3}\.?\d+)\s*,\s*(-?\d{1,3}\.?\d+)", "(**coordenadas**)", text)
+    text = re.sub(
+        r"(-?\d{1,3}\.?\d+)\s*,\s*(-?\d{1,3}\.?\d+)",
+        "(**coordenadas**)",
+        text,
+    )
     # documentos simples (CPF/CNPJ — heurísticas)
     text = re.sub(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b", "(**cpf**)", text)
     text = re.sub(r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b", "(**cnpj**)", text)
@@ -65,7 +83,12 @@ def _trim_middle(text: str, max_chars: int, head: int = 4000, tail: int = 4000) 
     return text[:head].rstrip() + "\n…\n" + text[-tail:].lstrip()
 
 
-def montar_dialogo(empresa_id: int, cliente_id: int, janela_dias: int = 3, limit: int = 400) -> str:
+def montar_dialogo(
+    empresa_id: int,
+    cliente_id: int,
+    janela_dias: int = 3,
+    limit: int = 400,
+) -> str:
     """Busca mensagens do BD e monta um diálogo 'Cliente:' / 'Agente:' em ordem cronológica."""
     db = SessionLocal()
     try:
@@ -94,7 +117,11 @@ def montar_dialogo(empresa_id: int, cliente_id: int, janela_dias: int = 3, limit
         db.close()
 
 
-def _raise_http_error(status_code: int, error: str, message: str | Dict[str, Any] | None = None) -> None:
+def _raise_http_error(
+    status_code: int,
+    error: str,
+    message: str | Dict[str, Any] | None = None,
+) -> None:
     detail: Dict[str, Any] = {"error": error}
     if message is not None:
         detail["message"] = message
@@ -122,7 +149,11 @@ async def _post_n8n(url: str, payload: dict):
             return {
                 "resumo": {
                     "resumo_curto": "(mock) n8n indisponível em dev.",
-                    "pontos_chave": ["verifique N8N_URL_*", "rede/porta", "logs do n8n"],
+                    "pontos_chave": [
+                        "verifique N8N_URL_*",
+                        "rede/porta",
+                        "logs do n8n",
+                    ],
                     "topico": "mock",
                     "urgencia": "baixa",
                     "confianca": 0.2,
@@ -182,19 +213,20 @@ def _build_dialogo(
 
 
 # --------- Helpers de segurança ---------
-def _empresa_do_user(user) -> Optional[int]:
-    """Tenta extrair o empresa_id de diferentes formas do objeto user."""
-    return getattr(user, "empresa_id", None) or getattr(user, "empresa", None)
-
-
-def _assert_empresa(user, empresa_id: int) -> int:
+def _assert_empresa(identity, empresa_id: int) -> int:
     """
-    Garante que o empresa_id da query é o mesmo do usuário logado.
-    Evita que um usuário de uma empresa peça resumo/melhoria de outra.
+    Garante que o empresa_id da query é o mesmo do identity (usuário ou colaborador).
     """
-    emp = _empresa_do_user(user)
-    if emp is not None and int(emp) != int(empresa_id):
-        raise HTTPException(status_code=403, detail="Empresa inválida para este usuário")
+    try:
+        empresa_token = int(identity["empresa_id"])
+    except Exception:
+        raise HTTPException(status_code=403, detail="Token sem empresa_id")
+
+    if empresa_token != int(empresa_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Empresa inválida para este usuário",
+        )
     return int(empresa_id)
 
 
@@ -212,13 +244,20 @@ async def resumo(
     max_chars: int = Query(9000, ge=0),  # 0 = sem truncar
     # Body opcional para sobrescrever o diálogo com o visível no DOM
     dialogo_override: Optional[str] = Body(None, embed=True),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     # 🔒 trava empresa: empresa_id tem que bater com a empresa do token
-    empresa_id = _assert_empresa(user, empresa_id)
+    empresa_id = _assert_empresa(identity, empresa_id)
 
     dialogo = _build_dialogo(
-        empresa_id, cliente_id, janela_dias, limit, include_dialogo, redact, max_chars, dialogo_override
+        empresa_id,
+        cliente_id,
+        janela_dias,
+        limit,
+        include_dialogo,
+        redact,
+        max_chars,
+        dialogo_override,
     )
     payload: Dict[str, Any] = {
         "mode": "resumo",
@@ -251,13 +290,20 @@ async def melhorar(
     draft: Optional[str] = Body(None, embed=True),
     prompt_user: Optional[str] = Body(None, embed=True),
     dialogo_override: Optional[str] = Body(None, embed=True),
-    user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
 ):
     # 🔒 trava empresa aqui também
-    empresa_id = _assert_empresa(user, empresa_id)
+    empresa_id = _assert_empresa(identity, empresa_id)
 
     dialogo = _build_dialogo(
-        empresa_id, cliente_id, janela_dias, limit, include_dialogo, redact, max_chars, dialogo_override
+        empresa_id,
+        cliente_id,
+        janela_dias,
+        limit,
+        include_dialogo,
+        redact,
+        max_chars,
+        dialogo_override,
     )
     payload: Dict[str, Any] = {
         "mode": "melhorar",
