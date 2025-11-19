@@ -1122,4 +1122,4 @@ function teardownConectar() {
 
 window.addEventListener('beforeunload', () => {
   teardownConectar();
-}); 
+});
