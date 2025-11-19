@@ -471,6 +471,7 @@ def cookieize(
 @router.post("/criar-empresa")
 def register(
     dados: RegisterIn,
+    request: Request,  
     response: Response,
     db: Session = Depends(get_db_session),
     _=Depends(guard_writable_register),

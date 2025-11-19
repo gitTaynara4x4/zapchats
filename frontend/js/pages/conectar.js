@@ -202,8 +202,8 @@ function ensureOverlay(){
 
 
 function formatClock(s){
-  const mm = String(Math.floor(s/60)).padStart(2,'0');
-  const ss = String(s%60).padStart(2,'0');
+  const mm = String(Math.floor(s/120)).padStart(2,'0');
+  const ss = String(s%120).padStart(2,'0');
   return `${mm}:${ss}`;
 }
 
