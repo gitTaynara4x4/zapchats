@@ -12,7 +12,7 @@ from typing import Optional
 
 from backend.database import get_db
 from backend import models
-from backend.routers.auth import get_current_user
+from backend.routers.auth import get_current_identity  # ⬅️ trocado
 
 router = APIRouter(tags=["Atendimento – Mídias"])
 
@@ -397,14 +397,14 @@ def midia_resolve(
     empresa_id: int | None = Query(None),
     instancia_id: int | None = Query(None),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity = Depends(get_current_identity),
 ):
     """
     Rota legacy por midia_id — resolve msg_id e REDIRECIONA (307) para a rota por msg_id.
     Propaga empresa_id/instancia_id quando informados (evita 422).
     Garante que a empresa da mídia pertence ao token.
     """
-    empresa_id_eff = _assert_mesma_empresa(user.empresa_id, empresa_id)
+    empresa_id_eff = _assert_mesma_empresa(identity["empresa_id"], empresa_id)
 
     row = (
         db.query(models.Midia, models.Mensagem)
@@ -435,7 +435,7 @@ def midia_por_msg(
     empresa_id: int | None = Query(None),
     instancia_id: int | None = Query(None),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity = Depends(get_current_identity),
 ):
     """
     Canônico por msg_id (multi-instância):
@@ -444,7 +444,7 @@ def midia_por_msg(
       2) tenta servir **do BD** (Midia.data/local_path/url),
       3) Evolution como fallback, persistindo e cacheando.
     """
-    empresa_id_eff = _assert_mesma_empresa(user.empresa_id, empresa_id)
+    empresa_id_eff = _assert_mesma_empresa(identity["empresa_id"], empresa_id)
 
     # 0) Cache no disco?
     cached = _cache_glob_for(msg_id)

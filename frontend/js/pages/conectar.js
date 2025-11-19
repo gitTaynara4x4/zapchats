@@ -192,12 +192,15 @@ function ensureOverlay(){
       </div>
       <div id="prep-ovl-title">Estamos organizando tudo para você.</div>
       <div id="prep-ovl-sub">Esta ação pode demorar um pouco.</div>
-      <div id="prep-ovl-time"><span class="time-pill">01:00</span></div>
+      <div id="prep-ovl-time"><span class="time-pill">02:00</span></div>
     </div>
   `;
   document.body.appendChild(ovl);
   return ovl;
 }
+
+
+
 function formatClock(s){
   const mm = String(Math.floor(s/60)).padStart(2,'0');
   const ss = String(s%60).padStart(2,'0');
@@ -243,7 +246,7 @@ function paintTime(){
   const pill = $('#prep-ovl-time .time-pill');
   if (pill) pill.textContent = formatClock(prep.left);
 }
-async function showPrepOverlayOneMinute(seconds=60, opts={}){
+async function showPrepOverlayOneMinute(seconds=120, opts={}){
   if (prep.active) return;
   prep.active = true;
   prep.left = Math.max(1, Math.floor(seconds));
@@ -777,7 +780,7 @@ function handleConnected(instanceFromMsg){
   hideQR();
   try { hideModal(); } catch {}
   wantQR = false;
-  showPrepOverlayOneMinute(60, { historico: lastHistoricoUsed });
+  showPrepOverlayOneMinute(120, { historico: lastHistoricoUsed });
   scheduleLoad(200);
 }
 
