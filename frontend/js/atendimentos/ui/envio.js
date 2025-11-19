@@ -100,6 +100,80 @@ function ensureDialogCSS() {
     }
     .zpPrev-list{font-size:12px;color:#9ca3af;margin-top:6px;max-height:120px;overflow:auto;}
     .zpPrev-list ul{margin:0;padding-left:16px;}
+
+    /* ===== emoji picker (estilo WPP Web) ===== */
+    .emoji-btn{
+      border:0;
+      background:transparent;
+      color:#8696a0;
+      width:32px;
+      height:32px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      margin-right:4px;
+      cursor:pointer;
+    }
+    .emoji-btn:hover{
+      color:#e9edef;
+    }
+
+    .emoji-pop{
+      position:absolute;
+      bottom:64px;
+      width:320px;
+      max-height:380px;
+      background:#202c33;
+      border-radius:16px;
+      border:1px solid #202c33;
+      box-shadow:0 12px 28px rgba(0,0,0,.35);
+      padding:0;
+      display:flex;
+      flex-direction:column;
+      z-index:50;
+      opacity:0;
+      transform:translateY(6px);
+      transition:opacity .15s, transform .15s;
+    }
+    .emoji-pop.show{opacity:1;transform:none}
+    .emoji-pop.hidden{display:none}
+
+    .emoji-head{
+      padding:8px 10px 6px;
+      border-bottom:1px solid #2a3942;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      font-size:13px;
+      color:#e9edef;
+    }
+    .emoji-head span{opacity:.9}
+
+    .emoji-grid{
+      padding:6px 8px 8px;
+      display:flex;
+      flex-wrap:wrap;
+      gap:2px;
+      overflow-y:auto;
+      scrollbar-width:thin;
+      max-height:330px;
+    }
+
+    .emoji-item{
+      width:32px;
+      height:32px;
+      border-radius:6px;
+      border:0;
+      background:transparent;
+      font-size:22px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      cursor:pointer;
+    }
+    .emoji-item:hover{
+      background:rgba(255,255,255,.08);
+    }
   `;
   document.head.appendChild(st);
 }
@@ -228,6 +302,9 @@ function ensureClienteSel(){
   const footer = document.getElementById('chat-footer') || document.body;
   const form = footer.closest('form');
   if (form) form.addEventListener('submit', e => e.preventDefault());
+
+  // garante CSS global (preview + emoji)
+  ensureDialogCSS();
 
   const btnClip = document.getElementById('btn-clipe') || (() => {
     const b = document.createElement('button');
@@ -521,6 +598,17 @@ function ensureClienteSel(){
     document.head.appendChild(s);
   })();
 
+  // lista básica de emojis (pode aumentar depois)
+  const EMOJI_LIST = [
+    '😀','😁','😂','🤣','😃','😄','😅','😆','😉','😊',
+    '😋','😎','😍','😘','😗','😙','😚','🙂','🤗','🤩',
+    '🤔','🤨','😐','😑','😶','🙄','😏','😣','😥','😮',
+    '🤐','😯','😪','😫','😴','😌','😛','😜','😝','🤤',
+    '😒','😓','😔','😕','🙃','🤑','😲','☹️','🙁','😖',
+    '😞','😟','😤','😢','😭','😦','😧','😨','😩','🤯',
+    '😬','😰','😱','😳','🤪','😵','😡','😠','🤬','😷'
+  ];
+
   let attachMenu = document.getElementById('attach-menu');
   if (!attachMenu){
     attachMenu = document.createElement('div');
@@ -561,10 +649,43 @@ function ensureClienteSel(){
     (footer.parentElement||footer).appendChild(attachMenu);
   }
 
-  // abre/fecha e ancora perto do clipe
+  let emojiMenu = document.getElementById('emoji-menu');
+  if (!emojiMenu) {
+    emojiMenu = document.createElement('div');
+    emojiMenu.id = 'emoji-menu';
+    emojiMenu.className = 'emoji-pop hidden';
+    emojiMenu.innerHTML = `
+      <div class="emoji-head">
+        <span>Emojis</span>
+      </div>
+      <div class="emoji-grid">
+        ${EMOJI_LIST.map(e =>
+          `<button type="button" class="emoji-item" aria-label="${e}">${e}</button>`
+        ).join('')}
+      </div>
+    `;
+    (footer.parentElement || footer).appendChild(emojiMenu);
+  }
+
+  const btnEmoji = document.getElementById('btn-emoji') || (() => {
+    const b = document.createElement('button');
+    b.id = 'btn-emoji';
+    b.className = 'emoji-btn';
+    b.type = 'button';
+    b.innerHTML = '<i class="fa-regular fa-face-smile"></i>';
+    // deixa o emoji antes do input, igual WPP
+    footer.insertBefore(b, inputMsg);
+    return b;
+  })();
+
+  // abre/fecha e ancora menus
   btnClip?.addEventListener('click', (ev)=>{
     ev.stopPropagation();
     attachMenu.classList.toggle('hidden');
+    // fecha emoji se abrir clipe
+    emojiMenu.classList.add('hidden');
+    emojiMenu.classList.remove('show');
+
     if (!attachMenu.classList.contains('hidden')) {
       const b = btnClip.getBoundingClientRect();
       const p = (attachMenu.parentElement||document.body).getBoundingClientRect();
@@ -575,11 +696,58 @@ function ensureClienteSel(){
       attachMenu.classList.remove('show');
     }
   });
+
+  btnEmoji?.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    emojiMenu.classList.toggle('hidden');
+    // fecha clipe se abrir emoji
+    attachMenu.classList.add('hidden');
+    attachMenu.classList.remove('show');
+
+    if (!emojiMenu.classList.contains('hidden')) {
+      const b = btnEmoji.getBoundingClientRect();
+      const p = (emojiMenu.parentElement || document.body).getBoundingClientRect();
+      emojiMenu.style.left = Math.max(12, Math.min(p.width-320, b.left - p.left)) + 'px';
+      emojiMenu.classList.add('show');
+      requestAnimationFrame(() => emojiMenu.classList.add('show'));
+    } else {
+      emojiMenu.classList.remove('show');
+    }
+  });
+
   document.addEventListener('click', (ev)=>{
-    if (!attachMenu.contains(ev.target) && ev.target!==btnClip){
+    if (attachMenu && !attachMenu.contains(ev.target) && ev.target!==btnClip){
       attachMenu.classList.add('hidden');
       attachMenu.classList.remove('show');
     }
+    if (emojiMenu && !emojiMenu.contains(ev.target) && ev.target!==btnEmoji){
+      emojiMenu.classList.add('hidden');
+      emojiMenu.classList.remove('show');
+    }
+  });
+
+  function insertEmoji(emoji) {
+    if (!inputMsg) return;
+    const el = inputMsg;
+    const start = el.selectionStart ?? (el.value || '').length;
+    const end   = el.selectionEnd ?? (el.value || '').length;
+    const v     = el.value || '';
+    el.value = v.slice(0, start) + emoji + v.slice(end);
+    const pos = start + emoji.length;
+    if (typeof el.setSelectionRange === 'function') {
+      el.setSelectionRange(pos, pos);
+    }
+    el.focus();
+    toggleSendMic();
+  }
+
+  emojiMenu.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.emoji-item');
+    if (!btn) return;
+    ev.preventDefault();
+    const emoji = btn.textContent || '';
+    if (!emoji) return;
+    insertEmoji(emoji);
   });
 
   /* ===================== ENVIO DE ARQUIVOS / MÍDIA ===================== */
