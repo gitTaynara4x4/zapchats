@@ -619,6 +619,110 @@ function ensureClienteSel(){
     }
   }
   btnMic.addEventListener('click', startStopRecording);
+
+  /* ===================== DRAG & DROP (arquivos / imagens) ===================== */
+  function ensureDropOverlay() {
+    let ov = document.getElementById('zc-drop-overlay');
+    if (!ov) {
+      ov = document.createElement('div');
+      ov.id = 'zc-drop-overlay';
+      Object.assign(ov.style, {
+        position: 'fixed',
+        inset: '0',
+        background: 'rgba(15,23,42,.80)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 9998,
+        opacity: '0',
+        pointerEvents: 'none',
+        transition: 'opacity .15s ease',
+      });
+      ov.innerHTML = `
+        <div style="
+          border:1px dashed #38bdf8;
+          border-radius:16px;
+          padding:16px 24px;
+          background:rgba(15,23,42,.95);
+          color:#e5e7eb;
+          font-size:14px;
+        ">
+          Solte o arquivo aqui para enviar ao cliente
+        </div>
+      `;
+      document.body.appendChild(ov);
+    }
+    return ov;
+  }
+
+  function setupDragAndDrop() {
+    const hist = document.getElementById('historico');
+    if (!hist) return;
+
+    let dragging = 0;
+    let overlay = null;
+
+    const hasFiles = (ev) => {
+      try {
+        const dt = ev.dataTransfer;
+        if (!dt || !dt.types) return false;
+        return Array.from(dt.types).includes('Files');
+      } catch {
+        return false;
+      }
+    };
+
+    const showOverlay = () => {
+      if (!overlay) overlay = ensureDropOverlay();
+      overlay.style.opacity = '1';
+      overlay.style.pointerEvents = 'auto';
+    };
+
+    const hideOverlay = () => {
+      if (!overlay) return;
+      overlay.style.opacity = '0';
+      overlay.style.pointerEvents = 'none';
+    };
+
+    window.addEventListener('dragenter', (ev) => {
+      if (!hasFiles(ev)) return;
+      dragging++;
+      showOverlay();
+      ev.preventDefault();
+    });
+
+    window.addEventListener('dragover', (ev) => {
+      if (!hasFiles(ev)) return;
+      ev.preventDefault();
+    });
+
+    window.addEventListener('dragleave', (ev) => {
+      if (!hasFiles(ev)) return;
+      dragging = Math.max(0, dragging - 1);
+      if (!dragging) hideOverlay();
+    });
+
+    window.addEventListener('drop', async (ev) => {
+      if (!hasFiles(ev)) return;
+      ev.preventDefault();
+      dragging = 0;
+      hideOverlay();
+
+      const files = Array.from(ev.dataTransfer.files || []);
+      if (!files.length) return;
+
+      for (const f of files) {
+        try {
+          await enviarMediaArquivo(f);
+        } catch (e) {
+          console.error('[drag&drop] erro ao enviar arquivo', e);
+          toast('Falha ao enviar arquivo.', false);
+        }
+      }
+    });
+  }
+
+  setupDragAndDrop();
 })();
 
 /* ====== FOCUS MANAGER (foco automático em TODAS as conversas) ====== */
