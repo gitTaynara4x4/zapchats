@@ -25,15 +25,22 @@ import { getConversas } from '../state/store.js';
 
   // ----------------- helpers -----------------
   const byId = new Map(); // id -> tags calculadas
+
   function isGroupByTel(tel) {
     const t = String(tel || '');
     return /@g\.us$/i.test(t) || /\bgrupo\b/i.test(t);
   }
+
   function matchInstancia(tagInstId) {
     try {
       // preferir helper global, se existir
-      if (typeof window._matchInstancia === 'function') return window._matchInstancia(tagInstId);
-      const ativa = (window.INSTANCIA_ATIVA == null || window.INSTANCIA_ATIVA === '') ? null : String(window.INSTANCIA_ATIVA);
+      if (typeof window._matchInstancia === 'function') {
+        return window._matchInstancia(tagInstId);
+      }
+      const ativa =
+        window.INSTANCIA_ATIVA == null || window.INSTANCIA_ATIVA === ''
+          ? null
+          : String(window.INSTANCIA_ATIVA);
       if (!ativa) return true;
       if (!tagInstId) return true;
       return String(tagInstId).toLowerCase() === String(ativa).toLowerCase();
@@ -41,21 +48,26 @@ import { getConversas } from '../state/store.js';
       return true;
     }
   }
+
   function openClienteId() {
     const hist = document.getElementById('historico');
     const v = hist?.dataset?.clienteId;
     return v ? Number(v) || 0 : 0;
   }
+
   function idFromLi(li) {
     const d = li.dataset?.id;
     if (d) return Number(d) || 0;
     const m = /chat-(\d+)/.exec(li.id || '');
     return m ? Number(m[1]) || 0 : 0;
   }
+
   function normalizarStatus(c) {
-    const raw = String(c.statusatendimento ?? c.status ?? '').trim().toLowerCase();
+    const raw = String(c.statusatendimento ?? c.status ?? '')
+      .trim()
+      .toLowerCase();
     // Rótulos comuns
-    const BOT = ['bot','automático','automatico','auto','automatizado'];
+    const BOT = ['bot', 'automático', 'automatico', 'auto', 'automatizado'];
     if (BOT.includes(raw)) return 'bot';
     // qualquer outro vira humano / no_bot
     return 'no_bot';
@@ -64,7 +76,9 @@ import { getConversas } from '../state/store.js';
   // ----------------- indexador (lê o store) -----------------
   function makeIndex() {
     byId.clear();
-    const convs = (typeof getConversas === 'function' ? (getConversas() || []) : []);
+    const convs =
+      typeof getConversas === 'function' ? getConversas() || [] : [];
+
     for (const c of convs) {
       const id = Number(c.conversation_id ?? c.cliente_id ?? c.id ?? 0) || 0;
       if (!id) continue;
@@ -72,16 +86,17 @@ import { getConversas } from '../state/store.js';
       const unread  = Number(c.novas ?? c.unread ?? 0) > 0;
       const grupo   = Boolean(c.is_group) || isGroupByTel(c.telefone);
       const statusN = normalizarStatus(c);
-      const isBot   = (statusN === 'bot');
+      const isBot   = statusN === 'bot';
       const isNoBot = !isBot;
 
-      const instId  = c.instancia_id ?? c.instancia ?? c.instance_id ?? c.inst ?? null;
+      const instId =
+        c.instancia_id ?? c.instancia ?? c.instance_id ?? c.inst ?? null;
 
       // Regras dos filtros:
       // - Em atendimento: humano (no_bot) e NÃO grupo (NÃO depende de unread!)
       // - Aguardando: tem não lidas
       // - No bot: status bot
-      // - Grupos: é grupo
+      // - Grupos: é grupo (qualquer estado)
       const tags = {
         unread,
         isGroup: grupo,
@@ -89,11 +104,12 @@ import { getConversas } from '../state/store.js';
         isNoBot,
         instId,
 
-        emAtend: (isNoBot && !grupo),
+        emAtend: isNoBot && !grupo,
         aguardando: unread,
         noBot: isBot,
         grupos: grupo,
       };
+
       byId.set(id, tags);
     }
   }
@@ -107,10 +123,12 @@ import { getConversas } from '../state/store.js';
     if (!matchInstancia(tags?.instId ?? null)) return false;
 
     const kind = current;
+
     if (kind === 'Em atendimento') return !!tags?.emAtend;
     if (kind === 'Aguardando')     return !!tags?.aguardando;
     if (kind === 'No bot')         return !!tags?.noBot;
-    if (kind === 'Grupos')         return !!tags?.grupos;
+    // filtro só pra grupos
+    if (kind === 'Grupos' || kind === 'Grupo') return !!tags?.grupos;
 
     // fallback (se aparecer um rótulo diferente)
     return true;
@@ -132,7 +150,7 @@ import { getConversas } from '../state/store.js';
 
   function marcarBotaoAtivo() {
     for (const b of btns) {
-      const on = (b.textContent.trim() === current);
+      const on = b.textContent.trim() === current;
       b.classList.toggle('ativo', on);
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
     }
@@ -152,12 +170,13 @@ import { getConversas } from '../state/store.js';
   const mo = new MutationObserver(() => {
     refilterList();
   });
+
   mo.observe(ul, {
     childList: true,
     subtree: true,
     characterData: true, // pega mudança de preview/badge
     attributes: true,
-    attributeFilter: ['data-status','data-instancia-id','class','data-id']
+    attributeFilter: ['data-status', 'data-instancia-id', 'class', 'data-id'],
   });
 
   // ----------------- reagir a eventos globais -----------------

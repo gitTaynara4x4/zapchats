@@ -84,22 +84,37 @@
     const query=(q||'').trim();
     let html='';
 
+    // --------- BLOCO MENSAGENS (usa cliente_nome / cliente_telefone do back) ----------
     if (mensagens?.length){
       html += `<div class="sr-group" style="padding:6px 2px;">
         <div class="sr-title" style="color:#7aa39a;font-size:12px;text-transform:uppercase;margin:6px 4px 4px;"><i class="fa fa-message"></i> Mensagens</div>
         <ul class="sr-list" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;">` +
         mensagens.slice(0,80).map(m=>{
-          const c = (window.todosContatosCache||window.clientesCache||[])
+          const cache = (window.todosContatosCache||window.clientesCache||[])
             .find(x=> Number(x.id)===Number(m.cliente_id)) || {};
-          const nome = c.push_name?.trim() || c.nome || formatarNumeroBR(c.telefone||'');
-          const when = (window.formatChatTime||(()=>''))(m.hora||'') || '';
+
+          const telRaw = (m.cliente_telefone || cache.telefone || '').toString().trim();
+          const telBR  = telRaw ? formatarNumeroBR(telRaw) : '';
+
+          const rawNome =
+            (m.cliente_nome || '').toString().trim() ||
+            (cache.push_name || '').toString().trim() ||
+            (cache.nome || '').toString().trim();
+
+          const displayNome = rawNome || telBR;
+          const nomeHtml =
+            escapeHtml(displayNome || '') +
+            (rawNome && telBR ? `<span style="opacity:.6;"> · ${escapeHtml(telBR)}</span>` : '');
+
+          const when    = (window.formatChatTime||(()=>''))(m.hora||'') || '';
           const snipRaw = m.snippet || '';
-          const snip = MARKER_RE.test(snipRaw) ? '' : escapeHtml(snipRaw).slice(0,220);
+          const snip    = MARKER_RE.test(snipRaw) ? '' : escapeHtml(snipRaw).slice(0,220);
+
           return `<li class="sr-item sr-msg" data-id="${m.cliente_id}" data-q="${encodeURIComponent(query)}"
               style="display:flex;gap:10px;align-items:flex-start;padding:6px;border-radius:8px;cursor:pointer;">
             <div class="sr-bullet" style="width:6px;height:6px;border-radius:9999px;background:#25d366;margin-top:8px;"></div>
             <div class="sr-text" style="flex:1;min-width:0;">
-              <div class="sr-name" style="font-size:13px;color:#e9edef;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(nome||'')}</div>
+              <div class="sr-name" style="font-size:13px;color:#e9edef;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${nomeHtml}</div>
               <div class="sr-msgline" style="font-size:12px;color:#aebac1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${snip ? '… '+snip : ''}</div>
             </div>
             <div class="sr-meta" style="font-size:11px;color:#6b7c85;">${when}</div>
@@ -107,6 +122,7 @@
         }).join('') + `</ul></div>`;
     }
 
+    // --------- BLOCO CONTATOS (igual estava) ----------
     if (contatos?.length){
       html += `<div class="sr-group" style="padding:6px 2px;">
         <div class="sr-title" style="color:#7aa39a;font-size:12px;text-transform:uppercase;margin:6px 4px 4px;"><i class="fa fa-user"></i> Contatos</div>

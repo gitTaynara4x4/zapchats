@@ -294,45 +294,52 @@
         const id   = Number(el.getAttribute('data-id') || 0);
         if (!id) return;
 
-        // se existir selecionarClienteObj (fluxo novo com cache), usa ELE e pronto
+        // dados básicos do contato (para header/avatar)
+        const nome = el.querySelector('.ag-name')?.textContent?.trim() || '';
+        const tel  = el.getAttribute('data-phone') || '';
+        const av   = el.getAttribute('data-avatar');
+
+        const seed = {
+          id,
+          cliente_id: id,
+          telefone: tel,
+          nome: nome || tel || 'Cliente',
+          avatar_url: av || null,
+          instancia_id: getInstanciaAtiva() ? Number(getInstanciaAtiva()) : null,
+        };
+
         if (typeof window.selecionarClienteObj === 'function') {
           try {
             await window.selecionarClienteObj(id);
+
+            // se o fluxo novo não montou o state/header, força fallback
+            const sel = window.state?.clienteSel;
+            if (!sel || sel.cliente_id !== id) {
+              console.warn('[Agenda] selecionarClienteObj não montou header, usando fallback');
+              window.state = window.state || {};
+              window.state.clienteSel = seed;
+              setChatHeader(seed);
+              try { await openByProfileFallback(id, seed); } catch (e2) {
+                console.error('[Agenda] fallback open', e2);
+              }
+            }
           } catch (e) {
             console.error('[Agenda] erro selecionarClienteObj, usando fallback', e);
-
-            // fallback antigo se realmente der erro
-            const nome = el.querySelector('.ag-name')?.textContent?.trim() || '';
-            const tel  = el.getAttribute('data-phone') || '';
-            const av   = el.getAttribute('data-avatar');
-
-            const seed = {
-              id, cliente_id:id, telefone: tel,
-              nome: nome || tel || 'Cliente',
-              avatar_url: av || null,
-              instancia_id: getInstanciaAtiva() ? Number(getInstanciaAtiva()) : null,
-            };
             window.state = window.state || {};
             window.state.clienteSel = seed;
             setChatHeader(seed);
-            try { await openByProfileFallback(id, seed); } catch(e2){ console.error('[Agenda] fallback open', e2); }
+            try { await openByProfileFallback(id, seed); } catch (e2) {
+              console.error('[Agenda] fallback open', e2);
+            }
           }
         } else {
           // ambiente antigo (sem selecionarClienteObj) → sempre fallback
-          const nome = el.querySelector('.ag-name')?.textContent?.trim() || '';
-          const tel  = el.getAttribute('data-phone') || '';
-          const av   = el.getAttribute('data-avatar');
-
-          const seed = {
-            id, cliente_id:id, telefone: tel,
-            nome: nome || tel || 'Cliente',
-            avatar_url: av || null,
-            instancia_id: getInstanciaAtiva() ? Number(getInstanciaAtiva()) : null,
-          };
           window.state = window.state || {};
           window.state.clienteSel = seed;
           setChatHeader(seed);
-          try { await openByProfileFallback(id, seed); } catch(e){ console.error('[Agenda] fallback open', e); }
+          try { await openByProfileFallback(id, seed); } catch (e) {
+            console.error('[Agenda] fallback open', e);
+          }
         }
 
         window.__Agenda.close();

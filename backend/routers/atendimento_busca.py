@@ -1,4 +1,3 @@
-# backend/routers/atendimento_busca.py
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
@@ -577,6 +576,7 @@ def _smart_mimetype(tipo: str | None, mt_db: str | None, filename: str | None) -
 # ---- Helpers para servir bytes/local file com suporte a Range ----
 _RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)")
 
+
 def _open_local_file(path: str) -> Tuple[int, callable]:
     file_size = os.path.getsize(path)
 
@@ -637,7 +637,7 @@ def atendimento_search(
     Responde no shape esperado pelo front:
     {
       "contatos": [{ id, nome, telefone, avatar_url, ultima_mensagem, hora, last_ts }, ...],
-      "mensagens": [{ cliente_id, snippet, hora }, ...]
+      "mensagens": [{ cliente_id, cliente_nome, cliente_telefone, snippet, hora }, ...]
     }
     """
     empresa_id_token = int(identity["empresa_id"])
@@ -702,8 +702,10 @@ def atendimento_search(
     if instance:
         inst_row = (
             db.query(models.EmpresaInstancia)
-            .filter(models.EmpresaInstancia.empresa_id == empresa_id_eff,
-                    models.EmpresaInstancia.instance_name == instance)
+            .filter(
+                models.EmpresaInstancia.empresa_id == empresa_id_eff,
+                models.EmpresaInstancia.instance_name == instance,
+            )
             .first()
         )
         if inst_row:
@@ -711,16 +713,33 @@ def atendimento_search(
 
     like = f"%{q}%"
     msgs_rows = (
-        db.query(m.cliente_id, m.conteudo, m.timestamp)
+        db.query(
+            m.cliente_id,
+            m.conteudo,
+            m.timestamp,
+            models.Cliente.nome,
+            models.Cliente.telefone,
+            models.Cliente.nome_whatsapp,
+        )
+        .join(models.Cliente, models.Cliente.id == m.cliente_id)
         .filter(*filtros, m.conteudo.ilike(like))
         .order_by(m.timestamp.desc())
         .limit(min(limit, 80))
         .all()
     )
 
-    mensagens: List[Dict] = [
-        {"cliente_id": int(cid), "snippet": (txt or ""), "hora": ts.isoformat() if ts else None}
-        for cid, txt, ts in msgs_rows
-    ]
+    mensagens: List[Dict] = []
+    for cid, txt, ts, cli_nome, cli_tel, cli_nome_whats in msgs_rows:
+        nome = (cli_nome_whats or cli_nome or "").strip()
+        tel = (cli_tel or "").strip()
+        mensagens.append(
+            {
+                "cliente_id": int(cid),
+                "cliente_nome": nome or tel,
+                "cliente_telefone": tel,
+                "snippet": (txt or ""),
+                "hora": ts.isoformat() if ts else None,
+            }
+        )
 
     return {"contatos": contatos, "mensagens": mensagens}

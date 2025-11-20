@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -69,18 +70,75 @@ def _resolve_instancia_id(
 
 
 def _iso(ts) -> Optional[str]:
+    if ts is None:
+        return None
     try:
         return ts.isoformat()
     except Exception:
-        return None
+        # fallback: tentar tratar como epoch (segundos)
+        try:
+            return datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat()
+        except Exception:
+            return None
+
+
+def _query_grupos_ultima_por_grupo(
+    db: Session,
+    *,
+    empresa_id: int,
+    resolved_inst_id: Optional[int],
+):
+    """
+    Retorna um query com a ÚLTIMA mensagem de cada grupo dessa empresa/instância.
+    (sem paginação; quem chama decide limit/order depois)
+    """
+    G = models.Grupo
+    MG = models.MensagemGrupo
+    EI = models.EmpresaInstancia
+
+    # subquery: última mensagem (por id) de cada grupo
+    sub = (
+        db.query(
+            MG.grupo_id.label("gid"),
+            func.max(MG.id).label("last_msg_id"),
+        )
+        .filter(MG.empresa_id == empresa_id)
+    )
+    if resolved_inst_id is not None:
+        sub = sub.filter(MG.instancia_id == resolved_inst_id)
+    sub = sub.group_by(MG.grupo_id).subquery()
+
+    q = (
+        db.query(
+            G.id.label("grupo_id"),
+            G.nome.label("nome"),
+            G.remote_jid.label("telefone"),
+            G.avatar_url.label("avatar_url"),
+
+            MG.id.label("ultima_msg_id"),
+            MG.conteudo.label("ultima_mensagem"),
+            MG.tipo.label("ultima_tipo"),
+            MG.ack.label("ultima_ack"),
+            func.to_timestamp(MG.timestamp).label("hora"),  # BigInt epoch -> timestamptz
+
+            MG.instancia_id.label("instancia_id"),
+            EI.instance_name.label("instance_name"),
+        )
+        .join(sub, sub.c.gid == G.id)
+        .join(MG, MG.id == sub.c.last_msg_id)
+        .outerjoin(EI, EI.id == MG.instancia_id)
+        .filter(G.empresa_id == empresa_id)
+    )
+
+    return q
 
 
 # =========================================================
 # GET /conversas
-# Lista conversas (uma por cliente) ordenadas pela última mensagem
+# Lista conversas (uma por cliente) + grupos, ordenadas pela última mensagem
 # Suporta:
 #   • filtro por instância (?instancia_id= / ?instance=)
-#   • paginação por cursor (?cursor_last_msg_id=ID)
+#   • paginação por cursor (?cursor_last_msg_id=ID)  -> só para clientes
 #   • limit (1..200)
 # =========================================================
 @router.get("/conversas")
@@ -100,22 +158,26 @@ def listar_conversas(
     {
       "items": [
         {
-          "id": 123, "conversation_id": 123, "cliente_id": 123,
+          "id": 123, "conversation_id": 123, "cliente_id": 123|null (grupo),
           "nome": "...", "nome_whatsapp": "...",
-          "telefone": "55...",
+          "telefone": "55... ou ...@g.us",
           "avatar_url": "http...",
           "ultima_msg_id": 9999,
           "ultima_mensagem": "texto",
+          "ultima_tipo": "saida|entrada",
+          "ultima_ack": 0|1|2|null,
           "last_tipo": "saida|entrada",
           "last_ack": 0|1|2|null,
           "hora": "2024-01-01T00:00:00Z",
           "last_ts": "2024-01-01T00:00:00Z",
           "instancia_id": 1,
           "instance_name": "minha-inst",
-          "pinned": true|false
+          "novas": 0,
+          "pinned": true|false,
+          "is_group": true|false
         }
       ],
-      "next_cursor": 888   # menor last_msg_id retornado na página (para paginação)
+      "next_cursor": 888   # menor ultima_msg_id de CLIENTE retornado na página (para paginação)
     }
     """
     # 1) valida empresa (token vs query)
@@ -138,7 +200,7 @@ def listar_conversas(
         instance=instance,
     )
 
-    # 4) cursor: se veio cursor_last_msg_id, vamos pegar seu timestamp
+    # 4) cursor: se veio cursor_last_msg_id, vamos pegar seu timestamp (APENAS em mensagens de cliente)
     cursor_ts = None
     cursor_id = None
     if cursor_last_msg_id is not None:
@@ -194,7 +256,7 @@ def listar_conversas(
         .filter(C.empresa_id == empresa_id)
     )
 
-    # 7) paginação por cursor: pega somente itens "mais antigos" que o cursor
+    # 7) paginação por cursor: pega somente itens "mais antigos" que o cursor (somente para clientes)
     #    regra: (timestamp, id) < (cursor_ts, cursor_id)
     if cursor_id is not None and cursor_ts is not None:
         q = q.filter(
@@ -204,24 +266,48 @@ def listar_conversas(
             )
         )
 
-    # 8) ordenação (mais recentes primeiro), limit e fetch
-    rows = (
+    # 8) busca de CLIENTES no banco (mantém a lógica antiga)
+    #    se for a primeira página (sem cursor), busca um pouco mais para sobrar espaço para misturar grupos
+    base_limit = limit
+    limit_db = base_limit * 2 if cursor_last_msg_id is None else base_limit
+
+    rows_clientes = (
         q.order_by(M.timestamp.desc(), M.id.desc())
-        .limit(limit)
+        .limit(limit_db)
         .all()
     )
 
-    # 9) montar payload
-    items: List[Dict[str, Any]] = []
-    for r in rows:
-        # pinned/coalesce
-        pinned_flag = bool(getattr(r, "pinned", False) or getattr(r, "fixado", False))
-        ts_iso = _iso(getattr(r, "hora", None))
+    # 9) busca de GRUPOS (apenas na primeira página; nas próximas você pagina só clientes mesmo)
+    rows_grupos = []
+    if cursor_last_msg_id is None:
+        qg = _query_grupos_ultima_por_grupo(
+            db,
+            empresa_id=empresa_id,
+            resolved_inst_id=resolved_inst_id,
+        )
+        # não deve ter milhares de grupos, mas limit_db dá um teto de segurança
+        rows_grupos = (
+            qg.order_by(func.to_timestamp(models.MensagemGrupo.timestamp).desc())
+            .limit(limit_db)
+            .all()
+        )
 
-        items.append({
-            "id": int(r.cliente_id),
-            "conversation_id": int(r.cliente_id),
-            "cliente_id": int(r.cliente_id),
+    # 10) montar payload (clientes + grupos) em memória, ordenar, cortar no LIMIT
+    entries: List[tuple[Optional[datetime], int, Dict[str, Any], bool]] = []
+    # tuple = (ts_datetime, ultima_msg_id, payload_dict, is_cliente_bool)
+
+    # --- clientes ---
+    for r in rows_clientes:
+        cli_id = int(r.cliente_id)
+        msg_id = int(getattr(r, "ultima_msg_id", 0) or 0)
+        ts_dt = getattr(r, "hora", None)
+
+        pinned_flag = bool(getattr(r, "pinned", False) or getattr(r, "fixado", False))
+
+        payload: Dict[str, Any] = {
+            "id": cli_id,
+            "conversation_id": cli_id,
+            "cliente_id": cli_id,
 
             "nome": getattr(r, "nome", None),
             "nome_whatsapp": getattr(r, "nome_whatsapp", None),
@@ -229,22 +315,85 @@ def listar_conversas(
             "telefone": getattr(r, "telefone", None),
             "avatar_url": getattr(r, "avatar_url", None),
 
-            "ultima_msg_id": int(getattr(r, "ultima_msg_id", 0) or 0),
+            "ultima_msg_id": msg_id,
             "ultima_mensagem": getattr(r, "ultima_mensagem", None) or "",
+            "ultima_tipo": getattr(r, "ultima_tipo", None),
+            "ultima_ack": getattr(r, "ultima_ack", None),
+
             "last_tipo": getattr(r, "ultima_tipo", None),
             "last_ack": getattr(r, "ultima_ack", None),
-
-            "hora": ts_iso,
-            "last_ts": ts_iso,
 
             "instancia_id": getattr(r, "instancia_id", None),
             "instance_name": getattr(r, "instance_name", None),
 
-            "novas": 0,          # se você tiver contagem de não lidas, preencha aqui
+            "novas": 0,           # se você tiver contagem de não lidas, preencha aqui depois
             "pinned": pinned_flag,
-        })
+            "is_group": False,
+        }
 
-    # 10) próximo cursor = menor ultima_msg_id da página atual
-    next_cursor = min((it["ultima_msg_id"] for it in items), default=None)
+        entries.append((ts_dt, msg_id, payload, True))
+
+    # --- grupos (só primeira página) ---
+    for g in rows_grupos:
+        grp_id = int(getattr(g, "grupo_id", 0) or 0)
+        msg_id = int(getattr(g, "ultima_msg_id", 0) or 0)
+        ts_dt = getattr(g, "hora", None)
+
+        payload_g: Dict[str, Any] = {
+            "id": grp_id,
+            "conversation_id": grp_id,
+            "cliente_id": None,  # front cai pro id
+
+            "nome": getattr(g, "nome", None),
+            "nome_whatsapp": None,
+
+            "telefone": getattr(g, "telefone", None),   # remote_jid: ...@g.us
+            "avatar_url": getattr(g, "avatar_url", None),
+
+            "ultima_msg_id": msg_id,
+            "ultima_mensagem": getattr(g, "ultima_mensagem", None) or "",
+            "ultima_tipo": getattr(g, "ultima_tipo", None),
+            "ultima_ack": getattr(g, "ultima_ack", None),
+
+            "last_tipo": getattr(g, "ultima_tipo", None),
+            "last_ack": getattr(g, "ultima_ack", None),
+
+            "instancia_id": getattr(g, "instancia_id", None),
+            "instance_name": getattr(g, "instance_name", None),
+
+            "novas": 0,
+            "pinned": False,
+            "is_group": True,
+        }
+
+        entries.append((ts_dt, msg_id, payload_g, False))
+
+    # ordenar por (ts, id) DESC
+    def _sort_key(ent: tuple[Optional[datetime], int, Dict[str, Any], bool]):
+        ts_dt, msg_id, _payload, _is_cli = ent
+        if ts_dt is None:
+            return (datetime.min.replace(tzinfo=timezone.utc), msg_id)
+        return (ts_dt, msg_id)
+
+    entries.sort(key=_sort_key, reverse=True)
+
+    # corta no LIMIT pedido pelo cliente
+    entries = entries[:base_limit]
+
+    # 11) converter timestamps para ISO e montar lista final
+    items: List[Dict[str, Any]] = []
+    cliente_msg_ids_visiveis: List[int] = []
+
+    for ts_dt, msg_id, payload, is_cli in entries:
+        ts_iso = _iso(ts_dt)
+        payload["hora"] = ts_iso
+        payload["last_ts"] = ts_iso
+        items.append(payload)
+
+        if is_cli and msg_id:
+            cliente_msg_ids_visiveis.append(msg_id)
+
+    # 12) próximo cursor = menor ultima_msg_id de CLIENTE visível na página
+    next_cursor = min(cliente_msg_ids_visiveis) if cliente_msg_ids_visiveis else None
 
     return {"items": items, "next_cursor": next_cursor}
