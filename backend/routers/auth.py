@@ -179,7 +179,7 @@ Você solicitou a redefinição de senha do ZapChats.
 
 Use este token no site: {token}
 
-Ou acesse: http://localhost:8000/esqueci_senha.html?token={token}
+Ou acesse: https://www.zapschat.com.br/esqueci_senha.html?token={token}
 
 Se você não solicitou, ignore este e-mail.
 """
