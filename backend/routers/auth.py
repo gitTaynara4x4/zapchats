@@ -171,29 +171,44 @@ def _decode_token(token: str) -> dict:
 
 # ───────────────────────── E-mail reset ─────────────────────────
 def enviar_email_reset(email_destino: str, token: str):
-    assunto = "Redefinição de senha - ZapChats"
+    assunto = "[ZapChats] Instruções para redefinição de senha"
+    link_reset = f"https://www.zapschat.com.br/esqueci_senha.html?token={token}"
+
     corpo = f"""
-Olá!
+Olá,
 
-Você solicitou a redefinição de senha do ZapChats.
+Recebemos uma solicitação para redefinir a senha da conta ZapChats associada a este e-mail.
 
-Use este token no site: {token}
+1) Acesse o link seguro:
+   {link_reset}
 
-Ou acesse: https://www.zapschat.com.br/esqueci_senha.html?token={token}
+2) Ou use este código na página "Esqueci minha senha":
+   {token}
 
-Se você não solicitou, ignore este e-mail.
+Por motivos de segurança, este código e o link são válidos por um período limitado.
+Se você não fez esta solicitação, pode ignorar este e-mail.
+
+Atenciosamente,
+Equipe ZapChats
 """
+
     msg = MIMEText(corpo)
     msg["Subject"] = assunto
     msg["From"] = EMAIL_REMETENTE
     msg["To"] = email_destino
 
     try:
+        print("[EMAIL] Conectando em smtp.gmail.com:465...")
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(EMAIL_REMETENTE, EMAIL_SENHA)
             server.sendmail(EMAIL_REMETENTE, email_destino, msg.as_string())
+        print(f"[EMAIL] Enviado com sucesso para {email_destino}")
     except Exception as e:
-        print("[ERRO EMAIL]", e)
+        import traceback
+        print("[ERRO EMAIL]", repr(e))
+        traceback.print_exc()
+
+
 
 # ───────────────────────── Util de data URL ─────────────────────────
 DATA_URL_RE = re.compile(r"^data:(?P<mime>[^;]+);base64,(?P<data>.+)$")

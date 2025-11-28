@@ -16,7 +16,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func
 
 from backend.database import get_db
 from backend.routers.auth import get_current_identity
@@ -34,6 +34,7 @@ def _resolve_colab_id(db: Session, ident: dict) -> int:
     if ident is None:
         raise HTTPException(status_code=401, detail="Não autenticado")
 
+    # se o token já veio com id_colab, ótimo
     if "id_colab" in ident and ident["id_colab"]:
         return int(ident["id_colab"])
 
@@ -41,6 +42,7 @@ def _resolve_colab_id(db: Session, ident: dict) -> int:
     if kind == "colaborador":
         return int(ident["id"])
 
+    # senão, resolve via espelho (usuario -> colaborador)
     user_id = int(ident["id"])
     empresa_id = int(ident["empresa_id"])
     colab = (
@@ -59,7 +61,12 @@ def _resolve_colab_id(db: Session, ident: dict) -> int:
     return int(colab.id)
 
 
-def _assert_participa(db: Session, empresa_id: int, thread_id: str, colab_id: int) -> None:
+def _assert_participa(
+    db: Session,
+    empresa_id: int,
+    thread_id: str,
+    colab_id: int,
+) -> None:
     """Verifica se o colaborador participa da thread (via EXISTS/UNNEST)."""
     row = db.execute(
         text(
@@ -81,7 +88,8 @@ def _assert_participa(db: Session, empresa_id: int, thread_id: str, colab_id: in
     ).first()
     if not row:
         raise HTTPException(
-            status_code=404, detail="Conversa não encontrada ou sem acesso"
+            status_code=404,
+            detail="Conversa não encontrada ou sem acesso",
         )
 
 
@@ -129,6 +137,13 @@ class ParticipantsIn(TypedDict, total=False):
     remove: Optional[List[int]]
 
 
+class ChatColabOut(TypedDict, total=False):
+    id: int
+    nome: str
+    nome_completo: Optional[str]
+    setor_nome: Optional[str]
+
+
 # =====================================================================================
 # Endpoints REST
 # =====================================================================================
@@ -143,6 +158,61 @@ def who_am_i(
     emp_id = int(ident["empresa_id"])
     colab_id = _resolve_colab_id(db, ident)
     return {"empresa_id": emp_id, "colab_id": colab_id}
+
+
+@router.get("/roster")
+def chat_roster(
+    ident=Depends(get_current_identity),
+    db: Session = Depends(get_db),
+) -> List[ChatColabOut]:
+    """
+    Lista básica de colaboradores da mesma empresa para o chat interno.
+
+    Não depende de permissão 'colaboradores.ver', só de estar autenticado
+    na empresa. É usado só pra montar nome/foto no chat interno.
+    """
+    emp_id = int(ident["empresa_id"])
+    Colab = models.Colaborador
+
+    # Só colaboradores da empresa logada, ordenados por nome (case-insensitive)
+    rows = (
+        db.query(Colab)
+        .filter(Colab.empresa_id == emp_id)
+        .order_by(func.lower(Colab.nome))
+        .all()
+    )
+
+    out: List[ChatColabOut] = []
+    for c in rows:
+        setor_nome: Optional[str] = None
+
+        # Se tiver relação .setor, usa
+        if getattr(c, "setor", None) is not None:
+            setor_nome = c.setor.nome
+        # senão tenta resolver por setor_id / departamento_id
+        elif getattr(c, "setor_id", None):
+            s = db.query(models.Setor).filter_by(id=c.setor_id).first()
+            if s:
+                setor_nome = s.nome
+            else:
+                dep = (
+                    db.query(models.Departamento)
+                    .filter_by(id=c.setor_id, empresa_id=c.empresa_id)
+                    .first()
+                )
+                if dep:
+                    setor_nome = dep.nome
+
+        out.append(
+            {
+                "id": int(c.id),
+                "nome": c.nome,
+                "nome_completo": getattr(c, "nome_completo", None),
+                "setor_nome": setor_nome,
+            }
+        )
+
+    return out
 
 
 @router.get("/conversations")
@@ -248,6 +318,7 @@ def create_conversation(
     uid = _resolve_colab_id(db, ident)
 
     titulo = (payload.get("titulo") or "").strip() or "Conversa"
+    # sempre garante que o próprio usuário entra nos participantes
     participantes = list(dict.fromkeys((payload.get("participantes") or []) + [uid]))
 
     tid = _new_thread_id()
@@ -336,7 +407,7 @@ def list_messages(
     uid = _resolve_colab_id(db, ident)
     _assert_participa(db, emp_id, thread_id, uid)
 
-    cond = []
+    cond: List[str] = []
     params = {"emp": emp_id, "tid": thread_id, "limit": limit}
     if before:
         cond.append("e.created_at < :before")
@@ -480,7 +551,6 @@ def rename_conversation(
             },
         )
 
-        # UPDATE usando subselect (corrigido)
         db.execute(
             text(
                 """
@@ -568,65 +638,6 @@ def update_participants(
             "type": "participants.updated",
             "thread_id": thread_id,
             "participantes": parts,
-        },
-    )
-    return
-
-
-@router.delete("/messages/{event_id}", status_code=204)
-def soft_delete_message(
-    event_id: int,
-    ident=Depends(get_current_identity),
-    db: Session = Depends(get_db),
-):
-    emp_id = int(ident["empresa_id"])
-    uid = _resolve_colab_id(db, ident)
-
-    ev = db.execute(
-        text(
-            """
-        SELECT id, empresa_id, thread_id, autor_id, kind
-          FROM chat_eventos
-         WHERE id = :id AND empresa_id = :emp
-         LIMIT 1
-    """
-        ),
-        {"id": event_id, "emp": emp_id},
-    ).mappings().first()
-
-    if not ev:
-        raise HTTPException(status_code=404, detail="Evento não encontrado")
-
-    _assert_participa(db, emp_id, ev["thread_id"], uid)
-
-    if ev["kind"] == "head":
-        raise HTTPException(
-            status_code=422, detail="HEAD não pode ser removido por este endpoint"
-        )
-    if int(ev["autor_id"] or 0) != uid:
-        raise HTTPException(
-            status_code=403, detail="Somente o autor pode remover a mensagem"
-        )
-
-    db.execute(
-        text(
-            """
-        UPDATE chat_eventos
-           SET deleted_at = NOW()
-         WHERE id = :id
-    """
-        ),
-        {"id": event_id},
-    )
-    db.commit()
-
-    # WS
-    _broadcast_emp(
-        emp_id,
-        {
-            "type": "message.deleted",
-            "thread_id": ev["thread_id"],
-            "id": ev["id"],
         },
     )
     return

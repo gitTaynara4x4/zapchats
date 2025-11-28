@@ -146,8 +146,14 @@ const minDelay=(ms)=>new Promise(r=>setTimeout(r,ms));
 // === Limite local de tentativas por e-mail ===
 const LS_KEY = (email)=>`fp:tries:${(email||'').toLowerCase()}`;
 function getTries(email){
-  try{ const raw=localStorage.getItem(LS_KEY(email)); if(!raw) return {n:0,ts:Date.now()};
-    const obj=JSON.parse(raw); return {n:obj.n|0, ts:obj.ts|0}; }catch{ return {n:0,ts:Date.now()}; }
+  try{
+    const raw=localStorage.getItem(LS_KEY(email));
+    if(!raw) return {n:0,ts:Date.now()};
+    const obj=JSON.parse(raw);
+    return {n:obj.n|0, ts:obj.ts|0};
+  }catch{
+    return {n:0,ts:Date.now()};
+  }
 }
 function setTries(email,n){ try{ localStorage.setItem(LS_KEY(email), JSON.stringify({n,ts:Date.now()})); }catch{} }
 function incTries(email){ const t=getTries(email); setTries(email, t.n+1); return t.n+1; }
@@ -179,7 +185,8 @@ formForgot.addEventListener('submit', async (e)=>{
 
   try{
     const res = await fetch('/api/auth/forgot-password',{
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
       body:JSON.stringify({email})
     });
 
@@ -236,11 +243,29 @@ const inputTok  = document.getElementById('token');
   sync();
 })();
 
-// Pré-preenche token via ?token=...
+// Pré-preenche token via ?token=... (abrindo direto no Passo 2)
 (function(){
   try{
-    const u=new URL(location.href); const t=u.searchParams.get('token');
-    if(t){ document.getElementById('reset-section').classList.remove('hidden'); inputTok.value=t; inputPass.focus(); }
+    const u = new URL(location.href);
+    const t = u.searchParams.get('token');
+    if (!t) return;
+
+    const resetSection = document.getElementById('reset-section');
+    const formForgot   = document.getElementById('form-forgot');
+    const heroTitle    = document.querySelector('.hero .title');
+    const heroSubtitle = document.querySelector('.hero .subtitle');
+
+    // mostra só o passo 2
+    if (resetSection) resetSection.classList.remove('hidden');
+    if (formForgot)   formForgot.classList.add('hidden');
+
+    // preenche token e foca na senha
+    if (inputTok)  inputTok.value = t;
+    if (inputPass) inputPass.focus();
+
+    // ajusta texto da hero
+    if (heroTitle)    heroTitle.textContent = 'Defina uma nova senha';
+    if (heroSubtitle) heroSubtitle.textContent = 'Informe o token e crie sua nova senha.';
   }catch{}
 })();
 
@@ -252,16 +277,22 @@ formReset.addEventListener('submit', async (e)=>{
     return;
   }
 
-  btnReset.disabled=true; const t=btnReset.querySelector('.btn-text')||btnReset; const old=t.textContent; t.textContent='Atualizando…';
+  btnReset.disabled=true;
+  const t=btnReset.querySelector('.btn-text')||btnReset;
+  const old=t.textContent;
+  t.textContent='Atualizando…';
+
   try{
     const res=await fetch('/api/auth/reset-password',{
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
       body:JSON.stringify({token,nova_senha})
     });
 
     if(!res.ok){
       const msg = await extractApiError(res, 'Não foi possível redefinir a senha.');
-      modal.open({title:'Erro', message:msg, variant:'error'}); return;
+      modal.open({title:'Erro', message:msg, variant:'error'});
+      return;
     }
 
     resetTries((emailInput.value||'').trim().toLowerCase());
@@ -275,6 +306,7 @@ formReset.addEventListener('submit', async (e)=>{
   }catch{
     modal.open({title:'Conexão falhou', message:'Tente novamente.', variant:'error'});
   }finally{
-    btnReset.disabled=false; t.textContent=old;
+    btnReset.disabled=false;
+    t.textContent=old;
   }
 });
