@@ -423,23 +423,58 @@ def _resolve_counterparty_num_1to1(data: dict, me_num: str | None) -> tuple[str 
         return tel, remote_jid
 
     # 2) alternativos: string **ou dict** (Evolution às vezes manda objetos aqui)
-    alt_fields = ("senderPn", "senderpn", "participant", "author", "from", "sender", "user")
+    #    ⬇⬇⬇ AQUI ENTRA O "source"
+    alt_fields = (
+        "senderPn",
+        "senderpn",
+        "participant",
+        "author",
+        "from",
+        "sender",
+        "user",
+        "source",  # <- NOVO: Evolution costuma mandar info rica aqui
+    )
 
     def _first_str_from_obj(o: dict) -> str | None:
-        for k2 in ("id","jid","wid","user","from","peer","participant","phone","phoneNumber","number"):
-            v2 = o.get(k2)
-            if isinstance(v2, str) and v2.strip():
-                return v2
+        """
+        Em objetos tipo `source`, prioriza campos claramente de telefone
+        antes de ids/jids genéricos.
+        """
+        # 1º: campos que normalmente trazem telefone "cru" ou formatado
+        prefer_keys = [
+            "phone", "phoneNumber", "number",
+            "senderPn", "senderpn",
+        ]
+        # 2º: campos que podem ter JID "bom" (@s.whatsapp.net) ou número
+        jid_like_keys = [
+            "user", "from", "peer", "participant",
+            "jid", "wid", "remoteJid", "remote_jid", "chatId", "chat_id",
+        ]
+        # 3º: ids genéricos (podem ser lid/business id)
+        fallback_keys = [
+            "id",
+        ]
+
+        for key_group in (prefer_keys, jid_like_keys, fallback_keys):
+            for k2 in key_group:
+                v2 = o.get(k2)
+                if isinstance(v2, str) and v2.strip():
+                    return v2.strip()
         return None
+
 
     for field in alt_fields:
         alt = key.get(field) or data.get(field)
-        cand = alt if isinstance(alt, str) else (_first_str_from_obj(alt) if isinstance(alt, dict) else None)
+        cand = alt if isinstance(alt, str) else (
+            _first_str_from_obj(alt) if isinstance(alt, dict) else None
+        )
         alt_num = _num_of(cand)
         if alt_num and alt_num != me_num:
             return alt_num, cand
 
     return (tel if tel else None), (remote_jid if isinstance(remote_jid, str) else None)
+
+
 
 
 def formatar_telefone_br(n: str) -> str:
@@ -565,6 +600,7 @@ def _get_or_open_atendimento(
     if not a:
         status_ini = StatusAtendimento.EM_ATENDIMENTO if direcao == "saida" else StatusAtendimento.NOVO
         a = models.Atendimento(
+            empresa_id=empresa_id,               # 👈 usa o empresa_id aqui
             cliente_id=cliente_id,
             instancia_id=instancia_id,
             operador_id=(operador_id if direcao == "saida" else None),
@@ -580,6 +616,7 @@ def _get_or_open_atendimento(
             a = q.first()
             if not a:
                 a = models.Atendimento(
+                    empresa_id=empresa_id,       # 👈 e aqui também
                     cliente_id=cliente_id,
                     instancia_id=instancia_id,
                     operador_id=(operador_id if direcao == "saida" else None),
@@ -587,6 +624,7 @@ def _get_or_open_atendimento(
                     criado_em=ts_dt,
                 )
                 db.add(a); db.flush()
+
 
     if direcao == "saida":
         try:
@@ -808,9 +846,15 @@ def extract_media_meta(msg_obj: dict) -> dict[str, Any] | None:
                 "fileLength":im.get("fileLength"),"base64":im.get("base64") or im.get("fileBase64") or im.get("data") or None}
     if "videoMessage" in m:
         vi = m["videoMessage"] or {}
-        return {"tipo":"video","mimetype":vi.get("mimetype") or "video/mp4","filename":vi.get("fileName") or "video.mp4",
-                "url":vi.get("url") or vi.get("directPath"),"caption":vi.get("caption") or None,
-                "fileLength":vi.get("fileLength"),"base64":vi.get("base64") or vi.get("fileBase64") or im.get("data") or None}
+        return {
+            "tipo":"video",
+            "mimetype":vi.get("mimetype") or "video/mp4",
+            "filename":vi.get("fileName") or "video.mp4",
+            "url":vi.get("url") or vi.get("directPath"),
+            "caption":vi.get("caption") or None,
+            "fileLength":vi.get("fileLength"),
+            "base64":vi.get("base64") or vi.get("fileBase64") or vi.get("data") or None,
+        }
     if "audioMessage" in m:
         au = m["audioMessage"] or {}
         return {"tipo":"audio","mimetype":au.get("mimetype") or "audio/ogg","filename":"ptt.ogg" if au.get("ptt") else "audio.ogg",
@@ -1534,7 +1578,19 @@ async def on_messages_upsert(inst_id: str, data):
                             msg_id=msg_id,
                             preview=_short(extract_text_from_baileys(m)),
                         )
+                        # log extra para enxergar o source cru
+                        try:
+                            src = m.get("source")
+                        except Exception:
+                            src = None
+                        _log_ctx(
+                            "[UPsert][lid-debug-source]",
+                            idx=idx,
+                            msg_id=msg_id,
+                            source=_short(src, 300),
+                        )
                         continue
+
 
                 remote_jid = resolved_jid or original_jid
                 if remote_jid.endswith("@g.us"):
@@ -1605,16 +1661,17 @@ async def on_messages_upsert(inst_id: str, data):
 
                 if not cli_id:
                     try:
-                        cli_id = upsert_cliente(
+                        cli_id = await _retry_deadlock(
                             db,
-                            empresa_id=empresa_id,
-                            instancia_id=inst.id,
-                            telefone_raw=telefone,
-                            nome=(formatted if from_me else (push_name or formatted)),
-                            nome_whatsapp=(
-                                formatted if from_me else (push_name or formatted)
-                            ),
-                            avatar_url=None,
+                            lambda: upsert_cliente(
+                                db,
+                                empresa_id=empresa_id,
+                                instancia_id=inst.id,
+                                telefone_raw=telefone,
+                                nome=(formatted if from_me else (push_name or formatted)),
+                                nome_whatsapp=(formatted if from_me else (push_name or formatted)),
+                                avatar_url=None,
+                            )
                         )
                     except Exception as e:
                         LOG(
@@ -1626,6 +1683,7 @@ async def on_messages_upsert(inst_id: str, data):
                         except Exception:
                             pass
                         continue
+
 
                 if not cli_id:
                     _log_skip(
