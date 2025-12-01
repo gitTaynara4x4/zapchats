@@ -152,7 +152,7 @@ def _assert_empresa_user(user, empresa_id: int) -> int:
     return int(empresa_id)
 
 
-# ------- Helpers: PIN por usuário em DB (com fallback) -------_
+# ------- Helpers: PIN por usuário em DB (com fallback) -------
 def _has_model_pinned() -> bool:
     return hasattr(models, "AtendimentoPinnedConversa")
 
@@ -191,7 +191,7 @@ def _pins_put_cached(empresa_id: int, user_id: int, s: set[int]):
     _cache_set_json(_k_pin_user(empresa_id, user_id), sorted(int(x) for x in s), ttl=30 * 24 * 3600)
 
 
-# ------- Helpers: Labels com cor em DB (com fallback) -------_
+# ------- Helpers: Labels com cor em DB (com fallback) -------
 def _has_model_labels() -> bool:
     return hasattr(models, "AtendimentoConversaLabel")
 
@@ -375,7 +375,7 @@ async def broadcast_msg(
     - Faz pass-through de `instancia_id` e `instance_name`.
     """
 
-    # --- segurança: chave interna obrigatória se configurada ---_
+    # --- segurança: chave interna obrigatória se configurada ---
     if INTERNAL_BROADCAST_KEY:
         if not x_internal_key or x_internal_key != INTERNAL_BROADCAST_KEY:
             raise HTTPException(
@@ -433,7 +433,7 @@ async def broadcast_msg(
                 # se der erro aqui, só seguimos sem cliente_id
                 pass
 
-        # --- atualiza ACK no banco (para mensagens de SAÍDA) ---_
+        # --- atualiza ACK no banco (para mensagens de SAÍDA) ---
         try:
             new_ack: Optional[int] = None
             if ack_raw is not None:
@@ -499,7 +499,7 @@ async def broadcast_msg(
             "instance_name": dados.get("instance_name") or dados.get("instance"),
         }
 
-        # --- anexos/mídias no mesmo formato do histórico ---_
+        # --- anexos/mídias no mesmo formato do histórico ---
         midias: List[Dict] = []
 
         # 1) Já veio uma lista padronizada?
@@ -1136,6 +1136,105 @@ def apagar_conversa(
     except Exception:
         pass
     return {"ok": True, "deleted": list(deleted)}
+
+
+@router.delete("/conversas/{cliente_id}/permanente")
+def apagar_conversa_permanente(
+    cliente_id: int,
+    empresa_id: int = Query(...),
+    db: Session = Depends(get_db),
+    identity: dict = Depends(get_current_identity),
+):
+    """
+    Hard delete:
+      - apaga mídia, mensagens, atendimentos e o próprio cliente
+      - limpa pins, caches e lista de deletados
+      - emite broadcast conv.hard_deleted
+    """
+    empresa_id = _assert_empresa_user(identity, empresa_id)
+
+    perms = set(identity.get("permissoes") or [])
+    is_admin = bool(identity.get("is_admin") or identity.get("admin"))
+
+    if not (is_admin or "atendimento.apagar_conversas" in perms):
+        raise HTTPException(status_code=403, detail="Sem permissão para apagar conversas")
+
+    # Confere se o cliente existe nessa empresa
+    cliente = (
+        db.query(models.Cliente)
+        .filter(
+            models.Cliente.id == cliente_id,
+            models.Cliente.empresa_id == empresa_id,
+        )
+        .first()
+    )
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    # 1) Apaga mídias ligadas a esse cliente
+    db.query(models.Midia).filter(
+        models.Midia.empresa_id == empresa_id,
+        models.Midia.cliente_id == cliente_id,
+    ).delete(synchronize_session=False)
+
+    # 2) Apaga mensagens desse cliente
+    db.query(models.Mensagem).filter(
+        models.Mensagem.empresa_id == empresa_id,
+        models.Mensagem.cliente_id == cliente_id,
+    ).delete(synchronize_session=False)
+
+    # 3) Apaga atendimentos desse cliente
+    db.query(models.Atendimento).filter(
+        models.Atendimento.cliente_id == cliente_id
+    ).delete(synchronize_session=False)
+
+    # 4) Apaga pins desse cliente (se houver tabela)
+    try:
+        if _has_model_pinned():
+            db.query(models.AtendimentoPinnedConversa).filter(
+                models.AtendimentoPinnedConversa.empresa_id == int(empresa_id),
+                models.AtendimentoPinnedConversa.conversa_id == int(cliente_id),
+            ).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    # 5) Apaga o próprio cliente
+    db.delete(cliente)
+
+    # Commit geral de todas as deleções de BD
+    db.commit()
+
+    # 6) Limpa caches / marcações de deletado
+    try:
+        # remove da lista de "deleted" em Redis, se estiver lá
+        deleted = set(_cache_get_json(_k_deleted(empresa_id)) or [])
+        if int(cliente_id) in deleted:
+            deleted.discard(int(cliente_id))
+            _cache_set_json(_k_deleted(empresa_id), list(deleted), ttl=7 * 24 * 3600)
+
+        # limpa caches de pins
+        _cache_del_pattern(_k("conv", "pin", "emp", str(empresa_id)))
+        # limpa caches de conversas e clientes
+        _cache_del_pattern(_k("conv", "list", "emp", str(empresa_id)))
+        _cache_del(_k("clientes", "emp", str(empresa_id), "dep", ""))
+    except Exception:
+        pass
+
+    # Broadcast opcional pra derrubar da tela de quem estiver aberto
+    try:
+        asyncio.create_task(
+            _broadcast(
+                {
+                    "type": "conv.hard_deleted",
+                    "cliente_id": int(cliente_id),
+                },
+                empresa_id=empresa_id,
+            )
+        )
+    except Exception:
+        pass
+
+    return {"ok": True, "deleted_permanente": True}
 
 
 # ---------- Labels (agora com cor quando houver tabela; fallback Redis compat) ----------

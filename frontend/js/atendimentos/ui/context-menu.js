@@ -10,6 +10,9 @@
   const EMPRESA_ID = Number(window.EMPRESA_ID || localStorage.getItem('empresa_id') || 0);
   if (!EMPRESA_ID) return;
 
+  // flag de permissão pra apagar conversa (vai ser preenchida com /api/usuarios/me)
+  let CAN_DELETE_CONVERSA = false;
+
   // ================== Fetch com credenciais ==================
   const authFetch = (url, opt = {}) => {
     const f = (window.ZAuth && ZAuth.authFetch) ? ZAuth.authFetch : fetch;
@@ -25,8 +28,8 @@
   // ================== Toast ==================
   function notify({ title = 'Pronto', msg = '', type = 'ok', timeout = 2800 } = {}) {
     if (typeof window.toast === 'function') {
-      try { window.toast({ title, msg, type, timeout }); return; } catch {}
-      try { window.toast(msg || title, type !== 'error'); return; } catch {}
+      try { window.toast({ title, msg, type, timeout }); return; } catch (e) {}
+      try { window.toast(msg || title, type !== 'error'); return; } catch (e) {}
     }
     ensureToastHost();
     const el = document.createElement('div');
@@ -37,7 +40,7 @@
     setTimeout(() => el.classList.remove('on'), timeout);
     setTimeout(() => el.remove(), timeout + 320);
   }
-  function escapeHtml(s) { return String(s || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+  function escapeHtml(s) { return String(s || '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
   function ensureToastHost() {
     if (document.getElementById('zcToastHost')) return;
     const host = document.createElement('div');
@@ -48,7 +51,7 @@
       #zcToastHost{position:fixed;right:14px;bottom:14px;z-index:10000;display:flex;flex-direction:column;gap:8px}
       .zcToast{opacity:0;transform:translateY(8px);transition:all .18s ease;max-width:min(360px,90vw);
         background:var(--card,#111827);color:var(--text,#e5e7eb);border:1px solid var(--border,rgba(255,255,255,.12));
-        border-radius:12px;padding:10px 12px;box-shadow:0 10px 30px rgba(0,0,0,.35);font:14px/1.35 system-ui, -apple-system, Segoe UI, Roboto}
+        border-radius:12px;padding:10px 12px;box-shadow:0 10px 30px rgba(0,0,0,.35);font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto}
       .zcToast.on{opacity:1;transform:none}
       .zcToast strong{display:block;font-weight:600;margin-bottom:2px}
       .zcToast .m{opacity:.9}
@@ -59,33 +62,164 @@
     document.head.appendChild(st);
   }
 
-  // ================== Diálogos ==================
-  function confirmDialog({ title = 'Confirmação', msg = '', okText = 'OK', cancelText = 'Cancelar', destructive = false } = {}) {
+  // ================== Diálogo bonitinho de confirmação (genérico, 2 botões) ==================
+  function ensureConfirmCSS() {
+    if (document.getElementById('zcConfirmCSS')) return;
+    const st = document.createElement('style');
+    st.id = 'zcConfirmCSS';
+    st.textContent = `
+      .zcConfirmBackdrop{
+        position:fixed;inset:0;background:rgba(0,0,0,.52);
+        display:flex;align-items:center;justify-content:center;z-index:10001;
+      }
+      .zcConfirm{
+        width:min(420px,92vw);
+        background:var(--card,#020617);
+        color:var(--text,#e5e7eb);
+        border-radius:16px;
+        border:1px solid var(--border,rgba(148,163,184,.55));
+        box-shadow:0 18px 50px rgba(0,0,0,.7);
+        padding:16px 18px 14px;
+        display:flex;flex-direction:column;gap:10px;
+      }
+      .zcConfirm-title{font-size:15px;font-weight:600;margin-bottom:2px}
+      .zcConfirm-body{font-size:13px;opacity:.9;white-space:pre-line}
+      .zcConfirm-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:10px;flex-wrap:wrap}
+      .zcConfirm-btn{
+        padding:8px 14px;border-radius:999px;
+        border:1px solid rgba(148,163,184,.5);
+        background:transparent;
+        color:inherit;
+        cursor:pointer;
+        font-size:13px;
+      }
+      .zcConfirm-btn.ghost{background:transparent}
+      .zcConfirm-btn.primary{
+        background:var(--accent,#2563eb);
+        border-color:var(--accent,#2563eb);
+        color:#fff;
+      }
+      .zcConfirm-btn.danger{
+        background:#1f2937;
+        border-color:#ef4444;
+        color:#fecaca;
+      }
+      .zcConfirm-btn:focus-visible{
+        outline:2px solid var(--accent,#2563eb);
+        outline-offset:2px;
+      }
+    `;
+    document.head.appendChild(st);
+  }
+
+  function confirmDialog({
+    title = 'Confirmação',
+    msg = '',
+    okText = 'OK',
+    cancelText = 'Cancelar',
+    destructive = false
+  } = {}) {
     return new Promise(resolve => {
-      ensureDialogCSS();
+      ensureConfirmCSS();
       const wrap = document.createElement('div');
-      wrap.className = 'zcDlgBackdrop';
+      wrap.className = 'zcConfirmBackdrop';
       wrap.innerHTML = `
-        <div class="zcDlg" role="dialog" aria-label="${escapeHtml(title)}">
-          <div class="h">${escapeHtml(title)}</div>
-          <div class="b">${escapeHtml(msg)}</div>
-          <div class="f">
-            <button class="btn ghost">${escapeHtml(cancelText)}</button>
-            <button class="btn ${destructive ? 'danger' : ''}">${escapeHtml(okText)}</button>
+        <div class="zcConfirm" role="dialog" aria-modal="true">
+          <div class="zcConfirm-title">${escapeHtml(title)}</div>
+          <div class="zcConfirm-body">${escapeHtml(msg)}</div>
+          <div class="zcConfirm-footer">
+            <button class="zcConfirm-btn ghost">${escapeHtml(cancelText)}</button>
+            <button class="zcConfirm-btn ${destructive ? 'danger' : 'primary'}">${escapeHtml(okText)}</button>
           </div>
         </div>
       `;
       document.body.appendChild(wrap);
-      const [btnCancel, btnOk] = wrap.querySelectorAll('.f .btn');
-      const close = (v) => { wrap.remove(); resolve(v); };
+
+      const btns = wrap.querySelectorAll('.zcConfirm-btn');
+      const btnCancel = btns[0];
+      const btnOk = btns[1];
+
+      const close = (v) => {
+        window.removeEventListener('keydown', onKey, true);
+        wrap.remove();
+        resolve(v);
+      };
+
+      function onKey(e) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          close(false);
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          close(true);
+        }
+      }
+      window.addEventListener('keydown', onKey, true);
+
       btnCancel.onclick = () => close(false);
-      btnOk.onclick = () => close(true);
-      wrap.addEventListener('click', e => { if (e.target === wrap) close(false); });
-      document.addEventListener('keydown', function esc(e){ if(e.key==='Escape'){ document.removeEventListener('keydown', esc); close(false);} });
-      try { btnOk.focus(); } catch {}
+      btnOk.onclick     = () => close(true);
+
+      wrap.addEventListener('click', e => {
+        if (e.target === wrap) close(false);
+      });
+
+      try { btnOk.focus(); } catch (e) {}
     });
   }
 
+  // ========== Diálogo específico de apagar: 2 opções (lista / permanente) ==========
+  function deleteChoiceDialog() {
+    return new Promise(resolve => {
+      ensureConfirmCSS();
+      const wrap = document.createElement('div');
+      wrap.className = 'zcConfirmBackdrop';
+      wrap.innerHTML = `
+        <div class="zcConfirm" role="dialog" aria-modal="true">
+          <div class="zcConfirm-title">Apagar conversa</div>
+          <div class="zcConfirm-body">
+O que você deseja fazer com esta conversa?
+
+• Apagar apenas da lista: a conversa some da lista, mas o cliente e o histórico continuam no sistema.
+• Apagar permanentemente: remove o cliente e TODO o histórico desta conversa do sistema.
+          </div>
+          <div class="zcConfirm-footer">
+            <button class="zcConfirm-btn ghost" data-val="cancel">Cancelar</button>
+            <button class="zcConfirm-btn" data-val="lista">Apagar só da lista</button>
+            <button class="zcConfirm-btn danger" data-val="permanente">Apagar permanentemente</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(wrap);
+
+      const [btnCancel, btnLista, btnPerma] = wrap.querySelectorAll('.zcConfirm-btn');
+
+      const close = (val) => {
+        window.removeEventListener('keydown', onKey, true);
+        wrap.remove();
+        resolve(val);
+      };
+
+      function onKey(e) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          close(null);
+        }
+      }
+      window.addEventListener('keydown', onKey, true);
+
+      btnCancel.onclick = () => close(null);
+      btnLista.onclick  = () => close('lista');
+      btnPerma.onclick  = () => close('permanente');
+
+      wrap.addEventListener('click', e => {
+        if (e.target === wrap) close(null);
+      });
+
+      try { btnLista.focus(); } catch (e) {}
+    });
+  }
+
+  // ================== Diálogo de etiqueta ==================
   function labelDialog({
     title = 'Etiquetar conversa',
     placeholder = 'Ex.: VIP, Financeiro, Suporte',
@@ -332,9 +466,15 @@
         if (e.target === wrap) close(null);
       });
       document.addEventListener('keydown', onKey, { capture:true });
-      setTimeout(() => { try{ inp.focus(); }catch{} }, 10);
+      setTimeout(() => { try{ inp.focus(); }catch(e){} }, 10);
       inp.addEventListener('input', updateState);
       updateState();
+
+      // abrir popover ao clicar no gradiente
+      customSwatch.addEventListener('click', (e) => {
+        e.preventDefault();
+        openPopover();
+      });
     });
   }
 
@@ -462,14 +602,14 @@
   function reorderByPinned(container){
     if (!container) return;
     const sel = 'li, .cliente-item, .chat-item, .list-item';
-    const children = Array.from(container.children).filter(n => n.matches?.(sel));
+    const children = Array.from(container.children).filter(n => n.matches && n.matches(sel));
     if (!children.length) return;
 
-    const pinned = children.filter(n => n.classList?.contains('is-pinned'));
+    const pinned = children.filter(n => n.classList && n.classList.contains('is-pinned'));
     if (!pinned.length) return;
 
     // âncora = primeiro NÃO fixado
-    const firstNonPinned = children.find(n => !n.classList?.contains('is-pinned')) || null;
+    const firstNonPinned = children.find(n => !(n.classList && n.classList.contains('is-pinned'))) || null;
 
     // insere os fixados antes do primeiro não-fixado, preservando a ordem entre eles
     for (const n of pinned) {
@@ -494,8 +634,9 @@
         if (!Number.isNaN(d)) return d;
       }
     }
-    for (const a of node.getAttributeNames?.() || []){
-      if (a.startsWith('data-')){
+    if (node.getAttributeNames) {
+      for (const a of node.getAttributeNames()){
+        if (!a.startsWith('data-')) continue;
         const v = node.getAttribute(a);
         if (!v) continue;
         const n = parseFloat(v);
@@ -504,7 +645,7 @@
         if (!Number.isNaN(d)) return d;
       }
     }
-    const t = node.querySelector?.('time[datetime]');
+    const t = node.querySelector && node.querySelector('time[datetime]');
     if (t && t.getAttribute){
       const d = Date.parse(t.getAttribute('datetime'));
       if (!Number.isNaN(d)) return d;
@@ -515,13 +656,13 @@
   function resortByTime(container){
     if (!container) return;
     const sel = 'li, .cliente-item, .chat-item, .list-item';
-    const kids = Array.from(container.children).filter(n => n.matches?.(sel));
+    const kids = Array.from(container.children).filter(n => n.matches && n.matches(sel));
     if (!kids.length) return;
     const pinned = [];
     const others = [];
     let idx = 0;
     for (const n of kids){
-      if (n.classList?.contains('is-pinned')) pinned.push(n);
+      if (n.classList && n.classList.contains('is-pinned')) pinned.push(n);
       else {
         const ts = tsFromNode(n);
         others.push({ node:n, ts: Number.isFinite(ts) ? ts : -Infinity, _i: idx++ });
@@ -563,6 +704,30 @@
   `;
   document.body.appendChild(menu);
 
+  const btnDelete = menu.querySelector('[data-action="delete"]');
+  function updateDeleteVisibility() {
+    if (!btnDelete) return;
+    btnDelete.style.display = CAN_DELETE_CONVERSA ? 'flex' : 'none';
+  }
+  updateDeleteVisibility();
+
+  // Descobre no backend se o usuário pode apagar conversa
+  (async () => {
+    try {
+      const res = await authFetch('/api/usuarios/me', { method:'GET' });
+      if (!res.ok) throw new Error('não conseguiu /me');
+      const me = await res.json();
+      const permsRaw = me.permissoes || me.permissions || me.perms || [];
+      const perms = Array.isArray(permsRaw) ? permsRaw : [];
+      const isAdmin = !!(me.is_admin || me.isAdmin || me.admin || me.cargo === 'admin');
+      const hasDelPerm = perms.includes('atendimento.apagar_conversas') || perms.includes('atendimento.apagar');
+      CAN_DELETE_CONVERSA = !!(isAdmin || hasDelPerm);
+    } catch (e) {
+      CAN_DELETE_CONVERSA = false;
+    }
+    updateDeleteVisibility();
+  })();
+
   let targetLi = null;
   const closeMenu = () => { menu.classList.remove('open'); targetLi = null; };
   const openMenuAt = (x, y) => {
@@ -576,7 +741,7 @@
   };
   const updatePinLabel = (li) => {
     const el = menu.querySelector('[data-pin-label]');
-    const pinned = li?.classList?.contains('is-pinned');
+    const pinned = li && li.classList && li.classList.contains('is-pinned');
     if (el) el.textContent = pinned ? 'Desafixar conversa' : 'Fixar conversa';
   };
 
@@ -596,7 +761,7 @@
         notify({ title:'Etiqueta aplicada', msg: picked.color && i===0 ? `${picked.name} • ${picked.color}` : `${picked.name}`, type:'ok' });
         return;
       }catch(e){
-        if (i === bodies.length-1) notify({title:'Falha ao etiquetar', msg:String(e?.message||e), type:'error'});
+        if (i === bodies.length-1) notify({title:'Falha ao etiquetar', msg:String(e && e.message || e), type:'error'});
       }
     }
   }
@@ -607,7 +772,10 @@
       li = document.querySelector(
         `[data-id="${clienteId}"], .cliente-item[data-id="${clienteId}"], .chat-item[data-id="${clienteId}"], .list-item[data-id="${clienteId}"]`
       );
-      if (!li) { notify({ title:'Falha', msg:'Não encontrei o item da conversa na lista.', type:'error' }); return; }
+    }
+    if (!li) {
+      notify({ title:'Falha', msg:'Não encontrei o item da conversa na lista.', type:'error' });
+      return;
     }
 
     const willPin = !li.classList.contains('is-pinned');
@@ -637,14 +805,12 @@
         body: JSON.stringify({ pin: willPin })
       });
       if (res.status === 403) { notify({title:'Sem permissão', msg:'Apenas administradores podem fixar.', type:'error'}); return; }
-      if (!res.ok) throw new Error(await res.text().catch(()=> ''));
+      if (!res.ok) throw new Error(await res.text().catch(() => ''));
 
-      // ✅ Sincroniza estado + força re-fetch sem cache agora
-      try { window.Lista?.setPinned?.(clienteId, willPin); } catch {}
-      try { await window.carregarClientes?.({ force: true }); } catch {}
+      try { window.Lista && window.Lista.setPinned && window.Lista.setPinned(clienteId, willPin); } catch (e) {}
+      try { await window.carregarClientes && window.carregarClientes({ force: true }); } catch (e) {}
 
-      // ✅ Garante que um F5 imediato também venha sem cache
-      try { sessionStorage.setItem('convForceReload', '1'); } catch {}
+      try { sessionStorage.setItem('convForceReload', '1'); } catch (e) {}
 
       notify({title: willPin ? 'Conversa fixada' : 'Conversa desafixada', type:'ok'});
     }catch(e){
@@ -660,28 +826,75 @@
         updatePinLabel(li);
         requestAnimationFrame(() => reorderByPinned(container));
       }
-      notify({title:'Falha ao fixar/desafixar', msg:String(e?.message||e), type:'error'});
+      notify({title:'Falha ao fixar/desafixar', msg:String(e && e.message || e), type:'error'});
     }
   }
 
   async function doDelete(clienteId, li){
-    const ok = await confirmDialog({
-      title: 'Apagar conversa',
-      msg: 'Apagar da lista? (não remove o cliente nem mensagens do banco)',
-      okText: 'Apagar',
-      destructive: true
-    });
-    if (!ok) return;
+    if (!CAN_DELETE_CONVERSA) {
+      notify({ title:'Sem permissão', msg:'Apenas administradores podem apagar conversas.', type:'error' });
+      return;
+    }
 
-    try{
-      const res = await authFetch(`/api/atendimento/conversas/${clienteId}?empresa_id=${EMPRESA_ID}`, { method: 'DELETE' });
-      if (res.status === 403) { notify({title:'Sem permissão', msg:'Apenas administradores podem apagar.', type:'error'}); return; }
-      if (!res.ok) throw new Error(await res.text());
-      li?.remove();
-      try{ if (window.state?.cacheHistoricos) delete window.state.cacheHistoricos[String(clienteId)]; }catch{}
-      notify({title:'Conversa apagada da lista', type:'ok'});
-    }catch(e){
-      notify({title:'Falha ao apagar conversa', msg:String(e?.message||e), type:'error'});
+    const choice = await deleteChoiceDialog();
+    if (!choice) return; // cancelou
+
+    // helper pra limpar UI/local cache
+    const removeFromUI = () => {
+      if (li && li.remove) li.remove();
+      try {
+        if (window.state && window.state.cacheHistoricos) {
+          delete window.state.cacheHistoricos[String(clienteId)];
+        }
+      } catch (e) {}
+    };
+
+    // ---------- apagar só da lista ----------
+    if (choice === 'lista') {
+      try{
+        const res = await authFetch(`/api/atendimento/conversas/${clienteId}?empresa_id=${EMPRESA_ID}`, {
+          method: 'DELETE'
+        });
+        if (res.status === 403) {
+          notify({title:'Sem permissão', msg:'Apenas administradores podem apagar.', type:'error'});
+          return;
+        }
+        if (!res.ok) throw new Error(await res.text());
+        removeFromUI();
+        notify({title:'Conversa removida da lista', type:'ok'});
+      }catch(e){
+        notify({title:'Falha ao apagar da lista', msg:String(e && e.message || e), type:'error'});
+      }
+      return;
+    }
+
+    // ---------- apagar permanente ----------
+    if (choice === 'permanente') {
+      const ok = await confirmDialog({
+        title: 'Apagar permanentemente',
+        msg: 'Tem certeza que deseja apagar PERMANENTEMENTE esta conversa?\n\nIsso vai remover o cliente e TODO o histórico desta conversa do sistema. Esta ação não poderá ser desfeita.',
+        okText: 'Apagar permanentemente',
+        cancelText: 'Cancelar',
+        destructive: true
+      });
+      if (!ok) return;
+
+      try{
+        // aqui chamamos a rota que realmente apaga do banco:
+        // DELETE /api/atendimento/conversas/{cliente_id}/permanente
+        const res = await authFetch(`/api/atendimento/conversas/${clienteId}/permanente?empresa_id=${EMPRESA_ID}`, {
+          method: 'DELETE'
+        });
+        if (res.status === 403) {
+          notify({title:'Sem permissão', msg:'Apenas administradores podem apagar permanentemente.', type:'error'});
+          return;
+        }
+        if (!res.ok) throw new Error(await res.text());
+        removeFromUI();
+        notify({title:'Conversa apagada permanentemente', type:'ok'});
+      }catch(e){
+        notify({title:'Falha ao apagar permanentemente', msg:String(e && e.message || e), type:'error'});
+      }
     }
   }
 
@@ -692,16 +905,16 @@
 
     const liCtx = targetLi; // snapshot antes de fechar
     const action = btn.dataset.action;
-    const clienteId = Number(liCtx.dataset?.id || liCtx.getAttribute?.('data-id'));
+    const clienteId = Number((liCtx.dataset && liCtx.dataset.id) || liCtx.getAttribute && liCtx.getAttribute('data-id'));
     closeMenu();
 
     if (!Number.isFinite(clienteId)) {
       notify({ title:'Falha', msg:'Item sem data-id.', type:'error' });
       return;
     }
-    if (action === 'label')  return void doLabel(clienteId);
-    if (action === 'pin')    return void doPin(clienteId, liCtx);
-    if (action === 'delete') return void doDelete(clienteId, liCtx);
+    if (action === 'label')  { doLabel(clienteId); return; }
+    if (action === 'pin')    { doPin(clienteId, liCtx); return; }
+    if (action === 'delete') { doDelete(clienteId, liCtx); return; }
   });
 
   // Fecha menu
@@ -715,7 +928,7 @@
   list.addEventListener('contextmenu', (ev) => {
     const li = ev.target.closest('[data-id], .chat-item, .cliente-item, .list-item, li');
     if (!li) return;
-    if (!li.dataset.id && !li.getAttribute('data-id')) return;
+    if (!li.dataset.id && !(li.getAttribute && li.getAttribute('data-id'))) return;
     ev.preventDefault();
     targetLi = li;
     updatePinLabel(li);

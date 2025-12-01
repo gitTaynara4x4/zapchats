@@ -11,7 +11,10 @@
       try {
         const saved = localStorage.getItem('zc:theme');
         const prefersDark = matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
-        document.documentElement.setAttribute('data-theme', saved || (prefersDark ? 'dark' : 'light'));
+        document.documentElement.setAttribute(
+          'data-theme',
+          saved || (prefersDark ? 'dark' : 'light')
+        );
       } catch {}
     })();
   </script>
@@ -20,10 +23,12 @@
   <link rel="stylesheet" href="/frontend/css/atendimentos.css">
 
   <!-- libs -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap"
+        rel="stylesheet">
 
-  <!-- ====== CSS EXTRA EMBUTIDO: WALLPAPER SÓ NO #historico ====== -->
+  <!-- ====== CSS EXTRA EMBUTIDO: WALLPAPER SÓ NO #historico + SETA MOBILE ====== -->
   <style>
     main.whatsapp-auto-bg #historico,
     main.whatsapp-bg-dark #historico,
@@ -54,6 +59,31 @@
       background-color:#efeae2 !important;
       background-image: url("/frontend/img/whatsapp-bg-light.png") !important;
     }
+
+    /* ====== MOBILE: só controla a seta de voltar ====== */
+    #chat-back-mobile {
+      display: none; /* desktop esconde */
+    }
+
+    @media (max-width: 920px) {
+      #chat-back-mobile {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: .5rem;
+        width: 32px;
+        height: 32px;
+        border-radius: 999px;
+        border: none;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+      }
+
+      #chat-back-mobile i {
+        font-size: 1rem;
+      }
+    }
   </style>
 </head>
 <body style="display:none">
@@ -68,8 +98,7 @@
 
   <div class="wpp-root h-[100vh] w-full">
 
-    <!-- LEFTBAR (barra lateral esquerda) 
-         ÍCONES SÃO GERADOS AUTOMATICAMENTE A PARTIR DE /frontend/partials/sidebar-atendimentos.html -->
+    <!-- LEFTBAR (barra lateral esquerda) -->
     <nav class="wpp-leftbar" aria-label="Menu do atendimento">
       <div class="wpp-leftbar-icons">
         <!-- preenchido via JS copiando de #appSidebarAtt nav (sidebar-atendimentos.html) -->
@@ -108,8 +137,12 @@
     <aside class="flex flex-col">
       <div class="wpp-header-externo">
         <div class="wpp-header-titulo-row">
-          <img class="wpp-header-logo logo-dark"  src="/frontend/img/logo-white.png"   alt="ZapChats (dark)">
-          <img class="wpp-header-logo logo-light" src="/frontend/img/logo-s-fundo.png" alt="ZapChats (light)">
+          <img class="wpp-header-logo logo-dark"
+               src="/frontend/img/logo-white.png"
+               alt="ZapChats (dark)">
+          <img class="wpp-header-logo logo-light"
+               src="/frontend/img/logo-s-fundo.png"
+               alt="ZapChats (light)">
 
           <!-- Ícones do header (nova conversa + menu no header) -->
           <div class="wpp-header-icons">
@@ -168,8 +201,21 @@
          - whatsapp-bg-light (força imagem clara)
     -->
     <main class="flex flex-col whatsapp-bg-dark">
-      <header id="chat-header" class="h-16 flex items-center px-4 gap-3 shadow-sm" style="display:none;">
+      <header id="chat-header"
+              class="h-16 flex items-center px-4 gap-3 shadow-sm"
+              style="display:none;">
         <div class="flex items-center gap-2 relative">
+          <!-- seta de voltar (só aparece no mobile via CSS) -->
+          <button
+            id="chat-back-mobile"
+            type="button"
+            class="hdr-icon-btn"
+            aria-label="Voltar para lista"
+            title="Voltar para lista"
+          >
+            <i class="fa fa-arrow-left"></i>
+          </button>
+
           <span id="chat-avatar"></span>
           <h2 id="chat-title" class="font-medium truncate text-[1.09em]"></h2>
 
@@ -189,7 +235,9 @@
       <section
         id="welcome-screen"
         class="absolute inset-0 flex flex-col items-center justify-center text-center z-10">
-        <img src="/frontend/img/wpp.png" class="w-52 h-auto mb-6 opacity-100" alt="ZapChats Logo">
+        <img src="/frontend/img/wpp.png"
+             class="w-52 h-auto mb-6 opacity-100"
+             alt="ZapChats Logo">
         <h2 class="text-lg font-semibold mt-2">Mantenha seu celular conectado</h2>
         <p class="max-w-md">
           O ZapChats conecta ao seu telefone para sincronizar suas mensagens.<br>
@@ -201,7 +249,8 @@
       <section id="historico" style="display:none;"></section>
 
       <!-- Loading overlay -->
-      <div id="chat-loading" class="hidden absolute inset-0 z-[50] flex items-center justify-center">
+      <div id="chat-loading"
+           class="hidden absolute inset-0 z-[50] flex items-center justify-center">
         <div class="flex items-center gap-3">
           <span class="w-5 h-5 rounded-full border-2 animate-spin"></span>
           <span class="text-sm">Carregando conversa…</span>
@@ -209,7 +258,9 @@
       </div>
 
       <!-- Footer -->
-      <footer id="chat-footer" class="flex items-center gap-3 px-4 py-3" style="display:none;">
+      <footer id="chat-footer"
+              class="flex items-center gap-3 px-4 py-3"
+              style="display:none;">
         <button
           type="button"
           class="text-xl"
@@ -247,7 +298,6 @@
   <script type="module" src="/frontend/js/atendimentos/boot/main.js"></script>
   <script type="module" src="/frontend/js/atendimentos/ui/filtros.js"></script>
   <script type="module" src="/frontend/js/pages/atendimentos-autoopen.js"></script>
-
 
   <!-- Config do Evolution vinda do backend (.env injetado no template) -->
   <script>
@@ -296,7 +346,7 @@
             miniLink.appendChild(iconClone);
           }
 
-          // Label opcional (se o seu CSS esconder no mobile/hover, continua funcionando)
+          // Label opcional
           if (labelText) {
             const labelSpan = document.createElement('span');
             labelSpan.className = 'wpp-label';
@@ -336,6 +386,47 @@
         obs.observe(host, { childList: true, subtree: true });
         window.addEventListener('beforeunload', () => obs.disconnect());
       }
+    })();
+  </script>
+
+  <!-- Mobile: alternar lista/chat + seta de voltar -->
+  <script>
+    (function mobileChatToggle(){
+      const listEl = document.getElementById('lista-clientes');
+      const back   = document.getElementById('chat-back-mobile');
+
+      function isMobile(){
+        return window.innerWidth <= 920; // mesmo break do CSS
+      }
+
+      // clicar em qualquer conversa abre o chat no mobile
+      if (listEl) {
+        listEl.addEventListener('click', function(ev){
+          const li = ev.target.closest('li.chat-item, li.cliente-item');
+          if (!li) return;
+          if (isMobile()) {
+            document.body.classList.add('is-chat-open');
+          }
+        });
+      }
+
+      // botão de voltar fecha o chat e mostra a lista
+      if (back) {
+        back.addEventListener('click', function(){
+          if (isMobile()) {
+            document.body.classList.remove('is-chat-open');
+          }
+        });
+      }
+
+      // se virar desktop, garante layout normal (lista + chat)
+      function handleResize(){
+        if (!isMobile()) {
+          document.body.classList.remove('is-chat-open');
+        }
+      }
+      window.addEventListener('resize', handleResize);
+      handleResize();
     })();
   </script>
 </body>

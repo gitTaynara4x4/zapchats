@@ -65,12 +65,22 @@ export function formatChatTime(ts) {
     };
     const diffDays = Math.round((toUtcMid(ymdNow) - toUtcMid(ymdD)) / 86400000);
 
+    // hoje -> HH:mm
     if (diffDays === 0) return fmtTime.format(d);
+
+    // ontem -> "ontem"
     if (diffDays === 1) return 'ontem';
+
+    // últimos 7 dias -> só dia da semana (igual WhatsApp)
     if (diffDays < 7) {
-      const weekday = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', timeZone: tz }).format(d);
-      return `${weekday} ${fmtTime.format(d)}`;
+      const weekday = new Intl.DateTimeFormat('pt-BR', {
+        weekday: 'long',
+        timeZone: tz
+      }).format(d);
+      return weekday; // "terça-feira", "sábado", etc.
     }
+
+    // mais antigo -> data completa
     return new Intl.DateTimeFormat('pt-BR', {
       day: '2-digit', month: '2-digit', year: 'numeric', timeZone: tz
     }).format(d);

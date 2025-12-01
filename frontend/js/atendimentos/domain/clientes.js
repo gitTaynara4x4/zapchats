@@ -4,7 +4,7 @@
 // - Dedupe em 3 fases (preserva .pinned), pin > recência
 // - Render do <ul id="lista-clientes"> com preview (ACK/hora)
 // - Integra com hist-cache para hora/preview "canônico"
-// - Infinite scroll (loadMoreConversas)
+// - Paginação via botão "Carregar mais conversas" (loadMoreConversas)
 // - Expõe window.carregarClientes e window.Lista (shim UI)
 // =====================================================================
 
@@ -27,7 +27,6 @@ import {
    ========================================================= */
 if (typeof window !== 'undefined') {
   if (window.PREFETCH_HISTORIES === undefined) {
-    // Vamos buscar mensagens pra alinhar preview/hora das conversas com novas > 0
     window.PREFETCH_HISTORIES = true;
   }
 }
@@ -61,12 +60,11 @@ function scoreRecencia(c){
   return ts * 1_000_000 + mid * 1_000 + ack * 10 + ava;
 }
 
-// handler global para erro de avatar (403 / expirado / etc)
+// handler global para erro de avatar
 if (typeof window !== 'undefined' && !window.handleAvatarError) {
   window.handleAvatarError = function handleAvatarError(img){
     try{
       if (!img) return;
-      // evita loops
       try { img.onerror = null; } catch {}
 
       const li = img.closest('li.chat-item, li.cliente-item');
@@ -82,7 +80,6 @@ if (typeof window !== 'undefined' && !window.handleAvatarError) {
       }
 
       if (cid && typeof window.refreshAvatarFromEvolution === 'function') {
-        // tenta atualizar a foto via Evolution + BD
         window.refreshAvatarFromEvolution(cid);
       }
     }catch(e){
@@ -238,7 +235,6 @@ export function normalizeCliente(c){
   const preview =
     c.ultima_texto ?? c.ultima_mensagem ?? c.ultima ?? c.last_text ?? '';
 
-  // tenta vários campos de foto
   const foto =
     c.avatar_url
     || c.foto_url
@@ -289,13 +285,8 @@ function buildMsgsUrl(convId, instanciaId, extra = {}) {
   if (instanciaId != null && instanciaId !== '' && instanciaId !== 'all') {
     qs.set('instancia_id', String(instanciaId));
   }
-
-  if (extra.since_ts) {
-    qs.set('since_ts', String(extra.since_ts));
-  }
-  if (extra.since_id) {
-    qs.set('since_id', String(extra.since_id));
-  }
+  if (extra.since_ts) qs.set('since_ts', String(extra.since_ts));
+  if (extra.since_id) qs.set('since_id', String(extra.since_id));
 
   return `/api/atendimento/conversas/${convId}/mensagens?` + qs.toString();
 }
@@ -313,23 +304,19 @@ async function fetchConv30(convId, instanciaId){
   return { items, cursors };
 }
 
-// controla concorrência de fetch (AGORA: só conversas com novas > 0)
-const PREFETCH_LIMIT = 10; // máximo de conversas com não lidas para pré-carregar
+const PREFETCH_LIMIT = 10;
 
 async function primeHistories(convs, { concurrency = 2 } = {}) {
   if (!window.PREFETCH_HISTORIES) return;
 
   const lista = Array.isArray(convs) ? convs.slice() : [];
 
-  // 1) pega apenas conversas com mensagens não lidas (novas > 0)
   const unread = lista
     .filter(c => Number(c.novas || 0) > 0)
     .slice(0, PREFETCH_LIMIT);
 
-  // se não tem nenhuma não lida, não faz nada
   if (!unread.length) return;
 
-  // 2) fila só com as conversas não lidas
   const queue = unread.slice();
 
   const runners = Array.from(
@@ -377,14 +364,14 @@ export async function carregarClientes({ force=false } = {}){
       { ttlMs: forceFlag ? 0 : 30_000, key, bust: forceFlag }
     );
 
-    // >>> PATCH: aceita array direto OU objeto com {items:[]}
     const items = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : []);
     const next  = raw?.next_cursor ?? null;
 
     let cs = items.map(normalizeCliente).filter(_matchInstancia);
 
-    // preserva campos do cache anterior (ack/preview/hora/pinned) e canônica de hora
-    const antigo = Array.isArray(state.clientesCache)?state.clientesCache:[];
+    // ====================== MERGE COM O QUE JÁ TINHA ======================
+    const antigo = Array.isArray(state.clientesCache) ? state.clientesCache : [];
+
     cs.forEach(n=>{
       const a = antigo.find(x=> (x.id??x.conversation_id) === n.id);
 
@@ -421,21 +408,23 @@ export async function carregarClientes({ force=false } = {}){
       n.pinned = Boolean(n.pinned || a?.pinned);
     });
 
-    // DEDUPE FORTE (preserva .pinned)
-    cs = dedupeConversas(cs);
+    // 👉 aqui é o pulo do gato:
+    // mantém as conversas antigas que NÃO vieram nessa página nova
+    const setNovos = new Set(cs.map(x => String(x.id ?? x.conversation_id)));
+    const extrasAntigos = antigo.filter(a => !setNovos.has(String(a.id ?? a.conversation_id)));
 
-    state.clientesCache = cs;
+    let all = [...cs, ...extrasAntigos];
+    all = dedupeConversas(all);
+
+    state.clientesCache = all;
     state.nextCursor    = next;
     persist();
 
-    // Render inicial
-    renderListaClientes(cs);
-    try { window.Lista?.render(cs); } catch {}
+    renderListaClientes(all);
+    try { window.Lista?.render(all); } catch {}
 
-    // Sempre tentar sincronizar preview pelo histórico local
     try { (state.clientesCache || []).forEach(c => window.syncPreviewFromCache?.(c.id)); } catch {}
 
-    // PRIME leve: agora priorizando conversas com novas > 0
     if (window.PREFETCH_HISTORIES) {
       try {
         await primeHistories(state.clientesCache, { concurrency: 2 });
@@ -444,35 +433,20 @@ export async function carregarClientes({ force=false } = {}){
       }
     }
 
-    return cs;
+    return all;
   } finally {
     __loadingConversas = false;
   }
 }
 
+
 /* =========================================================
-   Carregar mais conversas (infinite scroll)
+   Carregar mais conversas (botão)
    ========================================================= */
 export function wireListaInfiniteScroll(){
+  // compat; não usamos mais scroll automático
   if (_isWired) return;
   _isWired = true;
-
-  const ul = document.getElementById('lista-clientes');
-  if (!ul) return;
-
-  ul.addEventListener('scroll', async () => {
-    const nearBottom = ul.scrollTop + ul.clientHeight >= (ul.scrollHeight - 80);
-    if (!nearBottom) return;
-    if (_isLoadingMore) return;
-    if (!state.nextCursor) return;
-
-    try{
-      _isLoadingMore = true;
-      await loadMoreConversas();
-    } finally {
-      _isLoadingMore = false;
-    }
-  }, { passive: true });
 }
 
 export async function loadMoreConversas(){
@@ -507,14 +481,11 @@ export async function loadMoreConversas(){
   renderListaClientes(arr);
   try { window.Lista?.render(arr); } catch {}
 
-  // sincroniza previews pelo histórico, se já houver
   try { (state.clientesCache || []).forEach(c => window.syncPreviewFromCache?.(c.id)); } catch {}
-
-  // PRIME dos recém-carregados (se quiser, dá pra ligar aqui no futuro também)
 }
 
 /* =========================================================
-   Render da lista (usa histórico local quando disponível)
+   Render da lista
    ========================================================= */
 export function renderListaClientes(data){
   const arr = dedupeConversas(
@@ -525,21 +496,19 @@ export function renderListaClientes(data){
 
   const ordenado = ordenarConversasDesc(arr);
 
-  const html = ordenado.map(c=>{
+  let html = ordenado.map(c=>{
     const nome = (c.nome_whatsapp && c.nome_whatsapp.trim())
       ? c.nome_whatsapp.trim()
       : (c.nome && c.nome.trim() && c.nome !== 'Cliente')
         ? c.nome.trim()
         : (c.push_name?.trim() || formatarNumeroBR(c.telefone));
 
-    // ----- baseline: dados vindos da /conversas (server) -----
     const serverMs = tsToMillis(c.hora || c.last_ts) || 0;
     let when       = serverMs ? formatChatTime(serverMs) : '';
     let preview    = (c.ultima_mensagem || '').trim();
     let outboundFlag  = (c.last_tipo === 'saida');
     let ackValForIcon = Number(c.last_ack ?? 0) || 0;
 
-    // ----- enriquecer com histórico, mas sem “apagar” a mensagem nova -----
     try {
       const instCanon = (c.instancia_id ?? c.instancia ?? null) || null;
       const arrHist   = window.cacheHistoricos?.[c.id] || getHist(instCanon, c.id);
@@ -548,19 +517,16 @@ export function renderListaClientes(data){
         const histMs = Number(last?.ts || 0) || Date.parse(last?.timestamp || '') || 0;
         const rawHistText = (last?.texto || last?.text || last?.conteudo || last?.mensagem || '').trim();
 
-        // usa histórico só se ele for claramente MAIS novo que o server
         const useHist =
-          (!serverMs && histMs) ||                           // só tenho hist
-          (histMs && serverMs && histMs > serverMs + 999) || // hist > server (~1s de folga)
-          (!preview && rawHistText);                         // server não trouxe texto
+          (!serverMs && histMs) ||
+          (histMs && serverMs && histMs > serverMs + 999) ||
+          (!preview && rawHistText);
 
         if (useHist) {
           outboundFlag  = (last?.tipo === 'saida') || !!last?.from_me || (last?.origem === 'atendente');
           ackValForIcon = outboundFlag ? (Number(last?.ack || 0) || 0) : 0;
 
-          if (histMs) {
-            when = formatChatTime(histMs);
-          }
+          if (histMs) when = formatChatTime(histMs);
 
           if (rawHistText) {
             preview = rawHistText;
@@ -570,21 +536,19 @@ export function renderListaClientes(data){
             const hasAny = a.length > 0;
             preview = hasAny
               ? (mime.includes('image') ? '[Foto]'
-                  : mime.includes('video') ? '[Vídeo]'
-                  : mime.includes('audio') ? '[Áudio]'
-                  : mime.includes('pdf')   ? '[PDF]'
-                  : '[Arquivo]')
+                : mime.includes('video') ? '[Vídeo]'
+                : mime.includes('audio') ? '[Áudio]'
+                : mime.includes('pdf')   ? '[PDF]'
+                : '[Arquivo]')
               : '';
           }
         } else {
-          // hist é mais antigo: só aproveita ACK maior (ex.: mensagem enviada antes do reload)
           const histAck = Number(last?.ack || 0) || 0;
           if (histAck > ackValForIcon) {
             ackValForIcon = histAck;
           }
         }
 
-        // se mesmo assim não tiver horário, cai pro server
         if (!when && serverMs) {
           when = formatChatTime(serverMs);
         }
@@ -627,15 +591,50 @@ export function renderListaClientes(data){
       </li>`;
   }).join('');
 
+  const hasMore = Boolean(state.nextCursor);
+  if (hasMore) {
+    html += `
+      <li class="chat-item load-more-item" id="lista-load-more">
+        <button type="button" class="load-more-btn">
+          Carregar mais conversas
+        </button>
+      </li>`;
+  }
+
   ul.innerHTML = html;
   document.dispatchEvent(new CustomEvent('lista:rendered'));
-  ul.querySelectorAll('.chat-item').forEach(el=>{
+
+  // ⚠️ Safety: se sobrar avatar SEM img nem ícone, força placeholder
+  ul.querySelectorAll('.avatar').forEach(span => {
+    if (!span.querySelector('img, i')) {
+      span.classList.add('placeholder');
+      span.innerHTML = '<i class="fa fa-user-circle"></i>';
+    }
+  });
+
+  ul.querySelectorAll('.chat-item.cliente-item').forEach(el=>{
     el.addEventListener('click',()=> window.selecionarClienteObj?.(Number(el.dataset.id)));
   });
+
+  if (hasMore) {
+    const btn = ul.querySelector('#lista-load-more .load-more-btn');
+    if (btn) {
+      btn.addEventListener('click', async () => {
+        if (!state.nextCursor) return;
+        btn.disabled = true;
+        btn.textContent = 'Carregando...';
+        try {
+          await loadMoreConversas();
+        } finally {
+          // renderListaClientes será chamado dentro de loadMoreConversas
+        }
+      });
+    }
+  }
 }
 
 /* =========================================================
-   SHIM opcional de UI de lista
+   SHIM opcional de UI
    ========================================================= */
 function _findClienteIndex(id){
   const arr = Array.isArray(state.clientesCache) ? state.clientesCache : [];
@@ -662,7 +661,7 @@ if (!window.Lista) {
       if (typeof texto === 'string') c.ultima_mensagem = texto;
       if (temValor(ack)) {
         c.last_ack = Number(ack);
-        c.last_tipo = 'saida'; // garante que preview-ack aparece
+        c.last_tipo = 'saida';
       }
       if (unreadDelta) c.novas = Math.max(0, Number(c.novas||0) + Number(unreadDelta||0));
       _touchHora(c, ts);
@@ -703,10 +702,11 @@ if (!window.Lista) {
 /* === Exports globais úteis === */
 try {
   window.renderListaClientes?.(window.state?.clientesCache || []);
+
   window.carregarClientes = carregarClientes;
 } catch {}
 
-/* ====== LISTA: booster de preview + ACK ====== */
+/* ====== LISTA: booster de preview + ACK + CSS ====== */
 (function(){
   'use strict';
 
@@ -767,6 +767,7 @@ try {
     return prevSetAck ? prevSetAck(cid, ack) : undefined;
   };
 
+  // CSS do ACK
   (function ensureListaAckCss(){
     const id = 'lista-ack-css';
     if (document.getElementById(id)) return;
@@ -776,6 +777,38 @@ try {
       .chat-last .preview-ack { margin-right: .25rem; display: inline-flex; }
       .preview-ack .msg-ack svg { width: 12px; height: 12px; }
       .preview-ack .msg-ack { vertical-align: -0.1em; }
+    `;
+    document.head.appendChild(s);
+  })();
+
+  // CSS do botão "Carregar mais conversas" CENTRALIZADO
+  (function ensureListaLoadMoreCss(){
+    const id = 'lista-load-more-css';
+    if (document.getElementById(id)) return;
+    const s = document.createElement('style');
+    s.id = id;
+    s.textContent = `
+      #lista-clientes .load-more-item {
+        padding: 6px 0;
+        display: flex;
+        justify-content: center;
+      }
+      #lista-clientes .load-more-item .load-more-btn {
+        padding: 4px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--border, #2a2f32);
+        background: transparent;
+        color: var(--muted, #aebac1);
+        font-size: .8rem;
+        cursor: pointer;
+      }
+      #lista-clientes .load-more-item .load-more-btn:hover:not(:disabled) {
+        background: rgba(255,255,255,0.06);
+      }
+      #lista-clientes .load-more-item .load-more-btn:disabled {
+        opacity: .6;
+        cursor: default;
+      }
     `;
     document.head.appendChild(s);
   })();

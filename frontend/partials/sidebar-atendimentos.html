@@ -1,7 +1,7 @@
 <!-- /frontend/partials/sidebar-atendimentos.html -->
 <!-- DESKTOP/MOBILE — carregado dentro do flyout; sem referência a .zc-flyout__panel -->
 
-<!-- Preload logos -->
+<!-- Preload logos (pode deixar, não atrapalha) -->
 <link rel="preload" as="image" href="/img/logo-s-fundo.png">
 <link rel="preload" as="image" href="/img/logo-white.png">
 <link rel="preload" as="image" href="/img/fav-icon.png">
@@ -14,7 +14,6 @@
     --border:#27272a;
     --fg:#e5e7eb;
     --muted:#9ca3af;
-    /* hover mais suave, parecido com o sidebar principal */
     --hover:rgba(255,255,255,.04);
     --ring:#4f83ff;
     --danger:#ef4444;
@@ -39,8 +38,7 @@
     min-height:100%;
     background:var(--card);
     border-right:0 !important;
-    padding:1rem .75rem calc(1rem + env(safe-area-inset-bottom));
-    padding-top:calc(var(--topbar-h) + .75rem);
+    padding:.6rem .75rem calc(1rem + env(safe-area-inset-bottom));
     display:flex;
     flex-direction:column;
     overflow:auto;
@@ -80,10 +78,10 @@
       0 8px 20px rgba(15,23,42,.12);
   }
 
-  /* LINKS – agora sem translate / scale pra não mexer */
+  /* LINKS – sem translate/scale */
   .app-sidebar nav a{
     position:relative;
-    z-index:1; /* fica acima do indicador */
+    z-index:1;
     display:flex;
     align-items:center;
     gap:.75rem;
@@ -117,7 +115,7 @@
   .app-sidebar nav a[aria-current="page"]{
     color:var(--fg);
     font-weight:600;
-    background:transparent; /* quem destaca é o indicador atrás */
+    background:transparent;
   }
 
   /* ÍCONES – mesmo tamanho do sidebar principal */
@@ -164,15 +162,7 @@
     gap:.6rem;
   }
 
-  .logo{
-    height:56px;
-    margin:0 0 1rem;
-    display:grid;
-    place-items:center;
-    position:relative;
-    z-index:1;
-  }
-  .logo img{ max-height:50px; }
+  /* sem .logo */
 
   .user-chip{
     display:flex;
@@ -286,13 +276,13 @@
   /* ===== MINI LEFTBAR (whatsapp) FIXA, SEM DESCER AO ABRIR ===== */
   .wpp-leftbar{
     position:relative;
-    width:3.2rem;                 /* largura colapsada */
+    width:3.2rem;
     flex:0 0 3.2rem;
     padding:.4rem 0;
-    background:#111827;           /* pode ajustar pra usar var(--card) se quiser */
+    background:#111827;
     display:flex;
     flex-direction:column;
-    align-items:flex-start !important;   /* trava no topo */
+    align-items:flex-start !important;
     justify-content:flex-start !important;
     transition:width .22s ease;
     overflow:visible;
@@ -304,18 +294,17 @@
     gap:.35rem;
     width:100%;
     align-items:stretch;
-    margin-top:0;                       /* não empurra nada pra baixo */
+    margin-top:0;
   }
 
-  /* FIXO: padding/justify não mudam ao abrir, só a largura da barra */
   .wpp-leftbar-icon{
     position:relative;
     display:flex;
     align-items:center;
-    justify-content:flex-start !important; /* nunca centraliza no meio */
+    justify-content:flex-start !important;
     gap:.65rem;
     width:100%;
-    padding:.5rem .7rem .5rem .6rem;       /* fixo */
+    padding:.5rem .7rem .5rem .6rem;
     border-radius:.75rem;
     color:var(--muted);
     text-decoration:none;
@@ -343,12 +332,9 @@
       transform .22s ease;
   }
 
-  /* hover geral na barra: ela "abre" igual o sidebar */
   .wpp-leftbar:hover{
-    width:16.5rem;  /* mesma largura expandida do sidebar */
+    width:16.5rem;
   }
-
-  /* não mexe mais no padding/justify aqui pra não empurrar nada pra baixo */
 
   .wpp-leftbar:hover .wpp-leftbar-icon svg{
     margin-right:.25rem;
@@ -369,15 +355,27 @@
     background:var(--hover);
     color:var(--fg);
   }
+
+  /* ===== Animação do flyout (entra da direita) ===== */
+  #zcSidebarHost .app-sidebar{
+    transform: translateX(100%);
+    opacity: 0;
+    pointer-events:none;
+    transition:
+      transform .22s cubic-bezier(.28,1.2,.43,1),
+      opacity   .18s ease;
+    will-change: transform, opacity;
+  }
+
+  #zcSidebarHost.is-open .app-sidebar{
+    transform: translateX(0);
+    opacity: 1;
+    pointer-events:auto;
+  }
 </style>
 
 <aside class="app-sidebar" id="appSidebarAtt" aria-label="Menu lateral">
-  <div class="logo">
-    <img class="logo-fav"  src="/img/fav-icon.png" alt="favicon" width="32" height="32">
-  </div>
-
   <nav>
-    <!-- Indicador animado -->
     <span class="att-nav-indicator" id="attNavInd"></span>
 
     <a href="/dashboard">
@@ -550,7 +548,7 @@
 
 <script>
 (function(){
-  // ===== THEME ENGINE: unifica .dark + data-theme + localStorage =====
+  // ===== THEME ENGINE =====
   (function ThemeEngine(){
     const html = document.documentElement;
     const label = document.getElementById('themeSwitchAtt');
@@ -629,10 +627,8 @@
       ind.style.opacity = 1;
     }
 
-    // posição inicial
     moveIndicator(getCurrentLink());
 
-    // ao clicar nos links, move para o novo alvo
     nav.addEventListener('click', function(e){
       var link = e.target.closest('a[href]');
       if (!link || !nav.contains(link)) return;
@@ -641,7 +637,6 @@
       }, 0);
     });
 
-    // reajusta em resize
     window.addEventListener('resize', function(){
       moveIndicator(getCurrentLink());
     });
@@ -692,7 +687,7 @@
     });
   })();
 
-  // Pré-carrega avatar do servidor (se ainda não existir no localStorage)
+  // Pré-carrega avatar do servidor
   (async function(){
     if (localStorage.getItem('usuario_avatar')) return;
     var token=localStorage.getItem('access_token')||localStorage.getItem('token'); if(!token) return;
@@ -720,7 +715,6 @@
     var deptInput=document.getElementById('pfDeptAtt');
     var msg=document.getElementById('pfMsgAtt');
 
-    // move modal para <body> (independente do host)
     if (modal && modal.parentElement !== document.body) {
       document.body.appendChild(modal);
     }
@@ -797,7 +791,6 @@
       msg.textContent='Informações salvas.'; setTimeout(closePf, 600);
     }
 
-    // Abrir modal pelo chip
     document.addEventListener('click', function (e) {
       var chip = e.target.closest('#userChipAtt');
       if (chip) { e.preventDefault(); window.PfModal && PfModal.open(); }
@@ -811,7 +804,7 @@
     });
   })();
 
-  // Logout (idempotente)
+  // Logout
   (function(){
     var out=document.getElementById('sidebarLogoutAtt');
     if (!out || out.dataset.bound) return;
