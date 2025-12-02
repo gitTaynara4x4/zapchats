@@ -387,21 +387,36 @@ def normalizar_telefone(n: str) -> str | None:
     return f"55{ddd}{restante}"
 
 def _remote_to_num(remote_jid: str | None) -> str | None:
-    if not remote_jid: return None
-    if remote_jid.endswith("@g.us"):  # grupo
+    if not remote_jid:
         return None
-    # não tentar converter @lid diretamente
-    if remote_jid.endswith("@lid"):
+
+    # grupos continuam ignorados
+    if remote_jid.endswith("@g.us"):
         return None
-    user = _jid_strip_device(remote_jid).split("@")[0]
-    user = re.sub(r"\D", "", user or "")
-    if not user: return None
-    if user.startswith("0"): user = user[1:]
-    if not user.startswith("55"): user = "55" + user
-    ddd = user[2:4]; restante = user[4:]
+
+    base = _jid_strip_device(remote_jid)
+    user = base.split("@")[0]
+    user_digits = re.sub(r"\D", "", user or "")
+    if not user_digits:
+        return None
+
+    # 🔸 NOVO: fallback para @lid sem mapping oficial
+    # Gera um "telefone sintético" LID-<11 últimos dígitos>
+    # só para não perder o cliente/conversa.
+    if base.endswith("@lid"):
+        core = user_digits[-11:] if len(user_digits) >= 11 else user_digits.zfill(11)
+        return f"LID-{core}"
+
+    # Demais JIDs (@s.whatsapp.net, etc) continuam como antes
+    if user_digits.startswith("0"):
+        user_digits = user_digits[1:]
+    if not user_digits.startswith("55"):
+        user_digits = "55" + user_digits
+    ddd, restante = user_digits[2:4], user_digits[4:]
     if len(restante) == 8 and not restante.startswith("9"):
         restante = "9" + restante
     return f"55{ddd}{restante}"
+
 
 def _resolve_counterparty_num_1to1(data: dict, me_num: str | None) -> tuple[str | None, str | None]:
     if not isinstance(data, dict):
@@ -1572,13 +1587,15 @@ async def on_messages_upsert(inst_id: str, data):
                         except Exception as e:
                             _log_ctx("[UPsert][lid-cache-fail]", err=str(e))
                     else:
+                        # NOVO: não descarta mais a mensagem quando não tem mapping.
+                        # Mantém o LID como JID final e deixa _remote_to_num()
+                        # gerar o "telefone sintético" pra esse contato.
                         _log_skip(
-                            "JID @lid sem mapping",
+                            "JID @lid sem mapping (usando fallback sintético)",
                             idx=idx,
                             msg_id=msg_id,
                             preview=_short(extract_text_from_baileys(m)),
                         )
-                        # log extra para enxergar o source cru
                         try:
                             src = m.get("source")
                         except Exception:
@@ -1589,8 +1606,7 @@ async def on_messages_upsert(inst_id: str, data):
                             msg_id=msg_id,
                             source=_short(src, 300),
                         )
-                        continue
-
+                        resolved_jid = original_jid  # 👈 segue fluxo normal usando o próprio LID
 
                 remote_jid = resolved_jid or original_jid
                 if remote_jid.endswith("@g.us"):
@@ -1683,7 +1699,6 @@ async def on_messages_upsert(inst_id: str, data):
                         except Exception:
                             pass
                         continue
-
 
                 if not cli_id:
                     _log_skip(
