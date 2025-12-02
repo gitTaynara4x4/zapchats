@@ -432,14 +432,16 @@ def _resolve_counterparty_num_1to1(data: dict, me_num: str | None) -> tuple[str 
     def _num_of(jid_like: str | None) -> str | None:
         return _remote_to_num(jid_like if isinstance(jid_like, str) else None)
 
-    # 1) tenta pelo remote_jid
+    # 1) tenta pelo remote_jid principal
     tel = _num_of(remote_jid)
     if tel and (not me_num or tel != me_num):
         return tel, remote_jid
 
-    # 2) alternativos: string **ou dict** (Evolution às vezes manda objetos aqui)
-    #    ⬇⬇⬇ AQUI ENTRA O "source"
+    # 2) alternativos: string OU dict (Evolution às vezes manda objetos aqui)
+    #    ⬇⬇⬇ AQUI ENTRA O "remoteJidAlt" E O "source"
     alt_fields = (
+        "remoteJidAlt",   # ← NOVO: onde está aparecendo o 553186419237@s.whatsapp.net
+        "remote_jid_alt", # ← se algum provider vier em snake_case
         "senderPn",
         "senderpn",
         "participant",
@@ -447,7 +449,7 @@ def _resolve_counterparty_num_1to1(data: dict, me_num: str | None) -> tuple[str 
         "from",
         "sender",
         "user",
-        "source",  # <- NOVO: Evolution costuma mandar info rica aqui
+        "source",         # info rica (objeto) – fica por último
     )
 
     def _first_str_from_obj(o: dict) -> str | None:
@@ -476,7 +478,6 @@ def _resolve_counterparty_num_1to1(data: dict, me_num: str | None) -> tuple[str 
                 if isinstance(v2, str) and v2.strip():
                     return v2.strip()
         return None
-
 
     for field in alt_fields:
         alt = key.get(field) or data.get(field)
@@ -591,13 +592,14 @@ def _mensagem_tem_campo_atendimento() -> bool:
 _HAS_MSG_ATD_FIELD = _mensagem_tem_campo_atendimento()
 
 def _get_or_open_atendimento(
-    db: Session, *,
-    empresa_id: int,
+    db: Session,
+    *,
+    empresa_id: int,        # continua vindo no parâmetro, mas não usamos dentro
     instancia_id: int,
     cliente_id: int,
     direcao: str,                     # 'entrada' | 'saida'
     ts_dt: datetime | None = None,
-    operador_id: int | None = None
+    operador_id: int | None = None,
 ):
     """
     Busca um atendimento aberto (status != RESOLVIDO) para (cliente_id, instancia_id).
@@ -605,17 +607,26 @@ def _get_or_open_atendimento(
     """
     ts_dt = ts_dt or _now_utc()
 
-    q = db.query(models.Atendimento).filter(
-        models.Atendimento.cliente_id == cliente_id,
-        models.Atendimento.instancia_id == instancia_id,
-        models.Atendimento.status != StatusAtendimento.RESOLVIDO,
-    ).order_by(models.Atendimento.criado_em.desc())
+    q = (
+        db.query(models.Atendimento)
+        .filter(
+            models.Atendimento.cliente_id == cliente_id,
+            models.Atendimento.instancia_id == instancia_id,
+            models.Atendimento.status != StatusAtendimento.RESOLVIDO,
+        )
+        .order_by(models.Atendimento.criado_em.desc())
+    )
 
     a = q.first()
     if not a:
-        status_ini = StatusAtendimento.EM_ATENDIMENTO if direcao == "saida" else StatusAtendimento.NOVO
+        status_ini = (
+            StatusAtendimento.EM_ATENDIMENTO
+            if direcao == "saida"
+            else StatusAtendimento.NOVO
+        )
+
         a = models.Atendimento(
-            empresa_id=empresa_id,               # 👈 usa o empresa_id aqui
+            # empresa_id=empresa_id,  # ❌ NÃO GRAVA MAIS AQUI
             cliente_id=cliente_id,
             instancia_id=instancia_id,
             operador_id=(operador_id if direcao == "saida" else None),
@@ -623,6 +634,7 @@ def _get_or_open_atendimento(
             criado_em=ts_dt,
         )
         db.add(a)
+
         try:
             db.flush()
         except IntegrityError:
@@ -631,16 +643,17 @@ def _get_or_open_atendimento(
             a = q.first()
             if not a:
                 a = models.Atendimento(
-                    empresa_id=empresa_id,       # 👈 e aqui também
+                    # empresa_id=empresa_id,  # ❌ NEM AQUI
                     cliente_id=cliente_id,
                     instancia_id=instancia_id,
                     operador_id=(operador_id if direcao == "saida" else None),
                     status=status_ini,
                     criado_em=ts_dt,
                 )
-                db.add(a); db.flush()
+                db.add(a)
+                db.flush()
 
-
+    # Se for mensagem de saída, garante status EM_ATENDIMENTO e seta operador se ainda não tiver
     if direcao == "saida":
         try:
             if getattr(a, "status", None) != StatusAtendimento.EM_ATENDIMENTO:
@@ -648,10 +661,10 @@ def _get_or_open_atendimento(
             if operador_id and not a.operador_id:
                 a.operador_id = operador_id
         except Exception:
+            # não deixa estourar a rotina inteira por qualquer merdinha
             pass
 
     return a
-
 
 def _status_token(val) -> str | None:
     """Converte Enum/str para o token esperado no DB (minúsculos)."""
