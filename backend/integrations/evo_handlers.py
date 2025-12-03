@@ -387,34 +387,30 @@ def normalizar_telefone(n: str) -> str | None:
     return f"55{ddd}{restante}"
 
 def _remote_to_num(remote_jid: str | None) -> str | None:
+    """
+    Converte um remoteJid/alt (Baileys/Evolution) em telefone BR normalizado (55DDDNXXXXXXXX).
+
+    - Ignora grupos (@g.us)
+    - Ignora @lid (LID NÃO é telefone real; só usa quando já tiver mapping pra @s.whatsapp.net)
+    """
     if not remote_jid:
         return None
 
-    # grupos continuam ignorados
-    if remote_jid.endswith("@g.us"):
-        return None
-
     base = _jid_strip_device(remote_jid)
-    user = base.split("@")[0]
-    user_digits = re.sub(r"\D", "", user or "")
-    if not user_digits:
+
+    # grupos continuam ignorados
+    if base.endswith("@g.us"):
         return None
 
-    # 🔸 Fallback para @lid sem mapping oficial:
-    # gera um "telefone sintético" LID-XXXXXXXXXXX
+    # LID NÃO É TELEFONE → deixa pra resolver via mapping/remoteJidAlt/etc
     if base.endswith("@lid"):
-        core = user_digits[-11:] if len(user_digits) >= 11 else user_digits.zfill(11)
-        return f"LID-{core}"
+        return None
 
-    # Demais JIDs (@s.whatsapp.net, etc) continuam como antes
-    if user_digits.startswith("0"):
-        user_digits = user_digits[1:]
-    if not user_digits.startswith("55"):
-        user_digits = "55" + user_digits
-    ddd, restante = user_digits[2:4], user_digits[4:]
-    if len(restante) == 8 and not restante.startswith("9"):
-        restante = "9" + restante
-    return f"55{ddd}{restante}"
+    # pega só a parte antes do @ (ou o próprio número, se vier sem @)
+    user = base.split("@", 1)[0]
+
+    # reaproveita a mesma lógica de normalizar_telefone
+    return normalizar_telefone(user)
 
 
 def _resolve_counterparty_num_1to1(data: dict, me_num: str | None) -> tuple[str | None, str | None]:
