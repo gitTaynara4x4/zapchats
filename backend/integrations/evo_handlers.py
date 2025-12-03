@@ -400,9 +400,8 @@ def _remote_to_num(remote_jid: str | None) -> str | None:
     if not user_digits:
         return None
 
-    # 🔸 NOVO: fallback para @lid sem mapping oficial
-    # Gera um "telefone sintético" LID-<11 últimos dígitos>
-    # só para não perder o cliente/conversa.
+    # 🔸 Fallback para @lid sem mapping oficial:
+    # gera um "telefone sintético" LID-XXXXXXXXXXX
     if base.endswith("@lid"):
         core = user_digits[-11:] if len(user_digits) >= 11 else user_digits.zfill(11)
         return f"LID-{core}"
@@ -432,16 +431,16 @@ def _resolve_counterparty_num_1to1(data: dict, me_num: str | None) -> tuple[str 
     def _num_of(jid_like: str | None) -> str | None:
         return _remote_to_num(jid_like if isinstance(jid_like, str) else None)
 
-    # 1) tenta pelo remote_jid principal
+    # 1) tenta pelo remote_jid principal, MAS IGNORA @lid
     tel = _num_of(remote_jid)
-    if tel and (not me_num or tel != me_num):
+    if tel and (not me_num or tel != me_num) and not _is_lid_jid(remote_jid):
+        # só usa o remote_jid direto se NÃO for LID
         return tel, remote_jid
 
-    # 2) alternativos: string OU dict (Evolution às vezes manda objetos aqui)
-    #    ⬇⬇⬇ AQUI ENTRA O "remoteJidAlt" E O "source"
+    # 2) alternativos: remoteJidAlt, senderPn, source etc.
     alt_fields = (
-        "remoteJidAlt",   # ← NOVO: onde está aparecendo o 553186419237@s.whatsapp.net
-        "remote_jid_alt", # ← se algum provider vier em snake_case
+        "remoteJidAlt",   # ← AQUI vem o 553186419237@s.whatsapp.net
+        "remote_jid_alt",
         "senderPn",
         "senderpn",
         "participant",
@@ -449,28 +448,19 @@ def _resolve_counterparty_num_1to1(data: dict, me_num: str | None) -> tuple[str 
         "from",
         "sender",
         "user",
-        "source",         # info rica (objeto) – fica por último
+        "source",
     )
 
     def _first_str_from_obj(o: dict) -> str | None:
-        """
-        Em objetos tipo `source`, prioriza campos claramente de telefone
-        antes de ids/jids genéricos.
-        """
-        # 1º: campos que normalmente trazem telefone "cru" ou formatado
         prefer_keys = [
             "phone", "phoneNumber", "number",
             "senderPn", "senderpn",
         ]
-        # 2º: campos que podem ter JID "bom" (@s.whatsapp.net) ou número
         jid_like_keys = [
             "user", "from", "peer", "participant",
             "jid", "wid", "remoteJid", "remote_jid", "chatId", "chat_id",
         ]
-        # 3º: ids genéricos (podem ser lid/business id)
-        fallback_keys = [
-            "id",
-        ]
+        fallback_keys = ["id"]
 
         for key_group in (prefer_keys, jid_like_keys, fallback_keys):
             for k2 in key_group:
@@ -486,10 +476,10 @@ def _resolve_counterparty_num_1to1(data: dict, me_num: str | None) -> tuple[str 
         )
         alt_num = _num_of(cand)
         if alt_num and alt_num != me_num:
+            # agora sim: número real + a string (que pode ser o JID)
             return alt_num, cand
 
     return (tel if tel else None), (remote_jid if isinstance(remote_jid, str) else None)
-
 
 
 
@@ -594,7 +584,7 @@ _HAS_MSG_ATD_FIELD = _mensagem_tem_campo_atendimento()
 def _get_or_open_atendimento(
     db: Session,
     *,
-    empresa_id: int,        # continua vindo no parâmetro, mas não usamos dentro
+    empresa_id: int,        # continua vindo no parâmetro
     instancia_id: int,
     cliente_id: int,
     direcao: str,                     # 'entrada' | 'saida'
@@ -626,7 +616,7 @@ def _get_or_open_atendimento(
         )
 
         a = models.Atendimento(
-            # empresa_id=empresa_id,  # ❌ NÃO GRAVA MAIS AQUI
+            empresa_id=empresa_id,  # ✅ VOLTA A GRAVAR A EMPRESA
             cliente_id=cliente_id,
             instancia_id=instancia_id,
             operador_id=(operador_id if direcao == "saida" else None),
@@ -643,7 +633,7 @@ def _get_or_open_atendimento(
             a = q.first()
             if not a:
                 a = models.Atendimento(
-                    # empresa_id=empresa_id,  # ❌ NEM AQUI
+                    empresa_id=empresa_id,  # ✅ TAMBÉM AQUI
                     cliente_id=cliente_id,
                     instancia_id=instancia_id,
                     operador_id=(operador_id if direcao == "saida" else None),
@@ -691,7 +681,18 @@ def _lid_pend_key(emp_id: int, inst_db_id: int, lid: str) -> str:
 
 def _lid_map_get(emp_id: int, inst_db_id: int, lid: str) -> str | None:
     v = _rget(_lid_map_key(emp_id, inst_db_id, lid))
-    return v if isinstance(v, str) else None
+    if not isinstance(v, str):
+        return None
+
+    base = _jid_strip_device(v)
+    local = base.split("@", 1)[0]
+
+    # se o que está salvo é um JID com usuário começando em "LID-",
+    # considera mapping inválido e ignora
+    if local.startswith("LID-"):
+        return None
+
+    return v
 
 def _lid_map_set(emp_id: int, inst_db_id: int, lid: str, wa_jid: str) -> None:
     _rset(_lid_map_key(emp_id, inst_db_id, lid), wa_jid, ttl=_LID_REDIS_TTL)
@@ -1573,10 +1574,53 @@ async def on_messages_upsert(inst_id: str, data):
                     _log_skip("sem remoteJid", idx=idx, msg_id=msg_id)
                     continue
 
-                # 2) resolver @lid logo no início (Evolution/Redis) + fallback 1:1
+                # ✅ NOVO: se for @lid e tiver remoteJidAlt/@alt, já troca pelo JID real
+                alt_jid = (
+                    key.get("remoteJidAlt")
+                    or key.get("remote_jid_alt")
+                    or m.get("remoteJidAlt")
+                    or m.get("remote_jid_alt")
+                )
+
+                if _is_lid_jid(raw_remote) and isinstance(alt_jid, str) and "@" in alt_jid:
+                    original_lid = _jid_strip_device(raw_remote)
+                    real_jid = _jid_strip_device(alt_jid)
+
+                    _log_ctx(
+                        "[UPsert][lid-alt-resolve]",
+                        idx=idx,
+                        msg_id=msg_id,
+                        lid=original_lid,
+                        real_jid=real_jid,
+                    )
+
+                    # passa a usar o JID real deste contato daqui pra frente
+                    raw_remote = real_jid
+
+                    # cacheia o mapping lid -> real_jid (memória + Redis)
+                    try:
+                        _LID_CACHE.setdefault(inst_id, {})[original_lid] = real_jid
+                        if empresa_id and getattr(inst, "id", None):
+                            _lid_map_set(
+                                empresa_id,
+                                inst.id,
+                                original_lid,
+                                real_jid,
+                            )
+                    except Exception as e:
+                        _log_ctx(
+                            "[UPsert][lid-alt-cache-fail]",
+                            idx=idx,
+                            msg_id=msg_id,
+                            err=str(e),
+                        )
+
+                # 2) resolver @lid (Evolution/Redis) + fallback 1:1
                 original_jid = raw_remote
                 resolved_jid = _resolve_remote_jid(inst_id, raw_remote)
+
                 if _is_lid_jid(original_jid) and not resolved_jid:
+                    # tenta achar o número/JID real a partir de remoteJidAlt / senderPn / etc.
                     tel_fallback, alt = _resolve_counterparty_num_1to1(m, me_number)
                     _log_ctx(
                         "[UPsert][lid-fallback]",
@@ -1585,12 +1629,18 @@ async def on_messages_upsert(inst_id: str, data):
                         tel_fallback=tel_fallback,
                         alt=_short(alt, 64),
                     )
-                    if tel_fallback:
-                        resolved_jid = f"{tel_fallback}@s.whatsapp.net"
-                        _LID_CACHE.setdefault(inst_id, {})[
-                            _jid_strip_device(original_jid)
-                        ] = resolved_jid
+
+                    # 1️⃣ se o alt já for um JID completo (@s.whatsapp.net), usa ele direto
+                    jid_from_alt: str | None = None
+                    if isinstance(alt, str) and "@" in alt:
+                        jid_from_alt = _jid_strip_device(alt)
+
+                    if jid_from_alt:
+                        resolved_jid = jid_from_alt
                         try:
+                            _LID_CACHE.setdefault(inst_id, {})[
+                                _jid_strip_device(original_jid)
+                            ] = resolved_jid
                             _lid_map_set(
                                 empresa_id,
                                 inst.id,
@@ -1599,10 +1649,26 @@ async def on_messages_upsert(inst_id: str, data):
                             )
                         except Exception as e:
                             _log_ctx("[UPsert][lid-cache-fail]", err=str(e))
+
+                    # 2️⃣ se não tem alt JID, mas tem telefone "normal", monta o JID
+                    elif tel_fallback and not str(tel_fallback).startswith("LID-"):
+                        resolved_jid = f"{tel_fallback}@s.whatsapp.net"
+                        try:
+                            _LID_CACHE.setdefault(inst_id, {})[
+                                _jid_strip_device(original_jid)
+                            ] = resolved_jid
+                            _lid_map_set(
+                                empresa_id,
+                                inst.id,
+                                _jid_strip_device(original_jid),
+                                resolved_jid,
+                            )
+                        except Exception as e:
+                            _log_ctx("[UPsert][lid-cache-fail]", err=str(e))
+
                     else:
-                        # NOVO: não descarta mais a mensagem quando não tem mapping.
-                        # Mantém o LID como JID final e deixa _remote_to_num()
-                        # gerar o "telefone sintético" pra esse contato.
+                        # 3️⃣ Último caso: não achou nada utilizável → mantém o LID,
+                        # mas NÃO descarta a mensagem (segue com fallback sintético)
                         _log_skip(
                             "JID @lid sem mapping (usando fallback sintético)",
                             idx=idx,
@@ -1619,9 +1685,10 @@ async def on_messages_upsert(inst_id: str, data):
                             msg_id=msg_id,
                             source=_short(src, 300),
                         )
-                        resolved_jid = original_jid  # 👈 segue fluxo normal usando o próprio LID
+                        resolved_jid = original_jid  # segue usando o próprio LID
 
                 remote_jid = resolved_jid or original_jid
+
                 if remote_jid.endswith("@g.us"):
                     _log_skip("grupo", idx=idx, msg_id=msg_id, remote_jid=remote_jid)
                     continue
@@ -2456,7 +2523,13 @@ async def on_messages_set(inst_id: str, data):
     """
     Import de histórico com LOG detalhado + overlay.
     NÃO emite cada mensagem no WS (para não lotar), apenas progresso/done.
-    >>> Patch: passa a emitir no WS mensagens RECENTES do histórico (<= HISTORY_RECENT_WS_SEC).
+
+    Patch:
+      • respeita janela 24h/7d/HISTORY_LIMIT_HOURS
+      • tenta resolver @lid -> real JID
+      • se tiver tel_fallback, salva mapping em cache/DB
+      • emite no WS apenas mensagens RECENTES do histórico (<= HISTORY_RECENT_WS_SEC)
+      • importa mídia se DISABLE_MEDIA_ON_HISTORY == False
     """
     if not ENABLE_MESSAGES_SET:
         LOG("[MESSAGES_SET] Ignorado (ENABLE_MESSAGES_SET=false).")
@@ -2487,26 +2560,41 @@ async def on_messages_set(inst_id: str, data):
         mensagens = extract_messages_any_shape(data)
         total = len(mensagens)
 
-        _log_ctx("[HIST] start",
-                 inst=inst_id, empresa_id=empresa_id,
-                 historico_opcao=historico_opcao, total=total,
-                 DISABLE_MEDIA_ON_HISTORY=DISABLE_MEDIA_ON_HISTORY,
-                 HISTORY_MAX_IMPORT=HISTORY_MAX_IMPORT,
-                 HISTORY_BATCH_COMMIT=HISTORY_BATCH_COMMIT)
+        _log_ctx(
+            "[HIST] start",
+            inst=inst_id,
+            empresa_id=empresa_id,
+            historico_opcao=historico_opcao,
+            total=total,
+            DISABLE_MEDIA_ON_HISTORY=DISABLE_MEDIA_ON_HISTORY,
+            HISTORY_MAX_IMPORT=HISTORY_MAX_IMPORT,
+            HISTORY_BATCH_COMMIT=HISTORY_BATCH_COMMIT,
+        )
 
+        # avisa front que começou
         try:
             await conexoes_ativas.send_message(
                 f"emp:{empresa_id}",
-                {"type": "history_sync_start", "total": total, "serverTimestamp": _server_ts_ms()}
+                {
+                    "type": "history_sync_start",
+                    "total": total,
+                    "serverTimestamp": _server_ts_ms(),
+                },
             )
         except Exception:
             pass
 
         if historico_opcao == "none" or not mensagens:
+            # nada pra importar
             try:
                 await conexoes_ativas.send_message(
                     f"emp:{empresa_id}",
-                    {"type": "history_sync_done", "total": total, "imported": 0, "serverTimestamp": _server_ts_ms()}
+                    {
+                        "type": "history_sync_done",
+                        "total": total,
+                        "imported": 0,
+                        "serverTimestamp": _server_ts_ms(),
+                    },
                 )
             except Exception:
                 pass
@@ -2514,26 +2602,36 @@ async def on_messages_set(inst_id: str, data):
 
         got_lock = _try_acquire_hist_lock(db, empresa_id, inst.id)
         if not got_lock:
-            LOG(f"[MESSAGES_SET] lock ocupado para emp={empresa_id} inst={inst.id} — outro import rodando; saindo.")
+            LOG(
+                f"[MESSAGES_SET] lock ocupado para emp={empresa_id} inst={inst.id} — outro import rodando; saindo."
+            )
             return
 
         try:
-            # limite temporal
+            # ==========================
+            # janela temporal (24h / 7d / HISTORY_LIMIT_HOURS)
+            # ==========================
             if HISTORY_LIMIT_HOURS > 0:
                 limite_tempo = _now_utc() - timedelta(hours=HISTORY_LIMIT_HOURS)
             else:
-                dias = 1 if historico_opcao == "24h" else (7 if historico_opcao == "7d" else 0)
+                dias = (
+                    1
+                    if historico_opcao == "24h"
+                    else (7 if historico_opcao == "7d" else 0)
+                )
                 limite_tempo = _now_utc() - timedelta(days=dias)
 
             novas = 0
             me_num = _me_number_by_inst(inst)
             cap = max(1, int(HISTORY_MAX_IMPORT))
 
-            _log_ctx("[HIST] janela/limites",
-                     limite_utc=_iso_utc(limite_tempo),
-                     cap=cap)
+            _log_ctx(
+                "[HIST] janela/limites",
+                limite_utc=_iso_utc(limite_tempo),
+                cap=cap,
+            )
 
-            # janela para emitir mensagens recentes do histórico no WS
+            # janela para emitir mensagens recentes no WS
             try:
                 RECENT_SEC = int(os.getenv("HISTORY_RECENT_WS_SEC", "120"))
             except Exception:
@@ -2545,54 +2643,113 @@ async def on_messages_set(inst_id: str, data):
                     break
 
                 if not isinstance(m, dict):
-                    _log_ctx("[HIST][skip] m não é dict", idx=idx, type_m=type(m).__name__)
+                    _log_ctx(
+                        "[HIST][skip] m não é dict",
+                        idx=idx,
+                        type_m=type(m).__name__,
+                    )
                     continue
 
-                key = (m.get("key") or {})
-                remote_jid = key.get("remoteJid") or key.get("remote_jid") or m.get("remoteJid") or m.get("jid") or m.get("chatId")
+                key = m.get("key") or {}
+                remote_jid = (
+                    key.get("remoteJid")
+                    or key.get("remote_jid")
+                    or m.get("remoteJid")
+                    or m.get("jid")
+                    or m.get("chatId")
+                )
                 msg_id = key.get("id") or m.get("id")
                 ts_raw = m.get("messageTimestamp") or m.get("timestamp") or 0
 
                 try:
                     ts_msg = _to_dt_utc(ts_raw)
                 except Exception:
-                    _log_ctx("[HIST][skip] ts inválido", idx=idx, msg_id=msg_id, ts_raw=ts_raw)
+                    _log_ctx(
+                        "[HIST][skip] ts inválido",
+                        idx=idx,
+                        msg_id=msg_id,
+                        ts_raw=ts_raw,
+                    )
                     continue
 
+                # fora da janela de histórico
                 if ts_msg < limite_tempo:
-                    _log_ctx("[HIST][skip] fora da janela", idx=idx, msg_id=msg_id, ts=_iso_utc(ts_msg))
+                    _log_ctx(
+                        "[HIST][skip] fora da janela",
+                        idx=idx,
+                        msg_id=msg_id,
+                        ts=_iso_utc(ts_msg),
+                    )
                     continue
 
                 if not remote_jid:
-                    _log_ctx("[HIST][skip] sem remoteJid", idx=idx, msg_id=msg_id)
+                    _log_ctx(
+                        "[HIST][skip] sem remoteJid", idx=idx, msg_id=msg_id
+                    )
                     continue
 
+                # ==========================
+                # resolver JID / @lid
+                # ==========================
                 original_jid = remote_jid
                 resolved_jid = _resolve_remote_jid(inst_id, remote_jid)
+
                 if _is_lid_jid(original_jid) and not resolved_jid:
+                    # tenta cair pro número (sender / alt / etc)
                     tel_fallback, _ = _resolve_counterparty_num_1to1(m, me_num)
-                    _log_ctx("[HIST][lid-fallback]", idx=idx, msg_id=msg_id, tel_fallback=tel_fallback)
+                    _log_ctx(
+                        "[HIST][lid-fallback]",
+                        idx=idx,
+                        msg_id=msg_id,
+                        tel_fallback=tel_fallback,
+                    )
                     if tel_fallback:
+                        # mapeia lid -> real JID pra próximos eventos
                         resolved_jid = f"{tel_fallback}@s.whatsapp.net"
-                        _LID_CACHE.setdefault(inst_id, {})[_jid_strip_device(original_jid)] = resolved_jid
+                        _LID_CACHE.setdefault(inst_id, {})[
+                            _jid_strip_device(original_jid)
+                        ] = resolved_jid
                         try:
-                            _lid_map_set(empresa_id, inst.id, _jid_strip_device(original_jid), resolved_jid)
+                            _lid_map_set(
+                                empresa_id,
+                                inst.id,
+                                _jid_strip_device(original_jid),
+                                resolved_jid,
+                            )
                         except Exception as e:
-                            _log_ctx("[HIST][lid-cache-fail]", err=str(e))
+                            _log_ctx(
+                                "[HIST][lid-cache-fail]", err=str(e)
+                            )
                     else:
-                        _log_ctx("[HIST][skip] @lid sem mapping", idx=idx, msg_id=msg_id)
+                        # aqui diferente do upsert: no histórico **realmente** pulamos @lid sem mapping
+                        _log_ctx(
+                            "[HIST][skip] @lid sem mapping",
+                            idx=idx,
+                            msg_id=msg_id,
+                        )
                         continue
 
                 remote_jid = resolved_jid or original_jid
 
-                # ===== GRUPO =====
+                # ==========================
+                # GRUPO
+                # ==========================
                 if remote_jid.endswith("@g.us"):
-                    from_me   = bool(key.get("fromMe", False))
-                    author_j  = key.get("participant") or m.get("participant") or ""
-                    conteudo  = extract_text_from_baileys(m)
-                    ts_int    = _int_unix(ts_msg)
+                    from_me = bool(key.get("fromMe", False))
+                    author_j = (
+                        key.get("participant") or m.get("participant") or ""
+                    )
+                    conteudo = extract_text_from_baileys(m)
+                    ts_int = _int_unix(ts_msg)
 
-                    grupo = _grupo_row_by_remote(db, empresa_id, _jid_strip_device(remote_jid), instancia_id=inst.id, inst_obj=inst)
+                    grupo = _grupo_row_by_remote(
+                        db,
+                        empresa_id,
+                        _jid_strip_device(remote_jid),
+                        instancia_id=inst.id,
+                        inst_obj=inst,
+                    )
+
                     name = _name_from_contact_like(m) or m.get("pushName")
                     avatar = _avatar_from_contact_like(m)
                     if name and (grupo.nome or "") != name:
@@ -2601,38 +2758,74 @@ async def on_messages_set(inst_id: str, data):
                         grupo.avatar_url = avatar
                     _carimbar_inst(grupo, inst)
 
-                    if msg_id and db.query(models.MensagemGrupo.id).filter_by(grupo_id=grupo.id, msg_id=msg_id).first():
-                        _log_ctx("[HIST][skip] duplicada (grupo)", idx=idx, msg_id=msg_id, grupo_id=grupo.id)
+                    # já temos essa mensagem do grupo?
+                    if msg_id and db.query(models.MensagemGrupo.id).filter_by(
+                        grupo_id=grupo.id, msg_id=msg_id
+                    ).first():
+                        _log_ctx(
+                            "[HIST][skip] duplicada (grupo)",
+                            idx=idx,
+                            msg_id=msg_id,
+                            grupo_id=grupo.id,
+                        )
                         continue
 
                     def _ins_grupo():
                         msgg = models.MensagemGrupo(
-                            empresa_id=empresa_id, grupo_id=grupo.id, author_jid=author_j, from_me=from_me,
-                            conteudo=conteudo, message_type=m.get("messageType"), lida=from_me,
-                            timestamp=ts_int, msg_id=msg_id, ack=_ack_from_status(m.get("status")) if from_me else None,
-                            instancia_id=inst.id
+                            empresa_id=empresa_id,
+                            grupo_id=grupo.id,
+                            author_jid=author_j,
+                            from_me=from_me,
+                            conteudo=conteudo,
+                            message_type=m.get("messageType"),
+                            lida=from_me,
+                            timestamp=ts_int,
+                            msg_id=msg_id,
+                            ack=_ack_from_status(m.get("status"))
+                            if from_me
+                            else None,
+                            instancia_id=inst.id,
                         )
                         _carimbar_inst(msgg, inst)
-                        db.add(msgg); db.flush()
+                        db.add(msgg)
+                        db.flush()
                         return msgg.id
 
                     msgg_id = await _retry_deadlock(db, _ins_grupo)
                     novas += 1
-                    _log_ctx("[HIST][saved][grupo]", idx=idx, msg_id=msg_id, saved_id=msgg_id,
-                             ts=_iso_utc(ts_msg), preview=_short(conteudo))
+                    _log_ctx(
+                        "[HIST][saved][grupo]",
+                        idx=idx,
+                        msg_id=msg_id,
+                        saved_id=msgg_id,
+                        ts=_iso_utc(ts_msg),
+                        preview=_short(conteudo),
+                    )
 
                 else:
-                    # ===== 1:1 =====
+                    # ==========================
+                    # 1:1
+                    # ==========================
                     telefone = _remote_to_num(remote_jid)
                     if not telefone:
-                        _log_ctx("[HIST][skip] telefone inválido", idx=idx, msg_id=msg_id, remote_jid=remote_jid)
+                        _log_ctx(
+                            "[HIST][skip] telefone inválido",
+                            idx=idx,
+                            msg_id=msg_id,
+                            remote_jid=remote_jid,
+                        )
                         continue
 
-                    from_me   = bool(key.get("fromMe", False))
-                    conteudo  = extract_text_from_baileys(m)
+                    from_me = bool(key.get("fromMe", False))
+                    conteudo = extract_text_from_baileys(m)
 
-                    media_meta = None if DISABLE_MEDIA_ON_HISTORY else extract_media_meta(m)
+                    media_meta = (
+                        None
+                        if DISABLE_MEDIA_ON_HISTORY
+                        else extract_media_meta(m)
+                    )
 
+                    # cliente
                     def _up():
                         return upsert_cliente(
                             db,
@@ -2641,16 +2834,29 @@ async def on_messages_set(inst_id: str, data):
                             telefone_raw=telefone,
                             nome=formatar_telefone_br(telefone),
                             nome_whatsapp=None,
-                            avatar_url=None
+                            avatar_url=None,
                         )
+
                     cli_id = await _retry_deadlock(db, _up)
                     if not cli_id:
-                        _log_ctx("[HIST][skip] upsert_cliente None", idx=idx, msg_id=msg_id, telefone=telefone)
+                        _log_ctx(
+                            "[HIST][skip] upsert_cliente None",
+                            idx=idx,
+                            msg_id=msg_id,
+                            telefone=telefone,
+                        )
                         continue
 
-                    if msg_id and db.query(models.Mensagem.id).filter_by(cliente_id=cli_id, msg_id=msg_id).first():
-                        _log_ctx("[HIST][skip] duplicada (1:1)", idx=idx, msg_id=msg_id, cliente_id=cli_id)
-                        # (do histórico) não emitimos duplicadas aqui
+                    # mensagem duplicada?
+                    if msg_id and db.query(models.Mensagem.id).filter_by(
+                        cliente_id=cli_id, msg_id=msg_id
+                    ).first():
+                        _log_ctx(
+                            "[HIST][skip] duplicada (1:1)",
+                            idx=idx,
+                            msg_id=msg_id,
+                            cliente_id=cli_id,
+                        )
                         continue
 
                     ack_initial = _ack_from_status(m.get("status"))
@@ -2658,113 +2864,248 @@ async def on_messages_set(inst_id: str, data):
 
                     def _ins_msg():
                         msg_model = models.Mensagem(
-                            empresa_id=empresa_id, cliente_id=cli_id, conteudo=conteudo,
-                            tipo="saida" if from_me else "entrada", lida=from_me, ack=ack_initial,
-                            timestamp=ts_msg, msg_id=msg_id, instancia_id=inst.id
+                            empresa_id=empresa_id,
+                            cliente_id=cli_id,
+                            conteudo=conteudo,
+                            tipo="saida" if from_me else "entrada",
+                            lida=from_me,
+                            ack=ack_initial,
+                            timestamp=ts_msg,
+                            msg_id=msg_id,
+                            instancia_id=inst.id,
                         )
                         _carimbar_inst(msg_model, inst)
-                        db.add(msg_model); db.flush()
+                        db.add(msg_model)
+                        db.flush()
                         return msg_model.id
 
                     msg_db_id = await _retry_deadlock(db, _ins_msg)
                     novas += 1
-                    _log_ctx("[HIST][saved][1:1]", idx=idx, msg_id=msg_id, saved_id=msg_db_id,
-                             telefone=telefone, ts=_iso_utc(ts_msg), preview=_short(conteudo),
-                             media=("off" if DISABLE_MEDIA_ON_HISTORY else ("on" if media_meta else "none")))
+                    _log_ctx(
+                        "[HIST][saved][1:1]",
+                        idx=idx,
+                        msg_id=msg_id,
+                        saved_id=msg_db_id,
+                        telefone=telefone,
+                        ts=_iso_utc(ts_msg),
+                        preview=_short(conteudo),
+                        media=(
+                            "off"
+                            if DISABLE_MEDIA_ON_HISTORY
+                            else ("on" if media_meta else "none")
+                        ),
+                    )
 
-                    # >>>>> PATCH WS-LIVE (somente mensagens recentes do histórico) <<<<<
+                    # ==========================
+                    # WS-LIVE para mensagens RECENTES do histórico
+                    # ==========================
                     try:
-                        is_recent = abs((_now_utc() - ts_msg).total_seconds()) <= RECENT_SEC
+                        is_recent = (
+                            abs(
+                                (_now_utc() - ts_msg).total_seconds()
+                            )
+                            <= RECENT_SEC
+                        )
                     except Exception:
                         is_recent = False
+
                     if is_recent:
                         try:
-                            # mesmos campos que o on_messages_upsert emite (para o front tratar igual)
-                            cliente = db.query(models.Cliente).filter_by(id=cli_id).first()
+                            cliente = (
+                                db.query(models.Cliente)
+                                .filter_by(id=cli_id)
+                                .first()
+                            )
                             await conexoes_ativas.send_message(
                                 f"emp:{empresa_id}",
                                 {
                                     # contexto / roteamento
-                                    "empresa_id":  empresa_id,
-                                    "cliente_id":  cli_id,
+                                    "empresa_id": empresa_id,
+                                    "cliente_id": cli_id,
                                     "instancia_id": inst.id,
-                                    "instance_name": getattr(inst, "instance_name", None),
-
+                                    "instance_name": getattr(
+                                        inst, "instance_name", None
+                                    ),
                                     # dados para a lista/preview
-                                    "telefone": formatar_telefone_br(telefone),
-                                    "avatar_url": getattr(cliente, "avatar_url", None) if cliente else None,
-                                    "push_name": getattr(cliente, "nome_whatsapp", None) if cliente else None,
-                                    "nome": getattr(cliente, "nome", None) if cliente else formatar_telefone_br(telefone),
-
+                                    "telefone": formatar_telefone_br(
+                                        telefone
+                                    ),
+                                    "avatar_url": getattr(
+                                        cliente, "avatar_url", None
+                                    )
+                                    if cliente
+                                    else None,
+                                    "push_name": getattr(
+                                        cliente, "nome_whatsapp", None
+                                    )
+                                    if cliente
+                                    else None,
+                                    "nome": getattr(
+                                        cliente, "nome", None
+                                    )
+                                    if cliente
+                                    else formatar_telefone_br(telefone),
                                     # conteúdo que o front espera
-                                    "mensagem":  conteudo,
-                                    "tipo":      ("saida" if from_me else "entrada"),
-                                    "origem":    ("atendente" if from_me else "cliente"),
+                                    "mensagem": conteudo,
+                                    "tipo": "saida"
+                                    if from_me
+                                    else "entrada",
+                                    "origem": "atendente"
+                                    if from_me
+                                    else "cliente",
                                     "timestamp": _iso_utc(ts_msg),
-
                                     # chaves de conciliação/RT
                                     "msg_id": (msg_id or str(msg_db_id)),
-                                    "ack":    (ack_initial if from_me else None),
-
+                                    "ack": (
+                                        ack_initial if from_me else None
+                                    ),
                                     # para badge de lag
-                                    "serverTimestamp": int(_now_utc().timestamp() * 1000),
-                                }
+                                    "serverTimestamp": int(
+                                        _now_utc().timestamp() * 1000
+                                    ),
+                                },
                             )
                         except Exception as e:
-                            _log_ctx("[HIST][ws-live] falha ao emitir", idx=idx, msg_id=msg_id, err=str(e))
+                            _log_ctx(
+                                "[HIST][ws-live] falha ao emitir",
+                                idx=idx,
+                                msg_id=msg_id,
+                                err=str(e),
+                            )
 
-                    # mídia (se habilitada)
+                    # ==========================
+                    # MÍDIA (se habilitada)
+                    # ==========================
                     if media_meta:
                         try:
                             raw = None
-                            real_name = media_meta.get("filename") or (f"{msg_id}.bin" if msg_id else "file")
-                            real_ct   = media_meta.get("mimetype")
-                            real_len  = None
+                            real_name = (
+                                media_meta.get("filename")
+                                or (f"{msg_id}.bin" if msg_id else "file")
+                            )
+                            real_ct = media_meta.get("mimetype")
+                            real_len = None
 
+                            # tenta pegar da Evolution (base64)
                             if msg_id:
                                 try:
-                                    conv = True if (media_meta and media_meta.get("tipo") == "video") else None
-                                    evo_raw, evo_name, evo_ct, evo_len = _evo_get_base64_media(inst_id, msg_id, convert_to_mp4=conv)
+                                    conv = (
+                                        True
+                                        if (
+                                            media_meta
+                                            and media_meta.get("tipo")
+                                            == "video"
+                                        )
+                                        else None
+                                    )
+                                    (
+                                        evo_raw,
+                                        evo_name,
+                                        evo_ct,
+                                        evo_len,
+                                    ) = _evo_get_base64_media(
+                                        inst_id,
+                                        msg_id,
+                                        convert_to_mp4=conv,
+                                    )
                                     raw, real_len = evo_raw, evo_len
-                                    if evo_ct:   real_ct = evo_ct
-                                    if evo_name: real_name = evo_name
+                                    if evo_ct:
+                                        real_ct = evo_ct
+                                    if evo_name:
+                                        real_name = evo_name
                                 except Exception as e:
-                                    _log_ctx("[HIST][midia] base64 falhou", idx=idx, msg_id=msg_id, err=str(e))
+                                    _log_ctx(
+                                        "[HIST][midia] base64 falhou",
+                                        idx=idx,
+                                        msg_id=msg_id,
+                                        err=str(e),
+                                    )
 
+                            # fallback: base64 direto do payload
                             if raw is None:
                                 b64 = media_meta.get("base64")
                                 if b64:
                                     raw, mt_from = _b64_to_bytes(b64)
-                                    if mt_from: real_ct = mt_from
+                                    if mt_from:
+                                        real_ct = mt_from
                                     real_len = len(raw) if raw else None
 
+                            # último fallback: download via URL/Evolution
                             if raw is None and msg_id:
                                 try:
-                                    dl_bytes, dl_name, dl_ct, dl_len = _download_media_bytes(inst_id, msg_id, None)
+                                    (
+                                        dl_bytes,
+                                        dl_name,
+                                        dl_ct,
+                                        dl_len,
+                                    ) = _download_media_bytes(
+                                        inst_id, msg_id, None
+                                    )
                                     raw, real_len = dl_bytes, dl_len
-                                    if dl_ct and dl_ct.lower() != "application/octet-stream": real_ct = dl_ct
-                                    if dl_name and not dl_name.lower().endswith(".enc"): real_name = dl_name
+                                    if dl_ct and dl_ct.lower() != (
+                                        "application/octet-stream"
+                                    ):
+                                        real_ct = dl_ct
+                                    if dl_name and not dl_name.lower().endswith(
+                                        ".enc"
+                                    ):
+                                        real_name = dl_name
                                 except Exception as e:
-                                    _log_ctx("[HIST][midia] download falhou", idx=idx, msg_id=msg_id, err=str(e))
+                                    _log_ctx(
+                                        "[HIST][midia] download falhou",
+                                        idx=idx,
+                                        msg_id=msg_id,
+                                        err=str(e),
+                                    )
 
                             if raw:
-                                real_ct_norm = _normalize_mimetype(media_meta["tipo"], real_name, real_ct)
-                                _save_midia_db(
-                                    db, empresa_id=empresa_id, cliente_id=cli_id, mensagem_id=msg_db_id,
-                                    tipo=media_meta["tipo"], filename=real_name or "file",
-                                    mimetype_=real_ct_norm, raw=raw, url_origem=None, content_length=real_len,
-                                    instancia_id=inst.id
+                                real_ct_norm = _normalize_mimetype(
+                                    media_meta["tipo"],
+                                    real_name,
+                                    real_ct,
                                 )
-                                _log_ctx("[HIST][midia] salva", idx=idx, msg_id=msg_id, name=real_name, mimetype=real_ct_norm, size=real_len)
+                                _save_midia_db(
+                                    db,
+                                    empresa_id=empresa_id,
+                                    cliente_id=cli_id,
+                                    mensagem_id=msg_db_id,
+                                    tipo=media_meta["tipo"],
+                                    filename=real_name or "file",
+                                    mimetype_=real_ct_norm,
+                                    raw=raw,
+                                    url_origem=None,
+                                    content_length=real_len,
+                                    instancia_id=inst.id,
+                                )
+                                _log_ctx(
+                                    "[HIST][midia] salva",
+                                    idx=idx,
+                                    msg_id=msg_id,
+                                    name=real_name,
+                                    mimetype=real_ct_norm,
+                                    size=real_len,
+                                )
                         except Exception as e:
-                            _log_ctx("[HIST][midia] erro ao salvar", idx=idx, msg_id=msg_id, err=str(e))
+                            _log_ctx(
+                                "[HIST][midia] erro ao salvar",
+                                idx=idx,
+                                msg_id=msg_id,
+                                err=str(e),
+                            )
 
+                # ==========================
                 # progresso/log periódico
+                # ==========================
                 if novas % PROG_STEP == 0:
                     try:
                         await conexoes_ativas.send_message(
                             f"emp:{empresa_id}",
-                            {"type": "history_sync_progress", "imported": novas, "total": total, "serverTimestamp": _server_ts_ms()}
+                            {
+                                "type": "history_sync_progress",
+                                "imported": novas,
+                                "total": total,
+                                "serverTimestamp": _server_ts_ms(),
+                            },
                         )
                     except Exception:
                         pass
@@ -2777,36 +3118,60 @@ async def on_messages_set(inst_id: str, data):
                         _log_ctx("[HIST] commit", imported=novas)
                     except Exception as e:
                         if _is_deadlock_error(e):
-                            try: db.rollback()
-                            except Exception: pass
+                            try:
+                                db.rollback()
+                            except Exception:
+                                pass
                             await asyncio.sleep(0.1)
-                            _log_ctx("[HIST] commit-deadlock-rollback]", err=str(e))
+                            _log_ctx(
+                                "[HIST] commit-deadlock-rollback]",
+                                err=str(e),
+                            )
                         else:
                             raise
 
                 if novas % max(1, HISTORY_SLEEP_EVERY) == 0:
                     await asyncio.sleep(0)
 
+            # ==========================
             # final
+            # ==========================
             try:
                 db.commit()
                 _log_ctx("[HIST] commit-final", imported=novas)
             except Exception as e:
                 if _is_deadlock_error(e):
-                    try: db.rollback()
-                    except Exception: pass
-                    _log_ctx("[HIST] commit-final-deadlock-rollback]", err=str(e))
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                    _log_ctx(
+                        "[HIST] commit-final-deadlock-rollback]",
+                        err=str(e),
+                    )
                 else:
                     raise
 
+            # recarrega lista de clientes + avisa fim
             try:
-                await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "reload_clientes", "serverTimestamp": _server_ts_ms()})
+                await conexoes_ativas.send_message(
+                    f"emp:{empresa_id}",
+                    {
+                        "type": "reload_clientes",
+                        "serverTimestamp": _server_ts_ms(),
+                    },
+                )
             except Exception:
                 pass
             try:
                 await conexoes_ativas.send_message(
                     f"emp:{empresa_id}",
-                    {"type": "history_sync_done", "total": total, "imported": novas, "serverTimestamp": _server_ts_ms()}
+                    {
+                        "type": "history_sync_done",
+                        "total": total,
+                        "imported": novas,
+                        "serverTimestamp": _server_ts_ms(),
+                    },
                 )
             except Exception:
                 pass
