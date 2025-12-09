@@ -90,6 +90,50 @@ FULL_EVENTS_RABBIT = [
 RABBIT_EXCHANGE = os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange")
 RABBIT_BINDINGS = [b.strip() for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#").split(",") if b.strip()]
 
+# =========================
+# Config / ENV
+# =========================
+
+EVOLUTION_URL = (os.getenv("EVOLUTION_URL") or "").rstrip("/")
+EVOLUTION_KEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_KEY")
+HEADERS = {"apikey": EVOLUTION_KEY, "Content-Type": "application/json"} if EVOLUTION_KEY else {}
+
+# 🔹 NOVO: webhook pro n8n (chatbot)
+N8N_CHATBOT_WEBHOOK_URL = (os.getenv("N8N_CHATBOT_WEBHOOK_URL") or "").strip()
+
+
+def _notify_n8n_chatbot(
+    *,
+    empresa_id: int,
+    instancia_id: int | None,
+    jid: str,
+    numero: str,
+    texto: str,
+    direcao: str,  # "entrada" ou "saida"
+) -> None:
+    """
+    Dispara um POST simples pro n8n com os dados da mensagem.
+    Se der erro, só loga e segue a vida (não quebra nada do fluxo atual).
+    """
+    if not N8N_CHATBOT_WEBHOOK_URL:
+        return
+
+    payload = {
+        "empresa_id": empresa_id,
+        "instancia_id": instancia_id,
+        "jid": jid,
+        "numero": numero,
+        "texto": texto,
+        "direction": direcao,
+    }
+
+    try:
+        requests.post(N8N_CHATBOT_WEBHOOK_URL, json=payload, timeout=5)
+        # LOG(f"[N8N][chatbot] webhook ok numero={numero}")  # opcional
+    except Exception as e:
+        LOG(f"[N8N][chatbot] erro ao enviar webhook: {e}")
+
+
 import random
 try:
     from psycopg2.errors import DeadlockDetected as _PGDeadlock, QueryCanceled as _PGQueryCanceled
@@ -1510,6 +1554,65 @@ async def on_messages_upsert(inst_id: str, data):
     - Liga mensagem a um Atendimento (campo atendimento_id) quando o campo existir
     """
 
+    # ============================================================
+    # NOVO: envia o payload bruto para o n8n, sem alterar o fluxo
+    #       (agora sanitizando bytes -> string)
+    # ============================================================
+    async def _send_to_n8n_raw(inst: str, raw_data):
+        # Usa a que preferir: N8N_MESSAGES_UPSERT_URL ou N8N_WEBHOOK_URL
+        url = (
+            os.getenv("N8N_MESSAGES_UPSERT_URL")
+            or os.getenv("N8N_WEBHOOK_URL")
+            or ""
+        )
+        url = url.strip()
+        if not url:
+            return
+
+        # 🔹 converte qualquer bytes/bytearray em string segura
+        def _sanitize(obj):
+            if isinstance(obj, (bytes, bytearray)):
+                try:
+                    return obj.decode("utf-8", "replace")
+                except Exception:
+                    return repr(obj)
+            if isinstance(obj, dict):
+                return {k: _sanitize(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_sanitize(v) for v in obj]
+            if isinstance(obj, tuple):
+                return tuple(_sanitize(v) for v in obj)
+            return obj
+
+        safe_payload = {
+            "event": "MESSAGES_UPSERT",
+            "instance": inst,
+            "payload": _sanitize(raw_data),
+        }
+
+        def _post():
+            try:
+                # No n8n você trata tudo (filtra empresa, instancia, etc.)
+                requests.post(
+                    url,
+                    json=safe_payload,
+                    timeout=5,
+                )
+            except Exception as e:
+                LOG(f"[N8N] erro ao enviar MESSAGES_UPSERT: {e}")
+
+        # roda o requests em thread pra não travar o loop async
+        await asyncio.to_thread(_post)
+
+    try:
+        # dispara em background, sem bloquear o restante do handler
+        asyncio.create_task(_send_to_n8n_raw(inst_id, data))
+    except Exception as e:
+        LOG(f"[N8N] falha ao agendar envio MESSAGES_UPSERT: {e}")
+
+    # ============================================================
+    # A PARTIR DAQUI É O SEU CÓDIGO ORIGINAL, INALTERADO
+    # ============================================================
     with SessionLocal() as db:
         inst = _get_inst_row(db, inst_id)
         if not inst:
@@ -1760,8 +1863,16 @@ async def on_messages_upsert(inst_id: str, data):
                                 empresa_id=empresa_id,
                                 instancia_id=inst.id,
                                 telefone_raw=telefone,
-                                nome=(formatted if from_me else (push_name or formatted)),
-                                nome_whatsapp=(formatted if from_me else (push_name or formatted)),
+                                nome=(
+                                    formatted
+                                    if from_me
+                                    else (push_name or formatted)
+                                ),
+                                nome_whatsapp=(
+                                    formatted
+                                    if from_me
+                                    else (push_name or formatted)
+                                ),
                                 avatar_url=None,
                             )
                         )
@@ -1889,44 +2000,49 @@ async def on_messages_upsert(inst_id: str, data):
                 # 9) SEMPRE emitir no WS (tempo real), mesmo se exists=True
                 try:
                     cliente = _fetch_cliente(db, cli_id)
+
+                    ws_payload = {
+                        # contexto / roteamento
+                        "empresa_id": empresa_id,
+                        "cliente_id": cli_id,
+                        "instancia_id": inst.id,
+                        "instance_name": getattr(inst, "instance_name", None),
+
+                        # info de atendimento para o front (pode ser None)
+                        "atendimento_id": getattr(atendimento, "id", None),
+
+                        # dados para a lista/preview
+                        "telefone": formatar_telefone_br(telefone),
+                        "avatar_url": getattr(cliente, "avatar_url", None)
+                        if cliente
+                        else None,
+                        "push_name": getattr(cliente, "nome_whatsapp", None)
+                        if cliente
+                        else None,
+                        "nome": getattr(cliente, "nome", None)
+                        if cliente
+                        else formatted,
+
+                        # conteúdo
+                        "mensagem": conteudo,
+                        "tipo": direcao,
+                        "origem": ("atendente" if from_me else "cliente"),
+                        "timestamp": _iso_utc(ts_msg),
+
+                        # chaves de conciliação
+                        "msg_id": msg_id or (str(msg_db_id) if msg_db_id else None),
+                        "ack": (ack_initial if from_me else None),
+
+                        # relógio do servidor
+                        "serverTimestamp": _server_ts_ms(),
+                    }
+
                     await conexoes_ativas.send_message(
                         f"emp:{empresa_id}",
-                        {
-                            # contexto / roteamento
-                            "empresa_id": empresa_id,
-                            "cliente_id": cli_id,
-                            "instancia_id": inst.id,
-                            "instance_name": getattr(inst, "instance_name", None),
-
-                            # info de atendimento para o front (pode ser None)
-                            "atendimento_id": getattr(atendimento, "id", None),
-
-                            # dados para a lista/preview
-                            "telefone": formatar_telefone_br(telefone),
-                            "avatar_url": getattr(cliente, "avatar_url", None)
-                            if cliente
-                            else None,
-                            "push_name": getattr(cliente, "nome_whatsapp", None)
-                            if cliente
-                            else None,
-                            "nome": getattr(cliente, "nome", None)
-                            if cliente
-                            else formatted,
-
-                            # conteúdo
-                            "mensagem": conteudo,
-                            "tipo": direcao,
-                            "origem": ("atendente" if from_me else "cliente"),
-                            "timestamp": _iso_utc(ts_msg),
-
-                            # chaves de conciliação
-                            "msg_id": msg_id or (str(msg_db_id) if msg_db_id else None),
-                            "ack": (ack_initial if from_me else None),
-
-                            # relógio do servidor
-                            "serverTimestamp": _server_ts_ms(),
-                        },
+                        ws_payload,
                     )
+
+                    # (opcional) reaproveitar ws_payload pro n8n no futuro
                 except Exception as e:
                     LOG(f"[UPsert][ws] falha ao emitir: {e}")
 

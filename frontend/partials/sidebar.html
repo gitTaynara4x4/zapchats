@@ -80,51 +80,46 @@
   /* ===== Logo — alinhada + cross-fade sem flicker + ANIMAÇÃO SUAVE ===== */
   .app-sidebar .logo{
     height:56px; margin:0 0 1rem;
-    display:grid; place-items:center;           /* colapsado: igual aos ícones (centro) */
+    display:grid; place-items:center;
     position:relative; z-index:1;
   }
   .app-sidebar:hover .logo{
-    justify-items:start;                        /* expandido: alinha à esquerda */
-    padding:0 .7rem 0 .6rem;                    /* mesmo padding dos links */
+    justify-items:start;
+    padding:0 .7rem 0 .6rem;
   }
 
-  /* empilha favicon e logo cheia na mesma célula p/ transição limpa */
   .logo .logo-fav,
   .logo .logo-full{
     grid-area:1/1;
     max-height:50px;
     will-change:opacity, transform;
     backface-visibility:hidden;
-    transform:translateZ(0);                    /* evita “piscada” em GPUs */
+    transform:translateZ(0);
     contain:paint;
   }
 
-  /* estado colapsado (só favicon) */
   .logo .logo-fav{ opacity:1; transition:opacity .16s ease-in; }
   .logo .logo-full{ opacity:0; pointer-events:none; }
 
-  /* ANIMAÇÃO: quando expandir, a logo cheia aparece devagar */
   @keyframes logoFadeIn {
     from { opacity:0; transform:translateY(2px) scale(.985); filter:blur(.6px); }
     to   { opacity:1; transform:none; filter:none; }
   }
 
-  /* estado expandido (hover no aside) */
   .app-sidebar:hover .logo .logo-fav{
     opacity:0; pointer-events:none; transition:opacity .12s ease-out;
   }
   .app-sidebar:hover .logo .logo-full{
     opacity:1; pointer-events:auto;
     animation:logoFadeIn .42s cubic-bezier(.2,.7,.2,1) both;
-    animation-delay:.06s;                       /* começa logo que o hover abrir */
+    animation-delay:.06s;
   }
-  /* tema da logo cheia */
+
   html.dark .app-sidebar:hover .logo .logo-full.logo-dark{ opacity:1; }
   html.dark .app-sidebar:hover .logo .logo-full.logo-light{ opacity:0; }
   html:not(.dark) .app-sidebar:hover .logo .logo-full.logo-light{ opacity:1; }
   html:not(.dark) .app-sidebar:hover .logo .logo-full.logo-dark{ opacity:0; }
 
-  /* respeita redução de movimento do SO */
   @media (prefers-reduced-motion: reduce){
     .logo .logo-fav,
     .logo .logo-full{
@@ -153,7 +148,6 @@
     padding:.5rem .7rem .5rem .6rem;
   }
 
-  /* Ícone — tamanho constante */
   .nav-icon{
     width:26px; height:26px;
     flex:0 0 26px;
@@ -187,7 +181,6 @@
     color:var(--icon-active-light);
   }
 
-  /* Colapsado: centralização perfeita */
   .app-sidebar:not(:hover) nav{ align-items:center; }
   .app-sidebar:not(:hover) nav a{
     width:100%; gap:0; justify-content:center;
@@ -488,6 +481,16 @@
         </svg>
       </span>
       <span class="label">Chatbot</span>
+    </a>
+
+    <!-- NOVA SEÇÃO: DISPARADOR -->
+    <a href="/disparos" title="Disparador de mensagens">
+      <span class="nav-icon" aria-hidden="true">
+        <svg class="nav-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor">
+          <path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z"/>
+        </svg>
+      </span>
+      <span class="label">Disparador</span>
     </a>
 
     <a href="/conectar">

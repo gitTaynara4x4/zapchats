@@ -211,18 +211,19 @@ html, body{
 
 /* ========================= COLUNA DE CHATS (ASIDE) ======================= */
 
-aside{
+.wpp-root > aside{
   background:var(--bg);
-  height:100vh; display:flex; flex-direction:column;
-  min-width:280px; max-width:4200px;
+  height:100vh;
+  display:flex;
+  flex-direction:column;
+  min-width:280px;
+  max-width:4200px;
   width:var(--aside-w);
-
-  /* >>> LINHA ENTRE LISTA E CHAT (sempre visível) */
   border-right: var(--aside-divider-w) solid var(--leftbar-border) !important;
-
   z-index:2;
   box-shadow:none !important;
 }
+
 
 /* header da coluna */
 .wpp-header-externo{

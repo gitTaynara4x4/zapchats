@@ -757,6 +757,120 @@ class ColaboradorPermissao(Base):
     criado_em      = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
+class Disparo(Base):
+    __tablename__ = "disparos"
+
+    id = Column(Integer, primary_key=True)
+
+    empresa_id = Column(
+        Integer,
+        ForeignKey("empresas.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    instancia_id = Column(
+        Integer,
+        ForeignKey("empresas_instancias.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    colaborador_id = Column(
+        Integer,
+        ForeignKey("colaboradores.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # "text" | "image" | "audio" (no futuro dá pra expandir)
+    tipo_conteudo = Column(String(16), nullable=False, server_default="text")
+
+    # texto da mensagem (opcional se for só mídia)
+    mensagem = Column(Text, nullable=True)
+
+    # mídia opcional (imagem/áudio) já salva em midias
+    midia_id = Column(
+        Integer,
+        ForeignKey("midias.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # delay entre um envio e outro, em segundos
+    delay_segundos = Column(Integer, nullable=False, server_default="20")
+
+    # contadores
+    total_destinatarios = Column(Integer, nullable=False, server_default="0")
+    enviados_sucesso    = Column(Integer, nullable=False, server_default="0")
+    enviados_erro       = Column(Integer, nullable=False, server_default="0")
+
+    # pendente | processando | concluido | cancelado | erro
+    status = Column(String(16), nullable=False, server_default="pendente")
+
+    criado_em     = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    iniciado_em   = Column(TIMESTAMP(timezone=True), nullable=True)
+    finalizado_em = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    # opcional, se quiser guardar mais coisa (config de fila, filtros, etc.)
+    meta = Column(JSONB, nullable=True)
+
+    empresa     = relationship("Empresa", backref=backref("disparos", cascade="all, delete-orphan"))
+    instancia   = relationship("EmpresaInstancia", backref=backref("disparos", cascade="all, delete-orphan"))
+    colaborador = relationship("Colaborador", backref=backref("disparos", cascade="all, delete-orphan"))
+    midia       = relationship("Midia")
+
+    destinatarios = relationship(
+        "DisparoDestinatario",
+        back_populates="disparo",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<Disparo id={self.id} emp={self.empresa_id} inst={self.instancia_id} status={self.status}>"
+
+
+class DisparoDestinatario(Base):
+    __tablename__ = "disparos_destinatarios"
+    __table_args__ = (
+        UniqueConstraint("disparo_id", "numero_normalizado", name="uq_disparo_destinatario"),
+        Index("ix_disparo_dest_did", "disparo_id"),
+        Index("ix_disparo_dest_num", "numero_normalizado"),
+    )
+
+    id = Column(Integer, primary_key=True)
+
+    disparo_id = Column(
+        Integer,
+        ForeignKey("disparos.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # como o cliente digitou/colou
+    numero_raw = Column(String(64), nullable=False)
+
+    # só dígitos ou no formato que vc padronizar (ex: 5511999999999)
+    numero_normalizado = Column(String(32), nullable=False)
+
+    nome = Column(String, nullable=True)
+
+    # pendente | enviando | enviado | erro | ignorado
+    status = Column(String(16), nullable=False, server_default="pendente")
+
+    erro_msg = Column(Text, nullable=True)
+
+    tentativas          = Column(Integer, nullable=False, server_default="0")
+    ultima_tentativa_em = Column(TIMESTAMP(timezone=True), nullable=True)
+    enviado_em          = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    criado_em = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    disparo = relationship("Disparo", back_populates="destinatarios")
+
+    def __repr__(self) -> str:
+        return f"<DisparoDestinatario id={self.id} disp={self.disparo_id} numero={self.numero_normalizado} status={self.status}>"
+
+
 # =========================
 # ChatbotConfig (por instancia_id)
 # =========================
@@ -764,8 +878,27 @@ class ChatbotConfig(Base):
     __tablename__ = "chatbot_configs"
 
     id = Column(Integer, primary_key=True)
-    empresa_id   = Column(Integer, ForeignKey("empresas.id", ondelete="CASCADE"), nullable=False, index=True)
-    instancia_id = Column(Integer, ForeignKey("empresas_instancias.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    empresa_id   = Column(
+        Integer,
+        ForeignKey("empresas.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    instancia_id = Column(
+        Integer,
+        ForeignKey("empresas_instancias.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # 🔹 Novo: nome/slug da instância (espelha o instance_name do Evolution)
+    instancia_nome = Column(
+        Text,      # bate com o TEXT que você criou no banco
+        nullable=True,
+        index=True,
+    )
 
     ativo = Column(Boolean, nullable=False, server_default="true")
 
@@ -780,15 +913,33 @@ class ChatbotConfig(Base):
     off_start       = Column(DateTime, nullable=True)
     off_end         = Column(DateTime, nullable=True)
 
+    # JSONzão com configs (mensagens, horários, etc.)
     config = Column(JSONB, default=dict)
 
-    instancia = relationship("EmpresaInstancia", back_populates="chatbot_configs")
-    empresa   = relationship("Empresa", backref=backref("chatbot_configs", cascade="all, delete-orphan"))
-
-    __table_args__ = (
-        UniqueConstraint("empresa_id", "instancia_id", name="uq_chatbot_conf_emp_inst"),
+    instancia = relationship(
+        "EmpresaInstancia",
+        back_populates="chatbot_configs",
     )
 
+    empresa = relationship(
+        "Empresa",
+        backref=backref("chatbot_configs", cascade="all, delete-orphan"),
+    )
+
+    __table_args__ = (
+        # ainda garante 1 config por (empresa, instancia_id)
+        UniqueConstraint(
+            "empresa_id",
+            "instancia_id",
+            name="uq_chatbot_conf_emp_inst",
+        ),
+        # opcional, mas recomendado: 1 config por (empresa, instancia_nome)
+        UniqueConstraint(
+            "empresa_id",
+            "instancia_nome",
+            name="uq_chatbot_conf_emp_inst_nome",
+        ),
+    )
 
 # =======================================================
 # Chat Interno — MODELO (1 tabela + estado de leitura)

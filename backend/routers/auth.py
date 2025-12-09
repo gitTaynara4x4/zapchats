@@ -534,7 +534,7 @@ def register(
         for nome_setor in ["Atendimento", "Comercial", "Financeiro", "Suporte Técnico"]:
             db.add(models.Setor(nome=nome_setor, empresa_id=empresa.id))
 
-        # admin
+        # admin (USUÁRIO) – SEM colaborador-espelho
         usuario = models.Usuario(
             nome=(dados.nome_adm or "Admin").strip(),
             email=dados.email_admin,
@@ -558,18 +558,7 @@ def register(
             except Exception as e:
                 print("[AVATAR WARN]", e)
 
-        # colaborador-espelho admin + permissões
-        colab_admin = models.Colaborador(
-            empresa_id=empresa.id,
-            usuario_id=usuario.id,
-            nome=usuario.nome,
-            email=usuario.email,
-            senha=hash_pwd(dados.senha_admin),  # helper central
-            cargo="admin",
-        )
-        db.add(colab_admin); db.flush()
-
-        # --- Departamento padrão + vínculo do admin ---
+        # --- Departamento padrão (SEM vincular ninguém ainda) ---
         try:
             dep_padrao_nome = "Geral"
             dep_padrao = db.query(models.Departamento).filter_by(
@@ -587,62 +576,15 @@ def register(
                 if hasattr(models.Departamento, "codigo"):
                     setattr(dep_padrao, "codigo", "GERAL")
                 db.add(dep_padrao); db.flush()
-
-            membro = models.DepartamentoMembro(
-                empresa_id=empresa.id,
-                departamento_id=dep_padrao.id,
-                colaborador_id=colab_admin.id,
-                role="head",
-                is_primary=True,
-            )
-            db.add(membro)
-
-            if hasattr(colab_admin, "departamento_id"):
-                colab_admin.departamento_id = dep_padrao.id
-
-            try:
-                setor_atd = db.query(models.Setor).filter_by(
-                    empresa_id=empresa.id, nome="Atendimento"
-                ).first()
-                if setor_atd and hasattr(colab_admin, "setor_id"):
-                    colab_admin.setor_id = setor_atd.id
-            except Exception:
-                pass
-
         except Exception as e:
             print("[DEPARTAMENTO WARN]", e)
-        # --- FIM ---
 
-        # permissões
-        perm_ids: list[str] = []
+        # Sincroniza catálogo de permissões (apenas tabela 'permissoes')
         try:
-            from backend.routers.permissoes import _sync_catalog_to_db, _all_perm_ids
+            from backend.routers.permissoes import _sync_catalog_to_db
             _sync_catalog_to_db(db)
-            perm_ids = _all_perm_ids()
-        except Exception:
-            rows = db.execute(text("SELECT id FROM permissoes")).fetchall()
-            perm_ids = [r[0] for r in rows]
-            if not perm_ids:
-                base = [
-                    "dashboard.ver","clientes.ver","departamentos.gerenciar","usuarios.gerenciar",
-                    "colaboradores.gerenciar","colaboradores.ver",
-                    "integracoes.whatsapp","config.editar",
-                    "chatinterno.ver","chatbot.configurar","atendimento.ver","atendimento.enviar",
-                ]
-                for pid in base:
-                    db.execute(text("""
-                        INSERT INTO permissoes (id, nome)
-                        VALUES (:id, :nome)
-                        ON CONFLICT (id) DO NOTHING
-                    """), {"id": pid, "nome": pid})
-                perm_ids = base
-
-        for pid in perm_ids:
-            db.execute(text("""
-                INSERT INTO colaboradores_permissoes (colaborador_id, permissao_id)
-                VALUES (:cid, :pid)
-                ON CONFLICT (colaborador_id, permissao_id) DO NOTHING
-            """), {"cid": colab_admin.id, "pid": pid})
+        except Exception as e:
+            print("[PERMISSOES WARN]", e)
 
         commit_or_block(db)
 
@@ -681,6 +623,7 @@ def register(
         except Exception:
             pass
         raise HTTPException(status_code=500, detail="Erro interno: " + str(e))
+
 
 @router.post("/forgot-password")
 def forgot_password(

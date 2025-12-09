@@ -1,0 +1,163 @@
+/* /frontend/css/disparos.css */
+/* Layout específico da tela Disparos. Reaproveita tokens globais (.main, .box, .btn etc). */
+
+.section-title .top-meta{
+  font-size:.9rem;
+  color:var(--muted, #9ca3af);
+}
+.section-title .top-meta strong{
+  font-weight:600;
+  color:var(--fg, #e5e7eb);
+}
+
+.box-config {
+  margin-top: 1rem;
+}
+
+.box-header {
+  margin-bottom: 1rem;
+}
+
+.box-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.box-header p {
+  margin: .25rem 0 0;
+  font-size: .9rem;
+  color: var(--muted, #9ca3af);
+}
+
+/* Grid principal: formulário + resumo */
+.config-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.1fr);
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+@media (max-width: 960px) {
+  .config-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Campos do formulário */
+.config-main .field {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  margin-bottom: .85rem;
+}
+
+.config-main label {
+  font-size: .9rem;
+  font-weight: 500;
+}
+
+.config-main .hint {
+  font-size: .8rem;
+  color: var(--muted, #9ca3af);
+}
+
+textarea.input {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.input--multiline {
+  line-height: 1.4;
+}
+
+.numbers-area {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: .9rem;
+}
+
+/* Checkbox simples */
+.field-inline .check {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  font-size: .9rem;
+}
+
+/* Coluna de resumo à direita */
+.config-side {
+  border-left: 1px solid var(--border, #27272a);
+  padding-left: 1.25rem;
+}
+
+@media (max-width: 960px) {
+  .config-side {
+    border-left: none;
+    border-top: 1px solid var(--border, #27272a);
+    padding-left: 0;
+    padding-top: 1rem;
+  }
+}
+
+.config-side h3 {
+  margin: 0 0 .5rem 0;
+  font-size: 1rem;
+}
+
+.summary {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 .75rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  font-size: .9rem;
+}
+
+.summary li {
+  display: flex;
+  justify-content: space-between;
+  gap: .75rem;
+}
+
+.summary li span {
+  color: var(--muted, #9ca3af);
+}
+
+.summary li strong {
+  font-weight: 600;
+}
+
+.summary-note {
+  font-size: .8rem;
+  color: var(--muted, #9ca3af);
+  margin: 0 0 .75rem 0;
+}
+
+/* Botão principal maiorzinho */
+.btn-lg {
+  padding: .55rem 1.1rem;
+}
+
+/* Status de feedback do disparo */
+.status-line {
+  margin-top: .5rem;
+  font-size: .8rem;
+  color: var(--muted, #9ca3af);
+}
+
+.status-line[data-kind="success"] {
+  color: #22c55e;
+}
+
+.status-line[data-kind="error"] {
+  color: #f97373;
+}
+
+/* Histórico */
+.box-historico {
+  margin-top: 1rem;
+}
+
+#emptyDisparos {
+  margin-top: .75rem;
+}

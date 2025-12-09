@@ -195,7 +195,7 @@
       <span>Interno</span>
     </a>
 
-    <!-- CLIENTES: usando exatamente o path que você enviou -->
+    <!-- CLIENTES -->
     <a href="/clientes">
       <span class="nav-icon" aria-hidden="true">
         <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -230,6 +230,16 @@
         </svg>
       </span>
       <span>Chatbot</span>
+    </a>
+
+    <!-- NOVO: Disparador (igual ao desktop) -->
+    <a href="/disparos">
+      <span class="nav-icon" aria-hidden="true">
+        <svg class="nav-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor">
+          <path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z"/>
+        </svg>
+      </span>
+      <span>Disparos</span>
     </a>
 
     <a href="/conectar">
@@ -578,18 +588,37 @@
     openProfileModal();
   });
 
-  /* Logout */
+  /* Logout (igual ao desktop) */
   (function logout(){
     const out=document.getElementById('dockLogout'); if(!out) return;
-    out.addEventListener('click', function(ev){
+    out.addEventListener('click', async function(ev){
       ev.preventDefault();
+
+      // 1) avisa backend pra apagar cookies HttpOnly
       try{
-        ['token','access_token','refresh_token','email','role','empresa_id','user_id',
-         'nome','departamento','usuario','user','me','auth_user','profile','auth','usuario_avatar','avatar_url']
-        .forEach(k=>localStorage.removeItem(k));
-        sessionStorage.clear();
+        await fetch('/api/auth/logout', { method:'POST', credentials:'include' });
       }catch{}
-      window.location.href = '/login';
+
+      // 2) limpa cookies acessíveis via JS
+      (function nukeCookies(){
+        const past='Thu, 01 Jan 1970 00:00:00 GMT';
+        const names=(document.cookie||'').split(/;\s*/).filter(Boolean).map(c=>c.split('=')[0]);
+        for(const name of names){
+          document.cookie = `${name}=; Expires=${past}; Path=/`;
+        }
+      })();
+
+      // 3) limpa storages/caches
+      try{ localStorage.clear(); sessionStorage.clear(); }catch{}
+      if ('caches' in window) {
+        try{
+          const ks = await caches.keys();
+          await Promise.all(ks.map(k => caches.delete(k)));
+        }catch{}
+      }
+
+      // 4) redireciona pra raiz (login)
+      window.location.replace('/');
     });
   })();
 

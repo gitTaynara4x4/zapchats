@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from backend.routers.email import router as email_router
 from dotenv import load_dotenv
+from backend.routers.disparos import router as disparos_router
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, APIRouter, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, HTMLResponse, JSONResponse
@@ -47,6 +48,7 @@ from backend.routers.atendimento_send import router as atendimento_send_router
 from backend.routers import departamentos as departamentos_router
 from backend.routers import chatbot_config as chatbot_config_router
 from backend.routers import admin_planos
+from backend.routers import chatbot_n8n
 from backend.integrations.rabbit_consumer import start_rabbit_consumer
 from backend.integrations.evo_ws_listener import start_evo_ws_listener
 
@@ -227,9 +229,13 @@ REQUIRED_PERMS = {
     "/midias":               "arquivos.ver",
     "/email":                "email.ver",
 
+    # 🔔 Disparos em massa
+    "/disparos":             "disparos.ver",
+
     # 👇 AQUI: Conectar WhatsApp exige integracoes.whatsapp
     "/conectar":             "integracoes.whatsapp",
 }
+
 
 
 def _norm_path_for_perm(path: str) -> str:
@@ -801,7 +807,9 @@ app.include_router(atendimento_conversas.router, prefix="/api")
 # Atendimento principal
 app.include_router(atendimento.router, prefix="/api/atendimento", tags=["Atendimento"])
 app.include_router(email_router)
+app.include_router(chatbot_n8n.router)
 # ✅ Router REST específico do chat (conversas/mensagens)
+app.include_router(disparos_router)
 app.include_router(atendimento_chat_router.router, prefix="/api/atendimento", tags=["Atendimento – Chat"])
 app.include_router(ws_router)
 app.include_router(cliente_onboarding.router,   prefix="/api/onboarding", tags=["Onboarding"])

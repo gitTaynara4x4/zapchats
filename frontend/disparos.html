@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="has-sidebar prepaint">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Disparos – ZapChats</title>
+
+  <!-- Shell global (injeta head-base + loader + tema + sidebar) -->
+  <script src="/frontend/js/app-base.js" defer></script>
+  <script src="/frontend/js/auth.js" defer></script>
+  <!-- Guard (permite Page.guarded + redireciona 401/403) -->
+  <script src="/frontend/js/page-guard.js" defer></script>
+
+  <!-- Anti-flash -->
+  <style>
+    html.prepaint body{visibility:hidden}
+    html.prepaint[data-head-ready][data-loader-ready] body{visibility:visible}
+  </style>
+
+  <!-- Ícones -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+
+  <!-- CSS da página -->
+  <link rel="stylesheet" href="/frontend/css/disparos.css"/>
+</head>
+<body data-page="disparos">
+  <!-- Sidebar (carregada via app-base.js) -->
+  <aside id="sidebar"
+         data-src="/frontend/partials/sidebar.html"
+         data-src-mobile="/frontend/partials/sidebar-mobile.html"></aside>
+
+  <main class="main">
+    <div class="section-title">
+      <h1>
+        <i class="fa-solid fa-bullhorn title-ico"></i>
+        <span class="title-text">Disparos</span>
+
+        <!-- Dropdown de instâncias -->
+        <button id="instMenuBtn" type="button" class="inst-trigger"
+                aria-haspopup="listbox" aria-expanded="false" aria-controls="inst-menu">
+          <span id="instMenuLabel">Todas as instâncias</span>
+          <span class="chev">▾</span>
+        </button>
+      </h1>
+
+      <div class="top-meta">
+        <strong id="topMetaDisparos">0</strong> disparos hoje
+      </div>
+
+      <div id="inst-menu" class="inst-menu" role="listbox" aria-hidden="true" aria-label="Selecionar instância">
+        <div class="head">WhatsApps</div>
+        <ul id="instMenuList"><!-- itens via JS --></ul>
+      </div>
+    </div>
+
+    <!-- Card principal: configurar disparo -->
+    <section class="box box-config" aria-label="Configurar disparo">
+      <header class="box-header">
+        <h2>Configurar disparo</h2>
+        <p>Defina a mensagem e os números que vão receber o disparo.</p>
+      </header>
+
+      <div class="config-grid">
+        <!-- Coluna esquerda: formulário -->
+        <div class="config-main">
+          <div class="field">
+            <label for="msgDisparo">Mensagem</label>
+            <textarea id="msgDisparo"
+                      class="input input--multiline"
+                      rows="4"
+                      placeholder="Digite a mensagem que será enviada por WhatsApp…"></textarea>
+            <small class="hint">
+              Ex.: “Olá {nome}, tudo bem? Vimos que seu contrato vence em {data_vencimento}…”
+            </small>
+          </div>
+
+          <div class="field">
+            <label for="numsDisparos">Números de destino</label>
+            <textarea id="numsDisparos"
+                      class="input input--multiline numbers-area"
+                      rows="4"
+                      placeholder="Um número por linha ou separados por vírgula/; …"></textarea>
+            <small class="hint">
+              Aceita DDD com ou sem +55. Ex.: <code>44988887777</code> ou <code>+5544988887777</code>.
+            </small>
+          </div>
+
+          <div class="field field-inline">
+            <label class="check">
+              <input type="checkbox" id="optDedup" checked>
+              <span>Remover números duplicados automaticamente</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Coluna direita: resumo + botão -->
+        <aside class="config-side">
+          <h3>Resumo</h3>
+          <ul class="summary">
+            <li><span>Total:</span><strong id="resTotal">0</strong></li>
+            <li><span>Válidos (tamanho OK):</span><strong id="resValidos">0</strong></li>
+            <li><span>Suspeitos/curtos:</span><strong id="resInvalidos">0</strong></li>
+          </ul>
+          <p class="summary-note">
+            O disparo será feito usando a instância selecionada no topo.
+          </p>
+
+          <button id="btnDisparar" class="btn primary btn-lg" type="button">
+            <i class="fa fa-paper-plane"></i>
+            <span>Disparar agora</span>
+          </button>
+
+          <div id="statusDisparos" class="status-line" aria-live="polite"></div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- Histórico -->
+    <section class="box box-historico" aria-label="Histórico de disparos">
+      <header class="box-header">
+        <h2>Histórico de disparos</h2>
+      </header>
+
+      <div class="table-wrap">
+        <table id="tblDisparos" aria-label="Histórico de disparos">
+          <thead>
+            <tr>
+              <th>Mensagem</th>
+              <th>Qtd. números</th>
+              <th>Instância</th>
+              <th>Status</th>
+              <th>Criado em</th>
+            </tr>
+          </thead>
+          <tbody id="tbodyDisparos"><!-- preenchido via JS --></tbody>
+        </table>
+      </div>
+
+      <div id="emptyDisparos" class="empty">
+        <p>Nenhum disparo encontrado.</p>
+        <small>Os disparos criados aparecerão aqui com o status de envio.</small>
+      </div>
+    </section>
+  </main>
+
+  <!-- Toast (se você já usa em outras telas) -->
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <!-- JS da página -->
+  <script src="/frontend/js/pages/disparos.js" defer></script>
+</body>
+</html>

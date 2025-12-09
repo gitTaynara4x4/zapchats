@@ -1,0 +1,422 @@
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timezone
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Body, Query
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+
+from backend.database import get_db, SessionLocal
+from backend.routers.auth import get_current_identity
+from backend import models
+
+router = APIRouter(prefix="/api/disparos", tags=["Disparos"])
+
+
+# =====================================================
+# Helpers de permissão / identidade
+# =====================================================
+
+def _get_empresa_e_colab(identity: dict | None) -> tuple[int, Optional[int]]:
+    if identity is None:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+
+    empresa_id = identity.get("empresa_id")
+    if not empresa_id:
+        raise HTTPException(status_code=400, detail="Empresa não encontrada no token")
+
+    kind = (identity.get("kind") or "").lower()
+    colab_id: Optional[int] = None
+
+    if kind == "colaborador":
+        for key in ("id_colab", "colaborador_id", "id_colaborador"):
+            raw = identity.get(key)
+            if raw is None:
+                continue
+            try:
+                colab_id = int(raw)
+                break
+            except Exception:
+                colab_id = None
+
+    return int(empresa_id), colab_id
+
+
+def _ensure_perm(identity: dict, db: Session, perm_id: str) -> None:
+    """
+    Verifica se o colaborador logado possui a permissão `perm_id`.
+    Se o usuário logado NÃO for colaborador (ex.: usuário/admin do painel),
+    por enquanto a gente libera.
+    """
+    empresa_id = identity.get("empresa_id")
+    if not empresa_id:
+        raise HTTPException(status_code=400, detail="Empresa não encontrada no token")
+
+    kind = (identity.get("kind") or "").lower()
+    if kind != "colaborador":
+        # Usuário master/admin da empresa – geralmente você controla pelo front.
+        # Aqui deixamos passar.
+        return
+
+    _, colab_id = _get_empresa_e_colab(identity)
+    if not colab_id:
+        raise HTTPException(status_code=403, detail="Sem colaborador vinculado.")
+
+    row = db.execute(
+        text(
+            """
+            SELECT 1
+            FROM colaboradores_permissoes
+            WHERE colaborador_id = :cid
+              AND permissao_id   = :pid
+            LIMIT 1
+            """
+        ),
+        {"cid": colab_id, "pid": perm_id},
+    ).first()
+
+    if not row:
+        raise HTTPException(status_code=403, detail=f"Você não tem permissão: {perm_id}")
+
+
+# =====================================================
+# Schemas
+# =====================================================
+
+class DisparoCreate(BaseModel):
+    instancia_id: int = Field(..., description="ID da instância (empresas_instancias.id)")
+    delay_segundos: int = Field(
+        20,
+        ge=5,
+        le=3600,
+        description="Intervalo entre envios em segundos (mín. 5s)",
+    )
+    # por enquanto só vamos tratar text; image/audio você pluga depois
+    tipo_conteudo: str = Field(
+        "text",
+        description="text | image | audio (no momento só text está implementado)",
+    )
+    mensagem: Optional[str] = Field(
+        None,
+        description="Texto da mensagem (pode ser vazio se for só mídia)",
+    )
+    midia_id: Optional[int] = Field(
+        None,
+        description="ID da mídia (tabela midias) se for imagem/áudio",
+    )
+    numeros: List[str] = Field(
+        default_factory=list,
+        description="Lista de números, um por destinatário",
+    )
+
+
+class DisparoOut(BaseModel):
+    id: int
+    mensagem: Optional[str]
+    qtd_numeros: int
+    instancia_id: Optional[int]
+    instancia_nome: Optional[str]
+    status: str
+    criado_em: datetime
+    delay_segundos: int
+
+    class Config:
+        from_attributes = True
+
+
+# =====================================================
+# Utilitários de normalização
+# =====================================================
+
+def _normalizar_numeros(raw_numeros: List[str]) -> list[tuple[str, str]]:
+    """
+    Recebe lista de strings digitadas pelo usuário e retorna
+    [(numero_raw, numero_normalizado)] já sem duplicados.
+    Normalização = só dígitos.
+    """
+    vistos: set[str] = set()
+    out: list[tuple[str, str]] = []
+
+    for raw in raw_numeros:
+        if not raw:
+            continue
+        s = raw.strip()
+        if not s:
+            continue
+        digits = "".join(ch for ch in s if ch.isdigit())
+        if not digits:
+            continue
+        if digits in vistos:
+            continue
+        vistos.add(digits)
+        out.append((s, digits))
+
+    return out
+
+
+# =====================================================
+# Worker de processamento de disparo
+# =====================================================
+
+async def _enviar_destinatario(
+    db: Session,
+    disparo: models.Disparo,
+    dest: models.DisparoDestinatario,
+) -> None:
+    """
+    AQUI você pluga o envio REAL via Evolution.
+
+    No momento, esta função só SIMULA um envio bem-sucedido.
+
+    Dica: se você já tem helpers para enviar mensagem no atendimento,
+    pode reaproveitar algo tipo:
+
+        send_text_message(
+            instancia=disparo.instancia,
+            numero=dest.numero_normalizado,
+            texto=disparo.mensagem,
+        )
+
+    ou então jogar numa fila RabbitMQ usando a mesma exchange/queue do atendimento.
+    """
+    # TODO: substituir por chamada real à Evolution / RabbitMQ
+    await asyncio.sleep(0.01)
+    # Se der erro real, levanta uma Exception aqui pra cair no "erro" do destinatário.
+
+
+async def _processar_disparo(disparo_id: int) -> None:
+    """
+    Processa um disparo: envia 1 por 1 respeitando o delay.
+    Roda em background (asyncio.create_task).
+    """
+    db: Session = SessionLocal()
+    try:
+        disparo = db.query(models.Disparo).filter(models.Disparo.id == disparo_id).first()
+        if not disparo:
+            return
+
+        if disparo.status in ("cancelado", "concluido"):
+            return
+
+        disparo.status = "processando"
+        disparo.iniciado_em = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(disparo)
+
+        delay = max(5, int(disparo.delay_segundos or 0))
+
+        # Loop até não sobrar mais destinatário pendente
+        while True:
+            db.refresh(disparo)
+            if disparo.status == "cancelado":
+                break
+
+            dest = (
+                db.query(models.DisparoDestinatario)
+                .filter(
+                    models.DisparoDestinatario.disparo_id == disparo.id,
+                    models.DisparoDestinatario.status == "pendente",
+                )
+                .order_by(models.DisparoDestinatario.id.asc())
+                .first()
+            )
+
+            if not dest:
+                # acabou
+                disparo.status = "concluido"
+                disparo.finalizado_em = datetime.now(timezone.utc)
+                db.commit()
+                break
+
+            # Marca como enviando
+            dest.status = "enviando"
+            dest.tentativas = (dest.tentativas or 0) + 1
+            dest.ultima_tentativa_em = datetime.now(timezone.utc)
+            db.commit()
+
+            try:
+                await _enviar_destinatario(db, disparo, dest)
+            except Exception as e:  # noqa: BLE001
+                dest.status = "erro"
+                dest.erro_msg = str(e)[:4000]
+                disparo.enviados_erro = (disparo.enviados_erro or 0) + 1
+                db.commit()
+            else:
+                dest.status = "enviado"
+                dest.enviado_em = datetime.now(timezone.utc)
+                disparo.enviados_sucesso = (disparo.enviados_sucesso or 0) + 1
+                db.commit()
+
+            # Delay entre um envio e outro
+            await asyncio.sleep(delay)
+
+    finally:
+        db.close()
+
+
+# =====================================================
+# Endpoints
+# =====================================================
+
+@router.post(
+    "/simples",
+    response_model=DisparoOut,
+    summary="Cria um disparo simples (uma mensagem para vários números)",
+)
+async def criar_disparo_simples(
+    payload: DisparoCreate = Body(...),
+    db: Session = Depends(get_db),
+    identity: dict = Depends(get_current_identity),
+):
+    _ensure_perm(identity, db, "disparos.enviar")
+
+    empresa_id, colab_id = _get_empresa_e_colab(identity)
+
+    # Valida se a instância pertence à empresa
+    instancia = (
+        db.query(models.EmpresaInstancia)
+        .filter(
+            models.EmpresaInstancia.id == payload.instancia_id,
+            models.EmpresaInstancia.empresa_id == empresa_id,
+        )
+        .first()
+    )
+    if not instancia:
+        raise HTTPException(status_code=404, detail="Instância não encontrada para esta empresa.")
+
+    nums_norm = _normalizar_numeros(payload.numeros)
+    if not nums_norm:
+        raise HTTPException(status_code=400, detail="Nenhum número válido informado.")
+
+    disparo = models.Disparo(
+        empresa_id=empresa_id,
+        instancia_id=payload.instancia_id,
+        colaborador_id=colab_id,
+        tipo_conteudo=(payload.tipo_conteudo or "text"),
+        mensagem=payload.mensagem,
+        midia_id=payload.midia_id,
+        delay_segundos=payload.delay_segundos,
+        total_destinatarios=len(nums_norm),
+        status="pendente",
+    )
+    db.add(disparo)
+    db.flush()  # pega ID
+
+    # Cria destinatários
+    for raw, norm in nums_norm:
+        dest = models.DisparoDestinatario(
+            disparo_id=disparo.id,
+            numero_raw=raw,
+            numero_normalizado=norm,
+            nome=None,
+            status="pendente",
+        )
+        db.add(dest)
+
+    db.commit()
+    db.refresh(disparo)
+
+    # Dispara o processamento em background
+    asyncio.create_task(_processar_disparo(disparo.id))
+
+    instancia_nome = None
+    if disparo.instancia:
+        instancia_nome = disparo.instancia.apelido or disparo.instancia.instance_name
+
+    return DisparoOut(
+        id=disparo.id,
+        mensagem=disparo.mensagem,
+        qtd_numeros=disparo.total_destinatarios or 0,
+        instancia_id=disparo.instancia_id,
+        instancia_nome=instancia_nome,
+        status=disparo.status,
+        criado_em=disparo.criado_em,
+        delay_segundos=disparo.delay_segundos,
+    )
+
+
+@router.get(
+    "",
+    response_model=List[DisparoOut],
+    summary="Lista disparos da empresa (opcionalmente filtrando por instância)",
+)
+def listar_disparos(
+    empresa_id: int = Query(..., description="ID da empresa"),
+    instancia_id: Optional[int] = Query(None, description="Filtrar por instância"),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    identity: dict = Depends(get_current_identity),
+):
+    _ensure_perm(identity, db, "disparos.ver")
+
+    ident_empresa_id = identity.get("empresa_id")
+    if ident_empresa_id and int(ident_empresa_id) != int(empresa_id):
+        raise HTTPException(status_code=403, detail="Empresa inválida para o usuário logado.")
+
+    q = (
+        db.query(models.Disparo)
+        .filter(models.Disparo.empresa_id == empresa_id)
+        .order_by(models.Disparo.id.desc())
+    )
+
+    if instancia_id:
+        q = q.filter(models.Disparo.instancia_id == instancia_id)
+
+    q = q.limit(limit)
+    itens = q.all()
+
+    out: list[DisparoOut] = []
+    for d in itens:
+        instancia_nome = None
+        if d.instancia:
+            instancia_nome = d.instancia.apelido or d.instancia.instance_name
+        out.append(
+            DisparoOut(
+                id=d.id,
+                mensagem=d.mensagem,
+                qtd_numeros=d.total_destinatarios or 0,
+                instancia_id=d.instancia_id,
+                instancia_nome=instancia_nome,
+                status=d.status,
+                criado_em=d.criado_em,
+                delay_segundos=d.delay_segundos,
+            )
+        )
+    return out
+
+
+@router.post(
+    "/{disparo_id}/cancelar",
+    summary="Cancela o processamento de um disparo (não interrompe o envio atual, mas impede os próximos)",
+)
+def cancelar_disparo(
+    disparo_id: int,
+    db: Session = Depends(get_db),
+    identity: dict = Depends(get_current_identity),
+):
+    _ensure_perm(identity, db, "disparos.configurar")
+
+    empresa_id, _ = _get_empresa_e_colab(identity)
+
+    disparo = (
+        db.query(models.Disparo)
+        .filter(
+            models.Disparo.id == disparo_id,
+            models.Disparo.empresa_id == empresa_id,
+        )
+        .first()
+    )
+    if not disparo:
+        raise HTTPException(status_code=404, detail="Disparo não encontrado.")
+
+    if disparo.status in ("concluido", "cancelado"):
+        return {"ok": True, "status": disparo.status}
+
+    disparo.status = "cancelado"
+    disparo.finalizado_em = datetime.now(timezone.utc)
+    db.commit()
+
+    return {"ok": True, "status": disparo.status}

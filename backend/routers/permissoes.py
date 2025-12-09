@@ -41,6 +41,11 @@ PERMISSOES_CATALOGO = [
     {"id": "atendimento.apagar_mensagens", "label": "Apagar mensagens do Atendimento"},
     {"id": "arquivos.ver",              "label": "Ver Mídias/Arquivos"},
 
+    # ===== DISPAROS =====
+    {"id": "disparos.ver",              "label": "Ver disparos"},
+    {"id": "disparos.enviar",           "label": "Criar/enviar disparos"},
+    {"id": "disparos.configurar",       "label": "Configurar disparos (cancelar, ajustar fila, etc.)"},
+
     # ===== MÓDULO DE E-MAIL =====
     {"id": "email.ver",                 "label": "Ver E-mails"},
     {"id": "email.gerenciar",           "label": "Gerenciar contas de E-mail"},
@@ -89,61 +94,86 @@ def syncar_catalogo(
 # ===== Minhas permissões (sem bypass; com fallback para admin sem espelho) =====
 @router.get("/minhas", response_model=List[str])
 def minhas_permissoes(
-    identity=Depends(get_current_identity),
+    identity = Depends(get_current_identity),
     db: Session = Depends(get_db),
 ):
-    """Retorna as permissões efetivas do usuário logado.
+    """
+    Retorna as permissões efetivas do usuário logado.
 
-    Regras:
-      - Se houver colaborador correspondente (espelho), retorna o que estiver na tabela colaboradores_permissoes;
-      - NÃO há bypass automático só por ser admin;
-      - Somente se for admin e NÃO existir colaborador espelho, fallback = todas as permissões.
+    Regras simples:
+
+      - Se for USUÁRIO (admin):
+          * usa as permissões que já vieram no token (/api/auth/me)
+          * se por acaso vier vazio, devolve TODAS as permissões do catálogo.
+
+      - Se for COLABORADOR:
+          * se o token já tiver permissões, usa elas;
+          * se não tiver, busca na tabela colaboradores_permissoes.
     """
     empresa_id = identity.get("empresa_id")
-    kind = identity.get("kind")  # "usuario" ou "colaborador"
-    is_admin = bool(identity.get("is_admin"))
+    kind      = identity.get("kind")      # "usuario" ou "colaborador"
+    is_admin  = bool(identity.get("is_admin"))
 
-    # 1) Tentar resolver o "colaborador espelho"
-    colab: models.Colaborador | None = None
+    # Permissões que já vieram no token (/api/auth/me)
+    perms_claim = (
+        identity.get("permissoes")
+        or identity.get("perms")
+        or identity.get("permissions")
+        or identity.get("scopes")
+        or []
+    )
+
+    # -------------------------
+    # 1) USUÁRIO (admin)
+    # -------------------------
+    if kind == "usuario":
+        # Se o token já trouxe permissões, usa elas
+        if perms_claim:
+            return sorted({str(p) for p in perms_claim})
+
+        # Fallback: admin sem lista -> todas do catálogo
+        if is_admin:
+            return _all_perm_ids()
+
+        # Usuário não-admin (quase não usamos hoje)
+        return []
+
+    # -------------------------
+    # 2) COLABORADOR
+    # -------------------------
     if kind == "colaborador":
-        colab = (
-            db.query(models.Colaborador)
-            .filter(
-                models.Colaborador.id == identity.get("id"),
-                models.Colaborador.empresa_id == empresa_id,
-            )
-            .first()
-        )
-    else:
-        # logou como Usuario admin -> procurar colaborador espelho por usuario_id
-        colab = (
-            db.query(models.Colaborador)
-            .filter(
-                models.Colaborador.usuario_id == identity.get("id"),
-                models.Colaborador.empresa_id == empresa_id,
-            )
-            .first()
-        )
+        # Se o token já tem permissões, usa elas (mais rápido)
+        if perms_claim:
+            return sorted({str(p) for p in perms_claim})
 
-    # 2) Se achou colaborador: aplica a regra da tabela (sem bypass)
-    if colab:
-        rows = db.execute(
-            text(
-                """
-                SELECT p.id
-                  FROM colaboradores_permissoes cp
-                  JOIN permissoes p ON p.id = cp.permissao_id
-                 WHERE cp.colaborador_id = :cid
-                 ORDER BY p.id
-                """
-            ),
-            {"cid": colab.id},
-        ).fetchall()
-        return [r[0] for r in rows]
+        colab_id = identity.get("id")
+        if not colab_id:
+            return []
 
-    # 3) Sem colaborador espelho:
+        try:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT p.id
+                      FROM colaboradores_permissoes cp
+                      JOIN permissoes p ON p.id = cp.permissao_id
+                     WHERE cp.colaborador_id = :cid
+                     ORDER BY p.id
+                    """
+                ),
+                {"cid": colab_id},
+            ).fetchall()
+            return [r[0] for r in rows]
+        except Exception as e:
+            print("[PERMISSOES] erro em /api/permissoes/minhas (colaborador):", e)
+            return []
+
+    # -------------------------
+    # 3) Fallback genérico
+    # -------------------------
     if is_admin:
         return _all_perm_ids()
+
     return []
 
 
