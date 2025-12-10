@@ -96,6 +96,20 @@
       <h1><i class="fa fa-user-friends title-ico" aria-hidden="true"></i> Colaboradores</h1>
     </div>
 
+    <!-- 🔐 Configuração de segurança de login da empresa -->
+    <section id="sec-login-config" class="box" aria-label="Segurança de login">
+      <label class="chk-line" style="align-items:flex-start;gap:.5rem;cursor:pointer">
+        <input type="checkbox" id="chk-requer-token">
+        <span>
+          <strong>Exigir código de login (token)</strong>
+          <span class="muted" style="display:block;font-size:.85rem;margin-top:2px;">
+            Quando ativado, depois de digitar e-mail e senha o colaborador
+            precisa informar um código enviado pelo WhatsApp para concluir o login.
+          </span>
+        </span>
+      </label>
+    </section>
+
     <!-- Filtros -->
     <section class="filter" aria-label="Filtros de colaboradores">
       <label for="filtro">Buscar:</label>
@@ -211,7 +225,17 @@
                 <dd><div class="fieldbox" id="fb-cargo"><span id="v-cargo">—</span></div></dd>
               </div>
 
-              <!-- ===== Senha de acesso (somente na criação) ===== -->
+              <!-- Expediente (entrada / saída) -->
+              <div class="half">
+                <dt>Entrada do expediente</dt>
+                <dd><div class="fieldbox" id="fb-exp-ini"><span id="v-exp-ini">—</span></div></dd>
+              </div>
+              <div class="half">
+                <dt>Saída do expediente</dt>
+                <dd><div class="fieldbox" id="fb-exp-fim"><span id="v-exp-fim">—</span></div></dd>
+              </div>
+
+              <!-- ===== Senha de acesso (somente na criação / perm de redefinir) ===== -->
               <div class="full">
                 <dt>Senha de acesso</dt>
                 <dd>

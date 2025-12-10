@@ -208,7 +208,7 @@ function showEmailHelp(msg){
   handler();
 })();
 
-// === Submit ===
+// === Submit (2 etapas: senha → token opcional) ===
 (function(){
   var form = document.getElementById('form-login');
   var erro = document.getElementById('erro');
@@ -216,6 +216,14 @@ function showEmailHelp(msg){
   var emailInput = document.getElementById('email');
   var senhaInput = document.getElementById('senha');
   var rememberInput = document.getElementById('remember');
+
+  var step1 = document.getElementById('step1-fields');
+  var step2 = document.getElementById('step2-fields');
+  var tokenInput = document.getElementById('login-token');
+
+  var currentStep = 1;
+  var tokenEmail = null;
+  var tokenRemember = false;
 
   if (!form) return;
 
@@ -234,7 +242,7 @@ function showEmailHelp(msg){
   })();
 
   function disable(){ if(btn){ btn.disabled = true; } }
-  function enable(){ if(btn){ btn.disabled = false; btn.textContent = 'Entrar'; } }
+  function enable(){ if(btn){ btn.disabled = false; btn.textContent = (currentStep === 1 ? 'Entrar' : 'Confirmar código'); } }
 
   function applyLockState(){
     var vEmail = (emailInput && emailInput.value) ? emailInput.value : '';
@@ -251,175 +259,271 @@ function showEmailHelp(msg){
   if (emailInput) emailInput.addEventListener('input', applyLockState);
   applyLockState();
 
+  function goToStep(step){
+    currentStep = step;
+    if (step1) step1.classList.toggle('hidden', step !== 1);
+    if (step2) step2.classList.toggle('hidden', step !== 2);
+    if (btn){
+      btn.textContent = (step === 1 ? 'Entrar' : 'Confirmar código');
+    }
+    if (step === 2 && tokenInput){
+      tokenInput.value = '';
+      try { tokenInput.focus(); } catch (e) {}
+    }
+  }
+
+  var btnBack = document.getElementById('btn-token-back');
+  if (btnBack){
+    btnBack.addEventListener('click', function(){
+      tokenEmail = null;
+      tokenRemember = false;
+      goToStep(1);
+      applyLockState();
+    });
+  }
+
+  async function finalizeLoginSuccess(d, email, remember){
+    var token = d.access_token || d.token || '';
+    if (token) {
+      try {
+        localStorage.setItem('access_token', token);
+        localStorage.setItem('token', token);
+      } catch (e) {}
+    }
+    var empresaId = (d.hasOwnProperty('empresaId') && d.empresaId !== null) ? d.empresaId : d.empresa_id;
+    if (empresaId !== undefined && empresaId !== null) {
+      try { localStorage.setItem('empresa_id', String(empresaId)); } catch (e) {}
+    }
+
+    try { localStorage.setItem('email', email); } catch (e) {}
+    if (d && d.nome) {
+      try { localStorage.setItem('nome', d.nome); } catch (e) {}
+    }
+
+    var cargoOuRole = d ? (d.cargo || d.role) : null;
+    if (cargoOuRole) {
+      try {
+        localStorage.setItem('usuario_role', cargoOuRole);
+        localStorage.setItem('role', cargoOuRole);
+      } catch (e) {}
+    }
+
+    if (d && d.avatar_url) {
+      try { localStorage.setItem('usuario_avatar', d.avatar_url); } catch (e) {}
+    }
+    await cacheAvatar(d);
+
+    clearLocalLock(email);
+
+    try {
+      if (remember) {
+        localStorage.setItem('remember_login', '1');
+        localStorage.setItem('remember_email', email);
+      } else {
+        localStorage.removeItem('remember_login');
+        localStorage.removeItem('remember_email');
+      }
+    } catch (e) {}
+
+    if (window.ZAuth && typeof window.ZAuth.routeAfterLogin === 'function') {
+      window.ZAuth.routeAfterLogin();
+      return;
+    }
+    var params = new URLSearchParams(window.location.search || '');
+    var next = params.get('next');
+    var target = (next && /^\/[^\s]*$/.test(next)) ? next : '/dashboard';
+    window.location.replace(target);
+  }
+
   form.addEventListener('submit', async function(e){
     e.preventDefault();
     clearNotify();
 
-    var vEmail = (emailInput && emailInput.value) ? emailInput.value : '';
-    var emailMsg = emailValidationMessage(vEmail);
-    if (emailMsg){
-      showEmailHelp(emailMsg);
-      enable();
-      if (emailInput) emailInput.focus();
-      return;
-    }
-
-    var email = vEmail.trim().replace(/\s/g,'').toLowerCase();
-    var senha = (senhaInput && senhaInput.value) ? senhaInput.value.trim() : '';
-    var remember = !!(rememberInput && !!rememberInput.checked);
-
-    if (!email || !senha){
-      notifyWarn('Preencha e-mail e senha.');
-      return;
-    }
-
-    if (isLocked(email)){
-      notifyWarn('Muitas tentativas. Tente novamente mais tarde.');
-      disable();
-      return;
-    }
-
-    disable();
-    if (btn) btn.textContent = 'Entrando…';
-
-    try {
-      var res = await fetch('/api/auth/login', {
-        method : 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify({ email: email, senha: senha, remember: remember })
-      });
-
-      if (res.status === 422) {
-        var msg = 'Dados inválidos.';
-        var emailErrText = 'E-mail inválido.';
-        try {
-          var err = await res.json();
-          var arr = Array.isArray(err && err.detail) ? err.detail : [];
-          var emailErr = null;
-          for (var i=0;i<arr.length;i++){
-            if (arr[i] && arr[i].loc && arr[i].loc.indexOf && arr[i].loc.indexOf('email') !== -1) { emailErr = arr[i]; break; }
-          }
-          if (emailErr && emailErr.msg) {
-            emailErrText = 'E-mail inválido: ' + emailErr.msg;
-            msg = emailErrText;
-          } else if (arr.length) {
-            var parts = [];
-            for (var j=0;j<arr.length;j++){ if (arr[j] && arr[j].msg) parts.push(arr[j].msg); }
-            msg = parts.join('\n') || msg;
-          } else if (err && typeof err.detail === 'string') {
-            msg = err.detail;
-          }
-        } catch (e) {}
-        showEmailHelp(emailErrText);
-        notifyWarn(msg);
+    // === PASSO 1: e-mail + senha ===
+    if (currentStep === 1){
+      var vEmail = (emailInput && emailInput.value) ? emailInput.value : '';
+      var emailMsg = emailValidationMessage(vEmail);
+      if (emailMsg){
+        showEmailHelp(emailMsg);
         enable();
+        if (emailInput) emailInput.focus();
         return;
       }
 
-      if (res.status === 401) {
-        var msg401 = 'E-mail e/ou senha incorretos.';
-        try { var err401 = await res.json(); if (err401 && typeof err401.detail === 'string') msg401 = err401.detail; } catch (e) {}
-        notifyWarn(msg401);
-        enable();
+      var email = vEmail.trim().replace(/\s/g,'').toLowerCase();
+      var senha = (senhaInput && senhaInput.value) ? senhaInput.value.trim() : '';
+      var remember = !!(rememberInput && !!rememberInput.checked);
+
+      if (!email || !senha){
+        notifyWarn('Preencha e-mail e senha.');
         return;
       }
 
-      if (res.status === 404){
-        notifyWarn('E-mail não cadastrado.');
-        enable();
-        return;
-      }
-
-      if (res.status === 429){
-        var retry = 60;
-        try {
-          var ra = parseInt(res.headers.get('Retry-After') || '60', 10);
-          if (isFinite(ra) && ra > 0) retry = ra;
-        } catch (e) {}
-        setLocalLock(email, retry);
+      if (isLocked(email)){
         notifyWarn('Muitas tentativas. Tente novamente mais tarde.');
         disable();
         return;
       }
 
-      if (!res.ok) {
-        var msgGen = 'Credenciais inválidas';
+      disable();
+      if (btn) btn.textContent = 'Entrando…';
+
+      try {
+        var res = await fetch('/api/auth/login', {
+          method : 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ email: email, senha: senha, remember: remember })
+        });
+
+        if (res.status === 422) {
+          var msg = 'Dados inválidos.';
+          var emailErrText = 'E-mail inválido.';
+          try {
+            var err = await res.json();
+            var arr = Array.isArray(err && err.detail) ? err.detail : [];
+            var emailErr = null;
+            for (var i=0;i<arr.length;i++){
+              if (arr[i] && arr[i].loc && arr[i].loc.indexOf && arr[i].loc.indexOf('email') !== -1) { emailErr = arr[i]; break; }
+            }
+            if (emailErr && emailErr.msg) {
+              emailErrText = 'E-mail inválido: ' + emailErr.msg;
+              msg = emailErrText;
+            } else if (arr.length) {
+              var parts = [];
+              for (var j=0;j<arr.length;j++){ if (arr[j] && arr[j].msg) parts.push(arr[j].msg); }
+              msg = parts.join('\n') || msg;
+            } else if (err && typeof err.detail === 'string') {
+              msg = err.detail;
+            }
+          } catch (e) {}
+          showEmailHelp(emailErrText);
+          notifyWarn(msg);
+          enable();
+          return;
+        }
+
+        if (res.status === 401) {
+          var msg401 = 'E-mail e/ou senha incorretos.';
+          try { var err401 = await res.json(); if (err401 && typeof err401.detail === 'string') msg401 = err401.detail; } catch (e) {}
+          notifyWarn(msg401);
+          enable();
+          return;
+        }
+
+        if (res.status === 404){
+          notifyWarn('E-mail não cadastrado.');
+          enable();
+          return;
+        }
+
+        if (res.status === 429){
+          var retry = 60;
+          try {
+            var ra = parseInt(res.headers.get('Retry-After') || '60', 10);
+            if (isFinite(ra) && ra > 0) retry = ra;
+          } catch (e) {}
+          setLocalLock(email, retry);
+          notifyWarn('Muitas tentativas. Tente novamente mais tarde.');
+          disable();
+          return;
+        }
+
+        if (!res.ok) {
+          var msgGen = 'Credenciais inválidas';
+          try {
+            var errGen = await res.json();
+            if (errGen && typeof errGen.detail === 'string') msgGen = errGen.detail;
+            else if (errGen && Array.isArray(errGen.detail)) {
+              var parts2 = [];
+              for (var k=0;k<errGen.detail.length;k++){ if (errGen.detail[k] && errGen.detail[k].msg) parts2.push(errGen.detail[k].msg); }
+              msgGen = parts2.join('\n') || msgGen;
+            }
+          } catch (e) {}
+          notifyWarn(msgGen);
+          enable();
+          return;
+        }
+
+        // ====== SUCESSO ======
+        var d = await res.json().catch(function(){ return {}; });
+
+        // Se a empresa exigir token de login, servidor responde require_token=true
+        if (d && d.require_token){
+          tokenEmail = email;
+          tokenRemember = remember;
+          var info = d.mensagem || 'Enviamos um código de acesso para o seu e-mail.';
+          var infoEl = document.getElementById('token-info');
+          if (infoEl) infoEl.textContent = info;
+          notifyWarn('Digite o código enviado para o seu e-mail para concluir o acesso.');
+          goToStep(2);
+          enable();
+          return;
+        }
+
+        // Caso normal (sem segundo fator)
+        await finalizeLoginSuccess(d, email, remember);
+
+      } catch (err) {
+        console.error(err);
+        if (erro) { erro.textContent = 'Erro de conexão com o servidor'; erro.classList.remove('hidden'); }
+        enable();
+      }
+      return;
+    }
+
+    // === PASSO 2: confirmação do código ===
+    var email2 = tokenEmail || ((emailInput && emailInput.value) ? emailInput.value.trim().toLowerCase() : '');
+    if (!email2){
+      notifyWarn('E-mail inválido. Volte e tente novamente.');
+      goToStep(1);
+      return;
+    }
+
+    var codigo = (tokenInput && tokenInput.value) ? tokenInput.value.trim() : '';
+    if (!codigo){
+      notifyWarn('Digite o código de acesso enviado para o seu e-mail.');
+      return;
+    }
+
+    disable();
+    if (btn) btn.textContent = 'Confirmando…';
+
+    try {
+      var res2 = await fetch('/api/auth/login/token', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email2, token: codigo, remember: !!tokenRemember })
+      });
+
+      if (res2.status === 400 || res2.status === 401){
+        var msgBad = 'Código inválido ou expirado.';
         try {
-          var errGen = await res.json();
-          if (errGen && typeof errGen.detail === 'string') msgGen = errGen.detail;
-          else if (errGen && Array.isArray(errGen.detail)) {
-            var parts2 = [];
-            for (var k=0;k<errGen.detail.length;k++){ if (errGen.detail[k] && errGen.detail[k].msg) parts2.push(errGen.detail[k].msg); }
-            msgGen = parts2.join('\n') || msgGen;
-          }
+          var errBad = await res2.json();
+          if (errBad && typeof errBad.detail === 'string') msgBad = errBad.detail;
         } catch (e) {}
-        notifyWarn(msgGen);
+        notifyWarn(msgBad);
         enable();
         return;
       }
 
-      // ====== SUCESSO ======
-      var d = await res.json().catch(function(){ return {}; });
-      var token = d.access_token || d.token || '';
-      if (token) {
-        localStorage.setItem('access_token', token);
-        localStorage.setItem('token', token);
-      }
-      var empresaId = (d.hasOwnProperty('empresaId') && d.empresaId !== null) ? d.empresaId : d.empresa_id;
-      if (empresaId !== undefined && empresaId !== null) localStorage.setItem('empresa_id', String(empresaId));
-
-      try { localStorage.setItem('email', email); } catch (e) {}
-      if (d && d.nome) localStorage.setItem('nome', d.nome);
-
-      var cargoOuRole = d ? (d.cargo || d.role) : null;
-      if (cargoOuRole) {
-        localStorage.setItem('usuario_role', cargoOuRole);
-        localStorage.setItem('role', cargoOuRole);
-      }
-
-      if (d && d.avatar_url) localStorage.setItem('usuario_avatar', d.avatar_url);
-      await cacheAvatar(d);
-
-      if (d && d.instance_name) {
-        localStorage.setItem('instance_name', d.instance_name);
-      } else if (empresaId !== undefined && empresaId !== null) {
+      if (!res2.ok){
+        var msgGen2 = 'Não foi possível validar o código.';
         try {
-          var instRes = await fetch('/api/evolution/instancia?empresa_id=' + empresaId, {
-            credentials: 'include',
-            headers: token ? { 'Authorization': 'Bearer ' + token } : {}
-          });
-          if (instRes.ok) {
-            var instData = await instRes.json();
-            if (instData && instData.nome) localStorage.setItem('instance_name', instData.nome);
-          }
-        } catch (instErr) {
-          console.error('[ERRO] Buscar instance_name', instErr);
-        }
+          var errGen2 = await res2.json();
+          if (errGen2 && typeof errGen2.detail === 'string') msgGen2 = errGen2.detail;
+        } catch (e) {}
+        notifyWarn(msgGen2);
+        enable();
+        return;
       }
 
-      clearLocalLock(email);
+      var d2 = await res2.json().catch(function(){ return {}; });
+      await finalizeLoginSuccess(d2, email2, !!tokenRemember);
 
-      try {
-        if (remember) {
-          localStorage.setItem('remember_login', '1');
-          localStorage.setItem('remember_email', email);
-        } else {
-          localStorage.removeItem('remember_login');
-          localStorage.removeItem('remember_email');
-        }
-      } catch (e) {}
-
-      if (window.ZAuth && typeof window.ZAuth.routeAfterLogin === 'function') {
-        window.ZAuth.routeAfterLogin(); return;
-      }
-      var params = new URLSearchParams(window.location.search || '');
-      var next = params.get('next');
-      var target = (next && /^\/[^\s]*$/.test(next)) ? next : '/dashboard';
-      window.location.replace(target);
-
-    } catch (err) {
-      console.error(err);
+    } catch (err2){
+      console.error(err2);
       if (erro) { erro.textContent = 'Erro de conexão com o servidor'; erro.classList.remove('hidden'); }
       enable();
     }

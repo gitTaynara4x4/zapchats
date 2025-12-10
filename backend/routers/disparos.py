@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
+import json
 import asyncio
 from datetime import datetime, timezone
 from typing import List, Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -14,6 +17,14 @@ from backend.routers.auth import get_current_identity
 from backend import models
 
 router = APIRouter(prefix="/api/disparos", tags=["Disparos"])
+
+# =====================================================
+# Config Evolution API (env)
+# =====================================================
+
+EVOLUTION_URL = (os.getenv("EVOLUTION_URL") or "").rstrip("/")
+# Aceita tanto EVOLUTION_APIKEY quanto EVOLUTION_API_KEY
+EVOLUTION_APIKEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_API_KEY")
 
 
 # =====================================================
@@ -57,8 +68,7 @@ def _ensure_perm(identity: dict, db: Session, perm_id: str) -> None:
 
     kind = (identity.get("kind") or "").lower()
     if kind != "colaborador":
-        # Usuário master/admin da empresa – geralmente você controla pelo front.
-        # Aqui deixamos passar.
+        # Usuário master/admin da empresa
         return
 
     _, colab_id = _get_empresa_e_colab(identity)
@@ -158,6 +168,80 @@ def _normalizar_numeros(raw_numeros: List[str]) -> list[tuple[str, str]]:
 
 
 # =====================================================
+# Evolution – envio de texto
+# =====================================================
+
+async def _evolution_send_text(
+    *,
+    empresa_id: int,
+    instancia_db: models.EmpresaInstancia,
+    numero: str,
+    texto: str,
+) -> None:
+    """
+    Envia um texto simples via Evolution.
+
+    Usa o endpoint:
+      POST {EVOLUTION_URL}/message/sendText/{instance}
+    Body esperado (v2):
+      {
+        "number": "5531xxxxxxxxx",
+        "text": "mensagem aqui"
+      }
+    """
+    if not EVOLUTION_URL:
+        raise RuntimeError("EVOLUTION_URL não configurada (EVOLUTION_URL).")
+    if not EVOLUTION_APIKEY:
+        raise RuntimeError("EVOLUTION_APIKEY/EVOLUTION_API_KEY não configurada.")
+
+    # Nome da instância na Evolution (pelo que aparece no log: seg-sistemas-de-...)
+    inst_name = (
+        getattr(instancia_db, "instance_name", None)
+        or getattr(instancia_db, "instance", None)
+        or getattr(instancia_db, "apelido", None)
+        or str(instancia_db.id)
+    )
+
+    # Garante E.164 com DDI 55
+    numero_e164 = "".join(ch for ch in numero if ch.isdigit())
+    if not numero_e164.startswith("55"):
+        numero_e164 = "55" + numero_e164
+
+    url = f"{EVOLUTION_URL}/message/sendText/{inst_name}"
+
+    payload = {
+        "number": numero_e164,
+        "text": texto,
+    }
+
+    headers = {
+        "Content-Type": "application/json",
+        "apikey": EVOLUTION_APIKEY,
+    }
+
+    print(
+        "[DISPARO] Enviando via Evolution:",
+        f"emp={empresa_id}",
+        f"inst_id={instancia_db.id}",
+        f"inst={inst_name}",
+        f"num={numero_e164}",
+        f"msg={texto[:60]!r}",
+    )
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.post(url, headers=headers, json=payload)
+
+    # Tenta decodificar a resposta pra dar erro mais legível
+    try:
+        data = resp.json()
+    except Exception:
+        data = resp.text
+
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Evolution sendText HTTP {resp.status_code}: {data}")
+
+
+# =====================================================
 # Worker de processamento de disparo
 # =====================================================
 
@@ -167,24 +251,36 @@ async def _enviar_destinatario(
     dest: models.DisparoDestinatario,
 ) -> None:
     """
-    AQUI você pluga o envio REAL via Evolution.
-
-    No momento, esta função só SIMULA um envio bem-sucedido.
-
-    Dica: se você já tem helpers para enviar mensagem no atendimento,
-    pode reaproveitar algo tipo:
-
-        send_text_message(
-            instancia=disparo.instancia,
-            numero=dest.numero_normalizado,
-            texto=disparo.mensagem,
-        )
-
-    ou então jogar numa fila RabbitMQ usando a mesma exchange/queue do atendimento.
+    Envia UM destinatário de um disparo.
     """
-    # TODO: substituir por chamada real à Evolution / RabbitMQ
-    await asyncio.sleep(0.01)
-    # Se der erro real, levanta uma Exception aqui pra cair no "erro" do destinatário.
+
+    # Garante que a instância está carregada
+    instancia = disparo.instancia
+    if instancia is None:
+        instancia = (
+            db.query(models.EmpresaInstancia)
+            .filter(models.EmpresaInstancia.id == disparo.instancia_id)
+            .first()
+        )
+        if instancia is None:
+            raise RuntimeError("Instância não encontrada para esse disparo.")
+
+    tipo = (disparo.tipo_conteudo or "text").lower()
+    if tipo != "text":
+        raise RuntimeError(f"Tipo de conteúdo ainda não suportado em disparo: {tipo!r}")
+
+    texto = (disparo.mensagem or "").strip()
+    if not texto:
+        raise RuntimeError("Mensagem vazia para disparo de texto.")
+
+    numero = dest.numero_normalizado
+
+    await _evolution_send_text(
+        empresa_id=disparo.empresa_id,
+        instancia_db=instancia,
+        numero=numero,
+        texto=texto,
+    )
 
 
 async def _processar_disparo(disparo_id: int) -> None:
@@ -196,9 +292,11 @@ async def _processar_disparo(disparo_id: int) -> None:
     try:
         disparo = db.query(models.Disparo).filter(models.Disparo.id == disparo_id).first()
         if not disparo:
+            print(f"[DISPARO] {disparo_id} não encontrado ao processar")
             return
 
         if disparo.status in ("cancelado", "concluido"):
+            print(f"[DISPARO] {disparo_id} já está {disparo.status}, não processa.")
             return
 
         disparo.status = "processando"
@@ -208,10 +306,13 @@ async def _processar_disparo(disparo_id: int) -> None:
 
         delay = max(5, int(disparo.delay_segundos or 0))
 
+        print(f"[DISPARO] Iniciando processamento do disparo #{disparo.id} (delay={delay}s)")
+
         # Loop até não sobrar mais destinatário pendente
         while True:
             db.refresh(disparo)
             if disparo.status == "cancelado":
+                print(f"[DISPARO] {disparo.id} cancelado durante o processamento.")
                 break
 
             dest = (
@@ -229,7 +330,10 @@ async def _processar_disparo(disparo_id: int) -> None:
                 disparo.status = "concluido"
                 disparo.finalizado_em = datetime.now(timezone.utc)
                 db.commit()
+                print(f"[DISPARO] {disparo.id} concluído.")
                 break
+
+            print(f"[DISPARO] Enviando destinatário #{dest.id} -> {dest.numero_normalizado}")
 
             # Marca como enviando
             dest.status = "enviando"
@@ -240,6 +344,7 @@ async def _processar_disparo(disparo_id: int) -> None:
             try:
                 await _enviar_destinatario(db, disparo, dest)
             except Exception as e:  # noqa: BLE001
+                print(f"[DISPARO] Erro ao enviar destinatário #{dest.id}: {e!r}")
                 dest.status = "erro"
                 dest.erro_msg = str(e)[:4000]
                 disparo.enviados_erro = (disparo.enviados_erro or 0) + 1

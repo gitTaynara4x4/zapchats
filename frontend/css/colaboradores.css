@@ -2,20 +2,14 @@
    Colaboradores — CSS ÚNICO (perfil + lista + modal)
    ======================================================= */
 
-/* ---------- Tokens/cores (dark default) ---------- */
+/* ---------- Tokens/cores (alinhado com o shell) ---------- */
 :root{
   --border-hairline: rgba(255,255,255,.08);
   --border-hairline-strong: rgba(255,255,255,.12);
 
-  --text: #e5e7eb;
-  --muted: #9ca3af;
+  /* Usa o mesmo texto base do app */
+  --text: var(--fg);
 
-  --bg: #0e0f12;
-  --panel: #121318;
-  --card: #111827;
-  --card2: #0b1220;
-
-  --border: rgba(255,255,255,.12);
   --primary: #60a5fa;
 
   /* ZapChats green */
@@ -31,26 +25,6 @@
 
   /* força controles nativos no dark quando forem usados */
   color-scheme: dark;
-}
-
-/* Tema claro */
-[data-theme="light"]{
-  --text: #1f2937;
-  --muted: #6b7280;
-
-  --bg: #f3f4f6;
-  --panel: #f5f6f8;
-  --card: #ffffff;
-  --card2: #f9fafb;
-
-  --border: rgba(0,0,0,.12);
-  --border-hairline: rgba(0,0,0,.10);
-  --border-hairline-strong: rgba(0,0,0,.18);
-  --primary: #2563eb;
-
-  --overlay: rgba(0,0,0,.45);
-
-  color-scheme: light;
 }
 
 /* ---------- Escopo da página ---------- */
@@ -274,7 +248,7 @@ html.modal-open{ overflow: hidden; }
 }
 .avatar-hint > i, #btn-add-avatar{ display:none !important; }
 .avatar-hint .txt{ display:grid; gap:.25rem; }
-.avatar-hint .txt strong{ font-size:.95rem; font-weight:700; }
+avatar-hint .txt strong{ font-size:.95rem; font-weight:700; }
 .avatar-hint .txt span{ font-size:.88rem; color:var(--muted); }
 
 .status-left{

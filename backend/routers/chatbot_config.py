@@ -47,12 +47,15 @@ def _exclusive_server_guard(cfg: Dict[str, Any]) -> None:
 
 def _prune_for_storage(cfg: Dict[str, Any]) -> Dict[str, Any]:
     data: Dict[str, Any] = {}
+
+    # ativo
     if "ativo" in cfg:
         data["ativo"] = bool(cfg["ativo"])
 
     f_in = cfg.get("features", {}) or {}
     features: Dict[str, Any] = {}
 
+    # ===== auto_messages (simples) =====
     am = f_in.get("auto_messages") or {}
     if bool(am.get("enabled")):
         am_store: Dict[str, Any] = {"enabled": True}
@@ -71,28 +74,43 @@ def _prune_for_storage(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
         features["auto_messages"] = am_store
 
+    # ===== auto_messages_departments (ramal) =====
     ad = f_in.get("auto_messages_departments") or {}
     ad_enabled = bool(ad.get("enabled"))
     if ad_enabled:
         ad_store: Dict[str, Any] = {"enabled": True}
+
+        # bloco de boas-vindas dos departamentos
+        if isinstance(ad.get("welcome"), dict) and ad["welcome"].get("enabled") is True:
+            w = ad["welcome"]
+            ad_store["welcome"] = {
+                k: w[k] for k in ["enabled", "text", "start", "end"] if k in w
+            }
+
+        # textos por departamento (ramais)
         if "items" in ad and isinstance(ad["items"], dict):
-            items_out = {}
+            items_out: Dict[str, Any] = {}
             for did, item in ad["items"].items():
-                if isinstance(item, dict):
-                    tmp = {}
-                    if "enabled" in item:
-                        tmp["enabled"] = bool(item["enabled"])
-                    if "text" in item and str(item["text"]).strip():
-                        tmp["text"] = str(item["text"])
-                    if tmp:
-                        items_out[did] = tmp
+                if not isinstance(item, dict):
+                    continue
+                tmp: Dict[str, Any] = {}
+                if "enabled" in item:
+                    tmp["enabled"] = bool(item["enabled"])
+                if "text" in item and str(item["text"]).strip():
+                    tmp["text"] = str(item["text"])
+                if tmp:
+                    items_out[did] = tmp
+
             if items_out:
                 ad_store["items"] = items_out
+
         features["auto_messages_departments"] = ad_store
 
+    # guarda features se tiver algo
     if features:
         data["features"] = features
 
+    # (opcional) se você tiver um campo "setores" separado
     if ad_enabled and "setores" in cfg:
         data["setores"] = cfg["setores"]
 

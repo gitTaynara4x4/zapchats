@@ -2,7 +2,10 @@
    (versão com: troca de senha em edição, validação opcional da senha, salvamento de instâncias,
    correção de refs DOM recriadas nas fieldboxes + limpeza de erros ao trocar de colaborador
    + salvamento de PERMISSÕES por colaborador em /api/permissoes/colaboradores/{id}
-   + respeito à permissão colaboradores.redefinir_senha para mexer em senha) */
+   + respeito à permissão colaboradores.redefinir_senha para mexer em senha
+   + modal de confirmação custom para remoção de colaborador (#zc-confirm)
+   + horário de expediente (hora_login_inicio / hora_login_fim) com validação HH:MM
+   + 🔐 flag de empresa requer_token_login controlado na página de colaboradores) */
 (function ColaboradoresPage(){
   'use strict';
 
@@ -84,7 +87,9 @@
 
     instsCache: null,
 
-    showErrors: false
+    showErrors: false,
+
+    empresa: null   // 🔐 cache da empresa (inclui requer_token_login)
   };
 
   async function preloadPerms(){
@@ -103,7 +108,7 @@
     if (typeof fn === 'function') return !!fn(p);
     return true;
   };
-  // 👇 AQUI É A MUDANÇA: permite redefinir senha SE tiver a perm nova OU a de gerenciar
+  // 👇 permite redefinir senha SE tiver a perm nova OU a de gerenciar
   const canEditPassword = () => hasPerm(RESET_PASS_PERM) || hasPerm(EDIT_PERM);
 
   // ====== Toast ======
@@ -120,6 +125,50 @@
     toast._t = setTimeout(()=> toastEl.classList.remove('show'), 3200);
   }
 
+  // ====== Confirm modal (remoção, etc.) ======
+  const confirmModal = $('#zc-confirm');
+  const confirmMsgEl = confirmModal ? confirmModal.querySelector('.zc-confirm-message') : null;
+
+  function showConfirm(message){
+    if (!confirmModal) {
+      return Promise.resolve(window.confirm(message || 'Confirmar ação?'));
+    }
+
+    if (confirmMsgEl) confirmMsgEl.textContent = message || 'Confirmar ação?';
+    confirmModal.setAttribute('aria-hidden','false');
+    document.documentElement.classList.add('modal-open');
+
+    return new Promise(resolve=>{
+      const onClick = (ev)=>{
+        const btn = ev.target.closest('[data-confirm]');
+        if (!btn) return;
+        const ok = btn.getAttribute('data-confirm') === 'yes';
+        cleanup(ok);
+      };
+      const onKey = (ev)=>{
+        if (ev.key === 'Escape'){
+          cleanup(false);
+        }
+      };
+      const onBackdrop = (ev)=>{
+        if (ev.target === confirmModal){
+          cleanup(false);
+        }
+      };
+      function cleanup(result){
+        confirmModal.setAttribute('aria-hidden','true');
+        document.documentElement.classList.remove('modal-open');
+        confirmModal.removeEventListener('click', onClick);
+        document.removeEventListener('keydown', onKey);
+        confirmModal.removeEventListener('mousedown', onBackdrop);
+        resolve(result);
+      }
+      confirmModal.addEventListener('click', onClick);
+      document.addEventListener('keydown', onKey);
+      confirmModal.addEventListener('mousedown', onBackdrop);
+    });
+  }
+
   // ====== Elements (estáveis/no topo do modal) ======
   const filtroTxt   = $('#filtro');
   const filtroDepto = $('#filtro-depto');
@@ -128,6 +177,9 @@
   const tbody       = $('#tabela-colaboradores');
   const emptyState  = $('#empty-state');
   const countEl     = $('#count-colaboradores');
+
+  // 🔐 checkbox de exigir token no nível da empresa
+  const chkRequerToken = $('#chk-requer-token');
 
   // Modal PERFIL
   const perfilModal  = $('#modal-perfil');
@@ -146,7 +198,7 @@
 
   // hint/CTA avatar (modo "novo")
   const avatarHint   = $('#avatar-hint');
-  const btnAddAvatar = $('#btn-add-avatar');
+  const btnAddAvatar = $('#btn-add-avatar'); // opcional, se existir
   const pAvatarInput = $('#p-avatar-input');
 
   // Permissões (estáveis)
@@ -184,6 +236,7 @@
 
   // ====== Utils (máscaras e validações) ======
   const digits = (s)=> String(s||'').replace(/\D+/g,'');
+
   function maskPhoneBR(v){
     let d=digits(v).slice(0,11), dd=d.slice(0,2), n=d.slice(2);
     if(!d.length) return '';
@@ -206,6 +259,30 @@
     return n.length<=8 ? `(${dd}) ${n.slice(0,4)}-${n.slice(4)}`
                        : `(${dd}) ${n[0]} ${n.slice(1,5)}-${n.slice(5)}`;
   }
+
+  // ---- horário: helpers ----
+  function maskTimeInput(el){
+    if (!el) return;
+    let v = String(el.value || '').replace(/[^\d]/g,'');
+    if (v.length > 4) v = v.slice(0,4);
+    if (v.length >= 3) v = v.slice(0,2) + ':' + v.slice(2);
+    el.value = v;
+  }
+  function isValidTimeHHMM(str){
+    if (!str) return true; // vazio é permitido (sem controle de horário)
+    const m = /^(\d{1,2}):(\d{2})$/.exec(str.trim());
+    if (!m) return false;
+    const h = Number(m[1]), mm = Number(m[2]);
+    return h >= 0 && h <= 23 && mm >= 0 && mm <= 59;
+  }
+  function timeToMinutes(str){
+    const m = /^(\d{1,2}):(\d{2})$/.exec(str.trim());
+    if (!m) return null;
+    const h = Number(m[1]), mm = Number(m[2]);
+    if (h < 0 || h > 23 || mm < 0 || mm > 59) return null;
+    return h*60 + mm;
+  }
+
   function initials(name){
     const parts = String(name||'').trim().split(/\s+/).filter(Boolean);
     if (!parts.length) return 'AZ';
@@ -420,6 +497,25 @@
   function coalesceCargo(c){
     return c.cargo ?? c.funcao ?? c.usuario?.cargo ?? c.user?.job_title ?? '';
   }
+  // Horário de expediente – tenta pegar de alguns nomes comuns
+  function coalesceHorarioInicio(c){
+    return c.hora_login_inicio
+        ?? c.hora_inicio
+        ?? c.horario_inicio
+        ?? c.expediente_inicio
+        ?? c.inicio_expediente
+        ?? c.hora_entrada
+        ?? null;
+  }
+  function coalesceHorarioFim(c){
+    return c.hora_login_fim
+        ?? c.hora_fim
+        ?? c.horario_fim
+        ?? c.expediente_fim
+        ?? c.fim_expediente
+        ?? c.hora_saida
+        ?? null;
+  }
 
   // ====== Admin badge ======
   function isAdminFlag(c){
@@ -473,6 +569,46 @@
     }catch(e){
       console.error(e); state.colaboradores = [];
       toast('Erro ao carregar colaboradores.','err');
+    }
+  }
+
+  // 🔐 Empresa (inclui requer_token_login)
+  async function loadEmpresa(force){
+    if (!EMPRESA_ID) return null;
+    if (!force && state.empresa) return state.empresa;
+
+    try{
+      const data = await apiGet(`/api/empresas/${EMPRESA_ID}`);
+      state.empresa = data;
+
+      // sincroniza checkbox de “Exigir código de login”
+      if (chkRequerToken) {
+        chkRequerToken.checked = !!data.requer_token_login;
+      }
+
+      return data;
+    }catch{
+      return null;
+    }
+  }
+
+  async function saveEmpresaLoginConfig(requerToken){
+    if (!EMPRESA_ID) return;
+    const payload = { requer_token_login: !!requerToken };
+
+    try{
+      // Você precisa implementar esse endpoint no backend:
+      // PUT /api/empresas/{empresa_id}/login-config
+      const resp = await apiJSON(`/api/empresas/${EMPRESA_ID}/login-config`, 'PUT', payload);
+      state.empresa = resp || { ...(state.empresa || {}), requer_token_login: !!requerToken };
+      toast('Configuração de login atualizada.');
+    }catch(e){
+      console.warn('Falha ao atualizar requer_token_login', e);
+      toast('Não foi possível salvar a configuração de login.','err');
+      // desenrola checkbox de volta pro valor anterior
+      if (chkRequerToken && state.empresa) {
+        chkRequerToken.checked = !!state.empresa.requer_token_login;
+      }
     }
   }
 
@@ -686,11 +822,6 @@
     }
   }
 
-  async function loadEmpresa(){
-    if (!EMPRESA_ID) return null;
-    try{ return await apiGet(`/api/empresas/${EMPRESA_ID}`); }catch{ return null; }
-  }
-
   // BACKEND retorna ColaboradorOut plano
   async function loadColabFull(id){
     const c = await apiGet(`/api/colaboradores/${id}`);
@@ -709,6 +840,8 @@
     const vDepto  = $('#v-depto');
     const vTelA   = $('#v-tel');
     const vCargo  = $('#v-cargo');
+    const vExpIni = $('#v-exp-ini');
+    const vExpFim = $('#v-exp-fim');
 
     if (pTitle) pTitle.textContent = 'Carregando…';
     if (vNome)  vNome.textContent = '—';
@@ -717,6 +850,8 @@
     if (vDepto) vDepto.textContent = '—';
     if (vTelA){ vTelA.textContent = '—'; vTelA.href = '#'; }
     if (vCargo) vCargo.textContent = '—';
+    if (vExpIni) vExpIni.textContent = '—';
+    if (vExpFim) vExpFim.textContent = '—';
   }
 
   // ====== Edição inline helpers/validação ======
@@ -792,17 +927,28 @@
   }
 
   function getEditInputs(){
-    return { eNome:$('#e-nome'), eEmail:$('#e-email'), eSetor:$('#e-setor'), eTel:$('#e-tel'), eCargo:$('#e-cargo') };
+    return {
+      eNome:   $('#e-nome'),
+      eEmail:  $('#e-email'),
+      eSetor:  $('#e-setor'),
+      eTel:    $('#e-tel'),
+      eCargo:  $('#e-cargo'),
+      eExpIni: $('#e-exp-ini'),
+      eExpFim: $('#e-exp-fim')
+    };
   }
+
   function validateFormLive(forceShow){
     const show = (typeof forceShow === 'boolean') ? forceShow : state.showErrors;
 
-    const { eNome, eEmail, eSetor, eTel, eCargo } = getEditInputs();
+    const { eNome, eEmail, eSetor, eTel, eCargo, eExpIni, eExpFim } = getEditInputs();
     const nome   = eNome?.value.trim()   || '';
     const email  = (eEmail?.value || '').trim();
     const setor  = eSetor?.value || '';
     const tel    = eTel?.value   || '';
     const cargo  = eCargo?.value.trim()  || '';
+    const hIni   = eExpIni?.value.trim() || '';
+    const hFim   = eExpFim?.value.trim() || '';
 
     const msgs = [];
     const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -823,6 +969,37 @@
     markValidity(eSetor, show ? setorOk : true, setorOk ? '' : 'Selecione um departamento');
     markValidity(eTel,   show ? telOk   : true, telOk   ? '' : 'Telefone com DDD (10–11 dígitos)');
     markValidity(eCargo, show ? cargoOk : true, cargoOk ? '' : 'Cargo (mín. 2 letras)');
+
+    // ---- horário (opcional, mas se preencher tem que ser HH:MM + ordem certa) ----
+    let hIniOk = true;
+    let hFimOk = true;
+    let hOrderOk = true;
+
+    if (hIni){
+      hIniOk = isValidTimeHHMM(hIni);
+      if (!hIniOk) msgs.push('• Entrada do expediente no formato HH:MM');
+    }
+    if (hFim){
+      hFimOk = isValidTimeHHMM(hFim);
+      if (!hFimOk) msgs.push('• Saída do expediente no formato HH:MM');
+    }
+    if (hIni && hFim && hIniOk && hFimOk){
+      const mi = timeToMinutes(hIni);
+      const mf = timeToMinutes(hFim);
+      if (mi != null && mf != null && mi >= mf){
+        hOrderOk = false;
+        msgs.push('• Início do expediente deve ser antes do fim');
+      }
+    }
+
+    if (eExpIni){
+      const okField = hIniOk && hOrderOk;
+      markValidity(eExpIni, show ? okField : true, okField ? '' : 'Informe no formato HH:MM (ex.: 08:00)');
+    }
+    if (eExpFim){
+      const okField = hFimOk && hOrderOk;
+      markValidity(eExpFim, show ? okField : true, okField ? '' : 'Informe no formato HH:MM (ex.: 18:00)');
+    }
 
     // senha: obrigatório no create; opcional no edit; só se tiver permissão
     let senhaOk = true;
@@ -859,7 +1036,7 @@
       senhaOk = true;
     }
 
-    const ok = nomeOk && emailOk && setorOk && telOk && cargoOk && senhaOk;
+    const ok = nomeOk && emailOk && setorOk && telOk && cargoOk && senhaOk && hIniOk && hFimOk && hOrderOk;
     setSaveEnabled(ok);
     return { ok, msgs };
   }
@@ -955,6 +1132,8 @@
     const vDepto  = $('#v-depto');
     const vTelA   = $('#v-tel');
     const vCargo  = $('#v-cargo');
+    const vExpIni = $('#v-exp-ini');
+    const vExpFim = $('#v-exp-fim');
 
     const empresa = await loadEmpresa();
     if (!state.setores.length) { try{ await loadSetores(); }catch{} }
@@ -988,6 +1167,12 @@
     const adm = isAdminFlag(colab);
     if (vCargo) vCargo.textContent = adm ? '' : (cargoVal || '—');
     renderAdminBadge(colab);
+
+    // Horário de expediente (view)
+    const hIni = coalesceHorarioInicio(colab);
+    const hFim = coalesceHorarioFim(colab);
+    if (vExpIni) vExpIni.textContent = hIni || '—';
+    if (vExpFim) vExpFim.textContent = hFim || '—';
 
     if (dPerms){
       dPerms.innerHTML = '';
@@ -1050,7 +1235,7 @@
       </select>`;
     const sel = swapFieldbox('fb-depto', selHtml);
 
-    // ---- aqui é o pulo do gato: tentar por ID e depois por NOME ----
+    // ---- tenta por ID e depois por NOME ----
     const depIdRaw  = coalesceDeptId(state.viewing);
     const depName   = coalesceDeptName(state.viewing);
     let   depValue  = '';
@@ -1069,18 +1254,25 @@
 
     if (sel && depValue) {
       sel.value = depValue;
-      // avisa o “select bonitinho” pra atualizar o texto
       sel.dispatchEvent(new Event('change', { bubbles:true }));
     }
-    // ---------------------------------------------------------------
 
     swapFieldbox('fb-tel', `<input id="e-tel" class="input" type="tel" required inputmode="numeric" placeholder="(DD) 9 9999-9999">`);
     swapFieldbox('fb-cargo', `<input id="e-cargo" class="input" type="text" maxlength="80" required placeholder="Cargo">`);
+
+    // Horário – entrada / saída
+    swapFieldbox('fb-exp-ini', `<input id="e-exp-ini" class="input" type="text" inputmode="numeric" placeholder="08:00">`);
+    swapFieldbox('fb-exp-fim', `<input id="e-exp-fim" class="input" type="text" inputmode="numeric" placeholder="18:00">`);
 
     $('#e-nome').value  = coalesceName(state.viewing) || '';
     $('#e-email').value = coalesceEmail(state.viewing) || '';
     $('#e-tel').value   = (coalescePhone(state.viewing) ? maskPhoneBR(coalescePhone(state.viewing)) : '');
     $('#e-cargo').value = coalesceCargo(state.viewing) || '';
+
+    const hIni = coalesceHorarioInicio(state.viewing) || '';
+    const hFim = coalesceHorarioFim(state.viewing)   || '';
+    $('#e-exp-ini').value = hIni;
+    $('#e-exp-fim').value = hFim;
 
     renderAdminBadge({ ...state.viewing, cargo: $('#e-cargo').value });
 
@@ -1106,6 +1298,18 @@
       renderAdminBadge({ ...state.viewing, cargo: $('#e-cargo').value });
     });
     sel?.addEventListener('change', ()=> validateFormLive());
+
+    // horário – máscara e validação ao digitar
+    $('#e-exp-ini')?.addEventListener('input', ()=>{
+      const el = $('#e-exp-ini');
+      maskTimeInput(el);
+      validateFormLive();
+    });
+    $('#e-exp-fim')?.addEventListener('input', ()=>{
+      const el = $('#e-exp-fim');
+      maskTimeInput(el);
+      validateFormLive();
+    });
 
     const senhaInput = $('#e-senha');
     if (senhaInput){
@@ -1159,6 +1363,8 @@
     restoreFieldbox('fb-depto');
     restoreFieldbox('fb-tel');
     restoreFieldbox('fb-cargo');
+    restoreFieldbox('fb-exp-ini');
+    restoreFieldbox('fb-exp-fim');
 
     state.inlineEdit = false;
     state.showErrors = false;
@@ -1185,12 +1391,14 @@
     const id = Number(perfilModal.dataset.currentId || '0') || 0;
     const canPass = canEditPassword();
 
-    const { eNome, eEmail, eSetor, eTel, eCargo } = getEditInputs();
-    const nome  = eNome?.value.trim();
-    const email = eEmail?.value.trim();
-    const setor = eSetor?.value || '';
-    const tel   = eTel?.value || '';
-    const cargo = eCargo?.value || '';
+    const { eNome, eEmail, eSetor, eTel, eCargo, eExpIni, eExpFim } = getEditInputs();
+    const nome   = eNome?.value.trim();
+    const email  = eEmail?.value.trim();
+    const setor  = eSetor?.value || '';
+    const tel    = eTel?.value || '';
+    const cargo  = eCargo?.value || '';
+    const hIni   = eExpIni?.value.trim() || '';
+    const hFim   = eExpFim?.value.trim() || '';
 
     state.showErrors = true;
     const check = validateFormLive(true);
@@ -1209,6 +1417,10 @@
       fd.append('setor_id', String(Number(setor)));
       fd.append('telefone', telE164(tel));
       fd.append('cargo', (cargo||'').trim());
+
+      // horário (opcional) – NOME ALINHADO COM BACKEND
+      if (hIni) fd.append('hora_login_inicio', hIni);
+      if (hFim) fd.append('hora_login_fim', hFim);
 
       if (!canPass){
         toast('Você não tem permissão para definir senha deste colaborador.','warn');
@@ -1255,8 +1467,10 @@
         perfilModal.dataset.currentId = String(created?.id||'');
 
         const fresh = await loadColabFull(created.id);
-        fresh.instancias_ids = instsSel;
+        fresh.instancias_ids    = instsSel;
         if (permsSel.length) fresh.permissoes = permsSel;
+        fresh.hora_login_inicio = hIni || null;
+        fresh.hora_login_fim    = hFim || null;
 
         state.viewing = fresh;
         await loadColaboradores(); renderLista();
@@ -1281,6 +1495,10 @@
       instancias_ids: instsSel,
       atualizar_usuario: !!state.viewing?.usuario_id
     };
+
+    // permite limpar horário (null) se apagar – NOME ALINHADO COM BACKEND
+    payload.hora_login_inicio = hIni || null;
+    payload.hora_login_fim    = hFim || null;
 
     const senhaEl = document.querySelector('#e-senha');
     const newPass = (senhaEl?.value || '').trim();
@@ -1326,8 +1544,10 @@
       toast(msg || 'Alterações salvas.');
 
       const fresh = await loadColabFull(id);
-      fresh.instancias_ids = instsSel;
+      fresh.instancias_ids    = instsSel;
       if (permsSel.length) fresh.permissoes = permsSel;
+      fresh.hora_login_inicio = hIni || null;
+      fresh.hora_login_fim    = hFim || null;
 
       state.viewing = fresh;
       await loadColaboradores(); renderLista();
@@ -1374,7 +1594,18 @@
     if (!hasPerm(EDIT_PERM)) { toast('Sem permissão para criar.','warn'); return; }
     if (!canEditPassword()) { toast('Sem permissão para criar (requer permissão de redefinir senha).','warn'); return; }
 
-    const blank = { id:null, nome:'', email:'', telefone:'', cargo:'', setor_id:null, permissoes:[], instancias_ids:[] };
+    const blank = {
+      id:null,
+      nome:'',
+      email:'',
+      telefone:'',
+      cargo:'',
+      setor_id:null,
+      permissoes:[],
+      instancias_ids:[],
+      hora_login_inicio:null,
+      hora_login_fim:null
+    };
     perfilModal.dataset.mode = 'create';
     perfilModal.dataset.currentId = '';
     state.showErrors = false;
@@ -1429,6 +1660,13 @@
 
     btnAdd?.addEventListener('click', openNovo);
 
+    // 🔐 marcar/desmarcar “Exigir código de login (token)”
+    if (chkRequerToken){
+      chkRequerToken.addEventListener('change', () => {
+        saveEmpresaLoginConfig(chkRequerToken.checked);
+      });
+    }
+
     document.addEventListener('click', (e)=>{
       const b = e.target.closest('[data-action]'); if (!b) return;
       const raw = b.dataset.id;
@@ -1442,10 +1680,21 @@
       if (b.dataset.action === 'del'){
         if (!hasPerm(EDIT_PERM)) return toast('Sem permissão para remover.','warn');
         if (!raw || Number.isNaN(id) || !id){ toast('ID do colaborador inválido.','err'); return; }
-        if (!confirm('Remover este colaborador?')) return;
-        apiJSON(`/api/colaboradores/${id}`, 'DELETE', {}).then(async ()=>{
-          toast('Removido.'); await loadColaboradores(); renderLista();
-        }).catch(()=> toast('Não foi possível remover.','err'));
+
+        showConfirm('Remover este colaborador?').then(async (ok)=>{
+          if (!ok) return;
+          try{
+            const resp = await authFetch(withEmpresa(`/api/colaboradores/${id}`), { method:'DELETE' });
+            const data = await parseMaybeJSON(resp);
+            if (!resp.ok) throwHTTP(resp, data);
+            toast('Removido.');
+            await loadColaboradores();
+            renderLista();
+          }catch(err){
+            console.error(err);
+            toast('Não foi possível remover.','err');
+          }
+        });
       }
     }, { capture:true });
 
@@ -1465,7 +1714,7 @@
       const card = perfilModal.querySelector('.modal-card');
       if (card && !card.contains(ev.target)) closePerfil();
     });
-    perfilModal?.querySelector('.modal-card')?.addEventListener('mousedown', ev => ev.stopPropagation());
+    perfilModal?.querySelector(' .modal-card')?.addEventListener('mousedown', ev => ev.stopPropagation());
 
     document.addEventListener('keydown', (e)=>{
       if (e.key === 'Escape' && perfilModal?.getAttribute('aria-hidden') === 'false'){
@@ -1490,6 +1739,10 @@
     if (window.ZAuth?.softEnsureAuth) { try{ await ZAuth.softEnsureAuth(); }catch{} }
     await preloadPerms();
     bind();
+
+    // 🔐 carrega dados da empresa (inclui requer_token_login) e sincroniza checkbox
+    await loadEmpresa();
+
     await loadSetores();
     await loadColaboradores();
     renderLista();
@@ -1565,7 +1818,7 @@
         if (opt.selected) li.setAttribute('aria-selected','true');
         li.addEventListener('click', () => {
           sel.value = opt.value;
-          sel.dispatchEvent(new Event('change', { bubbles:true }));
+          sel.dispatchEvent(new Event('change', { bubbles:true } ));
           btn.textContent = opt.text;
           close();
         });

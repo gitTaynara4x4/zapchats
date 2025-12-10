@@ -76,6 +76,9 @@ class Empresa(Base):
 
     cnpj_cpf = Column(String, nullable=True, index=True)
 
+    # 🔹 NOVO: flag global da empresa pra exigir 2º fator (token) no login dos colaboradores
+    requer_token_login = Column(Boolean, nullable=False, server_default="false")
+
     # =========================
     # Módulo de E-mail (cotas independentes)
     # =========================
@@ -123,7 +126,7 @@ class Empresa(Base):
     )
 
     # (opcional) navegar pelas mensagens/ anexos de e-mail
-    email_messages = relationship("EmailMessage", back_populates="empresa", cascade="all, delete-orphan")
+    email_messages    = relationship("EmailMessage",    back_populates="empresa", cascade="all, delete-orphan")
     email_attachments = relationship("EmailAttachment", back_populates="empresa", cascade="all, delete-orphan")
 
     # ---------- Helpers de plano (WhatsApp/instâncias) ----------
@@ -644,6 +647,14 @@ class Colaborador(Base):
     setor   = relationship("Setor", back_populates="colaboradores")
     usuario = relationship("Usuario")  # opcional
 
+    # Janela de login
+    hora_login_inicio = Column(String(5), nullable=True)  # "HH:MM"
+    hora_login_fim    = Column(String(5), nullable=True)  # "HH:MM"
+
+    # Token de login (2º fator)
+    login_token = Column(String(20), nullable=True)
+    login_token_expires_at = Column(DateTime(timezone=True), nullable=True)
+
     # Many-to-many com Permissao
     permissoes = relationship(
         "Permissao",
@@ -651,12 +662,13 @@ class Colaborador(Base):
         back_populates="colaboradores",
         lazy="joined",
     )
-    instancias_ver = Column(PG_ARRAY(Integer), nullable=True)
 
+    instancias_ver = Column(PG_ARRAY(Integer), nullable=True)
 
 # =========================
 # Usuario
 # =========================
+
 class Usuario(Base):
     __tablename__ = "usuarios"
 

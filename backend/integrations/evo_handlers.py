@@ -94,9 +94,6 @@ RABBIT_BINDINGS = [b.strip() for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#
 # Config / ENV
 # =========================
 
-EVOLUTION_URL = (os.getenv("EVOLUTION_URL") or "").rstrip("/")
-EVOLUTION_KEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_KEY")
-HEADERS = {"apikey": EVOLUTION_KEY, "Content-Type": "application/json"} if EVOLUTION_KEY else {}
 
 # 🔹 NOVO: webhook pro n8n (chatbot)
 N8N_CHATBOT_WEBHOOK_URL = (os.getenv("N8N_CHATBOT_WEBHOOK_URL") or "").strip()
@@ -627,16 +624,21 @@ def _get_or_open_atendimento(
     empresa_id: int,        # continua vindo no parâmetro
     instancia_id: int,
     cliente_id: int,
-    direcao: str,                     # 'entrada' | 'saida'
+    direcao: str,           # 'entrada' | 'saida'
     ts_dt: datetime | None = None,
     operador_id: int | None = None,
 ):
     """
     Busca um atendimento aberto (status != RESOLVIDO) para (cliente_id, instancia_id).
     Se não existir, cria um novo. Usa o Enum StatusAtendimento diretamente.
+
+    ✅ IMPORTANTE:
+      - Só passa empresa_id para models.Atendimento se o modelo realmente tiver esse atributo.
+        Isso evita o erro: 'empresa_id' is an invalid keyword argument for Atendimento.
     """
     ts_dt = ts_dt or _now_utc()
 
+    # monta query base
     q = (
         db.query(models.Atendimento)
         .filter(
@@ -644,10 +646,16 @@ def _get_or_open_atendimento(
             models.Atendimento.instancia_id == instancia_id,
             models.Atendimento.status != StatusAtendimento.RESOLVIDO,
         )
-        .order_by(models.Atendimento.criado_em.desc())
     )
 
+    # se o modelo tiver empresa_id, filtra também por empresa
+    if hasattr(models.Atendimento, "empresa_id"):
+        q = q.filter(models.Atendimento.empresa_id == empresa_id)
+
+    q = q.order_by(models.Atendimento.criado_em.desc())
     a = q.first()
+
+    # ===== NÃO EXISTE ATENDIMENTO ABERTO → CRIA =====
     if not a:
         status_ini = (
             StatusAtendimento.EM_ATENDIMENTO
@@ -655,46 +663,51 @@ def _get_or_open_atendimento(
             else StatusAtendimento.NOVO
         )
 
-        a = models.Atendimento(
-            empresa_id=empresa_id,  # ✅ VOLTA A GRAVAR A EMPRESA
-            cliente_id=cliente_id,
-            instancia_id=instancia_id,
-            operador_id=(operador_id if direcao == "saida" else None),
-            status=status_ini,
-            criado_em=ts_dt,
-        )
+        # monta kwargs de forma segura
+        base_kwargs: dict[str, Any] = {
+            "cliente_id": cliente_id,
+            "instancia_id": instancia_id,
+            "operador_id": (operador_id if direcao == "saida" else None),
+            "status": status_ini,
+            "criado_em": ts_dt,
+        }
+
+        # 🔹 Só adiciona empresa_id se o modelo tiver esse atributo
+        if hasattr(models.Atendimento, "empresa_id"):
+            base_kwargs["empresa_id"] = empresa_id
+
+        a = models.Atendimento(**base_kwargs)
         db.add(a)
 
         try:
             db.flush()
         except IntegrityError:
-            # corrida: alguém criou entre o select e o insert
+            # Corrida: alguém criou entre o SELECT e o INSERT
             db.rollback()
             a = q.first()
             if not a:
-                a = models.Atendimento(
-                    empresa_id=empresa_id,  # ✅ TAMBÉM AQUI
-                    cliente_id=cliente_id,
-                    instancia_id=instancia_id,
-                    operador_id=(operador_id if direcao == "saida" else None),
-                    status=status_ini,
-                    criado_em=ts_dt,
-                )
+                # tenta de novo com os mesmos kwargs seguros
+                a = models.Atendimento(**base_kwargs)
                 db.add(a)
                 db.flush()
 
-    # Se for mensagem de saída, garante status EM_ATENDIMENTO e seta operador se ainda não tiver
+    # ===== AJUSTES EM MENSAGEM DE SAÍDA =====
     if direcao == "saida":
         try:
+            # se não estiver EM_ATENDIMENTO, força
             if getattr(a, "status", None) != StatusAtendimento.EM_ATENDIMENTO:
                 a.status = StatusAtendimento.EM_ATENDIMENTO
-            if operador_id and not a.operador_id:
+
+            # se veio operador_id e ainda não tem operador definido, seta
+            if operador_id and not getattr(a, "operador_id", None):
                 a.operador_id = operador_id
         except Exception:
-            # não deixa estourar a rotina inteira por qualquer merdinha
+            # não deixa quebrar o fluxo todo por qualquer coisa aqui
             pass
 
     return a
+
+
 
 def _status_token(val) -> str | None:
     """Converte Enum/str para o token esperado no DB (minúsculos)."""
@@ -702,7 +715,6 @@ def _status_token(val) -> str | None:
         return None
     raw = getattr(val, "value", val)  # aceita Enum ou str
     return str(raw).lower()
-
 
 # =========================
 # LID resolver/cache + pendentes
@@ -1544,6 +1556,8 @@ HANDLERS[EvoEvent.REMOVE_INSTANCE] = on_logout_instance
 
 # === [HANDLER: MESSAGES_UPSERT]  =============================================
 
+# === [HANDLER: MESSAGES_UPSERT]  =============================================
+
 @handler(EvoEvent.MESSAGES_UPSERT)
 async def on_messages_upsert(inst_id: str, data):
     """
@@ -1611,7 +1625,7 @@ async def on_messages_upsert(inst_id: str, data):
         LOG(f"[N8N] falha ao agendar envio MESSAGES_UPSERT: {e}")
 
     # ============================================================
-    # A PARTIR DAQUI É O SEU CÓDIGO ORIGINAL, INALTERADO
+    # A PARTIR DAQUI É O SEU CÓDIGO ORIGINAL (com chatbot plugado)
     # ============================================================
     with SessionLocal() as db:
         inst = _get_inst_row(db, inst_id)
@@ -1832,6 +1846,20 @@ async def on_messages_upsert(inst_id: str, data):
                     ts=_iso_utc(ts_msg),
                     preview=_short(conteudo),
                 )
+
+                # 🔹 N8N CHATBOT: envia só mensagem textual "mastigada"
+                try:
+                    if _is_textual_content(conteudo):
+                        _notify_n8n_chatbot(
+                            empresa_id=empresa_id,
+                            instancia_id=inst.id,
+                            jid=remote_jid,
+                            numero=telefone,
+                            texto=conteudo,
+                            direcao=direcao,  # "entrada" ou "saida"
+                        )
+                except Exception as e:
+                    LOG(f"[N8N][chatbot] erro ao enviar msg simples: {e}")
 
                 # 5) CLIENTE: primeiro tenta achar, depois cria se não tiver
                 try:
@@ -2307,76 +2335,128 @@ async def on_call(first: str, payload: dict | list):
         empresa_id = inst_row.empresa_id
         me_num = _me_number_by_inst(inst_row)
 
+        # Normaliza payload em uma lista de "items"
         if isinstance(payload, list):
             items = [x for x in payload if isinstance(x, dict)]
         elif isinstance(payload, dict):
             data = payload.get("data")
-            if isinstance(data, list):   items = [x for x in data if isinstance(x, dict)]
-            elif isinstance(data, dict): items = [data]
-            else:                        items = [payload]
+            if isinstance(data, list):
+                items = [x for x in data if isinstance(x, dict)]
+            elif isinstance(data, dict):
+                items = [data]
+            else:
+                items = [payload]
         else:
             items = []
 
+        # Se vier vazio, só manda um CALL vazio pro front
         if not items:
             try:
-                await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "call", "instance": inst_name, "items": [], "raw": None, "serverTimestamp": _server_ts_ms()})
+                await conexoes_ativas.send_message(
+                    f"emp:{empresa_id}",
+                    {
+                        "type": "call",
+                        "instance": inst_name,
+                        "items": [],
+                        "raw": None,
+                        "serverTimestamp": _server_ts_ms(),
+                    },
+                )
             except Exception as e:
                 LOG(f"[CALL] Falha ao emitir WS vazio: {e}")
             return
 
+        # ==== helpers locais ==================================================
+
         def _num_of(s: str | None) -> str | None:
             if not isinstance(s, str):
                 return None
-            s = _jid_strip_device(s)
-            if s.endswith("@s.whatsapp.net"):
-                s = s.split("@", 1)[0]
-            return normalizar_telefone(s)
+            s2 = _jid_strip_device(s)
+            if s2.endswith("@s.whatsapp.net"):
+                s2 = s2.split("@", 1)[0]
+            return normalizar_telefone(s2)
 
         def _fmt_kind(kind: str | None) -> str:
             k = (kind or "").lower()
-            if "video" in k: return "vídeo"
-            if "screen" in k: return "compartilhar tela"
-            if "voice" in k or "audio" in k: return "voz"
+            if "video" in k:
+                return "vídeo"
+            if "screen" in k:
+                return "compartilhar tela"
+            if "voice" in k or "audio" in k:
+                return "voz"
             return k or "chamada"
 
         def _fmt_status(st: str | None) -> str:
             s = (st or "").lower()
-            map_ = {"ringing":"chamando","offer":"iniciada","accept":"atendida","accepted":"atendida","active":"em curso",
-                    "end":"finalizada","ended":"finalizada","missed":"perdida","declined":"recusada","reject":"recusada",
-                    "timeout":"sem resposta","busy":"ocupado"}
+            map_ = {
+                "ringing": "chamando",
+                "offer": "iniciada",
+                "accept": "atendida",
+                "accepted": "atendida",
+                "active": "em curso",
+                "end": "finalizada",
+                "ended": "finalizada",
+                "missed": "perdida",
+                "declined": "recusada",
+                "reject": "recusada",
+                "timeout": "sem resposta",
+                "busy": "ocupado",
+            }
             return map_.get(s, s.upper() if s else "—")
 
-        ws_items = []
+        ws_items: list[dict] = []
 
+        # ==== processa cada item de chamada ===================================
         for raw in items:
             d = raw if isinstance(raw, dict) else {}
             call = d.get("call") if isinstance(d.get("call"), dict) else d
 
-            call_id  = (call.get("id") or call.get("callId") or call.get("callID") or d.get("id"))
-            c_from   = (call.get("from") or call.get("caller") or call.get("jid") or call.get("peer"))
-            c_to     = (call.get("to") or call.get("callee"))
-            c_type   = (call.get("type") or call.get("callType"))
-            c_status = (call.get("status") or call.get("state") or d.get("status"))
-            c_ts     = (call.get("timestamp") or call.get("ts") or d.get("timestamp"))
+            call_id = (
+                call.get("id")
+                or call.get("callId")
+                or call.get("callID")
+                or d.get("id")
+            )
+            c_from = (
+                call.get("from")
+                or call.get("caller")
+                or call.get("jid")
+                or call.get("peer")
+            )
+            c_to = call.get("to") or call.get("callee")
+            c_type = call.get("type") or call.get("callType")
+            c_status = call.get("status") or call.get("state") or d.get("status")
+            c_ts = call.get("timestamp") or call.get("ts") or d.get("timestamp")
 
             from_num = _num_of(c_from)
-            to_num   = _num_of(c_to)
+            to_num = _num_of(c_to)
 
-            tipo_msg = None; other_num = None
+            # direção e "outro participante"
+            tipo_msg: str | None = None
+            other_num: str | None = None
+
             if me_num and from_num == me_num:
-                tipo_msg = "saida"; other_num = to_num or from_num
+                # nós ligamos
+                tipo_msg = "saida"
+                other_num = to_num or from_num
             elif me_num and to_num == me_num:
-                tipo_msg = "entrada"; other_num = from_num or to_num
+                # ligaram pra nós
+                tipo_msg = "entrada"
+                other_num = from_num or to_num
             else:
+                # fallback se não bater com me_num
                 if from_num and from_num != me_num:
-                    tipo_msg = "entrada"; other_num = from_num
+                    tipo_msg = "entrada"
+                    other_num = from_num
                 else:
-                    tipo_msg = "saida";   other_num = to_num or from_num
+                    tipo_msg = "saida"
+                    other_num = to_num or from_num
 
             if not other_num:
                 LOG(f"[CALL] Sem número do outro participante; ignorando item (id={call_id}).")
                 continue
 
+            # upsert do cliente
             nome_padrao = formatar_telefone_br(other_num)
             cli_id = upsert_cliente(
                 db,
@@ -2385,66 +2465,112 @@ async def on_call(first: str, payload: dict | list):
                 telefone_raw=other_num,
                 nome=nome_padrao,
                 nome_whatsapp=None,
-                avatar_url=None
+                avatar_url=None,
             )
             if not cli_id:
                 continue
+
             cliente = _fetch_cliente(db, cli_id)
 
+            # um msg_id por callId
             msg_id = f"CALL:{call_id}" if call_id else None
             ts_dt = _to_dt_utc(c_ts)
 
-            if msg_id and db.query(models.Mensagem.id).filter_by(cliente_id=cli_id, msg_id=msg_id).first():
-                ws_items.append({
-                    "id": call_id or None,"from": c_from or None,"from_num": from_num,"to": c_to or None,"to_num": to_num,
-                    "timestamp_unix": _int_unix(ts_dt),
-                    "timestamp": _iso_utc(ts_dt),
-                    "timestamp_local": _iso_local(ts_dt),
-                    "status": (c_status or "").upper(),"call_type": (c_type or "").lower() or None,
-                    "is_group": bool(call.get("isGroup") or call.get("group") or False),
-                })
-                continue
+            # ===== AQUI é o pulo do gato pro UNIQUE (instancia_id, msg_id) =====
+            existing_msg: models.Mensagem | None = None
+            if msg_id:
+                existing_msg = (
+                    db.query(models.Mensagem)
+                    .filter(
+                        models.Mensagem.instancia_id == inst_row.id,
+                        models.Mensagem.msg_id == msg_id,
+                    )
+                    .first()
+                )
 
             kind_txt = _fmt_kind(c_type)
             status_txt = _fmt_status(c_status)
             dir_txt = "enviada" if tipo_msg == "saida" else "recebida"
             conteudo = f"[Ligação] {kind_txt} – {dir_txt} ({status_txt})"
 
-            m = models.Mensagem(
-                empresa_id=empresa_id, cliente_id=cli_id, conteudo=conteudo,
-                tipo=tipo_msg, lida=(tipo_msg == "saida"), ack=None,
-                timestamp=ts_dt, msg_id=msg_id, instancia_id=inst_row.id,
+            if existing_msg:
+                # Já existe uma mensagem pra essa CALL nessa instância
+                existing_msg.conteudo = conteudo
+                existing_msg.timestamp = ts_dt
+                # Se por algum motivo o cliente mudou, atualiza também
+                if existing_msg.cliente_id != cli_id:
+                    existing_msg.cliente_id = cli_id
+                m = existing_msg
+            else:
+                # Primeira vez que vemos essa CALL → cria
+                m = models.Mensagem(
+                    empresa_id=empresa_id,
+                    cliente_id=cli_id,
+                    conteudo=conteudo,
+                    tipo=tipo_msg,
+                    lida=(tipo_msg == "saida"),
+                    ack=0,
+                    timestamp=ts_dt,
+                    msg_id=msg_id,
+                    instancia_id=inst_row.id,
+                )
+                _carimbar_inst(m, inst_row)
+                db.add(m)
+                db.flush()
+
+            # payload resumido de call pra WS "CALL"
+            ws_items.append(
+                {
+                    "id": call_id or None,
+                    "from": c_from or None,
+                    "from_num": from_num,
+                    "to": c_to or None,
+                    "to_num": to_num,
+                    "timestamp_unix": _int_unix(ts_dt),
+                    "timestamp": _iso_utc(ts_dt),
+                    "timestamp_local": _iso_local(ts_dt),
+                    "status": (c_status or "").upper(),
+                    "call_type": (c_type or "").lower() or None,
+                    "is_group": bool(
+                        call.get("isGroup") or call.get("group") or False
+                    ),
+                    "mensagem_id": m.id,
+                    "cliente_id": m.cliente_id,
+                }
             )
-            _carimbar_inst(m, inst_row)
-            db.add(m); db.flush()
 
-            ws_items.append({
-                "id": call_id or None,"from": c_from or None,"from_num": from_num,"to": c_to or None,"to_num": to_num,
-                "timestamp_unix": _int_unix(ts_dt),
-                "timestamp": _iso_utc(ts_dt),
-                "timestamp_local": _iso_local(ts_dt),
-                "status": (c_status or "").upper(),
-                "call_type": (c_type or "").lower() or None,"is_group": bool(call.get("isGroup") or call.get("group") or False),
-                "mensagem_id": m.id,"cliente_id": cli_id,
-            })
-
+            # push individual pra linha de atendimento (aparecer como mensagem)
             try:
                 await conexoes_ativas.send_message(
                     f"emp:{empresa_id}",
-                    {"empresa_id": empresa_id, "cliente_id": cli_id, "telefone": formatar_telefone_br(other_num),
-                     "avatar_url": getattr(cliente, "avatar_url", None) if cliente else None,
-                     "push_name": getattr(cliente, "nome_whatsapp", None) if cliente else None,
-                     "nome": getattr(cliente, "nome", None) if cliente else nome_padrao,
-                     "mensagem": conteudo, "tipo": tipo_msg, "origem": "sistema",
-                     "timestamp": _iso_utc(ts_dt),
-                     "timestamp_local": _iso_local(ts_dt),
-                     "msg_id": msg_id or str(m.id),
-                     "ack": None, "instancia_id": inst_row.id,
-                     "serverTimestamp": _server_ts_ms()}
+                    {
+                        "empresa_id": empresa_id,
+                        "cliente_id": m.cliente_id,
+                        "telefone": formatar_telefone_br(other_num),
+                        "avatar_url": getattr(cliente, "avatar_url", None)
+                        if cliente
+                        else None,
+                        "push_name": getattr(cliente, "nome_whatsapp", None)
+                        if cliente
+                        else None,
+                        "nome": getattr(cliente, "nome", None)
+                        if cliente
+                        else nome_padrao,
+                        "mensagem": conteudo,
+                        "tipo": tipo_msg,
+                        "origem": "sistema",
+                        "timestamp": _iso_utc(ts_dt),
+                        "timestamp_local": _iso_local(ts_dt),
+                        "msg_id": msg_id or str(m.id),
+                        "ack": 0,
+                        "instancia_id": inst_row.id,
+                        "serverTimestamp": _server_ts_ms(),
+                    },
                 )
             except Exception as e:
                 LOG(f"[CALL] Falha ao emitir WS (linha mensagem): {e}")
 
+        # commit geral
         try:
             db.commit()
         except Exception as e:
@@ -2456,10 +2582,21 @@ async def on_call(first: str, payload: dict | list):
         except Exception:
             pass
 
+    # resumo das chamadas pra aba/visor de CALLS
     try:
-        await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "call", "instance": inst_name, "items": ws_items, "serverTimestamp": _server_ts_ms()})
+        await conexoes_ativas.send_message(
+            f"emp:{empresa_id}",
+            {
+                "type": "call",
+                "instance": inst_name,
+                "items": ws_items,
+                "serverTimestamp": _server_ts_ms(),
+            },
+        )
     except Exception as e:
         LOG(f"[CALL] Falha ao emitir WS resumo CALL: {e}")
+
+
 
 def _grupo_row_by_remote(db: Session, empresa_id: int, remote_jid: str, instancia_id: int | None = None, inst_obj: models.EmpresaInstancia | None = None) -> models.Grupo:
     g = db.query(models.Grupo).filter(models.Grupo.empresa_id==empresa_id, models.Grupo.remote_jid==remote_jid).first()

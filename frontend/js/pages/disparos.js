@@ -8,20 +8,45 @@
   const msgEl          = $('#msgDisparo');
   const numsEl         = $('#numsDisparos');
   const dedupEl        = $('#optDedup');
+  const delayEl        = $('#delaySegundos');
+  const fileEl         = $('#fileNumeros');      // import arquivo
+  const importStatusEl = $('#importStatus');     // texto "Importado: ..."
   const resTotalEl     = $('#resTotal');
   const resValidosEl   = $('#resValidos');
   const resInvalidosEl = $('#resInvalidos');
+  const resDelayEl     = $('#resDelay');
   const btnDisparar    = $('#btnDisparar');
   const statusEl       = $('#statusDisparos');
   const tbodyHist      = $('#tbodyDisparos');
   const emptyHist      = $('#emptyDisparos');
   const topMetaEl      = $('#topMetaDisparos');
 
-  const API_BASE   = '/api/disparos';        // ajuste pro backend
-  const API_CREATE = `${API_BASE}/simples`;  // POST para criar disparo
-  const API_LIST   = `${API_BASE}?limit=50`; // GET histórico
+  // --- Picker de clientes ---
+  const btnAddFromClientes  = $('#btnAddFromClientes');
+  const clientesModal       = $('#clientesModal');
+  const clientesListEl      = $('#clientesList');
+  const clientesSearchEl    = $('#clientesSearch');
+  const clientesEmptyEl     = $('#clientesEmpty');
+  const clientesApplyBtn    = $('#btnClientesApply');
+  const clientesCloseBtn    = $('#btnClientesClose');
+  const clientesLoadMoreBtn = $('#btnClientesLoadMore');
+  const cliCheckAllEl       = $('#cliCheckAll');
+
+  const API_BASE     = '/api/disparos';
+  const API_CREATE   = `${API_BASE}/simples`;
+  const API_LIST     = `${API_BASE}?limit=50`;
+  const API_CLIENTES = '/api/clientes';
 
   const F = (window.ZAuth?.guardFetch || window.ZAuth?.authFetch || fetch);
+
+  // estado do picker de clientes
+  const clientesState = {
+    q: '',
+    items: [],
+    has_more: false,
+    next_offset: 0,
+    loading: false,
+  };
 
   // ---------------------------
   // Helpers
@@ -46,8 +71,40 @@
     }
   }
 
+  // status do import de arquivo
+  function setImportStatus (text, kind) {
+    if (!importStatusEl) return;
+    importStatusEl.textContent = text || '';
+    if (!text) {
+      importStatusEl.removeAttribute('data-kind');
+    } else if (kind) {
+      importStatusEl.dataset.kind = kind;
+    }
+  }
+
+  // sincroniza texto "Delay" do resumo com o select
+  function syncDelayResumo () {
+    if (!resDelayEl) return;
+
+    let v = 20;
+    if (delayEl) {
+      const raw = delayEl.value || '20';
+      const n = Number.parseInt(raw, 10);
+      if (Number.isFinite(n)) {
+        v = Math.max(5, Math.min(3600, n));
+      }
+    }
+
+    if (v >= 60) {
+      const min = Math.round(v / 60);
+      resDelayEl.textContent = min + (min === 1 ? ' min' : ' mins');
+    } else {
+      resDelayEl.textContent = v + 's';
+    }
+  }
+
   // ---------------------------
-  // Parse de números
+  // Parse de números (textarea)
   // ---------------------------
   function parseNumeros () {
     const raw = (numsEl?.value || '');
@@ -84,6 +141,268 @@
     return { valid, invalid };
   }
 
+  // ---------------------------
+  // Importar arquivo (CSV/TXT/XLSX)
+  // ---------------------------
+  function handleFileChange (ev) {
+    const input = ev.target;
+    const file = input?.files && input.files[0];
+    if (!file) return;
+
+    setImportStatus(`Lendo arquivo "${file.name}"…`, 'info');
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const text = String(reader.result || '');
+        if (!text.trim()) {
+          setImportStatus('Arquivo vazio ou sem conteúdo legível.', 'error');
+          input.value = '';
+          return;
+        }
+
+        const atual = numsEl?.value || '';
+        const combined = atual
+          ? (atual.trimEnd() + '\n' + text.trim())
+          : text.trim();
+
+        if (numsEl) {
+          numsEl.value = combined;
+        }
+
+        parseNumeros();
+        setImportStatus(`Importado: ${file.name} (${file.size} bytes).`, 'success');
+      } catch (e) {
+        console.error('Erro ao importar arquivo de números', e);
+        setImportStatus('Erro ao processar o arquivo.', 'error');
+      } finally {
+        input.value = ''; // permite escolher o mesmo arquivo de novo depois
+      }
+    };
+    reader.onerror = () => {
+      console.error('Erro ao ler arquivo de números', reader.error);
+      setImportStatus('Erro ao ler arquivo. Tente novamente.', 'error');
+      input.value = '';
+    };
+
+    // Lê como texto simples; para Excel/Word recomendação é exportar como CSV/TXT
+    reader.readAsText(file, 'utf-8');
+  }
+
+  // ---------------------------
+  // Picker de clientes
+  // ---------------------------
+
+  function buildClientesUrl (q, offset) {
+    const empresaId = getEmpresaId();
+    const params = new URLSearchParams();
+    if (empresaId) params.set('empresa_id', String(empresaId));
+    params.set('limit', '50');
+    params.set('offset', String(offset || 0));
+    if (q) params.set('q', q);
+    return `${API_CLIENTES}?${params.toString()}`;
+  }
+
+  function renderClientesList (items, append) {
+    if (!clientesListEl) return;
+
+    if (!append) {
+      clientesListEl.innerHTML = '';
+    }
+
+    if ((!items || !items.length) && !append) {
+      if (clientesEmptyEl) clientesEmptyEl.style.display = '';
+      return;
+    }
+
+    if (clientesEmptyEl) clientesEmptyEl.style.display = 'none';
+
+    items.forEach((item) => {
+      const tr = document.createElement('tr');
+
+      const nome = (item.nome_whatsapp || item.nome || 'Cliente').toString();
+      const telefone = (item.telefone || '').toString();
+      const depto = (item.departamento || '').toString();
+      const digits = telefone.replace(/\D+/g, '');
+
+      // pequena sanitização pra evitar quebrar o HTML
+      const safeNome = nome.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const safeTel  = telefone.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const safeDep  = depto.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+      tr.innerHTML = `
+        <td>
+          <input type="checkbox"
+                 class="cli-check"
+                 data-phone="${safeTel}"
+                 data-digits="${digits}"
+                 data-nome="${safeNome}">
+        </td>
+        <td>${safeNome}</td>
+        <td>${safeTel || '—'}</td>
+        <td>${safeDep || '—'}</td>
+      `;
+      clientesListEl.appendChild(tr);
+    });
+  }
+
+  async function loadClientes (opts) {
+    if (!clientesModal || !clientesListEl) return;
+
+    opts = opts || {};
+    const q = typeof opts.q === 'string' ? opts.q.trim() : clientesState.q;
+    const append = !!opts.append;
+
+    if (clientesState.loading) return;
+    if (append && !clientesState.has_more) return;
+
+    const offset = append ? (clientesState.next_offset || 0) : 0;
+
+    clientesState.loading = true;
+    if (!append) {
+      // reset visual
+      if (clientesEmptyEl) clientesEmptyEl.style.display = 'none';
+      clientesListEl.innerHTML = '';
+    }
+
+    try {
+      const url = buildClientesUrl(q, offset);
+      const res = await F(url, { credentials: 'include' });
+      const txt = await res.text();
+      let data;
+      try {
+        data = txt ? JSON.parse(txt) : {};
+      } catch {
+        data = { raw: txt };
+      }
+
+      const items = Array.isArray(data?.items) ? data.items : [];
+
+      if (!append) {
+        clientesState.items = items.slice();
+      } else {
+        clientesState.items = clientesState.items.concat(items);
+      }
+
+      clientesState.q = q;
+      clientesState.has_more = !!data?.has_more;
+      clientesState.next_offset = data?.next_offset || 0;
+
+      renderClientesList(items, append);
+
+      if (clientesLoadMoreBtn) {
+        clientesLoadMoreBtn.style.display = clientesState.has_more ? '' : 'none';
+      }
+    } catch (e) {
+      console.error('Erro ao carregar clientes para o disparo', e);
+      if (!append) {
+        renderClientesList([], false);
+      }
+      if (clientesLoadMoreBtn) {
+        clientesLoadMoreBtn.style.display = 'none';
+      }
+    } finally {
+      clientesState.loading = false;
+    }
+  }
+
+  function openClientesModal () {
+    if (!clientesModal) return;
+
+    // reset estado
+    clientesState.q = '';
+    clientesState.items = [];
+    clientesState.has_more = false;
+    clientesState.next_offset = 0;
+    if (clientesSearchEl) clientesSearchEl.value = '';
+    if (clientesListEl) clientesListEl.innerHTML = '';
+    if (clientesEmptyEl) clientesEmptyEl.style.display = 'none';
+    if (cliCheckAllEl) cliCheckAllEl.checked = false;
+
+    clientesModal.setAttribute('aria-hidden', 'false');
+    clientesModal.classList.add('is-open');
+
+    loadClientes({ q: '', append: false });
+
+    setTimeout(() => {
+      if (clientesSearchEl) clientesSearchEl.focus();
+    }, 50);
+  }
+
+  function closeClientesModal () {
+    if (!clientesModal) return;
+    clientesModal.setAttribute('aria-hidden', 'true');
+    clientesModal.classList.remove('is-open');
+  }
+
+  function applyClientesSelection () {
+    if (!clientesListEl || !numsEl) {
+      closeClientesModal();
+      return;
+    }
+
+    const checks = $$('.cli-check:checked', clientesListEl);
+    if (!checks.length) {
+      alert('Selecione pelo menos um cliente para adicionar.');
+      return;
+    }
+
+    const { valid, invalid } = parseNumeros();
+    const seenDigits = new Set();
+    valid.forEach(v => seenDigits.add(v.digits));
+    invalid.forEach(v => seenDigits.add(v.digits));
+
+    const toAdd = [];
+
+    checks.forEach(ch => {
+      const phone  = ch.dataset.phone || '';
+      const digits = (ch.dataset.digits || '').replace(/\D+/g, '');
+      if (!digits) return;
+
+      if (dedupEl && dedupEl.checked && seenDigits.has(digits)) {
+        return; // já existe
+      }
+
+      seenDigits.add(digits);
+      const raw = phone || digits;
+      toAdd.push(raw);
+    });
+
+    if (!toAdd.length) {
+      alert('Nenhum número novo para adicionar (todos já estavam na lista).');
+      closeClientesModal();
+      return;
+    }
+
+    let base = numsEl.value || '';
+    base = base.trimEnd();
+    if (base && !base.endsWith('\n')) {
+      base += '\n';
+    }
+    base += toAdd.join('\n');
+    numsEl.value = base;
+
+    parseNumeros();
+    closeClientesModal();
+  }
+
+  // debounce da busca de clientes
+  let clientesSearchTimer = null;
+  function handleClientesSearchInput () {
+    if (!clientesSearchEl) return;
+    const term = clientesSearchEl.value.trim();
+
+    if (clientesSearchTimer) {
+      clearTimeout(clientesSearchTimer);
+    }
+    clientesSearchTimer = setTimeout(() => {
+      loadClientes({ q: term, append: false });
+    }, 300);
+  }
+
+  // ---------------------------
+  // Montagem do payload
+  // ---------------------------
   function getPayload () {
     const mensagem = (msgEl?.value || '').trim();
     const { valid } = parseNumeros();
@@ -101,11 +420,21 @@
 
     const numeros = valid.map(v => v.raw);
 
+    let delaySegundos = 20;
+    if (delayEl) {
+      const raw = delayEl.value || '20';
+      const n = Number.parseInt(raw, 10);
+      if (Number.isFinite(n)) {
+        delaySegundos = Math.max(5, Math.min(3600, n));
+      }
+    }
+
     return {
       mensagem,
       numeros,
       instancia_id: window.__INST_ID || null,
-      empresa_id: getEmpresaId() || undefined
+      empresa_id: getEmpresaId() || undefined,
+      delay_segundos: delaySegundos
     };
   }
 
@@ -141,14 +470,36 @@
       }
 
       if (!res.ok || data?.ok === false) {
-        throw new Error(data?.detail || `Erro HTTP ${res.status}`);
+        let msg = '';
+        const detail = data?.detail;
+
+        if (typeof detail === 'string') {
+          msg = detail;
+        } else if (Array.isArray(detail)) {
+          msg = detail
+            .map(d => d.msg || d.message || JSON.stringify(d))
+            .join(' | ');
+        } else if (detail && typeof detail === 'object') {
+          msg = detail.msg || detail.message || JSON.stringify(detail);
+        } else if (data?.message) {
+          msg = data.message;
+        } else {
+          msg = `Erro HTTP ${res.status}`;
+        }
+
+        const err = new Error(msg);
+        err.data = data;
+        err.status = res.status;
+        throw err;
       }
 
       setStatus('Disparo criado com sucesso.', 'success');
       carregarHistorico();
     } catch (e) {
-      console.error(e);
-      const msg = e?.message || 'Erro ao enviar disparo.';
+      console.error('Erro ao enviar disparo', e);
+      const msg =
+        (e && typeof e.message === 'string' && e.message) ||
+        'Erro ao enviar disparo.';
       setStatus(msg, 'error');
       alert('Erro ao enviar disparo: ' + msg);
     } finally {
@@ -242,7 +593,7 @@
   }
 
   // =====================================================
-  // Dropdown de instâncias (igual conceito Dashboard/Mídias)
+  // Dropdown de instâncias
   // =====================================================
   function ensureCSSEscape () {
     if (!window.CSS) window.CSS = {};
@@ -397,7 +748,7 @@
             items = Array.isArray(j.instancias) ? j.instancias : [];
           }
         } catch {
-          // ignora, tenta fallback
+          // ignora
         }
 
         if (!items.length) {
@@ -465,8 +816,56 @@
     if (dedupEl) {
       dedupEl.addEventListener('change', parseNumeros);
     }
+    if (delayEl) {
+      delayEl.addEventListener('change', syncDelayResumo);
+      syncDelayResumo();
+    } else if (resDelayEl) {
+      resDelayEl.textContent = '20s';
+    }
+    if (fileEl) {
+      fileEl.addEventListener('change', handleFileChange);
+    }
     if (btnDisparar) {
       btnDisparar.addEventListener('click', enviarDisparo);
+    }
+
+    // picker de clientes: eventos
+    if (btnAddFromClientes && clientesModal) {
+      btnAddFromClientes.addEventListener('click', openClientesModal);
+    }
+    if (clientesCloseBtn) {
+      clientesCloseBtn.addEventListener('click', closeClientesModal);
+    }
+    if (clientesApplyBtn) {
+      clientesApplyBtn.addEventListener('click', applyClientesSelection);
+    }
+    if (clientesLoadMoreBtn) {
+      clientesLoadMoreBtn.addEventListener('click', () => loadClientes({ append: true }));
+    }
+    if (clientesSearchEl) {
+      clientesSearchEl.addEventListener('input', handleClientesSearchInput);
+    }
+    if (cliCheckAllEl && clientesListEl) {
+      cliCheckAllEl.addEventListener('change', () => {
+        const checked = cliCheckAllEl.checked;
+        $$('.cli-check', clientesListEl).forEach(ch => {
+          ch.checked = checked;
+        });
+      });
+    }
+    if (clientesModal) {
+      // fechar clicando fora do painel
+      clientesModal.addEventListener('click', (e) => {
+        if (e.target === clientesModal) {
+          closeClientesModal();
+        }
+      });
+      // ESC fecha modal
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && clientesModal.classList.contains('is-open')) {
+          closeClientesModal();
+        }
+      });
     }
 
     initInstDropdown();
@@ -476,7 +875,7 @@
     };
 
     if (window.Page && typeof window.Page.guarded === 'function') {
-      window.Page.guarded(doLoad);
+      window.Page.guarded('disparos.ver', doLoad);
     } else {
       doLoad();
     }

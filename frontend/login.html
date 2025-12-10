@@ -74,37 +74,73 @@
         </div>
 
         <form id="form-login" class="form" autocomplete="on">
-          <div class="field">
-            <label class="label">E-mail</label>
-            <input id="email" type="text" name="email" required class="input" placeholder="usuario@dominio">
-            <small id="email-help" class="muted" style="display:block;margin-top:6px"></small>
-          </div>
+          <!-- PASSO 1: e-mail + senha -->
+          <div id="step1-fields">
+            <div class="field">
+              <label class="label">E-mail</label>
+              <input id="email" type="text" name="email" required class="input" placeholder="usuario@dominio">
+              <small id="email-help" class="muted" style="display:block;margin-top:6px"></small>
+            </div>
 
-          <div class="field">
-            <label class="label">Senha</label>
-            <div class="input-wrap">
-              <input id="senha" type="password" name="senha" required class="input" placeholder="••••••••">
-              <button type="button" id="togglePassBtn" class="icon-btn" aria-label="Mostrar senha">
-                <!-- aberto -->
-                <svg id="eye-open" viewBox="0 0 24 24">
-                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/>
-                  <circle cx="12" cy="12" r="3.2"/>
-                </svg>
-                <!-- fechado -->
-                <svg id="eye-off" viewBox="0 0 24 24" class="hidden">
-                  <path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-6.5 0-10-7-10-7a19.5 19.5 0 0 1 5.11-5.79M9.9 4.24A10.8 10.8 0 0 1 12 4c6.5 0 10 8 10 8a19.7 19.7 0 0 1-3.06 3.95"/>
-                  <path d="M1 1l22 22"/>
-                </svg>
-              </button>
+            <div class="field">
+              <label class="label">Senha</label>
+              <div class="input-wrap">
+                <input id="senha" type="password" name="senha" required class="input" placeholder="••••••••">
+                <button type="button" id="togglePassBtn" class="icon-btn" aria-label="Mostrar senha">
+                  <!-- aberto -->
+                  <svg id="eye-open" viewBox="0 0 24 24">
+                    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/>
+                    <circle cx="12" cy="12" r="3.2"/>
+                  </svg>
+                  <!-- fechado -->
+                  <svg id="eye-off" viewBox="0 0 24 24" class="hidden">
+                    <path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-6.5 0-10-7-10-7a19.5 19.5 0 0 1 5.11-5.79M9.9 4.24A10.8 10.8 0 0 1 12 4c6.5 0 10 8 10 8a19.7 19.7 0 0 1-3.06 3.95"/>
+                    <path d="M1 1l22 22"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="row-between">
+              <label class="muted" style="display:inline-flex;align-items:center;gap:8px">
+                <input id="remember" type="checkbox" style="width:16px;height:16px">
+                Lembrar de mim
+              </label>
+              <a id="link-forgot" href="/esqueci_senha" class="link">Esqueci minha senha</a>
             </div>
           </div>
 
-          <div class="row-between">
-            <label class="muted" style="display:inline-flex;align-items:center;gap:8px">
-              <input id="remember" type="checkbox" style="width:16px;height:16px">
-              Lembrar de mim
-            </label>
-            <a id="link-forgot" href="/esqueci_senha" class="link">Esqueci minha senha</a>
+          <!-- PASSO 2: código enviado por e-mail (apenas para colaboradores quando exigido) -->
+          <div id="step2-fields" class="hidden">
+            <p id="token-info" class="muted" style="margin-bottom:12px">
+              Enviamos um código de acesso para o seu e-mail. Digite-o abaixo para concluir o login.
+            </p>
+
+            <div class="field">
+              <label class="label">Código de acesso</label>
+              <input
+                id="login-token"
+                type="text"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                maxlength="6"
+                class="input"
+                autocomplete="one-time-code"
+                placeholder="000000"
+              >
+              <small class="muted" style="display:block;margin-top:6px">
+                Verifique também a pasta de spam/lixo eletrônico se não encontrar o e-mail.
+              </small>
+            </div>
+
+            <button
+              type="button"
+              id="btn-token-back"
+              class="btn btn-ghost"
+              style="margin-top:4px"
+            >
+              &larr; Voltar para senha
+            </button>
           </div>
 
           <div id="erro" class="error hidden"></div>

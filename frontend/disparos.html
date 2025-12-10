@@ -57,7 +57,7 @@
     <section class="box box-config" aria-label="Configurar disparo">
       <header class="box-header">
         <h2>Configurar disparo</h2>
-        <p>Defina a mensagem e os números que vão receber o disparo.</p>
+        <p>Defina a mensagem, os números de destino e a instância que será usada para enviar.</p>
       </header>
 
       <div class="config-grid">
@@ -78,11 +78,32 @@
             <label for="numsDisparos">Números de destino</label>
             <textarea id="numsDisparos"
                       class="input input--multiline numbers-area"
-                      rows="4"
+                      rows="5"
                       placeholder="Um número por linha ou separados por vírgula/; …"></textarea>
             <small class="hint">
               Aceita DDD com ou sem +55. Ex.: <code>44988887777</code> ou <code>+5544988887777</code>.
             </small>
+
+            <!-- NOVO: ferramentas embaixo do textarea -->
+            <div class="field-tools">
+              <div class="field-tools__left">
+                <label class="file-label">
+                  <i class="fa-solid fa-file-arrow-up"></i>
+                  <span>Importar arquivo</span>
+                  <input type="file"
+                         id="fileNumeros"
+                         accept=".txt,.csv,.xlsx,.xls,.ods,.doc,.docx"
+                         style="display:none">
+                </label>
+                <span id="importStatus" class="import-status" aria-live="polite"></span>
+              </div>
+              <div class="field-tools__right">
+                <button type="button" id="btnAddFromClientes" class="btn btn-sm">
+                  <i class="fa-solid fa-address-book"></i>
+                  <span>Adicionar da lista de clientes</span>
+                </button>
+              </div>
+            </div>
           </div>
 
           <div class="field field-inline">
@@ -90,6 +111,20 @@
               <input type="checkbox" id="optDedup" checked>
               <span>Remover números duplicados automaticamente</span>
             </label>
+          </div>
+
+          <!-- NOVO: delay entre envios -->
+          <div class="field field-inline">
+            <label for="delaySegundos">Intervalo entre envios</label>
+            <select id="delaySegundos" class="input input--select">
+              <option value="5">5 segundos</option>
+              <option value="10">10 segundos</option>
+              <option value="20" selected>20 segundos</option>
+              <option value="30">30 segundos</option>
+              <option value="60">1 minuto</option>
+              <option value="120">2 minutos</option>
+              <option value="300">5 minutos</option>
+            </select>
           </div>
         </div>
 
@@ -100,6 +135,7 @@
             <li><span>Total:</span><strong id="resTotal">0</strong></li>
             <li><span>Válidos (tamanho OK):</span><strong id="resValidos">0</strong></li>
             <li><span>Suspeitos/curtos:</span><strong id="resInvalidos">0</strong></li>
+            <li><span>Intervalo entre envios:</span><strong id="resDelay">20s</strong></li>
           </ul>
           <p class="summary-note">
             O disparo será feito usando a instância selecionada no topo.
@@ -142,6 +178,59 @@
       </div>
     </section>
   </main>
+
+  <!-- Modal: adicionar números da lista de clientes -->
+  <div id="clientesModal" class="cli-modal" aria-hidden="true">
+    <div class="cli-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="cliModalTitle">
+      <header class="cli-modal__header">
+        <h2 id="cliModalTitle">
+          <i class="fa-solid fa-address-book"></i>
+          <span>Adicionar da lista de clientes</span>
+        </h2>
+        <button type="button" id="btnClientesClose" class="cli-modal__close" aria-label="Fechar">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </header>
+
+      <div class="cli-modal__body">
+        <div class="cli-modal__toolbar">
+          <input id="clientesSearch"
+                 class="input cli-modal__search"
+                 type="search"
+                 placeholder="Buscar cliente por nome, telefone…">
+        </div>
+
+        <div class="cli-modal__table-wrap">
+          <table class="cli-modal__table">
+            <thead>
+              <tr>
+                <th class="cli-col-check">
+                  <input type="checkbox" id="cliCheckAll">
+                </th>
+                <th class="cli-col-nome">Cliente</th>
+              </tr>
+            </thead>
+            <tbody id="clientesList">
+              <!-- preenchido via JS -->
+            </tbody>
+          </table>
+          <div id="clientesEmpty" class="cli-modal__empty">
+            Nenhum cliente encontrado.
+          </div>
+        </div>
+      </div>
+
+      <footer class="cli-modal__footer">
+        <button type="button" id="btnClientesLoadMore" class="btn btn-sm">
+          Carregar mais
+        </button>
+        <span class="cli-modal__spacer"></span>
+        <button type="button" id="btnClientesApply" class="btn primary btn-sm">
+          Adicionar selecionados
+        </button>
+      </footer>
+    </div>
+  </div>
 
   <!-- Toast (se você já usa em outras telas) -->
   <div id="toast" role="status" aria-live="polite"></div>
