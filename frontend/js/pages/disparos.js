@@ -203,6 +203,26 @@
     return `${API_CLIENTES}?${params.toString()}`;
   }
 
+  function updateRowFromCheckbox (checkbox) {
+    const tr = checkbox.closest('tr');
+    if (!tr) return;
+    if (checkbox.checked) tr.classList.add('is-selected');
+    else tr.classList.remove('is-selected');
+  }
+
+  function syncCliCheckAllState () {
+    if (!cliCheckAllEl || !clientesListEl) return;
+    const allChecks = $$('.cli-check', clientesListEl);
+    if (!allChecks.length) {
+      cliCheckAllEl.checked = false;
+      cliCheckAllEl.indeterminate = false;
+      return;
+    }
+    const totalChecked = allChecks.filter(ch => ch.checked).length;
+    cliCheckAllEl.checked = totalChecked === allChecks.length;
+    cliCheckAllEl.indeterminate = totalChecked > 0 && totalChecked < allChecks.length;
+  }
+
   function renderClientesList (items, append) {
     if (!clientesListEl) return;
 
@@ -219,6 +239,7 @@
 
     items.forEach((item) => {
       const tr = document.createElement('tr');
+      tr.classList.add('cli-row');
 
       const nome = (item.nome_whatsapp || item.nome || 'Cliente').toString();
       const telefone = (item.telefone || '').toString();
@@ -244,6 +265,10 @@
       `;
       clientesListEl.appendChild(tr);
     });
+
+    // depois de renderizar, garante estado visual x checkbox
+    $$('.cli-check', clientesListEl).forEach(updateRowFromCheckbox);
+    syncCliCheckAllState();
   }
 
   async function loadClientes (opts) {
@@ -317,7 +342,10 @@
     if (clientesSearchEl) clientesSearchEl.value = '';
     if (clientesListEl) clientesListEl.innerHTML = '';
     if (clientesEmptyEl) clientesEmptyEl.style.display = 'none';
-    if (cliCheckAllEl) cliCheckAllEl.checked = false;
+    if (cliCheckAllEl) {
+      cliCheckAllEl.checked = false;
+      cliCheckAllEl.indeterminate = false;
+    }
 
     clientesModal.setAttribute('aria-hidden', 'false');
     clientesModal.classList.add('is-open');
@@ -398,6 +426,27 @@
     clientesSearchTimer = setTimeout(() => {
       loadClientes({ q: term, append: false });
     }, 300);
+  }
+
+  function handleClientesListClick (e) {
+    if (!clientesListEl) return;
+    const row = e.target.closest('tr');
+    if (!row || !clientesListEl.contains(row)) return;
+
+    const checkbox = row.querySelector('.cli-check');
+    if (!checkbox) return;
+
+    // se o clique foi diretamente na checkbox, deixa o comportamento normal
+    if (e.target === checkbox) {
+      updateRowFromCheckbox(checkbox);
+      syncCliCheckAllState();
+      return;
+    }
+
+    // clique em qualquer outro ponto da linha: alterna o checked
+    checkbox.checked = !checkbox.checked;
+    updateRowFromCheckbox(checkbox);
+    syncCliCheckAllState();
   }
 
   // ---------------------------
@@ -850,8 +899,13 @@
         const checked = cliCheckAllEl.checked;
         $$('.cli-check', clientesListEl).forEach(ch => {
           ch.checked = checked;
+          updateRowFromCheckbox(ch);
         });
+        syncCliCheckAllState();
       });
+    }
+    if (clientesListEl) {
+      clientesListEl.addEventListener('click', handleClientesListClick);
     }
     if (clientesModal) {
       // fechar clicando fora do painel
