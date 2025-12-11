@@ -48,7 +48,7 @@ from backend.security.passwords import hash_pwd, verify_pwd
 load_dotenv()
 
 EMAIL_REMETENTE = os.getenv("EMAIL_REMETENTE", "recuperazapchats@gmail.com")
-EMAIL_SENHA = os.getenv("EMAIL_SENHA", "qrwfnzukgfkopifr")
+EMAIL_SENHA = os.getenv("EMAIL_SENHA", "qrwfnzukgfk221opifr")
 
 JWT_SECRET = os.getenv("JWT_SECRET", "troque-me")
 JWT_EXP_MINUTES = int(os.getenv("JWT_EXP_MINUTES", str(60 * 24)))  # fallback 24h
@@ -66,9 +66,6 @@ COOKIE_SECURE = (
 COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "lax").strip().lower()  # "lax" | "strict" | "none"
 CSRF_COOKIE_NAME = os.getenv("CSRF_COOKIE_NAME", "csrf_token")
 COOKIE_DOMAIN: Optional[str] = (os.getenv("COOKIE_DOMAIN") or "").strip() or None
-
-# Número fixo do suporte para receber o código de login (apenas dígitos, ex.: 5512991865418)
-SUPORTE_LOGIN_WHATSAPP = (os.getenv("SUPORTE_LOGIN_WHATSAPP") or "").strip()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -338,8 +335,7 @@ def enviar_email_login_token(
     email_destino: str, codigo: str, nome_empresa: Optional[str] = None
 ):
     """
-    Mantido por compat (se quiser, pode continuar usando e-mail).
-    Atualmente o fluxo principal usa WhatsApp do suporte.
+    Envia o código de login por e-mail.
     """
     prefixo = f"[{nome_empresa}] " if nome_empresa else ""
     assunto = f"{prefixo}Código de acesso ao ZapChats"
@@ -360,72 +356,6 @@ Atenciosamente,
 Equipe ZapChats
 """
     _smtp_send(email_destino, assunto, corpo)
-
-
-# ───────────────────────── Envio do token via WhatsApp (suporte) ─────────────────────────
-def _format_wa_number(numero: str) -> str:
-    """
-    Normaliza o número para apenas dígitos, garantindo DDI 55.
-    Ex.: "12 99186-5418" -> "5512991865418"
-    """
-    d = "".join(ch for ch in (numero or "") if ch.isdigit())
-    if not d:
-        raise ValueError("Número de WhatsApp inválido")
-    if not d.startswith("55"):
-        d = "55" + d
-    return d
-
-
-def _format_wa_jid(numero: str) -> str:
-    """
-    Converte para JID do WhatsApp Web/Evolution: 5512991865418 -> 5512991865418@c.us
-    """
-    return _format_wa_number(numero) + "@c.us"
-
-
-def enviar_login_token_whatsapp(codigo: str, nome_empresa: Optional[str] = None):
-    """
-    Envia o código de login para o WhatsApp do SUPORTE (fixo no .env).
-    O suporte então repassa o código para o colaborador.
-    """
-    if not SUPORTE_LOGIN_WHATSAPP:
-        print(
-            "[LOGIN TOKEN WHATSAPP] SUPORTE_LOGIN_WHATSAPP não configurado. "
-            f"Código: {codigo}"
-        )
-        return
-
-    try:
-        jid = _format_wa_jid(SUPORTE_LOGIN_WHATSAPP)
-    except Exception as e:
-        print("[LOGIN TOKEN WHATSAPP] Número de suporte inválido:", repr(e))
-        return
-
-    prefixo = f"[{nome_empresa}] " if nome_empresa else "[ZapChats] "
-    texto = (
-        f"{prefixo}Código de acesso ao painel\n\n"
-        f"Código: {codigo}\n"
-        "Válido por alguns minutos.\n\n"
-        "Repasse este código para o colaborador que está tentando acessar o sistema."
-    )
-
-    try:
-        # Tenta usar algum helper de envio do seu projeto (ajuste o import/nome conforme seu evo_handlers)
-        try:
-            # EXEMPLO: ajuste pro nome real da função que envia texto no seu Evolution
-            from backend.integrations.evo_handlers import send_text_message as _evo_send_text  # type: ignore
-
-        except Exception:
-            _evo_send_text = None
-
-        if _evo_send_text:
-            _evo_send_text(jid=jid, text=texto)
-            print(f"[LOGIN TOKEN WHATSAPP] Enviado para {jid}")
-        else:
-            # fallback: apenas loga (não envia de verdade)
-            print(f"[LOGIN TOKEN WHATSAPP MOCK] Para {jid}: {texto}")
-    except Exception as e:
-        print("[LOGIN TOKEN WHATSAPP ERRO]", repr(e))
 
 
 # ───────────────────────── Util de data URL ─────────────────────────
@@ -693,22 +623,29 @@ def login(
         requer_token = bool(getattr(empresa, "requer_token_login", False)) if empresa else False
 
         if requer_token:
-            # Gera código, grava no colaborador e envia para o WhatsApp do suporte
+            # Gera código, grava no colaborador e envia por e-mail ao admin (ou ao próprio colaborador)
             codigo = gerar_codigo_login()
             colaborador.login_token = codigo
             colaborador.login_token_expires_at = datetime.utcnow() + timedelta(minutes=10)
             db.commit()
 
             try:
-                nome_emp = getattr(empresa, "nome", None) if empresa else None
-            except Exception:
-                nome_emp = None
-
-            try:
-                enviar_login_token_whatsapp(codigo, nome_emp)
-            except Exception:
+                # tenta achar um admin da empresa
+                admin_user = (
+                    db.query(models.Usuario)
+                    .filter(
+                        models.Usuario.empresa_id == colaborador.empresa_id,
+                        models.Usuario.is_admin == True,
+                    )
+                    .order_by(models.Usuario.id)
+                    .first()
+                )
+                destino = (admin_user.email if admin_user else None) or colaborador.email
+                nome_empresa = getattr(empresa, "nome", None) if empresa else None
+                enviar_email_login_token(destino, codigo, nome_empresa)
+            except Exception as e:
                 # erro de envio não deve vazar para o cliente; já comitou no banco
-                pass
+                print("[LOGIN TOKEN EMAIL] erro ao enviar código:", repr(e))
 
             # Responde sem criar sessão ainda → front mostra o 2º passo
             return {
@@ -716,8 +653,8 @@ def login(
                 "empresa_id": colaborador.empresa_id,
                 "email": colaborador.email,
                 "mensagem": (
-                    "Seu acesso precisa ser liberado com um código enviado ao "
-                    "WhatsApp do suporte da empresa. Solicite o código ao suporte."
+                    "Seu acesso precisa ser liberado com um código enviado por e-mail. "
+                    "Solicite o código ao administrador da sua empresa."
                 ),
             }
 
@@ -770,8 +707,8 @@ def confirmar_login_token(
     db: Session = Depends(get_db_session),
 ):
     """
-    Segundo passo do login quando a empresa exige código enviado ao suporte via WhatsApp.
-    O colaborador informa o código que o suporte repassou para ele.
+    Segundo passo do login quando a empresa exige código enviado por e-mail.
+    O colaborador informa o código que recebeu (via admin ou diretamente).
     """
     email = norm_email(form.email)
 
@@ -789,7 +726,7 @@ def confirmar_login_token(
     if not requer_token:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "Esta empresa não exige código de acesso via suporte.",
+            "Esta empresa não exige código de acesso adicional.",
         )
 
     # Confere se há código gerado

@@ -72,6 +72,22 @@
             <small class="hint">
               Ex.: “Olá {nome}, tudo bem? Vimos que seu contrato vence em {data_vencimento}…”
             </small>
+
+            <!-- Barra da IA (V1 + flag V2) -->
+            <div class="field-tools field-tools--msg">
+              <div class="field-tools__left">
+                <button type="button" id="btnIaMelhorar" class="btn btn-sm">
+                  <i class="fa-solid fa-wand-magic-sparkles"></i>
+                  <span>Melhorar com IA</span>
+                </button>
+              </div>
+              <div class="field-tools__right">
+                <label class="check check--inline">
+                  <input type="checkbox" id="chkIaVariar">
+                  <span>Gerar variações leves por número (beta)</span>
+                </label>
+              </div>
+            </div>
           </div>
 
           <div class="field">
@@ -84,7 +100,7 @@
               Aceita DDD com ou sem +55. Ex.: <code>44988887777</code> ou <code>+5544988887777</code>.
             </small>
 
-            <!-- NOVO: ferramentas embaixo do textarea -->
+            <!-- ferramentas embaixo do textarea -->
             <div class="field-tools">
               <div class="field-tools__left">
                 <label class="file-label">
@@ -113,7 +129,7 @@
             </label>
           </div>
 
-          <!-- NOVO: delay entre envios -->
+          <!-- Delay entre envios -->
           <div class="field field-inline">
             <label for="delaySegundos">Intervalo entre envios</label>
             <select id="delaySegundos" class="input input--select">
@@ -208,6 +224,8 @@
                   <input type="checkbox" id="cliCheckAll">
                 </th>
                 <th class="cli-col-nome">Cliente</th>
+                <th>Telefone</th>
+                <th>Departamento</th>
               </tr>
             </thead>
             <tbody id="clientesList">
@@ -227,6 +245,50 @@
         <span class="cli-modal__spacer"></span>
         <button type="button" id="btnClientesApply" class="btn primary btn-sm">
           Adicionar selecionados
+        </button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Modal: IA melhorar mensagem -->
+  <div id="iaModal" class="ia-modal" aria-hidden="true">
+    <div class="ia-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="iaModalTitle">
+      <header class="ia-modal__header">
+        <h2 id="iaModalTitle">
+          <i class="fa-solid fa-wand-magic-sparkles"></i>
+          <span>Melhorar mensagem com IA</span>
+        </h2>
+        <button type="button" id="btnIaClose" class="ia-modal__close" aria-label="Fechar">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </header>
+
+      <div class="ia-modal__body">
+        <div class="ia-cols">
+          <div class="ia-col">
+            <div class="ia-col-title">Original</div>
+            <textarea id="iaOriginal"
+                      class="input input--multiline ia-text"
+                      readonly></textarea>
+          </div>
+          <div class="ia-col">
+            <div class="ia-col-title">Sugestão da IA (editável)</div>
+            <textarea id="iaSugestao"
+                      class="input input--multiline ia-text"></textarea>
+          </div>
+        </div>
+        <div id="iaStatus" class="ia-status" aria-live="polite"></div>
+      </div>
+
+      <footer class="ia-modal__footer">
+        <button type="button" id="btnIaRegerar" class="btn btn-sm">
+          <i class="fa-solid fa-rotate"></i>
+          <span>Gerar outra variação</span>
+        </button>
+        <span class="ia-modal__spacer"></span>
+        <button type="button" id="btnIaAplicar" class="btn primary btn-sm">
+          <i class="fa-solid fa-check"></i>
+          <span>Usar esta versão</span>
         </button>
       </footer>
     </div>

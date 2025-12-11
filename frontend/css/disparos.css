@@ -292,6 +292,51 @@ textarea.input{
   gap:.5rem;
   font-size:.9rem;
 }
+.check--inline span{
+  font-size:.8rem;
+}
+
+/* Barra de ferramentas */
+.field-tools{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:.75rem;
+  margin-top:.35rem;
+  flex-wrap:wrap;
+}
+.field-tools--msg{
+  margin-top:.5rem;
+}
+.field-tools__left,
+.field-tools__right{
+  display:flex;
+  align-items:center;
+  gap:.5rem;
+  flex-wrap:wrap;
+}
+
+.file-label{
+  display:inline-flex;
+  align-items:center;
+  gap:.3rem;
+  font-size:.8rem;
+  padding:.35rem .6rem;
+  border-radius:.6rem;
+  border:1px solid var(--border);
+  cursor:pointer;
+  background:var(--hover);
+}
+.file-label i{
+  font-size:.9rem;
+}
+
+.import-status{
+  font-size:.8rem;
+  color:var(--muted);
+}
+.import-status[data-kind="success"]{ color:#22c55e; }
+.import-status[data-kind="error"]{ color:#f97373; }
 
 /* Coluna lateral (resumo) */
 .config-side{
@@ -384,51 +429,13 @@ textarea.input{
 }
 #toast.show{ display:block; }
 
-/* ===== Barra de ferramentas abaixo dos números ===== */
-.field-tools{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:.75rem;
-  margin-top:.35rem;
-  flex-wrap:wrap;
-}
-.field-tools__left,
-.field-tools__right{
-  display:flex;
-  align-items:center;
-  gap:.5rem;
-  flex-wrap:wrap;
-}
-
-.file-label{
-  display:inline-flex;
-  align-items:center;
-  gap:.3rem;
-  font-size:.8rem;
-  padding:.35rem .6rem;
-  border-radius:.6rem;
-  border:1px solid var(--border);
-  cursor:pointer;
-  background:var(--hover);
-}
-.file-label i{
-  font-size:.9rem;
-}
-
-.import-status{
-  font-size:.8rem;
-  color:var(--muted);
-}
-.import-status[data-kind="success"]{ color:#22c55e; }
-.import-status[data-kind="error"]{ color:#f97373; }
-
-/* ===== Modal de clientes ===== */
+/* ===== MODAIS ===== */
 
 body.has-modal{
   overflow:hidden;
 }
 
+/* ----- Modal de clientes ----- */
 .cli-modal{
   position:fixed;
   inset:0;
@@ -560,6 +567,113 @@ body.has-modal{
   flex:1;
 }
 
+/* Linha selecionável */
+.cli-row{
+  cursor:pointer;
+}
+.cli-row.is-selected{
+  background:var(--hover);
+}
+
+/* ----- Modal IA: melhorar mensagem ----- */
+.ia-modal{
+  position:fixed;
+  inset:0;
+  background:var(--overlay, rgba(0,0,0,.6));
+  display:none;
+  align-items:center;
+  justify-content:center;
+  z-index:70;
+}
+.ia-modal.is-open{
+  display:flex;
+}
+.ia-modal__dialog{
+  position:relative;
+  width:100%;
+  max-width:960px;
+  max-height:90vh;
+  background:var(--card);
+  color:var(--fg);
+  border-radius:.8rem;
+  box-shadow:0 16px 40px rgba(0,0,0,.6);
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+.ia-modal__header{
+  padding:.75rem 1rem;
+  border-bottom:1px solid var(--border);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:.5rem;
+}
+.ia-modal__header h2{
+  margin:0;
+  display:flex;
+  align-items:center;
+  gap:.5rem;
+  font-size:1rem;
+}
+.ia-modal__header i{
+  color:var(--muted);
+}
+.ia-modal__close{
+  border:0;
+  background:transparent;
+  color:var(--muted);
+  cursor:pointer;
+  padding:.25rem;
+  border-radius:.4rem;
+}
+.ia-modal__close:hover{
+  background:var(--hover);
+}
+
+.ia-modal__body{
+  padding:.6rem 1rem 0 1rem;
+  flex:1;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  gap:.5rem;
+}
+
+.ia-cols{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:1rem;
+}
+.ia-col-title{
+  font-size:.85rem;
+  color:var(--muted);
+  margin-bottom:.25rem;
+}
+.ia-text{
+  min-height:180px;
+  resize:vertical;
+}
+.ia-status{
+  margin:.35rem 0 .7rem 0;
+  font-size:.8rem;
+  color:var(--muted);
+}
+.ia-status[data-kind="success"]{ color:#22c55e; }
+.ia-status[data-kind="error"]{ color:#f97373; }
+
+.ia-modal__footer{
+  padding:.55rem 1rem .7rem 1rem;
+  border-top:1px solid var(--border);
+  display:flex;
+  align-items:center;
+  gap:.75rem;
+  font-size:.85rem;
+}
+.ia-modal__spacer{
+  flex:1;
+}
+
 /* ===== RESPONSIVO ===== */
 @media (max-width:960px){
   .main{ padding:1rem; }
@@ -572,7 +686,8 @@ body.has-modal{
     padding-left:0;
     padding-top:1rem;
   }
-  .cli-modal__dialog{
+  .cli-modal__dialog,
+  .ia-modal__dialog{
     max-width:calc(100% - 1.5rem);
     max-height:92vh;
   }
@@ -594,6 +709,9 @@ body.has-modal{
   }
   .table-wrap table{
     min-width:0;
+  }
+  .ia-cols{
+    grid-template-columns:1fr;
   }
 }
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import json
 import asyncio
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -25,6 +24,12 @@ router = APIRouter(prefix="/api/disparos", tags=["Disparos"])
 EVOLUTION_URL = (os.getenv("EVOLUTION_URL") or "").rstrip("/")
 # Aceita tanto EVOLUTION_APIKEY quanto EVOLUTION_API_KEY
 EVOLUTION_APIKEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_API_KEY")
+
+# n8n – fluxo de IA para melhorar mensagem de disparo
+N8N_IA_MELHORAR_DISPARO_URL = (os.getenv("N8N_IA_MELHORAR_DISPARO_URL") or "").strip()
+
+# Debug pra garantir que a env foi lida
+print("[IA-DISPARO] URL n8n =", N8N_IA_MELHORAR_DISPARO_URL)
 
 
 # =====================================================
@@ -137,6 +142,21 @@ class DisparoOut(BaseModel):
         from_attributes = True
 
 
+# ===== IA – melhorar mensagem de disparo (V1) =====
+
+class IAMelhorarDisparoIn(BaseModel):
+    draft: str = Field(..., description="Mensagem base digitada no campo de disparo")
+
+
+class IAMelhorarDisparoOut(BaseModel):
+    mensagem: str
+
+
+class IAMelhorarDisparoResp(BaseModel):
+    original: str
+    melhorada: str
+
+
 # =====================================================
 # Utilitários de normalização
 # =====================================================
@@ -239,6 +259,63 @@ async def _evolution_send_text(
 
     if resp.status_code >= 400:
         raise RuntimeError(f"Evolution sendText HTTP {resp.status_code}: {data}")
+
+
+# =====================================================
+# IA – chamada ao n8n
+# =====================================================
+
+async def _ia_melhorar_via_n8n(texto: str):
+    """
+    Chama o webhook do n8n para melhorar a mensagem de disparo.
+
+    Espera que o n8n receba algo como:
+      { "draft": "<texto>" }
+
+    E retorne:
+      - um JSON com campo "mensagem", "melhorada", "text", "draft" ou "resultado", OU
+      - texto puro (string)
+    """
+    if not N8N_IA_MELHORAR_DISPARO_URL:
+        print("[IA-DISPARO] ERRO: N8N_IA_MELHORAR_DISPARO_URL não configurada.")
+        raise HTTPException(
+            status_code=500,
+            detail="Motor de IA não configurado. Contate o administrador.",
+        )
+
+    payload = {"draft": texto}
+
+    print("[IA-DISPARO] Chamando n8n em", N8N_IA_MELHORAR_DISPARO_URL)
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                N8N_IA_MELHORAR_DISPARO_URL,
+                headers={"Content-Type": "application/json"},
+                json=payload,
+            )
+    except httpx.RequestError as e:
+        print("[IA-DISPARO] Erro ao chamar n8n:", repr(e))
+        raise HTTPException(
+            status_code=502,
+            detail="Erro ao chamar motor de IA (n8n).",
+        )
+
+    raw_text = resp.text
+    try:
+        data = resp.json()
+    except Exception:
+        data = raw_text
+
+    if resp.status_code >= 400:
+        print("[IA-DISPARO] n8n retornou HTTP", resp.status_code, "body:", data)
+        raise HTTPException(
+            status_code=502,
+            detail=f"n8n retornou erro HTTP {resp.status_code}.",
+        )
+
+    print("[IA-DISPARO] Resposta n8n OK:", data)
+    return data
 
 
 # =====================================================
@@ -365,6 +442,59 @@ async def _processar_disparo(disparo_id: int) -> None:
 # =====================================================
 # Endpoints
 # =====================================================
+
+@router.post(
+    "/ia-melhorar",
+    response_model=IAMelhorarDisparoResp,
+    summary="Usa IA (n8n) para sugerir uma versão melhorada da mensagem de disparo",
+)
+async def ia_melhorar_disparo(
+    body: dict = Body(...),
+    identity: dict = Depends(get_current_identity),
+):
+    if identity is None:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+
+    if not isinstance(body, dict):
+        # Se chegou algo inesperado (texto puro, etc.)
+        raise HTTPException(status_code=400, detail="Corpo inválido. Envie JSON.")
+
+    # Aceita tanto { "mensagem": "..." } quanto { "draft": "..." }
+    raw = body.get("mensagem") or body.get("draft") or ""
+
+    if raw is None:
+        raw = ""
+
+    if not isinstance(raw, str):
+        raw = str(raw)
+
+    texto = raw.strip()
+    if not texto:
+        raise HTTPException(status_code=400, detail="Mensagem vazia.")
+
+    # Chama n8n
+    data = await _ia_melhorar_via_n8n(texto)
+
+    melhorada = None
+    if isinstance(data, dict):
+        melhorada = (
+            data.get("melhorada")
+            or data.get("mensagem")
+            or data.get("text")
+            or data.get("draft")
+            or data.get("resultado")
+        )
+    elif isinstance(data, str):
+        melhorada = data
+
+    if not isinstance(melhorada, str) or not melhorada.strip():
+        melhorada = texto
+
+    return IAMelhorarDisparoResp(
+        original=texto,
+        melhorada=melhorada,
+    )
+
 
 @router.post(
     "/simples",

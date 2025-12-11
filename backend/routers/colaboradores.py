@@ -17,7 +17,7 @@ from fastapi import (
     Request,
     Response,
 )
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, Field
 from sqlalchemy import or_, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
@@ -165,6 +165,9 @@ class ColaboradorOut(BaseModel):
     hora_login_inicio: Optional[str] = None  # "08:00"
     hora_login_fim: Optional[str] = None  # "18:00"
 
+    # instâncias de WhatsApp que o colaborador pode ver
+    instancias_ids: list[int] = Field(default_factory=list)
+
     # extras
     setor_nome: Optional[str] = None
     tem_usuario: bool = False
@@ -188,6 +191,13 @@ class ColaboradorUpdate(BaseModel):
     senha: Optional[str] = None
     atualizar_usuario: Optional[bool] = False
     permissoes: Optional[List[str]] = None
+
+    # instâncias de WhatsApp que o colaborador pode ver
+    instancias_ids: Optional[List[int]] = None
+
+
+class ColaboradorInstanciasUpdate(BaseModel):
+    instancias_ids: List[int] = Field(default_factory=list)
 
 
 # ==========================
@@ -257,6 +267,8 @@ def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
         email=email_plano or "no-reply@local.invalid",
         telefone=telefone_plano,
         cargo=cargo_plano,
+        # instâncias permitidas (usa instancias_ver do model)
+        instancias_ids=list(c.instancias_ver or []),
         setor_nome=setor_nome,
         tem_usuario=bool(uid),
         avatar_url=avatar_url,
@@ -494,7 +506,9 @@ def atualizar_colaborador(
         colab.hora_login_fim = _norm_hora(data["hora_login_fim"])
 
     # --- senha (e sincroniza com usuário se solicitado) ---
-    atualizar_usuario_flag = bool(data.get("atualizar_usuario") or payload.atualizar_usuario)
+    atualizar_usuario_flag = bool(
+        data.get("atualizar_usuario") or payload.atualizar_usuario
+    )
 
     if "senha" in data and data["senha"]:
         nova_senha = data["senha"]
@@ -530,6 +544,18 @@ def atualizar_colaborador(
             perms = []
         colab.permissoes = perms
 
+    # --- instâncias de WhatsApp permitidas ---
+    if "instancias_ids" in data:
+        raw = data["instancias_ids"] or []
+        norm_ids: list[int] = []
+        for x in raw:
+            try:
+                if x is not None:
+                    norm_ids.append(int(x))
+            except (TypeError, ValueError):
+                continue
+        colab.instancias_ver = norm_ids
+
     try:
         db.add(colab)
         db.commit()
@@ -537,6 +563,48 @@ def atualizar_colaborador(
         db.rollback()
         # pode ser UNIQUE de email em colaboradores ou usuarios
         raise HTTPException(status_code=409, detail="E-mail já cadastrado")
+    except Exception:
+        db.rollback()
+        raise
+
+    c = (
+        db.query(models.Colaborador)
+        .options(joinedload(models.Colaborador.setor))
+        .get(colab.id)
+    )
+    return _to_out(db, c)
+
+
+@router.put("/{colab_id}/instancias", response_model=ColaboradorOut)
+def atualizar_instancias_colaborador(
+    colab_id: int,
+    payload: ColaboradorInstanciasUpdate = Body(...),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    colab = (
+        db.query(models.Colaborador)
+        .options(joinedload(models.Colaborador.setor))
+        .get(colab_id)
+    )
+    if not colab:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Colaborador não encontrado")
+
+    _assert_mesma_empresa(colab.empresa_id, user.empresa_id)
+
+    norm_ids: list[int] = []
+    for x in payload.instancias_ids or []:
+        try:
+            if x is not None:
+                norm_ids.append(int(x))
+        except (TypeError, ValueError):
+            continue
+
+    colab.instancias_ver = norm_ids
+
+    try:
+        db.add(colab)
+        db.commit()
     except Exception:
         db.rollback()
         raise

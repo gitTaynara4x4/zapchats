@@ -32,10 +32,21 @@
   const clientesLoadMoreBtn = $('#btnClientesLoadMore');
   const cliCheckAllEl       = $('#cliCheckAll');
 
-  const API_BASE     = '/api/disparos';
-  const API_CREATE   = `${API_BASE}/simples`;
-  const API_LIST     = `${API_BASE}?limit=50`;
-  const API_CLIENTES = '/api/clientes';
+  // --- IA – Melhorar mensagem ---
+  const iaBtnOpen     = $('#btnIaMelhorar');
+  const iaModal       = $('#iaModal');
+  const iaOriginalEl  = $('#iaOriginal');
+  const iaSugestaoEl  = $('#iaSugestao');
+  const iaApplyBtn    = $('#btnIaAplicar');
+  const iaRegerarBtn  = $('#btnIaRegerar');
+  const iaCloseBtn    = $('#btnIaClose');
+  const iaStatusEl    = $('#iaStatus');
+
+  const API_BASE        = '/api/disparos';
+  const API_CREATE      = `${API_BASE}/simples`;
+  const API_LIST        = `${API_BASE}?limit=50`;
+  const API_CLIENTES    = '/api/clientes';
+  const API_IA_MELHORAR = `${API_BASE}/ia-melhorar`;
 
   const F = (window.ZAuth?.guardFetch || window.ZAuth?.authFetch || fetch);
 
@@ -79,6 +90,181 @@
       importStatusEl.removeAttribute('data-kind');
     } else if (kind) {
       importStatusEl.dataset.kind = kind;
+    }
+  }
+
+  // ---------------------------
+  // IA – helpers de modal
+  // ---------------------------
+  function setIaStatus (text, kind) {
+    if (!iaStatusEl) return;
+    iaStatusEl.textContent = text || '';
+    if (!text) {
+      iaStatusEl.removeAttribute('data-kind');
+    } else if (kind) {
+      iaStatusEl.dataset.kind = kind;
+    }
+  }
+
+  function openIaModal (original, sugestao) {
+    if (!iaModal) return;
+    iaModal.setAttribute('aria-hidden', 'false');
+    iaModal.classList.add('is-open');
+    document.body.classList.add('has-modal');
+
+    if (iaOriginalEl) iaOriginalEl.value = original || '';
+    if (iaSugestaoEl) iaSugestaoEl.value = sugestao || '';
+    setIaStatus('', null);
+
+    setTimeout(() => {
+      if (iaSugestaoEl) iaSugestaoEl.focus();
+    }, 30);
+  }
+
+  function closeIaModal () {
+    if (!iaModal) return;
+    iaModal.setAttribute('aria-hidden', 'true');
+    iaModal.classList.remove('is-open');
+    document.body.classList.remove('has-modal');
+  }
+
+  function applyIaVersion () {
+    if (!iaSugestaoEl || !msgEl) {
+      closeIaModal();
+      return;
+    }
+    const texto = (iaSugestaoEl.value || '').trim();
+    if (!texto) {
+      alert('A versão da IA está vazia. Ajuste ou feche o modal.');
+      return;
+    }
+    msgEl.value = texto;
+    closeIaModal();
+    msgEl.focus();
+  }
+
+  async function chamarIaMelhorar (ev) {
+    ev?.preventDefault?.();
+
+    const draft = (msgEl?.value || '').trim();
+    if (!draft) {
+      alert('Digite a mensagem primeiro para a IA melhorar.');
+      msgEl && msgEl.focus();
+      return;
+    }
+
+    // abre modal já com o original e limpa a coluna da IA
+    openIaModal(draft, '');
+    setIaStatus('Chamando IA para melhorar sua mensagem…', 'info');
+
+    if (iaApplyBtn)  iaApplyBtn.disabled  = true;
+    if (iaRegerarBtn) iaRegerarBtn.disabled = true;
+
+    try {
+      const res = await F(API_IA_MELHORAR, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ mensagem: draft })
+      });
+
+      const txt = await res.text();
+      let data;
+      try {
+        data = txt ? JSON.parse(txt) : {};
+      } catch {
+        data = { raw: txt };
+      }
+
+      if (!res.ok) {
+        const msg =
+          (data && (data.detail || data.message)) ||
+          `Erro HTTP ${res.status}`;
+        console.error('[IA-DISPARO] Erro HTTP', res.status, data);
+        setIaStatus(msg, 'error');
+        alert('Erro ao chamar IA: ' + msg);
+        return;
+      }
+
+      const original  = data.original ?? draft;
+      const melhorada = data.melhorada ?? data.mensagem ?? data.text ?? txt ?? draft;
+
+      if (iaOriginalEl) iaOriginalEl.value   = original;
+      if (iaSugestaoEl) iaSugestaoEl.value   = melhorada;
+
+      if (melhorada === '__EMPTY__') {
+        setIaStatus('A IA entendeu que o rascunho está vazio. Revise o texto e tente novamente.', 'error');
+      } else {
+        setIaStatus('Revise, ajuste se quiser e clique em “Usar esta versão”.', 'success');
+      }
+    } catch (e) {
+      console.error('[IA-DISPARO] Erro ao chamar IA', e);
+      setIaStatus('Erro ao chamar IA. Tente novamente em instantes.', 'error');
+      alert('Erro ao chamar IA. Veja o console do navegador para detalhes.');
+    } finally {
+      if (iaApplyBtn)  iaApplyBtn.disabled  = false;
+      if (iaRegerarBtn) iaRegerarBtn.disabled = false;
+    }
+  }
+
+  async function regerarIa (ev) {
+    ev?.preventDefault?.();
+
+    const draft = (iaOriginalEl?.value || msgEl?.value || '').trim();
+    if (!draft) {
+      alert('Não há texto base para gerar outra variação.');
+      return;
+    }
+
+    setIaStatus('Gerando outra variação…', 'info');
+
+    if (iaApplyBtn)  iaApplyBtn.disabled  = true;
+    if (iaRegerarBtn) iaRegerarBtn.disabled = true;
+
+    try {
+      const res = await F(API_IA_MELHORAR, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ mensagem: draft })
+      });
+
+      const txt = await res.text();
+      let data;
+      try {
+        data = txt ? JSON.parse(txt) : {};
+      } catch {
+        data = { raw: txt };
+      }
+
+      if (!res.ok) {
+        const msg =
+          (data && (data.detail || data.message)) ||
+          `Erro HTTP ${res.status}`;
+        console.error('[IA-DISPARO] Erro HTTP (regerar)', res.status, data);
+        setIaStatus(msg, 'error');
+        alert('Erro ao chamar IA: ' + msg);
+        return;
+      }
+
+      const original  = data.original ?? draft;
+      const melhorada = data.melhorada ?? data.mensagem ?? data.text ?? txt ?? draft;
+
+      if (iaOriginalEl) iaOriginalEl.value = original;
+      if (iaSugestaoEl) iaSugestaoEl.value = melhorada;
+
+      if (melhorada === '__EMPTY__') {
+        setIaStatus('A IA entendeu que o rascunho está vazio. Revise o texto e tente novamente.', 'error');
+      } else {
+        setIaStatus('Nova variação gerada. Revise e clique em “Usar esta versão”.', 'success');
+      }
+    } catch (e) {
+      console.error('[IA-DISPARO] Erro ao chamar IA (regerar)', e);
+      setIaStatus('Erro ao chamar IA. Tente novamente em instantes.', 'error');
+      alert('Erro ao chamar IA. Veja o console do navegador para detalhes.');
+    } finally {
+      if (iaApplyBtn)  iaApplyBtn.disabled  = false;
+      if (iaRegerarBtn) iaRegerarBtn.disabled = false;
     }
   }
 
@@ -349,6 +535,7 @@
 
     clientesModal.setAttribute('aria-hidden', 'false');
     clientesModal.classList.add('is-open');
+    document.body.classList.add('has-modal');
 
     loadClientes({ q: '', append: false });
 
@@ -361,6 +548,7 @@
     if (!clientesModal) return;
     clientesModal.setAttribute('aria-hidden', 'true');
     clientesModal.classList.remove('is-open');
+    document.body.classList.remove('has-modal');
   }
 
   function applyClientesSelection () {
@@ -484,6 +672,8 @@
       instancia_id: window.__INST_ID || null,
       empresa_id: getEmpresaId() || undefined,
       delay_segundos: delaySegundos
+      // Checkbox "Gerar variações leves por número (beta)" ainda não está plugado aqui;
+      // quando formos implementar o V2, basta incluir um flag no payload.
     };
   }
 
@@ -876,6 +1066,32 @@
     }
     if (btnDisparar) {
       btnDisparar.addEventListener('click', enviarDisparo);
+    }
+
+    // IA – botão e modal
+    if (iaBtnOpen) {
+      iaBtnOpen.addEventListener('click', chamarIaMelhorar);
+    }
+    if (iaApplyBtn) {
+      iaApplyBtn.addEventListener('click', applyIaVersion);
+    }
+    if (iaRegerarBtn) {
+      iaRegerarBtn.addEventListener('click', regerarIa);
+    }
+    if (iaCloseBtn) {
+      iaCloseBtn.addEventListener('click', closeIaModal);
+    }
+    if (iaModal) {
+      iaModal.addEventListener('click', (e) => {
+        if (e.target === iaModal) {
+          closeIaModal();
+        }
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && iaModal.classList.contains('is-open')) {
+          closeIaModal();
+        }
+      });
     }
 
     // picker de clientes: eventos
