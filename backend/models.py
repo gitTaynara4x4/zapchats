@@ -768,7 +768,6 @@ class ColaboradorPermissao(Base):
     permissao_id   = Column(String,  ForeignKey("permissoes.id",     ondelete="CASCADE"), primary_key=True)
     criado_em      = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
-
 class Disparo(Base):
     __tablename__ = "disparos"
 
@@ -791,6 +790,14 @@ class Disparo(Base):
     colaborador_id = Column(
         Integer,
         ForeignKey("colaboradores.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # 👇 NOVO: se for usuário/admin do painel
+    usuario_id = Column(
+        Integer,
+        ForeignKey("usuarios.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -829,6 +836,7 @@ class Disparo(Base):
     empresa     = relationship("Empresa", backref=backref("disparos", cascade="all, delete-orphan"))
     instancia   = relationship("EmpresaInstancia", backref=backref("disparos", cascade="all, delete-orphan"))
     colaborador = relationship("Colaborador", backref=backref("disparos", cascade="all, delete-orphan"))
+    usuario     = relationship("Usuario")  # 👈 quem disparou caso seja admin/usuário
     midia       = relationship("Midia")
 
     destinatarios = relationship(

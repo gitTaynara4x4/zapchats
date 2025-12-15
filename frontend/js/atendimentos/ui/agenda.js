@@ -204,10 +204,9 @@
     return `${EMPRESA_ID}|${inst}|${mode}|${q||''}`;
   }
 
+  // 🔹 Agora a Agenda lista todos os contatos da empresa (sem filtrar por instância)
   function buildClientesURL({ initial=false }={}){
-    const inst = getInstanciaAtiva();
     const qs = new URLSearchParams({ empresa_id: String(EMPRESA_ID), limit: String(PAGE_SIZE) });
-    if (inst) qs.set('instancia_id', inst);
     if (dataState.mode === 'search' && dataState.q) qs.set('q', dataState.q); // chamada ao servidor SÓ quando buscando
 
     if (!initial){
@@ -299,13 +298,27 @@
         const tel  = el.getAttribute('data-phone') || '';
         const av   = el.getAttribute('data-avatar');
 
+        // trata instância ativa: pode ser ID numérico ou slug
+        const rawInst = getInstanciaAtiva();
+        let inst_id = null;
+        let inst_slug = null;
+        if (rawInst != null && rawInst !== '') {
+          const s = String(rawInst);
+          if (/^\d+$/.test(s)) {
+            inst_id = Number(s);     // ex.: 3
+          } else {
+            inst_slug = s;           // ex.: "seg-sistemas-1924"
+          }
+        }
+
         const seed = {
           id,
           cliente_id: id,
           telefone: tel,
           nome: nome || tel || 'Cliente',
           avatar_url: av || null,
-          instancia_id: getInstanciaAtiva() ? Number(getInstanciaAtiva()) : null,
+          instancia_id: inst_id,
+          instancia: inst_slug,
         };
 
         if (typeof window.selecionarClienteObj === 'function') {
@@ -382,6 +395,23 @@
     if (!r.ok) return;
     const p = await r.json();
 
+    // tenta pegar instância do profile, do seed ou da instância ativa
+    const rawInst =
+      (p && (p.instancia_id ?? p.instance)) ??
+      (seed && (seed.instancia_id ?? seed.instancia)) ??
+      getInstanciaAtiva();
+
+    let inst_id = null;
+    let inst_slug = null;
+    if (rawInst != null && rawInst !== '') {
+      const s = String(rawInst);
+      if (/^\d+$/.test(s)) {
+        inst_id = Number(s);
+      } else {
+        inst_slug = s;
+      }
+    }
+
     const sel = {
       id: cliente_id,
       cliente_id: cliente_id,
@@ -389,7 +419,8 @@
       nome: (p.nome_whatsapp || p.nome || seed?.nome || seed?.telefone || 'Cliente').trim(),
       avatar_url: (seed?.avatar_url && String(seed.avatar_url).trim() !== '') ? seed.avatar_url
                   : (p.avatar_url && String(p.avatar_url).trim() !== '' ? p.avatar_url : null),
-      instancia_id: seed?.instancia_id ?? (getInstanciaAtiva() ? Number(getInstanciaAtiva()) : null),
+      instancia_id: inst_id,
+      instancia: inst_slug,
     };
 
     window.state = window.state || {};
@@ -411,11 +442,20 @@
   async function tryLoadHistorico(sel){
     if (!sel?.cliente_id) return;
     const qs = new URLSearchParams({ empresa_id: String(EMPRESA_ID), limit: '50', offset: '0' });
-    if (sel.instancia_id != null) qs.set('instancia_id', String(sel.instancia_id));
+
+    if (sel.instancia_id != null && sel.instancia_id !== '') {
+      qs.set('instancia_id', String(sel.instancia_id));
+    } else if (sel.instancia != null && sel.instancia !== '') {
+      qs.set('instance', String(sel.instancia));
+    }
+
     const r = await fetch(`/api/atendimento/conversas/${sel.cliente_id}/mensagens?` + qs.toString(), { credentials:'include' });
     if (!r.ok) return;
     const payload = await r.json();
-    if (typeof window.renderHistoricoMensagens === 'function') { window.renderHistoricoMensagens(payload); return; }
+    if (typeof window.renderHistoricoMensagens === 'function') {
+      window.renderHistoricoMensagens(payload);
+      return;
+    }
     const his = $('#historico');
     if (his) {
       his.innerHTML = '';
@@ -425,6 +465,13 @@
 
   /* ---------------- Fluxos ---------------- */
   async function abrirAgenda(){
+    // 🔒 Só deixa abrir se tiver uma instância selecionada (chip).
+    const instRaw = (typeof window !== 'undefined') ? window.INSTANCIA_ATIVA : null;
+    if (!instRaw || String(instRaw).trim() === '') {
+      toast.err('Selecione uma instância antes de abrir a Agenda.');
+      return;
+    }
+
     buildDrawer();
     window.__Agenda.open();
     $('#agList').innerHTML = Array.from({length:8})

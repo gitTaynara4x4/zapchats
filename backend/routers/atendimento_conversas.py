@@ -9,7 +9,8 @@ from sqlalchemy import func, literal, and_
 
 from backend.database import get_db
 from backend import models
-from backend.routers.auth import get_current_identity  # <- troca aqui
+from backend.routers.auth import get_current_identity
+from backend.security.instancias import instancias_visiveis
 
 # =========================================================
 # Router
@@ -87,6 +88,7 @@ def _query_grupos_ultima_por_grupo(
     *,
     empresa_id: int,
     resolved_inst_id: Optional[int],
+    allowed_inst_ids: Optional[List[int]] = None,
 ):
     """
     Retorna um query com a ÚLTIMA mensagem de cada grupo dessa empresa/instância.
@@ -106,6 +108,8 @@ def _query_grupos_ultima_por_grupo(
     )
     if resolved_inst_id is not None:
         sub = sub.filter(MG.instancia_id == resolved_inst_id)
+    if allowed_inst_ids is not None:
+        sub = sub.filter(MG.instancia_id.in_(allowed_inst_ids))
     sub = sub.group_by(MG.grupo_id).subquery()
 
     q = (
@@ -200,6 +204,13 @@ def listar_conversas(
         instance=instance,
     )
 
+    # 3.1) instâncias permitidas para esse login (colaborador)
+    allowed_inst_ids = instancias_visiveis(identity, db)
+    if allowed_inst_ids is not None and resolved_inst_id is not None:
+        # colaborador tentando filtrar numa instância que não é dele
+        if resolved_inst_id not in allowed_inst_ids:
+            raise HTTPException(status_code=403, detail="Instância não permitida para este colaborador")
+
     # 4) cursor: se veio cursor_last_msg_id, vamos pegar seu timestamp (APENAS em mensagens de cliente)
     cursor_ts = None
     cursor_id = None
@@ -223,6 +234,8 @@ def listar_conversas(
     )
     if resolved_inst_id is not None:
         sub = sub.filter(M.instancia_id == resolved_inst_id)
+    if allowed_inst_ids is not None:
+        sub = sub.filter(M.instancia_id.in_(allowed_inst_ids))
     sub = sub.group_by(M.cliente_id).subquery()
 
     # 6) query principal: cliente + última mensagem + instância
@@ -284,6 +297,7 @@ def listar_conversas(
             db,
             empresa_id=empresa_id,
             resolved_inst_id=resolved_inst_id,
+            allowed_inst_ids=allowed_inst_ids,
         )
         # não deve ter milhares de grupos, mas limit_db dá um teto de segurança
         rows_grupos = (

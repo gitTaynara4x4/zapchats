@@ -1,3 +1,4 @@
+# backend/routers/disparos.py
 from __future__ import annotations
 
 import os
@@ -59,6 +60,36 @@ def _get_empresa_e_colab(identity: dict | None) -> tuple[int, Optional[int]]:
                 colab_id = None
 
     return int(empresa_id), colab_id
+
+
+def _get_ids(identity: dict | None) -> tuple[int, Optional[int], Optional[int]]:
+    """
+    Retorna (empresa_id, colaborador_id, usuario_id).
+
+    - Se kind == "colaborador" → preenche colaborador_id; usuario_id = None
+    - Se for usuário/admin (kind diferente) → tenta preencher usuario_id
+    """
+    if identity is None:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+
+    empresa_id, colab_id = _get_empresa_e_colab(identity)
+
+    kind = (identity.get("kind") or "").lower()
+    usuario_id: Optional[int] = None
+
+    if kind != "colaborador":
+        # tenta achar id do usuário/admin no token
+        for key in ("usuario_id", "user_id", "id_usuario", "id_user"):
+            raw = identity.get(key)
+            if raw is None:
+                continue
+            try:
+                usuario_id = int(raw)
+                break
+            except Exception:
+                usuario_id = None
+
+    return empresa_id, colab_id, usuario_id
 
 
 def _ensure_perm(identity: dict, db: Session, perm_id: str) -> None:
@@ -508,7 +539,7 @@ async def criar_disparo_simples(
 ):
     _ensure_perm(identity, db, "disparos.enviar")
 
-    empresa_id, colab_id = _get_empresa_e_colab(identity)
+    empresa_id, colab_id, usuario_id = _get_ids(identity)
 
     # Valida se a instância pertence à empresa
     instancia = (
@@ -530,6 +561,7 @@ async def criar_disparo_simples(
         empresa_id=empresa_id,
         instancia_id=payload.instancia_id,
         colaborador_id=colab_id,
+        usuario_id=usuario_id,
         tipo_conteudo=(payload.tipo_conteudo or "text"),
         mensagem=payload.mensagem,
         midia_id=payload.midia_id,

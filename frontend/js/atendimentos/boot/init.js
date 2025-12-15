@@ -11,6 +11,46 @@ import { abrirPerfilAtual } from '../ui/perfil.js';
 // ====== Flag global: esconder banner do topo (Operadora: …) ======
 window.SHOW_TOP_OPERATOR_BANNER = false;
 
+// ====== TRAVA: exige instância resolvida para operar (abrir/enviar) ======
+window.ZC_REQUIRE_INSTANCE = true;
+
+/* ================= Helpers (Toast simples) ================= */
+function toast(msg, ok = true) {
+  let t = document.getElementById('__app_toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = '__app_toast';
+    Object.assign(t.style, {
+      position: 'fixed',
+      left: '50%',
+      bottom: '22px',
+      transform: 'translateX(-50%)',
+      maxWidth: '90vw',
+      padding: '8px 12px',
+      color: '#fff',
+      background: '#1e293b',
+      borderRadius: '10px',
+      boxShadow: '0 10px 26px rgba(0,0,0,.30)',
+      zIndex: 99999,
+      fontSize: '13px',
+      lineHeight: '1.25',
+      opacity: '0',
+      transition: 'opacity .15s, transform .15s',
+      pointerEvents: 'none',
+    });
+    document.body.appendChild(t);
+  }
+  t.textContent = String(msg || '');
+  t.style.background = ok ? '#1e293b' : '#7f1d1d';
+  t.style.opacity = '1';
+  t.style.transform = 'translateX(-50%) translateY(0)';
+  clearTimeout(t.__timer);
+  t.__timer = setTimeout(() => {
+    t.style.opacity = '0';
+    t.style.transform = 'translateX(-50%) translateY(4px)';
+  }, 1700);
+}
+
 /* ================= Helpers de prontidão (Splash) ================= */
 function readyPart(key){
   if (window.AppReady && typeof window.AppReady.mark === 'function') {
@@ -118,6 +158,217 @@ function readyPart(key){
   window.OperatorLine = { set: setOpHeadline, clear: clearOpHeadline, getName: getUserName };
 })();
 
+/* ================= Instância (central + badge com NOME) ================= */
+(function(){
+  const LS_KEY = `instAtiva:${String(EMPRESA_ID || '')}`;
+
+  function norm(v){
+    const s = (v == null ? '' : String(v)).trim();
+    return s === '' ? '' : s;
+  }
+
+  function getInstanciasList(){
+    return (
+      window.ZC_INSTANCIAS ||
+      window.INSTANCIAS ||
+      window.state?.instancias ||
+      []
+    );
+  }
+
+  function pickLabelFromItem(i, fallbackRaw){
+    if (!i) return fallbackRaw;
+
+    // prioridade: apelido/nome “humano”
+    const cand =
+      i.apelido ||
+      i.nome_exibicao ||
+      i.display_name ||
+      i.nome ||
+      i.name ||
+      i.titulo ||
+      i.title ||
+      null;
+
+    if (cand && String(cand).trim()) return String(cand).trim();
+
+    // se tiver número/telefone, usa isso
+    const tel = i.telefone || i.numero || i.phone || i.whatsapp || null;
+    if (tel) {
+      const d = String(tel).replace(/\D+/g,'');
+      if (d.length >= 8) return `WhatsApp • ${d.slice(-4)}`;
+    }
+
+    // fallback: instance_name/instancia
+    const raw2 = i.instance_name || i.instancia || i.slug || null;
+    if (raw2 && String(raw2).trim()) return String(raw2).trim();
+
+    return fallbackRaw;
+  }
+
+  function resolveInstLabel(val){
+    const raw = norm(val);
+    if (!raw) return 'Selecione um WhatsApp';
+
+    const list = getInstanciasList();
+    const byId = (x) => String(x?.instancia_id ?? x?.id ?? x?.instance_id ?? '') === raw;
+    const bySlug = (x) => String(x?.instance_name ?? x?.instancia ?? '').toLowerCase() === raw.toLowerCase();
+
+    const it = list.find(byId) || list.find(bySlug);
+    const label = pickLabelFromItem(it, raw);
+
+    // evita mostrar “wa.4” feio: tenta humanizar se for padrão “wa.X”
+    if (/^wa\.\d+$/i.test(label)) {
+      const n = label.split('.').pop();
+      return `WhatsApp ${n}`;
+    }
+    return label;
+  }
+
+  async function ensureInstanciasLoaded(){
+    try{
+      // se já tem lista, não refaz
+      const list = getInstanciasList();
+      if (Array.isArray(list) && list.length) return list;
+
+      const id = Number(EMPRESA_ID || 0);
+      if (!id) return [];
+
+      const r = await fetch(`/api/empresas/${id}/whatsapp`, { credentials:'include' });
+      if (!r.ok) return [];
+
+      const j = await r.json().catch(()=>null);
+      const arr = Array.isArray(j?.instancias) ? j.instancias : [];
+
+      window.ZC_INSTANCIAS = arr;
+      window.INSTANCIAS = window.INSTANCIAS || arr;
+
+      window.state = window.state || {};
+      window.state.instancias = arr;
+
+      try { document.dispatchEvent(new CustomEvent('inst:list', { detail: { instancias: arr } })); } catch {}
+      return arr;
+    }catch{
+      return [];
+    }
+  }
+
+  function ensureInstBadgeStyle(){
+    if (document.getElementById('inst-badge-style')) return;
+    const s = document.createElement('style');
+    s.id = 'inst-badge-style';
+    s.textContent = `
+      #inst-badge{
+        margin-left:10px;
+        padding:2px 10px;
+        border:1px solid var(--border);
+        border-radius:999px;
+        font-size:12px;
+        line-height:18px;
+        color:var(--fg);
+        background:var(--card);
+        display:inline-flex;
+        align-items:center;
+        gap:6px;
+        white-space:nowrap;
+        opacity:.95;
+        user-select:none;
+      }
+      #inst-badge .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);}
+      #inst-badge.is-none{border-color:rgba(239,68,68,.55); background:rgba(239,68,68,.08);}
+      #inst-badge.is-none .dot{background:#ef4444;}
+      #inst-badge.shake{animation:instShake .35s linear 1;}
+      @keyframes instShake{
+        0%{transform:translateX(0)} 25%{transform:translateX(-4px)}
+        50%{transform:translateX(4px)} 75%{transform:translateX(-3px)}
+        100%{transform:translateX(0)}
+      }
+    `;
+    document.head.appendChild(s);
+  }
+
+  function ensureInstBadge(){
+    const head = document.getElementById('chat-header');
+    if (!head) return null;
+
+    let el = document.getElementById('inst-badge');
+    if (el) return el;
+
+    ensureInstBadgeStyle();
+
+    el = document.createElement('div');
+    el.id = 'inst-badge';
+    el.innerHTML = `<span class="dot"></span><span id="inst-badge-text">WhatsApp: —</span>`;
+
+    const title = document.getElementById('chat-title');
+    if (title && title.parentNode) title.parentNode.appendChild(el);
+    else head.appendChild(el);
+
+    return el;
+  }
+
+  function zcUpdateInstBadge(){
+    const el = ensureInstBadge();
+    if (!el) return;
+
+    const c = window.state?.clienteSel || state?.clienteSel || {};
+    const v = norm(c.instancia_id ?? c.instancia ?? window.INSTANCIA_ATIVA ?? localStorage.getItem(LS_KEY) ?? '');
+    const ok = !!v;
+
+    const txt = document.getElementById('inst-badge-text');
+    if (txt) txt.textContent = `WhatsApp: ${resolveInstLabel(v)}`;
+
+    el.classList.toggle('is-none', !ok);
+  }
+
+  function zcFlashInstBadge(){
+    try{
+      const b = ensureInstBadge();
+      if (!b) return;
+      b.classList.add('shake');
+      setTimeout(()=> b.classList.remove('shake'), 420);
+    }catch{}
+  }
+
+  // Central: define instância ativa (persiste + emite evento)
+  function setInstanciaAtiva(value, opt = {}){
+    const v = norm(value);
+    try { localStorage.setItem(LS_KEY, v); } catch {}
+    window.INSTANCIA_ATIVA = v ? v : null;
+
+    try { window.setInstanceChip?.(v); } catch {}
+    try { zcUpdateInstBadge(); } catch {}
+
+    try {
+      document.dispatchEvent(new CustomEvent('inst:change', { detail: { value: window.INSTANCIA_ATIVA }}));
+    } catch {}
+
+    // por padrão, NÃO forçamos reload aqui (inst-switch já faz)
+    if (opt && opt.reloadList) {
+      try { carregarClientes?.({ force:true, reason:'inst:change' }); } catch {}
+    }
+  }
+
+  function getInstanciaAtiva(){
+    return norm(window.INSTANCIA_ATIVA ?? localStorage.getItem(LS_KEY) ?? '');
+  }
+
+  // exports globais
+  window.zcEnsureInstanciasLoaded = ensureInstanciasLoaded;
+  window.zcResolveInstLabel       = resolveInstLabel;
+  window.zcUpdateInstBadge        = zcUpdateInstBadge;
+  window.zcFlashInstBadge         = zcFlashInstBadge;
+  window.setInstanciaAtiva        = setInstanciaAtiva;
+  window.getInstanciaAtiva        = getInstanciaAtiva;
+
+  // reações
+  document.addEventListener('inst:change', () => { try { zcUpdateInstBadge(); } catch {} });
+  document.addEventListener('inst:list', () => { try { zcUpdateInstBadge(); } catch {} });
+
+  // tenta carregar lista cedo (pra ter nome “humano” no badge)
+  ensureInstanciasLoaded().finally(() => { try { zcUpdateInstBadge(); } catch {} });
+})();
+
 /* ================= Utils ================= */
 
 async function markChatAsSeen(clienteId) {
@@ -141,6 +392,7 @@ function closeChatMobile() {
     hist.style.display = 'none';
     hist.innerHTML = '';
     hist.removeAttribute('data-cliente-id');
+    hist.removeAttribute('data-instancia-id');
   }
   if (foot) foot.style.display = 'none';
   if (ws)   ws.style.display   = 'none';
@@ -153,17 +405,34 @@ const onlyDigits = (s) => String(s||'').replace(/\D+/g,'');
 /* ===== Helpers de instância ===== */
 function getInstanciaForFetch(clienteId) {
   const sel = state?.clienteSel;
-  if (sel && (sel.id === clienteId || sel.conversation_id === clienteId)) {
-    const cand = sel.instancia_id ?? sel.instancia ?? window.INSTANCIA_ATIVA ?? null;
+
+  if (sel && (sel.id === clienteId || sel.conversation_id === clienteId || sel.cliente_id === clienteId)) {
+    const cand = sel.instancia_id ?? sel.instancia ?? window.getInstanciaAtiva?.() ?? window.INSTANCIA_ATIVA ?? null;
     return cand == null || cand === '' ? null : String(cand);
   }
-  const c = (state.clientesCache || []).find(x => (x.id ?? x.conversation_id) === Number(clienteId));
-  const cand = c?.instancia_id ?? c?.instancia ?? window.INSTANCIA_ATIVA ?? null;
+
+  const c = (state.clientesCache || []).find(x => (x.id ?? x.conversation_id ?? x.cliente_id) === Number(clienteId));
+  const cand = c?.instancia_id ?? c?.instancia ?? window.getInstanciaAtiva?.() ?? window.INSTANCIA_ATIVA ?? null;
   return (cand == null || cand === '') ? null : String(cand);
 }
 
-/* ============ Carregar mensagens (sempre consulta backend) ============ */
+function syncInstanciaFromCliente(c){
+  const instCand = c?.instancia_id ?? c?.instancia ?? null;
+  const active = window.getInstanciaAtiva?.() ?? window.INSTANCIA_ATIVA ?? null;
 
+  // se o cliente tem instância, sincroniza tudo (sem reload imediato)
+  if (instCand != null && String(instCand).trim() !== '') {
+    try { window.setInstanciaAtiva?.(String(instCand), { reloadList:false }); } catch {}
+    return String(instCand);
+  }
+
+  // se não tem instância e existe ativa, usa a ativa
+  if (active != null && String(active).trim() !== '') return String(active);
+
+  return null;
+}
+
+/* ============ Carregar mensagens (sempre consulta backend) ============ */
 async function ensureMensagensCarregadas(conversationId) {
   if (!state.mensagensOffset || typeof state.mensagensOffset !== 'object') {
     state.mensagensOffset = {};
@@ -171,9 +440,19 @@ async function ensureMensagensCarregadas(conversationId) {
 
   const inst = getInstanciaForFetch(conversationId);
 
-  // sempre consulta o backend pra garantir que novas mensagens
+  // TRAVA: não carrega conversa “no escuro”
+  if (window.ZC_REQUIRE_INSTANCE === true && !inst) {
+    try { window.zcUpdateInstBadge?.(); window.zcFlashInstBadge?.(); } catch {}
+    toast('Selecione um WhatsApp (instância) antes de abrir/enviar.', false);
+    throw new Error('Instância não resolvida');
+  }
+
   const qs = new URLSearchParams({ empresa_id: String(EMPRESA_ID), limit: '50' });
-  if (inst) qs.set('instancia_id', inst);
+  if (inst) {
+    const s = String(inst);
+    if (/^\d+$/.test(s)) qs.set('instancia_id', s);
+    else qs.set('instance', s);
+  }
   const url = `/api/atendimento/conversas/${conversationId}/mensagens?` + qs.toString();
 
   const r = await fetch(url, { credentials: 'include' });
@@ -182,7 +461,6 @@ async function ensureMensagensCarregadas(conversationId) {
 
   const items = Array.isArray(data?.items) ? data.items : [];
 
-  // normaliza tipo e ACK
   const mapped = items.map(m => {
     const tipoMsg = m.tipo || (m.remetente === 'agente' ? 'saida' : 'entrada');
     const isSaida = (tipoMsg === 'saida') || m.from_me === true || m.origem === 'atendente';
@@ -204,17 +482,10 @@ async function ensureMensagensCarregadas(conversationId) {
     };
   });
 
-  // merge no cache unificado
   try { salvarNoCache(conversationId, mapped); } catch {}
 
   const finalHist = getHist(inst, conversationId) || [];
-  // cursores (se você usar paginação depois)
-  const cursors = {
-    oldest: data?.prev_cursor ?? null,
-    newest: data?.next_cursor ?? null
-  };
 
-  // espelha no state (sobrevive a F5)
   state.cacheHistoricos = {
     ...(state.cacheHistoricos || {}),
     [conversationId]: (window.cacheHistoricos || {})[conversationId]
@@ -222,13 +493,8 @@ async function ensureMensagensCarregadas(conversationId) {
   state.mensagensOffset[conversationId] = finalHist.length;
   persist();
 
-  try {
-    console.debug('[ensureMensagensCarregadas]', { conversationId, total: finalHist.length, cursors });
-  } catch {}
-
   return finalHist;
 }
-
 
 /* ======= Atualiza banner com a última saída ======= */
 function updateOperatorBannerForConversation(convId){
@@ -256,7 +522,6 @@ function updateOperatorBannerForConversation(convId){
 }
 
 /* ================= Seleção de cliente + preparo da UI ================= */
-
 async function selecionarClienteObj(id) {
   const isMobile = window.matchMedia('(max-width: 920px)').matches;
   const hist = document.getElementById('historico');
@@ -281,30 +546,33 @@ async function selecionarClienteObj(id) {
     (state.clientesCache || []).find(byId) ||
     (state.todosContatosCache || []).find(byId);
 
-  if (!c) return;
+  if (!c) {
+    // se veio de agenda/search e não está no cache, ainda assim deixa quem chamou setar clienteSel antes
+    // (agenda.js faz fallback). Aqui só garantimos badge atualizado.
+    try { window.zcUpdateInstBadge?.(); } catch {}
+    return;
+  }
+
   setClienteSel(c);
+
+  // TRAVA/SYNC de instância antes de qualquer fetch/render
+  const instFinal = syncInstanciaFromCliente(c);
+  if (hist && instFinal) hist.dataset.instanciaId = String(instFinal);
+  if (window.ZC_REQUIRE_INSTANCE === true && !instFinal) {
+    try { window.zcUpdateInstBadge?.(); window.zcFlashInstBadge?.(); } catch {}
+    toast('Selecione um WhatsApp (instância) antes de abrir/enviar.', false);
+    return;
+  }
 
   // 🔗 integra com o drawer de Notas — informa qual cliente está aberto
   try {
     if (window.zcNotesSetContextFromCliente) {
-      // helper definido em notes-drawer.js
       window.zcNotesSetContextFromCliente(c);
     } else if (head) {
-      // fallback: ainda marca o header manualmente
       const cid = c.cliente_id ?? c.id ?? c.conversation_id ?? null;
       if (cid != null) head.dataset.clienteId = String(cid);
     }
   } catch {}
-
-  try{
-    const instCand = c.instancia_id ?? c.instancia ?? null;
-    if (instCand != null && instCand !== '') {
-      window.INSTANCIA_ATIVA = String(instCand);
-      window.setInstanceChip?.(String(instCand));
-      // carimba no DOM pro perfil_quick / historico saber a instância
-      if (hist) hist.dataset.instanciaId = String(instCand);
-    }
-  }catch{}
 
   // expor telefone pro perfil_quick.js
   try {
@@ -335,15 +603,24 @@ async function selecionarClienteObj(id) {
     }
   }
 
-  // ainda deixa o click abrindo o perfil "antigo" (perfil_quick intercepta se quiser)
+  // click abre perfil
   try {
     const openPerfil = () => abrirPerfilAtual && abrirPerfilAtual(false);
     if (t)  { t.style.cursor = 'pointer';  t.onclick  = openPerfil; }
     if (av) { av.style.cursor = 'pointer'; av.onclick = openPerfil; }
   } catch {}
 
-  await ensureMensagensCarregadas(id);
-  renderHistoricoDoCache(id);
+  // badge sempre atualizado
+  try { window.zcUpdateInstBadge?.(); } catch {}
+
+  try {
+    await ensureMensagensCarregadas(id);
+    renderHistoricoDoCache(id);
+  } catch (e) {
+    console.warn('[selecionarClienteObj] carregar mensagens falhou:', e?.message || e);
+    // não limpa a tela aqui — só evita “pisca some”
+    return;
+  }
 
   if (!state.mensagensOffset || typeof state.mensagensOffset !== 'object') {
     state.mensagensOffset = {};
@@ -354,7 +631,6 @@ async function selecionarClienteObj(id) {
   updateOperatorBannerForConversation(id);
 
   try { window.syncPreviewFromCache?.(id); } catch {}
-
   await markChatAsSeen(id);
 
   // zera “unread” local
@@ -406,6 +682,9 @@ export async function boot() {
       console.error('[boot] carregarClientes falhou:', e);
       readyPart('clientes');
     }
+
+    // tenta atualizar badge cedo (se header já existir)
+    try { window.zcUpdateInstBadge?.(); } catch {}
 
     readyPart('boot');
   } catch (e) {

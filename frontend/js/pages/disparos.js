@@ -666,14 +666,25 @@
       }
     }
 
+    // instancia_id é obrigatório pro backend
+    const instId = window.__INST_ID
+      ? Number(String(window.__INST_ID).replace(/\D/g, ''))
+      : null;
+
+    if (!instId) {
+      alert('Selecione uma instância de WhatsApp no topo antes de disparar.');
+      return null;
+    }
+
     return {
       mensagem,
       numeros,
-      instancia_id: window.__INST_ID || null,
-      empresa_id: getEmpresaId() || undefined,
-      delay_segundos: delaySegundos
-      // Checkbox "Gerar variações leves por número (beta)" ainda não está plugado aqui;
-      // quando formos implementar o V2, basta incluir um flag no payload.
+      instancia_id: instId,
+      delay_segundos: delaySegundos,
+      tipo_conteudo: 'text', // hoje só texto
+      midia_id: null         // placeholder pra futuro
+      // empresa_id removido: backend pega do token/jwt
+      // flag de variação por número (beta) entra aqui depois
     };
   }
 

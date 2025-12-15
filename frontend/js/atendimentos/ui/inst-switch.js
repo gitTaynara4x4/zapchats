@@ -4,8 +4,12 @@
   if (!wrap) return;
 
   const EMPRESA_ID = Number(localStorage.getItem('empresa_id') || 0);
-  const KEY  = (id)=> `instAtiva:${id}`;
-  const LAST = localStorage.getItem(KEY(EMPRESA_ID)) || '';
+
+  const KEY_VAL   = (id)=> `instAtiva:${id}`;              // valor (id/slug)
+  const KEY_LABEL = (id)=> `instAtivaLabel:${id}`;         // label exibida
+  const KEY_MAP   = (id, val)=> `instLabel:${id}:${val}`;  // cache por valor
+
+  const LAST = localStorage.getItem(KEY_VAL(EMPRESA_ID)) || '';
 
   function markActive(val){
     wrap.querySelectorAll('.inst-pill').forEach(b=>{
@@ -37,12 +41,31 @@
 
     // Atualiza o chip visual
     markActive(value || '');
+
+    // Atualiza badge do topo
+    try { window.zcUpdateInstBadge?.(); } catch {}
   }
 
-  function onPick(value){
-    const v = value || '';
-    localStorage.setItem(KEY(EMPRESA_ID), v);
-    applyInstance(v);
+  function saveSelection(value, label){
+    const v = String(value || '');
+    const lab = String(label || '').trim();
+
+    localStorage.setItem(KEY_VAL(EMPRESA_ID), v);
+
+    if (v) {
+      if (lab) {
+        localStorage.setItem(KEY_LABEL(EMPRESA_ID), lab);
+        localStorage.setItem(KEY_MAP(EMPRESA_ID, v), lab);
+      }
+    } else {
+      // "Todos" / nenhum
+      localStorage.removeItem(KEY_LABEL(EMPRESA_ID));
+    }
+  }
+
+  function onPick(value, label){
+    saveSelection(value, label);
+    applyInstance(value || '');
   }
 
   function pill({ label, value, active }){
@@ -51,10 +74,11 @@
     b.className = 'inst-pill' + (active ? ' is-active' : '');
     b.textContent = label;
     b.title = `Selecionar ${label}`;
-    b.dataset.value = String(value);
+    b.dataset.value = String(value ?? '');
+    b.dataset.label = String(label ?? '');
     b.setAttribute('role', 'button');
     b.setAttribute('aria-pressed', active ? 'true' : 'false');
-    b.onclick = ()=> onPick(String(value));
+    b.onclick = ()=> onPick(String(value ?? ''), String(label ?? ''));
     b.addEventListener('keydown', (e)=>{
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); b.click(); }
     });
@@ -87,8 +111,18 @@
       }));
     });
 
-    // restaura seleção anterior (aplica filtro e sincroniza lista)
-    if (LAST !== null) applyInstance(LAST);
+    // salva globais pra outros módulos (badge)
+    window.state = window.state || {};
+    window.state.instancias = list;
+    window.INSTANCIAS = list;
+
+    // restaura seleção anterior
+    if (LAST !== null) {
+      // tenta pegar label cacheada (pra não ficar “4”)
+      const cachedLabel = localStorage.getItem(KEY_MAP(EMPRESA_ID, LAST)) || localStorage.getItem(KEY_LABEL(EMPRESA_ID)) || '';
+      if (LAST && cachedLabel) saveSelection(LAST, cachedLabel);
+      applyInstance(LAST);
+    }
   }
 
   if (!EMPRESA_ID) return render([]);

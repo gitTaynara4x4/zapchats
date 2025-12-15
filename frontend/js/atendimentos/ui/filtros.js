@@ -9,12 +9,29 @@ import { getConversas } from '../state/store.js';
   const btns = [...row.querySelectorAll('.wpp-header-filtro')];
   if (!btns.length) return;
 
+  // ===== MIGRAÇÃO: "Aguardando" -> "Não lidas" (pra não confundir cliente) =====
+  const LEGACY_UNREAD_LABEL = 'Aguardando';
+  const UNREAD_LABEL        = 'Não lidas';
+
+  function mapKind(k){
+    const s = String(k || '').trim();
+    if (!s) return s;
+    return (s === LEGACY_UNREAD_LABEL) ? UNREAD_LABEL : s;
+  }
+
   // ----------------- estado do filtro (global p/ outros módulos chamarem) -----------------
   const Filtros = (window.Filtros = window.Filtros || {});
-  let current = sessionStorage.getItem('filtroAtend') || 'Em atendimento';
+  let current = mapKind(sessionStorage.getItem('filtroAtend') || 'Em atendimento');
+  sessionStorage.setItem('filtroAtend', current);
+
+  // Se o HTML ainda vier com botão "Aguardando", renomeia na hora
+  btns.forEach((b) => {
+    if (b.textContent.trim() === LEGACY_UNREAD_LABEL) b.textContent = UNREAD_LABEL;
+  });
 
   Filtros.get = () => current;
   Filtros.set = (kind) => {
+    kind = mapKind(kind);
     if (!kind) return;
     current = String(kind);
     sessionStorage.setItem('filtroAtend', current);
@@ -94,7 +111,7 @@ import { getConversas } from '../state/store.js';
 
       // Regras dos filtros:
       // - Em atendimento: humano (no_bot) e NÃO grupo (NÃO depende de unread!)
-      // - Aguardando: tem não lidas
+      // - Não lidas: tem não lidas (antigo "Aguardando")
       // - No bot: status bot
       // - Grupos: é grupo (qualquer estado)
       const tags = {
@@ -105,7 +122,7 @@ import { getConversas } from '../state/store.js';
         instId,
 
         emAtend: isNoBot && !grupo,
-        aguardando: unread,
+        naoLidas: unread,
         noBot: isBot,
         grupos: grupo,
       };
@@ -122,11 +139,15 @@ import { getConversas } from '../state/store.js';
     // respeitar instância ativa (se houver)
     if (!matchInstancia(tags?.instId ?? null)) return false;
 
-    const kind = current;
+    const kind = mapKind(current);
 
     if (kind === 'Em atendimento') return !!tags?.emAtend;
-    if (kind === 'Aguardando')     return !!tags?.aguardando;
-    if (kind === 'No bot')         return !!tags?.noBot;
+
+    // aceita os dois por compatibilidade
+    if (kind === UNREAD_LABEL || kind === LEGACY_UNREAD_LABEL) return !!tags?.naoLidas;
+
+    if (kind === 'No bot') return !!tags?.noBot;
+
     // filtro só pra grupos
     if (kind === 'Grupos' || kind === 'Grupo') return !!tags?.grupos;
 
@@ -150,7 +171,8 @@ import { getConversas } from '../state/store.js';
 
   function marcarBotaoAtivo() {
     for (const b of btns) {
-      const on = b.textContent.trim() === current;
+      const txt = mapKind(b.textContent.trim());
+      const on  = txt === mapKind(current);
       b.classList.toggle('ativo', on);
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
     }
@@ -160,8 +182,8 @@ import { getConversas } from '../state/store.js';
   btns.forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
-      const kind = btn.textContent.trim();
-      if (!kind || kind === current) return;
+      const kind = mapKind(btn.textContent.trim());
+      if (!kind || kind === mapKind(current)) return;
       Filtros.set(kind);
     });
   });
@@ -185,12 +207,9 @@ import { getConversas } from '../state/store.js';
   document.addEventListener('inst:change', () => refilterList());
 
   // ----------------- boot -----------------
-  // garante botão ativo conforme sessionStorage
   marcarBotaoAtivo();
-  // aplica filtro inicial
   refilterList();
 
-  // expõe no window (opcional)
   try {
     window.Filtros = Filtros;
   } catch {}

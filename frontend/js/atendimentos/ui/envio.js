@@ -287,6 +287,20 @@ function getInstPayload(){
   return {};
 }
 
+/* ====== TRAVA: exige instância antes de enviar ====== */
+function requireInstPayloadOrWarn(){
+  const p = getInstPayload();
+  const ok = p && (p.instancia_id != null || p.instance != null);
+
+  if (!ok){
+    toast('Selecione o WhatsApp (instância) antes de enviar.', false);
+    try { window.zcUpdateInstBadge?.(); } catch {}
+    try { window.zcFlashInstBadge?.(); } catch {}
+    return null;
+  }
+  return p;
+}
+
 /* ====== Helpers mínimos (SEM OTIMISMO) ====== */
 function toggleSendingUI(disabled){
   const input = document.getElementById('mensagem');
@@ -295,11 +309,7 @@ function toggleSendingUI(disabled){
   if (btn)   btn.disabled   = !!disabled;
 }
 
-/* ====== Resolve telefone a partir do cliente ======
-   - tenta telefone / whatsapp / numero
-   - se não tiver, e nome parecer telefone (caso do cliente vindo só com nome "+55 31 ..."),
-     usa nome como fonte do número
-==================================================== */
+/* ====== Resolve telefone a partir do cliente ====== */
 function resolveRawTel(cli){
   if (!cli) return '';
   if (cli.telefone) return cli.telefone;
@@ -556,7 +566,7 @@ function insertAtCursor(el, text){
     return numeroE164(raw || '');
   };
 
-  /* ===================== ENVIO TEXTO (SEM OTIMISMO) ===================== */
+  /* ===================== ENVIO TEXTO (TRAVADO) ===================== */
   async function enviarTexto(){
     const text = (inputMsg.value||'').trim();
     if (!text) return;
@@ -576,6 +586,9 @@ function insertAtCursor(el, text){
       return;
     }
 
+    const inst = requireInstPayloadOrWarn();
+    if (!inst) return;
+
     toggleSendingUI(true);
 
     try{
@@ -583,10 +596,9 @@ function insertAtCursor(el, text){
         empresa_id: EMPRESA_ID || undefined,
         number: numE164,
         text,
-        ...getInstPayload(),
+        ...inst,
       };
 
-      // ajuda pra debugar se der pau
       window.__debugLastSendPayload = payload;
 
       const r = await fetch('/api/atendimento/send/text', {
@@ -616,6 +628,7 @@ function insertAtCursor(el, text){
       if (instName || instId){
         if (!window.INSTANCIA_ATIVA){ window.INSTANCIA_ATIVA = instId ?? instName; }
         try { window.setInstanceChip?.(instName ?? String(instId ?? '')); } catch {}
+        try { window.zcUpdateInstBadge?.(); } catch {}
       }
 
       inputMsg.value = '';
@@ -761,12 +774,17 @@ function insertAtCursor(el, text){
     }
   });
 
-  /* ===================== ENVIO DE ARQUIVOS / MÍDIA ===================== */
+  /* ===================== ENVIO DE ARQUIVOS / MÍDIA (TRAVADO) ===================== */
   async function enviarMediaArquivo(file, explicitType = null, captionOverride = null){
     if (!ensureClienteSel() || !file) return;
+
+    const inst = requireInstPayloadOrWarn();
+    if (!inst) return;
+
     const caption = captionOverride != null
       ? captionOverride
       : (inputMsg.value||'').trim() || undefined;
+
     const number    = numberForApi();
     const mime      = file.type || guessMimeFromExt(file.name);
     const mediaType = explicitType || guessMediaType(mime);
@@ -778,20 +796,20 @@ function insertAtCursor(el, text){
         const r = await fetch('/api/atendimento/send/audio', {
           method:'POST', headers:{'Content-Type':'application/json'},
           credentials: 'include',
-          body: JSON.stringify(stripUndefined({ empresa_id: EMPRESA_ID, number, audio: base64, ...getInstPayload() }))
+          body: JSON.stringify(stripUndefined({ empresa_id: EMPRESA_ID, number, audio: base64, ...inst }))
         });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
       } else {
         const body = stripUndefined({
           empresa_id: EMPRESA_ID, number, media: base64,
           mediatype: mediaType, mimetype: mime, fileName: file.name || undefined, caption,
-          ...getInstPayload()
+          ...inst
         });
         const r = await fetch('/api/atendimento/send/media', {
           method:'POST', headers:{'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify(body)
         });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        if (caption && captionOverride != null) { // legenda veio do preview
+        if (caption && captionOverride != null) {
           inputMsg.value='';
           toggleSendMic();
         }
@@ -819,9 +837,13 @@ function insertAtCursor(el, text){
     e.target.value = '';
   });
 
-  /* ====== Modais slim para Contato e Sticker ====== */
+  /* ====== Modais slim para Contato e Sticker (TRAVADO) ====== */
   async function openContactPrompt(){
     if (!ensureClienteSel()) return;
+
+    const inst = requireInstPayloadOrWarn();
+    if (!inst) return;
+
     const data = await inputDialog({
       title: 'Enviar contato',
       rows: [
@@ -831,14 +853,16 @@ function insertAtCursor(el, text){
       okText:'Enviar'
     });
     if (!data) return;
+
     const contact  = [{
       fullName: data.fullName || undefined,
       phoneNumber: (data.phone||'').replace(/\D/g,'') || undefined
     }];
+
     try{
       const r = await fetch('/api/atendimento/send/contact', {
         method:'POST', headers:{'Content-Type':'application/json'}, credentials: 'include',
-        body: JSON.stringify({ empresa_id: EMPRESA_ID, number: numberForApi(), contact, ...getInstPayload() })
+        body: JSON.stringify({ empresa_id: EMPRESA_ID, number: numberForApi(), contact, ...inst })
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       toast('Contato enviado!', true);
@@ -847,18 +871,24 @@ function insertAtCursor(el, text){
 
   async function openStickerPrompt(){
     if (!ensureClienteSel()) return;
+
+    const inst = requireInstPayloadOrWarn();
+    if (!inst) return;
+
     const data = await inputDialog({
       title: 'Enviar figurinha',
       rows: [{ name:'st', label:'URL / BASE64', placeholder:'Cole a URL ou data:...' }],
       okText:'Enviar'
     });
     if (!data || !data.st) return;
+
     const s = String(data.st);
     const sticker = s.startsWith('data:') ? cleanDataUrl(s) : s.trim();
+
     try{
       const r = await fetch('/api/atendimento/send/sticker', {
         method:'POST', headers:{'Content-Type':'application/json'}, credentials: 'include',
-        body: JSON.stringify({ empresa_id: EMPRESA_ID, number: numberForApi(), sticker, ...getInstPayload() })
+        body: JSON.stringify({ empresa_id: EMPRESA_ID, number: numberForApi(), sticker, ...inst })
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       toast('Sticker enviado!', true);
@@ -897,7 +927,7 @@ function insertAtCursor(el, text){
     }
   });
 
-  // gravação de áudio (sem otimista)
+  // gravação de áudio (TRAVADO)
   let rec = null, recStream = null, recChunks = [], recEl = null, recTimer=null, recStartTs=0;
   function renderRecBubble(state='idle', elapsed='00:00'){
     if (!recEl){
@@ -919,6 +949,10 @@ function insertAtCursor(el, text){
   async function startStopRecording(){
     if (!rec){ // START
       if (!ensureClienteSel()) return;
+
+      const inst = requireInstPayloadOrWarn();
+      if (!inst) return;
+
       try{
         recStream = await navigator.mediaDevices.getUserMedia({audio:true});
         rec = new MediaRecorder(recStream);
@@ -933,7 +967,7 @@ function insertAtCursor(el, text){
             const base64  = cleanDataUrl(dataUrl);
             const r = await fetch('/api/atendimento/send/audio', {
               method:'POST', headers:{'Content-Type':'application/json'}, credentials: 'include',
-              body: JSON.stringify({ empresa_id: EMPRESA_ID, number: numberForApi(), audio: base64, ...getInstPayload() })
+              body: JSON.stringify({ empresa_id: EMPRESA_ID, number: numberForApi(), audio: base64, ...inst })
             });
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
           }catch(e){ console.error(e); toast('Falha ao enviar áudio.', false); }

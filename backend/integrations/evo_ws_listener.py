@@ -149,8 +149,7 @@ async def start(loop: asyncio.AbstractEventLoop, HANDLERS: Dict[Any, Callable], 
         "GROUP_UPDATE",
         "GROUP_PARTICIPANTS_UPDATE",
         "REMOVE_INSTANCE",
-        "LOGOUT_INSTANCE",
-        "CALL",
+        "LOGOUT_INSTANCE"
     ]:
         _bind(ev)
 
