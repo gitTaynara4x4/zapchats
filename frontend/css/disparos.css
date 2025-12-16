@@ -223,6 +223,53 @@ textarea.input{
   font-size:.9rem;
 }
 
+/* ===== AJUDA: Intervalo entre envios (explicação para o cliente) ===== */
+.help-details{ margin-top:.5rem; }
+
+.help-summary{
+  display:inline-flex;
+  align-items:center;
+  gap:.45rem;
+  cursor:pointer;
+  user-select:none;
+  font-weight:700;
+  font-size:.85rem;
+  color:var(--fg);
+  padding:.35rem .55rem;
+  border-radius:.55rem;
+  border:1px solid var(--border);
+  background:var(--hover);
+}
+.help-summary:hover{ background:var(--hover-strong, rgba(255,255,255,.04)); }
+.help-summary::-webkit-details-marker{ display:none; }
+
+.help-box{
+  margin-top:.6rem;
+  padding:.75rem .85rem;
+  border-radius:.75rem;
+  border:1px solid var(--border);
+  background:var(--panel-2, var(--card));
+  color:var(--fg);
+}
+.help-box p{
+  margin:.35rem 0;
+  color:var(--muted);
+  font-size:.88rem;
+  line-height:1.45;
+}
+.help-box p strong{ color:var(--fg); }
+.help-example{
+  margin:.6rem 0 .2rem 0;
+  padding:.6rem .7rem;
+  border-radius:.65rem;
+  border:1px dashed var(--border);
+  background:var(--panel, var(--card));
+  color:var(--fg);
+  font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size:.9rem;
+  line-height:1.4;
+}
+
 /* ===== BOTÕES (verde WhatsApp) ===== */
 .btn{
   display:inline-flex;

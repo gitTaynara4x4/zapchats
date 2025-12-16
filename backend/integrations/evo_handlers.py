@@ -93,24 +93,82 @@ RABBIT_BINDINGS = [b.strip() for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#
 # =========================
 
 
-# 🔹 NOVO: webhook pro n8n (chatbot)
-N8N_CHATBOT_WEBHOOK_URL = (os.getenv("N8N_CHATBOT_WEBHOOK_URL") or "").strip()
+# 🔹 NOVO: webhooks pro n8n (chatbot)
+#
+# Ideia:
+# - No ENV você guarda só a BASE do n8n:  https://.../webhook
+# - O código completa com o "path" do workflow:
+#     /chatbot-zapchats-geral
+#     /chatbot-zapchats-setores
+#
+# Compatibilidade:
+# - Se você ainda setar um URL completo (ex.: https://.../webhook/chatbot-zapchats-simples),
+#   o código usa esse URL como está (não tenta acrescentar path).
+
+N8N_WEBHOOK_BASE_URL = (
+    os.getenv("N8N_WEBHOOK_BASE_URL")
+    or os.getenv("N8N_CHATBOT_WEBHOOK_URL")  # legado: pode ser BASE ou URL completo
+    or ""
+).strip()
+
+# Paths (nomes dos workflows) no n8n
+N8N_CHATBOT_GERAL_PATH = (os.getenv("N8N_CHATBOT_GERAL_PATH") or "chatbot-zapchats-geral").strip().strip("/")
+N8N_CHATBOT_SETORES_PATH = (os.getenv("N8N_CHATBOT_SETORES_PATH") or "chatbot-zapchats-setores").strip().strip("/")
+
+# Se você ainda usa o envio "raw" do MESSAGES_UPSERT (opcional):
+N8N_MESSAGES_UPSERT_PATH = (os.getenv("N8N_MESSAGES_UPSERT_PATH") or "chatbot-zapchats").strip().strip("/")
 
 
-def _notify_n8n_chatbot(
-    *,
-    empresa_id: int,
-    instancia_id: int | None,
-    jid: str,
-    numero: str,
-    texto: str,
-    direcao: str,  # "entrada" ou "saida"
-) -> None:
+def _n8n_url(base_or_full: str, *, path: str) -> str:
+    v = (base_or_full or "").strip()
+    if not v:
+        return ""
+    v = v.rstrip("/")
+    # Se terminar em "/webhook", é BASE -> acrescenta o path.
+    if v.lower().endswith("/webhook"):
+        return f"{v}/{path.lstrip('/')}"
+    # Senão, assume que já é URL completo (legado) e retorna como está.
+    return v
+
+
+def _chatbot_mode_from_db(*, empresa_id: int, instancia_id: int | None) -> str:
+    """Decide se é 'geral' ou 'setores' olhando a config da instância.
+    Regra: se auto_messages_departments.enabled = true -> 'setores', senão 'geral'.
     """
-    Dispara um POST simples pro n8n com os dados da mensagem.
-    Se der erro, só loga e segue a vida (não quebra nada do fluxo atual).
-    """
-    if not N8N_CHATBOT_WEBHOOK_URL:
+    if not instancia_id:
+        return "geral"
+    try:
+        with SessionLocal() as db:
+            row = db.execute(
+                text(
+                    """
+                    SELECT
+                      COALESCE((config->'features'->'auto_messages_departments'->>'enabled')::boolean, FALSE) AS dep_enabled
+                    FROM chatbot_configs
+                    WHERE empresa_id=:emp AND instancia_id=:inst AND ativo=TRUE
+                    ORDER BY atualizado_em DESC
+                    LIMIT 1
+                    """
+                ),
+                {"emp": int(empresa_id), "inst": int(instancia_id)},
+            ).mappings().first()
+        if row and bool(row.get("dep_enabled")):
+            return "setores"
+    except Exception:
+        pass
+    return "geral"
+
+
+def _notify_n8n_chatbot(*, empresa_id: int, instancia_id: int, jid: str, numero: str, texto: str, direcao: str):
+    """Envia a mensagem 'mastigada' pro n8n decidir e responder (boas-vindas / fora do horário / setores)."""
+    base = N8N_WEBHOOK_BASE_URL
+    if not base:
+        return
+
+    modo = _chatbot_mode_from_db(empresa_id=empresa_id, instancia_id=instancia_id)
+    path = N8N_CHATBOT_SETORES_PATH if modo == "setores" else N8N_CHATBOT_GERAL_PATH
+    url = _n8n_url(base, path=path)
+    if not url:
         return
 
     payload = {
@@ -120,13 +178,17 @@ def _notify_n8n_chatbot(
         "numero": numero,
         "texto": texto,
         "direction": direcao,
+        "modo": modo,
     }
 
     try:
-        requests.post(N8N_CHATBOT_WEBHOOK_URL, json=payload, timeout=5)
-        # LOG(f"[N8N][chatbot] webhook ok numero={numero}")  # opcional
+        requests.post(url, json=payload, timeout=5)
     except Exception as e:
-        LOG(f"[N8N][chatbot] erro ao enviar webhook: {e}")
+        # Não derruba o handler por causa do n8n
+        try:
+            LOG(f"[N8N][chatbot] erro ao chamar {url}: {e}")
+        except Exception:
+            pass
 
 
 import random
@@ -1580,6 +1642,8 @@ async def on_messages_upsert(inst_id: str, data):
         url = url.strip()
         if not url:
             return
+        # Se vier só a BASE (…/webhook), completa com o path do workflow
+        url = _n8n_url(url, path=N8N_MESSAGES_UPSERT_PATH) or url
 
         # 🔹 converte qualquer bytes/bytearray em string segura
         def _sanitize(obj):

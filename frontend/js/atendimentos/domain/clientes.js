@@ -1,3 +1,4 @@
+// /frontend/js/atendimentos/domain/clientes.js
 // =====================================================================
 // LISTA DE CONVERSAS (render, dedupe, preview, paginação)
 // - Normaliza resposta do backend (suporta `{items:[]}` ou `[]`)
@@ -6,6 +7,7 @@
 // - Integra com hist-cache para hora/preview "canônico"
 // - Paginação via botão "Carregar mais conversas" (loadMoreConversas)
 // - Expõe window.carregarClientes e window.Lista (shim UI)
+// - FIX: avatares “vazios” (img quebrado / src null/undefined / erro antes do handler existir)
 // =====================================================================
 
 import { EMPRESA_ID } from '../core/env.js';
@@ -16,11 +18,7 @@ import { tsToMillis, formatChatTime } from '../core/time.js';
 import { escapeHtml, formatarNumeroBR, badge } from '../core/format.js';
 
 // >>> HISTÓRICO LOCAL (nova base de cache)
-import {
-  hasHistory,
-  primeWith,
-  getHist,
-} from '../domain/hist-cache.js';
+import { hasHistory, primeWith, getHist } from '../domain/hist-cache.js';
 
 /* =========================================================
    Toggle global: prefetch leve de mensagens (ligado por padrão)
@@ -34,7 +32,7 @@ if (typeof window !== 'undefined') {
 /* =========================================================
    Helpers
    ========================================================= */
-function normalizaTelefoneBR(s){
+function normalizaTelefoneBR(s) {
   const raw = String(s ?? '');
   if (raw.includes('@')) return '';
   const d = raw.replace(/\D/g, '');
@@ -42,7 +40,7 @@ function normalizaTelefoneBR(s){
   return (sem55.length === 10 || sem55.length === 11) ? sem55 : '';
 }
 
-function normalizeName(s){
+function normalizeName(s) {
   return String(s ?? '')
     .normalize('NFD')
     .replace(/\p{Diacritic}/gu, '')
@@ -50,10 +48,10 @@ function normalizeName(s){
     .toLowerCase();
 }
 
-function temValor(v){ return v !== undefined && v !== null; }
+function temValor(v) { return v !== undefined && v !== null; }
 
-function scoreRecencia(c){
-  const ts  = tsToMillis(c.hora || c.last_ts) || 0;
+function scoreRecencia(c) {
+  const ts = tsToMillis(c.hora || c.last_ts) || 0;
   const mid = Number(c.ultima_msg_id || 0);
   const ack = Number(c.last_ack || 0);
   const ava = c.avatar_url ? 1 : 0;
@@ -62,13 +60,13 @@ function scoreRecencia(c){
 
 // handler global para erro de avatar
 if (typeof window !== 'undefined' && !window.handleAvatarError) {
-  window.handleAvatarError = function handleAvatarError(img){
-    try{
+  window.handleAvatarError = function handleAvatarError(img) {
+    try {
       if (!img) return;
       try { img.onerror = null; } catch {}
 
       const li = img.closest('li.chat-item, li.cliente-item');
-      const cidAttr = img.dataset.clienteId || li?.dataset.id;
+      const cidAttr = img.dataset.clienteId || li?.dataset?.id;
       const cid = cidAttr ? Number(cidAttr) : null;
 
       const parent = img.parentElement;
@@ -82,20 +80,22 @@ if (typeof window !== 'undefined' && !window.handleAvatarError) {
       if (cid && typeof window.refreshAvatarFromEvolution === 'function') {
         window.refreshAvatarFromEvolution(cid);
       }
-    }catch(e){
+    } catch (e) {
       try { console.warn('[handleAvatarError]', e); } catch {}
     }
   };
 }
 
 // 🔼 PINS primeiro, depois recência
-function ordenarConversasDesc(arr){
+function ordenarConversasDesc(arr) {
   const A = Array.isArray(arr) ? arr.slice() : [];
-  return A.sort((a,b)=>{
+  return A.sort((a, b) => {
     const pinCmp = Number(b?.pinned ? 1 : 0) - Number(a?.pinned ? 1 : 0);
     if (pinCmp !== 0) return pinCmp;
+
     const recCmp = scoreRecencia(b) - scoreRecencia(a);
     if (recCmp !== 0) return recCmp;
+
     const ib = Number(b.id ?? b.conversation_id ?? b.cliente_id ?? 0);
     const ia = Number(a.id ?? a.conversation_id ?? a.cliente_id ?? 0);
     return ib - ia;
@@ -105,20 +105,21 @@ function ordenarConversasDesc(arr){
 /**
  * Dedupe em 3 fases (preserva .pinned)
  */
-function dedupeConversas(arr){
+function dedupeConversas(arr) {
   if (!Array.isArray(arr)) return [];
 
   const base = ordenarConversasDesc(arr);
 
   const byKey = new Map();
-  for (const c of base){
+  for (const c of base) {
     const inst = String(c.instancia_id ?? c.instancia ?? 'all');
     const pref = temValor(c.conversation_id) ? c.conversation_id
-               : temValor(c.cliente_id)      ? c.cliente_id
-               : temValor(c.id)              ? c.id
-               : `noid:${Math.random()}`;
+      : temValor(c.cliente_id) ? c.cliente_id
+        : temValor(c.id) ? c.id
+          : `noid:${Math.random()}`;
     const key = `${inst}:${pref}`;
     const cur = byKey.get(key);
+
     if (!cur || scoreRecencia(c) > scoreRecencia(cur)) {
       byKey.set(key, { ...c, pinned: Boolean(c.pinned || cur?.pinned) });
     } else if (cur) {
@@ -128,12 +129,13 @@ function dedupeConversas(arr){
 
   const byFone = new Map();
   const semFone = [];
-  for (const c of byKey.values()){
+  for (const c of byKey.values()) {
     const inst = String(c.instancia_id ?? c.instancia ?? 'all');
     const telNorm = normalizaTelefoneBR(c.telefone);
     if (!telNorm) { semFone.push(c); continue; }
     const fkey = `${inst}:${telNorm}`;
     const cur = byFone.get(fkey);
+
     if (!cur || scoreRecencia(c) > scoreRecencia(cur)) {
       byFone.set(fkey, { ...c, pinned: Boolean(c.pinned || cur?.pinned) });
     } else if (cur) {
@@ -142,13 +144,15 @@ function dedupeConversas(arr){
   }
 
   const byInstNomeComFone = new Map();
-  for (const [key, val] of byFone.entries()){
+  for (const [key, val] of byFone.entries()) {
     const instKey = String(key).split(':')[0];
     const inst = instKey || String(val.instancia_id ?? val.instancia ?? 'all');
     const nomeNorm = normalizeName(val.nome_whatsapp || val.nome || val.push_name);
     if (!nomeNorm) continue;
+
     const nmMap = byInstNomeComFone.get(inst) || new Map();
     const cur = nmMap.get(nomeNorm);
+
     if (!cur || scoreRecencia(val) > scoreRecencia(cur)) {
       nmMap.set(nomeNorm, { ...val, pinned: Boolean(val.pinned || cur?.pinned) });
     } else if (cur) {
@@ -158,11 +162,11 @@ function dedupeConversas(arr){
   }
 
   const byInstNomeOnly = new Map();
-  for (const c of semFone){
+  for (const c of semFone) {
     const inst = String(c.instancia_id ?? c.instancia ?? 'all');
     const nomeNorm = normalizeName(c.nome_whatsapp || c.nome || c.push_name);
 
-    if (!nomeNorm){
+    if (!nomeNorm) {
       const key = `${inst}:__no_phone__:${c.id ?? c.conversation_id ?? Math.random()}`;
       const cur = byFone.get(key);
       if (!cur || scoreRecencia(c) > scoreRecencia(cur)) {
@@ -176,11 +180,11 @@ function dedupeConversas(arr){
     const nmMap = byInstNomeComFone.get(inst);
     const comFone = nmMap?.get(nomeNorm);
 
-    if (comFone){
+    if (comFone) {
       const cScore = scoreRecencia(c);
       const fScore = scoreRecencia(comFone);
 
-      if (cScore > fScore){
+      if (cScore > fScore) {
         if (temValor(c.hora) && (!temValor(comFone.hora) || tsToMillis(c.hora) > tsToMillis(comFone.hora))) {
           comFone.hora = c.hora;
         }
@@ -188,7 +192,7 @@ function dedupeConversas(arr){
           comFone.ultima_mensagem = c.ultima_mensagem;
         }
         if (temValor(c.last_ack)) {
-          comFone.last_ack = Math.max(Number(comFone.last_ack||0), Number(c.last_ack||0));
+          comFone.last_ack = Math.max(Number(comFone.last_ack || 0), Number(c.last_ack || 0));
         }
       }
       comFone.pinned = Boolean(comFone.pinned || c.pinned);
@@ -204,8 +208,8 @@ function dedupeConversas(arr){
     }
   }
 
-  for (const [inst, onlyMap] of byInstNomeOnly.entries()){
-    for (const [nomeNorm, item] of onlyMap.entries()){
+  for (const [inst, onlyMap] of byInstNomeOnly.entries()) {
+    for (const [nomeNorm, item] of onlyMap.entries()) {
       const key = `${inst}:__name_only__:${nomeNorm}`;
       const cur = byFone.get(key);
       if (!cur || scoreRecencia(item) > scoreRecencia(cur)) {
@@ -222,10 +226,10 @@ function dedupeConversas(arr){
 /* =========================================================
    Normalização (suporta /conversas e legado /clientes)
    ========================================================= */
-export function normalizeCliente(c){
+export function normalizeCliente(c) {
   const inst =
     c.instancia_id ?? c.instancia ?? c.instancia_slug ??
-    c.instance_id  ?? c.instance  ?? c.session ?? c.sessionName ?? c.sessao ?? c.inst_slug ?? null;
+    c.instance_id ?? c.instance ?? c.session ?? c.sessionName ?? c.sessao ?? c.inst_slug ?? null;
 
   const id = Number(c.conversation_id ?? c.cliente_id ?? c.id ?? c.cid ?? 0) || null;
 
@@ -235,18 +239,17 @@ export function normalizeCliente(c){
   const preview =
     c.ultima_texto ?? c.ultima_mensagem ?? c.ultima ?? c.last_text ?? '';
 
-  const foto =
-    c.avatar_url
-    || c.foto_url
-    || c.foto
-    || c.avatar
-    || c.profile_pic_url
-    || '';
+  // ✅ FIX: sanitiza avatar_url (evita "null"/"undefined")
+  const fotoRaw =
+    c.avatar_url || c.foto_url || c.foto || c.avatar || c.profile_pic_url || '';
+  const fotoStr = String(fotoRaw || '').trim();
+  const fotoOk = fotoStr && !/^(null|undefined|about:blank)$/i.test(fotoStr);
+  const foto = fotoOk ? fotoStr : '';
 
   return {
     id,
     conversation_id: temValor(c.conversation_id) ? c.conversation_id : id,
-    cliente_id:      temValor(c.cliente_id) ? c.cliente_id : id,
+    cliente_id: temValor(c.cliente_id) ? c.cliente_id : id,
 
     nome_whatsapp: c.nome_whatsapp ?? null,
     nome: c.nome ?? null,
@@ -255,7 +258,7 @@ export function normalizeCliente(c){
     telefone: c.telefone ?? c.number ?? c.wuid ?? c.numero ?? null,
     telefone_norm: normalizaTelefoneBR(c.telefone ?? c.number ?? c.wuid ?? c.numero ?? null),
 
-    avatar_url: foto && String(foto).trim() !== '' ? String(foto) : null,
+    avatar_url: foto ? foto : null,
 
     ultima_msg_id: c.ultima_msg_id ?? c.last_msg_id ?? null,
     ultima_mensagem: preview,
@@ -264,7 +267,7 @@ export function normalizeCliente(c){
 
     novas: Number(c.novas ?? 0),
     last_tipo: c.ultima_tipo ?? c.last_tipo ?? c.tipo ?? null,
-    last_ack:  c.ultima_ack  ?? c.last_ack  ?? c.ack  ?? null,
+    last_ack: c.ultima_ack ?? c.last_ack ?? c.ack ?? null,
 
     instancia_id: inst,
     instancia: inst,
@@ -291,7 +294,7 @@ function buildMsgsUrl(convId, instanciaId, extra = {}) {
   return `/api/atendimento/conversas/${convId}/mensagens?` + qs.toString();
 }
 
-async function fetchConv30(convId, instanciaId){
+async function fetchConv30(convId, instanciaId) {
   const url = buildMsgsUrl(convId, instanciaId);
   const r = await fetch(url, { credentials: 'include' });
   if (!r.ok) throw new Error('Falha ao carregar mensagens da conversa ' + convId);
@@ -347,7 +350,7 @@ let _isWired = false;
 let _isLoadingMore = false;
 let __loadingConversas = false;
 
-export async function carregarClientes({ force=false } = {}){
+export async function carregarClientes({ force = false } = {}) {
   if (__loadingConversas) return state.clientesCache || [];
   __loadingConversas = true;
 
@@ -365,15 +368,15 @@ export async function carregarClientes({ force=false } = {}){
     );
 
     const items = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : []);
-    const next  = raw?.next_cursor ?? null;
+    const next = raw?.next_cursor ?? null;
 
     let cs = items.map(normalizeCliente).filter(_matchInstancia);
 
     // ====================== MERGE COM O QUE JÁ TINHA ======================
     const antigo = Array.isArray(state.clientesCache) ? state.clientesCache : [];
 
-    cs.forEach(n=>{
-      const a = antigo.find(x=> (x.id??x.conversation_id) === n.id);
+    cs.forEach(n => {
+      const a = antigo.find(x => (x.id ?? x.conversation_id) === n.id);
 
       const oldTs = tsToMillis(a?.hora || a?.last_ts);
       const newTs = tsToMillis(n.hora || n.last_ts);
@@ -386,7 +389,7 @@ export async function carregarClientes({ force=false } = {}){
         }
         if (a.last_tipo) n.last_tipo = a.last_tipo;
         if (a.last_tipo === 'saida' && temValor(a.last_ack)) {
-          n.last_ack = Math.max(Number(n.last_ack||0), Number(a.last_ack||0));
+          n.last_ack = Math.max(Number(n.last_ack || 0), Number(a.last_ack || 0));
         }
         if (temValor(a.novas) && (Number(n.novas) || 0) === 0) {
           n.novas = Number(a.novas) || 0;
@@ -402,13 +405,12 @@ export async function carregarClientes({ force=false } = {}){
 
       if (temValor(a?.last_ack)) {
         if (!temValor(n.last_ack)) n.last_ack = a.last_ack;
-        else n.last_ack = Math.max(Number(n.last_ack)||0, Number(a.last_ack)||0);
+        else n.last_ack = Math.max(Number(n.last_ack || 0), Number(a.last_ack || 0));
       }
 
       n.pinned = Boolean(n.pinned || a?.pinned);
     });
 
-    // 👉 aqui é o pulo do gato:
     // mantém as conversas antigas que NÃO vieram nessa página nova
     const setNovos = new Set(cs.map(x => String(x.id ?? x.conversation_id)));
     const extrasAntigos = antigo.filter(a => !setNovos.has(String(a.id ?? a.conversation_id)));
@@ -417,7 +419,7 @@ export async function carregarClientes({ force=false } = {}){
     all = dedupeConversas(all);
 
     state.clientesCache = all;
-    state.nextCursor    = next;
+    state.nextCursor = next;
     persist();
 
     renderListaClientes(all);
@@ -439,17 +441,15 @@ export async function carregarClientes({ force=false } = {}){
   }
 }
 
-
 /* =========================================================
    Carregar mais conversas (botão)
    ========================================================= */
-export function wireListaInfiniteScroll(){
-  // compat; não usamos mais scroll automático
+export function wireListaInfiniteScroll() {
   if (_isWired) return;
   _isWired = true;
 }
 
-export async function loadMoreConversas(){
+export async function loadMoreConversas() {
   const cursor = state.nextCursor;
   if (!cursor) return;
 
@@ -459,12 +459,12 @@ export async function loadMoreConversas(){
   const data = await r.json();
 
   const items = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
-  const next  = data?.next_cursor ?? null;
+  const next = data?.next_cursor ?? null;
 
   const mais = items.map(normalizeCliente).filter(_matchInstancia);
 
   const map = new Map(state.clientesCache.map(c => [String((c.conversation_id ?? c.id)), c]));
-  for (const it of mais){
+  for (const it of mais) {
     const key = String(it.conversation_id ?? it.id);
     const prev = map.get(key) || {};
     const merged = { ...prev, ...it };
@@ -487,16 +487,16 @@ export async function loadMoreConversas(){
 /* =========================================================
    Render da lista
    ========================================================= */
-export function renderListaClientes(data){
+export function renderListaClientes(data) {
   const arr = dedupeConversas(
-    (Array.isArray(data)?data:[]).map(normalizeCliente).filter(_matchInstancia)
+    (Array.isArray(data) ? data : []).map(normalizeCliente).filter(_matchInstancia)
   );
   const ul = document.getElementById('lista-clientes');
   if (!ul) return;
 
   const ordenado = ordenarConversasDesc(arr);
 
-  let html = ordenado.map(c=>{
+  let html = ordenado.map(c => {
     const nome = (c.nome_whatsapp && c.nome_whatsapp.trim())
       ? c.nome_whatsapp.trim()
       : (c.nome && c.nome.trim() && c.nome !== 'Cliente')
@@ -504,16 +504,16 @@ export function renderListaClientes(data){
         : (c.push_name?.trim() || formatarNumeroBR(c.telefone));
 
     const serverMs = tsToMillis(c.hora || c.last_ts) || 0;
-    let when       = serverMs ? formatChatTime(serverMs) : '';
-    let preview    = (c.ultima_mensagem || '').trim();
-    let outboundFlag  = (c.last_tipo === 'saida');
+    let when = serverMs ? formatChatTime(serverMs) : '';
+    let preview = (c.ultima_mensagem || '').trim();
+    let outboundFlag = (c.last_tipo === 'saida');
     let ackValForIcon = Number(c.last_ack ?? 0) || 0;
 
     try {
       const instCanon = (c.instancia_id ?? c.instancia ?? null) || null;
-      const arrHist   = window.cacheHistoricos?.[c.id] || getHist(instCanon, c.id);
+      const arrHist = window.cacheHistoricos?.[c.id] || getHist(instCanon, c.id);
       if (Array.isArray(arrHist) && arrHist.length) {
-        const last   = arrHist[arrHist.length - 1];
+        const last = arrHist[arrHist.length - 1];
         const histMs = Number(last?.ts || 0) || Date.parse(last?.timestamp || '') || 0;
         const rawHistText = (last?.texto || last?.text || last?.conteudo || last?.mensagem || '').trim();
 
@@ -523,7 +523,7 @@ export function renderListaClientes(data){
           (!preview && rawHistText);
 
         if (useHist) {
-          outboundFlag  = (last?.tipo === 'saida') || !!last?.from_me || (last?.origem === 'atendente');
+          outboundFlag = (last?.tipo === 'saida') || !!last?.from_me || (last?.origem === 'atendente');
           ackValForIcon = outboundFlag ? (Number(last?.ack || 0) || 0) : 0;
 
           if (histMs) when = formatChatTime(histMs);
@@ -537,9 +537,9 @@ export function renderListaClientes(data){
             preview = hasAny
               ? (mime.includes('image') ? '[Foto]'
                 : mime.includes('video') ? '[Vídeo]'
-                : mime.includes('audio') ? '[Áudio]'
-                : mime.includes('pdf')   ? '[PDF]'
-                : '[Arquivo]')
+                  : mime.includes('audio') ? '[Áudio]'
+                    : mime.includes('pdf') ? '[PDF]'
+                      : '[Arquivo]')
               : '';
           }
         } else {
@@ -556,14 +556,14 @@ export function renderListaClientes(data){
     } catch {}
 
     const outbound = outboundFlag;
-    const dirStr   = outbound ? 'out' : 'in';
-    const ackVal   = ackValForIcon;
+    const dirStr = outbound ? 'out' : 'in';
+    const ackVal = ackValForIcon;
 
     const ackHtml = outbound && typeof window.getAckIcon === 'function'
       ? `<span class="preview-ack" data-ack="${ackVal}">${window.getAckIcon(ackVal)}</span> `
       : '';
 
-    const avatarUrl = c.avatar_url ? String(c.avatar_url).replace(/"/g,'&quot;') : '';
+    const avatarUrl = c.avatar_url ? String(c.avatar_url).replace(/"/g, '&quot;') : '';
     const av = avatarUrl
       ? `<span class="avatar"><img src="${avatarUrl}" alt="" data-cliente-id="${c.id}"
                 onerror="window.handleAvatarError && window.handleAvatarError(this)" /></span>`
@@ -604,16 +604,38 @@ export function renderListaClientes(data){
   ul.innerHTML = html;
   document.dispatchEvent(new CustomEvent('lista:rendered'));
 
-  // ⚠️ Safety: se sobrar avatar SEM img nem ícone, força placeholder
-  ul.querySelectorAll('.avatar').forEach(span => {
-    if (!span.querySelector('img, i')) {
-      span.classList.add('placeholder');
-      span.innerHTML = '<i class="fa fa-user-circle"></i>';
-    }
-  });
+  // ✅ FIX: avatares “vazios” (img existe mas quebrou / src ruim / erro antes do handler existir)
+  (function fixBrokenAvatars() {
+    // 1) se tiver <img> mas estiver quebrado, troca por placeholder
+    ul.querySelectorAll('.avatar img').forEach(img => {
+      const src = String(img.getAttribute('src') || '').trim();
+      const isBadSrc = !src || /^(null|undefined|about:blank)$/i.test(src);
 
-  ul.querySelectorAll('.chat-item.cliente-item').forEach(el=>{
-    el.addEventListener('click',()=> window.selecionarClienteObj?.(Number(el.dataset.id)));
+      const fix = () => {
+        try { window.handleAvatarError?.(img); } catch {}
+      };
+
+      // garante que qualquer erro futuro vira placeholder
+      try { img.addEventListener('error', fix, { once: true }); } catch {}
+
+      // src já ruim → troca na hora
+      if (isBadSrc) return fix();
+
+      // erro já aconteceu antes (img complete + sem pixels) → troca agora
+      if (img.complete && img.naturalWidth === 0) return fix();
+    });
+
+    // 2) se sobrar .avatar sem nada dentro, força placeholder
+    ul.querySelectorAll('.avatar').forEach(span => {
+      if (!span.querySelector('img, i')) {
+        span.classList.add('placeholder');
+        span.innerHTML = '<i class="fa fa-user-circle"></i>';
+      }
+    });
+  })();
+
+  ul.querySelectorAll('.chat-item.cliente-item').forEach(el => {
+    el.addEventListener('click', () => window.selecionarClienteObj?.(Number(el.dataset.id)));
   });
 
   if (hasMore) {
@@ -636,25 +658,25 @@ export function renderListaClientes(data){
 /* =========================================================
    SHIM opcional de UI
    ========================================================= */
-function _findClienteIndex(id){
+function _findClienteIndex(id) {
   const arr = Array.isArray(state.clientesCache) ? state.clientesCache : [];
   return arr.findIndex(c => (c.id ?? c.conversation_id) === Number(id));
 }
-function _reRender(){
+function _reRender() {
   const arr = dedupeConversas(state.clientesCache || []);
   renderListaClientes(arr);
   persist();
 }
-function _touchHora(c, tsISO){
+function _touchHora(c, tsISO) {
   c.hora = tsISO || new Date().toISOString();
 }
 
 if (!window.Lista) {
   window.Lista = {
-    render(data){
+    render(data) {
       renderListaClientes(Array.isArray(data) ? data : (state.clientesCache || []));
     },
-    updatePreview(clienteId, { texto, ts, ack, unreadDelta } = {}){
+    updatePreview(clienteId, { texto, ts, ack, unreadDelta } = {}) {
       const idx = _findClienteIndex(clienteId);
       if (idx < 0) return;
       const c = state.clientesCache[idx];
@@ -663,34 +685,34 @@ if (!window.Lista) {
         c.last_ack = Number(ack);
         c.last_tipo = 'saida';
       }
-      if (unreadDelta) c.novas = Math.max(0, Number(c.novas||0) + Number(unreadDelta||0));
+      if (unreadDelta) c.novas = Math.max(0, Number(c.novas || 0) + Number(unreadDelta || 0));
       _touchHora(c, ts);
       _reRender();
     },
-    setAck(clienteId, ack){
+    setAck(clienteId, ack) {
       const idx = _findClienteIndex(clienteId);
       if (idx < 0) return;
       const c = state.clientesCache[idx];
       c.last_tipo = 'saida';
-      const novo = Math.max(Number(c.last_ack||0), Number(ack||0));
+      const novo = Math.max(Number(c.last_ack || 0), Number(ack || 0));
       c.last_ack = novo;
       persist();
       _reRender();
     },
-    bumpToTop(clienteId){
+    bumpToTop(clienteId) {
       const idx = _findClienteIndex(clienteId);
       if (idx < 0) return;
       const c = state.clientesCache[idx];
       _touchHora(c);
       _reRender();
     },
-    resetUnread(clienteId){
+    resetUnread(clienteId) {
       const idx = _findClienteIndex(clienteId);
       if (idx < 0) return;
       state.clientesCache[idx].novas = 0;
       _reRender();
     },
-    setPinned(clienteId, isPinned){
+    setPinned(clienteId, isPinned) {
       const idx = _findClienteIndex(clienteId);
       if (idx < 0) return;
       state.clientesCache[idx].pinned = !!isPinned;
@@ -702,27 +724,26 @@ if (!window.Lista) {
 /* === Exports globais úteis === */
 try {
   window.renderListaClientes?.(window.state?.clientesCache || []);
-
   window.carregarClientes = carregarClientes;
 } catch {}
 
 /* ====== LISTA: booster de preview + ACK + CSS ====== */
-(function(){
+(function () {
   'use strict';
 
-  function updatePreviewInline(clienteId, { texto, ack, ts, unreadDelta } = {}){
+  function updatePreviewInline(clienteId, { texto, ack, ts, unreadDelta } = {}) {
     const li = document.querySelector(`li.chat-item[data-id="${clienteId}"]`);
     if (!li) return;
 
-    if (typeof texto === 'string'){
+    if (typeof texto === 'string') {
       const preview = li.querySelector('.preview-text');
       if (preview) preview.textContent = texto;
     }
 
-    try{
-      if (typeof window.getAckIcon === 'function' && (ack ?? null) !== null){
+    try {
+      if (typeof window.getAckIcon === 'function' && (ack ?? null) !== null) {
         let wrap = li.querySelector('.preview-ack');
-        if (!wrap){
+        if (!wrap) {
           const last = li.querySelector('.chat-last') || li.querySelector('.last-line') || li;
           wrap = document.createElement('span');
           wrap.className = 'preview-ack';
@@ -732,25 +753,25 @@ try {
         wrap.setAttribute('data-ack', String(ack));
         wrap.innerHTML = window.getAckIcon(ack);
       }
-    }catch{}
+    } catch {}
 
-    if (ts){
+    if (ts) {
       const el = li.querySelector('.chat-time, time');
       if (el) el.textContent = ts;
     }
 
-    if (unreadDelta){
+    if (unreadDelta) {
       const badgeEl = li.querySelector('.badge, .unread');
-      if (badgeEl){
+      if (badgeEl) {
         const cur = Number(badgeEl.textContent || '0') || 0;
-        const val = Math.max(0, cur + Number(unreadDelta||0));
+        const val = Math.max(0, cur + Number(unreadDelta || 0));
         badgeEl.textContent = String(val);
         badgeEl.hidden = val <= 0;
       }
     }
   }
 
-  function setAckInline(clienteId, ack){
+  function setAckInline(clienteId, ack) {
     updatePreviewInline(clienteId, { ack });
   }
 
@@ -758,17 +779,17 @@ try {
   const prevUpdate = typeof L.updatePreview === 'function' ? L.updatePreview.bind(L) : null;
   const prevSetAck = typeof L.setAck === 'function' ? L.setAck.bind(L) : null;
 
-  L.updatePreview = function(cid, payload){
+  L.updatePreview = function (cid, payload) {
     try { updatePreviewInline(cid, payload || {}); } catch {}
     return prevUpdate ? prevUpdate(cid, payload) : undefined;
   };
-  L.setAck = function(cid, ack){
+  L.setAck = function (cid, ack) {
     try { setAckInline(cid, ack); } catch {}
     return prevSetAck ? prevSetAck(cid, ack) : undefined;
   };
 
   // CSS do ACK
-  (function ensureListaAckCss(){
+  (function ensureListaAckCss() {
     const id = 'lista-ack-css';
     if (document.getElementById(id)) return;
     const s = document.createElement('style');
@@ -782,7 +803,7 @@ try {
   })();
 
   // CSS do botão "Carregar mais conversas" CENTRALIZADO
-  (function ensureListaLoadMoreCss(){
+  (function ensureListaLoadMoreCss() {
     const id = 'lista-load-more-css';
     if (document.getElementById(id)) return;
     const s = document.createElement('style');

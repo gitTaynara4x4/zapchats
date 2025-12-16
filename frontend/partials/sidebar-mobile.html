@@ -408,19 +408,21 @@
       return localStorage.getItem('theme') || (html.classList.contains('dark')?'dark':'light');
     }catch{ return html.classList.contains('dark')?'dark':'light'; } }
 
-    function set(t){
+    function apply(t, animate){
       try{
         if(window.AppTheme && typeof AppTheme.set==='function') AppTheme.set(t);
         else { html.classList.toggle('dark',t==='dark'); localStorage.setItem('theme',t); }
       }catch{}
       btn.setAttribute('aria-pressed', String(t==='dark'));
-      btn.classList.remove('t-anim'); void btn.offsetWidth; btn.classList.add('t-anim');
-      setTimeout(()=>btn.classList.remove('t-anim'), 580);
+      if(animate){
+        btn.classList.remove('t-anim'); void btn.offsetWidth; btn.classList.add('t-anim');
+        setTimeout(()=>btn.classList.remove('t-anim'), 580);
+      }
     }
 
-    set(cur());
-    btn.addEventListener('click', ()=> set(cur()==='dark'?'light':'dark'));
-    window.addEventListener('storage', e=>{ if(e.key==='theme' && e.newValue) set(e.newValue); });
+    apply(cur(), false);
+    btn.addEventListener('click', ()=> apply(cur()==='dark'?'light':'dark', true));
+    window.addEventListener('storage', e=>{ if(e.key==='theme' && e.newValue) apply(e.newValue, false); });
   })();
 
   /* === Helpers de usuário === */
@@ -485,7 +487,10 @@
         const res = await fetch('/api/usuarios/me/avatar', {credentials:'include', headers:{Authorization:'Bearer '+token}});
         if(!res.ok) return;
         const blob = await res.blob(); const r = new FileReader();
-        r.onloadend = function(){ try{ localStorage.setItem('usuario_avatar', r.result); }catch{}; img.src=r.result; img.style.display='block'; icn.style.display='none'; fb.style.display='none'; };
+        r.onloadend = function(){
+          try{ localStorage.setItem('usuario_avatar', r.result); }catch{};
+          img.src=r.result; img.style.display='block'; icn.style.display='none'; fb.style.display='none';
+        };
         r.readAsDataURL(blob);
       }catch{}
     })();
@@ -523,16 +528,16 @@
     function close(){
       modal.classList.remove('is-open');
       modal.setAttribute('aria-hidden','true');
-      document.removeEventListener('keydown', onEsc);
-      modal.removeEventListener('click', onBackdrop);
     }
-    function onEsc(e){ if(e.key==='Escape') close(); }
+    function onEsc(e){ if(e.key==='Escape' && modal.classList.contains('is-open')) close(); }
     function onBackdrop(e){ if(e.target===modal) close(); }
+
+    // fica “sempre ligado” (sem perder depois da 1ª vez)
+    document.addEventListener('keydown', onEsc);
+    modal.addEventListener('click', onBackdrop);
 
     if (closeBtn) closeBtn.addEventListener('click', close);
     if (cancelBtn) cancelBtn.addEventListener('click', function(e){ e.preventDefault(); close(); });
-    modal.addEventListener('click', onBackdrop);
-    document.addEventListener('keydown', onEsc);
 
     if (fileInput && preview){
       fileInput.addEventListener('change', function(){

@@ -147,6 +147,30 @@ function resolveInstTopic(){
   }catch{ return s; }
 }
 
+// resolve label/nome amigável pela lista de instâncias (pra NÃO ficar "wa.4" se tiver nome/apelido)
+function resolveInstanceName(instKey){
+  const raw = (instKey == null ? '' : String(instKey)).trim();
+  if (!raw) return null;
+  try{
+    const arr = window.state?.instancias || window.INSTANCIAS || [];
+    const byId =
+      arr.find(x => String(x?.instancia_id ?? x?.id ?? x?.instance_id ?? '') === raw) ||
+      arr.find(x => String(x?.id ?? '') === raw);
+    if (byId) return (byId.apelido || byId.nome || byId.instance_name || byId.instancia || null);
+
+    const q = raw.toLowerCase();
+    const byName =
+      arr.find(x => String(x?.instance_name||'').toLowerCase() === q) ||
+      arr.find(x => String(x?.instancia||'').toLowerCase() === q) ||
+      arr.find(x => String(x?.nome||'').toLowerCase() === q);
+    if (byName) return (byName.apelido || byName.nome || byName.instance_name || byName.instancia || null);
+
+    return null;
+  }catch{
+    return null;
+  }
+}
+
 let sockEmp = null;
 let sockInst = null;
 let hbEmpTimer = null;
@@ -160,7 +184,6 @@ let lastServerTs = 0; // ms epoch (heartbeat ou qualquer evento)
 
 function heartbeat(ws){ try { ws?.send?.('ping'); } catch {} }
 function scheduleHeartbeat(ws, which='emp'){
-  const ref = (which === 'inst') ? 'hbInstTimer' : 'hbEmpTimer';
   clearInterval(which === 'inst' ? hbInstTimer : hbEmpTimer);
   const id = setInterval(() => heartbeat(ws), 30_000);
   if (which === 'inst') hbInstTimer = id; else hbEmpTimer = id;
@@ -202,7 +225,13 @@ function upsertClientePreview({ cliente_id, texto, ts, tipo='entrada', ack=null,
 
   const instSel   = window.INSTANCIA_ATIVA || window.state?.instanciaSelecionada || window.clienteSel?.instancia_id || null;
   const instToUse = (instancia_id != null) ? instancia_id : (c?.instancia_id ?? instSel);
-  const nameToUse = (instance_name) ? instance_name : (c?.instance_name ?? window.state?.instanciaSelecionadaNome ?? null);
+
+  const derivedName =
+    instance_name
+      || c?.instance_name
+      || resolveInstanceName(instToUse)
+      || window.state?.instanciaSelecionadaNome
+      || null;
 
   if (!c) {
     c = {
@@ -210,7 +239,7 @@ function upsertClientePreview({ cliente_id, texto, ts, tipo='entrada', ack=null,
       nome: null, push_name: null, telefone: null, avatar_url: null,
       ultima_msg_id: null, ultima_mensagem: '', hora: ts, novas: 0,
       last_tipo: null, last_ack: null, instancia_id: instToUse ?? null, instancia: instToUse ?? null,
-      instance_name: nameToUse ?? null,
+      instance_name: derivedName ?? null,
     };
   } else { if (ts) c.hora = ts; }
 
@@ -222,7 +251,7 @@ function upsertClientePreview({ cliente_id, texto, ts, tipo='entrada', ack=null,
     c.last_ack = null;
   }
   if (instToUse != null) { c.instancia_id = instToUse; c.instancia = instToUse; }
-  if (nameToUse) c.instance_name = nameToUse;
+  if (derivedName) c.instance_name = derivedName;
 
   const [g, s] = bothCaches(); upsertIn(g, c); upsertIn(s, c);
 
@@ -230,10 +259,11 @@ function upsertClientePreview({ cliente_id, texto, ts, tipo='entrada', ack=null,
     window.Lista?.updatePreview?.(cliente_id, {
       texto: (typeof texto === 'string') ? texto : undefined,
       ts, ack: (tipo === 'saida' ? ack : null),
-      instancia_id: instToUse ?? null
+      instancia_id: instToUse ?? null,
+      instance_name: derivedName ?? undefined,
     });
   } catch {}
-  if (DEBUG_WS) console.debug('[LISTA] preview', { cliente_id, texto, ts, tipo, ack, instancia_id: instToUse });
+  if (DEBUG_WS) console.debug('[LISTA] preview', { cliente_id, texto, ts, tipo, ack, instancia_id: instToUse, instance_name: derivedName });
 }
 
 // ========================= normalizadores =========================
@@ -500,7 +530,15 @@ function handleNovaMensagem(payload){
   }
 
   const tsMs = tsToMillis(tsIso) || Date.now();
-  upsertClientePreview({ cliente_id, texto: msg.conteudo, ts: tsMs, tipo, ack: msg.ack, instancia_id: inst, instance_name: payload.instance_name ?? payload.instance ?? null });
+  upsertClientePreview({
+    cliente_id,
+    texto: msg.conteudo,
+    ts: tsMs,
+    tipo,
+    ack: msg.ack,
+    instancia_id: inst,
+    instance_name: payload.instance_name ?? payload.instance ?? resolveInstanceName(inst) ?? null
+  });
 
   const ativa = isChatActive(cliente_id);
   try {
@@ -553,7 +591,7 @@ function handleDeleteMensagem(payload){
       tipo: 'entrada',
       ack: null,
       instancia_id: inst,
-      instance_name: payload.instance_name ?? payload.instance ?? null,
+      instance_name: payload.instance_name ?? payload.instance ?? resolveInstanceName(inst) ?? null,
     });
   }
 
@@ -563,17 +601,31 @@ function handleDeleteMensagem(payload){
 }
 
 // ========================= conv_status & pin =========================
+// ✅ FIX: "no_bot" NÃO pode virar "bot"
 function normalizeConvStatus(s){
-  const v = String(s || '').toLowerCase();
-  if (['bot','no_bot','automatico','automático'].includes(v)) return 'bot';
-  return v || 'bot';
+  const v = String(s || '').trim().toLowerCase();
+
+  if (!v) return 'no_bot';
+
+  const BOT = ['bot','automatico','automático','auto','automatizado'];
+  const HUMAN = ['no_bot','humano','manual','atendente','agente','agent','operador','operadora'];
+
+  if (BOT.includes(v)) return 'bot';
+  if (HUMAN.includes(v)) return 'no_bot';
+
+  // se vier outro status (ex.: "aberto", "resolvido"), mantém o valor
+  // (o seu filtros.js já trata "qualquer coisa diferente de bot" como humano)
+  return v;
 }
+
 function handleConvStatus(payload){
   const inst = pickInstanciaFromAny(payload);
   let cliente_id = Number(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? NaN);
   if (!cliente_id) cliente_id = findClienteIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || '') || 0;
   if (!cliente_id) return;
-  const status = normalizeConvStatus(payload?.status);
+
+  const rawStatus = payload?.statusatendimento ?? payload?.status ?? payload?.state ?? payload?.modo ?? '';
+  const status = normalizeConvStatus(rawStatus);
 
   const passesInst = _matchInstancia({ instancia_id: inst });
   const openNow = isOpenChat(cliente_id);
@@ -582,6 +634,14 @@ function handleConvStatus(payload){
   let c = findCliente(cliente_id) || { id: Number(cliente_id), cliente_id: Number(cliente_id), conversation_id: Number(cliente_id) };
   c.status = status;
   c.statusatendimento = status;
+
+  // melhora a chance de mostrar nome da instância no UI
+  if (inst != null) {
+    c.instancia_id = inst;
+    c.instancia = inst;
+    c.instance_name = c.instance_name || payload?.instance_name || payload?.instance || resolveInstanceName(inst) || null;
+  }
+
   const [g, s] = bothCaches(); upsertIn(g, c); upsertIn(s, c);
 
   try{
@@ -592,7 +652,7 @@ function handleConvStatus(payload){
   try { window.Lista?.updatePreview?.(cliente_id, { status, statusatendimento: status }); } catch {}
   try { document.dispatchEvent(new CustomEvent('ws:conv_status', { detail: { cliente_id, instancia_id: inst, status }})); } catch {}
 
-  if (DEBUG_WS) console.debug('[WS CONV_STATUS]', { cliente_id, inst, status });
+  if (DEBUG_WS) console.debug('[WS CONV_STATUS]', { cliente_id, inst, status, rawStatus });
 }
 
 function inferPinFlag(p){
@@ -670,7 +730,7 @@ function handleMessage(ev){
 
   // 🔹 delete vindo do backend
   if (
-    t === 'msg_deleted' ||        // tipo que sugeri no backend
+    t === 'msg_deleted' ||
     t === 'messages_delete' ||
     t === 'message_delete' ||
     t === 'messages.delete' ||

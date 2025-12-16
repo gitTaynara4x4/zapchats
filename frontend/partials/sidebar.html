@@ -237,12 +237,9 @@
   .theme-toggle .slot.left{ left:8px; }
   .theme-toggle .slot.right{ right:8px; }
   .theme-toggle .slot svg{ width:18px; height:18px; display:block; }
-  .theme-toggle .slot svg *{
-    stroke:#9ca3af;
-  }
-  html.dark .theme-toggle .slot svg *{
-    stroke:#8a93a1;
-  }
+  .theme-toggle .slot svg *{ stroke:#9ca3af; }
+  html.dark .theme-toggle .slot svg *{ stroke:#8a93a1; }
+
   .theme-toggle .thumb{
     position:absolute; left:var(--p); top:50%; width:var(--k); height:var(--k); border-radius:999px;
     transform:translate(0,-50%); transition:transform .38s cubic-bezier(.28,1.2,.43,1), box-shadow .2s ease, background .3s ease;
@@ -719,7 +716,7 @@
     });
   })();
 
-  /* modal perfil */
+  /* modal perfil (corrigido: click fora e ESC sempre funcionam) */
   (function(){
     var chip=document.getElementById('userChip');
     var modal=document.getElementById('pfModal');
@@ -732,6 +729,11 @@
     var emailInput=document.getElementById('pfEmail');
     var deptInput=document.getElementById('pfDept');
     var msg=document.getElementById('pfMsg');
+
+    if(!modal) return;
+
+    function onEsc(e){ if(e.key==='Escape' && modal.classList.contains('is-open')) closeModal(); }
+    function outsideClose(e){ if(e.target===modal) closeModal(); }
 
     function openModal(){
       var nome=localStorage.getItem('nome')||'';
@@ -746,15 +748,16 @@
       modal.classList.add('is-open');
       modal.setAttribute('aria-hidden','false');
       nomeInput.focus();
-      document.addEventListener('keydown', onEsc, {once:true});
-      modal.addEventListener('click', outsideClose, {once:true});
+
+      document.addEventListener('keydown', onEsc);
+      modal.addEventListener('click', outsideClose);
     }
     function closeModal(){
       modal.classList.remove('is-open');
       modal.setAttribute('aria-hidden','true');
+      document.removeEventListener('keydown', onEsc);
+      modal.removeEventListener('click', outsideClose);
     }
-    function onEsc(e){ if(e.key==='Escape') closeModal(); }
-    function outsideClose(e){ if(e.target===modal) closeModal(); }
 
     if(chip){
       chip.addEventListener('click', openModal);

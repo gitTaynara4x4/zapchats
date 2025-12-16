@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import asyncio
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Tuple, Dict, Set
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
@@ -37,57 +37,103 @@ print("[IA-DISPARO] URL n8n =", N8N_IA_MELHORAR_DISPARO_URL)
 # Helpers de permissão / identidade
 # =====================================================
 
-def _get_empresa_e_colab(identity: dict | None) -> tuple[int, Optional[int]]:
+def _to_int(v) -> Optional[int]:
+    try:
+        if v is None:
+            return None
+        s = str(v).strip()
+        if not s:
+            return None
+        return int(s)
+    except Exception:
+        return None
+
+
+def _infer_kind(identity: dict) -> str:
+    """
+    Tenta inferir se é "colaborador" ou "usuario" mesmo quando `kind` não vem no token.
+    """
+    k = (identity.get("kind") or identity.get("tipo") or "").lower().strip()
+    if k in ("colaborador", "usuario", "admin"):
+        return "colaborador" if k == "colaborador" else "usuario"
+
+    sub = str(identity.get("sub") or "").strip().lower()
+    role = str(identity.get("role") or "").strip().lower()
+
+    # seu padrão: sub = "colab-<id>"
+    if sub.startswith("colab-") or "colab" in role or "colaborador" in role:
+        return "colaborador"
+
+    # heurística: se tem qualquer campo de colab preenchido
+    for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
+        if _to_int(identity.get(key)):
+            return "colaborador"
+
+    return "usuario"
+
+
+def _get_empresa_e_colab(identity: dict | None) -> Tuple[int, Optional[int]]:
     if identity is None:
         raise HTTPException(status_code=401, detail="Não autenticado")
 
-    empresa_id = identity.get("empresa_id")
+    empresa_id = _to_int(identity.get("empresa_id"))
     if not empresa_id:
         raise HTTPException(status_code=400, detail="Empresa não encontrada no token")
 
-    kind = (identity.get("kind") or "").lower()
+    kind = _infer_kind(identity)
     colab_id: Optional[int] = None
 
     if kind == "colaborador":
-        for key in ("id_colab", "colaborador_id", "id_colaborador"):
-            raw = identity.get(key)
-            if raw is None:
-                continue
-            try:
-                colab_id = int(raw)
+        # tenta campos explícitos
+        for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
+            colab_id = _to_int(identity.get(key))
+            if colab_id:
                 break
-            except Exception:
-                colab_id = None
 
-    return int(empresa_id), colab_id
+        # tenta sub "colab-<id>"
+        if not colab_id:
+            sub = str(identity.get("sub") or "").strip().lower()
+            if sub.startswith("colab-"):
+                colab_id = _to_int(sub.split("-", 1)[1])
+
+        # fallback comum: identity["id"] = id do colaborador
+        if not colab_id:
+            colab_id = _to_int(identity.get("id"))
+
+    return empresa_id, colab_id
 
 
-def _get_ids(identity: dict | None) -> tuple[int, Optional[int], Optional[int]]:
+def _get_ids(identity: dict | None) -> Tuple[int, Optional[int], Optional[int]]:
     """
     Retorna (empresa_id, colaborador_id, usuario_id).
 
-    - Se kind == "colaborador" → preenche colaborador_id; usuario_id = None
-    - Se for usuário/admin (kind diferente) → tenta preencher usuario_id
+    - Se for colaborador → preenche colaborador_id
+    - Se for usuário/admin → preenche usuario_id
     """
     if identity is None:
         raise HTTPException(status_code=401, detail="Não autenticado")
 
     empresa_id, colab_id = _get_empresa_e_colab(identity)
+    kind = _infer_kind(identity)
 
-    kind = (identity.get("kind") or "").lower()
     usuario_id: Optional[int] = None
-
     if kind != "colaborador":
-        # tenta achar id do usuário/admin no token
-        for key in ("usuario_id", "user_id", "id_usuario", "id_user"):
-            raw = identity.get(key)
-            if raw is None:
-                continue
-            try:
-                usuario_id = int(raw)
+        for key in ("usuario_id", "user_id", "id_usuario", "id_user", "uid"):
+            usuario_id = _to_int(identity.get(key))
+            if usuario_id:
                 break
-            except Exception:
-                usuario_id = None
+
+        # fallback comum: identity["id"] = id do usuário
+        if not usuario_id:
+            usuario_id = _to_int(identity.get("id"))
+
+        # fallback: sub "user-<id>" ou sub numérico
+        if not usuario_id:
+            sub = str(identity.get("sub") or "").strip().lower()
+            if sub.isdigit():
+                usuario_id = int(sub)
+            elif sub.startswith("user-"):
+                usuario_id = _to_int(sub.split("-", 1)[1])
 
     return empresa_id, colab_id, usuario_id
 
@@ -98,11 +144,11 @@ def _ensure_perm(identity: dict, db: Session, perm_id: str) -> None:
     Se o usuário logado NÃO for colaborador (ex.: usuário/admin do painel),
     por enquanto a gente libera.
     """
-    empresa_id = identity.get("empresa_id")
+    empresa_id = _to_int(identity.get("empresa_id"))
     if not empresa_id:
         raise HTTPException(status_code=400, detail="Empresa não encontrada no token")
 
-    kind = (identity.get("kind") or "").lower()
+    kind = _infer_kind(identity)
     if kind != "colaborador":
         # Usuário master/admin da empresa
         return
@@ -128,6 +174,51 @@ def _ensure_perm(identity: dict, db: Session, perm_id: str) -> None:
         raise HTTPException(status_code=403, detail=f"Você não tem permissão: {perm_id}")
 
 
+def _resolve_colab_by_usuario(db: Session, empresa_id: int, usuario_id: Optional[int]) -> Optional[int]:
+    """
+    Se o admin/usuário tiver um Colaborador vinculado (colaboradores.usuario_id),
+    preenche colaborador_id também, pra rastrear por colaborador sempre que possível.
+    """
+    if not usuario_id:
+        return None
+
+    try:
+        cid = (
+            db.query(models.Colaborador.id)
+            .filter(
+                models.Colaborador.empresa_id == empresa_id,
+                models.Colaborador.usuario_id == usuario_id,
+            )
+            .scalar()
+        )
+        return int(cid) if cid else None
+    except Exception:
+        return None
+
+
+def _get_nome_autor(db: Session, colab_id: Optional[int], usuario_id: Optional[int]) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Retorna (criado_por, criado_por_tipo) priorizando colaborador.
+    """
+    if colab_id:
+        nome = (
+            db.query(models.Colaborador.nome)
+            .filter(models.Colaborador.id == colab_id)
+            .scalar()
+        )
+        return (str(nome) if nome else None, "colaborador")
+
+    if usuario_id:
+        nome = (
+            db.query(models.Usuario.nome)
+            .filter(models.Usuario.id == usuario_id)
+            .scalar()
+        )
+        return (str(nome) if nome else None, "usuario")
+
+    return (None, None)
+
+
 # =====================================================
 # Schemas
 # =====================================================
@@ -140,7 +231,6 @@ class DisparoCreate(BaseModel):
         le=3600,
         description="Intervalo entre envios em segundos (mín. 5s)",
     )
-    # por enquanto só vamos tratar text; image/audio você pluga depois
     tipo_conteudo: str = Field(
         "text",
         description="text | image | audio (no momento só text está implementado)",
@@ -169,18 +259,14 @@ class DisparoOut(BaseModel):
     criado_em: datetime
     delay_segundos: int
 
+    # ✅ rastreio
+    colaborador_id: Optional[int] = None
+    usuario_id: Optional[int] = None
+    criado_por: Optional[str] = None
+    criado_por_tipo: Optional[str] = None  # "colaborador" | "usuario"
+
     class Config:
         from_attributes = True
-
-
-# ===== IA – melhorar mensagem de disparo (V1) =====
-
-class IAMelhorarDisparoIn(BaseModel):
-    draft: str = Field(..., description="Mensagem base digitada no campo de disparo")
-
-
-class IAMelhorarDisparoOut(BaseModel):
-    mensagem: str
 
 
 class IAMelhorarDisparoResp(BaseModel):
@@ -232,20 +318,17 @@ async def _evolution_send_text(
     """
     Envia um texto simples via Evolution.
 
-    Usa o endpoint:
+    Endpoint:
       POST {EVOLUTION_URL}/message/sendText/{instance}
-    Body esperado (v2):
-      {
-        "number": "5531xxxxxxxxx",
-        "text": "mensagem aqui"
-      }
+
+    Body (v2):
+      { "number": "5531xxxxxxxxx", "text": "mensagem aqui" }
     """
     if not EVOLUTION_URL:
         raise RuntimeError("EVOLUTION_URL não configurada (EVOLUTION_URL).")
     if not EVOLUTION_APIKEY:
         raise RuntimeError("EVOLUTION_APIKEY/EVOLUTION_API_KEY não configurada.")
 
-    # Nome da instância na Evolution (pelo que aparece no log: seg-sistemas-de-...)
     inst_name = (
         getattr(instancia_db, "instance_name", None)
         or getattr(instancia_db, "instance", None)
@@ -253,22 +336,13 @@ async def _evolution_send_text(
         or str(instancia_db.id)
     )
 
-    # Garante E.164 com DDI 55
     numero_e164 = "".join(ch for ch in numero if ch.isdigit())
     if not numero_e164.startswith("55"):
         numero_e164 = "55" + numero_e164
 
     url = f"{EVOLUTION_URL}/message/sendText/{inst_name}"
-
-    payload = {
-        "number": numero_e164,
-        "text": texto,
-    }
-
-    headers = {
-        "Content-Type": "application/json",
-        "apikey": EVOLUTION_APIKEY,
-    }
+    payload = {"number": numero_e164, "text": texto}
+    headers = {"Content-Type": "application/json", "apikey": EVOLUTION_APIKEY}
 
     print(
         "[DISPARO] Enviando via Evolution:",
@@ -282,7 +356,6 @@ async def _evolution_send_text(
     async with httpx.AsyncClient(timeout=20.0) as client:
         resp = await client.post(url, headers=headers, json=payload)
 
-    # Tenta decodificar a resposta pra dar erro mais legível
     try:
         data = resp.json()
     except Exception:
@@ -299,13 +372,6 @@ async def _evolution_send_text(
 async def _ia_melhorar_via_n8n(texto: str):
     """
     Chama o webhook do n8n para melhorar a mensagem de disparo.
-
-    Espera que o n8n receba algo como:
-      { "draft": "<texto>" }
-
-    E retorne:
-      - um JSON com campo "mensagem", "melhorada", "text", "draft" ou "resultado", OU
-      - texto puro (string)
     """
     if not N8N_IA_MELHORAR_DISPARO_URL:
         print("[IA-DISPARO] ERRO: N8N_IA_MELHORAR_DISPARO_URL não configurada.")
@@ -315,7 +381,6 @@ async def _ia_melhorar_via_n8n(texto: str):
         )
 
     payload = {"draft": texto}
-
     print("[IA-DISPARO] Chamando n8n em", N8N_IA_MELHORAR_DISPARO_URL)
 
     try:
@@ -327,10 +392,7 @@ async def _ia_melhorar_via_n8n(texto: str):
             )
     except httpx.RequestError as e:
         print("[IA-DISPARO] Erro ao chamar n8n:", repr(e))
-        raise HTTPException(
-            status_code=502,
-            detail="Erro ao chamar motor de IA (n8n).",
-        )
+        raise HTTPException(status_code=502, detail="Erro ao chamar motor de IA (n8n).")
 
     raw_text = resp.text
     try:
@@ -340,10 +402,7 @@ async def _ia_melhorar_via_n8n(texto: str):
 
     if resp.status_code >= 400:
         print("[IA-DISPARO] n8n retornou HTTP", resp.status_code, "body:", data)
-        raise HTTPException(
-            status_code=502,
-            detail=f"n8n retornou erro HTTP {resp.status_code}.",
-        )
+        raise HTTPException(status_code=502, detail=f"n8n retornou erro HTTP {resp.status_code}.")
 
     print("[IA-DISPARO] Resposta n8n OK:", data)
     return data
@@ -361,8 +420,6 @@ async def _enviar_destinatario(
     """
     Envia UM destinatário de um disparo.
     """
-
-    # Garante que a instância está carregada
     instancia = disparo.instancia
     if instancia is None:
         instancia = (
@@ -381,12 +438,10 @@ async def _enviar_destinatario(
     if not texto:
         raise RuntimeError("Mensagem vazia para disparo de texto.")
 
-    numero = dest.numero_normalizado
-
     await _evolution_send_text(
         empresa_id=disparo.empresa_id,
         instancia_db=instancia,
-        numero=numero,
+        numero=dest.numero_normalizado,
         texto=texto,
     )
 
@@ -413,10 +468,8 @@ async def _processar_disparo(disparo_id: int) -> None:
         db.refresh(disparo)
 
         delay = max(5, int(disparo.delay_segundos or 0))
-
         print(f"[DISPARO] Iniciando processamento do disparo #{disparo.id} (delay={delay}s)")
 
-        # Loop até não sobrar mais destinatário pendente
         while True:
             db.refresh(disparo)
             if disparo.status == "cancelado":
@@ -434,7 +487,6 @@ async def _processar_disparo(disparo_id: int) -> None:
             )
 
             if not dest:
-                # acabou
                 disparo.status = "concluido"
                 disparo.finalizado_em = datetime.now(timezone.utc)
                 db.commit()
@@ -443,7 +495,6 @@ async def _processar_disparo(disparo_id: int) -> None:
 
             print(f"[DISPARO] Enviando destinatário #{dest.id} -> {dest.numero_normalizado}")
 
-            # Marca como enviando
             dest.status = "enviando"
             dest.tentativas = (dest.tentativas or 0) + 1
             dest.ultima_tentativa_em = datetime.now(timezone.utc)
@@ -463,7 +514,6 @@ async def _processar_disparo(disparo_id: int) -> None:
                 disparo.enviados_sucesso = (disparo.enviados_sucesso or 0) + 1
                 db.commit()
 
-            # Delay entre um envio e outro
             await asyncio.sleep(delay)
 
     finally:
@@ -487,15 +537,11 @@ async def ia_melhorar_disparo(
         raise HTTPException(status_code=401, detail="Não autenticado")
 
     if not isinstance(body, dict):
-        # Se chegou algo inesperado (texto puro, etc.)
         raise HTTPException(status_code=400, detail="Corpo inválido. Envie JSON.")
 
-    # Aceita tanto { "mensagem": "..." } quanto { "draft": "..." }
     raw = body.get("mensagem") or body.get("draft") or ""
-
     if raw is None:
         raw = ""
-
     if not isinstance(raw, str):
         raw = str(raw)
 
@@ -503,7 +549,6 @@ async def ia_melhorar_disparo(
     if not texto:
         raise HTTPException(status_code=400, detail="Mensagem vazia.")
 
-    # Chama n8n
     data = await _ia_melhorar_via_n8n(texto)
 
     melhorada = None
@@ -521,10 +566,7 @@ async def ia_melhorar_disparo(
     if not isinstance(melhorada, str) or not melhorada.strip():
         melhorada = texto
 
-    return IAMelhorarDisparoResp(
-        original=texto,
-        melhorada=melhorada,
-    )
+    return IAMelhorarDisparoResp(original=texto, melhorada=melhorada)
 
 
 @router.post(
@@ -541,7 +583,10 @@ async def criar_disparo_simples(
 
     empresa_id, colab_id, usuario_id = _get_ids(identity)
 
-    # Valida se a instância pertence à empresa
+    # Se for admin e existir colaborador vinculado ao usuario_id, preenche também
+    if usuario_id and not colab_id:
+        colab_id = _resolve_colab_by_usuario(db, empresa_id, usuario_id)
+
     instancia = (
         db.query(models.EmpresaInstancia)
         .filter(
@@ -572,7 +617,6 @@ async def criar_disparo_simples(
     db.add(disparo)
     db.flush()  # pega ID
 
-    # Cria destinatários
     for raw, norm in nums_norm:
         dest = models.DisparoDestinatario(
             disparo_id=disparo.id,
@@ -586,12 +630,13 @@ async def criar_disparo_simples(
     db.commit()
     db.refresh(disparo)
 
-    # Dispara o processamento em background
     asyncio.create_task(_processar_disparo(disparo.id))
 
     instancia_nome = None
     if disparo.instancia:
         instancia_nome = disparo.instancia.apelido or disparo.instancia.instance_name
+
+    criado_por, criado_por_tipo = _get_nome_autor(db, disparo.colaborador_id, disparo.usuario_id)
 
     return DisparoOut(
         id=disparo.id,
@@ -602,6 +647,10 @@ async def criar_disparo_simples(
         status=disparo.status,
         criado_em=disparo.criado_em,
         delay_segundos=disparo.delay_segundos,
+        colaborador_id=disparo.colaborador_id,
+        usuario_id=disparo.usuario_id,
+        criado_por=criado_por,
+        criado_por_tipo=criado_por_tipo,
     )
 
 
@@ -619,7 +668,7 @@ def listar_disparos(
 ):
     _ensure_perm(identity, db, "disparos.ver")
 
-    ident_empresa_id = identity.get("empresa_id")
+    ident_empresa_id = _to_int(identity.get("empresa_id"))
     if ident_empresa_id and int(ident_empresa_id) != int(empresa_id):
         raise HTTPException(status_code=403, detail="Empresa inválida para o usuário logado.")
 
@@ -632,14 +681,48 @@ def listar_disparos(
     if instancia_id:
         q = q.filter(models.Disparo.instancia_id == instancia_id)
 
-    q = q.limit(limit)
-    itens = q.all()
+    itens = q.limit(limit).all()
+
+    # pega nomes sem N+1
+    colab_ids: Set[int] = {int(d.colaborador_id) for d in itens if d.colaborador_id}
+    user_ids: Set[int] = {int(d.usuario_id) for d in itens if d.usuario_id}
+
+    colab_map: Dict[int, str] = {}
+    user_map: Dict[int, str] = {}
+
+    if colab_ids:
+        for cid, nome in (
+            db.query(models.Colaborador.id, models.Colaborador.nome)
+            .filter(models.Colaborador.id.in_(colab_ids))
+            .all()
+        ):
+            if cid:
+                colab_map[int(cid)] = str(nome or "")
+
+    if user_ids:
+        for uid, nome in (
+            db.query(models.Usuario.id, models.Usuario.nome)
+            .filter(models.Usuario.id.in_(user_ids))
+            .all()
+        ):
+            if uid:
+                user_map[int(uid)] = str(nome or "")
 
     out: list[DisparoOut] = []
     for d in itens:
         instancia_nome = None
         if d.instancia:
             instancia_nome = d.instancia.apelido or d.instancia.instance_name
+
+        criado_por = None
+        criado_por_tipo = None
+        if d.colaborador_id:
+            criado_por = colab_map.get(int(d.colaborador_id)) or None
+            criado_por_tipo = "colaborador"
+        elif d.usuario_id:
+            criado_por = user_map.get(int(d.usuario_id)) or None
+            criado_por_tipo = "usuario"
+
         out.append(
             DisparoOut(
                 id=d.id,
@@ -650,6 +733,10 @@ def listar_disparos(
                 status=d.status,
                 criado_em=d.criado_em,
                 delay_segundos=d.delay_segundos,
+                colaborador_id=d.colaborador_id,
+                usuario_id=d.usuario_id,
+                criado_por=criado_por,
+                criado_por_tipo=criado_por_tipo,
             )
         )
     return out

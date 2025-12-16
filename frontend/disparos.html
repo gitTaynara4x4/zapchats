@@ -141,6 +141,41 @@
               <option value="120">2 minutos</option>
               <option value="300">5 minutos</option>
             </select>
+
+            <!-- Explicação (sem emojis) -->
+            <details class="help-details" style="margin-top:10px;">
+              <summary class="help-summary" style="cursor:pointer; user-select:none;">
+                <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                <span>O que é “intervalo entre envios”?</span>
+              </summary>
+
+              <div class="help-box" role="note" aria-label="Ajuda: Intervalo entre envios" style="margin-top:10px;">
+                <p style="margin:0 0 8px 0;">
+                  O intervalo entre envios é o <strong>tempo de espera entre uma mensagem e outra</strong>.
+                </p>
+
+                <p style="margin:0 0 8px 0;">
+                  Exemplo: se você tiver <strong>10 contatos</strong> e escolher <strong>20 segundos</strong>, o sistema envia assim:
+                </p>
+
+                <div class="help-example" style="margin:0 0 10px 0;">
+                  Envia para o 1º contato → espera 20s → envia para o 2º → espera 20s → envia para o 3º...
+                </div>
+
+                <p style="margin:0 0 6px 0;"><strong>Por que isso existe?</strong></p>
+                <ul style="margin:0 0 10px 18px;">
+                  <li>Ajuda o WhatsApp a não interpretar como envio automático (spam)</li>
+                  <li>Reduz a chance de bloqueio da conta</li>
+                  <li>Deixa o envio mais seguro e estável</li>
+                </ul>
+
+                <p style="margin:0 0 6px 0;"><strong>Regra simples</strong></p>
+                <ul style="margin:0 0 0 18px;">
+                  <li><strong>5s / 10s</strong>: mais rápido, maior risco</li>
+                  <li><strong>20s / 30s / 1 min</strong>: mais seguro, menor risco</li>
+                </ul>
+              </div>
+            </details>
           </div>
         </div>
 
@@ -180,6 +215,7 @@
               <th>Mensagem</th>
               <th>Qtd. números</th>
               <th>Instância</th>
+              <th>Por</th>
               <th>Status</th>
               <th>Criado em</th>
             </tr>

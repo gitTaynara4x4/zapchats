@@ -42,6 +42,9 @@
   const iaCloseBtn    = $('#btnIaClose');
   const iaStatusEl    = $('#iaStatus');
 
+  // Beta (placeholder no HTML)
+  const chkIaVariar   = $('#chkIaVariar');
+
   const API_BASE        = '/api/disparos';
   const API_CREATE      = `${API_BASE}/simples`;
   const API_LIST        = `${API_BASE}?limit=50`;
@@ -62,6 +65,15 @@
   // ---------------------------
   // Helpers
   // ---------------------------
+  function escapeHTML (s) {
+    return String(s ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
   function getEmpresaId () {
     try {
       const raw = localStorage.getItem('empresa_id');
@@ -684,7 +696,6 @@
       tipo_conteudo: 'text', // hoje só texto
       midia_id: null         // placeholder pra futuro
       // empresa_id removido: backend pega do token/jwt
-      // flag de variação por número (beta) entra aqui depois
     };
   }
 
@@ -726,9 +737,7 @@
         if (typeof detail === 'string') {
           msg = detail;
         } else if (Array.isArray(detail)) {
-          msg = detail
-            .map(d => d.msg || d.message || JSON.stringify(d))
-            .join(' | ');
+          msg = detail.map(d => d.msg || d.message || JSON.stringify(d)).join(' | ');
         } else if (detail && typeof detail === 'object') {
           msg = detail.msg || detail.message || JSON.stringify(detail);
         } else if (data?.message) {
@@ -775,6 +784,26 @@
     return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
   }
 
+  function resolveAutor (item) {
+    const label =
+      item?.criado_por ||
+      item?.criado_por_nome ||
+      item?.criado_por_label ||
+      item?.autor_nome ||
+      item?.colaborador_nome ||
+      item?.usuario_nome;
+
+    if (label) return String(label);
+
+    const cid = item?.colaborador_id ?? item?.colab_id ?? null;
+    const uid = item?.usuario_id ?? item?.user_id ?? null;
+
+    if (cid) return `Colab #${cid}`;
+    if (uid) return `Usuário #${uid}`;
+
+    return '—';
+  }
+
   function renderHistorico (itens) {
     if (!tbodyHist) return;
 
@@ -790,20 +819,23 @@
 
     itens.forEach(item => {
       const tr = document.createElement('tr');
+
       const msg = (item.mensagem || '').toString();
       const preview = msg.length > 80 ? msg.slice(0, 80) + '…' : msg;
 
       const qtd = item.qtd_numeros ?? item.total_numeros ?? (item.numeros?.length || 0);
       const inst = item.instancia_nome || item.instance_name || item.instancia_id || '—';
+      const por = resolveAutor(item);
       const status = (item.status || 'pendente').toString();
       const criado = fmtDate(item.criado_em || item.created_at || item.created);
 
       tr.innerHTML = `
-        <td>${preview || '—'}</td>
-        <td style="text-align:center">${qtd}</td>
-        <td>${inst}</td>
-        <td>${status}</td>
-        <td>${criado}</td>
+        <td>${escapeHTML(preview || '—')}</td>
+        <td style="text-align:center">${escapeHTML(qtd)}</td>
+        <td>${escapeHTML(inst)}</td>
+        <td>${escapeHTML(por)}</td>
+        <td>${escapeHTML(status)}</td>
+        <td>${escapeHTML(criado)}</td>
       `;
       tbodyHist.appendChild(tr);
     });
@@ -946,7 +978,7 @@
       b.dataset.label = text;
       b.innerHTML = `
         <span class="radio" aria-hidden="true"></span>
-        <span>${text}</span>
+        <span>${escapeHTML(text)}</span>
       `;
       b.addEventListener('click', () => selectValue(String(value ?? ''), text));
       li.appendChild(b);
@@ -1059,6 +1091,13 @@
   // Init
   // ---------------------------
   function init () {
+    // desliga o beta pra não confundir (backend ainda não suporta sem 422)
+    if (chkIaVariar) {
+      chkIaVariar.checked = false;
+      chkIaVariar.disabled = true;
+      chkIaVariar.title = 'Em breve: variações por número ainda não estão implementadas no backend.';
+    }
+
     if (numsEl) {
       ['input', 'blur'].forEach(ev => numsEl.addEventListener(ev, parseNumeros));
       parseNumeros();
