@@ -192,7 +192,12 @@ PUBLIC_FRONTEND_PARTIALS = {
 
 @app.middleware("http")
 async def block_direct_frontend(request: Request, call_next):
+    # path aqui NÃO inclui querystring
     p = request.url.path
+
+    # 🔓 allowlist: partials públicos usados por telas públicas (login/boot)
+    if p in PUBLIC_FRONTEND_PARTIALS:
+        return await call_next(request)
 
     # 🔓 exceções: permitir abrir certos HTML direto sem login
     if p in ("/frontend/admin-planos.html", "/frontend/planos.html"):
@@ -795,6 +800,62 @@ async def auth_html_gate(request: Request, call_next):
 
     resp = await call_next(request)
     _no_cache_html(resp)
+    return resp
+
+
+
+# =========================================================
+# Cache-control para assets (evita "precisa limpar cache")
+# - HTML/partials: no-store (não cacheia)
+# - JS/CSS/JSON/MAP (static/assets/frontend): revalida sempre (não precisa hard refresh)
+# - Redirects: no-store (evita cache de redirecionamento)
+# =========================================================
+@app.middleware("http")
+async def cache_control_assets(request: Request, call_next):
+    resp: StarletteResponse = await call_next(request)
+    path = request.url.path or ""
+
+    # Nunca mexe em /api (JSON etc.)
+    if path.startswith("/api/"):
+        return resp
+
+    # Evita cachear redirects (browser/proxy às vezes guarda 301/302)
+    if resp.status_code in (301, 302, 303, 307, 308):
+        resp.headers.setdefault("Cache-Control", "no-store")
+        resp.headers.setdefault("Pragma", "no-cache")
+        resp.headers.setdefault("Expires", "0")
+        return resp
+
+    # Service Worker / Manifest (se existir) — sempre revalidar
+    if path in ("/service-worker.js", "/sw.js", "/manifest.json", "/manifest.webmanifest"):
+        resp.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
+
+    # HTML (principalmente partials) -> nunca cache forte
+    if path.endswith(".html") or "/partials/" in path:
+        # não sobrescreve se você já setou algo mais forte antes
+        resp.headers.setdefault("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        resp.headers.setdefault("Pragma", "no-cache")
+        resp.headers.setdefault("Expires", "0")
+        return resp
+
+    # JS/CSS/Map/JSON -> revalida sempre (não precisa limpar cache)
+    if path.endswith((".js", ".mjs", ".css", ".map", ".json")) and (
+        path.startswith("/static/")
+        or path.startswith("/assets/")
+        or path.startswith("/frontend/")
+    ):
+        resp.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
+
+    # Imagens/fontes podem ficar cacheadas (opcional)
+    if path.endswith((".png", ".jpg", ".jpeg", ".webp", ".svg", ".ico", ".woff", ".woff2", ".ttf")):
+        resp.headers.setdefault("Cache-Control", "public, max-age=86400")
+
     return resp
 
 # =======================================
