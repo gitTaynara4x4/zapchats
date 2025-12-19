@@ -482,10 +482,20 @@
         ?? c.usuario?.telefone ?? c.user?.phone ?? '';
   }
   function coalesceDeptId(c){
-    return c.setor_id ?? c.departamento_id ?? c.dep_id ?? c.depto_id ?? c.dept_id ?? null;
+    if (!c) return null;
+    return (
+      c.setor_id ?? c.departamento_id ?? c.dep_id ?? c.depto_id ?? c.dept_id ??
+      c.setor?.id ?? c.departamento?.id ?? c.depto?.id ??
+      null
+    );
   }
   function coalesceDeptName(c){
-    return c.setor_nome ?? c.departamento_nome ?? c.departamento ?? c.depto_nome ?? c.dep_nome ?? null;
+    if (!c) return null;
+    return (
+      c.setor_nome ?? c.departamento_nome ?? c.departamento ?? c.depto_nome ?? c.dep_nome ??
+      c.setor?.nome ?? c.departamento?.nome ?? c.depto?.nome ??
+      null
+    );
   }
   function coalesceName(c){
     return c.nome ?? c.nome_completo ?? c.display_name ?? c.full_name
@@ -551,7 +561,32 @@
         const data = await apiGet(u);
         const arr = Array.isArray(data) ? data : (data?.items || data?.data || []);
         if (arr?.length){
-          state.setores = arr.map(x=>({ id: String(x.id ?? x.dep_id ?? x.value ?? x.ID), nome: x.nome ?? x.name ?? x.titulo ?? x.label ?? '—' }));
+          // Aceita lista simples OU árvore (children/filhos/etc) — sempre gera uma lista plana
+          const out = [];
+          const seen = new Set();
+
+          const getId   = (x)=> x?.id ?? x?.dep_id ?? x?.departamento_id ?? x?.setor_id ?? x?.value ?? x?.ID ?? x?.Id;
+          const getName = (x)=> x?.nome ?? x?.name ?? x?.titulo ?? x?.label ?? x?.text ?? '—';
+          const getKids = (x)=> x?.filhos ?? x?.children ?? x?.itens ?? x?.items ?? x?.nodes ?? x?.departamentos ?? x?.subdepartamentos ?? x?.sub ?? [];
+
+          const walk = (node)=>{
+            if (!node) return;
+            const id0  = getId(node);
+            const id   = (id0 == null) ? null : String(id0);
+            const nome = String(getName(node) ?? '—');
+
+            if (id && !seen.has(id)){
+              seen.add(id);
+              out.push({ id, nome });
+            }
+
+            const kids = getKids(node);
+            if (Array.isArray(kids)) kids.forEach(walk);
+          };
+
+          (Array.isArray(arr) ? arr : [arr]).forEach(walk);
+
+          state.setores = out;
           renderSetores(); return;
         }
       }catch{}
@@ -1253,6 +1288,12 @@
     console.debug('[colab edit] depIdRaw=', depIdRaw, 'depName=', depName, '=> depValue=', depValue);
 
     if (sel && depValue) {
+      // Se a lista veio incompleta (ex.: API em árvore ou colaborador com setor antigo),
+      // garante a opção atual para não “resetar” o select para "Selecione…"
+      const hasOpt = Array.from(sel.options || []).some(o => o.value === depValue);
+      if (!hasOpt) {
+        sel.appendChild(new Option(depName || 'Departamento atual', depValue));
+      }
       sel.value = depValue;
       sel.dispatchEvent(new Event('change', { bubbles:true }));
     }

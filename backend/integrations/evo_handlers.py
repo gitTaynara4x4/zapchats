@@ -944,37 +944,102 @@ def _unwrap_baileys_layers(obj: dict) -> dict:
     return m.get("message") if "message" in m else m
 
 def extract_text_from_baileys(obj: dict) -> str:
-    if not isinstance(obj, dict): return ""
+    if not isinstance(obj, dict):
+        return ""
+
     m = _unwrap_baileys_layers(obj)
-    if not isinstance(m, dict): return ""
-    if "conversation" in m: return m["conversation"] or ""
-    if "extendedTextMessage" in m: return m["extendedTextMessage"].get("text") or ""
-    if "buttonsResponseMessage" in m: return m["buttonsResponseMessage"].get("selectedDisplayText") or "[Botão]"
-    if "templateButtonReplyMessage" in m: return m["templateButtonReplyMessage"].get("selectedDisplayText") or "[Botão]"
+    if not isinstance(m, dict):
+        return ""
+
+    # Texto simples
+    if "conversation" in m:
+        return m["conversation"] or ""
+
+    if "extendedTextMessage" in m:
+        return (m["extendedTextMessage"] or {}).get("text") or ""
+
+    # Botões (reply)
+    if "buttonsResponseMessage" in m:
+        brm = m.get("buttonsResponseMessage") or {}
+        return brm.get("selectedDisplayText") or brm.get("selectedButtonId") or "[Botão]"
+
+    if "templateButtonReplyMessage" in m:
+        tbr = m.get("templateButtonReplyMessage") or {}
+        return tbr.get("selectedDisplayText") or tbr.get("selectedId") or "[Botão]"
+
+    # LISTA (aqui é o mais importante: prioriza selectedRowId)
     if "listResponseMessage" in m:
-        sel = m["listResponseMessage"].get("title") or (m["listResponseMessage"].get("singleSelectReply") or {}).get("selectedRowId")
+        lrm = m.get("listResponseMessage") or {}
+
+        # Mais comum no Baileys:
+        ss = lrm.get("singleSelectReply") or {}
+        sel = ss.get("selectedRowId")
+
+        # Alguns payloads podem vir diferente:
+        if not sel:
+            sel = lrm.get("selectedRowId")
+
+        # Fallback: title (texto exibido)
+        if not sel:
+            sel = lrm.get("title")
+
         return sel or "[Lista]"
+
+    # Interativos (native flow)
     if "interactiveResponseMessage" in m:
-        resp = m["interactiveResponseMessage"].get("nativeFlowResponseMessage") or {}
+        irm = m.get("interactiveResponseMessage") or {}
+        resp = irm.get("nativeFlowResponseMessage") or {}
         text = (resp.get("paramsJson") or "").strip()
         return text or "[Interativo]"
+
+    # Reações
     if "reactionMessage" in m:
-        text = m["reactionMessage"].get("text") or ""
-        key = m["reactionMessage"].get("key", {})
+        rm = m.get("reactionMessage") or {}
+        text = rm.get("text") or ""
+        key = rm.get("key", {}) or {}
         reacted_to = key.get("id")
         return f"[Reação] {text} ⇢ {reacted_to}" if text else "[Reação]"
-    if "imageMessage" in m:  return m["imageMessage"].get("caption") or "[Imagem]"
-    if "videoMessage" in m:  return m["videoMessage"].get("caption") or "[Vídeo]"
-    if "audioMessage" in m:  return "[Áudio/ptt]" if m["audioMessage"].get("ptt", False) else "[Áudio]"
-    if "stickerMessage" in m: return "[Figurinha]"
+
+    # Mídias / outros
+    if "imageMessage" in m:
+        return (m["imageMessage"] or {}).get("caption") or "[Imagem]"
+
+    if "videoMessage" in m:
+        return (m["videoMessage"] or {}).get("caption") or "[Vídeo]"
+
+    if "audioMessage" in m:
+        am = m.get("audioMessage") or {}
+        return "[Áudio/ptt]" if am.get("ptt", False) else "[Áudio]"
+
+    if "stickerMessage" in m:
+        return "[Figurinha]"
+
     if "documentMessage" in m:
-        name = m["documentMessage"].get("fileName"); return f"[Documento] {name}" if name else "[Documento]"
-    if "contactMessage" in m: return f"[Contato] {m['contactMessage'].get('displayName') or ''}".strip()
-    if "contactsArrayMessage" in m: return f"[Contatos] {len(m['contactsArrayMessage'].get('contacts', []))}"
+        dm = m.get("documentMessage") or {}
+        name = dm.get("fileName")
+        return f"[Documento] {name}" if name else "[Documento]"
+
+    if "contactMessage" in m:
+        cm = m.get("contactMessage") or {}
+        return f"[Contato] {cm.get('displayName') or ''}".strip()
+
+    if "contactsArrayMessage" in m:
+        cam = m.get("contactsArrayMessage") or {}
+        return f"[Contatos] {len(cam.get('contacts', []))}"
+
     if "locationMessage" in m:
-        name = m["locationMessage"].get("name") or m["locationMessage"].get("address"); return f"[Localização] {name}" if name else "[Localização]"
-    if "protocolMessage" in m: return "[Mensagem apagada]" if m["protocolMessage"].get("type") == 0 else "[Evento]"
-    if "orderMessage" in m: return f"[Pedido] {(m['orderMessage'].get('orderTitle') or '').strip()}".strip()
+        lm = m.get("locationMessage") or {}
+        name = lm.get("name") or lm.get("address")
+        return f"[Localização] {name}" if name else "[Localização]"
+
+    if "protocolMessage" in m:
+        pm = m.get("protocolMessage") or {}
+        return "[Mensagem apagada]" if pm.get("type") == 0 else "[Evento]"
+
+    if "orderMessage" in m:
+        om = m.get("orderMessage") or {}
+        return f"[Pedido] {(om.get('orderTitle') or '').strip()}".strip()
+
     return "[Mensagem recebida]"
 
 def extract_media_meta(msg_obj: dict) -> dict[str, Any] | None:
