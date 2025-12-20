@@ -289,6 +289,9 @@ class Cliente(Base):
         UniqueConstraint("empresa_id", "telefone_norm", name="u_emp_cli_tel_norm"),
         Index("ix_clientes_empresa_inst", "empresa_id", "instancia_id"),
         Index("ix_clientes_tel_norm", "telefone_norm"),
+
+        # ✅ NOVO: ajuda a buscar quem está em triagem por empresa/instância
+        Index("ix_clientes_triagem", "empresa_id", "instancia_id", "triagem_ativa"),
     )
 
     id           = Column(Integer, primary_key=True, index=True)
@@ -314,7 +317,7 @@ class Cliente(Base):
 
     # IMPORTANTE: coluna gerada no banco → nunca enviar valor no INSERT/UPDATE
     telefone_norm = Column(
-        String,                      # compatível com sua DDL
+        String,
         nullable=False,
         server_default=FetchedValue(),
         server_onupdate=FetchedValue(),
@@ -350,6 +353,14 @@ class Cliente(Base):
     cidade          = Column(String)
     estado          = Column(String)
     nome_completo   = Column(String)
+
+    # =========================
+    # ✅ NOVO: estado da TRIAGEM (departamentos)
+    # =========================
+    triagem_ativa = Column(Boolean, nullable=False, server_default="false")
+    triagem_tentativas = Column(Integer, nullable=False, server_default="0")
+    triagem_iniciada_em = Column(TIMESTAMP(timezone=True), nullable=True)
+    triagem_ultima_msg_em = Column(TIMESTAMP(timezone=True), nullable=True)
 
     # relacionamentos
     empresa   = relationship("Empresa", back_populates="clientes")
@@ -534,10 +545,15 @@ class Departamento(Base):
 
     # hierarquia / organização
     parent_id = Column(Integer, ForeignKey("departamentos.id", ondelete="RESTRICT"), nullable=True, index=True)
-    codigo    = Column(String(64), nullable=True)      # ex.: "FIN", "TI-SUP"
+    codigo    = Column(String(64), nullable=True)       # ex.: "FIN", "TI-SUP"
     path      = Column(PG_ARRAY(String), nullable=True) # ex.: ["empresa","ti","suporte"]
-    chefe_id  = Column(Integer, nullable=True)         # FK para usuarios.id (quando houver)
+    chefe_id  = Column(Integer, nullable=True)          # FK para usuarios.id (quando houver)
     ativo     = Column(Boolean, nullable=False, server_default="true")
+
+    # horário padrão do departamento (para herança no login)
+    # formato "HH:MM" (ex.: "08:00" / "18:00")
+    hora_login_inicio_padrao = Column(String(5), nullable=True)
+    hora_login_fim_padrao    = Column(String(5), nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
@@ -562,7 +578,6 @@ class Departamento(Base):
 
     def __repr__(self) -> str:
         return f"<Departamento id={self.id} emp={self.empresa_id} nome={self.nome!r}>"
-
 
 # =========================
 # Pivot: Departamento <-> EmpresaInstancia

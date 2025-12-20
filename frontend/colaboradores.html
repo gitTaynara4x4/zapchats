@@ -1,3 +1,4 @@
+<!-- /frontend/pages/colaboradores.html -->
 <!DOCTYPE html>
 <html lang="pt-BR" class="has-sidebar prepaint">
 <head>
@@ -19,15 +20,13 @@
     #zc-confirm.modal-back{
       position:fixed;
       inset:0;
-      display:none; /* escondido por padrão */
+      display:none;
       place-items:center;
       background:var(--overlay, rgba(0,0,0,.55));
       z-index:2147483600;
       padding:16px;
     }
-    #zc-confirm[aria-hidden="false"]{
-      display:grid; /* só aparece quando aria-hidden="false" */
-    }
+    #zc-confirm[aria-hidden="false"]{ display:grid; }
     #zc-confirm .modal-card{
       width:min(420px,100%);
       max-height:80vh;
@@ -50,16 +49,9 @@
       align-items:center;
       gap:.5rem;
     }
-    #zc-confirm .modal-head .title i{
-      color:#f97316;
-    }
-    #zc-confirm .modal-body{
-      padding:14px 16px;
-    }
-    #zc-confirm .modal-body p{
-      margin:0;
-      font-size:.95rem;
-    }
+    #zc-confirm .modal-head .title i{ color:#f97316; }
+    #zc-confirm .modal-body{ padding:14px 16px; }
+    #zc-confirm .modal-body p{ margin:0; font-size:.95rem; }
     #zc-confirm .foot{
       display:flex;
       justify-content:flex-end;
@@ -84,6 +76,7 @@
   <!-- Ícones -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 </head>
+
 <body data-page="colaboradores">
   <!-- Sidebar padrão -->
   <aside id="sidebar"
@@ -104,7 +97,7 @@
           <strong>Exigir código de login (token)</strong>
           <span class="muted" style="display:block;font-size:.85rem;margin-top:2px;">
             Quando ativado, depois de digitar e-mail e senha o colaborador
-            precisa informar um código enviado pelo WhatsApp para concluir o login.
+            precisa informar um código enviado por e-mail para concluir o login.
           </span>
         </span>
       </label>
@@ -128,14 +121,16 @@
     <section aria-label="Lista de colaboradores">
       <div class="box">
         <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>#</th><th>Nome</th><th>E-mail</th><th>Departamento</th><th style="width:150px">Ações</th>
-              </tr>
-            </thead>
-            <tbody id="tabela-colaboradores"></tbody>
-          </table>
+          <div class="table-scroller">
+            <table class="colabs">
+              <thead>
+                <tr>
+                  <th>#</th><th>Nome</th><th>E-mail</th><th>Departamento</th><th style="width:150px">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="tabela-colaboradores"></tbody>
+            </table>
+          </div>
         </div>
 
         <div id="empty-state" class="empty empty-bordered">
@@ -145,7 +140,7 @@
     </section>
   </main>
 
-  <!-- ================= Modal PERFIL (visual + edição inline + criação) ================= -->
+  <!-- ================= Modal PERFIL ================= -->
   <div id="modal-perfil" class="modal-back" aria-hidden="true">
     <div class="modal-card perfil-modal-card" role="dialog" aria-modal="true" aria-labelledby="perfil-title">
       <div class="modal-head">
@@ -163,23 +158,21 @@
 
       <div class="modal-body">
         <div class="grid-two">
-          <!-- Coluna esquerda: foto + CTA + status -->
+          <!-- Coluna esquerda -->
           <aside class="card profile-card">
             <div class="avatar-wrap" id="avatar-wrap">
               <img id="p-avatar" alt="Avatar">
               <div id="p-mono">AZ</div>
             </div>
 
-            <!-- CTA (somente no modo "novo") -->
             <div id="avatar-hint" class="avatar-hint" style="display:none">
               <div class="txt">
                 <strong>Adicione uma foto de perfil</strong>
                 <span>Ajuda o time a reconhecer você</span>
               </div>
-              <input id="p-avatar-input" type="file" accept="image/*,.svg" hidden />
+              <input id="p-avatar-input" type="file" accept="image/*,.svg,.webp,.avif,.heic,.heif" hidden />
             </div>
 
-            <!-- Status debaixo da foto -->
             <div class="status-left">
               <span class="status-dot" id="p-status" title="Status"></span>
               <span id="p-status-text">Disponível</span>
@@ -193,13 +186,11 @@
             </div>
 
             <dl class="details-grid" id="details-grid">
-              <!-- Nome (topo) -->
               <div class="full">
                 <dt>Nome completo</dt>
                 <dd><div class="fieldbox" id="fb-nome"><span id="v-nome">—</span></div></dd>
               </div>
 
-              <!-- Email / Empresa -->
               <div class="half">
                 <dt>E-mail</dt>
                 <dd><div class="fieldbox" id="fb-email"><a id="v-email" href="#">—</a></div></dd>
@@ -209,13 +200,11 @@
                 <dd><div class="fieldbox" id="fb-empresa"><span id="v-empresa">—</span></div></dd>
               </div>
 
-              <!-- Departamento -->
               <div class="full">
                 <dt>Departamento</dt>
                 <dd><div class="fieldbox" id="fb-depto"><span id="v-depto">—</span></div></dd>
               </div>
 
-              <!-- Telefone / Cargo -->
               <div class="half">
                 <dt>Telefone</dt>
                 <dd><div class="fieldbox" id="fb-tel"><a id="v-tel" href="#">—</a></div></dd>
@@ -225,17 +214,40 @@
                 <dd><div class="fieldbox" id="fb-cargo"><span id="v-cargo">—</span></div></dd>
               </div>
 
-              <!-- Expediente (entrada / saída) -->
-              <div class="half">
+              <!-- 👇 IDs adicionados para bater com o JS -->
+              <div class="half" id="row-exp-ini">
                 <dt>Entrada do expediente</dt>
                 <dd><div class="fieldbox" id="fb-exp-ini"><span id="v-exp-ini">—</span></div></dd>
               </div>
-              <div class="half">
+
+              <div class="half" id="row-exp-fim">
                 <dt>Saída do expediente</dt>
                 <dd><div class="fieldbox" id="fb-exp-fim"><span id="v-exp-fim">—</span></div></dd>
               </div>
 
-              <!-- ===== Senha de acesso (somente na criação / perm de redefinir) ===== -->
+              <!-- ✅ BLOCO EXPLICATIVO (só aparece no modo edição) -->
+              <!-- 👇 IDs trocados para bater com o JS -->
+              <div class="full" id="row-exp-toggle">
+                <dt>Expediente</dt>
+                <dd>
+                  <div class="fieldbox" id="fb-exp-info">
+                    <small class="help-text" id="dept-exp-hint">
+                      Selecione um departamento para ver o horário padrão.
+                    </small>
+
+                    <label class="chk-line">
+                      <input type="checkbox" id="e-exp-personalizar">
+                      <span>
+                        <strong>Personalizar horário para este colaborador</strong>
+                        <span class="muted" style="display:block;font-size:.86rem;margin-top:2px;">
+                          Desmarcado = o sistema usa automaticamente o horário padrão do departamento.
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                </dd>
+              </div>
+
               <div class="full">
                 <dt>Senha de acesso</dt>
                 <dd>
@@ -254,7 +266,6 @@
                 </dd>
               </div>
 
-              <!-- Permissões -->
               <div class="full">
                 <dt>Permissões</dt>
                 <dd>
@@ -274,7 +285,7 @@
     </div>
   </div>
 
-  <!-- ================= Modal CONFIRMAÇÃO (remover colaborador) ================= -->
+  <!-- ================= Modal CONFIRMAÇÃO ================= -->
   <div id="zc-confirm" class="modal-back zc-confirm" aria-hidden="true">
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="zc-confirm-title">
       <div class="modal-head">
@@ -295,10 +306,8 @@
     </div>
   </div>
 
-  <!-- Toast -->
   <div id="toast" role="status" aria-live="polite"></div>
 
-  <!-- JS da página -->
   <script src="/frontend/js/pages/colaboradores.js" type="module"></script>
 </body>
 </html>

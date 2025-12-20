@@ -570,3 +570,57 @@ body[data-page="colaboradores"] ::-webkit-scrollbar-track{ background: transpare
   color: var(--danger);
   font-weight: 500;
 }
+/* =========================
+   PATCH — Expediente (print)
+   cole no FINAL do arquivo
+   ========================= */
+
+/* (1) corrige typo que estava sem ponto */
+.avatar-hint .txt strong{ font-size:.95rem; font-weight:700; }
+
+/* (2) Só aparece no modo edição (perfilModal recebe class "editing") */
+#row-expediente-box{ display:none; }
+#modal-perfil.editing #row-expediente-box{ display:block; }
+
+/* (3) layout do box: vira coluna (não duas colunas espremidas) */
+#fb-exp-info.fieldbox{
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  gap:.65rem;
+  height:auto !important;
+  min-height:auto !important;
+  padding:12px;
+}
+
+/* texto explicativo */
+#fb-exp-info .help-text{
+  margin:0;
+  line-height:1.35;
+  color: var(--muted);
+}
+#fb-exp-info .help-text .exp-ok{
+  color:#22c55e;
+  font-weight:700;
+}
+
+/* checkbox + texto */
+#fb-exp-info .chk-line{
+  align-items:flex-start;
+  gap:.6rem;
+}
+#fb-exp-info .chk-line > span{
+  display:grid;
+  gap:.15rem;
+}
+#fb-exp-info input[type="checkbox"]{
+  width:18px;
+  height:18px;
+  margin-top:.15rem;
+}
+
+/* quando está herdando (disabled) fica bem claro */
+.details-grid .input:disabled{
+  opacity:.65;
+  cursor:not-allowed;
+}

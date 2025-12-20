@@ -1,3 +1,4 @@
+// /frontend/js/pages/colaboradores.js
 /* Colaboradores – lista + modal de perfil (visualização/edição) e fluxo de criação
    (versão com: troca de senha em edição, validação opcional da senha, salvamento de instâncias,
    correção de refs DOM recriadas nas fieldboxes + limpeza de erros ao trocar de colaborador
@@ -5,7 +6,9 @@
    + respeito à permissão colaboradores.redefinir_senha para mexer em senha
    + modal de confirmação custom para remoção de colaborador (#zc-confirm)
    + horário de expediente (hora_login_inicio / hora_login_fim) com validação HH:MM
-   + 🔐 flag de empresa requer_token_login controlado na página de colaboradores) */
+   + 🔐 flag de empresa requer_token_login controlado na página de colaboradores
+   + 🕘 herança de horário do departamento + toggle “Personalizar horário”
+) */
 (function ColaboradoresPage(){
   'use strict';
 
@@ -26,6 +29,7 @@
     );
     return f(url, { credentials:'include', ...opt, headers });
   };
+
   const withEmpresa = (url) => {
     try {
       const u = new URL(url, location.origin);
@@ -36,6 +40,7 @@
       return EMPRESA_ID && !/(\?|&)empresa_id=/.test(url) ? url + sep + 'empresa_id=' + EMPRESA_ID : url;
     }
   };
+
   async function parseMaybeJSON(res){
     const txt = await res.text().catch(()=> '');
     try { return txt ? JSON.parse(txt) : null; } catch { return txt || null; }
@@ -269,7 +274,7 @@
     el.value = v;
   }
   function isValidTimeHHMM(str){
-    if (!str) return true; // vazio é permitido (sem controle de horário)
+    if (!str) return false;
     const m = /^(\d{1,2}):(\d{2})$/.exec(str.trim());
     if (!m) return false;
     const h = Number(m[1]), mm = Number(m[2]);
@@ -298,6 +303,82 @@
     s.className='chip'; s.textContent=text; return s;
   }
 
+  // ====== Horário padrão do departamento (UI) ======
+  function getDeptHorarioById(setorId){
+    const s = state.setores.find(x => String(x.id) === String(setorId));
+    const ini = (s && (s.hora_login_inicio ?? s.hora_inicio ?? s.expediente_inicio ?? s.horario_inicio)) || '';
+    const fim = (s && (s.hora_login_fim    ?? s.hora_fim    ?? s.expediente_fim    ?? s.horario_fim)) || '';
+    return { ini: String(ini||''), fim: String(fim||''), has: !!(ini || fim), dept: s || null };
+  }
+
+  function renderDeptHintBySetorId(setorId, opts={}){
+    const el = document.getElementById('dept-exp-hint');
+    if (!el) return;
+
+    const { ini, fim, has } = getDeptHorarioById(setorId);
+    if (!has){
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+
+    const personalizar = !!opts.personalizar;
+    const linha2 = personalizar
+      ? '⚙️ <strong>Este colaborador está com horário personalizado.</strong>'
+      : '✅ <strong>O colaborador usa esse horário automaticamente.</strong>';
+
+    const cta = personalizar
+      ? '<span style="opacity:.85">(desmarque “Personalizar horário” para voltar ao padrão.)</span>'
+      : '<span style="opacity:.85">(marque “Personalizar horário” se precisar diferente.)</span>';
+
+    el.style.display = 'block';
+    el.innerHTML = `
+      <strong>Horário padrão do departamento:</strong> ${ini || '—'}–${fim || '—'}<br>
+      ${linha2}<br>
+      ${cta}
+    `.trim();
+  }
+
+  function applyExpPersonalizarUI(){
+    const rowToggle = document.getElementById('row-exp-toggle');
+    const rowIni    = document.getElementById('row-exp-ini');
+    const rowFim    = document.getElementById('row-exp-fim');
+    const tgl       = document.getElementById('e-exp-personalizar');
+
+    // se HTML ainda não foi atualizado, sai sem quebrar
+    if (!tgl || !rowIni || !rowFim) return;
+
+    // mostra toggle só em edição
+    if (rowToggle) rowToggle.style.display = state.inlineEdit ? '' : 'none';
+
+    const on = !!tgl.checked;
+    rowIni.style.display = on ? '' : 'none';
+    rowFim.style.display = on ? '' : 'none';
+
+    const sel = document.getElementById('e-setor');
+    const setorId = sel?.value || '';
+
+    // sempre atualiza o hint do depto com o estado atual
+    renderDeptHintBySetorId(setorId, { personalizar: on });
+
+    // se ligou “personalizar” e ainda tá vazio, pré-preenche do depto
+    if (on){
+      const eIni = document.getElementById('e-exp-ini');
+      const eFim = document.getElementById('e-exp-fim');
+      if (eIni && eFim && !String(eIni.value||'').trim() && !String(eFim.value||'').trim()){
+        const { ini, fim } = getDeptHorarioById(setorId);
+        if (ini) eIni.value = ini;
+        if (fim) eFim.value = fim;
+      }
+    } else {
+      // desligou: limpa pra garantir que vai herdar (salvar null)
+      const eIni = document.getElementById('e-exp-ini');
+      const eFim = document.getElementById('e-exp-fim');
+      if (eIni) eIni.value = '';
+      if (eFim) eFim.value = '';
+    }
+  }
+
   // ====== Instâncias (WhatsApp) ======
   async function fetchInstances(){
     if (state.instsCache) return state.instsCache;
@@ -323,6 +404,7 @@
     state.instsCache = arr;
     return arr;
   }
+
   function coalesceInstIds(c){
     const raw = c?.instancias_ids ?? c?.instances_ids ?? c?.whatsapp_instancias_ids
              ?? c?.whatsapp_ids ?? c?.whatsapps_ids ?? c?.instancias ?? c?.instances ?? null;
@@ -343,11 +425,13 @@
     }
     return [];
   }
+
   function getInstsSelecionadasEdit(){
     return [...document.querySelectorAll('#e-insts input[name="inst-edit"]:checked')]
       .map(i => Number(i.value))
       .filter(n => !Number.isNaN(n));
   }
+
   async function saveInsts(id, ids){
     try{
       await apiJSON(`/api/colaboradores/${id}/instancias`, 'PUT', { instancias_ids: ids });
@@ -367,6 +451,7 @@
       }
     }
   }
+
   function ensureInstsSection(){
     let full = document.getElementById('insts-full');
     if (!full){
@@ -392,6 +477,7 @@
           </div>
         </dd>
       `;
+
       const permFull =
         dPerms?.closest('.full') ||
         ePerms?.closest('.full') ||
@@ -407,6 +493,7 @@
     }
     return full.querySelector('#insts-wrap');
   }
+
   async function renderInstsView(colab){
     const wrap = ensureInstsSection();
     const chipsWrap = wrap.querySelector('#d-insts');
@@ -428,6 +515,7 @@
       chipsWrap.appendChild(chip(lbl));
     });
   }
+
   async function ensureInstsEdit(){
     const wrap = ensureInstsSection();
     const chipsWrap = wrap.querySelector('#d-insts');
@@ -567,6 +655,18 @@
 
           const getId   = (x)=> x?.id ?? x?.dep_id ?? x?.departamento_id ?? x?.setor_id ?? x?.value ?? x?.ID ?? x?.Id;
           const getName = (x)=> x?.nome ?? x?.name ?? x?.titulo ?? x?.label ?? x?.text ?? '—';
+
+          // 🕘 tenta capturar horário padrão do departamento
+          const getIni = (x)=>
+            x?.hora_login_inicio ?? x?.hora_inicio ?? x?.expediente_inicio ?? x?.horario_inicio ??
+            x?.inicio_expediente ?? x?.hora_entrada ?? x?.entrada ??
+            x?.expediente?.inicio ?? x?.horario?.inicio ?? null;
+
+          const getFim = (x)=>
+            x?.hora_login_fim ?? x?.hora_fim ?? x?.expediente_fim ?? x?.horario_fim ??
+            x?.fim_expediente ?? x?.hora_saida ?? x?.saida ??
+            x?.expediente?.fim ?? x?.horario?.fim ?? null;
+
           const getKids = (x)=> x?.filhos ?? x?.children ?? x?.itens ?? x?.items ?? x?.nodes ?? x?.departamentos ?? x?.subdepartamentos ?? x?.sub ?? [];
 
           const walk = (node)=>{
@@ -577,7 +677,12 @@
 
             if (id && !seen.has(id)){
               seen.add(id);
-              out.push({ id, nome });
+              out.push({
+                id,
+                nome,
+                hora_login_inicio: (getIni(node) != null) ? String(getIni(node)) : null,
+                hora_login_fim:    (getFim(node) != null) ? String(getFim(node)) : null
+              });
             }
 
             const kids = getKids(node);
@@ -594,6 +699,7 @@
     state.setores = [];
     renderSetores();
   }
+
   async function loadColaboradores(){
     const p = new URLSearchParams();
     if (state.filtroTexto) p.set('q', state.filtroTexto);
@@ -661,6 +767,7 @@
       state.setores.forEach(s => fSetor.appendChild(new Option(s.nome,s.id)));
     }
   }
+
   function renderLista(){
     const q = (state.filtroTexto||'').toLowerCase();
     const depId = String(state.filtroSetorId||'');
@@ -969,14 +1076,15 @@
       eTel:    $('#e-tel'),
       eCargo:  $('#e-cargo'),
       eExpIni: $('#e-exp-ini'),
-      eExpFim: $('#e-exp-fim')
+      eExpFim: $('#e-exp-fim'),
+      eExpPersonalizar: $('#e-exp-personalizar')
     };
   }
 
   function validateFormLive(forceShow){
     const show = (typeof forceShow === 'boolean') ? forceShow : state.showErrors;
 
-    const { eNome, eEmail, eSetor, eTel, eCargo, eExpIni, eExpFim } = getEditInputs();
+    const { eNome, eEmail, eSetor, eTel, eCargo, eExpIni, eExpFim, eExpPersonalizar } = getEditInputs();
     const nome   = eNome?.value.trim()   || '';
     const email  = (eEmail?.value || '').trim();
     const setor  = eSetor?.value || '';
@@ -984,6 +1092,8 @@
     const cargo  = eCargo?.value.trim()  || '';
     const hIni   = eExpIni?.value.trim() || '';
     const hFim   = eExpFim?.value.trim() || '';
+
+    const expOn = !!eExpPersonalizar?.checked;
 
     const msgs = [];
     const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -1005,35 +1115,40 @@
     markValidity(eTel,   show ? telOk   : true, telOk   ? '' : 'Telefone com DDD (10–11 dígitos)');
     markValidity(eCargo, show ? cargoOk : true, cargoOk ? '' : 'Cargo (mín. 2 letras)');
 
-    // ---- horário (opcional, mas se preencher tem que ser HH:MM + ordem certa) ----
+    // ---- horário: só valida se "Personalizar horário" estiver ligado ----
     let hIniOk = true;
     let hFimOk = true;
     let hOrderOk = true;
 
-    if (hIni){
+    if (expOn){
       hIniOk = isValidTimeHHMM(hIni);
-      if (!hIniOk) msgs.push('• Entrada do expediente no formato HH:MM');
-    }
-    if (hFim){
       hFimOk = isValidTimeHHMM(hFim);
-      if (!hFimOk) msgs.push('• Saída do expediente no formato HH:MM');
-    }
-    if (hIni && hFim && hIniOk && hFimOk){
-      const mi = timeToMinutes(hIni);
-      const mf = timeToMinutes(hFim);
-      if (mi != null && mf != null && mi >= mf){
-        hOrderOk = false;
-        msgs.push('• Início do expediente deve ser antes do fim');
-      }
-    }
 
-    if (eExpIni){
-      const okField = hIniOk && hOrderOk;
-      markValidity(eExpIni, show ? okField : true, okField ? '' : 'Informe no formato HH:MM (ex.: 08:00)');
-    }
-    if (eExpFim){
-      const okField = hFimOk && hOrderOk;
-      markValidity(eExpFim, show ? okField : true, okField ? '' : 'Informe no formato HH:MM (ex.: 18:00)');
+      if (!hIniOk) msgs.push('• Entrada do expediente no formato HH:MM');
+      if (!hFimOk) msgs.push('• Saída do expediente no formato HH:MM');
+
+      if (hIniOk && hFimOk){
+        const mi = timeToMinutes(hIni);
+        const mf = timeToMinutes(hFim);
+        if (mi != null && mf != null && mi >= mf){
+          hOrderOk = false;
+          msgs.push('• Início do expediente deve ser antes do fim');
+        }
+      }
+
+      if (eExpIni){
+        const okField = hIniOk && hOrderOk;
+        markValidity(eExpIni, show ? okField : true, okField ? '' : 'Informe no formato HH:MM (ex.: 08:00)');
+      }
+      if (eExpFim){
+        const okField = hFimOk && hOrderOk;
+        markValidity(eExpFim, show ? okField : true, okField ? '' : 'Informe no formato HH:MM (ex.: 18:00)');
+      }
+    } else {
+      // herda do depto: limpa validação
+      if (eExpIni) markValidity(eExpIni, true, '');
+      if (eExpFim) markValidity(eExpFim, true, '');
+      hIniOk = true; hFimOk = true; hOrderOk = true;
     }
 
     // senha: obrigatório no create; opcional no edit; só se tiver permissão
@@ -1203,11 +1318,33 @@
     if (vCargo) vCargo.textContent = adm ? '' : (cargoVal || '—');
     renderAdminBadge(colab);
 
-    // Horário de expediente (view)
-    const hIni = coalesceHorarioInicio(colab);
-    const hFim = coalesceHorarioFim(colab);
-    if (vExpIni) vExpIni.textContent = hIni || '—';
-    if (vExpFim) vExpFim.textContent = hFim || '—';
+    // Horário de expediente (view) + herança do depto
+    const colIni = coalesceHorarioInicio(colab);
+    const colFim = coalesceHorarioFim(colab);
+    const depHor = getDeptHorarioById(depId);
+
+    const isCustom = !!(colIni || colFim);
+    if (vExpIni){
+      if (colIni) vExpIni.textContent = colIni;
+      else if (depHor.ini) vExpIni.textContent = `${depHor.ini} (padrão)`;
+      else vExpIni.textContent = '—';
+    }
+    if (vExpFim){
+      if (colFim) vExpFim.textContent = colFim;
+      else if (depHor.fim) vExpFim.textContent = `${depHor.fim} (padrão)`;
+      else vExpFim.textContent = '—';
+    }
+
+    // hint do depto sempre que houver horário padrão
+    renderDeptHintBySetorId(depId, { personalizar: isCustom });
+
+    // toggle de personalizar só aparece em edição
+    const rowToggle = document.getElementById('row-exp-toggle');
+    if (rowToggle) rowToggle.style.display = 'none';
+    const rowIni = document.getElementById('row-exp-ini');
+    const rowFim = document.getElementById('row-exp-fim');
+    if (rowIni) rowIni.style.display = '';
+    if (rowFim) rowFim.style.display = '';
 
     if (dPerms){
       dPerms.innerHTML = '';
@@ -1295,13 +1432,12 @@
         sel.appendChild(new Option(depName || 'Departamento atual', depValue));
       }
       sel.value = depValue;
-      sel.dispatchEvent(new Event('change', { bubbles:true }));
     }
 
     swapFieldbox('fb-tel', `<input id="e-tel" class="input" type="tel" required inputmode="numeric" placeholder="(DD) 9 9999-9999">`);
     swapFieldbox('fb-cargo', `<input id="e-cargo" class="input" type="text" maxlength="80" required placeholder="Cargo">`);
 
-    // Horário – entrada / saída
+    // Horário – entrada / saída (só aparece se “Personalizar” estiver ligado)
     swapFieldbox('fb-exp-ini', `<input id="e-exp-ini" class="input" type="text" inputmode="numeric" placeholder="08:00">`);
     swapFieldbox('fb-exp-fim', `<input id="e-exp-fim" class="input" type="text" inputmode="numeric" placeholder="18:00">`);
 
@@ -1314,6 +1450,18 @@
     const hFim = coalesceHorarioFim(state.viewing)   || '';
     $('#e-exp-ini').value = hIni;
     $('#e-exp-fim').value = hFim;
+
+    // configura toggle “Personalizar horário”
+    const tgl = document.getElementById('e-exp-personalizar');
+    if (tgl){
+      const isCreate = (perfilModal.dataset.mode === 'create');
+      // se já existir horário salvo no colaborador, considera personalizado
+      tgl.checked = !isCreate && !!(hIni || hFim);
+      tgl.onchange = ()=>{
+        applyExpPersonalizarUI();
+        validateFormLive();
+      };
+    }
 
     renderAdminBadge({ ...state.viewing, cargo: $('#e-cargo').value });
 
@@ -1338,7 +1486,12 @@
       validateFormLive();
       renderAdminBadge({ ...state.viewing, cargo: $('#e-cargo').value });
     });
-    sel?.addEventListener('change', ()=> validateFormLive());
+
+    // change do depto: atualiza hint + se personalizar ligado e vazio, pré-preenche
+    sel?.addEventListener('change', ()=>{
+      applyExpPersonalizarUI();
+      validateFormLive();
+    });
 
     // horário – máscara e validação ao digitar
     $('#e-exp-ini')?.addEventListener('input', ()=>{
@@ -1395,6 +1548,16 @@
 
     bindAvatarDnDAndPaste();
 
+    // aplica UI do “Personalizar horário” e hint do depto conforme seleção atual
+    applyExpPersonalizarUI();
+
+    // se tinha depto preselecionado, atualiza hint
+    if (sel && sel.value) {
+      renderDeptHintBySetorId(sel.value, { personalizar: !!tgl?.checked });
+    } else {
+      renderDeptHintBySetorId('', { personalizar: !!tgl?.checked });
+    }
+
     validateFormLive(false);
   }
 
@@ -1421,6 +1584,14 @@
 
     perfilModal.classList.remove('editing');
 
+    // volta exibição normal no view
+    const rowToggle = document.getElementById('row-exp-toggle');
+    if (rowToggle) rowToggle.style.display = 'none';
+    const rowIni = document.getElementById('row-exp-ini');
+    const rowFim = document.getElementById('row-exp-fim');
+    if (rowIni) rowIni.style.display = '';
+    if (rowFim) rowFim.style.display = '';
+
     if (restore && state.viewing) renderPerfilView(state.viewing);
   }
 
@@ -1432,14 +1603,16 @@
     const id = Number(perfilModal.dataset.currentId || '0') || 0;
     const canPass = canEditPassword();
 
-    const { eNome, eEmail, eSetor, eTel, eCargo, eExpIni, eExpFim } = getEditInputs();
+    const { eNome, eEmail, eSetor, eTel, eCargo, eExpIni, eExpFim, eExpPersonalizar } = getEditInputs();
     const nome   = eNome?.value.trim();
     const email  = eEmail?.value.trim();
     const setor  = eSetor?.value || '';
     const tel    = eTel?.value || '';
     const cargo  = eCargo?.value || '';
-    const hIni   = eExpIni?.value.trim() || '';
-    const hFim   = eExpFim?.value.trim() || '';
+    const expOn  = !!eExpPersonalizar?.checked;
+
+    const hIni   = (expOn ? (eExpIni?.value.trim() || '') : '');
+    const hFim   = (expOn ? (eExpFim?.value.trim() || '') : '');
 
     state.showErrors = true;
     const check = validateFormLive(true);
@@ -1459,9 +1632,11 @@
       fd.append('telefone', telE164(tel));
       fd.append('cargo', (cargo||'').trim());
 
-      // horário (opcional) – NOME ALINHADO COM BACKEND
-      if (hIni) fd.append('hora_login_inicio', hIni);
-      if (hFim) fd.append('hora_login_fim', hFim);
+      // horário: só envia se personalizar estiver marcado
+      if (expOn){
+        fd.append('hora_login_inicio', hIni);
+        fd.append('hora_login_fim', hFim);
+      }
 
       if (!canPass){
         toast('Você não tem permissão para definir senha deste colaborador.','warn');
@@ -1510,8 +1685,10 @@
         const fresh = await loadColabFull(created.id);
         fresh.instancias_ids    = instsSel;
         if (permsSel.length) fresh.permissoes = permsSel;
-        fresh.hora_login_inicio = hIni || null;
-        fresh.hora_login_fim    = hFim || null;
+
+        // salva o que foi definido (ou null para herdar)
+        fresh.hora_login_inicio = expOn ? (hIni || null) : null;
+        fresh.hora_login_fim    = expOn ? (hFim || null) : null;
 
         state.viewing = fresh;
         await loadColaboradores(); renderLista();
@@ -1537,9 +1714,9 @@
       atualizar_usuario: !!state.viewing?.usuario_id
     };
 
-    // permite limpar horário (null) se apagar – NOME ALINHADO COM BACKEND
-    payload.hora_login_inicio = hIni || null;
-    payload.hora_login_fim    = hFim || null;
+    // horário: null = herda do depto
+    payload.hora_login_inicio = expOn ? (hIni || null) : null;
+    payload.hora_login_fim    = expOn ? (hFim || null) : null;
 
     const senhaEl = document.querySelector('#e-senha');
     const newPass = (senhaEl?.value || '').trim();
@@ -1587,8 +1764,9 @@
       const fresh = await loadColabFull(id);
       fresh.instancias_ids    = instsSel;
       if (permsSel.length) fresh.permissoes = permsSel;
-      fresh.hora_login_inicio = hIni || null;
-      fresh.hora_login_fim    = hFim || null;
+
+      fresh.hora_login_inicio = expOn ? (hIni || null) : null;
+      fresh.hora_login_fim    = expOn ? (hFim || null) : null;
 
       state.viewing = fresh;
       await loadColaboradores(); renderLista();
@@ -1622,6 +1800,7 @@
       toast('Não foi possível abrir o perfil.','err');
     }
   }
+
   function closePerfil(){
     clearValidationErrors(); // limpa erros ao fechar também
     perfilModal.setAttribute('aria-hidden','true');
@@ -1631,6 +1810,7 @@
     state.showErrors = false;
     $('#avatar-wrap')?.classList.remove('drag-over');
   }
+
   async function openNovo(){
     if (!hasPerm(EDIT_PERM)) { toast('Sem permissão para criar.','warn'); return; }
     if (!canEditPassword()) { toast('Sem permissão para criar (requer permissão de redefinir senha).','warn'); return; }
@@ -1755,7 +1935,7 @@
       const card = perfilModal.querySelector('.modal-card');
       if (card && !card.contains(ev.target)) closePerfil();
     });
-    perfilModal?.querySelector(' .modal-card')?.addEventListener('mousedown', ev => ev.stopPropagation());
+    perfilModal?.querySelector('.modal-card')?.addEventListener('mousedown', ev => ev.stopPropagation());
 
     document.addEventListener('keydown', (e)=>{
       if (e.key === 'Escape' && perfilModal?.getAttribute('aria-hidden') === 'false'){

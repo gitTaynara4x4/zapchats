@@ -78,6 +78,32 @@ def _norm_hora(h: Optional[str]) -> Optional[str]:
     return h
 
 
+# ---- Horário de expediente (modo) ----
+# Valores aceitos:
+#   - "departamento"  -> usa o horário padrão definido no departamento/setor
+#   - "personalizado" -> usa hora_login_inicio/hora_login_fim do colaborador
+#   - "livre"         -> sem restrição
+HORARIO_MODO_VALUES = ("departamento", "personalizado", "livre")
+
+
+def _norm_horario_modo(v: Optional[str], *, default: Optional[str] = None) -> Optional[str]:
+    if v is None:
+        return default
+    s = str(v).strip().lower()
+    if not s:
+        return default
+    # normaliza variações comuns
+    if s in ("dept", "depto", "padrao", "padrão", "departamento_padrao", "departamento-padrao"):
+        return "departamento"
+    if s in ("custom", "personalizado", "pessoal", "individual"):
+        return "personalizado"
+    if s in ("livre", "sem restricao", "sem_restricao", "semrestricao", "none", "off"):
+        return "livre"
+    if s in HORARIO_MODO_VALUES:
+        return s
+    return default
+
+
 def build_avatar_url(nome: Optional[str], email: Optional[str]) -> str:
     seed = (nome or email or "Colaborador").strip() or "Colaborador"
     return (
@@ -165,6 +191,9 @@ class ColaboradorOut(BaseModel):
     hora_login_inicio: Optional[str] = None  # "08:00"
     hora_login_fim: Optional[str] = None  # "18:00"
 
+    # modo de expediente
+    horario_modo: Optional[str] = None  # "departamento" | "personalizado" | "livre"
+
     # instâncias de WhatsApp que o colaborador pode ver
     instancias_ids: list[int] = Field(default_factory=list)
 
@@ -187,6 +216,7 @@ class ColaboradorUpdate(BaseModel):
     # atualizáveis
     hora_login_inicio: Optional[str] = None
     hora_login_fim: Optional[str] = None
+    horario_modo: Optional[str] = None
 
     senha: Optional[str] = None
     atualizar_usuario: Optional[bool] = False
@@ -258,6 +288,15 @@ def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
     avatar_url = build_avatar_url(nome_plano, email_plano)
     is_admin_flag = (cargo_plano or "").lower() == "admin"
 
+    # modo de expediente (com compat p/ bancos antigos)
+    modo_raw = getattr(c, "horario_modo", None)
+    horario_modo_out = _norm_horario_modo(modo_raw, default=None)
+    if not horario_modo_out:
+        if c.hora_login_inicio and c.hora_login_fim:
+            horario_modo_out = "personalizado"
+        else:
+            horario_modo_out = "livre"
+
     return ColaboradorOut(
         id=c.id,
         empresa_id=c.empresa_id,
@@ -275,6 +314,7 @@ def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
         is_admin=is_admin_flag,
         hora_login_inicio=c.hora_login_inicio,
         hora_login_fim=c.hora_login_fim,
+        horario_modo=horario_modo_out,
     )
 
 
@@ -339,6 +379,7 @@ async def criar_colaborador(
     # janela de login (opcional)
     hora_login_inicio: Optional[str] = Form(None),
     hora_login_fim: Optional[str] = Form(None),
+    horario_modo: Optional[str] = Form(None),
     criar_usuario: Optional[bool] = Form(False),
     senha: Optional[str] = Form(None),
     permissoes: Optional[str] = Form(None),
@@ -416,6 +457,20 @@ async def criar_colaborador(
 
     senha_colab_hash = bcrypt.hash(senha) if senha else bcrypt.hash("temp@123")
 
+    hi_norm = _norm_hora(hora_login_inicio)
+    hf_norm = _norm_hora(hora_login_fim)
+
+    horario_modo_norm = _norm_horario_modo(horario_modo, default=None)
+    if not horario_modo_norm:
+        # compat: se mandou horários -> personalizado; se tem setor/departamento -> departamento; senão -> livre
+        if hi_norm or hf_norm:
+            horario_modo_norm = "personalizado"
+        elif setor is not None:
+            horario_modo_norm = "departamento"
+        else:
+            horario_modo_norm = "livre"
+
+
     colab = models.Colaborador(
         empresa_id=user.empresa_id,
         setor_id=(setor.id if setor else None),
@@ -425,9 +480,13 @@ async def criar_colaborador(
         senha=senha_colab_hash,
         telefone=telefone_norm,
         cargo=(cargo or None),
-        hora_login_inicio=_norm_hora(hora_login_inicio),
-        hora_login_fim=_norm_hora(hora_login_fim),
+        hora_login_inicio=hi_norm,
+        hora_login_fim=hf_norm,
     )
+
+    # modo de expediente (se a coluna existir no model)
+    if hasattr(colab, "horario_modo"):
+        setattr(colab, "horario_modo", horario_modo_norm)
 
     # permissões (se vierem)
     perm_ids = _parse_perms(permissoes)
@@ -505,6 +564,9 @@ def atualizar_colaborador(
     if "hora_login_fim" in data:
         colab.hora_login_fim = _norm_hora(data["hora_login_fim"])
 
+    # --- modo de expediente ---
+    if "horario_modo" in data and hasattr(colab, "horario_modo"):
+        colab.horario_modo = _norm_horario_modo(data.get("horario_modo"), default=None) or "livre"
     # --- senha (e sincroniza com usuário se solicitado) ---
     atualizar_usuario_flag = bool(
         data.get("atualizar_usuario") or payload.atualizar_usuario

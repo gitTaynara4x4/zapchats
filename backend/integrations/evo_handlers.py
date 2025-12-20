@@ -933,15 +933,140 @@ def _resolve_remote_jid(inst_id: str, raw_remote: str | None) -> str | None:
 # Message/media helpers
 # =========================
 def _unwrap_baileys_layers(obj: dict) -> dict:
-    m = obj if isinstance(obj, dict) else {}
-    while True:
-        if "ephemeralMessage" in m: m = m["ephemeralMessage"].get("message", {})
-        elif "viewOnceMessage" in m: m = m["viewOnceMessage"].get("message", {})
-        elif "viewOnceMessageV2" in m: m = m["viewOnceMessageV2"].get("message", {})
-        elif "viewOnceMessageV2Extension" in m: m = m["viewOnceMessageV2Extension"].get("message", {})
-        elif "deviceSentMessage" in m: m = m["deviceSentMessage"].get("message", {})
-        else: break
-    return m.get("message") if "message" in m else m
+    """
+    Baileys costuma embrulhar a mensagem em camadas:
+    message -> ephemeralMessage -> message -> viewOnceMessage -> message -> ...
+    Essa função tenta chegar no "miolo" onde ficam conversation/extendedText/etc.
+    """
+    if not isinstance(obj, dict):
+        return {}
+
+    m = obj.get("message") if isinstance(obj.get("message"), dict) else obj
+    if not isinstance(m, dict):
+        return {}
+
+    WRAPPERS = (
+        "ephemeralMessage",
+        "viewOnceMessage",
+        "viewOnceMessageV2",
+        "viewOnceMessageV2Extension",
+        "editedMessage",
+        "documentWithCaptionMessage",
+    )
+
+    # evita loop infinito
+    for _ in range(10):
+        progressed = False
+
+        # wrapper direto: {ephemeralMessage:{message:{...}}}
+        for k in WRAPPERS:
+            if k in m and isinstance(m.get(k), dict):
+                inner = m.get(k) or {}
+                if isinstance(inner.get("message"), dict):
+                    m = inner["message"]
+                    progressed = True
+                    break
+                # alguns wrappers podem não ter "message" e já trazer payload útil
+                m = inner
+                progressed = True
+                break
+
+        # às vezes vem {message:{...}} de novo
+        if not progressed and isinstance(m.get("message"), dict):
+            m = m["message"]
+            progressed = True
+
+        if not progressed:
+            break
+
+        if not isinstance(m, dict):
+            return {}
+
+    return m if isinstance(m, dict) else {}
+
+
+def extract_text_from_baileys(obj: dict) -> str:
+    if not isinstance(obj, dict):
+        return ""
+
+    m = _unwrap_baileys_layers(obj)
+    if not isinstance(m, dict):
+        return ""
+
+    if "conversation" in m:
+        return m["conversation"] or ""
+
+    if "extendedTextMessage" in m:
+        return (m["extendedTextMessage"] or {}).get("text") or ""
+
+    if "buttonsResponseMessage" in m:
+        return (m["buttonsResponseMessage"] or {}).get("selectedDisplayText") or "[Botão]"
+
+    if "templateButtonReplyMessage" in m:
+        return (m["templateButtonReplyMessage"] or {}).get("selectedDisplayText") or "[Botão]"
+
+    if "listResponseMessage" in m:
+        lrm = m["listResponseMessage"] or {}
+        ssr = lrm.get("singleSelectReply") or {}
+        sel = lrm.get("title") or ssr.get("selectedRowId")
+        return sel or "[Lista]"
+
+    if "interactiveResponseMessage" in m:
+        irm = m["interactiveResponseMessage"] or {}
+        resp = irm.get("nativeFlowResponseMessage") or {}
+        text = (resp.get("paramsJson") or "").strip()
+        return text or "[Interativo]"
+
+    if "reactionMessage" in m:
+        rm = m["reactionMessage"] or {}
+        text = rm.get("text") or ""
+        key = rm.get("key", {}) or {}
+        reacted_to = key.get("id")
+        return f"[Reação] {text} ⇢ {reacted_to}" if text else "[Reação]"
+
+    if "imageMessage" in m:
+        return (m["imageMessage"] or {}).get("caption") or "[Imagem]"
+
+    if "videoMessage" in m:
+        return (m["videoMessage"] or {}).get("caption") or "[Vídeo]"
+
+    if "audioMessage" in m:
+        am = m["audioMessage"] or {}
+        return "[Áudio/ptt]" if am.get("ptt", False) else "[Áudio]"
+
+    if "stickerMessage" in m:
+        return "[Figurinha]"
+
+    if "documentMessage" in m:
+        dm = m["documentMessage"] or {}
+        name = dm.get("fileName")
+        return f"[Documento] {name}" if name else "[Documento]"
+
+    if "contactMessage" in m:
+        cm = m["contactMessage"] or {}
+        return f"[Contato] {cm.get('displayName') or ''}".strip()
+
+    if "contactsArrayMessage" in m:
+        cam = m["contactsArrayMessage"] or {}
+        return f"[Contatos] {len(cam.get('contacts', []) or [])}"
+
+    if "locationMessage" in m:
+        lm = m["locationMessage"] or {}
+        name = lm.get("name") or lm.get("address")
+        return f"[Localização] {name}" if name else "[Localização]"
+
+    if "protocolMessage" in m:
+        pm = m["protocolMessage"] or {}
+        return "[Mensagem apagada]" if pm.get("type") == 0 else "[Evento]"
+
+    if "orderMessage" in m:
+        om = m["orderMessage"] or {}
+        title = (om.get("orderTitle") or "").strip()
+        return f"[Pedido] {title}".strip()
+
+    return "[Mensagem recebida]"
+
+
 
 def extract_text_from_baileys(obj: dict) -> str:
     if not isinstance(obj, dict):

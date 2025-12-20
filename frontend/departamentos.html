@@ -1,3 +1,4 @@
+<!-- /frontend/pages/departamentos.html -->
 <!DOCTYPE html>
 <html lang="pt-BR" class="has-sidebar prepaint">
 <head>
@@ -157,6 +158,19 @@
               <span>Mostrar para a equipe</span>
             </label>
             <small class="hint">Se desligar, esse setor não aparece nas seleções.</small>
+          </div>
+
+          <!-- ✅ Expediente padrão do departamento -->
+          <div class="fi" id="fi-expediente">
+            <label>Expediente padrão (login)</label>
+            <div class="row" style="gap:.5rem; align-items:center;">
+              <input id="d-exp-ini" class="input" type="time" step="60" />
+              <span class="muted">até</span>
+              <input id="d-exp-fim" class="input" type="time" step="60" />
+            </div>
+            <small class="hint">
+              Deixe vazio para <b>sem restrição</b>. (O colaborador pode usar o padrão, personalizar, ou ficar sem restrição.)
+            </small>
           </div>
 
           <!-- === WhatsApps permitidos (instâncias) === -->

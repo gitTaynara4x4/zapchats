@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Set
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, status
 from pydantic import BaseModel, Field, ConfigDict, field_validator
@@ -33,6 +34,9 @@ class DepartamentoIn(BaseModel):
     parent_id: Optional[int] = Field(default=None)
     codigo: Optional[str] = Field(default=None, max_length=64)
     ativo: Optional[bool] = Field(default=True)
+    # horário padrão de expediente (aplicável aos colaboradores do departamento)
+    hora_login_inicio_padrao: Optional[str] = Field(default=None, description="HH:MM")
+    hora_login_fim_padrao: Optional[str] = Field(default=None, description="HH:MM")
 
     @field_validator("nome", mode="before")
     @classmethod
@@ -52,6 +56,10 @@ class DepartamentoOut(BaseModel):
     empresa_id: int
     created_at: datetime | None = None
 
+    # horário padrão de expediente (opcional)
+    hora_login_inicio_padrao: str | None = None
+    hora_login_fim_padrao: str | None = None
+
     # extras (preenchidos se existirem no modelo)
     parent_id: int | None = None
     codigo: str | None = None
@@ -66,6 +74,27 @@ class MoveIn(BaseModel):
 
 
 # ========= Helpers =========
+
+# ---- Horário padrão do departamento (Brasília) ----
+HORA_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def _norm_hora(h: Optional[str]) -> Optional[str]:
+    """
+    Normaliza "HH:MM" ou "HH:MM:SS" para "HH:MM".
+    Se vier vazio, None ou inválido, retorna None.
+    """
+    if h is None:
+        return None
+    h = str(h).strip()
+    if not h:
+        return None
+    if len(h) >= 5 and h[2] == ":":
+        h = h[:5]
+    if not HORA_RE.match(h):
+        return None
+    return h
+
 
 
 def resolve_empresa_id(
@@ -157,6 +186,14 @@ def dept_to_dict(row: Any) -> Dict[str, Any]:
         out["ativo"] = getattr(row, "ativo", True)
     else:
         out["ativo"] = True
+    if has_column(row, "hora_login_inicio_padrao"):
+        out["hora_login_inicio_padrao"] = getattr(row, "hora_login_inicio_padrao", None)
+    else:
+        out["hora_login_inicio_padrao"] = None
+    if has_column(row, "hora_login_fim_padrao"):
+        out["hora_login_fim_padrao"] = getattr(row, "hora_login_fim_padrao", None)
+    else:
+        out["hora_login_fim_padrao"] = None
     # path pode ser coluna (ARRAY) — se não for, calculamos na rota /tree
     out["path"] = getattr(row, "path", None)
     return out
@@ -308,6 +345,12 @@ def criar(
     if has_column(models.Departamento, "ativo"):
         setattr(novo, "ativo", True if payload.ativo is None else bool(payload.ativo))
 
+
+    if has_column(models.Departamento, "hora_login_inicio_padrao"):
+        setattr(novo, "hora_login_inicio_padrao", _norm_hora(payload.hora_login_inicio_padrao))
+    if has_column(models.Departamento, "hora_login_fim_padrao"):
+        setattr(novo, "hora_login_fim_padrao", _norm_hora(payload.hora_login_fim_padrao))
+
     db.add(novo)
     db.commit()
     db.refresh(novo)
@@ -337,6 +380,12 @@ def atualizar(
         setattr(dept, "codigo", (payload.codigo or None))
     if has_column(models.Departamento, "ativo"):
         setattr(dept, "ativo", True if payload.ativo is None else bool(payload.ativo))
+
+
+    if has_column(models.Departamento, "hora_login_inicio_padrao"):
+        setattr(dept, "hora_login_inicio_padrao", _norm_hora(payload.hora_login_inicio_padrao))
+    if has_column(models.Departamento, "hora_login_fim_padrao"):
+        setattr(dept, "hora_login_fim_padrao", _norm_hora(payload.hora_login_fim_padrao))
 
     db.commit()
     db.refresh(dept)

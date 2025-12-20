@@ -22,7 +22,7 @@ from fastapi import (
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func
 from dotenv import load_dotenv
 import pytz
 
@@ -77,18 +77,111 @@ DATA_URL_RE = re.compile(r"^data:(?P<mime>[^;]+);base64,(?P<data>.+)$")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 
-def colab_login_allowed_now(colab: "models.Colaborador") -> bool:
+def _get_departamento_login_window(
+    db: Session, colab: "models.Colaborador"
+) -> tuple[Optional[str], Optional[str]]:
+    """
+    Resolve a janela de login padrão do *departamento* do colaborador.
+
+    Compat:
+    - Primeiro tenta models.Departamento.id == colab.setor_id (projetos que usam setor_id como dept).
+    - Se não achar, tenta mapear Setor -> Departamento por nome (legado).
+
+    Retorna (hi, hf) como strings ("HH:MM"/"HH:MM:SS") ou (None, None) se não houver.
+    """
+    try:
+        empresa_id = getattr(colab, "empresa_id", None)
+        setor_id = getattr(colab, "setor_id", None)
+        if not empresa_id or not setor_id:
+            return (None, None)
+
+        dept = (
+            db.query(models.Departamento)
+            .filter(
+                models.Departamento.empresa_id == int(empresa_id),
+                models.Departamento.id == int(setor_id),
+            )
+            .first()
+        )
+
+        if not dept:
+            # tenta Setor -> Departamento por nome (legado)
+            setor = (
+                db.query(models.Setor)
+                .filter(
+                    models.Setor.empresa_id == int(empresa_id),
+                    models.Setor.id == int(setor_id),
+                )
+                .first()
+            )
+            if setor and getattr(setor, "nome", None):
+                dept = (
+                    db.query(models.Departamento)
+                    .filter(
+                        models.Departamento.empresa_id == int(empresa_id),
+                        func.lower(models.Departamento.nome)
+                        == func.lower(str(setor.nome)),
+                    )
+                    .first()
+                )
+
+        if not dept:
+            return (None, None)
+
+        hi = getattr(dept, "hora_login_inicio_padrao", None)
+        hf = getattr(dept, "hora_login_fim_padrao", None)
+        return (hi, hf)
+    except Exception:
+        return (None, None)
+
+
+def colab_login_allowed_now(db: Session, colab: "models.Colaborador") -> bool:
     """
     Retorna True se o colaborador PODE logar (ou continuar usando) agora (horário de Brasília),
     False se estiver fora do horário configurado.
 
-    Usa campos:
-      - colab.hora_login_inicio (HH:MM ou HH:MM:SS)
-      - colab.hora_login_fim    (HH:MM ou HH:MM:SS)
-    Se qualquer um estiver vazio/None, NÃO restringe.
+    Modos suportados (coluna colab.horario_modo):
+      - "livre"         -> sem restrição
+      - "personalizado" -> usa colab.hora_login_inicio / colab.hora_login_fim
+      - "departamento"  -> usa dept.hora_login_inicio_padrao / dept.hora_login_fim_padrao
+
+    Compat:
+      - Se a coluna horario_modo não existir ou estiver vazia:
+          * se hora_login_inicio e hora_login_fim estiverem preenchidos -> "personalizado"
+          * senão -> "departamento" se tiver setor_id; caso contrário -> "livre"
     """
-    hi = getattr(colab, "hora_login_inicio", None)
-    hf = getattr(colab, "hora_login_fim", None)
+    modo_raw = getattr(colab, "horario_modo", None)
+    modo = (str(modo_raw).strip().lower() if modo_raw is not None else "").strip()
+
+    # compat p/ bancos antigos
+    if not modo:
+        hi0 = getattr(colab, "hora_login_inicio", None)
+        hf0 = getattr(colab, "hora_login_fim", None)
+        if hi0 and hf0:
+            modo = "personalizado"
+        else:
+            modo = "departamento" if getattr(colab, "setor_id", None) else "livre"
+
+    # normaliza variações
+    if modo in ("sem restricao", "sem_restricao", "none", "off"):
+        modo = "livre"
+    if modo in ("padrao", "padrão", "dept", "depto", "departamento_padrao", "departamento-padrao"):
+        modo = "departamento"
+
+    # sem restrição
+    if modo == "livre":
+        return True
+
+    # pega janela conforme modo
+    hi: Optional[str] = None
+    hf: Optional[str] = None
+
+    if modo == "departamento":
+        hi, hf = _get_departamento_login_window(db, colab)
+    else:
+        # default: personalizado
+        hi = getattr(colab, "hora_login_inicio", None)
+        hf = getattr(colab, "hora_login_fim", None)
 
     # Sem janela configurada -> sem restrição
     if not hi or not hf:
@@ -413,7 +506,7 @@ def get_current_identity(
             )
 
         # 🚫 Bloqueia uso do sistema se estiver fora da janela do expediente
-        if not colab_login_allowed_now(colab):
+        if not colab_login_allowed_now(db, colab):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
                 "Fora do horário permitido de acesso para este colaborador.",
@@ -607,7 +700,7 @@ def login(
         reset_fail(db, email, ip)
 
         # verifica janela de horário (Brasília)
-        if not colab_login_allowed_now(colaborador):
+        if not colab_login_allowed_now(db, colaborador):
             db.commit()
             raise HTTPException(
                 status_code=403,
@@ -761,7 +854,7 @@ def confirmar_login_token(
     colaborador.login_token_expires_at = None
 
     # Só por segurança, revalida faixa de horário
-    if not colab_login_allowed_now(colaborador):
+    if not colab_login_allowed_now(db, colaborador):
         db.commit()
         raise HTTPException(
             status_code=403,

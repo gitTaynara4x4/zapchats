@@ -72,6 +72,9 @@
   let pathPrevWrap, pathPrevCode;
   let btnViewTable, btnViewOrg, sectionTable, sectionOrg, orgContainer;
 
+  // ✅ Expediente padrão
+  let inpExpIniPadrao, inpExpFimPadrao;
+
   // Whats (instâncias)
   let whatsBtn, whatsPanel, whatsSearch, whatsListEl, whatsChipsEl;
 
@@ -124,6 +127,19 @@
     toast._t = setTimeout(()=>{ toastEl.style.display='none'; }, 2200);
   }
 
+  // ✅ Normaliza "HH:MM:SS" -> "HH:MM" (input[type=time] aceita HH:MM)
+  function normTime(val){
+    if (val === null || val === undefined) return '';
+    const s = String(val).trim();
+    if (!s) return '';
+    // pega HH:MM de "HH:MM" ou "HH:MM:SS"
+    const m = s.match(/^(\d{1,2}):(\d{2})/);
+    if (!m) return '';
+    const hh = String(m[1]).padStart(2,'0');
+    const mm = m[2];
+    return `${hh}:${mm}`;
+  }
+
   // ===== Normalização =====
   function normalizeRows(rows){
     const arr = Array.isArray(rows) ? rows : [];
@@ -153,7 +169,17 @@
       if (!Array.isArray(whats)) whats = [whats];
       const whatsapp_instancias = whats.map(n => Number(n)).filter(Number.isFinite);
 
-      return { id, parent_id, nome, path, codigo, ativo, descricao, whatsapp_instancias, children: [] };
+      // ✅ se o backend já mandar no tree, guardamos; se não, vem via details
+      const hora_login_inicio_padrao = r.hora_login_inicio_padrao ?? r.login_inicio_padrao ?? null;
+      const hora_login_fim_padrao    = r.hora_login_fim_padrao    ?? r.login_fim_padrao    ?? null;
+
+      return {
+        id, parent_id, nome, path, codigo, ativo, descricao,
+        whatsapp_instancias,
+        hora_login_inicio_padrao,
+        hora_login_fim_padrao,
+        children: []
+      };
     }).filter(x => Number.isFinite(x.id));
   }
 
@@ -818,6 +844,10 @@
     modalTit.textContent = 'Novo departamento';
     modal.classList.add('is-new');
 
+    // ✅ expediente padrão
+    if (inpExpIniPadrao) inpExpIniPadrao.value = '';
+    if (inpExpFimPadrao) inpExpFimPadrao.value = '';
+
     await loadInstanciasWhats();
     resetWhatsSelection([]);
 
@@ -852,6 +882,19 @@
     }
     resetWhatsSelection(sel);
 
+    // ✅ expediente padrão (prioriza item, cai pro details)
+    let hi = item?.hora_login_inicio_padrao ?? null;
+    let hf = item?.hora_login_fim_padrao ?? null;
+    if (!hi && !hf){
+      try{
+        const det = await loadDeptoDetails(item.id);
+        hi = det?.hora_login_inicio_padrao ?? det?.login_inicio_padrao ?? null;
+        hf = det?.hora_login_fim_padrao ?? det?.login_fim_padrao ?? null;
+      }catch{}
+    }
+    if (inpExpIniPadrao) inpExpIniPadrao.value = normTime(hi);
+    if (inpExpFimPadrao) inpExpFimPadrao.value = normTime(hf);
+
     showModal();
     updatePathPreview();
   }
@@ -871,13 +914,26 @@
     const nome = (inpNome.value||'').trim();
     if (!nome){ toast('Informe o nome.','warn'); inpNome.focus(); return; }
 
+    // ✅ valida expediente padrão (ou preenche ambos, ou nenhum)
+    const hi = (inpExpIniPadrao?.value || '').trim();
+    const hf = (inpExpFimPadrao?.value || '').trim();
+    if ((hi && !hf) || (!hi && hf)){
+      toast('Preencha início e fim do expediente (ou deixe ambos em branco).','warn');
+      (hi ? inpExpFimPadrao : inpExpIniPadrao)?.focus();
+      return;
+    }
+
     const payload = {
       nome,
       descricao: (txtDesc.value||'').trim() || null,
       parent_id: selParent.value ? Number(selParent.value) : null,
       codigo: (inpCodigo.value||'').trim() || null,
       ativo: !!chkAtivo.checked,
-      whatsapp_instancias: Array.from(state.whatsSelected)
+      whatsapp_instancias: Array.from(state.whatsSelected),
+
+      // ✅ expediente padrão do depto
+      hora_login_inicio_padrao: hi || null,
+      hora_login_fim_padrao: hf || null
     };
 
     if (btnSalva) btnSalva.disabled = true;
@@ -1309,6 +1365,10 @@
     pathPrevWrap = $('#path-preview');
     pathPrevCode = $('#path-preview-code');
     toastEl  = $('#toast');
+
+    // ✅ Expediente padrão refs
+    inpExpIniPadrao = $('#d-exp-ini');
+    inpExpFimPadrao = $('#d-exp-fim');
 
     // Whats refs
     whatsBtn    = $('#whats-btn');

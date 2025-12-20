@@ -1,4 +1,6 @@
+# backend/routers/chatbot_config.py
 from __future__ import annotations
+
 from typing import Any, Dict, Optional
 from datetime import time as dtime
 import os
@@ -35,17 +37,14 @@ def _trace(e: Exception) -> str:
 
 
 # ========= helpers (gerais) =========
-def _exclusive_server_guard(cfg: Dict[str, Any]) -> None:
-    f = cfg.setdefault("features", {})
-    au = f.setdefault("auto_messages", {})
-    dp = f.setdefault("auto_messages_departments", {})
-
-    if bool(au.get("enabled")) and bool(dp.get("enabled")):
-        # prioridade: auto_messages
-        dp["enabled"] = False
-
-
 def _prune_for_storage(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normaliza e enxuga o JSON que vai pro banco em chatbot_configs.config
+
+    ✅ Importante:
+    - Mantém textos (welcome/off/menu) mesmo se disabled, pra não perder.
+    - Mantém items de departamentos (enabled/label/keywords/text).
+    """
     data: Dict[str, Any] = {}
 
     # ativo
@@ -57,52 +56,107 @@ def _prune_for_storage(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     # ===== auto_messages (simples) =====
     am = f_in.get("auto_messages") or {}
-    if bool(am.get("enabled")):
-        am_store: Dict[str, Any] = {"enabled": True}
+    if isinstance(am, dict) and (("enabled" in am) or ("welcome" in am) or ("off_hours" in am) or am):
+        am_store: Dict[str, Any] = {"enabled": bool(am.get("enabled", False))}
 
-        if isinstance(am.get("welcome"), dict) and am["welcome"].get("enabled") is True:
-            w = am["welcome"]
-            am_store["welcome"] = {
-                k: w[k] for k in ["enabled", "text", "start", "end"] if k in w
+        # welcome
+        if isinstance(am.get("welcome"), dict):
+            w = am["welcome"] or {}
+            w_store: Dict[str, Any] = {
+                "enabled": bool(w.get("enabled", False)),
             }
+            if "text" in w:
+                w_store["text"] = str(w.get("text") or "")
+            if "start" in w:
+                w_store["start"] = str(w.get("start") or "")
+            if "end" in w:
+                w_store["end"] = str(w.get("end") or "")
+            am_store["welcome"] = w_store
 
-        if isinstance(am.get("off_hours"), dict) and am["off_hours"].get("enabled") is True:
-            o = am["off_hours"]
-            am_store["off_hours"] = {
-                k: o[k] for k in ["enabled", "text", "start", "end"] if k in o
+        # off_hours
+        if isinstance(am.get("off_hours"), dict):
+            o = am["off_hours"] or {}
+            o_store: Dict[str, Any] = {
+                "enabled": bool(o.get("enabled", False)),
             }
+            if "text" in o:
+                o_store["text"] = str(o.get("text") or "")
+            if "start" in o:
+                o_store["start"] = str(o.get("start") or "")
+            if "end" in o:
+                o_store["end"] = str(o.get("end") or "")
+            am_store["off_hours"] = o_store
+
+        # timezone opcional dentro do auto_messages
+        if "timezone" in am:
+            am_store["timezone"] = str(am.get("timezone") or "")
 
         features["auto_messages"] = am_store
 
-    # ===== auto_messages_departments (ramal) =====
+    # ===== auto_messages_departments (triagem/ramal) =====
     ad = f_in.get("auto_messages_departments") or {}
-    ad_enabled = bool(ad.get("enabled"))
-    if ad_enabled:
-        ad_store: Dict[str, Any] = {"enabled": True}
+    if isinstance(ad, dict) and (("enabled" in ad) or ("welcome" in ad) or ("items" in ad) or ad):
+        ad_store: Dict[str, Any] = {"enabled": bool(ad.get("enabled", False))}
 
-        # bloco de boas-vindas dos departamentos
-        if isinstance(ad.get("welcome"), dict) and ad["welcome"].get("enabled") is True:
-            w = ad["welcome"]
-            ad_store["welcome"] = {
-                k: w[k] for k in ["enabled", "text", "start", "end"] if k in w
+        # welcome (menu/abertura dos departamentos)
+        if isinstance(ad.get("welcome"), dict):
+            w = ad["welcome"] or {}
+            w_store: Dict[str, Any] = {
+                "enabled": bool(w.get("enabled", False)),
             }
+            if "text" in w:
+                w_store["text"] = str(w.get("text") or "")
+            if "start" in w:
+                w_store["start"] = str(w.get("start") or "")
+            if "end" in w:
+                w_store["end"] = str(w.get("end") or "")
+            ad_store["welcome"] = w_store
 
-        # textos por departamento (ramais)
-        if "items" in ad and isinstance(ad["items"], dict):
+        # itens por departamento
+        # formato sugerido:
+        # items: {
+        #   "12": {"enabled": true, "label":"Financeiro", "keywords":["fin","financeiro"], "text":"..."},
+        #   "13": {"enabled": true}
+        # }
+        items_in = ad.get("items")
+        if isinstance(items_in, dict):
             items_out: Dict[str, Any] = {}
-            for did, item in ad["items"].items():
+            for did, item in items_in.items():
                 if not isinstance(item, dict):
                     continue
+                did_s = str(did)
+
                 tmp: Dict[str, Any] = {}
                 if "enabled" in item:
-                    tmp["enabled"] = bool(item["enabled"])
-                if "text" in item and str(item["text"]).strip():
-                    tmp["text"] = str(item["text"])
+                    tmp["enabled"] = bool(item.get("enabled"))
+                if "label" in item:
+                    tmp["label"] = str(item.get("label") or "")
+                if "text" in item:
+                    tmp["text"] = str(item.get("text") or "")
+                if "keywords" in item:
+                    kws = item.get("keywords")
+                    if isinstance(kws, list):
+                        tmp["keywords"] = [str(x).strip() for x in kws if str(x).strip()]
+                    elif isinstance(kws, str):
+                        # aceita "fin, financeiro, cobrança"
+                        tmp["keywords"] = [s.strip() for s in kws.split(",") if s.strip()]
+
+                # só salva se tiver algo útil
                 if tmp:
-                    items_out[did] = tmp
+                    items_out[did_s] = tmp
 
             if items_out:
                 ad_store["items"] = items_out
+
+        # controles opcionais (triagem)
+        # ex: max_attempts, fallback_text
+        if "max_attempts" in ad:
+            try:
+                ad_store["max_attempts"] = int(ad.get("max_attempts") or 0)
+            except Exception:
+                pass
+        if "fallback_text" in ad:
+            ad_store["fallback_text"] = str(ad.get("fallback_text") or "")
 
         features["auto_messages_departments"] = ad_store
 
@@ -110,9 +164,9 @@ def _prune_for_storage(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if features:
         data["features"] = features
 
-    # (opcional) se você tiver um campo "setores" separado
-    if ad_enabled and "setores" in cfg:
-        data["setores"] = cfg["setores"]
+    # timezone no topo (se você usar isso no front)
+    if "timezone" in cfg:
+        data["timezone"] = str(cfg.get("timezone") or "")
 
     return data
 
@@ -149,10 +203,16 @@ def _parse_hhmm(val: Optional[str]) -> Optional[dtime]:
 
 
 def _tz_from_config(cfg: Dict[str, Any]) -> Optional[str]:
-    tz = cfg.get("timezone") or (
-        cfg.get("features", {}).get("auto_messages", {}) or {}
-    ).get("timezone")
-    return str(tz) if tz else None
+    # aceita timezone em dois lugares:
+    # 1) topo: cfg.timezone
+    # 2) cfg.features.auto_messages.timezone
+    tz = cfg.get("timezone")
+    if tz:
+        return str(tz)
+
+    am = (cfg.get("features", {}) or {}).get("auto_messages", {}) or {}
+    tz2 = am.get("timezone")
+    return str(tz2) if tz2 else None
 
 
 def _extract_auto_fields(cfg_in: Dict[str, Any]) -> dict:
@@ -160,28 +220,29 @@ def _extract_auto_fields(cfg_in: Dict[str, Any]) -> dict:
     am = features.get("auto_messages", {}) or {}
     w = am.get("welcome", {}) or {}
     o = am.get("off_hours", {}) or {}
+
     return {
         "tz": _tz_from_config(cfg_in),
-        "welcome_enabled": bool(w.get("enabled", False)),
-        "welcome_start": _parse_hhmm(w.get("start")),
-        "welcome_end": _parse_hhmm(w.get("end")),
-        "off_enabled": bool(o.get("enabled", False)),
-        "off_start": _parse_hhmm(o.get("start")),
-        "off_end": _parse_hhmm(o.get("end")),
+        "welcome_enabled": bool((w or {}).get("enabled", False)),
+        "welcome_start": _parse_hhmm((w or {}).get("start")),
+        "welcome_end": _parse_hhmm((w or {}).get("end")),
+        "off_enabled": bool((o or {}).get("enabled", False)),
+        "off_start": _parse_hhmm((o or {}).get("start")),
+        "off_end": _parse_hhmm((o or {}).get("end")),
     }
 
 
 def _apply_columns_from_config(row: models.ChatbotConfig, cfg_in: Dict[str, Any]) -> None:
     """
-    - Se seção ON e horário inválido: preenche fallback seguro.
-    - Se seção OFF: zera horários (None).
+    Preenche colunas auxiliares (tz + janelas), com fallback seguro.
     """
     fields = _extract_auto_fields(cfg_in)
 
-    row.tz = fields["tz"]  # se a coluna for NOT NULL, ajuste para fallback fixo aqui.
+    # tz NUNCA NULL (coluna é NOT NULL no seu model)
+    row.tz = (fields["tz"] or getattr(row, "tz", None) or "America/Sao_Paulo")
 
     # welcome
-    row.welcome_enabled = fields["welcome_enabled"]
+    row.welcome_enabled = bool(fields["welcome_enabled"])
     if row.welcome_enabled:
         row.welcome_start = fields["welcome_start"] or dtime(8, 0)
         row.welcome_end = fields["welcome_end"] or dtime(18, 0)
@@ -190,7 +251,7 @@ def _apply_columns_from_config(row: models.ChatbotConfig, cfg_in: Dict[str, Any]
         row.welcome_end = None
 
     # off-hours
-    row.off_enabled = fields["off_enabled"]
+    row.off_enabled = bool(fields["off_enabled"])
     if row.off_enabled:
         row.off_start = fields["off_start"] or dtime(18, 0)
         row.off_end = fields["off_end"] or dtime(8, 0)
@@ -226,9 +287,7 @@ def get_config(
         .first()
     )
     if not inst:
-        raise HTTPException(
-            status_code=404, detail="Instância não encontrada para esta empresa"
-        )
+        raise HTTPException(status_code=404, detail="Instância não encontrada para esta empresa")
 
     # config atual
     row = _safe_select_chatbot_config(db, empresa_id, instancia_id)
@@ -246,8 +305,7 @@ def get_config(
             .join(
                 models.DepartamentoInstancia,
                 and_(
-                    models.DepartamentoInstancia.departamento_id
-                    == models.Departamento.id,
+                    models.DepartamentoInstancia.departamento_id == models.Departamento.id,
                     models.DepartamentoInstancia.empresa_id == empresa_id,
                     models.DepartamentoInstancia.instancia_id == instancia_id,
                 ),
@@ -284,6 +342,7 @@ def get_config(
     return {
         "empresa_id": empresa_id,
         "instancia_id": instancia_id,
+        "instancia_nome": inst.instance_name,
         "empresa_nome": empresa_nome,
         "departamentos": departamentos,
         "config": cfg_raw or {},
@@ -319,9 +378,7 @@ def put_config(
         .first()
     )
     if not inst:
-        raise HTTPException(
-            status_code=404, detail="Instância não encontrada para esta empresa"
-        )
+        raise HTTPException(status_code=404, detail="Instância não encontrada para esta empresa")
 
     if not isinstance(payload, dict) or "config" not in payload:
         raise HTTPException(status_code=400, detail="Envie { config: {...} }")
@@ -330,17 +387,17 @@ def put_config(
     if not isinstance(cfg_in, dict):
         raise HTTPException(status_code=400, detail="Campo 'config' inválido")
 
-    # exclusividade
-    _exclusive_server_guard(cfg_in)
-    # prune
+    # prune (normaliza/limpa)
     to_store = _prune_for_storage(cfg_in)
 
     row = _safe_select_chatbot_config(db, empresa_id, instancia_id)
     creating = row is None
+
     if creating:
         row = models.ChatbotConfig(
             empresa_id=empresa_id,
             instancia_id=instancia_id,
+            instancia_nome=inst.instance_name,  # ✅ espelha
             config=to_store,
             ativo=bool(cfg_in.get("ativo", True)),
         )
@@ -349,6 +406,10 @@ def put_config(
     else:
         row.config = to_store
         row.ativo = bool(cfg_in.get("ativo", row.ativo))
+
+        # ✅ mantém instancia_nome atualizado
+        row.instancia_nome = inst.instance_name
+
         _apply_columns_from_config(row, cfg_in)
 
     try:
@@ -370,27 +431,15 @@ def put_config(
         )
     except Exception as e:
         db.rollback()
-        logger.exception(
-            "PUT config error emp=%s inst=%s\n%s",
-            empresa_id,
-            instancia_id,
-            _trace(e),
-        )
-        raise HTTPException(
-            status_code=500, detail={"message": "Erro inesperado", "error": str(e)}
-        )
+        logger.exception("PUT config error emp=%s inst=%s\n%s", empresa_id, instancia_id, _trace(e))
+        raise HTTPException(status_code=500, detail={"message": "Erro inesperado", "error": str(e)})
 
     try:
         db.refresh(row)
     except Exception:
         pass
 
-    logger.info(
-        "PUT chatbot/config OK emp=%s inst=%s creating=%s",
-        empresa_id,
-        instancia_id,
-        creating,
-    )
+    logger.info("PUT chatbot/config OK emp=%s inst=%s creating=%s", empresa_id, instancia_id, creating)
     return {
         "empresa_id": empresa_id,
         "instancia_id": instancia_id,
