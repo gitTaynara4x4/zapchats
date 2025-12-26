@@ -5,7 +5,7 @@ from enum import StrEnum, auto
 from typing import Callable, Awaitable, Any, Iterable
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func, String
 from sqlalchemy.exc import IntegrityError  # ← NEW
 from backend.database import SessionLocal
 from backend import models
@@ -681,58 +681,45 @@ _HAS_MSG_ATD_FIELD = _mensagem_tem_campo_atendimento()
 def _get_or_open_atendimento(
     db: Session,
     *,
-    empresa_id: int,        # continua vindo no parâmetro
+    empresa_id: int,
     instancia_id: int,
     cliente_id: int,
     direcao: str,           # 'entrada' | 'saida'
     ts_dt: datetime | None = None,
     operador_id: int | None = None,
 ):
-    """
-    Busca um atendimento aberto (status != RESOLVIDO) para (cliente_id, instancia_id).
-    Se não existir, cria um novo. Usa o Enum StatusAtendimento diretamente.
-
-    ✅ IMPORTANTE:
-      - Só passa empresa_id para models.Atendimento se o modelo realmente tiver esse atributo.
-        Isso evita o erro: 'empresa_id' is an invalid keyword argument for Atendimento.
-    """
     ts_dt = ts_dt or _now_utc()
 
-    # monta query base
+    resolvido_tok = _status_token(StatusAtendimento.RESOLVIDO) or "resolvido"
+    em_atd_tok    = _status_token(StatusAtendimento.EM_ATENDIMENTO) or "em_atendimento"
+    novo_tok      = _status_token(StatusAtendimento.NOVO) or "novo"
+
+    # pega atendimento aberto: status != resolvido (comparando em lower pra aguentar legado)
     q = (
         db.query(models.Atendimento)
         .filter(
             models.Atendimento.cliente_id == cliente_id,
             models.Atendimento.instancia_id == instancia_id,
-            models.Atendimento.status != StatusAtendimento.RESOLVIDO,
+            func.lower(models.Atendimento.status.cast(String)) != resolvido_tok,
         )
     )
 
-    # se o modelo tiver empresa_id, filtra também por empresa
     if hasattr(models.Atendimento, "empresa_id"):
         q = q.filter(models.Atendimento.empresa_id == empresa_id)
 
     q = q.order_by(models.Atendimento.criado_em.desc())
     a = q.first()
 
-    # ===== NÃO EXISTE ATENDIMENTO ABERTO → CRIA =====
     if not a:
-        status_ini = (
-            StatusAtendimento.EM_ATENDIMENTO
-            if direcao == "saida"
-            else StatusAtendimento.NOVO
-        )
+        status_ini_tok = em_atd_tok if direcao == "saida" else novo_tok
 
-        # monta kwargs de forma segura
         base_kwargs: dict[str, Any] = {
             "cliente_id": cliente_id,
             "instancia_id": instancia_id,
             "operador_id": (operador_id if direcao == "saida" else None),
-            "status": status_ini,
+            "status": status_ini_tok,   # ✅ SEMPRE token minúsculo
             "criado_em": ts_dt,
         }
-
-        # 🔹 Só adiciona empresa_id se o modelo tiver esse atributo
         if hasattr(models.Atendimento, "empresa_id"):
             base_kwargs["empresa_id"] = empresa_id
 
@@ -742,31 +729,24 @@ def _get_or_open_atendimento(
         try:
             db.flush()
         except IntegrityError:
-            # Corrida: alguém criou entre o SELECT e o INSERT
             db.rollback()
             a = q.first()
             if not a:
-                # tenta de novo com os mesmos kwargs seguros
                 a = models.Atendimento(**base_kwargs)
                 db.add(a)
                 db.flush()
 
-    # ===== AJUSTES EM MENSAGEM DE SAÍDA =====
+    # saída força em_atendimento (também em token minúsculo)
     if direcao == "saida":
         try:
-            # se não estiver EM_ATENDIMENTO, força
-            if getattr(a, "status", None) != StatusAtendimento.EM_ATENDIMENTO:
-                a.status = StatusAtendimento.EM_ATENDIMENTO
-
-            # se veio operador_id e ainda não tem operador definido, seta
+            if _status_token(getattr(a, "status", None)) != em_atd_tok:
+                a.status = em_atd_tok
             if operador_id and not getattr(a, "operador_id", None):
                 a.operador_id = operador_id
         except Exception:
-            # não deixa quebrar o fluxo todo por qualquer coisa aqui
             pass
 
     return a
-
 
 
 def _status_token(val) -> str | None:

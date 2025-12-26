@@ -692,7 +692,25 @@
       chip.title=u.email || u.nome || '';
       var av=getAvatar();
       if(av){
-        img.src=av;
+        // Cache-buster (evita ficar "preso" na foto antiga)
+        var v = (function(){
+          try{ return localStorage.getItem('usuario_avatar_v')||''; }catch{ return ''; }
+        })();
+        var src = av;
+        if(v){
+          src = av + (String(av).includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(v);
+        }
+        img.onerror = function(){
+          try{
+            // se a URL falhar, volta pro ícone e limpa a chave
+            localStorage.removeItem('usuario_avatar');
+            localStorage.removeItem('avatar_url');
+          }catch{}
+          img.removeAttribute('src');
+          img.style.display='none';
+          icn.style.display='';
+        };
+        img.src=src;
         img.style.display='block';
         icn.style.display='none';
       }else{
@@ -742,8 +760,14 @@
       nomeInput.value=nome;
       emailInput.value=email;
       deptInput.value=dept;
-      var av=localStorage.getItem('usuario_avatar')||'';
-      if(av) preview.src=av; else preview.removeAttribute('src');
+      var av=(localStorage.getItem('usuario_avatar')||localStorage.getItem('avatar_url')||'');
+      var v = localStorage.getItem('usuario_avatar_v')||'';
+      if(av){
+        var bust = av + (String(av).includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(v || Date.now());
+        preview.src=bust;
+      }else{
+        preview.removeAttribute('src');
+      }
       msg.textContent='';
       modal.classList.add('is-open');
       modal.setAttribute('aria-hidden','false');
@@ -784,14 +808,130 @@
     }
     async function saveProfile(){
       msg.textContent='Salvando...';
+      if(saveBtn) saveBtn.disabled = true;
+
+      function getCookie(name){
+        try{
+          var m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/[-.$?*|{}()\[\]\\/\+^]/g,'\$&') + '=([^;]*)'));
+          return m ? decodeURIComponent(m[1]) : '';
+        }catch{ return ''; }
+      }
+
+      async function uploadAvatarIfAny(){
+        var f = fileInput && fileInput.files && fileInput.files[0];
+        if(!f) return '';
+
+        msg.textContent='Enviando foto...';
+
+        // monta headers (CSRF opcional + Bearer opcional)
+        var headers = {};
+        var csrf = getCookie('csrf_token') || getCookie('csrf') || getCookie('XSRF-TOKEN');
+        if(csrf) headers['X-CSRF-Token'] = csrf;
+
+        try{
+          var tok = (localStorage.getItem('access_token')||localStorage.getItem('token')||'').trim();
+          if(tok && tok.split('.').length===3){
+            headers['Authorization'] = 'Bearer ' + tok;
+          }
+        }catch{}
+
+        // tenta alguns endpoints comuns (o seu deve ser o primeiro; os outros são fallback)
+        var endpoints = [
+          '/api/usuarios/me/avatar',
+          '/api/usuarios/avatar',
+          '/api/usuarios/me/upload-avatar',
+          '/api/usuarios/upload-avatar'
+        ];
+
+        var lastErr = null;
+
+        for(var i=0;i<endpoints.length;i++){
+          var url = endpoints[i];
+
+          // FormData novo por tentativa (mais compatível)
+          var fd = new FormData();
+          fd.append('file', f, f.name || 'avatar.jpg');
+
+          try{
+            var res = await fetch(url, {
+              method:'POST',
+              body: fd,
+              credentials:'include',
+              headers: headers
+            });
+
+            if(res.status === 404){
+              continue; // tenta o próximo
+            }
+
+            var data = null;
+            try{ data = await res.json(); }catch{}
+
+            if(!res.ok){
+              var detail = (data && (data.detail || data.message)) ? (data.detail || data.message) : '';
+              throw new Error(detail || ('HTTP ' + res.status));
+            }
+
+            var avatarUrl = (data && (data.avatar_url || data.avatarUrl || data.url || data.path || data.avatar)) || '';
+            if(!avatarUrl){
+              // se o backend não retorna a url, não tem como atualizar a UI sem outro GET
+              return '';
+            }
+
+            // persiste e força reload da imagem
+            var v = Date.now();
+            try{
+              localStorage.setItem('usuario_avatar', avatarUrl);
+              localStorage.setItem('avatar_url', avatarUrl);
+              localStorage.setItem('usuario_avatar_v', String(v));
+            }catch{}
+
+            var bust = avatarUrl + (String(avatarUrl).includes('?') ? '&' : '?') + 'v=' + v;
+
+            // atualiza preview do modal + chip do topo imediatamente (storage event não roda na mesma aba)
+            try{ preview.src = bust; }catch{}
+            try{
+              var topImg = document.getElementById('userAvatar');
+              var topIcn = document.getElementById('userIcon');
+              if(topImg && topIcn){
+                topImg.src = bust;
+                topImg.style.display = 'block';
+                topIcn.style.display = 'none';
+              }
+            }catch{}
+
+            // limpa input
+            try{ fileInput.value = ''; }catch{}
+
+            return avatarUrl;
+          }catch(e){
+            lastErr = e;
+          }
+        }
+
+        throw lastErr || new Error('Falha ao enviar foto (endpoint não encontrado).');
+      }
+
       try{
         var nome=(nomeInput.value||'').trim();
         var dept=(deptInput.value||'').trim();
-        if(nome) localStorage.setItem('nome', nome);
-        if(dept) localStorage.setItem('departamento', dept);
-      }catch{}
-      msg.textContent='Informações salvas.';
-      setTimeout(closeModal, 600);
+
+        try{
+          // salva nome/depto (aceita limpar também)
+          if(nome) localStorage.setItem('nome', nome); else localStorage.removeItem('nome');
+          if(dept) localStorage.setItem('departamento', dept); else localStorage.removeItem('departamento');
+        }catch{}
+
+        await uploadAvatarIfAny();
+
+        msg.textContent='Salvo!';
+        setTimeout(closeModal, 650);
+      }catch(err){
+        var m = (err && err.message) ? err.message : String(err||'Erro ao salvar');
+        msg.textContent='Erro: ' + m;
+      }finally{
+        if(saveBtn) saveBtn.disabled = false;
+      }
     }
     if(saveBtn) saveBtn.addEventListener('click', function(e){
       e.preventDefault();

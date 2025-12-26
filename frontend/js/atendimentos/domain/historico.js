@@ -1,3 +1,4 @@
+// historico.js
 // Histórico com paginação “puxar pra cima” + ACK único + persistência LS + merge de ACK
 // ⚠️ Agora o elemento #historico é buscado *dinamicamente* (H()) em todas as funções.
 
@@ -123,8 +124,8 @@ if (!window.salvarCache) {
         groups.get(key).items.push(m);
       }
       groups.forEach(({inst, items})=>{
-        try{ 
-          primeWith(inst, cid, items, null); 
+        try{
+          primeWith(inst, cid, items, null);
           dbg('hydrateHistFromLocalStorage: primeWith', { inst, cid, count: items.length });
         }catch(e){
           dbgError('hydrateHistFromLocalStorage: erro no primeWith', { inst, cid, e });
@@ -175,14 +176,9 @@ function _sanitizeBase(name){
 function deriveFileName(a){
   const url = a.url || a.link || a.path || '';
   const baseRaw = a.filename || a.name || a.nome_original || _basenameFromUrl(url) || 'arquivo';
-  const base = _sanitizeBase(baseRaw.replace(/\.[a-z0-9]{1,6}$/i,'')); 
+  const base = _sanitizeBase(baseRaw.replace(/\.[a-z0-9]{1,6}$/i,''));
   const ext  = _guessExt({ mimetype:(a.mimetype||a.mime||''), filename:(a.filename||a.name||''), url });
   return { fileName: `${base}.${ext}`, extUp: ext.toUpperCase(), extLower: String(ext).toLowerCase() };
-}
-function buildCanonUrlByMsgId(msg_id){
-  const url = `/api/atendimento/midias/msg/${encodeURIComponent(msg_id)}?empresa_id=${EMPRESA_ID}`;
-  dbg('buildCanonUrlByMsgId', { msg_id, url });
-  return url;
 }
 
 /* ========= instancia ativa (para chavear hist-cache) ========= */
@@ -202,6 +198,32 @@ function getInstanciaForFetch() {
     dbgError('getInstanciaForFetch: erro', e);
     return null;
   }
+}
+
+/* ========= query de instância (para requests) ========= */
+function getInstQuery(){
+  const inst = getInstanciaForFetch();
+  if (!inst) {
+    dbg('getInstQuery: sem inst');
+    return '';
+  }
+  const n = Number(inst);
+  const q = Number.isFinite(n) ? `&instancia_id=${n}` : `&instance=${encodeURIComponent(String(inst))}`;
+  dbg('getInstQuery', { inst, query: q });
+  return q;
+}
+
+/* ========= URLs canônicas ========= */
+function buildCanonUrlByMsgId(msg_id){
+  // ✅ FIX: inclui instância na query (multi-instância)
+  const url = `/api/atendimento/midias/msg/${encodeURIComponent(msg_id)}?empresa_id=${EMPRESA_ID}${getInstQuery()}`;
+  dbg('buildCanonUrlByMsgId', { msg_id, url });
+  return url;
+}
+function buildIdUrlByMidiaId(id){
+  // ✅ FIX: inclui instância na query (multi-instância)
+  const url = `/api/atendimento/midias/${encodeURIComponent(id)}?empresa_id=${EMPRESA_ID}${getInstQuery()}`;
+  return url;
 }
 
 /* ========= salvar cache unificado ========= */
@@ -291,6 +313,42 @@ function attachMediaDebugHandlers(root){
   }
 }
 
+/* ✅ fallback real pra img/audio/video quando a URL atual falhar */
+function attachMediaFallbackHandlers(root){
+  if (!root) return;
+  try {
+    root.querySelectorAll('img[data-alt],audio[data-alt],video[data-alt]').forEach(el=>{
+      if (el.__histFbBound) return;
+      el.__histFbBound = true;
+
+      el.addEventListener('error', () => {
+        try {
+          const list = String(el.dataset.alt || '').split('|').filter(Boolean);
+          if (!list.length) return;
+
+          const next = list.shift();
+          el.dataset.alt = list.join('|');
+
+          if (el.tagName === 'IMG') {
+            el.src = next;
+            return;
+          }
+
+          if (el.tagName === 'AUDIO' || el.tagName === 'VIDEO') {
+            el.src = next;
+            try { el.load(); } catch {}
+            return;
+          }
+        } catch(e) {
+          dbgError('attachMediaFallbackHandlers: erro', e);
+        }
+      }, { passive:true });
+    });
+  } catch(e) {
+    dbgError('attachMediaFallbackHandlers: erro geral', e);
+  }
+}
+
 export function criarHTMLDaMensagem(m){
   const isSaida = (m.tipo === 'saida') || (m.from_me === true) || (m.origem === 'atendente');
   const texto = String(m.conteudo ?? m.mensagem ?? m.texto ?? '').trim();
@@ -309,10 +367,12 @@ export function criarHTMLDaMensagem(m){
 
   function resolveUrlsForMedia(m, a){
     const MSG_CANON = m?.msg_id ? buildCanonUrlByMsgId(m.msg_id) : null;
-    const idUrl     = a?.id ? `/api/atendimento/midias/${encodeURIComponent(a.id)}?empresa_id=${EMPRESA_ID}` : '';
+    const idUrl     = a?.id ? buildIdUrlByMidiaId(a.id) : '';
     const primary   = MSG_CANON || a?.url_api || a?.url || a?.link || a?.path || idUrl;
-    const alts      = [];
+
+    const alts = [];
     if (MSG_CANON) [a?.url_api, a?.url, a?.link, a?.path, idUrl].forEach(u=>u && alts.push(u));
+
     const s=new Set();
     const urls = [primary, ...alts].filter(u=>u && !s.has(u) && s.add(u));
 
@@ -340,17 +400,18 @@ export function criarHTMLDaMensagem(m){
                 <img src="${url}" data-alt="${alts.join('|')}" alt="${escapeHtml(name)}" loading="lazy">
               </a>`;
     }
+
+    // ✅ vídeo com fallback por data-alt (em vez de múltiplos <source>)
     if (tipo.includes('vídeo') || tipo.includes('video') || mime.startsWith('video/')){
-      return `<video class="msg-media-video" controls preload="metadata">
-                ${urls.map(u=>`<source src="${u}">`).join('')}
-              </video>`;
+      return `<video class="msg-media-video" controls preload="metadata" src="${url}" data-alt="${alts.join('|')}"></video>`;
     }
+
+    // ✅ áudio com fallback por data-alt (em vez de múltiplos <source>)
     if (tipo.includes('áudio') || tipo.includes('audio') || tipo.includes('ptt') || mime.startsWith('audio/')){
       dbg('renderAnexo AUDIO', { msg_id: m?.msg_id || null, urls });
-      return `<audio controls preload="metadata" style="max-width:min(420px,70vw)">
-                ${urls.map(u=>`<source src="${u}">`).join('')}
-              </audio>`;
+      return `<audio controls preload="metadata" style="max-width:min(420px,70vw)" src="${url}" data-alt="${alts.join('|')}"></audio>`;
     }
+
     const { fileName, extUp } = deriveFileName({ mimetype: mime, filename: name, url });
     const sizeTxt = _humanSize(a.size || a.bytes || a.length) || '';
     return `<div class="doc-card">
@@ -373,13 +434,14 @@ export function criarHTMLDaMensagem(m){
     const src = buildCanonUrlByMsgId(m.msg_id);
     const kind = texto.replace(/^\[|\].*$/g,'').toLowerCase();
     dbg('MARKER media fallback', { msg_id: m.msg_id, kind, src });
+
     if (kind.startsWith('imagem')) {
       mediaHtml = `<a class="msg-media-img" href="${src}" target="_blank" rel="noopener"><img src="${src}" alt="imagem" loading="lazy"></a>`;
     } else if (kind.startsWith('vídeo') || kind.startsWith('video')) {
-      mediaHtml = `<video class="msg-media-video" controls preload="metadata"><source src="${src}"></video>`;
+      mediaHtml = `<video class="msg-media-video" controls preload="metadata" src="${src}"></video>`;
     } else if (kind.startsWith('áudio') || kind.startsWith('audio')) {
       dbg('MARKER AUDIO', { msg_id: m.msg_id, src });
-      mediaHtml = `<audio controls preload="metadata" style="max-width:min(420px,70vw)"><source src="${src}"></audio>`;
+      mediaHtml = `<audio controls preload="metadata" style="max-width:min(420px,70vw)" src="${src}"></audio>`;
     } else if (kind.startsWith('figurinha')) {
       mediaHtml = `<img class="msg-sticker" src="${src}" alt="figurinha" loading="lazy">`;
     } else {
@@ -483,8 +545,9 @@ export function renderHistoricoDoCache(clienteId, append=false){
     hist.scrollTop = hist.scrollHeight;
   }
 
-  // LOG de erros de mídia (áudio/imagem/vídeo) depois que o DOM foi montado
+  // LOG + fallback de mídia depois que o DOM foi montado
   attachMediaDebugHandlers(hist);
+  attachMediaFallbackHandlers(hist);
 
   try{ window.reconcilePendingAcks?.(); }catch(e){
     dbgError('renderHistoricoDoCache: reconcilePendingAcks erro', e);
@@ -516,22 +579,9 @@ function setOffset(id, val){
   try { window.persist?.(); } catch {}
 }
 
-/* ========= FETCH helpers ========= */
-function getInstQuery(){
-  const inst = getInstanciaForFetch();
-  if (!inst) {
-    dbg('getInstQuery: sem inst');
-    return '';
-  }
-  const n = Number(inst);
-  const q = Number.isFinite(n) ? `&instancia_id=${n}` : `&instance=${encodeURIComponent(String(inst))}`;
-  dbg('getInstQuery', { inst, query: q });
-  return q;
-}
-
 /* ========= abrir histórico (sempre sincroniza do servidor) ========= */
 export async function abrirHistorico(id){
-  const hist = H(); 
+  const hist = H();
   if (!hist) {
     dbgError('abrirHistorico: sem #historico', { id });
     return false;
@@ -595,9 +645,9 @@ export async function abrirHistorico(id){
 
     renderHistoricoDoCache(cid, false);
 
-    try { 
+    try {
       dbg('abrirHistorico: syncPreviewFromCache');
-      window.syncPreviewFromCache?.(cid); 
+      window.syncPreviewFromCache?.(cid);
     } catch(e){
       dbgError('abrirHistorico: erro syncPreviewFromCache', e);
     }
@@ -647,20 +697,20 @@ export async function carregarMaisHistorico(id){
     const r = await fetch(url, { credentials: 'include' });
     dbg('carregarMaisHistorico: resposta HTTP', { status: r.status });
 
-    if (!r.ok) { 
-      hist.dataset.noMore='1'; 
+    if (!r.ok) {
+      hist.dataset.noMore='1';
       dbg('carregarMaisHistorico: !ok, marcando noMore', { id, status: r.status });
-      return false; 
+      return false;
     }
     const data = await r.json();
     const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
     const n = items.length;
     dbg('carregarMaisHistorico: itens recebidos', { id, n, offset: off });
 
-    if (!n){ 
-      hist.dataset.noMore='1'; 
+    if (!n){
+      hist.dataset.noMore='1';
       dbg('carregarMaisHistorico: n=0, noMore=1', { id });
-      return false; 
+      return false;
     }
 
     const beforeHeight = hist.scrollHeight;
@@ -686,9 +736,9 @@ export async function carregarMaisHistorico(id){
 
     setOffset(id, off + n);
 
-    try { 
+    try {
       dbg('carregarMaisHistorico: syncPreviewFromCache');
-      window.syncPreviewFromCache?.(Number(id)); 
+      window.syncPreviewFromCache?.(Number(id));
     } catch(e){
       dbgError('carregarMaisHistorico: erro syncPreviewFromCache', e);
     }
@@ -751,12 +801,12 @@ if (!window.syncPreviewFromCache) {
 
         if (convObj) {
           const rawTs =
-            convObj.hora ?? 
-            convObj.last_ts ?? 
-            convObj.ultima_ts ?? 
-            convObj.updated_at ?? 
-            convObj.last_message_at ?? 
-            convObj.timestamp ?? 
+            convObj.hora ??
+            convObj.last_ts ??
+            convObj.ultima_ts ??
+            convObj.updated_at ??
+            convObj.last_message_at ??
+            convObj.timestamp ??
             null;
 
           if (rawTs) {
@@ -867,8 +917,8 @@ if (!window.syncPreviewFromCache) {
         });
       }
     } catch (e) {
-      try { 
-        dbgError('[syncPreviewFromCache][erro]', e); 
+      try {
+        dbgError('[syncPreviewFromCache][erro]', e);
       } catch {}
     }
   };

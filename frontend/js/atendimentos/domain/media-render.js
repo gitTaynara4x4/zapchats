@@ -147,6 +147,7 @@
       });
     });
   }
+
   function initMediaFallbacks(root=document){
     root.querySelectorAll('img[data-alt]').forEach(img=>{
       if (img._fb) return; img._fb = true;
@@ -159,13 +160,25 @@
     });
   }
 
+  // ✅ inst query do sistema (instances.js)
+  function _instQ(){
+    try{
+      return (typeof window._instQuery === 'function') ? (window._instQuery() || '') : '';
+    }catch{
+      return '';
+    }
+  }
+
   // url canônica por msg_id
   function buildCanonUrlByMsgId(msg_id){
-    return `/api/atendimento/midias/msg/${encodeURIComponent(msg_id)}?empresa_id=${EMPRESA_ID}`;
+    // ✅ FIX: inclui instância na query (multi-instância)
+    return `/api/atendimento/midias/msg/${encodeURIComponent(msg_id)}?empresa_id=${EMPRESA_ID}${_instQ()}`;
   }
+
   function resolveUrlsForMedia(m, a){
     const MSG_CANON = m?.msg_id ? buildCanonUrlByMsgId(m.msg_id) : null;
-    const idUrl     = a?.id ? `/api/atendimento/midias/${encodeURIComponent(a.id)}?empresa_id=${EMPRESA_ID}` : '';
+    // ✅ FIX: inclui instância também no idUrl
+    const idUrl     = a?.id ? `/api/atendimento/midias/${encodeURIComponent(a.id)}?empresa_id=${EMPRESA_ID}${_instQ()}` : '';
     const primary   = MSG_CANON || a?.url_api || a?.url || a?.link || a?.path || idUrl;
     const alts      = [];
     if (MSG_CANON) [a?.url_api, a?.url, a?.link, a?.path, idUrl].forEach(u=>u && alts.push(u));
@@ -222,7 +235,7 @@
                 </video>`;
       }
 
-      // Áudio (inclui PTT)
+      // Áudio (inclui PTT) — player WPP com fallback automático por erro
       if (tipo.includes("áudio") || tipo.includes("audio") || tipo.includes("ptt") || mime.startsWith("audio/")){
         return `<div class="wa-audio" data-src="${urls.join('|')}">
                   <button class="play" aria-label="Tocar/Pausar"></button>
@@ -299,8 +312,8 @@
   }
 
   // exporta
-  window.initAudioPlayers    = initAudioPlayers;
-  window.initMediaFallbacks  = initMediaFallbacks;
-  window.buildCanonUrlByMsgId= buildCanonUrlByMsgId;
-  window.criarHTMLDaMensagem = criarHTMLDaMensagem;
+  window.initAudioPlayers     = initAudioPlayers;
+  window.initMediaFallbacks   = initMediaFallbacks;
+  window.buildCanonUrlByMsgId = buildCanonUrlByMsgId;
+  window.criarHTMLDaMensagem  = criarHTMLDaMensagem;
 })();

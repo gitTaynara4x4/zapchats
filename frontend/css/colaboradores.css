@@ -624,3 +624,24 @@ body[data-page="colaboradores"] ::-webkit-scrollbar-track{ background: transpare
   opacity:.65;
   cursor:not-allowed;
 }
+
+/* coluna avatar */
+.td-avatar{ width: 56px; }
+.avatar-mini{
+  width: 36px; height: 36px; border-radius: 9999px;
+  display: grid; place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border-hairline-strong);
+}
+.avatar-mini-img{ width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.avatar-mini-initials{ font-weight: 700; font-size: .85rem; color: #fff; }
+
+/* mobile: atualizar labels (agora tem Foto) */
+@media (max-width:720px){
+  tbody td:nth-child(1)::before{ content:"#"; }
+  tbody td:nth-child(2)::before{ content:"Foto"; }
+  tbody td:nth-child(3)::before{ content:"Nome"; }
+  tbody td:nth-child(4)::before{ content:"E-mail"; }
+  tbody td:nth-child(5)::before{ content:"Departamento"; }
+  tbody td:nth-child(6)::before{ content:"Ações"; }
+}

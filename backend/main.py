@@ -16,7 +16,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.exception_handlers import http_exception_handler as fastapi_http_exception_handler
-
+from backend.routers import chatbot_setores as chatbot_setores_router
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -890,7 +890,7 @@ app.include_router(chatbot_config_router.router)
 app.include_router(remove_instance_router, prefix="/api")
 app.include_router(internal_chat_router.router)
 app.include_router(clients_central_router)
-
+app.include_router(chatbot_setores_router.router)
 # =======================================
 # uploads públicos + arquivos estáticos
 # =======================================

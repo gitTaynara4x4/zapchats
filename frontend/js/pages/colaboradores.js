@@ -8,6 +8,9 @@
    + horário de expediente (hora_login_inicio / hora_login_fim) com validação HH:MM
    + 🔐 flag de empresa requer_token_login controlado na página de colaboradores
    + 🕘 herança de horário do departamento + toggle “Personalizar horário”
+   + ✅ FIX: depto padrão vindo como hora_login_inicio_padrao/fim_padrao
+   + ✅ FIX: quando colaborador tem setor_id (setor) mas horário está no departamento, faz fallback por nome
+   + ✅ NOVO: coluna "Foto" na lista (avatar mini com fallback de iniciais + cache local de thumbs)
 ) */
 (function ColaboradoresPage(){
   'use strict';
@@ -18,6 +21,12 @@
 
   const LS = localStorage;
   const EMPRESA_ID = Number(LS.getItem('empresa_id') || '') || null;
+
+  const normStr = (s)=> String(s||'')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
 
   // fetch autenticado (usa ZAuth se tiver)
   const authFetch = (url, opt={}) => {
@@ -94,7 +103,11 @@
 
     showErrors: false,
 
-    empresa: null   // 🔐 cache da empresa (inclui requer_token_login)
+    empresa: null,   // 🔐 cache da empresa (inclui requer_token_login)
+
+    // ✅ cache de avatar mini (blob URL) — evita re-fetch toda hora
+    avatarThumbCache: new Map(),   // id -> string|null (blob url) | null = sem avatar
+    avatarThumbInflight: new Map() // id -> Promise<string|null>
   };
 
   async function preloadPerms(){
@@ -304,10 +317,30 @@
   }
 
   // ====== Horário padrão do departamento (UI) ======
-  function getDeptHorarioById(setorId){
-    const s = state.setores.find(x => String(x.id) === String(setorId));
-    const ini = (s && (s.hora_login_inicio ?? s.hora_inicio ?? s.expediente_inicio ?? s.horario_inicio)) || '';
-    const fim = (s && (s.hora_login_fim    ?? s.hora_fim    ?? s.expediente_fim    ?? s.horario_fim)) || '';
+  function getDeptHorarioById(setorId, setorNome){
+    // tenta por ID (quando o id do colaborador bate com o id retornado em /api/departamentos)
+    let s = state.setores.find(x => String(x.id) === String(setorId));
+
+    // ✅ fallback por nome (quando colaborador guarda setor_id, mas o horário é do departamento)
+    if (!s && setorNome){
+      const alvo = normStr(setorNome);
+      s = state.setores.find(x => normStr(x?.nome) === alvo);
+    }
+
+    const ini = (s && (
+      s.hora_login_inicio_padrao ?? s.hora_login_inicio ??
+      s.hora_inicio ?? s.expediente_inicio ?? s.horario_inicio ??
+      s.inicio_expediente ?? s.hora_entrada ?? s.entrada ??
+      s.expediente?.inicio ?? s.horario?.inicio
+    )) || '';
+
+    const fim = (s && (
+      s.hora_login_fim_padrao ?? s.hora_login_fim ??
+      s.hora_fim ?? s.expediente_fim ?? s.horario_fim ??
+      s.fim_expediente ?? s.hora_saida ?? s.saida ??
+      s.expediente?.fim ?? s.horario?.fim
+    )) || '';
+
     return { ini: String(ini||''), fim: String(fim||''), has: !!(ini || fim), dept: s || null };
   }
 
@@ -315,7 +348,9 @@
     const el = document.getElementById('dept-exp-hint');
     if (!el) return;
 
-    const { ini, fim, has } = getDeptHorarioById(setorId);
+    const setorNome = opts.setorNome || '';
+    const { ini, fim, has } = getDeptHorarioById(setorId, setorNome);
+
     if (!has){
       el.style.display = 'none';
       el.innerHTML = '';
@@ -357,16 +392,17 @@
 
     const sel = document.getElementById('e-setor');
     const setorId = sel?.value || '';
+    const setorNome = sel?.options?.[sel.selectedIndex]?.text || '';
 
     // sempre atualiza o hint do depto com o estado atual
-    renderDeptHintBySetorId(setorId, { personalizar: on });
+    renderDeptHintBySetorId(setorId, { personalizar: on, setorNome });
 
     // se ligou “personalizar” e ainda tá vazio, pré-preenche do depto
     if (on){
       const eIni = document.getElementById('e-exp-ini');
       const eFim = document.getElementById('e-exp-fim');
       if (eIni && eFim && !String(eIni.value||'').trim() && !String(eFim.value||'').trim()){
-        const { ini, fim } = getDeptHorarioById(setorId);
+        const { ini, fim } = getDeptHorarioById(setorId, setorNome);
         if (ini) eIni.value = ini;
         if (fim) eFim.value = fim;
       }
@@ -566,8 +602,8 @@
 
   // ====== Coalesce helpers ======
   function coalescePhone(c){
-    return c.telefone ?? c.telefone_norm ?? c.phone ?? c.celular ?? c.whatsapp ?? c.fone
-        ?? c.usuario?.telefone ?? c.user?.phone ?? '';
+    return c?.telefone ?? c?.telefone_norm ?? c?.phone ?? c?.celular ?? c?.whatsapp ?? c?.fone
+        ?? c?.usuario?.telefone ?? c?.user?.phone ?? '';
   }
   function coalesceDeptId(c){
     if (!c) return null;
@@ -586,32 +622,32 @@
     );
   }
   function coalesceName(c){
-    return c.nome ?? c.nome_completo ?? c.display_name ?? c.full_name
-        ?? c.usuario?.nome ?? c.user?.name ?? '';
+    return c?.nome ?? c?.nome_completo ?? c?.display_name ?? c?.full_name
+        ?? c?.usuario?.nome ?? c?.user?.name ?? '';
   }
   function coalesceEmail(c){
-    return c.email ?? c.usuario?.email ?? c.user?.email ?? '';
+    return c?.email ?? c?.usuario?.email ?? c?.user?.email ?? '';
   }
   function coalesceCargo(c){
-    return c.cargo ?? c.funcao ?? c.usuario?.cargo ?? c.user?.job_title ?? '';
+    return c?.cargo ?? c?.funcao ?? c?.usuario?.cargo ?? c?.user?.job_title ?? '';
   }
   // Horário de expediente – tenta pegar de alguns nomes comuns
   function coalesceHorarioInicio(c){
-    return c.hora_login_inicio
-        ?? c.hora_inicio
-        ?? c.horario_inicio
-        ?? c.expediente_inicio
-        ?? c.inicio_expediente
-        ?? c.hora_entrada
+    return c?.hora_login_inicio
+        ?? c?.hora_inicio
+        ?? c?.horario_inicio
+        ?? c?.expediente_inicio
+        ?? c?.inicio_expediente
+        ?? c?.hora_entrada
         ?? null;
   }
   function coalesceHorarioFim(c){
-    return c.hora_login_fim
-        ?? c.hora_fim
-        ?? c.horario_fim
-        ?? c.expediente_fim
-        ?? c.fim_expediente
-        ?? c.hora_saida
+    return c?.hora_login_fim
+        ?? c?.hora_fim
+        ?? c?.horario_fim
+        ?? c?.expediente_fim
+        ?? c?.fim_expediente
+        ?? c?.hora_saida
         ?? null;
   }
 
@@ -656,13 +692,15 @@
           const getId   = (x)=> x?.id ?? x?.dep_id ?? x?.departamento_id ?? x?.setor_id ?? x?.value ?? x?.ID ?? x?.Id;
           const getName = (x)=> x?.nome ?? x?.name ?? x?.titulo ?? x?.label ?? x?.text ?? '—';
 
-          // 🕘 tenta capturar horário padrão do departamento
+          // 🕘 tenta capturar horário padrão do departamento (inclui *_padrao)
           const getIni = (x)=>
+            x?.hora_login_inicio_padrao ??
             x?.hora_login_inicio ?? x?.hora_inicio ?? x?.expediente_inicio ?? x?.horario_inicio ??
             x?.inicio_expediente ?? x?.hora_entrada ?? x?.entrada ??
             x?.expediente?.inicio ?? x?.horario?.inicio ?? null;
 
           const getFim = (x)=>
+            x?.hora_login_fim_padrao ??
             x?.hora_login_fim ?? x?.hora_fim ?? x?.expediente_fim ?? x?.horario_fim ??
             x?.fim_expediente ?? x?.hora_saida ?? x?.saida ??
             x?.expediente?.fim ?? x?.horario?.fim ?? null;
@@ -677,11 +715,17 @@
 
             if (id && !seen.has(id)){
               seen.add(id);
+              const ini = getIni(node);
+              const fim = getFim(node);
+
+              // Mantém compat: salva nos nomes "hora_login_inicio/fim", MAS também guarda *_padrao.
               out.push({
                 id,
                 nome,
-                hora_login_inicio: (getIni(node) != null) ? String(getIni(node)) : null,
-                hora_login_fim:    (getFim(node) != null) ? String(getFim(node)) : null
+                hora_login_inicio_padrao: (ini != null) ? String(ini) : null,
+                hora_login_fim_padrao:    (fim != null) ? String(fim) : null,
+                hora_login_inicio:        (ini != null) ? String(ini) : null,
+                hora_login_fim:           (fim != null) ? String(fim) : null
               });
             }
 
@@ -768,12 +812,130 @@
     }
   }
 
+  // ====== Avatar (mini da lista) ======
+  function revokeBlobURL(u){
+    try{
+      if (u && String(u).startsWith('blob:')) URL.revokeObjectURL(u);
+    }catch{}
+  }
+  function clearAvatarThumbCache(){
+    for (const v of state.avatarThumbCache.values()){
+      if (typeof v === 'string') revokeBlobURL(v);
+    }
+    state.avatarThumbCache.clear();
+    state.avatarThumbInflight.clear();
+  }
+  window.addEventListener('beforeunload', clearAvatarThumbCache);
+
+  async function fetchAvatarThumbURLFor(colab){
+    // cache por id (mesma página)
+    const id = Number(colab?.id || 0) || 0;
+    if (!id) return null;
+
+    if (state.avatarThumbCache.has(id)) {
+      return state.avatarThumbCache.get(id); // string|null
+    }
+    if (state.avatarThumbInflight.has(id)) {
+      return state.avatarThumbInflight.get(id);
+    }
+
+    const p = (async ()=>{
+      let url = null;
+
+      // tenta /colaboradores/{id}/avatar
+      try{
+        const r1 = await authFetch(withEmpresa(`/api/colaboradores/${id}/avatar`));
+        if (r1.ok && r1.status === 200){
+          const blob = await r1.blob();
+          url = URL.createObjectURL(blob);
+        }
+      }catch{}
+
+      // fallback /usuarios/{usuario_id}/avatar
+      if (!url && colab?.usuario_id){
+        try{
+          const r2 = await authFetch(withEmpresa(`/api/usuarios/${colab.usuario_id}/avatar`));
+          if (r2.ok && r2.status === 200){
+            const blob = await r2.blob();
+            url = URL.createObjectURL(blob);
+          }
+        }catch{}
+      }
+
+      state.avatarThumbCache.set(id, url || null);
+      return url || null;
+    })().finally(()=>{
+      state.avatarThumbInflight.delete(id);
+    });
+
+    state.avatarThumbInflight.set(id, p);
+    return p;
+  }
+
+  function mountMiniAvatarInto(td, colab){
+    if (!td) return;
+
+    const name = coalesceName(colab) || coalesceEmail(colab) || `#${colab?.id||''}`;
+    const wrap = document.createElement('div');
+    wrap.className = 'avatar-mini';
+    wrap.style.background = hashColor(String(name));
+
+    const span = document.createElement('span');
+    span.className = 'avatar-mini-initials';
+    span.textContent = initials(name);
+
+    const img = document.createElement('img');
+    img.className = 'avatar-mini-img';
+    img.alt = '';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.style.display = 'none';
+
+    wrap.appendChild(span);
+    wrap.appendChild(img);
+    td.innerHTML = '';
+    td.appendChild(wrap);
+
+    // carrega thumb em background
+    fetchAvatarThumbURLFor(colab).then((url)=>{
+      if (!td.isConnected) return;
+      if (!url) return;
+      img.src = url;
+      img.style.display = 'block';
+      span.style.display = 'none';
+    }).catch(()=>{ /* ignora */ });
+  }
+
   function renderLista(){
     const q = (state.filtroTexto||'').toLowerCase();
     const depId = String(state.filtroSetorId||'');
+
+    const depSelName = depId ? (state.setores.find(s => String(s.id)===depId)?.nome || '') : '';
+    const depSelNorm = depSelName ? normStr(depSelName) : '';
+
     const rows = state.colaboradores
-      .filter(c => !q || [c.nome,c.email,coalescePhone(c),c.cargo].some(v => String(v||'').toLowerCase().includes(q)))
-      .filter(c => !depId || String(coalesceDeptId(c) ?? '') === depId);
+      .filter(c => {
+        if (!q) return true;
+        const name  = coalesceName(c);
+        const email = coalesceEmail(c);
+        const phone = coalescePhone(c);
+        const cargo = coalesceCargo(c);
+        return [name, email, phone, cargo].some(v => String(v||'').toLowerCase().includes(q));
+      })
+      .filter(c => {
+        if (!depId) return true;
+
+        const cid = String(coalesceDeptId(c) ?? '');
+        if (cid && cid === depId) return true;
+
+        // ✅ fallback: se IDs não batem (setor_id vs departamento_id), tenta por nome
+        const cn = coalesceDeptName(c)
+          || state.setores.find(s => String(s.id)===cid)?.nome
+          || '';
+        if (cn && depSelNorm) return normStr(cn) === depSelNorm;
+
+        return false;
+      });
 
     if (countEl) countEl.textContent = rows.length;
     if (tbody) tbody.innerHTML = '';
@@ -787,22 +949,33 @@
       const depName = coalesceDeptName(c)
         || state.setores.find(s => String(s.id)===String(coalesceDeptId(c)))?.nome
         || '-';
+
+      const name  = coalesceName(c) || '-';
+      const email = coalesceEmail(c) || '-';
+      const id    = c?.id ?? '';
+
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${i+1}</td>
-        <td>${c.nome||'-'}</td>
-        <td>${c.email||'-'}</td>
+        <td class="td-avatar"></td>
+        <td>${name}</td>
+        <td>${email}</td>
         <td>${depName}</td>
         <td class="td-actions">
-          <button class="btn btn-ghost" data-action="view" data-id="${c.id ?? ''}" title="Ver perfil"><i class="fa fa-pen"></i></button>
-          <button class="btn btn-ghost" data-action="del" data-id="${c.id ?? ''}" title="Remover"><i class="fa fa-trash"></i></button>
+          <button class="btn btn-ghost" data-action="view" data-id="${id}" title="Ver perfil"><i class="fa fa-pen"></i></button>
+          <button class="btn btn-ghost" data-action="del"  data-id="${id}" title="Remover"><i class="fa fa-trash"></i></button>
         </td>
       `.trim();
+
       tbody.appendChild(tr);
+
+      // injeta avatar mini (iniciais -> foto quando carregar)
+      const tdAv = tr.querySelector('.td-avatar');
+      mountMiniAvatarInto(tdAv, c);
     });
   }
 
-  // ====== Avatar ======
+  // ====== Avatar (modal/perfil) ======
   function replaceExt(name, ext){
     return (name || 'avatar').replace(/\.[^.]+$/, '') + ext;
   }
@@ -1307,6 +1480,7 @@
 
     const depId   = coalesceDeptId(colab);
     const depName = coalesceDeptName(colab) || state.setores.find(s => String(s.id)===String(depId))?.nome;
+
     if (vDepto) vDepto.textContent = depName || '—';
 
     const telRaw  = coalescePhone(colab);
@@ -1318,10 +1492,10 @@
     if (vCargo) vCargo.textContent = adm ? '' : (cargoVal || '—');
     renderAdminBadge(colab);
 
-    // Horário de expediente (view) + herança do depto
+    // Horário de expediente (view) + herança do depto (com fallback por nome)
     const colIni = coalesceHorarioInicio(colab);
     const colFim = coalesceHorarioFim(colab);
-    const depHor = getDeptHorarioById(depId);
+    const depHor = getDeptHorarioById(depId, depName);
 
     const isCustom = !!(colIni || colFim);
     if (vExpIni){
@@ -1336,7 +1510,7 @@
     }
 
     // hint do depto sempre que houver horário padrão
-    renderDeptHintBySetorId(depId, { personalizar: isCustom });
+    renderDeptHintBySetorId(depId, { personalizar: isCustom, setorNome: depName });
 
     // toggle de personalizar só aparece em edição
     const rowToggle = document.getElementById('row-exp-toggle');
@@ -1415,10 +1589,8 @@
     if (depIdRaw != null) {
       depValue = String(depIdRaw);
     } else if (depName && state.setores.length) {
-      const alvo = String(depName).trim().toLowerCase();
-      const found = state.setores.find(s =>
-        String(s.nome || '').trim().toLowerCase() === alvo
-      );
+      const alvo = normStr(depName);
+      const found = state.setores.find(s => normStr(s?.nome) === alvo);
       if (found) depValue = String(found.id);
     }
 
@@ -1553,9 +1725,10 @@
 
     // se tinha depto preselecionado, atualiza hint
     if (sel && sel.value) {
-      renderDeptHintBySetorId(sel.value, { personalizar: !!tgl?.checked });
+      const setorNome = sel?.options?.[sel.selectedIndex]?.text || '';
+      renderDeptHintBySetorId(sel.value, { personalizar: !!tgl?.checked, setorNome });
     } else {
-      renderDeptHintBySetorId('', { personalizar: !!tgl?.checked });
+      renderDeptHintBySetorId('', { personalizar: !!tgl?.checked, setorNome: '' });
     }
 
     validateFormLive(false);
