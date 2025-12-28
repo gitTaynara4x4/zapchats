@@ -1,5 +1,6 @@
 # backend/routers/atendimento_midias.py
 # — cache-1x + persistência BD + ETag/304 + multi-instância
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
@@ -28,6 +29,9 @@ HEADERS = {"apikey": EVOLUTION_KEY, "Content-Type": "application/json"} if EVOLU
 # =========================
 MEDIA_CACHE_DIR = os.getenv("MEDIA_CACHE_DIR", "/var/cache/zapchats/media")
 os.makedirs(MEDIA_CACHE_DIR, exist_ok=True)
+
+# ⚠️ mídia é recurso autenticado → evite cache público/proxy
+MEDIA_CACHE_CONTROL = "private, max-age=31536000, immutable"
 
 # trava por msg_id para evitar duplicidade de fetch/escrita
 _FETCH_LOCKS: dict[str, threading.Lock] = {}
@@ -94,7 +98,7 @@ def _fix_filename(name: str | None, mime: str) -> str:
     """
     Normaliza o nome para bater com o MIME:
     - remove .enc
-    - substitui/define a extensão pela extensão do MIME (ex.: *.oga → *.mp3)
+    - substitui/define a extensão pela extensão do MIME
     """
     base = (name or "arquivo")
     if base.lower().endswith(".enc"):
@@ -119,16 +123,26 @@ def _etag_from_raw(raw: bytes) -> str:
     h = hashlib.md5(raw).hexdigest()[:16]
     return f'W/"{len(raw)}-{h}"'
 
+def _etag_from_stat(path: str) -> str:
+    try:
+        st = os.stat(path)
+        # weak etag baseado em tamanho + mtime (suficiente p/ 304)
+        return f'W/"{st.st_size}-{int(st.st_mtime)}"'
+    except Exception:
+        return ""
+
 def _cache_glob_for(prefix: str):
     # arquivos salvos como: <MEDIA_CACHE_DIR>/<prefix>.<ext>
+    # ⚠️ NÃO pode pegar sidecars (.etag/.name/.tmp)
     pattern = os.path.join(MEDIA_CACHE_DIR, f"{prefix}.*")
-    files = glob.glob(pattern)
+    files = [f for f in glob.glob(pattern) if not f.endswith((".etag", ".name", ".tmp"))]
     return files[0] if files else None
 
 def _cache_write(prefix: str, raw: bytes, mime: str, name: str | None):
     ext = mimetypes.guess_extension(mime or "") or ""
     if ext == ".jpe": ext = ".jpg"
     safe_name = _fix_filename(name, mime)
+
     path = os.path.join(MEDIA_CACHE_DIR, f"{prefix}{ext}")
     tmp = path + ".tmp"
     with open(tmp, "wb") as f:
@@ -148,23 +162,34 @@ def _cache_write(prefix: str, raw: bytes, mime: str, name: str | None):
         pass
     return path
 
+def _sanitize_cd_filename(name: str) -> str:
+    # remove aspas/CRLF para não quebrar header
+    n = (name or "arquivo").replace("\r", "").replace("\n", "").replace('"', "")
+    return n or "arquivo"
+
 def _serve_cached(path: str, request: Request):
+    """
+    Serve arquivo do cache com ETag/304 CORRETO:
+    - 304 precisa repetir headers (ETag/Cache-Control/Content-Disposition)
+    - NÃO devolve 304 se tiver Range (áudio/vídeo normalmente usam Range)
+    """
     etag = None
     name = None
     try:
         with open(path + ".etag", "r") as f:
-            etag = f.read().strip()
+            etag = (f.read() or "").strip() or None
     except Exception:
-        pass
+        etag = None
+
     try:
         with open(path + ".name", "r", encoding="utf-8") as f:
-            name = f.read().strip()
+            name = (f.read() or "").strip() or None
     except Exception:
-        name = os.path.basename(path)
+        name = None
 
-    # 304 se ETag casar
-    if etag and request.headers.get("if-none-match") == etag:
-        return Response(status_code=304)
+    if not name:
+        name = os.path.basename(path)
+    name = _sanitize_cd_filename(name)
 
     mime = mimetypes.guess_type(path)[0]
     if not mime:
@@ -175,25 +200,42 @@ def _serve_cached(path: str, request: Request):
             mime = "application/octet-stream"
 
     headers = {
-        "Cache-Control": "public, max-age=31536000, immutable",
-        "Content-Disposition": f'inline; filename="{name.replace(chr(34), "")}"',
+        "Cache-Control": MEDIA_CACHE_CONTROL,
+        "Content-Disposition": f'inline; filename="{name}"',
+        "Accept-Ranges": "bytes",
     }
     if etag:
         headers["ETag"] = etag
 
+    inm = request.headers.get("if-none-match")
+    has_range = bool(request.headers.get("range"))
+    if etag and inm == etag and not has_range:
+        # ✅ 304 com headers (senão Chrome pode quebrar cache/stream)
+        return Response(status_code=304, headers=headers)
+
     return FileResponse(path, media_type=mime, headers=headers)
 
-def _inline(raw: bytes, mime: str | None, name: str | None, request: Request = None):
-    """Fallback: stream em memória (evitar; preferimos _serve_cached)."""
-    mime = mime or "application/octet-stream"
+def _inline(raw: bytes, mime: str | None, name: str | None, request: Request | None = None):
+    """
+    Fallback: stream em memória (evitar; preferimos cache em disco p/ suportar Range).
+    Mesmo assim, mantém ETag/304 correto e evita 304 com Range.
+    """
+    mime = (mime or "application/octet-stream").strip().lower() or "application/octet-stream"
     etag = _etag_from_raw(raw)
-    if request and request.headers.get("if-none-match") == etag:
-        return Response(status_code=304)
+    safe_name = _sanitize_cd_filename(_fix_filename(name, mime))
+
     headers = {
-        "Content-Disposition": f'inline; filename="{(name or "arquivo").replace(chr(34), "")}"',
-        "Cache-Control": "public, max-age=31536000, immutable",
+        "Content-Disposition": f'inline; filename="{safe_name}"',
+        "Cache-Control": MEDIA_CACHE_CONTROL,
         "ETag": etag,
     }
+
+    if request:
+        inm = request.headers.get("if-none-match")
+        has_range = bool(request.headers.get("range"))
+        if inm == etag and not has_range:
+            return Response(status_code=304, headers=headers)
+
     return StreamingResponse(BytesIO(raw), media_type=mime, headers=headers)
 
 def _bucket_for(mime: str, media_type: str | None = None) -> str:
@@ -364,21 +406,35 @@ def _persist_midia(
 # =========================
 # Helpers de servir do BD
 # =========================
-def _serve_midia_model(md: models.Midia) -> Response:
-    """Serve a mídia usando os campos do modelo (data/local_path/url)."""
+def _serve_midia_model(md: models.Midia, request: Request | None = None) -> Response:
+    """Serve a mídia usando os campos do modelo (data/local_path/url) com cache/etag."""
     mimetype = (getattr(md, "mimetype", None) or "application/octet-stream")
     filename = getattr(md, "filename", None) or getattr(md, "nome_original", None) or "arquivo"
+    filename = _sanitize_cd_filename(filename)
 
     # 1) blob/data
     raw = getattr(md, "data", None) or getattr(md, "conteudo", None)
     if raw:
-        headers = {"Content-Disposition": f'inline; filename="{filename}"'}
-        return Response(content=bytes(raw), media_type=mimetype, headers=headers)
+        raw_b = bytes(raw)
+        return _inline(raw_b, mimetype, filename, request=request)
 
     # 2) arquivo local
     local_path = getattr(md, "local_path", None) or getattr(md, "path_local", None) or getattr(md, "caminho", None)
     if local_path and os.path.exists(local_path):
-        return FileResponse(local_path, media_type=mimetype, filename=filename)
+        etag = _etag_from_stat(local_path)
+        headers = {
+            "Cache-Control": MEDIA_CACHE_CONTROL,
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Accept-Ranges": "bytes",
+        }
+        if etag:
+            headers["ETag"] = etag
+            inm = request.headers.get("if-none-match") if request else None
+            has_range = bool(request.headers.get("range")) if request else False
+            if inm and inm == etag and not has_range:
+                return Response(status_code=304, headers=headers)
+
+        return FileResponse(local_path, media_type=mimetype, headers=headers)
 
     # 3) url pública (fallback)
     url = getattr(md, "url", None)
@@ -456,8 +512,10 @@ def midia_por_msg(
         db.query(models.Mensagem, models.Cliente, models.EmpresaInstancia)
           .join(models.Cliente, models.Cliente.id == models.Mensagem.cliente_id)
           .outerjoin(models.EmpresaInstancia, models.EmpresaInstancia.id == models.Mensagem.instancia_id)
-          .filter(func.lower(models.Mensagem.msg_id) == msg_id.lower(),
-                  models.Mensagem.empresa_id == empresa_id_eff)
+          .filter(
+              func.lower(models.Mensagem.msg_id) == msg_id.lower(),
+              models.Mensagem.empresa_id == empresa_id_eff
+          )
     )
     if instancia_id is not None and hasattr(models.Mensagem, "instancia_id"):
         q = q.filter(models.Mensagem.instancia_id == instancia_id)
@@ -475,30 +533,39 @@ def midia_por_msg(
           .first()
     )
     if mid_db:
+        # se tem blob, prefira escrever no cache e servir do disco (range ok)
+        raw = getattr(mid_db, "data", None) or getattr(mid_db, "conteudo", None)
+        if raw:
+            raw_b = bytes(raw)
+            mime = (getattr(mid_db, "mimetype", None) or "application/octet-stream").lower()
+            safe_name = _fix_filename(getattr(mid_db, "filename", None) or getattr(mid_db, "nome_original", None) or "arquivo", mime)
+
+            try:
+                path = _cache_write(msg_id, raw_b, mime, safe_name)
+                return _serve_cached(path, request)
+            except Exception:
+                return _inline(raw_b, mime, safe_name, request=request)
+
+        # sem blob: tenta local_path/url com cache/etag
         try:
-            resp = _serve_midia_model(mid_db)
-            # se servimos blob, derrama no cache (best-effort)
-            raw = getattr(mid_db, "data", None) or getattr(mid_db, "conteudo", None)
-            if raw:
-                mime = (mid_db.mimetype or "application/octet-stream").lower()
-                safe_name = _fix_filename(mid_db.filename or mid_db.nome_original or "arquivo", mime)
-                _cache_write(msg_id, raw, mime, safe_name)
-            return resp
+            return _serve_midia_model(mid_db, request=request)
         except Exception:
             pass  # tenta Evolution
 
-    # 3) Evolution como fallback
+    # 3) Evolution como fallback (cache-1x com lock)
     lock = _lock_for(msg_id)
     with lock:
         cached2 = _cache_glob_for(msg_id)
         if cached2:
             return _serve_cached(cached2, request)
+
         try:
             raw, mime, evo_name, meta = _fetch_from_evolution(db, msg, cli, inst, instancia_id)
             safe_name = _fix_filename(evo_name, mime)
             path = _cache_write(msg_id, raw, mime, safe_name)
             _persist_midia(db, msg, raw, mime, evo_name, meta=meta, local_path=path)
             return _serve_cached(path, request)
+
         except Exception as evo_err:
             # último fallback: alguma Midia sem data mas com arquivo/url
             mid2 = (
@@ -509,7 +576,8 @@ def midia_por_msg(
             )
             if mid2:
                 try:
-                    return _serve_midia_model(mid2)
+                    return _serve_midia_model(mid2, request=request)
                 except Exception:
                     pass
+
             raise HTTPException(404, f"Não foi possível obter a mídia por msg_id ({evo_err})")

@@ -1,10 +1,14 @@
-// historico.js
+// /frontend/js/atendimentos/ui/historico.js
 // Histórico com paginação “puxar pra cima” + ACK único + persistência LS + merge de ACK
-// ⚠️ Agora o elemento #historico é buscado *dinamicamente* (H()) em todas as funções.
+// ✅ Agora o elemento #historico é buscado dinamicamente (H()) em todas as funções.
+// ✅ Render de mídias/áudio fica no media-render.js (player WPP), historico só delega.
 
 import { formatChatTime, parseAtendimentoDate } from '../core/time.js';
 import { getHist, primeWith, mergeOld } from '../domain/hist-cache.js';
 import { EMPRESA_ID } from '../core/env.js';
+
+// ✅ Importa o renderer (injeta CSS + expõe window.criarHTMLDaMensagem + initAudioPlayers)
+import './media-render.js';
 
 export const HISTORICO_LIMIT = 20;
 const H = () => document.getElementById('historico'); // << dinâmico
@@ -145,41 +149,6 @@ function ordenarMensagens(arr){
     return (aD?aD.getTime():0) - (bD?bD.getTime():0);
   });
 }
-function escapeHtml(s){
-  return (s||'').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
-}
-function _humanSize(bytes){
-  const b=Number(bytes||0); if(!b) return ''; const u=['B','KB','MB','GB']; const i=Math.floor(Math.log(b)/Math.log(1024));
-  return `${(b/Math.pow(1024,i)).toFixed(i?1:0)} ${u[i]}`;
-}
-function _basenameFromUrl(u){
-  try{ const p = new URL(u, location.origin).pathname; const b = p.split('/').pop() || ''; return decodeURIComponent(b); }
-  catch{ return ''; }
-}
-function _guessExt({ mimetype='', filename='', url='' }={}){
-  const fromName = (filename||'').split('.').pop()?.toLowerCase()
-    || _basenameFromUrl(url).split('.').pop()?.toLowerCase() || '';
-  const map = { 'application/pdf':'pdf','application/msword':'doc',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document':'docx',
-    'application/vnd.ms-excel':'xls','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'xlsx',
-    'application/vnd.ms-powerpoint':'ppt','application/vnd.openxmlformats-officedocument.presentationml.presentation':'pptx',
-    'text/plain':'txt','image/png':'png','image/jpeg':'jpg','image/webp':'webp',
-    'audio/mpeg':'mp3','audio/ogg':'ogg','audio/wav':'wav','video/mp4':'mp4' };
-  return (map[mimetype] || fromName || 'bin').toLowerCase();
-}
-function _sanitizeBase(name){
-  const n = (name||'').toString().trim() || 'arquivo';
-  return n.normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/[^\w\-.]+/g,'_').replace(/_+/g,'_')
-    .replace(/^_+|_+$/g,'').slice(0,80);
-}
-function deriveFileName(a){
-  const url = a.url || a.link || a.path || '';
-  const baseRaw = a.filename || a.name || a.nome_original || _basenameFromUrl(url) || 'arquivo';
-  const base = _sanitizeBase(baseRaw.replace(/\.[a-z0-9]{1,6}$/i,''));
-  const ext  = _guessExt({ mimetype:(a.mimetype||a.mime||''), filename:(a.filename||a.name||''), url });
-  return { fileName: `${base}.${ext}`, extUp: ext.toUpperCase(), extLower: String(ext).toLowerCase() };
-}
 
 /* ========= instancia ativa (para chavear hist-cache) ========= */
 function getInstanciaForFetch() {
@@ -213,18 +182,8 @@ function getInstQuery(){
   return q;
 }
 
-/* ========= URLs canônicas ========= */
-function buildCanonUrlByMsgId(msg_id){
-  // ✅ FIX: inclui instância na query (multi-instância)
-  const url = `/api/atendimento/midias/msg/${encodeURIComponent(msg_id)}?empresa_id=${EMPRESA_ID}${getInstQuery()}`;
-  dbg('buildCanonUrlByMsgId', { msg_id, url });
-  return url;
-}
-function buildIdUrlByMidiaId(id){
-  // ✅ FIX: inclui instância na query (multi-instância)
-  const url = `/api/atendimento/midias/${encodeURIComponent(id)}?empresa_id=${EMPRESA_ID}${getInstQuery()}`;
-  return url;
-}
+// ✅ deixa o renderer usar a mesma função (fallback)
+window._instQuery = getInstQuery;
 
 /* ========= salvar cache unificado ========= */
 export function salvarNoCache(clienteId, novos){
@@ -263,224 +222,27 @@ export function salvarNoCache(clienteId, novos){
 }
 
 /* ========= render de 1 mensagem ========= */
-
-// helper pra debugar erro de mídia (áudio/imagem/vídeo)
-function attachMediaDebugHandlers(root){
-  if (!DEBUG_HIST) return;
-  if (!root) return;
-  try {
-    root.querySelectorAll('audio,video,img').forEach(el => {
-      if (el.__histDbgBound) return;
-      el.__histDbgBound = true;
-
-      // sucesso básico (pra ver se chegou a carregar)
-      if (el.tagName === 'AUDIO' || el.tagName === 'VIDEO') {
-        el.addEventListener('loadedmetadata', () => {
-          try {
-            dbg('MIDIA carregada', {
-              tag: el.tagName,
-              currentSrc: el.currentSrc || null,
-              srcAttr: el.getAttribute('src') || null
-            });
-          } catch(e) {
-            dbgError('attachMediaDebugHandlers loadedmetadata erro', e);
-          }
-        });
-      }
-
-      // erro de carregamento
-      el.addEventListener('error', () => {
-        try {
-          let src = el.currentSrc || el.getAttribute('src') || null;
-
-          if (!src && (el.tagName === 'AUDIO' || el.tagName === 'VIDEO')) {
-            const s = el.querySelector('source');
-            if (s) src = s.src || s.getAttribute('src') || null;
-          }
-
-          dbgError('MIDIA ERRO AO CARREGAR', {
-            tag: el.tagName,
-            src,
-            dataset: { ...el.dataset }
-          });
-        } catch(e) {
-          dbgError('attachMediaDebugHandlers error handler falhou', e);
-        }
-      });
-    });
-  } catch(e) {
-    dbgError('attachMediaDebugHandlers: erro geral', e);
-  }
-}
-
-/* ✅ fallback real pra img/audio/video quando a URL atual falhar */
-function attachMediaFallbackHandlers(root){
-  if (!root) return;
-  try {
-    root.querySelectorAll('img[data-alt],audio[data-alt],video[data-alt]').forEach(el=>{
-      if (el.__histFbBound) return;
-      el.__histFbBound = true;
-
-      el.addEventListener('error', () => {
-        try {
-          const list = String(el.dataset.alt || '').split('|').filter(Boolean);
-          if (!list.length) return;
-
-          const next = list.shift();
-          el.dataset.alt = list.join('|');
-
-          if (el.tagName === 'IMG') {
-            el.src = next;
-            return;
-          }
-
-          if (el.tagName === 'AUDIO' || el.tagName === 'VIDEO') {
-            el.src = next;
-            try { el.load(); } catch {}
-            return;
-          }
-        } catch(e) {
-          dbgError('attachMediaFallbackHandlers: erro', e);
-        }
-      }, { passive:true });
-    });
-  } catch(e) {
-    dbgError('attachMediaFallbackHandlers: erro geral', e);
-  }
-}
-
 export function criarHTMLDaMensagem(m){
+  // ✅ usa o renderer central (áudio bonito fica lá)
+  if (typeof window.criarHTMLDaMensagem === 'function') {
+    return window.criarHTMLDaMensagem(m);
+  }
+
+  // fallback mínimo (se por algum motivo o media-render não carregou)
   const isSaida = (m.tipo === 'saida') || (m.from_me === true) || (m.origem === 'atendente');
   const texto = String(m.conteudo ?? m.mensagem ?? m.texto ?? '').trim();
   const ackVal = Number(m.ack ?? 0);
   const msgIdAttr = m.msg_id || '';
-  let mediaHtml = '';
-
-  let anexos = [];
-  if (Array.isArray(m.midias) && m.midias.length) anexos.push(...m.midias.filter(Boolean));
-  else if (m.midia && typeof m.midia === 'object') anexos.push(m.midia);
-  const seen = new Set();
-  anexos = anexos.filter(a=>{
-    const k = [a?.id ?? '', a?.url || a?.url_api || a?.link || a?.path || '', a?.tipo || '', a?.mimetype || a?.mime || '', a?.filename || a?.name || ''].join('|');
-    if (seen.has(k)) return false; seen.add(k); return true;
-  });
-
-  function resolveUrlsForMedia(m, a){
-    const MSG_CANON = m?.msg_id ? buildCanonUrlByMsgId(m.msg_id) : null;
-    const idUrl     = a?.id ? buildIdUrlByMidiaId(a.id) : '';
-    const primary   = MSG_CANON || a?.url_api || a?.url || a?.link || a?.path || idUrl;
-
-    const alts = [];
-    if (MSG_CANON) [a?.url_api, a?.url, a?.link, a?.path, idUrl].forEach(u=>u && alts.push(u));
-
-    const s=new Set();
-    const urls = [primary, ...alts].filter(u=>u && !s.has(u) && s.add(u));
-
-    dbg('resolveUrlsForMedia', {
-      msg_id: m?.msg_id || null,
-      midiaId: a?.id || null,
-      tipo: a?.tipo || null,
-      mime: a?.mimetype || a?.mime || null,
-      urls
-    });
-
-    return urls;
-  }
-
-  const renderAnexo = (a)=>{
-    if (!a) return '';
-    const urls = resolveUrlsForMedia(m, a);
-    const [url, ...alts] = urls;
-    const mime = (a.mimetype || a.mime || '').toLowerCase();
-    const tipo = (a.tipo || '').toLowerCase();
-    const name = a.filename || a.name || 'arquivo';
-
-    if (tipo.includes('imagem') || tipo.includes('image') || tipo.includes('figurinha') || mime.startsWith('image/')){
-      return `<a class="msg-media-img" href="${url}" target="_blank" rel="noopener">
-                <img src="${url}" data-alt="${alts.join('|')}" alt="${escapeHtml(name)}" loading="lazy">
-              </a>`;
-    }
-
-    // ✅ vídeo com fallback por data-alt (em vez de múltiplos <source>)
-    if (tipo.includes('vídeo') || tipo.includes('video') || mime.startsWith('video/')){
-      return `<video class="msg-media-video" controls preload="metadata" src="${url}" data-alt="${alts.join('|')}"></video>`;
-    }
-
-    // ✅ áudio com fallback por data-alt (em vez de múltiplos <source>)
-    if (tipo.includes('áudio') || tipo.includes('audio') || tipo.includes('ptt') || mime.startsWith('audio/')){
-      dbg('renderAnexo AUDIO', { msg_id: m?.msg_id || null, urls });
-      return `<audio controls preload="metadata" style="max-width:min(420px,70vw)" src="${url}" data-alt="${alts.join('|')}"></audio>`;
-    }
-
-    const { fileName, extUp } = deriveFileName({ mimetype: mime, filename: name, url });
-    const sizeTxt = _humanSize(a.size || a.bytes || a.length) || '';
-    return `<div class="doc-card">
-      <div class="doc-ico" style="background:#d9e0e3"><span class="ext">${extUp}</span></div>
-      <div class="doc-body">
-        <a class="doc-name" href="${url}" target="_blank" rel="noopener" download="${fileName}" title="${fileName}">${escapeHtml(fileName)}</a>
-        <div class="doc-meta">${sizeTxt || 'arquivo'}</div>
-      </div>
-      <div class="doc-actions">
-        <a class="doc-btn" href="${url}" target="_blank" rel="noopener">Abrir</a>
-        <a class="doc-btn" href="${url}" download="${fileName}">Salvar</a>
-      </div>
-    </div>`;
-  };
-
-  mediaHtml = anexos.map(renderAnexo).join('');
-
-  const MARKER_RE = /^\[(Imagem|Vídeo|Video|Áudio\/ptt|Áudio|Audio|Documento|Figurinha|Localização|Contatos?|M[íi]dia)\]/i;
-  if (!mediaHtml && m.msg_id && MARKER_RE.test(texto)) {
-    const src = buildCanonUrlByMsgId(m.msg_id);
-    const kind = texto.replace(/^\[|\].*$/g,'').toLowerCase();
-    dbg('MARKER media fallback', { msg_id: m.msg_id, kind, src });
-
-    if (kind.startsWith('imagem')) {
-      mediaHtml = `<a class="msg-media-img" href="${src}" target="_blank" rel="noopener"><img src="${src}" alt="imagem" loading="lazy"></a>`;
-    } else if (kind.startsWith('vídeo') || kind.startsWith('video')) {
-      mediaHtml = `<video class="msg-media-video" controls preload="metadata" src="${src}"></video>`;
-    } else if (kind.startsWith('áudio') || kind.startsWith('audio')) {
-      dbg('MARKER AUDIO', { msg_id: m.msg_id, src });
-      mediaHtml = `<audio controls preload="metadata" style="max-width:min(420px,70vw)" src="${src}"></audio>`;
-    } else if (kind.startsWith('figurinha')) {
-      mediaHtml = `<img class="msg-sticker" src="${src}" alt="figurinha" loading="lazy">`;
-    } else {
-      const fname = 'arquivo.bin';
-      mediaHtml = `<div class="doc-card">
-        <div class="doc-ico" style="background:#d9e0e3"><span class="ext">FILE</span></div>
-        <div class="doc-body">
-          <a class="doc-name" href="${src}" target="_blank" rel="noopener" download="${fname}" title="${fname}">${fname}</a>
-          <div class="doc-meta">arquivo</div>
-        </div>
-        <div class="doc-actions">
-          <a class="doc-btn" href="${src}" target="_blank" rel="noopener">Abrir</a>
-          <a class="doc-btn" href="${src}" download="${fname}">Salvar</a>
-        </div>
-      </div>`;
-    }
-  }
-
-  const hasMedia = mediaHtml.trim().length > 0;
-  const hasText  = !!texto;
-  const textHtml = hasText ? `<div class="msg-text">${escapeHtml(texto)}</div>` : (!hasMedia ? `<div class="msg-text">&nbsp;</div>` : '');
 
   const ackHtml = (isSaida && typeof window.getAckIcon === 'function')
     ? window.getAckIcon(ackVal).replace('<span class="msg-ack"', `<span class="msg-ack" data-msg-id="${msgIdAttr}"`)
     : '';
 
-  if (DEBUG_HIST) {
-    dbg('criarHTMLDaMensagem', {
-      msg_id: msgIdAttr || null,
-      isSaida,
-      hasMedia,
-      hasText,
-      ackVal
-    });
-  }
+  const textHtml = texto ? `<div class="msg-text">${(texto||'').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]))}</div>` : `<div class="msg-text">&nbsp;</div>`;
 
   return `<div class="msg-row ${isSaida ? 'msg-sent' : 'msg-received'}" data-id="${msgIdAttr}" data-msg-id="${msgIdAttr}">
     <div class="bubble ${isSaida ? 'bubble-out' : 'bubble-in'}" data-msg-id="${msgIdAttr}">
-      ${mediaHtml}${textHtml}
+      ${textHtml}
       <div class="meta">
         ${ackHtml}
         <span class="msg-time">${formatChatTime(m.timestamp || m.data || m.created_at || '')}</span>
@@ -545,9 +307,10 @@ export function renderHistoricoDoCache(clienteId, append=false){
     hist.scrollTop = hist.scrollHeight;
   }
 
-  // LOG + fallback de mídia depois que o DOM foi montado
-  attachMediaDebugHandlers(hist);
-  attachMediaFallbackHandlers(hist);
+  // ✅ inicializa CSS + player de áudio + fallbacks
+  try { window.ensureMsgMediaCss?.(); } catch {}
+  try { window.initAudioPlayers?.(hist); } catch {}
+  try { window.initMediaFallbacks?.(hist); } catch {}
 
   try{ window.reconcilePendingAcks?.(); }catch(e){
     dbgError('renderHistoricoDoCache: reconcilePendingAcks erro', e);
