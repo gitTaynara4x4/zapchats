@@ -3,8 +3,9 @@
 // *** AJUSTE: NOME vem SOMENTE do BD (sem Evolution) ***
 // - Ao abrir, chama /api/atendimento/clientes/:id/profile?empresa_id=... (apenas BD)
 // - Atualiza APENAS o nome no cache e no header (não mexe no avatar do header/lista).
-// - Mantém o fluxo existente de avatar (refresh via Evolution onerror), com guards p/ não gerar 400.
-// - Evita dados “fantasma” ao trocar de conversa (AbortController + token por cliente).
+// - ✅ NOVO: avatar NÃO faz refresh no onerror. Falhou => ícone.
+// - ✅ NOVO: refreshAvatarFromEvolution agora é "manual/diário", aceitando instância/numero via opt.
+// - ✅ NOVO: helpers para aplicar avatar no DOM (lista/header) sem re-render pesado.
 
 (() => {
   /* --------------- helpers --------------- */
@@ -32,7 +33,7 @@
     }catch{ return ''; }
   }
 
-  // **NOVO**: instância segura (reusa lógica da Agenda)
+  // instância segura (reusa lógica da Agenda)
   function getInstanciaAtivaSafe(){
     const sel = (window.state?.clienteSel) || null;
     const inst = sel?.instancia_id ?? sel?.instancia ?? window.INSTANCIA_ATIVA ?? null;
@@ -43,7 +44,24 @@
       return { instancia_id: iid, instance: name };
     }
     const iid = /^\d+$/.test(String(inst)) ? Number(inst) : undefined;
-    return { instancia_id: iid, instance: undefined };
+    return { instancia_id: iid, instance: /^\d+$/.test(String(inst)) ? undefined : String(inst) };
+  }
+
+  function resolveInstOpt(raw){
+    try{
+      if (raw == null) return { instancia_id: undefined, instance: undefined };
+      if (typeof raw === 'object') {
+        const iid = Number(raw.id || raw.instancia_id || raw.instance_id || 0) || undefined;
+        const name = raw.instance_name || raw.name || raw.instancia || raw.instance || undefined;
+        return { instancia_id: iid, instance: name };
+      }
+      const s = String(raw).trim();
+      if (!s) return { instancia_id: undefined, instance: undefined };
+      if (/^\d+$/.test(s)) return { instancia_id: Number(s), instance: undefined };
+      return { instancia_id: undefined, instance: s };
+    }catch{
+      return { instancia_id: undefined, instance: undefined };
+    }
   }
 
   const skeletonHTML = () => `
@@ -73,7 +91,6 @@
     const m = txt.match(/(\d{10,15})/);
     if (m) return m[1];
 
-    // Prioriza o parâmetro recebido (Agenda chama com id do item)
     const cid = Number(forClienteId || getClienteId() || 0);
     if (cid && EMPRESA_ID){
       try{
@@ -102,10 +119,8 @@
     try{
       const st = window.state || {};
       const patch = {
-        // ❗ NÃO tocar em avatar_url aqui
         nome: (bd?.nome ?? undefined),
         nome_whatsapp: (bd?.nome_whatsapp ?? undefined),
-        // extras (não alteram header/fluxo)
         is_business: (typeof bd?.is_business === 'boolean') ? bd.is_business : undefined,
         status_whatsapp: bd?.status_text ?? undefined,
         descricao:  bd?.description ?? undefined,
@@ -124,7 +139,6 @@
         Object.assign(st.clienteSel, patch);
       }
 
-      // ✅ só NOME no header
       updateHeaderNameFromBD(patch);
 
       if (typeof window.persist === 'function') window.persist();
@@ -226,8 +240,6 @@
     };
   }
 
-  // Painel renderizado com CAMPOS DO BD (nome/status/etc). A foto exibida aqui é a do BD,
-  // mas isso é visual do painel — não altera o avatar do header/lista.
   function renderProfileFromBD(bd){
     const name = (bd?.nome_whatsapp || bd?.nome || '').trim();
     const isBiz = !!bd?.is_business;
@@ -268,7 +280,6 @@
   // ===== Request guard =====
   let currentReq = { ctrl: null, token: null };
 
-  // >>> BUSCA APENAS NO BD
   async function fetchBDProfile(clienteId, signal){
     if (!clienteId || !EMPRESA_ID) throw new Error('Cliente/empresa inválidos.');
     const r = await fetch(`/api/atendimento/clientes/${clienteId}/profile?empresa_id=${EMPRESA_ID}`, {
@@ -296,11 +307,9 @@
       if (!currentReq.token || currentReq.token.clienteId !== Number(clienteId)) return;
       if (!window.__qcPerfil?.isOpen?.()) return;
 
-      // ✅ merge só do NOME no cache + header (sem tocar avatar)
       patchClienteCacheNameOnly(clienteId, bd);
       if (!currentReq.token || currentReq.token.clienteId !== Number(clienteId)) return;
 
-      // painel mostra o que está no BD
       window.__qcPerfil.setBody( renderProfileFromBD(bd) );
     }catch(err){
       if (err?.name === 'AbortError') return;
@@ -348,7 +357,6 @@
     if (!hdr || hdr.dataset.qcBound === '1') return;
     hdr.dataset.qcBound = '1';
 
-    // CAPTURE FIRST
     hdr.addEventListener('click', (e) => {
       const t = e.target;
       if (!t) return;
@@ -367,7 +375,6 @@
       abrirPerfilRapido();
     }, { capture:true, passive:false });
 
-    // Fallback bubble
     hdr.addEventListener('click', (e) => {
       const t = e.target;
       if (!t || t.closest(BLOCK_OPEN_SELECTOR)) return;
@@ -389,7 +396,6 @@
     attachHeaderHook();
   })();
 
-  // --------------- Atualiza se trocar de conversa com o drawer aberto ---------------
   (function watchHistoricoCliente(){
     const hist = document.getElementById('historico');
     if (!hist) return;
@@ -411,40 +417,110 @@
   })();
 
   /* =========================
-     ⚠️ AVATAR (com guards)
+     ✅ AVATAR: placeholder SEM refresh no onerror
      ========================= */
-  // ---- cooldown leve por cliente/trigger (localStorage) ----
-  const CD_MS = { list: 30 * 60 * 1000, chat: 10 * 60 * 1000, manual: 0 };
-  const cdKey = (clienteId, trigger) =>
-    `av_cd:v1:e${EMPRESA_ID}:c${Number(clienteId)}:t${trigger}`;
-
-  function canRunCooldown(clienteId, trigger){
+  function ensureAvatarPlaceholder(span, mode='list'){
     try{
-      const ms = CD_MS[trigger] ?? 0;
-      if (ms <= 0) return true;
-      const last = Number(localStorage.getItem(cdKey(clienteId, trigger)) || 0);
-      return (Date.now() - last) > ms;
-    }catch{ return true; }
-  }
-  function markCooldown(clienteId, trigger){
-    try{ localStorage.setItem(cdKey(clienteId, trigger), String(Date.now())); }catch{}
+      if (!span) return;
+      span.classList.add(mode === 'header' ? 'avatar-default' : 'placeholder');
+      span.innerHTML = '<i class="fa fa-user-circle"></i>';
+    }catch{}
   }
 
-  async function refreshAvatarFromEvolution(clienteId){
+  // ✅ handler do LISTA: só placeholder
+  window.handleListAvatarError = function onListImgError(imgEl, clienteId){
     try{
-      const number = await getTelefoneAsync(clienteId);
-      if (!number) return; // sem telefone não tenta Evolution
+      if (!imgEl) return;
+      try { imgEl.onerror = null; } catch {}
+      const span = imgEl.closest?.('.avatar') || imgEl.parentElement;
+      try { imgEl.remove(); } catch {}
+      ensureAvatarPlaceholder(span, 'list');
+    }catch{}
+  };
 
-      // **NOVO**: pega instância de forma segura
-      const inst = getInstanciaAtivaSafe();
-      // sem instancia_id nem nome → não chama (evita 400)
-      if (!inst.instancia_id && !inst.instance) return;
+  // ✅ handler do HEADER: só placeholder
+  window.handleAvatarError = function onHeaderImgError(imgEl){
+    try{
+      if (!imgEl) return;
+      try { imgEl.onerror = null; } catch {}
+      const span = imgEl.closest?.('.avatar') || imgEl.parentElement;
+      try { imgEl.remove(); } catch {}
+      ensureAvatarPlaceholder(span, 'header');
+    }catch{}
+  };
+
+  function applyAvatarToListDOM(clienteId, url){
+    try{
+      const li = document.querySelector(`li.chat-item[data-id="${Number(clienteId)}"], li.cliente-item[data-id="${Number(clienteId)}"], #chat-${Number(clienteId)}`);
+      const span = li?.querySelector?.('.avatar');
+      if (!span) return;
+
+      if (!url) { ensureAvatarPlaceholder(span, 'list'); return; }
+
+      span.classList.remove('placeholder');
+      span.innerHTML = '';
+      const img = document.createElement('img');
+      img.alt = '';
+      img.src = String(url);
+      img.dataset.clienteId = String(clienteId);
+      img.addEventListener('error', () => { try { window.handleListAvatarError?.(img, clienteId); } catch {} }, { once:true });
+      span.appendChild(img);
+    }catch{}
+  }
+
+  function applyAvatarToHeaderDOM(clienteId, url){
+    try{
+      const st = window.state || {};
+      const curId = Number(st?.clienteSel?.id ?? st?.clienteSel?.conversation_id ?? 0);
+      if (curId !== Number(clienteId)) return;
+
+      const box = document.getElementById('chat-avatar');
+      if (!box) return;
+
+      if (!url) {
+        box.innerHTML = `<span class="avatar avatar-default"><i class="fa fa-user-circle"></i></span>`;
+        return;
+      }
+
+      const span = document.createElement('span');
+      span.className = 'avatar';
+      const img = document.createElement('img');
+      img.alt = '';
+      img.src = String(url);
+      img.dataset.clienteId = String(clienteId);
+      img.addEventListener('error', () => { try { window.handleAvatarError?.(img); } catch {} }, { once:true });
+      span.appendChild(img);
+      box.innerHTML = '';
+      box.appendChild(span);
+    }catch{}
+  }
+
+  // ✅ Refresh via Evolution (usado pelo "diário" / manual)
+  async function refreshAvatarFromEvolution(clienteId, opt = {}){
+    try{
+      const cid = Number(clienteId || 0);
+      if (!cid || !EMPRESA_ID) return null;
+
+      // número: preferir opt.number, senão buscar
+      const numRaw = opt?.number ? String(opt.number) : await getTelefoneAsync(cid);
+      const number = onlyDigits(numRaw);
+      if (!number || number.length < 10) return null;
+
+      // instância: preferir opt (do cliente), senão ativa
+      let instOpt = { instancia_id: opt?.instancia_id, instance: opt?.instance };
+      if (!instOpt.instancia_id && !instOpt.instance && opt?.instancia_raw != null) {
+        instOpt = resolveInstOpt(opt.instancia_raw);
+      }
+      if (!instOpt.instancia_id && !instOpt.instance) {
+        instOpt = getInstanciaAtivaSafe();
+      }
+      if (!instOpt.instancia_id && !instOpt.instance) return null; // evita 400
 
       const body = {
-        number: onlyDigits(number),
+        number,
         empresa_id: EMPRESA_ID || undefined,
-        instancia_id: inst.instancia_id ?? undefined,
-        instance: inst.instance ?? undefined,
+        instancia_id: instOpt.instancia_id ?? undefined,
+        instance: instOpt.instance ?? undefined,
       };
 
       const r = await fetch('/api/evolution/fetchProfile', {
@@ -453,76 +529,43 @@
         credentials:'include',
         body: JSON.stringify(body),
       });
-      if (!r.ok) return;
-      const prof = await r.json();
+      if (!r.ok) return null;
 
-      // 🔄 Atualiza avatar no cache/header/lista
+      const prof = await r.json().catch(()=>null);
+      const pic = (prof?.picture && String(prof.picture).trim() && !/^(null|undefined)$/i.test(String(prof.picture).trim()))
+        ? String(prof.picture).trim()
+        : null;
+
+      if (!pic) return null;
+
+      // patch no cache
       try{
         const st2 = window.state || {};
         const lists = [st2.clientesCache, st2.todosContatosCache];
-        const patch = { avatar_url: prof.picture || null };
+        const patch = { avatar_url: pic };
+
         lists.forEach(arr => {
           if (!Array.isArray(arr)) return;
-          const idx = arr.findIndex(x => (x?.id ?? x?.conversation_id) === Number(clienteId));
+          const idx = arr.findIndex(x => (x?.id ?? x?.conversation_id) === cid);
           if (idx >= 0) arr[idx] = { ...arr[idx], ...patch };
         });
-        if (st2.clienteSel && (Number(st2.clienteSel.id ?? st2.clienteSel.conversation_id) === Number(clienteId))) {
+
+        if (st2.clienteSel && (Number(st2.clienteSel.id ?? st2.clienteSel.conversation_id) === cid)) {
           Object.assign(st2.clienteSel, patch);
         }
+
         if (typeof window.persist === 'function') window.persist();
-
-        // atualiza header avatar (se tiver aberto)
-        const av = document.getElementById('chat-avatar');
-        if (av && patch.avatar_url){
-          const safe = String(patch.avatar_url).replace(/"/g,'&quot;');
-          av.innerHTML =
-            `<span class="avatar">
-               <img src="${safe}" alt="" data-cliente-id="${clienteId}"
-                    onerror="window.handleAvatarError && window.handleAvatarError(this)">
-             </span>`;
-        }
-
-        try { window.renderListaClientes?.(st2.clientesCache || []); } catch {}
       }catch{}
-    }catch{}
+
+      // aplica no DOM (sem re-render pesado)
+      applyAvatarToListDOM(cid, pic);
+      applyAvatarToHeaderDOM(cid, pic);
+
+      return { picture: pic, profile: prof || null };
+    }catch{
+      return null;
+    }
   }
   window.refreshAvatarFromEvolution = refreshAvatarFromEvolution;
 
-  // handlers globais já esperados pela lista/header
-  window.handleListAvatarError = async function onListImgError(imgEl, clienteId){
-    try{
-      if (imgEl) {
-        imgEl.onerror = null;
-        imgEl.remove();
-        imgEl.parentElement?.classList?.add('placeholder');
-      }
-      if (!clienteId || !EMPRESA_ID) return;
-
-      if (!canRunCooldown(clienteId, 'list')) return;
-      markCooldown(clienteId, 'list');
-
-      await refreshAvatarFromEvolution(Number(clienteId));
-    }catch{}
-  };
-
-  window.handleAvatarError = async function onHeaderImgError(imgEl){
-    try{
-      if (imgEl) {
-        imgEl.onerror = null;
-        imgEl.remove();
-        imgEl.parentElement?.classList?.add('avatar-default');
-      }
-      const cidFromAttr = Number(imgEl?.getAttribute('data-cliente-id') || 0);
-      const clienteId =
-        cidFromAttr ||
-        Number(window.state?.clienteSel?.id || window.state?.clienteSel?.conversation_id || 0);
-
-      if (!clienteId || !EMPRESA_ID) return;
-
-      if (!canRunCooldown(clienteId, 'chat')) return;
-      markCooldown(clienteId, 'chat');
-
-      await refreshAvatarFromEvolution(Number(clienteId));
-    }catch{}
-  };
 })();

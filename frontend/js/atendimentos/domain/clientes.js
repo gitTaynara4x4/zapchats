@@ -1,13 +1,8 @@
 // /frontend/js/atendimentos/domain/clientes.js
 // =====================================================================
 // LISTA DE CONVERSAS (render, dedupe, preview, paginação)
-// - Normaliza resposta do backend (suporta `{items:[]}` ou `[]`)
-// - Dedupe em 3 fases (preserva .pinned), pin > recência
-// - Render do <ul id="lista-clientes"> com preview (ACK/hora)
-// - Integra com hist-cache para hora/preview "canônico"
-// - Paginação via botão "Carregar mais conversas" (loadMoreConversas)
-// - Expõe window.carregarClientes e window.Lista (shim UI)
-// - FIX: avatares “vazios” (img quebrado / src null/undefined / erro antes do handler existir)
+// ✅ Falhou imagem => placeholder (SEM refresh)
+// ✅ Daily refresh 1x/dia: só sem foto, top 50, conc 2, localStorage
 // =====================================================================
 
 import { EMPRESA_ID } from '../core/env.js';
@@ -27,6 +22,149 @@ if (typeof window !== 'undefined') {
   if (window.PREFETCH_HISTORIES === undefined) {
     window.PREFETCH_HISTORIES = true;
   }
+}
+
+/* =========================================================
+   AVATAR: handlers globais (placeholder-only, sem refresh onerror)
+   ========================================================= */
+function _ensureAvatarPlaceholder(span){
+  try{
+    if (!span) return;
+    span.classList.add('placeholder');
+    span.innerHTML = '<i class="fa fa-user-circle"></i>';
+  }catch{}
+}
+
+if (typeof window !== 'undefined') {
+  // ✅ LISTA: só placeholder
+  window.handleListAvatarError = function(imgEl, clienteId){
+    try{
+      if (!imgEl) return;
+      try { imgEl.onerror = null; } catch {}
+      const span = imgEl.closest?.('.avatar') || imgEl.parentElement;
+      try { imgEl.remove(); } catch {}
+      _ensureAvatarPlaceholder(span);
+    }catch{}
+  };
+
+  // ✅ HEADER (caso alguém use aqui): só placeholder
+  window.handleAvatarError = function(imgEl){
+    try{
+      if (!imgEl) return;
+      try { imgEl.onerror = null; } catch {}
+      const span = imgEl.closest?.('.avatar') || imgEl.parentElement;
+      try { imgEl.remove(); } catch {}
+      if (span) {
+        span.classList.add('avatar-default');
+        span.innerHTML = '<i class="fa fa-user-circle"></i>';
+      }
+    }catch{}
+  };
+}
+
+/* =========================================================
+   Daily refresh (1x/dia) - só quem tá sem foto, top 50, conc 2
+   ========================================================= */
+let __dailyKickScheduled = false;
+let __dailyRunning = false;
+
+function _ymdLocal(){
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return `${yyyy}${mm}${dd}`;
+}
+
+function _dailyKey(){
+  return `av_daily:v1:e${Number(EMPRESA_ID||0)}:d${_ymdLocal()}`;
+}
+
+function _shouldRunDaily(){
+  try{
+    if (window.AVATAR_DAILY_REFRESH === false) return false;
+    const k = _dailyKey();
+    return !localStorage.getItem(k);
+  }catch{
+    return true;
+  }
+}
+
+function _markDaily(){
+  try{
+    localStorage.setItem(_dailyKey(), String(Date.now()));
+  }catch{}
+}
+
+async function runDailyAvatarRefresh(){
+  try{
+    if (__dailyRunning) return;
+    if (!_shouldRunDaily()) return;
+
+    // só roda se o refresh existir (perfil_quick.js)
+    if (typeof window.refreshAvatarFromEvolution !== 'function') return;
+
+    __dailyRunning = true;
+
+    const limit = Math.max(1, Math.min(200, Number(window.AVATAR_DAILY_LIMIT || 50)));
+    const conc  = Math.max(1, Math.min(6, Number(window.AVATAR_DAILY_CONCURRENCY || 2)));
+
+    const base = Array.isArray(state.clientesCache) ? state.clientesCache.slice() : [];
+    if (!base.length) { _markDaily(); return; }
+
+    // top 50 mais recentes (com pin primeiro, igual UI)
+    const topRecent = ordenarConversasDesc(base).slice(0, limit);
+
+    // só quem está sem foto
+    const targets = topRecent.filter(c => !c?.avatar_url);
+
+    // marca no começo (não repete no mesmo dia)
+    _markDaily();
+
+    if (!targets.length) return;
+
+    const queue = targets.slice();
+
+    const workers = Array.from(
+      { length: Math.min(conc, queue.length) },
+      async () => {
+        while (queue.length) {
+          const c = queue.shift();
+          const cid = Number(c?.id ?? c?.conversation_id ?? 0);
+          if (!cid) continue;
+
+          const number = (c?.telefone_norm || c?.telefone || c?.number || '');
+          const instRaw = (c?.instancia_id ?? c?.instancia ?? null);
+
+          // monta opt com instância do PRÓPRIO contato
+          const opt = {
+            trigger: 'daily',
+            number,
+            instancia_raw: instRaw
+          };
+
+          try{
+            await window.refreshAvatarFromEvolution(cid, opt);
+          }catch{}
+        }
+      }
+    );
+
+    await Promise.all(workers);
+  } finally {
+    __dailyRunning = false;
+  }
+}
+
+function kickDailyAvatarRefreshSoon(){
+  if (__dailyKickScheduled) return;
+  __dailyKickScheduled = true;
+  setTimeout(() => { try { runDailyAvatarRefresh(); } catch {} }, 350);
+}
+
+// expõe global (init.js também pode chamar)
+if (typeof window !== 'undefined') {
+  window.runDailyAvatarRefresh = window.runDailyAvatarRefresh || runDailyAvatarRefresh;
 }
 
 /* =========================================================
@@ -56,34 +194,6 @@ function scoreRecencia(c) {
   const ack = Number(c.last_ack || 0);
   const ava = c.avatar_url ? 1 : 0;
   return ts * 1_000_000 + mid * 1_000 + ack * 10 + ava;
-}
-
-// handler global para erro de avatar
-if (typeof window !== 'undefined' && !window.handleAvatarError) {
-  window.handleAvatarError = function handleAvatarError(img) {
-    try {
-      if (!img) return;
-      try { img.onerror = null; } catch {}
-
-      const li = img.closest('li.chat-item, li.cliente-item');
-      const cidAttr = img.dataset.clienteId || li?.dataset?.id;
-      const cid = cidAttr ? Number(cidAttr) : null;
-
-      const parent = img.parentElement;
-      if (parent) {
-        parent.classList.add('placeholder');
-        parent.innerHTML = '<i class="fa fa-user-circle"></i>';
-      } else {
-        img.remove();
-      }
-
-      if (cid && typeof window.refreshAvatarFromEvolution === 'function') {
-        window.refreshAvatarFromEvolution(cid);
-      }
-    } catch (e) {
-      try { console.warn('[handleAvatarError]', e); } catch {}
-    }
-  };
 }
 
 // 🔼 PINS primeiro, depois recência
@@ -239,7 +349,6 @@ export function normalizeCliente(c) {
   const preview =
     c.ultima_texto ?? c.ultima_mensagem ?? c.ultima ?? c.last_text ?? '';
 
-  // ✅ FIX: sanitiza avatar_url (evita "null"/"undefined")
   const fotoRaw =
     c.avatar_url || c.foto_url || c.foto || c.avatar || c.profile_pic_url || '';
   const fotoStr = String(fotoRaw || '').trim();
@@ -372,7 +481,6 @@ export async function carregarClientes({ force = false } = {}) {
 
     let cs = items.map(normalizeCliente).filter(_matchInstancia);
 
-    // ====================== MERGE COM O QUE JÁ TINHA ======================
     const antigo = Array.isArray(state.clientesCache) ? state.clientesCache : [];
 
     cs.forEach(n => {
@@ -411,7 +519,6 @@ export async function carregarClientes({ force = false } = {}) {
       n.pinned = Boolean(n.pinned || a?.pinned);
     });
 
-    // mantém as conversas antigas que NÃO vieram nessa página nova
     const setNovos = new Set(cs.map(x => String(x.id ?? x.conversation_id)));
     const extrasAntigos = antigo.filter(a => !setNovos.has(String(a.id ?? a.conversation_id)));
 
@@ -434,6 +541,9 @@ export async function carregarClientes({ force = false } = {}) {
         try { console.debug('[carregarClientes] primeHistories erro', e); } catch {}
       }
     }
+
+    // ✅ agenda o refresh diário (não trava UI)
+    kickDailyAvatarRefreshSoon();
 
     return all;
   } finally {
@@ -566,7 +676,7 @@ export function renderListaClientes(data) {
     const avatarUrl = c.avatar_url ? String(c.avatar_url).replace(/"/g, '&quot;') : '';
     const av = avatarUrl
       ? `<span class="avatar"><img src="${avatarUrl}" alt="" data-cliente-id="${c.id}"
-                onerror="window.handleAvatarError && window.handleAvatarError(this)" /></span>`
+                onerror="window.handleListAvatarError && window.handleListAvatarError(this, ${Number(c.id)})" /></span>`
       : `<span class="avatar placeholder"><i class="fa fa-user-circle"></i></span>`;
 
     const pinClass = c.pinned ? ' is-pinned' : '';
@@ -606,26 +716,24 @@ export function renderListaClientes(data) {
 
   // ✅ FIX: avatares “vazios” (img existe mas quebrou / src ruim / erro antes do handler existir)
   (function fixBrokenAvatars() {
-    // 1) se tiver <img> mas estiver quebrado, troca por placeholder
     ul.querySelectorAll('.avatar img').forEach(img => {
       const src = String(img.getAttribute('src') || '').trim();
       const isBadSrc = !src || /^(null|undefined|about:blank)$/i.test(src);
 
       const fix = () => {
-        try { window.handleAvatarError?.(img); } catch {}
+        try{
+          const li = img.closest('li.chat-item, li.cliente-item');
+          const cidAttr = img.dataset.clienteId || li?.dataset?.id;
+          const cid = cidAttr ? Number(cidAttr) : null;
+          window.handleListAvatarError?.(img, cid || 0);
+        }catch{}
       };
 
-      // garante que qualquer erro futuro vira placeholder
       try { img.addEventListener('error', fix, { once: true }); } catch {}
-
-      // src já ruim → troca na hora
       if (isBadSrc) return fix();
-
-      // erro já aconteceu antes (img complete + sem pixels) → troca agora
       if (img.complete && img.naturalWidth === 0) return fix();
     });
 
-    // 2) se sobrar .avatar sem nada dentro, força placeholder
     ul.querySelectorAll('.avatar').forEach(span => {
       if (!span.querySelector('img, i')) {
         span.classList.add('placeholder');
@@ -788,7 +896,6 @@ try {
     return prevSetAck ? prevSetAck(cid, ack) : undefined;
   };
 
-  // CSS do ACK
   (function ensureListaAckCss() {
     const id = 'lista-ack-css';
     if (document.getElementById(id)) return;
@@ -802,7 +909,6 @@ try {
     document.head.appendChild(s);
   })();
 
-  // CSS do botão "Carregar mais conversas" CENTRALIZADO
   (function ensureListaLoadMoreCss() {
     const id = 'lista-load-more-css';
     if (document.getElementById(id)) return;
