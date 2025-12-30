@@ -2,6 +2,7 @@
 // Histórico com paginação “puxar pra cima” + ACK único + persistência LS + merge de ACK
 // ✅ Agora o elemento #historico é buscado dinamicamente (H()) em todas as funções.
 // ✅ Render de mídias/áudio fica no media-render.js (player WPP), historico só delega.
+// ✅ NOVO: divisores de data (Hoje / Ontem / dd/mm/aaaa) estilo WhatsApp Web
 
 import { formatChatTime, parseAtendimentoDate } from '../core/time.js';
 import { getHist, primeWith, mergeOld } from '../domain/hist-cache.js';
@@ -83,6 +84,133 @@ function showTopLoader(){
 function hideTopLoader(){
   const hist = H(); if (!hist) return;
   hist.removeAttribute('data-loading-old');
+}
+
+/* ========== Divisor de data estilo WhatsApp (CSS + helpers) ========== */
+(function injectDayDividerCSS(){
+  const id = 'hist-day-divider-css';
+  if (document.getElementById(id)) return;
+  const css = `
+    #historico .zc-day-divider{
+      display:flex;
+      justify-content:center;
+      margin:12px 0;
+      position:relative;
+      z-index:2;
+      user-select:none;
+      pointer-events:none;
+    }
+    #historico .zc-day-divider > span{
+      font-size:12px;
+      padding:4px 10px;
+      border-radius:999px;
+      background:rgba(0,0,0,.35);
+      color:var(--fg, #e5e7eb);
+      border:1px solid rgba(255,255,255,.08);
+      backdrop-filter: blur(6px);
+    }
+  `;
+  const s = document.createElement('style');
+  s.id = id; s.textContent = css;
+  (document.head || document.documentElement).appendChild(s);
+})();
+
+function escapeHtml(s){
+  return String(s || '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+}
+
+function dayKeyFromDate(d){
+  try{
+    const dd = new Date(d);
+    dd.setHours(0,0,0,0);
+    const y = dd.getFullYear();
+    const m = String(dd.getMonth()+1).padStart(2,'0');
+    const a = String(dd.getDate()).padStart(2,'0');
+    return `${y}-${m}-${a}`;
+  }catch{
+    return null;
+  }
+}
+
+function dayLabelFromDate(d){
+  try{
+    const today = new Date(); today.setHours(0,0,0,0);
+    const dd = new Date(d); dd.setHours(0,0,0,0);
+    const diff = Math.round((today - dd) / 86400000);
+
+    if (diff === 0) return 'Hoje';
+    if (diff === 1) return 'Ontem';
+    return dd.toLocaleDateString('pt-BR');
+  }catch{
+    return '';
+  }
+}
+
+function dayDividerHtml(label){
+  const safe = escapeHtml(label || '');
+  return `<div class="zc-day-divider" data-day-divider="1"><span>${safe}</span></div>`;
+}
+
+function parseMsgDate(m){
+  const raw = m?.timestamp || m?.data || m?.created_at || m?.ts || null;
+  if (!raw) return null;
+  let d = null;
+  try { d = parseAtendimentoDate(raw); } catch { d = null; }
+  if (!d || Number.isNaN(d.getTime())) {
+    try { d = new Date(raw); } catch { d = null; }
+  }
+  if (!d || Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function renderMsgsWithDividers(msgs, lastDayKey=null){
+  let html = '';
+  let last = lastDayKey || null;
+
+  for (const m of (Array.isArray(msgs) ? msgs : [])) {
+    const d = parseMsgDate(m);
+    if (d) {
+      const k = dayKeyFromDate(d);
+      if (k && k !== last) {
+        html += dayDividerHtml(dayLabelFromDate(d));
+        last = k;
+      }
+    }
+    html += criarHTMLDaMensagem(m);
+  }
+
+  return { html, lastDayKey: last };
+}
+
+function getLastRenderedMsgId(hist){
+  try{
+    const lastRow = hist?.querySelector?.('.msg-row:last-of-type');
+    if (!lastRow) return '';
+    return (
+      lastRow.getAttribute('data-msg-id') ||
+      lastRow.getAttribute('data-id') ||
+      ''
+    );
+  }catch{
+    return '';
+  }
+}
+
+function setHistLastDayKey(hist, key){
+  try{
+    if (!hist) return;
+    if (key) hist.dataset.lastDayKey = String(key);
+    else delete hist.dataset.lastDayKey;
+  }catch{}
+}
+
+function getHistLastDayKey(hist){
+  try{
+    const k = hist?.dataset?.lastDayKey || '';
+    return k ? String(k) : null;
+  }catch{
+    return null;
+  }
 }
 
 if (!window.cacheHistoricos) window.cacheHistoricos = {};
@@ -238,7 +366,9 @@ export function criarHTMLDaMensagem(m){
     ? window.getAckIcon(ackVal).replace('<span class="msg-ack"', `<span class="msg-ack" data-msg-id="${msgIdAttr}"`)
     : '';
 
-  const textHtml = texto ? `<div class="msg-text">${(texto||'').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]))}</div>` : `<div class="msg-text">&nbsp;</div>`;
+  const textHtml = texto
+    ? `<div class="msg-text">${escapeHtml(texto)}</div>`
+    : `<div class="msg-text">&nbsp;</div>`;
 
   return `<div class="msg-row ${isSaida ? 'msg-sent' : 'msg-received'}" data-id="${msgIdAttr}" data-msg-id="${msgIdAttr}">
     <div class="bubble ${isSaida ? 'bubble-out' : 'bubble-in'}" data-msg-id="${msgIdAttr}">
@@ -271,11 +401,24 @@ export function renderHistoricoDoCache(clienteId, append=false){
 
   ensureTopLoader();
 
+  // Helper: remove ACK em recebidas
+  const stripAckReceived = ()=>{
+    try{
+      hist.querySelectorAll('.msg-row.msg-received .msg-ack, .bubble-in .msg-ack').forEach(n=>n.remove());
+    }catch{}
+  };
+
   if (!append){
     hist.innerHTML=''; ensureTopLoader();
-    const html = msgs.map(criarHTMLDaMensagem).join('');
+
+    const { html, lastDayKey } = renderMsgsWithDividers(msgs, null);
     hist.insertAdjacentHTML('beforeend', html);
-    hist.querySelectorAll('.msg-row.msg-received .msg-ack, .bubble-in .msg-ack').forEach(n=>n.remove());
+
+    stripAckReceived();
+
+    // guarda o último dia renderizado (pra append incremental)
+    setHistLastDayKey(hist, lastDayKey);
+
     hist.scrollTop = hist.scrollHeight;
   } else {
     const existingIds = new Set(
@@ -291,20 +434,52 @@ export function renderHistoricoDoCache(clienteId, append=false){
       });
       hist.innerHTML = '';
       ensureTopLoader();
-      const html = msgs.map(criarHTMLDaMensagem).join('');
+
+      const { html, lastDayKey } = renderMsgsWithDividers(msgs, null);
       hist.insertAdjacentHTML('beforeend', html);
+
+      stripAckReceived();
+      setHistLastDayKey(hist, lastDayKey);
+      hist.scrollTop = hist.scrollHeight;
     } else {
-      const novas = msgs.filter(m => !existingIds.has(String(m.msg_id)));
-      dbg('renderHistoricoDoCache: append novas', { novasCount: novas.length });
+      // tenta descobrir último msg_id renderizado para inserir divisores corretamente
+      const lastRenderedId = getLastRenderedMsgId(hist);
+      let startIdx = -1;
+
+      if (lastRenderedId) {
+        startIdx = msgs.findIndex(m => String(m?.msg_id || '') === String(lastRenderedId));
+      }
+
+      // se não achou, cai para o comportamento antigo (append por Set) sem quebrar
+      let novas = [];
+      if (startIdx >= 0) {
+        novas = msgs.slice(startIdx + 1);
+      } else {
+        novas = msgs.filter(m => !existingIds.has(String(m.msg_id)));
+      }
+
+      dbg('renderHistoricoDoCache: append novas', {
+        novasCount: novas.length,
+        lastRenderedId,
+        startIdx
+      });
+
       if (novas.length){
-        const html = novas.map(criarHTMLDaMensagem).join('');
+        const lastDayKey = getHistLastDayKey(hist);
+        const out = renderMsgsWithDividers(novas, lastDayKey);
+        const html = out.html;
+
         const lastRow = hist.querySelector('.msg-row:last-of-type');
         if (lastRow) lastRow.insertAdjacentHTML('afterend', html);
         else hist.insertAdjacentHTML('beforeend', html);
+
+        // atualiza o último dia renderizado
+        setHistLastDayKey(hist, out.lastDayKey);
       }
+
+      stripAckReceived();
+      hist.scrollTop = hist.scrollHeight;
     }
-    hist.querySelectorAll('.msg-row.msg-received .msg-ack, .bubble-in .msg-ack').forEach(n=>n.remove());
-    hist.scrollTop = hist.scrollHeight;
   }
 
   // ✅ inicializa CSS + player de áudio + fallbacks
