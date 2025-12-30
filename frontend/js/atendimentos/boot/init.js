@@ -1,5 +1,4 @@
 // /frontend/js/atendimentos/boot/init.js
-
 import { state, persist, setClienteSel } from '../state/store.js';
 import { EMPRESA_ID } from '../core/env.js';
 import { carregarClientes } from '../domain/clientes.js';
@@ -53,7 +52,7 @@ function toast(msg, ok = true) {
 }
 
 /* ================= Helpers de prontidão (Splash) ================= */
-function readyPart(key) {
+function readyPart(key){
   if (window.AppReady && typeof window.AppReady.mark === 'function') {
     window.AppReady.mark(key);
   } else {
@@ -62,29 +61,27 @@ function readyPart(key) {
 }
 
 /* ================= OperatorLine (banner “Operadora: …”) ================= */
-(function () {
+(function(){
   const SELECTORS = ['#historico', '.chat-history', '.mensagens', '#mensagens', '#history'];
 
-  function ensureStyle() {
+  function ensureStyle(){
     if (document.getElementById('op-headline-style')) return;
     const style = document.createElement('style');
     style.id = 'op-headline-style';
     style.textContent =
-      `.op-headline{position:sticky;top:0;z-index:6;background:var(--card);color:var(--fg);` +
-      `border-bottom:1px dashed var(--border);padding:.5rem .75rem;font-weight:600;font-size:.95rem}` +
+      `.op-headline{position:sticky;top:0;z-index:6;background:var(--card);color:var(--fg);`+
+      `border-bottom:1px dashed var(--border);padding:.5rem .75rem;font-weight:600;font-size:.95rem}`+
       `.op-headline small{color:var(--muted);font-weight:500;margin-left:.5rem}`;
     document.head.appendChild(style);
   }
-
-  function findHistoryContainer() {
-    for (const s of SELECTORS) {
+  function findHistoryContainer(){
+    for (const s of SELECTORS){
       const n = document.querySelector(s);
       if (n) return n;
     }
     return null;
   }
-
-  function ensureHeadline() {
+  function ensureHeadline(){
     let el = document.getElementById('op-headline');
     if (el) return el;
     ensureStyle();
@@ -94,50 +91,47 @@ function readyPart(key) {
     el.hidden = true;
 
     const hist = findHistoryContainer();
-    if (hist && hist.parentNode) {
+    if (hist && hist.parentNode){
       hist.parentNode.insertBefore(el, hist);
-    } else {
+    }else{
       document.body.prepend(el);
-      const mo = new MutationObserver(() => {
+      const mo = new MutationObserver(()=> {
         const h = findHistoryContainer();
         const cur = document.getElementById('op-headline');
-        if (h && h.parentNode && cur && cur.parentNode !== h.parentNode) {
+        if (h && h.parentNode && cur && cur.parentNode !== h.parentNode){
           h.parentNode.insertBefore(cur, h);
           mo.disconnect();
         }
       });
-      mo.observe(document.documentElement, { childList: true, subtree: true });
+      mo.observe(document.documentElement, { childList:true, subtree:true });
     }
     return el;
   }
-
-  function getUserName() {
-    const w = window,
-      LS = w.localStorage || {};
-    return w.Auth?.user?.nome || w.CURRENT_USER?.nome || LS.getItem('user_nome') || 'Operadora';
+  function getUserName(){
+    const w = window, LS = w.localStorage || {};
+    return (w.Auth?.user?.nome) || (w.CURRENT_USER?.nome) || LS.getItem('user_nome') || 'Operadora';
   }
-
-  const normalize = (s) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, 180);
-  const fmtTime = (iso) => {
-    try {
+  const normalize = (s)=> String(s||'').replace(/\s+/g,' ').trim().slice(0,180);
+  const fmtTime   = (iso)=> {
+    try{
       const d = iso ? new Date(iso) : new Date();
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } catch {
+      return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    }catch{
       return '';
     }
   };
 
-  function deriveName(meta) {
+  function deriveName(meta){
     if (meta && meta.origem === 'whatsapp_fisico') return 'WhatsApp físico';
     if (meta && meta.autor_nome) return meta.autor_nome;
     return getUserName();
   }
 
-  function setOpHeadline(text, whenISO, meta) {
+  function setOpHeadline(text, whenISO, meta){
     if (window.SHOW_TOP_OPERATOR_BANNER === false) return;
     const box = ensureHeadline();
     const preview = normalize(text);
-    if (!preview) {
+    if (!preview){
       box.hidden = true;
       box.textContent = '';
       return;
@@ -147,10 +141,9 @@ function readyPart(key) {
     box.innerHTML = `${nome}: ${preview} ${time}`;
     box.hidden = false;
   }
-
-  function clearOpHeadline() {
+  function clearOpHeadline(){
     const box = document.getElementById('op-headline');
-    if (box) {
+    if (box){
       box.hidden = true;
       box.textContent = '';
     }
@@ -166,21 +159,27 @@ function readyPart(key) {
 })();
 
 /* ================= Instância (central + badge com NOME) ================= */
-(function () {
+(function(){
   const LS_KEY = `instAtiva:${String(EMPRESA_ID || '')}`;
 
-  function norm(v) {
+  function norm(v){
     const s = (v == null ? '' : String(v)).trim();
     return s === '' ? '' : s;
   }
 
-  function getInstanciasList() {
-    return window.ZC_INSTANCIAS || window.INSTANCIAS || window.state?.instancias || [];
+  function getInstanciasList(){
+    return (
+      window.ZC_INSTANCIAS ||
+      window.INSTANCIAS ||
+      window.state?.instancias ||
+      []
+    );
   }
 
-  function pickLabelFromItem(i, fallbackRaw) {
+  function pickLabelFromItem(i, fallbackRaw){
     if (!i) return fallbackRaw;
 
+    // prioridade: apelido/nome “humano”
     const cand =
       i.apelido ||
       i.nome_exibicao ||
@@ -193,30 +192,32 @@ function readyPart(key) {
 
     if (cand && String(cand).trim()) return String(cand).trim();
 
+    // se tiver número/telefone, usa isso
     const tel = i.telefone || i.numero || i.phone || i.whatsapp || null;
     if (tel) {
-      const d = String(tel).replace(/\D+/g, '');
+      const d = String(tel).replace(/\D+/g,'');
       if (d.length >= 8) return `WhatsApp • ${d.slice(-4)}`;
     }
 
+    // fallback: instance_name/instancia
     const raw2 = i.instance_name || i.instancia || i.slug || null;
     if (raw2 && String(raw2).trim()) return String(raw2).trim();
 
     return fallbackRaw;
   }
 
-  function resolveInstLabel(val) {
+  function resolveInstLabel(val){
     const raw = norm(val);
     if (!raw) return 'Selecione um WhatsApp';
 
     const list = getInstanciasList();
     const byId = (x) => String(x?.instancia_id ?? x?.id ?? x?.instance_id ?? '') === raw;
-    const bySlug = (x) =>
-      String(x?.instance_name ?? x?.instancia ?? '').toLowerCase() === raw.toLowerCase();
+    const bySlug = (x) => String(x?.instance_name ?? x?.instancia ?? '').toLowerCase() === raw.toLowerCase();
 
     const it = list.find(byId) || list.find(bySlug);
     const label = pickLabelFromItem(it, raw);
 
+    // evita mostrar “wa.4” feio: tenta humanizar se for padrão “wa.X”
     if (/^wa\.\d+$/i.test(label)) {
       const n = label.split('.').pop();
       return `WhatsApp ${n}`;
@@ -224,18 +225,19 @@ function readyPart(key) {
     return label;
   }
 
-  async function ensureInstanciasLoaded() {
-    try {
+  async function ensureInstanciasLoaded(){
+    try{
+      // se já tem lista, não refaz
       const list = getInstanciasList();
       if (Array.isArray(list) && list.length) return list;
 
       const id = Number(EMPRESA_ID || 0);
       if (!id) return [];
 
-      const r = await fetch(`/api/empresas/${id}/whatsapp`, { credentials: 'include' });
+      const r = await fetch(`/api/empresas/${id}/whatsapp`, { credentials:'include' });
       if (!r.ok) return [];
 
-      const j = await r.json().catch(() => null);
+      const j = await r.json().catch(()=>null);
       const arr = Array.isArray(j?.instancias) ? j.instancias : [];
 
       window.ZC_INSTANCIAS = arr;
@@ -244,16 +246,14 @@ function readyPart(key) {
       window.state = window.state || {};
       window.state.instancias = arr;
 
-      try {
-        document.dispatchEvent(new CustomEvent('inst:list', { detail: { instancias: arr } }));
-      } catch {}
+      try { document.dispatchEvent(new CustomEvent('inst:list', { detail: { instancias: arr } })); } catch {}
       return arr;
-    } catch {
+    }catch{
       return [];
     }
   }
 
-  function ensureInstBadgeStyle() {
+  function ensureInstBadgeStyle(){
     if (document.getElementById('inst-badge-style')) return;
     const s = document.createElement('style');
     s.id = 'inst-badge-style';
@@ -287,7 +287,7 @@ function readyPart(key) {
     document.head.appendChild(s);
   }
 
-  function ensureInstBadge() {
+  function ensureInstBadge(){
     const head = document.getElementById('chat-header');
     if (!head) return null;
 
@@ -307,14 +307,12 @@ function readyPart(key) {
     return el;
   }
 
-  function zcUpdateInstBadge() {
+  function zcUpdateInstBadge(){
     const el = ensureInstBadge();
     if (!el) return;
 
     const c = window.state?.clienteSel || state?.clienteSel || {};
-    const v = norm(
-      c.instancia_id ?? c.instancia ?? window.INSTANCIA_ATIVA ?? localStorage.getItem(LS_KEY) ?? ''
-    );
+    const v = norm(c.instancia_id ?? c.instancia ?? window.INSTANCIA_ATIVA ?? localStorage.getItem(LS_KEY) ?? '');
     const ok = !!v;
 
     const txt = document.getElementById('inst-badge-text');
@@ -323,67 +321,52 @@ function readyPart(key) {
     el.classList.toggle('is-none', !ok);
   }
 
-  function zcFlashInstBadge() {
-    try {
+  function zcFlashInstBadge(){
+    try{
       const b = ensureInstBadge();
       if (!b) return;
       b.classList.add('shake');
-      setTimeout(() => b.classList.remove('shake'), 420);
-    } catch {}
+      setTimeout(()=> b.classList.remove('shake'), 420);
+    }catch{}
   }
 
-  function setInstanciaAtiva(value, opt = {}) {
+  // Central: define instância ativa (persiste + emite evento)
+  function setInstanciaAtiva(value, opt = {}){
     const v = norm(value);
-    try {
-      localStorage.setItem(LS_KEY, v);
-    } catch {}
+    try { localStorage.setItem(LS_KEY, v); } catch {}
     window.INSTANCIA_ATIVA = v ? v : null;
 
-    try {
-      window.setInstanceChip?.(v);
-    } catch {}
-    try {
-      zcUpdateInstBadge();
-    } catch {}
+    try { window.setInstanceChip?.(v); } catch {}
+    try { zcUpdateInstBadge(); } catch {}
 
     try {
-      document.dispatchEvent(new CustomEvent('inst:change', { detail: { value: window.INSTANCIA_ATIVA } }));
+      document.dispatchEvent(new CustomEvent('inst:change', { detail: { value: window.INSTANCIA_ATIVA }}));
     } catch {}
 
+    // por padrão, NÃO forçamos reload aqui (inst-switch já faz)
     if (opt && opt.reloadList) {
-      try {
-        carregarClientes?.({ force: true, reason: 'inst:change' });
-      } catch {}
+      try { carregarClientes?.({ force:true, reason:'inst:change' }); } catch {}
     }
   }
 
-  function getInstanciaAtiva() {
+  function getInstanciaAtiva(){
     return norm(window.INSTANCIA_ATIVA ?? localStorage.getItem(LS_KEY) ?? '');
   }
 
+  // exports globais
   window.zcEnsureInstanciasLoaded = ensureInstanciasLoaded;
-  window.zcResolveInstLabel = resolveInstLabel;
-  window.zcUpdateInstBadge = zcUpdateInstBadge;
-  window.zcFlashInstBadge = zcFlashInstBadge;
-  window.setInstanciaAtiva = setInstanciaAtiva;
-  window.getInstanciaAtiva = getInstanciaAtiva;
+  window.zcResolveInstLabel       = resolveInstLabel;
+  window.zcUpdateInstBadge        = zcUpdateInstBadge;
+  window.zcFlashInstBadge         = zcFlashInstBadge;
+  window.setInstanciaAtiva        = setInstanciaAtiva;
+  window.getInstanciaAtiva        = getInstanciaAtiva;
 
-  document.addEventListener('inst:change', () => {
-    try {
-      zcUpdateInstBadge();
-    } catch {}
-  });
-  document.addEventListener('inst:list', () => {
-    try {
-      zcUpdateInstBadge();
-    } catch {}
-  });
+  // reações
+  document.addEventListener('inst:change', () => { try { zcUpdateInstBadge(); } catch {} });
+  document.addEventListener('inst:list', () => { try { zcUpdateInstBadge(); } catch {} });
 
-  ensureInstanciasLoaded().finally(() => {
-    try {
-      zcUpdateInstBadge();
-    } catch {}
-  });
+  // tenta carregar lista cedo (pra ter nome “humano” no badge)
+  ensureInstanciasLoaded().finally(() => { try { zcUpdateInstBadge(); } catch {} });
 })();
 
 /* ================= Utils ================= */
@@ -399,7 +382,7 @@ async function markChatAsSeen(clienteId) {
 
 function closeChatMobile() {
   if (!window.matchMedia('(max-width: 920px)').matches) return;
-  const ws = document.getElementById('welcome-screen');
+  const ws   = document.getElementById('welcome-screen');
   const head = document.getElementById('chat-header');
   const hist = document.getElementById('historico');
   const foot = document.getElementById('chat-footer');
@@ -412,12 +395,12 @@ function closeChatMobile() {
     hist.removeAttribute('data-instancia-id');
   }
   if (foot) foot.style.display = 'none';
-  if (ws) ws.style.display = 'none';
+  if (ws)   ws.style.display   = 'none';
 
   document.body.classList.remove('is-chat-open');
 }
 
-const onlyDigits = (s) => String(s || '').replace(/\D+/g, '');
+const onlyDigits = (s) => String(s||'').replace(/\D+/g,'');
 
 /* ===== Helpers de instância ===== */
 function getInstanciaForFetch(clienteId) {
@@ -428,24 +411,22 @@ function getInstanciaForFetch(clienteId) {
     return cand == null || cand === '' ? null : String(cand);
   }
 
-  const c = (state.clientesCache || []).find(
-    (x) => (x.id ?? x.conversation_id ?? x.cliente_id) === Number(clienteId)
-  );
+  const c = (state.clientesCache || []).find(x => (x.id ?? x.conversation_id ?? x.cliente_id) === Number(clienteId));
   const cand = c?.instancia_id ?? c?.instancia ?? window.getInstanciaAtiva?.() ?? window.INSTANCIA_ATIVA ?? null;
-  return cand == null || cand === '' ? null : String(cand);
+  return (cand == null || cand === '') ? null : String(cand);
 }
 
-function syncInstanciaFromCliente(c) {
+function syncInstanciaFromCliente(c){
   const instCand = c?.instancia_id ?? c?.instancia ?? null;
   const active = window.getInstanciaAtiva?.() ?? window.INSTANCIA_ATIVA ?? null;
 
+  // se o cliente tem instância, sincroniza tudo (sem reload imediato)
   if (instCand != null && String(instCand).trim() !== '') {
-    try {
-      window.setInstanciaAtiva?.(String(instCand), { reloadList: false });
-    } catch {}
+    try { window.setInstanciaAtiva?.(String(instCand), { reloadList:false }); } catch {}
     return String(instCand);
   }
 
+  // se não tem instância e existe ativa, usa a ativa
   if (active != null && String(active).trim() !== '') return String(active);
 
   return null;
@@ -459,11 +440,9 @@ async function ensureMensagensCarregadas(conversationId) {
 
   const inst = getInstanciaForFetch(conversationId);
 
+  // TRAVA: não carrega conversa “no escuro”
   if (window.ZC_REQUIRE_INSTANCE === true && !inst) {
-    try {
-      window.zcUpdateInstBadge?.();
-      window.zcFlashInstBadge?.();
-    } catch {}
+    try { window.zcUpdateInstBadge?.(); window.zcFlashInstBadge?.(); } catch {}
     toast('Selecione um WhatsApp (instância) antes de abrir/enviar.', false);
     throw new Error('Instância não resolvida');
   }
@@ -482,36 +461,34 @@ async function ensureMensagensCarregadas(conversationId) {
 
   const items = Array.isArray(data?.items) ? data.items : [];
 
-  const mapped = items.map((m) => {
+  const mapped = items.map(m => {
     const tipoMsg = m.tipo || (m.remetente === 'agente' ? 'saida' : 'entrada');
-    const isSaida = tipoMsg === 'saida' || m.from_me === true || m.origem === 'atendente';
+    const isSaida = (tipoMsg === 'saida') || m.from_me === true || m.origem === 'atendente';
 
     let ackNum = Number(m.ack ?? m.status ?? m.ack_status ?? m.meta?.ack ?? 0);
     if (!Number.isFinite(ackNum)) ackNum = 0;
     ackNum = Math.min(3, Math.max(0, ackNum));
 
     return {
-      msg_id: m.msg_id || m.id || null,
-      conteudo: m.texto ?? m.conteudo ?? '',
-      tipo: tipoMsg,
+      msg_id:    m.msg_id || m.id || null,
+      conteudo:  m.texto ?? m.conteudo ?? '',
+      tipo:      tipoMsg,
       timestamp: m.ts || m.timestamp || new Date().toISOString(),
-      ack: isSaida ? ackNum : null,
-      midias: Array.isArray(m.midias) ? m.midias : [],
+      ack:       isSaida ? ackNum : null,
+      midias:    Array.isArray(m.midias) ? m.midias : [],
       instancia_id: m.instancia_id ?? (inst || null),
-      origem: m.origem ?? (isSaida ? 'atendente' : 'cliente'),
+      origem:    m.origem ?? (isSaida ? 'atendente' : 'cliente'),
       autor_nome: m.autor_nome ?? m.atendente_nome ?? null,
     };
   });
 
-  try {
-    salvarNoCache(conversationId, mapped);
-  } catch {}
+  try { salvarNoCache(conversationId, mapped); } catch {}
 
   const finalHist = getHist(inst, conversationId) || [];
 
   state.cacheHistoricos = {
     ...(state.cacheHistoricos || {}),
-    [conversationId]: (window.cacheHistoricos || {})[conversationId],
+    [conversationId]: (window.cacheHistoricos || {})[conversationId]
   };
   state.mensagensOffset[conversationId] = finalHist.length;
   persist();
@@ -520,19 +497,21 @@ async function ensureMensagensCarregadas(conversationId) {
 }
 
 /* ======= Atualiza banner com a última saída ======= */
-function updateOperatorBannerForConversation(convId) {
+function updateOperatorBannerForConversation(convId){
   if (window.SHOW_TOP_OPERATOR_BANNER === false) return;
-  try {
+  try{
     const inst = getInstanciaForFetch(convId);
-    const arr = getHist(inst, convId) || (window.cacheHistoricos || {})[convId] || [];
-    const lastOut = [...arr].reverse().find(
-      (m) => m?.tipo === 'saida' || m?.from_me === true || m?.origem === 'atendente'
+    const arr  = getHist(inst, convId) || ((window.cacheHistoricos || {})[convId] || []);
+    const lastOut = [...arr].reverse().find(m =>
+      (m?.tipo === 'saida') || (m?.from_me === true) || (m?.origem === 'atendente')
     );
     if (lastOut) {
       const texto = lastOut.conteudo || lastOut.texto || lastOut.mensagem || '';
-      const ts = lastOut.timestamp || lastOut.ts || null;
-      const meta = {
-        origem: lastOut.origem ? lastOut.origem : (lastOut.tipo === 'saida' || lastOut.from_me === true ? 'atendente' : 'cliente'),
+      const ts    = lastOut.timestamp || lastOut.ts || null;
+      const meta  = {
+        origem: (lastOut.origem)
+          ? lastOut.origem
+          : ((lastOut.tipo === 'saida' || lastOut.from_me === true) ? 'atendente' : 'cliente'),
         autor_nome: lastOut.autor_nome || lastOut.atendente_nome || lastOut.user_nome || null,
       };
       window.OperatorLine?.set(texto, ts, meta);
@@ -546,7 +525,7 @@ function updateOperatorBannerForConversation(convId) {
 async function selecionarClienteObj(id) {
   const isMobile = window.matchMedia('(max-width: 920px)').matches;
   const hist = document.getElementById('historico');
-  const ws = document.getElementById('welcome-screen');
+  const ws   = document.getElementById('welcome-screen');
   const head = document.getElementById('chat-header');
   const foot = document.getElementById('chat-footer');
 
@@ -556,31 +535,31 @@ async function selecionarClienteObj(id) {
     hist.dataset.noMore = '0';
     hist.style.display = 'block';
   }
-  if (ws) ws.style.display = 'none';
+  if (ws)   ws.style.display   = 'none';
   if (head) head.style.display = 'flex';
   if (foot) foot.style.display = 'flex';
 
   readyPart('ui');
 
   const byId = (x) => x?.conversation_id === id || x?.id === id || x?.cliente_id === id;
-  const c = (state.clientesCache || []).find(byId) || (state.todosContatosCache || []).find(byId);
+  const c =
+    (state.clientesCache || []).find(byId) ||
+    (state.todosContatosCache || []).find(byId);
 
   if (!c) {
-    try {
-      window.zcUpdateInstBadge?.();
-    } catch {}
+    // se veio de agenda/search e não está no cache, ainda assim deixa quem chamou setar clienteSel antes
+    // (agenda.js faz fallback). Aqui só garantimos badge atualizado.
+    try { window.zcUpdateInstBadge?.(); } catch {}
     return;
   }
 
   setClienteSel(c);
 
+  // TRAVA/SYNC de instância antes de qualquer fetch/render
   const instFinal = syncInstanciaFromCliente(c);
   if (hist && instFinal) hist.dataset.instanciaId = String(instFinal);
   if (window.ZC_REQUIRE_INSTANCE === true && !instFinal) {
-    try {
-      window.zcUpdateInstBadge?.();
-      window.zcFlashInstBadge?.();
-    } catch {}
+    try { window.zcUpdateInstBadge?.(); window.zcFlashInstBadge?.(); } catch {}
     toast('Selecione um WhatsApp (instância) antes de abrir/enviar.', false);
     return;
   }
@@ -597,8 +576,10 @@ async function selecionarClienteObj(id) {
 
   // expor telefone pro perfil_quick.js
   try {
-    const phone = c.telefone ?? c.tel ?? c.phone ?? c.whatsapp ?? c.telefone_norm ?? c.numero ?? c.number ?? null;
-    const digits = onlyDigits(phone || '');
+    const phone =
+      c.telefone ?? c.tel ?? c.phone ?? c.whatsapp ?? c.telefone_norm ?? c.numero ?? c.number ?? null;
+
+    const digits = String(phone || '').replace(/\D+/g,'');
     if (digits) {
       if (hist) hist.dataset.telefone = digits;
       if (head) head.setAttribute('data-phone', digits);
@@ -608,45 +589,36 @@ async function selecionarClienteObj(id) {
     }
   } catch {}
 
-  const t = document.getElementById('chat-title');
+  const t  = document.getElementById('chat-title');
   const av = document.getElementById('chat-avatar');
-
-  if (t) t.textContent = c.nome_whatsapp || c.nome || c.push_name || '';
+  if (t)  t.textContent = c.nome || c.push_name || '';
   if (av) {
     if (c.avatar_url) {
-      const safeUrl = String(c.avatar_url).replace(/"/g, '&quot;');
+      const safeUrl = String(c.avatar_url).replace(/"/g,'&quot;');
       av.innerHTML = `<span class="avatar"><img src="${safeUrl}" alt="" data-cliente-id="${c.id}"
            onerror="window.handleAvatarError && window.handleAvatarError(this)"></span>`;
     } else {
-      av.innerHTML = `<span class="avatar avatar-default"><i class="fa fa-user-circle text-2xl text-gray-400"></i></span>`;
+      av.innerHTML =
+        `<span class="avatar avatar-default"><i class="fa fa-user-circle text-2xl text-gray-400"></i></span>`;
     }
   }
 
-  // ✅ clique no nome/foto abre o PERFIL RÁPIDO (se existir), senão cai no perfil antigo
+  // click abre perfil
   try {
-    const openPerfil = () => {
-      if (typeof window.abrirPerfilRapido === 'function') return window.abrirPerfilRapido();
-      if (typeof abrirPerfilAtual === 'function') return abrirPerfilAtual(false);
-    };
-    if (t) {
-      t.style.cursor = 'pointer';
-      t.onclick = openPerfil;
-    }
-    if (av) {
-      av.style.cursor = 'pointer';
-      av.onclick = openPerfil;
-    }
+    const openPerfil = () => abrirPerfilAtual && abrirPerfilAtual(false);
+    if (t)  { t.style.cursor = 'pointer';  t.onclick  = openPerfil; }
+    if (av) { av.style.cursor = 'pointer'; av.onclick = openPerfil; }
   } catch {}
 
-  try {
-    window.zcUpdateInstBadge?.();
-  } catch {}
+  // badge sempre atualizado
+  try { window.zcUpdateInstBadge?.(); } catch {}
 
   try {
     await ensureMensagensCarregadas(id);
     renderHistoricoDoCache(id);
   } catch (e) {
     console.warn('[selecionarClienteObj] carregar mensagens falhou:', e?.message || e);
+    // não limpa a tela aqui — só evita “pisca some”
     return;
   }
 
@@ -658,9 +630,7 @@ async function selecionarClienteObj(id) {
 
   updateOperatorBannerForConversation(id);
 
-  try {
-    window.syncPreviewFromCache?.(id);
-  } catch {}
+  try { window.syncPreviewFromCache?.(id); } catch {}
   await markChatAsSeen(id);
 
   // zera “unread” local
@@ -670,7 +640,7 @@ async function selecionarClienteObj(id) {
   } catch {
     try {
       const arr = window.state?.clientesCache || window.clientesCache || [];
-      const idx = arr.findIndex((x) => Number(x.id ?? x.conversation_id ?? x.cliente_id) === Number(id));
+      const idx = arr.findIndex(x => Number(x.id ?? x.conversation_id ?? x.cliente_id) === Number(id));
       if (idx >= 0) {
         arr[idx].novas = 0;
         window.renderListaClientes?.(arr);
@@ -681,19 +651,17 @@ async function selecionarClienteObj(id) {
 
   if (isMobile) {
     document.body.classList.add('is-chat-open');
-    try {
-      history.pushState({ chatOpen: true, id }, '', location.href);
-    } catch {}
+    try { history.pushState({ chatOpen: true, id }, '', location.href); } catch {}
   }
 }
 
 /* ================= Exports globais ================= */
 window.selecionarClienteObj = selecionarClienteObj;
-window.closeChatMobile = closeChatMobile;
+window.closeChatMobile      = closeChatMobile;
 
 /* ================= Chips de instância (opcional) ================= */
 export function wireInstanciaChips() {
-  document.querySelectorAll('[data-inst],[data-inst-id],[data-instancia]').forEach((el) => {
+  document.querySelectorAll('[data-inst],[data-inst-id],[data-instancia]').forEach(el => {
     el.addEventListener('click', () => {});
   });
 }
@@ -702,7 +670,7 @@ export function wireInstanciaChips() {
 export async function boot() {
   try {
     if (window.AppReady?.setRequired) {
-      window.AppReady.setRequired(['ui', 'clientes', 'boot']);
+      window.AppReady.setRequired(['ui','clientes','boot']);
     }
 
     readyPart('ui');
@@ -715,9 +683,8 @@ export async function boot() {
       readyPart('clientes');
     }
 
-    try {
-      window.zcUpdateInstBadge?.();
-    } catch {}
+    // tenta atualizar badge cedo (se header já existir)
+    try { window.zcUpdateInstBadge?.(); } catch {}
 
     readyPart('boot');
   } catch (e) {
@@ -726,15 +693,11 @@ export async function boot() {
     readyPart('clientes');
   }
 
-  window.addEventListener(
-    'popstate',
-    (e) => {
-      const isMobile = window.matchMedia('(max-width: 920px)').matches;
-      if (!isMobile) return;
-      const hasChat = document.body.classList.contains('is-chat-open');
-      const st = e.state || {};
-      if (hasChat && !st.chatOpen) closeChatMobile();
-    },
-    { passive: true }
-  );
+  window.addEventListener('popstate', (e) => {
+    const isMobile = window.matchMedia('(max-width: 920px)').matches;
+    if (!isMobile) return;
+    const hasChat = document.body.classList.contains('is-chat-open');
+    const st = e.state || {};
+    if (hasChat && !st.chatOpen) closeChatMobile();
+  }, { passive: true });
 }
