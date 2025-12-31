@@ -3,7 +3,20 @@ from __future__ import annotations
 
 import os
 import asyncio
-from typing import Any, Optional, Tuple, Dict, Callable
+from typing import Any, Optional, Tuple, Dict, Callable, Awaitable
+
+# =============================================================================
+# ✅ COMPAT: engineio/python-socketio tenta usar aiohttp.ClientWSTimeout,
+# mas no aiohttp 3.10.x isso NÃO é exportado no topo (fica em aiohttp.client_ws).
+# Então a gente injeta no namespace do aiohttp ANTES de importar socketio.
+# =============================================================================
+try:
+    import aiohttp  # noqa
+    if not hasattr(aiohttp, "ClientWSTimeout"):
+        from aiohttp.client_ws import ClientWSTimeout  # noqa
+        aiohttp.ClientWSTimeout = ClientWSTimeout  # type: ignore[attr-defined]
+except Exception as _e:
+    print("[EVO-WS] Aviso: compat aiohttp.ClientWSTimeout falhou:", _e)
 
 import socketio  # python-socketio (client)
 
@@ -61,7 +74,11 @@ def _extract_instance(payload, default: Optional[str] = None) -> Optional[str]:
 # =========================
 # Bootstrap do listener
 # =========================
-async def start(loop: asyncio.AbstractEventLoop, HANDLERS: Dict[Any, Callable], EvoEvent: Any) -> Tuple[Optional[asyncio.Task], Optional[Callable[[], asyncio.Future]]]:
+async def start(
+    loop: asyncio.AbstractEventLoop,
+    HANDLERS: Dict[Any, Callable],
+    EvoEvent: Any
+) -> Tuple[Optional[asyncio.Task], Optional[Callable[[], Awaitable[None]]]]:
     """
     Sobe o cliente Socket.IO do Evolution em background.
     Retorna (task, stop) — onde stop() encerra a task e desconecta o socket.
@@ -128,8 +145,13 @@ async def start(loop: asyncio.AbstractEventLoop, HANDLERS: Dict[Any, Callable], 
         Faz o bind em UPPER_CASE e em dotted.lower() para cobrir variações do servidor.
         """
         dotted = event_upper.lower().replace("_", ".")
-        async def _h_upper(d): await _dispatch(event_upper, d)
-        async def _h_lower(d): await _dispatch(event_upper, d)
+
+        async def _h_upper(d):
+            await _dispatch(event_upper, d)
+
+        async def _h_lower(d):
+            await _dispatch(event_upper, d)
+
         sio.on(event_upper)(_h_upper)
         sio.on(dotted)(_h_lower)
 
@@ -149,7 +171,7 @@ async def start(loop: asyncio.AbstractEventLoop, HANDLERS: Dict[Any, Callable], 
         "GROUP_UPDATE",
         "GROUP_PARTICIPANTS_UPDATE",
         "REMOVE_INSTANCE",
-        "LOGOUT_INSTANCE"
+        "LOGOUT_INSTANCE",
     ]:
         _bind(ev)
 

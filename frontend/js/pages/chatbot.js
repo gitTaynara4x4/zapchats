@@ -26,93 +26,74 @@
     if(!host){
       host=el('div','toast-host');
       host.id='toast-host';
-      host.style.cssText='position:fixed;right:16px;top:16px;z-index:99999;display:flex;flex-direction:column;gap:8px';
+      host.style.cssText='position:fixed;right:16px;top:16px;display:flex;flex-direction:column;gap:10px;z-index:9999';
       document.body.appendChild(host);
     }
     return host;
   }
-  function toast(msg, kind='success'){
+
+  function toast(message, kind='ok', ms=2400){
     const host=ensureToastHost();
-    const box=el('div','toast');
-    box.style.cssText='min-width:280px;max-width:520px;padding:12px 14px;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.25);font:14px/1.35 system-ui;transition:.25s';
-    const color = kind==='error' ? '#fee2e2' : kind==='warn' ? '#fef3c7' : '#dbeafe';
-    box.style.background = color; box.style.color = '#0f172a';
-    box.textContent = msg;
-    host.appendChild(box);
-    setTimeout(()=>{ box.style.opacity='0'; box.style.transform='translateY(-6px)'; setTimeout(()=>box.remove(), 240); }, 2800);
+    const t=el('div','toast');
+    t.style.cssText='padding:10px 12px;border-radius:12px;border:1px solid var(--border);background:var(--card);box-shadow:0 10px 40px rgba(0,0,0,.25);font-weight:800;min-width:220px';
+    if(kind==='warn') t.style.borderColor='rgba(245,158,11,.45)';
+    if(kind==='bad')  t.style.borderColor='rgba(244,63,94,.40)';
+    if(kind==='ok')   t.style.borderColor='rgba(34,197,94,.40)';
+    t.textContent=message;
+    host.appendChild(t);
+    setTimeout(()=>{ t.style.opacity='0'; t.style.transform='translateY(-6px)'; t.style.transition='all .18s ease'; }, ms);
+    setTimeout(()=>t.remove(), ms+220);
   }
 
-  function notify({title='Atenção', message='', kind='warn', details=null, actions=[]}={}){
-    let overlay=el('div');
-    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.28);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px';
-    const card=el('div');
-    card.style.cssText='width:min(680px,96vw);background:#0b0b13;color:#e5e7eb;border:1px solid #1f2937;border-radius:16px;padding:18px 18px 14px;box-shadow:0 10px 40px rgba(0,0,0,.45);font:14px/1.5 system-ui';
-    const head=el('div'); head.style.cssText='font-weight:700;font-size:16px;margin-bottom:8px;display:flex;gap:8px;align-items:center';
-    const dot=el('span'); dot.style.cssText='width:10px;height:10px;border-radius:50%'; dot.style.background = kind==='error'?'#ef4444':(kind==='warn'?'#f59e0b':'#60a5fa');
-    const h=el('span'); h.textContent=title; head.append(dot,h);
-    const p=el('div'); p.innerHTML=String(message||'').replace(/\n/g,'<br>'); p.style.marginBottom='8px';
-    const detWrap=el('div'); detWrap.style.display = details ? '' : 'none';
-    const toggle=el('button'); toggle.type='button'; toggle.textContent='Ver detalhes técnicos';
-    toggle.style.cssText='background:none;border:0;color:#93c5fd;text-decoration:underline;cursor:pointer;padding:0;margin:6px 0';
-    const pre=el('pre'); pre.textContent=details||''; pre.style.cssText='white-space:pre-wrap;margin:8px 0 0;background:#0f172a;border:1px solid #1f2937;border-radius:10px;padding:10px;max-height:38vh;overflow:auto;font-size:12px;display:none';
-    toggle.addEventListener('click',()=>{ pre.style.display = pre.style.display==='none' ? 'block' : 'none'; });
-    detWrap.append(toggle,pre);
-    const footer=el('div'); footer.style.cssText='display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:12px';
-    const ok=el('button'); ok.type='button'; ok.textContent='OK';
-    ok.style.cssText='padding:8px 14px;border-radius:10px;background:#c7d2fe;color:#111827;border:0;font-weight:600;cursor:pointer';
+  function notify({title='Atenção', message='', details='', kind='warn', actions=[]}){
+    const overlay=el('div','notice-ov');
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:99999;padding:16px';
+    const card=el('div','notice');
+    card.style.cssText='width:min(640px,96vw);background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:0 22px 80px rgba(0,0,0,.35);padding:14px 14px 12px';
+    const head=el('div'); head.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px';
+    const h=el('div'); h.style.cssText='font-size:1.05rem;font-weight:900';
+    h.textContent=title;
+    const x=el('button'); x.className='btn'; x.textContent='Fechar';
+    x.addEventListener('click',()=>overlay.remove());
+    head.append(h,x);
+
+    const p=el('div');
+    p.style.cssText='white-space:pre-wrap;color:var(--fg);line-height:1.4;font-weight:650;padding:6px 2px 8px';
+    p.textContent=message;
+
+    let detWrap=null;
+    if(details){
+      detWrap=el('details');
+      detWrap.style.cssText='margin-top:10px;border:1px dashed var(--border);border-radius:12px;padding:10px;background:color-mix(in oklab, var(--card) 92%, transparent)';
+      const sum=el('summary'); sum.textContent='Detalhes técnicos';
+      sum.style.cssText='cursor:pointer;font-weight:800;color:var(--muted)';
+      const pre=el('pre');
+      pre.style.cssText='white-space:pre-wrap;margin:10px 0 0;font-size:.86rem;color:var(--muted)';
+      pre.textContent=details;
+      detWrap.append(sum,pre);
+    }
+
+    const footer=el('div');
+    footer.style.cssText='display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap';
+    const ok=el('button','btn primary'); ok.textContent='OK';
     ok.addEventListener('click',()=>overlay.remove());
     footer.append(...actions, ok);
-    card.append(head,p,detWrap,footer); overlay.addEventListener('click',(e)=>{ if(e.target===overlay) overlay.remove(); });
-    overlay.appendChild(card); document.body.appendChild(overlay);
+
+    card.append(head,p,detWrap,footer); overlay.appendChild(card);
+    overlay.addEventListener('click',(e)=>{ if(e.target===overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
   }
 
-  function friendlyHttpError(status, detailText=''){
-    const msgs = {
-      0:['Sem conexão','Não conseguimos falar com o servidor.'],
-      400:['Não foi possível salvar','Revise os horários (HH:MM) e os textos das mensagens.'],
-      401:['Sessão expirada','Faça login novamente para continuar.'],
-      403:['Permissão negada','Você não pode alterar esta instância.'],
-      404:['Instância não encontrada','Selecione outra instância e tente novamente.'],
-      409:['Conflito','As configurações mudaram enquanto você editava. Recarregamos os dados.'],
-      422:['Dados incompletos','Preencha os campos obrigatórios e salve de novo.'],
-      429:['Muitas tentativas','Aguarde alguns segundos e tente novamente.'],
-      500:['Ops! Algo deu errado','Falha no servidor. Tente novamente.']
-    };
-    const k=(status>=500)?500:(msgs[status]?status:0);
-    const [title,message]=msgs[k]; return {title,message,details:detailText||''};
-  }
-
-  /* ================= dropdown de instâncias ================= */
+  /* ================= DOM ================= */
   const instBtn   = document.getElementById('instMenuBtnChat');
-  const instLabel = document.getElementById('instMenuLabelChat');
   const instMenu  = document.getElementById('inst-menu-chat');
   const instList  = document.getElementById('instMenuListChat');
+  const instLabel = document.getElementById('instMenuLabelChat');
+  const instRequiredBanner = document.getElementById('instRequiredBanner');
 
-  const normalizeInstValue = (v) => (v ?? '').toString().trim();
-  const getActiveInstKey   = () => normalizeInstValue(window.__INST_ID || '');
-  function requireActiveInstKey(){ const k=getActiveInstKey(); if(!k) throw new Error('INST_REQUIRED'); return k; }
-
-  function lockUI(locked,msg){
-    const controls = document.querySelectorAll(
-      '.tswitch input, textarea, input[type="time"], #saveAuto, #saveDept, ' +
-      'button:not(#instMenuBtnChat):not(.inst-item), select'
-    );
-    controls.forEach(el=>el.disabled=!!locked);
-    let banner = document.getElementById('instRequiredBanner');
-    if(locked){
-      if(!banner){
-        banner = document.createElement('div');
-        banner.id='instRequiredBanner'; banner.className='alert warn'; banner.style.margin='.75rem 0';
-        banner.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> ${msg||'Selecione uma instância para configurar o chatbot.'}`;
-        document.querySelector('.section-title')?.after(banner);
-      } else banner.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> ${msg||'Selecione uma instância para configurar o chatbot.'}`;
-    } else if(banner){ banner.remove(); }
-  }
-
-  /* ================= refs DOM ================= */
-  const swAutoHdr   = document.getElementById('swAutoHdr');
+  const swAutoHdr = document.getElementById('swAutoHdr');
   const pillAutoHdr = document.getElementById('pillAutoHdr');
-  const swDeptHdr   = document.getElementById('swDeptHdr');
+  const swDeptHdr = document.getElementById('swDeptHdr');
   const pillDeptHdr = document.getElementById('pillDeptHdr');
 
   const headAuto = document.querySelector('[data-toggle="auto"]');
@@ -134,6 +115,7 @@
   const prevW = document.getElementById('prevW');
   const prevWText = document.getElementById('prevWText');
   const prevO = document.getElementById('prevO');
+  const prevOText = document.getElementById('prevOText');
 
   const saveAuto = document.getElementById('saveAuto');
   const cancelAuto = document.getElementById('cancelAuto');
@@ -150,6 +132,13 @@
   const dwStart         = document.getElementById('dwStart');
   const dwEnd           = document.getElementById('dwEnd');
 
+  // seletor de departamentos (modo 2)
+  const deptSearch = document.getElementById('deptSearch');
+  const deptAll    = document.getElementById('deptAll');
+  const deptNone   = document.getElementById('deptNone');
+  const deptList   = document.getElementById('deptList');
+  const deptCount  = document.getElementById('deptCount');
+
   const schedWelcome = document.getElementById('schedWelcome');
   const schedOff     = document.getElementById('schedOff');
   const schedDeptWelcomeEl = document.getElementById('schedDeptWelcome');
@@ -159,33 +148,30 @@
 
   // cache/ctx
   let _deptCache = null; // [{id,nome}]
-  let _empresaNome = (LS.getItem('empresa_nome') || '').trim() || null;
+  let _empresaNome = (LS.getItem('empresa_nome') || '').trim();
 
-  const LOCAL_DEFAULTS = {
-    timezone: FALLBACK_TZ,
-    features:{
-      auto_messages:{
-        enabled:false,
-        welcome:{ enabled:false, text:"Olá! 👋 Como posso ajudar?", start:"08:00", end:"18:00" },
-        off_hours:{ enabled:false, text:"Atendemos de 08:00 às 18:00. Deixe sua mensagem e responderemos no próximo expediente.", start:"18:00", end:"08:00" }
-      },
-      auto_messages_departments:{
-        enabled:false,
-        welcome:{ enabled:false, text:"", start:"08:00", end:"18:00" }
-      }
-    }
-  };
+  /* ================= util ================= */
+  function safeJsonParse(s){ try{ return JSON.parse(s); }catch{ return null; } }
 
-  /* ================= utils ================= */
-  function setSwitch(el,on,pillEl){
-    if(!el) return;
-    el.dataset.on=on?'true':'false';
-    const input=el.querySelector('input');
+  function getActiveInstKey(){
+    return String(window.__INST_ID || LS.getItem('instancia_id') || '').trim();
+  }
+  function requireActiveInstKey(){
+    const k=getActiveInstKey();
+    if(!k) throw new Error('Selecione uma instância.');
+    return k;
+  }
+  function normalizeInstValue(v){ return String(v||'').trim(); }
+
+  function setSwitch(sw,on,pill){
+    if(!sw) return;
+    const input=sw.querySelector('input');
     if(input) input.checked=!!on;
-    if(pillEl){
-      pillEl.textContent=on?'on':'off';
-      pillEl.classList.toggle('on',!!on);
-      pillEl.classList.toggle('off',!on);
+    sw.setAttribute('data-on', on ? 'true' : 'false');
+    if(pill){
+      pill.classList.toggle('on', !!on);
+      pill.classList.toggle('off', !on);
+      pill.textContent = on ? 'on' : 'off';
     }
   }
   function getSwitch(el){ return !!el?.querySelector('input')?.checked; }
@@ -203,68 +189,47 @@
     if(!ta) return;
     const s=ta.selectionStart??ta.value.length, e=ta.selectionEnd??ta.value.length;
     ta.value=ta.value.slice(0,s)+text+ta.value.slice(e);
-    const pos=s+text.length; ta.focus();
-    try{ta.setSelectionRange(pos,pos);}catch{}
-    if(ta===msgWelcome&&wcCount) wcCount.textContent=`${ta.value.length} caracteres`;
-    if(ta===msgDeptWelcome&&dwCount) dwCount.textContent=`${ta.value.length} caracteres`;
-    if(ta===msgWelcome) renderWelcomePreview();
+    ta.selectionStart=ta.selectionEnd=s+text.length;
+    ta.dispatchEvent(new Event('input',{bubbles:true}));
+    ta.focus();
   }
 
-  function timeValid(v){ if(typeof v!=='string' || !/^\d{2}:\d{2}$/.test(v)) return false; const [h,m]=v.split(':').map(Number); return h>=0&&h<=23&&m>=0&&m<=59; }
-  function markInvalid(el,on=true){ if(!el) return; el.setAttribute('aria-invalid',on?'true':'false'); el.style.outline=on?'2px solid #ef4444':''; el.style.outlineOffset=on?'2px':''; }
+  /* ================= defaults locais ================= */
+  const LOCAL_DEFAULTS = {
+    timezone: FALLBACK_TZ,
+    features:{
+      auto_messages:{
+        enabled:false,
+        welcome:{ enabled:false, text:"Olá! 👋 Como posso ajudar?", start:"08:00", end:"18:00" },
+        off_hours:{ enabled:false, text:"Atendemos de 08:00 às 18:00. Deixe sua mensagem e responderemos no próximo expediente.", start:"18:00", end:"08:00" }
+      },
+      auto_messages_departments:{
+        enabled:false,
+        welcome:{ enabled:false, text:"", start:"08:00", end:"18:00" }
+      }
+    }
+  };
 
-  // === horários & sobreposição ===
-  const DAY=24*60, pad2=n=>String(n).padStart(2,'0'), m2hhmm=m=>`${pad2(Math.floor(m/60)%24)}:${pad2(m%60)}`;
-  const hhmmToMin=s=>{ if(!timeValid(s)) return NaN; const [h,m]=s.split(':').map(Number); return (h*60+m)%DAY; };
-  const segs=(a,b)=> a===b?[]:(a<b?[[a,b]]:[[a,DAY],[0,b]]);
-  const overlap=(a1,a2,b1,b2)=>{ for(const [x,y] of segs(a1,a2)) for(const [u,v] of segs(b1,b2)) if(Math.min(y,v)>Math.max(x,u)) return [Math.max(x,u),Math.min(y,v)]; return null; };
-  const isComplement=(wS,wE,oS,oE)=> oS===wE && oE===wS;
+  /* ================= templates ================= */
+  function expandTemplate(text, {empresa,setor}={}){
+    const e = (empresa||_empresaNome||EMPRESA_NOME()).trim() || '[Empresa]';
+    const s = (setor||'').trim() || '{setor}';
+    return String(text||'')
+      .replaceAll('{empresa}', e)
+      .replaceAll('{setor}', s);
+  }
 
-  /* ======= placeholders ======= */
-
-  // Constrói a mensagem default "empresa + lista de departamentos"
   function buildWelcomeListaEmpresaDept(){
-    const empresa = _empresaNome || EMPRESA_NOME() || '[Empresa]';
-    const lista = (Array.isArray(_deptCache) && _deptCache.length)
-      ? _deptCache.slice(0, 12).map((d,i)=>`${i+1} - ${d.nome}`).join('\n')
-      : '1 - {setor}';
-    return (
-`Olá! 👋 Você fala com ${empresa}.
-
-Você gostaria de falar com qual setor hoje?
-${lista}`
-    );
+    const empresa = (_empresaNome||EMPRESA_NOME()||'[Empresa]').trim();
+    return `Olá! 👋 Você está falando com a ${empresa}. Como posso ajudar?`;
   }
 
-  // Expande tokens no texto livre
-  function expandTemplate(text){
-    let out = String(text || '');
-
-    if (_empresaNome && _empresaNome !== '[Empresa]') {
-      out = out.replace(/\{empresa\}|\[empresa\]|\[Empresa\]/gi, _empresaNome);
-    }
-
-    // se houver {setor} numa linha, troca pela lista numerada
-    if (/\{setor\}|\[setor\]/i.test(out)) {
-      const lista = (Array.isArray(_deptCache) && _deptCache.length)
-        ? _deptCache.slice(0, 12).map((d,i)=>`${i+1} - ${d.nome}`).join('\n')
-        : '1 - {setor}';
-      out = out.split('\n').map(
-        ln => (/(\{setor\}|\[setor\])/i.test(ln) ? lista : ln)
-      ).join('\n');
-    }
-
-    return out;
-  }
-
-  /* ======= helpers DEPARTAMENTO ======= */
-  function buildDeptWelcomeExample(dep) {
-    const setor   = (dep && (dep.nome || dep.name || dep.titulo || dep.title)) || '{setor}';
-    const empresa = _empresaNome || EMPRESA_NOME() || '[Empresa]';
-    const start   = (dwStart && dwStart.value) || '08:00';
-    const end     = (dwEnd   && dwEnd.value)   || '18:00';
-    return (
-      `Olá! 👋 Você está falando com o setor ${setor} da ${empresa}. ` +
+  function buildDeptWelcomeExample(setor){
+    const empresa = (_empresaNome||EMPRESA_NOME()||'[Empresa]').trim();
+    const start = (dwStart&&dwStart.value)||'08:00';
+    const end   = (dwEnd&&dwEnd.value)||'18:00';
+    return expandTemplate(
+      `Olá! 👋 Você está falando com o setor ${setor||'{setor}'} da ${empresa}. ` +
       `Estamos aqui para ajudar. ` +
       `Atendemos de ${start} às ${end}. ` +
       `Para agilizar, por favor diga seu nome e bairro.`
@@ -299,6 +264,100 @@ ${lista}`
     });
   }
 
+  /* ================= dept picker (lista de departamentos) ================= */
+  function ensureDeptItems(c){
+    const ad = c?.features?.auto_messages_departments || (c.features.auto_messages_departments = {enabled:false, welcome:{enabled:false,text:"",start:"08:00",end:"18:00"}});
+    if(!ad.items || typeof ad.items !== 'object' || Array.isArray(ad.items)) ad.items = {};
+    return ad.items;
+  }
+
+  function seedDeptItemsFromCache(c){
+    // Se não houver "items" no config, inicializa com TODOS os departamentos marcados
+    // (pra bater com sua expectativa: mostra tudo e já vem selecionado).
+    if(!Array.isArray(_deptCache) || !_deptCache.length) return;
+    const items = ensureDeptItems(c);
+    const hasAny = Object.keys(items).length > 0;
+    if(!hasAny){
+      _deptCache.forEach(d=>{
+        const id = String(d.id);
+        items[id] = { enabled:true, label: String(d.nome||'').trim() };
+      });
+    } else {
+      // garante label se faltar
+      _deptCache.forEach(d=>{
+        const id = String(d.id);
+        if(items[id] && (!items[id].label || !String(items[id].label).trim())){
+          items[id].label = String(d.nome||'').trim();
+        }
+      });
+    }
+  }
+
+  function setDeptPickerEnabled(enabled){
+    if(deptSearch) deptSearch.disabled = !enabled;
+    if(deptAll)    deptAll.disabled    = !enabled;
+    if(deptNone)   deptNone.disabled   = !enabled;
+    if(deptList){
+      deptList.classList.toggle('disabled', !enabled);
+      deptList.querySelectorAll('input[type="checkbox"]').forEach(ch => (ch.disabled = !enabled));
+    }
+  }
+
+  function countSelectedDeptItems(c){
+    const items = ensureDeptItems(c);
+    return Object.values(items).reduce((acc,it)=> acc + (it?.enabled ? 1 : 0), 0);
+  }
+
+  function renderDeptPicker(){
+    if(!deptList) return;
+    const items = ensureDeptItems(cfg || {});
+    const q = String(deptSearch?.value || '').trim().toLowerCase();
+    deptList.innerHTML = '';
+
+    if(!Array.isArray(_deptCache) || !_deptCache.length){
+      const empty = document.createElement('div');
+      empty.className = 'dept-empty';
+      empty.textContent = 'Nenhum departamento encontrado. Cadastre/ative departamentos para usar o modo 2.';
+      deptList.appendChild(empty);
+      deptCount && (deptCount.textContent = '0 selecionados');
+      return;
+    }
+
+    // render
+    const list = _deptCache
+      .map(d => ({ id:String(d.id), nome:String(d.nome||'').trim() }))
+      .filter(d => d.nome)
+      .filter(d => !q || d.nome.toLowerCase().includes(q));
+
+    list.forEach(d=>{
+      const row = document.createElement('label');
+      row.className = 'dept-row';
+      row.setAttribute('data-id', d.id);
+
+      const chk = document.createElement('input');
+      chk.type = 'checkbox';
+      chk.checked = !!items[d.id]?.enabled;
+      chk.addEventListener('change', ()=>{
+        items[d.id] = { ...(items[d.id]||{}), enabled: !!chk.checked, label: items[d.id]?.label || d.nome };
+        // mantém config sincronizado
+        cfg.features.auto_messages_departments.items = items;
+        deptCount && (deptCount.textContent = `${countSelectedDeptItems(cfg)} selecionados`);
+        updateSaveButtons();
+      });
+
+      const name = document.createElement('span');
+      name.className = 'dept-name';
+      name.textContent = d.nome;
+
+      row.appendChild(chk);
+      row.appendChild(name);
+      deptList.appendChild(row);
+    });
+
+    deptCount && (deptCount.textContent = `${countSelectedDeptItems(cfg||{})} selecionados`);
+    setDeptPickerEnabled(!!cfg?.features?.auto_messages_departments?.enabled);
+  }
+
   /* ================= acordeões & UI ================= */
   function setAccordionOpen(head, body, open){
     head?.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -306,31 +365,50 @@ ${lista}`
     body.style.opacity = open ? '1' : '0';
     body.style.pointerEvents = open ? 'auto' : 'none';
     body.setAttribute('aria-hidden', open ? 'false' : 'true');
-    head?.closest('.item')?.classList.toggle('open', !!open);
+    head?.closest('.card')?.querySelector('.chev')?.classList.toggle('open', open);
   }
-  function bindAccordion(head, body){ head?.addEventListener('click',()=>{ const open=head.getAttribute('aria-expanded')==='true'; setAccordionOpen(head,body,!open); }); }
+  function bindAccordion(head, body){
+    if(!head||!body) return;
+    head.addEventListener('click', (e)=>{
+      if(e.target?.closest?.('.tswitch')) return;
+      const open = head.getAttribute('aria-expanded')!=='true';
+      setAccordionOpen(head, body, open);
+    });
+  }
 
-  function updateScheduleVisibility(){
-    const onA = getSwitch(swAutoHdr);
-    const wOn = onA && getSwitch(swWelcome);
-    const oOn = onA && getSwitch(swOff);
-    schedWelcome?.classList.toggle('show', wOn);
-    schedOff?.classList.toggle('show', oOn);
-    const onD = getSwitch(swDeptHdr);
-    const dOn = onD && getSwitch(swDeptWelcome);
-    schedDeptWelcomeEl?.classList.toggle('show', dOn);
+  function bindSwitch(sw, pill, onChange){
+    if(!sw) return;
+    const input = sw.querySelector('input');
+    const toggle = ()=>{
+      if(input && input.disabled) return;
+      const on = !getSwitch(sw);
+      setSwitch(sw,on,pill);
+      sw.setAttribute('aria-pressed',on?'true':'false');
+      onChange?.(on);
+    };
+    sw.addEventListener('click', (e)=>{ if(e.target===input) return; toggle(); });
+    input?.addEventListener('change', ()=>{ setSwitch(sw, input.checked, pill); onChange?.(!!input.checked); });
+    sw.addEventListener('keydown', (e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); toggle(); }});
   }
+
+  function lockUI(locked, msg=''){
+    instRequiredBanner?.classList.toggle('show', !!locked);
+    if(instRequiredBanner) instRequiredBanner.textContent = msg || 'Selecione uma instância para configurar o chatbot.';
+    document.querySelectorAll('button, textarea, input[type="time"]').forEach(el=>{
+      if(el===instBtn) return;
+      el.disabled = !!locked;
+    });
+  }
+
   function setAutoChildrenEnabled(enabled){
     swWelcome?.classList.toggle('disabled',!enabled);
-    swWelcome?.querySelector('input')&&(swWelcome.querySelector('input').disabled=!enabled);
-    msgWelcome && (msgWelcome.disabled=!enabled||!getSwitch(swWelcome));
-    if(wStart) wStart.disabled=!enabled; if(wEnd) wEnd.disabled=!enabled;
-
     swOff?.classList.toggle('disabled',!enabled);
+    swWelcome?.querySelector('input')&&(swWelcome.querySelector('input').disabled=!enabled);
     swOff?.querySelector('input')&&(swOff.querySelector('input').disabled=!enabled);
+    msgWelcome && (msgWelcome.disabled=!enabled||!getSwitch(swWelcome));
     msgOff && (msgOff.disabled=!enabled||!getSwitch(swOff));
+    if(wStart) wStart.disabled=!enabled; if(wEnd) wEnd.disabled=!enabled;
     if(oStart) oStart.disabled=!enabled; if(oEnd) oEnd.disabled=!enabled;
-
     updateScheduleVisibility();
   }
   function setDeptChildrenEnabled(enabled){
@@ -338,12 +416,13 @@ ${lista}`
     swDeptWelcome?.querySelector('input')&&(swDeptWelcome.querySelector('input').disabled=!enabled);
     msgDeptWelcome && (msgDeptWelcome.disabled=!enabled||!getSwitch(swDeptWelcome));
     if(dwStart) dwStart.disabled=!enabled; if(dwEnd) dwEnd.disabled=!enabled;
+    setDeptPickerEnabled(enabled);
     updateScheduleVisibility();
   }
   function ensureMasters(c){
     c.features??={}; c.features.auto_messages??={};
     if(typeof c.features.auto_messages.enabled!=='boolean'){ c.features.auto_messages.enabled=false; }
-    c.features.auto_messages_departments??={ enabled:false, welcome:{enabled:false,text:"",start:"08:00",end:"18:00"} };
+    c.features.auto_messages_departments??={ enabled:false, welcome:{enabled:false,text:"",start:"08:00",end:"18:00"}, items:{} };
     c.timezone = (c.timezone||'').trim() || FALLBACK_TZ;
   }
 
@@ -356,70 +435,32 @@ ${lista}`
       setAccordionOpen(headAutoDept,bodyAutoDept,false);
       setAccordionOpen(headAuto,bodyAuto,true);
       setAutoChildrenEnabled(true); setDeptChildrenEnabled(false);
-      renderWelcomePreview(); renderOffPreview(); updateSaveButtons(); updateScheduleVisibility();
-    }else{
+    }
+    if(which==='dept'){
       setHeaderSwitch(swDeptHdr,pillDeptHdr,true);
       setHeaderSwitch(swAutoHdr,pillAutoHdr,false);
-      setSwitch(swWelcome,false,pillWelcome); setSwitch(swOff,false,pillOff);
       cfg.features.auto_messages_departments.enabled=true;
       cfg.features.auto_messages.enabled=false;
-      (cfg.features.auto_messages.welcome ||= {}).enabled=false;
-      (cfg.features.auto_messages.off_hours ||= {}).enabled=false;
       setAccordionOpen(headAuto,bodyAuto,false);
       setAccordionOpen(headAutoDept,bodyAutoDept,true);
-      setAutoChildrenEnabled(false); setDeptChildrenEnabled(true);
-      renderWelcomePreview(); renderOffPreview(); updateSaveButtons(); updateScheduleVisibility();
+      setDeptChildrenEnabled(true); setAutoChildrenEnabled(false);
     }
   }
 
-  function renderWelcomePreview(){
-    const on = getSwitch(swWelcome)&&getSwitch(swAutoHdr);
-    if(prevW) prevW.style.display=on?'':'none';
-    if(prevWText) prevWText.textContent=(msgWelcome?.value||'—').trim()||'—';
-  }
-  function renderOffPreview(){
-    const on = getSwitch(swOff)&&getSwitch(swAutoHdr);
-    if(prevO) prevO.style.display=on?'':'none';
-    if(prevO) prevO.textContent=(msgOff?.value||'—').trim()||'—';
+  function updateScheduleVisibility(){
+    const wOn = getSwitch(swWelcome) && getSwitch(swAutoHdr);
+    const oOn = getSwitch(swOff) && getSwitch(swAutoHdr);
+    const dwOn = getSwitch(swDeptWelcome) && getSwitch(swDeptHdr);
+
+    schedWelcome?.classList.toggle('show', !!wOn);
+    schedOff?.classList.toggle('show', !!oOn);
+    schedDeptWelcomeEl?.classList.toggle('show', !!dwOn);
   }
 
-  function bindSwitch(labelEl,pillEl,onToggle){
-    if(!labelEl) return; const input=labelEl.querySelector('input');
-    labelEl.addEventListener('click',(e)=>{
-      e.preventDefault(); e.stopPropagation();
-      const newVal=!input.checked; setSwitch(labelEl,newVal,pillEl); onToggle?.(newVal);
-      if(!cfg?.features) return;
-
-      if(labelEl===swAutoHdr){
-        if(newVal) enforceExclusive('auto');
-        else { cfg.features.auto_messages.enabled=false; setAutoChildrenEnabled(false); renderWelcomePreview(); renderOffPreview(); updateSaveButtons(); }
-        updateScheduleVisibility();
-      }
-      if(labelEl===swDeptHdr){
-        if(newVal) enforceExclusive('dept');
-        else { cfg.features.auto_messages_departments.enabled=false; setDeptChildrenEnabled(false); updateSaveButtons(); }
-      }
-      if(labelEl===swWelcome){
-        if(newVal&&!getSwitch(swAutoHdr)) enforceExclusive('auto');
-        msgWelcome&&(msgWelcome.disabled=!newVal||!getSwitch(swAutoHdr));
-        (cfg.features.auto_messages.welcome ||= {}).enabled=newVal;
-        renderWelcomePreview(); updateScheduleVisibility();
-      }
-      if(labelEl===swOff){
-        if(newVal&&!getSwitch(swAutoHdr)) enforceExclusive('auto');
-        msgOff&&(msgOff.disabled=!newVal||!getSwitch(swAutoHdr));
-        (cfg.features.auto_messages.off_hours ||= {}).enabled=newVal;
-        renderOffPreview(); updateScheduleVisibility();
-      }
-      if(labelEl===swDeptWelcome){
-        if(newVal&&!getSwitch(swDeptHdr)) enforceExclusive('dept');
-        msgDeptWelcome&&(msgDeptWelcome.disabled=!newVal||!getSwitch(swDeptHdr));
-        (cfg.features.auto_messages_departments.welcome ||= {}).enabled=newVal;
-        updateScheduleVisibility();
-      }
-    });
+  function updateSaveButtons(){
+    if(saveAuto) saveAuto.disabled=!getSwitch(swAutoHdr);
+    if(saveDept) saveDept.disabled=!getSwitch(swDeptHdr);
   }
-  function updateSaveButtons(){ if(saveAuto) saveAuto.disabled=!getSwitch(swAutoHdr); if(saveDept) saveDept.disabled=!getSwitch(swDeptHdr); }
 
   /* ================= API ================= */
   async function getConfig(){
@@ -450,45 +491,44 @@ ${lista}`
     const url = new URL('/api/chatbot/config', location.origin);
     url.searchParams.set('empresa_id', String(EMPRESA_ID()));
     url.searchParams.set('instancia_id', requireActiveInstKey());
+
     const r = await authFetch(url.toString(), {
       method:'PUT',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({config:data})
+      body: JSON.stringify(data)
     });
-
-    let detail='';
-    try {
-      const body = await r.clone().json();
-      detail = body?.detail ? (typeof body.detail==='string'? body.detail : JSON.stringify(body.detail)) : '';
-    } catch { detail = await r.text(); }
-
     if(!r.ok){
-      const dlow=(detail||'').toLowerCase();
-      const tzMissing = (dlow.includes(' tz ')||dlow.includes('"tz"')) && (dlow.includes('not-null')||dlow.includes('null'));
-      if(tzMissing){
-        const btn=document.createElement('button');
-        btn.type='button'; btn.textContent=`Usar ${FALLBACK_TZ} e salvar`;
-        btn.style.cssText='padding:8px 12px;border-radius:10px;background:#10b981;color:#111827;border:0;font-weight:700;cursor:pointer';
-        btn.addEventListener('click', async ()=>{
-          try{ data.timezone=FALLBACK_TZ; await putConfig(data); toast('Fuso horário aplicado e configurações salvas.'); }catch(_e){}
-        });
-        notify({
-          title:'Defina o fuso horário da empresa',
-          message:`Para salvar as mensagens automáticas, precisamos do fuso horário.<br>Você pode ajustar em <b>Configurações → Empresa → Fuso horário</b> (ex.: ${FALLBACK_TZ}) ou clicar no botão abaixo.`,
-          kind:'warn',
-          details:detail,
-          actions:[btn]
-        });
-        throw new Error('missing_timezone');
-      }
-      const {title,message,details}=friendlyHttpError(r.status, detail);
-      notify({title,message,kind:(r.status>=400?'error':'warn'),details});
-      throw new Error(message);
+      const t = await r.text().catch(()=> '');
+      throw new Error(`PUT config ${r.status}\n${t}`);
     }
-    return true;
+    return r.json().catch(()=> ({}));
   }
 
-  /* ================= validação (anti-sobreposição opcional) ================= */
+  /* ================= validação ================= */
+  function markInvalid(el,on=true){
+    if(!el) return;
+    el.style.borderColor = on ? 'rgba(244,63,94,.55)' : '';
+    el.style.boxShadow   = on ? '0 0 0 3px rgba(244,63,94,.15)' : '';
+  }
+  function timeValid(v){ return /^\d{2}:\d{2}$/.test(String(v||'')); }
+  function hhmmToMin(v){ const [h,m]=String(v).split(':').map(Number); return (h*60+m)%1440; }
+  function m2hhmm(m){ const h=Math.floor(m/60)%24; const mm=m%60; return String(h).padStart(2,'0')+':'+String(mm).padStart(2,'0'); }
+  function overlap(aS,aE,bS,bE){
+    const norm=(s,e)=> (e>s)?[[s,e]]:[[s,1440],[0,e]];
+    const A=norm(aS,aE), B=norm(bS,bE);
+    for(const [as,ae] of A) for(const [bs,be] of B){
+      const s=Math.max(as,bs), e=Math.min(ae,be);
+      if(e>s) return [s,e];
+    }
+    return null;
+  }
+  function isComplement(ws,we,os,oe){
+    const W = overlap(ws,we,os,oe)===null;
+    if(!W) return false;
+    const covers = (ws<we && os>oe) || (ws>we && os<oe) || (ws===oe && we===os);
+    return covers;
+  }
+
   function validateBeforeSave(kind='auto'){
     [wStart,wEnd,oStart,oEnd,dwStart,dwEnd,msgWelcome,msgOff,msgDeptWelcome].forEach(x=>markInvalid(x,false));
     const errors=[]; const fixes=[];
@@ -523,11 +563,11 @@ ${lista}`
           fix.addEventListener('click',()=>{ oStart.value=wEnd.value; markInvalid(oStart,false); markInvalid(wEnd,false); toast('Corrigido: sem sobreposição.'); });
           fixes.push(fix);
         } else if (!isComplement(ws,we,os,oe)){
-          // Apenas aviso (você decidiu permitir “buracos”)
           const fix=document.createElement('button');
-          fix.type='button'; fix.textContent='Complementar automaticamente';
-          fix.style.cssText='padding:8px 12px;border-radius:10px;background:#60a5fa;color:#111827;border:0;font-weight:700;cursor:pointer';
-          fix.addEventListener('click',()=>{ oStart.value=wEnd.value; oEnd.value=wStart.value; toast('Faixa de “Fora do horário” complementada.'); });
+          fix.type='button'
+          fix.textContent='Ajustar para complementar (recomendado)';
+          fix.style.cssText='padding:8px 12px;border-radius:10px;background:#93c5fd;color:#111827;border:0;font-weight:800;cursor:pointer';
+          fix.addEventListener('click',()=>{ oStart.value=wEnd.value; oEnd.value=wStart.value; toast('Boas-vindas e “Fora do horário” complementada.'); });
           errors.push('Os intervalos não são complementares (pode sobrar horário sem mensagem).');
           fixes.push(fix);
         }
@@ -536,11 +576,19 @@ ${lista}`
 
     if(kind==='dept' && getSwitch(swDeptHdr)){
       if(getSwitch(swDeptWelcome)){
-        if(!msgDeptWelcome?.value?.trim()) { errors.push('Mensagem por departamento não pode ficar vazia.'); markInvalid(msgDeptWelcome,true); }
+        if(!msgDeptWelcome?.value?.trim()) { errors.push('Mensagem de departamentos não pode ficar vazia.'); markInvalid(msgDeptWelcome,true); }
         if(dwStart && !timeValid(dwStart.value)) { errors.push('Horário inicial (departamentos) inválido.'); markInvalid(dwStart,true); }
         if(dwEnd && !timeValid(dwEnd.value))   { errors.push('Horário final (departamentos) inválido.'); markInvalid(dwEnd,true); }
       } else {
         errors.push('Ative a mensagem de departamentos para salvar este bloco.');
+      }
+
+      // precisa ter pelo menos 1 departamento selecionado
+      if (Array.isArray(_deptCache) && _deptCache.length){
+        const sel = countSelectedDeptItems(cfg||{});
+        if(sel <= 0){
+          errors.push('Selecione ao menos 1 departamento para a triagem.');
+        }
       }
     }
 
@@ -552,27 +600,32 @@ ${lista}`
     return true;
   }
 
-  /* ================= fill helpers (expansão de tokens) ================= */
-  function maybeFillWelcome(){
-    if(!msgWelcome) return;
-
-    // aplica expansão sempre
-    msgWelcome.value = expandTemplate(msgWelcome.value);
-
-    const v = (msgWelcome.value||'').trim();
-    const precisaTrocar = (!v || /\{empresa\}|\[Empresa\]/i.test(v) || v === 'Olá! 👋 Como posso ajudar?' || v.startsWith('Olá! 👋 Você fala com'));
-    if (precisaTrocar) {
-      msgWelcome.value = expandTemplate(buildWelcomeListaEmpresaDept());
-    }
-    wcCount && (wcCount.textContent = `${msgWelcome.value.length} caracteres`);
-    renderWelcomePreview();
+  /* ================= render previews ================= */
+  function renderWelcomePreview(){
+    if(!prevWText) return;
+    const txt = expandTemplate(msgWelcome?.value||buildWelcomeListaEmpresaDept(), {empresa:_empresaNome});
+    prevWText.textContent = txt;
+  }
+  function renderOffPreview(){
+    if(!prevOText) return;
+    const txt = expandTemplate(msgOff?.value||'', {empresa:_empresaNome});
+    prevOText.textContent = txt;
   }
 
-  function maybeFillDeptWelcome(){
+  function maybeFillWelcome(){
+    if(!msgWelcome) return;
+    if(!msgWelcome.value.trim()){
+      msgWelcome.value = buildWelcomeListaEmpresaDept();
+      wcCount && (wcCount.textContent = `${msgWelcome.value.length} caracteres`);
+      renderWelcomePreview();
+    }
+  }
+
+  function maybeFillDeptWelcomeExample(setor){
     if(!msgDeptWelcome) return;
-    const v = (msgDeptWelcome.value||'').trim();
-    if(!v || /\{empresa\}|\[Empresa\]/i.test(v) || v.includes('{setor}')){
-      msgDeptWelcome.value = buildDeptWelcomeExample(null);
+    if(!msgDeptWelcome.value.trim()){
+      msgDeptWelcome.value = buildDeptWelcomeExample(setor);
+      dwCount && (dwCount.textContent = `${msgDeptWelcome.value.length} caracteres`);
     }
     // sempre expande tokens
     msgDeptWelcome.value = expandTemplate(msgDeptWelcome.value);
@@ -582,6 +635,9 @@ ${lista}`
   /* ================= load/render ================= */
   async function loadAll(){
     cfg = await getConfig(); ensureMasters(cfg);
+
+    // inicializa seleção padrão (todos os deps marcados) quando ainda não existe "items"
+    seedDeptItemsFromCache(cfg);
 
     // Snapshot p/ botão Cancelar
     _lastLoadedSnapshot = JSON.stringify(cfg);
@@ -618,12 +674,14 @@ ${lista}`
     if(dwEnd)   dwEnd.value   = dw.end   ?? '18:00';
     setDeptChildrenEnabled(!!cfg.features.auto_messages_departments.enabled);
 
-    // chips
+    // chips + dept list
     attachDeptSuggestions(msgDeptWelcome);
+    renderDeptPicker();
+
     updateScheduleVisibility(); updateSaveButtons();
   }
 
-  /* ================= save handlers ================= */
+  /* ================= salvar ================= */
   async function saveAutoBlock(){
     if(!validateBeforeSave('auto')) return;
     cfg.timezone = (cfg.timezone||'').trim() || FALLBACK_TZ;
@@ -643,7 +701,7 @@ ${lista}`
       start:(oStart&&oStart.value)||'18:00',
       end:(oEnd&&oEnd.value)||'08:00'
     };
-    try{ await putConfig(cfg); toast('Configurações salvas com sucesso.'); _lastLoadedSnapshot = JSON.stringify(cfg); }catch(_e){}
+    try{ await putConfig(cfg); toast('Mensagem automática salva.'); _lastLoadedSnapshot = JSON.stringify(cfg); }catch(_e){}
   }
 
   async function saveDeptBlock(){
@@ -676,34 +734,31 @@ ${lista}`
       if(wStart) wStart.value = w.start ?? '08:00';
       if(wEnd)   wEnd.value   = w.end   ?? '18:00';
       if(wcCount) wcCount.textContent = `${(msgWelcome?.value||'').length} caracteres`;
-      maybeFillWelcome();
 
       const o = cfg.features.auto_messages.off_hours || {};
       setSwitch(swOff, !!o.enabled, pillOff);
-      if(msgOff) msgOff.value = o.text ?? 'Atendemos de 08:00 às 18:00. Deixe sua mensagem e responderemos no próximo expediente.';
+      if(msgOff) msgOff.value = o.text ?? '';
       if(oStart) oStart.value = o.start ?? '18:00';
       if(oEnd)   oEnd.value   = o.end   ?? '08:00';
       if(offCount) offCount.textContent = `${(msgOff?.value||'').length} caracteres`;
 
       const dw = cfg.features.auto_messages_departments.welcome || {};
       setSwitch(swDeptWelcome, !!dw.enabled, pillDeptWelcome);
-      if(msgDeptWelcome){
-        msgDeptWelcome.value = (dw.text ?? '').trim() || buildDeptWelcomeExample(null);
-        if(dwCount) dwCount.textContent = `${msgDeptWelcome.value.length} caracteres`;
-        msgDeptWelcome.value = expandTemplate(msgDeptWelcome.value);
-      }
+      if(msgDeptWelcome) msgDeptWelcome.value = (dw.text ?? '').trim() || buildDeptWelcomeExample(null);
+      if(dwCount) dwCount.textContent = `${(msgDeptWelcome?.value||'').length} caracteres`;
       if(dwStart) dwStart.value = dw.start ?? '08:00';
       if(dwEnd)   dwEnd.value   = dw.end   ?? '18:00';
 
       setAutoChildrenEnabled(!!cfg.features.auto_messages.enabled);
       setDeptChildrenEnabled(!!cfg.features.auto_messages_departments.enabled);
       renderWelcomePreview(); renderOffPreview();
+      attachDeptSuggestions(msgDeptWelcome);
+      renderDeptPicker();
       updateScheduleVisibility(); updateSaveButtons();
-      toast('Alterações descartadas.', 'warn');
-    }catch{}
+    }catch(e){}
   }
 
-  /* ================= boot ================= */
+  /* ================= inst dropdown ================= */
   async function initInstDropdown(){
     if(!instBtn||!instMenu||!instList) return;
     if(!window.CSS) window.CSS={}; if(typeof CSS.escape!=='function') CSS.escape=(v)=>String(v??'').replace(/["\\]/g,'\\$&').replace(/\s/g,'\\ ');
@@ -724,46 +779,24 @@ ${lista}`
     function toggleMenu(){ (instMenu.getAttribute('aria-hidden')!=='false')?openMenu():closeMenu(); }
     function onDocClick(e){ if(!instMenu.contains(e.target)&&e.target!==instBtn) closeMenu(); }
     function onKey(e){
-      if(e.key==='Escape'){ e.preventDefault(); closeMenu(); instBtn.focus(); }
-      if(instMenu.getAttribute('aria-hidden')==='true') return;
-      const items=Array.from(instList.querySelectorAll('.inst-item')); const i=items.indexOf(document.activeElement);
-      if(e.key==='ArrowDown'){ e.preventDefault(); (items[i+1]||items[0])?.focus(); }
-      if(e.key==='ArrowUp'){ e.preventDefault(); (items[i-1]||items[items.length-1])?.focus(); }
-      if(e.key==='Home'){ e.preventDefault(); items[0]?.focus(); }
-      if(e.key==='End'){ e.preventDefault(); items[items.length-1]?.focus(); }
-      if(e.key==='Enter'||e.key===' '){
-        const a=document.activeElement;
-        if(a&&a.classList.contains('inst-item')){ e.preventDefault(); selectValue(a.dataset.value,a.dataset.label); }
-      }
+      if(e.key==='Escape'){ closeMenu(); instBtn.focus(); }
     }
-    instBtn.addEventListener('click',toggleMenu);
 
-    const empresaId=EMPRESA_ID();
-    const instValue=(i)=> i.instancia_id ?? i.id ?? i.instance_id ?? i.session ?? i.sessionName ?? '';
-    const instLabel2=(i,v)=> i.apelido || i.nome || i.instance_name || String(v) || 'Instância';
-
-    function itemTpl(text,value,selected){
-      const li=document.createElement('li');
-      const b=document.createElement('button'); b.type='button'; b.className='inst-item'; b.setAttribute('role','option');
-      b.setAttribute('aria-selected',selected?'true':'false'); b.tabIndex=-1; b.dataset.value=String(value??''); b.dataset.label=text;
-      b.innerHTML=`<span class="radio" aria-hidden="true"></span><span>${text}</span>`;
-      b.addEventListener('click',()=>selectValue(String(value??''),text));
-      li.appendChild(b); return li;
-    }
     function setActiveUI(value,text){
-      instList.querySelectorAll('.inst-item').forEach(b=>b.setAttribute('aria-selected', b.dataset.value===String(value)?'true':'false'));
-      const active=instList.querySelector(`.inst-item[data-value="${CSS.escape(value)}"]`);
-      if(active) instMenu.setAttribute('aria-activedescendant', active.id || (active.id='inst-opt-chat-'+String(value||'x')));
+      instList.querySelectorAll('.inst-item').forEach(x=>x.setAttribute('aria-selected','false'));
+      const active = value ? instList.querySelector(`[data-value="${CSS.escape(String(value))}"]`) : null;
+      active?.setAttribute('aria-selected','true');
+      if(instList) instList.setAttribute('aria-activedescendant', active?.id || '');
       if(instLabel) instLabel.textContent = text || (value ? `Instância ${value}` : 'Selecione uma instância');
     }
+
     function selectValue(value,text){
       window.__INST_ID = value ? normalizeInstValue(value) : '';
       setActiveUI(value,text);
       if(window.__INST_ID){
         lockUI(false);
         loadAll().catch(e=>{
-          const {title,message,details}=friendlyHttpError(0,String(e?.message||e));
-          notify({title,message,details});
+          notify({title:'Erro', message:String(e?.message||e), details:String(e?.stack||'')});
         });
       } else {
         lockUI(true,'Selecione uma instância para configurar o chatbot.');
@@ -774,53 +807,69 @@ ${lista}`
     async function loadList(){
       instList.innerHTML='';
       let items=[];
+      const empresaId=EMPRESA_ID();
       if(empresaId){
         try{
           const r=await authFetch(`/api/empresas/${empresaId}/whatsapp`,{credentials:'include'});
-          if(!r.ok) throw 0;
-          const j=await r.json(); items = Array.isArray(j.instancias)? j.instancias : [];
-        }catch{
-          try{
-            const r2=await authFetch(`/api/instancias/list?empresa_id=${empresaId}`,{credentials:'include'});
-            const j2=await r2.json(); items = Array.isArray(j2)? j2 : (Array.isArray(j2?.instancias) ? j2.instancias : []);
-          }catch{}
-        }
+          if(r.ok){
+            const data=await r.json();
+            items = Array.isArray(data)?data:(data?.items||[]);
+          }
+        }catch{}
       }
-      items.forEach(i=>{
-        const v=normalizeInstValue(instValue(i));
-        const t=instLabel2(i,v);
-        instList.appendChild(itemTpl(t,v,false));
+
+      items = (items||[]).map(x=>({
+        id: x?.id ?? x?.instancia_id ?? x?.instanciaId,
+        name: x?.instance_name ?? x?.nome ?? x?.name ?? x?.titulo ?? `Instância ${x?.id}`
+      })).filter(x=>x.id);
+
+      if(!items.length){
+        const it=el('div','inst-item'); it.textContent='Nenhuma instância encontrada.'; it.style.color='var(--muted)';
+        instList.appendChild(it);
+        return;
+      }
+
+      items.forEach((it,idx)=>{
+        const b=el('div','inst-item');
+        b.id='inst-opt-chat-'+String(it.id);
+        b.tabIndex=0;
+        b.setAttribute('role','option');
+        b.setAttribute('data-value', String(it.id));
+        b.setAttribute('aria-selected','false');
+
+        const left=el('div');
+        left.innerHTML = `<div style="font-weight:900">${it.name}</div><div class="inst-badge">ID ${it.id}</div>`;
+        const right=el('div'); right.innerHTML='<i class="fa-solid fa-check" style="opacity:.65"></i>';
+        b.append(left,right);
+
+        b.addEventListener('click', ()=>selectValue(it.id,it.name));
+        b.addEventListener('keydown', (e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); selectValue(it.id,it.name); }});
+        instList.appendChild(b);
       });
 
-      if(window.__INST_ID==null||window.__INST_ID===''){
-        const firstConnected = items.find(x=>!!(x.connected||x.conectada||x.status==='CONNECTED'));
-        const firstAny = items[0];
-        const chosen = firstConnected || firstAny;
-        window.__INST_ID = chosen ? normalizeInstValue(instValue(chosen)) : '';
-      }
-
-      if(window.__INST_ID){
-        const sel=instList.querySelector(`.inst-item[data-value="${CSS.escape(String(window.__INST_ID))}"]`);
-        const text=sel?.dataset?.label || `Instância ${window.__INST_ID}`;
-        setActiveUI(sel?.dataset?.value ?? String(window.__INST_ID),text); lockUI(false);
-      }else{
-        setActiveUI('','Selecione uma instância'); lockUI(true,'Nenhuma instância disponível. Conecte um WhatsApp primeiro.');
+      const current=getActiveInstKey();
+      if(current){
+        const found=items.find(x=>String(x.id)===String(current));
+        if(found) setActiveUI(found.id, found.name);
       }
     }
+
+    instBtn.addEventListener('click', toggleMenu);
     await loadList();
   }
 
+  /* ================= boot ================= */
   async function boot(){
     try{
       bindAccordion(headAuto, bodyAuto);
       bindAccordion(headAutoDept, bodyAutoDept);
 
-      bindSwitch(swAutoHdr, pillAutoHdr, (on)=>{ if(on)enforceExclusive('auto'); else{ if(cfg?.features) cfg.features.auto_messages.enabled=false; setAutoChildrenEnabled(false); updateSaveButtons(); updateScheduleVisibility(); } });
-      bindSwitch(swDeptHdr, pillDeptHdr, (on)=>{ if(on)enforceExclusive('dept'); else{ if(cfg?.features) cfg.features.auto_messages_departments.enabled=false; setDeptChildrenEnabled(false); updateSaveButtons(); } });
+      bindSwitch(swAutoHdr, pillAutoHdr, (on)=>{ if(on)enforceExclusive('auto'); else { cfg.features.auto_messages.enabled=false; setAutoChildrenEnabled(false); } updateSaveButtons(); updateScheduleVisibility(); });
+      bindSwitch(swDeptHdr, pillDeptHdr, (on)=>{ if(on)enforceExclusive('dept'); else { cfg.features.auto_messages_departments.enabled=false; setDeptChildrenEnabled(false); } updateSaveButtons(); });
 
-      bindSwitch(swWelcome, pillWelcome, (on)=>{ if(cfg){ (cfg.features.auto_messages.welcome ||= {}).enabled=on; } if(on&&!getSwitch(swAutoHdr)) enforceExclusive('auto'); });
-      bindSwitch(swOff, pillOff, (on)=>{ if(cfg){ (cfg.features.auto_messages.off_hours ||= {}).enabled=on; } if(on&&!getSwitch(swAutoHdr)) enforceExclusive('auto'); });
-      bindSwitch(swDeptWelcome, pillDeptWelcome, (on)=>{ if(cfg){ (cfg.features.auto_messages_departments.welcome ||= {}).enabled=on; } if(on&&!getSwitch(swDeptHdr)) enforceExclusive('dept'); });
+      bindSwitch(swWelcome, pillWelcome, (on)=>{ if(cfg){ (cfg.features.auto_messages.welcome||{}).enabled=on; } if(on&&!getSwitch(swAutoHdr)) enforceExclusive('auto'); });
+      bindSwitch(swOff, pillOff, (on)=>{ if(cfg){ (cfg.features.auto_messages.off_hours||{}).enabled=on; } if(on&&!getSwitch(swAutoHdr)) enforceExclusive('auto'); });
+      bindSwitch(swDeptWelcome, pillDeptWelcome, (on)=>{ if(cfg){ (cfg.features.auto_messages_departments.welcome||{}).enabled=on; } if(on&&!getSwitch(swDeptHdr)) enforceExclusive('dept'); });
 
       msgWelcome?.addEventListener('input',()=>{ msgWelcome.value = expandTemplate(msgWelcome.value); wcCount&&(wcCount.textContent=`${msgWelcome.value.length} caracteres`); renderWelcomePreview(); });
       wStart?.addEventListener('change',()=> { if(cfg?.features?.auto_messages?.welcome) cfg.features.auto_messages.welcome.start = wStart.value; });
@@ -831,6 +880,35 @@ ${lista}`
       msgDeptWelcome?.addEventListener('input',()=>{ msgDeptWelcome.value = expandTemplate(msgDeptWelcome.value); dwCount&&(dwCount.textContent=`${msgDeptWelcome.value.length} caracteres`); });
       dwStart?.addEventListener('change',()=> { if(cfg?.features?.auto_messages_departments?.welcome) cfg.features.auto_messages_departments.welcome.start = dwStart.value; });
       dwEnd  ?.addEventListener('change',()=> { if(cfg?.features?.auto_messages_departments?.welcome) cfg.features.auto_messages_departments.welcome.end   = dwEnd.value; });
+
+      // dept picker
+      deptSearch?.addEventListener('input', ()=>{ renderDeptPicker(); });
+
+      deptAll?.addEventListener('click', ()=>{
+        if(!cfg) return;
+        const items = ensureDeptItems(cfg);
+        (_deptCache||[]).forEach(d=>{
+          const id = String(d.id);
+          const nome = String(d.nome||'').trim();
+          items[id] = { ...(items[id]||{}), enabled:true, label: items[id]?.label || nome };
+        });
+        cfg.features.auto_messages_departments.items = items;
+        renderDeptPicker();
+        updateSaveButtons();
+      });
+
+      deptNone?.addEventListener('click', ()=>{
+        if(!cfg) return;
+        const items = ensureDeptItems(cfg);
+        (_deptCache||[]).forEach(d=>{
+          const id = String(d.id);
+          const nome = String(d.nome||'').trim();
+          items[id] = { ...(items[id]||{}), enabled:false, label: items[id]?.label || nome };
+        });
+        cfg.features.auto_messages_departments.items = items;
+        renderDeptPicker();
+        updateSaveButtons();
+      });
 
       saveAuto?.addEventListener('click', saveAutoBlock);
       saveDept?.addEventListener('click', saveDeptBlock);
@@ -843,8 +921,7 @@ ${lista}`
       lockUI(false);
       await loadAll();
     }catch(e){
-      const {title,message,details}=friendlyHttpError(0,String(e?.message||e));
-      notify({title,message,details});
+      notify({title:'Erro', message:String(e?.message||e), details:String(e?.stack||'')});
     }
   }
 
