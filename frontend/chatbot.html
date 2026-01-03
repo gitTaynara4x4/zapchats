@@ -14,57 +14,31 @@
 
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
-
   <link rel="stylesheet" href="/frontend/css/chatbot.css"/>
 
   <style>
-    .inst-trigger{display:inline-flex;align-items:center;gap:.5rem;padding:.4rem .6rem;border:1px solid var(--border);border-radius:.65rem;background:var(--card);cursor:pointer}
+    .inst-trigger{display:inline-flex;align-items:center;gap:.5rem;padding:.4rem .7rem;border-radius:.6rem;font-weight:600;font-size:.9rem;background:var(--card);border:1px solid var(--border);color:var(--fg);cursor:pointer;margin-left:.5rem}
     .inst-trigger:hover{background:var(--hover)}
-    .inst-menu{position:relative}
-    .inst-pop{position:absolute;top:calc(100% + 8px);left:0;z-index:50;width:min(420px,90vw);background:var(--card);border:1px solid var(--border);border-radius:.75rem;box-shadow:0 18px 60px rgba(0,0,0,.25);padding:.5rem;display:none}
-    .inst-pop[aria-hidden="false"]{display:block}
-    .inst-list{max-height:320px;overflow:auto}
-    .inst-item{display:flex;align-items:center;justify-content:space-between;gap:.6rem;padding:.55rem .6rem;border-radius:.6rem;cursor:pointer}
+    .inst-trigger .chev{font-size:.9rem;opacity:.85}
+    .inst-menu{position:absolute;top:100%;left:0;margin-top:.5rem;z-index:50;min-width:260px;max-height:340px;overflow:auto;background:var(--card);color:var(--fg);border:1px solid var(--border);border-radius:.75rem;box-shadow:0 12px 32px rgba(0,0,0,.45);display:none}
+    .inst-menu[aria-hidden="false"]{display:block}
+    .inst-menu .head{position:sticky;top:0;background:var(--card);padding:.6rem .75rem;font-weight:700;font-size:.9rem;border-bottom:1px solid var(--border)}
+    .inst-menu ul{list-style:none;margin:0;padding:.4rem}
+    .inst-menu li{margin:0;padding:0}
+    .inst-item{width:100%;text-align:left;border:0;background:transparent;color:inherit;padding:.55rem .6rem;border-radius:.55rem;display:flex;align-items:center;gap:.55rem;cursor:pointer}
     .inst-item:hover{background:var(--hover)}
-    .inst-item[aria-selected="true"]{outline:2px solid rgba(79,131,255,.35);background:rgba(79,131,255,.08)}
-    .inst-badge{font-size:.78rem;color:var(--muted)}
-    .inst-required{display:none;margin:.75rem 0;padding:.7rem .85rem;border:1px dashed var(--border);border-radius:.75rem;color:var(--muted)}
-    .inst-required.show{display:block}
+    .inst-item[aria-selected="true"]{outline:2px solid var(--ring);outline-offset:0;background:color-mix(in oklab, var(--ring) 6%, transparent)}
+    .inst-item .radio{width:16px;height:16px;border-radius:999px;border:2px solid var(--border);display:inline-flex;align-items:center;justify-content:center}
+    .inst-item[aria-selected="true"] .radio{border-color:var(--ring)}
+    .inst-item[aria-selected="true"] .radio::after{content:"";width:8px;height:8px;border-radius:999px;background:var(--ring);display:block}
 
-    /* mini “tabs”/pills */
-    .pill{font-size:.78rem;padding:.16rem .5rem;border-radius:999px;border:1px solid var(--border);color:var(--muted)}
-    .pill.on{border-color:rgba(34,197,94,.45);color:#22c55e;background:rgba(34,197,94,.08)}
-    .pill.off{border-color:rgba(244,63,94,.35);color:#fb7185;background:rgba(244,63,94,.06)}
-
-    /* toggle switch */
-    .tswitch{--w:54px;--h:28px;position:relative;display:inline-flex;align-items:center;justify-content:center;width:var(--w);height:var(--h);border-radius:999px;border:1px solid var(--border);background:var(--bg);cursor:pointer;user-select:none}
-    .tswitch input{position:absolute;inset:0;opacity:0;cursor:pointer}
-    .tswitch .track{position:absolute;inset:0;border-radius:999px;background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(0,0,0,.06))}
-    .tswitch .knob{position:absolute;left:3px;top:3px;width:calc(var(--h) - 6px);height:calc(var(--h) - 6px);border-radius:999px;background:#e5e7eb;transition:transform .2s ease}
-    .tswitch .label{position:absolute;font-size:.72rem;font-weight:800;opacity:.8}
-    .tswitch .label.off{left:8px;color:#fb7185}
-    .tswitch .label.on{right:10px;color:#22c55e}
-    .tswitch[data-on="true"] .knob{ transform: translateX(calc(var(--w) - var(--h))); }
-
-    .tswitch:focus-visible{ outline:3px solid rgba(79,131,255,.35); outline-offset:2px; border-radius:999px; }
-
-    /* Campos */
-    label{font-weight:600}
-    textarea{
-      width:100%;min-height:110px;resize:vertical;padding:.6rem .75rem;border-radius:.6rem;
-      background:var(--bg);color:var(--fg);border:1px solid var(--border);outline:none
-    }
-    textarea:focus{box-shadow:0 0 0 3px var(--ring);border-color:transparent}
-    .counter{font-size:.88rem;color:var(--muted);margin-top:.25rem}
-    .time-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin:.35rem 0}
-    @media (max-width:520px){.time-grid{grid-template-columns:1fr}}
-    input[type="time"]{
-      width:100%;padding:.5rem .6rem;border-radius:.6rem;
-      background:var(--bg);color:var(--fg);border:1px solid var(--border)
-    }
-    input[type="time"]:focus{box-shadow:0 0 0 3px var(--ring);border-color:transparent}
-    .sched{display:none}
+    /* horários */
+    .sched{margin:.35rem 0 .5rem;display:none}
     .sched.show{display:block}
+    .time-grid{display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:.5rem}
+    .time-grid label{display:block;font-size:.8rem;color:var(--muted)}
+    .time-grid input[type="time"]{width:100%;padding:.5rem .6rem;border:1px solid var(--border);background:var(--card);color:var(--fg);border-radius:.5rem}
+    .time-grid input[disabled]{opacity:.6;cursor:not-allowed}
 
     /* chips de sugestões (departamentos) */
     .chips{display:flex;flex-wrap:wrap;gap:.4rem;margin:.35rem 0}
@@ -75,46 +49,40 @@
   <script src="/frontend/js/app-base.js" defer></script>
   <script src="/frontend/js/auth.js" defer></script>
   <script src="/frontend/js/pages/chatbot.js" defer></script>
-
 </head>
 <body>
+  <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
+
   <main class="main">
-    <header class="page-top">
-      <div class="left">
-        <div class="h1">Chatbot <span class="tag tag-ia">funcionalidades</span></div>
-        <div class="sub">Configure mensagens automáticas por instância.</div>
-      </div>
+    <div class="section-title" style="position:relative">
+      <h1><i class="fa-solid fa-robot title-ico"></i> Chatbot</h1>
+      <span class="tag tag-ia">Funcionalidades</span>
 
-      <!-- seletor de instância -->
-      <div class="right inst-menu">
-        <button id="instMenuBtnChat" class="inst-trigger" aria-haspopup="listbox" aria-expanded="false">
-          <i class="fa-solid fa-sim-card"></i>
-          <span id="instMenuLabelChat">Selecione uma instância</span>
-          <i class="fa-solid fa-chevron-down" style="opacity:.7"></i>
-        </button>
-        <div id="inst-menu-chat" class="inst-pop" aria-hidden="true">
-          <div class="inst-list" id="instMenuListChat" role="listbox" aria-label="Instâncias"></div>
-        </div>
+      <!-- dropdown de instâncias -->
+      <button id="instMenuBtnChat" type="button" role="button" class="inst-trigger"
+              aria-haspopup="listbox" aria-expanded="false" aria-controls="inst-menu-chat">
+        <span id="instMenuLabelChat">Todas as instâncias</span>
+        <span class="chev">▾</span>
+      </button>
+      <div id="inst-menu-chat" class="inst-menu" role="listbox" aria-hidden="true" aria-label="Selecionar instância">
+        <div class="head">WhatsApps</div>
+        <ul id="instMenuListChat"></ul>
       </div>
-    </header>
-
-    <div id="instRequiredBanner" class="inst-required">
-      Selecione uma instância para configurar o chatbot.
     </div>
 
-    <section class="grid">
-      <!-- ===== bloco 1 ===== -->
-      <article class="card">
+    <section class="stack" aria-label="Funcionalidades do chatbot">
+      <!-- ========== BLOCO 1 ========== -->
+      <article class="item" id="it-auto">
         <header class="head" data-toggle="auto" role="button" aria-expanded="false">
-          <div class="ico"><i class="fa-solid fa-message"></i></div>
+          <div class="ico"><i class="fa-solid fa-comments"></i></div>
           <div>
-            <div class="title">Mensagens automáticas — Simples</div>
-            <div class="desc">Boas-vindas e Fora do horário.</div>
+            <div class="title">Mensagens automáticas</div>
+            <div class="desc">Ative cada uma e defina seus horários.</div>
           </div>
           <div class="right">
             <span id="pillAutoHdr" class="pill off">off</span>
-            <label class="tswitch" id="swAutoHdr" data-on="false" title="Ativar/desativar bloco simples" tabindex="0" aria-pressed="false">
-              <input type="checkbox" aria-label="Ativar/desativar bloco simples">
+            <label class="tswitch" id="swAutoHdr" data-on="false" title="Ativar/desativar mensagens automáticas" tabindex="0" aria-pressed="false">
+              <input type="checkbox" aria-label="Ativar/desativar mensagens automáticas">
               <span class="track"></span>
               <span class="label off">off</span>
               <span class="label on">on</span>
@@ -126,76 +94,78 @@
 
         <div class="body" id="body-auto" aria-hidden="true" style="height:0;opacity:0;pointer-events:none">
           <div class="body-inner">
-            <div class="col-card">
-              <div class="block-head">
-                <div class="block-title">Boas-vindas</div>
-                <div class="block-ctrl">
-                  <span id="pillWelcome" class="pill off">off</span>
-                  <label class="tswitch" id="swWelcome" data-on="false" title="toggle welcome" tabindex="0">
-                    <input type="checkbox" aria-label="toggle welcome">
-                    <span class="track"></span>
-                    <span class="label off">off</span>
-                    <span class="label on">on</span>
-                    <span class="knob"></span>
-                  </label>
-                </div>
-              </div>
-
-              <div id="schedWelcome" class="sched">
-                <div class="time-grid">
-                  <div>
-                    <label for="wStart">Início</label>
-                    <input type="time" id="wStart" value="08:00">
-                  </div>
-                  <div>
-                    <label for="wEnd">Fim</label>
-                    <input type="time" id="wEnd" value="18:00">
+            <div class="cols">
+              <!-- Boas-vindas -->
+              <div class="col-card">
+                <div class="block-head">
+                  <div class="block-title">Boas-vindas</div>
+                  <div class="block-ctrl">
+                    <span id="pillWelcome" class="pill off">off</span>
+                    <label class="tswitch" id="swWelcome" data-on="false" title="toggle welcome" tabindex="0">
+                      <input type="checkbox" aria-label="toggle welcome">
+                      <span class="track"></span>
+                      <span class="label off">off</span>
+                      <span class="label on">on</span>
+                      <span class="knob"></span>
+                    </label>
                   </div>
                 </div>
+
+                <div id="schedWelcome" class="sched">
+                  <div class="time-grid">
+                    <div>
+                      <label for="wStart">Início</label>
+                      <input type="time" id="wStart" value="08:00">
+                    </div>
+                    <div>
+                      <label for="wEnd">Fim</label>
+                      <input type="time" id="wEnd" value="18:00">
+                    </div>
+                  </div>
+                </div>
+
+                <textarea id="msgWelcome" placeholder="Olá! 👋 Como posso ajudar?" disabled></textarea>
+                <div class="counter" id="wcCount">0 caracteres</div>
               </div>
 
-              <textarea id="msgWelcome" placeholder="Mensagem de boas-vindas" disabled></textarea>
-              <div class="counter" id="wcCount">0 caracteres</div>
+              <!-- Fora do horário -->
+              <div class="col-card">
+                <div class="block-head">
+                  <div class="block-title">Fora do horário</div>
+                  <div class="block-ctrl">
+                    <span id="pillOff" class="pill off">off</span>
+                    <label class="tswitch" id="swOff" data-on="false" title="toggle off-hours" tabindex="0">
+                      <input type="checkbox" aria-label="toggle off-hours">
+                      <span class="track"></span>
+                      <span class="label off">off</span>
+                      <span class="label on">on</span>
+                      <span class="knob"></span>
+                    </label>
+                  </div>
+                </div>
 
-              <div class="preview" id="prevW">
-                <div class="bubble" id="prevWText"></div>
+                <div id="schedOff" class="sched">
+                  <div class="time-grid">
+                    <div>
+                      <label for="oStart">Início</label>
+                      <input type="time" id="oStart" value="18:00">
+                    </div>
+                    <div>
+                      <label for="oEnd">Fim</label>
+                      <input type="time" id="oEnd" value="08:00">
+                    </div>
+                  </div>
+                </div>
+
+                <textarea id="msgOff" placeholder="Atendemos de 08:00 às 18:00. Deixe sua mensagem e responderemos no próximo expediente." disabled></textarea>
+                <div class="counter" id="offCount">0 caracteres</div>
               </div>
             </div>
 
-            <div class="col-card" style="margin-top:1rem">
-              <div class="block-head">
-                <div class="block-title">Fora do horário</div>
-                <div class="block-ctrl">
-                  <span id="pillOff" class="pill off">off</span>
-                  <label class="tswitch" id="swOff" data-on="false" title="toggle off hours" tabindex="0">
-                    <input type="checkbox" aria-label="toggle off hours">
-                    <span class="track"></span>
-                    <span class="label off">off</span>
-                    <span class="label on">on</span>
-                    <span class="knob"></span>
-                  </label>
-                </div>
-              </div>
-
-              <div id="schedOff" class="sched">
-                <div class="time-grid">
-                  <div>
-                    <label for="oStart">Início</label>
-                    <input type="time" id="oStart" value="18:00">
-                  </div>
-                  <div>
-                    <label for="oEnd">Fim</label>
-                    <input type="time" id="oEnd" value="08:00">
-                  </div>
-                </div>
-              </div>
-
-              <textarea id="msgOff" placeholder="Mensagem fora do horário" disabled></textarea>
-              <div class="counter" id="offCount">0 caracteres</div>
-
-              <div class="preview" id="prevO">
-                <div class="bubble" id="prevOText"></div>
-              </div>
+            <div class="preview" aria-label="Pré-visualização">
+              <div class="muted" style="margin-bottom:.4rem"><i class="fa-solid fa-eye"></i> Preview</div>
+              <div class="bubble" id="prevW" style="margin-bottom:.5rem"><div id="prevWText">—</div></div>
+              <div class="bubble" id="prevO">—</div>
             </div>
 
             <div style="margin-top:.75rem;display:flex;gap:.5rem;justify-content:flex-end">
@@ -206,8 +176,8 @@
         </div>
       </article>
 
-      <!-- ===== bloco 2 ===== -->
-      <article class="card">
+      <!-- ========== BLOCO 2 ========== -->
+      <article class="item" id="it-auto-dept">
         <header class="head" data-toggle="auto-dept" role="button" aria-expanded="false">
           <div class="ico"><i class="fa-solid fa-layer-group"></i></div>
           <div>
@@ -257,9 +227,8 @@
                   </div>
                 </div>
               </div>
-
               <!-- seleção de departamentos (triagem) -->
-              <div class="dept-picker" aria-label="Seleção de departamentos">
+              <div class="dept-picker" aria-label="Departamentos na triagem">
                 <div class="dept-picker-head">
                   <div class="dept-picker-title">Departamentos na triagem</div>
                   <div class="dept-picker-sub">Marque quais opções o cliente verá no menu.</div>
@@ -277,10 +246,13 @@
                 </div>
 
                 <div id="deptList" class="dept-list" role="list"></div>
+
                 <div class="dept-foot">
                   <span id="deptCount" class="muted">0 selecionados</span>
                 </div>
               </div>
+
+
 
               <!-- sugestões de setores (preenchidas via JS) -->
               <div id="deptChips" class="chips" aria-label="Sugestões de setores"></div>
