@@ -142,6 +142,17 @@ def _no_cache_html(resp: StarletteResponse):
 # =======================================
 app = FastAPI()
 
+@app.middleware("http")
+async def _debug_healthcheck(request: Request, call_next):
+    p = request.url.path
+    if p in ("/healthz", "/ping", "/"):
+        LOG("[HC]", "path=", p,
+            "host=", request.headers.get("host"),
+            "xfp=", request.headers.get("x-forwarded-proto"),
+            "ua=", request.headers.get("user-agent"))
+    return await call_next(request)
+
+
 # Middlewares
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(
