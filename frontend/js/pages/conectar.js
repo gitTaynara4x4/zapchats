@@ -7,11 +7,23 @@ import {
 // ====== Config ======
 const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
 
+// ✅ Status baseado no ping setPresence
+const PRESENCE_REFRESH_INTERVAL_MS = 30000; // a cada 30s
+const PRESENCE_COOLDOWN_MS = 15000;         // não repete na mesma instância antes de 15s
+const PRESENCE_CONCURRENCY = 4;
+
 // ====== Estado ======
 let wantQR = false;
 let currentInstance = null;
 let timerId = null;
 let lastHistoricoUsed = 'none'; // 'none' | '24h' | '7d'
+
+// Status/presence
+let lastWhatsPayload = null;
+let presenceInFlight = false;
+let presenceLoadTmr = null;
+let presenceIntervalId = null;
+const presenceCache = new Map(); // instance -> { ok:boolean, ts:number }
 
 // ===== Helpers =====
 const $  = (s, r=document) => r.querySelector(s);
@@ -20,7 +32,11 @@ const onlyDigits = (s) => String(s||'').replace(/\D/g,'');
 const htmlEscape = (s) => String(s ?? '').replace(/[&<>"']/g, c => (
   {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
 ));
-const dot = (color='#22c55e') => `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};"></span>`;
+const cssEscape = (s) => {
+  try { return (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s).replace(/["\\]/g,'\\$&'); }
+  catch { return String(s).replace(/["\\]/g,'\\$&'); }
+};
+
 function formatPhoneBR(num) {
   const d = onlyDigits(num);
   if (!d) return '—';
@@ -80,6 +96,14 @@ async function apiPost(url, body){
   }
   return js;
 }
+async function apiPostSoft(url, body){
+  try{
+    await apiPost(url, body || {});
+    return true;
+  } catch {
+    return false;
+  }
+}
 async function apiDelete(url){
   const extra = 'cascade=0&force=1&delete_remote=1';
   const sep1 = url.includes('?') ? '&' : '?';
@@ -93,6 +117,105 @@ async function apiDelete(url){
   if (ct.includes('application/json')) { try { js = await r.json(); } catch {} }
   const ok = r.ok && (js?.ok !== false);
   return { ok, status: r.status, data: js };
+}
+
+// ✅ Base do Status: ping setPresence
+async function pingSetPresence(instanceName, { force=false } = {}){
+  if (!instanceName) return false;
+
+  const now = Date.now();
+  const cache = presenceCache.get(instanceName);
+  if (!force && cache && (now - cache.ts) < PRESENCE_COOLDOWN_MS) {
+    return !!cache.ok;
+  }
+
+  const ok = await apiPostSoft(`/instance/setPresence/${encodeURIComponent(instanceName)}`, {});
+  presenceCache.set(instanceName, { ok: !!ok, ts: now });
+  return !!ok;
+}
+
+function setDotStateByInstance(instanceName, { ok=null, loading=false } = {}){
+  const sel = `.js-status-dot[data-inst="${cssEscape(instanceName)}"]`;
+  const el = document.querySelector(sel);
+  if (!el) return;
+
+  el.classList.toggle('st-dot--loading', !!loading);
+
+  if (ok === null) {
+    el.classList.remove('st-dot--on','st-dot--off');
+    return;
+  }
+  el.classList.toggle('st-dot--on',  !!ok);
+  el.classList.toggle('st-dot--off', !ok);
+  el.title = ok ? 'Ativo' : 'Inativo';
+}
+
+function schedulePresenceRefresh(ms=250, opts={}){
+  clearTimeout(presenceLoadTmr);
+  presenceLoadTmr = setTimeout(() => {
+    if (document.hidden) return;
+    void refreshPresenceStatuses(opts);
+  }, ms);
+}
+
+async function refreshPresenceStatuses({ force=false, onlyInstances=null } = {}){
+  if (!empresaId) return;
+  if (presenceInFlight) return;
+  if (!Array.isArray(allItems) || allItems.length === 0) return;
+
+  presenceInFlight = true;
+  try{
+    const list = Array.isArray(onlyInstances) && onlyInstances.length
+      ? allItems.filter(it => onlyInstances.includes(it.instance_name))
+      : allItems.slice();
+
+    if (!list.length) return;
+
+    // marca loading nos visíveis
+    for (const it of list) setDotStateByInstance(it.instance_name, { loading:true });
+
+    let idx = 0;
+    let changedAny = false;
+
+    async function worker(){
+      while (idx < list.length){
+        const it = list[idx++];
+        const inst = it?.instance_name;
+        if (!inst) continue;
+
+        let ok = false;
+        try { ok = await pingSetPresence(inst, { force }); } catch { ok = false; }
+
+        // atualiza dot (se estiver na tela)
+        setDotStateByInstance(inst, { ok, loading:false });
+
+        // atualiza modelo (connected vira o resultado do setPresence)
+        const prev = !!it.connected;
+        it.connected = !!ok;
+        if (prev !== !!ok) changedAny = true;
+      }
+    }
+
+    await Promise.all(Array.from({ length: PRESENCE_CONCURRENCY }, () => worker()));
+
+    // se mudou algo, atualiza contadores + re-render tab atual (pra mover itens entre Ativos/Inativos)
+    if (changedAny) {
+      const totalAtivos   = allItems.filter(it => !!it.connected).length;
+      const totalInativos = allItems.length - totalAtivos;
+
+      updateTabCounts(totalAtivos, totalInativos);
+
+      // mantém topo e botão
+      if (lastWhatsPayload) {
+        updateTopTotal(lastPlanLabel, lastWhatsPayload, allItems);
+        updateAddButton(lastWhatsPayload, allItems);
+      }
+
+      renderList(filterItemsByTab(allItems), lastPlanLabel);
+    }
+  } finally {
+    presenceInFlight = false;
+  }
 }
 
 // ===== Elementos =====
@@ -344,6 +467,19 @@ function hidePrepOverlay(){
   .kebab-item:hover{ background:rgba(0,0,0,.04); }
   html.dark .kebab-item:hover{ background:rgba(255,255,255,.06); }
 
+  /* ✅ bolinha de status */
+  .st-dot{
+    display:inline-block;
+    width:10px;
+    height:10px;
+    border-radius:999px;
+    background:#9ca3af;
+    vertical-align:middle;
+  }
+  .st-dot--on{  background:#22c55e; }
+  .st-dot--off{ background:#9ca3af; }
+  .st-dot--loading{ opacity:.55; filter:saturate(.2); }
+
   /* ===== Overlay ===== */
   #sync-overlay{
     position:fixed;
@@ -468,13 +604,18 @@ function hidePrepOverlay(){
 function rowHTML(item, planLabel){
   const apelido = htmlEscape(item.apelido || item.instance_name || '');
   const numero  = formatPhoneBR(item.numero_instancia);
-  const status  = item.connected ? dot('#22c55e') : dot('#9ca3af');
+  const inst    = htmlEscape(String(item.instance_name || ''));
+
+  // ✅ bolinha baseada no "connected" (que agora é resultado do ping setPresence)
+  const statusCls = item.connected ? 'st-dot--on' : 'st-dot--off';
+  const status = `<span class="st-dot ${statusCls} js-status-dot" data-inst="${inst}" title="${item.connected ? 'Ativo' : 'Inativo'}"></span>`;
+
   const menuItems = [];
   if (!item.connected) menuItems.push('<button class="kebab-item js-reconnect">Reconectar</button>');
   menuItems.push('<button class="kebab-item js-remove">Remover número</button>');
 
   return `
-    <tr class="border-b last:border-0 relative" data-id="${htmlEscape(String(item.id))}" data-instance="${htmlEscape(String(item.instance_name))}">
+    <tr class="border-b last:border-0 relative" data-id="${htmlEscape(String(item.id))}" data-instance="${inst}">
       <td class="py-2">${apelido || '—'}</td>
       <td class="py-2">${numero}</td>
       <td class="py-2"><span class="plan-pill">${htmlEscape(planLabel)}</span></td>
@@ -629,8 +770,11 @@ async function loadWhatsAppStatus(){
   if (inFlight) { pendingReload = true; return; }
   inFlight = true;
   pendingReload = false;
+
   try{
     const js = await apiGet(`/api/empresas/${empresaId}/whatsapp`);
+    lastWhatsPayload = js;
+
     const tier = String(js?.effective_tier || js?.assinatura || 'FREE').toUpperCase();
 
     const list = Array.isArray(js?.instancias)
@@ -639,6 +783,7 @@ async function loadWhatsAppStatus(){
           instance_name: i.instance_name,
           apelido: i.apelido || '',
           numero_instancia: i.numero_instancia || '',
+          // ✅ aqui é só "valor inicial"; depois o refreshPresenceStatuses sobrescreve pelo setPresence
           connected: isConnectedPayload(i),
           last_seen: i.last_seen || null
         }))
@@ -655,6 +800,10 @@ async function loadWhatsAppStatus(){
     updateAddButton(js, list);   // controla cor/estado do botão “Adicionar”
 
     renderList(filterItemsByTab(allItems), tier);
+
+    // ✅ depois de renderizar, atualiza status REAL via setPresence (e move entre tabs se necessário)
+    schedulePresenceRefresh(150, { force:false });
+
   }catch(e){
     console.error(e);
   } finally{
@@ -779,6 +928,9 @@ function handleConnected(instanceFromMsg){
   wantQR = false;
   showPrepOverlayOneMinute(60, { historico: lastHistoricoUsed });
   scheduleLoad(200);
+
+  // ✅ força refresh do status na instância conectada
+  if (instanceFromMsg) schedulePresenceRefresh(200, { force:true, onlyInstances:[instanceFromMsg] });
 }
 
 // ===== WebSockets =====
@@ -899,6 +1051,11 @@ async function handleConnectSubmit(ev){
 
     await loadWhatsAppStatus();
 
+    // ✅ quando clicou conectar, já “baseia o status” no setPresence dessa instância
+    if (currentInstance) {
+      schedulePresenceRefresh(150, { force:true, onlyInstances:[currentInstance] });
+    }
+
     if (rendered){
       els.btnGerarQR?.classList.add('hidden');
       els.btnRefresh?.classList.remove('hidden');
@@ -953,6 +1110,9 @@ async function openReconnect(item){
     showIllustration();
   }
 
+  // ✅ ao clicar “Reconectar”, já usa setPresence pra status
+  schedulePresenceRefresh(150, { force:true, onlyInstances:[currentInstance] });
+
   els.btnGerarQR?.classList.add('hidden');
   els.btnRefresh?.classList.remove('hidden');
   els.qrInstru?.classList.remove('hidden');
@@ -972,6 +1132,10 @@ async function refreshQR(){
     const ok = renderQRFromResponse(res?.qrcode || {});
     wantQR = true;
     if (!ok) showIllustration();
+
+    // ✅ refresh do QR também força status via setPresence
+    schedulePresenceRefresh(200, { force:true, onlyInstances:[window.currentInstance] });
+
   }catch(e){
     els.qrLoader?.classList.add('hidden');
     showQRError('Não foi possível atualizar o QR.');
@@ -1086,6 +1250,12 @@ if (!empresaId){
 } else {
   attachEmpresaWS();
   loadWhatsAppStatus();
+
+  // ✅ refresh automático do status (baseado em /instance/setPresence/<inst>)
+  presenceIntervalId = setInterval(() => {
+    if (document.hidden) return;
+    void refreshPresenceStatuses({ force:false });
+  }, PRESENCE_REFRESH_INTERVAL_MS);
 }
 
 // ===== Teardown SPA =====
@@ -1098,6 +1268,12 @@ function teardownConectar() {
   loadTmr = null;
   inFlight = false;
   pendingReload = false;
+
+  clearTimeout(presenceLoadTmr);
+  presenceLoadTmr = null;
+  try { if (presenceIntervalId) clearInterval(presenceIntervalId); } catch {}
+  presenceIntervalId = null;
+
   try { hidePrepOverlay(); } catch {}
   document.body.style.overflow = '';
 }

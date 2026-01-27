@@ -60,6 +60,7 @@ from backend.integrations.rabbit_consumer import start_rabbit_consumer
 from backend.integrations.evo_ws_listener import start_evo_ws_listener
 import backend.routers.auth as auth_router
 from backend.routers.auth import get_current_user
+from backend.integrations.evolution import router as evolution_router
 
 # Evo handlers/registry
 from backend.integrations.evo_handlers import (
@@ -634,6 +635,7 @@ app.include_router(remove_instance_router, prefix="/api")
 app.include_router(internal_chat_router.router)
 app.include_router(clients_central_router)
 app.include_router(chatbot_setores_router.router)
+app.include_router(evolution_router)
 
 # =======================================
 # uploads públicos + arquivos estáticos
