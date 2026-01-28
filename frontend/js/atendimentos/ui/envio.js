@@ -15,217 +15,41 @@ function toast(msg, ok = true) {
   if (!t) {
     t = document.createElement('div');
     t.id = '__app_toast';
-    Object.assign(t.style, {
-      position: 'fixed', left: '50%', bottom: '22px',
-      transform: 'translateX(-50%)',
-      maxWidth: '90vw', padding: '8px 12px',
-      color: '#fff', background: '#1e293b',
-      borderRadius: '8px', boxShadow: '0 8px 20px rgba(0,0,0,.28)',
-      zIndex: 99999, fontSize: '13px', lineHeight: '1.25',
-      opacity: '0', transition: 'opacity .15s, transform .15s', pointerEvents: 'none'
-    });
     document.body.appendChild(t);
   }
+
   t.textContent = msg;
-  t.style.background = ok ? '#1e293b' : '#7f1d1d';
-  t.style.opacity = '1';
-  t.style.transform = 'translateX(-50%) translateY(0)';
+  t.classList.toggle('is-error', !ok);
+  t.classList.add('on');
+
   clearTimeout(t.__timer);
   t.__timer = setTimeout(() => {
-    t.style.opacity = '0';
-    t.style.transform = 'translateX(-50%) translateY(4px)';
+    t.classList.remove('on');
   }, 1600);
 }
 
-/* ========= MODAIS PRÓPRIOS SLIM + CSS DO COMPOSER ========= */
-function ensureDialogCSS() {
-  if (document.getElementById('zcDlgCSS')) return;
-  const st = document.createElement('style');
-  st.id = 'zcDlgCSS';
-  st.textContent = `
-    .zcDlgBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.35);
-      display:flex;align-items:center;justify-content:center;z-index:10000}
-    .zcDlg{width:min(420px,92vw);background:#0b141a;color:#d1d5db;
-      border:1px solid #23323a;border-radius:10px;
-      box-shadow:0 12px 32px rgba(0,0,0,.35);
-      transform:translateY(6px);opacity:0;transition:opacity .12s ease, transform .12s ease}
-    .zcDlg.show{opacity:1;transform:none}
-    .zcDlg .h{padding:10px 12px 8px;font-weight:600;font-size:14px;letter-spacing:.2px}
-    .zcDlg .b{padding:6px 12px 8px}
-    .zcDlg .row{display:flex;gap:8px;margin:6px 0;align-items:center}
-    .zcDlg .row label{min-width:74px;font-size:12.5px;opacity:.8}
-    .zcDlg .in{flex:1;height:34px;padding:6px 10px;border-radius:8px;background:#0a1015;
-      border:1px solid #25343c;color:#e5e7eb;font:inherit;outline:none}
-    .zcDlg .in:focus{border-color:#00a884;box-shadow:0 0 0 2px rgba(0,168,132,.15)}
-    .zcDlg .f{display:flex;gap:8px;justify-content:flex-end;padding:8px 12px 10px}
-    .zcBtn{padding:7px 12px;border-radius:8px;border:1px solid #2a3942;
-      background:#0e1720;color:#e5e7eb;font-size:13px;cursor:pointer}
-    .zcBtn:hover{background:#0f1c26}
-    .zcBtn.ghost{background:transparent}
-    .zcBtn.ghost:hover{background:rgba(255,255,255,.04)}
-    .zcBtn.ok{border-color:#00a884;background:#0b251f}
-    .zcBtn.ok:hover{background:#0d2b24}
-    .zcBtn.danger{border-color:#ef4444;background:#2a1111;color:#fca5a5}
-    .zcMsg{font-size:13px;line-height:1.35;opacity:.95;padding:2px 0}
-
-    /* ===== preview de arquivos (tipo WPP) ===== */
-    .zcDlg.zcDlg-filePreview{
-      width:min(640px,96vw);
-      max-height:90vh;
-      display:flex;
-      flex-direction:column;
-    }
-    .zcDlg.zcDlg-filePreview .b{
-      max-height:calc(90vh - 92px);
-      overflow:auto;
-    }
-    .zpPrev{display:flex;flex-direction:column;gap:10px;}
-    .zpPrev-main{display:flex;gap:10px;align-items:flex-start;}
-    .zpPrev-thumb{
-      flex:0 0 120px;height:120px;border-radius:8px;overflow:hidden;
-      background:#020617;display:flex;align-items:center;justify-content:center;
-      font-size:32px;color:#64748b;
-    }
-    .zpPrev-thumb img{max-width:100%;max-height:100%;object-fit:contain;display:block;}
-    .zpPrev-meta{font-size:12px;color:#9ca3af;}
-    .zpPrev-name{font-size:13px;color:#e5e7eb;margin-bottom:2px;word-break:break-all;}
-    .zpPrev-caption-row{margin-top:8px;}
-    .zpPrev-caption-row textarea{
-      width:100%;min-height:64px;resize:vertical;border-radius:8px;
-      border:1px solid #25343c;background:#020617;color:#e5e7eb;
-      font:inherit;padding:6px 8px;outline:none;
-    }
-    .zpPrev-caption-row textarea:focus{
-      border-color:#00a884;box-shadow:0 0 0 2px rgba(0,168,132,.15);
-    }
-    .zpPrev-list{font-size:12px;color:#9ca3af;margin-top:6px;max-height:120px;overflow:auto;}
-    .zpPrev-list ul{margin:0;padding-left:16px;}
-
-    /* ===== chat footer estilo WhatsApp Web ===== */
-    #chat-footer{
-      display:flex;
-      align-items:center;
-      gap:8px;
-      padding:8px 10px 10px;
-      background:transparent;
-    }
-    #chat-footer .clip-btn,
-    #chat-footer .mic-btn,
-    #chat-footer .send-btn{
-      width:40px;
-      height:40px;
-      border-radius:999px;
-      border:0;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      background:#202c33;
-      color:#aebac1;
-      cursor:pointer;
-      flex-shrink:0;
-    }
-    #chat-footer .clip-btn i,
-    #chat-footer .mic-btn i{
-      font-size:18px;
-    }
-    #chat-footer .send-btn svg{
-      width:18px;height:18px;
-    }
-    #chat-footer .composer-wrap{
-      flex:1;
-      display:flex;
-      align-items:center;
-      background:#202c33;
-      border-radius:24px;
-      padding:0 12px;
-      border:1px solid #202c33;
-      height:40px;
-    }
-    #chat-footer .emoji-btn{
-      width:32px;
-      height:32px;
-      border-radius:999px;
-      border:0;
-      background:transparent;
-      color:#aebac1;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      cursor:pointer;
-      margin-right:6px;
-      flex-shrink:0;
-    }
-    #chat-footer #mensagem{
-      flex:1;
-      background:transparent;
-      border:0;
-      color:#e9edef;
-      font-size:14px;
-      padding:0;
-      height:36px;
-      line-height:36px; /* centraliza o texto/placeholder */
-    }
-    #chat-footer #mensagem::placeholder{
-      color:#8696a0;
-    }
-
-    /* ===== emoji picker ===== */
-    .emoji-pop{
-      position:absolute;
-      bottom:64px;
-      left:64px;
-      background:#202c33;
-      border-radius:16px;
-      border:1px solid #202c33;
-      box-shadow:0 12px 28px rgba(0,0,0,.35);
-      padding:8px;
-      z-index:60;
-      display:none;
-      max-width:320px;
-      max-height:260px;
-      overflow:auto;
-    }
-    .emoji-pop.show{display:block;}
-    .emoji-grid{
-      display:grid;
-      grid-template-columns:repeat(8,1fr);
-      gap:4px;
-    }
-    .emoji-btn-item{
-      width:32px;height:32px;
-      border-radius:8px;
-      border:0;
-      background:transparent;
-      font-size:20px;
-      cursor:pointer;
-    }
-    .emoji-btn-item:hover{
-      background:rgba(255,255,255,.12);
-    }
-  `;
-  document.head.appendChild(st);
-}
+/* ========= MODAIS PRÓPRIOS SLIM ========= */
 function mountDialog(html) {
-  ensureDialogCSS();
   const wrap = document.createElement('div');
   wrap.className = 'zcDlgBackdrop';
   wrap.innerHTML = html;
   document.body.appendChild(wrap);
-  requestAnimationFrame(()=> wrap.querySelector('.zcDlg')?.classList.add('show'));
+  requestAnimationFrame(() => wrap.querySelector('.zcDlg')?.classList.add('show'));
   return wrap;
 }
-function inputDialog({ title, rows, okText='OK', cancelText='Cancelar' }) {
+
+function inputDialog({ title, rows, okText = 'OK', cancelText = 'Cancelar' }) {
   // rows: [{name,label,placeholder,value='',type='text'}]
   return new Promise(res => {
     const wrap = mountDialog(`
-      <div class="zcDlg" role="dialog" aria-label="${title||'Entrada'}">
-        <div class="h">${title||''}</div>
+      <div class="zcDlg" role="dialog" aria-label="${title || 'Entrada'}">
+        <div class="h">${title || ''}</div>
         <div class="b">
           ${rows.map(r => `
             <div class="row">
-              <label>${r.label||''}</label>
-              <input class="in" name="${r.name}" type="${r.type||'text'}"
-                     placeholder="${r.placeholder||''}" value="${r.value||''}">
+              <label>${r.label || ''}</label>
+              <input class="in" name="${r.name}" type="${r.type || 'text'}"
+                     placeholder="${r.placeholder || ''}" value="${r.value || ''}">
             </div>`).join('')}
         </div>
         <div class="f">
@@ -233,66 +57,82 @@ function inputDialog({ title, rows, okText='OK', cancelText='Cancelar' }) {
           <button class="zcBtn ok">${okText}</button>
         </div>
       </div>`);
+
     const [btnCancel, btnOk] = wrap.querySelectorAll('.zcBtn');
     const inputs = [...wrap.querySelectorAll('.in')];
+
     const close = (val) => { wrap.remove(); res(val); };
+
     btnCancel.onclick = () => close(null);
-    btnOk.onclick = () => { const out = {}; inputs.forEach(i => out[i.name] = i.value.trim()); close(out); };
+    btnOk.onclick = () => {
+      const out = {};
+      inputs.forEach(i => out[i.name] = i.value.trim());
+      close(out);
+    };
+
     wrap.addEventListener('click', e => { if (e.target === wrap) close(null); });
     wrap.addEventListener('keydown', e => {
       if (e.key === 'Escape') { e.preventDefault(); close(null); }
       if (e.key === 'Enter')  { e.preventDefault(); btnOk.click(); }
     });
-    setTimeout(()=> inputs[0]?.focus(), 30);
+
+    setTimeout(() => inputs[0]?.focus(), 30);
   });
 }
-function confirmDialog({ title='Confirmar', msg='', okText='OK', cancelText='Cancelar', destructive=false }) {
-  return new Promise(res=>{
+
+function confirmDialog({ title = 'Confirmar', msg = '', okText = 'OK', cancelText = 'Cancelar', destructive = false }) {
+  return new Promise(res => {
     const wrap = mountDialog(`
       <div class="zcDlg" role="dialog" aria-label="${title}">
         <div class="h">${title}</div>
         <div class="b"><div class="zcMsg">${msg}</div></div>
         <div class="f">
           <button class="zcBtn ghost">${cancelText}</button>
-          <button class="zcBtn ${destructive?'danger':'ok'}">${okText}</button>
+          <button class="zcBtn ${destructive ? 'danger' : 'ok'}">${okText}</button>
         </div>
       </div>`);
+
     const [btnCancel, btnOk] = wrap.querySelectorAll('.zcBtn');
     const close = v => { wrap.remove(); res(v); };
+
     btnCancel.onclick = () => close(false);
     btnOk.onclick = () => close(true);
-    wrap.addEventListener('click', e=>{ if(e.target===wrap) close(false); });
+
+    wrap.addEventListener('click', e => { if (e.target === wrap) close(false); });
     wrap.addEventListener('keydown', e => {
       if (e.key === 'Escape') { e.preventDefault(); close(false); }
-      if (e.key === 'Enter')  { e.preventDefault(); btnOk.click();  }
+      if (e.key === 'Enter')  { e.preventDefault(); btnOk.click(); }
     });
   });
 }
 
 /* ====== RESOLVE INSTÂNCIA ====== */
-function getInstPayload(){
+function getInstPayload() {
   const cli = state?.clienteSel || {};
   const idFromCliente = cli.instancia_id ?? cli.instancia ?? null;
+
   if (idFromCliente != null && idFromCliente !== '') {
     const n = Number(idFromCliente);
     if (Number.isFinite(n)) return { instancia_id: n };
     return { instance: String(idFromCliente) };
   }
+
   const act = (typeof window !== 'undefined') ? window.INSTANCIA_ATIVA : null;
   if (act != null && act !== '') {
     const n = Number(act);
     if (Number.isFinite(n)) return { instancia_id: n };
     return { instance: String(act) };
   }
+
   return {};
 }
 
 /* ====== TRAVA: exige instância antes de enviar ====== */
-function requireInstPayloadOrWarn(){
+function requireInstPayloadOrWarn() {
   const p = getInstPayload();
   const ok = p && (p.instancia_id != null || p.instance != null);
 
-  if (!ok){
+  if (!ok) {
     toast('Selecione o WhatsApp (instância) antes de enviar.', false);
     try { window.zcUpdateInstBadge?.(); } catch {}
     try { window.zcFlashInstBadge?.(); } catch {}
@@ -302,32 +142,31 @@ function requireInstPayloadOrWarn(){
 }
 
 /* ====== Helpers mínimos (SEM OTIMISMO) ====== */
-function toggleSendingUI(disabled){
+function toggleSendingUI(disabled) {
   const input = document.getElementById('mensagem');
-  const btn   = document.getElementById('btn-enviar');
+  const btn = document.getElementById('btn-enviar');
   if (input) input.disabled = !!disabled;
-  if (btn)   btn.disabled   = !!disabled;
+  if (btn) btn.disabled = !!disabled;
 }
 
 /* ====== Resolve telefone a partir do cliente ====== */
-function resolveRawTel(cli){
+function resolveRawTel(cli) {
   if (!cli) return '';
   if (cli.telefone) return cli.telefone;
   if (cli.whatsapp) return cli.whatsapp;
-  if (cli.numero)   return cli.numero;
+  if (cli.numero) return cli.numero;
 
   if (typeof cli.nome === 'string') {
-    const digits = cli.nome.replace(/\D/g,'');
+    const digits = cli.nome.replace(/\D/g, '');
     if (digits.length >= 10) return cli.nome;
   }
   return '';
 }
 
-// garante que existe ALGUM telefone resolvível
-function ensureClienteSel(){
+function ensureClienteSel() {
   const cli = state?.clienteSel || {};
   const rawTel = resolveRawTel(cli);
-  if (!rawTel){
+  if (!rawTel) {
     toast('Selecione um contato.', false);
     console.warn('[send] ensureClienteSel: clienteSel sem telefone', cli);
     return false;
@@ -335,26 +174,24 @@ function ensureClienteSel(){
   return true;
 }
 
-function insertAtCursor(el, text){
+function insertAtCursor(el, text) {
   if (!el) return;
   const start = el.selectionStart ?? (el.value || '').length;
-  const end   = el.selectionEnd ?? (el.value || '').length;
-  const v     = el.value || '';
-  el.value    = v.slice(0, start) + text + v.slice(end);
-  const pos   = start + text.length;
+  const end = el.selectionEnd ?? (el.value || '').length;
+  const v = el.value || '';
+  el.value = v.slice(0, start) + text + v.slice(end);
+  const pos = start + text.length;
   if (typeof el.setSelectionRange === 'function') {
     el.setSelectionRange(pos, pos);
   }
-  try { el.focus({ preventScroll:true }); } catch{ el.focus(); }
+  try { el.focus({ preventScroll: true }); } catch { el.focus(); }
 }
 
 /* ===================== MAIN INIT ENVIO ===================== */
-(function initEnvio(){
+(function initEnvio() {
   const footer = document.getElementById('chat-footer') || document.body;
   const form = footer.closest('form');
   if (form) form.addEventListener('submit', e => e.preventDefault());
-
-  ensureDialogCSS();
 
   const btnClip = document.getElementById('btn-clipe') || (() => {
     const b = document.createElement('button');
@@ -365,14 +202,14 @@ function insertAtCursor(el, text){
 
   const btnSend = document.getElementById('btn-enviar') || (() => {
     const b = document.createElement('button');
-    b.id = 'btn-enviar'; b.className = 'send-btn'; b.style.display = 'none'; b.type='button';
+    b.id = 'btn-enviar'; b.className = 'send-btn'; b.style.display = 'none'; b.type = 'button';
     b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>';
     footer.appendChild(b); return b;
   })();
 
   const btnMic = document.getElementById('btn-mic') || (() => {
     const b = document.createElement('button');
-    b.id = 'btn-mic'; b.className = 'mic-btn'; b.title = 'Gravar áudio'; b.type='button';
+    b.id = 'btn-mic'; b.className = 'mic-btn'; b.title = 'Gravar áudio'; b.type = 'button';
     b.innerHTML = '<i class="fa-solid fa-microphone" aria-hidden="true"></i>';
     footer.appendChild(b); return b;
   })();
@@ -380,19 +217,38 @@ function insertAtCursor(el, text){
   const inputMsg = document.getElementById('mensagem') || (() => {
     const i = document.createElement('input');
     i.id = 'mensagem'; i.placeholder = 'Digite sua resposta…';
-    i.className = '';
     footer.insertBefore(i, btnSend);
     return i;
   })();
 
   // inputs ocultos
-  const fileDoc   = document.getElementById('file-doc')   || (() => { const i=document.createElement('input'); i.type='file'; i.id='file-doc';   i.style.display='none'; i.accept='.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,application/*'; footer.appendChild(i); return i; })();
-  const fileMedia = document.getElementById('file-media') || (() => { const i=document.createElement('input'); i.type='file'; i.id='file-media'; i.style.display='none'; i.accept='image/*,video/*'; footer.appendChild(i); return i; })();
-  const fileAudio = document.getElementById('file-audio') || (() => { const i=document.createElement('input'); i.type='file'; i.id='file-audio'; i.style.display='none'; i.accept='audio/*'; footer.appendChild(i); return i; })();
+  const fileDoc = document.getElementById('file-doc') || (() => {
+    const i = document.createElement('input');
+    i.type = 'file'; i.id = 'file-doc';
+    i.style.display = 'none';
+    i.accept = '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,application/*';
+    footer.appendChild(i); return i;
+  })();
+
+  const fileMedia = document.getElementById('file-media') || (() => {
+    const i = document.createElement('input');
+    i.type = 'file'; i.id = 'file-media';
+    i.style.display = 'none';
+    i.accept = 'image/*,video/*';
+    footer.appendChild(i); return i;
+  })();
+
+  const fileAudio = document.getElementById('file-audio') || (() => {
+    const i = document.createElement('input');
+    i.type = 'file'; i.id = 'file-audio';
+    i.style.display = 'none';
+    i.accept = 'audio/*';
+    footer.appendChild(i); return i;
+  })();
 
   // === layout tipo WPP: composer-wrap com emoji + input ===
   let composerWrap = document.getElementById('composer-wrap');
-  if (!composerWrap){
+  if (!composerWrap) {
     composerWrap = document.createElement('div');
     composerWrap.id = 'composer-wrap';
     composerWrap.className = 'composer-wrap';
@@ -412,51 +268,64 @@ function insertAtCursor(el, text){
     return b;
   })();
 
-  function toggleSendMic(){
+  function toggleSendMic() {
     const hasText = (inputMsg.value || '').trim().length > 0;
     btnSend.style.display = hasText ? 'inline-flex' : 'none';
-    btnMic.style.display  = hasText ? 'none'       : 'inline-flex';
+    btnMic.style.display = hasText ? 'none' : 'inline-flex';
   }
   inputMsg.addEventListener('input', toggleSendMic);
   toggleSendMic();
 
-  function toDataUrl(fileOrBlob){
-    return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(fileOrBlob); });
+  function toDataUrl(fileOrBlob) {
+    return new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = rej;
+      fr.readAsDataURL(fileOrBlob);
+    });
   }
-  function cleanDataUrl(s){ if (!s) return ''; const i = s.indexOf(','); return i >= 0 ? s.slice(i+1).trim() : s.trim(); }
-  function guessMediaType(mime){
+
+  function cleanDataUrl(s) {
+    if (!s) return '';
+    const i = s.indexOf(',');
+    return i >= 0 ? s.slice(i + 1).trim() : s.trim();
+  }
+
+  function guessMediaType(mime) {
     if (!mime) return 'document';
     if (mime.startsWith('image/')) return 'image';
     if (mime.startsWith('video/')) return 'video';
     if (mime.startsWith('audio/')) return 'audio';
     return 'document';
   }
-  function guessMimeFromExt(name){
-    const ext = (name||'').split('.').pop()?.toLowerCase() || '';
-    switch(ext){
-      case 'pdf':  return 'application/pdf';
-      case 'doc':  return 'application/msword';
+
+  function guessMimeFromExt(name) {
+    const ext = (name || '').split('.').pop()?.toLowerCase() || '';
+    switch (ext) {
+      case 'pdf': return 'application/pdf';
+      case 'doc': return 'application/msword';
       case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-      case 'xls':  return 'application/vnd.ms-excel';
+      case 'xls': return 'application/vnd.ms-excel';
       case 'xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-      case 'ppt':  return 'application/vnd.ms-powerpoint';
+      case 'ppt': return 'application/vnd.ms-powerpoint';
       case 'pptx': return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-      case 'png':  return 'image/png';
-      case 'jpg':  return 'image/jpeg';
+      case 'png': return 'image/png';
+      case 'jpg': return 'image/jpeg';
       case 'jpeg': return 'image/jpeg';
       case 'webp': return 'image/webp';
-      case 'mp4':  return 'video/mp4';
-      case 'mp3':  return 'audio/mpeg';
-      case 'ogg':  return 'audio/ogg';
-      case 'wav':  return 'audio/wav';
-      default:     return 'application/octet-stream';
+      case 'mp4': return 'video/mp4';
+      case 'mp3': return 'audio/mpeg';
+      case 'ogg': return 'audio/ogg';
+      case 'wav': return 'audio/wav';
+      default: return 'application/octet-stream';
     }
   }
-  function stripUndefined(o){ Object.keys(o).forEach(k=> o[k]===undefined && delete o[k]); return o; }
+
+  function stripUndefined(o) { Object.keys(o).forEach(k => o[k] === undefined && delete o[k]); return o; }
 
   const humanFileSize = (bytes) => {
     if (bytes == null) return '';
-    const units = ['B','KB','MB','GB'];
+    const units = ['B', 'KB', 'MB', 'GB'];
     let u = 0, v = bytes;
     while (v >= 1024 && u < units.length - 1) { v /= 1024; u++; }
     const fixed = v >= 10 || u === 0 ? v.toFixed(0) : v.toFixed(1);
@@ -496,16 +365,16 @@ function insertAtCursor(el, text){
       </div>
     `);
 
-    const thumb   = wrap.querySelector('.zpPrev-thumb');
-    const nameEl  = wrap.querySelector('.zpPrev-name');
-    const infoEl  = wrap.querySelector('.zpPrev-info');
-    const capEl   = wrap.querySelector('.zpPrev-caption');
-    const listUl  = wrap.querySelector('.zpPrev-ul');
+    const thumb = wrap.querySelector('.zpPrev-thumb');
+    const nameEl = wrap.querySelector('.zpPrev-name');
+    const infoEl = wrap.querySelector('.zpPrev-info');
+    const capEl = wrap.querySelector('.zpPrev-caption');
+    const listUl = wrap.querySelector('.zpPrev-ul');
     const btnCanc = wrap.querySelector('.zpPrev-cancel');
     const btnSendPrev = wrap.querySelector('.zpPrev-send');
 
     const first = files[0];
-    const mime  = first.type || guessMimeFromExt(first.name);
+    const mime = first.type || guessMimeFromExt(first.name);
     const typeLabel = mime || 'arquivo';
 
     nameEl.textContent = first.name || 'Arquivo';
@@ -535,12 +404,8 @@ function insertAtCursor(el, text){
     const close = () => wrap.remove();
 
     btnCanc.addEventListener('click', () => close());
-    wrap.addEventListener('click', (e) => {
-      if (e.target === wrap) close();
-    });
-    wrap.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); close(); }
-    });
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+    wrap.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } });
 
     btnSendPrev.addEventListener('click', async () => {
       const caption = capEl.value.trim() || undefined;
@@ -567,20 +432,20 @@ function insertAtCursor(el, text){
   };
 
   /* ===================== ENVIO TEXTO (TRAVADO) ===================== */
-  async function enviarTexto(){
-    const text = (inputMsg.value||'').trim();
+  async function enviarTexto() {
+    const text = (inputMsg.value || '').trim();
     if (!text) return;
 
     const cli = state?.clienteSel || {};
     const rawTel = resolveRawTel(cli);
-    if (!rawTel){
+    if (!rawTel) {
       toast('Contato sem telefone válido. Recarregue a tela ou edite o cadastro.', false);
       console.warn('[send/text] clienteSel sem telefone', cli);
       return;
     }
 
     const numE164 = numeroE164(rawTel);
-    if (!numE164){
+    if (!numE164) {
       toast('Telefone do contato inválido. Verifique o cadastro.', false);
       console.warn('[send/text] numeroE164 retornou vazio', { rawTel, cli });
       return;
@@ -591,7 +456,7 @@ function insertAtCursor(el, text){
 
     toggleSendingUI(true);
 
-    try{
+    try {
       const payload = {
         empresa_id: EMPRESA_ID || undefined,
         number: numE164,
@@ -624,58 +489,34 @@ function insertAtCursor(el, text){
       const resp = respJson;
 
       const instName = resp?.instance_name ?? resp?.db?.instance_name ?? null;
-      const instId   = resp?.db?.instancia_id ?? resp?.instancia_id ?? null;
-      if (instName || instId){
-        if (!window.INSTANCIA_ATIVA){ window.INSTANCIA_ATIVA = instId ?? instName; }
+      const instId = resp?.db?.instancia_id ?? resp?.instancia_id ?? null;
+      if (instName || instId) {
+        if (!window.INSTANCIA_ATIVA) { window.INSTANCIA_ATIVA = instId ?? instName; }
         try { window.setInstanceChip?.(instName ?? String(instId ?? '')); } catch {}
         try { window.zcUpdateInstBadge?.(); } catch {}
       }
 
       inputMsg.value = '';
       toggleSendMic();
-    }catch(e){
+    } catch (e) {
       console.error('[send/text] erro inesperado', e);
       toast('Falha ao enviar.', false);
-    }finally{
+    } finally {
       toggleSendingUI(false);
     }
   }
 
   btnSend.addEventListener('click', enviarTexto);
-  inputMsg.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); enviarTexto(); } });
+  inputMsg.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      enviarTexto();
+    }
+  });
 
   /* ===================== MENU DE ANEXOS (estilo WPP) ===================== */
-  (function ensureAttachCss(){
-    if (document.getElementById('attach-css')) return;
-    const s = document.createElement('style');
-    s.id = 'attach-css';
-    s.textContent = `
-      .attach-pop{position:absolute;bottom:64px;min-width:240px;max-width:260px;
-        background:#111b21;border:1px solid #2a3942;border-radius:12px;
-        padding:6px;box-shadow:0 12px 28px rgba(0,0,0,.35);z-index:50;
-        opacity:0; transform: translateY(6px); transition: opacity .15s, transform .15s}
-      .attach-pop.show{opacity:1; transform:none}
-      .attach-pop.hidden{display:none}
-      .attach-item{display:flex;align-items:center;gap:10px;width:100%;
-        padding:10px 12px;border:0;border-radius:10px;background:transparent;
-        color:#e9edef;cursor:pointer;user-select:none}
-      .attach-item:hover{background:rgba(255,255,255,.06)}
-      .attach-ico{width:28px;height:28px;border-radius:9999px;display:grid;place-items:center;color:#fff}
-      .attach-lab{font-size:14px}
-      .attach-item[data-act="doc"]        .attach-ico{background:#7b83eb}
-      .attach-item[data-act="media"]      .attach-ico{background:#00a884}
-      .attach-item[data-act="camera"]     .attach-ico{background:#ea4c89}
-      .attach-item[data-act="audio-file"] .attach-ico{background:#53bdeb}
-      .attach-item[data-act="audio-record"] .attach-ico{background:#25d366}
-      .attach-item[data-act="contact"]    .attach-ico{background:#ffbe0b}
-      .attach-item[data-act="sticker"]    .attach-ico{background:#7f66ff}
-      .attach-sep{height:1px;margin:6px 4px;background:#2a3942;border-radius:1px}
-    `;
-    document.head.appendChild(s);
-  })();
-
   let attachMenu = document.getElementById('attach-menu');
-  if (!attachMenu){
+  if (!attachMenu) {
     attachMenu = document.createElement('div');
     attachMenu.id = 'attach-menu';
     attachMenu.className = 'attach-pop hidden';
@@ -711,12 +552,12 @@ function insertAtCursor(el, text){
         <span class="attach-lab">Sticker</span>
       </div>
     `;
-    (footer.parentElement||footer).appendChild(attachMenu);
+    (footer.parentElement || footer).appendChild(attachMenu);
   }
 
   // ===== Emoji picker =====
   let emojiPop = document.getElementById('emoji-pop');
-  if (!emojiPop){
+  if (!emojiPop) {
     emojiPop = document.createElement('div');
     emojiPop.id = 'emoji-pop';
     emojiPop.className = 'emoji-pop';
@@ -733,28 +574,28 @@ function insertAtCursor(el, text){
       b.textContent = ch;
       b.addEventListener('click', () => {
         insertAtCursor(inputMsg, ch);
-        inputMsg.dispatchEvent(new Event('input', { bubbles:true }));
+        inputMsg.dispatchEvent(new Event('input', { bubbles: true }));
       });
       grid.appendChild(b);
     });
   }
 
   // abre/fecha menus e ancora perto do clipe / emoji
-  btnClip?.addEventListener('click', (ev)=>{
+  btnClip?.addEventListener('click', (ev) => {
     ev.stopPropagation();
     attachMenu.classList.toggle('hidden');
     if (!attachMenu.classList.contains('hidden')) {
       const b = btnClip.getBoundingClientRect();
-      const p = (attachMenu.parentElement||document.body).getBoundingClientRect();
-      attachMenu.style.left = Math.max(12, Math.min(p.width-260, b.left - p.left - 8)) + 'px';
+      const p = (attachMenu.parentElement || document.body).getBoundingClientRect();
+      attachMenu.style.left = Math.max(12, Math.min(p.width - 260, b.left - p.left - 8)) + 'px';
       attachMenu.classList.add('show');
-      requestAnimationFrame(()=>attachMenu.classList.add('show'));
+      requestAnimationFrame(() => attachMenu.classList.add('show'));
     } else {
       attachMenu.classList.remove('show');
     }
   });
 
-  btnEmoji.addEventListener('click', (ev)=>{
+  btnEmoji.addEventListener('click', (ev) => {
     ev.stopPropagation();
     emojiPop.classList.toggle('show');
     if (emojiPop.classList.contains('show')) {
@@ -764,18 +605,18 @@ function insertAtCursor(el, text){
     }
   });
 
-  document.addEventListener('click', (ev)=>{
-    if (!attachMenu.contains(ev.target) && ev.target!==btnClip){
+  document.addEventListener('click', (ev) => {
+    if (!attachMenu.contains(ev.target) && ev.target !== btnClip) {
       attachMenu.classList.add('hidden');
       attachMenu.classList.remove('show');
     }
-    if (emojiPop && !emojiPop.contains(ev.target) && ev.target !== btnEmoji){
+    if (emojiPop && !emojiPop.contains(ev.target) && ev.target !== btnEmoji) {
       emojiPop.classList.remove('show');
     }
   });
 
   /* ===================== ENVIO DE ARQUIVOS / MÍDIA (TRAVADO) ===================== */
-  async function enviarMediaArquivo(file, explicitType = null, captionOverride = null){
+  async function enviarMediaArquivo(file, explicitType = null, captionOverride = null) {
     if (!ensureClienteSel() || !file) return;
 
     const inst = requireInstPayloadOrWarn();
@@ -783,62 +624,74 @@ function insertAtCursor(el, text){
 
     const caption = captionOverride != null
       ? captionOverride
-      : (inputMsg.value||'').trim() || undefined;
+      : (inputMsg.value || '').trim() || undefined;
 
-    const number    = numberForApi();
-    const mime      = file.type || guessMimeFromExt(file.name);
+    const number = numberForApi();
+    const mime = file.type || guessMimeFromExt(file.name);
     const mediaType = explicitType || guessMediaType(mime);
-    const dataUrl   = await toDataUrl(file);
-    const base64    = cleanDataUrl(dataUrl);
+    const dataUrl = await toDataUrl(file);
+    const base64 = cleanDataUrl(dataUrl);
 
-    try{
+    try {
       if (mediaType === 'audio') {
         const r = await fetch('/api/atendimento/send/audio', {
-          method:'POST', headers:{'Content-Type':'application/json'},
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify(stripUndefined({ empresa_id: EMPRESA_ID, number, audio: base64, ...inst }))
         });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
       } else {
         const body = stripUndefined({
-          empresa_id: EMPRESA_ID, number, media: base64,
-          mediatype: mediaType, mimetype: mime, fileName: file.name || undefined, caption,
+          empresa_id: EMPRESA_ID,
+          number,
+          media: base64,
+          mediatype: mediaType,
+          mimetype: mime,
+          fileName: file.name || undefined,
+          caption,
           ...inst
         });
+
         const r = await fetch('/api/atendimento/send/media', {
-          method:'POST', headers:{'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify(body)
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(body)
         });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         if (caption && captionOverride != null) {
-          inputMsg.value='';
+          inputMsg.value = '';
           toggleSendMic();
         }
       }
       toast('Arquivo enviado!', true);
-    }catch(e){
+    } catch (e) {
       console.error('[send/media|audio]', e);
       toast('Falha ao enviar arquivo.', false);
     }
   }
 
-  fileDoc.addEventListener('change', (e)=>{
+  fileDoc.addEventListener('change', (e) => {
     const files = e.target.files;
     if (files && files.length) openFilePreview(files, 'document');
     e.target.value = '';
   });
-  fileMedia.addEventListener('change', (e)=>{
+
+  fileMedia.addEventListener('change', (e) => {
     const files = e.target.files;
     if (files && files.length) openFilePreview(files, null);
     e.target.value = '';
   });
-  fileAudio.addEventListener('change', (e)=>{
+
+  fileAudio.addEventListener('change', (e) => {
     const files = e.target.files;
     if (files && files.length) openFilePreview(files, 'audio');
     e.target.value = '';
   });
 
   /* ====== Modais slim para Contato e Sticker (TRAVADO) ====== */
-  async function openContactPrompt(){
+  async function openContactPrompt() {
     if (!ensureClienteSel()) return;
 
     const inst = requireInstPayloadOrWarn();
@@ -847,29 +700,31 @@ function insertAtCursor(el, text){
     const data = await inputDialog({
       title: 'Enviar contato',
       rows: [
-        { name:'fullName',  label:'Nome',       placeholder:'Ex.: Maria Silva' },
-        { name:'phone',     label:'Telefone',   placeholder:'DDI+DDD+Número (só dígitos)' }
+        { name: 'fullName', label: 'Nome', placeholder: 'Ex.: Maria Silva' },
+        { name: 'phone', label: 'Telefone', placeholder: 'DDI+DDD+Número (só dígitos)' }
       ],
-      okText:'Enviar'
+      okText: 'Enviar'
     });
     if (!data) return;
 
-    const contact  = [{
+    const contact = [{
       fullName: data.fullName || undefined,
-      phoneNumber: (data.phone||'').replace(/\D/g,'') || undefined
+      phoneNumber: (data.phone || '').replace(/\D/g, '') || undefined
     }];
 
-    try{
+    try {
       const r = await fetch('/api/atendimento/send/contact', {
-        method:'POST', headers:{'Content-Type':'application/json'}, credentials: 'include',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ empresa_id: EMPRESA_ID, number: numberForApi(), contact, ...inst })
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       toast('Contato enviado!', true);
-    }catch(e){ console.error(e); toast('Falha ao enviar contato.', false); }
+    } catch (e) { console.error(e); toast('Falha ao enviar contato.', false); }
   }
 
-  async function openStickerPrompt(){
+  async function openStickerPrompt() {
     if (!ensureClienteSel()) return;
 
     const inst = requireInstPayloadOrWarn();
@@ -877,32 +732,34 @@ function insertAtCursor(el, text){
 
     const data = await inputDialog({
       title: 'Enviar figurinha',
-      rows: [{ name:'st', label:'URL / BASE64', placeholder:'Cole a URL ou data:...' }],
-      okText:'Enviar'
+      rows: [{ name: 'st', label: 'URL / BASE64', placeholder: 'Cole a URL ou data:...' }],
+      okText: 'Enviar'
     });
     if (!data || !data.st) return;
 
     const s = String(data.st);
     const sticker = s.startsWith('data:') ? cleanDataUrl(s) : s.trim();
 
-    try{
+    try {
       const r = await fetch('/api/atendimento/send/sticker', {
-        method:'POST', headers:{'Content-Type':'application/json'}, credentials: 'include',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ empresa_id: EMPRESA_ID, number: numberForApi(), sticker, ...inst })
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       toast('Sticker enviado!', true);
-    }catch(e){ console.error(e); toast('Falha ao enviar figurinha.', false); }
+    } catch (e) { console.error(e); toast('Falha ao enviar figurinha.', false); }
   }
 
-  attachMenu.addEventListener('click', (ev)=>{
-    const item = ev.target.closest('.attach-item'); if(!item) return;
+  attachMenu.addEventListener('click', (ev) => {
+    const item = ev.target.closest('.attach-item'); if (!item) return;
     const act = item.getAttribute('data-act');
     attachMenu.classList.add('hidden');
     attachMenu.classList.remove('show');
-    switch(act){
-      case 'doc':         fileDoc.click(); break;
-      case 'media':       fileMedia.click(); break;
+    switch (act) {
+      case 'doc': fileDoc.click(); break;
+      case 'media': fileMedia.click(); break;
 
       case 'camera': {
         const prevAccept = fileMedia.accept;
@@ -912,7 +769,7 @@ function insertAtCursor(el, text){
           fileMedia.setAttribute('capture', 'environment');
           fileMedia.click();
         } finally {
-          setTimeout(()=>{
+          setTimeout(() => {
             fileMedia.accept = prevAccept;
             if (!hadCapture) fileMedia.removeAttribute('capture');
           }, 0);
@@ -920,72 +777,87 @@ function insertAtCursor(el, text){
         break;
       }
 
-      case 'audio-file':  fileAudio.click(); break;
-      case 'audio-record':startStopRecording(); break;
-      case 'contact':     openContactPrompt(); break;
-      case 'sticker':     openStickerPrompt(); break;
+      case 'audio-file': fileAudio.click(); break;
+      case 'audio-record': startStopRecording(); break;
+      case 'contact': openContactPrompt(); break;
+      case 'sticker': openStickerPrompt(); break;
     }
   });
 
   // gravação de áudio (TRAVADO)
-  let rec = null, recStream = null, recChunks = [], recEl = null, recTimer=null, recStartTs=0;
-  function renderRecBubble(state='idle', elapsed='00:00'){
-    if (!recEl){
-      recEl=document.createElement('div');
-      Object.assign(recEl.style,{position:'absolute',right:'14px',bottom:'58px',background:'#0f1a1f',color:'#e9edef',
-        border:'1px solid #2a3942',borderRadius:'10px',padding:'8px 10px',display:'flex',gap:'8px',alignItems:'center',zIndex:70,fontSize:'13px'});
-      recEl.innerHTML=`<span class="dot" style="width:8px;height:8px;border-radius:9999px;background:#ef4444"></span>
-                       <span class="t">gravando… 00:00</span>
-                       <button class="stop" style="background:#ef4444;border:0;color:#fff;padding:6px 10px;border-radius:8px;cursor:pointer;font-size:12.5px">Parar</button>`;
-      (footer.parentElement||footer).appendChild(recEl);
+  let rec = null, recStream = null, recChunks = [], recEl = null, recTimer = null, recStartTs = 0;
+
+  function renderRecBubble(state = 'idle', elapsed = '00:00') {
+    if (!recEl) {
+      recEl = document.createElement('div');
+      recEl.className = 'zc-rec-bubble';
+      recEl.innerHTML = `
+        <span class="dot"></span>
+        <span class="t">gravando… 00:00</span>
+        <button class="stop" type="button">Parar</button>
+      `;
+      (footer.parentElement || footer).appendChild(recEl);
       recEl.querySelector('.stop').addEventListener('click', startStopRecording);
     }
-    recEl.querySelector('.t').textContent = `${state==='rec'?'gravando…':'processando…'} ${elapsed}`;
-    recEl.style.display='flex';
+    recEl.querySelector('.t').textContent = `${state === 'rec' ? 'gravando…' : 'processando…'} ${elapsed}`;
+    recEl.classList.add('show');
   }
-  function hideRecBubble(){ if(recEl) recEl.style.display='none'; }
-  function fmtElapsed(ms){ const s=Math.floor(ms/1000), m=String(Math.floor(s/60)).padStart(2,'0'), ss=String(s%60).padStart(2,'0'); return `${m}:${ss}`; }
 
-  async function startStopRecording(){
-    if (!rec){ // START
+  function hideRecBubble() { if (recEl) recEl.classList.remove('show'); }
+
+  function fmtElapsed(ms) {
+    const s = Math.floor(ms / 1000);
+    const m = String(Math.floor(s / 60)).padStart(2, '0');
+    const ss = String(s % 60).padStart(2, '0');
+    return `${m}:${ss}`;
+  }
+
+  async function startStopRecording() {
+    if (!rec) { // START
       if (!ensureClienteSel()) return;
 
       const inst = requireInstPayloadOrWarn();
       if (!inst) return;
 
-      try{
-        recStream = await navigator.mediaDevices.getUserMedia({audio:true});
+      try {
+        recStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         rec = new MediaRecorder(recStream);
         recChunks = [];
+
         rec.ondataavailable = e => { if (e.data?.size) recChunks.push(e.data); };
+
         rec.onstop = async () => {
           clearInterval(recTimer);
-          renderRecBubble('proc', fmtElapsed(Date.now()-recStartTs));
-          try{
+          renderRecBubble('proc', fmtElapsed(Date.now() - recStartTs));
+          try {
             const blob = new Blob(recChunks, { type: rec.mimeType || 'audio/webm' });
             const dataUrl = await toDataUrl(blob);
-            const base64  = cleanDataUrl(dataUrl);
+            const base64 = cleanDataUrl(dataUrl);
             const r = await fetch('/api/atendimento/send/audio', {
-              method:'POST', headers:{'Content-Type':'application/json'}, credentials: 'include',
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
               body: JSON.stringify({ empresa_id: EMPRESA_ID, number: numberForApi(), audio: base64, ...inst })
             });
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          }catch(e){ console.error(e); toast('Falha ao enviar áudio.', false); }
-          finally{
+          } catch (e) { console.error(e); toast('Falha ao enviar áudio.', false); }
+          finally {
             hideRecBubble();
-            recStream?.getTracks()?.forEach(t=>t.stop());
-            recStream=null; rec=null; recChunks=[];
+            recStream?.getTracks()?.forEach(t => t.stop());
+            recStream = null; rec = null; recChunks = [];
           }
         };
+
         rec.start();
         recStartTs = Date.now();
-        recTimer=setInterval(()=> renderRecBubble('rec', fmtElapsed(Date.now()-recStartTs)), 250);
-        renderRecBubble('rec','00:00');
-      }catch(e){ console.error(e); toast('Permissão de microfone negada.', false); }
-    }else{ // STOP
-      try{ rec.stop(); }catch{}
+        recTimer = setInterval(() => renderRecBubble('rec', fmtElapsed(Date.now() - recStartTs)), 250);
+        renderRecBubble('rec', '00:00');
+      } catch (e) { console.error(e); toast('Permissão de microfone negada.', false); }
+    } else { // STOP
+      try { rec.stop(); } catch {}
     }
   }
+
   btnMic.addEventListener('click', startStopRecording);
 
   /* ===================== DRAG & DROP (arquivos / imagens) ===================== */
@@ -994,30 +866,7 @@ function insertAtCursor(el, text){
     if (!ov) {
       ov = document.createElement('div');
       ov.id = 'zc-drop-overlay';
-      Object.assign(ov.style, {
-        position: 'fixed',
-        inset: '0',
-        background: 'rgba(15,23,42,.80)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 9998,
-        opacity: '0',
-        pointerEvents: 'none',
-        transition: 'opacity .15s ease',
-      });
-      ov.innerHTML = `
-        <div style="
-          border:1px dashed #38bdf8;
-          border-radius:16px;
-          padding:16px 24px;
-          background:rgba(15,23,42,.95);
-          color:#e5e7eb;
-          font-size:14px;
-        ">
-          Solte o arquivo aqui para enviar ao cliente
-        </div>
-      `;
+      ov.innerHTML = `<div class="zc-drop-box">Solte o arquivo aqui para enviar ao cliente</div>`;
       document.body.appendChild(ov);
     }
     return ov;
@@ -1042,14 +891,12 @@ function insertAtCursor(el, text){
 
     const showOverlay = () => {
       if (!overlay) overlay = ensureDropOverlay();
-      overlay.style.opacity = '1';
-      overlay.style.pointerEvents = 'auto';
+      overlay.classList.add('on');
     };
 
     const hideOverlay = () => {
       if (!overlay) return;
-      overlay.style.opacity = '0';
-      overlay.style.pointerEvents = 'none';
+      overlay.classList.remove('on');
     };
 
     window.addEventListener('dragenter', (ev) => {
@@ -1087,17 +934,17 @@ function insertAtCursor(el, text){
 })();
 
 /* ====== FOCUS MANAGER (foco automático em TODAS as conversas) ====== */
-(function(){
-  function findComposer(){
+(function () {
+  function findComposer() {
     return document.querySelector('[data-chat-input]') ||
-           document.querySelector('#mensagem') ||
-           document.querySelector('#chat-input') ||
-           document.querySelector('#composer') ||
-           document.querySelector('.chat-composer textarea, .chat-composer input[type="text"]') ||
-           document.querySelector('textarea[name="mensagem"], input[name="mensagem"]');
+      document.querySelector('#mensagem') ||
+      document.querySelector('#chat-input') ||
+      document.querySelector('#composer') ||
+      document.querySelector('.chat-composer textarea, .chat-composer input[type="text"]') ||
+      document.querySelector('textarea[name="mensagem"], input[name="mensagem"]');
   }
 
-  function reallyFocus(el){
+  function reallyFocus(el) {
     if (!el) return;
     try {
       el.removeAttribute('disabled');
@@ -1144,6 +991,7 @@ function insertAtCursor(el, text){
     const root = document.getElementById('chat-footer') || document.body;
     if (root) obs.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
   };
+
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount);
   else mount();
 })();

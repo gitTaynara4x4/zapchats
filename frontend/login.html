@@ -1,165 +1,258 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Login – ZapChats</title>
-
-  <!-- Inter (Google Fonts) -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Acesse sua conta | ZapChat Connect</title>
+  
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-  <!-- Preload do tema (evita FOUC) -->
-  <script>
-    (function () {
-      try {
-        var t = localStorage.getItem('theme');
-        if (!t || t === 'dark') document.documentElement.classList.add('dark');
-        else document.documentElement.classList.remove('dark');
-      } catch {}
-    })();
-  </script>
+  <style>
+    /* =========================================
+       ✅ ESTILOS (Design ZapChat Connect)
+       ========================================= */
+    :root {
+      --brand-primary: #047857;   /* Verde Principal */
+      --brand-secondary: #065f46; /* Verde Escuro Hover */
+      --brand-light: #d1fae5;
+      --bg-body: #f8fafc;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --line: #e2e8f0;
+      --error: #ef4444;
+      --radius-md: 12px;
+    }
 
-  <!-- CSS próprio -->
-  <link rel="stylesheet" href="/frontend/css/login.css">
+    * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+
+    body {
+      margin: 0;
+      font-family: "Plus Jakarta Sans", sans-serif;
+      background: var(--bg-body);
+      color: var(--text-main);
+      height: 100vh;
+      display: grid;
+      grid-template-columns: 1fr 1fr; /* Split Screen Desktop */
+      overflow: hidden; 
+    }
+
+    /* --- LADO ESQUERDO (BRANDING) --- */
+    .brand-side {
+      background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
+      display: flex; flex-direction: column; justify-content: center; padding: 60px;
+      color: white; position: relative;
+    }
+    .brand-side::before {
+      content: ""; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      background-image: radial-gradient(rgba(255,255,255,0.15) 1px, transparent 1px);
+      background-size: 24px 24px; opacity: 0.6;
+    }
+    .brand-content { position: relative; z-index: 2; max-width: 480px; }
+    .brand-quote { font-size: 32px; font-weight: 800; line-height: 1.2; margin-bottom: 24px; letter-spacing: -1px; }
+    .brand-author { display: flex; align-items: center; gap: 12px; font-size: 15px; }
+    .avatar { width: 40px; height: 40px; background: rgba(255,255,255,0.2); border-radius: 50%; display: grid; place-items: center; font-weight: 800; }
+
+    /* --- LADO DIREITO (FORMULÁRIO) --- */
+    .form-side {
+      display: flex; flex-direction: column; justify-content: center; align-items: center;
+      padding: 40px; background: white; overflow-y: auto;
+    }
+    .login-container { width: 100%; max-width: 400px; }
+
+    /* Header */
+    .logo-header { margin-bottom: 32px; }
+    .logo-img { height: 40px; display: block; margin-bottom: 20px; }
+    .title { font-size: 26px; font-weight: 800; margin: 0 0 8px; color: var(--text-main); letter-spacing: -0.5px; }
+    .subtitle { color: var(--text-muted); font-size: 15px; margin: 0; font-weight: 500; }
+
+    /* Inputs */
+    .field { margin-bottom: 20px; }
+    .label { display: block; font-size: 14px; font-weight: 700; margin-bottom: 8px; color: var(--text-main); }
+    .input-wrap { position: relative; }
+    
+    .input {
+      width: 100%; padding: 12px 16px;
+      border: 1px solid var(--line); border-radius: var(--radius-md);
+      font-family: inherit; font-size: 15px; color: var(--text-main);
+      transition: 0.2s; background: var(--bg-body);
+    }
+    .input:focus {
+      outline: 3px solid rgba(4,120,87,0.15); border-color: var(--brand-primary); background: white;
+    }
+
+    /* Botão Ver Senha */
+    .icon-btn {
+      position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; cursor: pointer; color: var(--text-muted);
+      padding: 4px; display: flex;
+    }
+    .icon-btn:hover { color: var(--text-main); }
+    .hidden { display: none !important; }
+
+    /* Links e Checkbox */
+    .row-between { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; font-size: 14px; }
+    .link { color: var(--brand-primary); text-decoration: none; font-weight: 700; }
+    .link:hover { text-decoration: underline; }
+    
+    /* Botões */
+    .btn-primary {
+      width: 100%; padding: 14px; background: var(--brand-primary); color: white;
+      border: none; border-radius: var(--radius-md); font-size: 16px; font-weight: 700;
+      cursor: pointer; transition: 0.2s; box-shadow: 0 4px 12px rgba(4,120,87,0.2);
+    }
+    .btn-primary:hover { background: var(--brand-secondary); transform: translateY(-2px); }
+    
+    .btn-ghost {
+      background: transparent; color: var(--text-muted); border: none;
+      font-weight: 600; cursor: pointer; font-size: 14px; padding: 0;
+    }
+    .btn-ghost:hover { color: var(--brand-primary); text-decoration: underline; }
+
+    /* Erros (Compatível com seu JS) */
+    .error-box {
+      background: #fef2f2; border: 1px solid #fecaca; color: var(--error);
+      padding: 12px; border-radius: 8px; font-size: 14px; margin-bottom: 20px;
+      display: none; font-weight: 600;
+    }
+    .error-box:not(:empty) { display: block; animation: shake 0.3s; }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-5px); }
+      75% { transform: translateX(5px); }
+    }
+
+    /* Footer */
+    .footer-note { margin-top: 32px; text-align: center; font-size: 14px; color: var(--text-muted); font-weight: 600; }
+
+    /* --- MOBILE --- */
+    @media (max-width: 900px) {
+      body { grid-template-columns: 1fr; overflow: auto; }
+      .brand-side { display: none; }
+      .form-side { padding: 20px; align-items: flex-start; min-height: 100vh; }
+      .login-container { max-width: 100%; }
+    }
+  </style>
 </head>
 
 <body>
-  <!-- TOPBAR -->
-  <div class="topline-bar">
-    <button id="themeSwitch" class="theme-toggle" aria-label="Alternar tema" aria-pressed="false">
-      <span class="slot left" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3.5" fill="none"/>
-          <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
-          <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
-          <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
-          <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
-        </svg>
-      </span>
-      <span class="slot right" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8z" fill="none"/>
-        </svg>
-      </span>
-      <span class="thumb" aria-hidden="true">
-        <svg class="thumb-sun" viewBox="0 0 24 24">
-          <defs><radialGradient id="sunGrad" cx="30%" cy="30%" r="80%"><stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#f8c266"/><stop offset="100%" stop-color="#f59e0b"/></radialGradient></defs>
-          <circle cx="12" cy="12" r="6.3" fill="url(#sunGrad)"/>
-        </svg>
-        <svg class="thumb-moon" viewBox="0 0 24 24">
-          <defs><radialGradient id="moonGrad" cx="30%" cy="30%" r="80%"><stop offset="0%" stop-color="#9fc3ff"/><stop offset="60%" stop-color="#6ba6ff"/><stop offset="100%" stop-color="#2563eb"/></radialGradient></defs>
-          <circle cx="12" cy="12" r="11" fill="url(#moonGrad)"/>
-        </svg>
-      </span>
-    </button>
-  </div>
 
-  <!-- Conteúdo -->
-  <main class="page-shell">
-    <div class="login-card">
-      <!-- Ilustração -->
-      <div class="login-illustration">
-        <img src="/img/login-illustration.png" alt="Ilustração">
+  <aside class="brand-side">
+    <div class="brand-content">
+      <div class="brand-quote">
+        "Governança, escala e produtividade no WhatsApp da sua empresa."
+      </div>
+      <div class="brand-author">
+        <div class="avatar">ZP</div>
+        <div>
+          <div style="font-weight:800;">ZapChat Connect</div>
+          <div style="font-size:13px; opacity:0.9;">Plataforma de Gestão</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="form-side">
+    <div class="login-container">
+      
+      <div class="logo-header">
+        <img src="/img/logo.png" alt="ZapChat" class="logo-img" onerror="this.style.display='none'">
+        <h1 class="title">Bem-vindo de volta!</h1>
+        <p class="subtitle">Faça login para acessar o painel.</p>
       </div>
 
-      <!-- Formulário -->
-      <div class="login-form">
-        <div class="head-block">
-          <img src="/img/logo-dark.png" alt="ZapChats-ws" class="logo">
-          <img src="/img/logo-white.png" alt="ZapChats" class="logo-dark">
-          <h1 class="title">Acesse sua conta</h1>
-          <p class="subtitle">Faça login para continuar</p>
+      <form id="form-login" autocomplete="on">
+        
+        <div id="erro" class="error-box"></div>
+
+        <div id="step1-fields">
+          <div class="field">
+            <label class="label" for="email">E-mail</label>
+            <input id="email" type="email" name="email" class="input" placeholder="seu@email.com" required>
+            <small id="email-help" class="hidden"></small>
+          </div>
+
+          <div class="field">
+            <label class="label" for="senha">Senha</label>
+            <div class="input-wrap">
+              <input id="senha" type="password" name="senha" class="input" placeholder="••••••••" required>
+              
+              <button type="button" id="togglePassBtn" class="icon-btn" aria-label="Mostrar senha">
+                <svg id="eye-open" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                <svg id="eye-off" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="hidden"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="row-between">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input id="remember" type="checkbox" style="accent-color:var(--brand-primary); width:16px; height:16px;"> 
+              Lembrar de mim
+            </label>
+            <a href="/esqueci_senha" class="link" id="link-forgot">Esqueceu a senha?</a>
+          </div>
         </div>
 
-        <form id="form-login" class="form" autocomplete="on">
-          <!-- PASSO 1: e-mail + senha -->
-          <div id="step1-fields">
-            <div class="field">
-              <label class="label">E-mail</label>
-              <input id="email" type="text" name="email" required class="input" placeholder="usuario@dominio">
-              <small id="email-help" class="muted" style="display:block;margin-top:6px"></small>
-            </div>
-
-            <div class="field">
-              <label class="label">Senha</label>
-              <div class="input-wrap">
-                <input id="senha" type="password" name="senha" required class="input" placeholder="••••••••">
-                <button type="button" id="togglePassBtn" class="icon-btn" aria-label="Mostrar senha">
-                  <!-- aberto -->
-                  <svg id="eye-open" viewBox="0 0 24 24">
-                    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/>
-                    <circle cx="12" cy="12" r="3.2"/>
-                  </svg>
-                  <!-- fechado -->
-                  <svg id="eye-off" viewBox="0 0 24 24" class="hidden">
-                    <path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-6.5 0-10-7-10-7a19.5 19.5 0 0 1 5.11-5.79M9.9 4.24A10.8 10.8 0 0 1 12 4c6.5 0 10 8 10 8a19.7 19.7 0 0 1-3.06 3.95"/>
-                    <path d="M1 1l22 22"/>
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <div class="row-between">
-              <label class="muted" style="display:inline-flex;align-items:center;gap:8px">
-                <input id="remember" type="checkbox" style="width:16px;height:16px">
-                Lembrar de mim
-              </label>
-              <a id="link-forgot" href="/esqueci_senha" class="link">Esqueci minha senha</a>
-            </div>
-          </div>
-
-          <!-- PASSO 2: código enviado por e-mail (apenas para colaboradores quando exigido) -->
-          <div id="step2-fields" class="hidden">
-            <p id="token-info" class="muted" style="margin-bottom:12px">
-              Enviamos um código de acesso para o seu e-mail. Digite-o abaixo para concluir o login.
+        <div id="step2-fields" class="hidden">
+          <div class="field">
+            <label class="label">Código de Verificação</label>
+            <p id="token-info" style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">
+              Enviamos um código de acesso para o seu e-mail.
             </p>
-
-            <div class="field">
-              <label class="label">Código de acesso</label>
-              <input
-                id="login-token"
-                type="text"
-                inputmode="numeric"
-                pattern="[0-9]*"
-                maxlength="6"
-                class="input"
-                autocomplete="one-time-code"
-                placeholder="000000"
-              >
-              <small class="muted" style="display:block;margin-top:6px">
-                Verifique também a pasta de spam/lixo eletrônico se não encontrar o e-mail.
-              </small>
-            </div>
-
-            <button
-              type="button"
-              id="btn-token-back"
-              class="btn btn-ghost"
-              style="margin-top:4px"
+            <input 
+              id="login-token" 
+              type="text" 
+              inputmode="numeric" 
+              pattern="[0-9]*" 
+              maxlength="6" 
+              class="input" 
+              placeholder="000000" 
+              autocomplete="one-time-code"
+              style="text-align:center; letter-spacing: 4px; font-size:18px;"
             >
-              &larr; Voltar para senha
-            </button>
           </div>
-
-          <div id="erro" class="error hidden"></div>
-
-          <button id="btn-login" type="submit" class="btn btn-primary" style="margin-top:10px">
-            Entrar
+          <button type="button" id="btn-token-back" class="btn-ghost" style="margin-bottom:20px;">
+            &larr; Voltar para senha
           </button>
-        </form>
+        </div>
 
-        <p class="footer-note">
-          Ainda não tem conta? <a href="/criar-empresa" class="link">Cadastre-se</a>
-        </p>
+        <button id="btn-login" type="submit" class="btn-primary">Entrar</button>
+      </form>
+
+      <div class="footer-note">
+        Ainda não tem conta? <a href="/criar-empresa.html" class="link">Cadastre-se</a>
       </div>
     </div>
   </main>
 
-  <!-- JS próprio -->
   <script src="/frontend/js/pages/login.js" defer></script>
   <script src="/frontend/assets/guard-devtools.js" defer></script>
 
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const toggleBtn = document.getElementById('togglePassBtn');
+      const passInput = document.getElementById('senha');
+      const eyeOpen = document.getElementById('eye-open');
+      const eyeOff = document.getElementById('eye-off');
+
+      if(toggleBtn && passInput) {
+        toggleBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const isPass = passInput.type === 'password';
+          passInput.type = isPass ? 'text' : 'password';
+          
+          if(isPass) {
+            eyeOpen.classList.add('hidden');
+            eyeOff.classList.remove('hidden');
+          } else {
+            eyeOpen.classList.remove('hidden');
+            eyeOff.classList.add('hidden');
+          }
+        });
+      }
+    });
+  </script>
 </body>
 </html>
