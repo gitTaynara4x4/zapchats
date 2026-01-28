@@ -1,208 +1,1189 @@
 <!DOCTYPE html>
-<html lang="pt-BR" class="">
+<html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>ZapChats – Início</title>
+  <title>ZapChat Connect | Gestão Profissional de WhatsApp & CRM</title>
+  <meta name="description" content="Centralize seu atendimento, organize filas e escale suas vendas com ZapChat Connect.">
 
-  <!-- Tema inicial (padrão: DARK quando não houver cache) -->
-  <script>
-    (function () {
-      try {
-        var t = localStorage.getItem('theme');
-        if (!t || t === 'dark') document.documentElement.classList.add('dark');
-      } catch {}
-    })();
-  </script>
+  <!-- ✅ SEO Social (troque SEU-DOMINIO e imagem OG) -->
+  <link rel="canonical" href="https://SEU-DOMINIO.com/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="ZapChat Connect | Gestão Profissional de WhatsApp & CRM">
+  <meta property="og:description" content="Centralize seu atendimento, organize filas e escale suas vendas com ZapChat Connect.">
+  <meta property="og:url" content="https://SEU-DOMINIO.com/">
+  <meta property="og:image" content="https://SEU-DOMINIO.com/img/og-zapchat.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ZapChat Connect | Gestão Profissional de WhatsApp & CRM">
+  <meta name="twitter:description" content="Centralize seu atendimento, organize filas e escale suas vendas com ZapChat Connect.">
+  <meta name="twitter:image" content="https://SEU-DOMINIO.com/img/og-zapchat.jpg">
 
-  <!-- CSS sem Tailwind -->
-  <link rel="stylesheet" href="/frontend/css/inicio.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --brand-primary: #047857;
+      --brand-secondary: #065f46;
+      --brand-light: #d1fae5;
+      --bg-body: #f8fafc;
+      --bg-card: #ffffff;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --line: rgba(15,23,42,0.08);
+
+      --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+      --shadow-lg: 0 20px 25px -5px rgba(0, 0, 0, 0.08);
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-xl: 24px;
+
+      --max-width: 1200px;
+    }
+
+    * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      font-family: "Plus Jakarta Sans", sans-serif;
+      background: var(--bg-body);
+      color: var(--text-main);
+      line-height: 1.6;
+    }
+
+    .container { width: 100%; max-width: var(--max-width); margin: 0 auto; padding: 0 24px; }
+
+    .sr-only{
+      position:absolute; width:1px; height:1px;
+      padding:0; margin:-1px;
+      overflow:hidden; clip:rect(0,0,0,0);
+      white-space:nowrap; border:0;
+    }
+
+    /* ✅ foco visível (acessibilidade) */
+    :focus-visible{
+      outline: 3px solid rgba(4,120,87,.45);
+      outline-offset: 3px;
+      border-radius: 10px;
+    }
+
+    /* --- HEADER --- */
+    .header {
+      position: sticky; top: 0; z-index: 999;
+      background: rgba(255,255,255,0.9);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line);
+    }
+    .nav { height: 80px; display: flex; align-items: center; justify-content: space-between; gap:16px; }
+    .logo {
+      display: flex; align-items: center; gap: 10px;
+      text-decoration: none;
+      color: var(--brand-primary);
+      font-weight: 800;
+      font-size: 20px;
+    }
+
+    /* ✅ LOGO maior */
+    .logo img{
+      height: 44px;
+      width: auto;
+      display:block;
+      max-width: 320px;
+    }
+
+    .nav-links { display: flex; gap: 28px; flex-wrap:wrap; }
+    .nav-links a {
+      text-decoration: none;
+      color: var(--text-muted);
+      font-weight: 700;
+      font-size: 14px;
+      transition: 0.2s;
+    }
+    .nav-links a:hover { color: var(--brand-primary); }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 12px 22px;
+      border-radius: var(--radius-md);
+      font-weight: 800;
+      font-size: 14px;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 1px solid transparent;
+      white-space:nowrap;
+    }
+    .btn-primary { background: var(--brand-primary); color: white; box-shadow: var(--shadow-md); }
+    .btn-primary:hover { background: var(--brand-secondary); transform: translateY(-2px); }
+    .btn-ghost { background: white; border-color: var(--line); color: var(--text-main); }
+    .btn-ghost:hover { border-color: var(--brand-primary); color: var(--brand-primary); }
+
+    /* ✅ Entrar/Cadastrar (links) */
+    .nav-actions{
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+    .btn-link{
+      text-decoration:none;
+      background:transparent;
+      border:1px solid transparent;
+      padding:10px 10px;
+      border-radius: 10px;
+      font-weight:900;
+      font-size:14px;
+      color: var(--text-muted);
+      transition:.2s;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .btn-link:hover{ color: var(--brand-primary); background: rgba(4,120,87,.06); }
+
+    .btn-outline{
+      background:#fff;
+      border-color: rgba(4,120,87,.20);
+      color: var(--brand-primary);
+    }
+    .btn-outline:hover{
+      border-color: var(--brand-primary);
+      transform: translateY(-2px);
+    }
+
+    /* --- HERO --- */
+    .hero { padding: 80px 0 60px; overflow: hidden; }
+    .hero-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 60px; align-items: center; }
+
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--brand-light); color: var(--brand-primary);
+      padding: 6px 12px; border-radius: 100px; font-size: 12px; font-weight: 800;
+      text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 24px;
+    }
+
+    .hero h1 { font-size: 52px; line-height: 1.1; font-weight: 900; letter-spacing: -1.5px; margin: 0 0 20px; color: var(--text-main); }
+    .hero p { font-size: 18px; color: var(--text-muted); margin-bottom: 30px; max-width: 540px; font-weight:600; }
+
+    .hero-bullets { list-style: none; padding: 0; margin: 0 0 30px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .hero-bullets li { display: flex; gap: 10px; font-weight: 700; font-size: 14px; color: var(--text-main); align-items: center; }
+    .hero-bullets svg { width: 18px; height: 18px; color: var(--brand-primary); flex-shrink: 0; }
+
+    .hero-actions{
+      display:flex; gap:12px; flex-wrap:wrap;
+      justify-content:center;
+    }
+    @media(min-width: 1024px){
+      .hero-actions{ justify-content:flex-start; }
+    }
+
+    .hero-preview {
+      position: relative;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-xl);
+      padding: 14px;
+      box-shadow: var(--shadow-lg);
+    }
+
+    /* ✅ PREVIEW (agora com o print real) */
+    .preview-screen {
+      background: transparent;
+      border-radius: var(--radius-lg);
+      border: 0;
+      padding: 0;
+      height: auto;
+      display: block;
+    }
+    .preview-shot{
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 18px;
+      border: 1px solid rgba(15,23,42,0.10);
+      box-shadow: 0 14px 38px rgba(2,6,23,.10);
+      image-rendering: auto;
+      -webkit-backface-visibility: hidden;
+      transform: translateZ(0);
+    }
+
+    /* --- SEÇÕES --- */
+    .section { padding: 90px 0; }
+    .section-head { text-align: center; max-width: 760px; margin: 0 auto 60px; }
+    .kicker { color: var(--brand-primary); font-weight: 900; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; display: block; margin-bottom: 10px; }
+    .section-head h2 { font-size: 36px; font-weight: 900; margin: 0 0 16px; letter-spacing: -1px; }
+    .section-head p { font-size: 18px; color: var(--text-muted); line-height: 1.5; font-weight:600; margin:0; }
+
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+    .feature-card {
+      background: white; padding: 24px; border-radius: var(--radius-lg);
+      border: 1px solid var(--line); transition: 0.3s;
+    }
+    .feature-card:hover { transform: translateY(-5px); box-shadow: var(--shadow-md); border-color: var(--brand-primary); }
+    .feature-icon { font-size: 24px; margin-bottom: 16px; background: var(--bg-body); width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; }
+    .feature-card h3 { margin: 0 0 8px; font-size: 16px; font-weight: 900; }
+    .feature-card p { margin: 0; font-size: 14px; color: var(--text-muted); line-height: 1.5; font-weight:600; }
+
+    .highlight-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 40px; }
+    .highlight-panel { background: white; border: 1px solid var(--line); border-radius: var(--radius-xl); padding: 32px; box-shadow: var(--shadow-sm); }
+    .checklist { list-style: none; padding: 0; margin-top: 20px; margin-bottom:0; }
+    .checklist li { display: flex; gap: 12px; margin-bottom: 12px; font-size: 15px; font-weight: 800; color: var(--text-main); }
+    .checklist svg { color: var(--brand-primary); width: 20px; flex-shrink: 0; }
+
+    .steps-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; margin-top: 40px; }
+    .step-card { position: relative; padding: 30px; background: white; border-radius: var(--radius-lg); border: 1px solid var(--line); }
+    .step-number {
+      background: var(--brand-light); color: var(--brand-primary); width: 40px; height: 40px;
+      border-radius: 10px; display: grid; place-items: center; font-weight: 900; font-size: 18px; margin-bottom: 20px;
+    }
+    .step-card h3{ margin:0 0 8px; font-weight:900; }
+    .step-card p{ margin:0; color:var(--text-muted); font-weight:600; }
+
+    .pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; align-items: start; }
+    .price-card {
+      background: white; border: 1px solid var(--line); border-radius: var(--radius-xl); padding: 40px 30px;
+      text-align: center; position: relative;
+    }
+    /* ✅ popular sem quebrar mobile/tablet */
+    .price-card.popular {
+      border: 2px solid var(--brand-primary);
+      box-shadow: var(--shadow-lg);
+      z-index: 2;
+      transform: none;
+    }
+    @media (min-width: 1025px){
+      .price-card.popular{ transform: scale(1.05); }
+    }
+
+    .price-tag { font-size: 42px; font-weight: 900; color: var(--text-main); margin: 20px 0 10px; }
+    .price-tag span { font-size: 16px; color: var(--text-muted); font-weight: 700; }
+    .price-features { list-style: none; padding: 0; margin: 30px 0; text-align: left; }
+    .price-features li { display: flex; gap: 10px; margin-bottom: 12px; font-size: 14px; font-weight: 800; color: var(--text-muted); }
+    .price-features li.active { color: var(--text-main); }
+    .price-features svg { color: var(--brand-primary); width: 18px; flex-shrink: 0; }
+
+    .security-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+    .testimonials-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+    .testimonial { background: white; padding: 30px; border-radius: var(--radius-lg); border: 1px solid var(--line); box-shadow: var(--shadow-sm); }
+    .testimonial p { font-size: 15px; color: var(--text-main); font-style: italic; margin-bottom: 20px; font-weight:600; }
+    .user-profile { display: flex; align-items: center; gap: 12px; }
+    .avatar { width: 40px; height: 40px; background: #e2e8f0; border-radius: 50%; display: grid; place-items: center; font-weight: 900; color: var(--text-muted); }
+
+    .faq-wrapper { max-width: 800px; margin: 0 auto; display: grid; gap: 16px; }
+    details { background: white; border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 20px; cursor: pointer; transition: 0.2s; }
+    details[open] { border-color: var(--brand-primary); box-shadow: var(--shadow-md); }
+    summary { font-weight: 900; list-style: none; display: flex; justify-content: space-between; align-items: center; gap:18px; }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: "+"; font-size: 20px; color: var(--brand-primary); font-weight: 700; }
+    details[open] summary::after { content: "-"; }
+    details p { margin-top: 15px; color: var(--text-muted); font-size: 15px; font-weight:600; }
+
+    .cta-box {
+      background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
+      border-radius: var(--radius-xl); padding: 60px 24px; text-align: center; color: white;
+      box-shadow: 0 20px 40px -10px rgba(4,120,87,0.4); margin-bottom: 60px;
+    }
+    .cta-box h2 { font-size: 32px; font-weight: 900; margin: 0 0 16px; }
+    .cta-box p { font-size: 18px; opacity: 0.9; max-width: 600px; margin: 0 auto 30px; font-weight:600; }
+
+    .footer { background: #0f172a; color: white; padding: 80px 0 30px; margin-top: 80px; }
+    .footer-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 40px; padding-bottom: 60px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    .footer h4 { color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; font-weight:900; }
+    .footer a { display: block; color: #cbd5e1; text-decoration: none; margin-bottom: 12px; font-size: 14px; transition: 0.2s; font-weight:600; }
+    .footer a:hover { color: white; }
+    .footer-bottom { padding-top: 30px; display: flex; justify-content: space-between; color: #64748b; font-size: 13px; gap:12px; flex-wrap:wrap; font-weight:600; }
+
+    @media (max-width: 1024px) {
+      .grid-4, .pricing-grid, .steps-grid, .security-grid, .testimonials-grid { grid-template-columns: repeat(2, 1fr); }
+      .hero h1 { font-size: 42px; }
+      .hero-grid { grid-template-columns: 1fr; text-align: center; }
+      .hero-bullets { max-width: 520px; margin: 0 auto 30px; text-align: left; }
+      .highlight-grid { grid-template-columns: 1fr; }
+      .logo img{ max-width: 260px; height: 40px; }
+    }
+    @media (max-width: 820px) {
+      .nav-links { display: none; }
+      .logo img{ max-width: 240px; height: 38px; }
+      .btn-primary{ padding: 12px 16px; }
+      .btn-link{ padding: 10px 8px; }
+    }
+
+    /* ✅ mantém CTA no mobile (compacto) */
+    @media (max-width: 480px){
+      .logo img{ max-width: 200px; height: 34px; }
+
+      .nav-actions .btn-primary{
+        display:inline-flex;
+        padding: 12px 14px;
+        border-radius: 12px;
+        gap: 8px;
+      }
+      .nav-actions .btn-primary::before{
+        content:"💬";
+        font-size:16px;
+        line-height:1;
+      }
+    }
+
+    /* ✅ bullets mobile mais confortáveis */
+    @media (max-width: 1024px){
+      .hero-bullets{ gap: 10px; }
+      .hero-bullets li{ font-size: 14px; line-height: 1.35; }
+    }
+
+    [data-animate] { opacity: 0; transform: translateY(20px); transition: 0.6s ease-out; }
+    [data-animate].visible { opacity: 1; transform: translateY(0); }
+
+    /* =========================
+       ✅ WIDGET WHATSAPP
+    ========================== */
+    .wa-widget,
+    .wa-widget *{ box-sizing:border-box; }
+
+    .wa-widget{
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 9999;
+      font-family: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    }
+
+    .wa-fab{
+      width: 58px;
+      height: 58px;
+      border-radius: 999px;
+      border: 0;
+      cursor: pointer;
+      background: var(--brand-primary);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 18px 40px rgba(2,6,23,.18);
+      transition: transform .15s ease, background .15s ease;
+    }
+    .wa-fab:hover{ transform: translateY(-2px); background: var(--brand-secondary); }
+
+    .wa-badge{
+      position:absolute;
+      right: 52px;
+      bottom: 12px;
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--text-main);
+      padding: 8px 10px;
+      border-radius: 999px;
+      font-weight: 900;
+      font-size: 12px;
+      box-shadow: var(--shadow-sm);
+      white-space: nowrap;
+      user-select:none;
+    }
+
+    .wa-panel{
+      position: absolute;
+      right: 0;
+      bottom: 70px;
+      width: min(320px, calc(100vw - 36px));
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 22px 60px rgba(2,6,23,.16);
+      overflow: hidden;
+      transform-origin: 90% 100%;
+      transform: scale(.96) translateY(8px);
+      opacity: 0;
+      pointer-events: none;
+      transition: .18s ease;
+    }
+    .wa-widget.open .wa-panel{
+      transform: scale(1) translateY(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .wa-head{
+      padding: 14px 14px 10px;
+      background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
+      color: #fff;
+    }
+    .wa-head strong{ display:block; font-size: 14px; font-weight: 900; }
+    .wa-head span{ display:block; opacity:.9; font-size: 12px; font-weight: 700; }
+
+    .wa-body{ padding: 12px 14px 14px; }
+    .wa-actions{
+      display: grid;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .wa-btn{
+      width: 100%;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      padding: 12px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+      text-decoration:none;
+      color: var(--text-main);
+      font-weight: 900;
+      font-size: 13px;
+      transition: .15s ease;
+    }
+    .wa-btn:hover{ border-color: rgba(4,120,87,.35); box-shadow: var(--shadow-sm); }
+
+    .wa-small{
+      color: var(--text-muted);
+      font-weight: 700;
+      font-size: 12px;
+      margin: 0;
+      line-height: 1.35;
+    }
+
+    .wa-icon{
+      width: 18px; height: 18px; flex: 0 0 auto;
+    }
+
+    /* ===========================================================
+       ✅ PATCH MOBILE (SEM MEXER NO DESKTOP) — MELHORA FORTE
+       (fica no final pra sobrescrever no mobile)
+    =========================================================== */
+
+    /* ✅ Menu mobile (aparece só no mobile) */
+    .mnav{ display:none; }
+    @media (max-width: 820px){
+      .mnav{
+        display:block;
+        position: relative;
+      }
+      .mnav > summary{
+        list-style:none;
+        cursor:pointer;
+        font-weight: 900;
+        font-size: 14px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background:#fff;
+        color: var(--text-main);
+        user-select:none;
+      }
+      .mnav > summary::-webkit-details-marker{ display:none; }
+      .mnav[open] > summary{
+        border-color: rgba(4,120,87,.35);
+        box-shadow: var(--shadow-sm);
+      }
+      .mnav__panel{
+        position:absolute;
+        left:0;
+        top: calc(100% + 10px);
+        width: 220px;
+        background:#fff;
+        border:1px solid var(--line);
+        border-radius: 16px;
+        box-shadow: 0 22px 60px rgba(2,6,23,.16);
+        padding: 10px;
+        display:grid;
+        gap: 6px;
+        z-index: 9999;
+      }
+      .mnav__panel a{
+        padding: 10px 10px;
+        border-radius: 12px;
+        text-decoration:none;
+        color: var(--text-main);
+        font-weight: 800;
+      }
+      .mnav__panel a:hover{
+        background: rgba(4,120,87,.06);
+        color: var(--brand-primary);
+      }
+    }
+
+    /* Melhora geral de toque e layout no mobile */
+    @media (max-width: 820px){
+      .container{ padding: 0 16px; }
+
+      .header{ backdrop-filter: blur(12px); }
+
+      .nav{
+        height: auto;
+        padding: 12px 0;
+        gap: 10px;
+        align-items: center;
+      }
+
+      /* Logo não esmagar */
+      .logo{ gap: 10px; }
+      .logo img{
+        height: 34px;
+        max-width: 200px;
+      }
+
+      /* ações do topo mais organizadas */
+      .nav-actions{
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .btn-link,
+      .btn.btn-outline{
+        padding: 10px 10px;
+        border-radius: 12px;
+      }
+
+      /* CTA principal do topo em "pílula" e mais confortável */
+      .nav-actions .btn-primary{
+        padding: 12px 14px;
+        border-radius: 14px;
+      }
+    }
+
+    /* HERO: tipografia e espaçamento responsivo */
+    @media (max-width: 1024px){
+      .hero{ padding: 44px 0 30px; }
+
+      .hero-grid{ gap: 26px; }
+
+      .badge{
+        margin: 0 auto 14px;
+        font-size: 11px;
+        padding: 6px 10px;
+      }
+
+      .hero h1{
+        font-size: clamp(28px, 6.2vw, 40px);
+        letter-spacing: -1px;
+        margin: 0 0 12px;
+      }
+
+      .hero p{
+        font-size: 15px;
+        line-height: 1.55;
+        margin: 0 auto 18px;
+        max-width: 44ch;
+      }
+
+      /* Bullets: vira 1 coluna e fica "tocável" */
+      .hero-bullets{
+        grid-template-columns: 1fr;
+        gap: 10px;
+        margin: 0 auto 18px;
+        max-width: 540px;
+      }
+      .hero-bullets li{
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 10px 12px;
+        font-size: 14px;
+        line-height: 1.35;
+      }
+
+      /* Botões do hero: 100% largura no mobile */
+      .hero-actions{
+        width: 100%;
+        justify-content: center;
+        gap: 10px;
+      }
+      .hero-actions .btn{
+        width: 100%;
+        max-width: 520px;
+        justify-content: center;
+      }
+      .hero-actions .btn-primary,
+      .hero-actions .btn-ghost{
+        padding: 14px 16px !important;
+      }
+
+      /* Preview: não estourar e ficar mais leve no mobile */
+      .hero-preview{
+        padding: 10px;
+        border-radius: 18px;
+      }
+      .preview-shot{
+        border-radius: 14px;
+      }
+    }
+
+    /* Seções: menos "ar" no mobile, títulos menores e legíveis */
+    @media (max-width: 820px){
+      .section{ padding: 56px 0; }
+
+      .section-head{ margin: 0 auto 28px; }
+      .section-head h2{
+        font-size: clamp(22px, 5.2vw, 30px);
+        letter-spacing: -0.8px;
+        margin: 0 0 10px;
+      }
+      .section-head p{
+        font-size: 15px;
+        line-height: 1.55;
+      }
+
+      /* Grades viram 1 coluna (em vez de 2 apertado) */
+      .grid-4,
+      .pricing-grid,
+      .steps-grid,
+      .security-grid,
+      .testimonials-grid{
+        grid-template-columns: 1fr;
+        gap: 14px;
+      }
+
+      .feature-card{ padding: 18px; border-radius: 16px; }
+      .feature-icon{ width: 44px; height: 44px; border-radius: 12px; }
+
+      .highlight-panel{ padding: 18px; border-radius: 18px; }
+
+      .step-card{ padding: 18px; border-radius: 16px; }
+
+      /* Planos: cards mais compactos e botão full */
+      .price-card{
+        padding: 22px 18px;
+        border-radius: 18px;
+        text-align: left;
+      }
+      .price-tag{ font-size: 34px; margin: 12px 0 8px; }
+      .price-features{ margin: 18px 0; }
+      .price-card .btn{ width: 100%; justify-content: center; }
+
+      /* Depoimentos mais compactos */
+      .testimonial{ padding: 18px; border-radius: 16px; }
+      .testimonial p{ font-size: 14px; }
+
+      /* FAQ mais confortável pro toque */
+      details{ padding: 16px; border-radius: 16px; }
+      summary{ font-size: 14px; }
+
+      /* CTA final: menos padding e botão full */
+      .cta-box{
+        padding: 32px 16px;
+        border-radius: 18px;
+        margin-bottom: 30px;
+      }
+      .cta-box h2{ font-size: clamp(20px, 5vw, 28px); }
+      .cta-box p{ font-size: 15px; }
+      .cta-box .btn{
+        width: 100%;
+        max-width: 520px;
+        justify-content: center;
+      }
+
+      /* Footer: vira 1 coluna */
+      .footer{ padding: 56px 0 24px; }
+      .footer-grid{
+        grid-template-columns: 1fr;
+        gap: 22px;
+        padding-bottom: 30px;
+      }
+    }
+
+    /* Ajustes finos: mobile pequeno */
+    @media (max-width: 480px){
+      .nav-actions{ width: 100%; justify-content: space-between; }
+      .btn-link{ padding: 10px 8px; }
+      .btn.btn-outline{ padding: 10px 10px; }
+
+      /* CTA do topo ocupa a linha toda (melhor conversão) */
+      .nav-actions .btn-primary{
+        width: 100%;
+        justify-content: center;
+      }
+
+      /* Badge flutuante do WhatsApp não cobrir conteúdo */
+      .wa-widget{ right: 14px; bottom: 14px; }
+      .wa-badge{ display: none; } /* some no mobile pequeno */
+    }
+  </style>
 </head>
 
-<body class="min-h-screen bg-gradient-to-b from-emerald-50 to-white text-gray-800">
+<body>
+  <!-- ✅ Skip link -->
+  <a class="sr-only" href="#conteudo">Pular para o conteúdo</a>
 
-  <!-- Topbar -->
-  <header class="sticky top-0 z-20 border-b border-gray-200 bg-white/70 backdrop-blur">
-    <div class="mx-auto max-w-6xl px-4">
-      <div class="h-14 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <!-- DUAS LOGOS: light e dark -->
-          <img src="img/logo-s-fundo.png" class="logo logo-light" alt="ZapChats" />
-          <img src="img/logo-white.png" class="logo logo-dark" alt="ZapChats" />
-          <span class="hidden sm:inline text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 badge-inicio">início</span>
+  <header class="header">
+    <div class="container">
+      <nav class="nav">
+        <a href="inicio.html" class="logo" aria-label="Página inicial">
+          <img src="img/logo.png" alt="ZapChat Connect">
+          <span class="sr-only">ZapChat Connect</span>
+        </a>
+
+        <div class="nav-links">
+          <a href="#recursos">Recursos</a>
+          <a href="#como-funciona">Como Funciona</a>
+          <a href="#planos">Planos</a>
+          <a href="#seguranca">Segurança</a>
         </div>
 
-        <div class="flex items-center gap-3">
-          <!-- Toggle de tema -->
-          <button id="themeSwitch" class="theme-toggle" aria-label="Alternar tema" aria-pressed="false">
-            <span class="slot left" aria-hidden="true">
-              <!-- sol -->
-              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="3.5" fill="none"/>
-                <line x1="12" y1="2"  x2="12" y2="5"/>
-                <line x1="12" y1="19" x2="12" y2="22"/>
-                <line x1="2"  y1="12" x2="5"  y2="12"/>
-                <line x1="19" y1="12" x2="22" y2="12"/>
-                <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/>
-                <line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
-                <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/>
-                <line x1="17.66" y1="6.34"  x2="19.78" y2="4.22"/>
-              </svg>
-            </span>
-            <span class="slot right" aria-hidden="true">
-              <!-- lua -->
-              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8z" fill="none"/>
-              </svg>
-            </span>
-            <span class="thumb" aria-hidden="true">
-              <svg class="thumb-sun" viewBox="0 0 24 24">
-                <defs>
-                  <radialGradient id="sunGrad" cx="30%" cy="30%" r="80%">
-                    <stop offset="0%" stop-color="#ffd27a"/>
-                    <stop offset="50%" stop-color="#f59e0b"/>
-                    <stop offset="100%" stop-color="#b45309"/>
-                  </radialGradient>
-                </defs>
-                <circle cx="12" cy="12" r="6.3" fill="url(#sunGrad)"/>
-              </svg>
-              <svg class="thumb-moon" viewBox="0 0 24 24">
-                <defs>
-                  <radialGradient id="moonGrad" cx="30%" cy="30%" r="80%">
-                    <stop offset="0%" stop-color="#dbeafe"/>
-                    <stop offset="50%" stop-color="#93c5fd"/>
-                    <stop offset="100%" stop-color="#2563eb"/>
-                  </radialGradient>
-                </defs>
-                <circle cx="12" cy="12" r="11" fill="url(#moonGrad)"/>
-              </svg>
-            </span>
-          </button>
+        <!-- ✅ MENU MOBILE (aparece só no mobile) -->
+        <details class="mnav">
+          <summary>Menu</summary>
+          <div class="mnav__panel">
+            <a href="#recursos">Recursos</a>
+            <a href="#como-funciona">Como Funciona</a>
+            <a href="#planos">Planos</a>
+            <a href="#seguranca">Segurança</a>
+          </div>
+        </details>
+
+        <div class="nav-actions">
+          <a class="btn-link" href="login.html">Entrar</a>
+          <a class="btn btn-outline" href="register.html">Cadastrar</a>
+
+          <!-- ✅ fallback real (se JS falhar) -->
+          <a
+            data-wa-link="consultor"
+            href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Quero%20falar%20com%20um%20consultor%20sobre%20o%20ZapChat%20Connect."
+            class="btn btn-primary"
+            target="_blank"
+            rel="noopener"
+          >
+            Falar com Consultor
+          </a>
         </div>
-      </div>
+      </nav>
     </div>
   </header>
 
-  <!-- Hero -->
-  <section class="mx-auto max-w-6xl px-4 mt-6">
-    <div class="relative overflow-hidden rounded-3xl glass border border-gray-200">
-      <div class="grid md:grid-cols-2 gap-6 p-6 md:p-10">
-        <div class="flex flex-col justify-center">
-          <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">
-            Bem-vindo ao <span class="text-emerald-600">ZapChats</span>!
-          </h1>
-          <p class="mt-3 text-gray-600 leading-relaxed">
-            Centralize seus atendimentos do WhatsApp, organize sua equipe e responda mais rápido. Siga os passos abaixo para deixar tudo pronto.
+  <main id="conteudo">
+    <!-- HERO -->
+    <section class="hero">
+      <div class="container">
+        <div class="hero-grid">
+          <div data-animate>
+            <div class="badge">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+              </svg>
+              CRM & Gestão de WhatsApp 2026
+            </div>
+
+            <h1>Governança, escala e produtividade no WhatsApp da sua empresa.</h1>
+
+            <p>O ZapChat centraliza conversas, organiza atendimentos por filas, automatiza rotinas e entrega relatórios para você reduzir tempo de resposta e vender mais.</p>
+
+            <ul class="hero-bullets">
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Caixa de entrada multiatendente com filas</li>
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Automação por regras, horários e gatilhos</li>
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> CRM: contatos, histórico e funil de vendas</li>
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Relatórios de SLA e produtividade</li>
+            </ul>
+
+            <div class="hero-actions">
+              <!-- ✅ fallback real (se JS falhar) -->
+              <a
+                data-wa-link="demo"
+                href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Quero%20agendar%20uma%20demonstra%C3%A7%C3%A3o%20do%20ZapChat%20Connect."
+                class="btn btn-primary"
+                style="padding: 16px 32px;"
+                target="_blank"
+                rel="noopener"
+              >
+                Agendar demonstração
+              </a>
+              <a href="#recursos" class="btn btn-ghost" style="padding: 16px 32px;">Ver todos recursos</a>
+            </div>
+
+            <div style="margin-top:14px; color:var(--text-muted); font-weight:600; font-size:13px;">
+              Tudo fica na empresa: histórico, contatos e operação (não no celular do vendedor).
+            </div>
+          </div>
+
+          <div class="hero-preview" data-animate>
+            <div class="preview-screen">
+              <img
+                class="preview-shot"
+                src="img/sistema-zapchat.png"
+                alt="Painel ZapChat Connect"
+                loading="eager"
+                decoding="async"
+                fetchpriority="high"
+                width="1200"
+                height="800"
+              >
+              <!-- se tiver 2x:
+                srcset="img/sistema-zapchat.png 1x, img/sistema-zapchat@2x.png 2x"
+              -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RECURSOS -->
+    <section class="section" id="recursos">
+      <div class="container">
+        <div class="section-head" data-animate>
+          <span class="kicker">Recursos</span>
+          <h2>O que o ZapChat entrega na operação.</h2>
+          <p>Do primeiro contato ao pós-venda: padronização, automação e métricas.</p>
+        </div>
+
+        <div class="grid-4">
+          <div class="feature-card" data-animate><span class="feature-icon">📥</span><h3>Caixa Compartilhada</h3><p>Centralize o atendimento em um painel único com histórico completo.</p></div>
+          <div class="feature-card" data-animate><span class="feature-icon">👥</span><h3>Multiatendente</h3><p>Usuários, equipes e papéis: controle de acesso e operação padronizada.</p></div>
+          <div class="feature-card" data-animate><span class="feature-icon">↕️</span><h3>Filas e Roteamento</h3><p>Comercial, Suporte, Financeiro: direcione o volume por área.</p></div>
+          <div class="feature-card" data-animate><span class="feature-icon">🔄</span><h3>Distribuição Auto</h3><p>Regras para distribuir conversas por disponibilidade e fila.</p></div>
+          <div class="feature-card" data-animate><span class="feature-icon">🏷️</span><h3>Tags e Status</h3><p>Etiquete conversas e encontre tudo com filtros operacionais.</p></div>
+          <div class="feature-card" data-animate><span class="feature-icon">⚡</span><h3>Respostas Rápidas</h3><p>Padronize atendimento com atalhos e templates por equipe.</p></div>
+          <div class="feature-card" data-animate><span class="feature-icon">🤖</span><h3>Automação</h3><p>Mensagens por horário, inatividade e etapas do funil.</p></div>
+          <div class="feature-card" data-animate><span class="feature-icon">📇</span><h3>CRM e Histórico</h3><p>Dados do cliente e anotações para atender com consistência.</p></div>
+          <div class="feature-card" data-animate><span class="feature-icon">📊</span><h3>Funil Comercial</h3><p>Etapas (lead → proposta → fechamento) e visão de conversão.</p></div>
+          <div class="feature-card" data-animate><span class="feature-icon">📈</span><h3>Relatórios SLA</h3><p>Tempo de resposta, volume e produtividade por agente.</p></div>
+          <div class="feature-card" data-animate><span class="feature-icon">📝</span><h3>Notas Internas</h3><p>Comentários e transferência sem expor informações ao cliente.</p></div>
+          <div class="feature-card" data-animate><span class="feature-icon">🔗</span><h3>API e Webhooks</h3><p>Conecte ERP/CRM: eventos, automações e sincronização.</p></div>
+        </div>
+
+        <div class="highlight-grid">
+          <div class="highlight-panel" data-animate>
+            <h3>Operação organizada e rastreável</h3>
+            <p style="color:var(--text-muted); margin:0 0 18px; font-weight:600;">Cada conversa com fila, status e histórico — reduz retrabalho.</p>
+            <ul class="checklist">
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Distribuição e transferência com regras</li>
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Filtros, tags, status e busca rápida</li>
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Permissões por usuário (governança)</li>
+            </ul>
+          </div>
+          <div class="highlight-panel" data-animate>
+            <h3>Automação aplicada</h3>
+            <p style="color:var(--text-muted); margin:0 0 18px; font-weight:600;">Reduza repetição e acelere o primeiro atendimento com regras simples.</p>
+            <ul class="checklist">
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Fora de horário e inatividade</li>
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Gatilhos por palavra-chave e tags</li>
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Templates e respostas rápidas por time</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- COMO FUNCIONA -->
+    <section class="section" id="como-funciona" style="background: #fff;">
+      <div class="container">
+        <div class="section-head" data-animate>
+          <span class="kicker">Processo</span>
+          <h2>Implantação rápida e objetiva.</h2>
+          <p>Conecte, estruture filas e comece a operar com indicadores.</p>
+        </div>
+        <div class="steps-grid">
+          <div class="step-card" data-animate><div class="step-number">1</div><h3>Conecte seu WhatsApp</h3><p>Integração do número via QR Code e centralização no painel em poucos minutos.</p></div>
+          <div class="step-card" data-animate><div class="step-number">2</div><h3>Estruture filas e usuários</h3><p>Crie departamentos (Vendas, Suporte), cadastre sua equipe e defina permissões.</p></div>
+          <div class="step-card" data-animate><div class="step-number">3</div><h3>Automatize e acompanhe</h3><p>Ative mensagens de horário, configure rotinas e monitore o SLA.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PLANOS -->
+    <section class="section" id="planos">
+      <div class="container">
+        <div class="section-head" data-animate>
+          <span class="kicker">Preços</span>
+          <h2>Planos para cada tamanho de operação.</h2>
+          <p>Escolha o ideal pelo tamanho do time e necessidade de automação/relatórios.</p>
+
+          <!-- ✅ micro prova social (sem inventar números) -->
+          <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin: 18px 0 0;">
+            <div style="background:#fff; border:1px solid var(--line); padding:10px 14px; border-radius:14px; font-weight:800; color:var(--text-main);">
+              ✅ Implantação rápida
+            </div>
+            <div style="background:#fff; border:1px solid var(--line); padding:10px 14px; border-radius:14px; font-weight:800; color:var(--text-main);">
+              ✅ Controle por usuário e filas
+            </div>
+            <div style="background:#fff; border:1px solid var(--line); padding:10px 14px; border-radius:14px; font-weight:800; color:var(--text-main);">
+              ✅ Relatórios de produtividade
+            </div>
+          </div>
+        </div>
+
+        <div class="pricing-grid">
+          <div class="price-card" data-animate>
+            <h3>Start</h3>
+            <div class="price-tag">R$ 97<span>/mês</span></div>
+            <ul class="price-features">
+              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> 1 Número Conectado</li>
+              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Até 3 Atendentes</li>
+              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Filas Básicas</li>
+              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Histórico de Conversas</li>
+            </ul>
+            <a data-wa-link="start"
+               href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Quero%20assinar%20o%20plano%20Start%20do%20ZapChat%20Connect."
+               class="btn btn-ghost"
+               style="width:100%"
+               target="_blank"
+               rel="noopener">Assinar Start</a>
+          </div>
+
+          <div class="price-card popular" data-animate>
+            <div style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:var(--brand-primary); color:white; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:900;">MAIS ESCOLHIDO</div>
+            <h3 style="color:var(--brand-primary);">Business</h3>
+            <div class="price-tag">R$ 197<span>/mês</span></div>
+            <ul class="price-features">
+              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> 1 Número Conectado</li>
+              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Atendentes Ilimitados</li>
+              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Automação de Horários</li>
+              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Relatórios SLA Avançados</li>
+              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Funil de Vendas (CRM)</li>
+            </ul>
+            <a data-wa-link="business"
+               href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Quero%20assinar%20o%20plano%20Business%20do%20ZapChat%20Connect."
+               class="btn btn-primary"
+               style="width:100%"
+               target="_blank"
+               rel="noopener">Assinar Business</a>
+          </div>
+
+          <div class="price-card" data-animate>
+            <h3>Enterprise</h3>
+            <div class="price-tag" style="font-size:32px;">Sob Consulta</div>
+            <ul class="price-features">
+              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Múltiplos Números</li>
+              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> API e Webhooks</li>
+              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Onboarding Assistido</li>
+              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Gerente de Conta</li>
+            </ul>
+            <a data-wa-link="enterprise"
+               href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Quero%20um%20or%C3%A7amento%20do%20plano%20Enterprise%20do%20ZapChat%20Connect."
+               class="btn btn-ghost"
+               style="width:100%"
+               target="_blank"
+               rel="noopener">Falar com Consultor</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SEGURANÇA -->
+    <section class="section" id="seguranca" style="background: white;">
+      <div class="container">
+        <div class="section-head" data-animate>
+          <span class="kicker">Segurança</span>
+          <h2>Controle de acesso e rastreabilidade.</h2>
+          <p>Permissões, histórico e operação centralizada para manter governança.</p>
+        </div>
+        <div class="security-grid">
+          <div class="feature-card" data-animate><h3>🔒 Controle de Acesso</h3><p>Defina perfis de Administrador e Agente para restringir configurações e dados.</p></div>
+          <div class="feature-card" data-animate><h3>👁️ Auditoria</h3><p>Saiba quem atendeu, o que foi falado e quando. Histórico completo de conversas.</p></div>
+          <div class="feature-card" data-animate><h3>🛡️ Dados Centralizados</h3><p>Se um vendedor sair, os contatos e conversas continuam com a empresa.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- DEPOIMENTOS -->
+    <section class="section" id="depoimentos">
+      <div class="container">
+        <div class="section-head" data-animate>
+          <span class="kicker">Resultados</span>
+          <h2>O que nossos clientes dizem.</h2>
+          <p>Use depoimentos reais ou troque por cases (antes/depois).</p>
+        </div>
+        <div class="testimonials-grid">
+          <div class="testimonial" data-animate>
+            <p>"Parou de perder conversa e conseguimos dividir o atendimento por setor com controle e histórico total."</p>
+            <div class="user-profile">
+              <div class="avatar">AN</div><div><strong style="display:block; font-size:14px;">Ana N.</strong><span style="font-size:12px; color:var(--text-muted); font-weight:700;">Gerente Comercial</span></div>
+            </div>
+          </div>
+          <div class="testimonial" data-animate>
+            <p>"Com os relatórios ficou claro onde a gente demorava. Ajustamos o fluxo e melhorou muito."</p>
+            <div class="user-profile">
+              <div class="avatar">RC</div><div><strong style="display:block; font-size:14px;">Rafael C.</strong><span style="font-size:12px; color:var(--text-muted); font-weight:700;">Diretor de Operações</span></div>
+            </div>
+          </div>
+          <div class="testimonial" data-animate>
+            <p>"A automação de fora de horário salvou nossos finais de semana. O cliente já recebe retorno na hora."</p>
+            <div class="user-profile">
+              <div class="avatar">MP</div><div><strong style="display:block; font-size:14px;">Marina P.</strong><span style="font-size:12px; color:var(--text-muted); font-weight:700;">Líder de Atendimento</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="section" id="faq" style="background: white;">
+      <div class="container">
+        <div class="section-head" data-animate>
+          <span class="kicker">Dúvidas</span>
+          <h2>Perguntas Frequentes</h2>
+          <p>Respostas diretas para acelerar a decisão do cliente.</p>
+        </div>
+        <div class="faq-wrapper">
+          <details data-animate><summary>Dá pra usar com vários atendentes?</summary><p>Sim. O ZapChat permite múltiplos usuários atendendo simultaneamente, com controle e histórico centralizado.</p></details>
+          <details data-animate><summary>Consigo separar por setores (Comercial/Suporte)?</summary><p>Sim. Você cria filas (departamentos) e direciona o cliente para a fila certa.</p></details>
+          <details data-animate><summary>Tem automação de fora de horário?</summary><p>Sim. Você define horários e uma mensagem automática personalizada para contatos fora do expediente.</p></details>
+          <details data-animate><summary>O ZapChat tem CRM?</summary><p>Sim. Você pode salvar contatos, usar etiquetas, anotações e acompanhar o funil de vendas.</p></details>
+          <details data-animate><summary>Preciso de um celular ligado?</summary><p>Depende do modo de conexão. Em alguns cenários, exige o aparelho online (similar ao WhatsApp Web).</p></details>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="section">
+      <div class="container">
+        <div class="cta-box" data-animate>
+          <h2>Pronto para estruturar sua operação?</h2>
+          <p>Chame no WhatsApp e eu te ajudo a montar a configuração ideal (filas, usuários e automações).</p>
+
+          <!-- ✅ fallback real -->
+          <a data-wa-link="cta"
+             href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Quero%20agendar%20uma%20demonstra%C3%A7%C3%A3o%20do%20ZapChat%20Connect."
+             class="btn"
+             style="background: white; color: var(--brand-primary); padding: 16px 32px;"
+             target="_blank"
+             rel="noopener">
+            Começar Agora no WhatsApp
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <h3 style="margin-top:0; color:white;">ZapChat Connect</h3>
+          <p style="color:#94a3b8; font-size:14px; line-height:1.6; font-weight:600;">
+            Plataforma de gestão de WhatsApp para equipes que buscam escala, organização e vendas.
           </p>
         </div>
-        <div class="flex items-center justify-center">
-          <img src="img/hero-inicio.png" alt="" class="w-full max-w-md drop-shadow-xl rounded-2xl object-contain">
+        <div>
+          <h4>Produto</h4>
+          <a href="#recursos">Recursos</a>
+          <a href="#como-funciona">Como Funciona</a>
+          <a href="#planos">Planos</a>
+        </div>
+        <div>
+          <h4>Suporte</h4>
+          <a href="#faq">Central de Ajuda</a>
+          <a data-wa-link="suporte" href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Preciso%20de%20ajuda%20com%20o%20ZapChat%20Connect." target="_blank" rel="noopener">WhatsApp Suporte</a>
+          <a href="#seguranca">Segurança</a>
+        </div>
+        <div>
+          <h4>Legal</h4>
+          <a href="#">Termos de Uso</a>
+          <a href="#">Política de Privacidade</a>
+          <a href="#">LGPD</a>
         </div>
       </div>
-    </div>
-  </section>
-
-  <!-- Trilha de passos -->
-  <section class="mx-auto max-w-6xl px-4 mt-10 mb-16">
-    <h2 class="text-xl font-bold mb-4">Passo a passo de configuração</h2>
-
-    <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <!-- 1 -->
-      <div class="card p-5">
-        <div class="flex items-center justify-between">
-          <div class="text-sm font-medium text-gray-500">Passo 1</div>
-          <div class="chip chip-ok">Obrigatório</div>
-        </div>
-        <h3 class="mt-2 text-lg font-semibold">Conectar WhatsApp</h3>
-        <p class="mt-1 text-gray-600">Escaneie o QR ou use o código de pareamento.</p>
-        <a href="conectar.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-primary">Abrir Conexão</a>
+      <div class="footer-bottom">
+        <span>© 2026 ZapChat Technology. Todos os direitos reservados.</span>
+        <span>Feito com foco em conversão.</span>
       </div>
-
-      <!-- 2 -->
-      <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500">Passo 2</div>
-        <h3 class="mt-2 text-lg font-semibold">Criar Departamentos</h3>
-        <p class="mt-1 text-gray-600">Comercial, Suporte, Financeiro…</p>
-        <a href="departamentos.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Configurar Setores</a>
-      </div>
-
-      <!-- 3 -->
-      <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500">Passo 3</div>
-        <h3 class="mt-2 text-lg font-semibold">Adicionar Colaboradores</h3>
-        <p class="mt-1 text-gray-600">Crie usuários da equipe e defina setores.</p>
-        <a href="colaboradores.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Gerenciar Equipe</a>
-      </div>
-
-      <!-- 4 -->
-      <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500">Passo 4</div>
-        <h3 class="mt-2 text-lg font-semibold">Definir Permissões</h3>
-        <p class="mt-1 text-gray-600">Controle o que cada função pode ver e fazer.</p>
-        <a href="colaboradores.html#permissoes" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Atribuir Permissões</a>
-      </div>
-
-      <!-- 5 -->
-      <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500">Passo 5</div>
-        <h3 class="mt-2 text-lg font-semibold">Configurar Chatbot</h3>
-        <p class="mt-1 text-gray-600">Saudação, horários e menu de setores.</p>
-        <a href="chatbot.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Abrir Chatbot</a>
-      </div>
-
-      <!-- 6 -->
-      <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500">Passo 6</div>
-        <h3 class="mt-2 text-lg font-semibold">Personalizar Empresa</h3>
-        <p class="mt-1 text-gray-600">Logo, timezone, webhooks e token de API.</p>
-        <a href="configuracoes.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Abrir Configurações</a>
-      </div>
-
-      <!-- 7 -->
-      <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500">Passo 7</div>
-        <h3 class="mt-2 text-lg font-semibold">Cadastrar Clientes</h3>
-        <p class="mt-1 text-gray-600">Cadastre contatos para iniciar atendimentos.</p>
-        <a href="clientes.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Gerenciar Clientes</a>
-      </div>
-
-      <!-- 8 -->
-      <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500">Passo 8</div>
-        <h3 class="mt-2 text-lg font-semibold">Testar Envio/Recebimento</h3>
-        <p class="mt-1 text-gray-600">Envie uma mensagem de teste e confirme ✅✅.</p>
-        <a href="atendimentos.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Abrir Atendimentos</a>
-      </div>
-
-      <!-- 9 -->
-      <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500">Passo 9</div>
-        <h3 class="mt-2 text-lg font-semibold">Explorar Mídias</h3>
-        <p class="mt-1 text-gray-600">Fotos, áudios e documentos em um só lugar.</p>
-        <a href="midias.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Abrir Mídias</a>
-      </div>
-
-      <!-- 10 -->
-      <div class="card p-5">
-        <div class="text-sm font-medium text-gray-500">Passo 10</div>
-        <h3 class="mt-2 text-lg font-semibold">Dashboard & Relatórios</h3>
-        <p class="mt-1 text-gray-600">Acompanhe volume, picos e desempenho.</p>
-        <a href="dashboard.html" class="mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 btn btn-outline">Ir ao Dashboard</a>
-      </div>
-    </div>
-
-    <div class="mt-8 flex flex-wrap gap-3">
-      <button id="btn-finalizar" class="rounded-2xl px-4 py-2.5 btn btn-strong">Marcar início como concluído</button>
-      <a href="dashboard.html" class="rounded-2xl px-4 py-2.5 btn btn-outline">Ir ao Dashboard</a>
-    </div>
-  </section>
-
-  <footer class="border-t border-gray-200">
-    <div class="mx-auto max-w-6xl px-4 py-6 text-sm text-gray-500 flex flex-wrap items-center justify-between gap-3">
-      <span>© <span id="year"></span> ZapChats</span>
     </div>
   </footer>
 
-  <script src="/frontend/js/pages/inicio.js"></script>
+  <!-- ✅ WIDGET WHATSAPP -->
+  <div class="wa-widget" id="waWidget" aria-live="polite">
+    <div class="wa-panel" id="waPanel" role="dialog" aria-label="WhatsApp">
+      <div class="wa-head">
+        <strong>Fale no WhatsApp</strong>
+        <span>Resposta rápida • Comercial / Suporte</span>
+      </div>
+      <div class="wa-body">
+        <p class="wa-small">Clique em uma opção e abra direto no WhatsApp com mensagem pronta.</p>
+        <div class="wa-actions">
+          <a class="wa-btn" id="waBtnDemo" href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Quero%20agendar%20uma%20demonstra%C3%A7%C3%A3o%20do%20ZapChat%20Connect." target="_blank" rel="noopener">
+            Agendar demonstração
+            <svg class="wa-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M7 17L17 7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <path d="M10 7h7v7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </a>
+          <a class="wa-btn" id="waBtnSuporte" href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Preciso%20de%20ajuda%20com%20o%20ZapChat%20Connect." target="_blank" rel="noopener">
+            Falar com suporte
+            <svg class="wa-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M7 17L17 7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <path d="M10 7h7v7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <div class="wa-badge" aria-hidden="true">WhatsApp</div>
+    <button class="wa-fab" id="waFab" aria-label="Abrir WhatsApp" aria-expanded="false" aria-controls="waPanel">
+      <!-- ícone WhatsApp (SVG) -->
+      <svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path fill="currentColor" d="M19.11 17.52c-.28-.14-1.63-.8-1.88-.89-.25-.09-.44-.14-.62.14-.19.28-.71.89-.87 1.08-.16.19-.32.21-.6.07-.28-.14-1.17-.43-2.23-1.37-.82-.73-1.38-1.63-1.54-1.9-.16-.28-.02-.43.12-.57.12-.12.28-.32.42-.48.14-.16.19-.28.28-.46.09-.19.05-.35-.02-.5-.07-.14-.62-1.5-.85-2.06-.22-.53-.44-.46-.62-.47h-.53c-.19 0-.5.07-.76.35-.26.28-1 0.98-1 2.39s1.02 2.77 1.17 2.97c.14.19 2 3.06 4.84 4.29.68.29 1.21.46 1.62.59.68.21 1.3.18 1.79.11.55-.08 1.63-.67 1.86-1.31.23-.64.23-1.19.16-1.31-.07-.12-.25-.19-.53-.33z"/>
+        <path fill="currentColor" d="M16.04 3C9.47 3 4.14 8.32 4.14 14.89c0 2.06.54 4.07 1.56 5.85L4 29l8.46-1.66a11.85 11.85 0 0 0 3.58.55h.01c6.57 0 11.89-5.32 11.89-11.89C27.93 8.32 22.61 3 16.04 3zm0 21.66h-.01c-1.17 0-2.31-.31-3.32-.89l-.24-.14-5.02.99.99-4.9-.16-.25a9.69 9.69 0 0 1-1.48-5.17c0-5.36 4.36-9.72 9.72-9.72 5.36 0 9.72 4.36 9.72 9.72 0 5.36-4.36 9.72-9.72 9.72z"/>
+      </svg>
+    </button>
+  </div>
+
+  <script>
+    // =========================
+    // ✅ CONFIG DO WHATSAPP
+    // Troque aqui e pronto:
+    // =========================
+    const WA_NUMBER = "5511999999999"; // <-- coloque seu número (DDI+DDD+numero)
+    const WA_MSG_DEMO = "Olá! Quero agendar uma demonstração do ZapChat Connect.";
+    const WA_MSG_SUPORTE = "Olá! Preciso de ajuda com o ZapChat Connect.";
+
+    function waLink(msg){
+      const text = encodeURIComponent(msg);
+      return `https://wa.me/${WA_NUMBER}?text=${text}`;
+    }
+
+    // aplica nos botões do site (robusto)
+    document.querySelectorAll('[data-wa-link]').forEach((el) => {
+      const k = el.getAttribute('data-wa-link');
+      let msg = WA_MSG_DEMO;
+      if (k === "suporte") msg = WA_MSG_SUPORTE;
+      if (k === "start") msg = "Olá! Quero assinar o plano Start do ZapChat Connect.";
+      if (k === "business") msg = "Olá! Quero assinar o plano Business do ZapChat Connect.";
+      if (k === "enterprise") msg = "Olá! Quero um orçamento do plano Enterprise do ZapChat Connect.";
+      if (k === "consultor") msg = "Olá! Quero falar com um consultor sobre o ZapChat Connect.";
+      if (k === "cta") msg = WA_MSG_DEMO;
+
+      el.setAttribute("href", waLink(msg));
+      el.setAttribute("target", "_blank");
+      el.setAttribute("rel", "noopener");
+    });
+
+    // Widget flutuante (robusto)
+    const waWidget = document.getElementById("waWidget");
+    const waFab = document.getElementById("waFab");
+
+    if (waWidget && waFab) {
+      const waBtnDemo = document.getElementById("waBtnDemo");
+      const waBtnSuporte = document.getElementById("waBtnSuporte");
+
+      if (waBtnDemo) waBtnDemo.href = waLink(WA_MSG_DEMO);
+      if (waBtnSuporte) waBtnSuporte.href = waLink(WA_MSG_SUPORTE);
+
+      function setOpen(v){
+        waWidget.classList.toggle("open", v);
+        waFab.setAttribute("aria-expanded", String(v));
+      }
+
+      waFab.addEventListener("click", () => {
+        setOpen(!waWidget.classList.contains("open"));
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!waWidget.contains(e.target)) setOpen(false);
+      });
+
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") setOpen(false);
+      });
+    }
+
+    // Animações on-scroll
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) entry.target.classList.add('visible');
+      });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('[data-animate]').forEach(el => observer.observe(el));
+  </script>
 </body>
 </html>

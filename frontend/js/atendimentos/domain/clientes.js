@@ -835,7 +835,7 @@ try {
   window.carregarClientes = carregarClientes;
 } catch {}
 
-/* ====== LISTA: booster de preview + ACK + CSS ====== */
+/* ====== LISTA: booster de preview + ACK (SEM CSS AQUI) ====== */
 (function () {
   'use strict';
 
@@ -895,48 +895,4 @@ try {
     try { setAckInline(cid, ack); } catch {}
     return prevSetAck ? prevSetAck(cid, ack) : undefined;
   };
-
-  (function ensureListaAckCss() {
-    const id = 'lista-ack-css';
-    if (document.getElementById(id)) return;
-    const s = document.createElement('style');
-    s.id = id;
-    s.textContent = `
-      .chat-last .preview-ack { margin-right: .25rem; display: inline-flex; }
-      .preview-ack .msg-ack svg { width: 12px; height: 12px; }
-      .preview-ack .msg-ack { vertical-align: -0.1em; }
-    `;
-    document.head.appendChild(s);
-  })();
-
-  (function ensureListaLoadMoreCss() {
-    const id = 'lista-load-more-css';
-    if (document.getElementById(id)) return;
-    const s = document.createElement('style');
-    s.id = id;
-    s.textContent = `
-      #lista-clientes .load-more-item {
-        padding: 6px 0;
-        display: flex;
-        justify-content: center;
-      }
-      #lista-clientes .load-more-item .load-more-btn {
-        padding: 4px 10px;
-        border-radius: 999px;
-        border: 1px solid var(--border, #2a2f32);
-        background: transparent;
-        color: var(--muted, #aebac1);
-        font-size: .8rem;
-        cursor: pointer;
-      }
-      #lista-clientes .load-more-item .load-more-btn:hover:not(:disabled) {
-        background: rgba(255,255,255,0.06);
-      }
-      #lista-clientes .load-more-item .load-more-btn:disabled {
-        opacity: .6;
-        cursor: default;
-      }
-    `;
-    document.head.appendChild(s);
-  })();
 })();

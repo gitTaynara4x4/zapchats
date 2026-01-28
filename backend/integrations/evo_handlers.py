@@ -206,6 +206,7 @@ async def on_conn_update(first: str, payload: dict):
         inst.last_seen = _now_utc()
         empresa_id = inst.empresa_id
 
+        # pegamos aqui a preferência de histórico para decidir overlay
         historico_opcao = (inst.historico_restaurar or "none").lower()
         db.commit()
 
@@ -213,11 +214,13 @@ async def on_conn_update(first: str, payload: dict):
         _mark_disconnected(inst_id)
 
     if conectado:
+        # 0) cancela auto-cleanup do onboarding
         try:
             cancel_auto_cleanup(inst_id)
         except Exception as e:
             LOG(f"[CLEANUP] falha ao cancelar auto cleanup: {e}")
 
+        # 1) mostrar overlay APENAS se vai haver importação de histórico
         if historico_opcao in ("24h", "7d") or (HISTORY_LIMIT_HOURS > 0):
             try:
                 await conexoes_ativas.send_message(
@@ -229,18 +232,21 @@ async def on_conn_update(first: str, payload: dict):
             except Exception as e:
                 LOG(f"[SYNC] falha ao emitir start/progress inicial: {e}")
 
+        # 2) EXPANDE ASSINATURAS (anti-tempestade: só agora “abre a torneira”)
         _evo_expand_websocket(inst_id)
         _evo_expand_rabbit(inst_id)
 
+    # eventos de conexão para instância e empresa
     await conexoes_ativas.send_message(
         f"inst:{inst_id}",
-        {"type": "connection", "status": "CONNECTED" if conectado else "DISCONNECTED", "serverTimestamp": _server_ts_ms()},
+        {"type": "connection", "status": "CONNECTED" if conectado else "DISCONNECTED", "serverTimestamp": _server_ts_ms()}
     )
     await conexoes_ativas.send_message(
         f"emp:{empresa_id}",
-        {"type": "connection", "inst_status": {"connected": bool(conectado), "instance": inst_id}, "reload_whatsapp": True, "serverTimestamp": _server_ts_ms()},
+        {"type": "connection", "inst_status": {"connected": bool(conectado), "instance": inst_id}, "reload_whatsapp": True, "serverTimestamp": _server_ts_ms()}
     )
 
+    # dispara syncs no primeiro CONNECTED
     if conectado and inst_id not in INSTANCIAS_SYNC:
         INSTANCIAS_SYNC.add(inst_id)
         if SYNC_CONTACTS_ON_CONNECT:
@@ -249,8 +255,7 @@ async def on_conn_update(first: str, payload: dict):
             await _sync_chats_completos(inst_id)
         if ENABLE_MESSAGES_SET:
             LOG("[MESSAGES_SET] aguardando histórico (none/24h/7d).")
-
-
+            
 def _mark_disconnected(instance: str):
     if not instance:
         return

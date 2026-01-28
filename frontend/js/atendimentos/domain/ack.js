@@ -28,32 +28,6 @@ const HistAPI = {
   }
 };
 
-function ensureAckCss(){
-  if (document.getElementById('ack-css')) return;
-  const s = document.createElement('style');
-  s.id = 'ack-css';
-  s.textContent = `
-    :root{ --ack-grey:#8696a0; --ack-blue:#53bdeb; }
-    .msg-ack{ display:inline-flex; align-items:center; gap:0; vertical-align:-0.15em; line-height:1; height:1em; user-select:none }
-    .msg-ack svg{ width:14px; height:14px; display:block }
-    .msg-ack .tick{ fill:currentColor }
-    .msg-ack .tick.second{ margin-left:-6px }
-    .msg-ack[data-ack="0"]{ color:var(--ack-grey); opacity:.95 }
-    .msg-ack[data-ack="1"]{ color:var(--ack-grey); opacity:.95 }
-    .msg-ack[data-ack="2"]{ color:var(--ack-blue);  opacity:1 }
-    .msg-ack .clock{ stroke:currentColor; fill:none; stroke-width:1.6 }
-    .msg-ack .clock-hand{ stroke:currentColor; stroke-width:1.6; stroke-linecap:round }
-
-    /* layout da meta: hora + ack (ack sempre depois da hora) */
-    .bubble .meta{ display:flex; align-items:center; gap:.35rem; white-space:nowrap }
-    .bubble-out .meta{ justify-content:flex-end }
-    .bubble .meta .time, .bubble .meta .msg-time{ order:1 }
-    .bubble .meta .msg-ack{ order:2 }
-    .bubble-in  .msg-ack{ display:none !important } /* ACK só em saída */
-  `;
-  document.head.appendChild(s);
-}
-
 /* ============================ SVGs ============================ */
 function svgClock(){ return `
   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -69,7 +43,6 @@ function svgDoubleCheck(){ return svgSingleCheck('first') + svgSingleCheck('seco
 /* ============================ Render ============================ */
 function labelFor(a){ return a===2?'lida':(a===1?'entregue':'enviando'); }
 function iconMarkup(ack){
-  ensureAckCss();
   const a = normalizeAck(ack);
   return a === 0 ? svgClock() : svgDoubleCheck();
 }

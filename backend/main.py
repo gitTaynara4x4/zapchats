@@ -276,9 +276,12 @@ def _html_forbidden(msg: str):
 def _is_public(path: str) -> bool:
     p = path.split("?", 1)[0].lower()
 
+    # ✅ PÚBLICAS (SEM LOGIN)
     PUBLIC_HTML_PATHS = {
         "/",
+        "/inicio", "/inicio.html",                 # ✅ LANDING
         "/login", "/login.html",
+        "/register", "/register.html",             # ✅ (recomendado)
         "/criar-empresa", "/criar-empresa.html",
         "/esqueci_senha", "/esqueci_senha.html",
 
@@ -738,12 +741,24 @@ def _discover_pages() -> list[str]:
 
 PAGES = _discover_pages()
 
+# ✅ ROOT: abre /inicio para público; se logado → /dashboard
 @app.get("/", response_class=HTMLResponse)
-async def root_redirect():
-    # Prioriza login se existir
+async def root_redirect(request: Request):
+    token = request.cookies.get(ACCESS_COOKIE_NAME)
+    emp = request.cookies.get("empresa_id") or request.cookies.get("EMPRESA_ID")
+    if token and emp:
+        return RedirectResponse(url="/dashboard", status_code=302)
+
+    # público: landing
+    f = _page_file("inicio")
+    if f.is_file():
+        return FileResponse(str(f))
+
+    # fallback se não existir inicio.html
     target = "login" if "login" in PAGES else ("index" if "index" in PAGES else None)
     if target and _page_file(target).is_file():
         return FileResponse(str(_page_file(target)))
+
     return {"ok": True, "msg": "Backend ZapChats API (front não encontrado)."}
 
 # Se você quiser manter /dashboard “fixo”, deixa aqui e evita duplicar no loop abaixo

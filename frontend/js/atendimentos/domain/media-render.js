@@ -24,129 +24,9 @@
   }
 
   // ========= CSS =========
+  // ✅ CSS foi movido para /frontend/css/atendimentos.css
   function ensureMsgMediaCss() {
-    if (document.getElementById('msg-media-css')) return;
-    const s = document.createElement('style');
-    s.id = 'msg-media-css';
-    s.textContent = `
-/* ---- midias ---- */
-.msg-media-img{display:block;max-width:min(420px,70vw);border-radius:10px;overflow:hidden}
-.msg-media-img img{display:block;max-width:100%;height:auto;border-radius:10px}
-.msg-media-video{display:block;max-width:min(420px,70vw);border-radius:10px;overflow:hidden}
-.msg-sticker{display:block;max-width:220px;height:auto}
-
-/* ---- docs ---- */
-.doc-card{display:flex;gap:10px;align-items:center;background:#1f2c33;border:1px solid #2a3942;
-  border-radius:12px;padding:10px;min-width:min(320px,70vw);max-width:min(420px,70vw)}
-.doc-ico{width:42px;height:42px;border-radius:10px;display:grid;place-items:center;font-weight:800;color:#111;flex:0 0 auto}
-.doc-ico .ext{font-size:11px;letter-spacing:.6px}
-.doc-body{flex:1;min-width:0}
-.doc-name{display:block;color:#e9edef;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.doc-meta{font-size:12px;color:#aebac1;margin-top:2px}
-.doc-actions{display:flex;gap:6px}
-.doc-btn{background:#0b141a;border:1px solid #2a3942;color:#d1d7db;padding:6px 10px;border-radius:10px;font-size:12px;text-decoration:none}
-
-/* ===========================
-   ✅ ÁUDIO (WPP Web-like)
-   - IN  : avatar com mic
-   - OUT : botão 1.0x
-   - waveform pontilhado + bolinha CENTRALIZADA
-   =========================== */
-
-.wa-audio{
-  --wa-dot:#7aa2ff;
-  --wa-dots:rgba(255,255,255,.38);
-  --wa-fill:rgba(255,255,255,.22);
-  display:flex;align-items:center;gap:10px;
-  padding:6px 6px;
-  max-width:min(520px,78vw);
-  user-select:none;
-}
-
-/* bloco esquerdo */
-.wa-audio .wa-left{display:flex;align-items:center;gap:10px;flex:0 0 auto}
-
-/* avatar (IN) */
-.wa-audio .wa-avatar{
-  width:36px;height:36px;border-radius:999px;overflow:hidden;position:relative;flex:0 0 auto;
-  background:rgba(255,255,255,.14);
-}
-.wa-audio .wa-avatar img{width:100%;height:100%;object-fit:cover;display:block}
-.wa-audio .wa-avatar .ph{
-  position:absolute;inset:0;display:grid;place-items:center;color:rgba(255,255,255,.75)
-}
-.wa-audio .wa-avatar .ph svg{width:18px;height:18px;opacity:.9}
-.wa-audio .wa-avatar .mic{
-  position:absolute;right:-2px;bottom:-2px;width:16px;height:16px;border-radius:999px;
-  display:grid;place-items:center;
-  background:#00a884;
-  border:2px solid rgba(0,0,0,.25);
-}
-.wa-audio .wa-avatar .mic svg{width:10px;height:10px;color:#071a15}
-
-/* play (triângulo simples) */
-.wa-audio .wa-play{
-  width:28px;height:28px;border:0;background:transparent;color:rgba(255,255,255,.92);
-  display:grid;place-items:center;cursor:pointer;padding:0;
-}
-.wa-audio .wa-play svg{width:18px;height:18px}
-.wa-audio .wa-play:active{transform:translateY(1px)}
-
-/* speed (OUT) */
-.wa-audio .wa-speed{
-  border:0;background:rgba(0,0,0,.22);
-  color:rgba(255,255,255,.88);
-  font-size:11px;font-weight:700;
-  padding:5px 8px;border-radius:999px;
-  cursor:pointer;line-height:1;
-}
-.bubble-out .wa-audio .wa-speed{ background:rgba(0,0,0,.18); }
-
-/* main */
-.wa-audio .wa-main{flex:1;min-width:190px;display:flex;flex-direction:column;gap:6px}
-
-/* waveform */
-.wa-audio .wa-wave{
-  position:relative;height:12px;display:flex;align-items:center;
-  touch-action:none; /* pointer drag */
-}
-.wa-audio .wa-wave .dots{
-  position:absolute;left:0;right:0;top:50%;
-  transform:translateY(-50%);
-  height:4px;border-radius:999px;
-  /* pontilhado */
-  background-image: radial-gradient(circle, var(--wa-dots) 1.2px, transparent 1.4px);
-  background-size: 8px 4px;
-  background-repeat: repeat-x;
-  background-position: center;
-  opacity:.95;
-}
-.wa-audio .wa-wave .fill{
-  position:absolute;left:0;top:50%;
-  transform:translateY(-50%);
-  height:4px;border-radius:999px;
-  width:var(--p,0%);
-  background:var(--wa-fill);
-}
-.wa-audio .wa-wave .knob{
-  position:absolute;top:50%;
-  transform:translate(-50%,-50%);
-  left:var(--p,0%);
-  width:10px;height:10px;border-radius:999px;
-  background:var(--wa-dot);
-  box-shadow:0 6px 16px rgba(0,0,0,.25);
-}
-
-/* duração (igual WPP: só total) */
-.wa-audio .wa-len{
-  font-size:12px;color:rgba(255,255,255,.82);
-  line-height:1;
-}
-
-/* quando está tocando, dá um “peso” */
-.wa-audio[data-playing="1"] .wa-play{ color:#ffffff; }
-    `;
-    document.head.appendChild(s);
+    return;
   }
 
   // ========= docs utils =========
@@ -427,9 +307,7 @@
         if (idx < srcs.length - 1) {
           idx++;
           audio.src = srcs[idx];
-          try {
-            audio.load();
-          } catch {}
+          try { audio.load(); } catch {}
           if (!audio.paused) audio.play().catch(() => {});
         }
       };
@@ -461,15 +339,10 @@
       }
 
       // play/pause
-      btnPlay &&
-        btnPlay.addEventListener('click', () => {
-          if (audio.paused) {
-            pauseOthers();
-            audio.play().catch(() => {});
-          } else {
-            audio.pause();
-          }
-        });
+      btnPlay && btnPlay.addEventListener('click', () => {
+        if (audio.paused) { pauseOthers(); audio.play().catch(() => {}); }
+        else { audio.pause(); }
+      });
 
       // speed (só OUT)
       if (btnSpeed) {
@@ -488,9 +361,7 @@
       if (wave) {
         wave.addEventListener('pointerdown', (e) => {
           dragging = true;
-          try {
-            wave.setPointerCapture(e.pointerId);
-          } catch {}
+          try { wave.setPointerCapture(e.pointerId); } catch {}
           setFromClientX(e.clientX);
           e.preventDefault();
         });
@@ -517,18 +388,10 @@
       // events
       audio.addEventListener('play', () => el.setAttribute('data-playing', '1'));
       audio.addEventListener('pause', () => el.removeAttribute('data-playing'));
-      audio.addEventListener('loadedmetadata', () => {
-        if (lenEl) lenEl.textContent = _fmtT(audio.duration || 0);
-        updateFromAudio();
-      });
-      audio.addEventListener('durationchange', () => {
-        if (lenEl && isFinite(audio.duration)) lenEl.textContent = _fmtT(audio.duration || 0);
-      });
+      audio.addEventListener('loadedmetadata', () => { if (lenEl) lenEl.textContent = _fmtT(audio.duration || 0); updateFromAudio(); });
+      audio.addEventListener('durationchange', () => { if (lenEl && isFinite(audio.duration)) lenEl.textContent = _fmtT(audio.duration || 0); });
       audio.addEventListener('timeupdate', updateFromAudio);
-      audio.addEventListener('ended', () => {
-        el.removeAttribute('data-playing');
-        setProgress(0);
-      });
+      audio.addEventListener('ended', () => { el.removeAttribute('data-playing'); setProgress(0); });
       audio.addEventListener('error', tryNext);
 
       // IN: seta avatar do cliente
@@ -565,19 +428,13 @@
     root.querySelectorAll('video[data-alt]').forEach((v) => {
       if (v._fb) return;
       v._fb = true;
-      v.addEventListener(
-        'error',
-        () => {
-          const list = (v.dataset.alt || '').split('|').filter(Boolean);
-          if (!list.length) return;
-          v.src = list.shift();
-          v.dataset.alt = list.join('|');
-          try {
-            v.load();
-          } catch {}
-        },
-        { passive: true }
-      );
+      v.addEventListener('error', () => {
+        const list = (v.dataset.alt || '').split('|').filter(Boolean);
+        if (!list.length) return;
+        v.src = list.shift();
+        v.dataset.alt = list.join('|');
+        try { v.load(); } catch {}
+      }, { passive: true });
     });
   }
 
@@ -662,12 +519,8 @@
     const isSaida = m.tipo === 'saida' || m.from_me === true || m.origem === 'atendente';
     const dir = isSaida ? 'out' : 'in';
 
-    const hora = (window.formatChatTime || ((x) => new Date(x).toLocaleString('pt-BR')))(
-      m.timestamp || m.data || m.created_at || ''
-    );
-
+    const hora = (window.formatChatTime || ((x) => new Date(x).toLocaleString('pt-BR')))(m.timestamp || m.data || m.created_at || '');
     const texto = String(m.conteudo ?? m.mensagem ?? m.texto ?? '').trim();
-
     const ackHtml = isSaida && typeof window.getAckIcon === 'function' ? window.getAckIcon(m.ack ?? 0) : '';
 
     // anexos (dedup)

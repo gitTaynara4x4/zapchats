@@ -189,34 +189,8 @@ function decorateRow(row) {
 function decorateAll() {
   const hist = findHistoryContainer();
   if (!hist) return;
-  const rows = hist.querySelectorAll(
-    '.msg-row, li.msg-row, .message-row'
-  );
+  const rows = hist.querySelectorAll('.msg-row, li.msg-row, .message-row');
   rows.forEach(decorateRow);
-}
-
-function ensureCss() {
-  if (document.getElementById('msg-delete-style')) return;
-  const style = document.createElement('style');
-  style.id = 'msg-delete-style';
-  style.textContent = `
-  #historico .msg-row.msg-deleted .bubble,
-  #historico .msg-row.msg-deleted {
-    opacity: .97;
-  }
-  #historico .msg-row.msg-deleted .msg-delete-banner {
-    display: block;
-    font-size: .70rem;
-    font-style: italic;
-    margin-bottom: .15rem;
-    color: var(--muted, #aebac1);
-  }
-  #historico .msg-row.msg-deleted .msg-time,
-  #historico .msg-row.msg-deleted time {
-    opacity: .9;
-  }
-  `;
-  document.head.appendChild(style);
 }
 
 function setupObserver() {
@@ -231,10 +205,7 @@ function setupObserver() {
         decorateAll();
       }
     });
-    mo.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-    });
+    mo.observe(document.documentElement, { childList: true, subtree: true });
     return;
   }
 
@@ -246,9 +217,7 @@ function setupObserver() {
           decorateRow(node);
         } else {
           node
-            .querySelectorAll?.(
-              '.msg-row, li.msg-row, .message-row'
-            )
+            .querySelectorAll?.('.msg-row, li.msg-row, .message-row')
             .forEach(decorateRow);
         }
       }
@@ -260,7 +229,7 @@ function setupObserver() {
 
 function init() {
   try {
-    ensureCss();
+    // ✅ CSS agora fica no atendimentos.css
     decorateAll();
     setupObserver();
     console.log('[apagar.js] inicializado (UI de mensagens apagadas)');

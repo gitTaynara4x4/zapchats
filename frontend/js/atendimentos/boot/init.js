@@ -20,24 +20,7 @@ function toast(msg, ok = true) {
   if (!t) {
     t = document.createElement('div');
     t.id = '__app_toast';
-    Object.assign(t.style, {
-      position: 'fixed',
-      left: '50%',
-      bottom: '22px',
-      transform: 'translateX(-50%)',
-      maxWidth: '90vw',
-      padding: '8px 12px',
-      color: '#fff',
-      background: '#1e293b',
-      borderRadius: '10px',
-      boxShadow: '0 10px 26px rgba(0,0,0,.30)',
-      zIndex: 99999,
-      fontSize: '13px',
-      lineHeight: '1.25',
-      opacity: '0',
-      transition: 'opacity .15s, transform .15s',
-      pointerEvents: 'none',
-    });
+    t.className = 'zc-toast'; // <-- CSS vai pro atendimentos.css
     document.body.appendChild(t);
   }
   t.textContent = String(msg || '');
@@ -64,16 +47,8 @@ function readyPart(key){
 (function(){
   const SELECTORS = ['#historico', '.chat-history', '.mensagens', '#mensagens', '#history'];
 
-  function ensureStyle(){
-    if (document.getElementById('op-headline-style')) return;
-    const style = document.createElement('style');
-    style.id = 'op-headline-style';
-    style.textContent =
-      `.op-headline{position:sticky;top:0;z-index:6;background:var(--card);color:var(--fg);`+
-      `border-bottom:1px dashed var(--border);padding:.5rem .75rem;font-weight:600;font-size:.95rem}`+
-      `.op-headline small{color:var(--muted);font-weight:500;margin-left:.5rem}`;
-    document.head.appendChild(style);
-  }
+  // (REMOVIDO) ensureStyle() que injetava <style> no JS
+
   function findHistoryContainer(){
     for (const s of SELECTORS){
       const n = document.querySelector(s);
@@ -84,10 +59,10 @@ function readyPart(key){
   function ensureHeadline(){
     let el = document.getElementById('op-headline');
     if (el) return el;
-    ensureStyle();
+
     el = document.createElement('div');
     el.id = 'op-headline';
-    el.className = 'op-headline';
+    el.className = 'op-headline'; // <-- CSS vai pro atendimentos.css
     el.hidden = true;
 
     const hist = findHistoryContainer();
@@ -149,11 +124,8 @@ function readyPart(key){
     }
   }
 
-  if (window.SHOW_TOP_OPERATOR_BANNER === false) {
-    const s = document.createElement('style');
-    s.textContent = `#op-headline{display:none!important}`;
-    document.head.appendChild(s);
-  }
+  // (REMOVIDO) <style> pra esconder #op-headline no JS
+  // Agora o CSS cuida (via variável/atributo)
 
   window.OperatorLine = { set: setOpHeadline, clear: clearOpHeadline, getName: getUserName };
 })();
@@ -253,39 +225,7 @@ function readyPart(key){
     }
   }
 
-  function ensureInstBadgeStyle(){
-    if (document.getElementById('inst-badge-style')) return;
-    const s = document.createElement('style');
-    s.id = 'inst-badge-style';
-    s.textContent = `
-      #inst-badge{
-        margin-left:10px;
-        padding:2px 10px;
-        border:1px solid var(--border);
-        border-radius:999px;
-        font-size:12px;
-        line-height:18px;
-        color:var(--fg);
-        background:var(--card);
-        display:inline-flex;
-        align-items:center;
-        gap:6px;
-        white-space:nowrap;
-        opacity:.95;
-        user-select:none;
-      }
-      #inst-badge .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);}
-      #inst-badge.is-none{border-color:rgba(239,68,68,.55); background:rgba(239,68,68,.08);}
-      #inst-badge.is-none .dot{background:#ef4444;}
-      #inst-badge.shake{animation:instShake .35s linear 1;}
-      @keyframes instShake{
-        0%{transform:translateX(0)} 25%{transform:translateX(-4px)}
-        50%{transform:translateX(4px)} 75%{transform:translateX(-3px)}
-        100%{transform:translateX(0)}
-      }
-    `;
-    document.head.appendChild(s);
-  }
+  // (REMOVIDO) ensureInstBadgeStyle() que injetava <style> no JS
 
   function ensureInstBadge(){
     const head = document.getElementById('chat-header');
@@ -294,10 +234,9 @@ function readyPart(key){
     let el = document.getElementById('inst-badge');
     if (el) return el;
 
-    ensureInstBadgeStyle();
-
     el = document.createElement('div');
     el.id = 'inst-badge';
+    el.className = 'inst-badge'; // <-- CSS vai pro atendimentos.css
     el.innerHTML = `<span class="dot"></span><span id="inst-badge-text">WhatsApp: —</span>`;
 
     const title = document.getElementById('chat-title');

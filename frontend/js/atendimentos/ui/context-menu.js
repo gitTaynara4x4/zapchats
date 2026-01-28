@@ -1,7 +1,8 @@
 // /frontend/js/atendimentos/ui/context-menu.js
 // Menu de contexto: Etiquetar, Fixar/Desafixar, Apagar (admin-only).
-// Fix/Desfixa com UI otimista + placeholder (comentário) pra restaurar.
-// Desfixar reordena os não fixados pelo HORÁRIO (desc). Fixar agora vai pro TOPO.
+// Fix/Desfixa com UI otimista + restaura posição.
+// Desfixar reordena os não fixados pelo HORÁRIO (desc). Fixar vai pro TOPO.
+// ✅ SEM injetar CSS (agora fica no atendimentos.css).
 
 (function () {
   if (window.__ATD_CTXMENU_INIT__) return;
@@ -26,10 +27,23 @@
   };
 
   // ================== Toast ==================
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, m => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[m]));
+  }
+
+  function ensureToastHost() {
+    if (document.getElementById('zcToastHost')) return;
+    const host = document.createElement('div');
+    host.id = 'zcToastHost';
+    document.body.appendChild(host);
+  }
+
   function notify({ title = 'Pronto', msg = '', type = 'ok', timeout = 2800 } = {}) {
     if (typeof window.toast === 'function') {
-      try { window.toast({ title, msg, type, timeout }); return; } catch (e) {}
-      try { window.toast(msg || title, type !== 'error'); return; } catch (e) {}
+      try { window.toast({ title, msg, type, timeout }); return; } catch {}
+      try { window.toast(msg || title, type !== 'error'); return; } catch {}
     }
     ensureToastHost();
     const el = document.createElement('div');
@@ -40,78 +54,8 @@
     setTimeout(() => el.classList.remove('on'), timeout);
     setTimeout(() => el.remove(), timeout + 320);
   }
-  function escapeHtml(s) { return String(s || '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
-  function ensureToastHost() {
-    if (document.getElementById('zcToastHost')) return;
-    const host = document.createElement('div');
-    host.id = 'zcToastHost';
-    document.body.appendChild(host);
-    const st = document.createElement('style');
-    st.textContent = `
-      #zcToastHost{position:fixed;right:14px;bottom:14px;z-index:10000;display:flex;flex-direction:column;gap:8px}
-      .zcToast{opacity:0;transform:translateY(8px);transition:all .18s ease;max-width:min(360px,90vw);
-        background:var(--card,#111827);color:var(--text,#e5e7eb);border:1px solid var(--border,rgba(255,255,255,.12));
-        border-radius:12px;padding:10px 12px;box-shadow:0 10px 30px rgba(0,0,0,.35);font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto}
-      .zcToast.on{opacity:1;transform:none}
-      .zcToast strong{display:block;font-weight:600;margin-bottom:2px}
-      .zcToast .m{opacity:.9}
-      .zcToast.ok{border-color:rgba(16,185,129,.35)}
-      .zcToast.error{border-color:rgba(239,68,68,.45)}
-      .zcToast.warn{border-color:rgba(245,158,11,.45)}
-    `;
-    document.head.appendChild(st);
-  }
 
-  // ================== Diálogo bonitinho de confirmação (genérico, 2 botões) ==================
-  function ensureConfirmCSS() {
-    if (document.getElementById('zcConfirmCSS')) return;
-    const st = document.createElement('style');
-    st.id = 'zcConfirmCSS';
-    st.textContent = `
-      .zcConfirmBackdrop{
-        position:fixed;inset:0;background:rgba(0,0,0,.52);
-        display:flex;align-items:center;justify-content:center;z-index:10001;
-      }
-      .zcConfirm{
-        width:min(420px,92vw);
-        background:var(--card,#020617);
-        color:var(--text,#e5e7eb);
-        border-radius:16px;
-        border:1px solid var(--border,rgba(148,163,184,.55));
-        box-shadow:0 18px 50px rgba(0,0,0,.7);
-        padding:16px 18px 14px;
-        display:flex;flex-direction:column;gap:10px;
-      }
-      .zcConfirm-title{font-size:15px;font-weight:600;margin-bottom:2px}
-      .zcConfirm-body{font-size:13px;opacity:.9;white-space:pre-line}
-      .zcConfirm-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:10px;flex-wrap:wrap}
-      .zcConfirm-btn{
-        padding:8px 14px;border-radius:999px;
-        border:1px solid rgba(148,163,184,.5);
-        background:transparent;
-        color:inherit;
-        cursor:pointer;
-        font-size:13px;
-      }
-      .zcConfirm-btn.ghost{background:transparent}
-      .zcConfirm-btn.primary{
-        background:var(--accent,#2563eb);
-        border-color:var(--accent,#2563eb);
-        color:#fff;
-      }
-      .zcConfirm-btn.danger{
-        background:#1f2937;
-        border-color:#ef4444;
-        color:#fecaca;
-      }
-      .zcConfirm-btn:focus-visible{
-        outline:2px solid var(--accent,#2563eb);
-        outline-offset:2px;
-      }
-    `;
-    document.head.appendChild(st);
-  }
-
+  // ================== Confirm genérico (2 botões) ==================
   function confirmDialog({
     title = 'Confirmação',
     msg = '',
@@ -120,7 +64,6 @@
     destructive = false
   } = {}) {
     return new Promise(resolve => {
-      ensureConfirmCSS();
       const wrap = document.createElement('div');
       wrap.className = 'zcConfirmBackdrop';
       wrap.innerHTML = `
@@ -146,31 +89,22 @@
       };
 
       function onKey(e) {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          close(false);
-        } else if (e.key === 'Enter') {
-          e.preventDefault();
-          close(true);
-        }
+        if (e.key === 'Escape') { e.preventDefault(); close(false); }
+        else if (e.key === 'Enter') { e.preventDefault(); close(true); }
       }
       window.addEventListener('keydown', onKey, true);
 
       btnCancel.onclick = () => close(false);
       btnOk.onclick     = () => close(true);
 
-      wrap.addEventListener('click', e => {
-        if (e.target === wrap) close(false);
-      });
-
-      try { btnOk.focus(); } catch (e) {}
+      wrap.addEventListener('click', e => { if (e.target === wrap) close(false); });
+      try { btnOk.focus(); } catch {}
     });
   }
 
   // ========== Diálogo específico de apagar: 2 opções (lista / permanente) ==========
   function deleteChoiceDialog() {
     return new Promise(resolve => {
-      ensureConfirmCSS();
       const wrap = document.createElement('div');
       wrap.className = 'zcConfirmBackdrop';
       wrap.innerHTML = `
@@ -200,10 +134,7 @@ O que você deseja fazer com esta conversa?
       };
 
       function onKey(e) {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          close(null);
-        }
+        if (e.key === 'Escape') { e.preventDefault(); close(null); }
       }
       window.addEventListener('keydown', onKey, true);
 
@@ -211,15 +142,22 @@ O que você deseja fazer com esta conversa?
       btnLista.onclick  = () => close('lista');
       btnPerma.onclick  = () => close('permanente');
 
-      wrap.addEventListener('click', e => {
-        if (e.target === wrap) close(null);
-      });
-
-      try { btnLista.focus(); } catch (e) {}
+      wrap.addEventListener('click', e => { if (e.target === wrap) close(null); });
+      try { btnLista.focus(); } catch {}
     });
   }
 
   // ================== Diálogo de etiqueta ==================
+  function defaultPalette(){
+    return [
+      { name:'Cinza',    hex:'#6b7280' }, { name:'Azul',     hex:'#3b82f6' },
+      { name:'Ciano',    hex:'#06b6d4' }, { name:'Verde',    hex:'#10b981' },
+      { name:'Lima',     hex:'#84cc16' }, { name:'Amarelo',  hex:'#eab308' },
+      { name:'Laranja',  hex:'#f59e0b' }, { name:'Vermelho', hex:'#ef4444' },
+      { name:'Rosa',     hex:'#ec4899' }, { name:'Roxo',     hex:'#8b5cf6' }
+    ];
+  }
+
   function labelDialog({
     title = 'Etiquetar conversa',
     placeholder = 'Ex.: VIP, Financeiro, Suporte',
@@ -231,7 +169,6 @@ O que você deseja fazer com esta conversa?
     palette = defaultPalette()
   } = {}) {
     return new Promise(resolve => {
-      ensureDialogCSS();
       const wrap = document.createElement('div');
       wrap.className = 'zcDlgBackdrop';
 
@@ -366,6 +303,11 @@ O que você deseja fazer com esta conversa?
         return {h,s,v};
       }
 
+      function selectChip(chip){
+        grid.querySelectorAll('.chip').forEach(x => x.classList.remove('selected'));
+        chip.classList.add('selected');
+      }
+
       function updatePreview(){
         const hex = hsvToHex(H, S, V);
         prev.style.background = hex;
@@ -378,44 +320,52 @@ O que você deseja fazer com esta conversa?
       }
 
       const GAP = 10, PAD = 12, POP_MIN_W = 220, POP_MAX_W = 260, SV_MIN = 120, SV_MAX = 200;
+
       function placePopover(){
         const dlgW = dlg.clientWidth, dlgH = dlg.clientHeight;
         const gridRect = grid.getBoundingClientRect();
         const dlgRect  = dlg.getBoundingClientRect();
+
         let desiredW = Math.min(
           Math.max(POP_MIN_W, Math.min(grid.clientWidth, POP_MAX_W)),
           Math.max(POP_MIN_W, dlgW - PAD*2)
         );
-        const popEl = wrap.querySelector('.color-popover');
-        popEl.style.width = desiredW + 'px';
+        pop.style.width = desiredW + 'px';
+
         const svSize = Math.max(SV_MIN, Math.min(SV_MAX, desiredW));
         sv.style.height = svSize + 'px';
 
-        const wasHidden = popEl.hidden;
-        if (wasHidden) { popEl.hidden = false; popEl.style.visibility = 'hidden'; }
-        const popW = popEl.offsetWidth, popH = popEl.offsetHeight;
-        if (wasHidden) { popEl.hidden = true; popEl.style.visibility = ''; }
+        const wasHidden = pop.hidden;
+        if (wasHidden) { pop.hidden = false; pop.style.visibility = 'hidden'; }
+        const popW = pop.offsetWidth, popH = pop.offsetHeight;
+        if (wasHidden) { pop.hidden = true; pop.style.visibility = ''; }
 
-        const right = { left: (gridRect.right - dlgRect.left) + GAP, top : (gridRect.top   - dlgRect.top) };
-        const left  = { left: (gridRect.left  - dlgRect.left) - popW - GAP, top : (gridRect.top   - dlgRect.top) };
-        const below = { left: (gridRect.left  - dlgRect.left), top : (gridRect.bottom- dlgRect.top) + GAP };
-        const above = { left: (gridRect.left  - dlgRect.left), top : (gridRect.top   - dlgRect.top) - popH - GAP };
+        const right = { left: (gridRect.right - dlgRect.left) + GAP, top : (gridRect.top - dlgRect.top) };
+        const left  = { left: (gridRect.left  - dlgRect.left) - popW - GAP, top : (gridRect.top - dlgRect.top) };
+        const below = { left: (gridRect.left  - dlgRect.left), top : (gridRect.bottom - dlgRect.top) + GAP };
+        const above = { left: (gridRect.left  - dlgRect.left), top : (gridRect.top - dlgRect.top) - popH - GAP };
+
         let pos =
-            (right.left >= PAD && right.left + popW <= dlgW - PAD) ? right :
-            (left.left  >= PAD && left.left  + popW <= dlgW - PAD) ? left  :
-            (below.left >= PAD && below.left + popW <= dlgW - PAD) ? below :
-            above;
-        pos.top = Math.min(Math.max(PAD, pos.top), Math.max(PAD, dlgH - popH - PAD));
-        popEl.style.left = Math.round(Math.max(PAD, Math.min(pos.left, dlgW - popW - PAD))) + 'px';
-        popEl.style.top  = Math.round(pos.top) + 'px';
-      }
-      const openPopover  = () => { const pop = wrap.querySelector('.color-popover'); setSVBackground(); updatePreview(); pop.hidden = false; pop.style.visibility = 'hidden'; placePopover(); pop.style.visibility = ''; };
-      const closePopover = () => { wrap.querySelector('.color-popover').hidden = true; };
+          (right.left >= PAD && right.left + popW <= dlgW - PAD) ? right :
+          (left.left  >= PAD && left.left  + popW <= dlgW - PAD) ? left  :
+          (below.left >= PAD && below.left + popW <= dlgW - PAD) ? below :
+          above;
 
-      function selectChip(chip){
-        grid.querySelectorAll('.chip').forEach(x => x.classList.remove('selected'));
-        chip.classList.add('selected');
+        pos.top = Math.min(Math.max(PAD, pos.top), Math.max(PAD, dlgH - popH - PAD));
+        pop.style.left = Math.round(Math.max(PAD, Math.min(pos.left, dlgW - popW - PAD))) + 'px';
+        pop.style.top  = Math.round(pos.top) + 'px';
       }
+
+      const openPopover  = () => {
+        setSVBackground();
+        updatePreview();
+        pop.hidden = false;
+        pop.style.visibility = 'hidden';
+        placePopover();
+        pop.style.visibility = '';
+      };
+      const closePopover = () => { pop.hidden = true; };
+
       function svSetFromEvent(e){
         const r = sv.getBoundingClientRect();
         const x = Math.min(Math.max(e.clientX - r.left, 0), r.width);
@@ -426,6 +376,7 @@ O que você deseja fazer com esta conversa?
         svCur.style.top  = ((1 - V) * 100) + '%';
         updatePreview();
       }
+
       sv.addEventListener('mousedown', (e) => {
         e.preventDefault();
         svSetFromEvent(e);
@@ -434,7 +385,13 @@ O que você deseja fazer com esta conversa?
         window.addEventListener('mousemove', move);
         window.addEventListener('mouseup', up);
       });
-      hue.addEventListener('input', () => { H = Number(hue.value)||0; setSVBackground(); updatePreview(); });
+
+      hue.addEventListener('input', () => {
+        H = Number(hue.value)||0;
+        setSVBackground();
+        updatePreview();
+      });
+
       hexIn.addEventListener('input', () => {
         const hex = normHex(hexIn.value); if (!hex) return;
         const {h,s,v} = hexToHsv(hex);
@@ -445,28 +402,35 @@ O que você deseja fazer com esta conversa?
         svCur.style.top  = ((1 - V) * 100) + '%';
         updatePreview();
       });
+
       wrap.querySelector('.cp-use').addEventListener('click', () => { closePopover(); });
       wrap.querySelector('.cp-close').addEventListener('click', closePopover);
 
-      function close(v){ wrap.remove(); resolve(v); }
+      function close(v){
+        document.removeEventListener('keydown', onKey, true);
+        wrap.remove();
+        resolve(v);
+      }
+
       function onKey(e){
-        if(e.key === 'Enter' && !btnOk.disabled){ e.preventDefault(); btnOk.click(); }
-        else if(e.key === 'Escape'){
-          const pop = wrap.querySelector('.color-popover');
+        if (e.key === 'Enter' && !btnOk.disabled){ e.preventDefault(); btnOk.click(); }
+        else if (e.key === 'Escape'){
           if (!pop.hidden) { closePopover(); return; }
           e.preventDefault(); close(null);
         }
       }
+
       btnCancel.onclick = () => close(null);
       btnOk.onclick     = () => close({ name: getVal(), color: picked || null });
+
       wrap.addEventListener('click', e => {
-        const pop = wrap.querySelector('.color-popover');
-        const customChipEl = customChip;
-        if (!pop.hidden && !pop.contains(e.target) && !customChipEl.contains(e.target)) closePopover();
+        if (!pop.hidden && !pop.contains(e.target) && !customChip.contains(e.target)) closePopover();
         if (e.target === wrap) close(null);
       });
-      document.addEventListener('keydown', onKey, { capture:true });
-      setTimeout(() => { try{ inp.focus(); }catch(e){} }, 10);
+
+      document.addEventListener('keydown', onKey, true);
+
+      setTimeout(() => { try{ inp.focus(); }catch{} }, 10);
       inp.addEventListener('input', updateState);
       updateState();
 
@@ -478,118 +442,18 @@ O que você deseja fazer com esta conversa?
     });
   }
 
-  function defaultPalette(){
-    return [
-      { name:'Cinza',    hex:'#6b7280' }, { name:'Azul',     hex:'#3b82f6' },
-      { name:'Ciano',    hex:'#06b6d4' }, { name:'Verde',    hex:'#10b981' },
-      { name:'Lima',     hex:'#84cc16' }, { name:'Amarelo',  hex:'#eab308' },
-      { name:'Laranja',  hex:'#f59e0b' }, { name:'Vermelho', hex:'#ef4444' },
-      { name:'Rosa',     hex:'#ec4899' }, { name:'Roxo',     hex:'#8b5cf6' }
-    ];
-  }
-
-  function ensureDialogCSS() {
-    if (document.getElementById('zcDlgCSS')) return;
-    const st = document.createElement('style');
-    st.id = 'zcDlgCSS';
-    st.textContent = `
-      .zcDlgBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:10000}
-      .zcDlg{position:relative;width:min(520px,92vw);background:var(--card,#111827);color:var(--text,#e5e7eb);
-        border:1px solid var(--border,rgba(255,255,255,.12));border-radius:14px;box-shadow:0 12px 36px rgba(0,0,0,.4);overflow:visible}
-      .zcDlg .h{padding:14px 16px 2px;font-weight:600;font-size:15px}
-      .zcDlg .b{padding:12px 16px;opacity:.95;display:grid;gap:12px}
-      .zcDlg .b .in{width:100%;padding:10px 12px;border-radius:10px;background:#0b1220;
-        border:1px solid rgba(255,255,255,.12);color:inherit;font:inherit;outline:2px solid transparent;outline-offset:2px}
-      .zcDlg .b .in:focus{border-color:var(--ring,#4f83ff);box-shadow:0 0 0 3px rgba(79,131,255,.18)}
-      .zcDlg .f{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px 14px}
-      .zcDlg .btn{padding:9px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:#0f172a;color:inherit;cursor:pointer}
-      .zcDlg .btn.ghost{background:transparent}
-      .zcDlg .btn.primary{background:var(--accent,#2563eb);border-color:var(--accent,#2563eb);color:#fff}
-      .zcDlg .btn[disabled]{opacity:.55;cursor:not-allowed}
-      .zcDlg .btn.danger{background:#1f0b0b;border-color:#ef4444;color:#ef8a8a}
-      .zcDlg .fld .lbl{display:block;font-weight:600;font-size:.92rem;margin:4px 0 6px}
-      .zcDlg .hint{display:block;margin-top:6px;font-size:.8rem;color:var(--muted,#9ca3af)}
-      .zcDlg .chipgrid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:10px;align-items:center}
-      .zcDlg .chip{display:grid;place-items:center;cursor:pointer;position:relative}
-      .zcDlg .chip input{display:none}
-      .zcDlg .chip .swatch{width:22px;height:22px;border-radius:999px;background:var(--c);
-        border:1px solid rgba(0,0,0,.25);box-shadow:inset 0 0 0 1px rgba(255,255,255,.15);transition:transform .08s,box-shadow .12s,filter .12s}
-      .zcDlg .chip .swatch:hover{transform:translateY(1px)}
-      .zcDlg .chip.selected .swatch{box-shadow:0 0 0 3px rgba(79,131,255,.28), inset 0 0 0 1px rgba(255,255,255,.18)}
-      .zcDlg .chip .swatch-none{display:grid;place-items:center;font-weight:700;font-size:.9rem;color:var(--muted,#9ca3af);
-        background:transparent;border:1px dashed var(--border,rgba(255,255,255,.22))}
-      .zcDlg .chip .swatch-custom{
-        display:grid;place-items:center;font-weight:900;color:#111;
-        background:
-          radial-gradient( circle at 30% 30%, rgba(255,255,255,.35), transparent 40% ),
-          conic-gradient(from 0deg,#f43f5e,#f59e0b,#fbbf24,#22c55e,#06b6d4,#3b82f6,#a78bfa,#f472b6,#f43f5e);
-        text-shadow:0 1px 0 rgba(255,255,255,.3);
-      }
-      .zcDlg .chip .swatch-custom.has-color{ color:transparent; }
-      .color-popover{position:absolute;z-index:10001;padding:10px;background:#0d1220;color:#e5e7eb;
-        border:1px solid rgba(255,255,255,.12);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.5);max-width:calc(100% - 24px)}
-      .color-popover[hidden]{display:none}
-      .color-popover .cp-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-      .color-popover .cp-close{cursor:pointer;border:1px solid rgba(255,255,255,.12);background:#111827;color:#e5e7eb;border-radius:8px;width:26px;height:26px}
-      .color-popover .cp-body{display:grid;gap:10px}
-      .cp-sv{position:relative;aspect-ratio:1/1;min-height:120px;max-height:200px;border-radius:10px;overflow:hidden;border:1px solid rgba(255,255,255,.12)}
-      .cp-sv-cursor{position:absolute;width:14px;height:14px;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.5);transform:translate(-50%,-50%)}
-      .cp-hue{width:100%;height:10px;border-radius:999px;cursor:pointer;-webkit-appearance:none;appearance:none;outline:none;
-        border:1px solid rgba(255,255,255,.12);
-        background:linear-gradient(to right,#ff0000,#ffff00,#00ff00,#00ffff,#0000ff,#ff00ff,#ff0000)}
-      .cp-row{display:flex;gap:8px;align-items:center}
-      .cp-preview{width:28px;height:28px;border-radius:8px;border:1px solid rgba(255,255,255,.16);background:var(--c,#3b82f6)}
-      .cp-hex{flex:1;min-width:0;background:#0b1220;border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:8px 10px;color:#e5e7eb;font:inherit}
-      .cp-use{border:1px solid rgba(255,255,255,.14);background:#0f172a;color:#e5e7eb;border-radius:10px;padding:8px 10px;cursor:pointer}
-    `;
-    document.head.appendChild(st);
-  }
-
-  // ================== CSS do menu ==================
-  (function injectMenuCSS() {
-    if (document.getElementById('zc-ctxmenu-css')) return;
-    const css = `
-      .zc-ctxmenu{ position:fixed; z-index:9999; min-width:230px; padding:6px;
-        background:var(--card, #111827); color:var(--text,#e5e7eb);
-        border:1px solid var(--border, rgba(255,255,255,.12));
-        border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,.35); display:none }
-      .zc-ctxmenu.open{ display:block }
-      .zc-ctxmenu .item{ display:flex; align-items:center; gap:10px;
-        width:100%; padding:10px 12px; background:transparent; border:0;
-        font:inherit; color:inherit; text-align:left; border-radius:8px; cursor:pointer }
-      .zc-ctxmenu .item:hover{ background:rgba(255,255,255,.06) }
-      .zc-ctxmenu .item .ico{ width:18px; display:inline-flex; align-items:center; justify-content:center; }
-      .zc-ctxmenu .sep{ height:1px; margin:6px 4px; background:var(--border, rgba(255,255,255,.12)); border-radius:1px }
-      .zc-ctxmenu .danger{ color:#ef4444 }
-
-      /* Visual de fixado */
-      .is-pinned{ border:1px solid rgba(250,204,21,.35); border-radius:10px }
-      .chat-item.is-pinned{ order:-1; }
-      .chat-item.is-pinned .chat-name::after{ content:'📌'; margin-left:6px; opacity:.95; font-size:.95em }
-    `;
-    const style = document.createElement('style');
-    style.id = 'zc-ctxmenu-css';
-    style.textContent = css;
-    document.head.appendChild(style);
-  })();
-
-  // ================== Helpers: placeholder + reorder ==================
+  // ================== Helpers: reorder / pinned ==================
   function ensurePlaceholder(node){
     if (!node) return null;
-    if (node.__pinPh) return node.__pinPh;
-    const ph = document.createComment('pin-ph');
-    node.__pinPh = ph;
-    if (node.parentNode) node.parentNode.insertBefore(ph, node);
-    return ph;
+    if (node.__pinRestore) return node.__pinRestore;
+    node.__pinRestore = { parent: node.parentNode, next: node.nextSibling };
+    return node.__pinRestore;
   }
   function restoreToPlaceholder(node){
-    if (!node) return;
-    const ph = node.__pinPh;
-    if (ph && ph.parentNode){
-      ph.parentNode.insertBefore(node, ph);
-      ph.remove();
-    }
-    node.__pinPh = null;
+    if (!node || !node.__pinRestore) return;
+    const { parent, next } = node.__pinRestore;
+    if (parent) parent.insertBefore(node, next || null);
+    node.__pinRestore = null;
   }
   function markPinned(node, flag){
     if (!node) return;
@@ -598,7 +462,6 @@ O que você deseja fazer com esta conversa?
     else node.style.removeProperty('order');
   }
 
-  // Empurra TODOS os fixados pro TOPO (listas não-flex)
   function reorderByPinned(container){
     if (!container) return;
     const sel = 'li, .cliente-item, .chat-item, .list-item';
@@ -608,16 +471,10 @@ O que você deseja fazer com esta conversa?
     const pinned = children.filter(n => n.classList && n.classList.contains('is-pinned'));
     if (!pinned.length) return;
 
-    // âncora = primeiro NÃO fixado
     const firstNonPinned = children.find(n => !(n.classList && n.classList.contains('is-pinned'))) || null;
-
-    // insere os fixados antes do primeiro não-fixado, preservando a ordem entre eles
-    for (const n of pinned) {
-      container.insertBefore(n, firstNonPinned);
-    }
+    for (const n of pinned) container.insertBefore(n, firstNonPinned);
   }
 
-  // ---------- resort por horário (desc) só para não fixados ----------
   function tsFromNode(node){
     if (!node) return Number.NaN;
     const ds = node.dataset || {};
@@ -658,9 +515,11 @@ O que você deseja fazer com esta conversa?
     const sel = 'li, .cliente-item, .chat-item, .list-item';
     const kids = Array.from(container.children).filter(n => n.matches && n.matches(sel));
     if (!kids.length) return;
+
     const pinned = [];
     const others = [];
     let idx = 0;
+
     for (const n of kids){
       if (n.classList && n.classList.contains('is-pinned')) pinned.push(n);
       else {
@@ -668,6 +527,7 @@ O que você deseja fazer com esta conversa?
         others.push({ node:n, ts: Number.isFinite(ts) ? ts : -Infinity, _i: idx++ });
       }
     }
+
     others.sort((a,b) => (b.ts - a.ts) || (a._i - b._i));
 
     const fragTop = document.createDocumentFragment();
@@ -705,6 +565,7 @@ O que você deseja fazer com esta conversa?
   document.body.appendChild(menu);
 
   const btnDelete = menu.querySelector('[data-action="delete"]');
+
   function updateDeleteVisibility() {
     if (!btnDelete) return;
     btnDelete.style.display = CAN_DELETE_CONVERSA ? 'flex' : 'none';
@@ -722,23 +583,35 @@ O que você deseja fazer com esta conversa?
       const isAdmin = !!(me.is_admin || me.isAdmin || me.admin || me.cargo === 'admin');
       const hasDelPerm = perms.includes('atendimento.apagar_conversas') || perms.includes('atendimento.apagar');
       CAN_DELETE_CONVERSA = !!(isAdmin || hasDelPerm);
-    } catch (e) {
+    } catch {
       CAN_DELETE_CONVERSA = false;
     }
     updateDeleteVisibility();
   })();
 
   let targetLi = null;
-  const closeMenu = () => { menu.classList.remove('open'); targetLi = null; };
-  const openMenuAt = (x, y) => {
-    const vw = window.innerWidth, vh = window.innerHeight;
-    const rect = { w: 240, h: 150 };
-    const left = Math.min(x, vw - rect.w - 8);
-    const top  = Math.min(y, vh - rect.h - 8);
-    menu.style.left = left + 'px';
-    menu.style.top  = top  + 'px';
-    menu.classList.add('open');
+
+  const closeMenu = () => {
+    menu.classList.remove('open');
+    targetLi = null;
   };
+
+  const openMenuAt = (x, y) => {
+    // abre e mede (tamanho real)
+    menu.style.left = '0px';
+    menu.style.top  = '0px';
+    menu.classList.add('open');
+
+    requestAnimationFrame(() => {
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const r = menu.getBoundingClientRect();
+      const left = Math.min(x, vw - r.width - 8);
+      const top  = Math.min(y, vh - r.height - 8);
+      menu.style.left = Math.max(8, left) + 'px';
+      menu.style.top  = Math.max(8, top)  + 'px';
+    });
+  };
+
   const updatePinLabel = (li) => {
     const el = menu.querySelector('[data-pin-label]');
     const pinned = li && li.classList && li.classList.contains('is-pinned');
@@ -747,7 +620,11 @@ O que você deseja fazer com esta conversa?
 
   // ================== Ações ==================
   async function doLabel(clienteId){
-    const picked = await labelDialog({ title:'Etiquetar conversa', placeholder:'Ex.: VIP, Financeiro, Suporte', submitText:'Aplicar' });
+    const picked = await labelDialog({
+      title:'Etiquetar conversa',
+      placeholder:'Ex.: VIP, Financeiro, Suporte',
+      submitText:'Aplicar'
+    });
     if (!picked || !picked.name) return;
 
     const bodies = [{ add:{ name:picked.name, color:picked.color } }, { add:picked.name }];
@@ -767,7 +644,6 @@ O que você deseja fazer com esta conversa?
   }
 
   async function doPin(clienteId, li){
-    // Se o li foi limpo ao fechar o menu, tenta reencontrar
     if (!li || !li.classList) {
       li = document.querySelector(
         `[data-id="${clienteId}"], .cliente-item[data-id="${clienteId}"], .chat-item[data-id="${clienteId}"], .list-item[data-id="${clienteId}"]`
@@ -783,20 +659,15 @@ O que você deseja fazer com esta conversa?
 
     // UI otimista
     if (willPin) {
-      ensurePlaceholder(li);          // guarda posição antiga
-      markPinned(li, true);           // visual + order:-1 (se flex)
+      ensurePlaceholder(li);
+      markPinned(li, true);
       updatePinLabel(li);
-      requestAnimationFrame(() => {   // listas não-flex: sobe pro topo
-        reorderByPinned(container);
-      });
+      requestAnimationFrame(() => reorderByPinned(container));
     } else {
-      restoreToPlaceholder(li);       // volta antes do placeholder e remove-o
-      markPinned(li, false);          // remove visual
+      restoreToPlaceholder(li);
+      markPinned(li, false);
       updatePinLabel(li);
-      // reordena os não fixados pelo HORÁRIO (desc)
-      requestAnimationFrame(() => {
-        resortByTime(container);
-      });
+      requestAnimationFrame(() => resortByTime(container));
     }
 
     try{
@@ -807,10 +678,9 @@ O que você deseja fazer com esta conversa?
       if (res.status === 403) { notify({title:'Sem permissão', msg:'Apenas administradores podem fixar.', type:'error'}); return; }
       if (!res.ok) throw new Error(await res.text().catch(() => ''));
 
-      try { window.Lista && window.Lista.setPinned && window.Lista.setPinned(clienteId, willPin); } catch (e) {}
-      try { await window.carregarClientes && window.carregarClientes({ force: true }); } catch (e) {}
-
-      try { sessionStorage.setItem('convForceReload', '1'); } catch (e) {}
+      try { window.Lista && window.Lista.setPinned && window.Lista.setPinned(clienteId, willPin); } catch {}
+      try { await window.carregarClientes && window.carregarClientes({ force: true }); } catch {}
+      try { sessionStorage.setItem('convForceReload', '1'); } catch {}
 
       notify({title: willPin ? 'Conversa fixada' : 'Conversa desafixada', type:'ok'});
     }catch(e){
@@ -837,28 +707,29 @@ O que você deseja fazer com esta conversa?
     }
 
     const choice = await deleteChoiceDialog();
-    if (!choice) return; // cancelou
+    if (!choice) return;
 
-    // helper pra limpar UI/local cache
     const removeFromUI = () => {
       if (li && li.remove) li.remove();
+
       try {
-        if (window.state && window.state.cacheHistoricos) {
-          delete window.state.cacheHistoricos[String(clienteId)];
+        if (window.cacheHistoricos) delete window.cacheHistoricos[String(clienteId)];
+        if (window.state?.cacheHistoricos) delete window.state.cacheHistoricos[String(clienteId)];
+
+        const key = `cacheHistoricos:${EMPRESA_ID}`;
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const obj = JSON.parse(raw);
+          delete obj[String(clienteId)];
+          localStorage.setItem(key, JSON.stringify(obj));
         }
-      } catch (e) {}
+      } catch {}
     };
 
-    // ---------- apagar só da lista ----------
     if (choice === 'lista') {
       try{
-        const res = await authFetch(`/api/atendimento/conversas/${clienteId}?empresa_id=${EMPRESA_ID}`, {
-          method: 'DELETE'
-        });
-        if (res.status === 403) {
-          notify({title:'Sem permissão', msg:'Apenas administradores podem apagar.', type:'error'});
-          return;
-        }
+        const res = await authFetch(`/api/atendimento/conversas/${clienteId}?empresa_id=${EMPRESA_ID}`, { method: 'DELETE' });
+        if (res.status === 403) { notify({title:'Sem permissão', msg:'Apenas administradores podem apagar.', type:'error'}); return; }
         if (!res.ok) throw new Error(await res.text());
         removeFromUI();
         notify({title:'Conversa removida da lista', type:'ok'});
@@ -868,7 +739,6 @@ O que você deseja fazer com esta conversa?
       return;
     }
 
-    // ---------- apagar permanente ----------
     if (choice === 'permanente') {
       const ok = await confirmDialog({
         title: 'Apagar permanentemente',
@@ -880,15 +750,8 @@ O que você deseja fazer com esta conversa?
       if (!ok) return;
 
       try{
-        // aqui chamamos a rota que realmente apaga do banco:
-        // DELETE /api/atendimento/conversas/{cliente_id}/permanente
-        const res = await authFetch(`/api/atendimento/conversas/${clienteId}/permanente?empresa_id=${EMPRESA_ID}`, {
-          method: 'DELETE'
-        });
-        if (res.status === 403) {
-          notify({title:'Sem permissão', msg:'Apenas administradores podem apagar permanentemente.', type:'error'});
-          return;
-        }
+        const res = await authFetch(`/api/atendimento/conversas/${clienteId}/permanente?empresa_id=${EMPRESA_ID}`, { method: 'DELETE' });
+        if (res.status === 403) { notify({title:'Sem permissão', msg:'Apenas administradores podem apagar permanentemente.', type:'error'}); return; }
         if (!res.ok) throw new Error(await res.text());
         removeFromUI();
         notify({title:'Conversa apagada permanentemente', type:'ok'});
@@ -903,9 +766,14 @@ O que você deseja fazer com esta conversa?
     const btn = ev.target.closest('.item');
     if (!btn || !targetLi) return;
 
-    const liCtx = targetLi; // snapshot antes de fechar
+    const liCtx = targetLi; // snapshot
     const action = btn.dataset.action;
-    const clienteId = Number((liCtx.dataset && liCtx.dataset.id) || liCtx.getAttribute && liCtx.getAttribute('data-id'));
+
+    const clienteId = Number(
+      (liCtx.dataset && liCtx.dataset.id) ||
+      (liCtx.getAttribute && liCtx.getAttribute('data-id'))
+    );
+
     closeMenu();
 
     if (!Number.isFinite(clienteId)) {
@@ -922,16 +790,26 @@ O que você deseja fazer com esta conversa?
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
   window.addEventListener('scroll', closeMenu, true);
 
-  // Abre com botão direito na lista
-  const list = document.getElementById('lista-clientes');
-  if (!list) return;
-  list.addEventListener('contextmenu', (ev) => {
+  // ========== Context menu delegado (não quebra quando a lista recria) ==========
+  function findListaClientes(){
+    return document.getElementById('lista-clientes')
+      || document.querySelector('.lista-clientes')
+      || document.querySelector('[data-role="lista-clientes"]')
+      || null;
+  }
+
+  document.addEventListener('contextmenu', (ev) => {
+    const list = findListaClientes();
+    if (!list || !list.contains(ev.target)) return;
+
     const li = ev.target.closest('[data-id], .chat-item, .cliente-item, .list-item, li');
     if (!li) return;
     if (!li.dataset.id && !(li.getAttribute && li.getAttribute('data-id'))) return;
+
     ev.preventDefault();
     targetLi = li;
     updatePinLabel(li);
     openMenuAt(ev.clientX, ev.clientY);
   });
+
 })();

@@ -31,45 +31,6 @@
       </span>`;
   }
 
-  /* ---------------- CSS ---------------- */
-  (function injectCSS(){
-    if ($('#agenda-style')) return;
-    const st = document.createElement('style');
-    st.id = 'agenda-style';
-    st.textContent = `
-      .ag-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.42);opacity:0;pointer-events:none;transition:opacity .18s;z-index:9998;}
-      .ag-backdrop.is-open{opacity:1;pointer-events:auto;}
-      .ag-drawer{position:fixed;top:0;right:0;height:100vh;width:min(420px,94vw);background:var(--panel-2,#1f2c33);color:var(--text,#e9edef);
-        border-left:1px solid var(--border,#26343a);transform:translateX(100%);transition:transform .18s;z-index:9999;display:flex;flex-direction:column;pointer-events:none;}
-      .ag-drawer.is-open{transform:translateX(0);pointer-events:auto;}
-      .ag-head{display:flex;align-items:center;gap:8px;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border,#26343a);}
-      .ag-title{font-weight:700}
-      .ag-close{background:transparent;border:0;color:#aebac1;cursor:pointer;padding:6px;border-radius:8px;}
-      .ag-close:hover{color:#fff;background:#233238}
-      .ag-search{padding:8px 12px;border-bottom:1px solid var(--border,#26343a)}
-      .ag-search input{width:100%;background:var(--panel-1,#0b141a);border:1px solid var(--border,#2a3942);border-radius:10px;padding:10px 12px;color:var(--text,#e9edef);outline:none}
-      html[data-theme="light"] .ag-search input{background:#fff;border-color:#dadde0;color:#111}
-
-      .ag-list{flex:1;overflow:auto;padding:8px}
-      .ag-item{display:flex;gap:10px;align-items:center;padding:8px;border-radius:10px;cursor:pointer}
-      .ag-item:hover{background:rgba(255,255,255,.06)}
-      html[data-theme="light"] .ag-item:hover{background:#f4f4f5}
-      .ag-avatar{width:40px;height:40px;border-radius:50%;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;background:#0b141a;border:1px solid var(--border,#2a3942)}
-      .ag-avatar img{width:100%;height:100%;object-fit:cover}
-      .ag-avatar--default{background:#0b141a;color:#9aa7ad}
-      .ag-meta{min-width:0;display:flex;flex-direction:column}
-      .ag-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
-      .ag-phone{font-size:12px;color:#9aa7ad}
-      .ag-empty{padding:16px;text-align:center;color:#9aa7ad}
-
-      .wpp-header-icons{display:flex;align-items:center;gap:8px}
-      .wpp-header-icon{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:8px;color:var(--text-2,#aebac1);background:transparent;border:0;cursor:pointer}
-      .wpp-header-icon:hover{background:rgba(255,255,255,.06);color:#fff}
-      html[data-theme="light"] .wpp-header-icon:hover{background:#f4f4f5;color:#111}
-    `;
-    document.head.appendChild(st);
-  })();
-
   /* ---------------- Drawer ---------------- */
   function buildDrawer(){
     if ($('#agBackdrop')) return;
@@ -304,11 +265,8 @@
         let inst_slug = null;
         if (rawInst != null && rawInst !== '') {
           const s = String(rawInst);
-          if (/^\d+$/.test(s)) {
-            inst_id = Number(s);     // ex.: 3
-          } else {
-            inst_slug = s;           // ex.: "seg-sistemas-1924"
-          }
+          if (/^\d+$/.test(s)) inst_id = Number(s);
+          else inst_slug = s;
         }
 
         const seed = {
@@ -325,34 +283,26 @@
           try {
             await window.selecionarClienteObj(id);
 
-            // se o fluxo novo não montou o state/header, força fallback
             const sel = window.state?.clienteSel;
             if (!sel || sel.cliente_id !== id) {
               console.warn('[Agenda] selecionarClienteObj não montou header, usando fallback');
               window.state = window.state || {};
               window.state.clienteSel = seed;
               setChatHeader(seed);
-              try { await openByProfileFallback(id, seed); } catch (e2) {
-                console.error('[Agenda] fallback open', e2);
-              }
+              try { await openByProfileFallback(id, seed); } catch (e2) { console.error('[Agenda] fallback open', e2); }
             }
           } catch (e) {
             console.error('[Agenda] erro selecionarClienteObj, usando fallback', e);
             window.state = window.state || {};
             window.state.clienteSel = seed;
             setChatHeader(seed);
-            try { await openByProfileFallback(id, seed); } catch (e2) {
-              console.error('[Agenda] fallback open', e2);
-            }
+            try { await openByProfileFallback(id, seed); } catch (e2) { console.error('[Agenda] fallback open', e2); }
           }
         } else {
-          // ambiente antigo (sem selecionarClienteObj) → sempre fallback
           window.state = window.state || {};
           window.state.clienteSel = seed;
           setChatHeader(seed);
-          try { await openByProfileFallback(id, seed); } catch (e) {
-            console.error('[Agenda] fallback open', e);
-          }
+          try { await openByProfileFallback(id, seed); } catch (e) { console.error('[Agenda] fallback open', e); }
         }
 
         window.__Agenda.close();
@@ -367,7 +317,6 @@
       ? dataState.items.map(htmlItem).join('')
       : `<div class="ag-empty">Nenhum contato encontrado.</div>`;
     bindItemClicks();
-    // 🔔 avisa quem está observando (lazy avatar)
     document.dispatchEvent(new CustomEvent('agenda:render'));
     list.scrollTop = prevTop;
   }
@@ -395,7 +344,6 @@
     if (!r.ok) return;
     const p = await r.json();
 
-    // tenta pegar instância do profile, do seed ou da instância ativa
     const rawInst =
       (p && (p.instancia_id ?? p.instance)) ??
       (seed && (seed.instancia_id ?? seed.instancia)) ??
@@ -405,11 +353,8 @@
     let inst_slug = null;
     if (rawInst != null && rawInst !== '') {
       const s = String(rawInst);
-      if (/^\d+$/.test(s)) {
-        inst_id = Number(s);
-      } else {
-        inst_slug = s;
-      }
+      if (/^\d+$/.test(s)) inst_id = Number(s);
+      else inst_slug = s;
     }
 
     const sel = {
@@ -443,11 +388,8 @@
     if (!sel?.cliente_id) return;
     const qs = new URLSearchParams({ empresa_id: String(EMPRESA_ID), limit: '50', offset: '0' });
 
-    if (sel.instancia_id != null && sel.instancia_id !== '') {
-      qs.set('instancia_id', String(sel.instancia_id));
-    } else if (sel.instancia != null && sel.instancia !== '') {
-      qs.set('instance', String(sel.instancia));
-    }
+    if (sel.instancia_id != null && sel.instancia_id !== '') qs.set('instancia_id', String(sel.instancia_id));
+    else if (sel.instancia != null && sel.instancia !== '') qs.set('instance', String(sel.instancia));
 
     const r = await fetch(`/api/atendimento/conversas/${sel.cliente_id}/mensagens?` + qs.toString(), { credentials:'include' });
     if (!r.ok) return;
@@ -465,7 +407,6 @@
 
   /* ---------------- Fluxos ---------------- */
   async function abrirAgenda(){
-    // 🔒 Só deixa abrir se tiver uma instância selecionada (chip).
     const instRaw = (typeof window !== 'undefined') ? window.INSTANCIA_ATIVA : null;
     if (!instRaw || String(instRaw).trim() === '') {
       toast.err('Selecione uma instância antes de abrir a Agenda.');
@@ -477,7 +418,6 @@
     $('#agList').innerHTML = Array.from({length:8})
       .map(()=>`<div class="ag-skel"><div class="dot"></div><div class="line"></div></div>`).join('');
 
-    // FEED normal
     dataState.mode = 'feed';
     dataState.q = '';
     try{
@@ -491,12 +431,10 @@
     }
   }
 
-  // Busca: chama servidor SÓ quando tiver texto (>=1 char)
   const onSearch = debounce(async () => {
     const q = ($('#agQuery')?.value || '').trim();
 
     if (q.length === 0){
-      // volta para FEED normal
       dataState.mode = 'feed';
       dataState.q = '';
       $('#agList').innerHTML = Array.from({length:4})
@@ -506,7 +444,6 @@
       return;
     }
 
-    // modo SEARCH — consulta servidor com q
     dataState.mode = 'search';
     dataState.q = q;
     $('#agList').innerHTML = Array.from({length:4})
@@ -514,7 +451,7 @@
     try{
       await fetchNextPage({ initial:true });
       renderList();
-      ensureInfiniteScroll(); // mantém scroll infinito também para resultados da busca
+      ensureInfiniteScroll();
     }catch(e){
       console.error('[Agenda] busca', e);
       $('#agList').innerHTML = `<div class="ag-empty">Erro na busca.<br><small>${String(e.message||e)}</small></div>`;
@@ -533,7 +470,6 @@
 
   /* ================== AGENDA: Lazy avatar (BD -> Evolution -> BD) ================== */
   (function agendaAvatarHydrator(){
-    // Sem cooldown longo: apenas evita duplicar tentativa na MESMA sessão
     const TRIED_BD = new Set();
     const TRIED_EVOLUTION = new Set();
 
@@ -570,21 +506,18 @@
       const id = Number(container?.getAttribute('data-id') || 0);
       if (!id) return;
 
-      // 1) Se já tem <img>, só arma onerror e reaproveita.
       const currentImg = container.querySelector('.ag-avatar img');
       if (currentImg){
         currentImg.addEventListener('error', () => onImgError(container));
         return;
       }
 
-      // 2) Se veio data-avatar, usa e pronto.
       const hinted = container.getAttribute('data-avatar');
       if (hinted && hinted.trim() !== ''){
         setAvatarImg(container, hinted);
         return;
       }
 
-      // 3) Nada visível → tenta BD UMA vez por sessão
       if (!TRIED_BD.has(id)){
         TRIED_BD.add(id);
         const bd = await fetchProfileBD(id);
@@ -595,7 +528,6 @@
         }
       }
 
-      // 4) Continua sem imagem → placeholder. Evolution só via onerror (ou outros fluxos)
       setAvatarImg(container, null);
     }
 
@@ -603,15 +535,12 @@
       const id = Number(container?.getAttribute('data-id') || 0);
       if (!id) return;
 
-      // Evita martelar Evolution
       if (TRIED_EVOLUTION.has(id)) return;
       TRIED_EVOLUTION.add(id);
 
-      // Reseta visual
       const box = container.querySelector('.ag-avatar');
       if (box){ box.classList.add('ag-avatar--default'); box.innerHTML = `<i class="fa fa-user-circle"></i>`; }
 
-      // Pede Evolution UMA vez; se backend salvar em storage estável, re-aplica
       try{
         if (typeof window.refreshAvatarFromEvolution === 'function'){
           await window.refreshAvatarFromEvolution(id);
