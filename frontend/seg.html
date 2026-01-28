@@ -3,390 +3,316 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SEG Monitoramento 24h | Segurança Patrimonial</title>
+    <title>SEG Monitoramento | Excelência em Segurança</title>
     
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
     <style>
-        /* --- ESTILO CORPORATIVO SÉRIO --- */
+        /* --- CONFIGURAÇÃO VISUAL DE ALTO PADRÃO --- */
         :root {
-            --azul-real: #004aad;     /* Azul da sua marca */
-            --azul-noite: #002a5c;    /* Azul escuro para contraste */
-            --amarelo-ouro: #ffcc00;  /* Amarelo para detalhes */
-            --branco: #ffffff;
-            --cinza-fundo: #f0f2f5;
-            --cinza-texto: #444444;
+            --navy-deep: #0f172a;    /* Azul Quase Preto */
+            --navy-light: #1e293b;   
+            --gold-metallic: #d4af37;/* Dourado Premium */
+            --gold-light: #f3e5ab;   
+            --white: #ffffff;
+            --gray-bg: #f8fafc;
+            --text-main: #334155;
+            
+            --shadow-soft: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            --shadow-hover: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+            --radius: 8px;
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
         body {
-            font-family: 'Roboto', sans-serif;
-            background-color: var(--cinza-fundo);
-            color: var(--cinza-texto);
+            font-family: 'Poppins', sans-serif;
+            color: var(--text-main);
+            background-color: var(--white);
             line-height: 1.6;
+            overflow-x: hidden;
         }
 
-        /* --- TOPO DE INFORMAÇÕES --- */
-        .barra-topo {
-            background-color: var(--azul-noite);
-            color: var(--branco);
-            font-size: 0.85rem;
-            padding: 8px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-        }
-
-        .container {
-            max-width: 1100px;
-            margin: 0 auto;
-            padding: 0 20px;
-        }
-
-        .flex-topo {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        /* --- CABEÇALHO (HEADER) --- */
+        a { text-decoration: none; transition: all 0.3s ease; }
+        ul { list-style: none; }
+        
+        /* HEADER */
         header {
-            background: var(--branco);
-            height: 90px;
-            box-shadow: 0 2px 15px rgba(0,0,0,0.05);
-            position: sticky;
-            top: 0;
-            z-index: 1000;
+            background: rgba(255, 255, 255, 0.98);
+            position: fixed; width: 100%; top: 0; z-index: 1000;
+            border-bottom: 1px solid rgba(0,0,0,0.05); padding: 15px 0;
+            box-shadow: var(--shadow-soft);
         }
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 25px; }
+        .header-flex { display: flex; justify-content: space-between; align-items: center; }
+        .logo { font-size: 1.8rem; font-weight: 700; color: var(--navy-deep); letter-spacing: -0.5px; display: flex; align-items: center; gap: 10px; }
+        .logo span { color: var(--gold-metallic); }
+        .nav-links { display: flex; gap: 30px; }
+        .nav-links a { color: var(--navy-light); font-weight: 500; font-size: 0.95rem; }
+        .nav-links a:hover { color: var(--gold-metallic); }
+        .btn-premium { background: var(--navy-deep); color: var(--white); padding: 12px 30px; border-radius: 4px; font-weight: 500; border: 1px solid var(--navy-deep); }
+        .btn-premium:hover { background: transparent; color: var(--navy-deep); }
 
-        .header-content {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            height: 100%;
-        }
-
-        /* LOGO INTELIGENTE: Se a imagem falhar, o texto aparece */
-        .logo-area {
-            display: flex;
-            align-items: center;
-            text-decoration: none;
-            gap: 15px;
-        }
-
-        .logo-img {
-            height: 65px;
-            width: auto;
-            display: block; /* Garante que a imagem se comporte bem */
-        }
-
-        /* Fallback: Estilo do texto caso a imagem não carregue */
-        .logo-texto-reserva {
-            font-family: 'Montserrat', sans-serif;
-            font-weight: 800;
-            font-size: 1.8rem;
-            color: var(--azul-real);
-            text-transform: uppercase;
-            line-height: 1;
-            display: none; /* Escondido por padrão */
-        }
-        
-        /* Se a imagem quebrar (alt text), mostramos o texto reserva via JS ou CSS fallback */
-        .logo-img[src=""] + .logo-texto-reserva, 
-        .logo-img:not([src]) + .logo-texto-reserva {
-            display: block;
-        }
-
-        .logo-sub {
-            font-size: 0.8rem;
-            color: var(--cinza-texto);
-            font-weight: 500;
-            letter-spacing: 1px;
-            display: block;
-        }
-
-        /* MENU */
-        .menu ul { display: flex; gap: 30px; }
-        .menu a {
-            font-family: 'Montserrat', sans-serif;
-            text-transform: uppercase;
-            font-weight: 600;
-            font-size: 0.9rem;
-            color: var(--azul-noite);
-            text-decoration: none;
-            transition: 0.3s;
-        }
-        .menu a:hover { color: var(--azul-real); border-bottom: 2px solid var(--amarelo-ouro); }
-
-        .btn-orcamento {
-            background-color: var(--azul-real);
-            color: var(--branco);
-            padding: 12px 25px;
-            border-radius: 4px;
-            font-weight: 700;
-            text-transform: uppercase;
-            font-size: 0.85rem;
-            text-decoration: none;
-            transition: 0.3s;
-        }
-        .btn-orcamento:hover { background-color: var(--azul-noite); }
-
-        /* --- HERO (CAPA) --- */
+        /* HERO SECTION */
         .hero {
-            background: linear-gradient(rgba(0, 42, 92, 0.85), rgba(0, 42, 92, 0.7)),
-                        url('https://images.unsplash.com/photo-1497366216548-37526070297c?ixlib=rb-1.2.1&auto=format&fit=crop&w=1920&q=80') center/cover;
-            height: 500px;
-            display: flex;
-            align-items: center;
-            color: var(--branco);
+            height: 90vh;
+            background: linear-gradient(rgba(15, 23, 42, 0.7), rgba(15, 23, 42, 0.6)), url('https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?ixlib=rb-1.2.1&auto=format&fit=crop&w=1920&q=80');
+            background-size: cover; background-position: center;
+            display: flex; align-items: center; position: relative;
+        }
+        .hero-content { color: var(--white); max-width: 700px; }
+        .tagline { background: rgba(212, 175, 55, 0.2); color: var(--gold-light); padding: 5px 15px; border-radius: 50px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 2px; border: 1px solid rgba(212, 175, 55, 0.5); display: inline-block; margin-bottom: 25px; }
+        .hero h1 { font-size: 3.5rem; line-height: 1.2; font-weight: 600; margin-bottom: 25px; }
+        .hero p { font-size: 1.15rem; opacity: 0.9; margin-bottom: 40px; font-weight: 300; }
+        .hero-btns { display: flex; gap: 20px; }
+        .btn-gold { background: var(--gold-metallic); color: var(--navy-deep); padding: 15px 35px; border-radius: 4px; font-weight: 600; }
+        .btn-gold:hover { background: #c5a059; transform: translateY(-2px); }
+        .btn-outline-light { border: 1px solid rgba(255,255,255,0.3); color: var(--white); padding: 15px 35px; border-radius: 4px; font-weight: 500; }
+        .btn-outline-light:hover { background: rgba(255,255,255,0.1); }
+
+        /* SEGMENTOS */
+        .segments { margin-top: -80px; position: relative; z-index: 10; padding-bottom: 40px; }
+        .segments-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+        .segment-card { background: var(--white); padding: 50px; border-radius: var(--radius); box-shadow: var(--shadow-soft); display: flex; align-items: center; gap: 25px; transition: 0.3s; border-bottom: 3px solid transparent; }
+        .segment-card:hover { transform: translateY(-5px); box-shadow: var(--shadow-hover); border-bottom-color: var(--gold-metallic); }
+        .seg-icon { width: 70px; height: 70px; background: var(--gray-bg); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; color: var(--navy-deep); flex-shrink: 0; }
+        .seg-text h3 { font-size: 1.5rem; color: var(--navy-deep); margin-bottom: 10px; }
+        .seg-text p { font-size: 0.95rem; color: #64748b; margin-bottom: 15px; }
+        .link-arrow { color: var(--gold-metallic); font-weight: 600; font-size: 0.9rem; }
+
+        /* --- ESTILO DAS MARCAS (CARROSSEL) --- */
+        .seg-brands {
+            --speed: 30s;
+            padding: 40px 0 80px 0; /* Espaçamento ajustado */
+            background: var(--white);
+            overflow: hidden;
+        }
+        .seg-brands__header { text-align: center; margin-bottom: 40px; }
+        .seg-brands__title { font-size: 24px; font-weight: 700; color: var(--navy-deep); margin-bottom: 8px; }
+        .seg-brands__sub { font-size: 15px; color: #64748b; }
+
+        .seg-brands__slider {
+            position: relative; display: flex; align-items: center;
+            mask-image: linear-gradient(to right, transparent, black 15%, black 85%, transparent);
+            -webkit-mask-image: linear-gradient(to right, transparent, black 15%, black 85%, transparent);
+        }
+        .seg-brands__track {
+            display: flex; gap: 60px;
+            animation: scroll var(--speed) linear infinite;
+            width: max-content;
+        }
+        .seg-brands__item {
+            flex: 0 0 auto; display: flex; align-items: center;
+            filter: grayscale(100%); opacity: 0.6; transition: all 0.3s ease;
+        }
+        .seg-brands__item:hover { filter: grayscale(0%); opacity: 1; transform: scale(1.05); }
+        .seg-brands__item img { height: 45px; width: auto; object-fit: contain; }
+
+        @keyframes scroll {
+            from { transform: translateX(0); }
+            to { transform: translateX(calc(-50% - 30px)); } /* Ajuste fino para o loop */
         }
 
-        .hero h1 {
-            font-family: 'Montserrat', sans-serif;
-            font-size: 3rem;
-            font-weight: 800;
-            line-height: 1.1;
-            margin-bottom: 20px;
-        }
-        
-        .destaque-amarelo { color: var(--amarelo-ouro); }
+        /* SERVIÇOS */
+        .services-section { padding: 80px 0; background: var(--gray-bg); }
+        .sec-header { text-align: center; margin-bottom: 60px; }
+        .sec-header h2 { font-size: 2.2rem; color: var(--navy-deep); margin-bottom: 15px; }
+        .services-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px; }
+        .service-box { background: var(--white); padding: 40px 30px; border-radius: var(--radius); text-align: center; transition: 0.3s; border: 1px solid rgba(0,0,0,0.03); }
+        .service-box:hover { box-shadow: var(--shadow-hover); transform: translateY(-5px); }
+        .service-box i { font-size: 2.5rem; color: var(--gold-metallic); margin-bottom: 25px; display: block; }
+        .service-box h4 { font-size: 1.25rem; color: var(--navy-deep); margin-bottom: 15px; }
+        .service-box p { font-size: 0.9rem; color: #64748b; }
 
-        .hero p {
-            font-size: 1.2rem;
-            max-width: 600px;
-            margin-bottom: 30px;
-            font-weight: 300;
-        }
+        /* STATS */
+        .stats-strip { background: var(--navy-deep); color: var(--white); padding: 60px 0; }
+        .stats-flex { display: flex; justify-content: space-around; text-align: center; flex-wrap: wrap; gap: 30px; }
+        .stat-box h3 { font-size: 2.5rem; color: var(--gold-metallic); font-weight: 700; }
+        .stat-box span { text-transform: uppercase; font-size: 0.8rem; letter-spacing: 1px; opacity: 0.8; }
 
-        /* --- SERVIÇOS SÉRIOS --- */
-        .secao { padding: 80px 0; }
-        
-        .titulo-secao {
-            text-align: center;
-            margin-bottom: 60px;
-        }
-        
-        .titulo-secao h2 {
-            font-family: 'Montserrat', sans-serif;
-            font-size: 2.2rem;
-            color: var(--azul-noite);
-            font-weight: 700;
-            position: relative;
-            display: inline-block;
-        }
+        /* CONTATO */
+        .contact-section { padding: 100px 0; }
+        .contact-wrapper { background: var(--white); border-radius: 20px; overflow: hidden; box-shadow: var(--shadow-hover); display: flex; }
+        .contact-info { background: var(--navy-deep); color: var(--white); padding: 60px; flex: 1; }
+        .contact-info h3 { font-size: 2rem; margin-bottom: 30px; }
+        .info-row { display: flex; align-items: center; gap: 15px; margin-bottom: 25px; }
+        .info-row i { color: var(--gold-metallic); font-size: 1.2rem; }
+        .contact-map { flex: 1.5; position: relative; min-height: 400px; background: #eee; }
 
-        .titulo-secao h2::after {
-            content: '';
-            display: block;
-            width: 60px;
-            height: 4px;
-            background: var(--amarelo-ouro);
-            margin: 10px auto 0;
-        }
+        /* FOOTER */
+        footer { background: #0f172a; color: #94a3b8; padding: 60px 0 20px; font-size: 0.9rem; border-top: 3px solid var(--gold-metallic); }
+        .footer-logo { font-size: 1.5rem; color: var(--white); font-weight: 700; display: block; margin-bottom: 20px; }
+        .footer-logo span { color: var(--gold-metallic); }
+        .copyright { text-align: center; margin-top: 50px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.05); }
 
-        .grid-servicos {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 30px;
-        }
+        .zap-float { position: fixed; bottom: 30px; right: 30px; background: #25d366; color: white; width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 30px; box-shadow: 0 10px 20px rgba(37, 211, 102, 0.3); z-index: 999; transition: 0.3s; }
+        .zap-float:hover { transform: scale(1.1); }
 
-        .card {
-            background: var(--branco);
-            padding: 40px 30px;
-            border: 1px solid #e0e0e0;
-            border-bottom: 4px solid var(--azul-real);
-            border-radius: 4px;
-            transition: 0.3s;
-        }
-
-        .card:hover { transform: translateY(-5px); border-bottom-color: var(--amarelo-ouro); box-shadow: 0 10px 20px rgba(0,0,0,0.08); }
-
-        .card i {
-            font-size: 2.5rem;
-            color: var(--azul-real);
-            margin-bottom: 20px;
-        }
-
-        .card h3 {
-            font-family: 'Montserrat', sans-serif;
-            color: var(--azul-noite);
-            margin-bottom: 15px;
-            font-size: 1.3rem;
-        }
-
-        .card ul {
-            list-style: none;
-            margin-top: 15px;
-        }
-
-        .card li {
-            font-size: 0.9rem;
-            margin-bottom: 8px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .card li i { font-size: 0.8rem; margin: 0; color: var(--amarelo-ouro); }
-
-        /* --- FAIXA TÉCNICA --- */
-        .faixa-tecnica {
-            background-color: var(--azul-noite);
-            color: var(--branco);
-            text-align: center;
-            padding: 40px 0;
-        }
-        .faixa-tecnica h3 { font-family: 'Montserrat', sans-serif; font-size: 1.5rem; }
-        .faixa-tecnica strong { color: var(--amarelo-ouro); }
-
-        /* --- CONTATO --- */
-        .contato-wrapper {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 50px;
-            background: var(--branco);
-            padding: 50px;
-            border-radius: 8px;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.05);
-        }
-
-        .info-item h4 { color: var(--azul-real); font-family: 'Montserrat', sans-serif; margin-bottom: 5px; }
-        .info-item p { margin-bottom: 20px; color: #555; }
-        .info-item a { color: inherit; text-decoration: none; font-weight: 500; }
-
-        /* --- FOOTER --- */
-        footer {
-            background: #111;
-            color: #888;
-            padding: 40px 0;
-            text-align: center;
-            font-size: 0.9rem;
-        }
-
-        /* --- RESPONSIVO --- */
-        @media (max-width: 768px) {
-            .menu { display: none; }
-            .hero h1 { font-size: 2.2rem; }
-            .contato-wrapper { grid-template-columns: 1fr; }
-            .flex-topo { flex-direction: column; gap: 5px; text-align: center; }
+        @media (max-width: 900px) {
+            .hero h1 { font-size: 2.5rem; }
+            .segments-grid { grid-template-columns: 1fr; }
+            .contact-wrapper { flex-direction: column; }
+            .nav-links { display: none; }
+            .seg-brands__track { gap: 40px; } 
+            .seg-brands__item img { height: 35px; }
         }
     </style>
 </head>
 <body>
 
-    <div class="barra-topo">
-        <div class="container flex-topo">
-            <div><i class="fas fa-map-marker-alt"></i> Taubaté e Região - SP</div>
-            <div><i class="fas fa-phone"></i> (12) 3633-4871 | (12) 97410-1924</div>
-        </div>
-    </div>
-
     <header>
-        <div class="container header-content">
-            <a href="#" class="logo-area">
-                <img src="logo.jpg" alt="SEG Monitoramento" class="logo-img" onerror="this.style.display='none'; document.getElementById('logo-texto').style.display='block';">
-                
-                <div id="logo-texto" style="display: none;">
-                    <div class="logo-texto-reserva">SEG</div>
-                    <span class="logo-sub">MONITORAMENTO 24H</span>
-                </div>
-            </a>
-
-            <nav class="menu">
-                <ul>
-                    <li><a href="#home">Início</a></li>
-                    <li><a href="#servicos">Soluções</a></li>
-                    <li><a href="#contato">Fale Conosco</a></li>
-                </ul>
+        <div class="container header-flex">
+            <div class="logo">
+                <i class="fas fa-shield-alt"></i> SEG<span>Sis</span>
+            </div>
+            <nav class="nav-links">
+                <a href="#solucoes">Soluções</a>
+                <a href="#marcas">Parceiros</a>
+                <a href="#diferenciais">Diferenciais</a>
             </nav>
-
-            <a href="https://wa.me/5512974101924" class="btn-orcamento" target="_blank">
-                <i class="fab fa-whatsapp"></i> Área do Cliente
-            </a>
+            <a href="https://wa.me/5512974101924" class="btn-premium">Área do Cliente</a>
         </div>
     </header>
 
-    <section id="home" class="hero">
+    <section class="hero">
         <div class="container">
-            <h1>Segurança Inteligente<br>Proteção <span class="destaque-amarelo">24 Horas</span></h1>
-            <p>Especialistas em alarmes, câmeras e monitoramento em Taubaté. Tecnologia de ponta para sua tranquilidade.</p>
-        </div>
-    </section>
-
-    <section id="servicos" class="secao">
-        <div class="container">
-            <div class="titulo-secao">
-                <h2>Nossas Soluções</h2>
-                <p>Tecnologia homologada e certificada.</p>
-            </div>
-
-            <div class="grid-servicos">
-                <div class="card">
-                    <i class="fas fa-shield-alt"></i>
-                    <h3>Monitoramento 24h</h3>
-                    <p>Central conectada dia e noite.</p>
-                    <ul>
-                        <li><i class="fas fa-check"></i> Pronta resposta</li>
-                        <li><i class="fas fa-check"></i> Relatórios de eventos</li>
-                    </ul>
-                </div>
-                <div class="card">
-                    <i class="fas fa-video"></i>
-                    <h3>CFTV Digital</h3>
-                    <p>Acesso às câmeras pelo celular.</p>
-                    <ul>
-                        <li><i class="fas fa-check"></i> Imagem HD/4K</li>
-                        <li><i class="fas fa-check"></i> Gravação em Nuvem</li>
-                    </ul>
-                </div>
-                <div class="card">
-                    <i class="fas fa-bolt"></i>
-                    <h3>Cerca Elétrica</h3>
-                    <p>Segurança perimetral robusta.</p>
-                    <ul>
-                        <li><i class="fas fa-check"></i> Alta voltagem pulsativa</li>
-                        <li><i class="fas fa-check"></i> Sirene integrada</li>
-                    </ul>
+            <div class="hero-content">
+                <span class="tagline">Tecnologia de Segurança Certificada</span>
+                <h1>Proteção Inteligente para o que Realmente Importa.</h1>
+                <p>Líder em monitoramento 24h em Taubaté. Sistemas integrados de alarme, câmeras e controle de acesso com resposta tática imediata.</p>
+                <div class="hero-btns">
+                    <a href="https://wa.me/5512974101924" class="btn-gold">Orçamento Rápido</a>
+                    <a href="#solucoes" class="btn-outline-light">Conhecer Planos</a>
                 </div>
             </div>
         </div>
     </section>
 
-    <div class="faixa-tecnica">
-        <div class="container">
-            <h3>COMUNICAÇÃO VIA <strong>TELEFONE</strong> • VIA <strong>GPRS</strong> • VIA <strong>INTERNET</strong></h3>
+    <div class="container segments" id="solucoes">
+        <div class="segments-grid">
+            <div class="segment-card">
+                <div class="seg-icon"><i class="fas fa-home"></i></div>
+                <div class="seg-text">
+                    <h3>Para Sua Residência</h3>
+                    <p>Tranquilidade para sua família com alarmes perimetrais, câmeras em nuvem e botão de pânico.</p>
+                    <a href="https://wa.me/5512974101924" class="link-arrow">Ver Soluções <i class="fas fa-arrow-right"></i></a>
+                </div>
+            </div>
+            <div class="segment-card">
+                <div class="seg-icon"><i class="fas fa-building"></i></div>
+                <div class="seg-text">
+                    <h3>Para Sua Empresa</h3>
+                    <p>Gestão de risco corporativo. Controle de acesso, prevenção de perdas e monitoramento de frota.</p>
+                    <a href="https://wa.me/5512974101924" class="link-arrow">Ver Soluções <i class="fas fa-arrow-right"></i></a>
+                </div>
+            </div>
         </div>
     </div>
 
-    <section id="contato" class="secao">
-        <div class="container">
-            <div class="titulo-secao">
-                <h2>Onde Estamos</h2>
+    <section class="seg-brands" id="marcas">
+        <div class="seg-brands__header">
+            <h3 class="seg-brands__title">Trabalhamos com as Melhores Marcas</h3>
+            <p class="seg-brands__sub">Equipamentos de alta performance e garantia oficial.</p>
+        </div>
+        <div class="seg-brands__slider">
+            <div class="seg-brands__track">
+                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/intelbras.png" alt="Intelbras"></div>
+                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/hikvision.png" alt="Hikvision"></div>
+                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/jfl.png" alt="JFL"></div>
+                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/dahua.png" alt="Dahua"></div>
+                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/control-id.png" alt="Control iD"></div>
+                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/intelbras.png" alt="Intelbras"></div>
+                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/hikvision.png" alt="Hikvision"></div>
+                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/jfl.png" alt="JFL"></div>
+                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/dahua.png" alt="Dahua"></div>
+                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/control-id.png" alt="Control iD"></div>
             </div>
-            <div class="contato-wrapper">
-                <div class="infos">
-                    <div class="info-item">
-                        <h4>Endereço</h4>
-                        <p>Rua Francisco de Paula Simões, 131 - Vila Paulista<br>Taubaté, SP - CEP 12031-050</p>
-                    </div>
-                    <div class="info-item">
-                        <h4>Telefones</h4>
-                        <p>
-                            (12) 3633-4871<br>
-                            (12) 3624-9199<br>
-                            (12) 3629-2946
-                        </p>
-                    </div>
-                    <div class="info-item">
-                        <h4>WhatsApp / Celular</h4>
-                        <p><a href="https://wa.me/5512974101924" target="_blank" style="color:#25D366; font-weight:bold;">(12) 97410-1924</a></p>
-                    </div>
-                    <div class="info-item">
-                        <h4>E-mail</h4>
-                        <p>info@segsis.com.br</p>
-                    </div>
+        </div>
+    </section>
+
+    <section class="services-section" id="diferenciais">
+        <div class="container">
+            <div class="sec-header">
+                <h2>Ecossistema de Segurança</h2>
+                <p>Integramos as melhores tecnologias globais para criar uma blindagem completa ao redor do seu patrimônio.</p>
+            </div>
+            
+            <div class="services-grid">
+                <div class="service-box">
+                    <i class="fas fa-video"></i>
+                    <h4>Monitoramento Full HD</h4>
+                    <p>Câmeras com IA que distinguem pessoas de animais, com gravação segura em nuvem.</p>
                 </div>
-                <div style="background: #ddd; height: 100%; min-height: 300px; border-radius: 4px;">
-                    <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3674.3468784307524!2d-45.5562!3d-23.0374!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMjPCsDAyJzE0LjYiUyA0NcKwMzMnMjIuMyJX!5e0!3m2!1spt-BR!2sbr!4v1620000000000!5m2!1spt-BR!2sbr" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>
+                <div class="service-box">
+                    <i class="fas fa-bell"></i>
+                    <h4>Alarmes Preditivos</h4>
+                    <p>Sensores que detectam a tentativa de invasão antes do arrombamento acontecer.</p>
+                </div>
+                <div class="service-box">
+                    <i class="fas fa-bolt"></i>
+                    <h4>Proteção Perimetral</h4>
+                    <p>Cerca elétrica industrial e concertina para inibir fisicamente qualquer intrusão.</p>
+                </div>
+                <div class="service-box">
+                    <i class="fas fa-id-badge"></i>
+                    <h4>Controle de Acesso</h4>
+                    <p>Biometria e reconhecimento facial para portarias e áreas restritas.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="stats-strip">
+        <div class="container stats-flex">
+            <div class="stat-box">
+                <h3>+10</h3>
+                <span>Anos de História</span>
+            </div>
+            <div class="stat-box">
+                <h3>5.000+</h3>
+                <span>Projetos Entregues</span>
+            </div>
+            <div class="stat-box">
+                <h3>24h</h3>
+                <span>Central Blindada</span>
+            </div>
+            <div class="stat-box">
+                <h3>15min</h3>
+                <span>Tempo de Resposta</span>
+            </div>
+        </div>
+    </section>
+
+    <section class="contact-section" id="contato">
+        <div class="container">
+            <div class="contact-wrapper">
+                <div class="contact-info">
+                    <h3>Vamos conversar?</h3>
+                    <p style="margin-bottom: 30px; opacity: 0.8;">Nossos consultores são especialistas em análise de risco. Solicite uma visita técnica sem compromisso.</p>
+                    
+                    <div class="info-row">
+                        <i class="fas fa-map-marker-alt"></i>
+                        <span>Rua Francisco de Paula Simões, 131 - Taubaté/SP</span>
+                    </div>
+                    <div class="info-row">
+                        <i class="fas fa-phone-alt"></i>
+                        <span>(12) 3633-4871</span>
+                    </div>
+                    <div class="info-row">
+                        <i class="fab fa-whatsapp"></i>
+                        <span>(12) 97410-1924</span>
+                    </div>
+                    <div class="info-row">
+                        <i class="fas fa-envelope"></i>
+                        <span>info@segsis.com.br</span>
+                    </div>
+                    
+                    <a href="https://wa.me/5512974101924" class="btn-gold" style="margin-top: 20px; display: inline-block;">Falar com Consultor</a>
+                </div>
+                
+                <div class="contact-map">
+                    <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3674.300589255866!2d-45.567!3d-23.030!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMjPCsDAxJzQ4LjAiUyA0NcKwMzQnMDEuMiJX!5e0!3m2!1spt-BR!2sbr!4v1620000000000!5m2!1spt-BR!2sbr" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>
                 </div>
             </div>
         </div>
@@ -394,9 +320,17 @@
 
     <footer>
         <div class="container">
-            <p>&copy; 2026 SEG Monitoramento 24 Horas. Todos os direitos reservados.</p>
+            <div class="footer-logo">SEG<span>SIS</span></div>
+            <p>Segurança Eletrônica e Monitoramento de alta performance para o Vale do Paraíba.</p>
+            <div class="copyright">
+                © 2026 SEG Monitoramento. Todos os direitos reservados.
+            </div>
         </div>
     </footer>
+
+    <a href="https://wa.me/5512974101924" class="zap-float" target="_blank">
+        <i class="fab fa-whatsapp"></i>
+    </a>
 
 </body>
 </html>
