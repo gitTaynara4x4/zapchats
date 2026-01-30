@@ -62,217 +62,7 @@
     if (mounted) return;
     mounted = true;
 
-    if (!document.getElementById('ia-modal-css')) {
-      const style = document.createElement('style');
-      style.id = 'ia-modal-css';
-      style.textContent = `
-        /* Modal (backdrop + caixa) */
-        #ia-modal-backdrop{
-          position:fixed;
-          inset:0;
-          background:rgba(0,0,0,.5);
-          z-index:9998;
-        }
-        #ia-modal-backdrop.hidden{ display:none; }
-
-        #ia-modal{
-          position:fixed;
-          top:50%;
-          left:50%;
-          transform:translate(-50%,-50%);
-          z-index:9999;
-          border-radius:12px;
-          border:1px solid #26343a;
-          background:#1f2c33;
-          color:#e9edef;
-          max-width:780px;
-          width:94vw;
-          box-shadow:0 18px 45px rgba(0,0,0,.6);
-          font-size:14px;
-        }
-        #ia-modal.hidden{ display:none; }
-
-        .ia-modal-header{
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          padding:12px 16px;
-          border-bottom:1px solid #26343a;
-        }
-        .ia-modal-header-main{
-          display:flex;
-          align-items:center;
-          gap:8px;
-        }
-        .ia-modal-title{
-          font-weight:600;
-          font-size:15px;
-        }
-        .ia-modal-close-btn{
-          border:0;
-          background:transparent;
-          color:#9ca3af;
-          cursor:pointer;
-          padding:4px;
-          border-radius:999px;
-        }
-        .ia-modal-close-btn:hover{
-          color:#ffffff;
-          background:rgba(255,255,255,.06);
-        }
-
-        #ia-modal-body{
-          padding:16px 20px;
-          max-height:70vh;
-          overflow:auto;
-        }
-
-        .ia-section{
-          margin-bottom:22px;
-        }
-        .ia-section-header{
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          margin-bottom:8px;
-        }
-        .ia-section-title{
-          display:flex;
-          align-items:center;
-          gap:8px;
-          font-weight:600;
-        }
-        .ia-chip{
-          font-size:11px;
-          padding:2px 8px;
-          border-radius:9999px;
-          background:#233238;
-          border:1px solid #2b424a;
-          color:#aebac1;
-        }
-        .ia-sec-actions{
-          display:flex;
-          align-items:center;
-          gap:8px;
-          flex-wrap:wrap;
-        }
-
-        .btn-soft{
-          display:inline-flex;
-          align-items:center;
-          gap:8px;
-          padding:8px 10px;
-          border-radius:8px;
-          border:1px solid #2a3942;
-          background:#0b141a;
-          color:#e9edef;
-          font-size:13px;
-          cursor:pointer;
-        }
-        .btn-soft i{ font-size:13px; }
-        .btn-soft:hover{
-          background:#0f171c;
-          border-color:#6b21a8;
-        }
-
-        .ia-spinner{
-          width:16px;
-          height:16px;
-          border:2px solid #9fb2bb66;
-          border-top-color:#a855f7;
-          border-radius:9999px;
-          animation:ia-spin .9s linear infinite;
-        }
-        @keyframes ia-spin{ to{ transform:rotate(360deg) } }
-
-        .ia-badge{
-          width:24px;
-          height:24px;
-          display:block;
-          object-fit:contain;
-          filter: drop-shadow(0 0 5px rgba(168,85,247,.50));
-        }
-
-        #ia-draft{
-          width:100%;
-          min-height:90px;
-          padding:10px 12px;
-          border-radius:8px;
-          border:1px solid #2a3942;
-          background:#0b141a;
-          color:#e9edef;
-          resize:vertical;
-          outline:none;
-        }
-        #ia-draft::placeholder{
-          color:#9ca3af;
-        }
-        #ia-draft:focus{
-          border-color:#6b21a8;
-        }
-
-        #ia-resposta-box{
-          margin-top:8px;
-        }
-        #ia-resposta-texto{
-          padding:10px 12px;
-          border-radius:8px;
-          background:#0b141a;
-          border:1px solid #2a3942;
-          white-space:pre-wrap;
-        }
-
-        #ia-resumo-content{
-          margin-top:4px;
-        }
-        #ia-resumo-texto{
-          margin-bottom:6px;
-        }
-        #ia-resumo-bullets{
-          margin:0 0 4px 18px;
-          padding:0;
-          list-style:disc;
-        }
-        .ia-resumo-meta{
-          margin-top:6px;
-          font-size:12px;
-          color:#aebac1;
-        }
-
-        .ia-resposta-container{
-          display:flex;
-          flex-direction:column;
-          gap:8px;
-        }
-        .ia-resposta-label{
-          font-size:11px;
-          color:#aebac1;
-          margin-bottom:4px;
-        }
-        .ia-separator{
-          border:0;
-          border-top:1px solid #26343a;
-          margin:6px 0 16px;
-        }
-
-        @media (max-width: 640px){
-          #ia-modal{
-            width:100vw;
-            max-width:100vw;
-            left:50%;
-            transform:translate(-50%,-50%);
-          }
-          #ia-modal-body{
-            max-height:65vh;
-            padding:12px 14px;
-          }
-          #ia-draft{
-            min-height:112px;
-          }
-        }
-      `;
-      document.head.appendChild(style);
-    }
+    // ✅ CSS foi movido para atendimentos.css (não injeta mais <style>)
 
     const wrap = document.createElement('div');
     wrap.id = 'ia-modal-mount';
@@ -405,7 +195,6 @@
 
     updateAllLogos();
 
-    // garante que o click está sempre amarrado
     if (!btn._iaBound) {
       btn._iaBound = true;
       btn.addEventListener('click', function(ev){
@@ -563,8 +352,8 @@
 
       const bullets = Array.isArray(res.pontos_chave) ? res.pontos_chave : [];
       bullets.forEach(t=>{
-        const li=document.createElement('li'); 
-        li.textContent=String(t); 
+        const li=document.createElement('li');
+        li.textContent=String(t);
         refs.resumoBullets.appendChild(li);
       });
 
@@ -651,14 +440,13 @@
     if (!refs.respTxt.textContent) return;
     const input = $('#mensagem');
     if (input) input.value = refs.respTxt.textContent;
-    closeIA(); 
+    closeIA();
     input?.focus();
   }
 
   // ---------- API pública ----------
   window.IA = { open: openIA, close: closeIA };
 
-  // Se o header já estiver visível, injeta o botão agora
   if ($('#chat-header') && getComputedStyle($('#chat-header')).display !== 'none') {
     ensureHeaderButton();
   }

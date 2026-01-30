@@ -1,11 +1,6 @@
 // /frontend/js/atendimentos/ui/new-chat.js
 // Nova conversa – via proxy backend + bloqueio quando filtro estiver em "Todos"
-// Regras:
-// - Achou cliente no BD → abre conversa direto. Header usa nome/avatar do BD (se tiver).
-// - Achou cliente no BD mas não tem conversa → idem.
-// - Não achou cliente → cria com o nome digitado; abre; depois tenta buscar foto no Evolution
-//   via backend e só ATUALIZA A FOTO (não mexe no nome).
-// - Quando filtro de instância está em "Todos" (sem instância selecionada), bloqueia “+” e submit.
+// - CSS removido -> agora usa classes + CSS no atendimentos.css
 
 import { EMPRESA_ID } from '../core/env.js';
 import { numeroE164 } from '../core/format.js';
@@ -15,9 +10,7 @@ import { state } from '../state/store.js';
   // ---------------- helpers ----------------
   const $  = function (s, root) { return (root || document).querySelector(s); };
   const onlyDigits = function (s) { return String(s || '').replace(/\D/g, ''); };
-  const ensure55 = function (d) {
-    return String(d || '').startsWith('55') ? String(d) : '55' + String(d || '');
-  };
+  const ensure55 = function (d) { return String(d || '').startsWith('55') ? String(d) : '55' + String(d || ''); };
   const insert9IfNeeded = function (d) {
     if (!/^55\d{2}\d+$/.test(d)) return d;
     const ddd = d.slice(2, 4), rest = d.slice(4);
@@ -29,7 +22,7 @@ import { state } from '../state/store.js';
     return m ? '+55 (' + m[2] + ') ' + m[3] + '-' + m[4] : s;
   };
 
-  // Toast com duração customizável
+  // Toast com duração customizável (mantém inline style pois é componente global pequeno)
   function toast(msg, ok, ms) {
     if (ok === void 0) ok = true;
     if (ms === void 0) ms = 2200;
@@ -94,9 +87,8 @@ import { state } from '../state/store.js';
   }
 
   // ---------------- Evolution via backend (SEM whatsappNumbers) ----------------
-  // Usa /api/evolution/fetchProfile com payload { number, empresa_id, instancia_id|instance }
   async function evoFetchProfileByNumber(numberDigits) {
-    if (!hasSelectedInstance()) return null; // em "Todos" nem tenta
+    if (!hasSelectedInstance()) return null;
     const digits = onlyDigits(numberDigits);
     if (!digits) throw new Error('number vazio');
 
@@ -182,7 +174,6 @@ import { state } from '../state/store.js';
     const imgEl   = qAny(AVATAR_SELS);
 
     const name = resolveDisplayName(cliente || {});
-
     if (titleEl) titleEl.textContent = name;
     if (subEl)   subEl.textContent   = '';
 
@@ -203,37 +194,29 @@ import { state } from '../state/store.js';
     }
   }
 
-  // ---- helpers para sincar novo cliente no cache e no state (EVITA ENVIAR PARA OUTRO) ----
+  // ---- helpers para sincar novo cliente no cache e no state ----
   function mergeClienteInCaches(cliente){
     if (!cliente || cliente.id == null) return;
     var idNum = Number(cliente.id);
 
-    // caches globais simples
     try {
       var names = ['todosContatosCache','clientesCache'];
       names.forEach(function (name){
         var arr = window[name];
         if (Array.isArray(arr)){
           var idx = arr.findIndex(function (c){ return Number(c.id) === idNum; });
-          if (idx >= 0) {
-            arr[idx] = Object.assign({}, arr[idx], cliente);
-          } else {
-            arr.unshift(cliente);
-          }
+          if (idx >= 0) arr[idx] = Object.assign({}, arr[idx], cliente);
+          else arr.unshift(cliente);
         }
       });
     } catch (e) {}
 
-    // cache dentro do state (usado pela lista)
     try {
       if (state){
         if (!Array.isArray(state.clientesCache)) state.clientesCache = [];
         var idx2 = state.clientesCache.findIndex(function (c){ return Number(c.id) === idNum; });
-        if (idx2 >= 0) {
-          state.clientesCache[idx2] = Object.assign({}, state.clientesCache[idx2], cliente);
-        } else {
-          state.clientesCache.unshift(cliente);
-        }
+        if (idx2 >= 0) state.clientesCache[idx2] = Object.assign({}, state.clientesCache[idx2], cliente);
+        else state.clientesCache.unshift(cliente);
       }
     } catch (e) {}
   }
@@ -245,7 +228,6 @@ import { state } from '../state/store.js';
     try { window.clienteSel = cliente; } catch (e) {}
   }
 
-  // Tenta pegar foto via Evolution (proxy) apenas se faltar avatar_url no BD
   async function tryEvolutionPictureIfMissing(cliente) {
     if (!hasSelectedInstance()) return;
     if (cliente && cliente.avatar_url) return;
@@ -255,10 +237,7 @@ import { state } from '../state/store.js';
 
     try {
       const prof = await evoFetchProfileByNumber(ensure55(telRaw));
-      if (prof && prof.picture) {
-        updateHeaderPicture(prof.picture);
-        return;
-      }
+      if (prof && prof.picture) { updateHeaderPicture(prof.picture); return; }
     } catch (e) {}
 
     try {
@@ -267,9 +246,7 @@ import { state } from '../state/store.js';
         const ddd = d.slice(2,4), rest = d.slice(4);
         const with9 = '55' + ddd + '9' + rest;
         const prof2 = await evoFetchProfileByNumber(with9);
-        if (prof2 && prof2.picture) {
-          updateHeaderPicture(prof2.picture);
-        }
+        if (prof2 && prof2.picture) updateHeaderPicture(prof2.picture);
       }
     } catch (e) {}
   }
@@ -292,7 +269,6 @@ import { state } from '../state/store.js';
       .then(function (c) {
         if (Number(window.__CURRENT_CHAT_ID) !== Number(id)) return;
         setHeaderFromDB(c);
-        // reforça seleção no state/caches com dados "completos"
         forceSelectCliente(c);
         return tryEvolutionPictureIfMissing(c);
       })
@@ -301,7 +277,7 @@ import { state } from '../state/store.js';
     return ok;
   }
 
-  // --------- Validações de entrada (erros de cliente) ---------
+  // --------- Validações de entrada ---------
   function validatePhoneOrExplain(rawDigits){
     const digits = onlyDigits(String(rawDigits || ''));
     if (!digits){
@@ -344,93 +320,117 @@ import { state } from '../state/store.js';
     toast('Falha ao criar contato. Tente novamente.', false, 2600);
   }
 
-  // ---------------- Drawer "Nova conversa" ----------------
+  // ---------------- Drawer "Nova conversa" (SEM inline CSS) ----------------
   function buildUI() {
     if (document.getElementById('ncBackdrop')) return;
 
-    const back = document.createElement('div'); back.id='ncBackdrop';
-    Object.assign(back.style,{
-      position:'fixed',inset:'0',background:'rgba(0,0,0,0.35)',backdropFilter:'saturate(140%) blur(2px)',
-      opacity:'0',pointerEvents:'none',transition:'opacity 0.18s',zIndex:'60'
-    });
-    const dr = document.createElement('aside'); dr.id='ncDrawer';
-    Object.assign(dr.style,{
-      position:'fixed',top:0,right:'-380px',width:'360px',maxWidth:'95vw',height:'100%',
-      background:'#111b21',color:'#e9edef',borderLeft:'1px solid #223038',
-      boxShadow:'-20px 0 50px rgba(0,0,0,0.35)',transition:'right 0.22s',zIndex:'61',
-      display:'flex',flexDirection:'column'
-    });
+    const back = document.createElement('div');
+    back.id='ncBackdrop';
 
-    dr.innerHTML = ''
-      + '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #223038">'
-      + '  <div style="font-weight:600">Nova conversa</div>'
-      + '  <button id="ncClose" style="background:transparent;border:0;color:#aebac1;cursor:pointer;padding:6px;border-radius:8px">✕</button>'
-      + '</div>'
-      + '<div style="padding:8px" id="ncBody">'
-      + '  <ul style="list-style:none;margin:6px 0;padding:0;display:flex;flex-direction:column;gap:6px">'
-      + '    <li id="ncNewContact" style="display:flex;gap:12px;align-items:center;padding:10px;border-radius:12px;border:1px solid #223038;background:#0b141a;cursor:pointer">'
-      + '      <div style="width:38px;height:38px;border-radius:999px;background:#00a884;display:grid;place-items:center;color:#0b141a;font-weight:700">+</div>'
-      + '      <div><div style="font-weight:600">Novo contato</div><div style="font-size:12px;color:#9aaeb5">Criar contato manualmente</div></div>'
-      + '    </li>'
-      + '  </ul>'
-      + '  <div style="border-top:1px solid #223038;margin:8px 0"></div>'
-      + '  <div style="padding:8px 10px;color:#9aaeb5;font-size:12px">Dica: pesquise um nome/telefone na barra superior.</div>'
-      + '</div>';
+    const dr = document.createElement('aside');
+    dr.id='ncDrawer';
+
+    dr.innerHTML =
+      '<div class="nc-drawer-header">' +
+      '  <div class="nc-drawer-title">Nova conversa</div>' +
+      '  <button id="ncClose" class="nc-close" type="button" aria-label="Fechar">✕</button>' +
+      '</div>' +
+      '<div id="ncBody">' +
+      '  <ul class="nc-list">' +
+      '    <li id="ncNewContact" class="nc-item" role="button" tabindex="0">' +
+      '      <div class="nc-icon-plus">+</div>' +
+      '      <div>' +
+      '        <div class="nc-item-title">Novo contato</div>' +
+      '        <div class="nc-item-sub">Criar contato manualmente</div>' +
+      '      </div>' +
+      '    </li>' +
+      '  </ul>' +
+      '  <div class="nc-sep"></div>' +
+      '  <div class="nc-tip">Dica: pesquise um nome/telefone na barra superior.</div>' +
+      '</div>';
 
     document.body.append(back, dr);
-    const close = function () { back.style.opacity='0'; back.style.pointerEvents='none'; dr.style.right='-380px'; };
-    const open  = function () { back.style.opacity='1'; back.style.pointerEvents='auto'; dr.style.right='0'; };
-    document.getElementById('ncClose') && document.getElementById('ncClose').addEventListener('click', close);
+
+    const close = function () {
+      back.style.opacity='0';
+      back.style.pointerEvents='none';
+      dr.style.right='-380px';
+    };
+    const open  = function () {
+      back.style.opacity='1';
+      back.style.pointerEvents='auto';
+      dr.style.right='0';
+    };
+
+    $('#ncClose') && $('#ncClose').addEventListener('click', close);
     back.addEventListener('click', function (e) { if (e.target === back) close(); });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
 
     window.__NewChat = {
       open: open,
       close: close,
-      setBody: function (html){ var body = document.getElementById('ncBody'); if (body) body.innerHTML = html; }
+      setBody: function (html){
+        var body = document.getElementById('ncBody');
+        if (body) body.innerHTML = html;
+      }
     };
-    document.getElementById('ncNewContact') && document.getElementById('ncNewContact').addEventListener('click', renderNewContactForm);
+
+    $('#ncNewContact') && $('#ncNewContact').addEventListener('click', renderNewContactForm);
+    $('#ncNewContact') && $('#ncNewContact').addEventListener('keydown', function(e){
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); renderNewContactForm(); }
+    });
   }
 
   function renderNewContactForm() {
-    const body = ''
-      + '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #223038">'
-      + '  <div style="font-weight:600">Novo contato</div>'
-      + '  <button id="ncBack" style="background:transparent;border:0;color:#aebac1;cursor:pointer;padding:6px;border-radius:8px">←</button>'
-      + '</div>'
-      + '<form id="ncForm" style="display:flex;flex-direction:column;gap:10px;padding:8px">'
-      + '  <input class="nc-input" id="ncName" placeholder="Nome completo" autocomplete="off"'
-      + '         style="background:#0b141a;border:1px solid #223038;border-radius:10px;color:#e9edef;padding:10px 12px;outline:none"/>'
-      + '  <input class="nc-input" id="ncPhone" placeholder="Telefone (DDI+DDD+Número, só dígitos)"'
-      + '         style="background:#0b141a;border:1px solid #223038;border-radius:10px;color:#e9edef;padding:10px 12px;outline:none"/>'
-      + '  <div style="display:flex;gap:8px">'
-      + '    <button class="nc-btn" id="ncSave" type="submit"'
-      + '            style="background:#00a884;border:0;color:#0b141a;font-weight:700;padding:10px 12px;border-radius:10px;cursor:pointer">Salvar contato</button>'
-      + '    <button type="button" id="ncCancel" style="background:transparent;border:0;color:#9aaeb5;cursor:pointer">Cancelar</button>'
-      + '  </div>'
-      + '</form>';
+    const body =
+      '<div class="nc-drawer-header">' +
+      '  <div class="nc-drawer-title">Novo contato</div>' +
+      '  <button id="ncBack" class="nc-back" type="button" aria-label="Voltar">←</button>' +
+      '</div>' +
+      '<form id="ncForm" class="nc-form">' +
+      '  <input class="nc-input" id="ncName" placeholder="Nome completo" autocomplete="off"/>' +
+      '  <input class="nc-input" id="ncPhone" placeholder="Telefone (DDI+DDD+Número, só dígitos)"/>' +
+      '  <div class="nc-form-actions">' +
+      '    <button class="nc-save" id="ncSave" type="submit">Salvar contato</button>' +
+      '    <button type="button" class="nc-cancel" id="ncCancel">Cancelar</button>' +
+      '  </div>' +
+      '</form>';
+
     window.__NewChat && window.__NewChat.setBody(body);
-    document.getElementById('ncCancel') && document.getElementById('ncCancel').addEventListener('click', function () { window.__NewChat && window.__NewChat.close(); });
-    document.getElementById('ncBack') && document.getElementById('ncBack').addEventListener('click', buildRoot);
-    document.getElementById('ncForm') && document.getElementById('ncForm').addEventListener('submit', onSaveContact);
-    document.getElementById('ncName') && document.getElementById('ncName').focus();
+
+    $('#ncCancel') && $('#ncCancel').addEventListener('click', function () { window.__NewChat && window.__NewChat.close(); });
+    $('#ncBack') && $('#ncBack').addEventListener('click', buildRoot);
+    $('#ncForm') && $('#ncForm').addEventListener('submit', onSaveContact);
+
+    const name = $('#ncName');
+    name && name.focus();
   }
 
   function buildRoot() {
     if (!window.__NewChat) return;
+
     window.__NewChat.close();
     setTimeout(function () { window.__NewChat && window.__NewChat.open(); }, 10);
-    const b = ''
-      + '<ul style="list-style:none;margin:6px 0;padding:0;display:flex;flex-direction:column;gap:6px">'
-      + '  <li id="ncNewContact" style="display:flex;gap:12px;align-items:center;padding:10px;border-radius:12px;border:1px solid #223038;background:#0b141a;cursor:pointer">'
-      + '    <div style="width:38px;height:38px;border-radius:999px;background:#00a884;display:grid;place-items:center;color:#0b141a;font-weight:700">+</div>'
-      + '    <div><div style="font-weight:600">Novo contato</div><div style="font-size:12px;color:#9aaeb5">Criar contato manualmente</div></div>'
-      + '  </li>'
-      + '</ul>'
-      + '<div style="border-top:1px solid #223038;margin:8px 0"></div>'
-      + '<div style="padding:8px 10px;color:#9aaeb5;font-size:12px">Dica: pesquise um nome/telefone na barra superior.</div>';
+
+    const b =
+      '<ul class="nc-list">' +
+      '  <li id="ncNewContact" class="nc-item" role="button" tabindex="0">' +
+      '    <div class="nc-icon-plus">+</div>' +
+      '    <div>' +
+      '      <div class="nc-item-title">Novo contato</div>' +
+      '      <div class="nc-item-sub">Criar contato manualmente</div>' +
+      '    </div>' +
+      '  </li>' +
+      '</ul>' +
+      '<div class="nc-sep"></div>' +
+      '<div class="nc-tip">Dica: pesquise um nome/telefone na barra superior.</div>';
+
     window.__NewChat.setBody(b);
-    document.getElementById('ncNewContact') && document.getElementById('ncNewContact').addEventListener('click', renderNewContactForm);
+
+    $('#ncNewContact') && $('#ncNewContact').addEventListener('click', renderNewContactForm);
+    $('#ncNewContact') && $('#ncNewContact').addEventListener('keydown', function(e){
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); renderNewContactForm(); }
+    });
   }
 
   // ---------------- criar/abrir contato ----------------
@@ -442,19 +442,18 @@ import { state } from '../state/store.js';
       return;
     }
 
-    const nomeManual = String(document.getElementById('ncName') && document.getElementById('ncName').value || '').trim();
-    const raw        = onlyDigits(document.getElementById('ncPhone') && document.getElementById('ncPhone').value || '');
+    const nomeManual = String($('#ncName') && $('#ncName').value || '').trim();
+    const raw        = onlyDigits($('#ncPhone') && $('#ncPhone').value || '');
 
     const e164 = validatePhoneOrExplain(raw);
     if (!e164) return;
 
-    const btnSave = document.getElementById('ncSave');
+    const btnSave = $('#ncSave');
     btnSave && btnSave.setAttribute('disabled', 'disabled');
 
     try {
       const found1 = await findClienteByTelefone(e164);
       if (found1 && found1.id) {
-        // já existe → abre direto (state/clique normal cuidam do resto)
         window.__NewChat && window.__NewChat.close();
         setTimeout(function () { openById(found1.id); }, 0);
         return;
@@ -491,15 +490,7 @@ import { state } from '../state/store.js';
 
       const newId  = Number(data && data.id) || null;
       if (newId) {
-        // *** AQUI É O PULO DO GATO ***
-        // Criamos um "cliente mínimo" só com id/nome/telefone,
-        // injetamos nos caches + state.clienteSel,
-        // assim o envio SEMPRE usa esse contato novo.
-        const simpleCliente = {
-          id: newId,
-          nome: nomeManual || 'Cliente',
-          telefone: canonical
-        };
+        const simpleCliente = { id: newId, nome: nomeManual || 'Cliente', telefone: canonical };
         forceSelectCliente(simpleCliente);
 
         window.__NewChat && window.__NewChat.close();
@@ -540,12 +531,10 @@ import { state } from '../state/store.js';
       btn.type = 'button';
       btn.title = 'Nova conversa';
       btn.setAttribute('aria-label', 'Nova conversa');
-      Object.assign(btn.style,{
-        display:'inline-flex',alignItems:'center',justifyContent:'center',width:'32px',height:'32px',marginLeft:'8px',
-        borderRadius:'8px',background:'transparent',border:'1px solid #223038',color:'#aebac1',cursor:'pointer'
-      });
-      btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true" style="width:18px;height:18px">'
-        + '<path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+      btn.innerHTML =
+        '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+        '<path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>' +
+        '</svg>';
       host.appendChild(btn);
     }
 
@@ -563,7 +552,6 @@ import { state } from '../state/store.js';
       });
     }
 
-    // evento do inst-switch.js
     if (!btn.__instEvtBound) {
       btn.__instEvtBound = true;
       document.addEventListener('inst:change', function () {
@@ -577,9 +565,6 @@ import { state } from '../state/store.js';
     try { ensurePlusButtonMounted(); } catch (e) { console.error('[new-chat] ensurePlusButtonMounted failed', e); }
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', wire);
-  } else {
-    wire();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
+  else wire();
 })();

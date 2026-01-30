@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os, re, asyncio, requests
+from datetime import timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from backend.database import SessionLocal
@@ -69,6 +70,12 @@ from .evo_handlers_utils import (
     # onboarding
     cancel_auto_cleanup,
 )
+
+# =========================
+# CONFIG EXTRA (SYNC APÓS QR)
+# =========================
+SYNC_ON_CONNECT_AFTER_QR = (os.getenv("SYNC_ON_CONNECT_AFTER_QR", "true").lower() == "true")
+QR_CONNECT_SYNC_WINDOW_MIN = int(os.getenv("QR_CONNECT_SYNC_WINDOW_MIN", "30") or "30")
 
 # =========================
 # HANDLERS / HELPERS LOCAIS
@@ -178,10 +185,19 @@ async def on_qrcode_updated(first: str, payload: dict):
             LOG(f"[QR EVT] Falha ao emitir estado 'waiting' para inst:{inst_id}: {e}")
         return
 
+    # ✅ marca QR recente para permitir sync no connect (janela)
+    try:
+        QR_RECENT[inst_id] = _int_unix(_now_utc())
+    except Exception:
+        pass
+
     await _emit_qr(inst_id, b64, pairing_code, limit)
 
 
+# In-memory guards (avoid repeated heavy sync/expand spam). These reset on process restart.
 INSTANCIAS_SYNC: set[str] = set()
+QR_RECENT: dict[str, int] = {}  # instance -> unix seconds when a QR was last emitted
+
 
 @handler(EvoEvent.CONNECTION_UPDATE)
 async def on_conn_update(first: str, payload: dict):
@@ -192,11 +208,16 @@ async def on_conn_update(first: str, payload: dict):
     st = str((data.get("state") or data.get("status") or "")).strip().lower()
     conectado = st in ("connected", "open")
 
+    was_connected = False
+    empresa_id = None
+    historico_opcao = "none"
+
     with SessionLocal() as db:
         inst = _get_inst_row(db, inst_id)
         if not inst:
             return
 
+        was_connected = bool(getattr(inst, "connected", False))
         inst.connected = bool(conectado)
 
         wuid = (data.get("id") or data.get("wid") or (data.get("me") or {}).get("id")) if isinstance(data, dict) else None
@@ -205,23 +226,24 @@ async def on_conn_update(first: str, payload: dict):
 
         inst.last_seen = _now_utc()
         empresa_id = inst.empresa_id
-
-        # pegamos aqui a preferência de histórico para decidir overlay
         historico_opcao = (inst.historico_restaurar or "none").lower()
+
         db.commit()
 
-    if not conectado and st in ("close","closed","disconnected","logout","loggedout"):
+    # ✅ quando desconecta/logout: libera sync futuro
+    if (not conectado) and (st in ("close", "closed", "disconnected", "logout", "loggedout")):
+        INSTANCIAS_SYNC.discard(inst_id)
+        QR_RECENT.pop(inst_id, None)
         _mark_disconnected(inst_id)
 
-    if conectado:
-        # 0) cancela auto-cleanup do onboarding
+    # ✅ só roda ações pesadas quando mudou de desconectado -> conectado
+    if conectado and not was_connected:
         try:
             cancel_auto_cleanup(inst_id)
         except Exception as e:
             LOG(f"[CLEANUP] falha ao cancelar auto cleanup: {e}")
 
-        # 1) mostrar overlay APENAS se vai haver importação de histórico
-        if historico_opcao in ("24h", "7d") or (HISTORY_LIMIT_HOURS > 0):
+        if empresa_id is not None and (historico_opcao in ("24h", "7d") or (HISTORY_LIMIT_HOURS > 0)):
             try:
                 await conexoes_ativas.send_message(
                     f"emp:{empresa_id}", {"type": "history_sync_start", "total": 0, "serverTimestamp": _server_ts_ms()}
@@ -232,30 +254,59 @@ async def on_conn_update(first: str, payload: dict):
             except Exception as e:
                 LOG(f"[SYNC] falha ao emitir start/progress inicial: {e}")
 
-        # 2) EXPANDE ASSINATURAS (anti-tempestade: só agora “abre a torneira”)
         _evo_expand_websocket(inst_id)
         _evo_expand_rabbit(inst_id)
 
-    # eventos de conexão para instância e empresa
+    # WS status
     await conexoes_ativas.send_message(
         f"inst:{inst_id}",
-        {"type": "connection", "status": "CONNECTED" if conectado else "DISCONNECTED", "serverTimestamp": _server_ts_ms()}
+        {"type": "connection", "status": "CONNECTED" if conectado else "DISCONNECTED", "serverTimestamp": _server_ts_ms()},
     )
-    await conexoes_ativas.send_message(
-        f"emp:{empresa_id}",
-        {"type": "connection", "inst_status": {"connected": bool(conectado), "instance": inst_id}, "reload_whatsapp": True, "serverTimestamp": _server_ts_ms()}
-    )
+    if empresa_id is not None:
+        await conexoes_ativas.send_message(
+            f"emp:{empresa_id}",
+            {
+                "type": "connection",
+                "inst_status": {"connected": bool(conectado), "instance": inst_id},
+                "reload_whatsapp": True,
+                "serverTimestamp": _server_ts_ms(),
+            },
+        )
 
-    # dispara syncs no primeiro CONNECTED
+    # ✅ roda sync 1x (e por padrão só depois de QR recente)
     if conectado and inst_id not in INSTANCIAS_SYNC:
-        INSTANCIAS_SYNC.add(inst_id)
-        if SYNC_CONTACTS_ON_CONNECT:
-            await _sync_contatos_completos(inst_id)
-        if SYNC_CHATS_ON_CONNECT:
-            await _sync_chats_completos(inst_id)
-        if ENABLE_MESSAGES_SET:
-            LOG("[MESSAGES_SET] aguardando histórico (none/24h/7d).")
-            
+        do_sync = True
+
+        if SYNC_ON_CONNECT_AFTER_QR:
+            now_s = _int_unix(_now_utc())
+            qr_s = QR_RECENT.get(inst_id)
+            do_sync = bool(qr_s and (now_s - int(qr_s)) <= (QR_CONNECT_SYNC_WINDOW_MIN * 60))
+
+        if do_sync:
+            INSTANCIAS_SYNC.add(inst_id)
+            QR_RECENT.pop(inst_id, None)  # consumiu
+
+            if SYNC_CONTACTS_ON_CONNECT:
+                await _sync_contatos_completos(inst_id)
+            if SYNC_CHATS_ON_CONNECT:
+                await _sync_chats_completos(inst_id)
+
+            if ENABLE_MESSAGES_SET:
+                LOG("[MESSAGES_SET] aguardando histórico (none/24h/7d).")
+
+
+async def on_logout_instance(instance: str, payload: dict):
+    # ✅ logout/delete/remove liberam sync futuro
+    INSTANCIAS_SYNC.discard(instance)
+    QR_RECENT.pop(instance, None)
+    _mark_disconnected(instance)
+
+# ✅ REGISTRA 1x (sem duplicar mais embaixo)
+HANDLERS[EvoEvent.LOGOUT_INSTANCE] = on_logout_instance
+HANDLERS[EvoEvent.INSTANCE_DELETE] = on_logout_instance
+HANDLERS[EvoEvent.REMOVE_INSTANCE] = on_logout_instance
+
+
 def _mark_disconnected(instance: str):
     if not instance:
         return
@@ -276,20 +327,15 @@ def _mark_disconnected(instance: str):
 
             try:
                 asyncio.create_task(
-                    conexoes_ativas.send_message(f"emp:{row.empresa_id}", {"type": "reload_whatsapp", "serverTimestamp": _server_ts_ms()})
+                    conexoes_ativas.send_message(
+                        f"emp:{row.empresa_id}",
+                        {"type": "reload_whatsapp", "serverTimestamp": _server_ts_ms()},
+                    )
                 )
             except Exception:
                 pass
     finally:
         db.close()
-
-
-async def on_logout_instance(instance: str, payload: dict):
-    _mark_disconnected(instance)
-
-HANDLERS[EvoEvent.LOGOUT_INSTANCE] = on_logout_instance
-HANDLERS[EvoEvent.INSTANCE_DELETE] = on_logout_instance
-HANDLERS[EvoEvent.REMOVE_INSTANCE] = on_logout_instance
 
 
 @handler(EvoEvent.MESSAGES_UPSERT)
@@ -1386,7 +1432,10 @@ async def _sync_contatos_completos(inst_id: str):
                 mudou = True
 
             if idx % 25 == 0:
-                await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "contacts_sync_progress", "total": total, "imported": imported, "serverTimestamp": _server_ts_ms()})
+                await conexoes_ativas.send_message(
+                    f"emp:{empresa_id}",
+                    {"type": "contacts_sync_progress", "total": total, "imported": imported, "serverTimestamp": _server_ts_ms()},
+                )
 
         if mudou:
             db.commit()
@@ -1443,6 +1492,10 @@ async def force_qr_now_async(inst_id: str):
         if isinstance(js, dict):
             b64, pc, limit = _extract_qr_fields(js)
             if b64 or pc:
+                try:
+                    QR_RECENT[inst_id] = _int_unix(_now_utc())
+                except Exception:
+                    pass
                 await _emit_qr(inst_id, b64, pc, limit)
     except Exception as e:
         LOG(f"[QR WS] falha ao forçar QR: {e}")

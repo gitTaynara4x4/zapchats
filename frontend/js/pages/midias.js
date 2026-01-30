@@ -208,21 +208,31 @@
   // ===== Helpers UI =====
   const toggleEmpty = show => els.empty?.classList.toggle('show', !!show);
 
+  // ✅ CORRIGIDO: sempre envia sem_cliente=false no modo instâncias
   function buildQuery({forUpload=false} = {}){
     const qs = new URLSearchParams({ limit: String(paging.limit), offset: String(paging.offset) });
     const emp = getEmpresaId(); if (emp) qs.set('empresa_id', String(emp));
 
-    if (isScopeMeus()){ qs.set('sem_cliente','true'); }
-    else {
-      if (selectedInst) { ['instancia_id','instancia','whatsapp_id','session','sessionName'].forEach(k=>qs.set(k, selectedInst)); }
-      else qs.set('sem_cliente','false');
+    if (isScopeMeus()){
+      qs.set('sem_cliente','true');
+    } else {
+      // ✅ sempre em instâncias
+      qs.set('sem_cliente','false');
+
+      // ✅ ENVIA APENAS UM CAMPO (o backend geralmente espera isso)
+      if (selectedInst) {
+        qs.set('instancia_id', String(selectedInst));
+        // (não manda instancia/session/etc)
+      }
     }
+
     if (!forUpload){
       const q=(els.q?.value||'').trim(); if(q) qs.set('q', q);
       const ord=els.ordenar?.value; if(ord) qs.set('ordenar', ord);
       if (currentType && currentType!=='all') qs.set('tipo', currentType);
       if (currentType==='documento' && currentDocGroup!=='all') qs.set('doc', currentDocGroup);
     }
+
     return qs.toString();
   }
 
@@ -1018,6 +1028,11 @@
     bindPageEvents();
     updateUploadState();
 
+    // ✅ aplica instância salva já no início (antes do primeiro fetch)
+    const empresaId = getEmpresaId();
+    const saved = (empresaId ? (localStorage.getItem(`instAtiva:${empresaId}`) || '') : '');
+    if (saved) { selectedInst = saved; scope.type = 'inst'; }
+
     const restored = await restoreFromStateIfSameQuery();
     if (!restored) {
       scope = { type:'inst', clienteId:null };
@@ -1051,6 +1066,21 @@
       resolved = true; clearTimeout(timer);
       legacyRun();
     }
+  };
+
+  // ✅ DEBUG OPCIONAL: no console você faz window.MidiasDebug.state()
+  window.MidiasDebug = {
+    state: () => ({
+      empresa_id: getEmpresaId(),
+      scope,
+      selectedInst,
+      q: (els.q?.value||'').trim(),
+      ordenar: els.ordenar?.value || 'recent',
+      currentType,
+      currentDocGroup,
+      query: buildQuery(),
+    }),
+    query: () => buildQuery(),
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run, { once:true });

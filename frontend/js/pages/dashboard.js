@@ -1,4 +1,3 @@
-// /frontend/js/pages/dashboard.js
 (function DashboardPage(){
   'use strict';
 
@@ -85,7 +84,8 @@
     }
   };
 
-  const PALETTE = ['#60a5fa','#f472b6','#34d399','#fbbf24','#a78bfa','#f87171','#22d3ee','#fb7185'];
+  // Paleta Moderna
+  const PALETTE = ['#6366f1','#ec4899','#10b981','#f59e0b','#8b5cf6','#f43f5e','#06b6d4','#14b8a6'];
 
   const toNum = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
   const fmtDateISO = (d)=>{ const x = (d instanceof Date)? d : new Date(d);
@@ -157,7 +157,7 @@
     for (const box of targets){
       const b = document.createElement('div');
       b.className = 'demo-badge';
-      b.textContent = 'modo demonstração';
+      b.textContent = 'Modo Demonstração';
       box.appendChild(b);
     }
   }
@@ -224,13 +224,45 @@
     const ctx = document.getElementById('pizzaAtendimento'); if (!hasChart() || !ctx) return;
     const labels = (distrib?.labels) || Object.keys(distrib?.data||{});
     const data   = Array.isArray(distrib?.data) ? distrib.data : labels.map(k => toNum(distrib?.data?.[k]) ?? 0);
+    
     chartPizza = upsertChart(ctx, chartPizza, {
       type:'doughnut',
-      data:{ labels, datasets:[{ data, backgroundColor: PALETTE.slice(0, data.length), borderWidth:0, hoverOffset:6 }] },
+      data:{ 
+        labels, 
+        datasets:[{ 
+          data, 
+          backgroundColor: PALETTE.slice(0, data.length), 
+          borderWidth:0,
+          hoverOffset:10,
+          borderRadius: 4,
+          spacing: 2
+        }] 
+      },
       options:{
         responsive:true,
-        cutout:'55%',
-        plugins:{ legend:{ position:'bottom', labels:{ boxWidth:14, boxHeight:14 } }, tooltip:{ mode:'index', intersect:false } }
+        cutout:'78%', // Anel mais fino e moderno
+        plugins:{ 
+          legend:{ 
+            position:'right', 
+            labels:{ 
+              boxWidth:8, 
+              boxHeight:8, 
+              usePointStyle:true, 
+              padding: 15,
+              font: { size: 11, family: "'Plus Jakarta Sans', sans-serif" } 
+            } 
+          }, 
+          tooltip:{ 
+            mode:'index', 
+            intersect:false,
+            backgroundColor: 'rgba(9, 9, 11, 0.95)',
+            borderColor: 'rgba(255,255,255,0.1)',
+            borderWidth: 1,
+            padding: 10,
+            cornerRadius: 8
+          } 
+        },
+        layout: { padding: 10 }
       }
     });
   }
@@ -252,13 +284,42 @@
 
     chartFunil = upsertChart(ctx, chartFunil, {
       type:'bar',
-      data:{ labels, datasets:[{ data, backgroundColor: PALETTE.slice(0, data.length), borderWidth:0, borderRadius:8, maxBarThickness:48 }] },
+      data:{ 
+        labels, 
+        datasets:[{ 
+          data, 
+          backgroundColor: PALETTE.slice(0, data.length), 
+          borderWidth:0, 
+          borderRadius: 6, // Barras arredondadas
+          barThickness: 28, 
+          maxBarThickness: 40 
+        }] 
+      },
       options:{
         responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{ display:false },
-          tooltip:{ mode:'index', intersect:false,
-            callbacks:{ title: (items)=> { if (!items?.length) return ''; const i = items[0].dataIndex; return IS_MOBILE ? labelsFull[i] : items[0].label; } } } },
-        scales:{ y:{ beginAtZero:true, ticks:{ precision:0 }, grid:{ drawBorder:false } }, x:{ grid:{ display:false }, ticks:{ maxRotation:0, minRotation:0, autoSkip:true, maxTicksLimit: Math.min(5, labels.length) } } }
+        plugins:{ 
+          legend:{ display:false },
+          tooltip:{ 
+            mode:'index', intersect:false,
+            backgroundColor: 'rgba(9, 9, 11, 0.95)',
+            borderColor: 'rgba(255,255,255,0.1)',
+            borderWidth: 1,
+            cornerRadius: 8,
+            padding: 10,
+            callbacks:{ title: (items)=> { if (!items?.length) return ''; const i = items[0].dataIndex; return IS_MOBILE ? labelsFull[i] : items[0].label; } } 
+          } 
+        },
+        scales:{ 
+          y:{ 
+            beginAtZero:true, 
+            ticks:{ precision:0, color: '#71717a', font: {size: 10} }, 
+            grid:{ color: '#27272a', drawBorder: false, tickLength: 0 } // Grade muito sutil
+          }, 
+          x:{ 
+            grid:{ display:false, drawBorder: false }, // Sem grade vertical
+            ticks:{ maxRotation:0, minRotation:0, autoSkip:true, maxTicksLimit: Math.min(5, labels.length), color: '#a1a1aa', font: {size: 11} } 
+          } 
+        }
       }
     });
   }

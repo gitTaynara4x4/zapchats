@@ -6,9 +6,7 @@
   let lastTrigger = null;
 
   function log() {
-    try {
-      console.log('[flyout.js]', ...arguments);
-    } catch {}
+    try { console.log('[flyout.js]', ...arguments); } catch {}
   }
 
   // ---------- Abertura / Fechamento do Flyout ----------
@@ -19,7 +17,6 @@
     host.classList.add('is-open');
     host.setAttribute('aria-hidden', 'false');
 
-    // foca no primeiro elemento focável dentro do sidebar
     const panel = host.querySelector('.app-sidebar') || host.querySelector('[role="dialog"]');
     if (panel) {
       const focusable = panel.querySelector(
@@ -97,33 +94,23 @@
       }, 100);
     }
 
-    // entrou na barrinha -> agenda abrir
     mini.addEventListener('mouseenter', function () {
       scheduleOpen();
     });
 
-    // saiu da barrinha
     mini.addEventListener('mouseleave', function (ev) {
       const to = ev.relatedTarget;
-      // se saiu da mini e foi para dentro do flyout (painel/backdrop), NÃO fecha
-      if (to && (host === to || host.contains(to))) {
-        return;
-      }
+      if (to && (host === to || host.contains(to))) return;
       scheduleClose();
     });
 
-    // se o mouse entra em QUALQUER parte do flyout, cancela fechamento
     host.addEventListener('mouseenter', function () {
       clearTimeout(closeTimer);
     });
 
-    // saiu do flyout
     host.addEventListener('mouseleave', function (ev) {
       const to = ev.relatedTarget;
-      // se saiu do flyout e foi pra mini-leftbar, NÃO fecha (pra deixar o cara ir e voltar)
-      if (to && (mini === to || mini.contains(to))) {
-        return;
-      }
+      if (to && (mini === to || mini.contains(to))) return;
       scheduleClose();
     });
   }
@@ -156,7 +143,6 @@
         mini.setAttribute('aria-label', labelText);
       }
 
-      // Ícone: clona o mesmo SVG do sidebar
       const iconSource = link.querySelector('.att-nav-icon svg') || link.querySelector('svg');
       if (iconSource) {
         const iconClone = iconSource.cloneNode(true);
@@ -167,7 +153,6 @@
         mini.appendChild(i);
       }
 
-      // Label opcional (se o CSS esconder, beleza)
       if (labelText) {
         const span = document.createElement('span');
         span.className = 'wpp-label';
@@ -175,7 +160,6 @@
         mini.appendChild(span);
       }
 
-      // marca como página atual
       if (href === currentPath) {
         mini.setAttribute('aria-current', 'page');
       }
@@ -201,10 +185,15 @@
 
       // joga <link preload> e <style> pro <head>
       fragment.querySelectorAll('link[rel="preload"], style').forEach(node => {
+        // evita duplicar style/link se o partial for carregado mais de uma vez
+        if (node.tagName === 'STYLE') {
+          const sig = (node.textContent || '').trim().slice(0, 80);
+          if (sig && document.querySelector(`style[data-flyout-sig="${CSS.escape(sig)}"]`)) return;
+          node.setAttribute('data-flyout-sig', sig);
+        }
         document.head.appendChild(node);
       });
 
-      // pega sidebar, modal e scripts do partial
       const aside  = fragment.querySelector('.app-sidebar');
       const modal  = fragment.querySelector('#pfModalAtt');
       const scripts = Array.from(fragment.querySelectorAll('script'));
@@ -214,16 +203,13 @@
         return;
       }
 
-      // injeta sidebar no flyout
       panelShell.innerHTML = '';
       panelShell.appendChild(aside);
 
-      // injeta modal no body (se ainda não existir)
       if (modal && !document.getElementById('pfModalAtt')) {
         document.body.appendChild(modal);
       }
 
-      // executa os <script> que estavam dentro do partial (theme, perfil, logout...)
       scripts.forEach(script => {
         const code = script.textContent || '';
         if (!code.trim()) return;
@@ -234,9 +220,7 @@
         }
       });
 
-      // monta a mini barra lateral com base nos <a> da sidebar
       buildMiniSidebarFromAside(aside);
-
       log('sidebar carregado e inicializado.');
     } catch (err) {
       console.error('[flyout.js] erro ao carregar partial:', err);
@@ -250,9 +234,7 @@
       log('zcSidebarHost não encontrado; nada a fazer.');
       return;
     }
-    if (host.dataset.zcFlyoutReady === '1') {
-      return;
-    }
+    if (host.dataset.zcFlyoutReady === '1') return;
     host.dataset.zcFlyoutReady = '1';
 
     const panelShell = host.querySelector('[role="dialog"]') || host;

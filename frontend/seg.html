@@ -3,334 +3,716 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SEG Monitoramento | Excelência em Segurança</title>
+    <meta name="description" content="SEG Monitoramento - Segurança Eletrônica, Alarmes e Câmeras em Taubaté e Vale do Paraíba. Proteção 24h para sua casa e empresa.">
+    <title>SEG Monitoramento | Segurança Inteligente</title>
     
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
 
     <style>
-        /* --- CONFIGURAÇÃO VISUAL DE ALTO PADRÃO --- */
+        /* --- VARIÁVEIS E RESET --- */
         :root {
-            --navy-deep: #0f172a;    /* Azul Quase Preto */
+            --navy-deep: #0f172a;    
             --navy-light: #1e293b;   
-            --gold-metallic: #d4af37;/* Dourado Premium */
-            --gold-light: #f3e5ab;   
+            --gold-metallic: #d4af37;
+            --gold-hover: #b5952f;
             --white: #ffffff;
-            --gray-bg: #f8fafc;
+            --gray-light: #f1f5f9;
             --text-main: #334155;
+            --text-light: #94a3b8;
             
-            --shadow-soft: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            --shadow-soft: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
             --shadow-hover: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
             --radius: 8px;
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
+        html { scroll-behavior: smooth; }
+
         body {
             font-family: 'Poppins', sans-serif;
             color: var(--text-main);
             background-color: var(--white);
             line-height: 1.6;
             overflow-x: hidden;
+            padding-top: 40px; /* Espaço para a barra de topo */
         }
 
         a { text-decoration: none; transition: all 0.3s ease; }
         ul { list-style: none; }
-        
-        /* HEADER */
-        header {
-            background: rgba(255, 255, 255, 0.98);
-            position: fixed; width: 100%; top: 0; z-index: 1000;
-            border-bottom: 1px solid rgba(0,0,0,0.05); padding: 15px 0;
-            box-shadow: var(--shadow-soft);
+
+        /* 🔥 BARRA DE URGÊNCIA (NOVO) */
+        .top-bar {
+            position: fixed; top: 0; left: 0; right: 0; height: 40px;
+            background: var(--navy-deep); color: white; z-index: 1002;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 13px; font-weight: 500; gap: 10px;
+            border-bottom: 1px solid rgba(212, 175, 55, 0.3);
         }
+        .top-bar span { background: var(--gold-metallic); color: var(--navy-deep); padding: 2px 8px; border-radius: 4px; font-weight: 700; text-transform: uppercase; font-size: 11px; }
+        
+        /* --- COMPONENTES --- */
+        .btn {
+            display: inline-block;
+            padding: 14px 32px;
+            border-radius: 4px;
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 0.85rem;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        /* 🔥 ANIMAÇÃO PULSE GOLD (NOVO) */
+        @keyframes pulse-gold {
+            0% { box-shadow: 0 0 0 0 rgba(212, 175, 55, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(212, 175, 55, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(212, 175, 55, 0); }
+        }
+
+        .btn-gold {
+            background: var(--gold-metallic);
+            color: var(--navy-deep);
+            border: 2px solid var(--gold-metallic);
+            animation: pulse-gold 2s infinite; /* Chama atenção */
+        }
+        .btn-gold:hover {
+            background: var(--gold-hover);
+            border-color: var(--gold-hover);
+            transform: translateY(-2px);
+            animation: none;
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: var(--white);
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+        .btn-outline:hover {
+            background: var(--white);
+            color: var(--navy-deep);
+            border-color: var(--white);
+        }
+
+        .section-title {
+            text-align: center;
+            margin-bottom: 60px;
+        }
+        .section-title span {
+            color: var(--gold-metallic);
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 0.9rem;
+            letter-spacing: 2px;
+            display: block;
+            margin-bottom: 10px;
+        }
+        .section-title h2 {
+            font-size: 2.5rem;
+            color: var(--navy-deep);
+        }
+
+        /* --- HEADER --- */
+        header {
+            background: transparent;
+            position: fixed;
+            width: 100%;
+            top: 40px; /* Abaixo da barra top */
+            z-index: 1000;
+            transition: 0.4s;
+            padding: 20px 0;
+        }
+
+        header.scrolled {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 0;
+            box-shadow: var(--shadow-soft);
+            backdrop-filter: blur(10px);
+            top: 0; /* Cola no topo ao rolar */
+        }
+
         .container { max-width: 1200px; margin: 0 auto; padding: 0 25px; }
         .header-flex { display: flex; justify-content: space-between; align-items: center; }
-        .logo { font-size: 1.8rem; font-weight: 700; color: var(--navy-deep); letter-spacing: -0.5px; display: flex; align-items: center; gap: 10px; }
+
+        .logo { 
+            font-size: 1.8rem; 
+            font-weight: 800; 
+            color: var(--white); 
+            letter-spacing: -1px; 
+            display: flex; 
+            align-items: center; 
+            gap: 10px; 
+        }
+        header.scrolled .logo { color: var(--navy-deep); }
         .logo span { color: var(--gold-metallic); }
+
         .nav-links { display: flex; gap: 30px; }
-        .nav-links a { color: var(--navy-light); font-weight: 500; font-size: 0.95rem; }
+        .nav-links a { color: rgba(255,255,255,0.9); font-weight: 500; font-size: 0.95rem; }
+        header.scrolled .nav-links a { color: var(--navy-deep); }
         .nav-links a:hover { color: var(--gold-metallic); }
-        .btn-premium { background: var(--navy-deep); color: var(--white); padding: 12px 30px; border-radius: 4px; font-weight: 500; border: 1px solid var(--navy-deep); }
-        .btn-premium:hover { background: transparent; color: var(--navy-deep); }
 
-        /* HERO SECTION */
+        .btn-login {
+            border: 1px solid var(--gold-metallic);
+            color: var(--gold-metallic);
+            padding: 8px 25px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        .btn-login:hover { background: var(--gold-metallic); color: var(--navy-deep); }
+
+        .mobile-toggle { display: none; font-size: 1.5rem; color: var(--white); cursor: pointer; }
+        header.scrolled .mobile-toggle { color: var(--navy-deep); }
+
+        /* --- HERO --- */
         .hero {
-            height: 90vh;
-            background: linear-gradient(rgba(15, 23, 42, 0.7), rgba(15, 23, 42, 0.6)), url('https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?ixlib=rb-1.2.1&auto=format&fit=crop&w=1920&q=80');
-            background-size: cover; background-position: center;
-            display: flex; align-items: center; position: relative;
+            height: 100vh;
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.7)), url('https://images.unsplash.com/photo-1558008258-3256797b43f3?ixlib=rb-1.2.1&auto=format&fit=crop&w=1920&q=80');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            display: flex;
+            align-items: center;
+            position: relative;
         }
-        .hero-content { color: var(--white); max-width: 700px; }
-        .tagline { background: rgba(212, 175, 55, 0.2); color: var(--gold-light); padding: 5px 15px; border-radius: 50px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 2px; border: 1px solid rgba(212, 175, 55, 0.5); display: inline-block; margin-bottom: 25px; }
-        .hero h1 { font-size: 3.5rem; line-height: 1.2; font-weight: 600; margin-bottom: 25px; }
-        .hero p { font-size: 1.15rem; opacity: 0.9; margin-bottom: 40px; font-weight: 300; }
-        .hero-btns { display: flex; gap: 20px; }
-        .btn-gold { background: var(--gold-metallic); color: var(--navy-deep); padding: 15px 35px; border-radius: 4px; font-weight: 600; }
-        .btn-gold:hover { background: #c5a059; transform: translateY(-2px); }
-        .btn-outline-light { border: 1px solid rgba(255,255,255,0.3); color: var(--white); padding: 15px 35px; border-radius: 4px; font-weight: 500; }
-        .btn-outline-light:hover { background: rgba(255,255,255,0.1); }
+        .hero-content { color: var(--white); max-width: 700px; padding-top: 60px; }
+        .hero h1 { font-size: 3.8rem; line-height: 1.1; font-weight: 700; margin-bottom: 25px; }
+        .hero p { font-size: 1.2rem; opacity: 0.9; margin-bottom: 40px; font-weight: 300; max-width: 600px; }
+        .hero-btns { display: flex; gap: 20px; flex-wrap: wrap; }
 
-        /* SEGMENTOS */
-        .segments { margin-top: -80px; position: relative; z-index: 10; padding-bottom: 40px; }
-        .segments-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
-        .segment-card { background: var(--white); padding: 50px; border-radius: var(--radius); box-shadow: var(--shadow-soft); display: flex; align-items: center; gap: 25px; transition: 0.3s; border-bottom: 3px solid transparent; }
-        .segment-card:hover { transform: translateY(-5px); box-shadow: var(--shadow-hover); border-bottom-color: var(--gold-metallic); }
-        .seg-icon { width: 70px; height: 70px; background: var(--gray-bg); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; color: var(--navy-deep); flex-shrink: 0; }
-        .seg-text h3 { font-size: 1.5rem; color: var(--navy-deep); margin-bottom: 10px; }
-        .seg-text p { font-size: 0.95rem; color: #64748b; margin-bottom: 15px; }
-        .link-arrow { color: var(--gold-metallic); font-weight: 600; font-size: 0.9rem; }
-
-        /* --- ESTILO DAS MARCAS (CARROSSEL) --- */
-        .seg-brands {
-            --speed: 30s;
-            padding: 40px 0 80px 0; /* Espaçamento ajustado */
+        /* --- STATS BAR --- */
+        .stats-strip {
             background: var(--white);
-            overflow: hidden;
+            margin-top: -60px;
+            position: relative;
+            z-index: 10;
+            padding: 40px 0;
+            box-shadow: var(--shadow-soft);
+            border-bottom: 1px solid rgba(0,0,0,0.05);
         }
-        .seg-brands__header { text-align: center; margin-bottom: 40px; }
-        .seg-brands__title { font-size: 24px; font-weight: 700; color: var(--navy-deep); margin-bottom: 8px; }
-        .seg-brands__sub { font-size: 15px; color: #64748b; }
+        .stats-grid { display: flex; justify-content: space-around; text-align: center; flex-wrap: wrap; gap: 30px; }
+        .stat-item h3 { font-size: 2.5rem; color: var(--navy-deep); font-weight: 800; margin-bottom: 5px; }
+        .stat-item p { color: var(--text-light); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; }
 
-        .seg-brands__slider {
-            position: relative; display: flex; align-items: center;
-            mask-image: linear-gradient(to right, transparent, black 15%, black 85%, transparent);
-            -webkit-mask-image: linear-gradient(to right, transparent, black 15%, black 85%, transparent);
+        /* --- MARCAS (Carousel) --- */
+        .brands-section { padding: 60px 0; background: var(--gray-light); overflow: hidden; }
+        .brands-slider {
+            display: flex;
+            width: calc(200px * 14);
+            animation: scroll 40s linear infinite;
         }
-        .seg-brands__track {
-            display: flex; gap: 60px;
-            animation: scroll var(--speed) linear infinite;
-            width: max-content;
-        }
-        .seg-brands__item {
-            flex: 0 0 auto; display: flex; align-items: center;
-            filter: grayscale(100%); opacity: 0.6; transition: all 0.3s ease;
-        }
-        .seg-brands__item:hover { filter: grayscale(0%); opacity: 1; transform: scale(1.05); }
-        .seg-brands__item img { height: 45px; width: auto; object-fit: contain; }
+        .brand-item { width: 200px; display: flex; align-items: center; justify-content: center; padding: 0 30px; opacity: 0.5; transition: 0.3s; }
+        .brand-item:hover { opacity: 1; transform: scale(1.1); }
+        .brand-item img { max-width: 100%; height: auto; max-height: 50px; filter: grayscale(100%); transition: 0.3s; }
+        .brand-item:hover img { filter: grayscale(0%); }
 
         @keyframes scroll {
-            from { transform: translateX(0); }
-            to { transform: translateX(calc(-50% - 30px)); } /* Ajuste fino para o loop */
+            0% { transform: translateX(0); }
+            100% { transform: translateX(calc(-200px * 7)); }
         }
 
-        /* SERVIÇOS */
-        .services-section { padding: 80px 0; background: var(--gray-bg); }
-        .sec-header { text-align: center; margin-bottom: 60px; }
-        .sec-header h2 { font-size: 2.2rem; color: var(--navy-deep); margin-bottom: 15px; }
-        .services-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px; }
-        .service-box { background: var(--white); padding: 40px 30px; border-radius: var(--radius); text-align: center; transition: 0.3s; border: 1px solid rgba(0,0,0,0.03); }
-        .service-box:hover { box-shadow: var(--shadow-hover); transform: translateY(-5px); }
-        .service-box i { font-size: 2.5rem; color: var(--gold-metallic); margin-bottom: 25px; display: block; }
-        .service-box h4 { font-size: 1.25rem; color: var(--navy-deep); margin-bottom: 15px; }
-        .service-box p { font-size: 0.9rem; color: #64748b; }
+        /* --- SERVIÇOS --- */
+        .services { padding: 100px 0; }
+        .services-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 30px; }
+        .service-card {
+            background: var(--white);
+            padding: 40px;
+            border-radius: var(--radius);
+            border: 1px solid #e2e8f0;
+            transition: 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        .service-card:hover {
+            transform: translateY(-10px);
+            box-shadow: var(--shadow-hover);
+            border-color: var(--gold-metallic);
+        }
+        .card-icon {
+            width: 60px; height: 60px;
+            background: rgba(212, 175, 55, 0.1);
+            color: var(--gold-metallic);
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.5rem;
+            margin-bottom: 25px;
+        }
+        .service-card h3 { font-size: 1.4rem; color: var(--navy-deep); margin-bottom: 15px; }
+        .service-card p { color: #64748b; font-size: 0.95rem; margin-bottom: 20px; }
+        .learn-more { color: var(--navy-deep); font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 5px; }
+        .learn-more:hover { color: var(--gold-metallic); gap: 10px; }
 
-        /* STATS */
-        .stats-strip { background: var(--navy-deep); color: var(--white); padding: 60px 0; }
-        .stats-flex { display: flex; justify-content: space-around; text-align: center; flex-wrap: wrap; gap: 30px; }
-        .stat-box h3 { font-size: 2.5rem; color: var(--gold-metallic); font-weight: 700; }
-        .stat-box span { text-transform: uppercase; font-size: 0.8rem; letter-spacing: 1px; opacity: 0.8; }
+        /* --- COMO FUNCIONA (Processo) --- */
+        .process { padding: 100px 0; background: var(--navy-deep); color: var(--white); }
+        .process .section-title h2 { color: var(--white); }
+        .process-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 40px; margin-top: 50px; }
+        .process-item { text-align: center; position: relative; }
+        .process-icon {
+            width: 80px; height: 80px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid var(--gold-metallic);
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            margin: 0 auto 25px;
+            font-size: 2rem;
+            color: var(--gold-metallic);
+        }
+        .process-item h4 { font-size: 1.2rem; margin-bottom: 10px; }
+        .process-item p { color: #94a3b8; font-size: 0.9rem; }
 
-        /* CONTATO */
-        .contact-section { padding: 100px 0; }
-        .contact-wrapper { background: var(--white); border-radius: 20px; overflow: hidden; box-shadow: var(--shadow-hover); display: flex; }
-        .contact-info { background: var(--navy-deep); color: var(--white); padding: 60px; flex: 1; }
-        .contact-info h3 { font-size: 2rem; margin-bottom: 30px; }
-        .info-row { display: flex; align-items: center; gap: 15px; margin-bottom: 25px; }
-        .info-row i { color: var(--gold-metallic); font-size: 1.2rem; }
-        .contact-map { flex: 1.5; position: relative; min-height: 400px; background: #eee; }
+        /* --- DEPOIMENTOS --- */
+        .testimonials { padding: 100px 0; background: var(--gray-light); }
+        .testi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 30px; }
+        .testi-card { background: var(--white); padding: 40px; border-radius: var(--radius); box-shadow: var(--shadow-soft); }
+        .stars { color: var(--gold-metallic); margin-bottom: 15px; font-size: 0.9rem; }
+        .testi-text { font-style: italic; color: #475569; margin-bottom: 20px; }
+        .client-info { display: flex; align-items: center; gap: 15px; }
+        .client-avatar { width: 50px; height: 50px; background: #cbd5e1; border-radius: 50%; }
+        .client-details h5 { font-size: 1rem; color: var(--navy-deep); }
+        .client-details span { font-size: 0.8rem; color: #94a3b8; }
 
-        /* FOOTER */
-        footer { background: #0f172a; color: #94a3b8; padding: 60px 0 20px; font-size: 0.9rem; border-top: 3px solid var(--gold-metallic); }
-        .footer-logo { font-size: 1.5rem; color: var(--white); font-weight: 700; display: block; margin-bottom: 20px; }
-        .footer-logo span { color: var(--gold-metallic); }
-        .copyright { text-align: center; margin-top: 50px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.05); }
+        /* --- CONTATO --- */
+        .contact { padding: 100px 0; }
+        .contact-wrapper {
+            display: grid;
+            grid-template-columns: 1fr 1.5fr;
+            box-shadow: var(--shadow-hover);
+            border-radius: 20px;
+            overflow: hidden;
+            background: var(--white);
+        }
+        .contact-details { background: var(--navy-deep); padding: 60px; color: var(--white); }
+        .contact-details h3 { font-size: 2rem; margin-bottom: 10px; }
+        .contact-details p { color: #94a3b8; margin-bottom: 40px; }
+        .info-line { display: flex; align-items: center; gap: 15px; margin-bottom: 25px; }
+        .info-line i { color: var(--gold-metallic); width: 20px; }
+        
+        .contact-form-area { padding: 60px; background: var(--white); }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 500; color: var(--navy-deep); font-size: 0.9rem; }
+        .form-control {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            background: #f8fafc;
+            font-family: inherit;
+            transition: 0.3s;
+        }
+        .form-control:focus { outline: none; border-color: var(--gold-metallic); background: var(--white); }
 
-        .zap-float { position: fixed; bottom: 30px; right: 30px; background: #25d366; color: white; width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 30px; box-shadow: 0 10px 20px rgba(37, 211, 102, 0.3); z-index: 999; transition: 0.3s; }
+        /* --- FOOTER --- */
+        footer { background: #020617; color: #94a3b8; padding: 80px 0 30px; font-size: 0.9rem; }
+        .footer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 40px; margin-bottom: 60px; }
+        .footer-brand h2 { color: var(--white); font-size: 1.8rem; margin-bottom: 20px; }
+        .footer-brand span { color: var(--gold-metallic); }
+        .footer-col h4 { color: var(--white); margin-bottom: 20px; font-size: 1.1rem; }
+        .footer-col ul li { margin-bottom: 12px; }
+        .footer-col ul li a { color: #94a3b8; }
+        .footer-col ul li a:hover { color: var(--gold-metallic); padding-left: 5px; }
+        .copyright { text-align: center; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 30px; }
+
+        /* --- ZAP FLOAT --- */
+        .zap-float {
+            position: fixed; bottom: 90px; right: 30px; /* Subiu um pouco por causa do menu fixo mobile */
+            background: #25d366; color: white;
+            width: 60px; height: 60px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 30px;
+            box-shadow: 0 10px 20px rgba(37, 211, 102, 0.4);
+            z-index: 999;
+            transition: 0.3s;
+        }
         .zap-float:hover { transform: scale(1.1); }
+        
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(37, 211, 102, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(37, 211, 102, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(37, 211, 102, 0); }
+        }
+        .pulse { animation: pulse-green 2s infinite; }
 
+        /* 🔥 BOTÃO FIXO MOBILE (NOVO) */
+        .sticky-cta {
+            position: fixed; bottom: 0; left: 0; right: 0; z-index: 9998;
+            background: var(--white); border-top: 1px solid #e2e8f0; padding: 12px 16px;
+            display: none; box-shadow: 0 -4px 10px rgba(0,0,0,0.05);
+        }
+        .sticky-cta .btn { width: 100%; text-align: center; }
+
+        /* --- RESPONSIVIDADE --- */
         @media (max-width: 900px) {
             .hero h1 { font-size: 2.5rem; }
-            .segments-grid { grid-template-columns: 1fr; }
-            .contact-wrapper { flex-direction: column; }
-            .nav-links { display: none; }
-            .seg-brands__track { gap: 40px; } 
-            .seg-brands__item img { height: 35px; }
+            .hero-btns { flex-direction: column; width: 100%; }
+            .hero-btns .btn { width: 100%; text-align: center; }
+            .stats-grid { flex-direction: column; gap: 20px; }
+            .contact-wrapper { grid-template-columns: 1fr; }
+            .nav-links { 
+                position: fixed; top: 0; right: -100%;
+                width: 70%; height: 100vh;
+                background: var(--navy-deep);
+                flex-direction: column;
+                justify-content: center; align-items: center;
+                transition: 0.3s;
+            }
+            .nav-links.active { right: 0; }
+            .mobile-toggle { display: block; z-index: 1001; }
+            
+            .sticky-cta { display: block; } /* Aparece só no mobile */
+            .zap-float { bottom: 85px; right: 20px; width: 50px; height: 50px; font-size: 24px; }
         }
     </style>
 </head>
 <body>
 
-    <header>
+    <div class="top-bar">
+        <span>OFERTA</span> &nbsp; Instalação com 10% OFF para fechamento até sexta-feira.
+    </div>
+
+    <header id="header">
         <div class="container header-flex">
             <div class="logo">
                 <i class="fas fa-shield-alt"></i> SEG<span>Sis</span>
             </div>
-            <nav class="nav-links">
+            
+            <nav class="nav-links" id="navLinks">
                 <a href="#solucoes">Soluções</a>
-                <a href="#marcas">Parceiros</a>
-                <a href="#diferenciais">Diferenciais</a>
+                <a href="#processo">Como Funciona</a>
+                <a href="#empresa">A Empresa</a>
+                <a href="#contato">Contato</a>
+                <a href="https://wa.me/5512974101924" class="btn-login mobile-only">Área do Cliente</a>
             </nav>
-            <a href="https://wa.me/5512974101924" class="btn-premium">Área do Cliente</a>
+
+            <div class="header-actions" style="display: flex; align-items: center; gap: 20px;">
+                <a href="#" class="btn-login" style="display: none;">Área do Cliente</a> <i class="fas fa-bars mobile-toggle" onclick="toggleMenu()"></i>
+            </div>
         </div>
     </header>
 
     <section class="hero">
         <div class="container">
-            <div class="hero-content">
-                <span class="tagline">Tecnologia de Segurança Certificada</span>
-                <h1>Proteção Inteligente para o que Realmente Importa.</h1>
-                <p>Líder em monitoramento 24h em Taubaté. Sistemas integrados de alarme, câmeras e controle de acesso com resposta tática imediata.</p>
+            <div class="hero-content" data-aos="fade-up" data-aos-duration="1000">
+                <div style="background: rgba(212,175,55,0.2); display: inline-block; padding: 5px 15px; border-radius: 50px; margin-bottom: 20px; border: 1px solid rgba(212,175,55,0.5); color: #fce7a4; font-size: 0.8rem; text-transform: uppercase; font-weight: 600;">
+                    <i class="fas fa-check-circle"></i> Tecnologia Certificada
+                </div>
+                <h1>Sua família está 100% segura agora?</h1>
+                <p>Monitoramento 24h em Taubaté e Região. Sistemas integrados de alarme, câmeras com IA e resposta tática imediata.</p>
                 <div class="hero-btns">
-                    <a href="https://wa.me/5512974101924" class="btn-gold">Orçamento Rápido</a>
-                    <a href="#solucoes" class="btn-outline-light">Conhecer Planos</a>
+                    <a href="https://wa.me/5512974101924?text=Ol%C3%A1%21%20Gostaria%20de%20uma%20avalia%C3%A7%C3%A3o%20de%20risco%20para%20meu%20im%C3%B3vel." class="btn btn-gold">
+                        <i class="fab fa-whatsapp"></i> Proteger Meu Imóvel Agora
+                    </a>
+                    <a href="#solucoes" class="btn btn-outline">Conhecer Planos</a>
+                </div>
+                <div style="margin-top: 15px; font-size: 0.85rem; color: rgba(255,255,255,0.7);">
+                    <i class="fas fa-lock"></i> Avaliação de risco sem compromisso.
                 </div>
             </div>
         </div>
     </section>
 
-    <div class="container segments" id="solucoes">
-        <div class="segments-grid">
-            <div class="segment-card">
-                <div class="seg-icon"><i class="fas fa-home"></i></div>
-                <div class="seg-text">
-                    <h3>Para Sua Residência</h3>
-                    <p>Tranquilidade para sua família com alarmes perimetrais, câmeras em nuvem e botão de pânico.</p>
-                    <a href="https://wa.me/5512974101924" class="link-arrow">Ver Soluções <i class="fas fa-arrow-right"></i></a>
+    <div class="container">
+        <div class="stats-strip">
+            <div class="stats-grid">
+                <div class="stat-item" data-aos="fade-up" data-aos-delay="0">
+                    <h3>+10</h3>
+                    <p>Anos de Excelência</p>
                 </div>
-            </div>
-            <div class="segment-card">
-                <div class="seg-icon"><i class="fas fa-building"></i></div>
-                <div class="seg-text">
-                    <h3>Para Sua Empresa</h3>
-                    <p>Gestão de risco corporativo. Controle de acesso, prevenção de perdas e monitoramento de frota.</p>
-                    <a href="https://wa.me/5512974101924" class="link-arrow">Ver Soluções <i class="fas fa-arrow-right"></i></a>
+                <div class="stat-item" data-aos="fade-up" data-aos-delay="100">
+                    <h3>5.000+</h3>
+                    <p>Projetos Instalados</p>
+                </div>
+                <div class="stat-item" data-aos="fade-up" data-aos-delay="200">
+                    <h3>24/7</h3>
+                    <p>Central Ativa</p>
+                </div>
+                <div class="stat-item" data-aos="fade-up" data-aos-delay="300">
+                    <h3>15min</h3>
+                    <p>Tempo Médio Resposta</p>
                 </div>
             </div>
         </div>
     </div>
 
-    <section class="seg-brands" id="marcas">
-        <div class="seg-brands__header">
-            <h3 class="seg-brands__title">Trabalhamos com as Melhores Marcas</h3>
-            <p class="seg-brands__sub">Equipamentos de alta performance e garantia oficial.</p>
-        </div>
-        <div class="seg-brands__slider">
-            <div class="seg-brands__track">
-                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/intelbras.png" alt="Intelbras"></div>
-                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/hikvision.png" alt="Hikvision"></div>
-                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/jfl.png" alt="JFL"></div>
-                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/dahua.png" alt="Dahua"></div>
-                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/control-id.png" alt="Control iD"></div>
-                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/intelbras.png" alt="Intelbras"></div>
-                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/hikvision.png" alt="Hikvision"></div>
-                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/jfl.png" alt="JFL"></div>
-                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/dahua.png" alt="Dahua"></div>
-                <div class="seg-brands__item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/control-id.png" alt="Control iD"></div>
+    <section class="services" id="solucoes">
+        <div class="container">
+            <div class="section-title" data-aos="fade-up">
+                <span>Nossas Soluções</span>
+                <h2>Ecossistema de Segurança</h2>
+            </div>
+
+            <div class="services-grid">
+                <div class="service-card" data-aos="fade-up" data-aos-delay="0">
+                    <div class="card-icon"><i class="fas fa-video"></i></div>
+                    <h3>CFTV Inteligente</h3>
+                    <p>Câmeras que distinguem pessoas de animais e veículos. Gravação em nuvem criptografada acessível pelo app.</p>
+                    <a href="https://wa.me/5512974101924?text=Tenho%20interesse%20em%20C%C3%A2meras%20de%20Seguran%C3%A7a" class="learn-more">Cotar Câmeras <i class="fas fa-arrow-right"></i></a>
+                </div>
+
+                <div class="service-card" data-aos="fade-up" data-aos-delay="100">
+                    <div class="card-icon"><i class="fas fa-bell"></i></div>
+                    <h3>Alarme Monitorado</h3>
+                    <p>Sensores sem fio de alta precisão. Disparo imediato na central em caso de intrusão com verificação por imagem.</p>
+                    <a href="https://wa.me/5512974101924?text=Tenho%20interesse%20em%20Alarme%20Monitorado" class="learn-more">Cotar Alarme <i class="fas fa-arrow-right"></i></a>
+                </div>
+
+                <div class="service-card" data-aos="fade-up" data-aos-delay="200">
+                    <div class="card-icon"><i class="fas fa-bolt"></i></div>
+                    <h3>Perímetro Seguro</h3>
+                    <p>Cerca elétrica industrial e concertina. A primeira barreira de defesa física e psicológica para seu imóvel.</p>
+                    <a href="https://wa.me/5512974101924?text=Tenho%20interesse%20em%20Cerca%20El%C3%A9trica" class="learn-more">Cotar Cerca <i class="fas fa-arrow-right"></i></a>
+                </div>
+
+                <div class="service-card" data-aos="fade-up" data-aos-delay="300">
+                    <div class="card-icon"><i class="fas fa-fingerprint"></i></div>
+                    <h3>Controle de Acesso</h3>
+                    <p>Portarias virtuais, reconhecimento facial e biometria para condomínios e empresas.</p>
+                    <a href="https://wa.me/5512974101924?text=Tenho%20interesse%20em%20Controle%20de%20Acesso" class="learn-more">Cotar Acesso <i class="fas fa-arrow-right"></i></a>
+                </div>
             </div>
         </div>
     </section>
 
-    <section class="services-section" id="diferenciais">
+    <section class="process" id="processo">
         <div class="container">
-            <div class="sec-header">
-                <h2>Ecossistema de Segurança</h2>
-                <p>Integramos as melhores tecnologias globais para criar uma blindagem completa ao redor do seu patrimônio.</p>
+            <div class="section-title">
+                <span>Metodologia SEGSis</span>
+                <h2>Como Blindamos seu Patrimônio</h2>
+            </div>
+            <div class="process-grid">
+                <div class="process-item" data-aos="zoom-in" data-aos-delay="0">
+                    <div class="process-icon"><i class="fas fa-search-location"></i></div>
+                    <h4>1. Análise de Risco</h4>
+                    <p>Consultor técnico visita o local para identificar vulnerabilidades e pontos cegos.</p>
+                </div>
+                <div class="process-item" data-aos="zoom-in" data-aos-delay="150">
+                    <div class="process-icon"><i class="fas fa-tools"></i></div>
+                    <h4>2. Instalação Padrão</h4>
+                    <p>Equipe própria e certificada realiza a instalação sem sujeira e com acabamento premium.</p>
+                </div>
+                <div class="process-item" data-aos="zoom-in" data-aos-delay="300">
+                    <div class="process-icon"><i class="fas fa-satellite-dish"></i></div>
+                    <h4>3. Conexão 24h</h4>
+                    <p>Seu sistema é conectado à nossa Central Blindada via internet e chip GPRS (backup).</p>
+                </div>
+                <div class="process-item" data-aos="zoom-in" data-aos-delay="450">
+                    <div class="process-icon"><i class="fas fa-user-shield"></i></div>
+                    <h4>4. Pronta Resposta</h4>
+                    <p>Ao detectar anomalia, enviamos viatura tática imediatamente ao local.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="brands-section">
+        <div class="container" style="text-align: center; margin-bottom: 30px;">
+            <p style="text-transform: uppercase; font-size: 0.8rem; color: #94a3b8; letter-spacing: 2px;">Trabalhamos com as melhores marcas</p>
+        </div>
+        <div class="brands-slider">
+            <div class="brand-item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/intelbras.png" alt="Intelbras"></div>
+            <div class="brand-item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/hikvision.png" alt="Hikvision"></div>
+            <div class="brand-item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/jfl.png" alt="JFL"></div>
+            <div class="brand-item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/dahua.png" alt="Dahua"></div>
+            <div class="brand-item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/control-id.png" alt="Control iD"></div>
+            <div class="brand-item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/intelbras.png" alt="Intelbras"></div>
+            <div class="brand-item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/hikvision.png" alt="Hikvision"></div>
+            <div class="brand-item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/jfl.png" alt="JFL"></div>
+            <div class="brand-item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/dahua.png" alt="Dahua"></div>
+            <div class="brand-item"><img src="https://sites-wordpress.9ywrah.easypanel.host/wp-content/uploads/2026/01/control-id.png" alt="Control iD"></div>
+        </div>
+    </section>
+
+    <section class="testimonials">
+        <div class="container">
+            <div class="section-title">
+                <span>O que dizem nossos clientes</span>
+                <h2>Confiança Conquistada</h2>
+            </div>
+            <div class="testi-grid">
+                <div class="testi-card" data-aos="fade-up" data-aos-delay="0">
+                    <div class="stars"><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i></div>
+                    <p class="testi-text">"Instalamos o sistema na nossa fábrica e a diferença no controle de acesso foi imediata. A equipe de suporte é muito ágil."</p>
+                    <div class="client-info">
+                        <div class="client-avatar" style="background-image: url('https://randomuser.me/api/portraits/men/32.jpg'); background-size: cover;"></div>
+                        <div class="client-details">
+                            <h5>Roberto Almeida</h5>
+                            <span>Gerente Industrial</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="testi-card" data-aos="fade-up" data-aos-delay="100">
+                    <div class="stars"><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i></div>
+                    <p class="testi-text">"Viajo muito e poder ver as câmeras da minha casa pelo celular com essa qualidade me traz muita paz. Recomendo!"</p>
+                    <div class="client-info">
+                        <div class="client-avatar" style="background-image: url('https://randomuser.me/api/portraits/women/44.jpg'); background-size: cover;"></div>
+                        <div class="client-details">
+                            <h5>Carla Souza</h5>
+                            <span>Residencial</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="testi-card" data-aos="fade-up" data-aos-delay="200">
+                    <div class="stars"><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i></div>
+                    <p class="testi-text">"Já tivemos um incidente e a viatura chegou em menos de 10 minutos. Profissionais extremamente treinados."</p>
+                    <div class="client-info">
+                        <div class="client-avatar" style="background-image: url('https://randomuser.me/api/portraits/men/85.jpg'); background-size: cover;"></div>
+                        <div class="client-details">
+                            <h5>Dr. Fernando Costa</h5>
+                            <span>Clínica Médica</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="contact" id="contato">
+        <div class="container">
+            <div class="section-title">
+                <span>Fale Conosco</span>
+                <h2>Solicite uma Visita Técnica</h2>
             </div>
             
-            <div class="services-grid">
-                <div class="service-box">
-                    <i class="fas fa-video"></i>
-                    <h4>Monitoramento Full HD</h4>
-                    <p>Câmeras com IA que distinguem pessoas de animais, com gravação segura em nuvem.</p>
-                </div>
-                <div class="service-box">
-                    <i class="fas fa-bell"></i>
-                    <h4>Alarmes Preditivos</h4>
-                    <p>Sensores que detectam a tentativa de invasão antes do arrombamento acontecer.</p>
-                </div>
-                <div class="service-box">
-                    <i class="fas fa-bolt"></i>
-                    <h4>Proteção Perimetral</h4>
-                    <p>Cerca elétrica industrial e concertina para inibir fisicamente qualquer intrusão.</p>
-                </div>
-                <div class="service-box">
-                    <i class="fas fa-id-badge"></i>
-                    <h4>Controle de Acesso</h4>
-                    <p>Biometria e reconhecimento facial para portarias e áreas restritas.</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <section class="stats-strip">
-        <div class="container stats-flex">
-            <div class="stat-box">
-                <h3>+10</h3>
-                <span>Anos de História</span>
-            </div>
-            <div class="stat-box">
-                <h3>5.000+</h3>
-                <span>Projetos Entregues</span>
-            </div>
-            <div class="stat-box">
-                <h3>24h</h3>
-                <span>Central Blindada</span>
-            </div>
-            <div class="stat-box">
-                <h3>15min</h3>
-                <span>Tempo de Resposta</span>
-            </div>
-        </div>
-    </section>
-
-    <section class="contact-section" id="contato">
-        <div class="container">
             <div class="contact-wrapper">
-                <div class="contact-info">
-                    <h3>Vamos conversar?</h3>
-                    <p style="margin-bottom: 30px; opacity: 0.8;">Nossos consultores são especialistas em análise de risco. Solicite uma visita técnica sem compromisso.</p>
+                <div class="contact-details">
+                    <h3>Vamos proteger seu patrimônio?</h3>
+                    <p>Preencha o formulário ou entre em contato direto pelos canais abaixo.</p>
                     
-                    <div class="info-row">
-                        <i class="fas fa-map-marker-alt"></i>
-                        <span>Rua Francisco de Paula Simões, 131 - Taubaté/SP</span>
-                    </div>
-                    <div class="info-row">
+                    <div class="info-line">
                         <i class="fas fa-phone-alt"></i>
                         <span>(12) 3633-4871</span>
                     </div>
-                    <div class="info-row">
+                    <div class="info-line">
                         <i class="fab fa-whatsapp"></i>
                         <span>(12) 97410-1924</span>
                     </div>
-                    <div class="info-row">
+                    <div class="info-line">
                         <i class="fas fa-envelope"></i>
-                        <span>info@segsis.com.br</span>
+                        <span>comercial@segsis.com.br</span>
                     </div>
-                    
-                    <a href="https://wa.me/5512974101924" class="btn-gold" style="margin-top: 20px; display: inline-block;">Falar com Consultor</a>
+                    <div class="info-line">
+                        <i class="fas fa-map-marker-alt"></i>
+                        <span>R. Francisco de Paula Simões, 131<br>Taubaté - SP</span>
+                    </div>
                 </div>
-                
-                <div class="contact-map">
-                    <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3674.300589255866!2d-45.567!3d-23.030!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMjPCsDAxJzQ4LjAiUyA0NcKwMzQnMDEuMiJX!5e0!3m2!1spt-BR!2sbr!4v1620000000000!5m2!1spt-BR!2sbr" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>
+
+                <div class="contact-form-area">
+                    <form>
+                        <div class="form-group">
+                            <label>Nome Completo</label>
+                            <input type="text" class="form-control" placeholder="Seu nome">
+                        </div>
+                        <div class="form-group">
+                            <label>Seu WhatsApp</label>
+                            <input type="text" class="form-control" placeholder="(12) 99999-9999">
+                        </div>
+                        <div class="form-group">
+                            <label>Tipo de Imóvel</label>
+                            <select class="form-control">
+                                <option>Residencial</option>
+                                <option>Comercial/Empresa</option>
+                                <option>Condomínio</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Mensagem (Opcional)</label>
+                            <input type="text" class="form-control" placeholder="Ex: Gostaria de orçamento para câmeras">
+                        </div>
+                        <button type="submit" class="btn btn-gold" style="width: 100%;">Enviar Solicitação</button>
+                    </form>
                 </div>
             </div>
         </div>
     </section>
 
+    <div style="width: 100%; height: 400px; filter: grayscale(1);">
+        <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3672.486241235123!2d-45.5562!3d-23.0304!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMjPCsDAxJzQ5LjQiUyA0NcKwMzMnMjIuMyJX!5e0!3m2!1spt-BR!2sbr!4v1625000000000!5m2!1spt-BR!2sbr" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>
+    </div>
+
     <footer>
         <div class="container">
-            <div class="footer-logo">SEG<span>SIS</span></div>
-            <p>Segurança Eletrônica e Monitoramento de alta performance para o Vale do Paraíba.</p>
+            <div class="footer-grid">
+                <div class="footer-brand">
+                    <h2>SEG<span>Sis</span></h2>
+                    <p>Referência em segurança eletrônica e monitoramento no Vale do Paraíba. Tecnologia de ponta aliada a táticas eficientes de resposta.</p>
+                    <div style="margin-top: 20px; font-size: 1.2rem;">
+                        <i class="fab fa-instagram" style="margin-right: 15px; cursor: pointer;"></i>
+                        <i class="fab fa-facebook" style="margin-right: 15px; cursor: pointer;"></i>
+                        <i class="fab fa-linkedin" style="cursor: pointer;"></i>
+                    </div>
+                </div>
+                
+                <div class="footer-col">
+                    <h4>Soluções</h4>
+                    <ul>
+                        <li><a href="#">Monitoramento de Alarmes</a></li>
+                        <li><a href="#">Câmeras Full HD</a></li>
+                        <li><a href="#">Portaria Virtual</a></li>
+                        <li><a href="#">Rastreamento Veicular</a></li>
+                    </ul>
+                </div>
+
+                <div class="footer-col">
+                    <h4>Links Rápidos</h4>
+                    <ul>
+                        <li><a href="#">Sobre a Empresa</a></li>
+                        <li><a href="#">Trabalhe Conosco</a></li>
+                        <li><a href="#">Área do Cliente</a></li>
+                        <li><a href="#">Política de Privacidade</a></li>
+                    </ul>
+                </div>
+
+                <div class="footer-col">
+                    <h4>Atendimento</h4>
+                    <ul>
+                        <li><i class="fas fa-phone"></i> (12) 3633-4871</li>
+                        <li><i class="fab fa-whatsapp"></i> (12) 97410-1924</li>
+                        <li>Seg a Sex: 08h às 18h</li>
+                        <li>Plantão 24h (Monitoramento)</li>
+                    </ul>
+                </div>
+            </div>
             <div class="copyright">
-                © 2026 SEG Monitoramento. Todos os direitos reservados.
+                <p>© 2026 SEGSis Monitoramento. Todos os direitos reservados. CNPJ: 00.000.000/0001-00</p>
             </div>
         </div>
     </footer>
 
-    <a href="https://wa.me/5512974101924" class="zap-float" target="_blank">
+    <a href="https://wa.me/5512974101924?text=Ol%C3%A1%21%20Vim%20pelo%20site%20e%20gostaria%20de%20saber%20mais." class="zap-float pulse" target="_blank" title="Falar no WhatsApp">
         <i class="fab fa-whatsapp"></i>
     </a>
 
+    <div class="sticky-cta">
+        <a href="https://wa.me/5512974101924?text=Ol%C3%A1%21%20Quero%20proteger%20meu%20im%C3%B3vel." class="btn btn-gold" target="_blank">
+            <i class="fab fa-whatsapp"></i> Solicitar Orçamento Rápido
+        </a>
+    </div>
+
+    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+    <script>
+        // Inicializa animações
+        AOS.init({
+            once: true, // Animar apenas uma vez
+            offset: 100 // Começar a animar um pouco antes
+        });
+
+        // Sticky Header e Mudança de cor
+        window.addEventListener('scroll', function() {
+            const header = document.getElementById('header');
+            if (window.scrollY > 50) {
+                header.classList.add('scrolled');
+            } else {
+                header.classList.remove('scrolled');
+            }
+        });
+
+        // Menu Mobile
+        function toggleMenu() {
+            const nav = document.getElementById('navLinks');
+            nav.classList.toggle('active');
+        }
+    </script>
 </body>
 </html>

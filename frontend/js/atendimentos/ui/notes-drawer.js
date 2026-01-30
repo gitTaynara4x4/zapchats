@@ -4,102 +4,11 @@
 // - Faz GET /api/atendimento/clientes/{cliente_id}/profile
 // - Faz PATCH /api/atendimento/clientes/{cliente_id}/profile
 // - Mostra mensagem de sucesso/erro pro usuário
+// ✅ CSS removido (vai no atendimentos.css)
 
 (function () {
   if (window.__zcNotesLoaded) return;
   window.__zcNotesLoaded = true;
-
-  // ---------- CSS ----------
-  const CSS = `
-  .zcNotes-backdrop{
-    position:fixed;inset:0;background:rgba(0,0,0,.42);
-    opacity:0;pointer-events:none;transition:opacity .18s ease;z-index:9998
-  }
-  .zcNotes-backdrop.is-open{opacity:1;pointer-events:auto}
-
-  .zcNotes-drawer{
-    position:fixed;top:0;right:0;height:100vh;width:min(520px,95vw);
-    background:#1f2c33;color:#e9edef;border-left:1px solid #26343a;
-    transform:translateX(100%);transition:transform .18s ease;z-index:9999;
-    display:flex;flex-direction:column;pointer-events:none
-  }
-  .zcNotes-drawer.is-open{transform:translateX(0);pointer-events:auto}
-
-  .zcNotes-head{
-    display:flex;align-items:center;justify-content:space-between;
-    padding:12px 16px;border-bottom:1px solid #26343a
-  }
-  .zcNotes-title{font-weight:600;font-size:16px;display:flex;align-items:center;gap:8px}
-
-  /* Ícone (no título do drawer e no #btn-sobre) */
-  .zcNotes-icon{display:inline-flex;align-items:center;line-height:0}
-  .zcNotes-icon svg{
-    display:block;width:24px;height:24px;vertical-align:middle;
-    transform: translateY(1px);
-    filter: drop-shadow(0 0 5px rgba(168,85,247,.50));
-  }
-
-  .zcNotes-close{background:transparent;border:0;color:#aebac1;cursor:pointer;padding:6px;border-radius:8px}
-  .zcNotes-close:hover{color:#fff;background:#233238}
-
-  .zcNotes-body{flex:1;display:flex;flex-direction:column;gap:12px;padding:14px}
-  .zcNotes-text{
-    flex:1;min-height:220px;background:#0b141a;color:#e9edef;border:1px solid #2a3942;
-    border-radius:12px;padding:12px;outline:none;resize:vertical
-  }
-  .zcNotes-actions{display:flex;gap:10px;margin-top:auto}
-
-  .zcNotes-btnPrimary{
-    flex:1;background:#25d366;border:1px solid #1fb05a;color:#061a0e;
-    padding:10px 12px;border-radius:10px;cursor:pointer;font-weight:600
-  }
-  .zcNotes-btnPrimary:hover{filter:brightness(1.05)}
-  .zcNotes-btnGhost{
-    flex:1;background:transparent;border:1px solid #2a3942;color:#e9edef;
-    padding:10px 12px;border-radius:10px;cursor:pointer
-  }
-  .zcNotes-btnGhost:hover{background:#152028}
-
-  .zcNotes-status{
-    font-size:12px;
-    color:#9ca3af;
-    margin-top:4px;
-    min-height:1em;
-    display:none;
-    transition:opacity .2s ease;
-  }
-  .zcNotes-status.ok{ color:#22c55e; }
-  .zcNotes-status.err{ color:#f97373; }
-
-  /* Botão no header: mesma caixa/feedback do #btn-ia */
-  #btn-sobre{
-    display:inline-grid;place-items:center;
-    width:24px;height:24px;line-height:0;
-    padding:0;background:transparent;border:0;
-    margin-left:6px;margin-right:0;vertical-align:middle;
-    border-radius:8px; cursor:pointer;
-    transition: background .15s, color .15s, transform .08s;
-    color: inherit;
-  }
-  #btn-sobre:hover{ background:rgba(255,255,255,.06); }
-  html[data-theme="light"] #btn-sobre:hover{ background:rgba(0,0,0,.06); }
-  #btn-sobre:active{ transform: translateY(1px); }
-  #btn-sobre:focus-visible{
-    outline:2px solid color-mix(in oklab, var(--accent) 55%, transparent);
-    outline-offset:2px;
-  }
-
-  @media (max-width: 480px){ .zcNotes-drawer{width:100vw} }
-  `;
-
-  (function injectCSS(){
-    if (!document.getElementById('zcNotes-style')) {
-      const st = document.createElement('style');
-      st.id = 'zcNotes-style';
-      st.textContent = CSS;
-      document.head.appendChild(st);
-    }
-  })();
 
   // ---------- tema + ícone ----------
   function getTheme(){
@@ -203,11 +112,14 @@
   function ensureStatusEl(){
     let el = getStatusEl();
     if (el) return el;
+
     const body = document.querySelector('.zcNotes-body');
     if (!body) return null;
+
     el = document.createElement('div');
     el.id = 'zcNotesStatus';
     el.className = 'zcNotes-status';
+
     const actions = body.querySelector('.zcNotes-actions');
     body.insertBefore(el, actions || body.firstChild);
     return el;
@@ -229,12 +141,15 @@
   function showStatus(msg, kind){
     const el = ensureStatusEl();
     if (!el) return;
+
     el.textContent = msg;
     el.classList.remove('ok','err');
     if (kind === 'ok') el.classList.add('ok');
     if (kind === 'err') el.classList.add('err');
+
     el.style.display = 'block';
     el.style.opacity = '1';
+
     if (statusTimeout) clearTimeout(statusTimeout);
     statusTimeout = setTimeout(() => {
       el.style.opacity = '0';
@@ -343,8 +258,8 @@
       <div class="zcNotes-body">
         <textarea id="zcNotesText" class="zcNotes-text" placeholder="Escreva anotações sobre este contato…"></textarea>
         <div class="zcNotes-actions">
-          <button id="zcNotesSave" class="zcNotes-btnPrimary">Salvar</button>
-          <button id="zcNotesCancel" class="zcNotes-btnGhost">Cancelar</button>
+          <button id="zcNotesSave" class="zcNotes-btnPrimary" type="button">Salvar</button>
+          <button id="zcNotesCancel" class="zcNotes-btnGhost" type="button">Cancelar</button>
         </div>
         <div id="zcNotesStatus" class="zcNotes-status" aria-live="polite"></div>
       </div>

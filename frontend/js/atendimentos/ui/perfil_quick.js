@@ -66,15 +66,15 @@
 
   const skeletonHTML = () => `
     <div class="qcHero">
-      <div class="avatar qcSkeleton" style="width:64px;height:64px;border-radius:50%"></div>
+      <div class="avatar qcSkeleton"></div>
       <div class="info">
         <div class="qcSk-name qcSkeleton"></div>
-        <div class="qcSk-line qcSkeleton" style="width:120px"></div>
+        <div class="qcSk-line qcSk-line--120 qcSkeleton"></div>
       </div>
     </div>
     <div class="qcCard">
       <div class="label">Status</div>
-      <div class="content qcSk-line qcSkeleton" style="height:14px;"></div>
+      <div class="content qcSk-line qcSkeleton"></div>
     </div>
   `;
 
@@ -147,60 +147,6 @@
     }catch(e){ console.warn('[perfil_quick] patchClienteCacheNameOnly falhou:', e); }
   }
 
-  /* --------------- CSS --------------- */
-  (function injectCSS(){
-    if (document.getElementById('qcPerfil-style')) return;
-    const st = document.createElement('style');
-    st.id = 'qcPerfil-style';
-    st.textContent = `
-      .qcBackdrop{ position:fixed; inset:0; background:rgba(0,0,0,.42);
-        opacity:0; pointer-events:none; transition:opacity .18s; z-index:9998; }
-      .qcBackdrop.is-open{ opacity:1; pointer-events:auto; }
-
-      .qcDrawer{
-        position:fixed; top:0; right:0; height:100vh; width:min(420px,94vw);
-        background:var(--panel-2,#1f2c33); color:var(--text,#e9edef);
-        border-left:1px solid var(--border,#26343a);
-        transform:translateX(100%); transition:transform .18s ease; z-index:9999;
-        display:flex; flex-direction:column; overflow:hidden; pointer-events:none;
-      }
-      .qcDrawer.is-open{ transform:translateX(0); pointer-events:auto; }
-
-      .qcHead{ display:flex; align-items:center; justify-content:space-between;
-        padding:12px 14px; border-bottom:1px solid var(--border,#26343a); }
-      .qcTitle{ font-weight:600; font-size:16px; }
-      .qcClose{ background:transparent; border:0; color:#aebac1; cursor:pointer; padding:6px; border-radius:8px; }
-      .qcClose:hover{ color:#fff; background:#233238; }
-
-      .qcBody{ padding:14px; display:flex; flex-direction:column; gap:14px; overflow:auto; }
-
-      .qcHero{ display:flex; gap:12px; align-items:center; }
-      .qcHero .avatar{ width:64px; height:64px; border-radius:50%; object-fit:cover; background:#0b141a; border:1px solid var(--border,#2a3942); }
-      .qcHero .info{ display:flex; flex-direction:column; gap:4px; min-width:0; }
-      .qcName{ font-size:16px; font-weight:700; }
-      .qcPhone{ font-size:12px; color:#9aa7ad; word-break:break-all; }
-      .qcBadge{ display:inline-flex; gap:6px; align-items:center; font-size:12px;
-        border:1px solid #2a3942; border-radius:999px; padding:3px 8px; color:#9aa7ad; }
-      html[data-theme="light"] .qcBadge{ border-color:#dadde0; color:#4b5563; }
-
-      .qcCard{ border:1px solid var(--border,#2a3942); border-radius:12px; padding:10px 12px; background:var(--panel-1,#0b141a); }
-      html[data-theme="light"] .qcCard{ background:#fff; border-color:#dadde0; }
-      .qcCard .label{ font-size:12px; color:#9aa7ad; margin-bottom:6px; }
-      .qcCard .content{ font-size:13.5px; line-height:1.35; white-space:pre-wrap; word-break:break-word; }
-
-      .qcRow{ display:flex; gap:10px; align-items:center; justify-content:space-between; }
-      .qcLink{ color:var(--accent,#25d366); text-decoration:none; font-weight:600; }
-      .qcLink:hover{ text-decoration:underline; }
-
-      .qcSkeleton{ background:linear-gradient(90deg, rgba(255,255,255,.06), rgba(255,255,255,.14), rgba(255,255,255,.06));
-        background-size: 200% 100%; animation: qc-shimmer 1.2s infinite; border-radius:8px; }
-      .qcSk-name{ height:16px; width:180px; }
-      .qcSk-line{ height:12px; width:80%; }
-      @keyframes qc-shimmer{ 0%{background-position:200% 0} 100%{background-position:-200% 0} }
-    `;
-    document.head.appendChild(st);
-  })();
-
   /* --------------- UI (drawer) --------------- */
   function buildDrawer(){
     if (document.getElementById('qcBackdrop')) return;
@@ -240,19 +186,45 @@
     };
   }
 
+  function wireDrawerAvatarFallback(){
+    try{
+      const drawer = document.getElementById('qcDrawer');
+      if (!drawer) return;
+      const img = drawer.querySelector('.qcAvatarImg');
+      if (!img) return;
+
+      img.addEventListener('error', () => {
+        try{
+          const parent = img.parentElement;
+          img.remove();
+
+          const span = document.createElement('span');
+          span.className = 'avatar qcAvatarFallback';
+          span.innerHTML = '<i class="fa fa-user-circle"></i>';
+
+          if (parent) parent.insertBefore(span, parent.firstChild);
+        }catch{}
+      }, { once:true });
+    }catch{}
+  }
+
   function renderProfileFromBD(bd){
     const name = (bd?.nome_whatsapp || bd?.nome || '').trim();
     const isBiz = !!bd?.is_business;
     const statusTxt = (bd?.status_text || '').trim();
     const statusAt  = bd?.status_at ? fmtDateTimeISO(bd.status_at) : '';
-    const pic = bd?.avatar_url || '';
+    const pic = (bd?.avatar_url || '').trim();
     const desc = (bd?.description || bd?.descricao || '').trim();
     const site = (bd?.website || '').trim();
     const phoneShown = ($('#historico')?.dataset?.telefone) || '';
 
+    const avatarHTML = pic
+      ? `<img class="avatar qcAvatarImg" alt="" src="${pic}">`
+      : `<span class="avatar qcAvatarFallback" aria-hidden="true"><i class="fa fa-user-circle"></i></span>`;
+
     return `
       <div class="qcHero">
-        <img class="avatar" alt="" src="${pic || ''}" onerror="this.style.visibility='hidden'">
+        ${avatarHTML}
         <div class="info">
           <div class="qcName">${name || '—'}</div>
           <div class="qcPhone">${phoneShown || '—'}</div>
@@ -263,13 +235,13 @@
       <div class="qcCard">
         <div class="label">Status</div>
         <div class="content">${statusTxt ? statusTxt : '—'}</div>
-        ${statusAt ? `<div class="label" style="margin-top:6px">Atualizado em</div><div class="content">${statusAt}</div>` : ``}
+        ${statusAt ? `<div class="label qcLabel--mt6">Atualizado em</div><div class="content">${statusAt}</div>` : ``}
       </div>
 
       ${(isBiz || desc || site || bd?.email) ? `
         <div class="qcCard">
           <div class="label">Informações públicas</div>
-          ${desc ? `<div class="content" style="margin-bottom:8px">${desc}</div>` : ``}
+          ${desc ? `<div class="content qcContent--mb8">${desc}</div>` : ``}
           ${site ? `<div class="qcRow"><span class="label">Website</span><a class="qcLink" href="${site}" target="_blank" rel="noopener">Abrir</a></div>` : ``}
           ${bd?.email ? `<div class="qcRow"><span class="label">E-mail</span><a class="qcLink" href="mailto:${bd.email}">Enviar</a></div>` : ``}
         </div>
@@ -311,6 +283,7 @@
       if (!currentReq.token || currentReq.token.clienteId !== Number(clienteId)) return;
 
       window.__qcPerfil.setBody( renderProfileFromBD(bd) );
+      wireDrawerAvatarFallback();
     }catch(err){
       if (err?.name === 'AbortError') return;
       console.error('[perfil_quick] erro', err);

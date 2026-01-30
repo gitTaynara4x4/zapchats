@@ -4,6 +4,8 @@
 // pares compactos (CEP+UF, Número+Complemento, Data+Gênero),
 // UF/CEP/Data menores e limites de caracteres.
 
+// ✅ SEM CSS inline/inject — tudo vai para /frontend/css/atendimentos.css
+
 /* ----------------- helpers ----------------- */
 const $  = (s, r=document)=> r.querySelector(s);
 const on = (el, ev, fn)=> el && el.addEventListener(ev, fn);
@@ -37,138 +39,15 @@ function bannerSvg(theme){
   `;
 }
 
-/* ----------------- CSS (idempotente) ----------------- */
-(function injectCSS(){
-  if (document.getElementById('zcPerfil-style')) return;
-  const st = document.createElement('style');
-  st.id = 'zcPerfil-style';
-  st.textContent = `
-    /* Botão no header */
-    #btn-perfil{
-      display:inline-grid; place-items:center; width:24px; height:24px;
-      line-height:0; padding:0; margin-left:6px; background:transparent; border:0;
-      border-radius:8px; cursor:pointer; transition:background .15s, transform .08s; color:inherit;
-    }
-    #btn-perfil:hover{ background:rgba(255,255,255,.06); }
-    html[data-theme="light"] #btn-perfil:hover{ background:rgba(0,0,0,.06); }
-    #btn-perfil:active{ transform:translateY(1px); }
-    #btn-perfil .perfil-ico{ width:24px; height:24px; transform:translateY(1px); filter:drop-shadow(0 0 5px rgba(168,85,247,.5)); }
-
-    /* Drawer fallback */
-    .zcPerfil-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.42); opacity:0; pointer-events:none; transition:opacity .18s; z-index:9998; }
-    .zcPerfil-backdrop.is-open{ opacity:1; pointer-events:auto; }
-    .zcPerfil-drawer{
-      position:fixed; top:0; right:0; height:100vh; width:min(480px,94vw);
-      background:var(--panel-2,#1f2c33); color:var(--text,#e9edef);
-      border-left:1px solid var(--border,#26343a);
-      transform:translateX(100%); transition:transform .18s ease; z-index:9999;
-      display:flex; flex-direction:column; pointer-events:none; box-sizing:border-box; overflow:hidden;
-    }
-    .zcPerfil-drawer.is-open{ transform:translateX(0); pointer-events:auto; }
-    .zcPerfil-head{ display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border,#26343a); }
-    .zcPerfil-title{ font-weight:600; font-size:16px; display:flex; align-items:center; gap:8px; }
-    .zcPerfil-close{ background:transparent; border:0; color:#aebac1; cursor:pointer; padding:6px; border-radius:8px; }
-    .zcPerfil-close:hover{ color:#fff; background:#233238; }
-    .zcPerfil-body{ flex:1; display:flex; flex-direction:column; gap:12px; padding:16px; overflow:auto; box-sizing:border-box; }
-
-    /* AVISO fino – borda roxa MUITO fina + borda esquerda verde */
-    .zcPerfil-banner{
-      font-size:12.5px; line-height:1.35; color:var(--text-2,#aebac1);
-      display:flex; gap:8px; align-items:flex-start;
-      border-left:2px solid var(--accent,#25d366);
-      border:1px solid rgba(168,85,247,.38);
-      padding:8px 10px; border-radius:10px;
-      background:color-mix(in oklab, var(--panel-2,#1f2c33) 88%, transparent);
-    }
-    .zcPerfil-banner .b-ico{ flex:0 0 auto; display:grid; place-items:center; transform:translateY(1px) }
-    .zcPerfil-banner .b-msg{ font-weight:500 }
-    .zcPerfil-banner .b-tip{ margin-top:4px; font-size:12px; opacity:.95 }
-
-    /* Layout em coluna + linhas compactas para pares */
-    .zcPerfil-stack{ display:flex; flex-direction:column; gap:10px; }
-    .zcPerfil-row{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
-
-    .zcPerfil-field{ display:flex; flex-direction:column; gap:6px; min-width:0; }
-    .zcPerfil-field label{ font-size:12px; color:var(--text-2,#aebac1); }
-
-    .zcPerfil-field input,
-    .zcPerfil-field select{
-      width:100%; box-sizing:border-box; background:var(--input-bg,#0b141a);
-      color:var(--text,#e9edef); border:1px solid var(--border,#2a3942);
-      border-radius:10px; padding:10px 12px; outline:none;
-      transition:border-color .14s, box-shadow .14s;
-    }
-    html[data-theme="light"] .zcPerfil-field input,
-    html[data-theme="light"] .zcPerfil-field select{
-      background:#ffffff; color:#080808;
-    }
-    .zcPerfil-field input:focus, .zcPerfil-field select:focus{
-      border-color:var(--accent,#25d366);
-      box-shadow:0 0 0 2px color-mix(in oklab, var(--accent,#25d366) 25%, transparent);
-    }
-    .zcPerfil-field input.is-invalid{
-      border-color:#ef4444 !important;
-      box-shadow:0 0 0 2px color-mix(in oklab, #ef4444 25%, transparent);
-    }
-
-    /* ---- Selects compactos + seta centralizada ---- */
-    .zcPerfil-selectWrap{ position:relative; }
-    .zcPerfil-selectWrap select{
-      appearance:none; -webkit-appearance:none; -moz-appearance:none;
-      height:36px; line-height:20px;
-      padding:8px 28px 8px 12px;      /* espaço p/ seta */
-      text-transform:none;
-      color-scheme: dark;             /* menu legível no dark */
-    }
-    html[data-theme="light"] .zcPerfil-selectWrap select{ color-scheme: light; }
-    .zcPerfil-selectWrap::after{
-      content:""; position:absolute; right:10px; top:50%; transform:translateY(-50%);
-      pointer-events:none;
-      width:0; height:0; border-left:5px solid transparent; border-right:5px solid transparent;
-      border-top:6px solid #aebac1;
-    }
-    .zcPerfil-selectWrap select option{ background:#0b141a; color:#e9edef; }
-    html[data-theme="light"] .zcPerfil-selectWrap select option{ background:#ffffff; color:#080808; }
-
-    /* Larguras compactas */
-    .field--cep{ width:160px; }
-    .field--uf{ width:84px; min-width:72px; }
-    .field--numero{ width:120px; }
-    .field--complemento{ flex:1 1 220px; }
-    .field--dob{ width:160px; min-width:140px; } /* Data de nascimento */
-    .field--genero{ flex:1 1 180px; }
-
-    .zcPerfil-actions{ display:flex; gap:10px; margin-top:6px; }
-    .zcPerfil-btnPrimary{ flex:1; background:#25d366; border:1px solid #1fb05a; color:#061a0e; padding:10px 12px; border-radius:10px; cursor:pointer; font-weight:600; }
-    .zcPerfil-btnPrimary:hover{ filter:brightness(1.05); }
-    .zcPerfil-btnGhost{ flex:1; background:transparent; border:1px solid var(--border,#2a3942); color:var(--text,#e9edef); padding:10px 12px; border-radius:10px; cursor:pointer; }
-    .zcPerfil-btnGhost:hover{ background:color-mix(in oklab, var(--panel-2,#1f2c33) 85%, transparent); }
-    @media (max-width:520px){ .zcPerfil-actions{ flex-direction:column; } }
-
-    /* Toasts */
-    .zcToastHost{ position:fixed; right:14px; bottom:14px; z-index:10000; display:flex; flex-direction:column; gap:8px; }
-    .zcToast{
-      display:flex; align-items:flex-start; gap:10px;
-      background:#0b141a; color:#e9edef; border:1px solid #2a3942; border-left-width:3px;
-      border-radius:12px; padding:10px 12px; max-width:min(86vw,420px); box-shadow:0 6px 28px rgba(0,0,0,.35);
-      animation:zc-toast-in .18s ease;
-    }
-    html[data-theme="light"] .zcToast{ background:#fff; color:#080808; border-color:#dadde0; }
-    .zcToast.ok{ border-left-color:#22c55e }
-    .zcToast.err{ border-left-color:#ef4444 }
-    .zcToast .t-title{ font-weight:600; font-size:13px }
-    .zcToast .t-msg{ font-size:12.5px; color:#aebac1 }
-    html[data-theme="light"] .zcToast .t-msg{ color:#4b5563 }
-    .zcToast .t-close{ margin-left:auto; color:#99aab3; background:transparent; border:0; cursor:pointer }
-    @keyframes zc-toast-in{ from{ transform:translateY(6px); opacity:0 } to{ transform:translateY(0); opacity:1 } }
-  `;
-  document.head.appendChild(st);
-})();
-
 /* ----------------- Toasts ----------------- */
 function ensureToastHost(){
   let h = document.getElementById('zcToastHost');
-  if (!h){ h = document.createElement('div'); h.id='zcToastHost'; h.className='zcToastHost'; document.body.appendChild(h); }
+  if (!h){
+    h = document.createElement('div');
+    h.id='zcToastHost';
+    h.className='zcToastHost';
+    document.body.appendChild(h);
+  }
   return h;
 }
 function toast({ title='Pronto', msg='', type='ok', timeout=2800 }){
@@ -194,7 +73,6 @@ const UF_SET = new Set(UF_LIST);
 const onlyDigits = s => (s||"").replace(/\D+/g,'');
 const keepRGChars = s => (s||"").replace(/[^0-9xX]/g,'').toUpperCase();
 
-/* CPF/CNPJ/RG/CEP/CIDADE/UF já existiam */
 function fmtCPF(d){ d=onlyDigits(d).slice(0,11);
   return d.replace(/^(\d{3})(\d)/,"$1.$2")
           .replace(/^(\d{3})\.(\d{3})(\d)/,"$1.$2.$3")
@@ -205,8 +83,12 @@ function fmtCNPJ(d){ d=onlyDigits(d).slice(0,14);
           .replace(/^(\d{2})\.(\d{3})\.(\d{3})(\d)/,"$1.$2.$3/$4")
           .replace(/^(\d{2})\.(\d{3})\.(\d{3})\/(\d{4})(\d)/,"$1.$2.$3/$4-$5"); }
 function fmtCPForCNPJ(v){ const d=onlyDigits(v); return d.length<=11 ? fmtCPF(d) : fmtCNPJ(d); }
-function fmtRG(v){ let s=keepRGChars(v).slice(0,10), body=s, dv=''; if(s.length===10){ body=s.slice(0,9); dv=s.slice(9); }
-  body=body.replace(/^(\d{2})(\d)/,"$1.$2").replace(/^(\d{2})\.(\d{3})(\d)/,"$1.$2.$3"); return dv ? `${body}-${dv}` : body; }
+function fmtRG(v){
+  let s=keepRGChars(v).slice(0,10), body=s, dv='';
+  if(s.length===10){ body=s.slice(0,9); dv=s.slice(9); }
+  body=body.replace(/^(\d{2})(\d)/,"$1.$2").replace(/^(\d{2})\.(\d{3})(\d)/,"$1.$2.$3");
+  return dv ? `${body}-${dv}` : body;
+}
 function fmtCEP(v){ let d=onlyDigits(v).slice(0,8); if(d.length>5) d=d.replace(/^(\d{5})(\d{1,3})$/,"$1-$2"); return d; }
 function fmtNumero(v){ return onlyDigits(v).slice(0,8); }
 function fmtComplemento(v){ return (v||"").replace(/[^0-9A-Za-zÀ-ÿ\s#\/\-\.\º°]/g,'').replace(/\s{2,}/g,' '); }
@@ -232,7 +114,7 @@ function isValidDataBR(v){
   if (dt.getTime() > now.getTime()) return false;
   return true;
 }
-function toISOFromDataBR(v){ // DD/MM/AAAA -> AAAA-MM-DD
+function toISOFromDataBR(v){
   if (!isValidDataBR(v)) return '';
   const [dd,mm,yyyy] = v.split('/');
   return `${yyyy}-${mm}-${dd}`;
@@ -240,13 +122,10 @@ function toISOFromDataBR(v){ // DD/MM/AAAA -> AAAA-MM-DD
 function toDataBRFromAny(x){
   if (!x) return '';
   const s = String(x);
-  // ISO
   let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (m) return `${m[3]}/${m[2]}/${m[1]}`;
-  // yyyymmdd
   m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
   if (m) return `${m[3]}/${m[2]}/${m[1]}`;
-  // já está BR?
   m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (m) return s;
   return '';
@@ -254,6 +133,7 @@ function toDataBRFromAny(x){
 
 function isValidEmail(v){ if(!v) return true; return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v); }
 function isValidCEP(v){ return onlyDigits(v).length===8; }
+
 function isValidCPF(d){
   d=onlyDigits(d); if(d.length!==11||/^(\d)\1+$/.test(d)) return false;
   let s=0; for(let i=0;i<9;i++) s+= +d[i]*(10-i);
@@ -263,15 +143,30 @@ function isValidCPF(d){
 }
 function isValidCNPJ(c){
   c=onlyDigits(c); if(c.length!==14||/^(\d)\1+$/.test(c)) return false;
-  const calc=b=>{ const seq=[5,4,3,2,9,8,7,6,5,4,3,2].slice(12-b.length);
-    const sum=b.split('').reduce((s,ch,i)=>s+(+ch)*seq[i],0); const r=sum%11; return r<2?0:11-r; };
-  const b1=c.substring(0,12), d1=calc(b1), d2=calc(b1+String(d1)); return c===(b1+String(d1)+String(d2));
+  const calc=b=>{
+    const seq=[5,4,3,2,9,8,7,6,5,4,3,2].slice(12-b.length);
+    const sum=b.split('').reduce((s,ch,i)=>s+(+ch)*seq[i],0);
+    const r=sum%11; return r<2?0:11-r;
+  };
+  const b1=c.substring(0,12), d1=calc(b1), d2=calc(b1+String(d1));
+  return c===(b1+String(d1)+String(d2));
 }
-function validCPForCNPJ(v){ const d=onlyDigits(v); if(!d.length) return true; return d.length<=11?isValidCPF(d):isValidCNPJ(d); }
+function validCPForCNPJ(v){
+  const d=onlyDigits(v);
+  if(!d.length) return true;
+  return d.length<=11?isValidCPF(d):isValidCNPJ(d);
+}
 
 function maskInput(el, formatter, validator){
   if (!el) return;
-  const apply=()=>{ el.value=formatter(el.value); if(validator){ const ok=validator(el.value); el.classList.toggle('is-invalid',!ok); el.title=ok?'':'Valor inválido'; } };
+  const apply=()=>{
+    el.value=formatter(el.value);
+    if(validator){
+      const ok=validator(el.value);
+      el.classList.toggle('is-invalid',!ok);
+      el.title=ok?'':'Valor inválido';
+    }
+  };
   on(el,'input',apply); on(el,'blur',apply); apply();
 }
 
@@ -304,7 +199,13 @@ function setBanner(msg, tip){
   if (t) t.textContent = tip || '';
   refreshBannerIcon(b);
 }
-function setBannerTip(tip){ const t=$('#zcPerfilBanner .b-tip'); if(t){ t.textContent=tip||''; t.animate([{opacity:.2},{opacity:1}],{duration:160,fill:'forwards'}); } }
+function setBannerTip(tip){
+  const t=$('#zcPerfilBanner .b-tip');
+  if(t){
+    t.textContent=tip||'';
+    try{ t.animate([{opacity:.2},{opacity:1}],{duration:160,fill:'forwards'}); }catch{}
+  }
+}
 
 /* ----------------- Drawer fallback (injetado se necessário) ----------------- */
 function ensureFallbackDrawer(){
@@ -390,7 +291,6 @@ function ensureFallbackDrawer(){
   `;
   document.body.append(backdrop, drawer);
 
-  // tema: atualizar ícones
   const refreshIcon = ()=>{
     const t=drawer.querySelector('.zcPerfil-title');
     if(t) t.innerHTML=`${iconSvg(getTheme())} Campos do cliente`;
@@ -400,15 +300,21 @@ function ensureFallbackDrawer(){
   new MutationObserver(refreshIcon).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
   addEventListener('storage', e=>{ if(e && e.key==='zc:theme') refreshIcon(); });
 
-  const open = ()=>{ backdrop.classList.add('is-open'); drawer.classList.add('is-open'); setTimeout(()=> $('#pf_nome_completo')?.focus(), 0); };
-  const close = ()=>{ backdrop.classList.remove('is-open'); drawer.classList.remove('is-open'); };
+  const open = ()=>{
+    backdrop.classList.add('is-open');
+    drawer.classList.add('is-open');
+    setTimeout(()=> $('#pf_nome_completo')?.focus(), 0);
+  };
+  const close = ()=>{
+    backdrop.classList.remove('is-open');
+    drawer.classList.remove('is-open');
+  };
 
   on($('#zcPerfilClose'),'click',close);
   on($('#zcPerfilCancel'),'click',close);
   on(backdrop,'click',e=>{ if(e.target===backdrop) close(); });
   on(document,'keydown',e=>{ if(e.key==='Escape') close(); });
 
-  // máscaras
   function bindMasks(){
     maskInput($('#pf_cpf_cnpj'), fmtCPForCNPJ, validCPForCNPJ);
     maskInput($('#pf_rg'),       fmtRG, null);
@@ -418,16 +324,26 @@ function ensureFallbackDrawer(){
     maskInput($('#pf_cidade'),   fmtCidade, null);
     maskInput($('#pf_data_nasc'), fmtDataBR, v => isValidDataBR(v) || v==='');
 
-    const emailEl=$('#pf_email'); if(emailEl){
-      const apply=()=>{ emailEl.value=(emailEl.value||'').trim().toLowerCase(); const ok=isValidEmail(emailEl.value); emailEl.classList.toggle('is-invalid',!ok); emailEl.title=ok?'':'E-mail inválido'; };
+    const emailEl=$('#pf_email');
+    if(emailEl){
+      const apply=()=>{
+        emailEl.value=(emailEl.value||'').trim().toLowerCase();
+        const ok=isValidEmail(emailEl.value);
+        emailEl.classList.toggle('is-invalid',!ok);
+        emailEl.title=ok?'':'E-mail inválido';
+      };
       on(emailEl,'blur',apply); apply();
     }
   }
 
-  on($('#pf_cep'),'blur',async()=>{ const ok=await preencherPorCEP($('#pf_cep').value); if(!ok) setBannerTip('Não foi possível sugerir o endereço para este CEP.'); });
+  on($('#pf_cep'),'blur',async()=>{
+    const ok=await preencherPorCEP($('#pf_cep').value);
+    if(!ok) setBannerTip('Não foi possível sugerir o endereço para este CEP.');
+  });
 
   async function carregar(){
-    const cid=getClienteId(); if(!cid){ toast({title:'Selecione um cliente', type:'error'}); return; }
+    const cid=getClienteId();
+    if(!cid){ toast({title:'Selecione um cliente', type:'error'}); return; }
     try{
       const r=await fetch(`/api/atendimento/clientes/${cid}/profile?empresa_id=${EMPRESA_ID}`, { credentials:'include' });
       if(!r.ok) throw new Error('Falha ao buscar perfil');
@@ -450,15 +366,21 @@ function ensureFallbackDrawer(){
       $('#pf_complemento').value=fmtComplemento(j.complemento||'');
       $('#pf_bairro').value=j.bairro||'';
       $('#pf_cidade').value=fmtCidade(j.cidade||'');
-      const uf=fmtUF(j.estado||''); if(UF_SET.has(uf)) $('#pf_estado').value=uf;
+      const uf=fmtUF(j.estado||'');
+      if(UF_SET.has(uf)) $('#pf_estado').value=uf;
 
       bindMasks();
       setBanner('Usamos inteligência artificial para montar o endereço a partir do CEP e para validar CPF/CNPJ. Confira os dados antes de salvar.','');
-    }catch(err){ console.error('[perfil] carregar()',err); bindMasks(); }
+    }catch(err){
+      console.error('[perfil] carregar()',err);
+      bindMasks();
+    }
   }
 
   on($('#zcPerfilSave'),'click',async()=>{
-    const cid=getClienteId(); if(!cid){ toast({title:'Selecione um cliente', type:'error'}); return; }
+    const cid=getClienteId();
+    if(!cid){ toast({title:'Selecione um cliente', type:'error'}); return; }
+
     const email=($('#pf_email').value||'').trim().toLowerCase();
     const cpfcnpj=$('#pf_cpf_cnpj').value||'';
     const cep=$('#pf_cep').value||'';
@@ -473,14 +395,17 @@ function ensureFallbackDrawer(){
     if(ufSel && !UF_SET.has(ufSel)) invalids.push('UF inválida');
     if(dnBr && !isValidDataBR(dnBr)) invalids.push('Data de nascimento inválida');
 
-    if(invalids.length){ toast({title:'Verifique os campos', msg:invalids.join(' · '), type:'error'}); return; }
+    if(invalids.length){
+      toast({title:'Verifique os campos', msg:invalids.join(' · '), type:'error'});
+      return;
+    }
 
     const payload={
       nome_completo: ($('#pf_nome_completo').value||'').trim() || undefined,
       cpf_cnpj:      onlyDigits(cpfcnpj) || undefined,
       rg:            ($('#pf_rg').value||'').replace(/\./g,'').toUpperCase() || undefined,
       email:         email || undefined,
-      data_nascimento: dnBr ? toISOFromDataBR(dnBr) : undefined, // AAAA-MM-DD
+      data_nascimento: dnBr ? toISOFromDataBR(dnBr) : undefined,
       genero:        generoSel || undefined,
       cep:           onlyDigits(cep) || undefined,
       endereco:      ($('#pf_endereco').value||'').trim() || undefined,
@@ -507,12 +432,8 @@ function ensureFallbackDrawer(){
     }
   });
 
-  window.__zcPerfilFallback = {
-    open: ()=>{refreshIcon(); backdrop.classList.add('is-open'); drawer.classList.add('is-open');},
-    close: ()=>{backdrop.classList.remove('is-open'); drawer.classList.remove('is-open');},
-    carregar
-  };
-  refreshIcon(); // inicial
+  window.__zcPerfilFallback = { open, close, carregar };
+  refreshIcon();
 }
 
 /* ----------------- EXPORT: abrirPerfilAtual ----------------- */
@@ -522,24 +443,32 @@ export async function abrirPerfilAtual() {
 
   const perfilDrawer   = document.getElementById('perfil-drawer');
   const perfilBackdrop = document.getElementById('perfil-backdrop');
+
   if (perfilDrawer && perfilBackdrop){
-    // abre
-    perfilDrawer.classList.remove('hidden'); perfilBackdrop.classList.remove('hidden');
+    perfilDrawer.classList.remove('hidden');
+    perfilBackdrop.classList.remove('hidden');
     requestAnimationFrame(()=> perfilDrawer.classList.add('open'));
-    // close
-    const close = ()=>{ perfilDrawer.classList.remove('open'); setTimeout(()=>{ perfilDrawer.classList.add('hidden'); perfilBackdrop.classList.add('hidden'); },180); };
+
+    const close = ()=>{
+      perfilDrawer.classList.remove('open');
+      setTimeout(()=>{
+        perfilDrawer.classList.add('hidden');
+        perfilBackdrop.classList.add('hidden');
+      },180);
+    };
     $('#perfil-close')?.addEventListener('click', close, { once:true });
     perfilBackdrop?.addEventListener('click', e=>{ if(e.target===perfilBackdrop) close(); }, { once:true });
 
-    // injeta banner (com SVG)
     if (!perfilDrawer.querySelector('#zcPerfilBanner')){
       const banner=document.createElement('div');
-      banner.className='zcPerfil-banner'; banner.id='zcPerfilBanner'; banner.setAttribute('aria-live','polite');
+      banner.className='zcPerfil-banner';
+      banner.id='zcPerfilBanner';
+      banner.setAttribute('aria-live','polite');
       banner.innerHTML=`<span class="b-ico"></span><div><div class="b-msg">Usamos inteligência artificial para <strong>montar o endereço</strong> a partir do CEP e para <strong>validar CPF/CNPJ</strong>. Confira os dados antes de salvar.</div><div class="b-tip"></div></div>`;
       perfilDrawer.insertBefore(banner, perfilDrawer.firstChild);
       refreshBannerIcon(perfilDrawer);
     }
-    // máscaras se IDs existirem (modo nativo)
+
     const maybe = $('#pf_cpf_cnpj') || $('#pf_rg') || $('#pf_cep') || $('#pf_data_nasc') || $('#pf_genero');
     if (maybe){
       maskInput($('#pf_cpf_cnpj'), fmtCPForCNPJ, validCPForCNPJ);
@@ -550,14 +479,31 @@ export async function abrirPerfilAtual() {
       maskInput($('#pf_cidade'), fmtCidade, null);
       maskInput($('#pf_data_nasc'), fmtDataBR, v=>isValidDataBR(v) || v==='');
 
-      const emailEl=$('#pf_email'); if(emailEl){ const apply=()=>{ emailEl.value=(emailEl.value||'').trim().toLowerCase(); const ok=isValidEmail(emailEl.value); emailEl.classList.toggle('is-invalid',!ok); emailEl.title=ok?'':'E-mail inválido'; }; on(emailEl,'blur',apply); apply(); }
-      on($('#pf_cep'),'blur', async()=>{ const ok=await preencherPorCEP($('#pf_cep').value); if(!ok) setBannerTip('Não foi possível sugerir o endereço para este CEP.'); });
+      const emailEl=$('#pf_email');
+      if(emailEl){
+        const apply=()=>{
+          emailEl.value=(emailEl.value||'').trim().toLowerCase();
+          const ok=isValidEmail(emailEl.value);
+          emailEl.classList.toggle('is-invalid',!ok);
+          emailEl.title=ok?'':'E-mail inválido';
+        };
+        on(emailEl,'blur',apply); apply();
+      }
+
+      on($('#pf_cep'),'blur', async()=>{
+        const ok=await preencherPorCEP($('#pf_cep').value);
+        if(!ok) setBannerTip('Não foi possível sugerir o endereço para este CEP.');
+      });
     }
     return;
   }
 
   ensureFallbackDrawer();
-  if (window.__zcPerfilFallback){ await window.__zcPerfilFallback.carregar(); window.__zcPerfilFallback.open(); return; }
+  if (window.__zcPerfilFallback){
+    await window.__zcPerfilFallback.carregar();
+    window.__zcPerfilFallback.open();
+    return;
+  }
   console.debug('[perfil] Nenhum drawer encontrado.');
 }
 window.abrirPerfilAtual = abrirPerfilAtual;
@@ -565,19 +511,35 @@ window.abrirPerfilAtual = abrirPerfilAtual;
 /* ----------------- botão no header ----------------- */
 function ensureHeaderButton(){
   if (document.getElementById('btn-perfil')) return;
-  const hdr = $('#chat-header .flex.items-center.gap-2.relative') || $('#chat-header .flex.items-center.gap-2') || $('#chat-header');
+
+  const hdr = $('#chat-header .flex.items-center.gap-2.relative')
+           || $('#chat-header .flex.items-center.gap-2')
+           || $('#chat-header');
   if (!hdr) return;
+
   const btn=document.createElement('button');
-  btn.id='btn-perfil'; btn.className='hdr-icon-btn'; btn.title='Campos do cliente'; btn.setAttribute('aria-label','Campos do cliente'); btn.innerHTML=iconSvg(getTheme());
+  btn.id='btn-perfil';
+  btn.className='hdr-icon-btn';
+  btn.title='Campos do cliente';
+  btn.setAttribute('aria-label','Campos do cliente');
+  btn.innerHTML=iconSvg(getTheme());
+
   on(btn,'click',e=>{ e.preventDefault(); abrirPerfilAtual(); });
   hdr.appendChild(btn);
-  const refresh=()=>{ const h=document.getElementById('btn-perfil'); if(h) h.innerHTML=iconSvg(getTheme()); };
+
+  const refresh=()=>{
+    const h=document.getElementById('btn-perfil');
+    if(h) h.innerHTML=iconSvg(getTheme());
+  };
   try{ const mq=matchMedia('(prefers-color-scheme: dark)'); (mq.addEventListener?mq.addEventListener('change',refresh):mq.addListener(refresh)); }catch{}
   new MutationObserver(refresh).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
   addEventListener('storage', e=>{ if(e && e.key==='zc:theme') refresh(); });
 }
 (function watchHeader(){
   const hdrEl=document.getElementById('chat-header');
-  if (hdrEl){ const mo=new MutationObserver(()=> ensureHeaderButton()); mo.observe(hdrEl,{attributes:true,attributeFilter:['style','class']}); }
+  if (hdrEl){
+    const mo=new MutationObserver(()=> ensureHeaderButton());
+    mo.observe(hdrEl,{attributes:true,attributeFilter:['style','class']});
+  }
   ensureHeaderButton();
 })();

@@ -6,7 +6,6 @@
   <title>ZapChat Connect | Gestão Profissional de WhatsApp & CRM</title>
   <meta name="description" content="Centralize seu atendimento, organize filas e escale suas vendas com ZapChat Connect.">
 
-  <!-- ✅ SEO Social (troque SEU-DOMINIO e imagem OG) -->
   <link rel="canonical" href="https://SEU-DOMINIO.com/">
   <meta property="og:type" content="website">
   <meta property="og:title" content="ZapChat Connect | Gestão Profissional de WhatsApp & CRM">
@@ -27,6 +26,7 @@
       --brand-primary: #047857;
       --brand-secondary: #065f46;
       --brand-light: #d1fae5;
+      --accent: #f59e0b; /* COR DE URGÊNCIA */
       --bg-body: #f8fafc;
       --bg-card: #ffffff;
       --text-main: #0f172a;
@@ -52,6 +52,7 @@
       background: var(--bg-body);
       color: var(--text-main);
       line-height: 1.6;
+      padding-top: 36px; /* Espaço para a barra de aviso */
     }
 
     .container { width: 100%; max-width: var(--max-width); margin: 0 auto; padding: 0 24px; }
@@ -63,6 +64,17 @@
       white-space:nowrap; border:0;
     }
 
+    /* 🔥 BARRA DE URGÊNCIA (NOVO) */
+    .top-bar {
+      position: fixed; top: 0; left: 0; right: 0; height: 36px;
+      background: #0f172a; color: white; z-index: 1000;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; gap: 10px;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .top-bar span { background: var(--accent); color: #000; padding: 2px 8px; border-radius: 4px; font-weight: 900; }
+
+
     /* ✅ foco visível (acessibilidade) */
     :focus-visible{
       outline: 3px solid rgba(4,120,87,.45);
@@ -72,7 +84,7 @@
 
     /* --- HEADER --- */
     .header {
-      position: sticky; top: 0; z-index: 999;
+      position: sticky; top: 36px; z-index: 999;
       background: rgba(255,255,255,0.9);
       backdrop-filter: blur(10px);
       border-bottom: 1px solid var(--line);
@@ -104,6 +116,13 @@
     }
     .nav-links a:hover { color: var(--brand-primary); }
 
+    /* 🔥 BOTÃO COM ANIMAÇÃO PULSE (NOVO) */
+    @keyframes pulse-green {
+      0% { box-shadow: 0 0 0 0 rgba(4, 120, 87, 0.7); }
+      70% { box-shadow: 0 0 0 10px rgba(4, 120, 87, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(4, 120, 87, 0); }
+    }
+
     .btn {
       display: inline-flex; align-items: center; justify-content: center; gap: 8px;
       padding: 12px 22px;
@@ -116,8 +135,13 @@
       border: 1px solid transparent;
       white-space:nowrap;
     }
-    .btn-primary { background: var(--brand-primary); color: white; box-shadow: var(--shadow-md); }
-    .btn-primary:hover { background: var(--brand-secondary); transform: translateY(-2px); }
+    .btn-primary { 
+        background: var(--brand-primary); 
+        color: white; 
+        box-shadow: var(--shadow-md); 
+        animation: pulse-green 2s infinite; /* Efeito Pulse Ativo */
+    }
+    .btn-primary:hover { background: var(--brand-secondary); transform: translateY(-2px); animation: none; }
     .btn-ghost { background: white; border-color: var(--line); color: var(--text-main); }
     .btn-ghost:hover { border-color: var(--brand-primary); color: var(--brand-primary); }
 
@@ -162,6 +186,25 @@
       background: var(--brand-light); color: var(--brand-primary);
       padding: 6px 12px; border-radius: 100px; font-size: 12px; font-weight: 800;
       text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    /* ✅ selo “7 dias grátis” */
+    .free-pill{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      margin-left: 10px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #fff;
+      border: 1px solid rgba(4,120,87,.22);
+      color: var(--brand-primary);
+      font-weight: 900;
+      font-size: 12px;
+      letter-spacing: .2px;
+      text-transform: none;
+      white-space: nowrap;
     }
 
     .hero h1 { font-size: 52px; line-height: 1.1; font-weight: 900; letter-spacing: -1.5px; margin: 0 0 20px; color: var(--text-main); }
@@ -179,6 +222,31 @@
       .hero-actions{ justify-content:flex-start; }
     }
 
+    .trial-note{
+      margin-top: 12px;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap: wrap;
+      color: var(--text-muted);
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .trial-badge{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      background:#fff;
+      border: 1px solid var(--line);
+      padding: 8px 12px;
+      border-radius: 14px;
+      font-weight: 900;
+      color: var(--text-main);
+      box-shadow: var(--shadow-sm);
+      white-space: nowrap;
+    }
+    .trial-badge strong{ color: var(--brand-primary); }
+
     .hero-preview {
       position: relative;
       background: white;
@@ -188,15 +256,7 @@
       box-shadow: var(--shadow-lg);
     }
 
-    /* ✅ PREVIEW (agora com o print real) */
-    .preview-screen {
-      background: transparent;
-      border-radius: var(--radius-lg);
-      border: 0;
-      padding: 0;
-      height: auto;
-      display: block;
-    }
+    .preview-screen { background: transparent; border-radius: var(--radius-lg); border: 0; padding: 0; height: auto; display: block; }
     .preview-shot{
       width: 100%;
       height: auto;
@@ -208,6 +268,18 @@
       -webkit-backface-visibility: hidden;
       transform: translateZ(0);
     }
+    
+    /* 🔥 FAIXA DE INTEGRAÇÕES (NOVO) */
+    .logos-strip {
+      border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+      background: white; padding: 24px 0; margin-top: 40px;
+    }
+    .logos-grid {
+      display: flex; gap: 40px; justify-content: center; opacity: 0.6; filter: grayscale(100%);
+      flex-wrap: wrap; align-items: center;
+    }
+    .logos-text { text-align: center; font-size: 12px; font-weight: 800; color: var(--text-muted); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+
 
     /* --- SEÇÕES --- */
     .section { padding: 90px 0; }
@@ -246,7 +318,6 @@
       background: white; border: 1px solid var(--line); border-radius: var(--radius-xl); padding: 40px 30px;
       text-align: center; position: relative;
     }
-    /* ✅ popular sem quebrar mobile/tablet */
     .price-card.popular {
       border: 2px solid var(--brand-primary);
       box-shadow: var(--shadow-lg);
@@ -264,12 +335,47 @@
     .price-features li.active { color: var(--text-main); }
     .price-features svg { color: var(--brand-primary); width: 18px; flex-shrink: 0; }
 
+    .trial-strip{
+      margin: 18px auto 0;
+      width: fit-content;
+      max-width: 100%;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap: wrap;
+      background: rgba(4,120,87,.07);
+      border: 1px solid rgba(4,120,87,.18);
+      color: var(--text-main);
+      padding: 10px 14px;
+      border-radius: 16px;
+      font-weight: 800;
+    }
+    .trial-strip strong{ color: var(--brand-primary); }
+    .trial-strip small{
+      display:block;
+      color: var(--text-muted);
+      font-weight: 700;
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
     .security-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
     .testimonials-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
     .testimonial { background: white; padding: 30px; border-radius: var(--radius-lg); border: 1px solid var(--line); box-shadow: var(--shadow-sm); }
     .testimonial p { font-size: 15px; color: var(--text-main); font-style: italic; margin-bottom: 20px; font-weight:600; }
     .user-profile { display: flex; align-items: center; gap: 12px; }
-    .avatar { width: 40px; height: 40px; background: #e2e8f0; border-radius: 50%; display: grid; place-items: center; font-weight: 900; color: var(--text-muted); }
+
+    /* ✅ AVATAR ATUALIZADO PARA FOTOS */
+    .avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: #e2e8f0;
+      object-fit: cover; /* Garante que a foto não fique achatada */
+      flex-shrink: 0;
+      border: 2px solid #fff;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
 
     .faq-wrapper { max-width: 800px; margin: 0 auto; display: grid; gap: 16px; }
     details { background: white; border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 20px; cursor: pointer; transition: 0.2s; }
@@ -295,6 +401,14 @@
     .footer a:hover { color: white; }
     .footer-bottom { padding-top: 30px; display: flex; justify-content: space-between; color: #64748b; font-size: 13px; gap:12px; flex-wrap:wrap; font-weight:600; }
 
+    /* 🔥 BOTÃO FIXO MOBILE (NOVO) */
+    .sticky-cta {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 9998;
+      background: white; border-top: 1px solid var(--line); padding: 12px 16px;
+      display: none; box-shadow: 0 -4px 10px rgba(0,0,0,0.05);
+    }
+    .sticky-cta .btn { width: 100%; justify-content: center; }
+
     @media (max-width: 1024px) {
       .grid-4, .pricing-grid, .steps-grid, .security-grid, .testimonials-grid { grid-template-columns: repeat(2, 1fr); }
       .hero h1 { font-size: 42px; }
@@ -302,32 +416,67 @@
       .hero-bullets { max-width: 520px; margin: 0 auto 30px; text-align: left; }
       .highlight-grid { grid-template-columns: 1fr; }
       .logo img{ max-width: 260px; height: 40px; }
+      .logos-grid { gap: 24px; }
     }
+    
+    /* 🔥 MEDIA QUERIES OTIMIZADAS PARA MOBILE */
     @media (max-width: 820px) {
       .nav-links { display: none; }
       .logo img{ max-width: 240px; height: 38px; }
       .btn-primary{ padding: 12px 16px; }
       .btn-link{ padding: 10px 8px; }
+      .sticky-cta { display: block; } /* Aparece só no mobile */
+      .wa-widget { bottom: 80px; } /* Sobe o widget para não cobrir o botão fixo */
+      
+      /* Ajuste de espaçamento para não ficar gigante no mobile */
+      .section { padding: 50px 0; } 
+      .hero { padding: 40px 0 50px; }
+      .section-head { margin-bottom: 40px; }
+      .section-head h2 { font-size: 28px; }
+      
+      /* Menu Mobile melhorado */
+      .mnav { display: block; }
+      
+      /* Grid vira coluna única no celular */
+      .grid-4, .pricing-grid, .steps-grid, .security-grid, .testimonials-grid { grid-template-columns: 1fr; }
+      
+      /* Ajustes de card para caber melhor na tela */
+      .price-card, .feature-card, .step-card { padding: 24px; }
+      
+      /* Hero ajustes */
+      .hero h1 { font-size: 34px; letter-spacing: -1px; }
+      .hero p { font-size: 16px; }
     }
 
-    /* ✅ mantém CTA no mobile (compacto) */
     @media (max-width: 480px){
-      .logo img{ max-width: 200px; height: 34px; }
+      .logo img{ max-width: 160px; height: 32px; }
+      
+      /* Esconde o link "Entrar" para caber os botões importantes */
+      .nav-actions .btn-link { display: none; }
 
       .nav-actions .btn-primary{
         display:inline-flex;
-        padding: 12px 14px;
+        padding: 10px 14px;
         border-radius: 12px;
-        gap: 8px;
+        gap: 6px;
+        font-size: 13px;
       }
       .nav-actions .btn-primary::before{
         content:"💬";
-        font-size:16px;
+        font-size:14px;
         line-height:1;
       }
+      
+      /* Hero bullets stack */
+      .hero-bullets { grid-template-columns: 1fr; gap: 8px; }
+      
+      .cta-box { padding: 40px 20px; }
+      .cta-box h2 { font-size: 26px; }
+      
+      /* Footer */
+      .footer-grid { grid-template-columns: 1fr; gap: 30px; }
     }
 
-    /* ✅ bullets mobile mais confortáveis */
     @media (max-width: 1024px){
       .hero-bullets{ gap: 10px; }
       .hero-bullets li{ font-size: 14px; line-height: 1.35; }
@@ -362,6 +511,7 @@
       place-items: center;
       box-shadow: 0 18px 40px rgba(2,6,23,.18);
       transition: transform .15s ease, background .15s ease;
+      animation: pulse-green 2s infinite; /* Pulso no Widget */
     }
     .wa-fab:hover{ transform: translateY(-2px); background: var(--brand-secondary); }
 
@@ -449,11 +599,9 @@
     }
 
     /* ===========================================================
-       ✅ PATCH MOBILE (SEM MEXER NO DESKTOP) — MELHORA FORTE
-       (fica no final pra sobrescrever no mobile)
+       ✅ PATCH MOBILE
     =========================================================== */
 
-    /* ✅ Menu mobile (aparece só no mobile) */
     .mnav{ display:none; }
     @media (max-width: 820px){
       .mnav{
@@ -504,7 +652,6 @@
       }
     }
 
-    /* Melhora geral de toque e layout no mobile */
     @media (max-width: 820px){
       .container{ padding: 0 16px; }
 
@@ -517,14 +664,12 @@
         align-items: center;
       }
 
-      /* Logo não esmagar */
       .logo{ gap: 10px; }
       .logo img{
         height: 34px;
         max-width: 200px;
       }
 
-      /* ações do topo mais organizadas */
       .nav-actions{
         gap: 8px;
         flex-wrap: wrap;
@@ -537,175 +682,20 @@
         border-radius: 12px;
       }
 
-      /* CTA principal do topo em "pílula" e mais confortável */
       .nav-actions .btn-primary{
         padding: 12px 14px;
         border-radius: 14px;
       }
     }
-
-    /* HERO: tipografia e espaçamento responsivo */
-    @media (max-width: 1024px){
-      .hero{ padding: 44px 0 30px; }
-
-      .hero-grid{ gap: 26px; }
-
-      .badge{
-        margin: 0 auto 14px;
-        font-size: 11px;
-        padding: 6px 10px;
-      }
-
-      .hero h1{
-        font-size: clamp(28px, 6.2vw, 40px);
-        letter-spacing: -1px;
-        margin: 0 0 12px;
-      }
-
-      .hero p{
-        font-size: 15px;
-        line-height: 1.55;
-        margin: 0 auto 18px;
-        max-width: 44ch;
-      }
-
-      /* Bullets: vira 1 coluna e fica "tocável" */
-      .hero-bullets{
-        grid-template-columns: 1fr;
-        gap: 10px;
-        margin: 0 auto 18px;
-        max-width: 540px;
-      }
-      .hero-bullets li{
-        background: #fff;
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        padding: 10px 12px;
-        font-size: 14px;
-        line-height: 1.35;
-      }
-
-      /* Botões do hero: 100% largura no mobile */
-      .hero-actions{
-        width: 100%;
-        justify-content: center;
-        gap: 10px;
-      }
-      .hero-actions .btn{
-        width: 100%;
-        max-width: 520px;
-        justify-content: center;
-      }
-      .hero-actions .btn-primary,
-      .hero-actions .btn-ghost{
-        padding: 14px 16px !important;
-      }
-
-      /* Preview: não estourar e ficar mais leve no mobile */
-      .hero-preview{
-        padding: 10px;
-        border-radius: 18px;
-      }
-      .preview-shot{
-        border-radius: 14px;
-      }
-    }
-
-    /* Seções: menos "ar" no mobile, títulos menores e legíveis */
-    @media (max-width: 820px){
-      .section{ padding: 56px 0; }
-
-      .section-head{ margin: 0 auto 28px; }
-      .section-head h2{
-        font-size: clamp(22px, 5.2vw, 30px);
-        letter-spacing: -0.8px;
-        margin: 0 0 10px;
-      }
-      .section-head p{
-        font-size: 15px;
-        line-height: 1.55;
-      }
-
-      /* Grades viram 1 coluna (em vez de 2 apertado) */
-      .grid-4,
-      .pricing-grid,
-      .steps-grid,
-      .security-grid,
-      .testimonials-grid{
-        grid-template-columns: 1fr;
-        gap: 14px;
-      }
-
-      .feature-card{ padding: 18px; border-radius: 16px; }
-      .feature-icon{ width: 44px; height: 44px; border-radius: 12px; }
-
-      .highlight-panel{ padding: 18px; border-radius: 18px; }
-
-      .step-card{ padding: 18px; border-radius: 16px; }
-
-      /* Planos: cards mais compactos e botão full */
-      .price-card{
-        padding: 22px 18px;
-        border-radius: 18px;
-        text-align: left;
-      }
-      .price-tag{ font-size: 34px; margin: 12px 0 8px; }
-      .price-features{ margin: 18px 0; }
-      .price-card .btn{ width: 100%; justify-content: center; }
-
-      /* Depoimentos mais compactos */
-      .testimonial{ padding: 18px; border-radius: 16px; }
-      .testimonial p{ font-size: 14px; }
-
-      /* FAQ mais confortável pro toque */
-      details{ padding: 16px; border-radius: 16px; }
-      summary{ font-size: 14px; }
-
-      /* CTA final: menos padding e botão full */
-      .cta-box{
-        padding: 32px 16px;
-        border-radius: 18px;
-        margin-bottom: 30px;
-      }
-      .cta-box h2{ font-size: clamp(20px, 5vw, 28px); }
-      .cta-box p{ font-size: 15px; }
-      .cta-box .btn{
-        width: 100%;
-        max-width: 520px;
-        justify-content: center;
-      }
-
-      /* Footer: vira 1 coluna */
-      .footer{ padding: 56px 0 24px; }
-      .footer-grid{
-        grid-template-columns: 1fr;
-        gap: 22px;
-        padding-bottom: 30px;
-      }
-    }
-
-    /* Ajustes finos: mobile pequeno */
-    @media (max-width: 480px){
-      .nav-actions{ width: 100%; justify-content: space-between; }
-      .btn-link{ padding: 10px 8px; }
-      .btn.btn-outline{ padding: 10px 10px; }
-
-      /* CTA do topo ocupa a linha toda (melhor conversão) */
-      .nav-actions .btn-primary{
-        width: 100%;
-        justify-content: center;
-      }
-
-      /* Badge flutuante do WhatsApp não cobrir conteúdo */
-      .wa-widget{ right: 14px; bottom: 14px; }
-      .wa-badge{ display: none; } /* some no mobile pequeno */
-    }
   </style>
 </head>
 
 <body>
-  <!-- ✅ Skip link -->
   <a class="sr-only" href="#conteudo">Pular para o conteúdo</a>
+
+  <div class="top-bar">
+    <span>OFERTA</span> &nbsp; Teste 7 dias grátis + Setup Assistido até sexta-feira.
+  </div>
 
   <header class="header">
     <div class="container">
@@ -722,7 +712,6 @@
           <a href="#seguranca">Segurança</a>
         </div>
 
-        <!-- ✅ MENU MOBILE (aparece só no mobile) -->
         <details class="mnav">
           <summary>Menu</summary>
           <div class="mnav__panel">
@@ -737,10 +726,9 @@
           <a class="btn-link" href="login.html">Entrar</a>
           <a class="btn btn-outline" href="register.html">Cadastrar</a>
 
-          <!-- ✅ fallback real (se JS falhar) -->
           <a
             data-wa-link="consultor"
-            href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Quero%20falar%20com%20um%20consultor%20sobre%20o%20ZapChat%20Connect."
+            href="https://wa.me/5512991865418?text=Ol%C3%A1%21%20Quero%20contratar%20o%20ZapChat%20Connect%20e%20testar%20os%207%20dias%20gr%C3%A1tis."
             class="btn btn-primary"
             target="_blank"
             rel="noopener"
@@ -753,7 +741,6 @@
   </header>
 
   <main id="conteudo">
-    <!-- HERO -->
     <section class="hero">
       <div class="container">
         <div class="hero-grid">
@@ -763,10 +750,10 @@
                 <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
               </svg>
               CRM & Gestão de WhatsApp 2026
+              <span class="free-pill">🎁 7 dias grátis</span>
             </div>
 
             <h1>Governança, escala e produtividade no WhatsApp da sua empresa.</h1>
-
             <p>O ZapChat centraliza conversas, organiza atendimentos por filas, automatiza rotinas e entrega relatórios para você reduzir tempo de resposta e vender mais.</p>
 
             <ul class="hero-bullets">
@@ -777,10 +764,9 @@
             </ul>
 
             <div class="hero-actions">
-              <!-- ✅ fallback real (se JS falhar) -->
               <a
                 data-wa-link="demo"
-                href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Quero%20agendar%20uma%20demonstra%C3%A7%C3%A3o%20do%20ZapChat%20Connect."
+                href="https://wa.me/5512991865418?text=Ol%C3%A1%21%20Quero%20agendar%20uma%20demonstra%C3%A7%C3%A3o%20do%20ZapChat%20Connect%20e%20testar%20os%207%20dias%20gr%C3%A1tis."
                 class="btn btn-primary"
                 style="padding: 16px 32px;"
                 target="_blank"
@@ -789,6 +775,11 @@
                 Agendar demonstração
               </a>
               <a href="#recursos" class="btn btn-ghost" style="padding: 16px 32px;">Ver todos recursos</a>
+            </div>
+
+            <div class="trial-note">
+              <span class="trial-badge">✅ <strong>7 dias grátis</strong> para testar</span>
+              <span>Sem risco: veja se serve pra sua operação.</span>
             </div>
 
             <div style="margin-top:14px; color:var(--text-muted); font-weight:600; font-size:13px;">
@@ -808,16 +799,24 @@
                 width="1200"
                 height="800"
               >
-              <!-- se tiver 2x:
-                srcset="img/sistema-zapchat.png 1x, img/sistema-zapchat@2x.png 2x"
-              -->
             </div>
           </div>
         </div>
       </div>
     </section>
+    
+    <div class="logos-strip">
+      <div class="container">
+        <div class="logos-text">Compatível com as principais ferramentas</div>
+        <div class="logos-grid">
+          <div style="font-weight:900; font-size:20px; display:flex; gap:6px; align-items:center;"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg> RD Station</div>
+          <div style="font-weight:900; font-size:20px; display:flex; gap:6px; align-items:center;"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg> HubSpot</div>
+          <div style="font-weight:900; font-size:20px; display:flex; gap:6px; align-items:center;"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg> ActiveCampaign</div>
+          <div style="font-weight:900; font-size:20px; display:flex; gap:6px; align-items:center;"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg> PipeDrive</div>
+        </div>
+      </div>
+    </div>
 
-    <!-- RECURSOS -->
     <section class="section" id="recursos">
       <div class="container">
         <div class="section-head" data-animate>
@@ -864,7 +863,6 @@
       </div>
     </section>
 
-    <!-- COMO FUNCIONA -->
     <section class="section" id="como-funciona" style="background: #fff;">
       <div class="container">
         <div class="section-head" data-animate>
@@ -880,7 +878,6 @@
       </div>
     </section>
 
-    <!-- PLANOS -->
     <section class="section" id="planos">
       <div class="container">
         <div class="section-head" data-animate>
@@ -888,7 +885,13 @@
           <h2>Planos para cada tamanho de operação.</h2>
           <p>Escolha o ideal pelo tamanho do time e necessidade de automação/relatórios.</p>
 
-          <!-- ✅ micro prova social (sem inventar números) -->
+          <div class="trial-strip" aria-label="Período grátis">
+            🎁 <strong>7 dias grátis</strong>
+            <div style="display:flex; flex-direction:column; text-align:left;">
+              <small>Teste a operação completa antes de decidir.</small>
+            </div>
+          </div>
+
           <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin: 18px 0 0;">
             <div style="background:#fff; border:1px solid var(--line); padding:10px 14px; border-radius:14px; font-weight:800; color:var(--text-main);">
               ✅ Implantação rápida
@@ -907,17 +910,20 @@
             <h3>Start</h3>
             <div class="price-tag">R$ 97<span>/mês</span></div>
             <ul class="price-features">
-              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> 1 Número Conectado</li>
+              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> <strong>2 Números Conectados</strong></li>
               <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Até 3 Atendentes</li>
               <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Filas Básicas</li>
               <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Histórico de Conversas</li>
             </ul>
             <a data-wa-link="start"
-               href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Quero%20assinar%20o%20plano%20Start%20do%20ZapChat%20Connect."
+               href="https://wa.me/5512991865418?text=Ol%C3%A1%21%20Quero%20contratar%20o%20plano%20Start%20do%20ZapChat%20Connect%20(2%20n%C3%BAmeros)%20e%20testar%20os%207%20dias%20gr%C3%A1tis."
                class="btn btn-ghost"
                style="width:100%"
                target="_blank"
                rel="noopener">Assinar Start</a>
+            <div style="margin-top:10px; color:var(--text-muted); font-weight:700; font-size:12px;">
+              Inclui <strong style="color:var(--brand-primary);">7 dias grátis</strong> para testar.
+            </div>
           </div>
 
           <div class="price-card popular" data-animate>
@@ -925,18 +931,21 @@
             <h3 style="color:var(--brand-primary);">Business</h3>
             <div class="price-tag">R$ 197<span>/mês</span></div>
             <ul class="price-features">
-              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> 1 Número Conectado</li>
+              <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> <strong>4 Números Conectados</strong></li>
               <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Atendentes Ilimitados</li>
               <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Automação de Horários</li>
               <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Relatórios SLA Avançados</li>
               <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Funil de Vendas (CRM)</li>
             </ul>
             <a data-wa-link="business"
-               href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Quero%20assinar%20o%20plano%20Business%20do%20ZapChat%20Connect."
+               href="https://wa.me/5512991865418?text=Ol%C3%A1%21%20Quero%20contratar%20o%20plano%20Business%20do%20ZapChat%20Connect%20(4%20n%C3%BAmeros)%20e%20testar%20os%207%20dias%20gr%C3%A1tis."
                class="btn btn-primary"
                style="width:100%"
                target="_blank"
                rel="noopener">Assinar Business</a>
+            <div style="margin-top:10px; color:var(--text-muted); font-weight:700; font-size:12px;">
+              Inclui <strong style="color:var(--brand-primary);">7 dias grátis</strong> para testar.
+            </div>
           </div>
 
           <div class="price-card" data-animate>
@@ -949,17 +958,19 @@
               <li class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg> Gerente de Conta</li>
             </ul>
             <a data-wa-link="enterprise"
-               href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Quero%20um%20or%C3%A7amento%20do%20plano%20Enterprise%20do%20ZapChat%20Connect."
+               href="https://wa.me/5512991865418?text=Ol%C3%A1%21%20Quero%20um%20or%C3%A7amento%20do%20plano%20Enterprise%20do%20ZapChat%20Connect%20e%20testar%20os%207%20dias%20gr%C3%A1tis."
                class="btn btn-ghost"
                style="width:100%"
                target="_blank"
                rel="noopener">Falar com Consultor</a>
+            <div style="margin-top:10px; color:var(--text-muted); font-weight:700; font-size:12px;">
+              Inclui <strong style="color:var(--brand-primary);">7 dias grátis</strong> para testar.
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- SEGURANÇA -->
     <section class="section" id="seguranca" style="background: white;">
       <div class="container">
         <div class="section-head" data-animate>
@@ -975,7 +986,6 @@
       </div>
     </section>
 
-    <!-- DEPOIMENTOS -->
     <section class="section" id="depoimentos">
       <div class="container">
         <div class="section-head" data-animate>
@@ -987,26 +997,28 @@
           <div class="testimonial" data-animate>
             <p>"Parou de perder conversa e conseguimos dividir o atendimento por setor com controle e histórico total."</p>
             <div class="user-profile">
-              <div class="avatar">AN</div><div><strong style="display:block; font-size:14px;">Ana N.</strong><span style="font-size:12px; color:var(--text-muted); font-weight:700;">Gerente Comercial</span></div>
+              <img src="https://i.pravatar.cc/150?u=a042581f4e29026024d" alt="Ana N." class="avatar">
+              <div><strong style="display:block; font-size:14px;">Ana N.</strong><span style="font-size:12px; color:var(--text-muted); font-weight:700;">Gerente Comercial</span></div>
             </div>
           </div>
           <div class="testimonial" data-animate>
             <p>"Com os relatórios ficou claro onde a gente demorava. Ajustamos o fluxo e melhorou muito."</p>
             <div class="user-profile">
-              <div class="avatar">RC</div><div><strong style="display:block; font-size:14px;">Rafael C.</strong><span style="font-size:12px; color:var(--text-muted); font-weight:700;">Diretor de Operações</span></div>
+              <img src="https://i.pravatar.cc/150?u=a04258a2462d826712d" alt="Rafael C." class="avatar">
+              <div><strong style="display:block; font-size:14px;">Rafael C.</strong><span style="font-size:12px; color:var(--text-muted); font-weight:700;">Diretor de Operações</span></div>
             </div>
           </div>
           <div class="testimonial" data-animate>
             <p>"A automação de fora de horário salvou nossos finais de semana. O cliente já recebe retorno na hora."</p>
             <div class="user-profile">
-              <div class="avatar">MP</div><div><strong style="display:block; font-size:14px;">Marina P.</strong><span style="font-size:12px; color:var(--text-muted); font-weight:700;">Líder de Atendimento</span></div>
+              <img src="https://i.pravatar.cc/150?u=4742581f4e29026024d" alt="Marina P." class="avatar">
+              <div><strong style="display:block; font-size:14px;">Marina P.</strong><span style="font-size:12px; color:var(--text-muted); font-weight:700;">Líder de Atendimento</span></div>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- FAQ -->
     <section class="section" id="faq" style="background: white;">
       <div class="container">
         <div class="section-head" data-animate>
@@ -1020,20 +1032,23 @@
           <details data-animate><summary>Tem automação de fora de horário?</summary><p>Sim. Você define horários e uma mensagem automática personalizada para contatos fora do expediente.</p></details>
           <details data-animate><summary>O ZapChat tem CRM?</summary><p>Sim. Você pode salvar contatos, usar etiquetas, anotações e acompanhar o funil de vendas.</p></details>
           <details data-animate><summary>Preciso de um celular ligado?</summary><p>Depende do modo de conexão. Em alguns cenários, exige o aparelho online (similar ao WhatsApp Web).</p></details>
+          <details data-animate><summary>Como funciona o teste grátis de 7 dias?</summary><p>Você usa a plataforma por 7 dias para validar na prática (filas, atendentes e automações). Se fizer sentido, você continua no plano escolhido.</p></details>
         </div>
       </div>
     </section>
 
-    <!-- CTA -->
     <section class="section">
       <div class="container">
         <div class="cta-box" data-animate>
           <h2>Pronto para estruturar sua operação?</h2>
           <p>Chame no WhatsApp e eu te ajudo a montar a configuração ideal (filas, usuários e automações).</p>
 
-          <!-- ✅ fallback real -->
+          <div style="margin: 0 auto 18px; max-width: 720px; opacity:.95; font-weight:800;">
+            🎁 Teste com <strong style="color:#fff;">7 dias grátis</strong> e valide na prática.
+          </div>
+
           <a data-wa-link="cta"
-             href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Quero%20agendar%20uma%20demonstra%C3%A7%C3%A3o%20do%20ZapChat%20Connect."
+             href="https://wa.me/5512991865418?text=Ol%C3%A1%21%20Quero%20contratar%20o%20ZapChat%20Connect%20e%20testar%20os%207%20dias%20gr%C3%A1tis."
              class="btn"
              style="background: white; color: var(--brand-primary); padding: 16px 32px;"
              target="_blank"
@@ -1053,6 +1068,9 @@
           <p style="color:#94a3b8; font-size:14px; line-height:1.6; font-weight:600;">
             Plataforma de gestão de WhatsApp para equipes que buscam escala, organização e vendas.
           </p>
+          <div style="margin-top:12px; color:#cbd5e1; font-size:13px; font-weight:800;">
+            🎁 7 dias grátis para testar
+          </div>
         </div>
         <div>
           <h4>Produto</h4>
@@ -1063,7 +1081,10 @@
         <div>
           <h4>Suporte</h4>
           <a href="#faq">Central de Ajuda</a>
-          <a data-wa-link="suporte" href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Preciso%20de%20ajuda%20com%20o%20ZapChat%20Connect." target="_blank" rel="noopener">WhatsApp Suporte</a>
+          <a data-wa-link="suporte"
+             href="https://wa.me/5512991865418?text=Ol%C3%A1%21%20Preciso%20de%20ajuda%20com%20o%20ZapChat%20Connect."
+             target="_blank"
+             rel="noopener">WhatsApp Suporte</a>
           <a href="#seguranca">Segurança</a>
         </div>
         <div>
@@ -1080,7 +1101,6 @@
     </div>
   </footer>
 
-  <!-- ✅ WIDGET WHATSAPP -->
   <div class="wa-widget" id="waWidget" aria-live="polite">
     <div class="wa-panel" id="waPanel" role="dialog" aria-label="WhatsApp">
       <div class="wa-head">
@@ -1090,14 +1110,18 @@
       <div class="wa-body">
         <p class="wa-small">Clique em uma opção e abra direto no WhatsApp com mensagem pronta.</p>
         <div class="wa-actions">
-          <a class="wa-btn" id="waBtnDemo" href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Quero%20agendar%20uma%20demonstra%C3%A7%C3%A3o%20do%20ZapChat%20Connect." target="_blank" rel="noopener">
+          <a class="wa-btn" id="waBtnDemo"
+             href="https://wa.me/5512991865418?text=Ol%C3%A1%21%20Quero%20agendar%20uma%20demonstra%C3%A7%C3%A3o%20do%20ZapChat%20Connect%20e%20testar%20os%207%20dias%20gr%C3%A1tis."
+             target="_blank" rel="noopener">
             Agendar demonstração
             <svg class="wa-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M7 17L17 7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
               <path d="M10 7h7v7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
             </svg>
           </a>
-          <a class="wa-btn" id="waBtnSuporte" href="https://wa.me/5511999999999?text=Ol%C3%A1%21%20Preciso%20de%20ajuda%20com%20o%20ZapChat%20Connect." target="_blank" rel="noopener">
+          <a class="wa-btn" id="waBtnSuporte"
+             href="https://wa.me/5512991865418?text=Ol%C3%A1%21%20Preciso%20de%20ajuda%20com%20o%20ZapChat%20Connect."
+             target="_blank" rel="noopener">
             Falar com suporte
             <svg class="wa-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M7 17L17 7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -1110,45 +1134,76 @@
 
     <div class="wa-badge" aria-hidden="true">WhatsApp</div>
     <button class="wa-fab" id="waFab" aria-label="Abrir WhatsApp" aria-expanded="false" aria-controls="waPanel">
-      <!-- ícone WhatsApp (SVG) -->
       <svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true">
         <path fill="currentColor" d="M19.11 17.52c-.28-.14-1.63-.8-1.88-.89-.25-.09-.44-.14-.62.14-.19.28-.71.89-.87 1.08-.16.19-.32.21-.6.07-.28-.14-1.17-.43-2.23-1.37-.82-.73-1.38-1.63-1.54-1.9-.16-.28-.02-.43.12-.57.12-.12.28-.32.42-.48.14-.16.19-.28.28-.46.09-.19.05-.35-.02-.5-.07-.14-.62-1.5-.85-2.06-.22-.53-.44-.46-.62-.47h-.53c-.19 0-.5.07-.76.35-.26.28-1 0.98-1 2.39s1.02 2.77 1.17 2.97c.14.19 2 3.06 4.84 4.29.68.29 1.21.46 1.62.59.68.21 1.3.18 1.79.11.55-.08 1.63-.67 1.86-1.31.23-.64.23-1.19.16-1.31-.07-.12-.25-.19-.53-.33z"/>
         <path fill="currentColor" d="M16.04 3C9.47 3 4.14 8.32 4.14 14.89c0 2.06.54 4.07 1.56 5.85L4 29l8.46-1.66a11.85 11.85 0 0 0 3.58.55h.01c6.57 0 11.89-5.32 11.89-11.89C27.93 8.32 22.61 3 16.04 3zm0 21.66h-.01c-1.17 0-2.31-.31-3.32-.89l-.24-.14-5.02.99.99-4.9-.16-.25a9.69 9.69 0 0 1-1.48-5.17c0-5.36 4.36-9.72 9.72-9.72 5.36 0 9.72 4.36 9.72 9.72 0 5.36-4.36 9.72-9.72 9.72z"/>
       </svg>
     </button>
   </div>
+  
+  <div class="sticky-cta">
+    <a href="https://wa.me/5512991865418?text=Ol%C3%A1%21%20Quero%20contratar%20o%20ZapChat%20Connect%20e%20testar%20os%207%20dias%20gr%C3%A1tis." 
+       class="btn btn-primary" target="_blank">
+       💬 Falar no WhatsApp Agora
+    </a>
+  </div>
 
   <script>
     // =========================
     // ✅ CONFIG DO WHATSAPP
-    // Troque aqui e pronto:
     // =========================
-    const WA_NUMBER = "5511999999999"; // <-- coloque seu número (DDI+DDD+numero)
-    const WA_MSG_DEMO = "Olá! Quero agendar uma demonstração do ZapChat Connect.";
+    // Número em formato: DDI + DDD + número (sem + e sem espaços)
+    const WA_NUMBER_SUPORTE = "5512991865418"; // ✅ suporte
+    const WA_NUMBER_VENDAS  = "5512991865418"; // ✅ contratar (se for outro depois, troque aqui)
+
+    const WA_MSG_DEMO    = "Olá! Quero agendar uma demonstração do ZapChat Connect e testar os 7 dias grátis.";
     const WA_MSG_SUPORTE = "Olá! Preciso de ajuda com o ZapChat Connect.";
 
-    function waLink(msg){
+    function waLink(number, msg){
       const text = encodeURIComponent(msg);
-      return `https://wa.me/${WA_NUMBER}?text=${text}`;
+      return `https://wa.me/${number}?text=${text}`;
     }
 
     // aplica nos botões do site (robusto)
     document.querySelectorAll('[data-wa-link]').forEach((el) => {
       const k = el.getAttribute('data-wa-link');
-      let msg = WA_MSG_DEMO;
-      if (k === "suporte") msg = WA_MSG_SUPORTE;
-      if (k === "start") msg = "Olá! Quero assinar o plano Start do ZapChat Connect.";
-      if (k === "business") msg = "Olá! Quero assinar o plano Business do ZapChat Connect.";
-      if (k === "enterprise") msg = "Olá! Quero um orçamento do plano Enterprise do ZapChat Connect.";
-      if (k === "consultor") msg = "Olá! Quero falar com um consultor sobre o ZapChat Connect.";
-      if (k === "cta") msg = WA_MSG_DEMO;
 
-      el.setAttribute("href", waLink(msg));
+      let number = WA_NUMBER_VENDAS;
+      let msg = WA_MSG_DEMO;
+
+      if (k === "suporte") {
+        number = WA_NUMBER_SUPORTE;
+        msg = WA_MSG_SUPORTE;
+      }
+
+      // ✅ mensagens de contratação
+      if (k === "start") {
+        number = WA_NUMBER_VENDAS;
+        msg = "Olá! Quero contratar o plano Start do ZapChat Connect (2 números conectados) e testar os 7 dias grátis.";
+      }
+      if (k === "business") {
+        number = WA_NUMBER_VENDAS;
+        msg = "Olá! Quero contratar o plano Business do ZapChat Connect (4 números conectados) e testar os 7 dias grátis.";
+      }
+      if (k === "enterprise") {
+        number = WA_NUMBER_VENDAS;
+        msg = "Olá! Quero um orçamento do plano Enterprise do ZapChat Connect e testar os 7 dias grátis.";
+      }
+      if (k === "consultor") {
+        number = WA_NUMBER_VENDAS;
+        msg = "Olá! Quero contratar o ZapChat Connect e testar os 7 dias grátis.";
+      }
+      if (k === "demo" || k === "cta") {
+        number = WA_NUMBER_VENDAS;
+        msg = WA_MSG_DEMO;
+      }
+
+      el.setAttribute("href", waLink(number, msg));
       el.setAttribute("target", "_blank");
       el.setAttribute("rel", "noopener");
     });
 
-    // Widget flutuante (robusto)
+    // Widget flutuante
     const waWidget = document.getElementById("waWidget");
     const waFab = document.getElementById("waFab");
 
@@ -1156,8 +1211,8 @@
       const waBtnDemo = document.getElementById("waBtnDemo");
       const waBtnSuporte = document.getElementById("waBtnSuporte");
 
-      if (waBtnDemo) waBtnDemo.href = waLink(WA_MSG_DEMO);
-      if (waBtnSuporte) waBtnSuporte.href = waLink(WA_MSG_SUPORTE);
+      if (waBtnDemo) waBtnDemo.href = waLink(WA_NUMBER_VENDAS, WA_MSG_DEMO);
+      if (waBtnSuporte) waBtnSuporte.href = waLink(WA_NUMBER_SUPORTE, WA_MSG_SUPORTE);
 
       function setOpen(v){
         waWidget.classList.toggle("open", v);
