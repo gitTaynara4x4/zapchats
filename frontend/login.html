@@ -231,28 +231,54 @@
   <script src="/frontend/assets/guard-devtools.js" defer></script>
 
   <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      const toggleBtn = document.getElementById('togglePassBtn');
-      const passInput = document.getElementById('senha');
-      const eyeOpen = document.getElementById('eye-open');
-      const eyeOff = document.getElementById('eye-off');
+    // Toggle senha "à prova de conflito" (não muda design)
+    (function () {
+      function bind() {
+        const toggleBtn = document.getElementById("togglePassBtn");
+        const passInput = document.getElementById("senha");
+        const eyeOpen = document.getElementById("eye-open");
+        const eyeOff  = document.getElementById("eye-off");
 
-      if(toggleBtn && passInput) {
-        toggleBtn.addEventListener('click', (e) => {
+        if (!toggleBtn || !passInput) return;
+
+        // evita duplicar listener se scripts rodarem mais de uma vez
+        if (toggleBtn.dataset.bound === "1") return;
+        toggleBtn.dataset.bound = "1";
+
+        // sincroniza ícones conforme estado atual
+        function sync() {
+          const isPwd = passInput.type === "password";
+          if (eyeOpen) eyeOpen.classList.toggle("hidden", !isPwd);
+          if (eyeOff)  eyeOff.classList.toggle("hidden",  isPwd);
+          toggleBtn.setAttribute("aria-label", isPwd ? "Mostrar senha" : "Ocultar senha");
+        }
+
+        toggleBtn.addEventListener("click", (e) => {
+          // pega o clique antes de qualquer outro JS
           e.preventDefault();
-          const isPass = passInput.type === 'password';
-          passInput.type = isPass ? 'text' : 'password';
-          
-          if(isPass) {
-            eyeOpen.classList.add('hidden');
-            eyeOff.classList.remove('hidden');
-          } else {
-            eyeOpen.classList.remove('hidden');
-            eyeOff.classList.add('hidden');
-          }
-        });
+          e.stopPropagation();
+          if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+
+          const wasPwd = passInput.type === "password";
+          passInput.type = wasPwd ? "text" : "password";
+          sync();
+
+          // mantém UX boa
+          passInput.focus({ preventScroll: true });
+        }, true); // capture=true
+
+        sync();
       }
-    });
+
+      // tenta agora e tenta de novo depois (caso o login.js recrie os nodes)
+      bind();
+      document.addEventListener("DOMContentLoaded", bind);
+      window.addEventListener("load", bind);
+
+      // se o /login.js mexer no DOM, isso rebinda automaticamente
+      const obs = new MutationObserver(() => bind());
+      obs.observe(document.documentElement, { childList: true, subtree: true });
+    })();
   </script>
 </body>
 </html>

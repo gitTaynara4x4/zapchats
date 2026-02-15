@@ -171,7 +171,17 @@
         <form id="form-reset" novalidate>
           <div class="field">
             <label class="label" for="token">Token recebido</label>
-            <input id="token" type="text" class="input" placeholder="Cole o código aqui" required>
+            <input
+              id="token"
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              class="input"
+              placeholder="Ex: 15936"
+              maxlength="5"
+              required
+            >
+            <p class="hint">Digite o código de 5 dígitos.</p>
           </div>
 
           <div class="field">
@@ -210,33 +220,62 @@
   </div>
 
   <script src="/frontend/js/pages/esqueci_senha.js" defer></script>
-  
+
   <script>
-    // Lógica visual para abrir o modal se o JS original usar .classList.remove('hidden')
-    // e Lógica do Toggle Senha
-    document.addEventListener('DOMContentLoaded', () => {
-      const toggleBtn = document.getElementById('toggle-pass');
-      const passInput = document.getElementById('nova_senha');
-      if(toggleBtn && passInput){
-        toggleBtn.addEventListener('click', () => {
-          const type = passInput.getAttribute('type') === 'password' ? 'text' : 'password';
-          passInput.setAttribute('type', type);
-          
-          document.getElementById('eye-open').classList.toggle('hidden');
-          document.getElementById('eye-off').classList.toggle('hidden');
-        });
+    // Toggle senha "à prova de conflito" (não muda design)
+    (function () {
+      function bindToggle() {
+        const toggleBtn = document.getElementById('toggle-pass');
+        const passInput = document.getElementById('nova_senha');
+        const eyeOpen = document.getElementById('eye-open');
+        const eyeOff  = document.getElementById('eye-off');
+        if (!toggleBtn || !passInput) return;
+
+        // evita duplicar listener
+        if (toggleBtn.dataset.bound === "1") return;
+        toggleBtn.dataset.bound = "1";
+
+        toggleBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          const wasPwd = passInput.type === 'password';
+          passInput.type = wasPwd ? 'text' : 'password';
+
+          if (eyeOpen && eyeOff) {
+            eyeOpen.classList.toggle('hidden', !wasPwd);
+            eyeOff.classList.toggle('hidden',  wasPwd);
+          }
+
+          passInput.focus({ preventScroll: true });
+        }, true);
       }
-      
-      // Patch para o Modal funcionar se o seu JS usar display block/none
-      const modal = document.getElementById('notifyModal');
-      const btnOk = document.getElementById('notify-ok');
-      if(modal && btnOk) {
-        btnOk.addEventListener('click', () => {
+
+      function bindModalOk() {
+        const modal = document.getElementById('notifyModal');
+        const btnOk = document.getElementById('notify-ok');
+        if (!modal || !btnOk) return;
+        if (btnOk.dataset.bound === "1") return;
+        btnOk.dataset.bound = "1";
+        btnOk.addEventListener('click', (e) => {
+          e.preventDefault();
           modal.style.display = 'none';
           modal.classList.add('hidden');
         });
       }
-    });
+
+      bindToggle();
+      bindModalOk();
+
+      document.addEventListener('DOMContentLoaded', () => {
+        bindToggle();
+        bindModalOk();
+      });
+
+      // se o reset-section aparecer depois via JS, garante bind
+      const obs = new MutationObserver(() => bindToggle());
+      obs.observe(document.documentElement, { childList: true, subtree: true });
+    })();
   </script>
 
 </body>

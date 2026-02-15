@@ -1,12 +1,12 @@
 # backend/routers/auth.py
 from datetime import datetime, timedelta
 import os
-from uuid import uuid4
+import time
 import smtplib
 from email.mime.text import MIMEText
 import base64
 import re
-import secrets  # compare_digest
+import secrets  # compare_digest + geração de códigos
 from typing import Optional
 
 import jwt
@@ -75,6 +75,63 @@ DATA_URL_RE = re.compile(r"^data:(?P<mime>[^;]+);base64,(?P<data>.+)$")
 
 # Timezone Brasilia
 TZ_BR = pytz.timezone("America/Sao_Paulo")
+
+# ───────────────────────── Reset de senha: código curto + limites ─────────────────────────
+RESET_CODE_TTL_MIN = int(os.getenv("RESET_CODE_TTL_MIN", "15"))  # 15 min
+FORGOT_MAX_REQ = int(os.getenv("FORGOT_MAX_REQ", "3"))          # 3 por janela
+FORGOT_WINDOW_SEC = int(os.getenv("FORGOT_WINDOW_SEC", "900"))  # 15 min
+
+RESET_MAX_ATTEMPTS = int(os.getenv("RESET_MAX_ATTEMPTS", "5"))          # 5 tentativas por janela
+RESET_ATTEMPT_WINDOW_SEC = int(os.getenv("RESET_ATTEMPT_WINDOW_SEC", "900"))  # 15 min
+
+# Memória local (simples) — bom p/ 1 instância. Se tiver várias, ideal seria Redis/banco.
+_forgot_rate: dict[str, list[float]] = {}  # key -> [reset_at_epoch, count]
+_reset_attempts: dict[str, list[float]] = {}  # key -> [reset_at_epoch, count]
+
+
+def _rate_take(store: dict, key: str, limit: int, window_sec: int) -> bool:
+    """
+    Retorna True se pode prosseguir (consume 1), False se excedeu.
+    """
+    now = time.time()
+    rec = store.get(key)
+    if not rec or rec[0] < now:
+        store[key] = [now + window_sec, 1]
+        return True
+    # rec[0] = expira_em_epoch, rec[1] = count
+    if rec[1] >= limit:
+        return False
+    rec[1] += 1
+    return True
+
+
+def _rate_remaining(store: dict, key: str) -> int:
+    """
+    Segundos restantes até liberar (aprox), ou 0 se livre.
+    """
+    now = time.time()
+    rec = store.get(key)
+    if not rec:
+        return 0
+    exp = rec[0]
+    if exp < now:
+        return 0
+    return int(exp - now)
+
+
+def _safe_email_key(email: str) -> str:
+    # evita email com espaços etc
+    return (email or "").strip().lower()
+
+
+def _client_ip(request: Request) -> str:
+    try:
+        return client_ip_from_headers(
+            request.headers,
+            request.client.host if request.client else None
+        ) or "0.0.0.0"
+    except Exception:
+        return request.client.host if request.client else "0.0.0.0"
 
 
 def _get_departamento_login_window(
@@ -285,9 +342,7 @@ def _envflag(name: str, default: str = "false") -> bool:
 
 READONLY_MODE = _envflag("READONLY_MODE")  # trava geral (manutenção)
 DISABLE_REGISTER = _envflag("DISABLE_REGISTER")  # trava apenas /register
-DISABLE_PASSWORD_RECOVERY = _envflag(
-    "DISABLE_PASSWORD_RECOVERY"
-)  # trava forgot/reset
+DISABLE_PASSWORD_RECOVERY = _envflag("DISABLE_PASSWORD_RECOVERY")  # trava forgot/reset
 
 
 def guard_writable_all(_: Request):
@@ -390,27 +445,29 @@ def _smtp_send(email_destino: str, assunto: str, corpo: str):
         print(f"[EMAIL] Enviado com sucesso para {email_destino}")
     except Exception as e:
         import traceback
-
         print("[ERRO EMAIL]", repr(e))
         traceback.print_exc()
 
 
-def enviar_email_reset(email_destino: str, token: str):
-    assunto = "[ZapChats] Instruções para redefinição de senha"
-    link_reset = f"https://www.zapschat.com.br/esqueci_senha.html?token={token}"
+# ✅ NOVO: código numérico de 5 dígitos para reset
+def gerar_codigo_reset_5d() -> str:
+    """Gera um código numérico de 5 dígitos (10000-99999)."""
+    return f"{secrets.randbelow(90000) + 10000:05d}"
 
+
+# ✅ ALTERADO: e-mail de reset sem link, só o código
+def enviar_email_reset(email_destino: str, token: str):
+    assunto = "[ZapChats] Código para redefinir sua senha"
     corpo = f"""
 Olá,
 
 Recebemos uma solicitação para redefinir a senha da conta ZapChats associada a este e-mail.
 
-1) Acesse o link seguro:
-   {link_reset}
+Seu código de redefinição é:
 
-2) Ou use este código na página "Esqueci minha senha":
-   {token}
+    {token}
 
-Por motivos de segurança, este código e o link são válidos por um período limitado.
+Por motivos de segurança, este código é válido por um período limitado.
 Se você não fez esta solicitação, pode ignorar este e-mail.
 
 Atenciosamente,
@@ -501,9 +558,7 @@ def get_current_identity(
             .first()
         )
         if not colab:
-            raise HTTPException(
-                status.HTTP_401_UNAUTHORIZED, "Usuário não encontrado"
-            )
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Usuário não encontrado")
 
         # 🚫 Bloqueia uso do sistema se estiver fora da janela do expediente
         if not colab_login_allowed_now(db, colab):
@@ -600,9 +655,7 @@ def get_current_user(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token inválido")
 
     if isinstance(sub, str) and sub.startswith("colab-"):
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN, "Apenas administradores"
-        )
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Apenas administradores")
 
     user = (
         db.query(models.Usuario)
@@ -922,9 +975,7 @@ def refresh_token(
     if not sub or not empresa_id:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token inválido")
 
-    new_token = create_access_token(
-        {"sub": sub, "empresa_id": empresa_id, "role": role}
-    )
+    new_token = create_access_token({"sub": sub, "empresa_id": empresa_id, "role": role})
     set_auth_cookies(
         response,
         request,
@@ -932,9 +983,7 @@ def refresh_token(
         empresa_id=int(empresa_id),
         max_age=JWT_EXP_MINUTES * 60,
     )
-    exp_ts = int(
-        (datetime.utcnow() + timedelta(minutes=JWT_EXP_MINUTES)).timestamp()
-    )
+    exp_ts = int((datetime.utcnow() + timedelta(minutes=JWT_EXP_MINUTES)).timestamp())
     return {"access_token": new_token, "exp": exp_ts}
 
 
@@ -958,9 +1007,7 @@ def cookieize(
     payload = _decode_token(token)
     empresa_id = payload.get("empresa_id")
     if not empresa_id:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, "Token sem empresa_id"
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Token sem empresa_id")
 
     # grava cookies como no login (auto Secure/SameSite)
     set_auth_cookies(
@@ -986,13 +1033,9 @@ def register(
     try:
         # validações
         if db.query(models.Usuario).filter_by(email=dados.email_admin).first():
-            raise HTTPException(
-                status_code=400, detail="E-mail já está em uso"
-            )
+            raise HTTPException(status_code=400, detail="E-mail já está em uso")
         if db.query(models.Empresa).filter_by(telefone=tel_limpo).first():
-            raise HTTPException(
-                status_code=400, detail="Telefone já está em uso"
-            )
+            raise HTTPException(status_code=400, detail="Telefone já está em uso")
 
         # valida documento (opcional, apenas formato)
         if doc_limpo and (len(doc_limpo) not in (11, 14)):
@@ -1003,11 +1046,7 @@ def register(
 
         # unicidade (se quiser impedir duplicidade)
         if doc_limpo:
-            ja = (
-                db.query(models.Empresa)
-                .filter_by(cnpj_cpf=doc_limpo)
-                .first()
-            )
+            ja = db.query(models.Empresa).filter_by(cnpj_cpf=doc_limpo).first()
             if ja:
                 raise HTTPException(
                     status_code=400,
@@ -1027,9 +1066,7 @@ def register(
         if hasattr(empresa, "trial_tier"):
             empresa.trial_tier = "PRATA"
         if hasattr(empresa, "trial_expires_at"):
-            empresa.trial_expires_at = datetime.utcnow() + timedelta(
-                days=TRIAL_DAYS
-            )
+            empresa.trial_expires_at = datetime.utcnow() + timedelta(days=TRIAL_DAYS)
 
         db.add(empresa)
         db.flush()
@@ -1038,12 +1075,7 @@ def register(
             empresa.nome_adm = dados.nome_adm.strip()
 
         # setores padrão
-        for nome_setor in [
-            "Atendimento",
-            "Comercial",
-            "Financeiro",
-            "Suporte Técnico",
-        ]:
+        for nome_setor in ["Atendimento", "Comercial", "Financeiro", "Suporte Técnico"]:
             db.add(models.Setor(nome=nome_setor, empresa_id=empresa.id))
 
         # admin (USUÁRIO) – SEM colaborador-espelho
@@ -1068,9 +1100,7 @@ def register(
                         usuario.avatar_mime = mime
                     if hasattr(usuario, "avatar_data"):
                         usuario.avatar_data = raw
-                elif dados.avatar_url.startswith(
-                    ("http://", "https://")
-                ) and hasattr(empresa, "avatar_url"):
+                elif dados.avatar_url.startswith(("http://", "https://")) and hasattr(empresa, "avatar_url"):
                     empresa.avatar_url = dados.avatar_url
             except Exception as e:
                 print("[AVATAR WARN]", e)
@@ -1101,7 +1131,6 @@ def register(
         # Sincroniza catálogo de permissões (apenas tabela 'permissoes')
         try:
             from backend.routers.permissoes import _sync_catalog_to_db
-
             _sync_catalog_to_db(db)
         except Exception as e:
             print("[PERMISSOES WARN]", e)
@@ -1112,20 +1141,14 @@ def register(
         created_at_formatado = None
         try:
             tz_sp = pytz.timezone("America/Sao_Paulo")
-            created_at_formatado = empresa.created_at.astimezone(
-                tz_sp
-            ).strftime("%d/%m/%Y %H:%M")
+            created_at_formatado = empresa.created_at.astimezone(tz_sp).strftime("%d/%m/%Y %H:%M")
         except Exception:
             try:
-                created_at_formatado = empresa.created_at.strftime(
-                    "%d/%m/%Y %H:%M"
-                )
+                created_at_formatado = empresa.created_at.strftime("%d/%m/%Y %H:%M")
             except Exception:
                 created_at_formatado = None
 
-        token = create_access_token(
-            {"sub": str(usuario.id), "empresa_id": empresa.id, "role": "admin"}
-        )
+        token = create_access_token({"sub": str(usuario.id), "empresa_id": empresa.id, "role": "admin"})
         set_auth_cookies(
             response,
             request,
@@ -1143,9 +1166,7 @@ def register(
             "created_at": created_at_formatado,
             "assinatura": empresa.assinatura,
             "trial_tier": getattr(empresa, "trial_tier", None),
-            "trial_expires_at": getattr(
-                empresa, "trial_expires_at", None
-            ).isoformat()
+            "trial_expires_at": getattr(empresa, "trial_expires_at", None).isoformat()
             if getattr(empresa, "trial_expires_at", None)
             else None,
         }
@@ -1157,60 +1178,105 @@ def register(
             db.rollback()
         except Exception:
             pass
-        raise HTTPException(
-            status_code=500, detail="Erro interno: " + str(e)
-        )
+        raise HTTPException(status_code=500, detail="Erro interno: " + str(e))
 
 
 @router.post("/forgot-password")
 def forgot_password(
     dados: ForgotPasswordIn,
+    request: Request,
     db: Session = Depends(get_db_session),
     _: Depends = Depends(guard_writable_recovery),
 ):
-    print(f"[LOG] Requisição forgot-password recebida: {dados.email}")
-    usuario = db.query(models.Usuario).filter_by(email=dados.email).first()
+    """
+    Envia código numérico (5 dígitos) por e-mail.
+    Sem link.
+    Com rate limit simples para evitar spam/bruteforce.
+    """
+    email_norm = norm_email(dados.email)
+    ip = _client_ip(request)
+
+    # Rate limit por e-mail + IP
+    k1 = f"forgot:email:{_safe_email_key(email_norm)}"
+    k2 = f"forgot:ip:{ip}"
+    if not _rate_take(_forgot_rate, k1, FORGOT_MAX_REQ, FORGOT_WINDOW_SEC) or not _rate_take(_forgot_rate, k2, FORGOT_MAX_REQ, FORGOT_WINDOW_SEC):
+        wait = max(_rate_remaining(_forgot_rate, k1), _rate_remaining(_forgot_rate, k2))
+        raise HTTPException(
+            status_code=429,
+            detail="Muitas solicitações de recuperação. Aguarde alguns minutos e tente novamente.",
+            headers={"Retry-After": str(wait)},
+        )
+
+    print(f"[LOG] Requisição forgot-password recebida: {email_norm}")
+    usuario = db.query(models.Usuario).filter_by(email=email_norm).first()
     if not usuario:
-        print("[LOG] Usuário não encontrado para:", dados.email)
+        print("[LOG] Usuário não encontrado para:", email_norm)
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
-    token = str(uuid4())
+    # ✅ Token 5 dígitos, tentando evitar colisão
+    token = None
+    for _ in range(10):
+        c = gerar_codigo_reset_5d()
+        existe = db.query(models.Usuario).filter_by(reset_token=c).first()
+        if not existe:
+            token = c
+            break
+    if not token:
+        raise HTTPException(status_code=500, detail="Erro ao gerar código. Tente novamente.")
+
     usuario.reset_token = token
-    usuario.reset_token_expira = datetime.utcnow() + timedelta(hours=1)
+    usuario.reset_token_expira = datetime.utcnow() + timedelta(minutes=RESET_CODE_TTL_MIN)
     commit_or_block(db)
 
-    print(f"[LOG] Token gerado: {token}")
-    enviar_email_reset(dados.email, token)
+    print(f"[LOG] Token gerado (5 dígitos): {token} (expira em {RESET_CODE_TTL_MIN} min)")
+    enviar_email_reset(email_norm, token)
+
     return {"detail": "Token enviado para o e-mail informado."}
 
 
 @router.post("/reset-password")
 def reset_password(
     dados: ResetPasswordIn,
+    request: Request,
     db: Session = Depends(get_db_session),
     _: Depends = Depends(guard_writable_recovery),
 ):
-    print(f"[LOG] Requisição reset-password recebida: token={dados.token}")
-    usuario = (
-        db.query(models.Usuario)
-        .filter_by(reset_token=dados.token)
-        .first()
-    )
-    if (
-        not usuario
-        or usuario.reset_token_expira.replace(tzinfo=None) < datetime.utcnow()
-    ):
-        print("[LOG] Token inválido ou expirado")
+    """
+    Redefine senha com token numérico (5 dígitos).
+    Com limite de tentativas por IP+token para reduzir brute-force.
+    """
+    token_in = (dados.token or "").strip()
+    ip = _client_ip(request)
+
+    # Rate limit de tentativas (por IP e por token)
+    k_ip = f"reset:ip:{ip}"
+    k_tok = f"reset:tok:{token_in}"
+    if not _rate_take(_reset_attempts, k_ip, RESET_MAX_ATTEMPTS, RESET_ATTEMPT_WINDOW_SEC) or not _rate_take(_reset_attempts, k_tok, RESET_MAX_ATTEMPTS, RESET_ATTEMPT_WINDOW_SEC):
+        wait = max(_rate_remaining(_reset_attempts, k_ip), _rate_remaining(_reset_attempts, k_tok))
         raise HTTPException(
-            status_code=400, detail="Token inválido ou expirado"
+            status_code=429,
+            detail="Muitas tentativas de redefinição. Aguarde alguns minutos e tente novamente.",
+            headers={"Retry-After": str(wait)},
         )
 
+    print(f"[LOG] Requisição reset-password recebida: token={token_in}")
+
+    # Busca pelo token (como é curto, existe chance teórica de colisão, mas mitigamos ao gerar)
+    usuario = db.query(models.Usuario).filter_by(reset_token=token_in).first()
+    if not usuario:
+        print("[LOG] Token não encontrado")
+        raise HTTPException(status_code=400, detail="Token inválido ou expirado")
+
+    expira = getattr(usuario, "reset_token_expira", None)
+    if not expira or expira.replace(tzinfo=None) < datetime.utcnow():
+        print("[LOG] Token expirado")
+        raise HTTPException(status_code=400, detail="Token inválido ou expirado")
+
+    # Atualiza senha
     usuario.senha_hash = hash_pwd(dados.nova_senha)
     usuario.reset_token = None
     usuario.reset_token_expira = None
     commit_or_block(db)
 
-    print(
-        f"[LOG] Senha redefinida com sucesso para usuário ID={usuario.id}"
-    )
+    print(f"[LOG] Senha redefinida com sucesso para usuário ID={usuario.id}")
     return {"detail": "Senha redefinida com sucesso!"}
