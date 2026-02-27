@@ -108,19 +108,34 @@ function confirmDialog({ title = 'Confirmar', msg = '', okText = 'OK', cancelTex
 
 /* ====== RESOLVE INSTÂNCIA ====== */
 function getInstPayload() {
+  // ✅ Fonte da verdade (ordem):
+  // 1) histórico aberto no DOM (carimbado quando abre/recebe msg)
+  // 2) state.clienteSel.instancia_id
+  // 3) INSTANCIA_ATIVA (fallback manual)
+
+  try {
+    const hist = document.getElementById('historico');
+    const domInst = hist?.dataset?.instanciaId;
+    if (domInst != null && String(domInst).trim() !== '') {
+      const n = Number(domInst);
+      if (Number.isFinite(n) && n > 0) return { instancia_id: n };
+    }
+  } catch {}
+
   const cli = state?.clienteSel || {};
   const idFromCliente = cli.instancia_id ?? cli.instancia ?? null;
 
   if (idFromCliente != null && idFromCliente !== '') {
     const n = Number(idFromCliente);
-    if (Number.isFinite(n)) return { instancia_id: n };
+    if (Number.isFinite(n) && n > 0) return { instancia_id: n };
     return { instance: String(idFromCliente) };
   }
 
+  // fallback: INSTANCIA_ATIVA (legado)
   const act = (typeof window !== 'undefined') ? window.INSTANCIA_ATIVA : null;
   if (act != null && act !== '') {
     const n = Number(act);
-    if (Number.isFinite(n)) return { instancia_id: n };
+    if (Number.isFinite(n) && n > 0) return { instancia_id: n };
     return { instance: String(act) };
   }
 
@@ -155,6 +170,9 @@ function resolveRawTel(cli) {
   if (cli.telefone) return cli.telefone;
   if (cli.whatsapp) return cli.whatsapp;
   if (cli.numero) return cli.numero;
+
+  // 👇 se for grupo no formato { remote_jid: "...@g.us" }
+  if (cli.remote_jid) return String(cli.remote_jid);
 
   if (typeof cli.nome === 'string') {
     const digits = cli.nome.replace(/\D/g, '');
@@ -424,11 +442,19 @@ function insertAtCursor(el, text) {
     setTimeout(() => capEl?.focus(), 30);
   }
 
-  // usa resolveRawTel + numeroE164
+  /* ===================== DESTINO (telefone ou JID) ===================== */
+  function isJid(s) {
+    const v = String(s || '').trim();
+    return /@g\.us$/i.test(v) || /@s\.whatsapp\.net$/i.test(v);
+  }
+
+  // ✅ agora suporta: telefone normal -> E.164 / grupo -> @g.us / contato jid -> @s.whatsapp.net
   const numberForApi = () => {
     const cli = state?.clienteSel || {};
-    const raw = resolveRawTel(cli);
-    return numeroE164(raw || '');
+    const raw = String(resolveRawTel(cli) || '').trim();
+    if (!raw) return '';
+    if (isJid(raw)) return raw;
+    return numeroE164(raw);
   };
 
   /* ===================== ENVIO TEXTO (TRAVADO) ===================== */
@@ -444,10 +470,11 @@ function insertAtCursor(el, text) {
       return;
     }
 
-    const numE164 = numeroE164(rawTel);
-    if (!numE164) {
-      toast('Telefone do contato inválido. Verifique o cadastro.', false);
-      console.warn('[send/text] numeroE164 retornou vazio', { rawTel, cli });
+    // ✅ usa o mesmo padrão do restante: telefone normal ou JID de grupo
+    const dest = numberForApi();
+    if (!dest) {
+      toast('Destino inválido (telefone ou grupo). Verifique o cadastro.', false);
+      console.warn('[send/text] numberForApi retornou vazio', { rawTel, cli });
       return;
     }
 
@@ -459,7 +486,8 @@ function insertAtCursor(el, text) {
     try {
       const payload = {
         empresa_id: EMPRESA_ID || undefined,
-        number: numE164,
+        cliente_id: cli?.id ?? underfined, 
+        number: dest,
         text,
         ...inst,
       };
@@ -479,9 +507,16 @@ function insertAtCursor(el, text) {
 
       if (!r.ok) {
         console.error('[send/text] HTTP', r.status, respText || respJson);
-        const msg =
-          (respJson && (respJson.detail || respJson.message || respJson.error)) ||
-          (r.status === 400 ? 'Dados inválidos (número ou instância).' : 'Falha ao enviar.');
+
+        // prioriza detail/message/error; se vier objeto, transforma em texto
+        const rawMsg =
+          (respJson && (respJson.detail ?? respJson.message ?? respJson.error)) ||
+          respText ||
+          null;
+
+        const msg = _stringifyErr(rawMsg) ||
+          (r.status === 400 ? 'Dados inválidos (destino ou instância).' : 'Falha ao enviar.');
+
         toast(msg, false);
         return;
       }
@@ -626,7 +661,7 @@ function insertAtCursor(el, text) {
       ? captionOverride
       : (inputMsg.value || '').trim() || undefined;
 
-    const number = numberForApi();
+    const number = numberForApi(); // ✅ agora pode ser @g.us
     const mime = file.type || guessMimeFromExt(file.name);
     const mediaType = explicitType || guessMediaType(mime);
     const dataUrl = await toDataUrl(file);

@@ -1,4 +1,12 @@
 // /frontend/js/atendimentos/ui/filtros.js
+// ==========================================================
+// Filtros estilo WhatsApp (Tudo / Não lidas / Grupos / No bot)
+// ✅ Indexa por ID (state/store) + fallback de DOM dataset
+// ✅ Respeita instância ativa
+// ✅ Grupos: detecta por is_group OU JID @g.us OU data-is-group do <li>
+// ✅ “chat aberto” nunca some
+// ==========================================================
+
 import { getConversas } from '../state/store.js';
 
 (function FiltrosLista() {
@@ -33,7 +41,8 @@ import { getConversas } from '../state/store.js';
 
   // ----------------- garante botões estilo WPP -----------------
   function ensureButton(label, prepend = false){
-    const exists = [...row.querySelectorAll('.wpp-header-filtro')].some(b => normLabel(b.textContent) === normLabel(label));
+    const exists = [...row.querySelectorAll('.wpp-header-filtro')]
+      .some(b => normLabel(b.textContent) === normLabel(label));
     if (exists) return;
 
     const b = document.createElement('button');
@@ -92,6 +101,23 @@ import { getConversas } from '../state/store.js';
     return /@g\.us$/i.test(t) || /\bgrupo\b/i.test(t);
   }
 
+  // ✅ DOM fallback (clientes.js já escreve data-is-group e data-telefone)
+  function isGroupByDOM(li){
+    try{
+      if (!li) return false;
+      const v = String(li.dataset?.isGroup || '').trim();
+      if (v === '1' || v === 'true') return true;
+
+      const tel = String(li.dataset?.telefone || '').trim();
+      if (tel && /@g\.us$/i.test(tel)) return true;
+
+      // fallback final: tenta achar no texto (bem conservador)
+      return false;
+    }catch{
+      return false;
+    }
+  }
+
   function matchInstancia(tagInstId) {
     try {
       if (typeof window._matchInstancia === 'function') {
@@ -146,7 +172,15 @@ import { getConversas } from '../state/store.js';
       if (!id) continue;
 
       const unread  = Number(c.novas ?? c.unread ?? 0) > 0;
-      const grupo   = Boolean(c.is_group) || isGroupByTel(c.telefone);
+
+      // ✅ grupo por: is_group OR JID (@g.us) OR jid/remoteJid
+      const telLike = (c.telefone ?? c.number ?? c.remoteJid ?? c.jid ?? '');
+      const grupo   =
+        Boolean(c.is_group) ||
+        isGroupByTel(telLike) ||
+        isGroupByTel(c.jid) ||
+        isGroupByTel(c.remoteJid);
+
       const statusN = normalizarStatus(c);
       const isBot   = statusN === 'bot';
 
@@ -162,7 +196,7 @@ import { getConversas } from '../state/store.js';
   }
 
   // ----------------- regra de exibição -----------------
-  function shouldShow(id, tags) {
+  function shouldShow(id, tags, li) {
     // chat aberto nunca some
     if (id && id === openClienteId()) return true;
 
@@ -176,7 +210,12 @@ import { getConversas } from '../state/store.js';
     if (k === normLabel(LABEL_ALL)) return true;
 
     if (k === normLabel(LABEL_UNREAD)) return !!tags?.unread;
-    if (k === normLabel(LABEL_GROUPS)) return !!tags?.isGroup;
+
+    if (k === normLabel(LABEL_GROUPS)) {
+      // ✅ tags primeiro; se não tem tags (novo li antes do index), usa DOM
+      return !!(tags?.isGroup || isGroupByDOM(li));
+    }
+
     if (k === normLabel(LABEL_BOT))    return !!tags?.isBot;
 
     // fallback
@@ -191,7 +230,7 @@ import { getConversas } from '../state/store.js';
       const id   = idFromLi(li);
       const tags = byId.get(id) || null;
 
-      const show = id && tags ? shouldShow(id, tags) : true;
+      const show = id ? shouldShow(id, tags || {}, li) : true;
       li.style.display = show ? '' : 'none';
       li.classList.toggle('hidden-by-filter', !show);
     }
@@ -225,7 +264,7 @@ import { getConversas } from '../state/store.js';
     subtree: true,
     characterData: true,
     attributes: true,
-    attributeFilter: ['data-status', 'data-instancia-id', 'class', 'data-id'],
+    attributeFilter: ['data-status', 'data-instancia-id', 'class', 'data-id', 'data-is-group', 'data-telefone'],
   });
 
   // ----------------- reagir a eventos globais -----------------

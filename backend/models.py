@@ -14,7 +14,7 @@ from sqlalchemy.orm import relationship, backref
 from sqlalchemy import Enum as SqlEnum
 
 from backend.database import Base
-from backend.utils.plans import PLAN_LIMITS
+from backend.utils.plans import plan_limit, limit_value
 
 
 # =========================
@@ -31,8 +31,11 @@ class PlanoAssinatura(str, enum.Enum):
 
 
 def max_instancias_por_plano(plano: str | None) -> int:
-    """Evita duplicar números: usa os limites do módulo plans."""
-    return PLAN_LIMITS.get((plano or "FREE").upper(), 0)
+    """
+    Evita duplicar números no models.
+    Usa a matriz de entitlements do plans.py novo.
+    """
+    return limit_value(plano or "FREE", "whatsapp_instances_max", default=0)
 
 
 # =========================
@@ -386,6 +389,16 @@ class Mensagem(Base):
     __table_args__ = (
         Index("ix_mensagens_msg_id", "msg_id"),
         Index("ix_mensagens_empresa_cliente_ts", "empresa_id", "cliente_id", "timestamp"),
+
+        # ✅ BLINDAGEM 1:1 (idempotência):
+        # impede duplicar a mesma mensagem por cliente quando msg_id existe,
+        # e evita corrida (select+insert) ao usar UPSERT no handler.
+        Index(
+            "uq_mensagens_cliente_msgid_notnull",
+            "cliente_id", "msg_id",
+            unique=True,
+            postgresql_where=text("msg_id IS NOT NULL"),
+        ),
     )
 
     id         = Column(Integer, primary_key=True, index=True)
@@ -415,13 +428,16 @@ class Mensagem(Base):
     msg_id = Column(String, index=True)  # id do Baileys/Evolution
     ack    = Column(Integer, default=0)
 
-    cliente    = relationship("Cliente", back_populates="mensagens")
-    instancia  = relationship("EmpresaInstancia", back_populates="mensagens")
+    cliente     = relationship("Cliente", back_populates="mensagens")
+    instancia   = relationship("EmpresaInstancia", back_populates="mensagens")
     atendimento = relationship("Atendimento", back_populates="mensagens")
+
     apagada_cliente = Column(Boolean, nullable=False, default=False)
     apagada_usuario = Column(Boolean, nullable=False, default=False)
+
     def __repr__(self) -> str:
         return f"<Mensagem id={self.id} cli={self.cliente_id} inst={self.instancia_id} atd={self.atendimento_id} tipo={self.tipo} ts={self.timestamp}>"
+
 
 # =========================
 # Midia
@@ -497,16 +513,20 @@ class Grupo(Base):
 class MensagemGrupo(Base):
     __tablename__ = "mensagens_grupo"
     __table_args__ = (
+        # idempotência: 1 msg_id = 1 linha (se isso fizer sentido no seu fluxo)
         UniqueConstraint("msg_id", name="u_msg_grupo_msgid"),
+
+        # buscas comuns
         Index("ix_msggrupo_grupo_ts", "grupo_id", "timestamp"),
         Index("ix_msggrupo_empresa", "empresa_id"),
         Index("ix_msggrupo_author", "author_jid"),
         Index("ix_msggrupo_instancia", "empresa_id", "instancia_id"),
     )
 
-    id           = Column(BigInteger, primary_key=True, index=True)
-    empresa_id   = Column(Integer, ForeignKey("empresas.id"), nullable=False)
-    grupo_id     = Column(BigInteger, ForeignKey("grupos.id"), nullable=False)
+    id = Column(BigInteger, primary_key=True, index=True)
+
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    grupo_id = Column(BigInteger, ForeignKey("grupos.id"), nullable=False, index=True)
 
     instancia_id = Column(
         Integer,
@@ -515,21 +535,38 @@ class MensagemGrupo(Base):
         index=True,
     )
 
-    author_jid   = Column(Text)
-    from_me      = Column(Boolean, default=False)
-    conteudo     = Column(Text)
-    tipo         = Column(Text)
-    message_type = Column(Text)
-    lida         = Column(Boolean, default=False)
-    timestamp    = Column(BigInteger)               # epoch
-    msg_id       = Column(Text, nullable=False)
-    ack          = Column(Integer, default=0)
-    criado_em    = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    # metadados do whatsapp/evolution
+    author_jid = Column(Text, nullable=True)      # quem enviou (no grupo); pra saída pode ser NULL
+    from_me = Column(Boolean, default=False)      # True = enviado por nós
 
-    empresa   = relationship("Empresa", back_populates="mensagens_grupo")
-    grupo     = relationship("Grupo", back_populates="mensagens")
+    # conteúdo
+    conteudo = Column(Text, nullable=False)
+    tipo = Column(Text, nullable=False)           # 'entrada' | 'saida'
+    message_type = Column(Text, nullable=True)    # conversation | audio | image | etc
+
+    # estado
+    lida = Column(Boolean, default=False)
+    ack = Column(Integer, default=0)              # 0/1/2/3/4 (depende do que você mapear)
+    apagada_cliente = Column(Boolean, nullable=False, default=False)
+    apagada_usuario = Column(Boolean, nullable=False, default=False)
+
+    # tempo/ids
+    timestamp = Column(BigInteger, nullable=True)  # epoch (segundos)
+    msg_id = Column(Text, nullable=False, index=True)
+
+    criado_em = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    # relationships
+    empresa = relationship("Empresa", back_populates="mensagens_grupo")
+    grupo = relationship("Grupo", back_populates="mensagens")
     instancia = relationship("EmpresaInstancia", back_populates="mensagens_grupo")
 
+    def __repr__(self) -> str:
+        return (
+            f"<MensagemGrupo id={self.id} emp={self.empresa_id} grupo={self.grupo_id} "
+            f"inst={self.instancia_id} from_me={self.from_me} tipo={self.tipo} "
+            f"ack={self.ack} lida={self.lida} ts={self.timestamp} msg_id={self.msg_id}>"
+        )
 
 # =========================
 # Departamento
@@ -579,6 +616,7 @@ class Departamento(Base):
     def __repr__(self) -> str:
         return f"<Departamento id={self.id} emp={self.empresa_id} nome={self.nome!r}>"
 
+
 # =========================
 # Pivot: Departamento <-> EmpresaInstancia
 # =========================
@@ -622,7 +660,9 @@ class AtendimentoPinnedConversa(Base):
     empresa  = relationship("Empresa")
     usuario  = relationship("Usuario")
     conversa = relationship("Cliente")
+
     atendimento_id = Column(Integer, ForeignKey("atendimentos.id"), nullable=True)
+
     def __repr__(self) -> str:
         return f"<Pinned emp={self.empresa_id} user={self.user_id} conv={self.conversa_id}>"
 
@@ -680,10 +720,10 @@ class Colaborador(Base):
 
     instancias_ver = Column(PG_ARRAY(Integer), nullable=True)
 
+
 # =========================
 # Usuario
 # =========================
-
 class Usuario(Base):
     __tablename__ = "usuarios"
 
@@ -782,6 +822,7 @@ class ColaboradorPermissao(Base):
     colaborador_id = Column(Integer, ForeignKey("colaboradores.id", ondelete="CASCADE"), primary_key=True)
     permissao_id   = Column(String,  ForeignKey("permissoes.id",     ondelete="CASCADE"), primary_key=True)
     criado_em      = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
 
 class Disparo(Base):
     __tablename__ = "disparos"
@@ -975,6 +1016,7 @@ class ChatbotConfig(Base):
             name="uq_chatbot_conf_emp_inst_nome",
         ),
     )
+
 
 # =======================================================
 # Chat Interno — MODELO (1 tabela + estado de leitura)

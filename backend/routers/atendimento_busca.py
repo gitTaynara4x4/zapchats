@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Body, Query
+from fastapi import APIRouter, Depends, HTTPException, Body, Query, Response, Path
 import mimetypes
 import os
 import re
@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func
+from sqlalchemy import or_, func, text
 from sqlalchemy.exc import ProgrammingError
 
 from backend.database import get_db
@@ -25,39 +25,209 @@ EVOLUTION_URL = (os.getenv("EVOLUTION_URL", "").rstrip("/"))
 EVOLUTION_KEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_KEY")
 HEADERS = {"apikey": EVOLUTION_KEY, "Content-Type": "application/json"} if EVOLUTION_KEY else {}
 
+# =========================================================
+# ACL / Permissões (mesmo padrão do "novo atendimento")
+# =========================================================
+def _to_int(v) -> Optional[int]:
+    try:
+        if v is None:
+            return None
+        s = str(v).strip()
+        if not s:
+            return None
+        return int(s)
+    except Exception:
+        return None
+
+
+def _is_admin(identity: dict) -> bool:
+    try:
+        if identity.get("is_admin") or identity.get("admin"):
+            return True
+        perms = identity.get("permissoes") or identity.get("permissions") or []
+        if isinstance(perms, dict):
+            perms = [k for k, v in perms.items() if v]
+        perms = set(str(p).lower() for p in (perms or []))
+        return any(p in perms for p in ("admin", "root", "clientes.gerenciar", "atendimento.gerenciar"))
+    except Exception:
+        return False
+
+
+def _ensure_perm(identity: dict, perm: str) -> None:
+    if _is_admin(identity):
+        return
+    perms = set(identity.get("permissoes") or [])
+    if perm not in perms:
+        raise HTTPException(status_code=403, detail=f"Sem permissão ({perm})")
+
+
+def _infer_kind(identity: dict) -> str:
+    k = (identity.get("kind") or identity.get("tipo") or "").lower().strip()
+    if k in ("colaborador", "usuario", "admin"):
+        return "colaborador" if k == "colaborador" else "usuario"
+    sub = str(identity.get("sub") or "").strip().lower()
+    role = str(identity.get("role") or "").strip().lower()
+    if sub.startswith("colab-") or "colab" in role or "colaborador" in role:
+        return "colaborador"
+    return "usuario"
+
+
+def _get_colab_id(identity: dict) -> Optional[int]:
+    for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
+        cid = _to_int(identity.get(key))
+        if cid:
+            return cid
+    sub = str(identity.get("sub") or "").strip().lower()
+    if sub.startswith("colab-"):
+        cid = _to_int(sub.split("-", 1)[1])
+        if cid:
+            return cid
+    return _to_int(identity.get("id"))
+
+
+def _table_exists(db: Session, table_name: str) -> bool:
+    try:
+        reg = db.execute(text(f"SELECT to_regclass('public.{table_name}')")).scalar()
+        return reg is not None
+    except Exception:
+        return False
+
+
+def _allowed_instancia_ids(db: Session, identity: dict, empresa_id: int) -> Optional[List[int]]:
+    """
+    Retorna:
+      - None => sem restrição (admin/usuario master OU tabela inexistente)
+      - []   => colaborador sem instâncias permitidas (nega tudo)
+      - [..] => lista de instâncias permitidas
+    """
+    if _is_admin(identity):
+        return None
+
+    if _infer_kind(identity) != "colaborador":
+        return None
+
+    if not _table_exists(db, "colaboradores_instancias"):
+        return None  # legado: não restringe
+
+    cid = _get_colab_id(identity)
+    if not cid:
+        return []
+
+    rows = db.execute(
+        text(
+            """
+            SELECT instancia_id
+            FROM colaboradores_instancias
+            WHERE empresa_id = :emp
+              AND colaborador_id = :cid
+            """
+        ),
+        {"emp": int(empresa_id), "cid": int(cid)},
+    ).fetchall()
+
+    ids = [int(r[0]) for r in rows if r and r[0] is not None]
+    return ids
+
+
+def _assert_instancia_allowed(allowed: Optional[List[int]], instancia_id: Optional[int]) -> None:
+    if instancia_id is None:
+        return
+    if allowed is None:
+        return
+    if int(instancia_id) not in set(int(x) for x in allowed):
+        raise HTTPException(status_code=403, detail="Instância não permitida para este usuário")
+
+
+def _assert_cliente_access_by_instancias(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente_id: int,
+    allowed: Optional[List[int]],
+) -> None:
+    """
+    Garante que colaborador só acesse cliente que tenha mensagens em instância permitida.
+    Admin/allowed=None => libera.
+    """
+    if allowed is None:
+        return
+    if not allowed:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    ok = (
+        db.query(models.Mensagem.id)
+        .filter(
+            models.Mensagem.empresa_id == int(empresa_id),
+            models.Mensagem.cliente_id == int(cliente_id),
+            models.Mensagem.instancia_id.in_([int(x) for x in allowed]),
+        )
+        .first()
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+
+def _resolve_instancia_id(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: Optional[int],
+    instance: Optional[str],
+) -> Tuple[Optional[int], Optional[str]]:
+    if instancia_id is not None:
+        row = (
+            db.query(models.EmpresaInstancia)
+            .filter(
+                models.EmpresaInstancia.empresa_id == int(empresa_id),
+                models.EmpresaInstancia.id == int(instancia_id),
+            )
+            .first()
+        )
+        if row:
+            return int(row.id), row.instance_name
+        return None, None
+
+    if instance:
+        row = (
+            db.query(models.EmpresaInstancia)
+            .filter(
+                models.EmpresaInstancia.empresa_id == int(empresa_id),
+                models.EmpresaInstancia.instance_name == instance,
+            )
+            .first()
+        )
+        if row:
+            return int(row.id), row.instance_name
+        return None, None
+
+    return None, None
+
 
 # ===== Schemas =====
 class FetchProfileIn(BaseModel):
     number: str
-    empresa_id: int | None = None     # opcional; se não vier, usamos a do token
-    instancia_id: int | None = None   # opcional: id da instância
-    instance: str | None = None       # opcional: nome da instância (instance_name)
+    empresa_id: int | None = None
+    instancia_id: int | None = None
+    instance: str | None = None
 
 
 class SaveProfileIn(BaseModel):
-    """
-    Aceita tanto o shape 'normalizado' quanto o shape Evolution.
-    Só persistimos colunas existentes em models.Cliente.
-    """
-    # shape normalizado (campos que o front envie se quiser fazer merge)
     avatar_url: str | None = None
-    # nome: removido de updates automáticos
     is_business: bool | None = None
-    status_text: str | None = None     # -> status_whatsapp
+    status_text: str | None = None
     email: str | None = None
-    description: str | None = None     # -> descricao
+    description: str | None = None
     website: str | None = None
-    sobre_cliente: str | None = None   # notas (drawer)
+    sobre_cliente: str | None = None
 
     # shape bruto do Evolution (opcional)
     name: str | None = None
     isBusiness: bool | None = None
     picture: str | None = None
-    status: dict | None = None         # {"status": "...", "setAt": "..."}
+    status: dict | None = None
 
 
 class SaveCustomIn(BaseModel):
-    """Campos custom do drawer (formulário de endereço/documentos)."""
     nome_completo: str | None = None
     cpf_cnpj: str | None = None
     rg: str | None = None
@@ -69,7 +239,6 @@ class SaveCustomIn(BaseModel):
     bairro: str | None = None
     cidade: str | None = None
     estado: str | None = None
-    # novos (compat opcional)
     data_nascimento: str | None = None
     genero: str | None = None
 
@@ -78,9 +247,9 @@ class SaveCustomIn(BaseModel):
 def _assert_mesma_empresa(empresa_do_token: int, empresa_da_query: int | None) -> int:
     if empresa_da_query is None:
         return empresa_do_token
-    if empresa_da_query != empresa_do_token:
+    if int(empresa_da_query) != int(empresa_do_token):
         raise HTTPException(403, "Empresa inválida para este recurso")
-    return empresa_da_query
+    return int(empresa_da_query)
 
 
 def _pick_instance_name(
@@ -142,7 +311,7 @@ def _parse_date_any(v):
     if not s:
         return None
 
-    m = re.match(r"^(\d{2})/(\d{2})/(\d{4})$", s)  # BR
+    m = re.match(r"^(\d{2})/(\d{2})/(\d{4})$", s)
     if m:
         dd, mm, yy = map(int, m.groups())
         try:
@@ -186,44 +355,35 @@ def _set_if_changed(row, field: str, value) -> bool:
     return False
 
 
-# Campos permitidos para merge no profile (NÃO inclui 'nome')
+def _avatar_proxy_url(cliente_id: int) -> str:
+    # ajuste aqui se seu prefixo real for diferente
+    return f"/api/atendimento/avatar/{int(cliente_id)}"
+
+
 UPDATABLE_FIELDS = {
-    # básicos / visual
     "avatar_url",
-    # evolution / status
     "wuid", "whatsapp_exists", "is_business", "status_text", "status_set_at",
-    # contato extra
     "email", "description", "website",
-    # custom
     "nome_completo", "cpf_cnpj", "rg",
     "data_nascimento", "genero",
     "cep", "endereco", "numero", "complemento", "bairro", "cidade", "estado",
-    # notas
     "sobre_cliente",
 }
 
-# Mapeamento de campos normalizados -> colunas reais
 FIELD_MAP = {
     "status_text": "status_whatsapp",
     "description": "descricao",
 }
 
-
-# ============= ROTAS EVOLUTION: fetchProfile (com persistência ao abrir) =============
+# ============= ROTAS EVOLUTION: fetchProfile =============
 @router.post("/evolution/fetchProfile")
 def evolution_fetch_profile(
     payload: FetchProfileIn,
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    """
-    1) Chama Evolution: /chat/fetchProfile/{instance}
-    2) Retorna payload normalizado para o front
-    3) Atualiza o BD somente ao abrir o perfil:
-       - Só dá UPDATE se algum valor mudou (evita writes desnecessários)
-       - NÃO atualiza telefone_norm (coluna gerada)
-       - **NÃO altera o campo 'nome'**; salva o nome vindo do WA em `nome_whatsapp`.
-    """
+    _ensure_perm(identity, "atendimento.ver")
+
     if not EVOLUTION_URL:
         raise HTTPException(500, "EVOLUTION_URL não configurada no servidor.")
     if not payload.number:
@@ -231,11 +391,25 @@ def evolution_fetch_profile(
 
     empresa_id_token = int(identity["empresa_id"])
     empresa_id_eff = _assert_mesma_empresa(empresa_id_token, payload.empresa_id)
+
+    # ACL instâncias (se colaborador)
+    allowed = _allowed_instancia_ids(db, identity, empresa_id_eff)
+
+    # resolve instância solicitada (se vier)
+    resolved_inst_id, resolved_inst_name = _resolve_instancia_id(
+        db, empresa_id=empresa_id_eff, instancia_id=payload.instancia_id, instance=payload.instance
+    )
+    if (payload.instancia_id is not None or payload.instance) and resolved_inst_id is None:
+        raise HTTPException(404, "Instância não encontrada para a empresa.")
+
+    _assert_instancia_allowed(allowed, resolved_inst_id)
+
+    # se não informarem, escolhe a melhor (como já era)
     instance_name = _pick_instance_name(
         db,
         empresa_id_eff,
-        instance=payload.instance,
-        instancia_id=payload.instancia_id,
+        instance=resolved_inst_name,
+        instancia_id=resolved_inst_id,
     )
 
     numero_norm = _only_digits(payload.number)
@@ -307,9 +481,12 @@ def evolution_fetch_profile(
             .first()
         )
 
+    # se for colaborador com ACL, garante que esse cliente está no escopo dele
+    if cli:
+        _assert_cliente_access_by_instancias(db, empresa_id=empresa_id_eff, cliente_id=int(cli.id), allowed=allowed)
+
     changed = False
     if cli:
-        # NÃO tocar em telefone_norm e NÃO tocar em 'nome'
         changed |= _set_if_changed(cli, "is_business", bool(normalized.get("isBusiness")))
         status_obj = normalized.get("status") or {}
         changed |= _set_if_changed(cli, "status_whatsapp", (status_obj.get("status") or None))
@@ -332,7 +509,68 @@ def evolution_fetch_profile(
                 if "generated" not in str(e).lower():
                     raise
 
+        # IMPORTANTE: devolve pro front também a URL proxy (não quebra por CORS/expiração)
+        normalized["avatar_url"] = _avatar_proxy_url(int(cli.id))
+        normalized["avatar_remote_url"] = getattr(cli, "avatar_url", None)  # opcional p/ debug
+    else:
+        # se não achou cliente no BD, pelo menos mantém o remote (front pode ignorar)
+        normalized["avatar_remote_url"] = normalized.get("picture")
+
     return normalized
+
+
+# =========================================================
+# AVATAR PROXY (fix pra foto de perfil aparecer pra todos)
+# =========================================================
+@router.get("/atendimento/avatar/{cliente_id}")
+def atendimento_avatar(
+    cliente_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    _ensure_perm(identity, "atendimento.ver")
+
+    empresa_id_token = int(identity["empresa_id"])
+    allowed = _allowed_instancia_ids(db, identity, empresa_id_token)
+
+    cli = (
+        db.query(models.Cliente)
+        .filter(models.Cliente.id == int(cliente_id))
+        .first()
+    )
+    if not cli:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    if int(getattr(cli, "empresa_id", 0)) != int(empresa_id_token):
+        raise HTTPException(status_code=403, detail="Cliente não pertence à sua empresa")
+
+    _assert_cliente_access_by_instancias(
+        db,
+        empresa_id=int(empresa_id_token),
+        cliente_id=int(cliente_id),
+        allowed=allowed,
+    )
+
+    url = (getattr(cli, "avatar_url", None) or "").strip()
+    if not url:
+        raise HTTPException(status_code=404, detail="Avatar não encontrado")
+
+    headers = {}
+    if EVOLUTION_URL and url.startswith(EVOLUTION_URL) and EVOLUTION_KEY:
+        headers = {"apikey": EVOLUTION_KEY}
+
+    try:
+        r = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+    except Exception:
+        raise HTTPException(status_code=502, detail="Falha ao buscar avatar")
+
+    if r.status_code != 200 or not r.content:
+        raise HTTPException(status_code=404, detail="Avatar indisponível")
+
+    content_type = r.headers.get("content-type") or "image/jpeg"
+    resp = Response(content=r.content, media_type=content_type)
+    resp.headers["Cache-Control"] = "private, max-age=3600"
+    return resp
 
 
 # ---- Perfil completo (ler do BD) ----
@@ -342,6 +580,8 @@ def get_cliente_profile(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
+    _ensure_perm(identity, "atendimento.ver")
+
     cli = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
     if not cli:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
@@ -350,14 +590,18 @@ def get_cliente_profile(
     if int(cli.empresa_id) != empresa_id_token:
         raise HTTPException(403, "Cliente não pertence à sua empresa")
 
+    allowed = _allowed_instancia_ids(db, identity, empresa_id_token)
+    _assert_cliente_access_by_instancias(db, empresa_id=empresa_id_token, cliente_id=int(cliente_id), allowed=allowed)
+
+    # devolve SEMPRE proxy, e mantém o remote separado (se quiser)
     return {
         "id": cli.id,
         "empresa_id": cli.empresa_id,
         "telefone": cli.telefone,
-        "avatar_url": getattr(cli, "avatar_url", None),
+        "avatar_url": _avatar_proxy_url(int(cli.id)),
+        "avatar_remote_url": getattr(cli, "avatar_url", None),
         "nome": getattr(cli, "nome", None),
         "nome_whatsapp": getattr(cli, "nome_whatsapp", None),
-        # ===== Campos personalizados =====
         "nome_completo": getattr(cli, "nome_completo", None),
         "cpf_cnpj": getattr(cli, "cpf_cnpj", None),
         "rg": getattr(cli, "rg", None),
@@ -373,13 +617,10 @@ def get_cliente_profile(
         "bairro": getattr(cli, "bairro", None),
         "cidade": getattr(cli, "cidade", None),
         "estado": getattr(cli, "estado", None),
-        # Evolution (somente leitura no front)
         "is_business": getattr(cli, "is_business", None),
         "status_text": getattr(cli, "status_whatsapp", None),
-        # extras úteis
         "description": getattr(cli, "descricao", None),
         "website": getattr(cli, "website", None),
-        # notas
         "sobre_cliente": getattr(cli, "sobre_cliente", None),
     }
 
@@ -393,13 +634,8 @@ def merge_cliente_profile(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    """
-    Atualização NÃO-DESTRUTIVA:
-    - Só atualiza campos presentes no payload E com valor não-vazio (após _clean).
-    - Campos ausentes são ignorados (não apaga).
-    - Suporta aliases: data_nascimento|nascimento|dataNascimento e genero|sexo.
-    - **Ignora o campo 'nome' se vier no payload.**
-    """
+    _ensure_perm(identity, "atendimento.ver")
+
     cli = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
     if not cli:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
@@ -408,10 +644,11 @@ def merge_cliente_profile(
     if int(cli.empresa_id) != empresa_id_token:
         raise HTTPException(403, "Cliente não pertence à sua empresa")
 
+    allowed = _allowed_instancia_ids(db, identity, empresa_id_token)
+    _assert_cliente_access_by_instancias(db, empresa_id=empresa_id_token, cliente_id=int(cliente_id), allowed=allowed)
+
     norm = dict(payload or {})
-    # proteção extra: remover 'nome' se vier
-    if "nome" in norm:
-        norm.pop("nome", None)
+    norm.pop("nome", None)  # proteção extra
 
     if "genero" not in norm and "sexo" in norm:
         norm["genero"] = norm.get("sexo")
@@ -452,6 +689,8 @@ def cliente_get(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
+    _ensure_perm(identity, "atendimento.ver")
+
     cli = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
     if not cli:
         raise HTTPException(404, "Cliente não encontrado.")
@@ -459,6 +698,9 @@ def cliente_get(
     empresa_id_token = int(identity["empresa_id"])
     if int(cli.empresa_id) != empresa_id_token:
         raise HTTPException(403, "Cliente não pertence à sua empresa")
+
+    allowed = _allowed_instancia_ids(db, identity, empresa_id_token)
+    _assert_cliente_access_by_instancias(db, empresa_id=empresa_id_token, cliente_id=int(cliente_id), allowed=allowed)
 
     return {
         "id": cli.id,
@@ -487,11 +729,8 @@ def cliente_put(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    """
-    Atualiza campos custom do cliente (formulário do drawer) de forma NÃO-DESTRUTIVA.
-    Usa exclude_unset=True para aplicar somente campos enviados no JSON.
-    Strings vazias são ignoradas (não sobrescrevem com NULL).
-    """
+    _ensure_perm(identity, "atendimento.ver")
+
     cli = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
     if not cli:
         raise HTTPException(404, "Cliente não encontrado.")
@@ -499,6 +738,9 @@ def cliente_put(
     empresa_id_token = int(identity["empresa_id"])
     if int(cli.empresa_id) != empresa_id_token:
         raise HTTPException(403, "Cliente não pertence à sua empresa")
+
+    allowed = _allowed_instancia_ids(db, identity, empresa_id_token)
+    _assert_cliente_access_by_instancias(db, empresa_id=empresa_id_token, cliente_id=int(cliente_id), allowed=allowed)
 
     incoming = payload.model_dump(exclude_unset=True)
     changed = False
@@ -562,7 +804,7 @@ def _smart_mimetype(tipo: str | None, mt_db: str | None, filename: str | None) -
     if t == "video":
         return "video/mp4"
     if t == "audio":
-        return "audio/ogg"  # ptt/opus costuma vir .ogg
+        return "audio/ogg"
     if t == "sticker":
         return "image/webp"
 
@@ -573,7 +815,6 @@ def _smart_mimetype(tipo: str | None, mt_db: str | None, filename: str | None) -
     return "application/octet-stream"
 
 
-# ---- Helpers para servir bytes/local file com suporte a Range ----
 _RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)")
 
 
@@ -633,13 +874,8 @@ def atendimento_search(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    """
-    Responde no shape esperado pelo front:
-    {
-      "contatos": [{ id, nome, telefone, avatar_url, ultima_mensagem, hora, last_ts }, ...],
-      "mensagens": [{ cliente_id, cliente_nome, cliente_telefone, snippet, hora }, ...]
-    }
-    """
+    _ensure_perm(identity, "atendimento.ver")
+
     empresa_id_token = int(identity["empresa_id"])
     empresa_id_eff = _assert_mesma_empresa(empresa_id_token, empresa_id)
 
@@ -647,13 +883,35 @@ def atendimento_search(
     if not qn:
         return {"contatos": [], "mensagens": []}
 
+    allowed = _allowed_instancia_ids(db, identity, empresa_id_eff)
+
+    # resolve instância pedida (se vier)
+    resolved_inst_id, _resolved_inst_name = _resolve_instancia_id(
+        db, empresa_id=empresa_id_eff, instancia_id=instancia_id, instance=instance
+    )
+    if (instancia_id is not None or instance) and resolved_inst_id is None:
+        raise HTTPException(404, "Instância não encontrada para a empresa.")
+    _assert_instancia_allowed(allowed, resolved_inst_id)
+
     m = models.Mensagem
+
+    # ----------------- filtros efetivos de instância -----------------
+    filtros_inst = []
+    if resolved_inst_id is not None:
+        filtros_inst.append(m.instancia_id == int(resolved_inst_id))
+    else:
+        if allowed is not None:
+            if not allowed:
+                return {"contatos": [], "mensagens": []}
+            filtros_inst.append(m.instancia_id.in_([int(x) for x in allowed]))
+
+    # subquery: última msg por cliente (já respeitando instâncias)
     sub_last = (
         db.query(
             m.cliente_id.label("cid"),
             func.max(m.id).label("last_msg_id"),
         )
-        .filter(m.empresa_id == empresa_id_eff)
+        .filter(m.empresa_id == empresa_id_eff, *filtros_inst)
         .group_by(m.cliente_id)
         .subquery()
     )
@@ -686,7 +944,8 @@ def atendimento_search(
                 "id": cli.id,
                 "nome": nome or tel,
                 "telefone": cli.telefone,
-                "avatar_url": getattr(cli, "avatar_url", None),
+                "avatar_url": _avatar_proxy_url(int(cli.id)),
+                "avatar_remote_url": getattr(cli, "avatar_url", None),
                 "ultima_mensagem": last,
                 "hora": ts_iso,
                 "last_ts": ts_iso,
@@ -695,21 +954,6 @@ def atendimento_search(
             })
             if len(contatos) >= limit:
                 break
-
-    filtros = [m.empresa_id == empresa_id_eff]
-    if instancia_id is not None:
-        filtros.append(m.instancia_id == instancia_id)
-    if instance:
-        inst_row = (
-            db.query(models.EmpresaInstancia)
-            .filter(
-                models.EmpresaInstancia.empresa_id == empresa_id_eff,
-                models.EmpresaInstancia.instance_name == instance,
-            )
-            .first()
-        )
-        if inst_row:
-            filtros.append(m.instancia_id == inst_row.id)
 
     like = f"%{q}%"
     msgs_rows = (
@@ -722,7 +966,7 @@ def atendimento_search(
             models.Cliente.nome_whatsapp,
         )
         .join(models.Cliente, models.Cliente.id == m.cliente_id)
-        .filter(*filtros, m.conteudo.ilike(like))
+        .filter(m.empresa_id == empresa_id_eff, *filtros_inst, m.conteudo.ilike(like))
         .order_by(m.timestamp.desc())
         .limit(min(limit, 80))
         .all()

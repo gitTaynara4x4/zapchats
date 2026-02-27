@@ -3,6 +3,11 @@
 // LISTA DE CONVERSAS (render, dedupe, preview, paginação)
 // ✅ Falhou imagem => placeholder (SEM refresh)
 // ✅ Daily refresh 1x/dia: só sem foto, top 50, conc 2, localStorage
+// ✅ FIX GRUPOS: detecta JID @g.us, preserva jid/remoteJid, is_group, normaliza tel
+// ✅ Dedupe seguro: conversa de grupo NÃO entra no dedupe por telefone
+// ✅ Dedupe seguro: grupo também NÃO entra no merge por NOME
+// ✅ Click/merge: mantém instância + dados canônicos (jid/tel_norm)
+// ✅ FIX BIGINT/GRUPOS: IDs string-first (NUNCA Number() no id)
 // =====================================================================
 
 import { EMPRESA_ID } from '../core/env.js';
@@ -16,6 +21,28 @@ import { escapeHtml, formatarNumeroBR, badge } from '../core/format.js';
 import { hasHistory, primeWith, getHist } from '../domain/hist-cache.js';
 
 /* =========================================================
+   ID helpers (string-first)
+   ========================================================= */
+function idKey(v) {
+  const s = String(v ?? '').trim();
+  if (!s || s === 'null' || s === 'undefined' || s === 'NaN') return null;
+  return s;
+}
+function idEq(a, b) {
+  const A = idKey(a), B = idKey(b);
+  if (!A || !B) return false;
+  return A === B;
+}
+function idToBig(v) {
+  const s = idKey(v);
+  if (!s) return 0n;
+  if (/^\d+$/.test(s)) {
+    try { return BigInt(s); } catch { return 0n; }
+  }
+  return 0n;
+}
+
+/* =========================================================
    Toggle global: prefetch leve de mensagens (ligado por padrão)
    ========================================================= */
 if (typeof window !== 'undefined') {
@@ -27,29 +54,27 @@ if (typeof window !== 'undefined') {
 /* =========================================================
    AVATAR: handlers globais (placeholder-only, sem refresh onerror)
    ========================================================= */
-function _ensureAvatarPlaceholder(span){
-  try{
+function _ensureAvatarPlaceholder(span) {
+  try {
     if (!span) return;
     span.classList.add('placeholder');
     span.innerHTML = '<i class="fa fa-user-circle"></i>';
-  }catch{}
+  } catch {}
 }
 
 if (typeof window !== 'undefined') {
-  // ✅ LISTA: só placeholder
-  window.handleListAvatarError = function(imgEl, clienteId){
-    try{
+  window.handleListAvatarError = function (imgEl, clienteId) {
+    try {
       if (!imgEl) return;
       try { imgEl.onerror = null; } catch {}
       const span = imgEl.closest?.('.avatar') || imgEl.parentElement;
       try { imgEl.remove(); } catch {}
       _ensureAvatarPlaceholder(span);
-    }catch{}
+    } catch {}
   };
 
-  // ✅ HEADER (caso alguém use aqui): só placeholder
-  window.handleAvatarError = function(imgEl){
-    try{
+  window.handleAvatarError = function (imgEl) {
+    try {
       if (!imgEl) return;
       try { imgEl.onerror = null; } catch {}
       const span = imgEl.closest?.('.avatar') || imgEl.parentElement;
@@ -58,7 +83,7 @@ if (typeof window !== 'undefined') {
         span.classList.add('avatar-default');
         span.innerHTML = '<i class="fa fa-user-circle"></i>';
       }
-    }catch{}
+    } catch {}
   };
 }
 
@@ -68,40 +93,33 @@ if (typeof window !== 'undefined') {
 let __dailyKickScheduled = false;
 let __dailyRunning = false;
 
-function _ymdLocal(){
+function _ymdLocal() {
   const d = new Date();
   const yyyy = d.getFullYear();
-  const mm = String(d.getMonth()+1).padStart(2,'0');
-  const dd = String(d.getDate()).padStart(2,'0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
   return `${yyyy}${mm}${dd}`;
 }
-
-function _dailyKey(){
-  return `av_daily:v1:e${Number(EMPRESA_ID||0)}:d${_ymdLocal()}`;
+function _dailyKey() {
+  return `av_daily:v1:e${Number(EMPRESA_ID || 0)}:d${_ymdLocal()}`;
 }
-
-function _shouldRunDaily(){
-  try{
+function _shouldRunDaily() {
+  try {
     if (window.AVATAR_DAILY_REFRESH === false) return false;
     const k = _dailyKey();
     return !localStorage.getItem(k);
-  }catch{
+  } catch {
     return true;
   }
 }
-
-function _markDaily(){
-  try{
-    localStorage.setItem(_dailyKey(), String(Date.now()));
-  }catch{}
+function _markDaily() {
+  try { localStorage.setItem(_dailyKey(), String(Date.now())); } catch {}
 }
 
-async function runDailyAvatarRefresh(){
-  try{
+async function runDailyAvatarRefresh() {
+  try {
     if (__dailyRunning) return;
     if (!_shouldRunDaily()) return;
-
-    // só roda se o refresh existir (perfil_quick.js)
     if (typeof window.refreshAvatarFromEvolution !== 'function') return;
 
     __dailyRunning = true;
@@ -112,15 +130,10 @@ async function runDailyAvatarRefresh(){
     const base = Array.isArray(state.clientesCache) ? state.clientesCache.slice() : [];
     if (!base.length) { _markDaily(); return; }
 
-    // top 50 mais recentes (com pin primeiro, igual UI)
     const topRecent = ordenarConversasDesc(base).slice(0, limit);
-
-    // só quem está sem foto
     const targets = topRecent.filter(c => !c?.avatar_url);
 
-    // marca no começo (não repete no mesmo dia)
     _markDaily();
-
     if (!targets.length) return;
 
     const queue = targets.slice();
@@ -130,22 +143,19 @@ async function runDailyAvatarRefresh(){
       async () => {
         while (queue.length) {
           const c = queue.shift();
-          const cid = Number(c?.id ?? c?.conversation_id ?? 0);
+          const cid = idKey(c?.id ?? c?.conversation_id ?? c?.cliente_id ?? null);
           if (!cid) continue;
+
+          // refreshAvatarFromEvolution normalmente espera id numérico do DB.
+          if (!/^\d+$/.test(cid)) continue;
+          const cidNum = Number(cid);
+          if (!Number.isFinite(cidNum) || cidNum <= 0) continue;
 
           const number = (c?.telefone_norm || c?.telefone || c?.number || '');
           const instRaw = (c?.instancia_id ?? c?.instancia ?? null);
 
-          // monta opt com instância do PRÓPRIO contato
-          const opt = {
-            trigger: 'daily',
-            number,
-            instancia_raw: instRaw
-          };
-
-          try{
-            await window.refreshAvatarFromEvolution(cid, opt);
-          }catch{}
+          const opt = { trigger: 'daily', number, instancia_raw: instRaw };
+          try { await window.refreshAvatarFromEvolution(cidNum, opt); } catch {}
         }
       }
     );
@@ -156,13 +166,12 @@ async function runDailyAvatarRefresh(){
   }
 }
 
-function kickDailyAvatarRefreshSoon(){
+function kickDailyAvatarRefreshSoon() {
   if (__dailyKickScheduled) return;
   __dailyKickScheduled = true;
   setTimeout(() => { try { runDailyAvatarRefresh(); } catch {} }, 350);
 }
 
-// expõe global (init.js também pode chamar)
 if (typeof window !== 'undefined') {
   window.runDailyAvatarRefresh = window.runDailyAvatarRefresh || runDailyAvatarRefresh;
 }
@@ -170,10 +179,48 @@ if (typeof window !== 'undefined') {
 /* =========================================================
    Helpers
    ========================================================= */
+function onlyDigits(s) { return String(s ?? '').replace(/\D+/g, ''); }
+function isGroupJid(s) {
+  const v = String(s || '');
+  return /@g\.us$/i.test(v);
+}
+
+// ✅ Heurística: alguns bridges retornam grupo como número "1203...." (sem @g.us)
+// Se começar com 120 e for bem longo, tratamos como grupo.
+function looksLikeNumericGroupId(digits) {
+  const d = String(digits || '');
+  return d.startsWith('120') && d.length >= 15;
+}
+
+// Para grupos: mantém o JID (não tenta virar telefone)
+function normalizeJidOrPhone(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return { is_group: false, jid: '', tel_norm: '' };
+
+  // Já veio como JID
+  if (s.includes('@')) {
+    const jid = s;
+    return { is_group: isGroupJid(jid), jid, tel_norm: '' };
+  }
+
+  const d = onlyDigits(s);
+
+  // ✅ grupo numérico sem sufixo
+  if (looksLikeNumericGroupId(d)) {
+    return { is_group: true, jid: `${d}@g.us`, tel_norm: '' };
+  }
+
+  // Tel (BR) normalizado
+  const sem55 = (d.startsWith('55') && d.length > 11) ? d.slice(2) : d;
+  const tel_norm = (sem55.length === 10 || sem55.length === 11) ? sem55 : '';
+  return { is_group: false, jid: '', tel_norm };
+}
+
 function normalizaTelefoneBR(s) {
   const raw = String(s ?? '');
   if (raw.includes('@')) return '';
   const d = raw.replace(/\D/g, '');
+  if (looksLikeNumericGroupId(d)) return ''; // ✅ não trata como telefone
   const sem55 = (d.startsWith('55') && d.length > 11) ? d.slice(2) : d;
   return (sem55.length === 10 || sem55.length === 11) ? sem55 : '';
 }
@@ -206,27 +253,37 @@ function ordenarConversasDesc(arr) {
     const recCmp = scoreRecencia(b) - scoreRecencia(a);
     if (recCmp !== 0) return recCmp;
 
-    const ib = Number(b.id ?? b.conversation_id ?? b.cliente_id ?? 0);
-    const ia = Number(a.id ?? a.conversation_id ?? a.cliente_id ?? 0);
-    return ib - ia;
+    // tie-breaker estável com BigInt (quando for numérico)
+    const ib = idToBig(b?.id ?? b?.conversation_id ?? b?.cliente_id ?? 0);
+    const ia = idToBig(a?.id ?? a?.conversation_id ?? a?.cliente_id ?? 0);
+    if (ib > ia) return 1;
+    if (ib < ia) return -1;
+    return 0;
   });
 }
 
-/**
- * Dedupe em 3 fases (preserva .pinned)
- */
+/* =========================================================
+   Dedupe em 3 fases (preserva .pinned)
+   ✅ FIX: grupos NÃO entram na fase por telefone
+   ✅ FIX: grupos também NÃO entram no merge por nome
+   ✅ FIX: ids string-first
+   ========================================================= */
 function dedupeConversas(arr) {
   if (!Array.isArray(arr)) return [];
 
   const base = ordenarConversasDesc(arr);
 
+  // 1) por inst + id (sempre)
   const byKey = new Map();
   for (const c of base) {
     const inst = String(c.instancia_id ?? c.instancia ?? 'all');
-    const pref = temValor(c.conversation_id) ? c.conversation_id
-      : temValor(c.cliente_id) ? c.cliente_id
-        : temValor(c.id) ? c.id
-          : `noid:${Math.random()}`;
+
+    const pref =
+      idKey(c.conversation_id) ??
+      idKey(c.cliente_id) ??
+      idKey(c.id) ??
+      `noid:${Math.random()}`;
+
     const key = `${inst}:${pref}`;
     const cur = byKey.get(key);
 
@@ -237,12 +294,38 @@ function dedupeConversas(arr) {
     }
   }
 
+  // 2) por inst + telefone (SÓ NÃO-GRUPO)
+  // ✅ e já grava grupos como itens únicos (inst + jid)
   const byFone = new Map();
   const semFone = [];
+
   for (const c of byKey.values()) {
     const inst = String(c.instancia_id ?? c.instancia ?? 'all');
+
+    const isGrp = Boolean(c.is_group) || isGroupJid(c.jid || c.remoteJid || c.telefone || '');
+
+    if (isGrp) {
+      // ✅ grupo sempre vira chave própria (NUNCA vai pra merge por nome)
+      const gid =
+        idKey(c.jid) ||
+        idKey(c.remoteJid) ||
+        (String(c.telefone || '').includes('@') ? idKey(c.telefone) : null) ||
+        idKey(c.id ?? c.conversation_id ?? c.cliente_id) ||
+        `g:${Math.random()}`;
+
+      const gkey = `${inst}:__group__:${gid}`;
+      const cur = byFone.get(gkey);
+      if (!cur || scoreRecencia(c) > scoreRecencia(cur)) {
+        byFone.set(gkey, { ...c, pinned: Boolean(c.pinned || cur?.pinned) });
+      } else if (cur) {
+        cur.pinned = Boolean(cur.pinned || c.pinned);
+      }
+      continue;
+    }
+
     const telNorm = normalizaTelefoneBR(c.telefone);
     if (!telNorm) { semFone.push(c); continue; }
+
     const fkey = `${inst}:${telNorm}`;
     const cur = byFone.get(fkey);
 
@@ -253,8 +336,12 @@ function dedupeConversas(arr) {
     }
   }
 
+  // 3) merge por nome dentro da inst (SÓ para itens sem telefone e NÃO-GRUPO)
   const byInstNomeComFone = new Map();
   for (const [key, val] of byFone.entries()) {
+    // ignora grupos nos índices por nome
+    if (String(key).includes(':__group__:')) continue;
+
     const instKey = String(key).split(':')[0];
     const inst = instKey || String(val.instancia_id ?? val.instancia ?? 'all');
     const nomeNorm = normalizeName(val.nome_whatsapp || val.nome || val.push_name);
@@ -274,10 +361,32 @@ function dedupeConversas(arr) {
   const byInstNomeOnly = new Map();
   for (const c of semFone) {
     const inst = String(c.instancia_id ?? c.instancia ?? 'all');
+
+    // ✅ garante: se virou grupo por algum motivo, não mergeia por nome
+    const isGrp = Boolean(c.is_group) || isGroupJid(c.jid || c.remoteJid || c.telefone || '');
+    if (isGrp) {
+      const gid =
+        idKey(c.jid) ||
+        idKey(c.remoteJid) ||
+        (String(c.telefone || '').includes('@') ? idKey(c.telefone) : null) ||
+        idKey(c.id ?? c.conversation_id ?? c.cliente_id) ||
+        `g:${Math.random()}`;
+
+      const gkey = `${inst}:__group__:${gid}`;
+      const cur = byFone.get(gkey);
+      if (!cur || scoreRecencia(c) > scoreRecencia(cur)) {
+        byFone.set(gkey, { ...c, pinned: Boolean(c.pinned || cur?.pinned) });
+      } else if (cur) {
+        cur.pinned = Boolean(cur.pinned || c.pinned);
+      }
+      continue;
+    }
+
     const nomeNorm = normalizeName(c.nome_whatsapp || c.nome || c.push_name);
 
     if (!nomeNorm) {
-      const key = `${inst}:__no_phone__:${c.id ?? c.conversation_id ?? Math.random()}`;
+      const uniq = idKey(c.id ?? c.conversation_id) ?? String(Math.random());
+      const key = `${inst}:__no_name__:${uniq}`;
       const cur = byFone.get(key);
       if (!cur || scoreRecencia(c) > scoreRecencia(cur)) {
         byFone.set(key, { ...c, pinned: Boolean(c.pinned || cur?.pinned) });
@@ -335,13 +444,15 @@ function dedupeConversas(arr) {
 
 /* =========================================================
    Normalização (suporta /conversas e legado /clientes)
+   ✅ FIX GRUPOS: detecta JID @g.us e marca is_group + jid
+   ✅ FIX BIGINT: id string-first
    ========================================================= */
 export function normalizeCliente(c) {
   const inst =
     c.instancia_id ?? c.instancia ?? c.instancia_slug ??
     c.instance_id ?? c.instance ?? c.session ?? c.sessionName ?? c.sessao ?? c.inst_slug ?? null;
 
-  const id = Number(c.conversation_id ?? c.cliente_id ?? c.id ?? c.cid ?? 0) || null;
+  const id = idKey(c.conversation_id ?? c.cliente_id ?? c.id ?? c.cid ?? null);
 
   const rawHora =
     c.ultima_ts ?? c.hora ?? c.last_ts ?? c.updated_at ?? c.last_message_at ?? c.timestamp ?? null;
@@ -355,17 +466,51 @@ export function normalizeCliente(c) {
   const fotoOk = fotoStr && !/^(null|undefined|about:blank)$/i.test(fotoStr);
   const foto = fotoOk ? fotoStr : '';
 
+  const remote =
+    c.remoteJid ?? c.remote_jid ?? c.jid ?? c.chat_jid ?? c.key_remoteJid ??
+    c.telefone ?? c.number ?? c.wuid ?? c.numero ?? null;
+
+  const parsed = normalizeJidOrPhone(remote);
+
+  const hintedGroup =
+    Boolean(c.is_group) || Boolean(c.grupo) || Boolean(c.isGroup);
+
+  let jid = parsed.jid || (isGroupJid(remote) ? String(remote) : '');
+
+  // ✅ se o backend disse que é grupo, mas veio sem @g.us, força
+  if (!jid && hintedGroup) {
+    const d = onlyDigits(remote);
+    if (d && looksLikeNumericGroupId(d)) jid = `${d}@g.us`;
+  }
+
+  const is_group =
+    hintedGroup ||
+    Boolean(parsed.is_group) ||
+    isGroupJid(remote) ||
+    isGroupJid(jid);
+
+  const telRaw = c.telefone ?? c.number ?? c.wuid ?? c.numero ?? null;
+  const tel_norm = is_group ? '' : (parsed.tel_norm || normalizaTelefoneBR(telRaw));
+
+  const telForUi = is_group
+    ? (jid || String(remote || ''))
+    : (telRaw);
+
   return {
     id,
-    conversation_id: temValor(c.conversation_id) ? c.conversation_id : id,
-    cliente_id: temValor(c.cliente_id) ? c.cliente_id : id,
+    conversation_id: idKey(c.conversation_id) ?? id,
+    cliente_id: idKey(c.cliente_id) ?? id,
 
     nome_whatsapp: c.nome_whatsapp ?? null,
     nome: c.nome ?? null,
     push_name: c.push_name ?? null,
 
-    telefone: c.telefone ?? c.number ?? c.wuid ?? c.numero ?? null,
-    telefone_norm: normalizaTelefoneBR(c.telefone ?? c.number ?? c.wuid ?? c.numero ?? null),
+    telefone: telForUi,
+    telefone_norm: tel_norm,
+
+    jid: jid || null,
+    remoteJid: jid || null,
+    is_group,
 
     avatar_url: foto ? foto : null,
 
@@ -374,7 +519,7 @@ export function normalizeCliente(c) {
     hora: rawHora,
     last_ts: c.last_ts ?? null,
 
-    novas: Number(c.novas ?? 0),
+    novas: Number(c.novas ?? c.unread ?? 0),
     last_tipo: c.ultima_tipo ?? c.last_tipo ?? c.tipo ?? null,
     last_ack: c.ultima_ack ?? c.last_ack ?? c.ack ?? null,
 
@@ -382,6 +527,10 @@ export function normalizeCliente(c) {
     instancia: inst,
 
     pinned: Boolean(c.pinned || c.fixado || c.pin || false),
+
+    instance_name: c.instance_name ?? c.instancia_nome ?? c.inst_name ?? null,
+    status: c.status ?? c.statusatendimento ?? null,
+    statusatendimento: c.statusatendimento ?? c.status ?? null,
   };
 }
 
@@ -400,7 +549,7 @@ function buildMsgsUrl(convId, instanciaId, extra = {}) {
   if (extra.since_ts) qs.set('since_ts', String(extra.since_ts));
   if (extra.since_id) qs.set('since_id', String(extra.since_id));
 
-  return `/api/atendimento/conversas/${convId}/mensagens?` + qs.toString();
+  return `/api/atendimento/conversas/${encodeURIComponent(String(convId))}/mensagens?` + qs.toString();
 }
 
 async function fetchConv30(convId, instanciaId) {
@@ -422,11 +571,7 @@ async function primeHistories(convs, { concurrency = 2 } = {}) {
   if (!window.PREFETCH_HISTORIES) return;
 
   const lista = Array.isArray(convs) ? convs.slice() : [];
-
-  const unread = lista
-    .filter(c => Number(c.novas || 0) > 0)
-    .slice(0, PREFETCH_LIMIT);
-
+  const unread = lista.filter(c => Number(c.novas || 0) > 0).slice(0, PREFETCH_LIMIT);
   if (!unread.length) return;
 
   const queue = unread.slice();
@@ -436,14 +581,17 @@ async function primeHistories(convs, { concurrency = 2 } = {}) {
     async () => {
       while (queue.length) {
         const c = queue.shift();
+        const convId = idKey(c.id ?? c.conversation_id ?? c.cliente_id ?? null);
+        if (!convId) continue;
+
         const inst = c.instancia_id ?? c.instancia ?? null;
 
         try {
-          const { items, cursors } = await fetchConv30(c.id, inst);
-          primeWith(inst, c.id, items, cursors);
-          try { window.syncPreviewFromCache?.(c.id); } catch {}
+          const { items, cursors } = await fetchConv30(convId, inst);
+          primeWith(inst, convId, items, cursors);
+          try { window.syncPreviewFromCache?.(convId); } catch {}
         } catch (e) {
-          try { console.debug('[primeHistories] erro conv', c.id, e); } catch {}
+          try { console.debug('[primeHistories] erro conv', convId, e); } catch {}
         }
       }
     }
@@ -456,7 +604,6 @@ async function primeHistories(convs, { concurrency = 2 } = {}) {
    Carregar primeira página (20 conversas)
    ========================================================= */
 let _isWired = false;
-let _isLoadingMore = false;
 let __loadingConversas = false;
 
 export async function carregarClientes({ force = false } = {}) {
@@ -484,31 +631,43 @@ export async function carregarClientes({ force = false } = {}) {
     const antigo = Array.isArray(state.clientesCache) ? state.clientesCache : [];
 
     cs.forEach(n => {
-      const a = antigo.find(x => (x.id ?? x.conversation_id) === n.id);
+      const nid = idKey(n?.id ?? n?.conversation_id ?? n?.cliente_id ?? null);
+      if (!nid) return;
+
+      const a = antigo.find(x => idEq(x?.id ?? x?.conversation_id ?? x?.cliente_id, nid));
 
       const oldTs = tsToMillis(a?.hora || a?.last_ts);
       const newTs = tsToMillis(n.hora || n.last_ts);
       const tsCanon = tsToMillis(n.hora || n.last_ts || a?.hora || a?.last_ts);
       if (tsCanon) n.hora = tsCanon;
 
-      if (a && oldTs && newTs && oldTs > newTs) {
-        if (a.ultima_mensagem && String(a.ultima_mensagem).trim()) {
-          n.ultima_mensagem = a.ultima_mensagem;
+      // ✅ preserva campos canônicos (grupo/jid/tel)
+      if (a) {
+        if (!n.jid && a.jid) n.jid = a.jid;
+        if (!n.remoteJid && a.remoteJid) n.remoteJid = a.remoteJid;
+        n.is_group = Boolean(n.is_group || a.is_group || isGroupJid(n.telefone) || isGroupJid(a.telefone));
+        if (n.is_group) {
+          const keep = n.jid || n.remoteJid || a.jid || a.remoteJid || n.telefone || a.telefone || '';
+          if (keep) n.telefone = keep;
+          n.telefone_norm = '';
+        } else {
+          if (!n.telefone_norm && a.telefone_norm) n.telefone_norm = a.telefone_norm;
+          if (!n.telefone && a.telefone) n.telefone = a.telefone;
         }
+      }
+
+      if (a && oldTs && newTs && oldTs > newTs) {
+        if (a.ultima_mensagem && String(a.ultima_mensagem).trim()) n.ultima_mensagem = a.ultima_mensagem;
         if (a.last_tipo) n.last_tipo = a.last_tipo;
         if (a.last_tipo === 'saida' && temValor(a.last_ack)) {
           n.last_ack = Math.max(Number(n.last_ack || 0), Number(a.last_ack || 0));
         }
-        if (temValor(a.novas) && (Number(n.novas) || 0) === 0) {
-          n.novas = Number(a.novas) || 0;
-        }
+        if (temValor(a.novas) && (Number(n.novas) || 0) === 0) n.novas = Number(a.novas) || 0;
       } else {
         if (a && (!n.ultima_mensagem || !String(n.ultima_mensagem).trim()) && a?.ultima_mensagem) {
           n.ultima_mensagem = a.ultima_mensagem;
         }
-        if (temValor(a?.novas) && (Number(n.novas) || 0) === 0) {
-          n.novas = Number(a.novas) || 0;
-        }
+        if (temValor(a?.novas) && (Number(n.novas) || 0) === 0) n.novas = Number(a.novas) || 0;
       }
 
       if (temValor(a?.last_ack)) {
@@ -517,10 +676,13 @@ export async function carregarClientes({ force = false } = {}) {
       }
 
       n.pinned = Boolean(n.pinned || a?.pinned);
+      if (!n.instance_name && a?.instance_name) n.instance_name = a.instance_name;
+      if (!n.status && a?.status) n.status = a.status;
+      if (!n.statusatendimento && a?.statusatendimento) n.statusatendimento = a.statusatendimento;
     });
 
-    const setNovos = new Set(cs.map(x => String(x.id ?? x.conversation_id)));
-    const extrasAntigos = antigo.filter(a => !setNovos.has(String(a.id ?? a.conversation_id)));
+    const setNovos = new Set(cs.map(x => String(idKey(x.id ?? x.conversation_id) ?? '')));
+    const extrasAntigos = antigo.filter(a => !setNovos.has(String(idKey(a.id ?? a.conversation_id) ?? '')));
 
     let all = [...cs, ...extrasAntigos];
     all = dedupeConversas(all);
@@ -532,19 +694,13 @@ export async function carregarClientes({ force = false } = {}) {
     renderListaClientes(all);
     try { window.Lista?.render(all); } catch {}
 
-    try { (state.clientesCache || []).forEach(c => window.syncPreviewFromCache?.(c.id)); } catch {}
+    try { (state.clientesCache || []).forEach(c => window.syncPreviewFromCache?.(idKey(c.id) ?? c.id)); } catch {}
 
     if (window.PREFETCH_HISTORIES) {
-      try {
-        await primeHistories(state.clientesCache, { concurrency: 2 });
-      } catch (e) {
-        try { console.debug('[carregarClientes] primeHistories erro', e); } catch {}
-      }
+      try { await primeHistories(state.clientesCache, { concurrency: 2 }); } catch {}
     }
 
-    // ✅ agenda o refresh diário (não trava UI)
     kickDailyAvatarRefreshSoon();
-
     return all;
   } finally {
     __loadingConversas = false;
@@ -573,12 +729,24 @@ export async function loadMoreConversas() {
 
   const mais = items.map(normalizeCliente).filter(_matchInstancia);
 
-  const map = new Map(state.clientesCache.map(c => [String((c.conversation_id ?? c.id)), c]));
+  const map = new Map(state.clientesCache.map(c => [String(idKey(c.conversation_id ?? c.id) ?? ''), c]));
   for (const it of mais) {
-    const key = String(it.conversation_id ?? it.id);
+    const key = String(idKey(it.conversation_id ?? it.id) ?? '');
+    if (!key) continue;
     const prev = map.get(key) || {};
+
     const merged = { ...prev, ...it };
     merged.pinned = Boolean((prev && prev.pinned) || it.pinned);
+
+    merged.is_group = Boolean(merged.is_group || prev?.is_group || it?.is_group || isGroupJid(merged.telefone));
+    if (merged.is_group) {
+      const keep = merged.jid || merged.remoteJid || prev?.jid || prev?.remoteJid || it?.jid || it?.remoteJid || merged.telefone || prev?.telefone || it?.telefone || '';
+      if (keep) merged.telefone = keep;
+      merged.telefone_norm = '';
+    } else {
+      if (!merged.telefone_norm) merged.telefone_norm = prev?.telefone_norm || it?.telefone_norm || normalizaTelefoneBR(merged.telefone);
+    }
+
     map.set(key, merged);
   }
 
@@ -591,7 +759,7 @@ export async function loadMoreConversas() {
   renderListaClientes(arr);
   try { window.Lista?.render(arr); } catch {}
 
-  try { (state.clientesCache || []).forEach(c => window.syncPreviewFromCache?.(c.id)); } catch {}
+  try { (state.clientesCache || []).forEach(c => window.syncPreviewFromCache?.(idKey(c.id) ?? c.id)); } catch {}
 }
 
 /* =========================================================
@@ -607,6 +775,8 @@ export function renderListaClientes(data) {
   const ordenado = ordenarConversasDesc(arr);
 
   let html = ordenado.map(c => {
+    const cid = idKey(c.id ?? c.conversation_id ?? c.cliente_id ?? null) ?? '';
+
     const nome = (c.nome_whatsapp && c.nome_whatsapp.trim())
       ? c.nome_whatsapp.trim()
       : (c.nome && c.nome.trim() && c.nome !== 'Cliente')
@@ -621,7 +791,7 @@ export function renderListaClientes(data) {
 
     try {
       const instCanon = (c.instancia_id ?? c.instancia ?? null) || null;
-      const arrHist = window.cacheHistoricos?.[c.id] || getHist(instCanon, c.id);
+      const arrHist = window.cacheHistoricos?.[cid] || getHist(instCanon, cid);
       if (Array.isArray(arrHist) && arrHist.length) {
         const last = arrHist[arrHist.length - 1];
         const histMs = Number(last?.ts || 0) || Date.parse(last?.timestamp || '') || 0;
@@ -654,14 +824,10 @@ export function renderListaClientes(data) {
           }
         } else {
           const histAck = Number(last?.ack || 0) || 0;
-          if (histAck > ackValForIcon) {
-            ackValForIcon = histAck;
-          }
+          if (histAck > ackValForIcon) ackValForIcon = histAck;
         }
 
-        if (!when && serverMs) {
-          when = formatChatTime(serverMs);
-        }
+        if (!when && serverMs) when = formatChatTime(serverMs);
       }
     } catch {}
 
@@ -675,16 +841,24 @@ export function renderListaClientes(data) {
 
     const avatarUrl = c.avatar_url ? String(c.avatar_url).replace(/"/g, '&quot;') : '';
     const av = avatarUrl
-      ? `<span class="avatar"><img src="${avatarUrl}" alt="" data-cliente-id="${c.id}"
-                onerror="window.handleListAvatarError && window.handleListAvatarError(this, ${Number(c.id)})" /></span>`
+      ? `<span class="avatar"><img src="${avatarUrl}" alt="" data-cliente-id="${escapeHtml(cid)}"
+                onerror="window.handleListAvatarError && window.handleListAvatarError(this, '${String(cid).replace(/'/g, "\\'")}')" /></span>`
       : `<span class="avatar placeholder"><i class="fa fa-user-circle"></i></span>`;
 
     const pinClass = c.pinned ? ' is-pinned' : '';
 
+    const isGrp = Boolean(c.is_group) || isGroupJid(c.telefone || '') || isGroupJid(c.jid || '') || isGroupJid(c.remoteJid || '');
+    const grpAttr = isGrp ? '1' : '0';
+
+    const jidAttr = escapeHtml(String(c.jid || c.remoteJid || (isGrp ? c.telefone : '') || ''));
+
     return `
-      <li class="chat-item cliente-item${pinClass}"
-          id="chat-${c.id}"
-          data-id="${c.id}"
+      <li class="chat-item cliente-item${pinClass}${isGrp ? ' is-group' : ''}"
+          id="chat-${escapeHtml(cid)}"
+          data-id="${escapeHtml(cid)}"
+          data-is-group="${grpAttr}"
+          data-jid="${jidAttr}"
+          data-telefone="${escapeHtml(String(c.telefone || ''))}"
           data-last-outbound="${outbound ? '1' : '0'}"
           data-last-dir="${dirStr}">
         ${av}
@@ -705,28 +879,25 @@ export function renderListaClientes(data) {
   if (hasMore) {
     html += `
       <li class="chat-item load-more-item" id="lista-load-more">
-        <button type="button" class="load-more-btn">
-          Carregar mais conversas
-        </button>
+        <button type="button" class="load-more-btn">Carregar mais conversas</button>
       </li>`;
   }
 
   ul.innerHTML = html;
   document.dispatchEvent(new CustomEvent('lista:rendered'));
 
-  // ✅ FIX: avatares “vazios” (img existe mas quebrou / src ruim / erro antes do handler existir)
   (function fixBrokenAvatars() {
     ul.querySelectorAll('.avatar img').forEach(img => {
       const src = String(img.getAttribute('src') || '').trim();
       const isBadSrc = !src || /^(null|undefined|about:blank)$/i.test(src);
 
       const fix = () => {
-        try{
+        try {
           const li = img.closest('li.chat-item, li.cliente-item');
           const cidAttr = img.dataset.clienteId || li?.dataset?.id;
-          const cid = cidAttr ? Number(cidAttr) : null;
-          window.handleListAvatarError?.(img, cid || 0);
-        }catch{}
+          const cid = idKey(cidAttr);
+          window.handleListAvatarError?.(img, cid || '');
+        } catch {}
       };
 
       try { img.addEventListener('error', fix, { once: true }); } catch {}
@@ -743,7 +914,7 @@ export function renderListaClientes(data) {
   })();
 
   ul.querySelectorAll('.chat-item.cliente-item').forEach(el => {
-    el.addEventListener('click', () => window.selecionarClienteObj?.(Number(el.dataset.id)));
+    el.addEventListener('click', () => window.selecionarClienteObj?.(String(el.dataset.id || '')));
   });
 
   if (hasMore) {
@@ -753,11 +924,7 @@ export function renderListaClientes(data) {
         if (!state.nextCursor) return;
         btn.disabled = true;
         btn.textContent = 'Carregando...';
-        try {
-          await loadMoreConversas();
-        } finally {
-          // renderListaClientes será chamado dentro de loadMoreConversas
-        }
+        try { await loadMoreConversas(); } catch {}
       });
     }
   }
@@ -767,28 +934,32 @@ export function renderListaClientes(data) {
    SHIM opcional de UI
    ========================================================= */
 function _findClienteIndex(id) {
+  const k = idKey(id);
   const arr = Array.isArray(state.clientesCache) ? state.clientesCache : [];
-  return arr.findIndex(c => (c.id ?? c.conversation_id) === Number(id));
+  return arr.findIndex(c => idEq(c?.id ?? c?.conversation_id ?? c?.cliente_id, k));
 }
 function _reRender() {
   const arr = dedupeConversas(state.clientesCache || []);
   renderListaClientes(arr);
   persist();
 }
-function _touchHora(c, tsISO) {
-  c.hora = tsISO || new Date().toISOString();
-}
+function _touchHora(c, tsISO) { c.hora = tsISO || new Date().toISOString(); }
 
 if (!window.Lista) {
   window.Lista = {
     render(data) {
       renderListaClientes(Array.isArray(data) ? data : (state.clientesCache || []));
     },
-    updatePreview(clienteId, { texto, ts, ack, unreadDelta } = {}) {
+    updatePreview(clienteId, { texto, ts, ack, unreadDelta, instancia_id, instance_name, status } = {}) {
       const idx = _findClienteIndex(clienteId);
       if (idx < 0) return;
       const c = state.clientesCache[idx];
+
       if (typeof texto === 'string') c.ultima_mensagem = texto;
+      if (temValor(instancia_id)) c.instancia_id = instancia_id, c.instancia = instancia_id;
+      if (instance_name) c.instance_name = instance_name;
+      if (status) c.status = status, c.statusatendimento = status;
+
       if (temValor(ack)) {
         c.last_ack = Number(ack);
         c.last_tipo = 'saida';
@@ -840,7 +1011,8 @@ try {
   'use strict';
 
   function updatePreviewInline(clienteId, { texto, ack, ts, unreadDelta } = {}) {
-    const li = document.querySelector(`li.chat-item[data-id="${clienteId}"]`);
+    const id = String(clienteId || '');
+    const li = document.querySelector(`li.chat-item[data-id="${CSS.escape(id)}"]`);
     if (!li) return;
 
     if (typeof texto === 'string') {

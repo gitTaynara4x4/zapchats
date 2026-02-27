@@ -1,3 +1,4 @@
+// /frontend/js/atendimentos/ws/ws-empresa.js
 // ====================================================================
 // WebSocket da EMPRESA + da INSTÂNCIA ATIVA (tempo real)
 // - Trata: nova mensagem, ACK, reloads segmentados, conv_status, pin/unpin
@@ -6,6 +7,8 @@
 // - Idempotência básica (merge do eco local por texto+tempo)
 // - Ajustes: unwrap de payloads aninhados; mapear cliente por telefone
 // - Ajustes: força render quando o chat aberto é o alvo (mesmo sem inst)
+// ✅ FIX GRUPOS: cliente_id SEM Number() (BigInteger vira string)
+// ✅ NOVO: upsert/preview/ack/unread usando state/store.js (sem duplicar)
 // ====================================================================
 
 import { tsToMillis } from '../core/time.js';
@@ -13,7 +16,19 @@ import { renderHistoricoDoCache } from '../domain/historico.js';
 import { _matchInstancia } from '../domain/instances.js';
 import { pushOneNew, getHist, primeWith } from '../domain/hist-cache.js';
 
-const EMPRESA_ID = Number(window.EMPRESA_ID || localStorage.getItem('empresa_id') || 0);
+// ✅ BASE NOVA (fonte da verdade)
+import {
+  state,
+  persist,
+  mergeIncomingMessage,
+  updateAck,
+  moveConversaToTop,
+  replaceOrInsertConversa
+} from '../state/store.js';
+
+import { EMPRESA_ID as EMPRESA_ID_ENV } from '../core/env.js';
+
+const EMPRESA_ID = Number(EMPRESA_ID_ENV || window.EMPRESA_ID || localStorage.getItem('empresa_id') || 0);
 
 // Ative/desative logs rápidos no console
 const DEBUG_WS = (window.DEBUG_WS ?? true);
@@ -33,40 +48,38 @@ const WS_CID = (() => {
   }
 })();
 
-// ========================= util: caches de clientes =========================
-function ensureCaches() {
-  if (!Array.isArray(window.clientesCache)) window.clientesCache = [];
-  if (window.state && !Array.isArray(window.state.clientesCache)) window.state.clientesCache = [];
+// ========================= helpers: ids (string-first) =========================
+function idKey(v){
+  const s = String(v ?? '').trim();
+  if (!s || s === 'null' || s === 'undefined' || s === 'NaN') return null;
+  return s;
 }
-function bothCaches() {
-  ensureCaches();
-  return [window.clientesCache, (window.state ? window.state.clientesCache : window.clientesCache)];
+function idEq(a,b){
+  const A = idKey(a), B = idKey(b);
+  if (!A || !B) return false;
+  return A === B;
 }
-function upsertIn(arr, obj) {
-  const key = Number(obj?.id ?? obj?.cliente_id ?? obj?.conversation_id);
-  if (!Number.isFinite(key)) return;
-  const idx = arr.findIndex(it => Number(it?.id ?? it?.cliente_id ?? it?.conversation_id) === key);
-  if (idx >= 0) Object.assign(arr[idx], obj); else arr.push(obj);
+function onlyDigits(s){ return String(s || '').replace(/\D+/g,''); }
+
+// ========================= helpers: conversa no store =========================
+function getConversaById(cid){
+  const k = idKey(cid);
+  if (!k) return null;
+  const arr = Array.isArray(state?.clientesCache) ? state.clientesCache : [];
+  return arr.find(c => idKey(c?.conversation_id ?? c?.id ?? c?.cliente_id) === k) || null;
 }
-function findCliente(id) {
-  ensureCaches();
-  const key = Number(id);
-  return window.clientesCache.find(c => Number(c.id ?? c.cliente_id ?? c.conversation_id) === key)
-      || window.state?.clientesCache?.find?.(c => Number(c.id ?? c.cliente_id ?? c.conversation_id) === key)
-      || null;
-}
-function onlyDigits(s){ return String(s||'').replace(/\D+/g,''); }
-function findClienteIdByPhone(phone){
+
+function getConversaIdByPhone(phone){
   const p = onlyDigits(phone);
-  if(!p) return null;
-  ensureCaches();
-  const all = [...(window.clientesCache||[]), ...(window.state?.clientesCache||[])];
-  // compara por "termina com" para lidar com DDI/DDD
-  const hit = all.find(c => {
-    const t = onlyDigits(c?.telefone || c?.phone || c?.remoteJid || '');
+  if (!p) return null;
+
+  const arr = Array.isArray(state?.clientesCache) ? state.clientesCache : [];
+  const hit = arr.find(c => {
+    const t = onlyDigits(c?.telefone || c?.phone || c?.remoteJid || c?.jid || '');
     return t && (t.endsWith(p) || p.endsWith(t));
   });
-  return hit ? Number(hit.id ?? hit.cliente_id ?? hit.conversation_id) : null;
+
+  return hit ? idKey(hit.conversation_id ?? hit.id ?? hit.cliente_id) : null;
 }
 
 // ========================= contexto aberto (cliente + instância) =========================
@@ -75,11 +88,12 @@ function getOpenContext(){
     const hist    = document.getElementById('historico');
     const cidDom  = hist?.dataset?.clienteId ?? null;
     const instDom = hist?.dataset?.instanciaId ?? null;
-    const cidState  = Number(window.state?.clienteSel?.id ?? window.clienteSel?.id ?? NaN);
-    const instState = (window.state?.clienteSel?.instancia_id ?? window.INSTANCIA_ATIVA ?? null);
+
+    const cidState = idKey(state?.clienteSel?.id ?? state?.clienteSel?.conversation_id ?? state?.clienteSel?.cliente_id ?? null);
+    const instState = (state?.clienteSel?.instancia_id ?? window.INSTANCIA_ATIVA ?? null);
 
     return {
-      cliente_id: Number.isFinite(Number(cidDom)) ? Number(cidDom) : (Number.isFinite(cidState) ? cidState : null),
+      cliente_id: idKey(cidDom) || cidState || null,
       instancia_id: (instDom ?? instState ?? null)
     };
   }catch{
@@ -87,13 +101,13 @@ function getOpenContext(){
   }
 }
 
-// Considera "aberto" só pelo cliente
 function isOpenChat(cliente_id){
   try{
     const oc = getOpenContext();
-    return Number(oc?.cliente_id) === Number(cliente_id);
+    return idEq(oc?.cliente_id, cliente_id);
   }catch{ return false; }
 }
+
 function isChatActive(cliente_id){
   try{
     const hist    = document.getElementById('historico');
@@ -108,11 +122,15 @@ function ensureDomContextFor(cliente_id, instancia_id){
   try{
     const hist = document.getElementById('historico');
     if (!hist) return false;
-    // se #historico não tem cliente ainda, seta
+
+    const cid = idKey(cliente_id);
+    if (!cid) return false;
+
     if (!hist.dataset?.clienteId || hist.dataset.clienteId === '0' || hist.dataset.clienteId === 'null') {
-      hist.dataset.clienteId = String(cliente_id);
+      hist.dataset.clienteId = String(cid);
     }
-    if (hist.dataset?.clienteId !== String(cliente_id)) return false; // outra conversa aberta
+    if (hist.dataset?.clienteId !== String(cid)) return false;
+
     const newInst = String(instancia_id ?? '');
     if (newInst && (!hist.dataset.instanciaId || hist.dataset.instanciaId === 'null' || hist.dataset.instanciaId !== newInst)){
       hist.dataset.instanciaId = newInst;
@@ -133,12 +151,11 @@ function wsUrlInst(instanceKey, { wantQR=false } = {}){
   return `${proto}://${location.host}/ws/inst:${encodeURIComponent(instanceKey)}?${qs.toString()}`;
 }
 
-// ajuda a resolver "instância ativa" para tópico 'inst:{nome}' (ou id string)
 function resolveInstTopic(){
   const sel = window.state?.instanciaSelecionada ?? window.INSTANCIA_ATIVA ?? null;
   if (!sel) return null;
   const s = String(sel);
-  if (/\D/.test(s)) return s; // já é nome/slug
+  if (/\D/.test(s)) return s;
   try{
     const arr = window.state?.instancias || window.INSTANCIAS || [];
     const it = arr.find(x => String(x?.instancia_id ?? x?.id) === s || String(x?.id) === s);
@@ -147,12 +164,12 @@ function resolveInstTopic(){
   }catch{ return s; }
 }
 
-// resolve label/nome amigável pela lista de instâncias (pra NÃO ficar "wa.4" se tiver nome/apelido)
 function resolveInstanceName(instKey){
   const raw = (instKey == null ? '' : String(instKey)).trim();
   if (!raw) return null;
   try{
     const arr = window.state?.instancias || window.INSTANCIAS || [];
+
     const byId =
       arr.find(x => String(x?.instancia_id ?? x?.id ?? x?.instance_id ?? '') === raw) ||
       arr.find(x => String(x?.id ?? '') === raw);
@@ -176,11 +193,11 @@ let sockInst = null;
 let hbEmpTimer = null;
 let hbInstTimer = null;
 let lagTimer = null;
-let retryBaseEmp = 800; // ms
+let retryBaseEmp = 800;
 let retryBaseInst = 800;
 let closedEmpByMe = false;
 let closedInstByMe = false;
-let lastServerTs = 0; // ms epoch (heartbeat ou qualquer evento)
+let lastServerTs = 0;
 
 function heartbeat(ws){ try { ws?.send?.('ping'); } catch {} }
 function scheduleHeartbeat(ws, which='emp'){
@@ -219,57 +236,23 @@ function startLagTimer(){
   }, 1000);
 }
 
-// ========================= preview/lista =========================
-function upsertClientePreview({ cliente_id, texto, ts, tipo='entrada', ack=null, instancia_id=null, instance_name=null }) {
-  let c = findCliente(cliente_id);
-
-  const instSel   = window.INSTANCIA_ATIVA || window.state?.instanciaSelecionada || window.clienteSel?.instancia_id || null;
-  const instToUse = (instancia_id != null) ? instancia_id : (c?.instancia_id ?? instSel);
-
-  const derivedName =
-    instance_name
-      || c?.instance_name
-      || resolveInstanceName(instToUse)
-      || window.state?.instanciaSelecionadaNome
-      || null;
-
-  if (!c) {
-    c = {
-      id: Number(cliente_id), conversation_id: Number(cliente_id), cliente_id: Number(cliente_id),
-      nome: null, push_name: null, telefone: null, avatar_url: null,
-      ultima_msg_id: null, ultima_mensagem: '', hora: ts, novas: 0,
-      last_tipo: null, last_ack: null, instancia_id: instToUse ?? null, instancia: instToUse ?? null,
-      instance_name: derivedName ?? null,
-    };
-  } else { if (ts) c.hora = ts; }
-
-  if (typeof texto === 'string') c.ultima_mensagem = texto;
-  c.last_tipo = (tipo === 'saida') ? 'saida' : 'entrada';
-  if (tipo === 'saida' && ack != null) {
-    c.last_ack = (typeof window.normalizeAck === 'function') ? window.normalizeAck(ack) : Number(ack) || 0;
-  } else if (tipo !== 'saida') {
-    c.last_ack = null;
-  }
-  if (instToUse != null) { c.instancia_id = instToUse; c.instancia = instToUse; }
-  if (derivedName) c.instance_name = derivedName;
-
-  const [g, s] = bothCaches(); upsertIn(g, c); upsertIn(s, c);
-
-  try {
-    window.Lista?.updatePreview?.(cliente_id, {
-      texto: (typeof texto === 'string') ? texto : undefined,
-      ts, ack: (tipo === 'saida' ? ack : null),
-      instancia_id: instToUse ?? null,
-      instance_name: derivedName ?? undefined,
-    });
-  } catch {}
-  if (DEBUG_WS) console.debug('[LISTA] preview', { cliente_id, texto, ts, tipo, ack, instancia_id: instToUse, instance_name: derivedName });
-}
-
 // ========================= normalizadores =========================
 function pickMsgId(p){ return (p?.msg_id ?? p?.msgId ?? p?.message_id ?? p?.messageId ?? p?.id ?? null); }
-function mapStatusToAck(status){ if (!status) return null; const s=String(status).toUpperCase(); if (s.includes('READ')) return 2; if (s.includes('DELIVER')) return 1; if (s.includes('SERVER')||s.includes('SENT')) return 0; return null; }
-function mapEventToAck(ev){ if (!ev) return null; const e=String(ev).toUpperCase(); if (e.includes('READ')) return 2; if (e.includes('DELIVERY')) return 1; return null; }
+function mapStatusToAck(status){
+  if (!status) return null;
+  const s=String(status).toUpperCase();
+  if (s.includes('READ')) return 2;
+  if (s.includes('DELIVER')) return 1;
+  if (s.includes('SERVER')||s.includes('SENT')) return 0;
+  return null;
+}
+function mapEventToAck(ev){
+  if (!ev) return null;
+  const e=String(ev).toUpperCase();
+  if (e.includes('READ')) return 2;
+  if (e.includes('DELIVERY')) return 1;
+  return null;
+}
 function pickAck(p){
   if (p?.ack != null) return Number(p.ack);
   if (p?.delivery_ack != null) return Number(p.delivery_ack);
@@ -298,18 +281,19 @@ function _toIdKey(key){
 function pickInstanciaFromAny(payload){
   const direct = payload?.instancia_id ?? payload?.instancia ?? payload?.instance_id ?? payload?.instanceId ?? null;
   if (direct != null && String(direct).trim() !== '') return _toIdKey(direct);
+
   const name = payload?.instance ?? payload?.instance_name ?? payload?.instanceName ?? null;
   if (name && String(name).trim() !== '') return _toIdKey(name);
 
-  const cid = Number(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? NaN);
-  if (Number.isFinite(cid)) {
-    const c = findCliente(cid);
+  const cid = idKey(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? null);
+  if (cid) {
+    const c = getConversaById(cid);
     const cached = c?.instancia_id ?? c?.instancia ?? null;
     if (cached != null) return _toIdKey(cached);
   }
 
   const oc = getOpenContext();
-  if (Number.isFinite(cid) && Number(oc?.cliente_id) === cid && oc?.instancia_id) {
+  if (cid && idEq(oc?.cliente_id, cid) && oc?.instancia_id) {
     return _toIdKey(oc.instancia_id);
   }
 
@@ -319,35 +303,12 @@ function pickInstanciaFromAny(payload){
 }
 
 // ========================= eco local (merge) =========================
-function mirrorLegacyF5(instKey, cid){
-  try{
-    const arr = getHist(instKey, cid) || [];
-    if (!window.cacheHistoricos) window.cacheHistoricos = {};
-    window.cacheHistoricos[cid] = arr;
-
-    // ⚠ Usa a MESMA chave de empresa que o historico.js
-    const empWindow = Number(window.EMPRESA_ID || 0);
-    const empLs     = Number(localStorage.getItem('empresa_id') || 0);
-    const EMP       = empWindow || empLs || 0;
-    if (!EMP) return;
-
-    const key = `cacheHistoricos:${EMP}`;
-    localStorage.setItem(key, JSON.stringify(window.cacheHistoricos || {}));
-
-    // compat: se window.EMPRESA_ID e empresa_id do LS forem diferentes, grava nas duas
-    if (empWindow && empLs && empWindow !== empLs) {
-      localStorage.setItem(`cacheHistoricos:${empWindow}`, JSON.stringify(window.cacheHistoricos || {}));
-      localStorage.setItem(`cacheHistoricos:${empLs}`,     JSON.stringify(window.cacheHistoricos || {}));
-    }
-  }catch(e){
-    if (DEBUG_WS) console.warn('[HIST APPEND] mirrorLegacyF5 falhou', e);
-  }
-}
-
 function squashPendingLocalEcho(inst, cliente_id, msg){
   try{
     const instKey = inst ?? window.INSTANCIA_ATIVA ?? null;
-    const cid = Number(cliente_id);
+    const cid = idKey(cliente_id);
+    if (!cid) return false;
+
     const arr = getHist(instKey, cid) || [];
     if (!arr.length) return false;
 
@@ -369,7 +330,6 @@ function squashPendingLocalEcho(inst, cliente_id, msg){
       if (sameTxt && closeTs){
         arr[i] = { ...m, ...msg };
         try { primeWith(instKey, cid, arr, null); } catch {}
-        mirrorLegacyF5(instKey, cid);
         return true;
       }
     }
@@ -379,11 +339,13 @@ function squashPendingLocalEcho(inst, cliente_id, msg){
 
 function appendToHistCache(inst, cliente_id, msg){
   let instKey = inst ?? pickInstanciaFromAny({ cliente_id }) ?? window.INSTANCIA_ATIVA ?? resolveInstTopic() ?? null;
+  const cid = idKey(cliente_id);
+  if (!cid) return;
+
   try {
-    pushOneNew(instKey, Number(cliente_id), msg);
-    mirrorLegacyF5(instKey, Number(cliente_id));
+    pushOneNew(instKey, cid, msg);
   } catch (e) {
-    if (DEBUG_WS) console.warn('[HIST APPEND] falha; cli=', cliente_id, 'inst=', instKey, e);
+    if (DEBUG_WS) console.warn('[HIST APPEND] falha; cli=', cid, 'inst=', instKey, e);
   }
 }
 
@@ -391,7 +353,7 @@ function appendToHistCache(inst, cliente_id, msg){
 function applyDeleteToHist(inst, cliente_id, msg_id, flags = {}) {
   try {
     const instKey = inst ?? pickInstanciaFromAny({ cliente_id }) ?? window.INSTANCIA_ATIVA ?? resolveInstTopic() ?? null;
-    const cid = Number(cliente_id);
+    const cid = idKey(cliente_id);
     if (!instKey || !cid || !msg_id) return false;
 
     const arr = getHist(instKey, cid) || [];
@@ -406,7 +368,6 @@ function applyDeleteToHist(inst, cliente_id, msg_id, flags = {}) {
       const mid = String(m.msg_id || m.id || '');
       if (!mid || mid !== idStr) continue;
 
-      // 🔹 Só marcamos flags; NÃO mexemos em texto/mídias
       if ('apagada_cliente' in flags)  m.apagada_cliente  = !!flags.apagada_cliente;
       if ('apagada_usuario' in flags) m.apagada_usuario = !!flags.apagada_usuario;
 
@@ -416,7 +377,6 @@ function applyDeleteToHist(inst, cliente_id, msg_id, flags = {}) {
 
     if (changed) {
       try { primeWith(instKey, cid, arr, null); } catch {}
-      mirrorLegacyF5(instKey, cid);
     }
     return changed;
   } catch {
@@ -427,60 +387,173 @@ function applyDeleteToHist(inst, cliente_id, msg_id, flags = {}) {
 // ========================= helpers: unwrap de payload =========================
 function unwrap(any){
   if (!any || typeof any !== 'object') return any;
-  // Sobe os campos de data|payload|message|event|body para o topo (sem perder os existentes)
   const pick = (k)=> (any[k] && typeof any[k]==='object') ? any[k] : null;
   const layers = [pick('data'), pick('payload'), pick('message'), pick('event'), pick('body')].filter(Boolean);
   if (!layers.length) return any;
-  // merge superficial (camadas internas ganham prioridade nos campos de mensagem)
   return Object.assign({}, any, ...layers);
+}
+
+// ========================= STORE: upsert/preview/unread/pin =========================
+function storeUpsertConversation(cid, patch = {}) {
+  const id = idKey(cid);
+  if (!id) return;
+
+  const prev = getConversaById(id);
+  const keepPinned = Boolean(prev?.pinned);
+
+  const base = {
+    // store normalizeConversa entende conversation_id / cliente_id etc
+    conversation_id: id,
+    cliente_id: id,
+    id: id,
+  };
+
+  const finalObj = {
+    ...base,
+    ...(prev || {}),
+    ...patch,
+    pinned: Boolean(patch?.pinned ?? keepPinned)
+  };
+
+  try {
+    replaceOrInsertConversa(finalObj);
+  } catch {
+    // fallback: mexe direto e persiste
+    const arr = Array.isArray(state.clientesCache) ? state.clientesCache.slice() : [];
+    const k = id;
+    const idx = arr.findIndex(c => idKey(c?.conversation_id ?? c?.id ?? c?.cliente_id) === k);
+    if (idx >= 0) arr[idx] = { ...(arr[idx] || {}), ...finalObj };
+    else arr.push(finalObj);
+    state.clientesCache = arr;
+    persist();
+  }
+}
+
+function bumpPreview(cid, { texto, tsMs, tipo, ack, instancia_id, instance_name, unreadDelta=0 } = {}) {
+  const id = idKey(cid);
+  if (!id) return;
+
+  const patch = {};
+
+  if (typeof texto === 'string') patch.ultima_mensagem = texto;
+  if (tsMs) patch.hora = tsMs;
+  if (tipo) patch.last_tipo = (tipo === 'saida') ? 'saida' : 'entrada';
+
+  if (tipo === 'saida') {
+    patch.last_ack = (ack == null) ? 0 : Number(ack) || 0;
+  } else {
+    patch.last_ack = null;
+  }
+
+  if (instancia_id != null) {
+    patch.instancia_id = instancia_id;
+    patch.instancia = instancia_id;
+  }
+  if (instance_name) patch.instance_name = instance_name;
+
+  // unread (só quando entrada e não está ativo)
+  if (unreadDelta) {
+    const cur = getConversaById(id);
+    const curN = Number(cur?.novas || 0) || 0;
+    patch.novas = Math.max(0, curN + Number(unreadDelta || 0));
+  }
+
+  // move para o topo e persiste
+  try {
+    const movePatch = {
+      ultima_mensagem: patch.ultima_mensagem,
+      hora: patch.hora,
+      last_tipo: patch.last_tipo,
+      last_ack: patch.last_ack,
+      novas: patch.novas,
+      instancia_id: patch.instancia_id,
+      instancia: patch.instancia,
+      instance_name: patch.instance_name
+    };
+    moveConversaToTop(id, movePatch);
+  } catch {
+    storeUpsertConversation(id, patch);
+  }
+
+  // UI helper já existente
+  try {
+    window.Lista?.updatePreview?.(id, {
+      texto: (typeof texto === 'string') ? texto : undefined,
+      ts: tsMs,
+      ack: (tipo === 'saida') ? ack : null,
+      unreadDelta: unreadDelta || 0,
+      instancia_id: instancia_id ?? null,
+      instance_name: instance_name ?? undefined,
+    });
+  } catch {}
 }
 
 // ========================= handlers: ACK & MSG & DELETE =========================
 function handleAckGeneric(payload){
   const inst = pickInstanciaFromAny(payload);
-  const cliente_id = Number(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? NaN)
-                  || findClienteIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || payload?.jid || '') || 0;
-  if (!cliente_id) return;
+
+  const cid =
+    idKey(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? null)
+    || getConversaIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || payload?.jid || '')
+    || null;
+
+  if (!cid) return;
 
   const msg_id = pickMsgId(payload) || null;
   const ackVal = pickAck(payload);
   if (ackVal == null) return;
 
-  const openByCliente = isOpenChat(cliente_id);
-  const canFixDom = ensureDomContextFor(cliente_id, inst);
+  // histórico local: atualiza ack no cache do store (se msg id bater)
+  try { updateAck(cid, msg_id, ackVal); } catch {}
 
-  const applied = window.applyAckUpdate?.({ instancia_id: inst ?? null, cliente_id, msg_id, ack: ackVal });
+  // também tenta aplicar no DOM (se você já tem isso no render)
+  const openByCliente = isOpenChat(cid);
+  const canFixDom = ensureDomContextFor(cid, inst);
+
+  const applied = window.applyAckUpdate?.({ instancia_id: inst ?? null, cliente_id: cid, msg_id, ack: ackVal });
   if (!applied && (openByCliente || canFixDom)) {
     window.reconcilePendingAcks?.();
     setTimeout(()=>window.reconcilePendingAcks?.(), 120);
   }
 
-  try { window.Lista?.setAck?.(cliente_id, ackVal, inst ?? null); } catch {}
-  if (DEBUG_WS) console.debug('[WS ACK]', { cliente_id, msg_id, ackVal, inst, openByCliente, canFixDom });
+  // preview da lista (se última foi saída, mantém)
+  try {
+    const cur = getConversaById(cid);
+    const tipo = (cur?.last_tipo === 'saida') ? 'saida' : null;
+    if (tipo === 'saida') bumpPreview(cid, {
+      tipo:'saida',
+      ack: ackVal,
+      tsMs: tsToMillis(cur?.hora) || cur?.hora || Date.now(),
+      instancia_id: inst ?? (cur?.instancia_id ?? null),
+      instance_name: resolveInstanceName(inst ?? (cur?.instancia_id ?? null)) ?? cur?.instance_name ?? null
+    });
+  } catch {}
+
+  try { window.Lista?.setAck?.(cid, ackVal, inst ?? null); } catch {}
+
+  if (DEBUG_WS) console.debug('[WS ACK]', { cliente_id: cid, msg_id, ackVal, inst, openByCliente, canFixDom });
 }
 
 function handleNovaMensagem(payload){
   const inst = pickInstanciaFromAny(payload);
 
-  let cliente_id = Number(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id);
-  if (!cliente_id) {
-    // tenta por telefone
-    const byPhone = findClienteIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || payload?.jid || '');
-    if (byPhone) cliente_id = byPhone;
+  let cid = idKey(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? null);
+  if (!cid) {
+    const byPhone = getConversaIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || payload?.jid || '');
+    if (byPhone) cid = byPhone;
   }
-  if (!cliente_id) return;
+  if (!cid) return;
 
   const textoRaw = payload.mensagem ?? payload.texto ?? payload.message ?? payload.body ?? payload.content ?? '';
   const tipo = (payload.tipo === 'saida' || payload.from_me === true || payload.origem === 'atendente') ? 'saida' : 'entrada';
   const tsIso = payload.timestamp || payload.ts_iso || payload.ts || new Date().toISOString();
 
-  // ID sintético quando faltar msg_id
   let msgId = pickMsgId(payload) || null;
   if (!msgId || String(msgId).trim() === '') {
     const baseTs = tsToMillis(tsIso) || Date.now();
     const sigTxt = String(textoRaw).slice(0,32);
     const slug = sigTxt.replace(/[^\w]/g,'').slice(0,16) || 'noTxt';
-    msgId = `tmp:${cliente_id || 0}:${baseTs}:${sigTxt.length}:${slug}`;
+    msgId = `tmp:${cid}:${baseTs}:${sigTxt.length}:${slug}`;
   }
 
   const ackV  = (tipo === 'saida') ? (pickAck(payload) ?? 0) : null;
@@ -503,108 +576,113 @@ function handleNovaMensagem(payload){
     autor_nome
   };
 
+  // 1) merge eco local (se saída)
   let merged = false;
   if (tipo === 'saida' && msg.msg_id) {
-    merged = squashPendingLocalEcho(inst, cliente_id, msg);
+    merged = squashPendingLocalEcho(inst, cid, msg);
   }
   if (!merged){
-    appendToHistCache(inst, cliente_id, msg);
+    appendToHistCache(inst, cid, msg);
   }
 
-  try { window._applyPreviewTimeAndAck?.(cliente_id, msg, msg.conteudo); } catch {}
+  // 2) store: mergeIncomingMessage (hist + preview move-top)
+  try {
+    mergeIncomingMessage(cid, {
+      id: msgId,
+      msg_id: msgId,
+      texto: msg.conteudo,
+      conteudo: msg.conteudo,
+      tipo: msg.tipo,
+      ack: msg.ack,
+      ts: msg.ts,
+      timestamp: msg.timestamp,
+      instancia_id: inst ?? null
+    });
+  } catch {
+    // fallback: só preview
+  }
 
-  const openByCliente = isOpenChat(cliente_id);
-  const canFixDom = ensureDomContextFor(cliente_id, inst);
+  // 3) render se conversa estiver aberta
+  const openByCliente = isOpenChat(cid);
+  const canFixDom = ensureDomContextFor(cid, inst);
 
   if (openByCliente || canFixDom){
-    if (DEBUG_WS) console.debug('[WS MSG][RENDER]', { cliente_id, inst, append: !merged, openByCliente, canFixDom });
-    // força render mesmo quando inst difere — o dom foi carimbado em ensureDomContextFor
-    renderHistoricoDoCache(cliente_id, /*append*/!merged ? true : false);
-    if (msg.ack != null) window.applyAckUpdate?.({ instancia_id: inst ?? null, cliente_id, msg_id: msg.msg_id, ack: msg.ack });
+    if (DEBUG_WS) console.debug('[WS MSG][RENDER]', { cliente_id: cid, inst, append: !merged, openByCliente, canFixDom });
+    renderHistoricoDoCache(cid, !merged ? true : false);
+    if (msg.ack != null) window.applyAckUpdate?.({ instancia_id: inst ?? null, cliente_id: cid, msg_id: msg.msg_id, ack: msg.ack });
     if (tipo === 'saida') {
       try { window.OperatorLine?.set(msg.conteudo, tsIso, { origem, autor_nome }); } catch {}
     }
   } else if (DEBUG_WS) {
     const oc = getOpenContext();
-    console.debug('[WS MSG][SKIP RENDER]', { cliente_id, inst, open_ctx: oc });
+    console.debug('[WS MSG][SKIP RENDER]', { cliente_id: cid, inst, open_ctx: oc });
   }
 
+  // 4) preview + unread
   const tsMs = tsToMillis(tsIso) || Date.now();
-  upsertClientePreview({
-    cliente_id,
+  const instName = payload.instance_name ?? payload.instance ?? resolveInstanceName(inst) ?? null;
+
+  const active = isChatActive(cid);
+  const unreadDelta = (tipo === 'entrada' && !active) ? 1 : 0;
+
+  bumpPreview(cid, {
     texto: msg.conteudo,
-    ts: tsMs,
+    tsMs,
     tipo,
     ack: msg.ack,
     instancia_id: inst,
-    instance_name: payload.instance_name ?? payload.instance ?? resolveInstanceName(inst) ?? null
+    instance_name: instName,
+    unreadDelta
   });
 
-  const ativa = isChatActive(cliente_id);
-  try {
-    if (tipo === 'entrada' && !ativa) {
-      window.Lista?.updatePreview?.(cliente_id, { unreadDelta: 1, ts: tsMs, texto: msg.conteudo, instancia_id: inst ?? null });
-    }
-  } catch {}
+  try { window.syncPreviewFromCache?.(cid); } catch {}
 
-  try { window.syncPreviewFromCache?.(cliente_id); } catch {}
-  if (DEBUG_WS) console.debug('[WS MSG]', { cliente_id, inst, merged, openByCliente, texto: msg.conteudo, origem, autor_nome });
+  if (DEBUG_WS) console.debug('[WS MSG]', { cliente_id: cid, inst, merged, openByCliente, texto: msg.conteudo, origem, autor_nome });
 }
 
-// 🔹 novo handler: delete
 function handleDeleteMensagem(payload){
   const inst = pickInstanciaFromAny(payload);
 
-  let cliente_id = Number(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? NaN);
-  if (!cliente_id) {
-    cliente_id = findClienteIdByPhone(
-      payload?.telefone || payload?.phone || payload?.remoteJid || payload?.jid || ''
-    ) || 0;
-  }
-  const msg_id = pickMsgId(payload);
-  if (!cliente_id || !msg_id) return;
+  let cid =
+    idKey(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? null)
+    || getConversaIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || payload?.jid || '')
+    || null;
 
-  // Flags vindas do backend (on_messages_delete)
+  const msg_id = pickMsgId(payload);
+  if (!cid || !msg_id) return;
+
   const flags = {
     apagada_cliente: payload.apagada_cliente,
     apagada_usuario: payload.apagada_usuario,
-    // ⚠️ não passamos clearContent: mantém o conteúdo original
   };
 
-  const changed = applyDeleteToHist(inst, cliente_id, msg_id, flags);
+  const changed = applyDeleteToHist(inst, cid, msg_id, flags);
 
-  const openByCliente = isOpenChat(cliente_id);
-  const canFixDom = ensureDomContextFor(cliente_id, inst);
+  const openByCliente = isOpenChat(cid);
+  const canFixDom = ensureDomContextFor(cid, inst);
 
   if (changed && (openByCliente || canFixDom)) {
-    // re-render geral (não append) porque alteramos uma mensagem existente
-    renderHistoricoDoCache(cliente_id, false);
+    renderHistoricoDoCache(cid, false);
   }
 
-  // Atualiza preview da lista
   if (changed) {
-    const tsNow = Date.now();
-    upsertClientePreview({
-      cliente_id,
+    bumpPreview(cid, {
       texto: 'Mensagem apagada',
-      ts: tsNow,
+      tsMs: Date.now(),
       tipo: 'entrada',
       ack: null,
       instancia_id: inst,
       instance_name: payload.instance_name ?? payload.instance ?? resolveInstanceName(inst) ?? null,
+      unreadDelta: 0
     });
   }
 
-  if (DEBUG_WS) console.debug('[WS MSG_DELETE]', {
-    cliente_id, inst, msg_id, flags, changed
-  });
+  if (DEBUG_WS) console.debug('[WS MSG_DELETE]', { cliente_id: cid, inst, msg_id, flags, changed });
 }
 
 // ========================= conv_status & pin =========================
-// ✅ FIX: "no_bot" NÃO pode virar "bot"
 function normalizeConvStatus(s){
   const v = String(s || '').trim().toLowerCase();
-
   if (!v) return 'no_bot';
 
   const BOT = ['bot','automatico','automático','auto','automatizado'];
@@ -612,47 +690,45 @@ function normalizeConvStatus(s){
 
   if (BOT.includes(v)) return 'bot';
   if (HUMAN.includes(v)) return 'no_bot';
-
-  // se vier outro status (ex.: "aberto", "resolvido"), mantém o valor
-  // (o seu filtros.js já trata "qualquer coisa diferente de bot" como humano)
   return v;
 }
 
 function handleConvStatus(payload){
   const inst = pickInstanciaFromAny(payload);
-  let cliente_id = Number(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? NaN);
-  if (!cliente_id) cliente_id = findClienteIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || '') || 0;
-  if (!cliente_id) return;
+
+  let cid =
+    idKey(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? null)
+    || getConversaIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || '')
+    || null;
+
+  if (!cid) return;
 
   const rawStatus = payload?.statusatendimento ?? payload?.status ?? payload?.state ?? payload?.modo ?? '';
   const status = normalizeConvStatus(rawStatus);
 
   const passesInst = _matchInstancia({ instancia_id: inst });
-  const openNow = isOpenChat(cliente_id);
+  const openNow = isOpenChat(cid);
   if (!passesInst && !openNow) return;
 
-  let c = findCliente(cliente_id) || { id: Number(cliente_id), cliente_id: Number(cliente_id), conversation_id: Number(cliente_id) };
-  c.status = status;
-  c.statusatendimento = status;
+  // upsert no store
+  storeUpsertConversation(cid, {
+    status,
+    statusatendimento: status,
+    instancia_id: inst ?? (getConversaById(cid)?.instancia_id ?? null),
+    instancia: inst ?? (getConversaById(cid)?.instancia_id ?? null),
+    instance_name: getConversaById(cid)?.instance_name || payload?.instance_name || payload?.instance || resolveInstanceName(inst) || null,
+  });
 
-  // melhora a chance de mostrar nome da instância no UI
-  if (inst != null) {
-    c.instancia_id = inst;
-    c.instancia = inst;
-    c.instance_name = c.instance_name || payload?.instance_name || payload?.instance || resolveInstanceName(inst) || null;
-  }
-
-  const [g, s] = bothCaches(); upsertIn(g, c); upsertIn(s, c);
-
+  // marca dataset no LI (para filtros.js)
   try{
-    const li = document.querySelector(`li.chat-item[data-id="${cliente_id}"]`);
+    const li = document.querySelector(`li.chat-item[data-id="${CSS.escape(String(cid))}"]`);
     if (li) li.dataset.status = status;
   }catch{}
 
-  try { window.Lista?.updatePreview?.(cliente_id, { status, statusatendimento: status }); } catch {}
-  try { document.dispatchEvent(new CustomEvent('ws:conv_status', { detail: { cliente_id, instancia_id: inst, status }})); } catch {}
+  try { window.Lista?.updatePreview?.(cid, { status, statusatendimento: status }); } catch {}
+  try { document.dispatchEvent(new CustomEvent('ws:conv_status', { detail: { cliente_id: cid, instancia_id: inst, status }})); } catch {}
 
-  if (DEBUG_WS) console.debug('[WS CONV_STATUS]', { cliente_id, inst, status, rawStatus });
+  if (DEBUG_WS) console.debug('[WS CONV_STATUS]', { cliente_id: cid, inst, status, rawStatus });
 }
 
 function inferPinFlag(p){
@@ -664,28 +740,31 @@ function inferPinFlag(p){
   if (a.includes('pin') || a.includes('fix')) return true;
   return null;
 }
+
 function handleConvPin(payload){
   const inst = pickInstanciaFromAny(payload);
-  let cliente_id = Number(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? NaN);
-  if (!cliente_id) cliente_id = findClienteIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || '') || 0;
-  if (!cliente_id) return;
+
+  let cid =
+    idKey(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? null)
+    || getConversaIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || '')
+    || null;
+
+  if (!cid) return;
 
   const flag = inferPinFlag(payload);
   if (flag == null) return;
 
-  let c = findCliente(cliente_id) || { id: Number(cliente_id), cliente_id: Number(cliente_id), conversation_id: Number(cliente_id) };
-  c.pinned = !!flag;
-  const [g, s] = bothCaches(); upsertIn(g, c); upsertIn(s, c);
+  storeUpsertConversation(cid, { pinned: !!flag });
 
-  try { window.Lista?.setPinned?.(cliente_id, !!flag); } catch {}
+  try { window.Lista?.setPinned?.(cid, !!flag); } catch {}
   try {
-    const li = document.querySelector(`li.chat-item[data-id="${cliente_id}"]`);
+    const li = document.querySelector(`li.chat-item[data-id="${CSS.escape(String(cid))}"]`);
     if (li) li.classList.toggle('is-pinned', !!flag);
   } catch {}
 
   try { sessionStorage.setItem('convForceReload', '1'); } catch {}
 
-  if (DEBUG_WS) console.debug('[WS CONV_PIN]', { cliente_id, inst, pinned: !!flag, raw: payload });
+  if (DEBUG_WS) console.debug('[WS CONV_PIN]', { cliente_id: cid, inst, pinned: !!flag, raw: payload });
 }
 
 // ========================= dispatcher =========================
@@ -696,7 +775,6 @@ function handleMessage(ev){
   const data = unwrap(raw);
   if (!data || typeof data !== 'object') return;
 
-  // serverTimestamp (lag)
   const sTs = Number(data.serverTimestamp ?? 0);
   if (Number.isFinite(sTs) && sTs > 0) lastServerTs = sTs;
 
@@ -728,7 +806,6 @@ function handleMessage(ev){
     handleConvPin(data); return;
   }
 
-  // 🔹 delete vindo do backend
   if (
     t === 'msg_deleted' ||
     t === 'messages_delete' ||
@@ -740,11 +817,9 @@ function handleMessage(ev){
     return;
   }
 
-  // processa ACK (mesmo se vier junto com texto)
   const maybeAck = pickAck(data);
   if (data.type === 'ack' || maybeAck != null) handleAckGeneric(data);
 
-  // nova mensagem (texto/mídias)
   const hasText    = (data.mensagem != null) || (data.texto != null) || (data.message != null) || (data.body != null) || (data.content != null);
   const hasMidias  = Array.isArray(data.midias) && data.midias.length > 0;
   const hasCliente = (data.cliente_id != null) || (data.client_id != null) || (data.conversation_id != null) || (data.telefone != null) || (data.phone != null) || (data.remoteJid != null);

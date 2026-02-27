@@ -23,6 +23,10 @@ function dbgError(...args){
   try { if (DEBUG_HIST && console?.error) console.error('[historico][ERRO]', ...args); } catch {}
 }
 
+// IDs: não use Number() (grupos podem vir como BigInt serializado em string e estourar 2^53)
+const idKey = (v) => String(v ?? '').trim();
+const idEq = (a, b) => idKey(a) === idKey(b);
+
 /* ===================== Loader “puxar pra cima” (SEM CSS inline) ===================== */
 function ensureTopLoader(){
   const hist = H();
@@ -152,7 +156,7 @@ if (!window.salvarCache) {
     window.cacheHistoricos = data;
 
     Object.keys(data).forEach(cidStr=>{
-      const cid = Number(cidStr);
+      const cid = idKey(cidStr);
       const arr = Array.isArray(data[cidStr]) ? data[cidStr] : [];
       const groups = new Map();
 
@@ -220,7 +224,7 @@ window._instQuery = getInstQuery;
 
 /* ===================== salvar cache unificado (compat) ===================== */
 export function salvarNoCache(clienteId, novos){
-  const cid = Number(clienteId);
+  const cid = idKey(clienteId);
   const inst =
     getInstanciaForFetch() ||
     (Array.isArray(novos) ? (novos[0]?.instancia_id ?? null) : null) ||
@@ -301,7 +305,7 @@ export function renderHistoricoDoCache(clienteId, append=false){
     ? hist.dataset.instanciaId
     : getInstanciaForFetch();
 
-  const msgs = ordenarMensagens(ensureArray(getHist(inst, Number(clienteId))));
+  const msgs = ordenarMensagens(ensureArray(getHist(inst, idKey(clienteId))));
 
   dbg('renderHistoricoDoCache', { clienteId, inst, append, msgsCount: msgs.length });
   ensureTopLoader();
@@ -413,7 +417,7 @@ export async function abrirHistorico(id){
   const hist = H();
   if (!hist) { dbgError('abrirHistorico: sem #historico', { id }); return false; }
 
-  const cid = Number(id);
+  const cid = idKey(id);
   if (!cid) { dbgError('abrirHistorico: id inválido', { id }); return false; }
 
   // garantir que a UI do chat apareça
@@ -437,7 +441,7 @@ export async function abrirHistorico(id){
 
   try{
     const url =
-      `/api/atendimento/conversas/${cid}/mensagens` +
+      `/api/atendimento/conversas/${encodeURIComponent(cid)}/mensagens` +
       `?empresa_id=${EMPRESA_ID}` +
       `&limit=${HISTORICO_LIMIT}` +
       getInstQuery();
@@ -534,11 +538,11 @@ export async function carregarMaisHistorico(id){
 
     const beforeHeight = hist.scrollHeight;
 
-    mergeOld(getInstanciaForFetch(), Number(id), items);
+    mergeOld(getInstanciaForFetch(), idKey(id), items);
 
     try{
       const inst = getInstanciaForFetch();
-      window.cacheHistoricos[id] = ensureArray(getHist(inst, Number(id)));
+      window.cacheHistoricos[id] = ensureArray(getHist(inst, idKey(id)));
       dbg('carregarMaisHistorico: cacheHistoricos atualizado', {
         id, inst, total: window.cacheHistoricos[id]?.length || 0
       });
@@ -555,7 +559,7 @@ export async function carregarMaisHistorico(id){
 
     try{
       dbg('carregarMaisHistorico: syncPreviewFromCache');
-      window.syncPreviewFromCache?.(Number(id));
+      window.syncPreviewFromCache?.(idKey(id));
     }catch(e){
       dbgError('carregarMaisHistorico: erro syncPreviewFromCache', e);
     }
@@ -582,7 +586,7 @@ export async function carregarMaisHistorico(id){
     hist.addEventListener('scroll', ()=> {
       if (hist.scrollTop <= 60){
         dbg('bindScroll: topo => carregarMaisHistorico', { clienteId: hist.dataset.clienteId });
-        carregarMaisHistorico(Number(hist.dataset.clienteId || 0));
+        carregarMaisHistorico(idKey(hist.dataset.clienteId));
       }
     }, { passive:true });
 
@@ -600,7 +604,7 @@ export async function carregarMaisHistorico(id){
 if (!window.syncPreviewFromCache) {
   window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
     try {
-      const cid = Number(clienteId);
+      const cid = idKey(clienteId);
       if (!cid) return;
 
       dbg('syncPreviewFromCache IN', { cid });
@@ -610,7 +614,7 @@ if (!window.syncPreviewFromCache) {
 
       try {
         const lista = (window.state?.clientesCache || window.clientesCache || []);
-        convObj = lista.find(x => Number(x.id ?? x.conversation_id ?? x.cliente_id) === cid) || null;
+        convObj = lista.find(x => idEq(x.id ?? x.conversation_id ?? x.cliente_id, cid)) || null;
 
         if (convObj) {
           const rawTs =
@@ -639,7 +643,7 @@ if (!window.syncPreviewFromCache) {
         let inst = null;
         try {
           const lista = (window.state?.clientesCache || window.clientesCache || []);
-          const c = convObj || lista.find(x => Number(x.id ?? x.conversation_id ?? x.cliente_id) === cid);
+          const c = convObj || lista.find(x => idEq(x.id ?? x.conversation_id ?? x.cliente_id, cid));
           inst = c?.instancia_id ?? c?.instancia ?? window.INSTANCIA_ATIVA ?? null;
         } catch(e) {
           dbgError('syncPreviewFromCache: erro ao inferir inst', e);

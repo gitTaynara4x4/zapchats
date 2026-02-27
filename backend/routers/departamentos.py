@@ -1,7 +1,6 @@
 # backend/routers/departamentos.py
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Set
 import re
@@ -13,7 +12,14 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend import models
-from backend.routers.auth import get_current_user
+
+# ✅ identity unificado (usuário OU colaborador)
+from backend.routers.auth import get_current_identity
+
+# ✅ Plano/Quota
+from backend.utils.entitlements import enforce_quota
+from backend.utils.usage import usage_counts
+
 
 # ==========================================================
 # Router "oficial" (fica montado em /api + este prefixo)
@@ -96,34 +102,29 @@ def _norm_hora(h: Optional[str]) -> Optional[str]:
     return h
 
 
-
 def resolve_empresa_id(
-    current_user=Depends(get_current_user),
+    identity=Depends(get_current_identity),
     x_empresa_id: Optional[int] = Header(default=None, alias="X-Empresa-Id"),
     empresa_id_qs: Optional[int] = Query(default=None, alias="empresa_id"),
 ) -> int:
     """
     Resolve o empresa_id a partir:
-      1) da empresa do usuário logado (se tiver),
+      1) da empresa do login (identity.empresa_id),
       2) opcionalmente header X-Empresa-Id ou ?empresa_id=.
 
-    Importante: se current_user.empresa_id estiver preenchido,
-    ele PRECISA bater com o ID pedido. Se for None (caso legado),
-    aceitamos o ID vindo de header/query.
+    Se identity.empresa_id estiver preenchido, ele PRECISA bater com o ID pedido.
     """
-    base_id = getattr(current_user, "empresa_id", None) or getattr(current_user, "empresa", None)
+    base_id = getattr(identity, "empresa_id", None)
 
-    # tenta: query/header > empresa do usuário
     empresa_id = x_empresa_id or empresa_id_qs or base_id
     if not empresa_id:
         raise HTTPException(
             status_code=400,
-            detail="empresa_id é obrigatório (usuário sem empresa ou header/query ausente)",
+            detail="empresa_id é obrigatório (header/query ausente e identity sem empresa_id)",
         )
 
     empresa_id = int(empresa_id)
 
-    # se o usuário já tem empresa_id definido, ELE é a verdade
     if base_id is not None and int(base_id) != empresa_id:
         raise HTTPException(status_code=403, detail="Empresa não permitida")
 
@@ -225,7 +226,6 @@ def build_paths(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     # para itens isolados (em teoria não deveria haver)
     for r in rows:
         if not r.get("path"):
-            # fallback: só o nome
             r["path"] = [r["nome"]]
 
     return rows
@@ -236,7 +236,6 @@ def assert_no_cycle(moving_id: int, new_parent_id: Optional[int], rows: List[Dic
     if new_parent_id is None:
         return
     by_id = {r["id"]: r for r in rows}
-    # sobe ancestrais do target até raiz; se encontrar moving_id, é ciclo
     cur = by_id.get(new_parent_id)
     visited: Set[int] = set()
     while cur:
@@ -268,7 +267,6 @@ def listar(
         .order_by(func.lower(models.Departamento.nome))
         .all()
     )
-    # mapeia para incluir extras quando existirem
     out: List[DepartamentoOut] = []
     for it in itens:
         d = dept_to_dict(it)
@@ -293,18 +291,15 @@ def tree(
     )
     rows = [dept_to_dict(it) for it in itens]
 
-    # calcula path em memória quando necessário
     has_parent = any(r.get("parent_id") is not None for r in rows) or has_column(
         models.Departamento, "parent_id"
     )
     if not has_parent:
-        # sem hierarquia: path é só [nome]
         for r in rows:
             r["path"] = [r["nome"]]
     else:
         rows = build_paths(rows)
 
-    # ordena por path (estável) para exibição
     rows.sort(key=lambda r: " / ".join(r.get("path") or [r["nome"]]).lower())
     return [DepartamentoOut(**r) for r in rows]
 
@@ -328,6 +323,19 @@ def criar(
 ):
     """Cria um novo departamento (nome único por empresa)."""
     ensure_empresa_exists(db, empresa_id)
+
+    # ✅ QUOTA: bloquear criação se exceder limite do plano
+    emp = db.query(models.Empresa).get(empresa_id)
+    if emp:
+        counts = usage_counts(db, emp.id)
+        enforce_quota(
+            emp,
+            "departments_max",
+            int(counts.get("departments_max", 0)),
+            delta=1,
+            message="Seu plano atingiu o limite de departamentos.",
+        )
+
     nome = payload.nome.strip()
     ensure_nome_unico(db, empresa_id, nome)
 
@@ -337,14 +345,12 @@ def criar(
         descricao=payload.descricao or None,
     )
 
-    # escreve extras se o modelo tiver essas colunas
     if has_column(models.Departamento, "parent_id"):
         setattr(novo, "parent_id", payload.parent_id)
     if has_column(models.Departamento, "codigo"):
         setattr(novo, "codigo", (payload.codigo or None))
     if has_column(models.Departamento, "ativo"):
         setattr(novo, "ativo", True if payload.ativo is None else bool(payload.ativo))
-
 
     if has_column(models.Departamento, "hora_login_inicio_padrao"):
         setattr(novo, "hora_login_inicio_padrao", _norm_hora(payload.hora_login_inicio_padrao))
@@ -381,7 +387,6 @@ def atualizar(
     if has_column(models.Departamento, "ativo"):
         setattr(dept, "ativo", True if payload.ativo is None else bool(payload.ativo))
 
-
     if has_column(models.Departamento, "hora_login_inicio_padrao"):
         setattr(dept, "hora_login_inicio_padrao", _norm_hora(payload.hora_login_inicio_padrao))
     if has_column(models.Departamento, "hora_login_fim_padrao"):
@@ -417,7 +422,6 @@ def mover(
             detail="Não é permitido definir o próprio departamento como superior.",
         )
 
-    # carrega todos para verificar ciclo
     itens = (
         db.query(models.Departamento)
         .filter(models.Departamento.empresa_id == empresa_id)
@@ -427,7 +431,6 @@ def mover(
     rows = build_paths(rows)
     assert_no_cycle(dept.id, payload.new_parent_id, rows)
 
-    # verifica se o novo parent existe (ou None)
     if payload.new_parent_id is not None:
         _p = (
             db.query(models.Departamento.id)

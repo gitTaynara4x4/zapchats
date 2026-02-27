@@ -523,6 +523,10 @@ def formatar_telefone_br(n: str) -> str:
 
 
 def _br_tel_norm_for_upsert(raw: str | None) -> str | None:
+    """
+    Retorna telefone_norm em 10/11 dígitos (sem DDI), ex: 11987654321
+    (Usado pra chave única (empresa_id, telefone_norm).)
+    """
     if not raw:
         return None
     s = str(raw)
@@ -545,11 +549,13 @@ def _br_tel_norm_for_upsert(raw: str | None) -> str | None:
 
 
 # =========================
-# Cliente UPSERT
+# Cliente UPSERT (FIX)
 # =========================
 UPSERT_CLIENTE_SQL = text("""
-  INSERT INTO public.clientes (empresa_id, instancia_id, telefone, nome, nome_whatsapp, avatar_url)
-  VALUES (:empresa_id, :instancia_id, :telefone, :nome, :nome_whatsapp, :avatar_url)
+  INSERT INTO public.clientes
+    (empresa_id, instancia_id, telefone, nome, nome_whatsapp, avatar_url)
+  VALUES
+    (:empresa_id, :instancia_id, :telefone, :nome, :nome_whatsapp, :avatar_url)
   ON CONFLICT (empresa_id, telefone_norm) DO UPDATE
   SET
     instancia_id   = COALESCE(public.clientes.instancia_id, EXCLUDED.instancia_id),
@@ -559,32 +565,23 @@ UPSERT_CLIENTE_SQL = text("""
   RETURNING id;
 """)
 
-
 def upsert_cliente(
     db: Session, *,
     empresa_id: int,
     instancia_id: int | None,
     telefone_raw: str | None,
-    nome: str | None,
-    nome_whatsapp: str | None,
-    avatar_url: str | None
+    nome: str | None = None,
+    nome_whatsapp: str | None = None,
+    avatar_url: str | None = None
 ) -> int | None:
+    """
+    UPSERT seguro com telefone_norm GENERATED:
+      - NÃO inserimos telefone_norm (o banco calcula)
+      - ainda calculamos tel_norm só pra fallback de lookup
+    """
     tel_norm = _br_tel_norm_for_upsert(telefone_raw)
     if not tel_norm:
         return None
-
-    row = db.execute(
-        UPSERT_CLIENTE_SQL,
-        {
-            "empresa_id": int(empresa_id),
-            "instancia_id": int(instancia_id) if instancia_id is not None else None,
-            "telefone": telefone_raw or tel_norm,
-            "nome": nome,
-            "nome_whatsapp": nome_whatsapp,
-            "avatar_url": avatar_url,
-        }
-    ).first()
-    return int(row[0]) if row else None
 
 
 def _fetch_cliente(db: Session, cliente_id: int) -> models.Cliente | None:

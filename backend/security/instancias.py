@@ -1,7 +1,7 @@
 # backend/security/instancias.py
 from __future__ import annotations
 
-from typing import List, Optional, Any
+from typing import Any, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -20,7 +20,7 @@ def _id_get(obj: Any, key: str, default: Any = None) -> Any:
     return getattr(obj, key, default)
 
 
-def _normalize_ids(raw) -> List[int]:
+def _normalize_ids(raw: Any) -> List[int]:
     """
     Converte uma lista qualquer (ints/str/misto) em lista de ints únicos.
     Ignora valores inválidos.
@@ -71,15 +71,15 @@ def instancias_visiveis(identity: Any, db: Session) -> Optional[List[int]]:
         # Se preferir travar tudo, poderia retornar [].
         return None
 
-    # Busca o colaborador no banco
-    colab: models.Colaborador | None = db.query(models.Colaborador).get(colab_id)  # type: ignore[arg-type]
+    # Busca o colaborador no banco (SQLAlchemy 1.4/2.0 friendly)
+    colab: models.Colaborador | None = db.get(models.Colaborador, int(colab_id))  # type: ignore[arg-type]
     if not colab:
         # Colaborador não encontrado: não faz filtro aqui
         return None
 
     # Se tiver empresa_id no identity, confere (defesa extra)
     try:
-        if empresa_id is not None and getattr(colab, "empresa_id", None) != empresa_id:
+        if empresa_id is not None and getattr(colab, "empresa_id", None) != int(empresa_id):
             # Empresa divergente: por segurança, retorna lista vazia (vê nada)
             return []
     except Exception:

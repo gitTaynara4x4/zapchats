@@ -1,10 +1,16 @@
 # backend/integrations/evo_handlers.py
 from __future__ import annotations
 
-import os, re, asyncio, requests
+import os
+import re
+import asyncio
+import requests
 from datetime import timedelta
+
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, bindparam
+from sqlalchemy.exc import IntegrityError
+
 from backend.database import SessionLocal
 from backend import models
 from backend.websocket_manager import conexoes_ativas
@@ -21,51 +27,94 @@ from .evo_handlers_extract import (
 
 from .evo_handlers_utils import (
     # registry
-    EvoEvent, HANDLERS, handler,
+    EvoEvent,
+    HANDLERS,
+    handler,
 
     # env/config
-    EVOLUTION_URL, HEADERS,
-    SYNC_CONTACTS_ON_CONNECT, SYNC_CHATS_ON_CONNECT, ENABLE_MESSAGES_SET,
+    EVOLUTION_URL,
+    HEADERS,
+    SYNC_CONTACTS_ON_CONNECT,
+    SYNC_CHATS_ON_CONNECT,
+    ENABLE_MESSAGES_SET,
     EVOLUTION_FORCE_QR_ON_WS,
-    HISTORY_LIMIT_HOURS, HISTORY_IGNORE_AFTER_DONE_MIN,
-    ALLOW_HISTORY_7D, HISTORY_MAX_IMPORT, HISTORY_BATCH_COMMIT, HISTORY_SLEEP_EVERY, DISABLE_MEDIA_ON_HISTORY,
-    N8N_MESSAGES_UPSERT_PATH, _n8n_url,
+    HISTORY_LIMIT_HOURS,
+    HISTORY_IGNORE_AFTER_DONE_MIN,
+    ALLOW_HISTORY_7D,
+    HISTORY_MAX_IMPORT,
+    HISTORY_BATCH_COMMIT,
+    HISTORY_SLEEP_EVERY,
+    DISABLE_MEDIA_ON_HISTORY,
+    N8N_MESSAGES_UPSERT_PATH,
+    _n8n_url,
 
     # log/debug
-    LOG, _short, _log_ctx, _log_skip,
+    LOG,
+    _short,
+    _log_ctx,
+    _log_skip,
 
     # rabbit monitor
-    record_rabbit_event, get_rabbit_monitor, RABBIT_MONITOR,
+    record_rabbit_event,
+    get_rabbit_monitor,
+    RABBIT_MONITOR,
 
     # time helpers
-    _now_utc, _server_ts_ms, _to_dt_utc, _iso_utc, _int_unix,
+    _now_utc,
+    _server_ts_ms,
+    _to_dt_utc,
+    _iso_utc,
+    _int_unix,
 
     # cache
     _invalidate_emp_cache,
 
     # ack + phone/lid
-    ACK_READ, _ack_from_status,
-    _jid_strip_device, _is_lid_jid, _remote_to_num, _resolve_counterparty_num_1to1,
-    formatar_telefone_br, _resolve_remote_jid, _lid_map_get, _lid_map_set,
+    ACK_READ,
+    _ack_from_status,
+    _jid_strip_device,
+    _is_lid_jid,
+    _remote_to_num,
+    _resolve_counterparty_num_1to1,
+    formatar_telefone_br,
+    _resolve_remote_jid,
+    _lid_map_get,
+    _lid_map_set,
 
     # db helpers
-    upsert_cliente, _fetch_cliente,
-    _HAS_MSG_ATD_FIELD, _get_or_open_atendimento,
+    upsert_cliente,
+    _fetch_cliente,
+    _HAS_MSG_ATD_FIELD,
+    _get_or_open_atendimento,
 
     # inst helpers
-    _inst_from, _get_inst_row, _empresa_id_by_inst, _me_number_by_inst, _carimbar_inst,
+    _inst_from,
+    _get_inst_row,
+    _empresa_id_by_inst,
+    _me_number_by_inst,
+    _carimbar_inst,
 
     # qr + expand
-    _emit_qr, _extract_qr_fields, _evo_expand_websocket, _evo_expand_rabbit,
+    _emit_qr,
+    _extract_qr_fields,
+    _evo_expand_websocket,
+    _evo_expand_rabbit,
 
     # evo connect/media
-    _evo_connect, _evo_get_base64_media, _download_media_bytes, _save_midia_db,
+    _evo_connect,
+    _evo_get_base64_media,
+    _download_media_bytes,
+    _save_midia_db,
 
     # deadlock
-    _retry_deadlock, _is_deadlock_error, _try_acquire_hist_lock, _release_hist_lock,
+    _retry_deadlock,
+    _is_deadlock_error,
+    _try_acquire_hist_lock,
+    _release_hist_lock,
 
     # chatbot
-    _notify_n8n_chatbot, _is_textual_content,
+    _notify_n8n_chatbot,
+    _is_textual_content,
 
     # onboarding
     cancel_auto_cleanup,
@@ -77,33 +126,103 @@ from .evo_handlers_utils import (
 SYNC_ON_CONNECT_AFTER_QR = (os.getenv("SYNC_ON_CONNECT_AFTER_QR", "true").lower() == "true")
 QR_CONNECT_SYNC_WINDOW_MIN = int(os.getenv("QR_CONNECT_SYNC_WINDOW_MIN", "30") or "30")
 
+# In-memory guards (avoid repeated heavy sync/expand spam). These reset on process restart.
+INSTANCIAS_SYNC: set[str] = set()
+QR_RECENT: dict[str, int] = {}  # instance -> unix seconds when a QR was last emitted
+
+# ============================================================
+# ✅ Grupo: buscar subject via Evolution (findGroupInfos) + cache
+# ============================================================
+_GROUP_INFO_CACHE: dict[tuple[str, str], tuple[str, int]] = {}
+_GROUP_INFO_TTL = 60 * 60  # 1h
+
+def _is_nome_grupo_ruim(nome: str | None) -> bool:
+    if not nome:
+        return True
+    n = str(nome).strip().lower()
+    return (n == "") or (n in {"grupo", "group", "grupo do whatsapp", "whatsapp group"})
+
+def _evo_get_group_subject(instance_name: str, group_jid: str) -> str | None:
+    """
+    Chama: /group/findGroupInfos/{instance}?groupJid=...
+    Retorna o subject (nome do grupo) quando disponível.
+    """
+    if not (EVOLUTION_URL and instance_name and group_jid):
+        return None
+
+    key = (instance_name, group_jid)
+    now = _int_unix(_now_utc())
+
+    cached = _GROUP_INFO_CACHE.get(key)
+    if cached:
+        subject_cached, ts_cached = cached
+        if (now - ts_cached) < _GROUP_INFO_TTL:
+            return subject_cached
+
+    try:
+        url = f"{EVOLUTION_URL.rstrip('/')}/group/findGroupInfos/{instance_name}"
+        r = requests.get(url, headers=HEADERS, params={"groupJid": group_jid}, timeout=10)
+        if not r.ok:
+            return None
+        js = r.json() or {}
+        subject = js.get("subject")
+        if isinstance(subject, str) and subject.strip():
+            subject = subject.strip()
+            _GROUP_INFO_CACHE[key] = (subject, now)
+            return subject
+        return None
+    except Exception:
+        return None
+
+
 # =========================
 # HANDLERS / HELPERS LOCAIS
 # =========================
 def _grupo_row_by_remote(
-    db: Session, empresa_id: int, remote_jid: str,
+    db: Session,
+    empresa_id: int,
+    remote_jid: str,
     instancia_id: int | None = None,
-    inst_obj: models.EmpresaInstancia | None = None
+    inst_obj: models.EmpresaInstancia | None = None,
 ) -> models.Grupo:
-    g = db.query(models.Grupo).filter(models.Grupo.empresa_id==empresa_id, models.Grupo.remote_jid==remote_jid).first()
+    g = (
+        db.query(models.Grupo)
+        .filter(models.Grupo.empresa_id == empresa_id, models.Grupo.remote_jid == remote_jid)
+        .first()
+    )
     if g:
         if instancia_id and g.instancia_id is None:
             g.instancia_id = instancia_id
         if inst_obj and hasattr(g, "instance_name") and not getattr(g, "instance_name", None):
             g.instance_name = inst_obj.instance_name
         return g
+
     g = models.Grupo(empresa_id=empresa_id, remote_jid=remote_jid, nome="Grupo", instancia_id=instancia_id)
     if inst_obj and hasattr(g, "instance_name"):
         g.instance_name = inst_obj.instance_name
-    db.add(g); db.flush()
+    db.add(g)
+    db.flush()
     return g
 
+
 def _name_from_contact_like(c: dict) -> str | None:
-    for k in ("verifiedName","name","pushName","notifyName","formattedName","shortName","contactName","subject","title","displayName"):
+    for k in (
+        "verifiedName",
+        "name",
+        "pushName",
+        "notifyName",
+        "formattedName",
+        "shortName",
+        "contactName",
+        "subject",
+        "title",
+        "displayName",
+    ):
         v = c.get(k)
         if isinstance(v, str) and v.strip():
             return v.strip()
     return None
+
 
 def _avatar_from_contact_like(c: dict) -> str | None:
     return (
@@ -115,6 +234,7 @@ def _avatar_from_contact_like(c: dict) -> str | None:
         or None
     )
 
+
 def _upsert_grupos_from_chats(db: Session, empresa_id: int, chats: list[dict], inst: models.EmpresaInstancia) -> int:
     imported = 0
     for ch in chats:
@@ -122,9 +242,15 @@ def _upsert_grupos_from_chats(db: Session, empresa_id: int, chats: list[dict], i
         if not isinstance(jid, str) or not jid.endswith("@g.us"):
             continue
         jid = _jid_strip_device(jid)
+
         nome = _name_from_contact_like(ch) or "Grupo"
         avatar = _avatar_from_contact_like(ch)
-        g = db.query(models.Grupo).filter(models.Grupo.empresa_id==empresa_id, models.Grupo.remote_jid==jid).first()
+
+        g = (
+            db.query(models.Grupo)
+            .filter(models.Grupo.empresa_id == empresa_id, models.Grupo.remote_jid == jid)
+            .first()
+        )
         if not g:
             g = models.Grupo(
                 empresa_id=empresa_id,
@@ -133,19 +259,25 @@ def _upsert_grupos_from_chats(db: Session, empresa_id: int, chats: list[dict], i
                 avatar_url=avatar,
                 instancia_id=inst.id,
             )
-            db.add(g); imported += 1
+            db.add(g)
+            imported += 1
         else:
             changed = False
             if g.instancia_id is None:
-                g.instancia_id = inst.id; changed = True
+                g.instancia_id = inst.id
+                changed = True
             if hasattr(g, "instance_name") and not getattr(g, "instance_name", None):
-                g.instance_name = getattr(inst, "instance_name", None); changed = True
+                g.instance_name = getattr(inst, "instance_name", None)
+                changed = True
             if nome and (g.nome or "") != nome:
-                g.nome = nome; changed = True
+                g.nome = nome
+                changed = True
             if avatar and (g.avatar_url or "") != avatar:
-                g.avatar_url = avatar; changed = True
+                g.avatar_url = avatar
+                changed = True
             if changed:
                 imported += 1
+
     if imported:
         db.flush()
     return imported
@@ -159,6 +291,7 @@ async def on_qrcode_updated(first: str, payload: dict):
     inst_id = _inst_from(payload) or first
     record_rabbit_event("QRCODE_UPDATED", inst_id)
     data = (payload.get("data") or payload) if isinstance(payload, dict) else {}
+
     q = data.get("qrcode") if isinstance(data, dict) and isinstance(data.get("qrcode"), dict) else data
     b64 = (q.get("base64") if isinstance(q, dict) else None) or (q.get("image") if isinstance(q, dict) else None) or ""
     pairing_code = (q.get("pairingCode") if isinstance(q, dict) else None) or (q.get("code") if isinstance(q, dict) else None)
@@ -179,7 +312,13 @@ async def on_qrcode_updated(first: str, payload: dict):
         try:
             await conexoes_ativas.send_message(
                 f"inst:{inst_id}",
-                {"type": "qrcode", "waiting": True, "instance": inst_id, "qr_limit": limit, "serverTimestamp": _server_ts_ms()},
+                {
+                    "type": "qrcode",
+                    "waiting": True,
+                    "instance": inst_id,
+                    "qr_limit": limit,
+                    "serverTimestamp": _server_ts_ms(),
+                },
             )
         except Exception as e:
             LOG(f"[QR EVT] Falha ao emitir estado 'waiting' para inst:{inst_id}: {e}")
@@ -192,11 +331,6 @@ async def on_qrcode_updated(first: str, payload: dict):
         pass
 
     await _emit_qr(inst_id, b64, pairing_code, limit)
-
-
-# In-memory guards (avoid repeated heavy sync/expand spam). These reset on process restart.
-INSTANCIAS_SYNC: set[str] = set()
-QR_RECENT: dict[str, int] = {}  # instance -> unix seconds when a QR was last emitted
 
 
 @handler(EvoEvent.CONNECTION_UPDATE)
@@ -249,7 +383,8 @@ async def on_conn_update(first: str, payload: dict):
                     f"emp:{empresa_id}", {"type": "history_sync_start", "total": 0, "serverTimestamp": _server_ts_ms()}
                 )
                 await conexoes_ativas.send_message(
-                    f"emp:{empresa_id}", {"type": "history_sync_progress", "imported": 0, "total": 0, "serverTimestamp": _server_ts_ms()}
+                    f"emp:{empresa_id}",
+                    {"type": "history_sync_progress", "imported": 0, "total": 0, "serverTimestamp": _server_ts_ms()},
                 )
             except Exception as e:
                 LOG(f"[SYNC] falha ao emitir start/progress inicial: {e}")
@@ -301,6 +436,7 @@ async def on_logout_instance(instance: str, payload: dict):
     QR_RECENT.pop(instance, None)
     _mark_disconnected(instance)
 
+
 # ✅ REGISTRA 1x (sem duplicar mais embaixo)
 HANDLERS[EvoEvent.LOGOUT_INSTANCE] = on_logout_instance
 HANDLERS[EvoEvent.INSTANCE_DELETE] = on_logout_instance
@@ -310,6 +446,7 @@ HANDLERS[EvoEvent.REMOVE_INSTANCE] = on_logout_instance
 def _mark_disconnected(instance: str):
     if not instance:
         return
+
     db: Session = SessionLocal()
     try:
         row = db.query(models.EmpresaInstancia).filter(models.EmpresaInstancia.instance_name == instance).first()
@@ -319,10 +456,14 @@ def _mark_disconnected(instance: str):
 
             emp = db.query(models.Empresa).filter(models.Empresa.id == row.empresa_id).first()
             if emp and hasattr(emp, "quantidade_instancias"):
-                emp.quantidade_instancias = db.query(models.EmpresaInstancia).filter(
-                    models.EmpresaInstancia.empresa_id == emp.id,
-                    models.EmpresaInstancia.connected.is_(True),
-                ).count()
+                emp.quantidade_instancias = (
+                    db.query(models.EmpresaInstancia)
+                    .filter(
+                        models.EmpresaInstancia.empresa_id == emp.id,
+                        models.EmpresaInstancia.connected.is_(True),
+                    )
+                    .count()
+                )
             db.commit()
 
             try:
@@ -385,13 +526,19 @@ async def on_messages_upsert(inst_id: str, data):
         me_number = _me_number_by_inst(inst)
 
         mensagens = extract_messages_any_shape(data)
-        _log_ctx("[UPsert] batch", inst=inst_id, empresa_id=empresa_id, total=len(mensagens), type_data=type(data).__name__)
+        _log_ctx(
+            "[UPsert] batch",
+            inst=inst_id,
+            empresa_id=empresa_id,
+            total=len(mensagens),
+            type_data=type(data).__name__,
+        )
 
         if not mensagens:
             LOG("[UPsert] nenhum item reconhecido em payload.")
             return
 
-        novas = 0
+        novas = 0  # conta inserts (direto + grupo)
 
         for idx, m in enumerate(mensagens, start=1):
             try:
@@ -401,27 +548,51 @@ async def on_messages_upsert(inst_id: str, data):
 
                 key = m.get("key") or {}
                 raw_remote = (
-                    key.get("remoteJid") or key.get("remote_jid") or
-                    m.get("remoteJid") or m.get("jid") or m.get("chatId") or ""
+                    key.get("remoteJid")
+                    or key.get("remote_jid")
+                    or m.get("remoteJid")
+                    or m.get("jid")
+                    or m.get("chatId")
+                    or ""
                 )
 
                 msg_id = key.get("id") or m.get("id")
                 ts_raw = m.get("messageTimestamp") or m.get("timestamp") or 0
                 status = m.get("status")
 
-                _log_ctx("[UPsert][in]", idx=idx, msg_id=msg_id, raw_remote=raw_remote, keys=list(m.keys())[:15], ts_raw=ts_raw, status=status)
+                _log_ctx(
+                    "[UPsert][in]",
+                    idx=idx,
+                    msg_id=msg_id,
+                    raw_remote=raw_remote,
+                    keys=list(m.keys())[:15],
+                    ts_raw=ts_raw,
+                    status=status,
+                )
 
                 if not raw_remote:
                     _log_skip("sem remoteJid", idx=idx, msg_id=msg_id)
                     continue
 
-                alt_jid = (key.get("remoteJidAlt") or key.get("remote_jid_alt") or m.get("remoteJidAlt") or m.get("remote_jid_alt"))
+                alt_jid = (
+                    key.get("remoteJidAlt")
+                    or key.get("remote_jid_alt")
+                    or m.get("remoteJidAlt")
+                    or m.get("remote_jid_alt")
+                )
 
+                # -------- resolve LID via alt --------
                 if _is_lid_jid(raw_remote) and isinstance(alt_jid, str) and "@" in alt_jid:
                     original_lid = _jid_strip_device(raw_remote)
                     real_jid = _jid_strip_device(alt_jid)
 
-                    _log_ctx("[UPsert][lid-alt-resolve]", idx=idx, msg_id=msg_id, lid=original_lid, real_jid=real_jid)
+                    _log_ctx(
+                        "[UPsert][lid-alt-resolve]",
+                        idx=idx,
+                        msg_id=msg_id,
+                        lid=original_lid,
+                        real_jid=real_jid,
+                    )
 
                     raw_remote = real_jid
                     try:
@@ -433,9 +604,16 @@ async def on_messages_upsert(inst_id: str, data):
                 original_jid = raw_remote
                 resolved_jid = _resolve_remote_jid(inst_id, raw_remote)
 
+                # -------- fallback LID (1:1) --------
                 if _is_lid_jid(original_jid) and not resolved_jid:
                     tel_fallback, alt = _resolve_counterparty_num_1to1(m, me_number)
-                    _log_ctx("[UPsert][lid-fallback]", idx=idx, msg_id=msg_id, tel_fallback=tel_fallback, alt=_short(alt, 64))
+                    _log_ctx(
+                        "[UPsert][lid-fallback]",
+                        idx=idx,
+                        msg_id=msg_id,
+                        tel_fallback=tel_fallback,
+                        alt=_short(alt, 64),
+                    )
 
                     jid_from_alt: str | None = None
                     if isinstance(alt, str) and "@" in alt:
@@ -455,15 +633,187 @@ async def on_messages_upsert(inst_id: str, data):
                         except Exception as e:
                             _log_ctx("[UPsert][lid-cache-fail]", err=str(e))
                     else:
-                        _log_skip("JID @lid sem mapping (usando fallback sintético)", idx=idx, msg_id=msg_id, preview=_short(extract_text_from_baileys(m)))
+                        _log_skip(
+                            "JID @lid sem mapping (usando fallback sintético)",
+                            idx=idx,
+                            msg_id=msg_id,
+                            preview=_short(extract_text_from_baileys(m)),
+                        )
                         resolved_jid = original_jid
 
                 remote_jid = resolved_jid or original_jid
+                remote_jid = _jid_strip_device(remote_jid)
 
+                from_me = bool(key.get("fromMe", m.get("fromMe", False)))
+                direcao = "saida" if from_me else "entrada"
+                push_name = m.get("pushName") or m.get("senderName")
+                ts_msg = _to_dt_utc(ts_raw)
+                conteudo = extract_text_from_baileys(m)
+
+                # ✅ FIX 1: ack nunca pode ser NULL (coluna ack é NOT NULL)
+                # - saída: calcula pelo status
+                # - entrada: 0
+                ack_value = int(_ack_from_status(status) if from_me else 0)
+
+                # (mantém para logs/compat, mas NÃO use no INSERT)
+                ack_initial = ack_value
+
+                # =====================================================================
+                # ✅ GRUPOS: idempotente + commit imediato (evita lock/timeout do UNIQUE)
+                # =====================================================================
                 if remote_jid.endswith("@g.us"):
-                    _log_skip("grupo", idx=idx, msg_id=msg_id, remote_jid=remote_jid)
+                    if not msg_id:
+                        _log_skip("grupo sem msg_id", idx=idx, remote_jid=remote_jid)
+                        continue
+
+                    grp_remote = _jid_strip_device(remote_jid)
+
+                    try:
+                        grp = _grupo_row_by_remote(
+                            db,
+                            empresa_id,
+                            grp_remote,
+                            instancia_id=getattr(inst, "id", None),
+                            inst_obj=inst,
+                        )
+                    except Exception as e:
+                        grp = None
+                        LOG(f"[UPsert][grupo] falha criando/buscando grupo: {e}")
+
+                    if grp is None:
+                        _log_skip("grupo sem grp-row", idx=idx, msg_id=msg_id, remote_jid=grp_remote)
+                        continue
+
+                    # ✅ Se o grupo ainda não tem nome bom, resolve via findGroupInfos (cache)
+                    try:
+                        if _is_nome_grupo_ruim(getattr(grp, "nome", None)):
+                            subject = _evo_get_group_subject(getattr(inst, "instance_name", inst_id), grp_remote)
+                            if subject and (grp.nome or "") != subject:
+                                grp.nome = subject
+                    except Exception:
+                        pass
+
+                    participant = (
+                        (key or {}).get("participant")
+                        or m.get("participant")
+                        or m.get("sender")
+                        or m.get("participantJid")
+                        or ""
+                    )
+                    participant = _jid_strip_device(participant) if isinstance(participant, str) else ""
+
+                    # ⚠️ pushName aqui é do remetente, NÃO do grupo.
+                    # Só atualiza nome/avatar do grupo se vier de fonte confiável.
+                    try:
+                        avatar = _avatar_from_contact_like(m)
+                        if isinstance(avatar, str) and avatar.strip():
+                            if getattr(grp, "avatar_url", None) != avatar.strip():
+                                grp.avatar_url = avatar.strip()
+                        _carimbar_inst(grp, inst)
+                    except Exception:
+                        pass
+
+                    inserted = False
+
+                    try:
+                        ts_int = _int_unix(ts_msg)  # epoch
+                        gm = models.MensagemGrupo(
+                            empresa_id=empresa_id,
+                            grupo_id=grp.id,
+                            instancia_id=getattr(inst, "id", None),
+                            author_jid=(participant or None),
+                            from_me=bool(from_me),
+                            conteudo=conteudo,
+                            tipo=direcao,
+                            message_type=m.get("messageType"),
+                            lida=bool(from_me),
+                            timestamp=ts_int,
+                            msg_id=str(msg_id),
+                            ack=int(ack_value or 0),
+                        )
+                        _carimbar_inst(gm, inst)
+                        db.add(gm)
+                        db.flush()   # valida UNIQUE
+                        db.commit()  # ✅ solta o lock do u_msg_grupo_msgid imediatamente
+
+                        novas += 1
+                        inserted = True
+
+                        _log_ctx(
+                            "[UPsert][grupo-saved]",
+                            idx=idx,
+                            msg_id=msg_id,
+                            grupo_id=grp.id,
+                            saved_id=getattr(gm, "id", None),
+                            from_me=from_me,
+                            participant=_short(participant, 60),
+                            ts=_iso_utc(ts_msg),
+                            preview=_short(conteudo),
+                        )
+
+                    except IntegrityError:
+                        # ✅ duplicada por msg_id (UNIQUE) → ignora sem travar
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
+                        _log_skip("duplicada grupo (msg_id)", idx=idx, msg_id=msg_id, grupo_id=grp.id)
+                        inserted = False
+
+                    except Exception as e:
+                        LOG(f"[UPsert][grupo][erro ao salvar] idx={idx} msg_id={msg_id} err={e}")
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
+                        continue
+
+                    # ✅ Só emite WS live se realmente inseriu (evita duplicar no front)
+                    if inserted:
+                        try:
+                            ws_payload_grupo = {
+                                "empresa_id": empresa_id,
+                                "cliente_id": grp.id,          # compatibilidade
+                                "conversation_id": grp.id,
+                                "grupo_id": grp.id,
+                                "is_group": True,
+                                "instancia_id": inst.id,
+                                "instance_name": getattr(inst, "instance_name", None),
+                                "telefone": getattr(grp, "remote_jid", grp_remote),
+                                "avatar_url": getattr(grp, "avatar_url", None),
+                                "push_name": getattr(grp, "nome", None),
+                                "nome": getattr(grp, "nome", None) or "Grupo",
+                                "mensagem": conteudo,
+                                "tipo": direcao,
+                                "origem": ("atendente" if from_me else "cliente"),
+                                "timestamp": _iso_utc(ts_msg),
+                                "msg_id": str(msg_id),
+                                "ack": (ack_value if from_me else None),
+                                "author_jid": (participant or None),
+                                "autor_nome": (push_name or participant or None),
+                                "serverTimestamp": _server_ts_ms(),
+                            }
+                            await conexoes_ativas.send_message(f"emp:{empresa_id}", ws_payload_grupo)
+                        except Exception as e:
+                            LOG(f"[UPsert][grupo][ws-live] falha ao emitir: {e}")
+
+                        # lista/preview
+                        try:
+                            await conexoes_ativas.send_message(
+                                f"emp:{empresa_id}",
+                                {"type": "reload_grupos", "serverTimestamp": _server_ts_ms()},
+                            )
+                        except Exception as e:
+                            LOG(f"[UPsert][grupo][ws] falha reload_grupos: {e}")
+
+                    if (novas % 500) == 0:
+                        await asyncio.sleep(0)
+
                     continue
 
+                # =====================================================================
+                # 1:1 (normal)
+                # =====================================================================
                 telefone = _remote_to_num(remote_jid)
                 if not telefone:
                     _log_skip("telefone inválido", idx=idx, msg_id=msg_id, remote_jid=remote_jid)
@@ -473,16 +823,21 @@ async def on_messages_upsert(inst_id: str, data):
                     _log_skip("eco do meu número", idx=idx, msg_id=msg_id, telefone=telefone)
                     continue
 
-                from_me = bool(key.get("fromMe", m.get("fromMe", False)))
-                direcao = "saida" if from_me else "entrada"
-
-                push_name = m.get("pushName") or m.get("senderName")
                 formatted = formatar_telefone_br(telefone)
-                ts_msg = _to_dt_utc(ts_raw)
-                conteudo = extract_text_from_baileys(m)
 
-                _log_ctx("[UPsert][resolved]", idx=idx, msg_id=msg_id, remote_jid=remote_jid, telefone=telefone, from_me=from_me, push_name=_short(push_name, 60), ts=_iso_utc(ts_msg), preview=_short(conteudo))
+                _log_ctx(
+                    "[UPsert][resolved]",
+                    idx=idx,
+                    msg_id=msg_id,
+                    remote_jid=remote_jid,
+                    telefone=telefone,
+                    from_me=from_me,
+                    push_name=_short(push_name, 60),
+                    ts=_iso_utc(ts_msg),
+                    preview=_short(conteudo),
+                )
 
+                # n8n chatbot (só texto)
                 try:
                     if _is_textual_content(conteudo):
                         _notify_n8n_chatbot(
@@ -496,6 +851,7 @@ async def on_messages_upsert(inst_id: str, data):
                 except Exception as e:
                     LOG(f"[N8N][chatbot] erro ao enviar msg simples: {e}")
 
+                # cliente
                 try:
                     cli_id = (
                         db.query(models.Cliente.id)
@@ -504,25 +860,32 @@ async def on_messages_upsert(inst_id: str, data):
                     )
                 except Exception as e:
                     LOG(f"[UPsert][erro select_cliente] idx={idx} msg_id={msg_id} err={e}")
-                    try: db.rollback()
-                    except Exception: pass
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
                     continue
 
                 if not cli_id:
                     try:
-                        cli_id = await _retry_deadlock(db, lambda: upsert_cliente(
+                        cli_id = await _retry_deadlock(
                             db,
-                            empresa_id=empresa_id,
-                            instancia_id=inst.id,
-                            telefone_raw=telefone,
-                            nome=(formatted if from_me else (push_name or formatted)),
-                            nome_whatsapp=(formatted if from_me else (push_name or formatted)),
-                            avatar_url=None,
-                        ))
+                            lambda: upsert_cliente(
+                                db,
+                                empresa_id=empresa_id,
+                                instancia_id=inst.id,
+                                telefone_raw=telefone,
+                                nome=(formatted if from_me else (push_name or formatted)),
+                                nome_whatsapp=(formatted if from_me else (push_name or formatted)),
+                                avatar_url=None,
+                            ),
+                        )
                     except Exception as e:
                         LOG(f"[UPsert][erro upsert_cliente] idx={idx} msg_id={msg_id} err={e}")
-                        try: db.rollback()
-                        except Exception: pass
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
                         continue
 
                 if not cli_id:
@@ -543,26 +906,75 @@ async def on_messages_upsert(inst_id: str, data):
                         )
                     except Exception as e:
                         LOG(f"[UPsert][erro_atendimento] idx={idx} msg_id={msg_id} err={e}")
-                        try: db.rollback()
-                        except Exception: pass
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
                         atendimento = None
 
-                exists = False
+                # ✅ 1:1 blindado: UPSERT ON CONFLICT DO NOTHING (sem select exists)
+                msg_db_id = None
+                inserted_11 = False
+
                 if msg_id:
                     try:
-                        exists = bool(db.query(models.Mensagem.id).filter_by(cliente_id=cli_id, msg_id=msg_id).first())
+                        sql = text(
+                            """
+                            INSERT INTO mensagens
+                                (empresa_id, cliente_id, conteudo, tipo, lida, ack, timestamp, msg_id, instancia_id, atendimento_id)
+                            VALUES
+                                (:empresa_id, :cliente_id, :conteudo, :tipo, :lida, :ack, :timestamp, :msg_id, :instancia_id, :atendimento_id)
+                            ON CONFLICT (empresa_id, cliente_id, msg_id)
+                            WHERE msg_id IS NOT NULL
+                            DO NOTHING
+                            RETURNING id
+                            """
+                        )
+
+                        row = db.execute(
+                            sql,
+                            {
+                                "empresa_id": empresa_id,
+                                "cliente_id": cli_id,
+                                "conteudo": conteudo,
+                                "tipo": direcao,
+                                "lida": bool(from_me),
+                                "ack": ack_value,  # ✅ FIX: nunca NULL
+                                "timestamp": ts_msg,
+                                "msg_id": str(msg_id),
+                                "instancia_id": inst.id,
+                                "atendimento_id": getattr(atendimento, "id", None),
+                            },
+                        ).fetchone()
+
+                        if row:
+                            msg_db_id = int(row[0])
+                            novas += 1
+                            inserted_11 = True
+
+                            _log_ctx(
+                                "[UPsert][saved-upsert]",
+                                idx=idx,
+                                msg_id=msg_id,
+                                saved_id=msg_db_id,
+                                tipo=direcao,
+                                ack=ack_value,
+                                ts=_iso_utc(ts_msg),
+                                preview=_short(conteudo),
+                            )
+                        else:
+                            _log_skip("duplicada (upsert)", idx=idx, msg_id=msg_id, cliente_id=cli_id)
+
                     except Exception as e:
-                        LOG(f"[UPsert][erro checando duplicada] idx={idx} msg_id={msg_id} err={e}")
-                        try: db.rollback()
-                        except Exception: pass
+                        LOG(f"[UPsert][erro upsert mensagem] idx={idx} msg_id={msg_id} err={e}")
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
                         continue
-                    if exists:
-                        _log_skip("duplicada (msg_id)", idx=idx, msg_id=msg_id, cliente_id=cli_id)
 
-                ack_initial = _ack_from_status(status) if from_me else None
-                msg_db_id = None
-
-                if not exists:
+                else:
+                    # msg_id vazio → não tem como garantir dedup; salva normal
                     try:
                         msg_model = models.Mensagem(
                             empresa_id=empresa_id,
@@ -570,12 +982,11 @@ async def on_messages_upsert(inst_id: str, data):
                             conteudo=conteudo,
                             tipo=direcao,
                             lida=from_me,
-                            ack=ack_initial,
+                            ack=ack_value,  # ✅ FIX: nunca NULL
                             timestamp=ts_msg,
-                            msg_id=msg_id,
+                            msg_id=None,
                             instancia_id=inst.id,
                         )
-
                         if atendimento is not None and _HAS_MSG_ATD_FIELD:
                             setattr(msg_model, "atendimento_id", atendimento.id)
 
@@ -584,47 +995,63 @@ async def on_messages_upsert(inst_id: str, data):
                         db.flush()
                         msg_db_id = msg_model.id
                         novas += 1
+                        inserted_11 = True
 
-                        _log_ctx("[UPsert][saved]", idx=idx, msg_id=msg_id, saved_id=msg_db_id, tipo=direcao, ack=ack_initial, ts=_iso_utc(ts_msg), preview=_short(conteudo))
+                        _log_ctx(
+                            "[UPsert][saved-nomsgid]",
+                            idx=idx,
+                            saved_id=msg_db_id,
+                            tipo=direcao,
+                            ts=_iso_utc(ts_msg),
+                            preview=_short(conteudo),
+                        )
+
                     except Exception as e:
-                        LOG(f"[UPsert][erro ao salvar mensagem] idx={idx} msg_id={msg_id} err={e}")
-                        try: db.rollback()
-                        except Exception: pass
+                        LOG(f"[UPsert][erro ao salvar mensagem sem msg_id] idx={idx} err={e}")
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
                         continue
 
-                try:
-                    cliente = _fetch_cliente(db, cli_id)
+                # WS (1:1) — emite só se inserted_11=True (evita duplicar no front)
+                if inserted_11:
+                    try:
+                        cliente = _fetch_cliente(db, cli_id)
 
-                    ws_payload = {
-                        "empresa_id": empresa_id,
-                        "cliente_id": cli_id,
-                        "instancia_id": inst.id,
-                        "instance_name": getattr(inst, "instance_name", None),
-                        "atendimento_id": getattr(atendimento, "id", None),
-                        "telefone": formatar_telefone_br(telefone),
-                        "avatar_url": getattr(cliente, "avatar_url", None) if cliente else None,
-                        "push_name": getattr(cliente, "nome_whatsapp", None) if cliente else None,
-                        "nome": getattr(cliente, "nome", None) if cliente else formatted,
-                        "mensagem": conteudo,
-                        "tipo": direcao,
-                        "origem": ("atendente" if from_me else "cliente"),
-                        "timestamp": _iso_utc(ts_msg),
-                        "msg_id": msg_id or (str(msg_db_id) if msg_db_id else None),
-                        "ack": (ack_initial if from_me else None),
-                        "serverTimestamp": _server_ts_ms(),
-                    }
+                        ws_payload = {
+                            "empresa_id": empresa_id,
+                            "cliente_id": cli_id,
+                            "instancia_id": inst.id,
+                            "instance_name": getattr(inst, "instance_name", None),
+                            "atendimento_id": getattr(atendimento, "id", None),
+                            "telefone": formatar_telefone_br(telefone),
+                            "avatar_url": getattr(cliente, "avatar_url", None) if cliente else None,
+                            "push_name": getattr(cliente, "nome_whatsapp", None) if cliente else None,
+                            "nome": getattr(cliente, "nome", None) if cliente else formatted,
+                            "mensagem": conteudo,
+                            "tipo": direcao,
+                            "origem": ("atendente" if from_me else "cliente"),
+                            "timestamp": _iso_utc(ts_msg),
+                            "msg_id": str(msg_id) if msg_id else (str(msg_db_id) if msg_db_id else None),
+                            "ack": (ack_value if from_me else None),
+                            "serverTimestamp": _server_ts_ms(),
+                        }
 
-                    await conexoes_ativas.send_message(f"emp:{empresa_id}", ws_payload)
-                except Exception as e:
-                    LOG(f"[UPsert][ws] falha ao emitir: {e}")
+                        await conexoes_ativas.send_message(f"emp:{empresa_id}", ws_payload)
+                    except Exception as e:
+                        LOG(f"[UPsert][ws] falha ao emitir: {e}")
 
+                # commit por batch
                 if novas and (novas % max(1, HISTORY_BATCH_COMMIT)) == 0:
                     try:
                         db.commit()
                         _log_ctx("[UPsert][commit]", count=novas)
                     except Exception as e:
-                        try: db.rollback()
-                        except Exception: pass
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
                         LOG(f"[UPsert][commit-erro] {e}")
 
                 if (novas % 500) == 0:
@@ -632,16 +1059,20 @@ async def on_messages_upsert(inst_id: str, data):
 
             except Exception as e:
                 LOG(f"[UPsert] erro em mensagem idx={idx}: {e}")
-                try: db.rollback()
-                except Exception: pass
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
                 continue
 
         try:
             db.commit()
             _log_ctx("[UPsert][commit-final]", novas=novas)
         except Exception as e:
-            try: db.rollback()
-            except Exception: pass
+            try:
+                db.rollback()
+            except Exception:
+                pass
             LOG(f"[UPsert][commit-final-erro] {e}")
 
         try:
@@ -651,6 +1082,8 @@ async def on_messages_upsert(inst_id: str, data):
             pass
 
         LOG(f"[UPsert] inst={inst_id} novas={novas}")
+
+
 
 
 @handler(EvoEvent.MESSAGES_DELETE)
@@ -726,17 +1159,34 @@ async def on_messages_delete(inst_id: str, data):
 
                 if changed:
                     alterados += 1
-                    to_notify.append(dict(
-                        cliente_id=row.cliente_id,
-                        msg_id=row.msg_id,
-                        apagada_cliente=row.apagada_cliente,
-                        apagada_usuario=row.apagada_usuario,
-                    ))
+                    to_notify.append(
+                        dict(
+                            cliente_id=row.cliente_id,
+                            msg_id=row.msg_id,
+                            apagada_cliente=row.apagada_cliente,
+                            apagada_usuario=row.apagada_usuario,
+                        )
+                    )
 
                     preview = (getattr(row, "conteudo", None) or getattr(row, "texto", "") or "")[:32]
-                    _log_ctx("[DEL][hit]", idx=idx, msg_id=row.msg_id, tipo=tipo, apagada_cliente=row.apagada_cliente, apagada_usuario=row.apagada_usuario, preview=preview)
+                    _log_ctx(
+                        "[DEL][hit]",
+                        idx=idx,
+                        msg_id=row.msg_id,
+                        tipo=tipo,
+                        apagada_cliente=row.apagada_cliente,
+                        apagada_usuario=row.apagada_usuario,
+                        preview=preview,
+                    )
                 else:
-                    _log_ctx("[DEL][nochange]", idx=idx, msg_id=row.msg_id, tipo=tipo, apagada_cliente=row.apagada_cliente, apagada_usuario=row.apagada_usuario)
+                    _log_ctx(
+                        "[DEL][nochange]",
+                        idx=idx,
+                        msg_id=row.msg_id,
+                        tipo=tipo,
+                        apagada_cliente=row.apagada_cliente,
+                        apagada_usuario=row.apagada_usuario,
+                    )
 
             except Exception as e:
                 _log_ctx("[DEL][err_msg]", idx=idx, exc=str(e))
@@ -777,6 +1227,7 @@ async def on_messages_delete(inst_id: str, data):
 
 
 _HISTORY_DONE_AT: dict[str, float] = {}
+
 
 @handler(EvoEvent.MESSAGES_SET)
 async def on_messages_set(inst_id: str, data):
@@ -870,7 +1321,13 @@ async def on_messages_set(inst_id: str, data):
                     continue
 
                 key = m.get("key") or {}
-                remote_jid = key.get("remoteJid") or key.get("remote_jid") or m.get("remoteJid") or m.get("jid") or m.get("chatId")
+                remote_jid = (
+                    key.get("remoteJid")
+                    or key.get("remote_jid")
+                    or m.get("remoteJid")
+                    or m.get("jid")
+                    or m.get("chatId")
+                )
                 msg_id = key.get("id") or m.get("id")
                 ts_raw = m.get("messageTimestamp") or m.get("timestamp") or 0
 
@@ -913,12 +1370,21 @@ async def on_messages_set(inst_id: str, data):
                     conteudo = extract_text_from_baileys(m)
                     ts_int = _int_unix(ts_msg)
 
-                    grupo = _grupo_row_by_remote(db, empresa_id, _jid_strip_device(remote_jid), instancia_id=inst.id, inst_obj=inst)
+                    grupo = _grupo_row_by_remote(
+                        db, empresa_id, _jid_strip_device(remote_jid), instancia_id=inst.id, inst_obj=inst
+                    )
 
-                    name = _name_from_contact_like(m) or m.get("pushName")
+                    # ✅ NÃO usar pushName como nome do grupo (pushName é do participante)
+                    # Se nome estiver ruim, tenta via findGroupInfos (cache)
+                    try:
+                        if _is_nome_grupo_ruim(getattr(grupo, "nome", None)):
+                            subject = _evo_get_group_subject(getattr(inst, "instance_name", inst_id), _jid_strip_device(remote_jid))
+                            if subject and (grupo.nome or "") != subject:
+                                grupo.nome = subject
+                    except Exception:
+                        pass
+
                     avatar = _avatar_from_contact_like(m)
-                    if name and (grupo.nome or "") != name:
-                        grupo.nome = name
                     if avatar and (grupo.avatar_url or "") != avatar:
                         grupo.avatar_url = avatar
                     _carimbar_inst(grupo, inst)
@@ -948,7 +1414,14 @@ async def on_messages_set(inst_id: str, data):
 
                     msgg_id = await _retry_deadlock(db, _ins_grupo)
                     novas += 1
-                    _log_ctx("[HIST][saved][grupo]", idx=idx, msg_id=msg_id, saved_id=msgg_id, ts=_iso_utc(ts_msg), preview=_short(conteudo))
+                    _log_ctx(
+                        "[HIST][saved][grupo]",
+                        idx=idx,
+                        msg_id=msg_id,
+                        saved_id=msgg_id,
+                        ts=_iso_utc(ts_msg),
+                        preview=_short(conteudo),
+                    )
 
                 else:
                     # 1:1
@@ -1005,8 +1478,16 @@ async def on_messages_set(inst_id: str, data):
                     msg_db_id = await _retry_deadlock(db, _ins_msg)
                     novas += 1
 
-                    _log_ctx("[HIST][saved][1:1]", idx=idx, msg_id=msg_id, saved_id=msg_db_id, telefone=telefone, ts=_iso_utc(ts_msg), preview=_short(conteudo),
-                             media=("off" if DISABLE_MEDIA_ON_HISTORY else ("on" if media_meta else "none")))
+                    _log_ctx(
+                        "[HIST][saved][1:1]",
+                        idx=idx,
+                        msg_id=msg_id,
+                        saved_id=msg_db_id,
+                        telefone=telefone,
+                        ts=_iso_utc(ts_msg),
+                        preview=_short(conteudo),
+                        media=("off" if DISABLE_MEDIA_ON_HISTORY else ("on" if media_meta else "none")),
+                    )
 
                     # WS-LIVE para mensagens recentes
                     try:
@@ -1051,7 +1532,9 @@ async def on_messages_set(inst_id: str, data):
                             if msg_id:
                                 try:
                                     conv = True if (media_meta and media_meta.get("tipo") == "video") else None
-                                    evo_raw, evo_name, evo_ct, evo_len = _evo_get_base64_media(inst_id, msg_id, convert_to_mp4=conv)
+                                    evo_raw, evo_name, evo_ct, evo_len = _evo_get_base64_media(
+                                        inst_id, msg_id, convert_to_mp4=conv
+                                    )
                                     raw, real_len = evo_raw, evo_len
                                     if evo_ct:
                                         real_ct = evo_ct
@@ -1095,7 +1578,14 @@ async def on_messages_set(inst_id: str, data):
                                     content_length=real_len,
                                     instancia_id=inst.id,
                                 )
-                                _log_ctx("[HIST][midia] salva", idx=idx, msg_id=msg_id, name=real_name, mimetype=real_ct_norm, size=real_len)
+                                _log_ctx(
+                                    "[HIST][midia] salva",
+                                    idx=idx,
+                                    msg_id=msg_id,
+                                    name=real_name,
+                                    mimetype=real_ct_norm,
+                                    size=real_len,
+                                )
                         except Exception as e:
                             _log_ctx("[HIST][midia] erro ao salvar", idx=idx, msg_id=msg_id, err=str(e))
 
@@ -1103,7 +1593,12 @@ async def on_messages_set(inst_id: str, data):
                     try:
                         await conexoes_ativas.send_message(
                             f"emp:{empresa_id}",
-                            {"type": "history_sync_progress", "imported": novas, "total": total, "serverTimestamp": _server_ts_ms()},
+                            {
+                                "type": "history_sync_progress",
+                                "imported": novas,
+                                "total": total,
+                                "serverTimestamp": _server_ts_ms(),
+                            },
                         )
                     except Exception:
                         pass
@@ -1115,8 +1610,10 @@ async def on_messages_set(inst_id: str, data):
                         _log_ctx("[HIST] commit", imported=novas)
                     except Exception as e:
                         if _is_deadlock_error(e):
-                            try: db.rollback()
-                            except Exception: pass
+                            try:
+                                db.rollback()
+                            except Exception:
+                                pass
                             await asyncio.sleep(0.1)
                             _log_ctx("[HIST] commit-deadlock-rollback]", err=str(e))
                         else:
@@ -1130,14 +1627,18 @@ async def on_messages_set(inst_id: str, data):
                 _log_ctx("[HIST] commit-final", imported=novas)
             except Exception as e:
                 if _is_deadlock_error(e):
-                    try: db.rollback()
-                    except Exception: pass
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
                     _log_ctx("[HIST] commit-final-deadlock-rollback]", err=str(e))
                 else:
                     raise
 
             try:
-                await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "reload_clientes", "serverTimestamp": _server_ts_ms()})
+                await conexoes_ativas.send_message(
+                    f"emp:{empresa_id}", {"type": "reload_clientes", "serverTimestamp": _server_ts_ms()}
+                )
             except Exception:
                 pass
             try:
@@ -1206,14 +1707,16 @@ async def on_messages_update(first: str, payload: dict | list):
 
         try:
             db.execute(
-                text(f"""
+                text(
+                    f"""
                     UPDATE mensagens
                        SET ack = CASE
                                    WHEN COALESCE(ack, 0) < :new_ack THEN :new_ack
                                    ELSE ack
                                  END
                      WHERE {where}
-                """),
+                    """
+                ),
                 params,
             )
             db.commit()
@@ -1228,7 +1731,6 @@ async def on_messages_update(first: str, payload: dict | list):
             pass
 
         try:
-            from sqlalchemy import bindparam
             msg_ids = tuple({p["msg_id"] for p in params})
             if msg_ids:
                 base = "SELECT msg_id, cliente_id FROM mensagens WHERE msg_id IN :ids"
@@ -1333,20 +1835,25 @@ async def on_contacts_event(first: str, payload: dict | list):
             nome_default = nome_push or formatar_telefone_br(numero)
 
             try:
-                cli_id = await _retry_deadlock(db, lambda: upsert_cliente(
+                cli_id = await _retry_deadlock(
                     db,
-                    empresa_id=empresa_id,
-                    instancia_id=inst.id,
-                    telefone_raw=numero,
-                    nome=nome_default,
-                    nome_whatsapp=nome_push,
-                    avatar_url=avatar
-                ))
+                    lambda: upsert_cliente(
+                        db,
+                        empresa_id=empresa_id,
+                        instancia_id=inst.id,
+                        telefone_raw=numero,
+                        nome=nome_default,
+                        nome_whatsapp=nome_push,
+                        avatar_url=avatar,
+                    ),
+                )
                 if cli_id:
                     mudou = True
             except Exception as e:
-                try: db.rollback()
-                except Exception: pass
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
                 print(f"[CONTACTS] erro no upsert_cliente: {e}")
                 continue
 
@@ -1359,12 +1866,16 @@ async def on_contacts_event(first: str, payload: dict | list):
                 db.commit()
             except Exception as e:
                 if _is_deadlock_error(e):
-                    try: db.rollback()
-                    except Exception: pass
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
                 else:
                     raise
 
-            await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "reload_clientes", "serverTimestamp": _server_ts_ms()})
+            await conexoes_ativas.send_message(
+                f"emp:{empresa_id}", {"type": "reload_clientes", "serverTimestamp": _server_ts_ms()}
+            )
             try:
                 _invalidate_emp_cache(empresa_id)
             except Exception:
@@ -1390,8 +1901,12 @@ async def _sync_contatos_completos(inst_id: str):
             LOG(f"[CONTACTS] erro ao buscar: {e}")
             return
 
-        total = len(contatos); imported = 0
-        await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "contacts_sync_start", "total": total, "serverTimestamp": _server_ts_ms()})
+        total = len(contatos)
+        imported = 0
+        await conexoes_ativas.send_message(
+            f"emp:{empresa_id}",
+            {"type": "contacts_sync_start", "total": total, "serverTimestamp": _server_ts_ms()},
+        )
 
         me_num = _me_number_by_inst(inst)
         mudou = False
@@ -1425,7 +1940,7 @@ async def _sync_contatos_completos(inst_id: str):
                 telefone_raw=numero,
                 nome=nome_default,
                 nome_whatsapp=nome_push,
-                avatar_url=avatar
+                avatar_url=avatar,
             )
             if cli_id:
                 imported += 1
@@ -1434,14 +1949,24 @@ async def _sync_contatos_completos(inst_id: str):
             if idx % 25 == 0:
                 await conexoes_ativas.send_message(
                     f"emp:{empresa_id}",
-                    {"type": "contacts_sync_progress", "total": total, "imported": imported, "serverTimestamp": _server_ts_ms()},
+                    {
+                        "type": "contacts_sync_progress",
+                        "total": total,
+                        "imported": imported,
+                        "serverTimestamp": _server_ts_ms(),
+                    },
                 )
 
         if mudou:
             db.commit()
 
-        await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "contacts_sync_done", "total": total, "imported": imported, "serverTimestamp": _server_ts_ms()})
-        await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "reload_clientes", "serverTimestamp": _server_ts_ms()})
+        await conexoes_ativas.send_message(
+            f"emp:{empresa_id}",
+            {"type": "contacts_sync_done", "total": total, "imported": imported, "serverTimestamp": _server_ts_ms()},
+        )
+        await conexoes_ativas.send_message(
+            f"emp:{empresa_id}", {"type": "reload_clientes", "serverTimestamp": _server_ts_ms()}
+        )
 
         try:
             _invalidate_emp_cache(empresa_id)
@@ -1475,7 +2000,10 @@ async def _sync_chats_completos(inst_id: str):
         db.commit()
         after = db.query(models.Grupo).filter(models.Grupo.empresa_id == empresa_id).count()
         if after != before:
-            await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "reload_grupos", "total": after, "serverTimestamp": _server_ts_ms()})
+            await conexoes_ativas.send_message(
+                f"emp:{empresa_id}",
+                {"type": "reload_grupos", "total": after, "serverTimestamp": _server_ts_ms()},
+            )
 
 
 # =========================
@@ -1500,6 +2028,7 @@ async def force_qr_now_async(inst_id: str):
     except Exception as e:
         LOG(f"[QR WS] falha ao forçar QR: {e}")
 
+
 async def force_qr_for_instance(inst_id: str):
     return await force_qr_now_async(inst_id)
 
@@ -1509,12 +2038,17 @@ async def force_qr_for_instance(inst_id: str):
 # =========================
 HANDLERS[EvoEvent.MESSAGES_UPSERT] = on_messages_upsert
 HANDLERS[EvoEvent.MESSAGES_UPDATE] = on_messages_update
-HANDLERS[EvoEvent.CONTACTS_SET]    = on_contacts_event
+HANDLERS[EvoEvent.CONTACTS_SET] = on_contacts_event
 HANDLERS[EvoEvent.CONTACTS_UPDATE] = on_contacts_event
 HANDLERS[EvoEvent.CONTACTS_UPSERT] = on_contacts_event
 
 __all__ = [
-    "HANDLERS", "EvoEvent", "handler",
-    "force_qr_for_instance", "normalize_mimetype",
-    "RABBIT_MONITOR", "record_rabbit_event", "get_rabbit_monitor",
+    "HANDLERS",
+    "EvoEvent",
+    "handler",
+    "force_qr_for_instance",
+    "normalize_mimetype",
+    "RABBIT_MONITOR",
+    "record_rabbit_event",
+    "get_rabbit_monitor",
 ]

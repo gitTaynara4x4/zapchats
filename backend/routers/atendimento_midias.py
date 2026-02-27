@@ -1,5 +1,5 @@
 # backend/routers/atendimento_midias.py
-# — cache-1x + persistência BD + ETag/304 + multi-instância
+# — cache-1x + persistência BD + ETag/304 + multi-instância + ACL instâncias
 
 from __future__ import annotations
 
@@ -9,13 +9,15 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from io import BytesIO
 import base64, re, os, mimetypes, hashlib, threading, glob
-from typing import Optional
+from typing import Optional, Any, Dict, List, Tuple
 
 from backend.database import get_db
 from backend import models
-from backend.routers.auth import get_current_identity  # ⬅️ AGORA USA IDENTITY
+from backend.routers.auth import get_current_identity
+from backend.security.instancias import instancias_visiveis
 
 router = APIRouter(tags=["Atendimento – Mídias"])
+
 
 # =========================
 # Evolution (env)
@@ -23,6 +25,7 @@ router = APIRouter(tags=["Atendimento – Mídias"])
 EVOLUTION_URL = (os.getenv("EVOLUTION_URL", "").rstrip("/"))
 EVOLUTION_KEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_KEY")
 HEADERS = {"apikey": EVOLUTION_KEY, "Content-Type": "application/json"} if EVOLUTION_KEY else {}
+
 
 # =========================
 # Cache de arquivos (env)
@@ -33,30 +36,124 @@ os.makedirs(MEDIA_CACHE_DIR, exist_ok=True)
 # ⚠️ mídia é recurso autenticado → evite cache público/proxy
 MEDIA_CACHE_CONTROL = "private, max-age=31536000, immutable"
 
+
 # trava por msg_id para evitar duplicidade de fetch/escrita
 _FETCH_LOCKS: dict[str, threading.Lock] = {}
 _FETCH_LOCKS_G = threading.Lock()
-def _lock_for(msg_id: str) -> threading.Lock:
+
+
+def _lock_for(key: str) -> threading.Lock:
     with _FETCH_LOCKS_G:
-        if msg_id not in _FETCH_LOCKS:
-            _FETCH_LOCKS[msg_id] = threading.Lock()
-        return _FETCH_LOCKS[msg_id]
+        if key not in _FETCH_LOCKS:
+            _FETCH_LOCKS[key] = threading.Lock()
+        return _FETCH_LOCKS[key]
+
+
+# =========================
+# ACL / Permissões
+# =========================
+def _ensure_atendimento_ver(identity: Any) -> None:
+    perms = set((identity or {}).get("permissoes") or [])
+    if "atendimento.ver" not in perms:
+        raise HTTPException(status_code=403, detail="Sem permissão para ver mídias de atendimento")
+
+
+def _allowed_inst_ids(identity: Any, db: Session) -> Optional[List[int]]:
+    """
+    Retorna:
+      - None: sem restrição (admin / regra libera)
+      - []: sem instâncias visíveis (bloqueia tudo)
+      - [ids...]: whitelist
+    """
+    ids = instancias_visiveis(identity, db)
+    if ids is None:
+        return None
+    try:
+        return [int(x) for x in ids]
+    except Exception:
+        return []
+
 
 # =========================
 # Helpers
 # =========================
 def _assert_mesma_empresa(empresa_do_token: int, empresa_da_query: int | None) -> int:
-    """
-    Se empresa_da_query existir, deve ser igual ao do token; senão usa o do token.
-    """
     if empresa_da_query is None:
-        return empresa_do_token
-    if empresa_da_query != empresa_do_token:
+        return int(empresa_do_token)
+    if int(empresa_da_query) != int(empresa_do_token):
         raise HTTPException(403, "Empresa inválida para este recurso")
-    return empresa_da_query
+    return int(empresa_da_query)
+
+
+def _resolve_instancia(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int | None,
+    instance: str | None,
+) -> Tuple[Optional[int], Optional[str]]:
+    """
+    Resolve (instancia_id, instance_name) pelo filtro recebido.
+    """
+    if instancia_id is not None:
+        row = (
+            db.query(models.EmpresaInstancia)
+            .filter(
+                models.EmpresaInstancia.empresa_id == int(empresa_id),
+                models.EmpresaInstancia.id == int(instancia_id),
+            )
+            .first()
+        )
+        if row:
+            return int(row.id), row.instance_name
+        return None, None
+
+    if instance:
+        row = (
+            db.query(models.EmpresaInstancia)
+            .filter(
+                models.EmpresaInstancia.empresa_id == int(empresa_id),
+                models.EmpresaInstancia.instance_name == instance,
+            )
+            .first()
+        )
+        if row:
+            return int(row.id), row.instance_name
+        return None, None
+
+    return None, None
+
+
+def _assert_instancia_permitida(
+    *,
+    allowed: Optional[List[int]],
+    resolved_inst_id: Optional[int],
+    msg_instancia_id: Optional[int],
+    filtro_inst_id: Optional[int],
+) -> None:
+    """
+    Regras:
+      - Se allowed is None -> sem restrição.
+      - Se allowed == [] -> bloqueia.
+      - Se filtro_inst_id/resolved_inst_id veio e não está em allowed -> 403.
+      - Se mensagem tem instancia_id e não está em allowed -> 403.
+    """
+    if allowed is None:
+        return
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Sem instâncias permitidas para este colaborador")
+
+    if resolved_inst_id is not None and resolved_inst_id not in allowed:
+        raise HTTPException(status_code=403, detail="Instância não permitida para este colaborador")
+
+    if filtro_inst_id is not None and int(filtro_inst_id) not in allowed:
+        raise HTTPException(status_code=403, detail="Instância não permitida para este colaborador")
+
+    if msg_instancia_id is not None and int(msg_instancia_id) not in allowed:
+        raise HTTPException(status_code=403, detail="Mídia não permitida para este colaborador (instância)")
+
 
 def _find_b64(d):
-    """Busca recursiva por campos comuns que carregam base64/dataURL."""
     if isinstance(d, dict):
         for k in ("base64", "b64", "fileBase64", "data"):
             v = d.get(k)
@@ -73,19 +170,27 @@ def _find_b64(d):
                 return b
     return None
 
+
 def _sniff_mime(raw: bytes) -> str:
     h = raw[:16]
-    if h.startswith(b"\xff\xd8\xff"): return "image/jpeg"
-    if h.startswith(b"\x89PNG\r\n\x1a\n"): return "image/png"
-    if h[:4] == b"RIFF" and h[8:12] == b"WEBP": return "image/webp"
-    if h.startswith(b"OggS"): return "audio/ogg"
-    if h.startswith(b"ID3") or (len(h) >= 2 and h[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2")): return "audio/mpeg"
-    if len(h) >= 12 and h[4:8] == b"ftyp": return "video/mp4"
-    if h.startswith(b"%PDF"): return "application/pdf"
+    if h.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if h.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if h[:4] == b"RIFF" and h[8:12] == b"WEBP":
+        return "image/webp"
+    if h.startswith(b"OggS"):
+        return "audio/ogg"
+    if h.startswith(b"ID3") or (len(h) >= 2 and h[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2")):
+        return "audio/mpeg"
+    if len(h) >= 12 and h[4:8] == b"ftyp":
+        return "video/mp4"
+    if h.startswith(b"%PDF"):
+        return "application/pdf"
     return "application/octet-stream"
 
+
 def _decode_any(b64: str):
-    """Aceita dataURL (data:mime;base64,...) ou base64 puro; tenta adivinhar o MIME."""
     m = re.match(r"^data:([^;]+);base64,(.+)$", b64)
     if m:
         raw = base64.b64decode(m.group(2), validate=False)
@@ -94,12 +199,8 @@ def _decode_any(b64: str):
     raw = base64.b64decode("".join(b64.split()), validate=False)
     return raw, _sniff_mime(raw)
 
+
 def _fix_filename(name: str | None, mime: str) -> str:
-    """
-    Normaliza o nome para bater com o MIME:
-    - remove .enc
-    - substitui/define a extensão pela extensão do MIME
-    """
     base = (name or "arquivo")
     if base.lower().endswith(".enc"):
         base = base[:-4]
@@ -119,28 +220,41 @@ def _fix_filename(name: str | None, mime: str) -> str:
     else:
         return base + ext_from_mime
 
+
 def _etag_from_raw(raw: bytes) -> str:
     h = hashlib.md5(raw).hexdigest()[:16]
     return f'W/"{len(raw)}-{h}"'
 
+
 def _etag_from_stat(path: str) -> str:
     try:
         st = os.stat(path)
-        # weak etag baseado em tamanho + mtime (suficiente p/ 304)
         return f'W/"{st.st_size}-{int(st.st_mtime)}"'
     except Exception:
         return ""
 
+
+def _sanitize_cache_key(key: str) -> str:
+    # msg_id geralmente é seguro, mas vamos blindar path
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", key or "")
+
+
 def _cache_glob_for(prefix: str):
-    # arquivos salvos como: <MEDIA_CACHE_DIR>/<prefix>.<ext>
-    # ⚠️ NÃO pode pegar sidecars (.etag/.name/.tmp)
+    prefix = _sanitize_cache_key(prefix)
     pattern = os.path.join(MEDIA_CACHE_DIR, f"{prefix}.*")
     files = [f for f in glob.glob(pattern) if not f.endswith((".etag", ".name", ".tmp"))]
-    return files[0] if files else None
+    if not files:
+        return None
+    # escolhe o mais recente (se existir mais de 1 por algum motivo)
+    files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    return files[0]
+
 
 def _cache_write(prefix: str, raw: bytes, mime: str, name: str | None):
+    prefix = _sanitize_cache_key(prefix)
     ext = mimetypes.guess_extension(mime or "") or ""
-    if ext == ".jpe": ext = ".jpg"
+    if ext == ".jpe":
+        ext = ".jpg"
     safe_name = _fix_filename(name, mime)
 
     path = os.path.join(MEDIA_CACHE_DIR, f"{prefix}{ext}")
@@ -149,7 +263,6 @@ def _cache_write(prefix: str, raw: bytes, mime: str, name: str | None):
         f.write(raw)
     os.replace(tmp, path)
 
-    # sidecars: etag + original name (para Content-Disposition)
     try:
         with open(path + ".etag", "w") as f:
             f.write(_etag_from_raw(raw))
@@ -162,17 +275,20 @@ def _cache_write(prefix: str, raw: bytes, mime: str, name: str | None):
         pass
     return path
 
+
 def _sanitize_cd_filename(name: str) -> str:
-    # remove aspas/CRLF para não quebrar header
     n = (name or "arquivo").replace("\r", "").replace("\n", "").replace('"', "")
     return n or "arquivo"
 
+
+def _if_none_match_hits(inm: str | None, etag: str) -> bool:
+    if not inm or not etag:
+        return False
+    # Pode vir: W/"..." ou lista: W/"...", W/"..."
+    return etag in inm
+
+
 def _serve_cached(path: str, request: Request):
-    """
-    Serve arquivo do cache com ETag/304 CORRETO:
-    - 304 precisa repetir headers (ETag/Cache-Control/Content-Disposition)
-    - NÃO devolve 304 se tiver Range (áudio/vídeo normalmente usam Range)
-    """
     etag = None
     name = None
     try:
@@ -209,17 +325,14 @@ def _serve_cached(path: str, request: Request):
 
     inm = request.headers.get("if-none-match")
     has_range = bool(request.headers.get("range"))
-    if etag and inm == etag and not has_range:
-        # ✅ 304 com headers (senão Chrome pode quebrar cache/stream)
+
+    if etag and _if_none_match_hits(inm, etag) and not has_range:
         return Response(status_code=304, headers=headers)
 
     return FileResponse(path, media_type=mime, headers=headers)
 
+
 def _inline(raw: bytes, mime: str | None, name: str | None, request: Request | None = None):
-    """
-    Fallback: stream em memória (evitar; preferimos cache em disco p/ suportar Range).
-    Mesmo assim, mantém ETag/304 correto e evita 304 com Range.
-    """
     mime = (mime or "application/octet-stream").strip().lower() or "application/octet-stream"
     etag = _etag_from_raw(raw)
     safe_name = _sanitize_cd_filename(_fix_filename(name, mime))
@@ -233,13 +346,13 @@ def _inline(raw: bytes, mime: str | None, name: str | None, request: Request | N
     if request:
         inm = request.headers.get("if-none-match")
         has_range = bool(request.headers.get("range"))
-        if inm == etag and not has_range:
+        if _if_none_match_hits(inm, etag) and not has_range:
             return Response(status_code=304, headers=headers)
 
     return StreamingResponse(BytesIO(raw), media_type=mime, headers=headers)
 
+
 def _bucket_for(mime: str, media_type: str | None = None) -> str:
-    """image|video|audio|document|sticker"""
     m = (mime or "").lower()
     mt = (media_type or "").lower()
     if "sticker" in mt:
@@ -248,23 +361,26 @@ def _bucket_for(mime: str, media_type: str | None = None) -> str:
         if m == "image/webp" and "sticker" in mt:
             return "sticker"
         return "image"
-    if m.startswith("video/"): return "video"
-    if m.startswith("audio/"): return "audio"
-    if m.startswith("application/"): return "document"
+    if m.startswith("video/"):
+        return "video"
+    if m.startswith("audio/"):
+        return "audio"
+    if m.startswith("application/"):
+        return "document"
     return "document"
 
+
 def _pdf_page_count(raw: bytes) -> Optional[int]:
-    """Heurística simples; se precisar perfeito, trocar por PyPDF2 depois."""
     try:
         return raw.count(b"/Type /Page") or None
     except Exception:
         return None
 
+
 # =========================
 # Core: Evolution + persistência
 # =========================
 def _evo_payloads_for(msg: models.Mensagem, cli: models.Cliente, inst: models.EmpresaInstancia | None):
-    """Monta variações de key (com/sem remoteJid, fromMe true/false) para aumentar chance de hit."""
     jid = (cli.telefone or "").strip()
     if jid:
         jid = "".join(ch for ch in jid if ch.isdigit())
@@ -280,14 +396,13 @@ def _evo_payloads_for(msg: models.Mensagem, cli: models.Cliente, inst: models.Em
         ]
     return payloads
 
+
 def _fetch_from_evolution(
     db: Session,
     msg: models.Mensagem,
     cli: models.Cliente,
     inst: models.EmpresaInstancia | None,
-    instancia_id: int | None = None,  # opcional; usamos instance_name da instância
 ):
-    """Busca base64 + metadados na Evolution; tenta convertToMp4=False→True e variações de key."""
     if not EVOLUTION_KEY:
         raise RuntimeError("Evolution KEY ausente")
     if not EVOLUTION_URL:
@@ -300,6 +415,7 @@ def _fetch_from_evolution(
 
     def _post(payload_msg, convert: bool):
         import requests
+
         body = {"message": payload_msg, "convertToMp4": bool(convert)}
         r = requests.post(url, headers=HEADERS, json=body, timeout=40)
         if r.status_code not in (200, 201):
@@ -318,14 +434,12 @@ def _fetch_from_evolution(
         }
         return raw, mime, name, meta
 
-    # Primeiro tenta o payload simples (igual ao Postman)
-    for convert in (False, True):  # True ajuda áudio/ptt
+    for convert in (False, True):
         try:
             return _post({"key": {"id": msg.msg_id}}, convert)
         except Exception as e:
             last_err = str(e)
 
-    # Depois variações com remoteJid/fromMe
     for key in _evo_payloads_for(msg, cli, inst):
         for convert in (False, True):
             try:
@@ -335,6 +449,12 @@ def _fetch_from_evolution(
                 continue
 
     raise RuntimeError(last_err or "falha Evolution")
+
+
+def _set_attr_if_exists(obj, field: str, value) -> None:
+    if hasattr(obj, field):
+        setattr(obj, field, value)
+
 
 def _persist_midia(
     db: Session,
@@ -346,80 +466,105 @@ def _persist_midia(
     local_path: str | None = None,
 ):
     """
-    Cria/atualiza Midia da mensagem com campos ricos:
-    empresa_id, cliente_id, mensagem_id, mimetype, filename,
-    tamanho, tipo (bucket), file_sha256, local_path, data (binário), page_count (PDF).
+    Suporta dois modelos:
+      - models.Midia (novo)
+      - models.MensagemMidia (legado)
     """
+    MediaModel = getattr(models, "Midia", None) or getattr(models, "MensagemMidia", None)
+    if MediaModel is None:
+        return None  # não tem tabela de mídia no schema
+
     media_type = (meta or {}).get("mediaType")
-    size_obj   = (meta or {}).get("size") or {}
-    file_len   = size_obj.get("fileLength")
+    size_obj = (meta or {}).get("size") or {}
+    file_len = size_obj.get("fileLength")
+
     try:
         file_len = int(file_len) if file_len is not None else None
     except Exception:
         file_len = None
 
-    # normaliza filename e bucket
-    fname  = _fix_filename(filename, mime)
+    fname = _fix_filename(filename, mime)
     bucket = _bucket_for(mime, media_type)
 
-    # calcula tamanho e hash
     real_size = len(raw)
-    tamanho   = file_len or real_size
-    sha_hex   = hashlib.sha256(raw).hexdigest()
+    tamanho = file_len or real_size
+    sha_hex = hashlib.sha256(raw).hexdigest()
 
     midia = (
-        db.query(models.Midia)
-          .filter(models.Midia.mensagem_id == msg.id)
-          .first()
+        db.query(MediaModel)
+        .filter(getattr(MediaModel, "mensagem_id") == msg.id)
+        .order_by(getattr(MediaModel, "id").asc())
+        .first()
     )
     if midia is None:
-        midia = models.Midia(mensagem_id=msg.id)
+        midia = MediaModel(mensagem_id=msg.id)
         db.add(midia)
 
-    midia.empresa_id = msg.empresa_id
-    midia.cliente_id = msg.cliente_id
-    midia.mimetype   = mime or midia.mimetype or "application/octet-stream"
-    midia.filename   = fname or midia.filename or "arquivo"
+    _set_attr_if_exists(midia, "empresa_id", msg.empresa_id)
+    _set_attr_if_exists(midia, "cliente_id", msg.cliente_id)
+
+    # nomes variam dependendo do modelo
+    _set_attr_if_exists(midia, "mimetype", (mime or "application/octet-stream"))
+    _set_attr_if_exists(midia, "mime", (mime or "application/octet-stream"))
+
+    _set_attr_if_exists(midia, "filename", fname or "arquivo")
+    _set_attr_if_exists(midia, "name", fname or "arquivo")
+
     if filename and filename != fname:
-        # guarda o nome vindo da Evolution, se diferente do normalizado
-        midia.nome_original = filename
+        _set_attr_if_exists(midia, "nome_original", filename)
 
-    midia.tipo        = bucket
-    midia.tamanho     = tamanho
-    midia.file_sha256 = sha_hex
+    _set_attr_if_exists(midia, "tipo", bucket)
+    _set_attr_if_exists(midia, "tamanho", tamanho)
+    _set_attr_if_exists(midia, "size", tamanho)
+
+    _set_attr_if_exists(midia, "file_sha256", sha_hex)
+    _set_attr_if_exists(midia, "sha256", sha_hex)
+
     if local_path:
-        midia.local_path = local_path
+        _set_attr_if_exists(midia, "local_path", local_path)
+        _set_attr_if_exists(midia, "path_local", local_path)
+        _set_attr_if_exists(midia, "caminho", local_path)
 
-    # mantém o binário para auditoria/backup:
-    midia.data = raw
+    # blob
+    _set_attr_if_exists(midia, "data", raw)
+    _set_attr_if_exists(midia, "conteudo", raw)
 
-    # (opcional) page_count em PDF
-    if (midia.mimetype or "").lower() == "application/pdf":
+    if (mime or "").lower() == "application/pdf":
         pc = _pdf_page_count(raw)
         if pc:
-            midia.page_count = pc
+            _set_attr_if_exists(midia, "page_count", pc)
 
     db.commit()
-    db.refresh(midia)
+    try:
+        db.refresh(midia)
+    except Exception:
+        pass
     return midia
+
 
 # =========================
 # Helpers de servir do BD
 # =========================
-def _serve_midia_model(md: models.Midia, request: Request | None = None) -> Response:
-    """Serve a mídia usando os campos do modelo (data/local_path/url) com cache/etag."""
-    mimetype = (getattr(md, "mimetype", None) or "application/octet-stream")
-    filename = getattr(md, "filename", None) or getattr(md, "nome_original", None) or "arquivo"
+def _serve_midia_model(md: Any, request: Request | None = None) -> Response:
+    mimetype = (getattr(md, "mimetype", None) or getattr(md, "mime", None) or "application/octet-stream")
+    filename = (
+        getattr(md, "filename", None)
+        or getattr(md, "name", None)
+        or getattr(md, "nome_original", None)
+        or "arquivo"
+    )
     filename = _sanitize_cd_filename(filename)
 
-    # 1) blob/data
     raw = getattr(md, "data", None) or getattr(md, "conteudo", None)
     if raw:
         raw_b = bytes(raw)
         return _inline(raw_b, mimetype, filename, request=request)
 
-    # 2) arquivo local
-    local_path = getattr(md, "local_path", None) or getattr(md, "path_local", None) or getattr(md, "caminho", None)
+    local_path = (
+        getattr(md, "local_path", None)
+        or getattr(md, "path_local", None)
+        or getattr(md, "caminho", None)
+    )
     if local_path and os.path.exists(local_path):
         etag = _etag_from_stat(local_path)
         headers = {
@@ -431,45 +576,61 @@ def _serve_midia_model(md: models.Midia, request: Request | None = None) -> Resp
             headers["ETag"] = etag
             inm = request.headers.get("if-none-match") if request else None
             has_range = bool(request.headers.get("range")) if request else False
-            if inm and inm == etag and not has_range:
+            if inm and _if_none_match_hits(inm, etag) and not has_range:
                 return Response(status_code=304, headers=headers)
 
         return FileResponse(local_path, media_type=mimetype, headers=headers)
 
-    # 3) url pública (fallback)
     url = getattr(md, "url", None)
     if url:
         return RedirectResponse(url)
 
     raise HTTPException(404, "Mídia sem conteúdo disponível")
 
+
 # =========================
 # Rotas
 # =========================
-@router.get("/api/atendimento/midias/{midia_id}")
+@router.get("/midias/{midia_id}")
 def midia_resolve(
     midia_id: int,
     request: Request,
     empresa_id: int | None = Query(None),
     instancia_id: int | None = Query(None),
+    instance: str | None = Query(None),
     db: Session = Depends(get_db),
-    identity = Depends(get_current_identity),  # ⬅️ AQUI
+    identity=Depends(get_current_identity),
 ):
     """
     Rota legacy por midia_id — resolve msg_id e REDIRECIONA (307) para a rota por msg_id.
-    Propaga empresa_id/instancia_id quando informados (evita 422).
-    Garante que a empresa da mídia pertence ao token.
+    Propaga empresa_id/instancia_id/instance quando informados.
+    Garante que a empresa e a instância pertencem ao token/ACL.
     """
-    empresa_id_eff = _assert_mesma_empresa(identity["empresa_id"], empresa_id)
+    _ensure_atendimento_ver(identity)
+
+    empresa_id_eff = _assert_mesma_empresa(int(identity["empresa_id"]), empresa_id)
+    allowed = _allowed_inst_ids(identity, db)
+
+    resolved_inst_id, _resolved_name = _resolve_instancia(
+        db,
+        empresa_id=empresa_id_eff,
+        instancia_id=instancia_id,
+        instance=instance,
+    )
+
+    MediaModel = getattr(models, "Midia", None) or getattr(models, "MensagemMidia", None)
+    if MediaModel is None:
+        raise HTTPException(500, "Modelo de mídia não disponível no schema (Midia/MensagemMidia).")
 
     row = (
-        db.query(models.Midia, models.Mensagem)
-          .join(models.Mensagem, models.Mensagem.id == models.Midia.mensagem_id)
-          .filter(models.Midia.id == midia_id)
-          .first()
+        db.query(MediaModel, models.Mensagem)
+        .join(models.Mensagem, models.Mensagem.id == getattr(MediaModel, "mensagem_id"))
+        .filter(getattr(MediaModel, "id") == int(midia_id))
+        .first()
     )
     if not row:
         raise HTTPException(404, "Mídia não encontrada")
+
     mid, msg = row
     if not msg or not msg.msg_id:
         raise HTTPException(404, "Mensagem associada não encontrada")
@@ -477,107 +638,166 @@ def midia_resolve(
     if int(msg.empresa_id) != int(empresa_id_eff):
         raise HTTPException(403, "Mídia não pertence à sua empresa")
 
+    _assert_instancia_permitida(
+        allowed=allowed,
+        resolved_inst_id=resolved_inst_id,
+        msg_instancia_id=getattr(msg, "instancia_id", None),
+        filtro_inst_id=instancia_id,
+    )
+
     qs = []
-    if empresa_id_eff is not None: qs.append(f"empresa_id={empresa_id_eff}")
-    if instancia_id is not None: qs.append(f"instancia_id={instancia_id}")
+    qs.append(f"empresa_id={empresa_id_eff}")
+    if instancia_id is not None:
+        qs.append(f"instancia_id={int(instancia_id)}")
+    if instance:
+        qs.append(f"instance={instance}")
     q = ("?" + "&".join(qs)) if qs else ""
+
     return RedirectResponse(url=f"/api/atendimento/midias/msg/{msg.msg_id}{q}", status_code=307)
 
 
-@router.get("/api/atendimento/midias/msg/{msg_id}")
+@router.get("/midias/msg/{msg_id}")
 def midia_por_msg(
     msg_id: str,
     request: Request,
     empresa_id: int | None = Query(None),
     instancia_id: int | None = Query(None),
+    instance: str | None = Query(None),
     db: Session = Depends(get_db),
-    identity = Depends(get_current_identity),  # ⬅️ E AQUI
+    identity=Depends(get_current_identity),
 ):
     """
-    Canônico por msg_id (multi-instância):
+    Canônico por msg_id (multi-instância + ACL):
       0) cache em disco (ETag/304),
-      1) resolve Mensagem+Cliente+Instância (validando empresa do token),
-      2) tenta servir **do BD** (Midia.data/local_path/url),
+      1) resolve Mensagem+Cliente+Instância (validando empresa do token + ACL instância),
+      2) tenta servir do BD,
       3) Evolution como fallback, persistindo e cacheando.
     """
-    empresa_id_eff = _assert_mesma_empresa(identity["empresa_id"], empresa_id)
+    _ensure_atendimento_ver(identity)
+
+    empresa_id_eff = _assert_mesma_empresa(int(identity["empresa_id"]), empresa_id)
+    allowed = _allowed_inst_ids(identity, db)
+
+    resolved_inst_id, _resolved_name = _resolve_instancia(
+        db,
+        empresa_id=empresa_id_eff,
+        instancia_id=instancia_id,
+        instance=instance,
+    )
+
+    # ACL: se colaborador não tem instâncias visíveis, bloqueia
+    _assert_instancia_permitida(
+        allowed=allowed,
+        resolved_inst_id=resolved_inst_id,
+        msg_instancia_id=None,
+        filtro_inst_id=instancia_id,
+    )
 
     # 0) Cache no disco?
     cached = _cache_glob_for(msg_id)
     if cached:
         return _serve_cached(cached, request)
 
-    # 1) Resolve Mensagem + Cliente + Instância (msg_id case-insensitive)
+    # 1) Resolve Mensagem + Cliente + Instância
     q = (
         db.query(models.Mensagem, models.Cliente, models.EmpresaInstancia)
-          .join(models.Cliente, models.Cliente.id == models.Mensagem.cliente_id)
-          .outerjoin(models.EmpresaInstancia, models.EmpresaInstancia.id == models.Mensagem.instancia_id)
-          .filter(
-              func.lower(models.Mensagem.msg_id) == msg_id.lower(),
-              models.Mensagem.empresa_id == empresa_id_eff
-          )
+        .join(models.Cliente, models.Cliente.id == models.Mensagem.cliente_id)
+        .outerjoin(models.EmpresaInstancia, models.EmpresaInstancia.id == models.Mensagem.instancia_id)
+        .filter(
+            func.lower(models.Mensagem.msg_id) == msg_id.lower(),
+            models.Mensagem.empresa_id == int(empresa_id_eff),
+        )
     )
-    if instancia_id is not None and hasattr(models.Mensagem, "instancia_id"):
-        q = q.filter(models.Mensagem.instancia_id == instancia_id)
+
+    if resolved_inst_id is not None and hasattr(models.Mensagem, "instancia_id"):
+        q = q.filter(models.Mensagem.instancia_id == int(resolved_inst_id))
+    elif instancia_id is not None and hasattr(models.Mensagem, "instancia_id"):
+        # se veio id mas não resolveu, força "não encontrado"
+        q = q.filter(models.Mensagem.instancia_id == int(instancia_id))
+
+    if allowed is not None:
+        # filtra instâncias permitidas no próprio select
+        q = q.filter(models.Mensagem.instancia_id.in_(allowed))
 
     row = q.first()
     if not row:
         raise HTTPException(404, "Mensagem não encontrada para os filtros informados")
+
     msg, cli, inst = row
 
-    # 2) **Serve do BD primeiro**
-    mid_db = (
-        db.query(models.Midia)
-          .filter(models.Midia.mensagem_id == msg.id)
-          .order_by(models.Midia.id.asc())
-          .first()
+    # ACL final (mensagem resolvida)
+    _assert_instancia_permitida(
+        allowed=allowed,
+        resolved_inst_id=resolved_inst_id,
+        msg_instancia_id=getattr(msg, "instancia_id", None),
+        filtro_inst_id=instancia_id,
     )
+
+    # 2) Serve do BD primeiro
+    MediaModel = getattr(models, "Midia", None) or getattr(models, "MensagemMidia", None)
+    mid_db = None
+    if MediaModel is not None:
+        mid_db = (
+            db.query(MediaModel)
+            .filter(getattr(MediaModel, "mensagem_id") == msg.id)
+            .order_by(getattr(MediaModel, "id").asc())
+            .first()
+        )
+
     if mid_db:
-        # se tem blob, prefira escrever no cache e servir do disco (range ok)
         raw = getattr(mid_db, "data", None) or getattr(mid_db, "conteudo", None)
         if raw:
             raw_b = bytes(raw)
-            mime = (getattr(mid_db, "mimetype", None) or "application/octet-stream").lower()
-            safe_name = _fix_filename(getattr(mid_db, "filename", None) or getattr(mid_db, "nome_original", None) or "arquivo", mime)
-
+            mime = (
+                getattr(mid_db, "mimetype", None)
+                or getattr(mid_db, "mime", None)
+                or "application/octet-stream"
+            ).lower()
+            safe_name = _fix_filename(
+                getattr(mid_db, "filename", None)
+                or getattr(mid_db, "name", None)
+                or getattr(mid_db, "nome_original", None)
+                or "arquivo",
+                mime,
+            )
             try:
                 path = _cache_write(msg_id, raw_b, mime, safe_name)
                 return _serve_cached(path, request)
             except Exception:
                 return _inline(raw_b, mime, safe_name, request=request)
 
-        # sem blob: tenta local_path/url com cache/etag
         try:
             return _serve_midia_model(mid_db, request=request)
         except Exception:
-            pass  # tenta Evolution
+            pass
 
     # 3) Evolution como fallback (cache-1x com lock)
-    lock = _lock_for(msg_id)
+    lock = _lock_for(_sanitize_cache_key(msg_id))
     with lock:
         cached2 = _cache_glob_for(msg_id)
         if cached2:
             return _serve_cached(cached2, request)
 
         try:
-            raw, mime, evo_name, meta = _fetch_from_evolution(db, msg, cli, inst, instancia_id)
+            raw, mime, evo_name, meta = _fetch_from_evolution(db, msg, cli, inst)
             safe_name = _fix_filename(evo_name, mime)
             path = _cache_write(msg_id, raw, mime, safe_name)
             _persist_midia(db, msg, raw, mime, evo_name, meta=meta, local_path=path)
             return _serve_cached(path, request)
 
         except Exception as evo_err:
-            # último fallback: alguma Midia sem data mas com arquivo/url
-            mid2 = (
-                db.query(models.Midia)
-                  .filter(models.Midia.mensagem_id == msg.id)
-                  .order_by(models.Midia.id.desc())
-                  .first()
-            )
-            if mid2:
-                try:
-                    return _serve_midia_model(mid2, request=request)
-                except Exception:
-                    pass
+            # fallback final: tentar servir o que houver no BD (local/url)
+            if MediaModel is not None:
+                mid2 = (
+                    db.query(MediaModel)
+                    .filter(getattr(MediaModel, "mensagem_id") == msg.id)
+                    .order_by(getattr(MediaModel, "id").desc())
+                    .first()
+                )
+                if mid2:
+                    try:
+                        return _serve_midia_model(mid2, request=request)
+                    except Exception:
+                        pass
 
             raise HTTPException(404, f"Não foi possível obter a mídia por msg_id ({evo_err})")

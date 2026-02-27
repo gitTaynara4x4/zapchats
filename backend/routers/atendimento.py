@@ -8,14 +8,14 @@ from datetime import datetime
 
 from dateutil import parser
 from fastapi import APIRouter, Depends, HTTPException, Query, Body, Header
-from sqlalchemy import func, or_
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from backend import models
 from backend.database import get_db
 from backend.websocket_manager import conexoes_ativas
-from backend.routers.auth import get_current_identity  # <- aqui
+from backend.routers.auth import get_current_identity  # <- identity (colab + perms)
 
 # =========================================================
 # Redis (opcional) – cache leve para /conversas e /clientes
@@ -34,7 +34,6 @@ if REDIS_URL:
 
 
 def _k(*parts: str) -> str:
-    # monta chave do cache com prefixo
     return ":".join([REDIS_PREFIX, *[p for p in parts if p is not None and p != ""]])
 
 
@@ -68,10 +67,6 @@ def _cache_del(*keys: str):
 
 
 def _cache_del_pattern(prefix: str):
-    """
-    Deleta por SCAN um conjunto de chaves que começam com 'prefix'.
-    Ex.: prefix='zap:conv:list:emp:12' -> apaga todas as variações.
-    """
     if not _redis:
         return
     try:
@@ -91,12 +86,10 @@ def _cache_del_pattern(prefix: str):
 # Helpers: flags de conversa (pin/labels/deleted) e admin
 # =========================================================
 def _k_pin(empresa_id: int) -> str:
-    # (usado só como fallback quando não houver tabela de PINs)
     return _k("conv", "pin", "emp", str(int(empresa_id)))
 
 
 def _k_pin_user(empresa_id: int, user_id: int) -> str:
-    # pins por usuário (cache Redis)
     return _k("conv", "pin", "emp", str(int(empresa_id)), "user", str(int(user_id)))
 
 
@@ -112,14 +105,56 @@ def _ensure_list(x):
     return x if isinstance(x, list) else (list(x) if isinstance(x, (set, tuple)) else [])
 
 
+def _to_int(v) -> Optional[int]:
+    try:
+        if v is None:
+            return None
+        s = str(v).strip()
+        if not s:
+            return None
+        return int(s)
+    except Exception:
+        return None
+
+
+def _infer_kind(identity: dict) -> str:
+    k = (identity.get("kind") or identity.get("tipo") or "").lower().strip()
+    if k in ("colaborador", "usuario", "admin"):
+        return "colaborador" if k == "colaborador" else "usuario"
+
+    sub = str(identity.get("sub") or "").strip().lower()
+    role = str(identity.get("role") or "").strip().lower()
+
+    if sub.startswith("colab-") or "colab" in role or "colaborador" in role:
+        return "colaborador"
+    return "usuario"
+
+
+def _get_colab_id(identity: dict) -> Optional[int]:
+    # tenta campos explícitos
+    for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
+        cid = _to_int(identity.get(key))
+        if cid:
+            return cid
+
+    # tenta sub colab-<id>
+    sub = str(identity.get("sub") or "").strip().lower()
+    if sub.startswith("colab-"):
+        cid = _to_int(sub.split("-", 1)[1])
+        if cid:
+            return cid
+
+    # fallback comum: identity["id"] = id do colaborador
+    return _to_int(identity.get("id"))
+
+
 def _is_admin(user) -> bool:
     """
-    Considera admin se: user.is_admin == True  OU  permissões conterem:
+    Considera admin se: user.is_admin == True OU permissões conterem:
     'admin', 'root', 'clientes.gerenciar' ou 'atendimento.gerenciar'.
-    Suporta tanto models.Usuario quanto o dict do get_current_identity.
+    Suporta identity (dict) e models.Usuario.
     """
     try:
-        # dict (identity)
         if isinstance(user, dict):
             if user.get("is_admin"):
                 return True
@@ -137,9 +172,7 @@ def _is_admin(user) -> bool:
         return False
 
 
-# ------- Helpers: empresa do usuário / validação -------
 def _empresa_do_user(user) -> Optional[int]:
-    # Suporta tanto identity (dict) quanto models.Usuario
     if isinstance(user, dict):
         return user.get("empresa_id")
     return getattr(user, "empresa_id", None) or getattr(user, "empresa", None)
@@ -152,16 +185,149 @@ def _assert_empresa_user(user, empresa_id: int) -> int:
     return int(empresa_id)
 
 
+def _ensure_perm(identity: dict, perm: str) -> None:
+    perms = set(identity.get("permissoes") or [])
+    if perm not in perms and not _is_admin(identity):
+        raise HTTPException(status_code=403, detail=f"Sem permissão ({perm})")
+
+
+# =========================================================
+# Avatar URL: nunca devolver pps.whatsapp.net pro browser
+# -> sempre devolver o proxy do backend (/api/atendimento/avatar/{cliente_id})
+# =========================================================
+def _public_avatar_url(cliente_id: int, raw_avatar_url: Optional[str]) -> Optional[str]:
+    """
+    Se o banco tiver avatar_url apontando para pps.whatsapp.net (ou qualquer http externo),
+    NÃO mande pro front. Mande o proxy local.
+
+    - Se já vier /api/atendimento/avatar/... mantém.
+    - Se não tiver nada, retorna None (front usa fallback).
+    """
+    if not cliente_id:
+        return None
+
+    raw = (raw_avatar_url or "").strip()
+    if not raw:
+        return None
+
+    # já é nosso proxy/local
+    if raw.startswith("/api/atendimento/avatar/"):
+        return raw
+
+    # se vier pps.whatsapp.net (ou qualquer URL externa), força proxy
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return f"/api/atendimento/avatar/{int(cliente_id)}"
+
+    # qualquer outra string estranha -> também força proxy (mais seguro)
+    return f"/api/atendimento/avatar/{int(cliente_id)}"
+
+
+# =========================================================
+# ACL por instância do colaborador (privacidade)
+# - Usa tabela colaboradores_instancias se existir
+# - Se não existir: modo legado (não filtra por instância)
+# =========================================================
+def _table_exists(db: Session, table_name: str) -> bool:
+    """
+    Postgres: to_regclass('public.tabela') retorna NULL se não existir.
+    Se não for postgres, tenta e falha com try/except (retorna False).
+    """
+    try:
+        reg = db.execute(text(f"SELECT to_regclass('public.{table_name}')")).scalar()
+        return reg is not None
+    except Exception:
+        return False
+
+
+def _allowed_instancia_ids(db: Session, identity: dict, empresa_id: int) -> Optional[List[int]]:
+    """
+    Retorna:
+      - None  => sem restrição (admin/usuario master OU tabela inexistente)
+      - []    => colaborador sem instâncias permitidas (nega tudo)
+      - [..]  => lista de instâncias permitidas
+    """
+    if _is_admin(identity):
+        return None
+
+    kind = _infer_kind(identity)
+    if kind != "colaborador":
+        # usuário/admin do painel: sem restrição por enquanto
+        return None
+
+    if not _table_exists(db, "colaboradores_instancias"):
+        # legado: sem tabela de ACL, não restringe
+        return None
+
+    cid = _get_colab_id(identity)
+    if not cid:
+        return []
+
+    rows = db.execute(
+        text(
+            """
+            SELECT instancia_id
+            FROM colaboradores_instancias
+            WHERE empresa_id = :emp
+              AND colaborador_id = :cid
+            """
+        ),
+        {"emp": int(empresa_id), "cid": int(cid)},
+    ).fetchall()
+
+    ids = [int(r[0]) for r in rows if r and r[0] is not None]
+    # se tiver tabela mas não tiver vínculos, é nega-tudo (privacidade)
+    return ids
+
+
+def _assert_instancia_allowed(
+    *,
+    allowed: Optional[List[int]],
+    instancia_id: Optional[int],
+) -> None:
+    if instancia_id is None:
+        return
+    if allowed is None:
+        return
+    if int(instancia_id) not in set(int(x) for x in allowed):
+        raise HTTPException(status_code=403, detail="Instância não permitida para este usuário")
+
+
+def _assert_cliente_access_by_instancias(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente_id: int,
+    allowed: Optional[List[int]],
+) -> None:
+    """
+    Garante que o colaborador só consiga mexer em conversa/cliente que tenha
+    mensagens em instâncias permitidas.
+    Admin/allowed=None => libera.
+    """
+    if allowed is None:
+        return
+    if not allowed:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    ok = (
+        db.query(models.Mensagem.id)
+        .filter(
+            models.Mensagem.empresa_id == int(empresa_id),
+            models.Mensagem.cliente_id == int(cliente_id),
+            models.Mensagem.instancia_id.in_([int(x) for x in allowed]),
+        )
+        .first()
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+
 # ------- Helpers: PIN por usuário em DB (com fallback) -------
 def _has_model_pinned() -> bool:
     return hasattr(models, "AtendimentoPinnedConversa")
 
 
 def _pinned_set_db(db: Session, empresa_id: int, user_id: int) -> set[int]:
-    """
-    Lê no banco os 'pinned' do usuário. Se a tabela não existir,
-    retorna set() e o chamador pode cair no fallback de Redis/antigo.
-    """
     if not _has_model_pinned():
         return set()
     rows = (
@@ -204,7 +370,7 @@ def _normalize_hex(c: Optional[str]) -> Optional[str]:
         return None
     if not c.startswith("#"):
         c = "#" + c
-    if len(c) == 4:  # #abc -> #aabbcc
+    if len(c) == 4:
         c = "#" + "".join(ch * 2 for ch in c[1:])
     return c[:7].lower()
 
@@ -268,13 +434,11 @@ def _labels_db_replace_all(
     if not _has_model_labels():
         return
     names = [n for n in (names or []) if isinstance(n, str) and n.strip()]
-    # apaga os que não estão mais na lista
     db.query(models.AtendimentoConversaLabel).filter(
         models.AtendimentoConversaLabel.empresa_id == int(empresa_id),
         models.AtendimentoConversaLabel.cliente_id == int(cliente_id),
         ~models.AtendimentoConversaLabel.name.in_(names) if names else True,
     ).delete(synchronize_session=False)
-    # garante existência de todos os 'names' (sem cor definida)
     for n in names:
         _labels_db_upsert(db, empresa_id, cliente_id, n.strip(), None, created_by)
     db.commit()
@@ -291,12 +455,6 @@ def LOG(*a):
 # WebSocket broadcast util
 # =========================================================
 async def _broadcast(payload: dict, *, empresa_id: int | None = None, grupo: str | None = None):
-    """
-    Envia para:
-      - grupo específico (se grupo for passado), OU
-      - emp:{empresa_id} (se empresa_id for passado), OU
-      - todos os grupos conectados (fallback).
-    """
     try:
         if grupo:
             await conexoes_ativas.send_message(grupo, payload)
@@ -304,8 +462,6 @@ async def _broadcast(payload: dict, *, empresa_id: int | None = None, grupo: str
         if empresa_id is not None:
             await conexoes_ativas.send_message(f"emp:{int(empresa_id)}", payload)
             return
-
-        # broadcast total (todos os grupos)
         for g in list(conexoes_ativas.grupos.keys()):
             await conexoes_ativas.send_message(g, payload)
     except Exception as e:
@@ -316,30 +472,24 @@ class BroadcastMensagem(BaseModel):
     empresa_id: int
     cliente_id: int
     mensagem: str
-    tipo: str  # "entrada" ou "saida"
+    tipo: str
     timestamp: str
     msg_id: str
-    # opcionais/legados
     midia_url: Optional[str] = None
     mimetype: Optional[str] = None
     lida: bool = False
-    # padronizado com o front:
     midias: Optional[List[Dict]] = None
     instancia_id: Optional[int] = None
     instance_name: Optional[str] = None
 
 
 def _parse_timestamp(val) -> str:
-    """
-    Aceita ISO, 'YYYY-MM-DD HH:MM:SS', epoch (str/int) e devolve ISO (UTC naive).
-    """
     if val is None:
         return datetime.utcnow().isoformat()
     try:
         if isinstance(val, (int, float)) or (isinstance(val, str) and str(val).isdigit()):
             dt = datetime.utcfromtimestamp(int(val))
             return dt.isoformat()
-        # trata 'YYYY-MM-DD HH:MM...' trocando espaço por 'T'
         if isinstance(val, str) and "T" not in val and " " in val:
             try:
                 return parser.parse(val.replace(" ", "T")).isoformat()
@@ -350,7 +500,6 @@ def _parse_timestamp(val) -> str:
         return str(val)
 
 
-# Chave de segurança para broadcast externo
 INTERNAL_BROADCAST_KEY = os.getenv("INTERNAL_BROADCAST_KEY")
 
 
@@ -360,62 +509,25 @@ async def broadcast_msg(
     x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
     db: Session = Depends(get_db),
 ):
-    """
-    Recebe eventos EXTERNOS e propaga via WebSocket.
-
-    ⚠ Segurança:
-    - Exige header X-Internal-Key igual à INTERNAL_BROADCAST_KEY (env).
-    - Sem chave válida => 403 (não permite que qualquer um mande evento
-      para qualquer empresa).
-
-    Comportamento:
-    - Para ACK isolado (sem mensagem/tipo), inclui `cliente_id` no payload
-      e agora também atualiza o ACK no banco.
-    - Para mensagens, inclui `midias` no mesmo formato usado pelo histórico.
-    - Faz pass-through de `instancia_id` e `instance_name`.
-    """
-
-    # --- segurança: chave interna obrigatória se configurada ---
     if INTERNAL_BROADCAST_KEY:
         if not x_internal_key or x_internal_key != INTERNAL_BROADCAST_KEY:
-            raise HTTPException(
-                status_code=403,
-                detail="Chave interna inválida para broadcast",
-            )
+            raise HTTPException(status_code=403, detail="Chave interna inválida para broadcast")
 
-    # normalização básica dos campos de mensagem
-    mensagem = (
-        dados.get("mensagem")
-        or dados.get("texto")
-        or dados.get("message")
-        or ""
-    )
-    # "entrada" | "saida"
+    mensagem = dados.get("mensagem") or dados.get("texto") or dados.get("message") or ""
     tipo = dados.get("tipo") or dados.get("direction") or ""
 
-    # ACK isolado = veio ack mas não veio mensagem nem tipo
     is_ack_isolado = dados.get("ack") is not None and not mensagem and not tipo
 
-    ts_bruto = (
-        dados.get("timestamp")
-        or dados.get("hora")
-        or dados.get("created_at")
-        or dados.get("ts")
-    )
+    ts_bruto = dados.get("timestamp") or dados.get("hora") or dados.get("created_at") or dados.get("ts")
     ts_formatado = _parse_timestamp(ts_bruto)
 
     if is_ack_isolado:
-        # ------------------------------------------------------------------
-        # CASO 1: ACK isolado (sem mensagem)
-        # ------------------------------------------------------------------
         empresa_id = dados.get("empresa_id")
         msg_id = dados.get("msg_id")
         ack_raw = dados.get("ack")
 
-        # tenta carregar cliente_id do próprio payload
         cliente_id = dados.get("cliente_id")
 
-        # se não veio cliente_id, tenta descobrir via banco pelo msg_id
         if cliente_id is None and empresa_id and msg_id:
             try:
                 row = (
@@ -430,25 +542,17 @@ async def broadcast_msg(
                 if row and row[0] is not None:
                     cliente_id = int(row[0])
             except Exception:
-                # se der erro aqui, só seguimos sem cliente_id
                 pass
 
-        # --- atualiza ACK no banco (para mensagens de SAÍDA) ---
         try:
             new_ack: Optional[int] = None
             if ack_raw is not None:
-                # normalmente vem "0", "1", "2", "3"...
                 try:
                     new_ack = int(ack_raw)
                 except Exception:
                     new_ack = None
 
-            if (
-                new_ack is not None
-                and new_ack > 0
-                and empresa_id
-                and msg_id
-            ):
+            if new_ack is not None and new_ack > 0 and empresa_id and msg_id:
                 (
                     db.query(models.Mensagem)
                     .filter(
@@ -456,7 +560,6 @@ async def broadcast_msg(
                         models.Mensagem.msg_id == str(msg_id),
                         models.Mensagem.tipo == "saida",
                     )
-                    # só aumenta ACK, nunca regride
                     .filter(func.coalesce(models.Mensagem.ack, 0) < new_ack)
                     .update({"ack": new_ack}, synchronize_session=False)
                 )
@@ -468,69 +571,47 @@ async def broadcast_msg(
                 pass
             print("[BROADCAST][ACK-ONLY][DB-ERROR]", e)
 
-        # payload que vai pro WS
         payload = {
             "type": "ack",
             "empresa_id": empresa_id,
             "msg_id": msg_id,
             "ack": ack_raw,
-            "cliente_id": cliente_id,  # ESSENCIAL p/ front atualizar em tempo real
+            "cliente_id": cliente_id,
             "timestamp": ts_formatado,
-            # pass-through de instância
             "instancia_id": dados.get("instancia_id") or dados.get("instance_id"),
             "instance_name": dados.get("instance_name") or dados.get("instance"),
         }
 
     else:
-        # ------------------------------------------------------------------
-        # CASO 2: mensagem “normal” (entrada/saída), opcionalmente com midias
-        # ------------------------------------------------------------------
         payload = {
             "empresa_id": dados.get("empresa_id"),
             "cliente_id": dados.get("cliente_id"),
             "mensagem": mensagem,
-            "tipo": tipo,  # "entrada" | "saida"
+            "tipo": tipo,
             "timestamp": ts_formatado,
             "msg_id": dados.get("msg_id"),
             "ack": dados.get("ack"),
             "novo_cliente": dados.get("novo_cliente", False),
-            # pass-through de instância (front usa em ws-empresa.js)
             "instancia_id": dados.get("instancia_id") or dados.get("instance_id"),
             "instance_name": dados.get("instance_name") or dados.get("instance"),
         }
 
-        # --- anexos/mídias no mesmo formato do histórico ---
         midias: List[Dict] = []
 
-        # 1) Já veio uma lista padronizada?
         if isinstance(dados.get("midias"), list) and dados["midias"]:
             for a in dados["midias"]:
-                u = (
-                    a.get("url")
-                    or a.get("url_api")
-                    or a.get("link")
-                    or a.get("path")
-                    or ""
-                )
+                u = a.get("url") or a.get("url_api") or a.get("link") or a.get("path") or ""
                 if not u and a.get("id"):
-                    # o front aceita ID numérico (resolve /api/atendimento/midias/:id)
                     u = f"/api/atendimento/midias/{a['id']}"
-
                 midias.append(
                     {
                         "tipo": (a.get("tipo") or a.get("type") or "").lower(),
                         "mimetype": (a.get("mimetype") or a.get("mime") or ""),
-                        "filename": (
-                            a.get("filename")
-                            or a.get("name")
-                            or a.get("nome_original")
-                            or ""
-                        ),
+                        "filename": (a.get("filename") or a.get("name") or a.get("nome_original") or ""),
                         "url": u,
                     }
                 )
 
-        # 2) Fallback: veio um arquivo "solto" (midia_url/mimetype/filename)
         elif dados.get("midia_url"):
             mt = (dados.get("mimetype") or "").lower()
 
@@ -550,26 +631,21 @@ async def broadcast_msg(
                     "tipo": _guess_tipo(mt),
                     "mimetype": mt or "",
                     "filename": dados.get("filename") or dados.get("name") or "",
-                    "url": dados["midia_url"],  # http(s), data: ou caminho local
+                    "url": dados["midia_url"],
                 }
             ]
 
         if midias:
-            # força usar a rota resolutora quando for um id puro
             for m in midias:
                 if isinstance(m.get("url"), str) and m["url"].isdigit():
                     m["url"] = f"/api/atendimento/midias/{m['url']}"
             payload["midias"] = midias
 
-    # dispara para todos os conectados (empresa/instância), conforme sua infra atual
     await _broadcast(payload, empresa_id=dados.get("empresa_id"))
 
-    # ---- Invalidação de cache: convs & clientes da empresa ----
     emp_id = dados.get("empresa_id")
     if emp_id:
-        # apaga todas as variações de /conversas da empresa (página 1, cursores, instâncias)
         _cache_del_pattern(_k("conv", "list", "emp", str(emp_id)))
-        # apaga lista legado /clientes
         _cache_del(_k("clientes", "emp", str(emp_id), "dep", ""))
 
     return {"status": "ok"}
@@ -585,10 +661,6 @@ def _resolve_instancia_id(
     instancia_id: Optional[int],
     instance: Optional[str],
 ) -> Tuple[Optional[int], Optional[str]]:
-    """
-    Resolve a instância a partir de instancia_id (numérico) ou instance (slug/nome).
-    Retorna (instancia_id_resolvido, instance_name_resolvido)
-    """
     if instancia_id is not None:
         row = (
             db.query(models.EmpresaInstancia)
@@ -630,27 +702,13 @@ def listar_conversas(
     cursor: Optional[int] = Query(None, description="id da última Mensagem já carregada"),
     cursor_last_msg_id: Optional[int] = Query(None, description="alias legado"),
     db: Session = Depends(get_db),
-    identity=Depends(get_current_identity),  # <- agora identity
+    identity=Depends(get_current_identity),
 ):
-    """
-    Retorna conversas (1/cliente) ordenadas pela última mensagem (desc),
-    com paginação por cursor (mensagem.id < cursor).
-
-    Filtro de instância: por `instancia_id` (numérico) OU `instance` (slug/nome).
-
-    Respeita flags:
-    - 'deleted' (Redis) oculta
-    - 'pinned'  (DB por usuário; fallback Redis se não houver tabela)
-    """
-    # 🔒 trava empresa
     empresa_id = _assert_empresa_user(identity, empresa_id)
-
-    # 🔐 permissão de atendimento
-    perms = set(identity.get("permissoes") or [])
-    if "atendimento.ver" not in perms:
-        raise HTTPException(status_code=403, detail="Sem permissão para ver atendimentos")
+    _ensure_perm(identity, "atendimento.ver")
 
     user_id = int(identity["id"])
+    allowed = _allowed_instancia_ids(db, identity, empresa_id)
 
     try:
         if cursor is None and cursor_last_msg_id is not None:
@@ -658,14 +716,20 @@ def listar_conversas(
 
         m = models.Mensagem
 
-        # resolve instância
         resolved_inst_id, resolved_inst_name = _resolve_instancia_id(
             db, empresa_id=empresa_id, instancia_id=instancia_id, instance=instance
         )
+
+        # se o front pediu instância mas não existe, devolve 404 (evita “vazar” tudo)
+        if (instancia_id is not None or instance) and resolved_inst_id is None:
+            raise HTTPException(status_code=404, detail="Instância não encontrada")
+
+        # aplica ACL: se pediu uma instância específica, valida
+        _assert_instancia_allowed(allowed=allowed, instancia_id=resolved_inst_id)
+
         inst_key = str(resolved_inst_id) if resolved_inst_id is not None else (resolved_inst_name or "0")
         cursor_key = str(cursor) if cursor is not None else "none"
 
-        # --------- CACHE (GET) ----------
         cache_key = _k(
             "conv",
             "list",
@@ -681,7 +745,6 @@ def listar_conversas(
         cached = _cache_get_json(cache_key)
         if cached:
             deleted_set = set(_cache_get_json(_k_deleted(empresa_id)) or [])
-            # pins por usuário (se houver tabela) senão fallback Redis global
             if _has_model_pinned():
                 pins_user = _pins_get_cached(db, int(empresa_id), user_id)
             else:
@@ -690,16 +753,26 @@ def listar_conversas(
             items = [it for it in cached.get("items", []) if int(it["cliente_id"]) not in deleted_set]
             for it in items:
                 it["pinned"] = int(it["cliente_id"]) in pins_user
+                # GARANTE: avatar_url sempre proxy local (nunca pps.whatsapp.net)
+                it["avatar_url"] = _public_avatar_url(int(it["cliente_id"]), it.get("avatar_url"))
 
-            # reordena: pins no topo (mantendo ordem relativa)
             items_p = [it for it in items if it.get("pinned")]
             items_o = [it for it in items if not it.get("pinned")]
             return {"items": items_p + items_o, "next_cursor": cached.get("next_cursor")}
 
-        # 1) id da última mensagem por cliente
         filtros = [m.empresa_id == empresa_id]
+
+        # filtro de instância
         if resolved_inst_id is not None:
             filtros.append(m.instancia_id == resolved_inst_id)
+        else:
+            # se não pediu instância, mas tem ACL, restringe ao conjunto permitido
+            if allowed is not None:
+                if not allowed:
+                    payload = {"items": [], "next_cursor": None}
+                    _cache_set_json(cache_key, payload)
+                    return payload
+                filtros.append(m.instancia_id.in_([int(x) for x in allowed]))
 
         subq = (
             db.query(
@@ -719,17 +792,16 @@ def listar_conversas(
             base = base.filter(subq.c.last_msg_id < int(cursor))
 
         base = base.order_by(subq.c.last_msg_id.desc()).limit(limit)
-        pairs = base.all()  # [(cliente_id, msg_id), ...]
+        pairs = base.all()
 
         if not pairs:
             payload = {"items": [], "next_cursor": None}
-            _cache_set_json(cache_key, payload)  # cache também o vazio por pouco tempo
+            _cache_set_json(cache_key, payload)
             return payload
 
         cliente_ids = [int(p[0]) for p in pairs]
         msg_ids = [int(p[1]) for p in pairs]
 
-        # 2) carregar clientes e mensagens em lote
         clientes = {
             c.id: c
             for c in db.query(models.Cliente)
@@ -739,10 +811,9 @@ def listar_conversas(
 
         msgs = {mm.id: mm for mm in db.query(m).filter(m.id.in_(msg_ids)).all()}
 
-        # não lidas por cliente (apenas ENTRADA)
         novas_map: Dict[int, int] = {}
         if cliente_ids:
-            for cid, cnt in (
+            q_novas = (
                 db.query(m.cliente_id, func.count(m.id))
                 .filter(
                     m.empresa_id == empresa_id,
@@ -750,23 +821,27 @@ def listar_conversas(
                     m.tipo == "entrada",
                     m.lida == False,  # noqa: E712
                 )
-                .group_by(m.cliente_id)
-                .all()
-            ):
+            )
+
+            # mesma restrição de instância na contagem de não lidas
+            if resolved_inst_id is not None:
+                q_novas = q_novas.filter(m.instancia_id == resolved_inst_id)
+            elif allowed is not None:
+                q_novas = q_novas.filter(m.instancia_id.in_([int(x) for x in allowed]))
+
+            for cid, cnt in q_novas.group_by(m.cliente_id).all():
                 novas_map[int(cid)] = int(cnt)
 
-        # flags
         deleted_set = set(_cache_get_json(_k_deleted(empresa_id)) or [])
         if _has_model_pinned():
             pins_user = _pins_get_cached(db, int(empresa_id), user_id)
         else:
             pins_user = set(_cache_get_json(_k_pin(empresa_id)) or [])
 
-        # Monta na mesma ordem do page set
         items = []
         for cid, mid in pairs:
             if int(cid) in deleted_set:
-                continue  # oculta deletados
+                continue
             c = clientes.get(int(cid))
             msg = msgs.get(int(mid))
             if not c or not msg:
@@ -781,10 +856,11 @@ def listar_conversas(
                     "cliente_id": c.id,
                     "nome": getattr(c, "nome_whatsapp", None) or c.nome,
                     "telefone": c.telefone,
-                    "avatar_url": getattr(c, "avatar_url", None),
+                    # AQUI: nunca manda pps.whatsapp.net pro front
+                    "avatar_url": _public_avatar_url(int(c.id), getattr(c, "avatar_url", None)),
                     "ultima_msg_id": msg.id,
                     "ultima_mensagem": msg.conteudo or "",
-                    "hora": ts_iso,  # front converte para ms
+                    "hora": ts_iso,
                     "last_ts": ts_iso,
                     "novas": novas_map.get(int(c.id), 0),
                     "last_tipo": msg.tipo,
@@ -794,7 +870,6 @@ def listar_conversas(
                 }
             )
 
-        # reordena: pins no topo (mantendo ordem relativa original)
         items_p = [it for it in items if it.get("pinned")]
         items_o = [it for it in items if not it.get("pinned")]
         items = items_p + items_o
@@ -802,10 +877,11 @@ def listar_conversas(
         next_cursor = int(pairs[-1][1]) if pairs else None
         payload = {"items": items, "next_cursor": next_cursor}
 
-        # --------- CACHE (SET) ----------
         _cache_set_json(cache_key, payload)
         return payload
 
+    except HTTPException:
+        raise
     except Exception as e:
         LOG("[/conversas][ERRO]", repr(e))
         raise HTTPException(status_code=500, detail="Falha ao listar conversas")
@@ -821,48 +897,52 @@ def listar_clientes(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    """
-    Lista clientes que já possuem conversa (pelo menos uma mensagem),
-    trazendo o preview da última mensagem e contagem de não lidas (entradas).
-    Ordena por data da última mensagem (mais recente primeiro).
-
-    Respeita 'deleted' (oculta).
-    """
     empresa_id = _assert_empresa_user(identity, empresa_id)
+    _ensure_perm(identity, "atendimento.ver")
+
+    allowed = _allowed_instancia_ids(db, identity, empresa_id)
 
     LOG("[clientes] Listando clientes para empresa_id", empresa_id)
 
-    # --------- CACHE (GET) ----------
     cache_key = _k("clientes", "emp", str(empresa_id), "dep", str(departamento or ""))
     cached = _cache_get_json(cache_key)
     if cached:
         deleted_set = set(_cache_get_json(_k_deleted(empresa_id)) or [])
         if deleted_set:
             cached = [it for it in cached if int(it.get("id")) not in deleted_set]
+        # GARANTE: avatar_url sempre proxy local
+        for it in cached:
+            it["avatar_url"] = _public_avatar_url(int(it.get("id") or it.get("cliente_id") or 0), it.get("avatar_url"))
         return cached
 
-    # Subquery: última data de mensagem por cliente
-    subq = (
+    m = models.Mensagem
+
+    subq_q = (
         db.query(
-            models.Mensagem.cliente_id,
-            func.max(models.Mensagem.timestamp).label("ultima_data"),
+            m.cliente_id,
+            func.max(m.timestamp).label("ultima_data"),
         )
-        .filter(models.Mensagem.empresa_id == empresa_id)
-        .group_by(models.Mensagem.cliente_id)
-        .subquery()
+        .filter(m.empresa_id == empresa_id)
     )
 
-    # Clientes da empresa que têm conversa
+    # aplica ACL por instância no legado também
+    if allowed is not None:
+        if not allowed:
+            _cache_set_json(cache_key, [])
+            return []
+        subq_q = subq_q.filter(m.instancia_id.in_([int(x) for x in allowed]))
+
+    subq = subq_q.group_by(m.cliente_id).subquery()
+
     q = (
         db.query(models.Cliente)
         .outerjoin(subq, models.Cliente.id == subq.c.cliente_id)
         .filter(models.Cliente.empresa_id == empresa_id)
-        .filter(subq.c.ultima_data.isnot(None))  # só quem tem conversa
+        .filter(subq.c.ultima_data.isnot(None))
     )
     if departamento:
         q = q.filter(models.Cliente.departamento == departamento)
 
-    # Ordena por última atividade (desc)
     q = q.order_by(subq.c.ultima_data.desc().nullslast())
 
     deleted_set = set(_cache_get_json(_k_deleted(empresa_id)) or [])
@@ -872,30 +952,31 @@ def listar_clientes(
         if int(c.id) in deleted_set:
             continue
 
-        # Última mensagem desse cliente (na empresa)
-        ultima = (
-            db.query(models.Mensagem)
+        ultima_q = (
+            db.query(m)
             .filter(
-                models.Mensagem.cliente_id == c.id,
-                models.Mensagem.empresa_id == empresa_id,
+                m.cliente_id == c.id,
+                m.empresa_id == empresa_id,
             )
-            .order_by(models.Mensagem.timestamp.desc())
-            .first()
         )
+        if allowed is not None:
+            ultima_q = ultima_q.filter(m.instancia_id.in_([int(x) for x in allowed]))
 
-        # Contagem de não lidas de ENTRADA (na empresa)
-        novas = (
-            db.query(models.Mensagem)
+        ultima = ultima_q.order_by(m.timestamp.desc()).first()
+
+        novas_q = (
+            db.query(m)
             .filter(
-                models.Mensagem.cliente_id == c.id,
-                models.Mensagem.empresa_id == empresa_id,
-                models.Mensagem.tipo == "entrada",
-                models.Mensagem.lida == False,  # noqa: E712
+                m.cliente_id == c.id,
+                m.empresa_id == empresa_id,
+                m.tipo == "entrada",
+                m.lida == False,  # noqa: E712
             )
-            .count()
         )
+        if allowed is not None:
+            novas_q = novas_q.filter(m.instancia_id.in_([int(x) for x in allowed]))
+        novas = novas_q.count()
 
-        # epoch em ms (o front entende de primeira)
         ultima_ts_ms = int(ultima.timestamp.timestamp() * 1000) if (ultima and ultima.timestamp) else None
 
         resultado.append(
@@ -903,47 +984,21 @@ def listar_clientes(
                 "id": c.id,
                 "nome": getattr(c, "nome_whatsapp", None) or c.nome,
                 "telefone": c.telefone,
-                "avatar_url": c.avatar_url,
+                # AQUI: nunca manda pps.whatsapp.net pro front
+                "avatar_url": _public_avatar_url(int(c.id), getattr(c, "avatar_url", None)),
                 "ultima_mensagem": (ultima.conteudo or "") if ultima else "",
-                "hora": ultima_ts_ms,  # usado no preview
-                "last_ts": ultima_ts_ms,  # alias lido pelo front
+                "hora": ultima_ts_ms,
+                "last_ts": ultima_ts_ms,
                 "novas": novas,
-                "last_tipo": ultima.tipo if ultima else None,  # decide ✓✓
+                "last_tipo": ultima.tipo if ultima else None,
                 "last_ack": int(getattr(ultima, "ack", 0)) if (ultima and ultima.tipo == "saida") else None,
             }
         )
 
     LOG(f"[clientes] Retornando {len(resultado)} clientes.")
 
-    # --------- CACHE (SET) ----------
     _cache_set_json(cache_key, resultado)
     return resultado
-
-
-# =========================================================
-# Helpers de mídia (para histórico/listagem apenas)
-# (mantidos aqui para reuso futuro; não usados nas rotas atuais)
-# =========================================================
-def _carregar_midias_por_mensagem_ids(db: Session, msg_ids: List[int]) -> Dict[int, List[models.Midia]]:
-    if not msg_ids:
-        return {}
-    anexos = db.query(models.Midia).filter(models.Midia.mensagem_id.in_(msg_ids)).all()
-    por_msg: Dict[int, List[models.Midia]] = {}
-    for md in anexos:
-        por_msg.setdefault(int(md.mensagem_id), []).append(md)
-    return por_msg
-
-
-def _midia_to_dict(md: models.Midia) -> Dict[str, Any]:
-    return {
-        "id": md.id,
-        "tipo": getattr(md, "tipo", None),
-        "mimetype": getattr(md, "mimetype", None),
-        "tamanho": getattr(md, "tamanho", None),
-        "nome_original": getattr(md, "nome_original", None),
-        "url_api": f"/api/atendimento/midias/{md.id}",  # rota resolutora (no atendimento_midias.py)
-        "filename": getattr(md, "filename", None) or getattr(md, "nome_original", None),
-    }
 
 
 # =========================================================
@@ -956,14 +1011,13 @@ async def marcar_lidas(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    """
-    Marca como lidas todas as mensagens de ENTRADA (recebidas) desse cliente.
-    É idempotente. Após atualizar, emite 'reload_clientes' para sincronizar UIs.
-    Também invalida caches de listas afetadas.
-    """
     empresa_id = _assert_empresa_user(identity, empresa_id)
+    _ensure_perm(identity, "atendimento.ver")
 
-    total = (
+    allowed = _allowed_instancia_ids(db, identity, empresa_id)
+    _assert_cliente_access_by_instancias(db, empresa_id=empresa_id, cliente_id=cliente_id, allowed=allowed)
+
+    q = (
         db.query(models.Mensagem)
         .filter(
             models.Mensagem.cliente_id == cliente_id,
@@ -971,11 +1025,13 @@ async def marcar_lidas(
             models.Mensagem.tipo == "entrada",
             models.Mensagem.lida == False,  # noqa: E712
         )
-        .update({models.Mensagem.lida: True}, synchronize_session=False)
     )
+    if allowed is not None:
+        q = q.filter(models.Mensagem.instancia_id.in_([int(x) for x in allowed]))
+
+    total = q.update({models.Mensagem.lida: True}, synchronize_session=False)
     db.commit()
 
-    # invalida lista legado e conversas (primeiras páginas)
     _cache_del(_k("clientes", "emp", str(empresa_id), "dep", ""))
     _cache_del_pattern(_k("conv", "list", "emp", str(empresa_id)))
 
@@ -985,11 +1041,8 @@ async def marcar_lidas(
 
 # =========================================================
 # Conversas: pins / labels / delete
-#  - PIN agora é por usuário e persiste no DB (fallback Redis se sem tabela)
-#  - LABELS aceitam cor quando houver tabela; fallback Redis mantém compat
 # =========================================================
 
-# ---------- PIN ----------
 @router.get("/conversas/pin")
 def listar_pins(
     empresa_id: int = Query(...),
@@ -997,12 +1050,12 @@ def listar_pins(
     identity=Depends(get_current_identity),
 ):
     empresa_id = _assert_empresa_user(identity, empresa_id)
+    _ensure_perm(identity, "atendimento.ver")
 
     if _has_model_pinned():
         pinned = _pins_get_cached(db, empresa_id=int(empresa_id), user_id=int(identity["id"]))
         return {"pinned": sorted(pinned)}
 
-    # fallback legado (global, via Redis)
     pinned = _cache_get_json(_k_pin(empresa_id)) or []
     return {"pinned": _ensure_list(pinned)}
 
@@ -1016,11 +1069,15 @@ def fixar_conversa(
     identity=Depends(get_current_identity),
 ):
     empresa_id = _assert_empresa_user(identity, empresa_id)
+    _ensure_perm(identity, "atendimento.ver")
+
+    allowed = _allowed_instancia_ids(db, identity, empresa_id)
+    _assert_cliente_access_by_instancias(db, empresa_id=empresa_id, cliente_id=cliente_id, allowed=allowed)
+
     want_pin = bool(payload.get("pin", True))
     user_id = int(identity["id"])
 
     if _has_model_pinned():
-        # por usuário no DB
         if want_pin:
             exists = (
                 db.query(models.AtendimentoPinnedConversa)
@@ -1040,7 +1097,6 @@ def fixar_conversa(
                     )
                 )
                 db.commit()
-            # atualiza cache
             s = _pins_get_cached(db, int(empresa_id), user_id)
             s.add(int(cliente_id))
             _pins_put_cached(int(empresa_id), user_id, s)
@@ -1051,17 +1107,13 @@ def fixar_conversa(
                 models.AtendimentoPinnedConversa.conversa_id == int(cliente_id),
             ).delete(synchronize_session=False)
             db.commit()
-            # atualiza cache
             s = _pins_get_cached(db, int(empresa_id), user_id)
             if int(cliente_id) in s:
                 s.discard(int(cliente_id))
                 _pins_put_cached(int(empresa_id), user_id, s)
 
-        # limpa chave global legada para evitar “ressuscitar” pins antigos
         _cache_del(_k_pin(empresa_id))
-
     else:
-        # fallback legado (global, Redis) — mantém compat até criar a tabela
         pinned = set(_cache_get_json(_k_pin(empresa_id)) or [])
         if want_pin:
             pinned.add(int(cliente_id))
@@ -1069,10 +1121,8 @@ def fixar_conversa(
             pinned.discard(int(cliente_id))
         _cache_set_json(_k_pin(empresa_id), list(pinned), ttl=7 * 24 * 3600)
 
-    # invalida listas de conversas para refletir ordenação
     _cache_del_pattern(_k("conv", "list", "emp", str(empresa_id)))
 
-    # avisa UIs conectadas
     try:
         asyncio.create_task(
             _broadcast(
@@ -1086,13 +1136,14 @@ def fixar_conversa(
     return {"ok": True, "pinned": want_pin}
 
 
-# ---------- Deleted (permanece em Redis) ----------
 @router.get("/conversas/deleted")
 def listar_deletados(
     empresa_id: int = Query(...),
     identity=Depends(get_current_identity),
 ):
     empresa_id = _assert_empresa_user(identity, empresa_id)
+    _ensure_perm(identity, "atendimento.ver")
+
     deleted = _cache_get_json(_k_deleted(empresa_id)) or []
     return {"deleted": _ensure_list(deleted)}
 
@@ -1105,7 +1156,9 @@ def apagar_conversa(
     identity=Depends(get_current_identity),
 ):
     empresa_id = _assert_empresa_user(identity, empresa_id)
+    _ensure_perm(identity, "atendimento.ver")
 
+    # manter como admin-only como era
     if not _is_admin(identity):
         raise HTTPException(403, "Apenas administradores")
 
@@ -1113,7 +1166,6 @@ def apagar_conversa(
     deleted.add(int(cliente_id))
     _cache_set_json(_k_deleted(empresa_id), list(deleted), ttl=7 * 24 * 3600)
 
-    # opcional: ao esconder conversa, remover pins do BD para todos os usuários
     try:
         if _has_model_pinned():
             db.query(models.AtendimentoPinnedConversa).filter(
@@ -1121,18 +1173,14 @@ def apagar_conversa(
                 models.AtendimentoPinnedConversa.conversa_id == int(cliente_id),
             ).delete(synchronize_session=False)
             db.commit()
-            # invalida caches de pins de todos os users da empresa
             _cache_del_pattern(_k("conv", "pin", "emp", str(empresa_id)))
     except Exception:
         pass
 
-    # invalida listas para esconder imediatamente
     _cache_del_pattern(_k("conv", "list", "emp", str(empresa_id)))
     _cache_del(_k("clientes", "emp", str(empresa_id), "dep", ""))
     try:
-        asyncio.create_task(
-            _broadcast({"type": "conv.deleted", "cliente_id": int(cliente_id)}, empresa_id=empresa_id)
-        )
+        asyncio.create_task(_broadcast({"type": "conv.deleted", "cliente_id": int(cliente_id)}, empresa_id=empresa_id))
     except Exception:
         pass
     return {"ok": True, "deleted": list(deleted)}
@@ -1145,21 +1193,17 @@ def apagar_conversa_permanente(
     db: Session = Depends(get_db),
     identity: dict = Depends(get_current_identity),
 ):
-    """
-    Hard delete:
-      - apaga mídia, mensagens, atendimentos e o próprio cliente
-      - limpa pins, caches e lista de deletados
-      - emite broadcast conv.hard_deleted
-    """
     empresa_id = _assert_empresa_user(identity, empresa_id)
 
     perms = set(identity.get("permissoes") or [])
     is_admin = bool(identity.get("is_admin") or identity.get("admin"))
-
     if not (is_admin or "atendimento.apagar_conversas" in perms):
         raise HTTPException(status_code=403, detail="Sem permissão para apagar conversas")
 
-    # Confere se o cliente existe nessa empresa
+    # ACL por instância: se colaborador, não pode hard delete fora do escopo
+    allowed = _allowed_instancia_ids(db, identity, empresa_id)
+    _assert_cliente_access_by_instancias(db, empresa_id=empresa_id, cliente_id=cliente_id, allowed=allowed)
+
     cliente = (
         db.query(models.Cliente)
         .filter(
@@ -1171,24 +1215,21 @@ def apagar_conversa_permanente(
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
-    # 1) Apaga mídias ligadas a esse cliente
     db.query(models.Midia).filter(
         models.Midia.empresa_id == empresa_id,
         models.Midia.cliente_id == cliente_id,
     ).delete(synchronize_session=False)
 
-    # 2) Apaga mensagens desse cliente
-    db.query(models.Mensagem).filter(
+    q_msg = db.query(models.Mensagem).filter(
         models.Mensagem.empresa_id == empresa_id,
         models.Mensagem.cliente_id == cliente_id,
-    ).delete(synchronize_session=False)
+    )
+    if allowed is not None:
+        q_msg = q_msg.filter(models.Mensagem.instancia_id.in_([int(x) for x in allowed]))
+    q_msg.delete(synchronize_session=False)
 
-    # 3) Apaga atendimentos desse cliente
-    db.query(models.Atendimento).filter(
-        models.Atendimento.cliente_id == cliente_id
-    ).delete(synchronize_session=False)
+    db.query(models.Atendimento).filter(models.Atendimento.cliente_id == cliente_id).delete(synchronize_session=False)
 
-    # 4) Apaga pins desse cliente (se houver tabela)
     try:
         if _has_model_pinned():
             db.query(models.AtendimentoPinnedConversa).filter(
@@ -1198,50 +1239,33 @@ def apagar_conversa_permanente(
     except Exception:
         pass
 
-    # 5) Apaga o próprio cliente
     db.delete(cliente)
-
-    # Commit geral de todas as deleções de BD
     db.commit()
 
-    # 6) Limpa caches / marcações de deletado
     try:
-        # remove da lista de "deleted" em Redis, se estiver lá
         deleted = set(_cache_get_json(_k_deleted(empresa_id)) or [])
         if int(cliente_id) in deleted:
             deleted.discard(int(cliente_id))
             _cache_set_json(_k_deleted(empresa_id), list(deleted), ttl=7 * 24 * 3600)
 
-        # limpa caches de pins
         _cache_del_pattern(_k("conv", "pin", "emp", str(empresa_id)))
-        # limpa caches de conversas e clientes
         _cache_del_pattern(_k("conv", "list", "emp", str(empresa_id)))
         _cache_del(_k("clientes", "emp", str(empresa_id), "dep", ""))
     except Exception:
         pass
 
-    # Broadcast opcional pra derrubar da tela de quem estiver aberto
     try:
-        asyncio.create_task(
-            _broadcast(
-                {
-                    "type": "conv.hard_deleted",
-                    "cliente_id": int(cliente_id),
-                },
-                empresa_id=empresa_id,
-            )
-        )
+        asyncio.create_task(_broadcast({"type": "conv.hard_deleted", "cliente_id": int(cliente_id)}, empresa_id=empresa_id))
     except Exception:
         pass
 
     return {"ok": True, "deleted_permanente": True}
 
 
-# ---------- Labels (agora com cor quando houver tabela; fallback Redis compat) ----------
 class LabelsIn(BaseModel):
     add: Optional[str] = None
     set: Optional[List[str]] = None
-    color: Optional[str] = None  # aceita 'color' ou 'color_hex'
+    color: Optional[str] = None
     color_hex: Optional[str] = None
 
 
@@ -1253,17 +1277,19 @@ def obter_etiquetas(
     identity=Depends(get_current_identity),
 ):
     empresa_id = _assert_empresa_user(identity, empresa_id)
+    _ensure_perm(identity, "atendimento.ver")
+
+    allowed = _allowed_instancia_ids(db, identity, empresa_id)
+    _assert_cliente_access_by_instancias(db, empresa_id=empresa_id, cliente_id=cliente_id, allowed=allowed)
 
     if _has_model_labels():
         rows = _labels_db_list(db, empresa_id=int(empresa_id), cliente_id=int(cliente_id))
         labels = [r["name"] for r in rows]
         return {"labels": labels, "labels_ex": rows}
 
-    # fallback Redis (lista simples de strings)
     key = _k_labels(empresa_id, cliente_id)
     labels = _cache_get_json(key) or []
     labels = _ensure_list(labels)
-    # compat: expõe também labels_ex sem cor
     return {"labels": labels, "labels_ex": [{"name": s, "color_hex": None} for s in labels]}
 
 
@@ -1276,38 +1302,31 @@ def etiquetar_conversa(
     identity=Depends(get_current_identity),
 ):
     empresa_id = _assert_empresa_user(identity, empresa_id)
+    _ensure_perm(identity, "atendimento.ver")
 
-    # manter exigência de admin (como era no legado) — ajuste se quiser liberar
+    # mantém admin-only (como legado)
     if not _is_admin(identity):
         raise HTTPException(403, "Apenas administradores")
+
+    allowed = _allowed_instancia_ids(db, identity, empresa_id)
+    _assert_cliente_access_by_instancias(db, empresa_id=empresa_id, cliente_id=cliente_id, allowed=allowed)
 
     user_id = int(identity["id"])
 
     if _has_model_labels():
-        # DB com cor
         if body.set is not None:
-            # substitui o conjunto (sem cor definida nessa operação)
             _labels_db_replace_all(db, int(empresa_id), int(cliente_id), body.set, user_id)
             rows = _labels_db_list(db, int(empresa_id), int(cliente_id))
             try:
                 asyncio.create_task(
                     _broadcast(
-                        {
-                            "type": "conv.labels",
-                            "cliente_id": int(cliente_id),
-                            "labels": [r["name"] for r in rows],
-                            "labels_ex": rows,
-                        },
+                        {"type": "conv.labels", "cliente_id": int(cliente_id), "labels": [r["name"] for r in rows], "labels_ex": rows},
                         empresa_id=empresa_id,
                     )
                 )
             except Exception:
                 pass
-            return {
-                "ok": True,
-                "labels": [r["name"] for r in rows],
-                "labels_ex": rows,
-            }
+            return {"ok": True, "labels": [r["name"] for r in rows], "labels_ex": rows}
 
         if body.add:
             name = (body.add or "").strip()
@@ -1319,26 +1338,16 @@ def etiquetar_conversa(
             try:
                 asyncio.create_task(
                     _broadcast(
-                        {
-                            "type": "conv.labels",
-                            "cliente_id": int(cliente_id),
-                            "labels": [r["name"] for r in rows],
-                            "labels_ex": rows,
-                        },
+                        {"type": "conv.labels", "cliente_id": int(cliente_id), "labels": [r["name"] for r in rows], "labels_ex": rows},
                         empresa_id=empresa_id,
                     )
                 )
             except Exception:
                 pass
-            return {
-                "ok": True,
-                "labels": [r["name"] for r in rows],
-                "labels_ex": rows,
-            }
+            return {"ok": True, "labels": [r["name"] for r in rows], "labels_ex": rows}
 
         raise HTTPException(400, "Informe 'add' ou 'set'.")
 
-    # ---- Fallback Redis (sem cor) ----
     key = _k_labels(empresa_id, cliente_id)
     labels = _cache_get_json(key) or []
     labels = [s for s in labels if isinstance(s, str)]
@@ -1355,19 +1364,10 @@ def etiquetar_conversa(
     try:
         asyncio.create_task(
             _broadcast(
-                {
-                    "type": "conv.labels",
-                    "cliente_id": int(cliente_id),
-                    "labels": labels,
-                    "labels_ex": [{"name": s, "color_hex": None} for s in labels],
-                },
+                {"type": "conv.labels", "cliente_id": int(cliente_id), "labels": labels, "labels_ex": [{"name": s, "color_hex": None} for s in labels]},
                 empresa_id=empresa_id,
             )
         )
     except Exception:
         pass
-    return {
-        "ok": True,
-        "labels": labels,
-        "labels_ex": [{"name": s, "color_hex": None} for s in labels],
-    }
+    return {"ok": True, "labels": labels, "labels_ex": [{"name": s, "color_hex": None} for s in labels]}

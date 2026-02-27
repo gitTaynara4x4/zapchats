@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import asyncio
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple, Dict, Set
+from typing import List, Optional, Tuple, Dict, Set, Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
@@ -15,6 +15,12 @@ from sqlalchemy import text
 from backend.database import get_db, SessionLocal
 from backend.routers.auth import get_current_identity
 from backend import models
+
+# ===== Plano/Entitlements =====
+from backend.utils.entitlements import enforce_quota, has_feature
+
+# ===== Privacidade por instâncias (colaborador) =====
+from backend.security.instancias import instancias_visiveis
 
 router = APIRouter(prefix="/api/disparos", tags=["Disparos"])
 
@@ -32,10 +38,10 @@ N8N_IA_MELHORAR_DISPARO_URL = (os.getenv("N8N_IA_MELHORAR_DISPARO_URL") or "").s
 # Debug pra garantir que a env foi lida
 print("[IA-DISPARO] URL n8n =", N8N_IA_MELHORAR_DISPARO_URL)
 
-
 # =====================================================
 # Helpers de permissão / identidade
 # =====================================================
+
 
 def _to_int(v) -> Optional[int]:
     try:
@@ -150,7 +156,6 @@ def _ensure_perm(identity: dict, db: Session, perm_id: str) -> None:
 
     kind = _infer_kind(identity)
     if kind != "colaborador":
-        # Usuário master/admin da empresa
         return
 
     _, colab_id = _get_empresa_e_colab(identity)
@@ -217,6 +222,36 @@ def _get_nome_autor(db: Session, colab_id: Optional[int], usuario_id: Optional[i
         return (str(nome) if nome else None, "usuario")
 
     return (None, None)
+
+
+def _assert_instancia_acl(identity: dict, db: Session, instancia_id: Optional[int]) -> None:
+    """
+    Se colaborador tiver restrição de instâncias, garante que a instância do pedido/registro
+    está dentro do ACL.
+    """
+    vis = instancias_visiveis(identity, db)
+    if vis is None:
+        return
+    if instancia_id is None:
+        return
+    try:
+        iid = int(instancia_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="instancia_id inválido")
+    if iid not in vis:
+        raise HTTPException(status_code=403, detail="Sem acesso a esta instância")
+
+
+def _apply_instancias_filter(identity: dict, db: Session, query):
+    """
+    Aplica filtro de instâncias em queries (Disparo.instancia_id).
+    """
+    vis = instancias_visiveis(identity, db)
+    if vis is None:
+        return query
+    if not vis:
+        return query.filter(models.Disparo.id == -1)
+    return query.filter(models.Disparo.instancia_id.in_(vis))
 
 
 # =====================================================
@@ -317,12 +352,6 @@ async def _evolution_send_text(
 ) -> None:
     """
     Envia um texto simples via Evolution.
-
-    Endpoint:
-      POST {EVOLUTION_URL}/message/sendText/{instance}
-
-    Body (v2):
-      { "number": "5531xxxxxxxxx", "text": "mensagem aqui" }
     """
     if not EVOLUTION_URL:
         raise RuntimeError("EVOLUTION_URL não configurada (EVOLUTION_URL).")
@@ -583,6 +612,16 @@ async def criar_disparo_simples(
 
     empresa_id, colab_id, usuario_id = _get_ids(identity)
 
+    # 🔒 Plano: feature_broadcasts
+    if not has_feature(db, empresa_id, "feature_broadcasts"):
+        raise HTTPException(
+            status_code=403,
+            detail="Seu plano não permite disparos (feature_broadcasts).",
+        )
+
+    # 🔒 ACL por instância (colaborador)
+    _assert_instancia_acl(identity, db, payload.instancia_id)
+
     # Se for admin e existir colaborador vinculado ao usuario_id, preenche também
     if usuario_id and not colab_id:
         colab_id = _resolve_colab_by_usuario(db, empresa_id, usuario_id)
@@ -601,6 +640,10 @@ async def criar_disparo_simples(
     nums_norm = _normalizar_numeros(payload.numeros)
     if not nums_norm:
         raise HTTPException(status_code=400, detail="Nenhum número válido informado.")
+
+    # 🔒 Plano: quota por disparo (1 por criação)
+    # (se você quiser cobrar por destinatário, troque delta=1 por delta=len(nums_norm))
+    enforce_quota(db, empresa_id, "broadcasts_per_month_max", delta=1)
 
     disparo = models.Disparo(
         empresa_id=empresa_id,
@@ -672,11 +715,18 @@ def listar_disparos(
     if ident_empresa_id and int(ident_empresa_id) != int(empresa_id):
         raise HTTPException(status_code=403, detail="Empresa inválida para o usuário logado.")
 
+    # se pedir instancia_id específica, valida ACL
+    if instancia_id is not None:
+        _assert_instancia_acl(identity, db, instancia_id)
+
     q = (
         db.query(models.Disparo)
         .filter(models.Disparo.empresa_id == empresa_id)
         .order_by(models.Disparo.id.desc())
     )
+
+    # aplica privacidade por instâncias (colaborador)
+    q = _apply_instancias_filter(identity, db, q)
 
     if instancia_id:
         q = q.filter(models.Disparo.instancia_id == instancia_id)
@@ -765,6 +815,9 @@ def cancelar_disparo(
     )
     if not disparo:
         raise HTTPException(status_code=404, detail="Disparo não encontrado.")
+
+    # privacidade por instância (colaborador)
+    _assert_instancia_acl(identity, db, getattr(disparo, "instancia_id", None))
 
     if disparo.status in ("concluido", "cancelado"):
         return {"ok": True, "status": disparo.status}

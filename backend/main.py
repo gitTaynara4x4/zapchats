@@ -43,7 +43,7 @@ from backend.routers.colaboradores import router as colaboradores_router
 from backend.routers.permissoes import router as permissoes_router
 
 # ⚠️ DOIS routers de mídias (prefixos distintos)
-from backend.routers.atendimento_midias import router as atendimento_midias_router  # /api/atendimento/midias/...
+from backend.routers.atendimento_midias import router as atendimento_midias_router  # ✅ agora prefix no main
 from backend.routers.midias import router as midias_router                         # prefix="/api/midias" (ou similar)
 
 from backend.routers.atendimento_send import router as atendimento_send_router
@@ -605,7 +605,9 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
 app.include_router(auth.router, prefix="/api")
 app.include_router(usuarios.router, prefix="/api", tags=["Usuarios"])
 app.include_router(clientes.router, prefix="/api", tags=["Clientes"])
-app.include_router(atendimento_conversas.router, prefix="/api")
+
+# ✅ Conversas de atendimento (corrigido: agora fica /api/atendimento/conversas)
+app.include_router(atendimento_conversas.router, prefix="/api/atendimento")
 
 # Atendimento principal
 app.include_router(atendimento.router, prefix="/api/atendimento", tags=["Atendimento"])
@@ -614,6 +616,7 @@ app.include_router(atendimento.router, prefix="/api/atendimento", tags=["Atendim
 app.include_router(email_router)
 app.include_router(chatbot_n8n.router)
 app.include_router(disparos_router)
+
 app.include_router(atendimento_chat_router.router, prefix="/api/atendimento", tags=["Atendimento – Chat"])
 app.include_router(ws_router)
 
@@ -624,7 +627,10 @@ app.include_router(atendimento_busca.router, prefix="/api", tags=["Busca"])
 app.include_router(admin_planos.router)
 app.include_router(midias_router, tags=["Mídias"])
 app.include_router(atendimento_ia_router.router)
-app.include_router(atendimento_midias_router)
+
+# ✅ Atendimento mídias (padronizado: prefix aqui, rotas internas viram /midias/...)
+app.include_router(atendimento_midias_router, prefix="/api/atendimento", tags=["Atendimento – Mídias"])
+
 app.include_router(atendimento_send_router, prefix="/api/atendimento", tags=["Atendimento – Envio"])
 
 app.include_router(departamentos_router.router, prefix="/api", tags=["Departamentos"])
@@ -871,7 +877,7 @@ async def _stop_integrations():
     evo_stop = getattr(app.state, "evo_stop", None)
     if evo_stop:
         try:
-            await evo_stop()
+            pass
         except Exception:
             pass
 

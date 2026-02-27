@@ -28,6 +28,10 @@ from backend.database import get_db
 from backend import models
 from backend.routers.auth import get_current_user
 
+# ✅ Plano/Quota
+from backend.utils.entitlements import enforce_quota
+from backend.utils.usage import usage_counts
+
 # este router costuma ser montado com prefixo "/api" no main.py
 router = APIRouter(prefix="/colaboradores", tags=["Colaboradores"])
 
@@ -385,6 +389,18 @@ async def criar_colaborador(
     permissoes: Optional[str] = Form(None),
     avatar: Optional[UploadFile] = File(None),
 ):
+    # ✅ QUOTA: bloquear criação se exceder limite do plano
+    emp = db.query(models.Empresa).get(user.empresa_id)
+    if emp:
+        counts = usage_counts(db, emp.id)
+        enforce_quota(
+            emp,
+            "users_max",
+            int(counts.get("users_max", 0)),
+            delta=1,
+            message="Seu plano atingiu o limite de colaboradores.",
+        )
+
     # Se vier JSON, aceitar também
     if request.headers.get("content-type", "").startswith("application/json"):
         payload = await request.json()
@@ -397,9 +413,7 @@ async def criar_colaborador(
             criar_usuario = payload.get("criar_usuario", criar_usuario)
             senha = payload.get("senha", senha)
             permissoes = payload.get("permissoes", permissoes)
-            hora_login_inicio = payload.get(
-                "hora_login_inicio", hora_login_inicio
-            )
+            hora_login_inicio = payload.get("hora_login_inicio", hora_login_inicio)
             hora_login_fim = payload.get("hora_login_fim", hora_login_fim)
 
     setor = (
@@ -469,7 +483,6 @@ async def criar_colaborador(
             horario_modo_norm = "departamento"
         else:
             horario_modo_norm = "livre"
-
 
     colab = models.Colaborador(
         empresa_id=user.empresa_id,
@@ -567,6 +580,7 @@ def atualizar_colaborador(
     # --- modo de expediente ---
     if "horario_modo" in data and hasattr(colab, "horario_modo"):
         colab.horario_modo = _norm_horario_modo(data.get("horario_modo"), default=None) or "livre"
+
     # --- senha (e sincroniza com usuário se solicitado) ---
     atualizar_usuario_flag = bool(
         data.get("atualizar_usuario") or payload.atualizar_usuario

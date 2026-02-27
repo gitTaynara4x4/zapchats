@@ -16,11 +16,19 @@ from backend.models import (
     ChatbotConfig, StatusAtendimento, PlanoAssinatura,
     DepartamentoMembro, DepartamentoACL
 )
-from backend.utils.plans import PLAN_LIMITS  # ex.: {"FREE":0,"PRATA":1,...}
+
+# ✅ NOVO: usa o seu sistema unificado de planos
+from backend.utils.plans import (
+    plan_status_payload,
+    effective_plan,
+    normalize_plan,
+    plan_limits,
+    is_trial_active,
+    trial_days_left,
+)
 from backend.routers.auth import require_admin
 
 # Router apenas para ADMIN CENTRAL
-# dependencies garantem que apenas identity.is_admin == True acesse
 router = APIRouter(dependencies=[Depends(require_admin)])  # manter paths absolutos (sem prefixo global)
 
 
@@ -37,26 +45,26 @@ def iso(dt: Optional[datetime]) -> Optional[str]:
     return dt.astimezone(timezone.utc).isoformat() if dt else None
 
 
-def plan_limit(tier: Optional[str]) -> int:
-    return PLAN_LIMITS.get((tier or "FREE").upper(), 0)
-
-
 def serialize_empresa(emp: Empresa) -> Dict[str, Any]:
+    # ❗ emp.effective_tier no seu projeto pode existir ou não.
+    # A fonte correta agora é effective_plan(emp)
+    eff = effective_plan(emp)
+
     return {
         "id": emp.id,
         "nome": emp.nome,
         "telefone": emp.telefone,
-        "assinatura": (emp.assinatura or "FREE").upper(),
-        "trial_tier": (emp.trial_tier or "").upper() if emp.trial_tier else None,
-        "trial_expires_at": iso(emp.trial_expires_at),
-        "plano_expira_em": iso(emp.plano_expira_em),
-        "quantidade_instancias": emp.quantidade_instancias or 0,
+        "assinatura": normalize_plan(getattr(emp, "assinatura", None)),
+        "trial_tier": normalize_plan(getattr(emp, "trial_tier", None)) if getattr(emp, "trial_tier", None) else None,
+        "trial_expires_at": iso(getattr(emp, "trial_expires_at", None)),
+        "plano_expira_em": iso(getattr(emp, "plano_expira_em", None)),
+        "quantidade_instancias": getattr(emp, "quantidade_instancias", None) or 0,
         "avatar_url": emp.avatar_url,
         "status_numero": emp.status_numero,
         "created_at": iso(emp.created_at),
         "nome_adm": emp.nome_adm,
         "cnpj_cpf": emp.cnpj_cpf,
-        "effective_tier": emp.effective_tier,
+        "effective_tier": eff,
     }
 
 
@@ -88,27 +96,37 @@ def serialize_bot(b: ChatbotConfig) -> Dict[str, Any]:
 
 
 def empresa_status_payload(emp: Empresa, insts: List[EmpresaInstancia]) -> Dict[str, Any]:
-    eff = emp.effective_tier
-    # se houver quantidade_instancias configurada na empresa, usa como limite; senão cai no plano
-    limite_cfg = (emp.quantidade_instancias or 0)
-    limite = limite_cfg if limite_cfg > 0 else plan_limit(eff)
+    """
+    Mantém o payload COMPAT do seu admin central,
+    mas agora usa o sistema novo de plans.py como fonte única.
 
-    qtd_con = sum(1 for i in insts if i.connected)
+    Regra mantida:
+      - se emp.quantidade_instancias > 0 => força esse limite (override)
+      - senão => usa limite do plano (whatsapp_instances_max)
+    """
+    eff = effective_plan(emp)
 
-    tri_active = emp.trial_active
-    days_left = 0
-    if tri_active and emp.trial_expires_at:
-        delta = emp.trial_expires_at - now_utc()
-        days_left = max(0, ceil(delta.total_seconds() / 86400))
+    # limite vindo do plano
+    limits = plan_limits(eff)
+    limite_plano = int(limits.get("whatsapp_instances_max", 0))
+
+    # override configurado na empresa
+    limite_cfg = int(getattr(emp, "quantidade_instancias", 0) or 0)
+    limite = limite_cfg if limite_cfg > 0 else limite_plano
+
+    qtd_conectadas = sum(1 for i in insts if i.connected)
+
+    tri_active = is_trial_active(emp)
+    days_left = trial_days_left(emp) if tri_active else 0
 
     return {
         "effective_tier": eff,
         "limite_instancias": limite,
-        "quantidade_instancias": qtd_con,
+        "quantidade_instancias": qtd_conectadas,
         "trial": {
             "active": tri_active,
-            "tier": (emp.trial_tier or "").upper() if emp.trial_tier else None,
-            "expires_at": iso(emp.trial_expires_at),
+            "tier": normalize_plan(getattr(emp, "trial_tier", None)) if getattr(emp, "trial_tier", None) else None,
+            "expires_at": iso(getattr(emp, "trial_expires_at", None)),
             "days_left": days_left,
         },
         "instancias": [serialize_inst(i) for i in insts],
@@ -132,7 +150,6 @@ def counts_for_empresa(db: Session, empresa_id: int) -> Dict[str, Any]:
         "instancias": q(EmpresaInstancia),
     }
 
-    # atendimentos por empresa (via join pela instancia)
     total_open = (
         db.query(func.count(Atendimento.id))
         .join(EmpresaInstancia, Atendimento.instancia_id == EmpresaInstancia.id)
@@ -162,18 +179,10 @@ def admin_buscar_por_cnpj(
     cnpj: str = Query(..., description="CPF ou CNPJ (com ou sem máscara)"),
     db: Session = Depends(get_db),
 ):
-    """
-    Resolve a empresa pelo documento e retorna:
-      - empresa (serialize_empresa)
-      - status (tier efetivo, limite, trial, instâncias resumidas)
-
-    Protegido por require_admin (router-level).
-    """
     doc = digits_only(cnpj)
     if not doc:
         raise HTTPException(status_code=400, detail="Informe CPF ou CNPJ.")
 
-    # normaliza a coluna no Postgres removendo não-dígitos; fallback simples se regex não estiver disponível
     try:
         norm_col = func.regexp_replace(Empresa.cnpj_cpf, r"[^0-9]", "", "g")
         emp: Optional[Empresa] = db.query(Empresa).filter(norm_col == doc).first()
@@ -194,10 +203,6 @@ def admin_buscar_por_cnpj(
 # ======================= 2) EMPRESA BÁSICA (compat) =======================
 @router.get("/api/empresas/{empresa_id}")
 def empresa_by_id(empresa_id: int, db: Session = Depends(get_db)):
-    """
-    Compat: detalhes básicos da empresa.
-    Acesso restrito a administradores (require_admin).
-    """
     emp = db.query(Empresa).filter(Empresa.id == empresa_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Empresa não encontrada.")
@@ -207,10 +212,6 @@ def empresa_by_id(empresa_id: int, db: Session = Depends(get_db)):
 # ======================= 3) STATUS/WHATSAPP (compat) =======================
 @router.get("/api/empresas/{empresa_id}/whatsapp")
 def empresa_whatsapp_status(empresa_id: int, db: Session = Depends(get_db)):
-    """
-    Compat: status geral das instâncias WhatsApp.
-    Acesso restrito a administradores (require_admin).
-    """
     emp = db.query(Empresa).filter(Empresa.id == empresa_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Empresa não encontrada.")
@@ -229,11 +230,9 @@ def empresa_overview(
     if not emp:
         raise HTTPException(status_code=404, detail="Empresa não encontrada.")
 
-    # instâncias e chatbot
     insts = db.query(EmpresaInstancia).filter(EmpresaInstancia.empresa_id == empresa_id).all()
     bots = db.query(ChatbotConfig).filter(ChatbotConfig.empresa_id == empresa_id).all()
 
-    # -------- Usuários (com nome do departamento) --------
     dep_alias = aliased(Departamento)
     total_usuarios = (
         db.query(func.count(Usuario.id))
@@ -273,7 +272,6 @@ def empresa_overview(
         ],
     }
 
-    # -------- Colaboradores (setor + contagem de permissões) --------
     set_alias = aliased(Setor)
     total_colabs = (
         db.query(func.count(Colaborador.id))
@@ -298,7 +296,7 @@ def empresa_overview(
         .limit(limit)
         .all()
     )
-    # contagem de permissões via SQL leve (evita N+1)
+
     res = db.execute(
         text(
             """
@@ -331,7 +329,6 @@ def empresa_overview(
         ],
     }
 
-    # -------- Departamentos (com contagens) --------
     total_deps = (
         db.query(func.count(Departamento.id))
         .filter(Departamento.empresa_id == empresa_id)
@@ -374,7 +371,7 @@ def empresa_overview(
                 "ativo": bool(d.ativo),
                 "parent_id": d.parent_id,
                 "chefe_id": d.chefe_id,
-                "path": d.path,  # array (se existir)
+                "path": d.path,
                 "usuarios_count": int(usuarios_por_dep.get(d.id, 0)),
                 "membros_count": int(membros_por_dep.get(d.id, 0)),
                 "acls_count": int(acls_por_dep.get(d.id, 0)),
@@ -383,7 +380,6 @@ def empresa_overview(
         ],
     }
 
-    # -------- Setores (com total de colaboradores) --------
     total_set = (
         db.query(func.count(Setor.id))
         .filter(Setor.empresa_id == empresa_id)

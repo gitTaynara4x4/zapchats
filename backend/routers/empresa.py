@@ -12,10 +12,9 @@ from backend.database import get_db
 from backend import models
 from backend.utils.plans import (
     plan_status_payload,
-    effective_tier,
+    effective_plan,
     plan_limit,
 )
-# IMPORTANTE: agora usamos get_current_identity
 from backend.routers.auth import get_current_identity
 
 router = APIRouter(prefix="/api/empresas", tags=["Empresas"])
@@ -25,143 +24,143 @@ router = APIRouter(prefix="/api/empresas", tags=["Empresas"])
 # Utils simples
 # =========================
 def _iso(dt):
-  if not dt:
-      return None
-  try:
-      return dt.astimezone(timezone.utc).isoformat()
-  except Exception:
-      try:
-          return dt.isoformat()
-      except Exception:
-          return None
+    if not dt:
+        return None
+    try:
+        return dt.astimezone(timezone.utc).isoformat()
+    except Exception:
+        try:
+            return dt.isoformat()
+        except Exception:
+            return None
 
 
 def _only_digits(s: Optional[str]) -> str:
-  return "".join(ch for ch in (s or "") if ch.isdigit())
+    return "".join(ch for ch in (s or "") if ch.isdigit())
 
 
 def _norm_instance_name(s: Optional[str]) -> Optional[str]:
-  s = (s or "").strip()
-  return s or None
+    s = (s or "").strip()
+    return s or None
 
 
 def _norm_instance_number(s: Optional[str]) -> Optional[str]:
-  """
-  Normaliza para numérico puro (ex.: '5531999999999').
-  Não adiciona DDI/DDD — apenas remove não-dígitos.
-  """
-  d = _only_digits(s)
-  return d or None
+    """
+    Normaliza para numérico puro (ex.: '5531999999999').
+    Não adiciona DDI/DDD — apenas remove não-dígitos.
+    """
+    d = _only_digits(s)
+    return d or None
 
 
 def _assert_empresa_access(empresa_id: int, identity) -> int:
-  """
-  Garante que o usuário só acesse a própria empresa.
-  Funciona tanto para usuário quanto para colaborador.
-  """
-  emp_user = getattr(identity, "empresa_id", None)
-  if emp_user is not None and int(emp_user) != int(empresa_id):
-      raise HTTPException(status_code=403, detail="Empresa não permitida")
-  return int(empresa_id)
+    """
+    Garante que o usuário só acesse a própria empresa.
+    Funciona tanto para usuário quanto para colaborador.
+    """
+    emp_user = getattr(identity, "empresa_id", None)
+    if emp_user is not None and int(emp_user) != int(empresa_id):
+        raise HTTPException(status_code=403, detail="Empresa não permitida")
+    return int(empresa_id)
 
 
 # =========================
 # Resolução de instância
 # =========================
 def resolve_instancia_id(
-  db: Session,
-  *,
-  empresa_id: int,
-  instancia_id: Optional[int] = None,
-  instance_name: Optional[str] = None,
-  numero_instancia: Optional[str] = None,
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: Optional[int] = None,
+    instance_name: Optional[str] = None,
+    numero_instancia: Optional[str] = None,
 ) -> Optional[int]:
-  """
-  Resolve o id de empresas_instancias para a empresa dada.
+    """
+    Resolve o id de empresas_instancias para a empresa dada.
 
-  1) Se instancia_id pertencer à empresa → retorna.
-  2) Senão, tenta por instance_name (ex.: 'exas-9237').
-  3) Senão, tenta por numero_instancia (ex.: '55319...').
+    1) Se instancia_id pertencer à empresa → retorna.
+    2) Senão, tenta por instance_name (ex.: 'exas-9237').
+    3) Senão, tenta por numero_instancia (ex.: '55319...').
 
-  Retorna None se não encontrar.
-  """
-  q = db.query(models.EmpresaInstancia).filter(
-      models.EmpresaInstancia.empresa_id == empresa_id
-  )
+    Retorna None se não encontrar.
+    """
+    q = db.query(models.EmpresaInstancia).filter(
+        models.EmpresaInstancia.empresa_id == empresa_id
+    )
 
-  # 1) id interno informado
-  if instancia_id:
-      inst = q.filter(models.EmpresaInstancia.id == instancia_id).first()
-      if inst:
-          return inst.id
+    # 1) id interno informado
+    if instancia_id:
+        inst = q.filter(models.EmpresaInstancia.id == instancia_id).first()
+        if inst:
+            return inst.id
 
-  # 2) instance_name
-  name = _norm_instance_name(instance_name)
-  if name:
-      inst = q.filter(models.EmpresaInstancia.instance_name == name).first()
-      if inst:
-          return inst.id
+    # 2) instance_name
+    name = _norm_instance_name(instance_name)
+    if name:
+        inst = q.filter(models.EmpresaInstancia.instance_name == name).first()
+        if inst:
+            return inst.id
 
-  # 3) numero_instancia
-  num = _norm_instance_number(numero_instancia)
-  if num:
-      inst = q.filter(models.EmpresaInstancia.numero_instancia == num).first()
-      if inst:
-          return inst.id
+    # 3) numero_instancia
+    num = _norm_instance_number(numero_instancia)
+    if num:
+        inst = q.filter(models.EmpresaInstancia.numero_instancia == num).first()
+        if inst:
+            return inst.id
 
-  return None
+    return None
 
 
 def resolve_instancia_id_from_event(
-  db: Session,
-  *,
-  empresa_id: int,
-  event: Dict[str, Any],
+    db: Session,
+    *,
+    empresa_id: int,
+    event: Dict[str, Any],
 ) -> Optional[int]:
-  """
-  Conveniência para eventos (Evolution/Webhook/Rabbit).
+    """
+    Conveniência para eventos (Evolution/Webhook/Rabbit).
 
-  Extrai de nomes comuns:
-    - 'instancia_id' | 'instanceId'
-    - 'instance_name' | 'instanceName'
-    - 'instance_number' | 'instanceNumber' | 'numero_instancia'
-  """
-  inst_id = event.get("instancia_id") or event.get("instanceId")
-  try:
-      inst_id = int(inst_id) if inst_id is not None else None
-  except Exception:
-      inst_id = None
+    Extrai de nomes comuns:
+      - 'instancia_id' | 'instanceId'
+      - 'instance_name' | 'instanceName'
+      - 'instance_number' | 'instanceNumber' | 'numero_instancia'
+    """
+    inst_id = event.get("instancia_id") or event.get("instanceId")
+    try:
+        inst_id = int(inst_id) if inst_id is not None else None
+    except Exception:
+        inst_id = None
 
-  name = event.get("instance_name") or event.get("instanceName")
-  number = (
-      event.get("instance_number")
-      or event.get("instanceNumber")
-      or event.get("numero_instancia")
-  )
+    name = event.get("instance_name") or event.get("instanceName")
+    number = (
+        event.get("instance_number")
+        or event.get("instanceNumber")
+        or event.get("numero_instancia")
+    )
 
-  return resolve_instancia_id(
-      db,
-      empresa_id=empresa_id,
-      instancia_id=inst_id,
-      instance_name=name,
-      numero_instancia=number,
-  )
+    return resolve_instancia_id(
+        db,
+        empresa_id=empresa_id,
+        instancia_id=inst_id,
+        instance_name=name,
+        numero_instancia=number,
+    )
 
 
 # =========================
 # Schemas
 # =========================
 class UpdateApelidoIn(BaseModel):
-  apelido: str | None = None
+    apelido: Optional[str] = None
 
 
 class EmpresaLoginConfigIn(BaseModel):
-  """
-  Configuração simples de login da empresa.
+    """
+    Configuração simples de login da empresa.
 
-  No momento só temos o flag se o login exige token ou não.
-  """
-  requer_token_login: bool = False
+    Hoje só temos o flag se o login exige token ou não.
+    """
+    requer_token_login: bool = False
 
 
 # =========================
@@ -169,144 +168,143 @@ class EmpresaLoginConfigIn(BaseModel):
 # =========================
 @router.get("/{empresa_id}")
 def get_empresa(
-  empresa_id: int,
-  db: Session = Depends(get_db),
-  identity=Depends(get_current_identity),
+    empresa_id: int,
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
 ):
-  _assert_empresa_access(empresa_id, identity)
+    _assert_empresa_access(empresa_id, identity)
 
-  emp = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
-  if not emp:
-      raise HTTPException(404, "Empresa não encontrada")
+    emp = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
 
-  # Tier efetivo/limite (usa utils)
-  tier = effective_tier(emp)
-  limite = plan_limit(tier)
+    # Plano efetivo/limite (via utils/plans.py)
+    tier = effective_plan(emp)
+    limite = plan_limit(tier)
 
-  return {
-      "id": emp.id,
-      "nome": emp.nome,
-      "telefone": emp.telefone,
-      "assinatura": emp.assinatura,
-      "trial_tier": getattr(emp, "trial_tier", None),
-      "trial_expires_at": _iso(getattr(emp, "trial_expires_at", None))
-      if getattr(emp, "trial_expires_at", None)
-      else None,
-      "trial_active": getattr(emp, "trial_active", False),
-      "effective_tier": tier,
-      "limite_instancias": limite,
-      "quantidade_instancias": len(emp.instancias or []),
-      "avatar_url": emp.avatar_url,
-      "status_numero": emp.status_numero,
-      "created_at": _iso(emp.created_at),
-      "nome_adm": emp.nome_adm,
-      # se o campo não existir ainda, devolve False
-      "requer_token_login": getattr(emp, "requer_token_login", False),
-  }
+    return {
+        "id": emp.id,
+        "nome": emp.nome,
+        "telefone": emp.telefone,
+        "assinatura": emp.assinatura,
+        "trial_tier": getattr(emp, "trial_tier", None),
+        "trial_expires_at": _iso(getattr(emp, "trial_expires_at", None))
+        if getattr(emp, "trial_expires_at", None)
+        else None,
+        "trial_active": getattr(emp, "trial_active", False),  # compat (se existir)
+        "effective_tier": tier,
+        "limite_instancias": limite,
+        "quantidade_instancias": len(emp.instancias or []),
+        "avatar_url": emp.avatar_url,
+        "status_numero": emp.status_numero,
+        "created_at": _iso(emp.created_at),
+        "nome_adm": emp.nome_adm,
+        # se o campo não existir ainda, devolve False
+        "requer_token_login": getattr(emp, "requer_token_login", False),
+    }
 
 
 @router.put("/{empresa_id}/login-config")
 def update_login_config(
-  empresa_id: int,
-  payload: EmpresaLoginConfigIn,
-  db: Session = Depends(get_db),
-  identity=Depends(get_current_identity),
+    empresa_id: int,
+    payload: EmpresaLoginConfigIn,
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
 ):
-  """
-  Atualiza configurações relacionadas ao login da empresa.
+    """
+    Atualiza configurações relacionadas ao login da empresa.
 
-  Hoje só controla:
-    - requer_token_login: se o login da empresa exige token ou não.
-  """
-  _assert_empresa_access(empresa_id, identity)
+    Hoje só controla:
+      - requer_token_login: se o login da empresa exige token ou não.
+    """
+    _assert_empresa_access(empresa_id, identity)
 
-  emp = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
-  if not emp:
-      raise HTTPException(404, "Empresa não encontrada")
+    emp = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
 
-  # Garante bool
-  emp.requer_token_login = bool(payload.requer_token_login)
+    emp.requer_token_login = bool(payload.requer_token_login)
 
-  db.commit()
-  db.refresh(emp)
+    db.commit()
+    db.refresh(emp)
 
-  # Front só precisa do flag, mas devolvemos algumas infos a mais
-  return {
-      "id": emp.id,
-      "nome": emp.nome,
-      "requer_token_login": getattr(emp, "requer_token_login", False),
-  }
+    return {
+        "id": emp.id,
+        "nome": emp.nome,
+        "requer_token_login": getattr(emp, "requer_token_login", False),
+    }
 
 
 @router.get("/{empresa_id}/whatsapp")
 def info_whatsapp(
-  empresa_id: int,
-  db: Session = Depends(get_db),
-  identity=Depends(get_current_identity),
+    empresa_id: int,
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
 ):
-  """
-  Lista todas as instâncias com seus metadados e devolve
-  o status/limite pelo plano para o front travar o botão de adicionar.
+    """
+    Lista todas as instâncias com seus metadados e devolve
+    o status/limite pelo plano para o front travar o botão de adicionar.
 
-  Importante:
-  - Exibimos 'apelido' como rótulo no front.
-  - Filtramos sempre por 'instancia_id'.
-  - Mantemos 'id' por compatibilidade.
-  """
-  _assert_empresa_access(empresa_id, identity)
+    Importante:
+    - Exibimos 'apelido' como rótulo no front.
+    - Filtramos sempre por 'instancia_id'.
+    - Mantemos 'id' por compatibilidade.
+    """
+    _assert_empresa_access(empresa_id, identity)
 
-  emp = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
-  if not emp:
-      raise HTTPException(404, "Empresa não encontrada")
+    emp = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
 
-  insts: List[Dict[str, Any]] = []
-  ativos = 0
-  for i in emp.instancias or []:
-      item = {
-          "id": i.id,  # compat
-          "instancia_id": i.id,  # <- usado para filtro no front
-          "apelido": i.apelido,  # <- rótulo exibido
-          "instance_name": i.instance_name,  # fallback técnico
-          "numero_instancia": i.numero_instancia,
-          "connected": bool(i.connected),
-          "last_seen": _iso(i.last_seen) if i.last_seen else None,
-          "historico_restaurar": i.historico_restaurar,
-      }
-      insts.append(item)
-      if i.connected:
-          ativos += 1
+    insts: List[Dict[str, Any]] = []
+    ativos = 0
 
-  total = len(insts)
+    for i in (emp.instancias or []):
+        item = {
+            "id": i.id,  # compat
+            "instancia_id": i.id,  # usado para filtro no front
+            "apelido": i.apelido,  # rótulo exibido
+            "instance_name": i.instance_name,  # fallback técnico
+            "numero_instancia": i.numero_instancia,
+            "connected": bool(i.connected),
+            "last_seen": _iso(i.last_seen) if i.last_seen else None,
+            "historico_restaurar": i.historico_restaurar,
+        }
+        insts.append(item)
+        if i.connected:
+            ativos += 1
 
-  status = plan_status_payload(emp, current_instances=total)
-  status.update(
-      {
-          "ativos": ativos,
-          "inativos": total - ativos,
-          "instancias": insts,
-      }
-  )
-  return status
+    total = len(insts)
+
+    # ✅ fonte única de status/limites/features
+    status = plan_status_payload(emp, current_instances=total)
+    status.update(
+        {
+            "ativos": ativos,
+            "inativos": total - ativos,
+            "instancias": insts,
+        }
+    )
+    return status
 
 
 @router.patch("/instancias/{instancia_id}/apelido")
 def update_apelido(
-  instancia_id: int,
-  body: UpdateApelidoIn,
-  db: Session = Depends(get_db),
-  identity=Depends(get_current_identity),
+    instancia_id: int,
+    body: UpdateApelidoIn,
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
 ):
-  inst = (
-      db.query(models.EmpresaInstancia)
-      .filter(models.EmpresaInstancia.id == instancia_id)
-      .first()
-  )
-  if not inst:
-      raise HTTPException(404, "Instância não encontrada")
+    inst = (
+        db.query(models.EmpresaInstancia)
+        .filter(models.EmpresaInstancia.id == instancia_id)
+        .first()
+    )
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instância não encontrada")
 
-  # garante que o apelido só possa ser alterado pela própria empresa
-  _assert_empresa_access(inst.empresa_id, identity)
+    _assert_empresa_access(inst.empresa_id, identity)
 
-  inst.apelido = (body.apelido or None)
-  db.commit()
-  return {"ok": True, "id": inst.id, "apelido": inst.apelido}
+    inst.apelido = (body.apelido or None)
+    db.commit()
+    return {"ok": True, "id": inst.id, "apelido": inst.apelido}
