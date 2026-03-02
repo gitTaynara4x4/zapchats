@@ -138,6 +138,34 @@ def _no_cache_html(resp: StarletteResponse):
     except Exception:
         pass
 
+def _apply_hsts(resp: StarletteResponse):
+    """
+    HSTS controlado por ENV:
+      HSTS_MODE=clear -> max-age=0 (remove HSTS do navegador)
+      HSTS_MODE=short -> max-age=86400 (1 dia)
+      HSTS_MODE=long  -> max-age=63072000; includeSubDomains; preload (forte)
+      HSTS_MODE=off   -> não envia
+    """
+    if ENV == "dev":
+        return
+
+    mode = (os.getenv("HSTS_MODE", "clear") or "clear").strip().lower()
+
+    if mode in ("off", "0", "false", "no", "disabled"):
+        return
+
+    if mode in ("clear", "reset", "0s"):
+        # Importante: sem includeSubDomains aqui, para não "prender" subdomínios
+        resp.headers["Strict-Transport-Security"] = "max-age=0"
+        return
+
+    if mode in ("short", "1d", "day"):
+        resp.headers["Strict-Transport-Security"] = "max-age=86400"
+        return
+
+    # default/long
+    resp.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+
 # =======================================
 # FastAPI app
 # =======================================
@@ -184,12 +212,8 @@ async def ensure_csrf_cookie(request: Request, call_next):
             path=CSRF_COOKIE_PATH,
         )
 
-    # HSTS apenas em produção
-    if ENV != "dev":
-        resp.headers.setdefault(
-            "Strict-Transport-Security",
-            "max-age=63072000; includeSubDomains; preload"
-        )
+    # ✅ HSTS controlado por ENV (ver _apply_hsts)
+    _apply_hsts(resp)
 
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
