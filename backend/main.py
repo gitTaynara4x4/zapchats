@@ -166,6 +166,22 @@ def _apply_hsts(resp: StarletteResponse):
     # default/long
     resp.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
 
+def _clear_auth_cookies(resp: StarletteResponse):
+    """
+    Remove cookies que geram loop de redirect quando token/empresa estão inválidos.
+    Usamos path="/" para pegar o caso comum. (Se você setou path diferente no login,
+    considere ajustar aqui também.)
+    """
+    try:
+        resp.delete_cookie(ACCESS_COOKIE_NAME, path="/")
+    except Exception:
+        pass
+    for k in ("empresa_id", "EMPRESA_ID"):
+        try:
+            resp.delete_cookie(k, path="/")
+        except Exception:
+            pass
+
 # =======================================
 # FastAPI app
 # =======================================
@@ -205,30 +221,41 @@ async def ensure_csrf_cookie(request: Request, call_next):
         resp.set_cookie(
             key=CSRF_COOKIE_NAME,
             value=token,
-            httponly=False,              # JS lê para mandar no header
-            secure=_is_https(request),    # auto
+            httponly=False,               # JS lê para mandar no header
+            secure=_is_https(request),     # auto
             samesite=COOKIE_SAMESITE,
             max_age=CSRF_COOKIE_MAX_AGE,
             path=CSRF_COOKIE_PATH,
         )
 
-    # ✅ HSTS controlado por ENV (ver _apply_hsts)
+    # ✅ HSTS controlado por ENV
     _apply_hsts(resp)
 
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     return resp
 
-# ✅ Auto-redirect do /login quando já autenticado
+# ✅ Auto-redirect do /login quando já autenticado (com validação do token p/ evitar loop)
 @app.middleware("http")
 async def login_autoredirect(request: Request, call_next):
     p = request.url.path
     if p in ("/login", "/login.html"):
         token = request.cookies.get(ACCESS_COOKIE_NAME)
         emp = request.cookies.get("empresa_id") or request.cookies.get("EMPRESA_ID")
+
         if token and emp:
+            # ✅ valida token antes de redirecionar
+            try:
+                auth_router._decode_token(token)
+            except Exception:
+                # token inválido/expirado -> limpa cookies e deixa abrir login
+                resp = await call_next(request)
+                _clear_auth_cookies(resp)
+                return resp
+
             next_url = request.query_params.get("next") or "/dashboard"
             return RedirectResponse(url=next_url, status_code=302)
+
     return await call_next(request)
 
 # =======================================
@@ -362,9 +389,11 @@ async def auth_html_gate(request: Request, call_next):
     try:
         payload = auth_router._decode_token(token)
     except HTTPException:
+        # ✅ token inválido -> limpa cookies e redireciona (evita loop)
         next_url = path + (("?" + request.url.query) if request.url.query else "")
         resp = RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
         resp.headers["X-Auth-Gate"] = "bad-token"
+        _clear_auth_cookies(resp)
         return resp
 
     sub = payload.get("sub")
