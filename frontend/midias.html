@@ -5,26 +5,19 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Mídias – ZapChats</title>
 
-  <!-- Shell global (injeta head-base + loader + tema + sidebar) -->
   <script src="/frontend/js/app-base.js" defer></script>
   <script src="/frontend/js/auth.js" defer></script>
-  <!-- Guard (permite Page.guarded + redireciona 401/403) -->
   <script src="/frontend/js/page-guard.js" defer></script>
 
-  <!-- Anti-flash -->
   <style>
     html.prepaint body{visibility:hidden}
     html.prepaint[data-head-ready][data-loader-ready] body{visibility:visible}
   </style>
 
-  <!-- Ícones -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
-
-  <!-- CSS da página -->
   <link rel="stylesheet" href="/frontend/css/midias.css"/>
 </head>
 <body>
-  <!-- Sidebar (carregada via app-base.js) -->
   <aside id="sidebar"
          data-src="/frontend/partials/sidebar.html"
          data-src-mobile="/frontend/partials/sidebar-mobile.html"></aside>
@@ -35,14 +28,12 @@
         <i class="fa fa-folder-open title-ico"></i>
         <span class="title-text">Mídias</span>
 
-        <!-- seletor de instâncias -->
         <button id="instMenuBtn" type="button" class="inst-trigger" aria-haspopup="listbox"
                 aria-expanded="false" aria-controls="inst-menu">
           <span id="instMenuLabel">Todas as instâncias</span>
           <span class="chev">▾</span>
         </button>
 
-        <!-- Meus Arquivos ao lado do seletor -->
         <button id="btn-meus-arquivos" type="button" class="btn">
           <i class="fa fa-user-gear"></i>
           <span class="hide-xs">Meus Arquivos</span>
@@ -52,14 +43,12 @@
 
       <div class="top-meta"><strong id="midias-meta">0</strong> itens</div>
 
-      <!-- menu do seletor de instâncias -->
       <div id="inst-menu" class="inst-menu" role="listbox" aria-hidden="true" aria-label="Selecionar instância">
         <div class="head">WhatsApps</div>
-        <ul id="instMenuList"><!-- itens via JS --></ul>
+        <ul id="instMenuList"></ul>
       </div>
     </div>
 
-    <!-- Filtros -->
     <section class="filter" aria-label="Filtros de mídias">
       <div class="group group-search">
         <label for="q">Buscar:</label>
@@ -106,10 +95,8 @@
     </section>
   </main>
 
-  <!-- Toast -->
   <div id="toast" role="status" aria-live="polite"></div>
 
-  <!-- JS da página -->
   <script src="/frontend/js/pages/midias.js" defer></script>
 </body>
 </html>

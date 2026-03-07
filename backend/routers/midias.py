@@ -86,6 +86,9 @@ def _item_dict(m: Midia, request: Request) -> dict:
     return {
         "id": m.id,
         "empresa_id": m.empresa_id,
+        "cliente_id": getattr(m, "cliente_id", None),
+        "grupo_id": getattr(m, "grupo_id", None),
+        "is_group": bool(getattr(m, "grupo_id", None)),
         "nome": m.filename or m.nome_original or f"arquivo_{m.id}",
         "tipo": m.mimetype,       # mimetype reportado
         "tipo_db": m.tipo,        # 'image' | 'video' | 'audio' | 'document' | ...
@@ -176,7 +179,7 @@ def list_midias(
     # IMPORTANTE: None = não filtra; True = só pessoais; False (se presente) = excluir pessoais
     sem_cliente: Optional[bool] = Query(
         None,
-        description="true: cliente_id IS NULL; false (se presente): cliente_id IS NOT NULL",
+        description="true: só pessoais; false (se presente): exclui pessoais mas mantém cliente/grupo",
     ),
     ordenar: str = Query("recent", description="recent|old|az|za"),
     # ↓↓↓ NOVO: filtros por tipo/grupo
@@ -196,8 +199,10 @@ def list_midias(
 ):
     """
     Lista mídias (paginada):
-      - 'Meus Arquivos': sem_cliente=true (cliente_id IS NULL)
-      - sem_cliente=false **(quando presente)** => cliente_id IS NOT NULL (exclui pessoais)
+      - 'Meus Arquivos': sem_cliente=true => só pessoais (cliente_id IS NULL e grupo_id IS NULL)
+      - sem_cliente=false **(quando presente)** => exclui pessoais, mas mantém:
+          - mídias ligadas a cliente
+          - mídias ligadas a grupo
       - por cliente_id, por instância (aceita instancia/instance/inst/session/sessionName/instancia_id/whatsapp_id)
       - aceita filtro `tipo=` (imagem|video|audio|documento) e `doc=` (pdf|word|excel|ppt|text|code|zip|all)
       - ordenação + paginação (limit/offset)
@@ -209,12 +214,30 @@ def list_midias(
 
     stmt = select(Midia).where(Midia.empresa_id == empresa_id)
 
-    # Pessoais / não pessoais
+    # Pessoais / não pessoais / grupos
     if sem_cliente is True:
-        stmt = stmt.where(Midia.cliente_id.is_(None))
+        # só pessoais: sem cliente e sem grupo
+        if hasattr(Midia, "grupo_id"):
+            stmt = stmt.where(
+                Midia.cliente_id.is_(None),
+                Midia.grupo_id.is_(None),
+            )
+        else:
+            stmt = stmt.where(Midia.cliente_id.is_(None))
+
     elif sem_cliente is False and "sem_cliente" in request.query_params:
-        # parâmetro presente e false => excluir pessoais
-        stmt = stmt.where(Midia.cliente_id.is_not(None))
+        # excluir pessoais, mas manter:
+        # - mídias ligadas a cliente
+        # - mídias ligadas a grupo
+        if hasattr(Midia, "grupo_id"):
+            stmt = stmt.where(
+                or_(
+                    Midia.cliente_id.is_not(None),
+                    Midia.grupo_id.is_not(None),
+                )
+            )
+        else:
+            stmt = stmt.where(Midia.cliente_id.is_not(None))
 
     # Cliente específico
     if cliente_id is not None:

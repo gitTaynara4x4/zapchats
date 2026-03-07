@@ -9,8 +9,8 @@
   const numsEl         = $('#numsDisparos');
   const dedupEl        = $('#optDedup');
   const delayEl        = $('#delaySegundos');
-  const fileEl         = $('#fileNumeros');      // import arquivo
-  const importStatusEl = $('#importStatus');     // texto "Importado: ..."
+  const fileEl         = $('#fileNumeros');
+  const importStatusEl = $('#importStatus');
   const resTotalEl     = $('#resTotal');
   const resValidosEl   = $('#resValidos');
   const resInvalidosEl = $('#resInvalidos');
@@ -21,7 +21,6 @@
   const emptyHist      = $('#emptyDisparos');
   const topMetaEl      = $('#topMetaDisparos');
 
-  // --- Picker de clientes ---
   const btnAddFromClientes  = $('#btnAddFromClientes');
   const clientesModal       = $('#clientesModal');
   const clientesListEl      = $('#clientesList');
@@ -32,7 +31,6 @@
   const clientesLoadMoreBtn = $('#btnClientesLoadMore');
   const cliCheckAllEl       = $('#cliCheckAll');
 
-  // --- IA – Melhorar mensagem ---
   const iaBtnOpen     = $('#btnIaMelhorar');
   const iaModal       = $('#iaModal');
   const iaOriginalEl  = $('#iaOriginal');
@@ -42,7 +40,6 @@
   const iaCloseBtn    = $('#btnIaClose');
   const iaStatusEl    = $('#iaStatus');
 
-  // Beta (placeholder no HTML)
   const chkIaVariar   = $('#chkIaVariar');
 
   const API_BASE        = '/api/disparos';
@@ -53,7 +50,6 @@
 
   const F = (window.ZAuth?.guardFetch || window.ZAuth?.authFetch || fetch);
 
-  // estado do picker de clientes
   const clientesState = {
     q: '',
     items: [],
@@ -62,10 +58,7 @@
     loading: false,
   };
 
-  // ---------------------------
-  // Helpers
-  // ---------------------------
-  function escapeHTML (s) {
+  function escapeHTML(s) {
     return String(s ?? '')
       .replaceAll('&', '&amp;')
       .replaceAll('<', '&lt;')
@@ -74,7 +67,7 @@
       .replaceAll("'", '&#39;');
   }
 
-  function getEmpresaId () {
+  function getEmpresaId() {
     try {
       const raw = localStorage.getItem('empresa_id');
       const n = Number.parseInt(raw, 10);
@@ -84,67 +77,47 @@
     }
   }
 
-  function setStatus (text, kind) {
+  function setStatus(text, kind) {
     if (!statusEl) return;
     statusEl.textContent = text || '';
-    if (!text) {
-      statusEl.removeAttribute('data-kind');
-    } else if (kind) {
-      statusEl.dataset.kind = kind;
-    }
+    if (!text) statusEl.removeAttribute('data-kind');
+    else if (kind) statusEl.dataset.kind = kind;
   }
 
-  // status do import de arquivo
-  function setImportStatus (text, kind) {
+  function setImportStatus(text, kind) {
     if (!importStatusEl) return;
     importStatusEl.textContent = text || '';
-    if (!text) {
-      importStatusEl.removeAttribute('data-kind');
-    } else if (kind) {
-      importStatusEl.dataset.kind = kind;
-    }
+    if (!text) importStatusEl.removeAttribute('data-kind');
+    else if (kind) importStatusEl.dataset.kind = kind;
   }
 
-  // ---------------------------
-  // IA – helpers de modal
-  // ---------------------------
-  function setIaStatus (text, kind) {
+  function setIaStatus(text, kind) {
     if (!iaStatusEl) return;
     iaStatusEl.textContent = text || '';
-    if (!text) {
-      iaStatusEl.removeAttribute('data-kind');
-    } else if (kind) {
-      iaStatusEl.dataset.kind = kind;
-    }
+    if (!text) iaStatusEl.removeAttribute('data-kind');
+    else if (kind) iaStatusEl.dataset.kind = kind;
   }
 
-  function openIaModal (original, sugestao) {
+  function openIaModal(original, sugestao) {
     if (!iaModal) return;
     iaModal.setAttribute('aria-hidden', 'false');
     iaModal.classList.add('is-open');
     document.body.classList.add('has-modal');
-
     if (iaOriginalEl) iaOriginalEl.value = original || '';
     if (iaSugestaoEl) iaSugestaoEl.value = sugestao || '';
     setIaStatus('', null);
-
-    setTimeout(() => {
-      if (iaSugestaoEl) iaSugestaoEl.focus();
-    }, 30);
+    setTimeout(() => iaSugestaoEl?.focus(), 30);
   }
 
-  function closeIaModal () {
+  function closeIaModal() {
     if (!iaModal) return;
     iaModal.setAttribute('aria-hidden', 'true');
     iaModal.classList.remove('is-open');
     document.body.classList.remove('has-modal');
   }
 
-  function applyIaVersion () {
-    if (!iaSugestaoEl || !msgEl) {
-      closeIaModal();
-      return;
-    }
+  function applyIaVersion() {
+    if (!iaSugestaoEl || !msgEl) return closeIaModal();
     const texto = (iaSugestaoEl.value || '').trim();
     if (!texto) {
       alert('A versão da IA está vazia. Ajuste ou feche o modal.');
@@ -155,21 +128,20 @@
     msgEl.focus();
   }
 
-  async function chamarIaMelhorar (ev) {
+  async function chamarIaMelhorar(ev) {
     ev?.preventDefault?.();
 
     const draft = (msgEl?.value || '').trim();
     if (!draft) {
       alert('Digite a mensagem primeiro para a IA melhorar.');
-      msgEl && msgEl.focus();
+      msgEl?.focus();
       return;
     }
 
-    // abre modal já com o original e limpa a coluna da IA
     openIaModal(draft, '');
     setIaStatus('Chamando IA para melhorar sua mensagem…', 'info');
 
-    if (iaApplyBtn)  iaApplyBtn.disabled  = true;
+    if (iaApplyBtn) iaApplyBtn.disabled = true;
     if (iaRegerarBtn) iaRegerarBtn.disabled = true;
 
     try {
@@ -182,27 +154,22 @@
 
       const txt = await res.text();
       let data;
-      try {
-        data = txt ? JSON.parse(txt) : {};
-      } catch {
-        data = { raw: txt };
-      }
+      try { data = txt ? JSON.parse(txt) : {}; }
+      catch { data = { raw: txt }; }
 
       if (!res.ok) {
-        const msg =
-          (data && (data.detail || data.message)) ||
-          `Erro HTTP ${res.status}`;
+        const msg = (data && (data.detail || data.message)) || `Erro HTTP ${res.status}`;
         console.error('[IA-DISPARO] Erro HTTP', res.status, data);
         setIaStatus(msg, 'error');
         alert('Erro ao chamar IA: ' + msg);
         return;
       }
 
-      const original  = data.original ?? draft;
+      const original = data.original ?? draft;
       const melhorada = data.melhorada ?? data.mensagem ?? data.text ?? txt ?? draft;
 
-      if (iaOriginalEl) iaOriginalEl.value   = original;
-      if (iaSugestaoEl) iaSugestaoEl.value   = melhorada;
+      if (iaOriginalEl) iaOriginalEl.value = original;
+      if (iaSugestaoEl) iaSugestaoEl.value = melhorada;
 
       if (melhorada === '__EMPTY__') {
         setIaStatus('A IA entendeu que o rascunho está vazio. Revise o texto e tente novamente.', 'error');
@@ -214,12 +181,12 @@
       setIaStatus('Erro ao chamar IA. Tente novamente em instantes.', 'error');
       alert('Erro ao chamar IA. Veja o console do navegador para detalhes.');
     } finally {
-      if (iaApplyBtn)  iaApplyBtn.disabled  = false;
+      if (iaApplyBtn) iaApplyBtn.disabled = false;
       if (iaRegerarBtn) iaRegerarBtn.disabled = false;
     }
   }
 
-  async function regerarIa (ev) {
+  async function regerarIa(ev) {
     ev?.preventDefault?.();
 
     const draft = (iaOriginalEl?.value || msgEl?.value || '').trim();
@@ -229,8 +196,7 @@
     }
 
     setIaStatus('Gerando outra variação…', 'info');
-
-    if (iaApplyBtn)  iaApplyBtn.disabled  = true;
+    if (iaApplyBtn) iaApplyBtn.disabled = true;
     if (iaRegerarBtn) iaRegerarBtn.disabled = true;
 
     try {
@@ -243,23 +209,18 @@
 
       const txt = await res.text();
       let data;
-      try {
-        data = txt ? JSON.parse(txt) : {};
-      } catch {
-        data = { raw: txt };
-      }
+      try { data = txt ? JSON.parse(txt) : {}; }
+      catch { data = { raw: txt }; }
 
       if (!res.ok) {
-        const msg =
-          (data && (data.detail || data.message)) ||
-          `Erro HTTP ${res.status}`;
+        const msg = (data && (data.detail || data.message)) || `Erro HTTP ${res.status}`;
         console.error('[IA-DISPARO] Erro HTTP (regerar)', res.status, data);
         setIaStatus(msg, 'error');
         alert('Erro ao chamar IA: ' + msg);
         return;
       }
 
-      const original  = data.original ?? draft;
+      const original = data.original ?? draft;
       const melhorada = data.melhorada ?? data.mensagem ?? data.text ?? txt ?? draft;
 
       if (iaOriginalEl) iaOriginalEl.value = original;
@@ -275,22 +236,18 @@
       setIaStatus('Erro ao chamar IA. Tente novamente em instantes.', 'error');
       alert('Erro ao chamar IA. Veja o console do navegador para detalhes.');
     } finally {
-      if (iaApplyBtn)  iaApplyBtn.disabled  = false;
+      if (iaApplyBtn) iaApplyBtn.disabled = false;
       if (iaRegerarBtn) iaRegerarBtn.disabled = false;
     }
   }
 
-  // sincroniza texto "Delay" do resumo com o select
-  function syncDelayResumo () {
+  function syncDelayResumo() {
     if (!resDelayEl) return;
 
     let v = 20;
     if (delayEl) {
-      const raw = delayEl.value || '20';
-      const n = Number.parseInt(raw, 10);
-      if (Number.isFinite(n)) {
-        v = Math.max(5, Math.min(3600, n));
-      }
+      const n = Number.parseInt(delayEl.value || '20', 10);
+      if (Number.isFinite(n)) v = Math.max(5, Math.min(3600, n));
     }
 
     if (v >= 60) {
@@ -301,10 +258,7 @@
     }
   }
 
-  // ---------------------------
-  // Parse de números (textarea)
-  // ---------------------------
-  function parseNumeros () {
+  function parseNumeros() {
     const raw = (numsEl?.value || '');
     const parts = raw.split(/[\n,;]+/);
     const seen = new Set();
@@ -318,33 +272,26 @@
       const digits = s.replace(/\D+/g, '');
       if (!digits) continue;
 
-      const key = digits;
-      if (dedupEl && dedupEl.checked) {
-        if (seen.has(key)) continue;
-        seen.add(key);
+      if (dedupEl?.checked) {
+        if (seen.has(digits)) continue;
+        seen.add(digits);
       }
 
-      // Regra simples: 10+ dígitos é "válido"
-      const isValid = digits.length >= 10;
       const obj = { raw: s, digits };
-
-      if (isValid) valid.push(obj);
+      if (digits.length >= 10) valid.push(obj);
       else invalid.push(obj);
     }
 
-    if (resTotalEl)     resTotalEl.textContent     = String(valid.length + invalid.length);
-    if (resValidosEl)   resValidosEl.textContent   = String(valid.length);
+    if (resTotalEl) resTotalEl.textContent = String(valid.length + invalid.length);
+    if (resValidosEl) resValidosEl.textContent = String(valid.length);
     if (resInvalidosEl) resInvalidosEl.textContent = String(invalid.length);
 
     return { valid, invalid };
   }
 
-  // ---------------------------
-  // Importar arquivo (CSV/TXT/XLSX)
-  // ---------------------------
-  function handleFileChange (ev) {
+  function handleFileChange(ev) {
     const input = ev.target;
-    const file = input?.files && input.files[0];
+    const file = input?.files?.[0];
     if (!file) return;
 
     setImportStatus(`Lendo arquivo "${file.name}"…`, 'info');
@@ -360,38 +307,29 @@
         }
 
         const atual = numsEl?.value || '';
-        const combined = atual
-          ? (atual.trimEnd() + '\n' + text.trim())
-          : text.trim();
+        const combined = atual ? (atual.trimEnd() + '\n' + text.trim()) : text.trim();
 
-        if (numsEl) {
-          numsEl.value = combined;
-        }
-
+        if (numsEl) numsEl.value = combined;
         parseNumeros();
         setImportStatus(`Importado: ${file.name} (${file.size} bytes).`, 'success');
       } catch (e) {
         console.error('Erro ao importar arquivo de números', e);
         setImportStatus('Erro ao processar o arquivo.', 'error');
       } finally {
-        input.value = ''; // permite escolher o mesmo arquivo de novo depois
+        input.value = '';
       }
     };
+
     reader.onerror = () => {
       console.error('Erro ao ler arquivo de números', reader.error);
       setImportStatus('Erro ao ler arquivo. Tente novamente.', 'error');
       input.value = '';
     };
 
-    // Lê como texto simples; para Excel/Word recomendação é exportar como CSV/TXT
     reader.readAsText(file, 'utf-8');
   }
 
-  // ---------------------------
-  // Picker de clientes
-  // ---------------------------
-
-  function buildClientesUrl (q, offset) {
+  function buildClientesUrl(q, offset) {
     const empresaId = getEmpresaId();
     const params = new URLSearchParams();
     if (empresaId) params.set('empresa_id', String(empresaId));
@@ -401,14 +339,13 @@
     return `${API_CLIENTES}?${params.toString()}`;
   }
 
-  function updateRowFromCheckbox (checkbox) {
+  function updateRowFromCheckbox(checkbox) {
     const tr = checkbox.closest('tr');
     if (!tr) return;
-    if (checkbox.checked) tr.classList.add('is-selected');
-    else tr.classList.remove('is-selected');
+    tr.classList.toggle('is-selected', !!checkbox.checked);
   }
 
-  function syncCliCheckAllState () {
+  function syncCliCheckAllState() {
     if (!cliCheckAllEl || !clientesListEl) return;
     const allChecks = $$('.cli-check', clientesListEl);
     if (!allChecks.length) {
@@ -421,12 +358,9 @@
     cliCheckAllEl.indeterminate = totalChecked > 0 && totalChecked < allChecks.length;
   }
 
-  function renderClientesList (items, append) {
+  function renderClientesList(items, append) {
     if (!clientesListEl) return;
-
-    if (!append) {
-      clientesListEl.innerHTML = '';
-    }
+    if (!append) clientesListEl.innerHTML = '';
 
     if ((!items || !items.length) && !append) {
       if (clientesEmptyEl) clientesEmptyEl.style.display = '';
@@ -444,7 +378,6 @@
       const depto = (item.departamento || '').toString();
       const digits = telefone.replace(/\D+/g, '');
 
-      // pequena sanitização pra evitar quebrar o HTML
       const safeNome = nome.replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const safeTel  = telefone.replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const safeDep  = depto.replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -464,12 +397,11 @@
       clientesListEl.appendChild(tr);
     });
 
-    // depois de renderizar, garante estado visual x checkbox
     $$('.cli-check', clientesListEl).forEach(updateRowFromCheckbox);
     syncCliCheckAllState();
   }
 
-  async function loadClientes (opts) {
+  async function loadClientes(opts) {
     if (!clientesModal || !clientesListEl) return;
 
     opts = opts || {};
@@ -480,10 +412,9 @@
     if (append && !clientesState.has_more) return;
 
     const offset = append ? (clientesState.next_offset || 0) : 0;
-
     clientesState.loading = true;
+
     if (!append) {
-      // reset visual
       if (clientesEmptyEl) clientesEmptyEl.style.display = 'none';
       clientesListEl.innerHTML = '';
     }
@@ -492,54 +423,43 @@
       const url = buildClientesUrl(q, offset);
       const res = await F(url, { credentials: 'include' });
       const txt = await res.text();
+
       let data;
-      try {
-        data = txt ? JSON.parse(txt) : {};
-      } catch {
-        data = { raw: txt };
-      }
+      try { data = txt ? JSON.parse(txt) : {}; }
+      catch { data = { raw: txt }; }
 
       const items = Array.isArray(data?.items) ? data.items : [];
 
-      if (!append) {
-        clientesState.items = items.slice();
-      } else {
-        clientesState.items = clientesState.items.concat(items);
-      }
+      if (!append) clientesState.items = items.slice();
+      else clientesState.items = clientesState.items.concat(items);
 
       clientesState.q = q;
       clientesState.has_more = !!data?.has_more;
       clientesState.next_offset = data?.next_offset || 0;
 
       renderClientesList(items, append);
-
-      if (clientesLoadMoreBtn) {
-        clientesLoadMoreBtn.style.display = clientesState.has_more ? '' : 'none';
-      }
+      if (clientesLoadMoreBtn) clientesLoadMoreBtn.style.display = clientesState.has_more ? '' : 'none';
     } catch (e) {
       console.error('Erro ao carregar clientes para o disparo', e);
-      if (!append) {
-        renderClientesList([], false);
-      }
-      if (clientesLoadMoreBtn) {
-        clientesLoadMoreBtn.style.display = 'none';
-      }
+      if (!append) renderClientesList([], false);
+      if (clientesLoadMoreBtn) clientesLoadMoreBtn.style.display = 'none';
     } finally {
       clientesState.loading = false;
     }
   }
 
-  function openClientesModal () {
+  function openClientesModal() {
     if (!clientesModal) return;
 
-    // reset estado
     clientesState.q = '';
     clientesState.items = [];
     clientesState.has_more = false;
     clientesState.next_offset = 0;
+
     if (clientesSearchEl) clientesSearchEl.value = '';
     if (clientesListEl) clientesListEl.innerHTML = '';
     if (clientesEmptyEl) clientesEmptyEl.style.display = 'none';
+
     if (cliCheckAllEl) {
       cliCheckAllEl.checked = false;
       cliCheckAllEl.indeterminate = false;
@@ -550,24 +470,18 @@
     document.body.classList.add('has-modal');
 
     loadClientes({ q: '', append: false });
-
-    setTimeout(() => {
-      if (clientesSearchEl) clientesSearchEl.focus();
-    }, 50);
+    setTimeout(() => clientesSearchEl?.focus(), 50);
   }
 
-  function closeClientesModal () {
+  function closeClientesModal() {
     if (!clientesModal) return;
     clientesModal.setAttribute('aria-hidden', 'true');
     clientesModal.classList.remove('is-open');
     document.body.classList.remove('has-modal');
   }
 
-  function applyClientesSelection () {
-    if (!clientesListEl || !numsEl) {
-      closeClientesModal();
-      return;
-    }
+  function applyClientesSelection() {
+    if (!clientesListEl || !numsEl) return closeClientesModal();
 
     const checks = $$('.cli-check:checked', clientesListEl);
     if (!checks.length) {
@@ -583,17 +497,13 @@
     const toAdd = [];
 
     checks.forEach(ch => {
-      const phone  = ch.dataset.phone || '';
+      const phone = ch.dataset.phone || '';
       const digits = (ch.dataset.digits || '').replace(/\D+/g, '');
       if (!digits) return;
 
-      if (dedupEl && dedupEl.checked && seenDigits.has(digits)) {
-        return; // já existe
-      }
-
+      if (dedupEl?.checked && seenDigits.has(digits)) return;
       seenDigits.add(digits);
-      const raw = phone || digits;
-      toAdd.push(raw);
+      toAdd.push(phone || digits);
     });
 
     if (!toAdd.length) {
@@ -602,33 +512,23 @@
       return;
     }
 
-    let base = numsEl.value || '';
-    base = base.trimEnd();
-    if (base && !base.endsWith('\n')) {
-      base += '\n';
-    }
-    base += toAdd.join('\n');
-    numsEl.value = base;
+    let base = (numsEl.value || '').trimEnd();
+    if (base && !base.endsWith('\n')) base += '\n';
+    numsEl.value = base + toAdd.join('\n');
 
     parseNumeros();
     closeClientesModal();
   }
 
-  // debounce da busca de clientes
   let clientesSearchTimer = null;
-  function handleClientesSearchInput () {
+  function handleClientesSearchInput() {
     if (!clientesSearchEl) return;
     const term = clientesSearchEl.value.trim();
-
-    if (clientesSearchTimer) {
-      clearTimeout(clientesSearchTimer);
-    }
-    clientesSearchTimer = setTimeout(() => {
-      loadClientes({ q: term, append: false });
-    }, 300);
+    if (clientesSearchTimer) clearTimeout(clientesSearchTimer);
+    clientesSearchTimer = setTimeout(() => loadClientes({ q: term, append: false }), 300);
   }
 
-  function handleClientesListClick (e) {
+  function handleClientesListClick(e) {
     if (!clientesListEl) return;
     const row = e.target.closest('tr');
     if (!row || !clientesListEl.contains(row)) return;
@@ -636,49 +536,39 @@
     const checkbox = row.querySelector('.cli-check');
     if (!checkbox) return;
 
-    // se o clique foi diretamente na checkbox, deixa o comportamento normal
     if (e.target === checkbox) {
       updateRowFromCheckbox(checkbox);
       syncCliCheckAllState();
       return;
     }
 
-    // clique em qualquer outro ponto da linha: alterna o checked
     checkbox.checked = !checkbox.checked;
     updateRowFromCheckbox(checkbox);
     syncCliCheckAllState();
   }
 
-  // ---------------------------
-  // Montagem do payload
-  // ---------------------------
-  function getPayload () {
+  function getPayload() {
     const mensagem = (msgEl?.value || '').trim();
     const { valid } = parseNumeros();
 
     if (!mensagem) {
       alert('Digite a mensagem do disparo.');
-      msgEl && msgEl.focus();
-      return null;
-    }
-    if (!valid.length) {
-      alert('Informe ao menos um número válido.');
-      numsEl && numsEl.focus();
+      msgEl?.focus();
       return null;
     }
 
-    const numeros = valid.map(v => v.raw);
+    if (!valid.length) {
+      alert('Informe ao menos um número válido.');
+      numsEl?.focus();
+      return null;
+    }
 
     let delaySegundos = 20;
     if (delayEl) {
-      const raw = delayEl.value || '20';
-      const n = Number.parseInt(raw, 10);
-      if (Number.isFinite(n)) {
-        delaySegundos = Math.max(5, Math.min(3600, n));
-      }
+      const n = Number.parseInt(delayEl.value || '20', 10);
+      if (Number.isFinite(n)) delaySegundos = Math.max(5, Math.min(3600, n));
     }
 
-    // instancia_id é obrigatório pro backend
     const instId = window.__INST_ID
       ? Number(String(window.__INST_ID).replace(/\D/g, ''))
       : null;
@@ -690,19 +580,15 @@
 
     return {
       mensagem,
-      numeros,
+      numeros: valid.map(v => v.raw),
       instancia_id: instId,
       delay_segundos: delaySegundos,
-      tipo_conteudo: 'text', // hoje só texto
-      midia_id: null         // placeholder pra futuro
-      // empresa_id removido: backend pega do token/jwt
+      tipo_conteudo: 'text',
+      midia_id: null
     };
   }
 
-  // ---------------------------
-  // Envio
-  // ---------------------------
-  async function enviarDisparo (ev) {
+  async function enviarDisparo(ev) {
     ev?.preventDefault?.();
 
     const payload = getPayload();
@@ -724,27 +610,18 @@
 
       const txt = await res.text();
       let data;
-      try {
-        data = txt ? JSON.parse(txt) : {};
-      } catch {
-        data = { raw: txt };
-      }
+      try { data = txt ? JSON.parse(txt) : {}; }
+      catch { data = { raw: txt }; }
 
       if (!res.ok || data?.ok === false) {
         let msg = '';
         const detail = data?.detail;
 
-        if (typeof detail === 'string') {
-          msg = detail;
-        } else if (Array.isArray(detail)) {
-          msg = detail.map(d => d.msg || d.message || JSON.stringify(d)).join(' | ');
-        } else if (detail && typeof detail === 'object') {
-          msg = detail.msg || detail.message || JSON.stringify(detail);
-        } else if (data?.message) {
-          msg = data.message;
-        } else {
-          msg = `Erro HTTP ${res.status}`;
-        }
+        if (typeof detail === 'string') msg = detail;
+        else if (Array.isArray(detail)) msg = detail.map(d => d.msg || d.message || JSON.stringify(d)).join(' | ');
+        else if (detail && typeof detail === 'object') msg = detail.msg || detail.message || JSON.stringify(detail);
+        else if (data?.message) msg = data.message;
+        else msg = `Erro HTTP ${res.status}`;
 
         const err = new Error(msg);
         err.data = data;
@@ -756,9 +633,7 @@
       carregarHistorico();
     } catch (e) {
       console.error('Erro ao enviar disparo', e);
-      const msg =
-        (e && typeof e.message === 'string' && e.message) ||
-        'Erro ao enviar disparo.';
+      const msg = (e && typeof e.message === 'string' && e.message) || 'Erro ao enviar disparo.';
       setStatus(msg, 'error');
       alert('Erro ao enviar disparo: ' + msg);
     } finally {
@@ -769,10 +644,7 @@
     }
   }
 
-  // ---------------------------
-  // Histórico
-  // ---------------------------
-  function fmtDate (s) {
+  function fmtDate(s) {
     if (!s) return '—';
     const d = new Date(s);
     if (Number.isNaN(d.getTime())) return String(s);
@@ -784,7 +656,7 @@
     return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
   }
 
-  function resolveAutor (item) {
+  function resolveAutor(item) {
     const label =
       item?.criado_por ||
       item?.criado_por_nome ||
@@ -800,14 +672,18 @@
 
     if (cid) return `Colab #${cid}`;
     if (uid) return `Usuário #${uid}`;
-
     return '—';
   }
 
-  function renderHistorico (itens) {
+  function tdCell(label, value, extraStyle) {
+    return `<td data-label="${escapeHTML(label)}"${extraStyle ? ` style="${extraStyle}"` : ''}>${value}</td>`;
+  }
+
+  function renderHistorico(itens) {
     if (!tbodyHist) return;
 
     tbodyHist.innerHTML = '';
+
     if (!Array.isArray(itens) || !itens.length) {
       if (emptyHist) emptyHist.style.display = '';
       if (topMetaEl) topMetaEl.textContent = '0';
@@ -822,26 +698,26 @@
 
       const msg = (item.mensagem || '').toString();
       const preview = msg.length > 80 ? msg.slice(0, 80) + '…' : msg;
-
       const qtd = item.qtd_numeros ?? item.total_numeros ?? (item.numeros?.length || 0);
       const inst = item.instancia_nome || item.instance_name || item.instancia_id || '—';
       const por = resolveAutor(item);
       const status = (item.status || 'pendente').toString();
       const criado = fmtDate(item.criado_em || item.created_at || item.created);
 
-      tr.innerHTML = `
-        <td>${escapeHTML(preview || '—')}</td>
-        <td style="text-align:center">${escapeHTML(qtd)}</td>
-        <td>${escapeHTML(inst)}</td>
-        <td>${escapeHTML(por)}</td>
-        <td>${escapeHTML(status)}</td>
-        <td>${escapeHTML(criado)}</td>
-      `;
+      tr.innerHTML = [
+        tdCell('Mensagem', escapeHTML(preview || '—')),
+        tdCell('Qtd. números', escapeHTML(qtd), 'text-align:center'),
+        tdCell('Instância', escapeHTML(inst)),
+        tdCell('Por', escapeHTML(por)),
+        tdCell('Status', escapeHTML(status)),
+        tdCell('Criado em', escapeHTML(criado))
+      ].join('');
+
       tbodyHist.appendChild(tr);
     });
   }
 
-  async function carregarHistorico () {
+  async function carregarHistorico() {
     if (!tbodyHist) return;
 
     let url = API_LIST;
@@ -849,24 +725,17 @@
     const params = [];
     if (empresaId) params.push(`empresa_id=${encodeURIComponent(String(empresaId))}`);
     if (window.__INST_ID) params.push(`instancia_id=${encodeURIComponent(String(window.__INST_ID))}`);
-    if (params.length) {
-      url += (url.includes('?') ? '&' : '?') + params.join('&');
-    }
+    if (params.length) url += (url.includes('?') ? '&' : '?') + params.join('&');
 
     try {
       const res = await F(url, { credentials: 'include' });
       const txt = await res.text();
+
       let data;
-      try {
-        data = txt ? JSON.parse(txt) : {};
-      } catch {
-        data = { raw: txt };
-      }
+      try { data = txt ? JSON.parse(txt) : {}; }
+      catch { data = { raw: txt }; }
 
-      const itens = Array.isArray(data?.items) ? data.items
-                  : Array.isArray(data)        ? data
-                  : [];
-
+      const itens = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
       renderHistorico(itens);
     } catch (e) {
       console.error('Erro ao carregar histórico de disparos', e);
@@ -874,10 +743,7 @@
     }
   }
 
-  // =====================================================
-  // Dropdown de instâncias
-  // =====================================================
-  function ensureCSSEscape () {
+  function ensureCSSEscape() {
     if (!window.CSS) window.CSS = {};
     if (typeof window.CSS.escape !== 'function') {
       window.CSS.escape = function (val) {
@@ -886,19 +752,18 @@
     }
   }
 
-  function initInstDropdown () {
-    const btn    = $('#instMenuBtn');
-    const label  = $('#instMenuLabel');
-    const menu   = $('#inst-menu');
+  function initInstDropdown() {
+    const btn = $('#instMenuBtn');
+    const label = $('#instMenuLabel');
+    const menu = $('#inst-menu');
     const listEl = $('#instMenuList');
 
     if (!btn || !menu || !listEl) return;
 
     ensureCSSEscape();
-
     const empresaId = getEmpresaId();
 
-    function openMenu () {
+    function openMenu() {
       menu.setAttribute('aria-hidden', 'false');
       btn.setAttribute('aria-expanded', 'true');
       const first = listEl.querySelector('.inst-item[aria-selected="true"]') || listEl.querySelector('.inst-item');
@@ -907,32 +772,30 @@
       document.addEventListener('keydown', onKey);
     }
 
-    function closeMenu () {
+    function closeMenu() {
       menu.setAttribute('aria-hidden', 'true');
       btn.setAttribute('aria-expanded', 'false');
       document.removeEventListener('mousedown', onDocClick);
       document.removeEventListener('keydown', onKey);
     }
 
-    function toggleMenu () {
+    function toggleMenu() {
       const isHidden = menu.getAttribute('aria-hidden') !== 'false';
-      if (isHidden) openMenu();
-      else closeMenu();
+      isHidden ? openMenu() : closeMenu();
     }
 
-    function onDocClick (e) {
-      if (!menu.contains(e.target) && e.target !== btn) {
-        closeMenu();
-      }
+    function onDocClick(e) {
+      if (!menu.contains(e.target) && e.target !== btn && !btn.contains(e.target)) closeMenu();
     }
 
-    function onKey (e) {
+    function onKey(e) {
       if (e.key === 'Escape') {
         e.preventDefault();
         closeMenu();
         btn.focus();
         return;
       }
+
       if (menu.getAttribute('aria-hidden') === 'true') return;
 
       const items = Array.from(listEl.querySelectorAll('.inst-item'));
@@ -961,12 +824,10 @@
 
     btn.addEventListener('click', toggleMenu);
 
-    const instValue = i =>
-      i.instancia_id ?? i.id ?? i.instance_id ?? i.session ?? i.sessionName ?? '';
-    const instLabel = (i, v) =>
-      i.apelido || i.nome || i.instance_name || String(v) || 'Instância';
+    const instValue = i => i.instancia_id ?? i.id ?? i.instance_id ?? i.session ?? i.sessionName ?? '';
+    const instLabel = (i, v) => i.apelido || i.nome || i.instance_name || String(v) || 'Instância';
 
-    function makeItem (text, value, selected) {
+    function makeItem(text, value, selected) {
       const li = document.createElement('li');
       const b = document.createElement('button');
       b.type = 'button';
@@ -985,38 +846,34 @@
       return li;
     }
 
-    function setActiveUI (value, text) {
+    function setActiveUI(value, text) {
       $$('.inst-item', listEl).forEach(b => {
         b.setAttribute('aria-selected', b.dataset.value === String(value) ? 'true' : 'false');
       });
-      const active = listEl.querySelector(
-        `.inst-item[data-value="${window.CSS.escape(String(value))}"]`
-      );
+
+      const active = listEl.querySelector(`.inst-item[data-value="${window.CSS.escape(String(value))}"]`);
       if (active) {
         if (!active.id) active.id = 'inst-opt-' + String(value || 'all');
         menu.setAttribute('aria-activedescendant', active.id);
       }
-      if (label) {
-        label.textContent = text || (value ? `Instância ${value}` : 'Todas as instâncias');
-      }
+
+      if (label) label.textContent = text || (value ? `Instância ${value}` : 'Todas as instâncias');
     }
 
-    function applyInstancia (value, text) {
-      window.__INST_ID   = value ? Number(String(value).replace(/\D/g, '')) : '';
+    function applyInstancia(value, text) {
+      window.__INST_ID = value ? Number(String(value).replace(/\D/g, '')) : '';
       window.__INST_NAME = (text || '').trim();
       setActiveUI(value, text);
-      if (typeof window.onInstanciaChange === 'function') {
-        window.onInstanciaChange(value, text);
-      }
+      if (typeof window.onInstanciaChange === 'function') window.onInstanciaChange(value, text);
     }
 
-    function selectValue (value, text) {
+    function selectValue(value, text) {
       applyInstancia(value, text);
       closeMenu();
       btn.focus();
     }
 
-    async function loadList () {
+    async function loadList() {
       listEl.innerHTML = '';
       listEl.appendChild(makeItem('Todas as instâncias', '', false));
 
@@ -1029,24 +886,16 @@
             const j = await r.json();
             items = Array.isArray(j.instancias) ? j.instancias : [];
           }
-        } catch {
-          // ignora
-        }
+        } catch {}
 
         if (!items.length) {
           try {
-            const r2 = await F(`/api/instancias/list?empresa_id=${empresaId}`, {
-              credentials: 'include'
-            });
+            const r2 = await F(`/api/instancias/list?empresa_id=${empresaId}`, { credentials: 'include' });
             if (r2.ok) {
               const j2 = await r2.json();
-              items = Array.isArray(j2)
-                ? j2
-                : (Array.isArray(j2?.instancias) ? j2.instancias : []);
+              items = Array.isArray(j2) ? j2 : (Array.isArray(j2?.instancias) ? j2.instancias : []);
             }
-          } catch {
-            // ignora
-          }
+          } catch {}
         }
       }
 
@@ -1057,21 +906,15 @@
       });
 
       if (window.__INST_ID == null || window.__INST_ID === '') {
-        const firstConnected = items.find(
-          x => !!(x.connected || x.conectada || x.status === 'CONNECTED')
-        );
+        const firstConnected = items.find(x => !!(x.connected || x.conectada || x.status === 'CONNECTED'));
         const firstAny = items[0];
         const chosen = firstConnected || firstAny;
-        window.__INST_ID = chosen
-          ? Number(String(instValue(chosen) || '').replace(/\D/g, ''))
-          : '';
+        window.__INST_ID = chosen ? Number(String(instValue(chosen) || '').replace(/\D/g, '')) : '';
       }
 
       if (window.__INST_ID) {
         const val = String(window.__INST_ID);
-        const sel = listEl.querySelector(
-          `.inst-item[data-value="${window.CSS.escape(val)}"]`
-        );
+        const sel = listEl.querySelector(`.inst-item[data-value="${window.CSS.escape(val)}"]`);
         const text = sel?.dataset?.label || `Instância ${val}`;
         applyInstancia(val, text);
       } else {
@@ -1082,16 +925,11 @@
     loadList();
   }
 
-  // Toda vez que trocar instância, recarrega histórico
   window.onInstanciaChange = function () {
     carregarHistorico();
   };
 
-  // ---------------------------
-  // Init
-  // ---------------------------
-  function init () {
-    // desliga o beta pra não confundir (backend ainda não suporta sem 422)
+  function init() {
     if (chkIaVariar) {
       chkIaVariar.checked = false;
       chkIaVariar.disabled = true;
@@ -1102,64 +940,39 @@
       ['input', 'blur'].forEach(ev => numsEl.addEventListener(ev, parseNumeros));
       parseNumeros();
     }
-    if (dedupEl) {
-      dedupEl.addEventListener('change', parseNumeros);
-    }
+
+    dedupEl?.addEventListener('change', parseNumeros);
+
     if (delayEl) {
       delayEl.addEventListener('change', syncDelayResumo);
       syncDelayResumo();
     } else if (resDelayEl) {
       resDelayEl.textContent = '20s';
     }
-    if (fileEl) {
-      fileEl.addEventListener('change', handleFileChange);
-    }
-    if (btnDisparar) {
-      btnDisparar.addEventListener('click', enviarDisparo);
-    }
 
-    // IA – botão e modal
-    if (iaBtnOpen) {
-      iaBtnOpen.addEventListener('click', chamarIaMelhorar);
-    }
-    if (iaApplyBtn) {
-      iaApplyBtn.addEventListener('click', applyIaVersion);
-    }
-    if (iaRegerarBtn) {
-      iaRegerarBtn.addEventListener('click', regerarIa);
-    }
-    if (iaCloseBtn) {
-      iaCloseBtn.addEventListener('click', closeIaModal);
-    }
+    fileEl?.addEventListener('change', handleFileChange);
+    btnDisparar?.addEventListener('click', enviarDisparo);
+
+    iaBtnOpen?.addEventListener('click', chamarIaMelhorar);
+    iaApplyBtn?.addEventListener('click', applyIaVersion);
+    iaRegerarBtn?.addEventListener('click', regerarIa);
+    iaCloseBtn?.addEventListener('click', closeIaModal);
+
     if (iaModal) {
       iaModal.addEventListener('click', (e) => {
-        if (e.target === iaModal) {
-          closeIaModal();
-        }
+        if (e.target === iaModal) closeIaModal();
       });
       document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && iaModal.classList.contains('is-open')) {
-          closeIaModal();
-        }
+        if (e.key === 'Escape' && iaModal.classList.contains('is-open')) closeIaModal();
       });
     }
 
-    // picker de clientes: eventos
-    if (btnAddFromClientes && clientesModal) {
-      btnAddFromClientes.addEventListener('click', openClientesModal);
-    }
-    if (clientesCloseBtn) {
-      clientesCloseBtn.addEventListener('click', closeClientesModal);
-    }
-    if (clientesApplyBtn) {
-      clientesApplyBtn.addEventListener('click', applyClientesSelection);
-    }
-    if (clientesLoadMoreBtn) {
-      clientesLoadMoreBtn.addEventListener('click', () => loadClientes({ append: true }));
-    }
-    if (clientesSearchEl) {
-      clientesSearchEl.addEventListener('input', handleClientesSearchInput);
-    }
+    if (btnAddFromClientes && clientesModal) btnAddFromClientes.addEventListener('click', openClientesModal);
+    clientesCloseBtn?.addEventListener('click', closeClientesModal);
+    clientesApplyBtn?.addEventListener('click', applyClientesSelection);
+    clientesLoadMoreBtn?.addEventListener('click', () => loadClientes({ append: true }));
+    clientesSearchEl?.addEventListener('input', handleClientesSearchInput);
+
     if (cliCheckAllEl && clientesListEl) {
       cliCheckAllEl.addEventListener('change', () => {
         const checked = cliCheckAllEl.checked;
@@ -1170,29 +983,21 @@
         syncCliCheckAllState();
       });
     }
-    if (clientesListEl) {
-      clientesListEl.addEventListener('click', handleClientesListClick);
-    }
+
+    clientesListEl?.addEventListener('click', handleClientesListClick);
+
     if (clientesModal) {
-      // fechar clicando fora do painel
       clientesModal.addEventListener('click', (e) => {
-        if (e.target === clientesModal) {
-          closeClientesModal();
-        }
+        if (e.target === clientesModal) closeClientesModal();
       });
-      // ESC fecha modal
       document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && clientesModal.classList.contains('is-open')) {
-          closeClientesModal();
-        }
+        if (e.key === 'Escape' && clientesModal.classList.contains('is-open')) closeClientesModal();
       });
     }
 
     initInstDropdown();
 
-    const doLoad = () => {
-      carregarHistorico();
-    };
+    const doLoad = () => carregarHistorico();
 
     if (window.Page && typeof window.Page.guarded === 'function') {
       window.Page.guarded('disparos.ver', doLoad);

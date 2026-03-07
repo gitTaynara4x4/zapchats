@@ -538,7 +538,7 @@ async def on_messages_upsert(inst_id: str, data):
             LOG("[UPsert] nenhum item reconhecido em payload.")
             return
 
-        novas = 0  # conta inserts (direto + grupo)
+        novas = 0
 
         for idx, m in enumerate(mensagens, start=1):
             try:
@@ -581,7 +581,6 @@ async def on_messages_upsert(inst_id: str, data):
                     or m.get("remote_jid_alt")
                 )
 
-                # -------- resolve LID via alt --------
                 if _is_lid_jid(raw_remote) and isinstance(alt_jid, str) and "@" in alt_jid:
                     original_lid = _jid_strip_device(raw_remote)
                     real_jid = _jid_strip_device(alt_jid)
@@ -604,7 +603,6 @@ async def on_messages_upsert(inst_id: str, data):
                 original_jid = raw_remote
                 resolved_jid = _resolve_remote_jid(inst_id, raw_remote)
 
-                # -------- fallback LID (1:1) --------
                 if _is_lid_jid(original_jid) and not resolved_jid:
                     tel_fallback, alt = _resolve_counterparty_num_1to1(m, me_number)
                     _log_ctx(
@@ -649,18 +647,13 @@ async def on_messages_upsert(inst_id: str, data):
                 push_name = m.get("pushName") or m.get("senderName")
                 ts_msg = _to_dt_utc(ts_raw)
                 conteudo = extract_text_from_baileys(m)
+                media_meta = extract_media_meta(m)
 
-                # ✅ FIX 1: ack nunca pode ser NULL (coluna ack é NOT NULL)
-                # - saída: calcula pelo status
-                # - entrada: 0
                 ack_value = int(_ack_from_status(status) if from_me else 0)
 
-                # (mantém para logs/compat, mas NÃO use no INSERT)
-                ack_initial = ack_value
-
-                # =====================================================================
-                # ✅ GRUPOS: idempotente + commit imediato (evita lock/timeout do UNIQUE)
-                # =====================================================================
+                # =========================
+                # GRUPO
+                # =========================
                 if remote_jid.endswith("@g.us"):
                     if not msg_id:
                         _log_skip("grupo sem msg_id", idx=idx, remote_jid=remote_jid)
@@ -684,7 +677,6 @@ async def on_messages_upsert(inst_id: str, data):
                         _log_skip("grupo sem grp-row", idx=idx, msg_id=msg_id, remote_jid=grp_remote)
                         continue
 
-                    # ✅ Se o grupo ainda não tem nome bom, resolve via findGroupInfos (cache)
                     try:
                         if _is_nome_grupo_ruim(getattr(grp, "nome", None)):
                             subject = _evo_get_group_subject(getattr(inst, "instance_name", inst_id), grp_remote)
@@ -702,8 +694,6 @@ async def on_messages_upsert(inst_id: str, data):
                     )
                     participant = _jid_strip_device(participant) if isinstance(participant, str) else ""
 
-                    # ⚠️ pushName aqui é do remetente, NÃO do grupo.
-                    # Só atualiza nome/avatar do grupo se vier de fonte confiável.
                     try:
                         avatar = _avatar_from_contact_like(m)
                         if isinstance(avatar, str) and avatar.strip():
@@ -713,10 +703,42 @@ async def on_messages_upsert(inst_id: str, data):
                     except Exception:
                         pass
 
-                    inserted = False
+                    cli_autor_id = None
+                    autor_nome = push_name or participant or None
 
                     try:
-                        ts_int = _int_unix(ts_msg)  # epoch
+                        tel_autor = _remote_to_num(participant) if participant else None
+                        if tel_autor and (not me_number or tel_autor != me_number):
+                            cli_autor_id = (
+                                db.query(models.Cliente.id)
+                                .filter(
+                                    models.Cliente.empresa_id == empresa_id,
+                                    models.Cliente.telefone == tel_autor,
+                                )
+                                .scalar()
+                            )
+
+                            if not cli_autor_id:
+                                cli_autor_id = await _retry_deadlock(
+                                    db,
+                                    lambda: upsert_cliente(
+                                        db,
+                                        empresa_id=empresa_id,
+                                        instancia_id=inst.id,
+                                        telefone_raw=tel_autor,
+                                        nome=(push_name or formatar_telefone_br(tel_autor)),
+                                        nome_whatsapp=(push_name or formatar_telefone_br(tel_autor)),
+                                        avatar_url=None,
+                                    ),
+                                )
+                    except Exception as e:
+                        _log_ctx("[UPsert][grupo][autor-upsert-fail]", idx=idx, msg_id=msg_id, err=str(e))
+
+                    inserted = False
+                    gm_id = None
+
+                    try:
+                        ts_int = _int_unix(ts_msg)
                         gm = models.MensagemGrupo(
                             empresa_id=empresa_id,
                             grupo_id=grp.id,
@@ -733,9 +755,9 @@ async def on_messages_upsert(inst_id: str, data):
                         )
                         _carimbar_inst(gm, inst)
                         db.add(gm)
-                        db.flush()   # valida UNIQUE
-                        db.commit()  # ✅ solta o lock do u_msg_grupo_msgid imediatamente
+                        db.flush()
 
+                        gm_id = getattr(gm, "id", None)
                         novas += 1
                         inserted = True
 
@@ -744,7 +766,7 @@ async def on_messages_upsert(inst_id: str, data):
                             idx=idx,
                             msg_id=msg_id,
                             grupo_id=grp.id,
-                            saved_id=getattr(gm, "id", None),
+                            saved_id=gm_id,
                             from_me=from_me,
                             participant=_short(participant, 60),
                             ts=_iso_utc(ts_msg),
@@ -752,13 +774,27 @@ async def on_messages_upsert(inst_id: str, data):
                         )
 
                     except IntegrityError:
-                        # ✅ duplicada por msg_id (UNIQUE) → ignora sem travar
                         try:
                             db.rollback()
                         except Exception:
                             pass
+
                         _log_skip("duplicada grupo (msg_id)", idx=idx, msg_id=msg_id, grupo_id=grp.id)
                         inserted = False
+
+                        try:
+                            gm_exist = (
+                                db.query(models.MensagemGrupo)
+                                .filter(
+                                    models.MensagemGrupo.grupo_id == grp.id,
+                                    models.MensagemGrupo.msg_id == str(msg_id),
+                                )
+                                .first()
+                            )
+                            gm_id = getattr(gm_exist, "id", None) if gm_exist else None
+                        except Exception as e:
+                            gm_id = None
+                            _log_ctx("[UPsert][grupo][dup][buscar-msg] falhou", idx=idx, msg_id=msg_id, err=str(e))
 
                     except Exception as e:
                         LOG(f"[UPsert][grupo][erro ao salvar] idx={idx} msg_id={msg_id} err={e}")
@@ -768,12 +804,119 @@ async def on_messages_upsert(inst_id: str, data):
                             pass
                         continue
 
-                    # ✅ Só emite WS live se realmente inseriu (evita duplicar no front)
+                    if media_meta and (inserted or gm_id):
+                        try:
+                            raw = None
+                            real_name = media_meta.get("filename") or (f"{msg_id}.bin" if msg_id else "file")
+                            real_ct = media_meta.get("mimetype")
+                            real_len = None
+
+                            if msg_id:
+                                try:
+                                    conv = True if (media_meta.get("tipo") == "video") else None
+                                    evo_raw, evo_name, evo_ct, evo_len = _evo_get_base64_media(
+                                        inst_id, msg_id, convert_to_mp4=conv
+                                    )
+                                    raw, real_len = evo_raw, evo_len
+                                    if evo_ct:
+                                        real_ct = evo_ct
+                                    if evo_name:
+                                        real_name = evo_name
+                                except Exception as e:
+                                    _log_ctx("[UPsert][grupo][midia] base64 falhou", idx=idx, msg_id=msg_id, err=str(e))
+
+                            if raw is None:
+                                b64 = media_meta.get("base64")
+                                if b64:
+                                    from .evo_handlers_extract import _b64_to_bytes
+                                    raw, mt_from = _b64_to_bytes(b64)
+                                    if mt_from:
+                                        real_ct = mt_from
+                                    real_len = len(raw) if raw else None
+
+                            if raw is None and msg_id:
+                                try:
+                                    dl_bytes, dl_name, dl_ct, dl_len = _download_media_bytes(inst_id, msg_id, None)
+                                    raw, real_len = dl_bytes, dl_len
+                                    if dl_ct and dl_ct.lower() != "application/octet-stream":
+                                        real_ct = dl_ct
+                                    if dl_name and not dl_name.lower().endswith(".enc"):
+                                        real_name = dl_name
+                                except Exception as e:
+                                    _log_ctx("[UPsert][grupo][midia] download falhou", idx=idx, msg_id=msg_id, err=str(e))
+
+                            if raw:
+                                real_ct_norm = normalize_mimetype(media_meta["tipo"], real_name, real_ct)
+
+                                ja_tem_midia_grupo = False
+                                try:
+                                    q_dup = db.query(models.Midia).filter(
+                                        models.Midia.empresa_id == empresa_id,
+                                        models.Midia.grupo_id == grp.id,
+                                        models.Midia.filename == (real_name or "file"),
+                                        models.Midia.tipo == media_meta["tipo"],
+                                    )
+
+                                    if cli_autor_id is not None:
+                                        q_dup = q_dup.filter(models.Midia.cliente_id == cli_autor_id)
+
+                                    ja_tem_midia_grupo = q_dup.first() is not None
+                                except Exception as e:
+                                    _log_ctx("[UPsert][grupo][midia][dup-check-fail]", idx=idx, msg_id=msg_id, err=str(e))
+
+                                if ja_tem_midia_grupo:
+                                    _log_ctx(
+                                        "[UPsert][grupo][midia] já existia",
+                                        idx=idx,
+                                        msg_id=msg_id,
+                                        grupo_id=grp.id,
+                                        cliente_id=cli_autor_id,
+                                        name=real_name,
+                                        tipo=media_meta["tipo"],
+                                    )
+                                else:
+                                    _save_midia_db(
+                                        db,
+                                        empresa_id=empresa_id,
+                                        cliente_id=cli_autor_id,
+                                        grupo_id=grp.id,
+                                        mensagem_id=None,
+                                        tipo=media_meta["tipo"],
+                                        filename=real_name or "file",
+                                        mimetype_=real_ct_norm,
+                                        raw=raw,
+                                        url_origem=None,
+                                        content_length=real_len,
+                                        instancia_id=inst.id,
+                                    )
+                                    _log_ctx(
+                                        "[UPsert][grupo][midia] salva",
+                                        idx=idx,
+                                        msg_id=msg_id,
+                                        grupo_id=grp.id,
+                                        cliente_id=cli_autor_id,
+                                        tipo=media_meta["tipo"],
+                                        name=real_name,
+                                        mimetype=real_ct_norm,
+                                        size=real_len,
+                                        instancia_id=inst.id,
+                                    )
+                            else:
+                                _log_ctx(
+                                    "[UPsert][grupo][midia] detectada mas sem bytes",
+                                    idx=idx,
+                                    msg_id=msg_id,
+                                    grupo_id=grp.id,
+                                    tipo=media_meta.get("tipo"),
+                                )
+                        except Exception as e:
+                            _log_ctx("[UPsert][grupo][midia] erro ao salvar", idx=idx, msg_id=msg_id, err=str(e))
+
                     if inserted:
                         try:
                             ws_payload_grupo = {
                                 "empresa_id": empresa_id,
-                                "cliente_id": grp.id,          # compatibilidade
+                                "cliente_id": grp.id,
                                 "conversation_id": grp.id,
                                 "grupo_id": grp.id,
                                 "is_group": True,
@@ -790,14 +933,14 @@ async def on_messages_upsert(inst_id: str, data):
                                 "msg_id": str(msg_id),
                                 "ack": (ack_value if from_me else None),
                                 "author_jid": (participant or None),
-                                "autor_nome": (push_name or participant or None),
+                                "autor_nome": autor_nome,
+                                "autor_cliente_id": cli_autor_id,
                                 "serverTimestamp": _server_ts_ms(),
                             }
                             await conexoes_ativas.send_message(f"emp:{empresa_id}", ws_payload_grupo)
                         except Exception as e:
                             LOG(f"[UPsert][grupo][ws-live] falha ao emitir: {e}")
 
-                        # lista/preview
                         try:
                             await conexoes_ativas.send_message(
                                 f"emp:{empresa_id}",
@@ -811,9 +954,9 @@ async def on_messages_upsert(inst_id: str, data):
 
                     continue
 
-                # =====================================================================
-                # 1:1 (normal)
-                # =====================================================================
+                # =========================
+                # 1:1
+                # =========================
                 telefone = _remote_to_num(remote_jid)
                 if not telefone:
                     _log_skip("telefone inválido", idx=idx, msg_id=msg_id, remote_jid=remote_jid)
@@ -837,7 +980,6 @@ async def on_messages_upsert(inst_id: str, data):
                     preview=_short(conteudo),
                 )
 
-                # n8n chatbot (só texto)
                 try:
                     if _is_textual_content(conteudo):
                         _notify_n8n_chatbot(
@@ -851,7 +993,6 @@ async def on_messages_upsert(inst_id: str, data):
                 except Exception as e:
                     LOG(f"[N8N][chatbot] erro ao enviar msg simples: {e}")
 
-                # cliente
                 try:
                     cli_id = (
                         db.query(models.Cliente.id)
@@ -912,7 +1053,6 @@ async def on_messages_upsert(inst_id: str, data):
                             pass
                         atendimento = None
 
-                # ✅ 1:1 blindado: UPSERT ON CONFLICT DO NOTHING (sem select exists)
                 msg_db_id = None
                 inserted_11 = False
 
@@ -939,7 +1079,7 @@ async def on_messages_upsert(inst_id: str, data):
                                 "conteudo": conteudo,
                                 "tipo": direcao,
                                 "lida": bool(from_me),
-                                "ack": ack_value,  # ✅ FIX: nunca NULL
+                                "ack": ack_value,
                                 "timestamp": ts_msg,
                                 "msg_id": str(msg_id),
                                 "instancia_id": inst.id,
@@ -974,7 +1114,6 @@ async def on_messages_upsert(inst_id: str, data):
                         continue
 
                 else:
-                    # msg_id vazio → não tem como garantir dedup; salva normal
                     try:
                         msg_model = models.Mensagem(
                             empresa_id=empresa_id,
@@ -982,7 +1121,7 @@ async def on_messages_upsert(inst_id: str, data):
                             conteudo=conteudo,
                             tipo=direcao,
                             lida=from_me,
-                            ack=ack_value,  # ✅ FIX: nunca NULL
+                            ack=ack_value,
                             timestamp=ts_msg,
                             msg_id=None,
                             instancia_id=inst.id,
@@ -1014,7 +1153,76 @@ async def on_messages_upsert(inst_id: str, data):
                             pass
                         continue
 
-                # WS (1:1) — emite só se inserted_11=True (evita duplicar no front)
+                if inserted_11 and msg_db_id and media_meta:
+                    try:
+                        raw = None
+                        real_name = media_meta.get("filename") or (f"{msg_id}.bin" if msg_id else "file")
+                        real_ct = media_meta.get("mimetype")
+                        real_len = None
+
+                        if msg_id:
+                            try:
+                                conv = True if (media_meta.get("tipo") == "video") else None
+                                evo_raw, evo_name, evo_ct, evo_len = _evo_get_base64_media(
+                                    inst_id, msg_id, convert_to_mp4=conv
+                                )
+                                raw, real_len = evo_raw, evo_len
+                                if evo_ct:
+                                    real_ct = evo_ct
+                                if evo_name:
+                                    real_name = evo_name
+                            except Exception as e:
+                                _log_ctx("[UPsert][midia] base64 falhou", idx=idx, msg_id=msg_id, err=str(e))
+
+                        if raw is None:
+                            b64 = media_meta.get("base64")
+                            if b64:
+                                from .evo_handlers_extract import _b64_to_bytes
+                                raw, mt_from = _b64_to_bytes(b64)
+                                if mt_from:
+                                    real_ct = mt_from
+                                real_len = len(raw) if raw else None
+
+                        if raw is None and msg_id:
+                            try:
+                                dl_bytes, dl_name, dl_ct, dl_len = _download_media_bytes(inst_id, msg_id, None)
+                                raw, real_len = dl_bytes, dl_len
+                                if dl_ct and dl_ct.lower() != "application/octet-stream":
+                                    real_ct = dl_ct
+                                if dl_name and not dl_name.lower().endswith(".enc"):
+                                    real_name = dl_name
+                            except Exception as e:
+                                _log_ctx("[UPsert][midia] download falhou", idx=idx, msg_id=msg_id, err=str(e))
+
+                        if raw:
+                            real_ct_norm = normalize_mimetype(media_meta["tipo"], real_name, real_ct)
+                            _save_midia_db(
+                                db,
+                                empresa_id=empresa_id,
+                                cliente_id=cli_id,
+                                mensagem_id=msg_db_id,
+                                tipo=media_meta["tipo"],
+                                filename=real_name or "file",
+                                mimetype_=real_ct_norm,
+                                raw=raw,
+                                url_origem=None,
+                                content_length=real_len,
+                                instancia_id=inst.id,
+                            )
+                            _log_ctx(
+                                "[UPsert][midia] salva",
+                                idx=idx,
+                                msg_id=msg_id,
+                                mensagem_id=msg_db_id,
+                                tipo=media_meta["tipo"],
+                                name=real_name,
+                                mimetype=real_ct_norm,
+                                size=real_len,
+                                instancia_id=inst.id,
+                            )
+                    except Exception as e:
+                        _log_ctx("[UPsert][midia] erro ao salvar", idx=idx, msg_id=msg_id, err=str(e))
+
                 if inserted_11:
                     try:
                         cliente = _fetch_cliente(db, cli_id)
@@ -1042,7 +1250,6 @@ async def on_messages_upsert(inst_id: str, data):
                     except Exception as e:
                         LOG(f"[UPsert][ws] falha ao emitir: {e}")
 
-                # commit por batch
                 if novas and (novas % max(1, HISTORY_BATCH_COMMIT)) == 0:
                     try:
                         db.commit()
@@ -1082,8 +1289,6 @@ async def on_messages_upsert(inst_id: str, data):
             pass
 
         LOG(f"[UPsert] inst={inst_id} novas={novas}")
-
-
 
 
 @handler(EvoEvent.MESSAGES_DELETE)
@@ -1363,22 +1568,27 @@ async def on_messages_set(inst_id: str, data):
 
                 remote_jid = resolved_jid or original_jid
 
+                # =========================
                 # GRUPO
+                # =========================
                 if remote_jid.endswith("@g.us"):
                     from_me = bool(key.get("fromMe", False))
                     author_j = (key.get("participant") or m.get("participant") or "")
+                    author_j = _jid_strip_device(author_j) if isinstance(author_j, str) else ""
                     conteudo = extract_text_from_baileys(m)
                     ts_int = _int_unix(ts_msg)
+                    media_meta = None if DISABLE_MEDIA_ON_HISTORY else extract_media_meta(m)
 
                     grupo = _grupo_row_by_remote(
                         db, empresa_id, _jid_strip_device(remote_jid), instancia_id=inst.id, inst_obj=inst
                     )
 
-                    # ✅ NÃO usar pushName como nome do grupo (pushName é do participante)
-                    # Se nome estiver ruim, tenta via findGroupInfos (cache)
                     try:
                         if _is_nome_grupo_ruim(getattr(grupo, "nome", None)):
-                            subject = _evo_get_group_subject(getattr(inst, "instance_name", inst_id), _jid_strip_device(remote_jid))
+                            subject = _evo_get_group_subject(
+                                getattr(inst, "instance_name", inst_id),
+                                _jid_strip_device(remote_jid),
+                            )
                             if subject and (grupo.nome or "") != subject:
                                 grupo.nome = subject
                     except Exception:
@@ -1392,6 +1602,24 @@ async def on_messages_set(inst_id: str, data):
                     if msg_id and db.query(models.MensagemGrupo.id).filter_by(grupo_id=grupo.id, msg_id=msg_id).first():
                         _log_ctx("[HIST][skip] duplicada (grupo)", idx=idx, msg_id=msg_id, grupo_id=grupo.id)
                         continue
+
+                    cli_autor_id = None
+                    try:
+                        tel_autor = _remote_to_num(author_j) if author_j else None
+                        if tel_autor and (not me_num or tel_autor != me_num):
+                            def _up_autor():
+                                return upsert_cliente(
+                                    db,
+                                    empresa_id=empresa_id,
+                                    instancia_id=inst.id,
+                                    telefone_raw=tel_autor,
+                                    nome=formatar_telefone_br(tel_autor),
+                                    nome_whatsapp=push_name if 'push_name' in locals() else None,
+                                    avatar_url=None,
+                                )
+                            cli_autor_id = await _retry_deadlock(db, _up_autor)
+                    except Exception as e:
+                        _log_ctx("[HIST][grupo][autor-upsert-fail]", idx=idx, msg_id=msg_id, err=str(e))
 
                     def _ins_grupo():
                         msgg = models.MensagemGrupo(
@@ -1421,10 +1649,93 @@ async def on_messages_set(inst_id: str, data):
                         saved_id=msgg_id,
                         ts=_iso_utc(ts_msg),
                         preview=_short(conteudo),
+                        media=("off" if DISABLE_MEDIA_ON_HISTORY else ("on" if media_meta else "none")),
                     )
 
+                    if media_meta:
+                        try:
+                            raw = None
+                            real_name = media_meta.get("filename") or (f"{msg_id}.bin" if msg_id else "file")
+                            real_ct = media_meta.get("mimetype")
+                            real_len = None
+
+                            if msg_id:
+                                try:
+                                    conv = True if (media_meta.get("tipo") == "video") else None
+                                    evo_raw, evo_name, evo_ct, evo_len = _evo_get_base64_media(
+                                        inst_id, msg_id, convert_to_mp4=conv
+                                    )
+                                    raw, real_len = evo_raw, evo_len
+                                    if evo_ct:
+                                        real_ct = evo_ct
+                                    if evo_name:
+                                        real_name = evo_name
+                                except Exception as e:
+                                    _log_ctx("[HIST][grupo][midia] base64 falhou", idx=idx, msg_id=msg_id, err=str(e))
+
+                            if raw is None:
+                                b64 = media_meta.get("base64")
+                                if b64:
+                                    from .evo_handlers_extract import _b64_to_bytes
+                                    raw, mt_from = _b64_to_bytes(b64)
+                                    if mt_from:
+                                        real_ct = mt_from
+                                    real_len = len(raw) if raw else None
+
+                            if raw is None and msg_id:
+                                try:
+                                    dl_bytes, dl_name, dl_ct, dl_len = _download_media_bytes(inst_id, msg_id, None)
+                                    raw, real_len = dl_bytes, dl_len
+                                    if dl_ct and dl_ct.lower() != "application/octet-stream":
+                                        real_ct = dl_ct
+                                    if dl_name and not dl_name.lower().endswith(".enc"):
+                                        real_name = dl_name
+                                except Exception as e:
+                                    _log_ctx("[HIST][grupo][midia] download falhou", idx=idx, msg_id=msg_id, err=str(e))
+
+                            if raw:
+                                real_ct_norm = normalize_mimetype(media_meta["tipo"], real_name, real_ct)
+                                _save_midia_db(
+                                    db,
+                                    empresa_id=empresa_id,
+                                    cliente_id=cli_autor_id,
+                                    grupo_id=grupo.id,
+                                    mensagem_id=None,  # importante: evita FK errada com mensagens 1:1
+                                    tipo=media_meta["tipo"],
+                                    filename=real_name or "file",
+                                    mimetype_=real_ct_norm,
+                                    raw=raw,
+                                    url_origem=None,
+                                    content_length=real_len,
+                                    instancia_id=inst.id,
+                                )
+                                _log_ctx(
+                                    "[HIST][grupo][midia] salva",
+                                    idx=idx,
+                                    msg_id=msg_id,
+                                    grupo_id=grupo.id,
+                                    cliente_id=cli_autor_id,
+                                    tipo=media_meta["tipo"],
+                                    name=real_name,
+                                    mimetype=real_ct_norm,
+                                    size=real_len,
+                                    instancia_id=inst.id,
+                                )
+                            else:
+                                _log_ctx(
+                                    "[HIST][grupo][midia] detectada mas sem bytes",
+                                    idx=idx,
+                                    msg_id=msg_id,
+                                    grupo_id=grupo.id,
+                                    tipo=media_meta.get("tipo"),
+                                )
+                        except Exception as e:
+                            _log_ctx("[HIST][grupo][midia] erro ao salvar", idx=idx, msg_id=msg_id, err=str(e))
+
+                # =========================
+                # 1:1
+                # =========================
                 else:
-                    # 1:1
                     telefone = _remote_to_num(remote_jid)
                     if not telefone:
                         _log_ctx("[HIST][skip] telefone inválido", idx=idx, msg_id=msg_id, remote_jid=remote_jid)
@@ -1489,7 +1800,6 @@ async def on_messages_set(inst_id: str, data):
                         media=("off" if DISABLE_MEDIA_ON_HISTORY else ("on" if media_meta else "none")),
                     )
 
-                    # WS-LIVE para mensagens recentes
                     try:
                         is_recent = abs((_now_utc() - ts_msg).total_seconds()) <= RECENT_SEC
                     except Exception:
@@ -1521,7 +1831,6 @@ async def on_messages_set(inst_id: str, data):
                         except Exception as e:
                             _log_ctx("[HIST][ws-live] falha ao emitir", idx=idx, msg_id=msg_id, err=str(e))
 
-                    # MÍDIA
                     if media_meta:
                         try:
                             raw = None
@@ -1662,7 +1971,6 @@ async def on_messages_set(inst_id: str, data):
                 _release_hist_lock(db, empresa_id, inst.id)
             except Exception:
                 pass
-
 
 @handler(EvoEvent.MESSAGES_UPDATE)
 async def on_messages_update(first: str, payload: dict | list):

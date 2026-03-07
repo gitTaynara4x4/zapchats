@@ -25,10 +25,7 @@
   function isMobileLayout() {
     if (!window.matchMedia) return false;
 
-    // 1) Telas realmente estreitas (até 900px) sempre mobile
     var narrow = window.matchMedia('(max-width: 900px)').matches;
-
-    // 2) Até 1024px com pointer coarse (touch: celular/tablet) também mobile
     var tabletTouch = window.matchMedia('(max-width: 1024px) and (pointer: coarse)').matches;
 
     return narrow || tabletTouch;
@@ -42,9 +39,7 @@
   function playEnterAnimation() {
     var el = document.querySelector('main, .main, [data-route-container]');
     if (!el) return;
-    el.classList.remove('route-enter'); // reset se for navegação rápida
-    // força reflow para reiniciar a animação
-    // eslint-disable-next-line no-unused-expressions
+    el.classList.remove('route-enter');
     void el.offsetWidth;
     el.classList.add('route-enter');
   }
@@ -57,7 +52,7 @@
     if (__SHELL_DONE__) return;
     __SHELL_DONE__ = true;
     try { document.documentElement.classList.remove('prepaint'); } catch {}
-    playEnterAnimation(); // toca a entradinha no container principal
+    playEnterAnimation();
     document.dispatchEvent(new Event('shell:ready'));
   }
 
@@ -72,11 +67,9 @@
     __HEAD_BASE_BOOTED__ = true;
 
     HEAD_READY = (async function() {
-      // Se já existe sentinela (tokens), não reinjeta
       try {
         var cs = getComputedStyle(document.documentElement);
         if (cs.getPropertyValue('--shadow') && cs.getPropertyValue('--radius')) {
-          // Mesmo assim, marque data-head-ready para liberar o paint anti-flash
           document.documentElement.setAttribute('data-head-ready', '1');
           return;
         }
@@ -90,22 +83,20 @@
         var wrap = document.createElement('div');
         wrap.innerHTML = html;
 
-        // 1) <style> (tokens/base)
         Array.from(wrap.querySelectorAll('style')).forEach(function(st){
           var s = document.createElement('style');
           s.textContent = st.textContent || '';
           document.head.appendChild(s);
         });
 
-        // 2) <link> (tw.css/FA/Google Fonts) sem duplicar
         Array.from(wrap.querySelectorAll('link[rel="stylesheet"], link[rel="preload"]')).forEach(function(l){
-          var href = l.getAttribute('href'); if (!href) return;
+          var href = l.getAttribute('href');
+          if (!href) return;
           var exists = Array.from(document.head.querySelectorAll('link[rel="stylesheet"], link[rel="preload"]'))
             .some(function(e){ return e.getAttribute('href') === href; });
           if (!exists) document.head.appendChild(l.cloneNode(true));
         });
 
-        // 3) <script> inline do head-base (aplica tema cedo)
         Array.from(wrap.querySelectorAll('script')).forEach(function(o){
           var s = document.createElement('script');
           if (o.type) s.type = o.type;
@@ -114,11 +105,9 @@
         });
 
         wrap.remove();
-        // libera anti-flash ligado em html.prepaint body{visibility:hidden}
         document.documentElement.setAttribute('data-head-ready', '1');
       } catch (e) {
         console.warn('[app-base] Falha ao injetar head-base.html:', e);
-        // Mesmo com erro, libera o paint para não travar a tela
         document.documentElement.setAttribute('data-head-ready', '1');
       }
     })();
@@ -126,14 +115,13 @@
     return HEAD_READY;
   }
 
-  // Dispara head-base imediatamente
   ensureHeadBase();
 
   // =========================================================
   // 1) Tema (API simples para páginas/toggles)
   // =========================================================
   try {
-    var saved = localStorage.getItem('theme'); // 'dark'|'light'|null
+    var saved = localStorage.getItem('theme');
     if (saved) {
       document.documentElement.classList.toggle('dark', saved === 'dark');
     } else {
@@ -172,28 +160,24 @@
           var wrap = document.createElement('div');
           wrap.innerHTML = html;
 
-          // remove overlays antigos
           document.getElementById('page-loading')?.remove();
           document.getElementById('app-loading')?.remove();
 
-          // injeta overlay
           var overlay = wrap.querySelector('#page-loading, #app-loading');
           if (overlay) {
             document.body.appendChild(overlay);
             if (!overlay.style.position) overlay.style.position = 'fixed';
-            if (!overlay.style.zIndex)    overlay.style.zIndex = '9999';
+            if (!overlay.style.zIndex) overlay.style.zIndex = '9999';
           }
 
-          // estilos do loading
           Array.from(wrap.querySelectorAll('style')).forEach(function(st){
             var s = document.createElement('style');
             s.textContent = st.textContent || '';
             document.head.appendChild(s);
           });
 
-          // scripts do loading (PageLoading global)
           var scripts = Array.from(wrap.querySelectorAll('script'));
-          for (var i=0; i<scripts.length; i++) {
+          for (var i = 0; i < scripts.length; i++) {
             var o = scripts[i];
             var s = document.createElement('script');
             if (o.type) s.type = o.type;
@@ -216,14 +200,13 @@
         }
       }
 
-      // Shims convenientes
-      window.wait  = function (txt) {
+      window.wait = function (txt) {
         if (window.PageLoading?.show) return PageLoading.show(txt || 'Carregando…');
-        if (window.Loading?.show)     return Loading.show(txt || 'Carregando…');
+        if (window.Loading?.show) return Loading.show(txt || 'Carregando…');
       };
       window.ready = function () {
         if (window.PageLoading?.hide) return PageLoading.hide();
-        if (window.Loading?.hide)     return Loading.hide();
+        if (window.Loading?.hide) return Loading.hide();
       };
 
       document.documentElement.setAttribute('data-loader-ready', '1');
@@ -232,7 +215,6 @@
     return LOADER_READY;
   }
 
-  // Inicia loader assim que possível
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', ensureGlobalLoader, { once:true });
   } else {
@@ -240,7 +222,7 @@
   }
 
   // =========================================================
-  // 3) Sidebar (partial) — desktop x mobile padronizado
+  // 3) Sidebar (partial) — usa só sidebar.html
   // =========================================================
   var SIDEBAR_READY = null;
 
@@ -250,11 +232,7 @@
     host.dataset.loaded = '1';
 
     SIDEBAR_READY = (async function(){
-      var desktopSrc = host.getAttribute('data-src') || '/frontend/partials/sidebar.html';
-      var mobileSrc  = host.getAttribute('data-src-mobile') || '/frontend/partials/sidebar-mobile.html';
-
-      // Usa detecção padronizada
-      var src = (IS_MOBILE && mobileSrc) ? mobileSrc : desktopSrc;
+      var src = host.getAttribute('data-src') || '/frontend/partials/sidebar.html';
 
       try {
         var res  = await fetch(bust(src), { cache:'no-cache', credentials:'include' });
@@ -264,17 +242,14 @@
         var wrap = document.createElement('div');
         wrap.innerHTML = html;
 
-        // separa scripts
         var scripts = Array.from(wrap.querySelectorAll('script'));
         scripts.forEach(function(sc){ sc.parentNode && sc.parentNode.removeChild(sc); });
 
-        // injeta DOM após placeholder
         while (wrap.firstChild) {
           host.parentNode.insertBefore(wrap.firstChild, host.nextSibling);
         }
         host.remove();
 
-        // marca link ativo se parcial não marcou
         try {
           var aside = document.querySelector('.app-sidebar');
           if (aside && !aside.querySelector('nav a[aria-current="page"]')) {
@@ -286,13 +261,17 @@
                 var pFile = pFull.split('/').pop();
                 var eq = (pFull === nowFull) || (pFile === nowFile) ||
                          (pFull + '.html' === nowFull) || (pFull === nowFull + '.html');
-                if (eq) { a.classList.add('active'); a.setAttribute('aria-current','page'); }
+                if (eq) {
+                  a.classList.add('active');
+                  a.setAttribute('aria-current','page');
+                }
               } catch {}
             });
           }
-        } catch (e) { console.warn('active-link mark skipped:', e); }
+        } catch (e) {
+          console.warn('active-link mark skipped:', e);
+        }
 
-        // executa scripts do parcial
         (function runSeq(i){
           if (i >= scripts.length) return;
           var old = scripts[i];
@@ -305,12 +284,12 @@
           });
           if (old.src) {
             s.src = old.src;
-            s.onload = s.onerror = function(){ runSeq(i+1); };
+            s.onload = s.onerror = function(){ runSeq(i + 1); };
             document.body.appendChild(s);
           } else {
             s.textContent = old.textContent || '';
             document.body.appendChild(s);
-            runSeq(i+1);
+            runSeq(i + 1);
           }
         })(0);
 
@@ -322,7 +301,6 @@
     return SIDEBAR_READY;
   }
 
-  // Boot da sidebar e release do shell ao final
   function bootSidebar() {
     var p = ensureSidebar();
     if (p && typeof p.then === 'function') {
@@ -333,6 +311,7 @@
       Promise.allSettled([HEAD_READY, LOADER_READY]).finally(markShellReady);
     }
   }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', bootSidebar, { once:true });
   } else {
@@ -345,32 +324,30 @@
   (function navOverlayHook(){
     function shouldIntercept(a){
       if (!a) return false;
-      // Apenas links internos, mesma origem, sem target especial
       try{
         var href = a.getAttribute('href') || '';
         if (!href) return false;
-        if (href[0] === '#') return false; // âncora
+        if (href[0] === '#') return false;
         if (a.target && a.target !== '_self') return false;
 
         var u = new URL(href, location.origin);
         if (u.origin !== location.origin) return false;
         return true;
-      }catch{ return false; }
+      }catch{
+        return false;
+      }
     }
 
     document.addEventListener('click', function(e){
       var a = e.target.closest && e.target.closest('a[href]');
       if (!a) return;
 
-      // Links do menu (sidebar/nav) OU com atributo data-wait
       var inMenu = a.closest('.app-sidebar, nav');
       var wantsWait = a.hasAttribute('data-wait');
       if (!inMenu && !wantsWait) return;
       if (!shouldIntercept(a)) return;
 
-      // Mostra overlay otimista (fullscreen)
       try { window.PageLoading?.show?.('Carregando…', { scope:'body' }); } catch {}
-      // Navegação segue naturalmente; o overlay some na próxima página (ready()).
     }, { capture:true });
   })();
 
@@ -387,7 +364,6 @@
     var p = (location.pathname || '').toLowerCase();
     if (p === '/login' || p === '/login.html') return;
 
-    // Evita múltiplas injeções
     if (document.getElementById('__guard_devtools_js')) return;
 
     var v = window.APP_BUILD || localStorage.getItem('APP_BUILD') || 'dev';

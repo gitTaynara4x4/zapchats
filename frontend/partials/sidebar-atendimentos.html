@@ -1,398 +1,82 @@
-<!-- /frontend/partials/sidebar-atendimentos.html
-     Sidebar do ATENDIMENTOS com o MESMO comportamento do sidebar.html:
-     - fininho por padrão
-     - expande NO HOVER (desktop)
-     - mostra label com animação (hover)
-     - ícones iguais (copiados do sidebar.html)
-     - SEM faixa verde
--->
-<style>
-  :root{
-    --topbar-h:44px;
-    --sbw:16.5rem;   /* expandido */
-    --sbw-c:3.2rem;  /* colapsado */
+<nav class="wpp-leftbar" aria-label="Menu do atendimento">
+  <div class="wpp-leftbar-icons">
 
-    --icon:#9ca3af;
-    --icon-active-light:#000000;
-    --icon-active-dark:#ffffff;
+    <a class="wpp-leftbar-icon" href="/dashboard" title="Dashboard" aria-label="Dashboard">
+      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M224,98H182V56a6,6,0,0,0-6-6H54V40a6,6,0,0,0-12,0V216a6,6,0,0,0,12,0V206h90a6,6,0,0,0,6-6V158h74a6,6,0,0,0,6-6V104A6,6,0,0,0,224,98ZM170,62V98H54V62ZM138,194H54V158h84Zm80-48H54V110H218Z"/>
+      </svg>
+      <span class="wpp-label">Dashboard</span>
+    </a>
 
-    --card:#161617; --border:#27272a; --fg:#e5e7eb; --muted:#9ca3af; --hover:rgba(255,255,255,.04);
-    --ring:#4f83ff;
-  }
-  html:not(.dark),
-  html[data-theme="light"]{
-    --card:#fff; --border:#e5e7eb; --fg:#1f2937; --muted:#6b7280; --hover:rgba(0,0,0,.06);
-  }
+    <a class="wpp-leftbar-icon" href="/atendimentos" title="Atendimentos" aria-label="Atendimentos">
+      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M225.88,30.12a13.83,13.83,0,0,0-13.7-3.58l-.11,0L20.14,84.77A14,14,0,0,0,18,110.85l85.56,41.64L145.12,238a13.87,13.87,0,0,0,12.61,8c.4,0,.81,0,1.21-.05a13.9,13.9,0,0,0,12.29-10.09l58.2-191.93,0-.11A13.83,13.83,0,0,0,225.88,30.12Zm-8,10.4L159.73,232.43l0,.11a2,2,0,0,1-3.76.26l-40.68-83.58,49-49a6,6,0,1,0-8.49-8.49l-49,49L23.15,100a2,2,0,0,1,.31-3.74l.11,0L215.48,38.08a1.94,1.94,0,0,1,1.92.52A2,2,0,0,1,217.92,40.52Z"/>
+      </svg>
+      <span class="wpp-label">Atendimentos</span>
+    </a>
 
-  /* ===== Sidebar (igual sidebar.html, sem faixa) ===== */
-  .app-sidebar{
-    position:fixed;
-    left:0;
-    top:0;
-    bottom:0;
+    <a class="wpp-leftbar-icon" href="/midias" title="Arquivos" aria-label="Arquivos">
+      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M243.36,111.81A14,14,0,0,0,232,106H214V88a14,14,0,0,0-14-14H130L101.74,52.8a14.06,14.06,0,0,0-8.4-2.8H40A14,14,0,0,0,26,64V208a6,6,0,0,0,6,6H211.1a6,6,0,0,0,5.69-4.1l28.49-85.47A14,14,0,0,0,243.36,111.81ZM40,62H93.34a2,2,0,0,1,1.2.4L124.4,84.8A6,6,0,0,0,128,86h72a2,2,0,0,1,2,2v18H69.77a14,14,0,0,0-13.28,9.57L38,171V64A2,2,0,0,1,40,62Zm193.9,58.63L206.78,202H40.33l27.54-82.63a2,2,0,0,1,1.9-1.37H232a2,2,0,0,1,1.9,2.63Z"/>
+      </svg>
+      <span class="wpp-label">Arquivos</span>
+    </a>
 
-    width:var(--sbw-c);
-    padding:1rem 0;
-    padding-top:calc(var(--topbar-h) + 1rem);
+    <a class="wpp-leftbar-icon" href="/chat-interno" title="Chat Interno" aria-label="Chat Interno">
+      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M229.93,186.58A78,78,0,0,0,168.16,74.42,78,78,0,1,0,26.07,138.58L18.58,164A14,14,0,0,0,36,181.42l25.46-7.49a78,78,0,0,0,26.39,7.63,78,78,0,0,0,106.77,40.37L220,229.42A14,14,0,0,0,237.42,212ZM62,161.5a6.05,6.05,0,0,0-1.69.24l-27.77,8.17a2,2,0,0,1-2.48-2.48l8.17-27.77a6.05,6.05,0,0,0-.47-4.53,66,66,0,1,1,27.08,27.08A6,6,0,0,0,62,161.5Zm155.71,26.16,8.17,27.77a2,2,0,0,1-2.48,2.48l-27.77-8.17a6.06,6.06,0,0,0-4.53.47,66,66,0,0,1-90-28.4,77.92,77.92,0,0,0,71-94.68,66,66,0,0,1,46.07,96A6.05,6.05,0,0,0,217.74,187.66Z"/>
+      </svg>
+      <span class="wpp-label">Chat Interno</span>
+    </a>
 
-    background:transparent;
-    border-right:0;
-    display:flex;
-    flex-direction:column;
-    z-index:70;
+    <a class="wpp-leftbar-icon" href="/clientes" title="Clientes" aria-label="Clientes">
+      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M154,80a6,6,0,0,1,6-6h88a6,6,0,0,1,0,12H160A6,6,0,0,1,154,80Zm94,42H160a6,6,0,0,0,0,12h88a6,6,0,0,0,0-12Zm0,48H184a6,6,0,0,0,0,12h64a6,6,0,0,0,0-12Zm-98.19,20.5a6,6,0,1,1-11.62,3C131.7,168.29,107.23,150,80,150s-51.7,18.29-58.19,43.49a6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"/>
+      </svg>
+      <span class="wpp-label">Clientes</span>
+    </a>
 
-    transition:width .22s ease;
-    font-family:Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-    letter-spacing:-.01em;
+    <a class="wpp-leftbar-icon" href="/colaboradores" title="Colaboradores" aria-label="Colaboradores">
+      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M243.6,148.8a6,6,0,0,1-8.4-1.2A53.58,53.58,0,0,0,192,126a6,6,0,0,1,0-12,26,26,0,1,0-25.18-32.5,6,6,0,0,1-11.62-3,38,38,0,1,1,59.91,39.63A65.69,65.69,0,0,1,244.8,140.4,6,6,0,0,1,243.6,148.8ZM189.19,213a6,6,0,0,1-2.19,8.2,5.9,5.9,0,0,1-3,.81,6,6,0,0,1-5.2-3,59,59,0,0,0-101.62,0,6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"/>
+      </svg>
+      <span class="wpp-label">Colaboradores</span>
+    </a>
 
-    /* importante pra colapsar certinho */
-    overflow:hidden;
-  }
+    <a class="wpp-leftbar-icon" href="/departamentos" title="Departamentos" aria-label="Departamentos">
+      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M248,210H230V94h2a6,6,0,0,0,0-12H182V46h2a6,6,0,0,0,0-12H40a6,6,0,0,0,0,12h2V210H24a6,6,0,0,0,0-12H248a6,6,0,0,0,0-12ZM218,94V210H182V94ZM54,46H170V210H142V160a6,6,0,0,0-6-6H88a6,6,0,0,0-6,6v50H54Zm76,164H94V166h36ZM74,80a6,6,0,0,1,6-6H96a6,6,0,0,1,0,12H80A6,6,0,0,1,74,80Zm48,0a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,80ZM80,126a6,6,0,0,1,0-12H96a6,6,0,0,1,0,12Zm42-6a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,120Z"/>
+      </svg>
+      <span class="wpp-label">Departamentos</span>
+    </a>
 
-  /* expande no hover (DESKTOP) */
-  @media (hover:hover) and (pointer:fine){
-    .app-sidebar:hover{
-      width:var(--sbw);
-      overflow:auto;
-      padding-left:.45rem;
-      padding-right:.45rem;
-    }
-  }
+    <a class="wpp-leftbar-icon" href="/chatbot" title="Chatbot" aria-label="Chatbot">
+      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M222,114.56a54,54,0,0,0-58.67-74.73,54,54,0,0,0-94,13.46A54,54,0,0,0,34,141.44a54,54,0,0,0,35.56,73.65A54.54,54.54,0,0,0,83.59,217a52.86,52.86,0,0,0,9.06-.78,54,54,0,0,0,94-13.46A54,54,0,0,0,222,114.56ZM183.37,52.5a42,42,0,0,1,29.21,53.14,54.84,54.84,0,0,0-5.08-3.33L163,76.62a6,6,0,0,0-6,0l-47,27.13V80.66l41.5-24A41.73,41.73,0,0,1,183.37,52.5ZM146,138.39l-18,10.39-18-10.39V117.61l18-10.39,18,10.39ZM78,72a42,42,0,0,1,72.92-28.43,56.18,56.18,0,0,0-5.42,2.74L101,72a6,6,0,0,0-3,5.19v54.27L78,119.92ZM39.13,85.93a41.75,41.75,0,0,1,27.22-20A55.09,55.09,0,0,0,66,72v51.38a6,6,0,0,0,3,5.2l47,27.13L96,167.26l-41.5-24A42,42,0,0,1,39.13,85.93ZM72.63,203.5a42,42,0,0,1-29.21-53.14,54.84,54.84,0,0,0,5.08,3.33L93,179.38a6,6,0,0,0,6,0l47-27.13v23.09l-41.5,24A41.73,41.73,0,0,1,72.63,203.5ZM178,184a42,42,0,0,1-72.92,28.43,56.18,56.18,0,0,0,5.42-2.74L155,184a6,6,0,0,0,3-5.19V124.54l20,11.54Zm38.87-13.93a41.75,41.75,0,0,1-27.22,20A55.09,55.09,0,0,0,190,184V132.62a6,6,0,0,1-3-5.2l-47-27.13,20-11.55,41.5,24A42,42,0,0,1,216.87,170.07Z"/>
+      </svg>
+      <span class="wpp-label">Chatbot</span>
+    </a>
 
-  /* fundo/placa igual sidebar.html (sem faixa) */
-  .app-sidebar::before{
-    content:"";
-    position:fixed;
-    left:0;
-    top:0;
-    bottom:0;
-    width:inherit;
-    background:linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,0)), var(--card);
-    pointer-events:none;
-    z-index:0;
-    transition:width .22s ease;
-  }
+    <a class="wpp-leftbar-icon" href="/disparos" title="Disparador" aria-label="Disparador">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
+        <path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z"/>
+      </svg>
+      <span class="wpp-label">Disparador</span>
+    </a>
 
-  /* ===== Logo (mesmo fade) ===== */
-  .app-sidebar .logo{
-    height:56px; margin:0 0 1rem;
-    display:grid; place-items:center;
-    position:relative; z-index:1;
-  }
+    <a class="wpp-leftbar-icon" href="/conectar" title="Conectar WhatsApp" aria-label="Conectar WhatsApp">
+      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M104,42H56A14,14,0,0,0,42,56v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,104,42Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-2,34H56a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V152A14,14,0,0,0,104,138Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V152a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2ZM200,42H152a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,200,42Zm2,62a2,2,0,0,1-2,2H152a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-64,72V144a6,6,0,0,1,12,0v32a6,6,0,0,1-12,0Zm76-16a6,6,0,0,1-6,6H182v42a6,6,0,0,1-6,6H144a6,6,0,0,0,0,12h26V144a6,6,0,0,1,12,0v10h26A6,6,0,0,1,214,160Zm0,32v16a6,6,0,0,1-12,0V192a6,6,0,0,1,12,0Z"/>
+      </svg>
+      <span class="wpp-label">Conectar WhatsApp</span>
+    </a>
 
-  @media (hover:hover) and (pointer:fine){
-    .app-sidebar:hover .logo{
-      justify-items:start;
-      padding:0 .7rem 0 .6rem;
-    }
-  }
+    <a class="wpp-leftbar-icon" href="#" id="miniLogout" title="Sair" aria-label="Sair">
+      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M232,218H206V40a14,14,0,0,0-14-14H64A14,14,0,0,0,50,40V218H24a6,6,0,0,0,0,12H232a6,6,0,0,0,0-12ZM194,40V218H174V38h18A2,2,0,0,1,194,40ZM62,40a2,2,0,0,1,2-2h98V218H62Zm80,92a10,10,0,1,1-10-10A10,10,0,0,1,142,132Z"/>
+      </svg>
+      <span class="wpp-label">Sair</span>
+    </a>
 
-  .logo .logo-fav,
-  .logo .logo-full{
-    grid-area:1/1;
-    max-height:50px;
-    will-change:opacity, transform;
-    backface-visibility:hidden;
-    transform:translateZ(0);
-    contain:paint;
-  }
-  .logo .logo-fav{ opacity:1; transition:opacity .16s ease-in; }
-  .logo .logo-full{ opacity:0; pointer-events:none; }
-
-  @keyframes logoFadeInAtt {
-    from { opacity:0; transform:translateY(2px) scale(.985); filter:blur(.6px); }
-    to   { opacity:1; transform:none; filter:none; }
-  }
-
-  @media (hover:hover) and (pointer:fine){
-    .app-sidebar:hover .logo .logo-fav{
-      opacity:0; pointer-events:none; transition:opacity .12s ease-out;
-    }
-    .app-sidebar:hover .logo .logo-full{
-      opacity:1; pointer-events:auto;
-      animation:logoFadeInAtt .42s cubic-bezier(.2,.7,.2,1) both;
-      animation-delay:.06s;
-    }
-  }
-
-  html.dark .app-sidebar .logo .logo-full.logo-dark{ opacity:0; }
-  html.dark .app-sidebar .logo .logo-full.logo-light{ opacity:0; }
-  html:not(.dark) .app-sidebar .logo .logo-full.logo-light{ opacity:0; }
-  html:not(.dark) .app-sidebar .logo .logo-full.logo-dark{ opacity:0; }
-
-  @media (hover:hover) and (pointer:fine){
-    html.dark .app-sidebar:hover .logo .logo-full.logo-dark{ opacity:1; }
-    html.dark .app-sidebar:hover .logo .logo-full.logo-light{ opacity:0; }
-
-    html:not(.dark) .app-sidebar:hover .logo .logo-full.logo-light{ opacity:1; }
-    html:not(.dark) .app-sidebar:hover .logo .logo-full.logo-dark{ opacity:0; }
-  }
-
-  /* ===== Nav ===== */
-  .app-sidebar nav{
-    display:flex;
-    flex-direction:column;
-    gap:.5rem;
-    position:relative;
-    z-index:1;
-    flex:1 1 auto;
-    overflow-y:auto;
-    padding-right:2px;
-  }
-
-  .app-sidebar nav a{
-    display:flex;
-    align-items:center;
-    gap:.75rem;
-
-    justify-content:center;
-    padding:.5rem 0;
-
-    border-radius:.75rem;
-    color:var(--muted);
-    background:transparent !important;
-    border:0 !important;
-    box-shadow:none !important;
-    outline:0 !important;
-    text-decoration:none;
-    font-weight:600;
-
-    transition:background .15s,color .15s, padding .2s ease, justify-content .2s ease, gap .2s ease;
-  }
-
-  @media (hover:hover) and (pointer:fine){
-    .app-sidebar:hover nav a{
-      justify-content:flex-start;
-      padding:.5rem .7rem .5rem .6rem;
-    }
-  }
-
-  .nav-icon{
-    width:26px; height:26px;
-    flex:0 0 26px;
-    display:inline-grid;
-    place-items:center;
-    color:var(--icon);
-  }
-  .nav-icon-svg{ width:22px; height:22px; display:block; }
-
-  /* label escondida no colapsado */
-  .label{
-    white-space:nowrap;
-    overflow:hidden;
-    opacity:0;
-    max-width:0;
-    transform:translateX(-6px);
-    transition:opacity .18s ease, max-width .22s ease, transform .22s ease;
-  }
-
-  /* label aparece no hover (desktop) */
-  @media (hover:hover) and (pointer:fine){
-    .app-sidebar:hover .label{
-      opacity:1;
-      max-width:14rem;
-      transform:translateX(0);
-    }
-  }
-
-  /* Hover/Active */
-  @media (hover:hover) and (pointer:fine){
-    .app-sidebar:hover nav a:hover,
-    .app-sidebar:hover nav a:focus-visible{
-      background:var(--hover) !important;
-      color:var(--fg);
-      outline:none;
-    }
-  }
-
-  nav a.active,
-  nav a[aria-current="page"]{
-    background:var(--hover) !important;
-    color:var(--fg);
-  }
-
-  html.dark nav a.active .nav-icon,
-  html.dark nav a[aria-current="page"] .nav-icon{ color:var(--icon-active-dark); }
-
-  html:not(.dark) nav a.active .nav-icon,
-  html:not(.dark) nav a[aria-current="page"] .nav-icon{ color:var(--icon-active-light); }
-
-  /* Focus */
-  nav a:focus{ outline:none; }
-  @media (hover:hover) and (pointer:fine){
-    .app-sidebar:hover nav a:focus-visible{
-      outline:2px solid var(--ring);
-      outline-offset:2px;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce){
-    .logo .logo-fav,
-    .logo .logo-full,
-    .label{
-      transition:none !important;
-      animation:none !important;
-      filter:none !important;
-      transform:none !important;
-    }
-  }
-</style>
-
-<aside class="app-sidebar" id="appSidebarAtt" aria-label="Menu lateral (Atendimentos)">
-  <div class="logo">
-    <img class="logo-fav" src="/img/fav-icon.png" alt="favicon" width="32" height="32">
-    <img class="logo-full logo-light" src="/img/logo-s-fundo.png" alt="Logo (claro)">
-    <img class="logo-full logo-dark"  src="/img/logo-white.png"    alt="Logo (escuro)">
   </div>
-
-  <nav>
-    <a href="/dashboard">
-      <span class="nav-icon" aria-hidden="true">
-        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-          <path d="M224,98H182V56a6,6,0,0,0-6-6H54V40a6,6,0,0,0-12,0V216a6,6,0,0,0,12,0V206h90a6,6,0,0,0,6-6V158h74a6,6,0,0,0,6-6V104A6,6,0,0,0,224,98ZM170,62V98H54V62ZM138,194H54V158h84Zm80-48H54V110H218Z"/>
-        </svg>
-      </span>
-      <span class="label">Dashboard</span>
-    </a>
-
-    <a href="/atendimentos">
-      <span class="nav-icon" aria-hidden="true">
-        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-          <path d="M225.88,30.12a13.83,13.83,0,0,0-13.7-3.58l-.11,0L20.14,84.77A14,14,0,0,0,18,110.85l85.56,41.64L145.12,238a13.87,13.87,0,0,0,12.61,8c.4,0,.81,0,1.21-.05a13.9,13.9,0,0,0,12.29-10.09l58.2-191.93,0-.11A13.83,13.83,0,0,0,225.88,30.12Zm-8,10.4L159.73,232.43l0,.11a2,2,0,0,1-3.76.26l-40.68-83.58,49-49a6,6,0,1,0-8.49-8.49l-49,49L23.15,100a2,2,0,0,1,.31-3.74l.11,0L215.48,38.08a1.94,1.94,0,0,1,1.92.52A2,2,0,0,1,217.92,40.52Z"/>
-        </svg>
-      </span>
-      <span class="label">Atendimentos</span>
-    </a>
-
-    <a href="/midias" title="Arquivos">
-      <span class="nav-icon" aria-hidden="true">
-        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-          <path d="M243.36,111.81A14,14,0,0,0,232,106H214V88a14,14,0,0,0-14-14H130L101.74,52.8a14.06,14.06,0,0,0-8.4-2.8H40A14,14,0,0,0,26,64V208a6,6,0,0,0,6,6H211.1a6,6,0,0,0,5.69-4.1l28.49-85.47A14,14,0,0,0,243.36,111.81ZM40,62H93.34a2,2,0,0,1,1.2.4L124.4,84.8A6,6,0,0,0,128,86h72a2,2,0,0,1,2,2v18H69.77a14,14,0,0,0-13.28,9.57L38,171V64A2,2,0,0,1,40,62Zm193.9,58.63L206.78,202H40.33l27.54-82.63a2,2,0,0,1,1.9-1.37H232a2,2,0,0,1,1.9,2.63Z"/>
-        </svg>
-      </span>
-      <span class="label">Arquivos</span>
-    </a>
-
-    <a href="/email" title="E-mail">
-      <span class="nav-icon" aria-hidden="true">
-        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-          <path d="M224,48H32a8,8,0,0,0-8,8V192a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A8,8,0,0,0,224,48Zm-96,85.15L52.57,64H203.43ZM98.71,128,40,181.81V74.19Zm11.84,10.85,12,11.05a8,8,0,0,0,10.82,0l12-11.05,58,53.15H52.57ZM157.29,128,216,74.18V181.82Z"></path>
-        </svg>
-      </span>
-      <span class="label">E-mail</span>
-    </a>
-
-    <a href="/chat-interno">
-      <span class="nav-icon" aria-hidden="true">
-        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-          <path d="M229.93,186.58A78,78,0,0,0,168.16,74.42,78,78,0,1,0,26.07,138.58L18.58,164A14,14,0,0,0,36,181.42l25.46-7.49a78,78,0,0,0,26.39,7.63,78,78,0,0,0,106.77,40.37L220,229.42A14,14,0,0,0,237.42,212Z"/>
-        </svg>
-      </span>
-      <span class="label">Chat Interno</span>
-    </a>
-
-    <a href="/clientes">
-      <span class="nav-icon" aria-hidden="true">
-        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-          <path d="M154,80a6,6,0,0,1,6-6h88a6,6,0,0,1,0,12H160A6,6,0,0,1,154,80Zm94,42H160a6,6,0,0,0,0,12h88a6,6,0,0,0,0-12Zm0,48H184a6,6,0,0,0,0,12h64a6,6,0,0,0,0-12Z"/>
-        </svg>
-      </span>
-      <span class="label">Clientes</span>
-    </a>
-
-    <a href="/colaboradores">
-      <span class="nav-icon" aria-hidden="true">
-        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-          <path d="M243.6,148.8a6,6,0,0,1-8.4-1.2A53.58,53.58,0,0,0,192,126a6,6,0,0,1,0-12,26,26,0,1,0-25.18-32.5,6,6,0,0,1-11.62-3,38,38,0,1,1,59.91,39.63A65.69,65.69,0,0,1,244.8,140.4,6,6,0,0,1,243.6,148.8Z"/>
-        </svg>
-      </span>
-      <span class="label">Colaboradores</span>
-    </a>
-
-    <a href="/departamentos">
-      <span class="nav-icon" aria-hidden="true">
-        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-          <path d="M248,210H230V94h2a6,6,0,0,0,0-12H182V46h2a6,6,0,0,0,0-12H40a6,6,0,0,0,0,12h2V210H24a6,6,0,0,0,0-12H248a6,6,0,0,0,0-12Z"/>
-        </svg>
-      </span>
-      <span class="label">Departamentos</span>
-    </a>
-
-    <a href="/chatbot">
-      <span class="nav-icon" aria-hidden="true">
-        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-          <path d="M222,114.56a54,54,0,0,0-58.67-74.73,54,54,0,0,0-94,13.46A54,54,0,0,0,34,141.44a54,54,0,0,0,35.56,73.65,54.54,54.54,0,0,0,14,1.91,52.86,52.86,0,0,0,9.06-.78,54,54,0,0,0,94-13.46A54,54,0,0,0,222,114.56Z"/>
-        </svg>
-      </span>
-      <span class="label">Chatbot</span>
-    </a>
-
-    <a href="/disparos" title="Disparador de mensagens">
-      <span class="nav-icon" aria-hidden="true">
-        <svg class="nav-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor">
-          <path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89Z"/>
-        </svg>
-      </span>
-      <span class="label">Disparador</span>
-    </a>
-
-    <a href="/conectar">
-      <span class="nav-icon" aria-hidden="true">
-        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-          <path d="M104,42H56A14,14,0,0,0,42,56v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,104,42Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-2,34H56a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V152A14,14,0,0,0,104,138Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V152a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2ZM200,42H152a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,200,42Zm2,62a2,2,0,0,1-2,2H152a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-64,72V144a6,6,0,0,1,12,0v32a6,6,0,0,1-12,0Zm76-16a6,6,0,0,1-6,6H182v42a6,6,0,0,1-6,6H144a6,6,0,0,0,0,12h26V144a6,6,0,0,1,12,0v10h26A6,6,0,0,1,214,160Zm0,32v16a6,6,0,0,1-12,0V192a6,6,0,0,1,12,0Z"/>
-        </svg>
-      </span>
-      <span class="label">Conectar WhatsApp</span>
-    </a>
-
-    <a href="/configuracoes">
-      <span class="nav-icon" aria-hidden="true">
-        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-          <path d="M128,82a46,46,0,1,0,46,46A46.06,46.06,0,0,0,128,82Zm0,80a34,34,0,1,1,34-34A34,34,0,0,1,128,162ZM214,130.84c.06-1.89.06-3.79,0-5.68L229.33,106a6,6,0,0,0,1.11-5.29A105.34,105.34,0,0,0,219.76,74.9a6,6,0,0,0-4.53-3l-24.45-2.71q-1.93-2.07-4-4l-2.72-24.46a6,6,0,0,0-3-4.53,105.65,105.65,0,0,0-25.77-10.66A6,6,0,0,0,150,26.68l-19.2,15.37c-1.89-.06-3.79-.06-5.68,0L106,26.67a6,6,0,0,0-5.29-1.11A105.34,105.34,0,0,0,74.9,36.24a6,6,0,0,0-3,4.53L69.23,65.22q-2.07,1.94-4,4L40.76,72a6,6,0,0,0-4.53,3,105.65,105.65,0,0,0-10.66,25.77A6,6,0,0,0,26.68,106l15.37,19.2c-.06,1.89-.06,3.79,0,5.68L26.67,150.05a6,6,0,0,0-1.11,5.29A105.34,105.34,0,0,0,36.24,181.1a6,6,0,0,0,4.53,3l24.45,2.71q1.94,2.07,4,4L72,215.24a6,6,0,0,0,3,4.53,105.65,105.65,0,0,0,25.77,10.66,6,6,0,0,0,5.29-1.11L125.16,214c1.89.06,3.79.06,5.68,0l19.21,15.38a6,6,0,0,0,3.75,1.31,6.2,6.2,0,0,0,1.54-.2,105.34,105.34,0,0,0,25.76-10.68,6,6,0,0,0,3-4.53l2.71-24.45q2.07-1.93,4-4l24.46-2.72a6,6,0,0,0,4.53-3,105.49,105.49,0,0,0,10.66-25.77,6,6,0,0,0-1.11-5.29Zm-3.1,41.63-23.64,2.63a6,6,0,0,0-3.82,2,75.14,75.14,0,0,1-6.31,6.31,6,6,0,0,0-2,3.82l-2.63,23.63A94.28,94.28,0,0,1,155.14,218l-18.57-14.86a6,6,0,0,0-3.75-1.31h-.36a78.07,78.07,0,0,1-8.92,0,6,6,0,0,0-4.11,1.3L100.87,218a94.13,94.13,0,0,1-17.34-7.17L80.9,187.21a6,6,0,0,0-2-3.82,75.14,75.14,0,0,1-6.31-6.31,6,6,0,0,0-3.82-2l-23.63-2.63A94.28,94.28,0,0,1,38,155.14l14.86-18.57a6,6,0,0,0,1.3-4.11,78.07,78.07,0,0,1,0-8.92,6,6,0,0,0-1.3-4.11L38,100.87a94.13,94.13,0,0,1,7.17-17.34L68.79,80.9a6,6,0,0,0,3.82-2,75.14,75.14,0,0,1,6.31-6.31,6,6,0,0,0,2-3.82l2.63-23.63A94.28,94.28,0,0,1,100.86,38l18.57,14.86a6,6,0,0,0,4.11,1.3,78.07,78.07,0,0,1,8.92,0,6,6,0,0,0,4.11-1.3L155.13,38a94.13,94.13,0,0,1,17.34,7.17l2.63,23.64a6,6,0,0,0,2,3.82,75.14,75.14,0,0,1,6.31,6.31,6,6,0,0,0,3.82,2l23.63,2.63A94.28,94.28,0,0,1,218,100.86l-14.86,18.57a6,6,0,0,0,1.3,4.11,78,78,0,0,1,0,8.92,6,6,0,0,0,1.3,4.11L218,155.13A94.13,94.13,0,0,1,210.85,172.47Z"/>
-        </svg>
-      </span>
-      <span class="label">Configurações</span>
-    </a>
-
-    <a href="#" id="sidebarLogoutAtt">
-      <span class="nav-icon" aria-hidden="true">
-        <svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-          <path d="M232,218H206V40a14,14,0,0,0-14-14H64A14,14,0,0,0,50,40V218H24a6,6,0,0,0,0,12H232a6,6,0,0,0,0-12ZM194,40V218H174V38h18A2,2,0,0,1,194,40ZM62,40a2,2,0,0,1,2-2h98V218H62Zm80,92a10,10,0,1,1-10-10A10,10,0,0,1,142,132Z"/>
-        </svg>
-      </span>
-      <span class="label">Sair</span>
-    </a>
-  </nav>
-</aside>
-
-<script>
-/* sidebar-atendimentos: active + logout */
-(function(){
-  var aside=document.getElementById('appSidebarAtt');
-  if(aside){
-    var nowFull=(location.pathname.replace(/\/+$/,'') || '/');
-    var nowFile=nowFull.split('/').pop();
-    aside.querySelectorAll('nav a[href]').forEach(function(a){
-      try{
-        var pFull=new URL(a.getAttribute('href'), location.origin).pathname.replace(/\/+$/,'') || '/';
-        var pFile=pFull.split('/').pop();
-        if(pFull===nowFull || pFile===nowFile){
-          a.classList.add('active');
-          a.setAttribute('aria-current','page');
-        }
-      }catch{}
-    });
-  }
-
-  var out=document.getElementById('sidebarLogoutAtt');
-  if(out && !out.dataset.bound){
-    out.dataset.bound='1';
-    out.addEventListener('click', async function(ev){
-      ev.preventDefault();
-      try{ await fetch('/api/auth/logout', { method:'POST', credentials:'include' }); }catch{}
-      try{ localStorage.clear(); sessionStorage.clear(); }catch{}
-      window.location.replace('/');
-    });
-  }
-})();
-</script>
+</nav>

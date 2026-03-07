@@ -583,6 +583,60 @@ def upsert_cliente(
     if not tel_norm:
         return None
 
+    telefone_fmt = formatar_telefone_br(telefone_raw or tel_norm) or f"+55 {tel_norm}"
+    nome_final = (nome or nome_whatsapp or telefone_fmt or "Cliente").strip()
+    nome_wa_final = (nome_whatsapp or nome or telefone_fmt or "Cliente").strip()
+
+    try:
+        row = db.execute(
+            UPSERT_CLIENTE_SQL,
+            {
+                "empresa_id": int(empresa_id),
+                "instancia_id": int(instancia_id) if instancia_id else None,
+                "telefone": telefone_fmt,
+                "nome": nome_final,
+                "nome_whatsapp": nome_wa_final,
+                "avatar_url": avatar_url,
+            },
+        ).first()
+
+        if row and row[0]:
+            return int(row[0])
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+    try:
+        row = (
+            db.query(models.Cliente.id)
+            .filter(
+                models.Cliente.empresa_id == int(empresa_id),
+                models.Cliente.telefone_norm == tel_norm,
+            )
+            .first()
+        )
+        if row and row[0]:
+            return int(row[0])
+    except Exception:
+        pass
+
+    try:
+        row = (
+            db.query(models.Cliente.id)
+            .filter(
+                models.Cliente.empresa_id == int(empresa_id),
+                models.Cliente.telefone == telefone_fmt,
+            )
+            .first()
+        )
+        if row and row[0]:
+            return int(row[0])
+    except Exception:
+        pass
+
+    return None
 
 def _fetch_cliente(db: Session, cliente_id: int) -> models.Cliente | None:
     try:
@@ -1079,28 +1133,34 @@ def _download_media_bytes(inst_id: str, msg_id: str | None, _url_hint_ignored: s
 
 
 def _save_midia_db(
-    db: Session, *, empresa_id: int, cliente_id: int, mensagem_id: int,
-    tipo: str, filename: str, mimetype_: str, raw: bytes,
-    url_origem: str | None = None, content_length: int | None = None,
-    instancia_id: int | None = None
-) -> int:
-    mimetype_norm = normalize_mimetype(tipo, filename, mimetype_)
+    db,
+    empresa_id,
+    cliente_id,
+    mensagem_id,
+    tipo,
+    filename,
+    mimetype_,
+    raw,
+    url_origem=None,
+    content_length=None,
+    instancia_id=None,
+    grupo_id=None,
+):
     midia = models.Midia(
         empresa_id=empresa_id,
         cliente_id=cliente_id,
+        grupo_id=grupo_id,
         mensagem_id=mensagem_id,
         tipo=tipo,
-        filename=filename or "file",
-        mimetype=mimetype_norm,
-        tamanho=content_length or len(raw),
+        filename=filename,
+        mimetype=mimetype_,
         data=raw,
-        url=url_origem,
+        tamanho=content_length,
         instancia_id=instancia_id,
     )
     db.add(midia)
     db.flush()
-    return midia.id
-
+    return midia
 
 # =========================
 # Texto "mastigado" (chatbot)

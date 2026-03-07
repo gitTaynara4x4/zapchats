@@ -4,27 +4,23 @@
   const PERM_REQUIRED = 'arquivos.ver';
   const GUARD_TIMEOUT_MS = 3500;
 
-  // ===== Sessão / Fetch / Storage =====
   const LS = localStorage;
-  const STATE_KEY = 'midiasState:v1'; // cache desta página
+  const STATE_KEY = 'midiasState:v1';
   const getEmpresaId = () => LS.getItem('empresa_id') || '';
   const getToken     = () => LS.getItem('token') || LS.getItem('auth_token') || '';
-  const KEY_INST     = (empresa) => `instAtiva:${empresa || ''}`; // cache do seletor de instância
+  const KEY_INST     = (empresa) => `instAtiva:${empresa || ''}`;
 
-  // LIMPA APENAS EM 401 (sem login). Em 403, não limpamos.
   function clearAuthScopedState(){
     try{ LS.removeItem(STATE_KEY); }catch{}
     try{ LS.removeItem(KEY_INST(getEmpresaId())); }catch{}
   }
 
-  // redireciona quando não temos guardFetch (ou se ele não interceptar)
   function gotoLogin(){
     if (window.ZAuth?.goLogin) { try{ ZAuth.goLogin(); return; }catch{} }
     location.replace('/login');
   }
-  function gotoSemPermissao(){
-    location.replace('/sem-permissao');
-  }
+  function gotoSemPermissao(){ location.replace('/sem-permissao'); }
+
   function handleAuthStatus(res){
     if (!res) return false;
     if (res.status === 401){
@@ -39,7 +35,6 @@
     return false;
   }
 
-  // fetch autenticado (preferindo guardFetch). Se cair no fetch nativo, tratamos 401/403 manualmente.
   async function authFetch(input, init = {}) {
     const useGuard = !!(window.ZAuth?.guardFetch);
     const useAuth  = !!(window.ZAuth?.authFetch);
@@ -52,18 +47,15 @@
 
     try {
       const res = await F(input, { ...init, headers: { 'Accept':'application/json', ...headers }, credentials: 'include' });
-      // se usamos nativo, tratar 401/403 aqui
       if (useNative && (res.status === 401 || res.status === 403)) handleAuthStatus(res);
       return res;
     } catch (err) {
-      // se o guard redirecionou/abortou, marque e deixe quem chamou calar o toast
       const e = err || {};
       e.__authRedirect = true;
       throw e;
     }
   }
 
-  // ===== Loader / Toast =====
   function showLoading(show){
     if (window.PageLoading?.show && window.PageLoading?.hide){
       return show ? PageLoading.show('Carregando…', { scope: '.main' }) : PageLoading.hide();
@@ -77,13 +69,16 @@
     }
     el.style.display = show ? 'flex' : 'none';
   }
+
   function toast(msg){
-    const t = document.getElementById('toast'); if (!t) return alert(msg);
-    t.textContent = msg; t.classList.add('show'); clearTimeout(toast._t);
+    const t = document.getElementById('toast');
+    if (!t) return alert(msg);
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toast._t);
     toast._t = setTimeout(()=> t.classList.remove('show'), 2200);
   }
 
-  // ===== DOM =====
   const els = {
     grid: document.getElementById('midias-list'),
     empty: document.getElementById('empty'),
@@ -103,7 +98,6 @@
     moreWrap: null,
   };
 
-  // ===== Tipos / Extensões =====
   const IMGS=['PNG','JPG','JPEG','WEBP','GIF','BMP','SVG','AVIF','HEIC','HEIF'];
   const VIDS=['MP4','WEBM','OGG','MOV','M4V','MKV','AVI'];
   const AUDS=['MP3','WAV','M4A','AAC','OGG','FLAC','OPUS'];
@@ -126,17 +120,86 @@
   const UGLY_HASH_RE = /^[A-F0-9]{16,}$/i;
   const GENERIC_RE   = /^(?:IMG|VID|PXL|PTT|FILE|IMAGE|VIDEO|AUDIO)[-_ ]?\d{4,}$/i;
 
-  function isUglyName(name=''){ if(!name) return true; const base = String(name).replace(/\.[^.]+$/, ''); return UGLY_HASH_RE.test(base) || GENERIC_RE.test(base); }
-  function labelByKind(kind){ switch((kind||'').toLowerCase()){ case 'imagem':return 'Imagem'; case 'video':return 'Vídeo'; case 'audio':return 'Áudio'; case 'documento':return 'Documento'; default:return 'Arquivo'; } }
-  function guessExtByMime(mime=''){ const mt = mime.toLowerCase(); if (mt.startsWith('image/jpeg')) return '.jpg'; if (mt.startsWith('image/png')) return '.png'; if (mt.startsWith('image/webp')) return '.webp'; if (mt.startsWith('image/gif')) return '.gif'; if (mt.startsWith('video/mp4')) return '.mp4'; if (mt.startsWith('video/webm')) return '.webm'; if (mt.startsWith('audio/ogg')) return '.ogg'; if (mt.startsWith('audio/mpeg')) return '.mp3'; if (mt === 'application/pdf') return '.pdf'; return ''; }
-  function guessExt(item){ const raw = (item?.nome || '').trim(); const dot = raw.lastIndexOf('.'); if (dot > -1 && raw.length - dot <= 5) return raw.slice(dot).toLowerCase(); return guessExtByMime(item?.tipo || ''); }
-  function extOf(it){ const ex = extFromName(it?.nome||''); return ex || (guessExtByMime(it?.tipo||'').replace('.','').toUpperCase()) || 'ARQ'; }
-  function formatDateBR(ts){ const d = new Date(ts || Date.now()); const dStr = d.toLocaleDateString('pt-BR', { timeZone:'America/Sao_Paulo' }); const tStr = d.toLocaleTimeString('pt-BR', { timeZone:'America/Sao_Paulo', hour12:false, hour:'2-digit', minute:'2-digit' }); return `${dStr} ${tStr}`; }
-  function friendlyName(item){ const raw = (item?.nome || '').trim(); if (!raw || isUglyName(raw)) { const kind = kindFromNameOrMime(item?.nome||'', item?.tipo||''); const label = labelByKind(kind); const ext = guessExt(item); return `${label} ${formatDateBR(item?.timestamp)}${ext}`; } return raw; }
-  function escapeHtml(s=''){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+  function isUglyName(name=''){
+    if(!name) return true;
+    const base = String(name).replace(/\.[^.]+$/, '');
+    return UGLY_HASH_RE.test(base) || GENERIC_RE.test(base);
+  }
+
+  function labelByKind(kind){
+    switch((kind||'').toLowerCase()){
+      case 'imagem': return 'Imagem';
+      case 'video': return 'Vídeo';
+      case 'audio': return 'Áudio';
+      case 'documento': return 'Documento';
+      default: return 'Arquivo';
+    }
+  }
+
+  function guessExtByMime(mime=''){
+    const mt = mime.toLowerCase();
+    if (mt.startsWith('image/jpeg')) return '.jpg';
+    if (mt.startsWith('image/png')) return '.png';
+    if (mt.startsWith('image/webp')) return '.webp';
+    if (mt.startsWith('image/gif')) return '.gif';
+    if (mt.startsWith('video/mp4')) return '.mp4';
+    if (mt.startsWith('video/webm')) return '.webm';
+    if (mt.startsWith('audio/ogg')) return '.ogg';
+    if (mt.startsWith('audio/mpeg')) return '.mp3';
+    if (mt === 'application/pdf') return '.pdf';
+    return '';
+  }
+
+  function guessExt(item){
+    const raw = (item?.nome || '').trim();
+    const dot = raw.lastIndexOf('.');
+    if (dot > -1 && raw.length - dot <= 5) return raw.slice(dot).toLowerCase();
+    return guessExtByMime(item?.tipo || '');
+  }
+
+  function extOf(it){
+    const ex = extFromName(it?.nome||'');
+    return ex || (guessExtByMime(it?.tipo||'').replace('.','').toUpperCase()) || 'ARQ';
+  }
+
+  function formatDateBR(ts){
+    const d = new Date(ts || Date.now());
+    const dStr = d.toLocaleDateString('pt-BR', { timeZone:'America/Sao_Paulo' });
+    const tStr = d.toLocaleTimeString('pt-BR', { timeZone:'America/Sao_Paulo', hour12:false, hour:'2-digit', minute:'2-digit' });
+    return `${dStr} ${tStr}`;
+  }
+
+  function friendlyName(item){
+    const raw = (item?.nome || '').trim();
+    if (!raw || isUglyName(raw)) {
+      const kind = kindFromNameOrMime(item?.nome||'', item?.tipo||'');
+      const label = labelByKind(kind);
+      const ext = guessExt(item);
+      return `${label} ${formatDateBR(item?.timestamp)}${ext}`;
+    }
+    return raw;
+  }
+
+  function escapeHtml(s=''){
+    return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+  }
+
   const idOf = (it={}) => it.id ?? it._id ?? it.midias_id ?? it.media_id ?? it.uuid ?? it.key ?? it.chave ?? it.arquivo_id ?? it.file_id ?? it.ID ?? (it.url ? `url:${it.url}` : Math.random().toString(36).slice(2));
 
-  // ===== Estado / Query =====
+  function mediaContextLabel(it){
+    if (it?.is_group || it?.grupo_id){
+      return it?.grupo_nome || `Grupo #${it.grupo_id}`;
+    }
+    return 'Conversa';
+  }
+
+  function mediaGroupMeta(it){
+    if (!(it?.is_group || it?.grupo_id)) return '';
+    const nome = it?.grupo_nome ? escapeHtml(it.grupo_nome) : 'Grupo';
+    const gid  = it?.grupo_id ? `#${escapeHtml(String(it.grupo_id))}` : '';
+    return `${nome}${gid ? ` (${gid})` : ''}`;
+  }
+
   const PAGE_LIMIT = 5;
   let lastItems = [];
   const byId = new Map();
@@ -145,13 +208,12 @@
 
   const paging = { limit: PAGE_LIMIT, offset: 0, loading: false, more: true };
 
-  let scope = { type:'inst', clienteId:null }; // 'meus' ou 'inst'
+  let scope = { type:'inst', clienteId:null };
   let currentType = 'all';
   let currentDocGroup = 'all';
   let selectedInst = '';
   const isScopeMeus = () => scope.type === 'meus';
 
-  // persistência
   function makeQueryKeyObj(){
     const emp = getEmpresaId();
     return {
@@ -165,10 +227,29 @@
       currentDocGroup,
     };
   }
+
   const queryKeyToStr = obj => { try{ return JSON.stringify(obj); }catch{ return ''; } };
-  function saveState(extra = {}){ const keyObj = makeQueryKeyObj(); const state = { key: queryKeyToStr(keyObj), ...keyObj, loadedCount: lastItems.length, scrollY: window.scrollY || 0, ts: Date.now(), ...extra }; try { LS.setItem(STATE_KEY, JSON.stringify(state)); } catch {} return state; }
-  function loadState(){ try{ const raw = LS.getItem(STATE_KEY); return raw?JSON.parse(raw):null; }catch{ return null; } }
-  function clearStateLocal(){ try{ LS.removeItem(STATE_KEY); }catch{} }
+
+  function saveState(extra = {}){
+    const keyObj = makeQueryKeyObj();
+    const state = {
+      key: queryKeyToStr(keyObj),
+      ...keyObj,
+      loadedCount: lastItems.length,
+      scrollY: window.scrollY || 0,
+      ts: Date.now(),
+      ...extra
+    };
+    try { LS.setItem(STATE_KEY, JSON.stringify(state)); } catch {}
+    return state;
+  }
+
+  function loadState(){
+    try{
+      const raw = LS.getItem(STATE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    }catch{ return null; }
+  }
 
   function restoreFiltersFromState(st){
     if (!st) return;
@@ -179,13 +260,17 @@
     currentDocGroup = st.currentDocGroup || 'all';
     setTabSelected(currentType);
   }
+
   async function restoreFromStateIfSameQuery(){
     const saved = loadState();
     if (!saved) return false;
 
     const currentKeyObj = makeQueryKeyObj();
     const savedComparable = { ...saved };
-    delete savedComparable.key; delete savedComparable.ts; delete savedComparable.loadedCount; delete savedComparable.scrollY;
+    delete savedComparable.key;
+    delete savedComparable.ts;
+    delete savedComparable.loadedCount;
+    delete savedComparable.scrollY;
 
     if (queryKeyToStr(savedComparable) !== queryKeyToStr(currentKeyObj)) {
       restoreFiltersFromState(saved);
@@ -205,25 +290,18 @@
     return true;
   }
 
-  // ===== Helpers UI =====
   const toggleEmpty = show => els.empty?.classList.toggle('show', !!show);
 
-  // ✅ CORRIGIDO: sempre envia sem_cliente=false no modo instâncias
   function buildQuery({forUpload=false} = {}){
     const qs = new URLSearchParams({ limit: String(paging.limit), offset: String(paging.offset) });
-    const emp = getEmpresaId(); if (emp) qs.set('empresa_id', String(emp));
+    const emp = getEmpresaId();
+    if (emp) qs.set('empresa_id', String(emp));
 
     if (isScopeMeus()){
       qs.set('sem_cliente','true');
     } else {
-      // ✅ sempre em instâncias
       qs.set('sem_cliente','false');
-
-      // ✅ ENVIA APENAS UM CAMPO (o backend geralmente espera isso)
-      if (selectedInst) {
-        qs.set('instancia_id', String(selectedInst));
-        // (não manda instancia/session/etc)
-      }
+      if (selectedInst) qs.set('instancia_id', String(selectedInst));
     }
 
     if (!forUpload){
@@ -248,13 +326,29 @@
       Array.isArray(raw?.rows) ? raw.rows :
       Array.isArray(raw?.midias) ? raw.midias :
       [];
+
     return list.map(it => {
       const nome = it.nome ?? it.name ?? it.filename ?? it.titulo ?? it.title ?? '-';
       const url  = it.url ?? it.arquivo_url ?? it.file_url ?? it.public_url ?? it.signed_url ?? it.link ?? it.href ?? it.path ?? it.arquivo ?? '';
       const tipo = it.tipo ?? it.mime ?? it.mimetype ?? it.content_type ?? '';
       const ts   = it.timestamp ?? it.created_at ?? it.createdAt ?? it.criado_em ?? it.dataCriacao ?? it.updated_at ?? Date.now();
       const id   = idOf(it);
-      return { ...it, id, nome, url, tipo, timestamp: ts };
+
+      const grupoId   = it.grupo_id ?? it.group_id ?? it.grupoId ?? null;
+      const grupoNome = it.grupo_nome ?? it.group_name ?? it.nome_grupo ?? it.groupName ?? null;
+      const isGroup   = Boolean(it.is_group ?? grupoId);
+
+      return {
+        ...it,
+        id,
+        nome,
+        url,
+        tipo,
+        timestamp: ts,
+        grupo_id: grupoId,
+        grupo_nome: grupoNome,
+        is_group: isGroup,
+      };
     }).filter(it => it.nome);
   }
 
@@ -265,7 +359,6 @@
     return null;
   }
 
-  // ===== Helpers de áudio / rename / modal =====
   function audioMimeByExt(ext){
     const e = (ext||'').toLowerCase();
     if (e === 'mp3') return 'audio/mpeg';
@@ -277,11 +370,13 @@
     if (e === 'ogg' || e === 'oga') return 'audio/ogg';
     return '';
   }
+
   function withTimeFragment(u){
     if (!u) return u;
     if (u.includes('#')) return /(?:^|[#&])t=/.test(u) ? u : `${u}&t=0`;
     return `${u}#t=0`;
   }
+
   function wireAudioEl(a){
     a.preload = 'metadata';
     const toZero = () => { try { a.currentTime = 0.000001; } catch(_){} };
@@ -290,20 +385,30 @@
       return d && (a.currentTime >= d - 0.05);
     };
     a.addEventListener('loadedmetadata', toZero, { once:true });
-    a.addEventListener('loadeddata',     toZero, { once:true });
+    a.addEventListener('loadeddata', toZero, { once:true });
     a.addEventListener('canplay', () => { if (nearEnd() || a.ended) toZero(); });
-    a.addEventListener('play',    () => { if (nearEnd() || a.ended) toZero(); });
-    a.addEventListener('ended',   () => { toZero(); a.pause(); });
+    a.addEventListener('play', () => { if (nearEnd() || a.ended) toZero(); });
+    a.addEventListener('ended', () => { toZero(); a.pause(); });
   }
 
   function infoBlock(it){
     const div = document.createElement('div');
     div.className = 'mm-info';
+
     const name = friendlyName(it);
     const ext  = extOf(it);
     const when = formatDateTime(it.timestamp);
+    const grupoMeta = mediaGroupMeta(it);
+
     div.innerHTML = `
       <div class="mm-name" title="${escapeHtml(it.nome || name)}">${escapeHtml(name)}</div>
+      ${
+        grupoMeta
+          ? `<div class="mm-group" style="margin-top:.35rem;opacity:.85;font-size:.92rem">
+               <i class="fa fa-users"></i> ${grupoMeta}
+             </div>`
+          : ''
+      }
       <div class="mm-meta"><span>${ext}</span> <span>•</span> <span>${when}</span></div>
     `;
     return div;
@@ -376,11 +481,8 @@
         headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({ nome: newName })
       });
-      if (r.status === 401 || r.status === 403) return false; // já tratamos redirect
-      if (!r.ok){
-        console.warn('rename fail', r.status, await r.text().catch(()=>'')); 
-        return false;
-      }
+      if (r.status === 401 || r.status === 403) return false;
+      if (!r.ok) return false;
       const updated = await r.json().catch(()=>null);
       if (updated?.nome) item.nome = updated.nome; else item.nome = newName;
       if (updated?.timestamp) item.timestamp = updated.timestamp;
@@ -485,6 +587,7 @@
     modal.addEventListener('click',(e)=>{ if(e.target===modal) close(); });
     modal._close = close;
   }
+
   function clearModal(){
     ensureModal();
     stopInlineRename();
@@ -494,9 +597,16 @@
     modalDownload.onclick=null;
     modalRename.onclick=null;
   }
+
   function downloadUrl(url, filename){
-    const a=document.createElement('a'); a.href=url; a.download=filename||''; document.body.appendChild(a); a.click(); a.remove();
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=filename||'';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
+
   async function openModal(it){
     clearModal();
     const nomeUi  = friendlyName(it);
@@ -508,13 +618,26 @@
     const ext  = extFromName(it.nome||'');
 
     if (kind==='imagem'){
-      const img=new Image(); img.src=it.url; img.alt=nomeUi; img.style.maxHeight='78vh'; img.style.objectFit='contain'; img.style.display='block'; img.style.margin='0 auto';
+      const img=new Image();
+      img.src=it.url;
+      img.alt=nomeUi;
+      img.style.maxHeight='78vh';
+      img.style.objectFit='contain';
+      img.style.display='block';
+      img.style.margin='0 auto';
       modalBody.appendChild(img);
     } else if (kind==='video'){
-      const v=document.createElement('video'); v.src=it.url; v.controls=true; v.preload='metadata'; v.style.width='100%'; v.style.maxHeight='78vh';
+      const v=document.createElement('video');
+      v.src=it.url;
+      v.controls=true;
+      v.preload='metadata';
+      v.style.width='100%';
+      v.style.maxHeight='78vh';
       modalBody.appendChild(v);
     } else if (kind==='audio'){
-      const a=document.createElement('audio'); a.controls=true; a.preload='metadata';
+      const a=document.createElement('audio');
+      a.controls=true;
+      a.preload='metadata';
       const s = document.createElement('source');
       const e = (extFromName(it.nome || '').toLowerCase());
       s.src  = withTimeFragment(it.url || '');
@@ -524,8 +647,23 @@
       modalBody.appendChild(a);
     } else {
       const icon = iconForDoc(ext);
-      if (icon){ const img=new Image(); img.src=icon; img.alt=ext; img.style.width='120px'; img.style.height='120px'; img.style.display='block'; img.style.margin='0 auto'; modalBody.appendChild(img); }
-      else { const div=document.createElement('div'); div.textContent=ext || 'ARQ'; div.style.fontWeight='900'; div.style.textAlign='center'; div.style.opacity='.85'; modalBody.appendChild(div); }
+      if (icon){
+        const img=new Image();
+        img.src=icon;
+        img.alt=ext;
+        img.style.width='120px';
+        img.style.height='120px';
+        img.style.display='block';
+        img.style.margin='0 auto';
+        modalBody.appendChild(img);
+      } else {
+        const div=document.createElement('div');
+        div.textContent=ext || 'ARQ';
+        div.style.fontWeight='900';
+        div.style.textAlign='center';
+        div.style.opacity='.85';
+        modalBody.appendChild(div);
+      }
     }
 
     modalBody.appendChild(infoBlock(it));
@@ -538,7 +676,6 @@
     document.addEventListener('keydown', (modal._onKey = (e)=>{ if(e.key==='Escape') modal._close(); }));
   }
 
-  // ===== Render (append) =====
   function appendCards(items){
     if (!els.grid || !Array.isArray(items) || items.length === 0) return;
 
@@ -552,17 +689,32 @@
       const kind = kindFromNameOrMime(it.nome||'', it.tipo||'');
       const nomeUi = friendlyName(it);
       const nomeRaw = it.nome || nomeUi;
+      const grupoMeta = mediaGroupMeta(it);
 
-      const card = document.createElement('div'); card.className='media-card'; card.dataset.id = String(id);
-      const prev = document.createElement('div'); prev.className='media-thumb';
+      const card = document.createElement('div');
+      card.className = 'media-card';
+      card.dataset.id = String(id);
 
-      const badge = document.createElement('div'); badge.textContent=ext;
+      const prev = document.createElement('div');
+      prev.className = 'media-thumb';
+
+      const badge = document.createElement('div');
+      badge.textContent = ext;
       badge.style.cssText='position:absolute;top:8px;left:8px;z-index:2;background:#0fa27c;color:#fff;font-weight:800;font-size:.75rem;padding:.2rem .45rem;border-radius:.45rem;letter-spacing:.02em;border:1px solid rgba(255,255,255,.15)';
       prev.appendChild(badge);
 
-      // botão de seleção
+      if (it.is_group || it.grupo_id){
+        const gBadge = document.createElement('div');
+        gBadge.textContent = 'Grupo';
+        gBadge.style.cssText='position:absolute;top:8px;right:8px;z-index:2;background:#2563eb;color:#fff;font-weight:800;font-size:.72rem;padding:.2rem .45rem;border-radius:.45rem;letter-spacing:.02em;border:1px solid rgba(255,255,255,.15)';
+        prev.appendChild(gBadge);
+      }
+
       const pick = document.createElement('button');
-      pick.type='button'; pick.className='media-pick'; pick.setAttribute('aria-pressed','false'); pick.innerHTML='✓';
+      pick.type='button';
+      pick.className='media-pick';
+      pick.setAttribute('aria-pressed','false');
+      pick.innerHTML='✓';
       pick.addEventListener('click', (e)=>{
         e.stopPropagation();
         toggleSelect(card, !card.classList.contains('selected'), { index: cardsIndex(card), shiftKey: e.shiftKey });
@@ -570,44 +722,80 @@
       prev.appendChild(pick);
 
       if (kind==='imagem'){
-        const img=new Image(); img.loading='lazy'; img.src=it.url; img.alt=nomeUi; img.style.maxWidth='100%'; img.style.maxHeight='100%'; img.style.objectFit='cover';
-        prev.appendChild(img); prev.classList.add('image');
+        const img=new Image();
+        img.loading='lazy';
+        img.src=it.url;
+        img.alt=nomeUi;
+        img.style.maxWidth='100%';
+        img.style.maxHeight='100%';
+        img.style.objectFit='cover';
+        prev.appendChild(img);
+        prev.classList.add('image');
       } else if (kind==='video'){
-        const ic=document.createElement('i'); ic.className='fa fa-video'; ic.style.fontSize='2rem'; ic.style.opacity='.85';
+        const ic=document.createElement('i');
+        ic.className='fa fa-video';
+        ic.style.fontSize='2rem';
+        ic.style.opacity='.85';
         prev.appendChild(ic);
       } else if (kind==='audio'){
-        const ic=document.createElement('i'); ic.className='fa fa-microphone'; ic.style.fontSize='2rem'; ic.style.opacity='.85';
+        const ic=document.createElement('i');
+        ic.className='fa fa-microphone';
+        ic.style.fontSize='2rem';
+        ic.style.opacity='.85';
         prev.appendChild(ic);
       } else {
         const icon = iconForDoc(ext);
         if (icon){
-          const img = new Image(); img.src = icon; img.alt = ext; img.style.width='72px'; img.style.height='72px';
+          const img = new Image();
+          img.src = icon;
+          img.alt = ext;
+          img.style.width='72px';
+          img.style.height='72px';
           prev.appendChild(img);
-        }else{
-          const t = document.createElement('div'); t.textContent = ext; t.style.fontWeight='900'; t.style.opacity='.8';
+        } else {
+          const t = document.createElement('div');
+          t.textContent = ext;
+          t.style.fontWeight='900';
+          t.style.opacity='.8';
           prev.appendChild(t);
         }
       }
 
-      // legenda (mobile)
-      const cap = document.createElement('div'); cap.className='thumb-cap'; cap.textContent = nomeUi; cap.title = nomeRaw; prev.appendChild(cap);
+      const cap = document.createElement('div');
+      cap.className='thumb-cap';
+      cap.textContent = nomeUi;
+      cap.title = nomeRaw;
+      prev.appendChild(cap);
 
-      const body=document.createElement('div'); body.className='media-body';
-      body.innerHTML=`<div class="media-title" title="${escapeHtml(nomeRaw)}">${escapeHtml(nomeUi)}</div>
-                      <div class="media-meta"><span>${ext}</span><span>•</span><span>${formatDateTime(it.timestamp)}</span></div>`;
+      const body=document.createElement('div');
+      body.className='media-body';
+      body.innerHTML = `
+        <div class="media-title" title="${escapeHtml(nomeRaw)}">${escapeHtml(nomeUi)}</div>
+        ${
+          grupoMeta
+            ? `<div class="media-group-meta" title="${grupoMeta}">
+                 <i class="fa fa-users"></i> ${grupoMeta}
+               </div>`
+            : ''
+        }
+        <div class="media-meta">
+          <span>${ext}</span>
+          <span>•</span>
+          <span>${formatDateTime(it.timestamp)}</span>
+        </div>
+      `;
 
-      // clique no card abre modal (se não estiver selecionando)
       card.addEventListener('click',()=>{ if (!card.classList.contains('selected')) openModal(it); });
 
       card.title = nomeRaw;
-      card.appendChild(prev); card.appendChild(body);
+      card.appendChild(prev);
+      card.appendChild(body);
       frag.appendChild(card);
     });
 
     els.grid.appendChild(frag);
   }
 
-  // índice do card dentro do grid (para seleção por bloco)
   function cardsIndex(card){
     const arr = Array.from(els.grid.querySelectorAll('.media-card'));
     return arr.indexOf(card);
@@ -616,7 +804,6 @@
   function applyTypeFilter(items){
     let list = Array.isArray(items) ? items.slice() : [];
 
-    // não mostrar figurinha na aba "Todas"
     if (currentType === 'all') {
       list = list.filter(it => (it.tipo_db || '').toLowerCase() !== 'sticker');
     }
@@ -631,7 +818,6 @@
     return list;
   }
 
-  // ===== Botão "Mostrar mais" =====
   function ensureLoadMore(){
     if (!els.box || els.btnMore) return;
     const wrap = document.createElement('div');
@@ -646,7 +832,9 @@
     els.btnMore = wrap.querySelector('#btn-load-more');
     els.btnMore.addEventListener('click', ()=> fetchPage({ reset:false }).then(()=>saveState()));
   }
+
   const setMoreVisibility = show => { if (els.moreWrap) els.moreWrap.style.display = show ? 'flex' : 'none'; };
+
   function setMoreBusy(busy){
     if (!els.btnMore) return;
     els.btnMore.disabled = !!busy;
@@ -656,17 +844,20 @@
     else { span.textContent = 'Mostrar mais'; ico.className = 'fa fa-arrow-down'; }
   }
 
-  // ===== Abas / Filtros =====
   const setTabSelected = type => els.tabs.forEach(b=>b.setAttribute('aria-selected', b.dataset.type===type ? 'true':'false'));
+
   function bindFilterEvents(){
     els.tabs.forEach(btn=>{
       btn.addEventListener('click',()=>{
-        const t=btn.dataset.type; if(!t) return;
-        currentType=t; setTabSelected(t);
+        const t=btn.dataset.type;
+        if(!t) return;
+        currentType=t;
+        setTabSelected(t);
         if (t === 'documento') currentDocGroup = 'all';
         fetchPage({ reset:true }).then(()=>saveState());
       });
     });
+
     els.ordenar?.addEventListener('change', ()=>{ fetchPage({ reset:true }).then(()=>saveState()); });
     els.q?.addEventListener('keydown', e=>{ if(e.key==='Enter'){ fetchPage({ reset:true }).then(()=>saveState()); }});
 
@@ -678,7 +869,9 @@
     els.btnUpload?.addEventListener('click', async ()=>{
       if (els.btnUpload.disabled) return;
       const tmp = document.createElement('input');
-      tmp.type = 'file'; tmp.multiple = true; tmp.hidden = true;
+      tmp.type = 'file';
+      tmp.multiple = true;
+      tmp.hidden = true;
       document.body.appendChild(tmp);
       tmp.addEventListener('change', async e=>{
         const files = e.target.files || [];
@@ -708,20 +901,31 @@
     window.addEventListener('beforeunload', ()=> saveState());
   }
 
-  function updateUploadState(){ if (!els.btnUpload) return; els.btnUpload.disabled = !isScopeMeus(); }
+  function updateUploadState(){
+    if (!els.btnUpload) return;
+    els.btnUpload.disabled = !isScopeMeus();
+  }
 
-  // ===== Dropdown de Instâncias =====
   const KEY = id => `instAtiva:${id}`;
   function getSavedInst(empresa){ return empresa ? (localStorage.getItem(KEY(empresa)) || '') : ''; }
   function setSavedInst(empresa, v){ try{ if (empresa) localStorage.setItem(KEY(empresa), v || ''); }catch{} }
-  function ensureCSSEscape(){ if (typeof window.CSS === 'undefined') window.CSS = {}; if (typeof window.CSS.escape !== 'function') { window.CSS.escape = s => String(s).replace(/["\\]/g,'\\$&').replace(/\s/g,'\\ '); } }
+
+  function ensureCSSEscape(){
+    if (typeof window.CSS === 'undefined') window.CSS = {};
+    if (typeof window.CSS.escape !== 'function') {
+      window.CSS.escape = s => String(s).replace(/["\\]/g,'\\$&').replace(/\s/g,'\\ ');
+    }
+  }
+
   function instValue(i){
     return i.instancia_id ?? i.instancia ?? i.instancia_slug ??
            i.instance_id  ?? i.instance  ?? i.session ??
            i.sessionName  ?? i.sessao    ?? i.inst_slug ??
            i.id ?? '';
   }
+
   function instLabel(i, v){ return i.apelido || i.nome || i.instance_name || String(v) || 'Instância'; }
+
   function itemTpl(text, value, selected, onSelect){
     const li = document.createElement('li');
     const b  = document.createElement('button');
@@ -737,6 +941,7 @@
     li.appendChild(b);
     return li;
   }
+
   function wireInstDropdown(){
     const btn=els.instBtn, menu=els.instMenu, listEl=els.instList, label=els.instLabel;
     if (!btn || !menu || !listEl || !label) return;
@@ -751,6 +956,7 @@
       });
       label.textContent = text || (value ? `Instância ${value}` : 'Todas as instâncias');
     }
+
     function selectValue(value, text){
       selectedInst = value || '';
       scope.type = 'inst';
@@ -758,7 +964,8 @@
       setSavedInst(empresaId, value);
       updateUploadState();
       document.dispatchEvent(new CustomEvent('midias:instancia-set', { detail:{ value } }));
-      closeMenu(); btn.focus();
+      closeMenu();
+      btn.focus();
     }
 
     function openMenu(){
@@ -769,14 +976,17 @@
       document.addEventListener('mousedown', onDocClick);
       document.addEventListener('keydown', onKey);
     }
+
     function closeMenu(){
       menu.setAttribute('aria-hidden','true');
       btn.setAttribute('aria-expanded','false');
       document.removeEventListener('mousedown', onDocClick);
       document.removeEventListener('keydown', onKey);
     }
+
     function toggleMenu(){ (menu.getAttribute('aria-hidden')!=='false') ? openMenu() : closeMenu(); }
     function onDocClick(e){ if (!menu.contains(e.target) && e.target !== btn) closeMenu(); }
+
     function onKey(e){
       if (e.key === 'Escape'){ e.preventDefault(); closeMenu(); btn.focus(); }
       if (menu.getAttribute('aria-hidden') === 'true') return;
@@ -788,9 +998,13 @@
       if (e.key === 'End'){ e.preventDefault(); items[items.length-1]?.focus(); }
       if (e.key === 'Enter' || e.key === ' '){
         const a = document.activeElement;
-        if (a && a.classList.contains('inst-item')) { e.preventDefault(); selectValue(a.dataset.value, a.dataset.label); }
+        if (a && a.classList.contains('inst-item')) {
+          e.preventDefault();
+          selectValue(a.dataset.value, a.dataset.label);
+        }
       }
     }
+
     btn.addEventListener('click', toggleMenu);
 
     async function loadList(){
@@ -805,11 +1019,12 @@
       if (empresaId){
         try{
           const r = await authFetch(`/api/empresas/${empresaId}/whatsapp`, { credentials:'include' });
-          if (r.status === 401 || r.status === 403) return; // já redirecionou
+          if (r.status === 401 || r.status === 403) return;
           const j = await r.json().catch(()=>({}));
           items = Array.isArray(j.instancias) ? j.instancias : (Array.isArray(j) ? j : []);
         }catch{}
       }
+
       items.forEach(i=>{
         const v = String(instValue(i) ?? '');
         const t = instLabel(i, v);
@@ -823,36 +1038,48 @@
         setActiveUI('', 'Todas as instâncias');
       }
     }
+
     loadList();
   }
 
   document.addEventListener('midias:instancia-set', () => { fetchPage({ reset:true }).then(()=>saveState()); });
 
-  // ===== Upload =====
   async function uploadFiles(files){
     if(!files||!files.length) return;
-    const fd=new FormData(); Array.from(files).forEach(f=>fd.append('files', f));
-    fd.append('sem_cliente','true'); // upload só em "Meus Arquivos"
+    const fd=new FormData();
+    Array.from(files).forEach(f=>fd.append('files', f));
+    fd.append('sem_cliente','true');
 
     showLoading(true);
     try{
       const qs = buildQuery({forUpload:true});
       const r = await authFetch(`/api/midias/upload?${qs}`, { method:'POST', body:fd });
-      if (r.status === 401 || r.status === 403) return; // redirecionado
+      if (r.status === 401 || r.status === 403) return;
       if(!r.ok) toast('Falha no upload.');
-      else { await r.json().catch(()=>null); await fetchPage({ reset:true }); toast('Upload concluído.'); saveState(); }
-    }catch(e){ if (!e?.__authRedirect) toast('Erro no upload.'); }
-    finally{ showLoading(false); }
+      else {
+        await r.json().catch(()=>null);
+        await fetchPage({ reset:true });
+        toast('Upload concluído.');
+        saveState();
+      }
+    }catch(e){
+      if (!e?.__authRedirect) toast('Erro no upload.');
+    }finally{
+      showLoading(false);
+    }
   }
 
-  // ===== Páginas (Mostrar mais) =====
   async function fetchPage({ reset = false } = {}) {
     if (paging.loading) return;
     if (!paging.more && !reset) return;
 
     if (reset) {
-      paging.offset = 0; paging.more = true; lastItems = [];
-      byId.clear(); selected.clear(); lastClickedIndex = -1;
+      paging.offset = 0;
+      paging.more = true;
+      lastItems = [];
+      byId.clear();
+      selected.clear();
+      lastClickedIndex = -1;
       if (els.grid) els.grid.innerHTML = '';
       if (els.meta) els.meta.textContent = '0';
       toggleEmpty(true);
@@ -869,12 +1096,15 @@
 
     try {
       const r = await authFetch(`/api/midias?${buildQuery()}`);
-      if (r.status === 401 || r.status === 403) return; // já redirecionou
+      if (r.status === 401 || r.status === 403) return;
       if (!r.ok) {
         toast(`Erro ${r.status} ao buscar mídias.`);
-        paging.more = false; toggleEmpty(true); setMoreVisibility(false);
+        paging.more = false;
+        toggleEmpty(true);
+        setMoreVisibility(false);
         return;
       }
+
       const raw = await r.json().catch(()=>[]);
       const pageAll = normalizeItems(raw);
       const pageFiltered = applyTypeFilter(pageAll);
@@ -886,16 +1116,16 @@
       toggleEmpty(lastItems.length === 0);
 
       if (pageAll.length < paging.limit) {
-        paging.more = false; setMoreVisibility(false);
+        paging.more = false;
+        setMoreVisibility(false);
       } else {
-        paging.more = true; paging.offset += paging.limit; setMoreVisibility(true);
+        paging.more = true;
+        paging.offset += paging.limit;
+        setMoreVisibility(true);
       }
 
     } catch (e) {
-      if (e?.__authRedirect || e?.name === 'AbortError' || /aborted|cancel/i.test(e?.message||'')) {
-        // silêncio
-        return;
-      }
+      if (e?.__authRedirect || e?.name === 'AbortError' || /aborted|cancel/i.test(e?.message||'')) return;
       console.warn('[Mídias] erro fetch', e);
       toast('Erro ao carregar mídias.');
     } finally {
@@ -906,16 +1136,15 @@
     }
   }
 
-  // ===== Seleção / Limpar =====
   function toggleSelect(card, on=true, { index, shiftKey } = {}){
-    const id = card.dataset.id;
     const cards = Array.from(els.grid.querySelectorAll('.media-card'));
     const i = (index ?? cards.indexOf(card));
 
     if (shiftKey && lastClickedIndex >= 0){
       const [a,b] = [Math.min(lastClickedIndex,i), Math.max(lastClickedIndex,i)];
       for (let k=a;k<=b;k++){
-        const c = cards[k]; if(!c) continue;
+        const c = cards[k];
+        if(!c) continue;
         setCardSelected(c, true);
       }
     }else{
@@ -924,11 +1153,13 @@
     }
     updateBulkUI();
   }
+
   function setCardSelected(card, on){
     const id = card.dataset.id;
     card.classList.toggle('selected', !!on);
     if (on) selected.add(id); else selected.delete(id);
   }
+
   function updateBulkUI(){
     const n = selected.size;
     if (els.btnLimpar){
@@ -938,8 +1169,8 @@
     }
   }
 
-  // ===== Modal de confirmação (Limpar) / DELETE API =====
   let confirmModal=null, cmBody=null, cmOk=null, cmCancel=null;
+
   function ensureConfirm(){
     if (confirmModal) return;
     confirmModal = document.createElement('div');
@@ -960,12 +1191,12 @@
 
     cmCancel.addEventListener('click', ()=>confirmModal.classList.remove('open'));
   }
+
   function openConfirm(){
     ensureConfirm();
     const nSel = selected.size;
     const total = els.grid?.querySelectorAll('.media-card').length || 0;
-    cmBody.innerHTML = `Você selecionou <strong>${nSel}</strong> ${nSel===1?'arquivo':'arquivos'} de <strong>${total}</strong> exibidos.<br>
-      Essa ação não pode ser desfeita. Deseja realmente apagar?`;
+    cmBody.innerHTML = `Você selecionou <strong>${nSel}</strong> ${nSel===1?'arquivo':'arquivos'} de <strong>${total}</strong> exibidos.<br>Essa ação não pode ser desfeita. Deseja realmente apagar?`;
     cmOk.onclick = async ()=>{
       const ids = Array.from(selected);
       confirmModal.classList.remove('open');
@@ -976,7 +1207,8 @@
 
       ids.forEach(id=>{
         const el = els.grid.querySelector(`.media-card[data-id="${CSS.escape(String(id))}"]`);
-        el?.remove(); byId.delete(id);
+        el?.remove();
+        byId.delete(id);
       });
       ids.forEach(id=> selected.delete(id));
       updateBulkUI();
@@ -996,10 +1228,7 @@
         const url = `/api/midias/${encodeURIComponent(id)}?empresa_id=${encodeURIComponent(emp)}`;
         const r = await authFetch(url, { method:'DELETE' });
         if (r.status === 401 || r.status === 403) return false;
-        if (!r.ok) {
-          console.warn('delete fail', id, r.status, await r.text().catch(()=>'')); 
-          return false;
-        }
+        if (!r.ok) return false;
       }catch(e){
         if (e?.__authRedirect || e?.name === 'AbortError') return false;
         return false;
@@ -1008,11 +1237,10 @@
     return true;
   }
 
-  // ===== Permissão (fallback quando não há Page.guarded) =====
   async function ensurePermission(){
     try {
       const r = await authFetch('/api/permissoes/minhas', { headers:{ 'Accept':'application/json' } });
-      if (r.status === 401 || r.status === 403) return false; // já redirecionado
+      if (r.status === 401 || r.status === 403) return false;
       if (!r.ok) return false;
       const data = await r.json().catch(()=>[]);
       const list = Array.isArray(data) ? data : (Array.isArray(data?.permissoes) ? data.permissoes : []);
@@ -1020,18 +1248,23 @@
     } catch { return false; }
   }
 
-  // ===== Boot =====
-  function bindPageEvents(){ bindFilterEvents(); wireInstDropdown(); ensureLoadMore(); }
+  function bindPageEvents(){
+    bindFilterEvents();
+    wireInstDropdown();
+    ensureLoadMore();
+  }
 
   async function boot(){
     if (window.ZAuth?.softEnsureAuth) await ZAuth.softEnsureAuth();
     bindPageEvents();
     updateUploadState();
 
-    // ✅ aplica instância salva já no início (antes do primeiro fetch)
     const empresaId = getEmpresaId();
     const saved = (empresaId ? (localStorage.getItem(`instAtiva:${empresaId}`) || '') : '');
-    if (saved) { selectedInst = saved; scope.type = 'inst'; }
+    if (saved) {
+      selectedInst = saved;
+      scope.type = 'inst';
+    }
 
     const restored = await restoreFromStateIfSameQuery();
     if (!restored) {
@@ -1041,12 +1274,12 @@
     }
   }
 
-  // ===== Runner com guard =====
   async function legacyRun(){
     const ok = await ensurePermission();
-    if (!ok) return; // redirecionado em 401 ou 403
+    if (!ok) return;
     await boot();
   }
+
   const run = () => {
     const guard = window.Page?.guarded;
     if (typeof guard !== 'function') return legacyRun();
@@ -1056,19 +1289,20 @@
 
     try{
       guard(PERM_REQUIRED, async () => {
-        resolved = true; clearTimeout(timer);
+        resolved = true;
+        clearTimeout(timer);
         await boot();
       }, {
         loading: 'Carregando…',
         onDeny(){ resolved = true; clearTimeout(timer); gotoSemPermissao(); }
       });
     }catch{
-      resolved = true; clearTimeout(timer);
+      resolved = true;
+      clearTimeout(timer);
       legacyRun();
     }
   };
 
-  // ✅ DEBUG OPCIONAL: no console você faz window.MidiasDebug.state()
   window.MidiasDebug = {
     state: () => ({
       empresa_id: getEmpresaId(),

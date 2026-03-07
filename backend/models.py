@@ -453,11 +453,13 @@ class Midia(Base):
             postgresql_where=text("file_sha256 IS NULL")
         ),
         Index("ix_midias_instancia", "instancia_id"),
+        Index("ix_midias_grupo_id", "grupo_id"),
     )
 
     id            = Column(Integer, primary_key=True, index=True)
     empresa_id    = Column(Integer, ForeignKey("empresas.id"))
     cliente_id    = Column(Integer, ForeignKey("clientes.id"))
+    grupo_id      = Column(BigInteger, ForeignKey("grupos.id"), nullable=True, index=True)
     mensagem_id   = Column(Integer, ForeignKey("mensagens.id"))
     instancia_id  = Column(Integer, ForeignKey("empresas_instancias.id", ondelete="SET NULL"), index=True, nullable=True)
 
@@ -478,9 +480,8 @@ class Midia(Base):
 
     empresa   = relationship("Empresa", back_populates="midias")
     cliente   = relationship("Cliente", back_populates="midias")
+    grupo     = relationship("Grupo")
     mensagem  = relationship("Mensagem", foreign_keys=[mensagem_id])
-
-
 # =========================
 # Grupo
 # =========================

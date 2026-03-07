@@ -42,11 +42,10 @@
   }
 
   function bindTriggers(host) {
-    // Só no mobile/tablet (sem hover)
     if (!isMobileLike()) return;
 
     const btnSidebar = document.getElementById('btnSidebarFlyout');
-    const btnHeader  = document.getElementById('btnKebabHeader');
+    const btnHeader = document.getElementById('btnKebabHeader');
     const triggers = [btnSidebar, btnHeader].filter(Boolean);
 
     triggers.forEach(btn => {
@@ -90,14 +89,15 @@
     const style = document.createElement('style');
     style.id = 'zcFlyoutBaseStyles';
     style.textContent = `
-      /* Host overlay (MOBILE only - mas não faz mal existir) */
       #zcSidebarHost.zc-flyout{
         position:fixed;
         inset:0;
         z-index:10000;
         pointer-events:none;
       }
-      #zcSidebarHost.zc-flyout[aria-hidden="false"]{ pointer-events:auto; }
+      #zcSidebarHost.zc-flyout[aria-hidden="false"]{
+        pointer-events:auto;
+      }
 
       #zcSidebarHost .zc-flyout__backdrop{
         position:absolute;
@@ -117,14 +117,15 @@
 
       #zcSidebarHost [role="dialog"]{
         position:absolute;
-        top:0; left:0;
+        top:0;
+        left:0;
         height:100%;
-        width:min(92vw, 360px);
-        background: var(--card, #161617);
-        border-right:1px solid var(--border, #27272a);
+        width:min(92vw,360px);
+        background:var(--card,#161617);
+        border-right:1px solid var(--border,#27272a);
         transform:translateX(-10px);
         opacity:0;
-        transition:transform .22s ease, opacity .18s ease;
+        transition:transform .22s ease,opacity .18s ease;
         outline:none;
         overflow:auto;
         padding:14px 10px;
@@ -146,9 +147,10 @@
     ensureBaseStyles();
     bindTriggers(host);
 
-    // se abrir em desktop por algum motivo, fecha
     window.addEventListener('resize', () => {
-      if (!isMobileLike() && host.classList.contains('is-open')) closeFlyout(host);
+      if (!isMobileLike() && host.classList.contains('is-open')) {
+        closeFlyout(host);
+      }
     });
   }
 
