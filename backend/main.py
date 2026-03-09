@@ -50,7 +50,7 @@ from backend.routers.atendimento_send import router as atendimento_send_router
 from backend.routers import departamentos as departamentos_router
 from backend.routers import chatbot_config as chatbot_config_router
 from backend.routers import admin_planos
-from backend.routers import chatbot_n8n
+
 
 # DB
 from backend.database import Base, engine, SessionLocal
@@ -667,7 +667,6 @@ app.include_router(atendimento.router, prefix="/api/atendimento", tags=["Atendim
 
 # Extras
 app.include_router(email_router)
-app.include_router(chatbot_n8n.router)
 app.include_router(disparos_router)
 
 app.include_router(atendimento_chat_router.router, prefix="/api/atendimento", tags=["Atendimento – Chat"])

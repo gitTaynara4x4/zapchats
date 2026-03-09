@@ -699,19 +699,20 @@ class Colaborador(Base):
     telefone   = Column(String(20), nullable=True)
     cargo      = Column(String(50), nullable=True)
 
+    # NOVO
+    avatar_data = Column(LargeBinary, nullable=True)
+    avatar_mime = Column(String, nullable=True)
+
     empresa = relationship("Empresa", back_populates="colaboradores")
     setor   = relationship("Setor", back_populates="colaboradores")
     usuario = relationship("Usuario")  # opcional
 
-    # Janela de login
-    hora_login_inicio = Column(String(5), nullable=True)  # "HH:MM"
-    hora_login_fim    = Column(String(5), nullable=True)  # "HH:MM"
+    hora_login_inicio = Column(String(5), nullable=True)
+    hora_login_fim    = Column(String(5), nullable=True)
 
-    # Token de login (2º fator)
     login_token = Column(String(20), nullable=True)
     login_token_expires_at = Column(DateTime(timezone=True), nullable=True)
 
-    # Many-to-many com Permissao
     permissoes = relationship(
         "Permissao",
         secondary="colaboradores_permissoes",
@@ -720,8 +721,6 @@ class Colaborador(Base):
     )
 
     instancias_ver = Column(PG_ARRAY(Integer), nullable=True)
-
-
 # =========================
 # Usuario
 # =========================

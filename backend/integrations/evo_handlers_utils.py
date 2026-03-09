@@ -76,84 +76,6 @@ FULL_EVENTS_RABBIT = [
 RABBIT_EXCHANGE = os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange")
 RABBIT_BINDINGS = [b.strip() for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#").split(",") if b.strip()]
 
-# =========================
-# N8N webhook config
-# =========================
-N8N_WEBHOOK_BASE_URL = (
-    os.getenv("N8N_WEBHOOK_BASE_URL")
-    or os.getenv("N8N_CHATBOT_WEBHOOK_URL")
-    or ""
-).strip()
-
-N8N_CHATBOT_GERAL_PATH   = (os.getenv("N8N_CHATBOT_GERAL_PATH")   or "chatbot-zapchats-geral").strip().strip("/")
-N8N_CHATBOT_SETORES_PATH = (os.getenv("N8N_CHATBOT_SETORES_PATH") or "chatbot-zapchats-setores").strip().strip("/")
-N8N_MESSAGES_UPSERT_PATH = (os.getenv("N8N_MESSAGES_UPSERT_PATH") or "chatbot-zapchats").strip().strip("/")
-
-
-def _n8n_url(base_or_full: str, *, path: str) -> str:
-    v = (base_or_full or "").strip()
-    if not v:
-        return ""
-    v = v.rstrip("/")
-    if v.lower().endswith("/webhook"):
-        return f"{v}/{path.lstrip('/')}"
-    return v
-
-
-def _chatbot_mode_from_db(*, empresa_id: int, instancia_id: int | None) -> str:
-    if not instancia_id:
-        return "geral"
-    try:
-        with SessionLocal() as db:
-            row = db.execute(
-                text(
-                    """
-                    SELECT
-                      COALESCE((config->'features'->'auto_messages_departments'->>'enabled')::boolean, FALSE) AS dep_enabled
-                    FROM chatbot_configs
-                    WHERE empresa_id=:emp AND instancia_id=:inst AND ativo=TRUE
-                    ORDER BY atualizado_em DESC
-                    LIMIT 1
-                    """
-                ),
-                {"emp": int(empresa_id), "inst": int(instancia_id)},
-            ).mappings().first()
-        if row and bool(row.get("dep_enabled")):
-            return "setores"
-    except Exception:
-        pass
-    return "geral"
-
-
-def _notify_n8n_chatbot(*, empresa_id: int, instancia_id: int, jid: str, numero: str, texto: str, direcao: str):
-    base = N8N_WEBHOOK_BASE_URL
-    if not base:
-        return
-
-    modo = _chatbot_mode_from_db(empresa_id=empresa_id, instancia_id=instancia_id)
-    path = N8N_CHATBOT_SETORES_PATH if modo == "setores" else N8N_CHATBOT_GERAL_PATH
-    url = _n8n_url(base, path=path)
-    if not url:
-        return
-
-    payload = {
-        "empresa_id": empresa_id,
-        "instancia_id": instancia_id,
-        "jid": jid,
-        "numero": numero,
-        "texto": texto,
-        "direction": direcao,
-        "modo": modo,
-    }
-
-    try:
-        requests.post(url, json=payload, timeout=5)
-    except Exception as e:
-        try:
-            LOG(f"[N8N][chatbot] erro ao chamar {url}: {e}")
-        except Exception:
-            pass
-
 
 # =========================
 # Deadlock/timeout helpers
@@ -1162,6 +1084,7 @@ def _save_midia_db(
     db.flush()
     return midia
 
+
 # =========================
 # Texto "mastigado" (chatbot)
 # =========================
@@ -1184,7 +1107,6 @@ __all__ = [
     "HISTORY_LIMIT_HOURS","HISTORY_IGNORE_AFTER_DONE_MIN",
     "ALLOW_HISTORY_7D","HISTORY_MAX_IMPORT","HISTORY_BATCH_COMMIT","HISTORY_SLEEP_EVERY","DISABLE_MEDIA_ON_HISTORY",
     "FULL_EVENTS_WS","FULL_EVENTS_RABBIT","RABBIT_EXCHANGE","RABBIT_BINDINGS",
-    "N8N_WEBHOOK_BASE_URL","N8N_CHATBOT_GERAL_PATH","N8N_CHATBOT_SETORES_PATH","N8N_MESSAGES_UPSERT_PATH","_n8n_url",
     "LOG","_short","_log_ctx","_log_skip",
     "record_rabbit_event","get_rabbit_monitor","RABBIT_MONITOR",
     "EvoEvent","HANDLERS","handler",
@@ -1199,6 +1121,6 @@ __all__ = [
     "_inst_from","_get_inst_row","_empresa_id_by_inst","_me_number_by_inst","_carimbar_inst",
     "_emit_qr","_extract_qr_fields","_evo_expand_websocket","_evo_expand_rabbit",
     "_evo_connect","_evo_get_base64_media","_download_media_bytes","_save_midia_db",
-    "_notify_n8n_chatbot","_is_textual_content",
+    "_is_textual_content",
     "cancel_auto_cleanup",
 ]

@@ -15,6 +15,7 @@ from backend.database import SessionLocal
 from backend import models
 from backend.websocket_manager import conexoes_ativas
 from backend.integrations.qrcode import qr_force_lock_acquire
+from backend.routers.chatbot_setores import triagem_handle_inbound
 
 from .evo_handlers_extract import (
     extract_text_from_baileys,
@@ -45,8 +46,6 @@ from .evo_handlers_utils import (
     HISTORY_BATCH_COMMIT,
     HISTORY_SLEEP_EVERY,
     DISABLE_MEDIA_ON_HISTORY,
-    N8N_MESSAGES_UPSERT_PATH,
-    _n8n_url,
 
     # log/debug
     LOG,
@@ -113,7 +112,6 @@ from .evo_handlers_utils import (
     _release_hist_lock,
 
     # chatbot
-    _notify_n8n_chatbot,
     _is_textual_content,
 
     # onboarding
@@ -136,11 +134,13 @@ QR_RECENT: dict[str, int] = {}  # instance -> unix seconds when a QR was last em
 _GROUP_INFO_CACHE: dict[tuple[str, str], tuple[str, int]] = {}
 _GROUP_INFO_TTL = 60 * 60  # 1h
 
+
 def _is_nome_grupo_ruim(nome: str | None) -> bool:
     if not nome:
         return True
     n = str(nome).strip().lower()
     return (n == "") or (n in {"grupo", "group", "grupo do whatsapp", "whatsapp group"})
+
 
 def _evo_get_group_subject(instance_name: str, group_jid: str) -> str | None:
     """
@@ -324,7 +324,6 @@ async def on_qrcode_updated(first: str, payload: dict):
             LOG(f"[QR EVT] Falha ao emitir estado 'waiting' para inst:{inst_id}: {e}")
         return
 
-    # ✅ marca QR recente para permitir sync no connect (janela)
     try:
         QR_RECENT[inst_id] = _int_unix(_now_utc())
     except Exception:
@@ -364,13 +363,11 @@ async def on_conn_update(first: str, payload: dict):
 
         db.commit()
 
-    # ✅ quando desconecta/logout: libera sync futuro
     if (not conectado) and (st in ("close", "closed", "disconnected", "logout", "loggedout")):
         INSTANCIAS_SYNC.discard(inst_id)
         QR_RECENT.pop(inst_id, None)
         _mark_disconnected(inst_id)
 
-    # ✅ só roda ações pesadas quando mudou de desconectado -> conectado
     if conectado and not was_connected:
         try:
             cancel_auto_cleanup(inst_id)
@@ -392,7 +389,6 @@ async def on_conn_update(first: str, payload: dict):
         _evo_expand_websocket(inst_id)
         _evo_expand_rabbit(inst_id)
 
-    # WS status
     await conexoes_ativas.send_message(
         f"inst:{inst_id}",
         {"type": "connection", "status": "CONNECTED" if conectado else "DISCONNECTED", "serverTimestamp": _server_ts_ms()},
@@ -408,7 +404,6 @@ async def on_conn_update(first: str, payload: dict):
             },
         )
 
-    # ✅ roda sync 1x (e por padrão só depois de QR recente)
     if conectado and inst_id not in INSTANCIAS_SYNC:
         do_sync = True
 
@@ -419,7 +414,7 @@ async def on_conn_update(first: str, payload: dict):
 
         if do_sync:
             INSTANCIAS_SYNC.add(inst_id)
-            QR_RECENT.pop(inst_id, None)  # consumiu
+            QR_RECENT.pop(inst_id, None)
 
             if SYNC_CONTACTS_ON_CONNECT:
                 await _sync_contatos_completos(inst_id)
@@ -431,13 +426,11 @@ async def on_conn_update(first: str, payload: dict):
 
 
 async def on_logout_instance(instance: str, payload: dict):
-    # ✅ logout/delete/remove liberam sync futuro
     INSTANCIAS_SYNC.discard(instance)
     QR_RECENT.pop(instance, None)
     _mark_disconnected(instance)
 
 
-# ✅ REGISTRA 1x (sem duplicar mais embaixo)
 HANDLERS[EvoEvent.LOGOUT_INSTANCE] = on_logout_instance
 HANDLERS[EvoEvent.INSTANCE_DELETE] = on_logout_instance
 HANDLERS[EvoEvent.REMOVE_INSTANCE] = on_logout_instance
@@ -481,41 +474,6 @@ def _mark_disconnected(instance: str):
 
 @handler(EvoEvent.MESSAGES_UPSERT)
 async def on_messages_upsert(inst_id: str, data):
-    async def _send_to_n8n_raw(inst: str, raw_data):
-        url = (os.getenv("N8N_MESSAGES_UPSERT_URL") or os.getenv("N8N_WEBHOOK_URL") or "").strip()
-        if not url:
-            return
-        url = _n8n_url(url, path=N8N_MESSAGES_UPSERT_PATH) or url
-
-        def _sanitize(obj):
-            if isinstance(obj, (bytes, bytearray)):
-                try:
-                    return obj.decode("utf-8", "replace")
-                except Exception:
-                    return repr(obj)
-            if isinstance(obj, dict):
-                return {k: _sanitize(v) for k, v in obj.items()}
-            if isinstance(obj, list):
-                return [_sanitize(v) for v in obj]
-            if isinstance(obj, tuple):
-                return tuple(_sanitize(v) for v in obj)
-            return obj
-
-        safe_payload = {"event": "MESSAGES_UPSERT", "instance": inst, "payload": _sanitize(raw_data)}
-
-        def _post():
-            try:
-                requests.post(url, json=safe_payload, timeout=5)
-            except Exception as e:
-                LOG(f"[N8N] erro ao enviar MESSAGES_UPSERT: {e}")
-
-        await asyncio.to_thread(_post)
-
-    try:
-        asyncio.create_task(_send_to_n8n_raw(inst_id, data))
-    except Exception as e:
-        LOG(f"[N8N] falha ao agendar envio MESSAGES_UPSERT: {e}")
-
     with SessionLocal() as db:
         inst = _get_inst_row(db, inst_id)
         if not inst:
@@ -980,18 +938,29 @@ async def on_messages_upsert(inst_id: str, data):
                     preview=_short(conteudo),
                 )
 
+                # ✅ substitui n8n pela triagem interna
                 try:
-                    if _is_textual_content(conteudo):
-                        _notify_n8n_chatbot(
+                    if (not from_me) and _is_textual_content(conteudo):
+                        triagem_handle_inbound(
+                            db,
                             empresa_id=empresa_id,
                             instancia_id=inst.id,
-                            jid=remote_jid,
-                            numero=telefone,
+                            telefone_digits=telefone,
                             texto=conteudo,
-                            direcao=direcao,
+                            direction=direcao,
+                            remote_jid=remote_jid,
                         )
+                    else:
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
                 except Exception as e:
-                    LOG(f"[N8N][chatbot] erro ao enviar msg simples: {e}")
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                    LOG(f"[CHATBOT][triagem] erro ao processar msg simples: {e}")
 
                 try:
                     cli_id = (
@@ -1700,7 +1669,7 @@ async def on_messages_set(inst_id: str, data):
                                     empresa_id=empresa_id,
                                     cliente_id=cli_autor_id,
                                     grupo_id=grupo.id,
-                                    mensagem_id=None,  # importante: evita FK errada com mensagens 1:1
+                                    mensagem_id=None,
                                     tipo=media_meta["tipo"],
                                     filename=real_name or "file",
                                     mimetype_=real_ct_norm,
@@ -1971,6 +1940,7 @@ async def on_messages_set(inst_id: str, data):
                 _release_hist_lock(db, empresa_id, inst.id)
             except Exception:
                 pass
+
 
 @handler(EvoEvent.MESSAGES_UPDATE)
 async def on_messages_update(first: str, payload: dict | list):
@@ -2314,9 +2284,6 @@ async def _sync_chats_completos(inst_id: str):
             )
 
 
-# =========================
-# Forçar QR no WS (usado pelo main)
-# =========================
 async def force_qr_now_async(inst_id: str):
     if not EVOLUTION_FORCE_QR_ON_WS:
         return
@@ -2341,9 +2308,6 @@ async def force_qr_for_instance(inst_id: str):
     return await force_qr_now_async(inst_id)
 
 
-# =========================
-# Rebinds/export
-# =========================
 HANDLERS[EvoEvent.MESSAGES_UPSERT] = on_messages_upsert
 HANDLERS[EvoEvent.MESSAGES_UPDATE] = on_messages_update
 HANDLERS[EvoEvent.CONTACTS_SET] = on_contacts_event

@@ -5,13 +5,32 @@
   const GUARD_TIMEOUT_MS = 3500;
 
   const LS = localStorage;
-  const STATE_KEY = 'midiasState:v1';
+  const STATE_KEY = 'midiasState:v3';
+  const LAST_SCOPE_KEY = 'midiasLastScope:v3';
   const getEmpresaId = () => LS.getItem('empresa_id') || '';
   const getToken     = () => LS.getItem('token') || LS.getItem('auth_token') || '';
   const KEY_INST     = (empresa) => `instAtiva:${empresa || ''}`;
 
+  function getClienteIdFromContext(){
+    try{
+      const qs = new URLSearchParams(location.search);
+      const raw =
+        qs.get('cliente_id') ||
+        qs.get('clienteId') ||
+        document.body?.dataset?.clienteId ||
+        document.documentElement?.dataset?.clienteId ||
+        '';
+      if (!raw) return null;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : null;
+    }catch{
+      return null;
+    }
+  }
+
   function clearAuthScopedState(){
     try{ LS.removeItem(STATE_KEY); }catch{}
+    try{ LS.removeItem(LAST_SCOPE_KEY); }catch{}
     try{ LS.removeItem(KEY_INST(getEmpresaId())); }catch{}
   }
 
@@ -186,13 +205,6 @@
 
   const idOf = (it={}) => it.id ?? it._id ?? it.midias_id ?? it.media_id ?? it.uuid ?? it.key ?? it.chave ?? it.arquivo_id ?? it.file_id ?? it.ID ?? (it.url ? `url:${it.url}` : Math.random().toString(36).slice(2));
 
-  function mediaContextLabel(it){
-    if (it?.is_group || it?.grupo_id){
-      return it?.grupo_nome || `Grupo #${it.grupo_id}`;
-    }
-    return 'Conversa';
-  }
-
   function mediaGroupMeta(it){
     if (!(it?.is_group || it?.grupo_id)) return '';
     const nome = it?.grupo_nome ? escapeHtml(it.grupo_nome) : 'Grupo';
@@ -208,20 +220,39 @@
 
   const paging = { limit: PAGE_LIMIT, offset: 0, loading: false, more: true };
 
-  let scope = { type:'inst', clienteId:null };
+  let scope = { type:'all', clienteId:getClienteIdFromContext() };
   let currentType = 'all';
   let currentDocGroup = 'all';
   let selectedInst = '';
+  let lastInstBeforeMeus = '';
+  let lastScopeBeforeMeus = 'all';
+  let instUI = null;
+
+  let selectedClient = null;
+  let acWrap = null;
+  let acList = null;
+  let acItems = [];
+  let acIndex = -1;
+  let acTimer = null;
+  let acAbort = null;
+
   const isScopeMeus = () => scope.type === 'meus';
+  const isScopeAll  = () => scope.type === 'all';
+  const isScopeInst = () => scope.type === 'inst';
 
   function makeQueryKeyObj(){
     const emp = getEmpresaId();
     return {
       emp,
       scopeType: scope.type,
+      clienteId: scope.clienteId ?? null,
+      selectedClientName: selectedClient?.nome || '',
       selectedInst: selectedInst || '',
-      semCliente: isScopeMeus() ? true : false,
-      q: (els.q?.value||'').trim(),
+      semCliente:
+        isScopeMeus() ? true :
+        isScopeInst() ? false :
+        null,
+      q: selectedClient ? '' : (els.q?.value||'').trim(),
       ordenar: els.ordenar?.value || 'recent',
       currentType,
       currentDocGroup,
@@ -229,6 +260,26 @@
   }
 
   const queryKeyToStr = obj => { try{ return JSON.stringify(obj); }catch{ return ''; } };
+
+  function saveLastScope(){
+    try{
+      LS.setItem(LAST_SCOPE_KEY, JSON.stringify({
+        scopeType: scope.type,
+        clienteId: scope.clienteId ?? null,
+        selectedClientName: selectedClient?.nome || '',
+        selectedInst: selectedInst || '',
+        lastInstBeforeMeus: lastInstBeforeMeus || '',
+        lastScopeBeforeMeus: lastScopeBeforeMeus || 'all',
+      }));
+    }catch{}
+  }
+
+  function loadLastScope(){
+    try{
+      const raw = LS.getItem(LAST_SCOPE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    }catch{ return null; }
+  }
 
   function saveState(extra = {}){
     const keyObj = makeQueryKeyObj();
@@ -238,9 +289,12 @@
       loadedCount: lastItems.length,
       scrollY: window.scrollY || 0,
       ts: Date.now(),
+      lastInstBeforeMeus: lastInstBeforeMeus || '',
+      lastScopeBeforeMeus: lastScopeBeforeMeus || 'all',
       ...extra
     };
     try { LS.setItem(STATE_KEY, JSON.stringify(state)); } catch {}
+    saveLastScope();
     return state;
   }
 
@@ -251,13 +305,95 @@
     }catch{ return null; }
   }
 
+  function setTabSelected(type){
+    els.tabs.forEach(b=>b.setAttribute('aria-selected', b.dataset.type===type ? 'true':'false'));
+  }
+
+  function getCurrentScopeLabel(){
+    if (isScopeMeus()) return 'Meus Arquivos';
+    if (isScopeAll()) return selectedClient ? `Todos os arquivos • ${selectedClient.nome}` : 'Todos os arquivos';
+    return selectedInst ? (instUI?.getLabel?.(selectedInst) || `Instância ${selectedInst}`) : 'Todos os arquivos';
+  }
+
+  function syncScopeVisual(){
+    if (els.btnMeus) els.btnMeus.classList.toggle('active', isScopeMeus());
+
+    if (instUI?.setActiveUI){
+      if (isScopeMeus()){
+        instUI.setActiveUI('__meus__', 'Meus Arquivos');
+      } else if (isScopeAll()){
+        instUI.setActiveUI('__all__', selectedClient ? `Todos os arquivos • ${selectedClient.nome}` : 'Todos os arquivos');
+      } else {
+        const txt = selectedInst ? (instUI.getLabel?.(selectedInst) || `Instância ${selectedInst}`) : 'Todos os arquivos';
+        instUI.setActiveUI(selectedInst || '', txt);
+      }
+    }
+
+    if (els.instBtn) {
+      els.instBtn.title = getCurrentScopeLabel();
+      els.instBtn.dataset.scope = scope.type;
+    }
+
+    updateSearchPlaceholder();
+    updateUploadState();
+    saveLastScope();
+  }
+
+  function activateMeusMode({ preserveLastInst = true } = {}){
+    lastScopeBeforeMeus = isScopeInst() ? 'inst' : 'all';
+    if (preserveLastInst && selectedInst) lastInstBeforeMeus = selectedInst;
+    scope.type = 'meus';
+    selectedInst = '';
+    clearSelectedClient(false);
+    syncScopeVisual();
+  }
+
+  function activateAllMode(text='Todos os arquivos'){
+    scope.type = 'all';
+    selectedInst = '';
+    if (instUI?.setActiveUI) instUI.setActiveUI('__all__', text);
+    syncScopeVisual();
+  }
+
+  function activateInstMode(value = '', text){
+    scope.type = 'inst';
+    selectedInst = value || '';
+    if (selectedInst) lastInstBeforeMeus = selectedInst;
+    if (instUI?.setActiveUI){
+      instUI.setActiveUI(selectedInst, text || (selectedInst ? instUI.getLabel?.(selectedInst) || `Instância ${selectedInst}` : 'Todos os arquivos'));
+    }
+    syncScopeVisual();
+  }
+
+  function leaveMeusModeToLastScope(){
+    const empresaId = getEmpresaId();
+    const fallbackInst = lastInstBeforeMeus || getSavedInst(empresaId) || '';
+
+    if (lastScopeBeforeMeus === 'inst' && fallbackInst){
+      const text = instUI?.getLabel?.(fallbackInst) || `Instância ${fallbackInst}`;
+      activateInstMode(fallbackInst, text);
+      setSavedInst(empresaId, fallbackInst);
+      return;
+    }
+
+    activateAllMode('Todos os arquivos');
+  }
+
   function restoreFiltersFromState(st){
     if (!st) return;
-    scope.type = st.scopeType === 'meus' ? 'meus' : 'inst';
+    scope.type = st.scopeType === 'meus' ? 'meus' : (st.scopeType === 'inst' ? 'inst' : 'all');
+    scope.clienteId = Number.isFinite(Number(st.clienteId)) ? Number(st.clienteId) : getClienteIdFromContext();
     if (els.ordenar && st.ordenar) els.ordenar.value = st.ordenar;
-    if (els.q) els.q.value = st.q || '';
+    if (els.q) els.q.value = st.selectedClientName || st.q || '';
     currentType = st.currentType || 'all';
     currentDocGroup = st.currentDocGroup || 'all';
+    lastInstBeforeMeus = st.lastInstBeforeMeus || '';
+    lastScopeBeforeMeus = st.lastScopeBeforeMeus || 'all';
+
+    if (scope.clienteId && st.selectedClientName){
+      selectedClient = { id: scope.clienteId, nome: st.selectedClientName };
+    }
+
     setTabSelected(currentType);
   }
 
@@ -271,11 +407,17 @@
     delete savedComparable.ts;
     delete savedComparable.loadedCount;
     delete savedComparable.scrollY;
+    delete savedComparable.lastInstBeforeMeus;
+    delete savedComparable.lastScopeBeforeMeus;
 
     if (queryKeyToStr(savedComparable) !== queryKeyToStr(currentKeyObj)) {
       restoreFiltersFromState(saved);
     }
-    if (saved.key !== queryKeyToStr(makeQueryKeyObj())) return false;
+
+    syncScopeVisual();
+
+    const comparableCurrent = queryKeyToStr(makeQueryKeyObj());
+    if (saved.key !== comparableCurrent) return false;
 
     const want = Math.max(0, parseInt(saved.loadedCount || 0, 10));
     if (want <= 0) return false;
@@ -297,15 +439,20 @@
     const emp = getEmpresaId();
     if (emp) qs.set('empresa_id', String(emp));
 
+    if (Number.isFinite(scope.clienteId) && !isScopeMeus()){
+      qs.set('cliente_id', String(scope.clienteId));
+    }
+
     if (isScopeMeus()){
       qs.set('sem_cliente','true');
-    } else {
+    } else if (isScopeInst()){
       qs.set('sem_cliente','false');
       if (selectedInst) qs.set('instancia_id', String(selectedInst));
     }
 
     if (!forUpload){
-      const q=(els.q?.value||'').trim(); if(q) qs.set('q', q);
+      const q = selectedClient ? '' : (els.q?.value||'').trim();
+      if(q) qs.set('q', q);
       const ord=els.ordenar?.value; if(ord) qs.set('ordenar', ord);
       if (currentType && currentType!=='all') qs.set('tipo', currentType);
       if (currentType==='documento' && currentDocGroup!=='all') qs.set('doc', currentDocGroup);
@@ -429,6 +576,50 @@
     const style = document.createElement('style');
     style.id = '__mm_rename_css__';
     style.textContent = css;
+    document.head.appendChild(style);
+  }
+
+  function injectClientAutocompleteCSS(){
+    if (document.getElementById('__midias_client_ac_css__')) return;
+    const style = document.createElement('style');
+    style.id = '__midias_client_ac_css__';
+    style.textContent = `
+      .midias-ac-wrap{position:relative;min-width:260px;flex:1 1 320px}
+      .midias-ac-list{
+        position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:80;
+        background:var(--card,#161617);border:1px solid var(--border,#27272a);
+        border-radius:12px;box-shadow:0 18px 48px rgba(0,0,0,.28);
+        padding:6px;display:none;max-height:320px;overflow:auto
+      }
+      .midias-ac-list.show{display:block}
+      .midias-ac-item{
+        width:100%;border:none;background:transparent;color:inherit;text-align:left;
+        display:flex;gap:.6rem;align-items:flex-start;padding:.6rem .7rem;border-radius:.7rem;cursor:pointer
+      }
+      .midias-ac-item:hover,.midias-ac-item.active{background:var(--hover,rgba(255,255,255,.05))}
+      .midias-ac-item .ac-avatar{
+        width:34px;height:34px;border-radius:999px;flex:0 0 34px;
+        background:var(--chip,#2a2a2e);display:flex;align-items:center;justify-content:center;
+        overflow:hidden;font-weight:800;font-size:.8rem
+      }
+      .midias-ac-item .ac-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+      .midias-ac-item .ac-main{min-width:0;display:flex;flex-direction:column}
+      .midias-ac-item .ac-name{font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .midias-ac-item .ac-sub{font-size:.78rem;color:var(--muted,#9ca3af);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .midias-ac-empty{
+        padding:.8rem .9rem;color:var(--muted,#9ca3af);font-size:.85rem
+      }
+      .midias-ac-chip{
+        display:inline-flex;align-items:center;gap:.45rem;
+        margin-left:.5rem;padding:.28rem .55rem;border-radius:999px;
+        background:var(--chip,#2a2a2e);border:1px solid var(--border,#27272a);
+        font-size:.78rem;font-weight:700
+      }
+      .midias-ac-chip button{
+        border:none;background:transparent;color:inherit;cursor:pointer;
+        padding:0;margin:0;font-size:.85rem;line-height:1
+      }
+    `;
     document.head.appendChild(style);
   }
 
@@ -844,9 +1035,152 @@
     else { span.textContent = 'Mostrar mais'; ico.className = 'fa fa-arrow-down'; }
   }
 
-  const setTabSelected = type => els.tabs.forEach(b=>b.setAttribute('aria-selected', b.dataset.type===type ? 'true':'false'));
+  function updateSearchPlaceholder(){
+    if (!els.q) return;
+    els.q.placeholder = selectedClient
+      ? `Cliente selecionado: ${selectedClient.nome}`
+      : 'Buscar arquivo ou cliente…';
+  }
+
+  function ensureClientAutocomplete(){
+    if (!els.q || acWrap) return;
+    injectClientAutocompleteCSS();
+
+    const parent = els.q.parentElement;
+    if (!parent) return;
+
+    acWrap = document.createElement('div');
+    acWrap.className = 'midias-ac-wrap';
+
+    parent.insertBefore(acWrap, els.q);
+    acWrap.appendChild(els.q);
+
+    acList = document.createElement('div');
+    acList.className = 'midias-ac-list';
+    acList.setAttribute('role', 'listbox');
+    acWrap.appendChild(acList);
+
+    document.addEventListener('mousedown', (e)=>{
+      if (!acWrap?.contains(e.target)) closeAutocomplete();
+    });
+  }
+
+  function closeAutocomplete(){
+    if (!acList) return;
+    acItems = [];
+    acIndex = -1;
+    acList.classList.remove('show');
+    acList.innerHTML = '';
+  }
+
+  function renderAutocomplete(items){
+    if (!acList) return;
+    acItems = items.slice();
+    acIndex = -1;
+
+    if (!items.length){
+      acList.innerHTML = `<div class="midias-ac-empty">Nenhum cliente encontrado.</div>`;
+      acList.classList.add('show');
+      return;
+    }
+
+    acList.innerHTML = items.map((it, idx)=>{
+      const avatar = it.avatar_url
+        ? `<img src="${escapeHtml(it.avatar_url)}" alt="${escapeHtml(it.nome)}">`
+        : escapeHtml((it.nome || '?').trim().slice(0,1).toUpperCase() || '?');
+
+      return `
+        <button type="button" class="midias-ac-item" data-idx="${idx}" role="option">
+          <span class="ac-avatar">${avatar}</span>
+          <span class="ac-main">
+            <span class="ac-name">${escapeHtml(it.nome || 'Cliente')}</span>
+            <span class="ac-sub">${escapeHtml(it.telefone || '')}</span>
+          </span>
+        </button>
+      `;
+    }).join('');
+
+    Array.from(acList.querySelectorAll('.midias-ac-item')).forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const idx = Number(btn.dataset.idx || '-1');
+        const item = acItems[idx];
+        if (item) selectClient(item);
+      });
+    });
+
+    acList.classList.add('show');
+  }
+
+  async function fetchClientSuggestions(term){
+    const empresaId = getEmpresaId();
+    if (!empresaId || !term || term.trim().length < 2){
+      closeAutocomplete();
+      return;
+    }
+
+    if (acAbort) acAbort.abort();
+    acAbort = new AbortController();
+
+    try{
+      const url = `/api/clientes/search?empresa_id=${encodeURIComponent(empresaId)}&q=${encodeURIComponent(term.trim())}&limit=8`;
+
+      const r = await authFetch(url, { signal: acAbort.signal });
+      if (r.status === 401 || r.status === 403) return;
+      if (!r.ok){
+        closeAutocomplete();
+        return;
+      }
+
+      const data = await r.json().catch(()=>({ items: [] }));
+      const items = Array.isArray(data?.items) ? data.items : [];
+      renderAutocomplete(items);
+    }catch(e){
+      if (e?.name === 'AbortError' || e?.__authRedirect) return;
+      closeAutocomplete();
+    }
+  }
+
+
+  function clearSelectedClient(runFetch = true){
+    selectedClient = null;
+    scope.clienteId = getClienteIdFromContext();
+    updateSearchPlaceholder();
+    syncScopeVisual();
+    if (runFetch) fetchPage({ reset:true }).then(()=>saveState());
+  }
+
+  function selectClient(item){
+    selectedClient = {
+      id: Number(item.id),
+      nome: item.nome || 'Cliente',
+      telefone: item.telefone || '',
+      avatar_url: item.avatar_url || null,
+    };
+    scope.clienteId = Number(item.id);
+    if (els.q) els.q.value = selectedClient.nome;
+    closeAutocomplete();
+    updateSearchPlaceholder();
+    syncScopeVisual();
+    fetchPage({ reset:true }).then(()=>{
+      saveState();
+      toast(`Filtrando por cliente: ${selectedClient.nome}`);
+    });
+  }
+
+  function moveAutocomplete(dir){
+    if (!acList || !acItems.length) return;
+    acIndex += dir;
+    if (acIndex < 0) acIndex = acItems.length - 1;
+    if (acIndex >= acItems.length) acIndex = 0;
+
+    Array.from(acList.querySelectorAll('.midias-ac-item')).forEach((el, idx)=>{
+      el.classList.toggle('active', idx === acIndex);
+    });
+  }
 
   function bindFilterEvents(){
+    ensureClientAutocomplete();
+
     els.tabs.forEach(btn=>{
       btn.addEventListener('click',()=>{
         const t=btn.dataset.type;
@@ -859,7 +1193,64 @@
     });
 
     els.ordenar?.addEventListener('change', ()=>{ fetchPage({ reset:true }).then(()=>saveState()); });
-    els.q?.addEventListener('keydown', e=>{ if(e.key==='Enter'){ fetchPage({ reset:true }).then(()=>saveState()); }});
+
+    els.q?.addEventListener('input', ()=>{
+      const val = (els.q.value || '').trim();
+
+      if (selectedClient && val !== selectedClient.nome){
+        selectedClient = null;
+        scope.clienteId = getClienteIdFromContext();
+        syncScopeVisual();
+      }
+
+      clearTimeout(acTimer);
+      if (!val){
+        closeAutocomplete();
+        return;
+      }
+      acTimer = setTimeout(()=> fetchClientSuggestions(val), 220);
+    });
+
+    els.q?.addEventListener('keydown', e=>{
+      if (acList?.classList.contains('show') && acItems.length){
+        if (e.key === 'ArrowDown'){
+          e.preventDefault();
+          moveAutocomplete(1);
+          return;
+        }
+        if (e.key === 'ArrowUp'){
+          e.preventDefault();
+          moveAutocomplete(-1);
+          return;
+        }
+        if (e.key === 'Enter' && acIndex >= 0 && acItems[acIndex]){
+          e.preventDefault();
+          selectClient(acItems[acIndex]);
+          return;
+        }
+        if (e.key === 'Escape'){
+          e.preventDefault();
+          closeAutocomplete();
+          return;
+        }
+      }
+
+      if (e.key === 'Enter'){
+        e.preventDefault();
+        closeAutocomplete();
+        fetchPage({ reset:true }).then(()=>saveState());
+      }
+    });
+
+    els.q?.addEventListener('search', ()=>{
+      if (!els.q.value && selectedClient){
+        clearSelectedClient(true);
+      }
+    });
+
+    els.q?.addEventListener('blur', ()=>{
+      setTimeout(()=> closeAutocomplete(), 120);
+    });
 
     els.btnLimpar?.addEventListener('click', ()=>{
       if (selected.size === 0){ toast('Selecione arquivos no ✓ para limpar.'); return; }
@@ -882,11 +1273,11 @@
     });
 
     els.btnMeus?.addEventListener('click', ()=>{
-      scope.type = 'meus';
-      selectedInst = '';
-      updateUploadState();
-      fetchPage({ reset:true }).then(()=>saveState());
-      toast('Você está vendo apenas Meus Arquivos.');
+      activateMeusMode({ preserveLastInst:true });
+      fetchPage({ reset:true }).then(()=>{
+        saveState();
+        toast('Você está vendo apenas Meus Arquivos.');
+      });
     });
 
     els.grid?.addEventListener('click', e=>{
@@ -948,22 +1339,36 @@
 
     ensureCSSEscape();
     const empresaId = getEmpresaId();
+    const labelsMap = new Map();
 
     function setActiveUI(value, text){
       listEl.querySelectorAll('.inst-item').forEach(b=>{
-        const isSel = (b.dataset.value === String(value));
+        let isSel = false;
+        if (isScopeAll()) isSel = b.dataset.value === '__all__';
+        else if (isScopeInst()) isSel = b.dataset.value === String(value);
+        else isSel = false;
         b.setAttribute('aria-selected', isSel ? 'true' : 'false');
       });
-      label.textContent = text || (value ? `Instância ${value}` : 'Todas as instâncias');
+      label.textContent = text || (value ? `Instância ${value}` : 'Todos os arquivos');
+      btn.classList.toggle('mode-meus', isScopeMeus());
+    }
+
+    function getLabel(value){
+      if (!value || value === '__all__') return 'Todos os arquivos';
+      return labelsMap.get(String(value)) || `Instância ${value}`;
     }
 
     function selectValue(value, text){
-      selectedInst = value || '';
-      scope.type = 'inst';
-      setActiveUI(value, text);
-      setSavedInst(empresaId, value);
-      updateUploadState();
-      document.dispatchEvent(new CustomEvent('midias:instancia-set', { detail:{ value } }));
+      clearSelectedClient(false);
+
+      if (value === '__all__'){
+        activateAllMode(text || 'Todos os arquivos');
+        document.dispatchEvent(new CustomEvent('midias:scope-set', { detail:{ type:'all' } }));
+      } else {
+        activateInstMode(value || '', text);
+        setSavedInst(empresaId, value || '');
+        document.dispatchEvent(new CustomEvent('midias:scope-set', { detail:{ type:'inst', value: value || '' } }));
+      }
       closeMenu();
       btn.focus();
     }
@@ -1005,15 +1410,24 @@
       }
     }
 
-    btn.addEventListener('click', toggleMenu);
+    btn.addEventListener('click', ()=>{
+      if (isScopeMeus()){
+        leaveMeusModeToLastScope();
+        fetchPage({ reset:true }).then(()=>saveState());
+        return;
+      }
+      toggleMenu();
+    });
 
     async function loadList(){
       listEl.innerHTML = '';
-      const saved = getSavedInst(empresaId);
-      selectedInst = saved || '';
-      scope.type = 'inst';
+      labelsMap.clear();
 
-      listEl.appendChild(itemTpl('Todas as instâncias','', saved === '' , selectValue));
+      const saved = getSavedInst(empresaId);
+      if (isScopeInst()) selectedInst = saved || '';
+
+      labelsMap.set('__all__', 'Todos os arquivos');
+      listEl.appendChild(itemTpl('Todos os arquivos','__all__', isScopeAll(), selectValue));
 
       let items = [];
       if (empresaId){
@@ -1028,27 +1442,23 @@
       items.forEach(i=>{
         const v = String(instValue(i) ?? '');
         const t = instLabel(i, v);
-        listEl.appendChild(itemTpl(t, v, saved !== '' && saved === v, selectValue));
+        labelsMap.set(v, t);
+        listEl.appendChild(itemTpl(t, v, isScopeInst() && saved !== '' && saved === v, selectValue));
       });
 
-      if (saved){
-        const sel = listEl.querySelector(`.inst-item[data-value="${CSS.escape(saved)}"]`);
-        setActiveUI(saved, sel?.dataset?.label || `Instância ${saved}`);
-      }else{
-        setActiveUI('', 'Todas as instâncias');
-      }
+      syncScopeVisual();
     }
 
+    instUI = { setActiveUI, getLabel, loadList };
     loadList();
   }
 
-  document.addEventListener('midias:instancia-set', () => { fetchPage({ reset:true }).then(()=>saveState()); });
+  document.addEventListener('midias:scope-set', () => { fetchPage({ reset:true }).then(()=>saveState()); });
 
   async function uploadFiles(files){
     if(!files||!files.length) return;
     const fd=new FormData();
     Array.from(files).forEach(f=>fd.append('files', f));
-    fd.append('sem_cliente','true');
 
     showLoading(true);
     try{
@@ -1087,6 +1497,7 @@
       setMoreVisibility(true);
       updateUploadState();
       updateBulkUI();
+      syncScopeVisual();
     }
 
     paging.loading = true;
@@ -1257,18 +1668,29 @@
   async function boot(){
     if (window.ZAuth?.softEnsureAuth) await ZAuth.softEnsureAuth();
     bindPageEvents();
-    updateUploadState();
 
     const empresaId = getEmpresaId();
-    const saved = (empresaId ? (localStorage.getItem(`instAtiva:${empresaId}`) || '') : '');
-    if (saved) {
-      selectedInst = saved;
-      scope.type = 'inst';
+    const savedScope = loadLastScope();
+    const savedInst = empresaId ? (localStorage.getItem(`instAtiva:${empresaId}`) || '') : '';
+
+    scope.clienteId = getClienteIdFromContext();
+
+    if (savedScope?.lastInstBeforeMeus) lastInstBeforeMeus = savedScope.lastInstBeforeMeus;
+    else if (savedInst) lastInstBeforeMeus = savedInst;
+
+    if (savedScope?.lastScopeBeforeMeus) lastScopeBeforeMeus = savedScope.lastScopeBeforeMeus;
+
+    if (savedScope?.scopeType === 'meus'){
+      activateMeusMode({ preserveLastInst:false });
+    } else if (savedScope?.scopeType === 'inst' && savedInst){
+      activateInstMode(savedInst, instUI?.getLabel?.(savedInst) || `Instância ${savedInst}`);
+    } else {
+      activateAllMode('Todos os arquivos');
     }
 
     const restored = await restoreFromStateIfSameQuery();
     if (!restored) {
-      scope = { type:'inst', clienteId:null };
+      syncScopeVisual();
       await fetchPage({ reset:true });
       saveState();
     }
@@ -1307,7 +1729,10 @@
     state: () => ({
       empresa_id: getEmpresaId(),
       scope,
+      selectedClient,
       selectedInst,
+      lastInstBeforeMeus,
+      lastScopeBeforeMeus,
       q: (els.q?.value||'').trim(),
       ordenar: els.ordenar?.value || 'recent',
       currentType,
@@ -1315,6 +1740,7 @@
       query: buildQuery(),
     }),
     query: () => buildQuery(),
+    clearClient: () => clearSelectedClient(true),
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run, { once:true });

@@ -7,17 +7,17 @@
   --hover:rgba(255,255,255,.04); --hover-strong:rgba(255,255,255,.06);
 
   /* brand */
-  --brand:#25d366;
-  --brand-600:#128c7e;
-  --brand-700:#0fa27c;
+  --brand:#1b8a68;
+  --brand-600:#166f54;
+  --brand-700:#125844;
 
   --ring:#34b7f1;
   --danger:#ef4444;
   --chip:#2a2a2e;
 
   /* tamanhos (desktop) */
-  --thumb-h: 84px;        /* menor bloco da imagem */
-  --card-min: 160px;      /* cards mais estreitas */
+  --thumb-h: 84px;
+  --card-min: 160px;
 
   /* tipografia compacta */
   --title-fs: .82rem;
@@ -70,6 +70,15 @@ a{color:inherit;text-decoration:none}
 .inst-trigger:hover{ background:var(--hover); }
 .inst-trigger .chev{ font-size:.9rem; opacity:.85; }
 
+.inst-trigger.mode-meus{
+  border-color:color-mix(in oklab, var(--brand) 60%, var(--border));
+  background:color-mix(in oklab, var(--brand) 8%, var(--card));
+  color:var(--fg);
+}
+html:not(.dark) .inst-trigger.mode-meus{
+  color:var(--fg);
+}
+
 .inst-menu{
   position:absolute; top:calc(100% + .5rem); left:0; z-index:50;
   min-width:260px; max-height:340px; overflow:auto;
@@ -113,6 +122,14 @@ a{color:inherit;text-decoration:none}
 }
 #btn-meus-arquivos i{ color:var(--brand); }
 #btn-meus-arquivos:hover{ background:var(--hover); }
+
+#btn-meus-arquivos.active{
+  border-color:color-mix(in oklab, var(--brand) 65%, var(--border));
+  background:color-mix(in oklab, var(--brand) 10%, var(--card));
+  color:var(--fg);
+  box-shadow:0 0 0 1px color-mix(in oklab, var(--brand) 22%, transparent) inset;
+}
+#btn-meus-arquivos.active i{ color:var(--brand); }
 
 .hide-xs{ display:inline }
 .show-xs{ display:none }
@@ -229,6 +246,17 @@ a{color:inherit;text-decoration:none}
 }
 .media-meta span{ flex:0 0 auto; }
 .media-meta span:last-child{ flex:0 0 auto; white-space:nowrap; }
+
+.media-group-meta{
+  font-size:.72rem;
+  color:var(--muted);
+  display:flex;
+  align-items:center;
+  gap:.35rem;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
 
 /* legenda do nome no mobile */
 .thumb-cap{ display:none; }
@@ -416,7 +444,6 @@ a{color:inherit;text-decoration:none}
     border-radius:.4rem !important;
   }
 
-  /* legenda do nome — aparece no mobile como overlay no rodapé */
   .thumb-cap{
     position:absolute; left:0; right:0; bottom:0;
     padding:.42rem .5rem;
@@ -434,13 +461,11 @@ a{color:inherit;text-decoration:none}
 
   .midias-modal__panel{ width:100vw; height:100vh; max-height:100vh; border-radius:0; }
 
-  /* header do modal respeita notch */
   .midias-modal__header{
     top: env(safe-area-inset-top, 0);
     padding-top: max(.7rem, env(safe-area-inset-top, .7rem));
   }
 
-  /* barra de info fixa no rodapé do preview */
   .mm-info{
     position: sticky;
     bottom: 0;

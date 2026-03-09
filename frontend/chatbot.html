@@ -32,7 +32,6 @@
     .inst-item[aria-selected="true"] .radio{border-color:var(--ring)}
     .inst-item[aria-selected="true"] .radio::after{content:"";width:8px;height:8px;border-radius:999px;background:var(--ring);display:block}
 
-    /* horários */
     .sched{margin:.35rem 0 .5rem;display:none}
     .sched.show{display:block}
     .time-grid{display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:.5rem}
@@ -40,10 +39,33 @@
     .time-grid input[type="time"]{width:100%;padding:.5rem .6rem;border:1px solid var(--border);background:var(--card);color:var(--fg);border-radius:.5rem}
     .time-grid input[disabled]{opacity:.6;cursor:not-allowed}
 
-    /* chips de sugestões (departamentos) */
     .chips{display:flex;flex-wrap:wrap;gap:.4rem;margin:.35rem 0}
     .chip{padding:.3rem .6rem;border-radius:.6rem;border:1px solid var(--border);background:var(--bg);cursor:pointer;font-size:.85rem}
     .chip:hover{background:var(--hover)}
+
+    .preview-card{
+      margin-top:.75rem;
+      border:1px solid var(--border);
+      background:var(--bg);
+      border-radius:.8rem;
+      padding:.75rem;
+    }
+    .preview-title{
+      font-size:.85rem;
+      color:var(--muted);
+      margin-bottom:.45rem;
+      display:flex;
+      align-items:center;
+      gap:.4rem;
+    }
+    .preview-pre{
+      margin:0;
+      white-space:pre-wrap;
+      word-break:break-word;
+      font:inherit;
+      color:var(--fg);
+      line-height:1.5;
+    }
   </style>
 
   <script src="/frontend/js/app-base.js" defer></script>
@@ -58,12 +80,12 @@
       <h1><i class="fa-solid fa-robot title-ico"></i> Chatbot</h1>
       <span class="tag tag-ia">Funcionalidades</span>
 
-      <!-- dropdown de instâncias -->
       <button id="instMenuBtnChat" type="button" role="button" class="inst-trigger"
               aria-haspopup="listbox" aria-expanded="false" aria-controls="inst-menu-chat">
         <span id="instMenuLabelChat">Todas as instâncias</span>
         <span class="chev">▾</span>
       </button>
+
       <div id="inst-menu-chat" class="inst-menu" role="listbox" aria-hidden="true" aria-label="Selecionar instância">
         <div class="head">WhatsApps</div>
         <ul id="instMenuListChat"></ul>
@@ -71,7 +93,6 @@
     </div>
 
     <section class="stack" aria-label="Funcionalidades do chatbot">
-      <!-- ========== BLOCO 1 ========== -->
       <article class="item" id="it-auto">
         <header class="head" data-toggle="auto" role="button" aria-expanded="false">
           <div class="ico"><i class="fa-solid fa-comments"></i></div>
@@ -95,7 +116,6 @@
         <div class="body" id="body-auto" aria-hidden="true" style="height:0;opacity:0;pointer-events:none">
           <div class="body-inner">
             <div class="cols">
-              <!-- Boas-vindas -->
               <div class="col-card">
                 <div class="block-head">
                   <div class="block-title">Boas-vindas</div>
@@ -128,7 +148,6 @@
                 <div class="counter" id="wcCount">0 caracteres</div>
               </div>
 
-              <!-- Fora do horário -->
               <div class="col-card">
                 <div class="block-head">
                   <div class="block-title">Fora do horário</div>
@@ -176,13 +195,12 @@
         </div>
       </article>
 
-      <!-- ========== BLOCO 2 ========== -->
       <article class="item" id="it-auto-dept">
         <header class="head" data-toggle="auto-dept" role="button" aria-expanded="false">
           <div class="ico"><i class="fa-solid fa-layer-group"></i></div>
           <div>
-            <div class="title">Mensagens automáticas — Departamentos</div>
-            <div class="desc">Mensagem única de boas-vindas aplicada por departamento.</div>
+            <div class="title">Menu de triagem por departamento</div>
+            <div class="desc">Primeira mensagem enviada ao cliente para ele escolher o setor.</div>
           </div>
           <div class="right">
             <span id="pillDeptHdr" class="pill off">off</span>
@@ -201,7 +219,7 @@
           <div class="body-inner">
             <div class="col-card">
               <div class="block-head">
-                <div class="block-title">Boas-vindas</div>
+                <div class="block-title">Mensagem inicial da triagem</div>
                 <div class="block-ctrl">
                   <span id="pillDeptWelcome" class="pill off">off</span>
                   <label class="tswitch" id="swDeptWelcome" data-on="false" title="toggle dept welcome" tabindex="0">
@@ -214,7 +232,6 @@
                 </div>
               </div>
 
-              <!-- horários da mensagem de departamentos -->
               <div id="schedDeptWelcome" class="sched">
                 <div class="time-grid">
                   <div>
@@ -227,7 +244,7 @@
                   </div>
                 </div>
               </div>
-              <!-- seleção de departamentos (triagem) -->
+
               <div class="dept-picker" aria-label="Departamentos na triagem">
                 <div class="dept-picker-head">
                   <div class="dept-picker-title">Departamentos na triagem</div>
@@ -252,14 +269,18 @@
                 </div>
               </div>
 
+              <div id="deptChips" class="chips" aria-label="Sugestões de triagem"></div>
 
-
-              <!-- sugestões de setores (preenchidas via JS) -->
-              <div id="deptChips" class="chips" aria-label="Sugestões de setores"></div>
-
-              <!-- texto da mensagem de boas-vindas (departamentos) -->
-              <textarea id="msgDeptWelcome" placeholder="Mensagem de boas-vindas por departamento" disabled></textarea>
+              <textarea id="msgDeptWelcome" placeholder="Mensagem inicial da triagem" disabled></textarea>
               <div class="counter" id="dwCount">0 caracteres</div>
+
+              <div id="prevDept" class="preview-card" style="display:none">
+                <div class="preview-title">
+                  <i class="fa-solid fa-eye"></i>
+                  Prévia da mensagem para o cliente
+                </div>
+                <pre id="prevDeptText" class="preview-pre">—</pre>
+              </div>
             </div>
 
             <div style="margin-top:.75rem;display:flex;gap:.5rem;justify-content:flex-end">

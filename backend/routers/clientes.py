@@ -15,10 +15,9 @@ from openpyxl import Workbook, load_workbook
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-# ===== Zona/Timezone (SP com fallback UTC-3) =====
 try:
     from zoneinfo import ZoneInfo
-except Exception:  # pragma: no cover
+except Exception:
     ZoneInfo = None  # type: ignore
 
 
@@ -31,18 +30,11 @@ def tz_sao_paulo():
     return timezone(timedelta(hours=-3))
 
 
-# ===== Infra =====
 from backend.database import get_db
 from backend import models
-from backend.routers.auth import get_current_identity  # 🔒 usa identity (colab + perms)
-
-# ===== Plano/Entitlements =====
+from backend.routers.auth import get_current_identity
 from backend.utils.entitlements import enforce_quota, has_feature
-
-# ===== Privacidade por instâncias (colaborador) =====
 from backend.security.instancias import instancias_visiveis
-
-# ===== Redis cache util =====
 from backend.cache.redis_client import (
     get_json as cache_get_json,
     set_json as cache_set_json,
@@ -53,24 +45,16 @@ from backend.cache.redis_client import (
 router = APIRouter(prefix="/clientes", tags=["Clientes"])
 
 
-# ---------- Schemas ----------
 class PatchClienteProfile(BaseModel):
-    # já existentes
     departamento: Optional[str] = None
     sobre_cliente: Optional[str] = None
-
-    # novos campos básicos
     nome: Optional[str] = None
     telefone: Optional[str] = None
-
-    # documentos / contato
     cpf_cnpj: Optional[str] = None
     rg: Optional[str] = None
     email: Optional[str] = None
     data_nascimento: Optional[datetime] = None
     genero: Optional[str] = None
-
-    # endereço
     cep: Optional[str] = None
     endereco: Optional[str] = None
     numero: Optional[str] = None
@@ -78,8 +62,6 @@ class PatchClienteProfile(BaseModel):
     bairro: Optional[str] = None
     cidade: Optional[str] = None
     estado: Optional[str] = None
-
-    # outras infos
     nome_completo: Optional[str] = None
     website: Optional[str] = None
     descricao: Optional[str] = None
@@ -90,20 +72,19 @@ class PostNovoCliente(BaseModel):
     telefone: str
     departamento: Optional[str] = None
     sobre_cliente: Optional[str] = None
-    colaborador_id: Optional[int] = None  # opcional no create
+    colaborador_id: Optional[int] = None
 
 
 class BulkColaboradorIn(BaseModel):
     ids: List[int]
-    colaborador_id: Optional[int]  # null → remover colaborador
+    colaborador_id: Optional[int]
 
 
 class BulkDepartamentoIn(BaseModel):
     ids: List[int]
-    departamento_id: Optional[int]  # null → remover departamento
+    departamento_id: Optional[int]
 
 
-# ---------- helpers ----------
 def _id_get(obj: Any, key: str, default: Any = None) -> Any:
     if obj is None:
         return default
@@ -130,7 +111,6 @@ def _digits(s: str) -> str:
 
 
 def _iso(dt):
-    """ISO-8601 com seconds; se vier naive, assume UTC."""
     if not dt:
         return None
     if isinstance(dt, (datetime, date)):
@@ -145,10 +125,6 @@ def _get_perms(identity) -> set[str]:
 
 
 def _assert_instancia_acl(identity: Any, db: Session, instancia_id: Optional[int]) -> None:
-    """
-    Se for colaborador e tiver restrição de instâncias, valida.
-    - instancia_id None: não bloqueia (depende do seu modelo; aqui mantemos permissivo).
-    """
     vis = instancias_visiveis(identity, db)
     if vis is None:
         return
@@ -163,13 +139,9 @@ def _assert_instancia_acl(identity: Any, db: Session, instancia_id: Optional[int
 
 
 def _apply_instancias_filter(identity: Any, db: Session, query):
-    """
-    Aplica filtro de instâncias no SELECT para colaborador restrito.
-    """
     vis = instancias_visiveis(identity, db)
     if vis is None:
         return query
-    # se a lista for vazia, não retorna nada
     if not vis:
         return query.filter(models.Cliente.id == -1)
     return query.filter(models.Cliente.instancia_id.in_(vis))
@@ -179,10 +151,6 @@ def get_empresa_autorizada(
     empresa_id: int = Depends(resolve_empresa_id),
     identity=Depends(get_current_identity),
 ) -> int:
-    """
-    Garante que o empresa_id pedido na rota é o mesmo da empresa do usuário logado.
-    Agora usando identity (funciona para colaborador também).
-    """
     emp = _id_get(identity, "empresa_id")
     if emp is not None and int(emp) != int(empresa_id):
         raise HTTPException(
@@ -192,7 +160,6 @@ def get_empresa_autorizada(
     return int(empresa_id)
 
 
-# ======== helpers de IO (Export/Import) ========
 COLUMNS = ["nome", "telefone", "departamento", "sobre_cliente"]
 
 
@@ -224,10 +191,7 @@ def _xlsx_rows_to_dicts(ws):
     return out
 
 
-# ============================================================
-# =============== LISTAR (pagina por 20 + cache) ============
-# ============================================================
-@router.get("")  # sem response_model
+@router.get("")
 def listar_clientes(
     empresa_id: int = Depends(get_empresa_autorizada),
     q: Optional[str] = Query(None),
@@ -241,11 +205,6 @@ def listar_clientes(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    """
-    Lista de clientes com paginação + cache.
-    Inclui `colaborador_nome` e `departamento_id` no payload.
-    Precisa da permissão: clientes.ver
-    """
     perms = _get_perms(identity)
     if "clientes.ver" not in perms:
         raise HTTPException(
@@ -253,11 +212,9 @@ def listar_clientes(
             detail="Sem permissão para ver clientes (clientes.ver).",
         )
 
-    # Se for colaborador restrito, não deixa forçar instancia_id fora do ACL
     if instancia_id is not None:
         _assert_instancia_acl(identity, db, instancia_id)
 
-    # ====== Cache key ======
     key_src = json.dumps(
         {
             "emp": empresa_id,
@@ -269,7 +226,6 @@ def listar_clientes(
             "colab": colaborador_id,
             "limit": limit,
             "offset": offset,
-            # inclui ACL no cache (colab pode ter filtros diferentes)
             "acl": instancias_visiveis(identity, db),
         },
         sort_keys=True,
@@ -282,7 +238,6 @@ def listar_clientes(
     if cached:
         return cached
 
-    # ====== Query base ======
     Colab = aliased(models.Colaborador)
 
     base = (
@@ -293,7 +248,7 @@ def listar_clientes(
             models.Cliente.telefone,
             models.Cliente.avatar_url,
             models.Cliente.departamento,
-            models.Cliente.departamento_id,  # <- incluído
+            models.Cliente.departamento_id,
             models.Cliente.sobre_cliente.label("sobre"),
             models.Cliente.timestamp.label("data_cadastro"),
             models.Cliente.timestamp.label("timestamp"),
@@ -311,7 +266,6 @@ def listar_clientes(
         .filter(models.Cliente.empresa_id == empresa_id)
     )
 
-    # aplica privacidade por instância
     base = _apply_instancias_filter(identity, db, base)
 
     if instancia_id is not None:
@@ -338,7 +292,6 @@ def listar_clientes(
         else:
             base = base.filter(models.Cliente.colaborador_id == colaborador_id)
 
-    # Período em America/Sao_Paulo → UTC
     tz_sp = tz_sao_paulo()
     if data_inicio:
         ini_local = datetime.combine(data_inicio, time(0, 0, 0, tzinfo=tz_sp))
@@ -384,19 +337,85 @@ def listar_clientes(
     return out
 
 
-# ============================================================
-# ============= COLABORADORES (listar p/ select) ============
-# ============================================================
+@router.get("/search")
+def buscar_clientes_leve(
+    empresa_id: int = Depends(get_empresa_autorizada),
+    q: str = Query(..., min_length=1),
+    limit: int = Query(8, ge=1, le=20),
+    instancia_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    perms = _get_perms(identity)
+    if "clientes.ver" not in perms:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem permissão para buscar clientes.",
+        )
+
+    termo = (q or "").strip()
+    if not termo:
+        return {"items": []}
+
+    if instancia_id is not None:
+        _assert_instancia_acl(identity, db, instancia_id)
+
+    like = f"%{termo}%"
+    dq = _digits(termo)
+
+    query = (
+        db.query(
+            models.Cliente.id,
+            models.Cliente.nome,
+            models.Cliente.nome_whatsapp,
+            models.Cliente.telefone,
+            models.Cliente.avatar_url,
+            models.Cliente.instancia_id,
+        )
+        .filter(models.Cliente.empresa_id == empresa_id)
+    )
+
+    query = _apply_instancias_filter(identity, db, query)
+
+    if instancia_id is not None:
+        query = query.filter(models.Cliente.instancia_id == instancia_id)
+
+    conds = [
+        models.Cliente.nome.ilike(like),
+        models.Cliente.nome_whatsapp.ilike(like),
+        models.Cliente.telefone.ilike(like),
+    ]
+    if dq:
+        conds.append(models.Cliente.telefone_norm.ilike(f"%{dq}%"))
+
+    rows = (
+        query
+        .filter(or_(*conds))
+        .order_by(desc(models.Cliente.timestamp), desc(models.Cliente.id))
+        .limit(limit)
+        .all()
+    )
+
+    items = []
+    for r in rows:
+        nome = (r.nome_whatsapp or r.nome or "Cliente").strip()
+        items.append({
+            "id": r.id,
+            "nome": nome,
+            "telefone": r.telefone,
+            "avatar_url": r.avatar_url,
+            "instancia_id": r.instancia_id,
+        })
+
+    return {"items": items}
+
+
 @router.get("/colaboradores")
 def listar_colaboradores(
     empresa_id: int = Depends(get_empresa_autorizada),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    """
-    Retorna a lista de colaboradores da empresa (id, nome, email) para popular o select.
-    Precisa pelo menos de clientes.ver (ou clientes.editar, etc).
-    """
     perms = _get_perms(identity)
     if "clientes.ver" not in perms and "clientes.editar" not in perms:
         raise HTTPException(
@@ -413,9 +432,6 @@ def listar_colaboradores(
     return {"items": items}
 
 
-# ============================================================
-# ===================== DETALHE /{id} =======================
-# ============================================================
 @router.get("/{cliente_id}")
 def obter_cliente(
     cliente_id: int,
@@ -423,10 +439,6 @@ def obter_cliente(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    """
-    Retorna o detalhe do cliente, incluindo `colaborador_nome`.
-    Permissão: clientes.ver
-    """
     perms = _get_perms(identity)
     if "clientes.ver" not in perms:
         raise HTTPException(
@@ -450,7 +462,6 @@ def obter_cliente(
             models.Cliente.colaborador_id,
             Colab.nome.label("colaborador_nome"),
             models.Cliente.instancia_id,
-            # ====== CAMPOS EXTRAS ======
             models.Cliente.cpf_cnpj,
             models.Cliente.rg,
             models.Cliente.email,
@@ -482,7 +493,6 @@ def obter_cliente(
     if not r:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
-    # privacidade por instância
     _assert_instancia_acl(identity, db, r.instancia_id)
 
     return {
@@ -499,7 +509,6 @@ def obter_cliente(
         "colaborador_id": r.colaborador_id,
         "colaborador_nome": r.colaborador_nome,
         "instancia_id": r.instancia_id,
-        # ====== CAMPOS EXTRAS ======
         "cpf_cnpj": r.cpf_cnpj,
         "rg": r.rg,
         "email": r.email,
@@ -520,9 +529,6 @@ def obter_cliente(
     }
 
 
-# ============================================================
-# ===================== PATCH /{id}/profile =================
-# ============================================================
 @router.patch("/{cliente_id}/profile")
 def patch_cliente_profile(
     cliente_id: int,
@@ -546,16 +552,13 @@ def patch_cliente_profile(
     if not c:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
-    # privacidade por instância
     _assert_instancia_acl(identity, db, getattr(c, "instancia_id", None))
 
-    # ====== CAMPOS ORIGINAIS ======
     if payload.departamento is not None:
         c.departamento = payload.departamento or None
     if payload.sobre_cliente is not None:
         c.sobre_cliente = payload.sobre_cliente or None
 
-    # ====== NOVOS CAMPOS ======
     if payload.nome is not None:
         c.nome = payload.nome or "Cliente"
 
@@ -616,9 +619,6 @@ def patch_cliente_profile(
     return {"ok": True}
 
 
-# ============================================================
-# ========================= POST /novo =======================
-# ============================================================
 @router.post("/novo")
 def criar_cliente(
     body: PostNovoCliente,
@@ -637,7 +637,6 @@ def criar_cliente(
     if not tel:
         raise HTTPException(status_code=400, detail="Telefone inválido")
 
-    # Checa duplicidade pelo telefone_norm (coluna gerada = apenas dígitos)
     dup = (
         db.query(models.Cliente)
         .filter(
@@ -649,10 +648,8 @@ def criar_cliente(
     if dup:
         return {"id": dup.id, "exists": True}
 
-    # 🔒 Plano: precisa ter espaço para +1 contato
     enforce_quota(db, empresa_id, "contacts_max", delta=1)
 
-    # valida colaborador (se enviado)
     colab_id = body.colaborador_id
     if colab_id is not None:
         exists = (
@@ -670,7 +667,6 @@ def criar_cliente(
         departamento=(body.departamento or None),
         colaborador_id=colab_id,
         timestamp=datetime.now(timezone.utc),
-        # NÃO enviar telefone_norm (coluna gerada no banco)
     )
     if body.sobre_cliente is not None:
         c.sobre_cliente = body.sobre_cliente
@@ -697,9 +693,6 @@ def criar_cliente(
     return {"id": c.id, "created": True}
 
 
-# ============================================================
-# ============== EXPORTAR / IMPORTAR CLIENTES ===============
-# ============================================================
 @router.get("/export")
 def exportar_clientes(
     fmt: str = Query("csv", pattern="^(csv|xlsx|pdf)$"),
@@ -715,7 +708,6 @@ def exportar_clientes(
             detail="Sem permissão para exportar clientes (clientes.importar_exportar).",
         )
 
-    # 🔒 Plano: export precisa estar habilitado
     if not has_feature(db, empresa_id, "feature_export"):
         raise HTTPException(
             status_code=403,
@@ -821,7 +813,6 @@ def importar_clientes(
             detail="Sem permissão para importar clientes (clientes.importar_exportar).",
         )
 
-    # 🔒 Plano: import precisa estar habilitado
     if not has_feature(db, empresa_id, "feature_import"):
         raise HTTPException(
             status_code=403,
@@ -833,7 +824,6 @@ def importar_clientes(
     if not content:
         raise HTTPException(status_code=400, detail="Arquivo vazio.")
 
-    # 1) parse tudo pra memória (pra contar quantos NOVOS vão entrar)
     parsed_rows: List[Dict[str, str]] = []
     if name.endswith(".xlsx"):
         wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
@@ -861,7 +851,6 @@ def importar_clientes(
     else:
         raise HTTPException(status_code=400, detail="Formato não suportado. Use CSV, XLSX ou TXT.")
 
-    # 2) calcula telefones únicos válidos no arquivo
     phones: List[str] = []
     seen: Set[str] = set()
     for row in parsed_rows:
@@ -872,7 +861,6 @@ def importar_clientes(
             seen.add(tel)
             phones.append(tel)
 
-    # 3) consulta de uma vez quais já existem
     existing: Set[str] = set()
     if phones:
         rows_exist = (
@@ -884,7 +872,6 @@ def importar_clientes(
 
     to_insert = len([p for p in phones if p not in existing])
 
-    # 🔒 Plano: reserva quota para os NOVOS contatos
     if to_insert > 0:
         enforce_quota(db, empresa_id, "contacts_max", delta=to_insert)
 
@@ -902,9 +889,7 @@ def importar_clientes(
             .first()
         )
         if cli:
-            # privacidade por instância (se o cli tiver instancia_id restrita, colaborador não edita)
             _assert_instancia_acl(identity, db, getattr(cli, "instancia_id", None))
-
             if sobrescrever:
                 if nome:
                     cli.nome = nome
@@ -938,9 +923,6 @@ def importar_clientes(
     }
 
 
-# ============================================================
-# ============= Atribuição de Colaborador ====================
-# ============================================================
 @router.post("/bulk/colaborador")
 def trocar_colaborador_em_massa(
     payload: BulkColaboradorIn,
@@ -948,11 +930,6 @@ def trocar_colaborador_em_massa(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    """
-    Atribui (ou remove) o colaborador de vários clientes.
-    - colaborador_id = null → remove colaborador
-    Permissão: clientes.editar
-    """
     perms = _get_perms(identity)
     if "clientes.editar" not in perms:
         raise HTTPException(
@@ -963,7 +940,6 @@ def trocar_colaborador_em_massa(
     if not payload.ids:
         raise HTTPException(status_code=400, detail="Lista de IDs vazia.")
 
-    # valida colaborador se informado
     if payload.colaborador_id is not None:
         ok = (
             db.query(models.Colaborador)
@@ -1000,10 +976,6 @@ def trocar_colaborador_unitario(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    """
-    Troca o colaborador de um único cliente.
-    Permissão: clientes.editar
-    """
     perms = _get_perms(identity)
     if "clientes.editar" not in perms:
         raise HTTPException(
@@ -1037,9 +1009,6 @@ def trocar_colaborador_unitario(
     return {"ok": True}
 
 
-# ============================================================
-# ============ Atribuição de Departamento (BULK) ============
-# ============================================================
 @router.post("/bulk/departamento")
 def trocar_departamento_em_massa(
     payload: BulkDepartamentoIn,
@@ -1047,10 +1016,6 @@ def trocar_departamento_em_massa(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    """
-    Define (ou remove) o departamento de vários clientes.
-    Permissão: clientes.editar
-    """
     perms = _get_perms(identity)
     if "clientes.editar" not in perms:
         raise HTTPException(

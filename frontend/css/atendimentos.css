@@ -153,7 +153,6 @@ html[data-theme="light"] .logo-dark{display:none}
 #zcSidebarHost [role="dialog"]::-webkit-scrollbar{width:10px}
 #zcSidebarHost [role="dialog"]::-webkit-scrollbar-track{background:var(--scroll-track)}
 #zcSidebarHost [role="dialog"]::-webkit-scrollbar-thumb{background:var(--scroll-thumb);border-radius:8px;border:2px solid transparent;background-clip:padding-box}
-#inst-switch{background:transparent!important;border-top:0!important;border-bottom:0!important;padding:8px;box-shadow:none!important}
 .inst-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;font-size:12.5px;border-radius:9999px;background:var(--card);color:var(--text-2);border:1px solid var(--border-2);white-space:nowrap;cursor:pointer;transition:.15s}
 .inst-pill:hover{background:var(--panel-3);border-color:var(--border);color:var(--text)}
 .inst-pill.is-active{background:var(--accent);border-color:var(--accent);color:#0b141a;font-weight:600}
@@ -706,7 +705,6 @@ html[data-theme="light"]{--shadow-soft:0 8px 24px rgba(15,23,42,.06);--shadow-so
 .wpp-header-search-row .fa-search{margin-right:8px;font-size:.92rem;color:var(--muted)}
 .wpp-header-search{font-size:.95rem;padding:0}
 .wpp-header-search::placeholder{color:color-mix(in oklab, var(--text-2) 88%, transparent)}
-#inst-switch{padding:6px 4px 2px!important}
 .inst-section-label{font-size:11px;margin:4px 6px 4px;gap:6px;font-weight:600;color:var(--muted)}
 .inst-section-label .dot{width:6px;height:6px;box-shadow:0 0 0 1.5px color-mix(in oklab, var(--accent) 24%, transparent)}
 .inst-pill{font-size:11.5px;padding:4px 8px;border-radius:999px;background:transparent;border:1px solid color-mix(in oklab, var(--border-2) 80%, transparent);color:var(--text-2)}
@@ -798,233 +796,91 @@ footer{min-height:62px!important;padding:0 16px 14px!important;background:transp
   #chat-footer .composer-wrap{padding:0 8px}
 }
 
-/* =========================================
-   WHATSAPPS / FILTROS — VISUAL CLEAN SEM BORDA
-   ========================================= */
+/* ===== TOPO / INSTÂNCIAS ===== */
 
-#inst-switch{
-  background:transparent !important;
-  border-top:0 !important;
-  border-bottom:0 !important;
-  padding:4px 2px 2px !important;
-  box-shadow:none !important;
+#inst-switch{display:none!important}
+.wpp-header-externo{padding:14px 14px 10px!important}
+.zc-topbar{display:flex;flex-direction:column;gap:8px}
+.zc-topbar-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.zc-brand-wrap{min-width:0;display:flex;align-items:center}
+.zc-brand-title{font-size:1rem;font-weight:700;letter-spacing:-.2px;color:var(--text);line-height:1}
+.zc-inst-row{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:nowrap}
+.zc-inst-meta{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;min-width:0;padding-left:1px}
+.zc-inst-meta .dot{width:6px;height:6px;border-radius:999px;background:var(--accent);display:block;flex:0 0 auto;box-shadow:0 0 0 3px rgba(37,211,102,.10)}
+.zc-inst-title{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;letter-spacing:.1px}
+#zc-inst-count{color:var(--text-2);opacity:.9}
+.zc-inst-dropdown{position:relative;display:inline-block;flex:0 0 auto;min-width:128px;max-width:180px}
+.zc-inst-trigger{width:100%;min-height:32px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 11px;border:1px solid color-mix(in oklab,var(--border) 82%,transparent);border-radius:999px;background:color-mix(in oklab,var(--panel-2) 92%,transparent);color:var(--text);box-shadow:none;font-size:12px;font-weight:600;cursor:pointer;transition:background .16s ease,border-color .16s ease,color .16s ease,box-shadow .16s ease}
+.zc-inst-trigger:hover{background:color-mix(in oklab,var(--panel-3) 90%,transparent);border-color:color-mix(in oklab,var(--accent) 42%,var(--border));color:var(--text)}
+.zc-inst-trigger:focus-visible{outline:none;border-color:rgba(37,211,102,.45);box-shadow:0 0 0 3px rgba(37,211,102,.12)}
+.zc-inst-trigger-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.zc-inst-trigger i{font-size:9px;flex:0 0 auto;opacity:.72;color:var(--text-2);transition:transform .15s ease,opacity .15s ease}
+.zc-inst-trigger:hover i{opacity:.95}
+.zc-inst-dropdown.is-open .zc-inst-trigger i{transform:rotate(180deg)}
+.zc-inst-menu{position:absolute;top:calc(100% + 8px);left:0;z-index:70;min-width:100%;max-width:280px;padding:6px;border-radius:14px;background:var(--panel-2);border:1px solid color-mix(in oklab,var(--border) 84%,transparent);box-shadow:0 14px 34px rgba(0,0,0,.28);display:none}
+.zc-inst-dropdown.is-open .zc-inst-menu{display:block}
+.zc-inst-option{width:100%;display:flex;align-items:center;justify-content:flex-start;gap:8px;padding:9px 11px;border:0;border-radius:10px;background:transparent;color:var(--text);font-size:12.5px;line-height:1.2;text-align:left;cursor:pointer;transition:background .14s ease,color .14s ease}
+.zc-inst-option:hover{background:color-mix(in oklab,var(--panel-3) 84%,transparent)}
+.zc-inst-option.is-active{background:rgba(37,211,102,.10);color:var(--accent)}
+.zc-inst-option-count{margin-left:auto;font-size:10.5px;color:var(--text-2);opacity:.82}
+
+/* ícones do topo menores */
+.wpp-header-icon,.hdr-icon-btn{
+  width:28px!important;
+  height:28px!important;
+  border-radius:8px!important;
 }
 
-.inst-section-label{
-  display:flex;
-  align-items:center;
-  gap:6px;
-  font-size:12px;
-  font-weight:600;
-  color:var(--text-2);
-  margin:4px 4px 6px;
-  letter-spacing:.1px;
-  text-transform:none;
-  user-select:none;
+/* botão menu/kebab */
+.menu-only-btn,
+#menuOnlyBtn,
+#btnKebabHeader{
+  width:30px!important;
+  height:30px!important;
 }
 
-.inst-section-label .dot{
-  width:6px;
-  height:6px;
-  border-radius:999px;
-  background:var(--accent);
-  box-shadow:none;
+/* sidebar esquerda */
+.wpp-leftbar-icon{
+  min-height:40px!important;
 }
 
-.inst-section-count{
-  font-weight:600;
-  color:var(--text-2);
-  opacity:.8;
+/* ícones SVG da leftbar */
+.wpp-leftbar .wpp-leftbar-icons a.wpp-leftbar-icon svg,
+.wpp-icon-img{
+  width:18px!important;
+  height:18px!important;
+  min-width:18px!important;
 }
 
-.wpp-header-filtros-row{
-  display:flex;
-  gap:6px;
-  min-width:0;
-  margin:4px 0 6px;
-  padding-left:0;
-  overflow-x:auto !important;
-  overflow-y:hidden !important;
-  padding-bottom:4px !important;
-  margin-bottom:4px !important;
-  scrollbar-width:none;
-  -ms-overflow-style:none;
+/* evita crescer ícone do plus do topo */
+#btn-sidemodal-nova-conversa,
+.wpp-header-icon i,
+.hdr-icon-btn i{
+  font-size:14px!important;
 }
 
-.wpp-header-filtros-row::-webkit-scrollbar{
-  display:none !important;
-}
-
-.wpp-header-filtro,
-.wpp-header-filtros-row .wpp-header-filtro,
-.wpp-header-filtros-row .wpp-header-filtro.btn,
-.wpp-header-filtros-row .wpp-header-filtro[class*="btn"]{
-  background:transparent !important;
-  border:0 !important;
-  color:var(--text-2) !important;
-  border-radius:999px !important;
-  padding:6px 12px !important;
-  font:500 12px/1.05 inherit !important;
-  white-space:nowrap !important;
-  display:inline-flex !important;
-  align-items:center !important;
-  justify-content:center !important;
-  box-shadow:none !important;
-  transition:background .14s,color .14s,opacity .14s !important;
-}
-
-.wpp-header-filtro:hover,
-.wpp-header-filtros-row .wpp-header-filtro:hover{
-  background:color-mix(in oklab,var(--panel-2) 84%,transparent) !important;
-  color:var(--text) !important;
-  border:0 !important;
-}
-
-.wpp-header-filtro.ativo,
-.wpp-header-filtro.active,
-.wpp-header-filtro[aria-current="true"],
-.wpp-header-filtros-row .wpp-header-filtro.ativo,
-.wpp-header-filtros-row .wpp-header-filtro.active,
-.wpp-header-filtros-row .wpp-header-filtro[aria-current="true"]{
-  background:rgba(34,197,94,.12) !important;
-  color:var(--accent) !important;
-  border:0 !important;
-  box-shadow:inset 0 0 0 1px rgba(34,197,94,.32) !important;
-}
-
-.wpp-header-filtro:focus-visible{
-  outline:none !important;
-  box-shadow:inset 0 0 0 1px rgba(34,197,94,.32) !important;
-}
-
-#inst-switch .inst-pill{
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  background:transparent !important;
-  border:0 !important;
-  color:var(--text-2) !important;
-  border-radius:999px !important;
-  padding:6px 12px !important;
-  font-size:12px !important;
-  line-height:1.05 !important;
-  white-space:nowrap !important;
-  cursor:pointer;
-  box-shadow:none !important;
-  transition:background .14s,color .14s,opacity .14s !important;
-}
-
-#inst-switch .inst-pill:hover{
-  background:color-mix(in oklab,var(--panel-2) 84%,transparent) !important;
-  color:var(--text) !important;
-}
-
-#inst-switch .inst-pill.is-active{
-  background:rgba(34,197,94,.12) !important;
-  color:var(--accent) !important;
-  border:0 !important;
-  box-shadow:inset 0 0 0 1px rgba(34,197,94,.32) !important;
-  font-weight:600 !important;
-}
+/* mantém o avatar e nome mais proporcionais */
+.chat-item{padding:10px 14px!important}
+.avatar{width:36px!important;height:36px!important;font-size:16px!important}
+.chat-name{font-size:1.02em!important}
 
 @media (max-width:920px){
-  #inst-switch{padding:3px 0 1px !important}
-  .inst-section-label{font-size:11px !important;margin:3px 2px 5px !important}
-  .wpp-header-filtros-row{gap:5px !important;margin:4px 0 5px !important;padding-bottom:3px !important}
-  .wpp-header-filtro,
-  .wpp-header-filtros-row .wpp-header-filtro,
-  #inst-switch .inst-pill{
-    padding:5px 10px !important;
-    font-size:11.5px !important;
-  }
-}/* ========= OVERRIDE FINAL DOS PILLS / INSTÂNCIAS ========= */
-
-#inst-switch,
-#inst-switch *{
-  box-shadow:none !important;
+  .wpp-header-externo{padding:10px 10px 8px!important}
+  .zc-brand-title{font-size:.98rem}
+  .zc-topbar{gap:7px}
+  .zc-topbar-head{gap:8px}
+  .zc-inst-row{gap:7px}
+  .zc-inst-title{font-size:11px}
+  .zc-inst-dropdown{min-width:116px;max-width:164px}
+  .zc-inst-trigger{min-height:30px;padding:0 10px;font-size:11.5px}
+  .zc-inst-option{padding:8px 10px;font-size:12px}
+  .wpp-header-icon,.hdr-icon-btn{width:27px!important;height:27px!important}
+  #btn-sidemodal-nova-conversa{width:28px!important;height:28px!important}
 }
 
-#inst-switch{
-  background:transparent !important;
-  border:0 !important;
-  outline:0 !important;
-  padding:4px 0 2px !important;
-}
-
-#inst-switch .inst-pill,
-#inst-switch button,
-#inst-switch .wpp-header-filtro,
-#inst-switch [role="button"]{
-  appearance:none !important;
-  -webkit-appearance:none !important;
-  background:transparent !important;
-  border:0 !important;
-  outline:0 !important;
-  box-shadow:none !important;
-  color:var(--text-2) !important;
-  border-radius:999px !important;
-  padding:6px 12px !important;
-  min-height:30px !important;
-  display:inline-flex !important;
-  align-items:center !important;
-  justify-content:center !important;
-  font-size:12px !important;
-  font-weight:500 !important;
-  line-height:1 !important;
-  white-space:nowrap !important;
-}
-
-#inst-switch .inst-pill:hover,
-#inst-switch button:hover,
-#inst-switch .wpp-header-filtro:hover,
-#inst-switch [role="button"]:hover{
-  background:rgba(255,255,255,.04) !important;
-  border:0 !important;
-  box-shadow:none !important;
-  color:var(--text) !important;
-}
-
-#inst-switch .inst-pill.is-active,
-#inst-switch .inst-pill.ativo,
-#inst-switch button.is-active,
-#inst-switch button.ativo,
-#inst-switch .wpp-header-filtro.ativo,
-#inst-switch .wpp-header-filtro.active,
-#inst-switch [aria-current="true"],
-#inst-switch [aria-selected="true"]{
-  background:rgba(37,211,102,.14) !important;
-  color:var(--accent) !important;
-  border:1px solid rgba(37,211,102,.45) !important;
-  box-shadow:none !important;
-}
-
-/* remove qualquer borda herdada do container dos filtros */
-.wpp-header-filtros-row,
-#inst-switch .wpp-header-filtros-row{
-  background:transparent !important;
-  border:0 !important;
-  box-shadow:none !important;
-  padding-left:0 !important;
-  gap:6px !important;
-}
-
-/* dark/light */
-html[data-theme="light"] #inst-switch .inst-pill:hover,
-html[data-theme="light"] #inst-switch button:hover,
-html[data-theme="light"] #inst-switch .wpp-header-filtro:hover,
-html[data-theme="light"] #inst-switch [role="button"]:hover{
-  background:rgba(0,0,0,.04) !important;
-}
-
-html[data-theme="light"] #inst-switch .inst-pill.is-active,
-html[data-theme="light"] #inst-switch .inst-pill.ativo,
-html[data-theme="light"] #inst-switch button.is-active,
-html[data-theme="light"] #inst-switch button.ativo,
-html[data-theme="light"] #inst-switch .wpp-header-filtro.ativo,
-html[data-theme="light"] #inst-switch .wpp-header-filtro.active,
-html[data-theme="light"] #inst-switch [aria-current="true"],
-html[data-theme="light"] #inst-switch [aria-selected="true"]{
-  background:rgba(37,211,102,.10) !important;
-  color:#129c49 !important;
-  border:1px solid rgba(37,211,102,.35) !important;
+@media (max-width:480px){
+  .zc-brand-title{font-size:.95rem}
+  .zc-inst-row{gap:6px}
+  .zc-inst-title{font-size:10.8px}
+  .zc-inst-dropdown{min-width:110px;max-width:154px}
 }

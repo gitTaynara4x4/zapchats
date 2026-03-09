@@ -56,23 +56,211 @@
       background-image: url("/frontend/img/whatsapp-bg-light.png") !important;
     }
 
-    #chat-back-mobile { display:none; }
-    @media (max-width: 920px) {
+    #chat-back-mobile{display:none}
+    @media (max-width:920px){
       #chat-back-mobile{
-        display:inline-flex; align-items:center; justify-content:center;
-        margin-right:.5rem; width:32px; height:32px;
-        border-radius:999px; border:none; background:transparent;
-        color:inherit; cursor:pointer;
+        display:inline-flex;align-items:center;justify-content:center;
+        margin-right:.5rem;width:32px;height:32px;
+        border-radius:999px;border:none;background:transparent;
+        color:inherit;cursor:pointer;
       }
-      #chat-back-mobile i{ font-size:1rem; }
+      #chat-back-mobile i{font-size:1rem}
     }
 
     .wpp-leftbar .wpp-leftbar-icons a.wpp-leftbar-icon svg{
-      width:22px; height:22px; display:block;
+      width:22px;height:22px;display:block;
     }
 
     .wpp-leftbar .wpp-leftbar-icons a.wpp-leftbar-icon[aria-current="page"]{
       outline:none;
+    }
+
+    .zc-topbar{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+
+    .zc-topbar-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+    }
+
+    .zc-brand-wrap{
+      min-width:0;
+      display:flex;
+      align-items:center;
+    }
+
+    .zc-brand-title{
+      font-size:1.05rem;
+      font-weight:700;
+      letter-spacing:-.2px;
+      color:var(--text);
+      line-height:1;
+    }
+
+    /* fonte real das instâncias */
+    #inst-switch{
+      display:none !important;
+    }
+
+    /* linha whatsapp + dropdown ao lado */
+    .zc-inst-row{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      min-width:0;
+    }
+
+    .zc-inst-meta{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      flex:0 0 auto;
+      min-width:0;
+    }
+
+    .zc-inst-meta .dot{
+      width:6px;
+      height:6px;
+      border-radius:999px;
+      background:var(--accent);
+      display:block;
+      flex:0 0 auto;
+    }
+
+    .zc-inst-title{
+      font-size:12px;
+      font-weight:600;
+      color:var(--text-2);
+      white-space:nowrap;
+    }
+
+    #zc-inst-count{
+      opacity:.85;
+    }
+
+    .zc-inst-dropdown{
+      position:relative;
+      display:inline-block;
+      flex:0 0 auto;
+      min-width:140px;
+      max-width:200px;
+    }
+
+    .zc-inst-trigger{
+      width:100%;
+      min-height:34px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:0 12px;
+      border:0;
+      border-radius:999px;
+      background:rgba(37,211,102,.12);
+      color:var(--accent);
+      box-shadow:inset 0 0 0 1px rgba(37,211,102,.30);
+      font-size:12.5px;
+      font-weight:600;
+      cursor:pointer;
+      transition:background .15s ease,color .15s ease,box-shadow .15s ease;
+    }
+
+    .zc-inst-trigger:hover{
+      background:rgba(37,211,102,.16);
+      box-shadow:inset 0 0 0 1px rgba(37,211,102,.38);
+    }
+
+    .zc-inst-trigger:focus-visible{
+      outline:none;
+      box-shadow:
+        inset 0 0 0 1px rgba(37,211,102,.42),
+        0 0 0 2px rgba(37,211,102,.14);
+    }
+
+    .zc-inst-trigger-text{
+      min-width:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      text-align:left;
+    }
+
+    .zc-inst-trigger i{
+      font-size:11px;
+      flex:0 0 auto;
+      opacity:.9;
+      transition:transform .15s ease;
+    }
+
+    .zc-inst-dropdown.is-open .zc-inst-trigger i{
+      transform:rotate(180deg);
+    }
+
+    .zc-inst-menu{
+      position:absolute;
+      top:calc(100% + 8px);
+      left:0;
+      z-index:70;
+      min-width:100%;
+      max-width:280px;
+      padding:6px;
+      border-radius:14px;
+      background:var(--panel-2);
+      border:1px solid var(--border);
+      box-shadow:0 14px 34px rgba(0,0,0,.28);
+      display:none;
+    }
+
+    .zc-inst-dropdown.is-open .zc-inst-menu{
+      display:block;
+    }
+
+    .zc-inst-option{
+      width:100%;
+      display:flex;
+      align-items:center;
+      justify-content:flex-start;
+      gap:8px;
+      padding:10px 12px;
+      border:0;
+      border-radius:10px;
+      background:transparent;
+      color:var(--text);
+      font-size:13px;
+      line-height:1.2;
+      text-align:left;
+      cursor:pointer;
+      transition:background .14s ease,color .14s ease;
+    }
+
+    .zc-inst-option:hover{
+      background:color-mix(in oklab,var(--panel-3) 84%,transparent);
+    }
+
+    .zc-inst-option.is-active{
+      background:rgba(37,211,102,.10);
+      color:var(--accent);
+    }
+
+    .zc-inst-option-count{
+      margin-left:auto;
+      font-size:11px;
+      color:var(--text-2);
+      opacity:.82;
+    }
+
+    @media (max-width:920px){
+      .zc-brand-title{font-size:1rem}
+      .zc-inst-row{gap:8px}
+      .zc-inst-title{font-size:11px}
+      .zc-inst-dropdown{min-width:120px;max-width:170px}
+      .zc-inst-trigger{min-height:32px;padding:0 11px;font-size:12px}
+      .zc-inst-option{padding:9px 10px;font-size:12.5px}
     }
   </style>
 </head>
@@ -92,23 +280,51 @@
 
     <aside class="flex flex-col">
       <div class="wpp-header-externo">
-        <div class="wpp-header-titulo-row">
-          <img class="wpp-header-logo logo-dark"
-               src="/frontend/img/logo-white.png"
-               alt="ZapChats (dark)">
-          <img class="wpp-header-logo logo-light"
-               src="/frontend/img/logo-s-fundo.png"
-               alt="ZapChats (light)">
+        <div class="zc-topbar">
+          <div class="zc-topbar-head">
+            <div class="zc-brand-wrap">
+              <span class="zc-brand-title">ZapChat</span>
+            </div>
 
-          <div class="wpp-header-icons">
-            <button
-              class="wpp-header-icon"
-              id="btn-sidemodal-nova-conversa"
-              title="Nova conversa"
-              aria-label="Nova conversa"
-            >
-              <i class="fa fa-plus"></i>
-            </button>
+            <div class="wpp-header-icons">
+              <button
+                class="wpp-header-icon"
+                id="btn-sidemodal-nova-conversa"
+                title="Nova conversa"
+                aria-label="Nova conversa"
+              >
+                <i class="fa fa-plus"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="zc-inst-row">
+            <div class="zc-inst-meta">
+              <span class="dot"></span>
+              <span class="zc-inst-title">WhatsApps <span id="zc-inst-count">(0)</span></span>
+            </div>
+
+            <div id="inst-switch"></div>
+
+            <div class="zc-inst-dropdown" id="zc-inst-dropdown">
+              <button
+                type="button"
+                class="zc-inst-trigger"
+                id="zc-inst-trigger"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+              >
+                <span class="zc-inst-trigger-text" id="zc-inst-current-label">Todos</span>
+                <i class="fa fa-chevron-down" aria-hidden="true"></i>
+              </button>
+
+              <div
+                class="zc-inst-menu"
+                id="zc-inst-menu"
+                role="listbox"
+                aria-label="Selecionar instância"
+              ></div>
+            </div>
           </div>
         </div>
 
@@ -122,7 +338,6 @@
         </div>
 
         <div id="search-results" class="search-results hidden"></div>
-        <div id="inst-switch"></div>
 
         <div class="wpp-header-filtros-row">
           <button class="wpp-header-filtro ativo">Em atendimento</button>
@@ -300,6 +515,146 @@
 
       window.addEventListener('resize', handleResize);
       handleResize();
+    })();
+  </script>
+
+  <script>
+    (function () {
+      const source = document.getElementById('inst-switch');
+      const dropdown = document.getElementById('zc-inst-dropdown');
+      const trigger = document.getElementById('zc-inst-trigger');
+      const menu = document.getElementById('zc-inst-menu');
+      const currentLabel = document.getElementById('zc-inst-current-label');
+      const countEl = document.getElementById('zc-inst-count');
+
+      if (!source || !dropdown || !trigger || !menu || !currentLabel) return;
+
+      function normalizeText(text) {
+        return String(text || '').replace(/\s+/g, ' ').trim();
+      }
+
+      function getSourceButtons() {
+        return Array.from(
+          source.querySelectorAll('button, [role="button"], .inst-pill, .wpp-header-filtro, [data-instancia]')
+        ).filter(el => normalizeText(el.textContent));
+      }
+
+      function getCurrentSourceButton(buttons) {
+        return (
+          buttons.find(btn =>
+            btn.classList.contains('is-active') ||
+            btn.classList.contains('ativo') ||
+            btn.classList.contains('active') ||
+            btn.getAttribute('aria-current') === 'true' ||
+            btn.getAttribute('aria-selected') === 'true'
+          ) || buttons[0] || null
+        );
+      }
+
+      function closeMenu() {
+        dropdown.classList.remove('is-open');
+        trigger.setAttribute('aria-expanded', 'false');
+      }
+
+      function openMenu() {
+        dropdown.classList.add('is-open');
+        trigger.setAttribute('aria-expanded', 'true');
+      }
+
+      function syncDropdown() {
+        const buttons = getSourceButtons();
+        menu.innerHTML = '';
+
+        if (countEl) countEl.textContent = `(${buttons.length})`;
+
+        if (!buttons.length) {
+          currentLabel.textContent = 'Todos';
+          return;
+        }
+
+        const activeBtn = getCurrentSourceButton(buttons);
+        currentLabel.textContent = normalizeText(activeBtn?.textContent) || 'Todos';
+
+        buttons.forEach((btn, index) => {
+          const txt = normalizeText(btn.textContent);
+          if (!txt) return;
+
+          const opt = document.createElement('button');
+          opt.type = 'button';
+          opt.className = 'zc-inst-option';
+          opt.setAttribute('role', 'option');
+          opt.dataset.index = String(index);
+          opt.dataset.label = txt;
+
+          const label = document.createElement('span');
+          label.className = 'zc-inst-option-label';
+          label.textContent = txt;
+          opt.appendChild(label);
+
+          const isActive =
+            btn === activeBtn ||
+            btn.classList.contains('is-active') ||
+            btn.classList.contains('ativo') ||
+            btn.classList.contains('active') ||
+            btn.getAttribute('aria-current') === 'true' ||
+            btn.getAttribute('aria-selected') === 'true';
+
+          if (isActive) {
+            opt.classList.add('is-active');
+            opt.setAttribute('aria-selected', 'true');
+          } else {
+            opt.setAttribute('aria-selected', 'false');
+          }
+
+          opt.addEventListener('click', function () {
+            try { btn.click(); } catch {}
+            currentLabel.textContent = txt;
+
+            menu.querySelectorAll('.zc-inst-option').forEach(item => {
+              item.classList.remove('is-active');
+              item.setAttribute('aria-selected', 'false');
+            });
+
+            opt.classList.add('is-active');
+            opt.setAttribute('aria-selected', 'true');
+
+            setTimeout(syncDropdown, 60);
+            closeMenu();
+          });
+
+          menu.appendChild(opt);
+        });
+      }
+
+      trigger.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        if (dropdown.classList.contains('is-open')) closeMenu();
+        else openMenu();
+      });
+
+      document.addEventListener('click', function (ev) {
+        if (!dropdown.contains(ev.target)) closeMenu();
+      });
+
+      document.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Escape') closeMenu();
+      });
+
+      const observer = new MutationObserver(function () {
+        syncDropdown();
+      });
+
+      observer.observe(source, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true
+      });
+
+      setTimeout(syncDropdown, 50);
+      setTimeout(syncDropdown, 250);
+      setTimeout(syncDropdown, 700);
+      window.addEventListener('load', syncDropdown);
     })();
   </script>
 </body>

@@ -1,4 +1,3 @@
-// /frontend/js/pages/colaboradores.js
 /* Colaboradores – lista + modal de perfil (visualização/edição) e fluxo de criação
    (versão com: troca de senha em edição, validação opcional da senha, salvamento de instâncias,
    correção de refs DOM recriadas nas fieldboxes + limpeza de erros ao trocar de colaborador
@@ -10,12 +9,11 @@
    + 🕘 herança de horário do departamento + toggle “Personalizar horário”
    + ✅ FIX: depto padrão vindo como hora_login_inicio_padrao/fim_padrao
    + ✅ FIX: quando colaborador tem setor_id (setor) mas horário está no departamento, faz fallback por nome
-   + ✅ NOVO: coluna "Foto" na lista (avatar mini com fallback de iniciais + cache local de thumbs)
+   + ✅ NOVO: coluna "Foto" na lista (avatar mini com fallback de iniciais + cache local de thumbs + avatar_url)
 ) */
 (function ColaboradoresPage(){
   'use strict';
 
-  // ====== Helpers ======
   const $  = (s, r=document) => r.querySelector(s);
   const $$ = (s, r=document) => [...r.querySelectorAll(s)];
 
@@ -28,7 +26,6 @@
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
 
-  // fetch autenticado (usa ZAuth se tiver)
   const authFetch = (url, opt={}) => {
     const f = (window.ZAuth && ZAuth.authFetch) ? ZAuth.authFetch : fetch;
     const headers = Object.assign(
@@ -82,7 +79,6 @@
   }
   const debounce = (fn,ms=160)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
 
-  // ====== Perms guard ======
   const VIEW_PERM       = 'colaboradores.ver';
   const EDIT_PERM       = 'colaboradores.gerenciar';
   const RESET_PASS_PERM = 'colaboradores.redefinir_senha';
@@ -98,16 +94,12 @@
     inlineEdit: false,
 
     newAvatarFile: null,
-
     instsCache: null,
-
     showErrors: false,
+    empresa: null,
 
-    empresa: null,   // 🔐 cache da empresa (inclui requer_token_login)
-
-    // ✅ cache de avatar mini (blob URL) — evita re-fetch toda hora
-    avatarThumbCache: new Map(),   // id -> string|null (blob url) | null = sem avatar
-    avatarThumbInflight: new Map() // id -> Promise<string|null>
+    avatarThumbCache: new Map(),
+    avatarThumbInflight: new Map()
   };
 
   async function preloadPerms(){
@@ -126,10 +118,8 @@
     if (typeof fn === 'function') return !!fn(p);
     return true;
   };
-  // 👇 permite redefinir senha SE tiver a perm nova OU a de gerenciar
   const canEditPassword = () => hasPerm(RESET_PASS_PERM) || hasPerm(EDIT_PERM);
 
-  // ====== Toast ======
   const toastEl = $('#toast');
   function toast(msg, type='ok'){
     if (!toastEl) return;
@@ -143,14 +133,11 @@
     toast._t = setTimeout(()=> toastEl.classList.remove('show'), 3200);
   }
 
-  // ====== Confirm modal (remoção, etc.) ======
   const confirmModal = $('#zc-confirm');
   const confirmMsgEl = confirmModal ? confirmModal.querySelector('.zc-confirm-message') : null;
 
   function showConfirm(message){
-    if (!confirmModal) {
-      return Promise.resolve(window.confirm(message || 'Confirmar ação?'));
-    }
+    if (!confirmModal) return Promise.resolve(window.confirm(message || 'Confirmar ação?'));
 
     if (confirmMsgEl) confirmMsgEl.textContent = message || 'Confirmar ação?';
     confirmModal.setAttribute('aria-hidden','false');
@@ -160,19 +147,11 @@
       const onClick = (ev)=>{
         const btn = ev.target.closest('[data-confirm]');
         if (!btn) return;
-        const ok = btn.getAttribute('data-confirm') === 'yes';
-        cleanup(ok);
+        cleanup(btn.getAttribute('data-confirm') === 'yes');
       };
-      const onKey = (ev)=>{
-        if (ev.key === 'Escape'){
-          cleanup(false);
-        }
-      };
-      const onBackdrop = (ev)=>{
-        if (ev.target === confirmModal){
-          cleanup(false);
-        }
-      };
+      const onKey = (ev)=>{ if (ev.key === 'Escape') cleanup(false); };
+      const onBackdrop = (ev)=>{ if (ev.target === confirmModal) cleanup(false); };
+
       function cleanup(result){
         confirmModal.setAttribute('aria-hidden','true');
         document.documentElement.classList.remove('modal-open');
@@ -187,7 +166,6 @@
     });
   }
 
-  // ====== Elements (estáveis/no topo do modal) ======
   const filtroTxt   = $('#filtro');
   const filtroDepto = $('#filtro-depto');
   const btnFiltrar  = $('#btn-filtrar');
@@ -195,11 +173,8 @@
   const tbody       = $('#tabela-colaboradores');
   const emptyState  = $('#empty-state');
   const countEl     = $('#count-colaboradores');
-
-  // 🔐 checkbox de exigir token no nível da empresa
   const chkRequerToken = $('#chk-requer-token');
 
-  // Modal PERFIL
   const perfilModal  = $('#modal-perfil');
   const pClose       = $('#perfil-fechar');
   const pClose2      = $('#perfil-fechar2');
@@ -208,22 +183,18 @@
   const pCancel      = $('#perfil-cancelar');
   const pTitle       = $('#perfil-title');
 
-  // avatar + status
   const pAvatar  = $('#p-avatar');
   const pMono    = $('#p-mono');
   const dStatus  = $('#p-status');
   const dStatusText = $('#p-status-text');
 
-  // hint/CTA avatar (modo "novo")
   const avatarHint   = $('#avatar-hint');
-  const btnAddAvatar = $('#btn-add-avatar'); // opcional, se existir
+  const btnAddAvatar = $('#btn-add-avatar');
   const pAvatarInput = $('#p-avatar-input');
 
-  // Permissões (estáveis)
   const dPerms   = $('#d-perms');
   const ePerms   = $('#e-perms');
 
-  // Rodapé (para botões dinâmicos)
   const footEl  = perfilModal?.querySelector('.foot');
   let pSaveFoot = null, pCancelFoot = null;
 
@@ -252,7 +223,6 @@
     }
   }
 
-  // ====== Utils (máscaras e validações) ======
   const digits = (s)=> String(s||'').replace(/\D+/g,'');
 
   function maskPhoneBR(v){
@@ -278,7 +248,6 @@
                        : `(${dd}) ${n[0]} ${n.slice(1,5)}-${n.slice(5)}`;
   }
 
-  // ---- horário: helpers ----
   function maskTimeInput(el){
     if (!el) return;
     let v = String(el.value || '').replace(/[^\d]/g,'');
@@ -316,12 +285,8 @@
     s.className='chip'; s.textContent=text; return s;
   }
 
-  // ====== Horário padrão do departamento (UI) ======
   function getDeptHorarioById(setorId, setorNome){
-    // tenta por ID (quando o id do colaborador bate com o id retornado em /api/departamentos)
     let s = state.setores.find(x => String(x.id) === String(setorId));
-
-    // ✅ fallback por nome (quando colaborador guarda setor_id, mas o horário é do departamento)
     if (!s && setorNome){
       const alvo = normStr(setorNome);
       s = state.setores.find(x => normStr(x?.nome) === alvo);
@@ -379,11 +344,8 @@
     const rowIni    = document.getElementById('row-exp-ini');
     const rowFim    = document.getElementById('row-exp-fim');
     const tgl       = document.getElementById('e-exp-personalizar');
-
-    // se HTML ainda não foi atualizado, sai sem quebrar
     if (!tgl || !rowIni || !rowFim) return;
 
-    // mostra toggle só em edição
     if (rowToggle) rowToggle.style.display = state.inlineEdit ? '' : 'none';
 
     const on = !!tgl.checked;
@@ -394,10 +356,8 @@
     const setorId = sel?.value || '';
     const setorNome = sel?.options?.[sel.selectedIndex]?.text || '';
 
-    // sempre atualiza o hint do depto com o estado atual
     renderDeptHintBySetorId(setorId, { personalizar: on, setorNome });
 
-    // se ligou “personalizar” e ainda tá vazio, pré-preenche do depto
     if (on){
       const eIni = document.getElementById('e-exp-ini');
       const eFim = document.getElementById('e-exp-fim');
@@ -407,7 +367,6 @@
         if (fim) eFim.value = fim;
       }
     } else {
-      // desligou: limpa pra garantir que vai herdar (salvar null)
       const eIni = document.getElementById('e-exp-ini');
       const eFim = document.getElementById('e-exp-fim');
       if (eIni) eIni.value = '';
@@ -415,7 +374,6 @@
     }
   }
 
-  // ====== Instâncias (WhatsApp) ======
   async function fetchInstances(){
     if (state.instsCache) return state.instsCache;
     let arr = [];
@@ -435,7 +393,7 @@
           }).filter(Boolean);
         };
         arr = normInstances(Array.isArray(data?.instancias) ? data.instancias : (Array.isArray(data) ? data : []));
-      }catch(e){ /* ignora */ }
+      }catch{}
     }
     state.instsCache = arr;
     return arr;
@@ -447,8 +405,7 @@
     if (!raw) return [];
     if (Array.isArray(raw)){
       if (raw.length && typeof raw[0] === 'object'){
-        return raw.map(x=> Number(x.id ?? x.instancia_id ?? x.instance_id ?? x.value))
-                  .filter(n=> !Number.isNaN(n));
+        return raw.map(x=> Number(x.id ?? x.instancia_id ?? x.instance_id ?? x.value)).filter(n=> !Number.isNaN(n));
       }
       return raw.map(x=> Number(x)).filter(n=> !Number.isNaN(n));
     }
@@ -600,7 +557,6 @@
     }
   }
 
-  // ====== Coalesce helpers ======
   function coalescePhone(c){
     return c?.telefone ?? c?.telefone_norm ?? c?.phone ?? c?.celular ?? c?.whatsapp ?? c?.fone
         ?? c?.usuario?.telefone ?? c?.user?.phone ?? '';
@@ -631,7 +587,6 @@
   function coalesceCargo(c){
     return c?.cargo ?? c?.funcao ?? c?.usuario?.cargo ?? c?.user?.job_title ?? '';
   }
-  // Horário de expediente – tenta pegar de alguns nomes comuns
   function coalesceHorarioInicio(c){
     return c?.hora_login_inicio
         ?? c?.hora_inicio
@@ -651,7 +606,6 @@
         ?? null;
   }
 
-  // ====== Admin badge ======
   function isAdminFlag(c){
     return !!(c && (
       c.is_admin === true ||
@@ -677,7 +631,6 @@
     badge.style.display = isAdminFlag(colab) ? '' : 'none';
   }
 
-  // ====== Data ======
   async function loadSetores(){
     const tries = ['/api/departamentos','/api/departamentos/tree','/api/atendimento/clientes/departamentos','/api/atendimento/clientes/departamentos/tree'];
     for (const u of tries){
@@ -685,14 +638,12 @@
         const data = await apiGet(u);
         const arr = Array.isArray(data) ? data : (data?.items || data?.data || []);
         if (arr?.length){
-          // Aceita lista simples OU árvore (children/filhos/etc) — sempre gera uma lista plana
           const out = [];
           const seen = new Set();
 
           const getId   = (x)=> x?.id ?? x?.dep_id ?? x?.departamento_id ?? x?.setor_id ?? x?.value ?? x?.ID ?? x?.Id;
           const getName = (x)=> x?.nome ?? x?.name ?? x?.titulo ?? x?.label ?? x?.text ?? '—';
 
-          // 🕘 tenta capturar horário padrão do departamento (inclui *_padrao)
           const getIni = (x)=>
             x?.hora_login_inicio_padrao ??
             x?.hora_login_inicio ?? x?.hora_inicio ?? x?.expediente_inicio ?? x?.horario_inicio ??
@@ -717,8 +668,6 @@
               seen.add(id);
               const ini = getIni(node);
               const fim = getFim(node);
-
-              // Mantém compat: salva nos nomes "hora_login_inicio/fim", MAS também guarda *_padrao.
               out.push({
                 id,
                 nome,
@@ -734,9 +683,9 @@
           };
 
           (Array.isArray(arr) ? arr : [arr]).forEach(walk);
-
           state.setores = out;
-          renderSetores(); return;
+          renderSetores();
+          return;
         }
       }catch{}
     }
@@ -752,25 +701,19 @@
       const res = await apiGet(url);
       state.colaboradores = Array.isArray(res) ? res : (res?.items||[]);
     }catch(e){
-      console.error(e); state.colaboradores = [];
+      console.error(e);
+      state.colaboradores = [];
       toast('Erro ao carregar colaboradores.','err');
     }
   }
 
-  // 🔐 Empresa (inclui requer_token_login)
   async function loadEmpresa(force){
     if (!EMPRESA_ID) return null;
     if (!force && state.empresa) return state.empresa;
-
     try{
       const data = await apiGet(`/api/empresas/${EMPRESA_ID}`);
       state.empresa = data;
-
-      // sincroniza checkbox de “Exigir código de login”
-      if (chkRequerToken) {
-        chkRequerToken.checked = !!data.requer_token_login;
-      }
-
+      if (chkRequerToken) chkRequerToken.checked = !!data.requer_token_login;
       return data;
     }catch{
       return null;
@@ -780,30 +723,24 @@
   async function saveEmpresaLoginConfig(requerToken){
     if (!EMPRESA_ID) return;
     const payload = { requer_token_login: !!requerToken };
-
     try{
-      // Você precisa implementar esse endpoint no backend:
-      // PUT /api/empresas/{empresa_id}/login-config
       const resp = await apiJSON(`/api/empresas/${EMPRESA_ID}/login-config`, 'PUT', payload);
       state.empresa = resp || { ...(state.empresa || {}), requer_token_login: !!requerToken };
       toast('Configuração de login atualizada.');
     }catch(e){
       console.warn('Falha ao atualizar requer_token_login', e);
       toast('Não foi possível salvar a configuração de login.','err');
-      // desenrola checkbox de volta pro valor anterior
-      if (chkRequerToken && state.empresa) {
-        chkRequerToken.checked = !!state.empresa.requer_token_login;
-      }
+      if (chkRequerToken && state.empresa) chkRequerToken.checked = !!state.empresa.requer_token_login;
     }
   }
 
-  // ====== Render lista ======
   function renderSetores(){
     const filtroDepto = $('#filtro-depto');
-    const fSetor = $('#c-setor'); // compat
+    const fSetor = $('#c-setor');
     if (filtroDepto){
       const first = filtroDepto.querySelector('option');
-      filtroDepto.innerHTML=''; if (first) filtroDepto.appendChild(first);
+      filtroDepto.innerHTML='';
+      if (first) filtroDepto.appendChild(first);
       state.setores.forEach(s => filtroDepto.appendChild(new Option(s.nome,s.id)));
     }
     if (fSetor){
@@ -812,7 +749,6 @@
     }
   }
 
-  // ====== Avatar (mini da lista) ======
   function revokeBlobURL(u){
     try{
       if (u && String(u).startsWith('blob:')) URL.revokeObjectURL(u);
@@ -828,21 +764,15 @@
   window.addEventListener('beforeunload', clearAvatarThumbCache);
 
   async function fetchAvatarThumbURLFor(colab){
-    // cache por id (mesma página)
     const id = Number(colab?.id || 0) || 0;
-    if (!id) return null;
+    if (!id) return colab?.avatar_url || null;
 
-    if (state.avatarThumbCache.has(id)) {
-      return state.avatarThumbCache.get(id); // string|null
-    }
-    if (state.avatarThumbInflight.has(id)) {
-      return state.avatarThumbInflight.get(id);
-    }
+    if (state.avatarThumbCache.has(id)) return state.avatarThumbCache.get(id);
+    if (state.avatarThumbInflight.has(id)) return state.avatarThumbInflight.get(id);
 
     const p = (async ()=>{
       let url = null;
 
-      // tenta /colaboradores/{id}/avatar
       try{
         const r1 = await authFetch(withEmpresa(`/api/colaboradores/${id}/avatar`));
         if (r1.ok && r1.status === 200){
@@ -851,7 +781,6 @@
         }
       }catch{}
 
-      // fallback /usuarios/{usuario_id}/avatar
       if (!url && colab?.usuario_id){
         try{
           const r2 = await authFetch(withEmpresa(`/api/usuarios/${colab.usuario_id}/avatar`));
@@ -860,6 +789,10 @@
             url = URL.createObjectURL(blob);
           }
         }catch{}
+      }
+
+      if (!url && colab?.avatar_url){
+        url = colab.avatar_url;
       }
 
       state.avatarThumbCache.set(id, url || null);
@@ -876,6 +809,7 @@
     if (!td) return;
 
     const name = coalesceName(colab) || coalesceEmail(colab) || `#${colab?.id||''}`;
+
     const wrap = document.createElement('div');
     wrap.className = 'avatar-mini';
     wrap.style.background = hashColor(String(name));
@@ -886,24 +820,32 @@
 
     const img = document.createElement('img');
     img.className = 'avatar-mini-img';
-    img.alt = '';
+    img.alt = name;
     img.loading = 'lazy';
     img.decoding = 'async';
     img.style.display = 'none';
+
+    img.onload = () => {
+      img.style.display = 'block';
+      span.style.display = 'none';
+      wrap.style.background = 'transparent';
+    };
+
+    img.onerror = () => {
+      img.removeAttribute('src');
+      img.style.display = 'none';
+      span.style.display = 'grid';
+    };
 
     wrap.appendChild(span);
     wrap.appendChild(img);
     td.innerHTML = '';
     td.appendChild(wrap);
 
-    // carrega thumb em background
     fetchAvatarThumbURLFor(colab).then((url)=>{
-      if (!td.isConnected) return;
-      if (!url) return;
+      if (!td.isConnected || !url) return;
       img.src = url;
-      img.style.display = 'block';
-      span.style.display = 'none';
-    }).catch(()=>{ /* ignora */ });
+    }).catch(()=>{});
   }
 
   function renderLista(){
@@ -924,16 +866,10 @@
       })
       .filter(c => {
         if (!depId) return true;
-
         const cid = String(coalesceDeptId(c) ?? '');
         if (cid && cid === depId) return true;
-
-        // ✅ fallback: se IDs não batem (setor_id vs departamento_id), tenta por nome
-        const cn = coalesceDeptName(c)
-          || state.setores.find(s => String(s.id)===cid)?.nome
-          || '';
+        const cn = coalesceDeptName(c) || state.setores.find(s => String(s.id)===cid)?.nome || '';
         if (cn && depSelNorm) return normStr(cn) === depSelNorm;
-
         return false;
       });
 
@@ -968,14 +904,11 @@
       `.trim();
 
       tbody.appendChild(tr);
-
-      // injeta avatar mini (iniciais -> foto quando carregar)
       const tdAv = tr.querySelector('.td-avatar');
       mountMiniAvatarInto(tdAv, c);
     });
   }
 
-  // ====== Avatar (modal/perfil) ======
   function replaceExt(name, ext){
     return (name || 'avatar').replace(/\.[^.]+$/, '') + ext;
   }
@@ -986,7 +919,8 @@
       img.onload = () => {
         try{
           const canvas = document.createElement('canvas');
-          canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0);
           canvas.toBlob((blob) => {
@@ -1012,7 +946,7 @@
       try {
         await apiForm(url, 'PUT', fd);
         return true;
-      } catch(e) { /* tenta o próximo */ }
+      } catch(e) {}
     }
     return false;
   }
@@ -1030,10 +964,7 @@
     }
   }
   async function fetchAvatarURLFor(colab){
-    // evita chamar /api/colaboradores/null/avatar quando ainda não tem id
-    if (!colab || !colab.id) {
-      return colab && colab.avatar_url ? colab.avatar_url : null;
-    }
+    if (!colab || !colab.id) return colab && colab.avatar_url ? colab.avatar_url : null;
     try{
       const r1 = await authFetch(withEmpresa(`/api/colaboradores/${colab.id}/avatar`));
       if (r1.ok && r1.status === 200) {
@@ -1053,7 +984,6 @@
     return colab.avatar_url || null;
   }
 
-  // <<< handleAvatarFile
   async function handleAvatarFile(file){
     if (!file) return;
 
@@ -1066,27 +996,24 @@
     const needConvert = /image\/(webp|avif|heic|heif)/i.test(file.type || '') ||
                         /\.(webp|avif|heic|heif)$/i.test(file.name || '');
     if (needConvert){
-      try { file = await convertToPng(file); } catch(e){ /* segue com original */ }
+      try { file = await convertToPng(file); } catch(e){}
     }
     state.newAvatarFile = file;
     const url = URL.createObjectURL(file);
     setPerfilAvatar($('#e-nome')?.value || coalesceName(state.viewing) || 'Novo Colaborador', url);
   }
 
-  // === Arrastar/soltar + Colar imagem (criar e editar) ===
   function bindAvatarDnDAndPaste(){
     const avatarWrap = $('#avatar-wrap');
     const fileInput  = $('#p-avatar-input');
     if (!avatarWrap) return;
 
-    // clique abre seletor (sempre)
     if (fileInput){
       fileInput.setAttribute('accept','image/*,.svg,.webp,.avif,.heic,.heif');
       avatarWrap.onclick = () => { fileInput.value = ''; fileInput.click(); };
       fileInput.onchange = () => handleAvatarFile(fileInput.files?.[0] || null);
     }
 
-    // evita duplicar binds
     if (avatarWrap.dataset.dndBound !== '1'){
       avatarWrap.dataset.dndBound = '1';
 
@@ -1103,7 +1030,6 @@
       avatarWrap.addEventListener('drop', onDrop);
     }
 
-    // colar (global – uma única vez)
     if (!window.__avatarPasteBound){
       window.__avatarPasteBound = true;
       window.addEventListener('paste', async (e)=>{
@@ -1129,7 +1055,7 @@
                 const b   = await res.blob();
                 const name = url.split('/').pop()?.split('?')[0] || 'image';
                 handleAvatarFile(new File([b], name, { type: b.type || 'image/png' }));
-              }catch{/* CORS/NETWORK: ignora */}
+              }catch{}
             }
           }
         }
@@ -1137,7 +1063,6 @@
     }
   }
 
-  // BACKEND retorna ColaboradorOut plano
   async function loadColabFull(id){
     const c = await apiGet(`/api/colaboradores/${id}`);
     try{
@@ -1147,7 +1072,6 @@
     return c;
   }
 
-  // ====== View placeholders – requery sempre ======
   function setPlaceholderPerfil(){
     const vNome   = $('#v-nome');
     const vEmailA = $('#v-email');
@@ -1169,7 +1093,6 @@
     if (vExpFim) vExpFim.textContent = '—';
   }
 
-  // ====== Edição inline helpers/validação ======
   function swapFieldbox(boxId, html){
     const wrap = document.getElementById(boxId);
     if (!wrap) return null;
@@ -1187,17 +1110,13 @@
     }
   }
 
-  // marca inválido + mostra / esconde mensagem embaixo do campo
   function markValidity(input, isValid, message){
     if (!input) return;
-
     const wrap = input.closest('.fieldbox') || input.parentElement;
     input.classList.toggle('invalid', !isValid);
     input.setAttribute('aria-invalid', String(!isValid));
-
     if (!wrap) return;
 
-    // erro fica DEPOIS da fieldbox, não dentro
     let err = wrap.nextElementSibling;
     if (!err || !err.classList.contains('field-error')) {
       err = document.createElement('div');
@@ -1216,26 +1135,18 @@
     }
   }
 
-  // limpa erros do modal inteiro (chamado ao abrir outro colaborador/fechar)
   function clearValidationErrors(){
-    document
-      .querySelectorAll('#modal-perfil .field-error')
-      .forEach(el => el.remove());
-
-    document
-      .querySelectorAll('#modal-perfil .input.invalid, #modal-perfil .select.invalid, #modal-perfil .fieldbox.invalid')
+    document.querySelectorAll('#modal-perfil .field-error').forEach(el => el.remove());
+    document.querySelectorAll('#modal-perfil .input.invalid, #modal-perfil .select.invalid, #modal-perfil .fieldbox.invalid')
       .forEach(el => {
         el.classList.remove('invalid');
-        if (typeof el.removeAttribute === 'function') {
-          el.removeAttribute('aria-invalid');
-        }
+        if (typeof el.removeAttribute === 'function') el.removeAttribute('aria-invalid');
       });
   }
 
   function setSaveEnabled(ok){
     [pSaveFoot, pSave].forEach(btn=>{
       if (!btn) return;
-      // NÃO desabilita de verdade, só muda aparência / acessibilidade
       btn.classList.toggle('btn-soft-disabled', !ok);
       btn.setAttribute('aria-disabled', String(!ok));
     });
@@ -1265,7 +1176,6 @@
     const cargo  = eCargo?.value.trim()  || '';
     const hIni   = eExpIni?.value.trim() || '';
     const hFim   = eExpFim?.value.trim() || '';
-
     const expOn = !!eExpPersonalizar?.checked;
 
     const msgs = [];
@@ -1288,7 +1198,6 @@
     markValidity(eTel,   show ? telOk   : true, telOk   ? '' : 'Telefone com DDD (10–11 dígitos)');
     markValidity(eCargo, show ? cargoOk : true, cargoOk ? '' : 'Cargo (mín. 2 letras)');
 
-    // ---- horário: só valida se "Personalizar horário" estiver ligado ----
     let hIniOk = true;
     let hFimOk = true;
     let hOrderOk = true;
@@ -1318,13 +1227,11 @@
         markValidity(eExpFim, show ? okField : true, okField ? '' : 'Informe no formato HH:MM (ex.: 18:00)');
       }
     } else {
-      // herda do depto: limpa validação
       if (eExpIni) markValidity(eExpIni, true, '');
       if (eExpFim) markValidity(eExpFim, true, '');
       hIniOk = true; hFimOk = true; hOrderOk = true;
     }
 
-    // senha: obrigatório no create; opcional no edit; só se tiver permissão
     let senhaOk = true;
     const senhaEl  = document.querySelector('#e-senha');
     const isCreate = (perfilModal.dataset.mode === 'create');
@@ -1335,26 +1242,17 @@
       if (isCreate) {
         senhaOk = s.length >= 6 && s.length <= 72;
         if (!senhaOk) msgs.push('• Senha (mín. 6 caracteres)');
-        markValidity(
-          senhaEl,
-          show ? senhaOk : true,
-          senhaOk ? '' : 'Senha (mín. 6 caracteres)'
-        );
+        markValidity(senhaEl, show ? senhaOk : true, senhaOk ? '' : 'Senha (mín. 6 caracteres)');
       } else {
         if (s.length > 0) {
           senhaOk = s.length >= 6 && s.length <= 72;
           if (!senhaOk) msgs.push('• Senha (mín. 6 caracteres)');
-          markValidity(
-            senhaEl,
-            show ? senhaOk : true,
-            senhaOk ? '' : 'Senha (mín. 6 caracteres)'
-          );
+          markValidity(senhaEl, show ? senhaOk : true, senhaOk ? '' : 'Senha (mín. 6 caracteres)');
         } else {
           markValidity(senhaEl, true, '');
         }
       }
     } else if (senhaEl) {
-      // sem permissão – ignora validação de senha
       markValidity(senhaEl, true, '');
       senhaOk = true;
     }
@@ -1364,7 +1262,6 @@
     return { ok, msgs };
   }
 
-  // ====== Permissões (checkboxes por colaborador) ======
   async function ensurePermsEdit(){
     if (!ePerms) return;
 
@@ -1374,20 +1271,14 @@
     try {
       const list  = await apiGet('/api/permissoes');
       const items = Array.isArray(list) ? list : (list?.items || list?.data || []);
-
-      // permissões atuais do colaborador (podem vir como id ou objeto)
-      const current = new Set(
-        (state.viewing?.permissoes || []).map(x => String(x.id ?? x.value ?? x.key ?? x))
-      );
+      const current = new Set((state.viewing?.permissoes || []).map(x => String(x.id ?? x.value ?? x.key ?? x)));
 
       if (!items.length){
         ePerms.innerHTML = '<div style="opacity:.75">Nenhuma permissão cadastrada.</div>';
         return;
       }
 
-      items.sort((a,b) =>
-        String(a.nome || a.id || '').localeCompare(String(b.nome || b.id || ''), 'pt-BR')
-      );
+      items.sort((a,b) => String(a.nome || a.id || '').localeCompare(String(b.nome || b.id || ''), 'pt-BR'));
 
       items.forEach(p => {
         const idRaw = p.id ?? p.value ?? p.key;
@@ -1411,25 +1302,19 @@
   }
 
   function getPermsSelecionadasEdit(){
-    return [...document.querySelectorAll('#e-perms input[name="perm-edit"]:checked')]
-      .map(i=> i.value);
+    return [...document.querySelectorAll('#e-perms input[name="perm-edit"]:checked')].map(i=> i.value);
   }
 
   async function savePerms(id, arr){
-    // sempre envia exatamente as permissões marcadas para ESTE colaborador
     const payload = { permissoes: arr };
-
     const tries = [
-      // endpoint principal
       { path: `/api/permissoes/colaboradores/${id}`, method: 'PUT' },
-      // possíveis variações
       { path: `/api/colaboradores/${id}/permissoes`, method: 'PUT' },
       { path: `/api/colaboradores/${id}/permissoes`, method: 'POST' },
-      { path: `/api/colaboradores/${id}`,           method: 'PUT' },
+      { path: `/api/colaboradores/${id}`, method: 'PUT' },
     ];
 
     let lastError = null;
-
     for (const t of tries){
       try{
         await apiJSON(t.path, t.method, payload);
@@ -1438,14 +1323,12 @@
         lastError = e;
       }
     }
-
     console.warn('falha ao salvar perms', id, lastError);
     return false;
   }
 
-  // ====== Render perfil (view) – requery elementos a cada render ======
   async function renderPerfilView(colab){
-    clearValidationErrors();   // limpa erros que ficaram de outro colaborador
+    clearValidationErrors();
     state.viewing = colab;
     state.showErrors = false;
 
@@ -1492,7 +1375,6 @@
     if (vCargo) vCargo.textContent = adm ? '' : (cargoVal || '—');
     renderAdminBadge(colab);
 
-    // Horário de expediente (view) + herança do depto (com fallback por nome)
     const colIni = coalesceHorarioInicio(colab);
     const colFim = coalesceHorarioFim(colab);
     const depHor = getDeptHorarioById(depId, depName);
@@ -1509,10 +1391,8 @@
       else vExpFim.textContent = '—';
     }
 
-    // hint do depto sempre que houver horário padrão
     renderDeptHintBySetorId(depId, { personalizar: isCustom, setorNome: depName });
 
-    // toggle de personalizar só aparece em edição
     const rowToggle = document.getElementById('row-exp-toggle');
     if (rowToggle) rowToggle.style.display = 'none';
     const rowIni = document.getElementById('row-exp-ini');
@@ -1544,11 +1424,9 @@
     if (senhaHelp) senhaHelp.style.display = (canPass && isCreate) ? '' : 'none';
 
     bindAvatarDnDAndPaste();
-
     exitInlineEdit(false);
   }
 
-  // ====== Edição inline ======
   function enterInlineEdit(){
     if (!state.viewing || state.inlineEdit) return;
     state.inlineEdit = true;
@@ -1581,35 +1459,25 @@
       </select>`;
     const sel = swapFieldbox('fb-depto', selHtml);
 
-    // ---- tenta por ID e depois por NOME ----
     const depIdRaw  = coalesceDeptId(state.viewing);
     const depName   = coalesceDeptName(state.viewing);
-    let   depValue  = '';
+    let depValue  = '';
 
-    if (depIdRaw != null) {
-      depValue = String(depIdRaw);
-    } else if (depName && state.setores.length) {
+    if (depIdRaw != null) depValue = String(depIdRaw);
+    else if (depName && state.setores.length) {
       const alvo = normStr(depName);
       const found = state.setores.find(s => normStr(s?.nome) === alvo);
       if (found) depValue = String(found.id);
     }
 
-    console.debug('[colab edit] depIdRaw=', depIdRaw, 'depName=', depName, '=> depValue=', depValue);
-
     if (sel && depValue) {
-      // Se a lista veio incompleta (ex.: API em árvore ou colaborador com setor antigo),
-      // garante a opção atual para não “resetar” o select para "Selecione…"
       const hasOpt = Array.from(sel.options || []).some(o => o.value === depValue);
-      if (!hasOpt) {
-        sel.appendChild(new Option(depName || 'Departamento atual', depValue));
-      }
+      if (!hasOpt) sel.appendChild(new Option(depName || 'Departamento atual', depValue));
       sel.value = depValue;
     }
 
     swapFieldbox('fb-tel', `<input id="e-tel" class="input" type="tel" required inputmode="numeric" placeholder="(DD) 9 9999-9999">`);
     swapFieldbox('fb-cargo', `<input id="e-cargo" class="input" type="text" maxlength="80" required placeholder="Cargo">`);
-
-    // Horário – entrada / saída (só aparece se “Personalizar” estiver ligado)
     swapFieldbox('fb-exp-ini', `<input id="e-exp-ini" class="input" type="text" inputmode="numeric" placeholder="08:00">`);
     swapFieldbox('fb-exp-fim', `<input id="e-exp-fim" class="input" type="text" inputmode="numeric" placeholder="18:00">`);
 
@@ -1623,11 +1491,9 @@
     $('#e-exp-ini').value = hIni;
     $('#e-exp-fim').value = hFim;
 
-    // configura toggle “Personalizar horário”
     const tgl = document.getElementById('e-exp-personalizar');
     if (tgl){
       const isCreate = (perfilModal.dataset.mode === 'create');
-      // se já existir horário salvo no colaborador, considera personalizado
       tgl.checked = !isCreate && !!(hIni || hFim);
       tgl.onchange = ()=>{
         applyExpPersonalizarUI();
@@ -1659,13 +1525,11 @@
       renderAdminBadge({ ...state.viewing, cargo: $('#e-cargo').value });
     });
 
-    // change do depto: atualiza hint + se personalizar ligado e vazio, pré-preenche
     sel?.addEventListener('change', ()=>{
       applyExpPersonalizarUI();
       validateFormLive();
     });
 
-    // horário – máscara e validação ao digitar
     $('#e-exp-ini')?.addEventListener('input', ()=>{
       const el = $('#e-exp-ini');
       maskTimeInput(el);
@@ -1678,11 +1542,8 @@
     });
 
     const senhaInput = $('#e-senha');
-    if (senhaInput){
-      senhaInput.addEventListener('input', ()=> validateFormLive());
-    }
+    if (senhaInput) senhaInput.addEventListener('input', ()=> validateFormLive());
 
-    // Permissões: em modo edição (create ou edit) sempre mostra os checkboxes
     if (ePerms){
       ePerms.style.display = 'grid';
       ensurePermsEdit();
@@ -1719,11 +1580,8 @@
     }
 
     bindAvatarDnDAndPaste();
-
-    // aplica UI do “Personalizar horário” e hint do depto conforme seleção atual
     applyExpPersonalizarUI();
 
-    // se tinha depto preselecionado, atualiza hint
     if (sel && sel.value) {
       const setorNome = sel?.options?.[sel.selectedIndex]?.text || '';
       renderDeptHintBySetorId(sel.value, { personalizar: !!tgl?.checked, setorNome });
@@ -1757,7 +1615,6 @@
 
     perfilModal.classList.remove('editing');
 
-    // volta exibição normal no view
     const rowToggle = document.getElementById('row-exp-toggle');
     if (rowToggle) rowToggle.style.display = 'none';
     const rowIni = document.getElementById('row-exp-ini');
@@ -1768,7 +1625,6 @@
     if (restore && state.viewing) renderPerfilView(state.viewing);
   }
 
-  // ====== Salvar (create + edit) ======
   async function saveInline(){
     validateFormLive(false);
 
@@ -1783,7 +1639,6 @@
     const tel    = eTel?.value || '';
     const cargo  = eCargo?.value || '';
     const expOn  = !!eExpPersonalizar?.checked;
-
     const hIni   = (expOn ? (eExpIni?.value.trim() || '') : '');
     const hFim   = (expOn ? (eExpFim?.value.trim() || '') : '');
 
@@ -1805,7 +1660,6 @@
       fd.append('telefone', telE164(tel));
       fd.append('cargo', (cargo||'').trim());
 
-      // horário: só envia se personalizar estiver marcado
       if (expOn){
         fd.append('hora_login_inicio', hIni);
         fd.append('hora_login_fim', hFim);
@@ -1832,7 +1686,6 @@
       try{
         const created = await apiForm('/api/colaboradores/', 'POST', fd);
 
-        // garante que colaboradores_permissoes seja atualizado
         if (created?.id != null){
           try { await savePerms(created.id, permsSel); } catch(ePerm){ console.warn('perm create', ePerm); }
         }
@@ -1858,13 +1711,12 @@
         const fresh = await loadColabFull(created.id);
         fresh.instancias_ids    = instsSel;
         if (permsSel.length) fresh.permissoes = permsSel;
-
-        // salva o que foi definido (ou null para herdar)
         fresh.hora_login_inicio = expOn ? (hIni || null) : null;
         fresh.hora_login_fim    = expOn ? (hFim || null) : null;
 
         state.viewing = fresh;
-        await loadColaboradores(); renderLista();
+        await loadColaboradores();
+        renderLista();
         await renderPerfilView(fresh);
         exitInlineEdit(false);
       }catch(e){
@@ -1877,7 +1729,6 @@
       return;
     }
 
-    // ===== edição =====
     const payload = {
       nome, email,
       setor_id: Number(setor),
@@ -1887,7 +1738,6 @@
       atualizar_usuario: !!state.viewing?.usuario_id
     };
 
-    // horário: null = herda do depto
     payload.hora_login_inicio = expOn ? (hIni || null) : null;
     payload.hora_login_fim    = expOn ? (hFim || null) : null;
 
@@ -1915,9 +1765,7 @@
       let permsUpdated = true;
       try{
         permsUpdated = await savePerms(id, permsSel);
-        if (permsUpdated){
-          state.viewing.permissoes = permsSel;
-        }
+        if (permsUpdated) state.viewing.permissoes = permsSel;
       }catch(ePerm){
         permsUpdated = false;
         console.warn('Erro ao salvar permissões (edit)', ePerm);
@@ -1937,12 +1785,12 @@
       const fresh = await loadColabFull(id);
       fresh.instancias_ids    = instsSel;
       if (permsSel.length) fresh.permissoes = permsSel;
-
       fresh.hora_login_inicio = expOn ? (hIni || null) : null;
       fresh.hora_login_fim    = expOn ? (hFim || null) : null;
 
       state.viewing = fresh;
-      await loadColaboradores(); renderLista();
+      await loadColaboradores();
+      renderLista();
       renderPerfilView(fresh);
     }catch(e){
       console.error(e);
@@ -1952,7 +1800,6 @@
     }
   }
 
-  // ====== Flow de abrir perfil/novo ======
   async function openPerfil(id){
     try{
       if (Number.isNaN(Number(id)) || !Number(id)){
@@ -1975,7 +1822,7 @@
   }
 
   function closePerfil(){
-    clearValidationErrors(); // limpa erros ao fechar também
+    clearValidationErrors();
     perfilModal.setAttribute('aria-hidden','true');
     document.documentElement.classList.remove('modal-open');
     perfilModal.dataset.mode = 'view';
@@ -2043,7 +1890,6 @@
     enterInlineEdit();
   }
 
-  // ====== Events ======
   function bind(){
     filtroTxt?.addEventListener('input', debounce(()=>{
       state.filtroTexto = filtroTxt.value.trim();
@@ -2051,10 +1897,8 @@
     },160));
     filtroDepto?.addEventListener('change', ()=>{ state.filtroSetorId = filtroDepto.value; renderLista(); });
     btnFiltrar?.addEventListener('click', renderLista);
-
     btnAdd?.addEventListener('click', openNovo);
 
-    // 🔐 marcar/desmarcar “Exigir código de login (token)”
     if (chkRequerToken){
       chkRequerToken.addEventListener('change', () => {
         saveEmpresaLoginConfig(chkRequerToken.checked);
@@ -2062,7 +1906,8 @@
     }
 
     document.addEventListener('click', (e)=>{
-      const b = e.target.closest('[data-action]'); if (!b) return;
+      const b = e.target.closest('[data-action]');
+      if (!b) return;
       const raw = b.dataset.id;
       const id  = Number(raw);
 
@@ -2117,7 +1962,6 @@
     });
   }
 
-  // ====== Init / Poller ======
   let _poller = null;
   function startPoller(){
     if (_poller) return;
@@ -2133,10 +1977,7 @@
     if (window.ZAuth?.softEnsureAuth) { try{ await ZAuth.softEnsureAuth(); }catch{} }
     await preloadPerms();
     bind();
-
-    // 🔐 carrega dados da empresa (inclui requer_token_login) e sincroniza checkbox
     await loadEmpresa();
-
     await loadSetores();
     await loadColaboradores();
     renderLista();
@@ -2149,7 +1990,8 @@
   }
 
   function run(){
-    if (run._did) return; run._did = true;
+    if (run._did) return;
+    run._did = true;
     if (window.Page?.guarded){
       window.Page.guarded(VIEW_PERM, init, { msg:'Sem permissão para Colaboradores' });
     } else {
@@ -2162,7 +2004,6 @@
 
 })();
 
-/* ===== Dark/Light dropdown: mesmo fundo da superfície ===== */
 (()=>{
   if (document.body.dataset.page !== 'colaboradores') return;
 

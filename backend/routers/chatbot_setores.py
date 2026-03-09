@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, select, and_
 
 from backend.database import get_db
 import backend.models as models
@@ -21,11 +21,19 @@ from backend.routers.atendimento_send import _evo_post  # type: ignore
 
 router = APIRouter(prefix="/api", tags=["Chatbot (Triagem Setores)"])
 
-TRIAGEM_TTL_HOURS = int(os.getenv("TRIAGEM_TTL_HOURS", "6"))  # após X horas sem falar, volta a pedir setor
+TRIAGEM_TTL_HOURS = int(os.getenv("TRIAGEM_TTL_HOURS", "6"))
 
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _as_aware_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def _digits(s: str) -> str:
@@ -40,7 +48,6 @@ def _norm_txt(s: str) -> str:
 
 
 def _ensure_br_country(d: str) -> str:
-    """Se vier só com DDD+número (11 dígitos no BR), prefixa 55."""
     d = _digits(d)
     if len(d) == 11 and not d.startswith("55"):
         return "55" + d
@@ -50,7 +57,6 @@ def _ensure_br_country(d: str) -> str:
 def _remote_jid_from_payload(numero_digits: str, jid: str | None) -> str:
     jid = (jid or "").strip()
     if jid:
-        # já vem algo tipo 5531...@s.whatsapp.net
         return jid
     e164 = _ensure_br_country(numero_digits)
     return f"{e164}@s.whatsapp.net"
@@ -76,12 +82,6 @@ def _resolve_emp_inst_from_instance_name(db: Session, instance_name: str) -> Tup
 def _find_cliente(
     db: Session, *, empresa_id: int, telefone_digits: str, instancia_id: Optional[int]
 ) -> Optional[models.Cliente]:
-    """
-    Seu banco parece salvar:
-      telefone (raw) = 5531...
-      telefone_norm  = 319...
-    Então procuramos por 2 candidatos: com e sem 55.
-    """
     tel = _digits(telefone_digits)
     cands = {tel}
     if tel.startswith("55") and len(tel) >= 12:
@@ -96,7 +96,6 @@ def _find_cliente(
     if not rows:
         return None
 
-    # se tiver mais de um (raro), prefere o que bate a instância atual
     if instancia_id:
         for r in rows:
             if r.instancia_id == instancia_id:
@@ -113,14 +112,12 @@ def _get_or_create_cliente(
 ) -> models.Cliente:
     cli = _find_cliente(db, empresa_id=empresa_id, telefone_digits=telefone_digits, instancia_id=instancia_id)
     if cli:
-        # mantém telefone raw atualizado (se quiser)
         if telefone_digits:
             cli.telefone = _ensure_br_country(telefone_digits)
         if instancia_id and (cli.instancia_id != instancia_id):
             cli.instancia_id = instancia_id
         return cli
 
-    # cria
     cli = models.Cliente(
         empresa_id=empresa_id,
         instancia_id=instancia_id,
@@ -128,7 +125,7 @@ def _get_or_create_cliente(
         nome="Cliente",
     )
     db.add(cli)
-    db.flush()  # pega cli.id
+    db.flush()
     return cli
 
 
@@ -152,6 +149,24 @@ def _fetch_empresa_instancia_info(db: Session, *, empresa_id: int, instancia_id:
     instancia = (row or {}).get("instancia") or ""
     empresa_nome = (row or {}).get("empresa_nome") or ""
     return str(instancia), str(empresa_nome)
+
+
+def _fetch_chatbot_config(db: Session, *, empresa_id: int, instancia_id: int) -> Dict[str, Any]:
+    row = db.execute(
+        select(models.ChatbotConfig).where(
+            and_(
+                models.ChatbotConfig.empresa_id == empresa_id,
+                models.ChatbotConfig.instancia_id == instancia_id,
+                models.ChatbotConfig.ativo.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+
+    if not row:
+        return {}
+
+    cfg = row.config or {}
+    return cfg if isinstance(cfg, dict) else {}
 
 
 def _fetch_departamentos(db: Session, *, empresa_id: int, instancia_id: int) -> List[Dict[str, Any]]:
@@ -185,44 +200,132 @@ def _fetch_departamentos(db: Session, *, empresa_id: int, instancia_id: int) -> 
 
     deps: List[Dict[str, Any]] = []
     for idx, r in enumerate(rows, start=1):
-        deps.append({"idx": idx, "id": int(r["id"]), "nome": str(r["nome"] or "").strip()})
+        deps.append(
+            {
+                "idx": idx,
+                "id": int(r["id"]),
+                "nome": str(r["nome"] or "").strip(),
+            }
+        )
     return deps
 
 
-def _parse_departamento_choice(texto: str, deps: List[Dict[str, Any]]) -> Tuple[Optional[int], Optional[int], Optional[str]]:
+def _get_triage_cfg_parts(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    features = cfg.get("features") or {}
+    ad = features.get("auto_messages_departments") or {}
+    welcome = ad.get("welcome") or {}
+    items = ad.get("items") or {}
+    if not isinstance(ad, dict):
+        ad = {}
+    if not isinstance(welcome, dict):
+        welcome = {}
+    if not isinstance(items, dict):
+        items = {}
+    return ad, welcome, items
+
+
+def _fetch_triage_departamentos(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    cfg: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    deps_raw = _fetch_departamentos(db, empresa_id=empresa_id, instancia_id=instancia_id)
+    _, _, items_cfg = _get_triage_cfg_parts(cfg)
+
+    # Se não houver items configurados, usa todos os departamentos encontrados.
+    if not items_cfg:
+        deps: List[Dict[str, Any]] = []
+        for idx, d in enumerate(deps_raw, start=1):
+            deps.append(
+                {
+                    "idx": idx,
+                    "id": int(d["id"]),
+                    "nome": str(d["nome"] or "").strip(),
+                    "label": str(d["nome"] or "").strip(),
+                    "keywords": [],
+                    "text": "",
+                }
+            )
+        return deps
+
+    deps: List[Dict[str, Any]] = []
+    for d in deps_raw:
+        did = str(d["id"])
+        item = items_cfg.get(did) or {}
+        if not isinstance(item, dict):
+            item = {}
+
+        enabled = bool(item.get("enabled", False))
+        if not enabled:
+            continue
+
+        label = str(item.get("label") or d["nome"] or "").strip()
+        text = str(item.get("text") or "").strip()
+
+        kws_raw = item.get("keywords") or []
+        if isinstance(kws_raw, list):
+            keywords = [str(x).strip() for x in kws_raw if str(x).strip()]
+        elif isinstance(kws_raw, str):
+            keywords = [s.strip() for s in kws_raw.split(",") if s.strip()]
+        else:
+            keywords = []
+
+        deps.append(
+            {
+                "id": int(d["id"]),
+                "nome": str(d["nome"] or "").strip(),
+                "label": label or str(d["nome"] or "").strip(),
+                "keywords": keywords,
+                "text": text,
+            }
+        )
+
+    for idx, d in enumerate(deps, start=1):
+        d["idx"] = idx
+
+    return deps
+
+
+def _parse_departamento_choice(
+    texto: str, deps: List[Dict[str, Any]]
+) -> Tuple[Optional[int], Optional[int], Optional[str], Optional[Dict[str, Any]]]:
     """
     Aceita:
       - "2" ou "2 - financeiro"
       - "dep:12"
       - "financeiro"
+      - palavras-chave configuradas
     """
     t = _norm_txt(texto)
     if not t:
-        return None, None, None
+        return None, None, None, None
 
-    # dep:ID
     m = re.fullmatch(r"dep:(\d+)", t)
     if m:
         dep_id = int(m.group(1))
         dep = next((d for d in deps if d["id"] == dep_id), None)
-        return dep_id, (dep["idx"] if dep else None), (dep["nome"] if dep else None)
+        return dep_id, (dep["idx"] if dep else None), (dep["label"] if dep else None), dep
 
-    # começa com número
     m = re.match(r"^(\d{1,2})\b", t)
     if m:
         opt = int(m.group(1))
         dep = next((d for d in deps if d["idx"] == opt), None)
         if dep:
-            return int(dep["id"]), int(dep["idx"]), str(dep["nome"])
+            return int(dep["id"]), int(dep["idx"]), str(dep["label"]), dep
 
-    # por nome (contém)
-    if len(t) >= 3:
+    if len(t) >= 2:
         for d in deps:
-            dn = _norm_txt(d["nome"])
-            if dn and (dn in t or t in dn):
-                return int(d["id"]), int(d["idx"]), str(d["nome"])
+            aliases = [str(d.get("label") or ""), str(d.get("nome") or "")]
+            aliases.extend(d.get("keywords") or [])
+            aliases_norm = [_norm_txt(x) for x in aliases if str(x).strip()]
 
-    return None, None, None
+            for alias in aliases_norm:
+                if alias and (alias == t or alias in t or t in alias):
+                    return int(d["id"]), int(d["idx"]), str(d["label"]), d
+
+    return None, None, None, None
 
 
 def _fetch_primary_colab_id(db: Session, *, empresa_id: int, departamento_id: int) -> Optional[int]:
@@ -258,6 +361,80 @@ def _send_text(db: Session, *, instancia_nome: str, remote_jid: str, text_msg: s
     _evo_post("/messages/sendText", instancia_nome, payload)
 
 
+def _replace_tokens(template: str, *, empresa_nome: str, menu_departamentos: str) -> str:
+    text_msg = str(template or "").strip()
+
+    if not text_msg:
+        text_msg = (
+            "Olá! 👋\n"
+            "Bem-vindo(a) à {empresa}.\n\n"
+            "Para direcionar seu atendimento, escolha uma opção abaixo:\n\n"
+            "{menu_departamentos}\n\n"
+            "Digite apenas o número da opção desejada."
+        )
+
+    text_msg = re.sub(r"\{empresa\}", empresa_nome or "empresa", text_msg, flags=re.I)
+    text_msg = re.sub(r"\{menu_departamentos\}", menu_departamentos, text_msg, flags=re.I)
+    return text_msg
+
+
+def _build_menu_message(
+    *,
+    empresa_nome: str,
+    deps: List[Dict[str, Any]],
+    cfg: Dict[str, Any],
+) -> str:
+    _, welcome_cfg, _ = _get_triage_cfg_parts(cfg)
+    template = str(welcome_cfg.get("text") or "").strip()
+    linhas = "\n".join([f'{d["idx"]} - {d["label"]}' for d in deps])
+    return _replace_tokens(template, empresa_nome=empresa_nome or "empresa", menu_departamentos=linhas)
+
+
+def _build_invalid_choice_message(
+    *,
+    empresa_nome: str,
+    deps: List[Dict[str, Any]],
+    cfg: Dict[str, Any],
+) -> str:
+    base = _build_menu_message(empresa_nome=empresa_nome, deps=deps, cfg=cfg)
+    return f"Não entendi sua opção.\n\n{base}"
+
+
+def _build_fallback_message(
+    *,
+    empresa_nome: str,
+    cfg: Dict[str, Any],
+) -> str:
+    ad, _, _ = _get_triage_cfg_parts(cfg)
+    fallback_text = str(ad.get("fallback_text") or "").strip()
+    if fallback_text:
+        return re.sub(r"\{empresa\}", empresa_nome or "empresa", fallback_text, flags=re.I)
+
+    return (
+        f"Não consegui identificar a opção desejada na triagem da *{empresa_nome or 'empresa'}*.\n"
+        "Vou encaminhar sua mensagem para atendimento manual. 🙂"
+    )
+
+
+def _build_assign_ack(
+    *,
+    empresa_nome: str,
+    dep: Optional[Dict[str, Any]],
+) -> str:
+    if dep:
+        custom = str(dep.get("text") or "").strip()
+        if custom:
+            custom = re.sub(r"\{empresa\}", empresa_nome or "empresa", custom, flags=re.I)
+            custom = re.sub(r"\{setor\}", str(dep.get("label") or dep.get("nome") or ""), custom, flags=re.I)
+            return custom
+
+        dep_nome = str(dep.get("label") or dep.get("nome") or "").strip()
+        if dep_nome:
+            return f"Perfeito! Vou te encaminhar para *{dep_nome}*. Só um instante 🙂"
+
+    return "Perfeito! Só um instante 🙂"
+
+
 def triagem_handle_inbound(
     db: Session,
     *,
@@ -275,8 +452,8 @@ def triagem_handle_inbound(
           - Se ficou > ttl_hours sem falar: limpa departamento_id/colaborador_id e liga triagem_ativa
           - Atualiza triagem_ultima_msg_em = agora
           - Se precisa de triagem: manda menu ou aceita escolha e salva departamento_id
+          - Respeita config salva em chatbot_configs.config.features.auto_messages_departments
     """
-    # não responde msg enviada por você
     if (direction or "").lower() == "saida":
         return {"ok": True, "action": "ignore_saida"}
 
@@ -286,9 +463,19 @@ def triagem_handle_inbound(
     if not empresa_id or not instancia_id or not telefone_digits or not texto:
         return {"ok": True, "action": "noop_invalid"}
 
-    instancia_nome, empresa_nome = _fetch_empresa_instancia_info(db, empresa_id=empresa_id, instancia_id=instancia_id)
+    instancia_nome, empresa_nome = _fetch_empresa_instancia_info(
+        db, empresa_id=empresa_id, instancia_id=instancia_id
+    )
+    cfg = _fetch_chatbot_config(db, empresa_id=empresa_id, instancia_id=instancia_id)
+    ad_cfg, welcome_cfg, _ = _get_triage_cfg_parts(cfg)
 
-    # garante cliente
+    # Se a triagem de departamentos não estiver ativa, não faz nada.
+    if not bool(ad_cfg.get("enabled", False)):
+        return {"ok": True, "action": "noop_triagem_disabled"}
+
+    if not bool(welcome_cfg.get("enabled", False)):
+        return {"ok": True, "action": "noop_triagem_welcome_disabled"}
+
     cliente = _get_or_create_cliente(
         db,
         empresa_id=empresa_id,
@@ -299,8 +486,7 @@ def triagem_handle_inbound(
     now = _now_utc()
     ttl = timedelta(hours=max(1, int(ttl_hours)))
 
-    # 1) regra do "voltou depois de horas" -> reseta
-    last = cliente.triagem_ultima_msg_em
+    last = _as_aware_utc(cliente.triagem_ultima_msg_em)
     if last and (now - last) > ttl:
         cliente.departamento_id = None
         cliente.colaborador_id = None
@@ -308,61 +494,79 @@ def triagem_handle_inbound(
         cliente.triagem_tentativas = 0
         cliente.triagem_iniciada_em = now
 
-    # 2) sempre atualiza última msg do cliente
     cliente.triagem_ultima_msg_em = now
 
-    # 3) precisa triagem?
     needs_triage = (cliente.departamento_id is None) or bool(cliente.triagem_ativa)
-
     if not needs_triage:
         db.commit()
         return {"ok": True, "action": "noop_has_departamento"}
 
-    # Se entrou em triagem agora e ainda não tem iniciada_em, seta
     if not cliente.triagem_iniciada_em:
         cliente.triagem_iniciada_em = now
 
-    deps = _fetch_departamentos(db, empresa_id=empresa_id, instancia_id=instancia_id)
-
+    deps = _fetch_triage_departamentos(db, empresa_id=empresa_id, instancia_id=instancia_id, cfg=cfg)
     if not deps:
         cliente.triagem_ativa = False
         db.commit()
-        return {"ok": True, "action": "noop_no_deps"}
+        return {"ok": True, "action": "noop_no_deps_enabled"}
 
-    dep_id, dep_idx, dep_nome = _parse_departamento_choice(texto, deps)
+    dep_id, dep_idx, dep_nome, dep_obj = _parse_departamento_choice(texto, deps)
 
     if dep_id:
-        # escolheu certo -> salva e para triagem
         cliente.departamento_id = dep_id
         cliente.triagem_ativa = False
         cliente.triagem_tentativas = int(cliente.triagem_tentativas or 0) + 1
 
-        # atribui colab primário (se existir)
         primary = _fetch_primary_colab_id(db, empresa_id=empresa_id, departamento_id=dep_id)
         if primary:
             cliente.colaborador_id = primary
 
         db.commit()
 
-        ack = f"Perfeito! Vou te encaminhar para *{dep_nome}*. Só um instante 🙂" if dep_nome else "Perfeito! Só um instante 🙂"
+        ack = _build_assign_ack(empresa_nome=empresa_nome, dep=dep_obj)
         _send_text(db, instancia_nome=instancia_nome, remote_jid=remote_jid, text_msg=ack)
-        return {"ok": True, "action": "assign", "departamento_id": dep_id, "departamento_idx": dep_idx}
-
-    # não escolheu (ou digitou algo diferente) -> manda menu
-    linhas = "\n".join([f'{d["idx"]}) {d["nome"]}' for d in deps])
-    menu = (
-        f"Olá! Somos da *{empresa_nome or 'empresa'}* 🙂\n"
-        f"Qual setor você quer falar?\n\n"
-        f"{linhas}\n\n"
-        f"Responda com o *número* (ex: 1) ou escreva o *nome do setor*."
-    )
+        return {
+            "ok": True,
+            "action": "assign",
+            "departamento_id": dep_id,
+            "departamento_idx": dep_idx,
+            "departamento_nome": dep_nome,
+        }
 
     cliente.triagem_ativa = True
     cliente.triagem_tentativas = int(cliente.triagem_tentativas or 0) + 1
+
+    max_attempts = 0
+    try:
+        max_attempts = int(ad_cfg.get("max_attempts") or 0)
+    except Exception:
+        max_attempts = 0
+
+    if max_attempts > 0 and int(cliente.triagem_tentativas or 0) >= max_attempts:
+        cliente.triagem_ativa = False
+        db.commit()
+
+        fallback_msg = _build_fallback_message(empresa_nome=empresa_nome, cfg=cfg)
+        _send_text(db, instancia_nome=instancia_nome, remote_jid=remote_jid, text_msg=fallback_msg)
+        return {
+            "ok": True,
+            "action": "fallback",
+            "attempts": int(cliente.triagem_tentativas or 0),
+            "max_attempts": max_attempts,
+        }
+
+    # Se a mensagem parecer primeira abordagem (cliente escreveu algo que não é opção),
+    # ainda assim mostramos o menu configurado.
+    menu = _build_invalid_choice_message(empresa_nome=empresa_nome, deps=deps, cfg=cfg)
     db.commit()
 
     _send_text(db, instancia_nome=instancia_nome, remote_jid=remote_jid, text_msg=menu)
-    return {"ok": True, "action": "send_menu", "options": len(deps)}
+    return {
+        "ok": True,
+        "action": "send_menu",
+        "options": len(deps),
+        "attempts": int(cliente.triagem_tentativas or 0),
+    }
 
 
 @router.post("/chatbot/setores")
@@ -372,9 +576,9 @@ def webhook_chatbot_setores(payload: Dict[str, Any], db: Session = Depends(get_d
 
     Aceita:
       {
-        "empresa_id": 7,                # opcional se mandar "instancia"/"instance_name"
-        "instancia_id": 12,             # opcional se mandar "instancia"/"instance_name"
-        "instancia": "minha-instancia", # opcional
+        "empresa_id": 7,
+        "instancia_id": 12,
+        "instancia": "minha-instancia",
         "numero": "5531986419237" ou "31986419237",
         "texto": "2",
         "direction": "entrada"|"saida",

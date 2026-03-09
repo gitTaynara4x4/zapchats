@@ -1,4 +1,3 @@
-# backend/routers/colaboradores.py
 from __future__ import annotations
 
 from typing import Optional, List
@@ -28,17 +27,12 @@ from backend.database import get_db
 from backend import models
 from backend.routers.auth import get_current_user
 
-# ✅ Plano/Quota
 from backend.utils.entitlements import enforce_quota
 from backend.utils.usage import usage_counts
 
-# este router costuma ser montado com prefixo "/api" no main.py
 router = APIRouter(prefix="/colaboradores", tags=["Colaboradores"])
 
 
-# ==========================
-# Utilidades / Helpers
-# ==========================
 def _assert_mesma_empresa(a: int, b: int) -> None:
     if a != b:
         raise HTTPException(
@@ -53,7 +47,6 @@ def normalize_phone_e164_br(raw: Optional[str]) -> Optional[str]:
     d = re.sub(r"\D+", "", str(raw))
     if not d:
         return None
-    # aceita números BR com/sem 55 e aplica +55
     if d.startswith("55"):
         return "+" + d
     if len(d) in (10, 11):
@@ -61,15 +54,10 @@ def normalize_phone_e164_br(raw: Optional[str]) -> Optional[str]:
     return "+" + d
 
 
-# ---- Horário de login (Brasília) ----
 HORA_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 def _norm_hora(h: Optional[str]) -> Optional[str]:
-    """
-    Normaliza "HH:MM" ou "HH:MM:SS" para "HH:MM".
-    Se vier vazio, None ou inválido, retorna None (sem restrição).
-    """
     if h is None:
         return None
     h = str(h).strip()
@@ -82,11 +70,6 @@ def _norm_hora(h: Optional[str]) -> Optional[str]:
     return h
 
 
-# ---- Horário de expediente (modo) ----
-# Valores aceitos:
-#   - "departamento"  -> usa o horário padrão definido no departamento/setor
-#   - "personalizado" -> usa hora_login_inicio/hora_login_fim do colaborador
-#   - "livre"         -> sem restrição
 HORARIO_MODO_VALUES = ("departamento", "personalizado", "livre")
 
 
@@ -96,7 +79,6 @@ def _norm_horario_modo(v: Optional[str], *, default: Optional[str] = None) -> Op
     s = str(v).strip().lower()
     if not s:
         return default
-    # normaliza variações comuns
     if s in ("dept", "depto", "padrao", "padrão", "departamento_padrao", "departamento-padrao"):
         return "departamento"
     if s in ("custom", "personalizado", "pessoal", "individual"):
@@ -119,14 +101,9 @@ def build_avatar_url(nome: Optional[str], email: Optional[str]) -> str:
 def _resolve_setor_or_departamento(
     db: Session, empresa_id: int, maybe_id: Optional[int]
 ) -> Optional[models.Setor]:
-    """
-    Aceita um ID que pode ser de Setor OU de Departamento.
-    - Se for Setor da mesma empresa: retorna.
-    - Se for Departamento da mesma empresa: tenta reaproveitar Setor com mesmo nome; se não existir, cria e retorna.
-    """
     if not maybe_id:
         return None
-    # 1) tenta Setor
+
     s = (
         db.query(models.Setor)
         .filter_by(id=maybe_id, empresa_id=empresa_id)
@@ -134,7 +111,7 @@ def _resolve_setor_or_departamento(
     )
     if s:
         return s
-    # 2) tenta Departamento
+
     dep = (
         db.query(models.Departamento)
         .filter(
@@ -145,7 +122,7 @@ def _resolve_setor_or_departamento(
     )
     if not dep:
         return None
-    # 3) setor com mesmo nome?
+
     s = (
         db.query(models.Setor)
         .filter(models.Setor.empresa_id == empresa_id, models.Setor.nome == dep.nome)
@@ -153,7 +130,7 @@ def _resolve_setor_or_departamento(
     )
     if s:
         return s
-    # 4) cria Setor espelho
+
     s = models.Setor(empresa_id=empresa_id, nome=dep.nome)
     db.add(s)
     db.flush()
@@ -174,13 +151,9 @@ def _parse_perms(value: Optional[str | list]) -> list[str]:
             return [str(x) for x in data]
     except Exception:
         pass
-    # fallback: separado por vírgula/whitespace
     return [p for p in re.split(r"[\s,;]+", s) if p]
 
 
-# ==========================
-# Pydantic Schemas
-# ==========================
 class ColaboradorOut(BaseModel):
     id: int
     empresa_id: int
@@ -191,17 +164,12 @@ class ColaboradorOut(BaseModel):
     telefone: Optional[str]
     cargo: Optional[str]
 
-    # janela de login (horário de Brasília)
-    hora_login_inicio: Optional[str] = None  # "08:00"
-    hora_login_fim: Optional[str] = None  # "18:00"
+    hora_login_inicio: Optional[str] = None
+    hora_login_fim: Optional[str] = None
+    horario_modo: Optional[str] = None
 
-    # modo de expediente
-    horario_modo: Optional[str] = None  # "departamento" | "personalizado" | "livre"
-
-    # instâncias de WhatsApp que o colaborador pode ver
     instancias_ids: list[int] = Field(default_factory=list)
 
-    # extras
     setor_nome: Optional[str] = None
     tem_usuario: bool = False
     avatar_url: Optional[str] = None
@@ -217,7 +185,6 @@ class ColaboradorUpdate(BaseModel):
     telefone: Optional[str] = None
     cargo: Optional[str] = None
 
-    # atualizáveis
     hora_login_inicio: Optional[str] = None
     hora_login_fim: Optional[str] = None
     horario_modo: Optional[str] = None
@@ -225,8 +192,6 @@ class ColaboradorUpdate(BaseModel):
     senha: Optional[str] = None
     atualizar_usuario: Optional[bool] = False
     permissoes: Optional[List[str]] = None
-
-    # instâncias de WhatsApp que o colaborador pode ver
     instancias_ids: Optional[List[int]] = None
 
 
@@ -234,17 +199,7 @@ class ColaboradorInstanciasUpdate(BaseModel):
     instancias_ids: List[int] = Field(default_factory=list)
 
 
-# ==========================
-# Transformadores
-# ==========================
 def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
-    """
-    Retorna o shape plano esperado no front.
-    Fallbacks:
-      - setor_nome: tenta Setor -> (se não achar) Departamento com o mesmo ID
-      - telefone: tenta colab.telefone -> usuario.telefone/whatsapp/celular/phone
-    """
-    # ---- setor_nome (Setor OU Departamento) ----
     setor_nome: Optional[str] = None
     if getattr(c, "setor", None) is not None:
         setor_nome = c.setor.nome
@@ -261,7 +216,6 @@ def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
             if dep:
                 setor_nome = dep.nome
 
-    # ---- usuário (definir sempre para evitar UnboundLocalError) ----
     u = None
     uid = getattr(c, "usuario_id", None)
     need_user = (
@@ -277,7 +231,6 @@ def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
         except Exception:
             u = None
 
-    # ---- campos com fallback no usuário ----
     nome_plano = c.nome or getattr(u, "nome", None)
     email_plano = c.email or getattr(u, "email", None)
     telefone_plano = (
@@ -292,7 +245,6 @@ def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
     avatar_url = build_avatar_url(nome_plano, email_plano)
     is_admin_flag = (cargo_plano or "").lower() == "admin"
 
-    # modo de expediente (com compat p/ bancos antigos)
     modo_raw = getattr(c, "horario_modo", None)
     horario_modo_out = _norm_horario_modo(modo_raw, default=None)
     if not horario_modo_out:
@@ -310,7 +262,6 @@ def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
         email=email_plano or "no-reply@local.invalid",
         telefone=telefone_plano,
         cargo=cargo_plano,
-        # instâncias permitidas (usa instancias_ver do model)
         instancias_ids=list(c.instancias_ver or []),
         setor_nome=setor_nome,
         tem_usuario=bool(uid),
@@ -322,9 +273,6 @@ def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
     )
 
 
-# ==========================
-# Endpoints
-# ==========================
 @router.get("", response_model=List[ColaboradorOut])
 @router.get("/", response_model=List[ColaboradorOut])
 def listar_colaboradores(
@@ -374,13 +322,11 @@ async def criar_colaborador(
     request: Request,
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
-    # FormData (compat do front)
     nome: str = Form(...),
     email: EmailStr = Form(...),
     setor_id: Optional[int] = Form(None),
     telefone: Optional[str] = Form(None),
     cargo: Optional[str] = Form(None),
-    # janela de login (opcional)
     hora_login_inicio: Optional[str] = Form(None),
     hora_login_fim: Optional[str] = Form(None),
     horario_modo: Optional[str] = Form(None),
@@ -389,7 +335,6 @@ async def criar_colaborador(
     permissoes: Optional[str] = Form(None),
     avatar: Optional[UploadFile] = File(None),
 ):
-    # ✅ QUOTA: bloquear criação se exceder limite do plano
     emp = db.query(models.Empresa).get(user.empresa_id)
     if emp:
         counts = usage_counts(db, emp.id)
@@ -401,7 +346,6 @@ async def criar_colaborador(
             message="Seu plano atingiu o limite de colaboradores.",
         )
 
-    # Se vier JSON, aceitar também
     if request.headers.get("content-type", "").startswith("application/json"):
         payload = await request.json()
         if isinstance(payload, dict):
@@ -415,6 +359,7 @@ async def criar_colaborador(
             permissoes = payload.get("permissoes", permissoes)
             hora_login_inicio = payload.get("hora_login_inicio", hora_login_inicio)
             hora_login_fim = payload.get("hora_login_fim", hora_login_fim)
+            horario_modo = payload.get("horario_modo", horario_modo)
 
     setor = (
         _resolve_setor_or_departamento(db, user.empresa_id, setor_id)
@@ -437,6 +382,13 @@ async def criar_colaborador(
             status_code=409, detail="E-mail já cadastrado em colaboradores"
         )
 
+    avatar_bytes = None
+    avatar_mime = None
+    if avatar is not None:
+        avatar_bytes = await avatar.read()
+        if avatar_bytes:
+            avatar_mime = avatar.content_type or "application/octet-stream"
+
     usuario_id = None
     if criar_usuario:
         if not senha:
@@ -444,6 +396,7 @@ async def criar_colaborador(
                 status_code=422,
                 detail="Senha é obrigatória para criar usuário",
             )
+
         u = models.Usuario(
             empresa_id=user.empresa_id,
             nome=nome.strip(),
@@ -452,13 +405,11 @@ async def criar_colaborador(
             cargo=cargo or None,
             is_admin=False,
         )
-        if avatar is not None:
-            data = await avatar.read()
-            if data:
-                u.avatar_data = data
-                u.avatar_mime = (
-                    avatar.content_type or "application/octet-stream"
-                )
+
+        if avatar_bytes:
+            u.avatar_data = avatar_bytes
+            u.avatar_mime = avatar_mime
+
         try:
             db.add(u)
             db.flush()
@@ -476,7 +427,6 @@ async def criar_colaborador(
 
     horario_modo_norm = _norm_horario_modo(horario_modo, default=None)
     if not horario_modo_norm:
-        # compat: se mandou horários -> personalizado; se tem setor/departamento -> departamento; senão -> livre
         if hi_norm or hf_norm:
             horario_modo_norm = "personalizado"
         elif setor is not None:
@@ -495,13 +445,13 @@ async def criar_colaborador(
         cargo=(cargo or None),
         hora_login_inicio=hi_norm,
         hora_login_fim=hf_norm,
+        avatar_data=avatar_bytes if avatar_bytes else None,
+        avatar_mime=avatar_mime if avatar_bytes else None,
     )
 
-    # modo de expediente (se a coluna existir no model)
     if hasattr(colab, "horario_modo"):
         setattr(colab, "horario_modo", horario_modo_norm)
 
-    # permissões (se vierem)
     perm_ids = _parse_perms(permissoes)
     if perm_ids:
         perms = (
@@ -546,10 +496,8 @@ def atualizar_colaborador(
         raise HTTPException(status_code=404, detail="Colaborador não encontrado")
     _assert_mesma_empresa(colab.empresa_id, user.empresa_id)
 
-    # só campos realmente enviados (importante pra diferenciar "não mandou" de "mandou None")
     data = payload.model_dump(exclude_unset=True)
 
-    # --- atualiza campos básicos ---
     if "nome" in data and data["nome"] is not None:
         colab.nome = data["nome"].strip()
     if "email" in data and data["email"] is not None:
@@ -571,17 +519,14 @@ def atualizar_colaborador(
         else:
             colab.setor_id = None
 
-    # --- janela de horário de login (Brasília) ---
     if "hora_login_inicio" in data:
         colab.hora_login_inicio = _norm_hora(data["hora_login_inicio"])
     if "hora_login_fim" in data:
         colab.hora_login_fim = _norm_hora(data["hora_login_fim"])
 
-    # --- modo de expediente ---
     if "horario_modo" in data and hasattr(colab, "horario_modo"):
         colab.horario_modo = _norm_horario_modo(data.get("horario_modo"), default=None) or "livre"
 
-    # --- senha (e sincroniza com usuário se solicitado) ---
     atualizar_usuario_flag = bool(
         data.get("atualizar_usuario") or payload.atualizar_usuario
     )
@@ -595,7 +540,6 @@ def atualizar_colaborador(
                 u.senha_hash = bcrypt.hash(nova_senha)
                 db.add(u)
 
-    # --- sincronização com Usuario (nome/email/cargo) ---
     if atualizar_usuario_flag and colab.usuario_id:
         u = db.query(models.Usuario).get(colab.usuario_id)
         if u:
@@ -607,7 +551,6 @@ def atualizar_colaborador(
                 u.cargo = data["cargo"] or None
             db.add(u)
 
-    # --- permissões (substituição do conjunto) ---
     if "permissoes" in data:
         perm_ids = [str(x) for x in (data["permissoes"] or [])]
         if perm_ids:
@@ -620,7 +563,6 @@ def atualizar_colaborador(
             perms = []
         colab.permissoes = perms
 
-    # --- instâncias de WhatsApp permitidas ---
     if "instancias_ids" in data:
         raw = data["instancias_ids"] or []
         norm_ids: list[int] = []
@@ -637,7 +579,6 @@ def atualizar_colaborador(
         db.commit()
     except IntegrityError:
         db.rollback()
-        # pode ser UNIQUE de email em colaboradores ou usuarios
         raise HTTPException(status_code=409, detail="E-mail já cadastrado")
     except Exception:
         db.rollback()
@@ -701,7 +642,7 @@ def excluir_colaborador(
 ):
     colab = db.query(models.Colaborador).get(colab_id)
     if not colab:
-        return  # idempotente
+        return
     _assert_mesma_empresa(colab.empresa_id, user.empresa_id)
 
     try:
@@ -713,12 +654,44 @@ def excluir_colaborador(
     return
 
 
-# ==========================
-# Avatar do colaborador
-# ==========================
+@router.put(
+    "/{colab_id}/avatar",
+    summary="Atualiza avatar do colaborador",
+    responses={200: {"description": "Avatar atualizado"}},
+)
+async def put_colaborador_avatar(
+    colab_id: int,
+    avatar: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    me=Depends(get_current_user),
+):
+    c = db.query(models.Colaborador).get(colab_id)
+    if not c:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Colaborador não encontrado")
+
+    _assert_mesma_empresa(c.empresa_id, me.empresa_id)
+
+    data = await avatar.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Arquivo de avatar vazio")
+
+    c.avatar_data = data
+    c.avatar_mime = avatar.content_type or "application/octet-stream"
+
+    if c.usuario_id:
+        u = db.query(models.Usuario).get(c.usuario_id)
+        if u:
+            u.avatar_data = data
+            u.avatar_mime = c.avatar_mime
+
+    db.add(c)
+    db.commit()
+    return {"ok": True}
+
+
 @router.get(
     "/{colab_id}/avatar",
-    summary="Avatar do colaborador (usa avatar do usuário vinculado, se houver)",
+    summary="Avatar do colaborador",
     responses={200: {"content": {"image/*": {}}}},
 )
 def get_colaborador_avatar(
@@ -731,6 +704,11 @@ def get_colaborador_avatar(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Colaborador não encontrado")
     _assert_mesma_empresa(c.empresa_id, me.empresa_id)
 
+    if getattr(c, "avatar_data", None):
+        data = c.avatar_data.tobytes() if isinstance(c.avatar_data, memoryview) else c.avatar_data
+        mime = c.avatar_mime or "image/png"
+        return Response(content=data, media_type=mime)
+
     if c.usuario_id:
         u = db.query(models.Usuario).get(c.usuario_id)
         if u and u.avatar_data:
@@ -742,5 +720,4 @@ def get_colaborador_avatar(
             mime = u.avatar_mime or "image/png"
             return Response(content=data, media_type=mime)
 
-    # Sem avatar -> 204; front exibe monograma/iniciais
     return Response(status_code=status.HTTP_204_NO_CONTENT)
