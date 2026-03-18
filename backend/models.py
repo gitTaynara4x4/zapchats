@@ -233,8 +233,31 @@ class EmpresaInstancia(Base):
     apelido = Column(String, nullable=True)
     numero_instancia = Column(String, nullable=True)
 
-    connected  = Column(Boolean, nullable=False, server_default="false")
-    last_seen  = Column(TIMESTAMP(timezone=True), nullable=True)
+    connected = Column(Boolean, nullable=False, server_default="false")
+    last_seen = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    # =========================
+    # Saúde do Número
+    # =========================
+    # NULL = ainda não analisado
+    score = Column(Integer, nullable=True, index=True)
+
+    # ex.: "boa" | "atencao" | "alto_risco" | "critico"
+    score_status = Column(String(30), nullable=True, index=True)
+
+    # ex.: "Boa" | "Atenção" | "Alto risco" | "Crítico"
+    score_label = Column(String(50), nullable=True)
+
+    # resumo curto para exibir no modal/tela
+    score_resumo = Column(Text, nullable=True)
+
+    # listas e métricas salvas da última análise
+    score_motivos = Column(JSONB, nullable=True)
+    score_metricas = Column(JSONB, nullable=True)
+    score_recomendacoes = Column(JSONB, nullable=True)
+
+    # quando foi feita a última análise
+    score_atualizado_em = Column(TIMESTAMP(timezone=True), nullable=True)
 
     # preferências de histórico: "none" | "24h" | "7d"
     historico_restaurar = Column(String, nullable=True, server_default="none")
@@ -263,7 +286,6 @@ class EmpresaInstancia(Base):
         passive_deletes=True,
     )
 
-    # vínculo 1:N com configurações do chatbot
     chatbot_configs = relationship(
         "ChatbotConfig",
         back_populates="instancia",
@@ -271,7 +293,6 @@ class EmpresaInstancia(Base):
         passive_deletes=True,
     )
 
-    # N:N via pivot com departamentos
     dep_instancias = relationship(
         "DepartamentoInstancia",
         back_populates="instancia",
@@ -280,7 +301,11 @@ class EmpresaInstancia(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<EmpresaInstancia id={self.id} emp={self.empresa_id} inst={self.instance_name!r}>"
+        return (
+            f"<EmpresaInstancia id={self.id} emp={self.empresa_id} "
+            f"inst={self.instance_name!r} connected={self.connected} "
+            f"score={self.score} status={self.score_status!r}>"
+        )
 
 
 # =========================

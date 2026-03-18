@@ -22,23 +22,51 @@
 
   <main class="main">
     <div class="section-title">
-      <h1>
-        <i class="fa-solid fa-bullhorn title-ico"></i>
-        <span class="title-text">Disparos</span>
-
-        <button id="instMenuBtn"
-                type="button"
-                class="inst-trigger"
-                aria-haspopup="listbox"
-                aria-expanded="false"
-                aria-controls="inst-menu">
-          <span id="instMenuLabel">Todas as instâncias</span>
-          <span class="chev">▾</span>
-        </button>
-      </h1>
+      <div class="title-wrap">
+        <h1>
+          <i class="fa-solid fa-bullhorn title-ico"></i>
+          <span class="title-text">Disparos</span>
+        </h1>
+        <p class="page-subtitle">
+          Envie mensagens em fila, com intervalo entre envios e acompanhamento do histórico.
+        </p>
+      </div>
 
       <div class="top-meta">
-        <strong id="topMetaDisparos">0</strong> disparos hoje
+        <strong id="topMetaDisparos">0</strong> disparos encontrados
+      </div>
+    </div>
+
+    <section class="box box-hero" aria-label="Selecionar WhatsApp de envio">
+      <div class="hero-grid">
+        <div class="hero-main">
+          <div class="hero-kicker">Passo 1</div>
+          <h2>Escolha o WhatsApp que vai enviar</h2>
+          <p>
+            Antes de iniciar o disparo, selecione a instância/WhatsApp que será usada.
+          </p>
+        </div>
+
+        <div class="hero-side">
+          <label class="hero-label" for="instMenuBtn">WhatsApp de envio</label>
+
+          <button id="instMenuBtn"
+                  type="button"
+                  class="inst-trigger inst-trigger--hero"
+                  aria-haspopup="listbox"
+                  aria-expanded="false"
+                  aria-controls="inst-menu">
+            <span class="inst-trigger__main">
+              <span class="inst-trigger__caption">Instância selecionada</span>
+              <span id="instMenuLabel">Selecione uma instância</span>
+            </span>
+            <span class="chev">▾</span>
+          </button>
+
+          <small class="hero-help" id="heroInstHelp">
+            Escolha a instância no botão acima para habilitar o disparo.
+          </small>
+        </div>
       </div>
 
       <div id="inst-menu"
@@ -46,28 +74,52 @@
            role="listbox"
            aria-hidden="true"
            aria-label="Selecionar instância">
-        <div class="head">WhatsApps</div>
+        <div class="head">WhatsApps disponíveis</div>
         <ul id="instMenuList"></ul>
       </div>
-    </div>
+    </section>
 
     <section class="box box-config" aria-label="Configurar disparo">
       <header class="box-header">
-        <h2>Configurar disparo</h2>
-        <p>Defina a mensagem, os números de destino e a instância que será usada para enviar.</p>
+        <div>
+          <div class="box-step">Passo 2</div>
+          <h2>Monte seu disparo</h2>
+          <p>
+            Escreva a mensagem, adicione os contatos e revise o resumo antes de iniciar.
+          </p>
+        </div>
+
+        <div class="guide-inline">
+          <span><i class="fa-solid fa-circle-check"></i> Escolha a instância</span>
+          <span><i class="fa-solid fa-pen"></i> Escreva a mensagem</span>
+          <span><i class="fa-solid fa-users"></i> Adicione os contatos</span>
+          <span><i class="fa-solid fa-paper-plane"></i> Inicie o envio</span>
+        </div>
       </header>
 
       <div class="config-grid">
         <div class="config-main">
           <div class="field">
-            <label for="msgDisparo">Mensagem</label>
+            <label for="msgDisparo">Mensagem do disparo</label>
+
+            <div class="template-bar">
+              <span class="template-bar__label">Modelos rápidos:</span>
+              <div class="template-chips">
+                <button type="button" class="tpl-chip" data-template="cobranca">Cobrança</button>
+                <button type="button" class="tpl-chip" data-template="pos_venda">Pós-venda</button>
+                <button type="button" class="tpl-chip" data-template="reativacao">Reativação</button>
+                <button type="button" class="tpl-chip" data-template="promocao">Promoção</button>
+                <button type="button" class="tpl-chip" data-template="lembrete">Lembrete</button>
+              </div>
+            </div>
+
             <textarea id="msgDisparo"
                       class="input input--multiline"
-                      rows="4"
-                      placeholder="Digite a mensagem que será enviada por WhatsApp…"></textarea>
+                      rows="5"
+                      placeholder="Digite aqui a mensagem que será enviada por WhatsApp..."></textarea>
 
             <small class="hint">
-              Ex.: “Olá {nome}, tudo bem? Vimos que seu contrato vence em {data_vencimento}…”
+              Você pode usar uma mensagem mais natural e curta para melhorar a taxa de resposta.
             </small>
 
             <div class="field-tools field-tools--msg">
@@ -76,26 +128,36 @@
                   <i class="fa-solid fa-wand-magic-sparkles"></i>
                   <span>Melhorar com IA</span>
                 </button>
+
+                <button type="button" id="btnPreencherExemplo" class="btn btn-sm">
+                  <i class="fa-solid fa-bolt"></i>
+                  <span>Preencher exemplo</span>
+                </button>
+
+                <button type="button" id="btnLimparRascunho" class="btn btn-sm">
+                  <i class="fa-solid fa-trash-can"></i>
+                  <span>Limpar rascunho</span>
+                </button>
               </div>
 
               <div class="field-tools__right">
                 <label class="check check--inline">
                   <input type="checkbox" id="chkIaVariar">
-                  <span>Gerar variações leves por número (beta)</span>
+                  <span>Gerar pequenas variações por contato (em breve)</span>
                 </label>
               </div>
             </div>
           </div>
 
           <div class="field">
-            <label for="numsDisparos">Números de destino</label>
+            <label for="numsDisparos">Contatos de destino</label>
             <textarea id="numsDisparos"
                       class="input input--multiline numbers-area"
-                      rows="5"
-                      placeholder="Um número por linha ou separados por vírgula/; …"></textarea>
+                      rows="7"
+                      placeholder="Cole um número por linha, ou separados por vírgula e ponto e vírgula..."></textarea>
 
             <small class="hint">
-              Aceita DDD com ou sem +55. Ex.: <code>44988887777</code> ou <code>+5544988887777</code>.
+              Ex.: <code>11999999999</code>, <code>+5511999999999</code> ou uma lista com vários números.
             </small>
 
             <div class="field-tools">
@@ -127,8 +189,11 @@
             </label>
           </div>
 
-          <div class="field field-inline">
-            <label for="delaySegundos">Intervalo entre envios</label>
+          <div class="field field-inline field-delay">
+            <div class="field-delay__head">
+              <label for="delaySegundos">Intervalo entre envios</label>
+              <span class="delay-badge" id="delayRiskBadge">Seguro</span>
+            </div>
 
             <select id="delaySegundos" class="input input--select">
               <option value="5">5 segundos</option>
@@ -143,29 +208,21 @@
             <details class="help-details">
               <summary class="help-summary">
                 <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
-                <span>O que é “intervalo entre envios”?</span>
+                <span>Entender o intervalo entre envios</span>
               </summary>
 
               <div class="help-box" role="note" aria-label="Ajuda: Intervalo entre envios">
-                <p>O intervalo entre envios é o <strong>tempo de espera entre uma mensagem e outra</strong>.</p>
-
-                <p>Exemplo: se você tiver <strong>10 contatos</strong> e escolher <strong>20 segundos</strong>, o sistema envia assim:</p>
+                <p>Esse intervalo é o <strong>tempo que o sistema espera entre uma mensagem e outra</strong>.</p>
+                <p>Quanto menor o intervalo, mais rápido o disparo. Quanto maior, mais seguro para a conta.</p>
 
                 <div class="help-example">
-                  Envia para o 1º contato → espera 20s → envia para o 2º → espera 20s → envia para o 3º...
+                  Exemplo: 10 contatos com intervalo de 20s → o sistema envia 1, espera 20s, envia o próximo, e assim por diante.
                 </div>
 
-                <p><strong>Por que isso existe?</strong></p>
                 <ul>
-                  <li>Ajuda o WhatsApp a não interpretar como envio automático (spam)</li>
-                  <li>Reduz a chance de bloqueio da conta</li>
-                  <li>Deixa o envio mais seguro e estável</li>
-                </ul>
-
-                <p><strong>Regra simples</strong></p>
-                <ul>
-                  <li><strong>5s / 10s</strong>: mais rápido, maior risco</li>
-                  <li><strong>20s / 30s / 1 min</strong>: mais seguro, menor risco</li>
+                  <li><strong>5s e 10s:</strong> mais rápido, porém com mais risco</li>
+                  <li><strong>20s e 30s:</strong> bom equilíbrio</li>
+                  <li><strong>1 min ou mais:</strong> mais conservador</li>
                 </ul>
               </div>
             </details>
@@ -173,32 +230,59 @@
         </div>
 
         <aside class="config-side">
-          <h3>Resumo</h3>
+          <div class="resume-card">
+            <div class="resume-card__head">
+              <div>
+                <div class="box-step">Passo 3</div>
+                <h3>Revisão do disparo</h3>
+              </div>
+              <span class="resume-state" id="resumeState">Aguardando dados</span>
+            </div>
 
-          <ul class="summary">
-            <li><span>Total:</span><strong id="resTotal">0</strong></li>
-            <li><span>Válidos (tamanho OK):</span><strong id="resValidos">0</strong></li>
-            <li><span>Suspeitos/curtos:</span><strong id="resInvalidos">0</strong></li>
-            <li><span>Intervalo entre envios:</span><strong id="resDelay">20s</strong></li>
-          </ul>
+            <ul class="summary">
+              <li><span>Instância:</span><strong id="resInstancia">Não selecionada</strong></li>
+              <li><span>Total informado:</span><strong id="resTotal">0</strong></li>
+              <li><span>Válidos:</span><strong id="resValidos">0</strong></li>
+              <li><span>Suspeitos/curtos:</span><strong id="resInvalidos">0</strong></li>
+              <li><span>Intervalo:</span><strong id="resDelay">20s</strong></li>
+              <li><span>Tempo estimado:</span><strong id="resEstimativa">—</strong></li>
+            </ul>
 
-          <p class="summary-note">
-            O disparo será feito usando a instância selecionada no topo.
-          </p>
+            <div class="summary-note-box">
+              <div class="summary-note-box__title">
+                <i class="fa-solid fa-shield-halved"></i>
+                <span>Antes de enviar</span>
+              </div>
+              <p id="summaryAdvice">
+                Selecione uma instância, escreva a mensagem e adicione pelo menos um número válido.
+              </p>
+            </div>
 
-          <button id="btnDisparar" class="btn primary btn-lg" type="button">
-            <i class="fa fa-paper-plane"></i>
-            <span>Disparar agora</span>
-          </button>
+            <button id="btnDisparar" class="btn primary btn-lg" type="button">
+              <i class="fa fa-paper-plane"></i>
+              <span>Iniciar disparo</span>
+            </button>
 
-          <div id="statusDisparos" class="status-line" aria-live="polite"></div>
+            <div id="statusDisparos" class="status-line" aria-live="polite"></div>
+          </div>
         </aside>
       </div>
     </section>
 
     <section class="box box-historico" aria-label="Histórico de disparos">
-      <header class="box-header">
-        <h2>Histórico de disparos</h2>
+      <header class="box-header box-header--split">
+        <div>
+          <div class="box-step">Passo 4</div>
+          <h2>Histórico de disparos</h2>
+          <p>
+            Acompanhe os disparos criados e reaproveite mensagem e intervalo com um clique.
+          </p>
+        </div>
+
+        <button type="button" id="btnAtualizarHistorico" class="btn btn-sm">
+          <i class="fa-solid fa-rotate-right"></i>
+          <span>Atualizar</span>
+        </button>
       </header>
 
       <div class="table-wrap">
@@ -206,11 +290,12 @@
           <thead>
             <tr>
               <th>Mensagem</th>
-              <th>Qtd. números</th>
+              <th>Contatos</th>
               <th>Instância</th>
-              <th>Por</th>
+              <th>Criado por</th>
               <th>Status</th>
               <th>Criado em</th>
+              <th>Ação</th>
             </tr>
           </thead>
           <tbody id="tbodyDisparos"></tbody>
@@ -219,7 +304,7 @@
 
       <div id="emptyDisparos" class="empty">
         <p>Nenhum disparo encontrado.</p>
-        <small>Os disparos criados aparecerão aqui com o status de envio.</small>
+        <small>Crie seu primeiro disparo ou use um modelo pronto para começar mais rápido.</small>
       </div>
     </section>
   </main>
@@ -241,7 +326,7 @@
           <input id="clientesSearch"
                  class="input cli-modal__search"
                  type="search"
-                 placeholder="Buscar cliente por nome, telefone…">
+                 placeholder="Buscar cliente por nome, telefone...">
         </div>
 
         <div class="cli-modal__table-wrap">

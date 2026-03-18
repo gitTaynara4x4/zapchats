@@ -104,6 +104,63 @@
     document.body.appendChild(overlay);
   }
 
+  function confirmAction({
+    title = 'Confirmar ação',
+    message = 'Tem certeza que deseja continuar?',
+    confirmText = 'Sim, desligar',
+    cancelText = 'Cancelar',
+    kind = 'warn'
+  } = {}) {
+    return new Promise((resolve) => {
+      let overlay = el('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:100001;display:flex;align-items:center;justify-content:center;padding:20px';
+
+      const card = el('div');
+      card.style.cssText = 'width:min(520px,96vw);background:#0b0b13;color:#e5e7eb;border:1px solid #1f2937;border-radius:16px;padding:18px 18px 14px;box-shadow:0 10px 40px rgba(0,0,0,.45);font:14px/1.5 system-ui';
+
+      const head = el('div');
+      head.style.cssText = 'font-weight:700;font-size:16px;margin-bottom:8px;display:flex;gap:8px;align-items:center';
+
+      const dot = el('span');
+      dot.style.cssText = 'width:10px;height:10px;border-radius:50%';
+      dot.style.background = kind === 'error' ? '#ef4444' : (kind === 'warn' ? '#f59e0b' : '#60a5fa');
+
+      const h = el('span');
+      h.textContent = title;
+      head.append(dot, h);
+
+      const p = el('div');
+      p.innerHTML = String(message || '').replace(/\n/g, '<br>');
+
+      const footer = el('div');
+      footer.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:16px';
+
+      const cancel = el('button');
+      cancel.type = 'button';
+      cancel.textContent = cancelText;
+      cancel.style.cssText = 'padding:8px 14px;border-radius:10px;background:#111827;color:#e5e7eb;border:1px solid #374151;font-weight:600;cursor:pointer';
+
+      const confirm = el('button');
+      confirm.type = 'button';
+      confirm.textContent = confirmText;
+      confirm.style.cssText = 'padding:8px 14px;border-radius:10px;background:#ef4444;color:#fff;border:0;font-weight:700;cursor:pointer';
+
+      function close(v) {
+        overlay.remove();
+        resolve(v);
+      }
+
+      cancel.addEventListener('click', () => close(false));
+      confirm.addEventListener('click', () => close(true));
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+
+      footer.append(cancel, confirm);
+      card.append(head, p, footer);
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+    });
+  }
+
   function friendlyHttpError(status, detailText = '') {
     const msgs = {
       0:   ['Sem conexão', 'Não conseguimos falar com o servidor.'],
@@ -682,38 +739,116 @@ Digite apenas o número da opção desejada.`
     if (prevO) prevO.textContent = (msgOff?.value || '—').trim() || '—';
   }
 
+  function getConfirmMessage(labelEl) {
+    if (labelEl === swAutoHdr) return 'Tem certeza que deseja desligar as mensagens automáticas?';
+    if (labelEl === swDeptHdr) return 'Tem certeza que deseja desligar o menu de triagem por departamento?';
+    if (labelEl === swWelcome) return 'Tem certeza que deseja desligar a mensagem de boas-vindas?';
+    if (labelEl === swOff) return 'Tem certeza que deseja desligar a mensagem de fora do horário?';
+    if (labelEl === swDeptWelcome) return 'Tem certeza que deseja desligar a mensagem inicial da triagem?';
+    return 'Tem certeza que deseja desligar esta opção?';
+  }
+
+  function shouldConfirmOff(labelEl, wasOn, newVal) {
+    if (!wasOn || newVal) return false;
+    return (
+      labelEl === swAutoHdr ||
+      labelEl === swDeptHdr ||
+      labelEl === swWelcome ||
+      labelEl === swOff ||
+      labelEl === swDeptWelcome
+    );
+  }
+
   function bindSwitch(labelEl, pillEl, onToggle) {
     if (!labelEl) return;
     const input = labelEl.querySelector('input');
 
-    labelEl.addEventListener('click', (e) => {
+    labelEl.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
 
-      const newVal = !input.checked;
+      const wasOn = !!input?.checked;
+      const newVal = !wasOn;
+
+      if (shouldConfirmOff(labelEl, wasOn, newVal)) {
+        const ok = await confirmAction({
+          title: 'Confirmar desligamento',
+          message: getConfirmMessage(labelEl),
+          confirmText: 'Sim, desligar',
+          cancelText: 'Cancelar',
+          kind: 'warn'
+        });
+        if (!ok) return;
+      }
+
       setSwitch(labelEl, newVal, pillEl);
       onToggle?.(newVal);
 
       if (!cfg?.features) return;
 
       if (labelEl === swAutoHdr) {
-        if (newVal) enforceExclusive('auto');
-        else {
+        if (newVal) {
+          enforceExclusive('auto');
+        } else {
           cfg.features.auto_messages.enabled = false;
+          (cfg.features.auto_messages.welcome ||= {}).enabled = false;
+          (cfg.features.auto_messages.off_hours ||= {}).enabled = false;
+
+          setSwitch(swWelcome, false, pillWelcome);
+          setSwitch(swOff, false, pillOff);
+
           setAutoChildrenEnabled(false);
           renderWelcomePreview();
           renderOffPreview();
           updateSaveButtons();
+          updateScheduleVisibility();
+
+          try {
+            await putConfig(cfg);
+            toast('Mensagens automáticas desligadas com sucesso.');
+            _lastLoadedSnapshot = JSON.stringify(cfg);
+          } catch (err) {
+            restoreSnapshot();
+            const friendly = friendlyHttpError(0, err?.message || 'Falha ao salvar.');
+            notify({
+              title: friendly.title,
+              message: friendly.message,
+              kind: 'error',
+              details: friendly.details
+            });
+          }
         }
         updateScheduleVisibility();
       }
 
       if (labelEl === swDeptHdr) {
-        if (newVal) enforceExclusive('dept');
-        else {
+        if (newVal) {
+          enforceExclusive('dept');
+        } else {
           cfg.features.auto_messages_departments.enabled = false;
+          (cfg.features.auto_messages_departments.welcome ||= {}).enabled = false;
+
+          setSwitch(swDeptWelcome, false, pillDeptWelcome);
+
           setDeptChildrenEnabled(false);
           updateSaveButtons();
+          updateScheduleVisibility();
+          renderDeptPreview();
+
+          try {
+            await putConfig(cfg);
+            toast('Triagem por departamento desligada com sucesso.');
+            _lastLoadedSnapshot = JSON.stringify(cfg);
+          } catch (err) {
+            restoreSnapshot();
+            const friendly = friendlyHttpError(0, err?.message || 'Falha ao salvar.');
+            notify({
+              title: friendly.title,
+              message: friendly.message,
+              kind: 'error',
+              details: friendly.details
+            });
+          }
         }
       }
 
@@ -1053,7 +1188,7 @@ Digite apenas o número da opção desejada.`
     } catch {}
   }
 
-  function restoreSnapshot() {
+  function restoreSnapshot(showToast = true) {
     try {
       if (!_lastLoadedSnapshot) return;
 
@@ -1097,7 +1232,7 @@ Digite apenas o número da opção desejada.`
       renderDeptPreview();
       updateScheduleVisibility();
       updateSaveButtons();
-      toast('Alterações descartadas.', 'warn');
+      if (showToast) toast('Alterações descartadas.', 'warn');
     } catch {}
   }
 
@@ -1356,8 +1491,8 @@ Digite apenas o número da opção desejada.`
 
       saveAuto?.addEventListener('click', saveAutoBlock);
       saveDept?.addEventListener('click', saveDeptBlock);
-      cancelAuto?.addEventListener('click', restoreSnapshot);
-      cancelDept?.addEventListener('click', restoreSnapshot);
+      cancelAuto?.addEventListener('click', () => restoreSnapshot(true));
+      cancelDept?.addEventListener('click', () => restoreSnapshot(true));
 
       await initInstDropdown();
 

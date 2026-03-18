@@ -938,30 +938,6 @@ async def on_messages_upsert(inst_id: str, data):
                     preview=_short(conteudo),
                 )
 
-                # ✅ substitui n8n pela triagem interna
-                try:
-                    if (not from_me) and _is_textual_content(conteudo):
-                        triagem_handle_inbound(
-                            db,
-                            empresa_id=empresa_id,
-                            instancia_id=inst.id,
-                            telefone_digits=telefone,
-                            texto=conteudo,
-                            direction=direcao,
-                            remote_jid=remote_jid,
-                        )
-                    else:
-                        try:
-                            db.rollback()
-                        except Exception:
-                            pass
-                except Exception as e:
-                    try:
-                        db.rollback()
-                    except Exception:
-                        pass
-                    LOG(f"[CHATBOT][triagem] erro ao processar msg simples: {e}")
-
                 try:
                     cli_id = (
                         db.query(models.Cliente.id)
@@ -1122,6 +1098,27 @@ async def on_messages_upsert(inst_id: str, data):
                             pass
                         continue
 
+                # ✅ triagem só depois que a msg realmente foi salva como nova
+                if inserted_11:
+                    try:
+                        if (not from_me) and _is_textual_content(conteudo):
+                            triagem_res = triagem_handle_inbound(
+                                db,
+                                empresa_id=empresa_id,
+                                instancia_id=inst.id,
+                                telefone_digits=telefone,
+                                texto=conteudo,
+                                direction=direcao,
+                                remote_jid=remote_jid,
+                            )
+                            LOG(f"[CHATBOT][triagem] res={triagem_res}")
+                    except Exception as e:
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
+                        LOG(f"[CHATBOT][triagem] erro ao processar msg simples: {e}")
+
                 if inserted_11 and msg_db_id and media_meta:
                     try:
                         raw = None
@@ -1260,6 +1257,8 @@ async def on_messages_upsert(inst_id: str, data):
         LOG(f"[UPsert] inst={inst_id} novas={novas}")
 
 
+
+        
 @handler(EvoEvent.MESSAGES_DELETE)
 async def on_messages_delete(inst_id: str, data):
     mensagens = extract_messages_any_shape(data)

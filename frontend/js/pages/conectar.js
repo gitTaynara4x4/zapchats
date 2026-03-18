@@ -1,34 +1,37 @@
-// /frontend/js/pages/conectar.js  (ES module)
+// /frontend/js/pages/conectar.js
 import {
   ensureEmpresaWS, onEmpresaMessage, ensureInstWS, onInstMessage,
-  closeEmpresaWS, closeInstWS, getWSStatus
+  closeEmpresaWS, closeInstWS
 } from '/frontend/js/realtime/ws-core.js';
 
 // ====== Config ======
 const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
-
-// ✅ Status baseado no ping setPresence
-const PRESENCE_REFRESH_INTERVAL_MS = 30000; // a cada 30s
-const PRESENCE_COOLDOWN_MS = 15000;         // não repete na mesma instância antes de 15s
+const PRESENCE_REFRESH_INTERVAL_MS = 30000;
+const PRESENCE_COOLDOWN_MS = 15000;
 const PRESENCE_CONCURRENCY = 4;
 
 // ====== Estado ======
 let wantQR = false;
 let currentInstance = null;
 let timerId = null;
-let lastHistoricoUsed = 'none'; // 'none' | '24h' | '7d'
+let lastHistoricoUsed = 'none';
 
-// Status/presence
 let lastWhatsPayload = null;
 let presenceInFlight = false;
 let presenceLoadTmr = null;
 let presenceIntervalId = null;
-const presenceCache = new Map(); // instance -> { ok:boolean, ts:number }
+const presenceCache = new Map();
+
+let saudeLoadingTmr = null;
+let saudeLoadingStepIdx = 0;
+let saudeLoadingMsgIdx = 0;
+let saudeCurrentItem = null;
 
 // ===== Helpers =====
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
-const onlyDigits = (s) => String(s||'').replace(/\D/g,'');
+
+const onlyDigits = (s) => String(s || '').replace(/\D/g, '');
 const htmlEscape = (s) => String(s ?? '').replace(/[&<>"']/g, c => (
   {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
 ));
@@ -42,8 +45,11 @@ function formatPhoneBR(num) {
   if (!d) return '—';
   if (d.length === 13) return `+${d.slice(0,2)} ${d.slice(2,4)} ${d.slice(4,9)}-${d.slice(9)}`;
   if (d.length === 12) return `+${d.slice(0,2)} ${d.slice(2,4)} ${d.slice(4,8)}-${d.slice(8)}`;
+  if (d.length === 11) return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;
   return `+${d}`;
 }
+
 function isConnectedPayload(m){
   if (m?.inst_status && typeof m.inst_status.connected !== 'undefined') {
     return !!m.inst_status.connected;
@@ -51,6 +57,37 @@ function isConnectedPayload(m){
   return m?.connected === true
       || String(m?.status || m?.state || '').toUpperCase() === 'CONNECTED'
       || String(m?.type || '').toLowerCase() === 'connected';
+}
+
+function badgeClassByStatus(status){
+  const s = String(status || '').toLowerCase();
+  if (s === 'critico') return 'saude-badge--critico';
+  if (s === 'alto_risco') return 'saude-badge--alto';
+  if (s === 'atencao') return 'saude-badge--atencao';
+  return 'saude-badge--boa';
+}
+
+function scoreText(score){
+  const n = Number(score || 0);
+  if (n >= 80) return 'Crítico';
+  if (n >= 60) return 'Alto risco';
+  if (n >= 30) return 'Atenção';
+  return 'Boa';
+}
+
+function formatMetricValue(v){
+  if (v === null || typeof v === 'undefined' || v === '') return '—';
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  return String(v);
+}
+
+function formatDateTimeBR(iso){
+  try{
+    if (!iso) return '—';
+    return new Date(iso).toLocaleString('pt-BR');
+  }catch{
+    return String(iso || '—');
+  }
 }
 
 // Fail-safe do "prepaint"
@@ -82,6 +119,7 @@ async function apiGet(url){
   if (!r.ok) throw new Error(`GET ${url} → ${r.status}`);
   return r.json();
 }
+
 async function apiPost(url, body){
   const r = await fetch(url, {
     method: 'POST',
@@ -96,6 +134,7 @@ async function apiPost(url, body){
   }
   return js;
 }
+
 async function apiPostSoft(url, body){
   try{
     await apiPost(url, body || {});
@@ -104,6 +143,7 @@ async function apiPostSoft(url, body){
     return false;
   }
 }
+
 async function apiDelete(url){
   const extra = 'cascade=0&force=1&delete_remote=1';
   const sep1 = url.includes('?') ? '&' : '?';
@@ -171,7 +211,6 @@ async function refreshPresenceStatuses({ force=false, onlyInstances=null } = {})
 
     if (!list.length) return;
 
-    // marca loading nos visíveis
     for (const it of list) setDotStateByInstance(it.instance_name, { loading:true });
 
     let idx = 0;
@@ -186,10 +225,8 @@ async function refreshPresenceStatuses({ force=false, onlyInstances=null } = {})
         let ok = false;
         try { ok = await pingSetPresence(inst, { force }); } catch { ok = false; }
 
-        // atualiza dot (se estiver na tela)
         setDotStateByInstance(inst, { ok, loading:false });
 
-        // atualiza modelo (connected vira o resultado do setPresence)
         const prev = !!it.connected;
         it.connected = !!ok;
         if (prev !== !!ok) changedAny = true;
@@ -198,14 +235,12 @@ async function refreshPresenceStatuses({ force=false, onlyInstances=null } = {})
 
     await Promise.all(Array.from({ length: PRESENCE_CONCURRENCY }, () => worker()));
 
-    // se mudou algo, atualiza contadores + re-render tab atual (pra mover itens entre Ativos/Inativos)
     if (changedAny) {
       const totalAtivos   = allItems.filter(it => !!it.connected).length;
       const totalInativos = allItems.length - totalAtivos;
 
       updateTabCounts(totalAtivos, totalInativos);
 
-      // mantém topo e botão
       if (lastWhatsPayload) {
         updateTopTotal(lastPlanLabel, lastWhatsPayload, allItems);
         updateAddButton(lastWhatsPayload, allItems);
@@ -226,7 +261,7 @@ const els = {
   table:       $('#lista-zap'),
   tbody:       $('#lista-zap tbody'),
   btnAdd:      $('#btn-open-modal'),
-  countPro:    $('#count-pro'),   // topo “OURO 1/3”
+  countPro:    $('#count-pro'),
 
   modal:       $('#modal'),
   btnCloseMd:  $('#btn-close-modal'),
@@ -253,6 +288,24 @@ const els = {
   btnRemYes:     $('#btn-confirmar-remover'),
   btnRemNo:      $('#btn-cancelar-remover'),
   remConsent:    $('#rem-consent'),
+
+  modalSaude: $('#modal-saude-numero'),
+  btnCloseSaude: $('#btn-close-saude'),
+  btnFecharSaude: $('#btn-fechar-saude'),
+  btnReanalisarSaude: $('#btn-reanalisar-saude'),
+  saudeSubtitle: $('#saude-modal-subtitle'),
+  saudeLoading: $('#saude-loading'),
+  saudeLoadingText: $('#saude-loading-text'),
+  saudeResult: $('#saude-result'),
+  saudeError: $('#saude-error'),
+  saudeLabelBadge: $('#saude-label-badge'),
+  saudeScoreLine: $('#saude-score-line'),
+  saudeScoreNumber: $('#saude-score-number'),
+  saudeResumo: $('#saude-resumo'),
+  saudeMotivos: $('#saude-motivos'),
+  saudeRecomendacoes: $('#saude-recomendacoes'),
+  saudeMetricas: $('#saude-metricas'),
+  saudeConsultadoEm: $('#saude-consultado-em'),
 };
 
 const modalPanel = $('#modal .modal-panel, #modal .modal-card, #modal .card, #modal > div');
@@ -263,24 +316,191 @@ const setModalTitle = (t) => { if (modalTitle) modalTitle.textContent = t; };
 function showModal(){
   if (!els.modal) return;
   els.modal.classList.remove('hidden');
-  if (modalPanel){
-    modalPanel.classList.remove('anim-out');
-    void modalPanel.offsetWidth;
-    modalPanel.classList.add('anim-in');
-    setTimeout(()=>modalPanel.classList.remove('anim-in'), 180);
-  }
 }
+
 function hideModal(){
   if (!els.modal) return;
-  if (modalPanel){
-    modalPanel.classList.remove('anim-in');
-    modalPanel.classList.add('anim-out');
-    setTimeout(()=>{
-      els.modal.classList.add('hidden');
-      modalPanel.classList.remove('anim-out');
-    }, 160);
-  } else {
-    els.modal.classList.add('hidden');
+  els.modal.classList.add('hidden');
+}
+
+// ===== Modal Saúde =====
+function openSaudeModal(){
+  els.modalSaude?.classList.remove('hidden');
+}
+
+function closeSaudeModal(){
+  clearInterval(saudeLoadingTmr);
+  saudeLoadingTmr = null;
+  saudeCurrentItem = null;
+  els.modalSaude?.classList.add('hidden');
+}
+
+function resetSaudeModal(){
+  clearInterval(saudeLoadingTmr);
+  saudeLoadingTmr = null;
+  saudeLoadingStepIdx = 0;
+  saudeLoadingMsgIdx = 0;
+
+  els.saudeError?.classList.add('hidden');
+  if (els.saudeError) els.saudeError.textContent = '';
+
+  els.saudeResult?.classList.add('hidden');
+  els.saudeLoading?.classList.remove('hidden');
+  els.btnReanalisarSaude?.classList.add('hidden');
+
+  const msg = 'Analisando padrão das últimas mensagens...';
+  if (els.saudeLoadingText) els.saudeLoadingText.textContent = msg;
+
+  const steps = $$('#saude-loading .saude-step');
+  steps.forEach((el, idx) => el.classList.toggle('active', idx === 0));
+}
+
+function startSaudeLoadingAnimation(){
+  const msgs = [
+    'Analisando padrão das últimas mensagens...',
+    'Verificando repetição de conteúdo...',
+    'Calculando velocidade de envio...',
+    'Medindo taxa de resposta...',
+    'Montando diagnóstico do número...'
+  ];
+
+  const steps = $$('#saude-loading .saude-step');
+  clearInterval(saudeLoadingTmr);
+
+  saudeLoadingTmr = setInterval(() => {
+    saudeLoadingMsgIdx = (saudeLoadingMsgIdx + 1) % msgs.length;
+    saudeLoadingStepIdx = (saudeLoadingStepIdx + 1) % Math.max(steps.length, 1);
+
+    if (els.saudeLoadingText) els.saudeLoadingText.textContent = msgs[saudeLoadingMsgIdx];
+    steps.forEach((el, idx) => el.classList.toggle('active', idx === saudeLoadingStepIdx));
+  }, 1200);
+}
+
+function fillSaudeList(container, items, fallback){
+  if (!container) return;
+  const arr = Array.isArray(items) ? items.filter(Boolean) : [];
+  container.innerHTML = '';
+  if (!arr.length){
+    const li = document.createElement('li');
+    li.textContent = fallback;
+    container.appendChild(li);
+    return;
+  }
+  arr.forEach(txt => {
+    const li = document.createElement('li');
+    li.textContent = txt;
+    container.appendChild(li);
+  });
+}
+
+function renderSaudeMetricas(metricas){
+  if (!els.saudeMetricas) return;
+  const m = metricas || {};
+  const rows = [
+    ['Mensagens analisadas', formatMetricValue(m.mensagens_analisadas)],
+    ['Mensagens de saída', formatMetricValue(m.saidas)],
+    ['Mensagens de entrada', formatMetricValue(m.entradas)],
+    ['Repetição', `${formatMetricValue(m.repeticao_pct)}%`],
+    ['Intervalo médio', m.intervalo_medio_seg == null ? '—' : `${formatMetricValue(m.intervalo_medio_seg)} s`],
+    ['Sem resposta', `${formatMetricValue(m.taxa_sem_resposta_pct)}%`],
+  ];
+
+  els.saudeMetricas.innerHTML = rows.map(([k, v]) => `
+    <div class="saude-metrica-item">
+      <span class="saude-metrica-label">${htmlEscape(k)}</span>
+      <strong class="saude-metrica-value">${htmlEscape(v)}</strong>
+    </div>
+  `).join('');
+}
+
+function renderSaudeResult(item, payload){
+  clearInterval(saudeLoadingTmr);
+  saudeLoadingTmr = null;
+
+  const saude = payload?.saude || {};
+  const score = Number(saude.score || payload?.score || 0);
+  const label = saude.label || scoreText(score);
+  const status = saude.status || 'boa';
+
+  els.saudeLoading?.classList.add('hidden');
+  els.saudeResult?.classList.remove('hidden');
+  els.btnReanalisarSaude?.classList.remove('hidden');
+
+  if (els.saudeSubtitle) {
+    const nome = item?.apelido || item?.instance_name || 'Instância';
+    const numero = formatPhoneBR(item?.numero_instancia || '');
+    els.saudeSubtitle.textContent = `${nome} • ${numero}`;
+  }
+
+  if (els.saudeLabelBadge) {
+    els.saudeLabelBadge.className = `saude-badge ${badgeClassByStatus(status)}`;
+    els.saudeLabelBadge.textContent = label;
+  }
+
+  if (els.saudeScoreNumber) els.saudeScoreNumber.textContent = String(score);
+  if (els.saudeScoreLine) els.saudeScoreLine.textContent = `Score: ${score}/100`;
+  if (els.saudeResumo) els.saudeResumo.textContent = saude.resumo || 'Sem resumo disponível.';
+
+  fillSaudeList(
+    els.saudeMotivos,
+    saude.motivos,
+    'Nenhum sinal forte de risco foi encontrado nesta análise.'
+  );
+
+  fillSaudeList(
+    els.saudeRecomendacoes,
+    saude.recomendacoes,
+    'Continue mantendo uma comunicação natural e variada.'
+  );
+
+  renderSaudeMetricas(saude.metricas || {});
+
+  if (els.saudeConsultadoEm) {
+    els.saudeConsultadoEm.textContent = `Consultado em: ${formatDateTimeBR(saude.consultado_em)}`;
+  }
+
+  if (item) {
+    item.score = score;
+    item.saude_status = status;
+    item.saude_label = label;
+  }
+}
+
+function showSaudeError(msg){
+  clearInterval(saudeLoadingTmr);
+  saudeLoadingTmr = null;
+  els.saudeLoading?.classList.add('hidden');
+  els.saudeResult?.classList.add('hidden');
+  if (els.saudeError) {
+    els.saudeError.textContent = msg || 'Não foi possível consultar a saúde do número.';
+    els.saudeError.classList.remove('hidden');
+  }
+  els.btnReanalisarSaude?.classList.remove('hidden');
+}
+
+async function consultarSaudeNumero(item, { force=true } = {}){
+  if (!item?.id) return;
+
+  saudeCurrentItem = item;
+  openSaudeModal();
+  resetSaudeModal();
+  startSaudeLoadingAnimation();
+
+  try{
+    const res = await apiPost(
+      `/api/onboarding/empresas/instancias/${encodeURIComponent(item.id)}/saude`,
+      {
+        empresa_id: empresaId,
+        limite_mensagens: 200,
+        janela_horas: 24,
+        forcar_recalculo: !!force
+      }
+    );
+
+    renderSaudeResult(item, res);
+    toast('Saúde do Número consultada com sucesso.');
+  } catch (e) {
+    showSaudeError(e?.message || 'Não foi possível consultar a saúde do número.');
   }
 }
 
@@ -299,7 +519,7 @@ function loadLottie(){
   });
 }
 
-// ===== Overlay (dots estilo ChatGPT) =====
+// ===== Overlay =====
 const prep = { active:false, left:0, tmr:null, anim:null, seq:[], seqIdx:0, seqTmr:null, historico:'none' };
 
 function ensureOverlay(){
@@ -321,16 +541,17 @@ function ensureOverlay(){
   document.body.appendChild(ovl);
   return ovl;
 }
+
 function formatClock(s){
   const mm = String(Math.floor(s/60)).padStart(2,'0');
   const ss = String(s%60).padStart(2,'0');
   return `${mm}:${ss}`;
 }
 
-// monta o texto + “pontinhos” animados (estilo ChatGPT)
 function statusHTML(txt){
   return `${htmlEscape(txt)}<span class="typing" aria-hidden="true"><span></span><span></span><span></span></span>`;
 }
+
 function setStatus(txt, fade=true){
   const el = $('#prep-ovl-status');
   if (!el) return;
@@ -339,6 +560,7 @@ function setStatus(txt, fade=true){
   void el.offsetWidth;
   if (fade) el.classList.add('fade');
 }
+
 function pickSequence(historico){
   if ((historico||'none') === 'none') return ['Sincronizando seus contatos...'];
   return [
@@ -350,22 +572,24 @@ function pickSequence(historico){
     'Sincronizando seus áudios...',
   ];
 }
+
 function startStatusLoop(){
   clearInterval(prep.seqTmr);
   const items = prep.seq;
   if (!items.length) return;
   prep.seqIdx = 0;
   setStatus(items[0], true);
-  // ritmo mais lento (≈4s)
   prep.seqTmr = setInterval(() => {
     prep.seqIdx = (prep.seqIdx + 1) % items.length;
     setStatus(items[prep.seqIdx], true);
   }, 4000);
 }
+
 function paintTime(){
   const pill = $('#prep-ovl-time .time-pill');
   if (pill) pill.textContent = formatClock(prep.left);
 }
+
 async function showPrepOverlayOneMinute(seconds=60, opts={}){
   if (prep.active) return;
   prep.active = true;
@@ -376,7 +600,6 @@ async function showPrepOverlayOneMinute(seconds=60, opts={}){
   ovl.classList.add('show');
   document.body.style.overflow = 'hidden';
 
-  // Lottie
   try {
     const lottie = await loadLottie();
     const slot = $('#prep-ovl-lottie', ovl);
@@ -392,11 +615,9 @@ async function showPrepOverlayOneMinute(seconds=60, opts={}){
     }
   } catch {}
 
-  // Mensagens
   prep.seq = pickSequence(prep.historico);
   startStatusLoop();
 
-  // Cronômetro
   paintTime();
   clearInterval(prep.tmr);
   prep.tmr = setInterval(() => {
@@ -408,6 +629,7 @@ async function showPrepOverlayOneMinute(seconds=60, opts={}){
     }
   }, 1000);
 }
+
 function hidePrepOverlay(){
   const ovl = ensureOverlay();
   prep.active = false;
@@ -419,7 +641,7 @@ function hidePrepOverlay(){
   document.body.style.overflow = '';
 }
 
-// ===== CSS injetado (overlay + menus) =====
+// ===== CSS injetado =====
 (function injectCSS(){
   const css = `
   .hidden{ display:none !important; }
@@ -446,7 +668,7 @@ function hidePrepOverlay(){
     border:1px solid #e5e7eb;
     border-radius:10px;
     box-shadow:0 10px 30px rgba(0,0,0,.15);
-    min-width:180px;
+    min-width:220px;
     z-index:50;
     display:none;
   }
@@ -467,7 +689,6 @@ function hidePrepOverlay(){
   .kebab-item:hover{ background:rgba(0,0,0,.04); }
   html.dark .kebab-item:hover{ background:rgba(255,255,255,.06); }
 
-  /* ✅ bolinha de status */
   .st-dot{
     display:inline-block;
     width:10px;
@@ -480,7 +701,47 @@ function hidePrepOverlay(){
   .st-dot--off{ background:#9ca3af; }
   .st-dot--loading{ opacity:.55; filter:saturate(.2); }
 
-  /* ===== Overlay ===== */
+  .saude-inline{
+    display:flex;
+    align-items:center;
+    gap:.55rem;
+    flex-wrap:wrap;
+  }
+  .saude-chip-sm{
+    display:inline-flex;
+    align-items:center;
+    padding:.24rem .55rem;
+    border-radius:999px;
+    font-size:.74rem;
+    font-weight:800;
+    letter-spacing:.01em;
+    border:1px solid transparent;
+  }
+  .saude-chip-sm--boa{
+    background:rgba(34,197,94,.12);
+    color:#15803d;
+    border-color:rgba(34,197,94,.22);
+  }
+  .saude-chip-sm--atencao{
+    background:rgba(245,158,11,.14);
+    color:#b45309;
+    border-color:rgba(245,158,11,.26);
+  }
+  .saude-chip-sm--alto{
+    background:rgba(239,68,68,.12);
+    color:#dc2626;
+    border-color:rgba(239,68,68,.22);
+  }
+  .saude-chip-sm--critico{
+    background:rgba(127,29,29,.12);
+    color:#991b1b;
+    border-color:rgba(127,29,29,.22);
+  }
+  html.dark .saude-chip-sm--boa{ color:#86efac; }
+  html.dark .saude-chip-sm--atencao{ color:#fcd34d; }
+  html.dark .saude-chip-sm--alto{ color:#fca5a5; }
+  html.dark .saude-chip-sm--critico{ color:#fca5a5; }
+
   #sync-overlay{
     position:fixed;
     inset:0;
@@ -523,7 +784,6 @@ function hidePrepOverlay(){
     to{opacity:1;transform:none}
   }
 
-  /* Pontinhos estilo ChatGPT */
   .typing{
     display:inline-flex;
     align-items:center;
@@ -577,23 +837,6 @@ function hidePrepOverlay(){
     border-radius:999px;
     background:rgba(255,255,255,.06);
   }
-
-  /* Classe de dev antiga (não há botão em produção) */
-  .test-overlay-btn{
-    position:fixed;
-    right:18px;
-    bottom:18px;
-    z-index:10000;
-    background:#16a34a;
-    color:#fff;
-    border:0;
-    border-radius:999px;
-    padding:10px 14px;
-    font-weight:600;
-    box-shadow:0 10px 30px rgba(0,0,0,.2);
-    cursor:pointer;
-  }
-  .test-overlay-btn:hover{ filter:brightness(1.05); }
   `;
   const s = document.createElement('style');
   s.textContent = css;
@@ -606,11 +849,21 @@ function rowHTML(item, planLabel){
   const numero  = formatPhoneBR(item.numero_instancia);
   const inst    = htmlEscape(String(item.instance_name || ''));
 
-  // ✅ bolinha baseada no "connected" (que agora é resultado do ping setPresence)
   const statusCls = item.connected ? 'st-dot--on' : 'st-dot--off';
   const status = `<span class="st-dot ${statusCls} js-status-dot" data-inst="${inst}" title="${item.connected ? 'Ativo' : 'Inativo'}"></span>`;
 
+  const saudeClass = (() => {
+    const s = String(item.saude_status || '').toLowerCase();
+    if (s === 'critico') return 'saude-chip-sm--critico';
+    if (s === 'alto_risco') return 'saude-chip-sm--alto';
+    if (s === 'atencao') return 'saude-chip-sm--atencao';
+    return 'saude-chip-sm--boa';
+  })();
+
+  const saudeLabel = htmlEscape(item.saude_label || scoreText(item.score || 0));
+
   const menuItems = [];
+  menuItems.push('<button class="kebab-item js-saude">Saúde do Número</button>');
   if (!item.connected) menuItems.push('<button class="kebab-item js-reconnect">Reconectar</button>');
   menuItems.push('<button class="kebab-item js-remove">Remover número</button>');
 
@@ -619,7 +872,12 @@ function rowHTML(item, planLabel){
       <td class="py-2">${apelido || '—'}</td>
       <td class="py-2">${numero}</td>
       <td class="py-2"><span class="plan-pill">${htmlEscape(planLabel)}</span></td>
-      <td class="py-2">${status}</td>
+      <td class="py-2">
+        <div class="saude-inline">
+          ${status}
+          <span class="saude-chip-sm ${saudeClass}">${saudeLabel}</span>
+        </div>
+      </td>
       <td class="py-2 text-right">
         <button class="kebab-btn" aria-haspopup="true" aria-expanded="false" aria-label="Ações">
           <i class="fa-solid fa-ellipsis-vertical"></i>
@@ -629,9 +887,11 @@ function rowHTML(item, planLabel){
     </tr>
   `;
 }
+
 function bindRowEvents(tr, item){
   const btn  = $('.kebab-btn', tr);
   const menu = $('.kebab-menu', tr);
+
   if (btn && menu){
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -640,6 +900,16 @@ function bindRowEvents(tr, item){
       btn.setAttribute('aria-expanded', menu.classList.contains('show') ? 'true' : 'false');
     });
   }
+
+  const btnSaude = $('.js-saude', tr);
+  if (btnSaude){
+    btnSaude.addEventListener('click', async () => {
+      menu.classList.remove('show');
+      await consultarSaudeNumero(item, { force:true });
+      renderList(filterItemsByTab(allItems), lastPlanLabel);
+    });
+  }
+
   const btnRem = $('.js-remove', tr);
   if (btnRem){
     btnRem.addEventListener('click', () => {
@@ -647,6 +917,7 @@ function bindRowEvents(tr, item){
       openRemoveModal(item);
     });
   }
+
   const btnRec = $('.js-reconnect', tr);
   if (btnRec){
     btnRec.addEventListener('click', async () => {
@@ -655,24 +926,29 @@ function bindRowEvents(tr, item){
     });
   }
 }
+
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.kebab-btn') && !e.target.closest('.kebab-menu')) {
     $$('.kebab-menu').forEach(m => m.classList.remove('show'));
   }
 });
+
 function renderList(items, planLabel){
   if (!els.tbody) return;
   els.tbody.innerHTML = '';
+
   if (!Array.isArray(items) || items.length === 0){
     els.table?.classList.add('hidden');
     els.placeholder?.classList.remove('hidden');
     return;
   }
+
   els.placeholder?.classList.add('hidden');
   els.table?.classList.remove('hidden');
 
   const tpl = document.createElement('template');
   const frag = document.createDocumentFragment();
+
   for (const it of items){
     tpl.innerHTML = rowHTML(it, planLabel).trim();
     const tr = tpl.content.firstElementChild;
@@ -692,10 +968,12 @@ function filterItemsByTab(list){
     ? list.filter(i => !!i.connected)
     : list.filter(i => !i.connected);
 }
+
 function activateTab(tab){
   currentTab = tab;
   renderList(filterItemsByTab(allItems), lastPlanLabel);
 }
+
 els.tabAtivos?.addEventListener('click', () => activateTab('ativos'));
 els.tabInativos?.addEventListener('click', () => activateTab('inativos'));
 
@@ -705,14 +983,12 @@ function updateTabCounts(totalAtivos, totalInativos){
   if (els.tabInativos) els.tabInativos.textContent = `Inativos (${totalInativos})`;
 }
 
-// Helper central para pegar o limite de instâncias do payload
 function getInstanceLimit(payload){
   const raw =
     payload?.limite_instancias ??
     payload?.max_instancias ??
     payload?.limite;
   const n = Number(raw);
-  // null = sem limite; 0,1,2... = limite real
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
@@ -723,10 +999,8 @@ function updateTopTotal(tier, payload, list){
   const limit = getInstanceLimit(payload);
 
   if (limit !== null) {
-    // ex: OURO 1/3
     els.countPro.textContent = `${t} ${total}/${limit}`;
   } else {
-    // plano sem limite configurado
     els.countPro.textContent = `${t} ${total}`;
   }
 }
@@ -737,16 +1011,12 @@ function updateAddButton(payload, list){
   const total = Array.isArray(list) ? list.length : 0;
   const limit = getInstanceLimit(payload);
   const hasLimit = (limit !== null);
-  const canAdd = !hasLimit || total < limit;  // se não tem limite OU ainda não bateu o limite
+  const canAdd = !hasLimit || total < limit;
 
-  // habilita/desabilita de verdade
   els.btnAdd.disabled = !canAdd;
   els.btnAdd.setAttribute('aria-disabled', canAdd ? 'false' : 'true');
-
-  // Verde quando pode adicionar, neutro/cinza quando não pode
   els.btnAdd.classList.toggle('btn--ok', canAdd);
 
-  // Tooltip amigável
   if (canAdd) {
     els.btnAdd.title = 'Adicionar novo número ZapChats';
   } else {
@@ -783,9 +1053,11 @@ async function loadWhatsAppStatus(){
           instance_name: i.instance_name,
           apelido: i.apelido || '',
           numero_instancia: i.numero_instancia || '',
-          // ✅ aqui é só "valor inicial"; depois o refreshPresenceStatuses sobrescreve pelo setPresence
           connected: isConnectedPayload(i),
-          last_seen: i.last_seen || null
+          last_seen: i.last_seen || null,
+          score: Number(i.score || 0),
+          saude_status: i.saude_status || '',
+          saude_label: i.saude_label || ''
         }))
       : [];
 
@@ -797,11 +1069,9 @@ async function loadWhatsAppStatus(){
 
     updateTabCounts(totalAtivos, totalInativos);
     updateTopTotal(tier, js, list);
-    updateAddButton(js, list);   // controla cor/estado do botão “Adicionar”
+    updateAddButton(js, list);
 
     renderList(filterItemsByTab(allItems), tier);
-
-    // ✅ depois de renderizar, atualiza status REAL via setPresence (e move entre tabs se necessário)
     schedulePresenceRefresh(150, { force:false });
 
   }catch(e){
@@ -823,6 +1093,7 @@ function secondsFromLimit(raw){
   if (n <= 5)  return Math.round(n * 60);
   return Math.round(n);
 }
+
 function hideIllustration(){ els.qrIllustration?.classList.add('hidden'); }
 function showIllustration(){ els.qrIllustration?.classList.remove('hidden'); }
 
@@ -835,6 +1106,7 @@ function hideQR(){
   els.qrInstru?.classList.add('hidden');
   els.qrLoader?.classList.add('hidden');
 }
+
 function showQRError(msg){
   if (!els.qrErro) return;
   if (msg) {
@@ -845,6 +1117,7 @@ function showQRError(msg){
     els.qrErro.classList.add('hidden');
   }
 }
+
 function startTimer(sec){
   clearInterval(timerId);
   if (!Number.isFinite(sec) || sec<=0 || !els.qrTimerWrap || !els.qrTimerCnt) return;
@@ -871,6 +1144,7 @@ function startTimer(sec){
     }
   }, 1000);
 }
+
 function renderQRFromBase64(b64, limit){
   if (!b64 || !els.qrImg) return;
   const src = b64.startsWith('data:') ? b64 : `data:image/png;base64,${b64}`;
@@ -884,18 +1158,18 @@ function renderQRFromBase64(b64, limit){
   els.btnGerarQR?.classList.add('hidden');
   els.btnRefresh?.classList.remove('hidden');
 }
+
 function renderQRFromText(text, limit){
   if (!els.qrCanvas) return;
   els.qrLoader?.classList.add('hidden');
   hideIllustration();
   try{
-    const qr = new QRious({
+    new QRious({
       element: els.qrCanvas,
       value: String(text),
       size: 208,
       level: 'M'
     });
-    void qr;
     els.qrCanvas.classList.remove('hidden');
     els.qrImg?.classList.add('hidden');
     els.qrInstru?.classList.remove('hidden');
@@ -906,6 +1180,7 @@ function renderQRFromText(text, limit){
     showQRError('Falha ao gerar QR. Tente novamente.');
   }
 }
+
 function renderQRFromResponse(qr){
   if (!qr || typeof qr !== 'object') return false;
   if (qr.base64) {
@@ -919,7 +1194,7 @@ function renderQRFromResponse(qr){
   return false;
 }
 
-// ===== Conectado → overlay 1 min =====
+// ===== Conectado → overlay =====
 function handleConnected(instanceFromMsg){
   if (currentInstance && instanceFromMsg && instanceFromMsg !== currentInstance) return;
   clearInterval(timerId);
@@ -929,7 +1204,6 @@ function handleConnected(instanceFromMsg){
   showPrepOverlayOneMinute(60, { historico: lastHistoricoUsed });
   scheduleLoad(200);
 
-  // ✅ força refresh do status na instância conectada
   if (instanceFromMsg) schedulePresenceRefresh(200, { force:true, onlyInstances:[instanceFromMsg] });
 }
 
@@ -973,6 +1247,7 @@ function attachEmpresaWS() {
     }
   });
 }
+
 function attachInstWS(instance) {
   if (offInst) { try { offInst(); } catch {} offInst = null; }
   if (!instance) return;
@@ -994,11 +1269,7 @@ function attachInstWS(instance) {
     }
     if (m?.type === 'connection' || m?.type === 'connected' || m?.status || m?.state) {
       if (isConnectedPayload(m)) {
-        const instName =
-          m.instance ||
-          m.instance_name ||
-          m.instancia ||
-          null;
+        const instName = m.instance || m.instance_name || m.instancia || null;
         handleConnected(instName);
         scheduleLoad(200);
       }
@@ -1025,6 +1296,7 @@ async function handleConnectSubmit(ev){
     showQRError('Informe um número de telefone válido.');
     return;
   }
+
   const e164 = `+${ddi}${numero}`;
 
   try{
@@ -1043,7 +1315,6 @@ async function handleConnectSubmit(ev){
     window.currentInstance = currentInstance;
 
     if (currentInstance) attachInstWS(currentInstance);
-
     wantQR = true;
 
     const rendered = renderQRFromResponse(js?.qrcode || {});
@@ -1051,7 +1322,6 @@ async function handleConnectSubmit(ev){
 
     await loadWhatsAppStatus();
 
-    // ✅ quando clicou conectar, já “baseia o status” no setPresence dessa instância
     if (currentInstance) {
       schedulePresenceRefresh(150, { force:true, onlyInstances:[currentInstance] });
     }
@@ -1077,7 +1347,6 @@ async function openReconnect(item){
   currentInstance = item.instance_name;
   window.currentInstance = currentInstance;
 
-  // Reconnect não restaura histórico
   lastHistoricoUsed = 'none';
 
   setModalTitle('Reconecte seu número de WhatsApp');
@@ -1110,7 +1379,6 @@ async function openReconnect(item){
     showIllustration();
   }
 
-  // ✅ ao clicar “Reconectar”, já usa setPresence pra status
   schedulePresenceRefresh(150, { force:true, onlyInstances:[currentInstance] });
 
   els.btnGerarQR?.classList.add('hidden');
@@ -1133,7 +1401,6 @@ async function refreshQR(){
     wantQR = true;
     if (!ok) showIllustration();
 
-    // ✅ refresh do QR também força status via setPresence
     schedulePresenceRefresh(200, { force:true, onlyInstances:[window.currentInstance] });
 
   }catch(e){
@@ -1141,6 +1408,7 @@ async function refreshQR(){
     showQRError('Não foi possível atualizar o QR.');
   }
 }
+
 async function gerarPrimeiroQR(){
   await refreshQR();
 }
@@ -1155,17 +1423,25 @@ els.btnAdd?.addEventListener('click', () => {
   currentInstance = null;
   window.currentInstance = null;
 
-  // volta a mostrar seleção de histórico quando é “novo número”
   const histRow = els.selHist?.closest('.form-row, .field, .mb-4, .mb-3, .grid, div') || null;
   if (histRow) histRow.classList.remove('hidden');
 });
+
 els.btnCloseMd?.addEventListener('click', hideModal);
 els.btnCancel?.addEventListener('click', hideModal);
 els.form?.addEventListener('submit', handleConnectSubmit);
 els.btnRefresh?.addEventListener('click', refreshQR);
 els.btnGerarQR?.addEventListener('click', gerarPrimeiroQR);
 
-// ===== Remoção de instância =====
+els.btnCloseSaude?.addEventListener('click', closeSaudeModal);
+els.btnFecharSaude?.addEventListener('click', closeSaudeModal);
+els.btnReanalisarSaude?.addEventListener('click', async () => {
+  if (!saudeCurrentItem) return;
+  await consultarSaudeNumero(saudeCurrentItem, { force:true });
+  renderList(filterItemsByTab(allItems), lastPlanLabel);
+});
+
+// ===== Remoção =====
 let toRemove = null;
 
 function openRemoveModal(item){
@@ -1178,6 +1454,7 @@ function openRemoveModal(item){
   }
   els.modalRem.classList.remove('hidden');
 }
+
 function closeRemoveModal(){
   toRemove = null;
   els.modalRem?.classList.add('hidden');
@@ -1190,7 +1467,9 @@ els.remConsent?.addEventListener('change', () => {
   els.btnRemYes.classList.toggle('opacity-60', !allowed);
   els.btnRemYes.classList.toggle('cursor-not-allowed', !allowed);
 });
+
 els.btnRemNo?.addEventListener('click', closeRemoveModal);
+
 els.btnRemYes?.addEventListener('click', async () => {
   if (!toRemove) return;
   if (!els.remConsent?.checked){
@@ -1241,7 +1520,10 @@ function toast(msg){
   box.style.display = 'block';
   box.style.background = '#16a34a';
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => box.classList.add('hidden'), 3200);
+  toastTimer = setTimeout(() => {
+    box.classList.add('hidden');
+    box.style.display = 'none';
+  }, 3200);
 }
 
 // ===== Init =====
@@ -1251,7 +1533,6 @@ if (!empresaId){
   attachEmpresaWS();
   loadWhatsAppStatus();
 
-  // ✅ refresh automático do status (baseado em /instance/setPresence/<inst>)
   presenceIntervalId = setInterval(() => {
     if (document.hidden) return;
     void refreshPresenceStatuses({ force:false });
@@ -1273,6 +1554,9 @@ function teardownConectar() {
   presenceLoadTmr = null;
   try { if (presenceIntervalId) clearInterval(presenceIntervalId); } catch {}
   presenceIntervalId = null;
+
+  clearInterval(saudeLoadingTmr);
+  saudeLoadingTmr = null;
 
   try { hidePrepOverlay(); } catch {}
   document.body.style.overflow = '';

@@ -5,21 +5,29 @@
   const $  = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  const msgEl          = $('#msgDisparo');
-  const numsEl         = $('#numsDisparos');
-  const dedupEl        = $('#optDedup');
-  const delayEl        = $('#delaySegundos');
-  const fileEl         = $('#fileNumeros');
-  const importStatusEl = $('#importStatus');
-  const resTotalEl     = $('#resTotal');
-  const resValidosEl   = $('#resValidos');
-  const resInvalidosEl = $('#resInvalidos');
-  const resDelayEl     = $('#resDelay');
-  const btnDisparar    = $('#btnDisparar');
-  const statusEl       = $('#statusDisparos');
-  const tbodyHist      = $('#tbodyDisparos');
-  const emptyHist      = $('#emptyDisparos');
-  const topMetaEl      = $('#topMetaDisparos');
+  const msgEl            = $('#msgDisparo');
+  const numsEl           = $('#numsDisparos');
+  const dedupEl          = $('#optDedup');
+  const delayEl          = $('#delaySegundos');
+  const fileEl           = $('#fileNumeros');
+  const importStatusEl   = $('#importStatus');
+  const resInstanciaEl   = $('#resInstancia');
+  const resTotalEl       = $('#resTotal');
+  const resValidosEl     = $('#resValidos');
+  const resInvalidosEl   = $('#resInvalidos');
+  const resDelayEl       = $('#resDelay');
+  const resEstimativaEl  = $('#resEstimativa');
+  const resumeStateEl    = $('#resumeState');
+  const summaryAdviceEl  = $('#summaryAdvice');
+  const btnDisparar      = $('#btnDisparar');
+  const statusEl         = $('#statusDisparos');
+  const delayRiskBadgeEl = $('#delayRiskBadge');
+  const topMetaEl        = $('#topMetaDisparos');
+  const heroInstHelpEl   = $('#heroInstHelp');
+  const btnAtualizarHist = $('#btnAtualizarHistorico');
+
+  const tbodyHist        = $('#tbodyDisparos');
+  const emptyHist        = $('#emptyDisparos');
 
   const btnAddFromClientes  = $('#btnAddFromClientes');
   const clientesModal       = $('#clientesModal');
@@ -41,6 +49,11 @@
   const iaStatusEl    = $('#iaStatus');
 
   const chkIaVariar   = $('#chkIaVariar');
+  const toastEl       = $('#toast');
+
+  const btnPreencherExemplo = $('#btnPreencherExemplo');
+  const btnLimparRascunho   = $('#btnLimparRascunho');
+  const templateButtons     = $$('.tpl-chip');
 
   const API_BASE        = '/api/disparos';
   const API_CREATE      = `${API_BASE}/simples`;
@@ -57,6 +70,21 @@
     next_offset: 0,
     loading: false,
   };
+
+  const DRAFT_KEY = 'zc:disparos:draft:v3';
+  let toastTimer = null;
+  let autoRefreshTimer = null;
+
+  const TEMPLATES = {
+    cobranca: 'Olá! Tudo bem? Passando para lembrar sobre sua pendência em aberto. Se quiser, posso te enviar os detalhes e as formas de pagamento por aqui.',
+    pos_venda: 'Olá! Passando para saber se ficou tudo certo com seu atendimento. Se precisar de qualquer ajuste ou suporte, estou à disposição.',
+    reativacao: 'Olá! Tudo bem? Faz um tempo que não falamos. Estamos com condições especiais e queria saber se você ainda tem interesse.',
+    promocao: 'Olá! Tudo bem? Estamos com uma condição especial por tempo limitado. Se quiser, posso te passar os detalhes por aqui.',
+    lembrete: 'Olá! Tudo bem? Estou passando para te lembrar sobre nosso contato anterior. Se quiser continuar, me responde por aqui.'
+  };
+
+  const EXAMPLE_MESSAGE = 'Olá! Tudo bem? Passando para falar com você rapidamente. Se quiser, posso te mandar mais detalhes por aqui.';
+  const EXAMPLE_NUMBERS = ['11999999999', '11988888888', '11977777777'];
 
   function escapeHTML(s) {
     return String(s ?? '')
@@ -75,6 +103,20 @@
     } catch {
       return 0;
     }
+  }
+
+  function showToast(text, kind = 'info') {
+    if (!toastEl) return;
+    toastEl.textContent = text || '';
+    toastEl.className = 'show';
+    toastEl.dataset.kind = kind;
+
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      toastEl.classList.remove('show');
+      toastEl.textContent = '';
+      toastEl.removeAttribute('data-kind');
+    }, 3200);
   }
 
   function setStatus(text, kind) {
@@ -96,6 +138,226 @@
     iaStatusEl.textContent = text || '';
     if (!text) iaStatusEl.removeAttribute('data-kind');
     else if (kind) iaStatusEl.dataset.kind = kind;
+  }
+
+  function normalizeStatusHuman(status) {
+    const s = String(status || '').toLowerCase();
+    if (s === 'pendente') return { label: 'Na fila', cls: 'pending' };
+    if (s === 'processando') return { label: 'Enviando', cls: 'processing' };
+    if (s === 'concluido') return { label: 'Finalizado', cls: 'success' };
+    if (s === 'erro') return { label: 'Com erro', cls: 'error' };
+    if (s === 'cancelado') return { label: 'Cancelado', cls: 'muted' };
+    return { label: status || '—', cls: 'muted' };
+  }
+
+  function fmtDate(s) {
+    if (!s) return '—';
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return String(s);
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+  }
+
+  function formatTempo(seg) {
+    const n = Number(seg || 0);
+    if (!Number.isFinite(n) || n <= 0) return '—';
+    if (n < 60) return `${n}s`;
+    const h = Math.floor(n / 3600);
+    const m = Math.floor((n % 3600) / 60);
+    const s = n % 60;
+    const parts = [];
+    if (h) parts.push(`${h}h`);
+    if (m) parts.push(`${m}min`);
+    if (!h && !m && s) parts.push(`${s}s`);
+    return parts.join(' ');
+  }
+
+  function getDelayValue() {
+    let v = 20;
+    if (delayEl) {
+      const n = Number.parseInt(delayEl.value || '20', 10);
+      if (Number.isFinite(n)) v = Math.max(5, Math.min(3600, n));
+    }
+    return v;
+  }
+
+  function getDelayLabel(v) {
+    const n = Number(v || getDelayValue());
+    if (n >= 60) {
+      const min = Math.round(n / 60);
+      return min === 1 ? '1 min' : `${min} mins`;
+    }
+    return `${n}s`;
+  }
+
+  function updateDelayRisk() {
+    if (!delayRiskBadgeEl) return;
+    const v = getDelayValue();
+    if (v <= 10) {
+      delayRiskBadgeEl.textContent = 'Mais arriscado';
+      delayRiskBadgeEl.dataset.kind = 'warn';
+    } else if (v <= 30) {
+      delayRiskBadgeEl.textContent = 'Seguro';
+      delayRiskBadgeEl.dataset.kind = 'ok';
+    } else {
+      delayRiskBadgeEl.textContent = 'Mais conservador';
+      delayRiskBadgeEl.dataset.kind = 'soft';
+    }
+  }
+
+  function parseNumeros() {
+    const raw = (numsEl?.value || '');
+    const parts = raw.split(/[\n,;]+/);
+    const seen = new Set();
+    const valid = [];
+    const invalid = [];
+
+    for (const part of parts) {
+      const s = part.trim();
+      if (!s) continue;
+      const digits = s.replace(/\D+/g, '');
+      if (!digits) continue;
+
+      if (dedupEl?.checked) {
+        if (seen.has(digits)) continue;
+        seen.add(digits);
+      }
+
+      const obj = { raw: s, digits };
+      if (digits.length >= 10) valid.push(obj);
+      else invalid.push(obj);
+    }
+
+    if (resTotalEl) resTotalEl.textContent = String(valid.length + invalid.length);
+    if (resValidosEl) resValidosEl.textContent = String(valid.length);
+    if (resInvalidosEl) resInvalidosEl.textContent = String(invalid.length);
+
+    return { valid, invalid };
+  }
+
+  function saveDraft() {
+    try {
+      const payload = {
+        mensagem: msgEl?.value || '',
+        numeros: numsEl?.value || '',
+        delay: delayEl?.value || '20',
+        dedup: !!dedupEl?.checked,
+        saved_at: Date.now()
+      };
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(payload));
+    } catch {}
+  }
+
+  function loadDraft() {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return false;
+      const draft = JSON.parse(raw);
+
+      if (msgEl && typeof draft?.mensagem === 'string' && !msgEl.value.trim()) {
+        msgEl.value = draft.mensagem;
+      }
+      if (numsEl && typeof draft?.numeros === 'string' && !numsEl.value.trim()) {
+        numsEl.value = draft.numeros;
+      }
+      if (delayEl && draft?.delay) {
+        delayEl.value = String(draft.delay);
+      }
+      if (dedupEl && typeof draft?.dedup === 'boolean') {
+        dedupEl.checked = draft.dedup;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function clearDraft() {
+    try { localStorage.removeItem(DRAFT_KEY); } catch {}
+  }
+
+  function updateResumo() {
+    const { valid, invalid } = parseNumeros();
+    const instName = (window.__INST_NAME || '').trim();
+    const delay = getDelayValue();
+    const totalSeg = valid.length > 0 ? Math.max(0, (valid.length - 1) * delay) : 0;
+
+    if (resInstanciaEl) {
+      resInstanciaEl.textContent = instName || 'Não selecionada';
+      resInstanciaEl.dataset.empty = instName ? '0' : '1';
+    }
+
+    if (resDelayEl) resDelayEl.textContent = getDelayLabel(delay);
+    if (resEstimativaEl) resEstimativaEl.textContent = valid.length ? formatTempo(totalSeg) : '—';
+
+    const hasMsg = !!(msgEl?.value || '').trim();
+    const hasInst = !!window.__INST_ID;
+    const hasValid = valid.length > 0;
+
+    if (!hasInst) {
+      resumeStateEl.textContent = 'Falta escolher instância';
+      resumeStateEl.dataset.kind = 'warn';
+      summaryAdviceEl.textContent = 'Escolha primeiro o WhatsApp de envio. Sem isso o disparo não pode começar.';
+    } else if (!hasMsg) {
+      resumeStateEl.textContent = 'Falta escrever a mensagem';
+      resumeStateEl.dataset.kind = 'warn';
+      summaryAdviceEl.textContent = 'Digite a mensagem que será enviada para os contatos.';
+    } else if (!hasValid) {
+      resumeStateEl.textContent = 'Faltam contatos válidos';
+      resumeStateEl.dataset.kind = 'warn';
+      summaryAdviceEl.textContent = 'Adicione pelo menos um número válido para iniciar o disparo.';
+    } else if (invalid.length > 0) {
+      resumeStateEl.textContent = 'Revisão recomendada';
+      resumeStateEl.dataset.kind = 'soft';
+      summaryAdviceEl.textContent = 'Há números suspeitos ou curtos na lista. Revise antes de enviar.';
+    } else {
+      resumeStateEl.textContent = 'Pronto para disparar';
+      resumeStateEl.dataset.kind = 'ok';
+      summaryAdviceEl.textContent = `Tudo certo. O envio será feito em fila usando ${instName} com intervalo de ${getDelayLabel(delay)}.`;
+    }
+
+    if (heroInstHelpEl) {
+      heroInstHelpEl.textContent = hasInst
+        ? `Instância pronta para uso: ${instName}.`
+        : 'Escolha a instância no botão acima para habilitar o disparo.';
+    }
+
+    updateDelayRisk();
+    saveDraft();
+  }
+
+  function useTemplate(key) {
+    const text = TEMPLATES[key];
+    if (!text || !msgEl) return;
+    msgEl.value = text;
+    updateResumo();
+    msgEl.focus();
+    showToast('Modelo aplicado na mensagem.', 'success');
+  }
+
+  function fillExample() {
+    if (msgEl) msgEl.value = EXAMPLE_MESSAGE;
+    if (numsEl) numsEl.value = EXAMPLE_NUMBERS.join('\n');
+    if (delayEl) delayEl.value = '20';
+    if (dedupEl) dedupEl.checked = true;
+    updateResumo();
+    showToast('Exemplo preenchido.', 'success');
+  }
+
+  function clearDraftUI() {
+    if (msgEl) msgEl.value = '';
+    if (numsEl) numsEl.value = '';
+    if (delayEl) delayEl.value = '20';
+    if (dedupEl) dedupEl.checked = true;
+    clearDraft();
+    updateResumo();
+    setStatus('', null);
+    setImportStatus('', null);
+    showToast('Rascunho limpo.', 'success');
   }
 
   function openIaModal(original, sugestao) {
@@ -120,26 +382,28 @@
     if (!iaSugestaoEl || !msgEl) return closeIaModal();
     const texto = (iaSugestaoEl.value || '').trim();
     if (!texto) {
-      alert('A versão da IA está vazia. Ajuste ou feche o modal.');
+      setIaStatus('A sugestão está vazia. Ajuste o texto antes de aplicar.', 'error');
+      showToast('A sugestão da IA está vazia.', 'error');
       return;
     }
     msgEl.value = texto;
     closeIaModal();
+    updateResumo();
     msgEl.focus();
+    showToast('Mensagem atualizada com a versão da IA.', 'success');
   }
 
   async function chamarIaMelhorar(ev) {
     ev?.preventDefault?.();
-
     const draft = (msgEl?.value || '').trim();
     if (!draft) {
-      alert('Digite a mensagem primeiro para a IA melhorar.');
+      showToast('Digite a mensagem primeiro para a IA melhorar.', 'error');
       msgEl?.focus();
       return;
     }
 
     openIaModal(draft, '');
-    setIaStatus('Chamando IA para melhorar sua mensagem…', 'info');
+    setIaStatus('Chamando IA para melhorar sua mensagem...', 'info');
 
     if (iaApplyBtn) iaApplyBtn.disabled = true;
     if (iaRegerarBtn) iaRegerarBtn.disabled = true;
@@ -159,9 +423,8 @@
 
       if (!res.ok) {
         const msg = (data && (data.detail || data.message)) || `Erro HTTP ${res.status}`;
-        console.error('[IA-DISPARO] Erro HTTP', res.status, data);
         setIaStatus(msg, 'error');
-        alert('Erro ao chamar IA: ' + msg);
+        showToast(`Erro ao chamar IA: ${msg}`, 'error');
         return;
       }
 
@@ -170,16 +433,11 @@
 
       if (iaOriginalEl) iaOriginalEl.value = original;
       if (iaSugestaoEl) iaSugestaoEl.value = melhorada;
-
-      if (melhorada === '__EMPTY__') {
-        setIaStatus('A IA entendeu que o rascunho está vazio. Revise o texto e tente novamente.', 'error');
-      } else {
-        setIaStatus('Revise, ajuste se quiser e clique em “Usar esta versão”.', 'success');
-      }
+      setIaStatus('Revise a sugestão e clique em “Usar esta versão”.', 'success');
     } catch (e) {
-      console.error('[IA-DISPARO] Erro ao chamar IA', e);
-      setIaStatus('Erro ao chamar IA. Tente novamente em instantes.', 'error');
-      alert('Erro ao chamar IA. Veja o console do navegador para detalhes.');
+      console.error('[IA-DISPARO] Erro', e);
+      setIaStatus('Erro ao chamar IA. Tente novamente.', 'error');
+      showToast('Erro ao chamar IA.', 'error');
     } finally {
       if (iaApplyBtn) iaApplyBtn.disabled = false;
       if (iaRegerarBtn) iaRegerarBtn.disabled = false;
@@ -188,14 +446,13 @@
 
   async function regerarIa(ev) {
     ev?.preventDefault?.();
-
     const draft = (iaOriginalEl?.value || msgEl?.value || '').trim();
     if (!draft) {
-      alert('Não há texto base para gerar outra variação.');
+      showToast('Não há texto base para gerar outra variação.', 'error');
       return;
     }
 
-    setIaStatus('Gerando outra variação…', 'info');
+    setIaStatus('Gerando outra variação...', 'info');
     if (iaApplyBtn) iaApplyBtn.disabled = true;
     if (iaRegerarBtn) iaRegerarBtn.disabled = true;
 
@@ -214,9 +471,8 @@
 
       if (!res.ok) {
         const msg = (data && (data.detail || data.message)) || `Erro HTTP ${res.status}`;
-        console.error('[IA-DISPARO] Erro HTTP (regerar)', res.status, data);
         setIaStatus(msg, 'error');
-        alert('Erro ao chamar IA: ' + msg);
+        showToast(`Erro ao chamar IA: ${msg}`, 'error');
         return;
       }
 
@@ -225,68 +481,15 @@
 
       if (iaOriginalEl) iaOriginalEl.value = original;
       if (iaSugestaoEl) iaSugestaoEl.value = melhorada;
-
-      if (melhorada === '__EMPTY__') {
-        setIaStatus('A IA entendeu que o rascunho está vazio. Revise o texto e tente novamente.', 'error');
-      } else {
-        setIaStatus('Nova variação gerada. Revise e clique em “Usar esta versão”.', 'success');
-      }
+      setIaStatus('Nova variação gerada. Revise e aplique se quiser.', 'success');
     } catch (e) {
-      console.error('[IA-DISPARO] Erro ao chamar IA (regerar)', e);
-      setIaStatus('Erro ao chamar IA. Tente novamente em instantes.', 'error');
-      alert('Erro ao chamar IA. Veja o console do navegador para detalhes.');
+      console.error('[IA-DISPARO] Erro ao regerar', e);
+      setIaStatus('Erro ao chamar IA. Tente novamente.', 'error');
+      showToast('Erro ao chamar IA.', 'error');
     } finally {
       if (iaApplyBtn) iaApplyBtn.disabled = false;
       if (iaRegerarBtn) iaRegerarBtn.disabled = false;
     }
-  }
-
-  function syncDelayResumo() {
-    if (!resDelayEl) return;
-
-    let v = 20;
-    if (delayEl) {
-      const n = Number.parseInt(delayEl.value || '20', 10);
-      if (Number.isFinite(n)) v = Math.max(5, Math.min(3600, n));
-    }
-
-    if (v >= 60) {
-      const min = Math.round(v / 60);
-      resDelayEl.textContent = min + (min === 1 ? ' min' : ' mins');
-    } else {
-      resDelayEl.textContent = v + 's';
-    }
-  }
-
-  function parseNumeros() {
-    const raw = (numsEl?.value || '');
-    const parts = raw.split(/[\n,;]+/);
-    const seen = new Set();
-    const valid = [];
-    const invalid = [];
-
-    for (const part of parts) {
-      const s = part.trim();
-      if (!s) continue;
-
-      const digits = s.replace(/\D+/g, '');
-      if (!digits) continue;
-
-      if (dedupEl?.checked) {
-        if (seen.has(digits)) continue;
-        seen.add(digits);
-      }
-
-      const obj = { raw: s, digits };
-      if (digits.length >= 10) valid.push(obj);
-      else invalid.push(obj);
-    }
-
-    if (resTotalEl) resTotalEl.textContent = String(valid.length + invalid.length);
-    if (resValidosEl) resValidosEl.textContent = String(valid.length);
-    if (resInvalidosEl) resInvalidosEl.textContent = String(invalid.length);
-
-    return { valid, invalid };
   }
 
   function handleFileChange(ev) {
@@ -294,7 +497,7 @@
     const file = input?.files?.[0];
     if (!file) return;
 
-    setImportStatus(`Lendo arquivo "${file.name}"…`, 'info');
+    setImportStatus(`Lendo arquivo "${file.name}"...`, 'info');
 
     const reader = new FileReader();
     reader.onload = () => {
@@ -310,19 +513,21 @@
         const combined = atual ? (atual.trimEnd() + '\n' + text.trim()) : text.trim();
 
         if (numsEl) numsEl.value = combined;
-        parseNumeros();
-        setImportStatus(`Importado: ${file.name} (${file.size} bytes).`, 'success');
+        updateResumo();
+        setImportStatus(`Arquivo importado: ${file.name}.`, 'success');
+        showToast('Contatos importados com sucesso.', 'success');
       } catch (e) {
-        console.error('Erro ao importar arquivo de números', e);
+        console.error('Erro ao importar', e);
         setImportStatus('Erro ao processar o arquivo.', 'error');
+        showToast('Erro ao processar o arquivo.', 'error');
       } finally {
         input.value = '';
       }
     };
 
     reader.onerror = () => {
-      console.error('Erro ao ler arquivo de números', reader.error);
       setImportStatus('Erro ao ler arquivo. Tente novamente.', 'error');
+      showToast('Erro ao ler arquivo.', 'error');
       input.value = '';
     };
 
@@ -348,11 +553,13 @@
   function syncCliCheckAllState() {
     if (!cliCheckAllEl || !clientesListEl) return;
     const allChecks = $$('.cli-check', clientesListEl);
+
     if (!allChecks.length) {
       cliCheckAllEl.checked = false;
       cliCheckAllEl.indeterminate = false;
       return;
     }
+
     const totalChecked = allChecks.filter(ch => ch.checked).length;
     cliCheckAllEl.checked = totalChecked === allChecks.length;
     cliCheckAllEl.indeterminate = totalChecked > 0 && totalChecked < allChecks.length;
@@ -440,9 +647,10 @@
       renderClientesList(items, append);
       if (clientesLoadMoreBtn) clientesLoadMoreBtn.style.display = clientesState.has_more ? '' : 'none';
     } catch (e) {
-      console.error('Erro ao carregar clientes para o disparo', e);
+      console.error('Erro ao carregar clientes', e);
       if (!append) renderClientesList([], false);
       if (clientesLoadMoreBtn) clientesLoadMoreBtn.style.display = 'none';
+      showToast('Erro ao carregar clientes.', 'error');
     } finally {
       clientesState.loading = false;
     }
@@ -485,7 +693,7 @@
 
     const checks = $$('.cli-check:checked', clientesListEl);
     if (!checks.length) {
-      alert('Selecione pelo menos um cliente para adicionar.');
+      showToast('Selecione pelo menos um cliente para adicionar.', 'error');
       return;
     }
 
@@ -500,14 +708,13 @@
       const phone = ch.dataset.phone || '';
       const digits = (ch.dataset.digits || '').replace(/\D+/g, '');
       if (!digits) return;
-
       if (dedupEl?.checked && seenDigits.has(digits)) return;
       seenDigits.add(digits);
       toAdd.push(phone || digits);
     });
 
     if (!toAdd.length) {
-      alert('Nenhum número novo para adicionar (todos já estavam na lista).');
+      showToast('Nenhum número novo para adicionar.', 'info');
       closeClientesModal();
       return;
     }
@@ -516,8 +723,9 @@
     if (base && !base.endsWith('\n')) base += '\n';
     numsEl.value = base + toAdd.join('\n');
 
-    parseNumeros();
     closeClientesModal();
+    updateResumo();
+    showToast(`${toAdd.length} contato(s) adicionados.`, 'success');
   }
 
   let clientesSearchTimer = null;
@@ -551,30 +759,29 @@
     const mensagem = (msgEl?.value || '').trim();
     const { valid } = parseNumeros();
 
+    if (!window.__INST_ID) {
+      showToast('Selecione uma instância de WhatsApp antes de disparar.', 'error');
+      setStatus('Selecione uma instância de WhatsApp antes de disparar.', 'error');
+      return null;
+    }
+
     if (!mensagem) {
-      alert('Digite a mensagem do disparo.');
+      showToast('Digite a mensagem do disparo.', 'error');
       msgEl?.focus();
       return null;
     }
 
     if (!valid.length) {
-      alert('Informe ao menos um número válido.');
+      showToast('Informe ao menos um número válido.', 'error');
       numsEl?.focus();
       return null;
     }
 
-    let delaySegundos = 20;
-    if (delayEl) {
-      const n = Number.parseInt(delayEl.value || '20', 10);
-      if (Number.isFinite(n)) delaySegundos = Math.max(5, Math.min(3600, n));
-    }
-
-    const instId = window.__INST_ID
-      ? Number(String(window.__INST_ID).replace(/\D/g, ''))
-      : null;
+    const delaySegundos = getDelayValue();
+    const instId = Number(String(window.__INST_ID).replace(/\D/g, ''));
 
     if (!instId) {
-      alert('Selecione uma instância de WhatsApp no topo antes de disparar.');
+      showToast('Instância inválida.', 'error');
       return null;
     }
 
@@ -594,7 +801,7 @@
     const payload = getPayload();
     if (!payload) return;
 
-    setStatus('Enviando disparo…', 'info');
+    setStatus('Criando disparo e enviando para a fila...', 'info');
     if (btnDisparar) {
       btnDisparar.disabled = true;
       btnDisparar.classList.add('loading');
@@ -613,7 +820,7 @@
       try { data = txt ? JSON.parse(txt) : {}; }
       catch { data = { raw: txt }; }
 
-      if (!res.ok || data?.ok === false) {
+      if (!res.ok) {
         let msg = '';
         const detail = data?.detail;
 
@@ -623,37 +830,28 @@
         else if (data?.message) msg = data.message;
         else msg = `Erro HTTP ${res.status}`;
 
-        const err = new Error(msg);
-        err.data = data;
-        err.status = res.status;
-        throw err;
+        throw new Error(msg);
       }
 
-      setStatus('Disparo criado com sucesso.', 'success');
+      const qtd = Array.isArray(payload.numeros) ? payload.numeros.length : 0;
+      const inst = window.__INST_NAME || `Instância ${payload.instancia_id}`;
+
+      setStatus(`Disparo criado com sucesso. ${qtd} contato(s) entrarão em fila pela instância ${inst}.`, 'success');
+      showToast('Disparo iniciado com sucesso.', 'success');
+
+      clearDraft();
       carregarHistorico();
     } catch (e) {
       console.error('Erro ao enviar disparo', e);
       const msg = (e && typeof e.message === 'string' && e.message) || 'Erro ao enviar disparo.';
       setStatus(msg, 'error');
-      alert('Erro ao enviar disparo: ' + msg);
+      showToast(`Erro ao enviar disparo: ${msg}`, 'error');
     } finally {
       if (btnDisparar) {
         btnDisparar.disabled = false;
         btnDisparar.classList.remove('loading');
       }
     }
-  }
-
-  function fmtDate(s) {
-    if (!s) return '—';
-    const d = new Date(s);
-    if (Number.isNaN(d.getTime())) return String(s);
-    const dd = String(d.getDate()).padStart(2, '0');
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const yyyy = d.getFullYear();
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mi = String(d.getMinutes()).padStart(2, '0');
-    return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
   }
 
   function resolveAutor(item) {
@@ -679,6 +877,35 @@
     return `<td data-label="${escapeHTML(label)}"${extraStyle ? ` style="${extraStyle}"` : ''}>${value}</td>`;
   }
 
+  function buildQtdCell(item) {
+    const total =
+      item?.qtd_numeros ??
+      item?.total_numeros ??
+      item?.total_destinatarios ??
+      0;
+
+    return `
+      <div class="hist-qty">
+        <strong>${escapeHTML(total)}</strong>
+        <small>contato(s)</small>
+      </div>
+    `;
+  }
+
+  function reuseHistorico(item) {
+    if (!item) return;
+
+    const mensagem = String(item.mensagem || '').trim();
+    const delay = item.delay_segundos ?? item.delay ?? item.intervalo_segundos ?? null;
+
+    if (msgEl && mensagem) msgEl.value = mensagem;
+    if (delayEl && delay != null) delayEl.value = String(delay);
+
+    updateResumo();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    showToast('Mensagem e intervalo reaproveitados do histórico.', 'success');
+  }
+
   function renderHistorico(itens) {
     if (!tbodyHist) return;
 
@@ -693,28 +920,62 @@
     if (emptyHist) emptyHist.style.display = 'none';
     if (topMetaEl) topMetaEl.textContent = String(itens.length);
 
-    itens.forEach(item => {
+    itens.forEach((item, idx) => {
       const tr = document.createElement('tr');
 
       const msg = (item.mensagem || '').toString();
-      const preview = msg.length > 80 ? msg.slice(0, 80) + '…' : msg;
-      const qtd = item.qtd_numeros ?? item.total_numeros ?? (item.numeros?.length || 0);
+      const preview = msg.length > 110 ? msg.slice(0, 110) + '…' : msg;
       const inst = item.instancia_nome || item.instance_name || item.instancia_id || '—';
       const por = resolveAutor(item);
-      const status = (item.status || 'pendente').toString();
+      const statusObj = normalizeStatusHuman(item.status || 'pendente');
       const criado = fmtDate(item.criado_em || item.created_at || item.created);
 
       tr.innerHTML = [
-        tdCell('Mensagem', escapeHTML(preview || '—')),
-        tdCell('Qtd. números', escapeHTML(qtd), 'text-align:center'),
-        tdCell('Instância', escapeHTML(inst)),
-        tdCell('Por', escapeHTML(por)),
-        tdCell('Status', escapeHTML(status)),
-        tdCell('Criado em', escapeHTML(criado))
+        tdCell('Mensagem', `<div class="hist-msg"><strong>${escapeHTML(preview || '—')}</strong></div>`),
+        tdCell('Contatos', buildQtdCell(item)),
+        tdCell('Instância', `<span class="hist-inst">${escapeHTML(inst)}</span>`),
+        tdCell('Criado por', escapeHTML(por)),
+        tdCell('Status', `<span class="status-pill ${escapeHTML(statusObj.cls)}">${escapeHTML(statusObj.label)}</span>`),
+        tdCell('Criado em', escapeHTML(criado)),
+        tdCell('Ação', `<button type="button" class="btn btn-sm btn-ghost-action" data-action="reusar" data-index="${idx}"><i class="fa-solid fa-copy"></i><span>Reusar</span></button>`)
       ].join('');
-
-      tbodyHist.appendChild(tr);
     });
+
+    tbodyHist.__items = itens;
+  }
+
+  function bindHistoricoActions() {
+    if (!tbodyHist) return;
+
+    tbodyHist.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-action="reusar"]');
+      if (!btn) return;
+
+      const idx = Number(btn.dataset.index);
+      const items = Array.isArray(tbodyHist.__items) ? tbodyHist.__items : [];
+      const item = items[idx];
+      if (!item) return;
+
+      reuseHistorico(item);
+    });
+  }
+
+  function startAutoRefreshIfNeeded(items) {
+    if (autoRefreshTimer) {
+      clearTimeout(autoRefreshTimer);
+      autoRefreshTimer = null;
+    }
+
+    const hasRunning = Array.isArray(items) && items.some(it => {
+      const s = String(it?.status || '').toLowerCase();
+      return s === 'pendente' || s === 'processando';
+    });
+
+    if (hasRunning) {
+      autoRefreshTimer = setTimeout(() => {
+        carregarHistorico();
+      }, 8000);
+    }
   }
 
   async function carregarHistorico() {
@@ -732,14 +993,16 @@
       const txt = await res.text();
 
       let data;
-      try { data = txt ? JSON.parse(txt) : {}; }
-      catch { data = { raw: txt }; }
+      try { data = txt ? JSON.parse(txt) : []; }
+      catch { data = []; }
 
       const itens = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
       renderHistorico(itens);
+      startAutoRefreshIfNeeded(itens);
     } catch (e) {
-      console.error('Erro ao carregar histórico de disparos', e);
+      console.error('Erro ao carregar histórico', e);
       renderHistorico([]);
+      showToast('Erro ao carregar histórico.', 'error');
     }
   }
 
@@ -857,7 +1120,8 @@
         menu.setAttribute('aria-activedescendant', active.id);
       }
 
-      if (label) label.textContent = text || (value ? `Instância ${value}` : 'Todas as instâncias');
+      if (label) label.textContent = text || (value ? `Instância ${value}` : 'Selecione uma instância');
+      updateResumo();
     }
 
     function applyInstancia(value, text) {
@@ -871,11 +1135,12 @@
       applyInstancia(value, text);
       closeMenu();
       btn.focus();
+      showToast(text ? `Instância selecionada: ${text}` : 'Filtro de instância limpo.', 'success');
     }
 
     async function loadList() {
       listEl.innerHTML = '';
-      listEl.appendChild(makeItem('Todas as instâncias', '', false));
+      listEl.appendChild(makeItem('Selecione uma instância', '', false));
 
       let items = [];
 
@@ -905,21 +1170,7 @@
         listEl.appendChild(makeItem(t, v, false));
       });
 
-      if (window.__INST_ID == null || window.__INST_ID === '') {
-        const firstConnected = items.find(x => !!(x.connected || x.conectada || x.status === 'CONNECTED'));
-        const firstAny = items[0];
-        const chosen = firstConnected || firstAny;
-        window.__INST_ID = chosen ? Number(String(instValue(chosen) || '').replace(/\D/g, '')) : '';
-      }
-
-      if (window.__INST_ID) {
-        const val = String(window.__INST_ID);
-        const sel = listEl.querySelector(`.inst-item[data-value="${window.CSS.escape(val)}"]`);
-        const text = sel?.dataset?.label || `Instância ${val}`;
-        applyInstancia(val, text);
-      } else {
-        applyInstancia('', 'Todas as instâncias');
-      }
+      applyInstancia('', 'Selecione uma instância');
     }
 
     loadList();
@@ -927,6 +1178,7 @@
 
   window.onInstanciaChange = function () {
     carregarHistorico();
+    updateResumo();
   };
 
   function init() {
@@ -936,22 +1188,25 @@
       chkIaVariar.title = 'Em breve: variações por número ainda não estão implementadas no backend.';
     }
 
-    if (numsEl) {
-      ['input', 'blur'].forEach(ev => numsEl.addEventListener(ev, parseNumeros));
-      parseNumeros();
-    }
+    const hadDraft = loadDraft();
 
-    dedupEl?.addEventListener('change', parseNumeros);
-
-    if (delayEl) {
-      delayEl.addEventListener('change', syncDelayResumo);
-      syncDelayResumo();
-    } else if (resDelayEl) {
-      resDelayEl.textContent = '20s';
-    }
+    msgEl?.addEventListener('input', updateResumo);
+    numsEl?.addEventListener('input', updateResumo);
+    numsEl?.addEventListener('blur', updateResumo);
+    dedupEl?.addEventListener('change', updateResumo);
+    delayEl?.addEventListener('change', updateResumo);
+    delayEl?.addEventListener('input', updateResumo);
 
     fileEl?.addEventListener('change', handleFileChange);
     btnDisparar?.addEventListener('click', enviarDisparo);
+    btnAtualizarHist?.addEventListener('click', carregarHistorico);
+
+    btnPreencherExemplo?.addEventListener('click', fillExample);
+    btnLimparRascunho?.addEventListener('click', clearDraftUI);
+
+    templateButtons.forEach(btn => {
+      btn.addEventListener('click', () => useTemplate(btn.dataset.template));
+    });
 
     iaBtnOpen?.addEventListener('click', chamarIaMelhorar);
     iaApplyBtn?.addEventListener('click', applyIaVersion);
@@ -995,7 +1250,13 @@
       });
     }
 
+    bindHistoricoActions();
     initInstDropdown();
+    updateResumo();
+
+    if (hadDraft) {
+      showToast('Rascunho restaurado automaticamente.', 'info');
+    }
 
     const doLoad = () => carregarHistorico();
 

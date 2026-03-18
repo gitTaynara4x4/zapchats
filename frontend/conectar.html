@@ -6,54 +6,42 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Conectar WhatsApp – ZapChats</title>
 
-  <!-- Shell global (injeta head-base + loader + tema + sidebar) -->
   <script src="/frontend/js/app-base.js" defer></script>
   <script src="/frontend/js/auth.js" defer></script>
 
-  <!-- Lib da página (QR) -->
   <script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js" defer></script>
 
-  <!-- CSS externo -->
   <link rel="stylesheet" href="/frontend/css/conectar.css">
 </head>
 <body>
-  <!-- Sidebar (carregada via app-base.js) -->
-  <aside id="sidebar"
-        data-src="/frontend/partials/sidebar.html"></aside>
+  <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
 
   <main class="main">
-    <!-- Título -->
     <div class="section-title">
       <h1><i class="fa-brands fa-whatsapp title-ico"></i> Conectar WhatsApp</h1>
       <div class="top-total"><span id="count-pro">OURO 0/0</span></div>
     </div>
 
-    <!-- ===== Card principal ===== -->
     <section class="box" aria-label="Números WhatsApp">
-      <!-- Tabs -->
       <div class="tabs" role="tablist" aria-label="Status dos números">
-        <button class="tab-btn" role="tab" id="tab-ativos"   aria-controls="panel-ativos"   data-tab="ativos"   aria-selected="true">Ativos (0)</button>
+        <button class="tab-btn" role="tab" id="tab-ativos" aria-controls="panel-ativos" data-tab="ativos" aria-selected="true">Ativos (0)</button>
         <button class="tab-btn" role="tab" id="tab-inativos" aria-controls="panel-inativos" data-tab="inativos" aria-selected="false">Inativos (0)</button>
       </div>
 
-      <!-- Ações -->
       <div class="actions">
         <button id="btn-open-modal" type="button" class="btn">
           Adicionar novo número ZapChats
         </button>
       </div>
 
-      <!-- Loader -->
       <div id="zap-loader" class="wpp-loader hidden" role="status" aria-live="polite">
         <div class="loader-spin"></div>Carregando números...
       </div>
 
-      <!-- Placeholder -->
       <div id="placeholder-zap" class="muted" style="padding:.9rem 1rem; border-radius:.8rem; background:var(--hover-strong);">
         ⚠️ Não foram encontrados registros!
       </div>
 
-      <!-- Tabela -->
       <div class="table-wrap">
         <table id="lista-zap" class="hidden" aria-live="polite" aria-labelledby="tab-ativos" role="region">
           <thead>
@@ -65,12 +53,12 @@
               <th>Ações</th>
             </tr>
           </thead>
-          <tbody><!-- linhas via JS --></tbody>
+          <tbody></tbody>
         </table>
       </div>
     </section>
 
-    <!-- ===== Modal: Conectar ===== -->
+    <!-- Modal: Conectar -->
     <div id="modal" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:10000;">
       <div class="card" style="background:var(--card); color:var(--fg); border:1px solid var(--border); border-radius:14px; width:min(760px,92vw);">
         <div style="display:flex; align-items:center; justify-content:space-between; padding:1rem 1.1rem; border-bottom:1px solid var(--border);">
@@ -79,16 +67,13 @@
         </div>
 
         <form id="form-conectar" style="padding:1.1rem; max-height:78vh; overflow:auto; display:grid; gap:1rem;">
-          <!-- Apelido -->
           <input name="apelido" type="text" placeholder="Apelido" autocomplete="off"
                  style="width:100%; padding:.75rem .85rem; border-radius:.75rem; border:1px solid var(--border); background:var(--bg); color:var(--fg);" />
 
-          <!-- Número -->
           <input id="numero" name="numero" type="tel" required inputmode="numeric" placeholder="(31) 99999-9999" autocomplete="off"
                  style="width:100%; padding:.75rem .85rem; border-radius:.75rem; border:1px solid var(--border); background:var(--bg); color:var(--fg);" />
 
           <div style="display:flex; gap:1rem; flex-wrap:wrap;">
-            <!-- País -->
             <div style="flex:1; min-width:240px;">
               <label class="muted" style="display:block; margin-bottom:.4rem;">País de origem</label>
               <select id="pais-select"
@@ -100,7 +85,6 @@
               </select>
             </div>
 
-            <!-- Origem dos contatos -->
             <div style="flex:1; min-width:240px;">
               <label class="muted" style="display:block; margin-bottom:.4rem;">Origem dos contatos</label>
               <div style="display:flex">
@@ -110,7 +94,6 @@
             </div>
           </div>
 
-          <!-- Histórico -->
           <div>
             <label class="muted" style="display:block; margin-bottom:.4rem;">Restaurar histórico</label>
             <select id="historico-select"
@@ -121,13 +104,11 @@
             </select>
           </div>
 
-          <!-- Pairing -->
           <label style="display:flex;align-items:center;gap:.6rem;">
             <input id="use-pairing" type="checkbox">
             <span class="muted" style="font-size:.95rem;">Usar <strong>Pairing Code</strong> em vez de QR (se disponível)</span>
           </label>
 
-          <!-- QR -->
           <div id="qr-area">
             <p id="qr-instru" class="muted hidden" style="font-size:.86rem;">Após fazer a leitura do QR Code, aguarde.</p>
 
@@ -186,18 +167,87 @@
       </div>
     </div>
 
-    <!-- Toast -->
+    <!-- Modal Saúde do Número -->
+    <div id="modal-saude-numero" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,.58); display:flex; align-items:center; justify-content:center; z-index:10002;">
+      <div class="card saude-modal-card" style="background:var(--card); color:var(--fg); border:1px solid var(--border); border-radius:16px; width:min(760px,92vw); max-height:86vh; overflow:auto;">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:1rem 1.1rem; border-bottom:1px solid var(--border);">
+          <div style="display:grid; gap:.15rem;">
+            <h2 style="margin:0; font-size:1.05rem; font-weight:800;">Saúde do Número</h2>
+            <div id="saude-modal-subtitle" class="muted" style="font-size:.9rem;">Análise sob demanda do padrão recente desta instância.</div>
+          </div>
+          <button id="btn-close-saude" class="kebab-btn" aria-label="Fechar">✕</button>
+        </div>
+
+        <div id="saude-body" style="padding:1.1rem;">
+          <div id="saude-loading" class="saude-loading hidden">
+            <div class="saude-loading-top">
+              <div class="loader-spin"></div>
+            </div>
+
+            <div class="saude-loading-title">Consultando saúde do número...</div>
+            <div id="saude-loading-text" class="saude-loading-text">Analisando padrão das últimas mensagens...</div>
+
+            <div class="saude-loading-steps">
+              <div class="saude-step active">Lendo mensagens recentes</div>
+              <div class="saude-step">Verificando repetição de conteúdo</div>
+              <div class="saude-step">Calculando velocidade de envio</div>
+              <div class="saude-step">Montando diagnóstico</div>
+            </div>
+          </div>
+
+          <div id="saude-result" class="hidden">
+            <div class="saude-head">
+              <div>
+                <div id="saude-label-badge" class="saude-badge saude-badge--boa">Boa</div>
+                <div id="saude-score-line" class="saude-score-line">Score: 0/100</div>
+              </div>
+              <div class="saude-score-card">
+                <div class="saude-score-number" id="saude-score-number">0</div>
+                <div class="saude-score-caption">Risco atual</div>
+              </div>
+            </div>
+
+            <div id="saude-resumo" class="saude-resumo">
+              O padrão recente parece saudável e sem sinais fortes de risco.
+            </div>
+
+            <div class="saude-grid">
+              <section class="saude-section">
+                <h3>Principais riscos</h3>
+                <ul id="saude-motivos" class="saude-list"></ul>
+              </section>
+
+              <section class="saude-section">
+                <h3>Recomendado agora</h3>
+                <ul id="saude-recomendacoes" class="saude-list"></ul>
+              </section>
+            </div>
+
+            <section class="saude-section">
+              <h3>Métricas analisadas</h3>
+              <div id="saude-metricas" class="saude-metricas"></div>
+            </section>
+
+            <div id="saude-consultado-em" class="muted" style="margin-top:1rem; font-size:.88rem;"></div>
+          </div>
+
+          <div id="saude-error" class="hidden" style="padding:.4rem 0; color:#ef4444; font-weight:700;"></div>
+        </div>
+
+        <div style="padding:1rem 1.1rem; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:.6rem;">
+          <button id="btn-reanalisar-saude" class="btn btn--primary hidden">Reanalisar agora</button>
+          <button id="btn-fechar-saude" class="btn">Fechar</button>
+        </div>
+      </div>
+    </div>
+
     <div id="global-msg" style="position:fixed; z-index:10001; top:1.1rem; left:50%; transform:translateX(-50%); display:none;
          padding:.75rem 1rem; border-radius:.75rem; background:var(--ok); color:white; font-weight:900;"></div>
   </main>
 
-  <!-- Guard + página -->
   <script src="/frontend/js/page-guard.js" defer></script>
-
-  <!-- Página (ESM) -->
   <script type="module" src="/frontend/js/pages/conectar.js"></script>
 
-  <!-- Tabs a11y -->
   <script>
     (function(){
       const tabs = document.querySelectorAll('.tab-btn[role="tab"]');

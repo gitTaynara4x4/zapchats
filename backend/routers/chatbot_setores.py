@@ -9,11 +9,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+from sqlalchemy import and_, select, text
 from sqlalchemy.orm import Session
-from sqlalchemy import text, select, and_
 
-from backend.database import get_db
 import backend.models as models
+from backend.database import get_db
 
 # Reusa o client Evolution já pronto no send
 from backend.routers.atendimento_send import _evo_post  # type: ignore
@@ -234,7 +234,6 @@ def _fetch_triage_departamentos(
     deps_raw = _fetch_departamentos(db, empresa_id=empresa_id, instancia_id=instancia_id)
     _, _, items_cfg = _get_triage_cfg_parts(cfg)
 
-    # Se não houver items configurados, usa todos os departamentos encontrados.
     if not items_cfg:
         deps: List[Dict[str, Any]] = []
         for idx, d in enumerate(deps_raw, start=1):
@@ -262,7 +261,7 @@ def _fetch_triage_departamentos(
             continue
 
         label = str(item.get("label") or d["nome"] or "").strip()
-        text = str(item.get("text") or "").strip()
+        text_msg = str(item.get("text") or "").strip()
 
         kws_raw = item.get("keywords") or []
         if isinstance(kws_raw, list):
@@ -278,7 +277,7 @@ def _fetch_triage_departamentos(
                 "nome": str(d["nome"] or "").strip(),
                 "label": label or str(d["nome"] or "").strip(),
                 "keywords": keywords,
-                "text": text,
+                "text": text_msg,
             }
         )
 
@@ -322,7 +321,11 @@ def _parse_departamento_choice(
             aliases_norm = [_norm_txt(x) for x in aliases if str(x).strip()]
 
             for alias in aliases_norm:
-                if alias and (alias == t or alias in t or t in alias):
+                if not alias:
+                    continue
+                if alias == t:
+                    return int(d["id"]), int(d["idx"]), str(d["label"]), d
+                if re.search(rf"\b{re.escape(alias)}\b", t):
                     return int(d["id"]), int(d["idx"]), str(d["label"]), d
 
     return None, None, None, None
@@ -353,12 +356,22 @@ def _fetch_primary_colab_id(db: Session, *, empresa_id: int, departamento_id: in
 def _send_text(db: Session, *, instancia_nome: str, remote_jid: str, text_msg: str) -> None:
     if not instancia_nome or not remote_jid or not text_msg:
         return
+
+    jid = str(remote_jid).strip()
+
+    if jid.endswith("@g.us"):
+        destino = jid
+    else:
+        numero = jid.split("@", 1)[0].split(":", 1)[0]
+        numero = _ensure_br_country(numero)
+        destino = f"{numero}@s.whatsapp.net"
+
     payload = {
-        "remoteJid": remote_jid,
-        "messageText": text_msg,
-        "options_message": {},
+        "number": destino,
+        "text": text_msg,
     }
-    _evo_post("/messages/sendText", instancia_nome, payload)
+
+    _evo_post("/message/sendText", instancia_nome, payload)
 
 
 def _replace_tokens(template: str, *, empresa_nome: str, menu_departamentos: str) -> str:
@@ -378,6 +391,12 @@ def _replace_tokens(template: str, *, empresa_nome: str, menu_departamentos: str
     return text_msg
 
 
+def _clean_menu_label(s: str) -> str:
+    s = str(s or "").strip()
+    s = re.sub(r"^\s*\d+\s*[-–—.)]\s*", "", s)
+    return s.strip()
+
+
 def _build_menu_message(
     *,
     empresa_nome: str,
@@ -386,7 +405,7 @@ def _build_menu_message(
 ) -> str:
     _, welcome_cfg, _ = _get_triage_cfg_parts(cfg)
     template = str(welcome_cfg.get("text") or "").strip()
-    linhas = "\n".join([f'{d["idx"]} - {d["label"]}' for d in deps])
+    linhas = "\n".join([f'{d["idx"]} - {_clean_menu_label(d["label"])}' for d in deps])
     return _replace_tokens(template, empresa_nome=empresa_nome or "empresa", menu_departamentos=linhas)
 
 
@@ -423,14 +442,15 @@ def _build_assign_ack(
 ) -> str:
     if dep:
         custom = str(dep.get("text") or "").strip()
+        setor_nome = _clean_menu_label(str(dep.get("label") or dep.get("nome") or "").strip())
+
         if custom:
             custom = re.sub(r"\{empresa\}", empresa_nome or "empresa", custom, flags=re.I)
-            custom = re.sub(r"\{setor\}", str(dep.get("label") or dep.get("nome") or ""), custom, flags=re.I)
+            custom = re.sub(r"\{setor\}", setor_nome, custom, flags=re.I)
             return custom
 
-        dep_nome = str(dep.get("label") or dep.get("nome") or "").strip()
-        if dep_nome:
-            return f"Perfeito! Vou te encaminhar para *{dep_nome}*. Só um instante 🙂"
+        if setor_nome:
+            return f"Perfeito! Vou te encaminhar para *{setor_nome}*. Só um instante 🙂"
 
     return "Perfeito! Só um instante 🙂"
 
@@ -453,6 +473,8 @@ def triagem_handle_inbound(
           - Atualiza triagem_ultima_msg_em = agora
           - Se precisa de triagem: manda menu ou aceita escolha e salva departamento_id
           - Respeita config salva em chatbot_configs.config.features.auto_messages_departments
+      - Se o TTL expirou, a PRIMEIRA mensagem após expirar sempre mostra o menu
+        e não tenta interpretar o texto como escolha de setor.
     """
     if (direction or "").lower() == "saida":
         return {"ok": True, "action": "ignore_saida"}
@@ -469,7 +491,6 @@ def triagem_handle_inbound(
     cfg = _fetch_chatbot_config(db, empresa_id=empresa_id, instancia_id=instancia_id)
     ad_cfg, welcome_cfg, _ = _get_triage_cfg_parts(cfg)
 
-    # Se a triagem de departamentos não estiver ativa, não faz nada.
     if not bool(ad_cfg.get("enabled", False)):
         return {"ok": True, "action": "noop_triagem_disabled"}
 
@@ -485,6 +506,7 @@ def triagem_handle_inbound(
 
     now = _now_utc()
     ttl = timedelta(hours=max(1, int(ttl_hours)))
+    ttl_expired = False
 
     last = _as_aware_utc(cliente.triagem_ultima_msg_em)
     if last and (now - last) > ttl:
@@ -493,6 +515,7 @@ def triagem_handle_inbound(
         cliente.triagem_ativa = True
         cliente.triagem_tentativas = 0
         cliente.triagem_iniciada_em = now
+        ttl_expired = True
 
     cliente.triagem_ultima_msg_em = now
 
@@ -509,6 +532,22 @@ def triagem_handle_inbound(
         cliente.triagem_ativa = False
         db.commit()
         return {"ok": True, "action": "noop_no_deps_enabled"}
+
+    # Se o TTL expirou, a primeira mensagem após isso só reabre o menu
+    if ttl_expired:
+        cliente.triagem_ativa = True
+        cliente.triagem_tentativas = 1
+
+        menu = _build_menu_message(empresa_nome=empresa_nome, deps=deps, cfg=cfg)
+        db.commit()
+
+        _send_text(db, instancia_nome=instancia_nome, remote_jid=remote_jid, text_msg=menu)
+        return {
+            "ok": True,
+            "action": "send_menu_ttl_reset",
+            "options": len(deps),
+            "attempts": int(cliente.triagem_tentativas or 0),
+        }
 
     dep_id, dep_idx, dep_nome, dep_obj = _parse_departamento_choice(texto, deps)
 
@@ -533,8 +572,10 @@ def triagem_handle_inbound(
             "departamento_nome": dep_nome,
         }
 
+    tentativas_antes = int(cliente.triagem_tentativas or 0)
+
     cliente.triagem_ativa = True
-    cliente.triagem_tentativas = int(cliente.triagem_tentativas or 0) + 1
+    cliente.triagem_tentativas = tentativas_antes + 1
 
     max_attempts = 0
     try:
@@ -555,9 +596,11 @@ def triagem_handle_inbound(
             "max_attempts": max_attempts,
         }
 
-    # Se a mensagem parecer primeira abordagem (cliente escreveu algo que não é opção),
-    # ainda assim mostramos o menu configurado.
-    menu = _build_invalid_choice_message(empresa_nome=empresa_nome, deps=deps, cfg=cfg)
+    if tentativas_antes == 0:
+        menu = _build_menu_message(empresa_nome=empresa_nome, deps=deps, cfg=cfg)
+    else:
+        menu = _build_invalid_choice_message(empresa_nome=empresa_nome, deps=deps, cfg=cfg)
+
     db.commit()
 
     _send_text(db, instancia_nome=instancia_nome, remote_jid=remote_jid, text_msg=menu)
