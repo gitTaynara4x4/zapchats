@@ -88,18 +88,37 @@ except Exception:
 
 
 def _is_deadlock_error(e: Exception) -> bool:
+    """
+    Detecta APENAS deadlock real.
+    Não trata statement timeout como deadlock.
+    """
     base = getattr(e, "orig", e)
     msg = str(base).lower()
 
     if _PGDeadlock and isinstance(base, _PGDeadlock):
         return True
+
+    return "deadlock detected" in msg
+
+
+def _is_timeout_error(e: Exception) -> bool:
+    """
+    Detecta timeout/cancelamento de statement.
+    Separado de deadlock para o caller decidir se quer retry.
+    """
+    base = getattr(e, "orig", e)
+    msg = str(base).lower()
+
     if _PGQueryCanceled and isinstance(base, _PGQueryCanceled):
         return True
 
     return (
-        "deadlock detected" in msg
-        or "statement timeout" in msg
+        "statement timeout" in msg
         or "canceling statement due to statement timeout" in msg
+        or "querycanceled" in msg
+        or "query canceled" in msg
+        or "lock timeout" in msg
+        or "canceling statement due to lock timeout" in msg
     )
 
 
@@ -126,11 +145,46 @@ def _release_hist_lock(db: Session, empresa_id: int, instancia_id: int) -> None:
 
 
 async def _retry_deadlock(db: Session, func, *, attempts: int = 5, base_delay: float = 0.02):
+    """
+    Retry APENAS para deadlock real.
+    """
     for i in range(attempts):
         try:
             return func()
         except Exception as e:
             if _is_deadlock_error(e):
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                wait = base_delay * (2 ** i) + random.random() * 0.01
+                await asyncio.sleep(wait)
+                continue
+            raise
+
+
+async def _retry_db_transient(
+    db: Session,
+    func,
+    *,
+    attempts: int = 5,
+    base_delay: float = 0.02,
+    retry_on_timeout: bool = True,
+    retry_on_deadlock: bool = True,
+):
+    """
+    Retry genérico para erros transitórios de banco.
+    Útil quando quiser tratar deadlock e timeout separadamente sem duplicar código.
+    """
+    for i in range(attempts):
+        try:
+            return func()
+        except Exception as e:
+            is_dead = _is_deadlock_error(e)
+            is_time = _is_timeout_error(e)
+
+            should_retry = (retry_on_deadlock and is_dead) or (retry_on_timeout and is_time)
+            if should_retry:
                 try:
                     db.rollback()
                 except Exception:
@@ -317,7 +371,9 @@ def _log_skip(why: str, **ctx):
 # =========================
 # ACK helpers
 # =========================
-ACK_NONE=0; ACK_DELIVERED=1; ACK_READ=2
+ACK_NONE = 0
+ACK_DELIVERED = 1
+ACK_READ = 2
 
 def _ack_from_status(status_or_ack) -> int:
     if status_or_ack is None:
@@ -410,8 +466,8 @@ def _resolve_counterparty_num_1to1(data: dict, me_num: str | None) -> tuple[str 
     )
 
     def _first_str_from_obj(o: dict) -> str | None:
-        prefer_keys = ["phone","phoneNumber","number","senderPn","senderpn"]
-        jid_like_keys = ["user","from","peer","participant","jid","wid","remoteJid","remote_jid","chatId","chat_id"]
+        prefer_keys = ["phone", "phoneNumber", "number", "senderPn", "senderpn"]
+        jid_like_keys = ["user", "from", "peer", "participant", "jid", "wid", "remoteJid", "remote_jid", "chatId", "chat_id"]
         fallback_keys = ["id"]
 
         for key_group in (prefer_keys, jid_like_keys, fallback_keys):
@@ -559,6 +615,7 @@ def upsert_cliente(
         pass
 
     return None
+
 
 def _fetch_cliente(db: Session, cliente_id: int) -> models.Cliente | None:
     try:
@@ -740,7 +797,7 @@ def _resolve_remote_jid(inst_id: str, raw_remote: str | None) -> str | None:
                 if isinstance(js, list):
                     items = js
                 elif isinstance(js, dict):
-                    for k in ("chats","items","data","result","rows","list","payload","store"):
+                    for k in ("chats", "items", "data", "result", "rows", "list", "payload", "store"):
                         v = js.get(k)
                         if isinstance(v, list):
                             items = v
@@ -760,7 +817,7 @@ def _resolve_remote_jid(inst_id: str, raw_remote: str | None) -> str | None:
                     if isinstance(js, list):
                         items = js
                     elif isinstance(js, dict):
-                        for k in ("chats","items","data","result","rows","list","payload","store"):
+                        for k in ("chats", "items", "data", "result", "rows", "list", "payload", "store"):
                             v = js.get(k)
                             if isinstance(v, list):
                                 items = v
@@ -780,7 +837,7 @@ def _resolve_remote_jid(inst_id: str, raw_remote: str | None) -> str | None:
                     if isinstance(js, list):
                         items = js
                     elif isinstance(js, dict):
-                        for k in ("contacts","items","data","result","rows","list","payload","store"):
+                        for k in ("contacts", "items", "data", "result", "rows", "list", "payload", "store"):
                             v = js.get(k)
                             if isinstance(v, list):
                                 items = v
@@ -985,7 +1042,7 @@ def _evo_connect(instance: str) -> dict:
         return {}
     try:
         r = requests.get(f"{EVOLUTION_URL}/instance/connect/{instance}", headers=HEADERS, timeout=25)
-        if r.ok and "application/json" in (r.headers.get("content-type","")):
+        if r.ok and "application/json" in (r.headers.get("content-type", "")):
             return r.json() or {}
     except Exception:
         pass
@@ -1101,26 +1158,26 @@ def _is_textual_content(s: str | None) -> bool:
 # Exports úteis p/ handlers
 # =========================
 __all__ = [
-    "EVOLUTION_URL","EVOLUTION_KEY","HEADERS",
-    "SYNC_CONTACTS_ON_CONNECT","SYNC_CHATS_ON_CONNECT","ENABLE_MESSAGES_SET",
+    "EVOLUTION_URL", "EVOLUTION_KEY", "HEADERS",
+    "SYNC_CONTACTS_ON_CONNECT", "SYNC_CHATS_ON_CONNECT", "ENABLE_MESSAGES_SET",
     "EVOLUTION_FORCE_QR_ON_WS",
-    "HISTORY_LIMIT_HOURS","HISTORY_IGNORE_AFTER_DONE_MIN",
-    "ALLOW_HISTORY_7D","HISTORY_MAX_IMPORT","HISTORY_BATCH_COMMIT","HISTORY_SLEEP_EVERY","DISABLE_MEDIA_ON_HISTORY",
-    "FULL_EVENTS_WS","FULL_EVENTS_RABBIT","RABBIT_EXCHANGE","RABBIT_BINDINGS",
-    "LOG","_short","_log_ctx","_log_skip",
-    "record_rabbit_event","get_rabbit_monitor","RABBIT_MONITOR",
-    "EvoEvent","HANDLERS","handler",
-    "_now_utc","_server_ts_ms","_to_dt_utc","_iso_utc","_iso_local","_int_unix",
+    "HISTORY_LIMIT_HOURS", "HISTORY_IGNORE_AFTER_DONE_MIN",
+    "ALLOW_HISTORY_7D", "HISTORY_MAX_IMPORT", "HISTORY_BATCH_COMMIT", "HISTORY_SLEEP_EVERY", "DISABLE_MEDIA_ON_HISTORY",
+    "FULL_EVENTS_WS", "FULL_EVENTS_RABBIT", "RABBIT_EXCHANGE", "RABBIT_BINDINGS",
+    "LOG", "_short", "_log_ctx", "_log_skip",
+    "record_rabbit_event", "get_rabbit_monitor", "RABBIT_MONITOR",
+    "EvoEvent", "HANDLERS", "handler",
+    "_now_utc", "_server_ts_ms", "_to_dt_utc", "_iso_utc", "_iso_local", "_int_unix",
     "_invalidate_emp_cache",
-    "ACK_NONE","ACK_DELIVERED","ACK_READ","_ack_from_status",
-    "_jid_strip_device","_is_lid_jid","normalizar_telefone","_remote_to_num","_resolve_counterparty_num_1to1","formatar_telefone_br",
-    "_lid_map_get","_lid_map_set","_lid_pend_append","_lid_pend_takeall","_resolve_remote_jid",
-    "_try_acquire_hist_lock","_release_hist_lock","_retry_deadlock","_is_deadlock_error",
-    "upsert_cliente","_fetch_cliente",
-    "_HAS_MSG_ATD_FIELD","_get_or_open_atendimento","_status_token",
-    "_inst_from","_get_inst_row","_empresa_id_by_inst","_me_number_by_inst","_carimbar_inst",
-    "_emit_qr","_extract_qr_fields","_evo_expand_websocket","_evo_expand_rabbit",
-    "_evo_connect","_evo_get_base64_media","_download_media_bytes","_save_midia_db",
+    "ACK_NONE", "ACK_DELIVERED", "ACK_READ", "_ack_from_status",
+    "_jid_strip_device", "_is_lid_jid", "normalizar_telefone", "_remote_to_num", "_resolve_counterparty_num_1to1", "formatar_telefone_br",
+    "_lid_map_get", "_lid_map_set", "_lid_pend_append", "_lid_pend_takeall", "_resolve_remote_jid",
+    "_try_acquire_hist_lock", "_release_hist_lock", "_retry_deadlock", "_retry_db_transient", "_is_deadlock_error", "_is_timeout_error",
+    "upsert_cliente", "_fetch_cliente",
+    "_HAS_MSG_ATD_FIELD", "_get_or_open_atendimento", "_status_token",
+    "_inst_from", "_get_inst_row", "_empresa_id_by_inst", "_me_number_by_inst", "_carimbar_inst",
+    "_emit_qr", "_extract_qr_fields", "_evo_expand_websocket", "_evo_expand_rabbit",
+    "_evo_connect", "_evo_get_base64_media", "_download_media_bytes", "_save_midia_db",
     "_is_textual_content",
     "cancel_auto_cleanup",
 ]

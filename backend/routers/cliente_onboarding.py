@@ -24,10 +24,7 @@ except Exception:
     SessionLocal = None
 
 from backend import models
-# ✅ usa fonte única de plano/limite
 from backend.utils.plans import PLAN_LIMITS, effective_tier as plans_effective_tier
-
-# 🔒 auth para travar empresa
 from backend.routers.auth import get_current_user
 
 router = APIRouter(tags=["Onboarding"])  # montado como /api/onboarding/...
@@ -162,11 +159,10 @@ def _analisar_saude_mensagens(msgs: list[models.Mensagem]) -> dict:
     """
     total = len(msgs)
     if total == 0:
-        score = 0
         return {
-            "score": score,
-            "status": _score_to_status(score),
-            "label": _score_to_label(score),
+            "score": 0,
+            "status": "boa",
+            "label": "Boa",
             "resumo": "Ainda não há mensagens suficientes para analisar esta instância.",
             "motivos": [],
             "metricas": {
@@ -296,7 +292,6 @@ def _analisar_saude_mensagens(msgs: list[models.Mensagem]) -> dict:
 # Listas de eventos
 # =============================
 def _events_minimal() -> List[str]:
-    # ← lista "normal" que você usa no dia-a-dia
     return [
         "MESSAGES_SET", "MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE",
         "SEND_MESSAGE",
@@ -307,13 +302,11 @@ def _events_minimal() -> List[str]:
 
 
 def _ws_events_initial() -> List[str]:
-    # ← durante o onboarding, PARA NÃO TRAVAR:
-    #    WebSocket só com QR e estado de conexão
     return ["QRCODE_UPDATED", "CONNECTION_UPDATE"]
 
 
 # =============================
-# Evolution – criação e assinatura inicial (anti-tempestade)
+# Evolution – criação e assinatura inicial
 # =============================
 def _evo_create_instance(instance: str, use_pairing: bool) -> None:
     if not (EVOLUTION_URL and EVOLUTION_KEY):
@@ -323,14 +316,12 @@ def _evo_create_instance(instance: str, use_pairing: bool) -> None:
         "instanceName": instance,
         "integration": "WHATSAPP-BAILEYS",
         "qrcode": (not use_pairing),
-        # Rabbit começa SEM eventos (evita tsunami ao ler QR)
         "rabbitmq": {
             "enabled": True,
             "exchange": os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange"),
             "bindings": [b.strip() for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#").split(",") if b.strip()],
             "events": [],
         },
-        # WS começa só com QR/CONNECTION (evita chuva)
         "websocket": {
             "enabled": True,
             "events": _ws_events_initial(),
@@ -346,7 +337,6 @@ def _evo_create_instance(instance: str, use_pairing: bool) -> None:
 
 
 def _evo_set_rabbit_initial(instance: str) -> None:
-    # durante o onboarding: rabbit SEM eventos
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return
     s = _http()
@@ -365,7 +355,6 @@ def _evo_set_rabbit_initial(instance: str) -> None:
 
 
 def _evo_set_websocket_initial(instance: str) -> None:
-    # durante o onboarding: ws só com QR/CONNECTION
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return
     s = _http()
@@ -377,7 +366,6 @@ def _evo_set_websocket_initial(instance: str) -> None:
 
 
 def _evo_connect(instance: str, number_digits: str | None) -> dict:
-    """Passa número só-dígitos na query."""
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return {}
     s = _http()
@@ -397,7 +385,6 @@ def _evo_try_refresh_qr(instance: str) -> dict:
     return _evo_connect(instance, None)
 
 
-# ========= NÃO deletar a instância na Evolution no cleanup =========
 def _evo_delete_instance(instance: str) -> None:
     if not (EVOLUTION_URL and EVOLUTION_KEY and instance):
         return
@@ -419,14 +406,13 @@ def _evo_delete_instance(instance: str) -> None:
 
 
 # =============================
-# Auto-cleanup (apenas BD) — BLINDADO
+# Auto-cleanup (apenas BD)
 # =============================
 _CLEANUP_TIMERS: Dict[str, threading.Timer] = {}
 _CLEANUP_SECONDS = int(os.getenv("ONBOARDING_CLEANUP_SECONDS", "120"))
 
 
 def _has_bound_data(db: Session, inst_row: models.EmpresaInstancia) -> bool:
-    """Há qualquer dado vinculando esta instância? (mensagens, clientes, grupos, mídias)"""
     iid = int(inst_row.id)
     if db.query(models.Mensagem.id).filter_by(instancia_id=iid).limit(1).first():
         return True
@@ -440,18 +426,10 @@ def _has_bound_data(db: Session, inst_row: models.EmpresaInstancia) -> bool:
 
 
 def _was_ever_connected(inst_row: models.EmpresaInstancia) -> bool:
-    """Algum sinal de conexão prévia / pareamento?"""
     return bool(inst_row.connected or inst_row.numero_instancia or inst_row.last_seen)
 
 
 def _cleanup_if_still_disconnected(instance: str):
-    """
-    Só apaga se:
-      - a instância ainda existir,
-      - estiver desconectada,
-      - E NÃO houver qualquer dado vinculado (mensagens, mídias, clientes, grupos, etc.).
-    Caso contrário, não faz nada.
-    """
     if SessionLocal is not None:
         try:
             db: Session = SessionLocal()  # type: ignore
@@ -463,13 +441,11 @@ def _cleanup_if_still_disconnected(instance: str):
                 if not row:
                     return
 
-                # Se já conectou alguma vez, NUNCA apagar em cleanup
                 if bool(getattr(row, "connected", False)):
                     return
 
                 instancia_id = int(row.id)
 
-                # Verifica dados vinculados
                 has_data = False
                 checks = [
                     "SELECT 1 FROM mensagens WHERE instancia_id = :iid LIMIT 1",
@@ -498,7 +474,6 @@ def _cleanup_if_still_disconnected(instance: str):
                 if has_data:
                     return
 
-                # Ainda desconectada e sem dados → pode excluir com segurança
                 if not bool(getattr(row, "connected", False)):
                     db.delete(row)
                     db.commit()
@@ -542,15 +517,6 @@ def conectar(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """
-    Fluxo:
-      1) Checa limite (conta apenas connected=True).
-      2) Reaproveita pendente do mesmo número (somente dígitos).
-      3) Garante Evolution (Rabbit/WS) — MODO INICIAL ENXUTO.
-      4) Cria/atualiza row (connected=False).
-      5) Connect → QR (WS manda QRCODE_UPDATED também).
-      6) Agenda cleanup (apenas BD, blindado).
-    """
     if not EVOLUTION_URL or not EVOLUTION_KEY:
         raise HTTPException(500, "Evolution API não configurada (EVOLUTION_URL/KEY).")
 
@@ -791,7 +757,7 @@ def consultar_saude_numero(
     Consulta sob demanda a saúde do número:
     - busca últimas mensagens da instância
     - calcula score de risco
-    - salva em empresas_instancias.score
+    - salva o resultado completo na instância
     - devolve resumo para o modal do front
     """
     emp_user = _empresa_do_user(user)
@@ -820,8 +786,18 @@ def consultar_saude_numero(
     ).all()
 
     analise = _analisar_saude_mensagens(msgs)
+    agora = datetime.now(timezone.utc)
 
-    inst.score = int(analise["score"])
+    # salva tudo na instância para outros funcionários visualizarem também
+    inst.score = analise["score"]
+    inst.score_status = analise["status"]
+    inst.score_label = analise["label"]
+    inst.score_resumo = analise["resumo"]
+    inst.score_motivos = analise["motivos"]
+    inst.score_metricas = analise["metricas"]
+    inst.score_recomendacoes = analise["recomendacoes"]
+    inst.score_atualizado_em = agora
+
     db.add(inst)
     db.commit()
     db.refresh(inst)
@@ -833,9 +809,16 @@ def consultar_saude_numero(
         "apelido": inst.apelido,
         "numero": inst.numero_instancia,
         "score": inst.score,
+        "score_status": inst.score_status,
+        "score_label": inst.score_label,
+        "score_resumo": inst.score_resumo,
+        "score_motivos": inst.score_motivos,
+        "score_metricas": inst.score_metricas,
+        "score_recomendacoes": inst.score_recomendacoes,
+        "score_atualizado_em": inst.score_atualizado_em.isoformat() if inst.score_atualizado_em else None,
         "saude": {
             **analise,
-            "consultado_em": datetime.now(timezone.utc).isoformat(),
+            "consultado_em": agora.isoformat(),
         },
     }
 

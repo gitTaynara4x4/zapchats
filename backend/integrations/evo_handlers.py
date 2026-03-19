@@ -9,13 +9,18 @@ from datetime import timedelta
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text, bindparam
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from backend.database import SessionLocal
 from backend import models
 from backend.websocket_manager import conexoes_ativas
 from backend.integrations.qrcode import qr_force_lock_acquire
 from backend.routers.chatbot_setores import triagem_handle_inbound
+
+try:
+    from backend.routers.chatbot_setores import auto_messages_handle_inbound
+except ImportError:
+    auto_messages_handle_inbound = None
 
 from .evo_handlers_extract import (
     extract_text_from_baileys,
@@ -173,6 +178,247 @@ def _evo_get_group_subject(instance_name: str, group_jid: str) -> str | None:
         return None
     except Exception:
         return None
+
+
+# =========================
+# HELPERS LOCAIS (UPSERT 1:1)
+# =========================
+def _is_statement_timeout_error(e: Exception) -> bool:
+    base = getattr(e, "orig", e)
+    msg = str(base).lower()
+    return (
+        "statement timeout" in msg
+        or "canceling statement due to statement timeout" in msg
+        or "querycanceled" in msg
+        or "query canceled" in msg
+        or "lock timeout" in msg
+    )
+
+
+async def _insert_mensagem_11_with_retry(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente_id: int,
+    conteudo: str,
+    tipo: str,
+    lida: bool,
+    ack: int | None,
+    timestamp,
+    msg_id: str,
+    instancia_id: int,
+    atendimento_id: int | None,
+    idx: int,
+) -> tuple[int | None, bool]:
+    """
+    Insere mensagem 1:1 com deduplicação por (instancia_id, msg_id),
+    retry curto para timeout/lock timeout, e RETURNING id.
+    """
+    sql = text(
+        """
+        INSERT INTO mensagens
+            (empresa_id, cliente_id, conteudo, tipo, lida, ack, timestamp, msg_id, instancia_id, atendimento_id)
+        VALUES
+            (:empresa_id, :cliente_id, :conteudo, :tipo, :lida, :ack, :timestamp, :msg_id, :instancia_id, :atendimento_id)
+        ON CONFLICT (instancia_id, msg_id)
+        DO NOTHING
+        RETURNING id
+        """
+    )
+
+    params = {
+        "empresa_id": empresa_id,
+        "cliente_id": cliente_id,
+        "conteudo": conteudo,
+        "tipo": tipo,
+        "lida": bool(lida),
+        "ack": ack,
+        "timestamp": timestamp,
+        "msg_id": str(msg_id),
+        "instancia_id": instancia_id,
+        "atendimento_id": atendimento_id,
+    }
+
+    for tentativa in range(3):
+        try:
+            row = db.execute(sql, params).fetchone()
+            if row:
+                return int(row[0]), True
+            return None, False
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
+            if _is_statement_timeout_error(e) and tentativa < 2:
+                _log_ctx(
+                    "[UPsert][retry-timeout]",
+                    idx=idx,
+                    msg_id=msg_id,
+                    tentativa=(tentativa + 1),
+                    err=str(e),
+                )
+                await asyncio.sleep(0.15 * (tentativa + 1))
+                continue
+            raise
+
+
+async def _run_triagem_pos_commit(
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    telefone: str,
+    conteudo: str,
+    direcao: str,
+    remote_jid: str,
+):
+    if not conteudo or direcao != "entrada" or not _is_textual_content(conteudo):
+        return
+
+    with SessionLocal() as db_triagem:
+        try:
+            if callable(auto_messages_handle_inbound):
+                auto_res = auto_messages_handle_inbound(
+                    db_triagem,
+                    empresa_id=empresa_id,
+                    instancia_id=instancia_id,
+                    telefone_digits=telefone,
+                    texto=conteudo,
+                    direction=direcao,
+                    remote_jid=remote_jid,
+                )
+                LOG(f"[CHATBOT][auto_messages] res={auto_res}")
+
+                auto_action = str((auto_res or {}).get("action") or "")
+                if auto_action in {"sent_off_hours", "sent_welcome"}:
+                    try:
+                        db_triagem.commit()
+                    except Exception:
+                        try:
+                            db_triagem.rollback()
+                        except Exception:
+                            pass
+                    return
+
+            triagem_res = triagem_handle_inbound(
+                db_triagem,
+                empresa_id=empresa_id,
+                instancia_id=instancia_id,
+                telefone_digits=telefone,
+                texto=conteudo,
+                direction=direcao,
+                remote_jid=remote_jid,
+            )
+            try:
+                db_triagem.commit()
+            except Exception:
+                try:
+                    db_triagem.rollback()
+                except Exception:
+                    pass
+            LOG(f"[CHATBOT][triagem] res={triagem_res}")
+        except Exception as e:
+            try:
+                db_triagem.rollback()
+            except Exception:
+                pass
+            LOG(f"[CHATBOT] erro ao processar inbound do chatbot: {e}")
+
+
+async def _save_media_pos_commit_11(
+    *,
+    inst_id: str,
+    empresa_id: int,
+    cli_id: int,
+    msg_db_id: int,
+    msg_id: str | None,
+    media_meta: dict,
+    instancia_db_id: int,
+    idx: int,
+):
+    with SessionLocal() as db_media:
+        try:
+            raw = None
+            real_name = media_meta.get("filename") or (f"{msg_id}.bin" if msg_id else "file")
+            real_ct = media_meta.get("mimetype")
+            real_len = None
+
+            if msg_id:
+                try:
+                    conv = True if (media_meta.get("tipo") == "video") else None
+                    evo_raw, evo_name, evo_ct, evo_len = _evo_get_base64_media(
+                        inst_id, msg_id, convert_to_mp4=conv
+                    )
+                    raw, real_len = evo_raw, evo_len
+                    if evo_ct:
+                        real_ct = evo_ct
+                    if evo_name:
+                        real_name = evo_name
+                except Exception as e:
+                    _log_ctx("[UPsert][midia] base64 falhou", idx=idx, msg_id=msg_id, err=str(e))
+
+            if raw is None:
+                b64 = media_meta.get("base64")
+                if b64:
+                    from .evo_handlers_extract import _b64_to_bytes
+                    raw, mt_from = _b64_to_bytes(b64)
+                    if mt_from:
+                        real_ct = mt_from
+                    real_len = len(raw) if raw else None
+
+            if raw is None and msg_id:
+                try:
+                    dl_bytes, dl_name, dl_ct, dl_len = _download_media_bytes(inst_id, msg_id, None)
+                    raw, real_len = dl_bytes, dl_len
+                    if dl_ct and dl_ct.lower() != "application/octet-stream":
+                        real_ct = dl_ct
+                    if dl_name and not dl_name.lower().endswith(".enc"):
+                        real_name = dl_name
+                except Exception as e:
+                    _log_ctx("[UPsert][midia] download falhou", idx=idx, msg_id=msg_id, err=str(e))
+
+            if raw:
+                real_ct_norm = normalize_mimetype(media_meta["tipo"], real_name, real_ct)
+                _save_midia_db(
+                    db_media,
+                    empresa_id=empresa_id,
+                    cliente_id=cli_id,
+                    mensagem_id=msg_db_id,
+                    tipo=media_meta["tipo"],
+                    filename=real_name or "file",
+                    mimetype_=real_ct_norm,
+                    raw=raw,
+                    url_origem=None,
+                    content_length=real_len,
+                    instancia_id=instancia_db_id,
+                )
+                try:
+                    db_media.commit()
+                except Exception:
+                    try:
+                        db_media.rollback()
+                    except Exception:
+                        pass
+                    raise
+
+                _log_ctx(
+                    "[UPsert][midia] salva",
+                    idx=idx,
+                    msg_id=msg_id,
+                    mensagem_id=msg_db_id,
+                    tipo=media_meta["tipo"],
+                    name=real_name,
+                    mimetype=real_ct_norm,
+                    size=real_len,
+                    instancia_id=instancia_db_id,
+                )
+        except Exception as e:
+            try:
+                db_media.rollback()
+            except Exception:
+                pass
+            _log_ctx("[UPsert][midia] erro ao salvar", idx=idx, msg_id=msg_id, err=str(e))
 
 
 # =========================
@@ -979,6 +1225,7 @@ async def on_messages_upsert(inst_id: str, data):
                     continue
 
                 atendimento = None
+                atendimento_id = None
                 if _HAS_MSG_ATD_FIELD:
                     try:
                         atendimento = _get_or_open_atendimento(
@@ -990,6 +1237,7 @@ async def on_messages_upsert(inst_id: str, data):
                             ts_dt=ts_msg,
                             operador_id=None,
                         )
+                        atendimento_id = getattr(atendimento, "id", None)
                     except Exception as e:
                         LOG(f"[UPsert][erro_atendimento] idx={idx} msg_id={msg_id} err={e}")
                         try:
@@ -997,46 +1245,40 @@ async def on_messages_upsert(inst_id: str, data):
                         except Exception:
                             pass
                         atendimento = None
+                        atendimento_id = None
 
                 msg_db_id = None
                 inserted_11 = False
 
                 if msg_id:
                     try:
-                        sql = text(
-                            """
-                            INSERT INTO mensagens
-                                (empresa_id, cliente_id, conteudo, tipo, lida, ack, timestamp, msg_id, instancia_id, atendimento_id)
-                            VALUES
-                                (:empresa_id, :cliente_id, :conteudo, :tipo, :lida, :ack, :timestamp, :msg_id, :instancia_id, :atendimento_id)
-                            ON CONFLICT (empresa_id, cliente_id, msg_id)
-                            WHERE msg_id IS NOT NULL
-                            DO NOTHING
-                            RETURNING id
-                            """
+                        msg_db_id, inserted_11 = await _insert_mensagem_11_with_retry(
+                            db,
+                            empresa_id=empresa_id,
+                            cliente_id=cli_id,
+                            conteudo=conteudo,
+                            tipo=direcao,
+                            lida=bool(from_me),
+                            ack=ack_value,
+                            timestamp=ts_msg,
+                            msg_id=str(msg_id),
+                            instancia_id=inst.id,
+                            atendimento_id=atendimento_id,
+                            idx=idx,
                         )
 
-                        row = db.execute(
-                            sql,
-                            {
-                                "empresa_id": empresa_id,
-                                "cliente_id": cli_id,
-                                "conteudo": conteudo,
-                                "tipo": direcao,
-                                "lida": bool(from_me),
-                                "ack": ack_value,
-                                "timestamp": ts_msg,
-                                "msg_id": str(msg_id),
-                                "instancia_id": inst.id,
-                                "atendimento_id": getattr(atendimento, "id", None),
-                            },
-                        ).fetchone()
+                        if inserted_11 and msg_db_id:
+                            try:
+                                db.commit()
+                            except Exception as e:
+                                try:
+                                    db.rollback()
+                                except Exception:
+                                    pass
+                                LOG(f"[UPsert][commit-msg-erro] idx={idx} msg_id={msg_id} err={e}")
+                                continue
 
-                        if row:
-                            msg_db_id = int(row[0])
                             novas += 1
-                            inserted_11 = True
-
                             _log_ctx(
                                 "[UPsert][saved-upsert]",
                                 idx=idx,
@@ -1078,6 +1320,17 @@ async def on_messages_upsert(inst_id: str, data):
                         db.add(msg_model)
                         db.flush()
                         msg_db_id = msg_model.id
+
+                        try:
+                            db.commit()
+                        except Exception as e:
+                            try:
+                                db.rollback()
+                            except Exception:
+                                pass
+                            LOG(f"[UPsert][commit-msg-sem-id-erro] idx={idx} err={e}")
+                            continue
+
                         novas += 1
                         inserted_11 = True
 
@@ -1098,107 +1351,40 @@ async def on_messages_upsert(inst_id: str, data):
                             pass
                         continue
 
-                # ✅ triagem só depois que a msg realmente foi salva como nova
-                if inserted_11:
+                # pós-commit do 1:1: triagem, mídia e WS fora da transação principal
+                if inserted_11 and msg_db_id:
+                    if (not from_me) and _is_textual_content(conteudo):
+                        await _run_triagem_pos_commit(
+                            empresa_id=empresa_id,
+                            instancia_id=inst.id,
+                            telefone=telefone,
+                            conteudo=conteudo,
+                            direcao=direcao,
+                            remote_jid=remote_jid,
+                        )
+
+                    if media_meta:
+                        await _save_media_pos_commit_11(
+                            inst_id=inst_id,
+                            empresa_id=empresa_id,
+                            cli_id=cli_id,
+                            msg_db_id=msg_db_id,
+                            msg_id=(str(msg_id) if msg_id else None),
+                            media_meta=media_meta,
+                            instancia_db_id=inst.id,
+                            idx=idx,
+                        )
+
                     try:
-                        if (not from_me) and _is_textual_content(conteudo):
-                            triagem_res = triagem_handle_inbound(
-                                db,
-                                empresa_id=empresa_id,
-                                instancia_id=inst.id,
-                                telefone_digits=telefone,
-                                texto=conteudo,
-                                direction=direcao,
-                                remote_jid=remote_jid,
-                            )
-                            LOG(f"[CHATBOT][triagem] res={triagem_res}")
-                    except Exception as e:
-                        try:
-                            db.rollback()
-                        except Exception:
-                            pass
-                        LOG(f"[CHATBOT][triagem] erro ao processar msg simples: {e}")
-
-                if inserted_11 and msg_db_id and media_meta:
-                    try:
-                        raw = None
-                        real_name = media_meta.get("filename") or (f"{msg_id}.bin" if msg_id else "file")
-                        real_ct = media_meta.get("mimetype")
-                        real_len = None
-
-                        if msg_id:
-                            try:
-                                conv = True if (media_meta.get("tipo") == "video") else None
-                                evo_raw, evo_name, evo_ct, evo_len = _evo_get_base64_media(
-                                    inst_id, msg_id, convert_to_mp4=conv
-                                )
-                                raw, real_len = evo_raw, evo_len
-                                if evo_ct:
-                                    real_ct = evo_ct
-                                if evo_name:
-                                    real_name = evo_name
-                            except Exception as e:
-                                _log_ctx("[UPsert][midia] base64 falhou", idx=idx, msg_id=msg_id, err=str(e))
-
-                        if raw is None:
-                            b64 = media_meta.get("base64")
-                            if b64:
-                                from .evo_handlers_extract import _b64_to_bytes
-                                raw, mt_from = _b64_to_bytes(b64)
-                                if mt_from:
-                                    real_ct = mt_from
-                                real_len = len(raw) if raw else None
-
-                        if raw is None and msg_id:
-                            try:
-                                dl_bytes, dl_name, dl_ct, dl_len = _download_media_bytes(inst_id, msg_id, None)
-                                raw, real_len = dl_bytes, dl_len
-                                if dl_ct and dl_ct.lower() != "application/octet-stream":
-                                    real_ct = dl_ct
-                                if dl_name and not dl_name.lower().endswith(".enc"):
-                                    real_name = dl_name
-                            except Exception as e:
-                                _log_ctx("[UPsert][midia] download falhou", idx=idx, msg_id=msg_id, err=str(e))
-
-                        if raw:
-                            real_ct_norm = normalize_mimetype(media_meta["tipo"], real_name, real_ct)
-                            _save_midia_db(
-                                db,
-                                empresa_id=empresa_id,
-                                cliente_id=cli_id,
-                                mensagem_id=msg_db_id,
-                                tipo=media_meta["tipo"],
-                                filename=real_name or "file",
-                                mimetype_=real_ct_norm,
-                                raw=raw,
-                                url_origem=None,
-                                content_length=real_len,
-                                instancia_id=inst.id,
-                            )
-                            _log_ctx(
-                                "[UPsert][midia] salva",
-                                idx=idx,
-                                msg_id=msg_id,
-                                mensagem_id=msg_db_id,
-                                tipo=media_meta["tipo"],
-                                name=real_name,
-                                mimetype=real_ct_norm,
-                                size=real_len,
-                                instancia_id=inst.id,
-                            )
-                    except Exception as e:
-                        _log_ctx("[UPsert][midia] erro ao salvar", idx=idx, msg_id=msg_id, err=str(e))
-
-                if inserted_11:
-                    try:
-                        cliente = _fetch_cliente(db, cli_id)
+                        with SessionLocal() as db_ws:
+                            cliente = _fetch_cliente(db_ws, cli_id)
 
                         ws_payload = {
                             "empresa_id": empresa_id,
                             "cliente_id": cli_id,
                             "instancia_id": inst.id,
                             "instance_name": getattr(inst, "instance_name", None),
-                            "atendimento_id": getattr(atendimento, "id", None),
+                            "atendimento_id": atendimento_id,
                             "telefone": formatar_telefone_br(telefone),
                             "avatar_url": getattr(cliente, "avatar_url", None) if cliente else None,
                             "push_name": getattr(cliente, "nome_whatsapp", None) if cliente else None,
@@ -1216,16 +1402,10 @@ async def on_messages_upsert(inst_id: str, data):
                     except Exception as e:
                         LOG(f"[UPsert][ws] falha ao emitir: {e}")
 
-                if novas and (novas % max(1, HISTORY_BATCH_COMMIT)) == 0:
                     try:
-                        db.commit()
-                        _log_ctx("[UPsert][commit]", count=novas)
-                    except Exception as e:
-                        try:
-                            db.rollback()
-                        except Exception:
-                            pass
-                        LOG(f"[UPsert][commit-erro] {e}")
+                        _invalidate_emp_cache(empresa_id)
+                    except Exception:
+                        pass
 
                 if (novas % 500) == 0:
                     await asyncio.sleep(0)
@@ -1257,8 +1437,6 @@ async def on_messages_upsert(inst_id: str, data):
         LOG(f"[UPsert] inst={inst_id} novas={novas}")
 
 
-
-        
 @handler(EvoEvent.MESSAGES_DELETE)
 async def on_messages_delete(inst_id: str, data):
     mensagens = extract_messages_any_shape(data)
@@ -1582,7 +1760,7 @@ async def on_messages_set(inst_id: str, data):
                                     instancia_id=inst.id,
                                     telefone_raw=tel_autor,
                                     nome=formatar_telefone_br(tel_autor),
-                                    nome_whatsapp=push_name if 'push_name' in locals() else None,
+                                    nome_whatsapp=None,
                                     avatar_url=None,
                                 )
                             cli_autor_id = await _retry_deadlock(db, _up_autor)
@@ -1711,7 +1889,6 @@ async def on_messages_set(inst_id: str, data):
 
                     from_me = bool(key.get("fromMe", False))
                     conteudo = extract_text_from_baileys(m)
-
                     media_meta = None if DISABLE_MEDIA_ON_HISTORY else extract_media_meta(m)
 
                     def _up():
@@ -1730,7 +1907,7 @@ async def on_messages_set(inst_id: str, data):
                         _log_ctx("[HIST][skip] upsert_cliente None", idx=idx, msg_id=msg_id, telefone=telefone)
                         continue
 
-                    if msg_id and db.query(models.Mensagem.id).filter_by(cliente_id=cli_id, msg_id=msg_id).first():
+                    if msg_id and db.query(models.Mensagem.id).filter_by(instancia_id=inst.id, msg_id=msg_id).first():
                         _log_ctx("[HIST][skip] duplicada (1:1)", idx=idx, msg_id=msg_id, cliente_id=cli_id)
                         continue
 

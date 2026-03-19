@@ -64,15 +64,57 @@ function badgeClassByStatus(status){
   if (s === 'critico') return 'saude-badge--critico';
   if (s === 'alto_risco') return 'saude-badge--alto';
   if (s === 'atencao') return 'saude-badge--atencao';
-  return 'saude-badge--boa';
+  if (s === 'boa') return 'saude-badge--boa';
+  return 'saude-badge--na';
 }
 
-function scoreText(score){
-  const n = Number(score || 0);
-  if (n >= 80) return 'Crítico';
-  if (n >= 60) return 'Alto risco';
-  if (n >= 30) return 'Atenção';
-  return 'Boa';
+function chipClassByStatus(status){
+  const s = String(status || '').toLowerCase();
+  if (s === 'critico') return 'saude-chip-sm--critico';
+  if (s === 'alto_risco') return 'saude-chip-sm--alto';
+  if (s === 'atencao') return 'saude-chip-sm--atencao';
+  if (s === 'boa') return 'saude-chip-sm--boa';
+  return 'saude-chip-sm--na';
+}
+
+function getSaudeVisual(item){
+  const hasSavedAnalysis =
+    !!item?.score_atualizado_em ||
+    !!item?.score_status ||
+    !!item?.saude_status ||
+    !!item?.score_label ||
+    !!item?.saude_label ||
+    item?.score === 0 ||
+    typeof item?.score === 'number';
+
+  if (!hasSavedAnalysis) {
+    return {
+      label: 'Não analisado',
+      status: 'na'
+    };
+  }
+
+  const status = String(
+    item?.score_status ||
+    item?.saude_status ||
+    ''
+  ).toLowerCase();
+
+  const label =
+    item?.score_label ||
+    item?.saude_label ||
+    (
+      status === 'critico' ? 'Crítico' :
+      status === 'alto_risco' ? 'Alto risco' :
+      status === 'atencao' ? 'Atenção' :
+      status === 'boa' ? 'Boa' :
+      'Não analisado'
+    );
+
+  return {
+    label,
+    status: status || 'na'
+  };
 }
 
 function formatMetricValue(v){
@@ -81,13 +123,39 @@ function formatMetricValue(v){
   return String(v);
 }
 
-function formatDateTimeBR(iso){
-  try{
-    if (!iso) return '—';
-    return new Date(iso).toLocaleString('pt-BR');
-  }catch{
-    return String(iso || '—');
+function formatDateTimeBR(value){
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+
+  return new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(d);
+}
+
+function formatRelativeTimeBR(value){
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+
+  const diffMs = d.getTime() - Date.now();
+  const rtf = new Intl.RelativeTimeFormat('pt-BR', { numeric: 'auto' });
+
+  const minutes = Math.round(diffMs / (1000 * 60));
+  const hours = Math.round(diffMs / (1000 * 60 * 60));
+  const days = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+  if (Math.abs(minutes) < 60) {
+    return rtf.format(minutes, 'minute');
   }
+  if (Math.abs(hours) < 24) {
+    return rtf.format(hours, 'hour');
+  }
+  return rtf.format(days, 'day');
 }
 
 // Fail-safe do "prepaint"
@@ -308,9 +376,7 @@ const els = {
   saudeConsultadoEm: $('#saude-consultado-em'),
 };
 
-const modalPanel = $('#modal .modal-panel, #modal .modal-card, #modal .card, #modal > div');
 const modalTitle = $('#modal [data-modal-title], #modal .modal-title, #modal h3, #modal h2');
-
 const setModalTitle = (t) => { if (modalTitle) modalTitle.textContent = t; };
 
 function showModal(){
@@ -418,9 +484,9 @@ function renderSaudeResult(item, payload){
   saudeLoadingTmr = null;
 
   const saude = payload?.saude || {};
-  const score = Number(saude.score || payload?.score || 0);
-  const label = saude.label || scoreText(score);
-  const status = saude.status || 'boa';
+  const score = Number(saude.score ?? payload?.score ?? 0);
+  const label = saude.label || payload?.score_label || 'Não analisado';
+  const status = saude.status || payload?.score_status || 'na';
 
   els.saudeLoading?.classList.add('hidden');
   els.saudeResult?.classList.remove('hidden');
@@ -437,32 +503,50 @@ function renderSaudeResult(item, payload){
     els.saudeLabelBadge.textContent = label;
   }
 
-  if (els.saudeScoreNumber) els.saudeScoreNumber.textContent = String(score);
-  if (els.saudeScoreLine) els.saudeScoreLine.textContent = `Score: ${score}/100`;
-  if (els.saudeResumo) els.saudeResumo.textContent = saude.resumo || 'Sem resumo disponível.';
+  if (els.saudeScoreNumber) els.saudeScoreNumber.textContent = Number.isFinite(score) ? String(score) : '—';
+  if (els.saudeScoreLine) els.saudeScoreLine.textContent = Number.isFinite(score) ? `Score: ${score}/100` : 'Score: —';
+  if (els.saudeResumo) els.saudeResumo.textContent = saude.resumo || payload?.score_resumo || 'Sem resumo disponível.';
 
   fillSaudeList(
     els.saudeMotivos,
-    saude.motivos,
+    saude.motivos || payload?.score_motivos,
     'Nenhum sinal forte de risco foi encontrado nesta análise.'
   );
 
   fillSaudeList(
     els.saudeRecomendacoes,
-    saude.recomendacoes,
+    saude.recomendacoes || payload?.score_recomendacoes,
     'Continue mantendo uma comunicação natural e variada.'
   );
 
-  renderSaudeMetricas(saude.metricas || {});
+  renderSaudeMetricas(saude.metricas || payload?.score_metricas || {});
 
+  const consultadoEm = saude.consultado_em || payload?.score_atualizado_em;
   if (els.saudeConsultadoEm) {
-    els.saudeConsultadoEm.textContent = `Consultado em: ${formatDateTimeBR(saude.consultado_em)}`;
+    if (consultadoEm) {
+      const absoluto = formatDateTimeBR(consultadoEm);
+      const relativo = formatRelativeTimeBR(consultadoEm);
+
+      els.saudeConsultadoEm.textContent = relativo
+        ? `Analisado ${relativo} • ${absoluto}`
+        : `Atualizado em: ${absoluto}`;
+
+      els.saudeConsultadoEm.title = absoluto;
+    } else {
+      els.saudeConsultadoEm.textContent = 'Ainda não há data da última análise.';
+      els.saudeConsultadoEm.removeAttribute('title');
+    }
   }
 
   if (item) {
     item.score = score;
-    item.saude_status = status;
-    item.saude_label = label;
+    item.score_status = status;
+    item.score_label = label;
+    item.score_resumo = saude.resumo || payload?.score_resumo || null;
+    item.score_motivos = saude.motivos || payload?.score_motivos || [];
+    item.score_metricas = saude.metricas || payload?.score_metricas || {};
+    item.score_recomendacoes = saude.recomendacoes || payload?.score_recomendacoes || [];
+    item.score_atualizado_em = consultadoEm || null;
   }
 }
 
@@ -581,7 +665,7 @@ function startStatusLoop(){
   setStatus(items[0], true);
   prep.seqTmr = setInterval(() => {
     prep.seqIdx = (prep.seqIdx + 1) % items.length;
-    setStatus(items[prep.seqIdx], true);
+    setStatus(prep.seq[prep.seqIdx], true);
   }, 4000);
 }
 
@@ -633,8 +717,8 @@ async function showPrepOverlayOneMinute(seconds=60, opts={}){
 function hidePrepOverlay(){
   const ovl = ensureOverlay();
   prep.active = false;
-  clearInterval(prep.tmr);     prep.tmr = null;
-  clearInterval(prep.seqTmr);  prep.seqTmr = null;
+  clearInterval(prep.tmr); prep.tmr = null;
+  clearInterval(prep.seqTmr); prep.seqTmr = null;
   try { prep.anim?.destroy?.(); } catch {}
   prep.anim = null;
   ovl.classList.remove('show');
@@ -717,6 +801,11 @@ function hidePrepOverlay(){
     letter-spacing:.01em;
     border:1px solid transparent;
   }
+  .saude-chip-sm--na{
+    background:rgba(148,163,184,.12);
+    color:#64748b;
+    border-color:rgba(148,163,184,.24);
+  }
   .saude-chip-sm--boa{
     background:rgba(34,197,94,.12);
     color:#15803d;
@@ -737,10 +826,11 @@ function hidePrepOverlay(){
     color:#991b1b;
     border-color:rgba(127,29,29,.22);
   }
+  html.dark .saude-chip-sm--na{ color:#cbd5e1; }
   html.dark .saude-chip-sm--boa{ color:#86efac; }
   html.dark .saude-chip-sm--atencao{ color:#fcd34d; }
   html.dark .saude-chip-sm--alto{ color:#fca5a5; }
-  html.dark .saude-chip-sm--critico{ color:#fca5a5; }
+  html.dark .saude-chip-sm--critico{ color:#fecaca; }
 
   #sync-overlay{
     position:fixed;
@@ -852,15 +942,15 @@ function rowHTML(item, planLabel){
   const statusCls = item.connected ? 'st-dot--on' : 'st-dot--off';
   const status = `<span class="st-dot ${statusCls} js-status-dot" data-inst="${inst}" title="${item.connected ? 'Ativo' : 'Inativo'}"></span>`;
 
-  const saudeClass = (() => {
-    const s = String(item.saude_status || '').toLowerCase();
-    if (s === 'critico') return 'saude-chip-sm--critico';
-    if (s === 'alto_risco') return 'saude-chip-sm--alto';
-    if (s === 'atencao') return 'saude-chip-sm--atencao';
-    return 'saude-chip-sm--boa';
-  })();
+  const saude = getSaudeVisual(item);
+  const saudeClass = chipClassByStatus(saude.status);
+  const saudeLabel = htmlEscape(saude.label);
 
-  const saudeLabel = htmlEscape(item.saude_label || scoreText(item.score || 0));
+  const atualizadoEm = item?.score_atualizado_em || null;
+  const absoluto = atualizadoEm ? formatDateTimeBR(atualizadoEm) : '';
+  const chipTitle = atualizadoEm
+    ? `Analisado em ${absoluto}`
+    : 'Ainda não analisado';
 
   const menuItems = [];
   menuItems.push('<button class="kebab-item js-saude">Saúde do Número</button>');
@@ -875,7 +965,7 @@ function rowHTML(item, planLabel){
       <td class="py-2">
         <div class="saude-inline">
           ${status}
-          <span class="saude-chip-sm ${saudeClass}">${saudeLabel}</span>
+          <span class="saude-chip-sm ${saudeClass}" title="${htmlEscape(chipTitle)}">${saudeLabel}</span>
         </div>
       </td>
       <td class="py-2 text-right">
@@ -1055,9 +1145,15 @@ async function loadWhatsAppStatus(){
           numero_instancia: i.numero_instancia || '',
           connected: isConnectedPayload(i),
           last_seen: i.last_seen || null,
-          score: Number(i.score || 0),
-          saude_status: i.saude_status || '',
-          saude_label: i.saude_label || ''
+
+          score: (i.score === null || typeof i.score === 'undefined') ? null : Number(i.score),
+          score_status: i.score_status || null,
+          score_label: i.score_label || null,
+          score_resumo: i.score_resumo || null,
+          score_motivos: i.score_motivos || [],
+          score_metricas: i.score_metricas || {},
+          score_recomendacoes: i.score_recomendacoes || [],
+          score_atualizado_em: i.score_atualizado_em || null
         }))
       : [];
 

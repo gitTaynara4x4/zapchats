@@ -191,7 +191,7 @@ def get_empresa(
         "trial_expires_at": _iso(getattr(emp, "trial_expires_at", None))
         if getattr(emp, "trial_expires_at", None)
         else None,
-        "trial_active": getattr(emp, "trial_active", False),  # compat (se existir)
+        "trial_active": getattr(emp, "trial_active", False),
         "effective_tier": tier,
         "limite_instancias": limite,
         "quantidade_instancias": len(emp.instancias or []),
@@ -199,7 +199,6 @@ def get_empresa(
         "status_numero": emp.status_numero,
         "created_at": _iso(emp.created_at),
         "nome_adm": emp.nome_adm,
-        # se o campo não existir ainda, devolve False
         "requer_token_login": getattr(emp, "requer_token_login", False),
     }
 
@@ -249,6 +248,7 @@ def info_whatsapp(
     - Exibimos 'apelido' como rótulo no front.
     - Filtramos sempre por 'instancia_id'.
     - Mantemos 'id' por compatibilidade.
+    - Também devolvemos os campos de saúde do número para não sumirem no F5.
     """
     _assert_empresa_access(empresa_id, identity)
 
@@ -269,6 +269,20 @@ def info_whatsapp(
             "connected": bool(i.connected),
             "last_seen": _iso(i.last_seen) if i.last_seen else None,
             "historico_restaurar": i.historico_restaurar,
+
+            # =========================
+            # Saúde do número
+            # =========================
+            "score": getattr(i, "score", None),
+            "score_status": getattr(i, "score_status", None),
+            "score_label": getattr(i, "score_label", None),
+            "score_resumo": getattr(i, "score_resumo", None),
+            "score_motivos": getattr(i, "score_motivos", None) or [],
+            "score_metricas": getattr(i, "score_metricas", None) or {},
+            "score_recomendacoes": getattr(i, "score_recomendacoes", None) or [],
+            "score_atualizado_em": _iso(getattr(i, "score_atualizado_em", None))
+            if getattr(i, "score_atualizado_em", None)
+            else None,
         }
         insts.append(item)
         if i.connected:
@@ -276,7 +290,7 @@ def info_whatsapp(
 
     total = len(insts)
 
-    # ✅ fonte única de status/limites/features
+    # fonte única de status/limites/features
     status = plan_status_payload(emp, current_instances=total)
     status.update(
         {
@@ -307,4 +321,6 @@ def update_apelido(
 
     inst.apelido = (body.apelido or None)
     db.commit()
+    db.refresh(inst)
+
     return {"ok": True, "id": inst.id, "apelido": inst.apelido}

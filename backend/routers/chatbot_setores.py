@@ -6,6 +6,7 @@ import re
 import unicodedata
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -22,6 +23,7 @@ from backend.routers.atendimento_send import _evo_post  # type: ignore
 router = APIRouter(prefix="/api", tags=["Chatbot (Triagem Setores)"])
 
 TRIAGEM_TTL_HOURS = int(os.getenv("TRIAGEM_TTL_HOURS", "6"))
+AUTO_MESSAGE_DEDUP_MINUTES = int(os.getenv("AUTO_MESSAGE_DEDUP_MINUTES", "60"))
 
 
 def _now_utc() -> datetime:
@@ -224,6 +226,20 @@ def _get_triage_cfg_parts(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str
     return ad, welcome, items
 
 
+def _get_auto_cfg_parts(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    features = cfg.get("features") or {}
+    auto = features.get("auto_messages") or {}
+    welcome = auto.get("welcome") or {}
+    off_hours = auto.get("off_hours") or {}
+    if not isinstance(auto, dict):
+        auto = {}
+    if not isinstance(welcome, dict):
+        welcome = {}
+    if not isinstance(off_hours, dict):
+        off_hours = {}
+    return auto, welcome, off_hours
+
+
 def _fetch_triage_departamentos(
     db: Session,
     *,
@@ -391,6 +407,14 @@ def _replace_tokens(template: str, *, empresa_nome: str, menu_departamentos: str
     return text_msg
 
 
+def _replace_auto_tokens(template: str, *, empresa_nome: str) -> str:
+    text_msg = str(template or "").strip()
+    if not text_msg:
+        text_msg = "Olá! 👋 Como posso ajudar?"
+    text_msg = re.sub(r"\{empresa\}", empresa_nome or "empresa", text_msg, flags=re.I)
+    return text_msg
+
+
 def _clean_menu_label(s: str) -> str:
     s = str(s or "").strip()
     s = re.sub(r"^\s*\d+\s*[-–—.)]\s*", "", s)
@@ -453,6 +477,193 @@ def _build_assign_ack(
             return f"Perfeito! Vou te encaminhar para *{setor_nome}*. Só um instante 🙂"
 
     return "Perfeito! Só um instante 🙂"
+
+
+def _safe_zoneinfo(name: str | None) -> ZoneInfo:
+    try:
+        return ZoneInfo(str(name or "").strip() or "America/Sao_Paulo")
+    except Exception:
+        return ZoneInfo("America/Sao_Paulo")
+
+
+def _parse_hhmm(s: str, default: str) -> Tuple[int, int]:
+    raw = str(s or default).strip()
+    m = re.fullmatch(r"(\d{2}):(\d{2})", raw)
+    if not m:
+        raw = default
+        m = re.fullmatch(r"(\d{2}):(\d{2})", raw)
+    if not m:
+        return 8, 0
+    hh = max(0, min(23, int(m.group(1))))
+    mm = max(0, min(59, int(m.group(2))))
+    return hh, mm
+
+
+def _minutes_of_day(dt: datetime) -> int:
+    return dt.hour * 60 + dt.minute
+
+
+def _window_contains(now_local: datetime, start_hhmm: str, end_hhmm: str) -> bool:
+    sh, sm = _parse_hhmm(start_hhmm, "08:00")
+    eh, em = _parse_hhmm(end_hhmm, "18:00")
+
+    start_min = sh * 60 + sm
+    end_min = eh * 60 + em
+    now_min = _minutes_of_day(now_local)
+
+    if start_min == end_min:
+        return True
+
+    if start_min < end_min:
+        return start_min <= now_min < end_min
+
+    return now_min >= start_min or now_min < end_min
+
+
+def _fetch_last_inbound_message_time(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente_id: int,
+    instancia_id: int,
+) -> Optional[datetime]:
+    row = db.execute(
+        text(
+            """
+            SELECT timestamp
+            FROM mensagens
+            WHERE empresa_id = :empresa_id
+              AND cliente_id = :cliente_id
+              AND instancia_id = :instancia_id
+              AND tipo = 'entrada'
+            ORDER BY timestamp DESC
+            LIMIT 2
+            """
+        ),
+        {
+            "empresa_id": empresa_id,
+            "cliente_id": cliente_id,
+            "instancia_id": instancia_id,
+        },
+    ).mappings().all()
+
+    if not row:
+        return None
+
+    # LIMIT 2 porque a mensagem atual já foi salva antes do hook.
+    # Queremos a anterior à atual, quando existir.
+    if len(row) >= 2:
+        return _as_aware_utc(row[1].get("timestamp"))
+
+    return _as_aware_utc(row[0].get("timestamp"))
+
+
+def auto_messages_handle_inbound(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    telefone_digits: str,
+    texto: str,
+    direction: str = "",
+    remote_jid: str = "",
+) -> Dict[str, Any]:
+    """
+    Mensagens automáticas simples:
+      - welcome: envia dentro da janela configurada
+      - off_hours: envia fora da janela configurada
+    Regras:
+      - só processa ENTRADA
+      - respeita chatbot_configs.config.features.auto_messages
+      - evita reenvio em sequência usando dedup por última msg de entrada
+    """
+    if (direction or "").lower() == "saida":
+        return {"ok": True, "action": "ignore_saida"}
+
+    telefone_digits = _digits(telefone_digits)
+    texto = (texto or "").strip()
+
+    if not empresa_id or not instancia_id or not telefone_digits or not texto:
+        return {"ok": True, "action": "noop_invalid"}
+
+    instancia_nome, empresa_nome = _fetch_empresa_instancia_info(
+        db, empresa_id=empresa_id, instancia_id=instancia_id
+    )
+    cfg = _fetch_chatbot_config(db, empresa_id=empresa_id, instancia_id=instancia_id)
+    auto_cfg, welcome_cfg, off_cfg = _get_auto_cfg_parts(cfg)
+
+    if not bool(auto_cfg.get("enabled", False)):
+        return {"ok": True, "action": "noop_auto_disabled"}
+
+    cliente = _get_or_create_cliente(
+        db,
+        empresa_id=empresa_id,
+        instancia_id=instancia_id,
+        telefone_digits=telefone_digits,
+    )
+
+    last_prev_inbound = _fetch_last_inbound_message_time(
+        db,
+        empresa_id=empresa_id,
+        cliente_id=int(cliente.id),
+        instancia_id=instancia_id,
+    )
+    if last_prev_inbound:
+        delta = _now_utc() - last_prev_inbound
+        if delta <= timedelta(minutes=max(1, AUTO_MESSAGE_DEDUP_MINUTES)):
+            return {
+                "ok": True,
+                "action": "noop_already_sent_recently",
+                "dedup_minutes": int(AUTO_MESSAGE_DEDUP_MINUTES),
+            }
+
+    tz_name = str(cfg.get("timezone") or "America/Sao_Paulo").strip() or "America/Sao_Paulo"
+    tz = _safe_zoneinfo(tz_name)
+    now_local = _now_utc().astimezone(tz)
+
+    welcome_enabled = bool(welcome_cfg.get("enabled", False))
+    off_enabled = bool(off_cfg.get("enabled", False))
+
+    welcome_start = str(welcome_cfg.get("start") or "08:00")
+    welcome_end = str(welcome_cfg.get("end") or "18:00")
+    off_start = str(off_cfg.get("start") or "18:00")
+    off_end = str(off_cfg.get("end") or "08:00")
+
+    welcome_in_window = _window_contains(now_local, welcome_start, welcome_end) if welcome_enabled else False
+    off_in_window = _window_contains(now_local, off_start, off_end) if off_enabled else False
+
+    if welcome_enabled and welcome_in_window:
+        text_msg = _replace_auto_tokens(str(welcome_cfg.get("text") or "").strip(), empresa_nome=empresa_nome)
+        db.commit()
+        _send_text(db, instancia_nome=instancia_nome, remote_jid=remote_jid, text_msg=text_msg)
+        return {
+            "ok": True,
+            "action": "sent_welcome",
+            "timezone": tz_name,
+            "now_local": now_local.isoformat(),
+        }
+
+    if off_enabled and off_in_window:
+        text_msg = _replace_auto_tokens(str(off_cfg.get("text") or "").strip(), empresa_nome=empresa_nome)
+        db.commit()
+        _send_text(db, instancia_nome=instancia_nome, remote_jid=remote_jid, text_msg=text_msg)
+        return {
+            "ok": True,
+            "action": "sent_off_hours",
+            "timezone": tz_name,
+            "now_local": now_local.isoformat(),
+        }
+
+    return {
+        "ok": True,
+        "action": "noop_outside_window",
+        "timezone": tz_name,
+        "now_local": now_local.isoformat(),
+        "welcome_enabled": welcome_enabled,
+        "welcome_in_window": welcome_in_window,
+        "off_enabled": off_enabled,
+        "off_in_window": off_in_window,
+    }
 
 
 def triagem_handle_inbound(

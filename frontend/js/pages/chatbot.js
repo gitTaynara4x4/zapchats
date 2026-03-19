@@ -654,14 +654,14 @@ Digite apenas o número da opção desejada.`
 
   function setAutoChildrenEnabled(enabled) {
     swWelcome?.classList.toggle('disabled', !enabled);
-    swWelcome?.querySelector('input') && (swWelcome.querySelector('input').disabled = !enabled);
-    msgWelcome && (msgWelcome.disabled = !enabled || !getSwitch(swWelcome));
+    if (swWelcome?.querySelector('input')) swWelcome.querySelector('input').disabled = !enabled;
+    if (msgWelcome) msgWelcome.disabled = !enabled || !getSwitch(swWelcome);
     if (wStart) wStart.disabled = !enabled;
     if (wEnd) wEnd.disabled = !enabled;
 
     swOff?.classList.toggle('disabled', !enabled);
-    swOff?.querySelector('input') && (swOff.querySelector('input').disabled = !enabled);
-    msgOff && (msgOff.disabled = !enabled || !getSwitch(swOff));
+    if (swOff?.querySelector('input')) swOff.querySelector('input').disabled = !enabled;
+    if (msgOff) msgOff.disabled = !enabled || !getSwitch(swOff);
     if (oStart) oStart.disabled = !enabled;
     if (oEnd) oEnd.disabled = !enabled;
 
@@ -670,8 +670,8 @@ Digite apenas o número da opção desejada.`
 
   function setDeptChildrenEnabled(enabled) {
     swDeptWelcome?.classList.toggle('disabled', !enabled);
-    swDeptWelcome?.querySelector('input') && (swDeptWelcome.querySelector('input').disabled = !enabled);
-    msgDeptWelcome && (msgDeptWelcome.disabled = !enabled || !getSwitch(swDeptWelcome));
+    if (swDeptWelcome?.querySelector('input')) swDeptWelcome.querySelector('input').disabled = !enabled;
+    if (msgDeptWelcome) msgDeptWelcome.disabled = !enabled || !getSwitch(swDeptWelcome);
     if (dwStart) dwStart.disabled = !enabled;
     if (dwEnd) dwEnd.disabled = !enabled;
     updateScheduleVisibility();
@@ -691,40 +691,23 @@ Digite apenas o número da opção desejada.`
     c.timezone = (c.timezone || '').trim() || FALLBACK_TZ;
   }
 
-  function enforceExclusive(which) {
-    if (which === 'auto') {
-      setHeaderSwitch(swAutoHdr, pillAutoHdr, true);
-      setHeaderSwitch(swDeptHdr, pillDeptHdr, false);
-      cfg.features.auto_messages.enabled = true;
-      cfg.features.auto_messages_departments.enabled = false;
-      setAccordionOpen(headAutoDept, bodyAutoDept, false);
-      setAccordionOpen(headAuto, bodyAuto, true);
-      setAutoChildrenEnabled(true);
-      setDeptChildrenEnabled(false);
-      renderWelcomePreview();
-      renderOffPreview();
-      renderDeptPreview();
-      updateSaveButtons();
-      updateScheduleVisibility();
-    } else {
-      setHeaderSwitch(swDeptHdr, pillDeptHdr, true);
-      setHeaderSwitch(swAutoHdr, pillAutoHdr, false);
-      setSwitch(swWelcome, false, pillWelcome);
-      setSwitch(swOff, false, pillOff);
-      cfg.features.auto_messages_departments.enabled = true;
-      cfg.features.auto_messages.enabled = false;
-      (cfg.features.auto_messages.welcome ||= {}).enabled = false;
-      (cfg.features.auto_messages.off_hours ||= {}).enabled = false;
-      setAccordionOpen(headAuto, bodyAuto, false);
-      setAccordionOpen(headAutoDept, bodyAutoDept, true);
-      setAutoChildrenEnabled(false);
-      setDeptChildrenEnabled(true);
-      renderWelcomePreview();
-      renderOffPreview();
-      renderDeptPreview();
-      updateSaveButtons();
-      updateScheduleVisibility();
-    }
+  function syncSectionState() {
+    if (!cfg?.features) return;
+
+    cfg.features.auto_messages.enabled = !!getSwitch(swAutoHdr);
+    cfg.features.auto_messages_departments.enabled = !!getSwitch(swDeptHdr);
+    (cfg.features.auto_messages.welcome ||= {}).enabled = !!getSwitch(swWelcome);
+    (cfg.features.auto_messages.off_hours ||= {}).enabled = !!getSwitch(swOff);
+    (cfg.features.auto_messages_departments.welcome ||= {}).enabled = !!getSwitch(swDeptWelcome);
+
+    setAutoChildrenEnabled(!!cfg.features.auto_messages.enabled);
+    setDeptChildrenEnabled(!!cfg.features.auto_messages_departments.enabled);
+
+    renderWelcomePreview();
+    renderOffPreview();
+    renderDeptPreview();
+    updateSaveButtons();
+    updateScheduleVisibility();
   }
 
   function renderWelcomePreview() {
@@ -787,93 +770,54 @@ Digite apenas o número da opção desejada.`
       if (!cfg?.features) return;
 
       if (labelEl === swAutoHdr) {
-        if (newVal) {
-          enforceExclusive('auto');
-        } else {
-          cfg.features.auto_messages.enabled = false;
-          (cfg.features.auto_messages.welcome ||= {}).enabled = false;
-          (cfg.features.auto_messages.off_hours ||= {}).enabled = false;
-
+        cfg.features.auto_messages.enabled = newVal;
+        if (!newVal) {
           setSwitch(swWelcome, false, pillWelcome);
           setSwitch(swOff, false, pillOff);
-
-          setAutoChildrenEnabled(false);
-          renderWelcomePreview();
-          renderOffPreview();
-          updateSaveButtons();
-          updateScheduleVisibility();
-
-          try {
-            await putConfig(cfg);
-            toast('Mensagens automáticas desligadas com sucesso.');
-            _lastLoadedSnapshot = JSON.stringify(cfg);
-          } catch (err) {
-            restoreSnapshot();
-            const friendly = friendlyHttpError(0, err?.message || 'Falha ao salvar.');
-            notify({
-              title: friendly.title,
-              message: friendly.message,
-              kind: 'error',
-              details: friendly.details
-            });
-          }
+          (cfg.features.auto_messages.welcome ||= {}).enabled = false;
+          (cfg.features.auto_messages.off_hours ||= {}).enabled = false;
         }
-        updateScheduleVisibility();
+        syncSectionState();
+        return;
       }
 
       if (labelEl === swDeptHdr) {
-        if (newVal) {
-          enforceExclusive('dept');
-        } else {
-          cfg.features.auto_messages_departments.enabled = false;
-          (cfg.features.auto_messages_departments.welcome ||= {}).enabled = false;
-
+        cfg.features.auto_messages_departments.enabled = newVal;
+        if (!newVal) {
           setSwitch(swDeptWelcome, false, pillDeptWelcome);
-
-          setDeptChildrenEnabled(false);
-          updateSaveButtons();
-          updateScheduleVisibility();
-          renderDeptPreview();
-
-          try {
-            await putConfig(cfg);
-            toast('Triagem por departamento desligada com sucesso.');
-            _lastLoadedSnapshot = JSON.stringify(cfg);
-          } catch (err) {
-            restoreSnapshot();
-            const friendly = friendlyHttpError(0, err?.message || 'Falha ao salvar.');
-            notify({
-              title: friendly.title,
-              message: friendly.message,
-              kind: 'error',
-              details: friendly.details
-            });
-          }
+          (cfg.features.auto_messages_departments.welcome ||= {}).enabled = false;
         }
+        syncSectionState();
+        return;
       }
 
       if (labelEl === swWelcome) {
-        if (newVal && !getSwitch(swAutoHdr)) enforceExclusive('auto');
-        msgWelcome && (msgWelcome.disabled = !newVal || !getSwitch(swAutoHdr));
+        if (newVal && !getSwitch(swAutoHdr)) {
+          setHeaderSwitch(swAutoHdr, pillAutoHdr, true);
+          cfg.features.auto_messages.enabled = true;
+        }
         (cfg.features.auto_messages.welcome ||= {}).enabled = newVal;
-        renderWelcomePreview();
-        updateScheduleVisibility();
+        syncSectionState();
+        return;
       }
 
       if (labelEl === swOff) {
-        if (newVal && !getSwitch(swAutoHdr)) enforceExclusive('auto');
-        msgOff && (msgOff.disabled = !newVal || !getSwitch(swAutoHdr));
+        if (newVal && !getSwitch(swAutoHdr)) {
+          setHeaderSwitch(swAutoHdr, pillAutoHdr, true);
+          cfg.features.auto_messages.enabled = true;
+        }
         (cfg.features.auto_messages.off_hours ||= {}).enabled = newVal;
-        renderOffPreview();
-        updateScheduleVisibility();
+        syncSectionState();
+        return;
       }
 
       if (labelEl === swDeptWelcome) {
-        if (newVal && !getSwitch(swDeptHdr)) enforceExclusive('dept');
-        msgDeptWelcome && (msgDeptWelcome.disabled = !newVal || !getSwitch(swDeptHdr));
+        if (newVal && !getSwitch(swDeptHdr)) {
+          setHeaderSwitch(swDeptHdr, pillDeptHdr, true);
+          cfg.features.auto_messages_departments.enabled = true;
+        }
         (cfg.features.auto_messages_departments.welcome ||= {}).enabled = newVal;
-        updateScheduleVisibility();
-        renderDeptPreview();
+        syncSectionState();
       }
     });
   }
@@ -1115,10 +1059,6 @@ Digite apenas o número da opção desejada.`
     if (oEnd) oEnd.value = o.end ?? '08:00';
     if (offCount) offCount.textContent = `${(msgOff?.value || '').length} caracteres`;
 
-    setAutoChildrenEnabled(!!cfg.features.auto_messages.enabled);
-    renderWelcomePreview();
-    renderOffPreview();
-
     const dw = cfg.features.auto_messages_departments.welcome || {};
     setSwitch(swDeptWelcome, !!dw.enabled, pillDeptWelcome);
     if (msgDeptWelcome) {
@@ -1130,20 +1070,16 @@ Digite apenas o número da opção desejada.`
     if (dwStart) dwStart.value = dw.start ?? '08:00';
     if (dwEnd) dwEnd.value = dw.end ?? '18:00';
 
-    setDeptChildrenEnabled(!!cfg.features.auto_messages_departments.enabled);
     attachDeptSuggestions(msgDeptWelcome);
     renderDeptPicker();
-    renderDeptPreview();
-    updateScheduleVisibility();
-    updateSaveButtons();
+    syncSectionState();
   }
 
   async function saveAutoBlock() {
     if (!validateBeforeSave('auto')) return;
     cfg.timezone = (cfg.timezone || '').trim() || FALLBACK_TZ;
 
-    enforceExclusive('auto');
-
+    cfg.features.auto_messages.enabled = getSwitch(swAutoHdr);
     cfg.features.auto_messages.welcome = {
       ...(cfg.features.auto_messages.welcome || {}),
       enabled: getSwitch(swWelcome),
@@ -1171,8 +1107,7 @@ Digite apenas o número da opção desejada.`
     if (!validateBeforeSave('dept')) return;
     cfg.timezone = (cfg.timezone || '').trim() || FALLBACK_TZ;
 
-    enforceExclusive('dept');
-
+    cfg.features.auto_messages_departments.enabled = getSwitch(swDeptHdr);
     cfg.features.auto_messages_departments.welcome = {
       ...(cfg.features.auto_messages_departments.welcome || {}),
       enabled: getSwitch(swDeptWelcome),
@@ -1224,14 +1159,8 @@ Digite apenas o número da opção desejada.`
       if (dwStart) dwStart.value = dw.start ?? '08:00';
       if (dwEnd) dwEnd.value = dw.end ?? '18:00';
 
-      setAutoChildrenEnabled(!!cfg.features.auto_messages.enabled);
-      setDeptChildrenEnabled(!!cfg.features.auto_messages_departments.enabled);
-      renderWelcomePreview();
-      renderOffPreview();
       renderDeptPicker();
-      renderDeptPreview();
-      updateScheduleVisibility();
-      updateSaveButtons();
+      syncSectionState();
       if (showToast) toast('Alterações descartadas.', 'warn');
     } catch {}
   }
@@ -1390,37 +1319,40 @@ Digite apenas o número da opção desejada.`
       bindAccordion(headAutoDept, bodyAutoDept);
 
       bindSwitch(swAutoHdr, pillAutoHdr, (on) => {
-        if (on) enforceExclusive('auto');
-        else {
-          if (cfg?.features) cfg.features.auto_messages.enabled = false;
-          setAutoChildrenEnabled(false);
-          updateSaveButtons();
-          updateScheduleVisibility();
-        }
+        if (cfg?.features) cfg.features.auto_messages.enabled = on;
+        syncSectionState();
       });
 
       bindSwitch(swDeptHdr, pillDeptHdr, (on) => {
-        if (on) enforceExclusive('dept');
-        else {
-          if (cfg?.features) cfg.features.auto_messages_departments.enabled = false;
-          setDeptChildrenEnabled(false);
-          updateSaveButtons();
-        }
+        if (cfg?.features) cfg.features.auto_messages_departments.enabled = on;
+        syncSectionState();
       });
 
       bindSwitch(swWelcome, pillWelcome, (on) => {
         if (cfg) (cfg.features.auto_messages.welcome ||= {}).enabled = on;
-        if (on && !getSwitch(swAutoHdr)) enforceExclusive('auto');
+        if (on && !getSwitch(swAutoHdr)) {
+          setHeaderSwitch(swAutoHdr, pillAutoHdr, true);
+          cfg.features.auto_messages.enabled = true;
+        }
+        syncSectionState();
       });
 
       bindSwitch(swOff, pillOff, (on) => {
         if (cfg) (cfg.features.auto_messages.off_hours ||= {}).enabled = on;
-        if (on && !getSwitch(swAutoHdr)) enforceExclusive('auto');
+        if (on && !getSwitch(swAutoHdr)) {
+          setHeaderSwitch(swAutoHdr, pillAutoHdr, true);
+          cfg.features.auto_messages.enabled = true;
+        }
+        syncSectionState();
       });
 
       bindSwitch(swDeptWelcome, pillDeptWelcome, (on) => {
         if (cfg) (cfg.features.auto_messages_departments.welcome ||= {}).enabled = on;
-        if (on && !getSwitch(swDeptHdr)) enforceExclusive('dept');
+        if (on && !getSwitch(swDeptHdr)) {
+          setHeaderSwitch(swDeptHdr, pillDeptHdr, true);
+          cfg.features.auto_messages_departments.enabled = true;
+        }
+        syncSectionState();
       });
 
       msgWelcome?.addEventListener('input', () => {

@@ -196,11 +196,10 @@ th:last-child, td:last-child { text-align: right; }
   border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
 }
 
-/* Status dot */
+/* Status */
 .dot { width: .65rem; height: .65rem; border-radius: 999px; display: inline-block; background: #9ca3af; }
 .dot.ok { background: var(--ok); }
 
-/* Kebab */
 .kebab-btn {
   border: 1px solid var(--border);
   border-radius: .7rem;
@@ -252,6 +251,55 @@ th:last-child, td:last-child { text-align: right; }
   animation: spin 1s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Saúde inline */
+.saude-inline{
+  display:flex;
+  align-items:center;
+  gap:.55rem;
+  flex-wrap:wrap;
+}
+
+.saude-chip-sm{
+  display:inline-flex;
+  align-items:center;
+  padding:.24rem .55rem;
+  border-radius:999px;
+  font-size:.74rem;
+  font-weight:800;
+  letter-spacing:.01em;
+  border:1px solid transparent;
+}
+
+.saude-chip-sm--na{
+  background:rgba(148,163,184,.12);
+  color:#64748b;
+  border-color:rgba(148,163,184,.24);
+}
+
+.saude-chip-sm--boa{
+  background:rgba(34,197,94,.12);
+  color:#15803d;
+  border-color:rgba(34,197,94,.22);
+}
+
+.saude-chip-sm--atencao{
+  background:rgba(245,158,11,.14);
+  color:#b45309;
+  border-color:rgba(245,158,11,.26);
+}
+
+.saude-chip-sm--alto{
+  background:rgba(239,68,68,.12);
+  color:#dc2626;
+  border-color:rgba(239,68,68,.22);
+}
+
+.saude-chip-sm--critico{
+  background:rgba(127,29,29,.12);
+  color:#991b1b;
+  border-color:rgba(127,29,29,.22);
+}
 
 /* === Modal Saúde do Número === */
 .saude-modal-card{
@@ -325,6 +373,12 @@ th:last-child, td:last-child { text-align: right; }
   letter-spacing:.02em;
   border:1px solid transparent;
   margin-bottom:.55rem;
+}
+
+.saude-badge--na{
+  background:rgba(148,163,184,.12);
+  color:#64748b;
+  border-color:rgba(148,163,184,.24);
 }
 
 .saude-badge--boa{
@@ -560,7 +614,14 @@ html.dark .box{
   border: none !important;
 }
 
+html.dark .saude-badge--na{ color:#cbd5e1; }
 html.dark .saude-badge--boa{ color:#86efac; }
 html.dark .saude-badge--atencao{ color:#fcd34d; }
 html.dark .saude-badge--alto{ color:#fca5a5; }
 html.dark .saude-badge--critico{ color:#fecaca; }
+
+html.dark .saude-chip-sm--na{ color:#cbd5e1; }
+html.dark .saude-chip-sm--boa{ color:#86efac; }
+html.dark .saude-chip-sm--atencao{ color:#fcd34d; }
+html.dark .saude-chip-sm--alto{ color:#fca5a5; }
+html.dark .saude-chip-sm--critico{ color:#fecaca; }
