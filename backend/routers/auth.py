@@ -1,4 +1,3 @@
-# backend/routers/auth.py
 from datetime import datetime, timedelta
 import os
 import time
@@ -6,7 +5,7 @@ import smtplib
 from email.mime.text import MIMEText
 import base64
 import re
-import secrets  # compare_digest + geração de códigos
+import secrets
 from typing import Optional
 
 import jwt
@@ -28,6 +27,12 @@ import pytz
 
 from backend.database import get_db_session
 import backend.models as models
+from backend.utils.plans import (
+    PLAN_FREE,
+    PLAN_START,
+    normalize_plan,
+    start_start_trial,
+)
 
 # Throttle de login
 from backend.security.login_throttle import (
@@ -58,12 +63,11 @@ TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "7"))  # 7 por padrão
 
 # Cookies/CSRF (devem bater com main.py)
 ACCESS_COOKIE_NAME = os.getenv("ACCESS_COOKIE_NAME", "access_token")
-# Mantidos por compat (não usados diretamente; lógica de Secure/SameSite é automática):
 COOKIE_SECURE = (
     os.getenv("COOKIE_SECURE", "false").strip().lower()
     in ("1", "true", "yes", "on")
 )
-COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "lax").strip().lower()  # "lax" | "strict" | "none"
+COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "lax").strip().lower()
 CSRF_COOKIE_NAME = os.getenv("CSRF_COOKIE_NAME", "csrf_token")
 COOKIE_DOMAIN: Optional[str] = (os.getenv("COOKIE_DOMAIN") or "").strip() or None
 
@@ -77,28 +81,24 @@ DATA_URL_RE = re.compile(r"^data:(?P<mime>[^;]+);base64,(?P<data>.+)$")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 # ───────────────────────── Reset de senha: código curto + limites ─────────────────────────
-RESET_CODE_TTL_MIN = int(os.getenv("RESET_CODE_TTL_MIN", "15"))  # 15 min
-FORGOT_MAX_REQ = int(os.getenv("FORGOT_MAX_REQ", "3"))          # 3 por janela
-FORGOT_WINDOW_SEC = int(os.getenv("FORGOT_WINDOW_SEC", "900"))  # 15 min
+RESET_CODE_TTL_MIN = int(os.getenv("RESET_CODE_TTL_MIN", "15"))
+FORGOT_MAX_REQ = int(os.getenv("FORGOT_MAX_REQ", "3"))
+FORGOT_WINDOW_SEC = int(os.getenv("FORGOT_WINDOW_SEC", "900"))
 
-RESET_MAX_ATTEMPTS = int(os.getenv("RESET_MAX_ATTEMPTS", "5"))          # 5 tentativas por janela
-RESET_ATTEMPT_WINDOW_SEC = int(os.getenv("RESET_ATTEMPT_WINDOW_SEC", "900"))  # 15 min
+RESET_MAX_ATTEMPTS = int(os.getenv("RESET_MAX_ATTEMPTS", "5"))
+RESET_ATTEMPT_WINDOW_SEC = int(os.getenv("RESET_ATTEMPT_WINDOW_SEC", "900"))
 
-# Memória local (simples) — bom p/ 1 instância. Se tiver várias, ideal seria Redis/banco.
-_forgot_rate: dict[str, list[float]] = {}  # key -> [reset_at_epoch, count]
-_reset_attempts: dict[str, list[float]] = {}  # key -> [reset_at_epoch, count]
+# Memória local
+_forgot_rate: dict[str, list[float]] = {}
+_reset_attempts: dict[str, list[float]] = {}
 
 
 def _rate_take(store: dict, key: str, limit: int, window_sec: int) -> bool:
-    """
-    Retorna True se pode prosseguir (consume 1), False se excedeu.
-    """
     now = time.time()
     rec = store.get(key)
     if not rec or rec[0] < now:
         store[key] = [now + window_sec, 1]
         return True
-    # rec[0] = expira_em_epoch, rec[1] = count
     if rec[1] >= limit:
         return False
     rec[1] += 1
@@ -106,9 +106,6 @@ def _rate_take(store: dict, key: str, limit: int, window_sec: int) -> bool:
 
 
 def _rate_remaining(store: dict, key: str) -> int:
-    """
-    Segundos restantes até liberar (aprox), ou 0 se livre.
-    """
     now = time.time()
     rec = store.get(key)
     if not rec:
@@ -120,7 +117,6 @@ def _rate_remaining(store: dict, key: str) -> int:
 
 
 def _safe_email_key(email: str) -> str:
-    # evita email com espaços etc
     return (email or "").strip().lower()
 
 
@@ -137,15 +133,6 @@ def _client_ip(request: Request) -> str:
 def _get_departamento_login_window(
     db: Session, colab: "models.Colaborador"
 ) -> tuple[Optional[str], Optional[str]]:
-    """
-    Resolve a janela de login padrão do *departamento* do colaborador.
-
-    Compat:
-    - Primeiro tenta models.Departamento.id == colab.setor_id (projetos que usam setor_id como dept).
-    - Se não achar, tenta mapear Setor -> Departamento por nome (legado).
-
-    Retorna (hi, hf) como strings ("HH:MM"/"HH:MM:SS") ou (None, None) se não houver.
-    """
     try:
         empresa_id = getattr(colab, "empresa_id", None)
         setor_id = getattr(colab, "setor_id", None)
@@ -162,7 +149,6 @@ def _get_departamento_login_window(
         )
 
         if not dept:
-            # tenta Setor -> Departamento por nome (legado)
             setor = (
                 db.query(models.Setor)
                 .filter(
@@ -193,24 +179,9 @@ def _get_departamento_login_window(
 
 
 def colab_login_allowed_now(db: Session, colab: "models.Colaborador") -> bool:
-    """
-    Retorna True se o colaborador PODE logar (ou continuar usando) agora (horário de Brasília),
-    False se estiver fora do horário configurado.
-
-    Modos suportados (coluna colab.horario_modo):
-      - "livre"         -> sem restrição
-      - "personalizado" -> usa colab.hora_login_inicio / colab.hora_login_fim
-      - "departamento"  -> usa dept.hora_login_inicio_padrao / dept.hora_login_fim_padrao
-
-    Compat:
-      - Se a coluna horario_modo não existir ou estiver vazia:
-          * se hora_login_inicio e hora_login_fim estiverem preenchidos -> "personalizado"
-          * senão -> "departamento" se tiver setor_id; caso contrário -> "livre"
-    """
     modo_raw = getattr(colab, "horario_modo", None)
     modo = (str(modo_raw).strip().lower() if modo_raw is not None else "").strip()
 
-    # compat p/ bancos antigos
     if not modo:
         hi0 = getattr(colab, "hora_login_inicio", None)
         hf0 = getattr(colab, "hora_login_fim", None)
@@ -219,35 +190,29 @@ def colab_login_allowed_now(db: Session, colab: "models.Colaborador") -> bool:
         else:
             modo = "departamento" if getattr(colab, "setor_id", None) else "livre"
 
-    # normaliza variações
     if modo in ("sem restricao", "sem_restricao", "none", "off"):
         modo = "livre"
     if modo in ("padrao", "padrão", "dept", "depto", "departamento_padrao", "departamento-padrao"):
         modo = "departamento"
 
-    # sem restrição
     if modo == "livre":
         return True
 
-    # pega janela conforme modo
     hi: Optional[str] = None
     hf: Optional[str] = None
 
     if modo == "departamento":
         hi, hf = _get_departamento_login_window(db, colab)
     else:
-        # default: personalizado
         hi = getattr(colab, "hora_login_inicio", None)
         hf = getattr(colab, "hora_login_fim", None)
 
-    # Sem janela configurada -> sem restrição
     if not hi or not hf:
         return True
 
     try:
         now_br = datetime.now(TZ_BR).time()
 
-        # aceita "HH:MM" ou "HH:MM:SS"
         def _parse(s: str):
             s = str(s).strip()
             if len(s) == 5:
@@ -259,35 +224,24 @@ def colab_login_allowed_now(db: Session, colab: "models.Colaborador") -> bool:
         h_ini = _parse(hi)
         h_fim = _parse(hf)
     except Exception:
-        # Dado estranho -> não derruba login
         return True
 
     if h_ini == h_fim:
-        # início == fim -> interpretando como "sem limite"
         return True
 
-    # janela normal (mesmo dia)
     if h_ini < h_fim:
         return h_ini <= now_br < h_fim
 
-    # janela virando a madrugada (ex.: 22:00 – 06:00)
     return now_br >= h_ini or now_br < h_fim
 
 
-# ───────────────────────── Helpers de Cookie (auto HTTP/HTTPS) ─────────────────────────
+# ───────────────────────── Helpers de Cookie ─────────────────────────
 def _is_https(request: Request) -> bool:
-    """Detecta HTTPS atrás de proxy (Traefik/Nginx/EasyPanel) ou direto."""
     proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "").lower()
     return proto == "https"
 
 
 def _cookie_base(request: Request, max_age: Optional[int] = None) -> dict:
-    """
-    Define flags de cookie:
-      - Secure: True só quando a requisição chega via HTTPS
-      - SameSite: Lax por padrão (ou None se COOKIE_SAMESITE=none)
-      - Domain: opcional via COOKIE_DOMAIN (útil para compartilhar entre apex e www)
-    """
     params = {
         "secure": _is_https(request),
         "samesite": "none" if COOKIE_SAMESITE == "none" else "lax",
@@ -308,14 +262,12 @@ def set_auth_cookies(
     max_age: int,
 ):
     base = _cookie_base(request, max_age=max_age)
-    # Token httpOnly
     response.set_cookie(
         key=ACCESS_COOKIE_NAME,
         value=token,
         httponly=True,
         **base,
     )
-    # Empresa legível pelo front
     response.set_cookie(
         key="empresa_id",
         value=str(empresa_id),
@@ -340,9 +292,9 @@ def _envflag(name: str, default: str = "false") -> bool:
     )
 
 
-READONLY_MODE = _envflag("READONLY_MODE")  # trava geral (manutenção)
-DISABLE_REGISTER = _envflag("DISABLE_REGISTER")  # trava apenas /register
-DISABLE_PASSWORD_RECOVERY = _envflag("DISABLE_PASSWORD_RECOVERY")  # trava forgot/reset
+READONLY_MODE = _envflag("READONLY_MODE")
+DISABLE_REGISTER = _envflag("DISABLE_REGISTER")
+DISABLE_PASSWORD_RECOVERY = _envflag("DISABLE_PASSWORD_RECOVERY")
 
 
 def guard_writable_all(_: Request):
@@ -394,13 +346,13 @@ class ResetPasswordIn(BaseModel):
 class LoginIn(BaseModel):
     email: EmailStr
     senha: str
-    remember: bool | None = None  # para “lembrar de mim”
+    remember: bool | None = None
 
 
 class LoginTokenIn(BaseModel):
     email: EmailStr
     token: str
-    remember: bool | None = None  # segue o remember do primeiro passo
+    remember: bool | None = None
 
 
 class RegisterIn(BaseModel):
@@ -410,7 +362,7 @@ class RegisterIn(BaseModel):
     senha_admin: str
     nome_adm: str | None = None
     avatar_url: str | None = None
-    doc: str | None = None  # CPF/CNPJ opcional
+    doc: str | None = None
 
 
 # ───────────────────────── JWT Helpers ─────────────────────────
@@ -449,13 +401,10 @@ def _smtp_send(email_destino: str, assunto: str, corpo: str):
         traceback.print_exc()
 
 
-# ✅ NOVO: código numérico de 5 dígitos para reset
 def gerar_codigo_reset_5d() -> str:
-    """Gera um código numérico de 5 dígitos (10000-99999)."""
     return f"{secrets.randbelow(90000) + 10000:05d}"
 
 
-# ✅ ALTERADO: e-mail de reset sem link, só o código
 def enviar_email_reset(email_destino: str, token: str):
     assunto = "[ZapChats] Código para redefinir sua senha"
     corpo = f"""
@@ -477,16 +426,12 @@ Equipe ZapChats
 
 
 def gerar_codigo_login() -> str:
-    """Gera um código numérico de 6 dígitos."""
     return f"{secrets.randbelow(900000) + 100000:06d}"
 
 
 def enviar_email_login_token(
     email_destino: str, codigo: str, nome_empresa: Optional[str] = None
 ):
-    """
-    Envia o código de login por e-mail.
-    """
     prefixo = f"[{nome_empresa}] " if nome_empresa else ""
     assunto = f"{prefixo}Código de acesso ao ZapChats"
 
@@ -540,12 +485,10 @@ def get_current_identity(
     payload = _decode_token(token)
     sub = payload.get("sub")
     role = (payload.get("role") or "").lower()
-    empresa_id = payload.get("empresa_id")
 
     if not sub:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token inválido")
 
-    # ───── Colaborador ─────
     if isinstance(sub, str) and sub.startswith("colab-"):
         try:
             colab_id = int(sub.split("colab-", 1)[1])
@@ -560,7 +503,6 @@ def get_current_identity(
         if not colab:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Usuário não encontrado")
 
-        # 🚫 Bloqueia uso do sistema se estiver fora da janela do expediente
         if not colab_login_allowed_now(db, colab):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
@@ -569,10 +511,8 @@ def get_current_identity(
 
         is_admin = (role == "admin") or ((colab.cargo or "").lower() == "admin")
 
-        # Carregar permissões do colaborador
         perms: list[str] = []
         try:
-            # Se tiver relacionamento ORM, usa ele
             rel = getattr(colab, "permissoes", None)
             if rel is not None:
                 for p in rel:
@@ -580,7 +520,6 @@ def get_current_identity(
                     if pid:
                         perms.append(pid)
             else:
-                # Fallback direto no join table
                 rows = db.execute(
                     text(
                         """
@@ -607,12 +546,10 @@ def get_current_identity(
             "permissoes": perms,
         }
 
-    # ───── Usuario (admin) ─────
     user = db.query(models.Usuario).filter(models.Usuario.id == int(sub)).first()
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Usuário não encontrado")
 
-    # Admin normalmente tem tudo: pega todas as permissões cadastradas
     perms_admin: list[str] = []
     try:
         rows = db.execute(text("SELECT id FROM permissoes")).fetchall()
@@ -639,7 +576,6 @@ def require_admin(identity=Depends(get_current_identity)):
     return identity
 
 
-# Compat: retorna models.Usuario e bloqueia colaboradores
 def get_current_user(
     request: Request,
     authorization: str = Header(default=None, alias="Authorization"),
@@ -709,7 +645,6 @@ def login(
         request.headers, request.client.host if request.client else None
     )
 
-    # 0) Lock ativo?
     remain = is_locked(db, email, ip)
     if remain > 0:
         raise HTTPException(
@@ -718,7 +653,6 @@ def login(
             headers={"Retry-After": str(remain)},
         )
 
-    # 1) Admin
     user = db.query(models.Usuario).filter_by(email=email).first()
     if user and verify_pwd(form.senha, user.senha_hash):
         reset_fail(db, email, ip)
@@ -726,11 +660,9 @@ def login(
         token = create_access_token(
             {"sub": str(user.id), "empresa_id": user.empresa_id, "role": "admin"}
         )
-        # cookie ttl (lembrar de mim)
         cookie_max_age = JWT_EXP_MINUTES * 60
         if getattr(form, "remember", False):
-            cookie_max_age = 60 * 60 * 24 * 30  # 30 dias
-        # grava cookies necessários para o gate HTML (auto Secure/SameSite)
+            cookie_max_age = 60 * 60 * 24 * 30
         set_auth_cookies(
             response,
             request,
@@ -746,13 +678,10 @@ def login(
             "is_admin": True,
         }
 
-    # 2) Colaborador
     colaborador = db.query(models.Colaborador).filter_by(email=email).first()
     if colaborador and verify_pwd(form.senha, colaborador.senha):
-        # limpa falhas de login (credenciais válidas)
         reset_fail(db, email, ip)
 
-        # verifica janela de horário (Brasília)
         if not colab_login_allowed_now(db, colaborador):
             db.commit()
             raise HTTPException(
@@ -760,7 +689,6 @@ def login(
                 detail="Fora do horário permitido de acesso para este colaborador.",
             )
 
-        # verifica se a EMPRESA exige token de login para colaboradores
         empresa = (
             db.query(models.Empresa)
             .filter(models.Empresa.id == colaborador.empresa_id)
@@ -769,14 +697,12 @@ def login(
         requer_token = bool(getattr(empresa, "requer_token_login", False)) if empresa else False
 
         if requer_token:
-            # Gera código, grava no colaborador e envia por e-mail ao admin (ou ao próprio colaborador)
             codigo = gerar_codigo_login()
             colaborador.login_token = codigo
             colaborador.login_token_expires_at = datetime.utcnow() + timedelta(minutes=10)
             db.commit()
 
             try:
-                # tenta achar um admin da empresa
                 admin_user = (
                     db.query(models.Usuario)
                     .filter(
@@ -790,10 +716,8 @@ def login(
                 nome_empresa = getattr(empresa, "nome", None) if empresa else None
                 enviar_email_login_token(destino, codigo, nome_empresa)
             except Exception as e:
-                # erro de envio não deve vazar para o cliente; já comitou no banco
                 print("[LOGIN TOKEN EMAIL] erro ao enviar código:", repr(e))
 
-            # Responde sem criar sessão ainda → front mostra o 2º passo
             return {
                 "require_token": True,
                 "empresa_id": colaborador.empresa_id,
@@ -804,7 +728,6 @@ def login(
                 ),
             }
 
-        # fluxo normal (sem token adicional)
         db.commit()
         token = create_access_token(
             {
@@ -831,7 +754,6 @@ def login(
             "is_admin": (colaborador.cargo or "").lower() == "admin",
         }
 
-    # 3) Falhou → incrementa e, se necessário, aplica lock
     fails, _window_left = inc_fail(db, email, ip)
     if should_lock(fails):
         apply_lock(db, email, ip, ACCOUNT_LOCK_SEC)
@@ -852,17 +774,12 @@ def confirmar_login_token(
     request: Request,
     db: Session = Depends(get_db_session),
 ):
-    """
-    Segundo passo do login quando a empresa exige código enviado por e-mail.
-    O colaborador informa o código que recebeu (via admin ou diretamente).
-    """
     email = norm_email(form.email)
 
     colaborador = db.query(models.Colaborador).filter_by(email=email).first()
     if not colaborador:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Credenciais inválidas")
 
-    # Confirma que a empresa realmente exige token de login
     empresa = (
         db.query(models.Empresa)
         .filter(models.Empresa.id == colaborador.empresa_id)
@@ -875,7 +792,6 @@ def confirmar_login_token(
             "Esta empresa não exige código de acesso adicional.",
         )
 
-    # Confere se há código gerado
     codigo_salvo = getattr(colaborador, "login_token", None)
     expira_em = getattr(colaborador, "login_token_expires_at", None)
     if not codigo_salvo or not expira_em:
@@ -884,7 +800,6 @@ def confirmar_login_token(
             "Código inválido ou expirado. Gere um novo tentando entrar novamente.",
         )
 
-    # Verifica expiração (compara em UTC, ignorando timezone)
     if expira_em.replace(tzinfo=None) < datetime.utcnow():
         colaborador.login_token = None
         colaborador.login_token_expires_at = None
@@ -894,7 +809,6 @@ def confirmar_login_token(
             "Código expirado. Gere um novo tentando entrar novamente.",
         )
 
-    # Compara o código informado
     codigo_informado = (form.token or "").strip()
     if not secrets.compare_digest(str(codigo_salvo), codigo_informado):
         raise HTTPException(
@@ -902,11 +816,9 @@ def confirmar_login_token(
             "Código incorreto.",
         )
 
-    # Tudo certo: limpa o token e cria a sessão normalmente
     colaborador.login_token = None
     colaborador.login_token_expires_at = None
 
-    # Só por segurança, revalida faixa de horário
     if not colab_login_allowed_now(db, colaborador):
         db.commit()
         raise HTTPException(
@@ -949,25 +861,17 @@ def logout(response: Response, request: Request):
     return {"msg": "Desconectado com sucesso"}
 
 
-# 🔄 Refresh com CSRF double-submit
 @router.post("/refresh", dependencies=[Depends(csrf_protect_refresh)])
 def refresh_token(
     request: Request,
     response: Response,
     authorization: str = Header(default=None, alias="Authorization"),
 ):
-    """
-    Reemite o access_token mantendo as mesmas claims.
-    Requer:
-      - Cookie 'csrf_token' (setado pelo middleware em /api/auth/refresh)
-      - Header 'X-CSRF-Token' com o MESMO valor do cookie
-      - Access token válido no cookie 'access_token' ou no Authorization: Bearer
-    """
     token = _token_from_request(request, authorization)
     if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Não autenticado")
 
-    payload = _decode_token(token)  # valida exp/assinatura
+    payload = _decode_token(token)
     sub = payload.get("sub")
     empresa_id = payload.get("empresa_id")
     role = payload.get("role")
@@ -993,10 +897,6 @@ def cookieize(
     response: Response,
     authorization: str = Header(default=None, alias="Authorization"),
 ):
-    """
-    Opcional: converte Authorization: Bearer <token> em cookies httpOnly para o gate HTML.
-    Útil quando o front ainda trabalha com localStorage.
-    """
     token = _token_from_request(request, authorization)
     if not token:
         raise HTTPException(
@@ -1009,7 +909,6 @@ def cookieize(
     if not empresa_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Token sem empresa_id")
 
-    # grava cookies como no login (auto Secure/SameSite)
     set_auth_cookies(
         response,
         request,
@@ -1031,20 +930,17 @@ def register(
     tel_limpo = "".join(c for c in dados.telefone if c.isdigit())
     doc_limpo = "".join(c for c in (dados.doc or "") if c.isdigit())
     try:
-        # validações
         if db.query(models.Usuario).filter_by(email=dados.email_admin).first():
             raise HTTPException(status_code=400, detail="E-mail já está em uso")
         if db.query(models.Empresa).filter_by(telefone=tel_limpo).first():
             raise HTTPException(status_code=400, detail="Telefone já está em uso")
 
-        # valida documento (opcional, apenas formato)
         if doc_limpo and (len(doc_limpo) not in (11, 14)):
             raise HTTPException(
                 status_code=400,
                 detail="Documento deve ter 11 (CPF) ou 14 (CNPJ) dígitos.",
             )
 
-        # unicidade (se quiser impedir duplicidade)
         if doc_limpo:
             ja = db.query(models.Empresa).filter_by(cnpj_cpf=doc_limpo).first()
             if ja:
@@ -1053,20 +949,22 @@ def register(
                     detail="Documento já cadastrado para outra empresa.",
                 )
 
-        # empresa
         empresa = models.Empresa(
             nome=dados.nome,
             telefone=tel_limpo,
             cnpj_cpf=doc_limpo or None,
         )
-        # inicia no FREE por padrão
+
         if hasattr(empresa, "assinatura"):
-            empresa.assinatura = "FREE"
-        # trial automático do PRATA por 7 dias (se as colunas existirem)
-        if hasattr(empresa, "trial_tier"):
-            empresa.trial_tier = "PRATA"
-        if hasattr(empresa, "trial_expires_at"):
-            empresa.trial_expires_at = datetime.utcnow() + timedelta(days=TRIAL_DAYS)
+            empresa.assinatura = PLAN_FREE
+
+        if hasattr(empresa, "trial_tier") and hasattr(empresa, "trial_expires_at"):
+            start_start_trial(empresa, days=TRIAL_DAYS)
+        else:
+            if hasattr(empresa, "trial_tier"):
+                empresa.trial_tier = PLAN_START
+            if hasattr(empresa, "trial_expires_at"):
+                empresa.trial_expires_at = datetime.utcnow() + timedelta(days=TRIAL_DAYS)
 
         db.add(empresa)
         db.flush()
@@ -1074,22 +972,19 @@ def register(
         if hasattr(empresa, "nome_adm") and dados.nome_adm:
             empresa.nome_adm = dados.nome_adm.strip()
 
-        # setores padrão
         for nome_setor in ["Atendimento", "Comercial", "Financeiro", "Suporte Técnico"]:
             db.add(models.Setor(nome=nome_setor, empresa_id=empresa.id))
 
-        # admin (USUÁRIO) – SEM colaborador-espelho
         usuario = models.Usuario(
             nome=(dados.nome_adm or "Admin").strip(),
             email=dados.email_admin,
-            senha_hash=hash_pwd(dados.senha_admin),  # helper central (trunca 72 bytes utf-8)
+            senha_hash=hash_pwd(dados.senha_admin),
             empresa_id=empresa.id,
             is_admin=True,
         )
         db.add(usuario)
         db.flush()
 
-        # avatar (admin) / logo (empresa)
         if dados.avatar_url:
             try:
                 if dados.avatar_url.startswith("data:"):
@@ -1105,7 +1000,6 @@ def register(
             except Exception as e:
                 print("[AVATAR WARN]", e)
 
-        # --- Departamento padrão (SEM vincular ninguém ainda) ---
         try:
             dep_padrao_nome = "Geral"
             dep_padrao = (
@@ -1128,7 +1022,6 @@ def register(
         except Exception as e:
             print("[DEPARTAMENTO WARN]", e)
 
-        # Sincroniza catálogo de permissões (apenas tabela 'permissoes')
         try:
             from backend.routers.permissoes import _sync_catalog_to_db
             _sync_catalog_to_db(db)
@@ -1137,7 +1030,6 @@ def register(
 
         commit_or_block(db)
 
-        # resposta / cookie
         created_at_formatado = None
         try:
             tz_sp = pytz.timezone("America/Sao_Paulo")
@@ -1164,8 +1056,10 @@ def register(
             "email": usuario.email,
             "is_admin": True,
             "created_at": created_at_formatado,
-            "assinatura": empresa.assinatura,
-            "trial_tier": getattr(empresa, "trial_tier", None),
+            "assinatura": normalize_plan(empresa.assinatura),
+            "trial_tier": normalize_plan(getattr(empresa, "trial_tier", None))
+            if getattr(empresa, "trial_tier", None)
+            else None,
             "trial_expires_at": getattr(empresa, "trial_expires_at", None).isoformat()
             if getattr(empresa, "trial_expires_at", None)
             else None,
@@ -1188,15 +1082,9 @@ def forgot_password(
     db: Session = Depends(get_db_session),
     _: Depends = Depends(guard_writable_recovery),
 ):
-    """
-    Envia código numérico (5 dígitos) por e-mail.
-    Sem link.
-    Com rate limit simples para evitar spam/bruteforce.
-    """
     email_norm = norm_email(dados.email)
     ip = _client_ip(request)
 
-    # Rate limit por e-mail + IP
     k1 = f"forgot:email:{_safe_email_key(email_norm)}"
     k2 = f"forgot:ip:{ip}"
     if not _rate_take(_forgot_rate, k1, FORGOT_MAX_REQ, FORGOT_WINDOW_SEC) or not _rate_take(_forgot_rate, k2, FORGOT_MAX_REQ, FORGOT_WINDOW_SEC):
@@ -1213,7 +1101,6 @@ def forgot_password(
         print("[LOG] Usuário não encontrado para:", email_norm)
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
-    # ✅ Token 5 dígitos, tentando evitar colisão
     token = None
     for _ in range(10):
         c = gerar_codigo_reset_5d()
@@ -1241,14 +1128,9 @@ def reset_password(
     db: Session = Depends(get_db_session),
     _: Depends = Depends(guard_writable_recovery),
 ):
-    """
-    Redefine senha com token numérico (5 dígitos).
-    Com limite de tentativas por IP+token para reduzir brute-force.
-    """
     token_in = (dados.token or "").strip()
     ip = _client_ip(request)
 
-    # Rate limit de tentativas (por IP e por token)
     k_ip = f"reset:ip:{ip}"
     k_tok = f"reset:tok:{token_in}"
     if not _rate_take(_reset_attempts, k_ip, RESET_MAX_ATTEMPTS, RESET_ATTEMPT_WINDOW_SEC) or not _rate_take(_reset_attempts, k_tok, RESET_MAX_ATTEMPTS, RESET_ATTEMPT_WINDOW_SEC):
@@ -1261,7 +1143,6 @@ def reset_password(
 
     print(f"[LOG] Requisição reset-password recebida: token={token_in}")
 
-    # Busca pelo token (como é curto, existe chance teórica de colisão, mas mitigamos ao gerar)
     usuario = db.query(models.Usuario).filter_by(reset_token=token_in).first()
     if not usuario:
         print("[LOG] Token não encontrado")
@@ -1272,7 +1153,6 @@ def reset_password(
         print("[LOG] Token expirado")
         raise HTTPException(status_code=400, detail="Token inválido ou expirado")
 
-    # Atualiza senha
     usuario.senha_hash = hash_pwd(dados.nova_senha)
     usuario.reset_token = None
     usuario.reset_token_expira = None

@@ -195,6 +195,54 @@ def _is_statement_timeout_error(e: Exception) -> bool:
     )
 
 
+def _is_duplicate_key_error(e: Exception) -> bool:
+    base = getattr(e, "orig", e)
+    msg = str(base).lower()
+    return (
+        "duplicate key value violates unique constraint" in msg
+        or "unique violation" in msg
+        or "uq_mensagens_" in msg
+    )
+
+
+def _find_existing_mensagem_11_id(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente_id: int | None,
+    msg_id: str | None,
+    instancia_id: int | None,
+) -> int | None:
+    if not msg_id:
+        return None
+
+    sql = text(
+        """
+        SELECT id
+          FROM mensagens
+         WHERE msg_id = :msg_id
+           AND (
+                (:cliente_id IS NOT NULL AND cliente_id = :cliente_id)
+             OR (:empresa_id IS NOT NULL AND :cliente_id IS NOT NULL AND empresa_id = :empresa_id AND cliente_id = :cliente_id)
+             OR (:instancia_id IS NOT NULL AND instancia_id = :instancia_id)
+           )
+         ORDER BY id DESC
+         LIMIT 1
+        """
+    )
+
+    row = db.execute(
+        sql,
+        {
+            "empresa_id": empresa_id,
+            "cliente_id": cliente_id,
+            "msg_id": str(msg_id),
+            "instancia_id": instancia_id,
+        },
+    ).fetchone()
+    return int(row[0]) if row and row[0] is not None else None
+
+
 async def _insert_mensagem_11_with_retry(
     db: Session,
     *,
@@ -211,8 +259,9 @@ async def _insert_mensagem_11_with_retry(
     idx: int,
 ) -> tuple[int | None, bool]:
     """
-    Insere mensagem 1:1 com deduplicação por (instancia_id, msg_id),
-    retry curto para timeout/lock timeout, e RETURNING id.
+    Insere mensagem 1:1 com deduplicação robusta.
+    Mantém o ON CONFLICT atual por (instancia_id, msg_id),
+    mas tolera bancos com outras constraints únicas por msg_id.
     """
     sql = text(
         """
@@ -244,7 +293,56 @@ async def _insert_mensagem_11_with_retry(
             row = db.execute(sql, params).fetchone()
             if row:
                 return int(row[0]), True
-            return None, False
+
+            existente_id = _find_existing_mensagem_11_id(
+                db,
+                empresa_id=empresa_id,
+                cliente_id=cliente_id,
+                msg_id=msg_id,
+                instancia_id=instancia_id,
+            )
+            return existente_id, False
+
+        except IntegrityError as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
+            if _is_duplicate_key_error(e):
+                try:
+                    existente_id = _find_existing_mensagem_11_id(
+                        db,
+                        empresa_id=empresa_id,
+                        cliente_id=cliente_id,
+                        msg_id=msg_id,
+                        instancia_id=instancia_id,
+                    )
+                except Exception:
+                    existente_id = None
+
+                _log_ctx(
+                    "[UPsert][duplicate-tolerated]",
+                    idx=idx,
+                    msg_id=msg_id,
+                    cliente_id=cliente_id,
+                    existing_id=existente_id,
+                    err=str(e),
+                )
+                return existente_id, False
+
+            if _is_statement_timeout_error(e) and tentativa < 2:
+                _log_ctx(
+                    "[UPsert][retry-timeout]",
+                    idx=idx,
+                    msg_id=msg_id,
+                    tentativa=(tentativa + 1),
+                    err=str(e),
+                )
+                await asyncio.sleep(0.15 * (tentativa + 1))
+                continue
+            raise
+
         except Exception as e:
             try:
                 db.rollback()
@@ -1224,6 +1322,35 @@ async def on_messages_upsert(inst_id: str, data):
                     _log_skip("cli_id vazio (select+upsert)", idx=idx, msg_id=msg_id, telefone=telefone)
                     continue
 
+                if msg_id:
+                    try:
+                        msg_existente_id = _find_existing_mensagem_11_id(
+                            db,
+                            empresa_id=empresa_id,
+                            cliente_id=cli_id,
+                            msg_id=str(msg_id),
+                            instancia_id=inst.id,
+                        )
+                    except Exception as e:
+                        LOG(f"[UPsert][erro precheck-msgid] idx={idx} msg_id={msg_id} err={e}")
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
+                        continue
+
+                    if msg_existente_id:
+                        _log_ctx(
+                            "[UPsert][skip-replay-existing-msgid]",
+                            idx=idx,
+                            msg_id=msg_id,
+                            cliente_id=cli_id,
+                            existing_id=msg_existente_id,
+                            status=status,
+                            from_me=from_me,
+                        )
+                        continue
+
                 atendimento = None
                 atendimento_id = None
                 if _HAS_MSG_ATD_FIELD:
@@ -1907,9 +2034,23 @@ async def on_messages_set(inst_id: str, data):
                         _log_ctx("[HIST][skip] upsert_cliente None", idx=idx, msg_id=msg_id, telefone=telefone)
                         continue
 
-                    if msg_id and db.query(models.Mensagem.id).filter_by(instancia_id=inst.id, msg_id=msg_id).first():
-                        _log_ctx("[HIST][skip] duplicada (1:1)", idx=idx, msg_id=msg_id, cliente_id=cli_id)
-                        continue
+                    if msg_id:
+                        msg_existente_id = _find_existing_mensagem_11_id(
+                            db,
+                            empresa_id=empresa_id,
+                            cliente_id=cli_id,
+                            msg_id=str(msg_id),
+                            instancia_id=inst.id,
+                        )
+                        if msg_existente_id:
+                            _log_ctx(
+                                "[HIST][skip] duplicada (1:1)",
+                                idx=idx,
+                                msg_id=msg_id,
+                                cliente_id=cli_id,
+                                existing_id=msg_existente_id,
+                            )
+                            continue
 
                     ack_initial = _ack_from_status(m.get("status"))
                     ack_initial = ack_initial if from_me else None

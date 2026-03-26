@@ -66,6 +66,27 @@
       color:var(--fg);
       line-height:1.5;
     }
+
+    .mode-notice{
+      display:flex;
+      align-items:flex-start;
+      gap:.65rem;
+      padding:.85rem 1rem;
+      margin-bottom:1rem;
+      border:1px solid rgba(245,158,11,.35);
+      background:rgba(245,158,11,.10);
+      color:#fbbf24;
+      border-radius:14px;
+      font-size:.95rem;
+      line-height:1.45;
+    }
+    .mode-notice i{
+      margin-top:.1rem;
+      opacity:.95;
+    }
+    .mode-notice strong{
+      color:#fde68a;
+    }
   </style>
 
   <script src="/frontend/js/app-base.js" defer></script>
@@ -115,6 +136,13 @@
 
         <div class="body" id="body-auto" aria-hidden="true" style="height:0;opacity:0;pointer-events:none">
           <div class="body-inner">
+            <div id="autoModeNotice" class="mode-notice" hidden>
+              <i class="fa-solid fa-triangle-exclamation"></i>
+              <span>
+                Este modo não pode ficar ativo ao mesmo tempo que o <strong>Menu de triagem por departamento</strong>.
+              </span>
+            </div>
+
             <div class="cols">
               <div class="col-card">
                 <div class="block-head">
@@ -217,6 +245,13 @@
 
         <div class="body" id="body-auto-dept" aria-hidden="true" style="height:0;opacity:0;pointer-events:none">
           <div class="body-inner">
+            <div id="deptModeNotice" class="mode-notice" hidden>
+              <i class="fa-solid fa-triangle-exclamation"></i>
+              <span>
+                Este modo não pode ficar ativo ao mesmo tempo que as <strong>Mensagens automáticas</strong>.
+              </span>
+            </div>
+
             <div class="col-card">
               <div class="block-head">
                 <div class="block-title">Mensagem inicial da triagem</div>

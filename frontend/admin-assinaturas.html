@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Hub | Gestão SaaS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <link rel="stylesheet" href="/frontend/css/admin-assinaturas.css">
+</head>
+<body>
+  <nav class="top-nav">
+    <div class="nav-brand">
+      <div class="logo-box"><i class="ph ph-hexagon-fill"></i></div>
+      <span>SaaS Admin Hub</span>
+    </div>
+    
+    <div class="global-metrics">
+      <div class="metric-badge"><i class="ph ph-buildings"></i> <span id="metricEmpresas">0</span> Total</div>
+      <div class="metric-badge success"><i class="ph ph-check-circle"></i> <span id="metricAtivas">0</span> Ativas</div>
+      <div class="metric-badge warning"><i class="ph ph-clock"></i> <span id="metricTrial">0</span> Trial</div>
+      <div class="metric-badge primary"><i class="ph ph-currency-dollar"></i> <span id="metricMrr">R$ 0</span> MRR</div>
+    </div>
+
+    <div class="nav-actions">
+      <span class="session-status" id="sessionState"><i class="ph ph-shield-warning"></i> Sem sessão</span>
+      <button id="openLoginBtn" class="btn primary"><i class="ph ph-lock-key"></i> Autenticar</button>
+      <button id="logoutBtn" class="btn ghost danger hidden"><i class="ph ph-sign-out"></i> Sair</button>
+    </div>
+  </nav>
+
+  <main class="split-layout">
+    
+    <aside class="master-pane">
+      <div class="master-header">
+        <div class="search-box">
+          <i class="ph ph-magnifying-glass"></i>
+          <input type="text" id="searchInput" placeholder="Buscar empresa (Nome, CNPJ, Tel)...">
+        </div>
+        <div class="filter-row">
+          <select id="planFilter">
+            <option value="">Qualquer Plano</option>
+            <option value="START">Start</option>
+            <option value="BUSINESS">Business</option>
+            <option value="ENTERPRISE">Enterprise</option>
+            <option value="FREE">Free</option>
+          </select>
+          <select id="statusFilter">
+            <option value="">Qualquer Status</option>
+            <option value="active">Ativo</option>
+            <option value="trial">Trial</option>
+            <option value="past_due">Expirado</option>
+          </select>
+          <button id="refreshBtn" class="btn icon-only" title="Atualizar Lista"><i class="ph ph-arrows-clockwise"></i></button>
+          <button id="exportCsvBtn" class="btn icon-only ghost" title="Exportar CSV"><i class="ph ph-download-simple"></i></button>
+        </div>
+      </div>
+
+      <div class="master-list" id="companyList">
+        <div class="empty-state">
+          <i class="ph ph-folder-lock"></i>
+          <p>Faça login para carregar os clientes.</p>
+        </div>
+      </div>
+    </aside>
+
+    <section class="detail-pane">
+      <div id="detailEmpty" class="empty-state large">
+        <i class="ph ph-cursor-click"></i>
+        <h2>Nenhuma empresa selecionada</h2>
+        <p>Selecione uma empresa na lista ao lado para gerenciar sua assinatura e limites.</p>
+      </div>
+
+      <div id="detailContent" class="detail-content hidden">
+        <header class="detail-header">
+          <div class="header-info">
+            <h1 id="detailCompanyName">Nome da Empresa</h1>
+            <p id="detailCompanyInfo">ID • Admin • Telefone • CNPJ</p>
+          </div>
+          <div class="header-status">
+            <span class="badge" id="detailPlanPill">PLANO • STATUS</span>
+          </div>
+        </header>
+
+        <div class="detail-tabs">
+          <button class="tab-btn active" data-target="tab-overview">Visão Geral</button>
+          <button class="tab-btn" data-target="tab-plan">Plano e Trial</button>
+          <button class="tab-btn" data-target="tab-limits">Limites Customizados</button>
+          <button class="tab-btn" data-target="tab-connections">Conexões</button>
+          <button class="tab-btn" data-target="tab-logs">Histórico</button>
+        </div>
+
+        <div class="tab-content-area">
+          
+          <div class="tab-pane active" id="tab-overview">
+            <h3 class="section-title">Consumo Atual (Sparklines)</h3>
+            <div class="stats-grid" id="detailStats">
+              </div>
+            
+            <h3 class="section-title mt-xl">Segurança de Acesso</h3>
+            <div class="card-box flex-row-between">
+              <div>
+                <strong>Exigir 2FA / Token de Login</strong>
+                <p class="text-sm muted">Colaboradores desta empresa precisarão de token para acessar o painel deles.</p>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="requerTokenLogin">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <button id="saveLoginConfigBtn" class="btn primary mt-sm">Salvar Segurança</button>
+          </div>
+
+          <div class="tab-pane" id="tab-plan">
+            <div class="split-cards">
+              <div class="card-box">
+                <h3 class="section-title"><i class="ph ph-medal"></i> Assinatura Oficial</h3>
+                <div class="form-group">
+                  <label>Plano Aplicado</label>
+                  <select id="planSelect">
+                    <option value="START">Start</option>
+                    <option value="BUSINESS">Business</option>
+                    <option value="ENTERPRISE">Enterprise</option>
+                    <option value="FREE">Free</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Data de Expiração</label>
+                  <input type="datetime-local" id="expiresAtInput">
+                </div>
+                <button id="applyPlanBtn" class="btn primary w-full mt-sm">Atualizar Assinatura</button>
+              </div>
+
+              <div class="card-box">
+                <h3 class="section-title"><i class="ph ph-timer"></i> Gestão de Trial</h3>
+                <div class="form-group">
+                  <label>Nível do Trial</label>
+                  <select id="trialPlanSelect">
+                    <option value="START">Start</option>
+                    <option value="BUSINESS">Business</option>
+                    <option value="ENTERPRISE">Enterprise</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Duração (Dias)</label>
+                  <input type="number" id="trialDaysInput" min="1" max="365" value="7">
+                </div>
+                <div class="btn-group mt-sm">
+                  <button id="startTrialBtn" class="btn primary flex-1">Iniciar Trial</button>
+                  <button id="cancelTrialBtn" class="btn ghost danger">Cancelar</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-pane" id="tab-limits">
+            <div class="card-box">
+              <div class="alert-info">
+                <i class="ph ph-info"></i>
+                <span>Valores inseridos aqui ignoram as regras do plano atual da empresa. Deixe em branco para usar o limite padrão do plano.</span>
+              </div>
+              
+              <div class="limits-grid mt-lg">
+                <div class="form-group"><label>Números WPP</label><input type="number" id="ovWhatsappInstances" placeholder="Padrão"></div>
+                <div class="form-group"><label>Membros (Equipe)</label><input type="number" id="ovUsersMax" placeholder="Padrão"></div>
+                <div class="form-group"><label>Filas/Departamentos</label><input type="number" id="ovDepartmentsMax" placeholder="Padrão"></div>
+                <div class="form-group"><label>Máx. Contatos</label><input type="number" id="ovContactsMax" placeholder="Padrão"></div>
+                <div class="form-group"><label>Disparos por Mês</label><input type="number" id="ovBroadcastsMax" placeholder="Padrão"></div>
+                <div class="form-group"><label>Campanhas Ativas</label><input type="number" id="ovCampaignsMax" placeholder="Padrão"></div>
+              </div>
+              <button id="saveOverridesBtn" class="btn primary mt-lg w-full">Forçar Novos Limites</button>
+            </div>
+          </div>
+
+          <div class="tab-pane" id="tab-connections">
+            <div class="split-cards">
+              <div>
+                <h3 class="section-title">Instâncias Conectadas</h3>
+                <div id="instancesList" class="data-list"></div>
+              </div>
+              <div>
+                <h3 class="section-title">Últimos Disparos</h3>
+                <div id="recentBroadcasts" class="data-list"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-pane" id="tab-logs">
+            <h3 class="section-title"><i class="ph ph-clock-counter-clockwise"></i> Log de Auditoria do Admin</h3>
+            <div class="timeline" id="logsTimeline">
+              </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal-overlay hidden" id="loginModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Acesso Administrativo</h2>
+        <button class="btn icon-only ghost" id="closeLoginModal"><i class="ph ph-x"></i></button>
+      </div>
+      <div class="form-group mt-md">
+        <label>Senha Master</label>
+        <input type="password" id="adminPasswordInput" placeholder="••••••••">
+      </div>
+      <button id="loginBtn" class="btn primary w-full mt-lg">Entrar no Hub</button>
+      <p class="error-msg" id="loginError"></p>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden">
+    <i class="ph ph-bell-ringing"></i> <span id="toastMsg"></span>
+  </div>
+  
+  <script src="/frontend/js/pages/admin-assinaturas.js"></script>
+</body>
+</html>

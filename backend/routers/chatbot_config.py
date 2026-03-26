@@ -36,30 +36,19 @@ def _trace(e: Exception) -> str:
         return f"{e.__class__.__name__}: {e}"
 
 
-# ========= helpers (gerais) =========
 def _prune_for_storage(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Normaliza e enxuga o JSON que vai pro banco em chatbot_configs.config
-
-    ✅ Importante:
-    - Mantém textos (welcome/off/menu) mesmo se disabled, pra não perder.
-    - Mantém items de departamentos (enabled/label/keywords/text).
-    """
     data: Dict[str, Any] = {}
 
-    # ativo
     if "ativo" in cfg:
         data["ativo"] = bool(cfg["ativo"])
 
     f_in = cfg.get("features", {}) or {}
     features: Dict[str, Any] = {}
 
-    # ===== auto_messages (simples) =====
     am = f_in.get("auto_messages") or {}
     if isinstance(am, dict) and (("enabled" in am) or ("welcome" in am) or ("off_hours" in am) or am):
         am_store: Dict[str, Any] = {"enabled": bool(am.get("enabled", False))}
 
-        # welcome
         if isinstance(am.get("welcome"), dict):
             w = am["welcome"] or {}
             w_store: Dict[str, Any] = {
@@ -73,7 +62,6 @@ def _prune_for_storage(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 w_store["end"] = str(w.get("end") or "")
             am_store["welcome"] = w_store
 
-        # off_hours
         if isinstance(am.get("off_hours"), dict):
             o = am["off_hours"] or {}
             o_store: Dict[str, Any] = {
@@ -87,18 +75,15 @@ def _prune_for_storage(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 o_store["end"] = str(o.get("end") or "")
             am_store["off_hours"] = o_store
 
-        # timezone opcional dentro do auto_messages
         if "timezone" in am:
             am_store["timezone"] = str(am.get("timezone") or "")
 
         features["auto_messages"] = am_store
 
-    # ===== auto_messages_departments (triagem/ramal) =====
     ad = f_in.get("auto_messages_departments") or {}
     if isinstance(ad, dict) and (("enabled" in ad) or ("welcome" in ad) or ("items" in ad) or ad):
         ad_store: Dict[str, Any] = {"enabled": bool(ad.get("enabled", False))}
 
-        # welcome (menu/abertura dos departamentos)
         if isinstance(ad.get("welcome"), dict):
             w = ad["welcome"] or {}
             w_store: Dict[str, Any] = {
@@ -112,12 +97,6 @@ def _prune_for_storage(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 w_store["end"] = str(w.get("end") or "")
             ad_store["welcome"] = w_store
 
-        # itens por departamento
-        # formato sugerido:
-        # items: {
-        #   "12": {"enabled": true, "label":"Financeiro", "keywords":["fin","financeiro"], "text":"..."},
-        #   "13": {"enabled": true}
-        # }
         items_in = ad.get("items")
         if isinstance(items_in, dict):
             items_out: Dict[str, Any] = {}
@@ -138,18 +117,14 @@ def _prune_for_storage(cfg: Dict[str, Any]) -> Dict[str, Any]:
                     if isinstance(kws, list):
                         tmp["keywords"] = [str(x).strip() for x in kws if str(x).strip()]
                     elif isinstance(kws, str):
-                        # aceita "fin, financeiro, cobrança"
                         tmp["keywords"] = [s.strip() for s in kws.split(",") if s.strip()]
 
-                # só salva se tiver algo útil
                 if tmp:
                     items_out[did_s] = tmp
 
             if items_out:
                 ad_store["items"] = items_out
 
-        # controles opcionais (triagem)
-        # ex: max_attempts, fallback_text
         if "max_attempts" in ad:
             try:
                 ad_store["max_attempts"] = int(ad.get("max_attempts") or 0)
@@ -160,11 +135,9 @@ def _prune_for_storage(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
         features["auto_messages_departments"] = ad_store
 
-    # guarda features se tiver algo
     if features:
         data["features"] = features
 
-    # timezone no topo (se você usar isso no front)
     if "timezone" in cfg:
         data["timezone"] = str(cfg.get("timezone") or "")
 
@@ -186,7 +159,6 @@ def _safe_select_chatbot_config(db: Session, empresa_id: int, instancia_id: int)
         return None
 
 
-# ========= helpers (colunas ↔ JSON) =========
 def _parse_hhmm(val: Optional[str]) -> Optional[dtime]:
     if val is None:
         return None
@@ -203,12 +175,9 @@ def _parse_hhmm(val: Optional[str]) -> Optional[dtime]:
 
 
 def _tz_from_config(cfg: Dict[str, Any]) -> Optional[str]:
-    # aceita timezone em dois lugares:
-    # 1) topo: cfg.timezone
-    # 2) cfg.features.auto_messages.timezone
     tz = cfg.get("timezone")
     if tz:
-        return str(tz)
+      return str(tz)
 
     am = (cfg.get("features", {}) or {}).get("auto_messages", {}) or {}
     tz2 = am.get("timezone")
@@ -233,15 +202,10 @@ def _extract_auto_fields(cfg_in: Dict[str, Any]) -> dict:
 
 
 def _apply_columns_from_config(row: models.ChatbotConfig, cfg_in: Dict[str, Any]) -> None:
-    """
-    Preenche colunas auxiliares (tz + janelas), com fallback seguro.
-    """
     fields = _extract_auto_fields(cfg_in)
 
-    # tz NUNCA NULL (coluna é NOT NULL no seu model)
     row.tz = (fields["tz"] or getattr(row, "tz", None) or "America/Sao_Paulo")
 
-    # welcome
     row.welcome_enabled = bool(fields["welcome_enabled"])
     if row.welcome_enabled:
         row.welcome_start = fields["welcome_start"] or dtime(8, 0)
@@ -250,7 +214,6 @@ def _apply_columns_from_config(row: models.ChatbotConfig, cfg_in: Dict[str, Any]
         row.welcome_start = None
         row.welcome_end = None
 
-    # off-hours
     row.off_enabled = bool(fields["off_enabled"])
     if row.off_enabled:
         row.off_start = fields["off_start"] or dtime(18, 0)
@@ -260,7 +223,6 @@ def _apply_columns_from_config(row: models.ChatbotConfig, cfg_in: Dict[str, Any]
         row.off_end = None
 
 
-# ========= routes =========
 @router.get("/config")
 def get_config(
     empresa_id: int = Query(..., description="ID da empresa"),
@@ -268,13 +230,6 @@ def get_config(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """
-    Retorna a configuração de chatbot para uma instância específica.
-
-    Segurança multi-empresa:
-      - empresa_id deve ser igual a user.empresa_id
-      - instancia_id deve pertencer à mesma empresa.
-    """
     if int(user.empresa_id) != int(empresa_id):
         raise HTTPException(status_code=403, detail="Empresa não permitida")
 
@@ -289,15 +244,12 @@ def get_config(
     if not inst:
         raise HTTPException(status_code=404, detail="Instância não encontrada para esta empresa")
 
-    # config atual
     row = _safe_select_chatbot_config(db, empresa_id, instancia_id)
     cfg_raw = row.config if row and getattr(row, "config", None) else {}
 
-    # nome da empresa
     empresa = db.get(models.Empresa, empresa_id)
     empresa_nome = empresa.nome.strip() if empresa and empresa.nome else None
 
-    # departamentos (preferindo vinculados à instância)
     deps_rows = []
     try:
         deps_rows = db.execute(
@@ -357,13 +309,6 @@ def put_config(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """
-    Atualiza a configuração do chatbot para uma instância específica.
-
-    Segurança multi-empresa:
-      - empresa_id deve ser igual a user.empresa_id
-      - instancia_id deve pertencer à mesma empresa.
-    """
     logger.info("PUT chatbot/config emp=%s inst=%s", empresa_id, instancia_id)
 
     if int(user.empresa_id) != int(empresa_id):
@@ -387,8 +332,24 @@ def put_config(
     if not isinstance(cfg_in, dict):
         raise HTTPException(status_code=400, detail="Campo 'config' inválido")
 
-    # prune (normaliza/limpa)
     to_store = _prune_for_storage(cfg_in)
+
+    features = (to_store.get("features") or {}) if isinstance(to_store, dict) else {}
+
+    auto = (features.get("auto_messages") or {}) if isinstance(features, dict) else {}
+    dept = (features.get("auto_messages_departments") or {}) if isinstance(features, dict) else {}
+
+    auto_enabled = bool(auto.get("enabled", False))
+    auto_welcome_enabled = bool((auto.get("welcome") or {}).get("enabled", False))
+    auto_off_enabled = bool((auto.get("off_hours") or {}).get("enabled", False))
+
+    dept_enabled = bool(dept.get("enabled", False))
+    dept_welcome_enabled = bool((dept.get("welcome") or {}).get("enabled", False))
+
+    auto_active = auto_enabled and (auto_welcome_enabled or auto_off_enabled)
+    dept_active = dept_enabled and dept_welcome_enabled
+
+    computed_ativo = bool(auto_active or dept_active)
 
     row = _safe_select_chatbot_config(db, empresa_id, instancia_id)
     creating = row is None
@@ -397,20 +358,17 @@ def put_config(
         row = models.ChatbotConfig(
             empresa_id=empresa_id,
             instancia_id=instancia_id,
-            instancia_nome=inst.instance_name,  # ✅ espelha
+            instancia_nome=inst.instance_name,
             config=to_store,
-            ativo=bool(cfg_in.get("ativo", True)),
+            ativo=computed_ativo,
         )
-        _apply_columns_from_config(row, cfg_in)
+        _apply_columns_from_config(row, to_store)
         db.add(row)
     else:
         row.config = to_store
-        row.ativo = bool(cfg_in.get("ativo", row.ativo))
-
-        # ✅ mantém instancia_nome atualizado
+        row.ativo = computed_ativo
         row.instancia_nome = inst.instance_name
-
-        _apply_columns_from_config(row, cfg_in)
+        _apply_columns_from_config(row, to_store)
 
     try:
         db.commit()
@@ -439,9 +397,16 @@ def put_config(
     except Exception:
         pass
 
-    logger.info("PUT chatbot/config OK emp=%s inst=%s creating=%s", empresa_id, instancia_id, creating)
+    logger.info(
+        "PUT chatbot/config OK emp=%s inst=%s creating=%s ativo=%s",
+        empresa_id,
+        instancia_id,
+        creating,
+        row.ativo,
+    )
     return {
         "empresa_id": empresa_id,
         "instancia_id": instancia_id,
+        "ativo": bool(row.ativo),
         "config": row.config or {},
     }

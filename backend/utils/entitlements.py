@@ -5,22 +5,49 @@ from typing import Any, Optional, Dict
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from backend.utils.plans import plan_limits, has_feature, effective_plan
+from backend.utils.plans import (
+    plan_limits,
+    plan_features,
+    has_feature,
+    effective_plan,
+)
 from backend.utils.usage import usage_counts
 
 
-def _limit_for(emp: Any, key: str) -> Optional[int]:
-    limits = plan_limits(emp)
-    v = limits.get(key, None)
-    if v is None:
-        return None
+def _safe_int(value: Any, default: int = 0) -> int:
     try:
-        return int(v)
+        return int(value)
+    except Exception:
+        return default
+
+
+def _limit_for(emp: Any, key: str) -> Optional[int]:
+    """
+    Retorna o limite configurado para a quota.
+    - int => limite numérico
+    - None => sem limite
+    """
+    limits = plan_limits(emp)
+    value = limits.get(key, None)
+
+    if value is None:
+        return None
+
+    try:
+        return int(value)
     except Exception:
         return None
 
 
-def enforce_feature(emp: Any, feature_key: str, *, message: Optional[str] = None) -> None:
+def enforce_feature(
+    emp: Any,
+    feature_key: str,
+    *,
+    message: Optional[str] = None,
+) -> None:
+    """
+    Bloqueia acesso a um recurso se o plano não tiver a feature.
+    """
     if not has_feature(emp, feature_key):
         raise HTTPException(
             status_code=403,
@@ -38,65 +65,103 @@ def enforce_quota(
 ) -> None:
     """
     Bloqueia se current + delta ultrapassar o limite do plano.
-    Ex.: ao criar 1 novo colaborador: enforce_quota(emp, "users_max", current_users, delta=1)
+
+    Ex.:
+      enforce_quota(emp, "users_max", current_users, delta=1)
     """
     limit = _limit_for(emp, key)
+
+    # None = sem limite
     if limit is None:
-        return  # sem limite (caso você use None no futuro)
-    if (int(current) + int(delta)) > int(limit):
+        return
+
+    current_i = _safe_int(current, 0)
+    delta_i = _safe_int(delta, 0)
+
+    if (current_i + delta_i) > limit:
         raise HTTPException(
             status_code=403,
-            detail=message or f"Limite do plano atingido para '{key}' ({current}/{limit}).",
+            detail=message or f"Limite do plano atingido para '{key}' ({current_i}/{limit}).",
         )
 
 
-def enforce_quotas_bulk(emp: Any, counts: Dict[str, int]) -> Dict[str, Dict[str, int]]:
+def quota_status(
+    emp: Any,
+    key: str,
+    current: int,
+) -> Dict[str, Any]:
     """
-    Útil pro front: retorna {key: {current, limit}} para exibir "x de y".
+    Retorna o estado de uma quota específica.
     """
-    out: Dict[str, Dict[str, int]] = {}
+    limit = _limit_for(emp, key)
+    current_i = _safe_int(current, 0)
+
+    if limit is None:
+        return {
+            "current": current_i,
+            "limit": None,
+            "remaining": None,
+            "percent": None,
+            "blocked": False,
+        }
+
+    remaining = max(0, limit - current_i)
+    percent = 0 if limit <= 0 else round((current_i / limit) * 100, 2)
+
+    return {
+        "current": current_i,
+        "limit": limit,
+        "remaining": remaining,
+        "percent": percent,
+        "blocked": current_i >= limit,
+    }
+
+
+def enforce_quotas_bulk(emp: Any, counts: Dict[str, int]) -> Dict[str, Dict[str, Any]]:
+    """
+    Retorna um snapshot pronto para o front:
+
+      {
+        "users_max": {
+          "current": 3,
+          "limit": 10,
+          "remaining": 7,
+          "percent": 30.0,
+          "blocked": False
+        }
+      }
+    """
+    out: Dict[str, Dict[str, Any]] = {}
     limits = plan_limits(emp)
-    for key, current in counts.items():
-        lim = limits.get(key)
-        if lim is None:
+
+    for key, current in (counts or {}).items():
+        if key not in limits:
             continue
-        try:
-            out[key] = {"current": int(current), "limit": int(lim)}
-        except Exception:
-            pass
+        out[key] = quota_status(emp, key, current)
+
     return out
 
 
 def entitlements_payload(db: Session, emp: Any) -> Dict[str, Any]:
     """
-    Payload único para o front e para decisões de UI:
-      - plan: plano efetivo
-      - limits: dicionário de limites do plano (quota)
-      - features: flags liga/desliga por plano
-      - usage: contagens atuais no banco (current)
-      - quotas: {key: {current, limit}} pronto pra mostrar "x de y"
+    Payload único para UI e regras de negócio:
+
+    {
+      "plan": "START",
+      "limits": {...},
+      "features": {...},
+      "usage": {...},
+      "quotas": {...}
+    }
     """
     plan = effective_plan(emp)
-
     limits = plan_limits(emp)
+    features = plan_features(emp)
 
-    # Monta features a partir do has_feature para não depender de estrutura interna do plans.py
-    # (Se você tiver uma lista fixa de features, coloque aqui.)
-    feature_keys = [
-        "feature_automation",
-        "feature_advanced_automation",
-        "feature_reports_basic",
-        "feature_reports_advanced",
-        "feature_api_webhooks",
-        "feature_audit_log",
-        "feature_export",
-    ]
-    features = {k: bool(has_feature(emp, k)) for k in feature_keys}
+    # contagens atuais do banco
+    usage = usage_counts(db, emp.id) or {}
 
-    # Uso atual (counts)
-    usage = usage_counts(db, emp.id)
-
-    # Quotas bonitinhas (current/limit)
+    # current/limit/remaining/percent
     quotas = enforce_quotas_bulk(emp, usage)
 
     return {

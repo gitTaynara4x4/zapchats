@@ -1,4 +1,3 @@
-# backend/models.py
 from __future__ import annotations
 
 import enum
@@ -14,28 +13,36 @@ from sqlalchemy.orm import relationship, backref
 from sqlalchemy import Enum as SqlEnum
 
 from backend.database import Base
-from backend.utils.plans import plan_limit, limit_value
+from backend.utils.plans import (
+    plan_limit,
+    limit_value,
+    normalize_plan,
+    effective_plan as resolve_effective_plan,
+    is_trial_active as plan_is_trial_active,
+    is_paid_active as plan_is_paid_active,
+    PLAN_FREE,
+    PLAN_START,
+    PLAN_BUSINESS,
+    PLAN_ENTERPRISE,
+)
 
 
 # =========================
 # Planos e helpers
 # =========================
 class PlanoAssinatura(str, enum.Enum):
-    PRATA      = "PRATA"
-    OURO       = "OURO"
-    PLATINA    = "PLATINA"
-    DIAMANTE   = "DIAMANTE"
-    ASCENDENTE = "ASCENDENTE"
-    IMORTAL    = "IMORTAL"
-    RADIANTE   = "RADIANTE"
+    FREE       = PLAN_FREE
+    START      = PLAN_START
+    BUSINESS   = PLAN_BUSINESS
+    ENTERPRISE = PLAN_ENTERPRISE
 
 
 def max_instancias_por_plano(plano: str | None) -> int:
     """
     Evita duplicar números no models.
-    Usa a matriz de entitlements do plans.py novo.
+    Usa a matriz de entitlements do plans.py.
     """
-    return limit_value(plano or "FREE", "whatsapp_instances_max", default=0)
+    return limit_value(plano or PLAN_FREE, "whatsapp_instances_max", default=0)
 
 
 # =========================
@@ -60,14 +67,14 @@ class Empresa(Base):
     nome     = Column(String, nullable=False)
     telefone = Column(String, nullable=False)
 
-    # Plano atual selecionado (pago ou FREE) – (WhatsApp/instâncias)
-    assinatura = Column(String, nullable=False, server_default="FREE")
+    # Plano atual selecionado (pago ou FREE)
+    assinatura = Column(String, nullable=False, server_default=PLAN_FREE)
 
-    # Trial opcional (ex.: PRATA por 7 dias) – (WhatsApp/instâncias)
+    # Trial opcional (START / BUSINESS / ENTERPRISE)
     trial_tier       = Column(String, nullable=True)
     trial_expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
-    # ✅ Validade do plano PAGO (se estiver setado e no futuro, o pago prevalece)
+    # Validade do plano PAGO (se estiver setado e no futuro, o pago prevalece)
     plano_expira_em  = Column(TIMESTAMP(timezone=True), nullable=True)
 
     quantidade_instancias = Column(Integer, nullable=False, server_default="0")
@@ -79,13 +86,13 @@ class Empresa(Base):
 
     cnpj_cpf = Column(String, nullable=True, index=True)
 
-    # 🔹 NOVO: flag global da empresa pra exigir 2º fator (token) no login dos colaboradores
+    # Flag global da empresa pra exigir 2º fator (token) no login dos colaboradores
     requer_token_login = Column(Boolean, nullable=False, server_default="false")
 
     # =========================
     # Módulo de E-mail (cotas independentes)
     # =========================
-    # Plano PAGO de E-mail (ex.: PRATA/OURO/...)
+    # Plano PAGO de E-mail
     email_assinatura       = Column(String, nullable=True)
     email_plano_expira_em  = Column(TIMESTAMP(timezone=True), nullable=True)
 
@@ -98,7 +105,6 @@ class Empresa(Base):
     max_email_accounts_override = Column(Integer, nullable=True)
 
     # Override: limite de armazenamento total de e-mails (bytes) da EMPRESA
-    # NULL => usa função/ plano padrão.
     email_storage_override_bytes = Column(Integer, nullable=True)
 
     # =========================
@@ -128,7 +134,7 @@ class Empresa(Base):
         passive_deletes=True,
     )
 
-    # (opcional) navegar pelas mensagens/ anexos de e-mail
+    # navegar pelas mensagens/anexos de e-mail
     email_messages    = relationship("EmailMessage",    back_populates="empresa", cascade="all, delete-orphan")
     email_attachments = relationship("EmailAttachment", back_populates="empresa", cascade="all, delete-orphan")
 
@@ -136,38 +142,26 @@ class Empresa(Base):
     @property
     def plano(self) -> str:
         """Alias para compat: lê o campo `assinatura`."""
-        return (self.assinatura or "FREE").upper()
+        return normalize_plan(self.assinatura or PLAN_FREE)
 
     @plano.setter
     def plano(self, value: str) -> None:
         """Alias para compat: escreve no campo `assinatura`."""
-        self.assinatura = (value or "FREE").upper()
+        self.assinatura = normalize_plan(value or PLAN_FREE)
 
     @property
     def trial_active(self) -> bool:
-        return bool(
-            self.trial_tier
-            and self.trial_expires_at
-            and datetime.now(timezone.utc) < self.trial_expires_at
-        )
+        return plan_is_trial_active(self)
 
     @property
     def paid_active(self) -> bool:
         """Ativo se assinatura != FREE e (sem expiração ou não expirado)."""
-        if (self.assinatura or "FREE").upper() == "FREE":
-            return False
-        if not self.plano_expira_em:
-            return True
-        return datetime.now(timezone.utc) < self.plano_expira_em
+        return plan_is_paid_active(self)
 
     @property
     def effective_tier(self) -> str:
         """Prioridade: PAGO > TRIAL > FREE"""
-        if self.paid_active:
-            return (self.assinatura or "FREE").upper()
-        if self.trial_active:
-            return str(self.trial_tier).upper()
-        return "FREE"
+        return resolve_effective_plan(self)
 
     # ---------- Helpers do Módulo de E-mail ----------
     @property
@@ -189,33 +183,36 @@ class Empresa(Base):
     @property
     def email_quota_effective(self) -> int:
         """
-        Cota efetiva de caixas de e-mail: override -> plano pago -> trial -> 0.
-        (somente contagem de CONTAS; armazenamento total é outra quota)
+        Cota efetiva de caixas de e-mail:
+        override -> plano pago -> trial -> 0.
+
+        Mantive compatibilidade com tiers legados também.
         """
-        # 1) Override manda (inclusive 0 para bloquear)
         if self.max_email_accounts_override is not None:
             return int(self.max_email_accounts_override)
 
-        # 2) Plano pago
         if self.email_paid_active:
-            tier = (self.email_assinatura or "").upper()
-        # 3) Trial
+            tier = normalize_plan(self.email_assinatura or "")
         elif self.email_trial_active:
-            tier = (self.email_trial_tier or "").upper()
+            tier = normalize_plan(self.email_trial_tier or "")
         else:
             return 0
 
-        # Mapeamento interno de cotas por tier (ajuste se quiser)
         limits = {
+            PLAN_START: 1,
+            PLAN_BUSINESS: 3,
+            PLAN_ENTERPRISE: 10,
+
+            # compat legado eventual
             "PRATA": 1,
-            "OURO": 2,
-            "PLATINA": 5,
+            "OURO": 3,
+            "PLATINA": 10,
             "DIAMANTE": 10,
-            "RADIANTE": 50,
-            "ASCENDENTE": 20,
-            "IMORTAL": 100,
+            "ASCENDENTE": 10,
+            "IMORTAL": 10,
+            "RADIANTE": 10,
         }
-        return limits.get(tier, 0)
+        return int(limits.get(tier, 0))
 
 
 # =========================
@@ -262,7 +259,6 @@ class EmpresaInstancia(Base):
     # preferências de histórico: "none" | "24h" | "7d"
     historico_restaurar = Column(String, nullable=True, server_default="none")
 
-    # ── relationships
     empresa = relationship("Empresa", back_populates="instancias")
 
     mensagens = relationship(
@@ -317,8 +313,6 @@ class Cliente(Base):
         UniqueConstraint("empresa_id", "telefone_norm", name="u_emp_cli_tel_norm"),
         Index("ix_clientes_empresa_inst", "empresa_id", "instancia_id"),
         Index("ix_clientes_tel_norm", "telefone_norm"),
-
-        # ✅ NOVO: ajuda a buscar quem está em triagem por empresa/instância
         Index("ix_clientes_triagem", "empresa_id", "instancia_id", "triagem_ativa"),
     )
 
@@ -339,11 +333,9 @@ class Cliente(Base):
         index=True,
     )
 
-    # dados básicos
     nome          = Column(String, default="Cliente")
     telefone      = Column(String, nullable=False)
 
-    # IMPORTANTE: coluna gerada no banco → nunca enviar valor no INSERT/UPDATE
     telefone_norm = Column(
         String,
         nullable=False,
@@ -355,22 +347,18 @@ class Cliente(Base):
     avatar_url    = Column(Text)
     timestamp     = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
-    # informações de WhatsApp/Evolution
     nome_whatsapp   = Column(String)
     is_business     = Column(Boolean, default=False)
     status_whatsapp = Column(String)
 
-    # anotações e perfis públicos
     sobre_cliente = Column(Text)
     descricao     = Column(Text)
     website       = Column(String)
 
-    # contato/documentos
     cpf_cnpj = Column(String)
     rg       = Column(String)
     email    = Column(String)
 
-    # dados pessoais/endereço
     data_nascimento = Column(DateTime)
     genero          = Column(String)
     cep             = Column(String)
@@ -382,15 +370,11 @@ class Cliente(Base):
     estado          = Column(String)
     nome_completo   = Column(String)
 
-    # =========================
-    # ✅ NOVO: estado da TRIAGEM (departamentos)
-    # =========================
     triagem_ativa = Column(Boolean, nullable=False, server_default="false")
     triagem_tentativas = Column(Integer, nullable=False, server_default="0")
     triagem_iniciada_em = Column(TIMESTAMP(timezone=True), nullable=True)
     triagem_ultima_msg_em = Column(TIMESTAMP(timezone=True), nullable=True)
 
-    # relacionamentos
     empresa   = relationship("Empresa", back_populates="clientes")
     mensagens = relationship("Mensagem", back_populates="cliente", cascade="all, delete-orphan")
     midias    = relationship("Midia", back_populates="cliente", cascade="all, delete-orphan")
@@ -414,10 +398,6 @@ class Mensagem(Base):
     __table_args__ = (
         Index("ix_mensagens_msg_id", "msg_id"),
         Index("ix_mensagens_empresa_cliente_ts", "empresa_id", "cliente_id", "timestamp"),
-
-        # ✅ BLINDAGEM 1:1 (idempotência):
-        # impede duplicar a mesma mensagem por cliente quando msg_id existe,
-        # e evita corrida (select+insert) ao usar UPSERT no handler.
         Index(
             "uq_mensagens_cliente_msgid_notnull",
             "cliente_id", "msg_id",
@@ -437,7 +417,6 @@ class Mensagem(Base):
         index=True,
     )
 
-    # 🔹 NOVO CAMPO: FK pro atendimento
     atendimento_id = Column(
         Integer,
         ForeignKey("atendimentos.id", ondelete="SET NULL"),
@@ -450,7 +429,7 @@ class Mensagem(Base):
     lida      = Column(Boolean, default=False)
     timestamp = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
-    msg_id = Column(String, index=True)  # id do Baileys/Evolution
+    msg_id = Column(String, index=True)
     ack    = Column(Integer, default=0)
 
     cliente     = relationship("Cliente", back_populates="mensagens")
@@ -488,7 +467,7 @@ class Midia(Base):
     mensagem_id   = Column(Integer, ForeignKey("mensagens.id"))
     instancia_id  = Column(Integer, ForeignKey("empresas_instancias.id", ondelete="SET NULL"), index=True, nullable=True)
 
-    tipo          = Column(String)         # image / audio / document / video / sticker
+    tipo          = Column(String)
     filename      = Column(String)
     mimetype      = Column(String)
     nome_original = Column(String)
@@ -507,6 +486,8 @@ class Midia(Base):
     cliente   = relationship("Cliente", back_populates="midias")
     grupo     = relationship("Grupo")
     mensagem  = relationship("Mensagem", foreign_keys=[mensagem_id])
+
+
 # =========================
 # Grupo
 # =========================
@@ -539,10 +520,7 @@ class Grupo(Base):
 class MensagemGrupo(Base):
     __tablename__ = "mensagens_grupo"
     __table_args__ = (
-        # idempotência: 1 msg_id = 1 linha (se isso fizer sentido no seu fluxo)
         UniqueConstraint("msg_id", name="u_msg_grupo_msgid"),
-
-        # buscas comuns
         Index("ix_msggrupo_grupo_ts", "grupo_id", "timestamp"),
         Index("ix_msggrupo_empresa", "empresa_id"),
         Index("ix_msggrupo_author", "author_jid"),
@@ -561,28 +539,23 @@ class MensagemGrupo(Base):
         index=True,
     )
 
-    # metadados do whatsapp/evolution
-    author_jid = Column(Text, nullable=True)      # quem enviou (no grupo); pra saída pode ser NULL
-    from_me = Column(Boolean, default=False)      # True = enviado por nós
+    author_jid = Column(Text, nullable=True)
+    from_me = Column(Boolean, default=False)
 
-    # conteúdo
     conteudo = Column(Text, nullable=False)
-    tipo = Column(Text, nullable=False)           # 'entrada' | 'saida'
-    message_type = Column(Text, nullable=True)    # conversation | audio | image | etc
+    tipo = Column(Text, nullable=False)
+    message_type = Column(Text, nullable=True)
 
-    # estado
     lida = Column(Boolean, default=False)
-    ack = Column(Integer, default=0)              # 0/1/2/3/4 (depende do que você mapear)
+    ack = Column(Integer, default=0)
     apagada_cliente = Column(Boolean, nullable=False, default=False)
     apagada_usuario = Column(Boolean, nullable=False, default=False)
 
-    # tempo/ids
-    timestamp = Column(BigInteger, nullable=True)  # epoch (segundos)
+    timestamp = Column(BigInteger, nullable=True)
     msg_id = Column(Text, nullable=False, index=True)
 
     criado_em = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
-    # relationships
     empresa = relationship("Empresa", back_populates="mensagens_grupo")
     grupo = relationship("Grupo", back_populates="mensagens")
     instancia = relationship("EmpresaInstancia", back_populates="mensagens_grupo")
@@ -593,6 +566,7 @@ class MensagemGrupo(Base):
             f"inst={self.instancia_id} from_me={self.from_me} tipo={self.tipo} "
             f"ack={self.ack} lida={self.lida} ts={self.timestamp} msg_id={self.msg_id}>"
         )
+
 
 # =========================
 # Departamento
@@ -606,15 +580,12 @@ class Departamento(Base):
     nome      = Column(String(80), nullable=False)
     descricao = Column(Text, nullable=True)
 
-    # hierarquia / organização
     parent_id = Column(Integer, ForeignKey("departamentos.id", ondelete="RESTRICT"), nullable=True, index=True)
-    codigo    = Column(String(64), nullable=True)       # ex.: "FIN", "TI-SUP"
-    path      = Column(PG_ARRAY(String), nullable=True) # ex.: ["empresa","ti","suporte"]
-    chefe_id  = Column(Integer, nullable=True)          # FK para usuarios.id (quando houver)
+    codigo    = Column(String(64), nullable=True)
+    path      = Column(PG_ARRAY(String), nullable=True)
+    chefe_id  = Column(Integer, nullable=True)
     ativo     = Column(Boolean, nullable=False, server_default="true")
 
-    # horário padrão do departamento (para herança no login)
-    # formato "HH:MM" (ex.: "08:00" / "18:00")
     hora_login_inicio_padrao = Column(String(5), nullable=True)
     hora_login_fim_padrao    = Column(String(5), nullable=True)
 
@@ -623,11 +594,9 @@ class Departamento(Base):
 
     empresa = relationship("Empresa", back_populates="departamentos")
 
-    # árvore
     parent   = relationship("Departamento", remote_side=[id], backref=backref("children", cascade="all"))
     usuarios = relationship("Usuario", back_populates="departamento", cascade="all, delete-orphan")
 
-    # N:N (via pivot) com instâncias do WhatsApp
     dep_instancias = relationship(
         "DepartamentoInstancia",
         back_populates="departamento",
@@ -656,12 +625,11 @@ class DepartamentoInstancia(Base):
     )
 
     id              = Column(Integer, primary_key=True, index=True)
-    empresa_id      = Column(Integer, nullable=False, index=True)  # (sem FK na sua DDL, mantido assim)
+    empresa_id      = Column(Integer, nullable=False, index=True)
     departamento_id = Column(Integer, ForeignKey("departamentos.id", ondelete="CASCADE"), nullable=False, index=True)
     instancia_id    = Column(Integer, ForeignKey("empresas_instancias.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at      = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
-    # relacionamentos para navegar em ORM
     departamento = relationship("Departamento", back_populates="dep_instancias")
     instancia    = relationship("EmpresaInstancia", back_populates="dep_instancias")
 
@@ -716,7 +684,7 @@ class Colaborador(Base):
     id         = Column(Integer, primary_key=True, index=True)
     empresa_id = Column(Integer, ForeignKey('empresas.id'), nullable=False)
     setor_id   = Column(Integer, ForeignKey('setores.id'), nullable=True)
-    usuario_id = Column(Integer, ForeignKey('usuarios.id'), nullable=True)  # opcional
+    usuario_id = Column(Integer, ForeignKey('usuarios.id'), nullable=True)
 
     nome       = Column(String(60), nullable=False)
     email      = Column(String(120), nullable=False, unique=True)
@@ -724,13 +692,12 @@ class Colaborador(Base):
     telefone   = Column(String(20), nullable=True)
     cargo      = Column(String(50), nullable=True)
 
-    # NOVO
     avatar_data = Column(LargeBinary, nullable=True)
     avatar_mime = Column(String, nullable=True)
 
     empresa = relationship("Empresa", back_populates="colaboradores")
     setor   = relationship("Setor", back_populates="colaboradores")
-    usuario = relationship("Usuario")  # opcional
+    usuario = relationship("Usuario")
 
     hora_login_inicio = Column(String(5), nullable=True)
     hora_login_fim    = Column(String(5), nullable=True)
@@ -746,6 +713,8 @@ class Colaborador(Base):
     )
 
     instancias_ver = Column(PG_ARRAY(Integer), nullable=True)
+
+
 # =========================
 # Usuario
 # =========================
@@ -792,7 +761,6 @@ class Atendimento(Base):
         server_default=func.now(),
     )
 
-    # opcional, mas ajuda o _get_or_open_atendimento a “tocar” o registro
     atualizado_em = Column(
         TIMESTAMP(timezone=True),
         server_default=func.now(),
@@ -811,7 +779,6 @@ class Atendimento(Base):
         nullable=False,
     )
 
-    # relação com mensagens (cada atendimento pode ter várias mensagens)
     mensagens = relationship(
         "Mensagem",
         back_populates="atendimento",
@@ -828,7 +795,7 @@ class Atendimento(Base):
 class Permissao(Base):
     __tablename__ = "permissoes"
 
-    id   = Column(String, primary_key=True)  # ex.: "clientes.ver"
+    id   = Column(String, primary_key=True)
     nome = Column(String, nullable=False)
 
     colaboradores = relationship(
@@ -875,7 +842,6 @@ class Disparo(Base):
         index=True,
     )
 
-    # 👇 NOVO: se for usuário/admin do painel
     usuario_id = Column(
         Integer,
         ForeignKey("usuarios.id", ondelete="SET NULL"),
@@ -883,41 +849,33 @@ class Disparo(Base):
         index=True,
     )
 
-    # "text" | "image" | "audio" (no futuro dá pra expandir)
     tipo_conteudo = Column(String(16), nullable=False, server_default="text")
-
-    # texto da mensagem (opcional se for só mídia)
     mensagem = Column(Text, nullable=True)
 
-    # mídia opcional (imagem/áudio) já salva em midias
     midia_id = Column(
         Integer,
         ForeignKey("midias.id", ondelete="SET NULL"),
         nullable=True,
     )
 
-    # delay entre um envio e outro, em segundos
     delay_segundos = Column(Integer, nullable=False, server_default="20")
 
-    # contadores
     total_destinatarios = Column(Integer, nullable=False, server_default="0")
     enviados_sucesso    = Column(Integer, nullable=False, server_default="0")
     enviados_erro       = Column(Integer, nullable=False, server_default="0")
 
-    # pendente | processando | concluido | cancelado | erro
     status = Column(String(16), nullable=False, server_default="pendente")
 
     criado_em     = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     iniciado_em   = Column(TIMESTAMP(timezone=True), nullable=True)
     finalizado_em = Column(TIMESTAMP(timezone=True), nullable=True)
 
-    # opcional, se quiser guardar mais coisa (config de fila, filtros, etc.)
     meta = Column(JSONB, nullable=True)
 
     empresa     = relationship("Empresa", backref=backref("disparos", cascade="all, delete-orphan"))
     instancia   = relationship("EmpresaInstancia", backref=backref("disparos", cascade="all, delete-orphan"))
     colaborador = relationship("Colaborador", backref=backref("disparos", cascade="all, delete-orphan"))
-    usuario     = relationship("Usuario")  # 👈 quem disparou caso seja admin/usuário
+    usuario     = relationship("Usuario")
     midia       = relationship("Midia")
 
     destinatarios = relationship(
@@ -947,15 +905,11 @@ class DisparoDestinatario(Base):
         nullable=False,
     )
 
-    # como o cliente digitou/colou
     numero_raw = Column(String(64), nullable=False)
-
-    # só dígitos ou no formato que vc padronizar (ex: 5511999999999)
     numero_normalizado = Column(String(32), nullable=False)
 
     nome = Column(String, nullable=True)
 
-    # pendente | enviando | enviado | erro | ignorado
     status = Column(String(16), nullable=False, server_default="pendente")
 
     erro_msg = Column(Text, nullable=True)
@@ -994,16 +948,14 @@ class ChatbotConfig(Base):
         index=True,
     )
 
-    # 🔹 Novo: nome/slug da instância (espelha o instance_name do Evolution)
     instancia_nome = Column(
-        Text,      # bate com o TEXT que você criou no banco
+        Text,
         nullable=True,
         index=True,
     )
 
     ativo = Column(Boolean, nullable=False, server_default="true")
 
-    # ✔️ UMA única tz, NOT NULL + default
     tz = Column(String(64), nullable=False, server_default="Etc/UTC")
 
     welcome_enabled = Column(Boolean, default=True)
@@ -1014,7 +966,6 @@ class ChatbotConfig(Base):
     off_start       = Column(DateTime, nullable=True)
     off_end         = Column(DateTime, nullable=True)
 
-    # JSONzão com configs (mensagens, horários, etc.)
     config = Column(JSONB, default=dict)
 
     instancia = relationship(
@@ -1028,13 +979,11 @@ class ChatbotConfig(Base):
     )
 
     __table_args__ = (
-        # ainda garante 1 config por (empresa, instancia_id)
         UniqueConstraint(
             "empresa_id",
             "instancia_id",
             name="uq_chatbot_conf_emp_inst",
         ),
-        # opcional, mas recomendado: 1 config por (empresa, instancia_nome)
         UniqueConstraint(
             "empresa_id",
             "instancia_nome",
@@ -1047,16 +996,15 @@ class ChatbotConfig(Base):
 # Chat Interno — MODELO (1 tabela + estado de leitura)
 # =======================================================
 class ChatKind(str, enum.Enum):
-    HEAD   = "head"     # criação da thread + participantes atuais
-    MSG    = "msg"      # mensagem normal
-    SYSTEM = "system"   # eventos do sistema (opcional)
-    RENAME = "rename"   # renome da thread
-    JOIN   = "join"     # entrou participante
-    LEAVE  = "leave"    # saiu participante
+    HEAD   = "head"
+    MSG    = "msg"
+    SYSTEM = "system"
+    RENAME = "rename"
+    JOIN   = "join"
+    LEAVE  = "leave"
 
 
 class ChatEvento(Base):
-    """Tabela única de eventos do chat interno (chat_eventos)."""
     __tablename__ = "chat_eventos"
     __table_args__ = (
         Index("idx_chat_eventos_emp_created", "empresa_id", "created_at"),
@@ -1064,9 +1012,9 @@ class ChatEvento(Base):
         Index("idx_chat_eventos_participantes", "participantes", postgresql_using="gin"),
     )
 
-    id           = Column(BigInteger, primary_key=True)  # bigserial
+    id           = Column(BigInteger, primary_key=True)
     empresa_id   = Column(Integer, ForeignKey("empresas.id", ondelete="CASCADE"), nullable=False, index=True)
-    thread_id    = Column(PG_UUID(as_uuid=False), nullable=False, index=True) # UUID (string)
+    thread_id    = Column(PG_UUID(as_uuid=False), nullable=False, index=True)
     kind         = Column(SqlEnum(ChatKind), nullable=False)
     autor_id     = Column(Integer, ForeignKey("colaboradores.id", ondelete="SET NULL"), nullable=True, index=True)
 
@@ -1083,7 +1031,6 @@ class ChatEvento(Base):
 
 
 class ChatReadState(Base):
-    """Estado de leitura por usuário: último 'created_at' lido por (empresa, thread, user)."""
     __tablename__ = "chat_read_state"
     __table_args__ = (
         UniqueConstraint("empresa_id", "thread_id", "user_id", name="pk_chat_read_state"),
@@ -1109,8 +1056,8 @@ class DepartamentoMembro(Base):
     id = Column(Integer, primary_key=True, index=True)
     empresa_id      = Column(Integer, nullable=False, index=True)
     departamento_id = Column(Integer, ForeignKey("departamentos.id", ondelete="CASCADE"), nullable=False, index=True)
-    colaborador_id  = Column(Integer, nullable=False, index=True)  # -> colaboradores.id (ou usuarios.id)
-    role            = Column(String(32), nullable=False, server_default="member")  # 'head','manager','member','viewer'
+    colaborador_id  = Column(Integer, nullable=False, index=True)
+    role            = Column(String(32), nullable=False, server_default="member")
     is_primary      = Column(Boolean, nullable=False, server_default="false")
 
     departamento = relationship("Departamento", backref=backref("membros", cascade="all, delete-orphan"))
@@ -1130,10 +1077,10 @@ class DepartamentoACL(Base):
     empresa_id      = Column(Integer, nullable=False, index=True)
     departamento_id = Column(Integer, ForeignKey("departamentos.id", ondelete="CASCADE"), nullable=False, index=True)
 
-    resource = Column(String(64), nullable=False)                 # 'clientes','atendimentos','financeiro','midias', ...
-    action   = Column(String(32), nullable=False)                 # 'view','create','edit','delete','export','assign'
-    scope    = Column(String(32), nullable=False, server_default="own")  # 'own','department','subtree','company'
-    effect   = Column(Boolean, nullable=False)                    # True=ALLOW, False=DENY
+    resource = Column(String(64), nullable=False)
+    action   = Column(String(32), nullable=False)
+    scope    = Column(String(32), nullable=False, server_default="own")
+    effect   = Column(Boolean, nullable=False)
 
     departamento = relationship("Departamento", backref=backref("acls", cascade="all, delete-orphan"))
 
@@ -1166,18 +1113,15 @@ class EmailAccount(Base):
     provider       = Column(String(32), nullable=False, default="gmail")
     email_address  = Column(String(255), nullable=False)
 
-    # tokens (refresh criptografado no app)
     refresh_token_enc = Column(Text, nullable=False)
     access_token      = Column(Text, nullable=True)
     token_expiry      = Column(TIMESTAMP(timezone=True), nullable=True)
 
-    # Override de armazenamento por CONTA (bytes). NULL => usa da empresa.
     storage_override_bytes = Column(Integer, nullable=True)
 
-    status        = Column(String(32), nullable=False, default="active")  # 'active' conta na cota
+    status        = Column(String(32), nullable=False, default="active")
     created_at    = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
-    # relationships
     empresa       = relationship("Empresa", back_populates="email_accounts")
     colaborador   = relationship("Colaborador", foreign_keys=[colaborador_id])
 
@@ -1190,7 +1134,6 @@ class EmailAccount(Base):
 class EmailMessage(Base):
     __tablename__ = "email_messages"
     __table_args__ = (
-        # evita duplicar a mesma mensagem por conta (ex.: external_id do Gmail)
         UniqueConstraint("account_id", "external_id", name="uq_email_msg_external"),
         Index("ix_email_msg_emp_received", "empresa_id", "received_at"),
         Index("ix_email_msg_acc_received", "account_id", "received_at"),
@@ -1202,7 +1145,7 @@ class EmailMessage(Base):
     empresa_id    = Column(Integer, ForeignKey("empresas.id", ondelete="CASCADE"), nullable=False, index=True)
     account_id    = Column(Integer, ForeignKey("email_accounts.id", ondelete="CASCADE"), nullable=False, index=True)
 
-    external_id   = Column(String(255), nullable=True)  # id do provedor (ex.: Gmail msg id)
+    external_id   = Column(String(255), nullable=True)
     subject       = Column(Text, nullable=True)
     snippet       = Column(Text, nullable=True)
 
@@ -1213,13 +1156,10 @@ class EmailMessage(Base):
 
     received_at   = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
 
-    # tamanho total estimado/real da mensagem (campos + corpos + headers)
     size_bytes    = Column(Integer, nullable=False, server_default="0")
 
-    # flags
     has_attachments = Column(Boolean, nullable=False, server_default="false")
 
-    # (opcional) armazenar corpos
     body_text     = Column(Text, nullable=True)
     body_html     = Column(Text, nullable=True)
 
@@ -1245,7 +1185,6 @@ class EmailAttachment(Base):
     filename    = Column(String(512), nullable=True)
     mimetype    = Column(String(256), nullable=True)
 
-    # armazenamento: ou data (bytea) OU storage_url (bucket/local path)
     size_bytes  = Column(Integer, nullable=False, server_default="0")
     storage_url = Column(Text, nullable=True)
     data        = Column(LargeBinary, nullable=True)

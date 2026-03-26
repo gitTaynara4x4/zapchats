@@ -479,11 +479,11 @@ def _build_assign_ack(
     return "Perfeito! Só um instante 🙂"
 
 
-def _safe_zoneinfo(name: str | None) -> ZoneInfo:
+def _safe_zoneinfo(name: str | None):
     try:
         return ZoneInfo(str(name or "").strip() or "America/Sao_Paulo")
     except Exception:
-        return ZoneInfo("America/Sao_Paulo")
+        return timezone.utc
 
 
 def _parse_hhmm(s: str, default: str) -> Tuple[int, int]:
@@ -520,7 +520,7 @@ def _window_contains(now_local: datetime, start_hhmm: str, end_hhmm: str) -> boo
     return now_min >= start_min or now_min < end_min
 
 
-def _fetch_last_inbound_message_time(
+def _fetch_last_conversation_message_time(
     db: Session,
     *,
     empresa_id: int,
@@ -535,7 +535,6 @@ def _fetch_last_inbound_message_time(
             WHERE empresa_id = :empresa_id
               AND cliente_id = :cliente_id
               AND instancia_id = :instancia_id
-              AND tipo = 'entrada'
             ORDER BY timestamp DESC
             LIMIT 2
             """
@@ -551,7 +550,7 @@ def _fetch_last_inbound_message_time(
         return None
 
     # LIMIT 2 porque a mensagem atual já foi salva antes do hook.
-    # Queremos a anterior à atual, quando existir.
+    # Queremos a mensagem anterior à atual, seja entrada ou saída.
     if len(row) >= 2:
         return _as_aware_utc(row[1].get("timestamp"))
 
@@ -575,7 +574,7 @@ def auto_messages_handle_inbound(
     Regras:
       - só processa ENTRADA
       - respeita chatbot_configs.config.features.auto_messages
-      - evita reenvio em sequência usando dedup por última msg de entrada
+      - evita reenvio em sequência usando dedup por última conversa
     """
     if (direction or "").lower() == "saida":
         return {"ok": True, "action": "ignore_saida"}
@@ -602,18 +601,18 @@ def auto_messages_handle_inbound(
         telefone_digits=telefone_digits,
     )
 
-    last_prev_inbound = _fetch_last_inbound_message_time(
+    last_conversation_msg = _fetch_last_conversation_message_time(
         db,
         empresa_id=empresa_id,
         cliente_id=int(cliente.id),
         instancia_id=instancia_id,
     )
-    if last_prev_inbound:
-        delta = _now_utc() - last_prev_inbound
+    if last_conversation_msg:
+        delta = _now_utc() - last_conversation_msg
         if delta <= timedelta(minutes=max(1, AUTO_MESSAGE_DEDUP_MINUTES)):
             return {
                 "ok": True,
-                "action": "noop_already_sent_recently",
+                "action": "noop_recent_conversation",
                 "dedup_minutes": int(AUTO_MESSAGE_DEDUP_MINUTES),
             }
 

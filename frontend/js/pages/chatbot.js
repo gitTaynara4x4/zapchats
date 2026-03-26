@@ -267,6 +267,9 @@
   const prevDept = document.getElementById('prevDept');
   const prevDeptText = document.getElementById('prevDeptText');
 
+  const autoModeNotice = document.getElementById('autoModeNotice');
+  const deptModeNotice = document.getElementById('deptModeNotice');
+
   let cfg = null;
   let _lastLoadedSnapshot = null;
   let _deptCache = null;
@@ -652,6 +655,14 @@ Digite apenas o número da opção desejada.`
     schedDeptWelcomeEl?.classList.toggle('show', dOn);
   }
 
+  function updateModeNotices() {
+    const autoOn = !!getSwitch(swAutoHdr);
+    const deptOn = !!getSwitch(swDeptHdr);
+
+    if (autoModeNotice) autoModeNotice.hidden = !deptOn;
+    if (deptModeNotice) deptModeNotice.hidden = !autoOn;
+  }
+
   function setAutoChildrenEnabled(enabled) {
     swWelcome?.classList.toggle('disabled', !enabled);
     if (swWelcome?.querySelector('input')) swWelcome.querySelector('input').disabled = !enabled;
@@ -708,6 +719,7 @@ Digite apenas o número da opção desejada.`
     renderDeptPreview();
     updateSaveButtons();
     updateScheduleVisibility();
+    updateModeNotices();
   }
 
   function renderWelcomePreview() {
@@ -762,6 +774,67 @@ Digite apenas o número da opção desejada.`
           kind: 'warn'
         });
         if (!ok) return;
+      }
+
+      if (labelEl === swAutoHdr && newVal && getSwitch(swDeptHdr)) {
+        const ok = await confirmAction({
+          title: 'Ativar mensagens automáticas?',
+          message: 'O menu de triagem por departamento será desligado, porque os dois modos não podem ficar ativos ao mesmo tempo.',
+          confirmText: 'Ativar e desligar triagem',
+          cancelText: 'Cancelar',
+          kind: 'warn'
+        });
+        if (!ok) return;
+
+        setHeaderSwitch(swDeptHdr, pillDeptHdr, false);
+        setSwitch(swDeptWelcome, false, pillDeptWelcome);
+        cfg.features.auto_messages_departments.enabled = false;
+        (cfg.features.auto_messages_departments.welcome ||= {}).enabled = false;
+      }
+
+      if (labelEl === swDeptHdr && newVal && getSwitch(swAutoHdr)) {
+        const ok = await confirmAction({
+          title: 'Ativar triagem por departamento?',
+          message: 'As mensagens automáticas serão desligadas, porque os dois modos não podem ficar ativos ao mesmo tempo.',
+          confirmText: 'Ativar triagem e desligar automático',
+          cancelText: 'Cancelar',
+          kind: 'warn'
+        });
+        if (!ok) return;
+
+        setHeaderSwitch(swAutoHdr, pillAutoHdr, false);
+        setSwitch(swWelcome, false, pillWelcome);
+        setSwitch(swOff, false, pillOff);
+        cfg.features.auto_messages.enabled = false;
+        (cfg.features.auto_messages.welcome ||= {}).enabled = false;
+        (cfg.features.auto_messages.off_hours ||= {}).enabled = false;
+      }
+
+      if (labelEl === swWelcome && newVal && getSwitch(swDeptHdr)) {
+        notify({
+          title: 'Modo incompatível',
+          message: 'Desligue primeiro o menu de triagem por departamento para ativar a mensagem de boas-vindas.',
+          kind: 'warn'
+        });
+        return;
+      }
+
+      if (labelEl === swOff && newVal && getSwitch(swDeptHdr)) {
+        notify({
+          title: 'Modo incompatível',
+          message: 'Desligue primeiro o menu de triagem por departamento para ativar a mensagem de fora do horário.',
+          kind: 'warn'
+        });
+        return;
+      }
+
+      if (labelEl === swDeptWelcome && newVal && getSwitch(swAutoHdr)) {
+        notify({
+          title: 'Modo incompatível',
+          message: 'Desligue primeiro as mensagens automáticas para ativar a triagem por departamento.',
+          kind: 'warn'
+        });
+        return;
       }
 
       setSwitch(labelEl, newVal, pillEl);
@@ -823,8 +896,8 @@ Digite apenas o número da opção desejada.`
   }
 
   function updateSaveButtons() {
-    if (saveAuto) saveAuto.disabled = !getSwitch(swAutoHdr);
-    if (saveDept) saveDept.disabled = !getSwitch(swDeptHdr);
+    if (saveAuto) saveAuto.disabled = false;
+    if (saveDept) saveDept.disabled = false;
   }
 
   async function getConfig() {
@@ -1076,13 +1149,15 @@ Digite apenas o número da opção desejada.`
   }
 
   async function saveAutoBlock() {
-    if (!validateBeforeSave('auto')) return;
+    const autoHdrOn = getSwitch(swAutoHdr);
+
+    if (autoHdrOn && !validateBeforeSave('auto')) return;
     cfg.timezone = (cfg.timezone || '').trim() || FALLBACK_TZ;
 
-    cfg.features.auto_messages.enabled = getSwitch(swAutoHdr);
+    cfg.features.auto_messages.enabled = !!autoHdrOn;
     cfg.features.auto_messages.welcome = {
       ...(cfg.features.auto_messages.welcome || {}),
-      enabled: getSwitch(swWelcome),
+      enabled: !!(autoHdrOn && getSwitch(swWelcome)),
       text: (msgWelcome?.value || '').trim(),
       start: (wStart && wStart.value) || '08:00',
       end: (wEnd && wEnd.value) || '18:00'
@@ -1090,36 +1165,51 @@ Digite apenas o número da opção desejada.`
 
     cfg.features.auto_messages.off_hours = {
       ...(cfg.features.auto_messages.off_hours || {}),
-      enabled: getSwitch(swOff),
+      enabled: !!(autoHdrOn && getSwitch(swOff)),
       text: (msgOff?.value || '').trim(),
       start: (oStart && oStart.value) || '18:00',
       end: (oEnd && oEnd.value) || '08:00'
     };
 
+    if (!autoHdrOn) {
+      cfg.features.auto_messages.enabled = false;
+      cfg.features.auto_messages.welcome.enabled = false;
+      cfg.features.auto_messages.off_hours.enabled = false;
+    }
+
     try {
       await putConfig(cfg);
-      toast('Configurações salvas com sucesso.');
+      toast(autoHdrOn ? 'Configurações salvas com sucesso.' : 'Mensagens automáticas desativadas.');
       _lastLoadedSnapshot = JSON.stringify(cfg);
+      await loadAll();
     } catch {}
   }
 
   async function saveDeptBlock() {
-    if (!validateBeforeSave('dept')) return;
+    const deptHdrOn = getSwitch(swDeptHdr);
+
+    if (deptHdrOn && !validateBeforeSave('dept')) return;
     cfg.timezone = (cfg.timezone || '').trim() || FALLBACK_TZ;
 
-    cfg.features.auto_messages_departments.enabled = getSwitch(swDeptHdr);
+    cfg.features.auto_messages_departments.enabled = !!deptHdrOn;
     cfg.features.auto_messages_departments.welcome = {
       ...(cfg.features.auto_messages_departments.welcome || {}),
-      enabled: getSwitch(swDeptWelcome),
+      enabled: !!(deptHdrOn && getSwitch(swDeptWelcome)),
       text: (msgDeptWelcome?.value || '').trim(),
       start: (dwStart && dwStart.value) || '08:00',
       end: (dwEnd && dwEnd.value) || '18:00'
     };
 
+    if (!deptHdrOn) {
+      cfg.features.auto_messages_departments.enabled = false;
+      cfg.features.auto_messages_departments.welcome.enabled = false;
+    }
+
     try {
       await putConfig(cfg);
-      toast('Mensagem da triagem salva.');
+      toast(deptHdrOn ? 'Mensagem da triagem salva.' : 'Triagem por departamento desativada.');
       _lastLoadedSnapshot = JSON.stringify(cfg);
+      await loadAll();
     } catch {}
   }
 
