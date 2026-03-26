@@ -1,4 +1,3 @@
-# backend/routers/disparos.py
 from __future__ import annotations
 
 import os
@@ -29,19 +28,17 @@ router = APIRouter(prefix="/api/disparos", tags=["Disparos"])
 # =====================================================
 
 EVOLUTION_URL = (os.getenv("EVOLUTION_URL") or "").rstrip("/")
-# Aceita tanto EVOLUTION_APIKEY quanto EVOLUTION_API_KEY
 EVOLUTION_APIKEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_API_KEY")
 
 # n8n – fluxo de IA para melhorar mensagem de disparo
 N8N_IA_MELHORAR_DISPARO_URL = (os.getenv("N8N_IA_MELHORAR_DISPARO_URL") or "").strip()
 
-# Debug pra garantir que a env foi lida
 print("[IA-DISPARO] URL n8n =", N8N_IA_MELHORAR_DISPARO_URL)
+
 
 # =====================================================
 # Helpers de permissão / identidade
 # =====================================================
-
 
 def _to_int(v) -> Optional[int]:
     try:
@@ -66,11 +63,9 @@ def _infer_kind(identity: dict) -> str:
     sub = str(identity.get("sub") or "").strip().lower()
     role = str(identity.get("role") or "").strip().lower()
 
-    # seu padrão: sub = "colab-<id>"
     if sub.startswith("colab-") or "colab" in role or "colaborador" in role:
         return "colaborador"
 
-    # heurística: se tem qualquer campo de colab preenchido
     for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
         if _to_int(identity.get(key)):
             return "colaborador"
@@ -90,19 +85,16 @@ def _get_empresa_e_colab(identity: dict | None) -> Tuple[int, Optional[int]]:
     colab_id: Optional[int] = None
 
     if kind == "colaborador":
-        # tenta campos explícitos
         for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
             colab_id = _to_int(identity.get(key))
             if colab_id:
                 break
 
-        # tenta sub "colab-<id>"
         if not colab_id:
             sub = str(identity.get("sub") or "").strip().lower()
             if sub.startswith("colab-"):
                 colab_id = _to_int(sub.split("-", 1)[1])
 
-        # fallback comum: identity["id"] = id do colaborador
         if not colab_id:
             colab_id = _to_int(identity.get("id"))
 
@@ -112,9 +104,6 @@ def _get_empresa_e_colab(identity: dict | None) -> Tuple[int, Optional[int]]:
 def _get_ids(identity: dict | None) -> Tuple[int, Optional[int], Optional[int]]:
     """
     Retorna (empresa_id, colaborador_id, usuario_id).
-
-    - Se for colaborador → preenche colaborador_id
-    - Se for usuário/admin → preenche usuario_id
     """
     if identity is None:
         raise HTTPException(status_code=401, detail="Não autenticado")
@@ -129,11 +118,9 @@ def _get_ids(identity: dict | None) -> Tuple[int, Optional[int], Optional[int]]:
             if usuario_id:
                 break
 
-        # fallback comum: identity["id"] = id do usuário
         if not usuario_id:
             usuario_id = _to_int(identity.get("id"))
 
-        # fallback: sub "user-<id>" ou sub numérico
         if not usuario_id:
             sub = str(identity.get("sub") or "").strip().lower()
             if sub.isdigit():
@@ -148,7 +135,7 @@ def _ensure_perm(identity: dict, db: Session, perm_id: str) -> None:
     """
     Verifica se o colaborador logado possui a permissão `perm_id`.
     Se o usuário logado NÃO for colaborador (ex.: usuário/admin do painel),
-    por enquanto a gente libera.
+    libera.
     """
     empresa_id = _to_int(identity.get("empresa_id"))
     if not empresa_id:
@@ -181,8 +168,7 @@ def _ensure_perm(identity: dict, db: Session, perm_id: str) -> None:
 
 def _resolve_colab_by_usuario(db: Session, empresa_id: int, usuario_id: Optional[int]) -> Optional[int]:
     """
-    Se o admin/usuário tiver um Colaborador vinculado (colaboradores.usuario_id),
-    preenche colaborador_id também, pra rastrear por colaborador sempre que possível.
+    Se o admin/usuário tiver um Colaborador vinculado, preenche colaborador_id também.
     """
     if not usuario_id:
         return None
@@ -202,9 +188,6 @@ def _resolve_colab_by_usuario(db: Session, empresa_id: int, usuario_id: Optional
 
 
 def _get_nome_autor(db: Session, colab_id: Optional[int], usuario_id: Optional[int]) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Retorna (criado_por, criado_por_tipo) priorizando colaborador.
-    """
     if colab_id:
         nome = (
             db.query(models.Colaborador.nome)
@@ -226,8 +209,7 @@ def _get_nome_autor(db: Session, colab_id: Optional[int], usuario_id: Optional[i
 
 def _assert_instancia_acl(identity: dict, db: Session, instancia_id: Optional[int]) -> None:
     """
-    Se colaborador tiver restrição de instâncias, garante que a instância do pedido/registro
-    está dentro do ACL.
+    Se colaborador tiver restrição de instâncias, garante ACL.
     """
     vis = instancias_visiveis(identity, db)
     if vis is None:
@@ -243,15 +225,36 @@ def _assert_instancia_acl(identity: dict, db: Session, instancia_id: Optional[in
 
 
 def _apply_instancias_filter(identity: dict, db: Session, query):
-    """
-    Aplica filtro de instâncias em queries (Disparo.instancia_id).
-    """
     vis = instancias_visiveis(identity, db)
     if vis is None:
         return query
     if not vis:
         return query.filter(models.Disparo.id == -1)
     return query.filter(models.Disparo.instancia_id.in_(vis))
+
+
+def _get_empresa_or_404(db: Session, empresa_id: int) -> models.Empresa:
+    empresa = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada.")
+    return empresa
+
+
+def _current_month_broadcasts_count(db: Session, empresa_id: int) -> int:
+    """
+    Conta quantos disparos foram criados no mês atual (UTC).
+    """
+    now = datetime.now(timezone.utc)
+    month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+
+    return (
+        db.query(models.Disparo)
+        .filter(
+            models.Disparo.empresa_id == empresa_id,
+            models.Disparo.criado_em >= month_start,
+        )
+        .count()
+    )
 
 
 # =====================================================
@@ -294,7 +297,6 @@ class DisparoOut(BaseModel):
     criado_em: datetime
     delay_segundos: int
 
-    # ✅ rastreio
     colaborador_id: Optional[int] = None
     usuario_id: Optional[int] = None
     criado_por: Optional[str] = None
@@ -317,7 +319,6 @@ def _normalizar_numeros(raw_numeros: List[str]) -> list[tuple[str, str]]:
     """
     Recebe lista de strings digitadas pelo usuário e retorna
     [(numero_raw, numero_normalizado)] já sem duplicados.
-    Normalização = só dígitos.
     """
     vistos: set[str] = set()
     out: list[tuple[str, str]] = []
@@ -478,7 +479,6 @@ async def _enviar_destinatario(
 async def _processar_disparo(disparo_id: int) -> None:
     """
     Processa um disparo: envia 1 por 1 respeitando o delay.
-    Roda em background (asyncio.create_task).
     """
     db: Session = SessionLocal()
     try:
@@ -611,15 +611,16 @@ async def criar_disparo_simples(
     _ensure_perm(identity, db, "disparos.enviar")
 
     empresa_id, colab_id, usuario_id = _get_ids(identity)
+    empresa = _get_empresa_or_404(db, empresa_id)
 
     # 🔒 Plano: feature_broadcasts
-    if not has_feature(db, empresa_id, "feature_broadcasts"):
+    if not has_feature(empresa, "feature_broadcasts"):
         raise HTTPException(
             status_code=403,
             detail="Seu plano não permite disparos (feature_broadcasts).",
         )
 
-    # 🔒 ACL por instância (colaborador)
+    # 🔒 ACL por instância
     _assert_instancia_acl(identity, db, payload.instancia_id)
 
     # Se for admin e existir colaborador vinculado ao usuario_id, preenche também
@@ -641,9 +642,15 @@ async def criar_disparo_simples(
     if not nums_norm:
         raise HTTPException(status_code=400, detail="Nenhum número válido informado.")
 
-    # 🔒 Plano: quota por disparo (1 por criação)
-    # (se você quiser cobrar por destinatário, troque delta=1 por delta=len(nums_norm))
-    enforce_quota(db, empresa_id, "broadcasts_per_month_max", delta=1)
+    # 🔒 Quota mensal de disparos
+    current_broadcasts_month = _current_month_broadcasts_count(db, empresa_id)
+    enforce_quota(
+        empresa,
+        "broadcasts_per_month_max",
+        current_broadcasts_month,
+        delta=1,
+        message="Limite mensal de disparos do plano atingido.",
+    )
 
     disparo = models.Disparo(
         empresa_id=empresa_id,
@@ -658,7 +665,7 @@ async def criar_disparo_simples(
         status="pendente",
     )
     db.add(disparo)
-    db.flush()  # pega ID
+    db.flush()
 
     for raw, norm in nums_norm:
         dest = models.DisparoDestinatario(
@@ -715,7 +722,6 @@ def listar_disparos(
     if ident_empresa_id and int(ident_empresa_id) != int(empresa_id):
         raise HTTPException(status_code=403, detail="Empresa inválida para o usuário logado.")
 
-    # se pedir instancia_id específica, valida ACL
     if instancia_id is not None:
         _assert_instancia_acl(identity, db, instancia_id)
 
@@ -725,7 +731,6 @@ def listar_disparos(
         .order_by(models.Disparo.id.desc())
     )
 
-    # aplica privacidade por instâncias (colaborador)
     q = _apply_instancias_filter(identity, db, q)
 
     if instancia_id:
@@ -733,7 +738,6 @@ def listar_disparos(
 
     itens = q.limit(limit).all()
 
-    # pega nomes sem N+1
     colab_ids: Set[int] = {int(d.colaborador_id) for d in itens if d.colaborador_id}
     user_ids: Set[int] = {int(d.usuario_id) for d in itens if d.usuario_id}
 
@@ -816,7 +820,6 @@ def cancelar_disparo(
     if not disparo:
         raise HTTPException(status_code=404, detail="Disparo não encontrado.")
 
-    # privacidade por instância (colaborador)
     _assert_instancia_acl(identity, db, getattr(disparo, "instancia_id", None))
 
     if disparo.status in ("concluido", "cancelado"):

@@ -926,7 +926,7 @@ async def _stop_integrations():
     evo_stop = getattr(app.state, "evo_stop", None)
     if evo_stop:
         try:
-            pass
+            await evo_stop()
         except Exception:
             pass
 

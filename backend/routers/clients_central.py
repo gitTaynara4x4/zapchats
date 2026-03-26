@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
-from math import ceil
 from typing import Any, Dict, Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,12 +12,18 @@ from backend.database import get_db
 from backend.models import (
     Empresa, EmpresaInstancia, Cliente, Usuario, Colaborador,
     Departamento, Setor, Grupo, Mensagem, Midia, Atendimento,
-    ChatbotConfig, StatusAtendimento, PlanoAssinatura,
+    ChatbotConfig, StatusAtendimento,
     DepartamentoMembro, DepartamentoACL
 )
 
-# ✅ NOVO: usa o seu sistema unificado de planos
+# ✅ sistema unificado de planos
 from backend.utils.plans import (
+    PLAN_FREE,
+    PLAN_START,
+    PLAN_BUSINESS,
+    PLAN_ENTERPRISE,
+    PLAN_CODES,
+    PAID_PLANS,
     plan_status_payload,
     effective_plan,
     normalize_plan,
@@ -29,7 +34,7 @@ from backend.utils.plans import (
 from backend.routers.auth import require_admin
 
 # Router apenas para ADMIN CENTRAL
-router = APIRouter(dependencies=[Depends(require_admin)])  # manter paths absolutos (sem prefixo global)
+router = APIRouter(dependencies=[Depends(require_admin)])
 
 
 # ============================== helpers ==============================
@@ -42,12 +47,26 @@ def digits_only(s: str) -> str:
 
 
 def iso(dt: Optional[datetime]) -> Optional[str]:
-    return dt.astimezone(timezone.utc).isoformat() if dt else None
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Data inválida. Use ISO8601.")
 
 
 def serialize_empresa(emp: Empresa) -> Dict[str, Any]:
-    # ❗ emp.effective_tier no seu projeto pode existir ou não.
-    # A fonte correta agora é effective_plan(emp)
     eff = effective_plan(emp)
 
     return {
@@ -55,7 +74,11 @@ def serialize_empresa(emp: Empresa) -> Dict[str, Any]:
         "nome": emp.nome,
         "telefone": emp.telefone,
         "assinatura": normalize_plan(getattr(emp, "assinatura", None)),
-        "trial_tier": normalize_plan(getattr(emp, "trial_tier", None)) if getattr(emp, "trial_tier", None) else None,
+        "trial_tier": (
+            normalize_plan(getattr(emp, "trial_tier", None))
+            if getattr(emp, "trial_tier", None)
+            else None
+        ),
         "trial_expires_at": iso(getattr(emp, "trial_expires_at", None)),
         "plano_expira_em": iso(getattr(emp, "plano_expira_em", None)),
         "quantidade_instancias": getattr(emp, "quantidade_instancias", None) or 0,
@@ -65,6 +88,8 @@ def serialize_empresa(emp: Empresa) -> Dict[str, Any]:
         "nome_adm": emp.nome_adm,
         "cnpj_cpf": emp.cnpj_cpf,
         "effective_tier": eff,
+        "trial_active": is_trial_active(emp),
+        "trial_days_left": trial_days_left(emp) if is_trial_active(emp) else 0,
     }
 
 
@@ -97,20 +122,15 @@ def serialize_bot(b: ChatbotConfig) -> Dict[str, Any]:
 
 def empresa_status_payload(emp: Empresa, insts: List[EmpresaInstancia]) -> Dict[str, Any]:
     """
-    Mantém o payload COMPAT do seu admin central,
-    mas agora usa o sistema novo de plans.py como fonte única.
-
-    Regra mantida:
-      - se emp.quantidade_instancias > 0 => força esse limite (override)
-      - senão => usa limite do plano (whatsapp_instances_max)
+    Mantém o payload compatível do admin central,
+    mas usa o sistema novo do plans.py como fonte.
     """
     eff = effective_plan(emp)
 
-    # limite vindo do plano
     limits = plan_limits(eff)
     limite_plano = int(limits.get("whatsapp_instances_max", 0))
 
-    # override configurado na empresa
+    # override manual na empresa, se existir e for > 0
     limite_cfg = int(getattr(emp, "quantidade_instancias", 0) or 0)
     limite = limite_cfg if limite_cfg > 0 else limite_plano
 
@@ -125,7 +145,11 @@ def empresa_status_payload(emp: Empresa, insts: List[EmpresaInstancia]) -> Dict[
         "quantidade_instancias": qtd_conectadas,
         "trial": {
             "active": tri_active,
-            "tier": normalize_plan(getattr(emp, "trial_tier", None)) if getattr(emp, "trial_tier", None) else None,
+            "tier": (
+                normalize_plan(getattr(emp, "trial_tier", None))
+                if getattr(emp, "trial_tier", None)
+                else None
+            ),
             "expires_at": iso(getattr(emp, "trial_expires_at", None)),
             "days_left": days_left,
         },
@@ -168,7 +192,8 @@ def counts_for_empresa(db: Session, empresa_id: int) -> Dict[str, Any]:
         .all()
     )
     counts["atendimentos_por_status"] = {
-        (k.value if hasattr(k, "value") else str(k)): int(v) for k, v in rows
+        (k.value if hasattr(k, "value") else str(k)): int(v)
+        for k, v in rows
     }
     return counts
 
@@ -219,7 +244,7 @@ def empresa_whatsapp_status(empresa_id: int, db: Session = Depends(get_db)):
     return empresa_status_payload(emp, insts)
 
 
-# ======================= 4) OVERVIEW COMPLETO (enriquecido) =======================
+# ======================= 4) OVERVIEW COMPLETO =======================
 @router.get("/api/admin/empresas/{empresa_id}/overview")
 def empresa_overview(
     empresa_id: int,
@@ -305,7 +330,7 @@ def empresa_overview(
             JOIN colaboradores c ON c.id = cp.colaborador_id
             WHERE c.empresa_id = :emp
             GROUP BY cp.colaborador_id
-        """
+            """
         ),
         {"emp": empresa_id},
     )
@@ -432,14 +457,19 @@ def aplicar_plano(
     db: Session = Depends(get_db),
 ):
     """
-    body: { "assinatura": "PRATA|OURO|...|FREE", "expires_at": "2026-12-31T23:59:59Z" (opcional) }
-    - Ao aplicar um plano PAGO, o trial é limpo.
-    - Se assinatura = FREE, plano_expira_em fica NULL (sem pago ativo).
+    body:
+      {
+        "assinatura": "FREE|START|BUSINESS|ENTERPRISE",
+        "expires_at": "2026-12-31T23:59:59Z",   # opcional
+        "duration_days": 30                     # opcional, usado se expires_at não vier
+      }
 
-    Acesso restrito a administradores (require_admin).
+    Regras:
+      - plano pago limpa trial
+      - FREE remove expiração
     """
-    assinatura = (body.get("assinatura") or "FREE").upper()
-    if assinatura not in (["FREE"] + [p.value for p in PlanoAssinatura]):
+    assinatura = normalize_plan(body.get("assinatura") or PLAN_FREE)
+    if assinatura not in PLAN_CODES:
         raise HTTPException(status_code=400, detail="Plano inválido.")
 
     emp = db.query(Empresa).filter(Empresa.id == empresa_id).first()
@@ -448,15 +478,18 @@ def aplicar_plano(
 
     emp.assinatura = assinatura
 
-    exp_str = body.get("expires_at")
-    emp.plano_expira_em = None
-    if assinatura != "FREE" and exp_str:
-        try:
-            emp.plano_expira_em = datetime.fromisoformat(exp_str.replace("Z", "+00:00"))
-        except Exception:
-            raise HTTPException(status_code=400, detail="expires_at inválido (ISO8601).")
+    if assinatura == PLAN_FREE:
+        emp.plano_expira_em = None
+    else:
+        exp_str = body.get("expires_at")
+        duration_days = int(body.get("duration_days") or 30)
+        emp.plano_expira_em = (
+            parse_iso_datetime(exp_str)
+            if exp_str
+            else now_utc() + timedelta(days=duration_days)
+        )
 
-    # limpar trial quando vira pago
+    # pago/ajuste manual limpa trial
     emp.trial_tier = None
     emp.trial_expires_at = None
 
@@ -469,7 +502,7 @@ def aplicar_plano(
         "ok": True,
         "empresa": serialize_empresa(emp),
         "status": empresa_status_payload(emp, insts),
-        "detail": "Plano aplicado e trial limpo.",
+        "detail": "Plano aplicado com sucesso.",
     }
 
 
@@ -478,11 +511,14 @@ def cancelar_trial(empresa_id: int, db: Session = Depends(get_db)):
     emp = db.query(Empresa).filter(Empresa.id == empresa_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Empresa não encontrada.")
+
     emp.trial_tier = None
     emp.trial_expires_at = None
+
     db.add(emp)
     db.commit()
     db.refresh(emp)
+
     return {
         "ok": True,
         "empresa": serialize_empresa(emp),
@@ -497,19 +533,23 @@ def reiniciar_trial(
     db: Session = Depends(get_db),
 ):
     """
-    body: { "tier": "PRATA" (default), "days": 7 (default) }
-
-    Acesso restrito a administradores (require_admin).
+    body:
+      {
+        "tier": "START|BUSINESS|ENTERPRISE",
+        "days": 7
+      }
     """
-    tier = (body.get("tier") or "PRATA").upper()
+    tier = normalize_plan(body.get("tier") or PLAN_START)
     days = int(body.get("days") or 7)
-    if tier not in [p.value for p in PlanoAssinatura]:
-        raise HTTPException(status_code=400, detail="Tier inválido.")
+
+    if tier not in PAID_PLANS:
+        raise HTTPException(status_code=400, detail="Tier inválido para trial.")
 
     emp = db.query(Empresa).filter(Empresa.id == empresa_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Empresa não encontrada.")
 
+    # trial mantém assinatura atual, só ativa trial_tier temporário
     emp.trial_tier = tier
     emp.trial_expires_at = now_utc() + timedelta(days=days)
 

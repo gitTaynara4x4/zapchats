@@ -1,40 +1,42 @@
-# backend/routers/admin_planos.py
 from __future__ import annotations
 
-from typing import Optional, Literal, Dict, Any
+import os
+from datetime import datetime, timezone, timedelta
+from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Header, status
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from backend.database import get_db_session
 import backend.models as models
 
 from backend.utils.plans import (
+    PLAN_FREE,
+    PLAN_START,
+    PLAN_BUSINESS,
+    PLAN_ENTERPRISE,
+    PLAN_CODES,
+    PAID_PLANS,
+    normalize_plan,
     plan_status_payload,
-    start_prata_trial,
-    is_trial_active,
-    effective_tier,
+    start_trial,
 )
 
-Tier = Literal["FREE", "PRATA", "OURO", "PLATINA", "DIAMANTE", "ASCENDENTE", "IMORTAL", "RADIANTE"]
 
 router = APIRouter(prefix="/api/admin", tags=["Admin / Planos"])
 
 # ====== Proteção por senha fixa (sem login) ======
-ADMIN_PASS = "promessa20"
+ADMIN_PASS = (os.getenv("ADMIN_PLANOS_PASS") or "promessa20").strip()
 
 
 def _require_promessa20(
     x_admin_pass: str | None = Header(default=None, alias="X-Admin-Pass"),
 ):
     """
-    Protege as rotas deste router usando apenas a senha fixa 'promessa20',
-    enviada no header X-Admin-Pass.
-
-    - Se o header estiver ausente ou incorreto -> 401.
-    - Não depende de get_current_identity / login normal.
+    Protege as rotas deste router usando senha fixa enviada no header X-Admin-Pass.
     """
-    if x_admin_pass != ADMIN_PASS:
+    if (x_admin_pass or "").strip() != ADMIN_PASS:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Senha admin inválida.",
@@ -43,64 +45,105 @@ def _require_promessa20(
 
 
 # ====== Helpers internos ======
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="expires_at inválido. Use ISO8601, ex.: 2026-12-31T23:59:59Z",
+        )
+
+
+def _digits_only(s: str) -> str:
+    return "".join(ch for ch in (s or "") if ch.isdigit())
 
 
 def _by_cnpj(db: Session, cnpj: str) -> models.Empresa:
-    if not cnpj:
-        raise HTTPException(400, "CNPJ obrigatório.")
-    emp = (
-        db.query(models.Empresa)
-        .filter(models.Empresa.cnpj_cpf == cnpj)
-        .first()
-    )
+    doc = _digits_only(cnpj)
+    if not doc:
+        raise HTTPException(status_code=400, detail="CNPJ obrigatório.")
+
+    try:
+        emp = (
+            db.query(models.Empresa)
+            .filter(func.regexp_replace(models.Empresa.cnpj_cpf, r"[^0-9]", "", "g") == doc)
+            .first()
+        )
+    except Exception:
+        emp = (
+            db.query(models.Empresa)
+            .filter(models.Empresa.cnpj_cpf == doc)
+            .first()
+        )
+
     if not emp:
-        raise HTTPException(404, "Empresa não encontrada pelo CNPJ.")
+        raise HTTPException(status_code=404, detail="Empresa não encontrada pelo CNPJ.")
     return emp
 
 
-# ====== Endpoints ======
-
-
-@router.get("/empresas/by-cnpj")
-def get_empresa_by_cnpj(
-    cnpj: str = Query(..., description="CNPJ exato (apenas dígitos)"),
-    db: Session = Depends(get_db_session),
-    _: bool = Depends(_require_promessa20),
-):
-    """
-    Busca empresa pelo CNPJ (já normalizado) e retorna payload básico + status de plano.
-
-    Protegido apenas por X-Admin-Pass: promessa20.
-    """
-    emp = _by_cnpj(db, cnpj)
-
-    # instâncias conectadas atuais
-    connected = (
+def _connected_instances_count(db: Session, empresa_id: int) -> int:
+    return (
         db.query(models.EmpresaInstancia)
         .filter(
-            models.EmpresaInstancia.empresa_id == emp.id,
+            models.EmpresaInstancia.empresa_id == empresa_id,
             models.EmpresaInstancia.connected.is_(True),
         )
         .count()
     )
 
+
+def _empresa_payload(emp: models.Empresa, connected: int) -> Dict[str, Any]:
     status_payload = plan_status_payload(emp, connected)
     return {
+        "id": emp.id,
+        "nome": emp.nome,
+        "cnpj_cpf": emp.cnpj_cpf,
+        "telefone": emp.telefone,
+        "assinatura": normalize_plan(getattr(emp, "assinatura", None)),
+        "trial_tier": (
+            normalize_plan(getattr(emp, "trial_tier", None))
+            if getattr(emp, "trial_tier", None)
+            else None
+        ),
+        "trial_expires_at": (
+            emp.trial_expires_at.isoformat()
+            if getattr(emp, "trial_expires_at", None)
+            else None
+        ),
+        "plano_expira_em": (
+            emp.plano_expira_em.isoformat()
+            if getattr(emp, "plano_expira_em", None)
+            else None
+        ),
+        "effective_tier": status_payload["effective_tier"],
+        "quantidade_instancias": int(getattr(emp, "quantidade_instancias", 0) or 0),
+    }
+
+
+# ====== Endpoints ======
+@router.get("/empresas/by-cnpj")
+def get_empresa_by_cnpj(
+    cnpj: str = Query(..., description="CNPJ/CPF com ou sem máscara"),
+    db: Session = Depends(get_db_session),
+    _: bool = Depends(_require_promessa20),
+):
+    emp = _by_cnpj(db, cnpj)
+    connected = _connected_instances_count(db, emp.id)
+
+    return {
         "ok": True,
-        "empresa": {
-            "id": emp.id,
-            "nome": emp.nome,
-            "cnpj_cpf": emp.cnpj_cpf,
-            "telefone": emp.telefone,
-            "assinatura": emp.assinatura,
-            "trial_tier": emp.trial_tier,
-            "trial_expires_at": emp.trial_expires_at.isoformat()
-            if emp.trial_expires_at
-            else None,
-            "effective_tier": status_payload["effective_tier"],
-            "quantidade_instancias": int(emp.quantidade_instancias or 0),
-        },
-        "status": status_payload,
+        "empresa": _empresa_payload(emp, connected),
+        "status": plan_status_payload(emp, connected),
     }
 
 
@@ -112,14 +155,24 @@ def apply_paid_plan(
     _: bool = Depends(_require_promessa20),
 ):
     """
-    Aplica plano PAGO e limpa qualquer trial.
-    body: { "assinatura": "OURO" }
+    Aplica plano pago ou FREE.
+    body:
+      {
+        "assinatura": "FREE|START|BUSINESS|ENTERPRISE",
+        "expires_at": "2026-12-31T23:59:59Z",   # opcional
+        "duration_days": 30                     # opcional, usado se expires_at não vier
+      }
 
-    Protegido apenas por X-Admin-Pass: promessa20.
+    Regras:
+      - ao aplicar qualquer plano, limpa trial
+      - FREE remove plano_expira_em
     """
-    new_tier: Optional[str] = (body or {}).get("assinatura")
-    if not new_tier:
-        raise HTTPException(400, "assinatura obrigatória (ex.: OURO).")
+    assinatura = normalize_plan((body or {}).get("assinatura") or PLAN_FREE)
+    if assinatura not in PLAN_CODES:
+        raise HTTPException(
+            status_code=400,
+            detail="Plano inválido. Use FREE, START, BUSINESS ou ENTERPRISE.",
+        )
 
     emp = (
         db.query(models.Empresa)
@@ -127,23 +180,31 @@ def apply_paid_plan(
         .first()
     )
     if not emp:
-        raise HTTPException(404, "Empresa não encontrada.")
+        raise HTTPException(status_code=404, detail="Empresa não encontrada.")
 
-    emp.assinatura = str(new_tier).upper()
+    emp.assinatura = assinatura
+
+    if assinatura == PLAN_FREE:
+        emp.plano_expira_em = None
+    else:
+        expires_at = _parse_iso_datetime((body or {}).get("expires_at"))
+        duration_days = int((body or {}).get("duration_days") or 30)
+        emp.plano_expira_em = expires_at or (now_utc() + timedelta(days=duration_days))
+
     emp.trial_tier = None
     emp.trial_expires_at = None
-    db.commit()
 
-    # recomputa payload
-    connected = (
-        db.query(models.EmpresaInstancia)
-        .filter(
-            models.EmpresaInstancia.empresa_id == emp.id,
-            models.EmpresaInstancia.connected.is_(True),
-        )
-        .count()
-    )
-    return {"ok": True, "status": plan_status_payload(emp, connected)}
+    db.add(emp)
+    db.commit()
+    db.refresh(emp)
+
+    connected = _connected_instances_count(db, emp.id)
+    return {
+        "ok": True,
+        "empresa": _empresa_payload(emp, connected),
+        "status": plan_status_payload(emp, connected),
+        "detail": "Plano aplicado com sucesso.",
+    }
 
 
 @router.post("/empresas/{empresa_id}/cancel-trial")
@@ -152,71 +213,78 @@ def cancel_trial(
     db: Session = Depends(get_db_session),
     _: bool = Depends(_require_promessa20),
 ):
-    """
-    Cancela o trial atual da empresa (se houver).
-
-    Protegido apenas por X-Admin-Pass: promessa20.
-    """
     emp = (
         db.query(models.Empresa)
         .filter(models.Empresa.id == empresa_id)
         .first()
     )
     if not emp:
-        raise HTTPException(404, "Empresa não encontrada.")
+        raise HTTPException(status_code=404, detail="Empresa não encontrada.")
 
     emp.trial_tier = None
     emp.trial_expires_at = None
+    db.add(emp)
     db.commit()
+    db.refresh(emp)
 
-    connected = (
-        db.query(models.EmpresaInstancia)
-        .filter(
-            models.EmpresaInstancia.empresa_id == emp.id,
-            models.EmpresaInstancia.connected.is_(True),
-        )
-        .count()
-    )
-    return {"ok": True, "status": plan_status_payload(emp, connected)}
+    connected = _connected_instances_count(db, emp.id)
+    return {
+        "ok": True,
+        "empresa": _empresa_payload(emp, connected),
+        "status": plan_status_payload(emp, connected),
+        "detail": "Trial cancelado.",
+    }
 
 
 @router.post("/empresas/{empresa_id}/start-trial")
-def start_trial(
+def restart_trial(
     empresa_id: int,
     body: Dict[str, Any] | None = None,
     db: Session = Depends(get_db_session),
     _: bool = Depends(_require_promessa20),
 ):
     """
-    Recomeça trial PRATA (útil p/ exceções/suporte).
-    body opcional: {"days": 7}
-
-    Protegido apenas por X-Admin-Pass: promessa20.
+    Reinicia trial.
+    body opcional:
+      {
+        "tier": "START|BUSINESS|ENTERPRISE",
+        "days": 7
+      }
     """
+    payload = body or {}
+    tier = normalize_plan(payload.get("tier") or PLAN_START)
+    if tier not in PAID_PLANS:
+        raise HTTPException(
+            status_code=400,
+            detail="Tier inválido para trial. Use START, BUSINESS ou ENTERPRISE.",
+        )
+
+    days: Optional[int] = None
+    if "days" in payload and payload.get("days") is not None:
+        try:
+            days = int(payload["days"])
+        except Exception:
+            raise HTTPException(status_code=400, detail="days inválido.")
+        if days <= 0:
+            raise HTTPException(status_code=400, detail="days deve ser maior que zero.")
+
     emp = (
         db.query(models.Empresa)
         .filter(models.Empresa.id == empresa_id)
         .first()
     )
     if not emp:
-        raise HTTPException(404, "Empresa não encontrada.")
+        raise HTTPException(status_code=404, detail="Empresa não encontrada.")
 
-    days: Optional[int] = None
-    if body and "days" in body:
-        try:
-            days = int(body["days"])
-        except Exception:
-            days = None
-
-    start_prata_trial(emp, days=days)
+    start_trial(emp, tier=tier, days=days)
+    db.add(emp)
     db.commit()
+    db.refresh(emp)
 
-    connected = (
-        db.query(models.EmpresaInstancia)
-        .filter(
-            models.EmpresaInstancia.empresa_id == emp.id,
-            models.EmpresaInstancia.connected.is_(True),
-        )
-        .count()
-    )
-    return {"ok": True, "status": plan_status_payload(emp, connected)}
+    connected = _connected_instances_count(db, emp.id)
+    return {
+        "ok": True,
+        "empresa": _empresa_payload(emp, connected),
+        "status": plan_status_payload(emp, connected),
+        "detail": f"Trial iniciado ({tier}, {days or 'padrão'} dias).",
+    }

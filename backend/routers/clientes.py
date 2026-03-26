@@ -6,11 +6,14 @@ from typing import Optional, List, Any, Dict, Set
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import desc, or_, and_
+from sqlalchemy import desc, or_, and_, func
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy.exc import IntegrityError
 
-import io, csv, json, hashlib
+import io
+import csv
+import json
+import hashlib
 from openpyxl import Workbook, load_workbook
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -104,6 +107,13 @@ def resolve_empresa_id(
             detail="empresa_id é obrigatório (X-Empresa-Id ou ?empresa_id=)",
         )
     return int(emp)
+
+
+def _get_empresa_or_404(db: Session, empresa_id: int) -> models.Empresa:
+    emp = db.query(models.Empresa).filter(models.Empresa.id == int(empresa_id)).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    return emp
 
 
 def _digits(s: str) -> str:
@@ -633,6 +643,8 @@ def criar_cliente(
             detail="Sem permissão para criar clientes (clientes.criar).",
         )
 
+    empresa = _get_empresa_or_404(db, empresa_id)
+
     tel = _digits(body.telefone)
     if not tel:
         raise HTTPException(status_code=400, detail="Telefone inválido")
@@ -648,7 +660,13 @@ def criar_cliente(
     if dup:
         return {"id": dup.id, "exists": True}
 
-    enforce_quota(db, empresa_id, "contacts_max", delta=1)
+    current_contacts = (
+        db.query(func.count(models.Cliente.id))
+        .filter(models.Cliente.empresa_id == empresa_id)
+        .scalar()
+        or 0
+    )
+    enforce_quota(empresa, "contacts_max", current_contacts, delta=1)
 
     colab_id = body.colaborador_id
     if colab_id is not None:
@@ -708,7 +726,9 @@ def exportar_clientes(
             detail="Sem permissão para exportar clientes (clientes.importar_exportar).",
         )
 
-    if not has_feature(db, empresa_id, "feature_export"):
+    empresa = _get_empresa_or_404(db, empresa_id)
+
+    if not has_feature(empresa, "feature_export"):
         raise HTTPException(
             status_code=403,
             detail="Seu plano não permite exportação de clientes (feature_export).",
@@ -813,7 +833,9 @@ def importar_clientes(
             detail="Sem permissão para importar clientes (clientes.importar_exportar).",
         )
 
-    if not has_feature(db, empresa_id, "feature_import"):
+    empresa = _get_empresa_or_404(db, empresa_id)
+
+    if not has_feature(empresa, "feature_import"):
         raise HTTPException(
             status_code=403,
             detail="Seu plano não permite importação de clientes (feature_import).",
@@ -873,7 +895,13 @@ def importar_clientes(
     to_insert = len([p for p in phones if p not in existing])
 
     if to_insert > 0:
-        enforce_quota(db, empresa_id, "contacts_max", delta=to_insert)
+        current_contacts = (
+            db.query(func.count(models.Cliente.id))
+            .filter(models.Cliente.empresa_id == empresa_id)
+            .scalar()
+            or 0
+        )
+        enforce_quota(empresa, "contacts_max", current_contacts, delta=to_insert)
 
     inseridos = atualizados = ignorados = 0
 

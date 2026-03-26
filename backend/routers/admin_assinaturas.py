@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hmac
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import jwt
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
@@ -30,20 +31,27 @@ from backend.utils.plans import (
 
 router = APIRouter(prefix="/api/admin-saas", tags=["Admin SaaS"])
 
-ADMIN_SAAS_PASSWORD = (os.getenv("ADMIN_SAAS_PASSWORD")).strip()
+ADMIN_SAAS_PASSWORD = (os.getenv("ADMIN_SAAS_PASSWORD") or "").strip()
 ADMIN_SAAS_JWT_SECRET = (
     os.getenv("ADMIN_SAAS_JWT_SECRET")
     or os.getenv("JWT_SECRET")
-    or "troque-me"
+    or ""
 ).strip()
 ADMIN_SAAS_JWT_ALG = "HS256"
-ADMIN_SAAS_JWT_HOURS = int((os.getenv("ADMIN_SAAS_JWT_HOURS") or "12").strip())
+
+try:
+    ADMIN_SAAS_JWT_HOURS = int((os.getenv("ADMIN_SAAS_JWT_HOURS") or "12").strip())
+except Exception:
+    ADMIN_SAAS_JWT_HOURS = 12
 
 OVERRIDE_TABLE = "empresa_plan_overrides"
-ADMIN_LOGS_TABLE = "empresa_admin_logs"  # <-- NOVA TABELA DE LOGS
+ADMIN_LOGS_TABLE = "empresa_admin_logs"
 ACTIVE_CAMPAIGN_STATUSES = ("pendente", "processando")
 
 
+# =========================
+# Pydantic Models
+# =========================
 class AdminLoginIn(BaseModel):
     password: str
 
@@ -73,16 +81,28 @@ class LoginConfigIn(BaseModel):
     requer_token_login: bool
 
 
+class NotesIn(BaseModel):
+    internal_notes: str
+
+
+class BulkActionIn(BaseModel):
+    empresa_ids: List[int]
+    action: str  # 'apply_plan' ou 'add_trial'
+    plan: Optional[str] = None
+    days: Optional[int] = None
+
+
 class SearchFilters(BaseModel):
     q: Optional[str] = None
     plan: Optional[str] = None
     status: Optional[str] = None
+    near_limit: Optional[str] = None
     page: int = 1
     limit: int = 20
 
 
 # =========================
-# Helpers Base
+# Helpers Base & Auth
 # =========================
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -103,9 +123,43 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _model_dump_compat(model: Any) -> dict:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
+def _ensure_admin_saas_config() -> None:
+    missing: list[str] = []
+
+    if not ADMIN_SAAS_PASSWORD:
+        missing.append("ADMIN_SAAS_PASSWORD")
+
+    if not ADMIN_SAAS_JWT_SECRET:
+        missing.append("ADMIN_SAAS_JWT_SECRET ou JWT_SECRET")
+
+    if missing:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Admin SaaS não configurado. Variáveis ausentes: {', '.join(missing)}",
+        )
+
+
+def _get_client_jwt_secret() -> str:
+    secret = (os.getenv("JWT_SECRET") or "").strip()
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="JWT_SECRET não configurado para gerar acesso mágico.",
+        )
+    return secret
+
+
 def _require_admin_saas(
     authorization: str | None = Header(default=None, alias="Authorization"),
 ):
+    _ensure_admin_saas_config()
+
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Token admin ausente.")
 
@@ -122,6 +176,8 @@ def _require_admin_saas(
 
 
 def _make_admin_token() -> str:
+    _ensure_admin_saas_config()
+
     now = _now_utc()
     payload = {
         "scope": "admin_saas",
@@ -132,7 +188,7 @@ def _make_admin_token() -> str:
 
 
 # =========================
-# Helpers de Logs (NOVO)
+# Helpers de Logs
 # =========================
 def _ensure_log_table(db: Session) -> None:
     db.execute(
@@ -147,23 +203,32 @@ def _ensure_log_table(db: Session) -> None:
             """
         )
     )
-    db.commit()
 
 
 def _add_log(db: Session, empresa_id: int, acao: str) -> None:
     _ensure_log_table(db)
     db.execute(
-        text(f"INSERT INTO {ADMIN_LOGS_TABLE} (empresa_id, acao, criado_em) VALUES (:emp, :acao, :now)"),
+        text(
+            f"""
+            INSERT INTO {ADMIN_LOGS_TABLE} (empresa_id, acao, criado_em)
+            VALUES (:emp, :acao, :now)
+            """
+        ),
         {"emp": int(empresa_id), "acao": acao, "now": _now_utc()},
     )
-    db.commit()
 
 
 def _get_logs(db: Session, empresa_id: int, limit: int = 20) -> list[Dict[str, Any]]:
     _ensure_log_table(db)
     rows = db.execute(
         text(
-            f"SELECT acao, criado_em FROM {ADMIN_LOGS_TABLE} WHERE empresa_id = :emp ORDER BY id DESC LIMIT :limit"
+            f"""
+            SELECT acao, criado_em
+            FROM {ADMIN_LOGS_TABLE}
+            WHERE empresa_id = :emp
+            ORDER BY id DESC
+            LIMIT :limit
+            """
         ),
         {"emp": int(empresa_id), "limit": limit},
     ).mappings().all()
@@ -187,32 +252,22 @@ def _ensure_override_table(db: Session) -> None:
                 broadcasts_per_month_max INTEGER NULL,
                 active_campaigns_max INTEGER NULL,
                 automation_rules_max INTEGER NULL,
-                updated_at TIMESTAMP NULL
+                updated_at TIMESTAMP NULL,
+                internal_notes TEXT DEFAULT '',
+                is_suspended BOOLEAN DEFAULT FALSE
             )
             """
         )
     )
-    db.commit()
+
+    db.execute(text(f"ALTER TABLE {OVERRIDE_TABLE} ADD COLUMN IF NOT EXISTS internal_notes TEXT DEFAULT ''"))
+    db.execute(text(f"ALTER TABLE {OVERRIDE_TABLE} ADD COLUMN IF NOT EXISTS is_suspended BOOLEAN DEFAULT FALSE"))
 
 
-def _get_overrides(db: Session, empresa_id: int) -> Dict[str, Optional[int]]:
+def _get_overrides(db: Session, empresa_id: int) -> Dict[str, Any]:
     _ensure_override_table(db)
     row = db.execute(
-        text(
-            f"""
-            SELECT
-                whatsapp_instances_max,
-                users_max,
-                departments_max,
-                contacts_max,
-                broadcasts_per_month_max,
-                active_campaigns_max,
-                automation_rules_max,
-                updated_at
-            FROM {OVERRIDE_TABLE}
-            WHERE empresa_id = :empresa_id
-            """
-        ),
+        text(f"SELECT * FROM {OVERRIDE_TABLE} WHERE empresa_id = :empresa_id"),
         {"empresa_id": int(empresa_id)},
     ).mappings().first()
 
@@ -226,24 +281,17 @@ def _get_overrides(db: Session, empresa_id: int) -> Dict[str, Optional[int]]:
             "active_campaigns_max": None,
             "automation_rules_max": None,
             "updated_at": None,
+            "internal_notes": "",
+            "is_suspended": False,
         }
 
-    return {
-        "whatsapp_instances_max": row.get("whatsapp_instances_max"),
-        "users_max": row.get("users_max"),
-        "departments_max": row.get("departments_max"),
-        "contacts_max": row.get("contacts_max"),
-        "broadcasts_per_month_max": row.get("broadcasts_per_month_max"),
-        "active_campaigns_max": row.get("active_campaigns_max"),
-        "automation_rules_max": row.get("automation_rules_max"),
-        "updated_at": _to_iso(row.get("updated_at")),
-    }
+    return {k: v for k, v in row.items() if k != "empresa_id"}
 
 
-def _save_overrides(db: Session, empresa_id: int, payload: OverrideLimitsIn) -> Dict[str, Optional[int]]:
+def _save_overrides(db: Session, empresa_id: int, payload: OverrideLimitsIn) -> None:
     _ensure_override_table(db)
     now = _now_utc()
-    data = payload.model_dump()
+    data = _model_dump_compat(payload)
 
     db.execute(
         text(
@@ -287,11 +335,12 @@ def _save_overrides(db: Session, empresa_id: int, payload: OverrideLimitsIn) -> 
             "updated_at": now,
         },
     )
-    db.commit()
-    return _get_overrides(db, empresa_id)
 
 
-def _plan_status(emp: models.Empresa) -> str:
+def _plan_status(emp: models.Empresa, is_suspended: bool = False) -> str:
+    if is_suspended:
+        return "suspended"
+
     if normalize_plan(getattr(emp, "assinatura", None)) != PLAN_FREE:
         exp = getattr(emp, "plano_expira_em", None)
         if exp is not None:
@@ -316,11 +365,36 @@ def _empresa_or_404(db: Session, empresa_id: int) -> models.Empresa:
 def _counts_for_empresa(db: Session, empresa_id: int) -> Dict[str, int]:
     empresa_id = int(empresa_id)
 
-    clientes = db.query(func.count(models.Cliente.id)).filter(models.Cliente.empresa_id == empresa_id).scalar() or 0
-    usuarios = db.query(func.count(models.Usuario.id)).filter(models.Usuario.empresa_id == empresa_id).scalar() or 0
-    colaboradores = db.query(func.count(models.Colaborador.id)).filter(models.Colaborador.empresa_id == empresa_id).scalar() or 0
-    departamentos = db.query(func.count(models.Departamento.id)).filter(models.Departamento.empresa_id == empresa_id).scalar() or 0
-    instancias_total = db.query(func.count(models.EmpresaInstancia.id)).filter(models.EmpresaInstancia.empresa_id == empresa_id).scalar() or 0
+    clientes = (
+        db.query(func.count(models.Cliente.id))
+        .filter(models.Cliente.empresa_id == empresa_id)
+        .scalar()
+        or 0
+    )
+    usuarios = (
+        db.query(func.count(models.Usuario.id))
+        .filter(models.Usuario.empresa_id == empresa_id)
+        .scalar()
+        or 0
+    )
+    colaboradores = (
+        db.query(func.count(models.Colaborador.id))
+        .filter(models.Colaborador.empresa_id == empresa_id)
+        .scalar()
+        or 0
+    )
+    departamentos = (
+        db.query(func.count(models.Departamento.id))
+        .filter(models.Departamento.empresa_id == empresa_id)
+        .scalar()
+        or 0
+    )
+    instancias_total = (
+        db.query(func.count(models.EmpresaInstancia.id))
+        .filter(models.EmpresaInstancia.empresa_id == empresa_id)
+        .scalar()
+        or 0
+    )
     instancias_conectadas = (
         db.query(func.count(models.EmpresaInstancia.id))
         .filter(models.EmpresaInstancia.empresa_id == empresa_id)
@@ -366,23 +440,20 @@ def _counts_for_empresa(db: Session, empresa_id: int) -> Dict[str, int]:
     }
 
 
-def _merged_limits(emp: models.Empresa, overrides: Dict[str, Optional[int]]) -> Dict[str, int]:
+def _merged_limits(emp: models.Empresa, overrides: Dict[str, Any]) -> Dict[str, int]:
     base = dict(plan_limits(emp))
 
-    if overrides.get("whatsapp_instances_max") is not None:
-        base["whatsapp_instances_max"] = _safe_int(overrides["whatsapp_instances_max"], 0)
-    if overrides.get("users_max") is not None:
-        base["users_max"] = _safe_int(overrides["users_max"], 0)
-    if overrides.get("departments_max") is not None:
-        base["departments_max"] = _safe_int(overrides["departments_max"], 0)
-    if overrides.get("contacts_max") is not None:
-        base["contacts_max"] = _safe_int(overrides["contacts_max"], 0)
-    if overrides.get("broadcasts_per_month_max") is not None:
-        base["broadcasts_per_month_max"] = _safe_int(overrides["broadcasts_per_month_max"], 0)
-    if overrides.get("active_campaigns_max") is not None:
-        base["active_campaigns_max"] = _safe_int(overrides["active_campaigns_max"], 0)
-    if overrides.get("automation_rules_max") is not None:
-        base["automation_rules_max"] = _safe_int(overrides["automation_rules_max"], 0)
+    for key in [
+        "whatsapp_instances_max",
+        "users_max",
+        "departments_max",
+        "contacts_max",
+        "broadcasts_per_month_max",
+        "active_campaigns_max",
+        "automation_rules_max",
+    ]:
+        if overrides.get(key) is not None:
+            base[key] = _safe_int(overrides[key], 0)
 
     quantidade_instancias = _safe_int(getattr(emp, "quantidade_instancias", 0), 0)
     if quantidade_instancias > 0:
@@ -391,12 +462,38 @@ def _merged_limits(emp: models.Empresa, overrides: Dict[str, Optional[int]]) -> 
     return {k: _safe_int(v, 0) for k, v in base.items()}
 
 
+def _is_near_limit(summary: Dict[str, Any], threshold: float = 0.8) -> bool:
+    counts = summary.get("counts", {}) or {}
+    limits = summary.get("limits", {}) or {}
+
+    checks = [
+        ("whatsapp_instances", "whatsapp_instances_max"),
+        ("team_members", "users_max"),
+        ("departments", "departments_max"),
+        ("contacts", "contacts_max"),
+        ("broadcasts_month", "broadcasts_per_month_max"),
+        ("active_campaigns", "active_campaigns_max"),
+    ]
+
+    for current_key, limit_key in checks:
+        current_val = _safe_int(counts.get(current_key), 0)
+        max_val = _safe_int(limits.get(limit_key), 0)
+
+        if max_val > 0 and (current_val / max_val) >= threshold:
+            return True
+
+    return False
+
+
 def _serialize_empresa_summary(db: Session, emp: models.Empresa) -> Dict[str, Any]:
     overrides = _get_overrides(db, emp.id)
     limits = _merged_limits(emp, overrides)
     counts = _counts_for_empresa(db, emp.id)
     catalog = plan_catalog_item(emp)
-    status_payload = plan_status_payload(emp, current_instances=counts["whatsapp_instances_connected"]) or {}
+    status_payload = plan_status_payload(
+        emp,
+        current_instances=counts["whatsapp_instances_connected"],
+    ) or {}
 
     return {
         "id": int(emp.id),
@@ -409,10 +506,12 @@ def _serialize_empresa_summary(db: Session, emp: models.Empresa) -> Dict[str, An
         "effective_tier": effective_plan(emp),
         "plan_name": catalog.get("name"),
         "price_monthly": catalog.get("price_monthly"),
-        "subscription_status": _plan_status(emp),
+        "subscription_status": _plan_status(emp, bool(overrides.get("is_suspended", False))),
         "trial": {
             "active": is_trial_active(emp),
-            "tier": normalize_plan(getattr(emp, "trial_tier", None)) if getattr(emp, "trial_tier", None) else None,
+            "tier": normalize_plan(getattr(emp, "trial_tier", None))
+            if getattr(emp, "trial_tier", None)
+            else None,
             "expires_at": _to_iso(getattr(emp, "trial_expires_at", None)),
             "days_left": trial_days_left(emp),
         },
@@ -435,6 +534,7 @@ def _recent_disparos(db: Session, empresa_id: int, limit: int = 10) -> list[Dict
         .limit(limit)
         .all()
     )
+
     out: list[Dict[str, Any]] = []
     for row in rows:
         out.append(
@@ -457,12 +557,14 @@ def _recent_disparos(db: Session, empresa_id: int, limit: int = 10) -> list[Dict
 # =========================
 @router.post("/auth/login")
 def admin_saas_login(body: AdminLoginIn):
+    _ensure_admin_saas_config()
+
     senha = (body.password or "").strip()
 
     if not senha:
         raise HTTPException(status_code=400, detail="Informe a senha.")
 
-    if senha != ADMIN_SAAS_PASSWORD:
+    if not hmac.compare_digest(senha, ADMIN_SAAS_PASSWORD):
         raise HTTPException(status_code=401, detail="Senha inválida.")
 
     token = _make_admin_token()
@@ -471,6 +573,7 @@ def admin_saas_login(body: AdminLoginIn):
         "token": token,
         "expires_in_hours": ADMIN_SAAS_JWT_HOURS,
     }
+
 
 @router.get("/session")
 def admin_saas_session(_: dict = Depends(_require_admin_saas)):
@@ -494,8 +597,9 @@ def list_empresas(
     q: Optional[str] = Query(default=None),
     plan: Optional[str] = Query(default=None),
     status_filter: Optional[str] = Query(default=None, alias="status"),
+    near_limit: Optional[str] = Query(default=None),
     page: int = Query(default=1, ge=1),
-    limit: int = Query(default=20, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db_session),
     _: dict = Depends(_require_admin_saas),
 ):
@@ -512,35 +616,39 @@ def list_empresas(
 
     plan_norm = normalize_plan(plan) if plan else None
     if plan and plan_norm != PLAN_FREE:
-        query = query.filter(models.Empresa.assinatura.in_([plan_norm, plan.upper()]))
+        query = query.filter(models.Empresa.assinatura.in_([plan_norm, str(plan).upper()]))
 
-    total = query.count()
-    items = (
-        query.order_by(models.Empresa.created_at.desc(), models.Empresa.id.desc())
-        .offset((page - 1) * limit)
-        .limit(limit)
-        .all()
-    )
+    empresas = query.order_by(models.Empresa.created_at.desc(), models.Empresa.id.desc()).all()
 
-    rows = [_serialize_empresa_summary(db, emp) for emp in items]
+    rows = [_serialize_empresa_summary(db, emp) for emp in empresas]
 
     if plan and plan_norm == PLAN_FREE:
         rows = [r for r in rows if r["effective_tier"] == PLAN_FREE]
+
     if status_filter:
         rows = [r for r in rows if r["subscription_status"] == status_filter]
 
-    mrr = 0
-    for row in rows:
-        if row["subscription_status"] in {"active", "trial"} and row.get("price_monthly"):
-            mrr += _safe_int(row["price_monthly"], 0)
+    if str(near_limit).lower() == "true":
+        rows = [r for r in rows if _is_near_limit(r)]
+
+    total = len(rows)
+    start_idx = (page - 1) * limit
+    end_idx = start_idx + limit
+    page_items = rows[start_idx:end_idx]
+
+    mrr_visible = sum(
+        _safe_int(r["price_monthly"], 0)
+        for r in rows
+        if r["subscription_status"] in {"active", "trial"}
+    )
 
     return {
         "ok": True,
         "page": page,
         "limit": limit,
         "total": total,
-        "mrr_visible": mrr,
-        "items": rows,
+        "mrr_visible": mrr_visible,
+        "items": page_items,
     }
 
 
@@ -555,7 +663,7 @@ def get_empresa_detail(
 
     overview_counts = summary["counts"]
     recent_disparos = _recent_disparos(db, empresa_id, limit=10)
-    logs_admin = _get_logs(db, empresa_id) # <-- BUSCA OS LOGS DO HISTÓRICO
+    logs_admin = _get_logs(db, empresa_id)
 
     instancias = (
         db.query(models.EmpresaInstancia)
@@ -583,12 +691,206 @@ def get_empresa_detail(
         "instancias": inst_items,
         "recent_disparos": recent_disparos,
         "counts": overview_counts,
-        "logs": logs_admin, # <-- RETORNA PRO FRONT
+        "logs": logs_admin,
     }
 
 
 # =========================
-# Ações
+# Ações Avançadas
+# =========================
+@router.get("/empresas/{empresa_id}/chart")
+def get_empresa_chart(
+    empresa_id: int,
+    db: Session = Depends(get_db_session),
+    _: dict = Depends(_require_admin_saas),
+):
+    _empresa_or_404(db, empresa_id)
+    trinta_dias = _now_utc() - timedelta(days=30)
+
+    data_expr = func.date(models.Disparo.criado_em)
+
+    dados = (
+        db.query(
+            data_expr.label("data"),
+            func.count(models.Disparo.id).label("total"),
+        )
+        .filter(models.Disparo.empresa_id == int(empresa_id))
+        .filter(models.Disparo.criado_em >= trinta_dias)
+        .group_by(data_expr)
+        .order_by(data_expr.asc())
+        .all()
+    )
+
+    return {
+        "ok": True,
+        "chart": [{"date": str(r.data), "count": int(r.total)} for r in dados],
+    }
+
+
+@router.post("/empresas/{empresa_id}/impersonate")
+def impersonate_client(
+    empresa_id: int,
+    db: Session = Depends(get_db_session),
+    _: dict = Depends(_require_admin_saas),
+):
+    emp = _empresa_or_404(db, empresa_id)
+    secret_key = _get_client_jwt_secret()
+
+    token = jwt.encode(
+        {
+            "empresa_id": int(emp.id),
+            "user_id": 0,
+            "role": "admin",
+            "impersonated": True,
+            "exp": int((_now_utc() + timedelta(hours=1)).timestamp()),
+        },
+        secret_key,
+        algorithm="HS256",
+    )
+
+    _add_log(db, empresa_id, "Acessou o painel do cliente via Acesso Mágico")
+    db.commit()
+
+    return {"ok": True, "magic_token": token}
+
+
+@router.put("/empresas/{empresa_id}/notes")
+def update_internal_notes(
+    empresa_id: int,
+    body: NotesIn,
+    db: Session = Depends(get_db_session),
+    _: dict = Depends(_require_admin_saas),
+):
+    _empresa_or_404(db, empresa_id)
+    _ensure_override_table(db)
+
+    db.execute(
+        text(
+            f"""
+            INSERT INTO {OVERRIDE_TABLE} (empresa_id, internal_notes, updated_at)
+            VALUES (:id, :notes, :updated_at)
+            ON CONFLICT (empresa_id)
+            DO UPDATE SET
+                internal_notes = EXCLUDED.internal_notes,
+                updated_at = EXCLUDED.updated_at
+            """
+        ),
+        {
+            "id": int(empresa_id),
+            "notes": body.internal_notes or "",
+            "updated_at": _now_utc(),
+        },
+    )
+
+    _add_log(db, empresa_id, "Atualizou as notas internas (CRM)")
+    db.commit()
+
+    return {"ok": True, "detail": "Notas salvas."}
+
+
+@router.post("/empresas/{empresa_id}/toggle-suspension")
+def toggle_suspension(
+    empresa_id: int,
+    db: Session = Depends(get_db_session),
+    _: dict = Depends(_require_admin_saas),
+):
+    _empresa_or_404(db, empresa_id)
+    _ensure_override_table(db)
+
+    row = db.execute(
+        text(f"SELECT is_suspended FROM {OVERRIDE_TABLE} WHERE empresa_id = :id"),
+        {"id": int(empresa_id)},
+    ).mappings().first()
+
+    atual = bool(row["is_suspended"]) if row else False
+    novo_status = not atual
+
+    db.execute(
+        text(
+            f"""
+            INSERT INTO {OVERRIDE_TABLE} (empresa_id, is_suspended, updated_at)
+            VALUES (:id, :status, :updated_at)
+            ON CONFLICT (empresa_id)
+            DO UPDATE SET
+                is_suspended = EXCLUDED.is_suspended,
+                updated_at = EXCLUDED.updated_at
+            """
+        ),
+        {
+            "id": int(empresa_id),
+            "status": novo_status,
+            "updated_at": _now_utc(),
+        },
+    )
+
+    _add_log(
+        db,
+        empresa_id,
+        f"{'Suspendeu' if novo_status else 'Reativou'} a conta (Kill Switch)",
+    )
+    db.commit()
+
+    return {"ok": True, "is_suspended": novo_status}
+
+
+@router.post("/empresas/bulk-action")
+def bulk_actions(
+    body: BulkActionIn,
+    db: Session = Depends(get_db_session),
+    _: dict = Depends(_require_admin_saas),
+):
+    action = (body.action or "").strip().lower()
+    if action not in {"apply_plan", "add_trial"}:
+        raise HTTPException(status_code=400, detail="Ação inválida.")
+
+    if action == "apply_plan":
+        if not body.plan:
+            raise HTTPException(status_code=400, detail="Informe o plano para apply_plan.")
+        assinatura = normalize_plan(body.plan)
+        if assinatura not in {PLAN_FREE, PLAN_START, PLAN_BUSINESS, PLAN_ENTERPRISE}:
+            raise HTTPException(status_code=400, detail="Plano inválido.")
+    else:
+        if not body.days or int(body.days) <= 0:
+            raise HTTPException(status_code=400, detail="Informe days válido para add_trial.")
+
+    processadas = 0
+
+    for emp_id in body.empresa_ids:
+        emp = db.query(models.Empresa).filter(models.Empresa.id == int(emp_id)).first()
+        if not emp:
+            continue
+
+        if action == "apply_plan":
+            assinatura = normalize_plan(body.plan)
+            emp.assinatura = assinatura
+            emp.trial_tier = None
+            emp.trial_expires_at = None
+
+            if assinatura == PLAN_FREE:
+                emp.plano_expira_em = None
+            else:
+                emp.plano_expira_em = _now_utc() + timedelta(days=30)
+
+            _add_log(db, int(emp_id), f"Ação em Massa: Alterou plano para {assinatura}")
+
+        elif action == "add_trial":
+            start_trial(emp, tier=PLAN_START, days=int(body.days))
+            _add_log(db, int(emp_id), f"Ação em Massa: Adicionou {int(body.days)} dias de trial")
+
+        db.add(emp)
+        processadas += 1
+
+    db.commit()
+
+    return {
+        "ok": True,
+        "detail": f"Ação em massa concluída para {processadas} empresas.",
+        "processed": processadas,
+    }
+
+
+# =========================
+# Ações Individuais Clássicas
 # =========================
 @router.post("/empresas/{empresa_id}/apply-plan")
 def apply_plan(
@@ -619,10 +921,9 @@ def apply_plan(
             emp.plano_expira_em = _now_utc() + timedelta(days=int(body.duration_days or 30))
 
     db.add(emp)
+    _add_log(db, empresa_id, f"Alterou assinatura manual para: {assinatura}")
     db.commit()
     db.refresh(emp)
-
-    _add_log(db, empresa_id, f"Alterou assinatura manual para: {assinatura}") # <-- GRAVA LOG
 
     return {
         "ok": True,
@@ -645,10 +946,9 @@ def start_trial_endpoint(
 
     start_trial(emp, tier=tier, days=int(body.days))
     db.add(emp)
+    _add_log(db, empresa_id, f"Iniciou trial de {body.days} dias no plano {tier}")
     db.commit()
     db.refresh(emp)
-
-    _add_log(db, empresa_id, f"Iniciou trial de {body.days} dias no plano {tier}") # <-- GRAVA LOG
 
     return {
         "ok": True,
@@ -666,27 +966,17 @@ def cancel_trial_endpoint(
     emp = _empresa_or_404(db, empresa_id)
     emp.trial_tier = None
     emp.trial_expires_at = None
+
     db.add(emp)
+    _add_log(db, empresa_id, "Cancelou o trial manualmente")
     db.commit()
     db.refresh(emp)
-
-    _add_log(db, empresa_id, "Cancelou o trial manualmente") # <-- GRAVA LOG
 
     return {
         "ok": True,
         "detail": "Trial cancelado.",
         "empresa": _serialize_empresa_summary(db, emp),
     }
-
-
-@router.get("/empresas/{empresa_id}/overrides")
-def get_overrides(
-    empresa_id: int,
-    db: Session = Depends(get_db_session),
-    _: dict = Depends(_require_admin_saas),
-):
-    _empresa_or_404(db, empresa_id)
-    return {"ok": True, "overrides": _get_overrides(db, empresa_id)}
 
 
 @router.post("/empresas/{empresa_id}/overrides")
@@ -697,10 +987,13 @@ def save_overrides(
     _: dict = Depends(_require_admin_saas),
 ):
     _empresa_or_404(db, empresa_id)
-    data = _save_overrides(db, empresa_id, body)
-    emp = _empresa_or_404(db, empresa_id)
 
-    _add_log(db, empresa_id, "Alterou os limites customizados da empresa") # <-- GRAVA LOG
+    _save_overrides(db, empresa_id, body)
+    _add_log(db, empresa_id, "Alterou os limites customizados da empresa")
+    db.commit()
+
+    emp = _empresa_or_404(db, empresa_id)
+    data = _get_overrides(db, empresa_id)
 
     return {
         "ok": True,
@@ -719,12 +1012,12 @@ def update_login_config(
 ):
     emp = _empresa_or_404(db, empresa_id)
     emp.requer_token_login = bool(body.requer_token_login)
+
     db.add(emp)
+    status_txt = "Habilitou" if body.requer_token_login else "Desabilitou"
+    _add_log(db, empresa_id, f"{status_txt} a exigência de Token 2FA de Login")
     db.commit()
     db.refresh(emp)
-
-    status = "Habilitou" if body.requer_token_login else "Desabilitou"
-    _add_log(db, empresa_id, f"{status} a exigência de Token 2FA de Login") # <-- GRAVA LOG
 
     return {
         "ok": True,

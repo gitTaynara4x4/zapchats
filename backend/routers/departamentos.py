@@ -1,4 +1,3 @@
-# backend/routers/departamentos.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -102,6 +101,14 @@ def _norm_hora(h: Optional[str]) -> Optional[str]:
     return h
 
 
+def _id_get(obj: Any, key: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
 def resolve_empresa_id(
     identity=Depends(get_current_identity),
     x_empresa_id: Optional[int] = Header(default=None, alias="X-Empresa-Id"),
@@ -114,7 +121,7 @@ def resolve_empresa_id(
 
     Se identity.empresa_id estiver preenchido, ele PRECISA bater com o ID pedido.
     """
-    base_id = getattr(identity, "empresa_id", None)
+    base_id = _id_get(identity, "empresa_id")
 
     empresa_id = x_empresa_id or empresa_id_qs or base_id
     if not empresa_id:
@@ -162,8 +169,35 @@ def get_departamento_or_404(db: Session, empresa_id: int, dept_id: int) -> model
     return dept
 
 
-def has_column(model, attr: str) -> bool:
-    return hasattr(model, attr)
+def has_column(model_or_obj, attr: str) -> bool:
+    return hasattr(model_or_obj, attr)
+
+
+def _validate_parent_same_empresa(
+    db: Session,
+    empresa_id: int,
+    parent_id: Optional[int],
+    current_dept_id: Optional[int] = None,
+) -> None:
+    if parent_id is None:
+        return
+
+    if current_dept_id is not None and int(parent_id) == int(current_dept_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Não é permitido definir o próprio departamento como superior.",
+        )
+
+    parent = (
+        db.query(models.Departamento.id)
+        .filter(
+            models.Departamento.id == parent_id,
+            models.Departamento.empresa_id == empresa_id,
+        )
+        .first()
+    )
+    if not parent:
+        raise HTTPException(status_code=404, detail="Superior informado não existe.")
 
 
 def dept_to_dict(row: Any) -> Dict[str, Any]:
@@ -195,7 +229,6 @@ def dept_to_dict(row: Any) -> Dict[str, Any]:
         out["hora_login_fim_padrao"] = getattr(row, "hora_login_fim_padrao", None)
     else:
         out["hora_login_fim_padrao"] = None
-    # path pode ser coluna (ARRAY) — se não for, calculamos na rota /tree
     out["path"] = getattr(row, "path", None)
     return out
 
@@ -208,22 +241,18 @@ def build_paths(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         parent = r.get("parent_id")
         children.setdefault(parent, []).append(r)
 
-    # ordena filhos por nome para previsibilidade
     for lst in children.values():
         lst.sort(key=lambda x: (x.get("nome") or "").lower())
 
-    # se já veio path da coluna, respeita; senão, calcula nomeando do topo
     def dfs(node: Dict[str, Any], acc_names: List[str]):
         node["path"] = list(acc_names) + [node["nome"]]
         for c in children.get(node["id"], []):
             dfs(c, node["path"])
 
-    # raízes (parent_id is None)
     for root in children.get(None, []):
         if not root.get("path"):
             dfs(root, [])
 
-    # para itens isolados (em teoria não deveria haver)
     for r in rows:
         if not r.get("path"):
             r["path"] = [r["nome"]]
@@ -325,7 +354,7 @@ def criar(
     ensure_empresa_exists(db, empresa_id)
 
     # ✅ QUOTA: bloquear criação se exceder limite do plano
-    emp = db.query(models.Empresa).get(empresa_id)
+    emp = db.get(models.Empresa, empresa_id)
     if emp:
         counts = usage_counts(db, emp.id)
         enforce_quota(
@@ -338,6 +367,9 @@ def criar(
 
     nome = payload.nome.strip()
     ensure_nome_unico(db, empresa_id, nome)
+
+    if has_column(models.Departamento, "parent_id"):
+        _validate_parent_same_empresa(db, empresa_id, payload.parent_id)
 
     novo = models.Departamento(
         empresa_id=empresa_id,
@@ -376,6 +408,18 @@ def atualizar(
 
     nome = payload.nome.strip()
     ensure_nome_unico(db, empresa_id, nome, ignore_id=dept.id)
+
+    if has_column(models.Departamento, "parent_id"):
+        _validate_parent_same_empresa(db, empresa_id, payload.parent_id, current_dept_id=dept.id)
+
+        itens = (
+            db.query(models.Departamento)
+            .filter(models.Departamento.empresa_id == empresa_id)
+            .all()
+        )
+        rows = [dept_to_dict(it) for it in itens]
+        rows = build_paths(rows)
+        assert_no_cycle(dept.id, payload.parent_id, rows)
 
     dept.nome = nome
     dept.descricao = payload.descricao or None
@@ -432,16 +476,7 @@ def mover(
     assert_no_cycle(dept.id, payload.new_parent_id, rows)
 
     if payload.new_parent_id is not None:
-        _p = (
-            db.query(models.Departamento.id)
-            .filter(
-                models.Departamento.empresa_id == empresa_id,
-                models.Departamento.id == payload.new_parent_id,
-            )
-            .first()
-        )
-        if not _p:
-            raise HTTPException(status_code=404, detail="Superior informado não existe.")
+        _validate_parent_same_empresa(db, empresa_id, payload.new_parent_id, current_dept_id=dept.id)
 
     setattr(dept, "parent_id", payload.new_parent_id)
     db.commit()

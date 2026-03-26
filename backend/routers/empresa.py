@@ -1,4 +1,3 @@
-# backend/routers/empresa.py
 from __future__ import annotations
 
 from datetime import timezone
@@ -14,6 +13,7 @@ from backend.utils.plans import (
     plan_status_payload,
     effective_plan,
     plan_limit,
+    normalize_plan,
 )
 from backend.routers.auth import get_current_identity
 
@@ -53,12 +53,27 @@ def _norm_instance_number(s: Optional[str]) -> Optional[str]:
     return d or None
 
 
+def _identity_empresa_id(identity) -> Optional[int]:
+    """
+    Compatível com identity em dict ou objeto.
+    """
+    if isinstance(identity, dict):
+        value = identity.get("empresa_id")
+    else:
+        value = getattr(identity, "empresa_id", None)
+
+    try:
+        return int(value) if value is not None else None
+    except Exception:
+        return None
+
+
 def _assert_empresa_access(empresa_id: int, identity) -> int:
     """
     Garante que o usuário só acesse a própria empresa.
     Funciona tanto para usuário quanto para colaborador.
     """
-    emp_user = getattr(identity, "empresa_id", None)
+    emp_user = _identity_empresa_id(identity)
     if emp_user is not None and int(emp_user) != int(empresa_id):
         raise HTTPException(status_code=403, detail="Empresa não permitida")
     return int(empresa_id)
@@ -78,9 +93,9 @@ def resolve_instancia_id(
     """
     Resolve o id de empresas_instancias para a empresa dada.
 
-    1) Se instancia_id pertencer à empresa → retorna.
-    2) Senão, tenta por instance_name (ex.: 'exas-9237').
-    3) Senão, tenta por numero_instancia (ex.: '55319...').
+    1) Se instancia_id pertencer à empresa -> retorna.
+    2) Senão, tenta por instance_name.
+    3) Senão, tenta por numero_instancia.
 
     Retorna None se não encontrar.
     """
@@ -88,20 +103,17 @@ def resolve_instancia_id(
         models.EmpresaInstancia.empresa_id == empresa_id
     )
 
-    # 1) id interno informado
     if instancia_id:
         inst = q.filter(models.EmpresaInstancia.id == instancia_id).first()
         if inst:
             return inst.id
 
-    # 2) instance_name
     name = _norm_instance_name(instance_name)
     if name:
         inst = q.filter(models.EmpresaInstancia.instance_name == name).first()
         if inst:
             return inst.id
 
-    # 3) numero_instancia
     num = _norm_instance_number(numero_instancia)
     if num:
         inst = q.filter(models.EmpresaInstancia.numero_instancia == num).first()
@@ -119,11 +131,6 @@ def resolve_instancia_id_from_event(
 ) -> Optional[int]:
     """
     Conveniência para eventos (Evolution/Webhook/Rabbit).
-
-    Extrai de nomes comuns:
-      - 'instancia_id' | 'instanceId'
-      - 'instance_name' | 'instanceName'
-      - 'instance_number' | 'instanceNumber' | 'numero_instancia'
     """
     inst_id = event.get("instancia_id") or event.get("instanceId")
     try:
@@ -157,8 +164,6 @@ class UpdateApelidoIn(BaseModel):
 class EmpresaLoginConfigIn(BaseModel):
     """
     Configuração simples de login da empresa.
-
-    Hoje só temos o flag se o login exige token ou não.
     """
     requer_token_login: bool = False
 
@@ -178,20 +183,24 @@ def get_empresa(
     if not emp:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
 
-    # Plano efetivo/limite (via utils/plans.py)
     tier = effective_plan(emp)
-    limite = plan_limit(tier)
+    limite = plan_limit(emp)
 
     return {
         "id": emp.id,
         "nome": emp.nome,
         "telefone": emp.telefone,
-        "assinatura": emp.assinatura,
-        "trial_tier": getattr(emp, "trial_tier", None),
+        "assinatura": normalize_plan(emp.assinatura),
+        "trial_tier": normalize_plan(getattr(emp, "trial_tier", None))
+        if getattr(emp, "trial_tier", None)
+        else None,
         "trial_expires_at": _iso(getattr(emp, "trial_expires_at", None))
         if getattr(emp, "trial_expires_at", None)
         else None,
-        "trial_active": getattr(emp, "trial_active", False),
+        "trial_active": bool(getattr(emp, "trial_active", False)),
+        "plano_expira_em": _iso(getattr(emp, "plano_expira_em", None))
+        if getattr(emp, "plano_expira_em", None)
+        else None,
         "effective_tier": tier,
         "limite_instancias": limite,
         "quantidade_instancias": len(emp.instancias or []),
@@ -199,7 +208,7 @@ def get_empresa(
         "status_numero": emp.status_numero,
         "created_at": _iso(emp.created_at),
         "nome_adm": emp.nome_adm,
-        "requer_token_login": getattr(emp, "requer_token_login", False),
+        "requer_token_login": bool(getattr(emp, "requer_token_login", False)),
     }
 
 
@@ -212,9 +221,6 @@ def update_login_config(
 ):
     """
     Atualiza configurações relacionadas ao login da empresa.
-
-    Hoje só controla:
-      - requer_token_login: se o login da empresa exige token ou não.
     """
     _assert_empresa_access(empresa_id, identity)
 
@@ -230,7 +236,7 @@ def update_login_config(
     return {
         "id": emp.id,
         "nome": emp.nome,
-        "requer_token_login": getattr(emp, "requer_token_login", False),
+        "requer_token_login": bool(getattr(emp, "requer_token_login", False)),
     }
 
 
@@ -243,12 +249,6 @@ def info_whatsapp(
     """
     Lista todas as instâncias com seus metadados e devolve
     o status/limite pelo plano para o front travar o botão de adicionar.
-
-    Importante:
-    - Exibimos 'apelido' como rótulo no front.
-    - Filtramos sempre por 'instancia_id'.
-    - Mantemos 'id' por compatibilidade.
-    - Também devolvemos os campos de saúde do número para não sumirem no F5.
     """
     _assert_empresa_access(empresa_id, identity)
 
@@ -261,18 +261,16 @@ def info_whatsapp(
 
     for i in (emp.instancias or []):
         item = {
-            "id": i.id,  # compat
-            "instancia_id": i.id,  # usado para filtro no front
-            "apelido": i.apelido,  # rótulo exibido
-            "instance_name": i.instance_name,  # fallback técnico
+            "id": i.id,
+            "instancia_id": i.id,
+            "apelido": i.apelido,
+            "instance_name": i.instance_name,
             "numero_instancia": i.numero_instancia,
             "connected": bool(i.connected),
             "last_seen": _iso(i.last_seen) if i.last_seen else None,
             "historico_restaurar": i.historico_restaurar,
 
-            # =========================
-            # Saúde do número
-            # =========================
+            # saúde do número
             "score": getattr(i, "score", None),
             "score_status": getattr(i, "score_status", None),
             "score_label": getattr(i, "score_label", None),
@@ -290,7 +288,6 @@ def info_whatsapp(
 
     total = len(insts)
 
-    # fonte única de status/limites/features
     status = plan_status_payload(emp, current_instances=total)
     status.update(
         {
@@ -319,7 +316,9 @@ def update_apelido(
 
     _assert_empresa_access(inst.empresa_id, identity)
 
-    inst.apelido = (body.apelido or None)
+    apelido = (body.apelido or "").strip()
+    inst.apelido = apelido or None
+
     db.commit()
     db.refresh(inst)
 

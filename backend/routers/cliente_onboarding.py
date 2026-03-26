@@ -1,20 +1,19 @@
-# backend/routers/cliente_onboarding.py
 from __future__ import annotations
 
 import os
 import re
 import time
 import threading
-import requests
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Literal, List, Dict
+from typing import Optional, Literal, List, Dict, Any
 
-from sqlalchemy import text
+import requests
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError  # nº duplicado
 
 # 👉 use o mesmo helper do resto do projeto
 from backend.database import get_db_session as get_db
@@ -24,10 +23,11 @@ except Exception:
     SessionLocal = None
 
 from backend import models
-from backend.utils.plans import PLAN_LIMITS, effective_tier as plans_effective_tier
+from backend.utils.plans import plan_limit
 from backend.routers.auth import get_current_user
 
 router = APIRouter(tags=["Onboarding"])  # montado como /api/onboarding/...
+
 
 # =============================
 # Helpers de segurança
@@ -47,16 +47,16 @@ EVOLUTION_URL = (os.getenv("EVOLUTION_URL") or "").rstrip("/")
 EVOLUTION_KEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_KEY")
 HEADERS = {"apikey": EVOLUTION_KEY, "Content-Type": "application/json"} if EVOLUTION_KEY else {}
 
+
 # =============================
 # Helpers de plano
 # =============================
 def _max_instancias_for_empresa(empresa: models.Empresa) -> int:
     """
-    Usa a fonte única do tier (considera trial automaticamente) e
-    fallback 0 para não liberar instância por engano.
+    Usa a fonte única do plano efetivo.
+    Considera trial automaticamente via plans.py.
     """
-    plano = plans_effective_tier(empresa)  # "FREE", "PRATA", "OURO", ...
-    return PLAN_LIMITS.get(str(plano).upper(), 0)
+    return int(plan_limit(empresa) or 0)
 
 
 # =============================
@@ -410,23 +410,6 @@ def _evo_delete_instance(instance: str) -> None:
 # =============================
 _CLEANUP_TIMERS: Dict[str, threading.Timer] = {}
 _CLEANUP_SECONDS = int(os.getenv("ONBOARDING_CLEANUP_SECONDS", "120"))
-
-
-def _has_bound_data(db: Session, inst_row: models.EmpresaInstancia) -> bool:
-    iid = int(inst_row.id)
-    if db.query(models.Mensagem.id).filter_by(instancia_id=iid).limit(1).first():
-        return True
-    if db.query(models.Cliente.id).filter_by(instancia_id=iid).limit(1).first():
-        return True
-    if db.query(models.Grupo.id).filter_by(instancia_id=iid).limit(1).first():
-        return True
-    if db.query(models.Midia.id).filter_by(instancia_id=iid).limit(1).first():
-        return True
-    return False
-
-
-def _was_ever_connected(inst_row: models.EmpresaInstancia) -> bool:
-    return bool(inst_row.connected or inst_row.numero_instancia or inst_row.last_seen)
 
 
 def _cleanup_if_still_disconnected(instance: str):
@@ -788,7 +771,6 @@ def consultar_saude_numero(
     analise = _analisar_saude_mensagens(msgs)
     agora = datetime.now(timezone.utc)
 
-    # salva tudo na instância para outros funcionários visualizarem também
     inst.score = analise["score"]
     inst.score_status = analise["status"]
     inst.score_label = analise["label"]
