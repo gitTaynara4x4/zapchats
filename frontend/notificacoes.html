@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="has-sidebar prepaint">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Notificações | ZapChats</title>
+
+  <script src="/frontend/js/app-base.js" defer></script>
+  <script src="/frontend/js/auth.js" defer></script>
+  <script src="/frontend/js/notificacoes.js" defer></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <link rel="stylesheet" href="/frontend/css/notificacoes.css" />
+</head>
+<body>
+  <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
+
+  <main class="main notificacoes-page">
+    <div class="notif-container">
+      
+      <header class="section-title">
+        <h1>
+          <span class="title-ico is-active" aria-hidden="true">
+            <svg class="title-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+            </svg>
+          </span>
+          Notificações
+        </h1>
+        <div class="top-total">
+          <span>Avisos e alertas da conta</span>
+        </div>
+      </header>
+
+      <section class="notif-shell">
+        
+        <div class="notif-hero">
+          <div class="notif-hero__content">
+            <span class="notif-hero__eyebrow">Central de Alertas</span>
+            <h2>Acompanhe sua conta</h2>
+            <p class="muted">Gerencie avisos do seu plano, período de teste e alertas importantes do sistema.</p>
+          </div>
+
+          <div class="notif-hero__stats">
+            <div class="notif-stat">
+              <span class="notif-stat__label">Total de Avisos</span>
+              <strong id="notifTotalCount">0</strong>
+            </div>
+
+            <div class="notif-stat notif-stat--danger">
+              <span class="notif-stat__label">Não Lidas</span>
+              <strong id="notifUnreadCount">0</strong>
+            </div>
+          </div>
+        </div>
+
+        <section class="notif-toolbar">
+          <div class="notif-toolbar__left">
+            <button type="button" class="btn btn--outline" id="notifRefreshBtn">
+              <i class="fa-solid fa-rotate-right"></i> Atualizar
+            </button>
+            <button type="button" class="btn btn--outline" id="notifMarkReadBtn">
+              <i class="fa-solid fa-check-double"></i> Marcar como lidas
+            </button>
+          </div>
+
+          <div class="notif-toolbar__right">
+            <button type="button" class="btn btn--ghost-danger" id="notifClearBtn">
+              <i class="fa-solid fa-trash-can"></i> Limpar tudo
+            </button>
+          </div>
+        </section>
+
+        <section class="notif-list-wrap">
+          <div class="notif-list" id="notifList">
+            </div>
+        </section>
+        
+      </section>
+    </div>
+  </main>
+</body>
+</html>

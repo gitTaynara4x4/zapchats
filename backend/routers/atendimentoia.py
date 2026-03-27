@@ -1,4 +1,3 @@
-# backend/routers/atendimentoia.py
 from __future__ import annotations
 
 import os
@@ -12,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Body, Query, Depends
 from backend.database import SessionLocal
 from backend import models
 from backend.routers.auth import get_current_identity
+from backend.utils.entitlements import enforce_feature
 
 """
 Endpoints:
@@ -43,6 +43,14 @@ ENV = os.getenv("ENV", "dev").lower()
 
 
 # --------- Utilitários ---------
+def _id_get(obj: Any, key: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
 def _redact_pii(text: str) -> str:
     """Mascaramento simples de PII comum em atendimento."""
     if not text:
@@ -129,13 +137,7 @@ def _raise_http_error(
 
 
 async def _post_n8n(url: str, payload: dict):
-    """Encaminha o payload para o n8n e **sempre** garante resposta JSON de erro.
-
-    - Conexão falhou → 502 (n8n_connect_error)
-    - Timeout → 504 (n8n_timeout)
-    - HTTPError → 502 (n8n_http_error)
-    - n8n respondeu >=300 → repassa status + corpo (JSON se houver, senão texto)
-    """
+    """Encaminha o payload para o n8n e sempre garante resposta JSON de erro."""
     headers = {"Content-Type": "application/json"}
     if N8N_KEY:
         headers["x-n8n-key"] = N8N_KEY
@@ -144,7 +146,6 @@ async def _post_n8n(url: str, payload: dict):
         async with httpx.AsyncClient(timeout=90) as cli:
             r = await cli.post(url, json=payload, headers=headers)
     except httpx.ConnectError as e:
-        # Em dev, opcionalmente devolvemos mock para não travar o fluxo local
         if ENV == "dev":
             return {
                 "resumo": {
@@ -175,7 +176,6 @@ async def _post_n8n(url: str, payload: dict):
     try:
         return r.json()
     except Exception:
-        # Se o n8n respondeu texto puro, ainda retornamos algo parseável
         return {"raw": r.text}
 
 
@@ -217,8 +217,9 @@ def _assert_empresa(identity, empresa_id: int) -> int:
     """
     Garante que o empresa_id da query é o mesmo do identity (usuário ou colaborador).
     """
+    empresa_token = _id_get(identity, "empresa_id")
     try:
-        empresa_token = int(identity["empresa_id"])
+        empresa_token = int(empresa_token)
     except Exception:
         raise HTTPException(status_code=403, detail="Token sem empresa_id")
 
@@ -228,6 +229,27 @@ def _assert_empresa(identity, empresa_id: int) -> int:
             detail="Empresa inválida para este usuário",
         )
     return int(empresa_id)
+
+
+def _require_ai_feature(empresa_id: int) -> None:
+    """
+    IA premium:
+    - bloqueia se plano venceu
+    - bloqueia se plano não tiver a feature
+    """
+    db = SessionLocal()
+    try:
+        emp = db.get(models.Empresa, int(empresa_id))
+        if not emp:
+            raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
+        enforce_feature(
+            emp,
+            "feature_ai",
+            message="Seu plano não permite IA ou está vencido. Renove para continuar usando este recurso.",
+        )
+    finally:
+        db.close()
 
 
 # --------- Endpoints ---------
@@ -242,12 +264,11 @@ async def resumo(
     include_dialogo: bool = Query(True),
     redact: bool = Query(True),
     max_chars: int = Query(9000, ge=0),  # 0 = sem truncar
-    # Body opcional para sobrescrever o diálogo com o visível no DOM
     dialogo_override: Optional[str] = Body(None, embed=True),
     identity=Depends(get_current_identity),
 ):
-    # 🔒 trava empresa: empresa_id tem que bater com a empresa do token
     empresa_id = _assert_empresa(identity, empresa_id)
+    _require_ai_feature(empresa_id)
 
     dialogo = _build_dialogo(
         empresa_id,
@@ -286,14 +307,13 @@ async def melhorar(
     include_dialogo: bool = Query(True),
     redact: bool = Query(True),
     max_chars: int = Query(9000, ge=0),
-    # Body
     draft: Optional[str] = Body(None, embed=True),
     prompt_user: Optional[str] = Body(None, embed=True),
     dialogo_override: Optional[str] = Body(None, embed=True),
     identity=Depends(get_current_identity),
 ):
-    # 🔒 trava empresa aqui também
     empresa_id = _assert_empresa(identity, empresa_id)
+    _require_ai_feature(empresa_id)
 
     dialogo = _build_dialogo(
         empresa_id,

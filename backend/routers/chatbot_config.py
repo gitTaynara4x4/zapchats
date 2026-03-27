@@ -1,4 +1,3 @@
-# backend/routers/chatbot_config.py
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
@@ -15,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from backend.database import get_db
 from backend import models
 from backend.routers.auth import get_current_user
+from backend.utils.entitlements import enforce_feature
 
 router = APIRouter(prefix="/api/chatbot", tags=["ChatBot – Config"])
 
@@ -177,7 +177,7 @@ def _parse_hhmm(val: Optional[str]) -> Optional[dtime]:
 def _tz_from_config(cfg: Dict[str, Any]) -> Optional[str]:
     tz = cfg.get("timezone")
     if tz:
-      return str(tz)
+        return str(tz)
 
     am = (cfg.get("features", {}) or {}).get("auto_messages", {}) or {}
     tz2 = am.get("timezone")
@@ -223,6 +223,31 @@ def _apply_columns_from_config(row: models.ChatbotConfig, cfg_in: Dict[str, Any]
         row.off_end = None
 
 
+def _has_advanced_automation_usage(cfg: Dict[str, Any]) -> bool:
+    """
+    Considera 'automação avançada' quando a configuração usa
+    o bloco por departamentos.
+    """
+    features = (cfg.get("features") or {}) if isinstance(cfg, dict) else {}
+    dept = (features.get("auto_messages_departments") or {}) if isinstance(features, dict) else {}
+
+    if not isinstance(dept, dict):
+        return False
+
+    if bool(dept.get("enabled", False)):
+        return True
+
+    welcome = dept.get("welcome") or {}
+    if isinstance(welcome, dict) and bool(welcome.get("enabled", False)):
+        return True
+
+    items = dept.get("items")
+    if isinstance(items, dict) and bool(items):
+        return True
+
+    return False
+
+
 @router.get("/config")
 def get_config(
     empresa_id: int = Query(..., description="ID da empresa"),
@@ -230,6 +255,7 @@ def get_config(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    # leitura continua permitida
     if int(user.empresa_id) != int(empresa_id):
         raise HTTPException(status_code=403, detail="Empresa não permitida")
 
@@ -331,6 +357,23 @@ def put_config(
     cfg_in = payload.get("config") or {}
     if not isinstance(cfg_in, dict):
         raise HTTPException(status_code=400, detail="Campo 'config' inválido")
+
+    empresa = db.get(models.Empresa, empresa_id)
+    if empresa:
+        # automação básica: exige feature_automation e também bloqueia se venceu
+        enforce_feature(
+            empresa,
+            "feature_automation",
+            message="Seu plano não permite automações ou está vencido. Renove para continuar.",
+        )
+
+        # automação por departamentos: trata como avançada
+        if _has_advanced_automation_usage(cfg_in):
+            enforce_feature(
+                empresa,
+                "feature_advanced_automation",
+                message="Seu plano não permite automações avançadas ou está vencido. Renove para continuar.",
+            )
 
     to_store = _prune_for_storage(cfg_in)
 

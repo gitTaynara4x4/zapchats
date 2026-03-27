@@ -4,1251 +4,1511 @@
 <link rel="preload" as="image" href="/img/logo-white.png">
 <link rel="preload" as="image" href="/img/fav-icon.png">
 
+<script>
+  (function () {
+    try {
+      var root = document.documentElement;
+      var saved =
+        (window.AppTheme && typeof window.AppTheme.current === 'function'
+          ? window.AppTheme.current()
+          : (localStorage.getItem('theme') || localStorage.getItem('valora_theme') || 'dark')
+        ) || 'dark';
+
+      var isDark = String(saved).toLowerCase() === 'dark';
+      root.classList.toggle('dark', isDark);
+      root.setAttribute('data-theme', isDark ? 'dark' : 'light');
+    } catch (e) {}
+  })();
+</script>
+
 <style>
-  :root{
-    --topbar-h:44px;
-    --sbw:220px;
-    --sbw-c:64px;
+  :root {
+    --vs-sidebar-bg: #ffffff;
+    --vs-sidebar-border: #e5e7eb;
+    --vs-text-main: #111827;
+    --vs-text-muted: #6b7280;
+    --vs-nav-muted: #9ca3af;
+    --vs-hover-bg: #f3f4f6;
+    --vs-dropdown-bg: #ffffff;
+    --vs-dropdown-hover: #f3f4f6;
+    --vs-dropdown-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+    --vs-accent: #25d366;
+    --vs-accent-soft: rgba(37, 211, 102, 0.12);
+    --vs-danger: #ef4444;
+    --vs-danger-soft: rgba(239, 68, 68, 0.08);
+    --vs-radius: 10px;
+    --vs-mobile-btn-bg: #f3f4f6;
+    --vs-overlay: rgba(15, 23, 42, 0.5);
+    --vs-topbar-bg: rgba(255, 255, 255, 0.88);
 
-    --icon:#9ca3af;
-    --icon-active-light:#000000;
-    --icon-active-dark:#ffffff;
+    --vs-sidebar-w-collapsed: 72px;
+    --vs-sidebar-w-expanded: 260px;
 
-    --card:#161617;
-    --border:#27272a;
-    --fg:#e5e7eb;
-    --muted:#9ca3af;
-    --hover:rgba(255,255,255,.04);
-    --ring:#4f83ff;
-    --danger:#ef4444;
-    --ok:#16a34a;
-    --overlay:rgba(0,0,0,.5);
-
-    --leftbar-bg:#1b1c1d;
-    --leftbar-border:#36393f;
-    --leftbar-divider-w:2px;
-    --text-2:#9ca3af;
-    --accent:#25d366;
-
-    --mobile-sheet-w:min(86vw,300px);
-    --mobile-bottom-h:64px;
+    --vs-mobile-topbar-h: 60px;
+    --vs-mobile-drawer-w: min(86vw, 320px);
   }
 
-  html:not(.dark){
-    --card:#fff;
-    --border:#e5e7eb;
-    --fg:#1f2937;
-    --muted:#6b7280;
-    --hover:rgba(0,0,0,.06);
-    --overlay:rgba(0,0,0,.45);
-    --leftbar-bg:#f8fafc;
-    --leftbar-border:#e5e7eb;
-    --text-2:#6b7280;
-    --accent:#16a34a;
+  html.dark,
+  html[data-theme="dark"] {
+    --vs-sidebar-bg: #181818;
+    --vs-sidebar-border: #262626;
+    --vs-text-main: #f5f5f5;
+    --vs-text-muted: #b0b0b0;
+    --vs-nav-muted: #8a8a8a;
+    --vs-hover-bg: #222222;
+    --vs-dropdown-bg: #1e1e1e;
+    --vs-dropdown-hover: #2a2a2a;
+    --vs-dropdown-shadow: 0 16px 35px rgba(0, 0, 0, 0.42);
+    --vs-accent: #25d366;
+    --vs-accent-soft: rgba(37, 211, 102, 0.16);
+    --vs-danger: #ef4444;
+    --vs-danger-soft: rgba(239, 68, 68, 0.12);
+    --vs-mobile-btn-bg: #202020;
+    --vs-overlay: rgba(0, 0, 0, 0.62);
+    --vs-topbar-bg: rgba(24, 24, 24, 0.88);
   }
 
-  html,body{margin:0;padding:0;border:0}
-  img{border:0;outline:0;box-shadow:none}
-
-  html{
-    background:
-      linear-gradient(90deg,#22c55e 0%,#16a34a 50%,#10b981 100%) 0 0 / 100% 6px no-repeat,
-      var(--card);
-    background-attachment:fixed;
-  }
-  html:not(.dark){
-    background:
-      linear-gradient(90deg,#22c55e 0%,#16a34a 50%,#10b981 100%) 0 0 / 100% 6px no-repeat,
-      #fff;
+  html, body {
+    margin: 0;
+    padding: 0;
   }
 
-  body{padding-top:var(--topbar-h)}
-  @media (min-width:1024px){ body{padding-left:var(--sbw-c)} }
-
-  .topline-bar{
-    position:fixed; top:0; left:0; right:0; height:var(--topbar-h);
-    display:flex; align-items:center; justify-content:flex-end; gap:.75rem;
-    padding:6px 14px 0; background:transparent; z-index:80; border:0; box-shadow:none;
-  }
-  .theme-toggle,.theme-toggle *{position:relative;z-index:0}
-
-  .mobile-page-logo{
-    display:none;
-    align-items:center;
-    justify-content:center;
-    width:100%;
-    pointer-events:none;
-  }
-  .mobile-page-logo img{
-    max-height:28px;
-    width:auto;
-    display:block;
-  }
-  html.dark .mobile-page-logo .logo-light{display:none}
-  html:not(.dark) .mobile-page-logo .logo-dark{display:none}
-
-  .app-sidebar{
-    position:fixed; left:0; top:0; bottom:0;
-    width:var(--sbw-c); min-width:var(--sbw-c); max-width:var(--sbw-c); height:100vh;
-    background:var(--leftbar-bg)!important; z-index:70; border-right:none!important;
-    display:flex; flex-direction:column; align-items:center;
-    padding:12px 6px; padding-top:calc(var(--topbar-h) + 12px);
-    overflow:hidden;
-    transition:width .22s ease,padding .22s ease,min-width .22s ease,max-width .22s ease;
-    font-family: var(--font-ui);
-    letter-spacing:-.01em;
-  }
-  .app-sidebar:hover{
-    width:var(--sbw); min-width:var(--sbw); max-width:var(--sbw);
-    align-items:stretch; padding-left:10px; padding-right:10px;
-  }
-  .app-sidebar::after{
-    content:""; position:absolute; top:0; right:0; bottom:0;
-    width:var(--leftbar-divider-w); background:var(--leftbar-border); pointer-events:none;
+  body.Valora-sidebar-ready {
+    padding-left: var(--vs-sidebar-w-collapsed);
+    transition: padding-left 0.2s ease, padding-top 0.2s ease;
   }
 
-  .app-sidebar .logo{
-    height:56px; margin:0 0 10px; display:grid; place-items:center;
-    position:relative; z-index:1; width:100%;
-  }
-  .app-sidebar:hover .logo{justify-items:start;padding:0 10px 0 6px}
-
-  .logo .logo-fav,.logo .logo-full{
-    grid-area:1/1; max-height:50px; will-change:opacity,transform;
-    backface-visibility:hidden; transform:translateZ(0); contain:paint;
-  }
-  .logo .logo-fav{opacity:1;transition:opacity .16s ease-in}
-  .logo .logo-full{opacity:0;pointer-events:none}
-
-  @keyframes logoFadeIn{
-    from{opacity:0;transform:translateY(2px) scale(.985);filter:blur(.6px)}
-    to{opacity:1;transform:none;filter:none}
-  }
-  .app-sidebar:hover .logo .logo-fav{opacity:0;pointer-events:none;transition:opacity .12s ease-out}
-  .app-sidebar:hover .logo .logo-full{
-    opacity:1;pointer-events:auto;animation:logoFadeIn .42s cubic-bezier(.2,.7,.2,1) both;
-    animation-delay:.06s;
-  }
-  html.dark .app-sidebar:hover .logo .logo-full.logo-dark{opacity:1}
-  html.dark .app-sidebar:hover .logo .logo-full.logo-light{opacity:0}
-  html:not(.dark) .app-sidebar:hover .logo .logo-full.logo-light{opacity:1}
-  html:not(.dark) .app-sidebar:hover .logo .logo-full.logo-dark{opacity:0}
-
-  .app-sidebar nav{
-    display:flex; flex-direction:column; gap:10px; width:100%; margin-top:6px;
-    flex:1; overflow-y:auto; position:relative; z-index:1;
-  }
-  .app-sidebar nav a{
-    width:100%; min-height:44px; display:flex; align-items:center; justify-content:center; gap:12px;
-    border:none; background:none!important; border-radius:12px; transition:background .16s,color .16s;
-    color:var(--text-2); cursor:pointer; position:relative; text-decoration:none; outline:none;
-    padding:0 10px; box-shadow:none!important;
-  }
-  .app-sidebar:hover nav a{justify-content:flex-start}
-  .app-sidebar nav a:hover,.app-sidebar nav a:focus{
-    background:color-mix(in oklab,var(--leftbar-bg) 55%,transparent)!important;
-    color:var(--accent);
-  }
-  .app-sidebar nav a.active,.app-sidebar nav a[aria-current="page"]{
-    background:color-mix(in oklab,var(--leftbar-bg) 55%,transparent)!important;
-    color:var(--fg);
+  .Valora-mobile-topbar {
+    display: none;
   }
 
-  .nav-icon{width:22px;height:22px;min-width:22px;display:grid;place-items:center;color:currentColor}
-  .nav-icon-svg{width:22px;height:22px;display:block}
-
-  .label{
-    opacity:0; max-width:0; overflow:hidden; white-space:nowrap; transform:translateX(-6px);
-    transition:opacity .18s ease,max-width .22s ease,transform .22s ease;
-    pointer-events:none; font-size:.95em; color:inherit;
-  }
-  .app-sidebar:hover .label{opacity:1;max-width:140px;transform:translateX(0)}
-
-  html.dark .app-sidebar nav a.active .nav-icon,
-  html.dark .app-sidebar nav a[aria-current="page"] .nav-icon{color:var(--icon-active-dark)}
-  html:not(.dark) .app-sidebar nav a.active .nav-icon,
-  html:not(.dark) .app-sidebar nav a[aria-current="page"] .nav-icon{color:var(--icon-active-light)}
-
-  .user-chip{
-    display:flex; align-items:center; gap:.5rem; margin-right:6px;
-    padding:.3rem .6rem; border:1px solid var(--border); border-radius:999px;
-    background:var(--card); color:var(--muted); font-weight:700; font-size:12px;
-    cursor:pointer; user-select:none;
-  }
-  .user-chip:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
-  .user-chip .user-email{
-    max-width:28ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--fg);
-  }
-  .user-chip .avatar{
-    width:22px; height:22px; border-radius:999px; object-fit:cover; display:none; box-shadow:none;
-  }
-  html:not(.dark) .user-chip{background:#fff}
-
-  .theme-toggle{
-    --w:78px; --h:34px; --p:3px; --k:28px; --dx:calc(var(--w) - var(--k) - var(--p)*2);
-    position:relative; width:var(--w); height:var(--h); padding:var(--p);
-    border-radius:999px; cursor:pointer; outline:none; border:1px solid;
-    display:inline-block; isolation:isolate; background:#eceff3; border-color:#d5d9e0;
-    box-shadow:inset 0 2px 4px rgba(0,0,0,.06), inset 0 -1px 2px rgba(0,0,0,.05);
-    transition:background .3s ease,border-color .3s ease,box-shadow .3s ease;
-    line-height:0;
-  }
-  html.dark .theme-toggle{
-    background:#2f323a; border-color:#3a3e46;
-    box-shadow:inset 0 2px 5px rgba(0,0,0,.35), inset 0 -1px 2px rgba(255,255,255,.03);
-  }
-  .theme-toggle .slot{
-    position:absolute; top:50%; transform:translateY(-50%);
-    width:28px; height:28px; display:grid; place-items:center; pointer-events:none; opacity:.75;
-  }
-  .theme-toggle .slot.left{left:8px}
-  .theme-toggle .slot.right{right:8px}
-  .theme-toggle .slot svg{width:18px;height:18px;display:block}
-  .theme-toggle .slot svg *{stroke:#9ca3af}
-  html.dark .theme-toggle .slot svg *{stroke:#8a93a1}
-
-  .theme-toggle .thumb{
-    position:absolute; left:var(--p); top:50%; width:var(--k); height:var(--k); border-radius:999px;
-    transform:translate(0,-50%); transition:transform .38s cubic-bezier(.28,1.2,.43,1),box-shadow .2s ease,background .3s ease;
-    display:grid; place-items:center; overflow:hidden;
-    background:
-      radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%, rgba(255,255,255,.08) 65%),
-      linear-gradient(180deg,#f8c266,#f59e0b);
-    box-shadow:0 4px 8px rgba(0,0,0,.18), inset 0 0 0 1px rgba(255,255,255,.25);
-  }
-  .theme-toggle .thumb svg{width:22px;height:22px;display:block;position:relative;z-index:1;pointer-events:none}
-  .theme-toggle .thumb .thumb-sun{display:block}
-  .theme-toggle .thumb .thumb-moon{display:none}
-  html.dark .theme-toggle .thumb{
-    transform:translate(var(--dx),-50%)!important;
-    background:
-      radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%, rgba(255,255,255,.08) 65%),
-      linear-gradient(180deg,#6ba6ff,#2563eb)!important;
-    box-shadow:0 6px 10px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.22);
-  }
-  html.dark .theme-toggle .thumb .thumb-sun{display:none!important}
-  html.dark .theme-toggle .thumb .thumb-moon{display:block!important}
-  .theme-toggle:active .thumb{transform:translate(0,-50%) scale(.96)}
-  html.dark .theme-toggle:active .thumb{transform:translate(calc(var(--dx)),-50%) scale(.96)}
-  .theme-toggle:focus-visible{box-shadow:0 0 0 3px rgba(99,102,241,.35)}
-  .theme-toggle.t-anim::after{
-    content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
-    background:linear-gradient(115deg,transparent 30%,rgba(255,255,255,.45) 50%,transparent 70%);
-    animation:sweep .55s ease both;
-  }
-  @keyframes sweep{from{opacity:0}to{opacity:1}}
-
-  .mobile-bottom-nav{
-    display:none;
-    position:fixed; left:0; right:0; bottom:0; height:var(--mobile-bottom-h);
-    background:color-mix(in oklab,var(--leftbar-bg) 92%,black 8%);
-    border-top:1px solid var(--leftbar-border);
-    z-index:92;
-    backdrop-filter:blur(10px);
-    -webkit-backdrop-filter:blur(10px);
-    grid-template-columns:repeat(4,1fr);
-    padding-bottom:env(safe-area-inset-bottom,0);
-  }
-  .mobile-bottom-nav a,
-  .mobile-bottom-nav button{
-    min-width:0; border:0; background:none; color:var(--text-2); text-decoration:none; cursor:pointer;
-    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;
-    font:inherit; padding:6px 4px;
-  }
-  .mobile-bottom-nav .m-icon{width:20px;height:20px;display:grid;place-items:center}
-  .mobile-bottom-nav .m-icon svg{width:20px;height:20px;display:block}
-  .mobile-bottom-nav .m-label{
-    font-size:11px; line-height:1; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  }
-  .mobile-bottom-nav a.active,
-  .mobile-bottom-nav a[aria-current="page"],
-  .mobile-bottom-nav button.is-active{
-    color:var(--accent);
+  .Valora-mobile-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--vs-overlay);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+    z-index: 1190;
   }
 
-  .mobile-more-backdrop{
-    position:fixed; inset:0; background:rgba(0,0,0,.48);
-    opacity:0; pointer-events:none; transition:opacity .22s ease; z-index:93;
-  }
-  .mobile-more-backdrop.is-open{opacity:1;pointer-events:auto}
-
-  .mobile-more-sheet{
-    position:fixed; top:0; right:0; bottom:0; width:var(--mobile-sheet-w);
-    background:var(--leftbar-bg); border-left:1px solid var(--leftbar-border);
-    transform:translateX(100%); transition:transform .24s ease; z-index:94;
-    display:flex; flex-direction:column; padding:12px; padding-top:calc(var(--topbar-h) + 12px);
-    box-shadow:0 20px 50px rgba(0,0,0,.28);
-  }
-  .mobile-more-sheet.is-open{transform:translateX(0)}
-  .mobile-more-sheet .logo{
-    height:56px; display:flex; align-items:center; padding:0 8px; margin:0 0 10px;
-  }
-  .mobile-more-sheet .logo .logo-fav{display:none}
-  html.dark .mobile-more-sheet .logo .logo-light{display:none}
-  html:not(.dark) .mobile-more-sheet .logo .logo-dark{display:none}
-
-  .mobile-more-head{
-    display:grid;
-    gap:10px;
-    margin-bottom:12px;
+  .Valora-mobile-overlay.show {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
   }
 
-  .mobile-profile-card{
-    display:flex;
-    align-items:center;
-    gap:10px;
-    padding:10px 12px;
-    border:1px solid var(--border);
-    border-radius:14px;
-    background:color-mix(in oklab,var(--card) 88%,transparent);
-    cursor:pointer;
-  }
-  .mobile-profile-card:focus-visible{
-    outline:2px solid var(--ring);
-    outline-offset:2px;
-  }
-  .mobile-profile-avatar{
-    width:38px;height:38px;border-radius:999px;object-fit:cover;display:none;flex:0 0 38px;
-  }
-  .mobile-profile-icon{
-    width:38px;height:38px;border-radius:999px;display:grid;place-items:center;
-    background:var(--hover); color:var(--muted); flex:0 0 38px;
-  }
-  .mobile-profile-meta{
-    min-width:0; display:grid; gap:2px;
-  }
-  .mobile-profile-name{
-    color:var(--fg); font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  }
-  .mobile-profile-sub{
-    color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  .Valora-app-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: var(--vs-sidebar-w-collapsed);
+    height: 100vh;
+    background: var(--vs-sidebar-bg);
+    border-right: 1px solid var(--vs-sidebar-border);
+    padding: 24px 10px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    z-index: 1200;
+    transition:
+      background 0.2s ease,
+      border-color 0.2s ease,
+      width 0.22s ease,
+      padding-left 0.22s ease,
+      padding-right 0.22s ease,
+      transform 0.22s ease,
+      box-shadow 0.22s ease;
+    box-shadow: none;
+    overflow: hidden;
   }
 
-  .mobile-theme-card{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:10px;
-    padding:10px 12px;
-    border:1px solid var(--border);
-    border-radius:14px;
-    background:color-mix(in oklab,var(--card) 88%,transparent);
-  }
-  .mobile-theme-left{
-    display:flex; align-items:center; gap:10px; min-width:0;
-  }
-  .mobile-theme-icon{
-    width:38px;height:38px;border-radius:999px;display:grid;place-items:center;
-    background:var(--hover); color:var(--muted); flex:0 0 38px;
-  }
-  .mobile-theme-text{
-    display:grid; gap:2px;
-  }
-  .mobile-theme-title{
-    color:var(--fg); font-weight:700;
-  }
-  .mobile-theme-sub{
-    color:var(--muted); font-size:12px;
+  .Valora-app-sidebar:hover {
+    width: var(--vs-sidebar-w-expanded);
+    padding-left: 16px;
+    padding-right: 16px;
+    box-shadow: 10px 0 28px rgba(0, 0, 0, 0.12);
   }
 
-  .mobile-more-nav{
-    display:flex; flex-direction:column; gap:10px; overflow:auto;
-  }
-  .mobile-more-nav a{
-    min-height:44px; display:flex; align-items:center; gap:12px; padding:0 12px;
-    border-radius:12px; text-decoration:none; color:var(--text-2); background:none;
-  }
-  .mobile-more-nav a:hover,
-  .mobile-more-nav a:focus{
-    background:color-mix(in oklab,var(--leftbar-bg) 55%,transparent);
-    color:var(--accent);
-  }
-  .mobile-more-nav a.active,
-  .mobile-more-nav a[aria-current="page"]{
-    background:color-mix(in oklab,var(--leftbar-bg) 55%,transparent);
-    color:var(--fg);
-  }
-  .mobile-more-nav .label{
-    opacity:1; max-width:none; overflow:visible; transform:none; pointer-events:auto;
+  html.dark .Valora-app-sidebar:hover,
+  html[data-theme="dark"] .Valora-app-sidebar:hover {
+    box-shadow: 12px 0 32px rgba(0, 0, 0, 0.34);
   }
 
-  .pf-modal{
-    position:fixed; inset:0; display:none; align-items:center; justify-content:center;
-    background:var(--overlay); z-index:10000;
+  .Valora-sidebar-header {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 0 6px 22px;
+    border-bottom: 1px solid var(--vs-sidebar-border);
+    position: relative;
   }
-  .pf-modal.is-open{display:flex}
-  .pf-dialog{
-    width:min(680px,92vw); background:var(--card); border:1px solid var(--border);
-    border-radius:1rem; box-shadow:0 20px 50px rgba(0,0,0,.35); overflow:hidden;
-  }
-  .pf-hd{
-    display:flex; align-items:center; justify-content:space-between;
-    padding:12px 14px; border-bottom:1px solid var(--border);
-  }
-  .pf-hd h3{margin:0;font-size:1rem}
-  .pf-close{background:transparent;border:none;font-size:22px;cursor:pointer;color:var(--muted)}
-  .pf-body{padding:16px;display:grid;grid-template-columns:160px 1fr;gap:16px}
-  .pf-avatar-wrap{display:flex;flex-direction:column;align-items:center;gap:.5rem}
-  .pf-avatar{width:120px;height:120px;border-radius:999px;object-fit:cover;background:var(--hover);box-shadow:none}
-  .pf-upload{
-    display:inline-block;font-size:.9rem;padding:.45rem .7rem;border-radius:.6rem;
-    border:1px solid var(--border);background:var(--card);cursor:pointer;
-  }
-  .pf-upload input{display:none}
-  .pf-grid{display:grid;gap:.75rem}
-  .pf-field label{display:block;font-size:.85rem;color:var(--muted);margin-bottom:.25rem}
-  .pf-field input{
-    width:100%;padding:.6rem .7rem;border-radius:.6rem;border:1px solid var(--border);
-    background:var(--card);color:var(--fg);outline:none;
-  }
-  .pf-field input:focus{box-shadow:0 0 0 3px var(--ring);border-color:transparent}
-  .pf-actions{display:flex;gap:.5rem;justify-content:flex-end;padding:12px 16px;border-top:1px solid var(--border)}
-  .pf-btn{
-    padding:.55rem .9rem;border-radius:.6rem;border:1px solid var(--border);
-    background:var(--card);color:var(--fg);cursor:pointer;font-weight:600;
-  }
-  .pf-btn.primary{background:#10b981;border-color:#10b981;color:#fff}
-  .pf-btn.danger{background:transparent;color:var(--danger);border-color:var(--danger)}
-  .pf-msg{padding:8px 16px;font-size:.9rem;color:var(--muted)}
 
-  .app-sidebar nav a:focus{outline:none}
+  .Valora-logo-link {
+    display: block;
+    width: 100%;
+    text-decoration: none;
+  }
 
-  @media (prefers-reduced-motion:reduce){
-    .logo .logo-fav,.logo .logo-full{
-      transition:none!important; animation:none!important; filter:none!important; transform:none!important;
+  .Valora-logo-wrap {
+    width: 100%;
+    min-height: 42px;
+    display: grid;
+    justify-items: center;
+    align-items: center;
+    position: relative;
+  }
+
+  .Valora-app-sidebar:hover .Valora-logo-wrap {
+    justify-items: start;
+  }
+
+  .Valora-logo-fav,
+  .Valora-logo-light,
+  .Valora-logo-dark {
+    grid-area: 1 / 1;
+    transition: opacity 0.18s ease, transform 0.22s ease;
+    will-change: opacity, transform;
+  }
+
+  .Valora-logo-fav {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .Valora-logo-light,
+  .Valora-logo-dark {
+    max-width: 100%;
+    height: 38px;
+    width: auto;
+    opacity: 0;
+    transform: scale(0.985);
+    pointer-events: none;
+  }
+
+  html.dark .Valora-logo-light,
+  html[data-theme="dark"] .Valora-logo-light {
+    display: none;
+  }
+
+  html:not(.dark):not([data-theme="dark"]) .Valora-logo-dark {
+    display: none;
+  }
+
+  .Valora-app-sidebar:hover .Valora-logo-fav {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+
+  .Valora-app-sidebar:hover .Valora-logo-light,
+  .Valora-app-sidebar:hover .Valora-logo-dark {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .Valora-logo-caption {
+    font-size: 14px;
+    color: var(--vs-text-muted);
+    font-weight: 500;
+    height: 20px;
+    line-height: 20px;
+    margin: 0;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    white-space: nowrap;
+    transition: opacity 0.16s ease;
+  }
+
+  .Valora-app-sidebar:hover .Valora-logo-caption {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .Valora-sidebar-section {
+    margin-top: 2px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .Valora-section-label {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--vs-nav-muted);
+    height: 16px;
+    line-height: 16px;
+    margin: 8px 8px 6px;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    white-space: nowrap;
+    transition: opacity 0.16s ease;
+  }
+
+  .Valora-app-sidebar:hover .Valora-section-label {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .Valora-nav-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border-radius: var(--vs-radius);
+    border: 1px solid transparent;
+    background: transparent;
+    padding: 11px 12px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--vs-text-muted);
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.18s ease;
+    width: 100%;
+    text-decoration: none;
+    min-height: 44px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .Valora-app-sidebar:hover .Valora-nav-item {
+    justify-content: flex-start;
+  }
+
+  .Valora-nav-item:hover {
+    background: var(--vs-hover-bg);
+    color: var(--vs-text-main);
+  }
+
+  .Valora-nav-icon {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--vs-nav-muted);
+    transition: color 0.18s ease;
+  }
+
+  .Valora-nav-icon svg {
+    width: 22px;
+    height: 22px;
+    display: block;
+    fill: currentColor;
+  }
+
+  .Valora-nav-item:hover .Valora-nav-icon {
+    color: var(--vs-text-main);
+  }
+
+  .Valora-nav-item > span:not(.Valora-nav-icon) {
+    opacity: 0;
+    max-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    transform: scale(0.98);
+    transform-origin: left center;
+    transition:
+      opacity 0.18s ease,
+      max-width 0.22s ease,
+      transform 0.22s ease;
+  }
+
+  .Valora-app-sidebar:hover .Valora-nav-item > span:not(.Valora-nav-icon) {
+    opacity: 1;
+    max-width: 180px;
+    transform: scale(1);
+  }
+
+  .Valora-nav-item.is-active,
+  .Valora-nav-item[aria-current="page"] {
+    background: var(--vs-accent-soft);
+    border-color: rgba(37, 211, 102, 0.18);
+    color: var(--vs-accent);
+  }
+
+  .Valora-nav-item.is-active .Valora-nav-icon,
+  .Valora-nav-item[aria-current="page"] .Valora-nav-icon {
+    color: var(--vs-accent);
+  }
+
+  .Valora-user-container {
+    margin-top: auto;
+    position: relative;
+  }
+
+  .Valora-user-profile {
+    padding: 10px;
+    border-top: 1px solid var(--vs-sidebar-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    border-radius: var(--vs-radius);
+    cursor: pointer;
+    transition: background 0.18s ease, padding 0.18s ease, justify-content 0.18s ease;
+    user-select: none;
+  }
+
+  .Valora-app-sidebar:hover .Valora-user-profile {
+    justify-content: flex-start;
+    padding: 12px;
+  }
+
+  .Valora-user-profile:hover,
+  .Valora-user-profile.active {
+    background: var(--vs-hover-bg);
+  }
+
+  .Valora-user-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 999px;
+    background: var(--vs-accent-soft);
+    color: var(--vs-accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 14px;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  .Valora-user-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: none;
+  }
+
+  .Valora-user-info {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-grow: 1;
+    min-width: 0;
+  }
+
+  .Valora-user-info strong {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--vs-text-main);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+  }
+
+  .Valora-user-info span {
+    font-size: 11px;
+    color: var(--vs-text-muted);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+  }
+
+  .Valora-user-info,
+  .Valora-user-chevron {
+    opacity: 0;
+    max-width: 0;
+    overflow: hidden;
+    transform: scale(0.98);
+    transform-origin: left center;
+    transition:
+      opacity 0.18s ease,
+      max-width 0.22s ease,
+      transform 0.22s ease;
+  }
+
+  .Valora-app-sidebar:hover .Valora-user-info,
+  .Valora-app-sidebar:hover .Valora-user-chevron {
+    opacity: 1;
+    max-width: 180px;
+    transform: scale(1);
+  }
+
+  .Valora-user-chevron {
+    width: 16px;
+    height: 16px;
+    color: var(--vs-nav-muted);
+    transition: transform 0.2s ease, opacity 0.18s ease, max-width 0.22s ease;
+    flex-shrink: 0;
+  }
+
+  .Valora-user-chevron svg {
+    width: 16px;
+    height: 16px;
+    display: block;
+    fill: currentColor;
+  }
+
+  .Valora-user-profile.active .Valora-user-chevron {
+    transform: rotate(180deg);
+  }
+
+  .Valora-user-dropdown {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    right: auto;
+    width: 230px;
+    background: var(--vs-dropdown-bg);
+    border: 1px solid var(--vs-sidebar-border);
+    border-radius: var(--vs-radius);
+    padding: 8px;
+    box-shadow: var(--vs-dropdown-shadow);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(10px);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 30;
+  }
+
+  .Valora-app-sidebar:hover .Valora-user-dropdown {
+    width: auto;
+    left: 0;
+    right: 0;
+  }
+
+  .Valora-user-dropdown.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+  }
+
+  .Valora-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 0;
+    background: transparent;
+    color: var(--vs-text-main);
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease, color 0.15s ease;
+    text-decoration: none;
+  }
+
+  .Valora-dropdown-item:hover {
+    background: var(--vs-dropdown-hover);
+  }
+
+  .Valora-dropdown-item .icon {
+    width: 16px;
+    height: 16px;
+    color: var(--vs-nav-muted);
+    flex-shrink: 0;
+  }
+
+  .Valora-dropdown-item .icon svg {
+    width: 16px;
+    height: 16px;
+    display: block;
+    fill: currentColor;
+  }
+
+  .Valora-dropdown-item__label {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .Valora-dropdown-badge {
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 800;
+    box-shadow: 0 8px 16px rgba(220,38,38,.22);
+    flex-shrink: 0;
+  }
+
+  .Valora-dropdown-divider {
+    height: 1px;
+    background: var(--vs-sidebar-border);
+    margin: 6px 0;
+  }
+
+  .Valora-dropdown-item.danger {
+    color: var(--vs-danger);
+  }
+
+  .Valora-dropdown-item.danger .icon {
+    color: var(--vs-danger);
+  }
+
+  .Valora-dropdown-item.danger:hover {
+    background: var(--vs-danger-soft);
+  }
+
+  .Valora-mobile-close {
+    display: none;
+  }
+
+  .Valora-app-sidebar:not(:hover) .Valora-logo-caption,
+  .Valora-app-sidebar:not(:hover) .Valora-section-label {
+    opacity: 1;
+    visibility: visible;
+    color: transparent;
+    position: relative;
+    pointer-events: none;
+  }
+
+  .Valora-app-sidebar:not(:hover) .Valora-logo-caption::after {
+    content: "";
+    display: block;
+    width: 34px;
+    height: 1px;
+    background: var(--vs-sidebar-border);
+    border-radius: 999px;
+    margin: 9px auto 0;
+    opacity: 0.9;
+  }
+
+  .Valora-app-sidebar:not(:hover) .Valora-section-label::after {
+    content: "";
+    display: block;
+    width: 28px;
+    height: 1px;
+    background: var(--vs-sidebar-border);
+    border-radius: 999px;
+    margin: 7px auto 0;
+    opacity: 0.75;
+  }
+
+  .Valora-app-sidebar:hover .Valora-logo-caption,
+  .Valora-app-sidebar:hover .Valora-section-label {
+    color: inherit;
+  }
+
+  .Valora-app-sidebar:hover .Valora-logo-caption::after,
+  .Valora-app-sidebar:hover .Valora-section-label::after {
+    display: none;
+  }
+
+  @media (max-width: 920px) {
+    body.Valora-sidebar-ready {
+      padding-left: 0;
+      padding-top: var(--vs-mobile-topbar-h);
     }
-  }
 
-  @media (max-width:920px){
-    body{padding-left:0!important;padding-bottom:calc(var(--mobile-bottom-h) + env(safe-area-inset-bottom,0))}
-    .app-sidebar{display:none!important}
-    .mobile-bottom-nav{display:grid}
-    .topline-bar{
-      justify-content:center;
-      padding-left:12px;
-      padding-right:12px;
+    .Valora-mobile-topbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: var(--vs-mobile-topbar-h);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 12px;
+      background: var(--vs-topbar-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--vs-sidebar-border);
+      z-index: 1210;
     }
-    .topline-bar .user-chip,
-    .topline-bar .theme-toggle{
-      display:none!important;
-    }
-    .mobile-page-logo{display:flex}
-  }
 
-  @media (max-width:720px){
-    .theme-toggle{--w:70px;--h:32px;--k:26px}
-    .pf-body{grid-template-columns:1fr}
+    .Valora-mobile-toggle {
+      width: 40px;
+      height: 40px;
+      min-width: 40px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      border: 1px solid var(--vs-sidebar-border);
+      background: var(--vs-mobile-btn-bg);
+      color: var(--vs-text-main);
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .Valora-mobile-toggle svg,
+    .Valora-mobile-close svg {
+      width: 20px;
+      height: 20px;
+      display: block;
+      fill: currentColor;
+    }
+
+    .Valora-mobile-brand {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      line-height: 1.15;
+    }
+
+    .Valora-mobile-brand strong {
+      font-size: 14px;
+      color: var(--vs-text-main);
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .Valora-mobile-brand span {
+      font-size: 12px;
+      color: var(--vs-text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .Valora-app-sidebar,
+    .Valora-app-sidebar:hover {
+      width: var(--vs-mobile-drawer-w);
+      max-width: var(--vs-mobile-drawer-w);
+      padding: 24px 16px 16px;
+      box-shadow: 12px 0 30px rgba(0, 0, 0, 0.28);
+      transform: translateX(-110%);
+      z-index: 1220;
+      overflow: hidden;
+    }
+
+    .Valora-app-sidebar.show {
+      transform: translateX(0);
+    }
+
+    .Valora-sidebar-header {
+      padding: 0 6px 22px;
+    }
+
+    .Valora-logo-wrap,
+    .Valora-app-sidebar:hover .Valora-logo-wrap {
+      justify-items: start;
+    }
+
+    .Valora-mobile-close {
+      display: inline-flex;
+      position: absolute;
+      right: 6px;
+      top: 6px;
+      width: 36px;
+      height: 36px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      border: 1px solid var(--vs-sidebar-border);
+      background: var(--vs-mobile-btn-bg);
+      color: var(--vs-text-main);
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .Valora-logo-fav {
+      display: none;
+    }
+
+    .Valora-logo-light,
+    .Valora-logo-dark {
+      opacity: 1;
+      transform: none;
+    }
+
+    .Valora-logo-caption,
+    .Valora-section-label,
+    .Valora-user-info,
+    .Valora-user-chevron,
+    .Valora-nav-item > span:not(.Valora-nav-icon) {
+      opacity: 1;
+      visibility: visible;
+      max-width: 999px;
+      max-height: none;
+      overflow: visible;
+      transform: none;
+      pointer-events: auto;
+    }
+
+    .Valora-nav-item,
+    .Valora-app-sidebar:hover .Valora-nav-item {
+      justify-content: flex-start;
+      padding: 11px 12px;
+      font-size: 15px;
+    }
+
+    .Valora-user-profile,
+    .Valora-app-sidebar:hover .Valora-user-profile {
+      justify-content: flex-start;
+      padding: 12px;
+    }
+
+    .Valora-user-dropdown,
+    .Valora-app-sidebar:hover .Valora-user-dropdown {
+      width: auto;
+      left: 0;
+      right: 0;
+    }
+
+    .Valora-app-sidebar:not(:hover) .Valora-logo-caption,
+    .Valora-app-sidebar:not(:hover) .Valora-section-label {
+      color: inherit;
+    }
+
+    .Valora-app-sidebar:not(:hover) .Valora-logo-caption::after,
+    .Valora-app-sidebar:not(:hover) .Valora-section-label::after {
+      display: none;
+    }
   }
 </style>
 
-<div class="topline-bar">
-  <div class="mobile-page-logo" aria-hidden="true">
-    <img class="logo-light" src="/img/logo-s-fundo.png" alt="">
-    <img class="logo-dark" src="/img/logo-white.png" alt="">
-  </div>
-
-  <div class="user-chip" id="userChip" title="" role="button" tabindex="0" aria-haspopup="dialog" aria-controls="pfModal">
-    <img id="userAvatar" class="avatar" alt="Foto do usuário" referrerpolicy="no-referrer">
-    <i class="fa-regular fa-circle-user" id="userIcon"></i>
-    <span class="user-email" id="userEmailLabel">Usuário</span>
-  </div>
-
-  <button id="themeSwitch" class="theme-toggle" aria-label="Alternar tema" aria-pressed="false">
-    <span class="slot left" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="3.5" fill="none"/>
-        <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
-        <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
-        <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
-        <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
-      </svg>
-    </span>
-    <span class="slot right" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8z" fill="none"/>
-      </svg>
-    </span>
-    <span class="thumb" aria-hidden="true">
-      <svg class="thumb-sun" viewBox="0 0 24 24">
-        <defs>
-          <radialGradient id="sunGrad-desktop" cx="30%" cy="30%" r="80%">
-            <stop offset="0%" stop-color="#ffd27a"/>
-            <stop offset="60%" stop-color="#f8c266"/>
-            <stop offset="100%" stop-color="#f59e0b"/>
-          </radialGradient>
-        </defs>
-        <circle cx="12" cy="12" r="6.3" fill="url(#sunGrad-desktop)"/>
-      </svg>
-      <svg class="thumb-moon" viewBox="0 0 24 24">
-        <defs>
-          <radialGradient id="moonGrad-desktop" cx="30%" cy="30%" r="80%">
-            <stop offset="0%" stop-color="#9fc3ff"/>
-            <stop offset="60%" stop-color="#6ba6ff"/>
-            <stop offset="100%" stop-color="#2563eb"/>
-          </radialGradient>
-        </defs>
-        <circle cx="12" cy="12" r="11" fill="url(#moonGrad-desktop)"/>
-      </svg>
-    </span>
+<div class="Valora-mobile-topbar" id="ValoraMobileTopbar">
+  <button type="button" class="Valora-mobile-toggle" id="ValoraSidebarToggle" aria-label="Abrir menu" aria-expanded="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v2H4V6Zm0 5h16v2H4v-2Zm0 5h16v2H4v-2Z"></path></svg>
   </button>
+
+  <div class="Valora-mobile-brand">
+    <strong>Menu</strong>
+    <span id="ValoraMobileSubtitle">Dashboard</span>
+  </div>
 </div>
 
-<aside class="app-sidebar" id="appSidebar" aria-label="Menu lateral">
-  <div class="logo">
-    <img class="logo-fav" src="/img/fav-icon.png" alt="favicon" width="32" height="32">
-    <img class="logo-full logo-light" src="/img/logo-s-fundo.png" alt="Logo (claro)">
-    <img class="logo-full logo-dark" src="/img/logo-white.png" alt="Logo (escuro)">
-  </div>
+<div class="Valora-mobile-overlay" id="ValoraMobileOverlay"></div>
 
-  <nav>
-    <a href="/dashboard">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M224,98H182V56a6,6,0,0,0-6-6H54V40a6,6,0,0,0-12,0V216a6,6,0,0,0,12,0V206h90a6,6,0,0,0,6-6V158h74a6,6,0,0,0,6-6V104A6,6,0,0,0,224,98ZM170,62V98H54V62ZM138,194H54V158h84Zm80-48H54V110H218Z"/></svg></span>
-      <span class="label">Dashboard</span>
+<aside class="Valora-app-sidebar" id="ValoraAppSidebar" aria-label="Menu lateral">
+  <header class="Valora-sidebar-header">
+    <a href="/dashboard" class="Valora-logo-link" aria-label="Ir para dashboard">
+      <div class="Valora-logo-wrap">
+        <img class="Valora-logo-fav" src="/img/fav-icon.png" alt="Logo ícone">
+        <img class="Valora-logo-light" src="/img/logo-s-fundo.png" alt="Logo">
+        <img class="Valora-logo-dark" src="/img/logo-white.png" alt="Logo">
+      </div>
     </a>
 
-    <a href="/atendimentos">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M225.88,30.12a13.83,13.83,0,0,0-13.7-3.58l-.11,0L20.14,84.77A14,14,0,0,0,18,110.85l85.56,41.64L145.12,238a13.87,13.87,0,0,0,12.61,8c.4,0,.81,0,1.21-.05a13.9,13.9,0,0,0,12.29-10.09l58.2-191.93,0-.11A13.83,13.83,0,0,0,225.88,30.12Zm-8,10.4L159.73,232.43l0,.11a2,2,0,0,1-3.76.26l-40.68-83.58,49-49a6,6,0,1,0-8.49-8.49l-49,49L23.15,100a2,2,0,0,1,.31-3.74l.11,0L215.48,38.08a1.94,1.94,0,0,1,1.92.52A2,2,0,0,1,217.92,40.52Z"/></svg></span>
-      <span class="label">Atendimentos</span>
+    <span class="Valora-logo-caption">Central do Sistema</span>
+
+    <button type="button" class="Valora-mobile-close" id="ValoraMobileClose" aria-label="Fechar menu">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.3 5.71 12 12l6.3 6.29-1.42 1.42L10.59 13.4 4.29 19.7 2.87 18.3 9.17 12l-6.3-6.29L4.29 4.3l6.3 6.3 6.29-6.3Z"></path></svg>
+    </button>
+  </header>
+
+  <nav class="Valora-sidebar-section">
+    <p class="Valora-section-label">Menu Principal</p>
+
+    <a class="Valora-nav-item" data-menu="dashboard" href="/dashboard">
+      <span class="Valora-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 256 256"><path d="M224,98H182V56a6,6,0,0,0-6-6H54V40a6,6,0,0,0-12,0V216a6,6,0,0,0,12,0V206h90a6,6,0,0,0,6-6V158h74a6,6,0,0,0,6-6V104A6,6,0,0,0,224,98ZM170,62V98H54V62ZM138,194H54V158h84Zm80-48H54V110H218Z"></path></svg>
+      </span>
+      <span>Dashboard</span>
     </a>
 
-    <a href="/midias">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M243.36,111.81A14,14,0,0,0,232,106H214V88a14,14,0,0,0-14-14H130L101.74,52.8a14.06,14.06,0,0,0-8.4-2.8H40A14,14,0,0,0,26,64V208a6,6,0,0,0,6,6H211.1a6,6,0,0,0,5.69-4.1l28.49-85.47A14,14,0,0,0,243.36,111.81ZM40,62H93.34a2,2,0,0,1,1.2.4L124.4,84.8A6,6,0,0,0,128,86h72a2,2,0,0,1,2,2v18H69.77a14,14,0,0,0-13.28,9.57L38,171V64A2,2,0,0,1,40,62Zm193.9,58.63L206.78,202H40.33l27.54-82.63a2,2,0,0,1,1.9-1.37H232a2,2,0,0,1,1.9,2.63Z"/></svg></span>
-      <span class="label">Arquivos</span>
+    <a class="Valora-nav-item" data-menu="atendimentos" href="/atendimentos">
+      <span class="Valora-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 256 256"><path d="M225.88,30.12a13.83,13.83,0,0,0-13.7-3.58l-.11,0L20.14,84.77A14,14,0,0,0,18,110.85l85.56,41.64L145.12,238a13.87,13.87,0,0,0,12.61,8c.4,0,.81,0,1.21-.05a13.9,13.9,0,0,0,12.29-10.09l58.2-191.93,0-.11A13.83,13.83,0,0,0,225.88,30.12Zm-8,10.4L159.73,232.43l0,.11a2,2,0,0,1-3.76.26l-40.68-83.58,49-49a6,6,0,1,0-8.49-8.49l-49,49L23.15,100a2,2,0,0,1,.31-3.74l.11,0L215.48,38.08a1.94,1.94,0,0,1,1.92.52A2,2,0,0,1,217.92,40.52Z"></path></svg>
+      </span>
+      <span>Atendimentos</span>
     </a>
 
-    <a href="/chat-interno">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M229.93,186.58A78,78,0,0,0,168.16,74.42,78,78,0,1,0,26.07,138.58L18.58,164A14,14,0,0,0,36,181.42l25.46-7.49a78,78,0,0,0,26.39,7.63,78,78,0,0,0,106.77,40.37L220,229.42A14,14,0,0,0,237.42,212ZM62,161.5a6.05,6.05,0,0,0-1.69.24l-27.77,8.17a2,2,0,0,1-2.48-2.48l8.17-27.77a6.05,6.05,0,0,0-.47-4.53,66,66,0,1,1,27.08,27.08A6,6,0,0,0,62,161.5Zm155.71,26.16,8.17,27.77a2,2,0,0,1-2.48,2.48l-27.77-8.17a6.06,6.06,0,0,0-4.53.47,66,66,0,0,1-90-28.4,77.92,77.92,0,0,0,71-94.68,66,66,0,0,1,46.07,96A6.05,6.05,0,0,0,217.74,187.66Z"/></svg></span>
-      <span class="label">Chat Interno</span>
+    <a class="Valora-nav-item" data-menu="midias" href="/midias">
+      <span class="Valora-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 256 256"><path d="M243.36,111.81A14,14,0,0,0,232,106H214V88a14,14,0,0,0-14-14H130L101.74,52.8a14.06,14.06,0,0,0-8.4-2.8H40A14,14,0,0,0,26,64V208a6,6,0,0,0,6,6H211.1a6,6,0,0,0,5.69-4.1l28.49-85.47A14,14,0,0,0,243.36,111.81ZM40,62H93.34a2,2,0,0,1,1.2.4L124.4,84.8A6,6,0,0,0,128,86h72a2,2,0,0,1,2,2v18H69.77a14,14,0,0,0-13.28,9.57L38,171V64A2,2,0,0,1,40,62Zm193.9,58.63L206.78,202H40.33l27.54-82.63a2,2,0,0,1,1.9-1.37H232a2,2,0,0,1,1.9,2.63Z"></path></svg>
+      </span>
+      <span>Arquivos</span>
     </a>
 
-    <a href="/clientes">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M154,80a6,6,0,0,1,6-6h88a6,6,0,0,1,0,12H160A6,6,0,0,1,154,80Zm94,42H160a6,6,0,0,0,0,12h88a6,6,0,0,0,0-12Zm0,48H184a6,6,0,0,0,0,12h64a6,6,0,0,0,0-12Zm-98.19,20.5a6,6,0,1,1-11.62,3C131.7,168.29,107.23,150,80,150s-51.7,18.29-58.19,43.49a6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"/></svg></span>
-      <span class="label">Clientes</span>
+    <a class="Valora-nav-item" data-menu="chat-interno" href="/chat-interno">
+      <span class="Valora-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 256 256"><path d="M229.93,186.58A78,78,0,0,0,168.16,74.42,78,78,0,1,0,26.07,138.58L18.58,164A14,14,0,0,0,36,181.42l25.46-7.49a78,78,0,0,0,26.39,7.63,78,78,0,0,0,106.77,40.37L220,229.42A14,14,0,0,0,237.42,212ZM62,161.5a6.05,6.05,0,0,0-1.69.24l-27.77,8.17a2,2,0,0,1-2.48-2.48l8.17-27.77a6.05,6.05,0,0,0-.47-4.53,66,66,0,1,1,27.08,27.08A6,6,0,0,0,62,161.5Zm155.71,26.16,8.17,27.77a2,2,0,0,1-2.48,2.48l-27.77-8.17a6.06,6.06,0,0,0-4.53.47,66,66,0,0,1-90-28.4,77.92,77.92,0,0,0,71-94.68,66,66,0,0,1,46.07,96A6.05,6.05,0,0,0,217.74,187.66Z"></path></svg>
+      </span>
+      <span>Chat Interno</span>
     </a>
 
-    <a href="/colaboradores">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M243.6,148.8a6,6,0,0,1-8.4-1.2A53.58,53.58,0,0,0,192,126a6,6,0,0,1,0-12,26,26,0,1,0-25.18-32.5,6,6,0,0,1-11.62-3,38,38,0,1,1,59.91,39.63A65.69,65.69,0,0,1,244.8,140.4,6,6,0,0,1,243.6,148.8ZM189.19,213a6,6,0,0,1-2.19,8.2,5.9,5.9,0,0,1-3,.81,6,6,0,0,1-5.2-3,59,59,0,0,0-101.62,0,6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"/></svg></span>
-      <span class="label">Colaboradores</span>
-    </a>
-
-    <a href="/departamentos">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M248,210H230V94h2a6,6,0,0,0,0-12H182V46h2a6,6,0,0,0,0-12H40a6,6,0,0,0,0,12h2V210H24a6,6,0,0,0,0-12H248a6,6,0,0,0,0-12ZM218,94V210H182V94ZM54,46H170V210H142V160a6,6,0,0,0-6-6H88a6,6,0,0,0-6,6v50H54Zm76,164H94V166h36ZM74,80a6,6,0,0,1,6-6H96a6,6,0,0,1,0,12H80A6,6,0,0,1,74,80Zm48,0a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,80ZM80,126a6,6,0,0,1,0-12H96a6,6,0,0,1,0,12Zm42-6a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,120Z"/></svg></span>
-      <span class="label">Departamentos</span>
-    </a>
-
-    <a href="/chatbot">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,114.56a54,54,0,0,0-58.67-74.73,54,54,0,0,0-94,13.46A54,54,0,0,0,34,141.44a54,54,0,0,0,35.56,73.65A54.54,54.54,0,0,0,83.59,217a52.86,52.86,0,0,0,9.06-.78,54,54,0,0,0,94-13.46A54,54,0,0,0,222,114.56ZM183.37,52.5a42,42,0,0,1,29.21,53.14,54.84,54.84,0,0,0-5.08-3.33L163,76.62a6,6,0,0,0-6,0l-47,27.13V80.66l41.5-24A41.73,41.73,0,0,1,183.37,52.5ZM146,138.39l-18,10.39-18-10.39V117.61l18-10.39,18,10.39ZM78,72a42,42,0,0,1,72.92-28.43,56.18,56.18,0,0,0-5.42,2.74L101,72a6,6,0,0,0-3,5.19v54.27L78,119.92ZM39.13,85.93a41.75,41.75,0,0,1,27.22-20A55.09,55.09,0,0,0,66,72v51.38a6,6,0,0,0,3,5.2l47,27.13L96,167.26l-41.5-24A42,42,0,0,1,39.13,85.93ZM72.63,203.5a42,42,0,0,1-29.21-53.14,54.84,54.84,0,0,0,5.08,3.33L93,179.38a6,6,0,0,0,6,0l47-27.13v23.09l-41.5,24A41.73,41.73,0,0,1,72.63,203.5ZM178,184a42,42,0,0,1-72.92,28.43,56.18,56.18,0,0,0,5.42-2.74L155,184a6,6,0,0,0,3-5.19V124.54l20,11.54Zm38.87-13.93a41.75,41.75,0,0,1-27.22,20A55.09,55.09,0,0,0,190,184V132.62a6,6,0,0,1-3-5.2l-47-27.13,20-11.55,41.5,24A42,42,0,0,1,216.87,170.07Z"/></svg></span>
-      <span class="label">Chatbot</span>
-    </a>
-
-    <a href="/disparos">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z"/></svg></span>
-      <span class="label">Disparador</span>
-    </a>
-
-    <a href="/conectar">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M104,42H56A14,14,0,0,0,42,56v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,104,42Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-2,34H56a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V152A14,14,0,0,0,104,138Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V152a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2ZM200,42H152a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,200,42Zm2,62a2,2,0,0,1-2,2H152a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-64,72V144a6,6,0,0,1,12,0v32a6,6,0,0,1-12,0Zm76-16a6,6,0,0,1-6,6H182v42a6,6,0,0,1-6,6H144a6,6,0,0,0,0,12h26V144a6,6,0,0,1,12,0v10h26A6,6,0,0,1,214,160Zm0,32v16a6,6,0,0,1-12,0V192a6,6,0,0,1,12,0Z"/></svg></span>
-      <span class="label">Conectar WhatsApp</span>
-    </a>
-
-    <a href="#" id="sidebarLogout">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,218H206V40a14,14,0,0,0-14-14H64A14,14,0,0,0,50,40V218H24a6,6,0,0,0,0,12H232a6,6,0,0,0,0-12ZM194,40V218H174V38h18A2,2,0,0,1,194,40ZM62,40a2,2,0,0,1,2-2h98V218H62Zm80,92a10,10,0,1,1-10-10A10,10,0,0,1,142,132Z"/></svg></span>
-      <span class="label">Sair</span>
+    <a class="Valora-nav-item" data-menu="clientes" href="/clientes">
+      <span class="Valora-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 256 256"><path d="M154,80a6,6,0,0,1,6-6h88a6,6,0,0,1,0,12H160A6,6,0,0,1,154,80Zm94,42H160a6,6,0,0,0,0,12h88a6,6,0,0,0,0-12Zm0,48H184a6,6,0,0,0,0,12h64a6,6,0,0,0,0-12Zm-98.19,20.5a6,6,0,1,1-11.62,3C131.7,168.29,107.23,150,80,150s-51.7,18.29-58.19,43.49a6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"></path></svg>
+      </span>
+      <span>Clientes</span>
     </a>
   </nav>
-</aside>
 
-<nav class="mobile-bottom-nav" aria-label="Navegação móvel">
-  <a href="/atendimentos" id="mbAtendimentos">
-    <span class="m-icon" aria-hidden="true">
-      <svg viewBox="0 0 256 256" fill="currentColor"><path d="M225.88,30.12a13.83,13.83,0,0,0-13.7-3.58l-.11,0L20.14,84.77A14,14,0,0,0,18,110.85l85.56,41.64L145.12,238a13.87,13.87,0,0,0,12.61,8c.4,0,.81,0,1.21-.05a13.9,13.9,0,0,0,12.29-10.09l58.2-191.93,0-.11A13.83,13.83,0,0,0,225.88,30.12Zm-8,10.4L159.73,232.43l0,.11a2,2,0,0,1-3.76.26l-40.68-83.58,49-49a6,6,0,1,0-8.49-8.49l-49,49L23.15,100a2,2,0,0,1,.31-3.74l.11,0L215.48,38.08a1.94,1.94,0,0,1,1.92.52A2,2,0,0,1,217.92,40.52Z"/></svg>
-    </span>
-    <span class="m-label">Atend.</span>
-  </a>
+  <nav class="Valora-sidebar-section">
+    <p class="Valora-section-label">Operação</p>
 
-  <a href="/midias" id="mbArquivos">
-    <span class="m-icon" aria-hidden="true">
-      <svg viewBox="0 0 256 256" fill="currentColor"><path d="M243.36,111.81A14,14,0,0,0,232,106H214V88a14,14,0,0,0-14-14H130L101.74,52.8a14.06,14.06,0,0,0-8.4-2.8H40A14,14,0,0,0,26,64V208a6,6,0,0,0,6,6H211.1a6,6,0,0,0,5.69-4.1l28.49-85.47A14,14,0,0,0,243.36,111.81ZM40,62H93.34a2,2,0,0,1,1.2.4L124.4,84.8A6,6,0,0,0,128,86h72a2,2,0,0,1,2,2v18H69.77a14,14,0,0,0-13.28,9.57L38,171V64A2,2,0,0,1,40,62Zm193.9,58.63L206.78,202H40.33l27.54-82.63a2,2,0,0,1,1.9-1.37H232a2,2,0,0,1,1.9,2.63Z"/></svg>
-    </span>
-    <span class="m-label">Arquivos</span>
-  </a>
+    <a class="Valora-nav-item" data-menu="colaboradores" href="/colaboradores">
+      <span class="Valora-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 256 256"><path d="M243.6,148.8a6,6,0,0,1-8.4-1.2A53.58,53.58,0,0,0,192,126a6,6,0,0,1,0-12,26,26,0,1,0-25.18-32.5,6,6,0,0,1-11.62-3,38,38,0,1,1,59.91,39.63A65.69,65.69,0,0,1,244.8,140.4,6,6,0,0,1,243.6,148.8ZM189.19,213a6,6,0,0,1-2.19,8.2,5.9,5.9,0,0,1-3,.81,6,6,0,0,1-5.2-3,59,59,0,0,0-101.62,0,6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"></path></svg>
+      </span>
+      <span>Colaboradores</span>
+    </a>
 
-  <a href="/clientes" id="mbClientes">
-    <span class="m-icon" aria-hidden="true">
-      <svg viewBox="0 0 256 256" fill="currentColor"><path d="M154,80a6,6,0,0,1,6-6h88a6,6,0,0,1,0,12H160A6,6,0,0,1,154,80Zm94,42H160a6,6,0,0,0,0,12h88a6,6,0,0,0,0-12Zm0,48H184a6,6,0,0,0,0,12h64a6,6,0,0,0,0-12Zm-98.19,20.5a6,6,0,1,1-11.62,3C131.7,168.29,107.23,150,80,150s-51.7,18.29-58.19,43.49a6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"/></svg>
-    </span>
-    <span class="m-label">Clientes</span>
-  </a>
+    <a class="Valora-nav-item" data-menu="departamentos" href="/departamentos">
+      <span class="Valora-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 256 256"><path d="M248,210H230V94h2a6,6,0,0,0,0-12H182V46h2a6,6,0,0,0,0-12H40a6,6,0,0,0,0,12h2V210H24a6,6,0,0,0,0,12H248a6,6,0,0,0,0-12ZM218,94V210H182V94ZM54,46H170V210H142V160a6,6,0,0,0-6-6H88a6,6,0,0,0-6,6v50H54Zm76,164H94V166h36ZM74,80a6,6,0,0,1,6-6H96a6,6,0,0,1,0,12H80A6,6,0,0,1,74,80Zm48,0a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,80ZM80,126a6,6,0,0,1,0-12H96a6,6,0,0,1,0,12Zm42-6a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,120Z"></path></svg>
+      </span>
+      <span>Departamentos</span>
+    </a>
 
-  <button type="button" id="mobileMoreBtn">
-    <span class="m-icon" aria-hidden="true">
-      <svg viewBox="0 0 256 256" fill="currentColor"><path d="M128,88a16,16,0,1,0,16,16A16,16,0,0,0,128,88Zm0,48a16,16,0,1,0,16,16A16,16,0,0,0,128,136Zm0,48a16,16,0,1,0,16,16A16,16,0,0,0,128,184Z"/></svg>
-    </span>
-    <span class="m-label">Mais</span>
-  </button>
-</nav>
+    <a class="Valora-nav-item" data-menu="chatbot" href="/chatbot">
+      <span class="Valora-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 256 256"><path d="M222,114.56a54,54,0,0,0-58.67-74.73,54,54,0,0,0-94,13.46A54,54,0,0,0,34,141.44a54,54,0,0,0,35.56,73.65A54.54,54.54,0,0,0,83.59,217a52.86,52.86,0,0,0,9.06-.78,54,54,0,0,0,94-13.46A54,54,0,0,0,222,114.56ZM183.37,52.5a42,42,0,0,1,29.21,53.14,54.84,54.84,0,0,0-5.08-3.33L163,76.62a6,6,0,0,0-6,0l-47,27.13V80.66l41.5-24A41.73,41.73,0,0,1,183.37,52.5ZM78,72a42,42,0,0,1,72.92-28.43,56.18,56.18,0,0,0-5.42,2.74L101,72a6,6,0,0,0-3,5.19v54.27L78,119.92ZM39.13,85.93a41.75,41.75,0,0,1,27.22-20A55.09,55.09,0,0,0,66,72v51.38a6,6,0,0,0,3,5.2l47,27.13L96,167.26l-41.5-24A42,42,0,0,1,39.13,85.93ZM72.63,203.5a42,42,0,0,1-29.21-53.14,54.84,54.84,0,0,0,5.08,3.33L93,179.38a6,6,0,0,0,6,0l47-27.13v23.09l-41.5,24A41.73,41.73,0,0,1,72.63,203.5ZM178,184a42,42,0,0,1-72.92,28.43,56.18,56.18,0,0,0,5.42-2.74L155,184a6,6,0,0,0,3-5.19V124.54l20,11.54Zm38.87-13.93a41.75,41.75,0,0,1-27.22,20A55.09,55.09,0,0,0,190,184V132.62a6,6,0,0,1-3-5.2l-47-27.13,20-11.55,41.5,24A42,42,0,0,1,216.87,170.07Z"></path></svg>
+      </span>
+      <span>Chatbot</span>
+    </a>
 
-<div id="mobileMoreBackdrop" class="mobile-more-backdrop" aria-hidden="true"></div>
+    <a class="Valora-nav-item" data-menu="disparos" href="/disparos">
+      <span class="Valora-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 256 256"><path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z"></path></svg>
+      </span>
+      <span>Disparador</span>
+    </a>
 
-<aside id="mobileMoreSheet" class="mobile-more-sheet" aria-label="Mais opções" aria-hidden="true">
-  <div class="logo">
-    <img class="logo-full logo-light" src="/img/logo-s-fundo.png" alt="Logo (claro)">
-    <img class="logo-full logo-dark" src="/img/logo-white.png" alt="Logo (escuro)">
-  </div>
+    <a class="Valora-nav-item" data-menu="conectar" href="/conectar">
+      <span class="Valora-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 256 256"><path d="M104,42H56A14,14,0,0,0,42,56v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,104,42Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-2,34H56a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V152A14,14,0,0,0,104,138Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V152a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2ZM200,42H152a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,200,42Zm2,62a2,2,0,0,1-2,2H152a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-64,72V144a6,6,0,0,1,12,0v32a6,6,0,0,1-12,0Zm76-16a6,6,0,0,1-6,6H182v42a6,6,0,0,1-6,6H144a6,6,0,0,0,0,12h26V144a6,6,0,0,1,12,0v10h26A6,6,0,0,1,214,160Zm0,32v16a6,6,0,0,1-12,0V192a6,6,0,0,1,12,0Z"></path></svg>
+      </span>
+      <span>Conectar WhatsApp</span>
+    </a>
+  </nav>
 
-  <div class="mobile-more-head">
-    <div class="mobile-profile-card" id="mobileProfileCard" role="button" tabindex="0" aria-haspopup="dialog" aria-controls="pfModal">
-      <img id="mobileProfileAvatar" class="mobile-profile-avatar" alt="Foto do usuário" referrerpolicy="no-referrer">
-      <div id="mobileProfileIcon" class="mobile-profile-icon">
-        <i class="fa-regular fa-circle-user"></i>
-      </div>
-      <div class="mobile-profile-meta">
-        <div id="mobileProfileName" class="mobile-profile-name">Usuário</div>
-        <div id="mobileProfileSub" class="mobile-profile-sub">Abrir perfil</div>
-      </div>
-    </div>
-
-    <div class="mobile-theme-card">
-      <div class="mobile-theme-left">
-        <div class="mobile-theme-icon">
-          <i class="fa-regular fa-sun" id="mobileThemeIcon"></i>
-        </div>
-        <div class="mobile-theme-text">
-          <div class="mobile-theme-title">Tema</div>
-          <div class="mobile-theme-sub" id="mobileThemeLabel">Claro</div>
-        </div>
-      </div>
-
-      <button id="mobileThemeSwitch" class="theme-toggle" aria-label="Alternar tema móvel" aria-pressed="false">
-        <span class="slot left" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3.5" fill="none"/>
-            <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
-            <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
-            <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
-            <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
-          </svg>
+  <div class="Valora-user-container">
+    <div class="Valora-user-dropdown" id="ValoraUserDropdown">
+      <button type="button" class="Valora-dropdown-item" id="ValoraOpenProfileBtn">
+        <span class="icon" aria-hidden="true">
+          <svg viewBox="0 0 256 256"><path d="M128,128A48,48,0,1,0,80,80,48.05,48.05,0,0,0,128,128Zm0-84a36,36,0,1,1-36,36A36,36,0,0,1,128,44Zm0,100c-44.11,0-80,25.12-80,56a6,6,0,0,0,12,0c0-23.93,30.5-44,68-44s68,20.07,68,44a6,6,0,0,0,12,0C208,169.12,172.11,144,128,144Z"></path></svg>
         </span>
-        <span class="slot right" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8z" fill="none"/>
-          </svg>
+        <span class="Valora-dropdown-item__label">Meu Perfil</span>
+      </button>
+
+      <button type="button" class="Valora-dropdown-item" id="ValoraMyPlanBtn">
+        <span class="icon" aria-hidden="true">
+          <svg viewBox="0 0 256 256"><path d="M232,88H182.33l-22.92-45.84A14,14,0,0,0,146.89,34H109.11A14,14,0,0,0,96.59,42.16L73.67,88H24a14,14,0,0,0-14,14v20a22,22,0,0,0,18,21.64V208a14,14,0,0,0,14,14H214a14,14,0,0,0,14-14V143.64A22,22,0,0,0,246,122V102A14,14,0,0,0,232,88ZM109.11,46h37.78a2,2,0,0,1,1.79,1.11L169,88H87l20.32-40.89A2,2,0,0,1,109.11,46ZM216,208a2,2,0,0,1-2,2H42a2,2,0,0,1-2-2V144h69.76l9.37,18.73A14,14,0,0,0,131.65,170h-7.3a14,14,0,0,0,12.52-7.27L146.24,144H216Zm18-86a10,10,0,0,1-10,10H143.76a6,6,0,0,0-5.37,3.32l-12.25,24.5a2,2,0,0,1-1.79,1.1h7.3a2,2,0,0,1-1.79-1.1l-12.25-24.5a6,6,0,0,0-5.37-3.32H32a10,10,0,0,1-10-10V102a2,2,0,0,1,2-2H232a2,2,0,0,1,2,2Z"></path></svg>
         </span>
-        <span class="thumb" aria-hidden="true">
-          <svg class="thumb-sun" viewBox="0 0 24 24">
-            <defs>
-              <radialGradient id="sunGrad-mobile" cx="30%" cy="30%" r="80%">
-                <stop offset="0%" stop-color="#ffd27a"/>
-                <stop offset="60%" stop-color="#f8c266"/>
-                <stop offset="100%" stop-color="#f59e0b"/>
-              </radialGradient>
-            </defs>
-            <circle cx="12" cy="12" r="6.3" fill="url(#sunGrad-mobile)"/>
-          </svg>
-          <svg class="thumb-moon" viewBox="0 0 24 24">
-            <defs>
-              <radialGradient id="moonGrad-mobile" cx="30%" cy="30%" r="80%">
-                <stop offset="0%" stop-color="#9fc3ff"/>
-                <stop offset="60%" stop-color="#6ba6ff"/>
-                <stop offset="100%" stop-color="#2563eb"/>
-              </radialGradient>
-            </defs>
-            <circle cx="12" cy="12" r="11" fill="url(#moonGrad-mobile)"/>
-          </svg>
+        <span class="Valora-dropdown-item__label">Meu Plano</span>
+      </button>
+
+      <a class="Valora-dropdown-item" id="ValoraNotifBtn" href="/notificacoes.html">
+        <span class="icon" aria-hidden="true">
+          <svg viewBox="0 0 256 256"><path d="M221.8,175.94C216.25,169.38,208,157,208,128.45V120a80,80,0,0,0-160,0v8.45C48,157,39.75,169.39,34.2,175.94A15.59,15.59,0,0,0,32,192a16,16,0,0,0,14.87,10H96a32,32,0,0,0,64,0h49.13A16,16,0,0,0,224,192,15.59,15.59,0,0,0,221.8,175.94ZM128,216a16,16,0,0,1-15.2-11h30.4A16,16,0,0,1,128,216Zm81.27-30H46.73c7.4-8.73,17.27-24.26,17.27-57.55V120a64,64,0,0,1,128,0v8.45C192,161.74,201.87,177.27,209.27,186Z"></path></svg>
         </span>
+        <span class="Valora-dropdown-item__label">Notificações</span>
+        <span class="Valora-dropdown-badge" id="ValoraNotifBadge" style="display:none;">0</span>
+      </a>
+
+      <button type="button" class="Valora-dropdown-item" id="ValoraConfigBtn">
+        <span class="icon" aria-hidden="true">
+          <svg viewBox="0 0 256 256"><path d="M230.94,123.05l-14.27-8.25c.24-2.24.33-4.52.33-6.8s-.09-4.56-.33-6.8l14.27-8.25a14,14,0,0,0,5.12-19.11l-12-20.78a14,14,0,0,0-18.52-5.5l-14.3,8.26a78.65,78.65,0,0,0-11.77-6.8V32a14,14,0,0,0-14-14H142a14,14,0,0,0-14,14V48.02a78.65,78.65,0,0,0-11.77,6.8l-14.3-8.26a14,14,0,0,0-18.52,5.5l-12,20.78a14,14,0,0,0,5.12,19.11l14.27,8.25c-.24,2.24-.33,4.52-.33,6.8s.09,4.56.33,6.8l-14.27,8.25a14,14,0,0,0-5.12,19.11l12,20.78a14,14,0,0,0,18.52,5.5l14.3-8.26a78.65,78.65,0,0,0,11.77,6.8V224a14,14,0,0,0,14,14h24a14,14,0,0,0,14-14V207.98a78.65,78.65,0,0,0,11.77-6.8l14.3,8.26a14,14,0,0,0,18.52-5.5l12-20.78A14,14,0,0,0,230.94,123.05ZM154,128a26,26,0,1,1-26-26A26,26,0,0,1,154,128Z"></path></svg>
+        </span>
+        <span class="Valora-dropdown-item__label">Configurações</span>
+      </button>
+
+      <button type="button" class="Valora-dropdown-item" id="ValoraToggleThemeBtn">
+        <span class="icon" aria-hidden="true">
+          <svg viewBox="0 0 256 256"><path d="M120,40V24a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66a8,8,0,0,0,11.32-11.32L58.34,47A8,8,0,0,0,47,58.34ZM40,120H24a8,8,0,0,0,0,16H40a8,8,0,0,0,0-16Zm18.34,66.34L47,197.66A8,8,0,0,0,58.34,209l11.32-11.31a8,8,0,0,0-11.32-11.32ZM136,216v16a8,8,0,0,1-16,0V216a8,8,0,0,1,16,0Zm72.69-18.34A8,8,0,0,0,197.37,209l11.32,11.31A8,8,0,0,0,220,209Zm23.31-77.66H216a8,8,0,0,0,0,16h16a8,8,0,0,0,0-16Zm-34.63-50.34A8,8,0,0,0,209,69.66L220.31,58.34A8,8,0,0,0,209,47L197.37,58.34A8,8,0,0,0,197.37,69.66Z"></path></svg>
+        </span>
+        <span class="Valora-dropdown-item__label" id="ValoraThemeActionText">Alternar tema</span>
+      </button>
+
+      <div class="Valora-dropdown-divider"></div>
+
+      <button type="button" class="Valora-dropdown-item danger" id="ValoraLogoutBtn">
+        <span class="icon" aria-hidden="true">
+          <svg viewBox="0 0 256 256"><path d="M222,128a6,6,0,0,1-6,6H117.66l37.17,37.17a6,6,0,0,1-8.49,8.49l-47.41-47.42a6,6,0,0,1,0-8.48l47.41-47.42a6,6,0,0,1,8.49,8.49L117.66,122H216A6,6,0,0,1,222,128ZM104,200a6,6,0,0,1-6,6H48a14,14,0,0,1-14-14V64A14,14,0,0,1,48,50H98a6,6,0,0,1,0,12H48a2,2,0,0,0-2,2V192a2,2,0,0,0,2,2H98A6,6,0,0,1,104,200Z"></path></svg>
+        </span>
+        <span class="Valora-dropdown-item__label">Sair do Sistema</span>
       </button>
     </div>
+
+    <div class="Valora-user-profile" id="ValoraUserProfileBtn" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false">
+      <div class="Valora-user-avatar" id="ValoraUserAvatarBox">
+        <img id="ValoraUserAvatarImg" alt="Avatar do usuário" referrerpolicy="no-referrer">
+        <span id="ValoraUserInitials">U</span>
+      </div>
+
+      <div class="Valora-user-info">
+        <strong id="ValoraUserName">Usuário</strong>
+        <span id="ValoraUserEmail">email@empresa.com</span>
+      </div>
+
+      <span class="Valora-user-chevron" aria-hidden="true">
+        <svg viewBox="0 0 256 256"><path d="M128,168a8,8,0,0,1-5.66-2.34l-56-56a8,8,0,0,1,11.32-11.32L128,148.69l50.34-50.35a8,8,0,0,1,11.32,11.32l-56,56A8,8,0,0,1,128,168Z"></path></svg>
+      </span>
+    </div>
   </div>
-
-  <nav class="mobile-more-nav">
-    <a href="/dashboard">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M224,98H182V56a6,6,0,0,0-6-6H54V40a6,6,0,0,0-12,0V216a6,6,0,0,0,12,0V206h90a6,6,0,0,0,6-6V158h74a6,6,0,0,0,6-6V104A6,6,0,0,0,224,98ZM170,62V98H54V62ZM138,194H54V158h84Zm80-48H54V110H218Z"/></svg></span>
-      <span class="label">Dashboard</span>
-    </a>
-
-    <a href="/chat-interno">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M229.93,186.58A78,78,0,0,0,168.16,74.42,78,78,0,1,0,26.07,138.58L18.58,164A14,14,0,0,0,36,181.42l25.46-7.49a78,78,0,0,0,26.39,7.63,78,78,0,0,0,106.77,40.37L220,229.42A14,14,0,0,0,237.42,212ZM62,161.5a6.05,6.05,0,0,0-1.69.24l-27.77,8.17a2,2,0,0,1-2.48-2.48l8.17-27.77a6.05,6.05,0,0,0-.47-4.53,66,66,0,1,1,27.08,27.08A6,6,0,0,0,62,161.5Zm155.71,26.16,8.17,27.77a2,2,0,0,1-2.48,2.48l-27.77-8.17a6.06,6.06,0,0,0-4.53.47,66,66,0,0,1-90-28.4,77.92,77.92,0,0,0,71-94.68,66,66,0,0,1,46.07,96A6.05,6.05,0,0,0,217.74,187.66Z"/></svg></span>
-      <span class="label">Chat Interno</span>
-    </a>
-
-    <a href="/colaboradores">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M243.6,148.8a6,6,0,0,1-8.4-1.2A53.58,53.58,0,0,0,192,126a6,6,0,0,1,0-12,26,26,0,1,0-25.18-32.5,6,6,0,0,1-11.62-3,38,38,0,1,1,59.91,39.63A65.69,65.69,0,0,1,244.8,140.4,6,6,0,0,1,243.6,148.8ZM189.19,213a6,6,0,0,1-2.19,8.2,5.9,5.9,0,0,1-3,.81,6,6,0,0,1-5.2-3,59,59,0,0,0-101.62,0,6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"/></svg></span>
-      <span class="label">Colaboradores</span>
-    </a>
-
-    <a href="/departamentos">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M248,210H230V94h2a6,6,0,0,0,0-12H182V46h2a6,6,0,0,0,0-12H40a6,6,0,0,0,0,12h2V210H24a6,6,0,0,0,0-12H248a6,6,0,0,0,0-12ZM218,94V210H182V94ZM54,46H170V210H142V160a6,6,0,0,0-6-6H88a6,6,0,0,0-6,6v50H54Zm76,164H94V166h36ZM74,80a6,6,0,0,1,6-6H96a6,6,0,0,1,0,12H80A6,6,0,0,1,74,80Zm48,0a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,80ZM80,126a6,6,0,0,1,0-12H96a6,6,0,0,1,0,12Zm42-6a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,120Z"/></svg></span>
-      <span class="label">Departamentos</span>
-    </a>
-
-    <a href="/chatbot">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,114.56a54,54,0,0,0-58.67-74.73,54,54,0,0,0-94,13.46A54,54,0,0,0,34,141.44a54,54,0,0,0,35.56,73.65A54.54,54.54,0,0,0,83.59,217a52.86,52.86,0,0,0,9.06-.78,54,54,0,0,0,94-13.46A54,54,0,0,0,222,114.56ZM183.37,52.5a42,42,0,0,1,29.21,53.14,54.84,54.84,0,0,0-5.08-3.33L163,76.62a6,6,0,0,0-6,0l-47,27.13V80.66l41.5-24A41.73,41.73,0,0,1,183.37,52.5ZM146,138.39l-18,10.39-18-10.39V117.61l18-10.39,18,10.39ZM78,72a42,42,0,0,1,72.92-28.43,56.18,56.18,0,0,0-5.42,2.74L101,72a6,6,0,0,0-3,5.19v54.27L78,119.92ZM39.13,85.93a41.75,41.75,0,0,1,27.22-20A55.09,55.09,0,0,0,66,72v51.38a6,6,0,0,0,3,5.2l47,27.13L96,167.26l-41.5-24A42,42,0,0,1,39.13,85.93ZM72.63,203.5a42,42,0,0,1-29.21-53.14,54.84,54.84,0,0,0,5.08,3.33L93,179.38a6,6,0,0,0,6,0l47-27.13v23.09l-41.5,24A41.73,41.73,0,0,1,72.63,203.5ZM178,184a42,42,0,0,1-72.92,28.43,56.18,56.18,0,0,0,5.42-2.74L155,184a6,6,0,0,0,3-5.19V124.54l20,11.54Zm38.87-13.93a41.75,41.75,0,0,1-27.22,20A55.09,55.09,0,0,0,190,184V132.62a6,6,0,0,1-3-5.2l-47-27.13,20-11.55,41.5,24A42,42,0,0,1,216.87,170.07Z"/></svg></span>
-      <span class="label">Chatbot</span>
-    </a>
-
-    <a href="/disparos">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z"/></svg></span>
-      <span class="label">Disparador</span>
-    </a>
-
-    <a href="/conectar">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M104,42H56A14,14,0,0,0,42,56v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,104,42Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-2,34H56a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V152A14,14,0,0,0,104,138Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V152a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2ZM200,42H152a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,200,42Zm2,62a2,2,0,0,1-2,2H152a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-64,72V144a6,6,0,0,1,12,0v32a6,6,0,0,1-12,0Zm76-16a6,6,0,0,1-6,6H182v42a6,6,0,0,1-6,6H144a6,6,0,0,0,0,12h26V144a6,6,0,0,1,12,0v10h26A6,6,0,0,1,214,160Zm0,32v16a6,6,0,0,1-12,0V192a6,6,0,0,1,12,0Z"/></svg></span>
-      <span class="label">Conectar WhatsApp</span>
-    </a>
-
-    <a href="#" id="mobileSidebarLogout">
-      <span class="nav-icon" aria-hidden="true"><svg class="nav-icon-svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,218H206V40a14,14,0,0,0-14-14H64A14,14,0,0,0,50,40V218H24a6,6,0,0,0,0,12H232a6,6,0,0,0,0-12ZM194,40V218H174V38h18A2,2,0,0,1,194,40ZM62,40a2,2,0,0,1,2-2h98V218H62Zm80,92a10,10,0,1,1-10-10A10,10,0,0,1,142,132Z"/></svg></span>
-      <span class="label">Sair</span>
-    </a>
-  </nav>
 </aside>
 
-<div id="pfModal" class="pf-modal" aria-hidden="true">
-  <div class="pf-dialog" role="dialog" aria-modal="true" aria-labelledby="pfTitle">
-    <div class="pf-hd">
-      <h3 id="pfTitle">Meu perfil</h3>
-      <button class="pf-close" id="pfClose" aria-label="Fechar">&times;</button>
-    </div>
-    <div class="pf-body">
-      <div class="pf-avatar-wrap">
-        <img id="pfPreview" class="pf-avatar" alt="Avatar">
-        <label class="pf-upload">
-          <input id="pfFile" type="file" accept="image/*">
-          <i class="fa fa-image" style="margin-right:.35rem"></i> Alterar foto
-        </label>
-      </div>
-      <div class="pf-grid">
-        <div class="pf-field">
-          <label for="pfNome">Nome</label>
-          <input id="pfNome" type="text" placeholder="Seu nome">
-        </div>
-        <div class="pf-field">
-          <label for="pfEmail">E-mail</label>
-          <input id="pfEmail" type="email" readonly>
-        </div>
-        <div class="pf-field">
-          <label for="pfDept">Departamento (opcional)</label>
-          <input id="pfDept" type="text" placeholder="Departamento">
-        </div>
-        <div id="pfMsg" class="pf-msg"></div>
-      </div>
-    </div>
-    <div class="pf-actions">
-      <button class="pf-btn" id="pfCancel">Cancelar</button>
-      <button class="pf-btn primary" id="pfSave">Salvar alterações</button>
-    </div>
-  </div>
-</div>
-
 <script>
-(function(){
-  var html=document.documentElement;
+(async function () {
+  'use strict';
 
-  function currentTheme(){
-    return html.classList.contains('dark') ? 'dark' : 'light';
+  var body = document.body;
+  if (body) body.classList.add('Valora-sidebar-ready');
+
+  var MENU_LABELS = {
+    'dashboard': 'Dashboard',
+    'atendimentos': 'Atendimentos',
+    'midias': 'Arquivos',
+    'chat-interno': 'Chat Interno',
+    'clientes': 'Clientes',
+    'colaboradores': 'Colaboradores',
+    'departamentos': 'Departamentos',
+    'chatbot': 'Chatbot',
+    'disparos': 'Disparador',
+    'conectar': 'Conectar WhatsApp',
+    'notificacoes': 'Notificações',
+    'configuracoes': 'Configurações',
+    'perfil': 'Meu Perfil',
+    'meu-plano': 'Meu Plano'
+  };
+
+  var MOBILE_BREAKPOINT = 920;
+
+  var sidebar = document.getElementById('ValoraAppSidebar');
+  var overlay = document.getElementById('ValoraMobileOverlay');
+  var toggleBtn = document.getElementById('ValoraSidebarToggle');
+  var closeBtn = document.getElementById('ValoraMobileClose');
+  var mobileSubtitle = document.getElementById('ValoraMobileSubtitle');
+
+  var userProfileBtn = document.getElementById('ValoraUserProfileBtn');
+  var userDropdown = document.getElementById('ValoraUserDropdown');
+  var notifBadge = document.getElementById('ValoraNotifBadge');
+
+  var openProfileBtn = document.getElementById('ValoraOpenProfileBtn');
+  var myPlanBtn = document.getElementById('ValoraMyPlanBtn');
+  var configBtn = document.getElementById('ValoraConfigBtn');
+  var toggleThemeBtn = document.getElementById('ValoraToggleThemeBtn');
+  var themeActionText = document.getElementById('ValoraThemeActionText');
+  var logoutBtn = document.getElementById('ValoraLogoutBtn');
+
+  var userNameEl = document.getElementById('ValoraUserName');
+  var userEmailEl = document.getElementById('ValoraUserEmail');
+  var userInitialsEl = document.getElementById('ValoraUserInitials');
+  var userAvatarImg = document.getElementById('ValoraUserAvatarImg');
+
+  function isMobile() {
+    return window.matchMedia('(max-width: ' + MOBILE_BREAKPOINT + 'px)').matches;
   }
 
-  function applyThemeUI(){
-    var isDark=currentTheme()==='dark';
-
-    var desktopBtn=document.getElementById('themeSwitch');
-    var mobileBtn=document.getElementById('mobileThemeSwitch');
-    var mobileLabel=document.getElementById('mobileThemeLabel');
-    var mobileIcon=document.getElementById('mobileThemeIcon');
-
-    if(desktopBtn) desktopBtn.setAttribute('aria-pressed', String(isDark));
-    if(mobileBtn) mobileBtn.setAttribute('aria-pressed', String(isDark));
-    if(mobileLabel) mobileLabel.textContent=isDark ? 'Escuro' : 'Claro';
-    if(mobileIcon){
-      mobileIcon.className=isDark ? 'fa-regular fa-moon' : 'fa-regular fa-sun';
-    }
+  function normalizePath(path) {
+    path = String(path || '').toLowerCase().trim();
+    path = path.split('?')[0].split('#')[0];
+    path = path.replace(/\/+$/, '');
+    return path || '/';
   }
 
-  function setTheme(mode){
-    try{
-      if(window.AppTheme && typeof AppTheme.set==='function'){
-        AppTheme.set(mode);
-        html.classList.toggle('dark', mode==='dark');
-      }else{
-        html.classList.toggle('dark', mode==='dark');
-        localStorage.setItem('theme', mode);
-      }
-    }catch{}
-    applyThemeUI();
+  function resolveCurrentMenu() {
+    var path = normalizePath(location.pathname);
+
+    if (path === '/' || path === '/dashboard' || path === '/home' || path === '/inicio' || path === '/dashboard.html') return 'dashboard';
+    if (path.indexOf('/atendimentos') === 0 || path === '/atendimentos.html') return 'atendimentos';
+    if (path.indexOf('/midias') === 0 || path === '/midias.html') return 'midias';
+    if (path.indexOf('/chat-interno') === 0 || path === '/chat-interno.html') return 'chat-interno';
+    if (path.indexOf('/clientes') === 0 || path === '/clientes.html') return 'clientes';
+    if (path.indexOf('/colaboradores') === 0 || path === '/colaboradores.html') return 'colaboradores';
+    if (path.indexOf('/departamentos') === 0 || path === '/departamentos.html') return 'departamentos';
+    if (path.indexOf('/chatbot') === 0 || path === '/chatbot.html') return 'chatbot';
+    if (path.indexOf('/disparos') === 0 || path === '/disparos.html') return 'disparos';
+    if (path.indexOf('/conectar') === 0 || path === '/conectar.html') return 'conectar';
+    if (path.indexOf('/notificacoes') === 0 || path === '/notificacoes.html') return 'notificacoes';
+    if (path.indexOf('/configuracoes') === 0 || path === '/configuracoes.html' || path === '/config.html') return 'configuracoes';
+    if (path.indexOf('/perfil') === 0 || path === '/perfil.html') return 'perfil';
+    if (path.indexOf('/meu-plano') === 0 || path === '/meu-plano.html') return 'meu-plano';
+
+    return 'dashboard';
   }
 
-  function toggleTheme(btn){
-    var willDark=!html.classList.contains('dark');
-    setTheme(willDark?'dark':'light');
-    if(btn){
-      btn.classList.remove('t-anim');
-      void btn.offsetWidth;
-      btn.classList.add('t-anim');
-      setTimeout(function(){ btn.classList.remove('t-anim'); }, 580);
-    }
-  }
+  function syncActiveMenu() {
+    var current = resolveCurrentMenu();
 
-  try{
-    if(window.AppTheme && typeof AppTheme.current==='function'){
-      html.classList.toggle('dark', AppTheme.current()==='dark');
-    }else{
-      var saved=localStorage.getItem('theme');
-      if(saved) html.classList.toggle('dark', saved==='dark');
-    }
-  }catch{}
-
-  var btn=document.getElementById('themeSwitch');
-  if(btn && !btn.dataset.bound){
-    btn.dataset.bound='1';
-    btn.addEventListener('click', function(){ toggleTheme(btn); });
-  }
-
-  var mobileThemeBtn=document.getElementById('mobileThemeSwitch');
-  if(mobileThemeBtn && !mobileThemeBtn.dataset.bound){
-    mobileThemeBtn.dataset.bound='1';
-    mobileThemeBtn.addEventListener('click', function(){ toggleTheme(mobileThemeBtn); });
-  }
-
-  window.addEventListener('storage', function(e){
-    if(e.key==='theme' && e.newValue){
-      html.classList.toggle('dark', e.newValue==='dark');
-      applyThemeUI();
-    }
-  });
-
-  applyThemeUI();
-
-  function activateCurrentLinks(root){
-    if(!root) return;
-    var nowFull=location.pathname.replace(/\/+$/,'');
-    var nowFile=nowFull.split('/').pop();
-    root.querySelectorAll('a[href]').forEach(function(a){
-      try{
-        var href=a.getAttribute('href');
-        if(!href || href==='#') return;
-        var pFull=new URL(href, location.origin).pathname.replace(/\/+$/,'');
-        var pFile=pFull.split('/').pop();
-        if(pFull===nowFull || pFile===nowFile){
-          a.classList.add('active');
-          a.setAttribute('aria-current','page');
-        }
-      }catch{}
+    document.querySelectorAll('.Valora-nav-item[data-menu]').forEach(function (item) {
+      var active = item.getAttribute('data-menu') === current;
+      item.classList.toggle('is-active', active);
+      if (active) item.setAttribute('aria-current', 'page');
+      else item.removeAttribute('aria-current');
     });
-  }
-  activateCurrentLinks(document.querySelector('.app-sidebar nav'));
-  activateCurrentLinks(document.querySelector('.mobile-more-nav'));
-  activateCurrentLinks(document.querySelector('.mobile-bottom-nav'));
 
-  function pick(){
-    for(var i=0;i<arguments.length;i++){
-      var k=arguments[i];
-      try{
-        var v=localStorage.getItem(k);
-        if(!v) continue;
-        if((v.startsWith('{')&&v.endsWith('}'))||(v.startsWith('[')&&v.endsWith(']'))){
-          try{ return JSON.parse(v); }catch{}
+    if (mobileSubtitle) {
+      mobileSubtitle.textContent = MENU_LABELS[current] || 'Menu';
+    }
+  }
+
+  function openSidebar() {
+    if (!isMobile()) return;
+    if (sidebar) sidebar.classList.add('show');
+    if (overlay) overlay.classList.add('show');
+    if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'true');
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeSidebar() {
+    if (sidebar) sidebar.classList.remove('show');
+    if (overlay) overlay.classList.remove('show');
+    if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
+    document.documentElement.style.overflow = '';
+    document.body.style.overflow = '';
+  }
+
+  function closeUserDropdown() {
+    if (userDropdown) userDropdown.classList.remove('show');
+    if (userProfileBtn) {
+      userProfileBtn.classList.remove('active');
+      userProfileBtn.setAttribute('aria-expanded', 'false');
+    }
+  }
+
+  function toggleUserDropdown() {
+    if (!userDropdown || !userProfileBtn) return;
+    var willOpen = !userDropdown.classList.contains('show');
+    userDropdown.classList.toggle('show', willOpen);
+    userProfileBtn.classList.toggle('active', willOpen);
+    userProfileBtn.setAttribute('aria-expanded', String(willOpen));
+  }
+
+  function isDarkTheme() {
+    return document.documentElement.classList.contains('dark') ||
+           document.documentElement.getAttribute('data-theme') === 'dark';
+  }
+
+  function setTheme(mode) {
+    var dark = String(mode) === 'dark';
+    var root = document.documentElement;
+
+    try {
+      if (window.AppTheme && typeof window.AppTheme.set === 'function') {
+        window.AppTheme.set(dark ? 'dark' : 'light');
+      }
+    } catch (e) {}
+
+    root.classList.toggle('dark', dark);
+    root.setAttribute('data-theme', dark ? 'dark' : 'light');
+
+    try {
+      localStorage.setItem('theme', dark ? 'dark' : 'light');
+      localStorage.setItem('valora_theme', dark ? 'dark' : 'light');
+    } catch (e) {}
+
+    syncThemeLabel();
+  }
+
+  function toggleTheme() {
+    setTheme(isDarkTheme() ? 'light' : 'dark');
+  }
+
+  function syncThemeLabel() {
+    if (themeActionText) {
+      themeActionText.textContent = isDarkTheme() ? 'Usar tema claro' : 'Usar tema escuro';
+    }
+  }
+
+  function pick() {
+    for (var i = 0; i < arguments.length; i++) {
+      var key = arguments[i];
+      try {
+        var value = localStorage.getItem(key);
+        if (!value) continue;
+
+        if (
+          (value.startsWith('{') && value.endsWith('}')) ||
+          (value.startsWith('[') && value.endsWith(']'))
+        ) {
+          try { return JSON.parse(value); } catch (e) {}
         }
-        return v;
-      }catch{}
+
+        return value;
+      } catch (e) {}
     }
     return '';
   }
 
-  function jwtInfo(){
-    try{
-      var tok=pick('access_token','token');
-      if(!tok||!tok.includes('.')) return {};
-      return JSON.parse(atob(tok.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))) || {};
-    }catch{
+  function jwtInfo() {
+    try {
+      var tok = pick('access_token', 'token');
+      if (!tok || String(tok).split('.').length !== 3) return {};
+      return JSON.parse(atob(tok.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) || {};
+    } catch (e) {
       return {};
     }
   }
 
-  function info(){
-    var nome=pick('nome','name','displayName','usuario_nome','user_name');
-    if(nome && typeof nome==='object') nome=nome.nome||nome.name||nome.displayName||'';
-    var dept=pick('departamento','setor','department','dept','usuario_departamento','user_department');
-    if(dept && typeof dept==='object') dept=dept.departamento||dept.setor||dept.department||dept.dept||'';
-    var email=pick('email','userEmail','loginEmail','usuario_email','user_email');
-    var obj=pick('usuario','user','me','auth_user','profile','auth');
-    if(obj && typeof obj==='object'){
-      email=email||obj.email||(obj.user&&obj.user.email)||'';
-      nome =nome ||obj.nome ||obj.name ||(obj.user&&(obj.user.nome||obj.user.name))||'';
-      dept =dept ||obj.departamento||obj.setor||(obj.user&&(obj.user.departamento||obj.user.setor))||'';
+  function getUserInfo() {
+    var nome = pick('nome', 'name', 'displayName', 'usuario_nome', 'user_name');
+    if (nome && typeof nome === 'object') nome = nome.nome || nome.name || nome.displayName || '';
+
+    var dept = pick('departamento', 'setor', 'department', 'dept', 'usuario_departamento', 'user_department');
+    if (dept && typeof dept === 'object') dept = dept.departamento || dept.setor || dept.department || dept.dept || '';
+
+    var email = pick('email', 'userEmail', 'loginEmail', 'usuario_email', 'user_email');
+
+    var obj = pick('usuario', 'user', 'me', 'auth_user', 'profile', 'auth');
+    if (obj && typeof obj === 'object') {
+      email = email || obj.email || (obj.user && obj.user.email) || '';
+      nome  = nome  || obj.nome || obj.name || (obj.user && (obj.user.nome || obj.user.name)) || '';
+      dept  = dept  || obj.departamento || obj.setor || (obj.user && (obj.user.departamento || obj.user.setor)) || '';
     }
-    var jwt=jwtInfo();
-    email=email||jwt.email||jwt.preferred_username||jwt.sub||'';
-    nome =nome ||jwt.name ||jwt.given_name||jwt.nickname||'';
-    return {nome:(nome||'').trim(), dept:(dept||'').trim(), email:(email||'').trim()};
+
+    var jwt = jwtInfo();
+    email = email || jwt.email || jwt.preferred_username || jwt.sub || '';
+    nome  = nome  || jwt.name || jwt.given_name || jwt.nickname || '';
+
+    return {
+      nome: String(nome || '').trim(),
+      dept: String(dept || '').trim(),
+      email: String(email || '').trim()
+    };
   }
 
-  function getAvatar(){
-    var a=localStorage.getItem('usuario_avatar')||localStorage.getItem('avatar_url')||'';
-    if(!a){
-      var jwt=jwtInfo();
-      a=(jwt&&jwt.picture)||'';
-    }
-    return a||'';
+  function normalizeUrlMaybeRelative(value) {
+    var s = String(value || '').trim();
+    if (!s) return '';
+    if (s.indexOf('data:') === 0) return s;
+    if (/^https?:\/\//i.test(s)) return s;
+    if (s.charAt(0) === '/') return s;
+    return '/' + s.replace(/^\/+/, '');
   }
 
-  function renderUser(){
-    var chip=document.getElementById('userChip');
-    var label=document.getElementById('userEmailLabel');
-    var img=document.getElementById('userAvatar');
-    var icn=document.getElementById('userIcon');
+  function base64ToDataUrl(base64, mime) {
+    var raw = String(base64 || '').trim();
+    if (!raw) return '';
+    if (raw.indexOf('data:') === 0) return raw;
+    return 'data:' + (mime || 'image/png') + ';base64,' + raw;
+  }
 
-    var mobName=document.getElementById('mobileProfileName');
-    var mobSub=document.getElementById('mobileProfileSub');
-    var mobImg=document.getElementById('mobileProfileAvatar');
-    var mobIcn=document.getElementById('mobileProfileIcon');
+  function getAvatar() {
+    try {
+      var avatar =
+        localStorage.getItem('usuario_avatar') ||
+        localStorage.getItem('avatar_url') ||
+        '';
 
-    var u=info();
-    var txt=[u.nome,u.dept].filter(Boolean).join(' · ') || u.email || 'Usuário';
+      if (!avatar) {
+        var jwt = jwtInfo();
+        avatar = (jwt && jwt.picture) || '';
+      }
 
-    if(chip && label){
-      label.textContent=txt;
-      chip.title=u.email || u.nome || '';
+      return avatar || '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function getInitials(name) {
+    var safe = String(name || '').trim();
+    if (!safe) return 'U';
+    var parts = safe.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+    return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+  }
+
+  function renderUser() {
+    var user = getUserInfo();
+    var avatar = getAvatar();
+
+    if (userNameEl) userNameEl.textContent = user.nome || 'Usuário';
+    if (userEmailEl) userEmailEl.textContent = user.email || user.dept || 'Sem e-mail';
+
+    if (userInitialsEl) {
+      userInitialsEl.textContent = getInitials(user.nome || user.email || 'Usuário');
+      userInitialsEl.style.display = '';
     }
 
-    if(mobName){
-      mobName.textContent=u.nome || 'Usuário';
-    }
-    if(mobSub){
-      mobSub.textContent=u.email || u.dept || 'Abrir perfil';
-    }
+    if (userAvatarImg) {
+      if (avatar) {
+        var v = '';
+        try { v = localStorage.getItem('usuario_avatar_v') || ''; } catch (e) {}
 
-    var av=getAvatar();
+        var src = avatar;
+        if (String(avatar).indexOf('data:') !== 0) {
+          src = avatar + (String(avatar).includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(v || Date.now());
+        }
 
-    function hideDesktopAvatar(){
-      if(img){ img.removeAttribute('src'); img.style.display='none'; }
-      if(icn) icn.style.display='';
-    }
-    function hideMobileAvatar(){
-      if(mobImg){ mobImg.removeAttribute('src'); mobImg.style.display='none'; }
-      if(mobIcn) mobIcn.style.display='';
-    }
-
-    if(av){
-      var v=(function(){ try{ return localStorage.getItem('usuario_avatar_v')||''; }catch{ return ''; }})();
-      var src=av;
-      if(v) src=av + (String(av).includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(v);
-
-      if(img){
-        img.onerror=function(){
-          try{
-            localStorage.removeItem('usuario_avatar');
-            localStorage.removeItem('avatar_url');
-          }catch{}
-          hideDesktopAvatar();
-          hideMobileAvatar();
+        userAvatarImg.onerror = function () {
+          userAvatarImg.removeAttribute('src');
+          userAvatarImg.style.display = 'none';
+          if (userInitialsEl) userInitialsEl.style.display = '';
         };
-        img.src=src;
-        img.style.display='block';
-      }
-      if(icn) icn.style.display='none';
 
-      if(mobImg){
-        mobImg.onerror=function(){ hideMobileAvatar(); };
-        mobImg.src=src;
-        mobImg.style.display='block';
+        userAvatarImg.src = src;
+        userAvatarImg.style.display = 'block';
+        if (userInitialsEl) userInitialsEl.style.display = 'none';
+      } else {
+        userAvatarImg.removeAttribute('src');
+        userAvatarImg.style.display = 'none';
+        if (userInitialsEl) userInitialsEl.style.display = '';
       }
-      if(mobIcn) mobIcn.style.display='none';
-    }else{
-      hideDesktopAvatar();
-      hideMobileAvatar();
     }
   }
 
-  renderUser();
-  window.addEventListener('storage', function(ev){
-    if([
-      'usuario_nome','nome','name','displayName',
-      'usuario_departamento','departamento','setor','department','dept',
-      'usuario_email','email','userEmail','loginEmail',
-      'usuario_avatar','avatar_url',
-      'usuario','user','me','auth_user','profile','auth',
-      'access_token','token'
-    ].includes(ev.key)){
-      renderUser();
-    }
-  });
-
-  (function(){
-    var chip=document.getElementById('userChip');
-    var mobileCard=document.getElementById('mobileProfileCard');
-    var modal=document.getElementById('pfModal');
-    var closeBtn=document.getElementById('pfClose');
-    var cancelBtn=document.getElementById('pfCancel');
-    var saveBtn=document.getElementById('pfSave');
-    var fileInput=document.getElementById('pfFile');
-    var preview=document.getElementById('pfPreview');
-    var nomeInput=document.getElementById('pfNome');
-    var emailInput=document.getElementById('pfEmail');
-    var deptInput=document.getElementById('pfDept');
-    var msg=document.getElementById('pfMsg');
-
-    if(!modal) return;
-
-    function onEsc(e){ if(e.key==='Escape' && modal.classList.contains('is-open')) closeModal(); }
-    function outsideClose(e){ if(e.target===modal) closeModal(); }
-
-    function openModal(){
-      var nome=localStorage.getItem('nome')||'';
-      var email=localStorage.getItem('email')||'';
-      var dept=localStorage.getItem('departamento')||localStorage.getItem('usuario_departamento')||'';
-      nomeInput.value=nome;
-      emailInput.value=email;
-      deptInput.value=dept;
-      var av=(localStorage.getItem('usuario_avatar')||localStorage.getItem('avatar_url')||'');
-      var v=localStorage.getItem('usuario_avatar_v')||'';
-      if(av){
-        var bust=av + (String(av).includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(v || Date.now());
-        preview.src=bust;
-      }else{
-        preview.removeAttribute('src');
-      }
-      msg.textContent='';
-      modal.classList.add('is-open');
-      modal.setAttribute('aria-hidden','false');
-      nomeInput.focus();
-
-      document.addEventListener('keydown', onEsc);
-      modal.addEventListener('click', outsideClose);
-    }
-
-    function closeModal(){
-      modal.classList.remove('is-open');
-      modal.setAttribute('aria-hidden','true');
-      document.removeEventListener('keydown', onEsc);
-      modal.removeEventListener('click', outsideClose);
-    }
-
-    function bindOpen(el){
-      if(!el) return;
-      el.addEventListener('click', openModal);
-      el.addEventListener('keydown', function(e){
-        if(e.key==='Enter' || e.key===' '){
-          e.preventDefault();
-          openModal();
+  async function hydrateUserFromApi() {
+    try {
+      var res = await fetch('/api/perfil', {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          'Accept': 'application/json'
         }
       });
-    }
 
-    bindOpen(chip);
-    bindOpen(mobileCard);
+      if (!res.ok) return;
 
-    if(closeBtn) closeBtn.addEventListener('click', closeModal);
-    if(cancelBtn) cancelBtn.addEventListener('click', function(e){ e.preventDefault(); closeModal(); });
+      var data = await res.json();
+      if (!data || typeof data !== 'object') return;
 
-    if(fileInput){
-      fileInput.addEventListener('change', function(){
-        var f=fileInput.files&&fileInput.files[0];
-        if(!f) return;
-        var fr=new FileReader();
-        fr.onload=function(){ preview.src=fr.result; };
-        fr.readAsDataURL(f);
-      });
-    }
+      var nome =
+        data.nome ||
+        data.name ||
+        data.usuario_nome ||
+        '';
 
-    async function saveProfile(){
-      msg.textContent='Salvando...';
-      if(saveBtn) saveBtn.disabled=true;
+      var email =
+        data.email ||
+        data.usuario_email ||
+        '';
 
-    function getCookie(name){
-      try{
-        var safeName = String(name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        var m = document.cookie.match(new RegExp('(?:^|; )' + safeName + '=([^;]*)'));
-        return m ? decodeURIComponent(m[1]) : '';
-      }catch{
-        return '';
+      var dept =
+        data.departamento ||
+        data.setor ||
+        data.department ||
+        data.dept ||
+        data.cargo ||
+        '';
+
+      var avatar =
+        data.avatar_url ||
+        data.foto_url ||
+        data.avatar ||
+        data.foto ||
+        data.picture ||
+        '';
+
+      var avatarBase64 =
+        data.avatar_base64 ||
+        data.foto_base64 ||
+        data.avatar_data ||
+        '';
+
+      var avatarMime =
+        data.avatar_mime ||
+        data.foto_mime ||
+        'image/png';
+
+      if (!avatar && avatarBase64) {
+        avatar = base64ToDataUrl(avatarBase64, avatarMime);
       }
-    }
 
-      async function uploadAvatarIfAny(){
-        var f=fileInput && fileInput.files && fileInput.files[0];
-        if(!f) return '';
+      if (!avatar) {
+        avatar = '/api/perfil/avatar';
+      }
 
-        msg.textContent='Enviando foto...';
+      avatar = normalizeUrlMaybeRelative(avatar);
 
-        var headers={};
-        var csrf=getCookie('csrf_token') || getCookie('csrf') || getCookie('XSRF-TOKEN');
-        if(csrf) headers['X-CSRF-Token']=csrf;
+      try {
+        if (nome) localStorage.setItem('usuario_nome', String(nome));
+        if (email) localStorage.setItem('usuario_email', String(email));
+        if (dept) localStorage.setItem('usuario_departamento', String(dept));
 
-        try{
-          var tok=(localStorage.getItem('access_token')||localStorage.getItem('token')||'').trim();
-          if(tok && tok.split('.').length===3) headers['Authorization']='Bearer ' + tok;
-        }catch{}
-
-        var endpoints=[
-          '/api/usuarios/me/avatar',
-          '/api/usuarios/avatar',
-          '/api/usuarios/me/upload-avatar',
-          '/api/usuarios/upload-avatar'
-        ];
-
-        var lastErr=null;
-
-        for(var i=0;i<endpoints.length;i++){
-          var url=endpoints[i];
-          var fd=new FormData();
-          fd.append('file', f, f.name || 'avatar.jpg');
-
-          try{
-            var res=await fetch(url,{ method:'POST', body:fd, credentials:'include', headers:headers });
-            if(res.status===404) continue;
-
-            var data=null;
-            try{ data=await res.json(); }catch{}
-
-            if(!res.ok){
-              var detail=(data && (data.detail || data.message)) ? (data.detail || data.message) : '';
-              throw new Error(detail || ('HTTP ' + res.status));
-            }
-
-            var avatarUrl=(data && (data.avatar_url || data.avatarUrl || data.url || data.path || data.avatar)) || '';
-            if(!avatarUrl) return '';
-
-            var v=Date.now();
-            try{
-              localStorage.setItem('usuario_avatar', avatarUrl);
-              localStorage.setItem('avatar_url', avatarUrl);
-              localStorage.setItem('usuario_avatar_v', String(v));
-            }catch{}
-
-            try{ fileInput.value=''; }catch{}
-            renderUser();
-            return avatarUrl;
-          }catch(e){
-            lastErr=e;
-          }
+        if (avatar) {
+          localStorage.setItem('usuario_avatar', avatar);
+          localStorage.setItem('avatar_url', avatar);
+          localStorage.setItem('usuario_avatar_v', String(Date.now()));
         }
+      } catch (e) {}
+    } catch (e) {}
+  }
 
-        throw lastErr || new Error('Falha ao enviar foto (endpoint não encontrado).');
+  function goToUrl(url) {
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.location.href = url;
+      } else {
+        window.location.href = url;
       }
-
-      try{
-        var nome=(nomeInput.value||'').trim();
-        var dept=(deptInput.value||'').trim();
-
-        try{
-          if(nome) localStorage.setItem('nome', nome); else localStorage.removeItem('nome');
-          if(dept) localStorage.setItem('departamento', dept); else localStorage.removeItem('departamento');
-        }catch{}
-
-        await uploadAvatarIfAny();
-        renderUser();
-
-        msg.textContent='Salvo!';
-        setTimeout(closeModal,650);
-      }catch(err){
-        var m=(err && err.message) ? err.message : String(err||'Erro ao salvar');
-        msg.textContent='Erro: ' + m;
-      }finally{
-        if(saveBtn) saveBtn.disabled=false;
-      }
+    } catch (e) {
+      window.location.href = url;
     }
+  }
 
-    if(saveBtn) saveBtn.addEventListener('click', function(e){
-      e.preventDefault();
-      saveProfile();
-    });
-  })();
+  async function doLogout() {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch (e) {}
 
-  async function doLogout(){
-    try{
-      await fetch('/api/auth/logout', { method:'POST', credentials:'include' });
-    }catch{}
+    try {
+      var past = 'Thu, 01 Jan 1970 00:00:00 GMT';
+      var names = (document.cookie || '').split(/;\s*/).filter(Boolean).map(function (c) {
+        return c.split('=')[0];
+      });
 
-    (function nukeCookies(){
-      const past='Thu, 01 Jan 1970 00:00:00 GMT';
-      const names=(document.cookie||'').split(/;\s*/).filter(Boolean).map(c=>c.split('=')[0]);
-      for(const name of names){
-        document.cookie = `${name}=; Expires=${past}; Path=/`;
-      }
-    })();
+      names.forEach(function (name) {
+        document.cookie = name + '=; Expires=' + past + '; Path=/';
+      });
+    } catch (e) {}
 
-    try{ localStorage.clear(); sessionStorage.clear(); }catch{}
-    if('caches' in window){
-      try{
-        const ks=await caches.keys();
-        await Promise.all(ks.map(k=>caches.delete(k)));
-      }catch{}
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch (e) {}
+
+    if ('caches' in window) {
+      try {
+        var keys = await caches.keys();
+        await Promise.all(keys.map(function (k) { return caches.delete(k); }));
+      } catch (e) {}
     }
 
     window.location.replace('/');
   }
 
-  (function(){
-    var out=document.getElementById('sidebarLogout');
-    var mobOut=document.getElementById('mobileSidebarLogout');
+  function getNotifApi() {
+    return window.PlanNotifications || null;
+  }
 
-    if(out && !out.dataset.bound){
-      out.dataset.bound='1';
-      out.addEventListener('click', function(ev){
-        ev.preventDefault();
-        doLogout();
-      });
+  function getNotifUnread() {
+    var api = getNotifApi();
+    if (api && typeof api.getUnreadCount === 'function') {
+      return Number(api.getUnreadCount() || 0);
     }
 
-    if(mobOut && !mobOut.dataset.bound){
-      mobOut.dataset.bound='1';
-      mobOut.addEventListener('click', function(ev){
-        ev.preventDefault();
-        doLogout();
-      });
+    try {
+      var empresaId = (document.cookie.match(/(?:^|;\s*)(?:empresa_id|EMPRESA_ID)=([^;]+)/) || [])[1] || '0';
+      var raw = localStorage.getItem('plan_notif:' + decodeURIComponent(empresaId) + ':unread');
+      return Math.max(0, Number(JSON.parse(raw || '0') || 0));
+    } catch (e) {
+      return 0;
     }
-  })();
+  }
 
-  (function(){
-    var btn=document.getElementById('mobileMoreBtn');
-    var sheet=document.getElementById('mobileMoreSheet');
-    var backdrop=document.getElementById('mobileMoreBackdrop');
-    if(!btn || !sheet || !backdrop) return;
+  function syncNotifBadge() {
+    if (!notifBadge) return;
+    var unread = getNotifUnread();
 
-    function isMobile(){
-      return window.matchMedia('(max-width: 920px)').matches;
+    if (unread > 0) {
+      notifBadge.style.display = 'inline-flex';
+      notifBadge.textContent = unread > 99 ? '99+' : String(unread);
+    } else {
+      notifBadge.style.display = 'none';
+      notifBadge.textContent = '0';
     }
+  }
 
-    function openSheet(){
-      if(!isMobile()) return;
-      sheet.classList.add('is-open');
-      backdrop.classList.add('is-open');
-      sheet.setAttribute('aria-hidden','false');
-      btn.classList.add('is-active');
-      document.documentElement.style.overflow='hidden';
-      document.body.style.overflow='hidden';
-    }
+  if (toggleBtn) toggleBtn.addEventListener('click', openSidebar);
+  if (closeBtn) closeBtn.addEventListener('click', closeSidebar);
+  if (overlay) overlay.addEventListener('click', closeSidebar);
 
-    function closeSheet(){
-      sheet.classList.remove('is-open');
-      backdrop.classList.remove('is-open');
-      sheet.setAttribute('aria-hidden','true');
-      btn.classList.remove('is-active');
-      document.documentElement.style.overflow='';
-      document.body.style.overflow='';
-    }
+  document.querySelectorAll('.Valora-nav-item[href]').forEach(function (link) {
+    link.addEventListener('click', function () {
+      if (isMobile()) closeSidebar();
+      closeUserDropdown();
+    });
+  });
 
-    btn.addEventListener('click', function(){
-      if(sheet.classList.contains('is-open')) closeSheet();
-      else openSheet();
+  if (userProfileBtn) {
+    userProfileBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      toggleUserDropdown();
     });
 
-    backdrop.addEventListener('click', closeSheet);
-
-    sheet.querySelectorAll('a[href]').forEach(function(a){
-      a.addEventListener('click', function(){
-        var href=a.getAttribute('href') || '';
-        if(href !== '#') closeSheet();
-      });
+    userProfileBtn.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleUserDropdown();
+      }
     });
+  }
 
-    document.addEventListener('keydown', function(e){
-      if(e.key==='Escape' && sheet.classList.contains('is-open')) closeSheet();
+  if (openProfileBtn) {
+    openProfileBtn.addEventListener('click', function () {
+      closeUserDropdown();
+      goToUrl('/perfil.html');
     });
+  }
 
-    window.addEventListener('resize', function(){
-      if(!isMobile()) closeSheet();
+  if (myPlanBtn) {
+    myPlanBtn.addEventListener('click', function () {
+      closeUserDropdown();
+      goToUrl('/meu-plano');
     });
-  })();
+  }
+
+  if (configBtn) {
+    configBtn.addEventListener('click', function () {
+      closeUserDropdown();
+      goToUrl('/configuracoes.html');
+    });
+  }
+
+  if (toggleThemeBtn) {
+    toggleThemeBtn.addEventListener('click', function () {
+      toggleTheme();
+      closeUserDropdown();
+    });
+  }
+
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', function () {
+      closeUserDropdown();
+      doLogout();
+    });
+  }
+
+  document.addEventListener('click', function (e) {
+    if (!userDropdown || !userProfileBtn) return;
+    if (!userDropdown.contains(e.target) && !userProfileBtn.contains(e.target)) {
+      closeUserDropdown();
+    }
+  });
+
+  document.addEventListener('plan-notifications:updated', function () {
+    syncNotifBadge();
+  });
+
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      closeUserDropdown();
+      closeSidebar();
+    }
+  });
+
+  window.addEventListener('resize', function () {
+    if (!isMobile()) closeSidebar();
+    syncActiveMenu();
+  });
+
+  window.addEventListener('storage', function (e) {
+    if ([
+      'usuario_nome', 'nome', 'name', 'displayName',
+      'usuario_departamento', 'departamento', 'setor', 'department', 'dept',
+      'usuario_email', 'email', 'userEmail', 'loginEmail',
+      'usuario_avatar', 'avatar_url', 'usuario_avatar_v',
+      'usuario', 'user', 'me', 'auth_user', 'profile', 'auth',
+      'access_token', 'token', 'theme', 'valora_theme'
+    ].indexOf(e.key) >= 0) {
+      renderUser();
+      syncThemeLabel();
+      syncActiveMenu();
+    }
+
+    if (String(e.key || '').indexOf('plan_notif:') === 0) {
+      syncNotifBadge();
+    }
+  });
+
+  await hydrateUserFromApi();
+  renderUser();
+  syncThemeLabel();
+  syncActiveMenu();
+  syncNotifBadge();
+
+  setTimeout(syncNotifBadge, 400);
+  setTimeout(syncNotifBadge, 1200);
 })();
 </script>

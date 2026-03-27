@@ -14,8 +14,8 @@
       var x = new URL(u, location.origin);
       x.searchParams.set('_v', ver);
       return x.toString();
-    } catch {
-      return u + (u.includes('?') ? '&' : '?') + '_v=' + ver;
+    } catch (e) {
+      return u + (u.indexOf('?') >= 0 ? '&' : '?') + '_v=' + ver;
     }
   }
 
@@ -51,9 +51,56 @@
   function markShellReady() {
     if (__SHELL_DONE__) return;
     __SHELL_DONE__ = true;
-    try { document.documentElement.classList.remove('prepaint'); } catch {}
+    try { document.documentElement.classList.remove('prepaint'); } catch (e) {}
     playEnterAnimation();
     document.dispatchEvent(new Event('shell:ready'));
+  }
+
+  // =========================================================
+  // Helpers gerais
+  // =========================================================
+  function isPublicLikePage() {
+    var p = (location.pathname || '').toLowerCase();
+    return (
+      p === '/' ||
+      p === '/inicio' || p === '/inicio.html' ||
+      p === '/login' || p === '/login.html' ||
+      p === '/register' || p === '/register.html' ||
+      p === '/criar-empresa' || p === '/criar-empresa.html' ||
+      p === '/esqueci_senha' || p === '/esqueci_senha.html' ||
+      p === '/planos' || p === '/planos.html' ||
+      p === '/admin-planos' || p === '/admin-planos.html'
+    );
+  }
+
+  function getCookie(name) {
+    try {
+      var prefix = name + '=';
+      var parts = document.cookie ? document.cookie.split('; ') : [];
+      for (var i = 0; i < parts.length; i++) {
+        if (parts[i].indexOf(prefix) === 0) {
+          return decodeURIComponent(parts[i].slice(prefix.length));
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function escapeHtml(v) {
+    return String(v == null ? '' : v)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function pluralDia(n) {
+    return Number(n) === 1 ? 'dia' : 'dias';
+  }
+
+  function nowIso() {
+    try { return new Date().toISOString(); } catch (e) { return String(Date.now()); }
   }
 
   // =========================================================
@@ -73,31 +120,39 @@
           document.documentElement.setAttribute('data-head-ready', '1');
           return;
         }
-      } catch {}
+      } catch (e) {}
 
       try {
-        var res  = await fetch(bust('/frontend/partials/head-base.html'), { cache:'no-cache', credentials:'include' });
+        var res = await fetch(bust('/frontend/partials/head-base.html'), {
+          cache: 'no-cache',
+          credentials: 'include'
+        });
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        var html = await res.text();
 
+        var html = await res.text();
         var wrap = document.createElement('div');
         wrap.innerHTML = html;
 
-        Array.from(wrap.querySelectorAll('style')).forEach(function(st){
+        Array.from(wrap.querySelectorAll('style')).forEach(function(st) {
           var s = document.createElement('style');
           s.textContent = st.textContent || '';
           document.head.appendChild(s);
         });
 
-        Array.from(wrap.querySelectorAll('link[rel="stylesheet"], link[rel="preload"]')).forEach(function(l){
+        Array.from(wrap.querySelectorAll('link[rel="stylesheet"], link[rel="preload"]')).forEach(function(l) {
           var href = l.getAttribute('href');
           if (!href) return;
-          var exists = Array.from(document.head.querySelectorAll('link[rel="stylesheet"], link[rel="preload"]'))
-            .some(function(e){ return e.getAttribute('href') === href; });
+
+          var exists = Array.from(
+            document.head.querySelectorAll('link[rel="stylesheet"], link[rel="preload"]')
+          ).some(function(e) {
+            return e.getAttribute('href') === href;
+          });
+
           if (!exists) document.head.appendChild(l.cloneNode(true));
         });
 
-        Array.from(wrap.querySelectorAll('script')).forEach(function(o){
+        Array.from(wrap.querySelectorAll('script')).forEach(function(o) {
           var s = document.createElement('script');
           if (o.type) s.type = o.type;
           s.textContent = o.textContent || '';
@@ -125,19 +180,34 @@
     if (saved) {
       document.documentElement.classList.toggle('dark', saved === 'dark');
     } else {
-      var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      var prefersDark = window.matchMedia &&
+        window.matchMedia('(prefers-color-scheme: dark)').matches;
       document.documentElement.classList.toggle('dark', prefersDark);
     }
+
     window.AppTheme = {
-      set: function(mode){
-        try { localStorage.setItem('theme', mode); } catch {}
+      set: function(mode) {
+        try { localStorage.setItem('theme', mode); } catch (e) {}
         document.documentElement.classList.toggle('dark', mode === 'dark');
       },
-      current: function(){
+      current: function() {
         return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
       }
     };
-  } catch {}
+  } catch (e) {}
+
+  // =========================================================
+  // Exposição opcional de helpers globais
+  // =========================================================
+  window.AppBaseUtils = window.AppBaseUtils || {
+    bust: bust,
+    isMobileLayout: isMobileLayout,
+    isPublicLikePage: isPublicLikePage,
+    getCookie: getCookie,
+    escapeHtml: escapeHtml,
+    pluralDia: pluralDia,
+    nowIso: nowIso
+  };
 
   // =========================================================
   // 2) Loader GLOBAL (injeta /frontend/partials/loading.html)
@@ -149,19 +219,25 @@
     if (__LOADER_BOOTED__) return LOADER_READY;
     __LOADER_BOOTED__ = true;
 
-    LOADER_READY = (async function(){
+    LOADER_READY = (async function() {
       var existing = document.getElementById('page-loading') || document.getElementById('app-loading');
+
       if (!existing) {
         try {
-          var res  = await fetch('/frontend/partials/loading.html', { cache:'no-cache', credentials:'include' });
+          var res = await fetch('/frontend/partials/loading.html', {
+            cache: 'no-cache',
+            credentials: 'include'
+          });
           if (!res.ok) throw new Error('HTTP ' + res.status);
-          var html = await res.text();
 
+          var html = await res.text();
           var wrap = document.createElement('div');
           wrap.innerHTML = html;
 
-          document.getElementById('page-loading')?.remove();
-          document.getElementById('app-loading')?.remove();
+          var oldPageLoading = document.getElementById('page-loading');
+          var oldAppLoading = document.getElementById('app-loading');
+          if (oldPageLoading) oldPageLoading.remove();
+          if (oldAppLoading) oldAppLoading.remove();
 
           var overlay = wrap.querySelector('#page-loading, #app-loading');
           if (overlay) {
@@ -170,7 +246,7 @@
             if (!overlay.style.zIndex) overlay.style.zIndex = '9999';
           }
 
-          Array.from(wrap.querySelectorAll('style')).forEach(function(st){
+          Array.from(wrap.querySelectorAll('style')).forEach(function(st) {
             var s = document.createElement('style');
             s.textContent = st.textContent || '';
             document.head.appendChild(s);
@@ -180,33 +256,46 @@
           for (var i = 0; i < scripts.length; i++) {
             var o = scripts[i];
             var s = document.createElement('script');
+
             if (o.type) s.type = o.type;
-            ['crossorigin','referrerpolicy','integrity','nomodule'].forEach(function(a){
+
+            ['crossorigin', 'referrerpolicy', 'integrity', 'nomodule'].forEach(function(a) {
               var v = o.getAttribute && o.getAttribute(a);
               if (v) s.setAttribute(a, v);
             });
+
             if (o.src) {
               s.src = o.src;
               document.body.appendChild(s);
-              await new Promise(function(r){ s.onload = s.onerror = r; });
+              await new Promise(function(r) { s.onload = s.onerror = r; });
             } else {
               s.textContent = o.textContent || '';
               document.body.appendChild(s);
             }
           }
+
           wrap.remove();
         } catch (e) {
           console.warn('[app-base] Falha ao injetar loading.html:', e);
         }
       }
 
-      window.wait = function (txt) {
-        if (window.PageLoading?.show) return PageLoading.show(txt || 'Carregando…');
-        if (window.Loading?.show) return Loading.show(txt || 'Carregando…');
+      window.wait = function(txt) {
+        if (window.PageLoading && typeof window.PageLoading.show === 'function') {
+          return window.PageLoading.show(txt || 'Carregando…');
+        }
+        if (window.Loading && typeof window.Loading.show === 'function') {
+          return window.Loading.show(txt || 'Carregando…');
+        }
       };
-      window.ready = function () {
-        if (window.PageLoading?.hide) return PageLoading.hide();
-        if (window.Loading?.hide) return Loading.hide();
+
+      window.ready = function() {
+        if (window.PageLoading && typeof window.PageLoading.hide === 'function') {
+          return window.PageLoading.hide();
+        }
+        if (window.Loading && typeof window.Loading.hide === 'function') {
+          return window.Loading.hide();
+        }
       };
 
       document.documentElement.setAttribute('data-loader-ready', '1');
@@ -216,7 +305,7 @@
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', ensureGlobalLoader, { once:true });
+    document.addEventListener('DOMContentLoaded', ensureGlobalLoader, { once: true });
   } else {
     ensureGlobalLoader();
   }
@@ -231,19 +320,24 @@
     if (!host || host.dataset.loaded) return;
     host.dataset.loaded = '1';
 
-    SIDEBAR_READY = (async function(){
+    SIDEBAR_READY = (async function() {
       var src = host.getAttribute('data-src') || '/frontend/partials/sidebar.html';
 
       try {
-        var res  = await fetch(bust(src), { cache:'no-cache', credentials:'include' });
+        var res = await fetch(bust(src), {
+          cache: 'no-cache',
+          credentials: 'include'
+        });
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        var html = await res.text();
 
+        var html = await res.text();
         var wrap = document.createElement('div');
         wrap.innerHTML = html;
 
         var scripts = Array.from(wrap.querySelectorAll('script'));
-        scripts.forEach(function(sc){ sc.parentNode && sc.parentNode.removeChild(sc); });
+        scripts.forEach(function(sc) {
+          if (sc.parentNode) sc.parentNode.removeChild(sc);
+        });
 
         while (wrap.firstChild) {
           host.parentNode.insertBefore(wrap.firstChild, host.nextSibling);
@@ -255,36 +349,46 @@
           if (aside && !aside.querySelector('nav a[aria-current="page"]')) {
             var nowFull = location.pathname.replace(/\/+$/, '');
             var nowFile = nowFull.split('/').pop();
-            aside.querySelectorAll('nav a[href]').forEach(function(a){
+
+            aside.querySelectorAll('nav a[href]').forEach(function(a) {
               try {
                 var pFull = new URL(a.getAttribute('href'), location.origin).pathname.replace(/\/+$/, '');
                 var pFile = pFull.split('/').pop();
-                var eq = (pFull === nowFull) || (pFile === nowFile) ||
-                         (pFull + '.html' === nowFull) || (pFull === nowFull + '.html');
+
+                var eq =
+                  (pFull === nowFull) ||
+                  (pFile === nowFile) ||
+                  (pFull + '.html' === nowFull) ||
+                  (pFull === nowFull + '.html');
+
                 if (eq) {
                   a.classList.add('active');
-                  a.setAttribute('aria-current','page');
+                  a.setAttribute('aria-current', 'page');
                 }
-              } catch {}
+              } catch (e) {}
             });
           }
         } catch (e) {
           console.warn('active-link mark skipped:', e);
         }
 
-        (function runSeq(i){
+        (function runSeq(i) {
           if (i >= scripts.length) return;
+
           var old = scripts[i];
           var s = document.createElement('script');
+
           if (old.type) s.type = old.type;
           if (old.noModule) s.noModule = true;
-          ['crossorigin','referrerpolicy','integrity'].forEach(function(a){
+
+          ['crossorigin', 'referrerpolicy', 'integrity'].forEach(function(a) {
             var v = old.getAttribute && old.getAttribute(a);
             if (v) s.setAttribute(a, v);
           });
+
           if (old.src) {
             s.src = old.src;
-            s.onload = s.onerror = function(){ runSeq(i + 1); };
+            s.onload = s.onerror = function() { runSeq(i + 1); };
             document.body.appendChild(s);
           } else {
             s.textContent = old.textContent || '';
@@ -303,8 +407,9 @@
 
   function bootSidebar() {
     var p = ensureSidebar();
+
     if (p && typeof p.then === 'function') {
-      p.finally(function(){
+      p.finally(function() {
         Promise.allSettled([HEAD_READY, LOADER_READY]).finally(markShellReady);
       });
     } else {
@@ -313,7 +418,7 @@
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bootSidebar, { once:true });
+    document.addEventListener('DOMContentLoaded', bootSidebar, { once: true });
   } else {
     bootSidebar();
   }
@@ -321,24 +426,26 @@
   // =========================================================
   // 4) Gancho de navegação — mostra overlay ANTES da troca
   // =========================================================
-  (function navOverlayHook(){
-    function shouldIntercept(a){
+  (function navOverlayHook() {
+    function shouldIntercept(a) {
       if (!a) return false;
-      try{
+
+      try {
         var href = a.getAttribute('href') || '';
         if (!href) return false;
-        if (href[0] === '#') return false;
+        if (href.charAt(0) === '#') return false;
         if (a.target && a.target !== '_self') return false;
 
         var u = new URL(href, location.origin);
         if (u.origin !== location.origin) return false;
+
         return true;
-      }catch{
+      } catch (e) {
         return false;
       }
     }
 
-    document.addEventListener('click', function(e){
+    document.addEventListener('click', function(e) {
       var a = e.target.closest && e.target.closest('a[href]');
       if (!a) return;
 
@@ -347,19 +454,76 @@
       if (!inMenu && !wantsWait) return;
       if (!shouldIntercept(a)) return;
 
-      try { window.PageLoading?.show?.('Carregando…', { scope:'body' }); } catch {}
-    }, { capture:true });
+      try {
+        if (window.PageLoading && typeof window.PageLoading.show === 'function') {
+          window.PageLoading.show('Carregando…', { scope: 'body' });
+        }
+      } catch (err) {}
+    }, { capture: true });
   })();
 
   // =========================================================
-  // 5) Fallback duro: se algo travar, libera após 2.5s
+  // 5) Boot do módulo de notificações top-right
+  // =========================================================
+  (function bootNotifModule() {
+    if (isPublicLikePage()) return;
+
+    function loadScriptOnce(src, id) {
+      return new Promise(function(resolve, reject) {
+        var existing = document.getElementById(id);
+
+        if (existing) {
+          if (existing.dataset.loaded === '1') {
+            resolve();
+            return;
+          }
+
+          existing.addEventListener('load', function() { resolve(); }, { once: true });
+          existing.addEventListener('error', function() { reject(new Error('Falha ao carregar ' + src)); }, { once: true });
+          return;
+        }
+
+        var s = document.createElement('script');
+        s.id = id;
+        s.src = bust(src);
+        s.defer = true;
+        s.setAttribute('data-notif-module', '1');
+
+        s.onload = function() {
+          s.dataset.loaded = '1';
+          resolve();
+        };
+
+        s.onerror = function() {
+          reject(new Error('Falha ao carregar ' + src));
+        };
+
+        document.head.appendChild(s);
+      });
+    }
+
+    function startNotif() {
+      loadScriptOnce('/frontend/js/notif.js', 'plan-notif-script').catch(function(err) {
+        console.warn('[app-base] Falha ao carregar notif.js', err);
+      });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', startNotif, { once: true });
+    } else {
+      startNotif();
+    }
+  })();
+
+  // =========================================================
+  // 6) Fallback duro: se algo travar, libera após 2.5s
   // =========================================================
   setTimeout(markShellReady, 2500);
 
 })();
 
 // === Guard DevTools (carregar só fora do /login) ============================
-(function(){
+(function() {
   try {
     var p = (location.pathname || '').toLowerCase();
     if (p === '/login' || p === '/login.html') return;
@@ -372,5 +536,5 @@
     s.src = '/frontend/assets/guard-devtools.js?_v=' + encodeURIComponent(v);
     s.defer = true;
     document.head.appendChild(s);
-  } catch {}
+  } catch (e) {}
 })();

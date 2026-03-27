@@ -1,332 +1,144 @@
 <!DOCTYPE html>
 <html lang="pt-BR" class="has-sidebar prepaint">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Configuração – ZapChats</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Configurações – ZapChats</title>
 
-  <!-- Shell global (injeta head-base + loader + tema + sidebar) -->
   <script src="/frontend/js/app-base.js" defer></script>
   <script src="/frontend/js/auth.js" defer></script>
 
-  <!-- Anti-flash (mesmo padrão das outras páginas) -->
-  <style>
-    html.prepaint body{visibility:hidden}
-    html.prepaint[data-head-ready][data-loader-ready] body{visibility:visible}
-  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
-  <!-- Ícones (como em Mídias) -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
-
-  <!-- Reuso do “base” visual (tokens, .main, .section-title, .btn, .tab, etc.) -->
-  <link rel="stylesheet" href="/frontend/css/midias.css"/>
-
-  <!-- Estilos mínimos específicos da página de Configuração -->
-  <style>
-    .form-grid{
-      display:grid; grid-template-columns: 1fr 1fr; gap: 1rem;
-    }
-    .form-box{
-      background: var(--card); border:1px solid var(--border);
-      border-radius: 12px; padding: 14px;
-    }
-    .field{ display:flex; flex-direction:column; gap:.4rem; margin:.5rem 0; }
-    .field label{ font-weight:700; font-size:.92rem; }
-    .field .help{ color:var(--muted); font-size:.86rem; }
-    .switch-row{ display:flex; align-items:center; gap:.6rem; margin:.35rem 0; }
-    #logo_preview{
-      margin-top:.75rem; padding:.6rem; border:1px solid var(--border); border-radius:.6rem;
-      background:var(--card2); display:flex; gap:.75rem; align-items:center; max-width:520px;
-    }
-    #logo_preview img{ width:84px; height:84px; object-fit:contain; background:var(--hover); border-radius:.5rem; }
-    #tabbar{ display:flex; gap:.5rem; flex-wrap:wrap; }
-    .panel-actions{ display:flex; justify-content:flex-end; gap:.5rem; margin-top:1rem; }
-    .weekday-grid{ display:grid; grid-template-columns: repeat(7, 1fr); gap:.4rem; }
-    .weekday-grid label{ display:flex; align-items:center; gap:.4rem; background:var(--chip); border:1px solid var(--border); border-radius:.6rem; padding:.45rem .55rem; font-weight:700; }
-    #workhours_group.disabled{ opacity:.6; pointer-events:none; }
-    @media (max-width:1024px){
-      .form-grid{ grid-template-columns: 1fr; }
-    }
-
-    /* ====== BLOQUEIO EM MANUTENÇÃO (SÓ NO MAIN, NÃO NO SIDEBAR) ====== */
-    .main{
-      position: relative; /* para o overlay ficar só em cima do conteúdo */
-    }
-    .config-maint-overlay{
-      position: absolute;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 1.5rem;
-      background: rgba(0,0,0,.55);
-      backdrop-filter: blur(3px);
-      z-index: 5;
-    }
-    .config-maint-card{
-      max-width: 480px;
-      width: 100%;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 1rem;
-      padding: 1.5rem 1.75rem;
-      box-shadow: var(--card-blur-shadow);
-      text-align: center;
-    }
-    .config-maint-title{
-      font-size: 1.1rem;
-      font-weight: 700;
-      margin-bottom: .5rem;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      gap:.5rem;
-    }
-    .config-maint-text{
-      color: var(--muted);
-      font-size: .95rem;
-      margin-bottom: 1rem;
-    }
-    .config-maint-actions{
-      display:flex;
-      justify-content:center;
-      gap:.75rem;
-      flex-wrap:wrap;
-    }
-  </style>
+  <link rel="stylesheet" href="/frontend/css/configuracoes.css" />
 </head>
-
-<body class="has-sidebar prepaint config-locked">
-  <!-- Sidebar (carregada via app-base.js) -->
-  <aside id="sidebar"
-        data-src="/frontend/partials/sidebar.html"></aside>
+<body>
+  <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
 
   <main class="main">
-    <div class="section-title">
-      <h1>
-        <i class="fa fa-gear title-ico"></i>
-        <span class="title-text">Configuração</span>
-      </h1>
-      <div class="top-meta"></div>
+    <div class="settings-container">
+      <header class="section-title">
+        <h1>
+          <span class="title-ico is-active" aria-hidden="true">
+            <svg class="title-ico-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M224,136a96,96,0,0,1-192,0,96.34,96.34,0,0,1,6.12-34,8,8,0,0,1,10.87-4.39l22,9.43a8,8,0,0,1,4.27,9.95A48,48,0,1,0,128,88a47.52,47.52,0,0,0-9.81,1,8,8,0,0,1-8.81-5.2L101.5,61a8,8,0,0,1,5.72-10.38A95.5,95.5,0,0,1,128,48,96.11,96.11,0,0,1,224,136Zm-96-24a24,24,0,1,0,24,24A24,24,0,0,0,128,112Z"/>
+            </svg>
+          </span>
+          Configurações
+        </h1>
+
+        <div class="top-total">
+          <span>Preferências do sistema</span>
+        </div>
+      </header>
+
+      <section class="settings-grid" aria-label="Painel de configurações">
+        
+        <div class="settings-col">
+          <article class="box">
+            <div class="card-head">
+              <div>
+                <h2>Aparência</h2>
+                <p class="muted">Defina como o sistema será exibido no seu dispositivo.</p>
+              </div>
+            </div>
+
+            <div class="form-grid">
+              <div class="form-group field--full">
+                <label for="select-tema">Tema do sistema</label>
+                <div class="select-wrap">
+                  <select id="select-tema" class="field" aria-label="Selecione o tema do sistema">
+                    <option value="dark">Escuro (Padrão)</option>
+                    <option value="light">Claro</option>
+                  </select>
+                  <span class="select-icon" aria-hidden="true">
+                    <i class="fa-solid fa-chevron-down"></i>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="box">
+            <div class="card-head">
+              <div>
+                <h2>Relatar bug ou sugestão</h2>
+                <p class="muted">Encontrou um erro ou tem uma melhoria? Envie para análise.</p>
+              </div>
+            </div>
+
+            <form id="form-bug" class="form-grid">
+              <div class="form-group field--full">
+                <label for="bug-descricao">Descrição do problema</label>
+                <textarea
+                  id="bug-descricao"
+                  class="field field-textarea"
+                  rows="4"
+                  placeholder="Ex: Ao abrir a conversa, o botão de responder ficou carregando infinitamente..."
+                  required
+                ></textarea>
+              </div>
+
+              <div class="form-actions field--full pt-2">
+                <button type="submit" class="btn btn--primary" id="btn-enviar-bug">
+                  <i class="fa-solid fa-paper-plane"></i>
+                  <span>Enviar relato</span>
+                </button>
+              </div>
+            </form>
+          </article>
+        </div>
+
+        <div class="settings-col">
+          <article class="box is-disabled">
+            <div class="card-head card-head-between">
+              <div>
+                <h2>Empresa</h2>
+                <p class="muted">Dados corporativos, identidade visual e preferências.</p>
+              </div>
+              <span class="coming-pill">Em breve</span>
+            </div>
+
+            <div class="empty-config">
+              <i class="fa-solid fa-building" aria-hidden="true"></i>
+              <div>
+                <strong>Configuração ainda não disponível</strong>
+                <p class="muted">Aqui ficarão dados da empresa, logotipo, nome exibido e integrações globais.</p>
+              </div>
+            </div>
+          </article>
+
+          <article class="box is-disabled">
+            <div class="card-head card-head-between">
+              <div>
+                <h2>Atendimento e automações</h2>
+                <p class="muted">Regras gerais de fila e comportamento do sistema.</p>
+              </div>
+              <span class="coming-pill">Em breve</span>
+            </div>
+
+            <div class="empty-config">
+              <i class="fa-solid fa-robot" aria-hidden="true"></i>
+              <div>
+                <strong>Módulo em preparação</strong>
+                <p class="muted">Preferências de atendimento automático, roteamento, horários e notificações.</p>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
     </div>
 
-    <!-- Tabs (mesmo componente visual das outras páginas) -->
-    <section class="box" aria-label="Abas">
-      <div id="tabbar" class="tabs" role="tablist" aria-label="Seções de configuração">
-        <button class="tab" role="tab" aria-selected="true"  data-tab="empresa">Empresa</button>
-        <button class="tab" role="tab" aria-selected="false" data-tab="horario">Horário comercial</button>
-        <button class="tab" role="tab" aria-selected="false" data-tab="mensagens">Mensagens automáticas</button>
-        <button class="tab" role="tab" aria-selected="false" data-tab="notificacoes">Notificações</button>
-        <button class="tab" role="tab" aria-selected="false" data-tab="privacidade">Privacidade / LGPD</button>
-      </div>
-    </section>
-
-    <!-- Painel: Empresa -->
-    <section class="form-box" data-panel="empresa">
-      <h2 style="margin:0 0 .5rem 0;">Empresa</h2>
-      <div class="form-grid">
-        <div class="field">
-          <label for="empresa_nome">Nome da empresa</label>
-          <input id="empresa_nome" class="input" type="text" placeholder="Ex.: ZapChats LTDA"/>
-        </div>
-        <div class="field">
-          <label for="support_email">E-mail de suporte</label>
-          <input id="support_email" class="input" type="email" placeholder="suporte@empresa.com.br"/>
-        </div>
-      </div>
-
-      <div class="form-grid">
-        <div class="field">
-          <label for="default_department">Departamento padrão</label>
-          <select id="default_department" class="select">
-            <option>Carregando…</option>
-          </select>
-          <div class="help">Usado quando não for possível identificar o setor a partir do fluxo.</div>
-        </div>
-      </div>
-
-      <div class="field">
-        <label for="logo_file">Logo (upload único)</label>
-        <input id="logo_file" type="file" accept="image/*"/>
-        <div class="help">Use PNG/SVG com fundo transparente quando possível. Uma prévia será exibida abaixo.</div>
-
-        <div id="logo_preview" hidden>
-          <img id="logo_img" alt="Prévia da logo da empresa"/>
-          <div>
-            <strong>Prévia da logo</strong>
-            <div id="logo_meta" class="help"></div>
-            <div style="margin-top:.4rem;">
-              <button id="logo_reset" class="btn"><i class="fa fa-xmark"></i> Remover prévia</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel-actions">
-        <button id="btn_save_empresa" class="btn primary">
-          <i class="fa fa-floppy-disk"></i> Salvar alterações
-        </button>
-      </div>
-    </section>
-
-    <!-- Painel: Horário comercial -->
-    <section class="form-box" data-panel="horario" hidden>
-      <h2 style="margin:0 0 .5rem 0;">Horário comercial</h2>
-
-      <div class="switch-row">
-        <input id="workhours_enabled" type="checkbox"/>
-        <label for="workhours_enabled">Ativar horário comercial</label>
-      </div>
-
-      <div id="workhours_group">
-        <div class="weekday-grid" style="margin:.6rem 0 1rem;">
-          <label><input id="wd_dom" type="checkbox"/> Dom</label>
-          <label><input id="wd_seg" type="checkbox"/> Seg</label>
-          <label><input id="wd_ter" type="checkbox"/> Ter</label>
-          <label><input id="wd_qua" type="checkbox"/> Qua</label>
-          <label><input id="wd_qui" type="checkbox"/> Qui</label>
-          <label><input id="wd_sex" type="checkbox"/> Sex</label>
-          <label><input id="wd_sab" type="checkbox"/> Sáb</label>
-        </div>
-
-        <div class="form-grid">
-          <div class="field">
-            <label for="work_start">Início</label>
-            <input id="work_start" class="input" type="time" value="09:00"/>
-          </div>
-          <div class="field">
-            <label for="work_end">Fim</label>
-            <input id="work_end" class="input" type="time" value="18:00"/>
-          </div>
-        </div>
-
-        <div class="field">
-          <label for="msg_offhours">Mensagem fora do horário</label>
-          <textarea id="msg_offhours" class="input" rows="3" placeholder="Ex.: Nosso atendimento é de seg a sex das 9h às 18h. Assim que possível retornaremos."></textarea>
-        </div>
-      </div>
-
-      <div class="panel-actions">
-        <button id="btn_save_horario" class="btn primary">
-          <i class="fa fa-floppy-disk"></i> Salvar alterações
-        </button>
-      </div>
-    </section>
-
-    <!-- Painel: Mensagens automáticas -->
-    <section class="form-box" data-panel="mensagens" hidden>
-      <h2 style="margin:0 0 .5rem 0;">Mensagens automáticas</h2>
-
-      <div class="field">
-        <label for="msg_greeting">Saudação inicial</label>
-        <textarea id="msg_greeting" class="input" rows="3" placeholder="Ex.: Olá! Como podemos ajudar?"></textarea>
-      </div>
-
-      <div class="field">
-        <label for="msg_welcome">Boas-vindas (novos contatos)</label>
-        <textarea id="msg_welcome" class="input" rows="3" placeholder="Ex.: Bem-vindo(a) à ZapChats!"></textarea>
-      </div>
-
-      <div class="field">
-        <label for="msg_absence">Ausência (fora do expediente/feriado)</label>
-        <textarea id="msg_absence" class="input" rows="3" placeholder="Ex.: Estamos ausentes no momento, responderemos assim que possível."></textarea>
-      </div>
-
-      <div class="panel-actions">
-        <button id="btn_save_mensagens" class="btn primary">
-          <i class="fa fa-floppy-disk"></i> Salvar alterações
-        </button>
-      </div>
-    </section>
-
-    <!-- Painel: Notificações -->
-    <section class="form-box" data-panel="notificacoes" hidden>
-      <h2 style="margin:0 0 .5rem 0;">Notificações</h2>
-
-      <div class="switch-row">
-        <input id="notify_email" type="checkbox"/>
-        <label for="notify_email">Notificar por e-mail</label>
-      </div>
-
-      <div class="switch-row">
-        <input id="notify_push" type="checkbox"/>
-        <label for="notify_push">Notificações push</label>
-      </div>
-
-      <div class="switch-row">
-        <input id="notify_sound" type="checkbox"/>
-        <label for="notify_sound">Som de nova mensagem</label>
-      </div>
-
-      <div class="panel-actions">
-        <button id="btn_save_notificacoes" class="btn primary">
-          <i class="fa fa-floppy-disk"></i> Salvar alterações
-        </button>
-      </div>
-    </section>
-
-    <!-- Painel: Privacidade -->
-    <section class="form-box" data-panel="privacidade" hidden>
-      <h2 style="margin:0 0 .5rem 0;">Privacidade / LGPD</h2>
-
-      <div class="switch-row">
-        <input id="privacy_read_receipts" type="checkbox"/>
-        <label for="privacy_read_receipts">Exibir “lido” (recibo de leitura)</label>
-      </div>
-
-      <div class="switch-row">
-        <input id="privacy_online_status" type="checkbox"/>
-        <label for="privacy_online_status">Mostrar status online</label>
-      </div>
-
-      <div class="panel-actions">
-        <button id="btn_save_privacidade" class="btn primary">
-          <i class="fa fa-floppy-disk"></i> Salvar alterações
-        </button>
-      </div>
-    </section>
-
-    <!-- Log opcional (para debug visual, usado pelo configuracoes.js) -->
-    <section class="box" style="margin-top:1rem;">
-      <pre id="cfg_logs" style="margin:0; max-height:180px; overflow:auto; font-size:.85rem; background:var(--card2); border:1px solid var(--border); border-radius:.6rem; padding:.6rem;"></pre>
-    </section>
-
-    <!-- Overlay de manutenção (SÓ EM CIMA DO MAIN) -->
-    <div id="config-maint-overlay" class="config-maint-overlay" role="alertdialog" aria-modal="true" aria-labelledby="config-maint-title">
-      <div class="config-maint-card">
-        <div class="config-maint-title" id="config-maint-title">
-          <i class="fa fa-screwdriver-wrench"></i>
-          Área de configuração em manutenção
-        </div>
-        <p class="config-maint-text">
-          Esta tela ainda está sendo preparada. Se você precisar ajustar alguma configuração,
-          entre em contato com o suporte ZapChats.
-        </p>
-        <div class="config-maint-actions">
-          <a href="mailto:suporte@zapchats.com.br" class="btn primary">
-            <i class="fa fa-headset"></i> Falar com o suporte
-          </a>
-        </div>
-      </div>
+    <div id="zapchat-toast" class="toast-message" role="alert" aria-live="assertive" aria-atomic="true">
+      <i class="toast-icon fa-solid"></i>
+      <span class="toast-text"></span>
     </div>
   </main>
 
-  <!-- Toast -->
-  <div id="toast" role="status" aria-live="polite"></div>
-
-  <!-- JS desta página -->
+  <script src="/frontend/js/page-guard.js" defer></script>
   <script src="/frontend/js/pages/configuracoes.js" defer></script>
-
-  <!-- Flag simples pra desligar o modo manutenção no futuro -->
-  <script>
-    // Quando quiser liberar, troca pra false ou remove esse script.
-    const CONFIG_EM_MANUTENCAO = true;
-
-    if (!CONFIG_EM_MANUTENCAO) {
-      const ov = document.getElementById('config-maint-overlay');
-      if (ov) ov.remove();
-      document.body.classList.remove('config-locked');
-    }
-  </script>
 </body>
 </html>

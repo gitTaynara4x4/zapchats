@@ -102,12 +102,10 @@
       line-height:1;
     }
 
-    /* fonte real das instâncias */
     #inst-switch{
       display:none !important;
     }
 
-    /* linha whatsapp + dropdown ao lado */
     .zc-inst-row{
       display:flex;
       align-items:center;
@@ -457,31 +455,374 @@
       const slot = document.getElementById('sidebar-atendimentos-slot');
       if (!slot) return;
 
+      function pick() {
+        for (let i = 0; i < arguments.length; i++) {
+          const key = arguments[i];
+          try {
+            let value = localStorage.getItem(key);
+            if (!value) continue;
+
+            if (
+              (value.startsWith('{') && value.endsWith('}')) ||
+              (value.startsWith('[') && value.endsWith(']'))
+            ) {
+              try { return JSON.parse(value); } catch {}
+            }
+
+            return value;
+          } catch {}
+        }
+        return '';
+      }
+
+      function jwtInfo() {
+        try {
+          const tok = pick('access_token', 'token');
+          if (!tok || String(tok).split('.').length !== 3) return {};
+          return JSON.parse(atob(tok.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) || {};
+        } catch {
+          return {};
+        }
+      }
+
+      function getInitials(name) {
+        const safe = String(name || '').trim();
+        if (!safe) return 'U';
+        const parts = safe.split(/\s+/).filter(Boolean);
+        if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+        return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+      }
+
+      function normalizeUrlMaybeRelative(value) {
+        const s = String(value || '').trim();
+        if (!s) return '';
+        if (s.startsWith('data:')) return s;
+        if (/^https?:\/\//i.test(s)) return s;
+        if (s.charAt(0) === '/') return s;
+        return '/' + s.replace(/^\/+/, '');
+      }
+
+      function base64ToDataUrl(base64, mime) {
+        const raw = String(base64 || '').trim();
+        if (!raw) return '';
+        if (raw.startsWith('data:')) return raw;
+        return 'data:' + (mime || 'image/png') + ';base64,' + raw;
+      }
+
+      function getUserInfo() {
+        let nome = pick('nome', 'name', 'displayName', 'usuario_nome', 'user_name');
+        if (nome && typeof nome === 'object') nome = nome.nome || nome.name || nome.displayName || '';
+
+        let dept = pick('departamento', 'setor', 'department', 'dept', 'usuario_departamento', 'user_department');
+        if (dept && typeof dept === 'object') dept = dept.departamento || dept.setor || dept.department || dept.dept || '';
+
+        let email = pick('email', 'userEmail', 'loginEmail', 'usuario_email', 'user_email');
+
+        const obj = pick('usuario', 'user', 'me', 'auth_user', 'profile', 'auth');
+        if (obj && typeof obj === 'object') {
+          email = email || obj.email || (obj.user && obj.user.email) || '';
+          nome  = nome  || obj.nome || obj.name || (obj.user && (obj.user.nome || obj.user.name)) || '';
+          dept  = dept  || obj.departamento || obj.setor || (obj.user && (obj.user.departamento || obj.user.setor)) || '';
+        }
+
+        const jwt = jwtInfo();
+        email = email || jwt.email || jwt.preferred_username || jwt.sub || '';
+        nome  = nome  || jwt.name || jwt.given_name || jwt.nickname || '';
+
+        return {
+          nome: String(nome || '').trim(),
+          dept: String(dept || '').trim(),
+          email: String(email || '').trim()
+        };
+      }
+
+      function getAvatar() {
+        try {
+          let avatar =
+            localStorage.getItem('usuario_avatar') ||
+            localStorage.getItem('avatar_url') ||
+            '';
+
+          if (!avatar) {
+            const jwt = jwtInfo();
+            avatar = (jwt && jwt.picture) || '';
+          }
+
+          return avatar || '';
+        } catch {
+          return '';
+        }
+      }
+
+      async function hydrateUserFromApi() {
+        try {
+          const res = await fetch('/api/perfil', {
+            method: 'GET',
+            credentials: 'include',
+            headers: { 'Accept': 'application/json' }
+          });
+
+          if (!res.ok) return;
+
+          const data = await res.json();
+          if (!data || typeof data !== 'object') return;
+
+          const nome = data.nome || data.name || data.usuario_nome || '';
+          const email = data.email || data.usuario_email || '';
+          const dept = data.departamento || data.setor || data.department || data.dept || data.cargo || '';
+
+          let avatar =
+            data.avatar_url ||
+            data.foto_url ||
+            data.avatar ||
+            data.foto ||
+            data.picture ||
+            '';
+
+          const avatarBase64 =
+            data.avatar_base64 ||
+            data.foto_base64 ||
+            data.avatar_data ||
+            '';
+
+          const avatarMime =
+            data.avatar_mime ||
+            data.foto_mime ||
+            'image/png';
+
+          if (!avatar && avatarBase64) {
+            avatar = base64ToDataUrl(avatarBase64, avatarMime);
+          }
+
+          if (!avatar) avatar = '/api/perfil/avatar';
+          avatar = normalizeUrlMaybeRelative(avatar);
+
+          try {
+            if (nome) localStorage.setItem('usuario_nome', String(nome));
+            if (email) localStorage.setItem('usuario_email', String(email));
+            if (dept) localStorage.setItem('usuario_departamento', String(dept));
+            if (avatar) {
+              localStorage.setItem('usuario_avatar', avatar);
+              localStorage.setItem('avatar_url', avatar);
+              localStorage.setItem('usuario_avatar_v', String(Date.now()));
+            }
+          } catch {}
+        } catch {}
+      }
+
+      function isDarkTheme() {
+        return document.documentElement.classList.contains('dark') ||
+               document.documentElement.getAttribute('data-theme') === 'dark';
+      }
+
+      function setTheme(mode) {
+        const dark = String(mode) === 'dark';
+        const root = document.documentElement;
+
+        try {
+          if (window.AppTheme && typeof window.AppTheme.set === 'function') {
+            window.AppTheme.set(dark ? 'dark' : 'light');
+          }
+        } catch {}
+
+        root.classList.toggle('dark', dark);
+        root.setAttribute('data-theme', dark ? 'dark' : 'light');
+
+        try {
+          localStorage.setItem('theme', dark ? 'dark' : 'light');
+          localStorage.setItem('valora_theme', dark ? 'dark' : 'light');
+          localStorage.setItem('zc:theme', dark ? 'dark' : 'light');
+        } catch {}
+      }
+
+      function goToUrl(url) {
+        try {
+          if (window.parent && window.parent !== window) {
+            window.parent.location.href = url;
+          } else {
+            window.location.href = url;
+          }
+        } catch {
+          window.location.href = url;
+        }
+      }
+
+      async function doLogout() {
+        try {
+          await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+        } catch {}
+
+        try {
+          localStorage.clear();
+          sessionStorage.clear();
+        } catch {}
+
+        window.location.replace('/');
+      }
+
+      function initMiniSidebar() {
+        const userBtn = document.getElementById('wppUserMenuBtn');
+        const userMenu = document.getElementById('wppUserMenu');
+
+        const openProfileBtn = document.getElementById('wppOpenProfileBtn');
+        const myPlanBtn = document.getElementById('wppMyPlanBtn');
+        const configBtn = document.getElementById('wppConfigBtn');
+        const themeBtn = document.getElementById('wppThemeBtn');
+        const logoutBtn = document.getElementById('wppLogoutBtn');
+
+        const userNameEl = document.getElementById('wppUserName');
+        const userEmailEl = document.getElementById('wppUserEmail');
+        const userInitialsEl = document.getElementById('wppUserInitials');
+        const userAvatarImg = document.getElementById('wppUserAvatarImg');
+
+        function renderUser() {
+          const user = getUserInfo();
+          const avatar = getAvatar();
+
+          if (userNameEl) userNameEl.textContent = user.nome || 'Usuário';
+          if (userEmailEl) userEmailEl.textContent = user.email || user.dept || 'Sem e-mail';
+
+          if (userInitialsEl) {
+            userInitialsEl.textContent = getInitials(user.nome || user.email || 'Usuário');
+            userInitialsEl.style.display = '';
+          }
+
+          if (userAvatarImg) {
+            if (avatar) {
+              let v = '';
+              try { v = localStorage.getItem('usuario_avatar_v') || ''; } catch {}
+
+              let src = avatar;
+              if (!String(avatar).startsWith('data:')) {
+                src = avatar + (String(avatar).includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(v || Date.now());
+              }
+
+              userAvatarImg.onerror = function () {
+                userAvatarImg.removeAttribute('src');
+                userAvatarImg.style.display = 'none';
+                if (userInitialsEl) userInitialsEl.style.display = '';
+              };
+
+              userAvatarImg.src = src;
+              userAvatarImg.style.display = 'block';
+              if (userInitialsEl) userInitialsEl.style.display = 'none';
+            } else {
+              userAvatarImg.removeAttribute('src');
+              userAvatarImg.style.display = 'none';
+              if (userInitialsEl) userInitialsEl.style.display = '';
+            }
+          }
+        }
+
+        function closeUserMenu() {
+          if (userMenu) userMenu.classList.remove('show');
+          if (userBtn) {
+            userBtn.classList.remove('active');
+            userBtn.setAttribute('aria-expanded', 'false');
+          }
+        }
+
+        function toggleUserMenu() {
+          if (!userMenu || !userBtn) return;
+          const willOpen = !userMenu.classList.contains('show');
+          userMenu.classList.toggle('show', willOpen);
+          userBtn.classList.toggle('active', willOpen);
+          userBtn.setAttribute('aria-expanded', String(willOpen));
+        }
+
+        if (userBtn && !userBtn.dataset.bound) {
+          userBtn.dataset.bound = '1';
+          userBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            toggleUserMenu();
+          });
+        }
+
+        if (openProfileBtn && !openProfileBtn.dataset.bound) {
+          openProfileBtn.dataset.bound = '1';
+          openProfileBtn.addEventListener('click', function () {
+            closeUserMenu();
+            goToUrl('/perfil.html');
+          });
+        }
+
+        if (myPlanBtn && !myPlanBtn.dataset.bound) {
+          myPlanBtn.dataset.bound = '1';
+          myPlanBtn.addEventListener('click', function () {
+            closeUserMenu();
+            goToUrl('/meu-plano');
+          });
+        }
+
+        if (configBtn && !configBtn.dataset.bound) {
+          configBtn.dataset.bound = '1';
+          configBtn.addEventListener('click', function () {
+            closeUserMenu();
+            goToUrl('/configuracoes.html');
+          });
+        }
+
+        if (themeBtn && !themeBtn.dataset.bound) {
+          themeBtn.dataset.bound = '1';
+          themeBtn.addEventListener('click', function () {
+            setTheme(isDarkTheme() ? 'light' : 'dark');
+            closeUserMenu();
+          });
+        }
+
+        if (logoutBtn && !logoutBtn.dataset.bound) {
+          logoutBtn.dataset.bound = '1';
+          logoutBtn.addEventListener('click', function () {
+            closeUserMenu();
+            doLogout();
+          });
+        }
+
+        document.addEventListener('click', function (e) {
+          if (!userMenu || !userBtn) return;
+          if (!userMenu.contains(e.target) && !userBtn.contains(e.target)) {
+            closeUserMenu();
+          }
+        });
+
+        document.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape') closeUserMenu();
+        });
+
+        renderUser();
+
+        window.addEventListener('storage', function (e) {
+          if ([
+            'usuario_nome', 'nome', 'name', 'displayName',
+            'usuario_departamento', 'departamento', 'setor', 'department', 'dept',
+            'usuario_email', 'email', 'userEmail', 'loginEmail',
+            'usuario_avatar', 'avatar_url', 'usuario_avatar_v',
+            'usuario', 'user', 'me', 'auth_user', 'profile', 'auth',
+            'access_token', 'token', 'theme', 'valora_theme', 'zc:theme'
+          ].indexOf(e.key) >= 0) {
+            renderUser();
+          }
+        });
+      }
+
       try {
         const res = await fetch('/frontend/partials/sidebar-atendimentos.html', {
           cache: 'no-store'
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
+
         slot.innerHTML = await res.text();
 
         const path = (location.pathname.replace(/\/+$/, '') || '/');
         document.querySelectorAll('.wpp-leftbar .wpp-leftbar-icons a[href]').forEach(a => {
-          try{
+          try {
             const href = new URL(a.getAttribute('href'), location.origin).pathname.replace(/\/+$/, '') || '/';
-            if (href === path) a.setAttribute('aria-current','page');
-          }catch{}
+            if (href === path) a.setAttribute('aria-current', 'page');
+          } catch {}
         });
 
-        const out = document.getElementById('miniLogout');
-        if(out && !out.dataset.bound){
-          out.dataset.bound = '1';
-          out.addEventListener('click', async function(ev){
-            ev.preventDefault();
-            try{ await fetch('/api/auth/logout', { method:'POST', credentials:'include' }); }catch{}
-            try{ localStorage.clear(); sessionStorage.clear(); }catch{}
-            window.location.replace('/');
-          });
-        }
+        await hydrateUserFromApi();
+        initMiniSidebar();
       } catch (err) {
         console.error('Erro ao carregar sidebar-atendimentos.html:', err);
       }

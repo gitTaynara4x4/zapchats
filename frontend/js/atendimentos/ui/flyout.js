@@ -11,6 +11,21 @@
 
   let lastTrigger = null;
 
+  function closeNestedUserMenus(host) {
+    if (!host) return;
+
+    const openMenus = host.querySelectorAll('.wpp-leftbar-user-menu.show');
+    openMenus.forEach(menu => {
+      menu.classList.remove('show');
+    });
+
+    const activeBtns = host.querySelectorAll('.wpp-leftbar-user-btn.active');
+    activeBtns.forEach(btn => {
+      btn.classList.remove('active');
+      btn.setAttribute('aria-expanded', 'false');
+    });
+  }
+
   function openFlyout(host, trigger) {
     if (!host) return;
     lastTrigger = trigger || lastTrigger;
@@ -33,6 +48,9 @@
 
   function closeFlyout(host) {
     if (!host) return;
+
+    closeNestedUserMenus(host);
+
     host.classList.remove('is-open');
     host.setAttribute('aria-hidden', 'true');
 

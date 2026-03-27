@@ -1,7 +1,7 @@
-# backend/utils/plans.py
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from math import ceil
 import os
 from typing import Optional, Dict, Any, Union
 
@@ -9,6 +9,8 @@ from typing import Optional, Dict, Any, Union
 # Config
 # ============================================================
 DEFAULT_TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "7") or "7")
+DEFAULT_PLAN_CYCLE_DAYS = int(os.getenv("PLAN_CYCLE_DAYS", "30") or "30")
+PLAN_DUE_WARNING_DAYS = int(os.getenv("PLAN_DUE_WARNING_DAYS", "5") or "5")
 
 # ============================================================
 # Planos oficiais
@@ -38,7 +40,7 @@ LEGACY_TIER_MAP: Dict[str, str] = {
     # legado antigo
     "PRATA": PLAN_START,
     "OURO": PLAN_BUSINESS,
-    "PLATINA": PLAN_ENTERPRISE,
+    "PLATINA": PLAN_BUSINESS,
     "DIAMANTE": PLAN_ENTERPRISE,
     "ASCENDENTE": PLAN_ENTERPRISE,
     "IMORTAL": PLAN_ENTERPRISE,
@@ -63,6 +65,7 @@ PLAN_CATALOG: Dict[str, Dict[str, Any]] = {
         "public": False,
         "price_monthly": 0,
         "trial_days": 0,
+        "billing_cycle_days": 0,
         "limits": {
             "whatsapp_instances_max": 0,
             "users_max": 1,
@@ -92,6 +95,7 @@ PLAN_CATALOG: Dict[str, Dict[str, Any]] = {
         "public": True,
         "price_monthly": 97,
         "trial_days": DEFAULT_TRIAL_DAYS,
+        "billing_cycle_days": DEFAULT_PLAN_CYCLE_DAYS,
         "limits": {
             "whatsapp_instances_max": 2,
             "users_max": 10,
@@ -121,6 +125,7 @@ PLAN_CATALOG: Dict[str, Dict[str, Any]] = {
         "public": True,
         "price_monthly": 197,
         "trial_days": DEFAULT_TRIAL_DAYS,
+        "billing_cycle_days": DEFAULT_PLAN_CYCLE_DAYS,
         "limits": {
             "whatsapp_instances_max": 4,
             "users_max": 30,
@@ -150,6 +155,7 @@ PLAN_CATALOG: Dict[str, Dict[str, Any]] = {
         "public": True,
         "price_monthly": 347,
         "trial_days": DEFAULT_TRIAL_DAYS,
+        "billing_cycle_days": DEFAULT_PLAN_CYCLE_DAYS,
         "limits": {
             "whatsapp_instances_max": 10,
             "users_max": 100,
@@ -175,7 +181,7 @@ PLAN_CATALOG: Dict[str, Dict[str, Any]] = {
 
 # ============================================================
 # Compat antiga: alguns arquivos usam PLAN_LIMITS.get(plano, 0)
-# Aqui ele continua sendo "limite de instâncias por plano"
+# Aqui continua sendo "limite de instâncias por plano"
 # ============================================================
 PLAN_LIMITS: Dict[str, int] = {
     plan_code: int((payload.get("limits") or {}).get("whatsapp_instances_max", 0))
@@ -195,6 +201,16 @@ def _as_aware_utc(dt: Optional[datetime]) -> Optional[datetime]:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+def _days_left_until(dt: Optional[datetime]) -> int:
+    dt = _as_aware_utc(dt)
+    if not dt:
+        return 0
+    delta = dt - now_utc()
+    if delta.total_seconds() <= 0:
+        return 0
+    return max(0, int(ceil(delta.total_seconds() / 86400)))
 
 
 # ============================================================
@@ -225,7 +241,17 @@ def plan_price(tier: Optional[str]) -> int:
 
 def plan_trial_days(tier: Optional[str]) -> int:
     plan = normalize_plan(tier)
-    return int(PLAN_CATALOG.get(plan, PLAN_CATALOG[PLAN_FREE]).get("trial_days", DEFAULT_TRIAL_DAYS) or DEFAULT_TRIAL_DAYS)
+    return int(PLAN_CATALOG.get(plan, PLAN_CATALOG[PLAN_FREE]).get("trial_days", 0) or 0)
+
+
+def plan_cycle_days(tier: Optional[str]) -> int:
+    plan = normalize_plan(tier)
+    return int(
+        PLAN_CATALOG.get(plan, PLAN_CATALOG[PLAN_FREE]).get(
+            "billing_cycle_days",
+            DEFAULT_PLAN_CYCLE_DAYS,
+        ) or DEFAULT_PLAN_CYCLE_DAYS
+    )
 
 
 # ============================================================
@@ -234,7 +260,7 @@ def plan_trial_days(tier: Optional[str]) -> int:
 def start_trial(empresa, tier: Optional[str] = None, days: Optional[int] = None) -> None:
     """
     Inicia trial do plano informado.
-    Por compatibilidade, mantém assinatura como FREE enquanto o trial está ativo.
+    Mantém assinatura como FREE enquanto o trial está ativo.
     """
     trial_plan = normalize_plan(tier or PLAN_START)
     if trial_plan == PLAN_FREE:
@@ -245,6 +271,7 @@ def start_trial(empresa, tier: Optional[str] = None, days: Optional[int] = None)
     empresa.assinatura = PLAN_FREE
     empresa.trial_tier = trial_plan
     empresa.trial_expires_at = now_utc() + timedelta(days=trial_days)
+    empresa.plano_expira_em = None
 
 
 def start_start_trial(empresa, days: Optional[int] = None) -> None:
@@ -272,16 +299,164 @@ def is_trial_active(empresa) -> bool:
     return now_utc() < trial_expires_at
 
 
-def is_paid_active(empresa) -> bool:
+def trial_days_left(empresa) -> int:
+    return _days_left_until(getattr(empresa, "trial_expires_at", None))
+
+
+# ============================================================
+# Plano pago / vencimento
+# ============================================================
+def clear_paid_plan(empresa) -> None:
+    empresa.assinatura = PLAN_FREE
+    empresa.plano_expira_em = None
+
+
+def start_paid_plan(
+    empresa,
+    tier: Optional[str] = None,
+    days: Optional[int] = None,
+    clear_trial: bool = True,
+) -> None:
+    """
+    Ativa plano pago a partir de AGORA e define novo vencimento.
+    """
+    paid_plan = normalize_plan(tier or getattr(empresa, "assinatura", None) or PLAN_START)
+    if paid_plan not in PAID_PLANS:
+        paid_plan = PLAN_START
+
+    cycle_days = int(days or plan_cycle_days(paid_plan) or DEFAULT_PLAN_CYCLE_DAYS)
+
+    empresa.assinatura = paid_plan
+    empresa.plano_expira_em = now_utc() + timedelta(days=cycle_days)
+
+    if clear_trial:
+        empresa.trial_tier = None
+        empresa.trial_expires_at = None
+
+
+def restart_paid_cycle(empresa, days: Optional[int] = None) -> None:
+    """
+    Reinicia o ciclo do plano atual a partir de hoje.
+    """
+    current_paid = normalize_plan(getattr(empresa, "assinatura", None))
+    if current_paid not in PAID_PLANS:
+        return
+
+    cycle_days = int(days or plan_cycle_days(current_paid) or DEFAULT_PLAN_CYCLE_DAYS)
+    empresa.plano_expira_em = now_utc() + timedelta(days=cycle_days)
+
+
+def configured_paid_plan_code(empresa) -> Optional[str]:
+    """
+    Retorna o plano pago configurado na empresa, mesmo que esteja vencido.
+    """
     assinatura = normalize_plan(getattr(empresa, "assinatura", None))
-    if assinatura == PLAN_FREE:
+    return assinatura if assinatura in PAID_PLANS else None
+
+
+def paid_expires_at(empresa) -> Optional[datetime]:
+    return _as_aware_utc(getattr(empresa, "plano_expira_em", None))
+
+
+def is_paid_expired(empresa) -> bool:
+    assinatura = configured_paid_plan_code(empresa)
+    if not assinatura:
         return False
 
-    plano_expira_em = _as_aware_utc(getattr(empresa, "plano_expira_em", None))
+    plano_expira_em = paid_expires_at(empresa)
+    if plano_expira_em is None:
+        return False
+
+    return now_utc() >= plano_expira_em
+
+
+def is_paid_active(empresa) -> bool:
+    assinatura = configured_paid_plan_code(empresa)
+    if not assinatura:
+        return False
+
+    plano_expira_em = paid_expires_at(empresa)
     if plano_expira_em is None:
         return True
 
     return now_utc() < plano_expira_em
+
+
+def paid_days_left(empresa) -> Optional[int]:
+    assinatura = configured_paid_plan_code(empresa)
+    if not assinatura:
+        return None
+
+    plano_expira_em = paid_expires_at(empresa)
+    if plano_expira_em is None:
+        return None
+
+    return _days_left_until(plano_expira_em)
+
+
+def is_paid_expiring_soon(empresa, warning_days: Optional[int] = None) -> bool:
+    if not is_paid_active(empresa):
+        return False
+
+    left = paid_days_left(empresa)
+    if left is None:
+        return False
+
+    warn = int(warning_days or PLAN_DUE_WARNING_DAYS)
+    return 0 < left <= warn
+
+
+def _alert_level_from_days_left(days_left: Optional[int], warning_days: int) -> Optional[str]:
+    if days_left is None:
+        return None
+    if days_left <= 0:
+        return "expired"
+    if days_left == 1:
+        return "danger"
+    if days_left <= max(1, int(warning_days)):
+        return "warning"
+    return None
+
+
+def paid_due_alert_level(empresa, warning_days: Optional[int] = None) -> Optional[str]:
+    if is_paid_expired(empresa):
+        return "expired"
+    if not is_paid_active(empresa):
+        return None
+    return _alert_level_from_days_left(
+        paid_days_left(empresa),
+        int(warning_days or PLAN_DUE_WARNING_DAYS),
+    )
+
+
+def trial_due_alert_level(empresa, warning_days: Optional[int] = None) -> Optional[str]:
+    if not is_trial_active(empresa):
+        return None
+    return _alert_level_from_days_left(
+        trial_days_left(empresa),
+        int(warning_days or PLAN_DUE_WARNING_DAYS),
+    )
+
+
+def is_billing_locked(empresa) -> bool:
+    """
+    Regra prática com o schema atual:
+    - FREE puro: não bloqueia por billing
+    - trial ativo: não bloqueia
+    - plano pago ativo: não bloqueia
+    - plano pago vencido e sem trial ativo: bloqueia
+    """
+    if is_trial_active(empresa):
+        return False
+
+    if is_paid_active(empresa):
+        return False
+
+    paid_code = configured_paid_plan_code(empresa)
+    if paid_code and is_paid_expired(empresa):
+        return True
+
+    return False
 
 
 def effective_tier(empresa) -> str:
@@ -304,23 +479,11 @@ def effective_plan(empresa) -> str:
     return effective_tier(empresa)
 
 
-def trial_days_left(empresa) -> int:
-    exp = _as_aware_utc(getattr(empresa, "trial_expires_at", None))
-    if not exp:
-        return 0
-
-    delta = exp - now_utc()
-    if delta.total_seconds() <= 0:
-        return 0
-
-    return max(0, int(delta.total_seconds() // 86400))
-
-
 # ============================================================
 # Entitlements helpers
 # ============================================================
 def _plan_code_from_input(tier_or_empresa: Union[str, Any]) -> str:
-    if hasattr(tier_or_empresa, "assinatura"):
+    if hasattr(tier_or_empresa, "assinatura") or hasattr(tier_or_empresa, "trial_tier"):
         return effective_plan(tier_or_empresa)
     return normalize_plan(str(tier_or_empresa or PLAN_FREE))
 
@@ -407,13 +570,22 @@ def plan_status_payload(
     }
 
     trial_expires_at = _as_aware_utc(getattr(empresa, "trial_expires_at", None))
-    plano_expira_em = _as_aware_utc(getattr(empresa, "plano_expira_em", None))
+    plano_expira_em = paid_expires_at(empresa)
+
+    assinatura_norm = normalize_plan(getattr(empresa, "assinatura", PLAN_FREE))
+    paid_plan_code = configured_paid_plan_code(empresa)
+    paid_plan_catalog = PLAN_CATALOG.get(paid_plan_code, {}) if paid_plan_code else {}
+
+    paid_left = paid_days_left(empresa)
+    paid_active = is_paid_active(empresa)
+    paid_expired = is_paid_expired(empresa)
+    paid_warning = is_paid_expiring_soon(empresa)
 
     return {
         "empresa_id": getattr(empresa, "id", None),
 
         # base
-        "assinatura": normalize_plan(getattr(empresa, "assinatura", PLAN_FREE)),
+        "assinatura": assinatura_norm,
         "effective_tier": tier,
         "plan_code": tier,
         "plan_name": catalog.get("name"),
@@ -423,7 +595,7 @@ def plan_status_payload(
         # compat front atual
         "limite_instancias": inst_limit,
         "quantidade_instancias": inst_current,
-        "pode_adicionar": inst_current < inst_limit,
+        "pode_adicionar": inst_current < inst_limit if inst_limit > 0 else False,
 
         # catálogo
         "limits": limits,
@@ -433,6 +605,10 @@ def plan_status_payload(
         "counts": counts_raw,
         "usage": usage,
 
+        # billing / lock
+        "billing_locked": is_billing_locked(empresa),
+        "configured_paid_plan": paid_plan_code,
+
         # trial
         "trial": {
             "active": is_trial_active(empresa),
@@ -441,18 +617,30 @@ def plan_status_payload(
             else None,
             "expires_at": trial_expires_at.isoformat() if trial_expires_at else None,
             "days_left": trial_days_left(empresa),
+            "alert_level": trial_due_alert_level(empresa),
         },
 
         # pago
         "paid": {
-            "active": is_paid_active(empresa),
+            "plan_code": paid_plan_code,
+            "plan_name": paid_plan_catalog.get("name"),
+            "price_monthly": _safe_int(paid_plan_catalog.get("price_monthly", 0), 0),
+            "active": paid_active,
+            "expired": paid_expired,
             "expires_at": plano_expira_em.isoformat() if plano_expira_em else None,
+            "days_left": paid_left,
+            "warning_days": PLAN_DUE_WARNING_DAYS,
+            "expiring_soon": paid_warning,
+            "show_due_alert": bool(paid_warning or paid_expired),
+            "alert_level": paid_due_alert_level(empresa),
         },
     }
 
 
 __all__ = [
     "DEFAULT_TRIAL_DAYS",
+    "DEFAULT_PLAN_CYCLE_DAYS",
+    "PLAN_DUE_WARNING_DAYS",
 
     "PLAN_FREE",
     "PLAN_START",
@@ -472,12 +660,25 @@ __all__ = [
     "plan_name",
     "plan_price",
     "plan_trial_days",
+    "plan_cycle_days",
 
     "start_trial",
     "start_start_trial",
     "start_business_trial",
     "start_enterprise_trial",
     "start_prata_trial",
+
+    "clear_paid_plan",
+    "start_paid_plan",
+    "restart_paid_cycle",
+    "configured_paid_plan_code",
+    "paid_expires_at",
+    "paid_days_left",
+    "is_paid_expired",
+    "is_paid_expiring_soon",
+    "paid_due_alert_level",
+    "trial_due_alert_level",
+    "is_billing_locked",
 
     "is_trial_active",
     "is_paid_active",

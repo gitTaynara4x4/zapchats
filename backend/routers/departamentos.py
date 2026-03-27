@@ -101,6 +101,20 @@ def _norm_hora(h: Optional[str]) -> Optional[str]:
     return h
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _pick_usage_count(counts: Dict[str, Any], *keys: str, default: int = 0) -> int:
+    for key in keys:
+        if key in counts:
+            return _safe_int(counts.get(key), default)
+    return default
+
+
 def _id_get(obj: Any, key: str, default: Any = None) -> Any:
     if obj is None:
         return default
@@ -353,16 +367,23 @@ def criar(
     """Cria um novo departamento (nome único por empresa)."""
     ensure_empresa_exists(db, empresa_id)
 
-    # ✅ QUOTA: bloquear criação se exceder limite do plano
+    # ✅ QUOTA: bloqueia criação quando plano venceu ou bateu limite
     emp = db.get(models.Empresa, empresa_id)
     if emp:
-        counts = usage_counts(db, emp.id)
+        counts = usage_counts(db, emp.id) or {}
+        current_departments = _pick_usage_count(
+            counts,
+            "departments_max",
+            "departments",
+            "departamentos",
+            default=0,
+        )
         enforce_quota(
             emp,
             "departments_max",
-            int(counts.get("departments_max", 0)),
+            current_departments,
             delta=1,
-            message="Seu plano atingiu o limite de departamentos.",
+            message="Seu plano está vencido ou atingiu o limite de departamentos.",
         )
 
     nome = payload.nome.strip()

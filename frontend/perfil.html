@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="has-sidebar prepaint">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Meu Perfil – ZapChats</title>
+
+  <script src="/frontend/js/app-base.js" defer></script>
+  <script src="/frontend/js/auth.js" defer></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <link rel="stylesheet" href="/frontend/css/perfil.css" />
+</head>
+<body>
+  <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
+
+  <main class="main">
+    <div class="profile-container">
+      <header class="section-title">
+        <h1>
+          <span class="title-ico is-active" aria-hidden="true">
+            <svg class="title-ico-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,48a40,40,0,1,1-40,40A40,40,0,0,1,128,72Zm0,136a79.65,79.65,0,0,1-57.16-24.09,64,64,0,0,1,114.32,0A79.65,79.65,0,0,1,128,208Z"/>
+            </svg>
+          </span>
+          Configurações de Perfil
+        </h1>
+        <div class="top-total">
+          <span>Gerencie sua conta e segurança</span>
+        </div>
+      </header>
+
+      <section class="perfil-grid" aria-label="Dados do perfil">
+        
+        <div class="grid-col-left">
+          <article class="box box--hero">
+            <div class="box-head">
+              <h2>Foto de Perfil</h2>
+              <p class="muted">Esta imagem aparecerá no menu lateral.</p>
+            </div>
+
+            <div class="avatar-area">
+              <div class="avatar-preview-wrapper">
+                <div class="avatar-preview" id="avatarPreviewBox" title="Clique para alterar a foto">
+                  <span id="avatarInitials">Z</span>
+                  <div class="avatar-overlay">
+                    <i class="fa-solid fa-camera"></i>
+                  </div>
+                </div>
+              </div>
+
+              <div class="avatar-meta">
+                <p class="muted">JPG, GIF ou PNG. Máximo de 4 MB.</p>
+                <div class="avatar-actions">
+                  <input
+                    type="file"
+                    id="avatarInput"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    hidden
+                  />
+                  <button type="button" class="btn btn--outline" id="btnUploadAvatar">
+                    Alterar foto
+                  </button>
+                  <button type="button" class="btn btn--ghost-danger" id="btnRemoveAvatar">
+                    Remover
+                  </button>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="box box--security">
+            <div class="box-head">
+              <h2>Segurança</h2>
+              <p class="muted">Atualize sua senha de acesso.</p>
+            </div>
+
+            <form id="formSenha" class="form-grid" autocomplete="off">
+              <div class="field field--full">
+                <label for="senha_atual">Senha atual</label>
+                <input type="password" id="senha_atual" name="senha_atual" required placeholder="••••••••" />
+              </div>
+
+              <div class="field field--full">
+                <label for="nova_senha">Nova senha</label>
+                <input type="password" id="nova_senha" name="nova_senha" required placeholder="••••••••" />
+              </div>
+
+              <div class="field field--full">
+                <label for="confirma_senha">Confirmar nova senha</label>
+                <input type="password" id="confirma_senha" name="confirma_senha" required placeholder="••••••••" />
+              </div>
+
+              <div class="form-actions field--full">
+                <button type="submit" class="btn btn--primary" id="btnSalvarSenha">
+                  Atualizar senha
+                </button>
+              </div>
+            </form>
+          </article>
+        </div>
+
+        <div class="grid-col-right">
+          <article class="box box--info">
+            <div class="box-head">
+              <h2>Informações Pessoais</h2>
+              <p class="muted">Atualize seus dados básicos de contato e identificação.</p>
+            </div>
+
+            <form id="formPerfil" class="form-grid" autocomplete="on">
+              <div class="field field--full">
+                <label for="nome">Nome completo</label>
+                <input type="text" id="nome" name="nome" required placeholder="Ex: João Silva" />
+              </div>
+
+              <div class="field field--full">
+                <label for="email">Endereço de e-mail</label>
+                <input type="email" id="email" name="email" required placeholder="joao@exemplo.com" />
+              </div>
+
+              <div class="field field--full">
+                <label for="telefone">Telefone</label>
+                <input type="tel" id="telefone" name="telefone" placeholder="(00) 00000-0000" />
+              </div>
+
+              <div class="field field--full">
+                <label for="cargo">Cargo</label>
+                <input type="text" id="cargo" name="cargo" placeholder="Ex: Desenvolvedor Front-end" />
+              </div>
+
+              <div class="form-actions form-actions--end field--full pt-4">
+                <button type="submit" class="btn btn--primary" id="btnSalvarPerfil">
+                  Salvar alterações
+                </button>
+              </div>
+            </form>
+          </article>
+        </div>
+
+      </section>
+    </div>
+
+    <div id="global-msg" role="status" aria-live="polite" aria-atomic="true"></div>
+  </main>
+
+  <script src="/frontend/js/page-guard.js" defer></script>
+  <script src="/frontend/js/pages/perfil.js" defer></script>
+</body>
+</html>

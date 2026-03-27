@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="has-sidebar prepaint">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meu Plano – ZapChats</title>
+
+  <script src="/frontend/js/app-base.js" defer></script>
+  <script src="/frontend/js/auth.js" defer></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <link rel="stylesheet" href="/frontend/css/meu-plano.css" />
+</head>
+<body>
+  <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
+
+  <main class="main">
+    <div class="plan-container">
+
+      <header class="section-title">
+        <div>
+          <h1>
+            <span class="title-ico is-active" aria-hidden="true">
+              <i class="fa-solid fa-crown"></i>
+            </span>
+            Meu Plano
+          </h1>
+          <p class="section-subtitle">
+            Veja seu plano atual, limites, recursos liberados e consumo da conta.
+          </p>
+        </div>
+
+        <div class="header-actions">
+          <a href="/planos" class="btn btn--outline">
+            <i class="fa-solid fa-layer-group"></i>
+            <span>Comparar planos</span>
+          </a>
+          <button type="button" class="btn btn--primary" id="btnReload">
+            <i class="fa-solid fa-rotate-right"></i>
+            <span>Atualizar</span>
+          </button>
+        </div>
+      </header>
+
+      <section id="alertArea" class="alert-stack"></section>
+
+      <section class="hero-grid">
+        <article class="hero-card box">
+          <div class="hero-top">
+            <div class="hero-main">
+              <p class="eyebrow">Plano atual</p>
+              <h2 id="planName">Carregando...</h2>
+              <div id="planBadges" class="badge-row"></div>
+            </div>
+
+            <div class="hero-price">
+              <span>Valor mensal</span>
+              <strong id="planPrice">—</strong>
+            </div>
+          </div>
+
+          <div id="heroMeta" class="hero-meta"></div>
+
+          <div class="hero-actions">
+            <a href="/planos" class="btn btn--outline">
+              <i class="fa-solid fa-arrow-up-right-from-square"></i>
+              <span>Ver planos</span>
+            </a>
+            <button type="button" class="btn btn--ghost" id="btnScrollCompare">
+              <i class="fa-solid fa-table-cells-large"></i>
+              <span>Comparativo</span>
+            </button>
+          </div>
+        </article>
+
+        <article class="summary-card box">
+          <div class="mini-stat">
+            <span>Contatos</span>
+            <strong id="statContacts">0</strong>
+          </div>
+          <div class="mini-stat">
+            <span>Equipe</span>
+            <strong id="statTeam">0</strong>
+          </div>
+          <div class="mini-stat">
+            <span>Departamentos</span>
+            <strong id="statDepartments">0</strong>
+          </div>
+          <div class="mini-stat">
+            <span>Números WhatsApp</span>
+            <strong id="statInstances">0</strong>
+          </div>
+          <div class="mini-stat">
+            <span>Disparos no mês</span>
+            <strong id="statBroadcasts">0</strong>
+          </div>
+          <div class="mini-stat">
+            <span>Campanhas ativas</span>
+            <strong id="statCampaigns">0</strong>
+          </div>
+        </article>
+      </section>
+
+      <section class="content-grid">
+        <article class="box">
+          <div class="card-head">
+            <div>
+              <h3>Recursos do seu plano</h3>
+              <p class="muted">Tudo o que está liberado para sua conta hoje.</p>
+            </div>
+          </div>
+          <div id="featuresList" class="feature-list"></div>
+        </article>
+
+        <article class="box">
+          <div class="card-head">
+            <div>
+              <h3>Uso atual</h3>
+              <p class="muted">Consumo versus limite efetivo da sua empresa.</p>
+            </div>
+          </div>
+          <div id="usageList" class="usage-list"></div>
+        </article>
+      </section>
+
+      <section class="content-grid bottom-grid">
+        <article class="box">
+          <div class="card-head">
+            <div>
+              <h3>Números / Instâncias</h3>
+              <p class="muted">Últimas conexões cadastradas na sua empresa.</p>
+            </div>
+          </div>
+          <div id="instancesList" class="data-list"></div>
+        </article>
+
+        <article class="box">
+          <div class="card-head">
+            <div>
+              <h3>Últimos disparos</h3>
+              <p class="muted">Resumo recente das campanhas e envios.</p>
+            </div>
+          </div>
+          <div id="broadcastList" class="data-list"></div>
+        </article>
+      </section>
+
+      <section class="box compare-box" id="compareSection">
+        <div class="card-head card-head-between">
+          <div>
+            <h3>Comparativo rápido</h3>
+            <p class="muted">Veja a diferença entre os planos pagos disponíveis.</p>
+          </div>
+          <a href="/planos" class="btn btn--outline">
+            <i class="fa-solid fa-arrow-up-right-from-square"></i>
+            <span>Abrir página pública</span>
+          </a>
+        </div>
+        <div id="planCompare" class="plan-compare-grid"></div>
+      </section>
+
+    </div>
+
+    <div id="meuPlanoToast" class="toast-message" role="alert" aria-live="assertive" aria-atomic="true">
+      <i class="toast-icon fa-solid"></i>
+      <span class="toast-text"></span>
+    </div>
+  </main>
+
+  <script src="/frontend/js/page-guard.js" defer></script>
+  <script src="/frontend/js/pages/meu-plano.js" defer></script>
+</body>
+</html>

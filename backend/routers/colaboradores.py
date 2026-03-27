@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from typing import Optional, List
-import re, json
+import re
+import json
 from urllib.parse import quote
 
 from fastapi import (
@@ -152,6 +153,20 @@ def _parse_perms(value: Optional[str | list]) -> list[str]:
     except Exception:
         pass
     return [p for p in re.split(r"[\s,;]+", s) if p]
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _usage_pick(counts: dict, *keys: str, default: int = 0) -> int:
+    for key in keys:
+        if key in counts:
+            return _safe_int(counts.get(key), default)
+    return default
 
 
 class ColaboradorOut(BaseModel):
@@ -322,8 +337,8 @@ async def criar_colaborador(
     request: Request,
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
-    nome: str = Form(...),
-    email: EmailStr = Form(...),
+    nome: Optional[str] = Form(None),
+    email: Optional[EmailStr] = Form(None),
     setor_id: Optional[int] = Form(None),
     telefone: Optional[str] = Form(None),
     cargo: Optional[str] = Form(None),
@@ -335,17 +350,6 @@ async def criar_colaborador(
     permissoes: Optional[str] = Form(None),
     avatar: Optional[UploadFile] = File(None),
 ):
-    emp = db.query(models.Empresa).get(user.empresa_id)
-    if emp:
-        counts = usage_counts(db, emp.id)
-        enforce_quota(
-            emp,
-            "users_max",
-            int(counts.get("users_max", 0)),
-            delta=1,
-            message="Seu plano atingiu o limite de colaboradores.",
-        )
-
     if request.headers.get("content-type", "").startswith("application/json"):
         payload = await request.json()
         if isinstance(payload, dict):
@@ -360,6 +364,31 @@ async def criar_colaborador(
             hora_login_inicio = payload.get("hora_login_inicio", hora_login_inicio)
             hora_login_fim = payload.get("hora_login_fim", hora_login_fim)
             horario_modo = payload.get("horario_modo", horario_modo)
+
+    if not nome or not str(nome).strip():
+        raise HTTPException(status_code=422, detail="Nome é obrigatório")
+
+    if not email:
+        raise HTTPException(status_code=422, detail="E-mail é obrigatório")
+
+    emp = db.query(models.Empresa).get(user.empresa_id)
+    if emp:
+        counts = usage_counts(db, emp.id) or {}
+        current_users = _usage_pick(
+            counts,
+            "users_max",
+            "users",
+            "usuarios",
+            "colaboradores",
+            default=0,
+        )
+        enforce_quota(
+            emp,
+            "users_max",
+            current_users,
+            delta=1,
+            message="Seu plano está vencido ou atingiu o limite de colaboradores.",
+        )
 
     setor = (
         _resolve_setor_or_departamento(db, user.empresa_id, setor_id)
@@ -399,7 +428,7 @@ async def criar_colaborador(
 
         u = models.Usuario(
             empresa_id=user.empresa_id,
-            nome=nome.strip(),
+            nome=str(nome).strip(),
             email=str(email).lower(),
             senha_hash=bcrypt.hash(senha),
             cargo=cargo or None,
@@ -438,7 +467,7 @@ async def criar_colaborador(
         empresa_id=user.empresa_id,
         setor_id=(setor.id if setor else None),
         usuario_id=usuario_id,
-        nome=nome.strip(),
+        nome=str(nome).strip(),
         email=str(email).lower(),
         senha=senha_colab_hash,
         telefone=telefone_norm,

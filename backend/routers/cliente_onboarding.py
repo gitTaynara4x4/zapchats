@@ -6,7 +6,7 @@ import time
 import threading
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Literal, List, Dict, Any
+from typing import Optional, Literal, List, Dict
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,6 +24,7 @@ except Exception:
 
 from backend import models
 from backend.utils.plans import plan_limit
+from backend.utils.entitlements import enforce_billing_active, enforce_quota
 from backend.routers.auth import get_current_user
 
 router = APIRouter(tags=["Onboarding"])  # montado como /api/onboarding/...
@@ -38,6 +39,30 @@ def _empresa_do_user(user) -> Optional[int]:
     Se não tiver (ex.: super admin), devolve None e não trava por empresa.
     """
     return getattr(user, "empresa_id", None) or getattr(user, "empresa", None)
+
+
+def _assert_empresa_access(user, empresa_id: int) -> None:
+    emp_user = _empresa_do_user(user)
+    if emp_user is not None and int(emp_user) != int(empresa_id):
+        raise HTTPException(status_code=403, detail="Empresa inválida para este usuário")
+
+
+def _get_empresa_or_404(db: Session, empresa_id: int) -> models.Empresa:
+    empresa = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada.")
+    return empresa
+
+
+def _count_connected_instances(db: Session, empresa_id: int) -> int:
+    return (
+        db.query(models.EmpresaInstancia)
+        .filter(
+            models.EmpresaInstancia.empresa_id == empresa_id,
+            models.EmpresaInstancia.connected.is_(True),
+        )
+        .count()
+    )
 
 
 # =============================
@@ -57,6 +82,32 @@ def _max_instancias_for_empresa(empresa: models.Empresa) -> int:
     Considera trial automaticamente via plans.py.
     """
     return int(plan_limit(empresa) or 0)
+
+
+def _enforce_instance_creation_allowed(db: Session, empresa: models.Empresa) -> None:
+    """
+    Regra central para criação/reconexão operacional de instância.
+    """
+    enforce_billing_active(
+        empresa,
+        message="Seu plano está vencido. Renove para conectar ou reativar instâncias.",
+    )
+
+    limite = _max_instancias_for_empresa(empresa)
+    if limite <= 0:
+        raise HTTPException(
+            status_code=403,
+            detail="Seu plano atual não permite instâncias de WhatsApp.",
+        )
+
+    conectadas = _count_connected_instances(db, empresa.id)
+    enforce_quota(
+        empresa,
+        "whatsapp_instances_max",
+        conectadas,
+        delta=1,
+        message=f"Limite de instâncias atingido para o plano. Plano permite {limite} instância(s).",
+    )
 
 
 # =============================
@@ -503,24 +554,12 @@ def conectar(
     if not EVOLUTION_URL or not EVOLUTION_KEY:
         raise HTTPException(500, "Evolution API não configurada (EVOLUTION_URL/KEY).")
 
-    emp_user = _empresa_do_user(user)
-    if emp_user is not None and int(emp_user) != int(payload.empresa_id):
-        raise HTTPException(status_code=403, detail="Empresa inválida para este usuário")
+    _assert_empresa_access(user, payload.empresa_id)
 
-    empresa = db.query(models.Empresa).filter(models.Empresa.id == payload.empresa_id).first()
-    if not empresa:
-        raise HTTPException(404, "Empresa não encontrada.")
+    empresa = _get_empresa_or_404(db, payload.empresa_id)
 
-    limite = _max_instancias_for_empresa(empresa)
-    conectadas = db.query(models.EmpresaInstancia).filter(
-        models.EmpresaInstancia.empresa_id == empresa.id,
-        models.EmpresaInstancia.connected.is_(True),
-    ).count()
-    if conectadas >= limite:
-        raise HTTPException(
-            403,
-            f"Limite de instâncias atingido para o plano. Plano permite {limite} instância(s).",
-        )
+    # trava por vencimento + quota
+    _enforce_instance_creation_allowed(db, empresa)
 
     number_digits = _only_digits(payload.whatsapp_numero)
     if not number_digits:
@@ -531,6 +570,7 @@ def conectar(
         models.EmpresaInstancia.numero_instancia == number_digits,
         models.EmpresaInstancia.connected.is_(False),
     ).first()
+
     if pendente:
         if payload.apelido:
             pendente.apelido = payload.apelido
@@ -556,6 +596,7 @@ def conectar(
                         "pairingCode": qrd.get("pairingCode") or qrd.get("code"),
                         "limit": qrd.get("limit") or qrd.get("timeout"),
                     }
+
         return {
             "ok": True,
             "instance": pendente.instance_name,
@@ -599,6 +640,7 @@ def conectar(
     inst_row = db.query(models.EmpresaInstancia).filter(
         models.EmpresaInstancia.instance_name == inst
     ).first()
+
     try:
         if not inst_row:
             inst_row = models.EmpresaInstancia(
@@ -619,17 +661,17 @@ def conectar(
             inst_row.historico_restaurar = payload.historico_restaurar
 
         if hasattr(empresa, "quantidade_instancias"):
-            empresa.quantidade_instancias = db.query(models.EmpresaInstancia).filter(
-                models.EmpresaInstancia.empresa_id == empresa.id,
-                models.EmpresaInstancia.connected.is_(True),
-            ).count()
+            empresa.quantidade_instancias = _count_connected_instances(db, empresa.id)
 
         db.commit()
+
     except IntegrityError:
         db.rollback()
+
         conflito = db.query(models.EmpresaInstancia).filter(
             models.EmpresaInstancia.numero_instancia == number_digits
         ).first()
+
         if conflito and not conflito.connected and conflito.empresa_id == empresa.id:
             if payload.apelido:
                 conflito.apelido = payload.apelido
@@ -655,6 +697,7 @@ def conectar(
                             "pairingCode": qrd.get("pairingCode") or qrd.get("code"),
                             "limit": qrd.get("limit") or qrd.get("timeout"),
                         }
+
             return {
                 "ok": True,
                 "instance": conflito.instance_name,
@@ -662,6 +705,7 @@ def conectar(
                 "qrcode": qr or None,
                 "numero": conflito.numero_instancia,
             }
+
         raise HTTPException(409, "Este número já está cadastrado em uma instância.")
 
     conn_json = _evo_connect(inst, number_digits)
@@ -706,9 +750,13 @@ def refresh_qr(
     if not row:
         raise HTTPException(status_code=404, detail="Instância não encontrada.")
 
-    emp_user = _empresa_do_user(user)
-    if emp_user is not None and int(emp_user) != int(row.empresa_id):
-        raise HTTPException(status_code=403, detail="Instância não pertence à sua empresa")
+    _assert_empresa_access(user, row.empresa_id)
+
+    empresa = _get_empresa_or_404(db, row.empresa_id)
+    enforce_billing_active(
+        empresa,
+        message="Seu plano está vencido. Renove para reativar ou atualizar QR de instâncias.",
+    )
 
     js = _evo_try_refresh_qr(instance)
 
@@ -726,6 +774,7 @@ def refresh_qr(
                     "pairingCode": qrd.get("pairingCode") or qrd.get("code"),
                     "limit": qrd.get("limit") or qrd.get("timeout"),
                 }
+
     return {"ok": True, "instance": instance, "qrcode": (qr or None)}
 
 
@@ -743,9 +792,13 @@ def consultar_saude_numero(
     - salva o resultado completo na instância
     - devolve resumo para o modal do front
     """
-    emp_user = _empresa_do_user(user)
-    if emp_user is not None and int(emp_user) != int(payload.empresa_id):
-        raise HTTPException(status_code=403, detail="Empresa inválida para este usuário")
+    _assert_empresa_access(user, payload.empresa_id)
+
+    empresa = _get_empresa_or_404(db, payload.empresa_id)
+    enforce_billing_active(
+        empresa,
+        message="Seu plano está vencido. Renove para consultar a saúde das instâncias.",
+    )
 
     inst = db.query(models.EmpresaInstancia).filter(
         models.EmpresaInstancia.id == instancia_id,
@@ -816,9 +869,6 @@ def marcar_conectado_e_cancelar_cleanup(instance: str, db: Session):
         row.connected = True
         emp = db.query(models.Empresa).filter(models.Empresa.id == row.empresa_id).first()
         if emp and hasattr(emp, "quantidade_instancias"):
-            emp.quantidade_instancias = db.query(models.EmpresaInstancia).filter(
-                models.EmpresaInstancia.empresa_id == emp.id,
-                models.EmpresaInstancia.connected.is_(True),
-            ).count()
+            emp.quantidade_instancias = _count_connected_instances(db, emp.id)
         db.commit()
     cancel_auto_cleanup(instance)

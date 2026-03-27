@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import asyncio
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple, Dict, Set, Any
+from typing import List, Optional, Tuple, Dict, Set
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
@@ -16,7 +16,11 @@ from backend.routers.auth import get_current_identity
 from backend import models
 
 # ===== Plano/Entitlements =====
-from backend.utils.entitlements import enforce_quota, has_feature
+from backend.utils.entitlements import (
+    enforce_quota,
+    has_feature,
+    enforce_billing_active,
+)
 
 # ===== Privacidade por instâncias (colaborador) =====
 from backend.security.instancias import instancias_visiveis
@@ -480,6 +484,10 @@ async def _processar_disparo(disparo_id: int) -> None:
     """
     Processa um disparo: envia 1 por 1 respeitando o delay.
     """
+    if SessionLocal is None:
+        print("[DISPARO] SessionLocal indisponível; worker abortado.")
+        return
+
     db: Session = SessionLocal()
     try:
         disparo = db.query(models.Disparo).filter(models.Disparo.id == disparo_id).first()
@@ -501,8 +509,30 @@ async def _processar_disparo(disparo_id: int) -> None:
 
         while True:
             db.refresh(disparo)
+
             if disparo.status == "cancelado":
                 print(f"[DISPARO] {disparo.id} cancelado durante o processamento.")
+                break
+
+            empresa = db.query(models.Empresa).filter(models.Empresa.id == disparo.empresa_id).first()
+            if not empresa:
+                disparo.status = "erro"
+                disparo.finalizado_em = datetime.now(timezone.utc)
+                db.commit()
+                print(f"[DISPARO] {disparo.id} sem empresa vinculada.")
+                break
+
+            # se venceu no meio do processo, para os próximos envios
+            try:
+                enforce_billing_active(
+                    empresa,
+                    message="Plano vencido durante o processamento do disparo.",
+                )
+            except HTTPException:
+                disparo.status = "cancelado"
+                disparo.finalizado_em = datetime.now(timezone.utc)
+                db.commit()
+                print(f"[DISPARO] {disparo.id} interrompido por vencimento do plano.")
                 break
 
             dest = (
@@ -560,10 +590,25 @@ async def _processar_disparo(disparo_id: int) -> None:
 )
 async def ia_melhorar_disparo(
     body: dict = Body(...),
+    db: Session = Depends(get_db),
     identity: dict = Depends(get_current_identity),
 ):
     if identity is None:
         raise HTTPException(status_code=401, detail="Não autenticado")
+
+    empresa_id, _, _ = _get_ids(identity)
+    empresa = _get_empresa_or_404(db, empresa_id)
+
+    enforce_billing_active(
+        empresa,
+        message="Seu plano está vencido. Renove para usar a IA de disparos.",
+    )
+
+    if not has_feature(empresa, "feature_broadcasts"):
+        raise HTTPException(
+            status_code=403,
+            detail="Seu plano não permite recursos de disparo.",
+        )
 
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Corpo inválido. Envie JSON.")
@@ -612,6 +657,12 @@ async def criar_disparo_simples(
 
     empresa_id, colab_id, usuario_id = _get_ids(identity)
     empresa = _get_empresa_or_404(db, empresa_id)
+
+    # 🔒 vencimento
+    enforce_billing_active(
+        empresa,
+        message="Seu plano está vencido. Renove para criar disparos.",
+    )
 
     # 🔒 Plano: feature_broadcasts
     if not has_feature(empresa, "feature_broadcasts"):

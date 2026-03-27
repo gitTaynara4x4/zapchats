@@ -1,4 +1,3 @@
-# backend/routers/usuarios.py
 from __future__ import annotations
 
 from typing import Optional
@@ -54,7 +53,10 @@ async def _pick_upload(
 ) -> UploadFile:
     up = avatar or file or upload
     if not up:
-        raise HTTPException(status_code=422, detail="Envie um arquivo de imagem em 'file' (ou 'avatar'/'upload').")
+        raise HTTPException(
+            status_code=422,
+            detail="Envie um arquivo de imagem em 'file' (ou 'avatar'/'upload').",
+        )
     return up
 
 
@@ -66,7 +68,6 @@ async def _read_and_validate_image(up: UploadFile) -> tuple[bytes, str]:
         raise HTTPException(status_code=413, detail="Avatar muito grande (máx 2MB).")
 
     mime = (up.content_type or "").strip() or "application/octet-stream"
-    # deixa passar image/*; se vier vazio mas for png/jpg pelo nome, ok também
     if not mime.lower().startswith("image/"):
         raise HTTPException(status_code=415, detail="Arquivo precisa ser uma imagem (image/*).")
 
@@ -94,7 +95,6 @@ def atualizar_me(
     db: Session = Depends(get_db),
     me=Depends(get_current_user),
 ):
-    # 🔑 importante: recarrega o usuário dentro da MESMA sessão do endpoint
     u = db.query(models.Usuario).get(me.id)
     if not u:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
@@ -114,7 +114,7 @@ def atualizar_me(
     return u
 
 
-# Aceita POST e PUT (seu sidebar usa POST; colaboradores.js usa PUT)
+# aceita POST e PUT
 @router.post("/me/avatar")
 @router.put("/me/avatar")
 async def upload_avatar_me(
@@ -168,7 +168,7 @@ def get_avatar_me(
 
 
 # =========================
-# Avatar por ID (pra tela de colaboradores)
+# Avatar por ID
 # =========================
 @router.post("/{usuario_id}/avatar")
 @router.put("/{usuario_id}/avatar")
@@ -180,13 +180,13 @@ async def upload_avatar_by_id(
     file: Optional[UploadFile] = File(None),
     upload: Optional[UploadFile] = File(None),
 ):
-    # só admin ou o próprio usuário
     if not getattr(me, "is_admin", False) and int(usuario_id) != int(me.id):
         raise HTTPException(status_code=403, detail="Sem permissão para alterar avatar de outro usuário.")
 
     u = db.query(models.Usuario).get(usuario_id)
     if not u:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
     _assert_mesma_empresa(u.empresa_id, me)
 
     up = await _pick_upload(avatar, file, upload)
@@ -216,6 +216,7 @@ def get_avatar_by_id(
     u = db.query(models.Usuario).get(usuario_id)
     if not u:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
     _assert_mesma_empresa(u.empresa_id, me)
 
     if not u.avatar_data:

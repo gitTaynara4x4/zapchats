@@ -1,9 +1,10 @@
 from __future__ import annotations
+
 from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Body, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-
 from pydantic import BaseModel, Field
 
 from backend.database import get_db
@@ -12,43 +13,52 @@ from backend import models
 
 router = APIRouter(prefix="/api/permissoes", tags=["Permissões"])
 
-# ===== Catálogo de permissões (exibido no front) =====
+
+# =========================================================
+# Catálogo de permissões (exibido no front)
+# =========================================================
 PERMISSOES_CATALOGO = [
-    {"id": "dashboard.ver",             "label": "Ver Dashboard"},
+    {"id": "dashboard.ver",                  "label": "Ver Dashboard"},
+
+    # ===== PERFIL =====
+    {"id": "perfil.ver",                     "label": "Ver perfil"},
+    {"id": "perfil.editar",                  "label": "Editar perfil"},
+
+    # ===== CONFIGURAÇÕES =====
+    {"id": "configuracoes.ver",              "label": "Ver configurações"},
+    {"id": "configuracoes.editar",           "label": "Editar configurações"},
 
     # ===== MÓDULO CLIENTES =====
-    {"id": "clientes.ver",              "label": "Ver clientes"},
-    {"id": "clientes.criar",            "label": "Criar clientes"},
-    {"id": "clientes.editar",           "label": "Editar clientes"},
-    {"id": "clientes.importar_exportar","label": "Importar/Exportar clientes"},
-    {"id": "clientes.excluir",          "label": "Excluir clientes"},
+    {"id": "clientes.ver",                   "label": "Ver clientes"},
+    {"id": "clientes.criar",                 "label": "Criar clientes"},
+    {"id": "clientes.editar",                "label": "Editar clientes"},
+    {"id": "clientes.importar_exportar",     "label": "Importar/Exportar clientes"},
+    {"id": "clientes.excluir",               "label": "Excluir clientes"},
 
     # ===== OUTROS MÓDULOS =====
-    {"id": "departamentos.gerenciar",   "label": "Gerenciar departamentos"},
-    {"id": "usuarios.gerenciar",        "label": "Gerenciar usuários/equipe"},
-    {"id": "colaboradores.ver",         "label": "Ver colaboradores"},
-    {"id": "colaboradores.gerenciar",   "label": "Gerenciar colaboradores"},
-    {"id": "colaboradores.redefinir_senha", "label": "Redefinir senha de colaboradores"},
-
-    {"id": "integracoes.whatsapp",      "label": "Gerenciar integrações WhatsApp"},
-    {"id": "config.editar",             "label": "Editar configurações"},
-    {"id": "chatinterno.ver",           "label": "Ver Chat Interno"},
-    {"id": "chatbot.configurar",        "label": "Configurar Chatbot"},
+    {"id": "departamentos.gerenciar",        "label": "Gerenciar departamentos"},
+    {"id": "usuarios.gerenciar",             "label": "Gerenciar usuários/equipe"},
+    {"id": "colaboradores.ver",              "label": "Ver colaboradores"},
+    {"id": "colaboradores.gerenciar",        "label": "Gerenciar colaboradores"},
+    {"id": "colaboradores.redefinir_senha",  "label": "Redefinir senha de colaboradores"},
+    {"id": "integracoes.whatsapp",           "label": "Gerenciar integrações WhatsApp"},
+    {"id": "chatinterno.ver",                "label": "Ver Chat Interno"},
+    {"id": "chatbot.configurar",             "label": "Configurar Chatbot"},
 
     # ===== ATENDIMENTO =====
-    {"id": "atendimento.ver",           "label": "Ver Atendimento"},
-    {"id": "atendimento.enviar",        "label": "Enviar mensagens no Atendimento"},
-    {"id": "atendimento.apagar_mensagens", "label": "Apagar mensagens do Atendimento"},
-    {"id": "arquivos.ver",              "label": "Ver Mídias/Arquivos"},
+    {"id": "atendimento.ver",                "label": "Ver Atendimento"},
+    {"id": "atendimento.enviar",             "label": "Enviar mensagens no Atendimento"},
+    {"id": "atendimento.apagar_mensagens",   "label": "Apagar mensagens do Atendimento"},
+    {"id": "arquivos.ver",                   "label": "Ver Mídias/Arquivos"},
 
     # ===== DISPAROS =====
-    {"id": "disparos.ver",              "label": "Ver disparos"},
-    {"id": "disparos.enviar",           "label": "Criar/enviar disparos"},
-    {"id": "disparos.configurar",       "label": "Configurar disparos (cancelar, ajustar fila, etc.)"},
+    {"id": "disparos.ver",                   "label": "Ver disparos"},
+    {"id": "disparos.enviar",                "label": "Criar/enviar disparos"},
+    {"id": "disparos.configurar",            "label": "Configurar disparos (cancelar, ajustar fila, etc.)"},
 
     # ===== MÓDULO DE E-MAIL =====
-    {"id": "email.ver",                 "label": "Ver E-mails"},
-    {"id": "email.gerenciar",           "label": "Gerenciar contas de E-mail"},
+    {"id": "email.ver",                      "label": "Ver E-mails"},
+    {"id": "email.gerenciar",                "label": "Gerenciar contas de E-mail"},
 ]
 
 
@@ -58,13 +68,16 @@ def _all_perm_ids() -> List[str]:
 
 def _sync_catalog_to_db(db: Session) -> None:
     for p in PERMISSOES_CATALOGO:
-        pid, label = p["id"], p["label"]
+        pid = p["id"]
+        label = p["label"]
+
         db.execute(
             text(
                 """
                 INSERT INTO permissoes (id, nome)
                 VALUES (:id, :nome)
-                ON CONFLICT (id) DO UPDATE SET nome = EXCLUDED.nome
+                ON CONFLICT (id) DO UPDATE
+                SET nome = EXCLUDED.nome
                 """
             ),
             {"id": pid, "nome": label},
@@ -72,12 +85,18 @@ def _sync_catalog_to_db(db: Session) -> None:
     db.commit()
 
 
+# =========================================================
+# Listagem do catálogo
+# =========================================================
 @router.get("", response_model=List[dict])
 def listar_permissoes(
     empresa_id: Optional[int] = None,  # compatibilidade
     user=Depends(get_current_user),
 ):
-    """Lista o catálogo de permissões (empresa_id é ignorado; compatibilidade)."""
+    """
+    Lista o catálogo de permissões.
+    O empresa_id é ignorado, mantido apenas por compatibilidade.
+    """
     return PERMISSOES_CATALOGO
 
 
@@ -86,35 +105,37 @@ def syncar_catalogo(
     user: models.Usuario = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Sincroniza o catálogo no banco (tabela 'permissoes')."""
+    """
+    Sincroniza o catálogo de permissões no banco.
+    """
     _sync_catalog_to_db(db)
     return
 
 
-# ===== Minhas permissões (sem bypass; com fallback para admin sem espelho) =====
+# =========================================================
+# Minhas permissões
+# =========================================================
 @router.get("/minhas", response_model=List[str])
 def minhas_permissoes(
-    identity = Depends(get_current_identity),
+    identity=Depends(get_current_identity),
     db: Session = Depends(get_db),
 ):
     """
     Retorna as permissões efetivas do usuário logado.
 
-    Regras simples:
-
-      - Se for USUÁRIO (admin):
-          * usa as permissões que já vieram no token (/api/auth/me)
-          * se por acaso vier vazio, devolve TODAS as permissões do catálogo.
-
-      - Se for COLABORADOR:
-          * se o token já tiver permissões, usa elas;
-          * se não tiver, busca na tabela colaboradores_permissoes.
+    Regras:
+    - Admin sempre recebe TODAS as permissões do catálogo
+      (evita ficar preso em token/sessão antigos).
+    - Usuário comum:
+        * usa as permissões do token, se existirem
+        * se não existir, retorna vazio
+    - Colaborador:
+        * usa as permissões do token, se existirem
+        * senão busca na tabela colaboradores_permissoes
     """
-    empresa_id = identity.get("empresa_id")
-    kind      = identity.get("kind")      # "usuario" ou "colaborador"
-    is_admin  = bool(identity.get("is_admin"))
+    kind = identity.get("kind")  # "usuario" ou "colaborador"
+    is_admin = bool(identity.get("is_admin"))
 
-    # Permissões que já vieram no token (/api/auth/me)
     perms_claim = (
         identity.get("permissoes")
         or identity.get("perms")
@@ -123,26 +144,24 @@ def minhas_permissoes(
         or []
     )
 
-    # -------------------------
-    # 1) USUÁRIO (admin)
-    # -------------------------
+    # -----------------------------------------
+    # 0) ADMIN sempre recebe tudo
+    # -----------------------------------------
+    if is_admin:
+        return _all_perm_ids()
+
+    # -----------------------------------------
+    # 1) Usuário comum
+    # -----------------------------------------
     if kind == "usuario":
-        # Se o token já trouxe permissões, usa elas
         if perms_claim:
             return sorted({str(p) for p in perms_claim})
-
-        # Fallback: admin sem lista -> todas do catálogo
-        if is_admin:
-            return _all_perm_ids()
-
-        # Usuário não-admin (quase não usamos hoje)
         return []
 
-    # -------------------------
-    # 2) COLABORADOR
-    # -------------------------
+    # -----------------------------------------
+    # 2) Colaborador
+    # -----------------------------------------
     if kind == "colaborador":
-        # Se o token já tem permissões, usa elas (mais rápido)
         if perms_claim:
             return sorted({str(p) for p in perms_claim})
 
@@ -163,21 +182,21 @@ def minhas_permissoes(
                 ),
                 {"cid": colab_id},
             ).fetchall()
+
             return [r[0] for r in rows]
         except Exception as e:
             print("[PERMISSOES] erro em /api/permissoes/minhas (colaborador):", e)
             return []
 
-    # -------------------------
+    # -----------------------------------------
     # 3) Fallback genérico
-    # -------------------------
-    if is_admin:
-        return _all_perm_ids()
-
+    # -----------------------------------------
     return []
 
 
-# ===== Endpoints para ver/alterar permissões de um colaborador =====
+# =========================================================
+# Ver permissões de um colaborador
+# =========================================================
 @router.get("/colaboradores/{colab_id}", response_model=List[str])
 def permissoes_do_colaborador(
     colab_id: int,
@@ -199,6 +218,7 @@ def permissoes_do_colaborador(
         ),
         {"cid": colab_id},
     ).fetchall()
+
     return [r[0] for r in rows]
 
 
@@ -206,7 +226,14 @@ class PermsUpdateBody(BaseModel):
     permissoes: List[str] = Field(default_factory=list)
 
 
-@router.put("/colaboradores/{colab_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+# =========================================================
+# Salvar permissões de um colaborador
+# =========================================================
+@router.put(
+    "/colaboradores/{colab_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
 def salvar_permissoes_do_colaborador(
     colab_id: int,
     body: PermsUpdateBody = Body(...),
@@ -217,22 +244,21 @@ def salvar_permissoes_do_colaborador(
     if not colab or colab.empresa_id != user.empresa_id:
         raise HTTPException(status_code=404, detail="Colaborador não encontrado")
 
-    # valida ids
-    ids = list(dict.fromkeys(body.permissoes))  # remove duplicados mantendo ordem
+    ids = list(dict.fromkeys(body.permissoes))
     valid = set(_all_perm_ids())
+
     for pid in ids:
         if pid not in valid:
             raise HTTPException(status_code=422, detail=f"Permissão inválida: {pid}")
 
-    # garante que catálogo está no banco
     _sync_catalog_to_db(db)
 
-    # sobrescreve permissões do colaborador
     with db.begin():
         db.execute(
             text("DELETE FROM colaboradores_permissoes WHERE colaborador_id = :cid"),
             {"cid": colab_id},
         )
+
         for pid in ids:
             db.execute(
                 text(
@@ -243,4 +269,5 @@ def salvar_permissoes_do_colaborador(
                 ),
                 {"cid": colab_id, "pid": pid},
             )
+
     return

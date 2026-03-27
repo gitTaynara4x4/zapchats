@@ -1,4 +1,3 @@
-# backend/routers/chatbot_setores.py
 from __future__ import annotations
 
 import os
@@ -18,7 +17,11 @@ from backend.database import get_db
 
 # Reusa o client Evolution já pronto no send
 from backend.routers.atendimento_send import _evo_post  # type: ignore
-
+from backend.utils.plans import (
+    has_feature as plan_has_feature,
+    is_billing_locked,
+    effective_plan,
+)
 
 router = APIRouter(prefix="/api", tags=["Chatbot (Triagem Setores)"])
 
@@ -79,6 +82,41 @@ def _resolve_emp_inst_from_instance_name(db: Session, instance_name: str) -> Tup
     if not row:
         return 0, 0
     return int(row["empresa_id"]), int(row["id"])
+
+
+def _get_empresa(db: Session, empresa_id: int) -> Optional[models.Empresa]:
+    if not empresa_id:
+        return None
+    try:
+        return db.get(models.Empresa, empresa_id)
+    except Exception:
+        return None
+
+
+def _runtime_feature_allowed(
+    db: Session,
+    *,
+    empresa_id: int,
+    feature_key: str,
+) -> Tuple[bool, str, Optional[str]]:
+    """
+    Valida se a execução runtime da automação pode rodar.
+    Retorna:
+      (allowed, reason, plan_code)
+    """
+    emp = _get_empresa(db, empresa_id)
+    if not emp:
+        return False, "empresa_not_found", None
+
+    plan_code = effective_plan(emp)
+
+    if is_billing_locked(emp):
+        return False, "billing_locked", plan_code
+
+    if not plan_has_feature(emp, feature_key):
+        return False, "feature_missing", plan_code
+
+    return True, "ok", plan_code
 
 
 def _find_cliente(
@@ -575,6 +613,7 @@ def auto_messages_handle_inbound(
       - só processa ENTRADA
       - respeita chatbot_configs.config.features.auto_messages
       - evita reenvio em sequência usando dedup por última conversa
+      - respeita billing/feature do plano
     """
     if (direction or "").lower() == "saida":
         return {"ok": True, "action": "ignore_saida"}
@@ -584,6 +623,20 @@ def auto_messages_handle_inbound(
 
     if not empresa_id or not instancia_id or not telefone_digits or not texto:
         return {"ok": True, "action": "noop_invalid"}
+
+    allowed, reason, plan_code = _runtime_feature_allowed(
+        db,
+        empresa_id=empresa_id,
+        feature_key="feature_automation",
+    )
+    if not allowed:
+        return {
+            "ok": True,
+            "action": "noop_automation_blocked",
+            "reason": reason,
+            "plan": plan_code,
+            "feature": "feature_automation",
+        }
 
     instancia_nome, empresa_nome = _fetch_empresa_instancia_info(
         db, empresa_id=empresa_id, instancia_id=instancia_id
@@ -683,6 +736,7 @@ def triagem_handle_inbound(
           - Atualiza triagem_ultima_msg_em = agora
           - Se precisa de triagem: manda menu ou aceita escolha e salva departamento_id
           - Respeita config salva em chatbot_configs.config.features.auto_messages_departments
+          - respeita billing/feature do plano
       - Se o TTL expirou, a PRIMEIRA mensagem após expirar sempre mostra o menu
         e não tenta interpretar o texto como escolha de setor.
     """
@@ -694,6 +748,20 @@ def triagem_handle_inbound(
 
     if not empresa_id or not instancia_id or not telefone_digits or not texto:
         return {"ok": True, "action": "noop_invalid"}
+
+    allowed, reason, plan_code = _runtime_feature_allowed(
+        db,
+        empresa_id=empresa_id,
+        feature_key="feature_advanced_automation",
+    )
+    if not allowed:
+        return {
+            "ok": True,
+            "action": "noop_triage_blocked",
+            "reason": reason,
+            "plan": plan_code,
+            "feature": "feature_advanced_automation",
+        }
 
     instancia_nome, empresa_nome = _fetch_empresa_instancia_info(
         db, empresa_id=empresa_id, instancia_id=instancia_id

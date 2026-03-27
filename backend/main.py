@@ -53,6 +53,7 @@ from backend.routers import admin_planos
 
 # DB
 from backend.database import Base, engine, SessionLocal
+from backend import models
 
 # Integrações
 from backend.integrations.rabbit_consumer import start_rabbit_consumer
@@ -60,6 +61,11 @@ from backend.integrations.evo_ws_listener import start_evo_ws_listener
 import backend.routers.auth as auth_router
 from backend.routers.auth import get_current_user
 from backend.integrations.evolution import router as evolution_router
+from backend.routers.perfil import router as perfil_router
+from backend.routers.meu_plano import router as meu_plano_router
+
+# Plans / billing
+from backend.utils.plans import is_billing_locked
 
 # Evo handlers/registry
 from backend.integrations.evo_handlers import (
@@ -117,6 +123,24 @@ ALLOWED_HOSTS = (os.getenv(
     "localhost,127.0.0.1,zapschat.com.br,www.zapschat.com.br"
 ) or "").split(",")
 
+# Billing: páginas premium para redirecionar quando vencido
+BILLING_BLOCKED_HTML_PATHS = {
+    "/conectar",
+    "/disparos",
+    "/chatbot",
+    "/email",
+}
+
+BILLING_ALLOWED_WHEN_LOCKED = {
+    "/dashboard",
+    "/clientes",
+    "/atendimentos",
+    "/meu-plano",
+    "/perfil",
+    "/configuracoes",
+    "/planos",
+}
+
 
 def _is_https(request: Request) -> bool:
     proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "").lower()
@@ -173,6 +197,51 @@ def _clear_auth_cookies(resp: StarletteResponse):
             pass
 
 
+def _int_or_none(v):
+    try:
+        if v is None:
+            return None
+        return int(v)
+    except Exception:
+        return None
+
+
+def _billing_locked_for_empresa_id(empresa_id: int | None) -> bool:
+    if not empresa_id:
+        return False
+
+    db: Session = SessionLocal()
+    try:
+        emp = db.query(models.Empresa).filter(models.Empresa.id == int(empresa_id)).first()
+        if not emp:
+            return False
+        return bool(is_billing_locked(emp))
+    except Exception:
+        return False
+    finally:
+        db.close()
+
+
+def _html_billing_redirect(path: str, query: str, message: str) -> RedirectResponse:
+    next_url = path + (("?" + query) if query else "")
+    motivo = quote_plus(message)[:300]
+    nxt = quote_plus(next_url)[:1000]
+    resp = RedirectResponse(
+        url=f"/meu-plano?billing=locked&motivo={motivo}&next={nxt}",
+        status_code=302,
+    )
+    resp.headers["X-Billing-Locked"] = "1"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+def _apply_billing_header(resp: StarletteResponse, locked: bool):
+    try:
+        resp.headers["X-Billing-Locked"] = "1" if locked else "0"
+    except Exception:
+        pass
+
+
 # =======================================
 # FastAPI app
 # =======================================
@@ -193,7 +262,7 @@ app.add_middleware(
         "Authorization", "Content-Type", "X-CSRF-Token",
         "X-Empresa-Id",
     ],
-    expose_headers=["Retry-After", "X-Auth-Gate"],
+    expose_headers=["Retry-After", "X-Auth-Gate", "X-Billing-Locked"],
 )
 
 # =======================================
@@ -374,13 +443,7 @@ async def auth_html_gate(request: Request, call_next):
         resp.headers["X-Auth-Gate"] = "missing-cookie"
         return resp
 
-    norm = _norm_path_for_perm(path)
-    required = REQUIRED_PERMS.get(norm)
-    if not required:
-        resp = await call_next(request)
-        _no_cache_html(resp)
-        return resp
-
+    # valida token SEMPRE para qualquer HTML logado
     try:
         payload = auth_router._decode_token(token)
     except HTTPException:
@@ -390,19 +453,47 @@ async def auth_html_gate(request: Request, call_next):
         _clear_auth_cookies(resp)
         return resp
 
+    norm = _norm_path_for_perm(path)
+    required = REQUIRED_PERMS.get(norm)
+
     sub = payload.get("sub")
     role = (payload.get("role") or "").lower()
+    payload_empresa_id = _int_or_none(payload.get("empresa_id"))
+    cookie_empresa_id = _int_or_none(empresa_cookie)
+    effective_empresa_id = cookie_empresa_id or payload_empresa_id
 
+    billing_locked = _billing_locked_for_empresa_id(effective_empresa_id)
+
+    # trava global de páginas premium quando vencido
+    if billing_locked and norm in BILLING_BLOCKED_HTML_PATHS and norm not in BILLING_ALLOWED_WHEN_LOCKED:
+        return _html_billing_redirect(
+            path,
+            request.url.query,
+            "Seu plano está vencido. Renove para continuar usando este módulo.",
+        )
+
+    # se a rota não exige permissão específica, deixa seguir
+    if not required:
+        resp = await call_next(request)
+        _no_cache_html(resp)
+        _apply_billing_header(resp, billing_locked)
+        return resp
+
+    # usuário admin (não colaborador) passa
     if not (isinstance(sub, str) and sub.startswith("colab-")):
         resp = await call_next(request)
         _no_cache_html(resp)
+        _apply_billing_header(resp, billing_locked)
         return resp
 
+    # colaborador com role admin passa
     if role == "admin":
         resp = await call_next(request)
         _no_cache_html(resp)
+        _apply_billing_header(resp, billing_locked)
         return resp
 
+    # colaborador comum → buscar permissões no DB
     try:
         colab_id = int(sub.split("colab-", 1)[1])
     except Exception:
@@ -425,6 +516,7 @@ async def auth_html_gate(request: Request, call_next):
 
     resp = await call_next(request)
     _no_cache_html(resp)
+    _apply_billing_header(resp, billing_locked)
     return resp
 
 
@@ -686,6 +778,10 @@ app.include_router(internal_chat_router.router)
 app.include_router(clients_central_router)
 app.include_router(chatbot_setores_router.router)
 app.include_router(evolution_router)
+
+app.include_router(perfil_router)
+app.include_router(meu_plano_router)
+
 
 # =======================================
 # uploads públicos + arquivos estáticos

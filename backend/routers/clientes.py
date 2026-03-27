@@ -36,7 +36,10 @@ def tz_sao_paulo():
 from backend.database import get_db
 from backend import models
 from backend.routers.auth import get_current_identity
-from backend.utils.entitlements import enforce_quota, has_feature
+from backend.utils.entitlements import (
+    enforce_quota,
+    enforce_feature,
+)
 from backend.security.instancias import instancias_visiveis
 from backend.cache.redis_client import (
     get_json as cache_get_json,
@@ -666,7 +669,13 @@ def criar_cliente(
         .scalar()
         or 0
     )
-    enforce_quota(empresa, "contacts_max", current_contacts, delta=1)
+    enforce_quota(
+        empresa,
+        "contacts_max",
+        current_contacts,
+        delta=1,
+        message="Seu plano está vencido ou no limite. Renove para cadastrar novos clientes.",
+    )
 
     colab_id = body.colaborador_id
     if colab_id is not None:
@@ -728,11 +737,11 @@ def exportar_clientes(
 
     empresa = _get_empresa_or_404(db, empresa_id)
 
-    if not has_feature(empresa, "feature_export"):
-        raise HTTPException(
-            status_code=403,
-            detail="Seu plano não permite exportação de clientes (feature_export).",
-        )
+    enforce_feature(
+        empresa,
+        "feature_export",
+        message="Seu plano não permite exportação de clientes ou está vencido. Renove para continuar.",
+    )
 
     q = db.query(models.Cliente).filter(models.Cliente.empresa_id == empresa_id)
     q = _apply_instancias_filter(identity, db, q)
@@ -835,11 +844,11 @@ def importar_clientes(
 
     empresa = _get_empresa_or_404(db, empresa_id)
 
-    if not has_feature(empresa, "feature_import"):
-        raise HTTPException(
-            status_code=403,
-            detail="Seu plano não permite importação de clientes (feature_import).",
-        )
+    enforce_feature(
+        empresa,
+        "feature_import",
+        message="Seu plano não permite importação de clientes ou está vencido. Renove para continuar.",
+    )
 
     name = (arquivo.filename or "").lower()
     content = arquivo.file.read()
@@ -901,7 +910,13 @@ def importar_clientes(
             .scalar()
             or 0
         )
-        enforce_quota(empresa, "contacts_max", current_contacts, delta=to_insert)
+        enforce_quota(
+            empresa,
+            "contacts_max",
+            current_contacts,
+            delta=to_insert,
+            message="Seu plano está vencido ou no limite. Renove para importar novos clientes.",
+        )
 
     inseridos = atualizados = ignorados = 0
 
