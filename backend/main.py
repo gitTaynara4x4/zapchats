@@ -395,7 +395,6 @@ def _is_public(path: str) -> bool:
         "/",
         "/inicio", "/inicio.html",
         "/login", "/login.html",
-        "/register", "/register.html",
         "/criar-empresa", "/criar-empresa.html",
         "/esqueci_senha", "/esqueci_senha.html",
 

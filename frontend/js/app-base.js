@@ -65,7 +65,7 @@
       p === '/' ||
       p === '/inicio' || p === '/inicio.html' ||
       p === '/login' || p === '/login.html' ||
-      p === '/register' || p === '/register.html' ||
+      p === '/criar-empresa' || p === '/criar-empresa' ||
       p === '/criar-empresa' || p === '/criar-empresa.html' ||
       p === '/esqueci_senha' || p === '/esqueci_senha.html' ||
       p === '/planos' || p === '/planos.html' ||

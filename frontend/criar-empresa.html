@@ -4,15 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Cadastro da Empresa | ZapChat Connect</title>
-  
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
   <style>
-    /* =========================================
-       ✅ ESTILOS COMPARTILHADOS (ZapChat Theme)
-       ========================================= */
     :root {
       --brand-primary: #047857;
       --brand-secondary: #065f46;
@@ -22,174 +19,507 @@
       --text-muted: #64748b;
       --line: #e2e8f0;
       --error: #ef4444;
-      
       --radius-md: 12px;
       --radius-lg: 16px;
     }
 
-    * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+    * {
+      box-sizing: border-box;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+    }
 
     body {
-      margin: 0;
       font-family: "Plus Jakarta Sans", sans-serif;
       background: var(--bg-body);
       color: var(--text-main);
-      height: 100vh;
+      min-height: 100vh;
       display: grid;
-      grid-template-columns: 1fr 1fr; /* Split Screen Desktop */
+      grid-template-columns: 1fr 1fr;
       overflow: hidden;
     }
 
-    /* --- LADO ESQUERDO (BRANDING) --- */
     .brand-side {
       background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
-      display: flex; flex-direction: column; justify-content: center; padding: 60px;
-      color: white; position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 60px;
+      color: #fff;
+      position: relative;
     }
+
     .brand-side::before {
-      content: ""; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      content: "";
+      position: absolute;
+      inset: 0;
       background-image: radial-gradient(rgba(255,255,255,0.15) 1px, transparent 1px);
-      background-size: 24px 24px; opacity: 0.6;
+      background-size: 24px 24px;
+      opacity: 0.6;
     }
-    .brand-content { position: relative; z-index: 2; max-width: 480px; }
-    .brand-quote { font-size: 32px; font-weight: 800; line-height: 1.2; margin-bottom: 24px; letter-spacing: -1px; }
-    .brand-author { display: flex; align-items: center; gap: 12px; font-size: 15px; }
-    .avatar-icon { width: 40px; height: 40px; background: rgba(255,255,255,0.2); border-radius: 50%; display: grid; place-items: center; font-weight: 800; }
 
-    /* --- LADO DIREITO (WIZARD) --- */
+    .brand-content {
+      position: relative;
+      z-index: 2;
+      max-width: 480px;
+    }
+
+    .brand-quote {
+      font-size: 32px;
+      font-weight: 800;
+      line-height: 1.2;
+      margin-bottom: 24px;
+      letter-spacing: -1px;
+    }
+
+    .brand-author {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 15px;
+    }
+
+    .avatar-icon {
+      width: 40px;
+      height: 40px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+    }
+
     .form-side {
-      display: flex; flex-direction: column; justify-content: center; align-items: center;
-      padding: 40px; background: white; overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 40px;
+      background: #fff;
+      overflow-y: auto;
+      position: relative;
     }
-    .register-container { width: 100%; max-width: 460px; }
 
-    /* Header e Stepper */
-    .logo-header { margin-bottom: 24px; }
-    .logo-img { height: 36px; display: block; margin-bottom: 16px; }
-    .title { font-size: 24px; font-weight: 800; margin: 0 0 8px; color: var(--text-main); }
-    .subtitle { color: var(--text-muted); font-size: 15px; margin: 0 0 24px 0; font-weight: 500; }
+    .register-container {
+      width: 100%;
+      max-width: 460px;
+      position: relative;
+    }
 
-    /* Stepper Visual */
-    .stepper { display: flex; align-items: center; gap: 8px; margin-bottom: 30px; }
-    .dot { width: 10px; height: 10px; background: var(--line); border-radius: 50%; transition: 0.3s; }
-    .step-label { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-left: auto; }
-    
-    /* Estado do Stepper (Controlado pelo JS via data-active no pai ou classe direta) */
-    .dot.active { background: var(--brand-primary); transform: scale(1.2); }
-    .dot.completed { background: var(--brand-primary); opacity: 0.5; }
+    .logo-header {
+      margin-bottom: 24px;
+      position: relative;
+    }
 
-    /* Inputs e Forms */
-    .field { margin-bottom: 16px; }
-    .label { display: block; font-size: 13px; font-weight: 700; margin-bottom: 6px; color: var(--text-main); text-transform: uppercase; letter-spacing: 0.5px; }
+    .logo-img {
+      height: 36px;
+      display: block;
+      margin-bottom: 16px;
+    }
+
+    .title {
+      font-size: 24px;
+      font-weight: 800;
+      margin: 0 0 8px;
+      color: var(--text-main);
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 15px;
+      margin: 0 0 24px 0;
+      font-weight: 500;
+    }
+
+    .stepper {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 30px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      background: var(--line);
+      border-radius: 50%;
+      transition: .25s ease;
+    }
+
+    .dot.active {
+      background: var(--brand-primary);
+      transform: scale(1.15);
+    }
+
+    .dot.completed {
+      background: var(--brand-primary);
+      opacity: .45;
+    }
+
+    .step-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
+    .step {
+      display: none;
+      animation: fadeIn .28s ease;
+    }
+
+    .step.step--active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .field {
+      margin-bottom: 16px;
+    }
+
+    .label {
+      display: block;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: var(--text-main);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+
     .input {
-      width: 100%; padding: 12px 16px;
-      border: 1px solid var(--line); border-radius: var(--radius-md);
-      font-family: inherit; font-size: 15px; color: var(--text-main);
-      transition: 0.2s; background: var(--bg-body);
+      width: 100%;
+      padding: 12px 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      font-family: inherit;
+      font-size: 15px;
+      color: var(--text-main);
+      transition: .2s ease;
+      background: var(--bg-body);
     }
+
     .input:focus {
-      outline: 3px solid rgba(4,120,87,0.15); border-color: var(--brand-primary); background: white;
+      outline: 3px solid rgba(4,120,87,.15);
+      border-color: var(--brand-primary);
+      background: #fff;
     }
-    .input-wrap { position: relative; }
 
-    .help-err { display: block; font-size: 12px; color: var(--error); margin-top: 5px; font-weight: 600; }
-    .muted { font-size: 12px; color: var(--text-muted); margin-top: 4px; display: block; }
+    .field.field-err .input {
+      border-color: var(--error) !important;
+      background: #fff;
+    }
 
-    /* Botões */
-    .wizard-actions { display: flex; justify-content: space-between; margin-top: 30px; gap: 12px; }
+    .field.field-err .input:focus {
+      outline: 3px solid rgba(239,68,68,.12);
+      border-color: var(--error) !important;
+    }
+
+    .input-wrap {
+      position: relative;
+    }
+
+    .help-err {
+      display: block;
+      min-height: 18px;
+      font-size: 12px;
+      color: var(--error);
+      margin-top: 5px;
+      font-weight: 600;
+    }
+
+    .muted {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      display: block;
+    }
+
+    .wizard-actions {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 30px;
+      gap: 12px;
+    }
+
     .btn-primary {
-      flex: 1; padding: 14px; background: var(--brand-primary); color: white;
-      border: none; border-radius: var(--radius-md); font-size: 15px; font-weight: 700;
-      cursor: pointer; transition: 0.2s; box-shadow: 0 4px 12px rgba(4,120,87,0.2);
-      display: flex; align-items: center; justify-content: center; gap: 8px;
+      flex: 1;
+      padding: 14px;
+      background: var(--brand-primary);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-md);
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: .2s ease;
+      box-shadow: 0 4px 12px rgba(4,120,87,.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
     }
-    .btn-primary:hover { background: var(--brand-secondary); transform: translateY(-2px); }
-    
+
+    .btn-primary:hover {
+      background: var(--brand-secondary);
+      transform: translateY(-2px);
+    }
+
+    .btn-primary:disabled {
+      opacity: .65;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
     .btn-ghost {
-      padding: 14px 20px; background: transparent; color: var(--text-muted);
-      border: 1px solid var(--line); border-radius: var(--radius-md);
-      font-size: 15px; font-weight: 700; cursor: pointer; transition: 0.2s;
+      padding: 14px 20px;
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: .2s ease;
     }
-    .btn-ghost:hover { border-color: var(--brand-primary); color: var(--brand-primary); background: var(--bg-body); }
-    
+
+    .btn-ghost:hover {
+      border-color: var(--brand-primary);
+      color: var(--brand-primary);
+      background: var(--bg-body);
+    }
+
     .icon-btn {
-      position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
-      background: none; border: none; cursor: pointer; color: var(--text-muted);
-      font-size: 12px; font-weight: 700; padding: 4px 8px; border-radius: 4px;
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 4px;
     }
-    .icon-btn:hover { background: #eee; color: var(--text-main); }
-    .icon-btn.strong { color: var(--brand-primary); }
 
-    /* Wizard Steps Logic */
-    .step { display: none; animation: fadeIn 0.4s ease; }
-    .step.step--active { display: block; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .icon-btn:hover {
+      background: #eee;
+      color: var(--text-main);
+    }
 
-    /* Avatar Upload Customizado */
-    .avatar-row { display: flex; align-items: center; gap: 20px; }
+    .avatar-row {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
     .avatar-uploader {
-      width: 80px; height: 80px; border-radius: 50%; border: 2px dashed var(--line);
-      background: var(--bg-body); cursor: pointer; position: relative; overflow: hidden;
-      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-      transition: 0.2s;
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      border: 2px dashed var(--line);
+      background: var(--bg-body);
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: .2s ease;
     }
-    .avatar-uploader:hover { border-color: var(--brand-primary); background: #fff; }
-    .avatar-uploader img { width: 100%; height: 100%; object-fit: cover; }
-    .avatar-uploader svg { width: 32px; height: 32px; color: var(--text-muted); }
-    .file-hidden { display: none; }
-    
-    .avatar-help button { font-size: 13px; color: var(--brand-primary); text-decoration: none; border: none; background: none; padding: 0; font-weight: 700; cursor: pointer; }
-    .avatar-help button:hover { text-decoration: underline; }
 
-    /* Modais (Mantendo a lógica funcional do seu JS) */
+    .avatar-uploader:hover {
+      border-color: var(--brand-primary);
+      background: #fff;
+    }
+
+    .avatar-uploader img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .avatar-uploader svg {
+      width: 32px;
+      height: 32px;
+      color: var(--text-muted);
+    }
+
+    .file-hidden {
+      display: none;
+    }
+
+    .avatar-help button {
+      font-size: 13px;
+      color: var(--brand-primary);
+      text-decoration: none;
+      border: none;
+      background: none;
+      padding: 0;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .avatar-help button:hover {
+      text-decoration: underline;
+    }
+
     .modal {
-      position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 9999;
-      display: flex; align-items: center; justify-content: center;
-      opacity: 0; pointer-events: none; transition: 0.2s;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: .2s ease;
     }
-    .modal:not(.hidden) { opacity: 1; pointer-events: auto; }
-    .modal-backdrop { position: absolute; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); }
+
+    .modal:not(.hidden) {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,.5);
+      backdrop-filter: blur(4px);
+    }
+
     .modal-card {
-      position: relative; background: white; width: 90%; max-width: 500px;
-      padding: 24px; border-radius: var(--radius-lg); box-shadow: 0 20px 50px rgba(0,0,0,0.2);
-      transform: translateY(20px); transition: 0.3s;
+      position: relative;
+      background: #fff;
+      width: 90%;
+      max-width: 500px;
+      padding: 24px;
+      border-radius: var(--radius-lg);
+      box-shadow: 0 20px 50px rgba(0,0,0,.2);
+      transform: translateY(20px);
+      transition: .25s ease;
     }
-    .modal:not(.hidden) .modal-card { transform: translateY(0); }
-    
-    .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-    .modal-head h3 { margin: 0; font-size: 18px; font-weight: 800; }
-    .btn-icon { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted); }
-    
-    .preset-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 20px 0; }
+
+    .modal:not(.hidden) .modal-card {
+      transform: translateY(0);
+    }
+
+    .modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .modal-head h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .btn-icon {
+      background: none;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      color: var(--text-muted);
+    }
+
+    .preset-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+      margin: 20px 0;
+    }
+
     .preset-avatar {
-      width: 100%; aspect-ratio: 1; border-radius: 50%; border: 2px solid transparent;
-      cursor: pointer; transition: 0.2s; font-weight: 700; color: white;
-      display: grid; place-items: center; font-size: 14px;
+      width: 100%;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      cursor: pointer;
+      transition: .2s ease;
+      font-weight: 700;
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-size: 14px;
     }
-    .preset-avatar:hover { transform: scale(1.1); }
-    .preset-avatar.selected { border-color: var(--text-main); transform: scale(1.1); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
 
-    .hidden { display: none !important; }
-    .visually-hidden { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip:rect(0,0,0,0); border:0; }
+    .preset-avatar:hover {
+      transform: scale(1.08);
+    }
 
-    /* Toast */
+    .preset-avatar.selected {
+      border-color: var(--text-main);
+      transform: scale(1.08);
+      box-shadow: 0 4px 12px rgba(0,0,0,.18);
+    }
+
     .toast {
-      position: absolute; top: 20px; right: 20px; background: #333; color: white;
-      padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 600;
-      z-index: 10000; box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #1f2937;
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      z-index: 10000;
+      box-shadow: 0 10px 30px rgba(0,0,0,.2);
+      max-width: 360px;
     }
 
-    /* --- MOBILE --- */
+    .hidden {
+      display: none !important;
+    }
+
     @media (max-width: 900px) {
-      body { grid-template-columns: 1fr; overflow: auto; }
-      .brand-side { display: none; }
-      .form-side { padding: 20px; align-items: flex-start; min-height: 100vh; }
-      .register-container { max-width: 100%; }
-      .avatar-row { flex-direction: column; align-items: flex-start; }
+      body {
+        grid-template-columns: 1fr;
+        overflow: auto;
+      }
+
+      .brand-side {
+        display: none;
+      }
+
+      .form-side {
+        padding: 20px;
+        align-items: flex-start;
+        min-height: 100vh;
+      }
+
+      .register-container {
+        max-width: 100%;
+      }
+
+      .avatar-row {
+        flex-direction: column;
+        align-items: flex-start;
+      }
     }
   </style>
 </head>
-
 <body>
 
   <aside class="brand-side">
@@ -209,7 +539,7 @@
 
   <main class="form-side">
     <div class="register-container">
-      
+
       <div class="logo-header">
         <img src="/img/logo.png" alt="ZapChat" class="logo-img" onerror="this.style.display='none'">
         <h1 class="title">Cadastro da Empresa</h1>
@@ -221,58 +551,58 @@
           <span class="dot" data-dot="2"></span>
           <span class="step-label" id="stepText">Etapa 1 de 3</span>
         </div>
-        
-        <div id="toast" class="toast hidden"></div>
       </div>
 
+      <div id="toast" class="toast hidden"></div>
+
       <form id="form-register" novalidate>
-        
+
         <section class="step step--active" data-step="0">
-          <div class="field">
-            <label class="label">CNPJ ou CPF</label>
-            <input id="doc" name="doc" inputmode="numeric" class="input" placeholder="Apenas números"/>
+          <div class="field" id="wrap-doc">
+            <label class="label" for="doc">CNPJ ou CPF</label>
+            <input id="doc" name="doc" inputmode="numeric" class="input" placeholder="Apenas números" />
             <small id="err-doc" class="help-err"></small>
           </div>
 
-          <div class="field">
-            <label class="label">Nome da Empresa</label>
-            <input id="nome" name="nome" class="input" placeholder="Ex: Minha Loja Ltda."/>
+          <div class="field" id="wrap-nomeemp">
+            <label class="label" for="nome">Nome da Empresa</label>
+            <input id="nome" name="nome" class="input" placeholder="Ex: Minha Loja Ltda." />
             <small id="err-nome" class="help-err"></small>
           </div>
 
-          <div class="field">
-            <label class="label">Telefone da Empresa</label>
-            <input id="telefone" name="telefone" inputmode="numeric" class="input" placeholder="(11) 91234-5678"/>
+          <div class="field" id="wrap-telefone">
+            <label class="label" for="telefone">Telefone da Empresa</label>
+            <input id="telefone" name="telefone" inputmode="numeric" class="input" placeholder="(11) 91234-5678" />
             <small class="muted">Apenas números. Usado para contato oficial.</small>
             <small id="err-telefone" class="help-err"></small>
           </div>
         </section>
 
         <section class="step" data-step="1">
-          <div class="field">
-            <label class="label">Nome do Administrador</label>
-            <input id="nome_adm" name="nome_adm" class="input" placeholder="Ex: Seu Nome Completo"/>
+          <div class="field" id="wrap-nomeadm">
+            <label class="label" for="nome_adm">Nome do Administrador</label>
+            <input id="nome_adm" name="nome_adm" class="input" placeholder="Ex: Seu Nome Completo" />
             <small id="err-nomeadm" class="help-err"></small>
           </div>
 
-          <div class="field">
-            <label class="label">E-mail de Acesso</label>
-            <input id="email_admin" type="email" name="email_admin" class="input" placeholder="admin@empresa.com"/>
+          <div class="field" id="wrap-email">
+            <label class="label" for="email_admin">E-mail de Acesso</label>
+            <input id="email_admin" type="email" name="email_admin" class="input" placeholder="admin@empresa.com" />
             <small id="err-email" class="help-err"></small>
           </div>
 
-          <div class="field">
-            <label class="label">Senha</label>
+          <div class="field" id="wrap-senha">
+            <label class="label" for="senha_admin">Senha</label>
             <div class="input-wrap">
-              <input id="senha_admin" type="password" name="senha_admin" class="input" placeholder="••••••••"/>
+              <input id="senha_admin" type="password" name="senha_admin" class="input" placeholder="••••••••" />
               <button type="button" id="toggle-pass" class="icon-btn">Mostrar</button>
             </div>
             <small id="err-senha" class="help-err"></small>
           </div>
 
-          <div class="field">
-            <label class="label">Confirmar Senha</label>
-            <input id="senha_confirm" type="password" name="senha_confirm" class="input" placeholder="Repita a senha"/>
+          <div class="field" id="wrap-confirma">
+            <label class="label" for="senha_confirm">Confirmar Senha</label>
+            <input id="senha_confirm" type="password" name="senha_confirm" class="input" placeholder="Repita a senha" />
             <small id="err-confirma" class="help-err"></small>
           </div>
         </section>
@@ -280,10 +610,13 @@
         <section class="step" data-step="2">
           <div class="field">
             <label class="label">Foto do Administrador (Opcional)</label>
+
             <div class="avatar-row">
-              <button id="avatar-trigger" type="button" class="avatar-uploader">
-                <svg id="avatar-placeholder" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm0 2c-3.33 0-10 1.67-10 5v3h20v-3c0-3.33-6.67-5-10-5z"/></svg>
-                <img id="avatar-preview" class="hidden" alt="Preview"/>
+              <button id="avatar-trigger" type="button" class="avatar-uploader" aria-label="Selecionar foto do administrador">
+                <svg id="avatar-placeholder" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm0 2c-3.33 0-10 1.67-10 5v3h20v-3c0-3.33-6.67-5-10-5z"/>
+                </svg>
+                <img id="avatar-preview" class="hidden" alt="Preview" />
               </button>
 
               <div class="avatar-help">
@@ -292,7 +625,7 @@
                 <div id="avatar-status" class="hidden" style="color:var(--brand-primary); font-weight:700; font-size:13px; margin-top:6px;">✓ Foto selecionada</div>
               </div>
             </div>
-            
+
             <small id="avatar-erro" class="help-err hidden"></small>
             <input id="avatar-file" type="file" accept="image/*" class="file-hidden">
             <input type="hidden" name="avatar_url" id="avatar_url">
@@ -304,47 +637,37 @@
           <button id="btn-next" type="button" class="btn-primary">Próximo</button>
           <button id="btn-submit" type="submit" class="btn-primary hidden">Concluir Cadastro</button>
         </div>
-
       </form>
 
       <div style="text-align:center; margin-top:24px;">
-        <a href="/login.html" style="font-size:14px; font-weight:700; color:var(--brand-primary); text-decoration:none;">Cancelar e voltar ao login</a>
+        <a href="/login.html" style="font-size:14px; font-weight:700; color:var(--brand-primary); text-decoration:none;">
+          Cancelar e voltar ao login
+        </a>
       </div>
     </div>
   </main>
 
-  <div id="avatar-modal" class="modal hidden">
+  <div id="avatar-modal" class="modal hidden" aria-hidden="true">
     <div id="avatar-backdrop" class="modal-backdrop"></div>
-    <div class="modal-card">
+
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="avatar-modal-title">
       <header class="modal-head">
-        <h3>Escolher Avatar</h3>
-        <button id="avatar-close" class="btn-icon">✕</button>
+        <h3 id="avatar-modal-title">Escolher Avatar</h3>
+        <button id="avatar-close" type="button" class="btn-icon" aria-label="Fechar">✕</button>
       </header>
+
       <p class="muted">Escolha uma cor para gerar suas iniciais.</p>
-      <div id="preset-grid" class="preset-grid"></div> <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
-        <button id="avatar-cancel" class="btn-ghost" style="padding:10px 16px;">Cancelar</button>
-        <button id="avatar-apply" class="btn-primary" style="flex:initial; padding:10px 20px;" disabled>Usar</button>
+
+      <div id="preset-grid" class="preset-grid"></div>
+
+      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+        <button id="avatar-cancel" type="button" class="btn-ghost" style="padding:10px 16px;">Cancelar</button>
+        <button id="avatar-apply" type="button" class="btn-primary" style="flex:initial; padding:10px 20px;" disabled>Usar</button>
       </div>
     </div>
   </div>
 
   <script src="/frontend/js/pages/criar-empresa.js" defer></script>
   <script src="/assets/guard-devtools.js" defer></script>
-
-  <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      // Toggle Senha
-      const toggleBtn = document.getElementById('toggle-pass');
-      const passInput = document.getElementById('senha_admin');
-      if(toggleBtn && passInput){
-        toggleBtn.addEventListener('click', () => {
-          const type = passInput.getAttribute('type') === 'password' ? 'text' : 'password';
-          passInput.setAttribute('type', type);
-          toggleBtn.textContent = type === 'password' ? 'Mostrar' : 'Ocultar';
-        });
-      }
-    });
-  </script>
-
 </body>
 </html>
