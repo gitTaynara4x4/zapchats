@@ -140,16 +140,13 @@
   const isEmail = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test((s||'').trim());
 
   function setErr(wrap, helpEl, msg) {
-    if (!wrap || !helpEl) return;
-    if (msg) {
-      wrap.classList.add('field-err');
-      helpEl.textContent = msg;
-    } else {
-      wrap.classList.remove('field-err');
-      helpEl.textContent = '';
+    if (wrap) {
+      wrap.classList.toggle('field-err', !!msg);
+    }
+    if (helpEl) {
+      helpEl.textContent = msg || '';
     }
   }
-
   // Mask (leve) ao digitar
   docInput?.addEventListener('input', () => {
     const d = onlyDigits(docInput.value);
