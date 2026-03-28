@@ -1,12 +1,17 @@
 (() => {
   'use strict';
 
+  console.log('[criar-empresa] script carregado');
+
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const byId = (id) => document.getElementById(id);
 
   const form = byId('form-register');
-  if (!form) return;
+  if (!form) {
+    console.error('[criar-empresa] form-register não encontrado');
+    return;
+  }
 
   const steps = $$('.step', form);
   const dots = $$('.dot');
@@ -79,6 +84,7 @@
     if (!toast) return;
     toast.textContent = message || '';
     toast.classList.remove('hidden');
+    console.log('[criar-empresa][toast]', message || '');
   }
 
   function hideToast() {
@@ -133,19 +139,31 @@
     steps.forEach((step, i) => {
       step.classList.toggle('step--active', i === index);
     });
+
     stepIndex = index;
     updateStepperUI();
     focusFirst(steps[stepIndex]);
+
+    console.log('[criar-empresa] showStep ->', stepIndex);
   }
 
   function gotoStep(nextIndex, options = {}) {
     const { validate = true } = options;
     const clamped = Math.max(0, Math.min(nextIndex, steps.length - 1));
 
+    console.log('[criar-empresa] gotoStep chamado', {
+      atual: stepIndex,
+      proximo: nextIndex,
+      clamped,
+      validate
+    });
+
     if (clamped === stepIndex) return;
 
     if (validate && clamped > stepIndex) {
-      if (!validateStep(stepIndex)) return;
+      const ok = validateStep(stepIndex);
+      console.log('[criar-empresa] validateStep resultado', ok);
+      if (!ok) return;
     }
 
     hideToast();
@@ -234,7 +252,6 @@
     if (!presetGrid) return;
 
     presetGrid.innerHTML = '';
-
     const initials = initialsFromName();
 
     AVATAR_COLORS.forEach((color) => {
@@ -271,6 +288,12 @@
       const rawTel = onlyDigits(telefone?.value);
       const nome = String(nomeEmp?.value || '').trim();
 
+      console.log('[criar-empresa] validando passo 0', {
+        rawDoc,
+        rawTel,
+        nome
+      });
+
       if (!(rawDoc && (rawDoc.length === 11 || rawDoc.length === 14))) {
         fail(wrapDoc, errDoc, 'Informe um CPF (11) ou CNPJ (14) válido.', docInput);
       } else {
@@ -295,6 +318,13 @@
       const email = String(emailAdm?.value || '').trim();
       const senha = String(senhaAdm?.value || '');
       const confirmacao = String(senhaConf?.value || '');
+
+      console.log('[criar-empresa] validando passo 1', {
+        nome,
+        email,
+        senhaLen: senha.length,
+        confirmacaoLen: confirmacao.length
+      });
 
       if (!nome || nome.length < 3) {
         fail(wrapNomeAdm, errNomeAdm, 'Informe o nome do administrador.', nomeAdm);
@@ -352,9 +382,7 @@
         localStorage.setItem('role', role);
       }
       if (data.avatar_url) localStorage.setItem('usuario_avatar', String(data.avatar_url));
-    } catch (_) {
-      // não quebra fluxo
-    }
+    } catch (_) {}
   }
 
   function bindMasks() {
@@ -462,11 +490,19 @@
     });
   }
 
-  btnNext?.addEventListener('click', () => gotoStep(stepIndex + 1, { validate: true }));
-  btnBack?.addEventListener('click', () => gotoStep(stepIndex - 1, { validate: false }));
+  btnNext?.addEventListener('click', () => {
+    console.log('[criar-empresa] clique em Próximo');
+    gotoStep(stepIndex + 1, { validate: true });
+  });
+
+  btnBack?.addEventListener('click', () => {
+    console.log('[criar-empresa] clique em Voltar');
+    gotoStep(stepIndex - 1, { validate: false });
+  });
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
+    console.log('[criar-empresa] submit');
 
     const step0Ok = validateStep(0);
     if (!step0Ok) {
@@ -491,6 +527,8 @@
       senha_admin: String(senhaAdm?.value || ''),
       avatar_url: String(avatarUrl?.value || '')
     };
+
+    console.log('[criar-empresa] payload pronto', payload);
 
     try {
       if (btnSubmit) {
@@ -525,7 +563,7 @@
 
       window.location.replace('/dashboard');
     } catch (error) {
-      console.error(error);
+      console.error('[criar-empresa] erro no submit', error);
       showToast('Erro de conexão. Tente novamente.');
     } finally {
       if (btnSubmit) {
@@ -539,4 +577,11 @@
   bindPasswordToggle();
   bindAvatarUpload();
   showStep(stepIndex);
+
+  window.__wizardCadastroEmpresa = {
+    gotoStep,
+    validateStep
+  };
+
+  console.log('[criar-empresa] inicializado com sucesso');
 })();
