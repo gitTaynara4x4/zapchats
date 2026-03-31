@@ -275,12 +275,30 @@
   let _deptCache = null;
   let _empresaNome = (LS.getItem('empresa_nome') || '').trim() || null;
 
+  let __persisting = false;
+  let __persistTimer = null;
+
+  function buildAutoWelcomeTemplate() {
+    return (
+`Olá! 👋 Você fala com {empresa}.
+
+Como podemos te ajudar hoje?`
+    );
+  }
+
+  function cleanDeptLabel(value) {
+    return String(value || '')
+      .trim()
+      .replace(/^\s*\d+\s*[-–—.)]\s*/, '')
+      .trim();
+  }
+
   const LOCAL_DEFAULTS = {
     timezone: FALLBACK_TZ,
     features: {
       auto_messages: {
         enabled: false,
-        welcome: { enabled: false, text: 'Olá! 👋 Como posso ajudar?', start: '08:00', end: '18:00' },
+        welcome: { enabled: false, text: buildAutoWelcomeTemplate(), start: '08:00', end: '18:00' },
         off_hours: { enabled: false, text: 'Atendemos de 08:00 às 18:00. Deixe sua mensagem e responderemos no próximo expediente.', start: '18:00', end: '08:00' }
       },
       auto_messages_departments: {
@@ -383,7 +401,7 @@
       .filter(d => selectedIds.has(String(d.id)))
       .map(d => ({
         id: String(d.id),
-        nome: String(d.nome || '').trim()
+        nome: cleanDeptLabel(d.nome)
       }))
       .filter(d => d.nome);
   }
@@ -391,21 +409,7 @@
   function buildMenuDepartamentosText() {
     const selected = getSelectedDepartments();
     if (!selected.length) return '1 - Comercial';
-    return selected.map((d, i) => `${i + 1} - ${d.nome}`).join('\n');
-  }
-
-  function buildWelcomeListaEmpresaDept() {
-    const empresa = _empresaNome || EMPRESA_NOME() || '[Empresa]';
-    const lista = (Array.isArray(_deptCache) && _deptCache.length)
-      ? _deptCache.slice(0, 12).map((d, i) => `${i + 1} - ${d.nome}`).join('\n')
-      : '1 - {setor}';
-
-    return (
-`Olá! 👋 Você fala com ${empresa}.
-
-Você gostaria de falar com qual setor hoje?
-${lista}`
-    );
+    return selected.map((d, i) => `${i + 1} - ${cleanDeptLabel(d.nome)}`).join('\n');
   }
 
   function buildDeptTriagemTemplate() {
@@ -438,7 +442,7 @@ Digite apenas o número da opção desejada.`
 
     if (/\{setor\}|\[setor\]/i.test(out)) {
       const lista = (Array.isArray(_deptCache) && _deptCache.length)
-        ? _deptCache.slice(0, 12).map((d, i) => `${i + 1} - ${d.nome}`).join('\n')
+        ? _deptCache.slice(0, 12).map((d, i) => `${i + 1} - ${cleanDeptLabel(d.nome)}`).join('\n')
         : '1 - {setor}';
 
       out = out.split('\n').map(
@@ -500,14 +504,15 @@ Digite apenas o número da opção desejada.`
     if (Object.keys(items).length === 0) {
       _deptCache.forEach(d => {
         const id = String(d.id);
-        items[id] = { enabled: true, label: String(d.nome || '').trim() };
+        const nome = cleanDeptLabel(d.nome);
+        items[id] = { enabled: true, label: nome };
       });
       return;
     }
 
     _deptCache.forEach(d => {
       const id = String(d.id);
-      const nome = String(d.nome || '').trim();
+      const nome = cleanDeptLabel(d.nome);
       if (!items[id]) {
         items[id] = { enabled: true, label: nome };
       } else if (!String(items[id].label || '').trim()) {
@@ -576,7 +581,7 @@ Digite apenas o número da opção desejada.`
     }
 
     const list = _deptCache
-      .map(d => ({ id: String(d.id), nome: String(d.nome || '').trim() }))
+      .map(d => ({ id: String(d.id), nome: cleanDeptLabel(d.nome) }))
       .filter(d => d.nome)
       .filter(d => !q || d.nome.toLowerCase().includes(q));
 
@@ -612,6 +617,7 @@ Digite apenas o número da opção desejada.`
         refreshDeptTemplateIfDefaultLike();
         renderDeptPreview();
         updateSaveButtons();
+        schedulePersist(250, { silent: false });
       });
 
       const name = document.createElement('span');
@@ -656,8 +662,8 @@ Digite apenas o número da opção desejada.`
   }
 
   function updateModeNotices() {
-    const autoOn = !!getSwitch(swAutoHdr);
-    const deptOn = !!getSwitch(swDeptHdr);
+    const autoOn = !!cfg?.features?.auto_messages?.enabled;
+    const deptOn = !!cfg?.features?.auto_messages_departments?.enabled;
 
     if (autoModeNotice) autoModeNotice.hidden = !deptOn;
     if (deptModeNotice) deptModeNotice.hidden = !autoOn;
@@ -732,6 +738,72 @@ Digite apenas o número da opção desejada.`
     const on = getSwitch(swOff) && getSwitch(swAutoHdr);
     if (prevO) prevO.style.display = on ? '' : 'none';
     if (prevO) prevO.textContent = (msgOff?.value || '—').trim() || '—';
+  }
+
+  function syncCfgFromUI() {
+    if (!cfg?.features) return;
+
+    cfg.timezone = (cfg.timezone || '').trim() || FALLBACK_TZ;
+
+    cfg.features.auto_messages.enabled = !!getSwitch(swAutoHdr);
+    cfg.features.auto_messages.welcome = {
+      ...(cfg.features.auto_messages.welcome || {}),
+      enabled: !!(getSwitch(swAutoHdr) && getSwitch(swWelcome)),
+      text: (msgWelcome?.value || '').trim(),
+      start: (wStart?.value || '08:00'),
+      end: (wEnd?.value || '18:00'),
+    };
+    cfg.features.auto_messages.off_hours = {
+      ...(cfg.features.auto_messages.off_hours || {}),
+      enabled: !!(getSwitch(swAutoHdr) && getSwitch(swOff)),
+      text: (msgOff?.value || '').trim(),
+      start: (oStart?.value || '18:00'),
+      end: (oEnd?.value || '08:00'),
+    };
+
+    cfg.features.auto_messages_departments.enabled = !!getSwitch(swDeptHdr);
+    cfg.features.auto_messages_departments.welcome = {
+      ...(cfg.features.auto_messages_departments.welcome || {}),
+      enabled: !!(getSwitch(swDeptHdr) && getSwitch(swDeptWelcome)),
+      text: (msgDeptWelcome?.value || '').trim(),
+      start: (dwStart?.value || '08:00'),
+      end: (dwEnd?.value || '18:00'),
+    };
+
+    ensureDeptItems();
+  }
+
+  async function persistUI({ silent = true } = {}) {
+    if (!cfg || __persisting) return;
+
+    syncCfgFromUI();
+
+    const autoOn = getSwitch(swAutoHdr);
+    const deptOn = getSwitch(swDeptHdr);
+
+    if (autoOn && !validateBeforeSave('auto')) return;
+    if (deptOn && !validateBeforeSave('dept')) return;
+
+    __persisting = true;
+    updateSaveButtons();
+
+    try {
+      await putConfig(cfg);
+      _lastLoadedSnapshot = JSON.stringify(cfg);
+      if (!silent) toast('Configurações salvas com sucesso.');
+    } catch (e) {
+      // putConfig já mostra notify
+    } finally {
+      __persisting = false;
+      updateSaveButtons();
+    }
+  }
+
+  function schedulePersist(delay = 500, opts = { silent: true }) {
+    clearTimeout(__persistTimer);
+    __persistTimer = setTimeout(() => {
+      persistUI(opts);
+    }, delay);
   }
 
   function getConfirmMessage(labelEl) {
@@ -851,6 +923,7 @@ Digite apenas o número da opção desejada.`
           (cfg.features.auto_messages.off_hours ||= {}).enabled = false;
         }
         syncSectionState();
+        schedulePersist(200, { silent: false });
         return;
       }
 
@@ -861,6 +934,7 @@ Digite apenas o número da opção desejada.`
           (cfg.features.auto_messages_departments.welcome ||= {}).enabled = false;
         }
         syncSectionState();
+        schedulePersist(200, { silent: false });
         return;
       }
 
@@ -871,6 +945,7 @@ Digite apenas o número da opção desejada.`
         }
         (cfg.features.auto_messages.welcome ||= {}).enabled = newVal;
         syncSectionState();
+        schedulePersist(200, { silent: false });
         return;
       }
 
@@ -881,6 +956,7 @@ Digite apenas o número da opção desejada.`
         }
         (cfg.features.auto_messages.off_hours ||= {}).enabled = newVal;
         syncSectionState();
+        schedulePersist(200, { silent: false });
         return;
       }
 
@@ -891,13 +967,14 @@ Digite apenas o número da opção desejada.`
         }
         (cfg.features.auto_messages_departments.welcome ||= {}).enabled = newVal;
         syncSectionState();
+        schedulePersist(200, { silent: false });
       }
     });
   }
 
   function updateSaveButtons() {
-    if (saveAuto) saveAuto.disabled = false;
-    if (saveDept) saveDept.disabled = false;
+    if (saveAuto) saveAuto.disabled = __persisting;
+    if (saveDept) saveDept.disabled = __persisting;
   }
 
   async function getConfig() {
@@ -1083,7 +1160,7 @@ Digite apenas o número da opção desejada.`
     );
 
     if (precisaTrocar) {
-      msgWelcome.value = expandTemplate(buildWelcomeListaEmpresaDept());
+      msgWelcome.value = expandTemplate(buildAutoWelcomeTemplate());
     }
 
     if (wcCount) wcCount.textContent = `${msgWelcome.value.length} caracteres`;
@@ -1119,7 +1196,7 @@ Digite apenas o número da opção desejada.`
 
     const w = cfg.features.auto_messages.welcome || {};
     setSwitch(swWelcome, !!w.enabled, pillWelcome);
-    if (msgWelcome) msgWelcome.value = w.text ?? buildWelcomeListaEmpresaDept();
+    if (msgWelcome) msgWelcome.value = w.text ?? buildAutoWelcomeTemplate();
     if (wStart) wStart.value = w.start ?? '08:00';
     if (wEnd) wEnd.value = w.end ?? '18:00';
     if (wcCount) wcCount.textContent = `${(msgWelcome?.value || '').length} caracteres`;
@@ -1149,68 +1226,11 @@ Digite apenas o número da opção desejada.`
   }
 
   async function saveAutoBlock() {
-    const autoHdrOn = getSwitch(swAutoHdr);
-
-    if (autoHdrOn && !validateBeforeSave('auto')) return;
-    cfg.timezone = (cfg.timezone || '').trim() || FALLBACK_TZ;
-
-    cfg.features.auto_messages.enabled = !!autoHdrOn;
-    cfg.features.auto_messages.welcome = {
-      ...(cfg.features.auto_messages.welcome || {}),
-      enabled: !!(autoHdrOn && getSwitch(swWelcome)),
-      text: (msgWelcome?.value || '').trim(),
-      start: (wStart && wStart.value) || '08:00',
-      end: (wEnd && wEnd.value) || '18:00'
-    };
-
-    cfg.features.auto_messages.off_hours = {
-      ...(cfg.features.auto_messages.off_hours || {}),
-      enabled: !!(autoHdrOn && getSwitch(swOff)),
-      text: (msgOff?.value || '').trim(),
-      start: (oStart && oStart.value) || '18:00',
-      end: (oEnd && oEnd.value) || '08:00'
-    };
-
-    if (!autoHdrOn) {
-      cfg.features.auto_messages.enabled = false;
-      cfg.features.auto_messages.welcome.enabled = false;
-      cfg.features.auto_messages.off_hours.enabled = false;
-    }
-
-    try {
-      await putConfig(cfg);
-      toast(autoHdrOn ? 'Configurações salvas com sucesso.' : 'Mensagens automáticas desativadas.');
-      _lastLoadedSnapshot = JSON.stringify(cfg);
-      await loadAll();
-    } catch {}
+    await persistUI({ silent: false });
   }
 
   async function saveDeptBlock() {
-    const deptHdrOn = getSwitch(swDeptHdr);
-
-    if (deptHdrOn && !validateBeforeSave('dept')) return;
-    cfg.timezone = (cfg.timezone || '').trim() || FALLBACK_TZ;
-
-    cfg.features.auto_messages_departments.enabled = !!deptHdrOn;
-    cfg.features.auto_messages_departments.welcome = {
-      ...(cfg.features.auto_messages_departments.welcome || {}),
-      enabled: !!(deptHdrOn && getSwitch(swDeptWelcome)),
-      text: (msgDeptWelcome?.value || '').trim(),
-      start: (dwStart && dwStart.value) || '08:00',
-      end: (dwEnd && dwEnd.value) || '18:00'
-    };
-
-    if (!deptHdrOn) {
-      cfg.features.auto_messages_departments.enabled = false;
-      cfg.features.auto_messages_departments.welcome.enabled = false;
-    }
-
-    try {
-      await putConfig(cfg);
-      toast(deptHdrOn ? 'Mensagem da triagem salva.' : 'Triagem por departamento desativada.');
-      _lastLoadedSnapshot = JSON.stringify(cfg);
-      await loadAll();
-    } catch {}
+    await persistUI({ silent: false });
   }
 
   function restoreSnapshot(showToast = true) {
@@ -1225,7 +1245,7 @@ Digite apenas o número da opção desejada.`
 
       const w = cfg.features.auto_messages.welcome || {};
       setSwitch(swWelcome, !!w.enabled, pillWelcome);
-      if (msgWelcome) msgWelcome.value = w.text ?? buildWelcomeListaEmpresaDept();
+      if (msgWelcome) msgWelcome.value = w.text ?? buildAutoWelcomeTemplate();
       if (wStart) wStart.value = w.start ?? '08:00';
       if (wEnd) wEnd.value = w.end ?? '18:00';
       if (wcCount) wcCount.textContent = `${(msgWelcome?.value || '').length} caracteres`;
@@ -1449,23 +1469,46 @@ Digite apenas o número da opção desejada.`
         msgWelcome.value = expandTemplate(msgWelcome.value);
         if (wcCount) wcCount.textContent = `${msgWelcome.value.length} caracteres`;
         renderWelcomePreview();
+        schedulePersist(700);
       });
 
-      wStart?.addEventListener('change', () => { if (cfg?.features?.auto_messages?.welcome) cfg.features.auto_messages.welcome.start = wStart.value; });
-      wEnd?.addEventListener('change', () => { if (cfg?.features?.auto_messages?.welcome) cfg.features.auto_messages.welcome.end = wEnd.value; });
+      msgWelcome?.addEventListener('blur', () => persistUI({ silent: false }));
+
+      wStart?.addEventListener('change', () => {
+        if (cfg?.features?.auto_messages?.welcome) cfg.features.auto_messages.welcome.start = wStart.value;
+        schedulePersist(200, { silent: false });
+      });
+
+      wEnd?.addEventListener('change', () => {
+        if (cfg?.features?.auto_messages?.welcome) cfg.features.auto_messages.welcome.end = wEnd.value;
+        schedulePersist(200, { silent: false });
+      });
 
       msgOff?.addEventListener('input', () => {
         if (offCount) offCount.textContent = `${msgOff.value.length} caracteres`;
         renderOffPreview();
+        schedulePersist(700);
       });
 
-      oStart?.addEventListener('change', () => { if (cfg?.features?.auto_messages?.off_hours) cfg.features.auto_messages.off_hours.start = oStart.value; });
-      oEnd?.addEventListener('change', () => { if (cfg?.features?.auto_messages?.off_hours) cfg.features.auto_messages.off_hours.end = oEnd.value; });
+      msgOff?.addEventListener('blur', () => persistUI({ silent: false }));
+
+      oStart?.addEventListener('change', () => {
+        if (cfg?.features?.auto_messages?.off_hours) cfg.features.auto_messages.off_hours.start = oStart.value;
+        schedulePersist(200, { silent: false });
+      });
+
+      oEnd?.addEventListener('change', () => {
+        if (cfg?.features?.auto_messages?.off_hours) cfg.features.auto_messages.off_hours.end = oEnd.value;
+        schedulePersist(200, { silent: false });
+      });
 
       msgDeptWelcome?.addEventListener('input', () => {
         if (dwCount) dwCount.textContent = `${msgDeptWelcome.value.length} caracteres`;
         renderDeptPreview();
+        schedulePersist(700);
       });
+
+      msgDeptWelcome?.addEventListener('blur', () => persistUI({ silent: false }));
 
       deptSearch?.addEventListener('input', () => renderDeptPicker());
 
@@ -1474,7 +1517,7 @@ Digite apenas o número da opção desejada.`
         const items = ensureDeptItems();
         (_deptCache || []).forEach(d => {
           const id = String(d.id);
-          const nome = String(d.nome || '').trim();
+          const nome = cleanDeptLabel(d.nome);
           items[id] = { ...(items[id] || {}), enabled: true, label: items[id]?.label || nome };
         });
         renderDeptPicker();
@@ -1484,6 +1527,7 @@ Digite apenas o número da opção desejada.`
         }
         renderDeptPreview();
         updateSaveButtons();
+        schedulePersist(250, { silent: false });
       });
 
       deptNone?.addEventListener('click', () => {
@@ -1491,7 +1535,7 @@ Digite apenas o número da opção desejada.`
         const items = ensureDeptItems();
         (_deptCache || []).forEach(d => {
           const id = String(d.id);
-          const nome = String(d.nome || '').trim();
+          const nome = cleanDeptLabel(d.nome);
           items[id] = { ...(items[id] || {}), enabled: false, label: items[id]?.label || nome };
         });
         renderDeptPicker();
@@ -1501,14 +1545,17 @@ Digite apenas o número da opção desejada.`
         }
         renderDeptPreview();
         updateSaveButtons();
+        schedulePersist(250, { silent: false });
       });
 
       dwStart?.addEventListener('change', () => {
         if (cfg?.features?.auto_messages_departments?.welcome) cfg.features.auto_messages_departments.welcome.start = dwStart.value;
+        schedulePersist(200, { silent: false });
       });
 
       dwEnd?.addEventListener('change', () => {
         if (cfg?.features?.auto_messages_departments?.welcome) cfg.features.auto_messages_departments.welcome.end = dwEnd.value;
+        schedulePersist(200, { silent: false });
       });
 
       saveAuto?.addEventListener('click', saveAutoBlock);

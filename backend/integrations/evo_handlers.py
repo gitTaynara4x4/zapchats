@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 import asyncio
 import requests
 from datetime import timedelta
@@ -132,6 +133,43 @@ QR_CONNECT_SYNC_WINDOW_MIN = int(os.getenv("QR_CONNECT_SYNC_WINDOW_MIN", "30") o
 # In-memory guards (avoid repeated heavy sync/expand spam). These reset on process restart.
 INSTANCIAS_SYNC: set[str] = set()
 QR_RECENT: dict[str, int] = {}  # instance -> unix seconds when a QR was last emitted
+
+# ============================================================
+# Dedup global do chatbot por msg_id
+# Evita reprocessar o mesmo evento/replay da Evolution.
+# ============================================================
+_CHATBOT_MSG_SEEN: dict[str, float] = {}
+_CHATBOT_MSG_TTL_SECONDS = float(os.getenv("CHATBOT_MSG_TTL_SECONDS", "120"))
+
+
+def _chatbot_seen_key(empresa_id: int, instancia_db_id: int, msg_id: str) -> str:
+    return f"{int(empresa_id)}:{int(instancia_db_id)}:{str(msg_id).strip()}"
+
+
+def _chatbot_should_process_msg(empresa_id: int, instancia_db_id: int, msg_id: str | None) -> bool:
+    """
+    Retorna True só na primeira vez que esse msg_id passar pelo chatbot
+    dentro da janela TTL. Replays posteriores retornam False.
+    """
+    raw = str(msg_id or "").strip()
+    if not raw:
+        return True  # sem msg_id não dá para deduplicar aqui
+
+    now_ts = time.time()
+
+    # limpeza simples de expirados
+    for k, ts in list(_CHATBOT_MSG_SEEN.items()):
+        if (now_ts - float(ts)) > _CHATBOT_MSG_TTL_SECONDS:
+            _CHATBOT_MSG_SEEN.pop(k, None)
+
+    key = _chatbot_seen_key(empresa_id, instancia_db_id, raw)
+
+    if key in _CHATBOT_MSG_SEEN:
+        return False
+
+    _CHATBOT_MSG_SEEN[key] = now_ts
+    return True
+
 
 # ============================================================
 # ✅ Grupo: buscar subject via Evolution (findGroupInfos) + cache
@@ -841,6 +879,7 @@ async def on_messages_upsert(inst_id: str, data):
             return
 
         novas = 0
+        chatbot_replay_batch_seen: set[tuple[int, str]] = set()
 
         for idx, m in enumerate(mensagens, start=1):
             try:
@@ -915,7 +954,7 @@ async def on_messages_upsert(inst_id: str, data):
                         alt=_short(alt, 64),
                     )
 
-                    jid_from_alt: str | None = None
+                    jid_from_alt = None
                     if isinstance(alt, str) and "@" in alt:
                         jid_from_alt = _jid_strip_device(alt)
 
@@ -1322,6 +1361,8 @@ async def on_messages_upsert(inst_id: str, data):
                     _log_skip("cli_id vazio (select+upsert)", idx=idx, msg_id=msg_id, telefone=telefone)
                     continue
 
+                replay_existing_msg_id = None
+
                 if msg_id:
                     try:
                         msg_existente_id = _find_existing_mensagem_11_id(
@@ -1340,16 +1381,16 @@ async def on_messages_upsert(inst_id: str, data):
                         continue
 
                     if msg_existente_id:
+                        replay_existing_msg_id = int(msg_existente_id)
                         _log_ctx(
                             "[UPsert][skip-replay-existing-msgid]",
                             idx=idx,
                             msg_id=msg_id,
                             cliente_id=cli_id,
-                            existing_id=msg_existente_id,
+                            existing_id=replay_existing_msg_id,
                             status=status,
                             from_me=from_me,
                         )
-                        continue
 
                 atendimento = None
                 atendimento_id = None
@@ -1417,7 +1458,16 @@ async def on_messages_upsert(inst_id: str, data):
                                 preview=_short(conteudo),
                             )
                         else:
-                            _log_skip("duplicada (upsert)", idx=idx, msg_id=msg_id, cliente_id=cli_id)
+                            if msg_db_id:
+                                replay_existing_msg_id = int(msg_db_id)
+
+                            _log_skip(
+                                "duplicada (upsert)",
+                                idx=idx,
+                                msg_id=msg_id,
+                                cliente_id=cli_id,
+                                existing_id=replay_existing_msg_id,
+                            )
 
                     except Exception as e:
                         LOG(f"[UPsert][erro upsert mensagem] idx={idx} msg_id={msg_id} err={e}")
@@ -1479,17 +1529,54 @@ async def on_messages_upsert(inst_id: str, data):
                         continue
 
                 # pós-commit do 1:1: triagem, mídia e WS fora da transação principal
-                if inserted_11 and msg_db_id:
-                    if (not from_me) and _is_textual_content(conteudo):
-                        await _run_triagem_pos_commit(
-                            empresa_id=empresa_id,
-                            instancia_id=inst.id,
-                            telefone=telefone,
-                            conteudo=conteudo,
-                            direcao=direcao,
-                            remote_jid=remote_jid,
-                        )
+                should_run_chatbot = False
 
+                if (not from_me) and direcao == "entrada" and _is_textual_content(conteudo):
+                    # regra correta: o mesmo msg_id só entra 1 vez no chatbot
+                    if msg_id:
+                        if _chatbot_should_process_msg(empresa_id, inst.id, str(msg_id)):
+                            if inserted_11 and msg_db_id:
+                                should_run_chatbot = True
+                            elif replay_existing_msg_id:
+                                replay_key = (int(replay_existing_msg_id), str(msg_id))
+                                if replay_key not in chatbot_replay_batch_seen:
+                                    chatbot_replay_batch_seen.add(replay_key)
+                                    msg_db_id = int(replay_existing_msg_id)
+                                    should_run_chatbot = True
+                                    _log_ctx(
+                                        "[UPsert][chatbot-replay-rescue]",
+                                        idx=idx,
+                                        msg_id=msg_id,
+                                        cliente_id=cli_id,
+                                        existing_id=msg_db_id,
+                                        status=status,
+                                    )
+                        else:
+                            _log_ctx(
+                                "[UPsert][chatbot-skip-global-ttl]",
+                                idx=idx,
+                                msg_id=msg_id,
+                                cliente_id=cli_id,
+                                existing_id=(replay_existing_msg_id or msg_db_id),
+                                status=status,
+                            )
+                            should_run_chatbot = False
+                    else:
+                        # sem msg_id, mantém comportamento antigo
+                        if inserted_11 and msg_db_id:
+                            should_run_chatbot = True
+
+                if should_run_chatbot:
+                    await _run_triagem_pos_commit(
+                        empresa_id=empresa_id,
+                        instancia_id=inst.id,
+                        telefone=telefone,
+                        conteudo=conteudo,
+                        direcao=direcao,
+                        remote_jid=remote_jid,
+                    )
+
+                if inserted_11 and msg_db_id:
                     if media_meta:
                         await _save_media_pos_commit_11(
                             inst_id=inst_id,
@@ -1591,24 +1678,23 @@ async def on_messages_delete(inst_id: str, data):
                     _log_ctx("[DEL][skip] m não é dict", idx=idx, type_m=type(m).__name__)
                     continue
 
-                key = m.get("key") or {}
-                msg_id = key.get("id") or m.get("id")
-                from_me = bool(key.get("fromMe") if "fromMe" in key else (m.get("fromMe") or False))
+                key_id = ((m.get("key") or {}).get("id")) or m.get("id") or m.get("messageId")
+                from_me = bool(((m.get("key") or {}).get("fromMe")) if "key" in m else (m.get("fromMe") or False))
 
-                _log_ctx("[DEL][in]", idx=idx, msg_id=msg_id, from_me=from_me)
+                _log_ctx("[DEL][in]", idx=idx, msg_id=key_id, from_me=from_me)
 
-                if not msg_id:
+                if not key_id:
                     _log_ctx("[DEL][skip] sem msg_id", idx=idx)
                     continue
 
                 row = (
                     db.query(models.Mensagem)
-                    .filter(models.Mensagem.instancia_id == inst.id, models.Mensagem.msg_id == msg_id)
+                    .filter(models.Mensagem.instancia_id == inst.id, models.Mensagem.msg_id == key_id)
                     .first()
                 )
 
                 if not row:
-                    _log_ctx("[DEL][miss]", idx=idx, msg_id=msg_id)
+                    _log_ctx("[DEL][miss]", idx=idx, msg_id=key_id)
                     continue
 
                 encontrados += 1

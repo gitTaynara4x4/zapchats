@@ -121,7 +121,30 @@
       transform 0.22s ease,
       box-shadow 0.22s ease;
     box-shadow: none;
-    overflow: hidden;
+    box-sizing: border-box;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(127,127,127,.45) transparent;
+  }
+
+  .Valora-app-sidebar::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .Valora-app-sidebar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .Valora-app-sidebar::-webkit-scrollbar-thumb {
+    background: rgba(127,127,127,.42);
+    border-radius: 999px;
+  }
+
+  .Valora-app-sidebar::-webkit-scrollbar-thumb:hover {
+    background: rgba(127,127,127,.65);
   }
 
   .Valora-app-sidebar:hover {
@@ -262,7 +285,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: 0;
     border-radius: var(--vs-radius);
     border: 1px solid transparent;
     background: transparent;
@@ -281,6 +304,7 @@
 
   .Valora-app-sidebar:hover .Valora-nav-item {
     justify-content: flex-start;
+    gap: 10px;
   }
 
   .Valora-nav-item:hover {
@@ -352,7 +376,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 12px;
+    gap: 0;
     border-radius: var(--vs-radius);
     cursor: pointer;
     transition: background 0.18s ease, padding 0.18s ease, justify-content 0.18s ease;
@@ -362,6 +386,7 @@
   .Valora-app-sidebar:hover .Valora-user-profile {
     justify-content: flex-start;
     padding: 12px;
+    gap: 12px;
   }
 
   .Valora-user-profile:hover,
@@ -683,7 +708,11 @@
       box-shadow: 12px 0 30px rgba(0, 0, 0, 0.28);
       transform: translateX(-110%);
       z-index: 1220;
-      overflow: hidden;
+      box-sizing: border-box;
+      overflow-x: hidden;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
     }
 
     .Valora-app-sidebar.show {
@@ -743,6 +772,7 @@
     .Valora-nav-item,
     .Valora-app-sidebar:hover .Valora-nav-item {
       justify-content: flex-start;
+      gap: 10px;
       padding: 11px 12px;
       font-size: 15px;
     }
@@ -750,6 +780,7 @@
     .Valora-user-profile,
     .Valora-app-sidebar:hover .Valora-user-profile {
       justify-content: flex-start;
+      gap: 12px;
       padding: 12px;
     }
 

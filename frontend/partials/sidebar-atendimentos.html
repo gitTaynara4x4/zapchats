@@ -4,16 +4,102 @@
   .wpp-leftbar{
     display:flex;
     flex-direction:column;
-    height:100%;
+    align-items:stretch;
+    width:64px !important;
+    min-width:64px !important;
+    max-width:64px !important;
+    height:100vh;
     min-height:100vh;
+    box-sizing:border-box;
+    position:relative;
+    z-index:80;
+    overflow:visible !important;
+    background:var(--leftbar-bg, var(--panel-2, #111827));
+    transition:
+      width .22s ease,
+      min-width .22s ease,
+      max-width .22s ease,
+      box-shadow .22s ease;
+  }
+
+  .wpp-leftbar:hover{
+    width:220px !important;
+    min-width:220px !important;
+    max-width:220px !important;
+    box-shadow:10px 0 28px rgba(0,0,0,.22);
   }
 
   .wpp-leftbar-icons{
     display:flex;
     flex-direction:column;
+    align-items:stretch;
     gap:8px;
     flex:1 1 auto;
     min-height:0;
+    width:100%;
+  }
+
+  .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon{
+    width:100% !important;
+    min-width:0 !important;
+    margin:0 !important;
+    box-sizing:border-box !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    gap:0 !important;
+    padding:12px 0 !important;
+    border-radius:14px;
+    background:transparent;
+    color:inherit;
+    text-decoration:none;
+    transition:
+      background .18s ease,
+      padding .18s ease,
+      justify-content .18s ease,
+      gap .18s ease,
+      color .18s ease;
+  }
+
+  .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon:hover,
+  .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon[aria-current="page"],
+  .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon.is-active{
+    background:rgba(255,255,255,.06);
+    color:var(--accent, #25d366);
+  }
+
+  .wpp-leftbar:hover .wpp-leftbar-icons > .wpp-leftbar-icon{
+    justify-content:flex-start !important;
+    gap:12px !important;
+    padding:12px !important;
+  }
+
+  .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon svg{
+    width:22px !important;
+    height:22px !important;
+    min-width:22px !important;
+    display:block;
+    flex:0 0 auto;
+    fill:currentColor;
+  }
+
+  .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon .wpp-label{
+    opacity:0;
+    max-width:0;
+    overflow:hidden;
+    white-space:nowrap;
+    transform:translateX(-6px);
+    transition:
+      opacity .18s ease,
+      max-width .22s ease,
+      transform .22s ease;
+    pointer-events:none;
+  }
+
+  .wpp-leftbar:hover .wpp-leftbar-icons > .wpp-leftbar-icon .wpp-label{
+    opacity:1;
+    max-width:180px;
+    transform:translateX(0);
   }
 
   .wpp-leftbar-user-wrap{
@@ -27,33 +113,31 @@
   }
 
   .wpp-leftbar-user-btn{
-    width:calc(100% - 8px);
-    margin:0 auto;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    gap:12px;
+    width:100% !important;
+    min-width:0 !important;
+    margin:0 !important;
+    box-sizing:border-box !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    gap:0 !important;
     border:0;
     background:transparent;
     color:inherit;
-    padding:10px 0;
+    padding:10px 0 !important;
     border-radius:14px;
     cursor:pointer;
     transition:
       background .18s ease,
       padding .18s ease,
       justify-content .18s ease,
-      width .18s ease;
-  }
-
-  .wpp-leftbar:hover .wpp-leftbar-user-wrap{
-    justify-content:stretch;
+      gap .18s ease;
   }
 
   .wpp-leftbar:hover .wpp-leftbar-user-btn{
-    width:100%;
-    justify-content:flex-start;
-    padding:12px;
+    justify-content:flex-start !important;
+    padding:12px !important;
+    gap:12px !important;
   }
 
   .wpp-leftbar-user-btn:hover,
@@ -74,6 +158,7 @@
     color:#25d366;
     font-size:14px;
     font-weight:700;
+    flex:0 0 auto;
   }
 
   .wpp-leftbar-avatar img{
@@ -89,6 +174,19 @@
     display:flex;
     flex-direction:column;
     overflow:hidden;
+    opacity:0;
+    max-width:0;
+    transform:translateX(-6px);
+    transition:
+      opacity .18s ease,
+      max-width .22s ease,
+      transform .22s ease;
+  }
+
+  .wpp-leftbar:hover .wpp-leftbar-user-info{
+    opacity:1;
+    max-width:180px;
+    transform:translateX(0);
   }
 
   .wpp-leftbar-user-info strong{
@@ -114,8 +212,20 @@
     display:flex;
     align-items:center;
     justify-content:center;
+    opacity:0;
+    max-width:0;
+    overflow:hidden;
+    transform:translateX(-6px);
+    transition:
+      transform .2s ease,
+      opacity .18s ease,
+      max-width .22s ease;
+  }
+
+  .wpp-leftbar:hover .wpp-leftbar-user-chevron{
     opacity:.75;
-    transition:transform .2s ease, opacity .18s ease, max-width .22s ease;
+    max-width:16px;
+    transform:translateX(0);
   }
 
   .wpp-leftbar-user-chevron svg{
@@ -127,26 +237,6 @@
 
   .wpp-leftbar-user-btn.active .wpp-leftbar-user-chevron{
     transform:rotate(180deg);
-  }
-
-  .wpp-leftbar-user-info,
-  .wpp-leftbar-user-chevron{
-    opacity:0;
-    max-width:0;
-    overflow:hidden;
-    transform:scale(.98);
-    transform-origin:left center;
-    transition:
-      opacity .18s ease,
-      max-width .22s ease,
-      transform .22s ease;
-  }
-
-  .wpp-leftbar:hover .wpp-leftbar-user-info,
-  .wpp-leftbar:hover .wpp-leftbar-user-chevron{
-    opacity:1;
-    max-width:180px;
-    transform:scale(1);
   }
 
   .wpp-leftbar-user-menu{
@@ -163,7 +253,7 @@
     visibility:hidden;
     transform:translateY(10px);
     transition:all .2s cubic-bezier(.16,1,.3,1);
-    z-index:40;
+    z-index:100;
   }
 
   .wpp-leftbar-user-menu.show{
@@ -223,76 +313,82 @@
   .wpp-leftbar-menu-item.danger:hover{
     background:rgba(239,68,68,.10);
   }
+
+  @media (max-width:920px){
+    .wpp-leftbar{
+      display:none !important;
+    }
+  }
 </style>
 
 <nav class="wpp-leftbar" aria-label="Menu do atendimento">
   <div class="wpp-leftbar-icons">
 
-    <a class="wpp-leftbar-icon" href="/dashboard" title="Dashboard" aria-label="Dashboard">
-      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <a class="wpp-leftbar-icon" data-menu="dashboard" href="/dashboard" title="Dashboard" aria-label="Dashboard">
+      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <path d="M224,98H182V56a6,6,0,0,0-6-6H54V40a6,6,0,0,0-12,0V216a6,6,0,0,0,12,0V206h90a6,6,0,0,0,6-6V158h74a6,6,0,0,0,6-6V104A6,6,0,0,0,224,98ZM170,62V98H54V62ZM138,194H54V158h84Zm80-48H54V110H218Z"/>
       </svg>
       <span class="wpp-label">Dashboard</span>
     </a>
 
-    <a class="wpp-leftbar-icon" href="/atendimentos" title="Atendimentos" aria-label="Atendimentos">
-      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <a class="wpp-leftbar-icon" data-menu="atendimentos" href="/atendimentos" title="Atendimentos" aria-label="Atendimentos">
+      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <path d="M225.88,30.12a13.83,13.83,0,0,0-13.7-3.58l-.11,0L20.14,84.77A14,14,0,0,0,18,110.85l85.56,41.64L145.12,238a13.87,13.87,0,0,0,12.61,8c.4,0,.81,0,1.21-.05a13.9,13.9,0,0,0,12.29-10.09l58.2-191.93,0-.11A13.83,13.83,0,0,0,225.88,30.12Zm-8,10.4L159.73,232.43l0,.11a2,2,0,0,1-3.76.26l-40.68-83.58,49-49a6,6,0,1,0-8.49-8.49l-49,49L23.15,100a2,2,0,0,1,.31-3.74l.11,0L215.48,38.08a1.94,1.94,0,0,1,1.92.52A2,2,0,0,1,217.92,40.52Z"/>
       </svg>
       <span class="wpp-label">Atendimentos</span>
     </a>
 
-    <a class="wpp-leftbar-icon" href="/midias" title="Arquivos" aria-label="Arquivos">
-      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <a class="wpp-leftbar-icon" data-menu="midias" href="/midias" title="Arquivos" aria-label="Arquivos">
+      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <path d="M243.36,111.81A14,14,0,0,0,232,106H214V88a14,14,0,0,0-14-14H130L101.74,52.8a14.06,14.06,0,0,0-8.4-2.8H40A14,14,0,0,0,26,64V208a6,6,0,0,0,6,6H211.1a6,6,0,0,0,5.69-4.1l28.49-85.47A14,14,0,0,0,243.36,111.81ZM40,62H93.34a2,2,0,0,1,1.2.4L124.4,84.8A6,6,0,0,0,128,86h72a2,2,0,0,1,2,2v18H69.77a14,14,0,0,0-13.28,9.57L38,171V64A2,2,0,0,1,40,62Zm193.9,58.63L206.78,202H40.33l27.54-82.63a2,2,0,0,1,1.9-1.37H232a2,2,0,0,1,1.9,2.63Z"/>
       </svg>
       <span class="wpp-label">Arquivos</span>
     </a>
 
-    <a class="wpp-leftbar-icon" href="/chat-interno" title="Chat Interno" aria-label="Chat Interno">
-      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <a class="wpp-leftbar-icon" data-menu="chat-interno" href="/chat-interno" title="Chat Interno" aria-label="Chat Interno">
+      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <path d="M229.93,186.58A78,78,0,0,0,168.16,74.42,78,78,0,1,0,26.07,138.58L18.58,164A14,14,0,0,0,36,181.42l25.46-7.49a78,78,0,0,0,26.39,7.63,78,78,0,0,0,106.77,40.37L220,229.42A14,14,0,0,0,237.42,212ZM62,161.5a6.05,6.05,0,0,0-1.69.24l-27.77,8.17a2,2,0,0,1-2.48-2.48l8.17-27.77a6.05,6.05,0,0,0-.47-4.53,66,66,0,1,1,27.08,27.08A6,6,0,0,0,62,161.5Zm155.71,26.16,8.17,27.77a2,2,0,0,1-2.48,2.48l-27.77-8.17a6.06,6.06,0,0,0-4.53.47,66,66,0,0,1-90-28.4,77.92,77.92,0,0,0,71-94.68,66,66,0,0,1,46.07,96A6.05,6.05,0,0,0,217.74,187.66Z"/>
       </svg>
       <span class="wpp-label">Chat Interno</span>
     </a>
 
-    <a class="wpp-leftbar-icon" href="/clientes" title="Clientes" aria-label="Clientes">
-      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <a class="wpp-leftbar-icon" data-menu="clientes" href="/clientes" title="Clientes" aria-label="Clientes">
+      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <path d="M154,80a6,6,0,0,1,6-6h88a6,6,0,0,1,0,12H160A6,6,0,0,1,154,80Zm94,42H160a6,6,0,0,0,0,12h88a6,6,0,0,0,0-12Zm0,48H184a6,6,0,0,0,0,12h64a6,6,0,0,0,0-12Zm-98.19,20.5a6,6,0,1,1-11.62,3C131.7,168.29,107.23,150,80,150s-51.7,18.29-58.19,43.49a6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"/>
       </svg>
       <span class="wpp-label">Clientes</span>
     </a>
 
-    <a class="wpp-leftbar-icon" href="/colaboradores" title="Colaboradores" aria-label="Colaboradores">
-      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <a class="wpp-leftbar-icon" data-menu="colaboradores" href="/colaboradores" title="Colaboradores" aria-label="Colaboradores">
+      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <path d="M243.6,148.8a6,6,0,0,1-8.4-1.2A53.58,53.58,0,0,0,192,126a6,6,0,0,1,0-12,26,26,0,1,0-25.18-32.5,6,6,0,0,1-11.62-3,38,38,0,1,1,59.91,39.63A65.69,65.69,0,0,1,244.8,140.4,6,6,0,0,1,243.6,148.8ZM189.19,213a6,6,0,0,1-2.19,8.2,5.9,5.9,0,0,1-3,.81,6,6,0,0,1-5.2-3,59,59,0,0,0-101.62,0,6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"/>
       </svg>
       <span class="wpp-label">Colaboradores</span>
     </a>
 
-    <a class="wpp-leftbar-icon" href="/departamentos" title="Departamentos" aria-label="Departamentos">
-      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <a class="wpp-leftbar-icon" data-menu="departamentos" href="/departamentos" title="Departamentos" aria-label="Departamentos">
+      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <path d="M248,210H230V94h2a6,6,0,0,0,0-12H182V46h2a6,6,0,0,0,0-12H40a6,6,0,0,0,0,12h2V210H24a6,6,0,0,0,0-12H248a6,6,0,0,0,0-12ZM218,94V210H182V94ZM54,46H170V210H142V160a6,6,0,0,0-6-6H88a6,6,0,0,0-6,6v50H54Zm76,164H94V166h36ZM74,80a6,6,0,0,1,6-6H96a6,6,0,0,1,0,12H80A6,6,0,0,1,74,80Zm48,0a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,80ZM80,126a6,6,0,0,1,0-12H96a6,6,0,0,1,0,12Zm42-6a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,120Z"/>
       </svg>
       <span class="wpp-label">Departamentos</span>
     </a>
 
-    <a class="wpp-leftbar-icon" href="/chatbot" title="Chatbot" aria-label="Chatbot">
-      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <a class="wpp-leftbar-icon" data-menu="chatbot" href="/chatbot" title="Chatbot" aria-label="Chatbot">
+      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <path d="M222,114.56a54,54,0,0,0-58.67-74.73,54,54,0,0,0-94,13.46A54,54,0,0,0,34,141.44a54,54,0,0,0,35.56,73.65A54.54,54.54,0,0,0,83.59,217a52.86,52.86,0,0,0,9.06-.78,54,54,0,0,0,94-13.46A54,54,0,0,0,222,114.56ZM183.37,52.5a42,42,0,0,1,29.21,53.14,54.84,54.84,0,0,0-5.08-3.33L163,76.62a6,6,0,0,0-6,0l-47,27.13V80.66l41.5-24A41.73,41.73,0,0,1,183.37,52.5ZM146,138.39l-18,10.39-18-10.39V117.61l18-10.39,18,10.39ZM78,72a42,42,0,0,1,72.92-28.43,56.18,56.18,0,0,0-5.42,2.74L101,72a6,6,0,0,0-3,5.19v54.27L78,119.92ZM39.13,85.93a41.75,41.75,0,0,1,27.22-20A55.09,55.09,0,0,0,66,72v51.38a6,6,0,0,0,3,5.2l47,27.13L96,167.26l-41.5-24A42,42,0,0,1,39.13,85.93ZM72.63,203.5a42,42,0,0,1-29.21-53.14,54.84,54.84,0,0,0,5.08,3.33L93,179.38a6,6,0,0,0,6,0l47-27.13v23.09l-41.5,24A41.73,41.73,0,0,1,72.63,203.5ZM178,184a42,42,0,0,1-72.92,28.43,56.18,56.18,0,0,0,5.42-2.74L155,184a6,6,0,0,0,3-5.19V124.54l20,11.54Zm38.87-13.93a41.75,41.75,0,0,1-27.22,20A55.09,55.09,0,0,0,190,184V132.62a6,6,0,0,1-3-5.2l-47-27.13,20-11.55,41.5,24A42,42,0,0,1,216.87,170.07Z"/>
       </svg>
       <span class="wpp-label">Chatbot</span>
     </a>
 
-    <a class="wpp-leftbar-icon" href="/disparos" title="Disparador" aria-label="Disparador">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
+    <a class="wpp-leftbar-icon" data-menu="disparos" href="/disparos" title="Disparador" aria-label="Disparador">
+      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z"/>
       </svg>
       <span class="wpp-label">Disparador</span>
     </a>
 
-    <a class="wpp-leftbar-icon" href="/conectar" title="Conectar WhatsApp" aria-label="Conectar WhatsApp">
-      <svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <a class="wpp-leftbar-icon" data-menu="conectar" href="/conectar" title="Conectar WhatsApp" aria-label="Conectar WhatsApp">
+      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <path d="M104,42H56A14,14,0,0,0,42,56v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,104,42Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-2,34H56a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V152A14,14,0,0,0,104,138Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V152a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2ZM200,42H152a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,200,42Zm2,62a2,2,0,0,1-2,2H152a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-64,72V144a6,6,0,0,1,12,0v32a6,6,0,0,1-12,0Zm76-16a6,6,0,0,1-6,6H182v42a6,6,0,0,1-6,6H144a6,6,0,0,0,0,12h26V144a6,6,0,0,1,12,0v10h26A6,6,0,0,1,214,160Zm0,32v16a6,6,0,0,1-12,0V192a6,6,0,0,1,12,0Z"/>
       </svg>
       <span class="wpp-label">Conectar WhatsApp</span>
@@ -378,3 +474,251 @@
     </div>
   </div>
 </nav>
+
+<script>
+(function () {
+  if (window.__WPP_SIDEBAR_ATEND_READY__) return;
+  window.__WPP_SIDEBAR_ATEND_READY__ = true;
+
+  var userBtn = document.getElementById('wppUserMenuBtn');
+  var userMenu = document.getElementById('wppUserMenu');
+  var avatarImg = document.getElementById('wppUserAvatarImg');
+  var initialsEl = document.getElementById('wppUserInitials');
+  var userNameEl = document.getElementById('wppUserName');
+  var userEmailEl = document.getElementById('wppUserEmail');
+
+  var openProfileBtn = document.getElementById('wppOpenProfileBtn');
+  var myPlanBtn = document.getElementById('wppMyPlanBtn');
+  var configBtn = document.getElementById('wppConfigBtn');
+  var themeBtn = document.getElementById('wppThemeBtn');
+  var logoutBtn = document.getElementById('wppLogoutBtn');
+
+  function norm(path) {
+    path = String(path || '').toLowerCase().trim();
+    path = path.split('?')[0].split('#')[0];
+    path = path.replace(/\/+$/, '');
+    return path || '/';
+  }
+
+  function currentMenu() {
+    var p = norm(location.pathname);
+    if (p === '/' || p === '/dashboard' || p === '/dashboard.html' || p === '/inicio') return 'dashboard';
+    if (p.indexOf('/atendimentos') === 0) return 'atendimentos';
+    if (p.indexOf('/midias') === 0) return 'midias';
+    if (p.indexOf('/chat-interno') === 0) return 'chat-interno';
+    if (p.indexOf('/clientes') === 0) return 'clientes';
+    if (p.indexOf('/colaboradores') === 0) return 'colaboradores';
+    if (p.indexOf('/departamentos') === 0) return 'departamentos';
+    if (p.indexOf('/chatbot') === 0) return 'chatbot';
+    if (p.indexOf('/disparos') === 0) return 'disparos';
+    if (p.indexOf('/conectar') === 0) return 'conectar';
+    return '';
+  }
+
+  function markActive() {
+    var cur = currentMenu();
+    document.querySelectorAll('.wpp-leftbar-icon[data-menu]').forEach(function (el) {
+      var on = el.getAttribute('data-menu') === cur;
+      el.classList.toggle('is-active', on);
+      if (on) el.setAttribute('aria-current', 'page');
+      else el.removeAttribute('aria-current');
+    });
+  }
+
+  function getInitials(name) {
+    var s = String(name || '').trim();
+    if (!s) return 'U';
+    var parts = s.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+    return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+  }
+
+  function decodeJwtPayload(token) {
+    try {
+      if (!token || token.split('.').length !== 3) return {};
+      return JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function pickStorage(keys) {
+    for (var i = 0; i < keys.length; i++) {
+      try {
+        var v = localStorage.getItem(keys[i]);
+        if (v) return v;
+      } catch (e) {}
+    }
+    return '';
+  }
+
+  function renderUserFromStorage() {
+    var token = pickStorage(['access_token', 'token']);
+    var jwt = decodeJwtPayload(token);
+
+    var nome = pickStorage(['usuario_nome', 'nome', 'name', 'displayName']) || jwt.name || jwt.given_name || '';
+    var email = pickStorage(['usuario_email', 'email', 'userEmail', 'loginEmail']) || jwt.email || jwt.preferred_username || jwt.sub || '';
+    var avatar = pickStorage(['usuario_avatar', 'avatar_url']);
+
+    if (userNameEl) userNameEl.textContent = nome || 'Usuário';
+    if (userEmailEl) userEmailEl.textContent = email || 'Sem e-mail';
+    if (initialsEl) initialsEl.textContent = getInitials(nome || email || 'Usuário');
+
+    if (avatarImg) {
+      if (avatar) {
+        avatarImg.onerror = function () {
+          avatarImg.removeAttribute('src');
+          avatarImg.style.display = 'none';
+          if (initialsEl) initialsEl.style.display = '';
+        };
+        avatarImg.src = avatar;
+        avatarImg.style.display = 'block';
+        if (initialsEl) initialsEl.style.display = 'none';
+      } else {
+        avatarImg.removeAttribute('src');
+        avatarImg.style.display = 'none';
+        if (initialsEl) initialsEl.style.display = '';
+      }
+    }
+  }
+
+  async function hydrateUserFromApi() {
+    try {
+      var res = await fetch('/api/perfil', {
+        method: 'GET',
+        credentials: 'include',
+        headers: { 'Accept': 'application/json' }
+      });
+      if (!res.ok) return;
+
+      var data = await res.json();
+      if (!data || typeof data !== 'object') return;
+
+      var nome = data.nome || data.name || '';
+      var email = data.email || '';
+      var avatar = data.avatar_url || data.avatar || '';
+
+      try {
+        if (nome) localStorage.setItem('usuario_nome', nome);
+        if (email) localStorage.setItem('usuario_email', email);
+        if (avatar) {
+          localStorage.setItem('usuario_avatar', avatar);
+          localStorage.setItem('avatar_url', avatar);
+        }
+      } catch (e) {}
+
+      renderUserFromStorage();
+    } catch (e) {}
+  }
+
+  function closeMenu() {
+    if (userMenu) userMenu.classList.remove('show');
+    if (userBtn) {
+      userBtn.classList.remove('active');
+      userBtn.setAttribute('aria-expanded', 'false');
+    }
+  }
+
+  function toggleMenu() {
+    if (!userMenu || !userBtn) return;
+    var open = !userMenu.classList.contains('show');
+    userMenu.classList.toggle('show', open);
+    userBtn.classList.toggle('active', open);
+    userBtn.setAttribute('aria-expanded', String(open));
+  }
+
+  function go(url) {
+    window.location.href = url;
+  }
+
+  function isDark() {
+    return document.documentElement.classList.contains('dark') ||
+      document.documentElement.getAttribute('data-theme') === 'dark';
+  }
+
+  function setTheme(mode) {
+    var dark = String(mode) === 'dark';
+    var root = document.documentElement;
+
+    try {
+      if (window.AppTheme && typeof window.AppTheme.set === 'function') {
+        window.AppTheme.set(dark ? 'dark' : 'light');
+      }
+    } catch (e) {}
+
+    root.classList.toggle('dark', dark);
+    root.setAttribute('data-theme', dark ? 'dark' : 'light');
+
+    try {
+      localStorage.setItem('theme', dark ? 'dark' : 'light');
+      localStorage.setItem('valora_theme', dark ? 'dark' : 'light');
+    } catch (e) {}
+  }
+
+  async function doLogout() {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch (e) {}
+
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch (e) {}
+
+    window.location.replace('/');
+  }
+
+  if (userBtn) {
+    userBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      toggleMenu();
+    });
+  }
+
+  document.addEventListener('click', function (e) {
+    if (!userMenu || !userBtn) return;
+    if (!userMenu.contains(e.target) && !userBtn.contains(e.target)) {
+      closeMenu();
+    }
+  });
+
+  if (openProfileBtn) {
+    openProfileBtn.addEventListener('click', function () {
+      closeMenu();
+      go('/perfil.html');
+    });
+  }
+
+  if (myPlanBtn) {
+    myPlanBtn.addEventListener('click', function () {
+      closeMenu();
+      go('/meu-plano');
+    });
+  }
+
+  if (configBtn) {
+    configBtn.addEventListener('click', function () {
+      closeMenu();
+      go('/configuracoes.html');
+    });
+  }
+
+  if (themeBtn) {
+    themeBtn.addEventListener('click', function () {
+      setTheme(isDark() ? 'light' : 'dark');
+      closeMenu();
+    });
+  }
+
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', function () {
+      closeMenu();
+      doLogout();
+    });
+  }
+
+  markActive();
+  renderUserFromStorage();
+  hydrateUserFromApi();
+})();
+</script>
