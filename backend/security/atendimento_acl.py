@@ -7,7 +7,6 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend import models
-from backend.security.instancias import instancias_visiveis
 
 
 # =========================================================
@@ -137,6 +136,9 @@ def allowed_instancia_ids(
       - [..] => whitelist de instâncias
     """
     try:
+        # IMPORT LAZY pra evitar circular import
+        from backend.security.instancias import instancias_visiveis
+
         ids = instancias_visiveis(identity, db)
         if ids is None:
             return None
@@ -258,12 +260,6 @@ def resolve_acl_context(
     identity: dict | None,
     empresa_id: int,
 ) -> dict:
-    """
-    Helper prático para as rotas:
-      ctx = resolve_acl_context(...)
-      ctx["allowed_instancias"]
-      ctx["allowed_departamentos"]
-    """
     empresa_id = assert_same_company(identity, empresa_id)
 
     return {
@@ -378,13 +374,6 @@ def assert_cliente_access(
     instancia_id: int | None = None,
     allow_unassigned_department: bool = False,
 ):
-    """
-    Valida acesso ao cliente pela conversa oficial (Atendimento).
-    Se houver atendimento mais recente, usa ele.
-    Se ainda não houver atendimento, cai no cliente:
-      - instancia_id do cliente
-      - departamento_id do cliente (fallback legado)
-    """
     ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id)
 
     cliente = get_cliente_or_404(
@@ -410,7 +399,6 @@ def assert_cliente_access(
         )
         return cliente, atendimento
 
-    # fallback legado enquanto a base ainda está migrando
     fallback_instancia_id = instancia_id
     if fallback_instancia_id is None:
         fallback_instancia_id = getattr(cliente, "instancia_id", None)
@@ -433,9 +421,6 @@ def build_allowed_filters(
     allowed_instancias: Optional[List[int]],
     allowed_departamentos: Optional[List[int]],
 ) -> dict:
-    """
-    Só devolve os arrays já normalizados para usar em queries.
-    """
     return {
         "instancias": None if allowed_instancias is None else [int(x) for x in allowed_instancias],
         "departamentos": None if allowed_departamentos is None else [int(x) for x in allowed_departamentos],
