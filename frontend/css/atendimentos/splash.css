@@ -1,0 +1,129 @@
+/* =========================
+   SPLASH / SYNC FULLSCREEN
+   ========================= */
+
+html.is-loading,
+body.is-loading{
+  overflow:hidden !important;
+}
+
+#splash-screen{
+  position:fixed;
+  inset:0;
+  z-index:100000;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:14px;
+  padding:24px;
+  background:var(--panel-1,#0b141a);
+  color:var(--text,#e9edef);
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+  transition:opacity .18s ease, visibility .18s ease;
+}
+
+#splash-screen.is-visible{
+  opacity:1;
+  visibility:visible;
+  pointer-events:auto;
+}
+
+#splash-screen .brand{
+  width:min(120px, 28vw);
+  max-width:120px;
+  min-width:72px;
+  height:auto;
+  display:block;
+  object-fit:contain;
+  filter:drop-shadow(0 8px 24px rgba(0,0,0,.22));
+}
+
+#splash-screen .msg{
+  margin:0;
+  font-size:14px;
+  font-weight:600;
+  color:var(--text,#e9edef);
+  letter-spacing:.01em;
+  text-align:center;
+}
+
+#splash-screen .bar-outer{
+  width:min(260px, 72vw);
+  height:8px;
+  border-radius:999px;
+  overflow:hidden;
+  background:color-mix(in oklab, var(--border,#2a3942) 84%, transparent);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+}
+
+#splash-screen .bar-inner{
+  width:42%;
+  height:100%;
+  border-radius:inherit;
+  background:linear-gradient(90deg, #25d366 0%, #10b981 45%, #06b6d4 100%);
+  animation:splash-bar-slide 1.15s ease-in-out infinite;
+  transform-origin:left center;
+}
+
+#splash-screen .crypto{
+  margin:0;
+  max-width:min(360px, 85vw);
+  font-size:12px;
+  line-height:1.35;
+  color:var(--text-2,#aebac1);
+  text-align:center;
+}
+
+@keyframes splash-bar-slide{
+  0%{
+    transform:translateX(-115%);
+  }
+  100%{
+    transform:translateX(340%);
+  }
+}
+
+html[data-theme="light"] #splash-screen{
+  background:#f8fafc;
+  color:#0f172a;
+}
+
+html[data-theme="light"] #splash-screen .msg{
+  color:#0f172a;
+}
+
+html[data-theme="light"] #splash-screen .crypto{
+  color:#64748b;
+}
+
+html[data-theme="light"] #splash-screen .bar-outer{
+  background:#e5e7eb;
+}
+
+@media (max-width:640px){
+  #splash-screen{
+    gap:12px;
+    padding:20px;
+  }
+
+  #splash-screen .brand{
+    width:min(96px, 30vw);
+    min-width:64px;
+  }
+
+  #splash-screen .msg{
+    font-size:13px;
+  }
+
+  #splash-screen .bar-outer{
+    width:min(220px, 78vw);
+    height:7px;
+  }
+
+  #splash-screen .crypto{
+    font-size:11.5px;
+  }
+}

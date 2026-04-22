@@ -1,0 +1,617 @@
+/* /frontend/css/atendimentos/composer.css */
+
+footer,
+#chat-footer{
+  position: sticky;
+  bottom: 0;
+  z-index: 40;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px 10px;
+  box-sizing: border-box;
+
+  /* o fundo real vai ficar no ::before */
+  background: transparent !important;
+  background-image: none !important;
+
+  opacity: 1 !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  mix-blend-mode: normal !important;
+
+  border-top: 0 !important;
+  box-shadow: none !important;
+  isolation: isolate;
+}
+
+#chat-footer{
+  position: sticky !important;
+  overflow: visible !important;
+}
+
+/* faixa atrás do composer usando o wallpaper */
+#chat-footer::before{
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -18px;
+  bottom: 0;
+  z-index: 0;
+  pointer-events: none;
+
+  background-color: #0b141a !important;
+  background-image: url("/frontend/img/whatsapp-bg-dark.png") !important;
+  background-repeat: repeat !important;
+  background-position: 0 0 !important;
+  background-size: 400px 400px !important;
+
+  opacity: 1 !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  mix-blend-mode: normal !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="light"] #chat-footer::before{
+  background-color: #efeae2 !important;
+  background-image: url("/frontend/img/whatsapp-bg-light.png") !important;
+  background-repeat: repeat !important;
+  background-position: 0 0 !important;
+  background-size: 400px 400px !important;
+}
+
+#chat-footer > *{
+  position: relative;
+  z-index: 1;
+}
+
+/* =========================
+   COMPOSER ESTILO WHATSAPP
+   ========================= */
+
+.wa-composer{
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 50px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: #2a2f32 !important;
+  background-image: none !important;
+  opacity: 1 !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  mix-blend-mode: normal !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.wa-composer::before{
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: #2a2f32 !important;
+}
+
+.wa-composer > *{
+  position: relative;
+  z-index: 1;
+}
+
+html[data-theme="light"] .wa-composer{
+  background: #ffffff !important;
+  background-image: none !important;
+  border: 1px solid #d9e0e4 !important;
+}
+
+html[data-theme="light"] .wa-composer::before{
+  background: #ffffff !important;
+}
+
+.wa-composer-btn{
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent !important;
+  color: #aebac1;
+  cursor: pointer;
+  box-shadow: none !important;
+  transition: background .15s ease, color .15s ease, transform .08s ease;
+}
+
+.wa-composer-btn:hover{
+  background: rgba(255,255,255,.04) !important;
+  color: #d1d7db;
+}
+
+.wa-composer-btn:active{
+  transform: translateY(1px);
+}
+
+html[data-theme="light"] .wa-composer-btn{
+  color: #54656f;
+}
+
+html[data-theme="light"] .wa-composer-btn:hover{
+  background: rgba(0,0,0,.05) !important;
+  color: #1f2c33;
+}
+
+.wa-composer-btn i,
+.wa-composer-btn svg{
+  font-size: 18px;
+  line-height: 1;
+  color: currentColor !important;
+  fill: currentColor;
+  stroke: currentColor;
+}
+
+.wa-attach-btn i{
+  font-size: 18px;
+}
+
+.wa-emoji-btn i{
+  font-size: 17px;
+}
+
+.wa-action-btn i{
+  font-size: 16px;
+}
+
+.wa-action-btn.is-send{
+  background: #00a884 !important;
+  color: #fff !important;
+}
+
+.wa-action-btn.is-send:hover{
+  background: #02b58d !important;
+  color: #fff !important;
+}
+
+.wa-action-btn.is-recording{
+  background: #ef4444 !important;
+  color: #fff !important;
+}
+
+.wa-action-btn.is-recording:hover{
+  background: #dc2626 !important;
+  color: #fff !important;
+}
+
+.wa-composer-input,
+#mensagem{
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 38px !important;
+  line-height: 38px !important;
+  padding: 0 6px !important;
+  margin: 0 !important;
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  color: #dfe5e7 !important;
+  -webkit-text-fill-color: #dfe5e7 !important;
+  font-size: 15px !important;
+  font-family: inherit;
+  border-radius: 0 !important;
+  resize: none;
+}
+
+.wa-composer-input::placeholder,
+#mensagem::placeholder{
+  color: #aebac1 !important;
+  opacity: 1;
+}
+
+html[data-theme="light"] .wa-composer-input,
+html[data-theme="light"] #mensagem{
+  color: #111b21 !important;
+  -webkit-text-fill-color: #111b21 !important;
+}
+
+html[data-theme="light"] .wa-composer-input::placeholder,
+html[data-theme="light"] #mensagem::placeholder{
+  color: #667781 !important;
+}
+
+.wa-composer-input:focus,
+#mensagem:focus{
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* =========================
+   EMOJI
+   ========================= */
+
+.emoji-pop{
+  position: absolute;
+  left: 12px;
+  bottom: calc(100% + 8px);
+  z-index: 60;
+  display: none;
+  width: min(320px, calc(100vw - 32px));
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px;
+  background: #202c33;
+  border: 1px solid #26343a;
+  border-radius: 16px;
+  box-shadow: var(--shadow-soft);
+}
+
+html[data-theme="light"] .emoji-pop{
+  background: #fff;
+  border-color: #d9e0e4;
+}
+
+.emoji-pop.show{
+  display: block;
+}
+
+.emoji-grid{
+  display: grid;
+  grid-template-columns: repeat(8,1fr);
+  gap: 4px;
+}
+
+.emoji-btn-item{
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 0;
+  background: transparent;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.emoji-btn-item:hover{
+  background: rgba(255,255,255,.12);
+}
+
+html[data-theme="light"] .emoji-btn-item:hover{
+  background: rgba(0,0,0,.06);
+}
+
+/* =========================
+   ANEXOS
+   ========================= */
+
+.attach-pop{
+  position: absolute;
+  left: 12px;
+  bottom: calc(100% + 8px);
+  min-width: 240px;
+  max-width: 260px;
+  z-index: 55;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity .15s ease, transform .15s ease;
+  background: #111b21;
+  border: 1px solid #2a3942;
+  border-radius: 14px;
+  padding: 6px;
+  box-shadow: var(--shadow-soft);
+}
+
+html[data-theme="light"] .attach-pop{
+  background: #ffffff;
+  border-color: #d9e0e4;
+}
+
+.attach-pop.show{
+  opacity: 1;
+  transform: none;
+}
+
+.attach-pop.hidden{
+  display: none !important;
+}
+
+.attach-item{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #e9edef;
+  cursor: pointer;
+  user-select: none;
+  text-align: left;
+}
+
+html[data-theme="light"] .attach-item{
+  color: #111b21;
+}
+
+.attach-item:hover{
+  background: rgba(255,255,255,.06);
+}
+
+html[data-theme="light"] .attach-item:hover{
+  background: rgba(0,0,0,.05);
+}
+
+.attach-ico{
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  flex: 0 0 28px;
+}
+
+.attach-lab{
+  font-size: 14px;
+}
+
+.attach-item[data-act="doc"] .attach-ico{ background:#7b83eb; }
+.attach-item[data-act="media"] .attach-ico{ background:#00a884; }
+.attach-item[data-act="camera"] .attach-ico{ background:#ea4c89; }
+.attach-item[data-act="audio-file"] .attach-ico{ background:#53bdeb; }
+.attach-item[data-act="audio-record"] .attach-ico{ background:#25d366; }
+.attach-item[data-act="contact"] .attach-ico{ background:#ffbe0b; }
+.attach-item[data-act="sticker"] .attach-ico{ background:#7f66ff; }
+
+.attach-sep{
+  height: 1px;
+  margin: 6px 4px;
+  background: #2a3942;
+  border-radius: 1px;
+}
+
+html[data-theme="light"] .attach-sep{
+  background: #e5e7eb;
+}
+
+/* =========================
+   BOLHA DE GRAVAÇÃO
+   ========================= */
+
+.zc-rec-bubble{
+  position: absolute;
+  right: 16px;
+  bottom: calc(100% + 10px);
+  z-index: 70;
+  display: none;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #e9edef;
+  background: #0f1a1f;
+  border: 1px solid #2a3942;
+  border-radius: 10px;
+}
+
+.zc-rec-bubble.show{
+  display: flex;
+}
+
+.zc-rec-bubble .dot{
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: #ef4444;
+}
+
+.zc-rec-bubble .stop{
+  background: #ef4444;
+  border: 0;
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+
+/* =========================
+   DRAG AND DROP
+   ========================= */
+
+#zc-drop-overlay{
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15,23,42,.80);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s ease;
+}
+
+#zc-drop-overlay.on{
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#zc-drop-overlay .zc-drop-box{
+  border: 1px dashed #38bdf8;
+  border-radius: 16px;
+  padding: 16px 24px;
+  background: rgba(15,23,42,.95);
+  color: #e5e7eb;
+  font-size: 14px;
+}
+
+/* =========================
+   PREVIEW / MODAIS AUXILIARES
+   ========================= */
+
+.zcDlg-filePreview .zpPrev{
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.zcDlg-filePreview .zpPrev-main{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.zcDlg-filePreview .zpPrev-thumb{
+  width: 72px;
+  height: 72px;
+  border-radius: 12px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--panel-2,#1f2c33);
+  color: var(--text-2,#aebac1);
+  flex: 0 0 72px;
+}
+
+.zcDlg-filePreview .zpPrev-thumb img{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.zcDlg-filePreview .zpPrev-meta{
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.zcDlg-filePreview .zpPrev-name{
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.zcDlg-filePreview .zpPrev-info{
+  font-size: 12px;
+  color: var(--text-2,#aebac1);
+}
+
+.zcDlg-filePreview .zpPrev-caption{
+  width: 100%;
+  min-height: 86px;
+  resize: vertical;
+  border-radius: 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent);
+  background: var(--panel-2,#1f2c33);
+  color: var(--text,#e9edef);
+  outline: none;
+}
+
+.zcDlg-filePreview .zpPrev-list{
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.zcDlg-filePreview .zpPrev-ul{
+  margin: 0;
+  padding-left: 18px;
+  max-height: 140px;
+  overflow: auto;
+}
+
+/* =========================
+   MOBILE
+   ========================= */
+
+@media (max-width:920px){
+  footer,
+  #chat-footer{
+    padding: 6px 10px 8px !important;
+  }
+
+  #chat-footer::before{
+    top: -14px;
+  }
+
+  .wa-composer{
+    min-height: 48px;
+    padding: 4px 8px;
+    border-radius: 8px;
+    gap: 3px;
+  }
+
+  .wa-composer-btn{
+    width: 36px;
+    height: 36px;
+    flex-basis: 36px;
+  }
+
+  .wa-composer-input,
+  #mensagem{
+    height: 38px !important;
+    line-height: 38px !important;
+    font-size: 14px !important;
+  }
+
+  .emoji-pop,
+  .attach-pop{
+    left: 8px;
+    width: min(300px, calc(100vw - 20px));
+    max-width: calc(100vw - 20px);
+  }
+
+  .zc-rec-bubble{
+    right: 10px;
+  }
+}
+
+@media (max-width:480px){
+  footer,
+  #chat-footer{
+    padding: 6px 8px 8px !important;
+  }
+
+  .wa-composer{
+    padding: 4px 7px;
+    border-radius: 8px;
+  }
+
+  .wa-composer-btn{
+    width: 34px;
+    height: 34px;
+    flex-basis: 34px;
+  }
+
+  .wa-composer-btn i,
+  .wa-composer-btn svg{
+    font-size: 16px;
+  }
+
+  .wa-composer-input,
+  #mensagem{
+    font-size: 13.5px !important;
+  }
+}

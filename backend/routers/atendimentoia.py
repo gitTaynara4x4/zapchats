@@ -32,11 +32,11 @@ router = APIRouter(prefix="/api/atendimento/ia", tags=["IA"])
 # URLs separadas para cada workflow do n8n
 N8N_URL_RESUMO = os.getenv(
     "N8N_URL_RESUMO",
-    "https://zapchats-n8n.9ywrah.easypanel.host/webhook/ia-resumo",
+    "https://zapschat-n8n.9ywrah.easypanel.host/webhook/ia-resumo",
 )
 N8N_URL_MELHORAR = os.getenv(
     "N8N_URL_MELHORAR",
-    "https://zapchats-n8n.9ywrah.easypanel.host/webhook/ia-melhorar",
+    "https://zapschat-n8n.9ywrah.easypanel.host/webhook/ia-melhorar",
 )
 N8N_KEY = os.getenv("N8N_KEY", "")  # opcional: header para validar no n8n
 ENV = os.getenv("ENV", "dev").lower()

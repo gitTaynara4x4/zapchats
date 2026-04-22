@@ -1,5 +1,7 @@
+//frontend\js\atendimentos\boot\main.js
+
 /* ====================================================================
- * ZapChats – Painel de Atendimento
+ * zapschat – Painel de Atendimento
  * /frontend/js/atendimentos/boot/main.js
  *
  * Ponto de entrada ES Module. Carrega todos os módulos em ordem e
@@ -21,7 +23,7 @@ import '../domain/ack.js';          // normalização/aplicação de ACK (getAck
 import '../domain/clientes.js';     // carregarClientes, renderListaClientes, contatos
 import '../domain/historico.js';    // salvarNoCache, renderHistoricoDoCache, paginação
 import '../domain/instances.js';    // INSTÂNCIA_ATIVA + setInstanciaAtiva / filtros
-import '../domain/media-render.js'; // criação de HTML de mídias, players, fallbacks
+import '../ui/media-render.js'; // criação de HTML de mídias, players, fallbacks
 
 // -------- REALTIME (websocket) --------------------------------------
 import '../realtime/ws-empresa.js'; // connectEmpresaWS + eventos (ack, reload, nova msg)
@@ -33,7 +35,6 @@ import '../ui/notif.js';            // áudio/desktop notifications + contador d
 import '../ui/perfil.js';           // shim de perfil: abrirPerfilAtual()
 import '../ui/perfil_quick.js';     // painel rápido (Evolution) ao clicar no nome/foto
 import '../ui/search.js';           // busca global e dentro do chat (F3/Ctrl+G)
-import '../ui/flyout.js';           // 3 pontinhos + flyout lateral
 import '../ui/inst-switch.js';      // seletor de instâncias "WhatsApps (N)"
 import '../ui/notes-drawer.js';     // drawer lateral “Sobre o cliente”
 import '../ui/ia.js';               // modal/ferramentas de IA

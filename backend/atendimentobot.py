@@ -14,7 +14,7 @@ EVOLUTION_APIKEY = os.getenv("EVOLUTION_APIKEY")
 HEADERS = {"apikey": EVOLUTION_APIKEY, "Content-Type": "application/json"} if EVOLUTION_APIKEY else {}
 
 
-MENU_SETORES = "*Atendimento ZapChats 🤖*\nDigite o número do setor desejado:\n\n"
+MENU_SETORES = "*Atendimento zapschat 🤖*\nDigite o número do setor desejado:\n\n"
 
 async def enviar_menu_se_novo_ou_24h(db, empresa, cliente, conexoes_ativas, HEADERS, EVOLUTION_URL):
     agora = datetime.now(pytz.timezone("America/Sao_Paulo"))

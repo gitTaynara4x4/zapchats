@@ -1,16 +1,23 @@
-// /frontend/js/store.js
+//frontend\js\atendimentos\state\store.js
+
 import { EMPRESA_ID } from '../core/env.js';
 
 /**
  * STORE (ZapChat Atendimentos)
  * - Cache por empresa
- * - Conversas: por instância (para não misturar listas)
- * - Histórico: agora é "base unificada" por (instância + conversa)
+ * - Conversas: por instância
+ * - Histórico: unificado por (instância + conversa)
  *
- * ✅ Mantém compat com módulos antigos:
- *   - state.clientesCache / state.nextCursor continuam existindo (instância atual)
- *   - cacheHistoricos legado continua existindo (para não quebrar quem ainda usa)
- * ✅ Novo recomendado:
+ * Regra oficial:
+ *   conversation_key = c:<cliente_id>:<instancia_id>
+ *   conversation_key = g:<grupo_id>:<instancia_id>
+ *
+ * Compatibilidade mantida:
+ *   - state.clientesCache / state.nextCursor continuam refletindo a instância ativa
+ *   - cacheHistoricos legado continua existindo
+ *   - window.state / window.clientesCache / window.cacheHistoricos / window.persist
+ *
+ * Novo recomendado:
  *   - getConversasKeyed()/setConversasKeyed()/appendConversasKeyed()
  *   - pushMsgKeyed()/saveMsgsKeyed()/getMsgsKeyed()
  */
@@ -22,13 +29,13 @@ const EID = String(EMPRESA_ID ?? '').trim() || '0';
    ========================= */
 const LS_META = `zc:meta:${EID}`;
 
-// ✅ LEGADO (mantém)
+// legado
 const LS_CLIENTES_LEGACY = `clientesCache:${EID}`;
-const LS_HIST_LEGACY     = `cacheHistoricos:${EID}`;
+const LS_HIST_LEGACY = `cacheHistoricos:${EID}`;
 
-// ✅ NOVO (por instância / unificado)
+// novo
 const LS_CONVS_V2 = `zc:convs:v2:${EID}`; // { [instKey]: { items:[], nextCursor, ts } }
-const LS_HIST_V2  = `zc:hist:v2:${EID}`;  // { [k]: Mensagem[] } onde k = `${instKey}:${convId}`
+const LS_HIST_V2 = `zc:hist:v2:${EID}`;   // { [instKey:conversation_key]: Mensagem[] }
 
 /* =========================
    DB_MODE flags
@@ -42,152 +49,553 @@ export const DB_MODE = {
 /* =========================
    Helpers internos
    ========================= */
-function safeJsonParse(v, fallback){
+function safeJsonParse(v, fallback) {
   try { return JSON.parse(v); } catch { return fallback; }
 }
 
-function normStr(v){
-  const s = (v == null ? '' : String(v)).trim();
+function getLS(key, fallback = null) {
+  try {
+    const v = localStorage.getItem(key);
+    return v == null ? fallback : v;
+  } catch {
+    return fallback;
+  }
+}
+
+function setLS(key, value) {
+  try { localStorage.setItem(key, value); } catch {}
+}
+
+function normStr(v) {
+  return (v == null ? '' : String(v)).trim();
+}
+
+function idKey(v) {
+  const s = normStr(v);
+  if (!s) return null;
+  if (s === 'null' || s === 'undefined' || s === 'NaN') return null;
   return s;
 }
 
-// instância ativa (mesma lógica do init.js)
-function getActiveInstKey(){
+function idEq(a, b) {
+  const A = idKey(a);
+  const B = idKey(b);
+  return !!A && !!B && A === B;
+}
+
+function numOrNull(v) {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function instValue(v) {
+  const s = normStr(v);
+  if (!s) return null;
+  if (['null', 'undefined', 'nan', '0', 'all', '*', '-'].includes(s.toLowerCase())) return null;
+  return s;
+}
+
+function instKeyFromValue(v) {
+  return instValue(v) || 'all';
+}
+
+function getActiveInstKey() {
   try {
     const k = `instAtiva:${EID}`;
-    const ls = normStr(localStorage.getItem(k));
-    const w  = normStr(window.INSTANCIA_ATIVA);
-    // preferir window > ls
-    const v = w || ls;
-    return v ? String(v) : 'all';
+    const fromWindow = instValue(window.INSTANCIA_ATIVA);
+    const fromLS = instValue(getLS(k, ''));
+    return instKeyFromValue(fromWindow || fromLS || 'all');
   } catch {
     return 'all';
   }
 }
 
-function instKeyFromValue(v){
-  const s = normStr(v);
-  return s ? s : 'all';
+function isActiveInst(instanciaKey) {
+  return instKeyFromValue(instanciaKey) === getActiveInstKey();
 }
 
-function convIdOf(item){
-  const v =
-    item?.conversation_id ?? item?.cliente_id ?? item?.id ?? item?.cid ??
-    item?.clienteId ?? null;
-  const n = Number(v ?? 0);
-  return Number.isFinite(n) && n > 0 ? n : null;
+/* =========================
+   Conversation ref helpers
+   ========================= */
+function parseComposedConversationKey(raw) {
+  const s = idKey(raw);
+  if (!s) return null;
+  const m = s.match(/^([cg]):(\d+):([^:]+)$/i);
+  if (!m) return null;
+
+  return {
+    key: `${m[1].toLowerCase()}:${m[2]}:${m[3]}`,
+    kind: m[1].toLowerCase(),
+    entityId: m[2],
+    instId: instValue(m[3]),
+  };
 }
 
-// base: recência + msg_id; pins primeiro (se existir)
-function tsToMillisAny(x){
+function inferKindFromItem(item) {
+  const src = item && typeof item === 'object' ? item : {};
+
+  const explicit =
+    src?.kind ??
+    src?.conversation_kind ??
+    src?.tipo_conversa ??
+    src?.tipo_ref ??
+    null;
+
+  const e = normStr(explicit).toLowerCase();
+  if (e === 'c' || e === 'contato' || e === 'cliente') return 'c';
+  if (e === 'g' || e === 'grupo' || e === 'group') return 'g';
+
+  const fromKeys = [
+    src?.conversation_key,
+    src?.conversation_id,
+    src?.id,
+  ];
+
+  for (const k of fromKeys) {
+    const parsed = parseComposedConversationKey(k);
+    if (parsed?.kind) return parsed.kind;
+  }
+
+  if (src?.grupo_id != null || src?.is_group === true || src?.grupo === true || src?.isGroup === true) {
+    return 'g';
+  }
+
+  return 'c';
+}
+
+function inferInstFromItem(item) {
+  const src = item && typeof item === 'object' ? item : {};
+
+  const direct =
+    src?.instancia_id ??
+    src?.instancia ??
+    src?.instancia_slug ??
+    src?.instance_id ??
+    src?.instance ??
+    src?.instance_name ??
+    src?.session ??
+    src?.sessionName ??
+    src?.sessao ??
+    src?.inst_slug ??
+    null;
+
+  const val = instValue(direct);
+  if (val) return val;
+
+  const fromKeys = [
+    src?.conversation_key,
+    src?.conversation_id,
+    src?.id,
+  ];
+
+  for (const k of fromKeys) {
+    const parsed = parseComposedConversationKey(k);
+    if (parsed?.instId) return parsed.instId;
+  }
+
+  return null;
+}
+
+function inferEntityIdFromItem(item, forcedKind = null) {
+  const src = item && typeof item === 'object' ? item : {};
+  const kind = forcedKind || inferKindFromItem(src);
+
+  const fromKeys = [
+    src?.conversation_key,
+    src?.conversation_id,
+    src?.id,
+  ];
+
+  for (const k of fromKeys) {
+    const parsed = parseComposedConversationKey(k);
+    if (parsed?.entityId) return parsed.entityId;
+  }
+
+  const direct =
+    src?.entity_id ??
+    src?.backend_id ??
+    src?.id_backend ??
+    src?.conversation_entity_id ??
+    (kind === 'g'
+      ? (src?.grupo_id ?? src?.group_id ?? null)
+      : (src?.cliente_id ?? src?.clienteId ?? src?.cid ?? src?.id_cliente ?? src?.idCliente ?? null)) ??
+    src?.api_id ??
+    src?.id_api ??
+    null;
+
+  const s = idKey(direct);
+  if (s && /^\d+$/.test(s)) return s;
+
+  return null;
+}
+
+function buildConversationKey(kind, entityId, instId) {
+  const k = String(kind || '').toLowerCase() === 'g' ? 'g' : 'c';
+  const eid = idKey(entityId);
+  const iid = instValue(instId);
+
+  if (!eid) return null;
+  return `${k}:${eid}:${iid ?? '0'}`;
+}
+
+function parseConversationRef(raw, row = null) {
+  const rawStr = idKey(raw);
+  const fromRowKey =
+    idKey(row?.conversation_key) ||
+    idKey(row?.conversation_id) ||
+    idKey(row?.id) ||
+    null;
+
+  const candidate = rawStr || fromRowKey || '';
+  const parsed = parseComposedConversationKey(candidate);
+  if (parsed) return parsed;
+
+  const kind = inferKindFromItem(row || {});
+  const entityId =
+    (parsed && parsed.entityId) ||
+    (rawStr && /^\d+$/.test(rawStr) ? rawStr : null) ||
+    inferEntityIdFromItem(row || {}, kind) ||
+    null;
+
+  const instId = inferInstFromItem(row || {});
+
+  return {
+    key: buildConversationKey(kind, entityId, instId) || candidate || '',
+    kind,
+    entityId,
+    instId,
+  };
+}
+
+function getAllKnownConversas() {
+  const out = [];
+  const seen = new Set();
+
+  const pushOne = (item) => {
+    if (!item || typeof item !== 'object') return;
+    const key =
+      parseConversationRef(
+        item?.conversation_key ?? item?.conversation_id ?? item?.id ?? null,
+        item
+      ).key || null;
+    const dedupeKey = key || `raw:${Math.random()}`;
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    out.push(item);
+  };
+
+  try {
+    Object.values(state?.convsByInst || {}).forEach((box) => {
+      (Array.isArray(box?.items) ? box.items : []).forEach(pushOne);
+    });
+  } catch {}
+
+  try { (Array.isArray(state?.clientesCache) ? state.clientesCache : []).forEach(pushOne); } catch {}
+  try { (Array.isArray(state?.todosContatosCache) ? state.todosContatosCache : []).forEach(pushOne); } catch {}
+
+  return out;
+}
+
+function resolveConversationKeyLoose(raw, row = null, instanciaKey = null) {
+  const ref = parseConversationRef(raw, row);
+
+  if (parseComposedConversationKey(ref.key)) return ref.key;
+
+  if (row) {
+    const rowRef = parseConversationRef(
+      row?.conversation_key ?? row?.conversation_id ?? row?.id ?? null,
+      row
+    );
+    if (parseComposedConversationKey(rowRef.key)) return rowRef.key;
+  }
+
+  if (ref.entityId) {
+    const all = getAllKnownConversas();
+
+    const wantedInst = instValue(instanciaKey);
+    const activeInst = getActiveInstKey();
+
+    let hits = all.filter((c) => {
+      const cr = parseConversationRef(
+        c?.conversation_key ?? c?.conversation_id ?? c?.id ?? null,
+        c
+      );
+      if (!cr.entityId || cr.entityId !== ref.entityId) return false;
+      if (ref.kind && cr.kind && cr.kind !== ref.kind) return false;
+      return true;
+    });
+
+    if (wantedInst) {
+      const exact = hits.find((c) => {
+        const cr = parseConversationRef(
+          c?.conversation_key ?? c?.conversation_id ?? c?.id ?? null,
+          c
+        );
+        return cr.instId === wantedInst;
+      });
+      if (exact) {
+        return parseConversationRef(
+          exact?.conversation_key ?? exact?.conversation_id ?? exact?.id ?? null,
+          exact
+        ).key;
+      }
+    }
+
+    if (activeInst && activeInst !== 'all') {
+      const exactActive = hits.find((c) => {
+        const cr = parseConversationRef(
+          c?.conversation_key ?? c?.conversation_id ?? c?.id ?? null,
+          c
+        );
+        return cr.instId === activeInst;
+      });
+      if (exactActive) {
+        return parseConversationRef(
+          exactActive?.conversation_key ?? exactActive?.conversation_id ?? exactActive?.id ?? null,
+          exactActive
+        ).key;
+      }
+    }
+
+    if (hits.length === 1) {
+      return parseConversationRef(
+        hits[0]?.conversation_key ?? hits[0]?.conversation_id ?? hits[0]?.id ?? null,
+        hits[0]
+      ).key;
+    }
+  }
+
+  return idKey(raw) || null;
+}
+
+function convIdOf(item) {
+  return resolveConversationKeyLoose(
+    item?.conversation_key ?? item?.conversation_id ?? item?.id ?? item?.cliente_id ?? item?.grupo_id ?? null,
+    item,
+    inferInstFromItem(item)
+  );
+}
+
+function entityIdOf(item) {
+  const ref = parseConversationRef(
+    item?.conversation_key ?? item?.conversation_id ?? item?.id ?? item?.cliente_id ?? item?.grupo_id ?? null,
+    item
+  );
+  return ref.entityId || null;
+}
+
+function kindOf(item) {
+  const ref = parseConversationRef(
+    item?.conversation_key ?? item?.conversation_id ?? item?.id ?? item?.cliente_id ?? item?.grupo_id ?? null,
+    item
+  );
+  return ref.kind || 'c';
+}
+
+function tsToMillisAny(x) {
   if (!x) return 0;
   if (typeof x === 'number') return x;
   const t = Date.parse(String(x));
   return Number.isFinite(t) ? t : 0;
 }
-function scoreRecencia(c){
-  const ts = tsToMillisAny(c?.hora || c?.ultima_ts || c?.last_ts || c?.updated_at || c?.last_message_at) || 0;
-  const mid = Number(c?.ultima_msg_id ?? c?.last_msg_id ?? 0) || 0;
-  const ack = Number(c?.ultima_ack ?? c?.last_ack ?? 0) || 0;
+
+function scoreRecencia(c) {
+  const ts =
+    tsToMillisAny(
+      c?.hora ||
+      c?.ultima_ts ||
+      c?.last_ts ||
+      c?.updated_at ||
+      c?.last_message_at
+    ) || 0;
+
+  const mid = numOrNull(c?.ultima_msg_id ?? c?.last_msg_id ?? 0) || 0;
+  const ack = numOrNull(c?.ultima_ack ?? c?.last_ack ?? c?.ack ?? 0) || 0;
+
   return ts * 1_000_000 + mid * 1_000 + ack * 10;
 }
-function sortConversasDesc(arr){
-  const A = Array.isArray(arr) ? arr.slice() : [];
-  return A.sort((a,b)=>{
+
+function sortConversasDesc(arr) {
+  const list = Array.isArray(arr) ? arr.slice() : [];
+  return list.sort((a, b) => {
     const pinCmp = Number(!!b?.pinned) - Number(!!a?.pinned);
     if (pinCmp !== 0) return pinCmp;
-    const r = scoreRecencia(b) - scoreRecencia(a);
-    if (r !== 0) return r;
-    const ib = Number(b?.conversation_id ?? b?.id ?? 0) || 0;
-    const ia = Number(a?.conversation_id ?? a?.id ?? 0) || 0;
-    return ib - ia;
+
+    const recCmp = scoreRecencia(b) - scoreRecencia(a);
+    if (recCmp !== 0) return recCmp;
+
+    const ib = convIdOf(b) || '';
+    const ia = convIdOf(a) || '';
+    return ib.localeCompare(ia, 'pt-BR', { numeric: true, sensitivity: 'base' });
   });
 }
 
-/* =========================
-   Normalização conversa (mínima)
-   ========================= */
-function normalizeConversa(item){
-  const conversation_id = convIdOf(item) ?? (
-    // fallback antigo (não ideal, mas não quebra)
-    item?.telefone ?? item?.name ?? item?.nome ?? null
-  );
+function normalizeConversa(item) {
+  const src = item && typeof item === 'object' ? item : {};
+  const kind = inferKindFromItem(src);
+  const entityId = inferEntityIdFromItem(src, kind);
+  const inst = inferInstFromItem(src);
 
-  const inst =
-    item?.instancia_id ?? item?.instancia ?? item?.instancia_slug ??
-    item?.instance_id ?? item?.instance ?? item?.session ?? item?.sessionName ??
-    item?.sessao ?? item?.inst_slug ?? null;
+  let conversation_key = convIdOf(src);
+  if (!parseComposedConversationKey(conversation_key)) {
+    conversation_key = buildConversationKey(kind, entityId, inst) || conversation_key || null;
+  }
+
+  const ref = parseConversationRef(conversation_key, {
+    ...src,
+    kind,
+    entity_id: entityId,
+    instancia_id: inst,
+  });
+
+  const finalKey = ref.key || conversation_key || null;
+  const finalKind = ref.kind || kind || 'c';
+  const finalEntityId = ref.entityId || entityId || null;
+  const finalInst = ref.instId || inst || null;
 
   const lastTs =
-    item?.ultima_ts ?? item?.hora ?? item?.last_ts ?? item?.updated_at ?? item?.last_message_at ?? null;
+    src?.ultima_ts ??
+    src?.hora ??
+    src?.last_ts ??
+    src?.updated_at ??
+    src?.last_message_at ??
+    null;
 
   const preview =
-    item?.ultima_texto ?? item?.ultima_mensagem ?? item?.preview ?? item?.last_text ?? item?.ultima ?? '';
+    src?.ultima_texto ??
+    src?.ultima_mensagem ??
+    src?.preview ??
+    src?.last_text ??
+    src?.ultima ??
+    '';
+
+  const is_group =
+    finalKind === 'g' ||
+    Boolean(src?.is_group || src?.grupo || src?.isGroup || false);
+
+  const cliente_id =
+    finalKind === 'c'
+      ? (finalEntityId ?? idKey(src?.cliente_id) ?? null)
+      : (idKey(src?.cliente_id) ?? null);
+
+  const grupo_id =
+    finalKind === 'g'
+      ? (finalEntityId ?? idKey(src?.grupo_id) ?? idKey(src?.group_id) ?? null)
+      : (idKey(src?.grupo_id) ?? idKey(src?.group_id) ?? null);
 
   return {
-    // ids
-    conversation_id,
-    cliente_id: item?.cliente_id ?? item?.id ?? conversation_id ?? null,
+    ...src,
 
-    // nomes
-    nome_whatsapp: item?.nome_whatsapp ?? null,
-    nome: item?.nome ?? item?.name ?? '',
-    push_name: item?.push_name ?? null,
+    // identidade canônica
+    id: finalKey ?? idKey(src?.id) ?? null,
+    conversation_key: finalKey,
+    conversation_id: finalKey,
+    kind: finalKind,
+    entity_id: finalEntityId,
+    backend_id: finalEntityId,
 
-    // contatos
-    telefone: item?.telefone ?? item?.number ?? item?.wuid ?? item?.numero ?? null,
-    avatar_url: item?.avatar_url ?? item?.foto_url ?? item?.foto ?? item?.avatar ?? item?.profile_pic_url ?? null,
+    // aliases de compat
+    api_id: finalEntityId,
+    cliente_id,
+    grupo_id,
 
-    // preview
-    ultima_msg_id: item?.ultima_msg_id ?? item?.last_msg_id ?? null,
+    nome_whatsapp: src?.nome_whatsapp ?? null,
+    nome: src?.nome ?? src?.name ?? '',
+    push_name: src?.push_name ?? null,
+
+    telefone: src?.telefone ?? src?.number ?? src?.wuid ?? src?.numero ?? null,
+    telefone_norm: src?.telefone_norm ?? null,
+
+    jid: src?.jid ?? src?.remoteJid ?? null,
+    remoteJid: src?.remoteJid ?? src?.jid ?? null,
+
+    avatar_url:
+      src?.avatar_url ??
+      src?.foto_url ??
+      src?.foto ??
+      src?.avatar ??
+      src?.profile_pic_url ??
+      null,
+
+    ultima_msg_id: src?.ultima_msg_id ?? src?.last_msg_id ?? null,
     ultima_mensagem: String(preview || ''),
     hora: lastTs,
-    last_ts: item?.last_ts ?? null,
-    last_tipo: item?.ultima_tipo ?? item?.last_tipo ?? item?.tipo ?? null,
-    last_ack: item?.ultima_ack ?? item?.last_ack ?? item?.ack ?? null,
+    last_ts: src?.last_ts ?? lastTs ?? null,
+    last_tipo: src?.ultima_tipo ?? src?.last_tipo ?? src?.tipo ?? null,
+    last_ack: src?.ultima_ack ?? src?.last_ack ?? src?.ack ?? null,
 
-    // contadores
-    novas: Number(item?.novas ?? item?.nao_lidas ?? item?.unread ?? 0) || 0,
+    novas: Number(src?.novas ?? src?.nao_lidas ?? src?.unread ?? 0) || 0,
 
-    // instância
-    instancia_id: inst,
-    instancia: inst,
+    instancia_id: finalInst,
+    instancia: finalInst,
+    instance_name: src?.instance_name ?? src?.instance ?? finalInst ?? null,
 
-    // pin
-    pinned: Boolean(item?.pinned || item?.fixado || item?.pin || false),
+    pinned: Boolean(src?.pinned || src?.fixado || src?.pin || false),
+    is_group,
   };
+}
+
+function normalizeConvsByInst(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+
+  Object.entries(raw).forEach(([instKey, box]) => {
+    const items = Array.isArray(box?.items) ? box.items.map(normalizeConversa) : [];
+    out[instKeyFromValue(instKey)] = {
+      items: sortConversasDesc(items),
+      nextCursor: box?.nextCursor ?? null,
+      ts: Number(box?.ts || 0) || 0,
+    };
+  });
+
+  return out;
+}
+
+function messageKeyOf(m) {
+  return idKey(m?.id) ?? idKey(m?.msg_id) ?? null;
+}
+
+function sortMsgsAsc(msgs) {
+  return (Array.isArray(msgs) ? msgs : []).slice().sort((a, b) => {
+    const ai = numOrNull(a?.id);
+    const bi = numOrNull(b?.id);
+    if (ai != null && bi != null && ai !== bi) return ai - bi;
+
+    const at = new Date(a?.ts || a?.timestamp || 0).getTime();
+    const bt = new Date(b?.ts || b?.timestamp || 0).getTime();
+    if (at !== bt) return at - bt;
+
+    const ak = messageKeyOf(a) || '';
+    const bk = messageKeyOf(b) || '';
+    return ak.localeCompare(bk, 'pt-BR', { numeric: true, sensitivity: 'base' });
+  });
 }
 
 /* =========================
    Estado inicial
    ========================= */
-const _legacyClientes = safeJsonParse(localStorage.getItem(LS_CLIENTES_LEGACY) || '[]', []);
-const _legacyHist     = safeJsonParse(localStorage.getItem(LS_HIST_LEGACY) || '{}', {});
+const _legacyClientes = safeJsonParse(getLS(LS_CLIENTES_LEGACY, '[]'), []);
+const _legacyHist = safeJsonParse(getLS(LS_HIST_LEGACY, '{}'), {});
+const _v2Convs = safeJsonParse(getLS(LS_CONVS_V2, '{}'), {});
+const _v2Hist = safeJsonParse(getLS(LS_HIST_V2, '{}'), {});
+const _meta = safeJsonParse(getLS(LS_META, '{"ver":2}'), { ver: 2 });
 
-const _v2Convs = safeJsonParse(localStorage.getItem(LS_CONVS_V2) || '{}', {});
-const _v2Hist  = safeJsonParse(localStorage.getItem(LS_HIST_V2)  || '{}', {});
-
-const _meta    = safeJsonParse(localStorage.getItem(LS_META) || '{"ver":2}', { ver: 2 });
-
-/** Estado global simples do front */
 export const state = {
-  // ===== legado (mantido) =====
-  clientesCache: Array.isArray(_legacyClientes) ? _legacyClientes : [],
+  // legado
+  clientesCache: Array.isArray(_legacyClientes) ? _legacyClientes.map(normalizeConversa) : [],
   cacheHistoricos: (_legacyHist && typeof _legacyHist === 'object') ? _legacyHist : {},
 
-  // ===== v2 =====
-  convsByInst: (_v2Convs && typeof _v2Convs === 'object') ? _v2Convs : {}, // {instKey:{items,nextCursor,ts}}
-  histByKey:  (_v2Hist  && typeof _v2Hist  === 'object') ? _v2Hist  : {},  // { "inst:conv": Mensagem[] }
+  // v2
+  convsByInst: normalizeConvsByInst(_v2Convs),
+  histByKey: (_v2Hist && typeof _v2Hist === 'object') ? _v2Hist : {},
 
   meta: _meta,
 
-  // contatos completos
   todosContatosCache: [],
 
-  // conversa selecionada
   clienteSel: null,
 
-  // paginação (compat)
   nextCursor: null,
   isLoadingMore: false,
 
@@ -195,118 +603,206 @@ export const state = {
 };
 
 /* =========================
-   Persistência
+   Compat global
    ========================= */
-export function persist(){
-  try{
-    // V2
-    localStorage.setItem(LS_CONVS_V2, JSON.stringify(state.convsByInst || {}));
-    localStorage.setItem(LS_HIST_V2,  JSON.stringify(state.histByKey  || {}));
+function syncLegacyGlobals() {
+  if (typeof window === 'undefined') return;
 
-    // Meta
-    localStorage.setItem(LS_META, JSON.stringify(state.meta || { ver: 2 }));
+  window.state = state;
+  window.clientesCache = state.clientesCache;
+  window.cacheHistoricos = state.cacheHistoricos;
+  window.todosContatosCache = state.todosContatosCache;
+  window.clienteSel = state.clienteSel;
+  window.DB_MODE = DB_MODE;
 
-    // Legado (mantém para compat)
-    localStorage.setItem(LS_CLIENTES_LEGACY, JSON.stringify(Array.isArray(state.clientesCache)?state.clientesCache:[]));
-    localStorage.setItem(LS_HIST_LEGACY,     JSON.stringify(state.cacheHistoricos || {}));
-  }catch{}
+  window.persist = persist;
+  window.salvarCache = persist;
+
+  window.getConversas = getConversas;
+  window.getMsgs = getMsgs;
+  window.pushMsg = pushMsg;
+  window.preloadMsgs = preloadMsgs;
+  window.prependOldMsgs = prependOldMsgs;
+
+  // helpers úteis
+  window.getConversationKey = getConversationKey;
+  window.getConversationEntityId = getConversationEntityId;
+  window.getConversationKind = getConversationKind;
 }
 
-export function clearAll(){
-  state.clientesCache   = [];
+function syncActiveCompatFromV2(instanciaKey = null) {
+  const k = instKeyFromValue(instanciaKey ?? getActiveInstKey());
+  const box = state.convsByInst?.[k];
+
+  state.clientesCache = Array.isArray(box?.items) ? box.items : [];
+  state.nextCursor = box?.nextCursor ?? null;
+
+  syncLegacyGlobals();
+}
+
+/* =========================
+   Persistência
+   ========================= */
+export function persist() {
+  try {
+    setLS(LS_CONVS_V2, JSON.stringify(state.convsByInst || {}));
+    setLS(LS_HIST_V2, JSON.stringify(state.histByKey || {}));
+    setLS(LS_META, JSON.stringify(state.meta || { ver: 2 }));
+
+    setLS(
+      LS_CLIENTES_LEGACY,
+      JSON.stringify(Array.isArray(state.clientesCache) ? state.clientesCache : [])
+    );
+    setLS(LS_HIST_LEGACY, JSON.stringify(state.cacheHistoricos || {}));
+  } catch {}
+
+  syncLegacyGlobals();
+}
+
+export function clearAll() {
+  state.clientesCache = [];
   state.cacheHistoricos = {};
-  state.convsByInst     = {};
-  state.histByKey       = {};
-  state.meta            = { ver: 2 };
-  state.nextCursor      = null;
+  state.convsByInst = {};
+  state.histByKey = {};
+  state.meta = { ver: 2 };
+  state.nextCursor = null;
+  state.todosContatosCache = [];
+  state.clienteSel = null;
   persist();
+}
+
+/* =========================
+   Helpers públicos de conversa
+   ========================= */
+export function getConversationKey(value, row = null, instanciaKey = null) {
+  return resolveConversationKeyLoose(value, row, instanciaKey);
+}
+
+export function getConversationEntityId(value, row = null) {
+  const ref = parseConversationRef(value, row);
+  return ref.entityId || null;
+}
+
+export function getConversationKind(value, row = null) {
+  const ref = parseConversationRef(value, row);
+  return ref.kind || 'c';
 }
 
 /* =========================
    Seleção atual
    ========================= */
-export function setClienteSel(c){ state.clienteSel = c; }
-export function getClienteSel(){ return state.clienteSel; }
+export function setClienteSel(c) {
+  state.clienteSel = c ? normalizeConversa(c) : null;
+  syncLegacyGlobals();
+}
+
+export function getClienteSel() {
+  return state.clienteSel;
+}
+
+/* =========================
+   Contatos completos
+   ========================= */
+export function setTodosContatosCache(items) {
+  state.todosContatosCache = Array.isArray(items) ? items.map(normalizeConversa) : [];
+  syncLegacyGlobals();
+}
+
+export function getTodosContatosCache() {
+  return Array.isArray(state.todosContatosCache) ? state.todosContatosCache : [];
+}
 
 /* =========================
    CONVERSAS - V2 (por instância)
    ========================= */
-export function getConversasKeyed(instanciaKey = null){
+export function getConversasKeyed(instanciaKey = null) {
   const k = instKeyFromValue(instanciaKey ?? getActiveInstKey());
   const box = state.convsByInst?.[k];
-  const items = Array.isArray(box?.items) ? box.items : [];
-  return items;
+  return Array.isArray(box?.items) ? box.items : [];
 }
 
-export function getNextCursorKeyed(instanciaKey = null){
+export function getNextCursorKeyed(instanciaKey = null) {
   const k = instKeyFromValue(instanciaKey ?? getActiveInstKey());
   return state.convsByInst?.[k]?.nextCursor ?? null;
 }
 
-export function setConversasKeyed(items, { nextCursor = null, instanciaKey = null } = {}){
+export function setConversasKeyed(items, { nextCursor = null, instanciaKey = null } = {}) {
   const k = instKeyFromValue(instanciaKey ?? getActiveInstKey());
-  const norm = (items || []).map(normalizeConversa);
+  const norm = (items || []).map(normalizeConversa).filter((it) => !!convIdOf(it));
   const sorted = sortConversasDesc(norm);
 
   state.convsByInst[k] = {
     items: sorted,
-    nextCursor: (typeof nextCursor === 'undefined') ? null : nextCursor,
+    nextCursor: typeof nextCursor === 'undefined' ? null : nextCursor,
     ts: Date.now(),
   };
 
-  // compat: aponta estado "ativo"
-  state.clientesCache = sorted;
-  state.nextCursor = state.convsByInst[k].nextCursor;
+  if (isActiveInst(k)) {
+    state.clientesCache = sorted;
+    state.nextCursor = state.convsByInst[k].nextCursor;
+  }
 
   persist();
 }
 
-export function appendConversasKeyed(items, { nextCursor = null, instanciaKey = null } = {}){
+export function appendConversasKeyed(items, { nextCursor = null, instanciaKey = null } = {}) {
   const k = instKeyFromValue(instanciaKey ?? getActiveInstKey());
-
   const box = state.convsByInst[k] || { items: [], nextCursor: null, ts: 0 };
   const cur = Array.isArray(box.items) ? box.items.slice() : [];
-  const map = new Map(cur.map(c => [String(c.conversation_id ?? c.id), c]));
 
-  for (const it of (items || [])){
+  const map = new Map();
+  for (const c of cur) {
+    const key = convIdOf(c);
+    if (key) map.set(key, c);
+  }
+
+  for (const it of (items || [])) {
     const n = normalizeConversa(it);
-    const id = String(n.conversation_id ?? n.id);
-    const prev = map.get(id) || {};
-    const merged = { ...prev, ...n };
+    const key = convIdOf(n);
+    if (!key) continue;
+
+    const prev = map.get(key) || {};
+    const merged = normalizeConversa({ ...prev, ...n });
     merged.pinned = Boolean((prev && prev.pinned) || n.pinned);
-    map.set(id, merged);
+    map.set(key, merged);
   }
 
   const sorted = sortConversasDesc([...map.values()]);
-  state.convsByInst[k] = { items: sorted, nextCursor, ts: Date.now() };
+  state.convsByInst[k] = {
+    items: sorted,
+    nextCursor: typeof nextCursor === 'undefined' ? box.nextCursor ?? null : nextCursor,
+    ts: Date.now(),
+  };
 
-  // compat: aponta estado "ativo"
-  state.clientesCache = sorted;
-  state.nextCursor = nextCursor;
+  if (isActiveInst(k)) {
+    state.clientesCache = sorted;
+    state.nextCursor = state.convsByInst[k].nextCursor;
+  }
 
   persist();
 }
 
-export function moveConversaToTopKeyed(conversation_id, patch = {}, instanciaKey = null){
-  const cid = Number(conversation_id ?? 0) || 0;
+export function moveConversaToTopKeyed(conversation_id, patch = {}, instanciaKey = null) {
+  const cid = resolveConversationKeyLoose(conversation_id, patch, instanciaKey);
   if (!cid) return;
 
-  const k = instKeyFromValue(instanciaKey ?? getActiveInstKey());
+  const k = instKeyFromValue(instanciaKey ?? parseConversationRef(cid).instId ?? getActiveInstKey());
   const box = state.convsByInst[k] || { items: [], nextCursor: null, ts: 0 };
   const cur = Array.isArray(box.items) ? box.items.slice() : [];
 
-  const idx = cur.findIndex(c => Number(c.conversation_id ?? c.id ?? 0) === cid);
+  const idx = cur.findIndex((c) => idEq(convIdOf(c), cid));
   if (idx === -1) return;
 
-  const updated = { ...cur[idx], ...patch };
+  const updated = normalizeConversa({ ...cur[idx], ...patch, conversation_key: cid });
   cur.splice(idx, 1);
   cur.unshift(updated);
 
   const sorted = sortConversasDesc(cur);
   state.convsByInst[k] = { ...box, items: sorted, ts: Date.now() };
 
-  // compat: aponta estado "ativo"
-  state.clientesCache = sorted;
+  if (isActiveInst(k)) {
+    state.clientesCache = sorted;
+  }
 
   persist();
 }
@@ -314,228 +810,274 @@ export function moveConversaToTopKeyed(conversation_id, patch = {}, instanciaKey
 /* =========================
    CONVERSAS - LEGADO (compat)
    ========================= */
-export function getConversas(){
-  // preferir o "ativo" do v2, se existir
-  const k = getActiveInstKey();
-  const v2 = getConversasKeyed(k);
-  if (Array.isArray(v2) && v2.length) return v2;
+export function getConversas() {
+  syncActiveCompatFromV2();
   return state.clientesCache || [];
 }
 
-export function setConversas(items, { nextCursor = null } = {}){
-  // agora seta no v2 (instância ativa)
+export function setConversas(items, { nextCursor = null } = {}) {
   setConversasKeyed(items, { nextCursor, instanciaKey: getActiveInstKey() });
 }
 
-export function appendConversas(items, { nextCursor = null } = {}){
+export function appendConversas(items, { nextCursor = null } = {}) {
   appendConversasKeyed(items, { nextCursor, instanciaKey: getActiveInstKey() });
 }
 
-export function moveConversaToTop(conversation_id, patch = {}){
+export function moveConversaToTop(conversation_id, patch = {}) {
   moveConversaToTopKeyed(conversation_id, patch, getActiveInstKey());
 }
 
-export function setNextCursor(cursor){
+export function setNextCursor(cursor) {
   const k = getActiveInstKey();
   const box = state.convsByInst[k] || { items: [], nextCursor: null, ts: 0 };
   box.nextCursor = cursor;
   state.convsByInst[k] = box;
-  state.nextCursor = cursor;
+
+  if (isActiveInst(k)) {
+    state.nextCursor = cursor;
+  }
+
   persist();
 }
-export function getNextCursor(){
-  const k = getActiveInstKey();
-  const v = state.convsByInst?.[k]?.nextCursor;
-  if (v != null) return v;
+
+export function getNextCursor() {
+  syncActiveCompatFromV2();
   return state.nextCursor;
 }
 
 /* =========================
-   HISTÓRICO - V2 (unificado inst+conv)
+   HISTÓRICO - V2
    ========================= */
 const MAX_MSGS_PER_CONVERSA = 200;
 
-function makeHistKey(instanciaKey, conversation_id){
-  const k = instKeyFromValue(instanciaKey ?? getActiveInstKey());
-  const cid = Number(conversation_id ?? 0) || 0;
-  return `${k}:${cid}`;
+function makeHistKey(instanciaKey, conversation_id) {
+  const ref = parseConversationRef(conversation_id);
+  const cid = resolveConversationKeyLoose(conversation_id, null, instanciaKey);
+  const k = instKeyFromValue(ref.instId ?? instanciaKey ?? getActiveInstKey());
+  return cid ? `${k}:${cid}` : `${k}:__invalid__`;
 }
 
-export function getMsgsKeyed(instanciaKey, conversation_id){
+export function getMsgsKeyed(instanciaKey, conversation_id) {
   const hk = makeHistKey(instanciaKey, conversation_id);
-  return state.histByKey[hk] || [];
+  const cid = resolveConversationKeyLoose(conversation_id, null, instanciaKey);
+  return state.histByKey[hk] || state.cacheHistoricos[String(cid)] || [];
 }
 
-export function saveMsgsKeyed(instanciaKey, conversation_id, msgs){
+export function saveMsgsKeyed(instanciaKey, conversation_id, msgs) {
   const hk = makeHistKey(instanciaKey, conversation_id);
-  const arr = Array.isArray(msgs) ? msgs.slice(-MAX_MSGS_PER_CONVERSA) : [];
+  const cid = resolveConversationKeyLoose(conversation_id, null, instanciaKey);
+  const arr = sortMsgsAsc(msgs).slice(-MAX_MSGS_PER_CONVERSA);
+
   state.histByKey[hk] = arr;
+  if (cid) state.cacheHistoricos[String(cid)] = arr;
+
   persist();
 }
 
-export function pushMsgKeyed(instanciaKey, conversation_id, msg){
+export function pushMsgKeyed(instanciaKey, conversation_id, msg) {
   const hk = makeHistKey(instanciaKey, conversation_id);
-  const arr = state.histByKey[hk] || [];
+  const cid = resolveConversationKeyLoose(conversation_id, null, instanciaKey);
+  const arr = state.histByKey[hk] || state.cacheHistoricos[String(cid)] || [];
+
   arr.push(msg);
-  state.histByKey[hk] = arr.slice(-MAX_MSGS_PER_CONVERSA);
+
+  const sorted = sortMsgsAsc(arr).slice(-MAX_MSGS_PER_CONVERSA);
+  state.histByKey[hk] = sorted;
+  if (cid) state.cacheHistoricos[String(cid)] = sorted;
+
   persist();
 }
 
-export function preloadMsgsKeyed(instanciaKey, conversation_id, msgs){
-  if (!Array.isArray(msgs)) msgs = [];
-  const sorted = msgs.slice().sort((a,b) => {
-    const ai = a.id ?? 0, bi = b.id ?? 0;
-    if (ai && bi) return ai - bi;
-    const at = (new Date(a.ts||a.timestamp||0)).getTime();
-    const bt = (new Date(b.ts||b.timestamp||0)).getTime();
-    return at - bt;
-  });
-  saveMsgsKeyed(instanciaKey, conversation_id, sorted);
+export function preloadMsgsKeyed(instanciaKey, conversation_id, msgs) {
+  saveMsgsKeyed(instanciaKey, conversation_id, sortMsgsAsc(msgs));
 }
 
-export function prependOldMsgsKeyed(instanciaKey, conversation_id, olderMsgs){
+export function prependOldMsgsKeyed(instanciaKey, conversation_id, olderMsgs) {
   const hk = makeHistKey(instanciaKey, conversation_id);
-  const cur = state.histByKey[hk] || [];
-  const seen = new Set(cur.map(m => m.id ?? m.msg_id));
-  const toAdd = (olderMsgs || []).filter(m => !seen.has(m.id ?? m.msg_id));
-  state.histByKey[hk] = toAdd.concat(cur).slice(-MAX_MSGS_PER_CONVERSA);
+  const cid = resolveConversationKeyLoose(conversation_id, null, instanciaKey);
+  const cur = state.histByKey[hk] || state.cacheHistoricos[String(cid)] || [];
+
+  const seen = new Set(cur.map((m) => messageKeyOf(m)).filter(Boolean));
+  const toAdd = (olderMsgs || []).filter((m) => {
+    const key = messageKeyOf(m);
+    if (!key) return true;
+    return !seen.has(key);
+  });
+
+  const sorted = sortMsgsAsc(toAdd.concat(cur)).slice(-MAX_MSGS_PER_CONVERSA);
+  state.histByKey[hk] = sorted;
+  if (cid) state.cacheHistoricos[String(cid)] = sorted;
+
   persist();
 }
 
 /* =========================
-   HISTÓRICO - LEGADO (compat)
+   HISTÓRICO - LEGADO
    ========================= */
-export function getMsgs(conversation_id){
-  // fallback legado (instância não entra)
-  return state.cacheHistoricos[String(conversation_id)] || [];
+export function getMsgs(conversation_id) {
+  const cid = resolveConversationKeyLoose(conversation_id) || String(conversation_id);
+  return state.cacheHistoricos[String(cid)] || [];
 }
-export function saveMsgs(conversation_id, msgs){
-  const arr = Array.isArray(msgs) ? msgs.slice(-MAX_MSGS_PER_CONVERSA) : [];
-  state.cacheHistoricos[String(conversation_id)] = arr;
+
+export function saveMsgs(conversation_id, msgs) {
+  const cid = resolveConversationKeyLoose(conversation_id) || String(conversation_id);
+  const arr = sortMsgsAsc(msgs).slice(-MAX_MSGS_PER_CONVERSA);
+  state.cacheHistoricos[String(cid)] = arr;
   persist();
 }
-export function pushMsg(conversation_id, msg){
-  const cid = String(conversation_id);
+
+export function pushMsg(conversation_id, msg) {
+  const cid = resolveConversationKeyLoose(conversation_id) || String(conversation_id);
   const arr = state.cacheHistoricos[cid] || [];
   arr.push(msg);
-  state.cacheHistoricos[cid] = arr.slice(-MAX_MSGS_PER_CONVERSA);
+  state.cacheHistoricos[cid] = sortMsgsAsc(arr).slice(-MAX_MSGS_PER_CONVERSA);
   persist();
 }
-export function preloadMsgs(conversation_id, msgs){
-  if (!Array.isArray(msgs)) msgs = [];
-  const sorted = msgs.slice().sort((a,b) => {
-    const ai = a.id ?? 0, bi = b.id ?? 0;
-    if (ai && bi) return ai - bi;
-    const at = (new Date(a.ts||a.timestamp||0)).getTime();
-    const bt = (new Date(b.ts||b.timestamp||0)).getTime();
-    return at - bt;
-  });
-  saveMsgs(conversation_id, sorted);
+
+export function preloadMsgs(conversation_id, msgs) {
+  saveMsgs(conversation_id, sortMsgsAsc(msgs));
 }
-export function prependOldMsgs(conversation_id, olderMsgs){
-  const cid = String(conversation_id);
+
+export function prependOldMsgs(conversation_id, olderMsgs) {
+  const cid = resolveConversationKeyLoose(conversation_id) || String(conversation_id);
   const cur = state.cacheHistoricos[cid] || [];
-  const seen = new Set(cur.map(m => m.id ?? m.msg_id));
-  const toAdd = (olderMsgs||[]).filter(m => !seen.has(m.id ?? m.msg_id));
-  state.cacheHistoricos[cid] = toAdd.concat(cur).slice(-MAX_MSGS_PER_CONVERSA);
+  const seen = new Set(cur.map((m) => messageKeyOf(m)).filter(Boolean));
+
+  const toAdd = (olderMsgs || []).filter((m) => {
+    const key = messageKeyOf(m);
+    if (!key) return true;
+    return !seen.has(key);
+  });
+
+  state.cacheHistoricos[cid] = sortMsgsAsc(toAdd.concat(cur)).slice(-MAX_MSGS_PER_CONVERSA);
   persist();
 }
 
 /* =========================
-   Merge de mensagem recebida/enviada (compat + v2 opcional)
+   Merge de mensagem
    ========================= */
-export function mergeIncomingMessage(conversation_id, message, instanciaKey = null){
-  // 1) salva no histórico
-  try {
-    // v2 (se tiver convId numérico)
-    const cid = Number(conversation_id ?? 0) || 0;
-    if (cid) pushMsgKeyed(instanciaKey ?? getActiveInstKey(), cid, message);
-  } catch {}
-  // legado
-  try { pushMsg(conversation_id, message); } catch {}
+export function mergeIncomingMessage(conversation_id, message, instanciaKey = null) {
+  const cid =
+    resolveConversationKeyLoose(conversation_id, message, instanciaKey) ||
+    resolveConversationKeyLoose(message?.conversation_key, message, instanciaKey);
 
-  // 2) atualiza preview e move conversa para o topo
+  if (!cid) return;
+
+  const targetInst = instKeyFromValue(
+    parseConversationRef(cid, message).instId ??
+    instanciaKey ??
+    getActiveInstKey()
+  );
+
+  try {
+    pushMsgKeyed(targetInst, cid, message);
+  } catch {}
+
+  try {
+    pushMsg(cid, message);
+  } catch {}
+
+  const msgTs =
+    message?.ts ??
+    message?.timestamp ??
+    message?.data ??
+    message?.created_at ??
+    null;
+
   const preview = {
+    conversation_key: cid,
     ultima_msg_id: message.id ?? message.db_id ?? message.msg_id ?? null,
     ultima_mensagem: message.texto ?? message.conteudo ?? message.mensagem ?? '',
-    hora: message.ts ?? message.timestamp ?? new Date().toISOString(),
+    hora: msgTs || new Date().toISOString(),
+    last_ts: msgTs || new Date().toISOString(),
     last_tipo: message.tipo ?? null,
     last_ack: typeof message.ack === 'number' ? message.ack : null,
   };
 
-  try { moveConversaToTopKeyed(conversation_id, preview, instanciaKey ?? getActiveInstKey()); } catch {}
-  try { moveConversaToTop(conversation_id, preview); } catch {}
+  try {
+    moveConversaToTopKeyed(cid, preview, targetInst);
+  } catch {}
 }
 
 /* =========================
    Acks e leitura
    ========================= */
-export function updateAck(conversation_id, msg_id, ack, instanciaKey = null){
-  // v2
-  try{
-    const hk = makeHistKey(instanciaKey ?? getActiveInstKey(), conversation_id);
+export function updateAck(conversation_id, msg_id, ack, instanciaKey = null) {
+  const cid = resolveConversationKeyLoose(conversation_id, null, instanciaKey);
+  if (!cid) return;
+
+  try {
+    const hk = makeHistKey(instanciaKey ?? getActiveInstKey(), cid);
     const arr = state.histByKey[hk] || [];
     let changed = false;
-    for (const m of arr){
-      const mid = m.id ?? m.msg_id;
-      if (mid === msg_id){
-        m.ack = ack;
-        changed = true;
-        break;
-      }
-    }
-    if (changed){
-      state.histByKey[hk] = arr;
-      persist();
-    }
-  }catch{}
+    const wanted = idKey(msg_id);
 
-  // legado
-  try{
-    const cid = String(conversation_id);
-    const arr = state.cacheHistoricos[cid] || [];
-    let changed = false;
-    for (const m of arr){
-      const mid = m.id ?? m.msg_id;
-      if (mid === msg_id){
+    for (const m of arr) {
+      const mid = messageKeyOf(m);
+      if (wanted && mid === wanted) {
         m.ack = ack;
         changed = true;
         break;
       }
     }
-    if (changed){
-      state.cacheHistoricos[cid] = arr;
+
+    if (changed) {
+      state.histByKey[hk] = arr;
+      state.cacheHistoricos[String(cid)] = arr;
       persist();
     }
-  }catch{}
+  } catch {}
+
+  try {
+    const arr = state.cacheHistoricos[String(cid)] || [];
+    let changed = false;
+    const wanted = idKey(msg_id);
+
+    for (const m of arr) {
+      const mid = messageKeyOf(m);
+      if (wanted && mid === wanted) {
+        m.ack = ack;
+        changed = true;
+        break;
+      }
+    }
+
+    if (changed) {
+      state.cacheHistoricos[String(cid)] = arr;
+      persist();
+    }
+  } catch {}
 }
 
-export function marcarLidas(conversation_id, instanciaKey = null){
-  // zera badge 'novas' e persiste (v2 + compat)
-  const cid = Number(conversation_id ?? 0) || 0;
-  const k = instKeyFromValue(instanciaKey ?? getActiveInstKey());
+export function marcarLidas(conversation_id, instanciaKey = null) {
+  const cid = resolveConversationKeyLoose(conversation_id, null, instanciaKey);
+  if (!cid) return;
 
-  // v2
-  try{
+  const k = instKeyFromValue(parseConversationRef(cid).instId ?? instanciaKey ?? getActiveInstKey());
+
+  try {
     const box = state.convsByInst[k];
     const items = Array.isArray(box?.items) ? box.items.slice() : [];
-    const i = items.findIndex(c => Number(c.conversation_id ?? c.id ?? 0) === cid);
-    if (i >= 0){
-      items[i] = { ...items[i], novas: 0 };
-      state.convsByInst[k] = { ...(box||{}), items, ts: Date.now() };
-      state.clientesCache = items;
-    }
-  }catch{}
+    const i = items.findIndex((c) => idEq(convIdOf(c), cid));
 
-  // legado
-  try{
+    if (i >= 0) {
+      items[i] = normalizeConversa({ ...items[i], novas: 0 });
+      state.convsByInst[k] = { ...(box || {}), items, ts: Date.now() };
+
+      if (isActiveInst(k)) {
+        state.clientesCache = items;
+      }
+    }
+  } catch {}
+
+  try {
     const list = state.clientesCache.slice(0);
-    const i = list.findIndex(c => Number(c.conversation_id ?? c.id ?? 0) === cid);
-    if (i >= 0){
-      list[i] = { ...list[i], novas: 0 };
+    const i = list.findIndex((c) => idEq(convIdOf(c), cid));
+    if (i >= 0) {
+      list[i] = normalizeConversa({ ...list[i], novas: 0 });
       state.clientesCache = list;
     }
-  }catch{}
+  } catch {}
 
   persist();
 }
@@ -543,74 +1085,87 @@ export function marcarLidas(conversation_id, instanciaKey = null){
 /* =========================
    Utilidades diversas
    ========================= */
-export function replaceOrInsertConversa(item, instanciaKey = null){
+export function replaceOrInsertConversa(item, instanciaKey = null) {
   const n = normalizeConversa(item);
-  const cid = Number(n.conversation_id ?? 0) || 0;
+  const cid = convIdOf(n);
   if (!cid) return;
 
-  const k = instKeyFromValue(instanciaKey ?? getActiveInstKey());
+  const k = instKeyFromValue(parseConversationRef(cid, n).instId ?? instanciaKey ?? getActiveInstKey());
   const box = state.convsByInst[k] || { items: [], nextCursor: null, ts: 0 };
   const cur = Array.isArray(box.items) ? box.items.slice() : [];
 
-  const idx = cur.findIndex(c => Number(c.conversation_id ?? c.id ?? 0) === cid);
-  if (idx >= 0) cur[idx] = { ...cur[idx], ...n };
+  const idx = cur.findIndex((c) => idEq(convIdOf(c), cid));
+  if (idx >= 0) cur[idx] = normalizeConversa({ ...cur[idx], ...n });
   else cur.push(n);
 
   const sorted = sortConversasDesc(cur);
   state.convsByInst[k] = { ...box, items: sorted, ts: Date.now() };
 
-  // compat
-  state.clientesCache = sorted;
+  if (isActiveInst(k)) {
+    state.clientesCache = sorted;
+  }
 
   persist();
 }
 
-export function removeConversa(conversation_id, instanciaKey = null){
-  const cid = Number(conversation_id ?? 0) || 0;
-  const k = instKeyFromValue(instanciaKey ?? getActiveInstKey());
+export function removeConversa(conversation_id, instanciaKey = null) {
+  const cid = resolveConversationKeyLoose(conversation_id, null, instanciaKey);
+  if (!cid) return;
 
-  // v2
-  try{
+  const k = instKeyFromValue(parseConversationRef(cid).instId ?? instanciaKey ?? getActiveInstKey());
+
+  try {
     const box = state.convsByInst[k] || { items: [], nextCursor: null, ts: 0 };
     const items = Array.isArray(box.items) ? box.items : [];
+
     state.convsByInst[k] = {
       ...box,
-      items: items.filter(c => Number(c.conversation_id ?? c.id ?? 0) !== cid),
-      ts: Date.now()
+      items: items.filter((c) => !idEq(convIdOf(c), cid)),
+      ts: Date.now(),
     };
-    delete state.histByKey[makeHistKey(k, cid)];
-  }catch{}
 
-  // legado
-  try{
-    state.clientesCache = (state.clientesCache || []).filter(c => Number(c.conversation_id ?? c.id ?? 0) !== cid);
+    delete state.histByKey[makeHistKey(k, cid)];
+
+    if (isActiveInst(k)) {
+      state.clientesCache = state.convsByInst[k].items;
+      state.nextCursor = state.convsByInst[k].nextCursor ?? null;
+    }
+  } catch {}
+
+  try {
+    state.clientesCache = (state.clientesCache || []).filter(
+      (c) => !idEq(convIdOf(c), cid)
+    );
     delete state.cacheHistoricos[String(cid)];
-  }catch{}
+  } catch {}
 
   persist();
 }
 
-/**
- * Hydrate em massa (retorno do servidor), preservando conversas existentes
- * dentro da instância atual (v2).
- */
-export function hydrateConversasFromServer(items, nextCursor = null, instanciaKey = null){
+export function hydrateConversasFromServer(items, nextCursor = null, instanciaKey = null) {
   const k = instKeyFromValue(instanciaKey ?? getActiveInstKey());
   const box = state.convsByInst[k] || { items: [], nextCursor: null, ts: 0 };
 
-  const map = new Map((box.items || []).map(c => [String(c.conversation_id ?? c.id), c]));
-  for (const it of (items || [])){
+  const map = new Map();
+  for (const c of (box.items || [])) {
+    const key = convIdOf(c);
+    if (key) map.set(key, c);
+  }
+
+  for (const it of (items || [])) {
     const n = normalizeConversa(it);
-    const id = String(n.conversation_id ?? n.id);
-    map.set(id, { ...(map.get(id) || {}), ...n });
+    const key = convIdOf(n);
+    if (!key) continue;
+    map.set(key, normalizeConversa({ ...(map.get(key) || {}), ...n }));
   }
 
   const merged = sortConversasDesc([...map.values()]);
   state.convsByInst[k] = { items: merged, nextCursor, ts: Date.now() };
 
-  // compat
-  state.clientesCache = merged;
-  state.nextCursor = nextCursor;
+  if (isActiveInst(k)) {
+    state.clientesCache = merged;
+    state.nextCursor = nextCursor;
+  }
 
   persist();
 }
@@ -618,36 +1173,37 @@ export function hydrateConversasFromServer(items, nextCursor = null, instanciaKe
 /* =========================
    Boot helpers
    ========================= */
-export function hasAnyCache(){
+export function hasAnyCache() {
   const k = getActiveInstKey();
   const v2 = getConversasKeyed(k);
   if (Array.isArray(v2) && v2.length) return true;
-  return (state.clientesCache && state.clientesCache.length > 0);
+  return !!(state.clientesCache && state.clientesCache.length > 0);
 }
 
-export function rememberBootFetched(flag=true){
+export function rememberBootFetched(flag = true) {
   DB_MODE.bootFetched = !!flag;
+  syncLegacyGlobals();
 }
 
-export function setMeta(key, value){
-  state.meta = { ...(state.meta||{}), [key]: value };
+export function setMeta(key, value) {
+  state.meta = { ...(state.meta || {}), [key]: value };
   persist();
 }
-export function getMeta(key, def=null){
+
+export function getMeta(key, def = null) {
   const m = state.meta || {};
-  return (key in m) ? m[key] : def;
+  return key in m ? m[key] : def;
 }
 
 /* =========================
-   Pequena ponte: ao carregar, aponta o "ativo" do v2 se existir
+   Bootstrap
    ========================= */
-(function bootstrapActiveFromV2(){
-  try{
-    const k = getActiveInstKey();
-    const box = state.convsByInst?.[k];
-    if (box && Array.isArray(box.items)) {
-      state.clientesCache = box.items;
-      state.nextCursor = box.nextCursor ?? null;
-    }
-  }catch{}
+(function bootstrapActiveFromV2() {
+  syncActiveCompatFromV2();
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('inst:change', () => {
+      syncActiveCompatFromV2();
+    });
+  }
 })();

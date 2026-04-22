@@ -1,25 +1,32 @@
 // /frontend/js/atendimentos/ui/perfil.js
-// Drawer “Campos do cliente” com máscaras, CEP (BrasilAPI), toasts,
-// banner com borda roxa e ícone SVG (sem emoji), layout em coluna,
-// pares compactos (CEP+UF, Número+Complemento, Data+Gênero),
-// UF/CEP/Data menores e limites de caracteres.
+// Drawer “Campos do cliente”
+// - sem CSS inline
+// - cria o drawer automaticamente
+// - máscaras + CEP (BrasilAPI)
+// - botão no header (#btn-perfil)
+// - exporta abrirPerfilAtual()
 
-// ✅ SEM CSS inline/inject — tudo vai para /frontend/css/atendimentos.css
+const $ = (s, r = document) => r.querySelector(s);
+const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
 
-/* ----------------- helpers ----------------- */
-const $  = (s, r=document)=> r.querySelector(s);
-const on = (el, ev, fn)=> el && el.addEventListener(ev, fn);
-function getClienteId(){ return Number($('#historico')?.dataset?.clienteId || 0); }
 const EMPRESA_ID = Number(window.EMPRESA_ID || localStorage.getItem('empresa_id') || 0);
 
-function getTheme(){
-  try{ const t = document.documentElement.getAttribute('data-theme'); if (t) return t; }catch{}
-  try{ return (matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; }catch{}
+function getClienteId() {
+  return Number($('#historico')?.dataset?.clienteId || 0);
+}
+
+function getTheme() {
+  try {
+    const t = document.documentElement.getAttribute('data-theme');
+    if (t) return t;
+  } catch {}
+  try {
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  } catch {}
   return 'dark';
 }
 
-/* Ícone do botão (24px) */
-function iconSvg(theme){
+function iconSvg(theme) {
   const fill = theme === 'light' ? '#080808' : '#ffffff';
   return `
     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
@@ -29,8 +36,7 @@ function iconSvg(theme){
   `;
 }
 
-/* Ícone do banner (SVG pedido) – adapta a cor pelo tema */
-function bannerSvg(theme){
+function bannerSvg(theme) {
   const fill = theme === 'light' ? '#080808' : '#ffffff';
   return `
     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="${fill}" viewBox="0 0 256 256" aria-hidden="true">
@@ -39,177 +45,306 @@ function bannerSvg(theme){
   `;
 }
 
-/* ----------------- Toasts ----------------- */
-function ensureToastHost(){
-  let h = document.getElementById('zcToastHost');
-  if (!h){
-    h = document.createElement('div');
-    h.id='zcToastHost';
-    h.className='zcToastHost';
-    document.body.appendChild(h);
+/* =========================
+   TOAST
+   ========================= */
+
+function ensureToastHost() {
+  let host = document.getElementById('zcToastHost');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'zcToastHost';
+    host.className = 'zcToastHost';
+    document.body.appendChild(host);
   }
-  return h;
+  return host;
 }
-function toast({ title='Pronto', msg='', type='ok', timeout=2800 }){
+
+function toast({ title = 'Pronto', msg = '', type = 'ok', timeout = 2800 } = {}) {
+  if (typeof window.toast === 'function') {
+    try {
+      window.toast({ title, msg, type, timeout });
+      return;
+    } catch {}
+  }
+
   const host = ensureToastHost();
   const el = document.createElement('div');
-  el.className = `zcToast ${type==='error'?'err':'ok'}`;
+  el.className = `zcToast ${type === 'error' ? 'err' : 'ok'}`;
   el.innerHTML = `
     <div>
       <div class="t-title">${title}</div>
-      ${msg?`<div class="t-msg">${msg}</div>`:''}
+      ${msg ? `<div class="t-msg">${msg}</div>` : ''}
     </div>
     <button class="t-close" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
   `;
   host.appendChild(el);
-  el.querySelector('.t-close')?.addEventListener('click', ()=> el.remove());
-  if (timeout) setTimeout(()=> el.remove(), timeout);
+  requestAnimationFrame(() => el.classList.add('on'));
+  el.querySelector('.t-close')?.addEventListener('click', () => el.remove());
+  if (timeout) setTimeout(() => el.remove(), timeout);
 }
 
-/* ----------------- MÁSCARAS / validações ----------------- */
-const UF_LIST = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
+/* =========================
+   MÁSCARAS / VALIDAÇÃO
+   ========================= */
+
+const UF_LIST = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
 const UF_SET = new Set(UF_LIST);
 
-const onlyDigits = s => (s||"").replace(/\D+/g,'');
-const keepRGChars = s => (s||"").replace(/[^0-9xX]/g,'').toUpperCase();
+const onlyDigits = s => String(s || '').replace(/\D+/g, '');
+const keepRGChars = s => String(s || '').replace(/[^0-9xX]/g, '').toUpperCase();
 
-function fmtCPF(d){ d=onlyDigits(d).slice(0,11);
-  return d.replace(/^(\d{3})(\d)/,"$1.$2")
-          .replace(/^(\d{3})\.(\d{3})(\d)/,"$1.$2.$3")
-          .replace(/^(\d{3})\.(\d{3})\.(\d{3})(\d)/,"$1.$2.$3-$4"); }
-function fmtCNPJ(d){ d=onlyDigits(d).slice(0,14);
-  return d.replace(/^(\d{2})(\d)/,"$1.$2")
-          .replace(/^(\d{2})\.(\d{3})(\d)/,"$1.$2.$3")
-          .replace(/^(\d{2})\.(\d{3})\.(\d{3})(\d)/,"$1.$2.$3/$4")
-          .replace(/^(\d{2})\.(\d{3})\.(\d{3})\/(\d{4})(\d)/,"$1.$2.$3/$4-$5"); }
-function fmtCPForCNPJ(v){ const d=onlyDigits(v); return d.length<=11 ? fmtCPF(d) : fmtCNPJ(d); }
-function fmtRG(v){
-  let s=keepRGChars(v).slice(0,10), body=s, dv='';
-  if(s.length===10){ body=s.slice(0,9); dv=s.slice(9); }
-  body=body.replace(/^(\d{2})(\d)/,"$1.$2").replace(/^(\d{2})\.(\d{3})(\d)/,"$1.$2.$3");
+function fmtCPF(d) {
+  d = onlyDigits(d).slice(0, 11);
+  return d
+    .replace(/^(\d{3})(\d)/, '$1.$2')
+    .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/^(\d{3})\.(\d{3})\.(\d{3})(\d)/, '$1.$2.$3-$4');
+}
+
+function fmtCNPJ(d) {
+  d = onlyDigits(d).slice(0, 14);
+  return d
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/^(\d{2})\.(\d{3})\.(\d{3})(\d)/, '$1.$2.$3/$4')
+    .replace(/^(\d{2})\.(\d{3})\.(\d{3})\/(\d{4})(\d)/, '$1.$2.$3/$4-$5');
+}
+
+function fmtCPForCNPJ(v) {
+  const d = onlyDigits(v);
+  return d.length <= 11 ? fmtCPF(d) : fmtCNPJ(d);
+}
+
+function fmtRG(v) {
+  let s = keepRGChars(v).slice(0, 10);
+  let body = s;
+  let dv = '';
+  if (s.length === 10) {
+    body = s.slice(0, 9);
+    dv = s.slice(9);
+  }
+  body = body
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3');
   return dv ? `${body}-${dv}` : body;
 }
-function fmtCEP(v){ let d=onlyDigits(v).slice(0,8); if(d.length>5) d=d.replace(/^(\d{5})(\d{1,3})$/,"$1-$2"); return d; }
-function fmtNumero(v){ return onlyDigits(v).slice(0,8); }
-function fmtComplemento(v){ return (v||"").replace(/[^0-9A-Za-zÀ-ÿ\s#\/\-\.\º°]/g,'').replace(/\s{2,}/g,' '); }
-function fmtCidade(v){ return (v||"").replace(/[^A-Za-zÀ-ÿ\s\-']/g,'').replace(/\s{2,}/g,' '); }
-function fmtUF(v){ return (v||"").replace(/[^A-Za-z]/g,'').toUpperCase().slice(0,2); }
 
-/* Data de nascimento */
-function fmtDataBR(v){
-  const d = onlyDigits(v).slice(0,8);
-  if (d.length <= 2) return d;
-  if (d.length <= 4) return d.replace(/^(\d{2})(\d{0,2})$/, "$1/$2");
-  return d.replace(/^(\d{2})(\d{2})(\d{0,4}).*$/, "$1/$2/$3");
+function fmtCEP(v) {
+  let d = onlyDigits(v).slice(0, 8);
+  if (d.length > 5) d = d.replace(/^(\d{5})(\d{1,3})$/, '$1-$2');
+  return d;
 }
-function isValidDataBR(v){
-  const m = String(v||'').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+
+function fmtNumero(v) {
+  return onlyDigits(v).slice(0, 8);
+}
+
+function fmtComplemento(v) {
+  return String(v || '')
+    .replace(/[^0-9A-Za-zÀ-ÿ\s#\/\-\.\º°]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .slice(0, 40);
+}
+
+function fmtCidade(v) {
+  return String(v || '')
+    .replace(/[^A-Za-zÀ-ÿ\s\-']/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .slice(0, 50);
+}
+
+function fmtUF(v) {
+  return String(v || '')
+    .replace(/[^A-Za-z]/g, '')
+    .toUpperCase()
+    .slice(0, 2);
+}
+
+function fmtDataBR(v) {
+  const d = onlyDigits(v).slice(0, 8);
+  if (d.length <= 2) return d;
+  if (d.length <= 4) return d.replace(/^(\d{2})(\d{0,2})$/, '$1/$2');
+  return d.replace(/^(\d{2})(\d{2})(\d{0,4}).*$/, '$1/$2/$3');
+}
+
+function isValidDataBR(v) {
+  const m = String(v || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (!m) return false;
-  const dd = +m[1], mm = +m[2], yyyy = +m[3];
+
+  const dd = Number(m[1]);
+  const mm = Number(m[2]);
+  const yyyy = Number(m[3]);
+
   if (yyyy < 1900) return false;
   if (mm < 1 || mm > 12) return false;
-  const dt = new Date(yyyy, mm-1, dd);
-  if (dt.getFullYear() !== yyyy || (dt.getMonth()+1) !== mm || dt.getDate() !== dd) return false;
-  const now = new Date();
-  if (dt.getTime() > now.getTime()) return false;
+
+  const dt = new Date(yyyy, mm - 1, dd);
+  if (
+    dt.getFullYear() !== yyyy ||
+    dt.getMonth() + 1 !== mm ||
+    dt.getDate() !== dd
+  ) return false;
+
+  if (dt.getTime() > Date.now()) return false;
   return true;
 }
-function toISOFromDataBR(v){
+
+function toISOFromDataBR(v) {
   if (!isValidDataBR(v)) return '';
-  const [dd,mm,yyyy] = v.split('/');
+  const [dd, mm, yyyy] = v.split('/');
   return `${yyyy}-${mm}-${dd}`;
 }
-function toDataBRFromAny(x){
+
+function toDataBRFromAny(x) {
   if (!x) return '';
   const s = String(x);
+
   let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+
   m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
   if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+
   m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (m) return s;
+
   return '';
 }
 
-function isValidEmail(v){ if(!v) return true; return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v); }
-function isValidCEP(v){ return onlyDigits(v).length===8; }
-
-function isValidCPF(d){
-  d=onlyDigits(d); if(d.length!==11||/^(\d)\1+$/.test(d)) return false;
-  let s=0; for(let i=0;i<9;i++) s+= +d[i]*(10-i);
-  let dg=(s*10)%11; if(dg===10) dg=0; if(dg!== +d[9]) return false;
-  s=0; for(let i=0;i<10;i++) s+= +d[i]*(11-i);
-  dg=(s*10)%11; if(dg===10) dg=0; return dg=== +d[10];
+function isValidEmail(v) {
+  if (!v) return true;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v);
 }
-function isValidCNPJ(c){
-  c=onlyDigits(c); if(c.length!==14||/^(\d)\1+$/.test(c)) return false;
-  const calc=b=>{
-    const seq=[5,4,3,2,9,8,7,6,5,4,3,2].slice(12-b.length);
-    const sum=b.split('').reduce((s,ch,i)=>s+(+ch)*seq[i],0);
-    const r=sum%11; return r<2?0:11-r;
+
+function isValidCEP(v) {
+  return onlyDigits(v).length === 8;
+}
+
+function isValidCPF(d) {
+  d = onlyDigits(d);
+  if (d.length !== 11 || /^(\d)\1+$/.test(d)) return false;
+
+  let s = 0;
+  for (let i = 0; i < 9; i++) s += Number(d[i]) * (10 - i);
+  let dg = (s * 10) % 11;
+  if (dg === 10) dg = 0;
+  if (dg !== Number(d[9])) return false;
+
+  s = 0;
+  for (let i = 0; i < 10; i++) s += Number(d[i]) * (11 - i);
+  dg = (s * 10) % 11;
+  if (dg === 10) dg = 0;
+
+  return dg === Number(d[10]);
+}
+
+function isValidCNPJ(c) {
+  c = onlyDigits(c);
+  if (c.length !== 14 || /^(\d)\1+$/.test(c)) return false;
+
+  const calc = (base) => {
+    const seq = [5,4,3,2,9,8,7,6,5,4,3,2].slice(12 - base.length);
+    const sum = base.split('').reduce((acc, ch, i) => acc + Number(ch) * seq[i], 0);
+    const r = sum % 11;
+    return r < 2 ? 0 : 11 - r;
   };
-  const b1=c.substring(0,12), d1=calc(b1), d2=calc(b1+String(d1));
-  return c===(b1+String(d1)+String(d2));
-}
-function validCPForCNPJ(v){
-  const d=onlyDigits(v);
-  if(!d.length) return true;
-  return d.length<=11?isValidCPF(d):isValidCNPJ(d);
+
+  const b1 = c.substring(0, 12);
+  const d1 = calc(b1);
+  const d2 = calc(b1 + String(d1));
+  return c === b1 + String(d1) + String(d2);
 }
 
-function maskInput(el, formatter, validator){
+function validCPForCNPJ(v) {
+  const d = onlyDigits(v);
+  if (!d.length) return true;
+  return d.length <= 11 ? isValidCPF(d) : isValidCNPJ(d);
+}
+
+function maskInput(el, formatter, validator) {
   if (!el) return;
-  const apply=()=>{
-    el.value=formatter(el.value);
-    if(validator){
-      const ok=validator(el.value);
-      el.classList.toggle('is-invalid',!ok);
-      el.title=ok?'':'Valor inválido';
+
+  const apply = () => {
+    el.value = formatter(el.value);
+    if (validator) {
+      const ok = validator(el.value);
+      el.classList.toggle('is-invalid', !ok);
+      el.title = ok ? '' : 'Valor inválido';
     }
   };
-  on(el,'input',apply); on(el,'blur',apply); apply();
+
+  on(el, 'input', apply);
+  on(el, 'blur', apply);
+  apply();
 }
 
-/* ----------------- BrasilAPI CEP ----------------- */
-async function preencherPorCEP(cep){
-  const d=onlyDigits(cep); if(d.length!==8) return false;
-  try{
-    const r=await fetch(`https://brasilapi.com.br/api/cep/v2/${d}`);
-    if(!r.ok) return false;
-    const j=await r.json();
-    const est=(j.state||'').toUpperCase();
-    if ($('#pf_estado')) { const sel=$('#pf_estado'); if (UF_SET.has(est)) sel.value=est; }
-    $('#pf_cidade') && ($('#pf_cidade').value = j.city || '');
-    $('#pf_bairro') && ($('#pf_bairro').value = j.neighborhood || '');
-    $('#pf_endereco') && ($('#pf_endereco').value = j.street || '');
+/* =========================
+   BRASILAPI
+   ========================= */
+
+async function preencherPorCEP(cep) {
+  const d = onlyDigits(cep);
+  if (d.length !== 8) return false;
+
+  try {
+    const r = await fetch(`https://brasilapi.com.br/api/cep/v2/${d}`);
+    if (!r.ok) return false;
+
+    const j = await r.json();
+    const est = String(j.state || '').toUpperCase();
+
+    if ($('#pf_estado') && UF_SET.has(est)) $('#pf_estado').value = est;
+    if ($('#pf_cidade')) $('#pf_cidade').value = j.city || '';
+    if ($('#pf_bairro')) $('#pf_bairro').value = j.neighborhood || '';
+    if ($('#pf_endereco')) $('#pf_endereco').value = j.street || '';
+
     setBannerTip('Endereço sugerido a partir do CEP. Confira antes de salvar.');
     return true;
-  }catch(e){ console.warn('[CEP] BrasilAPI erro', e); return false; }
-}
-
-/* ----------------- Banner helpers ----------------- */
-function refreshBannerIcon(container){
-  const slot = container?.querySelector('.b-ico');
-  if (slot) slot.innerHTML = bannerSvg(getTheme());
-}
-function setBanner(msg, tip){
-  const b = $('#zcPerfilBanner'); if(!b) return;
-  const m = b.querySelector('.b-msg'); const t = b.querySelector('.b-tip');
-  if (m) m.textContent = msg || '';
-  if (t) t.textContent = tip || '';
-  refreshBannerIcon(b);
-}
-function setBannerTip(tip){
-  const t=$('#zcPerfilBanner .b-tip');
-  if(t){
-    t.textContent=tip||'';
-    try{ t.animate([{opacity:.2},{opacity:1}],{duration:160,fill:'forwards'}); }catch{}
+  } catch (e) {
+    console.warn('[CEP] BrasilAPI erro', e);
+    return false;
   }
 }
 
-/* ----------------- Drawer fallback (injetado se necessário) ----------------- */
-function ensureFallbackDrawer(){
-  if (document.getElementById('perfil-drawer') || document.getElementById('zcPerfilDrawer')) return;
+/* =========================
+   DRAWER
+   ========================= */
+
+let drawerRefs = null;
+let drawerBound = false;
+
+function refreshBannerIcon(container) {
+  const slot = container?.querySelector('.b-ico');
+  if (slot) slot.innerHTML = bannerSvg(getTheme());
+}
+
+function setBanner(msg, tip = '') {
+  const banner = $('#zcPerfilBanner');
+  if (!banner) return;
+
+  const msgEl = banner.querySelector('.b-msg');
+  const tipEl = banner.querySelector('.b-tip');
+
+  if (msgEl) msgEl.innerHTML = msg || '';
+  if (tipEl) tipEl.textContent = tip;
+
+  refreshBannerIcon(banner);
+}
+
+function setBannerTip(tip) {
+  const tipEl = $('#zcPerfilBanner .b-tip');
+  if (!tipEl) return;
+  tipEl.textContent = tip || '';
+  try {
+    tipEl.animate([{ opacity: .25 }, { opacity: 1 }], { duration: 160, fill: 'forwards' });
+  } catch {}
+}
+
+function ensureDrawer() {
+  if (drawerRefs) return drawerRefs;
+
+  const UF_OPTIONS = UF_LIST.map((uf) => `<option value="${uf}">${uf}</option>`).join('');
 
   const backdrop = document.createElement('div');
   backdrop.id = 'zcPerfilBackdrop';
@@ -218,33 +353,58 @@ function ensureFallbackDrawer(){
   const drawer = document.createElement('aside');
   drawer.id = 'zcPerfilDrawer';
   drawer.className = 'zcPerfil-drawer';
-  drawer.setAttribute('role','dialog'); drawer.setAttribute('aria-modal','true');
+  drawer.setAttribute('role', 'dialog');
+  drawer.setAttribute('aria-modal', 'true');
 
-  const UF_OPTIONS = UF_LIST.map(uf=>`<option value="${uf}">${uf}</option>`).join('');
   drawer.innerHTML = `
     <div class="zcPerfil-head">
-      <div class="zcPerfil-title">${iconSvg(getTheme())} Campos do cliente</div>
+      <div class="zcPerfil-title" id="zcPerfilTitle">
+        ${iconSvg(getTheme())}
+        <span>Campos do cliente</span>
+      </div>
       <button class="zcPerfil-close" id="zcPerfilClose" title="Fechar" aria-label="Fechar">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M205.66 194.34a8 8 0 0 1-11.32 11.32L128 139.31l-66.34 66.35a8 8 0 0 1-11.32-11.32L116.69 128 50.34 61.66A8 8 0 0 1 61.66 50.34L128 116.69l66.34-66.35a8 8 0 0 1 11.32 11.32L139.31 128z"/></svg>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true">
+          <path fill="currentColor" d="M205.66 194.34a8 8 0 0 1-11.32 11.32L128 139.31l-66.34 66.35a8 8 0 0 1-11.32-11.32L116.69 128 50.34 61.66A8 8 0 0 1 61.66 50.34L128 116.69l66.34-66.35a8 8 0 0 1 11.32 11.32L139.31 128z"/>
+        </svg>
       </button>
     </div>
+
     <div class="zcPerfil-body">
       <div class="zcPerfil-banner" id="zcPerfilBanner" aria-live="polite">
         <span class="b-ico"></span>
         <div>
-          <div class="b-msg">Usamos inteligência artificial para <strong>montar o endereço</strong> a partir do CEP e para <strong>validar CPF/CNPJ</strong>. Confira os dados antes de salvar.</div>
+          <div class="b-msg"></div>
           <div class="b-tip"></div>
         </div>
       </div>
 
       <div class="zcPerfil-stack">
-        <div class="zcPerfil-field"><label>Nome completo</label><input id="pf_nome_completo" autocomplete="off" maxlength="120"></div>
-        <div class="zcPerfil-field"><label>CPF/CNPJ</label><input id="pf_cpf_cnpj" autocomplete="off" inputmode="numeric" maxlength="18" placeholder="CPF ou CNPJ"></div>
-        <div class="zcPerfil-field"><label>RG</label><input id="pf_rg" autocomplete="off" maxlength="12" placeholder="00.000.000-X"></div>
-        <div class="zcPerfil-field"><label>E-mail</label><input id="pf_email" type="email" autocomplete="off" maxlength="120" placeholder="email@dominio.com"></div>
+        <div class="zcPerfil-field">
+          <label>Nome completo</label>
+          <input id="pf_nome_completo" autocomplete="off" maxlength="120">
+        </div>
+
+        <div class="zcPerfil-field">
+          <label>CPF/CNPJ</label>
+          <input id="pf_cpf_cnpj" autocomplete="off" inputmode="numeric" maxlength="18" placeholder="CPF ou CNPJ">
+        </div>
+
+        <div class="zcPerfil-field">
+          <label>RG</label>
+          <input id="pf_rg" autocomplete="off" maxlength="12" placeholder="00.000.000-X">
+        </div>
+
+        <div class="zcPerfil-field">
+          <label>E-mail</label>
+          <input id="pf_email" type="email" autocomplete="off" maxlength="120" placeholder="email@dominio.com">
+        </div>
 
         <div class="zcPerfil-row zcPerfil-row--datagen">
-          <div class="zcPerfil-field field--dob"><label>Data de nascimento</label><input id="pf_data_nasc" autocomplete="off" inputmode="numeric" maxlength="10" placeholder="DD/MM/AAAA"></div>
+          <div class="zcPerfil-field field--dob">
+            <label>Data de nascimento</label>
+            <input id="pf_data_nasc" autocomplete="off" inputmode="numeric" maxlength="10" placeholder="DD/MM/AAAA">
+          </div>
+
           <div class="zcPerfil-field field--genero">
             <label>Gênero</label>
             <div class="zcPerfil-selectWrap">
@@ -260,7 +420,11 @@ function ensureFallbackDrawer(){
         </div>
 
         <div class="zcPerfil-row zcPerfil-row--cepuf">
-          <div class="zcPerfil-field field--cep"><label>CEP</label><input id="pf_cep" autocomplete="off" inputmode="numeric" maxlength="9" placeholder="00000-000"></div>
+          <div class="zcPerfil-field field--cep">
+            <label>CEP</label>
+            <input id="pf_cep" autocomplete="off" inputmode="numeric" maxlength="9" placeholder="00000-000">
+          </div>
+
           <div class="zcPerfil-field field--uf">
             <label>Estado (UF)</label>
             <div class="zcPerfil-selectWrap">
@@ -272,274 +436,358 @@ function ensureFallbackDrawer(){
           </div>
         </div>
 
-        <div class="zcPerfil-field"><label>Endereço</label><input id="pf_endereco" autocomplete="off" maxlength="80" placeholder="Rua, Av., Travessa…"></div>
-
-        <div class="zcPerfil-row zcPerfil-row--numcomp">
-          <div class="zcPerfil-field field--numero"><label>Número</label><input id="pf_numero" autocomplete="off" inputmode="numeric" maxlength="8"></div>
-          <div class="zcPerfil-field field--complemento"><label>Complemento</label><input id="pf_complemento" autocomplete="off" maxlength="40" placeholder="Apto, Bloco, Casa, Sala…"></div>
+        <div class="zcPerfil-field">
+          <label>Endereço</label>
+          <input id="pf_endereco" autocomplete="off" maxlength="80" placeholder="Rua, Av., Travessa…">
         </div>
 
-        <div class="zcPerfil-field"><label>Bairro</label><input id="pf_bairro" autocomplete="off" maxlength="50"></div>
-        <div class="zcPerfil-field"><label>Cidade</label><input id="pf_cidade" autocomplete="off" maxlength="50"></div>
+        <div class="zcPerfil-row zcPerfil-row--numcomp">
+          <div class="zcPerfil-field field--numero">
+            <label>Número</label>
+            <input id="pf_numero" autocomplete="off" inputmode="numeric" maxlength="8">
+          </div>
+
+          <div class="zcPerfil-field field--complemento">
+            <label>Complemento</label>
+            <input id="pf_complemento" autocomplete="off" maxlength="40" placeholder="Apto, Bloco, Casa, Sala…">
+          </div>
+        </div>
+
+        <div class="zcPerfil-field">
+          <label>Bairro</label>
+          <input id="pf_bairro" autocomplete="off" maxlength="50">
+        </div>
+
+        <div class="zcPerfil-field">
+          <label>Cidade</label>
+          <input id="pf_cidade" autocomplete="off" maxlength="50">
+        </div>
       </div>
 
       <div class="zcPerfil-actions">
-        <button class="zcPerfil-btnPrimary" id="zcPerfilSave">Salvar</button>
-        <button class="zcPerfil-btnGhost" id="zcPerfilCancel">Cancelar</button>
+        <button class="zcPerfil-btnPrimary" id="zcPerfilSave" type="button">Salvar</button>
+        <button class="zcPerfil-btnGhost" id="zcPerfilCancel" type="button">Cancelar</button>
       </div>
     </div>
   `;
+
   document.body.append(backdrop, drawer);
 
-  const refreshIcon = ()=>{
-    const t=drawer.querySelector('.zcPerfil-title');
-    if(t) t.innerHTML=`${iconSvg(getTheme())} Campos do cliente`;
-    refreshBannerIcon(drawer);
+  drawerRefs = {
+    backdrop,
+    drawer,
+    title: $('#zcPerfilTitle', drawer),
+    banner: $('#zcPerfilBanner', drawer),
+    save: $('#zcPerfilSave', drawer),
+    cancel: $('#zcPerfilCancel', drawer),
+    close: $('#zcPerfilClose', drawer),
+    nome: $('#pf_nome_completo', drawer),
+    cpfCnpj: $('#pf_cpf_cnpj', drawer),
+    rg: $('#pf_rg', drawer),
+    email: $('#pf_email', drawer),
+    dataNasc: $('#pf_data_nasc', drawer),
+    genero: $('#pf_genero', drawer),
+    cep: $('#pf_cep', drawer),
+    endereco: $('#pf_endereco', drawer),
+    numero: $('#pf_numero', drawer),
+    complemento: $('#pf_complemento', drawer),
+    bairro: $('#pf_bairro', drawer),
+    cidade: $('#pf_cidade', drawer),
+    estado: $('#pf_estado', drawer),
   };
-  try{ const mq=matchMedia('(prefers-color-scheme: dark)'); (mq.addEventListener?mq.addEventListener('change',refreshIcon):mq.addListener(refreshIcon)); }catch{}
-  new MutationObserver(refreshIcon).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
-  addEventListener('storage', e=>{ if(e && e.key==='zc:theme') refreshIcon(); });
 
-  const open = ()=>{
-    backdrop.classList.add('is-open');
-    drawer.classList.add('is-open');
-    setTimeout(()=> $('#pf_nome_completo')?.focus(), 0);
-  };
-  const close = ()=>{
-    backdrop.classList.remove('is-open');
-    drawer.classList.remove('is-open');
-  };
+  bindDrawer();
+  refreshDrawerIcons();
 
-  on($('#zcPerfilClose'),'click',close);
-  on($('#zcPerfilCancel'),'click',close);
-  on(backdrop,'click',e=>{ if(e.target===backdrop) close(); });
-  on(document,'keydown',e=>{ if(e.key==='Escape') close(); });
-
-  function bindMasks(){
-    maskInput($('#pf_cpf_cnpj'), fmtCPForCNPJ, validCPForCNPJ);
-    maskInput($('#pf_rg'),       fmtRG, null);
-    maskInput($('#pf_cep'),      fmtCEP, v=>isValidCEP(v)||v==='');
-    maskInput($('#pf_numero'),   fmtNumero, null);
-    maskInput($('#pf_complemento'), fmtComplemento, null);
-    maskInput($('#pf_cidade'),   fmtCidade, null);
-    maskInput($('#pf_data_nasc'), fmtDataBR, v => isValidDataBR(v) || v==='');
-
-    const emailEl=$('#pf_email');
-    if(emailEl){
-      const apply=()=>{
-        emailEl.value=(emailEl.value||'').trim().toLowerCase();
-        const ok=isValidEmail(emailEl.value);
-        emailEl.classList.toggle('is-invalid',!ok);
-        emailEl.title=ok?'':'E-mail inválido';
-      };
-      on(emailEl,'blur',apply); apply();
-    }
-  }
-
-  on($('#pf_cep'),'blur',async()=>{
-    const ok=await preencherPorCEP($('#pf_cep').value);
-    if(!ok) setBannerTip('Não foi possível sugerir o endereço para este CEP.');
-  });
-
-  async function carregar(){
-    const cid=getClienteId();
-    if(!cid){ toast({title:'Selecione um cliente', type:'error'}); return; }
-    try{
-      const r=await fetch(`/api/atendimento/clientes/${cid}/profile?empresa_id=${EMPRESA_ID}`, { credentials:'include' });
-      if(!r.ok) throw new Error('Falha ao buscar perfil');
-      const j=await r.json();
-
-      $('#pf_nome_completo').value=j.nome_completo||'';
-      $('#pf_cpf_cnpj').value=fmtCPForCNPJ(j.cpf_cnpj||'');
-      $('#pf_rg').value=fmtRG(j.rg||'');
-      $('#pf_email').value=(j.email||'').trim().toLowerCase();
-
-      const nascRaw = j.data_nascimento || j.nascimento || j.dataNascimento || '';
-      $('#pf_data_nasc').value = toDataBRFromAny(nascRaw);
-
-      const genRaw = j.genero || j.sexo || '';
-      if ($('#pf_genero')) $('#pf_genero').value = genRaw || '';
-
-      $('#pf_cep').value=fmtCEP(j.cep||'');
-      $('#pf_endereco').value=j.endereco||'';
-      $('#pf_numero').value=fmtNumero(j.numero||'');
-      $('#pf_complemento').value=fmtComplemento(j.complemento||'');
-      $('#pf_bairro').value=j.bairro||'';
-      $('#pf_cidade').value=fmtCidade(j.cidade||'');
-      const uf=fmtUF(j.estado||'');
-      if(UF_SET.has(uf)) $('#pf_estado').value=uf;
-
-      bindMasks();
-      setBanner('Usamos inteligência artificial para montar o endereço a partir do CEP e para validar CPF/CNPJ. Confira os dados antes de salvar.','');
-    }catch(err){
-      console.error('[perfil] carregar()',err);
-      bindMasks();
-    }
-  }
-
-  on($('#zcPerfilSave'),'click',async()=>{
-    const cid=getClienteId();
-    if(!cid){ toast({title:'Selecione um cliente', type:'error'}); return; }
-
-    const email=($('#pf_email').value||'').trim().toLowerCase();
-    const cpfcnpj=$('#pf_cpf_cnpj').value||'';
-    const cep=$('#pf_cep').value||'';
-    const ufSel=$('#pf_estado')?.value||'';
-    const dnBr=$('#pf_data_nasc')?.value||'';
-    const generoSel = ($('#pf_genero')?.value || '').trim();
-
-    const invalids=[];
-    if(!isValidEmail(email)) invalids.push('E-mail inválido');
-    if(!validCPForCNPJ(cpfcnpj)) invalids.push('CPF/CNPJ inválido');
-    if(cep && !isValidCEP(cep)) invalids.push('CEP inválido');
-    if(ufSel && !UF_SET.has(ufSel)) invalids.push('UF inválida');
-    if(dnBr && !isValidDataBR(dnBr)) invalids.push('Data de nascimento inválida');
-
-    if(invalids.length){
-      toast({title:'Verifique os campos', msg:invalids.join(' · '), type:'error'});
-      return;
-    }
-
-    const payload={
-      nome_completo: ($('#pf_nome_completo').value||'').trim() || undefined,
-      cpf_cnpj:      onlyDigits(cpfcnpj) || undefined,
-      rg:            ($('#pf_rg').value||'').replace(/\./g,'').toUpperCase() || undefined,
-      email:         email || undefined,
-      data_nascimento: dnBr ? toISOFromDataBR(dnBr) : undefined,
-      genero:        generoSel || undefined,
-      cep:           onlyDigits(cep) || undefined,
-      endereco:      ($('#pf_endereco').value||'').trim() || undefined,
-      numero:        onlyDigits($('#pf_numero').value||'') || undefined,
-      complemento:   ($('#pf_complemento').value||'').trim() || undefined,
-      bairro:        ($('#pf_bairro').value||'').trim() || undefined,
-      cidade:        ($('#pf_cidade').value||'').trim() || undefined,
-      estado:        (ufSel||'').toUpperCase() || undefined,
-    };
-
-    try{
-      const r=await fetch(`/api/atendimento/clientes/${cid}/profile?empresa_id=${EMPRESA_ID}`, {
-        method:'PUT',
-        credentials:'include',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(payload)
-      });
-      if(!r.ok) throw new Error('Falha ao salvar');
-      setBannerTip('Dados salvos com sucesso.');
-      toast({ title:'Salvo', msg:'Informações do cliente atualizadas.' });
-    }catch(err){
-      console.error('[perfil] salvar()', err);
-      toast({ title:'Erro ao salvar', type:'error' });
-    }
-  });
-
-  window.__zcPerfilFallback = { open, close, carregar };
-  refreshIcon();
+  return drawerRefs;
 }
 
-/* ----------------- EXPORT: abrirPerfilAtual ----------------- */
-export async function abrirPerfilAtual() {
-  const cid=getClienteId();
-  if(!cid){ toast({title:'Selecione um cliente', type:'error'}); return; }
+function refreshDrawerIcons() {
+  if (!drawerRefs) return;
+  if (drawerRefs.title) {
+    drawerRefs.title.innerHTML = `${iconSvg(getTheme())}<span>Campos do cliente</span>`;
+  }
+  refreshBannerIcon(drawerRefs.drawer);
+}
 
-  const perfilDrawer   = document.getElementById('perfil-drawer');
-  const perfilBackdrop = document.getElementById('perfil-backdrop');
+function bindDrawer() {
+  if (!drawerRefs || drawerBound) return;
+  drawerBound = true;
 
-  if (perfilDrawer && perfilBackdrop){
-    perfilDrawer.classList.remove('hidden');
-    perfilBackdrop.classList.remove('hidden');
-    requestAnimationFrame(()=> perfilDrawer.classList.add('open'));
+  const r = drawerRefs;
 
-    const close = ()=>{
-      perfilDrawer.classList.remove('open');
-      setTimeout(()=>{
-        perfilDrawer.classList.add('hidden');
-        perfilBackdrop.classList.add('hidden');
-      },180);
+  const close = () => {
+    r.backdrop.classList.remove('is-open');
+    r.drawer.classList.remove('is-open');
+  };
+
+  on(r.close, 'click', close);
+  on(r.cancel, 'click', close);
+  on(r.backdrop, 'click', (e) => {
+    if (e.target === r.backdrop) close();
+  });
+
+  on(document, 'keydown', (e) => {
+    if (e.key === 'Escape' && r.drawer.classList.contains('is-open')) close();
+  });
+
+  maskInput(r.cpfCnpj, fmtCPForCNPJ, validCPForCNPJ);
+  maskInput(r.rg, fmtRG, null);
+  maskInput(r.cep, fmtCEP, (v) => isValidCEP(v) || v === '');
+  maskInput(r.numero, fmtNumero, null);
+  maskInput(r.complemento, fmtComplemento, null);
+  maskInput(r.cidade, fmtCidade, null);
+  maskInput(r.dataNasc, fmtDataBR, (v) => isValidDataBR(v) || v === '');
+
+  if (r.email) {
+    const applyEmail = () => {
+      r.email.value = String(r.email.value || '').trim().toLowerCase();
+      const ok = isValidEmail(r.email.value);
+      r.email.classList.toggle('is-invalid', !ok);
+      r.email.title = ok ? '' : 'E-mail inválido';
     };
-    $('#perfil-close')?.addEventListener('click', close, { once:true });
-    perfilBackdrop?.addEventListener('click', e=>{ if(e.target===perfilBackdrop) close(); }, { once:true });
+    on(r.email, 'blur', applyEmail);
+    applyEmail();
+  }
 
-    if (!perfilDrawer.querySelector('#zcPerfilBanner')){
-      const banner=document.createElement('div');
-      banner.className='zcPerfil-banner';
-      banner.id='zcPerfilBanner';
-      banner.setAttribute('aria-live','polite');
-      banner.innerHTML=`<span class="b-ico"></span><div><div class="b-msg">Usamos inteligência artificial para <strong>montar o endereço</strong> a partir do CEP e para <strong>validar CPF/CNPJ</strong>. Confira os dados antes de salvar.</div><div class="b-tip"></div></div>`;
-      perfilDrawer.insertBefore(banner, perfilDrawer.firstChild);
-      refreshBannerIcon(perfilDrawer);
+  on(r.cep, 'blur', async () => {
+    const ok = await preencherPorCEP(r.cep.value);
+    if (!ok && onlyDigits(r.cep.value).length === 8) {
+      setBannerTip('Não foi possível sugerir o endereço para este CEP.');
     }
+  });
 
-    const maybe = $('#pf_cpf_cnpj') || $('#pf_rg') || $('#pf_cep') || $('#pf_data_nasc') || $('#pf_genero');
-    if (maybe){
-      maskInput($('#pf_cpf_cnpj'), fmtCPForCNPJ, validCPForCNPJ);
-      maskInput($('#pf_rg'), fmtRG, null);
-      maskInput($('#pf_cep'), fmtCEP, v=>isValidCEP(v)||v==='');
-      maskInput($('#pf_numero'), fmtNumero, null);
-      maskInput($('#pf_complemento'), fmtComplemento, null);
-      maskInput($('#pf_cidade'), fmtCidade, null);
-      maskInput($('#pf_data_nasc'), fmtDataBR, v=>isValidDataBR(v) || v==='');
+  on(r.save, 'click', salvarPerfil);
+}
 
-      const emailEl=$('#pf_email');
-      if(emailEl){
-        const apply=()=>{
-          emailEl.value=(emailEl.value||'').trim().toLowerCase();
-          const ok=isValidEmail(emailEl.value);
-          emailEl.classList.toggle('is-invalid',!ok);
-          emailEl.title=ok?'':'E-mail inválido';
-        };
-        on(emailEl,'blur',apply); apply();
+function openDrawer() {
+  const r = ensureDrawer();
+  r.backdrop.classList.add('is-open');
+  r.drawer.classList.add('is-open');
+  setTimeout(() => r.nome?.focus(), 0);
+}
+
+function resetForm() {
+  const r = ensureDrawer();
+  [
+    r.nome, r.cpfCnpj, r.rg, r.email, r.dataNasc, r.cep, r.endereco,
+    r.numero, r.complemento, r.bairro, r.cidade
+  ].forEach((el) => { if (el) el.value = ''; });
+
+  if (r.estado) r.estado.value = '';
+  if (r.genero) r.genero.value = '';
+
+  [r.cpfCnpj, r.email, r.dataNasc].forEach((el) => {
+    el?.classList.remove('is-invalid');
+    if (el) el.title = '';
+  });
+
+  setBanner(
+    'Usamos inteligência artificial para <strong>montar o endereço</strong> a partir do CEP e para <strong>validar CPF/CNPJ</strong>. Confira os dados antes de salvar.',
+    ''
+  );
+}
+
+async function carregarPerfil() {
+  const cid = getClienteId();
+  if (!cid || !EMPRESA_ID) {
+    toast({ title: 'Selecione um cliente', type: 'error' });
+    return;
+  }
+
+  const r = ensureDrawer();
+  resetForm();
+
+  try {
+    const resp = await fetch(
+      `/api/atendimento/clientes/${cid}/profile?empresa_id=${EMPRESA_ID}`,
+      { credentials: 'include' }
+    );
+
+    if (!resp.ok) throw new Error('Falha ao buscar perfil');
+
+    const j = await resp.json();
+
+    r.nome.value = j.nome_completo || '';
+    r.cpfCnpj.value = fmtCPForCNPJ(j.cpf_cnpj || '');
+    r.rg.value = fmtRG(j.rg || '');
+    r.email.value = String(j.email || '').trim().toLowerCase();
+
+    const nascRaw = j.data_nascimento || j.nascimento || j.dataNascimento || '';
+    r.dataNasc.value = toDataBRFromAny(nascRaw);
+
+    r.genero.value = j.genero || j.sexo || '';
+    r.cep.value = fmtCEP(j.cep || '');
+    r.endereco.value = j.endereco || '';
+    r.numero.value = fmtNumero(j.numero || '');
+    r.complemento.value = fmtComplemento(j.complemento || '');
+    r.bairro.value = j.bairro || '';
+    r.cidade.value = fmtCidade(j.cidade || '');
+
+    const uf = fmtUF(j.estado || '');
+    if (UF_SET.has(uf)) r.estado.value = uf;
+  } catch (err) {
+    console.error('[perfil] carregar()', err);
+    toast({ title: 'Não foi possível carregar o perfil', type: 'error' });
+  }
+}
+
+async function salvarPerfil() {
+  const cid = getClienteId();
+  if (!cid || !EMPRESA_ID) {
+    toast({ title: 'Selecione um cliente', type: 'error' });
+    return;
+  }
+
+  const r = ensureDrawer();
+
+  const email = String(r.email.value || '').trim().toLowerCase();
+  const cpfcnpj = r.cpfCnpj.value || '';
+  const cep = r.cep.value || '';
+  const ufSel = r.estado.value || '';
+  const dnBr = r.dataNasc.value || '';
+  const generoSel = String(r.genero.value || '').trim();
+
+  const invalids = [];
+  if (!isValidEmail(email)) invalids.push('E-mail inválido');
+  if (!validCPForCNPJ(cpfcnpj)) invalids.push('CPF/CNPJ inválido');
+  if (cep && !isValidCEP(cep)) invalids.push('CEP inválido');
+  if (ufSel && !UF_SET.has(ufSel)) invalids.push('UF inválida');
+  if (dnBr && !isValidDataBR(dnBr)) invalids.push('Data de nascimento inválida');
+
+  if (invalids.length) {
+    toast({
+      title: 'Verifique os campos',
+      msg: invalids.join(' · '),
+      type: 'error',
+    });
+    return;
+  }
+
+  const payload = {
+    nome_completo: String(r.nome.value || '').trim() || undefined,
+    cpf_cnpj: onlyDigits(cpfcnpj) || undefined,
+    rg: String(r.rg.value || '').replace(/\./g, '').toUpperCase() || undefined,
+    email: email || undefined,
+    data_nascimento: dnBr ? toISOFromDataBR(dnBr) : undefined,
+    genero: generoSel || undefined,
+    cep: onlyDigits(cep) || undefined,
+    endereco: String(r.endereco.value || '').trim() || undefined,
+    numero: onlyDigits(r.numero.value || '') || undefined,
+    complemento: String(r.complemento.value || '').trim() || undefined,
+    bairro: String(r.bairro.value || '').trim() || undefined,
+    cidade: String(r.cidade.value || '').trim() || undefined,
+    estado: String(ufSel || '').toUpperCase() || undefined,
+  };
+
+  r.save.disabled = true;
+  r.save.textContent = 'Salvando…';
+
+  try {
+    const resp = await fetch(
+      `/api/atendimento/clientes/${cid}/profile?empresa_id=${EMPRESA_ID}`,
+      {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       }
+    );
 
-      on($('#pf_cep'),'blur', async()=>{
-        const ok=await preencherPorCEP($('#pf_cep').value);
-        if(!ok) setBannerTip('Não foi possível sugerir o endereço para este CEP.');
-      });
-    }
-    return;
-  }
+    if (!resp.ok) throw new Error('Falha ao salvar');
 
-  ensureFallbackDrawer();
-  if (window.__zcPerfilFallback){
-    await window.__zcPerfilFallback.carregar();
-    window.__zcPerfilFallback.open();
-    return;
+    setBannerTip('Dados salvos com sucesso.');
+    toast({
+      title: 'Salvo',
+      msg: 'Informações do cliente atualizadas.',
+      type: 'ok',
+    });
+  } catch (err) {
+    console.error('[perfil] salvar()', err);
+    toast({
+      title: 'Erro ao salvar',
+      msg: 'Não foi possível atualizar o cliente.',
+      type: 'error',
+    });
+  } finally {
+    r.save.disabled = false;
+    r.save.textContent = 'Salvar';
   }
-  console.debug('[perfil] Nenhum drawer encontrado.');
 }
+
+/* =========================
+   API
+   ========================= */
+
+export async function abrirPerfilAtual() {
+  const cid = getClienteId();
+  if (!cid) {
+    toast({ title: 'Selecione um cliente', type: 'error' });
+    return;
+  }
+
+  ensureDrawer();
+  openDrawer();
+  await carregarPerfil();
+}
+
 window.abrirPerfilAtual = abrirPerfilAtual;
 
-/* ----------------- botão no header ----------------- */
-function ensureHeaderButton(){
+/* =========================
+   BOTÃO NO HEADER
+   ========================= */
+
+function ensureHeaderButton() {
   if (document.getElementById('btn-perfil')) return;
 
-  const hdr = $('#chat-header .flex.items-center.gap-2.relative')
-           || $('#chat-header .flex.items-center.gap-2')
-           || $('#chat-header');
+  const hdr =
+    $('#chat-header .flex.items-center.gap-2.relative') ||
+    $('#chat-header .flex.items-center.gap-2') ||
+    $('#chat-header');
+
   if (!hdr) return;
 
-  const btn=document.createElement('button');
-  btn.id='btn-perfil';
-  btn.className='hdr-icon-btn';
-  btn.title='Campos do cliente';
-  btn.setAttribute('aria-label','Campos do cliente');
-  btn.innerHTML=iconSvg(getTheme());
+  const btn = document.createElement('button');
+  btn.id = 'btn-perfil';
+  btn.className = 'hdr-icon-btn';
+  btn.type = 'button';
+  btn.title = 'Campos do cliente';
+  btn.setAttribute('aria-label', 'Campos do cliente');
+  btn.innerHTML = iconSvg(getTheme());
 
-  on(btn,'click',e=>{ e.preventDefault(); abrirPerfilAtual(); });
+  on(btn, 'click', (e) => {
+    e.preventDefault();
+    abrirPerfilAtual();
+  });
+
   hdr.appendChild(btn);
 
-  const refresh=()=>{
-    const h=document.getElementById('btn-perfil');
-    if(h) h.innerHTML=iconSvg(getTheme());
+  const refresh = () => {
+    const el = document.getElementById('btn-perfil');
+    if (el) el.innerHTML = iconSvg(getTheme());
+    refreshDrawerIcons();
   };
-  try{ const mq=matchMedia('(prefers-color-scheme: dark)'); (mq.addEventListener?mq.addEventListener('change',refresh):mq.addListener(refresh)); }catch{}
-  new MutationObserver(refresh).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
-  addEventListener('storage', e=>{ if(e && e.key==='zc:theme') refresh(); });
+
+  try {
+    const mq = matchMedia('(prefers-color-scheme: dark)');
+    mq.addEventListener ? mq.addEventListener('change', refresh) : mq.addListener(refresh);
+  } catch {}
+
+  new MutationObserver(refresh).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme'],
+  });
+
+  addEventListener('storage', (e) => {
+    if (e && e.key === 'zc:theme') refresh();
+  });
 }
-(function watchHeader(){
-  const hdrEl=document.getElementById('chat-header');
-  if (hdrEl){
-    const mo=new MutationObserver(()=> ensureHeaderButton());
-    mo.observe(hdrEl,{attributes:true,attributeFilter:['style','class']});
+
+(function watchHeader() {
+  const hdrEl = document.getElementById('chat-header');
+  if (hdrEl) {
+    const mo = new MutationObserver(() => ensureHeaderButton());
+    mo.observe(hdrEl, { attributes: true, attributeFilter: ['style', 'class'] });
   }
   ensureHeaderButton();
 })();

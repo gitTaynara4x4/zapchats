@@ -22,6 +22,9 @@ from backend.utils.plans import (
     is_billing_locked,
     effective_plan,
 )
+from backend.integrations.evolution.repositories.atendimentos_repo import (
+    update_open_atendimento_departamento_repo,
+)
 
 router = APIRouter(prefix="/api", tags=["Chatbot (Triagem Setores)"])
 
@@ -81,7 +84,7 @@ def _resolve_emp_inst_from_instance_name(db: Session, instance_name: str) -> Tup
     ).mappings().first()
     if not row:
         return 0, 0
-    return int(row["empresa_id"]), int(row["id"])
+    return int(row["id"]), int(row["empresa_id"])
 
 
 def _get_empresa(db: Session, empresa_id: int) -> Optional[models.Empresa]:
@@ -276,6 +279,11 @@ def _get_auto_cfg_parts(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, 
     if not isinstance(off_hours, dict):
         off_hours = {}
     return auto, welcome, off_hours
+
+
+def _triage_mode_is_active(cfg: Dict[str, Any]) -> bool:
+    ad_cfg, welcome_cfg, _ = _get_triage_cfg_parts(cfg)
+    return bool(ad_cfg.get("enabled", False)) and bool(welcome_cfg.get("enabled", False))
 
 
 def _fetch_triage_departamentos(
@@ -587,12 +595,38 @@ def _fetch_last_conversation_message_time(
     if not row:
         return None
 
-    # LIMIT 2 porque a mensagem atual já foi salva antes do hook.
-    # Queremos a mensagem anterior à atual, seja entrada ou saída.
+    # A mensagem atual já foi salva antes do hook.
+    # Só existe "mensagem anterior" se vierem 2 linhas.
     if len(row) >= 2:
         return _as_aware_utc(row[1].get("timestamp"))
 
-    return _as_aware_utc(row[0].get("timestamp"))
+    return None
+
+
+def _sync_open_atendimento_departamento(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    cliente_id: int,
+    departamento_id: int | None,
+    ts_dt: datetime | None,
+    operador_id: int | None = None,
+) -> None:
+    try:
+        update_open_atendimento_departamento_repo(
+            db,
+            empresa_id=int(empresa_id),
+            instancia_id=int(instancia_id),
+            cliente_id=int(cliente_id),
+            departamento_id=departamento_id,
+            ts_dt=ts_dt,
+            operador_id=operador_id,
+        )
+    except Exception:
+        # o repo já tenta se recuperar internamente;
+        # aqui não deixamos o chatbot cair por causa disso
+        return
 
 
 def auto_messages_handle_inbound(
@@ -643,6 +677,12 @@ def auto_messages_handle_inbound(
     )
     cfg = _fetch_chatbot_config(db, empresa_id=empresa_id, instancia_id=instancia_id)
     auto_cfg, welcome_cfg, off_cfg = _get_auto_cfg_parts(cfg)
+
+    if _triage_mode_is_active(cfg):
+        return {
+            "ok": True,
+            "action": "noop_auto_skipped_by_triage",
+        }
 
     if not bool(auto_cfg.get("enabled", False)):
         return {"ok": True, "action": "noop_auto_disabled"}
@@ -739,6 +779,10 @@ def triagem_handle_inbound(
           - respeita billing/feature do plano
       - Se o TTL expirou, a PRIMEIRA mensagem após expirar sempre mostra o menu
         e não tenta interpretar o texto como escolha de setor.
+
+    IMPORTANTE:
+      - cliente.departamento_id continua existindo como espelho/fallback
+      - a fonte oficial da conversa passa a ser atendimento.departamento_id
     """
     if (direction or "").lower() == "saida":
         return {"ok": True, "action": "ignore_saida"}
@@ -799,6 +843,15 @@ def triagem_handle_inbound(
 
     needs_triage = (cliente.departamento_id is None) or bool(cliente.triagem_ativa)
     if not needs_triage:
+        _sync_open_atendimento_departamento(
+            db,
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+            cliente_id=int(cliente.id),
+            departamento_id=int(cliente.departamento_id) if cliente.departamento_id is not None else None,
+            ts_dt=now,
+            operador_id=int(cliente.colaborador_id) if cliente.colaborador_id is not None else None,
+        )
         db.commit()
         return {"ok": True, "action": "noop_has_departamento"}
 
@@ -808,6 +861,15 @@ def triagem_handle_inbound(
     deps = _fetch_triage_departamentos(db, empresa_id=empresa_id, instancia_id=instancia_id, cfg=cfg)
     if not deps:
         cliente.triagem_ativa = False
+        _sync_open_atendimento_departamento(
+            db,
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+            cliente_id=int(cliente.id),
+            departamento_id=None,
+            ts_dt=now,
+            operador_id=None,
+        )
         db.commit()
         return {"ok": True, "action": "noop_no_deps_enabled"}
 
@@ -815,6 +877,16 @@ def triagem_handle_inbound(
     if ttl_expired:
         cliente.triagem_ativa = True
         cliente.triagem_tentativas = 1
+
+        _sync_open_atendimento_departamento(
+            db,
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+            cliente_id=int(cliente.id),
+            departamento_id=None,
+            ts_dt=now,
+            operador_id=None,
+        )
 
         menu = _build_menu_message(empresa_nome=empresa_nome, deps=deps, cfg=cfg)
         db.commit()
@@ -838,6 +910,16 @@ def triagem_handle_inbound(
         if primary:
             cliente.colaborador_id = primary
 
+        _sync_open_atendimento_departamento(
+            db,
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+            cliente_id=int(cliente.id),
+            departamento_id=int(dep_id),
+            ts_dt=now,
+            operador_id=int(primary) if primary is not None else None,
+        )
+
         db.commit()
 
         ack = _build_assign_ack(empresa_nome=empresa_nome, dep=dep_obj)
@@ -854,6 +936,16 @@ def triagem_handle_inbound(
 
     cliente.triagem_ativa = True
     cliente.triagem_tentativas = tentativas_antes + 1
+
+    _sync_open_atendimento_departamento(
+        db,
+        empresa_id=empresa_id,
+        instancia_id=instancia_id,
+        cliente_id=int(cliente.id),
+        departamento_id=None,
+        ts_dt=now,
+        operador_id=None,
+    )
 
     max_attempts = 0
     try:
@@ -911,7 +1003,7 @@ def webhook_chatbot_setores(payload: Dict[str, Any], db: Session = Depends(get_d
 
     instancia_nome_in = str(payload.get("instancia") or payload.get("instance_name") or "").strip()
     if (not empresa_id or not instancia_id) and instancia_nome_in:
-        emp2, inst2 = _resolve_emp_inst_from_instance_name(db, instancia_nome_in)
+        inst2, emp2 = _resolve_emp_inst_from_instance_name(db, instancia_nome_in)
         if not empresa_id:
             empresa_id = emp2
         if not instancia_id:

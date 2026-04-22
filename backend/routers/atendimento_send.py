@@ -20,44 +20,52 @@ from backend import models
 from backend.websocket_manager import conexoes_ativas
 from backend.routers.auth import get_current_identity
 
+from backend.integrations.evolution.utils.phone_utils import (
+    formatar_telefone_br,
+    normalize_phone_for_db,
+    normalize_phone_for_send,
+)
+from backend.integrations.evolution.repositories.clientes_repo import (
+    upsert_cliente_repo,
+    get_cliente_by_id,
+)
+from backend.integrations.evolution.repositories.atendimentos_repo import (
+    get_or_open_atendimento_repo,
+)
+from backend.security.atendimento_acl import (
+    ensure_perm,
+    assert_same_company,
+    resolve_acl_context,
+    assert_instancia_allowed,
+    assert_cliente_access,
+)
+
 router = APIRouter(tags=["Atendimento – Envio"])
 
-# ========= ENV Evolution =========
 EVOLUTION_URL = os.getenv("EVOLUTION_URL", "").rstrip("/")
 EVOLUTION_KEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_KEY")
 HEADERS = {"Content-Type": "application/json", "apikey": EVOLUTION_KEY} if EVOLUTION_KEY else {}
 
-# ========= DEBUG =========
 DEBUG_ATENDIMENTO_SEND = os.getenv("DEBUG_ATENDIMENTO_SEND", "1").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _dbg(*args):
-    if not DEBUG_ATENDIMENTO_SEND:
-        return
-    try:
-        print("[SEND_DEBUG]", *args)
-    except Exception:
-        pass
+    if DEBUG_ATENDIMENTO_SEND:
+        try:
+            print("[SEND_DEBUG]", *args)
+        except Exception:
+            pass
 
 
 def _dbg_json(label: str, obj: Any):
-    if not DEBUG_ATENDIMENTO_SEND:
-        return
-    try:
-        print("[SEND_DEBUG]", label, json.dumps(obj, ensure_ascii=False, indent=2, default=str))
-    except Exception:
-        print("[SEND_DEBUG]", label, obj)
+    if DEBUG_ATENDIMENTO_SEND:
+        try:
+            print("[SEND_DEBUG]", label, json.dumps(obj, ensure_ascii=False, indent=2, default=str))
+        except Exception:
+            print("[SEND_DEBUG]", label, obj)
 
 
-# =========================================================
-# AVATAR: nunca devolver pps.whatsapp.net pro front
-# =========================================================
 def _public_avatar_url(*, kind: str, conversation_id: int, raw_avatar_url: Optional[str]) -> Optional[str]:
-    """
-    Força o front a sempre usar um endpoint local (proxy/cache),
-    mesmo que o banco tenha guardado https://pps.whatsapp.net/...
-    kind: "cliente" | "grupo"
-    """
     if not conversation_id:
         return None
 
@@ -65,20 +73,17 @@ def _public_avatar_url(*, kind: str, conversation_id: int, raw_avatar_url: Optio
     if not raw:
         return None
 
-    # já é endpoint nosso
     if raw.startswith("/api/atendimento/avatar/"):
         return raw
 
-    # qualquer URL externa vira proxy local
     if raw.startswith("http://") or raw.startswith("https://"):
         return f"/api/atendimento/avatar/{int(conversation_id)}?kind={kind}"
 
-    # fallback seguro
     return f"/api/atendimento/avatar/{int(conversation_id)}?kind={kind}"
 
 
 # =========================================================
-# ACL / Permissões
+# Helpers base
 # =========================================================
 def _to_int(v) -> Optional[int]:
     try:
@@ -92,140 +97,56 @@ def _to_int(v) -> Optional[int]:
         return None
 
 
-def _is_admin(identity: dict) -> bool:
-    try:
-        if identity.get("is_admin") or identity.get("admin"):
-            return True
-        perms = identity.get("permissoes") or identity.get("permissions") or []
-        if isinstance(perms, dict):
-            perms = [k for k, v in perms.items() if v]
-        perms = set(str(p).lower() for p in (perms or []))
-        return any(p in perms for p in ("admin", "root", "clientes.gerenciar", "atendimento.gerenciar"))
-    except Exception:
-        return False
-
-
-def _ensure_perm(identity: dict, perm: str) -> None:
-    if _is_admin(identity):
-        return
-    perms = set(identity.get("permissoes") or [])
-    if perm not in perms:
-        raise HTTPException(status_code=403, detail=f"Sem permissão ({perm})")
-
-
-def _infer_kind(identity: dict) -> str:
-    k = (identity.get("kind") or identity.get("tipo") or "").lower().strip()
-    if k in ("colaborador", "usuario", "admin"):
-        return "colaborador" if k == "colaborador" else "usuario"
-    sub = str(identity.get("sub") or "").strip().lower()
-    role = str(identity.get("role") or "").strip().lower()
-    if sub.startswith("colab-") or "colab" in role or "colaborador" in role:
-        return "colaborador"
-    return "usuario"
-
-
-def _get_colab_id(identity: dict) -> Optional[int]:
-    for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
-        cid = _to_int(identity.get(key))
-        if cid:
-            return cid
-    sub = str(identity.get("sub") or "").strip().lower()
-    if sub.startswith("colab-"):
-        cid = _to_int(sub.split("-", 1)[1])
-        if cid:
-            return cid
-    return _to_int(identity.get("id"))
-
-
-def _table_exists(db: Session, table_name: str) -> bool:
-    try:
-        reg = db.execute(text(f"SELECT to_regclass('public.{table_name}')")).scalar()
-        return reg is not None
-    except Exception:
-        return False
-
-
-def _allowed_instancia_ids(db: Session, identity: dict, empresa_id: int) -> Optional[List[int]]:
-    """
-    Retorna:
-      - None => sem restrição (admin/usuario master OU tabela inexistente)
-      - []   => colaborador sem instâncias permitidas (nega tudo)
-      - [..] => lista de instâncias permitidas
-    """
-    if _is_admin(identity):
-        return None
-
-    if _infer_kind(identity) != "colaborador":
-        return None
-
-    if not _table_exists(db, "colaboradores_instancias"):
-        return None  # legado
-
-    cid = _get_colab_id(identity)
-    if not cid:
-        return []
-
-    rows = db.execute(
-        text(
-            """
-            SELECT instancia_id
-            FROM colaboradores_instancias
-            WHERE empresa_id = :emp
-              AND colaborador_id = :cid
-            """
-        ),
-        {"emp": int(empresa_id), "cid": int(cid)},
-    ).fetchall()
-
-    ids = [int(r[0]) for r in rows if r and r[0] is not None]
-    return ids
-
-
-def _assert_instancia_allowed(allowed: Optional[List[int]], instancia_id: Optional[int]) -> None:
-    if instancia_id is None or allowed is None:
-        return
-    if int(instancia_id) not in set(int(x) for x in allowed):
-        raise HTTPException(status_code=403, detail="Instância não permitida para este usuário")
-
-
-# ========= Helpers base =========
-def _assert_mesma_empresa(empresa_do_token: int, empresa_da_query: int | None) -> int:
-    if empresa_da_query is None:
-        return int(empresa_do_token)
-    if int(empresa_da_query) != int(empresa_do_token):
-        raise HTTPException(403, "Empresa inválida para este token")
-    return int(empresa_da_query)
-
-
 def _assert_empresa_resolvida(empresa_do_token: int, empresa_resolvida_id: int) -> None:
     if int(empresa_resolvida_id) != int(empresa_do_token):
         raise HTTPException(403, "Instância/empresa não pertence ao seu contexto")
 
 
-def normalizar_telefone(numero: str | None) -> str | None:
-    if not numero:
+def _current_operador_id(identity: Any) -> Optional[int]:
+    if identity is None:
         return None
-    numero = re.sub(r"\D", "", numero)
-    if numero.startswith("0"):
-        numero = numero[1:]
-    if not numero.startswith("55"):
-        numero = "55" + numero
-    ddd = numero[2:4]
-    restante = numero[4:]
-    if len(restante) == 8 and not restante.startswith("9"):
-        restante = "9" + restante
-    return f"55{ddd}{restante}"
+
+    if isinstance(identity, dict):
+        getter = identity.get
+    else:
+        getter = lambda k, default=None: getattr(identity, k, default)
+
+    for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
+        cid = _to_int(getter(key))
+        if cid:
+            return cid
+
+    sub = str(getter("sub", "") or "").strip().lower()
+    if sub.startswith("colab-"):
+        return _to_int(sub.split("-", 1)[1])
+
+    return None
+
+
+def normalizar_telefone(numero: str | None) -> str | None:
+    """
+    Compat legado deste router:
+    agora devolve SEMPRE o formato canônico de envio (E164 com 55).
+    """
+    return normalize_phone_for_send(numero)
 
 
 def _remote_to_num(remote_jid: str | None) -> str | None:
     if not remote_jid:
         return None
     user = str(remote_jid).split("@", 1)[0].split(":", 1)[0]
-    return normalizar_telefone(user)
+    return normalize_phone_for_db(user)
 
 
 def _destino_e_numero_norm(raw: str | None) -> tuple[str | None, str | None, bool]:
-    """Retorna (destino, numero_norm, is_group)."""
+    """
+    Retorna:
+      destino_evolution, numero_db_norm, is_group
+
+    - 1:1 => destino sempre no formato de envio (55...)
+        ou JID normalizado se vier @s.whatsapp.net
+    - grupo => preserva JID de grupo
+    """
     if not raw:
         return None, None, False
 
@@ -235,15 +156,18 @@ def _destino_e_numero_norm(raw: str | None) -> tuple[str | None, str | None, boo
 
     s_lower = s.lower()
 
-    # 1) Já veio como JID
+    # grupo já pronto
     if s_lower.endswith("@g.us"):
         return s, None, True
+
+    # jid 1:1
     if s_lower.endswith("@s.whatsapp.net"):
         base = s_lower.replace("@s.whatsapp.net", "")
-        num = normalizar_telefone(base)
-        return (f"{num}@s.whatsapp.net" if num else s), num, False
+        num_send = normalize_phone_for_send(base)
+        num_db = normalize_phone_for_db(base)
+        return (f"{num_send}@s.whatsapp.net" if num_send else s), num_db, False
 
-    # 2) Heurísticas para identificar grupo SEM sufixo
+    # grupos numéricos tipo 120... ou xx-yy
     if "-" in s:
         left, right = s.split("-", 1)
         left_digits = re.sub(r"\D", "", left or "")
@@ -260,20 +184,12 @@ def _destino_e_numero_norm(raw: str | None) -> tuple[str | None, str | None, boo
     if len(digits_only) >= 18:
         return f"{digits_only}@g.us", None, True
 
-    # 3) Caso padrão: conversa 1:1 por telefone
-    num = normalizar_telefone(s)
-    if not num:
-        return s, None, False
-    return num, num, False
+    num_send = normalize_phone_for_send(s)
+    num_db = normalize_phone_for_db(s)
+    if not num_send:
+        return s, num_db, False
 
-
-def formatar_telefone_br(numero: str) -> str:
-    numero = "".join(filter(str.isdigit, numero))
-    if len(numero) == 13:
-        return f"+{numero[:2]} {numero[2:4]} {numero[4:9]}-{numero[9:]}"
-    if len(numero) == 12:
-        return f"+{numero[:2]} {numero[2:4]} {numero[4:8]}-{numero[8:]}"
-    return f"+{numero[:2]} {numero[2:]}"
+    return num_send, num_db, False
 
 
 def _now_sp() -> datetime:
@@ -321,134 +237,268 @@ def _evo_post(path: str, instance: str, payload: Dict[str, Any], timeout: int = 
 def _resolve_empresa_e_instancia(
     db: Session,
     *,
-    empresa_id: Optional[int],
+    empresa_id: int,
     instance: Optional[str],
     instancia_id: Optional[int],
-    numero_norm: Optional[str] = None,
-    allowed_inst_ids: Optional[List[int]] = None,
-) -> Tuple[models.Empresa, str, Optional[int]]:
-    """
-    Regras com ACL por instância:
-      1) instance (nome)
-      2) instancia_id
-      3) empresa_id + numero_norm -> última instância (respeita ACL)
-      4) empresa_id com 1 instância (ou 1 permitida)
-      5) senão 400 com opções
-    Retorna: (empresa, instance_name, instancia_id)
-    """
-
-    def _list_instancias(emp_id: int) -> List[models.EmpresaInstancia]:
-        q = db.query(models.EmpresaInstancia).filter(models.EmpresaInstancia.empresa_id == int(emp_id))
-        if allowed_inst_ids is not None:
-            if not allowed_inst_ids:
-                return []
-            q = q.filter(models.EmpresaInstancia.id.in_([int(x) for x in allowed_inst_ids]))
-        return q.order_by(models.EmpresaInstancia.id.asc()).all()
-
-    if instance:
-        q = db.query(models.EmpresaInstancia).filter(models.EmpresaInstancia.instance_name == instance)
-        if empresa_id:
-            q = q.filter(models.EmpresaInstancia.empresa_id == int(empresa_id))
-        inst_row = q.first()
-        if not inst_row:
-            raise HTTPException(404, f"Instância '{instance}' não encontrada (ou não pertence à empresa).")
-
-        _assert_instancia_allowed(allowed_inst_ids, int(inst_row.id))
-
-        emp = db.query(models.Empresa).filter(models.Empresa.id == int(inst_row.empresa_id)).first()
-        if not emp:
-            raise HTTPException(404, "Empresa da instância não encontrada.")
-        return emp, inst_row.instance_name, int(inst_row.id)
-
-    if instancia_id is not None:
-        q = db.query(models.EmpresaInstancia).filter(models.EmpresaInstancia.id == int(instancia_id))
-        if empresa_id:
-            q = q.filter(models.EmpresaInstancia.empresa_id == int(empresa_id))
-        inst_row = q.first()
-        if not inst_row:
-            raise HTTPException(404, f"Instância id={instancia_id} não encontrada (ou não pertence à empresa).")
-
-        _assert_instancia_allowed(allowed_inst_ids, int(inst_row.id))
-
-        emp = db.query(models.Empresa).filter(models.Empresa.id == int(inst_row.empresa_id)).first()
-        if not emp:
-            raise HTTPException(404, "Empresa da instância não encontrada.")
-        return emp, inst_row.instance_name, int(inst_row.id)
-
-    if not empresa_id:
-        raise HTTPException(400, "Informe 'instance' (nome) ou 'instancia_id'; ou 'empresa_id' + 'number'.")
-
+    allowed_inst_ids: Optional[List[int]],
+) -> Tuple[models.Empresa, str, int]:
     emp = db.query(models.Empresa).filter(models.Empresa.id == int(empresa_id)).first()
     if not emp:
         raise HTTPException(404, f"Empresa id={empresa_id} não encontrada.")
 
-    if numero_norm:
-        cli = db.query(models.Cliente).filter_by(empresa_id=int(empresa_id), telefone=numero_norm).first()
-        if cli:
-            mq = (
-                db.query(models.Mensagem)
-                .filter(
-                    models.Mensagem.empresa_id == int(empresa_id),
-                    models.Mensagem.cliente_id == int(cli.id),
-                    models.Mensagem.instancia_id.isnot(None),
-                )
+    if instance:
+        q = (
+            db.query(models.EmpresaInstancia)
+            .filter(
+                models.EmpresaInstancia.empresa_id == int(empresa_id),
+                models.EmpresaInstancia.instance_name == str(instance),
             )
-            if allowed_inst_ids is not None:
-                if not allowed_inst_ids:
-                    mq = None
-                else:
-                    mq = mq.filter(models.Mensagem.instancia_id.in_([int(x) for x in allowed_inst_ids]))
-
-            if mq is not None:
-                last = mq.order_by(models.Mensagem.timestamp.desc(), models.Mensagem.id.desc()).first()
-                if last and last.instancia_id:
-                    inst_row = (
-                        db.query(models.EmpresaInstancia)
-                        .filter(models.EmpresaInstancia.id == int(last.instancia_id))
-                        .first()
-                    )
-                    if inst_row:
-                        _assert_instancia_allowed(allowed_inst_ids, int(inst_row.id))
-                        return emp, inst_row.instance_name, int(inst_row.id)
-
-    insts = _list_instancias(int(empresa_id))
-    if len(insts) == 1:
-        return emp, insts[0].instance_name, int(insts[0].id)
-
-    if insts:
-        opts = [{"id": int(r.id), "instance_name": r.instance_name} for r in insts]
-        raise HTTPException(
-            400,
-            {
-                "error": "empresa_tem_varias_instancias",
-                "message": "Informe 'instance' (nome) ou 'instancia_id' para escolher.",
-                "opcoes": opts,
-            },
         )
+        row = q.first()
+        if not row:
+            raise HTTPException(404, f"Instância '{instance}' não encontrada.")
+        assert_instancia_allowed(allowed_instancias=allowed_inst_ids, instancia_id=int(row.id))
+        return emp, row.instance_name, int(row.id)
+
+    if instancia_id is not None:
+        q = (
+            db.query(models.EmpresaInstancia)
+            .filter(
+                models.EmpresaInstancia.empresa_id == int(empresa_id),
+                models.EmpresaInstancia.id == int(instancia_id),
+            )
+        )
+        row = q.first()
+        if not row:
+            raise HTTPException(404, f"Instância id={instancia_id} não encontrada.")
+        assert_instancia_allowed(allowed_instancias=allowed_inst_ids, instancia_id=int(row.id))
+        return emp, row.instance_name, int(row.id)
+
+    q = db.query(models.EmpresaInstancia).filter(models.EmpresaInstancia.empresa_id == int(empresa_id))
+    if allowed_inst_ids is not None:
+        if not allowed_inst_ids:
+            raise HTTPException(403, "Nenhuma instância permitida para este usuário.")
+        q = q.filter(models.EmpresaInstancia.id.in_([int(x) for x in allowed_inst_ids]))
+
+    insts = q.order_by(models.EmpresaInstancia.id.asc()).all()
+    if len(insts) == 1:
+        row = insts[0]
+        return emp, row.instance_name, int(row.id)
+
+    opts = [{"id": int(r.id), "instance_name": r.instance_name} for r in insts]
+    raise HTTPException(
+        400,
+        {
+            "error": "empresa_tem_varias_instancias",
+            "message": "Informe 'instance', 'instancia_id' ou envie o conversation_id completo da conversa.",
+            "opcoes": opts,
+        },
+    )
+
+
+# =========================================================
+# Conversation refs
+# =========================================================
+def _conv_ref_cliente(cliente_id: int, instancia_id: Optional[int]) -> str:
+    return f"c:{int(cliente_id)}:{int(instancia_id or 0)}"
+
+
+def _conv_ref_grupo(grupo_id: int, instancia_id: Optional[int]) -> str:
+    return f"g:{int(grupo_id)}:{int(instancia_id or 0)}"
+
+
+def _parse_conversation_ref(value: str | None) -> Tuple[Optional[str], Optional[int], Optional[int]]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None, None, None
+
+    m = re.match(r"^(c|g):(\d+):(\d+)$", raw, flags=re.I)
+    if not m:
+        return None, None, None
+
+    kind = "cliente" if m.group(1).lower() == "c" else "grupo"
+    entity_id = int(m.group(2))
+    inst_id = int(m.group(3)) or None
+    return kind, entity_id, inst_id
+
+
+def _resolve_unique_client_instance(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente_id: int,
+    allowed_inst_ids: Optional[List[int]],
+) -> Optional[int]:
+    q = (
+        db.query(models.Mensagem.instancia_id)
+        .filter(
+            models.Mensagem.empresa_id == int(empresa_id),
+            models.Mensagem.cliente_id == int(cliente_id),
+            models.Mensagem.instancia_id.isnot(None),
+        )
+        .distinct()
+    )
 
     if allowed_inst_ids is not None:
-        raise HTTPException(403, "Nenhuma instância permitida para este usuário.")
-    raise HTTPException(400, "Empresa sem instâncias cadastradas.")
+        if not allowed_inst_ids:
+            raise HTTPException(403, "Nenhuma instância permitida para este usuário.")
+        q = q.filter(models.Mensagem.instancia_id.in_([int(x) for x in allowed_inst_ids]))
+
+    insts = [int(r[0]) for r in q.all() if r and r[0] is not None]
+    if not insts:
+        return None
+    if len(insts) == 1:
+        return int(insts[0])
+
+    raise HTTPException(
+        400,
+        "Cliente possui conversa em múltiplas instâncias. Envie 'instancia_id'/'instance' ou 'conversation_id'.",
+    )
+
+
+def _resolve_unique_group_instance(
+    db: Session,
+    *,
+    empresa_id: int,
+    grupo_id: int,
+    allowed_inst_ids: Optional[List[int]],
+) -> Optional[int]:
+    q = (
+        db.query(models.MensagemGrupo.instancia_id)
+        .filter(
+            models.MensagemGrupo.empresa_id == int(empresa_id),
+            models.MensagemGrupo.grupo_id == int(grupo_id),
+            models.MensagemGrupo.instancia_id.isnot(None),
+        )
+        .distinct()
+    )
+
+    if allowed_inst_ids is not None:
+        if not allowed_inst_ids:
+            raise HTTPException(403, "Nenhuma instância permitida para este usuário.")
+        q = q.filter(models.MensagemGrupo.instancia_id.in_([int(x) for x in allowed_inst_ids]))
+
+    insts = [int(r[0]) for r in q.all() if r and r[0] is not None]
+    if not insts:
+        return None
+    if len(insts) == 1:
+        return int(insts[0])
+
+    raise HTTPException(
+        400,
+        "Grupo possui conversa em múltiplas instâncias. Envie 'instancia_id'/'instance' ou 'conversation_id'.",
+    )
 
 
 # =========================================================
-# Persistência: Cliente (1:1)
+# Persistência
 # =========================================================
-def _get_or_create_cliente(db: Session, empresa: models.Empresa, numero_norm: str) -> models.Cliente:
-    cli = db.query(models.Cliente).filter_by(empresa_id=empresa.id, telefone=numero_norm).first()
-    if cli:
-        return cli
-    cli = models.Cliente(
-        empresa_id=empresa.id,
-        telefone=numero_norm,
-        nome=formatar_telefone_br(numero_norm),
+def _find_cliente_by_phone(
+    db: Session,
+    *,
+    empresa_id: int,
+    numero_db_norm: str,
+) -> Optional[models.Cliente]:
+    if not numero_db_norm:
+        return None
+
+    return (
+        db.query(models.Cliente)
+        .filter(
+            models.Cliente.empresa_id == int(empresa_id),
+            models.Cliente.telefone_norm == str(numero_db_norm),
+        )
+        .order_by(models.Cliente.id.desc())
+        .first()
+    )
+
+
+def _get_or_create_cliente(
+    db: Session,
+    empresa: models.Empresa,
+    numero_db_norm: str,
+    instancia_id: Optional[int],
+) -> models.Cliente:
+    """
+    Usa o mesmo upsert/lookup do fluxo inbound.
+    """
+    cli_id = upsert_cliente_repo(
+        db,
+        empresa_id=int(empresa.id),
+        instancia_id=(int(instancia_id) if instancia_id is not None else None),
+        telefone_raw=numero_db_norm,
+        nome=formatar_telefone_br(normalize_phone_for_send(numero_db_norm) or numero_db_norm),
         nome_whatsapp=None,
         avatar_url=None,
     )
-    db.add(cli)
-    db.commit()
-    db.refresh(cli)
+    if not cli_id:
+        raise HTTPException(500, "Não foi possível resolver/criar o cliente para envio.")
+    cli = get_cliente_by_id(db, cli_id)
+    if not cli:
+        raise HTTPException(500, "Cliente resolvido no envio não pôde ser recarregado.")
     return cli
+
+
+def _get_latest_atendimento_cliente_inst(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente_id: int,
+    instancia_id: Optional[int],
+) -> Optional[models.Atendimento]:
+    q = (
+        db.query(models.Atendimento)
+        .filter(
+            models.Atendimento.empresa_id == int(empresa_id),
+            models.Atendimento.cliente_id == int(cliente_id),
+        )
+    )
+    if instancia_id is not None:
+        q = q.filter(models.Atendimento.instancia_id == int(instancia_id))
+    return q.order_by(models.Atendimento.id.desc()).first()
+
+
+def _resolve_atendimento_for_send(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente: models.Cliente,
+    instancia_id: Optional[int],
+    operador_id: Optional[int],
+    ts_dt: datetime,
+    atendimento_acl: Optional[models.Atendimento] = None,
+) -> Tuple[Optional[models.Atendimento], Optional[int], Optional[int]]:
+    latest = atendimento_acl or _get_latest_atendimento_cliente_inst(
+        db,
+        empresa_id=int(empresa_id),
+        cliente_id=int(cliente.id),
+        instancia_id=(int(instancia_id) if instancia_id is not None else None),
+    )
+
+    departamento_id = None
+    if latest is not None:
+        departamento_id = getattr(latest, "departamento_id", None)
+
+    if departamento_id is None:
+        departamento_id = getattr(cliente, "departamento_id", None)
+
+    if instancia_id is None:
+        return latest, getattr(latest, "id", None) if latest else None, departamento_id
+
+    try:
+        atd = get_or_open_atendimento_repo(
+            db,
+            empresa_id=int(empresa_id),
+            instancia_id=int(instancia_id),
+            cliente_id=int(cliente.id),
+            direcao="saida",
+            ts_dt=ts_dt,
+            departamento_id=departamento_id,
+            operador_id=operador_id,
+        )
+        return atd, (getattr(atd, "id", None) if atd is not None else None), departamento_id
+    except Exception:
+        return latest, getattr(latest, "id", None) if latest else None, departamento_id
 
 
 def _insert_msg_saida(
@@ -459,6 +509,7 @@ def _insert_msg_saida(
     conteudo: str,
     msg_id: Optional[str],
     instancia_id: Optional[int],
+    atendimento_id: Optional[int],
     ack: int,
 ) -> models.Mensagem:
     m = models.Mensagem(
@@ -471,6 +522,7 @@ def _insert_msg_saida(
         timestamp=_now_sp(),
         msg_id=msg_id,
         instancia_id=instancia_id,
+        atendimento_id=atendimento_id,
     )
     db.add(m)
     db.commit()
@@ -478,10 +530,6 @@ def _insert_msg_saida(
     return m
 
 
-# =========================================================
-# Persistência: Grupo (@g.us)
-# (NÃO salva instance_name no banco)
-# =========================================================
 def _ts_seconds_from_evo(evo: Dict[str, Any]) -> int:
     ts = (evo or {}).get("messageTimestamp")
     try:
@@ -494,8 +542,6 @@ def _ts_seconds_from_evo(evo: Dict[str, Any]) -> int:
 
 
 def _ack_from_send_success() -> int:
-    # ✅ se o POST retornou 200, no mínimo saiu do seu backend e foi aceito pela Evolution.
-    # Isso já tira o "relógio" no front.
     return 1
 
 
@@ -575,12 +621,9 @@ def _identity_ctx(identity: Any) -> Tuple[int, Optional[str]]:
         raise HTTPException(401, "Sessão inválida ou expirada.")
 
     if isinstance(identity, dict):
-
         def getter(k, default=None):
             return identity.get(k, default)
-
     else:
-
         def getter(k, default=None):
             return getattr(identity, k, default)
 
@@ -597,8 +640,7 @@ def _identity_ctx(identity: Any) -> Tuple[int, Optional[str]]:
 
 
 # =========================================================
-# Broadcast WS
-# (pode enviar instance_name pro front, mas NÃO salva no banco)
+# Broadcast
 # =========================================================
 async def _broadcast_msg_saida_cliente(
     *,
@@ -611,14 +653,19 @@ async def _broadcast_msg_saida_cliente(
     instance_name: Optional[str],
     atendente_nome: Optional[str],
     ack: int,
+    atendimento_id: Optional[int],
+    departamento_id: Optional[int],
     midias: Optional[List[Dict[str, Any]]] = None,
 ):
+    conv_ref = _conv_ref_cliente(int(cliente.id), instancia_id)
+
     payload = {
         "empresa_id": int(empresa.id),
         "cliente_id": int(cliente.id),
+        "conversation_id": conv_ref,
+        "conversation_key": conv_ref,
         "is_group": False,
-        "telefone": formatar_telefone_br(cliente.telefone) if getattr(cliente, "telefone", None) else None,
-        # ✅ BLINDADO: nunca mandar URL externa
+        "telefone": formatar_telefone_br(getattr(cliente, "telefone", None) or ""),
         "avatar_url": _public_avatar_url(
             kind="cliente",
             conversation_id=int(cliente.id),
@@ -633,14 +680,13 @@ async def _broadcast_msg_saida_cliente(
         "msg_id": msg_id,
         "ack": int(ack),
         "instancia_id": instancia_id,
-        "instance_name": instance_name,  # apenas no WS
+        "instance_name": instance_name,
         "atendente_nome": atendente_nome,
+        "atendimento_id": atendimento_id,
+        "departamento_id": departamento_id,
     }
     if midias:
         payload["midias"] = midias
-
-    _dbg("WS broadcast channel=", f"emp:{empresa.id}")
-    _dbg_json("WS payload=", payload)
 
     await conexoes_ativas.send_message(f"emp:{empresa.id}", payload)
 
@@ -658,12 +704,15 @@ async def _broadcast_msg_saida_grupo(
     ack: int,
     midias: Optional[List[Dict[str, Any]]] = None,
 ):
+    conv_ref = _conv_ref_grupo(int(grupo.id), instancia_id)
+
     payload = {
         "empresa_id": int(empresa.id),
-        "cliente_id": int(grupo.id),  # pro front: id da conversa aberta
+        "cliente_id": int(grupo.id),
+        "conversation_id": conv_ref,
+        "conversation_key": conv_ref,
         "is_group": True,
         "remote_jid": getattr(grupo, "remote_jid", None),
-        # ✅ BLINDADO: nunca mandar URL externa
         "avatar_url": _public_avatar_url(
             kind="grupo",
             conversation_id=int(grupo.id),
@@ -677,14 +726,11 @@ async def _broadcast_msg_saida_grupo(
         "msg_id": msg_id,
         "ack": int(ack),
         "instancia_id": instancia_id,
-        "instance_name": instance_name,  # apenas no WS
+        "instance_name": instance_name,
         "atendente_nome": atendente_nome,
     }
     if midias:
         payload["midias"] = midias
-
-    _dbg("WS broadcast channel=", f"emp:{empresa.id}")
-    _dbg_json("WS payload=", payload)
 
     await conexoes_ativas.send_message(f"emp:{empresa.id}", payload)
 
@@ -706,11 +752,12 @@ class Quoted(BaseModel):
 
 
 class BaseSend(BaseModel):
-    empresa_id: Optional[int] = Field(None, description="ID da empresa (ou use 'instance'/'instancia_id')")
-    instance: Optional[str] = Field(None, description="Nome da instância (alternativa a empresa_id)")
-    instancia_id: Optional[int] = Field(None, description="ID da instância (alternativa a instance)")
-    cliente_id: Optional[int] = Field(None, description="ID da conversa no sistema (opcional; ajuda a forçar conversa)")
-    number: str = Field(..., description="Destino: telefone OU JID (ex: ...@s.whatsapp.net / ...@g.us)")
+    empresa_id: Optional[int] = Field(None, description="ID da empresa")
+    instance: Optional[str] = Field(None, description="Nome da instância")
+    instancia_id: Optional[int] = Field(None, description="ID da instância")
+    cliente_id: Optional[int] = Field(None, description="ID base do cliente/grupo")
+    conversation_id: Optional[str] = Field(None, description="conversation_id da lista lateral (ex.: c:123:3)")
+    number: str = Field(..., description="Destino: telefone ou JID")
 
 
 class SendTextReq(BaseSend):
@@ -781,6 +828,269 @@ class SendReactionReq(BaseModel):
 
 
 # =========================================================
+# Contexto de envio
+# =========================================================
+def _apply_conversation_hint(body) -> Tuple[Optional[str], Optional[int], Optional[int]]:
+    kind, entity_id, inst_id = _parse_conversation_ref(getattr(body, "conversation_id", None))
+    if kind and entity_id and getattr(body, "cliente_id", None) is None:
+        body.cliente_id = int(entity_id)
+    if inst_id is not None and getattr(body, "instancia_id", None) is None and not getattr(body, "instance", None):
+        body.instancia_id = int(inst_id)
+    return kind, entity_id, inst_id
+
+
+def _resolve_send_instance(
+    db: Session,
+    *,
+    empresa_id: int,
+    body,
+    is_group: bool,
+    allowed_inst_ids: Optional[List[int]],
+) -> Tuple[str, int]:
+    if getattr(body, "instance", None) or getattr(body, "instancia_id", None) is not None:
+        _, inst_name, inst_id = _resolve_empresa_e_instancia(
+            db,
+            empresa_id=int(empresa_id),
+            instance=getattr(body, "instance", None),
+            instancia_id=getattr(body, "instancia_id", None),
+            allowed_inst_ids=allowed_inst_ids,
+        )
+        return inst_name, inst_id
+
+    base_id = getattr(body, "cliente_id", None)
+    if base_id is not None:
+        if is_group:
+            guessed = _resolve_unique_group_instance(
+                db,
+                empresa_id=int(empresa_id),
+                grupo_id=int(base_id),
+                allowed_inst_ids=allowed_inst_ids,
+            )
+        else:
+            guessed = _resolve_unique_client_instance(
+                db,
+                empresa_id=int(empresa_id),
+                cliente_id=int(base_id),
+                allowed_inst_ids=allowed_inst_ids,
+            )
+
+        if guessed is not None:
+            _, inst_name, inst_id = _resolve_empresa_e_instancia(
+                db,
+                empresa_id=int(empresa_id),
+                instance=None,
+                instancia_id=int(guessed),
+                allowed_inst_ids=allowed_inst_ids,
+            )
+            return inst_name, inst_id
+
+    _, inst_name, inst_id = _resolve_empresa_e_instancia(
+        db,
+        empresa_id=int(empresa_id),
+        instance=None,
+        instancia_id=None,
+        allowed_inst_ids=allowed_inst_ids,
+    )
+    return inst_name, inst_id
+
+
+# =========================================================
+# Rota core reutilizável
+# =========================================================
+async def _send_core(
+    *,
+    body,
+    db: Session,
+    identity,
+    evo_path: str,
+    evo_payload: Dict[str, Any],
+    conteudo_persistido: str,
+    group_message_type: str,
+    midias: Optional[List[Dict[str, Any]]] = None,
+):
+    ensure_perm(identity, "atendimento.enviar")
+    _dbg_json("SEND body(recebido)=", body.model_dump(exclude_none=True))
+
+    destino, numero_db_norm, is_group = _destino_e_numero_norm(body.number)
+    if not destino:
+        raise HTTPException(400, "Número/JID inválido.")
+
+    _apply_conversation_hint(body)
+
+    empresa_do_token, atendente_nome = _identity_ctx(identity)
+    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_do_token)
+    allowed = acl_ctx["allowed_instancias"]
+
+    efetiva_empresa_id = assert_same_company(identity, body.empresa_id)
+
+    inst_name, inst_id = _resolve_send_instance(
+        db,
+        empresa_id=int(efetiva_empresa_id),
+        body=body,
+        is_group=is_group,
+        allowed_inst_ids=allowed,
+    )
+
+    empresa, _inst_name_checked, inst_id_checked = _resolve_empresa_e_instancia(
+        db,
+        empresa_id=efetiva_empresa_id,
+        instance=inst_name,
+        instancia_id=inst_id,
+        allowed_inst_ids=allowed,
+    )
+    _assert_empresa_resolvida(empresa_do_token, empresa.id)
+
+    operador_id = _current_operador_id(identity)
+
+    cliente_acl = None
+    atendimento_acl = None
+
+    if not is_group and body.cliente_id is not None:
+        cliente_acl, atendimento_acl = assert_cliente_access(
+            db,
+            identity=identity,
+            empresa_id=int(empresa.id),
+            cliente_id=int(body.cliente_id),
+            instancia_id=int(inst_id_checked),
+            allow_unassigned_department=False,
+        )
+
+    # Se veio só number, tenta mapear para cliente existente antes do envio
+    cliente_existing_by_number = None
+    if not is_group and body.cliente_id is None and numero_db_norm:
+        cliente_existing_by_number = _find_cliente_by_phone(
+            db,
+            empresa_id=int(empresa.id),
+            numero_db_norm=str(numero_db_norm),
+        )
+        if cliente_existing_by_number is not None:
+            cliente_acl, atendimento_acl = assert_cliente_access(
+                db,
+                identity=identity,
+                empresa_id=int(empresa.id),
+                cliente_id=int(cliente_existing_by_number.id),
+                instancia_id=int(inst_id_checked),
+                allow_unassigned_department=False,
+            )
+
+    evo = _evo_post(evo_path, inst_name, evo_payload)
+    evo_msg_id = ((evo or {}).get("key") or {}).get("id")
+    ack_now = _ack_from_send_success()
+
+    if is_group:
+        grp = None
+        if body.cliente_id is not None:
+            grp = (
+                db.query(models.Grupo)
+                .filter(models.Grupo.empresa_id == int(empresa.id), models.Grupo.id == int(body.cliente_id))
+                .first()
+            )
+            if grp and str(getattr(grp, "remote_jid", "")).lower() != str(destino).lower():
+                grp = None
+
+        if not grp:
+            grp = _get_or_create_grupo(db, empresa=empresa, remote_jid=destino, instancia_id=inst_id_checked)
+
+        ts = _ts_seconds_from_evo(evo)
+        ts_iso = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(timespec="microseconds")
+
+        msg_g = _insert_msg_saida_grupo(
+            db,
+            empresa=empresa,
+            grupo=grp,
+            conteudo=conteudo_persistido,
+            msg_id=evo_msg_id,
+            instancia_id=inst_id_checked,
+            ts_seconds=ts,
+            ack=ack_now,
+            message_type=group_message_type,
+        )
+
+        await _broadcast_msg_saida_grupo(
+            empresa=empresa,
+            grupo=grp,
+            conteudo=conteudo_persistido,
+            timestamp_iso=ts_iso,
+            msg_id=evo_msg_id or str(getattr(msg_g, "id", "")),
+            instancia_id=inst_id_checked,
+            instance_name=inst_name,
+            atendente_nome=atendente_nome,
+            ack=ack_now,
+            midias=midias,
+        )
+
+        return {
+            "evolution": evo,
+            "db": {
+                "mensagem_grupo_id": getattr(msg_g, "id", None),
+                "grupo_id": getattr(grp, "id", None),
+                "conversation_id": _conv_ref_grupo(int(grp.id), inst_id_checked),
+                "instancia_id": inst_id_checked,
+            },
+            "instance_name": inst_name,
+        }
+
+    cliente = cliente_acl
+    if not cliente and cliente_existing_by_number is not None:
+        cliente = cliente_existing_by_number
+
+    if not cliente and numero_db_norm:
+        cliente = _get_or_create_cliente(db, empresa, numero_db_norm, inst_id_checked)
+
+    if not cliente:
+        return {"evolution": evo, "db": None, "instance_name": inst_name}
+
+    atd_obj, atendimento_id, departamento_id = _resolve_atendimento_for_send(
+        db,
+        empresa_id=int(empresa.id),
+        cliente=cliente,
+        instancia_id=inst_id_checked,
+        operador_id=operador_id,
+        ts_dt=_now_sp(),
+        atendimento_acl=atendimento_acl,
+    )
+
+    msg = _insert_msg_saida(
+        db,
+        empresa=empresa,
+        cliente=cliente,
+        conteudo=conteudo_persistido,
+        msg_id=evo_msg_id,
+        instancia_id=inst_id_checked,
+        atendimento_id=atendimento_id,
+        ack=ack_now,
+    )
+
+    await _broadcast_msg_saida_cliente(
+        empresa=empresa,
+        cliente=cliente,
+        conteudo=msg.conteudo,
+        timestamp_iso=msg.timestamp.isoformat(timespec="microseconds"),
+        msg_id=msg.msg_id or str(msg.id),
+        instancia_id=msg.instancia_id,
+        instance_name=inst_name,
+        atendente_nome=atendente_nome,
+        ack=ack_now,
+        atendimento_id=atendimento_id,
+        departamento_id=departamento_id,
+        midias=midias,
+    )
+
+    return {
+        "evolution": evo,
+        "db": {
+            "mensagem_id": msg.id,
+            "cliente_id": cliente.id,
+            "atendimento_id": atendimento_id,
+            "departamento_id": departamento_id,
+            "conversation_id": _conv_ref_cliente(int(cliente.id), msg.instancia_id),
+            "instancia_id": inst_id_checked,
+        },
+        "instance_name": inst_name,
+    }
+
+
+# =========================================================
 # Rotas
 # =========================================================
 @router.post("/send/text")
@@ -789,28 +1099,7 @@ async def send_text(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    _ensure_perm(identity, "atendimento.enviar")
-    _dbg_json("SEND/TEXT body(recebido)=", body.model_dump(exclude_none=True))
-
-    destino, numero_norm, is_group = _destino_e_numero_norm(body.number)
-    _dbg("destino=", destino, "numero_norm=", numero_norm, "is_group=", is_group, "cliente_id=", body.cliente_id)
-    if not destino:
-        raise HTTPException(400, "Número/JID inválido.")
-
-    empresa_do_token, atendente_nome = _identity_ctx(identity)
-    allowed = _allowed_instancia_ids(db, identity, empresa_do_token)
-    efetiva_empresa_id = _assert_mesma_empresa(empresa_do_token, body.empresa_id)
-
-    empresa, inst_name, inst_id = _resolve_empresa_e_instancia(
-        db,
-        empresa_id=efetiva_empresa_id,
-        instance=body.instance,
-        instancia_id=body.instancia_id,
-        numero_norm=numero_norm,
-        allowed_inst_ids=allowed,
-    )
-    _assert_empresa_resolvida(empresa_do_token, empresa.id)
-
+    destino = _destino_e_numero_norm(body.number)[0]
     payload = {
         "number": destino,
         "text": body.text,
@@ -822,108 +1111,16 @@ async def send_text(
     }
     payload = {k: v for k, v in payload.items() if v is not None}
 
-    evo = _evo_post("/message/sendText", inst_name, payload)
-    evo_msg_id = ((evo or {}).get("key") or {}).get("id")
-
-    ack_now = _ack_from_send_success()
-
-    # ====== GRUPO ======
-    if is_group:
-        ts = _ts_seconds_from_evo(evo)
-        ts_iso = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(timespec="microseconds")
-
-        grp = None
-        if body.cliente_id is not None:
-            try:
-                grp = (
-                    db.query(models.Grupo)
-                    .filter(models.Grupo.empresa_id == int(empresa.id), models.Grupo.id == int(body.cliente_id))
-                    .first()
-                )
-                if grp and str(getattr(grp, "remote_jid", "")).lower() != str(destino).lower():
-                    grp = None
-            except Exception:
-                grp = None
-
-        if not grp:
-            grp = _get_or_create_grupo(db, empresa=empresa, remote_jid=destino, instancia_id=inst_id)
-
-        msg_g = _insert_msg_saida_grupo(
-            db,
-            empresa=empresa,
-            grupo=grp,
-            conteudo=body.text,
-            msg_id=evo_msg_id,
-            instancia_id=inst_id,
-            ts_seconds=ts,
-            ack=ack_now,
-            message_type="conversation",
-        )
-
-        await _broadcast_msg_saida_grupo(
-            empresa=empresa,
-            grupo=grp,
-            conteudo=body.text,
-            timestamp_iso=ts_iso,
-            msg_id=evo_msg_id or str(getattr(msg_g, "id", "")),
-            instancia_id=inst_id,
-            instance_name=inst_name,
-            atendente_nome=atendente_nome,
-            ack=ack_now,
-        )
-
-        return {
-            "evolution": evo,
-            "db": {
-                "mensagem_grupo_id": getattr(msg_g, "id", None),
-                "grupo_id": getattr(grp, "id", None),
-                "instancia_id": inst_id,
-            },
-            "instance_name": inst_name,
-        }
-
-    # ====== 1:1 ======
-    cliente = None
-    if body.cliente_id is not None:
-        cliente = (
-            db.query(models.Cliente)
-            .filter(models.Cliente.empresa_id == empresa.id, models.Cliente.id == int(body.cliente_id))
-            .first()
-        )
-
-    if not cliente and numero_norm:
-        cliente = _get_or_create_cliente(db, empresa, numero_norm)
-
-    if not cliente:
-        return {"evolution": evo, "db": None, "instance_name": inst_name}
-
-    msg = _insert_msg_saida(
-        db,
-        empresa=empresa,
-        cliente=cliente,
-        conteudo=body.text,
-        msg_id=evo_msg_id,
-        instancia_id=inst_id,
-        ack=ack_now,
+    return await _send_core(
+        body=body,
+        db=db,
+        identity=identity,
+        evo_path="/message/sendText",
+        evo_payload=payload,
+        conteudo_persistido=body.text,
+        group_message_type="conversation",
+        midias=None,
     )
-
-    await _broadcast_msg_saida_cliente(
-        empresa=empresa,
-        cliente=cliente,
-        conteudo=msg.conteudo,
-        timestamp_iso=msg.timestamp.isoformat(timespec="microseconds"),
-        msg_id=msg.msg_id or str(msg.id),
-        instancia_id=msg.instancia_id,
-        instance_name=inst_name,
-        atendente_nome=atendente_nome,
-        ack=ack_now,
-    )
-
-    return {
-        "evolution": evo,
-        "db": {"mensagem_id": msg.id, "cliente_id": cliente.id, "instancia_id": inst_id},
-        "instance_name": inst_name,
-    }
 
 
 @router.post("/send/audio")
@@ -932,27 +1129,7 @@ async def send_audio(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    _ensure_perm(identity, "atendimento.enviar")
-    _dbg_json("SEND/AUDIO body(recebido)=", body.model_dump(exclude_none=True))
-
-    destino, numero_norm, is_group = _destino_e_numero_norm(body.number)
-    if not destino:
-        raise HTTPException(400, "Número/JID inválido.")
-
-    empresa_do_token, atendente_nome = _identity_ctx(identity)
-    allowed = _allowed_instancia_ids(db, identity, empresa_do_token)
-    efetiva_empresa_id = _assert_mesma_empresa(empresa_do_token, body.empresa_id)
-
-    empresa, inst_name, inst_id = _resolve_empresa_e_instancia(
-        db,
-        empresa_id=efetiva_empresa_id,
-        instance=body.instance,
-        instancia_id=body.instancia_id,
-        numero_norm=numero_norm,
-        allowed_inst_ids=allowed,
-    )
-    _assert_empresa_resolvida(empresa_do_token, empresa.id)
-
+    destino = _destino_e_numero_norm(body.number)[0]
     payload = {
         "number": destino,
         "audio": body.audio,
@@ -964,109 +1141,21 @@ async def send_audio(
     }
     payload = {k: v for k, v in payload.items() if v is not None}
 
-    evo = _evo_post("/message/sendWhatsAppAudio", inst_name, payload)
-    evo_msg_id = ((evo or {}).get("key") or {}).get("id")
-
-    ack_now = _ack_from_send_success()
-
     audio_url = body.audio
     if audio_url and not audio_url.startswith("http") and not audio_url.startswith("data:"):
         audio_url = f"data:audio/ogg;base64,{body.audio}"
     midias = [{"tipo": "audio", "mimetype": "audio/ogg", "filename": "", "url": audio_url}]
 
-    if is_group:
-        ts = _ts_seconds_from_evo(evo)
-        ts_iso = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(timespec="microseconds")
-
-        grp = None
-        if body.cliente_id is not None:
-            try:
-                grp = (
-                    db.query(models.Grupo)
-                    .filter(models.Grupo.empresa_id == int(empresa.id), models.Grupo.id == int(body.cliente_id))
-                    .first()
-                )
-                if grp and str(getattr(grp, "remote_jid", "")).lower() != str(destino).lower():
-                    grp = None
-            except Exception:
-                grp = None
-
-        if not grp:
-            grp = _get_or_create_grupo(db, empresa=empresa, remote_jid=destino, instancia_id=inst_id)
-
-        msg_g = _insert_msg_saida_grupo(
-            db,
-            empresa=empresa,
-            grupo=grp,
-            conteudo="[Áudio]",
-            msg_id=evo_msg_id,
-            instancia_id=inst_id,
-            ts_seconds=ts,
-            ack=ack_now,
-            message_type="audio",
-        )
-
-        await _broadcast_msg_saida_grupo(
-            empresa=empresa,
-            grupo=grp,
-            conteudo="[Áudio]",
-            timestamp_iso=ts_iso,
-            msg_id=evo_msg_id or str(getattr(msg_g, "id", "")),
-            instancia_id=inst_id,
-            instance_name=inst_name,
-            atendente_nome=atendente_nome,
-            ack=ack_now,
-            midias=midias,
-        )
-        return {
-            "evolution": evo,
-            "db": {
-                "mensagem_grupo_id": getattr(msg_g, "id", None),
-                "grupo_id": getattr(grp, "id", None),
-                "instancia_id": inst_id,
-            },
-            "instance_name": inst_name,
-        }
-
-    cliente = None
-    if body.cliente_id is not None:
-        cliente = (
-            db.query(models.Cliente)
-            .filter(models.Cliente.empresa_id == empresa.id, models.Cliente.id == int(body.cliente_id))
-            .first()
-        )
-    if not cliente and numero_norm:
-        cliente = _get_or_create_cliente(db, empresa, numero_norm)
-    if not cliente:
-        return {"evolution": evo, "db": None, "instance_name": inst_name}
-
-    msg = _insert_msg_saida(
-        db,
-        empresa=empresa,
-        cliente=cliente,
-        conteudo="[Áudio]",
-        msg_id=evo_msg_id,
-        instancia_id=inst_id,
-        ack=ack_now,
-    )
-
-    await _broadcast_msg_saida_cliente(
-        empresa=empresa,
-        cliente=cliente,
-        conteudo=msg.conteudo,
-        timestamp_iso=msg.timestamp.isoformat(timespec="microseconds"),
-        msg_id=msg.msg_id or str(msg.id),
-        instancia_id=msg.instancia_id,
-        instance_name=inst_name,
-        atendente_nome=atendente_nome,
-        ack=ack_now,
+    return await _send_core(
+        body=body,
+        db=db,
+        identity=identity,
+        evo_path="/message/sendWhatsAppAudio",
+        evo_payload=payload,
+        conteudo_persistido="[Áudio]",
+        group_message_type="audio",
         midias=midias,
     )
-    return {
-        "evolution": evo,
-        "db": {"mensagem_id": msg.id, "cliente_id": cliente.id, "instancia_id": inst_id},
-        "instance_name": inst_name,
-    }
 
 
 @router.post("/send/media")
@@ -1075,33 +1164,13 @@ async def send_media(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    _ensure_perm(identity, "atendimento.enviar")
-    _dbg_json("SEND/MEDIA body(recebido)=", body.model_dump(exclude_none=True))
-
-    destino, numero_norm, is_group = _destino_e_numero_norm(body.number)
-    if not destino:
-        raise HTTPException(400, "Número/JID inválido.")
-
-    empresa_do_token, atendente_nome = _identity_ctx(identity)
-    allowed = _allowed_instancia_ids(db, identity, empresa_do_token)
-    efetiva_empresa_id = _assert_mesma_empresa(empresa_do_token, body.empresa_id)
-
-    empresa, inst_name, inst_id = _resolve_empresa_e_instancia(
-        db,
-        empresa_id=efetiva_empresa_id,
-        instance=body.instance,
-        instancia_id=body.instancia_id,
-        numero_norm=numero_norm,
-        allowed_inst_ids=allowed,
-    )
-    _assert_empresa_resolvida(empresa_do_token, empresa.id)
-
     mimetype = body.mimetype
     if not mimetype and body.fileName:
         guess = mimetypes.guess_type(body.fileName)[0]
         if guess:
             mimetype = guess
 
+    destino = _destino_e_numero_norm(body.number)[0]
     payload = {
         "number": destino,
         "mediatype": body.mediatype,
@@ -1117,113 +1186,28 @@ async def send_media(
     }
     payload = {k: v for k, v in payload.items() if v is not None}
 
-    evo = _evo_post("/message/sendMedia", inst_name, payload)
-    evo_msg_id = ((evo or {}).get("key") or {}).get("id")
-
-    ack_now = _ack_from_send_success()
-
-    conteudo = body.caption or "[Mídia]"
-
     media_url = body.media
     if media_url and not media_url.startswith("http") and not media_url.startswith("data:"):
         mime = mimetype or "application/octet-stream"
         media_url = f"data:{mime};base64,{body.media}"
 
-    midias = [{"tipo": body.mediatype, "mimetype": mimetype or "", "filename": body.fileName or "", "url": media_url}]
+    midias = [{
+        "tipo": body.mediatype,
+        "mimetype": mimetype or "",
+        "filename": body.fileName or "",
+        "url": media_url,
+    }]
 
-    if is_group:
-        ts = _ts_seconds_from_evo(evo)
-        ts_iso = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(timespec="microseconds")
-
-        grp = None
-        if body.cliente_id is not None:
-            try:
-                grp = (
-                    db.query(models.Grupo)
-                    .filter(models.Grupo.empresa_id == int(empresa.id), models.Grupo.id == int(body.cliente_id))
-                    .first()
-                )
-                if grp and str(getattr(grp, "remote_jid", "")).lower() != str(destino).lower():
-                    grp = None
-            except Exception:
-                grp = None
-
-        if not grp:
-            grp = _get_or_create_grupo(db, empresa=empresa, remote_jid=destino, instancia_id=inst_id)
-
-        msg_g = _insert_msg_saida_grupo(
-            db,
-            empresa=empresa,
-            grupo=grp,
-            conteudo=conteudo,
-            msg_id=evo_msg_id,
-            instancia_id=inst_id,
-            ts_seconds=ts,
-            ack=ack_now,
-            message_type=str(body.mediatype or "media"),
-        )
-
-        await _broadcast_msg_saida_grupo(
-            empresa=empresa,
-            grupo=grp,
-            conteudo=conteudo,
-            timestamp_iso=ts_iso,
-            msg_id=evo_msg_id or str(getattr(msg_g, "id", "")),
-            instancia_id=inst_id,
-            instance_name=inst_name,
-            atendente_nome=atendente_nome,
-            ack=ack_now,
-            midias=midias,
-        )
-        return {
-            "evolution": evo,
-            "db": {
-                "mensagem_grupo_id": getattr(msg_g, "id", None),
-                "grupo_id": getattr(grp, "id", None),
-                "instancia_id": inst_id,
-            },
-            "instance_name": inst_name,
-        }
-
-    cliente = None
-    if body.cliente_id is not None:
-        cliente = (
-            db.query(models.Cliente)
-            .filter(models.Cliente.empresa_id == empresa.id, models.Cliente.id == int(body.cliente_id))
-            .first()
-        )
-    if not cliente and numero_norm:
-        cliente = _get_or_create_cliente(db, empresa, numero_norm)
-    if not cliente:
-        return {"evolution": evo, "db": None, "instance_name": inst_name}
-
-    msg = _insert_msg_saida(
-        db,
-        empresa=empresa,
-        cliente=cliente,
-        conteudo=conteudo,
-        msg_id=evo_msg_id,
-        instancia_id=inst_id,
-        ack=ack_now,
-    )
-
-    await _broadcast_msg_saida_cliente(
-        empresa=empresa,
-        cliente=cliente,
-        conteudo=msg.conteudo,
-        timestamp_iso=msg.timestamp.isoformat(timespec="microseconds"),
-        msg_id=msg.msg_id or str(msg.id),
-        instancia_id=msg.instancia_id,
-        instance_name=inst_name,
-        atendente_nome=atendente_nome,
-        ack=ack_now,
+    return await _send_core(
+        body=body,
+        db=db,
+        identity=identity,
+        evo_path="/message/sendMedia",
+        evo_payload=payload,
+        conteudo_persistido=(body.caption or "[Mídia]"),
+        group_message_type=str(body.mediatype or "media"),
         midias=midias,
     )
-    return {
-        "evolution": evo,
-        "db": {"mensagem_id": msg.id, "cliente_id": cliente.id, "instancia_id": inst_id},
-        "instance_name": inst_name,
-    }
 
 
 @router.post("/send/sticker")
@@ -1232,27 +1216,7 @@ async def send_sticker(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    _ensure_perm(identity, "atendimento.enviar")
-    _dbg_json("SEND/STICKER body(recebido)=", body.model_dump(exclude_none=True))
-
-    destino, numero_norm, is_group = _destino_e_numero_norm(body.number)
-    if not destino:
-        raise HTTPException(400, "Número/JID inválido.")
-
-    empresa_do_token, atendente_nome = _identity_ctx(identity)
-    allowed = _allowed_instancia_ids(db, identity, empresa_do_token)
-    efetiva_empresa_id = _assert_mesma_empresa(empresa_do_token, body.empresa_id)
-
-    empresa, inst_name, inst_id = _resolve_empresa_e_instancia(
-        db,
-        empresa_id=efetiva_empresa_id,
-        instance=body.instance,
-        instancia_id=body.instancia_id,
-        numero_norm=numero_norm,
-        allowed_inst_ids=allowed,
-    )
-    _assert_empresa_resolvida(empresa_do_token, empresa.id)
-
+    destino = _destino_e_numero_norm(body.number)[0]
     payload = {
         "number": destino,
         "sticker": body.sticker,
@@ -1264,103 +1228,16 @@ async def send_sticker(
     }
     payload = {k: v for k, v in payload.items() if v is not None}
 
-    evo = _evo_post("/message/sendSticker", inst_name, payload)
-    evo_msg_id = ((evo or {}).get("key") or {}).get("id")
-
-    ack_now = _ack_from_send_success()
-    conteudo = "[Figurinha]"
-
-    if is_group:
-        ts = _ts_seconds_from_evo(evo)
-        ts_iso = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(timespec="microseconds")
-
-        grp = None
-        if body.cliente_id is not None:
-            try:
-                grp = (
-                    db.query(models.Grupo)
-                    .filter(models.Grupo.empresa_id == int(empresa.id), models.Grupo.id == int(body.cliente_id))
-                    .first()
-                )
-                if grp and str(getattr(grp, "remote_jid", "")).lower() != str(destino).lower():
-                    grp = None
-            except Exception:
-                grp = None
-
-        if not grp:
-            grp = _get_or_create_grupo(db, empresa=empresa, remote_jid=destino, instancia_id=inst_id)
-
-        msg_g = _insert_msg_saida_grupo(
-            db,
-            empresa=empresa,
-            grupo=grp,
-            conteudo=conteudo,
-            msg_id=evo_msg_id,
-            instancia_id=inst_id,
-            ts_seconds=ts,
-            ack=ack_now,
-            message_type="sticker",
-        )
-
-        await _broadcast_msg_saida_grupo(
-            empresa=empresa,
-            grupo=grp,
-            conteudo=conteudo,
-            timestamp_iso=ts_iso,
-            msg_id=evo_msg_id or str(getattr(msg_g, "id", "")),
-            instancia_id=inst_id,
-            instance_name=inst_name,
-            atendente_nome=atendente_nome,
-            ack=ack_now,
-        )
-        return {
-            "evolution": evo,
-            "db": {
-                "mensagem_grupo_id": getattr(msg_g, "id", None),
-                "grupo_id": getattr(grp, "id", None),
-                "instancia_id": inst_id,
-            },
-            "instance_name": inst_name,
-        }
-
-    cliente = None
-    if body.cliente_id is not None:
-        cliente = (
-            db.query(models.Cliente)
-            .filter(models.Cliente.empresa_id == empresa.id, models.Cliente.id == int(body.cliente_id))
-            .first()
-        )
-    if not cliente and numero_norm:
-        cliente = _get_or_create_cliente(db, empresa, numero_norm)
-    if not cliente:
-        return {"evolution": evo, "db": None, "instance_name": inst_name}
-
-    msg = _insert_msg_saida(
-        db,
-        empresa=empresa,
-        cliente=cliente,
-        conteudo=conteudo,
-        msg_id=evo_msg_id,
-        instancia_id=inst_id,
-        ack=ack_now,
+    return await _send_core(
+        body=body,
+        db=db,
+        identity=identity,
+        evo_path="/message/sendSticker",
+        evo_payload=payload,
+        conteudo_persistido="[Figurinha]",
+        group_message_type="sticker",
+        midias=None,
     )
-
-    await _broadcast_msg_saida_cliente(
-        empresa=empresa,
-        cliente=cliente,
-        conteudo=msg.conteudo,
-        timestamp_iso=msg.timestamp.isoformat(timespec="microseconds"),
-        msg_id=msg.msg_id or str(msg.id),
-        instancia_id=msg.instancia_id,
-        instance_name=inst_name,
-        atendente_nome=atendente_nome,
-        ack=ack_now,
-    )
-    return {
-        "evolution": evo,
-        "db": {"mensagem_id": msg.id, "cliente_id": cliente.id, "instancia_id": inst_id},
-        "instance_name": inst_name,
-    }
 
 
 @router.post("/send/contact")
@@ -1369,125 +1246,22 @@ async def send_contact(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    _ensure_perm(identity, "atendimento.enviar")
-    _dbg_json("SEND/CONTACT body(recebido)=", body.model_dump(exclude_none=True))
-
-    destino, numero_norm, is_group = _destino_e_numero_norm(body.number)
-    if not destino:
-        raise HTTPException(400, "Número/JID inválido.")
-
-    empresa_do_token, atendente_nome = _identity_ctx(identity)
-    allowed = _allowed_instancia_ids(db, identity, empresa_do_token)
-    efetiva_empresa_id = _assert_mesma_empresa(empresa_do_token, body.empresa_id)
-
-    empresa, inst_name, inst_id = _resolve_empresa_e_instancia(
-        db,
-        empresa_id=efetiva_empresa_id,
-        instance=body.instance,
-        instancia_id=body.instancia_id,
-        numero_norm=numero_norm,
-        allowed_inst_ids=allowed,
-    )
-    _assert_empresa_resolvida(empresa_do_token, empresa.id)
-
-    payload = {"number": destino, "contact": [c.model_dump(exclude_none=True) for c in body.contact]}
-    evo = _evo_post("/message/sendContact", inst_name, payload)
-    evo_msg_id = ((evo or {}).get("key") or {}).get("id")
-
-    ack_now = _ack_from_send_success()
-    conteudo = "[Contato]"
-
-    if is_group:
-        ts = _ts_seconds_from_evo(evo)
-        ts_iso = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(timespec="microseconds")
-
-        grp = None
-        if body.cliente_id is not None:
-            try:
-                grp = (
-                    db.query(models.Grupo)
-                    .filter(models.Grupo.empresa_id == int(empresa.id), models.Grupo.id == int(body.cliente_id))
-                    .first()
-                )
-                if grp and str(getattr(grp, "remote_jid", "")).lower() != str(destino).lower():
-                    grp = None
-            except Exception:
-                grp = None
-
-        if not grp:
-            grp = _get_or_create_grupo(db, empresa=empresa, remote_jid=destino, instancia_id=inst_id)
-
-        msg_g = _insert_msg_saida_grupo(
-            db,
-            empresa=empresa,
-            grupo=grp,
-            conteudo=conteudo,
-            msg_id=evo_msg_id,
-            instancia_id=inst_id,
-            ts_seconds=ts,
-            ack=ack_now,
-            message_type="contact",
-        )
-
-        await _broadcast_msg_saida_grupo(
-            empresa=empresa,
-            grupo=grp,
-            conteudo=conteudo,
-            timestamp_iso=ts_iso,
-            msg_id=evo_msg_id or str(getattr(msg_g, "id", "")),
-            instancia_id=inst_id,
-            instance_name=inst_name,
-            atendente_nome=atendente_nome,
-            ack=ack_now,
-        )
-        return {
-            "evolution": evo,
-            "db": {
-                "mensagem_grupo_id": getattr(msg_g, "id", None),
-                "grupo_id": getattr(grp, "id", None),
-                "instancia_id": inst_id,
-            },
-            "instance_name": inst_name,
-        }
-
-    cliente = None
-    if body.cliente_id is not None:
-        cliente = (
-            db.query(models.Cliente)
-            .filter(models.Cliente.empresa_id == empresa.id, models.Cliente.id == int(body.cliente_id))
-            .first()
-        )
-    if not cliente and numero_norm:
-        cliente = _get_or_create_cliente(db, empresa, numero_norm)
-    if not cliente:
-        return {"evolution": evo, "db": None, "instance_name": inst_name}
-
-    msg = _insert_msg_saida(
-        db,
-        empresa=empresa,
-        cliente=cliente,
-        conteudo=conteudo,
-        msg_id=evo_msg_id,
-        instancia_id=inst_id,
-        ack=ack_now,
-    )
-
-    await _broadcast_msg_saida_cliente(
-        empresa=empresa,
-        cliente=cliente,
-        conteudo=msg.conteudo,
-        timestamp_iso=msg.timestamp.isoformat(timespec="microseconds"),
-        msg_id=msg.msg_id or str(msg.id),
-        instancia_id=msg.instancia_id,
-        instance_name=inst_name,
-        atendente_nome=atendente_nome,
-        ack=ack_now,
-    )
-    return {
-        "evolution": evo,
-        "db": {"mensagem_id": msg.id, "cliente_id": cliente.id, "instancia_id": inst_id},
-        "instance_name": inst_name,
+    destino = _destino_e_numero_norm(body.number)[0]
+    payload = {
+        "number": destino,
+        "contact": [c.model_dump(exclude_none=True) for c in body.contact],
     }
+
+    return await _send_core(
+        body=body,
+        db=db,
+        identity=identity,
+        evo_path="/message/sendContact",
+        evo_payload=payload,
+        conteudo_persistido="[Contato]",
+        group_message_type="contact",
+        midias=None,
+    )
 
 
 @router.post("/send/reaction")
@@ -1496,22 +1270,22 @@ async def send_reaction(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    _ensure_perm(identity, "atendimento.reagir")
+    ensure_perm(identity, "atendimento.reagir")
     _dbg_json("SEND/REACTION body(recebido)=", body.model_dump(exclude_none=True))
 
     empresa_do_token, _ = _identity_ctx(identity)
-    allowed = _allowed_instancia_ids(db, identity, empresa_do_token)
-    efetiva_empresa_id = _assert_mesma_empresa(empresa_do_token, body.empresa_id)
+    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_do_token)
+    allowed = acl_ctx["allowed_instancias"]
+    efetiva_empresa_id = assert_same_company(identity, body.empresa_id)
 
     if not (body.instance or body.instancia_id):
-        raise HTTPException(400, "Para reação, informe 'instance' (nome) ou 'instancia_id'.")
+        raise HTTPException(400, "Para reação, informe 'instance' ou 'instancia_id'.")
 
     empresa, inst_name, inst_id = _resolve_empresa_e_instancia(
         db,
         empresa_id=efetiva_empresa_id,
         instance=body.instance,
         instancia_id=body.instancia_id,
-        numero_norm=None,
         allowed_inst_ids=allowed,
     )
     _assert_empresa_resolvida(empresa_do_token, empresa.id)
@@ -1521,6 +1295,7 @@ async def send_reaction(
 
     conversa_id: Optional[int] = None
     is_group: bool = False
+    conversation_key: Optional[str] = None
 
     try:
         msg = (
@@ -1533,8 +1308,22 @@ async def send_reaction(
             if allowed is not None and msg.instancia_id not in set(int(x) for x in (allowed or [])):
                 msg = None
             if msg:
+                try:
+                    assert_cliente_access(
+                        db,
+                        identity=identity,
+                        empresa_id=int(empresa.id),
+                        cliente_id=int(msg.cliente_id),
+                        instancia_id=getattr(msg, "instancia_id", None),
+                        allow_unassigned_department=False,
+                    )
+                except HTTPException:
+                    msg = None
+
+            if msg:
                 conversa_id = int(msg.cliente_id)
                 is_group = False
+                conversation_key = _conv_ref_cliente(int(msg.cliente_id), getattr(msg, "instancia_id", None))
 
         if conversa_id is None:
             mg = (
@@ -1549,14 +1338,7 @@ async def send_reaction(
                 if mg:
                     conversa_id = int(getattr(mg, "grupo_id", None) or 0) or None
                     is_group = True
-
-        if conversa_id is None and body.key.remoteJid:
-            num = _remote_to_num(body.key.remoteJid)
-            if num:
-                cli = db.query(models.Cliente).filter_by(empresa_id=int(empresa.id), telefone=num).first()
-                if cli:
-                    conversa_id = int(cli.id)
-                    is_group = False
+                    conversation_key = _conv_ref_grupo(int(conversa_id), getattr(mg, "instancia_id", None))
     except Exception:
         pass
 
@@ -1566,6 +1348,8 @@ async def send_reaction(
             {
                 "type": "reaction",
                 "cliente_id": int(conversa_id),
+                "conversation_id": conversation_key,
+                "conversation_key": conversation_key,
                 "is_group": bool(is_group),
                 "msg_id": body.key.id,
                 "reaction": body.reaction,
@@ -1576,13 +1360,20 @@ async def send_reaction(
             },
         )
 
-    return {"evolution": evo, "cliente_id": conversa_id, "instancia_id": inst_id, "instance_name": inst_name, "is_group": is_group}
+    return {
+        "evolution": evo,
+        "cliente_id": conversa_id,
+        "conversation_id": conversation_key,
+        "instancia_id": inst_id,
+        "instance_name": inst_name,
+        "is_group": is_group,
+    }
 
 
-# ========= Rotas alternativas com instância explícita na URL =========
+# ========= Rotas alternativas =========
 @router.post("/instance/{instance}/send/text")
 async def send_text_by_instance(
-    instance: str = Path(..., description="Nome da instância Evolution"),
+    instance: str = Path(...),
     body: SendTextReq = Body(...),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
@@ -1594,7 +1385,7 @@ async def send_text_by_instance(
 
 @router.post("/instancia/{instancia_id}/send/text")
 async def send_text_by_instancia_id(
-    instancia_id: int = Path(..., description="ID da instância (empresas_instancias.id)"),
+    instancia_id: int = Path(...),
     body: SendTextReq = Body(...),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
@@ -1606,7 +1397,7 @@ async def send_text_by_instancia_id(
 
 @router.post("/instance/{instance}/send/audio")
 async def send_audio_by_instance(
-    instance: str = Path(..., description="Nome da instância Evolution"),
+    instance: str = Path(...),
     body: SendAudioReq = Body(...),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
@@ -1618,7 +1409,7 @@ async def send_audio_by_instance(
 
 @router.post("/instancia/{instancia_id}/send/audio")
 async def send_audio_by_instancia_id(
-    instancia_id: int = Path(..., description="ID da instância (empresas_instancias.id)"),
+    instancia_id: int = Path(...),
     body: SendAudioReq = Body(...),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
@@ -1630,7 +1421,7 @@ async def send_audio_by_instancia_id(
 
 @router.post("/instance/{instance}/send/media")
 async def send_media_by_instance(
-    instance: str = Path(..., description="Nome da instância Evolution"),
+    instance: str = Path(...),
     body: SendMediaReq = Body(...),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
@@ -1642,7 +1433,7 @@ async def send_media_by_instance(
 
 @router.post("/instancia/{instancia_id}/send/media")
 async def send_media_by_instancia_id(
-    instancia_id: int = Path(..., description="ID da instância (empresas_instancias.id)"),
+    instancia_id: int = Path(...),
     body: SendMediaReq = Body(...),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
@@ -1654,7 +1445,7 @@ async def send_media_by_instancia_id(
 
 @router.post("/instance/{instance}/send/sticker")
 async def send_sticker_by_instance(
-    instance: str = Path(..., description="Nome da instância Evolution"),
+    instance: str = Path(...),
     body: SendStickerReq = Body(...),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
@@ -1666,7 +1457,7 @@ async def send_sticker_by_instance(
 
 @router.post("/instancia/{instancia_id}/send/sticker")
 async def send_sticker_by_instancia_id(
-    instancia_id: int = Path(..., description="ID da instância (empresas_instancias.id)"),
+    instancia_id: int = Path(...),
     body: SendStickerReq = Body(...),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
@@ -1678,7 +1469,7 @@ async def send_sticker_by_instancia_id(
 
 @router.post("/instance/{instance}/send/contact")
 async def send_contact_by_instance(
-    instance: str = Path(..., description="Nome da instância Evolution"),
+    instance: str = Path(...),
     body: SendContactReq = Body(...),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
@@ -1690,7 +1481,7 @@ async def send_contact_by_instance(
 
 @router.post("/instancia/{instancia_id}/send/contact")
 async def send_contact_by_instancia_id(
-    instancia_id: int = Path(..., description="ID da instância (empresas_instancias.id)"),
+    instancia_id: int = Path(...),
     body: SendContactReq = Body(...),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
@@ -1702,7 +1493,7 @@ async def send_contact_by_instancia_id(
 
 @router.post("/instance/{instance}/send/reaction")
 async def send_reaction_by_instance(
-    instance: str = Path(..., description="Nome da instância Evolution"),
+    instance: str = Path(...),
     body: SendReactionReq = Body(...),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
@@ -1714,7 +1505,7 @@ async def send_reaction_by_instance(
 
 @router.post("/instancia/{instancia_id}/send/reaction")
 async def send_reaction_by_instancia_id(
-    instancia_id: int = Path(..., description="ID da instância (empresas_instancias.id)"),
+    instancia_id: int = Path(...),
     body: SendReactionReq = Body(...),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),

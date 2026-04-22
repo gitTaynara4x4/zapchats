@@ -1,25 +1,125 @@
+// /frontend/js/atendimentos/domain/instances.js
 // Instância ativa (chips do header) + helpers de filtro — ES Module
 
 export let INSTANCIA_ATIVA = null;
 
-// --- persistência por empresa ---
+/* =========================
+   Persistência por empresa
+   ========================= */
+
+function empresaIdLS() {
+  return Number(localStorage.getItem('empresa_id') || 0) || 0;
+}
+
 function keyLS() {
-  const emp = Number(localStorage.getItem('empresa_id') || 0);
+  const emp = empresaIdLS();
   return emp ? `instAtiva:${emp}` : null;
 }
-function loadFromLS(){
-  const k = keyLS(); if (!k) return null;
-  const v = localStorage.getItem(k) || '';
-  return v ? String(v) : null;
-}
-function saveToLS(v){
-  const k = keyLS(); if (!k) return;
-  try { localStorage.setItem(k, v ? String(v) : ''); } catch {}
-}
-// carrega ao importar
-INSTANCIA_ATIVA = loadFromLS();
 
-// -------- util: extrai instância de um objeto cliente --------
+function normInst(v) {
+  const s = String(v ?? '').trim();
+  if (!s || s === 'null' || s === 'undefined') return null;
+  return s;
+}
+
+function loadFromLS() {
+  const k = keyLS();
+  if (!k) return null;
+  try {
+    return normInst(localStorage.getItem(k));
+  } catch {
+    return null;
+  }
+}
+
+function saveToLS(v) {
+  const k = keyLS();
+  if (!k) return;
+  try {
+    const n = normInst(v);
+    if (n) localStorage.setItem(k, n);
+    else localStorage.removeItem(k);
+  } catch {}
+}
+
+function syncWindowInstancia() {
+  try {
+    window.INSTANCIA_ATIVA = INSTANCIA_ATIVA;
+  } catch {}
+}
+
+/* carrega ao importar */
+INSTANCIA_ATIVA = loadFromLS();
+syncWindowInstancia();
+
+/* =========================
+   Lista de instâncias
+   ========================= */
+
+function getInstanciasList() {
+  try {
+    const arr =
+      window.ZC_INSTANCIAS ||
+      window.INSTANCIAS ||
+      window.state?.instancias ||
+      [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function getInstCandidates(raw) {
+  const v = normInst(raw);
+  if (!v) return [];
+
+  const out = new Set();
+  out.add(v);
+  out.add(v.toLowerCase());
+
+  const list = getInstanciasList();
+
+  const found =
+    list.find((x) => String(x?.instancia_id ?? x?.id ?? x?.instance_id ?? '') === v) ||
+    list.find((x) => String(x?.instance_name ?? '').toLowerCase() === v.toLowerCase()) ||
+    list.find((x) => String(x?.instancia ?? '').toLowerCase() === v.toLowerCase()) ||
+    list.find((x) => String(x?.slug ?? '').toLowerCase() === v.toLowerCase()) ||
+    list.find((x) => String(x?.nome ?? '').toLowerCase() === v.toLowerCase());
+
+  if (found) {
+    const vals = [
+      found?.instancia_id,
+      found?.id,
+      found?.instance_id,
+      found?.instance_name,
+      found?.instancia,
+      found?.slug,
+      found?.nome,
+    ];
+
+    vals.forEach((item) => {
+      const s = normInst(item);
+      if (!s) return;
+      out.add(s);
+      out.add(s.toLowerCase());
+    });
+  }
+
+  return [...out];
+}
+
+function sameInst(a, b) {
+  const A = getInstCandidates(a);
+  const B = getInstCandidates(b);
+
+  if (!A.length || !B.length) return false;
+  return A.some((x) => B.includes(x));
+}
+
+/* =========================
+   Extrai instância de um cliente/objeto
+   ========================= */
+
 export function getClienteInst(c) {
   return (
     c?.instancia_id ??
@@ -27,6 +127,7 @@ export function getClienteInst(c) {
     c?.instancia_slug ??
     c?.instance_id ??
     c?.instance ??
+    c?.instance_name ??
     c?.session ??
     c?.sessionName ??
     c?.sessao ??
@@ -35,90 +136,201 @@ export function getClienteInst(c) {
   );
 }
 
-// -------- match por instância ativa (para listas) --------
+/* =========================
+   Match por instância ativa
+   ========================= */
+
 export function matchInstancia(c) {
   if (!INSTANCIA_ATIVA) return true;
+
   const v = getClienteInst(c);
-  if (v == null || v === '') return true; // se servidor já filtrou, não sumir item sem campo
-  return String(v).toLowerCase() === String(INSTANCIA_ATIVA).toLowerCase();
+  if (v == null || v === '') return true; // não sumir se backend já filtrou
+
+  return sameInst(v, INSTANCIA_ATIVA);
 }
 
-// -------- helper de querystring (para GETs) --------
+/* =========================
+   Querystring / payload
+   ========================= */
+
 export function instQuery() {
   if (!INSTANCIA_ATIVA) return '';
-  const enc = encodeURIComponent(String(INSTANCIA_ATIVA));
-  // servidor pode aceitar instance_name (string) OU instancia_id (numérico):
-  const isNum = /^\d+$/.test(String(INSTANCIA_ATIVA));
-  return isNum ? `&instancia_id=${enc}` : `&instance=${enc}`;
+
+  const v = String(INSTANCIA_ATIVA);
+  const enc = encodeURIComponent(v);
+
+  if (/^\d+$/.test(v)) {
+    return `&instancia_id=${enc}`;
+  }
+
+  return `&instance=${enc}`;
 }
 
-// -------- helper de payload (para POSTs) --------
 export function instPayload() {
   if (!INSTANCIA_ATIVA) return {};
+
   const v = String(INSTANCIA_ATIVA);
-  return /^\d+$/.test(v) ? { instancia_id: Number(v) } : { instance: v };
+  return /^\d+$/.test(v)
+    ? { instancia_id: Number(v) }
+    : { instance: v };
 }
 
-// -------- troca instância ativa + limpa caches --------
-export async function setInstanciaAtiva(idOuSlug) {
-  INSTANCIA_ATIVA = (idOuSlug && String(idOuSlug).trim()) || null;
-  saveToLS(INSTANCIA_ATIVA);
+/* =========================
+   UI dos chips
+   ========================= */
 
+function getChipValue(el) {
+  return normInst(
+    el?.getAttribute('data-inst') ||
+    el?.getAttribute('data-inst-id') ||
+    el?.getAttribute('data-instancia') ||
+    ''
+  );
+}
+
+function markActiveChips() {
+  document.querySelectorAll('[data-inst],[data-inst-id],[data-instancia]').forEach((el) => {
+    const val = getChipValue(el);
+    const active = !INSTANCIA_ATIVA
+      ? !val
+      : sameInst(val, INSTANCIA_ATIVA);
+
+    el.classList.toggle('active', !!active);
+    el.classList.toggle('selected', !!active);
+    el.classList.toggle('is-active', !!active);
+    el.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+}
+
+/* =========================
+   Limpeza de cache
+   ========================= */
+
+function clearAtendimentoCaches() {
   try { window.cacheDel?.(`clientes:${window.EMPRESA_ID}`); } catch {}
   try { window.cacheDel?.(`contatos:${window.EMPRESA_ID}`); } catch {}
-  window.clientesCache = [];
-  window.todosContatosCache = [];
-  window.cacheHistoricos = {};
-  window.salvarCache?.();
 
-  // marca chip ativo (para elementos que usam data-attrs)
-  document.querySelectorAll('[data-inst],[data-inst-id],[data-instancia]').forEach(el => {
-    const val = el.getAttribute('data-inst') ||
-                el.getAttribute('data-inst-id') ||
-                el.getAttribute('data-instancia') || '';
-    const active = String(val || '').toLowerCase() === String(INSTANCIA_ATIVA || '').toLowerCase();
-    el.classList.toggle('active', active);
-    el.classList.toggle('selected', active);
-  });
+  try { window.clientesCache = []; } catch {}
+  try { window.todosContatosCache = []; } catch {}
+  try { window.cacheHistoricos = {}; } catch {}
 
-  // notifica módulos
-  document.dispatchEvent(new CustomEvent('inst:change', { detail:{ id: INSTANCIA_ATIVA }}));
+  try {
+    if (window.state) {
+      window.state.clientesCache = [];
+      window.state.todosContatosCache = [];
+      window.state.cacheHistoricos = {};
+      window.state.nextCursor = null;
+    }
+  } catch {}
 
-  // força recarregar listas
-  await window.carregarClientes?.({ force: true, reason: 'instancia' });
-  await window.carregarTodosContatos?.();
+  try { window.salvarCache?.(); } catch {}
+  try { window.persist?.(); } catch {}
 }
 
-// -------- liga os chips do header --------
-export function wireInstanciaChips() {
-  document.querySelectorAll('[data-inst],[data-inst-id],[data-instancia]').forEach(el => {
-    el.addEventListener('click', () => {
-      const val = el.getAttribute('data-inst') ||
-                  el.getAttribute('data-inst-id') ||
-                  el.getAttribute('data-instancia') || '';
+/* =========================
+   Troca instância ativa
+   ========================= */
+
+export async function setInstanciaAtiva(idOuSlug, opt = {}) {
+  const next = normInst(idOuSlug);
+  const prev = INSTANCIA_ATIVA;
+
+  INSTANCIA_ATIVA = next;
+  saveToLS(INSTANCIA_ATIVA);
+  syncWindowInstancia();
+
+  markActiveChips();
+
+  const changed = !sameInst(prev, INSTANCIA_ATIVA) || (!prev && !!INSTANCIA_ATIVA) || (!!prev && !INSTANCIA_ATIVA);
+
+  try {
+    document.dispatchEvent(new CustomEvent('inst:change', {
+      detail: { id: INSTANCIA_ATIVA, value: INSTANCIA_ATIVA }
+    }));
+  } catch {}
+
+  if (!changed) return INSTANCIA_ATIVA;
+
+  clearAtendimentoCaches();
+
+  if (opt.reload !== false) {
+    try { await window.carregarClientes?.({ force: true, reason: 'instancia' }); } catch {}
+    try { await window.carregarTodosContatos?.(); } catch {}
+  }
+
+  return INSTANCIA_ATIVA;
+}
+
+/* =========================
+   Bind dos chips
+   ========================= */
+
+export function wireInstanciaChips(root = document) {
+  root.querySelectorAll('[data-inst],[data-inst-id],[data-instancia]').forEach((el) => {
+    if (el.dataset.instBound === '1') return;
+    el.dataset.instBound = '1';
+
+    const onPick = () => {
+      const val = getChipValue(el);
       setInstanciaAtiva(val || null);
+    };
+
+    el.addEventListener('click', onPick);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onPick();
+      }
     });
   });
+
+  markActiveChips();
 }
 
-// ---- Aliases de compat ----
+/* =========================
+   Compat / aliases
+   ========================= */
+
 export { instQuery as _instQuery, matchInstancia as _matchInstancia, getClienteInst as _getClienteInst };
 
-// ---- Bridge p/ window ----
+/* =========================
+   Bridge p/ window
+   ========================= */
+
 try {
   if (typeof window !== 'undefined') {
     window._instQuery = instQuery;
     window._matchInstancia = matchInstancia;
+    window._getClienteInst = getClienteInst;
+    window.instPayload = instPayload;
     window.setInstanciaAtiva = setInstanciaAtiva;
     window.wireInstanciaChips = wireInstanciaChips;
-    window.instPayload = instPayload;
 
-    if (!Object.getOwnPropertyDescriptor(window, 'INSTANCIA_ATIVA')) {
-      Object.defineProperty(window, 'INSTANCIA_ATIVA', {
-        get() { return INSTANCIA_ATIVA; },
-        set(v) { INSTANCIA_ATIVA = v == null ? null : String(v); saveToLS(INSTANCIA_ATIVA); },
-        configurable: true
-      });
-    }
+    Object.defineProperty(window, 'INSTANCIA_ATIVA', {
+      get() {
+        return INSTANCIA_ATIVA;
+      },
+      set(v) {
+        INSTANCIA_ATIVA = normInst(v);
+        saveToLS(INSTANCIA_ATIVA);
+        markActiveChips();
+      },
+      configurable: true
+    });
   }
 } catch {}
+
+/* =========================
+   Boot
+   ========================= */
+
+function boot() {
+  markActiveChips();
+  wireInstanciaChips(document);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', boot, { once: true });
+} else {
+  boot();
+}

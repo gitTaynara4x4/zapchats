@@ -144,6 +144,32 @@ def _prune_for_storage(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return data
 
 
+def _mode_is_active(features: Dict[str, Any], mode: str) -> bool:
+    if not isinstance(features, dict):
+        return False
+
+    if mode == "auto":
+        auto = (features.get("auto_messages") or {}) if isinstance(features, dict) else {}
+        return bool(
+            isinstance(auto, dict)
+            and auto.get("enabled", False)
+            and (
+                bool((auto.get("welcome") or {}).get("enabled", False))
+                or bool((auto.get("off_hours") or {}).get("enabled", False))
+            )
+        )
+
+    if mode == "dept":
+        dept = (features.get("auto_messages_departments") or {}) if isinstance(features, dict) else {}
+        return bool(
+            isinstance(dept, dict)
+            and dept.get("enabled", False)
+            and bool((dept.get("welcome") or {}).get("enabled", False))
+        )
+
+    return False
+
+
 def _safe_select_chatbot_config(db: Session, empresa_id: int, instancia_id: int):
     try:
         return db.execute(
@@ -255,7 +281,6 @@ def get_config(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    # leitura continua permitida
     if int(user.empresa_id) != int(empresa_id):
         raise HTTPException(status_code=403, detail="Empresa não permitida")
 
@@ -360,14 +385,12 @@ def put_config(
 
     empresa = db.get(models.Empresa, empresa_id)
     if empresa:
-        # automação básica: exige feature_automation e também bloqueia se venceu
         enforce_feature(
             empresa,
             "feature_automation",
             message="Seu plano não permite automações ou está vencido. Renove para continuar.",
         )
 
-        # automação por departamentos: trata como avançada
         if _has_advanced_automation_usage(cfg_in):
             enforce_feature(
                 empresa,
@@ -378,19 +401,17 @@ def put_config(
     to_store = _prune_for_storage(cfg_in)
 
     features = (to_store.get("features") or {}) if isinstance(to_store, dict) else {}
+    auto_active = _mode_is_active(features, "auto")
+    dept_active = _mode_is_active(features, "dept")
 
-    auto = (features.get("auto_messages") or {}) if isinstance(features, dict) else {}
-    dept = (features.get("auto_messages_departments") or {}) if isinstance(features, dict) else {}
-
-    auto_enabled = bool(auto.get("enabled", False))
-    auto_welcome_enabled = bool((auto.get("welcome") or {}).get("enabled", False))
-    auto_off_enabled = bool((auto.get("off_hours") or {}).get("enabled", False))
-
-    dept_enabled = bool(dept.get("enabled", False))
-    dept_welcome_enabled = bool((dept.get("welcome") or {}).get("enabled", False))
-
-    auto_active = auto_enabled and (auto_welcome_enabled or auto_off_enabled)
-    dept_active = dept_enabled and dept_welcome_enabled
+    if auto_active and dept_active:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Mensagens automáticas e triagem por departamento não podem ficar ativas ao mesmo tempo para a mesma instância.",
+                "code": "CHATBOT_MODE_CONFLICT",
+            },
+        )
 
     computed_ativo = bool(auto_active or dept_active)
 

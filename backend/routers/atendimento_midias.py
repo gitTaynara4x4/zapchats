@@ -30,7 +30,7 @@ HEADERS = {"apikey": EVOLUTION_KEY, "Content-Type": "application/json"} if EVOLU
 # =========================
 # Cache de arquivos (env)
 # =========================
-MEDIA_CACHE_DIR = os.getenv("MEDIA_CACHE_DIR", "/var/cache/zapchats/media")
+MEDIA_CACHE_DIR = os.getenv("MEDIA_CACHE_DIR", "/var/cache/zapschat/media")
 os.makedirs(MEDIA_CACHE_DIR, exist_ok=True)
 
 # ⚠️ mídia é recurso autenticado → evite cache público/proxy

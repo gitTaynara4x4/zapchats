@@ -1,0 +1,586 @@
+/* =========================
+   PERFIL QUICK
+   ========================= */
+
+#btn-perfil{
+  width:22px;
+  height:22px;
+  display:inline-grid;
+  place-items:center;
+  margin-left:4px;
+  padding:0;
+  line-height:0;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  color:inherit;
+  cursor:pointer;
+  transition:background .15s, transform .08s, color .15s;
+}
+
+#btn-perfil:hover{
+  background:rgba(255,255,255,.06);
+}
+
+html[data-theme="light"] #btn-perfil:hover{
+  background:rgba(0,0,0,.06);
+}
+
+#btn-perfil:active{
+  transform:translateY(1px);
+}
+
+#btn-perfil:focus-visible{
+  outline:2px solid color-mix(in oklab, var(--accent,#25d366) 40%, transparent);
+  outline-offset:2px;
+}
+
+#btn-perfil .perfil-ico{
+  width:24px;
+  height:24px;
+  transform:translateY(1px);
+  filter:drop-shadow(0 0 5px rgba(168,85,247,.5));
+}
+
+.qcBackdrop{
+  position:fixed;
+  inset:0;
+  z-index:9998;
+  background:rgba(0,0,0,.42);
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .18s;
+}
+
+.qcBackdrop.is-open{
+  opacity:1;
+  pointer-events:auto;
+}
+
+.qcDrawer{
+  position:fixed;
+  top:0;
+  right:0;
+  z-index:9999;
+  width:min(420px,94vw);
+  height:100vh;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  background:var(--panel-2,#1f2c33);
+  color:var(--text,#e9edef);
+  border-left:1px solid color-mix(in oklab, var(--border) 72%, transparent);
+  box-shadow:-18px 0 42px rgba(0,0,0,.18);
+  transform:translateX(100%);
+  transition:transform .18s ease;
+  pointer-events:none;
+}
+
+.qcDrawer.is-open{
+  transform:translateX(0);
+  pointer-events:auto;
+}
+
+.qcHead{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:12px 14px;
+  border-bottom:1px solid var(--border,#26343a);
+}
+
+.qcTitle{
+  font-size:16px;
+  font-weight:600;
+}
+
+.qcClose{
+  padding:6px;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  color:#aebac1;
+  cursor:pointer;
+}
+
+.qcClose:hover{
+  color:#fff;
+  background:#233238;
+}
+
+.qcBody{
+  padding:14px;
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+  overflow:auto;
+}
+
+.qcHero{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+
+.qcHero .avatar,
+.qcAvatarFallback{
+  width:64px;
+  height:64px;
+  flex:0 0 64px;
+  border-radius:50%;
+  overflow:hidden;
+  border:1px solid var(--border,#2a3942);
+  background:#0b141a;
+}
+
+.qcHero .avatar{
+  object-fit:cover;
+}
+
+.qcAvatarFallback{
+  display:grid;
+  place-items:center;
+  font-size:42px;
+  color:#9aa7ad;
+}
+
+html[data-theme="light"] .qcAvatarFallback{
+  color:#6b7280;
+}
+
+.qcHero .info{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+
+.qcName{
+  font-size:16px;
+  font-weight:700;
+  line-height:1.25;
+  word-break:break-word;
+}
+
+.qcPhone{
+  font-size:12px;
+  color:#9aa7ad;
+  word-break:break-all;
+}
+
+.qcBadge{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  width:max-content;
+  max-width:100%;
+  padding:3px 8px;
+  border:1px solid #2a3942;
+  border-radius:999px;
+  font-size:12px;
+  color:#9aa7ad;
+}
+
+html[data-theme="light"] .qcBadge{
+  border-color:#dadde0;
+  color:#4b5563;
+}
+
+.qcCard{
+  padding:10px 12px;
+  border:1px solid var(--border,#2a3942);
+  border-radius:12px;
+  background:var(--panel-1,#0b141a);
+}
+
+html[data-theme="light"] .qcCard{
+  background:#fff;
+  border-color:#dadde0;
+}
+
+.qcCard .label{
+  margin-bottom:6px;
+  font-size:12px;
+  color:#9aa7ad;
+}
+
+.qcCard .content{
+  font-size:13.5px;
+  line-height:1.35;
+  white-space:pre-wrap;
+  word-break:break-word;
+}
+
+.qcRow{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.qcLink{
+  color:var(--accent,#25d366);
+  text-decoration:none;
+  font-weight:600;
+}
+
+.qcLink:hover{
+  text-decoration:underline;
+}
+
+.qcSkeleton{
+  border-radius:8px;
+  background:linear-gradient(
+    90deg,
+    rgba(255,255,255,.06),
+    rgba(255,255,255,.14),
+    rgba(255,255,255,.06)
+  );
+  background-size:200% 100%;
+  animation:qc-shimmer 1.2s infinite;
+}
+
+.qcSk-name{
+  width:180px;
+  height:16px;
+}
+
+.qcSk-line{
+  width:80%;
+  height:12px;
+}
+
+.qcSk-line--120{
+  width:120px;
+}
+
+@keyframes qc-shimmer{
+  0%{ background-position:200% 0; }
+  100%{ background-position:-200% 0; }
+}
+
+.qcLabel--mt6{
+  margin-top:6px;
+}
+
+.qcContent--mb8{
+  margin-bottom:8px;
+}
+
+/* =========================
+   PERFIL COMPLETO
+   ========================= */
+
+.zcPerfil-backdrop{
+  position:fixed;
+  inset:0;
+  z-index:9998;
+  background:rgba(0,0,0,.42);
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .18s;
+}
+
+.zcPerfil-backdrop.is-open{
+  opacity:1;
+  pointer-events:auto;
+}
+
+.zcPerfil-drawer{
+  position:fixed;
+  top:0;
+  right:0;
+  z-index:9999;
+  width:min(520px,96vw);
+  height:100vh;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  box-sizing:border-box;
+  background:var(--panel-2,#1f2c33);
+  color:var(--text,#e9edef);
+  border-left:1px solid color-mix(in oklab, var(--border) 72%, transparent);
+  box-shadow:-18px 0 42px rgba(0,0,0,.18);
+  transform:translateX(100%);
+  transition:transform .18s ease;
+  pointer-events:none;
+}
+
+.zcPerfil-drawer.is-open{
+  transform:translateX(0);
+  pointer-events:auto;
+}
+
+.zcPerfil-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:12px 16px;
+  border-bottom:1px solid var(--border,#26343a);
+}
+
+.zcPerfil-title{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:16px;
+  font-weight:600;
+  line-height:1.2;
+}
+
+.zcPerfil-close{
+  padding:6px;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  color:#aebac1;
+  cursor:pointer;
+}
+
+.zcPerfil-close:hover{
+  color:#fff;
+  background:#233238;
+}
+
+.zcPerfil-body{
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  padding:16px;
+  overflow:auto;
+  box-sizing:border-box;
+}
+
+.zcPerfil-banner{
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  padding:10px 12px;
+  border:1px solid rgba(168,85,247,.38);
+  border-left:2px solid var(--accent,#25d366);
+  border-radius:10px;
+  background:color-mix(in oklab, var(--panel-2,#1f2c33) 88%, transparent);
+  font-size:12.5px;
+  line-height:1.35;
+  color:var(--text-2,#aebac1);
+}
+
+.zcPerfil-banner .b-ico{
+  flex:0 0 auto;
+  display:grid;
+  place-items:center;
+  transform:translateY(1px);
+}
+
+.zcPerfil-banner .b-msg{
+  font-weight:500;
+}
+
+.zcPerfil-banner .b-tip{
+  margin-top:4px;
+  font-size:12px;
+  opacity:.95;
+}
+
+.zcPerfil-stack{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.zcPerfil-row{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:flex-end;
+  gap:10px;
+}
+
+.zcPerfil-field{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  flex:1 1 100%;
+}
+
+.zcPerfil-field label{
+  font-size:12px;
+  color:var(--text-2,#aebac1);
+}
+
+.zcPerfil-field input,
+.zcPerfil-field select{
+  width:100%;
+  box-sizing:border-box;
+  padding:10px 12px;
+  border:1px solid var(--border,#2a3942);
+  border-radius:10px;
+  background:var(--input-bg,#0b141a);
+  color:var(--text,#e9edef);
+  outline:none;
+  transition:border-color .14s, box-shadow .14s, background .14s;
+}
+
+html[data-theme="light"] .zcPerfil-field input,
+html[data-theme="light"] .zcPerfil-field select{
+  background:#fff;
+  color:#080808;
+}
+
+.zcPerfil-field input:focus,
+.zcPerfil-field select:focus{
+  border-color:var(--accent,#25d366);
+  box-shadow:0 0 0 2px color-mix(in oklab, var(--accent,#25d366) 25%, transparent);
+}
+
+.zcPerfil-field input.is-invalid,
+.zcPerfil-field select.is-invalid{
+  border-color:#ef4444 !important;
+  box-shadow:0 0 0 2px color-mix(in oklab, #ef4444 25%, transparent);
+}
+
+.zcPerfil-selectWrap{
+  position:relative;
+}
+
+.zcPerfil-selectWrap select{
+  appearance:none;
+  -webkit-appearance:none;
+  -moz-appearance:none;
+  height:42px;
+  padding:10px 34px 10px 12px;
+  color-scheme:dark;
+}
+
+html[data-theme="light"] .zcPerfil-selectWrap select{
+  color-scheme:light;
+}
+
+.zcPerfil-selectWrap::after{
+  content:"";
+  position:absolute;
+  top:50%;
+  right:12px;
+  transform:translateY(-50%);
+  width:0;
+  height:0;
+  border-left:5px solid transparent;
+  border-right:5px solid transparent;
+  border-top:6px solid #aebac1;
+  pointer-events:none;
+}
+
+.zcPerfil-selectWrap select option{
+  background:#0b141a;
+  color:#e9edef;
+}
+
+html[data-theme="light"] .zcPerfil-selectWrap select option{
+  background:#fff;
+  color:#080808;
+}
+
+/* pares compactos */
+.zcPerfil-row--datagen .field--dob{
+  flex:0 0 160px;
+  max-width:160px;
+}
+
+.zcPerfil-row--datagen .field--genero{
+  flex:1 1 180px;
+}
+
+.zcPerfil-row--cepuf .field--cep{
+  flex:0 0 160px;
+  max-width:160px;
+}
+
+.zcPerfil-row--cepuf .field--uf{
+  flex:0 0 92px;
+  max-width:92px;
+}
+
+.zcPerfil-row--numcomp .field--numero{
+  flex:0 0 120px;
+  max-width:120px;
+}
+
+.zcPerfil-row--numcomp .field--complemento{
+  flex:1 1 220px;
+}
+
+.zcPerfil-actions{
+  display:flex;
+  gap:10px;
+  margin-top:6px;
+}
+
+.zcPerfil-btnPrimary,
+.zcPerfil-btnGhost{
+  flex:1;
+  padding:10px 12px;
+  border-radius:10px;
+  cursor:pointer;
+  font-weight:600;
+  transition:filter .15s, background .15s, border-color .15s;
+}
+
+.zcPerfil-btnPrimary{
+  background:#25d366;
+  border:1px solid #1fb05a;
+  color:#061a0e;
+}
+
+.zcPerfil-btnPrimary:hover{
+  filter:brightness(1.05);
+}
+
+.zcPerfil-btnPrimary:disabled{
+  opacity:.65;
+  cursor:not-allowed;
+}
+
+.zcPerfil-btnGhost{
+  background:transparent;
+  border:1px solid var(--border,#2a3942);
+  color:var(--text,#e9edef);
+}
+
+.zcPerfil-btnGhost:hover{
+  background:color-mix(in oklab, var(--panel-2,#1f2c33) 85%, transparent);
+}
+
+.zcPerfil-btnGhost:disabled{
+  opacity:.65;
+  cursor:not-allowed;
+}
+
+/* =========================
+   RESPONSIVO
+   ========================= */
+
+@media (max-width:560px){
+  .zcPerfil-drawer{
+    width:100vw;
+  }
+
+  .zcPerfil-actions{
+    flex-direction:column;
+  }
+
+  .zcPerfil-row--datagen .field--dob,
+  .zcPerfil-row--datagen .field--genero,
+  .zcPerfil-row--cepuf .field--cep,
+  .zcPerfil-row--cepuf .field--uf,
+  .zcPerfil-row--numcomp .field--numero,
+  .zcPerfil-row--numcomp .field--complemento{
+    flex:1 1 100%;
+    max-width:none;
+  }
+
+  .qcDrawer{
+    width:100vw;
+  }
+}

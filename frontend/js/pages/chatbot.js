@@ -1,5 +1,10 @@
 // /frontend/js/pages/chatbot.js
 // Chatbot Config – Notificações amigáveis + validação + placeholders {empresa}/{menu_departamentos}
+// ✅ corrigido para:
+// - carregar instâncias por /api/empresas/:empresaId/whatsapp (fallback /api/instancias/list)
+// - usar /api/chatbot/config?empresa_id=...&instancia_id=...
+// - impedir conflito entre mensagens automáticas e triagem por departamento
+
 (() => {
   'use strict';
 
@@ -35,7 +40,9 @@
   function toast(msg, kind = 'success') {
     const host = ensureToastHost();
     const box = el('div', 'toast');
-    box.style.cssText = 'min-width:280px;max-width:520px;padding:12px 14px;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.25);font:14px/1.35 system-ui;transition:.25s';
+    box.style.cssText =
+      'min-width:280px;max-width:520px;padding:12px 14px;border-radius:12px;' +
+      'box-shadow:0 8px 28px rgba(0,0,0,.25);font:14px/1.35 system-ui;transition:.25s';
     const color = kind === 'error' ? '#fee2e2' : kind === 'warn' ? '#fef3c7' : '#dbeafe';
     box.style.background = color;
     box.style.color = '#0f172a';
@@ -49,14 +56,20 @@
   }
 
   function notify({ title = 'Atenção', message = '', kind = 'warn', details = null, actions = [] } = {}) {
-    let overlay = el('div');
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.28);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px';
+    const overlay = el('div');
+    overlay.style.cssText =
+      'position:fixed;inset:0;background:rgba(0,0,0,.28);z-index:100000;' +
+      'display:flex;align-items:center;justify-content:center;padding:20px';
 
     const card = el('div');
-    card.style.cssText = 'width:min(680px,96vw);background:#0b0b13;color:#e5e7eb;border:1px solid #1f2937;border-radius:16px;padding:18px 18px 14px;box-shadow:0 10px 40px rgba(0,0,0,.45);font:14px/1.5 system-ui';
+    card.style.cssText =
+      'width:min(680px,96vw);background:#0b0b13;color:#e5e7eb;border:1px solid #1f2937;' +
+      'border-radius:16px;padding:18px 18px 14px;box-shadow:0 10px 40px rgba(0,0,0,.45);' +
+      'font:14px/1.5 system-ui';
 
     const head = el('div');
-    head.style.cssText = 'font-weight:700;font-size:16px;margin-bottom:8px;display:flex;gap:8px;align-items:center';
+    head.style.cssText =
+      'font-weight:700;font-size:16px;margin-bottom:8px;display:flex;gap:8px;align-items:center';
 
     const dot = el('span');
     dot.style.cssText = 'width:10px;height:10px;border-radius:50%';
@@ -80,7 +93,9 @@
 
     const pre = el('pre');
     pre.textContent = details || '';
-    pre.style.cssText = 'white-space:pre-wrap;margin:8px 0 0;background:#0f172a;border:1px solid #1f2937;border-radius:10px;padding:10px;max-height:38vh;overflow:auto;font-size:12px;display:none';
+    pre.style.cssText =
+      'white-space:pre-wrap;margin:8px 0 0;background:#0f172a;border:1px solid #1f2937;' +
+      'border-radius:10px;padding:10px;max-height:38vh;overflow:auto;font-size:12px;display:none';
 
     toggle.addEventListener('click', () => {
       pre.style.display = pre.style.display === 'none' ? 'block' : 'none';
@@ -112,14 +127,20 @@
     kind = 'warn'
   } = {}) {
     return new Promise((resolve) => {
-      let overlay = el('div');
-      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:100001;display:flex;align-items:center;justify-content:center;padding:20px';
+      const overlay = el('div');
+      overlay.style.cssText =
+        'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:100001;' +
+        'display:flex;align-items:center;justify-content:center;padding:20px';
 
       const card = el('div');
-      card.style.cssText = 'width:min(520px,96vw);background:#0b0b13;color:#e5e7eb;border:1px solid #1f2937;border-radius:16px;padding:18px 18px 14px;box-shadow:0 10px 40px rgba(0,0,0,.45);font:14px/1.5 system-ui';
+      card.style.cssText =
+        'width:min(520px,96vw);background:#0b0b13;color:#e5e7eb;border:1px solid #1f2937;' +
+        'border-radius:16px;padding:18px 18px 14px;box-shadow:0 10px 40px rgba(0,0,0,.45);' +
+        'font:14px/1.5 system-ui';
 
       const head = el('div');
-      head.style.cssText = 'font-weight:700;font-size:16px;margin-bottom:8px;display:flex;gap:8px;align-items:center';
+      head.style.cssText =
+        'font-weight:700;font-size:16px;margin-bottom:8px;display:flex;gap:8px;align-items:center';
 
       const dot = el('span');
       dot.style.cssText = 'width:10px;height:10px;border-radius:50%';
@@ -138,12 +159,16 @@
       const cancel = el('button');
       cancel.type = 'button';
       cancel.textContent = cancelText;
-      cancel.style.cssText = 'padding:8px 14px;border-radius:10px;background:#111827;color:#e5e7eb;border:1px solid #374151;font-weight:600;cursor:pointer';
+      cancel.style.cssText =
+        'padding:8px 14px;border-radius:10px;background:#111827;color:#e5e7eb;' +
+        'border:1px solid #374151;font-weight:600;cursor:pointer';
 
       const confirm = el('button');
       confirm.type = 'button';
       confirm.textContent = confirmText;
-      confirm.style.cssText = 'padding:8px 14px;border-radius:10px;background:#ef4444;color:#fff;border:0;font-weight:700;cursor:pointer';
+      confirm.style.cssText =
+        'padding:8px 14px;border-radius:10px;background:#ef4444;color:#fff;' +
+        'border:0;font-weight:700;cursor:pointer';
 
       function close(v) {
         overlay.remove();
@@ -196,7 +221,7 @@
       '.tswitch input, textarea, input[type="time"], #saveAuto, #saveDept, ' +
       'button:not(#instMenuBtnChat):not(.inst-item), select'
     );
-    controls.forEach(el => el.disabled = !!locked);
+    controls.forEach(x => { x.disabled = !!locked; });
 
     let banner = document.getElementById('instRequiredBanner');
     if (locked) {
@@ -298,21 +323,36 @@ Como podemos te ajudar hoje?`
     features: {
       auto_messages: {
         enabled: false,
-        welcome: { enabled: false, text: buildAutoWelcomeTemplate(), start: '08:00', end: '18:00' },
-        off_hours: { enabled: false, text: 'Atendemos de 08:00 às 18:00. Deixe sua mensagem e responderemos no próximo expediente.', start: '18:00', end: '08:00' }
+        welcome: {
+          enabled: false,
+          text: buildAutoWelcomeTemplate(),
+          start: '08:00',
+          end: '18:00'
+        },
+        off_hours: {
+          enabled: false,
+          text: 'Atendemos de 08:00 às 18:00. Deixe sua mensagem e responderemos no próximo expediente.',
+          start: '18:00',
+          end: '08:00'
+        }
       },
       auto_messages_departments: {
         enabled: false,
-        welcome: { enabled: false, text: '', start: '08:00', end: '18:00' },
+        welcome: {
+          enabled: false,
+          text: '',
+          start: '08:00',
+          end: '18:00'
+        },
         items: {}
       }
     }
   };
 
-  function setSwitch(el, on, pillEl) {
-    if (!el) return;
-    el.dataset.on = on ? 'true' : 'false';
-    const input = el.querySelector('input');
+  function setSwitch(node, on, pillEl) {
+    if (!node) return;
+    node.dataset.on = on ? 'true' : 'false';
+    const input = node.querySelector('input');
     if (input) input.checked = !!on;
     if (pillEl) {
       pillEl.textContent = on ? 'on' : 'off';
@@ -321,13 +361,13 @@ Como podemos te ajudar hoje?`
     }
   }
 
-  function getSwitch(el) {
-    return !!el?.querySelector('input')?.checked;
+  function getSwitch(node) {
+    return !!node?.querySelector('input')?.checked;
   }
 
-  function setHeaderSwitch(el, pill, on) {
-    setSwitch(el, on, pill);
-    el?.setAttribute('aria-pressed', on ? 'true' : 'false');
+  function setHeaderSwitch(node, pill, on) {
+    setSwitch(node, on, pill);
+    node?.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
 
   function deepMerge(base, extra) {
@@ -362,11 +402,11 @@ Como podemos te ajudar hoje?`
     return h >= 0 && h <= 23 && m >= 0 && m <= 59;
   }
 
-  function markInvalid(el, on = true) {
-    if (!el) return;
-    el.setAttribute('aria-invalid', on ? 'true' : 'false');
-    el.style.outline = on ? '2px solid #ef4444' : '';
-    el.style.outlineOffset = on ? '2px' : '';
+  function markInvalid(node, on = true) {
+    if (!node) return;
+    node.setAttribute('aria-invalid', on ? 'true' : 'false');
+    node.style.outline = on ? '2px solid #ef4444' : '';
+    node.style.outlineOffset = on ? '2px' : '';
   }
 
   const DAY = 24 * 60;
@@ -643,7 +683,8 @@ Digite apenas o número da opção desejada.`
   }
 
   function bindAccordion(head, body) {
-    head?.addEventListener('click', () => {
+    head?.addEventListener('click', (e) => {
+      if (e.target.closest('.tswitch')) return;
       const open = head.getAttribute('aria-expanded') === 'true';
       setAccordionOpen(head, body, !open);
     });
@@ -791,7 +832,7 @@ Digite apenas o número da opção desejada.`
       await putConfig(cfg);
       _lastLoadedSnapshot = JSON.stringify(cfg);
       if (!silent) toast('Configurações salvas com sucesso.');
-    } catch (e) {
+    } catch (_) {
       // putConfig já mostra notify
     } finally {
       __persisting = false;
@@ -1353,9 +1394,13 @@ Digite apenas o número da opção desejada.`
     }
 
     function setActiveUI(value, text) {
-      instList.querySelectorAll('.inst-item').forEach(b => b.setAttribute('aria-selected', b.dataset.value === String(value) ? 'true' : 'false'));
-      const active = instList.querySelector(`.inst-item[data-value="${CSS.escape(value)}"]`);
-      if (active) instMenu.setAttribute('aria-activedescendant', active.id || (active.id = 'inst-opt-chat-' + String(value || 'x')));
+      instList.querySelectorAll('.inst-item').forEach(b => {
+        b.setAttribute('aria-selected', b.dataset.value === String(value) ? 'true' : 'false');
+      });
+      const active = instList.querySelector(`.inst-item[data-value="${CSS.escape(String(value || ''))}"]`);
+      if (active) {
+        instMenu.setAttribute('aria-activedescendant', active.id || (active.id = 'inst-opt-chat-' + String(value || 'x')));
+      }
       if (instLabel) instLabel.textContent = text || (value ? `Instância ${value}` : 'Selecione uma instância');
     }
 
@@ -1383,16 +1428,19 @@ Digite apenas o número da opção desejada.`
 
       if (empresaId) {
         try {
-          const r = await authFetch(`/api/empresas/${empresaId}/whatsapp`, { credentials: 'include' });
+          const r = await authFetch(`/api/empresas/${empresaId}/whatsapp`);
           if (!r.ok) throw 0;
           const j = await r.json();
           items = Array.isArray(j.instancias) ? j.instancias : [];
         } catch {
           try {
-            const r2 = await authFetch(`/api/instancias/list?empresa_id=${empresaId}`, { credentials: 'include' });
+            const r2 = await authFetch(`/api/instancias/list?empresa_id=${empresaId}`);
+            if (!r2.ok) throw 0;
             const j2 = await r2.json();
             items = Array.isArray(j2) ? j2 : (Array.isArray(j2?.instancias) ? j2.instancias : []);
-          } catch {}
+          } catch {
+            items = [];
+          }
         }
       }
 
@@ -1440,75 +1488,46 @@ Digite apenas o número da opção desejada.`
 
       bindSwitch(swWelcome, pillWelcome, (on) => {
         if (cfg) (cfg.features.auto_messages.welcome ||= {}).enabled = on;
-        if (on && !getSwitch(swAutoHdr)) {
-          setHeaderSwitch(swAutoHdr, pillAutoHdr, true);
-          cfg.features.auto_messages.enabled = true;
-        }
         syncSectionState();
       });
 
       bindSwitch(swOff, pillOff, (on) => {
         if (cfg) (cfg.features.auto_messages.off_hours ||= {}).enabled = on;
-        if (on && !getSwitch(swAutoHdr)) {
-          setHeaderSwitch(swAutoHdr, pillAutoHdr, true);
-          cfg.features.auto_messages.enabled = true;
-        }
         syncSectionState();
       });
 
       bindSwitch(swDeptWelcome, pillDeptWelcome, (on) => {
         if (cfg) (cfg.features.auto_messages_departments.welcome ||= {}).enabled = on;
-        if (on && !getSwitch(swDeptHdr)) {
-          setHeaderSwitch(swDeptHdr, pillDeptHdr, true);
-          cfg.features.auto_messages_departments.enabled = true;
-        }
         syncSectionState();
       });
 
       msgWelcome?.addEventListener('input', () => {
-        msgWelcome.value = expandTemplate(msgWelcome.value);
         if (wcCount) wcCount.textContent = `${msgWelcome.value.length} caracteres`;
         renderWelcomePreview();
-        schedulePersist(700);
-      });
-
-      msgWelcome?.addEventListener('blur', () => persistUI({ silent: false }));
-
-      wStart?.addEventListener('change', () => {
-        if (cfg?.features?.auto_messages?.welcome) cfg.features.auto_messages.welcome.start = wStart.value;
-        schedulePersist(200, { silent: false });
-      });
-
-      wEnd?.addEventListener('change', () => {
-        if (cfg?.features?.auto_messages?.welcome) cfg.features.auto_messages.welcome.end = wEnd.value;
-        schedulePersist(200, { silent: false });
+        updateSaveButtons();
+        schedulePersist(350, { silent: true });
       });
 
       msgOff?.addEventListener('input', () => {
         if (offCount) offCount.textContent = `${msgOff.value.length} caracteres`;
         renderOffPreview();
-        schedulePersist(700);
-      });
-
-      msgOff?.addEventListener('blur', () => persistUI({ silent: false }));
-
-      oStart?.addEventListener('change', () => {
-        if (cfg?.features?.auto_messages?.off_hours) cfg.features.auto_messages.off_hours.start = oStart.value;
-        schedulePersist(200, { silent: false });
-      });
-
-      oEnd?.addEventListener('change', () => {
-        if (cfg?.features?.auto_messages?.off_hours) cfg.features.auto_messages.off_hours.end = oEnd.value;
-        schedulePersist(200, { silent: false });
+        updateSaveButtons();
+        schedulePersist(350, { silent: true });
       });
 
       msgDeptWelcome?.addEventListener('input', () => {
         if (dwCount) dwCount.textContent = `${msgDeptWelcome.value.length} caracteres`;
         renderDeptPreview();
-        schedulePersist(700);
+        updateSaveButtons();
+        schedulePersist(350, { silent: true });
       });
 
-      msgDeptWelcome?.addEventListener('blur', () => persistUI({ silent: false }));
+      wStart?.addEventListener('change', () => schedulePersist(200, { silent: true }));
+      wEnd?.addEventListener('change', () => schedulePersist(200, { silent: true }));
+      oStart?.addEventListener('change', () => schedulePersist(200, { silent: true }));
+      oEnd?.addEventListener('change', () => schedulePersist(200, { silent: true }));
+      dwStart?.addEventListener('change', () => schedulePersist(200, { silent: true }));
+      dwEnd?.addEventListener('change', () => schedulePersist(200, { silent: true }));
 
       deptSearch?.addEventListener('input', () => renderDeptPicker());
 
@@ -1521,10 +1540,7 @@ Digite apenas o número da opção desejada.`
           items[id] = { ...(items[id] || {}), enabled: true, label: items[id]?.label || nome };
         });
         renderDeptPicker();
-        if (msgDeptWelcome) {
-          msgDeptWelcome.value = buildDeptTriagemTemplate();
-          if (dwCount) dwCount.textContent = `${msgDeptWelcome.value.length} caracteres`;
-        }
+        refreshDeptTemplateIfDefaultLike();
         renderDeptPreview();
         updateSaveButtons();
         schedulePersist(250, { silent: false });
@@ -1539,23 +1555,10 @@ Digite apenas o número da opção desejada.`
           items[id] = { ...(items[id] || {}), enabled: false, label: items[id]?.label || nome };
         });
         renderDeptPicker();
-        if (msgDeptWelcome) {
-          msgDeptWelcome.value = buildDeptTriagemTemplate();
-          if (dwCount) dwCount.textContent = `${msgDeptWelcome.value.length} caracteres`;
-        }
+        refreshDeptTemplateIfDefaultLike();
         renderDeptPreview();
         updateSaveButtons();
         schedulePersist(250, { silent: false });
-      });
-
-      dwStart?.addEventListener('change', () => {
-        if (cfg?.features?.auto_messages_departments?.welcome) cfg.features.auto_messages_departments.welcome.start = dwStart.value;
-        schedulePersist(200, { silent: false });
-      });
-
-      dwEnd?.addEventListener('change', () => {
-        if (cfg?.features?.auto_messages_departments?.welcome) cfg.features.auto_messages_departments.welcome.end = dwEnd.value;
-        schedulePersist(200, { silent: false });
       });
 
       saveAuto?.addEventListener('click', saveAutoBlock);

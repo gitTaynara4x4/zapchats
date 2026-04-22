@@ -11,10 +11,8 @@
   const EMPRESA_ID = Number(window.EMPRESA_ID || localStorage.getItem('empresa_id') || 0);
   if (!EMPRESA_ID) return;
 
-  // flag de permissão pra apagar conversa (vai ser preenchida com /api/usuarios/me)
   let CAN_DELETE_CONVERSA = false;
 
-  // ================== Fetch com credenciais ==================
   const authFetch = (url, opt = {}) => {
     const f = (window.ZAuth && ZAuth.authFetch) ? ZAuth.authFetch : fetch;
     const headers = Object.assign(
@@ -26,7 +24,6 @@
     return f(url, { credentials: 'include', ...opt, headers });
   };
 
-  // ================== Toast ==================
   function escapeHtml(s) {
     return String(s || '').replace(/[&<>"']/g, m => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -55,7 +52,6 @@
     setTimeout(() => el.remove(), timeout + 320);
   }
 
-  // ================== Confirm genérico (2 botões) ==================
   function confirmDialog({
     title = 'Confirmação',
     msg = '',
@@ -95,14 +91,13 @@
       window.addEventListener('keydown', onKey, true);
 
       btnCancel.onclick = () => close(false);
-      btnOk.onclick     = () => close(true);
+      btnOk.onclick = () => close(true);
 
       wrap.addEventListener('click', e => { if (e.target === wrap) close(false); });
       try { btnOk.focus(); } catch {}
     });
   }
 
-  // ========== Diálogo específico de apagar: 2 opções (lista / permanente) ==========
   function deleteChoiceDialog() {
     return new Promise(resolve => {
       const wrap = document.createElement('div');
@@ -139,16 +134,15 @@ O que você deseja fazer com esta conversa?
       window.addEventListener('keydown', onKey, true);
 
       btnCancel.onclick = () => close(null);
-      btnLista.onclick  = () => close('lista');
-      btnPerma.onclick  = () => close('permanente');
+      btnLista.onclick = () => close('lista');
+      btnPerma.onclick = () => close('permanente');
 
       wrap.addEventListener('click', e => { if (e.target === wrap) close(null); });
       try { btnLista.focus(); } catch {}
     });
   }
 
-  // ================== Diálogo de etiqueta ==================
-  function defaultPalette(){
+  function defaultPalette() {
     return [
       { name:'Cinza',    hex:'#6b7280' }, { name:'Azul',     hex:'#3b82f6' },
       { name:'Ciano',    hex:'#06b6d4' }, { name:'Verde',    hex:'#10b981' },
@@ -229,18 +223,18 @@ O que você deseja fazer com esta conversa?
       `;
       document.body.appendChild(wrap);
 
-      const dlg   = wrap.querySelector('.zcDlg');
-      const inp   = wrap.querySelector('.in');
+      const dlg = wrap.querySelector('.zcDlg');
+      const inp = wrap.querySelector('.in');
       const [btnCancel, btnOk] = wrap.querySelectorAll('.f .btn');
-      const grid  = wrap.querySelector('.chipgrid');
-      const customChip   = grid.querySelector('.chip.custom');
+      const grid = wrap.querySelector('.chipgrid');
+      const customChip = grid.querySelector('.chip.custom');
       const customSwatch = customChip.querySelector('.swatch-custom') || customChip.querySelector('.swatch');
-      const pop   = wrap.querySelector('.color-popover');
-      const sv    = pop.querySelector('.cp-sv');
+      const pop = wrap.querySelector('.color-popover');
+      const sv = pop.querySelector('.cp-sv');
       const svCur = pop.querySelector('.cp-sv-cursor');
-      const hue   = pop.querySelector('.cp-hue');
+      const hue = pop.querySelector('.cp-hue');
       const hexIn = pop.querySelector('.cp-hex');
-      const prev  = pop.querySelector('.cp-preview');
+      const prev = pop.querySelector('.cp-preview');
 
       let picked = '';
       let H = 210, S = 0.7, V = 0.9;
@@ -248,32 +242,34 @@ O que você deseja fazer com esta conversa?
       const getVal = () => (inp.value || '').trim();
       const updateState = () => { btnOk.disabled = getVal().length === 0; };
 
-      function setSVBackground(){
+      function setSVBackground() {
         sv.style.background = `
           linear-gradient(to right, rgba(255,255,255,1), rgba(255,255,255,0)),
           linear-gradient(to top, rgba(0,0,0,1), rgba(0,0,0,0)),
           hsl(${H}, 100%, 50%)
         `;
       }
-      function hsvToHex(h, s, v){
+
+      function hsvToHex(h, s, v) {
         s = Math.max(0, Math.min(1, s));
         v = Math.max(0, Math.min(1, v));
         const c = v * s;
         const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
         const m = v - c;
         let r=0, g=0, b=0;
-        if (0 <= h && h < 60)   { r=c; g=x; b=0; }
+        if (0 <= h && h < 60) { r=c; g=x; b=0; }
         else if (60 <= h && h < 120) { r=x; g=c; b=0; }
-        else if (120 <= h && h < 180){ r=0; g=c; b=x; }
-        else if (180 <= h && h < 240){ r=0; g=x; b=c; }
-        else if (240 <= h && h < 300){ r=x; g=0; b=c; }
+        else if (120 <= h && h < 180) { r=0; g=c; b=x; }
+        else if (180 <= h && h < 240) { r=0; g=x; b=c; }
+        else if (240 <= h && h < 300) { r=x; g=0; b=c; }
         else { r=c; g=0; b=x; }
         const R = Math.round((r + m) * 255);
         const G = Math.round((g + m) * 255);
         const B = Math.round((b + m) * 255);
         return '#' + [R,G,B].map(n => n.toString(16).padStart(2,'0')).join('');
       }
-      function normHex(v){
+
+      function normHex(v) {
         const s = String(v || '').trim().toLowerCase();
         if (/^#([0-9a-f]{6})$/.test(s)) return s;
         if (/^#([0-9a-f]{3})$/.test(s)) {
@@ -282,17 +278,21 @@ O que você deseja fazer com esta conversa?
         }
         return null;
       }
-      function hexToRgb(hex){
-        const h = normHex(hex); if (!h) return null;
+
+      function hexToRgb(hex) {
+        const h = normHex(hex);
+        if (!h) return null;
         const i = parseInt(h.slice(1), 16);
         return { r:(i>>16)&255, g:(i>>8)&255, b:i&255 };
       }
-      function hexToHsv(hex){
-        const rgb = hexToRgb(hex); if (!rgb) return {h:0,s:0,v:0};
+
+      function hexToHsv(hex) {
+        const rgb = hexToRgb(hex);
+        if (!rgb) return {h:0,s:0,v:0};
         const r = rgb.r/255, g = rgb.g/255, b = rgb.b/255;
         const max = Math.max(r,g,b), min = Math.min(r,g,b);
         const d = max - min;
-        let h=0;
+        let h = 0;
         if (d === 0) h = 0;
         else if (max === r) h = 60 * (((g-b)/d) % 6);
         else if (max === g) h = 60 * (((b-r)/d) + 2);
@@ -303,12 +303,12 @@ O que você deseja fazer com esta conversa?
         return {h,s,v};
       }
 
-      function selectChip(chip){
+      function selectChip(chip) {
         grid.querySelectorAll('.chip').forEach(x => x.classList.remove('selected'));
         chip.classList.add('selected');
       }
 
-      function updatePreview(){
+      function updatePreview() {
         const hex = hsvToHex(H, S, V);
         prev.style.background = hex;
         hexIn.value = hex.toLowerCase();
@@ -321,10 +321,10 @@ O que você deseja fazer com esta conversa?
 
       const GAP = 10, PAD = 12, POP_MIN_W = 220, POP_MAX_W = 260, SV_MIN = 120, SV_MAX = 200;
 
-      function placePopover(){
+      function placePopover() {
         const dlgW = dlg.clientWidth, dlgH = dlg.clientHeight;
         const gridRect = grid.getBoundingClientRect();
-        const dlgRect  = dlg.getBoundingClientRect();
+        const dlgRect = dlg.getBoundingClientRect();
 
         let desiredW = Math.min(
           Math.max(POP_MIN_W, Math.min(grid.clientWidth, POP_MAX_W)),
@@ -353,10 +353,10 @@ O que você deseja fazer com esta conversa?
 
         pos.top = Math.min(Math.max(PAD, pos.top), Math.max(PAD, dlgH - popH - PAD));
         pop.style.left = Math.round(Math.max(PAD, Math.min(pos.left, dlgW - popW - PAD))) + 'px';
-        pop.style.top  = Math.round(pos.top) + 'px';
+        pop.style.top = Math.round(pos.top) + 'px';
       }
 
-      const openPopover  = () => {
+      const openPopover = () => {
         setSVBackground();
         updatePreview();
         pop.hidden = false;
@@ -364,16 +364,17 @@ O que você deseja fazer com esta conversa?
         placePopover();
         pop.style.visibility = '';
       };
+
       const closePopover = () => { pop.hidden = true; };
 
-      function svSetFromEvent(e){
+      function svSetFromEvent(e) {
         const r = sv.getBoundingClientRect();
         const x = Math.min(Math.max(e.clientX - r.left, 0), r.width);
-        const y = Math.min(Math.max(e.clientY - r.top , 0), r.height);
+        const y = Math.min(Math.max(e.clientY - r.top, 0), r.height);
         S = (x / r.width);
         V = 1 - (y / r.height);
         svCur.style.left = (S * 100) + '%';
-        svCur.style.top  = ((1 - V) * 100) + '%';
+        svCur.style.top = ((1 - V) * 100) + '%';
         updatePreview();
       }
 
@@ -381,47 +382,54 @@ O que você deseja fazer com esta conversa?
         e.preventDefault();
         svSetFromEvent(e);
         const move = (ev) => svSetFromEvent(ev);
-        const up   = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+        const up = () => {
+          window.removeEventListener('mousemove', move);
+          window.removeEventListener('mouseup', up);
+        };
         window.addEventListener('mousemove', move);
         window.addEventListener('mouseup', up);
       });
 
       hue.addEventListener('input', () => {
-        H = Number(hue.value)||0;
+        H = Number(hue.value) || 0;
         setSVBackground();
         updatePreview();
       });
 
       hexIn.addEventListener('input', () => {
-        const hex = normHex(hexIn.value); if (!hex) return;
+        const hex = normHex(hexIn.value);
+        if (!hex) return;
         const {h,s,v} = hexToHsv(hex);
-        H=h;S=s;V=v;
+        H = h; S = s; V = v;
         hue.value = String(Math.round(H));
         setSVBackground();
         svCur.style.left = (S * 100) + '%';
-        svCur.style.top  = ((1 - V) * 100) + '%';
+        svCur.style.top = ((1 - V) * 100) + '%';
         updatePreview();
       });
 
       wrap.querySelector('.cp-use').addEventListener('click', () => { closePopover(); });
       wrap.querySelector('.cp-close').addEventListener('click', closePopover);
 
-      function close(v){
+      function close(v) {
         document.removeEventListener('keydown', onKey, true);
         wrap.remove();
         resolve(v);
       }
 
-      function onKey(e){
-        if (e.key === 'Enter' && !btnOk.disabled){ e.preventDefault(); btnOk.click(); }
-        else if (e.key === 'Escape'){
+      function onKey(e) {
+        if (e.key === 'Enter' && !btnOk.disabled) {
+          e.preventDefault();
+          btnOk.click();
+        } else if (e.key === 'Escape') {
           if (!pop.hidden) { closePopover(); return; }
-          e.preventDefault(); close(null);
+          e.preventDefault();
+          close(null);
         }
       }
 
       btnCancel.onclick = () => close(null);
-      btnOk.onclick     = () => close({ name: getVal(), color: picked || null });
+      btnOk.onclick = () => close({ name: getVal(), color: picked || null });
 
       wrap.addEventListener('click', e => {
         if (!pop.hidden && !pop.contains(e.target) && !customChip.contains(e.target)) closePopover();
@@ -430,11 +438,10 @@ O que você deseja fazer com esta conversa?
 
       document.addEventListener('keydown', onKey, true);
 
-      setTimeout(() => { try{ inp.focus(); }catch{} }, 10);
+      setTimeout(() => { try { inp.focus(); } catch {} }, 10);
       inp.addEventListener('input', updateState);
       updateState();
 
-      // abrir popover ao clicar no gradiente
       customSwatch.addEventListener('click', (e) => {
         e.preventDefault();
         openPopover();
@@ -442,27 +449,28 @@ O que você deseja fazer com esta conversa?
     });
   }
 
-  // ================== Helpers: reorder / pinned ==================
-  function ensurePlaceholder(node){
+  function ensurePlaceholder(node) {
     if (!node) return null;
     if (node.__pinRestore) return node.__pinRestore;
     node.__pinRestore = { parent: node.parentNode, next: node.nextSibling };
     return node.__pinRestore;
   }
-  function restoreToPlaceholder(node){
+
+  function restoreToPlaceholder(node) {
     if (!node || !node.__pinRestore) return;
     const { parent, next } = node.__pinRestore;
     if (parent) parent.insertBefore(node, next || null);
     node.__pinRestore = null;
   }
-  function markPinned(node, flag){
+
+  function markPinned(node, flag) {
     if (!node) return;
     node.classList.toggle('is-pinned', !!flag);
     if (flag) node.style.order = '-1';
     else node.style.removeProperty('order');
   }
 
-  function reorderByPinned(container){
+  function reorderByPinned(container) {
     if (!container) return;
     const sel = 'li, .cliente-item, .chat-item, .list-item';
     const children = Array.from(container.children).filter(n => n.matches && n.matches(sel));
@@ -475,15 +483,15 @@ O que você deseja fazer com esta conversa?
     for (const n of pinned) container.insertBefore(n, firstNonPinned);
   }
 
-  function tsFromNode(node){
+  function tsFromNode(node) {
     if (!node) return Number.NaN;
     const ds = node.dataset || {};
     const keys = [
       'ts','time','timestamp','last','lastAt','updated','updatedAt',
       'horario','hora','ordem','ordemInt','order','sort','ultima','ult'
     ];
-    for (const k of keys){
-      if (k in ds){
+    for (const k of keys) {
+      if (k in ds) {
         const v = String(ds[k] || '').trim();
         const n = parseFloat(v);
         if (Number.isFinite(n)) return n < 1e12 ? n*1000 : n;
@@ -492,7 +500,7 @@ O que você deseja fazer com esta conversa?
       }
     }
     if (node.getAttributeNames) {
-      for (const a of node.getAttributeNames()){
+      for (const a of node.getAttributeNames()) {
         if (!a.startsWith('data-')) continue;
         const v = node.getAttribute(a);
         if (!v) continue;
@@ -503,14 +511,14 @@ O que você deseja fazer com esta conversa?
       }
     }
     const t = node.querySelector && node.querySelector('time[datetime]');
-    if (t && t.getAttribute){
+    if (t && t.getAttribute) {
       const d = Date.parse(t.getAttribute('datetime'));
       if (!Number.isNaN(d)) return d;
     }
     return Number.NaN;
   }
 
-  function resortByTime(container){
+  function resortByTime(container) {
     if (!container) return;
     const sel = 'li, .cliente-item, .chat-item, .list-item';
     const kids = Array.from(container.children).filter(n => n.matches && n.matches(sel));
@@ -520,7 +528,7 @@ O que você deseja fazer com esta conversa?
     const others = [];
     let idx = 0;
 
-    for (const n of kids){
+    for (const n of kids) {
       if (n.classList && n.classList.contains('is-pinned')) pinned.push(n);
       else {
         const ts = tsFromNode(n);
@@ -538,7 +546,6 @@ O que você deseja fazer com esta conversa?
     container.appendChild(fragRest);
   }
 
-  // ================== DOM do menu ==================
   const menu = document.createElement('div');
   menu.className = 'zc-ctxmenu';
   menu.innerHTML = `
@@ -568,11 +575,10 @@ O que você deseja fazer com esta conversa?
 
   function updateDeleteVisibility() {
     if (!btnDelete) return;
-    btnDelete.style.display = CAN_DELETE_CONVERSA ? 'flex' : 'none';
+    btnDelete.classList.toggle('is-hidden', !CAN_DELETE_CONVERSA);
   }
   updateDeleteVisibility();
 
-  // Descobre no backend se o usuário pode apagar conversa
   (async () => {
     try {
       const res = await authFetch('/api/usuarios/me', { method:'GET' });
@@ -597,18 +603,17 @@ O que você deseja fazer com esta conversa?
   };
 
   const openMenuAt = (x, y) => {
-    // abre e mede (tamanho real)
     menu.style.left = '0px';
-    menu.style.top  = '0px';
+    menu.style.top = '0px';
     menu.classList.add('open');
 
     requestAnimationFrame(() => {
       const vw = window.innerWidth, vh = window.innerHeight;
       const r = menu.getBoundingClientRect();
       const left = Math.min(x, vw - r.width - 8);
-      const top  = Math.min(y, vh - r.height - 8);
+      const top = Math.min(y, vh - r.height - 8);
       menu.style.left = Math.max(8, left) + 'px';
-      menu.style.top  = Math.max(8, top)  + 'px';
+      menu.style.top = Math.max(8, top) + 'px';
     });
   };
 
@@ -618,8 +623,7 @@ O que você deseja fazer com esta conversa?
     if (el) el.textContent = pinned ? 'Desafixar conversa' : 'Fixar conversa';
   };
 
-  // ================== Ações ==================
-  async function doLabel(clienteId){
+  async function doLabel(clienteId) {
     const picked = await labelDialog({
       title:'Etiquetar conversa',
       placeholder:'Ex.: VIP, Financeiro, Suporte',
@@ -628,22 +632,32 @@ O que você deseja fazer com esta conversa?
     if (!picked || !picked.name) return;
 
     const bodies = [{ add:{ name:picked.name, color:picked.color } }, { add:picked.name }];
-    for (let i=0;i<bodies.length;i++){
-      try{
+    for (let i = 0; i < bodies.length; i++) {
+      try {
         const res = await authFetch(`/api/atendimento/conversas/${clienteId}/labels?empresa_id=${EMPRESA_ID}`, {
-          method:'POST', body: JSON.stringify(bodies[i])
+          method:'POST',
+          body: JSON.stringify(bodies[i])
         });
-        if (res.status === 403) { notify({title:'Sem permissão', msg:'Apenas administradores podem etiquetar.', type:'error'}); return; }
+        if (res.status === 403) {
+          notify({title:'Sem permissão', msg:'Apenas administradores podem etiquetar.', type:'error'});
+          return;
+        }
         if (!res.ok) throw new Error(await res.text());
-        notify({ title:'Etiqueta aplicada', msg: picked.color && i===0 ? `${picked.name} • ${picked.color}` : `${picked.name}`, type:'ok' });
+        notify({
+          title:'Etiqueta aplicada',
+          msg: picked.color && i === 0 ? `${picked.name} • ${picked.color}` : `${picked.name}`,
+          type:'ok'
+        });
         return;
-      }catch(e){
-        if (i === bodies.length-1) notify({title:'Falha ao etiquetar', msg:String(e && e.message || e), type:'error'});
+      } catch (e) {
+        if (i === bodies.length - 1) {
+          notify({title:'Falha ao etiquetar', msg:String(e && e.message || e), type:'error'});
+        }
       }
     }
   }
 
-  async function doPin(clienteId, li){
+  async function doPin(clienteId, li) {
     if (!li || !li.classList) {
       li = document.querySelector(
         `[data-id="${clienteId}"], .cliente-item[data-id="${clienteId}"], .chat-item[data-id="${clienteId}"], .list-item[data-id="${clienteId}"]`
@@ -657,7 +671,6 @@ O que você deseja fazer com esta conversa?
     const willPin = !li.classList.contains('is-pinned');
     const container = li.closest('#lista-clientes, .lista-clientes, [role="list"], .list, ul, ol') || li.parentElement;
 
-    // UI otimista
     if (willPin) {
       ensurePlaceholder(li);
       markPinned(li, true);
@@ -670,12 +683,15 @@ O que você deseja fazer com esta conversa?
       requestAnimationFrame(() => resortByTime(container));
     }
 
-    try{
+    try {
       const res = await authFetch(`/api/atendimento/conversas/${clienteId}/pin?empresa_id=${EMPRESA_ID}`, {
-        method: 'POST',
+        method:'POST',
         body: JSON.stringify({ pin: willPin })
       });
-      if (res.status === 403) { notify({title:'Sem permissão', msg:'Apenas administradores podem fixar.', type:'error'}); return; }
+      if (res.status === 403) {
+        notify({title:'Sem permissão', msg:'Apenas administradores podem fixar.', type:'error'});
+        return;
+      }
       if (!res.ok) throw new Error(await res.text().catch(() => ''));
 
       try { window.Lista && window.Lista.setPinned && window.Lista.setPinned(clienteId, willPin); } catch {}
@@ -683,8 +699,7 @@ O que você deseja fazer com esta conversa?
       try { sessionStorage.setItem('convForceReload', '1'); } catch {}
 
       notify({title: willPin ? 'Conversa fixada' : 'Conversa desafixada', type:'ok'});
-    }catch(e){
-      // rollback
+    } catch (e) {
       if (willPin) {
         markPinned(li, false);
         restoreToPlaceholder(li);
@@ -700,7 +715,7 @@ O que você deseja fazer com esta conversa?
     }
   }
 
-  async function doDelete(clienteId, li){
+  async function doDelete(clienteId, li) {
     if (!CAN_DELETE_CONVERSA) {
       notify({ title:'Sem permissão', msg:'Apenas administradores podem apagar conversas.', type:'error' });
       return;
@@ -727,13 +742,16 @@ O que você deseja fazer com esta conversa?
     };
 
     if (choice === 'lista') {
-      try{
-        const res = await authFetch(`/api/atendimento/conversas/${clienteId}?empresa_id=${EMPRESA_ID}`, { method: 'DELETE' });
-        if (res.status === 403) { notify({title:'Sem permissão', msg:'Apenas administradores podem apagar.', type:'error'}); return; }
+      try {
+        const res = await authFetch(`/api/atendimento/conversas/${clienteId}?empresa_id=${EMPRESA_ID}`, { method:'DELETE' });
+        if (res.status === 403) {
+          notify({title:'Sem permissão', msg:'Apenas administradores podem apagar.', type:'error'});
+          return;
+        }
         if (!res.ok) throw new Error(await res.text());
         removeFromUI();
         notify({title:'Conversa removida da lista', type:'ok'});
-      }catch(e){
+      } catch (e) {
         notify({title:'Falha ao apagar da lista', msg:String(e && e.message || e), type:'error'});
       }
       return;
@@ -749,24 +767,26 @@ O que você deseja fazer com esta conversa?
       });
       if (!ok) return;
 
-      try{
-        const res = await authFetch(`/api/atendimento/conversas/${clienteId}/permanente?empresa_id=${EMPRESA_ID}`, { method: 'DELETE' });
-        if (res.status === 403) { notify({title:'Sem permissão', msg:'Apenas administradores podem apagar permanentemente.', type:'error'}); return; }
+      try {
+        const res = await authFetch(`/api/atendimento/conversas/${clienteId}/permanente?empresa_id=${EMPRESA_ID}`, { method:'DELETE' });
+        if (res.status === 403) {
+          notify({title:'Sem permissão', msg:'Apenas administradores podem apagar permanentemente.', type:'error'});
+          return;
+        }
         if (!res.ok) throw new Error(await res.text());
         removeFromUI();
         notify({title:'Conversa apagada permanentemente', type:'ok'});
-      }catch(e){
+      } catch (e) {
         notify({title:'Falha ao apagar permanentemente', msg:String(e && e.message || e), type:'error'});
       }
     }
   }
 
-  // Clique nas opções do menu
   menu.addEventListener('click', (ev) => {
     const btn = ev.target.closest('.item');
     if (!btn || !targetLi) return;
 
-    const liCtx = targetLi; // snapshot
+    const liCtx = targetLi;
     const action = btn.dataset.action;
 
     const clienteId = Number(
@@ -780,18 +800,16 @@ O que você deseja fazer com esta conversa?
       notify({ title:'Falha', msg:'Item sem data-id.', type:'error' });
       return;
     }
-    if (action === 'label')  { doLabel(clienteId); return; }
-    if (action === 'pin')    { doPin(clienteId, liCtx); return; }
+    if (action === 'label') { doLabel(clienteId); return; }
+    if (action === 'pin') { doPin(clienteId, liCtx); return; }
     if (action === 'delete') { doDelete(clienteId, liCtx); return; }
   });
 
-  // Fecha menu
   document.addEventListener('click', (e) => { if (!menu.contains(e.target)) closeMenu(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
   window.addEventListener('scroll', closeMenu, true);
 
-  // ========== Context menu delegado (não quebra quando a lista recria) ==========
-  function findListaClientes(){
+  function findListaClientes() {
     return document.getElementById('lista-clientes')
       || document.querySelector('.lista-clientes')
       || document.querySelector('[data-role="lista-clientes"]')

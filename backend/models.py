@@ -115,6 +115,7 @@ class Empresa(Base):
     departamentos   = relationship("Departamento", back_populates="empresa", cascade="all, delete-orphan")
     setores         = relationship("Setor", back_populates="empresa", cascade="all, delete-orphan")
     colaboradores   = relationship("Colaborador", back_populates="empresa", cascade="all, delete-orphan")
+    atendimentos    = relationship("Atendimento", back_populates="empresa", cascade="all, delete-orphan")
     midias          = relationship("Midia", back_populates="empresa", cascade="all, delete-orphan")
     grupos          = relationship("Grupo", back_populates="empresa", cascade="all, delete-orphan")
     mensagens_grupo = relationship("MensagemGrupo", back_populates="empresa", cascade="all, delete-orphan")
@@ -296,6 +297,13 @@ class EmpresaInstancia(Base):
         passive_deletes=True,
     )
 
+    atendimentos = relationship(
+        "Atendimento",
+        back_populates="instancia",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
     def __repr__(self) -> str:
         return (
             f"<EmpresaInstancia id={self.id} emp={self.empresa_id} "
@@ -375,19 +383,23 @@ class Cliente(Base):
     triagem_iniciada_em = Column(TIMESTAMP(timezone=True), nullable=True)
     triagem_ultima_msg_em = Column(TIMESTAMP(timezone=True), nullable=True)
 
-    empresa   = relationship("Empresa", back_populates="clientes")
-    mensagens = relationship("Mensagem", back_populates="cliente", cascade="all, delete-orphan")
-    midias    = relationship("Midia", back_populates="cliente", cascade="all, delete-orphan")
-
-    colaborador = relationship("Colaborador", foreign_keys=[colaborador_id])
-
     departamento_id = Column(
         Integer,
         ForeignKey("departamentos.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
+
+    empresa      = relationship("Empresa", back_populates="clientes")
+    mensagens    = relationship("Mensagem", back_populates="cliente", cascade="all, delete-orphan")
+    midias       = relationship("Midia", back_populates="cliente", cascade="all, delete-orphan")
+    atendimentos = relationship("Atendimento", back_populates="cliente", cascade="all, delete-orphan")
+
+    colaborador      = relationship("Colaborador", foreign_keys=[colaborador_id])
     departamento_rel = relationship("Departamento")
+
+    def __repr__(self) -> str:
+        return f"<Cliente id={self.id} emp={self.empresa_id} tel={self.telefone!r} dep={self.departamento_id} inst={self.instancia_id}>"
 
 
 # =========================
@@ -603,6 +615,12 @@ class Departamento(Base):
         cascade="all, delete-orphan",
     )
 
+    atendimentos = relationship(
+        "Atendimento",
+        back_populates="departamento",
+        passive_deletes=True,
+    )
+
     __table_args__ = (
         UniqueConstraint("empresa_id", "nome",   name="uq_departamentos_empresa_nome"),
         UniqueConstraint("empresa_id", "codigo", name="uq_departamentos_empresa_codigo"),
@@ -610,6 +628,10 @@ class Departamento(Base):
 
     def __repr__(self) -> str:
         return f"<Departamento id={self.id} emp={self.empresa_id} nome={self.nome!r}>"
+
+
+# =========================
+# Pivot={self.empresa_id} nome={self.nome!r}>"
 
 
 # =========================
@@ -714,6 +736,12 @@ class Colaborador(Base):
 
     instancias_ver = Column(PG_ARRAY(Integer), nullable=True)
 
+    atendimentos_operados = relationship(
+        "Atendimento",
+        foreign_keys="Atendimento.operador_id",
+        back_populates="operador",
+    )
+
 
 # =========================
 # Usuario
@@ -744,10 +772,43 @@ class Usuario(Base):
 # =========================
 class Atendimento(Base):
     __tablename__ = "atendimentos"
+    __table_args__ = (
+        Index("ix_atendimentos_empresa_status", "empresa_id", "status"),
+        Index("ix_atendimentos_empresa_inst_status", "empresa_id", "instancia_id", "status"),
+        Index("ix_atendimentos_empresa_dep_status", "empresa_id", "departamento_id", "status"),
+        Index("ix_atendimentos_empresa_cli_inst", "empresa_id", "cliente_id", "instancia_id"),
+        Index("ix_atendimentos_operador", "operador_id"),
+    )
 
-    id          = Column(Integer, primary_key=True)
-    cliente_id  = Column(Integer, index=True)
-    operador_id = Column(Integer, index=True)
+    id = Column(Integer, primary_key=True, index=True)
+
+    empresa_id = Column(
+        Integer,
+        ForeignKey("empresas.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    cliente_id = Column(
+        Integer,
+        ForeignKey("clientes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    operador_id = Column(
+        Integer,
+        ForeignKey("colaboradores.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    departamento_id = Column(
+        Integer,
+        ForeignKey("departamentos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     instancia_id = Column(
         Integer,
@@ -759,6 +820,7 @@ class Atendimento(Base):
     criado_em = Column(
         TIMESTAMP(timezone=True),
         server_default=func.now(),
+        nullable=False,
     )
 
     atualizado_em = Column(
@@ -779,6 +841,12 @@ class Atendimento(Base):
         nullable=False,
     )
 
+    empresa = relationship("Empresa", back_populates="atendimentos")
+    cliente = relationship("Cliente", back_populates="atendimentos")
+    departamento = relationship("Departamento", back_populates="atendimentos")
+    instancia = relationship("EmpresaInstancia", back_populates="atendimentos")
+    operador = relationship("Colaborador", foreign_keys=[operador_id], back_populates="atendimentos_operados")
+
     mensagens = relationship(
         "Mensagem",
         back_populates="atendimento",
@@ -786,7 +854,10 @@ class Atendimento(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Atendimento id={self.id} cli={self.cliente_id} inst={self.instancia_id} status={self.status}>"
+        return (
+            f"<Atendimento id={self.id} emp={self.empresa_id} cli={self.cliente_id} "
+            f"dep={self.departamento_id} inst={self.instancia_id} status={self.status}>"
+        )
 
 
 # =========================

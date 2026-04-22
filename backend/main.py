@@ -28,7 +28,6 @@ from backend.routers.disparos import router as disparos_router
 from backend.routers import chatbot_setores as chatbot_setores_router
 from backend.routers import atendimento_conversas
 from backend.routers import internal_chat as internal_chat_router
-from backend.integrations.remove_instance import router as remove_instance_router
 from backend.websocket_manager import router as ws_router
 from backend.routers import atendimentoia as atendimento_ia_router
 from backend.routers import atendimento_chat as atendimento_chat_router
@@ -50,33 +49,37 @@ from backend.routers.atendimento_send import router as atendimento_send_router
 from backend.routers import departamentos as departamentos_router
 from backend.routers import chatbot_config as chatbot_config_router
 from backend.routers import admin_planos
+from backend.routers.perfil import router as perfil_router
+from backend.routers.meu_plano import router as meu_plano_router
 
 # DB
 from backend.database import Base, engine, SessionLocal
 from backend import models
 
-# Integrações
-from backend.integrations.rabbit_consumer import start_rabbit_consumer
-from backend.integrations.evo_ws_listener import start_evo_ws_listener
+# Integrações Evolution (NOVO pacote)
+from backend.integrations.evolution.api.remove_instance import router as remove_instance_router
+from backend.integrations.evolution.api.router import router as evolution_router
+from backend.integrations.evolution.transport.rabbit_consumer import start_rabbit_consumer
+from backend.integrations.evolution.transport.ws_listener import start_evo_ws_listener
+
+# IMPORTANTE:
+# este import dispara o __init__ do pacote de handlers e registra os módulos
+# no registry compartilhado.
+from backend.integrations.evolution import handlers as _evolution_handlers  # noqa: F401
+from backend.integrations.evolution.handlers.shared import HANDLERS, EvoEvent
+
 import backend.routers.auth as auth_router
 from backend.routers.auth import get_current_user
-from backend.integrations.evolution import router as evolution_router
-from backend.routers.perfil import router as perfil_router
-from backend.routers.meu_plano import router as meu_plano_router
 
 # Plans / billing
 from backend.utils.plans import is_billing_locked
-
-# Evo handlers/registry
-from backend.integrations.evo_handlers import (
-    HANDLERS, EvoEvent,
-)
 
 # =======================================
 # Config & utils
 # =======================================
 def LOG(*args):
     print("[MAIN]", *args)
+
 
 load_dotenv()
 
@@ -103,7 +106,10 @@ PROD_ORIGINS = ["https://zapschat.com.br", "https://www.zapschat.com.br"]
 ALLOW_ORIGINS = DEV_ORIGINS if ENV == "dev" else PROD_ORIGINS
 
 # ---- Flags de integração Evolution/Rabbit ----
-USE_RABBIT = bool(os.getenv("RABBITMQ_URI"))
+USE_RABBIT = any(
+    os.getenv(k)
+    for k in ("RABBITMQ_URI", "RABBITMQ_URL", "AMQP_URL")
+)
 USE_EVO_WS = (os.getenv("EVOLUTION_WS_SUBSCRIBE", "true").lower() == "true")
 
 # Cookies / CSRF
@@ -442,7 +448,6 @@ async def auth_html_gate(request: Request, call_next):
         resp.headers["X-Auth-Gate"] = "missing-cookie"
         return resp
 
-    # valida token SEMPRE para qualquer HTML logado
     try:
         payload = auth_router._decode_token(token)
     except HTTPException:
@@ -463,7 +468,6 @@ async def auth_html_gate(request: Request, call_next):
 
     billing_locked = _billing_locked_for_empresa_id(effective_empresa_id)
 
-    # trava global de páginas premium quando vencido
     if billing_locked and norm in BILLING_BLOCKED_HTML_PATHS and norm not in BILLING_ALLOWED_WHEN_LOCKED:
         return _html_billing_redirect(
             path,
@@ -471,28 +475,24 @@ async def auth_html_gate(request: Request, call_next):
             "Seu plano está vencido. Renove para continuar usando este módulo.",
         )
 
-    # se a rota não exige permissão específica, deixa seguir
     if not required:
         resp = await call_next(request)
         _no_cache_html(resp)
         _apply_billing_header(resp, billing_locked)
         return resp
 
-    # usuário admin (não colaborador) passa
     if not (isinstance(sub, str) and sub.startswith("colab-")):
         resp = await call_next(request)
         _no_cache_html(resp)
         _apply_billing_header(resp, billing_locked)
         return resp
 
-    # colaborador com role admin passa
     if role == "admin":
         resp = await call_next(request)
         _no_cache_html(resp)
         _apply_billing_header(resp, billing_locked)
         return resp
 
-    # colaborador comum → buscar permissões no DB
     try:
         colab_id = int(sub.split("colab-", 1)[1])
     except Exception:
@@ -579,7 +579,7 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8"/>
-  <title>Página não encontrada • ZapChats</title>
+  <title>Página não encontrada • zapschat</title>
   <style>
     :root{--topbar-h:44px;--card:#161617;--border:#27272a;--fg:#e5e7eb;--muted:#9ca3af;}
     html:not(.dark){--card:#fff;--border:#e5e7eb;--fg:#1f2937;--muted:#6b7280;}
@@ -804,6 +804,7 @@ if FRONTEND_DIR.is_dir():
 else:
     LOG("[STATIC] 'frontend' não encontrado — pulando mount.")
 
+
 # =======================================
 # Health / Robots / Favicon
 # =======================================
@@ -909,7 +910,7 @@ async def root_redirect(request: Request):
     if target and _page_file(target).is_file():
         return FileResponse(str(_page_file(target)))
 
-    return {"ok": True, "msg": "Backend ZapChats API (front não encontrado)."}
+    return {"ok": True, "msg": "Backend zapschat API (front não encontrado)."}
 
 
 @app.get("/dashboard", include_in_schema=False)
@@ -949,7 +950,7 @@ async def legacy_html(page_name: str):
 # =======================================
 # Handlers Evolution/WebSocket
 # =======================================
-LOG("Handlers Evolution/WebSocket prontos (via HANDLERS do evo_handlers).")
+LOG("Handlers Evolution/WebSocket prontos (via registry do pacote backend.integrations.evolution).")
 
 
 # =======================================
@@ -975,19 +976,19 @@ async def _start_integrations():
 
     if USE_RABBIT:
         try:
-            rabbit_task, rabbit_stop = start_rabbit_consumer(loop, HANDLERS, EvoEvent)
+            rabbit_task, rabbit_stop = await start_rabbit_consumer(loop, HANDLERS, EvoEvent)
             app.state.rabbit_task = rabbit_task
             app.state.rabbit_stop = rabbit_stop
             LOG("[STARTUP] RabbitMQ consumer ligado.")
         except Exception as e:
             LOG(f"[STARTUP][Rabbit] falha ao iniciar consumer: {e}")
     else:
-        LOG("[STARTUP] RabbitMQ desabilitado (sem RABBITMQ_URI).")
+        LOG("[STARTUP] RabbitMQ desabilitado (sem RABBITMQ_URI/RABBITMQ_URL/AMQP_URL).")
 
     if USE_EVO_WS:
         try:
             evo_ret = await start_evo_ws_listener(loop, HANDLERS, EvoEvent)
-            if isinstance(evo_ret, tuple) and len(evo_ret) == 2 and evo_ret[0] is not None:
+            if isinstance(evo_ret, tuple) and len(evo_ret) == 2:
                 app.state.evo_task, app.state.evo_stop = evo_ret
             LOG("[STARTUP] Evolution WS listener ligado.")
         except Exception as e:

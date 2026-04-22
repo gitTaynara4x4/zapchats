@@ -15,8 +15,8 @@ from backend.routers.auth import get_current_identity
 
 # Evolution (consulta direta, sem persistir)
 try:
-    from backend.integrations.evolution import EvolutionClient
-except Exception:  # em caso de import antes de existir
+    from backend.integrations.evolution.api.router import EvolutionClient
+except Exception:
     EvolutionClient = None  # type: ignore
 
 router = APIRouter()
@@ -37,7 +37,7 @@ def _parse_date(date_str: Optional[str]) -> Tuple[Optional[datetime], Optional[d
 def _daterange_filter(col, d0: Optional[datetime], d1: Optional[datetime]):
     if d0 and d1:
         return and_(col >= d0, col < d1)
-    return True  # no-op
+    return True
 
 
 def _today_range():
@@ -46,7 +46,6 @@ def _today_range():
 
 
 def _maybe_inst(col, instancia_id: Optional[int]):
-    """Retorna filtro por igualdade exata quando instancia_id for informado."""
     return (col == instancia_id) if instancia_id is not None else True
 
 
@@ -57,7 +56,7 @@ def _evo_enabled() -> bool:
 
 def _connected_from_state(state: str | None) -> bool:
     s = (state or "").strip().lower()
-    return s in {"open", "connected", "online"}
+    return s in {"open", "connected", "online", "ready"}
 
 
 def _evo_fetch_state(instance_name: str) -> Optional[Dict]:
@@ -68,9 +67,10 @@ def _evo_fetch_state(instance_name: str) -> Optional[Dict]:
     """
     if not instance_name or not _evo_enabled() or not EvolutionClient:
         return None
+
     try:
         evo = EvolutionClient()  # usa ENV (EVOLUTION_URL + APIKEY)
-        js = evo.get_connection_state(instance_name)  # type: ignore[attr-defined]
+        js = evo.get_connection_state(instance_name)
         data = js.get("instance") if isinstance(js, dict) else None
         state = str((data or {}).get("state") or js.get("state") or "").strip()
         return {
@@ -79,7 +79,6 @@ def _evo_fetch_state(instance_name: str) -> Optional[Dict]:
             "instance_name": instance_name,
         }
     except Exception:
-        # Mantemos silencioso para usar fallback BD
         return None
 
 
@@ -113,12 +112,10 @@ def dashboard_cards(
       - abertos: conversas ativas (heurística: última do dia foi 'entrada')
       - clientes_online: clientes com msg nos últimos 5 minutos
       - total_atendimentos: nº de clientes com alguma mensagem no dia
-    (sempre filtrando por empresa e, se vier, por instancia_id exato)
     """
     empresa_id = _assert_empresa_match(empresa_id, identity)
     d0, d1 = _parse_date(date) if date else _today_range()
 
-    # mensagens no dia
     msgs_q = (
         db.query(models.Mensagem)
         .filter(models.Mensagem.empresa_id == empresa_id)
@@ -127,7 +124,6 @@ def dashboard_cards(
     )
     mensagens_hoje = msgs_q.count()
 
-    # total de atendimentos (clientes distintos com msg no dia)
     total_atendimentos = (
         db.query(models.Mensagem.cliente_id)
         .filter(models.Mensagem.empresa_id == empresa_id)
@@ -137,7 +133,6 @@ def dashboard_cards(
         .count()
     )
 
-    # últimos do dia por cliente
     sub_last = (
         db.query(
             models.Mensagem.cliente_id.label("cid"),
@@ -163,7 +158,6 @@ def dashboard_cards(
     )
     abertos = sum(1 for m in last_msgs if (m.tipo or "").lower() == "entrada")
 
-    # clientes online (últimos 5 minutos)
     now = datetime.now()
     clientes_online = (
         db.query(models.Mensagem.cliente_id)
@@ -201,7 +195,6 @@ def dashboard_distribuicao(
     empresa_id = _assert_empresa_match(empresa_id, identity)
     d0, d1 = _parse_date(date) if date else _today_range()
 
-    # últimos do dia por cliente
     sub_last = (
         db.query(
             models.Mensagem.cliente_id.label("cid"),
@@ -227,7 +220,6 @@ def dashboard_distribuicao(
     )
     last_by_cli: Dict[int, str] = {cid: (tipo or "").lower() for cid, tipo in last_msgs}
 
-    # primeiras do dia por cliente
     sub_first = (
         db.query(
             models.Mensagem.cliente_id.label("cid"),
@@ -253,7 +245,6 @@ def dashboard_distribuicao(
     )
     first_by_cli: Dict[int, str] = {cid: (tipo or "").lower() for cid, tipo in first_msgs}
 
-    # quem teve pelo menos uma 'entrada' e nenhuma 'saida'
     set_in = {
         cid
         for (cid,) in db.query(models.Mensagem.cliente_id)
@@ -433,7 +424,6 @@ def dashboard_consolidado(
     """
     Retorna num payload só: cards, distrib, funil e ultimos.
     O JS tenta este endpoint primeiro e, se der erro, chama os separados.
-    (Todos filtráveis por empresa, data e, se informado, por instancia_id.)
     """
     empresa_id = _assert_empresa_match(empresa_id, identity)
 
@@ -442,22 +432,22 @@ def dashboard_consolidado(
         date=date,
         instancia_id=instancia_id,
         db=db,
-        identity=identity,  # passa o mesmo usuário para o helper
-    )  # type: ignore
+        identity=identity,
+    )
     distrib = dashboard_distribuicao(
         empresa_id=empresa_id,
         date=date,
         instancia_id=instancia_id,
         db=db,
         identity=identity,
-    )  # type: ignore
+    )
     funil = dashboard_funil(
         empresa_id=empresa_id,
         date=date,
         instancia_id=instancia_id,
         db=db,
         identity=identity,
-    )  # type: ignore
+    )
     ultimos = atendimentos_ultimos(
         empresa_id=empresa_id,
         date=date,
@@ -472,7 +462,6 @@ def dashboard_consolidado(
         "distrib": distrib,
         "funil": funil,
         "ultimos": ultimos,
-        # compat para o JS (realTotalFrom)
         "total_atendimentos": cards.get("total_atendimentos", 0),
         "mensagens_hoje": cards.get("mensagens_hoje", 0),
         "abertos": cards.get("abertos", 0),
@@ -494,15 +483,12 @@ def whatsapp_status(
       1) Tenta consultar a Evolution AO VIVO (sem gravar no BD) usando instance_name.
       2) Se não houver instance_name, mas tiver instancia_id, resolve o nome pelo BD e tenta Evolution.
       3) Se Evolution não estiver configurada/der erro, cai no fallback: lê flags do BD (connected/last_seen).
-    Estrutura de resposta compatível com o front.
     """
     empresa_id = _assert_empresa_match(empresa_id, identity)
 
-    # --- quando vem o nome direto (preferível) ---
     if instance_name and _evo_enabled():
         evo = _evo_fetch_state(instance_name)
         if evo is not None:
-            # Se também vier instancia_id, retorna detalhes “casados”
             detalhes = [
                 {
                     "id": instancia_id,
@@ -523,7 +509,6 @@ def whatsapp_status(
                 "source": "evolution",
             }
 
-    # --- se veio apenas o ID, tenta resolver o nome e consultar Evolution ---
     if instancia_id is not None and _evo_enabled():
         inst_row = (
             db.query(models.EmpresaInstancia)
@@ -535,6 +520,7 @@ def whatsapp_status(
         )
         if not inst_row:
             raise HTTPException(status_code=404, detail="Instância não encontrada")
+
         inst_name = (getattr(inst_row, "instance_name", None) or "").strip()
         if inst_name:
             evo = _evo_fetch_state(inst_name)
@@ -559,7 +545,6 @@ def whatsapp_status(
                     "source": "evolution",
                 }
 
-    # --- geral por empresa: tenta Evolution por todas (quando configurada) ---
     if instancia_id is None and _evo_enabled():
         rows: List[models.EmpresaInstancia] = (
             db.query(models.EmpresaInstancia)
@@ -569,6 +554,7 @@ def whatsapp_status(
         if rows:
             detalhes = []
             got_any = False
+
             for i in rows:
                 inst_name = (getattr(i, "instance_name", None) or "").strip()
                 evo = _evo_fetch_state(inst_name) if inst_name else None
@@ -585,7 +571,6 @@ def whatsapp_status(
                         }
                     )
                 else:
-                    # Se não conseguiu Evolution, ainda assim devolvemos algo neutro p/ esse item
                     detalhes.append(
                         {
                             "id": i.id,
@@ -596,6 +581,7 @@ def whatsapp_status(
                             "state": None,
                         }
                     )
+
             if got_any:
                 online = any(d["connected"] for d in detalhes)
                 return {
@@ -607,7 +593,6 @@ def whatsapp_status(
                     "source": "evolution",
                 }
 
-    # --- Fallback: BD (não grava nada, só lê) ---
     q = db.query(models.EmpresaInstancia).filter(models.EmpresaInstancia.empresa_id == empresa_id)
     if instancia_id is not None:
         q = q.filter(models.EmpresaInstancia.id == instancia_id)

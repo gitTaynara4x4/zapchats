@@ -6,13 +6,16 @@ import { cacheGet, cacheSet, cacheDel } from '../core/cache.js';
 // ===================== Utils =====================
 function toMillis(ts) {
   if (ts == null) return 0;
+
   if (typeof ts === 'number') {
     if (ts > 1e12) return Math.floor(ts);
-    if (ts > 1e8)  return Math.floor(ts * 1000);
+    if (ts > 1e8) return Math.floor(ts * 1000);
     return 0;
   }
+
   const n = Number(ts);
   if (Number.isFinite(n)) return toMillis(n);
+
   const p = Date.parse(String(ts));
   return Number.isFinite(p) ? p : 0;
 }
@@ -21,24 +24,42 @@ function normMsg(m) {
   const msg_id =
     m?.msg_id ?? m?.msgId ?? m?.message_id ?? m?.messageId ?? m?.id ?? null;
 
-  const tipo = (m?.tipo === 'saida' || m?.from_me === true || m?.origem === 'atendente')
-    ? 'saida' : 'entrada';
+  const tipo =
+    m?.tipo === 'saida' || m?.from_me === true || m?.origem === 'atendente'
+      ? 'saida'
+      : 'entrada';
 
-  const tsRaw = m?.ts ?? m?.timestamp ?? null;
-  const ts = toMillis(tsRaw) || Date.now();
+  const tsRaw =
+    m?.ts ??
+    m?.timestamp ??
+    m?.data ??
+    m?.created_at ??
+    m?.hora ??
+    null;
+
+  const isTmpId = typeof msg_id === 'string' && msg_id.startsWith('tmp:');
+  const tsParsed = toMillis(tsRaw);
+
+  // ✅ mensagem antiga sem horário real NÃO vira "agora"
+  // ✅ só local echo tmp pode cair para Date.now()
+  const ts = Number.isFinite(tsParsed) && tsParsed > 0
+    ? tsParsed
+    : (isTmpId ? Date.now() : 0);
 
   let ack = null;
   if (tipo === 'saida') {
-    const a = (m?.ack ?? m?.delivery_ack ?? m?.status_ack);
-    ack = (a == null) ? null : Number(a) || 0;
+    const a = m?.ack ?? m?.delivery_ack ?? m?.status_ack;
+    ack = a == null ? null : Number(a) || 0;
   }
 
   const midias = Array.isArray(m?.midias) ? m.midias : [];
 
   const origem =
-    (m?.origem != null)
+    m?.origem != null
       ? m.origem
-      : ((tipo === 'saida' || m?.from_me === true) ? 'atendente' : 'cliente');
+      : tipo === 'saida' || m?.from_me === true
+        ? 'atendente'
+        : 'cliente';
 
   const autor_nome =
     m?.autor_nome ?? m?.atendente_nome ?? m?.user_nome ?? null;
@@ -47,7 +68,7 @@ function normMsg(m) {
     msg_id: msg_id || null,
     conteudo: m?.conteudo ?? m?.texto ?? m?.mensagem ?? '',
     tipo,
-    timestamp: m?.timestamp ?? m?.ts ?? new Date(ts).toISOString(),
+    timestamp: tsRaw || (isTmpId ? new Date(ts).toISOString() : null),
     ack,
     midias,
     instancia_id: m?.instancia_id ?? null,
@@ -58,23 +79,29 @@ function normMsg(m) {
     apagada_cliente: Boolean(m?.apagada_cliente),
     apagada_usuario: Boolean(m?.apagada_usuario),
   };
-
 }
 
-const _norm = (v)=> (v ?? '').toString().trim();
-const _tsOf = (m)=>{
+const _norm = (v) => (v ?? '').toString().trim();
+
+const _tsOf = (m) => {
   const t = m?.timestamp || m?.ts || m?.data || m?.created_at || null;
   const d = t ? new Date(t) : null;
-  return d && !isNaN(d) ? d.getTime() : Date.now();
+  return d && !isNaN(d) ? d.getTime() : 0;
 };
-const _isTmp = (m)=>{
+
+const _isTmp = (m) => {
   const id = m?.msg_id || m?.id || '';
   return typeof id === 'string' && id.startsWith('tmp:');
 };
 
-function _findTmpCandidate(arr, incoming){
-  const isOut = (incoming.tipo === 'saida' || incoming.from_me === true || incoming.origem === 'atendente');
+function _findTmpCandidate(arr, incoming) {
+  const isOut =
+    incoming.tipo === 'saida' ||
+    incoming.from_me === true ||
+    incoming.origem === 'atendente';
+
   if (!isOut) return -1;
+
   const realId = incoming.msg_id;
   if (!realId || (typeof realId === 'string' && realId.startsWith('tmp:'))) return -1;
 
@@ -83,22 +110,32 @@ function _findTmpCandidate(arr, incoming){
 
   const now = Date.now();
   const WINDOW_MS = 15_000;
-  for (let i = arr.length - 1; i >= 0; i--){
+
+  for (let i = arr.length - 1; i >= 0; i--) {
     const m = arr[i];
     if (!_isTmp(m)) continue;
     if (!(m.tipo === 'saida' || m.from_me === true || m.origem === 'atendente')) continue;
+
     const mt = _norm(m.conteudo || m.texto || m.caption || '');
     if (mt !== txt) continue;
     if (Math.abs(now - _tsOf(m)) > WINDOW_MS) continue;
+
     return i;
   }
+
   return -1;
 }
 
 // keys
-function kHist(inst, convId)   { return `hist:${String(inst||'all')}:${String(convId)}`; }
-function kCurOld(inst, convId) { return `cursor:${String(inst||'all')}:${String(convId)}:oldest`; }
-function kCurNew(inst, convId) { return `cursor:${String(inst||'all')}:${String(convId)}:newest`; }
+function kHist(inst, convId) {
+  return `hist:${String(inst || 'all')}:${String(convId)}`;
+}
+function kCurOld(inst, convId) {
+  return `cursor:${String(inst || 'all')}:${String(convId)}:oldest`;
+}
+function kCurNew(inst, convId) {
+  return `cursor:${String(inst || 'all')}:${String(convId)}:newest`;
+}
 
 // ===================== In-memory mirror =====================
 if (!window.cacheHistoricos) window.cacheHistoricos = Object.create(null);
@@ -106,6 +143,7 @@ if (!window.cacheHistoricos) window.cacheHistoricos = Object.create(null);
 function setMirror(convId, arr) {
   window.cacheHistoricos[String(convId)] = Array.isArray(arr) ? arr : [];
 }
+
 function getMirror(convId) {
   const a = window.cacheHistoricos[String(convId)];
   return Array.isArray(a) ? a : [];
@@ -125,14 +163,25 @@ function _mergeOrPushOne(out, seen, m) {
   if (seen.has(key)) return;
 
   const idxTmp = _findTmpCandidate(out, m);
-  if (idxTmp >= 0){
+  if (idxTmp >= 0) {
     const prev = out[idxTmp];
     const merged = { ...prev, ...m };
     merged.msg_id = m.msg_id || prev.msg_id;
+
     if (m.origem != null) merged.origem = m.origem;
     if (m.autor_nome != null) merged.autor_nome = m.autor_nome;
     if (m.timestamp) merged.timestamp = m.timestamp;
-    merged.ts = toMillis(merged.timestamp) || _tsOf(merged);
+
+    const mergedTs = toMillis(
+      merged.timestamp ??
+      merged.ts ??
+      merged.data ??
+      merged.created_at ??
+      null
+    );
+
+    merged.ts = mergedTs || _tsOf(merged) || (typeof prev?.ts === 'number' ? prev.ts : 0);
+
     out[idxTmp] = merged;
     seen.set(buildIdKey(merged), true);
     return;
@@ -145,6 +194,7 @@ function _mergeOrPushOne(out, seen, m) {
 function mergeMessages(current, incoming, side = 'new') {
   const out = Array.isArray(current) ? current.slice() : [];
   const seen = new Map();
+
   for (const x of out) seen.set(buildIdKey(x), true);
 
   const normed = (Array.isArray(incoming) ? incoming : []).map(normMsg);
@@ -171,17 +221,23 @@ function mergeMessages(current, incoming, side = 'new') {
 export function getHist(inst, convId) {
   const key = kHist(inst, convId);
   const arr = cacheGet(key);
+
   if (Array.isArray(arr)) {
     setMirror(convId, arr);
     return arr;
   }
+
   const mem = getMirror(convId);
   if (mem.length) return mem;
+
   return [];
 }
 
 export function setHist(inst, convId, arr) {
-  const safe = Array.isArray(arr) ? arr.map(normMsg).sort((a,b)=>a.ts-b.ts) : [];
+  const safe = Array.isArray(arr)
+    ? arr.map(normMsg).sort((a, b) => (a.ts || 0) - (b.ts || 0))
+    : [];
+
   cacheSet(kHist(inst, convId), safe, null);
   setMirror(convId, safe);
   return safe;
@@ -204,7 +260,7 @@ export function mergeOld(inst, convId, msgs) {
 export function getCursors(inst, convId) {
   return {
     oldest: cacheGet(kCurOld(inst, convId)) ?? null,
-    newest: cacheGet(kCurNew(inst, convId)) ?? null
+    newest: cacheGet(kCurNew(inst, convId)) ?? null,
   };
 }
 
@@ -215,11 +271,13 @@ export function setCursors(inst, convId, { oldest, newest } = {}) {
 
 export function primeWith(inst, convId, msgs, cursors = null) {
   const normed = (Array.isArray(msgs) ? msgs : []).map(normMsg);
-  normed.sort((a,b)=>a.ts-b.ts);
+  normed.sort((a, b) => (a.ts || 0) - (b.ts || 0));
   setHist(inst, convId, normed);
+
   if (cursors && (cursors.oldest !== undefined || cursors.newest !== undefined)) {
     setCursors(inst, convId, cursors);
   }
+
   return normed;
 }
 
@@ -233,6 +291,7 @@ export function clear(inst = null, convId = null) {
     window.cacheHistoricos = Object.create(null);
     return;
   }
+
   if (inst != null && convId != null) {
     cacheDel(kHist(inst, convId));
     cacheDel(kCurOld(inst, convId));
@@ -245,6 +304,7 @@ export function clear(inst = null, convId = null) {
 export function pushOneNew(inst, convId, msg) {
   return mergeNew(inst, convId, [msg]);
 }
+
 export function pushOneOld(inst, convId, msg) {
   return mergeOld(inst, convId, [msg]);
 }
@@ -252,8 +312,7 @@ export function pushOneOld(inst, convId, msg) {
 // compat: alguns módulos chamam window.salvarNoCache
 try {
   window.salvarNoCache = function (convId, msgs) {
-    const inst =
-      (window.state?.clienteSel?.instancia_id ?? window.INSTANCIA_ATIVA ?? null);
+    const inst = window.state?.clienteSel?.instancia_id ?? window.INSTANCIA_ATIVA ?? null;
     mergeNew(inst, convId, msgs);
   };
 } catch {}

@@ -1,0 +1,252 @@
+# backend/integrations/evolution/handlers/connection.py
+from __future__ import annotations
+
+import asyncio
+import os
+import re
+
+import requests
+
+from backend.database import SessionLocal
+from backend import models
+from backend.websocket_manager import conexoes_ativas
+from backend.routers.cliente_onboarding import cancel_auto_cleanup
+
+from .shared import EvoEvent, HANDLERS, handler
+from ._state import INSTANCIAS_SYNC, QR_RECENT
+from ..utils.log_utils import LOG
+from ..utils.time_utils import _now_utc, _server_ts_ms
+from ..utils.cache_utils import invalidate_emp_cache
+from ..repositories.instancias_repo import get_instancia_by_name
+
+SYNC_CONTACTS_ON_CONNECT = (os.getenv("SYNC_CONTACTS_ON_CONNECT", "true").lower() == "true")
+SYNC_CHATS_ON_CONNECT = (os.getenv("SYNC_CHATS_ON_CONNECT", "true").lower() == "true")
+ENABLE_MESSAGES_SET = (os.getenv("ENABLE_MESSAGES_SET", "true").lower() == "true")
+SYNC_ON_CONNECT_AFTER_QR = (os.getenv("SYNC_ON_CONNECT_AFTER_QR", "true").lower() == "true")
+QR_CONNECT_SYNC_WINDOW_MIN = int(os.getenv("QR_CONNECT_SYNC_WINDOW_MIN", "30") or "30")
+EVOLUTION_URL = (os.getenv("EVOLUTION_URL") or "").rstrip("/")
+EVOLUTION_KEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_KEY") or ""
+HEADERS = {"apikey": EVOLUTION_KEY, "Content-Type": "application/json"} if EVOLUTION_KEY else {}
+FULL_EVENTS_WS = ["QRCODE_UPDATED", "CONNECTION_UPDATE"]
+FULL_EVENTS_RABBIT = [
+    "MESSAGES_SET",
+    "MESSAGES_UPSERT",
+    "MESSAGES_UPDATE",
+    "MESSAGES_DELETE",
+    "SEND_MESSAGE",
+    "PRESENCE_UPDATE",
+    "GROUPS_UPSERT",
+    "GROUPS_UPDATE",
+    "GROUP_PARTICIPANTS_UPDATE",
+    "CONTACTS_SET",
+    "CONTACTS_UPSERT",
+    "CONTACTS_UPDATE",
+    "NEW_TOKEN",
+    "LOGOUT_INSTANCE",
+    "INSTANCE_DELETE",
+    "REMOVE_INSTANCE",
+]
+RABBIT_EXCHANGE = os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange")
+RABBIT_BINDINGS = [b.strip() for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#").split(",") if b.strip()]
+
+
+def _inst_from_payload(first: str, payload: dict | list) -> str:
+    if isinstance(payload, dict):
+        for key in ("instance", "instanceName", "instanceId"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+        data = payload.get("data")
+        if isinstance(data, dict):
+            for key in ("instance", "instanceName", "instanceId"):
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+
+    return str(first or "").strip()
+
+
+def _get_inst_row(db, instance: str):
+    return get_instancia_by_name(db, instance_name=instance)
+
+
+def _evo_expand_websocket(instance: str) -> None:
+    if not (EVOLUTION_URL and HEADERS and instance):
+        return
+    body = {"websocket": {"enabled": True, "events": FULL_EVENTS_WS}}
+    try:
+        requests.post(f"{EVOLUTION_URL}/websocket/set/{instance}", headers=HEADERS, json=body, timeout=15)
+        LOG(f"[WS] expandido para inst={instance} -> {len(FULL_EVENTS_WS)} eventos")
+    except Exception as e:
+        LOG(f"[WS] falha ao expandir: {e}")
+
+
+def _evo_expand_rabbit(instance: str) -> None:
+    if not (EVOLUTION_URL and HEADERS and instance):
+        return
+    body = {
+        "rabbitmq": {
+            "enabled": True,
+            "exchange": RABBIT_EXCHANGE,
+            "bindings": RABBIT_BINDINGS,
+            "events": FULL_EVENTS_RABBIT,
+        }
+    }
+    try:
+        requests.post(f"{EVOLUTION_URL}/rabbitmq/set/{instance}", headers=HEADERS, json=body, timeout=20)
+        LOG(f"[Rabbit] expandido para inst={instance} -> {len(FULL_EVENTS_RABBIT)} eventos")
+    except Exception as e:
+        LOG(f"[Rabbit] falha ao expandir: {e}")
+
+
+def _mark_disconnected(instance: str):
+    if not instance:
+        return
+
+    db = SessionLocal()
+    try:
+        row = db.query(models.EmpresaInstancia).filter(models.EmpresaInstancia.instance_name == instance).first()
+        if row:
+            row.connected = False
+            row.last_seen = _now_utc()
+
+            emp = db.query(models.Empresa).filter(models.Empresa.id == row.empresa_id).first()
+            if emp and hasattr(emp, "quantidade_instancias"):
+                emp.quantidade_instancias = (
+                    db.query(models.EmpresaInstancia)
+                    .filter(
+                        models.EmpresaInstancia.empresa_id == emp.id,
+                        models.EmpresaInstancia.connected.is_(True),
+                    )
+                    .count()
+                )
+            db.commit()
+
+            try:
+                asyncio.create_task(
+                    conexoes_ativas.send_message(
+                        f"emp:{row.empresa_id}",
+                        {"type": "reload_whatsapp", "serverTimestamp": _server_ts_ms()},
+                    )
+                )
+            except Exception:
+                pass
+
+            try:
+                invalidate_emp_cache(row.empresa_id)
+            except Exception:
+                pass
+    finally:
+        db.close()
+
+
+@handler(EvoEvent.CONNECTION_UPDATE)
+async def on_conn_update(first: str, payload: dict):
+    from .contacts import sync_contatos_completos, sync_chats_completos
+
+    inst_id = _inst_from_payload(first, payload)
+    data = (payload.get("data") or payload) if isinstance(payload, dict) else {}
+
+    st = str((data.get("state") or data.get("status") or "")).strip().lower()
+    conectado = st in ("connected", "open")
+
+    was_connected = False
+    empresa_id = None
+    historico_opcao = "none"
+
+    with SessionLocal() as db:
+        inst = _get_inst_row(db, inst_id)
+        if not inst:
+            return
+
+        was_connected = bool(getattr(inst, "connected", False))
+        inst.connected = bool(conectado)
+
+        wuid = (data.get("id") or data.get("wid") or (data.get("me") or {}).get("id")) if isinstance(data, dict) else None
+        if isinstance(wuid, str) and wuid.endswith("@s.whatsapp.net"):
+            inst.numero_instancia = re.sub(r"\D", "", wuid.split("@", 1)[0])
+
+        inst.last_seen = _now_utc()
+        empresa_id = inst.empresa_id
+        historico_opcao = (inst.historico_restaurar or "none").lower()
+        db.commit()
+
+    if (not conectado) and (st in ("close", "closed", "disconnected", "logout", "loggedout")):
+        INSTANCIAS_SYNC.discard(inst_id)
+        QR_RECENT.pop(inst_id, None)
+        _mark_disconnected(inst_id)
+
+    if conectado and not was_connected:
+        try:
+            cancel_auto_cleanup(inst_id)
+        except Exception as e:
+            LOG(f"[CLEANUP] falha ao cancelar auto cleanup: {e}")
+
+        if empresa_id is not None and (historico_opcao in ("24h", "7d")):
+            try:
+                await conexoes_ativas.send_message(
+                    f"emp:{empresa_id}", {"type": "history_sync_start", "total": 0, "serverTimestamp": _server_ts_ms()}
+                )
+                await conexoes_ativas.send_message(
+                    f"emp:{empresa_id}",
+                    {"type": "history_sync_progress", "imported": 0, "total": 0, "serverTimestamp": _server_ts_ms()},
+                )
+            except Exception as e:
+                LOG(f"[SYNC] falha ao emitir start/progress inicial: {e}")
+
+        _evo_expand_websocket(inst_id)
+        _evo_expand_rabbit(inst_id)
+
+    await conexoes_ativas.send_message(
+        f"inst:{inst_id}",
+        {"type": "connection", "status": "CONNECTED" if conectado else "DISCONNECTED", "serverTimestamp": _server_ts_ms()},
+    )
+    if empresa_id is not None:
+        await conexoes_ativas.send_message(
+            f"emp:{empresa_id}",
+            {
+                "type": "connection",
+                "inst_status": {"connected": bool(conectado), "instance": inst_id},
+                "reload_whatsapp": True,
+                "serverTimestamp": _server_ts_ms(),
+            },
+        )
+
+    if conectado and inst_id not in INSTANCIAS_SYNC:
+        do_sync = True
+
+        if SYNC_ON_CONNECT_AFTER_QR:
+            now_s = int(_now_utc().timestamp())
+            qr_s = QR_RECENT.get(inst_id)
+            do_sync = bool(qr_s and (now_s - int(qr_s)) <= (QR_CONNECT_SYNC_WINDOW_MIN * 60))
+
+        if do_sync:
+            INSTANCIAS_SYNC.add(inst_id)
+            QR_RECENT.pop(inst_id, None)
+
+            if SYNC_CONTACTS_ON_CONNECT:
+                await sync_contatos_completos(inst_id)
+            if SYNC_CHATS_ON_CONNECT:
+                await sync_chats_completos(inst_id)
+
+            if ENABLE_MESSAGES_SET:
+                LOG("[MESSAGES_SET] aguardando histórico (none/24h/7d).")
+
+
+async def on_logout_instance(instance: str, payload: dict):
+    INSTANCIAS_SYNC.discard(instance)
+    QR_RECENT.pop(instance, None)
+    _mark_disconnected(instance)
+
+
+HANDLERS[EvoEvent.LOGOUT_INSTANCE] = on_logout_instance
+HANDLERS[EvoEvent.REMOVE_INSTANCE] = on_logout_instance
+if hasattr(EvoEvent, "INSTANCE_DELETE"):
+    HANDLERS[getattr(EvoEvent, "INSTANCE_DELETE")] = on_logout_instance
+
+
+__all__ = [
+    "on_conn_update",
+    "on_logout_instance",
+]

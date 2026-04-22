@@ -3,17 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Painel de Atendimento – ZapChats</title>
+  <title>Painel de Atendimento – zapschat</title>
 
   <script>
     (function () {
       try {
         const saved = localStorage.getItem('zc:theme');
-        const prefersDark = matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
-        document.documentElement.setAttribute(
-          'data-theme',
-          saved || (prefersDark ? 'dark' : 'light')
-        );
+        const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const mode = saved || (prefersDark ? 'dark' : 'light');
+        const root = document.documentElement;
+
+        root.setAttribute('data-theme', mode);
+        root.classList.toggle('dark', mode === 'dark');
       } catch {}
     })();
   </script>
@@ -34,14 +35,12 @@
       background-size: 400px 400px !important;
     }
 
-    html[data-theme="dark"] main.whatsapp-auto-bg #historico,
-    html.dark main.whatsapp-auto-bg #historico{
+    html[data-theme="dark"] main.whatsapp-auto-bg #historico{
       background-color:#0b141a !important;
       background-image: url("/frontend/img/whatsapp-bg-dark.png") !important;
     }
 
-    html[data-theme="light"] main.whatsapp-auto-bg #historico,
-    html:not(.dark) main.whatsapp-auto-bg #historico{
+    html[data-theme="light"] main.whatsapp-auto-bg #historico{
       background-color:#efeae2 !important;
       background-image: url("/frontend/img/whatsapp-bg-light.png") !important;
     }
@@ -350,7 +349,7 @@
       <ul id="lista-clientes"></ul>
     </aside>
 
-    <main class="flex flex-col whatsapp-bg-dark">
+    <main id="chat-main" class="flex flex-col whatsapp-auto-bg">
       <header id="chat-header"
               class="h-16 flex items-center px-4 gap-3 shadow-sm"
               style="display:none;">
@@ -384,10 +383,10 @@
         class="absolute inset-0 flex flex-col items-center justify-center text-center z-10">
         <img src="/frontend/img/wpp.png"
              class="w-52 h-auto mb-6 opacity-100"
-             alt="ZapChats Logo">
+             alt="zapschat Logo">
         <h2 class="text-lg font-semibold mt-2">Mantenha seu celular conectado</h2>
         <p class="max-w-md">
-          O ZapChats conecta ao seu telefone para sincronizar suas mensagens.<br>
+          O zapschat conecta ao seu telefone para sincronizar suas mensagens.<br>
           Mantenha seu dispositivo conectado à internet para não perder conversas.
         </p>
       </section>
@@ -402,35 +401,43 @@
         </div>
       </div>
 
-      <footer id="chat-footer"
-              class="flex items-center gap-3 px-4 py-3"
-              style="display:none;">
-        <button
-          type="button"
-          class="text-xl"
-          id="btn-clipe"
-          title="Enviar arquivo"
-          aria-label="Enviar arquivo">
-          <i class="fa fa-paperclip"></i>
-        </button>
+      <footer id="chat-footer" style="display:none;">
+        <div class="wa-composer" id="wa-composer">
+          <button
+            type="button"
+            class="wa-composer-btn wa-attach-btn"
+            id="btn-clipe"
+            title="Anexar"
+            aria-label="Anexar">
+            <i class="fa fa-plus"></i>
+          </button>
+
+          <button
+            type="button"
+            class="wa-composer-btn wa-emoji-btn"
+            id="btn-emoji"
+            title="Emoji"
+            aria-label="Emoji">
+            <i class="fa-regular fa-face-smile"></i>
+          </button>
+
+          <input
+            id="mensagem"
+            class="wa-composer-input"
+            placeholder="Digite uma mensagem"
+            autocomplete="off"/>
+
+          <button
+            id="btn-enviar"
+            class="wa-composer-btn wa-action-btn"
+            type="button"
+            title="Gravar áudio"
+            aria-label="Gravar áudio">
+            <i class="fa-solid fa-microphone"></i>
+          </button>
+        </div>
 
         <input id="input-arquivo" type="file" style="display:none" />
-
-        <input
-          id="mensagem"
-          placeholder="Digite sua resposta…"
-          class="flex-1 outline-none px-3 py-2 rounded"
-          autocomplete="off"/>
-
-        <button
-          id="btn-enviar"
-          class="send-btn"
-          title="Enviar"
-          aria-label="Enviar">
-          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
-            <path fill="currentColor" d="M2 21l21-9L2 3v7l15 2-15 2v7z"/>
-          </svg>
-        </button>
       </footer>
     </main>
   </div>
@@ -615,6 +622,19 @@
                document.documentElement.getAttribute('data-theme') === 'dark';
       }
 
+      function syncMainThemeBackground() {
+        const main =
+          document.getElementById('chat-main') ||
+          document.querySelector('.wpp-root > main') ||
+          document.querySelector('main');
+
+        if (!main) return;
+
+        if (!main.id) main.id = 'chat-main';
+        main.classList.remove('whatsapp-bg-dark', 'whatsapp-bg-light');
+        main.classList.add('whatsapp-auto-bg');
+      }
+
       function setTheme(mode) {
         const dark = String(mode) === 'dark';
         const root = document.documentElement;
@@ -627,6 +647,8 @@
 
         root.classList.toggle('dark', dark);
         root.setAttribute('data-theme', dark ? 'dark' : 'light');
+
+        syncMainThemeBackground();
 
         try {
           localStorage.setItem('theme', dark ? 'dark' : 'light');
@@ -823,6 +845,7 @@
 
         await hydrateUserFromApi();
         initMiniSidebar();
+        syncMainThemeBackground();
       } catch (err) {
         console.error('Erro ao carregar sidebar-atendimentos.html:', err);
       }
@@ -996,6 +1019,31 @@
       setTimeout(syncDropdown, 250);
       setTimeout(syncDropdown, 700);
       window.addEventListener('load', syncDropdown);
+    })();
+  </script>
+
+  <script>
+    (function () {
+      function syncMainThemeBackground() {
+        const main =
+          document.getElementById('chat-main') ||
+          document.querySelector('.wpp-root > main') ||
+          document.querySelector('main');
+
+        if (!main) return;
+
+        if (!main.id) main.id = 'chat-main';
+        main.classList.remove('whatsapp-bg-dark', 'whatsapp-bg-light');
+        main.classList.add('whatsapp-auto-bg');
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', syncMainThemeBackground, { once: true });
+      } else {
+        syncMainThemeBackground();
+      }
+
+      window.addEventListener('load', syncMainThemeBackground);
     })();
   </script>
 </body>

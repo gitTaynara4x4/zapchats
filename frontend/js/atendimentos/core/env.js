@@ -1,4 +1,4 @@
-// js/atendimentos/core/env.js
+// /frontend/js/atendimentos/core/env.js
 
 // Lê empresa_id do localStorage
 const rawEmpresa = localStorage.getItem('empresa_id');
@@ -15,20 +15,20 @@ if (!Number.isFinite(EMPRESA_ID) || EMPRESA_ID <= 0) {
 export const APP_TZ = 'America/Sao_Paulo';
 
 /* ============================================================
-   Bridge para scripts legados (inline/IIFEs)
-   - Publica EMPRESA_ID e APP_TZ no escopo global (window)
-   - Não interfere no uso por ES Modules (import/export)
-   ============================================================ */
+   Bridge para scripts legados (inline / IIFE)
+   - Publica EMPRESA_ID e APP_TZ no window
+   - Não interfere no uso via import/export
+============================================================ */
 try {
-  // Apenas define se ainda não existir, para evitar sobrescrita acidental
   if (typeof window !== 'undefined') {
     if (typeof window.EMPRESA_ID === 'undefined') {
       window.EMPRESA_ID = EMPRESA_ID;
     }
+
     if (typeof window.APP_TZ === 'undefined') {
       window.APP_TZ = APP_TZ;
     }
   }
 } catch (e) {
-  // Em ambientes sem window (SSR/tests), ignore
+  // ambientes sem window
 }

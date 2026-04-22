@@ -1,17 +1,28 @@
 # backend/routers/atendimento_chat.py
 from __future__ import annotations
 
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, Tuple
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 
 from backend.database import get_db
 from backend import models
 from backend.routers.auth import get_current_identity
 from backend.websocket_manager import conexoes_ativas
+from backend.integrations.evolution.utils.phone_utils import (
+    formatar_telefone_br as formatar_telefone_br_phone_utils,
+    normalize_phone_for_db,
+    normalize_phone_for_send,
+)
+from backend.security.atendimento_acl import (
+    ensure_perm,
+    assert_same_company,
+    resolve_acl_context,
+    assert_instancia_allowed,
+    assert_cliente_access,
+)
 
 # =========================================================
 # Router
@@ -20,207 +31,8 @@ router = APIRouter(prefix="", tags=["Atendimento – Chat"])
 
 
 # =========================================================
-# ACL / Permissões (mesmo padrão do resto)
-# =========================================================
-def _to_int(v) -> Optional[int]:
-    try:
-        if v is None:
-            return None
-        s = str(v).strip()
-        if not s:
-            return None
-        return int(s)
-    except Exception:
-        return None
-
-
-def _is_admin(identity: dict) -> bool:
-    try:
-        if identity.get("is_admin") or identity.get("admin"):
-            return True
-        perms = identity.get("permissoes") or identity.get("permissions") or []
-        if isinstance(perms, dict):
-            perms = [k for k, v in perms.items() if v]
-        perms = set(str(p).lower() for p in (perms or []))
-        return any(p in perms for p in ("admin", "root", "clientes.gerenciar", "atendimento.gerenciar"))
-    except Exception:
-        return False
-
-
-def _ensure_perm(identity: dict, perm: str) -> None:
-    if _is_admin(identity):
-        return
-    perms = set(identity.get("permissoes") or [])
-    if perm not in perms:
-        raise HTTPException(status_code=403, detail=f"Sem permissão ({perm})")
-
-
-def _infer_kind(identity: dict) -> str:
-    k = (identity.get("kind") or identity.get("tipo") or "").lower().strip()
-    if k in ("colaborador", "usuario", "admin"):
-        return "colaborador" if k == "colaborador" else "usuario"
-    sub = str(identity.get("sub") or "").strip().lower()
-    role = str(identity.get("role") or "").strip().lower()
-    if sub.startswith("colab-") or "colab" in role or "colaborador" in role:
-        return "colaborador"
-    return "usuario"
-
-
-def _get_colab_id(identity: dict) -> Optional[int]:
-    for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
-        cid = _to_int(identity.get(key))
-        if cid:
-            return cid
-    sub = str(identity.get("sub") or "").strip().lower()
-    if sub.startswith("colab-"):
-        cid = _to_int(sub.split("-", 1)[1])
-        if cid:
-            return cid
-    return _to_int(identity.get("id"))
-
-
-def _table_exists(db: Session, table_name: str) -> bool:
-    try:
-        reg = db.execute(text(f"SELECT to_regclass('public.{table_name}')")).scalar()
-        return reg is not None
-    except Exception:
-        return False
-
-
-def _allowed_instancia_ids(db: Session, identity: dict, empresa_id: int) -> Optional[List[int]]:
-    """
-    Retorna:
-      - None => sem restrição (admin/usuario master OU tabela inexistente)
-      - []   => colaborador sem instâncias permitidas (nega tudo)
-      - [..] => lista de instâncias permitidas
-    """
-    if _is_admin(identity):
-        return None
-
-    if _infer_kind(identity) != "colaborador":
-        return None
-
-    if not _table_exists(db, "colaboradores_instancias"):
-        return None  # legado: não restringe
-
-    cid = _get_colab_id(identity)
-    if not cid:
-        return []
-
-    rows = db.execute(
-        text(
-            """
-            SELECT instancia_id
-            FROM colaboradores_instancias
-            WHERE empresa_id = :emp
-              AND colaborador_id = :cid
-            """
-        ),
-        {"emp": int(empresa_id), "cid": int(cid)},
-    ).fetchall()
-
-    ids = [int(r[0]) for r in rows if r and r[0] is not None]
-    return ids
-
-
-def _assert_instancia_allowed(allowed: Optional[List[int]], instancia_id: Optional[int]) -> None:
-    if instancia_id is None:
-        return
-    if allowed is None:
-        return
-    if int(instancia_id) not in set(int(x) for x in allowed):
-        raise HTTPException(status_code=403, detail="Instância não permitida para este usuário")
-
-
-def _assert_cliente_access_by_instancias(
-    db: Session,
-    *,
-    empresa_id: int,
-    cliente_id: int,
-    allowed: Optional[List[int]],
-) -> None:
-    """
-    Garante que colaborador só acesse cliente que tenha mensagens em instância permitida.
-    Admin/allowed=None => libera.
-    """
-    if allowed is None:
-        return
-    if not allowed:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
-
-    ok = (
-        db.query(models.Mensagem.id)
-        .filter(
-            models.Mensagem.empresa_id == int(empresa_id),
-            models.Mensagem.cliente_id == int(cliente_id),
-            models.Mensagem.instancia_id.in_([int(x) for x in allowed]),
-        )
-        .first()
-    )
-    if not ok:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
-
-
-# =========================================================
 # Utils locais
 # =========================================================
-def _assert_mesma_empresa(empresa_do_token: int, empresa_da_query: int | None) -> int:
-    if empresa_da_query is None:
-        return int(empresa_do_token)
-    if int(empresa_da_query) != int(empresa_do_token):
-        raise HTTPException(status_code=403, detail="Empresa inválida para este recurso")
-    return int(empresa_da_query)
-
-
-def _normalize_phone(numero: Optional[str]) -> Optional[str]:
-    if not numero:
-        return None
-    s = "".join(ch for ch in str(numero) if ch.isdigit())
-    if not s:
-        return None
-    if s.startswith("0"):
-        s = s[1:]
-    if not s.startswith("55"):
-        s = "55" + s
-    if len(s) >= 6:
-        ddd = s[2:4]
-        restante = s[4:]
-        if len(restante) == 8 and not restante.startswith("9"):
-            restante = "9" + restante
-        s = f"55{ddd}{restante}"
-    return s
-
-
-def _format_phone_br(numero: Optional[str]) -> str:
-    if not numero:
-        return "—"
-    n = "".join(filter(str.isdigit, numero))
-    if len(n) == 13:
-        return f"+{n[:2]} {n[2:4]} {n[4:9]}-{n[9:]}"
-    if len(n) == 12:
-        return f"+{n[:2]} {n[2:4]} {n[4:8]}-{n[8:]}"
-    return f"+{n[:2]} {n[2:]}" if len(n) > 2 else n
-
-
-def _display_name_or_phone(
-    db: Session,
-    empresa_id: int,
-    telefone: Optional[str],
-    push_name: Optional[str] = None,
-    models=None,
-) -> str:
-    tel_fmt = _format_phone_br(telefone)
-    if not telefone or models is None:
-        return push_name or tel_fmt
-    cli = (
-        db.query(models.Cliente)
-        .filter_by(empresa_id=empresa_id, telefone=telefone)
-        .first()
-    )
-    nome = getattr(cli, "nome_whatsapp", None) or getattr(cli, "nome", None) or push_name
-    return nome or tel_fmt
-
-
 def _resolve_instancia_id(
     db: Session,
     *,
@@ -259,6 +71,29 @@ def _resolve_instancia_id(
         return None, None
 
     return None, None
+
+
+def _normalize_phone(numero: Optional[str]) -> Optional[str]:
+    """
+    Compat local: agora usa a normalização central do backend.
+    Retorna o formato canônico de banco (sem 55, com 9 quando aplicável).
+    """
+    return normalize_phone_for_db(numero)
+
+
+def _format_phone_br(numero: Optional[str]) -> str:
+    """
+    Formata o telefone no padrão BR a partir da normalização central.
+    """
+    if not numero:
+        return "—"
+
+    send_e164 = normalize_phone_for_send(numero)
+    if not send_e164:
+        return "—"
+
+    formatted = formatar_telefone_br_phone_utils(send_e164)
+    return formatted or "—"
 
 
 def _iso_utc(ts) -> str:
@@ -316,16 +151,12 @@ def listar_mensagens(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    # permissão
-    _ensure_perm(identity, "atendimento.ver")
+    ensure_perm(identity, "atendimento.ver")
 
-    # empresa efetiva (valida com token)
-    empresa_id_eff = _assert_mesma_empresa(int(identity["empresa_id"]), empresa_id)
+    empresa_id_eff = assert_same_company(identity, empresa_id)
+    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
+    allowed_instancias = acl_ctx["allowed_instancias"]
 
-    # ACL instâncias (se colaborador)
-    allowed = _allowed_instancia_ids(db, identity, empresa_id_eff)
-
-    # resolve instância (id e nome), se vier
     resolved_inst_id, resolved_inst_name = _resolve_instancia_id(
         db,
         empresa_id=empresa_id_eff,
@@ -333,12 +164,14 @@ def listar_mensagens(
         instance=instance,
     )
 
-    # se o usuário pediu instância mas não existe
     if (instancia_id is not None or instance) and resolved_inst_id is None:
         raise HTTPException(status_code=404, detail="Instância não encontrada para a empresa.")
 
-    # se existe ACL, garantir que a instância pedida é permitida
-    _assert_instancia_allowed(allowed, resolved_inst_id)
+    if resolved_inst_id is not None:
+        assert_instancia_allowed(
+            allowed_instancias=allowed_instancias,
+            instancia_id=resolved_inst_id,
+        )
 
     # ============================================
     # 1) tenta como CLIENTE
@@ -353,17 +186,23 @@ def listar_mensagens(
     )
 
     if cli:
-        _assert_cliente_access_by_instancias(db, empresa_id=empresa_id_eff, cliente_id=int(cliente_id), allowed=allowed)
+        cliente_acl, atendimento_acl = assert_cliente_access(
+            db,
+            identity=identity,
+            empresa_id=empresa_id_eff,
+            cliente_id=int(cliente_id),
+            instancia_id=resolved_inst_id,
+            allow_unassigned_department=False,
+        )
 
-        # filtros efetivos de instância:
         instancia_filters = []
         if resolved_inst_id is not None:
             instancia_filters.append(models.Mensagem.instancia_id == int(resolved_inst_id))
         else:
-            if allowed is not None:
-                if not allowed:
+            if allowed_instancias is not None:
+                if not allowed_instancias:
                     return {"conversa": None, "items": [], "mensagens": []}
-                instancia_filters.append(models.Mensagem.instancia_id.in_([int(x) for x in allowed]))
+                instancia_filters.append(models.Mensagem.instancia_id.in_([int(x) for x in allowed_instancias]))
 
         q = (
             db.query(
@@ -390,7 +229,6 @@ def listar_mensagens(
             )
         )
 
-        # cursor
         if since_id is not None:
             q = q.filter(models.Mensagem.id > int(since_id))
         if since_ts is not None:
@@ -405,7 +243,6 @@ def listar_mensagens(
 
         rows = q.all()
 
-        # normaliza saída
         items = []
         for r in rows:
             ts_iso = _iso_utc(r.timestamp) if r.timestamp is not None else None
@@ -425,18 +262,29 @@ def listar_mensagens(
                 }
             )
 
-        # ✅ meta da conversa (pra header no front) — avatar SEMPRE local
+        telefone_br = _format_phone_br(getattr(cliente_acl, "telefone", None))
+        telefone_norm = _normalize_phone(getattr(cliente_acl, "telefone", None))
+
         conversa = {
-            "id": int(cli.id),
+            "id": int(cliente_acl.id),
             "is_group": False,
-            "telefone": getattr(cli, "telefone", None),
-            "telefone_fmt": _format_phone_br(getattr(cli, "telefone", None)),
-            "nome": getattr(cli, "nome", None),
-            "push_name": getattr(cli, "nome_whatsapp", None),
+            "telefone": getattr(cliente_acl, "telefone", None),
+            "telefone_norm": telefone_norm,
+            "telefone_fmt": telefone_br,
+            "nome": getattr(cliente_acl, "nome", None),
+            "push_name": getattr(cliente_acl, "nome_whatsapp", None),
             "avatar_url": _public_avatar_url(
                 kind="cliente",
-                conversation_id=int(cli.id),
-                raw_avatar_url=getattr(cli, "avatar_url", None),
+                conversation_id=int(cliente_acl.id),
+                raw_avatar_url=getattr(cliente_acl, "avatar_url", None),
+            ),
+            "instancia_id": resolved_inst_id,
+            "instance_name": resolved_inst_name,
+            "atendimento_id": getattr(atendimento_acl, "id", None) if atendimento_acl else None,
+            "departamento_id": (
+                getattr(atendimento_acl, "departamento_id", None)
+                if atendimento_acl is not None
+                else getattr(cliente_acl, "departamento_id", None)
             ),
         }
 
@@ -456,15 +304,14 @@ def listar_mensagens(
     if not grp:
         raise HTTPException(status_code=404, detail="Conversa não encontrada nessa empresa.")
 
-    # filtros efetivos de instância (para mensagens_grupo)
     instancia_filters_g = []
     if resolved_inst_id is not None:
         instancia_filters_g.append(models.MensagemGrupo.instancia_id == int(resolved_inst_id))
     else:
-        if allowed is not None:
-            if not allowed:
+        if allowed_instancias is not None:
+            if not allowed_instancias:
                 return {"conversa": None, "items": [], "mensagens": []}
-            instancia_filters_g.append(models.MensagemGrupo.instancia_id.in_([int(x) for x in allowed]))
+            instancia_filters_g.append(models.MensagemGrupo.instancia_id.in_([int(x) for x in allowed_instancias]))
 
     qg = (
         db.query(
@@ -473,7 +320,7 @@ def listar_mensagens(
             models.MensagemGrupo.conteudo,
             models.MensagemGrupo.tipo,
             models.MensagemGrupo.ack,
-            models.MensagemGrupo.timestamp,  # epoch
+            models.MensagemGrupo.timestamp,
             models.MensagemGrupo.instancia_id,
             models.EmpresaInstancia.instance_name.label("instance_name"),
             models.MensagemGrupo.author_jid,
@@ -491,12 +338,10 @@ def listar_mensagens(
         )
     )
 
-    # cursor (since_id usa o id interno da tabela mensagens_grupo)
     if since_id is not None:
         qg = qg.filter(models.MensagemGrupo.id > int(since_id))
 
     if since_ts is not None:
-        # since_ts vem datetime; mensagens_grupo.timestamp é epoch
         since_epoch = int(since_ts.replace(tzinfo=timezone.utc).timestamp())
         qg = qg.filter(models.MensagemGrupo.timestamp > since_epoch)
 
@@ -536,7 +381,6 @@ def listar_mensagens(
             }
         )
 
-    # ✅ meta da conversa (pra header no front) — avatar SEMPRE local
     conversa_g = {
         "id": int(grp.id),
         "is_group": True,
@@ -547,6 +391,8 @@ def listar_mensagens(
             conversation_id=int(grp.id),
             raw_avatar_url=getattr(grp, "avatar_url", None),
         ),
+        "instancia_id": resolved_inst_id,
+        "instance_name": resolved_inst_name,
     }
 
     return {"conversa": conversa_g, "items": items_g, "mensagens": items_g}
@@ -568,7 +414,7 @@ def listar_mensagens_alias_historico(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    empresa_id_eff = _assert_mesma_empresa(int(identity["empresa_id"]), empresa_id)
+    empresa_id_eff = assert_same_company(identity, empresa_id)
     return listar_mensagens(
         cliente_id=cliente_id,
         empresa_id=empresa_id_eff,
@@ -594,20 +440,29 @@ async def apagar_mensagem_atendimento(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    empresa_id_eff = _assert_mesma_empresa(int(identity["empresa_id"]), empresa_id)
+    empresa_id_eff = assert_same_company(identity, empresa_id)
 
     perms = set(identity.get("permissoes") or [])
-    is_admin = bool(identity.get("is_admin")) or _is_admin(identity)
+    is_admin = bool(identity.get("is_admin")) or bool(identity.get("admin"))
     if not (is_admin or "atendimento.apagar_mensagens" in perms):
         raise HTTPException(status_code=403, detail="Sem permissão para apagar mensagens de atendimento")
 
-    # ACL instâncias (se colaborador)
-    allowed = _allowed_instancia_ids(db, identity, empresa_id_eff)
+    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
+    allowed_instancias = acl_ctx["allowed_instancias"]
 
-    # Se colaborador com ACL, só pode apagar msg de instância permitida.
-    # (Se a tabela não existir => allowed=None => libera)
-    if allowed is not None and not allowed:
-        raise HTTPException(status_code=404, detail="Mensagem não encontrada")
+    # garante ACL de departamento + instância para conversa de cliente
+    try:
+        assert_cliente_access(
+            db,
+            identity=identity,
+            empresa_id=empresa_id_eff,
+            cliente_id=int(cliente_id),
+            instancia_id=None,
+            allow_unassigned_department=False,
+        )
+    except HTTPException:
+        # se não for cliente 1:1, deixa seguir para tentativa de grupo por instância
+        pass
 
     q = (
         db.query(models.Mensagem)
@@ -618,8 +473,10 @@ async def apagar_mensagem_atendimento(
         )
     )
 
-    if allowed is not None:
-        q = q.filter(models.Mensagem.instancia_id.in_([int(x) for x in allowed]))
+    if allowed_instancias is not None:
+        if not allowed_instancias:
+            raise HTTPException(status_code=404, detail="Mensagem não encontrada")
+        q = q.filter(models.Mensagem.instancia_id.in_([int(x) for x in allowed_instancias]))
 
     rows = q.all()
     if not rows:

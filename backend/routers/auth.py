@@ -52,7 +52,7 @@ from backend.security.passwords import hash_pwd, verify_pwd
 # ───────────────────────── Configurações ─────────────────────────
 load_dotenv()
 
-EMAIL_REMETENTE = os.getenv("EMAIL_REMETENTE", "recuperazapchats@gmail.com")
+EMAIL_REMETENTE = os.getenv("EMAIL_REMETENTE", "recuperazapschat@gmail.com")
 EMAIL_SENHA = os.getenv("EMAIL_SENHA", "qrwfnzukgfk221opifr")
 
 JWT_SECRET = os.getenv("JWT_SECRET", "troque-me")
@@ -406,11 +406,11 @@ def gerar_codigo_reset_5d() -> str:
 
 
 def enviar_email_reset(email_destino: str, token: str):
-    assunto = "[ZapChats] Código para redefinir sua senha"
+    assunto = "[zapschat] Código para redefinir sua senha"
     corpo = f"""
 Olá,
 
-Recebemos uma solicitação para redefinir a senha da conta ZapChats associada a este e-mail.
+Recebemos uma solicitação para redefinir a senha da conta zapschat associada a este e-mail.
 
 Seu código de redefinição é:
 
@@ -420,7 +420,7 @@ Por motivos de segurança, este código é válido por um período limitado.
 Se você não fez esta solicitação, pode ignorar este e-mail.
 
 Atenciosamente,
-Equipe ZapChats
+Equipe zapschat
 """
     _smtp_send(email_destino, assunto, corpo)
 
@@ -433,7 +433,7 @@ def enviar_email_login_token(
     email_destino: str, codigo: str, nome_empresa: Optional[str] = None
 ):
     prefixo = f"[{nome_empresa}] " if nome_empresa else ""
-    assunto = f"{prefixo}Código de acesso ao ZapChats"
+    assunto = f"{prefixo}Código de acesso ao zapschat"
 
     corpo = f"""
 Olá,
@@ -442,13 +442,13 @@ Seu código de acesso é:
 
     {codigo}
 
-Digite esse código na tela de login do ZapChats para concluir o acesso.
+Digite esse código na tela de login do zapschat para concluir o acesso.
 Por segurança, este código expira em poucos minutos e só deve ser usado por você.
 
 Se você não está tentando acessar o sistema, ignore este e-mail.
 
 Atenciosamente,
-Equipe ZapChats
+Equipe zapschat
 """
     _smtp_send(email_destino, assunto, corpo)
 

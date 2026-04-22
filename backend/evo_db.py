@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, text
 
 # Exemplo de DSN – ajuste senha/host se precisar
 # coloque isso no .env:
-# EVOLUTION_DB_DSN=postgresql+psycopg2://postgres:SENHA@zapchats_evolution-api-db:5432/zapchats
+# EVOLUTION_DB_DSN=postgresql+psycopg2://postgres:SENHA@zapschat_evolution-api-db:5432/zapschat
 EVOLUTION_DB_DSN = os.getenv("EVOLUTION_DB_DSN")
 
 evo_engine = create_engine(

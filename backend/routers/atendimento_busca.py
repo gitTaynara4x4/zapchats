@@ -1,22 +1,34 @@
+# backend/routers/atendimento_busca.py
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Body, Query, Response, Path
-import mimetypes
 import os
 import re
 import unicodedata
 import requests
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func, text
+from sqlalchemy import or_, func
 from sqlalchemy.exc import ProgrammingError
 
 from backend.database import get_db
 from backend import models
 from backend.routers.auth import get_current_identity
+from backend.integrations.evolution.utils.phone_utils import (
+    formatar_telefone_br,
+    normalize_phone_for_db,
+    normalize_phone_for_send,
+)
+from backend.security.atendimento_acl import (
+    ensure_perm,
+    assert_same_company,
+    resolve_acl_context,
+    assert_instancia_allowed,
+    assert_cliente_access,
+)
 
 router = APIRouter(tags=["Atendimento – Perfil / Evolution & Busca/Arquivo"])
 
@@ -25,146 +37,39 @@ EVOLUTION_URL = (os.getenv("EVOLUTION_URL", "").rstrip("/"))
 EVOLUTION_KEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_KEY")
 HEADERS = {"apikey": EVOLUTION_KEY, "Content-Type": "application/json"} if EVOLUTION_KEY else {}
 
+
 # =========================================================
-# ACL / Permissões (mesmo padrão do "novo atendimento")
+# Utils ACL/cache
 # =========================================================
-def _to_int(v) -> Optional[int]:
-    try:
-        if v is None:
-            return None
-        s = str(v).strip()
-        if not s:
-            return None
-        return int(s)
-    except Exception:
-        return None
-
-
-def _is_admin(identity: dict) -> bool:
-    try:
-        if identity.get("is_admin") or identity.get("admin"):
-            return True
-        perms = identity.get("permissoes") or identity.get("permissions") or []
-        if isinstance(perms, dict):
-            perms = [k for k, v in perms.items() if v]
-        perms = set(str(p).lower() for p in (perms or []))
-        return any(p in perms for p in ("admin", "root", "clientes.gerenciar", "atendimento.gerenciar"))
-    except Exception:
-        return False
-
-
-def _ensure_perm(identity: dict, perm: str) -> None:
-    if _is_admin(identity):
-        return
-    perms = set(identity.get("permissoes") or [])
-    if perm not in perms:
-        raise HTTPException(status_code=403, detail=f"Sem permissão ({perm})")
-
-
-def _infer_kind(identity: dict) -> str:
-    k = (identity.get("kind") or identity.get("tipo") or "").lower().strip()
-    if k in ("colaborador", "usuario", "admin"):
-        return "colaborador" if k == "colaborador" else "usuario"
-    sub = str(identity.get("sub") or "").strip().lower()
-    role = str(identity.get("role") or "").strip().lower()
-    if sub.startswith("colab-") or "colab" in role or "colaborador" in role:
-        return "colaborador"
-    return "usuario"
-
-
-def _get_colab_id(identity: dict) -> Optional[int]:
-    for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
-        cid = _to_int(identity.get(key))
-        if cid:
-            return cid
-    sub = str(identity.get("sub") or "").strip().lower()
-    if sub.startswith("colab-"):
-        cid = _to_int(sub.split("-", 1)[1])
-        if cid:
-            return cid
-    return _to_int(identity.get("id"))
-
-
-def _table_exists(db: Session, table_name: str) -> bool:
-    try:
-        reg = db.execute(text(f"SELECT to_regclass('public.{table_name}')")).scalar()
-        return reg is not None
-    except Exception:
-        return False
-
-
-def _allowed_instancia_ids(db: Session, identity: dict, empresa_id: int) -> Optional[List[int]]:
-    """
-    Retorna:
-      - None => sem restrição (admin/usuario master OU tabela inexistente)
-      - []   => colaborador sem instâncias permitidas (nega tudo)
-      - [..] => lista de instâncias permitidas
-    """
-    if _is_admin(identity):
-        return None
-
-    if _infer_kind(identity) != "colaborador":
-        return None
-
-    if not _table_exists(db, "colaboradores_instancias"):
-        return None  # legado: não restringe
-
-    cid = _get_colab_id(identity)
-    if not cid:
-        return []
-
-    rows = db.execute(
-        text(
-            """
-            SELECT instancia_id
-            FROM colaboradores_instancias
-            WHERE empresa_id = :emp
-              AND colaborador_id = :cid
-            """
-        ),
-        {"emp": int(empresa_id), "cid": int(cid)},
-    ).fetchall()
-
-    ids = [int(r[0]) for r in rows if r and r[0] is not None]
-    return ids
-
-
-def _assert_instancia_allowed(allowed: Optional[List[int]], instancia_id: Optional[int]) -> None:
-    if instancia_id is None:
-        return
-    if allowed is None:
-        return
-    if int(instancia_id) not in set(int(x) for x in allowed):
-        raise HTTPException(status_code=403, detail="Instância não permitida para este usuário")
-
-
-def _assert_cliente_access_by_instancias(
+def _cliente_acl_ok(
     db: Session,
     *,
+    identity,
     empresa_id: int,
     cliente_id: int,
-    allowed: Optional[List[int]],
-) -> None:
-    """
-    Garante que colaborador só acesse cliente que tenha mensagens em instância permitida.
-    Admin/allowed=None => libera.
-    """
-    if allowed is None:
-        return
-    if not allowed:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+    instancia_id: int | None = None,
+    cache: dict[int, bool] | None = None,
+) -> bool:
+    key = int(cliente_id)
+    if cache is not None and key in cache:
+        return bool(cache[key])
 
-    ok = (
-        db.query(models.Mensagem.id)
-        .filter(
-            models.Mensagem.empresa_id == int(empresa_id),
-            models.Mensagem.cliente_id == int(cliente_id),
-            models.Mensagem.instancia_id.in_([int(x) for x in allowed]),
+    try:
+        assert_cliente_access(
+            db,
+            identity=identity,
+            empresa_id=int(empresa_id),
+            cliente_id=int(cliente_id),
+            instancia_id=instancia_id,
+            allow_unassigned_department=False,
         )
-        .first()
-    )
-    if not ok:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+        ok = True
+    except HTTPException:
+        ok = False
+
+    if cache is not None:
+        cache[key] = ok
+    return ok
 
 
 def _resolve_instancia_id(
@@ -244,21 +149,19 @@ class SaveCustomIn(BaseModel):
 
 
 # ===== Helpers =====
-def _assert_mesma_empresa(empresa_do_token: int, empresa_da_query: int | None) -> int:
-    if empresa_da_query is None:
-        return empresa_do_token
-    if int(empresa_da_query) != int(empresa_do_token):
-        raise HTTPException(403, "Empresa inválida para este recurso")
-    return int(empresa_da_query)
-
-
 def _pick_instance_name(
     db: Session,
     empresa_id_eff: int,
+    allowed: Optional[List[int]],
     instance: str | None = None,
     instancia_id: int | None = None,
 ) -> str:
-    q = db.query(models.EmpresaInstancia).filter(models.EmpresaInstancia.empresa_id == empresa_id_eff)
+    q = db.query(models.EmpresaInstancia).filter(models.EmpresaInstancia.empresa_id == int(empresa_id_eff))
+
+    if allowed is not None:
+        if not allowed:
+            raise HTTPException(403, "Nenhuma instância permitida para este usuário.")
+        q = q.filter(models.EmpresaInstancia.id.in_([int(x) for x in allowed]))
 
     if instance:
         row = q.filter(models.EmpresaInstancia.instance_name == instance).first()
@@ -267,7 +170,7 @@ def _pick_instance_name(
         return row.instance_name
 
     if instancia_id is not None:
-        row = q.filter(models.EmpresaInstancia.id == instancia_id).first()
+        row = q.filter(models.EmpresaInstancia.id == int(instancia_id)).first()
         if row:
             return row.instance_name
         raise HTTPException(404, "Instância (id) não encontrada para a empresa.")
@@ -339,8 +242,60 @@ def _parse_date_any(v):
     return None
 
 
-def _only_digits(s: str) -> str:
-    return re.sub(r"\D+", "", s or "")
+def _only_digits(s: str | None) -> str:
+    return re.sub(r"\D+", "", str(s or ""))
+
+
+def _normalize_lookup_number(raw: str | None) -> tuple[str | None, str | None]:
+    """
+    Retorna:
+      - numero_db_norm  => padrão do banco (10/11 dígitos sem 55)
+      - numero_send_norm => padrão de envio (55 + número)
+    """
+    return normalize_phone_for_db(raw), normalize_phone_for_send(raw)
+
+
+def _telefone_match_clause(raw: str | None):
+    numero_db_norm, numero_send_norm = _normalize_lookup_number(raw)
+    clauses = []
+
+    if numero_db_norm:
+        clauses.append(models.Cliente.telefone_norm == numero_db_norm)
+        clauses.append(func.right(models.Cliente.telefone_norm, len(numero_db_norm)) == numero_db_norm)
+
+    if numero_send_norm:
+        telefone_digits = func.regexp_replace(func.coalesce(models.Cliente.telefone, ""), r"\D", "", "g")
+        clauses.append(telefone_digits == numero_send_norm)
+
+        if numero_db_norm:
+            clauses.append(func.right(telefone_digits, len(numero_db_norm)) == numero_db_norm)
+
+    if not clauses:
+        return None
+
+    return or_(*clauses)
+
+
+def _find_cliente_by_phone(
+    db: Session,
+    *,
+    empresa_id: int,
+    raw_number: str | None,
+):
+    clause = _telefone_match_clause(raw_number)
+    if clause is None:
+        return None
+
+    try:
+        return (
+            db.query(models.Cliente)
+            .filter(models.Cliente.empresa_id == int(empresa_id))
+            .filter(clause)
+            .order_by(models.Cliente.id.desc())
+            .first()
+        )
+    except Exception:
+        return None
 
 
 def _set_if_changed(row, field: str, value) -> bool:
@@ -356,8 +311,230 @@ def _set_if_changed(row, field: str, value) -> bool:
 
 
 def _avatar_proxy_url(cliente_id: int) -> str:
-    # ajuste aqui se seu prefixo real for diferente
     return f"/api/atendimento/avatar/{int(cliente_id)}"
+
+
+def _safe_json(resp: requests.Response) -> dict:
+    try:
+        data = resp.json()
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _extract_picture_url(data: dict) -> Optional[str]:
+    if not isinstance(data, dict):
+        return None
+
+    candidates = [
+        data.get("picture"),
+        data.get("profilePictureUrl"),
+        data.get("profilePicUrl"),
+        data.get("pictureUrl"),
+        data.get("imgUrl"),
+        data.get("avatar"),
+        data.get("avatarUrl"),
+    ]
+
+    status_obj = data.get("status")
+    if isinstance(status_obj, dict):
+        candidates.extend([
+            status_obj.get("picture"),
+            status_obj.get("profilePictureUrl"),
+            status_obj.get("profilePicUrl"),
+        ])
+
+    for v in candidates:
+        if isinstance(v, str):
+            s = v.strip()
+            if s and not re.match(r"^(null|undefined)$", s, re.I):
+                return s
+
+    return None
+
+
+def _evo_fetch_profile_picture_url(instance_name: str, numero_send_norm: str) -> Optional[str]:
+    """
+    Fallback para versões da Evolution que só devolvem a foto
+    em /chat/fetchProfilePictureUrl/{instance}
+    """
+    if not EVOLUTION_URL or not instance_name or not numero_send_norm:
+        return None
+
+    url = f"{EVOLUTION_URL}/chat/fetchProfilePictureUrl/{instance_name}"
+
+    payloads = [
+        {"number": numero_send_norm},
+        {"number": f"{numero_send_norm}@s.whatsapp.net"},
+        {"number": f"{numero_send_norm}@c.us"},
+    ]
+
+    for body in payloads:
+        try:
+            r = requests.post(url, headers=HEADERS, json=body, timeout=20)
+        except requests.RequestException:
+            continue
+
+        if r.status_code != 200:
+            continue
+
+        data = _safe_json(r)
+        pic = _extract_picture_url(data)
+        if pic:
+            return pic
+
+    return None
+
+
+def _evo_fetch_profile(instance_name: str, numero_send_norm: str) -> Dict[str, Any]:
+    if not EVOLUTION_URL or not instance_name or not numero_send_norm:
+        return {}
+
+    url = f"{EVOLUTION_URL}/chat/fetchProfile/{instance_name}"
+
+    payloads = [
+        {"number": numero_send_norm},
+        {"number": f"{numero_send_norm}@s.whatsapp.net"},
+        {"number": f"{numero_send_norm}@c.us"},
+    ]
+
+    for body in payloads:
+        try:
+            r = requests.post(url, headers=HEADERS, json=body, timeout=25)
+        except requests.RequestException:
+            continue
+
+        if r.status_code != 200:
+            continue
+
+        data = _safe_json(r)
+        if data:
+            return data
+
+    return {}
+
+
+def _resolve_instance_name_for_cliente(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente_id: int,
+    allowed: Optional[List[int]],
+) -> Optional[str]:
+    q = (
+        db.query(
+            models.EmpresaInstancia.instance_name,
+            models.Mensagem.instancia_id,
+        )
+        .join(models.EmpresaInstancia, models.EmpresaInstancia.id == models.Mensagem.instancia_id)
+        .filter(
+            models.Mensagem.empresa_id == int(empresa_id),
+            models.Mensagem.cliente_id == int(cliente_id),
+            models.Mensagem.instancia_id.isnot(None),
+        )
+    )
+
+    if allowed is not None:
+        if not allowed:
+            return None
+        q = q.filter(models.Mensagem.instancia_id.in_([int(x) for x in allowed]))
+
+    row = q.order_by(models.Mensagem.timestamp.desc(), models.Mensagem.id.desc()).first()
+    if row and row[0]:
+        return str(row[0])
+
+    q2 = db.query(models.EmpresaInstancia).filter(models.EmpresaInstancia.empresa_id == int(empresa_id))
+    if allowed is not None:
+        if not allowed:
+            return None
+        q2 = q2.filter(models.EmpresaInstancia.id.in_([int(x) for x in allowed]))
+
+    row2 = q2.order_by(
+        models.EmpresaInstancia.connected.desc(),
+        models.EmpresaInstancia.last_seen.desc().nullslast(),
+        models.EmpresaInstancia.id.asc(),
+    ).first()
+    return row2.instance_name if row2 else None
+
+
+def _download_avatar_binary(url: str) -> Optional[Tuple[bytes, str]]:
+    if not url:
+        return None
+
+    headers = {}
+    if EVOLUTION_URL and url.startswith(EVOLUTION_URL) and EVOLUTION_KEY:
+        headers = {"apikey": EVOLUTION_KEY}
+
+    try:
+        r = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+    except Exception:
+        return None
+
+    if r.status_code != 200 or not r.content:
+        return None
+
+    content_type = r.headers.get("content-type") or "image/jpeg"
+    return r.content, content_type
+
+
+def _refresh_avatar_for_cliente(
+    db: Session,
+    *,
+    cli,
+    empresa_id: int,
+    allowed: Optional[List[int]],
+) -> Optional[str]:
+    numero_db_norm, numero_send_norm = _normalize_lookup_number(getattr(cli, "telefone", None))
+    if not numero_send_norm:
+        return None
+
+    instance_name = _resolve_instance_name_for_cliente(
+        db,
+        empresa_id=int(empresa_id),
+        cliente_id=int(cli.id),
+        allowed=allowed,
+    )
+    if not instance_name:
+        return None
+
+    data = _evo_fetch_profile(instance_name, numero_send_norm)
+    pic = _extract_picture_url(data)
+
+    if not pic:
+        pic = _evo_fetch_profile_picture_url(instance_name, numero_send_norm)
+
+    if not pic:
+        return None
+
+    old = (getattr(cli, "avatar_url", None) or "").strip()
+    changed = False
+
+    if old != pic:
+        setattr(cli, "avatar_url", pic)
+        changed = True
+
+    name = (
+        data.get("name")
+        or data.get("pushName")
+        or data.get("verifiedName")
+        or None
+    )
+    if name and hasattr(cli, "nome_whatsapp") and getattr(cli, "nome_whatsapp", None) != name:
+        setattr(cli, "nome_whatsapp", name)
+        changed = True
+
+    if hasattr(cli, "profile_refreshed_at"):
+        setattr(cli, "profile_refreshed_at", datetime.now(timezone.utc))
+        changed = True
+
+    if changed:
+        try:
+            db.commit()
+            db.refresh(cli)
+        except Exception:
+            db.rollback()
+
+    return pic
 
 
 UPDATABLE_FIELDS = {
@@ -375,6 +552,7 @@ FIELD_MAP = {
     "description": "descricao",
 }
 
+
 # ============= ROTAS EVOLUTION: fetchProfile =============
 @router.post("/evolution/fetchProfile")
 def evolution_fetch_profile(
@@ -382,111 +560,82 @@ def evolution_fetch_profile(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    _ensure_perm(identity, "atendimento.ver")
+    ensure_perm(identity, "atendimento.ver")
 
     if not EVOLUTION_URL:
         raise HTTPException(500, "EVOLUTION_URL não configurada no servidor.")
     if not payload.number:
         raise HTTPException(400, "Campo 'number' é obrigatório.")
 
-    empresa_id_token = int(identity["empresa_id"])
-    empresa_id_eff = _assert_mesma_empresa(empresa_id_token, payload.empresa_id)
+    empresa_id_eff = assert_same_company(identity, payload.empresa_id)
+    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
+    allowed = acl_ctx["allowed_instancias"]
 
-    # ACL instâncias (se colaborador)
-    allowed = _allowed_instancia_ids(db, identity, empresa_id_eff)
-
-    # resolve instância solicitada (se vier)
     resolved_inst_id, resolved_inst_name = _resolve_instancia_id(
         db, empresa_id=empresa_id_eff, instancia_id=payload.instancia_id, instance=payload.instance
     )
     if (payload.instancia_id is not None or payload.instance) and resolved_inst_id is None:
         raise HTTPException(404, "Instância não encontrada para a empresa.")
 
-    _assert_instancia_allowed(allowed, resolved_inst_id)
+    if resolved_inst_id is not None:
+        assert_instancia_allowed(allowed_instancias=allowed, instancia_id=resolved_inst_id)
 
-    # se não informarem, escolhe a melhor (como já era)
     instance_name = _pick_instance_name(
         db,
         empresa_id_eff,
+        allowed=allowed,
         instance=resolved_inst_name,
         instancia_id=resolved_inst_id,
     )
 
-    numero_norm = _only_digits(payload.number)
-    url = f"{EVOLUTION_URL}/chat/fetchProfile/{instance_name}"
+    numero_db_norm, numero_send_norm = _normalize_lookup_number(payload.number)
+    if not numero_send_norm:
+        raise HTTPException(400, "Número inválido.")
 
-    try:
-        r = requests.post(url, headers=HEADERS, json={"number": numero_norm}, timeout=30)
-    except requests.RequestException as e:
-        raise HTTPException(502, f"Erro ao contatar Evolution: {e}")
+    data = _evo_fetch_profile(instance_name, numero_send_norm)
 
-    if r.status_code != 200:
-        try:
-            raw = r.text
-        except Exception:
-            raw = ""
-        detail = raw
-        try:
-            j = r.json()
-            detail = j.get("detail") or j.get("message") or raw
-        except Exception:
-            pass
+    if not data:
+        raise HTTPException(502, "Falha ao buscar perfil no Evolution.")
 
-        if "Connection Closed" in str(detail):
-            raise HTTPException(503, f"Instância '{instance_name}' desconectada no Evolution.")
-        if 500 <= r.status_code < 600:
-            raise HTTPException(502, f"Evolution erro {r.status_code}: {detail}")
-        raise HTTPException(r.status_code, f"Evolution retornou {r.status_code}: {detail}")
-
-    data = r.json() if (r.headers.get("content-type") or "").startswith("application/json") else {}
+    picture_url = _extract_picture_url(data)
+    if not picture_url:
+        picture_url = _evo_fetch_profile_picture_url(instance_name, numero_send_norm)
 
     normalized = {
         "wuid": data.get("wuid") or data.get("wid") or data.get("id"),
         "name": data.get("name") or data.get("pushName") or data.get("verifiedName"),
         "numberExists": data.get("numberExists") if "numberExists" in data else data.get("exists"),
-        "picture": data.get("picture") or data.get("profilePicUrl") or data.get("imgUrl"),
+        "picture": picture_url,
+        "profilePictureUrl": picture_url,
         "status": data.get("status") if isinstance(data.get("status"), dict)
                    else {"status": data.get("status"), "setAt": data.get("statusAt")},
         "isBusiness": data.get("isBusiness") if "isBusiness" in data else (data.get("business") or data.get("is_business")),
         "email": data.get("email"),
         "description": data.get("description") or data.get("about"),
         "website": data.get("website"),
+        "telefone_norm": numero_db_norm,
+        "telefone_e164": numero_send_norm,
+        "telefone_fmt": formatar_telefone_br(numero_send_norm) if numero_send_norm else None,
     }
 
-    # Persistência no BD (SOMENTE ao abrir o perfil)
-    tail11 = numero_norm[-11:]
-
-    cli = (
-        db.query(models.Cliente)
-        .filter(models.Cliente.empresa_id == empresa_id_eff)
-        .filter(
-            or_(
-                getattr(models.Cliente, "telefone_norm", models.Cliente.telefone) == numero_norm,
-                models.Cliente.telefone == numero_norm,
-            )
-        )
-        .first()
+    cli = _find_cliente_by_phone(
+        db,
+        empresa_id=empresa_id_eff,
+        raw_number=payload.number,
     )
-    if not cli:
-        cli = (
-            db.query(models.Cliente)
-            .filter(models.Cliente.empresa_id == empresa_id_eff)
-            .filter(
-                or_(
-                    models.Cliente.telefone.like(f"%{tail11}"),
-                    getattr(models.Cliente, "telefone_norm", models.Cliente.telefone).like(f"%{tail11}"),
-                )
-            )
-            .order_by(models.Cliente.id.desc())
-            .first()
-        )
-
-    # se for colaborador com ACL, garante que esse cliente está no escopo dele
-    if cli:
-        _assert_cliente_access_by_instancias(db, empresa_id=empresa_id_eff, cliente_id=int(cli.id), allowed=allowed)
 
     changed = False
     if cli:
+        # ACL composta: departamento + instância
+        assert_cliente_access(
+            db,
+            identity=identity,
+            empresa_id=empresa_id_eff,
+            cliente_id=int(cli.id),
+            instancia_id=resolved_inst_id,
+            allow_unassigned_department=False,
+        )
+
         changed |= _set_if_changed(cli, "is_business", bool(normalized.get("isBusiness")))
         status_obj = normalized.get("status") or {}
         changed |= _set_if_changed(cli, "status_whatsapp", (status_obj.get("status") or None))
@@ -509,18 +658,20 @@ def evolution_fetch_profile(
                 if "generated" not in str(e).lower():
                     raise
 
-        # IMPORTANTE: devolve pro front também a URL proxy (não quebra por CORS/expiração)
-        normalized["avatar_url"] = _avatar_proxy_url(int(cli.id))
-        normalized["avatar_remote_url"] = getattr(cli, "avatar_url", None)  # opcional p/ debug
+        raw_avatar = (getattr(cli, "avatar_url", None) or "").strip()
+        normalized["avatar_url"] = _avatar_proxy_url(int(cli.id)) if raw_avatar else None
+        normalized["avatar_remote_url"] = raw_avatar or None
+        normalized["cliente_id"] = int(cli.id)
     else:
-        # se não achou cliente no BD, pelo menos mantém o remote (front pode ignorar)
+        normalized["avatar_url"] = None
         normalized["avatar_remote_url"] = normalized.get("picture")
+        normalized["cliente_id"] = None
 
     return normalized
 
 
 # =========================================================
-# AVATAR PROXY (fix pra foto de perfil aparecer pra todos)
+# AVATAR PROXY
 # =========================================================
 @router.get("/atendimento/avatar/{cliente_id}")
 def atendimento_avatar(
@@ -528,78 +679,84 @@ def atendimento_avatar(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    _ensure_perm(identity, "atendimento.ver")
+    ensure_perm(identity, "atendimento.ver")
 
     empresa_id_token = int(identity["empresa_id"])
-    allowed = _allowed_instancia_ids(db, identity, empresa_id_token)
+    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_token)
+    allowed = acl_ctx["allowed_instancias"]
 
-    cli = (
-        db.query(models.Cliente)
-        .filter(models.Cliente.id == int(cliente_id))
-        .first()
-    )
-    if not cli:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
-
-    if int(getattr(cli, "empresa_id", 0)) != int(empresa_id_token):
-        raise HTTPException(status_code=403, detail="Cliente não pertence à sua empresa")
-
-    _assert_cliente_access_by_instancias(
+    cli, _atd = assert_cliente_access(
         db,
-        empresa_id=int(empresa_id_token),
+        identity=identity,
+        empresa_id=empresa_id_token,
         cliente_id=int(cliente_id),
+        instancia_id=None,
+        allow_unassigned_department=False,
+    )
+
+    raw_url = (getattr(cli, "avatar_url", None) or "").strip()
+    if raw_url:
+        downloaded = _download_avatar_binary(raw_url)
+        if downloaded:
+            content, content_type = downloaded
+            resp = Response(content=content, media_type=content_type)
+            resp.headers["Cache-Control"] = "private, max-age=3600"
+            return resp
+
+    fresh_url = _refresh_avatar_for_cliente(
+        db,
+        cli=cli,
+        empresa_id=int(empresa_id_token),
         allowed=allowed,
     )
 
-    url = (getattr(cli, "avatar_url", None) or "").strip()
-    if not url:
-        raise HTTPException(status_code=404, detail="Avatar não encontrado")
+    if fresh_url:
+        downloaded = _download_avatar_binary(fresh_url)
+        if downloaded:
+            content, content_type = downloaded
+            resp = Response(content=content, media_type=content_type)
+            resp.headers["Cache-Control"] = "private, max-age=3600"
+            return resp
 
-    headers = {}
-    if EVOLUTION_URL and url.startswith(EVOLUTION_URL) and EVOLUTION_KEY:
-        headers = {"apikey": EVOLUTION_KEY}
-
-    try:
-        r = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
-    except Exception:
-        raise HTTPException(status_code=502, detail="Falha ao buscar avatar")
-
-    if r.status_code != 200 or not r.content:
-        raise HTTPException(status_code=404, detail="Avatar indisponível")
-
-    content_type = r.headers.get("content-type") or "image/jpeg"
-    resp = Response(content=r.content, media_type=content_type)
-    resp.headers["Cache-Control"] = "private, max-age=3600"
-    return resp
+    raise HTTPException(status_code=404, detail="Avatar não encontrado")
 
 
 # ---- Perfil completo (ler do BD) ----
 @router.get("/atendimento/clientes/{cliente_id}/profile")
 def get_cliente_profile(
     cliente_id: int,
+    empresa_id: int | None = Query(None),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    _ensure_perm(identity, "atendimento.ver")
+    ensure_perm(identity, "atendimento.ver")
 
-    cli = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
-    if not cli:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+    empresa_id_eff = assert_same_company(identity, empresa_id)
 
-    empresa_id_token = int(identity["empresa_id"])
-    if int(cli.empresa_id) != empresa_id_token:
-        raise HTTPException(403, "Cliente não pertence à sua empresa")
+    cli, atd = assert_cliente_access(
+        db,
+        identity=identity,
+        empresa_id=empresa_id_eff,
+        cliente_id=int(cliente_id),
+        instancia_id=None,
+        allow_unassigned_department=False,
+    )
 
-    allowed = _allowed_instancia_ids(db, identity, empresa_id_token)
-    _assert_cliente_access_by_instancias(db, empresa_id=empresa_id_token, cliente_id=int(cliente_id), allowed=allowed)
+    raw_avatar = (getattr(cli, "avatar_url", None) or "").strip()
+    avatar_proxy = _avatar_proxy_url(int(cli.id)) if raw_avatar else None
 
-    # devolve SEMPRE proxy, e mantém o remote separado (se quiser)
+    telefone_raw = getattr(cli, "telefone", None)
+    telefone_db_norm, telefone_send_norm = _normalize_lookup_number(telefone_raw)
+
     return {
         "id": cli.id,
         "empresa_id": cli.empresa_id,
-        "telefone": cli.telefone,
-        "avatar_url": _avatar_proxy_url(int(cli.id)),
-        "avatar_remote_url": getattr(cli, "avatar_url", None),
+        "telefone": telefone_raw,
+        "telefone_norm": telefone_db_norm,
+        "telefone_e164": telefone_send_norm,
+        "telefone_fmt": formatar_telefone_br(telefone_send_norm) if telefone_send_norm else None,
+        "avatar_url": avatar_proxy,
+        "avatar_remote_url": raw_avatar or None,
         "nome": getattr(cli, "nome", None),
         "nome_whatsapp": getattr(cli, "nome_whatsapp", None),
         "nome_completo": getattr(cli, "nome_completo", None),
@@ -622,6 +779,10 @@ def get_cliente_profile(
         "description": getattr(cli, "descricao", None),
         "website": getattr(cli, "website", None),
         "sobre_cliente": getattr(cli, "sobre_cliente", None),
+        "departamento_id": (
+            getattr(atd, "departamento_id", None) if atd is not None else getattr(cli, "departamento_id", None)
+        ),
+        "atendimento_id": getattr(atd, "id", None) if atd is not None else None,
     }
 
 
@@ -631,24 +792,25 @@ def get_cliente_profile(
 def merge_cliente_profile(
     cliente_id: int,
     payload: dict = Body(...),
+    empresa_id: int | None = Query(None),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    _ensure_perm(identity, "atendimento.ver")
+    ensure_perm(identity, "atendimento.ver")
 
-    cli = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
-    if not cli:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+    empresa_id_eff = assert_same_company(identity, empresa_id)
 
-    empresa_id_token = int(identity["empresa_id"])
-    if int(cli.empresa_id) != empresa_id_token:
-        raise HTTPException(403, "Cliente não pertence à sua empresa")
-
-    allowed = _allowed_instancia_ids(db, identity, empresa_id_token)
-    _assert_cliente_access_by_instancias(db, empresa_id=empresa_id_token, cliente_id=int(cliente_id), allowed=allowed)
+    cli, _atd = assert_cliente_access(
+        db,
+        identity=identity,
+        empresa_id=empresa_id_eff,
+        cliente_id=int(cliente_id),
+        instancia_id=None,
+        allow_unassigned_department=False,
+    )
 
     norm = dict(payload or {})
-    norm.pop("nome", None)  # proteção extra
+    norm.pop("nome", None)
 
     if "genero" not in norm and "sexo" in norm:
         norm["genero"] = norm.get("sexo")
@@ -686,21 +848,22 @@ def merge_cliente_profile(
 @router.get("/clientes/{cliente_id}")
 def cliente_get(
     cliente_id: int,
+    empresa_id: int | None = Query(None),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    _ensure_perm(identity, "atendimento.ver")
+    ensure_perm(identity, "atendimento.ver")
 
-    cli = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
-    if not cli:
-        raise HTTPException(404, "Cliente não encontrado.")
+    empresa_id_eff = assert_same_company(identity, empresa_id)
 
-    empresa_id_token = int(identity["empresa_id"])
-    if int(cli.empresa_id) != empresa_id_token:
-        raise HTTPException(403, "Cliente não pertence à sua empresa")
-
-    allowed = _allowed_instancia_ids(db, identity, empresa_id_token)
-    _assert_cliente_access_by_instancias(db, empresa_id=empresa_id_token, cliente_id=int(cliente_id), allowed=allowed)
+    cli, _atd = assert_cliente_access(
+        db,
+        identity=identity,
+        empresa_id=empresa_id_eff,
+        cliente_id=int(cliente_id),
+        instancia_id=None,
+        allow_unassigned_department=False,
+    )
 
     return {
         "id": cli.id,
@@ -726,21 +889,22 @@ def cliente_get(
 def cliente_put(
     cliente_id: int,
     payload: SaveCustomIn,
+    empresa_id: int | None = Query(None),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    _ensure_perm(identity, "atendimento.ver")
+    ensure_perm(identity, "atendimento.ver")
 
-    cli = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
-    if not cli:
-        raise HTTPException(404, "Cliente não encontrado.")
+    empresa_id_eff = assert_same_company(identity, empresa_id)
 
-    empresa_id_token = int(identity["empresa_id"])
-    if int(cli.empresa_id) != empresa_id_token:
-        raise HTTPException(403, "Cliente não pertence à sua empresa")
-
-    allowed = _allowed_instancia_ids(db, identity, empresa_id_token)
-    _assert_cliente_access_by_instancias(db, empresa_id=empresa_id_token, cliente_id=int(cliente_id), allowed=allowed)
+    cli, _atd = assert_cliente_access(
+        db,
+        identity=identity,
+        empresa_id=empresa_id_eff,
+        cliente_id=int(cliente_id),
+        instancia_id=None,
+        allow_unassigned_department=False,
+    )
 
     incoming = payload.model_dump(exclude_unset=True)
     changed = False
@@ -793,76 +957,6 @@ def cliente_put(
     }
 
 
-# ---- Util pra acertar Content-Type de mídias ----
-def _smart_mimetype(tipo: str | None, mt_db: str | None, filename: str | None) -> str:
-    if mt_db and mt_db.lower() != "application/octet-stream":
-        return mt_db
-
-    t = (tipo or "").lower()
-    if t == "image":
-        return "image/jpeg"
-    if t == "video":
-        return "video/mp4"
-    if t == "audio":
-        return "audio/ogg"
-    if t == "sticker":
-        return "image/webp"
-
-    if filename:
-        guess = mimetypes.guess_type(filename)[0]
-        if guess:
-            return guess
-    return "application/octet-stream"
-
-
-_RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)")
-
-
-def _open_local_file(path: str) -> Tuple[int, callable]:
-    file_size = os.path.getsize(path)
-
-    def _reader(start=0, end=None, chunk=1024 * 256):
-        nonlocal path
-        with open(path, "rb") as f:
-            f.seek(start)
-            remaining = (end - start + 1) if end is not None else None
-            while True:
-                size = chunk if remaining is None else min(chunk, remaining)
-                data = f.read(size)
-                if not data:
-                    break
-                if remaining is not None:
-                    remaining -= len(data)
-                    if remaining <= 0:
-                        yield data
-                        break
-                yield data
-
-    return file_size, _reader
-
-
-def _range_from_header(range_header: Optional[str], total: int) -> Tuple[int, Optional[int]]:
-    if not range_header:
-        return 0, None
-    m = _RANGE_RE.match(range_header.strip())
-    if not m:
-        return 0, None
-    start_s, end_s = m.groups()
-    if start_s == "" and end_s == "":
-        return 0, None
-    if start_s == "":
-        last_n = int(end_s)
-        start = max(0, total - last_n)
-        return start, total - 1
-    start = int(start_s)
-    if end_s == "":
-        return start, None
-    end = min(int(end_s), total - 1)
-    if end < start:
-        end = start
-    return start, end
-
-
 # ============= BUSCA GLOBAL (contatos + mensagens) =============
 @router.get("/atendimento/search")
 def atendimento_search(
@@ -874,28 +968,29 @@ def atendimento_search(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    _ensure_perm(identity, "atendimento.ver")
+    ensure_perm(identity, "atendimento.ver")
 
-    empresa_id_token = int(identity["empresa_id"])
-    empresa_id_eff = _assert_mesma_empresa(empresa_id_token, empresa_id)
+    empresa_id_eff = assert_same_company(identity, empresa_id)
 
     qn = _normalize_text(q)
     if not qn:
         return {"contatos": [], "mensagens": []}
 
-    allowed = _allowed_instancia_ids(db, identity, empresa_id_eff)
+    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
+    allowed = acl_ctx["allowed_instancias"]
 
-    # resolve instância pedida (se vier)
     resolved_inst_id, _resolved_inst_name = _resolve_instancia_id(
         db, empresa_id=empresa_id_eff, instancia_id=instancia_id, instance=instance
     )
     if (instancia_id is not None or instance) and resolved_inst_id is None:
         raise HTTPException(404, "Instância não encontrada para a empresa.")
-    _assert_instancia_allowed(allowed, resolved_inst_id)
+
+    if resolved_inst_id is not None:
+        assert_instancia_allowed(allowed_instancias=allowed, instancia_id=resolved_inst_id)
 
     m = models.Mensagem
+    acl_cache: dict[int, bool] = {}
 
-    # ----------------- filtros efetivos de instância -----------------
     filtros_inst = []
     if resolved_inst_id is not None:
         filtros_inst.append(m.instancia_id == int(resolved_inst_id))
@@ -905,7 +1000,6 @@ def atendimento_search(
                 return {"contatos": [], "mensagens": []}
             filtros_inst.append(m.instancia_id.in_([int(x) for x in allowed]))
 
-    # subquery: última msg por cliente (já respeitando instâncias)
     sub_last = (
         db.query(
             m.cliente_id.label("cid"),
@@ -923,6 +1017,7 @@ def atendimento_search(
             m.tipo,
             m.ack,
             m.timestamp,
+            m.instancia_id,
         )
         .join(sub_last, sub_last.c.cid == models.Cliente.id)
         .join(m, m.id == sub_last.c.last_msg_id)
@@ -933,19 +1028,36 @@ def atendimento_search(
     )
 
     contatos: List[Dict] = []
-    for cli, last_txt, last_tipo, last_ack, last_ts in rows:
+    for cli, last_txt, last_tipo, last_ack, last_ts, last_instancia_id in rows:
+        if not _cliente_acl_ok(
+            db,
+            identity=identity,
+            empresa_id=empresa_id_eff,
+            cliente_id=int(cli.id),
+            instancia_id=_to_int(last_instancia_id),
+            cache=acl_cache,
+        ):
+            continue
+
         nome = (getattr(cli, "nome_whatsapp", None) or cli.nome or "").strip()
         tel = (cli.telefone or "").strip()
         last = (last_txt or "").strip()
+        raw_avatar = (getattr(cli, "avatar_url", None) or "").strip()
+
+        telefone_db_norm, telefone_send_norm = _normalize_lookup_number(tel)
+        telefone_fmt = formatar_telefone_br(telefone_send_norm) if telefone_send_norm else tel
 
         if qn in _normalize_text(nome) or qn in _normalize_text(tel) or qn in _normalize_text(last):
             ts_iso = last_ts.isoformat() if last_ts else None
             contatos.append({
                 "id": cli.id,
-                "nome": nome or tel,
+                "nome": nome or telefone_fmt,
                 "telefone": cli.telefone,
-                "avatar_url": _avatar_proxy_url(int(cli.id)),
-                "avatar_remote_url": getattr(cli, "avatar_url", None),
+                "telefone_norm": telefone_db_norm,
+                "telefone_e164": telefone_send_norm,
+                "telefone_fmt": telefone_fmt,
+                "avatar_url": _avatar_proxy_url(int(cli.id)) if raw_avatar else None,
+                "avatar_remote_url": raw_avatar or None,
                 "ultima_mensagem": last,
                 "hora": ts_iso,
                 "last_ts": ts_iso,
@@ -961,6 +1073,7 @@ def atendimento_search(
             m.cliente_id,
             m.conteudo,
             m.timestamp,
+            m.instancia_id,
             models.Cliente.nome,
             models.Cliente.telefone,
             models.Cliente.nome_whatsapp,
@@ -968,22 +1081,50 @@ def atendimento_search(
         .join(models.Cliente, models.Cliente.id == m.cliente_id)
         .filter(m.empresa_id == empresa_id_eff, *filtros_inst, m.conteudo.ilike(like))
         .order_by(m.timestamp.desc())
-        .limit(min(limit, 80))
+        .limit(min(limit * 4, 120))
         .all()
     )
 
     mensagens: List[Dict] = []
-    for cid, txt, ts, cli_nome, cli_tel, cli_nome_whats in msgs_rows:
+    for cid, txt, ts, msg_instancia_id, cli_nome, cli_tel, cli_nome_whats in msgs_rows:
+        if not _cliente_acl_ok(
+            db,
+            identity=identity,
+            empresa_id=empresa_id_eff,
+            cliente_id=int(cid),
+            instancia_id=_to_int(msg_instancia_id),
+            cache=acl_cache,
+        ):
+            continue
+
         nome = (cli_nome_whats or cli_nome or "").strip()
         tel = (cli_tel or "").strip()
+
+        telefone_db_norm, telefone_send_norm = _normalize_lookup_number(tel)
+        telefone_fmt = formatar_telefone_br(telefone_send_norm) if telefone_send_norm else tel
+
         mensagens.append(
             {
                 "cliente_id": int(cid),
-                "cliente_nome": nome or tel,
+                "cliente_nome": nome or telefone_fmt,
                 "cliente_telefone": tel,
+                "cliente_telefone_norm": telefone_db_norm,
+                "cliente_telefone_e164": telefone_send_norm,
+                "cliente_telefone_fmt": telefone_fmt,
                 "snippet": (txt or ""),
                 "hora": ts.isoformat() if ts else None,
             }
         )
+        if len(mensagens) >= limit:
+            break
 
     return {"contatos": contatos, "mensagens": mensagens}
+
+
+def _to_int(v) -> Optional[int]:
+    try:
+        if v is None:
+            return None
+        return int(v)
+    except Exception:
+        return None

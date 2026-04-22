@@ -1108,7 +1108,7 @@ function updateAddButton(payload, list){
   els.btnAdd.classList.toggle('btn--ok', canAdd);
 
   if (canAdd) {
-    els.btnAdd.title = 'Adicionar novo número ZapChats';
+    els.btnAdd.title = 'Adicionar novo número zapschat';
   } else {
     els.btnAdd.title = 'Limite de números de WhatsApp atingido para o seu plano';
   }

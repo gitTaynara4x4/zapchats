@@ -1,7 +1,7 @@
 (function ConfiguracoesPage() {
   'use strict';
 
-  const THEME_KEY = 'zapchats_theme';
+  const THEME_KEY = 'zapschat_theme';
 
   function showToast(message, isError = false, timeout = 3500) {
     const el = document.getElementById('zapchat-toast');

@@ -1,291 +1,636 @@
 <!DOCTYPE html>
-<html lang="pt-BR" class="has-sidebar prepaint">
+<html lang="pt-BR">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Dashboard – ZapChats</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard • tataynara</title>
 
-  <!-- Shell global (injeta head-base + loader + tema + sidebar) -->
-  <script src="/frontend/js/app-base.js" defer></script>
-  <script src="/frontend/js/auth.js" defer></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
-  <!-- Libs -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/airbnb.css">
-  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-  <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/pt.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500&display=swap');
 
-  <!-- CSS externo do Dashboard -->
-  <link rel="stylesheet" href="/frontend/css/dashboard.css">
+    :root { --tw-color-primary: #00f0ff; }
 
-  <!-- Chart.js: respeitar altura do container -->
-  <script>
-    if (window.Chart) {
-      Chart.defaults.responsive = true;
-      Chart.defaults.maintainAspectRatio = false;
+    * {
+      transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, transform, box-shadow;
+      transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+      transition-duration: 150ms;
+      box-sizing: border-box;
     }
-  </script>
+
+    html, body {
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+    }
+
+    .tailwind-config { font-family: 'Inter', system-ui, sans-serif; }
+    .logo-font { font-family: 'Space Grotesk', sans-serif; }
+
+    .sidebar-link { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; }
+    .sidebar-link:hover { transform: translateX(8px); }
+
+    .card-hover:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 25px 50px -12px rgb(0 240 255 / 0.15);
+    }
+
+    .glass {
+      background: rgba(255,255,255,0.08);
+      backdrop-filter: blur(20px);
+    }
+
+    .custom-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #00f0ff; border-radius: 20px; }
+
+    .dashboard-main-container { height: 100vh; overflow: hidden; }
+    .content-wrapper { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .scroll-area { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+
+    .chart-box-sm {
+      position: relative;
+      height: 64px;
+      width: 100%;
+    }
+
+    .chart-box-lg {
+      position: relative;
+      height: 24rem;
+      width: 100%;
+    }
+
+    .chart-box-md {
+      position: relative;
+      height: 18rem;
+      width: 100%;
+    }
+
+    #notifications-dropdown {
+      min-width: 320px;
+    }
+  </style>
 </head>
-<body>
-  <!-- Sidebar (carregado via app-base.js) -->
-  <aside id="sidebar"
-        data-src="/frontend/partials/sidebar.html"></aside>
+<body class="tailwind-config bg-zinc-950 text-zinc-100">
 
-  <main class="main">
-    <div class="section-title">
-      <h1>
-        <span class="title-ico is-active" aria-hidden="true">
-          <svg class="title-ico-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-            <path d="M224,98H182V56a6,6,0,0,0-6-6H54V40a6,6,0,0,0-12,0V216a6,6,0,0,0,12,0V206h90a6,6,0,0,0,6-6V158h74a6,6,0,0,0,6-6V104A6,6,0,0,0,224,98ZM170,62V98H54V62ZM138,194H54V158h84Zm80-48H54V110H218Z"/>
-          </svg>
-        </span>
-        Dashboard
-        <!-- Dropdown de instâncias -->
-        <button id="instMenuBtn" type="button" role="button" class="inst-trigger"
-                aria-haspopup="listbox" aria-expanded="false" aria-controls="inst-menu">
-          <span id="instMenuLabel">Todas as instâncias</span>
-          <span class="chev">▾</span>
+  <div class="dashboard-main-container flex h-screen overflow-hidden">
+
+    <!-- SIDEBAR -->
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-72 bg-zinc-900 border-r border-zinc-800 flex flex-col shadow-2xl md:static md:translate-x-0 transition-all duration-300 -translate-x-full">
+      <div class="px-8 pt-8 pb-6 border-b border-zinc-800 flex items-center gap-x-3">
+        <div class="w-9 h-9 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-2xl flex items-center justify-center text-white">
+          <i class="fa-solid fa-rocket text-xl"></i>
+        </div>
+        <h1 class="logo-font text-3xl tracking-tighter">dash<span class="text-cyan-400">.</span></h1>
+        <span class="text-xs font-medium px-3 py-1 bg-cyan-400/10 text-cyan-400 rounded-3xl">PRO</span>
+      </div>
+
+      <nav class="flex-1 px-4 py-6 space-y-1 overflow-y-auto custom-scroll">
+        <a onclick="navigateToSection('dashboard')" class="sidebar-link flex items-center gap-x-3.5 px-6 py-4 text-sm font-medium rounded-3xl bg-white/5 text-white">
+          <i class="fa-solid fa-gauge-high w-5"></i><span>Dashboard</span>
+        </a>
+        <a onclick="navigateToSection('analytics')" class="sidebar-link flex items-center gap-x-3.5 px-6 py-4 text-sm font-medium rounded-3xl hover:bg-white/5 text-zinc-400 hover:text-white">
+          <i class="fa-solid fa-chart-line w-5"></i><span>Análises Avançadas</span>
+        </a>
+        <a onclick="navigateToSection('sales')" class="sidebar-link flex items-center gap-x-3.5 px-6 py-4 text-sm font-medium rounded-3xl hover:bg-white/5 text-zinc-400 hover:text-white">
+          <i class="fa-solid fa-cart-shopping w-5"></i><span>Vendas &amp; Pedidos</span>
+        </a>
+        <a onclick="navigateToSection('clients')" class="sidebar-link flex items-center gap-x-3.5 px-6 py-4 text-sm font-medium rounded-3xl hover:bg-white/5 text-zinc-400 hover:text-white">
+          <i class="fa-solid fa-users w-5"></i><span>Clientes</span>
+        </a>
+        <a onclick="navigateToSection('projects')" class="sidebar-link flex items-center gap-x-3.5 px-6 py-4 text-sm font-medium rounded-3xl hover:bg-white/5 text-zinc-400 hover:text-white">
+          <i class="fa-solid fa-folder-tree w-5"></i><span>Projetos</span>
+        </a>
+
+        <div class="px-6 mt-8 mb-3 text-xs font-semibold tracking-widest text-zinc-500">FERRAMENTAS</div>
+
+        <a onclick="navigateToSection('reports')" class="sidebar-link flex items-center gap-x-3.5 px-6 py-4 text-sm font-medium rounded-3xl hover:bg-white/5 text-zinc-400 hover:text-white">
+          <i class="fa-solid fa-file-lines w-5"></i><span>Relatórios</span>
+        </a>
+        <a onclick="navigateToSection('calendar')" class="sidebar-link flex items-center gap-x-3.5 px-6 py-4 text-sm font-medium rounded-3xl hover:bg-white/5 text-zinc-400 hover:text-white">
+          <i class="fa-solid fa-calendar w-5"></i><span>Calendário</span>
+        </a>
+        <a onclick="navigateToSection('team')" class="sidebar-link flex items-center gap-x-3.5 px-6 py-4 text-sm font-medium rounded-3xl hover:bg-white/5 text-zinc-400 hover:text-white">
+          <i class="fa-solid fa-user-group w-5"></i><span>Equipe</span>
+        </a>
+      </nav>
+
+      <div class="p-6 border-t border-zinc-800">
+        <div class="flex items-center gap-x-3">
+          <div class="w-8 h-8 bg-zinc-700 rounded-2xl flex items-center justify-center text-cyan-400">
+            <i class="fa-solid fa-circle-user text-xl"></i>
+          </div>
+          <div class="flex-1">
+            <p class="text-sm font-semibold">tataynara</p>
+            <p class="text-xs text-zinc-400">Administradora • Premium</p>
+          </div>
+          <button onclick="toggleDarkMode()" class="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-cyan-400 rounded-2xl hover:bg-white/10">
+            <i class="fa-solid fa-moon text-lg"></i>
+          </button>
+        </div>
+        <button onclick="logout()" class="mt-6 w-full flex items-center justify-center gap-x-2 text-sm font-medium py-3 px-4 bg-zinc-800 hover:bg-red-500/10 hover:text-red-400 rounded-3xl">
+          <i class="fa-solid fa-arrow-right-from-bracket"></i><span>Sair da conta</span>
         </button>
-      </h1>
-
-      <div class="top-total"><span id="qtdAtendimentos">--</span> atendimentos</div>
-
-      <div id="inst-menu" class="inst-menu" role="listbox" aria-hidden="true" aria-label="Selecionar instância">
-        <div class="head">WhatsApps</div>
-        <ul id="instMenuList"><!-- itens via JS --></ul>
       </div>
-    </div>
+    </aside>
 
-    <section class="filter" aria-label="Filtros do dashboard">
-      <label for="filtroData">Filtrar por dia:</label>
-      <input type="text" id="filtroData" placeholder="dd/mm/aaaa" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Selecionar data"/>
+    <!-- CONTEÚDO PRINCIPAL -->
+    <div class="content-wrapper flex-1 flex flex-col min-w-0">
 
-      <!-- Ações rápidas -->
-      <div class="quick">
-        <button type="button" id="btnHoje"   class="btn-ghost">Hoje</button>
-        <button type="button" id="btnOntem"  class="btn-ghost">Ontem</button>
-        <button type="button" id="btnLimpar" class="btn-ghost">Limpar</button>
-      </div>
-
-      <span class="count"><span id="qtdAtendimentos_legacy">--</span> atendimentos</span>
-    </section>
-
-    <section class="cards" aria-label="Indicadores principais">
-      <div class="box"><div class="muted">Mensagens Hoje</div><div class="stat card-mensagens">0</div></div>
-      <div class="box"><div class="muted">Atendimentos em Aberto</div><div class="stat card-abertos">0</div></div>
-      <div class="box"><div class="muted">Clientes Online</div><div class="stat card-clientes">0</div></div>
-
-      <div class="box card-wpp-status">
-        <div class="muted">Status WhatsApp</div>
-        <div style="display:flex;align-items:center;gap:.5rem;font-weight:600">
-          <span class="status-dot" aria-hidden="true"></span>
-          <span class="status-text">Checando…</span>
-        </div>
-      </div>
-    </section>
-
-    <section class="charts" aria-label="Gráficos">
-      <div class="box">
-        <h3>Distribuição de Atendimentos</h3>
-        <div class="chart-h"><canvas id="pizzaAtendimento"></canvas></div>
-      </div>
-      <div class="box">
-        <h3>Funil de Conversas</h3>
-        <div class="chart-h"><canvas id="funilAtendimento"></canvas></div>
-      </div>
-    </section>
-
-    <section class="last" aria-label="Últimos atendimentos">
-      <div class="box" id="lastBox">
-        <h3>Últimos Atendimentos</h3>
-
-        <div class="table-wrap">
-          <table id="tabelaAtendimentos">
-            <thead>
-              <tr><th>Cliente</th><th>Telefone</th><th>Status</th><th>Horário</th><th>Data</th></tr>
-            </thead>
-            <tbody><!-- preenchido via JS --></tbody>
-          </table>
-        </div>
-
-        <!-- Estado vazio amigável -->
-        <div id="lastEmpty" class="empty-list" aria-live="polite" hidden>
-          <i class="fa-solid fa-inbox" aria-hidden="true"></i>
-          <div>
-            <strong>Nenhum atendimento no período</strong>
-            <div class="muted">Escolha outra data ou selecione outra instância.</div>
+      <!-- TOPBAR -->
+      <header class="h-16 bg-zinc-900 border-b border-zinc-800 px-6 flex items-center justify-between sticky top-0 z-40 shadow-sm">
+        <div class="flex items-center gap-x-4">
+          <button onclick="toggleSidebar()" class="md:hidden w-10 h-10 flex items-center justify-center text-2xl text-zinc-300 hover:text-white">
+            <i class="fa-solid fa-bars"></i>
+          </button>
+          <div class="flex items-center gap-x-2">
+            <h2 id="page-title" class="text-2xl font-semibold logo-font tracking-tighter">Dashboard</h2>
+            <span class="text-xs px-2.5 py-0.5 bg-emerald-400 text-emerald-950 rounded-3xl font-medium hidden sm:inline">AO VIVO</span>
           </div>
         </div>
-      </div>
-    </section>
-  </main>
 
-  <!-- Guard + página -->
-  <script src="/frontend/js/page-guard.js" defer></script>
-  <script src="/frontend/js/pages/dashboard.js" defer></script>
+        <div class="flex-1 max-w-xl mx-8 relative hidden md:block">
+          <div class="glass absolute inset-0 rounded-3xl"></div>
+          <div class="relative flex items-center px-6 h-11 rounded-3xl border border-white/10">
+            <i class="fa-solid fa-magnifying-glass text-zinc-400"></i>
+            <input type="text" placeholder="Buscar métricas, clientes ou relatórios..." class="flex-1 ml-3 bg-transparent outline-none text-sm placeholder-zinc-400">
+          </div>
+        </div>
 
-  <!-- Init do Flatpickr -->
+        <div class="flex items-center gap-x-4">
+          <div onclick="toggleNotifications()" class="relative cursor-pointer">
+            <button class="w-10 h-10 flex items-center justify-center text-xl hover:bg-white/10 rounded-3xl relative">
+              <i class="fa-solid fa-bell"></i>
+              <span id="notification-badge" class="absolute top-1.5 right-1.5 w-4 h-4 bg-red-500 text-[10px] font-bold rounded-full flex items-center justify-center">3</span>
+            </button>
+
+            <div id="notifications-dropdown" class="hidden absolute right-0 mt-3 bg-zinc-900 border border-zinc-700 rounded-3xl shadow-2xl py-2 text-sm z-50">
+              <div class="px-6 py-3 border-b border-zinc-700 font-medium">Notificações</div>
+              <div class="max-h-96 overflow-auto custom-scroll">
+                <div class="px-6 py-4 hover:bg-white/5 flex gap-3">
+                  <i class="fa-solid fa-check-circle text-emerald-400 mt-0.5"></i>
+                  <div>
+                    <p class="font-medium">Pedido #3921 aprovado</p>
+                    <p class="text-xs text-zinc-400">Há 8 minutos</p>
+                  </div>
+                </div>
+                <div class="px-6 py-4 hover:bg-white/5 flex gap-3">
+                  <i class="fa-solid fa-chart-line text-cyan-400 mt-0.5"></i>
+                  <div>
+                    <p class="font-medium">Meta mensal atingida em 92%</p>
+                    <p class="text-xs text-zinc-400">Há 2 horas</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div onclick="showProfileMenu()" class="flex items-center gap-x-3 cursor-pointer">
+            <div class="text-right hidden sm:block">
+              <p class="text-sm font-semibold">tataynara</p>
+              <p class="text-xs text-emerald-400">Online</p>
+            </div>
+            <div class="w-9 h-9 bg-gradient-to-br from-cyan-300 to-blue-500 rounded-2xl flex items-center justify-center text-white ring-2 ring-offset-2 ring-offset-zinc-900 ring-cyan-400">
+              <span class="font-bold text-lg">T</span>
+            </div>
+          </div>
+
+          <button onclick="newAction()" class="flex items-center gap-x-2 bg-white text-zinc-900 hover:bg-cyan-400 hover:text-white px-5 h-10 rounded-3xl font-semibold text-sm shadow-lg shadow-cyan-400/30">
+            <i class="fa-solid fa-plus"></i><span>NOVA AÇÃO</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- CONTEÚDO -->
+      <main class="scroll-area custom-scroll p-6 lg:p-10 bg-zinc-950">
+        <div class="flex flex-col lg:flex-row lg:items-end justify-between mb-10">
+          <div>
+            <h1 class="text-4xl lg:text-5xl font-semibold logo-font tracking-[-1px]">Olá, tataynara 👋</h1>
+            <p class="text-zinc-400 mt-2 text-lg">Resumo completo • 21 de abril de 2026</p>
+          </div>
+          <div class="flex items-center gap-x-4 mt-6 lg:mt-0">
+            <div onclick="refreshDashboard()" class="flex items-center gap-x-2 text-sm px-6 h-10 border border-white/10 hover:border-cyan-400 rounded-3xl cursor-pointer">
+              <i class="fa-solid fa-rotate"></i><span>Atualizar</span>
+            </div>
+            <div class="text-xs px-4 py-2 bg-white/5 rounded-3xl flex items-center gap-x-2">
+              <div class="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
+              Tudo online
+            </div>
+          </div>
+        </div>
+
+        <!-- KPI -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+          <div class="card-hover bg-zinc-900 border border-white/10 rounded-3xl p-6">
+            <div class="flex justify-between">
+              <div>
+                <p class="text-sm text-zinc-400">RECEITA TOTAL</p>
+                <p id="revenue-value" class="text-4xl font-semibold mt-3">R$ 184.920</p>
+                <div class="flex items-center text-emerald-400 text-sm mt-4">
+                  <i class="fa-solid fa-arrow-trend-up"></i> <span class="ml-1">+24,8%</span>
+                </div>
+              </div>
+              <div class="w-12 h-12 bg-gradient-to-br from-emerald-400 to-teal-500 rounded-2xl flex items-center justify-center text-3xl">
+                <i class="fa-solid fa-sack-dollar"></i>
+              </div>
+            </div>
+            <div class="chart-box-sm mt-6"><canvas id="miniChart1"></canvas></div>
+          </div>
+
+          <div class="card-hover bg-zinc-900 border border-white/10 rounded-3xl p-6">
+            <div class="flex justify-between">
+              <div>
+                <p class="text-sm text-zinc-400">USUÁRIOS ATIVOS</p>
+                <p id="users-value" class="text-4xl font-semibold mt-3">3.284</p>
+                <div class="flex items-center text-emerald-400 text-sm mt-4">
+                  <i class="fa-solid fa-arrow-trend-up"></i> <span class="ml-1">+9,4%</span>
+                </div>
+              </div>
+              <div class="w-12 h-12 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-2xl flex items-center justify-center text-3xl">
+                <i class="fa-solid fa-users"></i>
+              </div>
+            </div>
+            <div class="chart-box-sm mt-6"><canvas id="miniChart2"></canvas></div>
+          </div>
+
+          <div class="card-hover bg-zinc-900 border border-white/10 rounded-3xl p-6">
+            <div class="flex justify-between">
+              <div>
+                <p class="text-sm text-zinc-400">PEDIDOS HOJE</p>
+                <p id="orders-value" class="text-4xl font-semibold mt-3">142</p>
+                <div class="flex items-center text-red-400 text-sm mt-4">
+                  <i class="fa-solid fa-arrow-trend-down"></i> <span class="ml-1">-3%</span>
+                </div>
+              </div>
+              <div class="w-12 h-12 bg-gradient-to-br from-orange-400 to-amber-500 rounded-2xl flex items-center justify-center text-3xl">
+                <i class="fa-solid fa-bag-shopping"></i>
+              </div>
+            </div>
+            <div class="chart-box-sm mt-6"><canvas id="miniChart3"></canvas></div>
+          </div>
+
+          <div class="card-hover bg-zinc-900 border border-white/10 rounded-3xl p-6">
+            <div class="flex justify-between">
+              <div>
+                <p class="text-sm text-zinc-400">CONVERSÃO</p>
+                <p id="conversion-value" class="text-4xl font-semibold mt-3">4,8%</p>
+                <div class="flex items-center text-emerald-400 text-sm mt-4">
+                  <i class="fa-solid fa-arrow-trend-up"></i> <span class="ml-1">+1,2%</span>
+                </div>
+              </div>
+              <div class="w-12 h-12 bg-gradient-to-br from-purple-400 to-pink-500 rounded-2xl flex items-center justify-center text-3xl">
+                <i class="fa-solid fa-percentage"></i>
+              </div>
+            </div>
+            <div class="mt-8 h-2 bg-zinc-800 rounded-3xl overflow-hidden">
+              <div class="h-full w-[48%] bg-gradient-to-r from-purple-400 to-pink-500"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CHARTS -->
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-6">
+          <div class="xl:col-span-8 bg-zinc-900 border border-white/10 rounded-3xl p-8">
+            <div class="font-semibold text-xl mb-6 flex items-center justify-between gap-4 flex-wrap">
+              <span>Evolução de Receita • Últimos 30 dias</span>
+              <span class="text-xs text-emerald-400 flex items-center">
+                <i class="fa-solid fa-arrow-trend-up mr-1"></i> +24,8% (igual ao card)
+              </span>
+            </div>
+            <div class="chart-box-lg"><canvas id="mainLineChart"></canvas></div>
+          </div>
+
+          <div class="xl:col-span-4 bg-zinc-900 border border-white/10 rounded-3xl p-8">
+            <div class="font-semibold text-xl mb-6">Distribuição por Categoria</div>
+            <div class="chart-box-md"><canvas id="pieChart"></canvas></div>
+          </div>
+
+          <div class="xl:col-span-12 bg-zinc-900 border border-white/10 rounded-3xl p-8">
+            <div class="flex justify-between items-center mb-6 gap-4 flex-wrap">
+              <div class="font-semibold text-xl">Atividades Recentes</div>
+              <button onclick="exportTable()" class="text-xs flex items-center gap-x-2 px-5 py-2 border border-white/10 hover:border-cyan-400 rounded-3xl">
+                <i class="fa-solid fa-download"></i> Exportar CSV
+              </button>
+            </div>
+
+            <div class="overflow-x-auto custom-scroll">
+              <table class="w-full text-sm min-w-[700px]">
+                <thead>
+                  <tr class="border-b border-zinc-700 text-zinc-400">
+                    <th class="text-left py-4">DATA</th>
+                    <th class="text-left py-4">DESCRIÇÃO</th>
+                    <th class="text-right py-4">VALOR</th>
+                    <th class="text-center py-4">STATUS</th>
+                  </tr>
+                </thead>
+                <tbody id="activity-table" class="divide-y divide-zinc-800"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
   <script>
-    (function(){
-      const el = document.getElementById('filtroData');
-      if (!el || !window.flatpickr) return;
-      const today = new Date();
-      flatpickr(el, {
-        dateFormat: 'Y-m-d',
-        altInput: true,
-        altFormat: 'd/m/Y',
-        allowInput: true,
-        defaultDate: today,
-        locale: flatpickr.l10ns.pt,
-        disableMobile: true,
-        onReady: (sel, str, inst) => { inst.altInput.classList.add('fp-input'); },
-        onChange: () => el.dispatchEvent(new Event('change', { bubbles:true }))
-      });
-    })();
-  </script>
+    const dashboardCharts = {};
 
-  <!-- Sincroniza badge nova (#qtdAtendimentos) com a antiga -->
-  <script>
-    (function(){
-      const main = document.getElementById('qtdAtendimentos');
-      const legacy = document.getElementById('qtdAtendimentos_legacy');
-      if (!main || !legacy) return;
-      const obs = new MutationObserver(()=>{ legacy.textContent = main.textContent; });
-      obs.observe(main, { childList:true, characterData:true, subtree:true });
-    })();
-  </script>
+    function toggleSidebar() {
+      document.getElementById('sidebar').classList.toggle('-translate-x-full');
+    }
 
-  <!-- Dropdown de Instâncias (com fetch guardado p/ 401/403) -->
-  <script>
-    (function(){
-      function getEmpresaId(){
-        const raw = localStorage.getItem('empresa_id');
-        const n = Number.parseInt(raw,10);
-        return Number.isFinite(n) && n>0 ? n : 0;
-      }
-      if (!window.CSS) window.CSS = {};
-      if (typeof CSS.escape !== 'function') {
-        CSS.escape = (val)=> String(val ?? '').replace(/["\\]/g,'\\$&').replace(/\s/g,'\\ ');
-      }
+    function toggleNotifications() {
+      document.getElementById('notifications-dropdown').classList.toggle('hidden');
+    }
 
-      const empresaId   = getEmpresaId();
-      const btn         = document.getElementById('instMenuBtn');
-      const label       = document.getElementById('instMenuLabel');
-      const menu        = document.getElementById('inst-menu');
-      const listEl      = document.getElementById('instMenuList');
-      if (!btn || !menu || !listEl) return;
+    function showProfileMenu() {
+      alert('👤 Perfil aberto (demo)');
+    }
 
-      function openMenu(){
-        menu.setAttribute('aria-hidden','false');
-        btn.setAttribute('aria-expanded','true');
-        (listEl.querySelector('.inst-item[aria-selected="true"]') || listEl.querySelector('.inst-item'))?.focus();
-        document.addEventListener('mousedown', onDocClick);
-        document.addEventListener('keydown', onKey);
-      }
-      function closeMenu(){
-        menu.setAttribute('aria-hidden','true');
-        btn.setAttribute('aria-expanded','false');
-        document.removeEventListener('mousedown', onDocClick);
-        document.removeEventListener('keydown', onKey);
-      }
-      function toggleMenu(){ (menu.getAttribute('aria-hidden')!=='false') ? openMenu() : closeMenu(); }
-      function onDocClick(e){ if (!menu.contains(e.target) && e.target !== btn) closeMenu(); }
-      function onKey(e){
-        if (e.key === 'Escape'){ e.preventDefault(); closeMenu(); btn.focus(); }
-        if (menu.getAttribute('aria-hidden') === 'true') return;
-        const items = Array.from(listEl.querySelectorAll('.inst-item'));
-        const i = items.indexOf(document.activeElement);
-        if (e.key === 'ArrowDown'){ e.preventDefault(); (items[i+1]||items[0])?.focus(); }
-        if (e.key === 'ArrowUp'){ e.preventDefault(); (items[i-1]||items[items.length-1])?.focus(); }
-        if (e.key === 'Home'){ e.preventDefault(); items[0]?.focus(); }
-        if (e.key === 'End'){ e.preventDefault(); items[items.length-1]?.focus(); }
-        if (e.key === 'Enter' || e.key === ' '){
-          const a = document.activeElement;
-          if (a && a.classList.contains('inst-item')) { e.preventDefault(); selectValue(a.dataset.value, a.dataset.label); }
+    function newAction() {
+      alert('🚀 Nova ação criada!');
+      document.getElementById('orders-value').textContent = '143';
+    }
+
+    function navigateToSection(section) {
+      document.getElementById('page-title').textContent =
+        section === 'dashboard'
+          ? 'Dashboard'
+          : section.charAt(0).toUpperCase() + section.slice(1);
+
+      if (window.innerWidth < 768) {
+        const sidebar = document.getElementById('sidebar');
+        if (!sidebar.classList.contains('-translate-x-full')) {
+          sidebar.classList.add('-translate-x-full');
         }
       }
-      btn.addEventListener('click', toggleMenu);
+    }
 
-      const instValue = (i)=> i.instancia_id ?? i.id ?? i.instance_id ?? i.session ?? i.sessionName ?? '';
-      const instLabel = (i,v)=> i.apelido || i.nome || i.instance_name || String(v) || 'Instância';
+    function logout() {
+      if (confirm('Sair do dashboard?')) location.reload();
+    }
 
-      function itemTpl(text, value, selected){
-        const li = document.createElement('li');
-        const b = document.createElement('button');
-        b.type='button'; b.className='inst-item'; b.setAttribute('role','option');
-        b.setAttribute('aria-selected', selected?'true':'false');
-        b.tabIndex=-1; b.dataset.value=String(value??''); b.dataset.label=text;
-        b.innerHTML = `<span class="radio" aria-hidden="true"></span><span>${text}</span>`;
-        b.addEventListener('click', ()=> selectValue(String(value??''), text));
-        li.appendChild(b); return li;
+    function toggleDarkMode() {
+      alert('🌙 Tema alternado');
+    }
+
+    function refreshDashboard() {
+      const icons = document.querySelectorAll('.fa-rotate');
+      icons.forEach(i => i.classList.add('animate-spin'));
+
+      setTimeout(() => {
+        document.getElementById('revenue-value').textContent =
+          'R$ ' + (184920 + Math.random() * 8000).toFixed(0);
+        document.getElementById('users-value').textContent =
+          (3284 + Math.random() * 200).toFixed(0);
+        document.getElementById('orders-value').textContent =
+          String(142 + Math.floor(Math.random() * 10));
+
+        icons.forEach(i => i.classList.remove('animate-spin'));
+        alert('✅ Dashboard atualizado!');
+      }, 800);
+    }
+
+    function exportTable() {
+      alert('📤 CSV baixado com sucesso!');
+    }
+
+    function destroyChart(id) {
+      const existing = Chart.getChart(id);
+      if (existing) existing.destroy();
+      if (dashboardCharts[id]) {
+        dashboardCharts[id].destroy();
+        delete dashboardCharts[id];
       }
+    }
 
-      function setActiveUI(value, text){
-        listEl.querySelectorAll('.inst-item').forEach(b=>{
-          b.setAttribute('aria-selected', b.dataset.value === String(value) ? 'true' : 'false');
-        });
-        const active = listEl.querySelector(`.inst-item[data-value="${CSS.escape(value)}"]`);
-        if (active) menu.setAttribute('aria-activedescendant', active.id || (active.id = 'inst-opt-' + String(value||'all')));
-        label.textContent = text || (value ? `Instância ${value}` : 'Todas as instâncias');
-      }
+    function buildLineChart(canvasId, dataPoints, color) {
+      destroyChart(canvasId);
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return null;
 
-      function selectValue(value, text){
-        window.__INST_ID = value ? Number(String(value).replace(/\D/g,'')) : '';
-        window.__INST_NAME = (text || '').trim();
-        setActiveUI(value, text);
-        if (typeof window.setInstanciaAtivaDashboard === 'function') {
-          window.setInstanciaAtivaDashboard(value, text);
-        }
-        closeMenu(); btn.focus();
-      }
-
-      async function loadList(){
-        listEl.innerHTML = '';
-        listEl.appendChild(itemTpl('Todas as instâncias','', false));
-
-        // >>> usa guardFetch/authFetch para não vazar dados em anônimo
-        const F = (window.ZAuth?.guardFetch || window.ZAuth?.authFetch || fetch);
-
-        let items = [];
-        if (empresaId){
-          try{
-            let r = await F(`/api/empresas/${empresaId}/whatsapp`, { credentials:'include' });
-            if (!r.ok) throw 0;
-            const j = await r.json();
-            items = Array.isArray(j.instancias) ? j.instancias : [];
-          }catch{
-            try {
-              const r2 = await F(`/api/instancias/list?empresa_id=${empresaId}`, { credentials:'include' });
-              const j2 = await r2.json();
-              items = Array.isArray(j2) ? j2 : (Array.isArray(j2?.instancias) ? j2.instancias : []);
-            }catch{}
+      const ctx = canvas.getContext('2d');
+      dashboardCharts[canvasId] = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7'],
+          datasets: [{
+            data: dataPoints,
+            borderColor: color,
+            borderWidth: 3,
+            tension: 0.4,
+            pointRadius: 0,
+            fill: false
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 700 },
+          plugins: {
+            legend: { display: false },
+            tooltip: { enabled: false }
+          },
+          scales: {
+            x: { display: false },
+            y: { display: false }
           }
         }
+      });
 
-        items.forEach(i=>{
-          const v = String(instValue(i) ?? '');
-          const t = instLabel(i, v);
-          listEl.appendChild(itemTpl(t, v, false));
-        });
+      return dashboardCharts[canvasId];
+    }
 
-        if (window.__INST_ID == null || window.__INST_ID === ''){
-          const firstConnected = items.find(x => !!(x.connected || x.conectada || x.status === 'CONNECTED'));
-          const firstAny       = items[0];
-          const chosen         = firstConnected || firstAny;
-          window.__INST_ID     = chosen ? Number(String(instValue(chosen) || '').replace(/\D/g,'')) : '';
-        }
-
-        if (window.__INST_ID){
-          const sel  = listEl.querySelector(`.inst-item[data-value="${CSS.escape(String(window.__INST_ID))}"]`);
-          const text = sel?.dataset?.label || `Instância ${window.__INST_ID}`;
-          setActiveUI(String(window.__INST_ID), text);
-        } else {
-          setActiveUI('', 'Todas as instâncias');
-        }
+    function createCharts() {
+      if (typeof Chart === 'undefined') {
+        console.error('Chart.js não carregou.');
+        return;
       }
 
-      loadList();
-    })();
+      buildLineChart('miniChart1', [14200, 15100, 15800, 16600, 17200, 17900, 18492], '#00f0ff');
+      buildLineChart('miniChart2', [2800, 2950, 3050, 3120, 3190, 3240, 3284], '#00f0ff');
+      buildLineChart('miniChart3', [138, 140, 145, 139, 148, 141, 142], '#00f0ff');
+
+      destroyChart('mainLineChart');
+      {
+        const canvas = document.getElementById('mainLineChart');
+        const ctx = canvas.getContext('2d');
+
+        dashboardCharts.mainLineChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: ['03/04', '06/04', '09/04', '12/04', '15/04', '18/04', '21/04'],
+            datasets: [
+              {
+                label: 'Receita Real',
+                data: [124000, 132000, 141000, 152000, 165000, 175000, 184920],
+                borderColor: '#00f0ff',
+                backgroundColor: 'rgba(0, 240, 255, 0.08)',
+                borderWidth: 4,
+                tension: 0.35,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                fill: true
+              },
+              {
+                label: 'Meta',
+                data: [130000, 140000, 150000, 160000, 170000, 180000, 190000],
+                borderColor: '#a855f7',
+                borderWidth: 2,
+                borderDash: [6, 4],
+                tension: 0.2,
+                pointRadius: 0,
+                fill: false
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 900 },
+            interaction: {
+              mode: 'index',
+              intersect: false
+            },
+            plugins: {
+              legend: {
+                position: 'top',
+                align: 'end',
+                labels: {
+                  color: '#d4d4d8',
+                  usePointStyle: true,
+                  boxWidth: 10
+                }
+              },
+              tooltip: {
+                backgroundColor: '#18181b',
+                titleColor: '#ffffff',
+                bodyColor: '#e4e4e7',
+                borderColor: 'rgba(255,255,255,0.08)',
+                borderWidth: 1
+              }
+            },
+            scales: {
+              y: {
+                grid: { color: 'rgba(255,255,255,0.08)' },
+                ticks: {
+                  color: '#71717a',
+                  callback: (value) => 'R$ ' + Number(value).toLocaleString('pt-BR')
+                }
+              },
+              x: {
+                grid: { color: 'rgba(255,255,255,0.08)' },
+                ticks: { color: '#71717a' }
+              }
+            }
+          }
+        });
+      }
+
+      destroyChart('pieChart');
+      {
+        const canvas = document.getElementById('pieChart');
+        const ctx = canvas.getContext('2d');
+
+        dashboardCharts.pieChart = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: ['Produtos', 'Serviços', 'Consultoria', 'Outros'],
+            datasets: [{
+              data: [62, 23, 10, 5],
+              backgroundColor: ['#00f0ff', '#a855f7', '#f59e0b', '#ec4899'],
+              borderColor: '#18181b',
+              borderWidth: 6,
+              hoverOffset: 6
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '72%',
+            plugins: {
+              legend: {
+                display: true,
+                position: 'bottom',
+                labels: {
+                  color: '#d4d4d8',
+                  usePointStyle: true,
+                  padding: 18
+                }
+              },
+              tooltip: {
+                backgroundColor: '#18181b',
+                titleColor: '#ffffff',
+                bodyColor: '#e4e4e7',
+                borderColor: 'rgba(255,255,255,0.08)',
+                borderWidth: 1
+              }
+            }
+          }
+        });
+      }
+    }
+
+    function populateActivityTable() {
+      const tbody = document.getElementById('activity-table');
+      tbody.innerHTML = '';
+
+      const data = [
+        { date: '21/04', desc: 'Pedido #3921 aprovado - TechCorp', value: 'R$ 12.400', status: '✅ Concluído' },
+        { date: '21/04', desc: 'Novo cliente: Maria Oliveira', value: '-', status: '👤 Novo' },
+        { date: '20/04', desc: 'Reembolso #871 processado', value: '-R$ 890', status: '🔄 Reembolso' },
+        { date: '19/04', desc: 'Meta mensal 94% atingida', value: 'R$ 184.920', status: '🏆 Meta' }
+      ];
+
+      data.forEach(item => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-white/5';
+
+        const negative = item.value.trim().startsWith('-');
+
+        tr.innerHTML = `
+          <td class="py-5 text-zinc-400">${item.date}</td>
+          <td class="py-5">${item.desc}</td>
+          <td class="py-5 text-right font-semibold ${negative ? 'text-red-400' : 'text-emerald-400'}">${item.value}</td>
+          <td class="py-5 text-center">
+            <span class="px-4 py-1 text-xs rounded-3xl bg-white/10">${item.status}</span>
+          </td>
+        `;
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    document.addEventListener('click', (e) => {
+      const dropdown = document.getElementById('notifications-dropdown');
+      const bellArea = e.target.closest('[onclick="toggleNotifications()"]');
+      if (!bellArea && !dropdown.classList.contains('hidden')) {
+        dropdown.classList.add('hidden');
+      }
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+      populateActivityTable();
+      createCharts();
+
+      console.log(
+        '%c✅ gráficos carregados com segurança',
+        'background:#00f0ff;color:#000;padding:4px 8px;border-radius:8px;font-weight:bold'
+      );
+    });
+
+    window.addEventListener('resize', () => {
+      clearTimeout(window.__chartResizeTimer);
+      window.__chartResizeTimer = setTimeout(() => {
+        Object.values(dashboardCharts).forEach(chart => {
+          if (chart && typeof chart.resize === 'function') chart.resize();
+        });
+      }, 120);
+    });
   </script>
 </body>
 </html>

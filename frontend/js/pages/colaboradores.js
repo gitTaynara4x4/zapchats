@@ -958,7 +958,7 @@
       if (pMono){
         pMono.textContent = initials(nome);
         pMono.style.display='grid';
-        pMono.parentElement && (pMono.parentElement.style.background = hashColor(nome||'ZapChats'));
+        pMono.parentElement && (pMono.parentElement.style.background = hashColor(nome||'zapschat'));
       }
       if (pAvatar){ pAvatar.removeAttribute('src'); pAvatar.style.display='none'; }
     }

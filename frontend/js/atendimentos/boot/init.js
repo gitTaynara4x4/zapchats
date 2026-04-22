@@ -1,4 +1,5 @@
-// /frontend/js/atendimentos/boot/init.js
+//frontend\js\atendimentos\boot\init.js
+
 import { state, persist, setClienteSel } from '../state/store.js';
 import { EMPRESA_ID } from '../core/env.js';
 import { carregarClientes } from '../domain/clientes.js';
@@ -14,16 +15,242 @@ window.SHOW_TOP_OPERATOR_BANNER = false;
 // ====== TRAVA: exige instância resolvida para operar (abrir/enviar) ======
 window.ZC_REQUIRE_INSTANCE = true;
 
-/* ================= ID helpers (string-first) ================= */
+/* ================= ID / REF helpers (string-first) ================= */
+function normStr(v) {
+  return String(v ?? '').trim();
+}
+
 function idKey(v) {
-  const s = String(v ?? '').trim();
+  const s = normStr(v);
   if (!s || s === 'null' || s === 'undefined' || s === 'NaN') return null;
   return s;
 }
+
 function idEq(a, b) {
-  const A = idKey(a), B = idKey(b);
+  const A = idKey(a);
+  const B = idKey(b);
   if (!A || !B) return false;
   return A === B;
+}
+
+function instKey(v) {
+  const s = normStr(v);
+  if (!s) return null;
+  if (['null', 'undefined', 'nan', '0', 'all', '*', '-'].includes(s.toLowerCase())) return null;
+  return s;
+}
+
+function digitsOnly(v) {
+  return String(v || '').replace(/\D+/g, '');
+}
+
+function inferKindFromRow(row = null) {
+  const explicit =
+    row?.kind ??
+    row?.conversation_kind ??
+    row?.tipo_conversa ??
+    null;
+
+  const exp = normStr(explicit).toLowerCase();
+  if (exp === 'c' || exp === 'contato' || exp === 'cliente') return 'c';
+  if (exp === 'g' || exp === 'grupo' || exp === 'group') return 'g';
+
+  if (row?.grupo_id != null || row?.is_group === true) return 'g';
+  return 'c';
+}
+
+function inferEntityIdFromRow(row = null) {
+  const kind = inferKindFromRow(row);
+
+  const raw =
+    row?.entity_id ??
+    row?.backend_id ??
+    row?.id_backend ??
+    (kind === 'g'
+      ? (row?.grupo_id ?? row?.conversation_entity_id ?? null)
+      : (row?.cliente_id ?? row?.conversation_entity_id ?? null));
+
+  const s = idKey(raw);
+  if (s && /^\d+$/.test(s)) return s;
+
+  const fallbackRaw =
+    row?.api_id ??
+    row?.id_api ??
+    null;
+
+  const f = idKey(fallbackRaw);
+  if (f && /^\d+$/.test(f)) return f;
+
+  return null;
+}
+
+function inferInstIdFromRow(row = null) {
+  return (
+    instKey(row?.instancia_id) ||
+    instKey(row?.instancia) ||
+    instKey(row?.instance_id) ||
+    instKey(row?.instance) ||
+    instKey(row?.instance_name) ||
+    null
+  );
+}
+
+function buildConversationKey(kind, entityId, instId) {
+  const k = String(kind || '').toLowerCase() === 'g' ? 'g' : 'c';
+  const eid = idKey(entityId);
+  const iid = instKey(instId);
+  if (!eid) return null;
+  return `${k}:${eid}:${iid ?? '0'}`;
+}
+
+function parseConversationRef(raw, row = null) {
+  const rawStr = normStr(raw);
+  const fromRowKey =
+    idKey(row?.conversation_key) ||
+    idKey(row?.conversation_id) ||
+    (idKey(row?.id) && /^[cg]:\d+:[^:]+$/i.test(String(row.id)) ? idKey(row.id) : null) ||
+    null;
+
+  const source = rawStr || fromRowKey || '';
+
+  const composed = source.match(/^([cg]):(\d+):([^:]+)$/i);
+  if (composed) {
+    return {
+      key: `${composed[1].toLowerCase()}:${composed[2]}:${composed[3]}`,
+      kind: composed[1].toLowerCase(),
+      entityId: composed[2],
+      instId: instKey(composed[3]),
+    };
+  }
+
+  const rowKind = inferKindFromRow(row);
+  const rowEntityId = inferEntityIdFromRow(row);
+  const rowInstId = inferInstIdFromRow(row);
+
+  if (rowEntityId) {
+    return {
+      key: buildConversationKey(rowKind, rowEntityId, rowInstId) || source || '',
+      kind: rowKind,
+      entityId: rowEntityId,
+      instId: rowInstId,
+    };
+  }
+
+  if (/^\d+$/.test(source)) {
+    return {
+      key: source,
+      kind: rowKind || null,
+      entityId: source,
+      instId: rowInstId,
+    };
+  }
+
+  return {
+    key: source || '',
+    kind: rowKind || null,
+    entityId: rowEntityId || null,
+    instId: rowInstId || null,
+  };
+}
+
+function convKeyOf(row) {
+  return parseConversationRef(
+    row?.conversation_key ??
+    row?.conversation_id ??
+    row?.id ??
+    row?.cliente_id ??
+    row?.grupo_id ??
+    null,
+    row
+  ).key;
+}
+
+function entityIdOf(row) {
+  return parseConversationRef(
+    row?.conversation_key ??
+    row?.conversation_id ??
+    row?.id ??
+    row?.cliente_id ??
+    row?.grupo_id ??
+    null,
+    row
+  ).entityId;
+}
+
+function kindOf(row) {
+  return parseConversationRef(
+    row?.conversation_key ??
+    row?.conversation_id ??
+    row?.id ??
+    row?.cliente_id ??
+    row?.grupo_id ??
+    null,
+    row
+  ).kind;
+}
+
+function sameConversation(a, b) {
+  const A = convKeyOf(a);
+  const B = parseConversationRef(b, typeof b === 'object' ? b : null).key;
+  return !!A && !!B && A === B;
+}
+
+function findConversation(raw) {
+  const ref = parseConversationRef(raw);
+  const pools = [
+    ...(Array.isArray(state?.clientesCache) ? state.clientesCache : []),
+    ...(Array.isArray(state?.todosContatosCache) ? state.todosContatosCache : []),
+  ];
+
+  const byKey = pools.find((x) => convKeyOf(x) === ref.key);
+  if (byKey) return byKey;
+
+  if (ref.entityId) {
+    const byEntityInst = pools.find((x) => {
+      const xr = parseConversationRef(convKeyOf(x), x);
+      if (!xr.entityId || xr.entityId !== ref.entityId) return false;
+      if (ref.kind && xr.kind && xr.kind !== ref.kind) return false;
+      if (ref.instId && xr.instId && xr.instId !== ref.instId) return false;
+      return true;
+    });
+    if (byEntityInst) return byEntityInst;
+  }
+
+  return null;
+}
+
+function setConversationDatasets(target, ref) {
+  if (!target || !ref) return;
+
+  target.dataset.conversationKey = String(ref.key || '');
+  target.dataset.kind = String(ref.kind || '');
+  target.dataset.entityId = String(ref.entityId || '');
+
+  if (ref.instId) target.dataset.instanciaId = String(ref.instId);
+  else target.removeAttribute('data-instancia-id');
+
+  // compat legado
+  target.dataset.clienteId = String(ref.key || '');
+  target.dataset.apiClienteId = String(ref.entityId || '');
+
+  if (ref.kind === 'c' && ref.entityId) {
+    target.dataset.backendClienteId = String(ref.entityId);
+  } else {
+    target.removeAttribute('data-backend-cliente-id');
+  }
+}
+
+function clearConversationDatasets(target) {
+  if (!target) return;
+  target.removeAttribute('data-conversation-key');
+  target.removeAttribute('data-kind');
+  target.removeAttribute('data-entity-id');
+  target.removeAttribute('data-instancia-id');
+
+  // compat legado
+  target.removeAttribute('data-cliente-id');
+  target.removeAttribute('data-api-cliente-id');
+  target.removeAttribute('data-backend-cliente-id');
 }
 
 /* ================= Helpers (Toast simples) ================= */
@@ -32,17 +259,17 @@ function toast(msg, ok = true) {
   if (!t) {
     t = document.createElement('div');
     t.id = '__app_toast';
-    t.className = 'zc-toast'; // <-- CSS vai pro atendimentos.css
     document.body.appendChild(t);
   }
+
   t.textContent = String(msg || '');
-  t.style.background = ok ? '#1e293b' : '#7f1d1d';
-  t.style.opacity = '1';
-  t.style.transform = 'translateX(-50%) translateY(0)';
+  t.classList.remove('is-error');
+  if (!ok) t.classList.add('is-error');
+
+  t.classList.add('on');
   clearTimeout(t.__timer);
   t.__timer = setTimeout(() => {
-    t.style.opacity = '0';
-    t.style.transform = 'translateX(-50%) translateY(4px)';
+    t.classList.remove('on');
   }, 1700);
 }
 
@@ -66,13 +293,14 @@ function readyPart(key) {
     }
     return null;
   }
+
   function ensureHeadline() {
     let el = document.getElementById('op-headline');
     if (el) return el;
 
     el = document.createElement('div');
     el.id = 'op-headline';
-    el.className = 'op-headline'; // <-- CSS vai pro atendimentos.css
+    el.className = 'op-headline';
     el.hidden = true;
 
     const hist = findHistoryContainer();
@@ -92,11 +320,20 @@ function readyPart(key) {
     }
     return el;
   }
+
   function getUserName() {
-    const w = window, LS = w.localStorage || {};
-    return (w.Auth?.user?.nome) || (w.CURRENT_USER?.nome) || LS.getItem('user_nome') || 'Operadora';
+    const w = window;
+    const LS = w.localStorage || {};
+    return (
+      w.Auth?.user?.nome ||
+      w.CURRENT_USER?.nome ||
+      LS.getItem('user_nome') ||
+      'Operadora'
+    );
   }
+
   const normalize = (s) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, 180);
+
   const fmtTime = (iso) => {
     try {
       const d = iso ? new Date(iso) : new Date();
@@ -126,6 +363,7 @@ function readyPart(key) {
     box.innerHTML = `${nome}: ${preview} ${time}`;
     box.hidden = false;
   }
+
   function clearOpHeadline() {
     const box = document.getElementById('op-headline');
     if (box) {
@@ -134,24 +372,35 @@ function readyPart(key) {
     }
   }
 
-  window.OperatorLine = { set: setOpHeadline, clear: clearOpHeadline, getName: getUserName };
+  window.OperatorLine = {
+    set: setOpHeadline,
+    clear: clearOpHeadline,
+    getName: getUserName,
+  };
 })();
-
 
 /* ================= Utils ================= */
 
-async function markChatAsSeen(clienteId) {
+async function markChatAsSeen(conversationRef, row = null) {
   try {
-    const cid = encodeURIComponent(String(clienteId ?? '').trim());
-    await fetch(`/api/atendimento/clientes/${cid}/seen?empresa_id=${encodeURIComponent(String(EMPRESA_ID))}`, {
-      method: 'POST',
-      credentials: 'include',
-    });
+    const ref = parseConversationRef(conversationRef, row);
+
+    // endpoint é de CLIENTE, então grupo não entra aqui
+    if (ref.kind !== 'c' || !ref.entityId) return;
+
+    await fetch(
+      `/api/atendimento/clientes/${encodeURIComponent(ref.entityId)}/seen?empresa_id=${encodeURIComponent(String(EMPRESA_ID))}`,
+      {
+        method: 'POST',
+        credentials: 'include',
+      }
+    );
   } catch {}
 }
 
 function closeChatMobile() {
   if (!window.matchMedia('(max-width: 920px)').matches) return;
+
   const ws = document.getElementById('welcome-screen');
   const head = document.getElementById('chat-header');
   const hist = document.getElementById('historico');
@@ -161,8 +410,14 @@ function closeChatMobile() {
   if (hist) {
     hist.style.display = 'none';
     hist.innerHTML = '';
-    hist.removeAttribute('data-cliente-id');
-    hist.removeAttribute('data-instancia-id');
+    clearConversationDatasets(hist);
+    hist.removeAttribute('data-telefone');
+  }
+  if (head) {
+    head.removeAttribute('data-phone');
+    head.removeAttribute('data-conversation-key');
+    head.removeAttribute('data-kind');
+    head.removeAttribute('data-entity-id');
   }
   if (foot) foot.style.display = 'none';
   if (ws) ws.style.display = 'none';
@@ -173,79 +428,117 @@ function closeChatMobile() {
 const onlyDigits = (s) => String(s || '').replace(/\D+/g, '');
 
 /* ===== Helpers de instância ===== */
-function getInstanciaForFetch(clienteId) {
-  const cid = idKey(clienteId);
+function getInstanciaForFetch(conversationRef) {
+  const ref = parseConversationRef(conversationRef);
   const sel = state?.clienteSel;
 
-  if (sel && idEq(sel.id ?? sel.conversation_id ?? sel.cliente_id, cid)) {
-    const cand = sel.instancia_id ?? sel.instancia ?? window.getInstanciaAtiva?.() ?? window.INSTANCIA_ATIVA ?? null;
-    return cand == null || String(cand).trim() === '' ? null : String(cand);
+  if (sel && convKeyOf(sel) === ref.key) {
+    const cand =
+      instKey(sel.instancia_id) ||
+      instKey(sel.instancia) ||
+      ref.instId ||
+      instKey(window.getInstanciaAtiva?.()) ||
+      instKey(window.INSTANCIA_ATIVA) ||
+      null;
+    return cand;
   }
 
-  const c = (state.clientesCache || []).find(x => idEq(x?.id ?? x?.conversation_id ?? x?.cliente_id, cid));
-  const cand = c?.instancia_id ?? c?.instancia ?? window.getInstanciaAtiva?.() ?? window.INSTANCIA_ATIVA ?? null;
-  return (cand == null || String(cand).trim() === '') ? null : String(cand);
+  const c = findConversation(ref.key);
+  const cand =
+    instKey(c?.instancia_id) ||
+    instKey(c?.instancia) ||
+    ref.instId ||
+    instKey(window.getInstanciaAtiva?.()) ||
+    instKey(window.INSTANCIA_ATIVA) ||
+    null;
+
+  return cand;
 }
 
 function syncInstanciaFromCliente(c) {
-  const instCand = c?.instancia_id ?? c?.instancia ?? null;
-  const active = window.getInstanciaAtiva?.() ?? window.INSTANCIA_ATIVA ?? null;
+  const instCand = instKey(c?.instancia_id) || instKey(c?.instancia) || null;
+  const active = instKey(window.getInstanciaAtiva?.()) || instKey(window.INSTANCIA_ATIVA) || null;
 
-  if (instCand != null && String(instCand).trim() !== '') {
-    try { window.setInstanciaAtiva?.(String(instCand), { reloadList: false }); } catch {}
+  if (instCand) {
+    try {
+      window.setInstanciaAtiva?.(String(instCand), { reloadList: false });
+    } catch {}
     return String(instCand);
   }
 
-  if (active != null && String(active).trim() !== '') return String(active);
+  if (active) return String(active);
 
   return null;
 }
 
 /* ============ Carregar mensagens (sempre consulta backend) ============ */
-async function ensureMensagensCarregadas(conversationId) {
+async function ensureMensagensCarregadas(conversationRef) {
   if (!state.mensagensOffset || typeof state.mensagensOffset !== 'object') {
     state.mensagensOffset = {};
   }
 
-  const convId = String(conversationId ?? '').trim();
-  const inst = getInstanciaForFetch(convId);
+  const row = state?.clienteSel || findConversation(conversationRef) || null;
+  const ref = parseConversationRef(conversationRef, row);
+  const convKey = ref.key;
+  const entityId = ref.entityId;
+
+  if (!entityId) {
+    throw new Error('Conversa inválida');
+  }
+
+  const inst = getInstanciaForFetch(convKey) || ref.instId;
 
   // TRAVA: não carrega conversa “no escuro”
   if (window.ZC_REQUIRE_INSTANCE === true && !inst) {
-    try { window.zcUpdateInstBadge?.(); window.zcFlashInstBadge?.(); } catch {}
+    try {
+      window.zcUpdateInstBadge?.();
+      window.zcFlashInstBadge?.();
+    } catch {}
     toast('Selecione um WhatsApp (instância) antes de abrir/enviar.', false);
     throw new Error('Instância não resolvida');
   }
 
-  const qs = new URLSearchParams({ empresa_id: String(EMPRESA_ID), limit: '50' });
+  const qs = new URLSearchParams({
+    empresa_id: String(EMPRESA_ID),
+    limit: '50',
+  });
+
   if (inst) {
     const s = String(inst);
     if (/^\d+$/.test(s)) qs.set('instancia_id', s);
     else qs.set('instance', s);
   }
 
-  const cidEnc = encodeURIComponent(convId);
-  const url = `/api/atendimento/conversas/${cidEnc}/mensagens?` + qs.toString();
+  const url = `/api/atendimento/conversas/${encodeURIComponent(entityId)}/mensagens?${qs.toString()}`;
 
   const r = await fetch(url, { credentials: 'include' });
-  if (!r.ok) throw new Error('Falha ao carregar mensagens');
+  if (!r.ok) throw new Error(`Falha ao carregar mensagens (${r.status})`);
   const data = await r.json();
 
   const items = Array.isArray(data?.items) ? data.items : [];
 
-  const mapped = items.map(m => {
+  const mapped = items.map((m) => {
     const tipoMsg = m.tipo || (m.remetente === 'agente' ? 'saida' : 'entrada');
-    const isSaida = (tipoMsg === 'saida') || m.from_me === true || m.origem === 'atendente';
+    const isSaida = tipoMsg === 'saida' || m.from_me === true || m.origem === 'atendente';
 
     let ackNum = Number(m.ack ?? m.status ?? m.ack_status ?? m.meta?.ack ?? 0);
     if (!Number.isFinite(ackNum)) ackNum = 0;
     ackNum = Math.min(3, Math.max(0, ackNum));
 
+    // ✅ NUNCA inventar "agora" em mensagem antiga sem timestamp claro
+    const rawTs =
+      m.ts ??
+      m.timestamp ??
+      m.data ??
+      m.created_at ??
+      m.hora ??
+      null;
+
     return {
       msg_id: m.msg_id || m.id || null,
       conteudo: m.texto ?? m.conteudo ?? '',
       tipo: tipoMsg,
-      timestamp: m.ts || m.timestamp || new Date().toISOString(),
+      timestamp: rawTs || null,
       ack: isSaida ? ackNum : null,
       midias: Array.isArray(m.midias) ? m.midias : [],
       instancia_id: m.instancia_id ?? (inst || null),
@@ -254,38 +547,47 @@ async function ensureMensagensCarregadas(conversationId) {
     };
   });
 
-  try { salvarNoCache(convId, mapped); } catch {}
+  try {
+    salvarNoCache(convKey, mapped);
+  } catch {}
 
-  const finalHist = getHist(inst, convId) || [];
+  const finalHist = getHist(inst, convKey) || [];
 
   state.cacheHistoricos = {
     ...(state.cacheHistoricos || {}),
-    [convId]: (window.cacheHistoricos || {})[convId]
+    [convKey]: (window.cacheHistoricos || {})[convKey],
   };
-  state.mensagensOffset[convId] = finalHist.length;
+  state.mensagensOffset[convKey] = finalHist.length;
   persist();
 
   return finalHist;
 }
 
 /* ======= Atualiza banner com a última saída ======= */
-function updateOperatorBannerForConversation(convId) {
+function updateOperatorBannerForConversation(conversationRef) {
   if (window.SHOW_TOP_OPERATOR_BANNER === false) return;
+
   try {
-    const id = String(convId ?? '').trim();
-    const inst = getInstanciaForFetch(id);
-    const arr = getHist(inst, id) || ((window.cacheHistoricos || {})[id] || []);
-    const lastOut = [...arr].reverse().find(m =>
-      (m?.tipo === 'saida') || (m?.from_me === true) || (m?.origem === 'atendente')
+    const ref = parseConversationRef(conversationRef);
+    const convKey = ref.key;
+    const inst = getInstanciaForFetch(convKey);
+    const arr = getHist(inst, convKey) || ((window.cacheHistoricos || {})[convKey] || []);
+
+    const lastOut = [...arr].reverse().find(
+      (m) => m?.tipo === 'saida' || m?.from_me === true || m?.origem === 'atendente'
     );
+
     if (lastOut) {
       const texto = lastOut.conteudo || lastOut.texto || lastOut.mensagem || '';
       const ts = lastOut.timestamp || lastOut.ts || null;
       const meta = {
-        origem: (lastOut.origem)
+        origem: lastOut.origem
           ? lastOut.origem
-          : ((lastOut.tipo === 'saida' || lastOut.from_me === true) ? 'atendente' : 'cliente'),
-        autor_nome: lastOut.autor_nome || lastOut.atendente_nome || lastOut.user_nome || null,
+          : lastOut.tipo === 'saida' || lastOut.from_me === true
+            ? 'atendente'
+            : 'cliente',
+        autor_nome:
+          lastOut.autor_nome || lastOut.atendente_nome || lastOut.user_nome || null,
       };
       window.OperatorLine?.set(texto, ts, meta);
     } else {
@@ -296,7 +598,7 @@ function updateOperatorBannerForConversation(convId) {
 
 /* ================= Seleção de cliente + preparo da UI ================= */
 async function selecionarClienteObj(id) {
-  const cid = idKey(id) ?? String(id ?? '').trim();
+  const rawInput = idKey(id) ?? String(id ?? '').trim();
   const isMobile = window.matchMedia('(max-width: 920px)').matches;
   const hist = document.getElementById('historico');
   const ws = document.getElementById('welcome-screen');
@@ -305,7 +607,6 @@ async function selecionarClienteObj(id) {
 
   if (hist) {
     hist.innerHTML = '';
-    hist.dataset.clienteId = String(cid || '');
     hist.dataset.noMore = '0';
     hist.style.display = 'block';
   }
@@ -315,23 +616,51 @@ async function selecionarClienteObj(id) {
 
   readyPart('ui');
 
-  const byId = (x) => idEq(x?.conversation_id ?? x?.id ?? x?.cliente_id, cid);
-  const c =
-    (state.clientesCache || []).find(byId) ||
-    (state.todosContatosCache || []).find(byId);
+  const c = findConversation(rawInput);
 
   if (!c) {
-    try { window.zcUpdateInstBadge?.(); } catch {}
+    try {
+      window.zcUpdateInstBadge?.();
+    } catch {}
     return;
   }
+
+  const ref = parseConversationRef(rawInput, c);
+  const convKey = ref.key;
+
+  if (!ref.entityId) {
+    toast('Conversa inválida.', false);
+    return;
+  }
+
+  if (hist) setConversationDatasets(hist, ref);
+  if (head) setConversationDatasets(head, ref);
 
   setClienteSel(c);
 
   // TRAVA/SYNC de instância antes de qualquer fetch/render
-  const instFinal = syncInstanciaFromCliente(c);
-  if (hist && instFinal) hist.dataset.instanciaId = String(instFinal);
+  let instFinal = syncInstanciaFromCliente(c);
+  if (!instFinal && ref.instId) {
+    instFinal = String(ref.instId);
+    try {
+      window.setInstanciaAtiva?.(String(instFinal), { reloadList: false });
+    } catch {}
+  }
+
+  if (hist) {
+    if (instFinal) hist.dataset.instanciaId = String(instFinal);
+    else hist.removeAttribute('data-instancia-id');
+  }
+  if (head) {
+    if (instFinal) head.dataset.instanciaId = String(instFinal);
+    else head.removeAttribute('data-instancia-id');
+  }
+
   if (window.ZC_REQUIRE_INSTANCE === true && !instFinal) {
-    try { window.zcUpdateInstBadge?.(); window.zcFlashInstBadge?.(); } catch {}
+    try {
+      window.zcUpdateInstBadge?.();
+      window.zcFlashInstBadge?.();
+    } catch {}
     toast('Selecione um WhatsApp (instância) antes de abrir/enviar.', false);
     return;
   }
@@ -341,15 +670,23 @@ async function selecionarClienteObj(id) {
     if (window.zcNotesSetContextFromCliente) {
       window.zcNotesSetContextFromCliente(c);
     } else if (head) {
-      const cidx = c.cliente_id ?? c.id ?? c.conversation_id ?? null;
-      if (cidx != null) head.dataset.clienteId = String(cidx);
+      head.dataset.conversationKey = String(convKey);
+      if (ref.kind === 'c' && ref.entityId) head.dataset.clienteId = String(ref.entityId);
+      else head.removeAttribute('data-cliente-id');
     }
   } catch {}
 
   // expor telefone pro perfil_quick.js
   try {
     const phone =
-      c.telefone ?? c.tel ?? c.phone ?? c.whatsapp ?? c.telefone_norm ?? c.numero ?? c.number ?? null;
+      c.telefone ??
+      c.tel ??
+      c.phone ??
+      c.whatsapp ??
+      c.telefone_norm ??
+      c.numero ??
+      c.number ??
+      null;
 
     const digits = String(phone || '').replace(/\D+/g, '');
     if (digits) {
@@ -363,11 +700,19 @@ async function selecionarClienteObj(id) {
 
   const t = document.getElementById('chat-title');
   const av = document.getElementById('chat-avatar');
-  if (t) t.textContent = c.nome || c.push_name || '';
+
+  if (t) {
+    t.textContent =
+      c.nome ||
+      c.nome_whatsapp ||
+      c.push_name ||
+      '';
+  }
+
   if (av) {
     if (c.avatar_url) {
       const safeUrl = String(c.avatar_url).replace(/"/g, '&quot;');
-      av.innerHTML = `<span class="avatar"><img src="${safeUrl}" alt="" data-cliente-id="${String(c.id ?? cid ?? '')}"
+      av.innerHTML = `<span class="avatar"><img src="${safeUrl}" alt="" data-cliente-id="${String(ref.entityId || '')}"
            onerror="window.handleAvatarError && window.handleAvatarError(this)"></span>`;
     } else {
       av.innerHTML =
@@ -378,16 +723,24 @@ async function selecionarClienteObj(id) {
   // click abre perfil
   try {
     const openPerfil = () => abrirPerfilAtual && abrirPerfilAtual(false);
-    if (t) { t.style.cursor = 'pointer'; t.onclick = openPerfil; }
-    if (av) { av.style.cursor = 'pointer'; av.onclick = openPerfil; }
+    if (t) {
+      t.style.cursor = 'pointer';
+      t.onclick = openPerfil;
+    }
+    if (av) {
+      av.style.cursor = 'pointer';
+      av.onclick = openPerfil;
+    }
   } catch {}
 
   // badge sempre atualizado
-  try { window.zcUpdateInstBadge?.(); } catch {}
+  try {
+    window.zcUpdateInstBadge?.();
+  } catch {}
 
   try {
-    await ensureMensagensCarregadas(cid);
-    renderHistoricoDoCache(cid);
+    await ensureMensagensCarregadas(convKey);
+    renderHistoricoDoCache(convKey);
   } catch (e) {
     console.warn('[selecionarClienteObj] carregar mensagens falhou:', e?.message || e);
     return;
@@ -396,22 +749,25 @@ async function selecionarClienteObj(id) {
   if (!state.mensagensOffset || typeof state.mensagensOffset !== 'object') {
     state.mensagensOffset = {};
   }
-  const inst = getInstanciaForFetch(cid);
-  state.mensagensOffset[cid] = (getHist(inst, cid) || []).length;
+  const inst = getInstanciaForFetch(convKey);
+  state.mensagensOffset[convKey] = (getHist(inst, convKey) || []).length;
 
-  updateOperatorBannerForConversation(cid);
+  updateOperatorBannerForConversation(convKey);
 
-  try { window.syncPreviewFromCache?.(cid); } catch {}
-  await markChatAsSeen(cid);
+  try {
+    window.syncPreviewFromCache?.(convKey);
+  } catch {}
+
+  await markChatAsSeen(convKey, c);
 
   // zera “unread” local
   try {
-    window.Lista?.resetUnread?.(cid);
+    window.Lista?.resetUnread?.(convKey);
     window.recomputeUnread?.();
   } catch {
     try {
       const arr = window.state?.clientesCache || window.clientesCache || [];
-      const idx = arr.findIndex(x => idEq(x?.id ?? x?.conversation_id ?? x?.cliente_id, cid));
+      const idx = arr.findIndex((x) => convKeyOf(x) === convKey);
       if (idx >= 0) {
         arr[idx].novas = 0;
         window.renderListaClientes?.(arr);
@@ -422,7 +778,9 @@ async function selecionarClienteObj(id) {
 
   if (isMobile) {
     document.body.classList.add('is-chat-open');
-    try { history.pushState({ chatOpen: true, id: cid }, '', location.href); } catch {}
+    try {
+      history.pushState({ chatOpen: true, id: convKey }, '', location.href);
+    } catch {}
   }
 }
 
@@ -432,7 +790,7 @@ window.closeChatMobile = closeChatMobile;
 
 /* ================= Chips de instância (opcional) ================= */
 export function wireInstanciaChips() {
-  document.querySelectorAll('[data-inst],[data-inst-id],[data-instancia]').forEach(el => {
+  document.querySelectorAll('[data-inst],[data-inst-id],[data-instancia]').forEach((el) => {
     el.addEventListener('click', () => {});
   });
 }
@@ -454,7 +812,9 @@ export async function boot() {
       readyPart('clientes');
     }
 
-    try { window.zcUpdateInstBadge?.(); } catch {}
+    try {
+      window.zcUpdateInstBadge?.();
+    } catch {}
 
     readyPart('boot');
   } catch (e) {
@@ -463,11 +823,15 @@ export async function boot() {
     readyPart('clientes');
   }
 
-  window.addEventListener('popstate', (e) => {
-    const isMobile = window.matchMedia('(max-width: 920px)').matches;
-    if (!isMobile) return;
-    const hasChat = document.body.classList.contains('is-chat-open');
-    const st = e.state || {};
-    if (hasChat && !st.chatOpen) closeChatMobile();
-  }, { passive: true });
+  window.addEventListener(
+    'popstate',
+    (e) => {
+      const isMobile = window.matchMedia('(max-width: 920px)').matches;
+      if (!isMobile) return;
+      const hasChat = document.body.classList.contains('is-chat-open');
+      const st = e.state || {};
+      if (hasChat && !st.chatOpen) closeChatMobile();
+    },
+    { passive: true }
+  );
 }
