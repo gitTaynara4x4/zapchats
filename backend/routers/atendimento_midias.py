@@ -1,5 +1,5 @@
 # backend/routers/atendimento_midias.py
-# — cache-1x + persistência BD + ETag/304 + multi-instância + ACL instâncias
+# — cache-1x + persistência BD + ETag/304 + multi-instância + ACL composta (departamento + instância)
 
 from __future__ import annotations
 
@@ -14,7 +14,13 @@ from typing import Optional, Any, Dict, List, Tuple
 from backend.database import get_db
 from backend import models
 from backend.routers.auth import get_current_identity
-from backend.security.instancias import instancias_visiveis
+from backend.security.atendimento_acl import (
+    ensure_perm,
+    assert_same_company,
+    resolve_acl_context,
+    assert_instancia_allowed,
+    assert_cliente_access,
+)
 
 router = APIRouter(tags=["Atendimento – Mídias"])
 
@@ -50,41 +56,8 @@ def _lock_for(key: str) -> threading.Lock:
 
 
 # =========================
-# ACL / Permissões
-# =========================
-def _ensure_atendimento_ver(identity: Any) -> None:
-    perms = set((identity or {}).get("permissoes") or [])
-    if "atendimento.ver" not in perms:
-        raise HTTPException(status_code=403, detail="Sem permissão para ver mídias de atendimento")
-
-
-def _allowed_inst_ids(identity: Any, db: Session) -> Optional[List[int]]:
-    """
-    Retorna:
-      - None: sem restrição (admin / regra libera)
-      - []: sem instâncias visíveis (bloqueia tudo)
-      - [ids...]: whitelist
-    """
-    ids = instancias_visiveis(identity, db)
-    if ids is None:
-        return None
-    try:
-        return [int(x) for x in ids]
-    except Exception:
-        return []
-
-
-# =========================
 # Helpers
 # =========================
-def _assert_mesma_empresa(empresa_do_token: int, empresa_da_query: int | None) -> int:
-    if empresa_da_query is None:
-        return int(empresa_do_token)
-    if int(empresa_da_query) != int(empresa_do_token):
-        raise HTTPException(403, "Empresa inválida para este recurso")
-    return int(empresa_da_query)
-
-
 def _resolve_instancia(
     db: Session,
     *,
@@ -122,35 +95,6 @@ def _resolve_instancia(
         return None, None
 
     return None, None
-
-
-def _assert_instancia_permitida(
-    *,
-    allowed: Optional[List[int]],
-    resolved_inst_id: Optional[int],
-    msg_instancia_id: Optional[int],
-    filtro_inst_id: Optional[int],
-) -> None:
-    """
-    Regras:
-      - Se allowed is None -> sem restrição.
-      - Se allowed == [] -> bloqueia.
-      - Se filtro_inst_id/resolved_inst_id veio e não está em allowed -> 403.
-      - Se mensagem tem instancia_id e não está em allowed -> 403.
-    """
-    if allowed is None:
-        return
-    if not allowed:
-        raise HTTPException(status_code=403, detail="Sem instâncias permitidas para este colaborador")
-
-    if resolved_inst_id is not None and resolved_inst_id not in allowed:
-        raise HTTPException(status_code=403, detail="Instância não permitida para este colaborador")
-
-    if filtro_inst_id is not None and int(filtro_inst_id) not in allowed:
-        raise HTTPException(status_code=403, detail="Instância não permitida para este colaborador")
-
-    if msg_instancia_id is not None and int(msg_instancia_id) not in allowed:
-        raise HTTPException(status_code=403, detail="Mídia não permitida para este colaborador (instância)")
 
 
 def _find_b64(d):
@@ -375,6 +319,30 @@ def _pdf_page_count(raw: bytes) -> Optional[int]:
         return raw.count(b"/Type /Page") or None
     except Exception:
         return None
+
+
+def _assert_midia_acl(
+    db: Session,
+    *,
+    identity,
+    empresa_id: int,
+    cliente_id: int,
+    instancia_id: int | None,
+) -> None:
+    """
+    ACL final da mídia 1:1:
+      - empresa
+      - instância
+      - departamento (via atendimento/cliente)
+    """
+    assert_cliente_access(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id),
+        cliente_id=int(cliente_id),
+        instancia_id=(int(instancia_id) if instancia_id is not None else None),
+        allow_unassigned_department=False,
+    )
 
 
 # =========================
@@ -604,12 +572,13 @@ def midia_resolve(
     """
     Rota legacy por midia_id — resolve msg_id e REDIRECIONA (307) para a rota por msg_id.
     Propaga empresa_id/instancia_id/instance quando informados.
-    Garante que a empresa e a instância pertencem ao token/ACL.
+    Garante ACL de empresa + instância + departamento.
     """
-    _ensure_atendimento_ver(identity)
+    ensure_perm(identity, "atendimento.ver")
 
-    empresa_id_eff = _assert_mesma_empresa(int(identity["empresa_id"]), empresa_id)
-    allowed = _allowed_inst_ids(identity, db)
+    empresa_id_eff = assert_same_company(identity, empresa_id)
+    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
+    allowed_inst = acl_ctx["allowed_instancias"]
 
     resolved_inst_id, _resolved_name = _resolve_instancia(
         db,
@@ -617,6 +586,12 @@ def midia_resolve(
         instancia_id=instancia_id,
         instance=instance,
     )
+
+    if resolved_inst_id is not None:
+        assert_instancia_allowed(
+            allowed_instancias=allowed_inst,
+            instancia_id=resolved_inst_id,
+        )
 
     MediaModel = getattr(models, "Midia", None) or getattr(models, "MensagemMidia", None)
     if MediaModel is None:
@@ -638,11 +613,18 @@ def midia_resolve(
     if int(msg.empresa_id) != int(empresa_id_eff):
         raise HTTPException(403, "Mídia não pertence à sua empresa")
 
-    _assert_instancia_permitida(
-        allowed=allowed,
-        resolved_inst_id=resolved_inst_id,
-        msg_instancia_id=getattr(msg, "instancia_id", None),
-        filtro_inst_id=instancia_id,
+    if getattr(msg, "instancia_id", None) is not None:
+        assert_instancia_allowed(
+            allowed_instancias=allowed_inst,
+            instancia_id=int(msg.instancia_id),
+        )
+
+    _assert_midia_acl(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id_eff),
+        cliente_id=int(msg.cliente_id),
+        instancia_id=getattr(msg, "instancia_id", None),
     )
 
     qs = []
@@ -667,16 +649,18 @@ def midia_por_msg(
     identity=Depends(get_current_identity),
 ):
     """
-    Canônico por msg_id (multi-instância + ACL):
+    Canônico por msg_id:
       0) cache em disco (ETag/304),
-      1) resolve Mensagem+Cliente+Instância (validando empresa do token + ACL instância),
-      2) tenta servir do BD,
-      3) Evolution como fallback, persistindo e cacheando.
+      1) resolve Mensagem+Cliente+Instância,
+      2) valida ACL composta (empresa + instância + departamento),
+      3) tenta servir do BD,
+      4) Evolution como fallback, persistindo e cacheando.
     """
-    _ensure_atendimento_ver(identity)
+    ensure_perm(identity, "atendimento.ver")
 
-    empresa_id_eff = _assert_mesma_empresa(int(identity["empresa_id"]), empresa_id)
-    allowed = _allowed_inst_ids(identity, db)
+    empresa_id_eff = assert_same_company(identity, empresa_id)
+    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
+    allowed_inst = acl_ctx["allowed_instancias"]
 
     resolved_inst_id, _resolved_name = _resolve_instancia(
         db,
@@ -685,18 +669,18 @@ def midia_por_msg(
         instance=instance,
     )
 
-    # ACL: se colaborador não tem instâncias visíveis, bloqueia
-    _assert_instancia_permitida(
-        allowed=allowed,
-        resolved_inst_id=resolved_inst_id,
-        msg_instancia_id=None,
-        filtro_inst_id=instancia_id,
-    )
+    if resolved_inst_id is not None:
+        assert_instancia_allowed(
+            allowed_instancias=allowed_inst,
+            instancia_id=resolved_inst_id,
+        )
 
     # 0) Cache no disco?
     cached = _cache_glob_for(msg_id)
     if cached:
-        return _serve_cached(cached, request)
+        # Mesmo servido do cache, a ACL foi validada acima apenas por filtro.
+        # Precisamos validar também a conversa real antes de liberar.
+        pass
 
     # 1) Resolve Mensagem + Cliente + Instância
     q = (
@@ -715,9 +699,10 @@ def midia_por_msg(
         # se veio id mas não resolveu, força "não encontrado"
         q = q.filter(models.Mensagem.instancia_id == int(instancia_id))
 
-    if allowed is not None:
-        # filtra instâncias permitidas no próprio select
-        q = q.filter(models.Mensagem.instancia_id.in_(allowed))
+    if allowed_inst is not None:
+        if not allowed_inst:
+            raise HTTPException(403, "Sem instâncias permitidas para este colaborador")
+        q = q.filter(models.Mensagem.instancia_id.in_(allowed_inst))
 
     row = q.first()
     if not row:
@@ -725,13 +710,24 @@ def midia_por_msg(
 
     msg, cli, inst = row
 
-    # ACL final (mensagem resolvida)
-    _assert_instancia_permitida(
-        allowed=allowed,
-        resolved_inst_id=resolved_inst_id,
-        msg_instancia_id=getattr(msg, "instancia_id", None),
-        filtro_inst_id=instancia_id,
+    if getattr(msg, "instancia_id", None) is not None:
+        assert_instancia_allowed(
+            allowed_instancias=allowed_inst,
+            instancia_id=int(msg.instancia_id),
+        )
+
+    _assert_midia_acl(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id_eff),
+        cliente_id=int(cli.id),
+        instancia_id=getattr(msg, "instancia_id", None),
     )
+
+    # agora sim, pode servir cache
+    cached = _cache_glob_for(msg_id)
+    if cached:
+        return _serve_cached(cached, request)
 
     # 2) Serve do BD primeiro
     MediaModel = getattr(models, "Midia", None) or getattr(models, "MensagemMidia", None)

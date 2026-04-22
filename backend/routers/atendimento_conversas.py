@@ -11,7 +11,11 @@ from sqlalchemy import func, literal, and_
 from backend.database import get_db
 from backend import models
 from backend.routers.auth import get_current_identity
-from backend.security.instancias import instancias_visiveis
+from backend.security.atendimento_acl import (
+    ensure_perm,
+    resolve_acl_context,
+    assert_instancia_allowed,
+)
 
 router = APIRouter(tags=["Atendimento – Conversas"])
 
@@ -19,14 +23,6 @@ router = APIRouter(tags=["Atendimento – Conversas"])
 # =========================================================
 # Utils
 # =========================================================
-def _assert_mesma_empresa(empresa_do_token: int, empresa_da_query: int | None) -> int:
-    if empresa_da_query is None:
-        return int(empresa_do_token)
-    if int(empresa_da_query) != int(empresa_do_token):
-        raise HTTPException(status_code=403, detail="Empresa inválida para este recurso")
-    return int(empresa_da_query)
-
-
 def _resolve_instancia_id(
     db: Session,
     *,
@@ -111,18 +107,41 @@ def _sort_key(ent: tuple[Optional[datetime], int, Dict[str, Any], bool]):
     return (ts_dt, msg_id)
 
 
+def _get_atendimento_caps():
+    A = getattr(models, "Atendimento", None)
+    if A is None:
+        return {
+            "model": None,
+            "usable": False,
+            "has_empresa_id": False,
+            "has_departamento_id": False,
+        }
+
+    usable = all(hasattr(A, attr) for attr in ("id", "cliente_id", "instancia_id"))
+    has_empresa_id = hasattr(A, "empresa_id")
+    has_departamento_id = hasattr(A, "departamento_id")
+
+    return {
+        "model": A,
+        "usable": usable,
+        "has_empresa_id": has_empresa_id,
+        "has_departamento_id": has_departamento_id,
+    }
+
+
 def _query_clientes_ultima_por_conversa(
     db: Session,
     *,
     empresa_id: int,
     resolved_inst_id: Optional[int],
     allowed_inst_ids: Optional[List[int]],
+    allowed_dep_ids: Optional[List[int]],
 ):
     M = models.Mensagem
     C = models.Cliente
     EI = models.EmpresaInstancia
 
-    sub = (
+    sub_msg = (
         db.query(
             M.cliente_id.label("cid"),
             M.instancia_id.label("iid"),
@@ -132,38 +151,122 @@ def _query_clientes_ultima_por_conversa(
     )
 
     if resolved_inst_id is not None:
-        sub = sub.filter(M.instancia_id == int(resolved_inst_id))
+        sub_msg = sub_msg.filter(M.instancia_id == int(resolved_inst_id))
     elif allowed_inst_ids is not None:
         if not allowed_inst_ids:
-            sub = sub.filter(literal(False))
+            sub_msg = sub_msg.filter(literal(False))
         else:
-            sub = sub.filter(M.instancia_id.in_([int(x) for x in allowed_inst_ids]))
+            sub_msg = sub_msg.filter(M.instancia_id.in_([int(x) for x in allowed_inst_ids]))
 
-    sub = sub.group_by(M.cliente_id, M.instancia_id).subquery()
+    sub_msg = sub_msg.group_by(M.cliente_id, M.instancia_id).subquery()
 
-    q = (
-        db.query(
-            C.id.label("cliente_id"),
-            C.empresa_id.label("empresa_id"),
-            C.nome.label("nome"),
-            (C.nome_whatsapp if hasattr(C, "nome_whatsapp") else literal(None)).label("nome_whatsapp"),
-            C.telefone.label("telefone"),
-            (C.avatar_url if hasattr(C, "avatar_url") else literal(None)).label("avatar_url"),
-            M.id.label("ultima_msg_id"),
-            M.conteudo.label("ultima_mensagem"),
-            M.tipo.label("ultima_tipo"),
-            M.ack.label("ultima_ack"),
-            M.timestamp.label("hora"),
-            M.instancia_id.label("instancia_id"),
-            (EI.instance_name if hasattr(EI, "instance_name") else literal(None)).label("instance_name"),
-            ((C.pinned if hasattr(C, "pinned") else literal(False))).label("pinned"),
-            ((C.fixado if hasattr(C, "fixado") else literal(False))).label("fixado"),
+    caps = _get_atendimento_caps()
+    A = caps["model"]
+
+    if caps["usable"]:
+        sub_atd = (
+            db.query(
+                A.cliente_id.label("cid"),
+                A.instancia_id.label("iid"),
+                func.max(A.id).label("last_atd_id"),
+            )
         )
-        .join(sub, and_(sub.c.cid == C.id))
-        .join(M, M.id == sub.c.last_msg_id)
-        .outerjoin(EI, EI.id == M.instancia_id)
-        .filter(C.empresa_id == int(empresa_id))
-    )
+
+        if caps["has_empresa_id"]:
+            sub_atd = sub_atd.filter(A.empresa_id == int(empresa_id))
+
+        if resolved_inst_id is not None:
+            sub_atd = sub_atd.filter(A.instancia_id == int(resolved_inst_id))
+        elif allowed_inst_ids is not None:
+            if not allowed_inst_ids:
+                sub_atd = sub_atd.filter(literal(False))
+            else:
+                sub_atd = sub_atd.filter(A.instancia_id.in_([int(x) for x in allowed_inst_ids]))
+
+        sub_atd = sub_atd.group_by(A.cliente_id, A.instancia_id).subquery()
+
+        acl_dep_expr = (
+            func.coalesce(A.departamento_id, C.departamento_id)
+            if caps["has_departamento_id"]
+            else C.departamento_id
+        )
+
+        q = (
+            db.query(
+                C.id.label("cliente_id"),
+                C.empresa_id.label("empresa_id"),
+                C.nome.label("nome"),
+                (C.nome_whatsapp if hasattr(C, "nome_whatsapp") else literal(None)).label("nome_whatsapp"),
+                C.telefone.label("telefone"),
+                (C.avatar_url if hasattr(C, "avatar_url") else literal(None)).label("avatar_url"),
+                C.departamento_id.label("cliente_departamento_id"),
+                M.id.label("ultima_msg_id"),
+                M.conteudo.label("ultima_mensagem"),
+                M.tipo.label("ultima_tipo"),
+                M.ack.label("ultima_ack"),
+                M.timestamp.label("hora"),
+                M.instancia_id.label("instancia_id"),
+                (EI.instance_name if hasattr(EI, "instance_name") else literal(None)).label("instance_name"),
+                ((C.pinned if hasattr(C, "pinned") else literal(False))).label("pinned"),
+                ((C.fixado if hasattr(C, "fixado") else literal(False))).label("fixado"),
+                A.id.label("atendimento_id"),
+                (
+                    A.departamento_id
+                    if caps["has_departamento_id"]
+                    else literal(None)
+                ).label("atendimento_departamento_id"),
+                acl_dep_expr.label("acl_departamento_id"),
+            )
+            .join(sub_msg, and_(sub_msg.c.cid == C.id))
+            .join(M, M.id == sub_msg.c.last_msg_id)
+            .outerjoin(
+                sub_atd,
+                and_(
+                    sub_atd.c.cid == C.id,
+                    sub_atd.c.iid == M.instancia_id,
+                ),
+            )
+            .outerjoin(A, A.id == sub_atd.c.last_atd_id)
+            .outerjoin(EI, EI.id == M.instancia_id)
+            .filter(C.empresa_id == int(empresa_id))
+        )
+    else:
+        acl_dep_expr = C.departamento_id
+
+        q = (
+            db.query(
+                C.id.label("cliente_id"),
+                C.empresa_id.label("empresa_id"),
+                C.nome.label("nome"),
+                (C.nome_whatsapp if hasattr(C, "nome_whatsapp") else literal(None)).label("nome_whatsapp"),
+                C.telefone.label("telefone"),
+                (C.avatar_url if hasattr(C, "avatar_url") else literal(None)).label("avatar_url"),
+                C.departamento_id.label("cliente_departamento_id"),
+                M.id.label("ultima_msg_id"),
+                M.conteudo.label("ultima_mensagem"),
+                M.tipo.label("ultima_tipo"),
+                M.ack.label("ultima_ack"),
+                M.timestamp.label("hora"),
+                M.instancia_id.label("instancia_id"),
+                (EI.instance_name if hasattr(EI, "instance_name") else literal(None)).label("instance_name"),
+                ((C.pinned if hasattr(C, "pinned") else literal(False))).label("pinned"),
+                ((C.fixado if hasattr(C, "fixado") else literal(False))).label("fixado"),
+                literal(None).label("atendimento_id"),
+                literal(None).label("atendimento_departamento_id"),
+                acl_dep_expr.label("acl_departamento_id"),
+            )
+            .join(sub_msg, and_(sub_msg.c.cid == C.id))
+            .join(M, M.id == sub_msg.c.last_msg_id)
+            .outerjoin(EI, EI.id == M.instancia_id)
+            .filter(C.empresa_id == int(empresa_id))
+        )
+
+    if allowed_dep_ids is not None:
+        if not allowed_dep_ids:
+            q = q.filter(literal(False))
+        else:
+            q = q.filter(acl_dep_expr.in_([int(x) for x in allowed_dep_ids]))
+
     return q
 
 
@@ -232,11 +335,12 @@ def listar_conversas(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    empresa_id = _assert_mesma_empresa(int(identity["empresa_id"]), empresa_id)
+    ensure_perm(identity, "atendimento.ver")
 
-    perms = set(identity.get("permissoes") or [])
-    if "atendimento.ver" not in perms:
-        raise HTTPException(status_code=403, detail="Sem permissão para ver atendimentos")
+    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id)
+    empresa_id = int(acl_ctx["empresa_id"])
+    allowed_inst_ids = acl_ctx["allowed_instancias"]
+    allowed_dep_ids = acl_ctx["allowed_departamentos"]
 
     M = models.Mensagem
     MG = models.MensagemGrupo
@@ -248,14 +352,14 @@ def listar_conversas(
         instance=instance,
     )
 
-    allowed_inst_ids = instancias_visiveis(identity, db)
-
     if allowed_inst_ids is not None and not allowed_inst_ids:
         return {"items": [], "next_cursor": None}
 
-    if allowed_inst_ids is not None and resolved_inst_id is not None:
-        if int(resolved_inst_id) not in set(int(x) for x in allowed_inst_ids):
-            raise HTTPException(status_code=403, detail="Instância não permitida para este colaborador")
+    if resolved_inst_id is not None:
+        assert_instancia_allowed(
+            allowed_instancias=allowed_inst_ids,
+            instancia_id=resolved_inst_id,
+        )
 
     cursor_ts = None
     cursor_id = None
@@ -274,6 +378,7 @@ def listar_conversas(
         empresa_id=empresa_id,
         resolved_inst_id=resolved_inst_id,
         allowed_inst_ids=allowed_inst_ids,
+        allowed_dep_ids=allowed_dep_ids,
     )
 
     if cursor_id is not None and cursor_ts is not None:
@@ -338,6 +443,20 @@ def listar_conversas(
             "last_ack": getattr(r, "ultima_ack", None),
             "instancia_id": inst_id,
             "instance_name": getattr(r, "instance_name", None),
+            "atendimento_id": (
+                int(getattr(r, "atendimento_id", 0))
+                if getattr(r, "atendimento_id", None) is not None
+                else None
+            ),
+            "departamento_id": (
+                int(getattr(r, "atendimento_departamento_id", 0))
+                if getattr(r, "atendimento_departamento_id", None) is not None
+                else (
+                    int(getattr(r, "cliente_departamento_id", 0))
+                    if getattr(r, "cliente_departamento_id", None) is not None
+                    else None
+                )
+            ),
             "novas": 0,
             "pinned": pinned_flag,
             "is_group": False,
