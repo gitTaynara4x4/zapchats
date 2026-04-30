@@ -8,6 +8,9 @@ import {
   getConversationKind,
 } from '../state/store.js';
 
+import { pushOneNew } from '../domain/hist-cache.js';
+import { renderHistoricoDoCache } from '../domain/historico.js';
+
 /* ====== Fallback pra window.addListener ====== */
 if (typeof window !== 'undefined' && typeof window.addListener !== 'function') {
   window.addListener = function (...args) {
@@ -1070,6 +1073,242 @@ async function fetchJsonOrThrow(url, payload) {
   }
 
   return respJson || {};
+}
+
+/* =========================================================
+   FIX: mensagem enviada aparece imediatamente no histórico aberto
+   ========================================================= */
+
+function pickDeep(obj, paths = []) {
+  for (const path of paths) {
+    try {
+      let cur = obj;
+
+      for (const part of path.split('.')) {
+        if (cur == null) break;
+        cur = cur[part];
+      }
+
+      if (cur !== undefined && cur !== null && String(cur).trim() !== '') {
+        return cur;
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
+function extractSentMsgId(resp, fallbackKey) {
+  const id = pickDeep(resp, [
+    'db.msg_id',
+    'db.message_id',
+    'db.mensagem_msg_id',
+    'evolution.key.id',
+    'evolution.message.key.id',
+    'evolution.data.key.id',
+    'evolution.data.message.key.id',
+    'evolution.id',
+    'message.key.id',
+    'key.id',
+  ]);
+
+  if (id != null && String(id).trim()) {
+    return String(id);
+  }
+
+  return `tmp:${String(fallbackKey || 'conv')}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+}
+
+function extractSentDbId(resp) {
+  const id = pickDeep(resp, [
+    'db.mensagem_id',
+    'db.mensagem_grupo_id',
+    'db.id',
+  ]);
+
+  return id != null && String(id).trim() ? String(id) : null;
+}
+
+function responseConversationRef(resp, fallbackRef) {
+  const db = resp?.db || {};
+
+  const rawKey =
+    db.conversation_key ??
+    db.conversation_id ??
+    resp?.conversation_key ??
+    resp?.conversation_id ??
+    fallbackRef?.key ??
+    null;
+
+  const row = {
+    conversation_key: rawKey,
+    conversation_id: rawKey,
+    kind: db.kind ?? fallbackRef?.kind ?? null,
+    entity_id: db.entity_id ?? fallbackRef?.entityId ?? null,
+    cliente_id: db.cliente_id ?? (fallbackRef?.kind === 'c' ? fallbackRef?.entityId : null),
+    grupo_id: db.grupo_id ?? (fallbackRef?.kind === 'g' ? fallbackRef?.entityId : null),
+    instancia_id:
+      db.instancia_id ??
+      resp?.instancia_id ??
+      fallbackRef?.instId ??
+      null,
+    instance_name:
+      resp?.instance_name ??
+      db.instance_name ??
+      fallbackRef?.instance_name ??
+      null,
+    is_group:
+      db.kind === 'g' ||
+      fallbackRef?.kind === 'g',
+  };
+
+  return conversationRefOf(rawKey || row, row);
+}
+
+function scrollHistoricoToBottomSoon() {
+  const hist = getHistoricoEl();
+  if (!hist) return;
+
+  try { hist.scrollTop = hist.scrollHeight; } catch {}
+
+  requestAnimationFrame(() => {
+    try { hist.scrollTop = hist.scrollHeight; } catch {}
+  });
+
+  setTimeout(() => {
+    try { hist.scrollTop = hist.scrollHeight; } catch {}
+  }, 80);
+}
+
+function isOpenConversationKey(convKey) {
+  const openKey = getOpenConversationKeyFromDom();
+
+  if (!openKey || !convKey) return false;
+  if (String(openKey) === String(convKey)) return true;
+
+  try {
+    return sameConversation(openKey, convKey);
+  } catch {
+    return false;
+  }
+}
+
+function appendSentMessageToHistory({
+  resp,
+  fallbackRef,
+  text = '',
+  midias = [],
+  ack = 0,
+  instanciaFallback = null,
+  forcePreview = true,
+}) {
+  try {
+    const ref = responseConversationRef(resp, fallbackRef);
+    const finalKey = ref?.key || fallbackRef?.key || null;
+
+    if (!finalKey) return false;
+
+    const finalInst =
+      instKey(ref?.instId) ||
+      instKey(resp?.db?.instancia_id) ||
+      instKey(resp?.instancia_id) ||
+      instKey(instanciaFallback) ||
+      instKey(fallbackRef?.instId) ||
+      instKey(window.state?.clienteSel?.instancia_id) ||
+      instKey(window.INSTANCIA_ATIVA) ||
+      null;
+
+    if (!finalInst) return false;
+
+    const now = Date.now();
+    const tsIso = new Date(now).toISOString();
+    const msgId = extractSentMsgId(resp, finalKey);
+    const dbId = extractSentDbId(resp);
+
+    const msg = stripUndefined({
+      id: dbId || msgId,
+      msg_id: msgId,
+      conteudo: text || '',
+      texto: text || '',
+      mensagem: text || '',
+      tipo: 'saida',
+      origem: 'atendente',
+      from_me: true,
+      timestamp: tsIso,
+      ts: now,
+      ack: Number(ack || 0),
+      midias: Array.isArray(midias) ? midias : [],
+      instancia_id: finalInst,
+      instance_name: resp?.instance_name ?? resp?.db?.instance_name ?? null,
+      autor_nome:
+        getIdentityJwt()?.nome ||
+        getIdentityJwt()?.name ||
+        getIdentityJwt()?.nome_completo ||
+        null,
+      quoted: resp?.db?.quoted ?? undefined,
+      quoted_preview: resp?.db?.quoted_preview ?? undefined,
+    });
+
+    pushOneNew(finalInst, finalKey, msg);
+
+    if (forcePreview) {
+      try {
+        window.Lista?.updatePreview?.(finalKey, {
+          texto: text || (midias?.length ? '[Arquivo]' : ''),
+          ts: tsIso,
+          ack: Number(ack || 0),
+          instancia_id: finalInst,
+          instance_name: resp?.instance_name ?? resp?.db?.instance_name ?? null,
+        });
+      } catch {}
+
+      try { window.syncPreviewFromCache?.(finalKey); } catch {}
+    }
+
+    if (isOpenConversationKey(finalKey)) {
+      try {
+        const hist = getHistoricoEl();
+
+        if (hist) {
+          hist.dataset.conversationKey = finalKey;
+          hist.dataset.conversationId = finalKey;
+          hist.dataset.convKey = finalKey;
+          hist.dataset.instanciaId = String(finalInst);
+          hist.dataset.entityId = String(ref?.entityId || '');
+          hist.dataset.kind = String(ref?.kind || 'c');
+
+          if (ref?.kind === 'g') {
+            hist.dataset.grupoId = String(ref?.entityId || '');
+            hist.dataset.isGroup = 'true';
+          } else {
+            hist.dataset.apiClienteId = String(ref?.entityId || '');
+            hist.dataset.backendClienteId = String(ref?.entityId || '');
+            hist.dataset.clienteId = String(ref?.entityId || '');
+            hist.dataset.isGroup = 'false';
+          }
+        }
+      } catch {}
+
+      renderHistoricoDoCache(finalKey, true);
+      scrollHistoricoToBottomSoon();
+    }
+
+    try {
+      window.dispatchEvent(new CustomEvent('zc:message-sent-local', {
+        detail: {
+          conversation_key: finalKey,
+          conversation_id: finalKey,
+          instancia_id: finalInst,
+          msg,
+        },
+      }));
+    } catch {}
+
+    return true;
+  } catch (e) {
+    console.warn('[send] append local no histórico falhou', e);
+    return false;
+  }
 }
 
 /* ===================== MAIN INIT ENVIO ===================== */
@@ -2169,6 +2408,14 @@ async function fetchJsonOrThrow(url, payload) {
       const resp = await fetchJsonOrThrow('/api/atendimento/send/text', payload);
       applyInstanceFromResponse(resp);
 
+      appendSentMessageToHistory({
+        resp,
+        fallbackRef: convRef,
+        text,
+        ack: 0,
+        instanciaFallback: inst.instancia_id ?? inst.instance ?? convRef.instId,
+      });
+
       inputMsg.value = '';
 
       try {
@@ -2227,7 +2474,21 @@ async function fetchJsonOrThrow(url, payload) {
           audio: base64,
           ...inst,
         }));
+
         applyInstanceFromResponse(resp);
+
+        appendSentMessageToHistory({
+          resp,
+          fallbackRef: convRef,
+          text: '',
+          midias: [{
+            tipo: 'audio',
+            mimetype: mime,
+            filename: file.name || 'audio',
+          }],
+          ack: 0,
+          instanciaFallback: inst.instancia_id ?? inst.instance ?? convRef.instId,
+        });
       } else {
         const body = stripUndefined({
           empresa_id: EMPRESA_ID,
@@ -2243,6 +2504,19 @@ async function fetchJsonOrThrow(url, payload) {
 
         const resp = await fetchJsonOrThrow('/api/atendimento/send/media', body);
         applyInstanceFromResponse(resp);
+
+        appendSentMessageToHistory({
+          resp,
+          fallbackRef: convRef,
+          text: caption || '',
+          midias: [{
+            tipo: mediaType,
+            mimetype: mime,
+            filename: file.name || 'arquivo',
+          }],
+          ack: 0,
+          instanciaFallback: inst.instancia_id ?? inst.instance ?? convRef.instId,
+        });
 
         if (caption && captionOverride != null) {
           inputMsg.value = '';
@@ -2485,6 +2759,20 @@ async function fetchJsonOrThrow(url, payload) {
                     }));
 
                     applyInstanceFromResponse(resp);
+
+                    appendSentMessageToHistory({
+                      resp,
+                      fallbackRef: conversationRefOf(recConversationKey, getConversationById(recConversationKey)),
+                      text: '',
+                      midias: [{
+                        tipo: 'audio',
+                        mimetype: mimeType,
+                        filename: 'audio.webm',
+                      }],
+                      ack: 0,
+                      instanciaFallback: recInstPayload?.instancia_id ?? recInstPayload?.instance ?? null,
+                    });
+
                     toast('Áudio enviado!', true);
                   }
                 }

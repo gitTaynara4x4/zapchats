@@ -307,7 +307,12 @@ DEV_ORIGINS = [
     "http://127.0.0.1:5500",
     "http://localhost:5500",
 ]
-PROD_ORIGINS = ["https://ZapsChat.com.br", "https://www.ZapsChat.com.br"]
+PROD_ORIGINS = [
+    "https://zapschat.com.br",
+    "https://www.zapschat.com.br",
+    "https://ZapsChat.com.br",
+    "https://www.ZapsChat.com.br",
+]
 ALLOW_ORIGINS = DEV_ORIGINS if ENV == "dev" else PROD_ORIGINS
 
 # ---- Flags de integração Evolution/Rabbit ----
@@ -328,14 +333,33 @@ CSRF_COOKIE_NAME = os.getenv("CSRF_COOKIE_NAME", "csrf_token")
 CSRF_COOKIE_PATH = os.getenv("CSRF_COOKIE_PATH", "/api/auth/refresh")
 CSRF_COOKIE_MAX_AGE = int(os.getenv("CSRF_COOKIE_MAX_AGE", str(60 * 60 * 24 * 30)))
 
+# =======================================
 # Trusted hosts
-ALLOWED_HOSTS = (
-    os.getenv(
-        "ALLOWED_HOSTS",
-        "localhost,127.0.0.1,ZapsChat.com.br,www.ZapsChat.com.br",
-    )
-    or ""
-).split(",")
+# =======================================
+# Corrige "Invalid host header".
+# Inclui:
+# - localhost
+# - 127.0.0.1
+# - domínio oficial
+# - wildcard do EasyPanel
+# - IP da VPS
+#
+# Se precisar liberar tudo temporariamente:
+# ALLOWED_HOSTS=*
+ALLOWED_HOSTS_RAW = os.getenv(
+    "ALLOWED_HOSTS",
+    "localhost,127.0.0.1,zapschat.com.br,www.zapschat.com.br,ZapsChat.com.br,www.ZapsChat.com.br,*.easypanel.host,82.25.74.157",
+) or ""
+
+ALLOWED_HOSTS = [
+    h.strip()
+    for h in ALLOWED_HOSTS_RAW.split(",")
+    if h.strip()
+]
+
+if ENV == "dev" and "*" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append("*")
+
 
 # Billing: páginas premium para redirecionar quando vencido
 BILLING_BLOCKED_HTML_PATHS = {
@@ -465,10 +489,12 @@ app = FastAPI()
 
 # Middlewares
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=[h.strip() for h in ALLOWED_HOSTS if h.strip()],
+    allowed_hosts=ALLOWED_HOSTS,
 )
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOW_ORIGINS,
@@ -911,7 +937,12 @@ app.include_router(billing_asaas_router)
 # =======================================
 @app.get("/healthz")
 def healthz():
-    return {"ok": True, "ts": datetime.now(timezone.utc).isoformat(), "build": BUILD_ID}
+    return {
+        "ok": True,
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "build": BUILD_ID,
+        "allowed_hosts": ALLOWED_HOSTS,
+    }
 
 
 @app.get("/ping")
@@ -969,7 +1000,7 @@ def robots():
         )
 
     return HTMLResponse(
-        "User-agent: *\nAllow: /\nSitemap: https://ZapsChat.com.br/sitemap.xml\n",
+        "User-agent: *\nAllow: /\nSitemap: https://zapschat.com.br/sitemap.xml\n",
         media_type="text/plain",
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
@@ -987,6 +1018,7 @@ def version_json():
             "build": BUILD_ID,
             "env": ENV,
             "ts": datetime.now(timezone.utc).isoformat(),
+            "allowed_hosts": ALLOWED_HOSTS,
         },
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
@@ -995,6 +1027,23 @@ def version_json():
             "X-ZC-Build": str(BUILD_ID),
         },
     )
+
+
+# =======================================
+# Partials HTML
+# =======================================
+@app.get("/frontend/partials/{path:path}", include_in_schema=False)
+def partial(path: str):
+    partials_dir = (FRONTEND_DIR / "partials").resolve()
+    target = (partials_dir / path).resolve()
+
+    if not str(target).startswith(str(partials_dir)):
+        raise HTTPException(status_code=404)
+
+    if not target.is_file():
+        raise HTTPException(status_code=404)
+
+    return _html_response_from_file(target, inject_build_script=False)
 
 
 # =======================================
@@ -1151,6 +1200,10 @@ LOG("Handlers Evolution/WebSocket prontos (via registry do pacote backend.integr
 async def _start_integrations():
     import time
 
+    LOG(f"[STARTUP] ENV={ENV}")
+    LOG(f"[STARTUP] BUILD_ID={BUILD_ID}")
+    LOG(f"[STARTUP] ALLOWED_HOSTS={ALLOWED_HOSTS}")
+
     for i in range(10):
         try:
             with engine.begin() as conn:
@@ -1226,20 +1279,3 @@ async def _stop_integrations():
                 evo_task.cancel()
             except Exception:
                 pass
-
-
-# =======================================
-# Partials HTML
-# =======================================
-@app.get("/frontend/partials/{path:path}", include_in_schema=False)
-def partial(path: str):
-    partials_dir = (FRONTEND_DIR / "partials").resolve()
-    target = (partials_dir / path).resolve()
-
-    if not str(target).startswith(str(partials_dir)):
-        raise HTTPException(status_code=404)
-
-    if not target.is_file():
-        raise HTTPException(status_code=404)
-
-    return _html_response_from_file(target, inject_build_script=False)
