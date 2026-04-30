@@ -16,6 +16,7 @@
   <link rel="alternate" hreflang="pt-BR" href="https://www.ZapsChat.com.br/" />
 
   <link rel="icon" href="/img/fav-icon.png" type="image/png" />
+  <link rel="preload" as="image" href="/frontend/img/logo.png" />
   <link rel="preload" as="image" href="/img/sistema-ZapsChat.png" />
 
   <meta property="og:type" content="website" />
@@ -52,7 +53,7 @@
     "@type": "Organization",
     "name": "ZapsChat Connect",
     "url": "https://www.ZapsChat.com.br/",
-    "logo": "https://www.ZapsChat.com.br/img/logo.png",
+    "logo": "https://www.ZapsChat.com.br/frontend/img/logo.png",
     "contactPoint": [
       {
         "@type": "ContactPoint",
@@ -186,7 +187,7 @@
       <nav class="nav" aria-label="Principal">
         <a href="/" class="logo" aria-label="ZapsChat Connect - Página inicial">
           <img
-            src="/img/logo.png"
+            src="/frontend/img/logo.png"
             alt="ZapsChat Connect"
             width="220"
             height="42"
@@ -844,6 +845,7 @@
         number = WA_NUMBER_SUPORTE;
         msg = WA_MSG_SUPORTE;
       }
+
       if (type === "demo") msg = WA_MSG_DEMO;
       if (type === "consultor" || type === "cta") msg = WA_MSG_CONSULTOR;
       if (type === "start") msg = WA_MSG_START;

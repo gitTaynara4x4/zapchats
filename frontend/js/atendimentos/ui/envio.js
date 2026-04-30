@@ -199,6 +199,8 @@ function entityIdFromAny(raw, row = null) {
   if (parsed?.entityId) return parsed.entityId;
 
   if (row && typeof row === 'object') {
+    const kind = kindFromObject(row);
+
     const direct =
       row.entity_id ??
       row.entityId ??
@@ -206,8 +208,8 @@ function entityIdFromAny(raw, row = null) {
       row.backendClienteId ??
       row.api_id ??
       row.apiClienteId ??
-      (kindFromObject(row) === 'g' ? row.grupo_id : row.cliente_id) ??
-      (kindFromObject(row) === 'g' ? row.grupoId : row.clienteId) ??
+      (kind === 'g' ? row.grupo_id : row.cliente_id) ??
+      (kind === 'g' ? row.grupoId : row.clienteId) ??
       row.id_backend ??
       row.id ??
       null;
@@ -248,9 +250,23 @@ function conversationRefOf(raw, row = null) {
     const obj = raw;
 
     const fromStoreHelper = getConversationKey(
-      obj.conversation_key ?? obj.conversationKey ?? obj.conversation_id ?? obj.conversationId ?? obj.id ?? obj.cliente_id ?? obj.clienteId ?? obj.grupo_id ?? obj.grupoId ?? null,
+      obj.conversation_key ??
+        obj.conversationKey ??
+        obj.conversation_id ??
+        obj.conversationId ??
+        obj.id ??
+        obj.cliente_id ??
+        obj.clienteId ??
+        obj.grupo_id ??
+        obj.grupoId ??
+        null,
       obj,
-      obj.instancia_id ?? obj.instanciaId ?? obj.instancia ?? obj.instance_name ?? obj.instanceName ?? null
+      obj.instancia_id ??
+        obj.instanciaId ??
+        obj.instancia ??
+        obj.instance_name ??
+        obj.instanceName ??
+        null
     );
 
     const parsedStore = parseConversationKey(fromStoreHelper);
@@ -285,7 +301,12 @@ function conversationRefOf(raw, row = null) {
   const fromStoreHelper = getConversationKey(
     raw,
     row || null,
-    row?.instancia_id ?? row?.instanciaId ?? row?.instancia ?? row?.instance_name ?? row?.instanceName ?? null
+    row?.instancia_id ??
+      row?.instanciaId ??
+      row?.instancia ??
+      row?.instance_name ??
+      row?.instanceName ??
+      null
   );
 
   const parsedStore = parseConversationKey(fromStoreHelper);
@@ -479,6 +500,7 @@ function makeFallbackConversationFromDom(targetKey = null) {
 
 function getAllConversationPools(extra = null) {
   const pools = [];
+
   const push = (x) => {
     if (!x) return;
     if (Array.isArray(x)) {
@@ -592,11 +614,18 @@ function getIdentityPayload(target = null) {
 
 function freezeHistoricoInstancia(inst) {
   const hist = getHistoricoEl();
+  const head = getChatHeaderEl();
   const ik = instKey(inst);
-  if (!hist) return;
 
-  if (ik) hist.dataset.instanciaId = String(ik);
-  else hist.removeAttribute('data-instancia-id');
+  if (hist) {
+    if (ik) hist.dataset.instanciaId = String(ik);
+    else hist.removeAttribute('data-instancia-id');
+  }
+
+  if (head) {
+    if (ik) head.dataset.instanciaId = String(ik);
+    else head.removeAttribute('data-instancia-id');
+  }
 }
 
 function getFrozenHistoricoInstancia() {
@@ -644,6 +673,7 @@ function getInstPayload(conversationRef = null) {
   if (Number.isFinite(n) && String(n) === String(inst)) {
     return { instancia_id: n };
   }
+
   return { instance: String(inst) };
 }
 
@@ -1015,6 +1045,7 @@ function inputDialog({ title, rows, okText = 'OK', cancelText = 'Cancelar' }) {
         e.preventDefault();
         close(null);
       }
+
       if (e.key === 'Enter') {
         e.preventDefault();
         btnOk.click();
@@ -1052,6 +1083,7 @@ async function fetchJsonOrThrow(url, payload) {
 
   const respText = await r.text().catch(() => '');
   let respJson = null;
+
   try {
     respJson = respText ? JSON.parse(respText) : null;
   } catch {}
@@ -1073,194 +1105,201 @@ async function fetchJsonOrThrow(url, payload) {
 }
 
 /* =========================================================
-   ACK: evita bolha ficar presa no reloginho depois do send ok
+   FIX ENVIO:
+   - tira reloginho quando API confirmou envio
+   - atualiza preview da lista
+   - força histórico aberto a recarregar
    ========================================================= */
-function normalizeAck(v, fallback = 1) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return fallback;
-  if (n <= 0) return fallback;
-  return Math.min(4, Math.max(1, n));
-}
-
 function getAckFromSendResponse(resp, fallback = 1) {
-  const candidates = [
-    resp?.db?.ack,
-    resp?.db?.ack_now,
-    resp?.db?.ultima_ack,
-    resp?.ack,
-    resp?.ack_now,
-    resp?.ultima_ack,
-    resp?.message?.ack,
-    resp?.mensagem?.ack,
-    resp?.data?.ack,
-  ];
+  const raw =
+    resp?.ack ??
+    resp?.db?.ack ??
+    resp?.mensagem?.ack ??
+    resp?.message?.ack ??
+    resp?.data?.ack ??
+    resp?.result?.ack ??
+    null;
 
-  for (const c of candidates) {
-    if (c !== undefined && c !== null && c !== '') {
-      return normalizeAck(c, fallback);
-    }
-  }
+  const n = Number(raw);
+  if (Number.isFinite(n) && n > 0) return Math.min(3, Math.max(1, n));
 
-  return fallback;
+  return Math.min(3, Math.max(1, Number(fallback || 1)));
 }
 
 function getMsgIdFromSendResponse(resp) {
   return (
-    resp?.db?.msg_id ||
-    resp?.db?.id ||
-    resp?.db?.mensagem_id ||
-    resp?.msg_id ||
-    resp?.id ||
-    resp?.mensagem_id ||
-    resp?.message?.id ||
-    resp?.message?.msg_id ||
+    resp?.msg_id ??
+    resp?.message_id ??
+    resp?.mensagem_id ??
+    resp?.db?.msg_id ??
+    resp?.db?.id ??
+    resp?.mensagem?.msg_id ??
+    resp?.mensagem?.id ??
+    resp?.message?.key?.id ??
+    resp?.key?.id ??
+    resp?.data?.key?.id ??
+    resp?.data?.id ??
     null
   );
 }
 
 function getTimestampFromSendResponse(resp) {
   return (
-    resp?.db?.timestamp ||
-    resp?.db?.hora ||
-    resp?.timestamp ||
-    resp?.hora ||
-    resp?.created_at ||
+    resp?.timestamp ??
+    resp?.ts ??
+    resp?.hora ??
+    resp?.created_at ??
+    resp?.db?.timestamp ??
+    resp?.db?.created_at ??
+    resp?.mensagem?.timestamp ??
+    resp?.mensagem?.created_at ??
     new Date().toISOString()
   );
 }
 
-function setAckHtmlOnElement(el, ack) {
-  if (!el) return false;
+function getOpenKeyFromDom() {
+  const hist = getHistoricoEl();
+  const head = getChatHeaderEl();
 
-  let ackEl =
-    el.querySelector?.('.msg-ack') ||
-    el.querySelector?.('.preview-ack') ||
-    el.querySelector?.('[data-ack]') ||
-    null;
-
-  if (!ackEl) {
-    const meta =
-      el.querySelector?.('.msg-meta') ||
-      el.querySelector?.('.message-meta') ||
-      el.querySelector?.('.bubble-meta') ||
-      el.querySelector?.('.hora') ||
-      null;
-
-    if (!meta) return false;
-
-    ackEl = document.createElement('span');
-    ackEl.className = 'msg-ack';
-    meta.appendChild(ackEl);
-  }
-
-  ackEl.dataset.ack = String(ack);
-  ackEl.setAttribute('data-ack', String(ack));
-
-  if (typeof window.getAckIcon === 'function') {
-    ackEl.innerHTML = window.getAckIcon(ack);
-  } else {
-    ackEl.textContent = ack >= 2 ? '✓✓' : '✓';
-  }
-
-  return true;
+  return (
+    idKey(hist?.dataset?.conversationKey) ||
+    idKey(hist?.dataset?.conversationId) ||
+    idKey(hist?.dataset?.convKey) ||
+    idKey(head?.dataset?.conversationKey) ||
+    idKey(head?.dataset?.conversationId) ||
+    idKey(head?.dataset?.convKey) ||
+    null
+  );
 }
 
-function updateLastOutgoingAckInDom({ conversationKey, msgId, ack }) {
+function updateLastOutgoingAckInDom({ conversationKey, msgId = null, ack = 1 }) {
   try {
     const hist = getHistoricoEl();
     if (!hist) return;
 
-    const openKey =
-      idKey(hist?.dataset?.conversationKey) ||
-      idKey(hist?.dataset?.conversationId) ||
-      idKey(hist?.dataset?.convKey) ||
-      null;
-
+    const openKey = getOpenKeyFromDom();
     if (conversationKey && openKey && String(openKey) !== String(conversationKey)) return;
 
-    const mid = idKey(msgId);
-    let target = null;
+    let bubble = null;
 
-    if (mid) {
-      const safe = CSS.escape(String(mid));
-      target =
+    if (msgId) {
+      const safe = CSS.escape(String(msgId));
+      bubble =
         hist.querySelector(`[data-msg-id="${safe}"]`) ||
-        hist.querySelector(`[data-message-id="${safe}"]`) ||
         hist.querySelector(`[data-id="${safe}"]`) ||
-        hist.querySelector(`#msg-${safe}`) ||
-        null;
+        hist.querySelector(`[data-message-id="${safe}"]`);
     }
 
-    if (!target) {
-      const candidates = [
-        ...hist.querySelectorAll(
-          [
-            '.msg.saida',
-            '.mensagem.saida',
-            '.message.saida',
-            '.message.out',
-            '.message.outgoing',
-            '.bubble.saida',
-            '.bubble.out',
-            '.bubble-out',
-            '.msg-out',
-            '[data-tipo="saida"]',
-            '[data-dir="out"]',
-            '[data-from-me="true"]',
-          ].join(',')
+    if (!bubble) {
+      const candidates = Array.from(
+        hist.querySelectorAll(
+          '.msg-out, .message-out, .bubble-out, .mensagem.saida, .msg.saida, [data-tipo="saida"], [data-dir="out"], [data-from-me="true"]'
         )
-      ];
+      );
 
-      target = candidates[candidates.length - 1] || null;
+      bubble = candidates[candidates.length - 1] || null;
     }
 
-    if (target) {
-      setAckHtmlOnElement(target, ack);
-      target.dataset.ack = String(ack);
-    }
+    if (!bubble) return;
 
-    const pendingAckEls = [
-      ...hist.querySelectorAll('.msg-ack[data-ack="0"], .preview-ack[data-ack="0"], [data-ack="0"]')
-    ];
+    bubble.dataset.ack = String(ack);
+    bubble.classList.remove('ack-0', 'ack-wait', 'is-pending', 'pending');
+    bubble.classList.add(`ack-${ack}`);
 
-    const lastPending = pendingAckEls[pendingAckEls.length - 1] || null;
-    if (lastPending) {
-      lastPending.dataset.ack = String(ack);
-      lastPending.setAttribute('data-ack', String(ack));
+    const ackTargets = bubble.querySelectorAll(
+      '.msg-ack, .ack, .message-ack, .bubble-ack, [data-ack]'
+    );
+
+    ackTargets.forEach((el) => {
+      el.dataset.ack = String(ack);
 
       if (typeof window.getAckIcon === 'function') {
-        lastPending.innerHTML = window.getAckIcon(ack);
-      } else {
-        lastPending.textContent = ack >= 2 ? '✓✓' : '✓';
+        el.innerHTML = window.getAckIcon(ack);
+      } else if (ack >= 1) {
+        el.textContent = '✓';
       }
+    });
+  } catch {}
+}
+
+function forceRefreshOpenHistory(ref, { reason = 'message-sent' } = {}) {
+  try {
+    if (!ref?.key) return;
+
+    const hist = getHistoricoEl();
+    const openKey = getOpenKeyFromDom();
+
+    if (!hist || !openKey || String(openKey) !== String(ref.key)) {
+      return;
+    }
+
+    const detail = {
+      conversation_key: ref.key,
+      conversation_id: ref.key,
+      kind: ref.kind,
+      entity_id: ref.entityId,
+      cliente_id: ref.kind === 'c' ? ref.entityId : undefined,
+      grupo_id: ref.kind === 'g' ? ref.entityId : undefined,
+      instancia_id: ref.instId,
+      reason,
+      force: true,
+      ts: Date.now(),
+    };
+
+    try {
+      window.dispatchEvent(new CustomEvent('zc:force-history-refresh', { detail }));
+      document.dispatchEvent(new CustomEvent('zc:force-history-refresh', { detail }));
+      window.dispatchEvent(new CustomEvent('historico:force-refresh', { detail }));
+      document.dispatchEvent(new CustomEvent('historico:force-refresh', { detail }));
+    } catch {}
+
+    if (typeof window.carregarHistoricoCliente === 'function') {
+      setTimeout(() => {
+        try {
+          window.carregarHistoricoCliente(ref.key, {
+            force: true,
+            reload: true,
+            reason,
+          });
+        } catch {}
+      }, 90);
+    }
+
+    if (typeof window.renderHistoricoDoCache === 'function') {
+      setTimeout(() => {
+        try {
+          window.renderHistoricoDoCache(ref.key);
+        } catch {}
+      }, 130);
+    }
+
+    if (typeof window.selecionarClienteObj === 'function') {
+      setTimeout(() => {
+        try {
+          window.selecionarClienteObj(ref.key, {
+            force: true,
+            forceReload: true,
+            reload: true,
+            silent: true,
+            keepScroll: true,
+            reason,
+          });
+        } catch {}
+      }, 220);
     }
   } catch (e) {
-    console.warn('[envio][ack-dom] falha ao atualizar ack visual', e);
+    console.warn('[envio] não consegui forçar refresh do histórico após envio', e);
   }
 }
 
-function previewLabelForMedia(mediaType, mime, caption = '') {
-  const cap = String(caption || '').trim();
-  if (cap) return cap;
-
-  const mt = String(mediaType || '').toLowerCase();
-  const mm = String(mime || '').toLowerCase();
-
-  if (mt === 'audio' || mm.startsWith('audio/')) return '[Áudio]';
-  if (mt === 'image' || mm.startsWith('image/')) return '[Foto]';
-  if (mt === 'video' || mm.startsWith('video/')) return '[Vídeo]';
-  if (mm.includes('pdf')) return '[PDF]';
-  return '[Arquivo]';
-}
-
-function notifySuccessfulOutgoing({ convRef, resp, text }) {
+function notifySuccessfulOutgoing({ convRef, resp, text = '', preview = '' }) {
   const ref = conversationRefOf(convRef?.key || convRef, convRef || null);
   if (!ref?.key) return 1;
 
   const ack = getAckFromSendResponse(resp, 1);
   const msgId = getMsgIdFromSendResponse(resp);
   const ts = getTimestampFromSendResponse(resp);
-  const preview = String(text || '').trim();
+  const finalPreview = String(preview || text || '').trim();
 
   updateLastOutgoingAckInDom({
     conversationKey: ref.key,
@@ -1270,7 +1309,10 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
 
   try {
     window.Lista?.updatePreview?.(ref.key, {
-      texto: preview,
+      texto: finalPreview,
+      mensagem: finalPreview,
+      conteudo: finalPreview,
+      preview: finalPreview,
       ack,
       ts,
       timestamp: ts,
@@ -1286,6 +1328,8 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
         conversation_id: ref.key,
         kind: ref.kind,
         entity_id: ref.entityId,
+        cliente_id: ref.kind === 'c' ? ref.entityId : undefined,
+        grupo_id: ref.kind === 'g' ? ref.entityId : undefined,
         instancia_id: ref.instId,
         msg_id: msgId,
         ack,
@@ -1309,14 +1353,16 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
         tipo: 'saida',
         direction: 'out',
         from_me: true,
-        texto: preview,
-        mensagem: preview,
-        conteudo: preview,
+        texto: finalPreview,
+        mensagem: finalPreview,
+        conteudo: finalPreview,
         timestamp: ts,
         resp,
       },
     }));
   } catch {}
+
+  forceRefreshOpenHistory(ref, { reason: 'message-sent' });
 
   return ack;
 }
@@ -1491,7 +1537,9 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
   function unlockComposerOptimistically(conversationKey = null) {
     const ref = conversationRefOf(conversationKey || getSelectedConversationKey(), getCurrentSelectedObject());
     if (!ref?.key) return;
+
     setForceUnlockedKey(ref.key);
+
     if (getSelectedConversationRef()?.key === ref.key) {
       setComposerLocked(false, '');
     }
@@ -1500,7 +1548,9 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
   function clearComposerOptimisticUnlock(conversationKey = null) {
     const ref = conversationRefOf(conversationKey || getSelectedConversationKey(), getCurrentSelectedObject());
     const forced = getForceUnlockedKey();
+
     if (!forced) return;
+
     if (!ref?.key || forced === ref.key) {
       setForceUnlockedKey(null);
     }
@@ -1516,7 +1566,6 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
 
     if (!btnAceitar && !btnLiberar) return false;
 
-    const aceitarVisible = !isHidden(btnAceitar);
     const liberarVisible = !isHidden(btnLiberar);
 
     if (liberarVisible) return true;
@@ -1530,11 +1579,13 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
 
   function ensureActionIcon() {
     let icon = btnAction.querySelector('i');
+
     if (!icon) {
       icon = document.createElement('i');
       btnAction.innerHTML = '';
       btnAction.appendChild(icon);
     }
+
     return icon;
   }
 
@@ -1733,6 +1784,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
 
   async function refreshComposerAccess(conversationRef = null, { silent = false, force = false } = {}) {
     const ref = conversationRefOf(conversationRef || getSelectedConversationKey(), getCurrentSelectedObject());
+
     if (!ref?.key) {
       setComposerLocked(false, '');
       return null;
@@ -1887,7 +1939,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
             entity_id: ref.entityId,
             kind: ref.kind,
             meta,
-          }
+          },
         }));
       } catch {}
 
@@ -1940,10 +1992,12 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
     if (left + popupWidth > window.innerWidth - 12) {
       left = window.innerWidth - popupWidth - 12;
     }
+
     if (left < minLeft) left = minLeft;
 
     let top = rect.top - popupHeight - gap;
     if (top < 12) top = rect.bottom + gap;
+
     if (top + popupHeight > window.innerHeight - 12) {
       top = Math.max(12, window.innerHeight - popupHeight - 12);
     }
@@ -2044,6 +2098,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
     }
 
     wave.innerHTML = '';
+
     for (let i = 0; i < 34; i++) {
       const bar = document.createElement('span');
       bar.className = 'wa-recorder-wave-bar';
@@ -2097,6 +2152,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
       analyser.getByteTimeDomainData(timeData);
 
       let sum = 0;
+
       for (let i = 0; i < timeData.length; i++) {
         const v = (timeData[i] - 128) / 128;
         sum += v * v;
@@ -2146,6 +2202,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
     if (audioCtx && typeof audioCtx.close === 'function') {
       audioCtx.close().catch(() => {});
     }
+
     audioCtx = null;
 
     resetWaveBars();
@@ -2189,6 +2246,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
 
   function syncRecorderPauseButton() {
     if (!recPauseBtn) return;
+
     const paused = !!rec && rec.state === 'paused';
     const icon = recPauseBtn.querySelector('i');
 
@@ -2322,12 +2380,17 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
     infoEl.textContent = [humanFileSize(first.size), typeLabel].filter(Boolean).join(' • ');
 
     thumb.innerHTML = '';
+
     if (mime && mime.startsWith('image/')) {
       const img = document.createElement('img');
       img.alt = first.name || 'imagem';
+
       const fr = new FileReader();
-      fr.onload = () => { img.src = fr.result; };
+      fr.onload = () => {
+        img.src = fr.result;
+      };
       fr.readAsDataURL(first);
+
       thumb.appendChild(img);
     } else {
       thumb.innerHTML = '<i class="fa-regular fa-file-lines"></i>';
@@ -2369,6 +2432,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
         for (const f of files) {
           await enviarMediaArquivo(f, explicitType, caption);
         }
+
         close();
       } finally {
         btnSendPrev.disabled = false;
@@ -2418,23 +2482,18 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
       const resp = await fetchJsonOrThrow('/api/atendimento/send/text', payload);
       applyInstanceFromResponse(resp);
 
-      /*
-        FIX PRINCIPAL:
-        Se a API respondeu OK, a mensagem não deve continuar com relógio.
-        ack mínimo visual = 1.
-        Depois os eventos da Evolution atualizam para entregue/lida.
-      */
       notifySuccessfulOutgoing({
         convRef,
         resp,
         text,
+        preview: text,
       });
 
       inputMsg.value = '';
 
       try {
         window.dispatchEvent(new CustomEvent('atendimento:refresh-meta', {
-          detail: { conversation_key: convRef.key }
+          detail: { conversation_key: convRef.key },
         }));
       } catch {}
 
@@ -2467,6 +2526,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
         : (inputMsg.value || '').trim() || undefined;
 
     const number = numberForApi(convRef.key);
+
     if (!number) {
       toast('Destino inválido (telefone ou grupo). Verifique o cadastro.', false);
       return;
@@ -2495,6 +2555,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
           convRef,
           resp,
           text: '[Áudio]',
+          preview: '[Áudio]',
         });
       } else {
         const body = stripUndefined({
@@ -2512,10 +2573,18 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
         const resp = await fetchJsonOrThrow('/api/atendimento/send/media', body);
         applyInstanceFromResponse(resp);
 
+        const preview =
+          caption ||
+          (mediaType === 'image' ? '[Foto]' :
+            mediaType === 'video' ? '[Vídeo]' :
+              mediaType === 'audio' ? '[Áudio]' :
+                '[Arquivo]');
+
         notifySuccessfulOutgoing({
           convRef,
           resp,
-          text: previewLabelForMedia(mediaType, mime, caption),
+          text: preview,
+          preview,
         });
 
         if (caption && captionOverride != null) {
@@ -2525,7 +2594,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
 
       try {
         window.dispatchEvent(new CustomEvent('atendimento:refresh-meta', {
-          detail: { conversation_key: convRef.key }
+          detail: { conversation_key: convRef.key },
         }));
       } catch {}
 
@@ -2589,6 +2658,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
         convRef,
         resp,
         text: '[Contato]',
+        preview: '[Contato]',
       });
 
       toast('Contato enviado!', true);
@@ -2645,7 +2715,8 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
       notifySuccessfulOutgoing({
         convRef,
         resp,
-        text: '[Figurinha]',
+        text: '[Sticker]',
+        preview: '[Sticker]',
       });
 
       toast('Sticker enviado!', true);
@@ -2749,10 +2820,12 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
               toast('Áudio vazio.', false);
             } else {
               const stillOpen = assertSendTargetStillOpen(recConversationKey, { silent: true });
+
               if (!stillOpen) {
                 toast('Conversa mudou. Clique novamente no contato antes de enviar.', false);
               } else {
                 const canSendNow = await ensureCanSendConversation(recConversationKey, { silentToast: true });
+
                 if (!canSendNow) {
                   toast('Aceite a conversa para responder.', false);
                 } else {
@@ -2761,6 +2834,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
                   const base64 = cleanDataUrl(dataUrl);
 
                   const number = numberForApi(recConversationKey);
+
                   if (!number) {
                     toast('Destino inválido (telefone ou grupo). Verifique o cadastro.', false);
                   } else {
@@ -2774,10 +2848,13 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
 
                     applyInstanceFromResponse(resp);
 
+                    const ref = conversationRefOf(recConversationKey, getCurrentSelectedObject());
+
                     notifySuccessfulOutgoing({
-                      convRef: conversationRefOf(recConversationKey, getCurrentSelectedObject()),
+                      convRef: ref,
                       resp,
                       text: '[Áudio]',
+                      preview: '[Áudio]',
                     });
 
                     toast('Áudio enviado!', true);
@@ -2826,6 +2903,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
     if (rec) return;
 
     const hasText = (inputMsg.value || '').trim().length > 0;
+
     if (hasText) {
       await enviarTexto();
     } else {
@@ -2838,6 +2916,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
   inputMsg.addEventListener('keydown', async (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+
       if ((inputMsg.value || '').trim()) {
         await enviarTexto();
       }
@@ -2880,6 +2959,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
         <span class="attach-lab">Sticker</span>
       </div>
     `;
+
     document.body.appendChild(attachMenu);
   }
 
@@ -2915,15 +2995,18 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
 
     EMOJIS.split(/\s+/).forEach((ch) => {
       if (!ch) return;
+
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'emoji-btn-item';
       b.textContent = ch;
+
       b.addEventListener('click', () => {
         insertAtCursor(inputMsg, ch);
         inputMsg.dispatchEvent(new Event('input', { bubbles: true }));
         applyComposerInteractiveState();
       });
+
       grid.appendChild(b);
     });
   }
@@ -3013,6 +3096,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
             if (!hadCapture) fileMedia.removeAttribute('capture');
           }, 0);
         }
+
         break;
       }
 
@@ -3037,6 +3121,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
   fileDoc.addEventListener('change', async (e) => {
     const files = e.target.files;
     if (files && files.length) await openFilePreview(files, 'document');
+
     e.target.value = '';
     inputArquivoLegacy.value = '';
   });
@@ -3044,6 +3129,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
   fileMedia.addEventListener('change', async (e) => {
     const files = e.target.files;
     if (files && files.length) await openFilePreview(files, null);
+
     e.target.value = '';
     inputArquivoLegacy.value = '';
   });
@@ -3051,18 +3137,21 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
   fileAudio.addEventListener('change', async (e) => {
     const files = e.target.files;
     if (files && files.length) await openFilePreview(files, 'audio');
+
     e.target.value = '';
     inputArquivoLegacy.value = '';
   });
 
   function ensureDropOverlay() {
     let ov = document.getElementById('zc-drop-overlay');
+
     if (!ov) {
       ov = document.createElement('div');
       ov.id = 'zc-drop-overlay';
       ov.innerHTML = '<div class="zc-drop-box">Solte o arquivo aqui para enviar ao cliente</div>';
       document.body.appendChild(ov);
     }
+
     return ov;
   }
 
@@ -3108,11 +3197,13 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
     window.addEventListener('dragleave', (ev) => {
       if (!hasFiles(ev)) return;
       dragging = Math.max(0, dragging - 1);
+
       if (!dragging) hideOverlay();
     });
 
     window.addEventListener('drop', async (ev) => {
       if (!hasFiles(ev)) return;
+
       ev.preventDefault();
 
       dragging = 0;
@@ -3215,10 +3306,11 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
 
     window.addEventListener('zc:conversation-accepted', (ev) => {
       const detail = ev?.detail || null;
+
       const ref = conversationRefOf(
         detail?.conversation_key ||
-        detail?.conversation_id ||
-        getSelectedConversationKey(),
+          detail?.conversation_id ||
+          getSelectedConversationKey(),
         getCurrentSelectedObject()
       );
 
@@ -3230,15 +3322,17 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
 
     window.addEventListener('zc:conversation-released', (ev) => {
       const detail = ev?.detail || null;
+
       const ref = conversationRefOf(
         detail?.conversation_key ||
-        detail?.conversation_id ||
-        getSelectedConversationKey(),
+          detail?.conversation_id ||
+          getSelectedConversationKey(),
         getCurrentSelectedObject()
       );
 
       if (ref?.key) {
         clearComposerOptimisticUnlock(ref.key);
+
         if (getSelectedConversationRef()?.key === ref.key) {
           setComposerLocked(true, 'Aceite a conversa para responder');
         }
@@ -3260,6 +3354,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
 
     document.addEventListener('click', (e) => {
       const li = e.target.closest?.('#lista-clientes .cliente-item, .cliente-item, .chat-item');
+
       if (li) {
         setTimeout(() => {
           clearComposerOptimisticUnlock(null);
@@ -3340,6 +3435,7 @@ function notifySuccessfulOutgoing({ convRef, resp, text }) {
 
   const mount = () => {
     const root = document.getElementById('chat-footer') || document.body;
+
     if (root) {
       obs.observe(root, {
         childList: true,
