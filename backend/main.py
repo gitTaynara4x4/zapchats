@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import asyncio
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit, urlunsplit, parse_qsl, urlencode
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,8 +34,13 @@ from backend.routers import atendimentoia as atendimento_ia_router
 from backend.routers import atendimento_chat as atendimento_chat_router
 from backend.routers.clients_central import router as clients_central_router
 from backend.routers import (
-    auth, usuarios, clientes, atendimento,
-    cliente_onboarding, empresa, atendimento_busca
+    auth,
+    usuarios,
+    clientes,
+    atendimento,
+    cliente_onboarding,
+    empresa,
+    atendimento_busca,
 )
 from backend.routers import dashboard as dashboard_router
 from backend.routers.colaboradores import router as colaboradores_router
@@ -52,14 +58,14 @@ from backend.routers import admin_planos
 from backend.routers.perfil import router as perfil_router
 from backend.routers.meu_plano import router as meu_plano_router
 
-# ✅ NOVO: router de filas
+# ✅ Router de filas
 from backend.routers import filas as filas_router
 
 # DB
 from backend.database import Base, engine, SessionLocal
 from backend import models
 
-# Integrações Evolution (NOVO pacote)
+# Integrações Evolution
 from backend.integrations.evolution.api.remove_instance import router as remove_instance_router
 from backend.integrations.evolution.api.router import router as evolution_router
 from backend.integrations.evolution.transport.rabbit_consumer import start_rabbit_consumer
@@ -91,7 +97,14 @@ load_dotenv()
 
 ENV = (os.getenv("ENV", "dev") or "dev").lower()
 
-# === Versão do build (cache-buster) ===
+# =========================================================
+# Versão do build
+# =========================================================
+# Em produção, o ideal é você passar BUILD_ID pelo EasyPanel/Docker.
+# Exemplo:
+# BUILD_ID=202604300001
+#
+# Se não passar, ele gera um novo a cada start do app.
 BUILD_ID = os.getenv("BUILD_ID") or datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 
 # Caminhos do frontend
@@ -101,6 +114,192 @@ FRONTEND_DIR = BASE_DIR / "frontend"
 # ✅ uploads: caminho absoluto + cria se faltar
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# =========================================================
+# Cache bust automático para frontend
+# =========================================================
+CACHE_BUST_EXTS = (
+    ".js",
+    ".mjs",
+    ".css",
+    ".map",
+    ".json",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".svg",
+    ".ico",
+    ".woff",
+    ".woff2",
+    ".ttf",
+)
+
+CACHE_BUST_PREFIXES = (
+    "/frontend/",
+    "/static/",
+    "/assets/",
+    "/img/",
+    "/favicon",
+    "/manifest",
+)
+
+_ASSET_ATTR_RE = re.compile(
+    r'(?P<attr>\b(?:src|href)\s*=\s*)(?P<quote>["\'])(?P<url>[^"\']+)(?P=quote)',
+    re.IGNORECASE,
+)
+
+
+def _is_cache_bustable_url(url: str) -> bool:
+    u = (url or "").strip()
+    if not u:
+        return False
+
+    lower = u.lower()
+
+    if lower.startswith(
+        (
+            "http://",
+            "https://",
+            "data:",
+            "blob:",
+            "mailto:",
+            "tel:",
+            "#",
+            "javascript:",
+        )
+    ):
+        return False
+
+    clean = lower.split("#", 1)[0].split("?", 1)[0]
+
+    if clean.startswith(CACHE_BUST_PREFIXES):
+        return True
+
+    return clean.endswith(CACHE_BUST_EXTS)
+
+
+def _url_with_build_id(url: str) -> str:
+    try:
+        parts = urlsplit(url)
+
+        query_items = [
+            (k, v)
+            for k, v in parse_qsl(parts.query, keep_blank_values=True)
+            if k.lower() != "v"
+        ]
+        query_items.append(("v", BUILD_ID))
+
+        new_query = urlencode(query_items)
+
+        return urlunsplit(
+            (
+                parts.scheme,
+                parts.netloc,
+                parts.path,
+                new_query,
+                parts.fragment,
+            )
+        )
+    except Exception:
+        sep = "&" if "?" in url else "?"
+        return f"{url}{sep}v={BUILD_ID}"
+
+
+def _rewrite_html_cache_bust(html: str, inject_build_script: bool = True) -> str:
+    def repl(match: re.Match) -> str:
+        attr = match.group("attr")
+        quote = match.group("quote")
+        url = match.group("url")
+
+        if not _is_cache_bustable_url(url):
+            return match.group(0)
+
+        return f"{attr}{quote}{_url_with_build_id(url)}{quote}"
+
+    out = _ASSET_ATTR_RE.sub(repl, html)
+
+    if inject_build_script:
+        safe_build = str(BUILD_ID).replace("\\", "\\\\").replace('"', '\\"')
+
+        build_script = f"""
+<meta name="zc-build-id" content="{safe_build}">
+<script>
+  window.ZC_BUILD_ID = "{safe_build}";
+
+  (function () {{
+    try {{
+      var BUILD = window.ZC_BUILD_ID;
+      var KEY = "zc:build_id";
+      var old = localStorage.getItem(KEY);
+
+      if (old && old !== BUILD) {{
+        localStorage.setItem(KEY, BUILD);
+
+        try {{
+          if ("serviceWorker" in navigator) {{
+            navigator.serviceWorker.getRegistrations()
+              .then(function (regs) {{
+                regs.forEach(function (reg) {{
+                  try {{ reg.unregister(); }} catch (e) {{}}
+                }});
+              }})
+              .catch(function () {{}});
+          }}
+        }} catch (e) {{}}
+
+        try {{
+          if (window.caches && caches.keys) {{
+            caches.keys()
+              .then(function (keys) {{
+                return Promise.all(keys.map(function (k) {{
+                  return caches.delete(k);
+                }}));
+              }})
+              .catch(function () {{}});
+          }}
+        }} catch (e) {{}}
+
+        var url = new URL(window.location.href);
+        url.searchParams.set("v", BUILD);
+        window.location.replace(url.toString());
+        return;
+      }}
+
+      localStorage.setItem(KEY, BUILD);
+    }} catch (e) {{}}
+  }})();
+</script>
+"""
+
+        lower = out.lower()
+        idx = lower.find("</head>")
+        if idx >= 0 and "zc-build-id" not in lower:
+            out = out[:idx] + build_script + out[idx:]
+
+    return out
+
+
+def _html_response_from_file(
+    path: Path,
+    status_code: int = 200,
+    inject_build_script: bool = True,
+):
+    html = path.read_text(encoding="utf-8")
+    html = _rewrite_html_cache_bust(html, inject_build_script=inject_build_script)
+
+    return HTMLResponse(
+        content=html,
+        status_code=status_code,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "X-ZC-Build": str(BUILD_ID),
+        },
+    )
+
 
 DEV_ORIGINS = [
     "http://127.0.0.1:8000",
@@ -130,10 +329,13 @@ CSRF_COOKIE_PATH = os.getenv("CSRF_COOKIE_PATH", "/api/auth/refresh")
 CSRF_COOKIE_MAX_AGE = int(os.getenv("CSRF_COOKIE_MAX_AGE", str(60 * 60 * 24 * 30)))
 
 # Trusted hosts
-ALLOWED_HOSTS = (os.getenv(
-    "ALLOWED_HOSTS",
-    "localhost,127.0.0.1,ZapsChat.com.br,www.ZapsChat.com.br"
-) or "").split(",")
+ALLOWED_HOSTS = (
+    os.getenv(
+        "ALLOWED_HOSTS",
+        "localhost,127.0.0.1,ZapsChat.com.br,www.ZapsChat.com.br",
+    )
+    or ""
+).split(",")
 
 # Billing: páginas premium para redirecionar quando vencido
 BILLING_BLOCKED_HTML_PATHS = {
@@ -173,6 +375,7 @@ def _no_cache_html(resp: StarletteResponse):
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         resp.headers["Pragma"] = "no-cache"
         resp.headers["Expires"] = "0"
+        resp.headers["X-ZC-Build"] = str(BUILD_ID)
     except Exception:
         pass
 
@@ -264,7 +467,7 @@ app = FastAPI()
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=[h.strip() for h in ALLOWED_HOSTS if h.strip()]
+    allowed_hosts=[h.strip() for h in ALLOWED_HOSTS if h.strip()],
 )
 app.add_middleware(
     CORSMiddleware,
@@ -272,10 +475,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=[
-        "Authorization", "Content-Type", "X-CSRF-Token",
+        "Authorization",
+        "Content-Type",
+        "X-CSRF-Token",
         "X-Empresa-Id",
     ],
-    expose_headers=["Retry-After", "X-Auth-Gate", "X-Billing-Locked"],
+    expose_headers=["Retry-After", "X-Auth-Gate", "X-Billing-Locked", "X-ZC-Build"],
 )
 
 
@@ -408,15 +613,20 @@ def _is_public(path: str) -> bool:
 
     PUBLIC_HTML_PATHS = {
         "/",
-        "/inicio", "/inicio.html",
-        "/login", "/login.html",
-        "/criar-empresa", "/criar-empresa.html",
-        "/esqueci_senha", "/esqueci_senha.html",
-
-        "/admin-planos", "/admin-planos.html",
-        "/planos", "/planos.html",
-        "/admin-assinaturas", "/admin-assinaturas.html",
-
+        "/inicio",
+        "/inicio.html",
+        "/login",
+        "/login.html",
+        "/criar-empresa",
+        "/criar-empresa.html",
+        "/esqueci_senha",
+        "/esqueci_senha.html",
+        "/admin-planos",
+        "/admin-planos.html",
+        "/planos",
+        "/planos.html",
+        "/admin-assinaturas",
+        "/admin-assinaturas.html",
         "/frontend/admin-planos.html",
         "/frontend/planos.html",
         "/frontend/admin-assinaturas.html",
@@ -424,11 +634,16 @@ def _is_public(path: str) -> bool:
 
     PUBLIC_PREFIXES = (
         "/api/auth",
-        "/img", "/uploads",
-        "/static", "/assets",
-        "/favicon", "/robots.txt", "/manifest",
+        "/img",
+        "/uploads",
+        "/static",
+        "/assets",
+        "/favicon",
+        "/robots.txt",
+        "/manifest",
         "/ws",
-        "/healthz", "/ping",
+        "/healthz",
+        "/ping",
         "/version.json",
     )
 
@@ -509,12 +724,17 @@ async def auth_html_gate(request: Request, call_next):
 
     db: Session = SessionLocal()
     try:
-        rows = db.execute(text("""
-            SELECT p.id
-              FROM colaboradores_permissoes cp
-              JOIN permissoes p ON p.id = cp.permissao_id
-             WHERE cp.colaborador_id = :cid
-        """), {"cid": colab_id}).fetchall()
+        rows = db.execute(
+            text(
+                """
+                SELECT p.id
+                  FROM colaboradores_permissoes cp
+                  JOIN permissoes p ON p.id = cp.permissao_id
+                 WHERE cp.colaborador_id = :cid
+                """
+            ),
+            {"cid": colab_id},
+        ).fetchall()
         perms = {r[0] for r in rows}
     finally:
         db.close()
@@ -540,33 +760,53 @@ async def cache_control_assets(request: Request, call_next):
         return resp
 
     if resp.status_code in (301, 302, 303, 307, 308):
-        resp.headers.setdefault("Cache-Control", "no-store")
-        resp.headers.setdefault("Pragma", "no-cache")
-        resp.headers.setdefault("Expires", "0")
-        return resp
-
-    if path in ("/service-worker.js", "/sw.js", "/manifest.json", "/manifest.webmanifest"):
-        resp.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         resp.headers["Pragma"] = "no-cache"
         resp.headers["Expires"] = "0"
+        resp.headers["X-ZC-Build"] = str(BUILD_ID)
+        return resp
+
+    if path in (
+        "/service-worker.js",
+        "/sw.js",
+        "/manifest.json",
+        "/manifest.webmanifest",
+        "/favicon.ico",
+        "/favicon.png",
+        "/version.json",
+    ):
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        resp.headers["X-ZC-Build"] = str(BUILD_ID)
         return resp
 
     if path.endswith(".html") or ("/partials/" in path):
-        resp.headers.setdefault("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-        resp.headers.setdefault("Pragma", "no-cache")
-        resp.headers.setdefault("Expires", "0")
-        return resp
-
-    if path.endswith((".js", ".mjs", ".css", ".map", ".json")) and (
-        path.startswith("/static/") or path.startswith("/assets/") or path.startswith("/frontend/")
-    ):
-        resp.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         resp.headers["Pragma"] = "no-cache"
         resp.headers["Expires"] = "0"
+        resp.headers["X-ZC-Build"] = str(BUILD_ID)
         return resp
 
-    if path.endswith((".png", ".jpg", ".jpeg", ".webp", ".svg", ".ico", ".woff", ".woff2", ".ttf")):
-        resp.headers.setdefault("Cache-Control", "public, max-age=86400")
+    is_front_asset = (
+        path.startswith("/frontend/")
+        or path.startswith("/static/")
+        or path.startswith("/assets/")
+        or path.startswith("/img/")
+    )
+
+    is_asset_ext = path.lower().endswith(CACHE_BUST_EXTS)
+
+    if is_front_asset and is_asset_ext:
+        if request.query_params.get("v") == str(BUILD_ID):
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        resp.headers["X-ZC-Build"] = str(BUILD_ID)
+        return resp
 
     return resp
 
@@ -604,6 +844,12 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
 </body>
 </html>""",
             status_code=404,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "X-ZC-Build": str(BUILD_ID),
+            },
         )
 
     return await fastapi_http_exception_handler(request, exc)
@@ -640,7 +886,7 @@ app.include_router(atendimento_send_router, prefix="/api/atendimento", tags=["At
 app.include_router(departamentos_router.router, prefix="/api", tags=["Departamentos"])
 app.include_router(departamentos_router.compat_router, prefix="/api", tags=["Departamentos"])
 
-# ✅ NOVO: filas
+# ✅ Filas
 app.include_router(filas_router.router, prefix="/api", tags=["Filas"])
 
 app.include_router(permissoes_router)
@@ -658,6 +904,97 @@ app.include_router(perfil_router)
 app.include_router(meu_plano_router)
 app.include_router(atendimento_transferencia_router)
 app.include_router(billing_asaas_router)
+
+
+# =======================================
+# Health / Robots / Favicon
+# =======================================
+@app.get("/healthz")
+def healthz():
+    return {"ok": True, "ts": datetime.now(timezone.utc).isoformat(), "build": BUILD_ID}
+
+
+@app.get("/ping")
+def ping():
+    return {"pong": True, "build": BUILD_ID}
+
+
+FAVICON_PATH = FRONTEND_DIR / "img" / "fav-icon.png"
+
+
+@app.get("/favicon.ico")
+def favicon():
+    if FAVICON_PATH.is_file():
+        return FileResponse(
+            str(FAVICON_PATH),
+            media_type="image/png",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "X-ZC-Build": str(BUILD_ID),
+            },
+        )
+    raise HTTPException(status_code=404, detail="favicon not found")
+
+
+@app.get("/favicon.png")
+def favicon_png():
+    if FAVICON_PATH.is_file():
+        return FileResponse(
+            str(FAVICON_PATH),
+            media_type="image/png",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "X-ZC-Build": str(BUILD_ID),
+            },
+        )
+    raise HTTPException(status_code=404, detail="favicon not found")
+
+
+@app.get("/robots.txt", response_class=HTMLResponse, include_in_schema=False)
+def robots():
+    if ENV == "dev":
+        return HTMLResponse(
+            "User-agent: *\nDisallow: /\n",
+            media_type="text/plain",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "X-ZC-Build": str(BUILD_ID),
+            },
+        )
+
+    return HTMLResponse(
+        "User-agent: *\nAllow: /\nSitemap: https://ZapsChat.com.br/sitemap.xml\n",
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "X-ZC-Build": str(BUILD_ID),
+        },
+    )
+
+
+@app.get("/version.json")
+def version_json():
+    return JSONResponse(
+        {
+            "build": BUILD_ID,
+            "env": ENV,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        },
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "X-ZC-Build": str(BUILD_ID),
+        },
+    )
 
 
 # =======================================
@@ -684,51 +1021,6 @@ else:
 
 
 # =======================================
-# Health / Robots / Favicon
-# =======================================
-@app.get("/healthz")
-def healthz():
-    return {"ok": True, "ts": datetime.now(timezone.utc).isoformat()}
-
-
-@app.get("/ping")
-def ping():
-    return {"pong": True}
-
-
-FAVICON_PATH = FRONTEND_DIR / "img" / "fav-icon.png"
-
-
-@app.get("/favicon.ico")
-def favicon():
-    if FAVICON_PATH.is_file():
-        return FileResponse(str(FAVICON_PATH), media_type="image/png")
-    raise HTTPException(status_code=404, detail="favicon not found")
-
-
-@app.get("/favicon.png")
-def favicon_png():
-    if FAVICON_PATH.is_file():
-        return FileResponse(str(FAVICON_PATH), media_type="image/png")
-    raise HTTPException(status_code=404, detail="favicon not found")
-
-
-@app.get("/robots.txt", response_class=HTMLResponse, include_in_schema=False)
-def robots():
-    if ENV == "dev":
-        return HTMLResponse("User-agent: *\nDisallow: /\n", media_type="text/plain")
-    return HTMLResponse(
-        "User-agent: *\nAllow: /\nSitemap: https://ZapsChat.com.br/sitemap.xml\n",
-        media_type="text/plain"
-    )
-
-
-@app.get("/version.json")
-def version_json():
-    return JSONResponse({"build": BUILD_ID}, headers={"Cache-Control": "no-store"})
-
-
-# =======================================
 # Rotas de mídia (binário direto) – LEGACY
 # =======================================
 @app.get("/media_bin/{midia_id}")
@@ -745,11 +1037,13 @@ def serve_media_bin(
 
 @app.get("/api/env/evolution")
 def evolution_env():
-    return JSONResponse({
-        "apiUrl": os.getenv("EVOLUTION_URL", ""),
-        "apiKey": os.getenv("EVOLUTION_APIKEY", ""),
-        "defaultInstance": os.getenv("EVOLUTION_DEFAULT_INSTANCE", "")
-    })
+    return JSONResponse(
+        {
+            "apiUrl": os.getenv("EVOLUTION_URL", ""),
+            "apiKey": os.getenv("EVOLUTION_APIKEY", ""),
+            "defaultInstance": os.getenv("EVOLUTION_DEFAULT_INSTANCE", ""),
+        }
+    )
 
 
 # =======================================
@@ -759,14 +1053,23 @@ def _page_file(name: str) -> Path:
     return FRONTEND_DIR / f"{name}.html"
 
 
+def _page_response(name: str):
+    f = _page_file(name)
+    if f.is_file():
+        return _html_response_from_file(f)
+    raise HTTPException(status_code=404)
+
+
 def _discover_pages() -> list[str]:
     if not FRONTEND_DIR.is_dir():
         return []
+
     pages: list[str] = []
     for p in FRONTEND_DIR.glob("*.html"):
         stem = p.stem.strip()
         if stem and not stem.startswith("_"):
             pages.append(stem)
+
     return sorted(set(pages))
 
 
@@ -777,31 +1080,34 @@ PAGES = _discover_pages()
 async def root_redirect(request: Request):
     token = request.cookies.get(ACCESS_COOKIE_NAME)
     emp = request.cookies.get("empresa_id") or request.cookies.get("EMPRESA_ID")
+
     if token and emp:
         return RedirectResponse(url="/dashboard", status_code=302)
 
     f = _page_file("inicio")
     if f.is_file():
-        return FileResponse(str(f))
+        return _html_response_from_file(f)
 
     target = "login" if "login" in PAGES else ("index" if "index" in PAGES else None)
     if target and _page_file(target).is_file():
-        return FileResponse(str(_page_file(target)))
+        return _html_response_from_file(_page_file(target))
 
-    return {"ok": True, "msg": "Backend ZapsChat API (front não encontrado)."}
+    return {
+        "ok": True,
+        "msg": "Backend ZapsChat API (front não encontrado).",
+        "build": BUILD_ID,
+    }
 
 
 @app.get("/dashboard", include_in_schema=False)
 def dashboard():
-    f = _page_file("dashboard")
-    if f.is_file():
-        return FileResponse(str(f))
-    raise HTTPException(status_code=404)
+    return _page_response("dashboard")
 
 
 def _make_handler(name: str):
     async def _handler(_name=name):
-        return FileResponse(str(_page_file(_name)))
+        return _page_response(_name)
+
     return _handler
 
 
@@ -810,9 +1116,15 @@ RESERVED_PAGES = {"dashboard"}
 for _name in PAGES:
     if _name in RESERVED_PAGES:
         continue
+
     f = _page_file(_name)
     if f.is_file():
-        app.add_api_route(f"/{_name}", endpoint=_make_handler(_name), methods=["GET"], include_in_schema=False)
+        app.add_api_route(
+            f"/{_name}",
+            endpoint=_make_handler(_name),
+            methods=["GET"],
+            include_in_schema=False,
+        )
 
 
 @app.get("/{page_name}.html", response_class=HTMLResponse, include_in_schema=False)
@@ -822,6 +1134,7 @@ async def legacy_html(page_name: str):
 
     if page_name in PAGES and _page_file(page_name).is_file():
         return RedirectResponse(url=f"/{page_name}", status_code=307)
+
     raise HTTPException(status_code=404)
 
 
@@ -846,7 +1159,7 @@ async def _start_integrations():
             LOG("[STARTUP] DB ok e tabelas garantidas.")
             break
         except Exception as e:
-            LOG(f"[STARTUP][DB] tentativa {i+1}/10 falhou: {e}")
+            LOG(f"[STARTUP][DB] tentativa {i + 1}/10 falhou: {e}")
             time.sleep(2)
 
     loop = asyncio.get_running_loop()
@@ -929,4 +1242,4 @@ def partial(path: str):
     if not target.is_file():
         raise HTTPException(status_code=404)
 
-    return FileResponse(str(target), media_type="text/html; charset=utf-8")
+    return _html_response_from_file(target, inject_build_script=False)
