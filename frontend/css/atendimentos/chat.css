@@ -22,31 +22,6 @@
    FUNDO WHATSAPP
    ========================= */
 
-/*
-  REGRA CERTA:
-  - #chat-main fica com fundo liso do layout.
-  - #welcome-screen fica com fundo liso do layout.
-  - Papel de parede fica SOMENTE dentro da conversa: #historico.
-*/
-
-#chat-main,
-main#chat-main,
-main.whatsapp-auto-bg,
-main.whatsapp-bg-dark,
-main.whatsapp-bg-light{
-  background-image:none !important;
-}
-
-#chat-main #welcome-screen,
-main#chat-main #welcome-screen,
-main.whatsapp-auto-bg #welcome-screen,
-main.whatsapp-bg-dark #welcome-screen,
-main.whatsapp-bg-light #welcome-screen{
-  background-image:none !important;
-  background-color:var(--bg, #0b141a) !important;
-}
-
-/* Wallpaper somente dentro do histórico/conversa */
 main.whatsapp-auto-bg #historico,
 main.whatsapp-bg-dark #historico,
 main.whatsapp-bg-light #historico{
