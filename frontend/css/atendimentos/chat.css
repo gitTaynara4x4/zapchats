@@ -20,121 +20,35 @@
 
 /* =========================
    FUNDO WHATSAPP
-   Papel de parede SOMENTE dentro da conversa (#historico)
    ========================= */
 
-/* O main fica liso para NÃO mostrar wallpaper na tela inicial */
-#chat-main,
-main#chat-main,
-main.whatsapp-auto-bg,
-main.whatsapp-bg-dark,
-main.whatsapp-bg-light{
-  background-image:none !important;
-}
-
-html[data-theme="dark"] #chat-main,
-html.dark #chat-main,
-html[data-theme="dark"] main#chat-main,
-html.dark main#chat-main,
-html[data-theme="dark"] main.whatsapp-auto-bg,
-html.dark main.whatsapp-auto-bg,
-html[data-theme="dark"] main.whatsapp-bg-dark,
-html.dark main.whatsapp-bg-dark,
-html[data-theme="dark"] main.whatsapp-bg-light,
-html.dark main.whatsapp-bg-light{
-  background-color:#0b141a !important;
-}
-
-html[data-theme="light"] #chat-main,
-html:not(.dark):not([data-theme="dark"]) #chat-main,
-html[data-theme="light"] main#chat-main,
-html:not(.dark):not([data-theme="dark"]) main#chat-main,
-html[data-theme="light"] main.whatsapp-auto-bg,
-html:not(.dark):not([data-theme="dark"]) main.whatsapp-auto-bg,
-html[data-theme="light"] main.whatsapp-bg-dark,
-html:not(.dark):not([data-theme="dark"]) main.whatsapp-bg-dark,
-html[data-theme="light"] main.whatsapp-bg-light,
-html:not(.dark):not([data-theme="dark"]) main.whatsapp-bg-light{
-  background-color:#f0f2f5 !important;
-}
-
-/* Tela inicial / welcome fica lisa */
-#chat-main #welcome-screen,
-main#chat-main #welcome-screen,
-main.whatsapp-auto-bg #welcome-screen,
-main.whatsapp-bg-dark #welcome-screen,
-main.whatsapp-bg-light #welcome-screen{
-  background-image:none !important;
-}
-
-html[data-theme="dark"] #chat-main #welcome-screen,
-html.dark #chat-main #welcome-screen,
-html[data-theme="dark"] main#chat-main #welcome-screen,
-html.dark main#chat-main #welcome-screen,
-html[data-theme="dark"] main.whatsapp-auto-bg #welcome-screen,
-html.dark main.whatsapp-auto-bg #welcome-screen,
-html[data-theme="dark"] main.whatsapp-bg-dark #welcome-screen,
-html.dark main.whatsapp-bg-dark #welcome-screen,
-html[data-theme="dark"] main.whatsapp-bg-light #welcome-screen,
-html.dark main.whatsapp-bg-light #welcome-screen{
-  background:#0b141a !important;
-}
-
-html[data-theme="light"] #chat-main #welcome-screen,
-html:not(.dark):not([data-theme="dark"]) #chat-main #welcome-screen,
-html[data-theme="light"] main#chat-main #welcome-screen,
-html:not(.dark):not([data-theme="dark"]) main#chat-main #welcome-screen,
-html[data-theme="light"] main.whatsapp-auto-bg #welcome-screen,
-html:not(.dark):not([data-theme="dark"]) main.whatsapp-auto-bg #welcome-screen,
-html[data-theme="light"] main.whatsapp-bg-dark #welcome-screen,
-html:not(.dark):not([data-theme="dark"]) main.whatsapp-bg-dark #welcome-screen,
-html[data-theme="light"] main.whatsapp-bg-light #welcome-screen,
-html:not(.dark):not([data-theme="dark"]) main.whatsapp-bg-light #welcome-screen{
-  background:#f0f2f5 !important;
-}
-
-/* Wallpaper somente dentro do histórico da conversa */
 main.whatsapp-auto-bg #historico,
 main.whatsapp-bg-dark #historico,
-main.whatsapp-bg-light #historico,
-#chat-main.whatsapp-auto-bg #historico,
-#chat-main.whatsapp-bg-dark #historico,
-#chat-main.whatsapp-bg-light #historico{
+main.whatsapp-bg-light #historico{
   background-repeat:repeat !important;
   background-position:0 0 !important;
   background-size:366px 366px !important;
 }
 
-/* Automático dark */
 html[data-theme="dark"] main.whatsapp-auto-bg #historico,
-html.dark main.whatsapp-auto-bg #historico,
-html[data-theme="dark"] #chat-main.whatsapp-auto-bg #historico,
-html.dark #chat-main.whatsapp-auto-bg #historico{
+html.dark main.whatsapp-auto-bg #historico{
   background-color:#0b141a !important;
   background-image:url("/frontend/img/whatsapp-bg-dark.png") !important;
 }
 
-/* Automático light */
-html[data-theme="light"] main.whatsapp-auto-bg #historico,
-html:not(.dark):not([data-theme="dark"]) main.whatsapp-auto-bg #historico,
-html[data-theme="light"] #chat-main.whatsapp-auto-bg #historico,
-html:not(.dark):not([data-theme="dark"]) #chat-main.whatsapp-auto-bg #historico{
+html[data-theme="light"] main.whatsapp-auto-bg #historico{
   background-color:#efeae2 !important;
   background-image:
     linear-gradient(rgba(255,255,255,.80), rgba(255,255,255,.80)),
     url("/frontend/img/whatsapp-bg-light.png") !important;
 }
 
-/* Forçado dark */
-main.whatsapp-bg-dark #historico,
-#chat-main.whatsapp-bg-dark #historico{
+main.whatsapp-bg-dark #historico{
   background-color:#0b141a !important;
   background-image:url("/frontend/img/whatsapp-bg-dark.png") !important;
 }
 
-/* Forçado light */
-main.whatsapp-bg-light #historico,
-#chat-main.whatsapp-bg-light #historico{
+main.whatsapp-bg-light #historico{
   background-color:#efeae2 !important;
   background-image:
     linear-gradient(rgba(255,255,255,.80), rgba(255,255,255,.80)),

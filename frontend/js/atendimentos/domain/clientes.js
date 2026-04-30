@@ -11,6 +11,7 @@
 // ✅ NOME OFICIAL: nome > nome_whatsapp > push_name > telefone
 // ✅ FIX bolinha verde: entende novas/unread/unread_count e cria badge se não existir
 // ✅ Avatar sem foto: cor fixa por conversa baseada no conversation_key
+// ✅ FILAS: mostra badge somente quando tiver fila_id + fila_nome real
 // =====================================================================
 
 import { EMPRESA_ID } from '../core/env.js';
@@ -33,7 +34,7 @@ import { primeWith, getHist } from './hist-cache.js';
 const LIST_CACHE_TTL_MS = 8_000;
 const LIST_FORCE_MIN_INTERVAL_MS = 2_500;
 const LIST_DEBOUNCE_MS = 700;
-const LIST_LOCAL_CACHE_VERSION = 'conversas:v3:nome-oficial-badge-fix-avatar-color';
+const LIST_LOCAL_CACHE_VERSION = 'conversas:v4:nome-oficial-badge-fix-avatar-color-filas';
 
 let __loadingConversasPromise = null;
 let __lastConversasFetchAt = 0;
@@ -161,6 +162,503 @@ function aplicarNomeOficialNoMerge(novo, antigo) {
   }
 
   return novo;
+}
+
+/* =========================================================
+   FILAS helpers
+   ========================================================= */
+function hasOwnAny(obj, keys) {
+  if (!obj || typeof obj !== 'object') return false;
+
+  return keys.some((k) => Object.prototype.hasOwnProperty.call(obj, k));
+}
+
+function filaPayloadPresent(src) {
+  if (!src || typeof src !== 'object') return false;
+
+  if (hasOwnAny(src, [
+    'fila_id',
+    'filaId',
+    'queue_id',
+    'queueId',
+    'fila_nome',
+    'filaNome',
+    'queue_name',
+    'queueName',
+    'fila_prioridade',
+    'filaPrioridade',
+    'fila_sla_minutos',
+    'filaSlaMinutos',
+    'fila_cor',
+    'filaCor',
+    'fila_ativa',
+    'filaAtiva',
+    'fila_exigir_aceite',
+    'filaExigirAceite',
+    'fila_escolhida_em',
+    'filaEscolhidaEm',
+  ])) {
+    return true;
+  }
+
+  return !!(src.fila && typeof src.fila === 'object') || !!(src.queue && typeof src.queue === 'object');
+}
+
+function filaIdKey(v) {
+  const s = idKey(v);
+  if (!s) return null;
+  if (s === '0') return null;
+
+  if (/^\d+$/.test(s)) {
+    const n = Number(s);
+    if (!Number.isFinite(n) || n <= 0) return null;
+  }
+
+  return s;
+}
+
+function filaIdFromAny(src) {
+  if (!src || typeof src !== 'object') return null;
+
+  return filaIdKey(
+    src.fila_id ??
+    src.filaId ??
+    src.queue_id ??
+    src.queueId ??
+    src.fila?.id ??
+    src.queue?.id ??
+    null
+  );
+}
+
+function filaNomeFromAny(src) {
+  if (!src || typeof src !== 'object') return '';
+
+  return cleanName(
+    src.fila_nome ??
+    src.filaNome ??
+    src.queue_name ??
+    src.queueName ??
+    src.fila?.nome ??
+    src.fila?.name ??
+    src.queue?.nome ??
+    src.queue?.name ??
+    ''
+  );
+}
+
+function filaPrioridadeNorm(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+
+  if (s === 'baixa') return 'baixa';
+  if (s === 'alta') return 'alta';
+  if (s === 'urgente') return 'urgente';
+  if (s === 'normal') return 'normal';
+
+  return s || null;
+}
+
+function filaPrioridadeFromAny(src) {
+  if (!src || typeof src !== 'object') return null;
+
+  return filaPrioridadeNorm(
+    src.fila_prioridade ??
+    src.filaPrioridade ??
+    src.queue_priority ??
+    src.queuePriority ??
+    src.fila?.prioridade ??
+    src.fila?.priority ??
+    src.queue?.prioridade ??
+    src.queue?.priority ??
+    null
+  );
+}
+
+function filaCorNorm(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+
+  if (['verde', 'azul', 'amarelo', 'vermelho', 'roxo'].includes(s)) return s;
+
+  if (s === 'green') return 'verde';
+  if (s === 'blue') return 'azul';
+  if (s === 'yellow') return 'amarelo';
+  if (s === 'red') return 'vermelho';
+  if (s === 'purple') return 'roxo';
+
+  return s || null;
+}
+
+function filaCorFromAny(src) {
+  if (!src || typeof src !== 'object') return null;
+
+  return filaCorNorm(
+    src.fila_cor ??
+    src.filaCor ??
+    src.queue_color ??
+    src.queueColor ??
+    src.cor_fila ??
+    src.fila?.cor ??
+    src.fila?.color ??
+    src.queue?.cor ??
+    src.queue?.color ??
+    null
+  );
+}
+
+function filaSlaFromAny(src) {
+  if (!src || typeof src !== 'object') return null;
+
+  const raw =
+    src.fila_sla_minutos ??
+    src.filaSlaMinutos ??
+    src.queue_sla_minutes ??
+    src.queueSlaMinutes ??
+    src.sla_minutos ??
+    src.slaMinutos ??
+    src.fila?.sla_minutos ??
+    src.fila?.slaMinutos ??
+    src.fila?.sla_minutes ??
+    src.queue?.sla_minutos ??
+    src.queue?.slaMinutos ??
+    src.queue?.sla_minutes ??
+    null;
+
+  const n = Number(raw);
+
+  if (!Number.isFinite(n) || n <= 0) return null;
+
+  return Math.round(n);
+}
+
+function filaBoolFromAny(src, keys, fallback = false) {
+  if (!src || typeof src !== 'object') return fallback;
+
+  for (const k of keys) {
+    if (src[k] !== undefined) return boolish(src[k]);
+  }
+
+  if (src.fila && typeof src.fila === 'object') {
+    for (const k of keys) {
+      if (src.fila[k] !== undefined) return boolish(src.fila[k]);
+    }
+  }
+
+  if (src.queue && typeof src.queue === 'object') {
+    for (const k of keys) {
+      if (src.queue[k] !== undefined) return boolish(src.queue[k]);
+    }
+  }
+
+  return fallback;
+}
+
+function filaDepartamentoIdFromAny(src) {
+  if (!src || typeof src !== 'object') return null;
+
+  const raw =
+    src.fila_departamento_id ??
+    src.filaDepartamentoId ??
+    src.queue_department_id ??
+    src.queueDepartmentId ??
+    src.fila?.departamento_id ??
+    src.fila?.departamentoId ??
+    src.queue?.departamento_id ??
+    src.queue?.departamentoId ??
+    null;
+
+  return idKey(raw);
+}
+
+function filaEscolhidaEmFromAny(src) {
+  if (!src || typeof src !== 'object') return null;
+
+  return (
+    src.fila_escolhida_em ??
+    src.filaEscolhidaEm ??
+    src.queue_selected_at ??
+    src.queueSelectedAt ??
+    src.fila?.escolhida_em ??
+    src.fila?.fila_escolhida_em ??
+    src.queue?.selected_at ??
+    null
+  );
+}
+
+function temFilaReal(c) {
+  return !!filaIdKey(c?.fila_id) && !!cleanName(c?.fila_nome);
+}
+
+function filaPrioridadeLabel(v) {
+  const p = filaPrioridadeNorm(v);
+
+  if (p === 'baixa') return 'Baixa';
+  if (p === 'alta') return 'Alta';
+  if (p === 'urgente') return 'Urgente';
+  if (p === 'normal') return 'Normal';
+
+  return p ? (p.charAt(0).toUpperCase() + p.slice(1)) : '';
+}
+
+function filaSlaLabel(minutos) {
+  const n = Number(minutos);
+
+  if (!Number.isFinite(n) || n <= 0) return '';
+
+  if (n < 60) return `SLA ${Math.round(n)} min`;
+  if (n === 60) return 'SLA 1h';
+
+  const h = Math.round(n / 60);
+  return `SLA ${h}h`;
+}
+
+function normalizeFilaState(raw, normalizedBase = {}) {
+  const explicit = filaPayloadPresent(raw);
+  const filaId = filaIdFromAny(raw);
+
+  const base = {
+    __has_fila_payload: explicit,
+
+    fila_id: null,
+    fila_nome: null,
+    fila_prioridade: null,
+    fila_sla_minutos: null,
+    fila_cor: null,
+    fila_ativa: false,
+    fila_exigir_aceite: false,
+    fila_escolhida_em: null,
+    fila_departamento_id: null,
+
+    exigir_aceite: false,
+    aceite_obrigatorio: false,
+    aguardando_aceite: false,
+  };
+
+  if (!filaId) return base;
+
+  const filaNome = filaNomeFromAny(raw);
+  const filaPrioridade = filaPrioridadeFromAny(raw);
+  const filaSla = filaSlaFromAny(raw);
+  const filaCor = filaCorFromAny(raw);
+
+  const filaAtiva = filaBoolFromAny(
+    raw,
+    ['fila_ativa', 'filaAtiva', 'ativa', 'active', 'queue_active'],
+    false
+  );
+
+  const filaExigirAceite = filaBoolFromAny(
+    raw,
+    ['fila_exigir_aceite', 'filaExigirAceite', 'exigir_aceite', 'aceite_obrigatorio', 'queue_require_accept'],
+    false
+  );
+
+  const aguardandoAceite = filaBoolFromAny(
+    raw,
+    ['aguardando_aceite', 'waiting_accept', 'esperando_aceite'],
+    false
+  );
+
+  return {
+    ...base,
+    ...normalizedBase,
+
+    __has_fila_payload: explicit,
+
+    fila_id: filaId,
+    fila_nome: filaNome || null,
+    fila_prioridade: filaPrioridade,
+    fila_sla_minutos: filaSla,
+    fila_cor: filaCor,
+    fila_ativa: filaAtiva,
+    fila_exigir_aceite: filaExigirAceite,
+    fila_escolhida_em: filaEscolhidaEmFromAny(raw),
+    fila_departamento_id: filaDepartamentoIdFromAny(raw),
+
+    exigir_aceite: filaExigirAceite,
+    aceite_obrigatorio: filaExigirAceite,
+    aguardando_aceite: aguardandoAceite,
+  };
+}
+
+function clearFilaState(c) {
+  if (!c) return c;
+
+  c.fila_id = null;
+  c.fila_nome = null;
+  c.fila_prioridade = null;
+  c.fila_sla_minutos = null;
+  c.fila_cor = null;
+  c.fila_ativa = false;
+  c.fila_exigir_aceite = false;
+  c.fila_escolhida_em = null;
+  c.fila_departamento_id = null;
+  c.exigir_aceite = false;
+  c.aceite_obrigatorio = false;
+  c.aguardando_aceite = false;
+
+  return c;
+}
+
+function copyFilaState(target, source) {
+  if (!target || !source) return target;
+
+  target.fila_id = source.fila_id ?? null;
+  target.fila_nome = source.fila_nome ?? null;
+  target.fila_prioridade = source.fila_prioridade ?? null;
+  target.fila_sla_minutos = source.fila_sla_minutos ?? null;
+  target.fila_cor = source.fila_cor ?? null;
+  target.fila_ativa = !!source.fila_ativa;
+  target.fila_exigir_aceite = !!source.fila_exigir_aceite;
+  target.fila_escolhida_em = source.fila_escolhida_em ?? null;
+  target.fila_departamento_id = source.fila_departamento_id ?? null;
+  target.exigir_aceite = !!source.fila_exigir_aceite;
+  target.aceite_obrigatorio = !!source.fila_exigir_aceite;
+  target.aguardando_aceite = !!source.aguardando_aceite;
+
+  return target;
+}
+
+function mergeFilaState(n, a) {
+  if (!n || !a) return n;
+
+  const nExplicit = !!n.__has_fila_payload;
+  const nFila = filaIdKey(n.fila_id);
+  const aFila = filaIdKey(a.fila_id);
+
+  /*
+    Regra importante:
+    - Se payload novo veio com campos de fila explícitos, ele manda.
+      Se veio fila_id null, limpa a fila.
+    - Se payload novo veio parcial sem campos de fila, preserva fila antiga.
+      Isso evita perder badge em evento de preview/ack que não sabe fila.
+  */
+  if (!nExplicit && aFila) {
+    copyFilaState(n, a);
+    return n;
+  }
+
+  if (!nFila) {
+    return clearFilaState(n);
+  }
+
+  if (nFila && aFila && String(nFila) === String(aFila)) {
+    if (!cleanName(n.fila_nome) && cleanName(a.fila_nome)) n.fila_nome = a.fila_nome;
+    if (!n.fila_prioridade && a.fila_prioridade) n.fila_prioridade = a.fila_prioridade;
+    if (!n.fila_sla_minutos && a.fila_sla_minutos) n.fila_sla_minutos = a.fila_sla_minutos;
+    if (!n.fila_cor && a.fila_cor) n.fila_cor = a.fila_cor;
+    if (!n.fila_escolhida_em && a.fila_escolhida_em) n.fila_escolhida_em = a.fila_escolhida_em;
+    if (!n.fila_departamento_id && a.fila_departamento_id) n.fila_departamento_id = a.fila_departamento_id;
+
+    n.fila_ativa = !!(n.fila_ativa || a.fila_ativa);
+    n.fila_exigir_aceite = !!(n.fila_exigir_aceite || a.fila_exigir_aceite);
+    n.exigir_aceite = !!n.fila_exigir_aceite;
+    n.aceite_obrigatorio = !!n.fila_exigir_aceite;
+    n.aguardando_aceite = !!(n.aguardando_aceite || a.aguardando_aceite);
+  }
+
+  return n;
+}
+
+function applyFilaPayloadToConversation(c, payload = {}) {
+  if (!c || !payload || typeof payload !== 'object') return false;
+
+  if (!filaPayloadPresent(payload)) return false;
+
+  const next = normalizeFilaState(payload);
+
+  c.__has_fila_payload = true;
+
+  if (!next.fila_id) {
+    clearFilaState(c);
+    return true;
+  }
+
+  copyFilaState(c, next);
+
+  return true;
+}
+
+function filaBadgeHtml(c) {
+  if (!temFilaReal(c)) return '';
+
+  const filaId = filaIdKey(c.fila_id);
+  const filaNome = cleanName(c.fila_nome);
+  const prio = filaPrioridadeNorm(c.fila_prioridade);
+  const prioLabel = filaPrioridadeLabel(prio);
+  const cor = filaCorNorm(c.fila_cor) || 'verde';
+  const sla = filaSlaLabel(c.fila_sla_minutos);
+
+  const titleParts = [`Fila: ${filaNome}`];
+  if (prioLabel) titleParts.push(`Prioridade: ${prioLabel}`);
+  if (sla) titleParts.push(sla);
+
+  const prioHtml = prioLabel
+    ? `<span class="chat-fila-prio chat-fila-prio-${escapeHtml(prio || 'normal')}">${escapeHtml(prioLabel)}</span>`
+    : '';
+
+  return `
+    <div class="chat-fila-row"
+         data-fila-id="${escapeHtml(String(filaId || ''))}"
+         title="${escapeHtml(titleParts.join(' • '))}">
+      <span class="chat-fila-badge chat-fila-cor-${escapeHtml(cor)}">
+        <i class="fa-solid fa-layer-group"></i>
+        <span>${escapeHtml(filaNome)}</span>
+      </span>
+      ${prioHtml}
+    </div>`;
+}
+
+function updateFilaInline(li, payload = {}) {
+  if (!li || !filaPayloadPresent(payload)) return;
+
+  const current = {
+    fila_id: li.dataset.filaId || null,
+    fila_nome: li.dataset.filaNome || null,
+    fila_prioridade: li.dataset.filaPrioridade || null,
+    fila_sla_minutos: li.dataset.filaSlaMinutos || null,
+    fila_cor: li.dataset.filaCor || null,
+    fila_ativa: li.dataset.filaAtiva === '1',
+    fila_exigir_aceite: li.dataset.filaExigirAceite === '1',
+  };
+
+  const temp = normalizeCliente({
+    ...current,
+    ...payload,
+    id: li.dataset.id || '',
+    conversation_key: li.dataset.conversationKey || li.dataset.id || '',
+  });
+
+  const filaId = filaIdKey(temp.fila_id);
+  const filaNome = cleanName(temp.fila_nome);
+  const has = !!filaId && !!filaNome;
+
+  li.classList.toggle('has-fila', has);
+
+  li.dataset.filaId = has ? String(filaId) : '';
+  li.dataset.filaNome = has ? filaNome : '';
+  li.dataset.filaPrioridade = has ? String(temp.fila_prioridade || '') : '';
+  li.dataset.filaSlaMinutos = has ? String(temp.fila_sla_minutos || '') : '';
+  li.dataset.filaCor = has ? String(temp.fila_cor || '') : '';
+  li.dataset.filaAtiva = has && temp.fila_ativa ? '1' : '0';
+  li.dataset.filaExigirAceite = has && temp.fila_exigir_aceite ? '1' : '0';
+
+  let row = li.querySelector('.chat-fila-row');
+
+  if (!has) {
+    if (row) row.remove();
+    return;
+  }
+
+  const html = filaBadgeHtml(temp);
+
+  if (!row) {
+    const chatName = li.querySelector('.chat-name');
+    if (chatName) {
+      chatName.insertAdjacentHTML('afterend', html);
+    }
+  } else {
+    row.outerHTML = html;
+  }
 }
 
 /* =========================================================
@@ -859,6 +1357,8 @@ export function normalizeCliente(c) {
   const nomeWhats = cleanName(c.nome_whatsapp);
   const pushName = cleanName(c.push_name || c.pushName);
 
+  const filaState = normalizeFilaState(c);
+
   return {
     ...c,
 
@@ -920,6 +1420,8 @@ export function normalizeCliente(c) {
     participantes_count: participantesCount,
     minha_participacao: minhaParticipacao,
 
+    ...filaState,
+
     is_new: statusValue === 'novo',
     is_waiting: statusValue === 'aguardando',
     is_in_service: statusValue === 'em_atendimento',
@@ -941,6 +1443,7 @@ function mergeConversaCanonica(novo, antigo) {
   if (!sameConversation(n, a)) return n;
 
   n = aplicarNomeOficialNoMerge(n, a);
+  n = mergeFilaState(n, a);
 
   if (!n.jid && a.jid) n.jid = a.jid;
   if (!n.remoteJid && a.remoteJid) n.remoteJid = a.remoteJid;
@@ -1525,6 +2028,13 @@ export function renderListaClientes(data) {
       isGroupJid(c.jid || '') ||
       isGroupJid(c.remoteJid || '');
 
+    const filaId = filaIdKey(c.fila_id);
+    const filaNome = cleanName(c.fila_nome);
+    const temFila = !!filaId && !!filaNome;
+
+    const filaClass = temFila ? ' has-fila' : '';
+    const filaHtml = filaBadgeHtml(c);
+
     const grpAttr = isGrp ? '1' : '0';
     const jidAttr = escapeHtml(String(c.jid || c.remoteJid || (isGrp ? c.telefone : '') || ''));
     const instAttr = escapeHtml(String(c.instancia_id ?? c.instancia ?? ''));
@@ -1537,8 +2047,16 @@ export function renderListaClientes(data) {
     const acceptedAttr = c.operador_id ? '1' : '0';
     const isNewAttr = statusValue === 'novo' ? '1' : '0';
 
+    const filaIdAttr = escapeHtml(String(filaId || ''));
+    const filaNomeAttr = escapeHtml(String(filaNome || ''));
+    const filaPrioridadeAttr = escapeHtml(String(c.fila_prioridade || ''));
+    const filaSlaAttr = escapeHtml(String(c.fila_sla_minutos || ''));
+    const filaCorAttr = escapeHtml(String(c.fila_cor || ''));
+    const filaAtivaAttr = temFila && c.fila_ativa ? '1' : '0';
+    const filaExigirAceiteAttr = temFila && c.fila_exigir_aceite ? '1' : '0';
+
     return `
-      <li class="chat-item cliente-item ${avatarColorClass}${pinClass}${isGrp ? ' is-group' : ''}${acceptedClass}${unreadClass}${newClass}${safeStatusClass}"
+      <li class="chat-item cliente-item ${avatarColorClass}${pinClass}${isGrp ? ' is-group' : ''}${acceptedClass}${unreadClass}${newClass}${safeStatusClass}${filaClass}"
           id="chat-${escapeHtml(convKey)}"
           data-id="${escapeHtml(convKey)}"
           data-conversation-key="${escapeHtml(convKey)}"
@@ -1562,10 +2080,18 @@ export function renderListaClientes(data) {
           data-operador-nome="${operadorNomeAttr}"
           data-departamento-id="${departamentoIdAttr}"
           data-participantes-count="${participantesCountAttr}"
-          data-minha-participacao="${minhaParticipacaoAttr}">
+          data-minha-participacao="${minhaParticipacaoAttr}"
+          data-fila-id="${filaIdAttr}"
+          data-fila-nome="${filaNomeAttr}"
+          data-fila-prioridade="${filaPrioridadeAttr}"
+          data-fila-sla-minutos="${filaSlaAttr}"
+          data-fila-cor="${filaCorAttr}"
+          data-fila-ativa="${filaAtivaAttr}"
+          data-fila-exigir-aceite="${filaExigirAceiteAttr}">
         ${av}
         <div class="chat-text">
           <div class="chat-name">${escapeHtml(nome || '')}</div>
+          ${filaHtml}
           <div class="chat-last">
             ${ackHtml}
             <span class="preview-text">${escapeHtml(preview)}</span>
@@ -1771,6 +2297,8 @@ if (!window.Lista) {
       if (operador_nome !== undefined) c.operador_nome = operador_nome || null;
       if (departamento_id !== undefined) c.departamento_id = idKey(departamento_id);
 
+      applyFilaPayloadToConversation(c, payload);
+
       if (temValor(ack)) {
         c.last_ack = Number(ack);
         c.last_tipo = 'saida';
@@ -1862,6 +2390,8 @@ if (!window.Lista) {
       if (meta.departamento_id !== undefined) c.departamento_id = idKey(meta.departamento_id);
       if (meta.participantes_count !== undefined) c.participantes_count = Number(meta.participantes_count || 0) || 0;
       if (meta.minha_participacao !== undefined) c.minha_participacao = !!meta.minha_participacao;
+
+      applyFilaPayloadToConversation(c, meta);
 
       _reRender();
     },
@@ -2095,6 +2625,8 @@ if (!window.Lista) {
     if (departamento_id !== undefined) {
       li.dataset.departamentoId = String(departamento_id || '');
     }
+
+    updateFilaInline(li, payload || {});
   }
 
   function setAckInline(clienteId, ack) {

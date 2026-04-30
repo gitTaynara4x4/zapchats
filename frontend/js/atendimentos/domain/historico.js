@@ -12,7 +12,8 @@
 // ✅ Resposta/quote renderizada dentro da bolha, igual WhatsApp
 // ✅ TRAVA: resposta atrasada não sobrescreve conversa atual
 // ✅ Aceita payload array, {items}, {data}, {results}, {mensagens}, {messages}
-// ✅ FIX PRINCIPAL: escuta eventos de refresh após envio/WS e busca mensagens novas do backend
+// ✅ Escuta eventos de refresh após envio/WS e busca mensagens novas do backend
+// ✅ Compat com envio otimista: tmp msg, reloginho, ack, falha, dedupe temp -> real
 // ✅ Exports compat: window.carregarHistoricoCliente / window.forcarAtualizacaoHistorico
 
 import { formatChatTime, parseAtendimentoDate } from '../core/time.js';
@@ -26,23 +27,32 @@ import '../ui/media-render.js';
 export const HISTORICO_LIMIT = 20;
 const H = () => document.getElementById('historico');
 
-/* ===================== DEBUG ===================== */
-const HIST_DEBUG =
-  typeof window !== 'undefined' && window.HIST_DEBUG === true;
+/* =====================
+   DEBUG
+   ===================== */
+function isHistDebug() {
+  try {
+    return window.HIST_DEBUG === true;
+  } catch {
+    return false;
+  }
+}
 
 function HLOG(...args) {
   try {
-    if (HIST_DEBUG && console?.log) console.log('[historico]', ...args);
+    if (isHistDebug() && console?.log) console.log('[historico]', ...args);
   } catch {}
 }
 
 function HERR(...args) {
   try {
-    if (HIST_DEBUG && console?.error) console.error('[historico][ERRO]', ...args);
+    if (isHistDebug() && console?.error) console.error('[historico][ERRO]', ...args);
   } catch {}
 }
 
-/* ===================== Conversation helpers ===================== */
+/* =====================
+   Conversation helpers
+   ===================== */
 const idKey = (v) => {
   const s = String(v ?? '').trim();
   if (!s || s === 'null' || s === 'undefined' || s === 'NaN') return null;
@@ -210,7 +220,9 @@ function getConversationKeySafe(raw = null, row = null) {
   return ref?.key || null;
 }
 
-/* ===================== Trava contra render atrasado ===================== */
+/* =====================
+   Trava contra render atrasado
+   ===================== */
 function getOpenHistKey(hist = H()) {
   return idKey(
     hist?.dataset?.conversationKey ||
@@ -264,7 +276,9 @@ function extractItems(payload) {
   return [];
 }
 
-/* ===================== Scroll guard ===================== */
+/* =====================
+   Scroll guard
+   ===================== */
 const HIST_SCROLL_GUARD_MS = 450;
 
 function armHistoricoScrollGuard(ms = HIST_SCROLL_GUARD_MS) {
@@ -278,7 +292,9 @@ function historicoScrollGuardActive(hist = H()) {
   return Number(hist.__zcScrollGuardUntil || 0) > Date.now();
 }
 
-/* ===================== Loader “puxar pra cima” ===================== */
+/* =====================
+   Loader “puxar pra cima”
+   ===================== */
 function ensureTopLoader() {
   const hist = H();
   if (!hist) return null;
@@ -306,7 +322,9 @@ function hideTopLoader() {
   hist.removeAttribute('data-loading-old');
 }
 
-/* ===================== Divisor de data ===================== */
+/* =====================
+   HTML helpers
+   ===================== */
 function escapeHtml(s) {
   return String(s || '').replace(/[&<>"]/g, (ch) => ({
     '&': '&amp;',
@@ -333,6 +351,9 @@ function jsonAttr(obj) {
   }
 }
 
+/* =====================
+   Datas / divisores
+   ===================== */
 function dayKeyFromDate(d) {
   try {
     const dd = new Date(d);
@@ -391,7 +412,9 @@ function parseMsgDate(m) {
   return d;
 }
 
-/* ===================== Reply / quote preview ===================== */
+/* =====================
+   Reply / quote preview
+   ===================== */
 function firstTextFromMessageObject(message) {
   if (!message || typeof message !== 'object') return '';
 
@@ -484,6 +507,83 @@ function renderQuotedPreview(q) {
   `;
 }
 
+/* =====================
+   Mensagem helpers
+   ===================== */
+function msgKey(m) {
+  return String(m?.msg_id || m?.message_id || m?.wa_msg_id || m?.id || '').trim();
+}
+
+function isTempMsg(m) {
+  const k = msgKey(m);
+  return (
+    k.startsWith('tmp:') ||
+    m?.temp === true ||
+    m?.pending === true ||
+    m?.optimistic === true ||
+    m?.__optimistic === true
+  );
+}
+
+function isSaidaMsg(m) {
+  return m?.tipo === 'saida' || m?.from_me === true || m?.origem === 'atendente';
+}
+
+function msgText(m) {
+  return String(m?.conteudo ?? m?.mensagem ?? m?.texto ?? '').trim();
+}
+
+function msgTimeMs(m) {
+  try {
+    const raw = m?.timestamp || m?.data || m?.created_at || m?.hora || null;
+    if (raw) {
+      let d = null;
+      try {
+        d = parseAtendimentoDate(raw);
+      } catch {
+        d = null;
+      }
+      if (!d || Number.isNaN(d.getTime())) d = new Date(raw);
+      if (d && !Number.isNaN(d.getTime())) return d.getTime();
+    }
+
+    const ts = Number(m?.ts || 0);
+    if (Number.isFinite(ts) && ts > 0) return ts;
+  } catch {}
+
+  return 0;
+}
+
+function removeOptimisticDuplicates(arr) {
+  const list = Array.isArray(arr) ? arr.slice() : [];
+  const realSent = list.filter((m) => isSaidaMsg(m) && !isTempMsg(m) && msgText(m));
+
+  if (!realSent.length) return list;
+
+  return list.filter((m) => {
+    if (!isTempMsg(m) || !isSaidaMsg(m)) return true;
+
+    const t = msgText(m);
+    if (!t) return true;
+
+    const mt = msgTimeMs(m);
+
+    const hasRealEquivalent = realSent.some((r) => {
+      if (msgText(r) !== t) return false;
+
+      const rt = msgTimeMs(r);
+      if (!mt || !rt) return true;
+
+      return Math.abs(rt - mt) <= 2 * 60 * 1000;
+    });
+
+    return !hasRealEquivalent;
+  });
+}
+
+/* =====================
+   Render helpers
+   ===================== */
 function renderMsgsWithDividers(msgs, lastDayKey = null) {
   let html = '';
   let last = lastDayKey || null;
@@ -533,7 +633,100 @@ function getHistLastDayKey(hist) {
   }
 }
 
-/* ===================== Persistência LS (cacheHistoricos) ===================== */
+function renderAckHtml(m) {
+  const isSaida = isSaidaMsg(m);
+  if (!isSaida) return '';
+
+  const ackVal = Number(m.ack ?? 0);
+  const mid = escapeHtml(msgKey(m));
+
+  if (m.failed === true || ackVal < 0) {
+    return `
+      <span class="msg-ack msg-ack-failed" data-msg-id="${mid}" title="Falha ao enviar">
+        <i class="fa-solid fa-circle-exclamation"></i>
+      </span>
+    `;
+  }
+
+  if (typeof window.getAckIcon === 'function') {
+    return window.getAckIcon(ackVal).replace(
+      '<span class="msg-ack"',
+      `<span class="msg-ack" data-msg-id="${mid}"`
+    );
+  }
+
+  if (ackVal <= 0) {
+    return `
+      <span class="msg-ack msg-ack-pending" data-msg-id="${mid}" title="Enviando">
+        <i class="fa-regular fa-clock"></i>
+      </span>
+    `;
+  }
+
+  return `
+    <span class="msg-ack msg-ack-sent" data-msg-id="${mid}" title="Enviado">
+      <i class="fa-solid fa-check"></i>
+    </span>
+  `;
+}
+
+function updateExistingRowsFromCache(hist, msgs) {
+  if (!hist || !Array.isArray(msgs) || !msgs.length) return;
+
+  const byId = new Map();
+  for (const m of msgs) {
+    const k = msgKey(m);
+    if (k) byId.set(k, m);
+  }
+
+  if (!byId.size) return;
+
+  hist.querySelectorAll('.msg-row').forEach((row) => {
+    const k =
+      row.getAttribute('data-msg-id') ||
+      row.getAttribute('data-id') ||
+      row.getAttribute('data-message-id') ||
+      row.getAttribute('data-wa-msg-id') ||
+      '';
+
+    if (!k || !byId.has(k)) return;
+
+    const m = byId.get(k);
+    const bubble = row.querySelector('.bubble');
+    const failed = m.failed === true || Number(m.ack ?? 0) < 0;
+    const pending = !failed && (m.pending === true || Number(m.ack ?? 0) <= 0) && isSaidaMsg(m);
+
+    row.dataset.pending = pending ? '1' : '0';
+    row.dataset.failed = failed ? '1' : '0';
+    row.classList.toggle('is-pending', pending);
+    row.classList.toggle('is-failed', failed);
+    row.classList.toggle('is-sent', isSaidaMsg(m) && !pending && !failed);
+
+    if (bubble) {
+      bubble.dataset.pending = pending ? '1' : '0';
+      bubble.dataset.failed = failed ? '1' : '0';
+      bubble.classList.toggle('is-pending', pending);
+      bubble.classList.toggle('is-failed', failed);
+      bubble.classList.toggle('is-sent', isSaidaMsg(m) && !pending && !failed);
+    }
+
+    if (isSaidaMsg(m)) {
+      const meta = row.querySelector('.meta');
+      const oldAck = row.querySelector('.msg-ack');
+      const newAck = renderAckHtml(m);
+
+      if (oldAck && newAck) {
+        oldAck.outerHTML = newAck;
+      } else if (!oldAck && meta && newAck) {
+        meta.insertAdjacentHTML('afterbegin', newAck);
+      }
+    }
+  });
+}
+
+/* =====================
+   Persistência LS
+   ===================== */
 if (!window.cacheHistoricos) window.cacheHistoricos = {};
 
 if (!window.salvarCache) {
@@ -610,7 +803,9 @@ function ordenarMensagens(arr) {
   });
 }
 
-/* ===================== Instância ativa ===================== */
+/* =====================
+   Instância ativa
+   ===================== */
 function getInstanciaForFetch(rawConversation = null) {
   try {
     const hist = H();
@@ -637,7 +832,9 @@ function getInstanciaForFetch(rawConversation = null) {
   }
 }
 
-/* ===================== Query de instância (requests) ===================== */
+/* =====================
+   Query de instância
+   ===================== */
 function getInstQuery(rawConversation = null) {
   const inst = getInstanciaForFetch(rawConversation);
   if (!inst) {
@@ -656,7 +853,9 @@ function getInstQuery(rawConversation = null) {
 
 window._instQuery = getInstQuery;
 
-/* ===================== salvar cache unificado (compat) ===================== */
+/* =====================
+   salvar cache unificado
+   ===================== */
 export function salvarNoCache(clienteId, novos) {
   const convKey = getConversationKeySafe(clienteId) || idKey(clienteId);
   if (!convKey) return;
@@ -676,7 +875,7 @@ export function salvarNoCache(clienteId, novos) {
   const noId = [];
 
   for (const m of merged) {
-    const k = m && (m.msg_id || m.message_id || m.wa_msg_id || m.id) ? String(m.msg_id || m.message_id || m.wa_msg_id || m.id) : '';
+    const k = msgKey(m);
 
     if (k) {
       const prev = byId.get(k);
@@ -709,7 +908,9 @@ export function salvarNoCache(clienteId, novos) {
     }
   }
 
-  const finalArr = ordenarMensagens([...byId.values(), ...noId]);
+  const deduped = removeOptimisticDuplicates([...byId.values(), ...noId]);
+  const finalArr = ordenarMensagens(deduped);
+
   HLOG('salvarNoCache OUT', { convKey, inst, total: finalArr.length });
 
   primeWith(inst, convKey, finalArr, null);
@@ -717,30 +918,28 @@ export function salvarNoCache(clienteId, novos) {
   window.salvarCache?.();
 }
 
-/* ===================== render de 1 mensagem ===================== */
+/* =====================
+   render de 1 mensagem
+   ===================== */
 export function criarHTMLDaMensagem(m) {
   if (typeof window.criarHTMLDaMensagem === 'function') {
     return window.criarHTMLDaMensagem(m);
   }
 
-  const isSaida = m.tipo === 'saida' || m.from_me === true || m.origem === 'atendente';
+  const isSaida = isSaidaMsg(m);
   const texto = String(m.conteudo ?? m.mensagem ?? m.texto ?? '').trim();
   const ackVal = Number(m.ack ?? 0);
-  const msgIdAttr = String(m.msg_id || m.message_id || m.wa_msg_id || m.id || '').trim();
+  const msgIdAttr = msgKey(m);
   const msgIdEsc = escapeHtml(msgIdAttr);
+
+  const pending = isSaida && !m.failed && ackVal <= 0;
+  const failed = isSaida && (m.failed === true || ackVal < 0);
 
   const quotedPreview = normalizeQuotedPreview(m);
   const quotedPreviewAttr = quotedPreview ? jsonAttr(quotedPreview) : '';
   const quotedAttr = m?.quoted && typeof m.quoted === 'object' ? jsonAttr(m.quoted) : '';
 
-  const ackHtml =
-    isSaida && typeof window.getAckIcon === 'function'
-      ? window.getAckIcon(ackVal).replace(
-          '<span class="msg-ack"',
-          `<span class="msg-ack" data-msg-id="${msgIdEsc}"`
-        )
-      : '';
-
+  const ackHtml = renderAckHtml(m);
   const quoteHtml = renderQuotedPreview(quotedPreview);
 
   const textHtml = texto
@@ -755,17 +954,21 @@ export function criarHTMLDaMensagem(m) {
     ? ` data-quoted="${quotedAttr}"`
     : '';
 
-  return `<div class="msg-row ${isSaida ? 'msg-sent' : 'msg-received'}"
+  return `<div class="msg-row ${isSaida ? 'msg-sent' : 'msg-received'}${pending ? ' is-pending' : ''}${failed ? ' is-failed' : ''}${isSaida && !pending && !failed ? ' is-sent' : ''}"
       data-id="${msgIdEsc}"
       data-msg-id="${msgIdEsc}"
       data-message-id="${msgIdEsc}"
       data-wa-msg-id="${msgIdEsc}"
-      data-from-me="${isSaida ? '1' : '0'}"${quotedPreviewData}${quotedData}>
-    <div class="bubble ${isSaida ? 'bubble-out' : 'bubble-in'}"
+      data-from-me="${isSaida ? '1' : '0'}"
+      data-pending="${pending ? '1' : '0'}"
+      data-failed="${failed ? '1' : '0'}"${quotedPreviewData}${quotedData}>
+    <div class="bubble ${isSaida ? 'bubble-out' : 'bubble-in'}${pending ? ' is-pending' : ''}${failed ? ' is-failed' : ''}${isSaida && !pending && !failed ? ' is-sent' : ''}"
         data-msg-id="${msgIdEsc}"
         data-message-id="${msgIdEsc}"
         data-wa-msg-id="${msgIdEsc}"
-        data-from-me="${isSaida ? '1' : '0'}"${quotedPreviewData}${quotedData}>
+        data-from-me="${isSaida ? '1' : '0'}"
+        data-pending="${pending ? '1' : '0'}"
+        data-failed="${failed ? '1' : '0'}"${quotedPreviewData}${quotedData}>
       ${quoteHtml}
       ${textHtml}
       <div class="meta">
@@ -776,7 +979,9 @@ export function criarHTMLDaMensagem(m) {
   </div>`;
 }
 
-/* ===================== render ===================== */
+/* =====================
+   render histórico
+   ===================== */
 export function renderHistoricoDoCache(clienteId, append = false) {
   const hist = H();
   if (!hist) return;
@@ -791,9 +996,10 @@ export function renderHistoricoDoCache(clienteId, append = false) {
       ? hist.dataset.instanciaId
       : getInstanciaForFetch(convKey);
 
-  const msgs = ordenarMensagens(ensureArray(getHist(inst, convKey)));
+  const msgs = ordenarMensagens(removeOptimisticDuplicates(ensureArray(getHist(inst, convKey))));
 
   HLOG('renderHistoricoDoCache', { convKey, inst, append, msgsCount: msgs.length });
+
   ensureTopLoader();
 
   const stripAckReceived = () => {
@@ -819,6 +1025,7 @@ export function renderHistoricoDoCache(clienteId, append = false) {
     hist.insertAdjacentHTML('beforeend', html);
 
     stripAckReceived();
+    updateExistingRowsFromCache(hist, msgs);
     setHistLastDayKey(hist, lastDayKey);
 
     hist.scrollTop = hist.scrollHeight;
@@ -838,7 +1045,7 @@ export function renderHistoricoDoCache(clienteId, append = false) {
     );
 
     const hasNoIdInDom = existingIds.has('');
-    const hasNoIdInList = msgs.some((m) => !m.msg_id && !m.message_id && !m.wa_msg_id && !m.id);
+    const hasNoIdInList = msgs.some((m) => !msgKey(m));
 
     if (hasNoIdInDom || hasNoIdInList) {
       HLOG('renderHistoricoDoCache: rebuild total (mensagem sem msg_id)', {
@@ -856,6 +1063,7 @@ export function renderHistoricoDoCache(clienteId, append = false) {
       hist.insertAdjacentHTML('beforeend', html);
 
       stripAckReceived();
+      updateExistingRowsFromCache(hist, msgs);
       setHistLastDayKey(hist, lastDayKey);
       hist.scrollTop = hist.scrollHeight;
 
@@ -867,11 +1075,13 @@ export function renderHistoricoDoCache(clienteId, append = false) {
 
       setTimeout(() => armHistoricoScrollGuard(), 60);
     } else {
+      updateExistingRowsFromCache(hist, msgs);
+
       const lastRenderedId = getLastRenderedMsgId(hist);
       let startIdx = -1;
 
       if (lastRenderedId) {
-        startIdx = msgs.findIndex((m) => String(m?.msg_id || m?.message_id || m?.wa_msg_id || m?.id || '') === String(lastRenderedId));
+        startIdx = msgs.findIndex((m) => msgKey(m) === String(lastRenderedId));
       }
 
       let novas = [];
@@ -879,7 +1089,7 @@ export function renderHistoricoDoCache(clienteId, append = false) {
         novas = msgs.slice(startIdx + 1);
       } else {
         novas = msgs.filter((m) => {
-          const mid = String(m?.msg_id || m?.message_id || m?.wa_msg_id || m?.id || '');
+          const mid = msgKey(m);
           return mid && !existingIds.has(mid);
         });
       }
@@ -901,18 +1111,10 @@ export function renderHistoricoDoCache(clienteId, append = false) {
         else hist.insertAdjacentHTML('beforeend', out.html);
 
         setHistLastDayKey(hist, out.lastDayKey);
+        updateExistingRowsFromCache(hist, msgs);
       } else {
-        // Mesmo sem mensagem nova, pode ter ACK novo.
-        try {
-          const fullHtml = hist.innerHTML;
-          if (!fullHtml || !hist.querySelector('.msg-row')) {
-            const { html, lastDayKey } = renderMsgsWithDividers(msgs, null);
-            hist.innerHTML = '';
-            ensureTopLoader();
-            hist.insertAdjacentHTML('beforeend', html);
-            setHistLastDayKey(hist, lastDayKey);
-          }
-        } catch {}
+        // Mesmo sem mensagem nova, pode ter ACK novo / pending -> sent.
+        updateExistingRowsFromCache(hist, msgs);
       }
 
       stripAckReceived();
@@ -945,14 +1147,18 @@ export function renderHistoricoDoCache(clienteId, append = false) {
   } catch {}
 }
 
-/* ===================== append util ===================== */
+/* =====================
+   append util
+   ===================== */
 export function appendToHistory(clienteId, msg) {
   const convKey = getConversationKeySafe(clienteId) || idKey(clienteId);
-  HLOG('appendToHistory', { convKey, msgId: msg?.msg_id || msg?.id || null });
+  HLOG('appendToHistory', { convKey, msgId: msgKey(msg) || null });
   salvarNoCache(convKey, [msg]);
 }
 
-/* ===================== offset helpers ===================== */
+/* =====================
+   offset helpers
+   ===================== */
 function getOffsetsObj() {
   return window.state && typeof window.state === 'object'
     ? (window.state.mensagensOffset = window.state.mensagensOffset || {})
@@ -978,7 +1184,9 @@ function setOffset(id, val) {
   } catch {}
 }
 
-/* ===================== abrir histórico (sync servidor) ===================== */
+/* =====================
+   abrir histórico
+   ===================== */
 export async function abrirHistorico(id) {
   const hist = H();
   if (!hist) {
@@ -1078,7 +1286,9 @@ export async function abrirHistorico(id) {
   }
 }
 
-/* ===================== refresh forçado do histórico aberto ===================== */
+/* =====================
+   refresh forçado do histórico aberto
+   ===================== */
 let forceRefreshSeq = 0;
 let forceRefreshTimer = null;
 let forceRefreshInFlight = null;
@@ -1258,6 +1468,7 @@ function agendarRefreshHistorico(rawConversation = null, opts = {}) {
   clearTimeout(forceRefreshTimer);
 
   const reason = String(opts.reason || convObj.reason || 'event-refresh');
+
   const delay =
     reason.includes('send') ||
     reason.includes('envio') ||
@@ -1322,6 +1533,11 @@ function agendarRefreshHistorico(rawConversation = null, opts = {}) {
 
   const handler = (ev) => {
     const detail = ev?.detail || {};
+
+    // Não força fetch no evento de criação otimista,
+    // porque essa mensagem já entrou no cache local e renderizou na hora.
+    if (ev?.type === 'zc:optimistic-message-created') return;
+
     const convObj = eventDetailToConversation(detail);
 
     HLOG('evento refresh histórico recebido', {
@@ -1341,7 +1557,9 @@ function agendarRefreshHistorico(rawConversation = null, opts = {}) {
   }
 })();
 
-/* ===================== paginação (scroll up) ===================== */
+/* =====================
+   paginação scroll up
+   ===================== */
 let loadingOld = false;
 
 export async function carregarMaisHistorico(id) {
@@ -1481,7 +1699,9 @@ export async function carregarMaisHistorico(id) {
   }
 }
 
-/* ===================== Scroll binding (dinâmico) ===================== */
+/* =====================
+   Scroll binding dinâmico
+   ===================== */
 (function bindScroll() {
   const tryBind = () => {
     const hist = H();
@@ -1518,7 +1738,9 @@ export async function carregarMaisHistorico(id) {
   mo.observe(document.documentElement, { childList: true, subtree: true });
 })();
 
-/* ===================== Sync preview da lista (do hist-cache) ===================== */
+/* =====================
+   Sync preview da lista
+   ===================== */
 window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
   try {
     const convKey = getConversationKeySafe(clienteId) || idKey(clienteId);
@@ -1595,6 +1817,8 @@ window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
       return;
     }
 
+    arr = removeOptimisticDuplicates(arr);
+
     const last = arr[arr.length - 1];
 
     let tsIso =
@@ -1625,8 +1849,8 @@ window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
       HERR('syncPreviewFromCache: erro parse tsIso', { tsIso, e });
     }
 
-    const textoRaw = (last.conteudo ?? last.mensagem ?? last.texto ?? '').toString().trim();
-    const outbound = last.tipo === 'saida' || last.from_me === true || last.origem === 'atendente';
+    const textoRaw = msgText(last);
+    const outbound = isSaidaMsg(last);
     const ackVal = outbound ? (Number(last.ack ?? 0) || 0) : undefined;
 
     if (convTsMs && histTsMs && histTsMs <= convTsMs) {
@@ -1648,7 +1872,9 @@ window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
   }
 };
 
-/* ===================== globais/compat ===================== */
+/* =====================
+   globais/compat
+   ===================== */
 window.renderHistoricoDoCache = renderHistoricoDoCache;
 window.salvarNoCache = salvarNoCache;
 window.abrirHistorico = abrirHistorico;
