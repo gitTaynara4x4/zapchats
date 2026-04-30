@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 # Routers
+from backend.routers.seo_landing import router as seo_landing_router
 from backend.routers.email import router as email_router
 from backend.routers.disparos import router as disparos_router
 from backend.routers import chatbot_setores as chatbot_setores_router
@@ -884,6 +885,7 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
 # =======================================
 # Rotas / Routers
 # =======================================
+app.include_router(seo_landing_router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(usuarios.router, prefix="/api", tags=["Usuarios"])
 app.include_router(clientes.router, prefix="/api", tags=["Clientes"])
