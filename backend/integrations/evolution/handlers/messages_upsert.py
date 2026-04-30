@@ -715,29 +715,54 @@ async def on_messages_upsert(inst_id: str, data):
 
                     if inserted:
                         try:
+                            conv_key_grupo = f"g:{int(grp.id)}:{int(inst.id or 0)}"
+
                             ws_payload_grupo = {
-                                "empresa_id": empresa_id,
-                                "cliente_id": grp.id,
-                                "conversation_id": grp.id,
-                                "grupo_id": grp.id,
+                                "type": "message",
+                                "event": "message",
+
+                                "empresa_id": int(empresa_id),
+
+                                "conversation_key": conv_key_grupo,
+                                "conversation_id": conv_key_grupo,
+                                "kind": "g",
+                                "entity_id": int(grp.id),
+                                "grupo_id": int(grp.id),
                                 "is_group": True,
-                                "instancia_id": inst.id,
+
+                                # compatibilidade legado: evita usar id de grupo como cliente real
+                                "cliente_id": None,
+
+                                "instancia_id": int(inst.id),
                                 "instance_name": getattr(inst, "instance_name", None),
+
                                 "telefone": getattr(grp, "remote_jid", grp_remote),
+                                "remote_jid": getattr(grp, "remote_jid", grp_remote),
+
                                 "avatar_url": getattr(grp, "avatar_url", None),
                                 "push_name": getattr(grp, "nome", None),
                                 "nome": getattr(grp, "nome", None) or "Grupo",
+
                                 "mensagem": conteudo,
+                                "texto": conteudo,
+                                "conteudo": conteudo,
+
                                 "tipo": direcao,
                                 "origem": ("atendente" if from_me else "cliente"),
+                                "from_me": bool(from_me),
+
                                 "timestamp": _iso_utc(ts_msg),
                                 "msg_id": str(msg_id),
                                 "ack": (ack_value if from_me else None),
+
                                 "author_jid": (participant or None),
                                 "autor_nome": autor_nome,
                                 "autor_cliente_id": cli_autor_id,
+
+                                "midias": [],
                                 "serverTimestamp": _server_ts_ms(),
                             }
+
                             await conexoes_ativas.send_message(f"emp:{empresa_id}", ws_payload_grupo)
                         except Exception as e:
                             LOG(f"[UPsert][grupo][ws-live] falha ao emitir: {e}")
@@ -1064,24 +1089,48 @@ async def on_messages_upsert(inst_id: str, data):
                         with SessionLocal() as db_ws:
                             cliente = _fetch_cliente(db_ws, cli_id)
 
+                        conv_key_cliente = f"c:{int(cli_id)}:{int(inst.id or 0)}"
+
                         ws_payload = {
-                            "empresa_id": empresa_id,
-                            "cliente_id": cli_id,
-                            "instancia_id": inst.id,
+                            "type": "message",
+                            "event": "message",
+
+                            "empresa_id": int(empresa_id),
+
+                            "conversation_key": conv_key_cliente,
+                            "conversation_id": conv_key_cliente,
+                            "kind": "c",
+                            "entity_id": int(cli_id),
+                            "cliente_id": int(cli_id),
+                            "is_group": False,
+
+                            "instancia_id": int(inst.id),
                             "instance_name": getattr(inst, "instance_name", None),
+
                             "atendimento_id": atendimento_id,
                             "departamento_id": (getattr(cliente, "departamento_id", None) if cliente else None),
                             "colaborador_id": (getattr(cliente, "colaborador_id", None) if cliente else None),
+
                             "telefone": formatar_telefone_br(telefone),
+                            "telefone_norm": telefone,
+
                             "avatar_url": getattr(cliente, "avatar_url", None) if cliente else None,
                             "push_name": getattr(cliente, "nome_whatsapp", None) if cliente else None,
                             "nome": getattr(cliente, "nome", None) if cliente else formatted,
+
                             "mensagem": conteudo,
+                            "texto": conteudo,
+                            "conteudo": conteudo,
+
                             "tipo": direcao,
                             "origem": ("atendente" if from_me else "cliente"),
+                            "from_me": bool(from_me),
+
                             "timestamp": _iso_utc(ts_msg),
                             "msg_id": (str(msg_id) if msg_id else (str(msg_db_id) if msg_db_id else None)),
                             "ack": (ack_value if from_me else None),
+
+                            "midias": [],
                             "serverTimestamp": _server_ts_ms(),
                         }
 

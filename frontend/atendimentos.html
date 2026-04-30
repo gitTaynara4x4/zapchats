@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Painel de Atendimento – zapschat</title>
+  <title>Painel de Atendimento – ZapsChat</title>
 
   <script>
     (function () {
@@ -19,245 +19,50 @@
     })();
   </script>
 
-  <link rel="stylesheet" href="/frontend/css/atendimentos.css">
+  <script
+    src="https://unpkg.com/@lottiefiles/dotlottie-wc@0.9.10/dist/dotlottie-wc.js"
+    type="module">
+  </script>
+
+  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260428-filas-aceite-1">
 
   <link rel="stylesheet"
         href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap"
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
         rel="stylesheet">
 
   <style>
-    main.whatsapp-auto-bg #historico,
-    main.whatsapp-bg-dark #historico,
-    main.whatsapp-bg-light #historico{
-      background-repeat: repeat !important;
-      background-position: 0 0 !important;
-      background-size: 400px 400px !important;
+    html,
+    body{
+      font-family:"Inter","Segoe UI","Helvetica Neue",Arial,sans-serif;
     }
 
-    html[data-theme="dark"] main.whatsapp-auto-bg #historico{
-      background-color:#0b141a !important;
-      background-image: url("/frontend/img/whatsapp-bg-dark.png") !important;
+    #welcome-screen .zc-welcome-lottie{
+      width:300px;
+      height:220px;
+      max-width:min(76vw, 320px);
+      margin-bottom:18px;
+      display:block;
     }
 
-    html[data-theme="light"] main.whatsapp-auto-bg #historico{
-      background-color:#efeae2 !important;
-      background-image: url("/frontend/img/whatsapp-bg-light.png") !important;
-    }
-
-    main.whatsapp-bg-dark #historico{
-      background-color:#0b141a !important;
-      background-image: url("/frontend/img/whatsapp-bg-dark.png") !important;
-    }
-
-    main.whatsapp-bg-light #historico{
-      background-color:#efeae2 !important;
-      background-image: url("/frontend/img/whatsapp-bg-light.png") !important;
-    }
-
-    #chat-back-mobile{display:none}
-    @media (max-width:920px){
-      #chat-back-mobile{
-        display:inline-flex;align-items:center;justify-content:center;
-        margin-right:.5rem;width:32px;height:32px;
-        border-radius:999px;border:none;background:transparent;
-        color:inherit;cursor:pointer;
-      }
-      #chat-back-mobile i{font-size:1rem}
-    }
-
-    .wpp-leftbar .wpp-leftbar-icons a.wpp-leftbar-icon svg{
-      width:22px;height:22px;display:block;
-    }
-
-    .wpp-leftbar .wpp-leftbar-icons a.wpp-leftbar-icon[aria-current="page"]{
-      outline:none;
-    }
-
-    .zc-topbar{
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-    }
-
-    .zc-topbar-head{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-    }
-
-    .zc-brand-wrap{
-      min-width:0;
-      display:flex;
-      align-items:center;
-    }
-
-    .zc-brand-title{
-      font-size:1.05rem;
-      font-weight:700;
-      letter-spacing:-.2px;
-      color:var(--text);
-      line-height:1;
-    }
-
-    #inst-switch{
+    /*
+      Regra visual:
+      - Sem fila exigindo aceite: claim bar fica escondida.
+      - Com fila exigindo aceite e já aceito: botão Aceitar some.
+    */
+    #chat-footer[data-send-locked="0"] #btnAceitarConversa,
+    #chat-footer[data-send-locked="0"] .zc-claim-bar #btnAceitarConversa,
+    .zc-claim-bar.is-accepted #btnAceitarConversa{
       display:none !important;
     }
 
-    .zc-inst-row{
-      display:flex;
-      align-items:center;
-      gap:12px;
-      min-width:0;
-    }
-
-    .zc-inst-meta{
-      display:inline-flex;
-      align-items:center;
-      gap:8px;
-      flex:0 0 auto;
-      min-width:0;
-    }
-
-    .zc-inst-meta .dot{
-      width:6px;
-      height:6px;
-      border-radius:999px;
-      background:var(--accent);
-      display:block;
-      flex:0 0 auto;
-    }
-
-    .zc-inst-title{
-      font-size:12px;
-      font-weight:600;
-      color:var(--text-2);
-      white-space:nowrap;
-    }
-
-    #zc-inst-count{
-      opacity:.85;
-    }
-
-    .zc-inst-dropdown{
-      position:relative;
-      display:inline-block;
-      flex:0 0 auto;
-      min-width:140px;
-      max-width:200px;
-    }
-
-    .zc-inst-trigger{
-      width:100%;
-      min-height:34px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      padding:0 12px;
-      border:0;
-      border-radius:999px;
-      background:rgba(37,211,102,.12);
-      color:var(--accent);
-      box-shadow:inset 0 0 0 1px rgba(37,211,102,.30);
-      font-size:12.5px;
-      font-weight:600;
-      cursor:pointer;
-      transition:background .15s ease,color .15s ease,box-shadow .15s ease;
-    }
-
-    .zc-inst-trigger:hover{
-      background:rgba(37,211,102,.16);
-      box-shadow:inset 0 0 0 1px rgba(37,211,102,.38);
-    }
-
-    .zc-inst-trigger:focus-visible{
-      outline:none;
-      box-shadow:
-        inset 0 0 0 1px rgba(37,211,102,.42),
-        0 0 0 2px rgba(37,211,102,.14);
-    }
-
-    .zc-inst-trigger-text{
-      min-width:0;
-      overflow:hidden;
-      text-overflow:ellipsis;
-      white-space:nowrap;
-      text-align:left;
-    }
-
-    .zc-inst-trigger i{
-      font-size:11px;
-      flex:0 0 auto;
-      opacity:.9;
-      transition:transform .15s ease;
-    }
-
-    .zc-inst-dropdown.is-open .zc-inst-trigger i{
-      transform:rotate(180deg);
-    }
-
-    .zc-inst-menu{
-      position:absolute;
-      top:calc(100% + 8px);
-      left:0;
-      z-index:70;
-      min-width:100%;
-      max-width:280px;
-      padding:6px;
-      border-radius:14px;
-      background:var(--panel-2);
-      border:1px solid var(--border);
-      box-shadow:0 14px 34px rgba(0,0,0,.28);
-      display:none;
-    }
-
-    .zc-inst-dropdown.is-open .zc-inst-menu{
-      display:block;
-    }
-
-    .zc-inst-option{
-      width:100%;
-      display:flex;
-      align-items:center;
-      justify-content:flex-start;
-      gap:8px;
-      padding:10px 12px;
-      border:0;
-      border-radius:10px;
-      background:transparent;
-      color:var(--text);
-      font-size:13px;
-      line-height:1.2;
-      text-align:left;
-      cursor:pointer;
-      transition:background .14s ease,color .14s ease;
-    }
-
-    .zc-inst-option:hover{
-      background:color-mix(in oklab,var(--panel-3) 84%,transparent);
-    }
-
-    .zc-inst-option.is-active{
-      background:rgba(37,211,102,.10);
-      color:var(--accent);
-    }
-
-    .zc-inst-option-count{
-      margin-left:auto;
-      font-size:11px;
-      color:var(--text-2);
-      opacity:.82;
-    }
-
-    @media (max-width:920px){
-      .zc-brand-title{font-size:1rem}
-      .zc-inst-row{gap:8px}
-      .zc-inst-title{font-size:11px}
-      .zc-inst-dropdown{min-width:120px;max-width:170px}
-      .zc-inst-trigger{min-height:32px;padding:0 11px;font-size:12px}
-      .zc-inst-option{padding:9px 10px;font-size:12.5px}
+    @media (max-width: 640px){
+      #welcome-screen .zc-welcome-lottie{
+        width:260px;
+        height:200px;
+        margin-bottom:14px;
+      }
     }
   </style>
 </head>
@@ -279,8 +84,32 @@
       <div class="wpp-header-externo">
         <div class="zc-topbar">
           <div class="zc-topbar-head">
-            <div class="zc-brand-wrap">
-              <span class="zc-brand-title">ZapChat</span>
+            <div class="zc-topbar-left">
+              <div class="zc-brand-wrap">
+                <span class="zc-brand-title">ZapsChat</span>
+              </div>
+
+              <div class="zc-inst-top">
+                <div class="zc-inst-dropdown zc-inst-dropdown--top" id="zc-inst-dropdown">
+                  <button
+                    type="button"
+                    class="zc-inst-trigger"
+                    id="zc-inst-trigger"
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                  >
+                    <span class="zc-inst-trigger-text" id="zc-inst-current-label">Todos</span>
+                    <i class="fa fa-chevron-down" aria-hidden="true"></i>
+                  </button>
+
+                  <div
+                    class="zc-inst-menu"
+                    id="zc-inst-menu"
+                    role="listbox"
+                    aria-label="Selecionar instância"
+                  ></div>
+                </div>
+              </div>
             </div>
 
             <div class="wpp-header-icons">
@@ -295,33 +124,13 @@
             </div>
           </div>
 
-          <div class="zc-inst-row">
+          <div class="zc-inst-row zc-inst-row--bottom">
             <div class="zc-inst-meta">
               <span class="dot"></span>
               <span class="zc-inst-title">WhatsApps <span id="zc-inst-count">(0)</span></span>
             </div>
 
             <div id="inst-switch"></div>
-
-            <div class="zc-inst-dropdown" id="zc-inst-dropdown">
-              <button
-                type="button"
-                class="zc-inst-trigger"
-                id="zc-inst-trigger"
-                aria-haspopup="listbox"
-                aria-expanded="false"
-              >
-                <span class="zc-inst-trigger-text" id="zc-inst-current-label">Todos</span>
-                <i class="fa fa-chevron-down" aria-hidden="true"></i>
-              </button>
-
-              <div
-                class="zc-inst-menu"
-                id="zc-inst-menu"
-                role="listbox"
-                aria-label="Selecionar instância"
-              ></div>
-            </div>
           </div>
         </div>
 
@@ -337,9 +146,9 @@
         <div id="search-results" class="search-results hidden"></div>
 
         <div class="wpp-header-filtros-row">
-          <button class="wpp-header-filtro ativo">Em atendimento</button>
-          <button class="wpp-header-filtro">Aguardando</button>
-          <button class="wpp-header-filtro">No bot</button>
+          <button class="wpp-header-filtro ativo">Tudo</button>
+          <button class="wpp-header-filtro">Não lidas</button>
+          <button class="wpp-header-filtro">Novas</button>
           <button class="wpp-header-filtro">Grupos</button>
         </div>
 
@@ -373,20 +182,37 @@
             title="Notas do cliente"
             aria-label="Notas do cliente">
           </button>
+
+          <button
+            id="btnTransferirDepartamento"
+            type="button"
+            class="hdr-icon-btn"
+            title="Transferir departamento"
+            aria-label="Transferir departamento">
+            <i class="fa-solid fa-arrow-right-arrow-left"></i>
+          </button>
         </div>
 
-        <span id="status-bateria" class="text-xs ml-auto"></span>
+        <div class="chat-header-actions">
+          <span id="status-bateria" class="text-xs"></span>
+        </div>
       </header>
 
       <section
         id="welcome-screen"
         class="absolute inset-0 flex flex-col items-center justify-center text-center z-10">
-        <img src="/frontend/img/wpp.png"
-             class="w-52 h-auto mb-6 opacity-100"
-             alt="zapschat Logo">
+
+        <dotlottie-wc
+          class="zc-welcome-lottie"
+          src="https://lottie.host/8206bd0c-9532-4333-be08-d31f7438074a/SOzEh7vafq.lottie"
+          autoplay
+          loop
+          aria-label="Animação do ZapsChat">
+        </dotlottie-wc>
+
         <h2 class="text-lg font-semibold mt-2">Mantenha seu celular conectado</h2>
         <p class="max-w-md">
-          O zapschat conecta ao seu telefone para sincronizar suas mensagens.<br>
+          O ZapsChat conecta ao seu telefone para sincronizar suas mensagens.<br>
           Mantenha seu dispositivo conectado à internet para não perder conversas.
         </p>
       </section>
@@ -394,14 +220,59 @@
       <section id="historico" style="display:none;"></section>
 
       <div id="chat-loading"
-           class="hidden absolute inset-0 z-[50] flex items-center justify-content-center">
+           class="hidden absolute inset-0 z-[50] flex items-center gap-3 justify-center">
         <div class="flex items-center gap-3">
           <span class="w-5 h-5 rounded-full border-2 animate-spin"></span>
           <span class="text-sm">Carregando conversa…</span>
         </div>
       </div>
 
-      <footer id="chat-footer" style="display:none;">
+      <footer id="chat-footer" style="display:none;" data-send-locked="0">
+        <div id="zc-claim-bar" class="zc-claim-bar" hidden>
+          <div class="zc-claim-card">
+            <div class="zc-claim-copy">
+              <div id="zc-claim-title" class="zc-claim-title">
+                Conversa aguardando aceite
+              </div>
+              <div id="zc-claim-subtitle" class="zc-claim-subtitle">
+                Aceite para responder ou transfira para outro atendente.
+              </div>
+            </div>
+
+            <div class="zc-claim-actions">
+              <button
+                id="btnAceitarConversa"
+                type="button"
+                class="hdr-pill-btn"
+                title="Aceitar conversa"
+                aria-label="Aceitar conversa"
+                hidden>
+                <span class="hdr-pill-btn-text">Aceitar</span>
+              </button>
+
+              <button
+                id="btnLiberarConversa"
+                type="button"
+                class="hdr-pill-btn"
+                title="Liberar conversa"
+                aria-label="Liberar conversa"
+                hidden>
+                <span class="hdr-pill-btn-text">Liberar</span>
+              </button>
+
+              <button
+                id="btnTransferirColaborador"
+                type="button"
+                class="hdr-pill-btn"
+                title="Transferir colaborador"
+                aria-label="Transferir colaborador"
+                hidden>
+                <span class="hdr-pill-btn-text">Transferir</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div class="wa-composer" id="wa-composer">
           <button
             type="button"
@@ -443,7 +314,6 @@
   </div>
 
   <script type="module" src="/frontend/js/atendimentos/boot/main.js"></script>
-  <script type="module" src="/frontend/js/atendimentos/ui/filtros.js"></script>
   <script type="module" src="/frontend/js/pages/atendimentos-autoopen.js"></script>
 
   <script>
@@ -1044,6 +914,314 @@
       }
 
       window.addEventListener('load', syncMainThemeBackground);
+    })();
+  </script>
+
+  <script>
+    /*
+      Guard novo da barra de aceite.
+
+      Antes:
+      - se data-send-locked != 0, ele forçava "Conversa aguardando aceite".
+      - isso fazia aparecer aceite mesmo sem fila configurada.
+
+      Agora:
+      - só mostra barra de aceite se a conversa tiver exigir_aceite/aceite_obrigatorio/fila_exigir_aceite = true.
+      - sem fila exigindo aceite, libera composer e esconde a barra.
+    */
+    (function zcClaimBarLightGuard(){
+      let raf = 0;
+
+      function boolish(v) {
+        if (v === true || v === 1) return true;
+        if (v === false || v === 0 || v == null) return false;
+
+        const s = String(v).trim().toLowerCase();
+        return ['1', 'true', 'sim', 's', 'yes', 'y', 'on'].includes(s);
+      }
+
+      function getDeep(obj, path) {
+        try {
+          return path.split('.').reduce((acc, key) => acc && acc[key], obj);
+        } catch {
+          return undefined;
+        }
+      }
+
+      function candidates() {
+        const footer = document.getElementById('chat-footer');
+        const bar = document.getElementById('zc-claim-bar');
+        const hist = document.getElementById('historico');
+
+        const arr = [
+          window.__ZC_CONVERSA_ATUAL,
+          window.__zcConversaAtual,
+          window.__zcSelectedConversation,
+          window.__ZC_SELECTED_CONVERSATION,
+          window.__clienteSelecionado,
+          window.clienteSelecionado,
+          window.clienteSel,
+          window.state && window.state.clienteSel,
+          window.ZC_STATE && window.ZC_STATE.clienteSel,
+          window.ZCStore && window.ZCStore.state && window.ZCStore.state.clienteSel,
+          getDeep(window, 'ZCAtendimento.conversaAtual'),
+          getDeep(window, 'ZCAtendimento.currentConversation'),
+          getDeep(window, 'AtendimentoStore.state.clienteSel'),
+        ].filter(Boolean);
+
+        [footer, bar, hist].forEach(el => {
+          if (!el || !el.dataset) return;
+          arr.push(el.dataset);
+        });
+
+        return arr;
+      }
+
+      function readFirst(keys) {
+        for (const obj of candidates()) {
+          for (const key of keys) {
+            if (!obj) continue;
+
+            if (Object.prototype.hasOwnProperty.call(obj, key)) {
+              return obj[key];
+            }
+
+            const dataKey = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+            if (Object.prototype.hasOwnProperty.call(obj, dataKey)) {
+              return obj[dataKey];
+            }
+          }
+        }
+
+        return undefined;
+      }
+
+      function currentClaimState() {
+        const exigir = boolish(readFirst([
+          'exigir_aceite',
+          'aceite_obrigatorio',
+          'fila_exigir_aceite',
+          'filaExigirAceite',
+          'requires_accept',
+          'requiresAccept'
+        ]));
+
+        const aceitaPorMim = boolish(readFirst([
+          'aceita_por_mim',
+          'aceitaPorMim',
+          'accepted_by_me',
+          'acceptedByMe'
+        ]));
+
+        const podeAceitarRaw = readFirst([
+          'pode_aceitar',
+          'podeAceitar',
+          'can_accept',
+          'canAccept'
+        ]);
+
+        const podeLiberar = boolish(readFirst([
+          'pode_liberar',
+          'podeLiberar',
+          'can_release',
+          'canRelease'
+        ]));
+
+        const aguardandoRaw = readFirst([
+          'aguardando_aceite',
+          'aguardandoAceite',
+          'waiting_accept',
+          'waitingAccept'
+        ]);
+
+        let aguardando = false;
+
+        if (exigir) {
+          if (aguardandoRaw !== undefined) {
+            aguardando = boolish(aguardandoRaw);
+          } else if (podeAceitarRaw !== undefined) {
+            aguardando = boolish(podeAceitarRaw) && !aceitaPorMim;
+          } else {
+            aguardando = !aceitaPorMim;
+          }
+        }
+
+        return {
+          exigir,
+          aceitaPorMim,
+          podeAceitar: exigir && (podeAceitarRaw === undefined ? aguardando : boolish(podeAceitarRaw)),
+          podeLiberar: exigir && podeLiberar,
+          aguardando
+        };
+      }
+
+      function setBtnText(btn, text) {
+        if (!btn) return;
+        const span = btn.querySelector('.hdr-pill-btn-text');
+        if (span && span.textContent.trim() !== text) {
+          span.textContent = text;
+        }
+      }
+
+      function setHidden(el, hidden) {
+        if (!el) return;
+        el.hidden = !!hidden;
+        el.style.display = hidden ? 'none' : '';
+      }
+
+      function syncClaimBar() {
+        raf = 0;
+
+        const footer = document.getElementById('chat-footer');
+        const bar = document.getElementById('zc-claim-bar');
+        const btnAccept = document.getElementById('btnAceitarConversa');
+        const btnRelease = document.getElementById('btnLiberarConversa');
+        const btnTransfer = document.getElementById('btnTransferirColaborador');
+        const title = document.getElementById('zc-claim-title');
+        const subtitle = document.getElementById('zc-claim-subtitle');
+
+        if (!footer || !bar) return;
+
+        setBtnText(btnAccept, 'Aceitar');
+        setBtnText(btnRelease, 'Liberar');
+        setBtnText(btnTransfer, 'Transferir');
+
+        const st = currentClaimState();
+
+        if (!st.exigir) {
+          footer.dataset.sendLocked = '0';
+          bar.classList.remove('is-locked', 'is-accepted', 'is-busy');
+          setHidden(bar, true);
+          setHidden(btnAccept, true);
+          setHidden(btnRelease, true);
+          setHidden(btnTransfer, true);
+          return;
+        }
+
+        setHidden(bar, false);
+
+        if (st.aguardando) {
+          footer.dataset.sendLocked = '1';
+          bar.classList.add('is-locked');
+          bar.classList.remove('is-accepted');
+
+          if (title && title.textContent.trim() !== 'Conversa aguardando aceite') {
+            title.textContent = 'Conversa aguardando aceite';
+          }
+
+          if (subtitle && subtitle.textContent.trim() !== 'Aceite para responder ou transfira para outro atendente.') {
+            subtitle.textContent = 'Aceite para responder ou transfira para outro atendente.';
+          }
+
+          setHidden(btnAccept, !st.podeAceitar);
+          setHidden(btnRelease, true);
+          setHidden(btnTransfer, false);
+          return;
+        }
+
+        footer.dataset.sendLocked = '0';
+        bar.classList.remove('is-locked');
+        bar.classList.add('is-accepted');
+
+        if (title && title.textContent.trim() !== 'Conversa aceita por você') {
+          title.textContent = 'Conversa aceita por você';
+        }
+
+        if (subtitle && subtitle.textContent.trim() !== 'Agora você já pode responder normalmente.') {
+          subtitle.textContent = 'Agora você já pode responder normalmente.';
+        }
+
+        setHidden(btnAccept, true);
+        setHidden(btnRelease, !st.podeLiberar);
+        setHidden(btnTransfer, false);
+      }
+
+      function scheduleSync() {
+        if (raf) return;
+        raf = requestAnimationFrame(syncClaimBar);
+      }
+
+      function observeSafe(el, opts) {
+        if (!el) return;
+        try {
+          new MutationObserver(scheduleSync).observe(el, opts);
+        } catch {}
+      }
+
+      function init() {
+        scheduleSync();
+
+        const footer = document.getElementById('chat-footer');
+        const bar = document.getElementById('zc-claim-bar');
+        const hist = document.getElementById('historico');
+
+        observeSafe(footer, {
+          attributes:true,
+          attributeFilter:[
+            'data-send-locked',
+            'data-exigir-aceite',
+            'data-aceite-obrigatorio',
+            'data-fila-exigir-aceite',
+            'data-aguardando-aceite',
+            'data-pode-aceitar',
+            'data-aceita-por-mim'
+          ]
+        });
+
+        observeSafe(bar, {
+          attributes:true,
+          attributeFilter:[
+            'class',
+            'hidden',
+            'data-exigir-aceite',
+            'data-aceite-obrigatorio',
+            'data-fila-exigir-aceite',
+            'data-aguardando-aceite',
+            'data-pode-aceitar',
+            'data-aceita-por-mim'
+          ]
+        });
+
+        observeSafe(hist, {
+          attributes:true,
+          attributeFilter:[
+            'data-exigir-aceite',
+            'data-aceite-obrigatorio',
+            'data-fila-exigir-aceite',
+            'data-aguardando-aceite',
+            'data-pode-aceitar',
+            'data-aceita-por-mim'
+          ]
+        });
+
+        document.addEventListener('click', function(e){
+          if (e.target.closest('#btnAceitarConversa')) {
+            setTimeout(scheduleSync, 120);
+            setTimeout(scheduleSync, 450);
+            setTimeout(scheduleSync, 900);
+          }
+        });
+
+        window.addEventListener('zc:conversation-changed', scheduleSync);
+        window.addEventListener('zc:conversation-opened', scheduleSync);
+        window.addEventListener('zc:claim-updated', scheduleSync);
+        window.addEventListener('zc:atendimento-accepted', scheduleSync);
+        window.addEventListener('zc:conversa-atualizada', scheduleSync);
+        window.addEventListener('zc:historico-rendered', scheduleSync);
+        window.addEventListener('load', scheduleSync);
+
+        setTimeout(scheduleSync, 150);
+        setTimeout(scheduleSync, 700);
+        setTimeout(scheduleSync, 1500);
+      }
+
+      window.zcSyncClaimBarByFila = scheduleSync;
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init, { once:true });
+      } else {
+        init();
+      }
     })();
   </script>
 </body>

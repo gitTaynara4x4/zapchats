@@ -201,11 +201,6 @@
 
 <!-- 3) WebSocket GLOBAL da EMPRESA (badge, toasts, etc) -->
 <script type="module">
-  import {
-    ensureEmpresaWS,
-    onEmpresaMessage
-  } from '/frontend/js/realtime/ws-core.js';
-
   async function getEmpresaId() {
     if (window.APP_EMPRESA_ID) return window.APP_EMPRESA_ID;
 
@@ -219,6 +214,7 @@
           me?.empresaId ??
           me?.empresaID ??
           null;
+
         if (id) {
           window.APP_EMPRESA_ID = id;
           return id;
@@ -227,12 +223,23 @@
     } catch(e) {
       console.warn('[head-base] /api/auth/me falhou ao resolver empresa:', e);
     }
+
     return null;
   }
 
   (async () => {
+    if (window.__ZC_HEAD_BASE_WS_BOOTED__) return;
+    window.__ZC_HEAD_BASE_WS_BOOTED__ = true;
+
     const empresaId = await getEmpresaId();
     if (!empresaId) return;
+
+    const ver = window.__ASSET_VER__ || Date.now();
+
+    const {
+      ensureEmpresaWS,
+      onEmpresaMessage
+    } = await import(`/frontend/js/realtime/ws-core.js?_v=${encodeURIComponent(ver)}`);
 
     // Abre (e mantém ativa) a conexão da empresa
     ensureEmpresaWS(empresaId);

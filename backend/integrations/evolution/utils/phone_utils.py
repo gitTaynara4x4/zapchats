@@ -1,7 +1,6 @@
-# backend/integrations/evolution/utils/phone_utils.py
+#backend\integrations\evolution\utils\phone_utils.py
 
 from __future__ import annotations
-
 import re
 from dataclasses import dataclass
 from typing import Any, Iterable
@@ -40,12 +39,6 @@ def _strip_country_code_br(digits: str) -> str:
 
 
 def _split_br_parts(digits: str) -> tuple[str, str]:
-    """
-    Retorna (ddd, local)
-    Ex:
-      31986419237 -> ('31', '986419237')
-      3186419237  -> ('31', '86419237')
-    """
     d = _strip_country_code_br(digits)
     if len(d) < 10:
         return "", d
@@ -53,9 +46,6 @@ def _split_br_parts(digits: str) -> tuple[str, str]:
 
 
 def _with_mobile_nine_br(digits: str) -> str:
-    """
-    Se vier BR com 10 dígitos (DDD + 8), assume celular faltando 9.
-    """
     d = _strip_country_code_br(digits)
     if len(d) == 10:
         ddd = d[:2]
@@ -65,9 +55,6 @@ def _with_mobile_nine_br(digits: str) -> str:
 
 
 def _without_mobile_nine_br(digits: str) -> str:
-    """
-    Se vier BR com 11 dígitos (DDD + 9 + 8), remove o 9.
-    """
     d = _strip_country_code_br(digits)
     if len(d) == 11 and d[2] == "9":
         ddd = d[:2]
@@ -83,14 +70,8 @@ class PhoneIdentity:
     remote_jid: str | None
     is_group: bool
     is_lid: bool
-
-    # canônico para banco
     db_norm: str | None
-
-    # canônico para envio (Evolution)
     send_e164: str | None
-
-    # variantes aceitáveis para lookup
     variants: tuple[str, ...]
 
     @property
@@ -104,14 +85,6 @@ def build_phone_identity(
     remote_jid: str | None = None,
     resolved_remote_jid: str | None = None,
 ) -> PhoneIdentity:
-    """
-    Regras:
-    - grupo => não vira telefone de cliente 1:1
-    - lid => não é telefone real; só entra como remote, não como base final
-    - db_norm => BR sem 55 e preferindo 9 quando aplicável
-    - send_e164 => BR com 55 e preferindo 9 quando aplicável
-    - variants => com/sem 55, com/sem 9, sempre priorizando formatos fortes
-    """
     best_remote = (
         str(resolved_remote_jid or "").strip()
         or str(remote_jid or "").strip()
@@ -172,7 +145,6 @@ def build_phone_identity(
         f"{BRAZIL_CC}{national_without_9}",
     ])
 
-    # canônico do banco
     if len(national) == 11:
         db_norm = national
     elif len(national) == 10:
@@ -180,7 +152,6 @@ def build_phone_identity(
     else:
         db_norm = national or digits
 
-    # canônico do envio
     if db_norm and len(db_norm) in (10, 11):
         send_e164 = f"{BRAZIL_CC}{db_norm}"
     elif digits.startswith(BRAZIL_CC):
@@ -243,20 +214,10 @@ def phone_lookup_variants(
 
 
 def normalize_phone_br(phone: Any) -> str:
-    """
-    Compat antigo:
-    agora devolve formato canônico de banco.
-    Ex.: 553186419237 -> 31986419237
-    """
     return normalize_phone_for_db(phone) or ""
 
 
 def remote_to_num(remote_jid: str | None) -> str | None:
-    """
-    Compat antigo:
-    agora devolve formato canônico de banco.
-    Ex.: 553186419237@s.whatsapp.net -> 31986419237
-    """
     raw = jid_strip_device(remote_jid)
     if not raw:
         return None
@@ -299,10 +260,6 @@ def _resolve_counterparty_num_1to1(
     message_item: dict,
     me_number: str | None = None,
 ) -> tuple[str | None, str | None]:
-    """
-    Tenta descobrir o telefone real de mensagem 1:1 quando o remoteJid vier em @lid.
-    Retorna: (telefone_db_norm, alt_jid_ou_none)
-    """
     m = message_item if isinstance(message_item, dict) else {}
     key = m.get("key") if isinstance(m.get("key"), dict) else {}
 

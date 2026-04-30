@@ -1,22 +1,40 @@
 // /frontend/js/pages/chatbot.js
-// Chatbot Config – Notificações amigáveis + validação + placeholders {empresa}/{menu_departamentos}
-// ✅ corrigido para:
-// - carregar instâncias por /api/empresas/:empresaId/whatsapp (fallback /api/instancias/list)
-// - usar /api/chatbot/config?empresa_id=...&instancia_id=...
-// - impedir conflito entre mensagens automáticas e triagem por departamento
+// Chatbot Config – ZapsChat
+// ✅ Modo 1: Resposta automática simples
+// ✅ Modo 2: Menu para o cliente escolher a FILA
+// ✅ Busca filas em: /api/filas/publicas?empresa_id=...&instancia_id=...
+// ✅ Mantém IDs antigos "dept..." no DOM para não quebrar CSS/HTML
+// ✅ Salva config em /api/chatbot/config
+// ✅ A fila NÃO fica fixa no cliente; ela será aplicada depois no atendimento quando o cliente escolher.
+// ✅ Corrigido: filas NÃO vêm marcadas por padrão. O usuário precisa marcar manualmente.
 
 (() => {
   'use strict';
 
+  const VERSION = 'zc-chatbot-filas-v2-sem-marcacao-default';
+  if (window.__ZC_CHATBOT_PAGE_VERSION__ === VERSION) return;
+  window.__ZC_CHATBOT_PAGE_VERSION__ = VERSION;
+
   const LS = localStorage;
-  const EMPRESA_ID   = () => Number(LS.getItem('empresa_id') || 0);
+  const EMPRESA_ID   = () => Number(LS.getItem('empresa_id') || LS.getItem('EMPRESA_ID') || 0);
   const EMPRESA_NOME = () => (LS.getItem('empresa_nome') || '[Empresa]').trim();
-  const TOKEN        = () => LS.getItem('token') || LS.getItem('auth_token') || '';
+  const TOKEN        = () => LS.getItem('token') || LS.getItem('auth_token') || LS.getItem('access_token') || '';
   const FALLBACK_TZ  = 'America/Sao_Paulo';
+
+  const $ = (s, root = document) => root.querySelector(s);
+  const $$ = (s, root = document) => Array.from(root.querySelectorAll(s));
 
   async function authFetch(input, init = {}) {
     const t = TOKEN();
-    const headers = { ...(init.headers || {}), ...(t ? { Authorization: `Bearer ${t}` } : {}) };
+    const headers = {
+      ...(init.headers || {}),
+      ...(t ? { Authorization: `Bearer ${t}` } : {})
+    };
+
+    if (window.ZAuth && typeof window.ZAuth.authFetch === 'function') {
+      return window.ZAuth.authFetch(input, { ...init, headers, credentials: 'include' });
+    }
+
     return fetch(input, { ...init, headers, credentials: 'include' });
   }
 
@@ -40,14 +58,18 @@
   function toast(msg, kind = 'success') {
     const host = ensureToastHost();
     const box = el('div', 'toast');
+
     box.style.cssText =
       'min-width:280px;max-width:520px;padding:12px 14px;border-radius:12px;' +
       'box-shadow:0 8px 28px rgba(0,0,0,.25);font:14px/1.35 system-ui;transition:.25s';
+
     const color = kind === 'error' ? '#fee2e2' : kind === 'warn' ? '#fef3c7' : '#dbeafe';
     box.style.background = color;
     box.style.color = '#0f172a';
     box.textContent = msg;
+
     host.appendChild(box);
+
     setTimeout(() => {
       box.style.opacity = '0';
       box.style.transform = 'translateY(-6px)';
@@ -114,7 +136,11 @@
 
     footer.append(...actions, ok);
     card.append(head, p, detWrap, footer);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+
     overlay.appendChild(card);
     document.body.appendChild(overlay);
   }
@@ -177,7 +203,9 @@
 
       cancel.addEventListener('click', () => close(false));
       confirm.addEventListener('click', () => close(true));
-      overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) close(false);
+      });
 
       footer.append(cancel, confirm);
       card.append(head, p, footer);
@@ -189,15 +217,16 @@
   function friendlyHttpError(status, detailText = '') {
     const msgs = {
       0:   ['Sem conexão', 'Não conseguimos falar com o servidor.'],
-      400: ['Não foi possível salvar', 'Revise os horários (HH:MM) e os textos das mensagens.'],
+      400: ['Não foi possível salvar', 'Revise os horários e os textos das mensagens.'],
       401: ['Sessão expirada', 'Faça login novamente para continuar.'],
       403: ['Permissão negada', 'Você não pode alterar esta instância.'],
-      404: ['Instância não encontrada', 'Selecione outra instância e tente novamente.'],
-      409: ['Conflito', 'As configurações mudaram enquanto você editava. Recarregamos os dados.'],
+      404: ['Não encontrado', 'A instância, configuração ou fila não foi encontrada.'],
+      409: ['Conflito', 'As configurações mudaram enquanto você editava.'],
       422: ['Dados incompletos', 'Preencha os campos obrigatórios e salve de novo.'],
       429: ['Muitas tentativas', 'Aguarde alguns segundos e tente novamente.'],
       500: ['Ops! Algo deu errado', 'Falha no servidor. Tente novamente.']
     };
+
     const k = (status >= 500) ? 500 : (msgs[status] ? status : 0);
     const [title, message] = msgs[k];
     return { title, message, details: detailText || '' };
@@ -210,6 +239,7 @@
 
   const normalizeInstValue = (v) => (v ?? '').toString().trim();
   const getActiveInstKey   = () => normalizeInstValue(window.__INST_ID || '');
+
   function requireActiveInstKey() {
     const k = getActiveInstKey();
     if (!k) throw new Error('INST_REQUIRED');
@@ -219,11 +249,15 @@
   function lockUI(locked, msg) {
     const controls = document.querySelectorAll(
       '.tswitch input, textarea, input[type="time"], #saveAuto, #saveDept, ' +
-      'button:not(#instMenuBtnChat):not(.inst-item), select'
+      'button:not(#instMenuBtnChat):not(.inst-item):not(#helpChatbotBtn):not(.help-close):not([data-close-modal]), select'
     );
-    controls.forEach(x => { x.disabled = !!locked; });
+
+    controls.forEach(x => {
+      x.disabled = !!locked;
+    });
 
     let banner = document.getElementById('instRequiredBanner');
+
     if (locked) {
       if (!banner) {
         banner = document.createElement('div');
@@ -247,6 +281,7 @@
 
   const headAuto = document.querySelector('[data-toggle="auto"]');
   const bodyAuto = document.getElementById('body-auto');
+
   const swWelcome = document.getElementById('swWelcome');
   const pillWelcome = document.getElementById('pillWelcome');
   const msgWelcome = document.getElementById('msgWelcome');
@@ -285,6 +320,7 @@
   const deptNone   = document.getElementById('deptNone');
   const deptList   = document.getElementById('deptList');
   const deptCount  = document.getElementById('deptCount');
+
   const schedWelcome = document.getElementById('schedWelcome');
   const schedOff     = document.getElementById('schedOff');
   const schedDeptWelcomeEl = document.getElementById('schedDeptWelcome');
@@ -297,26 +333,11 @@
 
   let cfg = null;
   let _lastLoadedSnapshot = null;
-  let _deptCache = null;
+  let _filaCache = null;
   let _empresaNome = (LS.getItem('empresa_nome') || '').trim() || null;
 
   let __persisting = false;
   let __persistTimer = null;
-
-  function buildAutoWelcomeTemplate() {
-    return (
-`Olá! 👋 Você fala com {empresa}.
-
-Como podemos te ajudar hoje?`
-    );
-  }
-
-  function cleanDeptLabel(value) {
-    return String(value || '')
-      .trim()
-      .replace(/^\s*\d+\s*[-–—.)]\s*/, '')
-      .trim();
-  }
 
   const LOCAL_DEFAULTS = {
     timezone: FALLBACK_TZ,
@@ -336,7 +357,7 @@ Como podemos te ajudar hoje?`
           end: '08:00'
         }
       },
-      auto_messages_departments: {
+      auto_messages_filas: {
         enabled: false,
         welcome: {
           enabled: false,
@@ -349,11 +370,41 @@ Como podemos te ajudar hoje?`
     }
   };
 
+  function buildAutoWelcomeTemplate() {
+    return (
+`Olá! 👋 Você fala com {empresa}.
+
+Como podemos te ajudar hoje?`
+    );
+  }
+
+  function buildFilaTriagemTemplate() {
+    return (
+`Olá! 👋
+Bem-vindo(a) à {empresa}.
+
+Para direcionar seu atendimento, escolha uma opção abaixo:
+
+{menu_filas}
+
+Digite apenas o número da opção desejada.`
+    );
+  }
+
+  function cleanLabel(value) {
+    return String(value || '')
+      .trim()
+      .replace(/^\s*\d+\s*[-–—.)]\s*/, '')
+      .trim();
+  }
+
   function setSwitch(node, on, pillEl) {
     if (!node) return;
     node.dataset.on = on ? 'true' : 'false';
+
     const input = node.querySelector('input');
     if (input) input.checked = !!on;
+
     if (pillEl) {
       pillEl.textContent = on ? 'on' : 'off';
       pillEl.classList.toggle('on', !!on);
@@ -372,28 +423,101 @@ Como podemos te ajudar hoje?`
 
   function deepMerge(base, extra) {
     if (!extra || typeof extra !== 'object') return base;
+
     const out = Array.isArray(base) ? base.slice() : { ...base };
+
     for (const k of Object.keys(extra)) {
       const v = extra[k];
       out[k] = (v && typeof v === 'object' && !Array.isArray(v))
         ? deepMerge(out[k] || {}, v)
         : v;
     }
+
     return out;
+  }
+
+  function ensureMasters(c) {
+    c.features ??= {};
+
+    c.features.auto_messages ??= {};
+    if (typeof c.features.auto_messages.enabled !== 'boolean') {
+      c.features.auto_messages.enabled = false;
+    }
+
+    c.features.auto_messages.welcome ??= {
+      enabled: false,
+      text: buildAutoWelcomeTemplate(),
+      start: '08:00',
+      end: '18:00'
+    };
+
+    c.features.auto_messages.off_hours ??= {
+      enabled: false,
+      text: 'Atendemos de 08:00 às 18:00. Deixe sua mensagem e responderemos no próximo expediente.',
+      start: '18:00',
+      end: '08:00'
+    };
+
+    c.features.auto_messages_filas ??= {
+      enabled: false,
+      welcome: {
+        enabled: false,
+        text: '',
+        start: '08:00',
+        end: '18:00'
+      },
+      items: {}
+    };
+
+    c.features.auto_messages_filas.welcome ??= {
+      enabled: false,
+      text: '',
+      start: '08:00',
+      end: '18:00'
+    };
+
+    if (!c.features.auto_messages_filas.items || typeof c.features.auto_messages_filas.items !== 'object' || Array.isArray(c.features.auto_messages_filas.items)) {
+      c.features.auto_messages_filas.items = {};
+    }
+
+    c.timezone = (c.timezone || '').trim() || FALLBACK_TZ;
+  }
+
+  function filaFeature() {
+    ensureMasters(cfg);
+    return cfg.features.auto_messages_filas;
+  }
+
+  function ensureFilaItems() {
+    const f = filaFeature();
+
+    if (!f.items || typeof f.items !== 'object' || Array.isArray(f.items)) {
+      f.items = {};
+    }
+
+    return f.items;
   }
 
   function insertAtCaret(ta, text) {
     if (!ta) return;
+
     const s = ta.selectionStart ?? ta.value.length;
     const e = ta.selectionEnd ?? ta.value.length;
+
     ta.value = ta.value.slice(0, s) + text + ta.value.slice(e);
+
     const pos = s + text.length;
     ta.focus();
-    try { ta.setSelectionRange(pos, pos); } catch {}
+
+    try {
+      ta.setSelectionRange(pos, pos);
+    } catch {}
+
     if (ta === msgWelcome && wcCount) wcCount.textContent = `${ta.value.length} caracteres`;
     if (ta === msgDeptWelcome && dwCount) dwCount.textContent = `${ta.value.length} caracteres`;
+
     if (ta === msgWelcome) renderWelcomePreview();
-    if (ta === msgDeptWelcome) renderDeptPreview();
+    if (ta === msgDeptWelcome) renderFilaPreview();
   }
 
   function timeValid(v) {
@@ -412,64 +536,74 @@ Como podemos te ajudar hoje?`
   const DAY = 24 * 60;
   const pad2 = n => String(n).padStart(2, '0');
   const m2hhmm = m => `${pad2(Math.floor(m / 60) % 24)}:${pad2(m % 60)}`;
-  const hhmmToMin = s => {
+
+  function hhmmToMin(s) {
     if (!timeValid(s)) return NaN;
     const [h, m] = s.split(':').map(Number);
     return (h * 60 + m) % DAY;
-  };
-  const segs = (a, b) => a === b ? [] : (a < b ? [[a, b]] : [[a, DAY], [0, b]]);
-  const overlap = (a1, a2, b1, b2) => {
+  }
+
+  function segs(a, b) {
+    return a === b ? [] : (a < b ? [[a, b]] : [[a, DAY], [0, b]]);
+  }
+
+  function overlap(a1, a2, b1, b2) {
     for (const [x, y] of segs(a1, a2)) {
       for (const [u, v] of segs(b1, b2)) {
-        if (Math.min(y, v) > Math.max(x, u)) return [Math.max(x, u), Math.min(y, v)];
+        if (Math.min(y, v) > Math.max(x, u)) {
+          return [Math.max(x, u), Math.min(y, v)];
+        }
       }
     }
-    return null;
-  };
-  const isComplement = (wS, wE, oS, oE) => oS === wE && oE === wS;
 
-  function getSelectedDepartments() {
+    return null;
+  }
+
+  function isComplement(wS, wE, oS, oE) {
+    return oS === wE && oE === wS;
+  }
+
+  function getSelectedFilas() {
     if (!cfg) return [];
-    const items = ensureDeptItems();
+
+    const items = ensureFilaItems();
+
     const selectedIds = new Set(
       Object.entries(items)
         .filter(([, it]) => !!it?.enabled)
         .map(([id]) => String(id))
     );
 
-    return (_deptCache || [])
-      .filter(d => selectedIds.has(String(d.id)))
-      .map(d => ({
-        id: String(d.id),
-        nome: cleanDeptLabel(d.nome)
+    return (_filaCache || [])
+      .filter(f => selectedIds.has(String(f.id)))
+      .map(f => ({
+        id: String(f.id),
+        nome: cleanLabel(f.nome),
+        departamento_id: f.departamento_id || null,
+        prioridade: f.prioridade || 'normal'
       }))
-      .filter(d => d.nome);
+      .filter(f => f.nome);
   }
 
-  function buildMenuDepartamentosText() {
-    const selected = getSelectedDepartments();
-    if (!selected.length) return '1 - Comercial';
-    return selected.map((d, i) => `${i + 1} - ${cleanDeptLabel(d.nome)}`).join('\n');
+  function buildMenuFilasText() {
+    const selected = getSelectedFilas();
+
+    if (!selected.length) {
+      return 'Nenhuma fila selecionada';
+    }
+
+    return selected
+      .map((f, i) => `${i + 1} - ${cleanLabel(f.nome)}`)
+      .join('\n');
   }
 
-  function buildDeptTriagemTemplate() {
-    return (
-`Olá! 👋
-Bem-vindo(a) à {empresa}.
-
-Para direcionar seu atendimento, escolha uma opção abaixo:
-
-{menu_departamentos}
-
-Digite apenas o número da opção desejada.`
-    );
-  }
-
-  function renderDeptTemplate(text) {
+  function renderFilaTemplate(text) {
     const empresa = _empresaNome || EMPRESA_NOME() || '[Empresa]';
-    const menu = buildMenuDepartamentosText();
+    const menu = buildMenuFilasText();
+
     return String(text || '')
       .replace(/\{empresa\}/gi, empresa)
+      .replace(/\{menu_filas\}/gi, menu)
       .replace(/\{menu_departamentos\}/gi, menu);
   }
 
@@ -480,24 +614,10 @@ Digite apenas o número da opção desejada.`
       out = out.replace(/\{empresa\}|\[empresa\]|\[Empresa\]/gi, _empresaNome);
     }
 
-    if (/\{setor\}|\[setor\]/i.test(out)) {
-      const lista = (Array.isArray(_deptCache) && _deptCache.length)
-        ? _deptCache.slice(0, 12).map((d, i) => `${i + 1} - ${cleanDeptLabel(d.nome)}`).join('\n')
-        : '1 - {setor}';
-
-      out = out.split('\n').map(
-        ln => (/(\{setor\}|\[setor\])/i.test(ln) ? lista : ln)
-      ).join('\n');
-    }
-
     return out;
   }
 
-  function buildDeptWelcomeExample() {
-    return buildDeptTriagemTemplate();
-  }
-
-  function attachDeptSuggestions(textarea) {
+  function attachFilaSuggestions(textarea) {
     const wrap = document.getElementById('deptChips');
     if (!wrap || !textarea) return;
 
@@ -505,9 +625,9 @@ Digite apenas o número da opção desejada.`
 
     const chips = [
       { label: '{empresa}', insert: '{empresa}' },
-      { label: '{menu_departamentos}', insert: '{menu_departamentos}' },
+      { label: '{menu_filas}', insert: '{menu_filas}' },
       { label: '👋 Saudação', insert: 'Olá! 👋\nBem-vindo(a) à {empresa}.\n\n' },
-      { label: '📋 Direcionar', insert: 'Para direcionar seu atendimento, escolha uma opção abaixo:\n\n{menu_departamentos}\n\n' },
+      { label: '📋 Direcionar', insert: 'Para direcionar seu atendimento, escolha uma opção abaixo:\n\n{menu_filas}\n\n' },
       { label: '🔢 Instrução final', insert: 'Digite apenas o número da opção desejada.' },
     ];
 
@@ -521,170 +641,194 @@ Digite apenas o número da opção desejada.`
     });
   }
 
-  function ensureDeptItems() {
-    cfg.features.auto_messages_departments ||= {
-      enabled: false,
-      welcome: { enabled: false, text: '', start: '08:00', end: '18:00' },
-      items: {}
-    };
-    let items = cfg.features.auto_messages_departments.items;
-    if (!items || typeof items !== 'object' || Array.isArray(items)) {
-      cfg.features.auto_messages_departments.items = {};
-      items = cfg.features.auto_messages_departments.items;
-    }
-    return items;
-  }
-
-  function seedDeptItemsDefault() {
+  function seedFilaItemsDefault() {
     if (!cfg) return;
-    if (!Array.isArray(_deptCache) || !_deptCache.length) return;
+    if (!Array.isArray(_filaCache) || !_filaCache.length) return;
 
-    const items = ensureDeptItems();
+    const items = ensureFilaItems();
 
-    if (Object.keys(items).length === 0) {
-      _deptCache.forEach(d => {
-        const id = String(d.id);
-        const nome = cleanDeptLabel(d.nome);
-        items[id] = { enabled: true, label: nome };
-      });
-      return;
-    }
+    _filaCache.forEach(f => {
+      const id = String(f.id);
+      const nome = cleanLabel(f.nome);
 
-    _deptCache.forEach(d => {
-      const id = String(d.id);
-      const nome = cleanDeptLabel(d.nome);
       if (!items[id]) {
-        items[id] = { enabled: true, label: nome };
-      } else if (!String(items[id].label || '').trim()) {
-        items[id].label = nome;
+        items[id] = { enabled: false, label: nome };
+      } else {
+        items[id].enabled = !!items[id].enabled;
+        if (!String(items[id].label || '').trim()) {
+          items[id].label = nome;
+        }
       }
     });
   }
 
-  function countSelectedDeps() {
+  function countSelectedFilas() {
     if (!cfg) return 0;
-    const items = ensureDeptItems();
+    const items = ensureFilaItems();
+
     return Object.values(items).reduce((acc, it) => acc + (it?.enabled ? 1 : 0), 0);
   }
 
-  function setDeptPickerEnabled(enabled) {
+  function setFilaPickerEnabled(enabled) {
     if (deptSearch) deptSearch.disabled = !enabled;
     if (deptAll) deptAll.disabled = !enabled;
     if (deptNone) deptNone.disabled = !enabled;
 
     if (deptList) {
       deptList.classList.toggle('disabled', !enabled);
-      deptList.querySelectorAll('input[type="checkbox"]').forEach(ch => (ch.disabled = !enabled));
+      deptList.querySelectorAll('input[type="checkbox"]').forEach(ch => {
+        ch.disabled = !enabled;
+      });
     }
   }
 
-  function refreshDeptTemplateIfDefaultLike() {
+  function refreshFilaTemplateIfDefaultLike() {
     const current = (msgDeptWelcome?.value || '').trim();
+
     const isDefaultLike =
       !current ||
+      current.includes('{menu_filas}') ||
       current.includes('{menu_departamentos}') ||
       current.includes('Digite apenas o número da opção desejada.') ||
       current.includes('Você está falando com o setor');
 
     if (msgDeptWelcome && isDefaultLike) {
-      msgDeptWelcome.value = buildDeptTriagemTemplate();
+      msgDeptWelcome.value = buildFilaTriagemTemplate();
       if (dwCount) dwCount.textContent = `${msgDeptWelcome.value.length} caracteres`;
     }
   }
 
-  function renderDeptPreview() {
+  function renderFilaPreview() {
     if (!prevDept || !prevDeptText) return;
+
     const on = getSwitch(swDeptWelcome) && getSwitch(swDeptHdr);
     prevDept.style.display = on ? '' : 'none';
-    prevDeptText.textContent = renderDeptTemplate(msgDeptWelcome?.value || '');
+    prevDeptText.textContent = renderFilaTemplate(msgDeptWelcome?.value || '');
   }
 
-  function renderDeptPicker() {
+  function renderFilaPicker() {
     if (!deptList) return;
+
     if (!cfg) {
       deptList.innerHTML = '';
       return;
     }
 
-    const items = ensureDeptItems();
+    const items = ensureFilaItems();
     const q = String(deptSearch?.value || '').trim().toLowerCase();
+
     deptList.innerHTML = '';
 
-    if (!Array.isArray(_deptCache) || !_deptCache.length) {
+    if (!Array.isArray(_filaCache) || !_filaCache.length) {
       const empty = document.createElement('div');
       empty.className = 'dept-empty';
-      empty.textContent = 'Nenhum departamento encontrado. Cadastre/ative departamentos para usar o modo 2.';
+      empty.innerHTML = 'Nenhuma fila encontrada. Cadastre filas em <strong>Gestão de Filas</strong> para usar este modo.';
       deptList.appendChild(empty);
-      if (deptCount) deptCount.textContent = '0 selecionados';
-      setDeptPickerEnabled(false);
+
+      if (deptCount) deptCount.textContent = '0 selecionadas';
+
+      setFilaPickerEnabled(false);
       return;
     }
 
-    const list = _deptCache
-      .map(d => ({ id: String(d.id), nome: cleanDeptLabel(d.nome) }))
-      .filter(d => d.nome)
-      .filter(d => !q || d.nome.toLowerCase().includes(q));
+    const list = _filaCache
+      .map(f => ({
+        id: String(f.id),
+        nome: cleanLabel(f.nome),
+        prioridade: f.prioridade || 'normal',
+        departamento_nome: f.departamento_nome || ''
+      }))
+      .filter(f => f.nome)
+      .filter(f => !q || f.nome.toLowerCase().includes(q) || String(f.departamento_nome || '').toLowerCase().includes(q));
 
     if (!list.length) {
       const empty = document.createElement('div');
       empty.className = 'dept-empty';
       empty.textContent = 'Nada encontrado.';
       deptList.appendChild(empty);
-      if (deptCount) deptCount.textContent = `${countSelectedDeps()} selecionados`;
+
+      if (deptCount) deptCount.textContent = `${countSelectedFilas()} selecionadas`;
       return;
     }
 
     const enabledHdr = getSwitch(swDeptHdr);
 
-    list.forEach(d => {
-      if (!items[d.id]) items[d.id] = { enabled: true, label: d.nome };
+    list.forEach(f => {
+      if (!items[f.id]) {
+        items[f.id] = { enabled: false, label: f.nome };
+      }
 
       const row = document.createElement('label');
       row.className = 'dept-row';
 
       const chk = document.createElement('input');
       chk.type = 'checkbox';
-      chk.checked = !!items[d.id]?.enabled;
+      chk.checked = !!items[f.id]?.enabled;
       chk.disabled = !enabledHdr;
 
       chk.addEventListener('change', () => {
-        items[d.id] = {
-          ...(items[d.id] || {}),
+        items[f.id] = {
+          ...(items[f.id] || {}),
           enabled: !!chk.checked,
-          label: items[d.id]?.label || d.nome
+          label: items[f.id]?.label || f.nome
         };
-        if (deptCount) deptCount.textContent = `${countSelectedDeps()} selecionados`;
-        refreshDeptTemplateIfDefaultLike();
-        renderDeptPreview();
+
+        if (deptCount) deptCount.textContent = `${countSelectedFilas()} selecionadas`;
+
+        refreshFilaTemplateIfDefaultLike();
+        renderFilaPreview();
         updateSaveButtons();
         schedulePersist(250, { silent: false });
+        scheduleSummaryRefresh();
       });
+
+      const nameWrap = document.createElement('span');
+      nameWrap.style.display = 'flex';
+      nameWrap.style.flexDirection = 'column';
+      nameWrap.style.gap = '2px';
 
       const name = document.createElement('span');
       name.className = 'dept-name';
-      name.textContent = d.nome;
+      name.textContent = f.nome;
+
+      const meta = document.createElement('small');
+      meta.style.color = 'var(--muted)';
+      meta.style.fontSize = '.78rem';
+      meta.textContent = [
+        f.prioridade ? `Prioridade: ${f.prioridade}` : '',
+        f.departamento_nome ? `Departamento: ${f.departamento_nome}` : '',
+      ].filter(Boolean).join(' • ');
+
+      nameWrap.appendChild(name);
+      if (meta.textContent) nameWrap.appendChild(meta);
 
       row.appendChild(chk);
-      row.appendChild(name);
+      row.appendChild(nameWrap);
       deptList.appendChild(row);
     });
 
-    if (deptCount) deptCount.textContent = `${countSelectedDeps()} selecionados`;
-    setDeptPickerEnabled(enabledHdr);
+    if (deptCount) deptCount.textContent = `${countSelectedFilas()} selecionadas`;
+
+    setFilaPickerEnabled(enabledHdr);
   }
 
   function setAccordionOpen(head, body, open) {
     head?.setAttribute('aria-expanded', open ? 'true' : 'false');
-    body.style.height = open ? 'auto' : '0px';
-    body.style.opacity = open ? '1' : '0';
-    body.style.pointerEvents = open ? 'auto' : 'none';
-    body.setAttribute('aria-hidden', open ? 'false' : 'true');
+
+    if (body) {
+      body.style.height = open ? 'auto' : '0px';
+      body.style.opacity = open ? '1' : '0';
+      body.style.pointerEvents = open ? 'auto' : 'none';
+      body.setAttribute('aria-hidden', open ? 'false' : 'true');
+    }
+
     head?.closest('.item')?.classList.toggle('open', !!open);
   }
 
   function bindAccordion(head, body) {
     head?.addEventListener('click', (e) => {
       if (e.target.closest('.tswitch')) return;
+
       const open = head.getAttribute('aria-expanded') === 'true';
       setAccordionOpen(head, body, !open);
     });
@@ -694,19 +838,21 @@ Digite apenas o número da opção desejada.`
     const onA = getSwitch(swAutoHdr);
     const wOn = onA && getSwitch(swWelcome);
     const oOn = onA && getSwitch(swOff);
+
     schedWelcome?.classList.toggle('show', wOn);
     schedOff?.classList.toggle('show', oOn);
 
-    const onD = getSwitch(swDeptHdr);
-    const dOn = onD && getSwitch(swDeptWelcome);
-    schedDeptWelcomeEl?.classList.toggle('show', dOn);
+    const onF = getSwitch(swDeptHdr);
+    const fOn = onF && getSwitch(swDeptWelcome);
+
+    schedDeptWelcomeEl?.classList.toggle('show', fOn);
   }
 
   function updateModeNotices() {
     const autoOn = !!cfg?.features?.auto_messages?.enabled;
-    const deptOn = !!cfg?.features?.auto_messages_departments?.enabled;
+    const filaOn = !!cfg?.features?.auto_messages_filas?.enabled;
 
-    if (autoModeNotice) autoModeNotice.hidden = !deptOn;
+    if (autoModeNotice) autoModeNotice.hidden = !filaOn;
     if (deptModeNotice) deptModeNotice.hidden = !autoOn;
   }
 
@@ -726,57 +872,56 @@ Digite apenas o número da opção desejada.`
     updateScheduleVisibility();
   }
 
-  function setDeptChildrenEnabled(enabled) {
+  function setFilaChildrenEnabled(enabled) {
     swDeptWelcome?.classList.toggle('disabled', !enabled);
     if (swDeptWelcome?.querySelector('input')) swDeptWelcome.querySelector('input').disabled = !enabled;
     if (msgDeptWelcome) msgDeptWelcome.disabled = !enabled || !getSwitch(swDeptWelcome);
     if (dwStart) dwStart.disabled = !enabled;
     if (dwEnd) dwEnd.disabled = !enabled;
-    updateScheduleVisibility();
-    setDeptPickerEnabled(!!enabled);
-    renderDeptPreview();
-  }
 
-  function ensureMasters(c) {
-    c.features ??= {};
-    c.features.auto_messages ??= {};
-    if (typeof c.features.auto_messages.enabled !== 'boolean') c.features.auto_messages.enabled = false;
-    c.features.auto_messages_departments ??= {
-      enabled: false,
-      welcome: { enabled: false, text: '', start: '08:00', end: '18:00' },
-      items: {}
-    };
-    c.timezone = (c.timezone || '').trim() || FALLBACK_TZ;
+    updateScheduleVisibility();
+    setFilaPickerEnabled(!!enabled);
+    renderFilaPreview();
   }
 
   function syncSectionState() {
     if (!cfg?.features) return;
 
     cfg.features.auto_messages.enabled = !!getSwitch(swAutoHdr);
-    cfg.features.auto_messages_departments.enabled = !!getSwitch(swDeptHdr);
+
+    ensureMasters(cfg);
+
+    cfg.features.auto_messages_filas.enabled = !!getSwitch(swDeptHdr);
+
     (cfg.features.auto_messages.welcome ||= {}).enabled = !!getSwitch(swWelcome);
     (cfg.features.auto_messages.off_hours ||= {}).enabled = !!getSwitch(swOff);
-    (cfg.features.auto_messages_departments.welcome ||= {}).enabled = !!getSwitch(swDeptWelcome);
+    (cfg.features.auto_messages_filas.welcome ||= {}).enabled = !!getSwitch(swDeptWelcome);
 
     setAutoChildrenEnabled(!!cfg.features.auto_messages.enabled);
-    setDeptChildrenEnabled(!!cfg.features.auto_messages_departments.enabled);
+    setFilaChildrenEnabled(!!cfg.features.auto_messages_filas.enabled);
 
     renderWelcomePreview();
     renderOffPreview();
-    renderDeptPreview();
+    renderFilaPreview();
+    renderFilaPicker();
+
     updateSaveButtons();
     updateScheduleVisibility();
     updateModeNotices();
+    updateSummary();
+    updateSimulatorBadge();
   }
 
   function renderWelcomePreview() {
     const on = getSwitch(swWelcome) && getSwitch(swAutoHdr);
+
     if (prevW) prevW.style.display = on ? '' : 'none';
     if (prevWText) prevWText.textContent = (msgWelcome?.value || '—').trim() || '—';
   }
 
   function renderOffPreview() {
     const on = getSwitch(swOff) && getSwitch(swAutoHdr);
+
     if (prevO) prevO.style.display = on ? '' : 'none';
     if (prevO) prevO.textContent = (msgOff?.value || '—').trim() || '—';
   }
@@ -784,9 +929,12 @@ Digite apenas o número da opção desejada.`
   function syncCfgFromUI() {
     if (!cfg?.features) return;
 
+    ensureMasters(cfg);
+
     cfg.timezone = (cfg.timezone || '').trim() || FALLBACK_TZ;
 
     cfg.features.auto_messages.enabled = !!getSwitch(swAutoHdr);
+
     cfg.features.auto_messages.welcome = {
       ...(cfg.features.auto_messages.welcome || {}),
       enabled: !!(getSwitch(swAutoHdr) && getSwitch(swWelcome)),
@@ -794,6 +942,7 @@ Digite apenas o número da opção desejada.`
       start: (wStart?.value || '08:00'),
       end: (wEnd?.value || '18:00'),
     };
+
     cfg.features.auto_messages.off_hours = {
       ...(cfg.features.auto_messages.off_hours || {}),
       enabled: !!(getSwitch(swAutoHdr) && getSwitch(swOff)),
@@ -802,16 +951,17 @@ Digite apenas o número da opção desejada.`
       end: (oEnd?.value || '08:00'),
     };
 
-    cfg.features.auto_messages_departments.enabled = !!getSwitch(swDeptHdr);
-    cfg.features.auto_messages_departments.welcome = {
-      ...(cfg.features.auto_messages_departments.welcome || {}),
+    cfg.features.auto_messages_filas.enabled = !!getSwitch(swDeptHdr);
+
+    cfg.features.auto_messages_filas.welcome = {
+      ...(cfg.features.auto_messages_filas.welcome || {}),
       enabled: !!(getSwitch(swDeptHdr) && getSwitch(swDeptWelcome)),
       text: (msgDeptWelcome?.value || '').trim(),
       start: (dwStart?.value || '08:00'),
       end: (dwEnd?.value || '18:00'),
     };
 
-    ensureDeptItems();
+    ensureFilaItems();
   }
 
   async function persistUI({ silent = true } = {}) {
@@ -820,10 +970,10 @@ Digite apenas o número da opção desejada.`
     syncCfgFromUI();
 
     const autoOn = getSwitch(swAutoHdr);
-    const deptOn = getSwitch(swDeptHdr);
+    const filaOn = getSwitch(swDeptHdr);
 
     if (autoOn && !validateBeforeSave('auto')) return;
-    if (deptOn && !validateBeforeSave('dept')) return;
+    if (filaOn && !validateBeforeSave('fila')) return;
 
     __persisting = true;
     updateSaveButtons();
@@ -849,15 +999,16 @@ Digite apenas o número da opção desejada.`
 
   function getConfirmMessage(labelEl) {
     if (labelEl === swAutoHdr) return 'Tem certeza que deseja desligar as mensagens automáticas?';
-    if (labelEl === swDeptHdr) return 'Tem certeza que deseja desligar o menu de triagem por departamento?';
+    if (labelEl === swDeptHdr) return 'Tem certeza que deseja desligar o menu de filas?';
     if (labelEl === swWelcome) return 'Tem certeza que deseja desligar a mensagem de boas-vindas?';
     if (labelEl === swOff) return 'Tem certeza que deseja desligar a mensagem de fora do horário?';
-    if (labelEl === swDeptWelcome) return 'Tem certeza que deseja desligar a mensagem inicial da triagem?';
+    if (labelEl === swDeptWelcome) return 'Tem certeza que deseja desligar a mensagem inicial do menu de filas?';
     return 'Tem certeza que deseja desligar esta opção?';
   }
 
   function shouldConfirmOff(labelEl, wasOn, newVal) {
     if (!wasOn || newVal) return false;
+
     return (
       labelEl === swAutoHdr ||
       labelEl === swDeptHdr ||
@@ -869,6 +1020,7 @@ Digite apenas o número da opção desejada.`
 
   function bindSwitch(labelEl, pillEl, onToggle) {
     if (!labelEl) return;
+
     const input = labelEl.querySelector('input');
 
     labelEl.addEventListener('click', async (e) => {
@@ -886,38 +1038,43 @@ Digite apenas o número da opção desejada.`
           cancelText: 'Cancelar',
           kind: 'warn'
         });
+
         if (!ok) return;
       }
 
       if (labelEl === swAutoHdr && newVal && getSwitch(swDeptHdr)) {
         const ok = await confirmAction({
           title: 'Ativar mensagens automáticas?',
-          message: 'O menu de triagem por departamento será desligado, porque os dois modos não podem ficar ativos ao mesmo tempo.',
-          confirmText: 'Ativar e desligar triagem',
+          message: 'O menu de filas será desligado, porque os dois modos não podem ficar ativos ao mesmo tempo.',
+          confirmText: 'Ativar e desligar menu de filas',
           cancelText: 'Cancelar',
           kind: 'warn'
         });
+
         if (!ok) return;
 
         setHeaderSwitch(swDeptHdr, pillDeptHdr, false);
         setSwitch(swDeptWelcome, false, pillDeptWelcome);
-        cfg.features.auto_messages_departments.enabled = false;
-        (cfg.features.auto_messages_departments.welcome ||= {}).enabled = false;
+
+        cfg.features.auto_messages_filas.enabled = false;
+        (cfg.features.auto_messages_filas.welcome ||= {}).enabled = false;
       }
 
       if (labelEl === swDeptHdr && newVal && getSwitch(swAutoHdr)) {
         const ok = await confirmAction({
-          title: 'Ativar triagem por departamento?',
+          title: 'Ativar menu de filas?',
           message: 'As mensagens automáticas serão desligadas, porque os dois modos não podem ficar ativos ao mesmo tempo.',
-          confirmText: 'Ativar triagem e desligar automático',
+          confirmText: 'Ativar filas e desligar automático',
           cancelText: 'Cancelar',
           kind: 'warn'
         });
+
         if (!ok) return;
 
         setHeaderSwitch(swAutoHdr, pillAutoHdr, false);
         setSwitch(swWelcome, false, pillWelcome);
         setSwitch(swOff, false, pillOff);
+
         cfg.features.auto_messages.enabled = false;
         (cfg.features.auto_messages.welcome ||= {}).enabled = false;
         (cfg.features.auto_messages.off_hours ||= {}).enabled = false;
@@ -926,7 +1083,7 @@ Digite apenas o número da opção desejada.`
       if (labelEl === swWelcome && newVal && getSwitch(swDeptHdr)) {
         notify({
           title: 'Modo incompatível',
-          message: 'Desligue primeiro o menu de triagem por departamento para ativar a mensagem de boas-vindas.',
+          message: 'Desligue primeiro o menu de filas para ativar a mensagem de boas-vindas.',
           kind: 'warn'
         });
         return;
@@ -935,7 +1092,7 @@ Digite apenas o número da opção desejada.`
       if (labelEl === swOff && newVal && getSwitch(swDeptHdr)) {
         notify({
           title: 'Modo incompatível',
-          message: 'Desligue primeiro o menu de triagem por departamento para ativar a mensagem de fora do horário.',
+          message: 'Desligue primeiro o menu de filas para ativar a mensagem de fora do horário.',
           kind: 'warn'
         });
         return;
@@ -944,7 +1101,7 @@ Digite apenas o número da opção desejada.`
       if (labelEl === swDeptWelcome && newVal && getSwitch(swAutoHdr)) {
         notify({
           title: 'Modo incompatível',
-          message: 'Desligue primeiro as mensagens automáticas para ativar a triagem por departamento.',
+          message: 'Desligue primeiro as mensagens automáticas para ativar o menu de filas.',
           kind: 'warn'
         });
         return;
@@ -955,25 +1112,32 @@ Digite apenas o número da opção desejada.`
 
       if (!cfg?.features) return;
 
+      ensureMasters(cfg);
+
       if (labelEl === swAutoHdr) {
         cfg.features.auto_messages.enabled = newVal;
+
         if (!newVal) {
           setSwitch(swWelcome, false, pillWelcome);
           setSwitch(swOff, false, pillOff);
+
           (cfg.features.auto_messages.welcome ||= {}).enabled = false;
           (cfg.features.auto_messages.off_hours ||= {}).enabled = false;
         }
+
         syncSectionState();
         schedulePersist(200, { silent: false });
         return;
       }
 
       if (labelEl === swDeptHdr) {
-        cfg.features.auto_messages_departments.enabled = newVal;
+        cfg.features.auto_messages_filas.enabled = newVal;
+
         if (!newVal) {
           setSwitch(swDeptWelcome, false, pillDeptWelcome);
-          (cfg.features.auto_messages_departments.welcome ||= {}).enabled = false;
+          (cfg.features.auto_messages_filas.welcome ||= {}).enabled = false;
         }
+
         syncSectionState();
         schedulePersist(200, { silent: false });
         return;
@@ -984,7 +1148,9 @@ Digite apenas o número da opção desejada.`
           setHeaderSwitch(swAutoHdr, pillAutoHdr, true);
           cfg.features.auto_messages.enabled = true;
         }
+
         (cfg.features.auto_messages.welcome ||= {}).enabled = newVal;
+
         syncSectionState();
         schedulePersist(200, { silent: false });
         return;
@@ -995,7 +1161,9 @@ Digite apenas o número da opção desejada.`
           setHeaderSwitch(swAutoHdr, pillAutoHdr, true);
           cfg.features.auto_messages.enabled = true;
         }
+
         (cfg.features.auto_messages.off_hours ||= {}).enabled = newVal;
+
         syncSectionState();
         schedulePersist(200, { silent: false });
         return;
@@ -1004,9 +1172,11 @@ Digite apenas o número da opção desejada.`
       if (labelEl === swDeptWelcome) {
         if (newVal && !getSwitch(swDeptHdr)) {
           setHeaderSwitch(swDeptHdr, pillDeptHdr, true);
-          cfg.features.auto_messages_departments.enabled = true;
+          cfg.features.auto_messages_filas.enabled = true;
         }
-        (cfg.features.auto_messages_departments.welcome ||= {}).enabled = newVal;
+
+        (cfg.features.auto_messages_filas.welcome ||= {}).enabled = newVal;
+
         syncSectionState();
         schedulePersist(200, { silent: false });
       }
@@ -1024,7 +1194,13 @@ Digite apenas o número da opção desejada.`
     url.searchParams.set('instancia_id', requireActiveInstKey());
 
     const r = await authFetch(url.toString());
-    if (!r.ok) throw new Error(`GET config ${r.status}`);
+
+    if (!r.ok) {
+      let detail = '';
+      try { detail = await r.text(); } catch {}
+      throw new Error(`GET config ${r.status}: ${detail}`);
+    }
+
     const data = await r.json();
 
     if (data?.empresa_nome) {
@@ -1032,13 +1208,42 @@ Digite apenas o número da opção desejada.`
       try { LS.setItem('empresa_nome', _empresaNome); } catch {}
     }
 
-    if (Array.isArray(data?.departamentos)) {
-      _deptCache = data.departamentos.map(d => ({ id: d.id, nome: d.nome })).filter(Boolean);
-    }
-
     const merged = deepMerge(structuredClone(LOCAL_DEFAULTS), data?.config || {});
     merged.timezone = (merged.timezone || '').trim() || FALLBACK_TZ;
+
+    ensureMasters(merged);
+
     return merged;
+  }
+
+  async function loadFilasPublicas() {
+    const empresaId = EMPRESA_ID();
+    const instId = requireActiveInstKey();
+
+    if (!empresaId || !instId) {
+      _filaCache = [];
+      return [];
+    }
+
+    const url = new URL('/api/filas/publicas', location.origin);
+    url.searchParams.set('empresa_id', String(empresaId));
+    url.searchParams.set('instancia_id', String(instId));
+
+    const r = await authFetch(url.toString());
+
+    if (!r.ok) {
+      let detail = '';
+      try { detail = await r.text(); } catch {}
+
+      console.warn('[chatbot] erro ao carregar filas públicas', r.status, detail);
+      _filaCache = [];
+      return [];
+    }
+
+    const data = await r.json();
+    _filaCache = Array.isArray(data?.items) ? data.items : [];
+
+    return _filaCache;
   }
 
   async function putConfig(data) {
@@ -1055,6 +1260,7 @@ Digite apenas o número da opção desejada.`
     });
 
     let detail = '';
+
     try {
       const body = await r.clone().json();
       detail = body?.detail ? (typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)) : '';
@@ -1087,6 +1293,7 @@ Digite apenas o número da opção desejada.`
           details: detail,
           actions: [btn]
         });
+
         throw new Error('missing_timezone');
       }
 
@@ -1100,20 +1307,43 @@ Digite apenas o número da opção desejada.`
 
   function validateBeforeSave(kind = 'auto') {
     [wStart, wEnd, oStart, oEnd, dwStart, dwEnd, msgWelcome, msgOff, msgDeptWelcome].forEach(x => markInvalid(x, false));
+
     const errors = [];
     const fixes = [];
 
     if (kind === 'auto' && getSwitch(swAutoHdr)) {
       if (getSwitch(swWelcome)) {
-        if (!msgWelcome?.value?.trim()) { errors.push('Mensagem de boas-vindas não pode ficar vazia.'); markInvalid(msgWelcome, true); }
-        if (wStart && !timeValid(wStart.value)) { errors.push('Horário inicial da Boas-vindas inválido.'); markInvalid(wStart, true); }
-        if (wEnd && !timeValid(wEnd.value)) { errors.push('Horário final da Boas-vindas inválido.'); markInvalid(wEnd, true); }
+        if (!msgWelcome?.value?.trim()) {
+          errors.push('Mensagem de boas-vindas não pode ficar vazia.');
+          markInvalid(msgWelcome, true);
+        }
+
+        if (wStart && !timeValid(wStart.value)) {
+          errors.push('Horário inicial da Boas-vindas inválido.');
+          markInvalid(wStart, true);
+        }
+
+        if (wEnd && !timeValid(wEnd.value)) {
+          errors.push('Horário final da Boas-vindas inválido.');
+          markInvalid(wEnd, true);
+        }
       }
 
       if (getSwitch(swOff)) {
-        if (!msgOff?.value?.trim()) { errors.push('Mensagem de fora do horário não pode ficar vazia.'); markInvalid(msgOff, true); }
-        if (oStart && !timeValid(oStart.value)) { errors.push('Horário inicial de Fora do horário inválido.'); markInvalid(oStart, true); }
-        if (oEnd && !timeValid(oEnd.value)) { errors.push('Horário final de Fora do horário inválido.'); markInvalid(oEnd, true); }
+        if (!msgOff?.value?.trim()) {
+          errors.push('Mensagem de fora do horário não pode ficar vazia.');
+          markInvalid(msgOff, true);
+        }
+
+        if (oStart && !timeValid(oStart.value)) {
+          errors.push('Horário inicial de Fora do horário inválido.');
+          markInvalid(oStart, true);
+        }
+
+        if (oEnd && !timeValid(oEnd.value)) {
+          errors.push('Horário final de Fora do horário inválido.');
+          markInvalid(oEnd, true);
+        }
       }
 
       if (!getSwitch(swWelcome) && !getSwitch(swOff)) {
@@ -1125,12 +1355,15 @@ Digite apenas o número da opção desejada.`
         && timeValid(oStart?.value || '') && timeValid(oEnd?.value || '');
 
       if (both) {
-        const ws = hhmmToMin(wStart.value), we = hhmmToMin(wEnd.value);
-        const os = hhmmToMin(oStart.value), oe = hhmmToMin(oEnd.value);
+        const ws = hhmmToMin(wStart.value);
+        const we = hhmmToMin(wEnd.value);
+        const os = hhmmToMin(oStart.value);
+        const oe = hhmmToMin(oEnd.value);
         const ov = overlap(ws, we, os, oe);
 
         if (ov) {
           const [s, e] = ov;
+
           errors.push(`Os horários se sobrepõem entre ${m2hhmm(s)} e ${m2hhmm(e)}.`);
           markInvalid(oStart, true);
           markInvalid(wEnd, true);
@@ -1139,42 +1372,59 @@ Digite apenas o número da opção desejada.`
           fix.type = 'button';
           fix.textContent = `Ajustar “Fora do horário → Início” para ${wEnd.value}`;
           fix.style.cssText = 'padding:8px 12px;border-radius:10px;background:#10b981;color:#111827;border:0;font-weight:700;cursor:pointer';
+
           fix.addEventListener('click', () => {
             oStart.value = wEnd.value;
             markInvalid(oStart, false);
             markInvalid(wEnd, false);
             toast('Corrigido: sem sobreposição.');
           });
+
           fixes.push(fix);
         } else if (!isComplement(ws, we, os, oe)) {
           const fix = document.createElement('button');
           fix.type = 'button';
           fix.textContent = 'Complementar automaticamente';
           fix.style.cssText = 'padding:8px 12px;border-radius:10px;background:#60a5fa;color:#111827;border:0;font-weight:700;cursor:pointer';
+
           fix.addEventListener('click', () => {
             oStart.value = wEnd.value;
             oEnd.value = wStart.value;
             toast('Faixa de “Fora do horário” complementada.');
           });
+
           errors.push('Os intervalos não são complementares (pode sobrar horário sem mensagem).');
           fixes.push(fix);
         }
       }
     }
 
-    if (kind === 'dept' && getSwitch(swDeptHdr)) {
+    if (kind === 'fila' && getSwitch(swDeptHdr)) {
       if (getSwitch(swDeptWelcome)) {
-        if (!msgDeptWelcome?.value?.trim()) { errors.push('Mensagem da triagem não pode ficar vazia.'); markInvalid(msgDeptWelcome, true); }
-        if (dwStart && !timeValid(dwStart.value)) { errors.push('Horário inicial (departamentos) inválido.'); markInvalid(dwStart, true); }
-        if (dwEnd && !timeValid(dwEnd.value)) { errors.push('Horário final (departamentos) inválido.'); markInvalid(dwEnd, true); }
+        if (!msgDeptWelcome?.value?.trim()) {
+          errors.push('Mensagem do menu de filas não pode ficar vazia.');
+          markInvalid(msgDeptWelcome, true);
+        }
+
+        if (dwStart && !timeValid(dwStart.value)) {
+          errors.push('Horário inicial do menu de filas inválido.');
+          markInvalid(dwStart, true);
+        }
+
+        if (dwEnd && !timeValid(dwEnd.value)) {
+          errors.push('Horário final do menu de filas inválido.');
+          markInvalid(dwEnd, true);
+        }
       } else {
-        errors.push('Ative a mensagem de triagem para salvar este bloco.');
+        errors.push('Ative a mensagem inicial do menu de filas para salvar este bloco.');
       }
 
-      if (Array.isArray(_deptCache) && _deptCache.length) {
-        if (countSelectedDeps() <= 0) {
-          errors.push('Selecione ao menos 1 departamento para a triagem.');
+      if (Array.isArray(_filaCache) && _filaCache.length) {
+        if (countSelectedFilas() <= 0) {
+          errors.push('Selecione ao menos 1 fila para o menu do cliente.');
         }
+      } else {
+        errors.push('Nenhuma fila ativa encontrada. Cadastre uma fila em Gestão de Filas primeiro.');
       }
     }
 
@@ -1193,6 +1443,7 @@ Digite apenas o número da opção desejada.`
     msgWelcome.value = expandTemplate(msgWelcome.value);
 
     const v = (msgWelcome.value || '').trim();
+
     const precisaTrocar = (
       !v ||
       /\{empresa\}|\[Empresa\]/i.test(v) ||
@@ -1205,35 +1456,44 @@ Digite apenas o número da opção desejada.`
     }
 
     if (wcCount) wcCount.textContent = `${msgWelcome.value.length} caracteres`;
+
     renderWelcomePreview();
   }
 
-  function maybeFillDeptWelcome() {
+  function maybeFillFilaWelcome() {
     if (!msgDeptWelcome) return;
 
-    const v = (msgDeptWelcome.value || '').trim();
+    let v = (msgDeptWelcome.value || '').trim();
+
     if (
       !v ||
       /\{empresa\}/i.test(v) ||
+      /\{menu_filas\}/i.test(v) ||
       /\{menu_departamentos\}/i.test(v) ||
       v.includes('Você está falando com o setor')
     ) {
-      msgDeptWelcome.value = buildDeptTriagemTemplate();
+      msgDeptWelcome.value = buildFilaTriagemTemplate();
+    } else {
+      msgDeptWelcome.value = msgDeptWelcome.value.replace(/\{menu_departamentos\}/gi, '{menu_filas}');
     }
 
     if (dwCount) dwCount.textContent = `${msgDeptWelcome.value.length} caracteres`;
-    renderDeptPreview();
+
+    renderFilaPreview();
   }
 
   async function loadAll() {
     cfg = await getConfig();
     ensureMasters(cfg);
 
-    seedDeptItemsDefault();
+    await loadFilasPublicas();
+
+    seedFilaItemsDefault();
+
     _lastLoadedSnapshot = JSON.stringify(cfg);
 
     setHeaderSwitch(swAutoHdr, pillAutoHdr, !!cfg.features.auto_messages.enabled);
-    setHeaderSwitch(swDeptHdr, pillDeptHdr, !!cfg.features.auto_messages_departments.enabled);
+    setHeaderSwitch(swDeptHdr, pillDeptHdr, !!cfg.features.auto_messages_filas.enabled);
 
     const w = cfg.features.auto_messages.welcome || {};
     setSwitch(swWelcome, !!w.enabled, pillWelcome);
@@ -1250,19 +1510,21 @@ Digite apenas o número da opção desejada.`
     if (oEnd) oEnd.value = o.end ?? '08:00';
     if (offCount) offCount.textContent = `${(msgOff?.value || '').length} caracteres`;
 
-    const dw = cfg.features.auto_messages_departments.welcome || {};
-    setSwitch(swDeptWelcome, !!dw.enabled, pillDeptWelcome);
+    const fw = cfg.features.auto_messages_filas.welcome || {};
+    setSwitch(swDeptWelcome, !!fw.enabled, pillDeptWelcome);
+
     if (msgDeptWelcome) {
-      msgDeptWelcome.value = (dw.text ?? '').trim() || buildDeptWelcomeExample();
+      msgDeptWelcome.value = (fw.text ?? '').trim() || buildFilaTriagemTemplate();
       if (dwCount) dwCount.textContent = `${msgDeptWelcome.value.length} caracteres`;
     }
-    maybeFillDeptWelcome();
 
-    if (dwStart) dwStart.value = dw.start ?? '08:00';
-    if (dwEnd) dwEnd.value = dw.end ?? '18:00';
+    maybeFillFilaWelcome();
 
-    attachDeptSuggestions(msgDeptWelcome);
-    renderDeptPicker();
+    if (dwStart) dwStart.value = fw.start ?? '08:00';
+    if (dwEnd) dwEnd.value = fw.end ?? '18:00';
+
+    attachFilaSuggestions(msgDeptWelcome);
+    renderFilaPicker();
     syncSectionState();
   }
 
@@ -1270,7 +1532,7 @@ Digite apenas o número da opção desejada.`
     await persistUI({ silent: false });
   }
 
-  async function saveDeptBlock() {
+  async function saveFilaBlock() {
     await persistUI({ silent: false });
   }
 
@@ -1282,7 +1544,7 @@ Digite apenas o número da opção desejada.`
       ensureMasters(cfg);
 
       setHeaderSwitch(swAutoHdr, pillAutoHdr, !!cfg.features.auto_messages.enabled);
-      setHeaderSwitch(swDeptHdr, pillDeptHdr, !!cfg.features.auto_messages_departments.enabled);
+      setHeaderSwitch(swDeptHdr, pillDeptHdr, !!cfg.features.auto_messages_filas.enabled);
 
       const w = cfg.features.auto_messages.welcome || {};
       setSwitch(swWelcome, !!w.enabled, pillWelcome);
@@ -1299,26 +1561,31 @@ Digite apenas o número da opção desejada.`
       if (oEnd) oEnd.value = o.end ?? '08:00';
       if (offCount) offCount.textContent = `${(msgOff?.value || '').length} caracteres`;
 
-      const dw = cfg.features.auto_messages_departments.welcome || {};
-      setSwitch(swDeptWelcome, !!dw.enabled, pillDeptWelcome);
+      const fw = cfg.features.auto_messages_filas.welcome || {};
+      setSwitch(swDeptWelcome, !!fw.enabled, pillDeptWelcome);
+
       if (msgDeptWelcome) {
-        msgDeptWelcome.value = (dw.text ?? '').trim() || buildDeptWelcomeExample();
+        msgDeptWelcome.value = (fw.text ?? '').trim() || buildFilaTriagemTemplate();
         if (dwCount) dwCount.textContent = `${msgDeptWelcome.value.length} caracteres`;
       }
-      maybeFillDeptWelcome();
 
-      if (dwStart) dwStart.value = dw.start ?? '08:00';
-      if (dwEnd) dwEnd.value = dw.end ?? '18:00';
+      maybeFillFilaWelcome();
 
-      renderDeptPicker();
+      if (dwStart) dwStart.value = fw.start ?? '08:00';
+      if (dwEnd) dwEnd.value = fw.end ?? '18:00';
+
+      renderFilaPicker();
       syncSectionState();
+
       if (showToast) toast('Alterações descartadas.', 'warn');
     } catch {}
   }
 
   async function initInstDropdown() {
     if (!instBtn || !instMenu || !instList) return;
+
     if (!window.CSS) window.CSS = {};
+
     if (typeof CSS.escape !== 'function') {
       CSS.escape = (v) => String(v ?? '').replace(/["\\]/g, '\\$&').replace(/\s/g, '\\ ');
     }
@@ -1326,7 +1593,9 @@ Digite apenas o número da opção desejada.`
     function openMenu() {
       instMenu.setAttribute('aria-hidden', 'false');
       instBtn.setAttribute('aria-expanded', 'true');
+
       (instList.querySelector('.inst-item[aria-selected="true"]') || instList.querySelector('.inst-item'))?.focus();
+
       document.addEventListener('mousedown', onDocClick);
       document.addEventListener('keydown', onKey);
     }
@@ -1334,6 +1603,7 @@ Digite apenas o número da opção desejada.`
     function closeMenu() {
       instMenu.setAttribute('aria-hidden', 'true');
       instBtn.setAttribute('aria-expanded', 'false');
+
       document.removeEventListener('mousedown', onDocClick);
       document.removeEventListener('keydown', onKey);
     }
@@ -1352,18 +1622,35 @@ Digite apenas o número da opção desejada.`
         closeMenu();
         instBtn.focus();
       }
+
       if (instMenu.getAttribute('aria-hidden') === 'true') return;
 
       const items = Array.from(instList.querySelectorAll('.inst-item'));
       const i = items.indexOf(document.activeElement);
 
-      if (e.key === 'ArrowDown') { e.preventDefault(); (items[i + 1] || items[0])?.focus(); }
-      if (e.key === 'ArrowUp') { e.preventDefault(); (items[i - 1] || items[items.length - 1])?.focus(); }
-      if (e.key === 'Home') { e.preventDefault(); items[0]?.focus(); }
-      if (e.key === 'End') { e.preventDefault(); items[items.length - 1]?.focus(); }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        (items[i + 1] || items[0])?.focus();
+      }
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        (items[i - 1] || items[items.length - 1])?.focus();
+      }
+
+      if (e.key === 'Home') {
+        e.preventDefault();
+        items[0]?.focus();
+      }
+
+      if (e.key === 'End') {
+        e.preventDefault();
+        items[items.length - 1]?.focus();
+      }
 
       if (e.key === 'Enter' || e.key === ' ') {
         const a = document.activeElement;
+
         if (a && a.classList.contains('inst-item')) {
           e.preventDefault();
           selectValue(a.dataset.value, a.dataset.label);
@@ -1380,6 +1667,7 @@ Digite apenas o número da opção desejada.`
     function itemTpl(text, value, selected) {
       const li = document.createElement('li');
       const b = document.createElement('button');
+
       b.type = 'button';
       b.className = 'inst-item';
       b.setAttribute('role', 'option');
@@ -1388,7 +1676,9 @@ Digite apenas o número da opção desejada.`
       b.dataset.value = String(value ?? '');
       b.dataset.label = text;
       b.innerHTML = `<span class="radio" aria-hidden="true"></span><span>${text}</span>`;
+
       b.addEventListener('click', () => selectValue(String(value ?? ''), text));
+
       li.appendChild(b);
       return li;
     }
@@ -1397,19 +1687,26 @@ Digite apenas o número da opção desejada.`
       instList.querySelectorAll('.inst-item').forEach(b => {
         b.setAttribute('aria-selected', b.dataset.value === String(value) ? 'true' : 'false');
       });
+
       const active = instList.querySelector(`.inst-item[data-value="${CSS.escape(String(value || ''))}"]`);
+
       if (active) {
         instMenu.setAttribute('aria-activedescendant', active.id || (active.id = 'inst-opt-chat-' + String(value || 'x')));
       }
-      if (instLabel) instLabel.textContent = text || (value ? `Instância ${value}` : 'Selecione uma instância');
+
+      if (instLabel) {
+        instLabel.textContent = text || (value ? `Instância ${value}` : 'Selecione uma instância');
+      }
     }
 
     function selectValue(value, text) {
       window.__INST_ID = value ? normalizeInstValue(value) : '';
+
       setActiveUI(value, text);
 
       if (window.__INST_ID) {
         lockUI(false);
+
         loadAll().catch(e => {
           const { title, message, details } = friendlyHttpError(0, String(e?.message || e));
           notify({ title, message, details });
@@ -1424,18 +1721,21 @@ Digite apenas o número da opção desejada.`
 
     async function loadList() {
       instList.innerHTML = '';
+
       let items = [];
 
       if (empresaId) {
         try {
           const r = await authFetch(`/api/empresas/${empresaId}/whatsapp`);
           if (!r.ok) throw 0;
+
           const j = await r.json();
           items = Array.isArray(j.instancias) ? j.instancias : [];
         } catch {
           try {
             const r2 = await authFetch(`/api/instancias/list?empresa_id=${empresaId}`);
             if (!r2.ok) throw 0;
+
             const j2 = await r2.json();
             items = Array.isArray(j2) ? j2 : (Array.isArray(j2?.instancias) ? j2.instancias : []);
           } catch {
@@ -1454,12 +1754,14 @@ Digite apenas o número da opção desejada.`
         const firstConnected = items.find(x => !!(x.connected || x.conectada || x.status === 'CONNECTED'));
         const firstAny = items[0];
         const chosen = firstConnected || firstAny;
+
         window.__INST_ID = chosen ? normalizeInstValue(instValue(chosen)) : '';
       }
 
       if (window.__INST_ID) {
         const sel = instList.querySelector(`.inst-item[data-value="${CSS.escape(String(window.__INST_ID))}"]`);
         const text = sel?.dataset?.label || `Instância ${window.__INST_ID}`;
+
         setActiveUI(sel?.dataset?.value ?? String(window.__INST_ID), text);
         lockUI(false);
       } else {
@@ -1471,10 +1773,340 @@ Digite apenas o número da opção desejada.`
     await loadList();
   }
 
+  function activeMode() {
+    if (getSwitch(swDeptHdr) && getSwitch(swDeptWelcome)) return 'fila';
+    if (getSwitch(swAutoHdr) && (getSwitch(swWelcome) || getSwitch(swOff))) return 'auto';
+    return 'none';
+  }
+
+  function updateSummary() {
+    const inst = String(instLabel?.textContent || '').trim() || '—';
+    const mode = activeMode();
+    const filas = getSelectedFilas();
+
+    let modeLabel = 'Nenhum ativo';
+    let behavior = 'Nada configurado';
+    let badge = 'Modo: nenhum';
+
+    if (mode === 'auto') {
+      modeLabel = 'Resposta automática simples';
+      badge = 'Modo: simples';
+
+      if (getSwitch(swWelcome) && getSwitch(swOff)) {
+        behavior = 'Envia boas-vindas e também mensagem fora do horário';
+      } else if (getSwitch(swWelcome)) {
+        behavior = 'Envia mensagem de boas-vindas';
+      } else if (getSwitch(swOff)) {
+        behavior = 'Envia mensagem de fora do horário';
+      }
+    } else if (mode === 'fila') {
+      modeLabel = 'Menu para escolher fila';
+      badge = 'Modo: filas';
+      behavior = `Mostra menu com ${filas.length || 0} fila(s)`;
+    }
+
+    const instVal = document.getElementById('sumInstValue');
+    const instChip = document.getElementById('sumInstLabel');
+    const modeVal = document.getElementById('sumModeValue');
+    const modeChip = document.getElementById('sumModeBadge');
+    const behaviorVal = document.getElementById('sumBehaviorValue');
+    const filaVal = document.getElementById('sumDeptValue');
+
+    if (instVal) instVal.textContent = inst;
+    if (instChip) instChip.textContent = `Instância: ${inst}`;
+    if (modeVal) modeVal.textContent = modeLabel;
+    if (modeChip) modeChip.textContent = badge;
+    if (behaviorVal) behaviorVal.textContent = behavior;
+    if (filaVal) filaVal.textContent = String(filas.length);
+  }
+
+  let _sumRaf = null;
+
+  function scheduleSummaryRefresh() {
+    if (_sumRaf) cancelAnimationFrame(_sumRaf);
+
+    _sumRaf = requestAnimationFrame(() => {
+      updateSummary();
+      updateSimulatorBadge();
+      _sumRaf = null;
+    });
+  }
+
+  function renderWelcomeMessage() {
+    const raw = String(msgWelcome?.value || '').trim() || buildAutoWelcomeTemplate();
+
+    return raw.replace(/\{empresa\}/gi, _empresaNome || EMPRESA_NOME() || '[Empresa]');
+  }
+
+  function renderOffMessage() {
+    const raw = String(msgOff?.value || '').trim() || 'Atendemos de 08:00 às 18:00. Deixe sua mensagem e responderemos no próximo expediente.';
+
+    return raw.replace(/\{empresa\}/gi, _empresaNome || EMPRESA_NOME() || '[Empresa]');
+  }
+
+  function renderFilaMessage() {
+    const raw = String(msgDeptWelcome?.value || '').trim() || buildFilaTriagemTemplate();
+    return renderFilaTemplate(raw);
+  }
+
+  function parseChoice(text) {
+    const raw = String(text || '').trim();
+    const norm = raw.toLowerCase();
+
+    const filas = getSelectedFilas();
+
+    if (!filas.length) return null;
+
+    const num = norm.match(/^(\d{1,2})\b/);
+
+    if (num) {
+      const idx = Number(num[1]) - 1;
+      if (filas[idx]) return filas[idx];
+    }
+
+    const exact = filas.find(f => f.nome.toLowerCase() === norm);
+    if (exact) return exact;
+
+    const contains = filas.find(f => norm.includes(f.nome.toLowerCase()));
+    if (contains) return contains;
+
+    return null;
+  }
+
+  function updateSimulatorBadge() {
+    const el = document.getElementById('simModeBadge');
+    if (!el) return;
+
+    const mode = activeMode();
+
+    if (mode === 'auto') el.textContent = 'Modo: resposta simples';
+    else if (mode === 'fila') el.textContent = 'Modo: menu de filas';
+    else el.textContent = 'Modo: nenhum ativo';
+  }
+
+  function addBubble(text, who = 'bot') {
+    const body = document.getElementById('simChatBody');
+    if (!body) return;
+
+    const div = document.createElement('div');
+    div.className = `sim-bubble ${who}`;
+    div.textContent = text;
+
+    body.appendChild(div);
+    body.scrollTop = body.scrollHeight;
+  }
+
+  function clearSim() {
+    const body = document.getElementById('simChatBody');
+    if (body) body.innerHTML = '';
+  }
+
+  function simulateFirstContact(customInput) {
+    updateSimulatorBadge();
+    clearSim();
+
+    const txt = String(customInput || document.getElementById('simClientInput')?.value || '').trim() || 'Oi';
+
+    addBubble(txt, 'client');
+
+    const mode = activeMode();
+
+    if (mode === 'fila') {
+      addBubble(renderFilaMessage(), 'bot');
+      return;
+    }
+
+    if (mode === 'auto') {
+      if (getSwitch(swWelcome)) {
+        addBubble(renderWelcomeMessage(), 'bot');
+        return;
+      }
+
+      if (getSwitch(swOff)) {
+        addBubble(renderOffMessage(), 'bot');
+        return;
+      }
+
+      addBubble('Nenhuma mensagem está ativa neste modo.', 'bot');
+      return;
+    }
+
+    addBubble('Nenhum modo está ativo nesta instância.', 'bot');
+  }
+
+  function simulateInvalidChoice() {
+    clearSim();
+    updateSimulatorBadge();
+
+    addBubble('tempo', 'client');
+
+    if (activeMode() !== 'fila') {
+      addBubble('Essa simulação faz mais sentido quando o menu de filas está ativo.', 'bot');
+      return;
+    }
+
+    addBubble(`Não entendi sua opção.\n\n${renderFilaMessage()}`, 'bot');
+  }
+
+  function simulateValidChoice() {
+    clearSim();
+    updateSimulatorBadge();
+
+    if (activeMode() !== 'fila') {
+      addBubble('Essa simulação faz mais sentido quando o menu de filas está ativo.', 'bot');
+      return;
+    }
+
+    const filas = getSelectedFilas();
+
+    if (!filas.length) {
+      addBubble('Oi', 'client');
+      addBubble('Nenhuma fila foi selecionada para aparecer no menu.', 'bot');
+      return;
+    }
+
+    const chosen = filas[1] || filas[0];
+    const idx = Math.max(1, filas.findIndex(f => f.id === chosen.id) + 1);
+
+    addBubble('Oi', 'client');
+    addBubble(renderFilaMessage(), 'bot');
+    addBubble(String(idx), 'client');
+    addBubble(`Perfeito! Vou te encaminhar para *${chosen.nome}*. Só um instante 🙂`, 'bot');
+  }
+
+  function simulateOffHours() {
+    clearSim();
+    updateSimulatorBadge();
+
+    addBubble('Oi, tudo bem?', 'client');
+
+    if (activeMode() !== 'auto') {
+      addBubble('Essa simulação faz mais sentido quando a resposta automática simples está ativa.', 'bot');
+      return;
+    }
+
+    if (getSwitch(swOff)) {
+      addBubble(renderOffMessage(), 'bot');
+    } else {
+      addBubble('A mensagem de fora do horário não está ativa.', 'bot');
+    }
+  }
+
+  function bindHelpModal() {
+    const helpBtn = document.getElementById('helpChatbotBtn');
+
+    function openModal(id) {
+      const modal = document.getElementById(id);
+      if (!modal) return;
+
+      modal.hidden = false;
+      requestAnimationFrame(() => modal.classList.add('show'));
+      document.body.style.overflow = 'hidden';
+
+      scheduleSummaryRefresh();
+
+      if (id === 'chatbotHelpModal' && !document.getElementById('simChatBody')?.children.length) {
+        simulateFirstContact('Oi');
+      }
+    }
+
+    function closeModal(id) {
+      const modal = document.getElementById(id);
+      if (!modal) return;
+
+      modal.classList.remove('show');
+      document.body.style.overflow = '';
+
+      setTimeout(() => {
+        modal.hidden = true;
+      }, 180);
+
+      scheduleSummaryRefresh();
+    }
+
+    helpBtn?.addEventListener('click', () => openModal('chatbotHelpModal'));
+
+    document.querySelectorAll('[data-close-modal]').forEach(btn => {
+      btn.addEventListener('click', () => closeModal(btn.getAttribute('data-close-modal')));
+    });
+
+    document.querySelectorAll('.help-modal').forEach(modal => {
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal(modal.id);
+      });
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        document.querySelectorAll('.help-modal.show').forEach(m => closeModal(m.id));
+      }
+    });
+
+    document.getElementById('simFirstBtn')?.addEventListener('click', () => {
+      simulateFirstContact('Oi');
+      scheduleSummaryRefresh();
+    });
+
+    document.getElementById('simInvalidBtn')?.addEventListener('click', () => {
+      simulateInvalidChoice();
+      scheduleSummaryRefresh();
+    });
+
+    document.getElementById('simValidBtn')?.addEventListener('click', () => {
+      simulateValidChoice();
+      scheduleSummaryRefresh();
+    });
+
+    document.getElementById('simOffBtn')?.addEventListener('click', () => {
+      simulateOffHours();
+      scheduleSummaryRefresh();
+    });
+
+    document.getElementById('simClearBtn')?.addEventListener('click', () => {
+      clearSim();
+      scheduleSummaryRefresh();
+    });
+
+    document.getElementById('simSendBtn')?.addEventListener('click', () => {
+      const val = String(document.getElementById('simClientInput')?.value || '').trim();
+      if (!val) return;
+
+      const mode = activeMode();
+
+      clearSim();
+
+      if (mode === 'fila') {
+        addBubble(val, 'client');
+
+        const chosen = parseChoice(val);
+
+        if (chosen) {
+          addBubble(`Perfeito! Vou te encaminhar para *${chosen.nome}*. Só um instante 🙂`, 'bot');
+        } else {
+          addBubble(`Não entendi sua opção.\n\n${renderFilaMessage()}`, 'bot');
+        }
+
+        scheduleSummaryRefresh();
+        return;
+      }
+
+      simulateFirstContact(val);
+      scheduleSummaryRefresh();
+    });
+
+    document.getElementById('simClientInput')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        document.getElementById('simSendBtn')?.click();
+      }
+    });
+  }
+
   async function boot() {
     try {
       bindAccordion(headAuto, bodyAuto);
       bindAccordion(headAutoDept, bodyAutoDept);
+      bindHelpModal();
 
       bindSwitch(swAutoHdr, pillAutoHdr, (on) => {
         if (cfg?.features) cfg.features.auto_messages.enabled = on;
@@ -1482,7 +2114,10 @@ Digite apenas o número da opção desejada.`
       });
 
       bindSwitch(swDeptHdr, pillDeptHdr, (on) => {
-        if (cfg?.features) cfg.features.auto_messages_departments.enabled = on;
+        if (cfg?.features) {
+          ensureMasters(cfg);
+          cfg.features.auto_messages_filas.enabled = on;
+        }
         syncSectionState();
       });
 
@@ -1497,7 +2132,10 @@ Digite apenas o número da opção desejada.`
       });
 
       bindSwitch(swDeptWelcome, pillDeptWelcome, (on) => {
-        if (cfg) (cfg.features.auto_messages_departments.welcome ||= {}).enabled = on;
+        if (cfg) {
+          ensureMasters(cfg);
+          (cfg.features.auto_messages_filas.welcome ||= {}).enabled = on;
+        }
         syncSectionState();
       });
 
@@ -1506,6 +2144,7 @@ Digite apenas o número da opção desejada.`
         renderWelcomePreview();
         updateSaveButtons();
         schedulePersist(350, { silent: true });
+        scheduleSummaryRefresh();
       });
 
       msgOff?.addEventListener('input', () => {
@@ -1513,13 +2152,15 @@ Digite apenas o número da opção desejada.`
         renderOffPreview();
         updateSaveButtons();
         schedulePersist(350, { silent: true });
+        scheduleSummaryRefresh();
       });
 
       msgDeptWelcome?.addEventListener('input', () => {
         if (dwCount) dwCount.textContent = `${msgDeptWelcome.value.length} caracteres`;
-        renderDeptPreview();
+        renderFilaPreview();
         updateSaveButtons();
         schedulePersist(350, { silent: true });
+        scheduleSummaryRefresh();
       });
 
       wStart?.addEventListener('change', () => schedulePersist(200, { silent: true }));
@@ -1529,46 +2170,66 @@ Digite apenas o número da opção desejada.`
       dwStart?.addEventListener('change', () => schedulePersist(200, { silent: true }));
       dwEnd?.addEventListener('change', () => schedulePersist(200, { silent: true }));
 
-      deptSearch?.addEventListener('input', () => renderDeptPicker());
+      deptSearch?.addEventListener('input', () => renderFilaPicker());
 
       deptAll?.addEventListener('click', () => {
         if (!cfg) return;
-        const items = ensureDeptItems();
-        (_deptCache || []).forEach(d => {
-          const id = String(d.id);
-          const nome = cleanDeptLabel(d.nome);
-          items[id] = { ...(items[id] || {}), enabled: true, label: items[id]?.label || nome };
+
+        const items = ensureFilaItems();
+
+        (_filaCache || []).forEach(f => {
+          const id = String(f.id);
+          const nome = cleanLabel(f.nome);
+
+          items[id] = {
+            ...(items[id] || {}),
+            enabled: true,
+            label: items[id]?.label || nome
+          };
         });
-        renderDeptPicker();
-        refreshDeptTemplateIfDefaultLike();
-        renderDeptPreview();
+
+        renderFilaPicker();
+        refreshFilaTemplateIfDefaultLike();
+        renderFilaPreview();
         updateSaveButtons();
         schedulePersist(250, { silent: false });
+        scheduleSummaryRefresh();
       });
 
       deptNone?.addEventListener('click', () => {
         if (!cfg) return;
-        const items = ensureDeptItems();
-        (_deptCache || []).forEach(d => {
-          const id = String(d.id);
-          const nome = cleanDeptLabel(d.nome);
-          items[id] = { ...(items[id] || {}), enabled: false, label: items[id]?.label || nome };
+
+        const items = ensureFilaItems();
+
+        (_filaCache || []).forEach(f => {
+          const id = String(f.id);
+          const nome = cleanLabel(f.nome);
+
+          items[id] = {
+            ...(items[id] || {}),
+            enabled: false,
+            label: items[id]?.label || nome
+          };
         });
-        renderDeptPicker();
-        refreshDeptTemplateIfDefaultLike();
-        renderDeptPreview();
+
+        renderFilaPicker();
+        refreshFilaTemplateIfDefaultLike();
+        renderFilaPreview();
         updateSaveButtons();
         schedulePersist(250, { silent: false });
+        scheduleSummaryRefresh();
       });
 
       saveAuto?.addEventListener('click', saveAutoBlock);
-      saveDept?.addEventListener('click', saveDeptBlock);
+      saveDept?.addEventListener('click', saveFilaBlock);
+
       cancelAuto?.addEventListener('click', () => restoreSnapshot(true));
       cancelDept?.addEventListener('click', () => restoreSnapshot(true));
 
       await initInstDropdown();
 
       const key = getActiveInstKey();
+
       if (!key) {
         lockUI(true, 'Selecione uma instância para configurar o chatbot.');
         return;
@@ -1576,6 +2237,8 @@ Digite apenas o número da opção desejada.`
 
       lockUI(false);
       await loadAll();
+
+      setTimeout(scheduleSummaryRefresh, 200);
     } catch (e) {
       const { title, message, details } = friendlyHttpError(0, String(e?.message || e));
       notify({ title, message, details });

@@ -2,6 +2,7 @@
 // Nova conversa – via proxy backend + bloqueio quando filtro estiver em "Todos"
 // - sem CSS inline no JS
 // - usa classes + CSS no atendimentos.css
+// ✅ Nome oficial: nome > nome_whatsapp > push_name > telefone
 
 import { EMPRESA_ID } from '../core/env.js';
 import { numeroE164 } from '../core/format.js';
@@ -23,6 +24,28 @@ import { state } from '../state/store.js';
     const m = s.match(/^(\+?55)?(\d{2})(\d{4,5})(\d{4})$/);
     return m ? `+55 (${m[2]}) ${m[3]}-${m[4]}` : s;
   };
+
+  function cleanName(v) {
+    const s = String(v ?? '').trim();
+    if (!s) return '';
+
+    const low = s.toLowerCase();
+    if (['null', 'undefined', 'nan', 'none'].includes(low)) return '';
+
+    return s;
+  }
+
+  function isPlaceholderName(v) {
+    const s = cleanName(v).toLowerCase();
+    if (!s) return true;
+
+    return [
+      'cliente',
+      'contato',
+      'sem nome',
+      'desconhecido',
+    ].includes(s);
+  }
 
   function toast(msg, ok = true, ms = 2200) {
     let t = document.getElementById('__app_toast');
@@ -164,13 +187,14 @@ import { state } from '../state/store.js';
 
   function resolveDisplayName(cliente) {
     const tel = onlyDigits(cliente?.telefone || cliente?.whatsapp || '');
-    const nomeWhats = cliente?.nome_whatsapp ? String(cliente.nome_whatsapp).trim() : '';
-    const nomeBd = cliente?.nome ? String(cliente.nome).trim() : '';
-    const push = cliente?.push_name ? String(cliente.push_name).trim() : '';
+    const nomeBd = cleanName(cliente?.nome);
+    const nomeWhats = cleanName(cliente?.nome_whatsapp);
+    const push = cleanName(cliente?.push_name || cliente?.pushName);
 
-    if (nomeWhats) return nomeWhats;
-    if (nomeBd && nomeBd !== 'Cliente') return nomeBd;
-    if (push) return push;
+    if (nomeBd && !isPlaceholderName(nomeBd)) return nomeBd;
+    if (nomeWhats && !isPlaceholderName(nomeWhats)) return nomeWhats;
+    if (push && !isPlaceholderName(push)) return push;
+
     return tel ? formatTelBR(tel) : 'Cliente';
   }
 

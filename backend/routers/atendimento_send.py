@@ -13,7 +13,7 @@ import requests
 from fastapi import APIRouter, Depends, HTTPException, Path, Body
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, or_
 
 from backend.database import get_db
 from backend import models
@@ -102,25 +102,87 @@ def _assert_empresa_resolvida(empresa_do_token: int, empresa_resolvida_id: int) 
         raise HTTPException(403, "Instância/empresa não pertence ao seu contexto")
 
 
+def _id_get(obj: Any, key: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
 def _current_operador_id(identity: Any) -> Optional[int]:
     if identity is None:
         return None
 
-    if isinstance(identity, dict):
-        getter = identity.get
-    else:
-        getter = lambda k, default=None: getattr(identity, k, default)
-
     for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
-        cid = _to_int(getter(key))
+        cid = _to_int(_id_get(identity, key))
         if cid:
             return cid
 
-    sub = str(getter("sub", "") or "").strip().lower()
+    sub = str(_id_get(identity, "sub", "") or "").strip().lower()
     if sub.startswith("colab-"):
         return _to_int(sub.split("-", 1)[1])
 
     return None
+
+
+def _table_exists(db: Session, table_name: str) -> bool:
+    try:
+        reg = db.execute(text(f"SELECT to_regclass('public.{table_name}')")).scalar()
+        return reg is not None
+    except Exception:
+        return False
+
+
+def _participant_feature_enabled(db: Session) -> bool:
+    return getattr(models, "AtendimentoParticipante", None) is not None and _table_exists(
+        db, "atendimento_participantes"
+    )
+
+
+def _fila_feature_enabled(db: Session) -> bool:
+    return (
+        getattr(models, "FilaAtendimento", None) is not None
+        and _table_exists(db, "filas_atendimento")
+    )
+
+
+def _atendimento_exige_aceite(
+    db: Session,
+    *,
+    atendimento: Optional[models.Atendimento],
+) -> bool:
+    """
+    Regra nova:
+    - Sem atendimento => não exige aceite.
+    - Atendimento sem fila_id => não exige aceite.
+    - Atendimento com fila_id => só exige se filas_atendimento.exigir_aceite=True.
+
+    Isso impede o envio de bloquear conversas normais só porque ainda não foram aceitas.
+    """
+    if atendimento is None:
+        return False
+
+    fila_id = _to_int(getattr(atendimento, "fila_id", None))
+    if fila_id is None:
+        return False
+
+    if not _fila_feature_enabled(db):
+        return False
+
+    fila = (
+        db.query(models.FilaAtendimento)
+        .filter(
+            models.FilaAtendimento.id == int(fila_id),
+            models.FilaAtendimento.empresa_id == int(getattr(atendimento, "empresa_id")),
+        )
+        .first()
+    )
+
+    if not fila:
+        return False
+
+    return bool(getattr(fila, "exigir_aceite", False))
 
 
 def normalizar_telefone(numero: str | None) -> str | None:
@@ -156,18 +218,15 @@ def _destino_e_numero_norm(raw: str | None) -> tuple[str | None, str | None, boo
 
     s_lower = s.lower()
 
-    # grupo já pronto
     if s_lower.endswith("@g.us"):
         return s, None, True
 
-    # jid 1:1
     if s_lower.endswith("@s.whatsapp.net"):
         base = s_lower.replace("@s.whatsapp.net", "")
         num_send = normalize_phone_for_send(base)
         num_db = normalize_phone_for_db(base)
         return (f"{num_send}@s.whatsapp.net" if num_send else s), num_db, False
 
-    # grupos numéricos tipo 120... ou xx-yy
     if "-" in s:
         left, right = s.split("-", 1)
         left_digits = re.sub(r"\D", "", left or "")
@@ -225,6 +284,8 @@ def _evo_post(path: str, instance: str, payload: Dict[str, Any], timeout: int = 
                 r.status_code,
                 {"error": "evolution_error", "status": r.status_code, "response": j},
             )
+        except HTTPException:
+            raise
         except Exception:
             raise HTTPException(r.status_code, f"Evolution error {r.status_code}: {r.text}")
 
@@ -290,10 +351,207 @@ def _resolve_empresa_e_instancia(
         400,
         {
             "error": "empresa_tem_varias_instancias",
-            "message": "Informe 'instance', 'instancia_id' ou envie o conversation_id completo da conversa.",
+            "message": "Informe 'instance', 'instancia_id' ou envie o conversation_id/conversation_key completo da conversa.",
             "opcoes": opts,
         },
     )
+
+
+# =========================================================
+# Participantes / aceite compartilhado
+# =========================================================
+def _active_participant_rows(
+    db: Session,
+    *,
+    empresa_id: int,
+    atendimento_id: Optional[int],
+):
+    if atendimento_id is None:
+        return []
+
+    if not _participant_feature_enabled(db):
+        return []
+
+    AP = models.AtendimentoParticipante
+
+    q = db.query(AP).filter(
+        AP.empresa_id == int(empresa_id),
+        AP.atendimento_id == int(atendimento_id),
+    )
+
+    if hasattr(AP, "is_ativo"):
+        q = q.filter(AP.is_ativo.is_(True))
+
+    if hasattr(AP, "id"):
+        q = q.order_by(AP.id.asc())
+
+    return q.all()
+
+
+def _active_participant_ids(
+    db: Session,
+    *,
+    empresa_id: int,
+    atendimento_id: Optional[int],
+) -> List[int]:
+    rows = _active_participant_rows(
+        db,
+        empresa_id=empresa_id,
+        atendimento_id=atendimento_id,
+    )
+    out: List[int] = []
+    for r in rows:
+        cid = _to_int(getattr(r, "colaborador_id", None))
+        if cid and cid not in out:
+            out.append(cid)
+    return out
+
+
+def _cliente_tem_historico(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente_id: int,
+    instancia_id: Optional[int],
+) -> bool:
+    q = (
+        db.query(models.Mensagem.id)
+        .filter(
+            models.Mensagem.empresa_id == int(empresa_id),
+            models.Mensagem.cliente_id == int(cliente_id),
+        )
+    )
+
+    if instancia_id is not None:
+        q = q.filter(models.Mensagem.instancia_id == int(instancia_id))
+
+    return q.first() is not None
+
+
+def _ensure_sender_can_send_existing_cliente(
+    db: Session,
+    *,
+    identity: Any,
+    empresa_id: int,
+    cliente_exists_before_send: bool,
+    atendimento: Optional[models.Atendimento],
+):
+    """
+    Regra corrigida:
+
+    Antes:
+      conversa existente + sem aceite => bloqueava envio sempre.
+
+    Agora:
+      conversa existente sem fila exigindo aceite => pode responder normal.
+
+      só bloqueia quando:
+        atendimento.fila_id existe
+        e filas_atendimento.exigir_aceite = true
+        e o colaborador atual ainda não aceitou/participa.
+    """
+    current_colab_id = _current_operador_id(identity)
+
+    # admin/usuário master ou identidade sem colaborador operacional passa.
+    if current_colab_id is None:
+        return
+
+    # Conversa nova outbound passa.
+    if not cliente_exists_before_send:
+        return
+
+    # Sem atendimento aberto não tem regra explícita de aceite.
+    if atendimento is None:
+        return
+
+    # PONTO PRINCIPAL:
+    # só exige aceite se a fila escolhida exigir.
+    exige_aceite = _atendimento_exige_aceite(db, atendimento=atendimento)
+    if not exige_aceite:
+        return
+
+    participant_ids = _active_participant_ids(
+        db,
+        empresa_id=int(empresa_id),
+        atendimento_id=getattr(atendimento, "id", None),
+    )
+
+    if participant_ids:
+        if int(current_colab_id) not in set(int(x) for x in participant_ids):
+            raise HTTPException(409, "Você precisa aceitar a conversa antes de responder.")
+        return
+
+    operador_id = _to_int(getattr(atendimento, "operador_id", None))
+    if operador_id is not None:
+        if int(operador_id) != int(current_colab_id):
+            raise HTTPException(409, "Essa conversa está com outro responsável.")
+        return
+
+    raise HTTPException(409, "Aceite a conversa antes de responder.")
+
+
+def _sync_sender_as_participant_if_needed(
+    db: Session,
+    *,
+    atendimento: Optional[models.Atendimento],
+    colaborador_id: Optional[int],
+):
+    """
+    Auto-sincroniza participação quando a conversa realmente exige aceite.
+    """
+    if atendimento is None or colaborador_id is None:
+        return
+
+    if not _participant_feature_enabled(db):
+        return
+
+    AP = models.AtendimentoParticipante
+    empresa_id = int(getattr(atendimento, "empresa_id"))
+    atendimento_id = int(getattr(atendimento, "id"))
+
+    active_ids = _active_participant_ids(
+        db,
+        empresa_id=empresa_id,
+        atendimento_id=atendimento_id,
+    )
+    make_responsavel = not active_ids
+
+    q = db.query(AP).filter(
+        AP.empresa_id == int(empresa_id),
+        AP.atendimento_id == int(atendimento_id),
+        AP.colaborador_id == int(colaborador_id),
+    )
+    row = q.order_by(AP.id.desc()).first() if hasattr(AP, "id") else q.first()
+
+    if row:
+        if hasattr(row, "is_ativo"):
+            row.is_ativo = True
+        if hasattr(row, "saiu_em"):
+            row.saiu_em = None
+        if hasattr(row, "aceito_em") and getattr(row, "aceito_em", None) is None:
+            row.aceito_em = _now_sp()
+        if hasattr(row, "is_responsavel") and make_responsavel:
+            row.is_responsavel = True
+        db.add(row)
+    else:
+        data: Dict[str, Any] = {
+            "empresa_id": int(empresa_id),
+            "atendimento_id": int(atendimento_id),
+            "colaborador_id": int(colaborador_id),
+        }
+        if hasattr(AP, "aceito_em"):
+            data["aceito_em"] = _now_sp()
+        if hasattr(AP, "is_ativo"):
+            data["is_ativo"] = True
+        if hasattr(AP, "is_responsavel"):
+            data["is_responsavel"] = bool(make_responsavel)
+
+        row = AP(**data)
+        db.add(row)
+
+    if make_responsavel and hasattr(atendimento, "operador_id"):
+        atendimento.operador_id = int(colaborador_id)
+        db.add(atendimento)
 
 
 # =========================================================
@@ -320,6 +578,234 @@ def _parse_conversation_ref(value: str | None) -> Tuple[Optional[str], Optional[
     entity_id = int(m.group(2))
     inst_id = int(m.group(3)) or None
     return kind, entity_id, inst_id
+
+
+def _raw_conversation_ref_from_body(body: Any) -> Optional[str]:
+    raw = (
+        getattr(body, "conversation_key", None)
+        or getattr(body, "conversation_id", None)
+        or None
+    )
+    if raw is None:
+        return None
+    raw = str(raw).strip()
+    return raw or None
+
+
+def _validate_ref_shape_if_present(raw: Optional[str], field_name: str) -> None:
+    if not raw:
+        return
+
+    s = str(raw).strip()
+    if re.match(r"^[cg]:", s, flags=re.I) and not re.match(r"^[cg]:\d+:\d+$", s, flags=re.I):
+        raise HTTPException(
+            400,
+            {
+                "error": "conversation_ref_invalida",
+                "field": field_name,
+                "message": f"{field_name} inválida. Use o formato c:<cliente_id>:<instancia_id> ou g:<grupo_id>:<instancia_id>.",
+            },
+        )
+
+
+def _apply_conversation_hint(body) -> Tuple[Optional[str], Optional[int], Optional[int]]:
+    """
+    Trava crítica:
+    - aceita conversation_key e conversation_id;
+    - se vier c:123:39, força cliente_id=123 e instancia_id=39;
+    - se vier payload contraditório, bloqueia;
+    - se vier instance textual junto, valida depois de resolver a instância.
+    """
+    raw_key = str(getattr(body, "conversation_key", "") or "").strip()
+    raw_id = str(getattr(body, "conversation_id", "") or "").strip()
+
+    _validate_ref_shape_if_present(raw_key, "conversation_key")
+    _validate_ref_shape_if_present(raw_id, "conversation_id")
+
+    k_kind, k_entity_id, k_inst_id = _parse_conversation_ref(raw_key)
+    i_kind, i_entity_id, i_inst_id = _parse_conversation_ref(raw_id)
+
+    if k_kind and i_kind:
+        if (k_kind, k_entity_id, k_inst_id) != (i_kind, i_entity_id, i_inst_id):
+            raise HTTPException(
+                400,
+                {
+                    "error": "conversation_ref_conflitante",
+                    "message": "conversation_key e conversation_id apontam para conversas diferentes.",
+                    "conversation_key": raw_key,
+                    "conversation_id": raw_id,
+                },
+            )
+
+    kind = k_kind or i_kind
+    entity_id = k_entity_id if k_entity_id is not None else i_entity_id
+    inst_id = k_inst_id if k_inst_id is not None else i_inst_id
+
+    if kind and entity_id is not None:
+        current_cliente_id = _to_int(getattr(body, "cliente_id", None))
+        if current_cliente_id is not None and int(current_cliente_id) != int(entity_id):
+            raise HTTPException(
+                400,
+                {
+                    "error": "cliente_id_conflitante",
+                    "message": "cliente_id não bate com a conversation_key/conversation_id enviada.",
+                    "cliente_id": current_cliente_id,
+                    "conversation_entity_id": entity_id,
+                },
+            )
+        body.cliente_id = int(entity_id)
+
+    if inst_id is not None:
+        current_inst_id = _to_int(getattr(body, "instancia_id", None))
+        if current_inst_id is not None and int(current_inst_id) != int(inst_id):
+            raise HTTPException(
+                400,
+                {
+                    "error": "instancia_id_conflitante",
+                    "message": "instancia_id não bate com a conversation_key/conversation_id enviada.",
+                    "instancia_id": current_inst_id,
+                    "conversation_instancia_id": inst_id,
+                },
+            )
+
+        # Se vier instance textual, não sobrescreve aqui.
+        # Depois que resolvermos a instance para id, validamos contra inst_id.
+        if not getattr(body, "instance", None):
+            body.instancia_id = int(inst_id)
+
+    return kind, entity_id, inst_id
+
+
+def _assert_conversation_hint_matches_kind(
+    *,
+    explicit_kind: Optional[str],
+    is_group_destino: bool,
+) -> None:
+    if not explicit_kind:
+        return
+
+    if explicit_kind == "cliente" and is_group_destino:
+        raise HTTPException(
+            400,
+            {
+                "error": "destino_conflitante",
+                "message": "conversation_key é de cliente, mas o destino enviado é de grupo.",
+            },
+        )
+
+    if explicit_kind == "grupo" and not is_group_destino:
+        raise HTTPException(
+            400,
+            {
+                "error": "destino_conflitante",
+                "message": "conversation_key é de grupo, mas o destino enviado é de cliente.",
+            },
+        )
+
+
+def _assert_hint_instancia_matches_resolved(
+    *,
+    explicit_inst_id: Optional[int],
+    resolved_inst_id: Optional[int],
+) -> None:
+    if explicit_inst_id is None:
+        return
+
+    if resolved_inst_id is None or int(explicit_inst_id) != int(resolved_inst_id):
+        raise HTTPException(
+            400,
+            {
+                "error": "instancia_conflitante",
+                "message": "A instância resolvida não bate com a instância da conversation_key/conversation_id.",
+                "conversation_instancia_id": explicit_inst_id,
+                "resolved_instancia_id": resolved_inst_id,
+            },
+        )
+
+
+def _assert_number_matches_cliente(
+    *,
+    cliente: models.Cliente,
+    numero_db_norm: Optional[str],
+    destino: str,
+) -> None:
+    """
+    Bloqueia envio para número diferente do cliente selecionado.
+
+    Importante:
+    - só valida cliente 1:1;
+    - aceita telefone_norm, telefone formatado, ou normalização do número salvo.
+    """
+    if not cliente:
+        return
+
+    expected_candidates: List[str] = []
+
+    for raw in (
+        getattr(cliente, "telefone_norm", None),
+        getattr(cliente, "telefone", None),
+        getattr(cliente, "whatsapp", None),
+        getattr(cliente, "numero", None),
+    ):
+        n = normalize_phone_for_db(raw)
+        if n and n not in expected_candidates:
+            expected_candidates.append(n)
+
+    got = normalize_phone_for_db(numero_db_norm or destino)
+
+    if not got:
+        raise HTTPException(
+            400,
+            {
+                "error": "destino_invalido",
+                "message": "Não foi possível validar o número de destino do cliente.",
+            },
+        )
+
+    if expected_candidates and got not in expected_candidates:
+        raise HTTPException(
+            400,
+            {
+                "error": "destino_nao_bate_com_cliente",
+                "message": "O número enviado não pertence ao cliente selecionado.",
+                "cliente_id": int(getattr(cliente, "id", 0) or 0),
+                "numero_enviado": got,
+                "numeros_do_cliente": expected_candidates,
+            },
+        )
+
+
+def _assert_destino_matches_grupo(
+    *,
+    grupo: models.Grupo,
+    destino: str,
+) -> None:
+    if not grupo:
+        return
+
+    expected = str(getattr(grupo, "remote_jid", "") or "").strip().lower()
+    got = str(destino or "").strip().lower()
+
+    if not expected or not got:
+        raise HTTPException(
+            400,
+            {
+                "error": "destino_grupo_invalido",
+                "message": "Não foi possível validar o destino do grupo.",
+            },
+        )
+
+    if expected != got:
+        raise HTTPException(
+            400,
+            {
+                "error": "destino_nao_bate_com_grupo",
+                "message": "O JID enviado não pertence ao grupo selecionado.",
+                "grupo_id": int(getattr(grupo, "id", 0) or 0),
+                "remote_jid_grupo": expected,
+                "destino_enviado": got,
+            },
+        )
 
 
 def _resolve_unique_client_instance(
@@ -352,7 +838,7 @@ def _resolve_unique_client_instance(
 
     raise HTTPException(
         400,
-        "Cliente possui conversa em múltiplas instâncias. Envie 'instancia_id'/'instance' ou 'conversation_id'.",
+        "Cliente possui conversa em múltiplas instâncias. Envie 'instancia_id'/'instance' ou 'conversation_id'/'conversation_key'.",
     )
 
 
@@ -386,7 +872,7 @@ def _resolve_unique_group_instance(
 
     raise HTTPException(
         400,
-        "Grupo possui conversa em múltiplas instâncias. Envie 'instancia_id'/'instance' ou 'conversation_id'.",
+        "Grupo possui conversa em múltiplas instâncias. Envie 'instancia_id'/'instance' ou 'conversation_id'/'conversation_key'.",
     )
 
 
@@ -511,6 +997,8 @@ def _insert_msg_saida(
     instancia_id: Optional[int],
     atendimento_id: Optional[int],
     ack: int,
+    quoted: Optional[Dict[str, Any]] = None,
+    quoted_preview: Optional[Dict[str, Any]] = None,
 ) -> models.Mensagem:
     m = models.Mensagem(
         empresa_id=empresa.id,
@@ -523,6 +1011,8 @@ def _insert_msg_saida(
         msg_id=msg_id,
         instancia_id=instancia_id,
         atendimento_id=atendimento_id,
+        quoted=quoted,
+        quoted_preview=quoted_preview,
     )
     db.add(m)
     db.commit()
@@ -591,6 +1081,8 @@ def _insert_msg_saida_grupo(
     ts_seconds: int,
     ack: int,
     message_type: str = "conversation",
+    quoted: Optional[Dict[str, Any]] = None,
+    quoted_preview: Optional[Dict[str, Any]] = None,
 ) -> models.MensagemGrupo:
     m = models.MensagemGrupo(
         empresa_id=int(empresa.id),
@@ -605,6 +1097,8 @@ def _insert_msg_saida_grupo(
         timestamp=int(ts_seconds),
         msg_id=str(msg_id) if msg_id else f"local-{int(time.time() * 1000)}",
         ack=int(ack),
+        quoted=quoted,
+        quoted_preview=quoted_preview,
     )
     db.add(m)
 
@@ -620,14 +1114,7 @@ def _identity_ctx(identity: Any) -> Tuple[int, Optional[str]]:
     if identity is None:
         raise HTTPException(401, "Sessão inválida ou expirada.")
 
-    if isinstance(identity, dict):
-        def getter(k, default=None):
-            return identity.get(k, default)
-    else:
-        def getter(k, default=None):
-            return getattr(identity, k, default)
-
-    empresa_id = getter("empresa_id", None)
+    empresa_id = _id_get(identity, "empresa_id", None)
     if not empresa_id:
         raise HTTPException(403, "Empresa inválida para este token")
     try:
@@ -635,7 +1122,11 @@ def _identity_ctx(identity: Any) -> Tuple[int, Optional[str]]:
     except Exception:
         raise HTTPException(403, "Empresa inválida para este token")
 
-    atendente_nome = getter("nome", None) or getter("nome_completo", None) or getter("name", None)
+    atendente_nome = (
+        _id_get(identity, "nome", None)
+        or _id_get(identity, "nome_completo", None)
+        or _id_get(identity, "name", None)
+    )
     return empresa_id, atendente_nome
 
 
@@ -656,6 +1147,8 @@ async def _broadcast_msg_saida_cliente(
     atendimento_id: Optional[int],
     departamento_id: Optional[int],
     midias: Optional[List[Dict[str, Any]]] = None,
+    quoted: Optional[Dict[str, Any]] = None,
+    quoted_preview: Optional[Dict[str, Any]] = None,
 ):
     conv_ref = _conv_ref_cliente(int(cliente.id), instancia_id)
 
@@ -664,6 +1157,8 @@ async def _broadcast_msg_saida_cliente(
         "cliente_id": int(cliente.id),
         "conversation_id": conv_ref,
         "conversation_key": conv_ref,
+        "kind": "c",
+        "entity_id": int(cliente.id),
         "is_group": False,
         "telefone": formatar_telefone_br(getattr(cliente, "telefone", None) or ""),
         "avatar_url": _public_avatar_url(
@@ -687,6 +1182,10 @@ async def _broadcast_msg_saida_cliente(
     }
     if midias:
         payload["midias"] = midias
+    if quoted:
+        payload["quoted"] = quoted
+    if quoted_preview:
+        payload["quoted_preview"] = quoted_preview
 
     await conexoes_ativas.send_message(f"emp:{empresa.id}", payload)
 
@@ -703,14 +1202,19 @@ async def _broadcast_msg_saida_grupo(
     atendente_nome: Optional[str],
     ack: int,
     midias: Optional[List[Dict[str, Any]]] = None,
+    quoted: Optional[Dict[str, Any]] = None,
+    quoted_preview: Optional[Dict[str, Any]] = None,
 ):
     conv_ref = _conv_ref_grupo(int(grupo.id), instancia_id)
 
     payload = {
         "empresa_id": int(empresa.id),
         "cliente_id": int(grupo.id),
+        "grupo_id": int(grupo.id),
         "conversation_id": conv_ref,
         "conversation_key": conv_ref,
+        "kind": "g",
+        "entity_id": int(grupo.id),
         "is_group": True,
         "remote_jid": getattr(grupo, "remote_jid", None),
         "avatar_url": _public_avatar_url(
@@ -731,6 +1235,10 @@ async def _broadcast_msg_saida_grupo(
     }
     if midias:
         payload["midias"] = midias
+    if quoted:
+        payload["quoted"] = quoted
+    if quoted_preview:
+        payload["quoted_preview"] = quoted_preview
 
     await conexoes_ativas.send_message(f"emp:{empresa.id}", payload)
 
@@ -740,15 +1248,28 @@ class QuoteKey(BaseModel):
     id: str
     remoteJid: Optional[str] = None
     fromMe: Optional[bool] = None
+    participant: Optional[str] = None
 
-
-class QuoteMessage(BaseModel):
-    conversation: Optional[str] = None
+    class Config:
+        extra = "allow"
 
 
 class Quoted(BaseModel):
     key: QuoteKey
-    message: Optional[QuoteMessage] = None
+    message: Optional[Dict[str, Any]] = None
+
+    class Config:
+        extra = "allow"
+
+
+class QuotedPreview(BaseModel):
+    msg_id: Optional[str] = None
+    text: Optional[str] = None
+    author: Optional[str] = None
+    direction: Optional[str] = None
+
+    class Config:
+        extra = "allow"
 
 
 class BaseSend(BaseModel):
@@ -757,6 +1278,7 @@ class BaseSend(BaseModel):
     instancia_id: Optional[int] = Field(None, description="ID da instância")
     cliente_id: Optional[int] = Field(None, description="ID base do cliente/grupo")
     conversation_id: Optional[str] = Field(None, description="conversation_id da lista lateral (ex.: c:123:3)")
+    conversation_key: Optional[str] = Field(None, description="conversation_key canônica (ex.: c:123:3)")
     number: str = Field(..., description="Destino: telefone ou JID")
 
 
@@ -767,6 +1289,7 @@ class SendTextReq(BaseSend):
     mentionsEveryOne: Optional[bool] = None
     mentioned: Optional[List[str]] = None
     quoted: Optional[Quoted] = None
+    quoted_preview: Optional[QuotedPreview] = None
 
 
 class SendAudioReq(BaseSend):
@@ -776,6 +1299,7 @@ class SendAudioReq(BaseSend):
     mentionsEveryOne: Optional[bool] = None
     mentioned: Optional[List[str]] = None
     quoted: Optional[Quoted] = None
+    quoted_preview: Optional[QuotedPreview] = None
 
 
 class SendMediaReq(BaseSend):
@@ -789,6 +1313,7 @@ class SendMediaReq(BaseSend):
     mentionsEveryOne: Optional[bool] = None
     mentioned: Optional[List[str]] = None
     quoted: Optional[Quoted] = None
+    quoted_preview: Optional[QuotedPreview] = None
 
 
 class SendStickerReq(BaseSend):
@@ -798,6 +1323,7 @@ class SendStickerReq(BaseSend):
     mentionsEveryOne: Optional[bool] = None
     mentioned: Optional[List[str]] = None
     quoted: Optional[Quoted] = None
+    quoted_preview: Optional[QuotedPreview] = None
 
 
 class ContactItem(BaseModel):
@@ -828,17 +1354,390 @@ class SendReactionReq(BaseModel):
 
 
 # =========================================================
+# Quoted / responder mensagem
+# =========================================================
+def _model_dump_compat(obj: Any, **kwargs) -> Dict[str, Any]:
+    if obj is None:
+        return {}
+    if isinstance(obj, dict):
+        return dict(obj)
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump(**kwargs)
+    if hasattr(obj, "dict"):
+        return obj.dict(**kwargs)
+    return {}
+
+
+def _clean_none_deep(value: Any) -> Any:
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for k, v in value.items():
+            cleaned = _clean_none_deep(v)
+            if cleaned is not None:
+                out[k] = cleaned
+        return out
+    if isinstance(value, list):
+        out = []
+        for v in value:
+            cleaned = _clean_none_deep(v)
+            if cleaned is not None:
+                out.append(cleaned)
+        return out
+    return value
+
+
+def _first_present(*values: Any) -> Any:
+    for v in values:
+        if v is None:
+            continue
+        if isinstance(v, str) and not v.strip():
+            continue
+        return v
+    return None
+
+
+def _truthy_bool(v: Any, fallback: bool = False) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+
+    s = str(v or "").strip().lower()
+    if s in {"1", "true", "sim", "s", "yes", "y", "saida", "out", "sent"}:
+        return True
+    if s in {"0", "false", "nao", "não", "n", "no", "entrada", "in", "received"}:
+        return False
+    return bool(fallback)
+
+
+def _jid_from_cliente(cliente: Optional[models.Cliente]) -> Optional[str]:
+    if not cliente:
+        return None
+
+    raw = getattr(cliente, "telefone", None) or getattr(cliente, "telefone_norm", None)
+    num = normalize_phone_for_send(raw)
+    if not num:
+        return None
+    return f"{num}@s.whatsapp.net"
+
+
+def _media_label_to_human(txt: str) -> str:
+    raw = str(txt or "").strip()
+    low = raw.lower()
+
+    media_labels = {
+        "[imagem]": "Imagem",
+        "[image]": "Imagem",
+        "[mídia]": "Mídia",
+        "[midia]": "Mídia",
+        "[vídeo]": "Vídeo",
+        "[video]": "Vídeo",
+        "[áudio]": "Áudio",
+        "[audio]": "Áudio",
+        "[áudio/ptt]": "Áudio",
+        "[audio/ptt]": "Áudio",
+        "[documento]": "Documento",
+        "[figurinha]": "Figurinha",
+        "[sticker]": "Figurinha",
+        "[contato]": "Contato",
+        "[localização]": "Localização",
+        "[localizacao]": "Localização",
+    }
+
+    return media_labels.get(low, raw)
+
+
+def _message_dict_for_quote(conteudo: Optional[str], fallback: str = "[mensagem]") -> Dict[str, Any]:
+    txt = str(conteudo or "").strip() or fallback
+    txt = _media_label_to_human(txt)
+    return {"conversation": txt}
+
+
+def _sanitize_quote_message_for_whatsapp(message: Any) -> Dict[str, Any]:
+    """
+    Evita mandar para o WhatsApp quote como texto feio tipo '[imagem]'.
+    O ideal futuramente é salvar o payload original imageMessage/audioMessage/etc.
+    Por enquanto, normaliza para algo mais bonito no WhatsApp do cliente.
+    """
+    if not isinstance(message, dict) or not message:
+        return {"conversation": "Mensagem"}
+
+    out = dict(message)
+
+    conv = out.get("conversation")
+    if isinstance(conv, str):
+        out["conversation"] = _media_label_to_human(conv) or "Mensagem"
+        return out
+
+    ext = out.get("extendedTextMessage")
+    if isinstance(ext, dict):
+        ext = dict(ext)
+        txt = ext.get("text")
+        if isinstance(txt, str):
+            ext["text"] = _media_label_to_human(txt) or "Mensagem"
+            out["extendedTextMessage"] = ext
+        return out
+
+    return out
+
+
+def _find_quote_cliente_msg(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: Optional[int],
+    quote_id: str,
+) -> Optional[models.Mensagem]:
+    if not quote_id:
+        return None
+
+    q = db.query(models.Mensagem).filter(models.Mensagem.empresa_id == int(empresa_id))
+
+    if instancia_id is not None:
+        q = q.filter(models.Mensagem.instancia_id == int(instancia_id))
+
+    conds = [models.Mensagem.msg_id == str(quote_id)]
+    quote_db_id = _to_int(quote_id)
+    if quote_db_id is not None:
+        conds.append(models.Mensagem.id == int(quote_db_id))
+
+    return (
+        q.filter(conds[0] if len(conds) == 1 else or_(*conds))
+        .order_by(models.Mensagem.id.desc())
+        .first()
+    )
+
+
+def _find_quote_grupo_msg(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: Optional[int],
+    quote_id: str,
+) -> Optional[models.MensagemGrupo]:
+    if not quote_id:
+        return None
+
+    q = db.query(models.MensagemGrupo).filter(models.MensagemGrupo.empresa_id == int(empresa_id))
+
+    if instancia_id is not None:
+        q = q.filter(models.MensagemGrupo.instancia_id == int(instancia_id))
+
+    conds = [models.MensagemGrupo.msg_id == str(quote_id)]
+    quote_db_id = _to_int(quote_id)
+    if quote_db_id is not None:
+        conds.append(models.MensagemGrupo.id == int(quote_db_id))
+
+    return (
+        q.filter(conds[0] if len(conds) == 1 else or_(*conds))
+        .order_by(models.MensagemGrupo.id.desc())
+        .first()
+    )
+
+
+def _resolve_quoted_for_evolution(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: Optional[int],
+    raw_quoted: Any,
+    is_group: bool,
+    destino: str,
+    numero_db_norm: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    if not raw_quoted:
+        return None
+
+    quoted = _model_dump_compat(raw_quoted, exclude_none=True)
+    if not isinstance(quoted, dict):
+        return None
+
+    key = quoted.get("key") or {}
+    if not isinstance(key, dict):
+        key = _model_dump_compat(key, exclude_none=True)
+
+    quote_id = str(_first_present(
+        key.get("id"),
+        quoted.get("id"),
+        quoted.get("msg_id"),
+        quoted.get("message_id"),
+        quoted.get("wa_msg_id"),
+    ) or "").strip()
+
+    if not quote_id:
+        return None
+
+    original_cliente = None
+    original_grupo = None
+
+    if is_group:
+        original_grupo = _find_quote_grupo_msg(
+            db,
+            empresa_id=int(empresa_id),
+            instancia_id=instancia_id,
+            quote_id=quote_id,
+        )
+    else:
+        original_cliente = _find_quote_cliente_msg(
+            db,
+            empresa_id=int(empresa_id),
+            instancia_id=instancia_id,
+            quote_id=quote_id,
+        )
+
+    real_id = quote_id
+    remote_jid = _first_present(key.get("remoteJid"), quoted.get("remoteJid"))
+    participant = _first_present(key.get("participant"), quoted.get("participant"))
+    from_me_raw = _first_present(key.get("fromMe"), quoted.get("fromMe"))
+    message = quoted.get("message")
+
+    if original_cliente is not None:
+        real_id = str(getattr(original_cliente, "msg_id", None) or quote_id)
+        from_me_raw = _first_present(
+            from_me_raw,
+            str(getattr(original_cliente, "tipo", "")).lower() == "saida",
+        )
+
+        if not remote_jid:
+            cli = (
+                db.query(models.Cliente)
+                .filter(models.Cliente.id == int(original_cliente.cliente_id))
+                .first()
+            )
+            remote_jid = _jid_from_cliente(cli)
+
+        if not isinstance(message, dict) or not message:
+            message = _message_dict_for_quote(getattr(original_cliente, "conteudo", None))
+
+    if original_grupo is not None:
+        real_id = str(getattr(original_grupo, "msg_id", None) or quote_id)
+        from_me_raw = _first_present(from_me_raw, getattr(original_grupo, "from_me", None))
+
+        if not remote_jid:
+            grp = (
+                db.query(models.Grupo)
+                .filter(models.Grupo.id == int(original_grupo.grupo_id))
+                .first()
+            )
+            remote_jid = getattr(grp, "remote_jid", None) if grp else None
+
+        if not participant:
+            participant = getattr(original_grupo, "author_jid", None)
+
+        if not isinstance(message, dict) or not message:
+            message = _message_dict_for_quote(getattr(original_grupo, "conteudo", None))
+
+    # Conversa privada: força remoteJid como o destino real da conversa
+    # e remove participant. Isso evita o WhatsApp mostrar "Grupo" no quote.
+    if not is_group:
+        participant = None
+
+        destino_str = str(destino or "").strip()
+        if destino_str.endswith("@s.whatsapp.net"):
+            remote_jid = destino_str
+        elif numero_db_norm:
+            num = normalize_phone_for_send(numero_db_norm)
+            remote_jid = f"{num}@s.whatsapp.net" if num else remote_jid
+        elif destino_str:
+            num = normalize_phone_for_send(destino_str)
+            remote_jid = f"{num}@s.whatsapp.net" if num else remote_jid
+
+    if not remote_jid:
+        if is_group and str(destino or "").endswith("@g.us"):
+            remote_jid = destino
+        elif str(destino or "").endswith("@s.whatsapp.net"):
+            remote_jid = destino
+        elif numero_db_norm:
+            num = normalize_phone_for_send(numero_db_norm)
+            remote_jid = f"{num}@s.whatsapp.net" if num else None
+
+    if not remote_jid:
+        return None
+
+    if not isinstance(message, dict) or not message:
+        message = _message_dict_for_quote(quoted.get("text") or quoted.get("conteudo") or "[mensagem]")
+
+    message = _sanitize_quote_message_for_whatsapp(message)
+
+    out_key: Dict[str, Any] = {
+        "id": str(real_id),
+        "remoteJid": str(remote_jid),
+        "fromMe": _truthy_bool(from_me_raw, fallback=False),
+    }
+
+    # Só grupo deve levar participant.
+    # Em conversa privada, participant faz o WhatsApp interpretar estranho e mostrar "Grupo".
+    if is_group and participant:
+        out_key["participant"] = str(participant)
+
+    out = {
+        "key": out_key,
+        "message": message,
+    }
+
+    return _clean_none_deep(out)
+
+
+def _quoted_preview_from_body_or_payload(
+    body: Any,
+    quoted_payload: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    raw = getattr(body, "quoted_preview", None)
+    preview = _model_dump_compat(raw, exclude_none=True) if raw else {}
+
+    if preview:
+        direction = str(preview.get("direction") or "").lower().strip()
+        return _clean_none_deep({
+            "msg_id": preview.get("msg_id")
+                      or preview.get("id")
+                      or ((quoted_payload or {}).get("key") or {}).get("id"),
+            "text": preview.get("text")
+                    or preview.get("conversation")
+                    or "[mensagem]",
+            "author": preview.get("author")
+                      or ("Você" if direction == "out" else "Contato"),
+            "direction": direction or "in",
+        })
+
+    if not quoted_payload:
+        return None
+
+    key = quoted_payload.get("key") or {}
+    msg = quoted_payload.get("message") or {}
+
+    text_preview = (
+        msg.get("conversation")
+        or (
+            (msg.get("extendedTextMessage") or {}).get("text")
+            if isinstance(msg.get("extendedTextMessage"), dict)
+            else None
+        )
+        or (
+            (msg.get("imageMessage") or {}).get("caption")
+            if isinstance(msg.get("imageMessage"), dict)
+            else None
+        )
+        or (
+            (msg.get("videoMessage") or {}).get("caption")
+            if isinstance(msg.get("videoMessage"), dict)
+            else None
+        )
+        or "[mensagem]"
+    )
+
+    from_me = _truthy_bool(key.get("fromMe"), fallback=False)
+
+    return _clean_none_deep({
+        "msg_id": key.get("id"),
+        "text": text_preview,
+        "author": "Você" if from_me else "Contato",
+        "direction": "out" if from_me else "in",
+    })
+
+
+# =========================================================
 # Contexto de envio
 # =========================================================
-def _apply_conversation_hint(body) -> Tuple[Optional[str], Optional[int], Optional[int]]:
-    kind, entity_id, inst_id = _parse_conversation_ref(getattr(body, "conversation_id", None))
-    if kind and entity_id and getattr(body, "cliente_id", None) is None:
-        body.cliente_id = int(entity_id)
-    if inst_id is not None and getattr(body, "instancia_id", None) is None and not getattr(body, "instance", None):
-        body.instancia_id = int(inst_id)
-    return kind, entity_id, inst_id
-
-
 def _resolve_send_instance(
     db: Session,
     *,
@@ -909,13 +1808,17 @@ async def _send_core(
     midias: Optional[List[Dict[str, Any]]] = None,
 ):
     ensure_perm(identity, "atendimento.enviar")
-    _dbg_json("SEND body(recebido)=", body.model_dump(exclude_none=True))
+    _dbg_json("SEND body(recebido)=", _model_dump_compat(body, exclude_none=True))
 
     destino, numero_db_norm, is_group = _destino_e_numero_norm(body.number)
     if not destino:
         raise HTTPException(400, "Número/JID inválido.")
 
-    _apply_conversation_hint(body)
+    explicit_kind, explicit_entity_id, explicit_inst_id = _apply_conversation_hint(body)
+    _assert_conversation_hint_matches_kind(
+        explicit_kind=explicit_kind,
+        is_group_destino=bool(is_group),
+    )
 
     empresa_do_token, atendente_nome = _identity_ctx(identity)
     acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_do_token)
@@ -940,6 +1843,29 @@ async def _send_core(
     )
     _assert_empresa_resolvida(empresa_do_token, empresa.id)
 
+    _assert_hint_instancia_matches_resolved(
+        explicit_inst_id=explicit_inst_id,
+        resolved_inst_id=inst_id_checked,
+    )
+
+    quoted_payload = _resolve_quoted_for_evolution(
+        db,
+        empresa_id=int(empresa.id),
+        instancia_id=int(inst_id_checked) if inst_id_checked is not None else None,
+        raw_quoted=getattr(body, "quoted", None),
+        is_group=bool(is_group),
+        destino=str(destino),
+        numero_db_norm=numero_db_norm,
+    )
+
+    evo_payload = dict(evo_payload or {})
+    if quoted_payload:
+        evo_payload["quoted"] = quoted_payload
+    else:
+        evo_payload.pop("quoted", None)
+
+    quoted_preview_payload = _quoted_preview_from_body_or_payload(body, quoted_payload)
+
     operador_id = _current_operador_id(identity)
 
     cliente_acl = None
@@ -955,7 +1881,12 @@ async def _send_core(
             allow_unassigned_department=False,
         )
 
-    # Se veio só number, tenta mapear para cliente existente antes do envio
+        _assert_number_matches_cliente(
+            cliente=cliente_acl,
+            numero_db_norm=numero_db_norm,
+            destino=str(destino),
+        )
+
     cliente_existing_by_number = None
     if not is_group and body.cliente_id is None and numero_db_norm:
         cliente_existing_by_number = _find_cliente_by_phone(
@@ -973,20 +1904,63 @@ async def _send_core(
                 allow_unassigned_department=False,
             )
 
+    cliente_para_regra = cliente_acl or cliente_existing_by_number
+    cliente_exists_before_send = False
+    if not is_group and cliente_para_regra is not None:
+        cliente_exists_before_send = _cliente_tem_historico(
+            db,
+            empresa_id=int(empresa.id),
+            cliente_id=int(cliente_para_regra.id),
+            instancia_id=int(inst_id_checked) if inst_id_checked is not None else None,
+        )
+
+    if not is_group:
+        _ensure_sender_can_send_existing_cliente(
+            db,
+            identity=identity,
+            empresa_id=int(empresa.id),
+            cliente_exists_before_send=bool(cliente_exists_before_send),
+            atendimento=atendimento_acl,
+        )
+
     evo = _evo_post(evo_path, inst_name, evo_payload)
     evo_msg_id = ((evo or {}).get("key") or {}).get("id")
     ack_now = _ack_from_send_success()
 
     if is_group:
         grp = None
+
         if body.cliente_id is not None:
             grp = (
                 db.query(models.Grupo)
                 .filter(models.Grupo.empresa_id == int(empresa.id), models.Grupo.id == int(body.cliente_id))
                 .first()
             )
-            if grp and str(getattr(grp, "remote_jid", "")).lower() != str(destino).lower():
-                grp = None
+
+            if not grp:
+                raise HTTPException(
+                    404,
+                    {
+                        "error": "grupo_nao_encontrado",
+                        "message": "Grupo da conversation_key/conversation_id não encontrado.",
+                        "grupo_id": body.cliente_id,
+                    },
+                )
+
+            _assert_destino_matches_grupo(grupo=grp, destino=str(destino))
+
+            if getattr(grp, "instancia_id", None) is not None and inst_id_checked is not None:
+                if int(getattr(grp, "instancia_id")) != int(inst_id_checked):
+                    raise HTTPException(
+                        400,
+                        {
+                            "error": "grupo_instancia_conflitante",
+                            "message": "A instância resolvida não bate com a instância cadastrada do grupo.",
+                            "grupo_id": int(grp.id),
+                            "grupo_instancia_id": int(getattr(grp, "instancia_id")),
+                            "resolved_instancia_id": int(inst_id_checked),
+                        },
+                    )
 
         if not grp:
             grp = _get_or_create_grupo(db, empresa=empresa, remote_jid=destino, instancia_id=inst_id_checked)
@@ -1004,7 +1978,11 @@ async def _send_core(
             ts_seconds=ts,
             ack=ack_now,
             message_type=group_message_type,
+            quoted=quoted_payload,
+            quoted_preview=quoted_preview_payload,
         )
+
+        conv_ref = _conv_ref_grupo(int(grp.id), inst_id_checked)
 
         await _broadcast_msg_saida_grupo(
             empresa=empresa,
@@ -1017,6 +1995,8 @@ async def _send_core(
             atendente_nome=atendente_nome,
             ack=ack_now,
             midias=midias,
+            quoted=quoted_payload,
+            quoted_preview=quoted_preview_payload,
         )
 
         return {
@@ -1024,8 +2004,13 @@ async def _send_core(
             "db": {
                 "mensagem_grupo_id": getattr(msg_g, "id", None),
                 "grupo_id": getattr(grp, "id", None),
-                "conversation_id": _conv_ref_grupo(int(grp.id), inst_id_checked),
+                "conversation_id": conv_ref,
+                "conversation_key": conv_ref,
+                "kind": "g",
+                "entity_id": int(getattr(grp, "id", 0) or 0),
                 "instancia_id": inst_id_checked,
+                "quoted": quoted_payload,
+                "quoted_preview": quoted_preview_payload,
             },
             "instance_name": inst_name,
         }
@@ -1040,6 +2025,25 @@ async def _send_core(
     if not cliente:
         return {"evolution": evo, "db": None, "instance_name": inst_name}
 
+    # Se veio conversation_key/conversation_id de cliente, o cliente final precisa ser o mesmo.
+    if explicit_kind == "cliente" and explicit_entity_id is not None:
+        if int(cliente.id) != int(explicit_entity_id):
+            raise HTTPException(
+                400,
+                {
+                    "error": "cliente_resolvido_conflitante",
+                    "message": "O cliente resolvido pelo envio não bate com a conversation_key/conversation_id.",
+                    "conversation_cliente_id": explicit_entity_id,
+                    "resolved_cliente_id": int(cliente.id),
+                },
+            )
+
+    _assert_number_matches_cliente(
+        cliente=cliente,
+        numero_db_norm=numero_db_norm,
+        destino=str(destino),
+    )
+
     atd_obj, atendimento_id, departamento_id = _resolve_atendimento_for_send(
         db,
         empresa_id=int(empresa.id),
@@ -1050,6 +2054,16 @@ async def _send_core(
         atendimento_acl=atendimento_acl,
     )
 
+    # Antes isso sempre criava/sincronizava participante ao enviar.
+    # Agora só faz isso se a conversa realmente exigir aceite.
+    # Assim uma conversa normal não vira "aceita" artificialmente.
+    if _atendimento_exige_aceite(db, atendimento=atd_obj):
+        _sync_sender_as_participant_if_needed(
+            db,
+            atendimento=atd_obj,
+            colaborador_id=operador_id,
+        )
+
     msg = _insert_msg_saida(
         db,
         empresa=empresa,
@@ -1059,7 +2073,11 @@ async def _send_core(
         instancia_id=inst_id_checked,
         atendimento_id=atendimento_id,
         ack=ack_now,
+        quoted=quoted_payload,
+        quoted_preview=quoted_preview_payload,
     )
+
+    conv_ref = _conv_ref_cliente(int(cliente.id), msg.instancia_id)
 
     await _broadcast_msg_saida_cliente(
         empresa=empresa,
@@ -1074,6 +2092,8 @@ async def _send_core(
         atendimento_id=atendimento_id,
         departamento_id=departamento_id,
         midias=midias,
+        quoted=quoted_payload,
+        quoted_preview=quoted_preview_payload,
     )
 
     return {
@@ -1083,8 +2103,13 @@ async def _send_core(
             "cliente_id": cliente.id,
             "atendimento_id": atendimento_id,
             "departamento_id": departamento_id,
-            "conversation_id": _conv_ref_cliente(int(cliente.id), msg.instancia_id),
+            "conversation_id": conv_ref,
+            "conversation_key": conv_ref,
+            "kind": "c",
+            "entity_id": int(cliente.id),
             "instancia_id": inst_id_checked,
+            "quoted": quoted_payload,
+            "quoted_preview": quoted_preview_payload,
         },
         "instance_name": inst_name,
     }
@@ -1107,7 +2132,7 @@ async def send_text(
         "linkPreview": body.linkPreview,
         "mentionsEveryOne": body.mentionsEveryOne,
         "mentioned": body.mentioned,
-        "quoted": body.quoted.model_dump(exclude_none=True) if body.quoted else None,
+        "quoted": _model_dump_compat(body.quoted, exclude_none=True) if body.quoted else None,
     }
     payload = {k: v for k, v in payload.items() if v is not None}
 
@@ -1137,7 +2162,7 @@ async def send_audio(
         "linkPreview": body.linkPreview,
         "mentionsEveryOne": body.mentionsEveryOne,
         "mentioned": body.mentioned,
-        "quoted": body.quoted.model_dump(exclude_none=True) if body.quoted else None,
+        "quoted": _model_dump_compat(body.quoted, exclude_none=True) if body.quoted else None,
     }
     payload = {k: v for k, v in payload.items() if v is not None}
 
@@ -1182,7 +2207,7 @@ async def send_media(
         "linkPreview": body.linkPreview,
         "mentionsEveryOne": body.mentionsEveryOne,
         "mentioned": body.mentioned,
-        "quoted": body.quoted.model_dump(exclude_none=True) if body.quoted else None,
+        "quoted": _model_dump_compat(body.quoted, exclude_none=True) if body.quoted else None,
     }
     payload = {k: v for k, v in payload.items() if v is not None}
 
@@ -1224,7 +2249,7 @@ async def send_sticker(
         "linkPreview": body.linkPreview,
         "mentionsEveryOne": body.mentionsEveryOne,
         "mentioned": body.mentioned,
-        "quoted": body.quoted.model_dump(exclude_none=True) if body.quoted else None,
+        "quoted": _model_dump_compat(body.quoted, exclude_none=True) if body.quoted else None,
     }
     payload = {k: v for k, v in payload.items() if v is not None}
 
@@ -1249,7 +2274,7 @@ async def send_contact(
     destino = _destino_e_numero_norm(body.number)[0]
     payload = {
         "number": destino,
-        "contact": [c.model_dump(exclude_none=True) for c in body.contact],
+        "contact": [_model_dump_compat(c, exclude_none=True) for c in body.contact],
     }
 
     return await _send_core(
@@ -1271,7 +2296,7 @@ async def send_reaction(
     identity=Depends(get_current_identity),
 ):
     ensure_perm(identity, "atendimento.reagir")
-    _dbg_json("SEND/REACTION body(recebido)=", body.model_dump(exclude_none=True))
+    _dbg_json("SEND/REACTION body(recebido)=", _model_dump_compat(body, exclude_none=True))
 
     empresa_do_token, _ = _identity_ctx(identity)
     acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_do_token)
@@ -1290,7 +2315,7 @@ async def send_reaction(
     )
     _assert_empresa_resolvida(empresa_do_token, empresa.id)
 
-    payload = {"key": body.key.model_dump(exclude_none=True), "reaction": body.reaction}
+    payload = {"key": _model_dump_compat(body.key, exclude_none=True), "reaction": body.reaction}
     evo = _evo_post("/message/sendReaction", inst_name, payload)
 
     conversa_id: Optional[int] = None
@@ -1350,6 +2375,8 @@ async def send_reaction(
                 "cliente_id": int(conversa_id),
                 "conversation_id": conversation_key,
                 "conversation_key": conversation_key,
+                "kind": "g" if is_group else "c",
+                "entity_id": int(conversa_id),
                 "is_group": bool(is_group),
                 "msg_id": body.key.id,
                 "reaction": body.reaction,
@@ -1364,6 +2391,9 @@ async def send_reaction(
         "evolution": evo,
         "cliente_id": conversa_id,
         "conversation_id": conversation_key,
+        "conversation_key": conversation_key,
+        "kind": "g" if is_group else "c",
+        "entity_id": conversa_id,
         "instancia_id": inst_id,
         "instance_name": inst_name,
         "is_group": is_group,

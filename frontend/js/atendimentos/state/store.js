@@ -3,7 +3,7 @@
 import { EMPRESA_ID } from '../core/env.js';
 
 /**
- * STORE (ZapChat Atendimentos)
+ * STORE (ZapsChat Atendimentos)
  * - Cache por empresa
  * - Conversas: por instância
  * - Histórico: unificado por (instância + conversa)
@@ -17,9 +17,10 @@ import { EMPRESA_ID } from '../core/env.js';
  *   - cacheHistoricos legado continua existindo
  *   - window.state / window.clientesCache / window.cacheHistoricos / window.persist
  *
- * Novo recomendado:
- *   - getConversasKeyed()/setConversasKeyed()/appendConversasKeyed()
- *   - pushMsgKeyed()/saveMsgsKeyed()/getMsgsKeyed()
+ * Correção importante:
+ *   - moveConversaToTopKeyed agora procura a conversa em TODAS as bases:
+ *     instância recebida, instância ativa, all e demais boxes.
+ *   - Isso evita o bug onde a prévia atualiza, mas o badge verde não aparece.
  */
 
 const EID = String(EMPRESA_ID ?? '').trim() || '0';
@@ -34,8 +35,8 @@ const LS_CLIENTES_LEGACY = `clientesCache:${EID}`;
 const LS_HIST_LEGACY = `cacheHistoricos:${EID}`;
 
 // novo
-const LS_CONVS_V2 = `zc:convs:v2:${EID}`; // { [instKey]: { items:[], nextCursor, ts } }
-const LS_HIST_V2 = `zc:hist:v2:${EID}`;   // { [instKey:conversation_key]: Mensagem[] }
+const LS_CONVS_V2 = `zc:convs:v2:${EID}`;
+const LS_HIST_V2 = `zc:hist:v2:${EID}`;
 
 /* =========================
    DB_MODE flags
@@ -115,6 +116,16 @@ function isActiveInst(instanciaKey) {
   return instKeyFromValue(instanciaKey) === getActiveInstKey();
 }
 
+function unreadFrom(src) {
+  return Number(
+    src?.novas ??
+    src?.nao_lidas ??
+    src?.unread ??
+    src?.unread_count ??
+    0
+  ) || 0;
+}
+
 /* =========================
    Conversation ref helpers
    ========================= */
@@ -157,7 +168,12 @@ function inferKindFromItem(item) {
     if (parsed?.kind) return parsed.kind;
   }
 
-  if (src?.grupo_id != null || src?.is_group === true || src?.grupo === true || src?.isGroup === true) {
+  if (
+    src?.grupo_id != null ||
+    src?.is_group === true ||
+    src?.grupo === true ||
+    src?.isGroup === true
+  ) {
     return 'g';
   }
 
@@ -253,7 +269,6 @@ function parseConversationRef(raw, row = null) {
 
   const kind = inferKindFromItem(row || {});
   const entityId =
-    (parsed && parsed.entityId) ||
     (rawStr && /^\d+$/.test(rawStr) ? rawStr : null) ||
     inferEntityIdFromItem(row || {}, kind) ||
     null;
@@ -274,13 +289,16 @@ function getAllKnownConversas() {
 
   const pushOne = (item) => {
     if (!item || typeof item !== 'object') return;
+
     const key =
       parseConversationRef(
         item?.conversation_key ?? item?.conversation_id ?? item?.id ?? null,
         item
       ).key || null;
+
     const dedupeKey = key || `raw:${Math.random()}`;
     if (seen.has(dedupeKey)) return;
+
     seen.add(dedupeKey);
     out.push(item);
   };
@@ -307,6 +325,7 @@ function resolveConversationKeyLoose(raw, row = null, instanciaKey = null) {
       row?.conversation_key ?? row?.conversation_id ?? row?.id ?? null,
       row
     );
+
     if (parseComposedConversationKey(rowRef.key)) return rowRef.key;
   }
 
@@ -316,13 +335,15 @@ function resolveConversationKeyLoose(raw, row = null, instanciaKey = null) {
     const wantedInst = instValue(instanciaKey);
     const activeInst = getActiveInstKey();
 
-    let hits = all.filter((c) => {
+    const hits = all.filter((c) => {
       const cr = parseConversationRef(
         c?.conversation_key ?? c?.conversation_id ?? c?.id ?? null,
         c
       );
+
       if (!cr.entityId || cr.entityId !== ref.entityId) return false;
       if (ref.kind && cr.kind && cr.kind !== ref.kind) return false;
+
       return true;
     });
 
@@ -334,6 +355,7 @@ function resolveConversationKeyLoose(raw, row = null, instanciaKey = null) {
         );
         return cr.instId === wantedInst;
       });
+
       if (exact) {
         return parseConversationRef(
           exact?.conversation_key ?? exact?.conversation_id ?? exact?.id ?? null,
@@ -350,6 +372,7 @@ function resolveConversationKeyLoose(raw, row = null, instanciaKey = null) {
         );
         return cr.instId === activeInst;
       });
+
       if (exactActive) {
         return parseConversationRef(
           exactActive?.conversation_key ?? exactActive?.conversation_id ?? exactActive?.id ?? null,
@@ -396,6 +419,7 @@ function kindOf(item) {
 function tsToMillisAny(x) {
   if (!x) return 0;
   if (typeof x === 'number') return x;
+
   const t = Date.parse(String(x));
   return Number.isFinite(t) ? t : 0;
 }
@@ -418,6 +442,7 @@ function scoreRecencia(c) {
 
 function sortConversasDesc(arr) {
   const list = Array.isArray(arr) ? arr.slice() : [];
+
   return list.sort((a, b) => {
     const pinCmp = Number(!!b?.pinned) - Number(!!a?.pinned);
     if (pinCmp !== 0) return pinCmp;
@@ -427,6 +452,7 @@ function sortConversasDesc(arr) {
 
     const ib = convIdOf(b) || '';
     const ia = convIdOf(a) || '';
+
     return ib.localeCompare(ia, 'pt-BR', { numeric: true, sensitivity: 'base' });
   });
 }
@@ -438,6 +464,7 @@ function normalizeConversa(item) {
   const inst = inferInstFromItem(src);
 
   let conversation_key = convIdOf(src);
+
   if (!parseComposedConversationKey(conversation_key)) {
     conversation_key = buildConversationKey(kind, entityId, inst) || conversation_key || null;
   }
@@ -484,10 +511,11 @@ function normalizeConversa(item) {
       ? (finalEntityId ?? idKey(src?.grupo_id) ?? idKey(src?.group_id) ?? null)
       : (idKey(src?.grupo_id) ?? idKey(src?.group_id) ?? null);
 
+  const unread = unreadFrom(src);
+
   return {
     ...src,
 
-    // identidade canônica
     id: finalKey ?? idKey(src?.id) ?? null,
     conversation_key: finalKey,
     conversation_id: finalKey,
@@ -495,7 +523,6 @@ function normalizeConversa(item) {
     entity_id: finalEntityId,
     backend_id: finalEntityId,
 
-    // aliases de compat
     api_id: finalEntityId,
     cliente_id,
     grupo_id,
@@ -525,7 +552,8 @@ function normalizeConversa(item) {
     last_tipo: src?.ultima_tipo ?? src?.last_tipo ?? src?.tipo ?? null,
     last_ack: src?.ultima_ack ?? src?.last_ack ?? src?.ack ?? null,
 
-    novas: Number(src?.novas ?? src?.nao_lidas ?? src?.unread ?? 0) || 0,
+    novas: unread,
+    unread_count: unread,
 
     instancia_id: finalInst,
     instancia: finalInst,
@@ -542,6 +570,7 @@ function normalizeConvsByInst(raw) {
 
   Object.entries(raw).forEach(([instKey, box]) => {
     const items = Array.isArray(box?.items) ? box.items.map(normalizeConversa) : [];
+
     out[instKeyFromValue(instKey)] = {
       items: sortConversasDesc(items),
       nextCursor: box?.nextCursor ?? null,
@@ -568,6 +597,7 @@ function sortMsgsAsc(msgs) {
 
     const ak = messageKeyOf(a) || '';
     const bk = messageKeyOf(b) || '';
+
     return ak.localeCompare(bk, 'pt-BR', { numeric: true, sensitivity: 'base' });
   });
 }
@@ -582,11 +612,9 @@ const _v2Hist = safeJsonParse(getLS(LS_HIST_V2, '{}'), {});
 const _meta = safeJsonParse(getLS(LS_META, '{"ver":2}'), { ver: 2 });
 
 export const state = {
-  // legado
   clientesCache: Array.isArray(_legacyClientes) ? _legacyClientes.map(normalizeConversa) : [],
   cacheHistoricos: (_legacyHist && typeof _legacyHist === 'object') ? _legacyHist : {},
 
-  // v2
   convsByInst: normalizeConvsByInst(_v2Convs),
   histByKey: (_v2Hist && typeof _v2Hist === 'object') ? _v2Hist : {},
 
@@ -624,7 +652,6 @@ function syncLegacyGlobals() {
   window.preloadMsgs = preloadMsgs;
   window.prependOldMsgs = prependOldMsgs;
 
-  // helpers úteis
   window.getConversationKey = getConversationKey;
   window.getConversationEntityId = getConversationEntityId;
   window.getConversationKind = getConversationKind;
@@ -653,6 +680,7 @@ export function persist() {
       LS_CLIENTES_LEGACY,
       JSON.stringify(Array.isArray(state.clientesCache) ? state.clientesCache : [])
     );
+
     setLS(LS_HIST_LEGACY, JSON.stringify(state.cacheHistoricos || {}));
   } catch {}
 
@@ -668,6 +696,7 @@ export function clearAll() {
   state.nextCursor = null;
   state.todosContatosCache = [];
   state.clienteSel = null;
+
   persist();
 }
 
@@ -713,11 +742,12 @@ export function getTodosContatosCache() {
 }
 
 /* =========================
-   CONVERSAS - V2 (por instância)
+   CONVERSAS - V2
    ========================= */
 export function getConversasKeyed(instanciaKey = null) {
   const k = instKeyFromValue(instanciaKey ?? getActiveInstKey());
   const box = state.convsByInst?.[k];
+
   return Array.isArray(box?.items) ? box.items : [];
 }
 
@@ -751,6 +781,7 @@ export function appendConversasKeyed(items, { nextCursor = null, instanciaKey = 
   const cur = Array.isArray(box.items) ? box.items.slice() : [];
 
   const map = new Map();
+
   for (const c of cur) {
     const key = convIdOf(c);
     if (key) map.set(key, c);
@@ -764,10 +795,12 @@ export function appendConversasKeyed(items, { nextCursor = null, instanciaKey = 
     const prev = map.get(key) || {};
     const merged = normalizeConversa({ ...prev, ...n });
     merged.pinned = Boolean((prev && prev.pinned) || n.pinned);
+
     map.set(key, merged);
   }
 
   const sorted = sortConversasDesc([...map.values()]);
+
   state.convsByInst[k] = {
     items: sorted,
     nextCursor: typeof nextCursor === 'undefined' ? box.nextCursor ?? null : nextCursor,
@@ -782,33 +815,184 @@ export function appendConversasKeyed(items, { nextCursor = null, instanciaKey = 
   persist();
 }
 
-export function moveConversaToTopKeyed(conversation_id, patch = {}, instanciaKey = null) {
-  const cid = resolveConversationKeyLoose(conversation_id, patch, instanciaKey);
-  if (!cid) return;
-
-  const k = instKeyFromValue(instanciaKey ?? parseConversationRef(cid).instId ?? getActiveInstKey());
+function updateConversationInsideBox(boxKey, cid, patch = {}) {
+  const k = instKeyFromValue(boxKey);
   const box = state.convsByInst[k] || { items: [], nextCursor: null, ts: 0 };
   const cur = Array.isArray(box.items) ? box.items.slice() : [];
 
   const idx = cur.findIndex((c) => idEq(convIdOf(c), cid));
-  if (idx === -1) return;
+  if (idx < 0) return false;
 
-  const updated = normalizeConversa({ ...cur[idx], ...patch, conversation_key: cid });
+  const prev = normalizeConversa(cur[idx]);
+  const mergedPatch = { ...(patch || {}) };
+
+  const oldUnread = unreadFrom(prev);
+  const patchHasUnread =
+    Object.prototype.hasOwnProperty.call(mergedPatch, 'novas') ||
+    Object.prototype.hasOwnProperty.call(mergedPatch, 'unread') ||
+    Object.prototype.hasOwnProperty.call(mergedPatch, 'unread_count') ||
+    Object.prototype.hasOwnProperty.call(mergedPatch, 'nao_lidas');
+
+  if (!patchHasUnread && oldUnread > 0) {
+    mergedPatch.novas = oldUnread;
+    mergedPatch.unread_count = oldUnread;
+  }
+
+  const updated = normalizeConversa({
+    ...prev,
+    ...mergedPatch,
+    id: cid,
+    conversation_key: cid,
+    conversation_id: cid,
+  });
+
   cur.splice(idx, 1);
   cur.unshift(updated);
 
   const sorted = sortConversasDesc(cur);
-  state.convsByInst[k] = { ...box, items: sorted, ts: Date.now() };
+
+  state.convsByInst[k] = {
+    ...box,
+    items: sorted,
+    ts: Date.now(),
+  };
 
   if (isActiveInst(k)) {
     state.clientesCache = sorted;
+    state.nextCursor = state.convsByInst[k].nextCursor ?? state.nextCursor ?? null;
+  }
+
+  return true;
+}
+
+export function moveConversaToTopKeyed(conversation_id, patch = {}, instanciaKey = null) {
+  const cid = resolveConversationKeyLoose(conversation_id, patch, instanciaKey);
+  if (!cid) return false;
+
+  const parsed = parseConversationRef(cid, patch);
+  const activeKey = getActiveInstKey();
+  const preferredKey = instKeyFromValue(instanciaKey ?? parsed.instId ?? patch?.instancia_id ?? patch?.instancia ?? activeKey);
+
+  const candidateKeys = [];
+  const addKey = (k) => {
+    const kk = instKeyFromValue(k);
+    if (!candidateKeys.includes(kk)) candidateKeys.push(kk);
+  };
+
+  addKey(preferredKey);
+  addKey(activeKey);
+  addKey(parsed.instId);
+  addKey(patch?.instancia_id);
+  addKey(patch?.instancia);
+  addKey('all');
+
+  Object.keys(state.convsByInst || {}).forEach(addKey);
+
+  let touched = false;
+
+  for (const k of candidateKeys) {
+    if (updateConversationInsideBox(k, cid, patch)) {
+      touched = true;
+    }
+  }
+
+  /*
+    Segurança extra:
+    se por algum motivo a conversa está em clientesCache mas não está
+    no box correto, atualiza a lista visível também.
+  */
+  try {
+    const arr = Array.isArray(state.clientesCache) ? state.clientesCache.slice() : [];
+    const idx = arr.findIndex((c) => idEq(convIdOf(c), cid));
+
+    if (idx >= 0) {
+      const prev = normalizeConversa(arr[idx]);
+      const oldUnread = unreadFrom(prev);
+      const mergedPatch = { ...(patch || {}) };
+
+      const patchHasUnread =
+        Object.prototype.hasOwnProperty.call(mergedPatch, 'novas') ||
+        Object.prototype.hasOwnProperty.call(mergedPatch, 'unread') ||
+        Object.prototype.hasOwnProperty.call(mergedPatch, 'unread_count') ||
+        Object.prototype.hasOwnProperty.call(mergedPatch, 'nao_lidas');
+
+      if (!patchHasUnread && oldUnread > 0) {
+        mergedPatch.novas = oldUnread;
+        mergedPatch.unread_count = oldUnread;
+      }
+
+      const updated = normalizeConversa({
+        ...prev,
+        ...mergedPatch,
+        id: cid,
+        conversation_key: cid,
+        conversation_id: cid,
+      });
+
+      arr.splice(idx, 1);
+      arr.unshift(updated);
+
+      const sorted = sortConversasDesc(arr);
+      state.clientesCache = sorted;
+
+      const ak = activeKey;
+      const box = state.convsByInst[ak] || { items: [], nextCursor: state.nextCursor ?? null, ts: 0 };
+      state.convsByInst[ak] = {
+        ...box,
+        items: sorted,
+        ts: Date.now(),
+      };
+
+      touched = true;
+    }
+  } catch {}
+
+  /*
+    Se a conversa ainda não existe em nenhuma lista, cria uma entrada mínima.
+    Isso ajuda quando chega mensagem de conversa nova via WS antes do reload.
+  */
+  if (!touched) {
+    const insertKey = preferredKey || activeKey || 'all';
+
+    const n = normalizeConversa({
+      id: cid,
+      conversation_key: cid,
+      conversation_id: cid,
+      kind: parsed.kind || patch?.kind || 'c',
+      entity_id: parsed.entityId || patch?.entity_id || patch?.cliente_id || patch?.grupo_id || null,
+      cliente_id: (parsed.kind || patch?.kind) === 'g' ? patch?.cliente_id ?? null : (parsed.entityId || patch?.cliente_id || null),
+      grupo_id: (parsed.kind || patch?.kind) === 'g' ? (parsed.entityId || patch?.grupo_id || null) : patch?.grupo_id ?? null,
+      instancia_id: parsed.instId || patch?.instancia_id || patch?.instancia || null,
+      instancia: parsed.instId || patch?.instancia_id || patch?.instancia || null,
+      ...patch,
+    });
+
+    const box = state.convsByInst[insertKey] || { items: [], nextCursor: null, ts: 0 };
+    const cur = Array.isArray(box.items) ? box.items.slice() : [];
+    cur.unshift(n);
+
+    const sorted = sortConversasDesc(cur);
+
+    state.convsByInst[insertKey] = {
+      ...box,
+      items: sorted,
+      ts: Date.now(),
+    };
+
+    if (isActiveInst(insertKey) || activeKey === insertKey) {
+      state.clientesCache = sorted;
+      state.nextCursor = state.convsByInst[insertKey].nextCursor ?? state.nextCursor ?? null;
+    }
+
+    touched = true;
   }
 
   persist();
+  return touched;
 }
 
 /* =========================
-   CONVERSAS - LEGADO (compat)
+   CONVERSAS - LEGADO
    ========================= */
 export function getConversas() {
   syncActiveCompatFromV2();
@@ -824,12 +1008,13 @@ export function appendConversas(items, { nextCursor = null } = {}) {
 }
 
 export function moveConversaToTop(conversation_id, patch = {}) {
-  moveConversaToTopKeyed(conversation_id, patch, getActiveInstKey());
+  return moveConversaToTopKeyed(conversation_id, patch, getActiveInstKey());
 }
 
 export function setNextCursor(cursor) {
   const k = getActiveInstKey();
   const box = state.convsByInst[k] || { items: [], nextCursor: null, ts: 0 };
+
   box.nextCursor = cursor;
   state.convsByInst[k] = box;
 
@@ -854,12 +1039,14 @@ function makeHistKey(instanciaKey, conversation_id) {
   const ref = parseConversationRef(conversation_id);
   const cid = resolveConversationKeyLoose(conversation_id, null, instanciaKey);
   const k = instKeyFromValue(ref.instId ?? instanciaKey ?? getActiveInstKey());
+
   return cid ? `${k}:${cid}` : `${k}:__invalid__`;
 }
 
 export function getMsgsKeyed(instanciaKey, conversation_id) {
   const hk = makeHistKey(instanciaKey, conversation_id);
   const cid = resolveConversationKeyLoose(conversation_id, null, instanciaKey);
+
   return state.histByKey[hk] || state.cacheHistoricos[String(cid)] || [];
 }
 
@@ -879,9 +1066,15 @@ export function pushMsgKeyed(instanciaKey, conversation_id, msg) {
   const cid = resolveConversationKeyLoose(conversation_id, null, instanciaKey);
   const arr = state.histByKey[hk] || state.cacheHistoricos[String(cid)] || [];
 
-  arr.push(msg);
+  const msgKey = messageKeyOf(msg);
+  const exists = msgKey ? arr.some((m) => messageKeyOf(m) === msgKey) : false;
 
-  const sorted = sortMsgsAsc(arr).slice(-MAX_MSGS_PER_CONVERSA);
+  const next = exists
+    ? arr.map((m) => messageKeyOf(m) === msgKey ? { ...m, ...msg } : m)
+    : arr.concat(msg);
+
+  const sorted = sortMsgsAsc(next).slice(-MAX_MSGS_PER_CONVERSA);
+
   state.histByKey[hk] = sorted;
   if (cid) state.cacheHistoricos[String(cid)] = sorted;
 
@@ -898,6 +1091,7 @@ export function prependOldMsgsKeyed(instanciaKey, conversation_id, olderMsgs) {
   const cur = state.histByKey[hk] || state.cacheHistoricos[String(cid)] || [];
 
   const seen = new Set(cur.map((m) => messageKeyOf(m)).filter(Boolean));
+
   const toAdd = (olderMsgs || []).filter((m) => {
     const key = messageKeyOf(m);
     if (!key) return true;
@@ -905,6 +1099,7 @@ export function prependOldMsgsKeyed(instanciaKey, conversation_id, olderMsgs) {
   });
 
   const sorted = sortMsgsAsc(toAdd.concat(cur)).slice(-MAX_MSGS_PER_CONVERSA);
+
   state.histByKey[hk] = sorted;
   if (cid) state.cacheHistoricos[String(cid)] = sorted;
 
@@ -922,6 +1117,7 @@ export function getMsgs(conversation_id) {
 export function saveMsgs(conversation_id, msgs) {
   const cid = resolveConversationKeyLoose(conversation_id) || String(conversation_id);
   const arr = sortMsgsAsc(msgs).slice(-MAX_MSGS_PER_CONVERSA);
+
   state.cacheHistoricos[String(cid)] = arr;
   persist();
 }
@@ -929,8 +1125,16 @@ export function saveMsgs(conversation_id, msgs) {
 export function pushMsg(conversation_id, msg) {
   const cid = resolveConversationKeyLoose(conversation_id) || String(conversation_id);
   const arr = state.cacheHistoricos[cid] || [];
-  arr.push(msg);
-  state.cacheHistoricos[cid] = sortMsgsAsc(arr).slice(-MAX_MSGS_PER_CONVERSA);
+
+  const msgKey = messageKeyOf(msg);
+  const exists = msgKey ? arr.some((m) => messageKeyOf(m) === msgKey) : false;
+
+  const next = exists
+    ? arr.map((m) => messageKeyOf(m) === msgKey ? { ...m, ...msg } : m)
+    : arr.concat(msg);
+
+  state.cacheHistoricos[cid] = sortMsgsAsc(next).slice(-MAX_MSGS_PER_CONVERSA);
+
   persist();
 }
 
@@ -966,15 +1170,13 @@ export function mergeIncomingMessage(conversation_id, message, instanciaKey = nu
   const targetInst = instKeyFromValue(
     parseConversationRef(cid, message).instId ??
     instanciaKey ??
+    message?.instancia_id ??
+    message?.instancia ??
     getActiveInstKey()
   );
 
   try {
     pushMsgKeyed(targetInst, cid, message);
-  } catch {}
-
-  try {
-    pushMsg(cid, message);
   } catch {}
 
   const msgTs =
@@ -986,6 +1188,7 @@ export function mergeIncomingMessage(conversation_id, message, instanciaKey = nu
 
   const preview = {
     conversation_key: cid,
+    conversation_id: cid,
     ultima_msg_id: message.id ?? message.db_id ?? message.msg_id ?? null,
     ultima_mensagem: message.texto ?? message.conteudo ?? message.mensagem ?? '',
     hora: msgTs || new Date().toISOString(),
@@ -1055,13 +1258,21 @@ export function marcarLidas(conversation_id, instanciaKey = null) {
 
   const k = instKeyFromValue(parseConversationRef(cid).instId ?? instanciaKey ?? getActiveInstKey());
 
+  const applyZero = (item) => normalizeConversa({
+    ...item,
+    novas: 0,
+    unread: 0,
+    unread_count: 0,
+    nao_lidas: 0,
+  });
+
   try {
     const box = state.convsByInst[k];
     const items = Array.isArray(box?.items) ? box.items.slice() : [];
     const i = items.findIndex((c) => idEq(convIdOf(c), cid));
 
     if (i >= 0) {
-      items[i] = normalizeConversa({ ...items[i], novas: 0 });
+      items[i] = applyZero(items[i]);
       state.convsByInst[k] = { ...(box || {}), items, ts: Date.now() };
 
       if (isActiveInst(k)) {
@@ -1073,8 +1284,9 @@ export function marcarLidas(conversation_id, instanciaKey = null) {
   try {
     const list = state.clientesCache.slice(0);
     const i = list.findIndex((c) => idEq(convIdOf(c), cid));
+
     if (i >= 0) {
-      list[i] = normalizeConversa({ ...list[i], novas: 0 });
+      list[i] = applyZero(list[i]);
       state.clientesCache = list;
     }
   } catch {}
@@ -1095,11 +1307,21 @@ export function replaceOrInsertConversa(item, instanciaKey = null) {
   const cur = Array.isArray(box.items) ? box.items.slice() : [];
 
   const idx = cur.findIndex((c) => idEq(convIdOf(c), cid));
-  if (idx >= 0) cur[idx] = normalizeConversa({ ...cur[idx], ...n });
-  else cur.push(n);
+
+  if (idx >= 0) {
+    const prev = normalizeConversa(cur[idx]);
+    cur[idx] = normalizeConversa({ ...prev, ...n });
+  } else {
+    cur.push(n);
+  }
 
   const sorted = sortConversasDesc(cur);
-  state.convsByInst[k] = { ...box, items: sorted, ts: Date.now() };
+
+  state.convsByInst[k] = {
+    ...box,
+    items: sorted,
+    ts: Date.now(),
+  };
 
   if (isActiveInst(k)) {
     state.clientesCache = sorted;
@@ -1136,6 +1358,7 @@ export function removeConversa(conversation_id, instanciaKey = null) {
     state.clientesCache = (state.clientesCache || []).filter(
       (c) => !idEq(convIdOf(c), cid)
     );
+
     delete state.cacheHistoricos[String(cid)];
   } catch {}
 
@@ -1147,6 +1370,7 @@ export function hydrateConversasFromServer(items, nextCursor = null, instanciaKe
   const box = state.convsByInst[k] || { items: [], nextCursor: null, ts: 0 };
 
   const map = new Map();
+
   for (const c of (box.items || [])) {
     const key = convIdOf(c);
     if (key) map.set(key, c);
@@ -1156,11 +1380,18 @@ export function hydrateConversasFromServer(items, nextCursor = null, instanciaKe
     const n = normalizeConversa(it);
     const key = convIdOf(n);
     if (!key) continue;
-    map.set(key, normalizeConversa({ ...(map.get(key) || {}), ...n }));
+
+    const prev = map.get(key) || {};
+    map.set(key, normalizeConversa({ ...prev, ...n }));
   }
 
   const merged = sortConversasDesc([...map.values()]);
-  state.convsByInst[k] = { items: merged, nextCursor, ts: Date.now() };
+
+  state.convsByInst[k] = {
+    items: merged,
+    nextCursor,
+    ts: Date.now(),
+  };
 
   if (isActiveInst(k)) {
     state.clientesCache = merged;
@@ -1176,7 +1407,9 @@ export function hydrateConversasFromServer(items, nextCursor = null, instanciaKe
 export function hasAnyCache() {
   const k = getActiveInstKey();
   const v2 = getConversasKeyed(k);
+
   if (Array.isArray(v2) && v2.length) return true;
+
   return !!(state.clientesCache && state.clientesCache.length > 0);
 }
 

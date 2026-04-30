@@ -115,7 +115,7 @@
     .chips{display:flex;flex-wrap:wrap;gap:.4rem;margin:.45rem 0}
     .chip{
       padding:.34rem .65rem;border-radius:.7rem;border:1px solid var(--border);
-      background:var(--bg);cursor:pointer;font-size:.84rem
+      background:var(--bg);cursor:pointer;font-size:.84rem;color:var(--fg)
     }
     .chip:hover{background:var(--hover)}
 
@@ -517,6 +517,17 @@
       gap:.6rem;
       padding-top:.2rem;
     }
+
+    .fila-soft-warning{
+      margin:.75rem 0 0;
+      border:1px solid rgba(96,165,250,.28);
+      background:rgba(96,165,250,.08);
+      color:#bfdbfe;
+      padding:.8rem .9rem;
+      border-radius:14px;
+      font-size:.92rem;
+      line-height:1.45;
+    }
   </style>
 
   <script src="/frontend/js/app-base.js" defer></script>
@@ -553,8 +564,8 @@
     <div class="inline-note">
       <i class="fa-solid fa-circle-info"></i>
       <div>
-        Configure a instância e salve.  
-        Se quiser ver explicações, exemplos e simulação, clique em <strong>Como funciona</strong>.
+        Configure a instância e salve.
+        No modo de filas, o cliente escolhe a fila pelo menu do chatbot. A fila não fica marcada automaticamente no cliente.
       </div>
     </div>
 
@@ -584,7 +595,7 @@
             <div id="autoModeNotice" class="mode-notice" hidden>
               <i class="fa-solid fa-triangle-exclamation"></i>
               <span>
-                Este modo não pode ficar ativo ao mesmo tempo que o <strong>Menu de triagem por departamento</strong>.
+                Este modo não pode ficar ativo ao mesmo tempo que o <strong>Menu para o cliente escolher a fila</strong>.
               </span>
             </div>
 
@@ -673,8 +684,8 @@
             </div>
 
             <div style="margin-top:.75rem;display:flex;gap:.5rem;justify-content:flex-end">
-              <button class="btn" id="cancelAuto"><i class="fa-solid fa-ban"></i> Cancelar</button>
-              <button class="btn primary" id="saveAuto"><i class="fa-solid fa-save"></i> Salvar</button>
+              <button class="btn" id="cancelAuto" type="button"><i class="fa-solid fa-ban"></i> Cancelar</button>
+              <button class="btn primary" id="saveAuto" type="button"><i class="fa-solid fa-save"></i> Salvar</button>
             </div>
           </div>
         </div>
@@ -682,15 +693,15 @@
 
       <article class="item" id="it-auto-dept">
         <header class="head" data-toggle="auto-dept" role="button" aria-expanded="false">
-          <div class="ico"><i class="fa-solid fa-layer-group"></i></div>
+          <div class="ico"><i class="fa-solid fa-list-check"></i></div>
           <div>
-            <div class="title">Menu para o cliente escolher o setor</div>
-            <div class="desc">Use quando quiser que o cliente escolha entre Comercial, Financeiro, Suporte, Cobrança e outros setores.</div>
+            <div class="title">Menu para o cliente escolher a fila</div>
+            <div class="desc">Use quando quiser que o cliente escolha entre filas como Comercial, Financeiro, Suporte, Cobrança e outras.</div>
           </div>
           <div class="right">
             <span id="pillDeptHdr" class="pill off">off</span>
-            <label class="tswitch" id="swDeptHdr" data-on="false" title="Ativar/desativar por departamento" tabindex="0" aria-pressed="false">
-              <input type="checkbox" aria-label="Ativar/desativar por departamento">
+            <label class="tswitch" id="swDeptHdr" data-on="false" title="Ativar/desativar menu de filas" tabindex="0" aria-pressed="false">
+              <input type="checkbox" aria-label="Ativar/desativar menu de filas">
               <span class="track"></span>
               <span class="label off">off</span>
               <span class="label on">on</span>
@@ -710,16 +721,16 @@
             </div>
 
             <div class="helper-line">
-              Configure a mensagem inicial e escolha quais departamentos o cliente poderá ver.
+              Configure a mensagem inicial e escolha quais filas o cliente poderá ver.
             </div>
 
             <div class="col-card">
               <div class="block-head">
-                <div class="block-title">Mensagem inicial da triagem</div>
+                <div class="block-title">Mensagem inicial da escolha de fila</div>
                 <div class="block-ctrl">
                   <span id="pillDeptWelcome" class="pill off">off</span>
-                  <label class="tswitch" id="swDeptWelcome" data-on="false" title="toggle dept welcome" tabindex="0">
-                    <input type="checkbox" aria-label="toggle dept welcome">
+                  <label class="tswitch" id="swDeptWelcome" data-on="false" title="toggle filas welcome" tabindex="0">
+                    <input type="checkbox" aria-label="toggle filas welcome">
                     <span class="track"></span>
                     <span class="label off">off</span>
                     <span class="label on">on</span>
@@ -729,7 +740,7 @@
               </div>
 
               <div class="helper-line">
-                Essa é a mensagem que o cliente recebe primeiro, junto com a lista de setores disponíveis.
+                Essa é a mensagem que o cliente recebe primeiro, junto com a lista de filas disponíveis.
               </div>
 
               <div id="schedDeptWelcome" class="sched">
@@ -745,33 +756,38 @@
                 </div>
               </div>
 
-              <div class="dept-picker" aria-label="Departamentos na triagem">
+              <div class="dept-picker" aria-label="Filas na triagem">
                 <div class="dept-picker-head">
-                  <div class="dept-picker-title">Departamentos na triagem</div>
-                  <div class="dept-picker-sub">Marque quais opções o cliente verá no menu.</div>
+                  <div class="dept-picker-title">Filas no menu do cliente</div>
+                  <div class="dept-picker-sub">Marque quais opções o cliente verá no menu do WhatsApp.</div>
                 </div>
 
-                <div class="dept-toolbar">
+                <div class="fila-soft-warning">
+                  <i class="fa-solid fa-circle-info"></i>
+                  As filas vêm da tela <strong>Gestão de Filas</strong>. Aqui você só escolhe quais delas aparecem no chatbot desta instância.
+                </div>
+
+                <div class="dept-toolbar" style="margin-top:.65rem">
                   <div class="dept-search">
                     <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-                    <input type="search" id="deptSearch" placeholder="Buscar departamento…">
+                    <input type="search" id="deptSearch" placeholder="Buscar fila…">
                   </div>
                   <div class="dept-actions">
-                    <button class="btn xs" id="deptAll" type="button">Todos</button>
-                    <button class="btn xs" id="deptNone" type="button">Nenhum</button>
+                    <button class="btn xs" id="deptAll" type="button">Todas</button>
+                    <button class="btn xs" id="deptNone" type="button">Nenhuma</button>
                   </div>
                 </div>
 
                 <div id="deptList" class="dept-list" role="list"></div>
 
                 <div class="dept-foot">
-                  <span id="deptCount" class="muted">0 selecionados</span>
+                  <span id="deptCount" class="muted">0 selecionadas</span>
                 </div>
               </div>
 
-              <div id="deptChips" class="chips" aria-label="Sugestões de triagem"></div>
+              <div id="deptChips" class="chips" aria-label="Sugestões de mensagem"></div>
 
-              <textarea id="msgDeptWelcome" placeholder="Mensagem inicial da triagem" disabled></textarea>
+              <textarea id="msgDeptWelcome" placeholder="Mensagem inicial da escolha de fila" disabled></textarea>
               <div class="counter" id="dwCount">0 caracteres</div>
 
               <div id="prevDept" class="preview-card" style="display:none">
@@ -783,8 +799,8 @@
               </div>
 
               <div style="margin-top:.75rem;display:flex;gap:.5rem;justify-content:flex-end">
-                <button class="btn" id="cancelDept"><i class="fa-solid fa-ban"></i> Cancelar</button>
-                <button class="btn primary" id="saveDept"><i class="fa-solid fa-save"></i> Salvar</button>
+                <button class="btn" id="cancelDept" type="button"><i class="fa-solid fa-ban"></i> Cancelar</button>
+                <button class="btn primary" id="saveDept" type="button"><i class="fa-solid fa-save"></i> Salvar</button>
               </div>
             </div>
           </div>
@@ -837,7 +853,7 @@
               <div class="v" id="sumBehaviorValue">Nada configurado</div>
             </div>
             <div class="summary-box">
-              <div class="k">Departamentos no menu</div>
+              <div class="k">Filas no menu</div>
               <div class="v" id="sumDeptValue">0</div>
             </div>
           </div>
@@ -848,7 +864,7 @@
           <div>
             <strong>Escolha 1 modo por instância.</strong><br>
             Use <strong>Resposta automática simples</strong> quando quiser só uma mensagem automática.
-            Use <strong>Menu para o cliente escolher o setor</strong> quando quiser direcionar a conversa para departamentos.
+            Use <strong>Menu para o cliente escolher a fila</strong> quando quiser que o cliente escolha para onde o atendimento deve ir.
           </div>
         </div>
 
@@ -864,7 +880,7 @@
           <div class="help-box">
             <h3><i class="fa-solid fa-shield-halved"></i> Regra importante</h3>
             <p>
-              Você pode usar <strong>ou</strong> a resposta automática simples, <strong>ou</strong> o menu por setor.
+              Você pode usar <strong>ou</strong> a resposta automática simples, <strong>ou</strong> o menu de filas.
               Os dois não ficam ativos juntos na mesma instância.
             </p>
           </div>
@@ -881,71 +897,35 @@
             <div class="help-steps">
               <div class="help-step"><div class="n">1</div><div class="txt">Você quer só cumprimentar o cliente automaticamente.</div></div>
               <div class="help-step"><div class="n">2</div><div class="txt">Você quer mandar mensagem fora do horário.</div></div>
-              <div class="help-step"><div class="n">3</div><div class="txt">Você não precisa que o cliente escolha setor.</div></div>
+              <div class="help-step"><div class="n">3</div><div class="txt">Você não precisa que o cliente escolha uma fila.</div></div>
             </div>
           </div>
 
           <div class="help-box">
-            <h3><i class="fa-solid fa-layer-group"></i> Use “Menu para o cliente escolher o setor” se:</h3>
+            <h3><i class="fa-solid fa-list-check"></i> Use “Menu para o cliente escolher a fila” se:</h3>
             <div class="help-steps">
-              <div class="help-step"><div class="n">1</div><div class="txt">Você quer separar o atendimento por departamentos.</div></div>
+              <div class="help-step"><div class="n">1</div><div class="txt">Você quer separar o atendimento por filas.</div></div>
               <div class="help-step"><div class="n">2</div><div class="txt">Você quer que o cliente escolha uma opção, como Comercial ou Financeiro.</div></div>
-              <div class="help-step"><div class="n">3</div><div class="txt">Você quer que a conversa já entre roteada para um setor.</div></div>
+              <div class="help-step"><div class="n">3</div><div class="txt">Você quer que a conversa entre aguardando na fila escolhida pelo cliente.</div></div>
             </div>
           </div>
         </div>
 
         <div class="help-box">
-          <h3><i class="fa-solid fa-comments"></i> Resposta automática simples</h3>
+          <h3><i class="fa-solid fa-list-check"></i> Menu para o cliente escolher a fila</h3>
           <p>
-            Esse modo é para respostas diretas.
-            Ele serve quando você quer mandar uma saudação automática ou uma mensagem de fora do horário, sem pedir para o cliente escolher setor.
+            Esse modo é para quando o cliente precisa escolher uma fila, como Comercial, Financeiro, Suporte ou Cobrança.
+            A fila não fica fixa no cliente. Ela só é aplicada no atendimento depois da escolha.
           </p>
 
           <div class="help-steps">
             <div class="help-step">
               <div class="n">1</div>
-              <div class="txt"><strong>Ative o modo</strong> no bloco de resposta simples.</div>
+              <div class="txt"><strong>Ative o modo</strong> de escolha de fila.</div>
             </div>
             <div class="help-step">
               <div class="n">2</div>
-              <div class="txt"><strong>Boas-vindas:</strong> envia uma primeira mensagem automática dentro do horário configurado.</div>
-            </div>
-            <div class="help-step">
-              <div class="n">3</div>
-              <div class="txt"><strong>Fora do horário:</strong> responde quando a mensagem chegar fora do expediente configurado.</div>
-            </div>
-            <div class="help-step">
-              <div class="n">4</div>
-              <div class="txt"><strong>Preview:</strong> mostra como a mensagem vai aparecer para o cliente.</div>
-            </div>
-          </div>
-
-          <div class="help-example">
-            <h4>Exemplo real</h4>
-            <pre>Cliente manda:
-"Oi"
-
-Cliente recebe:
-"Olá! 👋 Você fala com {empresa}.
-Como podemos te ajudar hoje?"</pre>
-          </div>
-        </div>
-
-        <div class="help-box">
-          <h3><i class="fa-solid fa-layer-group"></i> Menu para o cliente escolher o setor</h3>
-          <p>
-            Esse modo é para quando o cliente precisa escolher um setor, como Comercial, Financeiro, Suporte ou Cobrança.
-          </p>
-
-          <div class="help-steps">
-            <div class="help-step">
-              <div class="n">1</div>
-              <div class="txt"><strong>Ative o modo</strong> de triagem por departamento.</div>
-            </div>
-            <div class="help-step">
-              <div class="n">2</div>
-              <div class="txt">Marque quais <strong>departamentos</strong> quer mostrar no menu.</div>
+              <div class="txt">Marque quais <strong>filas</strong> quer mostrar no menu.</div>
             </div>
             <div class="help-step">
               <div class="n">3</div>
@@ -953,7 +933,7 @@ Como podemos te ajudar hoje?"</pre>
             </div>
             <div class="help-step">
               <div class="n">4</div>
-              <div class="txt">O cliente responde com o <strong>número da opção</strong> ou com o nome do setor, se reconhecido.</div>
+              <div class="txt">O cliente responde com o <strong>número da opção</strong> ou com o nome da fila.</div>
             </div>
           </div>
 
@@ -978,7 +958,7 @@ Cliente recebe:
         <div class="help-note">
           <strong>Dica importante:</strong>
           se você quer só cumprimentar o cliente automaticamente, use <strong>Resposta automática simples</strong>.
-          Se você quer que ele escolha um setor, use <strong>Menu para o cliente escolher o setor</strong>.
+          Se você quer que ele escolha para onde quer ir, use <strong>Menu para o cliente escolher a fila</strong>.
         </div>
 
         <div class="help-section-title">
@@ -1017,7 +997,7 @@ Cliente recebe:
             </div>
 
             <div class="sim-hint">
-              O simulador usa a mensagem que está escrita na tela agora, os departamentos marcados e o modo ativo da instância.
+              O simulador usa a mensagem que está escrita na tela agora, as filas marcadas e o modo ativo da instância.
             </div>
           </div>
 
@@ -1046,371 +1026,5 @@ Cliente recebe:
       </div>
     </div>
   </div>
-
-  <script>
-    (function () {
-      const $ = (s, root=document) => root.querySelector(s);
-      const $$ = (s, root=document) => Array.from(root.querySelectorAll(s));
-
-      function scheduleUiRefresh() {
-        if (scheduleUiRefresh._raf) cancelAnimationFrame(scheduleUiRefresh._raf);
-        scheduleUiRefresh._raf = requestAnimationFrame(() => {
-          updateSummary();
-          updateSimulatorBadge();
-          scheduleUiRefresh._raf = null;
-        });
-      }
-
-      function openModal(id){
-        const modal = document.getElementById(id);
-        if (!modal) return;
-        modal.hidden = false;
-        requestAnimationFrame(() => modal.classList.add('show'));
-        document.body.style.overflow = 'hidden';
-        scheduleUiRefresh();
-
-        if (id === 'chatbotHelpModal' && !$('#simChatBody')?.children.length) {
-          simulateFirstContact('Oi');
-        }
-      }
-
-      function closeModal(id){
-        const modal = document.getElementById(id);
-        if (!modal) return;
-        modal.classList.remove('show');
-        document.body.style.overflow = '';
-        setTimeout(() => { modal.hidden = true; }, 180);
-        scheduleUiRefresh();
-      }
-
-      function isChecked(id){
-        const el = document.getElementById(id);
-        return !!el?.querySelector('input')?.checked;
-      }
-
-      function safeText(v){
-        return String(v == null ? '' : v).trim();
-      }
-
-      function selectedDeptNames(){
-        return $$('#deptList .dept-row').map(row => {
-          const chk = $('input[type="checkbox"]', row);
-          const name = $('.dept-name', row);
-          if (chk?.checked && name?.textContent?.trim()) return name.textContent.trim();
-          return null;
-        }).filter(Boolean);
-      }
-
-      function activeMode(){
-        if (isChecked('swDeptHdr') && isChecked('swDeptWelcome')) return 'dept';
-        if (isChecked('swAutoHdr') && (isChecked('swWelcome') || isChecked('swOff'))) return 'auto';
-        return 'none';
-      }
-
-      function updateSummary(){
-        const inst = safeText($('#instMenuLabelChat')?.textContent) || '—';
-        const mode = activeMode();
-        const depts = selectedDeptNames();
-
-        let modeLabel = 'Nenhum ativo';
-        let behavior = 'Nada configurado';
-        let badge = 'Modo: nenhum';
-
-        if (mode === 'auto'){
-          modeLabel = 'Resposta automática simples';
-          badge = 'Modo: simples';
-          if (isChecked('swWelcome') && isChecked('swOff')){
-            behavior = 'Envia boas-vindas e também mensagem fora do horário';
-          } else if (isChecked('swWelcome')){
-            behavior = 'Envia mensagem de boas-vindas';
-          } else if (isChecked('swOff')){
-            behavior = 'Envia mensagem de fora do horário';
-          }
-        } else if (mode === 'dept'){
-          modeLabel = 'Menu para escolher setor';
-          badge = 'Modo: triagem';
-          behavior = `Mostra menu com ${depts.length || 0} departamento(s)`;
-        }
-
-        const instVal = $('#sumInstValue');
-        const instChip = $('#sumInstLabel');
-        const modeVal = $('#sumModeValue');
-        const modeChip = $('#sumModeBadge');
-        const behaviorVal = $('#sumBehaviorValue');
-        const deptVal = $('#sumDeptValue');
-
-        if (instVal) instVal.textContent = inst;
-        if (instChip) instChip.textContent = `Instância: ${inst}`;
-        if (modeVal) modeVal.textContent = modeLabel;
-        if (modeChip) modeChip.textContent = badge;
-        if (behaviorVal) behaviorVal.textContent = behavior;
-        if (deptVal) deptVal.textContent = String(depts.length);
-      }
-
-      function defaultDeptTemplate(){
-        return `Olá! 👋
-Bem-vindo(a) à {empresa}.
-
-Para direcionar seu atendimento, escolha uma opção abaixo:
-
-{menu_departamentos}
-
-Digite apenas o número da opção desejada.`;
-      }
-
-      function companyName(){
-        const txt = safeText(localStorage.getItem('empresa_nome'));
-        return txt || '[Empresa]';
-      }
-
-      function deptMenuText(){
-        const names = selectedDeptNames();
-        if (!names.length) return '1 - Comercial';
-        return names.map((n, i) => `${i + 1} - ${n}`).join('\n');
-      }
-
-      function renderDeptMessage(){
-        const raw = safeText($('#msgDeptWelcome')?.value) || defaultDeptTemplate();
-        return raw
-          .replace(/\{empresa\}/gi, companyName())
-          .replace(/\{menu_departamentos\}/gi, deptMenuText());
-      }
-
-      function renderWelcomeMessage(){
-        const raw = safeText($('#msgWelcome')?.value) || `Olá! 👋 Você fala com {empresa}.\n\nComo podemos te ajudar hoje?`;
-        return raw.replace(/\{empresa\}/gi, companyName());
-      }
-
-      function renderOffMessage(){
-        const raw = safeText($('#msgOff')?.value) || `Atendemos de 08:00 às 18:00. Deixe sua mensagem e responderemos no próximo expediente.`;
-        return raw.replace(/\{empresa\}/gi, companyName());
-      }
-
-      function parseChoice(text){
-        const raw = safeText(text);
-        const norm = raw.toLowerCase();
-        const depts = selectedDeptNames();
-        if (!depts.length) return null;
-
-        const num = norm.match(/^(\d{1,2})\b/);
-        if (num) {
-          const idx = Number(num[1]) - 1;
-          if (depts[idx]) return depts[idx];
-        }
-
-        const exact = depts.find(d => d.toLowerCase() === norm);
-        if (exact) return exact;
-
-        const contains = depts.find(d => norm.includes(d.toLowerCase()));
-        if (contains) return contains;
-
-        return null;
-      }
-
-      function setSimBadge(){
-        const el = $('#simModeBadge');
-        if (!el) return;
-        const mode = activeMode();
-        if (mode === 'auto') el.textContent = 'Modo: resposta simples';
-        else if (mode === 'dept') el.textContent = 'Modo: triagem por setor';
-        else el.textContent = 'Modo: nenhum ativo';
-      }
-      const updateSimulatorBadge = setSimBadge;
-
-      function addBubble(text, who='bot'){
-        const body = $('#simChatBody');
-        if (!body) return;
-        const div = document.createElement('div');
-        div.className = `sim-bubble ${who}`;
-        div.textContent = text;
-        body.appendChild(div);
-        body.scrollTop = body.scrollHeight;
-      }
-
-      function clearSim(){
-        const body = $('#simChatBody');
-        if (body) body.innerHTML = '';
-      }
-
-      function simulateFirstContact(customInput){
-        updateSimulatorBadge();
-        clearSim();
-
-        const txt = safeText(customInput || $('#simClientInput')?.value) || 'Oi';
-        addBubble(txt, 'client');
-
-        const mode = activeMode();
-        if (mode === 'dept'){
-          addBubble(renderDeptMessage(), 'bot');
-          return;
-        }
-        if (mode === 'auto'){
-          if (isChecked('swWelcome')) {
-            addBubble(renderWelcomeMessage(), 'bot');
-            return;
-          }
-          if (isChecked('swOff')) {
-            addBubble(renderOffMessage(), 'bot');
-            return;
-          }
-          addBubble('Nenhuma mensagem está ativa neste modo.', 'bot');
-          return;
-        }
-        addBubble('Nenhum modo está ativo nesta instância.', 'bot');
-      }
-
-      function simulateInvalidChoice(){
-        clearSim();
-        updateSimulatorBadge();
-        addBubble('tempo', 'client');
-        if (activeMode() !== 'dept'){
-          addBubble('Essa simulação faz mais sentido quando o modo de triagem por setor está ativo.', 'bot');
-          return;
-        }
-        addBubble(`Não entendi sua opção.\n\n${renderDeptMessage()}`, 'bot');
-      }
-
-      function simulateValidChoice(){
-        clearSim();
-        updateSimulatorBadge();
-        if (activeMode() !== 'dept'){
-          addBubble('Essa simulação faz mais sentido quando o modo de triagem por setor está ativo.', 'bot');
-          return;
-        }
-        const depts = selectedDeptNames();
-        const chosen = depts[1] || depts[0] || 'Comercial';
-        const idx = Math.max(1, depts.indexOf(chosen) + 1);
-        addBubble('Oi', 'client');
-        addBubble(renderDeptMessage(), 'bot');
-        addBubble(String(idx), 'client');
-        addBubble(`Perfeito! Vou te encaminhar para *${chosen}*. Só um instante 🙂`, 'bot');
-      }
-
-      function simulateOffHours(){
-        clearSim();
-        updateSimulatorBadge();
-        addBubble('Oi, tudo bem?', 'client');
-        if (activeMode() !== 'auto'){
-          addBubble('Essa simulação faz mais sentido quando a resposta automática simples está ativa.', 'bot');
-          return;
-        }
-        if (isChecked('swOff')){
-          addBubble(renderOffMessage(), 'bot');
-        } else {
-          addBubble('A mensagem de fora do horário não está ativa.', 'bot');
-        }
-      }
-
-      $('#helpChatbotBtn')?.addEventListener('click', () => openModal('chatbotHelpModal'));
-
-      $$('[data-close-modal]').forEach(btn => {
-        btn.addEventListener('click', () => closeModal(btn.getAttribute('data-close-modal')));
-      });
-
-      $$('.help-modal').forEach(modal => {
-        modal.addEventListener('click', (e) => {
-          if (e.target === modal) closeModal(modal.id);
-        });
-      });
-
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-          $$('.help-modal.show').forEach(m => closeModal(m.id));
-        }
-      });
-
-      $('#simFirstBtn')?.addEventListener('click', () => { simulateFirstContact('Oi'); scheduleUiRefresh(); });
-      $('#simInvalidBtn')?.addEventListener('click', () => { simulateInvalidChoice(); scheduleUiRefresh(); });
-      $('#simValidBtn')?.addEventListener('click', () => { simulateValidChoice(); scheduleUiRefresh(); });
-      $('#simOffBtn')?.addEventListener('click', () => { simulateOffHours(); scheduleUiRefresh(); });
-      $('#simClearBtn')?.addEventListener('click', () => { clearSim(); scheduleUiRefresh(); });
-
-      $('#simSendBtn')?.addEventListener('click', () => {
-        const val = safeText($('#simClientInput')?.value);
-        if (!val) return;
-
-        const mode = activeMode();
-        clearSim();
-
-        if (mode === 'dept'){
-          addBubble(val, 'client');
-          const chosen = parseChoice(val);
-          if (chosen) {
-            addBubble(`Perfeito! Vou te encaminhar para *${chosen}*. Só um instante 🙂`, 'bot');
-          } else {
-            addBubble(`Não entendi sua opção.\n\n${renderDeptMessage()}`, 'bot');
-          }
-          scheduleUiRefresh();
-          return;
-        }
-
-        simulateFirstContact(val);
-        scheduleUiRefresh();
-      });
-
-      $('#simClientInput')?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          $('#simSendBtn')?.click();
-        }
-      });
-
-      function bindSummaryRefresh(){
-        const directTargets = [
-          '#swAutoHdr input', '#swWelcome input', '#swOff input',
-          '#swDeptHdr input', '#swDeptWelcome input',
-          '#deptSearch', '#msgWelcome', '#msgOff', '#msgDeptWelcome',
-          '#wStart', '#wEnd', '#oStart', '#oEnd', '#dwStart', '#dwEnd'
-        ];
-
-        directTargets.forEach(sel => {
-          $$(sel).forEach(el => {
-            el.addEventListener('input', scheduleUiRefresh, { passive: true });
-            el.addEventListener('change', scheduleUiRefresh, { passive: true });
-            el.addEventListener('click', scheduleUiRefresh, { passive: true });
-          });
-        });
-
-        [
-          '#deptAll', '#deptNone',
-          '#instMenuBtnChat',
-          '#saveAuto', '#saveDept',
-          '#cancelAuto', '#cancelDept'
-        ].forEach(sel => {
-          $$(sel).forEach(el => el.addEventListener('click', scheduleUiRefresh, { passive: true }));
-        });
-
-        const deptList = document.getElementById('deptList');
-        if (deptList) {
-          const deptObs = new MutationObserver(() => scheduleUiRefresh());
-          deptObs.observe(deptList, { childList: true, subtree: true });
-        }
-
-        const instLabel = document.getElementById('instMenuLabelChat');
-        if (instLabel) {
-          const instObs = new MutationObserver(() => scheduleUiRefresh());
-          instObs.observe(instLabel, { childList: true, subtree: true, characterData: true });
-        }
-
-        ['swAutoHdr', 'swWelcome', 'swOff', 'swDeptHdr', 'swDeptWelcome'].forEach(id => {
-          const node = document.getElementById(id);
-          if (!node) return;
-          const switchObs = new MutationObserver(() => scheduleUiRefresh());
-          switchObs.observe(node, {
-            attributes: true,
-            attributeFilter: ['data-on', 'aria-pressed', 'class']
-          });
-        });
-      }
-
-      bindSummaryRefresh();
-      window.addEventListener('load', scheduleUiRefresh, { once: true });
-      document.addEventListener('DOMContentLoaded', scheduleUiRefresh, { once: true });
-
-      setTimeout(scheduleUiRefresh, 250);
-      setTimeout(scheduleUiRefresh, 900);
-      scheduleUiRefresh();
-    })();
-  </script>
 </body>
 </html>

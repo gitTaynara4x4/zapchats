@@ -1,54 +1,165 @@
-//frontend\js\atendimentos\boot\main.js
-
 /* ====================================================================
- * zapschat – Painel de Atendimento
+ * ZapsChat – Painel de Atendimento
  * /frontend/js/atendimentos/boot/main.js
  *
- * Ponto de entrada ES Module. Carrega todos os módulos em ordem e
- * dá o boot da aplicação quando o DOM estiver pronto.
+ * Ponto de entrada ES Module.
+ *
+ * Objetivo desta versão:
+ * - carregar módulos uma única vez
+ * - evitar boot duplicado
+ * - reduzir risco de loops/requisições duplicadas
+ * - manter comportamento tipo WhatsApp: mensagem nova continua chegando via realtime
  * ==================================================================== */
 
-// -------- CORE (infra/úteis) -----------------------------------------
-import '../core/env.js';        // valida EMPRESA_ID e expõe helpers de ambiente
-import '../core/format.js';     // normalize/escape/formatadores (número BR, etc.)
-import '../core/time.js';       // parse/format de datas (APP_TZ, tsToMillis, formatChatTime)
-import '../core/cache.js';      // cache TTL em localStorage + fetchWithCache
-import '../core/dom.js';        // helpers de DOM, estilos de mídia, etc.
+(function () {
+  'use strict';
 
-// -------- STATE (estado global/caches) -------------------------------
-import '../state/store.js';     // state/clientesCache/cacheHistoricos/salvarCache...
+  const MAIN_VERSION = 'zc-atendimentos-main-v2-anti-loop';
 
-// -------- DOMAIN (regras de negócio) --------------------------------
-import '../domain/ack.js';          // normalização/aplicação de ACK (getAckIcon, applyAckUpdate)
-import '../domain/clientes.js';     // carregarClientes, renderListaClientes, contatos
-import '../domain/historico.js';    // salvarNoCache, renderHistoricoDoCache, paginação
-import '../domain/instances.js';    // INSTÂNCIA_ATIVA + setInstanciaAtiva / filtros
-import '../ui/media-render.js'; // criação de HTML de mídias, players, fallbacks
+  /*
+    Se este arquivo for carregado duas vezes por engano
+    ou com cache/versionamento diferente, não deixa reinicializar tudo.
+  */
+  if (window.__ZC_ATENDIMENTOS_MAIN_PROMISE__) {
+    return;
+  }
 
-// -------- REALTIME (websocket) --------------------------------------
-import '../realtime/ws-empresa.js'; // connectEmpresaWS + eventos (ack, reload, nova msg)
+  window.__ZC_ATENDIMENTOS_MAIN_VERSION__ = MAIN_VERSION;
 
-// -------- UI (componentes/controles) --------------------------------
-import '../ui/splash.js';           // splash “Protegida com a criptografia…”
-import '../ui/envio.js';            // barra de envio: texto, anexos, gravação de áudio
-import '../ui/notif.js';            // áudio/desktop notifications + contador de não lidas
-import '../ui/perfil.js';           // shim de perfil: abrirPerfilAtual()
-import '../ui/perfil_quick.js';     // painel rápido (Evolution) ao clicar no nome/foto
-import '../ui/search.js';           // busca global e dentro do chat (F3/Ctrl+G)
-import '../ui/inst-switch.js';      // seletor de instâncias "WhatsApps (N)"
-import '../ui/notes-drawer.js';     // drawer lateral “Sobre o cliente”
-import '../ui/ia.js';               // modal/ferramentas de IA
-import '../ui/context-menu.js';
-import '../ui/new-chat.js';
-import '../ui/filtros.js';
-import '../ui/apagar.js';
+  /*
+    Flags globais ANTES dos imports dinâmicos.
+    Importante: em import estático isso chegaria tarde demais.
+  */
 
-// -------- BOOT (liga tudo ao carregar a página) ---------------------
-import { boot } from './init.js';
+  // Não fazer prefetch de histórico de várias conversas automaticamente.
+  // A conversa aberta continua carregando normal, e mensagem nova continua chegando via WS.
+  if (window.PREFETCH_HISTORIES === undefined) {
+    window.PREFETCH_HISTORIES = false;
+  }
 
-// Garante que o boot só execute após o DOM estar pronto
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => boot());
-} else {
-  boot();
-}
+  // Evita banner superior antigo.
+  window.SHOW_TOP_OPERATOR_BANNER = false;
+
+  // Exige instância resolvida antes de abrir/enviar.
+  window.ZC_REQUIRE_INSTANCE = true;
+
+  // Guardas de request/reload.
+  window.ZC_DISABLE_BOOT_DUPLICADO = true;
+  window.ZC_CONVERSAS_RELOAD_DEBOUNCE_MS = window.ZC_CONVERSAS_RELOAD_DEBOUNCE_MS || 700;
+  window.ZC_CONVERSAS_CACHE_TTL_MS = window.ZC_CONVERSAS_CACHE_TTL_MS || 8000;
+
+  function ready(fn) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', fn, { once: true });
+    } else {
+      fn();
+    }
+  }
+
+  async function importarModulos() {
+    // -------- CORE ----------------------------------------------------
+    await import('../core/env.js');
+    await import('../core/format.js');
+    await import('../core/time.js');
+    await import('../core/cache.js');
+    await import('../core/dom.js');
+
+    // -------- STATE ---------------------------------------------------
+    await import('../state/store.js');
+
+    // -------- DOMAIN --------------------------------------------------
+    await import('../domain/ack.js');
+    await import('../domain/clientes.js');
+    await import('../domain/historico.js');
+    await import('../domain/instances.js');
+
+    // -------- MEDIA ---------------------------------------------------
+    await import('../ui/media-render.js');
+
+    // -------- REALTIME -----------------------------------------------
+    await import('../realtime/ws-empresa.js');
+
+    // -------- UI ------------------------------------------------------
+    await import('../ui/splash.js');
+    await import('../ui/envio.js');
+    await import('../ui/notif.js');
+    await import('../ui/perfil.js');
+    await import('../ui/perfil_quick.js');
+    await import('../ui/search.js');
+    await import('../ui/inst-switch.js');
+    await import('../ui/notes-drawer.js');
+    await import('../ui/ia.js');
+    await import('../ui/context-menu.js');
+    await import('../ui/new-chat.js');
+    await import('../ui/filtros.js');
+    await import('../ui/apagar.js');
+    await import('../ui/transferir-departamento.js');
+    await import('../ui/header-actions.js');
+    await import('../ui/message-actions.js');
+    await import('../ui/aceitar-conversa.js');
+    await import('../ui/message-selection.js');
+    await import('../ui/forward-picker.js');
+
+    // -------- BOOT ----------------------------------------------------
+    return import('./init.js');
+  }
+
+  async function start() {
+    if (window.__ZC_ATENDIMENTOS_MAIN_STARTED__) {
+      return;
+    }
+
+    window.__ZC_ATENDIMENTOS_MAIN_STARTED__ = true;
+
+    try {
+      const initModule = await importarModulos();
+      const boot = initModule && initModule.boot;
+
+      if (typeof boot !== 'function') {
+        throw new Error('boot() não encontrado em /frontend/js/atendimentos/boot/init.js');
+      }
+
+      ready(() => {
+        try {
+          /*
+            O init.js também tem guarda própria:
+            window.__ZC_ATENDIMENTOS_BOOTED__
+            Aqui reforçamos para evitar chamada duplicada.
+          */
+          if (window.__ZC_ATENDIMENTOS_BOOT_CALLING__) {
+            return;
+          }
+
+          window.__ZC_ATENDIMENTOS_BOOT_CALLING__ = true;
+
+          Promise.resolve(boot())
+            .catch((err) => {
+              console.error('[ZapsChat][main] erro no boot:', err);
+            })
+            .finally(() => {
+              window.__ZC_ATENDIMENTOS_BOOT_CALLING__ = false;
+            });
+        } catch (err) {
+          window.__ZC_ATENDIMENTOS_BOOT_CALLING__ = false;
+          console.error('[ZapsChat][main] falha ao iniciar boot:', err);
+        }
+      });
+    } catch (err) {
+      console.error('[ZapsChat][main] erro ao carregar módulos:', err);
+
+      try {
+        const splash = document.getElementById('app-splash') || document.getElementById('splash');
+        if (splash) {
+          splash.innerHTML = `
+            <div style="padding:18px;text-align:center;color:#fff">
+              <strong>Não foi possível carregar o atendimento.</strong><br>
+              <small>Atualize a página e tente novamente.</small>
+            </div>
+          `;
+        }
+      } catch {}
+    }
+  }
+
+  window.__ZC_ATENDIMENTOS_MAIN_PROMISE__ = start();
+})();

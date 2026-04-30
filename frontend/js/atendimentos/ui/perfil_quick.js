@@ -1,1079 +1,1269 @@
 // /frontend/js/atendimentos/ui/perfil_quick.js
-// Painel RÁPIDO de perfil — abre só ao clicar no NOME/FOTO do header.
-// - Nome vem SOMENTE do BD.
-// - Ao abrir, chama /api/atendimento/clientes/:id/profile?empresa_id=...
-// - Atualiza APENAS o nome no cache e no header.
-// - Avatar não faz refresh automático no onerror; falhou => ícone.
-// - refreshAvatarFromEvolution fica manual/diário.
-// - Helpers para aplicar avatar no DOM sem re-render pesado.
-// ✅ alinhado com conversation_key canônica:
-//    c:<cliente_id>:<instancia_id> e g:<grupo_id>:<instancia_id>
-// ✅ se o BD vier sem avatar, busca automaticamente na Evolution ao abrir.
-// ✅ se o avatar 404, limpa do cache para não ficar repetindo request.
+// Clique na FOTO/NOME do header abre "Dados do cliente".
+// Para GRUPO, NÃO chama perfil de cliente. Dispara evento/função de grupo se existir.
+// Também expõe:
+//   window.zcApplyAvatarEverywhere(clienteId, avatarUrl?, opts?)
+//   window.zcApplyGroupAvatarEverywhere(grupoId, avatarUrl?, opts?)
+//
+// Otimizações desta versão:
+// - Remove loop pesado de avatar a cada 1.2s.
+// - Não usa Date.now() toda hora no src da imagem.
+// - Não chama renderListaClientes() ao atualizar avatar.
+// - Não tenta abrir /clientes/{id}/profile quando a conversa é grupo.
+// - Atualiza header/lista/caches apenas quando recebe evento, seleção ou refresh real.
 
 (() => {
-  const $ = (s, r = document) => r.querySelector(s);
-  const EMPRESA_ID = Number(window.EMPRESA_ID || localStorage.getItem('empresa_id') || 0);
+  const VERSION = 'zc-perfil-quick-v8-light-avatar-group-safe';
 
-  function ensureToast(msg, type = 'ok') {
-    if (typeof window.toast === 'function') {
-      window.toast({
-        title: type === 'ok' ? 'Pronto' : 'Erro',
-        msg,
-        type: type === 'ok' ? 'ok' : 'error',
-      });
-      return;
+  if (window.__ZC_PERFIL_QUICK_VERSION__ === VERSION) return;
+  window.__ZC_PERFIL_QUICK_VERSION__ = VERSION;
+
+  try {
+    if (window.__zcPerfilQuickEnsureInterval) {
+      clearInterval(window.__zcPerfilQuickEnsureInterval);
+      window.__zcPerfilQuickEnsureInterval = null;
     }
-    if (type === 'ok') console.log('[perfil_quick]', msg);
-    else console.error('[perfil_quick]', msg);
+  } catch {}
+
+  const $ = (s, r = document) => r.querySelector(s);
+
+  const avatarApplyTimers = new Map();
+  const lastAvatarUrlByKey = new Map();
+
+  function getEmpresaId() {
+    return (
+      window.EMPRESA_ID ||
+      window.empresa_id ||
+      window.state?.empresa_id ||
+      localStorage.getItem('empresa_id') ||
+      ''
+    );
   }
 
-  function esc(v) {
-    return String(v ?? '').replace(/[&<>"']/g, (m) => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;',
-    }[m]));
-  }
+  function parseConversationKey(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
 
-  function idKey(v) {
-    const s = String(v ?? '').trim();
-    if (!s || s === 'null' || s === 'undefined' || s === 'NaN') return null;
-    return s;
-  }
-
-  function instKey(v) {
-    const s = String(v ?? '').trim();
-    if (!s) return null;
-    if (['null', 'undefined', 'nan', '0', 'all', '*', '-'].includes(s.toLowerCase())) return null;
-    return s;
-  }
-
-  function onlyDigits(v) {
-    return String(v || '').replace(/\D+/g, '');
-  }
-
-  function parseConversationKey(raw) {
-    const s = idKey(raw);
-    if (!s) return null;
-
-    const m = s.match(/^([cg]):(\d+):([^:]+)$/i);
+    const m = raw.match(/^([cg]):(\d+):(\d+)$/i);
     if (!m) return null;
 
     return {
-      key: `${m[1].toLowerCase()}:${m[2]}:${m[3]}`,
-      kind: m[1].toLowerCase(),
-      entityId: m[2],
-      instId: instKey(m[3]),
+      raw,
+      kind: m[1].toLowerCase() === 'g' ? 'grupo' : 'cliente',
+      prefix: m[1].toLowerCase(),
+      entityId: Number(m[2]),
+      instanciaId: Number(m[3]) || null,
     };
   }
 
-  function buildConversationKey(kind, entityId, instId) {
-    const k = String(kind || '').toLowerCase() === 'g' ? 'g' : 'c';
-    const eid = idKey(entityId);
-    const iid = instKey(instId);
-    if (!eid) return null;
-    return `${k}:${eid}:${iid ?? '0'}`;
-  }
+  function idFromAny(v) {
+    if (v == null) return 0;
 
-  function kindFromObject(obj) {
-    if (!obj || typeof obj !== 'object') return 'c';
+    const s = String(v).trim();
+    if (!s || s === 'null' || s === 'undefined' || s === 'NaN') return 0;
 
-    const explicit =
-      obj.kind ??
-      obj.conversation_kind ??
-      obj.tipo_conversa ??
-      null;
-
-    const e = String(explicit || '').trim().toLowerCase();
-    if (e === 'g' || e === 'grupo' || e === 'group') return 'g';
-    if (e === 'c' || e === 'cliente' || e === 'contato') return 'c';
-
-    if (obj.is_group === true || obj.grupo === true || obj.isGroup === true || obj.grupo_id != null) {
-      return 'g';
+    const key = parseConversationKey(s);
+    if (key && Number.isFinite(key.entityId) && key.entityId > 0) {
+      return key.entityId;
     }
 
-    return 'c';
+    const n = Number(s);
+    return Number.isFinite(n) && n > 0 ? n : 0;
   }
 
-  function entityIdFromAny(raw, row = null) {
-    const parsed = parseConversationKey(raw);
-    if (parsed?.entityId) return parsed.entityId;
-
-    if (row && typeof row === 'object') {
-      const direct =
-        row.entity_id ??
-        row.backend_id ??
-        row.api_id ??
-        (kindFromObject(row) === 'g' ? row.grupo_id : row.cliente_id) ??
-        row.id_backend ??
-        null;
-
-      const d = idKey(direct);
-      if (d && /^\d+$/.test(d)) return d;
-    }
-
-    const s = idKey(raw);
-    if (s && /^\d+$/.test(s)) return s;
-
-    return null;
+  function getStateSelected() {
+    return window.state?.clienteSel || window.clienteSel || null;
   }
 
-  function instIdFromAny(raw, row = null) {
-    const parsed = parseConversationKey(raw);
-    if (parsed?.instId) return parsed.instId;
+  function getSelectedConversationKey() {
+    const hist = $('#historico');
+    const head = $('#chat-header');
+    const sel = getStateSelected();
 
-    if (row && typeof row === 'object') {
-      return (
-        instKey(row.instancia_id) ||
-        instKey(row.instancia) ||
-        instKey(row.instance_name) ||
-        instKey(row.instance) ||
-        null
-      );
-    }
-
-    return null;
-  }
-
-  function conversationRefOf(raw, row = null) {
-    if (raw && typeof raw === 'object') {
-      const obj = raw;
-
-      const fromStoreHelper = typeof window.getConversationKey === 'function'
-        ? window.getConversationKey(
-            obj.conversation_key ?? obj.conversation_id ?? obj.id ?? obj.cliente_id ?? obj.grupo_id ?? null,
-            obj,
-            obj.instancia_id ?? obj.instancia ?? obj.instance_name ?? null
-          )
-        : null;
-
-      const parsedStore = parseConversationKey(fromStoreHelper);
-      if (parsedStore) return parsedStore;
-
-      const directRaw =
-        obj.conversation_key ??
-        obj.conversation_id ??
-        obj.id ??
-        null;
-
-      const parsedDirect = parseConversationKey(directRaw);
-      if (parsedDirect) return parsedDirect;
-
-      const kind = kindFromObject(obj);
-      const entityId = entityIdFromAny(directRaw, obj);
-      const instId = instIdFromAny(directRaw, obj);
-
-      const built = buildConversationKey(kind, entityId, instId) || idKey(directRaw);
-      const parsedBuilt = parseConversationKey(built);
-
-      return parsedBuilt || {
-        key: built,
-        kind,
-        entityId,
-        instId,
-      };
-    }
-
-    const fromStoreHelper = typeof window.getConversationKey === 'function'
-      ? window.getConversationKey(raw, row || null, row?.instancia_id ?? row?.instancia ?? null)
-      : null;
-
-    const parsedStore = parseConversationKey(fromStoreHelper);
-    if (parsedStore) return parsedStore;
-
-    const parsed = parseConversationKey(raw);
-    if (parsed) return parsed;
-
-    const kind = row && typeof row === 'object' ? kindFromObject(row) : 'c';
-    const entityId = entityIdFromAny(raw, row);
-    const instId = instIdFromAny(raw, row);
-
-    const built = buildConversationKey(kind, entityId, instId) || idKey(raw);
-
-    return parseConversationKey(built) || {
-      key: built,
-      kind,
-      entityId,
-      instId,
-    };
-  }
-
-  function sameConversation(a, b) {
-    const A = conversationRefOf(a, typeof a === 'object' ? a : null);
-    const B = conversationRefOf(b, typeof b === 'object' ? b : null);
-
-    if (!A?.key || !B?.key) return false;
-    if (A.key === B.key) return true;
-
-    if (!A.entityId || !B.entityId) return false;
-    if ((A.kind || 'c') !== (B.kind || 'c')) return false;
-
-    const aInst = A.instId || '';
-    const bInst = B.instId || '';
-    return A.entityId === B.entityId && aInst === bInst;
-  }
-
-  function pickProfileAvatar(obj) {
     const candidates = [
-      obj?.avatar_url,
-      obj?.picture,
-      obj?.profilePictureUrl,
-      obj?.profilePicUrl,
-      obj?.pictureUrl,
-      obj?.avatar_remote_url,
-      obj?.imgUrl,
+      hist?.dataset?.conversationKey,
+      hist?.dataset?.conversationId,
+      hist?.dataset?.chatKey,
+      head?.dataset?.conversationKey,
+      head?.dataset?.conversationId,
+      head?.dataset?.chatKey,
+      sel?.conversation_key,
+      sel?.conversationKey,
+      sel?.conversation_id,
+      sel?.conversationId,
+      sel?.chat_key,
+      sel?.chatKey,
+      sel?.key,
     ];
 
     for (const v of candidates) {
-      const s = String(v || '').trim();
-      if (s && !/^(null|undefined|about:blank)$/i.test(s)) return s;
-    }
-    return null;
-  }
-
-  function getSelectedConversationRef() {
-    const hist = $('#historico');
-    const head = $('#chat-header');
-    const row = window.state?.clienteSel || window.clienteSel || null;
-
-    const raw =
-      idKey(hist?.dataset?.conversationKey) ||
-      idKey(hist?.dataset?.clienteId) ||
-      idKey(head?.dataset?.conversationKey) ||
-      idKey(row?.conversation_key) ||
-      idKey(row?.conversation_id) ||
-      idKey(row?.id) ||
-      null;
-
-    return conversationRefOf(raw, row).key || null;
-  }
-
-  function getSelectedKind() {
-    const hist = $('#historico');
-    const head = $('#chat-header');
-    const row = window.state?.clienteSel || window.clienteSel || null;
-
-    const direct =
-      idKey(hist?.dataset?.kind) ||
-      idKey(head?.dataset?.kind) ||
-      idKey(row?.kind) ||
-      null;
-
-    if (direct && /^(c|g)$/i.test(direct)) return direct.toLowerCase();
-
-    return conversationRefOf(getSelectedConversationRef(), row).kind || 'c';
-  }
-
-  function getClienteId() {
-    const hist = $('#historico');
-    const head = $('#chat-header');
-    const row = window.state?.clienteSel || window.clienteSel || null;
-
-    const direct =
-      idKey(hist?.dataset?.entityId) ||
-      idKey(head?.dataset?.entityId) ||
-      idKey(row?.entity_id) ||
-      idKey(row?.backend_id) ||
-      idKey(row?.api_id) ||
-      null;
-
-    if (direct && /^\d+$/.test(direct)) return direct;
-
-    const ref = conversationRefOf(getSelectedConversationRef(), row);
-    if (ref.kind !== 'c') return null;
-
-    return ref.entityId || null;
-  }
-
-  function getCurrentConversationForPatch() {
-    const row = window.state?.clienteSel || window.clienteSel || null;
-    const ref = conversationRefOf(getSelectedConversationRef(), row);
-    return ref.key || null;
-  }
-
-  function fmtDateTimeISO(v) {
-    if (!v) return '';
-    try {
-      const d = new Date(v);
-      if (Number.isNaN(d.getTime())) return '';
-      const dd = String(d.getDate()).padStart(2, '0');
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const yyyy = d.getFullYear();
-      const hh = String(d.getHours()).padStart(2, '0');
-      const mi = String(d.getMinutes()).padStart(2, '0');
-      return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
-    } catch {
-      return '';
-    }
-  }
-
-  function getInstanciaAtivaSafe() {
-    const sel = window.state?.clienteSel || null;
-    const inst =
-      instKey(sel?.instancia_id) ||
-      instKey(sel?.instancia) ||
-      instKey(window.INSTANCIA_ATIVA) ||
-      null;
-
-    if (!inst) {
-      return { instancia_id: undefined, instance: undefined };
-    }
-
-    if (/^\d+$/.test(String(inst))) {
-      return { instancia_id: Number(inst), instance: undefined };
-    }
-
-    return { instancia_id: undefined, instance: String(inst) };
-  }
-
-  function resolveInstOpt(raw) {
-    try {
-      if (raw == null) return { instancia_id: undefined, instance: undefined };
-
-      if (typeof raw === 'object') {
-        const iid = Number(raw.id || raw.instancia_id || raw.instance_id || 0) || undefined;
-        const name = raw.instance_name || raw.name || raw.instancia || raw.instance || undefined;
-        return { instancia_id: iid, instance: name };
-      }
-
-      const s = String(raw).trim();
-      if (!s) return { instancia_id: undefined, instance: undefined };
-      if (/^\d+$/.test(s)) return { instancia_id: Number(s), instance: undefined };
-      return { instancia_id: undefined, instance: s };
-    } catch {
-      return { instancia_id: undefined, instance: undefined };
-    }
-  }
-
-  function clearAvatarFromCaches(clienteId) {
-    try {
-      const cid = idKey(clienteId);
-      if (!cid) return;
-
-      const st = window.state || {};
-      const patch = { avatar_url: null, avatar_remote_url: null };
-
-      const lists = [st.clientesCache, st.todosContatosCache];
-      lists.forEach((arr) => {
-        if (!Array.isArray(arr)) return;
-        arr.forEach((item, idx) => {
-          const ref = conversationRefOf(item, item);
-          if (ref.kind === 'c' && ref.entityId === cid) {
-            arr[idx] = { ...item, ...patch };
-          }
-        });
-      });
-
-      if (st.clienteSel) {
-        const ref = conversationRefOf(st.clienteSel, st.clienteSel);
-        if (ref.kind === 'c' && ref.entityId === cid) Object.assign(st.clienteSel, patch);
-      }
-
-      try { window.persist?.(); } catch {}
-    } catch (e) {
-      console.warn('[perfil_quick] clearAvatarFromCaches falhou:', e);
-    }
-  }
-
-  const skeletonHTML = () => `
-    <div class="qcHero">
-      <div class="avatar qcSkeleton"></div>
-      <div class="info">
-        <div class="qcSk-name qcSkeleton"></div>
-        <div class="qcSk-line qcSk-line--120 qcSkeleton"></div>
-      </div>
-    </div>
-
-    <div class="qcCard">
-      <div class="label">Resumo</div>
-      <div class="qcMetaGrid">
-        <div class="qcMetaItem">
-          <div class="label">Status</div>
-          <div class="content qcSk-line qcSkeleton"></div>
-        </div>
-        <div class="qcMetaItem">
-          <div class="label">Atualizado em</div>
-          <div class="content qcSk-line qcSkeleton"></div>
-        </div>
-      </div>
-    </div>
-  `;
-
-  async function getTelefoneAsync(forClienteId) {
-    const hist = $('#historico');
-    const cands = [
-      hist?.dataset?.telefone,
-      hist?.dataset?.phone,
-      hist?.dataset?.number,
-      $('#chat-header [data-phone]')?.getAttribute?.('data-phone'),
-      $('#chat-header')?.getAttribute?.('data-phone'),
-    ];
-
-    for (const v of cands) {
-      if (v && /\d{10,}/.test(v)) return v;
-    }
-
-    const txt = $('#chat-header')?.textContent || '';
-    const m = txt.match(/(\d{10,15})/);
-    if (m) return m[1];
-
-    const cid = idKey(forClienteId || getClienteId() || '');
-    if (cid && EMPRESA_ID) {
-      try {
-        const r = await fetch(`/api/atendimento/clientes/${cid}/profile?empresa_id=${EMPRESA_ID}`, {
-          credentials: 'include',
-        });
-        if (r.ok) {
-          const j = await r.json();
-          if (j?.telefone) return j.telefone;
-        }
-      } catch {}
+      const raw = String(v || '').trim();
+      if (parseConversationKey(raw)) return raw;
     }
 
     return '';
   }
 
-  function updateHeaderNameFromBD(patch) {
-    const display =
-      (patch?.nome_whatsapp && String(patch.nome_whatsapp).trim()) ||
-      (patch?.nome && String(patch.nome).trim()) ||
-      '';
+  function getSelectedKind() {
+    const key = parseConversationKey(getSelectedConversationKey());
+    if (key) return key.kind;
 
-    if (!display) return;
+    const hist = $('#historico');
+    const head = $('#chat-header');
+    const sel = getStateSelected();
 
-    const nodes = [
-      document.getElementById('chat-title'),
-      document.querySelector('[data-role="contact-name"]'),
-    ].filter(Boolean);
+    const rawFlags = [
+      hist?.dataset?.isGroup,
+      hist?.dataset?.grupo,
+      hist?.dataset?.kind,
+      hist?.dataset?.tipo,
+      head?.dataset?.isGroup,
+      head?.dataset?.grupo,
+      head?.dataset?.kind,
+      head?.dataset?.tipo,
+      sel?.is_group,
+      sel?.isGroup,
+      sel?.grupo,
+      sel?.kind,
+      sel?.tipo,
+      sel?.conversation_kind,
+      sel?.conversationKind,
+    ];
 
-    nodes.forEach((n) => {
-      n.textContent = display;
-    });
+    for (const v of rawFlags) {
+      const s = String(v ?? '').trim().toLowerCase();
+      if (['1', 'true', 'sim', 'yes', 'grupo', 'group', 'g'].includes(s)) return 'grupo';
+      if (['0', 'false', 'nao', 'não', 'no', 'cliente', 'client', 'contact', 'c'].includes(s)) return 'cliente';
+    }
+
+    return 'cliente';
   }
 
-  function patchClienteCacheNameOnly(conversationRef, bd) {
+  function getSelectedClienteId() {
+    if (getSelectedKind() === 'grupo') return 0;
+
+    const hist = $('#historico');
+    const head = $('#chat-header');
+    const sel = getStateSelected();
+
+    const candidates = [
+      hist?.dataset?.backendClienteId,
+      hist?.dataset?.entityId,
+      hist?.dataset?.apiClienteId,
+      hist?.dataset?.clienteId,
+      hist?.dataset?.conversationKey,
+      hist?.dataset?.conversationId,
+
+      head?.dataset?.backendClienteId,
+      head?.dataset?.entityId,
+      head?.dataset?.apiClienteId,
+      head?.dataset?.clienteId,
+      head?.dataset?.conversationKey,
+      head?.dataset?.conversationId,
+
+      sel?.backend_cliente_id,
+      sel?.backendClienteId,
+      sel?.entity_id,
+      sel?.entityId,
+      sel?.cliente_id,
+      sel?.clienteId,
+      sel?.backend_id,
+      sel?.backendId,
+      sel?.id,
+      sel?.conversation_key,
+      sel?.conversationKey,
+      sel?.conversation_id,
+      sel?.conversationId,
+
+      window.CLIENTE_ID_ATUAL,
+      window.currentClienteId,
+      window.__perfilClienteIdAtual,
+    ];
+
+    for (const v of candidates) {
+      const n = idFromAny(v);
+      if (n > 0) return n;
+    }
+
+    return 0;
+  }
+
+  function getSelectedGroupId() {
+    if (getSelectedKind() !== 'grupo') return 0;
+
+    const key = parseConversationKey(getSelectedConversationKey());
+    if (key?.kind === 'grupo' && key.entityId > 0) return key.entityId;
+
+    const hist = $('#historico');
+    const head = $('#chat-header');
+    const sel = getStateSelected();
+
+    const candidates = [
+      hist?.dataset?.grupoId,
+      hist?.dataset?.groupId,
+      hist?.dataset?.entityId,
+      hist?.dataset?.clienteId,
+      hist?.dataset?.conversationKey,
+      hist?.dataset?.conversationId,
+
+      head?.dataset?.grupoId,
+      head?.dataset?.groupId,
+      head?.dataset?.entityId,
+      head?.dataset?.clienteId,
+      head?.dataset?.conversationKey,
+      head?.dataset?.conversationId,
+
+      sel?.grupo_id,
+      sel?.grupoId,
+      sel?.group_id,
+      sel?.groupId,
+      sel?.entity_id,
+      sel?.entityId,
+      sel?.cliente_id,
+      sel?.clienteId,
+      sel?.id,
+      sel?.conversation_key,
+      sel?.conversationKey,
+      sel?.conversation_id,
+      sel?.conversationId,
+    ];
+
+    for (const v of candidates) {
+      const n = idFromAny(v);
+      if (n > 0) return n;
+    }
+
+    return 0;
+  }
+
+  function getSelectedEntityId() {
+    return getSelectedKind() === 'grupo'
+      ? getSelectedGroupId()
+      : getSelectedClienteId();
+  }
+
+  function hasOpenChat() {
+    return getSelectedEntityId() > 0;
+  }
+
+  function escAttr(v) {
+    return String(v ?? '').replace(/[&<>"']/g, (ch) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }[ch]));
+  }
+
+  function cssEscapeSafe(v) {
     try {
-      const st = window.state || {};
-      const selectedKey = conversationRefOf(conversationRef, st?.clienteSel || null).key;
-      if (!selectedKey) return;
-
-      const patch = {
-        nome: bd?.nome ?? undefined,
-        nome_whatsapp: bd?.nome_whatsapp ?? undefined,
-        is_business: typeof bd?.is_business === 'boolean' ? bd.is_business : undefined,
-        status_whatsapp: bd?.status_text ?? undefined,
-        descricao: bd?.description ?? undefined,
-        website: bd?.website ?? undefined,
-        email: bd?.email ?? undefined,
-      };
-
-      const lists = [st.clientesCache, st.todosContatosCache];
-      lists.forEach((arr) => {
-        if (!Array.isArray(arr)) return;
-        const idx = arr.findIndex((x) => sameConversation(x, selectedKey));
-        if (idx >= 0) arr[idx] = { ...arr[idx], ...patch };
-      });
-
-      if (st.clienteSel && sameConversation(st.clienteSel, selectedKey)) {
-        Object.assign(st.clienteSel, patch);
+      if (window.CSS && typeof window.CSS.escape === 'function') {
+        return window.CSS.escape(String(v));
       }
+    } catch {}
+    return String(v).replace(/["\\]/g, '\\$&');
+  }
 
-      updateHeaderNameFromBD(patch);
+  function addCacheBust(url, bust = false) {
+    const s = String(url || '').trim();
+    if (!s) return null;
+    if (!bust) return s;
 
-      if (typeof window.persist === 'function') window.persist();
-      try { window.renderListaClientes?.(st.clientesCache || []); } catch {}
-      try { window.syncPreviewFromCache?.(selectedKey); } catch {}
-    } catch (e) {
-      console.warn('[perfil_quick] patchClienteCacheNameOnly falhou:', e);
+    const sep = s.includes('?') ? '&' : '?';
+    return `${s}${sep}v=${Date.now()}`;
+  }
+
+  function zcAvatarProxyUrl(id, opts = {}) {
+    const realId = idFromAny(id);
+    if (!realId) return null;
+
+    const kind = opts.kind === 'grupo' ? 'grupo' : 'cliente';
+    const empresaId = getEmpresaId();
+
+    const qs = new URLSearchParams();
+    qs.set('kind', kind);
+
+    if (empresaId) qs.set('empresa_id', String(empresaId));
+
+    return `/api/atendimento/avatar/${encodeURIComponent(realId)}?${qs.toString()}`;
+  }
+
+  function normalizeAvatarUrl(id, avatarUrl = null, opts = {}) {
+    const raw = String(avatarUrl || '').trim();
+    const bust = !!opts.bust;
+    const kind = opts.kind === 'grupo' ? 'grupo' : 'cliente';
+
+    if (raw) return addCacheBust(raw, bust);
+
+    const proxy = zcAvatarProxyUrl(id, { kind });
+    return addCacheBust(proxy, bust);
+  }
+
+  function sameUrl(a, b) {
+    try {
+      const aa = new URL(String(a || ''), location.origin);
+      const bb = new URL(String(b || ''), location.origin);
+      aa.searchParams.delete('v');
+      bb.searchParams.delete('v');
+      return aa.toString() === bb.toString();
+    } catch {
+      return String(a || '') === String(b || '');
     }
   }
 
-  function buildDrawer() {
-    if (document.getElementById('qcBackdrop')) return;
+  function markImgError(img) {
+    if (!img) return;
 
-    const backdrop = document.createElement('div');
-    backdrop.id = 'qcBackdrop';
-    backdrop.className = 'qcBackdrop';
+    img.dataset.avatarError = '1';
 
-    const drawer = document.createElement('aside');
-    drawer.id = 'qcDrawer';
-    drawer.className = 'qcDrawer';
-    drawer.setAttribute('role', 'dialog');
-    drawer.setAttribute('aria-modal', 'true');
+    if (typeof window.handleAvatarError === 'function') {
+      try {
+        window.handleAvatarError(img);
+        return;
+      } catch {}
+    }
 
-    drawer.innerHTML = `
-      <div class="qcHead">
-        <div class="qcTitle">Perfil do WhatsApp</div>
-        <button class="qcClose" id="qcClose" title="Fechar" aria-label="Fechar">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 256 256">
-            <path fill="currentColor" d="M205.66 194.34a8 8 0 0 1-11.32 11.32L128 139.31l-66.34 66.35a8 8 0 0 1-11.32-11.32L116.69 128 50.34 61.66A8 8 0 0 1 61.66 50.34L128 116.69l66.34-66.35a8 8 0 0 1 11.32 11.32L139.31 128z"/>
-          </svg>
-        </button>
-      </div>
-      <div class="qcBody" id="qcBody">${skeletonHTML()}</div>
-    `;
-
-    document.body.append(backdrop, drawer);
-
-    const close = () => {
-      backdrop.classList.remove('is-open');
-      drawer.classList.remove('is-open');
-    };
-
-    document.getElementById('qcClose')?.addEventListener('click', close);
-    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
-
-    window.__qcPerfil = {
-      open: () => {
-        backdrop.classList.add('is-open');
-        drawer.classList.add('is-open');
-      },
-      close,
-      setBody(html) {
-        const b = $('#qcBody');
-        if (b) b.innerHTML = html;
-      },
-      isOpen: () => document.getElementById('qcDrawer')?.classList.contains('is-open'),
-      setSkeleton: () => {
-        const b = $('#qcBody');
-        if (b) b.innerHTML = skeletonHTML();
-      },
-    };
-  }
-
-  function wireDrawerAvatarFallback(clienteId) {
     try {
-      const drawer = document.getElementById('qcDrawer');
-      if (!drawer) return;
-
-      const img = drawer.querySelector('.qcAvatarImg');
-      if (!img) return;
-
-      img.addEventListener('error', () => {
-        try {
-          const parent = img.parentElement;
-          img.remove();
-
-          const span = document.createElement('span');
-          span.className = 'avatar qcAvatarFallback';
-          span.innerHTML = '<i class="fa fa-user-circle"></i>';
-
-          if (parent) parent.insertBefore(span, parent.firstChild);
-        } catch {}
-
-        try {
-          clearAvatarFromCaches(clienteId);
-        } catch {}
-      }, { once: true });
+      img.removeAttribute('src');
+      img.style.display = 'none';
     } catch {}
   }
 
-  function renderProfileFromBD(bd) {
-    const name = (bd?.nome_whatsapp || bd?.nome || '').trim();
-    const isBiz = !!bd?.is_business;
-    const statusTxt = (bd?.status_text || '').trim();
-    const statusAt = bd?.status_at ? fmtDateTimeISO(bd.status_at) : '';
-    const pic = pickProfileAvatar(bd);
-    const desc = (bd?.description || bd?.descricao || '').trim();
-    const site = (bd?.website || '').trim();
-    const email = (bd?.email || '').trim();
-    const phoneShown = ($('#historico')?.dataset?.telefone || bd?.telefone || '').trim();
+  function setImgSrc(img, url, id, kind) {
+    if (!img || !url) return;
 
-    const avatarHTML = pic
-      ? `<img class="avatar qcAvatarImg" alt="" src="${esc(pic)}">`
-      : `<span class="avatar qcAvatarFallback" aria-hidden="true"><i class="fa fa-user-circle"></i></span>`;
+    const current = img.getAttribute('src') || img.src || '';
+    if (current && sameUrl(current, url) && img.dataset.avatarError !== '1') return;
 
-    return `
-      <div class="qcHero">
-        ${avatarHTML}
-        <div class="info">
-          <div class="qcName">${esc(name || '—')}</div>
-          <div class="qcPhone">${esc(phoneShown || '—')}</div>
-          ${isBiz ? `<div class="qcBadge" title="Conta comercial">Conta comercial</div>` : ''}
-        </div>
-      </div>
+    img.dataset.avatarError = '0';
+    img.dataset.avatarId = String(id || '');
+    img.dataset.avatarKind = kind === 'grupo' ? 'grupo' : 'cliente';
 
-      <div class="qcCard">
-        <div class="label">Resumo</div>
-        <div class="qcMetaGrid">
-          <div class="qcMetaItem">
-            <div class="label">Status</div>
-            <div class="content">${esc(statusTxt || '—')}</div>
-          </div>
-          ${statusAt ? `
-            <div class="qcMetaItem">
-              <div class="label">Atualizado em</div>
-              <div class="content">${esc(statusAt)}</div>
-            </div>
-          ` : ''}
-        </div>
-      </div>
+    img.setAttribute('referrerpolicy', 'no-referrer');
+    img.onerror = function () {
+      markImgError(this);
+    };
 
-      ${(isBiz || desc || site || email) ? `
-        <div class="qcCard">
-          <div class="label">Informações públicas</div>
-          <div class="qcInfoGrid">
-            ${desc ? `
-              <div class="qcInfoItem is-full">
-                <div class="label">Descrição</div>
-                <div class="content">${esc(desc)}</div>
-              </div>
-            ` : ''}
-
-            ${site ? `
-              <div class="qcInfoItem">
-                <div class="label">Website</div>
-                <div class="content">
-                  <a class="qcLink" href="${esc(site)}" target="_blank" rel="noopener">Abrir</a>
-                </div>
-              </div>
-            ` : ''}
-
-            ${email ? `
-              <div class="qcInfoItem">
-                <div class="label">E-mail</div>
-                <div class="content">
-                  <a class="qcLink" href="mailto:${esc(email)}">Enviar</a>
-                </div>
-              </div>
-            ` : ''}
-          </div>
-        </div>
-      ` : ''}
-    `;
+    img.style.display = '';
+    img.src = url;
   }
 
-  let currentReq = { ctrl: null, token: null };
+  function putImgIntoBox(box, url, id, kind, extraImgClass = '') {
+    if (!box || !url) return;
 
-  async function fetchBDProfile(clienteId, signal) {
-    if (!clienteId || !EMPRESA_ID) {
-      throw new Error('Cliente/empresa inválidos.');
+    const img = document.createElement('img');
+    img.alt = '';
+    img.dataset.avatarId = String(id || '');
+    img.dataset.avatarKind = kind === 'grupo' ? 'grupo' : 'cliente';
+
+    if (extraImgClass) img.className = extraImgClass;
+
+    img.setAttribute('referrerpolicy', 'no-referrer');
+    img.onerror = function () {
+      markImgError(this);
+    };
+
+    img.src = url;
+    box.innerHTML = '';
+    box.appendChild(img);
+  }
+
+  function candidateIdForCacheItem(c, kind) {
+    if (!c || typeof c !== 'object') return 0;
+
+    if (kind === 'grupo') {
+      const key = parseConversationKey(
+        c.conversation_key ||
+        c.conversationKey ||
+        c.conversation_id ||
+        c.conversationId ||
+        c.chat_key ||
+        c.chatKey ||
+        ''
+      );
+
+      if (key?.kind === 'grupo') return key.entityId;
+
+      const isGroup = !!(
+        c.is_group ||
+        c.isGroup ||
+        c.grupo ||
+        String(c.kind || c.tipo || '').toLowerCase() === 'grupo' ||
+        String(c.kind || c.tipo || '').toLowerCase() === 'group'
+      );
+
+      if (!isGroup) return 0;
+
+      return (
+        idFromAny(c.grupo_id) ||
+        idFromAny(c.grupoId) ||
+        idFromAny(c.group_id) ||
+        idFromAny(c.groupId) ||
+        idFromAny(c.entity_id) ||
+        idFromAny(c.entityId) ||
+        idFromAny(c.id) ||
+        idFromAny(c.cliente_id) ||
+        idFromAny(c.clienteId)
+      );
     }
 
-    const r = await fetch(`/api/atendimento/clientes/${clienteId}/profile?empresa_id=${EMPRESA_ID}`, {
-      credentials: 'include',
-      signal,
+    const key = parseConversationKey(
+      c.conversation_key ||
+      c.conversationKey ||
+      c.conversation_id ||
+      c.conversationId ||
+      c.chat_key ||
+      c.chatKey ||
+      ''
+    );
+
+    if (key?.kind === 'cliente') return key.entityId;
+    if (key?.kind === 'grupo') return 0;
+
+    return (
+      idFromAny(c.backend_cliente_id) ||
+      idFromAny(c.backendClienteId) ||
+      idFromAny(c.entity_id) ||
+      idFromAny(c.entityId) ||
+      idFromAny(c.cliente_id) ||
+      idFromAny(c.clienteId) ||
+      idFromAny(c.backend_id) ||
+      idFromAny(c.backendId) ||
+      idFromAny(c.id)
+    );
+  }
+
+  function updateCacheArray(arr, id, url, kind) {
+    if (!Array.isArray(arr)) return;
+
+    arr.forEach((c) => {
+      const cid = candidateIdForCacheItem(c, kind);
+
+      if (cid === id) {
+        c.avatar_url = url;
+        c.avatar = url;
+        c.foto = url;
+        c.foto_url = url;
+        c.profile_pic_url = url;
+        c.profilePictureUrl = url;
+
+        if (kind === 'grupo') {
+          c.group_avatar_url = url;
+          c.grupo_avatar_url = url;
+        }
+      }
     });
-
-    if (!r.ok) {
-      let raw = '';
-      try { raw = await r.text(); } catch {}
-
-      let detail = raw;
-      try {
-        const j = JSON.parse(raw);
-        detail = j?.detail || j?.message || raw;
-      } catch {}
-
-      throw new Error(`Falha ao buscar perfil no BD: ${detail || `${r.status} ${r.statusText}`}`);
-    }
-
-    return r.json();
   }
 
-  async function startFetch(clienteId, conversationKey) {
-    try { currentReq.ctrl?.abort(); } catch {}
+  function updateKnownCaches(id, url, kind) {
+    try {
+      updateCacheArray(window.state?.clientesCache, id, url, kind);
+      updateCacheArray(window.clientesCache, id, url, kind);
+      updateCacheArray(window.state?.todosContatosCache, id, url, kind);
+      updateCacheArray(window.todosContatosCache, id, url, kind);
+      updateCacheArray(window.state?.conversasCache, id, url, kind);
+      updateCacheArray(window.conversasCache, id, url, kind);
 
-    const ctrl = new AbortController();
-    const token = { clienteId: idKey(clienteId), conversationKey: idKey(conversationKey), openedAt: Date.now() };
-    currentReq = { ctrl, token };
+      const boxes = window.state?.convsByInst || {};
+      Object.values(boxes).forEach((box) => {
+        updateCacheArray(box?.items, id, url, kind);
+        updateCacheArray(box, id, url, kind);
+      });
+    } catch {}
+  }
+
+  function updateSelectedState(id, url, kind) {
+    try {
+      window.state = window.state || {};
+      const sel = window.state.clienteSel || window.clienteSel || null;
+      if (!sel) return;
+
+      const selKind = getSelectedKind();
+      const selId = kind === 'grupo'
+        ? getSelectedGroupId()
+        : getSelectedClienteId();
+
+      if (selKind === kind && selId === id) {
+        sel.avatar_url = url;
+        sel.avatar = url;
+        sel.foto = url;
+        sel.foto_url = url;
+        sel.profile_pic_url = url;
+        sel.profilePictureUrl = url;
+
+        if (kind === 'grupo') {
+          sel.group_avatar_url = url;
+          sel.grupo_avatar_url = url;
+        }
+
+        if (window.state.clienteSel) window.state.clienteSel = sel;
+        window.clienteSel = sel;
+      }
+    } catch {}
+  }
+
+  function updateHeaderAvatar(id, url, kind) {
+    try {
+      const currentKind = getSelectedKind();
+      const currentId = getSelectedEntityId();
+
+      if (currentKind !== kind || currentId !== id) return;
+
+      const av = document.getElementById('chat-avatar');
+      if (!av) return;
+
+      const existing =
+        av.querySelector('img') ||
+        av.matches?.('img') && av;
+
+      if (existing) {
+        setImgSrc(existing, url, id, kind);
+        return;
+      }
+
+      av.innerHTML = '<span class="avatar"></span>';
+      const box = av.querySelector('.avatar') || av;
+      putImgIntoBox(box, url, id, kind);
+    } catch {}
+  }
+
+  function updateListAvatar(id, url, kind) {
+    try {
+      const convKey = getSelectedConversationKey();
+      const selectors = [];
+
+      if (convKey) {
+        const ck = cssEscapeSafe(convKey);
+        selectors.push(
+          `#lista-clientes [data-conversation-key="${ck}"]`,
+          `#lista-clientes [data-chat-key="${ck}"]`,
+          `#lista-clientes [data-key="${ck}"]`,
+          `.cliente-item[data-conversation-key="${ck}"]`,
+          `.cliente-item[data-chat-key="${ck}"]`,
+          `.cliente-item[data-key="${ck}"]`,
+          `.chat-item[data-conversation-key="${ck}"]`,
+          `.chat-item[data-chat-key="${ck}"]`,
+          `.chat-item[data-key="${ck}"]`
+        );
+      }
+
+      if (kind === 'grupo') {
+        selectors.push(
+          `#lista-clientes [data-grupo-id="${id}"]`,
+          `#lista-clientes [data-group-id="${id}"]`,
+          `#lista-clientes [data-entity-id="${id}"][data-is-group="1"]`,
+          `.cliente-item[data-grupo-id="${id}"]`,
+          `.cliente-item[data-group-id="${id}"]`,
+          `.chat-item[data-grupo-id="${id}"]`,
+          `.chat-item[data-group-id="${id}"]`
+        );
+      } else {
+        selectors.push(
+          `#lista-clientes [data-id="${id}"]`,
+          `#lista-clientes [data-cliente-id="${id}"]`,
+          `#lista-clientes [data-api-cliente-id="${id}"]`,
+          `#lista-clientes [data-backend-cliente-id="${id}"]`,
+          `#lista-clientes [data-entity-id="${id}"]`,
+          `.cliente-item[data-id="${id}"]`,
+          `.cliente-item[data-cliente-id="${id}"]`,
+          `.cliente-item[data-api-cliente-id="${id}"]`,
+          `.cliente-item[data-backend-cliente-id="${id}"]`,
+          `.cliente-item[data-entity-id="${id}"]`,
+          `.chat-item[data-id="${id}"]`,
+          `.chat-item[data-cliente-id="${id}"]`
+        );
+      }
+
+      const uniqueSelectors = [...new Set(selectors)].join(',');
+      if (!uniqueSelectors) return;
+
+      document.querySelectorAll(uniqueSelectors).forEach((item) => {
+        item.dataset.avatar = url;
+        item.dataset.avatarUrl = url;
+        item.dataset.foto = url;
+
+        const img =
+          item.querySelector('img.avatar-img') ||
+          item.querySelector('.avatar img') ||
+          item.querySelector('.cliente-avatar img') ||
+          item.querySelector('.chat-avatar img') ||
+          item.querySelector('.foto img') ||
+          item.querySelector('[data-role="avatar"] img') ||
+          item.querySelector('img');
+
+        if (img) {
+          setImgSrc(img, url, id, kind);
+          return;
+        }
+
+        const box =
+          item.querySelector('.avatar') ||
+          item.querySelector('.cliente-avatar') ||
+          item.querySelector('.chat-avatar') ||
+          item.querySelector('.foto') ||
+          item.querySelector('[data-role="avatar"]');
+
+        if (box) {
+          putImgIntoBox(box, url, id, kind);
+        }
+      });
+    } catch {}
+  }
+
+  function updateAgendaAvatar(id, url, kind) {
+    if (kind !== 'cliente') return;
 
     try {
-      let bd = await fetchBDProfile(clienteId, ctrl.signal);
+      document
+        .querySelectorAll(`#agList .ag-item[data-id="${id}"]`)
+        .forEach((item) => {
+          item.dataset.avatar = url;
 
-      if (!currentReq.token || currentReq.token.clienteId !== idKey(clienteId)) return;
-      if (!window.__qcPerfil?.isOpen?.()) return;
+          const box = item.querySelector('.ag-avatar');
+          if (box) {
+            box.classList.remove('ag-avatar--default');
 
-      patchClienteCacheNameOnly(conversationKey, bd);
-
-      const hasAvatar = !!pickProfileAvatar(bd);
-
-      if (!hasAvatar) {
-        try {
-          await refreshAvatarFromEvolution(clienteId, { conversationKey });
-        } catch {}
-
-        if (!currentReq.token || currentReq.token.clienteId !== idKey(clienteId)) return;
-        if (!window.__qcPerfil?.isOpen?.()) return;
-
-        try {
-          bd = await fetchBDProfile(clienteId, ctrl.signal);
-        } catch {}
-      }
-
-      if (!currentReq.token || currentReq.token.clienteId !== idKey(clienteId)) return;
-      if (!window.__qcPerfil?.isOpen?.()) return;
-
-      window.__qcPerfil.setBody(renderProfileFromBD(bd));
-      wireDrawerAvatarFallback(clienteId);
-    } catch (err) {
-      if (err?.name === 'AbortError') return;
-
-      console.error('[perfil_quick] erro', err);
-
-      if (window.__qcPerfil?.isOpen?.()) {
-        window.__qcPerfil.setBody(`
-          <div class="qcCard">
-            <div class="label">Perfil</div>
-            <div class="content">
-              Não foi possível carregar o perfil.<br>
-              <small>${esc(String(err.message || err))}</small>
-            </div>
-          </div>
-        `);
-        ensureToast('Não foi possível carregar o perfil.', 'error');
-      }
-    }
+            const img = box.querySelector('img');
+            if (img) {
+              setImgSrc(img, url, id, kind);
+            } else {
+              putImgIntoBox(box, url, id, kind);
+            }
+          }
+        });
+    } catch {}
   }
 
-  async function abrirPerfilRapido() {
-    buildDrawer();
-    window.__qcPerfil.open();
-    window.__qcPerfil.setSkeleton();
+  function updateDrawerAvatar(id, url, kind) {
+    try {
+      document
+        .querySelectorAll([
+          '[data-cliente-avatar]',
+          '[data-role="cliente-avatar"]',
+          '[data-group-avatar]',
+          '[data-role="group-avatar"]',
+          '.cliente-dados-avatar',
+          '.perfil-avatar',
+          '.contact-avatar',
+          '.group-avatar',
+          '.drawer-avatar',
+        ].join(','))
+        .forEach((box) => {
+          const insideDrawer = box.closest(
+            '#perfilDrawer, #contactDrawer, #grupoDrawer, #groupDrawer, .perfil-drawer, .contact-drawer, .grupo-drawer, .group-drawer, .drawer, aside'
+          );
 
-    const selectedKind = getSelectedKind();
-    const conversationKey = getCurrentConversationForPatch();
+          if (!insideDrawer) return;
 
-    if (selectedKind !== 'c') {
-      window.__qcPerfil.setBody(`
-        <div class="qcCard">
-          <div class="label">Perfil</div>
-          <div class="content">
-            O perfil rápido está disponível apenas para contatos individuais.<br>
-            <small>Para grupos, use os dados da própria conversa.</small>
-          </div>
-        </div>
-      `);
+          const img = box.matches?.('img') ? box : box.querySelector('img');
+          if (img) {
+            setImgSrc(img, url, id, kind);
+          }
+        });
+    } catch {}
+  }
+
+  function dispatchAvatarEvent(id, url, kind) {
+    try {
+      window.dispatchEvent(
+        new CustomEvent(kind === 'grupo' ? 'zc:grupo-avatar-updated' : 'zc:cliente-avatar-updated', {
+          detail: kind === 'grupo'
+            ? { grupo_id: id, id, avatar_url: url, kind }
+            : { cliente_id: id, id, avatar_url: url, kind },
+        })
+      );
+    } catch {}
+  }
+
+  function applyAvatarGeneric(idRaw, avatarUrl = null, opts = {}) {
+    const id = idFromAny(idRaw);
+    if (!id) return;
+
+    const kind = opts.kind === 'grupo' ? 'grupo' : 'cliente';
+    const bust = !!opts.bust;
+    const force = !!opts.force;
+
+    const url = normalizeAvatarUrl(id, avatarUrl, { kind, bust });
+    if (!url) return;
+
+    const mapKey = `${kind}:${id}`;
+    const last = lastAvatarUrlByKey.get(mapKey);
+
+    if (!force && last && sameUrl(last, url)) {
+      // Mesmo URL: ainda atualiza DOM porque a lista/header pode ter sido re-renderizado.
+    } else {
+      lastAvatarUrlByKey.set(mapKey, url);
+    }
+
+    updateSelectedState(id, url, kind);
+    updateKnownCaches(id, url, kind);
+    updateHeaderAvatar(id, url, kind);
+    updateListAvatar(id, url, kind);
+    updateAgendaAvatar(id, url, kind);
+    updateDrawerAvatar(id, url, kind);
+    dispatchAvatarEvent(id, url, kind);
+  }
+
+  function zcApplyAvatarEverywhere(clienteId, avatarUrl = null, opts = {}) {
+    applyAvatarGeneric(clienteId, avatarUrl, {
+      ...opts,
+      kind: 'cliente',
+    });
+  }
+
+  function zcApplyGroupAvatarEverywhere(grupoId, avatarUrl = null, opts = {}) {
+    applyAvatarGeneric(grupoId, avatarUrl, {
+      ...opts,
+      kind: 'grupo',
+    });
+  }
+
+  function scheduleAvatarSpread(idRaw, avatarUrl = null, opts = {}) {
+    const id = idFromAny(idRaw);
+    if (!id) return;
+
+    const kind = opts.kind === 'grupo' ? 'grupo' : 'cliente';
+    const key = `${kind}:${id}:${String(avatarUrl || '')}:${opts.bust ? 'bust' : 'stable'}`;
+
+    if (avatarApplyTimers.has(key)) return;
+
+    const timers = [];
+
+    [80, 350].forEach((ms) => {
+      const t = setTimeout(() => {
+        try {
+          applyAvatarGeneric(id, avatarUrl, {
+            kind,
+            bust: !!opts.bust,
+            force: ms === 350,
+          });
+        } catch {}
+      }, ms);
+
+      timers.push(t);
+    });
+
+    avatarApplyTimers.set(key, timers);
+
+    setTimeout(() => {
+      avatarApplyTimers.delete(key);
+    }, 900);
+  }
+
+  window.zcAvatarProxyUrl = zcAvatarProxyUrl;
+  window.zcApplyAvatarEverywhere = zcApplyAvatarEverywhere;
+  window.zcApplyGroupAvatarEverywhere = zcApplyGroupAvatarEverywhere;
+
+  function removeLegacyQuickProfile() {
+    try { document.getElementById('btn-perfil')?.remove(); } catch {}
+    try { document.getElementById('qcBackdrop')?.remove(); } catch {}
+    try { document.getElementById('qcDrawer')?.remove(); } catch {}
+
+    try {
+      document.querySelectorAll('.qcBackdrop, .qcDrawer').forEach((el) => el.remove());
+    } catch {}
+  }
+
+  function isBlockedTarget(target) {
+    if (!target) return false;
+
+    return !!target.closest([
+      '.zc-chat-actions',
+      '.zc-chat-header-actions',
+      '.zc-chat-icon-btn',
+      '#btn-chat-search',
+      '#btn-chat-more',
+      '.zc-transfer-top-btn',
+      '.zc-chat-searchbar',
+      '.zc-chat-more-menu',
+      'button',
+      'a',
+      'input',
+      'textarea',
+      'select',
+      '[data-no-profile="1"]',
+    ].join(','));
+  }
+
+  function isOpenTarget(target) {
+    if (!target) return false;
+
+    return !!target.closest([
+      '#chat-avatar',
+      '#chat-avatar img',
+      '#chat-avatar .avatar',
+      '#chat-title',
+      '#chat-header .title',
+      '#chat-header .chat-title',
+      '#chat-header [data-role="chat-title"]',
+      '#chat-header [data-role="contact-name"]',
+      '#chat-header [data-role="contact-avatar"]',
+      '#chat-header .name',
+      '#chat-header .user-name',
+      '#chat-header .contact-name',
+    ].join(','));
+  }
+
+  async function openGroupData() {
+    const gid = getSelectedGroupId();
+    if (!gid) return;
+
+    scheduleAvatarSpread(gid, null, { kind: 'grupo', bust: false });
+
+    const fns = [
+      window.abrirGrupoAtual,
+      window.abrirDadosGrupoAtual,
+      window.abrirPerfilGrupoAtual,
+      window.openGroupProfile,
+      window.openGroupData,
+    ];
+
+    for (const fn of fns) {
+      if (typeof fn !== 'function') continue;
+
+      try {
+        await fn({ grupo_id: gid, id: gid, conversation_key: getSelectedConversationKey() });
+        return;
+      } catch (err) {
+        console.error('[perfil_quick] erro ao abrir dados do grupo:', err);
+      }
+    }
+
+    try {
+      document.dispatchEvent(
+        new CustomEvent('zc:open-group-data', {
+          detail: {
+            grupo_id: gid,
+            id: gid,
+            conversation_key: getSelectedConversationKey(),
+          },
+        })
+      );
+    } catch {}
+  }
+
+  async function openContactData() {
+    removeLegacyQuickProfile();
+
+    if (!hasOpenChat()) return;
+
+    if (getSelectedKind() === 'grupo') {
+      await openGroupData();
       return;
     }
 
-    const cid = getClienteId();
-    if (!cid || !conversationKey) {
-      window.__qcPerfil.setBody(`
-        <div class="qcCard">
-          <div class="label">Perfil</div>
-          <div class="content">
-            Não foi possível carregar o perfil.<br>
-            <small>Cliente não selecionado.</small>
-          </div>
-        </div>
-      `);
-      return;
+    if (typeof window.abrirPerfilAtual === 'function') {
+      try {
+        await window.abrirPerfilAtual({});
+        return;
+      } catch (err) {
+        console.error('[perfil_quick] erro ao abrir dados do contato:', err);
+      }
     }
 
-    await startFetch(cid, conversationKey);
+    try {
+      document.dispatchEvent(new CustomEvent('zc:open-contact-data', { detail: {} }));
+    } catch {}
   }
 
-  window.abrirPerfilRapido = abrirPerfilRapido;
+  function applyClickableState() {
+    const els = document.querySelectorAll([
+      '#chat-avatar',
+      '#chat-avatar img',
+      '#chat-avatar .avatar',
+      '#chat-title',
+      '#chat-header .title',
+      '#chat-header .chat-title',
+      '#chat-header [data-role="chat-title"]',
+      '#chat-header [data-role="contact-name"]',
+      '#chat-header [data-role="contact-avatar"]',
+      '#chat-header .name',
+      '#chat-header .user-name',
+      '#chat-header .contact-name',
+    ].join(','));
 
-  const BLOCK_OPEN_SELECTOR = [
-    '.btn-note', '.btn-notes', '[data-action="notes"]',
-    '.btn-gpt', '.btn-ai', '[data-action="ai"]',
-    '.btn', 'button', 'a[href]', '[role="button"]',
-    '[data-no-profile="1"]',
-  ].join(',');
+    els.forEach((el) => {
+      if (hasOpenChat()) {
+        el.style.cursor = 'pointer';
+        el.setAttribute('data-open-contact-drawer', '1');
+      } else {
+        el.style.cursor = '';
+        el.removeAttribute('data-open-contact-drawer');
+      }
+    });
+  }
 
-  const OPEN_TARGET_SELECTOR = [
-    '#chat-title',
-    '#chat-avatar',
-    '#chat-avatar .avatar',
-    '#chat-avatar img',
-    '[data-role="contact-name"]',
-    '[data-role="contact-avatar"]',
-  ].join(',');
-
-  function attachHeaderHook() {
+  function bindHeaderOnce() {
     const hdr = document.getElementById('chat-header');
-    if (!hdr || hdr.dataset.qcBound === '1') return;
-    hdr.dataset.qcBound = '1';
+    if (!hdr || hdr.dataset.zcPerfilQuickBound === VERSION) return;
 
-    hdr.addEventListener('click', (e) => {
+    hdr.dataset.zcPerfilQuickBound = VERSION;
+
+    hdr.addEventListener('click', async (e) => {
       const t = e.target;
       if (!t) return;
-      if (t.closest(BLOCK_OPEN_SELECTOR)) return;
 
-      const openFrom = t.closest(OPEN_TARGET_SELECTOR);
-      if (!openFrom) return;
-
-      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      if (isBlockedTarget(t)) return;
+      if (!isOpenTarget(t)) return;
+      if (!hasOpenChat()) return;
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
 
       e.preventDefault();
+      e.stopPropagation();
       e.stopImmediatePropagation?.();
-      e.stopPropagation();
 
-      abrirPerfilRapido();
-    }, { capture: true, passive: false });
-
-    hdr.addEventListener('click', (e) => {
-      const t = e.target;
-      if (!t || t.closest(BLOCK_OPEN_SELECTOR)) return;
-      if (!t.closest(OPEN_TARGET_SELECTOR)) return;
-      if (e.defaultPrevented) return;
-      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      abrirPerfilRapido();
-    }, { passive: false });
+      await openContactData();
+    }, true);
   }
 
-  (function watchHeader() {
-    const hdrEl = document.getElementById('chat-header');
-    if (hdrEl) {
-      const mo = new MutationObserver(() => attachHeaderHook());
-      mo.observe(hdrEl, { childList: true, subtree: true });
-    }
-    attachHeaderHook();
-  })();
+  function watchHeader() {
+    const hdr = document.getElementById('chat-header');
+    if (!hdr || hdr.__zcPerfilQuickObsVersion === VERSION) return;
 
-  (function watchHistoricoCliente() {
-    const hist = document.getElementById('historico');
-    if (!hist) return;
+    hdr.__zcPerfilQuickObsVersion = VERSION;
+
+    try {
+      if (hdr.__zcPerfilQuickObs) {
+        hdr.__zcPerfilQuickObs.disconnect();
+      }
+    } catch {}
+
+    let timer = null;
 
     const mo = new MutationObserver(() => {
-      const open = window.__qcPerfil?.isOpen?.();
-      const selectedKind = getSelectedKind();
-      const newCid = getClienteId();
-      const newConv = getCurrentConversationForPatch();
-
-      if (open) {
-        window.__qcPerfil.setSkeleton();
-
-        if (selectedKind === 'c' && newCid && newConv) {
-          startFetch(newCid, newConv);
-        } else {
-          currentReq.ctrl?.abort();
-          window.__qcPerfil.setBody(`
-            <div class="qcCard">
-              <div class="label">Perfil</div>
-              <div class="content">
-                O perfil rápido está disponível apenas para contatos individuais.
-              </div>
-            </div>
-          `);
-        }
-      } else {
-        currentReq.ctrl?.abort();
-      }
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        removeLegacyQuickProfile();
+        bindHeaderOnce();
+        applyClickableState();
+      }, 120);
     });
 
-    mo.observe(hist, {
+    mo.observe(hdr, {
+      childList: true,
+      subtree: true,
       attributes: true,
-      attributeFilter: ['data-conversation-key', 'data-kind', 'data-entity-id', 'data-cliente-id']
+      attributeFilter: ['class', 'style', 'data-conversation-key', 'data-cliente-id', 'data-grupo-id'],
     });
-  })();
 
-  function ensureAvatarPlaceholder(span, mode = 'list') {
-    try {
-      if (!span) return;
-      span.classList.add(mode === 'header' ? 'avatar-default' : 'placeholder');
-      span.innerHTML = '<i class="fa fa-user-circle"></i>';
-    } catch {}
+    hdr.__zcPerfilQuickObs = mo;
   }
 
-  window.handleListAvatarError = function handleListAvatarError(imgEl) {
-    try {
-      if (!imgEl) return;
-      try { imgEl.onerror = null; } catch {}
+  function bindAvatarRefreshHooks() {
+    if (window.__zcAvatarRefreshHooksBoundVersion === VERSION) return;
+    window.__zcAvatarRefreshHooksBoundVersion = VERSION;
 
-      const li = imgEl?.closest?.('[data-conversation-key], [data-id]');
-      const conv =
-        li?.getAttribute?.('data-conversation-key') ||
-        li?.getAttribute?.('data-id') ||
-        null;
+    [
+      'zc:profile-updated',
+      'zc:contact-profile-updated',
+      'zc:contact-refreshed',
+      'zc:perfil-atualizado',
+      'cliente:profile-updated',
+      'cliente:avatar-updated',
+    ].forEach((evName) => {
+      window.addEventListener(evName, (ev) => {
+        const d = ev?.detail || {};
 
-      const entityId =
-        li?.getAttribute?.('data-entity-id') ||
-        conversationRefOf(conv).entityId ||
-        null;
+        const id =
+          idFromAny(d.cliente_id) ||
+          idFromAny(d.clienteId) ||
+          idFromAny(d.id) ||
+          idFromAny(d.entity_id) ||
+          idFromAny(d.entityId) ||
+          0;
 
-      const span = imgEl.closest?.('.avatar') || imgEl.parentElement;
+        const url =
+          d.avatar_url ||
+          d.profile_avatar_url ||
+          d.profilePictureUrl ||
+          d.profile_picture_url ||
+          d.avatar ||
+          d.foto ||
+          null;
 
-      try { imgEl.removeAttribute('src'); } catch {}
-      try { imgEl.remove(); } catch {}
+        if (id) {
+          scheduleAvatarSpread(id, url, { kind: 'cliente', bust: true });
+        }
+      });
+    });
 
-      ensureAvatarPlaceholder(span, 'list');
+    [
+      'zc:group-profile-updated',
+      'zc:group-refreshed',
+      'zc:grupo-atualizado',
+      'grupo:profile-updated',
+      'grupo:avatar-updated',
+    ].forEach((evName) => {
+      window.addEventListener(evName, (ev) => {
+        const d = ev?.detail || {};
 
-      if (entityId && conversationRefOf(conv).kind === 'c') {
-        clearAvatarFromCaches(entityId);
-      }
+        const id =
+          idFromAny(d.grupo_id) ||
+          idFromAny(d.grupoId) ||
+          idFromAny(d.group_id) ||
+          idFromAny(d.groupId) ||
+          idFromAny(d.id) ||
+          idFromAny(d.entity_id) ||
+          idFromAny(d.entityId) ||
+          0;
 
-      try { window.persist?.(); } catch {}
-    } catch {}
-  };
+        const url =
+          d.avatar_url ||
+          d.group_avatar_url ||
+          d.grupo_avatar_url ||
+          d.profilePictureUrl ||
+          d.profile_picture_url ||
+          d.avatar ||
+          d.foto ||
+          null;
 
-  window.handleAvatarError = function handleAvatarError(imgEl) {
-    try {
-      if (!imgEl) return;
-      try { imgEl.onerror = null; } catch {}
+        if (id) {
+          scheduleAvatarSpread(id, url, { kind: 'grupo', bust: true });
+        }
+      });
+    });
 
-      const entityId = getClienteId();
-      const span = imgEl.closest?.('.avatar') || imgEl.parentElement;
+    const tryWrapClientRefresh = () => {
+      const fn = window.refreshAvatarFromEvolution;
+      if (typeof fn !== 'function') return false;
+      if (fn.__zcWrappedAvatarRefreshVersion === VERSION) return true;
 
-      try { imgEl.removeAttribute('src'); } catch {}
-      try { imgEl.remove(); } catch {}
+      const wrapped = async function (...args) {
+        const fallbackId = idFromAny(args[0]);
+        const resp = await fn.apply(this, args);
 
-      ensureAvatarPlaceholder(span, 'header');
+        const realId =
+          idFromAny(resp?.cliente_id) ||
+          idFromAny(resp?.clienteId) ||
+          idFromAny(resp?.id) ||
+          idFromAny(resp?.entity_id) ||
+          idFromAny(resp?.entityId) ||
+          fallbackId;
 
-      if (entityId) {
-        clearAvatarFromCaches(entityId);
-      }
+        const url =
+          resp?.avatar_url ||
+          resp?.profile_avatar_url ||
+          resp?.profilePictureUrl ||
+          resp?.profile_picture_url ||
+          resp?.avatar ||
+          resp?.foto ||
+          null;
 
-      try { window.persist?.(); } catch {}
-    } catch {}
-  };
+        if (realId) {
+          scheduleAvatarSpread(realId, url, { kind: 'cliente', bust: true });
+        }
 
-  function applyAvatarToListDOM(conversationKey, url) {
-    try {
-      const convKey = idKey(conversationKey);
-      if (!convKey) return;
-
-      const li = document.querySelector(
-        `li.chat-item[data-conversation-key="${CSS.escape(convKey)}"], li.cliente-item[data-conversation-key="${CSS.escape(convKey)}"], [data-conversation-key="${CSS.escape(convKey)}"]`
-      );
-      const span = li?.querySelector?.('.avatar');
-      if (!span) return;
-
-      if (!url) {
-        ensureAvatarPlaceholder(span, 'list');
-        return;
-      }
-
-      span.classList.remove('placeholder');
-      span.innerHTML = '';
-
-      const img = document.createElement('img');
-      img.alt = '';
-      img.src = String(url);
-      img.referrerPolicy = 'no-referrer';
-      img.addEventListener('error', () => {
-        try { window.handleListAvatarError?.(img); } catch {}
-      }, { once: true });
-
-      span.appendChild(img);
-    } catch {}
-  }
-
-  function applyAvatarToHeaderDOM(conversationKey, url) {
-    try {
-      const currentRef = getCurrentConversationForPatch();
-      if (!currentRef || !sameConversation(currentRef, conversationKey)) return;
-
-      const box = document.getElementById('chat-avatar');
-      if (!box) return;
-
-      if (!url) {
-        box.innerHTML = `<span class="avatar avatar-default"><i class="fa fa-user-circle"></i></span>`;
-        return;
-      }
-
-      const span = document.createElement('span');
-      span.className = 'avatar';
-
-      const img = document.createElement('img');
-      img.alt = '';
-      img.src = String(url);
-      img.referrerPolicy = 'no-referrer';
-      img.addEventListener('error', () => {
-        try { window.handleAvatarError?.(img); } catch {}
-      }, { once: true });
-
-      span.appendChild(img);
-      box.innerHTML = '';
-      box.appendChild(span);
-    } catch {}
-  }
-
-  async function refreshAvatarFromEvolution(clienteId, opt = {}) {
-    try {
-      const cid = idKey(clienteId || '');
-      if (!cid || !EMPRESA_ID) return null;
-
-      const conversationKey =
-        idKey(opt?.conversationKey) ||
-        getCurrentConversationForPatch() ||
-        buildConversationKey('c', cid, getInstanciaAtivaSafe().instancia_id || getInstanciaAtivaSafe().instance) ||
-        null;
-
-      const numRaw = opt?.number ? String(opt.number) : await getTelefoneAsync(cid);
-      const number = onlyDigits(numRaw);
-      if (!number || number.length < 10) return null;
-
-      let instOpt = {
-        instancia_id: opt?.instancia_id,
-        instance: opt?.instance,
+        return resp;
       };
 
-      if (!instOpt.instancia_id && !instOpt.instance && opt?.instancia_raw != null) {
-        instOpt = resolveInstOpt(opt.instancia_raw);
-      }
+      wrapped.__zcWrappedAvatarRefreshVersion = VERSION;
+      wrapped.__zcOriginal = fn;
+      window.refreshAvatarFromEvolution = wrapped;
+      return true;
+    };
 
-      if (!instOpt.instancia_id && !instOpt.instance) {
-        instOpt = getInstanciaAtivaSafe();
-      }
+    const tryWrapGroupRefresh = () => {
+      const names = [
+        'refreshGroupAvatarFromEvolution',
+        'refreshGrupoAvatarFromEvolution',
+        'refreshGroupProfile',
+        'refreshGrupoProfile',
+      ];
 
-      if (!instOpt.instancia_id && !instOpt.instance) return null;
+      let wrappedAny = false;
 
-      const body = {
-        number,
-        empresa_id: EMPRESA_ID || undefined,
-        instancia_id: instOpt.instancia_id ?? undefined,
-        instance: instOpt.instance ?? undefined,
-      };
+      names.forEach((name) => {
+        const fn = window[name];
+        if (typeof fn !== 'function') return;
+        if (fn.__zcWrappedGroupAvatarRefreshVersion === VERSION) {
+          wrappedAny = true;
+          return;
+        }
 
-      const r = await fetch('/api/evolution/fetchProfile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(body),
+        const wrapped = async function (...args) {
+          const fallbackId = idFromAny(args[0]);
+          const resp = await fn.apply(this, args);
+
+          const realId =
+            idFromAny(resp?.grupo_id) ||
+            idFromAny(resp?.grupoId) ||
+            idFromAny(resp?.group_id) ||
+            idFromAny(resp?.groupId) ||
+            idFromAny(resp?.id) ||
+            idFromAny(resp?.entity_id) ||
+            idFromAny(resp?.entityId) ||
+            fallbackId;
+
+          const url =
+            resp?.avatar_url ||
+            resp?.group_avatar_url ||
+            resp?.grupo_avatar_url ||
+            resp?.profilePictureUrl ||
+            resp?.profile_picture_url ||
+            resp?.avatar ||
+            resp?.foto ||
+            null;
+
+          if (realId) {
+            scheduleAvatarSpread(realId, url, { kind: 'grupo', bust: true });
+          }
+
+          return resp;
+        };
+
+        wrapped.__zcWrappedGroupAvatarRefreshVersion = VERSION;
+        wrapped.__zcOriginal = fn;
+        window[name] = wrapped;
+        wrappedAny = true;
       });
 
-      if (!r.ok) return null;
+      return wrappedAny;
+    };
 
-      const prof = await r.json().catch(() => null);
-      const pic = pickProfileAvatar(prof);
-      if (!pic) return null;
+    if (!tryWrapClientRefresh() || !tryWrapGroupRefresh()) {
+      const t = setInterval(() => {
+        const ok1 = tryWrapClientRefresh();
+        const ok2 = tryWrapGroupRefresh();
 
-      try {
-        const st2 = window.state || {};
-        const lists = [st2.clientesCache, st2.todosContatosCache];
-        const patch = { avatar_url: pic };
+        if (ok1 && ok2) clearInterval(t);
+      }, 900);
 
-        lists.forEach((arr) => {
-          if (!Array.isArray(arr)) return;
-          arr.forEach((item, idx) => {
-            const ref = conversationRefOf(item, item);
-            if (ref.kind === 'c' && ref.entityId === cid) {
-              arr[idx] = { ...item, ...patch };
-            }
-          });
-        });
+      setTimeout(() => clearInterval(t), 10000);
+    }
+  }
 
-        if (st2.clienteSel) {
-          const ref = conversationRefOf(st2.clienteSel, st2.clienteSel);
-          if (ref.kind === 'c' && ref.entityId === cid) {
-            Object.assign(st2.clienteSel, patch);
+  function syncAfterConversationChange() {
+    removeLegacyQuickProfile();
+    bindHeaderOnce();
+    watchHeader();
+    applyClickableState();
+
+    const kind = getSelectedKind();
+
+    if (kind === 'grupo') {
+      const gid = getSelectedGroupId();
+      if (gid) {
+        scheduleAvatarSpread(gid, null, { kind: 'grupo', bust: false });
+      }
+      return;
+    }
+
+    const cid = getSelectedClienteId();
+    const sel = getStateSelected();
+    const raw =
+      sel?.avatar_url ||
+      sel?.profilePictureUrl ||
+      sel?.profile_pic_url ||
+      sel?.avatar ||
+      sel?.foto ||
+      sel?.foto_url ||
+      null;
+
+    if (cid && raw) {
+      scheduleAvatarSpread(cid, raw, { kind: 'cliente', bust: false });
+    }
+  }
+
+  function bindConversationEvents() {
+    if (document.__zcPerfilQuickChatEventsBoundVersion === VERSION) return;
+    document.__zcPerfilQuickChatEventsBoundVersion = VERSION;
+
+    [
+      'cliente:selecionar',
+      'cliente:selecionado',
+      'zc:cliente_sel',
+      'zc:open_chat',
+      'chat:open',
+      'historico:rendered',
+      'historico:ready',
+    ].forEach((ev) => {
+      document.addEventListener(ev, () => {
+        setTimeout(syncAfterConversationChange, 80);
+      });
+    });
+
+    [
+      'atendimento:conversation-selected',
+      'zc:conversation-selected',
+      'zc:chat-selected',
+    ].forEach((ev) => {
+      window.addEventListener(ev, () => {
+        setTimeout(syncAfterConversationChange, 80);
+      });
+    });
+
+    window.addEventListener('load', () => {
+      setTimeout(syncAfterConversationChange, 120);
+    });
+
+    window.addEventListener('resize', () => {
+      applyClickableState();
+    }, { passive: true });
+  }
+
+  function watchAppMount() {
+    if (document.__zcPerfilQuickMountObsVersion === VERSION) return;
+    document.__zcPerfilQuickMountObsVersion = VERSION;
+
+    let timer = null;
+
+    const mo = new MutationObserver((mutations) => {
+      let relevant = false;
+
+      for (const m of mutations) {
+        for (const node of m.addedNodes || []) {
+          if (!node || node.nodeType !== 1) continue;
+
+          if (
+            node.id === 'chat-header' ||
+            node.id === 'chat-avatar' ||
+            node.querySelector?.('#chat-header, #chat-avatar')
+          ) {
+            relevant = true;
+            break;
           }
         }
 
-        if (typeof window.persist === 'function') window.persist();
-      } catch {}
-
-      if (conversationKey) {
-        applyAvatarToListDOM(conversationKey, pic);
-        applyAvatarToHeaderDOM(conversationKey, pic);
+        if (relevant) break;
       }
 
-      return { picture: pic, profile: prof || null };
-    } catch {
-      return null;
-    }
+      if (!relevant) return;
+
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        bindHeaderOnce();
+        watchHeader();
+        applyClickableState();
+      }, 160);
+    });
+
+    try {
+      mo.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+    } catch {}
   }
 
-  window.refreshAvatarFromEvolution = refreshAvatarFromEvolution;
+  function start() {
+    removeLegacyQuickProfile();
+    bindHeaderOnce();
+    bindConversationEvents();
+    bindAvatarRefreshHooks();
+    watchHeader();
+    watchAppMount();
+    applyClickableState();
+
+    setTimeout(syncAfterConversationChange, 150);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+
+  window.abrirPerfilRapido = openContactData;
+  window.openQuickProfile = openContactData;
 })();

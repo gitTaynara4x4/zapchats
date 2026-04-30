@@ -1,5 +1,3 @@
-
-
 @import url("/frontend/css/atendimentos/base.css");
 @import url("/frontend/css/atendimentos/layout.css");
 @import url("/frontend/css/atendimentos/conversas.css");
@@ -12,3 +10,5 @@
 @import url("/frontend/css/atendimentos/search.css");
 @import url("/frontend/css/atendimentos/splash.css");
 @import url("/frontend/css/atendimentos/responsive.css");
+@import url("/frontend/css/atendimentos/message-actions.css");
+@import url("/frontend/css/atendimentos/topbar.css");

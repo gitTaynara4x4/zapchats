@@ -40,7 +40,7 @@
       el = document.createElement("div");
       el.id = "splash-screen";
       el.innerHTML = `
-        <img id="splash-logo" class="brand" src="${LOGO_SRC}" alt="zapschat">
+        <img id="splash-logo" class="brand" src="${LOGO_SRC}" alt="ZapsChat">
         <p id="splash-msg" class="msg">Sincronizando…</p>
         <div class="bar-outer" aria-hidden="true">
           <div class="bar-inner"></div>

@@ -5,7 +5,7 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.13"
   },
-  "name": "zapschat",
+  "name": "ZapsChat",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {

@@ -441,3 +441,128 @@
     }
   }
 }
+
+/* =========================================================
+   FIX FINAL — HAMBURGER MOBILE AO LADO DO ZapsChat
+   ========================================================= */
+
+@media (max-width:920px){
+  .zc-topbar-head{
+    align-items:center !important;
+  }
+
+  .zc-topbar-left{
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    gap:10px !important;
+    min-width:0 !important;
+    flex:1 1 auto !important;
+  }
+
+  .zc-brand-wrap{
+    position:relative !important;
+    display:inline-flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    gap:8px !important;
+    flex:0 0 auto !important;
+    min-width:0 !important;
+    padding-left:0 !important;
+    margin:0 !important;
+    overflow:visible !important;
+  }
+
+  .zc-brand-title{
+    position:relative !important;
+    z-index:1 !important;
+    display:inline-flex !important;
+    align-items:center !important;
+    flex:0 0 auto !important;
+    margin:0 !important;
+    padding:0 !important;
+    transform:none !important;
+    line-height:1 !important;
+    white-space:nowrap !important;
+  }
+
+  #btnKebabHeader,
+  #menuOnlyBtn,
+  .menu-only-btn{
+    all:unset !important;
+    box-sizing:border-box !important;
+    position:static !important;
+    inset:auto !important;
+    transform:none !important;
+    translate:none !important;
+    order:-1 !important;
+
+    width:26px !important;
+    height:26px !important;
+    min-width:26px !important;
+    max-width:26px !important;
+    flex:0 0 26px !important;
+
+    margin:0 !important;
+    padding:0 !important;
+
+    display:inline-flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+
+    border-radius:0 !important;
+    border:0 !important;
+    background:transparent !important;
+    color:#d1d7db !important;
+    box-shadow:none !important;
+    opacity:1 !important;
+    visibility:visible !important;
+    z-index:2 !important;
+    cursor:pointer !important;
+    outline:none !important;
+    -webkit-tap-highlight-color:transparent !important;
+  }
+
+  #btnKebabHeader i,
+  #menuOnlyBtn i,
+  .menu-only-btn i{
+    font-size:18px !important;
+    line-height:1 !important;
+    color:currentColor !important;
+    margin:0 !important;
+    padding:0 !important;
+  }
+
+  #btnKebabHeader:hover,
+  #menuOnlyBtn:hover,
+  .menu-only-btn:hover,
+  #btnKebabHeader:focus,
+  #menuOnlyBtn:focus,
+  .menu-only-btn:focus,
+  #btnKebabHeader:active,
+  #menuOnlyBtn:active,
+  .menu-only-btn:active{
+    background:transparent !important;
+    color:#ffffff !important;
+    box-shadow:none !important;
+    outline:none !important;
+  }
+
+  #wppMobileToggle{
+    display:none !important;
+    visibility:hidden !important;
+    opacity:0 !important;
+    pointer-events:none !important;
+  }
+
+  html[data-theme="light"] #btnKebabHeader,
+  html[data-theme="light"] #menuOnlyBtn,
+  html[data-theme="light"] .menu-only-btn,
+  html:not(.dark)[data-theme="light"] #btnKebabHeader,
+  html:not(.dark)[data-theme="light"] #menuOnlyBtn,
+  html:not(.dark)[data-theme="light"] .menu-only-btn{
+    background:transparent !important;
+    border-color:transparent !important;
+    color:#111827 !important;
+  }
+}

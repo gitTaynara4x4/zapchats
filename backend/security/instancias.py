@@ -1,4 +1,3 @@
-# backend/security/instancias.py
 from __future__ import annotations
 
 from typing import Any, List, Optional
@@ -10,8 +9,7 @@ from backend import models
 
 def _id_get(obj: Any, key: str, default: Any = None) -> Any:
     """
-    Helper simples pra ler campos do `identity` tanto se ele for dict
-    quanto se for um objeto com atributos.
+    Lê campo do identity suportando dict ou objeto.
     """
     if obj is None:
         return default
@@ -20,13 +18,25 @@ def _id_get(obj: Any, key: str, default: Any = None) -> Any:
     return getattr(obj, key, default)
 
 
+def _to_int(v: Any) -> Optional[int]:
+    try:
+        if v is None:
+            return None
+        s = str(v).strip()
+        if not s:
+            return None
+        return int(s)
+    except Exception:
+        return None
+
+
 def _normalize_ids(raw: Any) -> List[int]:
     """
-    Converte uma lista qualquer (ints/str/misto) em lista de ints únicos.
-    Ignora valores inválidos.
+    Converte lista mista para ints únicos.
     """
     if not raw:
         return []
+
     out: List[int] = []
     for x in raw:
         if x is None:
@@ -40,90 +50,152 @@ def _normalize_ids(raw: Any) -> List[int]:
     return out
 
 
+def _is_admin(identity: Any) -> bool:
+    try:
+        if identity is None:
+            return False
+
+        if bool(_id_get(identity, "is_admin")) or bool(_id_get(identity, "admin")):
+            return True
+
+        perms = _id_get(identity, "permissoes") or _id_get(identity, "permissions") or []
+        if isinstance(perms, dict):
+            perms = [k for k, v in perms.items() if v]
+
+        perms = set(str(p).lower() for p in (perms or []))
+        return any(p in perms for p in ("admin", "root", "clientes.gerenciar", "atendimento.gerenciar"))
+    except Exception:
+        return False
+
+
+def _infer_kind(identity: Any) -> str:
+    """
+    Retorna:
+      - 'colaborador'
+      - 'usuario'
+    """
+    if identity is None:
+        return "usuario"
+
+    k = str(_id_get(identity, "kind") or _id_get(identity, "tipo") or "").strip().lower()
+    if k in ("colaborador", "usuario", "admin"):
+        return "colaborador" if k == "colaborador" else "usuario"
+
+    sub = str(_id_get(identity, "sub") or "").strip().lower()
+    role = str(_id_get(identity, "role") or "").strip().lower()
+
+    if sub.startswith("colab-") or "colab" in role or "colaborador" in role:
+        return "colaborador"
+
+    for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
+        if _to_int(_id_get(identity, key)):
+            return "colaborador"
+
+    return "usuario"
+
+
+def _get_colab_id(identity: Any) -> Optional[int]:
+    for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
+        cid = _to_int(_id_get(identity, key))
+        if cid:
+            return cid
+
+    sub = str(_id_get(identity, "sub") or "").strip().lower()
+    if sub.startswith("colab-"):
+        try:
+            return int(sub.split("-", 1)[1])
+        except Exception:
+            return None
+
+    return _to_int(_id_get(identity, "id"))
+
+
 def instancias_visiveis(identity: Any, db: Session) -> Optional[List[int]]:
     """
     Retorna quais IDs de instância o login atual pode ver.
 
-    Convenção de retorno:
-      - retorna `None`  -> sem filtro (pode ver TODAS as instâncias)
-      - retorna [1, 2]  -> só pode ver as instâncias 1 e 2
+    Convenção:
+      - None   => sem filtro (pode ver TODAS)
+      - []     => não pode ver nenhuma
+      - [1, 2] => só pode ver essas
 
-    Regras de negócio:
-
-      - USUÁRIO (admin / usuário normal):
-          * kind == "usuario" => sempre `None` (sem filtro por instância)
-
-      - COLABORADOR:
-          * se `instancias_ver` estiver vazio/None -> `None` (pode ver todas)
-          * se tiver [ids...] -> retorna essa lista normalizada
+    Regras:
+      - admin / usuário normal => None
+      - colaborador:
+          * precisa existir no banco
+          * precisa ser da empresa do token
+          * usa SOMENTE colaboradores.instancias_ver
+          * vazio/None => []
     """
-    kind = _id_get(identity, "kind")  # "usuario" ou "colaborador"
-
-    # Usuário normal/admin -> não restringe por instância
-    if kind != "colaborador":
+    if _is_admin(identity):
         return None
 
-    empresa_id = _id_get(identity, "empresa_id")
-    colab_id = _id_get(identity, "colaborador_id")
+    if _infer_kind(identity) != "colaborador":
+        return None
+
+    empresa_id = _to_int(_id_get(identity, "empresa_id"))
+    colab_id = _get_colab_id(identity)
 
     if not colab_id:
-        # Algum colaborador sem ID? Por segurança, não restringe aqui.
-        # Se preferir travar tudo, poderia retornar [].
-        return None
+        return []
 
-    # Busca o colaborador no banco (SQLAlchemy 1.4/2.0 friendly)
     colab: models.Colaborador | None = db.get(models.Colaborador, int(colab_id))  # type: ignore[arg-type]
     if not colab:
-        # Colaborador não encontrado: não faz filtro aqui
-        return None
+        return []
 
-    # Se tiver empresa_id no identity, confere (defesa extra)
     try:
-        if empresa_id is not None and getattr(colab, "empresa_id", None) != int(empresa_id):
-            # Empresa divergente: por segurança, retorna lista vazia (vê nada)
+        if empresa_id is not None and int(getattr(colab, "empresa_id", 0) or 0) != int(empresa_id):
             return []
     except Exception:
-        # Se der qualquer erro estranho, não derruba a request por causa disso
-        pass
+        return []
 
-    # Campo que já existe no model (usado em colaboradores.py)
     raw_insts = getattr(colab, "instancias_ver", None)
 
-    # Se não tiver nada configurado => sem filtro (vê todas)
+    # vazio = não vê nada
     if not raw_insts:
-        return None
+        return []
 
     norm_ids = _normalize_ids(raw_insts)
-
-    # Se depois de normalizar ainda ficar vazio, também considera "sem filtro"
-    # (se quiser que vazio signifique "não vê nada", troque pra `return []` aqui)
     if not norm_ids:
-        return None
+        return []
 
-    return norm_ids
+    try:
+        rows = (
+            db.query(models.EmpresaInstancia.id)
+            .filter(
+                models.EmpresaInstancia.empresa_id == int(getattr(colab, "empresa_id")),
+                models.EmpresaInstancia.id.in_(norm_ids),
+            )
+            .all()
+        )
+        valid_ids = [int(r[0]) for r in rows if r and r[0] is not None]
+    except Exception:
+        return []
+
+    if not valid_ids:
+        return []
+
+    return valid_ids
 
 
 def instancia_permitida(identity: Any, db: Session, instancia_id: Any) -> bool:
     """
-    Helper de conveniência:
-
-      - True  => esse login PODE usar/ver a instância informada
-      - False => NÃO pode
-
-    Regras:
-      - Se instancias_visiveis() retornar None -> qualquer instância é permitida
-      - Se retornar [ids] -> só é permitida se instancia_id estiver nessa lista
+    True se pode usar/ver a instância.
     """
     try:
         inst_id = int(instancia_id)
     except (TypeError, ValueError):
-        # ID inválido -> por segurança, nega
         return False
 
     visiveis = instancias_visiveis(identity, db)
 
-    # None = sem filtro (todas permitidas)
     if visiveis is None:
         return True
 
     return inst_id in visiveis
+
+
+__all__ = [
+    "instancias_visiveis",
+    "instancia_permitida",
+]

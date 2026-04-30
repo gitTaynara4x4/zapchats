@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Optional, List
 
 from fastapi import HTTPException
@@ -12,6 +13,14 @@ from backend import models
 # =========================================================
 # Helpers básicos
 # =========================================================
+def _id_get(obj: Any, key: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
 def _to_int(v) -> Optional[int]:
     try:
         if v is None:
@@ -24,90 +33,145 @@ def _to_int(v) -> Optional[int]:
         return None
 
 
-def _is_admin(identity: dict | None) -> bool:
+def _is_admin(identity: Any) -> bool:
     try:
         if not identity:
             return False
 
-        if identity.get("is_admin") or identity.get("admin"):
+        if _id_get(identity, "is_admin") or _id_get(identity, "admin"):
             return True
 
-        perms = identity.get("permissoes") or identity.get("permissions") or []
+        role = str(_id_get(identity, "role") or "").strip().lower()
+        if role == "admin":
+            return True
+
+        kind = str(_id_get(identity, "kind") or _id_get(identity, "tipo") or "").strip().lower()
+        if kind == "usuario":
+            return True
+
+        perms = _id_get(identity, "permissoes") or _id_get(identity, "permissions") or []
         if isinstance(perms, dict):
             perms = [k for k, v in perms.items() if v]
 
         perms = set(str(p).lower() for p in (perms or []))
-        return any(p in perms for p in ("admin", "root", "clientes.gerenciar", "atendimento.gerenciar"))
+        return any(
+            p in perms
+            for p in (
+                "admin",
+                "root",
+                "clientes.gerenciar",
+                "atendimento.gerenciar",
+            )
+        )
     except Exception:
         return False
 
 
-def _infer_kind(identity: dict | None) -> str:
+def _infer_kind(identity: Any) -> str:
     if not identity:
         return "usuario"
 
-    k = (identity.get("kind") or identity.get("tipo") or "").lower().strip()
+    k = str(_id_get(identity, "kind") or _id_get(identity, "tipo") or "").lower().strip()
     if k in ("colaborador", "usuario", "admin"):
         return "colaborador" if k == "colaborador" else "usuario"
 
-    sub = str(identity.get("sub") or "").strip().lower()
-    role = str(identity.get("role") or "").strip().lower()
+    sub = str(_id_get(identity, "sub") or "").strip().lower()
+    role = str(_id_get(identity, "role") or "").strip().lower()
 
     if sub.startswith("colab-") or "colab" in role or "colaborador" in role:
         return "colaborador"
 
     for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
-        if _to_int(identity.get(key)):
+        if _to_int(_id_get(identity, key)):
             return "colaborador"
 
     return "usuario"
 
 
-def _get_colab_id(identity: dict | None) -> Optional[int]:
+def _get_colab_id(identity: Any) -> Optional[int]:
+    """
+    Retorna id de colaborador.
+
+    Importante:
+    - Dá prioridade para campos explícitos de colaborador.
+    - Só usa identity["id"] como fallback quando a identidade realmente parece ser colaborador.
+    """
     if not identity:
         return None
 
     for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
-        cid = _to_int(identity.get(key))
+        cid = _to_int(_id_get(identity, key))
         if cid:
             return cid
 
-    sub = str(identity.get("sub") or "").strip().lower()
+    sub = str(_id_get(identity, "sub") or "").strip().lower()
     if sub.startswith("colab-"):
         cid = _to_int(sub.split("-", 1)[1])
         if cid:
             return cid
 
-    return _to_int(identity.get("id"))
+    if _infer_kind(identity) == "colaborador":
+        return _to_int(_id_get(identity, "id"))
+
+    return None
 
 
-def _get_empresa_id(identity: dict | None) -> Optional[int]:
+def _get_empresa_id(identity: Any) -> Optional[int]:
     if not identity:
         return None
-    return _to_int(identity.get("empresa_id"))
+    return _to_int(_id_get(identity, "empresa_id"))
 
 
 def _table_exists(db: Session, table_name: str) -> bool:
+    """
+    Postgres: to_regclass('public.tabela') retorna NULL se não existir.
+    Seguro contra SQL dinâmico inseguro: valida nome e usa parâmetro.
+    """
     try:
-        reg = db.execute(text(f"SELECT to_regclass('public.{table_name}')")).scalar()
+        name = str(table_name or "").strip()
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name):
+            return False
+
+        reg = db.execute(
+            text("SELECT to_regclass(:table_name)"),
+            {"table_name": f"public.{name}"},
+        ).scalar()
         return reg is not None
     except Exception:
         return False
 
 
+def _participant_feature_enabled(db: Session) -> bool:
+    return getattr(models, "AtendimentoParticipante", None) is not None and _table_exists(
+        db, "atendimento_participantes"
+    )
+
+
 # =========================================================
 # Empresa / permissão base
 # =========================================================
-def ensure_perm(identity: dict | None, perm: str) -> None:
+def ensure_perm(identity: Any, perm: str) -> None:
     if _is_admin(identity):
         return
 
-    perms = set((identity or {}).get("permissoes") or [])
-    if perm not in perms:
+    perms = _id_get(identity, "permissoes") or _id_get(identity, "permissions") or []
+    if isinstance(perms, dict):
+        perms = [k for k, v in perms.items() if v]
+
+    perms = set(str(p) for p in (perms or []))
+    perms_lower = set(str(p).lower() for p in perms)
+
+    if perm not in perms and perm.lower() not in perms_lower:
         raise HTTPException(status_code=403, detail=f"Sem permissão ({perm})")
 
 
-def assert_same_company(identity: dict | None, empresa_id: int | None) -> int:
+def assert_same_company(identity: Any, empresa_id: int | None) -> int:
+    """
+    Segurança multiempresa:
+    - A empresa oficial vem sempre do token/identity.
+    - Se empresa_id vier vazio, usa a empresa do token.
+    - Se vier diferente, bloqueia.
+    """
     token_emp = _get_empresa_id(identity)
     if token_emp is None:
         raise HTTPException(status_code=401, detail="Empresa não encontrada no token")
@@ -115,10 +179,15 @@ def assert_same_company(identity: dict | None, empresa_id: int | None) -> int:
     if empresa_id is None:
         return int(token_emp)
 
-    if int(token_emp) != int(empresa_id):
+    try:
+        emp_req = int(empresa_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="empresa_id inválido")
+
+    if int(token_emp) != int(emp_req):
         raise HTTPException(status_code=403, detail="Empresa inválida para este recurso")
 
-    return int(empresa_id)
+    return int(token_emp)
 
 
 # =========================================================
@@ -127,23 +196,28 @@ def assert_same_company(identity: dict | None, empresa_id: int | None) -> int:
 def allowed_instancia_ids(
     db: Session,
     *,
-    identity: dict | None,
+    identity: Any,
 ) -> Optional[List[int]]:
     """
     Retorna:
       - None => sem restrição
       - []   => sem acesso
       - [..] => whitelist de instâncias
+
+    Regra segura:
+    - admin/usuário master tende a retornar None via instancias_visiveis.
+    - se helper de instâncias falhar, colaborador fica sem acesso por segurança.
     """
     try:
-        # IMPORT LAZY pra evitar circular import
         from backend.security.instancias import instancias_visiveis
 
         ids = instancias_visiveis(identity, db)
         if ids is None:
             return None
-        return [int(x) for x in ids]
+        return [int(x) for x in ids if x is not None]
     except Exception:
+        if _is_admin(identity):
+            return None
         return []
 
 
@@ -157,7 +231,10 @@ def assert_instancia_allowed(
         return
 
     if not allowed_instancias:
-        raise HTTPException(status_code=403, detail="Sem instâncias permitidas para este colaborador")
+        raise HTTPException(
+            status_code=403,
+            detail="Sem instâncias permitidas para este colaborador",
+        )
 
     if instancia_id is None:
         raise HTTPException(status_code=403, detail=detail)
@@ -172,7 +249,7 @@ def assert_instancia_allowed(
 def allowed_departamento_ids(
     db: Session,
     *,
-    identity: dict | None,
+    identity: Any,
     empresa_id: int,
 ) -> Optional[List[int]]:
     """
@@ -221,7 +298,13 @@ def assert_departamento_allowed(
         return
 
     if not allowed_departamentos:
-        raise HTTPException(status_code=403, detail="Sem departamentos permitidos para este colaborador")
+        if departamento_id is None and allow_unassigned:
+            return
+
+        raise HTTPException(
+            status_code=403,
+            detail="Sem departamentos permitidos para este colaborador",
+        )
 
     if departamento_id is None:
         if allow_unassigned:
@@ -257,8 +340,8 @@ def assert_atendimento_acl(
 def resolve_acl_context(
     db: Session,
     *,
-    identity: dict | None,
-    empresa_id: int,
+    identity: Any,
+    empresa_id: int | None,
 ) -> dict:
     empresa_id = assert_same_company(identity, empresa_id)
 
@@ -270,6 +353,17 @@ def resolve_acl_context(
             identity=identity,
             empresa_id=int(empresa_id),
         ),
+    }
+
+
+def build_allowed_filters(
+    *,
+    allowed_instancias: Optional[List[int]],
+    allowed_departamentos: Optional[List[int]],
+) -> dict:
+    return {
+        "instancias": None if allowed_instancias is None else [int(x) for x in allowed_instancias],
+        "departamentos": None if allowed_departamentos is None else [int(x) for x in allowed_departamentos],
     }
 
 
@@ -337,13 +431,130 @@ def get_cliente_or_404(
 
 
 # =========================================================
+# Participação / aceite da conversa
+# =========================================================
+def get_atendimento_participantes_ativos(
+    db: Session,
+    *,
+    empresa_id: int,
+    atendimento_id: int,
+):
+    if not _participant_feature_enabled(db):
+        return []
+
+    AP = models.AtendimentoParticipante
+
+    q = db.query(AP).filter(
+        AP.empresa_id == int(empresa_id),
+        AP.atendimento_id == int(atendimento_id),
+    )
+
+    if hasattr(AP, "is_ativo"):
+        q = q.filter(AP.is_ativo.is_(True))
+
+    return q.order_by(AP.id.asc()).all()
+
+
+def get_atendimento_participante_ids_ativos(
+    db: Session,
+    *,
+    empresa_id: int,
+    atendimento_id: int,
+) -> List[int]:
+    rows = get_atendimento_participantes_ativos(
+        db,
+        empresa_id=empresa_id,
+        atendimento_id=atendimento_id,
+    )
+    out: List[int] = []
+    for r in rows:
+        cid = _to_int(getattr(r, "colaborador_id", None))
+        if cid and cid not in out:
+            out.append(cid)
+    return out
+
+
+def is_atendimento_participante_ativo(
+    db: Session,
+    *,
+    empresa_id: int,
+    atendimento_id: int,
+    colaborador_id: int,
+) -> bool:
+    if not _participant_feature_enabled(db):
+        return False
+
+    AP = models.AtendimentoParticipante
+
+    q = db.query(AP.id).filter(
+        AP.empresa_id == int(empresa_id),
+        AP.atendimento_id == int(atendimento_id),
+        AP.colaborador_id == int(colaborador_id),
+    )
+
+    if hasattr(AP, "is_ativo"):
+        q = q.filter(AP.is_ativo.is_(True))
+
+    row = q.first()
+    return row is not None
+
+
+def assert_atendimento_participante(
+    db: Session,
+    *,
+    identity: Any,
+    empresa_id: int,
+    atendimento_id: int,
+    allow_when_no_participants: bool = False,
+    detail: str = "Você precisa aceitar/entrar nesta conversa antes de responder",
+) -> List[int]:
+    """
+    Regra de interação:
+      - admin/usuário master: bypass
+      - se feature de participantes ainda não existir: bypass
+      - colaborador precisa estar entre os participantes ativos
+      - se não houver participantes ativos:
+          * allow_when_no_participants=True -> libera
+          * False -> bloqueia
+    """
+    if _is_admin(identity):
+        return []
+
+    if _infer_kind(identity) != "colaborador":
+        return []
+
+    if not _participant_feature_enabled(db):
+        return []
+
+    colab_id = _get_colab_id(identity)
+    if not colab_id:
+        raise HTTPException(status_code=403, detail=detail)
+
+    participantes_ids = get_atendimento_participante_ids_ativos(
+        db,
+        empresa_id=int(empresa_id),
+        atendimento_id=int(atendimento_id),
+    )
+
+    if not participantes_ids:
+        if allow_when_no_participants:
+            return []
+        raise HTTPException(status_code=403, detail=detail)
+
+    if int(colab_id) not in set(int(x) for x in participantes_ids):
+        raise HTTPException(status_code=403, detail=detail)
+
+    return participantes_ids
+
+
+# =========================================================
 # Asserts de acesso prontos para usar nas rotas
 # =========================================================
 def assert_atendimento_access(
     db: Session,
     *,
-    identity: dict | None,
-    empresa_id: int,
+    identity: Any,
+    empresa_id: int | None,
     atendimento_id: int,
     allow_unassigned_department: bool = False,
 ):
@@ -368,8 +579,8 @@ def assert_atendimento_access(
 def assert_cliente_access(
     db: Session,
     *,
-    identity: dict | None,
-    empresa_id: int,
+    identity: Any,
+    empresa_id: int | None,
     cliente_id: int,
     instancia_id: int | None = None,
     allow_unassigned_department: bool = False,
@@ -416,15 +627,73 @@ def assert_cliente_access(
     return cliente, None
 
 
-def build_allowed_filters(
+def assert_atendimento_interaction_access(
+    db: Session,
     *,
-    allowed_instancias: Optional[List[int]],
-    allowed_departamentos: Optional[List[int]],
-) -> dict:
-    return {
-        "instancias": None if allowed_instancias is None else [int(x) for x in allowed_instancias],
-        "departamentos": None if allowed_departamentos is None else [int(x) for x in allowed_departamentos],
-    }
+    identity: Any,
+    empresa_id: int | None,
+    atendimento_id: int,
+    allow_unassigned_department: bool = False,
+    allow_when_no_participants: bool = False,
+):
+    """
+    Usa quando a rota precisa de permissão de INTERAÇÃO,
+    não só de visualização.
+    Ex.: enviar mensagem, marcar como lida manualmente, etc.
+    """
+    atendimento = assert_atendimento_access(
+        db,
+        identity=identity,
+        empresa_id=empresa_id,
+        atendimento_id=atendimento_id,
+        allow_unassigned_department=allow_unassigned_department,
+    )
+
+    assert_atendimento_participante(
+        db,
+        identity=identity,
+        empresa_id=int(getattr(atendimento, "empresa_id")),
+        atendimento_id=int(getattr(atendimento, "id")),
+        allow_when_no_participants=allow_when_no_participants,
+    )
+
+    return atendimento
+
+
+def assert_cliente_interaction_access(
+    db: Session,
+    *,
+    identity: Any,
+    empresa_id: int | None,
+    cliente_id: int,
+    instancia_id: int | None = None,
+    allow_unassigned_department: bool = False,
+    allow_when_no_participants: bool = False,
+):
+    """
+    Igual ao assert_cliente_access, mas para ação de interação.
+    Se existir atendimento, exige participação.
+    Se ainda não existir atendimento, só valida ACL de visibilidade.
+    """
+    cliente, atendimento = assert_cliente_access(
+        db,
+        identity=identity,
+        empresa_id=empresa_id,
+        cliente_id=cliente_id,
+        instancia_id=instancia_id,
+        allow_unassigned_department=allow_unassigned_department,
+    )
+
+    if atendimento is not None:
+        assert_atendimento_participante(
+            db,
+            identity=identity,
+            empresa_id=int(getattr(atendimento, "empresa_id")),
+            atendimento_id=int(getattr(atendimento, "id")),
+            allow_when_no_participants=allow_when_no_participants,
+        )
+
+    return cliente, atendimento
 
 
 __all__ = [
@@ -436,10 +705,16 @@ __all__ = [
     "assert_departamento_allowed",
     "assert_atendimento_acl",
     "resolve_acl_context",
+    "build_allowed_filters",
     "get_atendimento_or_404",
     "get_latest_atendimento_for_cliente",
     "get_cliente_or_404",
+    "get_atendimento_participantes_ativos",
+    "get_atendimento_participante_ids_ativos",
+    "is_atendimento_participante_ativo",
+    "assert_atendimento_participante",
     "assert_atendimento_access",
     "assert_cliente_access",
-    "build_allowed_filters",
+    "assert_atendimento_interaction_access",
+    "assert_cliente_interaction_access",
 ]

@@ -1,5 +1,5 @@
 /* ====================================================================
- * zapschat – Atendimento: IA (JS-only) — logos 24px + responsivo
+ * ZapsChat – Atendimento: IA (JS-only) — logos 24px + responsivo
  * - Botão #btn-ia no header (sempre 24×24)
  * - Modal montado via JS (sem HTML extra)
  * - Logos por tema:

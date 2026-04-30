@@ -1,11 +1,12 @@
 # backend/routers/atendimento_chat.py
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any, Dict, List
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import text, literal
 
 from backend.database import get_db
 from backend import models
@@ -31,6 +32,170 @@ router = APIRouter(prefix="", tags=["Atendimento – Chat"])
 
 
 # =========================================================
+# Helpers gerais
+# =========================================================
+def _table_exists(db: Session, table_name: str) -> bool:
+    try:
+        reg = db.execute(text(f"SELECT to_regclass('public.{table_name}')")).scalar()
+        return reg is not None
+    except Exception:
+        return False
+
+
+def _participant_feature_enabled(db: Session) -> bool:
+    return getattr(models, "AtendimentoParticipante", None) is not None and _table_exists(
+        db, "atendimento_participantes"
+    )
+
+
+def _fila_feature_enabled(db: Session) -> bool:
+    return (
+        getattr(models, "FilaAtendimento", None) is not None
+        and _table_exists(db, "filas_atendimento")
+    )
+
+
+def _to_int(v: Any) -> Optional[int]:
+    try:
+        if v is None:
+            return None
+        s = str(v).strip()
+        if not s:
+            return None
+        return int(s)
+    except Exception:
+        return None
+
+
+def _id_get(obj: Any, key: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _get_colab_id(identity: Any) -> Optional[int]:
+    for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
+        cid = _to_int(_id_get(identity, key))
+        if cid:
+            return cid
+
+    sub = str(_id_get(identity, "sub") or "").strip().lower()
+    if sub.startswith("colab-"):
+        try:
+            return int(sub.split("-", 1)[1])
+        except Exception:
+            return None
+
+    return _to_int(_id_get(identity, "id"))
+
+
+def _nome_colaborador(db: Session, colaborador_id: Optional[int]) -> Optional[str]:
+    if colaborador_id is None:
+        return None
+    row = db.query(models.Colaborador).filter(models.Colaborador.id == int(colaborador_id)).first()
+    return row.nome if row else None
+
+
+def _iso_utc(ts) -> Optional[str]:
+    if ts is None:
+        return None
+    try:
+        if hasattr(ts, "tzinfo") and ts.tzinfo is None:
+            return ts.replace(tzinfo=timezone.utc).isoformat(timespec="microseconds")
+        if hasattr(ts, "isoformat"):
+            return ts.isoformat(timespec="microseconds")
+        return str(ts)
+    except Exception:
+        return str(ts)
+
+
+def _epoch_from_dt(dt: datetime) -> int:
+    try:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+        return int(dt.timestamp())
+    except Exception:
+        return 0
+
+
+# =========================================================
+# Conversation key helpers
+# =========================================================
+def _conv_ref_cliente(cliente_id: int, instancia_id: Optional[int]) -> str:
+    return f"c:{int(cliente_id)}:{int(instancia_id or 0)}"
+
+
+def _conv_ref_grupo(grupo_id: int, instancia_id: Optional[int]) -> str:
+    return f"g:{int(grupo_id)}:{int(instancia_id or 0)}"
+
+
+def _pick_effective_instancia_from_rows(
+    *,
+    resolved_inst_id: Optional[int],
+    resolved_inst_name: Optional[str],
+    rows: List[Any],
+    fallback_inst_id: Optional[int] = None,
+    fallback_inst_name: Optional[str] = None,
+) -> Tuple[Optional[int], Optional[str]]:
+    """
+    Se a rota recebeu instancia_id/instance, usa ela.
+    Se não recebeu, tenta inferir somente quando todas as mensagens retornadas
+    pertencem à mesma instância. Se houver múltiplas, mantém None para gerar :0.
+    """
+    if resolved_inst_id is not None:
+        return int(resolved_inst_id), resolved_inst_name
+
+    inst_map: Dict[int, Optional[str]] = {}
+
+    for r in rows or []:
+        iid = _to_int(getattr(r, "instancia_id", None))
+        if iid is None:
+            continue
+
+        if iid not in inst_map:
+            inst_map[iid] = getattr(r, "instance_name", None)
+
+    if len(inst_map) == 1:
+        iid = next(iter(inst_map.keys()))
+        return iid, inst_map.get(iid)
+
+    if fallback_inst_id is not None:
+        return int(fallback_inst_id), fallback_inst_name
+
+    return None, None
+
+
+def _conversation_payload_fields(
+    *,
+    kind: str,
+    entity_id: int,
+    instancia_id: Optional[int],
+) -> Dict[str, Any]:
+    if kind == "g":
+        key = _conv_ref_grupo(int(entity_id), instancia_id)
+        return {
+            "conversation_key": key,
+            "conversation_id": key,
+            "kind": "g",
+            "entity_id": int(entity_id),
+            "grupo_id": int(entity_id),
+        }
+
+    key = _conv_ref_cliente(int(entity_id), instancia_id)
+    return {
+        "conversation_key": key,
+        "conversation_id": key,
+        "kind": "c",
+        "entity_id": int(entity_id),
+        "cliente_id": int(entity_id),
+    }
+
+
+# =========================================================
 # Utils locais
 # =========================================================
 def _resolve_instancia_id(
@@ -41,8 +206,8 @@ def _resolve_instancia_id(
     instance: Optional[str],
 ) -> Tuple[Optional[int], Optional[str]]:
     """
-    Resolve a instância a partir de instancia_id (numérico) ou instance (slug/nome).
-    Retorna (instancia_id_resolvido, instance_name_resolvido)
+    Resolve a instância a partir de instancia_id numérico ou instance slug/nome.
+    Retorna (instancia_id_resolvido, instance_name_resolvido).
     """
     if instancia_id is not None:
         row = (
@@ -75,15 +240,14 @@ def _resolve_instancia_id(
 
 def _normalize_phone(numero: Optional[str]) -> Optional[str]:
     """
-    Compat local: agora usa a normalização central do backend.
-    Retorna o formato canônico de banco (sem 55, com 9 quando aplicável).
+    Retorna o formato canônico de banco.
     """
     return normalize_phone_for_db(numero)
 
 
 def _format_phone_br(numero: Optional[str]) -> str:
     """
-    Formata o telefone no padrão BR a partir da normalização central.
+    Formata telefone no padrão BR.
     """
     if not numero:
         return "—"
@@ -96,25 +260,13 @@ def _format_phone_br(numero: Optional[str]) -> str:
     return formatted or "—"
 
 
-def _iso_utc(ts) -> str:
-    try:
-        if hasattr(ts, "tzinfo") and ts.tzinfo is None:
-            return ts.replace(tzinfo=timezone.utc).isoformat(timespec="microseconds")
-        if hasattr(ts, "isoformat"):
-            return ts.isoformat(timespec="microseconds")
-        return str(ts)
-    except Exception:
-        return str(ts)
-
-
 # =========================================================
 # AVATAR: nunca devolver pps.whatsapp.net pro front
 # =========================================================
 def _public_avatar_url(*, kind: str, conversation_id: int, raw_avatar_url: Optional[str]) -> Optional[str]:
     """
     kind: "cliente" | "grupo"
-    Retorna SEMPRE um endpoint local /api/atendimento/avatar/{id}?kind=...
-    (mesmo que o banco tenha https://pps.whatsapp.net/...)
+    Retorna SEMPRE endpoint local /api/atendimento/avatar/{id}?kind=...
     """
     if not conversation_id:
         return None
@@ -123,20 +275,332 @@ def _public_avatar_url(*, kind: str, conversation_id: int, raw_avatar_url: Optio
     if not raw:
         return None
 
-    # já é endpoint nosso
     if raw.startswith("/api/atendimento/avatar/"):
         return raw
 
-    # qualquer URL externa vira proxy local
     if raw.startswith("http://") or raw.startswith("https://"):
         return f"/api/atendimento/avatar/{int(conversation_id)}?kind={kind}"
 
-    # fallback seguro
     return f"/api/atendimento/avatar/{int(conversation_id)}?kind={kind}"
 
 
 # =========================================================
-# REST: listar mensagens da conversa (cliente OU grupo)
+# Fila / regra de aceite
+# =========================================================
+def _default_fila_state() -> Dict[str, Any]:
+    return {
+        "fila_id": None,
+        "fila_nome": None,
+        "fila_prioridade": None,
+        "fila_sla_minutos": None,
+        "fila_cor": None,
+        "fila_ativa": False,
+        "fila_exigir_aceite": False,
+        "fila_escolhida_em": None,
+
+        # aliases diretos para o front
+        "exigir_aceite": False,
+        "aceite_obrigatorio": False,
+        "aguardando_aceite": False,
+
+        # por enquanto só vamos marcar true quando a próxima etapa do chatbot/handler
+        # detectar explicitamente que a conversa está aguardando escolha de fila.
+        "aguardando_escolha_fila": False,
+    }
+
+
+def _fila_state_for_atendimento(
+    db: Session,
+    *,
+    atendimento,
+) -> Dict[str, Any]:
+    """
+    Regra nova:
+    - Sem fila_id no atendimento => NÃO exige aceite.
+    - Com fila_id => usa filas_atendimento.exigir_aceite.
+    """
+    state = _default_fila_state()
+
+    if atendimento is None:
+        return state
+
+    fila_id = _to_int(getattr(atendimento, "fila_id", None))
+    if fila_id is None:
+        return state
+
+    state["fila_id"] = int(fila_id)
+    state["fila_escolhida_em"] = _iso_utc(getattr(atendimento, "fila_escolhida_em", None))
+
+    if not _fila_feature_enabled(db):
+        return state
+
+    fila = (
+        db.query(models.FilaAtendimento)
+        .filter(
+            models.FilaAtendimento.id == int(fila_id),
+            models.FilaAtendimento.empresa_id == int(getattr(atendimento, "empresa_id")),
+        )
+        .first()
+    )
+
+    if not fila:
+        return state
+
+    exigir = bool(getattr(fila, "exigir_aceite", False))
+
+    state.update(
+        {
+            "fila_id": int(fila.id),
+            "fila_nome": getattr(fila, "nome", None),
+            "fila_prioridade": getattr(fila, "prioridade", None),
+            "fila_sla_minutos": getattr(fila, "sla_minutos", None),
+            "fila_cor": getattr(fila, "cor", None),
+            "fila_ativa": bool(getattr(fila, "ativa", False)),
+            "fila_exigir_aceite": exigir,
+            "exigir_aceite": exigir,
+            "aceite_obrigatorio": exigir,
+        }
+    )
+
+    return state
+
+
+# =========================================================
+# Participantes / aceite compartilhado
+# =========================================================
+def _active_participants_snapshot(
+    db: Session,
+    *,
+    empresa_id: int,
+    atendimento_id: Optional[int],
+) -> List[Dict[str, Any]]:
+    if atendimento_id is None:
+        return []
+
+    if not _participant_feature_enabled(db):
+        return []
+
+    AP = models.AtendimentoParticipante
+    C = models.Colaborador
+
+    aceito_col = (
+        AP.aceito_em.label("aceito_em")
+        if hasattr(AP, "aceito_em")
+        else literal(None).label("aceito_em")
+    )
+
+    responsavel_col = (
+        AP.is_responsavel.label("is_responsavel")
+        if hasattr(AP, "is_responsavel")
+        else literal(False).label("is_responsavel")
+    )
+
+    q = (
+        db.query(
+            AP.colaborador_id.label("colaborador_id"),
+            C.nome.label("colaborador_nome"),
+            aceito_col,
+            responsavel_col,
+        )
+        .join(C, C.id == AP.colaborador_id)
+        .filter(
+            AP.empresa_id == int(empresa_id),
+            AP.atendimento_id == int(atendimento_id),
+        )
+    )
+
+    if hasattr(AP, "is_ativo"):
+        q = q.filter(AP.is_ativo.is_(True))
+
+    rows = q.all()
+    out: List[Dict[str, Any]] = []
+
+    for r in rows:
+        out.append(
+            {
+                "colaborador_id": int(r.colaborador_id),
+                "nome": r.colaborador_nome,
+                "aceito_em": _iso_utc(r.aceito_em) if getattr(r, "aceito_em", None) is not None else None,
+                "is_responsavel": bool(getattr(r, "is_responsavel", False)),
+            }
+        )
+
+    out.sort(
+        key=lambda x: (
+            0 if x.get("is_responsavel") else 1,
+            str(x.get("nome") or "").lower(),
+            int(x.get("colaborador_id") or 0),
+        )
+    )
+    return out
+
+
+def _build_participacao_state(
+    db: Session,
+    *,
+    atendimento,
+    current_colab_id: Optional[int],
+    is_group: bool = False,
+    exigir_aceite: bool = False,
+) -> Dict[str, Any]:
+    """
+    Regra importante:
+
+    Antes:
+      sem operador/participante => bloqueava e mostrava "Conversa aguardando aceite"
+
+    Agora:
+      só bloqueia/mostra aceite quando exigir_aceite=True.
+
+    exigir_aceite=True vem da fila escolhida pelo cliente:
+      atendimento.fila_id existe
+      filas_atendimento.exigir_aceite=True
+    """
+    if is_group:
+        return {
+            "participantes": [],
+            "participantes_ids": [],
+            "aceita_por_mim": False,
+            "tem_participantes": False,
+            "responsavel_id": None,
+            "responsavel_nome": None,
+            "pode_aceitar": False,
+            "pode_liberar": False,
+            "pode_responder": True,
+            "modo_aceite_compartilhado": False,
+            "exigir_aceite": False,
+            "aceite_obrigatorio": False,
+            "aguardando_aceite": False,
+        }
+
+    # Sem atendimento e sem regra explícita de aceite:
+    # deixa responder normal e não mostra banner de aceite.
+    if atendimento is None:
+        return {
+            "participantes": [],
+            "participantes_ids": [],
+            "aceita_por_mim": False,
+            "tem_participantes": False,
+            "responsavel_id": None,
+            "responsavel_nome": None,
+            "pode_aceitar": bool(current_colab_id is not None and exigir_aceite),
+            "pode_liberar": False,
+            "pode_responder": True if not exigir_aceite else False,
+            "modo_aceite_compartilhado": _participant_feature_enabled(db),
+            "exigir_aceite": bool(exigir_aceite),
+            "aceite_obrigatorio": bool(exigir_aceite),
+            "aguardando_aceite": bool(exigir_aceite and current_colab_id is not None),
+        }
+
+    participants = _active_participants_snapshot(
+        db,
+        empresa_id=int(atendimento.empresa_id),
+        atendimento_id=int(atendimento.id),
+    )
+
+    # fallback legado: se ainda não tiver tabela de participantes,
+    # sintetiza com operador_id
+    if not participants and getattr(atendimento, "operador_id", None) is not None:
+        participants = [
+            {
+                "colaborador_id": int(atendimento.operador_id),
+                "nome": _nome_colaborador(db, int(atendimento.operador_id)),
+                "aceito_em": None,
+                "is_responsavel": True,
+            }
+        ]
+
+    participant_ids = [
+        int(p["colaborador_id"])
+        for p in participants
+        if p.get("colaborador_id") is not None
+    ]
+
+    aceita_por_mim = (
+        current_colab_id is not None
+        and int(current_colab_id) in set(participant_ids)
+    )
+
+    responsavel = next((p for p in participants if p.get("is_responsavel")), None)
+    if responsavel is None and participants:
+        responsavel = participants[0]
+
+    legacy_operator_id = _to_int(getattr(atendimento, "operador_id", None))
+
+    if not exigir_aceite:
+        # Ponto principal da correção:
+        # se a conversa não veio de uma fila que exige aceite,
+        # não trava composer e não mostra botão/banner de aceite.
+        return {
+            "participantes": participants,
+            "participantes_ids": participant_ids,
+            "aceita_por_mim": bool(aceita_por_mim),
+            "tem_participantes": bool(participants),
+            "responsavel_id": (
+                int(responsavel["colaborador_id"])
+                if responsavel and responsavel.get("colaborador_id") is not None
+                else legacy_operator_id
+            ),
+            "responsavel_nome": (
+                responsavel.get("nome")
+                if responsavel
+                else _nome_colaborador(db, legacy_operator_id)
+            ),
+            "pode_aceitar": False,
+            "pode_liberar": False,
+            "pode_responder": True,
+            "modo_aceite_compartilhado": _participant_feature_enabled(db),
+            "exigir_aceite": False,
+            "aceite_obrigatorio": False,
+            "aguardando_aceite": False,
+        }
+
+    # Daqui para baixo: fila exige aceite.
+    if current_colab_id is None:
+        pode_responder = True
+    else:
+        if participant_ids:
+            pode_responder = aceita_por_mim
+        else:
+            if legacy_operator_id is not None:
+                pode_responder = int(legacy_operator_id) == int(current_colab_id)
+                aceita_por_mim = pode_responder
+            else:
+                pode_responder = False
+
+    aguardando_aceite = bool(
+        exigir_aceite
+        and current_colab_id is not None
+        and not bool(aceita_por_mim)
+    )
+
+    return {
+        "participantes": participants,
+        "participantes_ids": participant_ids,
+        "aceita_por_mim": bool(aceita_por_mim),
+        "tem_participantes": bool(participants),
+        "responsavel_id": (
+            int(responsavel["colaborador_id"])
+            if responsavel and responsavel.get("colaborador_id") is not None
+            else legacy_operator_id
+        ),
+        "responsavel_nome": (
+            responsavel.get("nome")
+            if responsavel
+            else _nome_colaborador(db, legacy_operator_id)
+        ),
+        "pode_aceitar": current_colab_id is not None and not bool(aceita_por_mim),
+        "pode_liberar": current_colab_id is not None and bool(aceita_por_mim),
+        "pode_responder": bool(pode_responder),
+        "modo_aceite_compartilhado": _participant_feature_enabled(db),
+        "exigir_aceite": True,
+        "aceite_obrigatorio": True,
+        "aguardando_aceite": aguardando_aceite,
+    }
+
+
+# =========================================================
+# REST: listar mensagens da conversa cliente OU grupo
 # =========================================================
 @router.get("/conversas/{cliente_id}/mensagens")
 def listar_mensagens(
@@ -144,10 +608,10 @@ def listar_mensagens(
     empresa_id: int | None = Query(None, description="(Opcional) Empresa. Se omitido, usa a do token."),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    instancia_id: int | None = Query(None, description="(Opcional) Filtra mensagens por instância (id numérico)"),
-    instance: str | None = Query(None, description="(Opcional) Filtra mensagens por instância (slug/nome)"),
-    since_ts: datetime | None = Query(None, description="(Opcional) Cursor: traz apenas mensagens com timestamp > since_ts (ISO-8601)."),
-    since_id: int | None = Query(None, description="(Opcional) Cursor numérico: traz apenas mensagens com id > since_id."),
+    instancia_id: int | None = Query(None, description="(Opcional) Filtra mensagens por instância id numérico"),
+    instance: str | None = Query(None, description="(Opcional) Filtra mensagens por instância slug/nome"),
+    since_ts: datetime | None = Query(None, description="(Opcional) Cursor: mensagens com timestamp > since_ts ISO."),
+    since_id: int | None = Query(None, description="(Opcional) Cursor: mensagens com id > since_id."),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
@@ -156,6 +620,7 @@ def listar_mensagens(
     empresa_id_eff = assert_same_company(identity, empresa_id)
     acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
     allowed_instancias = acl_ctx["allowed_instancias"]
+    current_colab_id = _get_colab_id(identity)
 
     resolved_inst_id, resolved_inst_name = _resolve_instancia_id(
         db,
@@ -213,6 +678,8 @@ def listar_mensagens(
                 models.Mensagem.ack,
                 models.Mensagem.timestamp,
                 models.Mensagem.instancia_id,
+                models.Mensagem.quoted,
+                models.Mensagem.quoted_preview,
                 models.EmpresaInstancia.instance_name.label("instance_name"),
                 models.Mensagem.apagada_cliente,
                 models.Mensagem.apagada_usuario,
@@ -243,9 +710,29 @@ def listar_mensagens(
 
         rows = q.all()
 
+        effective_inst_id, effective_inst_name = _pick_effective_instancia_from_rows(
+            resolved_inst_id=resolved_inst_id,
+            resolved_inst_name=resolved_inst_name,
+            rows=list(rows),
+            fallback_inst_id=(
+                _to_int(getattr(atendimento_acl, "instancia_id", None))
+                if atendimento_acl is not None
+                else _to_int(getattr(cliente_acl, "instancia_id", None))
+            ),
+            fallback_inst_name=resolved_inst_name,
+        )
+
+        conv_fields = _conversation_payload_fields(
+            kind="c",
+            entity_id=int(cliente_acl.id),
+            instancia_id=effective_inst_id,
+        )
+
         items = []
         for r in rows:
             ts_iso = _iso_utc(r.timestamp) if r.timestamp is not None else None
+            row_conv_key = _conv_ref_cliente(int(cliente_acl.id), r.instancia_id or effective_inst_id)
+
             items.append(
                 {
                     "id": int(r.id),
@@ -256,36 +743,71 @@ def listar_mensagens(
                     "timestamp": ts_iso,
                     "instancia_id": r.instancia_id,
                     "instance_name": r.instance_name,
+                    "quoted": r.quoted,
+                    "quoted_preview": r.quoted_preview,
                     "apagada_cliente": bool(r.apagada_cliente),
                     "apagada_usuario": bool(r.apagada_usuario),
                     "is_group": False,
+                    "conversation_key": row_conv_key,
+                    "conversation_id": row_conv_key,
+                    "kind": "c",
+                    "entity_id": int(cliente_acl.id),
+                    "cliente_id": int(cliente_acl.id),
                 }
             )
 
         telefone_br = _format_phone_br(getattr(cliente_acl, "telefone", None))
         telefone_norm = _normalize_phone(getattr(cliente_acl, "telefone", None))
 
+        operador_id = getattr(atendimento_acl, "operador_id", None) if atendimento_acl is not None else None
+        operador_nome = _nome_colaborador(db, operador_id) if operador_id is not None else None
+        status_atd = getattr(atendimento_acl, "status", None) if atendimento_acl is not None else None
+
+        fila_state = _fila_state_for_atendimento(
+            db,
+            atendimento=atendimento_acl,
+        )
+
+        part_state = _build_participacao_state(
+            db,
+            atendimento=atendimento_acl,
+            current_colab_id=current_colab_id,
+            is_group=False,
+            exigir_aceite=bool(fila_state.get("exigir_aceite")),
+        )
+
         conversa = {
             "id": int(cliente_acl.id),
+            **conv_fields,
             "is_group": False,
             "telefone": getattr(cliente_acl, "telefone", None),
             "telefone_norm": telefone_norm,
             "telefone_fmt": telefone_br,
             "nome": getattr(cliente_acl, "nome", None),
             "push_name": getattr(cliente_acl, "nome_whatsapp", None),
+            "nome_whatsapp": getattr(cliente_acl, "nome_whatsapp", None),
             "avatar_url": _public_avatar_url(
                 kind="cliente",
                 conversation_id=int(cliente_acl.id),
                 raw_avatar_url=getattr(cliente_acl, "avatar_url", None),
             ),
-            "instancia_id": resolved_inst_id,
-            "instance_name": resolved_inst_name,
+            "instancia_id": effective_inst_id,
+            "instance_name": effective_inst_name,
             "atendimento_id": getattr(atendimento_acl, "id", None) if atendimento_acl else None,
             "departamento_id": (
                 getattr(atendimento_acl, "departamento_id", None)
                 if atendimento_acl is not None
                 else getattr(cliente_acl, "departamento_id", None)
             ),
+            "operador_id": operador_id,
+            "operador_nome": operador_nome,
+            "status": status_atd.value if hasattr(status_atd, "value") else status_atd,
+
+            # primeiro estado de fila
+            **fila_state,
+
+            # depois estado de aceite calculado com base na fila
+            **part_state,
         }
 
         return {"conversa": conversa, "items": items, "mensagens": items}
@@ -322,6 +844,8 @@ def listar_mensagens(
             models.MensagemGrupo.ack,
             models.MensagemGrupo.timestamp,
             models.MensagemGrupo.instancia_id,
+            models.MensagemGrupo.quoted,
+            models.MensagemGrupo.quoted_preview,
             models.EmpresaInstancia.instance_name.label("instance_name"),
             models.MensagemGrupo.author_jid,
             models.MensagemGrupo.from_me,
@@ -342,7 +866,7 @@ def listar_mensagens(
         qg = qg.filter(models.MensagemGrupo.id > int(since_id))
 
     if since_ts is not None:
-        since_epoch = int(since_ts.replace(tzinfo=timezone.utc).timestamp())
+        since_epoch = _epoch_from_dt(since_ts)
         qg = qg.filter(models.MensagemGrupo.timestamp > since_epoch)
 
     incremental = (since_ts is not None) or (since_id is not None)
@@ -354,12 +878,28 @@ def listar_mensagens(
 
     rows_g = qg.all()
 
+    effective_inst_id_g, effective_inst_name_g = _pick_effective_instancia_from_rows(
+        resolved_inst_id=resolved_inst_id,
+        resolved_inst_name=resolved_inst_name,
+        rows=list(rows_g),
+        fallback_inst_id=_to_int(getattr(grp, "instancia_id", None)),
+        fallback_inst_name=resolved_inst_name,
+    )
+
+    conv_fields_g = _conversation_payload_fields(
+        kind="g",
+        entity_id=int(grp.id),
+        instancia_id=effective_inst_id_g,
+    )
+
     items_g = []
     for r in rows_g:
         try:
             ts_iso = datetime.fromtimestamp(int(r.timestamp or 0), tz=timezone.utc).isoformat(timespec="microseconds")
         except Exception:
             ts_iso = None
+
+        row_conv_key = _conv_ref_grupo(int(grp.id), r.instancia_id or effective_inst_id_g)
 
         items_g.append(
             {
@@ -371,6 +911,8 @@ def listar_mensagens(
                 "timestamp": ts_iso,
                 "instancia_id": r.instancia_id,
                 "instance_name": r.instance_name,
+                "quoted": r.quoted,
+                "quoted_preview": r.quoted_preview,
                 "author_jid": r.author_jid,
                 "from_me": bool(r.from_me),
                 "message_type": r.message_type,
@@ -378,11 +920,24 @@ def listar_mensagens(
                 "apagada_usuario": False,
                 "is_group": True,
                 "grupo_id": int(grp.id),
+                "conversation_key": row_conv_key,
+                "conversation_id": row_conv_key,
+                "kind": "g",
+                "entity_id": int(grp.id),
             }
         )
 
+    part_state_g = _build_participacao_state(
+        db,
+        atendimento=None,
+        current_colab_id=current_colab_id,
+        is_group=True,
+        exigir_aceite=False,
+    )
+
     conversa_g = {
         "id": int(grp.id),
+        **conv_fields_g,
         "is_group": True,
         "remote_jid": getattr(grp, "remote_jid", None),
         "nome": getattr(grp, "nome", None),
@@ -391,8 +946,10 @@ def listar_mensagens(
             conversation_id=int(grp.id),
             raw_avatar_url=getattr(grp, "avatar_url", None),
         ),
-        "instancia_id": resolved_inst_id,
-        "instance_name": resolved_inst_name,
+        "instancia_id": effective_inst_id_g,
+        "instance_name": effective_inst_name_g,
+        **_default_fila_state(),
+        **part_state_g,
     }
 
     return {"conversa": conversa_g, "items": items_g, "mensagens": items_g}
@@ -430,7 +987,7 @@ def listar_mensagens_alias_historico(
 
 
 # =========================================================
-# DELETE de mensagem (soft delete: marca apagada_usuario=True)
+# DELETE de mensagem soft delete: marca apagada_usuario=True
 # =========================================================
 @router.delete("/conversas/{cliente_id}/mensagens/{msg_id}")
 async def apagar_mensagem_atendimento(
@@ -442,15 +999,15 @@ async def apagar_mensagem_atendimento(
 ):
     empresa_id_eff = assert_same_company(identity, empresa_id)
 
-    perms = set(identity.get("permissoes") or [])
-    is_admin = bool(identity.get("is_admin")) or bool(identity.get("admin"))
+    perms = set(_id_get(identity, "permissoes") or [])
+    is_admin = bool(_id_get(identity, "is_admin")) or bool(_id_get(identity, "admin"))
+
     if not (is_admin or "atendimento.apagar_mensagens" in perms):
         raise HTTPException(status_code=403, detail="Sem permissão para apagar mensagens de atendimento")
 
     acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
     allowed_instancias = acl_ctx["allowed_instancias"]
 
-    # garante ACL de departamento + instância para conversa de cliente
     try:
         assert_cliente_access(
             db,
@@ -461,7 +1018,6 @@ async def apagar_mensagem_atendimento(
             allow_unassigned_department=False,
         )
     except HTTPException:
-        # se não for cliente 1:1, deixa seguir para tentativa de grupo por instância
         pass
 
     q = (
@@ -484,15 +1040,25 @@ async def apagar_mensagem_atendimento(
 
     for m in rows:
         m.apagada_usuario = True
+
     db.commit()
+
+    first_inst_id = getattr(rows[0], "instancia_id", None) if rows else None
+    conv_key = _conv_ref_cliente(int(cliente_id), first_inst_id)
 
     payload = {
         "type": "msg_deleted",
         "empresa_id": int(empresa_id_eff),
         "cliente_id": int(cliente_id),
+        "conversation_id": conv_key,
+        "conversation_key": conv_key,
+        "kind": "c",
+        "entity_id": int(cliente_id),
         "msg_id": str(msg_id),
         "apagada_usuario": True,
+        "instancia_id": first_inst_id,
     }
+
     try:
         await conexoes_ativas.send_message(f"emp:{int(empresa_id_eff)}", payload)
     except Exception as e:

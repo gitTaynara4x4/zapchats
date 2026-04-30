@@ -1,8 +1,9 @@
-# backend/integrations/evolution/repositories/atendimentos_repo.py
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, List, Optional
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend import models
@@ -14,6 +15,14 @@ def has_mensagem_atendimento_field() -> bool:
 
 def _get_atendimento_model():
     return getattr(models, "Atendimento", None)
+
+
+def _get_participante_model():
+    return getattr(models, "AtendimentoParticipante", None)
+
+
+def has_atendimento_participante_model() -> bool:
+    return _get_participante_model() is not None
 
 
 def _safe_rollback(db: Session) -> None:
@@ -30,6 +39,22 @@ def _to_int(v) -> int | None:
         return int(v)
     except Exception:
         return None
+
+
+def _now_utc():
+    return datetime.now(timezone.utc)
+
+
+def _table_exists(db: Session, table_name: str) -> bool:
+    try:
+        reg = db.execute(text(f"SELECT to_regclass('public.{table_name}')")).scalar()
+        return reg is not None
+    except Exception:
+        return False
+
+
+def _participant_feature_enabled(db: Session) -> bool:
+    return has_atendimento_participante_model() and _table_exists(db, "atendimento_participantes")
 
 
 def _status_abertos() -> list[object]:
@@ -157,6 +182,217 @@ def _query_latest_open_atendimento_any_department(
         return None
 
 
+def _list_active_participantes(
+    db: Session,
+    *,
+    empresa_id: int,
+    atendimento_id: int,
+):
+    AP = _get_participante_model()
+    if AP is None or not _participant_feature_enabled(db):
+        return []
+
+    q = db.query(AP).filter(
+        AP.empresa_id == int(empresa_id),
+        AP.atendimento_id == int(atendimento_id),
+    )
+
+    if hasattr(AP, "is_ativo"):
+        q = q.filter(AP.is_ativo.is_(True))
+    elif hasattr(AP, "saiu_em"):
+        q = q.filter(AP.saiu_em.is_(None))
+
+    try:
+        if hasattr(AP, "id"):
+            return q.order_by(AP.id.asc()).all()
+        return q.all()
+    except Exception:
+        _safe_rollback(db)
+        return []
+
+
+def _list_active_participante_ids(
+    db: Session,
+    *,
+    empresa_id: int,
+    atendimento_id: int,
+) -> List[int]:
+    rows = _list_active_participantes(
+        db,
+        empresa_id=int(empresa_id),
+        atendimento_id=int(atendimento_id),
+    )
+    out: List[int] = []
+    for row in rows:
+        cid = _to_int(getattr(row, "colaborador_id", None))
+        if cid is not None and cid not in out:
+            out.append(cid)
+    return out
+
+
+def _upsert_participante(
+    db: Session,
+    *,
+    atendimento,
+    colaborador_id: int,
+    is_responsavel: Optional[bool] = None,
+):
+    AP = _get_participante_model()
+    if AP is None or not _participant_feature_enabled(db):
+        return None
+
+    atendimento_id = _to_int(getattr(atendimento, "id", None))
+    empresa_id = _to_int(getattr(atendimento, "empresa_id", None))
+
+    if atendimento_id is None or empresa_id is None:
+        return None
+
+    q = db.query(AP).filter(
+        AP.empresa_id == int(empresa_id),
+        AP.atendimento_id == int(atendimento_id),
+        AP.colaborador_id == int(colaborador_id),
+    )
+
+    try:
+        row = q.order_by(AP.id.desc()).first() if hasattr(AP, "id") else q.first()
+    except Exception:
+        _safe_rollback(db)
+        return None
+
+    now = _now_utc()
+
+    if row is None:
+        data = {
+            "empresa_id": int(empresa_id),
+            "atendimento_id": int(atendimento_id),
+            "colaborador_id": int(colaborador_id),
+        }
+
+        if hasattr(AP, "aceito_em"):
+            data["aceito_em"] = now
+        if hasattr(AP, "entrou_em"):
+            data["entrou_em"] = now
+        if hasattr(AP, "is_ativo"):
+            data["is_ativo"] = True
+        if hasattr(AP, "saiu_em"):
+            data["saiu_em"] = None
+        if hasattr(AP, "is_responsavel"):
+            data["is_responsavel"] = bool(is_responsavel) if is_responsavel is not None else False
+
+        row = AP(**data)
+        db.add(row)
+        db.flush()
+        return row
+
+    if hasattr(row, "is_ativo"):
+        row.is_ativo = True
+    if hasattr(row, "saiu_em"):
+        row.saiu_em = None
+    if hasattr(row, "aceito_em") and getattr(row, "aceito_em", None) is None:
+        row.aceito_em = now
+    if hasattr(row, "entrou_em") and getattr(row, "entrou_em", None) is None:
+        row.entrou_em = now
+    if hasattr(row, "is_responsavel") and is_responsavel is not None:
+        row.is_responsavel = bool(is_responsavel)
+
+    db.add(row)
+    db.flush()
+    return row
+
+
+def _bootstrap_legacy_operador_as_participante(
+    db: Session,
+    *,
+    atendimento,
+) -> None:
+    """
+    Migração preguiçosa:
+    se existe operador_id no atendimento legado e ainda não existe
+    participante ativo, cria 1 participante ativo/responsável.
+    """
+    if atendimento is None or not _participant_feature_enabled(db):
+        return
+
+    atendimento_id = _to_int(getattr(atendimento, "id", None))
+    empresa_id = _to_int(getattr(atendimento, "empresa_id", None))
+    operador_id = _to_int(getattr(atendimento, "operador_id", None))
+
+    if atendimento_id is None or empresa_id is None or operador_id is None:
+        return
+
+    active_ids = _list_active_participante_ids(
+        db,
+        empresa_id=int(empresa_id),
+        atendimento_id=int(atendimento_id),
+    )
+    if active_ids:
+        return
+
+    _upsert_participante(
+        db,
+        atendimento=atendimento,
+        colaborador_id=int(operador_id),
+        is_responsavel=True,
+    )
+
+
+def ensure_participante_ativo_repo(
+    db: Session,
+    *,
+    atendimento,
+    colaborador_id: int | None,
+    preferir_responsavel_se_vazio: bool = True,
+):
+    """
+    Garante que o colaborador fique como participante ativo do atendimento.
+    Não remove ninguém; só adiciona/reativa.
+    """
+    if atendimento is None:
+        return None
+
+    colaborador_id_i = _to_int(colaborador_id)
+    if colaborador_id_i is None:
+        return None
+
+    if not _participant_feature_enabled(db):
+        # fallback legado
+        if hasattr(atendimento, "operador_id") and getattr(atendimento, "operador_id", None) is None:
+            atendimento.operador_id = int(colaborador_id_i)
+            db.add(atendimento)
+            db.flush()
+        return None
+
+    atendimento_id = _to_int(getattr(atendimento, "id", None))
+    empresa_id = _to_int(getattr(atendimento, "empresa_id", None))
+    if atendimento_id is None or empresa_id is None:
+        return None
+
+    _bootstrap_legacy_operador_as_participante(db, atendimento=atendimento)
+
+    active_ids = _list_active_participante_ids(
+        db,
+        empresa_id=int(empresa_id),
+        atendimento_id=int(atendimento_id),
+    )
+
+    is_responsavel = bool(preferir_responsavel_se_vazio and not active_ids)
+
+    row = _upsert_participante(
+        db,
+        atendimento=atendimento,
+        colaborador_id=int(colaborador_id_i),
+        is_responsavel=is_responsavel,
+    )
+
+    # mantém compat legado
+    if hasattr(atendimento, "operador_id") and getattr(atendimento, "operador_id", None) is None:
+        atendimento.operador_id = int(colaborador_id_i)
+        db.add(atendimento)
+        db.flush()
+
+    return row
+
+
 def get_or_open_atendimento_repo(
     db: Session,
     *,
@@ -181,7 +417,6 @@ def get_or_open_atendimento_repo(
     departamento_id_i = _to_int(departamento_id)
     operador_id_i = _to_int(operador_id)
 
-    # Se a sessão estiver em estado inválido, saneia primeiro
     try:
         if hasattr(db, "is_active") and not db.is_active:
             _safe_rollback(db)
@@ -196,7 +431,26 @@ def get_or_open_atendimento_repo(
         departamento_id=departamento_id_i,
     )
     if atendimento is not None:
-        return atendimento
+        try:
+            _bootstrap_legacy_operador_as_participante(db, atendimento=atendimento)
+
+            if operador_id_i is not None:
+                ensure_participante_ativo_repo(
+                    db,
+                    atendimento=atendimento,
+                    colaborador_id=operador_id_i,
+                    preferir_responsavel_se_vazio=True,
+                )
+            return atendimento
+        except Exception:
+            _safe_rollback(db)
+            return _query_open_atendimento(
+                db,
+                empresa_id=empresa_id_i,
+                instancia_id=instancia_id_i,
+                cliente_id=cliente_id_i,
+                departamento_id=departamento_id_i,
+            )
 
     try:
         novo = Atendimento()
@@ -224,6 +478,7 @@ def get_or_open_atendimento_repo(
         if hasattr(novo, "direcao"):
             novo.direcao = direcao
 
+        # compat legado
         if hasattr(novo, "operador_id") and operador_id_i is not None:
             novo.operador_id = operador_id_i
 
@@ -241,12 +496,20 @@ def get_or_open_atendimento_repo(
 
         db.add(novo)
         db.flush()
+
+        if operador_id_i is not None:
+            ensure_participante_ativo_repo(
+                db,
+                atendimento=novo,
+                colaborador_id=operador_id_i,
+                preferir_responsavel_se_vazio=True,
+            )
+
         return novo
 
     except Exception:
         _safe_rollback(db)
 
-        # tenta buscar de novo depois do rollback
         return _query_open_atendimento(
             db,
             empresa_id=empresa_id_i,
@@ -311,6 +574,8 @@ def update_open_atendimento_departamento_repo(
     try:
         changed = False
 
+        _bootstrap_legacy_operador_as_participante(db, atendimento=atendimento)
+
         if hasattr(atendimento, "departamento_id"):
             atual_dep = _to_int(getattr(atendimento, "departamento_id", None))
             if atual_dep != departamento_id_i:
@@ -333,6 +598,14 @@ def update_open_atendimento_departamento_repo(
 
         if changed:
             db.flush()
+
+        if operador_id_i is not None:
+            ensure_participante_ativo_repo(
+                db,
+                atendimento=atendimento,
+                colaborador_id=operador_id_i,
+                preferir_responsavel_se_vazio=True,
+            )
 
         return atendimento
 
@@ -387,8 +660,10 @@ def attach_atendimento_to_message_if_supported(msg_model, atendimento_id: int | 
 
 __all__ = [
     "has_mensagem_atendimento_field",
+    "has_atendimento_participante_model",
     "get_or_open_atendimento_repo",
     "get_atendimento_id_repo",
     "update_open_atendimento_departamento_repo",
+    "ensure_participante_ativo_repo",
     "attach_atendimento_to_message_if_supported",
 ]

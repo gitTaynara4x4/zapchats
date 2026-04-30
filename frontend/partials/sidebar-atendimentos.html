@@ -1,6 +1,97 @@
 <!-- /frontend/partials/sidebar-atendimentos.html -->
 
+<link rel="preload" as="image" href="/img/fav-icon.png">
+<link rel="preload" as="image" href="/img/logo-s-fundo.png">
+<link rel="preload" as="image" href="/img/logo-white.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+<script>
+  (function () {
+    try {
+      var root = document.documentElement;
+      var saved =
+        (window.AppTheme && typeof window.AppTheme.current === 'function'
+          ? window.AppTheme.current()
+          : (
+              localStorage.getItem('zc:theme') ||
+              localStorage.getItem('theme') ||
+              localStorage.getItem('valora_theme') ||
+              'dark'
+            )
+        ) || 'dark';
+
+      var isDark = String(saved).toLowerCase() === 'dark';
+      root.classList.toggle('dark', isDark);
+      root.setAttribute('data-theme', isDark ? 'dark' : 'light');
+    } catch (e) {}
+  })();
+</script>
+
 <style>
+  :root{
+    --zc-font:"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+
+    --zc-leftbar-bg:#ffffff;
+    --zc-leftbar-border:#e5e7eb;
+    --zc-leftbar-text:#111827;
+    --zc-leftbar-muted:#6b7280;
+    --zc-leftbar-nav-muted:#9ca3af;
+    --zc-leftbar-hover:#f3f4f6;
+    --zc-leftbar-dropdown-bg:#ffffff;
+    --zc-leftbar-dropdown-hover:#f3f4f6;
+    --zc-leftbar-accent:#25d366;
+    --zc-leftbar-accent-soft:rgba(37,211,102,.12);
+    --zc-leftbar-danger:#ef4444;
+    --zc-leftbar-danger-soft:rgba(239,68,68,.08);
+    --zc-leftbar-shadow:10px 0 28px rgba(0,0,0,.12);
+    --zc-mobile-overlay:rgba(15,23,42,.50);
+    --zc-mobile-btn-bg:#f3f4f6;
+  }
+
+  html.dark,
+  html[data-theme="dark"]{
+    --zc-leftbar-bg:#181818;
+    --zc-leftbar-border:#262626;
+    --zc-leftbar-text:#f5f5f5;
+    --zc-leftbar-muted:#b0b0b0;
+    --zc-leftbar-nav-muted:#8a8a8a;
+    --zc-leftbar-hover:#222222;
+    --zc-leftbar-dropdown-bg:#1e1e1e;
+    --zc-leftbar-dropdown-hover:#2a2a2a;
+    --zc-leftbar-accent:#25d366;
+    --zc-leftbar-accent-soft:rgba(37,211,102,.16);
+    --zc-leftbar-danger:#ef4444;
+    --zc-leftbar-danger-soft:rgba(239,68,68,.12);
+    --zc-leftbar-shadow:12px 0 32px rgba(0,0,0,.34);
+    --zc-mobile-overlay:rgba(0,0,0,.62);
+    --zc-mobile-btn-bg:#202020;
+  }
+
+  .wpp-mobile-float-toggle{
+    display:none;
+    font-family:var(--zc-font) !important;
+  }
+
+  .wpp-mobile-overlay{
+    position:fixed;
+    inset:0;
+    background:var(--zc-mobile-overlay);
+    opacity:0;
+    visibility:hidden;
+    pointer-events:none;
+    transition:opacity .2s ease, visibility .2s ease;
+    z-index:1190;
+  }
+
+  .wpp-mobile-overlay.show{
+    opacity:1;
+    visibility:visible;
+    pointer-events:auto;
+  }
+
   .wpp-leftbar{
     display:flex;
     flex-direction:column;
@@ -14,19 +105,118 @@
     position:relative;
     z-index:80;
     overflow:visible !important;
-    background:var(--leftbar-bg, var(--panel-2, #111827));
+    background:var(--zc-leftbar-bg) !important;
+    color:var(--zc-leftbar-muted) !important;
+    border-right:1px solid var(--zc-leftbar-border);
+    font-family:var(--zc-font) !important;
+    font-size:14px;
+    font-weight:500;
+    -webkit-font-smoothing:antialiased;
+    -moz-osx-font-smoothing:grayscale;
+    text-rendering:optimizeLegibility;
     transition:
+      background .2s ease,
+      border-color .2s ease,
       width .22s ease,
       min-width .22s ease,
       max-width .22s ease,
-      box-shadow .22s ease;
+      box-shadow .22s ease,
+      transform .22s ease;
+  }
+
+  .wpp-leftbar,
+  .wpp-leftbar *{
+    font-family:var(--zc-font) !important;
   }
 
   .wpp-leftbar:hover{
     width:220px !important;
     min-width:220px !important;
     max-width:220px !important;
-    box-shadow:10px 0 28px rgba(0,0,0,.22);
+    box-shadow:var(--zc-leftbar-shadow);
+  }
+
+  .wpp-leftbar-logo{
+    width:100%;
+    height:64px;
+    min-height:64px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:0;
+    box-sizing:border-box;
+    flex:0 0 auto;
+    overflow:hidden;
+    border-bottom:1px solid var(--zc-leftbar-border);
+    position:relative;
+  }
+
+  .wpp-leftbar-logo-link{
+    width:64px;
+    height:64px;
+    min-width:64px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    position:relative;
+    text-decoration:none;
+    color:inherit;
+    overflow:hidden;
+    box-sizing:border-box;
+  }
+
+  .wpp-leftbar:hover .wpp-leftbar-logo-link{
+    width:100%;
+    justify-content:flex-start;
+    padding-left:14px;
+  }
+
+  .wpp-leftbar-logo-fav{
+    width:32px !important;
+    height:32px !important;
+    min-width:32px !important;
+    max-width:32px !important;
+    max-height:32px !important;
+    display:block !important;
+    object-fit:contain !important;
+    object-position:center !important;
+    flex:0 0 auto;
+  }
+
+  .wpp-leftbar-logo-light,
+  .wpp-leftbar-logo-dark{
+    display:none !important;
+    height:38px !important;
+    width:auto !important;
+    max-width:176px !important;
+    object-fit:contain !important;
+    object-position:left center !important;
+    flex:0 0 auto;
+  }
+
+  .wpp-leftbar:hover .wpp-leftbar-logo-fav{
+    display:none !important;
+  }
+
+  html[data-theme="dark"] .wpp-leftbar:hover .wpp-leftbar-logo-dark,
+  html.dark .wpp-leftbar:hover .wpp-leftbar-logo-dark{
+    display:block !important;
+  }
+
+  html[data-theme="light"] .wpp-leftbar:hover .wpp-leftbar-logo-light,
+  html:not(.dark):not([data-theme="dark"]) .wpp-leftbar:hover .wpp-leftbar-logo-light{
+    display:block !important;
+  }
+
+  html[data-theme="dark"] .wpp-leftbar:hover .wpp-leftbar-logo-light,
+  html.dark .wpp-leftbar:hover .wpp-leftbar-logo-light,
+  html[data-theme="light"] .wpp-leftbar:hover .wpp-leftbar-logo-dark{
+    display:none !important;
+  }
+
+  .wpp-mobile-close{
+    display:none;
+    font-family:var(--zc-font) !important;
   }
 
   .wpp-leftbar-icons{
@@ -37,6 +227,80 @@
     flex:1 1 auto;
     min-height:0;
     width:100%;
+    overflow-y:auto;
+    overflow-x:hidden;
+    padding-top:8px;
+    padding-bottom:8px;
+    scrollbar-width:none;
+  }
+
+  .wpp-leftbar-icons::-webkit-scrollbar{
+    width:0;
+    height:0;
+  }
+
+  .wpp-leftbar-separator{
+    height:1px;
+    min-height:1px;
+    margin:2px 12px;
+    background:var(--zc-leftbar-border);
+    flex:0 0 auto;
+  }
+
+  .wpp-leftbar-section-label{
+    width:auto;
+    height:22px;
+    min-height:22px;
+    margin:4px 12px 0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    position:relative;
+    flex:0 0 auto;
+    overflow:hidden;
+  }
+
+  .wpp-leftbar-section-label::before{
+    content:"";
+    width:100%;
+    height:1px;
+    background:var(--zc-leftbar-border);
+    display:block;
+  }
+
+  .wpp-leftbar-section-label span{
+    opacity:0;
+    max-width:0;
+    overflow:hidden;
+    white-space:nowrap;
+    color:var(--zc-leftbar-nav-muted);
+    background:var(--zc-leftbar-bg);
+    padding:0;
+    font-family:var(--zc-font) !important;
+    font-size:10px;
+    font-weight:800;
+    line-height:1;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    transition:
+      opacity .18s ease,
+      max-width .22s ease,
+      padding .18s ease;
+  }
+
+  .wpp-leftbar:hover .wpp-leftbar-section-label{
+    justify-content:flex-start;
+    margin:8px 12px 2px;
+  }
+
+  .wpp-leftbar:hover .wpp-leftbar-section-label::before{
+    display:none;
+  }
+
+  .wpp-leftbar:hover .wpp-leftbar-section-label span{
+    opacity:1;
+    max-width:180px;
+    padding:0;
   }
 
   .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon{
@@ -48,30 +312,42 @@
     align-items:center !important;
     justify-content:center !important;
     gap:0 !important;
-    padding:12px 0 !important;
-    border-radius:14px;
+    padding:11px 0 !important;
+    min-height:44px;
+    border-radius:10px;
+    border:1px solid transparent;
     background:transparent;
-    color:inherit;
+    color:var(--zc-leftbar-nav-muted) !important;
     text-decoration:none;
+    font-family:var(--zc-font) !important;
+    font-size:14px;
+    font-weight:500;
+    -webkit-tap-highlight-color:transparent;
     transition:
       background .18s ease,
+      border-color .18s ease,
       padding .18s ease,
       justify-content .18s ease,
       gap .18s ease,
       color .18s ease;
   }
 
-  .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon:hover,
+  .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon:hover{
+    background:var(--zc-leftbar-hover);
+    color:var(--zc-leftbar-text) !important;
+  }
+
   .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon[aria-current="page"],
   .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon.is-active{
-    background:rgba(255,255,255,.06);
-    color:var(--accent, #25d366);
+    background:var(--zc-leftbar-accent-soft);
+    border-color:rgba(37,211,102,.18);
+    color:var(--zc-leftbar-accent) !important;
   }
 
   .wpp-leftbar:hover .wpp-leftbar-icons > .wpp-leftbar-icon{
     justify-content:flex-start !important;
-    gap:12px !important;
-    padding:12px !important;
+    gap:10px !important;
+    padding:11px 12px !important;
   }
 
   .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon svg{
@@ -80,15 +356,21 @@
     min-width:22px !important;
     display:block;
     flex:0 0 auto;
-    fill:currentColor;
+    fill:currentColor !important;
   }
 
   .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon .wpp-label{
+    color:inherit !important;
+    font-family:var(--zc-font) !important;
+    font-size:14px;
+    font-weight:500;
+    letter-spacing:0;
     opacity:0;
     max-width:0;
     overflow:hidden;
     white-space:nowrap;
-    transform:translateX(-6px);
+    transform:scale(.98);
+    transform-origin:left center;
     transition:
       opacity .18s ease,
       max-width .22s ease,
@@ -99,17 +381,18 @@
   .wpp-leftbar:hover .wpp-leftbar-icons > .wpp-leftbar-icon .wpp-label{
     opacity:1;
     max-width:180px;
-    transform:translateX(0);
+    transform:scale(1);
   }
 
   .wpp-leftbar-user-wrap{
     margin-top:auto;
     position:relative;
     padding-top:10px;
-    border-top:1px solid rgba(148,163,184,.18);
+    border-top:1px solid var(--zc-leftbar-border);
     width:100%;
     display:flex;
     justify-content:center;
+    flex:0 0 auto;
   }
 
   .wpp-leftbar-user-btn{
@@ -123,10 +406,11 @@
     gap:0 !important;
     border:0;
     background:transparent;
-    color:inherit;
+    color:var(--zc-leftbar-muted) !important;
     padding:10px 0 !important;
-    border-radius:14px;
+    border-radius:10px;
     cursor:pointer;
+    font-family:var(--zc-font) !important;
     transition:
       background .18s ease,
       padding .18s ease,
@@ -142,7 +426,7 @@
 
   .wpp-leftbar-user-btn:hover,
   .wpp-leftbar-user-btn.active{
-    background:rgba(255,255,255,.06);
+    background:var(--zc-leftbar-hover);
   }
 
   .wpp-leftbar-avatar{
@@ -154,10 +438,11 @@
     display:flex;
     align-items:center;
     justify-content:center;
-    background:rgba(37,211,102,.14);
-    color:#25d366;
+    background:var(--zc-leftbar-accent-soft);
+    color:var(--zc-leftbar-accent);
+    font-family:var(--zc-font) !important;
     font-size:14px;
-    font-weight:700;
+    font-weight:800;
     flex:0 0 auto;
   }
 
@@ -176,7 +461,8 @@
     overflow:hidden;
     opacity:0;
     max-width:0;
-    transform:translateX(-6px);
+    transform:scale(.98);
+    transform-origin:left center;
     transition:
       opacity .18s ease,
       max-width .22s ease,
@@ -186,20 +472,24 @@
   .wpp-leftbar:hover .wpp-leftbar-user-info{
     opacity:1;
     max-width:180px;
-    transform:translateX(0);
+    transform:scale(1);
   }
 
   .wpp-leftbar-user-info strong{
+    color:var(--zc-leftbar-text) !important;
+    font-family:var(--zc-font) !important;
     font-size:13px;
-    font-weight:600;
+    font-weight:700;
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
   }
 
   .wpp-leftbar-user-info span{
+    color:var(--zc-leftbar-muted) !important;
+    font-family:var(--zc-font) !important;
     font-size:11px;
-    opacity:.75;
+    font-weight:500;
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
@@ -215,7 +505,9 @@
     opacity:0;
     max-width:0;
     overflow:hidden;
-    transform:translateX(-6px);
+    color:var(--zc-leftbar-nav-muted);
+    transform:scale(.98);
+    transform-origin:left center;
     transition:
       transform .2s ease,
       opacity .18s ease,
@@ -225,7 +517,7 @@
   .wpp-leftbar:hover .wpp-leftbar-user-chevron{
     opacity:.75;
     max-width:16px;
-    transform:translateX(0);
+    transform:scale(1);
   }
 
   .wpp-leftbar-user-chevron svg{
@@ -244,11 +536,11 @@
     left:4px;
     right:4px;
     bottom:calc(100% + 8px);
-    background:var(--panel-2, #111827);
-    border:1px solid var(--border, rgba(148,163,184,.18));
-    border-radius:14px;
+    background:var(--zc-leftbar-dropdown-bg);
+    border:1px solid var(--zc-leftbar-border);
+    border-radius:10px;
     padding:8px;
-    box-shadow:0 18px 40px rgba(0,0,0,.28);
+    box-shadow:var(--zc-leftbar-shadow);
     opacity:0;
     visibility:hidden;
     transform:translateY(10px);
@@ -270,17 +562,19 @@
     padding:10px 12px;
     border:0;
     background:transparent;
-    color:var(--text, #e5e7eb);
-    border-radius:10px;
+    color:var(--zc-leftbar-text) !important;
+    border-radius:8px;
     cursor:pointer;
     text-decoration:none;
+    font-family:var(--zc-font) !important;
     font-size:13px;
     font-weight:500;
     text-align:left;
+    transition:background .15s ease, color .15s ease;
   }
 
   .wpp-leftbar-menu-item:hover{
-    background:rgba(255,255,255,.06);
+    background:var(--zc-leftbar-dropdown-hover);
   }
 
   .wpp-leftbar-menu-item .icon{
@@ -290,7 +584,7 @@
     display:flex;
     align-items:center;
     justify-content:center;
-    opacity:.78;
+    color:var(--zc-leftbar-nav-muted);
   }
 
   .wpp-leftbar-menu-item .icon svg{
@@ -302,98 +596,324 @@
 
   .wpp-leftbar-menu-divider{
     height:1px;
-    background:rgba(148,163,184,.18);
+    background:var(--zc-leftbar-border);
     margin:6px 0;
   }
 
   .wpp-leftbar-menu-item.danger{
-    color:#f87171;
+    color:var(--zc-leftbar-danger) !important;
+  }
+
+  .wpp-leftbar-menu-item.danger .icon{
+    color:var(--zc-leftbar-danger);
   }
 
   .wpp-leftbar-menu-item.danger:hover{
-    background:rgba(239,68,68,.10);
+    background:var(--zc-leftbar-danger-soft);
   }
 
   @media (max-width:920px){
-    .wpp-leftbar{
+    .wpp-mobile-float-toggle{
+      width:34px;
+      height:34px;
+      min-width:34px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      border-radius:10px;
+      border:1px solid rgba(134,150,160,.22);
+      background:rgba(32,44,51,.88);
+      color:#e9edef;
+      cursor:pointer;
+      padding:0;
+      z-index:1210;
+      box-shadow:none;
+      flex:0 0 auto;
+      vertical-align:middle;
+      font-family:var(--zc-font) !important;
+    }
+
+    html[data-theme="light"] .wpp-mobile-float-toggle,
+    html:not(.dark):not([data-theme="dark"]) .wpp-mobile-float-toggle{
+      background:#f3f4f6;
+      color:#111827;
+      border-color:#e5e7eb;
+    }
+
+    .wpp-mobile-float-toggle:not(.zc-mobile-attached){
+      position:fixed;
+      top:14px;
+      left:14px;
+    }
+
+    .zc-mobile-brand-force-host{
+      position:relative !important;
+      padding-left:42px !important;
+      box-sizing:border-box !important;
+    }
+
+    .zc-mobile-brand-force-host > #wppMobileToggle.zc-mobile-attached,
+    #wppMobileToggle.zc-mobile-attached{
+      position:absolute !important;
+      left:0 !important;
+      top:50% !important;
+      right:auto !important;
+      bottom:auto !important;
+      transform:translateY(-50%) !important;
+      margin:0 !important;
+      z-index:5 !important;
+      display:inline-flex !important;
+    }
+
+    .wpp-mobile-float-toggle svg{
+      width:20px;
+      height:20px;
+      display:block;
+      fill:currentColor;
+    }
+
+    .wpp-leftbar,
+    .wpp-leftbar:hover{
+      position:fixed;
+      top:0;
+      left:0;
+      width:min(86vw, 320px) !important;
+      min-width:min(86vw, 320px) !important;
+      max-width:min(86vw, 320px) !important;
+      height:100vh;
+      min-height:100vh;
+      z-index:1220;
+      transform:translateX(-110%);
+      box-shadow:12px 0 30px rgba(0,0,0,.28);
+      overflow-x:hidden !important;
+      overflow-y:auto !important;
+      padding:0;
+    }
+
+    .wpp-leftbar.show{
+      transform:translateX(0);
+    }
+
+    .wpp-leftbar-logo{
+      height:74px;
+      min-height:74px;
+      justify-content:flex-start;
+      padding:0 56px 0 16px;
+    }
+
+    .wpp-leftbar-logo-link,
+    .wpp-leftbar:hover .wpp-leftbar-logo-link{
+      width:100%;
+      min-width:0;
+      height:74px;
+      justify-content:flex-start;
+      padding-left:0;
+    }
+
+    .wpp-leftbar-logo-fav{
       display:none !important;
+    }
+
+    html[data-theme="dark"] .wpp-leftbar-logo-dark,
+    html.dark .wpp-leftbar-logo-dark{
+      display:block !important;
+      opacity:1 !important;
+      transform:none !important;
+    }
+
+    html[data-theme="light"] .wpp-leftbar-logo-light,
+    html:not(.dark):not([data-theme="dark"]) .wpp-leftbar-logo-light{
+      display:block !important;
+      opacity:1 !important;
+      transform:none !important;
+    }
+
+    .wpp-mobile-close{
+      position:absolute;
+      right:12px;
+      top:18px;
+      width:36px;
+      height:36px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      border-radius:10px;
+      border:1px solid var(--zc-leftbar-border);
+      background:var(--zc-mobile-btn-bg);
+      color:var(--zc-leftbar-text);
+      cursor:pointer;
+      padding:0;
+      z-index:3;
+      font-family:var(--zc-font) !important;
+    }
+
+    .wpp-mobile-close svg{
+      width:20px;
+      height:20px;
+      display:block;
+      fill:currentColor;
+    }
+
+    .wpp-leftbar-icons{
+      padding:12px 16px;
+      gap:6px;
+      overflow-y:auto;
+      overflow-x:hidden;
+    }
+
+    .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon,
+    .wpp-leftbar:hover .wpp-leftbar-icons > .wpp-leftbar-icon{
+      justify-content:flex-start !important;
+      gap:10px !important;
+      padding:11px 12px !important;
+    }
+
+    .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon .wpp-label,
+    .wpp-leftbar:hover .wpp-leftbar-icons > .wpp-leftbar-icon .wpp-label{
+      opacity:1;
+      max-width:220px;
+      transform:scale(1);
+      pointer-events:auto;
+    }
+
+    .wpp-leftbar-section-label,
+    .wpp-leftbar:hover .wpp-leftbar-section-label{
+      justify-content:flex-start;
+      height:24px;
+      min-height:24px;
+      margin:10px 12px 2px;
+    }
+
+    .wpp-leftbar-section-label::before,
+    .wpp-leftbar:hover .wpp-leftbar-section-label::before{
+      display:none;
+    }
+
+    .wpp-leftbar-section-label span,
+    .wpp-leftbar:hover .wpp-leftbar-section-label span{
+      opacity:1;
+      max-width:220px;
+      padding:0;
+    }
+
+    .wpp-leftbar-user-wrap{
+      padding:10px 16px 16px;
+    }
+
+    .wpp-leftbar-user-btn,
+    .wpp-leftbar:hover .wpp-leftbar-user-btn{
+      justify-content:flex-start !important;
+      padding:12px !important;
+      gap:12px !important;
+    }
+
+    .wpp-leftbar-user-info,
+    .wpp-leftbar:hover .wpp-leftbar-user-info{
+      opacity:1;
+      max-width:220px;
+      transform:scale(1);
+    }
+
+    .wpp-leftbar-user-chevron,
+    .wpp-leftbar:hover .wpp-leftbar-user-chevron{
+      opacity:.75;
+      max-width:16px;
+      transform:scale(1);
+    }
+
+    .wpp-leftbar-user-btn.active .wpp-leftbar-user-chevron{
+      transform:rotate(180deg);
+    }
+
+    .wpp-leftbar-user-menu{
+      left:16px;
+      right:16px;
     }
   }
 </style>
 
-<nav class="wpp-leftbar" aria-label="Menu do atendimento">
-  <div class="wpp-leftbar-icons">
+<button type="button" class="wpp-mobile-float-toggle" id="wppMobileToggle" aria-label="Abrir menu" aria-expanded="false">
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M4 6h16v2H4V6Zm0 5h16v2H4v-2Zm0 5h16v2H4v-2Z"></path>
+  </svg>
+</button>
 
-    <a class="wpp-leftbar-icon" data-menu="dashboard" href="/dashboard" title="Dashboard" aria-label="Dashboard">
-      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M224,98H182V56a6,6,0,0,0-6-6H54V40a6,6,0,0,0-12,0V216a6,6,0,0,0,12,0V206h90a6,6,0,0,0,6-6V158h74a6,6,0,0,0,6-6V104A6,6,0,0,0,224,98ZM170,62V98H54V62ZM138,194H54V158h84Zm80-48H54V110H218Z"/>
+<div class="wpp-mobile-overlay" id="wppMobileOverlay"></div>
+
+<nav class="wpp-leftbar" id="wppAtendSidebar" aria-label="Menu do atendimento">
+  <div class="wpp-leftbar-logo">
+    <a href="/dashboard" class="wpp-leftbar-logo-link" aria-label="Ir para dashboard">
+      <img class="wpp-leftbar-logo-fav" src="/img/fav-icon.png?v=12" alt="ZapsChat" onerror="this.onerror=null;this.src='/frontend/img/fav-icon.png?v=12';">
+      <img class="wpp-leftbar-logo-light" src="/img/logo-s-fundo.png?v=12" alt="ZapsChat" onerror="this.onerror=null;this.src='/frontend/img/logo-s-fundo.png?v=12';">
+      <img class="wpp-leftbar-logo-dark" src="/img/logo-white.png?v=12" alt="ZapsChat" onerror="this.onerror=null;this.src='/frontend/img/logo-white.png?v=12';">
+    </a>
+
+    <button type="button" class="wpp-mobile-close" id="wppMobileClose" aria-label="Fechar menu">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M18.3 5.71 12 12l6.3 6.29-1.42 1.42L10.59 13.4 4.29 19.7 2.87 18.3 9.17 12l-6.3-6.29L4.29 4.3l6.3 6.3 6.29-6.3Z"></path>
       </svg>
+    </button>
+  </div>
+
+  <div class="wpp-leftbar-icons">
+    <a class="wpp-leftbar-icon" data-menu="dashboard" href="/dashboard" title="Dashboard" aria-label="Dashboard">
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M224,98H182V56a6,6,0,0,0-6-6H54V40a6,6,0,0,0-12,0V216a6,6,0,0,0,12,0V206h90a6,6,0,0,0,6-6V158h74a6,6,0,0,0,6-6V104A6,6,0,0,0,224,98ZM170,62V98H54V62ZM138,194H54V158h84Zm80-48H54V110H218Z"></path></svg>
       <span class="wpp-label">Dashboard</span>
     </a>
 
     <a class="wpp-leftbar-icon" data-menu="atendimentos" href="/atendimentos" title="Atendimentos" aria-label="Atendimentos">
-      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M225.88,30.12a13.83,13.83,0,0,0-13.7-3.58l-.11,0L20.14,84.77A14,14,0,0,0,18,110.85l85.56,41.64L145.12,238a13.87,13.87,0,0,0,12.61,8c.4,0,.81,0,1.21-.05a13.9,13.9,0,0,0,12.29-10.09l58.2-191.93,0-.11A13.83,13.83,0,0,0,225.88,30.12Zm-8,10.4L159.73,232.43l0,.11a2,2,0,0,1-3.76.26l-40.68-83.58,49-49a6,6,0,1,0-8.49-8.49l-49,49L23.15,100a2,2,0,0,1,.31-3.74l.11,0L215.48,38.08a1.94,1.94,0,0,1,1.92.52A2,2,0,0,1,217.92,40.52Z"/>
-      </svg>
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M225.88,30.12a13.83,13.83,0,0,0-13.7-3.58l-.11,0L20.14,84.77A14,14,0,0,0,18,110.85l85.56,41.64L145.12,238a13.87,13.87,0,0,0,12.61,8c.4,0,.81,0,1.21-.05a13.9,13.9,0,0,0,12.29-10.09l58.2-191.93,0-.11A13.83,13.83,0,0,0,225.88,30.12Zm-8,10.4L159.73,232.43l0,.11a2,2,0,0,1-3.76.26l-40.68-83.58,49-49a6,6,0,1,0-8.49-8.49l-49,49L23.15,100a2,2,0,0,1,.31-3.74l.11,0L215.48,38.08a1.94,1.94,0,0,1,1.92.52A2,2,0,0,1,217.92,40.52Z"></path></svg>
       <span class="wpp-label">Atendimentos</span>
     </a>
 
     <a class="wpp-leftbar-icon" data-menu="midias" href="/midias" title="Arquivos" aria-label="Arquivos">
-      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M243.36,111.81A14,14,0,0,0,232,106H214V88a14,14,0,0,0-14-14H130L101.74,52.8a14.06,14.06,0,0,0-8.4-2.8H40A14,14,0,0,0,26,64V208a6,6,0,0,0,6,6H211.1a6,6,0,0,0,5.69-4.1l28.49-85.47A14,14,0,0,0,243.36,111.81ZM40,62H93.34a2,2,0,0,1,1.2.4L124.4,84.8A6,6,0,0,0,128,86h72a2,2,0,0,1,2,2v18H69.77a14,14,0,0,0-13.28,9.57L38,171V64A2,2,0,0,1,40,62Zm193.9,58.63L206.78,202H40.33l27.54-82.63a2,2,0,0,1,1.9-1.37H232a2,2,0,0,1,1.9,2.63Z"/>
-      </svg>
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M243.36,111.81A14,14,0,0,0,232,106H214V88a14,14,0,0,0-14-14H130L101.74,52.8a14.06,14.06,0,0,0-8.4-2.8H40A14,14,0,0,0,26,64V208a6,6,0,0,0,6,6H211.1a6,6,0,0,0,5.69-4.1l28.49-85.47A14,14,0,0,0,243.36,111.81ZM40,62H93.34a2,2,0,0,1,1.2.4L124.4,84.8A6,6,0,0,0,128,86h72a2,2,0,0,1,2,2v18H69.77a14,14,0,0,0-13.28,9.57L38,171V64A2,2,0,0,1,40,62Zm193.9,58.63L206.78,202H40.33l27.54-82.63a2,2,0,0,1,1.9-1.37H232a2,2,0,0,1,1.9,2.63Z"></path></svg>
       <span class="wpp-label">Arquivos</span>
     </a>
 
     <a class="wpp-leftbar-icon" data-menu="chat-interno" href="/chat-interno" title="Chat Interno" aria-label="Chat Interno">
-      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M229.93,186.58A78,78,0,0,0,168.16,74.42,78,78,0,1,0,26.07,138.58L18.58,164A14,14,0,0,0,36,181.42l25.46-7.49a78,78,0,0,0,26.39,7.63,78,78,0,0,0,106.77,40.37L220,229.42A14,14,0,0,0,237.42,212ZM62,161.5a6.05,6.05,0,0,0-1.69.24l-27.77,8.17a2,2,0,0,1-2.48-2.48l8.17-27.77a6.05,6.05,0,0,0-.47-4.53,66,66,0,1,1,27.08,27.08A6,6,0,0,0,62,161.5Zm155.71,26.16,8.17,27.77a2,2,0,0,1-2.48,2.48l-27.77-8.17a6.06,6.06,0,0,0-4.53.47,66,66,0,0,1-90-28.4,77.92,77.92,0,0,0,71-94.68,66,66,0,0,1,46.07,96A6.05,6.05,0,0,0,217.74,187.66Z"/>
-      </svg>
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M229.93,186.58A78,78,0,0,0,168.16,74.42,78,78,0,1,0,26.07,138.58L18.58,164A14,14,0,0,0,36,181.42l25.46-7.49a78,78,0,0,0,26.39,7.63,78,78,0,0,0,106.77,40.37L220,229.42A14,14,0,0,0,237.42,212ZM62,161.5a6.05,6.05,0,0,0-1.69.24l-27.77,8.17a2,2,0,0,1-2.48-2.48l8.17-27.77a6.05,6.05,0,0,0-.47-4.53,66,66,0,1,1,27.08,27.08A6,6,0,0,0,62,161.5Zm155.71,26.16,8.17,27.77a2,2,0,0,1-2.48,2.48l-27.77-8.17a6.06,6.06,0,0,0-4.53.47,66,66,0,0,1-90-28.4,77.92,77.92,0,0,0,71-94.68,66,66,0,0,1,46.07,96A6.05,6.05,0,0,0,217.74,187.66Z"></path></svg>
       <span class="wpp-label">Chat Interno</span>
     </a>
 
     <a class="wpp-leftbar-icon" data-menu="clientes" href="/clientes" title="Clientes" aria-label="Clientes">
-      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M154,80a6,6,0,0,1,6-6h88a6,6,0,0,1,0,12H160A6,6,0,0,1,154,80Zm94,42H160a6,6,0,0,0,0,12h88a6,6,0,0,0,0-12Zm0,48H184a6,6,0,0,0,0,12h64a6,6,0,0,0,0-12Zm-98.19,20.5a6,6,0,1,1-11.62,3C131.7,168.29,107.23,150,80,150s-51.7,18.29-58.19,43.49a6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"/>
-      </svg>
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M154,80a6,6,0,0,1,6-6h88a6,6,0,0,1,0,12H160A6,6,0,0,1,154,80Zm94,42H160a6,6,0,0,0,0,12h88a6,6,0,0,0,0-12Zm0,48H184a6,6,0,0,0,0,12h64a6,6,0,0,0,0-12Zm-98.19,20.5a6,6,0,1,1-11.62,3C131.7,168.29,107.23,150,80,150s-51.7,18.29-58.19,43.49a6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"></path></svg>
       <span class="wpp-label">Clientes</span>
     </a>
 
     <a class="wpp-leftbar-icon" data-menu="colaboradores" href="/colaboradores" title="Colaboradores" aria-label="Colaboradores">
-      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M243.6,148.8a6,6,0,0,1-8.4-1.2A53.58,53.58,0,0,0,192,126a6,6,0,0,1,0-12,26,26,0,1,0-25.18-32.5,6,6,0,0,1-11.62-3,38,38,0,1,1,59.91,39.63A65.69,65.69,0,0,1,244.8,140.4,6,6,0,0,1,243.6,148.8ZM189.19,213a6,6,0,0,1-2.19,8.2,5.9,5.9,0,0,1-3,.81,6,6,0,0,1-5.2-3,59,59,0,0,0-101.62,0,6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"/>
-      </svg>
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M243.6,148.8a6,6,0,0,1-8.4-1.2A53.58,53.58,0,0,0,192,126a6,6,0,0,1,0-12,26,26,0,1,0-25.18-32.5,6,6,0,0,1-11.62-3,38,38,0,1,1,59.91,39.63A65.69,65.69,0,0,1,244.8,140.4,6,6,0,0,1,243.6,148.8ZM189.19,213a6,6,0,0,1-2.19,8.2,5.9,5.9,0,0,1-3,.81,6,6,0,0,1-5.2-3,59,59,0,0,0-101.62,0,6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"></path></svg>
       <span class="wpp-label">Colaboradores</span>
     </a>
 
     <a class="wpp-leftbar-icon" data-menu="departamentos" href="/departamentos" title="Departamentos" aria-label="Departamentos">
-      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M248,210H230V94h2a6,6,0,0,0,0-12H182V46h2a6,6,0,0,0,0-12H40a6,6,0,0,0,0,12h2V210H24a6,6,0,0,0,0-12H248a6,6,0,0,0,0-12ZM218,94V210H182V94ZM54,46H170V210H142V160a6,6,0,0,0-6-6H88a6,6,0,0,0-6,6v50H54Zm76,164H94V166h36ZM74,80a6,6,0,0,1,6-6H96a6,6,0,0,1,0,12H80A6,6,0,0,1,74,80Zm48,0a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,80ZM80,126a6,6,0,0,1,0-12H96a6,6,0,0,1,0,12Zm42-6a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,120Z"/>
-      </svg>
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M248,210H230V94h2a6,6,0,0,0,0-12H182V46h2a6,6,0,0,0,0-12H40a6,6,0,0,0,0,12h2V210H24a6,6,0,0,0,0,12H248a6,6,0,0,0,0-12ZM218,94V210H182V94ZM54,46H170V210H142V160a6,6,0,0,0-6-6H88a6,6,0,0,0-6,6v50H54Zm76,164H94V166h36ZM74,80a6,6,0,0,1,6-6H96a6,6,0,0,1,0,12H80A6,6,0,0,1,74,80Zm48,0a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,80ZM80,126a6,6,0,0,1,0-12H96a6,6,0,0,1,0,12Zm42-6a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,120Z"></path></svg>
       <span class="wpp-label">Departamentos</span>
     </a>
 
     <a class="wpp-leftbar-icon" data-menu="chatbot" href="/chatbot" title="Chatbot" aria-label="Chatbot">
-      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M222,114.56a54,54,0,0,0-58.67-74.73,54,54,0,0,0-94,13.46A54,54,0,0,0,34,141.44a54,54,0,0,0,35.56,73.65A54.54,54.54,0,0,0,83.59,217a52.86,52.86,0,0,0,9.06-.78,54,54,0,0,0,94-13.46A54,54,0,0,0,222,114.56ZM183.37,52.5a42,42,0,0,1,29.21,53.14,54.84,54.84,0,0,0-5.08-3.33L163,76.62a6,6,0,0,0-6,0l-47,27.13V80.66l41.5-24A41.73,41.73,0,0,1,183.37,52.5ZM146,138.39l-18,10.39-18-10.39V117.61l18-10.39,18,10.39ZM78,72a42,42,0,0,1,72.92-28.43,56.18,56.18,0,0,0-5.42,2.74L101,72a6,6,0,0,0-3,5.19v54.27L78,119.92ZM39.13,85.93a41.75,41.75,0,0,1,27.22-20A55.09,55.09,0,0,0,66,72v51.38a6,6,0,0,0,3,5.2l47,27.13L96,167.26l-41.5-24A42,42,0,0,1,39.13,85.93ZM72.63,203.5a42,42,0,0,1-29.21-53.14,54.84,54.84,0,0,0,5.08,3.33L93,179.38a6,6,0,0,0,6,0l47-27.13v23.09l-41.5,24A41.73,41.73,0,0,1,72.63,203.5ZM178,184a42,42,0,0,1-72.92,28.43,56.18,56.18,0,0,0,5.42-2.74L155,184a6,6,0,0,0,3-5.19V124.54l20,11.54Zm38.87-13.93a41.75,41.75,0,0,1-27.22,20A55.09,55.09,0,0,0,190,184V132.62a6,6,0,0,1-3-5.2l-47-27.13,20-11.55,41.5,24A42,42,0,0,1,216.87,170.07Z"/>
-      </svg>
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M222,114.56a54,54,0,0,0-58.67-74.73,54,54,0,0,0-94,13.46A54,54,0,0,0,34,141.44a54,54,0,0,0,35.56,73.65A54.54,54.54,0,0,0,83.59,217a52.86,52.86,0,0,0,9.06-.78,54,54,0,0,0,94-13.46A54,54,0,0,0,222,114.56ZM183.37,52.5a42,42,0,0,1,29.21,53.14,54.84,54.84,0,0,0-5.08-3.33L163,76.62a6,6,0,0,0-6,0l-47,27.13V80.66l41.5-24A41.73,41.73,0,0,1,183.37,52.5ZM78,72a42,42,0,0,1,72.92-28.43,56.18,56.18,0,0,0-5.42,2.74L101,72a6,6,0,0,0-3,5.19v54.27L78,119.92ZM39.13,85.93a41.75,41.75,0,0,1,27.22-20A55.09,55.09,0,0,0,66,72v51.38a6,6,0,0,0,3,5.2l47,27.13L96,167.26l-41.5-24A42,42,0,0,1,39.13,85.93ZM72.63,203.5a42,42,0,0,1-29.21-53.14,54.84,54.84,0,0,0,5.08,3.33L93,179.38a6,6,0,0,0,6,0l47-27.13v23.09l-41.5,24A41.73,41.73,0,0,1,72.63,203.5ZM178,184a42,42,0,0,1-72.92,28.43,56.18,56.18,0,0,0,5.42-2.74L155,184a6,6,0,0,0,3-5.19V124.54l20,11.54Zm38.87-13.93a41.75,41.75,0,0,1-27.22,20A55.09,55.09,0,0,0,190,184V132.62a6,6,0,0,0-3-5.2l-47-27.13,20-11.55,41.5,24A42,42,0,0,1,216.87,170.07Z"></path></svg>
       <span class="wpp-label">Chatbot</span>
     </a>
 
     <a class="wpp-leftbar-icon" data-menu="disparos" href="/disparos" title="Disparador" aria-label="Disparador">
-      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z"/>
-      </svg>
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z"></path></svg>
       <span class="wpp-label">Disparador</span>
     </a>
 
     <a class="wpp-leftbar-icon" data-menu="conectar" href="/conectar" title="Conectar WhatsApp" aria-label="Conectar WhatsApp">
-      <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M104,42H56A14,14,0,0,0,42,56v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,104,42Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-2,34H56a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V152A14,14,0,0,0,104,138Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V152a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2ZM200,42H152a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,200,42Zm2,62a2,2,0,0,1-2,2H152a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-64,72V144a6,6,0,0,1,12,0v32a6,6,0,0,1-12,0Zm76-16a6,6,0,0,1-6,6H182v42a6,6,0,0,1-6,6H144a6,6,0,0,0,0,12h26V144a6,6,0,0,1,12,0v10h26A6,6,0,0,1,214,160Zm0,32v16a6,6,0,0,1-12,0V192a6,6,0,0,1,12,0Z"/>
-      </svg>
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M104,42H56A14,14,0,0,0,42,56v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,104,42Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-2,34H56a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V152A14,14,0,0,0,104,138Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V152a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2ZM200,42H152a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,200,42Zm2,62a2,2,0,0,1-2,2H152a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-64,72V144a6,6,0,0,1,12,0v32a6,6,0,0,1-12,0Zm76-16a6,6,0,0,1-6,6H182v42a6,6,0,0,1-6,6H144a6,6,0,0,0,0,12h26V144a6,6,0,0,1,12,0v10h26A6,6,0,0,1,214,160Zm0,32v16a6,6,0,0,1-12,0V192a6,6,0,0,1,12,0Z"></path></svg>
       <span class="wpp-label">Conectar WhatsApp</span>
     </a>
 
+    <div class="wpp-leftbar-section-label" aria-label="Atendimentos">
+      <span>ATENDIMENTOS</span>
+    </div>
+
+    <a class="wpp-leftbar-icon" data-menu="filas" href="/filas" title="Filas" aria-label="Filas">
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M40,64a8,8,0,0,1,8-8H208a8,8,0,0,1,0,16H48A8,8,0,0,1,40,64Zm168,56H48a8,8,0,0,0,0,16H208a8,8,0,0,0,0-16Zm0,64H48a8,8,0,0,0,0,16H208a8,8,0,0,0,0-16Zm-24-96a8,8,0,0,1-8,8H48a8,8,0,0,1,0-16H176A8,8,0,0,1,184,88Z"></path></svg>
+      <span class="wpp-label">Filas</span>
+    </a>
   </div>
 
   <div class="wpp-leftbar-user-wrap">
@@ -409,66 +929,40 @@
       </div>
 
       <span class="wpp-leftbar-user-chevron" aria-hidden="true">
-        <svg viewBox="0 0 256 256">
-          <path d="M128,168a8,8,0,0,1-5.66-2.34l-56-56a8,8,0,0,1,11.32-11.32L128,148.69l50.34-50.35a8,8,0,0,1,11.32,11.32l-56,56A8,8,0,0,1,128,168Z"></path>
-        </svg>
+        <svg viewBox="0 0 256 256"><path d="M128,168a8,8,0,0,1-5.66-2.34l-56-56a8,8,0,0,1,11.32-11.32L128,148.69l50.34-50.35a8,8,0,0,1,11.32,11.32l-56,56A8,8,0,0,1,128,168Z"></path></svg>
       </span>
     </button>
 
     <div class="wpp-leftbar-user-menu" id="wppUserMenu">
       <button class="wpp-leftbar-menu-item" type="button" id="wppOpenProfileBtn">
-        <span class="icon">
-          <svg viewBox="0 0 256 256">
-            <path d="M128,128A48,48,0,1,0,80,80,48.05,48.05,0,0,0,128,128Zm0-84a36,36,0,1,1-36,36A36,36,0,0,1,128,44Zm0,100c-44.11,0-80,25.12-80,56a6,6,0,0,0,12,0c0-23.93,30.5-44,68-44s68,20.07,68,44a6,6,0,0,0,12,0C208,169.12,172.11,144,128,144Z"></path>
-          </svg>
-        </span>
+        <span class="icon"><svg viewBox="0 0 256 256"><path d="M128,128A48,48,0,1,0,80,80,48.05,48.05,0,0,0,128,128Zm0-84a36,36,0,1,1-36,36A36,36,0,0,1,128,44Zm0,100c-44.11,0-80,25.12-80,56a6,6,0,0,0,12,0c0-23.93,30.5-44,68-44s68,20.07,68,44a6,6,0,0,0,12,0C208,169.12,172.11,144,128,144Z"></path></svg></span>
         <span>Meu Perfil</span>
       </button>
 
       <button class="wpp-leftbar-menu-item" type="button" id="wppMyPlanBtn">
-        <span class="icon">
-          <svg viewBox="0 0 256 256">
-            <path d="M232,88H182.33l-22.92-45.84A14,14,0,0,0,146.89,34H109.11A14,14,0,0,0,96.59,42.16L73.67,88H24a14,14,0,0,0-14,14v20a22,22,0,0,0,18,21.64V208a14,14,0,0,0,14,14H214a14,14,0,0,0,14-14V143.64A22,22,0,0,0,246,122V102A14,14,0,0,0,232,88ZM109.11,46h37.78a2,2,0,0,1,1.79,1.11L169,88H87l20.32-40.89A2,2,0,0,1,109.11,46ZM216,208a2,2,0,0,1-2,2H42a2,2,0,0,1-2-2V144h69.76l9.37,18.73A14,14,0,0,0,131.65,170h-7.3a14,14,0,0,0,12.52-7.27L146.24,144H216Zm18-86a10,10,0,0,1-10,10H143.76a6,6,0,0,0-5.37,3.32l-12.25,24.5a2,2,0,0,1-1.79,1.1h7.3a2,2,0,0,1-1.79-1.1l-12.25-24.5a6,6,0,0,0-5.37-3.32H32a10,10,0,0,1-10-10V102a2,2,0,0,1,2-2H232a2,2,0,0,1,2,2Z"></path>
-          </svg>
-        </span>
+        <span class="icon"><svg viewBox="0 0 256 256"><path d="M232,88H182.33l-22.92-45.84A14,14,0,0,0,146.89,34H109.11A14,14,0,0,0,96.59,42.16L73.67,88H24a14,14,0,0,0-14,14v20a22,22,0,0,0,18,21.64V208a14,14,0,0,0,14,14H214a14,14,0,0,0,14-14V143.64A22,22,0,0,0,246,122V102A14,14,0,0,0,232,88ZM109.11,46h37.78a2,2,0,0,1,1.79,1.11L169,88H87l20.32-40.89A2,2,0,0,1,109.11,46ZM216,208a2,2,0,0,1-2,2H42a2,2,0,0,1-2-2V144h69.76l9.37,18.73A14,14,0,0,0,131.65,170h-7.3a14,14,0,0,0,12.52-7.27L146.24,144H216Zm18-86a10,10,0,0,1-10,10H143.76a6,6,0,0,0-5.37,3.32l-12.25,24.5a2,2,0,0,1-1.79,1.1h7.3a2,2,0,0,1-1.79-1.1l-12.25-24.5a6,6,0,0,0-5.37-3.32H32a10,10,0,0,1-10-10V102a2,2,0,0,1,2-2H232a2,2,0,0,1,2,2Z"></path></svg></span>
         <span>Meu Plano</span>
       </button>
 
       <a class="wpp-leftbar-menu-item" href="/notificacoes.html">
-        <span class="icon">
-          <svg viewBox="0 0 256 256">
-            <path d="M221.8,175.94C216.25,169.38,208,157,208,128.45V120a80,80,0,0,0-160,0v8.45C48,157,39.75,169.39,34.2,175.94A15.59,15.59,0,0,0,32,192a16,16,0,0,0,14.87,10H96a32,32,0,0,0,64,0h49.13A16,16,0,0,0,224,192,15.59,15.59,0,0,0,221.8,175.94ZM128,216a16,16,0,0,1-15.2-11h30.4A16,16,0,0,1,128,216Zm81.27-30H46.73c7.4-8.73,17.27-24.26,17.27-57.55V120a64,64,0,0,1,128,0v8.45C192,161.74,201.87,177.27,209.27,186Z"></path>
-          </svg>
-        </span>
+        <span class="icon"><svg viewBox="0 0 256 256"><path d="M221.8,175.94C216.25,169.38,208,157,208,128.45V120a80,80,0,0,0-160,0v8.45C48,157,39.75,169.39,34.2,175.94A15.59,15.59,0,0,0,32,192a16,16,0,0,0,14.87,10H96a32,32,0,0,0,64,0h49.13A16,16,0,0,0,224,192,15.59,15.59,0,0,0,221.8,175.94ZM128,216a16,16,0,0,1-15.2-11h30.4A16,16,0,0,1,128,216Zm81.27-30H46.73c7.4-8.73,17.27-24.26,17.27-57.55V120a64,64,0,0,1,128,0v8.45C192,161.74,201.87,177.27,209.27,186Z"></path></svg></span>
         <span>Notificações</span>
       </a>
 
       <button class="wpp-leftbar-menu-item" type="button" id="wppConfigBtn">
-        <span class="icon">
-          <svg viewBox="0 0 256 256">
-            <path d="M230.94,123.05l-14.27-8.25c.24-2.24.33-4.52.33-6.8s-.09-4.56-.33-6.8l14.27-8.25a14,14,0,0,0,5.12-19.11l-12-20.78a14,14,0,0,0-18.52-5.5l-14.3,8.26a78.65,78.65,0,0,0-11.77-6.8V32a14,14,0,0,0-14-14H142a14,14,0,0,0-14,14V48.02a78.65,78.65,0,0,0-11.77,6.8l-14.3-8.26a14,14,0,0,0-18.52,5.5l-12,20.78a14,14,0,0,0,5.12,19.11l14.27,8.25c-.24,2.24-.33,4.52-.33,6.8s.09,4.56.33,6.8l-14.27,8.25a14,14,0,0,0-5.12,19.11l12,20.78a14,14,0,0,0,18.52,5.5l14.3-8.26a78.65,78.65,0,0,0,11.77,6.8V224a14,14,0,0,0,14,14h24a14,14,0,0,0,14-14V207.98a78.65,78.65,0,0,0,11.77-6.8l14.3,8.26a14,14,0,0,0,18.52-5.5l12-20.78A14,14,0,0,0,230.94,123.05ZM154,128a26,26,0,1,1-26-26A26,26,0,0,1,154,128Z"></path>
-          </svg>
-        </span>
+        <span class="icon"><svg viewBox="0 0 256 256"><path d="M230.94,123.05l-14.27-8.25c.24-2.24.33-4.52.33-6.8s-.09-4.56-.33-6.8l14.27-8.25a14,14,0,0,0,5.12-19.11l-12-20.78a14,14,0,0,0-18.52-5.5l-14.3,8.26a78.65,78.65,0,0,0-11.77-6.8V32a14,14,0,0,0-14-14H142a14,14,0,0,0-14,14V48.02a78.65,78.65,0,0,0-11.77,6.8l-14.3-8.26a14,14,0,0,0-18.52,5.5l-12,20.78a14,14,0,0,0,5.12,19.11l14.27,8.25c-.24,2.24-.33,4.52-.33,6.8s.09,4.56.33,6.8l-14.27,8.25a14,14,0,0,0-5.12,19.11l12,20.78a14,14,0,0,0,18.52,5.5l14.3-8.26a78.65,78.65,0,0,0,11.77,6.8V224a14,14,0,0,0,14,14h24a14,14,0,0,0,14-14V207.98a78.65,78.65,0,0,0,11.77-6.8l14.3,8.26a14,14,0,0,0,18.52-5.5l12-20.78A14,14,0,0,0,230.94,123.05ZM154,128a26,26,0,1,1-26-26A26,26,0,0,1,154,128Z"></path></svg></span>
         <span>Configurações</span>
       </button>
 
       <button class="wpp-leftbar-menu-item" type="button" id="wppThemeBtn">
-        <span class="icon">
-          <svg viewBox="0 0 256 256">
-            <path d="M120,40V24a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66a8,8,0,0,0,11.32-11.32L58.34,47A8,8,0,0,0,47,58.34ZM40,120H24a8,8,0,0,0,0,16H40a8,8,0,0,0,0-16Zm18.34,66.34L47,197.66A8,8,0,0,0,58.34,209l11.32-11.31a8,8,0,0,0-11.32-11.32ZM136,216v16a8,8,0,0,1-16,0V216a8,8,0,0,1,16,0Zm72.69-18.34A8,8,0,0,0,197.37,209l11.32,11.31A8,8,0,0,0,220,209Zm23.31-77.66H216a8,8,0,0,0,0,16h16a8,8,0,0,0,0-16Zm-34.63-50.34A8,8,0,0,0,209,69.66L220.31,58.34A8,8,0,0,0,209,47L197.37,58.34A8,8,0,0,0,197.37,69.66Z"></path>
-          </svg>
-        </span>
+        <span class="icon"><svg viewBox="0 0 256 256"><path d="M120,40V24a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66a8,8,0,0,0,11.32-11.32L58.34,47A8,8,0,0,0,47,58.34ZM40,120H24a8,8,0,0,0,0,16H40a8,8,0,0,0,0-16Zm18.34,66.34L47,197.66A8,8,0,0,0,58.34,209l11.32-11.31a8,8,0,0,0-11.32-11.32ZM136,216v16a8,8,0,0,1-16,0V216a8,8,0,0,1,16,0Zm72.69-18.34A8,8,0,0,0,197.37,209l11.32,11.31A8,8,0,0,0,220,209Zm23.31-77.66H216a8,8,0,0,0,0,16h16a8,8,0,0,0,0-16Zm-34.63-50.34A8,8,0,0,0,209,69.66L220.31,58.34A8,8,0,0,0,209,47L197.37,58.34A8,8,0,0,0,197.37,69.66Z"></path></svg></span>
         <span>Alternar tema</span>
       </button>
 
       <div class="wpp-leftbar-menu-divider"></div>
 
       <button class="wpp-leftbar-menu-item danger" type="button" id="wppLogoutBtn">
-        <span class="icon">
-          <svg viewBox="0 0 256 256">
-            <path d="M222,128a6,6,0,0,1-6,6H117.66l37.17,37.17a6,6,0,0,1-8.49,8.49l-47.41-47.42a6,6,0,0,1,0-8.48l47.41-47.42a6,6,0,0,1,8.49,8.49L117.66,122H216A6,6,0,0,1,222,128ZM104,200a6,6,0,0,1-6,6H48a14,14,0,0,1-14-14V64A14,14,0,0,1,48,50H98a6,6,0,0,1,0,12H48a2,2,0,0,0-2,2V192a2,2,0,0,0,2,2H98A6,6,0,0,1,104,200Z"></path>
-          </svg>
-        </span>
+        <span class="icon"><svg viewBox="0 0 256 256"><path d="M222,128a6,6,0,0,1-6,6H117.66l37.17,37.17a6,6,0,0,1-8.49,8.49l-47.41-47.42a6,6,0,0,1,0-8.48l47.41-47.42a6,6,0,0,1,8.49,8.49L117.66,122H216A6,6,0,0,1,222,128ZM104,200a6,6,0,0,1-6,6H48a14,14,0,0,1-14-14V64A14,14,0,0,1,48,50H98a6,6,0,0,1,0,12H48a2,2,0,0,0-2,2V192a2,2,0,0,0,2,2H98A6,6,0,0,1,104,200Z"></path></svg></span>
         <span>Sair do Sistema</span>
       </button>
     </div>
@@ -477,8 +971,13 @@
 
 <script>
 (function () {
-  if (window.__WPP_SIDEBAR_ATEND_READY__) return;
-  window.__WPP_SIDEBAR_ATEND_READY__ = true;
+  if (window.__WPP_SIDEBAR_ATEND_READY_20260428_FIX__) return;
+  window.__WPP_SIDEBAR_ATEND_READY_20260428_FIX__ = true;
+
+  var sidebar = document.getElementById('wppAtendSidebar');
+  var mobileToggle = document.getElementById('wppMobileToggle');
+  var mobileClose = document.getElementById('wppMobileClose');
+  var mobileOverlay = document.getElementById('wppMobileOverlay');
 
   var userBtn = document.getElementById('wppUserMenuBtn');
   var userMenu = document.getElementById('wppUserMenu');
@@ -493,6 +992,14 @@
   var themeBtn = document.getElementById('wppThemeBtn');
   var logoutBtn = document.getElementById('wppLogoutBtn');
 
+  function isMobile() {
+    try {
+      return window.matchMedia('(max-width: 920px)').matches;
+    } catch (e) {
+      return window.innerWidth <= 920;
+    }
+  }
+
   function norm(path) {
     path = String(path || '').toLowerCase().trim();
     path = path.split('?')[0].split('#')[0];
@@ -502,41 +1009,300 @@
 
   function currentMenu() {
     var p = norm(location.pathname);
+
     if (p === '/' || p === '/dashboard' || p === '/dashboard.html' || p === '/inicio') return 'dashboard';
-    if (p.indexOf('/atendimentos') === 0) return 'atendimentos';
-    if (p.indexOf('/midias') === 0) return 'midias';
-    if (p.indexOf('/chat-interno') === 0) return 'chat-interno';
-    if (p.indexOf('/clientes') === 0) return 'clientes';
-    if (p.indexOf('/colaboradores') === 0) return 'colaboradores';
-    if (p.indexOf('/departamentos') === 0) return 'departamentos';
-    if (p.indexOf('/chatbot') === 0) return 'chatbot';
-    if (p.indexOf('/disparos') === 0) return 'disparos';
-    if (p.indexOf('/conectar') === 0) return 'conectar';
+    if (p.indexOf('/atendimentos') === 0 || p === '/atendimentos.html') return 'atendimentos';
+    if (p.indexOf('/midias') === 0 || p === '/midias.html') return 'midias';
+    if (p.indexOf('/chat-interno') === 0 || p === '/chat-interno.html') return 'chat-interno';
+    if (p.indexOf('/clientes') === 0 || p === '/clientes.html') return 'clientes';
+    if (p.indexOf('/colaboradores') === 0 || p === '/colaboradores.html') return 'colaboradores';
+    if (p.indexOf('/departamentos') === 0 || p === '/departamentos.html') return 'departamentos';
+    if (p.indexOf('/chatbot') === 0 || p === '/chatbot.html') return 'chatbot';
+    if (p.indexOf('/disparos') === 0 || p === '/disparos.html') return 'disparos';
+    if (p.indexOf('/conectar') === 0 || p === '/conectar.html') return 'conectar';
+    if (p.indexOf('/filas') === 0 || p === '/filas.html') return 'filas';
+
     return '';
   }
 
   function markActive() {
     var cur = currentMenu();
+
     document.querySelectorAll('.wpp-leftbar-icon[data-menu]').forEach(function (el) {
       var on = el.getAttribute('data-menu') === cur;
       el.classList.toggle('is-active', on);
+
       if (on) el.setAttribute('aria-current', 'page');
       else el.removeAttribute('aria-current');
     });
   }
 
+  function openSidebar() {
+    if (!sidebar) return;
+
+    sidebar.classList.add('show');
+
+    if (mobileOverlay) {
+      mobileOverlay.classList.add('show');
+    }
+
+    if (mobileToggle) {
+      mobileToggle.setAttribute('aria-expanded', 'true');
+    }
+
+    if (isMobile()) {
+      try {
+        document.documentElement.style.overflow = 'hidden';
+        document.body.style.overflow = 'hidden';
+      } catch (e) {}
+    }
+  }
+
+  function closeSidebar() {
+    if (sidebar) {
+      sidebar.classList.remove('show');
+    }
+
+    if (mobileOverlay) {
+      mobileOverlay.classList.remove('show');
+    }
+
+    if (mobileToggle) {
+      mobileToggle.setAttribute('aria-expanded', 'false');
+    }
+
+    try {
+      document.documentElement.style.overflow = '';
+      document.body.style.overflow = '';
+    } catch (e) {}
+  }
+
+  function cleanText(v) {
+    return String(v || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function isBrandText(v) {
+    var t = cleanText(v).toLowerCase();
+    return t === 'zapchat' || t === 'zapschat';
+  }
+
+  function hasBrandText(v) {
+    var t = cleanText(v).toLowerCase();
+    return t.indexOf('zapchat') >= 0 || t.indexOf('zapschat') >= 0;
+  }
+
+  function isVisible(el) {
+    if (!el || !el.getBoundingClientRect) return false;
+
+    try {
+      var r = el.getBoundingClientRect();
+      var st = window.getComputedStyle(el);
+
+      return (
+        r.width > 0 &&
+        r.height > 0 &&
+        st.display !== 'none' &&
+        st.visibility !== 'hidden' &&
+        st.opacity !== '0'
+      );
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function isBadBrandCandidate(el) {
+    if (!el) return true;
+    if (el === document.body || el === document.documentElement) return true;
+    if (el.closest && el.closest('#wppAtendSidebar')) return true;
+    if (el === mobileToggle || el.contains(mobileToggle)) return true;
+    if (el.closest && el.closest('.wpp-mobile-overlay')) return true;
+
+    var tag = String(el.tagName || '').toLowerCase();
+    return tag === 'script' || tag === 'style' || tag === 'svg' || tag === 'path';
+  }
+
+  function findBrandElement() {
+    var existing = document.querySelector('[data-zc-mobile-brand-title="1"]');
+
+    if (existing && isVisible(existing)) {
+      return existing;
+    }
+
+    var selectors = [
+      '[data-brand]',
+      '[data-zc-brand]',
+      '.zc-brand',
+      '.zapschat-brand',
+      '.zapchat-brand',
+      '.brand-title',
+      '.topbar-brand',
+      '.wpp-brand-title',
+      '.wpp-header-brand',
+      'h1',
+      'h2',
+      'h3',
+      'strong',
+      'b',
+      'span',
+      'div'
+    ];
+
+    var candidates = [];
+
+    selectors.forEach(function (sel) {
+      try {
+        document.querySelectorAll(sel).forEach(function (el) {
+          if (candidates.indexOf(el) === -1) candidates.push(el);
+        });
+      } catch (e) {}
+    });
+
+    for (var i = 0; i < candidates.length; i++) {
+      var el = candidates[i];
+
+      if (isBadBrandCandidate(el) || !isVisible(el)) continue;
+
+      if (isBrandText(el.textContent)) {
+        el.setAttribute('data-zc-mobile-brand-title', '1');
+        return el;
+      }
+    }
+
+    try {
+      var walker = document.createTreeWalker(
+        document.body,
+        NodeFilter.SHOW_TEXT,
+        {
+          acceptNode: function (node) {
+            var text = cleanText(node.nodeValue);
+            var parent = node.parentElement;
+
+            if (!parent) return NodeFilter.FILTER_REJECT;
+            if (isBadBrandCandidate(parent)) return NodeFilter.FILTER_REJECT;
+            if (!hasBrandText(text)) return NodeFilter.FILTER_REJECT;
+            if (!isVisible(parent)) return NodeFilter.FILTER_REJECT;
+
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        }
+      );
+
+      var node;
+
+      while ((node = walker.nextNode())) {
+        var raw = String(node.nodeValue || '');
+        var match = raw.match(/ZapsChat|ZapChat|zapschat|zapchat/i);
+
+        if (!match) continue;
+
+        var parent = node.parentNode;
+        var before = raw.slice(0, match.index);
+        var brand = raw.slice(match.index, match.index + match[0].length);
+        var after = raw.slice(match.index + match[0].length);
+
+        var span = document.createElement('span');
+        span.textContent = brand;
+        span.setAttribute('data-zc-mobile-brand-title', '1');
+
+        if (before) parent.insertBefore(document.createTextNode(before), node);
+        parent.insertBefore(span, node);
+        if (after) parent.insertBefore(document.createTextNode(after), node);
+
+        parent.removeChild(node);
+
+        return span;
+      }
+    } catch (e) {}
+
+    for (var j = 0; j < candidates.length; j++) {
+      var el2 = candidates[j];
+
+      if (isBadBrandCandidate(el2) || !isVisible(el2)) continue;
+      if (!hasBrandText(el2.textContent)) continue;
+
+      try {
+        var r = el2.getBoundingClientRect();
+
+        if (r.width > 0 && r.height > 0 && r.width < 360 && r.height < 80) {
+          el2.setAttribute('data-zc-mobile-brand-title', '1');
+          return el2;
+        }
+      } catch (e) {}
+    }
+
+    return null;
+  }
+
+  function clearBrandHosts() {
+    document.querySelectorAll('.zc-mobile-brand-force-host').forEach(function (el) {
+      el.classList.remove('zc-mobile-brand-force-host');
+    });
+  }
+
+  function attachMobileToggleToBrand() {
+    if (!mobileToggle) return;
+
+    if (!isMobile()) {
+      mobileToggle.classList.remove('zc-mobile-attached');
+      clearBrandHosts();
+
+      if (mobileToggle.parentElement !== document.body) {
+        document.body.insertBefore(mobileToggle, document.body.firstChild);
+      }
+
+      closeSidebar();
+      return;
+    }
+
+    var brand = findBrandElement();
+
+    if (!brand || !brand.parentElement) {
+      mobileToggle.classList.remove('zc-mobile-attached');
+      return;
+    }
+
+    var host = brand.parentElement;
+
+    if (host.closest && host.closest('#wppAtendSidebar')) {
+      mobileToggle.classList.remove('zc-mobile-attached');
+      return;
+    }
+
+    clearBrandHosts();
+
+    host.classList.add('zc-mobile-brand-force-host');
+    mobileToggle.classList.add('zc-mobile-attached');
+
+    if (mobileToggle.parentElement !== host) {
+      host.insertBefore(mobileToggle, host.firstChild);
+    }
+  }
+
   function getInitials(name) {
     var s = String(name || '').trim();
     if (!s) return 'U';
+
     var parts = s.split(/\s+/).filter(Boolean);
     if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+
     return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
   }
 
   function decodeJwtPayload(token) {
     try {
       if (!token || token.split('.').length !== 3) return {};
-      return JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) || {};
+
+      var base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      var json = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map(function (c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+          })
+          .join('')
+      );
+
+      return JSON.parse(json) || {};
     } catch (e) {
       return {};
     }
@@ -549,15 +1315,38 @@
         if (v) return v;
       } catch (e) {}
     }
+
     return '';
+  }
+
+  function normalizeUrl(value) {
+    var s = String(value || '').trim();
+
+    if (!s) return '';
+    if (s.indexOf('data:') === 0) return s;
+    if (/^https?:\/\//i.test(s)) return s;
+    if (s.charAt(0) === '/') return s;
+
+    return '/' + s.replace(/^\/+/, '');
   }
 
   function renderUserFromStorage() {
     var token = pickStorage(['access_token', 'token']);
     var jwt = decodeJwtPayload(token);
 
-    var nome = pickStorage(['usuario_nome', 'nome', 'name', 'displayName']) || jwt.name || jwt.given_name || '';
-    var email = pickStorage(['usuario_email', 'email', 'userEmail', 'loginEmail']) || jwt.email || jwt.preferred_username || jwt.sub || '';
+    var nome =
+      pickStorage(['usuario_nome', 'nome', 'name', 'displayName', 'user_name']) ||
+      jwt.name ||
+      jwt.given_name ||
+      '';
+
+    var email =
+      pickStorage(['usuario_email', 'email', 'userEmail', 'loginEmail', 'user_email']) ||
+      jwt.email ||
+      jwt.preferred_username ||
+      jwt.sub ||
+      '';
+
     var avatar = pickStorage(['usuario_avatar', 'avatar_url']);
 
     if (userNameEl) userNameEl.textContent = nome || 'Usuário';
@@ -566,20 +1355,42 @@
 
     if (avatarImg) {
       if (avatar) {
+        var src = normalizeUrl(avatar);
+
+        try {
+          var v = localStorage.getItem('usuario_avatar_v') || '';
+          if (src && src.indexOf('data:') !== 0) {
+            src += (src.indexOf('?') >= 0 ? '&' : '?') + 'v=' + encodeURIComponent(v || Date.now());
+          }
+        } catch (e) {}
+
         avatarImg.onerror = function () {
           avatarImg.removeAttribute('src');
           avatarImg.style.display = 'none';
+
           if (initialsEl) initialsEl.style.display = '';
         };
-        avatarImg.src = avatar;
+
+        avatarImg.src = src;
         avatarImg.style.display = 'block';
+
         if (initialsEl) initialsEl.style.display = 'none';
       } else {
         avatarImg.removeAttribute('src');
         avatarImg.style.display = 'none';
+
         if (initialsEl) initialsEl.style.display = '';
       }
     }
+  }
+
+  function base64ToDataUrl(base64, mime) {
+    var raw = String(base64 || '').trim();
+
+    if (!raw) return '';
+    if (raw.indexOf('data:') === 0) return raw;
+
+    return 'data:' + (mime || 'image/png') + ';base64,' + raw;
   }
 
   async function hydrateUserFromApi() {
@@ -589,21 +1400,50 @@
         credentials: 'include',
         headers: { 'Accept': 'application/json' }
       });
+
       if (!res.ok) return;
 
       var data = await res.json();
+
       if (!data || typeof data !== 'object') return;
 
-      var nome = data.nome || data.name || '';
-      var email = data.email || '';
-      var avatar = data.avatar_url || data.avatar || '';
+      var nome = data.nome || data.name || data.usuario_nome || '';
+      var email = data.email || data.usuario_email || '';
+      var dept = data.departamento || data.setor || data.department || data.dept || data.cargo || '';
+
+      var avatar =
+        data.avatar_url ||
+        data.foto_url ||
+        data.avatar ||
+        data.foto ||
+        data.picture ||
+        '';
+
+      var avatarBase64 =
+        data.avatar_base64 ||
+        data.foto_base64 ||
+        data.avatar_data ||
+        '';
+
+      var avatarMime =
+        data.avatar_mime ||
+        data.foto_mime ||
+        'image/png';
+
+      if (!avatar && avatarBase64) avatar = base64ToDataUrl(avatarBase64, avatarMime);
+      if (!avatar) avatar = '/api/perfil/avatar';
+
+      avatar = normalizeUrl(avatar);
 
       try {
-        if (nome) localStorage.setItem('usuario_nome', nome);
-        if (email) localStorage.setItem('usuario_email', email);
+        if (nome) localStorage.setItem('usuario_nome', String(nome));
+        if (email) localStorage.setItem('usuario_email', String(email));
+        if (dept) localStorage.setItem('usuario_departamento', String(dept));
+
         if (avatar) {
           localStorage.setItem('usuario_avatar', avatar);
           localStorage.setItem('avatar_url', avatar);
+          localStorage.setItem('usuario_avatar_v', String(Date.now()));
         }
       } catch (e) {}
 
@@ -613,6 +1453,7 @@
 
   function closeMenu() {
     if (userMenu) userMenu.classList.remove('show');
+
     if (userBtn) {
       userBtn.classList.remove('active');
       userBtn.setAttribute('aria-expanded', 'false');
@@ -621,7 +1462,9 @@
 
   function toggleMenu() {
     if (!userMenu || !userBtn) return;
+
     var open = !userMenu.classList.contains('show');
+
     userMenu.classList.toggle('show', open);
     userBtn.classList.toggle('active', open);
     userBtn.setAttribute('aria-expanded', String(open));
@@ -650,6 +1493,7 @@
     root.setAttribute('data-theme', dark ? 'dark' : 'light');
 
     try {
+      localStorage.setItem('zc:theme', dark ? 'dark' : 'light');
       localStorage.setItem('theme', dark ? 'dark' : 'light');
       localStorage.setItem('valora_theme', dark ? 'dark' : 'light');
     } catch (e) {}
@@ -657,7 +1501,28 @@
 
   async function doLogout() {
     try {
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include'
+      });
+    } catch (e) {}
+
+    try {
+      await fetch('/logout', {
+        method: 'POST',
+        credentials: 'include'
+      });
+    } catch (e) {}
+
+    try {
+      var past = 'Thu, 01 Jan 1970 00:00:00 GMT';
+      var names = (document.cookie || '').split(/;\s*/).filter(Boolean).map(function (c) {
+        return c.split('=')[0];
+      });
+
+      names.forEach(function (name) {
+        document.cookie = name + '=; Expires=' + past + '; Path=/';
+      });
     } catch (e) {}
 
     try {
@@ -665,8 +1530,49 @@
       sessionStorage.clear();
     } catch (e) {}
 
+    if ('caches' in window) {
+      try {
+        var keys = await caches.keys();
+        await Promise.all(keys.map(function (k) {
+          return caches.delete(k);
+        }));
+      } catch (e) {}
+    }
+
     window.location.replace('/');
   }
+
+  if (mobileToggle) {
+    mobileToggle.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      openSidebar();
+    });
+  }
+
+  if (mobileClose) {
+    mobileClose.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSidebar();
+    });
+  }
+
+  if (mobileOverlay) {
+    mobileOverlay.addEventListener('click', function () {
+      closeSidebar();
+      closeMenu();
+    });
+  }
+
+  document.querySelectorAll('.wpp-leftbar-icon[href]').forEach(function (link) {
+    link.addEventListener('click', function () {
+      if (isMobile()) {
+        closeSidebar();
+        closeMenu();
+      }
+    });
+  });
 
   if (userBtn) {
     userBtn.addEventListener('click', function (e) {
@@ -676,15 +1582,36 @@
   }
 
   document.addEventListener('click', function (e) {
-    if (!userMenu || !userBtn) return;
-    if (!userMenu.contains(e.target) && !userBtn.contains(e.target)) {
+    if (userMenu && userBtn && !userMenu.contains(e.target) && !userBtn.contains(e.target)) {
       closeMenu();
     }
+  });
+
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      closeMenu();
+      closeSidebar();
+    }
+  });
+
+  window.addEventListener('resize', function () {
+    attachMobileToggleToBrand();
+
+    if (!isMobile()) {
+      closeSidebar();
+    }
+
+    markActive();
+  });
+
+  window.addEventListener('orientationchange', function () {
+    setTimeout(attachMobileToggleToBrand, 120);
   });
 
   if (openProfileBtn) {
     openProfileBtn.addEventListener('click', function () {
       closeMenu();
+      closeSidebar();
       go('/perfil.html');
     });
   }
@@ -692,6 +1619,7 @@
   if (myPlanBtn) {
     myPlanBtn.addEventListener('click', function () {
       closeMenu();
+      closeSidebar();
       go('/meu-plano');
     });
   }
@@ -699,6 +1627,7 @@
   if (configBtn) {
     configBtn.addEventListener('click', function () {
       closeMenu();
+      closeSidebar();
       go('/configuracoes.html');
     });
   }
@@ -713,6 +1642,7 @@
   if (logoutBtn) {
     logoutBtn.addEventListener('click', function () {
       closeMenu();
+      closeSidebar();
       doLogout();
     });
   }
@@ -720,5 +1650,29 @@
   markActive();
   renderUserFromStorage();
   hydrateUserFromApi();
+
+  attachMobileToggleToBrand();
+  setTimeout(attachMobileToggleToBrand, 50);
+  setTimeout(attachMobileToggleToBrand, 180);
+  setTimeout(attachMobileToggleToBrand, 400);
+  setTimeout(attachMobileToggleToBrand, 900);
+  setTimeout(attachMobileToggleToBrand, 1600);
+  setTimeout(attachMobileToggleToBrand, 4500);
+
+  try {
+    var obs = new MutationObserver(function () {
+      attachMobileToggleToBrand();
+    });
+
+    obs.observe(document.body, {
+      childList:true,
+      subtree:true,
+      characterData:true
+    });
+
+    setTimeout(function () {
+      try { obs.disconnect(); } catch (e) {}
+    }, 6000);
+  } catch (e) {}
 })();
 </script>

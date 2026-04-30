@@ -26,7 +26,7 @@ from sqlalchemy import text
 from backend.routers.email import router as email_router
 from backend.routers.disparos import router as disparos_router
 from backend.routers import chatbot_setores as chatbot_setores_router
-from backend.routers import atendimento_conversas
+from backend.routers.atendimento_conversas import router as atendimento_conversas_router
 from backend.routers import internal_chat as internal_chat_router
 from backend.websocket_manager import router as ws_router
 from backend.routers import atendimentoia as atendimento_ia_router
@@ -52,6 +52,9 @@ from backend.routers import admin_planos
 from backend.routers.perfil import router as perfil_router
 from backend.routers.meu_plano import router as meu_plano_router
 
+# ✅ NOVO: router de filas
+from backend.routers import filas as filas_router
+
 # DB
 from backend.database import Base, engine, SessionLocal
 from backend import models
@@ -61,6 +64,7 @@ from backend.integrations.evolution.api.remove_instance import router as remove_
 from backend.integrations.evolution.api.router import router as evolution_router
 from backend.integrations.evolution.transport.rabbit_consumer import start_rabbit_consumer
 from backend.integrations.evolution.transport.ws_listener import start_evo_ws_listener
+from backend.routers.atendimento_transferencia import router as atendimento_transferencia_router
 
 # IMPORTANTE:
 # este import dispara o __init__ do pacote de handlers e registra os módulos
@@ -73,6 +77,8 @@ from backend.routers.auth import get_current_user
 
 # Plans / billing
 from backend.utils.plans import is_billing_locked
+from backend.routers.billing_asaas import router as billing_asaas_router
+
 
 # =======================================
 # Config & utils
@@ -102,7 +108,7 @@ DEV_ORIGINS = [
     "http://127.0.0.1:5500",
     "http://localhost:5500",
 ]
-PROD_ORIGINS = ["https://zapschat.com.br", "https://www.zapschat.com.br"]
+PROD_ORIGINS = ["https://ZapsChat.com.br", "https://www.ZapsChat.com.br"]
 ALLOW_ORIGINS = DEV_ORIGINS if ENV == "dev" else PROD_ORIGINS
 
 # ---- Flags de integração Evolution/Rabbit ----
@@ -126,7 +132,7 @@ CSRF_COOKIE_MAX_AGE = int(os.getenv("CSRF_COOKIE_MAX_AGE", str(60 * 60 * 24 * 30
 # Trusted hosts
 ALLOWED_HOSTS = (os.getenv(
     "ALLOWED_HOSTS",
-    "localhost,127.0.0.1,zapschat.com.br,www.zapschat.com.br"
+    "localhost,127.0.0.1,ZapsChat.com.br,www.ZapsChat.com.br"
 ) or "").split(",")
 
 # Billing: páginas premium para redirecionar quando vencido
@@ -141,6 +147,7 @@ BILLING_ALLOWED_WHEN_LOCKED = {
     "/dashboard",
     "/clientes",
     "/atendimentos",
+    "/filas",
     "/meu-plano",
     "/perfil",
     "/configuracoes",
@@ -271,6 +278,7 @@ app.add_middleware(
     expose_headers=["Retry-After", "X-Auth-Gate", "X-Billing-Locked"],
 )
 
+
 # =======================================
 # Cookie de CSRF + headers básicos
 # =======================================
@@ -375,6 +383,7 @@ REQUIRED_PERMS = {
     "/chat-interno": "chatinterno.ver",
     "/chatbot": "chatbot.configurar",
     "/atendimentos": "atendimento.ver",
+    "/filas": "atendimento.ver",
     "/midias": "arquivos.ver",
     "/email": "email.ver",
     "/disparos": "disparos.ver",
@@ -575,164 +584,27 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
         and not path.startswith("/api")
         and not path.startswith("/frontend")
     ):
-        html = """<!doctype html>
+        return HTMLResponse(
+            """<!doctype html>
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8"/>
-  <title>Página não encontrada • zapschat</title>
-  <style>
-    :root{--topbar-h:44px;--card:#161617;--border:#27272a;--fg:#e5e7eb;--muted:#9ca3af;}
-    html:not(.dark){--card:#fff;--border:#e5e7eb;--fg:#1f2937;--muted:#6b7280;}
-    html, body{margin:0;padding:0;border:0;}
-    html{
-      background:linear-gradient(90deg,#22c55e 0%, #16a34a 50%, #10b981 100%) 0 0 / 100% 6px no-repeat,
-                 var(--card);
-      background-attachment:fixed;
-    }
-    html:not(.dark){
-      background:linear-gradient(90deg,#22c55e 0%, #16a34a 50%, #10b981 100%) 0 0 / 100% 6px no-repeat,#fff;
-    }
-    body{
-      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
-      color:var(--fg);
-      min-height:100vh;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      padding:calc(var(--topbar-h) + 24px) 24px 24px;
-      box-sizing:border-box;
-    }
-    .topline-bar{
-      position:fixed;top:0;left:0;right:0;height:var(--topbar-h);
-      display:flex;align-items:center;justify-content:flex-end;gap:.75rem;
-      padding:6px 14px 0;background:transparent;z-index:60;
-    }
-    .theme-toggle{
-      --w:78px;--h:34px;--p:3px;--k:28px;
-      --dx: calc(var(--w) - var(--k) - var(--p)*2);
-      position:relative;width:var(--w);height:var(--h);padding:var(--p);
-      border-radius:999px;cursor:pointer;outline:none;border:1px solid;
-      display:inline-block;isolation:isolate;background:#eceff3;border-color:#d5d9e0;
-      box-shadow:inset 0 2px 4px rgba(0,0,0,.06), inset 0 -1px 2px rgba(0,0,0,.05);
-      transition:background .3s ease,border-color .3s ease,box-shadow .3s ease;
-      line-height:0;
-    }
-    html.dark .theme-toggle{
-      background:#2f323a;border-color:#3a3e46;
-      box-shadow:inset 0 2px 5px rgba(0,0,0,.35), inset 0 -1px 2px rgba(255,255,255,.03);
-    }
-    .theme-toggle .slot{position:absolute;top:50%;transform:translateY(-50%);width:28px;height:28px;display:grid;place-items:center;pointer-events:none;opacity:.75;}
-    .theme-toggle .slot.left{left:8px;}
-    .theme-toggle .slot.right{right:8px;}
-    .theme-toggle .slot svg{width:18px;height:18px;display:block;}
-    .theme-toggle .slot svg *{stroke:#9ca3af;}
-    html.dark .theme-toggle .slot svg *{stroke:#8a93a1;}
-    .theme-toggle .thumb{
-      position:absolute;left:var(--p);top:50%;width:var(--k);height:var(--k);border-radius:999px;
-      transform:translate(0,-50%);
-      transition:transform .38s cubic-bezier(.28,1.2,.43,1),box-shadow .2s ease,background .3s ease;
-      display:grid;place-items:center;overflow:hidden;
-      background:radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%, rgba(255,255,255,.08) 65%),
-               linear-gradient(180deg,#f8c266,#f59e0b);
-      box-shadow:0 4px 8px rgba(0,0,0,.18), inset 0 0 0 1px rgba(255,255,255,.25);
-    }
-    html.dark .theme-toggle .thumb{
-      transform:translate(var(--dx), -50%) !important;
-      background:radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.7), rgba(255,255,255,.25) 45%, rgba(255,255,255,.08) 65%),
-               linear-gradient(180deg,#6ba6ff,#2563eb) !important;
-      box-shadow:0 6px 10px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.22);
-    }
-    main.wrap{max-width:520px;width:100%;text-align:center;}
-    .icon{font-size:32px;margin-bottom:10px;width:clamp(260px, 34vw, 340px);height:clamp(260px, 34vw, 340px);margin-left:auto;margin-right:auto;}
-    h1{font-size:22px;margin-bottom:8px;}
-    p{font-size:14px;line-height:1.6;color:var(--muted);margin-bottom:6px;}
-    .actions{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px;justify-content:center;}
-    a.btn{display:inline-flex;align-items:center;justify-content:center;padding:8px 14px;border-radius:999px;font-size:14px;text-decoration:none;border:1px solid var(--border);background:var(--card);color:var(--fg);}
-  </style>
+  <title>Página não encontrada • ZapsChat</title>
 </head>
-<body>
-  <div class="topline-bar">
-    <button id="themeSwitch" class="theme-toggle" aria-label="Alternar tema" aria-pressed="false">
-      <span class="slot left" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3.5" fill="none"/>
-          <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
-          <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
-          <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
-          <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
-        </svg>
-      </span>
-      <span class="slot right" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8z" fill="none"/>
-        </svg>
-      </span>
-      <span class="thumb" aria-hidden="true"></span>
-    </button>
-  </div>
-
-  <main class="wrap">
-    <div id="lottie404" class="icon"></div>
+<body style="font-family:system-ui;background:#111;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0">
+  <main style="max-width:520px;text-align:center;padding:24px">
     <h1>Não conseguimos encontrar essa página</h1>
-    <p>Não encontramos a página que você tentou acessar.</p>
     <p>Verifique se o endereço está correto ou volte para uma área existente do painel.</p>
-    <div class="actions">
-      <a href="/dashboard" class="btn">Ir para o Dashboard</a>
-      <a href="/atendimentos" class="btn">Ir para Atendimentos</a>
-      <a href="/login" class="btn">Voltar para o login</a>
-    </div>
+    <p>
+      <a style="color:#22c55e" href="/dashboard">Ir para o Dashboard</a> ·
+      <a style="color:#22c55e" href="/atendimentos">Ir para Atendimentos</a> ·
+      <a style="color:#22c55e" href="/login">Login</a>
+    </p>
   </main>
-
-  <script>
-  (function(){
-    var html = document.documentElement;
-    try{
-      var saved = localStorage.getItem('theme');
-      if (saved){ html.classList.toggle('dark', saved === 'dark'); }
-    }catch(e){}
-
-    var btn = document.getElementById('themeSwitch');
-    if (!btn) return;
-
-    function syncPressed(){
-      btn.setAttribute('aria-pressed', String(html.classList.contains('dark')));
-    }
-    syncPressed();
-
-    btn.addEventListener('click', function(){
-      var willDark = !html.classList.contains('dark');
-      html.classList.toggle('dark', willDark);
-      try{ localStorage.setItem('theme', willDark ? 'dark' : 'light'); }catch(e){}
-      syncPressed();
-    });
-  })();
-  </script>
-
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js"
-          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script>
-  (async function () {
-    var container = document.getElementById('lottie404');
-    if (!container) return;
-    try {
-      var res = await fetch('/frontend/js/404.json', { cache: 'no-store' });
-      if (!res.ok) return;
-      var data = await res.json();
-      var lottiePlayer = window.lottie || window.bodymovin;
-      if (!lottiePlayer || !lottiePlayer.loadAnimation) return;
-      lottiePlayer.loadAnimation({
-        container: container,
-        renderer: 'svg',
-        loop: true,
-        autoplay: true,
-        animationData: data
-      });
-    } catch (e) {}
-  })();
-  </script>
 </body>
-</html>"""
-        return HTMLResponse(html, status_code=404)
+</html>""",
+            status_code=404,
+        )
 
     return await fastapi_http_exception_handler(request, exc)
 
@@ -744,7 +616,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(usuarios.router, prefix="/api", tags=["Usuarios"])
 app.include_router(clientes.router, prefix="/api", tags=["Clientes"])
 
-app.include_router(atendimento_conversas.router, prefix="/api/atendimento")
+app.include_router(atendimento_conversas_router, prefix="/api/atendimento")
 app.include_router(atendimento.router, prefix="/api/atendimento", tags=["Atendimento"])
 
 app.include_router(email_router)
@@ -767,6 +639,10 @@ app.include_router(atendimento_send_router, prefix="/api/atendimento", tags=["At
 
 app.include_router(departamentos_router.router, prefix="/api", tags=["Departamentos"])
 app.include_router(departamentos_router.compat_router, prefix="/api", tags=["Departamentos"])
+
+# ✅ NOVO: filas
+app.include_router(filas_router.router, prefix="/api", tags=["Filas"])
+
 app.include_router(permissoes_router)
 app.include_router(colaboradores_router, prefix="/api", tags=["Colaboradores"])
 app.include_router(dashboard_router.router, prefix="/api", tags=["Dashboard"])
@@ -780,6 +656,8 @@ app.include_router(evolution_router)
 
 app.include_router(perfil_router)
 app.include_router(meu_plano_router)
+app.include_router(atendimento_transferencia_router)
+app.include_router(billing_asaas_router)
 
 
 # =======================================
@@ -840,7 +718,7 @@ def robots():
     if ENV == "dev":
         return HTMLResponse("User-agent: *\nDisallow: /\n", media_type="text/plain")
     return HTMLResponse(
-        "User-agent: *\nAllow: /\nSitemap: https://zapschat.com.br/sitemap.xml\n",
+        "User-agent: *\nAllow: /\nSitemap: https://ZapsChat.com.br/sitemap.xml\n",
         media_type="text/plain"
     )
 
@@ -910,7 +788,7 @@ async def root_redirect(request: Request):
     if target and _page_file(target).is_file():
         return FileResponse(str(_page_file(target)))
 
-    return {"ok": True, "msg": "Backend zapschat API (front não encontrado)."}
+    return {"ok": True, "msg": "Backend ZapsChat API (front não encontrado)."}
 
 
 @app.get("/dashboard", include_in_schema=False)

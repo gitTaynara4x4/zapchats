@@ -6,7 +6,7 @@ import time
 import threading
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Literal, List, Dict
+from typing import Optional, Literal, List, Dict, Any
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,8 +15,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-# 👉 use o mesmo helper do resto do projeto
 from backend.database import get_db_session as get_db
+
 try:
     from backend.database import SessionLocal  # p/ cleanup em background
 except Exception:
@@ -25,7 +25,7 @@ except Exception:
 from backend import models
 from backend.utils.plans import plan_limit
 from backend.utils.entitlements import enforce_billing_active, enforce_quota
-from backend.routers.auth import get_current_user
+from backend.routers.auth import require_admin
 
 router = APIRouter(tags=["Onboarding"])  # montado como /api/onboarding/...
 
@@ -33,22 +33,29 @@ router = APIRouter(tags=["Onboarding"])  # montado como /api/onboarding/...
 # =============================
 # Helpers de segurança
 # =============================
-def _empresa_do_user(user) -> Optional[int]:
+def _empresa_do_user(identity) -> Optional[int]:
     """
-    Tenta extrair empresa_id do usuário.
-    Se não tiver (ex.: super admin), devolve None e não trava por empresa.
+    Compatível com identity em dict ou objeto.
     """
-    return getattr(user, "empresa_id", None) or getattr(user, "empresa", None)
+    if isinstance(identity, dict):
+        value = identity.get("empresa_id")
+    else:
+        value = getattr(identity, "empresa_id", None) or getattr(identity, "empresa", None)
+
+    try:
+        return int(value) if value is not None else None
+    except Exception:
+        return None
 
 
-def _assert_empresa_access(user, empresa_id: int) -> None:
-    emp_user = _empresa_do_user(user)
+def _assert_empresa_access(identity, empresa_id: int) -> None:
+    emp_user = _empresa_do_user(identity)
     if emp_user is not None and int(emp_user) != int(empresa_id):
         raise HTTPException(status_code=403, detail="Empresa inválida para este usuário")
 
 
 def _get_empresa_or_404(db: Session, empresa_id: int) -> models.Empresa:
-    empresa = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
+    empresa = db.query(models.Empresa).filter(models.Empresa.id == int(empresa_id)).first()
     if not empresa:
         raise HTTPException(status_code=404, detail="Empresa não encontrada.")
     return empresa
@@ -58,7 +65,7 @@ def _count_connected_instances(db: Session, empresa_id: int) -> int:
     return (
         db.query(models.EmpresaInstancia)
         .filter(
-            models.EmpresaInstancia.empresa_id == empresa_id,
+            models.EmpresaInstancia.empresa_id == int(empresa_id),
             models.EmpresaInstancia.connected.is_(True),
         )
         .count()
@@ -100,7 +107,7 @@ def _enforce_instance_creation_allowed(db: Session, empresa: models.Empresa) -> 
             detail="Seu plano atual não permite instâncias de WhatsApp.",
         )
 
-    conectadas = _count_connected_instances(db, empresa.id)
+    conectadas = _count_connected_instances(db, int(empresa.id))
     enforce_quota(
         empresa,
         "whatsapp_instances_max",
@@ -159,18 +166,23 @@ def _gen_instance_name(empresa: models.Empresa, phone_e164: str | None) -> str:
 def _evo_wait_instance_ready(sess: requests.Session, instance: str, timeout_s: int = 8) -> bool:
     if not EVOLUTION_URL:
         return False
+
     url = f"{EVOLUTION_URL}/instances"
     t0 = time.time()
+
     while time.time() - t0 < timeout_s:
         try:
             r = sess.get(url, timeout=10)
             if r.ok:
                 arr = r.json() if (r.headers.get("content-type") or "").startswith("application/json") else []
-                if isinstance(arr, list) and any((i.get("instance") or i.get("instanceName")) == instance for i in arr):
+                if isinstance(arr, list) and any(
+                    (i.get("instance") or i.get("instanceName")) == instance for i in arr
+                ):
                     return True
         except Exception:
             pass
         time.sleep(0.4)
+
     return False
 
 
@@ -236,7 +248,6 @@ def _analisar_saude_mensagens(msgs: list[models.Mensagem]) -> dict:
     motivos: list[str] = []
     recomendacoes: list[str] = []
 
-    # 1) Repetição de conteúdo nas saídas
     textos_saida = [_norm_text(m.conteudo) for m in saidas if _norm_text(m.conteudo)]
     repeticao_pct = 0
 
@@ -254,7 +265,6 @@ def _analisar_saude_mensagens(msgs: list[models.Mensagem]) -> dict:
             motivos.append("Baixa variação nas mensagens")
             recomendacoes.append("Aumente a variação de abordagem e escrita.")
 
-    # 2) Velocidade média entre saídas
     intervalo_medio_seg = None
     if len(saidas) >= 2:
         saidas_ord = sorted(
@@ -282,7 +292,6 @@ def _analisar_saude_mensagens(msgs: list[models.Mensagem]) -> dict:
                 motivos.append("Velocidade de envio acima do ideal")
                 recomendacoes.append("Espalhe melhor os envios ao longo do tempo.")
 
-    # 3) Taxa simples de pouca resposta
     saidas_count = len(saidas)
     entradas_count = len(entradas)
     taxa_sem_resposta_pct = 0
@@ -300,7 +309,6 @@ def _analisar_saude_mensagens(msgs: list[models.Mensagem]) -> dict:
             motivos.append("Baixa taxa de resposta")
             recomendacoes.append("Revise o tom e a segmentação das mensagens.")
 
-    # 4) Volume de saídas dominante
     if saidas_count >= 25 and saidas_count > max(entradas_count * 4, 0):
         score += 10
         motivos.append("Volume alto de saídas em comparação com respostas")
@@ -362,6 +370,7 @@ def _ws_events_initial() -> List[str]:
 def _evo_create_instance(instance: str, use_pairing: bool) -> None:
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return
+
     s = _http()
     payload = {
         "instanceName": instance,
@@ -370,7 +379,11 @@ def _evo_create_instance(instance: str, use_pairing: bool) -> None:
         "rabbitmq": {
             "enabled": True,
             "exchange": os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange"),
-            "bindings": [b.strip() for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#").split(",") if b.strip()],
+            "bindings": [
+                b.strip()
+                for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#").split(",")
+                if b.strip()
+            ],
             "events": [],
         },
         "websocket": {
@@ -378,24 +391,31 @@ def _evo_create_instance(instance: str, use_pairing: bool) -> None:
             "events": _ws_events_initial(),
         },
     }
+
     try:
         r = s.post(f"{EVOLUTION_URL}/instance/create", json=payload, timeout=25)
         if r.status_code not in (200, 201, 202, 409):
             s.post(f"{EVOLUTION_URL}/instances/create", json=payload, timeout=25)
     except Exception:
         pass
+
     _evo_wait_instance_ready(s, instance, timeout_s=8)
 
 
 def _evo_set_rabbit_initial(instance: str) -> None:
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return
+
     s = _http()
     body = {
         "rabbitmq": {
             "enabled": True,
             "exchange": os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange"),
-            "bindings": [b.strip() for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#").split(",") if b.strip()],
+            "bindings": [
+                b.strip()
+                for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#").split(",")
+                if b.strip()
+            ],
             "events": [],
         }
     }
@@ -408,6 +428,7 @@ def _evo_set_rabbit_initial(instance: str) -> None:
 def _evo_set_websocket_initial(instance: str) -> None:
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return
+
     s = _http()
     body = {"websocket": {"enabled": True, "events": _ws_events_initial()}}
     try:
@@ -419,16 +440,19 @@ def _evo_set_websocket_initial(instance: str) -> None:
 def _evo_connect(instance: str, number_digits: str | None) -> dict:
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return {}
+
     s = _http()
     url = f"{EVOLUTION_URL}/instance/connect/{instance}"
     if number_digits:
         url += f"?number={_only_digits(number_digits)}"
+
     try:
         r = s.get(url, timeout=25)
         if r.ok and "application/json" in (r.headers.get("content-type") or "").lower():
             return r.json() or {}
     except Exception:
         pass
+
     return {}
 
 
@@ -439,14 +463,16 @@ def _evo_try_refresh_qr(instance: str) -> dict:
 def _evo_delete_instance(instance: str) -> None:
     if not (EVOLUTION_URL and EVOLUTION_KEY and instance):
         return
+
     s = _http()
     attempts = [
         ("DELETE", f"{EVOLUTION_URL}/instance/delete/{instance}", None),
         ("DELETE", f"{EVOLUTION_URL}/instances/delete/{instance}", None),
-        ("POST",   f"{EVOLUTION_URL}/instance/delete/{instance}", None),
-        ("POST",   f"{EVOLUTION_URL}/instance/delete", {"instanceName": instance}),
-        ("POST",   f"{EVOLUTION_URL}/instances/delete", {"instance": instance}),
+        ("POST", f"{EVOLUTION_URL}/instance/delete/{instance}", None),
+        ("POST", f"{EVOLUTION_URL}/instance/delete", {"instanceName": instance}),
+        ("POST", f"{EVOLUTION_URL}/instances/delete", {"instance": instance}),
     ]
+
     for method, url, body in attempts:
         try:
             r = s.delete(url, timeout=15) if method == "DELETE" else s.post(url, json=body, timeout=15)
@@ -490,16 +516,17 @@ def _cleanup_if_still_disconnected(instance: str):
                     "SELECT 1 FROM chatbot_configs WHERE instancia_id = :iid LIMIT 1",
                     "SELECT 1 FROM mensagens_grupo WHERE instancia_id = :iid LIMIT 1",
                     """
-                      SELECT 1 FROM mensagens_grupo
-                      WHERE grupo_id IN (SELECT id FROM grupos WHERE instancia_id = :iid)
-                      LIMIT 1
+                    SELECT 1 FROM mensagens_grupo
+                    WHERE grupo_id IN (SELECT id FROM grupos WHERE instancia_id = :iid)
+                    LIMIT 1
                     """,
                     """
-                      SELECT 1 FROM midias
-                      WHERE mensagem_id IN (SELECT id FROM mensagens WHERE instancia_id = :iid)
-                      LIMIT 1
+                    SELECT 1 FROM midias
+                    WHERE mensagem_id IN (SELECT id FROM mensagens WHERE instancia_id = :iid)
+                    LIMIT 1
                     """,
                 ]
+
                 for sql in checks:
                     if db.execute(text(sql), {"iid": instancia_id}).first():
                         has_data = True
@@ -515,18 +542,21 @@ def _cleanup_if_still_disconnected(instance: str):
                 db.close()
         except Exception:
             pass
+
     _CLEANUP_TIMERS.pop(instance, None)
 
 
 def _schedule_cleanup(instance: str):
     if _CLEANUP_SECONDS <= 0:
         return
+
     t = _CLEANUP_TIMERS.get(instance)
     if t:
         try:
             t.cancel()
         except Exception:
             pass
+
     timer = threading.Timer(_CLEANUP_SECONDS, _cleanup_if_still_disconnected, args=(instance,))
     timer.daemon = True
     _CLEANUP_TIMERS[instance] = timer
@@ -549,14 +579,14 @@ def cancel_auto_cleanup(instance: str):
 def conectar(
     payload: ConnectPayload,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(require_admin),
 ):
     if not EVOLUTION_URL or not EVOLUTION_KEY:
         raise HTTPException(500, "Evolution API não configurada (EVOLUTION_URL/KEY).")
 
-    _assert_empresa_access(user, payload.empresa_id)
+    _assert_empresa_access(identity, int(payload.empresa_id))
 
-    empresa = _get_empresa_or_404(db, payload.empresa_id)
+    empresa = _get_empresa_or_404(db, int(payload.empresa_id))
 
     # trava por vencimento + quota
     _enforce_instance_creation_allowed(db, empresa)
@@ -566,14 +596,14 @@ def conectar(
         raise HTTPException(400, "Número de WhatsApp inválido.")
 
     pendente = db.query(models.EmpresaInstancia).filter(
-        models.EmpresaInstancia.empresa_id == empresa.id,
+        models.EmpresaInstancia.empresa_id == int(empresa.id),
         models.EmpresaInstancia.numero_instancia == number_digits,
         models.EmpresaInstancia.connected.is_(False),
     ).first()
 
     if pendente:
         if payload.apelido:
-            pendente.apelido = payload.apelido
+            pendente.apelido = payload.apelido.strip() or None
         pendente.historico_restaurar = payload.historico_restaurar
         db.commit()
 
@@ -600,7 +630,7 @@ def conectar(
         return {
             "ok": True,
             "instance": pendente.instance_name,
-            "instancia_id": pendente.id,
+            "instancia_id": int(pendente.id),
             "qrcode": qr or None,
             "numero": pendente.numero_instancia,
         }
@@ -620,8 +650,9 @@ def conectar(
         models.EmpresaInstancia.instance_name == inst
     ).first()
     if exists_name:
-        if exists_name.empresa_id != empresa.id:
+        if int(exists_name.empresa_id) != int(empresa.id):
             raise HTTPException(409, "instance_name já está em uso.")
+
         base = inst
         i = 2
         while True:
@@ -644,11 +675,11 @@ def conectar(
     try:
         if not inst_row:
             inst_row = models.EmpresaInstancia(
-                empresa_id=empresa.id,
+                empresa_id=int(empresa.id),
                 instance_name=inst,
                 connected=False,
                 numero_instancia=number_digits,
-                apelido=(payload.apelido or None),
+                apelido=(payload.apelido.strip() if payload.apelido else None),
                 historico_restaurar=payload.historico_restaurar,
             )
             db.add(inst_row)
@@ -657,11 +688,11 @@ def conectar(
             if not getattr(inst_row, "numero_instancia", None):
                 inst_row.numero_instancia = number_digits
             if payload.apelido:
-                inst_row.apelido = payload.apelido
+                inst_row.apelido = payload.apelido.strip() or None
             inst_row.historico_restaurar = payload.historico_restaurar
 
         if hasattr(empresa, "quantidade_instancias"):
-            empresa.quantidade_instancias = _count_connected_instances(db, empresa.id)
+            empresa.quantidade_instancias = _count_connected_instances(db, int(empresa.id))
 
         db.commit()
 
@@ -672,9 +703,9 @@ def conectar(
             models.EmpresaInstancia.numero_instancia == number_digits
         ).first()
 
-        if conflito and not conflito.connected and conflito.empresa_id == empresa.id:
+        if conflito and not conflito.connected and int(conflito.empresa_id) == int(empresa.id):
             if payload.apelido:
-                conflito.apelido = payload.apelido
+                conflito.apelido = payload.apelido.strip() or None
             conflito.historico_restaurar = payload.historico_restaurar
             db.commit()
 
@@ -701,7 +732,7 @@ def conectar(
             return {
                 "ok": True,
                 "instance": conflito.instance_name,
-                "instancia_id": conflito.id,
+                "instancia_id": int(conflito.id),
                 "qrcode": qr or None,
                 "numero": conflito.numero_instancia,
             }
@@ -729,7 +760,7 @@ def conectar(
     return {
         "ok": True,
         "instance": inst,
-        "instancia_id": inst_row.id,
+        "instancia_id": int(inst_row.id),
         "qrcode": qr or None,
         "numero": inst_row.numero_instancia,
     }
@@ -739,7 +770,7 @@ def conectar(
 def refresh_qr(
     instance: str,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(require_admin),
 ):
     if not instance:
         raise HTTPException(400, "instance inválida.")
@@ -750,9 +781,9 @@ def refresh_qr(
     if not row:
         raise HTTPException(status_code=404, detail="Instância não encontrada.")
 
-    _assert_empresa_access(user, row.empresa_id)
+    _assert_empresa_access(identity, int(row.empresa_id))
 
-    empresa = _get_empresa_or_404(db, row.empresa_id)
+    empresa = _get_empresa_or_404(db, int(row.empresa_id))
     enforce_billing_active(
         empresa,
         message="Seu plano está vencido. Renove para reativar ou atualizar QR de instâncias.",
@@ -783,7 +814,7 @@ def consultar_saude_numero(
     instancia_id: int,
     payload: SaudeNumeroPayload,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    identity=Depends(require_admin),
 ):
     """
     Consulta sob demanda a saúde do número:
@@ -792,17 +823,17 @@ def consultar_saude_numero(
     - salva o resultado completo na instância
     - devolve resumo para o modal do front
     """
-    _assert_empresa_access(user, payload.empresa_id)
+    _assert_empresa_access(identity, int(payload.empresa_id))
 
-    empresa = _get_empresa_or_404(db, payload.empresa_id)
+    empresa = _get_empresa_or_404(db, int(payload.empresa_id))
     enforce_billing_active(
         empresa,
         message="Seu plano está vencido. Renove para consultar a saúde das instâncias.",
     )
 
     inst = db.query(models.EmpresaInstancia).filter(
-        models.EmpresaInstancia.id == instancia_id,
-        models.EmpresaInstancia.empresa_id == payload.empresa_id,
+        models.EmpresaInstancia.id == int(instancia_id),
+        models.EmpresaInstancia.empresa_id == int(payload.empresa_id),
     ).first()
     if not inst:
         raise HTTPException(status_code=404, detail="Instância não encontrada.")
@@ -810,8 +841,8 @@ def consultar_saude_numero(
     dt_min = datetime.now(timezone.utc) - timedelta(hours=int(payload.janela_horas))
 
     msgs = db.query(models.Mensagem).filter(
-        models.Mensagem.empresa_id == payload.empresa_id,
-        models.Mensagem.instancia_id == inst.id,
+        models.Mensagem.empresa_id == int(payload.empresa_id),
+        models.Mensagem.instancia_id == int(inst.id),
         models.Mensagem.timestamp >= dt_min,
         models.Mensagem.conteudo.isnot(None),
         models.Mensagem.conteudo != "",
@@ -839,7 +870,7 @@ def consultar_saude_numero(
 
     return {
         "ok": True,
-        "instancia_id": inst.id,
+        "instancia_id": int(inst.id),
         "instance": inst.instance_name,
         "apelido": inst.apelido,
         "numero": inst.numero_instancia,
@@ -869,6 +900,6 @@ def marcar_conectado_e_cancelar_cleanup(instance: str, db: Session):
         row.connected = True
         emp = db.query(models.Empresa).filter(models.Empresa.id == row.empresa_id).first()
         if emp and hasattr(emp, "quantidade_instancias"):
-            emp.quantidade_instancias = _count_connected_instances(db, emp.id)
+            emp.quantidade_instancias = _count_connected_instances(db, int(emp.id))
         db.commit()
     cancel_auto_cleanup(instance)

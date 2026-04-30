@@ -51,6 +51,7 @@ html[data-theme="light"] .logo-dark{ display:none; }
   align-items:center;
   gap:8px;
   margin-left:auto;
+  flex:0 0 auto;
 }
 
 .wpp-header-icon,
@@ -304,8 +305,8 @@ html[data-theme="light"] .logo-dark{ display:none; }
    ========================= */
 
 .avatar{
-  width:36px;
-  height:36px;
+  width:40px;
+  height:40px;
   margin-right:8px;
   display:flex;
   align-items:center;
@@ -330,8 +331,90 @@ html[data-theme="light"] .logo-dark{ display:none; }
   box-shadow:none;
 }
 
-.avatar.placeholder{
-  border:1.5px solid color-mix(in oklab, var(--border) 90%, transparent);
+/* Avatar sem foto estilo WhatsApp Web */
+.avatar.placeholder,
+.avatar.avatar-default,
+#chat-avatar .avatar.placeholder,
+#chat-avatar .avatar.avatar-default{
+  border:none;
+  background:#123f2c;
+  color:#35d979;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.055);
+}
+
+.avatar.placeholder i,
+.avatar.avatar-default i,
+#chat-avatar .avatar.placeholder i,
+#chat-avatar .avatar.avatar-default i{
+  font-size:16px;
+  line-height:1;
+  color:currentColor !important;
+}
+
+/* Troca fa-user-circle por ícone simples de usuário */
+.avatar.placeholder .fa-user-circle::before,
+.avatar.avatar-default .fa-user-circle::before,
+#chat-avatar .avatar.placeholder .fa-user-circle::before,
+#chat-avatar .avatar.avatar-default .fa-user-circle::before{
+  content:"\f007";
+}
+
+/* Cores fixas por conversa.
+   A classe avatar-color-X vem do clientes.js baseada no conversation_key.
+   Assim a cor não muda com F5, mensagem nova ou mudança de posição. */
+
+#lista-clientes .chat-item.avatar-color-1 .avatar.placeholder,
+#lista-clientes .chat-item.avatar-color-1 .avatar.avatar-default{
+  background:#123f2c;
+  color:#35d979;
+}
+
+#lista-clientes .chat-item.avatar-color-2 .avatar.placeholder,
+#lista-clientes .chat-item.avatar-color-2 .avatar.avatar-default{
+  background:#1d2f55;
+  color:#6ea8ff;
+}
+
+#lista-clientes .chat-item.avatar-color-3 .avatar.placeholder,
+#lista-clientes .chat-item.avatar-color-3 .avatar.avatar-default{
+  background:#33245f;
+  color:#a78bfa;
+}
+
+#lista-clientes .chat-item.avatar-color-4 .avatar.placeholder,
+#lista-clientes .chat-item.avatar-color-4 .avatar.avatar-default{
+  background:#552436;
+  color:#fb7185;
+}
+
+#lista-clientes .chat-item.avatar-color-5 .avatar.placeholder,
+#lista-clientes .chat-item.avatar-color-5 .avatar.avatar-default{
+  background:#4a3516;
+  color:#fbbf24;
+}
+
+#lista-clientes .chat-item.avatar-color-6 .avatar.placeholder,
+#lista-clientes .chat-item.avatar-color-6 .avatar.avatar-default{
+  background:#173f46;
+  color:#22d3ee;
+}
+
+/* Avatar do header quando não tem foto */
+#chat-avatar .avatar.placeholder,
+#chat-avatar .avatar.avatar-default{
+  width:40px;
+  height:40px;
+  margin-right:0;
+  background:#123f2c;
+  color:#35d979;
+}
+
+/* Tema claro */
+html[data-theme="light"] .avatar.placeholder,
+html[data-theme="light"] .avatar.avatar-default,
+html[data-theme="light"] #chat-avatar .avatar.placeholder,
+html[data-theme="light"] #chat-avatar .avatar.avatar-default{
+  box-shadow:inset 0 0 0 1px rgba(15,23,42,.07);
 }
 
 /* =========================
@@ -402,6 +485,14 @@ html[data-theme="light"] .logo-dark{ display:none; }
   display:flex;
   align-items:center;
   justify-content:center;
+}
+
+.search-item .avatar.placeholder,
+.search-item .avatar.avatar-default,
+.sr-item .avatar.placeholder,
+.sr-item .avatar.avatar-default{
+  background:#123f2c;
+  color:#35d979;
 }
 
 .search-item .avatar img,
@@ -579,7 +670,7 @@ li.is-pinned{
 .zc-topbar{
   display:flex;
   flex-direction:column;
-  gap:10px;
+  gap:14px;
 }
 
 .zc-topbar-head{
@@ -587,20 +678,40 @@ li.is-pinned{
   align-items:center;
   justify-content:space-between;
   gap:12px;
+  width:100%;
+}
+
+.zc-topbar-left{
+  min-width:0;
+  flex:1 1 auto;
+  display:flex;
+  align-items:center;
+  gap:18px;
 }
 
 .zc-brand-wrap{
+  flex:0 0 auto;
   min-width:0;
   display:flex;
   align-items:center;
 }
 
 .zc-brand-title{
-  font-size:1.05rem;
-  font-weight:700;
-  letter-spacing:-.2px;
-  color:var(--text);
+  font-family:"Montserrat","Segoe UI",Arial,sans-serif;
+  font-size:1.28rem;
+  font-weight:900;
+  letter-spacing:-.6px;
+  color:#f5f7f8;
   line-height:1;
+  white-space:nowrap;
+}
+
+.zc-inst-top{
+  min-width:0;
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  flex:0 0 auto;
 }
 
 .zc-inst-row{
@@ -609,6 +720,12 @@ li.is-pinned{
   gap:12px;
   min-width:0;
   flex-wrap:nowrap;
+}
+
+.zc-inst-row--bottom{
+  justify-content:flex-start;
+  padding-left:1px;
+  margin-top:2px;
 }
 
 .zc-inst-meta{
@@ -651,8 +768,12 @@ li.is-pinned{
   position:relative;
   display:inline-block;
   flex:0 0 auto;
-  min-width:140px;
-  max-width:200px;
+  min-width:128px;
+  max-width:180px;
+}
+
+.zc-inst-dropdown--top{
+  justify-self:auto;
 }
 
 .zc-inst-trigger{
@@ -661,29 +782,53 @@ li.is-pinned{
   display:flex;
   align-items:center;
   justify-content:space-between;
-  gap:10px;
-  padding:0 12px;
-  border:0;
-  border-radius:999px;
-  background:rgba(37,211,102,.12);
-  color:var(--accent);
-  box-shadow:inset 0 0 0 1px rgba(37,211,102,.30);
+  gap:9px;
+  padding:0 10px;
+  border-radius:10px;
+  border:1px solid rgba(134,150,160,.24) !important;
+  background:#1c2a33 !important;
+  color:#f5f7f8 !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.035),
+    0 8px 18px rgba(0,0,0,.12) !important;
   font-size:12.5px;
-  font-weight:600;
+  font-weight:700;
   cursor:pointer;
-  transition:background .15s ease, color .15s ease, box-shadow .15s ease;
+  transition:
+    background .15s ease,
+    border-color .15s ease,
+    box-shadow .15s ease,
+    transform .08s ease;
+}
+
+.zc-inst-trigger::before{
+  content:"";
+  width:8px;
+  height:8px;
+  border-radius:999px;
+  background:#25d366;
+  box-shadow:0 0 0 4px rgba(37,211,102,.12);
+  flex:0 0 auto;
 }
 
 .zc-inst-trigger:hover{
-  background:rgba(37,211,102,.16);
-  box-shadow:inset 0 0 0 1px rgba(37,211,102,.38);
+  background:#21323d !important;
+  border-color:rgba(134,150,160,.36) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.045),
+    0 10px 22px rgba(0,0,0,.16) !important;
+}
+
+.zc-inst-trigger:active{
+  transform:translateY(1px);
 }
 
 .zc-inst-trigger:focus-visible{
   outline:none;
+  border-color:rgba(37,211,102,.38) !important;
   box-shadow:
-    inset 0 0 0 1px rgba(37,211,102,.42),
-    0 0 0 2px rgba(37,211,102,.14);
+    0 0 0 2px rgba(37,211,102,.14),
+    inset 0 1px 0 rgba(255,255,255,.045) !important;
 }
 
 .zc-inst-trigger-text{
@@ -692,18 +837,27 @@ li.is-pinned{
   text-overflow:ellipsis;
   white-space:nowrap;
   text-align:left;
+  color:#f5f7f8 !important;
+  font-weight:800;
+  letter-spacing:-.15px;
 }
 
 .zc-inst-trigger i{
-  font-size:11px;
+  font-size:10px;
   flex:0 0 auto;
-  opacity:.9;
-  color:var(--accent);
-  transition:transform .15s ease;
+  opacity:.95;
+  color:#aebac1 !important;
+  transition:transform .15s ease,color .15s ease;
+}
+
+.zc-inst-dropdown.is-open .zc-inst-trigger{
+  background:#243641 !important;
+  border-color:rgba(37,211,102,.30) !important;
 }
 
 .zc-inst-dropdown.is-open .zc-inst-trigger i{
   transform:rotate(180deg);
+  color:#d1d7db !important;
 }
 
 .zc-inst-menu{
@@ -741,6 +895,16 @@ li.is-pinned{
   text-align:left;
   cursor:pointer;
   transition:background .14s ease, color .14s ease;
+}
+
+.zc-inst-option::before{
+  content:"";
+  width:7px;
+  height:7px;
+  border-radius:999px;
+  background:#25d366;
+  flex:0 0 auto;
+  opacity:.95;
 }
 
 .zc-inst-option:hover{
@@ -959,4 +1123,73 @@ button#btnKebabHeader{
   display:none !important;
   visibility:hidden !important;
   opacity:0 !important;
+}
+
+/* =========================
+   RESPONSIVO DA TOPBAR
+   ========================= */
+
+@media (max-width:920px){
+  .zc-topbar{
+    gap:12px;
+  }
+
+  .zc-topbar-head{
+    gap:8px;
+  }
+
+  .zc-topbar-left{
+    gap:12px;
+  }
+
+  .zc-brand-title{
+    font-family:"Montserrat","Segoe UI",Arial,sans-serif;
+    font-size:1.12rem;
+    font-weight:900;
+    letter-spacing:-.45px;
+  }
+
+  .zc-inst-row{
+    gap:8px;
+  }
+
+  .zc-inst-title{
+    font-size:11px;
+  }
+
+  .zc-inst-dropdown{
+    min-width:112px;
+    max-width:140px;
+  }
+
+  .zc-inst-trigger{
+    min-height:31px;
+    padding:0 9px;
+    font-size:12px;
+    border-radius:10px;
+  }
+
+  .zc-inst-option{
+    padding:9px 10px;
+    font-size:12.5px;
+  }
+}
+
+@media (max-width:560px){
+  .zc-topbar-head{
+    align-items:flex-start;
+  }
+
+  .zc-topbar-left{
+    gap:10px;
+  }
+
+  .zc-inst-dropdown{
+    min-width:108px;
+    max-width:128px;
+  }
+
+  .zc-inst-trigger{
+    padding:0 8px;
+  }
 }

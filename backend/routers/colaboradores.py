@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, List
+from typing import Optional, List, Any
 import re
 import json
 from urllib.parse import quote
@@ -138,18 +138,119 @@ def _resolve_setor_or_departamento(
     return s
 
 
+def _find_departamento_by_nome(
+    db: Session,
+    *,
+    empresa_id: int,
+    nome: Optional[str],
+) -> Optional[models.Departamento]:
+    nome = str(nome or "").strip()
+    if not nome:
+        return None
+
+    return (
+        db.query(models.Departamento)
+        .filter(
+            models.Departamento.empresa_id == int(empresa_id),
+            models.Departamento.nome == nome,
+        )
+        .first()
+    )
+
+
+def _find_or_create_departamento_from_setor(
+    db: Session,
+    *,
+    empresa_id: int,
+    setor_id: Optional[int],
+) -> Optional[models.Departamento]:
+    if not setor_id:
+        return None
+
+    setor = (
+        db.query(models.Setor)
+        .filter(
+            models.Setor.id == int(setor_id),
+            models.Setor.empresa_id == int(empresa_id),
+        )
+        .first()
+    )
+    if not setor:
+        return None
+
+    dep = _find_departamento_by_nome(
+        db,
+        empresa_id=int(empresa_id),
+        nome=setor.nome,
+    )
+    if dep:
+        return dep
+
+    dep = models.Departamento(
+        empresa_id=int(empresa_id),
+        nome=str(setor.nome).strip(),
+        ativo=True,
+    )
+    db.add(dep)
+    db.flush()
+    return dep
+
+
+def _sync_departamento_membro(
+    db: Session,
+    *,
+    empresa_id: int,
+    colaborador_id: int,
+    setor_id: Optional[int],
+) -> None:
+    """
+    Garante que o colaborador tenha 0 ou 1 vínculo principal em departamentos_membros,
+    usando o departamento correspondente ao nome do setor.
+
+    Regra:
+      - apaga vínculos antigos do colaborador nessa empresa
+      - se houver setor_id, resolve/cria o Departamento equivalente
+      - recria 1 vínculo primary
+    """
+    db.query(models.DepartamentoMembro).filter(
+        models.DepartamentoMembro.empresa_id == int(empresa_id),
+        models.DepartamentoMembro.colaborador_id == int(colaborador_id),
+    ).delete(synchronize_session=False)
+
+    if not setor_id:
+        return
+
+    dep = _find_or_create_departamento_from_setor(
+        db,
+        empresa_id=int(empresa_id),
+        setor_id=int(setor_id),
+    )
+    if not dep:
+        return
+
+    membro = models.DepartamentoMembro(
+        empresa_id=int(empresa_id),
+        departamento_id=int(dep.id),
+        colaborador_id=int(colaborador_id),
+        role="member",
+        is_primary=True,
+    )
+    db.add(membro)
+    db.flush()
+
+
 def _parse_perms(value: Optional[str | list]) -> list[str]:
     if not value:
         return []
     if isinstance(value, list):
-        return [str(x) for x in value]
+        return [str(x) for x in value if str(x).strip()]
     s = str(value).strip()
     if not s:
         return []
     try:
         data = json.loads(s)
         if isinstance(data, list):
-            return [str(x) for x in data]
+            return [str(x) for x in data if str(x).strip()]
     except Exception:
         pass
     return [p for p in re.split(r"[\s,;]+", s) if p]
@@ -167,6 +268,69 @@ def _usage_pick(counts: dict, *keys: str, default: int = 0) -> int:
         if key in counts:
             return _safe_int(counts.get(key), default)
     return default
+
+
+def _normalize_int_list(raw: Any) -> list[int]:
+    if raw is None:
+        return []
+
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return []
+        try:
+            parsed = json.loads(s)
+            raw = parsed
+        except Exception:
+            raw = [p for p in re.split(r"[\s,;]+", s) if p]
+
+    if not isinstance(raw, list):
+        raw = [raw]
+
+    out: list[int] = []
+    seen: set[int] = set()
+
+    for item in raw:
+        if item is None:
+            continue
+        try:
+            n = int(item)
+        except (TypeError, ValueError):
+            continue
+        if n not in seen:
+            seen.add(n)
+            out.append(n)
+
+    return out
+
+
+def _validate_instancias_ids_empresa(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancias_ids: list[int],
+) -> list[int]:
+    if not instancias_ids:
+        return []
+
+    rows = (
+        db.query(models.EmpresaInstancia.id)
+        .filter(
+            models.EmpresaInstancia.empresa_id == int(empresa_id),
+            models.EmpresaInstancia.id.in_(instancias_ids),
+        )
+        .all()
+    )
+    valid_ids = {int(r[0]) for r in rows if r and r[0] is not None}
+
+    invalid = [x for x in instancias_ids if x not in valid_ids]
+    if invalid:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Instância(s) inválida(s) para a empresa: {invalid}",
+        )
+
+    return [x for x in instancias_ids if x in valid_ids]
 
 
 class ColaboradorOut(BaseModel):
@@ -350,7 +514,12 @@ async def criar_colaborador(
     permissoes: Optional[str] = Form(None),
     avatar: Optional[UploadFile] = File(None),
 ):
-    if request.headers.get("content-type", "").startswith("application/json"):
+    raw_permissoes: Any = permissoes
+    raw_instancias_ids: Any = None
+
+    content_type = request.headers.get("content-type", "")
+
+    if content_type.startswith("application/json"):
         payload = await request.json()
         if isinstance(payload, dict):
             nome = payload.get("nome", nome)
@@ -360,10 +529,34 @@ async def criar_colaborador(
             cargo = payload.get("cargo", cargo)
             criar_usuario = payload.get("criar_usuario", criar_usuario)
             senha = payload.get("senha", senha)
-            permissoes = payload.get("permissoes", permissoes)
             hora_login_inicio = payload.get("hora_login_inicio", hora_login_inicio)
             hora_login_fim = payload.get("hora_login_fim", hora_login_fim)
             horario_modo = payload.get("horario_modo", horario_modo)
+
+            raw_permissoes = (
+                payload.get("permissoes", raw_permissoes)
+                if "permissoes" in payload
+                else raw_permissoes
+            )
+            raw_instancias_ids = (
+                payload.get("instancias_ids")
+                if "instancias_ids" in payload
+                else payload.get("instancias_ids[]")
+            )
+    else:
+        try:
+            form = await request.form()
+        except Exception:
+            form = None
+
+        if form is not None:
+            form_perms = form.getlist("permissoes[]") or form.getlist("permissoes")
+            form_insts = form.getlist("instancias_ids[]") or form.getlist("instancias_ids")
+
+            if form_perms:
+                raw_permissoes = form_perms
+            if form_insts:
+                raw_instancias_ids = form_insts
 
     if not nome or not str(nome).strip():
         raise HTTPException(status_code=422, detail="Nome é obrigatório")
@@ -463,6 +656,12 @@ async def criar_colaborador(
         else:
             horario_modo_norm = "livre"
 
+    instancias_ids_norm = _validate_instancias_ids_empresa(
+        db,
+        empresa_id=user.empresa_id,
+        instancias_ids=_normalize_int_list(raw_instancias_ids),
+    )
+
     colab = models.Colaborador(
         empresa_id=user.empresa_id,
         setor_id=(setor.id if setor else None),
@@ -476,12 +675,13 @@ async def criar_colaborador(
         hora_login_fim=hf_norm,
         avatar_data=avatar_bytes if avatar_bytes else None,
         avatar_mime=avatar_mime if avatar_bytes else None,
+        instancias_ver=instancias_ids_norm,
     )
 
     if hasattr(colab, "horario_modo"):
         setattr(colab, "horario_modo", horario_modo_norm)
 
-    perm_ids = _parse_perms(permissoes)
+    perm_ids = _parse_perms(raw_permissoes)
     if perm_ids:
         perms = (
             db.query(models.Permissao)
@@ -493,6 +693,14 @@ async def criar_colaborador(
     try:
         db.add(colab)
         db.flush()
+
+        _sync_departamento_membro(
+            db,
+            empresa_id=int(user.empresa_id),
+            colaborador_id=int(colab.id),
+            setor_id=colab.setor_id,
+        )
+
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -593,18 +801,23 @@ def atualizar_colaborador(
         colab.permissoes = perms
 
     if "instancias_ids" in data:
-        raw = data["instancias_ids"] or []
-        norm_ids: list[int] = []
-        for x in raw:
-            try:
-                if x is not None:
-                    norm_ids.append(int(x))
-            except (TypeError, ValueError):
-                continue
-        colab.instancias_ver = norm_ids
+        colab.instancias_ver = _validate_instancias_ids_empresa(
+            db,
+            empresa_id=user.empresa_id,
+            instancias_ids=_normalize_int_list(data["instancias_ids"]),
+        )
 
     try:
         db.add(colab)
+        db.flush()
+
+        _sync_departamento_membro(
+            db,
+            empresa_id=int(user.empresa_id),
+            colaborador_id=int(colab.id),
+            setor_id=colab.setor_id,
+        )
+
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -638,15 +851,11 @@ def atualizar_instancias_colaborador(
 
     _assert_mesma_empresa(colab.empresa_id, user.empresa_id)
 
-    norm_ids: list[int] = []
-    for x in payload.instancias_ids or []:
-        try:
-            if x is not None:
-                norm_ids.append(int(x))
-        except (TypeError, ValueError):
-            continue
-
-    colab.instancias_ver = norm_ids
+    colab.instancias_ver = _validate_instancias_ids_empresa(
+        db,
+        empresa_id=user.empresa_id,
+        instancias_ids=_normalize_int_list(payload.instancias_ids),
+    )
 
     try:
         db.add(colab)
@@ -675,6 +884,11 @@ def excluir_colaborador(
     _assert_mesma_empresa(colab.empresa_id, user.empresa_id)
 
     try:
+        db.query(models.DepartamentoMembro).filter(
+            models.DepartamentoMembro.empresa_id == int(colab.empresa_id),
+            models.DepartamentoMembro.colaborador_id == int(colab.id),
+        ).delete(synchronize_session=False)
+
         db.delete(colab)
         db.commit()
     except Exception:
@@ -720,8 +934,7 @@ async def put_colaborador_avatar(
 
 @router.get(
     "/{colab_id}/avatar",
-    summary="Avatar do colaborador",
-    responses={200: {"content": {"image/*": {}}}},
+    summary="Obtém avatar do colaborador",
 )
 def get_colaborador_avatar(
     colab_id: int,
@@ -731,22 +944,14 @@ def get_colaborador_avatar(
     c = db.query(models.Colaborador).get(colab_id)
     if not c:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Colaborador não encontrado")
+
     _assert_mesma_empresa(c.empresa_id, me.empresa_id)
 
-    if getattr(c, "avatar_data", None):
-        data = c.avatar_data.tobytes() if isinstance(c.avatar_data, memoryview) else c.avatar_data
-        mime = c.avatar_mime or "image/png"
-        return Response(content=data, media_type=mime)
+    if not c.avatar_data:
+        raise HTTPException(status_code=404, detail="Colaborador sem avatar")
 
-    if c.usuario_id:
-        u = db.query(models.Usuario).get(c.usuario_id)
-        if u and u.avatar_data:
-            data = (
-                u.avatar_data.tobytes()
-                if isinstance(u.avatar_data, memoryview)
-                else u.avatar_data
-            )
-            mime = u.avatar_mime or "image/png"
-            return Response(content=data, media_type=mime)
-
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return Response(
+        content=bytes(c.avatar_data),
+        media_type=c.avatar_mime or "application/octet-stream",
+        headers={"Cache-Control": "private, max-age=300"},
+    )

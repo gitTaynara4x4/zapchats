@@ -65,7 +65,7 @@ def _queue_name() -> str:
     return (
         _env("RABBITMQ_QUEUE_NAME")
         or _env("RABBITMQ_QUEUE")
-        or "zapchats.backend"
+        or "ZapsChats.backend"
     )
 
 

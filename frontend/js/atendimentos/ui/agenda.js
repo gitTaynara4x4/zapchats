@@ -2,8 +2,16 @@
 // Agenda (BD) — scroll infinito no feed normal;
 // Busca no servidor SÓ quando estiver pesquisando (q).
 // Lazy avatar: usa o que vier; só consulta BD/Evolution quando faltar/quebrar.
+// ✅ Não carrega histórico manualmente.
+// ✅ Não limpa #historico.
+// ✅ Não força state.clienteSel na marra.
+// ✅ Abre conversa pelo fluxo oficial: window.selecionarClienteObj(...)
+// ✅ Preserva conversation_key / instancia_id quando o backend enviar.
 
 (() => {
+  if (window.__ZC_AGENDA_LOADED__) return;
+  window.__ZC_AGENDA_LOADED__ = true;
+
   /* ---------------- helpers ---------------- */
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -17,6 +25,51 @@
     };
   }
 
+  function escHtml(v) {
+    return String(v ?? "").replace(/[&<>"']/g, (m) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    }[m]));
+  }
+
+  function escAttr(v) {
+    return escHtml(v).replace(/`/g, "&#96;");
+  }
+
+  function norm(v) {
+    return String(v ?? "").trim();
+  }
+
+  function idKey(v) {
+    const s = norm(v);
+    if (!s || s === "null" || s === "undefined" || s === "NaN") return null;
+    return s;
+  }
+
+  function instKey(v) {
+    const s = norm(v);
+    if (!s) return null;
+    if (["null", "undefined", "nan", "0", "all", "*", "-"].includes(s.toLowerCase())) {
+      return null;
+    }
+    return s;
+  }
+
+  function toIntOrNull(v) {
+    const s = idKey(v);
+    if (!s) return null;
+    if (!/^\d+$/.test(s)) return null;
+    const n = Number(s);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  function onlyDigits(v) {
+    return String(v || "").replace(/\D+/g, "");
+  }
+
   const toast = {
     ok: (m) =>
       window.toast
@@ -28,10 +81,87 @@
         : console.error("[Agenda]", m),
   };
 
+  /*
+    Importante:
+    Aqui NÃO usamos window.state?.clienteSel.
+    A Agenda deve pegar a instância selecionada no filtro/topo,
+    não a instância da conversa anterior aberta.
+  */
   function getInstanciaAtiva() {
-    const sel = window.state?.clienteSel || null;
-    const inst = sel?.instancia_id ?? sel?.instancia ?? window.INSTANCIA_ATIVA ?? null;
-    return inst == null || inst === "" ? null : String(inst);
+    const candidates = [
+      window.INSTANCIA_ATIVA,
+      EMPRESA_ID ? localStorage.getItem(`instAtiva:${EMPRESA_ID}`) : null,
+      EMPRESA_ID ? localStorage.getItem(`instanciaAtiva:${EMPRESA_ID}`) : null,
+    ];
+
+    for (const c of candidates) {
+      const s = instKey(c);
+      if (s) return s;
+    }
+
+    return null;
+  }
+
+  function splitInst(raw) {
+    const s = instKey(raw);
+    if (!s) {
+      return {
+        raw: null,
+        instancia_id: null,
+        instancia: null,
+      };
+    }
+
+    if (/^\d+$/.test(s)) {
+      return {
+        raw: s,
+        instancia_id: Number(s),
+        instancia: null,
+      };
+    }
+
+    return {
+      raw: s,
+      instancia_id: null,
+      instancia: s,
+    };
+  }
+
+  function normalizeKind(v) {
+    const s = norm(v).toLowerCase();
+    if (s === "g" || s === "grupo" || s === "group") return "g";
+    return "c";
+  }
+
+  function parseConversationKey(raw) {
+    const s = idKey(raw);
+    if (!s) return null;
+
+    const m = s.match(/^([cg]):(\d+):([^:]+)$/i);
+    if (!m) return null;
+
+    return {
+      key: `${m[1].toLowerCase()}:${m[2]}:${m[3]}`,
+      kind: m[1].toLowerCase(),
+      entityId: m[2],
+      instId: instKey(m[3]),
+    };
+  }
+
+  function buildConversationKey(kind, entityId, instRaw) {
+    const k = normalizeKind(kind);
+    const eid = idKey(entityId);
+    const iid = instKey(instRaw);
+    if (!eid) return null;
+    return `${k}:${eid}:${iid || "0"}`;
+  }
+
+  function pickFirst(obj, keys) {
+    for (const k of keys) {
+      const v = obj?.[k];
+      if (v !== undefined && v !== null && String(v).trim() !== "") return v;
+    }
+    return null;
   }
 
   function getSkeletonHtml(count = 8) {
@@ -55,7 +185,7 @@
       return `<span class="ag-avatar ag-avatar--default"><i class="fa fa-user-circle"></i></span>`;
     }
 
-    const esc = String(url).replace(/"/g, "&quot;");
+    const esc = escAttr(url);
     return `
       <span class="ag-avatar">
         <img src="${esc}" alt="" loading="lazy" referrerpolicy="no-referrer" crossorigin="anonymous"
@@ -208,21 +338,104 @@
   };
 
   function normalizeItem(it) {
+    const raw = it || {};
+
     const foto =
-      it.avatar_url ||
-      it.foto_url ||
-      it.foto ||
-      it.avatar ||
-      it.profile_pic_url ||
+      raw.avatar_url ||
+      raw.foto_url ||
+      raw.foto ||
+      raw.avatar ||
+      raw.profile_pic_url ||
       "";
 
-    const nome = (it.nome_whatsapp || it.nome || it.telefone || "").trim();
+    const id =
+      raw.cliente_id ??
+      raw.id_cliente ??
+      raw.entity_id ??
+      raw.conversation_entity_id ??
+      raw.id ??
+      raw.conversation_id ??
+      null;
+
+    const kind = normalizeKind(
+      raw.kind ??
+      raw.conversation_kind ??
+      raw.tipo_conversa ??
+      raw.tipo ??
+      "c"
+    );
+
+    const rawConversationKey =
+      raw.conversation_key ||
+      raw.conversationId ||
+      raw.conversation_id ||
+      raw.conv_key ||
+      raw.convKey ||
+      null;
+
+    const parsedKey = parseConversationKey(rawConversationKey);
+
+    const activeInst = getInstanciaAtiva();
+
+    const instRaw =
+      parsedKey?.instId ||
+      raw.instancia_id ||
+      raw.instanciaId ||
+      raw.instance_id ||
+      raw.instanceId ||
+      raw.instancia ||
+      raw.instance ||
+      raw.instance_name ||
+      raw.instanceName ||
+      activeInst ||
+      null;
+
+    const inst = splitInst(instRaw);
+
+    const finalId =
+      parsedKey?.entityId ||
+      idKey(id);
+
+    const conversationKey =
+      parsedKey?.key ||
+      buildConversationKey(kind, finalId, inst.raw);
+
+    const nome = norm(
+      raw.nome_whatsapp ||
+      raw.push_name ||
+      raw.pushName ||
+      raw.nome ||
+      raw.name ||
+      raw.telefone ||
+      raw.phone ||
+      raw.numero ||
+      ""
+    );
+
+    const telefone = norm(
+      raw.telefone ||
+      raw.phone ||
+      raw.numero ||
+      raw.whatsapp ||
+      raw.telefone_norm ||
+      raw.number ||
+      ""
+    );
 
     return {
-      id: it.id ?? it.cliente_id ?? it.conversation_id ?? it.id_cliente,
+      id: finalId,
+      cliente_id: finalId,
+      conversation_key: conversationKey,
+      conversation_id: conversationKey,
+      kind,
       nome,
-      telefone: it.telefone || "",
+      telefone,
       avatar_url: foto && String(foto).trim() !== "" ? String(foto) : null,
+      instancia_id: inst.instancia_id,
+      instancia: inst.instancia,
+      instance_name: inst.instancia,
+      instancia_raw: inst.raw,
+      raw,
     };
   }
 
@@ -231,12 +444,21 @@
     return `${EMPRESA_ID}|${inst}|${mode}|${q || ""}`;
   }
 
-  // Agora a Agenda lista todos os contatos da empresa
   function buildClientesURL({ initial = false } = {}) {
     const qs = new URLSearchParams({
       empresa_id: String(EMPRESA_ID),
       limit: String(PAGE_SIZE),
     });
+
+    /*
+      Mesmo que o endpoint ignore esses parâmetros, não tem problema.
+      Se ele aceitar, melhor: a Agenda já vem filtrada pela instância correta.
+    */
+    const activeInst = getInstanciaAtiva();
+    if (activeInst) {
+      if (/^\d+$/.test(activeInst)) qs.set("instancia_id", activeInst);
+      else qs.set("instance", activeInst);
+    }
 
     if (dataState.mode === "search" && dataState.q) {
       qs.set("q", dataState.q);
@@ -257,158 +479,272 @@
 
   async function fetchNextPage({ initial = false } = {}) {
     if (dataState.loading) return;
+
     dataState.loading = true;
 
-    const key = buildKey(dataState.mode, dataState.q);
+    try {
+      const key = buildKey(dataState.mode, dataState.q);
 
-    if (initial || dataState.lastKey !== key) {
-      dataState.items = [];
-      dataState.total = null;
-      dataState.hasMore = true;
-      dataState.offset = 0;
-      dataState.cursor = null;
-      dataState.next_page_token = null;
-      dataState.lastKey = key;
-    }
-
-    if (!dataState.hasMore) {
-      dataState.loading = false;
-      return;
-    }
-
-    const r = await fetch(buildClientesURL({ initial }), { credentials: "include" });
-
-    if (!r.ok) {
-      dataState.loading = false;
-      let detail = "";
-      try {
-        detail = (await r.json())?.detail || "";
-      } catch {
-        detail = await r.text();
+      if (initial || dataState.lastKey !== key) {
+        dataState.items = [];
+        dataState.total = null;
+        dataState.hasMore = true;
+        dataState.offset = 0;
+        dataState.cursor = null;
+        dataState.next_page_token = null;
+        dataState.lastKey = key;
       }
-      throw new Error(detail || r.status + " " + r.statusText);
+
+      if (!dataState.hasMore) return;
+
+      const r = await fetch(buildClientesURL({ initial }), { credentials: "include" });
+
+      if (!r.ok) {
+        let detail = "";
+        try {
+          const j = await r.json();
+          detail = j?.detail || j?.message || "";
+        } catch {
+          detail = await r.text();
+        }
+        throw new Error(detail || r.status + " " + r.statusText);
+      }
+
+      const payload = await r.json();
+
+      const items = Array.isArray(payload?.items)
+        ? payload.items
+        : Array.isArray(payload?.data)
+        ? payload.data
+        : Array.isArray(payload?.results)
+        ? payload.results
+        : Array.isArray(payload)
+        ? payload
+        : [];
+
+      dataState.next_page_token = payload?.next_page_token ?? null;
+      dataState.cursor = payload?.next_cursor ?? payload?.cursor ?? null;
+      dataState.total = payload?.total != null ? Number(payload.total) : dataState.total;
+
+      if (typeof payload?.has_more === "boolean") {
+        dataState.hasMore = payload.has_more;
+      } else if (payload?.next_page_token != null) {
+        dataState.hasMore = Boolean(payload.next_page_token);
+      } else if (payload?.next_cursor != null || payload?.cursor != null) {
+        dataState.hasMore = Boolean(payload.next_cursor || payload.cursor);
+      } else if (dataState.total != null) {
+        dataState.hasMore = dataState.items.length + items.length < dataState.total;
+      } else {
+        dataState.hasMore = items.length === PAGE_SIZE;
+      }
+
+      if (!dataState.next_page_token && !dataState.cursor) {
+        dataState.offset += items.length;
+        if (payload?.next_offset != null) dataState.offset = Number(payload.next_offset);
+      }
+
+      const normalized = items
+        .map(normalizeItem)
+        .filter((x) => x && x.id != null && x.id !== "");
+
+      dataState.items.push(...normalized);
+    } finally {
+      dataState.loading = false;
     }
-
-    const payload = await r.json();
-    const items = Array.isArray(payload?.items)
-      ? payload.items
-      : Array.isArray(payload)
-      ? payload
-      : [];
-
-    dataState.next_page_token = payload?.next_page_token ?? dataState.next_page_token ?? null;
-    dataState.cursor = payload?.next_cursor ?? dataState.cursor ?? null;
-    dataState.total = payload?.total != null ? Number(payload.total) : dataState.total;
-
-    if (typeof payload?.has_more === "boolean") {
-      dataState.hasMore = payload.has_more;
-    } else if (payload?.next_page_token != null) {
-      dataState.hasMore = Boolean(payload.next_page_token);
-    } else if (payload?.next_cursor != null) {
-      dataState.hasMore = Boolean(payload.next_cursor);
-    } else if (dataState.total != null) {
-      dataState.hasMore = dataState.items.length + items.length < dataState.total;
-    } else {
-      dataState.hasMore = items.length === PAGE_SIZE;
-    }
-
-    if (!dataState.next_page_token && !dataState.cursor) {
-      dataState.offset += items.length;
-      if (payload?.next_offset != null) dataState.offset = Number(payload.next_offset);
-    }
-
-    dataState.items.push(...items.map(normalizeItem).filter((x) => x.id != null));
-    dataState.loading = false;
   }
 
   /* ---------------- Render ---------------- */
   function htmlItem(it) {
-    const av = it.avatar_url
-      ? ` data-avatar="${String(it.avatar_url).replace(/"/g, "&quot;")}"`
-      : "";
+    const attrs = [];
+
+    attrs.push(`data-id="${escAttr(it.id)}"`);
+    attrs.push(`data-cliente-id="${escAttr(it.cliente_id || it.id)}"`);
+
+    if (it.conversation_key) {
+      attrs.push(`data-conversation-key="${escAttr(it.conversation_key)}"`);
+      attrs.push(`data-conversation-id="${escAttr(it.conversation_key)}"`);
+    }
+
+    attrs.push(`data-kind="${escAttr(it.kind || "c")}"`);
+
+    if (it.telefone) attrs.push(`data-phone="${escAttr(it.telefone)}"`);
+    if (it.avatar_url) attrs.push(`data-avatar="${escAttr(it.avatar_url)}"`);
+    if (it.instancia_id != null) attrs.push(`data-instancia-id="${escAttr(it.instancia_id)}"`);
+    if (it.instancia) attrs.push(`data-instance="${escAttr(it.instancia)}"`);
+    if (it.instancia_raw) attrs.push(`data-instancia-raw="${escAttr(it.instancia_raw)}"`);
+
+    const displayName = it.nome || it.telefone || "—";
+    const displayPhone = it.telefone || "";
 
     return `
-      <div class="ag-item" data-id="${it.id}" data-phone="${it.telefone}"${av}>
+      <div class="ag-item" ${attrs.join(" ")}>
         ${avatarHtml(it.avatar_url)}
         <div class="ag-meta">
-          <div class="ag-name">${it.nome || "—"}</div>
-          <div class="ag-phone">${it.telefone || ""}</div>
+          <div class="ag-name">${escHtml(displayName)}</div>
+          <div class="ag-phone">${escHtml(displayPhone)}</div>
         </div>
       </div>
     `;
   }
 
+  function getItemFromElement(el) {
+    if (!el) return null;
+
+    const id = idKey(el.getAttribute("data-cliente-id") || el.getAttribute("data-id"));
+    if (!id) return null;
+
+    const nome = el.querySelector(".ag-name")?.textContent?.trim() || "";
+    const tel = el.getAttribute("data-phone") || "";
+    const av = el.getAttribute("data-avatar") || null;
+    const kind = normalizeKind(el.getAttribute("data-kind") || "c");
+
+    const rawConvKey =
+      el.getAttribute("data-conversation-key") ||
+      el.getAttribute("data-conversation-id") ||
+      "";
+
+    const parsed = parseConversationKey(rawConvKey);
+
+    const rawInst =
+      parsed?.instId ||
+      el.getAttribute("data-instancia-id") ||
+      el.getAttribute("data-instance") ||
+      el.getAttribute("data-instancia-raw") ||
+      getInstanciaAtiva();
+
+    const inst = splitInst(rawInst);
+
+    const conversationKey =
+      parsed?.key ||
+      buildConversationKey(kind, id, inst.raw);
+
+    return {
+      id,
+      cliente_id: id,
+      conversation_key: conversationKey,
+      conversation_id: conversationKey,
+      kind,
+      telefone: tel,
+      nome: nome || tel || "Cliente",
+      avatar_url: av || null,
+      instancia_id: inst.instancia_id,
+      instancia: inst.instancia,
+      instance_name: inst.instancia,
+    };
+  }
+
+  function getSelectedConversationKeyFromDom() {
+    const hist = $("#historico");
+    const head = $("#chat-header");
+
+    return (
+      hist?.dataset?.conversationKey ||
+      hist?.dataset?.conversationId ||
+      hist?.dataset?.convKey ||
+      head?.dataset?.conversationKey ||
+      head?.dataset?.conversationId ||
+      head?.dataset?.convKey ||
+      ""
+    );
+  }
+
+  function getSelectedClienteIdFromDom() {
+    const hist = $("#historico");
+    const head = $("#chat-header");
+    const sel = window.state?.clienteSel || null;
+
+    return idKey(
+      hist?.dataset?.clienteId ||
+      hist?.dataset?.entityId ||
+      head?.dataset?.clienteId ||
+      head?.dataset?.entityId ||
+      sel?.cliente_id ||
+      sel?.id ||
+      null
+    );
+  }
+
+  function selectionLooksCorrect(seed) {
+    if (!seed) return false;
+
+    const targetKey = idKey(seed.conversation_key || seed.conversation_id);
+    const selectedKey = idKey(getSelectedConversationKeyFromDom());
+
+    if (targetKey && selectedKey) {
+      return selectedKey === targetKey;
+    }
+
+    const targetId = idKey(seed.cliente_id || seed.id);
+    const selectedId = getSelectedClienteIdFromDom();
+
+    return !!targetId && !!selectedId && targetId === selectedId;
+  }
+
+  async function openAgendaItem(el) {
+    const seed = getItemFromElement(el);
+    if (!seed?.cliente_id) return;
+
+    if (!seed.instancia_id && !seed.instancia && window.ZC_REQUIRE_INSTANCE !== false) {
+      toast.err("Não consegui identificar a instância desta conversa.");
+      return;
+    }
+
+    if (typeof window.selecionarClienteObj !== "function") {
+      toast.err("O atendimento ainda não terminou de carregar. Tente novamente.");
+      return;
+    }
+
+    el.classList.add("is-opening");
+
+    try {
+      /*
+        Importante:
+        Passamos o OBJETO completo, não só o id.
+        Assim o boot/init consegue usar conversation_key, instancia_id,
+        telefone, nome e avatar corretos.
+      */
+      await window.selecionarClienteObj(seed);
+
+      if (!selectionLooksCorrect(seed)) {
+        console.warn("[Agenda] conversa aberta não bateu com a conversa clicada", {
+          seed,
+          selectedKey: getSelectedConversationKeyFromDom(),
+          selectedClienteId: getSelectedClienteIdFromDom(),
+        });
+
+        toast.err("Não consegui abrir essa conversa com segurança. Tente pela lista de atendimentos.");
+        return;
+      }
+
+      try {
+        window.dispatchEvent(
+          new CustomEvent("agenda:conversation-opened", {
+            detail: {
+              ...seed,
+              source: "agenda",
+            },
+          })
+        );
+      } catch {}
+
+      window.__Agenda?.close?.();
+    } catch (e) {
+      console.error("[Agenda] erro ao abrir conversa pelo fluxo oficial:", e);
+      toast.err(e?.message || "Não foi possível abrir essa conversa.");
+    } finally {
+      el.classList.remove("is-opening");
+    }
+  }
+
   function bindItemClicks() {
     $$(".ag-item", $("#agList")).forEach((el) => {
+      if (el.dataset.agClickBound === "1") return;
+      el.dataset.agClickBound = "1";
+
       el.addEventListener(
         "click",
         async () => {
-          const id = Number(el.getAttribute("data-id") || 0);
-          if (!id) return;
-
-          const nome = el.querySelector(".ag-name")?.textContent?.trim() || "";
-          const tel = el.getAttribute("data-phone") || "";
-          const av = el.getAttribute("data-avatar");
-
-          const rawInst = getInstanciaAtiva();
-          let inst_id = null;
-          let inst_slug = null;
-
-          if (rawInst != null && rawInst !== "") {
-            const s = String(rawInst);
-            if (/^\d+$/.test(s)) inst_id = Number(s);
-            else inst_slug = s;
-          }
-
-          const seed = {
-            id,
-            cliente_id: id,
-            telefone: tel,
-            nome: nome || tel || "Cliente",
-            avatar_url: av || null,
-            instancia_id: inst_id,
-            instancia: inst_slug,
-          };
-
-          if (typeof window.selecionarClienteObj === "function") {
-            try {
-              await window.selecionarClienteObj(id);
-
-              const sel = window.state?.clienteSel;
-              if (!sel || sel.cliente_id !== id) {
-                console.warn("[Agenda] selecionarClienteObj não montou header, usando fallback");
-                window.state = window.state || {};
-                window.state.clienteSel = seed;
-                setChatHeader(seed);
-                try {
-                  await openByProfileFallback(id, seed);
-                } catch (e2) {
-                  console.error("[Agenda] fallback open", e2);
-                }
-              }
-            } catch (e) {
-              console.error("[Agenda] erro selecionarClienteObj, usando fallback", e);
-              window.state = window.state || {};
-              window.state.clienteSel = seed;
-              setChatHeader(seed);
-              try {
-                await openByProfileFallback(id, seed);
-              } catch (e2) {
-                console.error("[Agenda] fallback open", e2);
-              }
-            }
-          } else {
-            window.state = window.state || {};
-            window.state.clienteSel = seed;
-            setChatHeader(seed);
-            try {
-              await openByProfileFallback(id, seed);
-            } catch (e) {
-              console.error("[Agenda] fallback open", e);
-            }
-          }
-
-          window.__Agenda.close();
+          await openAgendaItem(el);
         },
         { passive: true }
       );
@@ -420,11 +756,13 @@
     if (!list) return;
 
     const prevTop = list.scrollTop;
+
     list.innerHTML = dataState.items.length
       ? dataState.items.map(htmlItem).join("")
       : `<div class="ag-empty">Nenhum contato encontrado.</div>`;
 
     bindItemClicks();
+
     document.dispatchEvent(new CustomEvent("agenda:render"));
     list.scrollTop = prevTop;
   }
@@ -452,121 +790,21 @@
     );
   }
 
-  /* --------- /profile (merge, sem sobrescrever avatar BD) --------- */
-  async function openByProfileFallback(cliente_id, seed) {
-    const qs = new URLSearchParams({ empresa_id: String(EMPRESA_ID) });
-    const r = await fetch(
-      `/api/atendimento/clientes/${cliente_id}/profile?` + qs.toString(),
-      { credentials: "include" }
-    );
-    if (!r.ok) return;
-
-    const p = await r.json();
-
-    const rawInst =
-      (p && (p.instancia_id ?? p.instance)) ??
-      (seed && (seed.instancia_id ?? seed.instancia)) ??
-      getInstanciaAtiva();
-
-    let inst_id = null;
-    let inst_slug = null;
-
-    if (rawInst != null && rawInst !== "") {
-      const s = String(rawInst);
-      if (/^\d+$/.test(s)) inst_id = Number(s);
-      else inst_slug = s;
-    }
-
-    const sel = {
-      id: cliente_id,
-      cliente_id,
-      telefone: p.telefone || seed?.telefone || "",
-      nome: (p.nome_whatsapp || p.nome || seed?.nome || seed?.telefone || "Cliente").trim(),
-      avatar_url:
-        seed?.avatar_url && String(seed.avatar_url).trim() !== ""
-          ? seed.avatar_url
-          : p.avatar_url && String(p.avatar_url).trim() !== ""
-          ? p.avatar_url
-          : null,
-      instancia_id: inst_id,
-      instancia: inst_slug,
-    };
-
-    window.state = window.state || {};
-    window.state.clienteSel = sel;
-    setChatHeader(sel);
-
-    try {
-      await tryLoadHistorico(sel);
-    } catch {}
-  }
-
-  function setChatHeader(sel) {
-    $("#welcome-screen")?.classList.add("hidden");
-
-    const hdr = $("#chat-header");
-    const ftr = $("#chat-footer");
-    const his = $("#historico");
-
-    if (hdr) hdr.style.display = "flex";
-    if (ftr) ftr.style.display = "flex";
-    if (his) his.style.display = "block";
-
-    const av = $("#chat-avatar");
-    if (av) av.innerHTML = avatarHtml(sel.avatar_url);
-
-    const tt = $("#chat-title");
-    if (tt) tt.textContent = sel.nome || sel.telefone || "Cliente";
-  }
-
-  async function tryLoadHistorico(sel) {
-    if (!sel?.cliente_id) return;
-
-    const qs = new URLSearchParams({
-      empresa_id: String(EMPRESA_ID),
-      limit: "50",
-      offset: "0",
-    });
-
-    if (sel.instancia_id != null && sel.instancia_id !== "") {
-      qs.set("instancia_id", String(sel.instancia_id));
-    } else if (sel.instancia != null && sel.instancia !== "") {
-      qs.set("instance", String(sel.instancia));
-    }
-
-    const r = await fetch(
-      `/api/atendimento/conversas/${sel.cliente_id}/mensagens?` + qs.toString(),
-      { credentials: "include" }
-    );
-    if (!r.ok) return;
-
-    const payload = await r.json();
-
-    if (typeof window.renderHistoricoMensagens === "function") {
-      window.renderHistoricoMensagens(payload);
-      return;
-    }
-
-    const his = $("#historico");
-    if (his) {
-      his.innerHTML = "";
-      if (!Array.isArray(payload) || !payload.length) {
-        his.innerHTML = `<div class="p-4 text-sm opacity-70">Sem mensagens anteriores.</div>`;
-      }
-    }
-  }
-
   /* ---------------- Fluxos ---------------- */
   async function abrirAgenda() {
-    const instRaw = typeof window !== "undefined" ? window.INSTANCIA_ATIVA : null;
+    const instRaw = getInstanciaAtiva();
+
     if (!instRaw || String(instRaw).trim() === "") {
       toast.err("Selecione uma instância antes de abrir a Agenda.");
       return;
     }
 
     buildDrawer();
+
     window.__Agenda.open();
-    $("#agList").innerHTML = getSkeletonHtml(8);
+
+    const list = $("#agList");
+    if (list) list.innerHTML = getSkeletonHtml(8);
 
     dataState.mode = "feed";
     dataState.q = "";
@@ -577,28 +815,44 @@
       ensureInfiniteScroll();
     } catch (e) {
       console.error("[Agenda] falha ao carregar contatos", e);
-      $("#agList").innerHTML = `<div class="ag-empty">Erro ao carregar a Agenda.<br><small>${String(
-        e.message || e
-      )}</small></div>`;
+      if (list) {
+        list.innerHTML = `<div class="ag-empty">Erro ao carregar a Agenda.<br><small>${escHtml(
+          e.message || e
+        )}</small></div>`;
+      }
       toast.err("Não foi possível carregar a Agenda.");
     }
   }
 
   const onSearch = debounce(async () => {
     const q = ($("#agQuery")?.value || "").trim();
+    const list = $("#agList");
 
     if (q.length === 0) {
       dataState.mode = "feed";
       dataState.q = "";
-      $("#agList").innerHTML = getSkeletonHtml(4);
-      await fetchNextPage({ initial: true });
-      renderList();
+      if (list) list.innerHTML = getSkeletonHtml(4);
+
+      try {
+        await fetchNextPage({ initial: true });
+        renderList();
+        ensureInfiniteScroll();
+      } catch (e) {
+        console.error("[Agenda] feed", e);
+        if (list) {
+          list.innerHTML = `<div class="ag-empty">Erro ao carregar contatos.<br><small>${escHtml(
+            e.message || e
+          )}</small></div>`;
+        }
+      }
+
       return;
     }
 
     dataState.mode = "search";
     dataState.q = q;
-    $("#agList").innerHTML = getSkeletonHtml(4);
+
+    if (list) list.innerHTML = getSkeletonHtml(4);
 
     try {
       await fetchNextPage({ initial: true });
@@ -606,9 +860,11 @@
       ensureInfiniteScroll();
     } catch (e) {
       console.error("[Agenda] busca", e);
-      $("#agList").innerHTML = `<div class="ag-empty">Erro na busca.<br><small>${String(
-        e.message || e
-      )}</small></div>`;
+      if (list) {
+        list.innerHTML = `<div class="ag-empty">Erro na busca.<br><small>${escHtml(
+          e.message || e
+        )}</small></div>`;
+      }
     }
   }, 250);
 
@@ -661,7 +917,7 @@
         return;
       }
 
-      const safe = String(url).replace(/"/g, "&quot;");
+      const safe = escAttr(url);
       box.classList.remove("ag-avatar--default");
       box.innerHTML = `<img src="${safe}" alt="" loading="lazy" referrerpolicy="no-referrer" crossorigin="anonymous">`;
 
@@ -722,31 +978,50 @@
       setAvatarImg(container, url && !isSuspectWhatsAppURL(url) ? url : null);
     }
 
-    const io = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((e) => {
-          if (e.isIntersecting) hydrateOne(e.target).catch(() => {});
-        });
-      },
-      {
-        root: document.querySelector("#agList") || null,
-        rootMargin: "120px 0px",
-        threshold: 0.01,
+    let io = null;
+
+    function getObserver() {
+      if (io) return io;
+
+      try {
+        io = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((e) => {
+              if (e.isIntersecting) hydrateOne(e.target).catch(() => {});
+            });
+          },
+          {
+            root: document.querySelector("#agList") || null,
+            rootMargin: "120px 0px",
+            threshold: 0.01,
+          }
+        );
+      } catch {
+        io = null;
       }
-    );
+
+      return io;
+    }
 
     function wireObserver() {
       const list = document.getElementById("agList");
       if (!list) return;
 
+      const observer = getObserver();
+
       try {
-        io.disconnect();
+        observer?.disconnect?.();
       } catch {}
 
       list.querySelectorAll(".ag-item").forEach((it) => {
         const img = it.querySelector(".ag-avatar img");
         if (img) img.addEventListener("error", () => onImgError(it));
-        io.observe(it);
+
+        if (observer) {
+          observer.observe(it);
+        } else {
+          hydrateOne(it).catch(() => {});
+        }
       });
     }
 

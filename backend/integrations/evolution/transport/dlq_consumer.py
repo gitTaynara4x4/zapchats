@@ -2,14 +2,14 @@ from __future__ import annotations
 
 """
 DLQ Consumer
-- Consome a DLQ final (zapschat.backend.dlq por padrão)
+- Consome a DLQ final (ZapsChat.backend.dlq por padrão)
 - Loga/contabiliza motivos (x-death), opcionalmente envia para webhook
 - ACK após processar (evita redelivery infinito da DLQ)
 
 ENV importantes:
   RABBITMQ_URI=amqp://user:pass@host:5672/vhost
   RABBITMQ_EXCHANGE_NAME=evolution_exchange
-  RABBITMQ_DLQ_NAME=zapschat.backend.dlq
+  RABBITMQ_DLQ_NAME=ZapsChat.backend.dlq
   DLQ_PREFETCH=16
   DLQ_WEBHOOK_URL=
   DLQ_WEBHOOK_BEARER=
@@ -94,7 +94,7 @@ async def forward_webhook(session, url: str, payload: Dict[str, Any]) -> None:
 async def main() -> None:
     uri = _uri()
     ex_name = _env("RABBITMQ_EXCHANGE_NAME", "evolution_exchange")
-    dlq_name = _env("RABBITMQ_DLQ_NAME", "zapchats.backend.dlq")
+    dlq_name = _env("RABBITMQ_DLQ_NAME", "ZapsChats.backend.dlq")
     prefetch = int(_env("DLQ_PREFETCH", "16") or "16")
     heartbeat = int(_env("RABBITMQ_HEARTBEAT", "15") or "15")
     webhook = _env("DLQ_WEBHOOK_URL", "")

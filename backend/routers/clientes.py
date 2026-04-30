@@ -1,3 +1,4 @@
+# backend/routers/clientes.py
 from __future__ import annotations
 
 from datetime import date, datetime, time, timezone, timedelta
@@ -126,15 +127,64 @@ def _digits(s: str) -> str:
 def _iso(dt):
     if not dt:
         return None
-    if isinstance(dt, (datetime, date)):
-        if isinstance(dt, datetime) and dt.tzinfo is None:
+    if isinstance(dt, datetime):
+        if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt.isoformat(timespec="seconds")
+    if isinstance(dt, date):
+        return dt.isoformat()
     return str(dt)
 
 
 def _get_perms(identity) -> set[str]:
     return set(_id_get(identity, "permissoes", []) or [])
+
+
+def _conv_ref_cliente(cliente_id: int, instancia_id: Optional[int]) -> str:
+    return f"c:{int(cliente_id)}:{int(instancia_id or 0)}"
+
+
+def _cliente_conversation_fields(
+    *,
+    cliente_id: int,
+    instancia_id: Optional[int],
+) -> Dict[str, Any]:
+    conv_key = _conv_ref_cliente(int(cliente_id), instancia_id)
+    return {
+        "conversation_key": conv_key,
+        "conversation_id": conv_key,
+        "kind": "c",
+        "entity_id": int(cliente_id),
+        "cliente_id": int(cliente_id),
+    }
+
+
+def _public_avatar_url(
+    *,
+    kind: str,
+    conversation_id: int,
+    raw_avatar_url: Optional[str],
+) -> Optional[str]:
+    """
+    Nunca devolve pps.whatsapp.net direto para o front.
+
+    O banco pode guardar a URL crua da Evolution/WhatsApp,
+    mas o navegador deve carregar pelo proxy local:
+
+      /api/atendimento/avatar/{id}?kind=cliente
+      /api/atendimento/avatar/{id}?kind=grupo
+    """
+    if not conversation_id:
+        return None
+
+    raw = (raw_avatar_url or "").strip()
+    if not raw:
+        return None
+
+    if raw.startswith("/api/atendimento/avatar/"):
+        return raw
+
+    return f"/api/atendimento/avatar/{int(conversation_id)}?kind={kind}"
 
 
 def _assert_instancia_acl(identity: Any, db: Session, instancia_id: Optional[int]) -> None:
@@ -230,6 +280,7 @@ def listar_clientes(
 
     key_src = json.dumps(
         {
+            "v": "clientes-conversation-key-v3-avatar-proxy",
             "emp": empresa_id,
             "q": (q or "").strip(),
             "departamento": (departamento or "").strip(),
@@ -252,6 +303,7 @@ def listar_clientes(
         return cached
 
     Colab = aliased(models.Colaborador)
+    Inst = aliased(models.EmpresaInstancia)
 
     base = (
         db.query(
@@ -268,12 +320,20 @@ def listar_clientes(
             models.Cliente.colaborador_id,
             Colab.nome.label("colaborador_nome"),
             models.Cliente.instancia_id,
+            Inst.instance_name.label("instance_name"),
         )
         .outerjoin(
             Colab,
             and_(
                 Colab.id == models.Cliente.colaborador_id,
                 Colab.empresa_id == models.Cliente.empresa_id,
+            ),
+        )
+        .outerjoin(
+            Inst,
+            and_(
+                Inst.id == models.Cliente.instancia_id,
+                Inst.empresa_id == models.Cliente.empresa_id,
             ),
         )
         .filter(models.Cliente.empresa_id == empresa_id)
@@ -318,24 +378,37 @@ def listar_clientes(
     base = base.order_by(desc(models.Cliente.timestamp), desc(models.Cliente.id)).offset(offset).limit(limit)
     rows = base.all()
 
-    items = [
-        {
-            "id": rrow.id,
-            "nome": rrow.nome,
-            "nome_whatsapp": rrow.nome_whatsapp,
-            "telefone": rrow.telefone,
-            "avatar_url": rrow.avatar_url,
-            "departamento": rrow.departamento,
-            "departamento_id": rrow.departamento_id,
-            "sobre": (rrow.sobre or None),
-            "data_cadastro": _iso(getattr(rrow, "data_cadastro", None)),
-            "timestamp": _iso(getattr(rrow, "timestamp", None)),
-            "colaborador_id": rrow.colaborador_id,
-            "colaborador_nome": rrow.colaborador_nome,
-            "instancia_id": rrow.instancia_id,
-        }
-        for rrow in rows
-    ]
+    items = []
+    for rrow in rows:
+        fields = _cliente_conversation_fields(
+            cliente_id=int(rrow.id),
+            instancia_id=rrow.instancia_id,
+        )
+
+        items.append(
+            {
+                "id": rrow.id,
+                **fields,
+                "nome": rrow.nome,
+                "nome_whatsapp": rrow.nome_whatsapp,
+                "telefone": rrow.telefone,
+                "avatar_url": _public_avatar_url(
+                    kind="cliente",
+                    conversation_id=int(rrow.id),
+                    raw_avatar_url=rrow.avatar_url,
+                ),
+                "departamento": rrow.departamento,
+                "departamento_id": rrow.departamento_id,
+                "sobre": (rrow.sobre or None),
+                "data_cadastro": _iso(getattr(rrow, "data_cadastro", None)),
+                "timestamp": _iso(getattr(rrow, "timestamp", None)),
+                "colaborador_id": rrow.colaborador_id,
+                "colaborador_nome": rrow.colaborador_nome,
+                "instancia_id": rrow.instancia_id,
+                "instance_name": rrow.instance_name,
+                "is_group": False,
+            }
+        )
 
     has_more = len(items) == limit
     out = {
@@ -376,6 +449,8 @@ def buscar_clientes_leve(
     like = f"%{termo}%"
     dq = _digits(termo)
 
+    Inst = aliased(models.EmpresaInstancia)
+
     query = (
         db.query(
             models.Cliente.id,
@@ -384,6 +459,14 @@ def buscar_clientes_leve(
             models.Cliente.telefone,
             models.Cliente.avatar_url,
             models.Cliente.instancia_id,
+            Inst.instance_name.label("instance_name"),
+        )
+        .outerjoin(
+            Inst,
+            and_(
+                Inst.id == models.Cliente.instancia_id,
+                Inst.empresa_id == models.Cliente.empresa_id,
+            ),
         )
         .filter(models.Cliente.empresa_id == empresa_id)
     )
@@ -412,12 +495,25 @@ def buscar_clientes_leve(
     items = []
     for r in rows:
         nome = (r.nome_whatsapp or r.nome or "Cliente").strip()
+        fields = _cliente_conversation_fields(
+            cliente_id=int(r.id),
+            instancia_id=r.instancia_id,
+        )
+
         items.append({
             "id": r.id,
+            **fields,
             "nome": nome,
+            "nome_whatsapp": r.nome_whatsapp,
             "telefone": r.telefone,
-            "avatar_url": r.avatar_url,
+            "avatar_url": _public_avatar_url(
+                kind="cliente",
+                conversation_id=int(r.id),
+                raw_avatar_url=r.avatar_url,
+            ),
             "instancia_id": r.instancia_id,
+            "instance_name": r.instance_name,
+            "is_group": False,
         })
 
     return {"items": items}
@@ -443,281 +539,6 @@ def listar_colaboradores(
     )
     items = [{"id": r.id, "nome": r.nome, "email": r.email} for r in q.all()]
     return {"items": items}
-
-
-@router.get("/{cliente_id}")
-def obter_cliente(
-    cliente_id: int,
-    empresa_id: int = Depends(get_empresa_autorizada),
-    db: Session = Depends(get_db),
-    identity=Depends(get_current_identity),
-):
-    perms = _get_perms(identity)
-    if "clientes.ver" not in perms:
-        raise HTTPException(
-            status_code=403,
-            detail="Sem permissão para ver detalhes de clientes.",
-        )
-
-    Colab = aliased(models.Colaborador)
-    r = (
-        db.query(
-            models.Cliente.id,
-            models.Cliente.nome,
-            models.Cliente.nome_whatsapp,
-            models.Cliente.telefone,
-            models.Cliente.avatar_url,
-            models.Cliente.departamento,
-            models.Cliente.departamento_id,
-            models.Cliente.sobre_cliente.label("sobre"),
-            models.Cliente.timestamp.label("data_cadastro"),
-            models.Cliente.timestamp.label("timestamp"),
-            models.Cliente.colaborador_id,
-            Colab.nome.label("colaborador_nome"),
-            models.Cliente.instancia_id,
-            models.Cliente.cpf_cnpj,
-            models.Cliente.rg,
-            models.Cliente.email,
-            models.Cliente.data_nascimento,
-            models.Cliente.genero,
-            models.Cliente.cep,
-            models.Cliente.endereco,
-            models.Cliente.numero,
-            models.Cliente.complemento,
-            models.Cliente.bairro,
-            models.Cliente.cidade,
-            models.Cliente.estado,
-            models.Cliente.nome_completo,
-            models.Cliente.website,
-            models.Cliente.descricao,
-            models.Cliente.is_business,
-            models.Cliente.status_whatsapp,
-        )
-        .outerjoin(
-            Colab,
-            and_(
-                Colab.id == models.Cliente.colaborador_id,
-                Colab.empresa_id == models.Cliente.empresa_id,
-            ),
-        )
-        .filter(models.Cliente.id == cliente_id, models.Cliente.empresa_id == empresa_id)
-        .first()
-    )
-    if not r:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
-
-    _assert_instancia_acl(identity, db, r.instancia_id)
-
-    return {
-        "id": r.id,
-        "nome": r.nome,
-        "nome_whatsapp": r.nome_whatsapp,
-        "telefone": r.telefone,
-        "avatar_url": r.avatar_url,
-        "departamento": r.departamento,
-        "departamento_id": r.departamento_id,
-        "sobre": r.sobre or None,
-        "data_cadastro": _iso(getattr(r, "data_cadastro", None)),
-        "timestamp": _iso(getattr(r, "timestamp", None)),
-        "colaborador_id": r.colaborador_id,
-        "colaborador_nome": r.colaborador_nome,
-        "instancia_id": r.instancia_id,
-        "cpf_cnpj": r.cpf_cnpj,
-        "rg": r.rg,
-        "email": r.email,
-        "data_nascimento": _iso(r.data_nascimento),
-        "genero": r.genero,
-        "cep": r.cep,
-        "endereco": r.endereco,
-        "numero": r.numero,
-        "complemento": r.complemento,
-        "bairro": r.bairro,
-        "cidade": r.cidade,
-        "estado": r.estado,
-        "nome_completo": r.nome_completo,
-        "website": r.website,
-        "descricao": r.descricao,
-        "is_business": r.is_business,
-        "status_whatsapp": r.status_whatsapp,
-    }
-
-
-@router.patch("/{cliente_id}/profile")
-def patch_cliente_profile(
-    cliente_id: int,
-    payload: PatchClienteProfile,
-    empresa_id: int = Depends(get_empresa_autorizada),
-    db: Session = Depends(get_db),
-    identity=Depends(get_current_identity),
-):
-    perms = _get_perms(identity)
-    if "clientes.editar" not in perms:
-        raise HTTPException(
-            status_code=403,
-            detail="Sem permissão para editar clientes (clientes.editar).",
-        )
-
-    c = (
-        db.query(models.Cliente)
-        .filter(models.Cliente.id == cliente_id, models.Cliente.empresa_id == empresa_id)
-        .first()
-    )
-    if not c:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
-
-    _assert_instancia_acl(identity, db, getattr(c, "instancia_id", None))
-
-    if payload.departamento is not None:
-        c.departamento = payload.departamento or None
-    if payload.sobre_cliente is not None:
-        c.sobre_cliente = payload.sobre_cliente or None
-
-    if payload.nome is not None:
-        c.nome = payload.nome or "Cliente"
-
-    if payload.telefone is not None:
-        tel = _digits(payload.telefone)
-        if not tel:
-            raise HTTPException(status_code=400, detail="Telefone inválido")
-        dup = (
-            db.query(models.Cliente)
-            .filter(
-                models.Cliente.empresa_id == empresa_id,
-                models.Cliente.telefone_norm == tel,
-                models.Cliente.id != cliente_id,
-            )
-            .first()
-        )
-        if dup:
-            raise HTTPException(status_code=400, detail="Já existe um cliente com esse telefone.")
-        c.telefone = tel
-
-    if payload.cpf_cnpj is not None:
-        c.cpf_cnpj = payload.cpf_cnpj or None
-    if payload.rg is not None:
-        c.rg = payload.rg or None
-    if payload.email is not None:
-        c.email = payload.email or None
-    if payload.data_nascimento is not None:
-        c.data_nascimento = payload.data_nascimento
-    if payload.genero is not None:
-        c.genero = payload.genero or None
-
-    if payload.cep is not None:
-        c.cep = payload.cep or None
-    if payload.endereco is not None:
-        c.endereco = payload.endereco or None
-    if payload.numero is not None:
-        c.numero = payload.numero or None
-    if payload.complemento is not None:
-        c.complemento = payload.complemento or None
-    if payload.bairro is not None:
-        c.bairro = payload.bairro or None
-    if payload.cidade is not None:
-        c.cidade = payload.cidade or None
-    if payload.estado is not None:
-        c.estado = payload.estado or None
-
-    if payload.nome_completo is not None:
-        c.nome_completo = payload.nome_completo or None
-    if payload.website is not None:
-        c.website = payload.website or None
-    if payload.descricao is not None:
-        c.descricao = payload.descricao or None
-
-    db.add(c)
-    db.commit()
-
-    cache_delete_prefix(cache_k("clientes", "list", str(empresa_id)))
-    return {"ok": True}
-
-
-@router.post("/novo")
-def criar_cliente(
-    body: PostNovoCliente,
-    empresa_id: int = Depends(get_empresa_autorizada),
-    db: Session = Depends(get_db),
-    identity=Depends(get_current_identity),
-):
-    perms = _get_perms(identity)
-    if "clientes.criar" not in perms:
-        raise HTTPException(
-            status_code=403,
-            detail="Sem permissão para criar clientes (clientes.criar).",
-        )
-
-    empresa = _get_empresa_or_404(db, empresa_id)
-
-    tel = _digits(body.telefone)
-    if not tel:
-        raise HTTPException(status_code=400, detail="Telefone inválido")
-
-    dup = (
-        db.query(models.Cliente)
-        .filter(
-            models.Cliente.empresa_id == empresa_id,
-            models.Cliente.telefone_norm == tel,
-        )
-        .first()
-    )
-    if dup:
-        return {"id": dup.id, "exists": True}
-
-    current_contacts = (
-        db.query(func.count(models.Cliente.id))
-        .filter(models.Cliente.empresa_id == empresa_id)
-        .scalar()
-        or 0
-    )
-    enforce_quota(
-        empresa,
-        "contacts_max",
-        current_contacts,
-        delta=1,
-        message="Seu plano está vencido ou no limite. Renove para cadastrar novos clientes.",
-    )
-
-    colab_id = body.colaborador_id
-    if colab_id is not None:
-        exists = (
-            db.query(models.Colaborador)
-            .filter(models.Colaborador.id == colab_id, models.Colaborador.empresa_id == empresa_id)
-            .first()
-        )
-        if not exists:
-            raise HTTPException(status_code=400, detail="colaborador_id inválido para esta empresa")
-
-    c = models.Cliente(
-        empresa_id=empresa_id,
-        nome=(body.nome or "Cliente"),
-        telefone=tel,
-        departamento=(body.departamento or None),
-        colaborador_id=colab_id,
-        timestamp=datetime.now(timezone.utc),
-    )
-    if body.sobre_cliente is not None:
-        c.sobre_cliente = body.sobre_cliente
-
-    db.add(c)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        dup2 = (
-            db.query(models.Cliente)
-            .filter(
-                models.Cliente.empresa_id == empresa_id,
-                models.Cliente.telefone_norm == tel,
-            )
-            .first()
-        )
-        if dup2:
-            return {"id": dup2.id, "exists": True}
-        raise HTTPException(status_code=400, detail="Erro de integridade ao criar cliente")
-
-    db.refresh(c)
-    cache_delete_prefix(cache_k("clientes", "list", str(empresa_id)))
-    return {"id": c.id, "created": True}
 
 
 @router.get("/export")
@@ -825,6 +646,340 @@ def exportar_clientes(
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="clientes.pdf"'},
     )
+
+
+@router.get("/{cliente_id}")
+def obter_cliente(
+    cliente_id: int,
+    empresa_id: int = Depends(get_empresa_autorizada),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    perms = _get_perms(identity)
+    if "clientes.ver" not in perms:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem permissão para ver detalhes de clientes.",
+        )
+
+    Colab = aliased(models.Colaborador)
+    Inst = aliased(models.EmpresaInstancia)
+
+    r = (
+        db.query(
+            models.Cliente.id,
+            models.Cliente.nome,
+            models.Cliente.nome_whatsapp,
+            models.Cliente.telefone,
+            models.Cliente.avatar_url,
+            models.Cliente.departamento,
+            models.Cliente.departamento_id,
+            models.Cliente.sobre_cliente.label("sobre"),
+            models.Cliente.timestamp.label("data_cadastro"),
+            models.Cliente.timestamp.label("timestamp"),
+            models.Cliente.colaborador_id,
+            Colab.nome.label("colaborador_nome"),
+            models.Cliente.instancia_id,
+            Inst.instance_name.label("instance_name"),
+            models.Cliente.cpf_cnpj,
+            models.Cliente.rg,
+            models.Cliente.email,
+            models.Cliente.data_nascimento,
+            models.Cliente.genero,
+            models.Cliente.cep,
+            models.Cliente.endereco,
+            models.Cliente.numero,
+            models.Cliente.complemento,
+            models.Cliente.bairro,
+            models.Cliente.cidade,
+            models.Cliente.estado,
+            models.Cliente.nome_completo,
+            models.Cliente.website,
+            models.Cliente.descricao,
+            models.Cliente.is_business,
+            models.Cliente.status_whatsapp,
+        )
+        .outerjoin(
+            Colab,
+            and_(
+                Colab.id == models.Cliente.colaborador_id,
+                Colab.empresa_id == models.Cliente.empresa_id,
+            ),
+        )
+        .outerjoin(
+            Inst,
+            and_(
+                Inst.id == models.Cliente.instancia_id,
+                Inst.empresa_id == models.Cliente.empresa_id,
+            ),
+        )
+        .filter(models.Cliente.id == cliente_id, models.Cliente.empresa_id == empresa_id)
+        .first()
+    )
+    if not r:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    _assert_instancia_acl(identity, db, r.instancia_id)
+
+    fields = _cliente_conversation_fields(
+        cliente_id=int(r.id),
+        instancia_id=r.instancia_id,
+    )
+
+    return {
+        "id": r.id,
+        **fields,
+        "nome": r.nome,
+        "nome_whatsapp": r.nome_whatsapp,
+        "telefone": r.telefone,
+        "avatar_url": _public_avatar_url(
+            kind="cliente",
+            conversation_id=int(r.id),
+            raw_avatar_url=r.avatar_url,
+        ),
+        "departamento": r.departamento,
+        "departamento_id": r.departamento_id,
+        "sobre": r.sobre or None,
+        "data_cadastro": _iso(getattr(r, "data_cadastro", None)),
+        "timestamp": _iso(getattr(r, "timestamp", None)),
+        "colaborador_id": r.colaborador_id,
+        "colaborador_nome": r.colaborador_nome,
+        "instancia_id": r.instancia_id,
+        "instance_name": r.instance_name,
+        "is_group": False,
+        "cpf_cnpj": r.cpf_cnpj,
+        "rg": r.rg,
+        "email": r.email,
+        "data_nascimento": _iso(r.data_nascimento),
+        "genero": r.genero,
+        "cep": r.cep,
+        "endereco": r.endereco,
+        "numero": r.numero,
+        "complemento": r.complemento,
+        "bairro": r.bairro,
+        "cidade": r.cidade,
+        "estado": r.estado,
+        "nome_completo": r.nome_completo,
+        "website": r.website,
+        "descricao": r.descricao,
+        "is_business": r.is_business,
+        "status_whatsapp": r.status_whatsapp,
+    }
+
+
+@router.patch("/{cliente_id}/profile")
+def patch_cliente_profile(
+    cliente_id: int,
+    payload: PatchClienteProfile,
+    empresa_id: int = Depends(get_empresa_autorizada),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    perms = _get_perms(identity)
+    if "clientes.editar" not in perms:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem permissão para editar clientes (clientes.editar).",
+        )
+
+    c = (
+        db.query(models.Cliente)
+        .filter(models.Cliente.id == cliente_id, models.Cliente.empresa_id == empresa_id)
+        .first()
+    )
+    if not c:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    _assert_instancia_acl(identity, db, getattr(c, "instancia_id", None))
+
+    if payload.departamento is not None:
+        c.departamento = payload.departamento or None
+    if payload.sobre_cliente is not None:
+        c.sobre_cliente = payload.sobre_cliente or None
+
+    if payload.nome is not None:
+        c.nome = payload.nome or "Cliente"
+
+    if payload.telefone is not None:
+        tel = _digits(payload.telefone)
+        if not tel:
+            raise HTTPException(status_code=400, detail="Telefone inválido")
+        dup = (
+            db.query(models.Cliente)
+            .filter(
+                models.Cliente.empresa_id == empresa_id,
+                models.Cliente.telefone_norm == tel,
+                models.Cliente.id != cliente_id,
+            )
+            .first()
+        )
+        if dup:
+            raise HTTPException(status_code=400, detail="Já existe um cliente com esse telefone.")
+        c.telefone = tel
+        try:
+            c.telefone_norm = tel
+        except Exception:
+            pass
+
+    if payload.cpf_cnpj is not None:
+        c.cpf_cnpj = payload.cpf_cnpj or None
+    if payload.rg is not None:
+        c.rg = payload.rg or None
+    if payload.email is not None:
+        c.email = payload.email or None
+    if payload.data_nascimento is not None:
+        c.data_nascimento = payload.data_nascimento
+    if payload.genero is not None:
+        c.genero = payload.genero or None
+
+    if payload.cep is not None:
+        c.cep = payload.cep or None
+    if payload.endereco is not None:
+        c.endereco = payload.endereco or None
+    if payload.numero is not None:
+        c.numero = payload.numero or None
+    if payload.complemento is not None:
+        c.complemento = payload.complemento or None
+    if payload.bairro is not None:
+        c.bairro = payload.bairro or None
+    if payload.cidade is not None:
+        c.cidade = payload.cidade or None
+    if payload.estado is not None:
+        c.estado = payload.estado or None
+
+    if payload.nome_completo is not None:
+        c.nome_completo = payload.nome_completo or None
+    if payload.website is not None:
+        c.website = payload.website or None
+    if payload.descricao is not None:
+        c.descricao = payload.descricao or None
+
+    db.add(c)
+    db.commit()
+
+    cache_delete_prefix(cache_k("clientes", "list", str(empresa_id)))
+    return {"ok": True}
+
+
+@router.post("/novo")
+def criar_cliente(
+    body: PostNovoCliente,
+    empresa_id: int = Depends(get_empresa_autorizada),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    perms = _get_perms(identity)
+    if "clientes.criar" not in perms:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem permissão para criar clientes (clientes.criar).",
+        )
+
+    empresa = _get_empresa_or_404(db, empresa_id)
+
+    tel = _digits(body.telefone)
+    if not tel:
+        raise HTTPException(status_code=400, detail="Telefone inválido")
+
+    dup = (
+        db.query(models.Cliente)
+        .filter(
+            models.Cliente.empresa_id == empresa_id,
+            models.Cliente.telefone_norm == tel,
+        )
+        .first()
+    )
+    if dup:
+        fields = _cliente_conversation_fields(
+            cliente_id=int(dup.id),
+            instancia_id=getattr(dup, "instancia_id", None),
+        )
+        return {
+            "id": dup.id,
+            **fields,
+            "instancia_id": getattr(dup, "instancia_id", None),
+            "exists": True,
+        }
+
+    current_contacts = (
+        db.query(func.count(models.Cliente.id))
+        .filter(models.Cliente.empresa_id == empresa_id)
+        .scalar()
+        or 0
+    )
+    enforce_quota(
+        empresa,
+        "contacts_max",
+        current_contacts,
+        delta=1,
+        message="Seu plano está vencido ou no limite. Renove para cadastrar novos clientes.",
+    )
+
+    colab_id = body.colaborador_id
+    if colab_id is not None:
+        exists = (
+            db.query(models.Colaborador)
+            .filter(models.Colaborador.id == colab_id, models.Colaborador.empresa_id == empresa_id)
+            .first()
+        )
+        if not exists:
+            raise HTTPException(status_code=400, detail="colaborador_id inválido para esta empresa")
+
+    c = models.Cliente(
+        empresa_id=empresa_id,
+        nome=(body.nome or "Cliente"),
+        telefone=tel,
+        departamento=(body.departamento or None),
+        colaborador_id=colab_id,
+        timestamp=datetime.now(timezone.utc),
+    )
+    try:
+        c.telefone_norm = tel
+    except Exception:
+        pass
+
+    if body.sobre_cliente is not None:
+        c.sobre_cliente = body.sobre_cliente
+
+    db.add(c)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        dup2 = (
+            db.query(models.Cliente)
+            .filter(
+                models.Cliente.empresa_id == empresa_id,
+                models.Cliente.telefone_norm == tel,
+            )
+            .first()
+        )
+        if dup2:
+            fields = _cliente_conversation_fields(
+                cliente_id=int(dup2.id),
+                instancia_id=getattr(dup2, "instancia_id", None),
+            )
+            return {
+                "id": dup2.id,
+                **fields,
+                "instancia_id": getattr(dup2, "instancia_id", None),
+                "exists": True,
+            }
+        raise HTTPException(status_code=400, detail="Erro de integridade ao criar cliente")
+
+    db.refresh(c)
+    cache_delete_prefix(cache_k("clientes", "list", str(empresa_id)))
+
+    fields = _cliente_conversation_fields(
+        cliente_id=int(c.id),
+        instancia_id=getattr(c, "instancia_id", None),
+    )
+    return {
+        "id": c.id,
+        **fields,
+        "instancia_id": getattr(c, "instancia_id", None),
+        "created": True,
+    }
 
 
 @router.post("/import")
@@ -949,6 +1104,11 @@ def importar_clientes(
                 sobre_cliente=(sobre or None),
                 timestamp=datetime.now(timezone.utc),
             )
+            try:
+                novo.telefone_norm = tel
+            except Exception:
+                pass
+
             db.add(novo)
             inseridos += 1
 

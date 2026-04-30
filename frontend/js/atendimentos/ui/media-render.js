@@ -1,16 +1,24 @@
 // /frontend/js/atendimentos/ui/media-render.js
-// Render de mídias/docs/áudio (player estilo WPP Web: avatar no IN, speed no OUT, waveform pontilhado)
-// + fallback por marcador [Áudio/ptt] + auto-init (MutationObserver) + upgrade de <audio controls> -> .wa-audio
+// Render de mídias/docs/áudio (player estilo WPP Web)
+// + fallback por marcador [Imagem] / [Figurinha] / [Áudio] / [Vídeo] / [Documento]
+// + auto-init MutationObserver
 // + galeria/mosaico de imagens estilo WhatsApp Web
-// + agrupamento de mensagens consecutivas só de imagem em um bloco único
-// + viewer/modal de mídia por clique (imagem/vídeo) com miniaturas embaixo
-// ✅ SEM CSS inline/inject — usa /frontend/css/atendimentos/media.css
+// + viewer/lightbox escuro
+// + suporte a quoted / quoted_preview dentro da bolha
 
 (function () {
-  if (window.__zcMediaRenderLoaded) return;
-  window.__zcMediaRenderLoaded = true;
+  const MEDIA_RENDER_VERSION = 'zc-media-render-viewer-v6-fixed-marker-render';
+  if (window.__zcMediaRenderVersion === MEDIA_RENDER_VERSION) return;
+  window.__zcMediaRenderVersion = MEDIA_RENDER_VERSION;
 
-  // ========= helpers =========
+  try { if (window.__zcMediaEnsureInterval) clearInterval(window.__zcMediaEnsureInterval); } catch {}
+  try { if (window.__zcMediaAvatarInterval) clearInterval(window.__zcMediaAvatarInterval); } catch {}
+
+  try { delete document.__zcMediaViewerBound; } catch {}
+  try { delete document.__mediaRenderChatEvt; } catch {}
+
+  document.querySelectorAll('.zc-media-viewer').forEach((el) => el.remove());
+
   function escapeHtml(s) {
     return String(s || '').replace(/[&<>"]/g, (ch) => ({
       '&': '&amp;',
@@ -18,6 +26,23 @@
       '>': '&gt;',
       '"': '&quot;'
     }[ch]));
+  }
+
+  function cleanOneLine(s, fallback = '') {
+    const out = String(s ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return out || fallback;
+  }
+
+  function jsonAttr(obj) {
+    try {
+      if (!obj || typeof obj !== 'object') return '';
+      return escapeHtml(JSON.stringify(obj));
+    } catch {
+      return '';
+    }
   }
 
   function uniq(arr) {
@@ -39,47 +64,636 @@
   }
 
   function ensureMsgMediaCss() {
-    return;
+    if (document.getElementById('zc-media-render-css')) return;
+
+    const st = document.createElement('style');
+    st.id = 'zc-media-render-css';
+    st.textContent = `
+      .zc-quoted-bubble{
+        position:relative;
+        display:flex;
+        gap:8px;
+        min-width:0;
+        max-width:100%;
+        margin:0 0 6px;
+        padding:7px 9px 7px 8px;
+        border-radius:8px;
+        overflow:hidden;
+        background:rgba(255,255,255,.08);
+        cursor:pointer;
+      }
+
+      .bubble-in .zc-quoted-bubble{
+        background:rgba(255,255,255,.07);
+      }
+
+      .bubble-out .zc-quoted-bubble{
+        background:rgba(0,0,0,.16);
+      }
+
+      html[data-theme="light"] .zc-quoted-bubble{
+        background:rgba(0,0,0,.06);
+      }
+
+      html[data-theme="light"] .bubble-out .zc-quoted-bubble{
+        background:rgba(0,0,0,.10);
+      }
+
+      .zc-quoted-bar{
+        width:3px;
+        flex:0 0 3px;
+        border-radius:8px;
+        background:#53bdeb;
+      }
+
+      .bubble-out .zc-quoted-bar{
+        background:#06cf9c;
+      }
+
+      .zc-quoted-content{
+        min-width:0;
+        flex:1 1 auto;
+        overflow:hidden;
+      }
+
+      .zc-quoted-author{
+        font-size:12px;
+        line-height:1.2;
+        font-weight:700;
+        color:#53bdeb;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        margin-bottom:2px;
+      }
+
+      .bubble-out .zc-quoted-author{
+        color:#06cf9c;
+      }
+
+      .zc-quoted-text{
+        font-size:12.5px;
+        line-height:1.25;
+        color:rgba(255,255,255,.82);
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+      }
+
+      html[data-theme="light"] .zc-quoted-text{
+        color:rgba(17,24,39,.76);
+      }
+
+      .msg-media-img,
+      .msg-media-cell{
+        display:block;
+        position:relative;
+        overflow:hidden;
+        border-radius:8px;
+        max-width:100%;
+        text-decoration:none;
+        background:rgba(0,0,0,.12);
+      }
+
+      .msg-media-img img,
+      .msg-media-cell img{
+        display:block;
+        width:100%;
+        max-width:320px;
+        max-height:420px;
+        object-fit:cover;
+        border-radius:8px;
+      }
+
+      .bubble.has-media-single{
+        padding:4px 4px 6px;
+      }
+
+      .bubble.has-media-single .msg-media-img img{
+        max-width:330px;
+      }
+
+      .msg-sticker{
+        display:block;
+        max-width:170px;
+        max-height:170px;
+        object-fit:contain;
+        background:transparent;
+      }
+
+      .msg-media-video{
+        display:block;
+        width:100%;
+        max-width:330px;
+        max-height:420px;
+        border-radius:8px;
+        background:#000;
+      }
+
+      .msg-media-group{
+        display:grid;
+        gap:2px;
+        overflow:hidden;
+        border-radius:8px;
+        max-width:330px;
+        background:rgba(0,0,0,.18);
+      }
+
+      .msg-media-group[data-count="1"]{
+        grid-template-columns:1fr;
+      }
+
+      .msg-media-group[data-count="2"]{
+        grid-template-columns:1fr 1fr;
+      }
+
+      .msg-media-group[data-count="3"]{
+        grid-template-columns:1fr 1fr;
+      }
+
+      .msg-media-group[data-count="3"] .cell-1{
+        grid-row:span 2;
+      }
+
+      .msg-media-group[data-count="4"]{
+        grid-template-columns:1fr 1fr;
+      }
+
+      .msg-media-cell img{
+        width:100%;
+        height:160px;
+        max-width:none;
+        max-height:none;
+        object-fit:cover;
+      }
+
+      .msg-media-group[data-count="2"] .msg-media-cell img{
+        height:190px;
+      }
+
+      .msg-media-group[data-count="3"] .cell-1 img{
+        height:322px;
+      }
+
+      .msg-media-more{
+        position:absolute;
+        inset:0;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        background:rgba(0,0,0,.45);
+        color:#fff;
+        font-size:30px;
+        font-weight:700;
+      }
+
+      .doc-card{
+        display:flex;
+        align-items:center;
+        gap:10px;
+        min-width:240px;
+        max-width:330px;
+        padding:10px;
+        border-radius:9px;
+        background:rgba(0,0,0,.18);
+      }
+
+      html[data-theme="light"] .doc-card{
+        background:rgba(0,0,0,.06);
+      }
+
+      .doc-ico{
+        width:42px;
+        height:48px;
+        border-radius:8px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        background:rgba(255,255,255,.12);
+        flex:0 0 auto;
+      }
+
+      html[data-theme="light"] .doc-ico{
+        background:rgba(0,0,0,.08);
+      }
+
+      .doc-ico .ext{
+        font-size:10px;
+        font-weight:800;
+        letter-spacing:.4px;
+      }
+
+      .doc-body{
+        min-width:0;
+        flex:1 1 auto;
+      }
+
+      .doc-name{
+        display:block;
+        color:inherit;
+        font-size:13px;
+        font-weight:600;
+        text-decoration:none;
+        overflow:hidden;
+        white-space:nowrap;
+        text-overflow:ellipsis;
+      }
+
+      .doc-meta{
+        margin-top:3px;
+        font-size:11px;
+        opacity:.68;
+      }
+
+      .doc-actions{
+        display:flex;
+        flex-direction:column;
+        gap:4px;
+        flex:0 0 auto;
+      }
+
+      .doc-btn{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        min-width:48px;
+        height:24px;
+        padding:0 8px;
+        border-radius:999px;
+        font-size:11px;
+        color:inherit;
+        text-decoration:none;
+        background:rgba(255,255,255,.10);
+      }
+
+      html[data-theme="light"] .doc-btn{
+        background:rgba(0,0,0,.07);
+      }
+
+      .wa-audio{
+        --p:0%;
+        display:flex;
+        align-items:center;
+        gap:10px;
+        min-width:250px;
+        max-width:330px;
+        padding:8px 8px;
+        border-radius:9px;
+      }
+
+      .wa-left{
+        display:flex;
+        align-items:center;
+        gap:8px;
+        flex:0 0 auto;
+      }
+
+      .wa-avatar{
+        width:38px;
+        height:38px;
+        border-radius:50%;
+        position:relative;
+        overflow:hidden;
+        background:rgba(255,255,255,.14);
+        flex:0 0 38px;
+      }
+
+      .wa-avatar img,
+      .wa-avatar .ph{
+        position:absolute;
+        inset:0;
+        width:100%;
+        height:100%;
+      }
+
+      .wa-avatar img{
+        object-fit:cover;
+      }
+
+      .wa-avatar .ph{
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        color:rgba(255,255,255,.68);
+      }
+
+      .wa-avatar .ph svg{
+        width:23px;
+        height:23px;
+      }
+
+      .wa-avatar .mic{
+        position:absolute;
+        right:-1px;
+        bottom:-1px;
+        width:16px;
+        height:16px;
+        border-radius:50%;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        background:#06cf9c;
+        color:#071b14;
+      }
+
+      .wa-avatar .mic svg{
+        width:11px;
+        height:11px;
+      }
+
+      .wa-play{
+        width:34px;
+        height:34px;
+        border:0;
+        border-radius:50%;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        cursor:pointer;
+        color:inherit;
+        background:rgba(255,255,255,.12);
+      }
+
+      html[data-theme="light"] .wa-play{
+        background:rgba(0,0,0,.08);
+      }
+
+      .wa-play svg{
+        width:20px;
+        height:20px;
+      }
+
+      .wa-speed{
+        border:0;
+        height:25px;
+        min-width:42px;
+        border-radius:999px;
+        cursor:pointer;
+        font-size:11px;
+        font-weight:700;
+        color:inherit;
+        background:rgba(255,255,255,.12);
+      }
+
+      html[data-theme="light"] .wa-speed{
+        background:rgba(0,0,0,.08);
+      }
+
+      .wa-main{
+        min-width:0;
+        flex:1 1 auto;
+      }
+
+      .wa-wave{
+        position:relative;
+        height:24px;
+        cursor:pointer;
+        outline:none;
+      }
+
+      .wa-wave .dots{
+        position:absolute;
+        left:0;
+        right:0;
+        top:50%;
+        height:4px;
+        transform:translateY(-50%);
+        border-radius:999px;
+        background:rgba(255,255,255,.26);
+      }
+
+      html[data-theme="light"] .wa-wave .dots{
+        background:rgba(0,0,0,.18);
+      }
+
+      .wa-wave .fill{
+        position:absolute;
+        left:0;
+        top:50%;
+        width:var(--p);
+        height:4px;
+        transform:translateY(-50%);
+        border-radius:999px;
+        background:#06cf9c;
+      }
+
+      .wa-wave .knob{
+        position:absolute;
+        left:var(--p);
+        top:50%;
+        width:10px;
+        height:10px;
+        border-radius:50%;
+        transform:translate(-50%,-50%);
+        background:#06cf9c;
+        box-shadow:0 1px 4px rgba(0,0,0,.25);
+      }
+
+      .wa-len{
+        margin-top:1px;
+        font-size:11px;
+        opacity:.68;
+      }
+
+      .zc-media-viewer{
+        position:fixed;
+        inset:0;
+        z-index:99999;
+        display:none;
+        color:#e9edef;
+      }
+
+      .zc-media-viewer.is-open{
+        display:block;
+      }
+
+      .zc-media-viewer__backdrop{
+        position:absolute;
+        inset:0;
+        background:rgba(11,20,26,.96);
+      }
+
+      .zc-media-viewer__top{
+        position:absolute;
+        z-index:2;
+        top:0;
+        left:0;
+        right:0;
+        height:58px;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        padding:0 18px;
+        box-sizing:border-box;
+        background:linear-gradient(to bottom, rgba(0,0,0,.38), rgba(0,0,0,0));
+      }
+
+      .zc-media-viewer__count{
+        font-size:12px;
+        opacity:.75;
+      }
+
+      .zc-media-viewer__name{
+        font-size:14px;
+        font-weight:600;
+        max-width:65vw;
+        overflow:hidden;
+        white-space:nowrap;
+        text-overflow:ellipsis;
+      }
+
+      .zc-media-viewer__icon-btn,
+      .zc-media-viewer__nav{
+        border:0;
+        color:#e9edef;
+        background:rgba(255,255,255,.08);
+        cursor:pointer;
+      }
+
+      .zc-media-viewer__icon-btn{
+        width:38px;
+        height:38px;
+        border-radius:50%;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+      }
+
+      .zc-media-viewer__icon-btn svg{
+        width:22px;
+        height:22px;
+      }
+
+      .zc-media-viewer__stage{
+        position:absolute;
+        inset:58px 72px 88px;
+        z-index:1;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+      }
+
+      .zc-media-viewer__frame{
+        width:100%;
+        height:100%;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+      }
+
+      .zc-media-viewer__media-wrap{
+        width:100%;
+        height:100%;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+      }
+
+      .zc-media-viewer__img,
+      .zc-media-viewer__video{
+        max-width:100%;
+        max-height:100%;
+        object-fit:contain;
+        border-radius:4px;
+      }
+
+      .zc-media-viewer__nav{
+        position:absolute;
+        z-index:2;
+        top:50%;
+        width:46px;
+        height:46px;
+        border-radius:50%;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        transform:translateY(-50%);
+      }
+
+      .zc-media-viewer__nav svg{
+        width:25px;
+        height:25px;
+      }
+
+      .zc-media-viewer__nav--prev{
+        left:16px;
+      }
+
+      .zc-media-viewer__nav--next{
+        right:16px;
+      }
+
+      .zc-media-viewer__thumbs{
+        position:absolute;
+        z-index:2;
+        left:0;
+        right:0;
+        bottom:0;
+        min-height:74px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        gap:8px;
+        padding:10px 16px;
+        box-sizing:border-box;
+        background:linear-gradient(to top, rgba(0,0,0,.45), rgba(0,0,0,0));
+      }
+
+      .zc-media-viewer__thumb{
+        width:52px;
+        height:52px;
+        border:2px solid transparent;
+        border-radius:8px;
+        overflow:hidden;
+        padding:0;
+        cursor:pointer;
+        background:rgba(255,255,255,.08);
+      }
+
+      .zc-media-viewer__thumb.is-active{
+        border-color:#06cf9c;
+      }
+
+      .zc-media-viewer__thumb img{
+        width:100%;
+        height:100%;
+        object-fit:cover;
+        display:block;
+      }
+
+      .zc-media-viewer__empty{
+        opacity:.75;
+      }
+
+      body.zc-media-viewer-open{
+        overflow:hidden;
+      }
+
+      @media (max-width:720px){
+        .zc-media-viewer__stage{
+          inset:58px 10px 88px;
+        }
+
+        .zc-media-viewer__nav{
+          display:none !important;
+        }
+
+        .msg-media-img img,
+        .bubble.has-media-single .msg-media-img img,
+        .msg-media-video{
+          max-width:76vw;
+        }
+
+        .doc-card,
+        .wa-audio{
+          max-width:76vw;
+          min-width:220px;
+        }
+      }
+    `;
+    document.head.appendChild(st);
   }
 
-  function getGroupVisibleCount(total) {
-    const n = Number(total || 0);
-    if (!n) return 0;
-    return Math.min(n, 4);
-  }
-
-  function getOverlayCount(total, visibleCount, idx) {
-    const n = Number(total || 0);
-    const v = Number(visibleCount || 0);
-    const i = Number(idx || 0);
-
-    if (n <= 4) return '';
-    if (i !== v - 1) return '';
-    return String(Math.max(1, n - 4));
-  }
-
-  function dedupeViewerItems(items) {
-    const out = [];
-    const seen = new Set();
-
-    (items || []).forEach((item) => {
-      const src = String(item?.src || '').trim();
-      if (!src) return;
-      if (seen.has(src)) return;
-      seen.add(src);
-      out.push({
-        type: item.type || 'image',
-        src,
-        name: item.name || 'imagem',
-        alt: item.alt || '',
-        thumb: item.thumb || src
-      });
-    });
-
-    return out;
-  }
-
-  // ========= docs utils =========
   function _humanSize(bytes) {
     const b = Number(bytes || 0);
     if (!b) return '';
@@ -116,14 +730,16 @@
       'text/plain': 'txt',
       'image/png': 'png',
       'image/jpeg': 'jpg',
+      'image/jpg': 'jpg',
       'image/webp': 'webp',
       'audio/mpeg': 'mp3',
+      'audio/mp3': 'mp3',
       'audio/ogg': 'ogg',
       'audio/wav': 'wav',
       'video/mp4': 'mp4'
     };
 
-    return (map[mimetype] || fromName || 'bin').toLowerCase();
+    return (map[String(mimetype || '').toLowerCase()] || fromName || 'bin').toLowerCase();
   }
 
   function _sanitizeBase(name) {
@@ -137,13 +753,20 @@
       .slice(0, 80);
   }
 
-  function deriveFileName(a) {
+  function deriveFileName(a = {}) {
     const url = a.url || a.link || a.path || '';
-    const baseRaw = a.filename || a.name || a.nome_original || _basenameFromUrl(url) || 'arquivo';
-    const base = _sanitizeBase(baseRaw.replace(/\.[a-z0-9]{1,6}$/i, ''));
+    const baseRaw =
+      a.filename ||
+      a.name ||
+      a.nome_original ||
+      a.fileName ||
+      _basenameFromUrl(url) ||
+      'arquivo';
+
+    const base = _sanitizeBase(String(baseRaw).replace(/\.[a-z0-9]{1,8}$/i, ''));
     const ext = _guessExt({
       mimetype: a.mimetype || a.mime || '',
-      filename: a.filename || a.name || '',
+      filename: a.filename || a.name || a.fileName || '',
       url
     });
 
@@ -154,14 +777,25 @@
     };
   }
 
-  // ========= inst/empresa =========
   function _empId() {
-    return window.EMPRESA_ID ?? window.empresa_id ?? window.state?.empresa_id ?? null;
+    return window.EMPRESA_ID ?? window.empresa_id ?? window.state?.empresa_id ?? localStorage.getItem('empresa_id') ?? null;
   }
 
   function _instQ() {
     try {
-      return typeof window._instQuery === 'function' ? (window._instQuery() || '') : '';
+      if (typeof window._instQuery === 'function') return window._instQuery() || '';
+
+      const inst =
+        window.INSTANCIA_ATIVA ??
+        window.state?.clienteSel?.instancia_id ??
+        window.clienteSel?.instancia_id ??
+        document.getElementById('historico')?.dataset?.instanciaId ??
+        null;
+
+      if (!inst) return '';
+      const s = String(inst).trim();
+      if (!s) return '';
+      return /^\d+$/.test(s) ? `&instancia_id=${encodeURIComponent(s)}` : `&instance=${encodeURIComponent(s)}`;
     } catch {
       return '';
     }
@@ -195,10 +829,7 @@
     return q ? `${base}?${q}` : base;
   }
 
-  function resolveUrlsForMedia(m, a, opts) {
-    opts = opts || {};
-    const preferAttachmentUrl = opts.preferAttachmentUrl !== false;
-
+  function resolveUrlsForMedia(m, a) {
     const MSG_CANON = m?.msg_id ? buildCanonUrlByMsgId(m.msg_id) : null;
 
     const qs = new URLSearchParams();
@@ -211,21 +842,17 @@
       ? `/api/atendimento/midias/${encodeURIComponent(String(a.id))}${q ? `?${q}` : ''}`
       : '';
 
-    const attachmentUrl = a?.url_api || a?.url || a?.link || a?.path || idUrl || '';
-    const primary = preferAttachmentUrl
-      ? (attachmentUrl || MSG_CANON || '')
-      : (MSG_CANON || attachmentUrl || '');
-
+    const primary = MSG_CANON || a?.url_api || a?.url || a?.link || a?.path || idUrl;
     const alts = [];
-    [attachmentUrl, MSG_CANON, idUrl, a?.url, a?.link, a?.path].forEach((u) => {
-      if (u && u !== primary) alts.push(u);
-    });
+
+    if (MSG_CANON) {
+      [a?.url_api, a?.url, a?.link, a?.path, idUrl].forEach((u) => u && alts.push(u));
+    }
 
     const seen = new Set();
     return [primary, ...alts].filter((u) => u && !seen.has(u) && seen.add(u));
   }
 
-  // ========= avatar do cliente (pra áudio IN) =========
   const AVATAR_SELS = [
     '#chat-avatar img[data-cliente-id]',
     '#chat-avatar img',
@@ -233,7 +860,7 @@
   ];
 
   function _qAny(sels) {
-    for (let i = 0; i < sels.length; i++) {
+    for (let i = 0; i < sels.length; i += 1) {
       const el = document.querySelector(sels[i]);
       if (el) return el;
     }
@@ -242,7 +869,7 @@
 
   function _currentClienteId() {
     const s = window.state?.clienteSel || window.clienteSel || {};
-    const cid = s.id ?? s.conversation_id ?? s.cliente_id ?? null;
+    const cid = s.id ?? s.cliente_id ?? s.entity_id ?? s.backend_id ?? null;
     return cid == null ? '' : String(cid);
   }
 
@@ -290,7 +917,6 @@
     };
   }
 
-  // ========= player áudio =========
   function _fmtT(sec) {
     const s = Math.max(0, Math.floor(sec || 0));
     const m = Math.floor(s / 60);
@@ -309,6 +935,30 @@
     return `
       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
         <path d="M7 5h4v14H7zM13 5h4v14h-4z"></path>
+      </svg>
+    `;
+  }
+
+  function _closeIconSvg() {
+    return `
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+      </svg>
+    `;
+  }
+
+  function _chevronLeftSvg() {
+    return `
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M15 18 9 12l6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    `;
+  }
+
+  function _chevronRightSvg() {
+    return `
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="m9 18 6-6-6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
     `;
   }
@@ -397,7 +1047,7 @@
 
       const tryNext = () => {
         if (idx < srcs.length - 1) {
-          idx++;
+          idx += 1;
           audio.src = srcs[idx];
           try { audio.load(); } catch {}
           if (!audio.paused) audio.play().catch(() => {});
@@ -419,6 +1069,7 @@
       }
 
       function setFromClientX(clientX) {
+        if (!wave) return;
         const rect = wave.getBoundingClientRect();
         const p = rect.width ? (clientX - rect.left) / rect.width : 0;
         const clamped = Math.max(0, Math.min(1, p));
@@ -447,7 +1098,7 @@
           const i = cycle.findIndex((x) => Math.abs(x - cur) < 0.01);
           const next = cycle[(i + 1 + cycle.length) % cycle.length];
           audio.playbackRate = next;
-          btnSpeed.textContent = next.toFixed(1) + 'x';
+          btnSpeed.textContent = `${next.toFixed(1)}x`;
         });
       }
 
@@ -528,7 +1179,6 @@
     });
   }
 
-  // ========= fallbacks =========
   function initMediaFallbacks(root) {
     root = root || document;
 
@@ -558,8 +1208,17 @@
     });
   }
 
-  // ========= fallback por marcador =========
   const MARKER_RE = /^\[(Imagem|Vídeo|Video|Áudio\/ptt|Áudio|Audio|Documento|Figurinha|Localização|Contatos?|M[íi]dia)\]/i;
+
+  function markerKind(txt) {
+    return String(txt || '')
+      .replace(/^\[/, '')
+      .replace(/\].*$/g, '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+  }
 
   function upgradeNativeAudios(root) {
     root = root || document;
@@ -594,21 +1253,20 @@
     });
   }
 
-  function injectMarkerAudios(root) {
+  function injectMarkerMedias(root) {
     root = root || document;
 
     root.querySelectorAll('.msg-row').forEach((row) => {
       const bubble = row.querySelector('.bubble');
       if (!bubble) return;
 
-      if (bubble.querySelector('.wa-audio, audio[controls]')) return;
+      if (bubble.querySelector('.wa-audio, audio[controls], .msg-media-img, .msg-media-video, .msg-sticker, .doc-card, .msg-media-group')) {
+        return;
+      }
 
       const txtEl = bubble.querySelector('.msg-text');
       const txt = (txtEl?.textContent || '').trim();
       if (!MARKER_RE.test(txt)) return;
-
-      const kind = txt.replace(/^\[|\].*$/g, '').toLowerCase();
-      if (!(kind.startsWith('áudio') || kind.startsWith('audio'))) return;
 
       const msgId =
         row.getAttribute('data-msg-id') ||
@@ -619,8 +1277,48 @@
       if (!msgId) return;
 
       const src = buildCanonUrlByMsgId(msgId);
+      const kind = markerKind(txt);
       const dir = bubble.classList.contains('bubble-out') ? 'out' : 'in';
-      const html = _makeWaAudioHTML([src], { dir });
+
+      let html = '';
+
+      if (kind.startsWith('imagem') || kind.startsWith('midia')) {
+        html = `<a
+          class="msg-media-img msg-media-img--single"
+          href="${escapeHtml(src)}"
+          data-media-view="1"
+          data-zc-media-open="1"
+          data-media-kind="image"
+          data-media-src="${escapeHtml(src)}"
+          data-media-thumb="${escapeHtml(src)}"
+          data-media-name="imagem"
+          data-name="imagem"
+        >
+          <img src="${escapeHtml(src)}" alt="imagem" loading="lazy">
+        </a>`;
+        bubble.classList.add('has-media-single');
+      } else if (kind.startsWith('figurinha')) {
+        html = `<img class="msg-sticker" src="${escapeHtml(src)}" alt="figurinha" loading="lazy">`;
+      } else if (kind.startsWith('video')) {
+        html = `<video class="msg-media-video" controls preload="metadata" src="${escapeHtml(src)}"></video>`;
+      } else if (kind.startsWith('audio')) {
+        html = _makeWaAudioHTML([src], { dir });
+      } else if (kind.startsWith('documento')) {
+        const fname = 'arquivo.bin';
+        html = `<div class="doc-card">
+          <div class="doc-ico" data-ext="bin"><span class="ext">FILE</span></div>
+          <div class="doc-body">
+            <a class="doc-name" href="${escapeHtml(src)}" target="_blank" rel="noopener" download="${fname}" title="${fname}">${fname}</a>
+            <div class="doc-meta">arquivo</div>
+          </div>
+          <div class="doc-actions">
+            <a class="doc-btn" href="${escapeHtml(src)}" target="_blank" rel="noopener">Abrir</a>
+            <a class="doc-btn" href="${escapeHtml(src)}" download="${fname}">Salvar</a>
+          </div>
+        </div>`;
+      }
+
+      if (!html) return;
 
       bubble.insertAdjacentHTML('afterbegin', html);
 
@@ -630,7 +1328,6 @@
     });
   }
 
-  // ========= imagens / galeria =========
   function isImageAttachment(a) {
     const mime = String(a?.mimetype || a?.mime || '').toLowerCase();
     const tipo = String(a?.tipo || a?.tipo_midia || '').toLowerCase();
@@ -638,10 +1335,8 @@
     return (
       tipo.includes('imagem') ||
       tipo.includes('image') ||
-      tipo.includes('foto') ||
-      tipo.includes('picture') ||
-      tipo.includes('figura') ||
       tipo.includes('figurinha') ||
+      tipo.includes('sticker') ||
       mime.startsWith('image/')
     );
   }
@@ -649,69 +1344,57 @@
   function isGalleryImageAttachment(a) {
     const mime = String(a?.mimetype || a?.mime || '').toLowerCase();
     const tipo = String(a?.tipo || a?.tipo_midia || '').toLowerCase();
-    const isSticker = tipo.includes('figurinha');
+    const isSticker = tipo.includes('figurinha') || tipo.includes('sticker');
 
     return mime.startsWith('image/') && !isSticker;
   }
 
-  function normalizeSingleImageThumbs(root) {
-    (root || document).querySelectorAll('.msg-media-img--single').forEach((link) => {
-      const img = link.querySelector('img');
-      if (!img) return;
-
-      const apply = () => {
-        const w = Number(img.naturalWidth || img.width || 0);
-        const h = Number(img.naturalHeight || img.height || 0);
-        if (!w || !h) return;
-
-        const ratio = w / h;
-        link.classList.remove('is-landscape', 'is-square', 'is-portrait', 'is-super-portrait');
-
-        if (ratio <= 0.62) {
-          link.classList.add('is-portrait', 'is-super-portrait');
-        } else if (ratio < 0.9) {
-          link.classList.add('is-portrait');
-        } else if (ratio > 1.18) {
-          link.classList.add('is-landscape');
-        } else {
-          link.classList.add('is-square');
-        }
+  function buildViewerItemsFromAttachments(m, list) {
+    return (list || []).map((a) => {
+      const urls = resolveUrlsForMedia(m, a);
+      const src = urls[0] || '';
+      const name = a.filename || a.name || 'imagem';
+      return {
+        type: 'image',
+        src,
+        thumb: src,
+        name
       };
-
-      if (!img.__zcThumbBound) {
-        img.__zcThumbBound = true;
-        img.addEventListener('load', apply);
-      }
-
-      if (img.complete && (img.naturalWidth || img.width) && (img.naturalHeight || img.height)) {
-        apply();
-      }
-    });
+    }).filter((x) => x.src);
   }
 
-  function renderImageCell(m, a, extraClass = '', overlay = '', idx = 0, hidden = false) {
-    const urls = resolveUrlsForMedia(m, a, { preferAttachmentUrl: true });
+  function encodeViewerItems(items) {
+    try {
+      return encodeURIComponent(JSON.stringify(items || []));
+    } catch {
+      return '';
+    }
+  }
+
+  function decodeViewerItems(raw) {
+    try {
+      const arr = JSON.parse(decodeURIComponent(String(raw || '')));
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function renderImageCell(m, a, idx, extraClass = '', overlay = '') {
+    const urls = resolveUrlsForMedia(m, a);
     const [url, ...alts] = urls;
-    const name = a.filename || a.name || `imagem-${idx + 1}.jpg`;
-    const { fileName } = deriveFileName({
-      mimetype: a.mimetype || a.mime || '',
-      filename: name,
-      url
-    });
+    const name = a.filename || a.name || 'imagem';
 
     return `
       <a
         class="msg-media-cell ${extraClass}"
         href="${escapeHtml(url)}"
-        data-media-view="1"
-        data-media-kind="image"
-        data-media-src="${escapeHtml(url)}"
-        data-media-thumb="${escapeHtml(url)}"
-        data-media-alt="${escapeHtml(alts.join('|'))}"
-        data-media-name="${escapeHtml(fileName)}"
-        data-media-idx="${Number(idx) || 0}"
-        aria-label="${escapeHtml(fileName)}"
-        ${hidden ? 'hidden' : ''}
+        target="_blank"
+        rel="noopener"
+        data-zc-media-open="1"
+        data-viewer-index="${idx}"
+        data-kind="image"
+        data-name="${escapeHtml(name)}"
       >
         <img src="${escapeHtml(url)}" data-alt="${escapeHtml(alts.join('|'))}" alt="${escapeHtml(name)}" loading="lazy">
         ${overlay ? `<span class="msg-media-more">+${escapeHtml(overlay)}</span>` : ''}
@@ -721,646 +1404,683 @@
 
   function renderImageGroup(m, list) {
     const total = list.length;
-    const visibleCount = getGroupVisibleCount(total);
-    const visible = list.slice(0, visibleCount);
-    const hidden = list.slice(visibleCount);
+    const visible = list.slice(0, Math.min(total, 4));
+    const viewerItems = buildViewerItemsFromAttachments(m, list);
 
     return `
-      <div class="msg-media-group" data-count="${visible.length}" data-total="${total}">
+      <div
+        class="msg-media-group"
+        data-count="${visible.length}"
+        data-total="${total}"
+        data-viewer-items="${escapeHtml(encodeViewerItems(viewerItems))}"
+      >
         ${visible.map((a, idx) => {
-          const overlay = getOverlayCount(total, visibleCount, idx);
-          return renderImageCell(m, a, `cell-${idx + 1}`, overlay, idx, false);
-        }).join('')}
-        ${hidden.map((a, idx) => {
-          const realIdx = idx + visibleCount;
-          return renderImageCell(m, a, 'is-extra-hidden', '', realIdx, true);
+          const overlay = idx === 3 && total > 4 ? String(total - 4) : '';
+          return renderImageCell(m, a, idx, `cell-${idx + 1}`, overlay);
         }).join('')}
       </div>
     `;
   }
 
-  function collectInlineImagesFromBubble(bubble) {
-    if (!bubble) return [];
-    const links = [...bubble.querySelectorAll('[data-media-view="1"][data-media-kind="image"]')];
-
-    return dedupeViewerItems(
-      links.map((a) => ({
-        type: 'image',
-        src: a.getAttribute('data-media-src') || a.getAttribute('href') || '',
-        name: a.getAttribute('data-media-name') || a.querySelector('img')?.getAttribute('alt') || 'imagem',
-        alt: a.getAttribute('data-media-alt') || '',
-        thumb: a.getAttribute('data-media-thumb') || a.getAttribute('data-media-src') || a.getAttribute('href') || ''
-      }))
-    );
-  }
-
-  // ========= viewer/modal =========
-  let __viewerState = {
-    items: [],
-    index: 0,
-    zoomed: false
-  };
-
-  function _iconClose() {
-    return `
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-      </svg>
-    `;
-  }
-
-  function _iconArrowLeft() {
-    return `
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-    `;
-  }
-
-  function _iconArrowRight() {
-    return `
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-    `;
-  }
-
-  function _iconOpen() {
-    return `
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M14 5h5v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M10 14L19 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        <path d="M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-      </svg>
-    `;
-  }
-
-  function _iconDownload() {
-    return `
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M12 4v10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        <path d="M8 10l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M4 20h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-      </svg>
-    `;
-  }
-
-  function ensureMediaViewer() {
-    let el = document.getElementById('zc-media-viewer');
-    if (el) return el;
-
-    el = document.createElement('div');
-    el.id = 'zc-media-viewer';
-    el.className = 'zc-media-viewer';
-    el.setAttribute('aria-hidden', 'true');
-
-    el.innerHTML = `
-      <div class="zc-media-viewer__backdrop" data-zc-close="1"></div>
-
-      <div class="zc-media-viewer__shell">
-        <div class="zc-media-viewer__top">
-          <div class="zc-media-viewer__meta">
-            <div class="zc-media-viewer__count">1 / 1</div>
-            <div class="zc-media-viewer__name"></div>
-          </div>
-
-          <div class="zc-media-viewer__actions">
-            <a class="zc-media-viewer__action zc-open" target="_blank" rel="noopener" title="Abrir">
-              ${_iconOpen()}
-              <span>Abrir</span>
-            </a>
-            <a class="zc-media-viewer__action zc-download" download title="Salvar">
-              ${_iconDownload()}
-              <span>Salvar</span>
-            </a>
-            <button class="zc-media-viewer__close" type="button" aria-label="Fechar">
-              ${_iconClose()}
-            </button>
-          </div>
-        </div>
-
-        <button class="zc-media-viewer__nav is-prev" type="button" aria-label="Anterior">
-          ${_iconArrowLeft()}
-        </button>
-
-        <div class="zc-media-viewer__stage-wrap">
-          <div class="zc-media-viewer__stage"></div>
-        </div>
-
-        <button class="zc-media-viewer__nav is-next" type="button" aria-label="Próxima">
-          ${_iconArrowRight()}
-        </button>
-
-        <div class="zc-media-viewer__bottom">
-          <div class="zc-media-viewer__thumbs"></div>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(el);
-
-    const closeBtn = el.querySelector('.zc-media-viewer__close');
-    const prevBtn = el.querySelector('.zc-media-viewer__nav.is-prev');
-    const nextBtn = el.querySelector('.zc-media-viewer__nav.is-next');
-    const backdrop = el.querySelector('.zc-media-viewer__backdrop');
-    const stageWrap = el.querySelector('.zc-media-viewer__stage-wrap');
-    const thumbs = el.querySelector('.zc-media-viewer__thumbs');
-
-    closeBtn?.addEventListener('click', closeMediaViewer);
-    prevBtn?.addEventListener('click', () => stepMediaViewer(-1));
-    nextBtn?.addEventListener('click', () => stepMediaViewer(1));
-    backdrop?.addEventListener('click', closeMediaViewer);
-
-    stageWrap?.addEventListener('click', (e) => {
-      const media = e.target.closest('.zc-media-viewer__media.is-image');
-      if (!media) return;
-      toggleMediaZoom();
-    });
-
-    thumbs?.addEventListener('click', (e) => {
-      const btn = e.target.closest('.zc-media-viewer__thumb');
-      if (!btn) return;
-      const idx = Number(btn.getAttribute('data-idx'));
-      if (!Number.isFinite(idx)) return;
-      __viewerState.index = idx;
-      __viewerState.zoomed = false;
-      renderMediaViewer();
-    });
-
-    document.addEventListener('keydown', (e) => {
-      if (!isMediaViewerOpen()) return;
-
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        closeMediaViewer();
-        return;
-      }
-
-      if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        stepMediaViewer(-1);
-        return;
-      }
-
-      if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        stepMediaViewer(1);
-      }
-    });
-
-    return el;
-  }
-
-  function isMediaViewerOpen() {
-    const el = document.getElementById('zc-media-viewer');
-    return !!(el && el.classList.contains('is-open'));
-  }
-
-  function collectViewerItemsFromTrigger(trigger) {
-    if (!trigger) return [];
-
-    const realTrigger = trigger.closest?.('[data-media-view="1"], .msg-media-video, .msg-sticker') || trigger;
-    const group = realTrigger.closest?.('.msg-media-group');
-
-    if (group) {
-      const anchors = [...group.querySelectorAll('[data-media-view="1"][data-media-kind="image"]')];
-      return dedupeViewerItems(
-        anchors.map((a) => ({
-          type: 'image',
-          src: a.getAttribute('data-media-src') || a.getAttribute('href') || '',
-          name: a.getAttribute('data-media-name') || a.querySelector('img')?.getAttribute('alt') || 'imagem',
-          alt: a.getAttribute('data-media-alt') || '',
-          thumb: a.getAttribute('data-media-thumb') || a.getAttribute('data-media-src') || a.getAttribute('href') || ''
-        }))
-      );
-    }
-
-    if (realTrigger.matches?.('[data-media-view="1"][data-media-kind="image"]')) {
-      return dedupeViewerItems([{
-        type: 'image',
-        src: realTrigger.getAttribute('data-media-src') || realTrigger.getAttribute('href') || '',
-        name: realTrigger.getAttribute('data-media-name') || realTrigger.querySelector('img')?.getAttribute('alt') || 'imagem',
-        alt: realTrigger.getAttribute('data-media-alt') || '',
-        thumb: realTrigger.getAttribute('data-media-thumb') || realTrigger.getAttribute('data-media-src') || realTrigger.getAttribute('href') || ''
-      }]);
-    }
-
-    if (realTrigger.matches?.('.msg-media-video')) {
-      return dedupeViewerItems([{
-        type: 'video',
-        src: realTrigger.currentSrc || realTrigger.getAttribute('src') || '',
-        name: 'video.mp4',
-        alt: realTrigger.getAttribute('data-alt') || '',
-        thumb: realTrigger.getAttribute('poster') || realTrigger.currentSrc || realTrigger.getAttribute('src') || ''
-      }]);
-    }
-
-    if (realTrigger.matches?.('.msg-sticker')) {
-      return dedupeViewerItems([{
-        type: 'image',
-        src: realTrigger.getAttribute('src') || '',
-        name: 'figurinha.webp',
-        alt: realTrigger.getAttribute('data-alt') || '',
-        thumb: realTrigger.getAttribute('src') || ''
-      }]);
-    }
-
-    return [];
-  }
-
-  function openMediaViewer(items, startIndex = 0) {
-    const list = dedupeViewerItems(items || []);
-    if (!list.length) return;
-
-    const el = ensureMediaViewer();
-    __viewerState.items = list;
-    __viewerState.index = Math.max(0, Math.min(startIndex, list.length - 1));
-    __viewerState.zoomed = false;
-
-    el.classList.add('is-open');
-    el.setAttribute('aria-hidden', 'false');
-    document.documentElement.classList.add('zc-no-scroll');
-    document.body.classList.add('zc-no-scroll');
-
-    renderMediaViewer();
-  }
-
-  function closeMediaViewer() {
-    const el = document.getElementById('zc-media-viewer');
-    if (!el) return;
-
-    const stage = el.querySelector('.zc-media-viewer__stage');
-    const thumbs = el.querySelector('.zc-media-viewer__thumbs');
-
-    if (stage) stage.innerHTML = '';
-    if (thumbs) thumbs.innerHTML = '';
-
-    __viewerState.items = [];
-    __viewerState.index = 0;
-    __viewerState.zoomed = false;
-
-    el.classList.remove('is-open');
-    el.setAttribute('aria-hidden', 'true');
-    document.documentElement.classList.remove('zc-no-scroll');
-    document.body.classList.remove('zc-no-scroll');
-  }
-
-  function stepMediaViewer(delta) {
-    const total = __viewerState.items.length || 0;
-    if (!total) return;
-
-    __viewerState.index = (__viewerState.index + delta + total) % total;
-    __viewerState.zoomed = false;
-    renderMediaViewer();
-  }
-
-  function toggleMediaZoom() {
-    __viewerState.zoomed = !__viewerState.zoomed;
-    const el = document.getElementById('zc-media-viewer');
-    if (!el) return;
-    el.classList.toggle('is-zoomed', __viewerState.zoomed);
-  }
-
-  function renderMediaViewerThumbs(el, items, activeIdx) {
-    const wrap = el.querySelector('.zc-media-viewer__thumbs');
-    if (!wrap) return;
-
-    wrap.innerHTML = items.map((item, idx) => {
-      const isActive = idx === activeIdx ? ' is-active' : '';
-      const thumbSrc = item.thumb || item.src;
-
-      if (item.type === 'video') {
-        return `
-          <button class="zc-media-viewer__thumb${isActive}" type="button" data-idx="${idx}" aria-label="Ir para item ${idx + 1}">
-            <span class="zc-media-viewer__thumb-video">VIDEO</span>
-          </button>
-        `;
-      }
-
-      return `
-        <button class="zc-media-viewer__thumb${isActive}" type="button" data-idx="${idx}" aria-label="Ir para item ${idx + 1}">
-          <img src="${escapeHtml(thumbSrc)}" alt="${escapeHtml(item.name || 'imagem')}">
-        </button>
-      `;
-    }).join('');
-
-    const active = wrap.querySelector('.zc-media-viewer__thumb.is-active');
-    if (active) {
-      try {
-        active.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
-      } catch {}
-    }
-  }
-
-  function renderMediaViewer() {
-    const el = ensureMediaViewer();
-    const stage = el.querySelector('.zc-media-viewer__stage');
-    const count = el.querySelector('.zc-media-viewer__count');
-    const name = el.querySelector('.zc-media-viewer__name');
-    const openA = el.querySelector('.zc-open');
-    const downA = el.querySelector('.zc-download');
-    const prevBtn = el.querySelector('.zc-media-viewer__nav.is-prev');
-    const nextBtn = el.querySelector('.zc-media-viewer__nav.is-next');
-
-    const items = __viewerState.items || [];
+  function buildImageGroupFromExisting(items) {
     const total = items.length;
-    const idx = __viewerState.index;
-    const item = items[idx];
+    const visible = items.slice(0, Math.min(total, 4));
 
-    if (!item || !stage) return;
-
-    el.classList.toggle('is-zoomed', !!__viewerState.zoomed);
-
-    count.textContent = `${idx + 1} / ${total}`;
-    name.textContent = item.name || '';
-    openA.href = item.src;
-    downA.href = item.src;
-    downA.setAttribute('download', item.name || 'midia');
-
-    prevBtn.style.display = total > 1 ? '' : 'none';
-    nextBtn.style.display = total > 1 ? '' : 'none';
-
-    if (item.type === 'video') {
-      stage.innerHTML = `
-        <video class="zc-media-viewer__media is-video" controls autoplay preload="metadata" src="${escapeHtml(item.src)}"></video>
-      `;
-    } else {
-      stage.innerHTML = `
-        <img
-          class="zc-media-viewer__media is-image"
-          src="${escapeHtml(item.src)}"
-          alt="${escapeHtml(item.name || 'imagem')}"
-          draggable="false"
-        >
-      `;
-    }
-
-    renderMediaViewerThumbs(el, items, idx);
-
-    try {
-      const prev = items[(idx - 1 + total) % total];
-      const next = items[(idx + 1) % total];
-      [prev, next].forEach((it) => {
-        if (it?.type === 'image' && it?.src) {
-          const pre = new Image();
-          pre.src = it.src;
-        }
-      });
-    } catch {}
+    return `
+      <div
+        class="msg-media-group"
+        data-front-grouped="1"
+        data-count="${visible.length}"
+        data-total="${total}"
+        data-viewer-items="${escapeHtml(encodeViewerItems(items))}"
+      >
+        ${visible.map((item, idx) => {
+          const overlay = idx === 3 && total > 4 ? String(total - 4) : '';
+          return `
+            <a
+              class="msg-media-cell cell-${idx + 1}"
+              href="${escapeHtml(item.src)}"
+              target="_blank"
+              rel="noopener"
+              data-zc-media-open="1"
+              data-viewer-index="${idx}"
+              data-kind="image"
+              data-name="${escapeHtml(item.name)}"
+            >
+              <img
+                src="${escapeHtml(item.thumb || item.src)}"
+                data-alt="${escapeHtml(item.altList || '')}"
+                alt="${escapeHtml(item.name)}"
+                loading="lazy"
+              >
+              ${overlay ? `<span class="msg-media-more">+${escapeHtml(overlay)}</span>` : ''}
+            </a>
+          `;
+        }).join('')}
+      </div>
+    `;
   }
 
-  function _resolveViewerStartIndex(trigger) {
-    const realTrigger = trigger.closest?.('[data-media-view="1"]') || trigger;
-    const src = realTrigger?.getAttribute?.('data-media-src') || realTrigger?.getAttribute?.('href') || '';
-
-    const group = realTrigger?.closest?.('.msg-media-group');
-    if (group) {
-      const arr = dedupeViewerItems(
-        [...group.querySelectorAll('[data-media-view="1"][data-media-kind="image"]')].map((a) => ({
-          type: 'image',
-          src: a.getAttribute('data-media-src') || a.getAttribute('href') || '',
-          name: a.getAttribute('data-media-name') || a.querySelector('img')?.getAttribute('alt') || 'imagem',
-          alt: a.getAttribute('data-media-alt') || '',
-          thumb: a.getAttribute('data-media-thumb') || a.getAttribute('data-media-src') || a.getAttribute('href') || ''
-        }))
-      );
-
-      const pos = arr.findIndex((x) => x.src === src);
-      if (pos >= 0) return pos;
-    }
-
-    const idxAttr = Number(realTrigger?.getAttribute?.('data-media-idx'));
-    if (Number.isFinite(idxAttr) && idxAttr >= 0) return idxAttr;
-
-    return 0;
-  }
-
-  function _handleViewerTrigger(trigger, e) {
-    if (!trigger) return false;
-
-    const realTrigger = trigger.closest?.('[data-media-view="1"], .msg-media-video, .msg-sticker') || trigger;
-
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-
-    const items = collectViewerItemsFromTrigger(realTrigger);
-    if (!items.length) return false;
-
-    let startIndex = 0;
-    if (realTrigger.matches?.('[data-media-view="1"]')) {
-      startIndex = _resolveViewerStartIndex(realTrigger);
-    }
-
-    openMediaViewer(items, startIndex);
-    return true;
-  }
-
-  function bindMediaViewerOnce() {
-    if (document.__zcMediaViewerBound) return;
-    document.__zcMediaViewerBound = true;
-
-    const delegatedHandler = (e) => {
-      const trigger = e.target?.closest?.('[data-media-view="1"], .msg-media-video, .msg-sticker');
-      if (!trigger) return;
-      _handleViewerTrigger(trigger, e);
-    };
-
-    document.addEventListener('click', delegatedHandler, true);
-  }
-
-  function bindDirectViewerTargets(root) {
-    (root || document)
-      .querySelectorAll('[data-media-view="1"], .msg-media-video, .msg-sticker')
-      .forEach((el) => {
-        if (el.__zcViewerBound) return;
-        el.__zcViewerBound = true;
-
-        el.addEventListener('click', function (e) {
-          _handleViewerTrigger(this, e);
-        }, true);
-      });
-  }
-
-  // ========= agrupamento de mensagens consecutivas de imagem =========
-  function _bubbleDir(bubble) {
-    return bubble?.classList.contains('bubble-out') ? 'out' : 'in';
-  }
-
-  function _trimMsgText(bubble) {
-    const txtEl = bubble?.querySelector('.msg-text');
-    const txt = String(txtEl?.textContent || '').replace(/\u00A0/g, ' ').trim();
-    return txt;
-  }
-
-  function _rowClusterInfo(row) {
-    if (!row || !row.classList?.contains('msg-row')) return null;
-    if (row.classList.contains('zc-media-cluster-row')) return null;
+  function getStandaloneImageRowInfo(row) {
+    if (!row || row.dataset.frontGroupHidden === '1') return null;
 
     const bubble = row.querySelector('.bubble');
     if (!bubble) return null;
+    if (bubble.dataset.frontGroupMaster === '1') return null;
+    if (bubble.querySelector('.msg-media-group')) return null;
 
-    const txt = _trimMsgText(bubble);
-    if (txt) return null;
+    const medias = bubble.querySelectorAll('.msg-media-img');
+    if (medias.length !== 1) return null;
 
-    if (bubble.querySelector('.wa-audio, audio[controls], .msg-media-video, video.msg-media-video, .doc-card, .msg-sticker')) {
-      return null;
-    }
+    if (bubble.querySelector('.msg-media-video, .msg-sticker, .doc-card, .wa-audio')) return null;
 
-    const items = collectInlineImagesFromBubble(bubble);
-    if (!items.length) return null;
+    const anchor = medias[0];
+    const img = anchor.querySelector('img');
+    if (!img) return null;
 
-    const metaHtml = bubble.querySelector('.meta')?.innerHTML || '<span class="msg-time"></span>';
+    const txtEl = bubble.querySelector('.msg-text');
+    const txt = (txtEl?.textContent || '').trim();
+
+    if (txt && !/^\[[^\]]+\]$/i.test(txt)) return null;
 
     return {
-      dir: _bubbleDir(bubble),
-      items,
-      metaHtml
+      row,
+      bubble,
+      anchor,
+      img,
+      dir: bubble.classList.contains('bubble-out') ? 'out' : 'in',
+      metaHtml: bubble.querySelector('.meta')?.innerHTML || '',
+      href: anchor.getAttribute('href') || img.getAttribute('src') || '',
+      src: img.getAttribute('src') || '',
+      altList: img.dataset.alt || '',
+      name: img.getAttribute('alt') || 'imagem'
     };
   }
 
-  function _renderClusterCell(item, idx, extraClass = '', overlay = '', hidden = false) {
-    return `
-      <a
-        class="msg-media-cell ${extraClass}"
-        href="${escapeHtml(item.src)}"
-        data-media-view="1"
-        data-media-kind="image"
-        data-media-src="${escapeHtml(item.src)}"
-        data-media-thumb="${escapeHtml(item.thumb || item.src)}"
-        data-media-alt="${escapeHtml(item.alt || '')}"
-        data-media-name="${escapeHtml(item.name || 'imagem')}"
-        data-media-idx="${Number(idx) || 0}"
-        aria-label="${escapeHtml(item.name || 'imagem')}"
-        ${hidden ? 'hidden' : ''}
-      >
-        <img src="${escapeHtml(item.thumb || item.src)}" alt="${escapeHtml(item.name || 'imagem')}" loading="lazy">
-        ${overlay ? `<span class="msg-media-more">+${escapeHtml(overlay)}</span>` : ''}
-      </a>
-    `;
-  }
+  function restoreFrontGroupedRows(root) {
+    const scope = root || document;
 
-  function _renderClusterGroup(items) {
-    const total = items.length;
-    const visibleCount = getGroupVisibleCount(total);
-    const visible = items.slice(0, visibleCount);
-    const hidden = items.slice(visibleCount);
+    scope.querySelectorAll('.msg-row[data-front-group-hidden="1"]').forEach((row) => {
+      row.style.display = '';
+      delete row.dataset.frontGroupHidden;
+    });
 
-    return `
-      <div class="msg-media-group zc-media-cluster-group" data-count="${visible.length}" data-total="${total}">
-        ${visible.map((item, idx) => {
-          const overlay = getOverlayCount(total, visibleCount, idx);
-          return _renderClusterCell(item, idx, `cell-${idx + 1}`, overlay, false);
-        }).join('')}
-        ${hidden.map((item, idx) => {
-          const realIdx = idx + visibleCount;
-          return _renderClusterCell(item, realIdx, 'is-extra-hidden', '', true);
-        }).join('')}
-      </div>
-    `;
+    scope.querySelectorAll('.bubble[data-front-group-master="1"]').forEach((bubble) => {
+      const grouped = bubble.querySelector('.msg-media-group[data-front-grouped="1"]');
+      if (grouped) grouped.remove();
+
+      if (bubble.dataset.frontGroupOriginalMediaHtml) {
+        bubble.insertAdjacentHTML('afterbegin', bubble.dataset.frontGroupOriginalMediaHtml);
+      }
+
+      const meta = bubble.querySelector('.meta');
+      if (meta && bubble.dataset.frontGroupOriginalMetaHtml) {
+        meta.innerHTML = bubble.dataset.frontGroupOriginalMetaHtml;
+      }
+
+      bubble.classList.remove('has-media-group');
+
+      delete bubble.dataset.frontGroupMaster;
+      delete bubble.dataset.frontGroupOriginalMediaHtml;
+      delete bubble.dataset.frontGroupOriginalMetaHtml;
+    });
   }
 
   function groupConsecutiveImageRows(root) {
-    root = root || H();
-    if (!root) return;
+    const hist =
+      root?.id === 'historico'
+        ? root
+        : root?.querySelector?.('#historico') || H();
 
-    root.querySelectorAll('.zc-media-cluster-row').forEach((el) => el.remove());
-    root.querySelectorAll('.msg-row[data-cluster-hidden="1"]').forEach((row) => {
-      row.style.display = '';
-      row.removeAttribute('data-cluster-hidden');
-    });
+    if (!hist) return;
 
-    const children = [...root.children];
+    restoreFrontGroupedRows(hist);
+
+    const rows = [...hist.querySelectorAll('.msg-row')];
     let i = 0;
 
-    while (i < children.length) {
-      const node = children[i];
+    while (i < rows.length) {
+      const first = getStandaloneImageRowInfo(rows[i]);
 
-      if (!node?.classList?.contains('msg-row')) {
-        i++;
+      if (!first) {
+        i += 1;
         continue;
       }
 
-      const firstInfo = _rowClusterInfo(node);
-      if (!firstInfo) {
-        i++;
-        continue;
-      }
-
-      const groupRows = [node];
-      const allItems = [...firstInfo.items];
-      const dir = firstInfo.dir;
-      let metaHtml = firstInfo.metaHtml;
-
+      const group = [first];
       let j = i + 1;
-      while (j < children.length) {
-        const nextNode = children[j];
 
-        if (!nextNode?.classList?.contains('msg-row')) break;
-
-        const info = _rowClusterInfo(nextNode);
-        if (!info) break;
-        if (info.dir !== dir) break;
-
-        groupRows.push(nextNode);
-        allItems.push(...info.items);
-        metaHtml = info.metaHtml || metaHtml;
-        j++;
+      while (j < rows.length) {
+        const next = getStandaloneImageRowInfo(rows[j]);
+        if (!next) break;
+        if (next.dir !== first.dir) break;
+        group.push(next);
+        j += 1;
       }
 
-      if (groupRows.length >= 2 && allItems.length >= 2) {
-        const clusterRow = document.createElement('div');
-        clusterRow.className = `msg-row ${dir === 'out' ? 'msg-sent' : 'msg-received'} zc-media-cluster-row`;
+      if (group.length > 1) {
+        const items = group.map((x) => ({
+          type: 'image',
+          src: x.href || x.src,
+          thumb: x.src,
+          altList: x.altList,
+          name: x.name
+        }));
 
-        clusterRow.innerHTML = `
-          <div class="bubble ${dir === 'out' ? 'bubble-out' : 'bubble-in'} has-media-group zc-media-cluster-bubble">
-            ${_renderClusterGroup(dedupeViewerItems(allItems))}
-            <div class="meta">
-              ${metaHtml}
-            </div>
-          </div>
-        `;
+        first.bubble.dataset.frontGroupMaster = '1';
+        first.bubble.dataset.frontGroupOriginalMediaHtml = first.anchor.outerHTML;
+        first.bubble.dataset.frontGroupOriginalMetaHtml = first.metaHtml;
 
-        groupRows[0].before(clusterRow);
-        groupRows.forEach((row) => {
-          row.setAttribute('data-cluster-hidden', '1');
-          row.style.display = 'none';
-        });
+        first.anchor.remove();
+        first.bubble.insertAdjacentHTML('afterbegin', buildImageGroupFromExisting(items));
+        first.bubble.classList.add('has-media-group');
+
+        const meta = first.bubble.querySelector('.meta');
+        if (meta) {
+          meta.innerHTML = group[group.length - 1].metaHtml;
+        }
+
+        for (let k = 1; k < group.length; k += 1) {
+          group[k].row.dataset.frontGroupHidden = '1';
+          group[k].row.style.display = 'none';
+        }
       }
 
       i = j;
     }
   }
 
-  // ========= render mensagem =========
+  function firstTextFromQuotedMessageObject(message) {
+    if (!message || typeof message !== 'object') return '';
+
+    return cleanOneLine(
+      message.conversation ||
+      message?.extendedTextMessage?.text ||
+      message?.imageMessage?.caption ||
+      message?.videoMessage?.caption ||
+      message?.documentMessage?.caption ||
+      ''
+    );
+  }
+
+  function mediaLabelFromQuotedMessageObject(message) {
+    if (!message || typeof message !== 'object') return '';
+
+    if (message.imageMessage) return '[imagem]';
+    if (message.videoMessage) return '[vídeo]';
+    if (message.audioMessage) return '[áudio]';
+    if (message.documentMessage) return '[documento]';
+    if (message.stickerMessage) return '[figurinha]';
+    if (message.locationMessage) return '[localização]';
+    if (message.contactMessage || message.contactsArrayMessage) return '[contato]';
+
+    return '';
+  }
+
+  function normalizeQuotedPreviewFromMsg(m) {
+    const direct =
+      m?.quoted_preview ||
+      m?.quotedPreview ||
+      m?.reply_preview ||
+      m?.replyPreview ||
+      null;
+
+    if (direct && typeof direct === 'object') {
+      const direction = String(direct.direction || '').toLowerCase().trim();
+
+      return {
+        msg_id: String(
+          direct.msg_id ||
+          direct.id ||
+          direct.message_id ||
+          direct.wa_msg_id ||
+          ''
+        ).trim(),
+        text: cleanOneLine(
+          direct.text ||
+          direct.conversation ||
+          direct.caption ||
+          '',
+          '[mensagem]'
+        ),
+        author: cleanOneLine(
+          direct.author ||
+          direct.nome ||
+          direct.push_name ||
+          '',
+          direction === 'out' ? 'Você' : 'Contato'
+        ),
+        direction: direction === 'out' ? 'out' : 'in',
+      };
+    }
+
+    const quoted = m?.quoted || m?.quote || m?.quotedMessage || m?.quoted_message || null;
+    if (!quoted || typeof quoted !== 'object') return null;
+
+    const key = quoted.key || quoted.messageKey || {};
+    const message = quoted.message || quoted.quotedMessage || quoted;
+
+    const text =
+      firstTextFromQuotedMessageObject(message) ||
+      mediaLabelFromQuotedMessageObject(message) ||
+      cleanOneLine(
+        quoted.text ||
+        quoted.conteudo ||
+        quoted.caption ||
+        '',
+        '[mensagem]'
+      );
+
+    const fromMe = Boolean(key?.fromMe);
+
+    return {
+      msg_id: String(
+        key?.id ||
+        quoted.msg_id ||
+        quoted.id ||
+        quoted.message_id ||
+        ''
+      ).trim(),
+      text,
+      author: fromMe ? 'Você' : 'Contato',
+      direction: fromMe ? 'out' : 'in',
+    };
+  }
+
+  function renderQuotedPreviewHtml(q) {
+    if (!q || typeof q !== 'object') return '';
+
+    const msgId = escapeHtml(q.msg_id || q.id || '');
+    const author = escapeHtml(
+      q.author || (q.direction === 'out' ? 'Você' : 'Contato')
+    );
+    const text = escapeHtml(
+      q.text || q.conversation || '[mensagem]'
+    );
+
+    return `
+      <div class="zc-quoted-bubble" data-quoted-msg-id="${msgId}" title="Mensagem respondida">
+        <div class="zc-quoted-bar" aria-hidden="true"></div>
+        <div class="zc-quoted-content">
+          <div class="zc-quoted-author">${author}</div>
+          <div class="zc-quoted-text">${text}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  let viewerRef = null;
+
+  function itemFromMediaAnchor(anchor) {
+    if (!anchor) return null;
+
+    const img = anchor.querySelector('img');
+    const href = anchor.getAttribute('href') || img?.getAttribute('src') || '';
+    const src = img?.getAttribute('src') || href;
+    const name = anchor.dataset.name || img?.getAttribute('alt') || 'imagem';
+
+    if (!href && !src) return null;
+
+    return {
+      type: 'image',
+      src: href || src,
+      thumb: src || href,
+      name
+    };
+  }
+
+  function itemFromSticker(img) {
+    if (!img) return null;
+    const src = img.getAttribute('src') || '';
+    if (!src) return null;
+
+    return {
+      type: 'image',
+      src,
+      thumb: src,
+      name: img.getAttribute('alt') || 'figurinha'
+    };
+  }
+
+  function itemFromLooseImage(img) {
+    if (!img) return null;
+
+    const src = img.getAttribute('src') || '';
+    if (!src) return null;
+
+    return {
+      type: 'image',
+      src,
+      thumb: src,
+      name: img.dataset.name || img.getAttribute('alt') || 'imagem'
+    };
+  }
+
+  function ensureViewer() {
+    if (viewerRef) return viewerRef;
+
+    const el = document.createElement('div');
+    el.className = 'zc-media-viewer';
+    el.setAttribute('aria-hidden', 'true');
+
+    el.innerHTML = `
+      <div class="zc-media-viewer__backdrop"></div>
+
+      <div class="zc-media-viewer__top">
+        <div class="zc-media-viewer__meta">
+          <div class="zc-media-viewer__count">1 de 1</div>
+          <div class="zc-media-viewer__name">Mídia</div>
+        </div>
+
+        <div class="zc-media-viewer__top-actions">
+          <button class="zc-media-viewer__icon-btn zc-media-viewer__close" type="button" aria-label="Fechar">
+            ${_closeIconSvg()}
+          </button>
+        </div>
+      </div>
+
+      <button class="zc-media-viewer__nav zc-media-viewer__nav--prev" type="button" aria-label="Anterior">
+        ${_chevronLeftSvg()}
+      </button>
+
+      <div class="zc-media-viewer__stage">
+        <div class="zc-media-viewer__frame">
+          <div class="zc-media-viewer__media-wrap">
+            <div class="zc-media-viewer__empty">Sem mídia</div>
+          </div>
+        </div>
+      </div>
+
+      <button class="zc-media-viewer__nav zc-media-viewer__nav--next" type="button" aria-label="Próxima">
+        ${_chevronRightSvg()}
+      </button>
+
+      <div class="zc-media-viewer__thumbs"></div>
+    `;
+
+    document.body.appendChild(el);
+
+    const ref = {
+      el,
+      count: el.querySelector('.zc-media-viewer__count'),
+      name: el.querySelector('.zc-media-viewer__name'),
+      closeBtn: el.querySelector('.zc-media-viewer__close'),
+      prevBtn: el.querySelector('.zc-media-viewer__nav--prev'),
+      nextBtn: el.querySelector('.zc-media-viewer__nav--next'),
+      mediaWrap: el.querySelector('.zc-media-viewer__media-wrap'),
+      thumbs: el.querySelector('.zc-media-viewer__thumbs'),
+      state: {
+        items: [],
+        index: 0
+      }
+    };
+
+    function normalizeItems(items) {
+      return (items || [])
+        .map((item) => ({
+          type: item?.type || 'image',
+          src: String(item?.src || '').trim(),
+          thumb: String(item?.thumb || item?.src || '').trim(),
+          name: String(item?.name || 'imagem').trim() || 'imagem'
+        }))
+        .filter((item) => item.src);
+    }
+
+    function pauseStageMedia() {
+      ref.mediaWrap.querySelectorAll('video').forEach((v) => {
+        try { v.pause(); } catch {}
+      });
+    }
+
+    function renderThumbs() {
+      const { items, index } = ref.state;
+
+      ref.thumbs.innerHTML = items.map((item, idx) => `
+        <button
+          class="zc-media-viewer__thumb ${idx === index ? 'is-active' : ''}"
+          type="button"
+          data-index="${idx}"
+          aria-label="Abrir mídia ${idx + 1}"
+        >
+          <img src="${escapeHtml(item.thumb || item.src)}" alt="${escapeHtml(item.name)}">
+        </button>
+      `).join('');
+    }
+
+    function renderCurrent() {
+      const { items, index } = ref.state;
+      const item = items[index];
+
+      if (!item) {
+        ref.mediaWrap.innerHTML = `<div class="zc-media-viewer__empty">Sem mídia</div>`;
+        ref.count.textContent = '0 de 0';
+        ref.name.textContent = 'Mídia';
+        ref.prevBtn.style.display = 'none';
+        ref.nextBtn.style.display = 'none';
+        ref.thumbs.innerHTML = '';
+        return;
+      }
+
+      ref.count.textContent = `${index + 1} de ${items.length}`;
+      ref.name.textContent = item.name || 'Mídia';
+
+      ref.prevBtn.style.display = items.length > 1 ? '' : 'none';
+      ref.nextBtn.style.display = items.length > 1 ? '' : 'none';
+      ref.thumbs.style.display = items.length > 1 ? '' : 'none';
+
+      pauseStageMedia();
+
+      if (item.type === 'video') {
+        ref.mediaWrap.innerHTML = `
+          <video class="zc-media-viewer__video" src="${escapeHtml(item.src)}" controls autoplay></video>
+        `;
+      } else {
+        ref.mediaWrap.innerHTML = `
+          <img class="zc-media-viewer__img" src="${escapeHtml(item.src)}" alt="${escapeHtml(item.name || 'imagem')}">
+        `;
+      }
+
+      renderThumbs();
+    }
+
+    function open(items, index = 0) {
+      const normalized = normalizeItems(items);
+      if (!normalized.length) return;
+
+      ref.state.items = normalized;
+      ref.state.index = Math.max(0, Math.min(normalized.length - 1, Number(index) || 0));
+
+      renderCurrent();
+
+      ref.el.classList.add('is-open');
+      ref.el.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('zc-media-viewer-open');
+    }
+
+    function close() {
+      pauseStageMedia();
+      ref.el.classList.remove('is-open');
+      ref.el.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('zc-media-viewer-open');
+    }
+
+    function go(delta) {
+      const items = ref.state.items || [];
+      if (!items.length) return;
+
+      const next = (ref.state.index + delta + items.length) % items.length;
+      ref.state.index = next;
+      renderCurrent();
+    }
+
+    ref.closeBtn.addEventListener('click', close);
+    ref.el.querySelector('.zc-media-viewer__backdrop')?.addEventListener('click', close);
+    ref.prevBtn.addEventListener('click', () => go(-1));
+    ref.nextBtn.addEventListener('click', () => go(1));
+
+    ref.thumbs.addEventListener('click', (e) => {
+      const btn = e.target.closest('.zc-media-viewer__thumb');
+      if (!btn) return;
+      const idx = Number(btn.dataset.index);
+      if (!Number.isFinite(idx)) return;
+      ref.state.index = idx;
+      renderCurrent();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (!ref.el.classList.contains('is-open')) return;
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+      }
+
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        go(-1);
+      }
+
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        go(1);
+      }
+    });
+
+    ref.open = open;
+    ref.close = close;
+    ref.go = go;
+
+    viewerRef = ref;
+    return ref;
+  }
+
+  function collectViewerItemsFromClick(target) {
+    const group = target.closest('.msg-media-group');
+    if (group) {
+      const items = decodeViewerItems(group.dataset.viewerItems || '');
+      const idx = Number(target.closest('[data-viewer-index]')?.dataset.viewerIndex || 0);
+      return { items, index: Number.isFinite(idx) ? idx : 0 };
+    }
+
+    const mediaAnchor =
+      target.closest('.msg-media-cell') ||
+      target.closest('.msg-media-img') ||
+      target.closest('[data-media-view="1"]');
+
+    if (mediaAnchor) {
+      const item = itemFromMediaAnchor(mediaAnchor);
+      return item ? { items: [item], index: 0 } : null;
+    }
+
+    const sticker = target.closest('.msg-sticker');
+    if (sticker) {
+      const item = itemFromSticker(sticker);
+      return item ? { items: [item], index: 0 } : null;
+    }
+
+    const looseImg = target.closest('.bubble img');
+    if (looseImg && !looseImg.closest('.wa-avatar')) {
+      const item = itemFromLooseImage(looseImg);
+      return item ? { items: [item], index: 0 } : null;
+    }
+
+    return null;
+  }
+
+  function bindViewerClicks() {
+    if (document.__zcMediaViewerBound) return;
+    document.__zcMediaViewerBound = true;
+
+    document.addEventListener('click', (e) => {
+      const hit = collectViewerItemsFromClick(e.target);
+      if (!hit || !hit.items || !hit.items.length) return;
+
+      const isMedia =
+        e.target.closest('.msg-media-cell') ||
+        e.target.closest('.msg-media-img') ||
+        e.target.closest('[data-media-view="1"]') ||
+        e.target.closest('.msg-sticker') ||
+        e.target.closest('.bubble img');
+
+      if (!isMedia) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      ensureViewer().open(hit.items, hit.index);
+    }, true);
+  }
+
+  function formatOnlyTime(raw) {
+    try {
+      if (!raw) return '';
+      const d = new Date(raw);
+      if (Number.isNaN(d.getTime())) return '';
+      return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '';
+    }
+  }
+
   function criarHTMLDaMensagem(m) {
     ensureMsgMediaCss();
 
-    const isSaida = m.tipo === 'saida' || m.from_me === true || m.origem === 'atendente';
+    const isSaida =
+      m?.tipo === 'saida' ||
+      m?.from_me === true ||
+      m?.fromMe === true ||
+      m?.origem === 'atendente';
+
     const dir = isSaida ? 'out' : 'in';
 
-    const hora = (window.formatChatTime || ((x) => new Date(x).toLocaleString('pt-BR')))(
-      m.timestamp || m.data || m.created_at || ''
+    const hora = formatOnlyTime(
+      m?.timestamp || m?.data || m?.created_at || m?.createdAt || m?.ts || ''
     );
 
-    const texto = String(m.conteudo ?? m.mensagem ?? m.texto ?? '').trim();
-    const ackHtml = isSaida && typeof window.getAckIcon === 'function'
-      ? window.getAckIcon(m.ack ?? 0)
+    const texto = String(m?.conteudo ?? m?.mensagem ?? m?.texto ?? '').trim();
+    const msgId = String(m?.msg_id || m?.msgId || m?.message_id || m?.messageId || m?.id || '').trim();
+    const msgIdEsc = escapeHtml(msgId);
+
+    let ackHtml = '';
+    if (isSaida && typeof window.getAckIcon === 'function') {
+      try {
+        ackHtml = String(window.getAckIcon(m?.ack ?? 0) || '');
+        if (ackHtml.includes('<span class="msg-ack"') && msgIdEsc) {
+          ackHtml = ackHtml.replace(
+            '<span class="msg-ack"',
+            `<span class="msg-ack" data-msg-id="${msgIdEsc}"`
+          );
+        }
+      } catch {}
+    }
+
+    const quotedPreview = normalizeQuotedPreviewFromMsg(m);
+    const quotedPreviewAttr = quotedPreview ? jsonAttr(quotedPreview) : '';
+    const quotedAttr = m?.quoted && typeof m.quoted === 'object' ? jsonAttr(m.quoted) : '';
+
+    const quotedPreviewData = quotedPreviewAttr
+      ? ` data-quoted-preview="${quotedPreviewAttr}"`
       : '';
 
+    const quotedData = quotedAttr
+      ? ` data-quoted="${quotedAttr}"`
+      : '';
+
+    const quoteHtml = renderQuotedPreviewHtml(quotedPreview);
+
     let anexos = [];
-    if (Array.isArray(m.midias) && m.midias.length) {
+    if (Array.isArray(m?.midias) && m.midias.length) {
       anexos.push(...m.midias.filter(Boolean));
-    } else if (Array.isArray(m.anexos) && m.anexos.length) {
+    } else if (Array.isArray(m?.anexos) && m.anexos.length) {
       anexos.push(...m.anexos.filter(Boolean));
-    } else if (m.midia && typeof m.midia === 'object') {
+    } else if (m?.midia && typeof m.midia === 'object') {
       anexos.push(m.midia);
     }
 
     const seen = new Set();
     anexos = anexos.filter((a) => {
       if (!a) return false;
+
       const k = [
         a.id ?? '',
         a.url || a.url_api || a.link || a.path || '',
@@ -1378,15 +2098,15 @@
     const hasSingleImagePreview = anexos.length === 1 && anexos.every(isGalleryImageAttachment);
 
     const renderAnexo = (a) => {
-      const urls = resolveUrlsForMedia(m, a, { preferAttachmentUrl: true });
+      const urls = resolveUrlsForMedia(m, a);
       const [url, ...alts] = urls;
 
-      const mime = (a.mimetype || a.mime || '').toLowerCase();
-      const tipo = (a.tipo || a.tipo_midia || '').toLowerCase();
-      const name = a.filename || a.name || 'arquivo';
+      const mime = String(a.mimetype || a.mime || '').toLowerCase();
+      const tipo = String(a.tipo || a.tipo_midia || '').toLowerCase();
+      const name = a.filename || a.name || a.fileName || 'arquivo';
 
       if (isImageAttachment(a)) {
-        if (tipo.includes('figurinha')) {
+        if (tipo.includes('figurinha') || tipo.includes('sticker')) {
           return `<img class="msg-sticker" src="${escapeHtml(url)}" data-alt="${escapeHtml(alts.join('|'))}" alt="${escapeHtml(name)}" loading="lazy">`;
         }
 
@@ -1400,11 +2120,13 @@
                   class="msg-media-img msg-media-img--single"
                   href="${escapeHtml(url)}"
                   data-media-view="1"
+                  data-zc-media-open="1"
                   data-media-kind="image"
                   data-media-src="${escapeHtml(url)}"
                   data-media-thumb="${escapeHtml(url)}"
                   data-media-alt="${escapeHtml(alts.join('|'))}"
                   data-media-name="${escapeHtml(fileName)}"
+                  data-name="${escapeHtml(fileName)}"
                   aria-label="${escapeHtml(fileName)}"
                 >
                   <img src="${escapeHtml(url)}" data-alt="${escapeHtml(alts.join('|'))}" alt="${escapeHtml(name)}" loading="lazy">
@@ -1444,25 +2166,27 @@
       ? renderImageGroup(m, anexos)
       : anexos.map(renderAnexo).join('');
 
-    if (!mediaHtml && m.msg_id && MARKER_RE.test(texto)) {
+    if (!mediaHtml && m?.msg_id && MARKER_RE.test(texto)) {
       const src = buildCanonUrlByMsgId(m.msg_id);
-      const kind = texto.replace(/^\[|\].*$/g, '').toLowerCase();
+      const kind = markerKind(texto);
 
-      if (kind.startsWith('imagem')) {
+      if (kind.startsWith('imagem') || kind.startsWith('midia')) {
         mediaHtml = `<a
                        class="msg-media-img msg-media-img--single"
                        href="${escapeHtml(src)}"
                        data-media-view="1"
+                       data-zc-media-open="1"
                        data-media-kind="image"
                        data-media-src="${escapeHtml(src)}"
                        data-media-thumb="${escapeHtml(src)}"
                        data-media-name="imagem"
+                       data-name="imagem"
                      >
                        <img src="${escapeHtml(src)}" alt="imagem" loading="lazy">
                      </a>`;
-      } else if (kind.startsWith('vídeo') || kind.startsWith('video')) {
+      } else if (kind.startsWith('video')) {
         mediaHtml = `<video class="msg-media-video" controls preload="metadata" src="${escapeHtml(src)}"></video>`;
-      } else if (kind.startsWith('áudio') || kind.startsWith('audio')) {
+      } else if (kind.startsWith('audio')) {
         mediaHtml = _makeWaAudioHTML([src], { dir });
       } else if (kind.startsWith('figurinha')) {
         mediaHtml = `<img class="msg-sticker" src="${escapeHtml(src)}" alt="figurinha" loading="lazy">`;
@@ -1488,113 +2212,99 @@
     const textHtml = texto && !shouldHidePureMarkerText
       ? `<div class="msg-text">${escapeHtml(texto)}</div>`
       : !hasMedia
-      ? `<div class="msg-text">&nbsp;</div>`
-      : '';
+        ? `<div class="msg-text">&nbsp;</div>`
+        : '';
 
-    return `<div class="msg-row ${isSaida ? 'msg-sent' : 'msg-received'}" data-id="${m.msg_id || ''}" data-msg-id="${m.msg_id || ''}">
-      <div class="bubble ${isSaida ? 'bubble-out' : 'bubble-in'}${onlyGalleryImages ? ' has-media-group' : ''}${hasSingleImagePreview ? ' has-media-single' : ''}" data-msg-id="${m.msg_id || ''}">
-        ${mediaHtml}${textHtml}
+    return `<div class="msg-row ${isSaida ? 'msg-sent' : 'msg-received'}${quotedPreview ? ' has-quoted' : ''}"
+        data-id="${msgIdEsc}"
+        data-msg-id="${msgIdEsc}"
+        data-message-id="${msgIdEsc}"
+        data-wa-msg-id="${msgIdEsc}"
+        data-from-me="${isSaida ? '1' : '0'}"${quotedPreviewData}${quotedData}>
+      <div class="bubble ${isSaida ? 'bubble-out' : 'bubble-in'}${onlyGalleryImages ? ' has-media-group' : ''}${hasSingleImagePreview ? ' has-media-single' : ''}${quotedPreview ? ' has-quoted' : ''}"
+          data-msg-id="${msgIdEsc}"
+          data-message-id="${msgIdEsc}"
+          data-wa-msg-id="${msgIdEsc}"
+          data-from-me="${isSaida ? '1' : '0'}"${quotedPreviewData}${quotedData}>
+        ${quoteHtml}
+        ${mediaHtml}
+        ${textHtml}
         <div class="meta">
           ${ackHtml}
-          <span class="msg-time">${hora}</span>
+          <span class="msg-time">${escapeHtml(hora)}</span>
         </div>
       </div>
     </div>`;
   }
 
-  // ========= auto-run =========
   function enhance(root) {
+    root = root || document;
+
     try { ensureMsgMediaCss(); } catch {}
-    try { initMediaFallbacks(root); } catch {}
     try { upgradeNativeAudios(root); } catch {}
-    try { injectMarkerAudios(root); } catch {}
+    try { injectMarkerMedias(root); } catch {}
+    try { initMediaFallbacks(root); } catch {}
     try { initAudioPlayers(root); } catch {}
     try { refreshAudioAvatars(root); } catch {}
-    try { ensureMediaViewer(); } catch {}
-    try { normalizeSingleImageThumbs(root); } catch {}
+    try { bindViewerClicks(root); } catch {}
     try { groupConsecutiveImageRows(root); } catch {}
-    try { bindDirectViewerTargets(root); } catch {}
   }
 
-  function bindObserver(hist) {
-    if (!hist || hist.__mediaObs) return;
-    hist.__mediaObs = true;
-
-    let raf = 0;
-    const mo = new MutationObserver(() => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        enhance(hist);
-      });
-    });
-
-    mo.observe(hist, { childList: true, subtree: true });
-  }
-
-  function ensureBound() {
+  function bootObserver() {
     const hist = H();
-    if (hist) {
-      bindObserver(hist);
-      enhance(hist);
+
+    if (hist && !hist.__zcMediaRenderObs) {
+      const obs = new MutationObserver(() => {
+        clearTimeout(hist.__zcMediaRenderTimer);
+        hist.__zcMediaRenderTimer = setTimeout(() => enhance(hist), 80);
+      });
+
+      obs.observe(hist, {
+        childList: true,
+        subtree: true
+      });
+
+      hist.__zcMediaRenderObs = obs;
     }
+
+    enhance(hist || document);
   }
-
-  function bindChatEventsOnce() {
-    if (document.__mediaRenderChatEvt) return;
-    document.__mediaRenderChatEvt = true;
-
-    const tick = () => {
-      const hist = H() || document;
-      refreshAudioAvatars(hist);
-      groupConsecutiveImageRows(hist);
-      bindDirectViewerTargets(hist);
-    };
-
-    document.addEventListener('cliente:selecionar', tick);
-    document.addEventListener('zc:open_chat', tick);
-    document.addEventListener('chat:open', tick);
-
-    if (!window.__zcMediaAvatarInterval) {
-      window.__zcMediaAvatarInterval = setInterval(() => {
-        const hist = H();
-        if (!hist) return;
-        refreshAudioAvatars(hist);
-      }, 1200);
-    }
-  }
-
-  // ========= exports =========
-  window.ensureMsgMediaCss = ensureMsgMediaCss;
-  window.initAudioPlayers = initAudioPlayers;
-  window.initMediaFallbacks = initMediaFallbacks;
-  window.buildCanonUrlByMsgId = buildCanonUrlByMsgId;
-  window.criarHTMLDaMensagem = criarHTMLDaMensagem;
-  window.openMediaViewer = openMediaViewer;
-  window.closeMediaViewer = closeMediaViewer;
-  window.groupConsecutiveImageRows = groupConsecutiveImageRows;
-
-  window.MediaRender = window.MediaRender || {};
-  window.MediaRender.enhance = () => enhance(H() || document);
-  window.MediaRender.openViewer = openMediaViewer;
-  window.MediaRender.closeViewer = closeMediaViewer;
-  window.MediaRender.groupClusters = () => groupConsecutiveImageRows(H() || document);
-
-  try { ensureMsgMediaCss(); } catch {}
-  bindChatEventsOnce();
-  bindMediaViewerOnce();
-
-  const start = () => {
-    ensureBound();
-
-    if (!window.__zcMediaEnsureInterval) {
-      window.__zcMediaEnsureInterval = setInterval(ensureBound, 900);
-    }
-  };
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', start);
+    document.addEventListener('DOMContentLoaded', bootObserver);
   } else {
-    start();
+    bootObserver();
   }
+
+  document.addEventListener('historico:ready', () => enhance(H() || document));
+  document.addEventListener('historico:rendered', () => enhance(H() || document));
+  document.addEventListener('cliente:selecionado', () => {
+    setTimeout(() => enhance(H() || document), 120);
+  });
+  document.addEventListener('cliente:selecionar', () => {
+    setTimeout(() => enhance(H() || document), 120);
+  });
+  document.addEventListener('zc:cliente_sel', () => {
+    setTimeout(() => enhance(H() || document), 120);
+  });
+
+  window.addEventListener('resize', () => {
+    try { groupConsecutiveImageRows(H() || document); } catch {}
+  }, { passive: true });
+
+  window.__zcMediaEnsureInterval = setInterval(() => {
+    try { enhance(H() || document); } catch {}
+  }, 2500);
+
+  window.__zcMediaAvatarInterval = setInterval(() => {
+    try { refreshAudioAvatars(H() || document); } catch {}
+  }, 3000);
+
+  window.initMediaFallbacks = initMediaFallbacks;
+  window.initAudioPlayers = initAudioPlayers;
+  window.refreshAudioAvatars = refreshAudioAvatars;
+  window.groupConsecutiveImageRows = groupConsecutiveImageRows;
+  window.criarHTMLDaMensagem = criarHTMLDaMensagem;
+  window.ensureMsgMediaCss = ensureMsgMediaCss;
+  window.zcMediaRenderEnhance = enhance;
 })();

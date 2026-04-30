@@ -6,6 +6,7 @@ import os
 import re
 import unicodedata
 import requests
+from urllib.parse import quote
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 
@@ -32,7 +33,10 @@ from backend.security.atendimento_acl import (
 
 router = APIRouter(tags=["Atendimento – Perfil / Evolution & Busca/Arquivo"])
 
-# ===== Evolution config =====
+
+# =========================================================
+# Evolution config
+# =========================================================
 EVOLUTION_URL = (os.getenv("EVOLUTION_URL", "").rstrip("/"))
 EVOLUTION_KEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_KEY")
 HEADERS = {"apikey": EVOLUTION_KEY, "Content-Type": "application/json"} if EVOLUTION_KEY else {}
@@ -108,7 +112,18 @@ def _resolve_instancia_id(
     return None, None
 
 
-# ===== Schemas =====
+def _to_int(v) -> Optional[int]:
+    try:
+        if v is None:
+            return None
+        return int(v)
+    except Exception:
+        return None
+
+
+# =========================================================
+# Schemas
+# =========================================================
 class FetchProfileIn(BaseModel):
     number: str
     empresa_id: int | None = None
@@ -125,7 +140,6 @@ class SaveProfileIn(BaseModel):
     website: str | None = None
     sobre_cliente: str | None = None
 
-    # shape bruto do Evolution (opcional)
     name: str | None = None
     isBusiness: bool | None = None
     picture: str | None = None
@@ -148,7 +162,9 @@ class SaveCustomIn(BaseModel):
     genero: str | None = None
 
 
-# ===== Helpers =====
+# =========================================================
+# Helpers gerais
+# =========================================================
 def _pick_instance_name(
     db: Session,
     empresa_id_eff: int,
@@ -180,8 +196,10 @@ def _pick_instance_name(
         models.EmpresaInstancia.last_seen.desc().nullslast(),
         models.EmpresaInstancia.id.asc(),
     ).first()
+
     if not row:
         raise HTTPException(400, "Empresa sem instância configurada.")
+
     return row.instance_name
 
 
@@ -210,6 +228,7 @@ def _normalize_text(s: Optional[str]) -> str:
 def _parse_date_any(v):
     if v is None:
         return None
+
     s = str(v).strip()
     if not s:
         return None
@@ -239,6 +258,7 @@ def _parse_date_any(v):
             return datetime(yy, mm, dd, tzinfo=timezone.utc)
         except ValueError:
             return None
+
     return None
 
 
@@ -247,11 +267,6 @@ def _only_digits(s: str | None) -> str:
 
 
 def _normalize_lookup_number(raw: str | None) -> tuple[str | None, str | None]:
-    """
-    Retorna:
-      - numero_db_norm  => padrão do banco (10/11 dígitos sem 55)
-      - numero_send_norm => padrão de envio (55 + número)
-    """
     return normalize_phone_for_db(raw), normalize_phone_for_send(raw)
 
 
@@ -303,15 +318,36 @@ def _set_if_changed(row, field: str, value) -> bool:
         return False
     if value is None or value == "":
         return False
+
     old = getattr(row, field)
     if old != value:
         setattr(row, field, value)
         return True
+
+    return False
+
+
+def _set_nullable_if_changed(row, field: str, value) -> bool:
+    if not hasattr(row, field):
+        return False
+
+    old = getattr(row, field)
+    if old != value:
+        setattr(row, field, value)
+        return True
+
     return False
 
 
 def _avatar_proxy_url(cliente_id: int) -> str:
     return f"/api/atendimento/avatar/{int(cliente_id)}"
+
+
+def _avatar_proxy_url_kind(conversation_id: int, kind: str) -> str:
+    kind_norm = str(kind or "cliente").strip().lower()
+    if kind_norm in {"grupo", "group", "g"}:
+        return f"/api/atendimento/avatar/{int(conversation_id)}?kind=grupo"
+    return f"/api/atendimento/avatar/{int(conversation_id)}?kind=cliente"
 
 
 def _safe_json(resp: requests.Response) -> dict:
@@ -334,6 +370,7 @@ def _extract_picture_url(data: dict) -> Optional[str]:
         data.get("imgUrl"),
         data.get("avatar"),
         data.get("avatarUrl"),
+        data.get("url"),
     ]
 
     status_obj = data.get("status")
@@ -342,6 +379,19 @@ def _extract_picture_url(data: dict) -> Optional[str]:
             status_obj.get("picture"),
             status_obj.get("profilePictureUrl"),
             status_obj.get("profilePicUrl"),
+            status_obj.get("pictureUrl"),
+        ])
+
+    group_obj = data.get("group")
+    if isinstance(group_obj, dict):
+        candidates.extend([
+            group_obj.get("picture"),
+            group_obj.get("profilePictureUrl"),
+            group_obj.get("profilePicUrl"),
+            group_obj.get("pictureUrl"),
+            group_obj.get("imgUrl"),
+            group_obj.get("avatar"),
+            group_obj.get("avatarUrl"),
         ])
 
     for v in candidates:
@@ -353,11 +403,10 @@ def _extract_picture_url(data: dict) -> Optional[str]:
     return None
 
 
+# =========================================================
+# Evolution: perfil contato
+# =========================================================
 def _evo_fetch_profile_picture_url(instance_name: str, numero_send_norm: str) -> Optional[str]:
-    """
-    Fallback para versões da Evolution que só devolvem a foto
-    em /chat/fetchProfilePictureUrl/{instance}
-    """
     if not EVOLUTION_URL or not instance_name or not numero_send_norm:
         return None
 
@@ -414,6 +463,98 @@ def _evo_fetch_profile(instance_name: str, numero_send_norm: str) -> Dict[str, A
     return {}
 
 
+# =========================================================
+# Evolution: perfil grupo
+# =========================================================
+def _evo_fetch_group_infos(instance_name: str, group_jid: str) -> Dict[str, Any]:
+    if not EVOLUTION_URL or not instance_name or not group_jid:
+        return {}
+
+    url = f"{EVOLUTION_URL}/group/findGroupInfos/{instance_name}"
+
+    param_candidates = [
+        {"groupJid": group_jid},
+        {"remoteJid": group_jid},
+        {"jid": group_jid},
+    ]
+
+    for params in param_candidates:
+        try:
+            r = requests.get(url, headers=HEADERS, params=params, timeout=25)
+        except requests.RequestException:
+            continue
+
+        if r.status_code != 200:
+            continue
+
+        data = _safe_json(r)
+        if data:
+            return data
+
+    body_candidates = [
+        {"groupJid": group_jid},
+        {"remoteJid": group_jid},
+        {"jid": group_jid},
+    ]
+
+    for body in body_candidates:
+        try:
+            r = requests.post(url, headers=HEADERS, json=body, timeout=25)
+        except requests.RequestException:
+            continue
+
+        if r.status_code != 200:
+            continue
+
+        data = _safe_json(r)
+        if data:
+            return data
+
+    return {}
+
+
+def _evo_fetch_profile_picture_url_any_jid(instance_name: str, jid: str) -> Optional[str]:
+    if not EVOLUTION_URL or not instance_name or not jid:
+        return None
+
+    url = f"{EVOLUTION_URL}/chat/fetchProfilePictureUrl/{instance_name}"
+
+    payloads = [
+        {"number": jid},
+        {"remoteJid": jid},
+        {"jid": jid},
+        {"groupJid": jid},
+    ]
+
+    for body in payloads:
+        try:
+            r = requests.post(url, headers=HEADERS, json=body, timeout=20)
+        except requests.RequestException:
+            continue
+
+        if r.status_code != 200:
+            continue
+
+        data = _safe_json(r)
+        pic = _extract_picture_url(data)
+        if pic:
+            return pic
+
+    return None
+
+
+def _evo_fetch_group_picture_url(instance_name: str, group_jid: str) -> Optional[str]:
+    infos = _evo_fetch_group_infos(instance_name, group_jid)
+    pic = _extract_picture_url(infos)
+    if pic:
+        return pic
+
+    return _evo_fetch_profile_picture_url_any_jid(instance_name, group_jid)
+
+
+# =========================================================
+# Resolução de instância para refresh
+# =========================================================
 def _resolve_instance_name_for_cliente(
     db: Session,
     *,
@@ -444,6 +585,7 @@ def _resolve_instance_name_for_cliente(
         return str(row[0])
 
     q2 = db.query(models.EmpresaInstancia).filter(models.EmpresaInstancia.empresa_id == int(empresa_id))
+
     if allowed is not None:
         if not allowed:
             return None
@@ -454,14 +596,84 @@ def _resolve_instance_name_for_cliente(
         models.EmpresaInstancia.last_seen.desc().nullslast(),
         models.EmpresaInstancia.id.asc(),
     ).first()
+
     return row2.instance_name if row2 else None
 
 
+def _resolve_instance_name_for_grupo(
+    db: Session,
+    *,
+    empresa_id: int,
+    grupo,
+    allowed: Optional[List[int]],
+) -> Optional[str]:
+    grupo_inst_id = _to_int(getattr(grupo, "instancia_id", None))
+
+    if grupo_inst_id is not None:
+        q = db.query(models.EmpresaInstancia).filter(
+            models.EmpresaInstancia.empresa_id == int(empresa_id),
+            models.EmpresaInstancia.id == int(grupo_inst_id),
+        )
+
+        if allowed is not None:
+            if not allowed:
+                return None
+            q = q.filter(models.EmpresaInstancia.id.in_([int(x) for x in allowed]))
+
+        row = q.first()
+        if row:
+            return row.instance_name
+
+    try:
+        q_msg = (
+            db.query(
+                models.EmpresaInstancia.instance_name,
+                models.MensagemGrupo.instancia_id,
+            )
+            .join(models.EmpresaInstancia, models.EmpresaInstancia.id == models.MensagemGrupo.instancia_id)
+            .filter(
+                models.MensagemGrupo.empresa_id == int(empresa_id),
+                models.MensagemGrupo.grupo_id == int(grupo.id),
+                models.MensagemGrupo.instancia_id.isnot(None),
+            )
+        )
+
+        if allowed is not None:
+            if not allowed:
+                return None
+            q_msg = q_msg.filter(models.MensagemGrupo.instancia_id.in_([int(x) for x in allowed]))
+
+        row_msg = q_msg.order_by(models.MensagemGrupo.id.desc()).first()
+        if row_msg and row_msg[0]:
+            return str(row_msg[0])
+    except Exception:
+        pass
+
+    q2 = db.query(models.EmpresaInstancia).filter(models.EmpresaInstancia.empresa_id == int(empresa_id))
+
+    if allowed is not None:
+        if not allowed:
+            return None
+        q2 = q2.filter(models.EmpresaInstancia.id.in_([int(x) for x in allowed]))
+
+    row2 = q2.order_by(
+        models.EmpresaInstancia.connected.desc(),
+        models.EmpresaInstancia.last_seen.desc().nullslast(),
+        models.EmpresaInstancia.id.asc(),
+    ).first()
+
+    return row2.instance_name if row2 else None
+
+
+# =========================================================
+# Download/avatar
+# =========================================================
 def _download_avatar_binary(url: str) -> Optional[Tuple[bytes, str]]:
     if not url:
         return None
 
     headers = {}
+
     if EVOLUTION_URL and url.startswith(EVOLUTION_URL) and EVOLUTION_KEY:
         headers = {"apikey": EVOLUTION_KEY}
 
@@ -474,19 +686,471 @@ def _download_avatar_binary(url: str) -> Optional[Tuple[bytes, str]]:
         return None
 
     content_type = r.headers.get("content-type") or "image/jpeg"
+
+    if not str(content_type).lower().startswith("image/"):
+        return None
+
     return r.content, content_type
 
 
-def _refresh_avatar_for_cliente(
+def _avatar_response_from_url(raw_url: str | None):
+    raw = (raw_url or "").strip()
+    if not raw:
+        return None
+
+    downloaded = _download_avatar_binary(raw)
+    if not downloaded:
+        return None
+
+    content, content_type = downloaded
+    resp = Response(content=content, media_type=content_type)
+    resp.headers["Cache-Control"] = "private, max-age=3600"
+    return resp
+
+
+def _refresh_profile_for_grupo(
+    db: Session,
+    *,
+    grupo,
+    empresa_id: int,
+    allowed: Optional[List[int]],
+) -> Dict[str, Any]:
+    remote_jid = (getattr(grupo, "remote_jid", None) or "").strip()
+    if not remote_jid:
+        return {}
+
+    instance_name = _resolve_instance_name_for_grupo(
+        db,
+        empresa_id=int(empresa_id),
+        grupo=grupo,
+        allowed=allowed,
+    )
+    if not instance_name:
+        return {}
+
+    picture_url = _evo_fetch_group_picture_url(instance_name, remote_jid)
+    if not picture_url:
+        return {}
+
+    changed = False
+
+    if hasattr(grupo, "avatar_url"):
+        old = (getattr(grupo, "avatar_url", None) or "").strip()
+        if old != picture_url:
+            grupo.avatar_url = picture_url
+            changed = True
+
+    try:
+        infos = _evo_fetch_group_infos(instance_name, remote_jid)
+        subject = (
+            infos.get("subject")
+            or infos.get("name")
+            or infos.get("pushName")
+            or ((infos.get("group") or {}).get("subject") if isinstance(infos.get("group"), dict) else None)
+        )
+
+        if subject and hasattr(grupo, "nome"):
+            if (getattr(grupo, "nome", None) or "").strip() != str(subject).strip():
+                grupo.nome = str(subject).strip()
+                changed = True
+    except Exception:
+        pass
+
+    if changed:
+        try:
+            db.commit()
+            db.refresh(grupo)
+        except Exception:
+            db.rollback()
+
+    return {
+        "remote_jid": remote_jid,
+        "instance_name": instance_name,
+        "picture": picture_url,
+        "profilePictureUrl": picture_url,
+    }
+
+
+# =========================================================
+# Mídias do perfil
+# =========================================================
+def _midia_categoria(row) -> str:
+    tipo = (getattr(row, "tipo", None) or "").strip().lower()
+    mime = (getattr(row, "mimetype", None) or "").strip().lower()
+    name = (
+        getattr(row, "nome_original", None)
+        or getattr(row, "filename", None)
+        or ""
+    ).strip().lower()
+
+    blob = " ".join([tipo, mime, name])
+
+    if any(x in blob for x in ["image/", "imagem", "image", "foto", "jpeg", "jpg", "png", "webp", "gif"]):
+        return "imagem"
+
+    if any(x in blob for x in ["video/", "vídeo", "video", "mp4", "mov", "avi", "mkv", "webm"]):
+        return "video"
+
+    if any(x in blob for x in ["audio/", "áudio", "audio", "ptt", "ogg", "mp3", "wav", "m4a", "opus"]):
+        return "audio"
+
+    return "documento"
+
+
+def _midia_public_url(midia_id: int) -> str:
+    return f"/api/atendimento/midias/{int(midia_id)}"
+
+
+def _midia_msg_url(msg_id: str | None) -> Optional[str]:
+    if not msg_id:
+        return None
+    return f"/api/atendimento/midias/msg/{quote(str(msg_id), safe='')}"
+
+
+def _build_media_payload(m) -> Dict[str, Any]:
+    categoria = _midia_categoria(m)
+
+    mensagem = getattr(m, "mensagem", None)
+    raw_msg_id = getattr(mensagem, "msg_id", None) if mensagem is not None else None
+
+    media_url = (
+        (getattr(m, "url", None) or "").strip()
+        or _midia_public_url(int(m.id))
+    )
+
+    return {
+        "id": int(m.id),
+        "mensagem_id": int(m.mensagem_id) if getattr(m, "mensagem_id", None) is not None else None,
+        "msg_id": raw_msg_id,
+        "tipo": getattr(m, "tipo", None),
+        "categoria": categoria,
+        "filename": getattr(m, "filename", None),
+        "nome_original": getattr(m, "nome_original", None),
+        "mimetype": getattr(m, "mimetype", None),
+        "tamanho": getattr(m, "tamanho", None),
+        "page_count": getattr(m, "page_count", None),
+        "created_at": getattr(m, "created_at", None).isoformat() if getattr(m, "created_at", None) else None,
+        "url": media_url,
+        "download_url": _midia_public_url(int(m.id)),
+        "message_media_url": _midia_msg_url(raw_msg_id),
+        "thumb_url": media_url if categoria in {"imagem", "video"} else None,
+    }
+
+
+def _build_midias_for_cliente(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente_id: int,
+    recent_limit: int = 24,
+) -> tuple[Dict[str, int], List[Dict[str, Any]]]:
+    q_base = (
+        db.query(models.Midia)
+        .filter(
+            models.Midia.empresa_id == int(empresa_id),
+            models.Midia.cliente_id == int(cliente_id),
+        )
+    )
+
+    total = q_base.count()
+
+    imagens = 0
+    videos = 0
+    audios = 0
+    documentos = 0
+
+    all_rows = (
+        q_base
+        .order_by(models.Midia.created_at.desc().nullslast(), models.Midia.id.desc())
+        .all()
+    )
+
+    for row in all_rows:
+        cat = _midia_categoria(row)
+        if cat == "imagem":
+            imagens += 1
+        elif cat == "video":
+            videos += 1
+        elif cat == "audio":
+            audios += 1
+        else:
+            documentos += 1
+
+    recent_rows = (
+        db.query(models.Midia)
+        .filter(
+            models.Midia.empresa_id == int(empresa_id),
+            models.Midia.cliente_id == int(cliente_id),
+        )
+        .order_by(models.Midia.created_at.desc().nullslast(), models.Midia.id.desc())
+        .limit(int(recent_limit))
+        .all()
+    )
+
+    recentes = [_build_media_payload(row) for row in recent_rows]
+
+    resumo = {
+        "total": int(total or 0),
+        "imagens": int(imagens or 0),
+        "videos": int(videos or 0),
+        "audios": int(audios or 0),
+        "documentos": int(documentos or 0),
+    }
+
+    return resumo, recentes
+
+
+
+def _build_midias_for_grupo(
+    db: Session,
+    *,
+    empresa_id: int,
+    grupo_id: int,
+    recent_limit: int = 24,
+) -> tuple[Dict[str, int], List[Dict[str, Any]]]:
+    msg_ids_q = (
+        db.query(models.MensagemGrupo.id)
+        .filter(
+            models.MensagemGrupo.empresa_id == int(empresa_id),
+            models.MensagemGrupo.grupo_id == int(grupo_id),
+        )
+    )
+
+    q_base = (
+        db.query(models.Midia)
+        .filter(models.Midia.empresa_id == int(empresa_id))
+        .filter(
+            or_(
+                models.Midia.grupo_id == int(grupo_id),
+                models.Midia.mensagem_grupo_id.in_(msg_ids_q),
+            )
+        )
+    )
+
+    total = q_base.count()
+
+    imagens = 0
+    videos = 0
+    audios = 0
+    documentos = 0
+
+    all_rows = (
+        q_base
+        .order_by(models.Midia.created_at.desc().nullslast(), models.Midia.id.desc())
+        .all()
+    )
+
+    for row in all_rows:
+        cat = _midia_categoria(row)
+        if cat == "imagem":
+            imagens += 1
+        elif cat == "video":
+            videos += 1
+        elif cat == "audio":
+            audios += 1
+        else:
+            documentos += 1
+
+    recent_rows = (
+        q_base
+        .order_by(models.Midia.created_at.desc().nullslast(), models.Midia.id.desc())
+        .limit(int(recent_limit))
+        .all()
+    )
+
+    recentes = [_build_media_payload(row) for row in recent_rows]
+
+    resumo = {
+        "total": int(total or 0),
+        "imagens": int(imagens or 0),
+        "videos": int(videos or 0),
+        "audios": int(audios or 0),
+        "documentos": int(documentos or 0),
+    }
+
+    return resumo, recentes
+
+
+def _assert_grupo_profile_access(
+    db: Session,
+    *,
+    identity,
+    empresa_id: int,
+    grupo_id: int,
+):
+    grp = (
+        db.query(models.Grupo)
+        .filter(
+            models.Grupo.empresa_id == int(empresa_id),
+            models.Grupo.id == int(grupo_id),
+        )
+        .first()
+    )
+
+    if not grp:
+        raise HTTPException(404, "Grupo não encontrado")
+
+    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=int(empresa_id))
+    allowed = acl_ctx["allowed_instancias"]
+
+    grp_inst_id = _to_int(getattr(grp, "instancia_id", None))
+    if grp_inst_id is not None:
+        assert_instancia_allowed(allowed_instancias=allowed, instancia_id=int(grp_inst_id))
+    elif allowed is not None and not allowed:
+        raise HTTPException(status_code=403, detail="Sem instâncias permitidas para este usuário")
+
+    return grp, allowed
+
+
+def _build_group_profile_payload(db: Session, grp) -> Dict[str, Any]:
+    raw_avatar = (getattr(grp, "avatar_url", None) or "").strip()
+    avatar_proxy = _avatar_proxy_url_kind(int(grp.id), "grupo")
+
+    midias_resumo, midias_recentes = _build_midias_for_grupo(
+        db,
+        empresa_id=int(grp.empresa_id),
+        grupo_id=int(grp.id),
+        recent_limit=24,
+    )
+
+    nome = (getattr(grp, "nome", None) or "").strip() or "Grupo"
+    descricao = (getattr(grp, "descricao", None) or "").strip() or None
+    remote_jid = (getattr(grp, "remote_jid", None) or "").strip() or None
+
+    return {
+        "kind": "grupo",
+        "is_group": True,
+        "id": int(grp.id),
+        "grupo_id": int(grp.id),
+        "empresa_id": int(grp.empresa_id),
+        "instancia_id": _to_int(getattr(grp, "instancia_id", None)),
+        "remote_jid": remote_jid,
+
+        "nome": nome,
+        "nome_grupo": nome,
+        "nome_whatsapp": nome,
+        "nome_completo": nome,
+
+        "telefone": remote_jid,
+        "telefone_norm": None,
+        "telefone_e164": None,
+        "telefone_fmt": "Grupo do WhatsApp",
+
+        "avatar_url": avatar_proxy,
+        "avatar_remote_url": raw_avatar or None,
+
+        "is_business": False,
+        "status_text": descricao or "Grupo do WhatsApp",
+        "description": descricao,
+        "sobre_cliente": descricao,
+        "descricao": descricao,
+        "business_info": None,
+
+        "cpf_cnpj": None,
+        "rg": None,
+        "email": None,
+        "data_nascimento": None,
+        "genero": None,
+        "cep": None,
+        "endereco": None,
+        "numero": None,
+        "complemento": None,
+        "bairro": None,
+        "cidade": None,
+        "estado": None,
+        "departamento_id": None,
+        "atendimento_id": None,
+
+        "midias_resumo": midias_resumo,
+        "midias_recentes": midias_recentes,
+    }
+
+
+def _build_profile_payload(db: Session, cli, atd) -> Dict[str, Any]:
+    raw_avatar = (getattr(cli, "avatar_url", None) or "").strip()
+    avatar_proxy = _avatar_proxy_url(int(cli.id)) if raw_avatar else None
+
+    telefone_raw = getattr(cli, "telefone", None)
+    telefone_db_norm, telefone_send_norm = _normalize_lookup_number(telefone_raw)
+
+    is_business = bool(getattr(cli, "is_business", False))
+
+    business_info = None
+    if is_business:
+        business_info = {
+            "email": getattr(cli, "email", None),
+            "description": getattr(cli, "descricao", None),
+            "website": getattr(cli, "website", None),
+        }
+
+    midias_resumo, midias_recentes = _build_midias_for_cliente(
+        db,
+        empresa_id=int(cli.empresa_id),
+        cliente_id=int(cli.id),
+        recent_limit=24,
+    )
+
+    return {
+        "id": cli.id,
+        "empresa_id": cli.empresa_id,
+        "telefone": telefone_raw,
+        "telefone_norm": telefone_db_norm,
+        "telefone_e164": telefone_send_norm,
+        "telefone_fmt": formatar_telefone_br(telefone_send_norm) if telefone_send_norm else None,
+
+        "avatar_url": avatar_proxy,
+        "avatar_remote_url": raw_avatar or None,
+
+        "nome": getattr(cli, "nome", None),
+        "nome_whatsapp": getattr(cli, "nome_whatsapp", None),
+        "nome_completo": getattr(cli, "nome_completo", None),
+
+        "cpf_cnpj": getattr(cli, "cpf_cnpj", None),
+        "rg": getattr(cli, "rg", None),
+
+        "email": business_info["email"] if business_info else None,
+        "data_nascimento": (
+            cli.data_nascimento.date().isoformat() if getattr(cli, "data_nascimento", None) else None
+        ),
+        "genero": getattr(cli, "genero", None),
+
+        "cep": getattr(cli, "cep", None),
+        "endereco": getattr(cli, "endereco", None),
+        "numero": getattr(cli, "numero", None),
+        "complemento": getattr(cli, "complemento", None),
+        "bairro": getattr(cli, "bairro", None),
+        "cidade": getattr(cli, "cidade", None),
+        "estado": getattr(cli, "estado", None),
+
+        "is_business": is_business,
+        "status_text": getattr(cli, "status_whatsapp", None),
+
+        "description": business_info["description"] if business_info else None,
+        "website": business_info["website"] if business_info else None,
+        "business_info": business_info,
+
+        "sobre_cliente": getattr(cli, "sobre_cliente", None),
+
+        "departamento_id": (
+            getattr(atd, "departamento_id", None) if atd is not None else getattr(cli, "departamento_id", None)
+        ),
+        "atendimento_id": getattr(atd, "id", None) if atd is not None else None,
+
+        "midias_resumo": midias_resumo,
+        "midias_recentes": midias_recentes,
+    }
+
+
+def _refresh_profile_for_cliente(
     db: Session,
     *,
     cli,
     empresa_id: int,
     allowed: Optional[List[int]],
-) -> Optional[str]:
+) -> Dict[str, Any]:
     numero_db_norm, numero_send_norm = _normalize_lookup_number(getattr(cli, "telefone", None))
     if not numero_send_norm:
-        return None
+        return {}
 
     instance_name = _resolve_instance_name_for_cliente(
         db,
@@ -495,33 +1159,43 @@ def _refresh_avatar_for_cliente(
         allowed=allowed,
     )
     if not instance_name:
-        return None
+        return {}
 
     data = _evo_fetch_profile(instance_name, numero_send_norm)
-    pic = _extract_picture_url(data)
+    if not data:
+        return {}
 
-    if not pic:
-        pic = _evo_fetch_profile_picture_url(instance_name, numero_send_norm)
+    picture_url = _extract_picture_url(data)
+    if not picture_url:
+        picture_url = _evo_fetch_profile_picture_url(instance_name, numero_send_norm)
 
-    if not pic:
-        return None
+    status_obj = data.get("status") if isinstance(data.get("status"), dict) else {
+        "status": data.get("status"),
+        "setAt": data.get("statusAt"),
+    }
 
-    old = (getattr(cli, "avatar_url", None) or "").strip()
+    is_business_raw = data.get("isBusiness")
+    if is_business_raw is None:
+        is_business_raw = data.get("business")
+    if is_business_raw is None:
+        is_business_raw = data.get("is_business")
+    is_business = bool(is_business_raw)
+
     changed = False
 
-    if old != pic:
-        setattr(cli, "avatar_url", pic)
-        changed = True
-
-    name = (
-        data.get("name")
-        or data.get("pushName")
-        or data.get("verifiedName")
-        or None
+    changed |= _set_nullable_if_changed(
+        cli,
+        "nome_whatsapp",
+        _clean(data.get("name") or data.get("pushName") or data.get("verifiedName")),
     )
-    if name and hasattr(cli, "nome_whatsapp") and getattr(cli, "nome_whatsapp", None) != name:
-        setattr(cli, "nome_whatsapp", name)
-        changed = True
+    changed |= _set_nullable_if_changed(cli, "avatar_url", _clean(picture_url))
+    changed |= _set_nullable_if_changed(cli, "status_whatsapp", _clean(status_obj.get("status")))
+    changed |= _set_nullable_if_changed(cli, "is_business", is_business)
+
+    if is_business:
+        changed |= _set_nullable_if_changed(cli, "email", _clean(data.get("email")))
+        changed |= _set_nullable_if_changed(cli, "descricao", _clean(data.get("description") or data.get("about")))
+        changed |= _set_nullable_if_changed(cli, "website", _clean(data.get("website")))
 
     if hasattr(cli, "profile_refreshed_at"):
         setattr(cli, "profile_refreshed_at", datetime.now(timezone.utc))
@@ -531,19 +1205,52 @@ def _refresh_avatar_for_cliente(
         try:
             db.commit()
             db.refresh(cli)
+        except ProgrammingError as e:
+            db.rollback()
+            if "generated" not in str(e).lower():
+                raise
         except Exception:
             db.rollback()
 
-    return pic
+    return {
+        "wuid": data.get("wuid") or data.get("wid") or data.get("id"),
+        "name": data.get("name") or data.get("pushName") or data.get("verifiedName"),
+        "numberExists": data.get("numberExists") if "numberExists" in data else data.get("exists"),
+        "picture": picture_url,
+        "profilePictureUrl": picture_url,
+        "status": status_obj if isinstance(status_obj, dict) else {},
+        "isBusiness": is_business,
+        "email": data.get("email") if is_business else None,
+        "description": (data.get("description") or data.get("about")) if is_business else None,
+        "website": data.get("website") if is_business else None,
+        "telefone_norm": numero_db_norm,
+        "telefone_e164": numero_send_norm,
+        "telefone_fmt": formatar_telefone_br(numero_send_norm) if numero_send_norm else None,
+    }
 
 
 UPDATABLE_FIELDS = {
     "avatar_url",
-    "wuid", "whatsapp_exists", "is_business", "status_text", "status_set_at",
-    "email", "description", "website",
-    "nome_completo", "cpf_cnpj", "rg",
-    "data_nascimento", "genero",
-    "cep", "endereco", "numero", "complemento", "bairro", "cidade", "estado",
+    "wuid",
+    "whatsapp_exists",
+    "is_business",
+    "status_text",
+    "status_set_at",
+    "email",
+    "description",
+    "website",
+    "nome_completo",
+    "cpf_cnpj",
+    "rg",
+    "data_nascimento",
+    "genero",
+    "cep",
+    "endereco",
+    "numero",
+    "complemento",
+    "bairro",
+    "cidade",
+    "estado",
     "sobre_cliente",
 }
 
@@ -553,7 +1260,9 @@ FIELD_MAP = {
 }
 
 
-# ============= ROTAS EVOLUTION: fetchProfile =============
+# =========================================================
+# ROTAS EVOLUTION: fetchProfile contato
+# =========================================================
 @router.post("/evolution/fetchProfile")
 def evolution_fetch_profile(
     payload: FetchProfileIn,
@@ -568,12 +1277,17 @@ def evolution_fetch_profile(
         raise HTTPException(400, "Campo 'number' é obrigatório.")
 
     empresa_id_eff = assert_same_company(identity, payload.empresa_id)
+
     acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
     allowed = acl_ctx["allowed_instancias"]
 
     resolved_inst_id, resolved_inst_name = _resolve_instancia_id(
-        db, empresa_id=empresa_id_eff, instancia_id=payload.instancia_id, instance=payload.instance
+        db,
+        empresa_id=empresa_id_eff,
+        instancia_id=payload.instancia_id,
+        instance=payload.instance,
     )
+
     if (payload.instancia_id is not None or payload.instance) and resolved_inst_id is None:
         raise HTTPException(404, "Instância não encontrada para a empresa.")
 
@@ -608,7 +1322,7 @@ def evolution_fetch_profile(
         "picture": picture_url,
         "profilePictureUrl": picture_url,
         "status": data.get("status") if isinstance(data.get("status"), dict)
-                   else {"status": data.get("status"), "setAt": data.get("statusAt")},
+        else {"status": data.get("status"), "setAt": data.get("statusAt")},
         "isBusiness": data.get("isBusiness") if "isBusiness" in data else (data.get("business") or data.get("is_business")),
         "email": data.get("email"),
         "description": data.get("description") or data.get("about"),
@@ -625,8 +1339,8 @@ def evolution_fetch_profile(
     )
 
     changed = False
+
     if cli:
-        # ACL composta: departamento + instância
         assert_cliente_access(
             db,
             identity=identity,
@@ -637,6 +1351,7 @@ def evolution_fetch_profile(
         )
 
         changed |= _set_if_changed(cli, "is_business", bool(normalized.get("isBusiness")))
+
         status_obj = normalized.get("status") or {}
         changed |= _set_if_changed(cli, "status_whatsapp", (status_obj.get("status") or None))
         changed |= _set_if_changed(cli, "descricao", normalized.get("description"))
@@ -671,57 +1386,173 @@ def evolution_fetch_profile(
 
 
 # =========================================================
-# AVATAR PROXY
+# AVATAR PROXY: cliente ou grupo
 # =========================================================
-@router.get("/atendimento/avatar/{cliente_id}")
+@router.get("/atendimento/avatar/{conversation_id}")
 def atendimento_avatar(
-    cliente_id: int = Path(..., ge=1),
+    conversation_id: int = Path(..., ge=1),
+    kind: str = Query("cliente", description="cliente ou grupo"),
+    empresa_id: int | None = Query(None),
+    instancia_id: int | None = Query(None),
+    instance: str | None = Query(None),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
     ensure_perm(identity, "atendimento.ver")
 
-    empresa_id_token = int(identity["empresa_id"])
-    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_token)
+    empresa_id_eff = assert_same_company(identity, empresa_id)
+    kind_norm = str(kind or "cliente").strip().lower()
+
+    acl_ctx = resolve_acl_context(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id_eff),
+    )
     allowed = acl_ctx["allowed_instancias"]
 
+    resolved_inst_id, _resolved_inst_name = _resolve_instancia_id(
+        db,
+        empresa_id=int(empresa_id_eff),
+        instancia_id=instancia_id,
+        instance=instance,
+    )
+
+    if (instancia_id is not None or instance) and resolved_inst_id is None:
+        raise HTTPException(404, "Instância não encontrada para a empresa.")
+
+    if resolved_inst_id is not None:
+        assert_instancia_allowed(allowed_instancias=allowed, instancia_id=resolved_inst_id)
+
+    # =====================================================
+    # GRUPO
+    # =====================================================
+    if kind_norm in {"grupo", "group", "g"}:
+        grp = (
+            db.query(models.Grupo)
+            .filter(
+                models.Grupo.id == int(conversation_id),
+                models.Grupo.empresa_id == int(empresa_id_eff),
+            )
+            .first()
+        )
+
+        if not grp:
+            raise HTTPException(status_code=404, detail="Grupo não encontrado")
+
+        grp_inst_id = _to_int(getattr(grp, "instancia_id", None))
+
+        if resolved_inst_id is not None and grp_inst_id is not None and int(grp_inst_id) != int(resolved_inst_id):
+            raise HTTPException(status_code=404, detail="Grupo não encontrado nesta instância")
+
+        if grp_inst_id is not None:
+            assert_instancia_allowed(allowed_instancias=allowed, instancia_id=int(grp_inst_id))
+        elif allowed is not None and not allowed:
+            raise HTTPException(status_code=403, detail="Sem instâncias permitidas para este usuário")
+
+        raw_url = (getattr(grp, "avatar_url", None) or "").strip()
+        resp = _avatar_response_from_url(raw_url)
+        if resp is not None:
+            return resp
+
+        try:
+            evo_data = _refresh_profile_for_grupo(
+                db,
+                grupo=grp,
+                empresa_id=int(empresa_id_eff),
+                allowed=allowed,
+            )
+
+            try:
+                db.refresh(grp)
+            except Exception:
+                pass
+
+            raw_url = (getattr(grp, "avatar_url", None) or "").strip()
+            resp = _avatar_response_from_url(raw_url)
+            if resp is not None:
+                return resp
+
+            if isinstance(evo_data, dict):
+                fallback_url = (
+                    evo_data.get("profilePictureUrl")
+                    or evo_data.get("picture")
+                    or evo_data.get("profilePicUrl")
+                    or evo_data.get("avatar_url")
+                )
+                resp = _avatar_response_from_url(fallback_url)
+                if resp is not None:
+                    return resp
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            try:
+                print("[ATENDIMENTO][AVATAR_GRUPO][ERRO_REFRESH]", e)
+            except Exception:
+                pass
+
+        raise HTTPException(status_code=404, detail="Avatar do grupo não encontrado")
+
+    # =====================================================
+    # CLIENTE
+    # =====================================================
     cli, _atd = assert_cliente_access(
         db,
         identity=identity,
-        empresa_id=empresa_id_token,
-        cliente_id=int(cliente_id),
-        instancia_id=None,
+        empresa_id=int(empresa_id_eff),
+        cliente_id=int(conversation_id),
+        instancia_id=resolved_inst_id,
         allow_unassigned_department=False,
     )
 
     raw_url = (getattr(cli, "avatar_url", None) or "").strip()
-    if raw_url:
-        downloaded = _download_avatar_binary(raw_url)
-        if downloaded:
-            content, content_type = downloaded
-            resp = Response(content=content, media_type=content_type)
-            resp.headers["Cache-Control"] = "private, max-age=3600"
+    resp = _avatar_response_from_url(raw_url)
+    if resp is not None:
+        return resp
+
+    try:
+        evo_data = _refresh_profile_for_cliente(
+            db,
+            cli=cli,
+            empresa_id=int(empresa_id_eff),
+            allowed=allowed,
+        )
+
+        try:
+            db.refresh(cli)
+        except Exception:
+            pass
+
+        raw_url = (getattr(cli, "avatar_url", None) or "").strip()
+        resp = _avatar_response_from_url(raw_url)
+        if resp is not None:
             return resp
 
-    fresh_url = _refresh_avatar_for_cliente(
-        db,
-        cli=cli,
-        empresa_id=int(empresa_id_token),
-        allowed=allowed,
-    )
+        if isinstance(evo_data, dict):
+            fallback_url = (
+                evo_data.get("profilePictureUrl")
+                or evo_data.get("picture")
+                or evo_data.get("profilePicUrl")
+                or evo_data.get("avatar_url")
+            )
+            resp = _avatar_response_from_url(fallback_url)
+            if resp is not None:
+                return resp
 
-    if fresh_url:
-        downloaded = _download_avatar_binary(fresh_url)
-        if downloaded:
-            content, content_type = downloaded
-            resp = Response(content=content, media_type=content_type)
-            resp.headers["Cache-Control"] = "private, max-age=3600"
-            return resp
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            print("[ATENDIMENTO][AVATAR_CLIENTE][ERRO_REFRESH]", e)
+        except Exception:
+            pass
 
     raise HTTPException(status_code=404, detail="Avatar não encontrado")
 
 
-# ---- Perfil completo (ler do BD) ----
+# =========================================================
+# Perfil completo cliente
+# =========================================================
 @router.get("/atendimento/clientes/{cliente_id}/profile")
 def get_cliente_profile(
     cliente_id: int,
@@ -742,51 +1573,55 @@ def get_cliente_profile(
         allow_unassigned_department=False,
     )
 
-    raw_avatar = (getattr(cli, "avatar_url", None) or "").strip()
-    avatar_proxy = _avatar_proxy_url(int(cli.id)) if raw_avatar else None
-
-    telefone_raw = getattr(cli, "telefone", None)
-    telefone_db_norm, telefone_send_norm = _normalize_lookup_number(telefone_raw)
-
-    return {
-        "id": cli.id,
-        "empresa_id": cli.empresa_id,
-        "telefone": telefone_raw,
-        "telefone_norm": telefone_db_norm,
-        "telefone_e164": telefone_send_norm,
-        "telefone_fmt": formatar_telefone_br(telefone_send_norm) if telefone_send_norm else None,
-        "avatar_url": avatar_proxy,
-        "avatar_remote_url": raw_avatar or None,
-        "nome": getattr(cli, "nome", None),
-        "nome_whatsapp": getattr(cli, "nome_whatsapp", None),
-        "nome_completo": getattr(cli, "nome_completo", None),
-        "cpf_cnpj": getattr(cli, "cpf_cnpj", None),
-        "rg": getattr(cli, "rg", None),
-        "email": getattr(cli, "email", None),
-        "data_nascimento": (
-            cli.data_nascimento.date().isoformat() if getattr(cli, "data_nascimento", None) else None
-        ),
-        "genero": getattr(cli, "genero", None),
-        "cep": getattr(cli, "cep", None),
-        "endereco": getattr(cli, "endereco", None),
-        "numero": getattr(cli, "numero", None),
-        "complemento": getattr(cli, "complemento", None),
-        "bairro": getattr(cli, "bairro", None),
-        "cidade": getattr(cli, "cidade", None),
-        "estado": getattr(cli, "estado", None),
-        "is_business": getattr(cli, "is_business", None),
-        "status_text": getattr(cli, "status_whatsapp", None),
-        "description": getattr(cli, "descricao", None),
-        "website": getattr(cli, "website", None),
-        "sobre_cliente": getattr(cli, "sobre_cliente", None),
-        "departamento_id": (
-            getattr(atd, "departamento_id", None) if atd is not None else getattr(cli, "departamento_id", None)
-        ),
-        "atendimento_id": getattr(atd, "id", None) if atd is not None else None,
-    }
+    return _build_profile_payload(db, cli, atd)
 
 
-# ---- Merge não-destrutivo (NÃO permite atualizar 'nome') ----
+@router.post("/atendimento/clientes/{cliente_id}/profile/refresh")
+def refresh_cliente_profile(
+    cliente_id: int,
+    empresa_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    ensure_perm(identity, "atendimento.ver")
+
+    if not EVOLUTION_URL:
+        raise HTTPException(500, "EVOLUTION_URL não configurada no servidor.")
+
+    empresa_id_eff = assert_same_company(identity, empresa_id)
+
+    cli, atd = assert_cliente_access(
+        db,
+        identity=identity,
+        empresa_id=empresa_id_eff,
+        cliente_id=int(cliente_id),
+        instancia_id=None,
+        allow_unassigned_department=False,
+    )
+
+    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
+    allowed = acl_ctx["allowed_instancias"]
+
+    evo_data = _refresh_profile_for_cliente(
+        db,
+        cli=cli,
+        empresa_id=int(empresa_id_eff),
+        allowed=allowed,
+    )
+
+    try:
+        db.refresh(cli)
+    except Exception:
+        pass
+
+    payload = _build_profile_payload(db, cli, atd)
+    payload["refreshed"] = bool(evo_data)
+    payload["refresh_source"] = "evolution" if evo_data else "db"
+    payload["evolution"] = evo_data or None
+
+    return payload
+
+
 @router.patch("/atendimento/clientes/{cliente_id}/profile")
 @router.put("/atendimento/clientes/{cliente_id}/profile")
 def merge_cliente_profile(
@@ -822,14 +1657,17 @@ def merge_cliente_profile(
             norm["data_nascimento"] = dob_dt
 
     changed = False
+
     for k, v in (norm or {}).items():
         if k not in UPDATABLE_FIELDS:
             continue
+
         v2 = _clean(v)
         if v2 is None:
             continue
 
         dest = FIELD_MAP.get(k, k)
+
         if not hasattr(cli, dest):
             continue
 
@@ -844,7 +1682,127 @@ def merge_cliente_profile(
     return {"ok": True, "changed": changed}
 
 
-# ===== Endpoints para CAMPOS CUSTOM do drawer (compat) =====
+# =========================================================
+# Perfil completo grupo
+# =========================================================
+@router.get("/atendimento/grupos/{grupo_id}/profile")
+def get_grupo_profile(
+    grupo_id: int,
+    empresa_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    ensure_perm(identity, "atendimento.ver")
+
+    empresa_id_eff = assert_same_company(identity, empresa_id)
+
+    grp, _allowed = _assert_grupo_profile_access(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id_eff),
+        grupo_id=int(grupo_id),
+    )
+
+    return _build_group_profile_payload(db, grp)
+
+
+@router.post("/atendimento/grupos/{grupo_id}/profile/refresh")
+def refresh_grupo_profile(
+    grupo_id: int,
+    empresa_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    ensure_perm(identity, "atendimento.ver")
+
+    if not EVOLUTION_URL:
+        raise HTTPException(500, "EVOLUTION_URL não configurada no servidor.")
+
+    empresa_id_eff = assert_same_company(identity, empresa_id)
+
+    grp, allowed = _assert_grupo_profile_access(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id_eff),
+        grupo_id=int(grupo_id),
+    )
+
+    evo_data = _refresh_profile_for_grupo(
+        db,
+        grupo=grp,
+        empresa_id=int(empresa_id_eff),
+        allowed=allowed,
+    )
+
+    try:
+        db.refresh(grp)
+    except Exception:
+        pass
+
+    payload = _build_group_profile_payload(db, grp)
+    payload["refreshed"] = bool(evo_data)
+    payload["refresh_source"] = "evolution" if evo_data else "db"
+    payload["evolution"] = evo_data or None
+
+    return payload
+
+
+@router.patch("/atendimento/grupos/{grupo_id}/profile")
+@router.put("/atendimento/grupos/{grupo_id}/profile")
+def merge_grupo_profile(
+    grupo_id: int,
+    payload: dict = Body(...),
+    empresa_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    ensure_perm(identity, "atendimento.ver")
+
+    empresa_id_eff = assert_same_company(identity, empresa_id)
+
+    grp, _allowed = _assert_grupo_profile_access(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id_eff),
+        grupo_id=int(grupo_id),
+    )
+
+    norm = dict(payload or {})
+
+    nome = _clean(
+        norm.get("nome_grupo")
+        or norm.get("nome")
+        or norm.get("nome_completo")
+        or norm.get("name")
+    )
+    descricao = _clean(
+        norm.get("descricao")
+        or norm.get("description")
+        or norm.get("sobre_cliente")
+        or norm.get("observacoes")
+        or norm.get("notas")
+    )
+
+    changed = False
+
+    if nome and hasattr(grp, "nome") and (getattr(grp, "nome", None) or "") != nome:
+        grp.nome = nome
+        changed = True
+
+    if descricao is not None and hasattr(grp, "descricao") and (getattr(grp, "descricao", None) or "") != descricao:
+        grp.descricao = descricao
+        changed = True
+
+    if changed:
+        db.commit()
+        db.refresh(grp)
+
+    return {"ok": True, "changed": changed, "profile": _build_group_profile_payload(db, grp)}
+
+
+# =========================================================
+# Endpoints compat: campos custom do drawer
+# =========================================================
 @router.get("/clientes/{cliente_id}")
 def cliente_get(
     cliente_id: int,
@@ -906,25 +1864,34 @@ def cliente_put(
         allow_unassigned_department=False,
     )
 
-    incoming = payload.model_dump(exclude_unset=True)
+    if hasattr(payload, "model_dump"):
+        incoming = payload.model_dump(exclude_unset=True)
+    else:
+        incoming = payload.dict(exclude_unset=True)
+
     changed = False
 
+    field_names = set(getattr(SaveCustomIn, "model_fields", {}).keys()) or set(getattr(SaveCustomIn, "__fields__", {}).keys())
+
     for campo, valor in incoming.items():
-        if campo not in SaveCustomIn.model_fields:
+        if campo not in field_names:
             continue
 
         if campo == "data_nascimento":
             dt = _parse_date_any(valor)
             if dt is None:
                 continue
+
             if getattr(cli, "data_nascimento", None) != dt:
                 setattr(cli, "data_nascimento", dt)
                 changed = True
+
             continue
 
         v2 = _norm_str(valor)
         if v2 is None:
             continue
+
         if hasattr(cli, campo) and getattr(cli, campo) != v2:
             setattr(cli, campo, v2)
             changed = True
@@ -957,7 +1924,9 @@ def cliente_put(
     }
 
 
-# ============= BUSCA GLOBAL (contatos + mensagens) =============
+# =========================================================
+# Busca global
+# =========================================================
 @router.get("/atendimento/search")
 def atendimento_search(
     empresa_id: int = Query(...),
@@ -980,8 +1949,12 @@ def atendimento_search(
     allowed = acl_ctx["allowed_instancias"]
 
     resolved_inst_id, _resolved_inst_name = _resolve_instancia_id(
-        db, empresa_id=empresa_id_eff, instancia_id=instancia_id, instance=instance
+        db,
+        empresa_id=empresa_id_eff,
+        instancia_id=instancia_id,
+        instance=instance,
     )
+
     if (instancia_id is not None or instance) and resolved_inst_id is None:
         raise HTTPException(404, "Instância não encontrada para a empresa.")
 
@@ -992,6 +1965,7 @@ def atendimento_search(
     acl_cache: dict[int, bool] = {}
 
     filtros_inst = []
+
     if resolved_inst_id is not None:
         filtros_inst.append(m.instancia_id == int(resolved_inst_id))
     else:
@@ -1028,6 +2002,7 @@ def atendimento_search(
     )
 
     contatos: List[Dict] = []
+
     for cli, last_txt, last_tipo, last_ack, last_ts, last_instancia_id in rows:
         if not _cliente_acl_ok(
             db,
@@ -1049,6 +2024,7 @@ def atendimento_search(
 
         if qn in _normalize_text(nome) or qn in _normalize_text(tel) or qn in _normalize_text(last):
             ts_iso = last_ts.isoformat() if last_ts else None
+
             contatos.append({
                 "id": cli.id,
                 "nome": nome or telefone_fmt,
@@ -1064,10 +2040,12 @@ def atendimento_search(
                 "last_tipo": last_tipo,
                 "last_ack": int(last_ack or 0) if last_tipo == "saida" else None,
             })
+
             if len(contatos) >= limit:
                 break
 
     like = f"%{q}%"
+
     msgs_rows = (
         db.query(
             m.cliente_id,
@@ -1086,6 +2064,7 @@ def atendimento_search(
     )
 
     mensagens: List[Dict] = []
+
     for cid, txt, ts, msg_instancia_id, cli_nome, cli_tel, cli_nome_whats in msgs_rows:
         if not _cliente_acl_ok(
             db,
@@ -1115,16 +2094,8 @@ def atendimento_search(
                 "hora": ts.isoformat() if ts else None,
             }
         )
+
         if len(mensagens) >= limit:
             break
 
     return {"contatos": contatos, "mensagens": mensagens}
-
-
-def _to_int(v) -> Optional[int]:
-    try:
-        if v is None:
-            return None
-        return int(v)
-    except Exception:
-        return None

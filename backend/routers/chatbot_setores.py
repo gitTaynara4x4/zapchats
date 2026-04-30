@@ -15,8 +15,7 @@ from sqlalchemy.orm import Session
 import backend.models as models
 from backend.database import get_db
 
-# Reusa o client Evolution já pronto no send
-from backend.routers.atendimento_send import _evo_post  # type: ignore
+from backend.routers.atendimento_send import _evo_post
 from backend.utils.plans import (
     has_feature as plan_has_feature,
     is_billing_locked,
@@ -102,11 +101,6 @@ def _runtime_feature_allowed(
     empresa_id: int,
     feature_key: str,
 ) -> Tuple[bool, str, Optional[str]]:
-    """
-    Valida se a execução runtime da automação pode rodar.
-    Retorna:
-      (allowed, reason, plan_code)
-    """
     emp = _get_empresa(db, empresa_id)
     if not emp:
         return False, "empresa_not_found", None
@@ -352,13 +346,6 @@ def _fetch_triage_departamentos(
 def _parse_departamento_choice(
     texto: str, deps: List[Dict[str, Any]]
 ) -> Tuple[Optional[int], Optional[int], Optional[str], Optional[Dict[str, Any]]]:
-    """
-    Aceita:
-      - "2" ou "2 - financeiro"
-      - "dep:12"
-      - "financeiro"
-      - palavras-chave configuradas
-    """
     t = _norm_txt(texto)
     if not t:
         return None, None, None, None
@@ -595,8 +582,6 @@ def _fetch_last_conversation_message_time(
     if not row:
         return None
 
-    # A mensagem atual já foi salva antes do hook.
-    # Só existe "mensagem anterior" se vierem 2 linhas.
     if len(row) >= 2:
         return _as_aware_utc(row[1].get("timestamp"))
 
@@ -624,8 +609,6 @@ def _sync_open_atendimento_departamento(
             operador_id=operador_id,
         )
     except Exception:
-        # o repo já tenta se recuperar internamente;
-        # aqui não deixamos o chatbot cair por causa disso
         return
 
 
@@ -639,16 +622,6 @@ def auto_messages_handle_inbound(
     direction: str = "",
     remote_jid: str = "",
 ) -> Dict[str, Any]:
-    """
-    Mensagens automáticas simples:
-      - welcome: envia dentro da janela configurada
-      - off_hours: envia fora da janela configurada
-    Regras:
-      - só processa ENTRADA
-      - respeita chatbot_configs.config.features.auto_messages
-      - evita reenvio em sequência usando dedup por última conversa
-      - respeita billing/feature do plano
-    """
     if (direction or "").lower() == "saida":
         return {"ok": True, "action": "ignore_saida"}
 
@@ -769,21 +742,6 @@ def triagem_handle_inbound(
     remote_jid: str = "",
     ttl_hours: int = TRIAGEM_TTL_HOURS,
 ) -> Dict[str, Any]:
-    """
-    Regra:
-      - Chegou msg ENTRADA:
-          - Se ficou > ttl_hours sem falar: limpa departamento_id/colaborador_id e liga triagem_ativa
-          - Atualiza triagem_ultima_msg_em = agora
-          - Se precisa de triagem: manda menu ou aceita escolha e salva departamento_id
-          - Respeita config salva em chatbot_configs.config.features.auto_messages_departments
-          - respeita billing/feature do plano
-      - Se o TTL expirou, a PRIMEIRA mensagem após expirar sempre mostra o menu
-        e não tenta interpretar o texto como escolha de setor.
-
-    IMPORTANTE:
-      - cliente.departamento_id continua existindo como espelho/fallback
-      - a fonte oficial da conversa passa a ser atendimento.departamento_id
-    """
     if (direction or "").lower() == "saida":
         return {"ok": True, "action": "ignore_saida"}
 
@@ -873,7 +831,6 @@ def triagem_handle_inbound(
         db.commit()
         return {"ok": True, "action": "noop_no_deps_enabled"}
 
-    # Se o TTL expirou, a primeira mensagem após isso só reabre o menu
     if ttl_expired:
         cliente.triagem_ativa = True
         cliente.triagem_tentativas = 1
@@ -984,20 +941,6 @@ def triagem_handle_inbound(
 
 @router.post("/chatbot/setores")
 def webhook_chatbot_setores(payload: Dict[str, Any], db: Session = Depends(get_db)):
-    """
-    Webhook (substitui seu n8n nesse fluxo).
-
-    Aceita:
-      {
-        "empresa_id": 7,
-        "instancia_id": 12,
-        "instancia": "minha-instancia",
-        "numero": "5531986419237" ou "31986419237",
-        "texto": "2",
-        "direction": "entrada"|"saida",
-        "jid": "5531986419237@s.whatsapp.net"
-      }
-    """
     empresa_id = int(payload.get("empresa_id") or 0)
     instancia_id = int(payload.get("instancia_id") or 0)
 

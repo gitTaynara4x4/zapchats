@@ -1,20 +1,19 @@
-// /frontend/js/atendimentos/ws/ws-empresa.js
+// /frontend/js/atendimentos/realtime/ws-empresa.js
 // ====================================================================
-// WebSocket da EMPRESA + da INSTÂNCIA ATIVA (tempo real)
-// - Trata: nova mensagem, ACK, reloads segmentados, conv_status, pin/unpin
-// - Trata: messages_delete (apagada pelo cliente/usuário)
-// - Reconexão com backoff + heartbeat (ping/pong) + medidor de lag
-// - Idempotência básica (merge do eco local por texto+tempo)
-// - Ajustes: unwrap de payloads aninhados; mapear cliente por telefone
-// - Ajustes: força render quando o chat aberto é o alvo (mesmo sem inst)
-// ✅ FIX GRUPOS: cliente_id SEM Number() (BigInteger vira string)
-// ✅ STORE: usa base nova do state/store.js
-// ✅ FIX HORÁRIO: não usa Date.now() para sobrescrever preview antigo
+// ZapsChat - WebSocket da empresa/instância
+//
+// Regra crítica:
+// - Conversa é: tipo + entidade + instância
+// - Mesmo telefone em outra instância NÃO é a mesma conversa
+// - Mesmo cliente_id em outra instância NÃO é a mesma conversa
+// - WS NUNCA cria conversa fantasma na lista
+// - WS só renderiza bolha se a conversa aberta bater com a instância correta
+// - Conversa aberta: sem bolinha de nova mensagem
+// - Conversa fechada: soma bolinha de nova mensagem
 // ====================================================================
 
 import { tsToMillis } from '../core/time.js';
 import { renderHistoricoDoCache } from '../domain/historico.js';
-import { _matchInstancia } from '../domain/instances.js';
 import { pushOneNew, getHist, primeWith } from '../domain/hist-cache.js';
 
 import {
@@ -22,11 +21,15 @@ import {
   mergeIncomingMessage,
   updateAck,
   moveConversaToTopKeyed,
-  replaceOrInsertConversa,
   marcarLidas
 } from '../state/store.js';
 
 import { EMPRESA_ID as EMPRESA_ID_ENV } from '../core/env.js';
+
+import {
+  ensureEmpresaWS as ensureCoreEmpresaWS,
+  onEmpresaMessage as onCoreEmpresaMessage
+} from '../../realtime/ws-core.js';
 
 const EMPRESA_ID = Number(
   EMPRESA_ID_ENV ||
@@ -35,971 +38,1538 @@ const EMPRESA_ID = Number(
   0
 );
 
-// Ative/desative logs rápidos no console
-const DEBUG_WS = (window.DEBUG_WS ?? true);
+const DEBUG_WS = Boolean(window.DEBUG_WS ?? false);
 
-// ========================= CID estável por aba =========================
 const WS_CID = (() => {
   try {
-    const KEY = 'ws_cid';
-    let v = sessionStorage.getItem(KEY);
-    if (!v) {
-      v = (crypto?.randomUUID?.() || `cid-${Math.random().toString(16).slice(2)}-${Date.now()}`);
-      sessionStorage.setItem(KEY, v);
-    }
+    if (window.__ZC_WS_CID__) return window.__ZC_WS_CID__;
+
+    const v =
+      crypto?.randomUUID?.() ||
+      `cid-${Math.random().toString(16).slice(2)}-${Date.now()}`;
+
+    window.__ZC_WS_CID__ = v;
     return v;
   } catch {
-    return `cid-${Date.now()}`;
+    return `cid-${Math.random().toString(16).slice(2)}-${Date.now()}`;
   }
 })();
 
-// ========================= helpers: ids (string-first) =========================
+let sockInst = null;
+let closedInstByMe = false;
+let hbInstTimer = null;
+let retryBaseInst = 800;
+
+let unsubEmpresaWS = null;
+
+let lastServerTs = 0;
+let lagTimer = null;
+
+let __reloadListTimer = null;
+let __lastReloadListAt = 0;
+
+/* =========================================================
+   BASE HELPERS
+========================================================= */
+
 function idKey(v) {
   const s = String(v ?? '').trim();
   if (!s || s === 'null' || s === 'undefined' || s === 'NaN') return null;
   return s;
 }
 
-function idEq(a, b) {
-  const A = idKey(a);
-  const B = idKey(b);
+function onlyDigits(v) {
+  return String(v || '').replace(/\D+/g, '');
+}
+
+function instKey(v) {
+  const s = String(v ?? '').trim();
+  if (!s) return null;
+
+  const low = s.toLowerCase();
+  if (
+    low === 'null' ||
+    low === 'undefined' ||
+    low === 'nan' ||
+    low === '0' ||
+    low === 'all' ||
+    low === '*' ||
+    low === '-'
+  ) {
+    return null;
+  }
+
+  return s;
+}
+
+function samePhone(a, b) {
+  const A = onlyDigits(a);
+  const B = onlyDigits(b);
+
   if (!A || !B) return false;
-  return A === B;
+
+  return A === B || A.endsWith(B) || B.endsWith(A);
 }
 
-function onlyDigits(s) {
-  return String(s || '').replace(/\D+/g, '');
+function phoneFromRow(row) {
+  return (
+    row?.telefone_norm ??
+    row?.telefone ??
+    row?.phone ??
+    row?.numero ??
+    row?.number ??
+    row?.remoteJid ??
+    row?.remote_jid ??
+    row?.jid ??
+    ''
+  );
 }
 
-// ========================= helpers: conversa no store =========================
+function unreadFromRow(row) {
+  const raw =
+    row?.novas ??
+    row?.unread_count ??
+    row?.unread ??
+    row?.nao_lidas ??
+    row?.naoLidas ??
+    row?.qtd_nao_lidas ??
+    row?.qtdNaoLidas ??
+    0;
+
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function parseConversationKey(raw) {
+  const s = idKey(raw);
+  if (!s) return null;
+
+  const m = s.match(/^([cg]):(\d+):([^:]+)$/i);
+  if (!m) return null;
+
+  return {
+    key: `${m[1].toLowerCase()}:${m[2]}:${m[3]}`,
+    kind: m[1].toLowerCase(),
+    entityId: m[2],
+    instId: instKey(m[3]),
+  };
+}
+
+function buildConversationKey(kind, entityId, instanciaId) {
+  const k = String(kind || '').toLowerCase() === 'g' ? 'g' : 'c';
+  const eid = idKey(entityId);
+  const iid = instKey(instanciaId);
+
+  if (!eid || !iid) return null;
+
+  return `${k}:${eid}:${iid}`;
+}
+
+function getInstanciasList() {
+  try {
+    const candidates = [
+      window.ZC_INSTANCIAS,
+      window.INSTANCIAS,
+      window.instancias,
+      window.state?.instancias,
+      state?.instancias,
+    ];
+
+    for (const c of candidates) {
+      if (Array.isArray(c)) return c;
+    }
+  } catch {}
+
+  return [];
+}
+
+function instanciaValues(row) {
+  if (!row || typeof row !== 'object') return [];
+
+  return [
+    row.id,
+    row.instancia_id,
+    row.instanciaId,
+    row.instance_id,
+    row.instanceId,
+    row.instancia,
+    row.instance,
+    row.instance_name,
+    row.instanceName,
+    row.nome,
+    row.slug,
+  ]
+    .map(instKey)
+    .filter(Boolean);
+}
+
+/*
+  Aqui é propositalmente rígido:
+  - Se ambos são iguais, ok.
+  - Se os dois aparecem na mesma linha de instância conhecida, ok.
+  - Fora isso, é diferente.
+  Nunca retorna true só porque um lado está vazio.
+*/
+function sameInstStrict(a, b) {
+  const A = instKey(a);
+  const B = instKey(b);
+
+  if (!A || !B) return false;
+  if (A === B) return true;
+
+  const list = getInstanciasList();
+
+  for (const row of list) {
+    const vals = instanciaValues(row);
+    if (vals.includes(A) && vals.includes(B)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function resolveInstanceName(inst) {
+  const I = instKey(inst);
+  if (!I) return null;
+
+  const list = getInstanciasList();
+
+  for (const row of list) {
+    const vals = instanciaValues(row);
+    if (!vals.includes(I)) continue;
+
+    return (
+      row.instance_name ||
+      row.instanceName ||
+      row.instancia ||
+      row.instance ||
+      row.nome ||
+      null
+    );
+  }
+
+  return null;
+}
+
+function conversationKindFromRow(row) {
+  if (!row || typeof row !== 'object') return 'c';
+
+  const explicit = String(
+    row.kind ??
+    row.conversation_kind ??
+    row.tipo_conversa ??
+    row.tipo_ref ??
+    ''
+  ).trim().toLowerCase();
+
+  if (explicit === 'g' || explicit === 'grupo' || explicit === 'group') return 'g';
+  if (explicit === 'c' || explicit === 'cliente' || explicit === 'contato') return 'c';
+
+  if (
+    row.is_group === true ||
+    row.isGroup === true ||
+    row.grupo === true ||
+    row.group === true ||
+    row.grupo_id != null ||
+    row.grupoId != null ||
+    row.group_id != null ||
+    row.groupId != null
+  ) {
+    return 'g';
+  }
+
+  return 'c';
+}
+
+function conversationEntityId(raw, row = null) {
+  const parsed = parseConversationKey(raw);
+  if (parsed?.entityId) return parsed.entityId;
+
+  if (row && typeof row === 'object') {
+    const kind = conversationKindFromRow(row);
+
+    const rawId =
+      row.entity_id ??
+      row.entityId ??
+      row.backend_id ??
+      row.backendClienteId ??
+      row.api_id ??
+      row.apiClienteId ??
+      row.id_backend ??
+      row.idBackend ??
+      (kind === 'g'
+        ? (
+            row.grupo_id ??
+            row.grupoId ??
+            row.group_id ??
+            row.groupId ??
+            null
+          )
+        : (
+            row.cliente_id ??
+            row.clienteId ??
+            row.id_cliente ??
+            row.idCliente ??
+            row.cid ??
+            null
+          ));
+
+    const s = idKey(rawId);
+    if (s && /^\d+$/.test(s)) return s;
+  }
+
+  const s = idKey(raw);
+  if (s && /^\d+$/.test(s)) return s;
+
+  return null;
+}
+
+function conversationInstanciaId(raw, row = null) {
+  const parsed = parseConversationKey(raw);
+  if (parsed?.instId) return parsed.instId;
+
+  if (row && typeof row === 'object') {
+    return (
+      instKey(row.instancia_id) ||
+      instKey(row.instanciaId) ||
+      instKey(row.instancia) ||
+      instKey(row.instance_id) ||
+      instKey(row.instanceId) ||
+      instKey(row.instance_name) ||
+      instKey(row.instanceName) ||
+      instKey(row.instance) ||
+      null
+    );
+  }
+
+  return null;
+}
+
+function rawConversationCandidate(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+
+  return (
+    obj.conversation_key ??
+    obj.conversationKey ??
+    obj.conversation_id ??
+    obj.conversationId ??
+    obj.conv_key ??
+    obj.convKey ??
+    obj.id ??
+    obj.cliente_id ??
+    obj.clienteId ??
+    obj.grupo_id ??
+    obj.grupoId ??
+    null
+  );
+}
+
+function normalizeConversationRef(raw, row = null) {
+  if (raw && typeof raw === 'object') {
+    row = raw;
+    raw = rawConversationCandidate(raw);
+  }
+
+  const parsed = parseConversationKey(raw);
+  if (parsed) return parsed;
+
+  const fromRowKey =
+    idKey(row?.conversation_key) ||
+    idKey(row?.conversationKey) ||
+    idKey(row?.conversation_id) ||
+    idKey(row?.conversationId) ||
+    idKey(row?.conv_key) ||
+    idKey(row?.convKey) ||
+    null;
+
+  const parsedRowKey = parseConversationKey(fromRowKey);
+  if (parsedRowKey) return parsedRowKey;
+
+  const kind = conversationKindFromRow(row);
+  const entityId = conversationEntityId(raw, row);
+  const instId = conversationInstanciaId(raw, row);
+
+  const built = buildConversationKey(kind, entityId, instId);
+
+  return {
+    key: built,
+    kind,
+    entityId,
+    instId,
+  };
+}
+
+function getConversationIdFromRow(row) {
+  return normalizeConversationRef(row, row)?.key || null;
+}
+
+/* =========================================================
+   CONVERSAS EXISTENTES
+========================================================= */
+
+function getAllConversationEntries() {
+  const entries = [];
+
+  try {
+    if (Array.isArray(state?.clientesCache)) {
+      entries.push({
+        type: 'clientesCache',
+        arr: state.clientesCache,
+      });
+    }
+  } catch {}
+
+  try {
+    if (Array.isArray(state?.todosContatosCache)) {
+      entries.push({
+        type: 'todosContatosCache',
+        arr: state.todosContatosCache,
+      });
+    }
+  } catch {}
+
+  try {
+    const byInst = state?.convsByInst || {};
+    for (const [inst, box] of Object.entries(byInst)) {
+      if (Array.isArray(box?.items)) {
+        entries.push({
+          type: 'convsByInst',
+          inst,
+          box,
+          arr: box.items,
+        });
+      }
+    }
+  } catch {}
+
+  try {
+    if (Array.isArray(window.__zcListaConversas)) {
+      entries.push({
+        type: '__zcListaConversas',
+        arr: window.__zcListaConversas,
+      });
+    }
+  } catch {}
+
+  return entries;
+}
+
 function getAllConversations() {
   const out = [];
   const seen = new Set();
 
-  try {
-    if (Array.isArray(state?.clientesCache)) {
-      for (const c of state.clientesCache) {
-        const k = idKey(c?.conversation_id ?? c?.id ?? c?.cliente_id);
-        if (!k || seen.has(k)) continue;
-        seen.add(k);
-        out.push(c);
-      }
-    }
+  for (const entry of getAllConversationEntries()) {
+    for (const c of entry.arr || []) {
+      const k = getConversationIdFromRow(c);
+      if (!k || seen.has(k)) continue;
 
-    const convsByInst = state?.convsByInst || {};
-    for (const box of Object.values(convsByInst)) {
-      const items = Array.isArray(box?.items) ? box.items : [];
-      for (const c of items) {
-        const k = idKey(c?.conversation_id ?? c?.id ?? c?.cliente_id);
-        if (!k || seen.has(k)) continue;
-        seen.add(k);
-        out.push(c);
-      }
+      seen.add(k);
+      out.push(c);
     }
-
-    if (Array.isArray(state?.todosContatosCache)) {
-      for (const c of state.todosContatosCache) {
-        const k = idKey(c?.conversation_id ?? c?.id ?? c?.cliente_id);
-        if (!k || seen.has(k)) continue;
-        seen.add(k);
-        out.push(c);
-      }
-    }
-  } catch {}
+  }
 
   return out;
 }
 
-function getConversaById(cid, preferredInst = null) {
-  const key = idKey(cid);
-  if (!key) return null;
+function findKnownConversationByRef(ref, data = null) {
+  if (!ref?.kind || !ref?.entityId || !ref?.instId) return null;
 
   const all = getAllConversations();
 
-  if (preferredInst != null) {
-    const preferred = all.find(c => {
-      const ck = idKey(c?.conversation_id ?? c?.id ?? c?.cliente_id);
-      const ik = idKey(c?.instancia_id ?? c?.instancia ?? null);
-      return ck === key && (!preferredInst || ik === idKey(preferredInst));
-    });
-    if (preferred) return preferred;
-  }
-
-  return all.find(c => idKey(c?.conversation_id ?? c?.id ?? c?.cliente_id) === key) || null;
-}
-
-function getConversaIdByPhone(phone, preferredInst = null) {
-  const p = onlyDigits(phone);
-  if (!p) return null;
-
-  const all = getAllConversations();
-
-  const sameInst = preferredInst != null
-    ? all.find(c => {
-        const t = onlyDigits(c?.telefone || c?.phone || c?.remoteJid || c?.jid || '');
-        const ik = idKey(c?.instancia_id ?? c?.instancia ?? null);
-        return t && (t.endsWith(p) || p.endsWith(t)) && ik === idKey(preferredInst);
-      })
-    : null;
-
-  if (sameInst) {
-    return idKey(sameInst.conversation_id ?? sameInst.id ?? sameInst.cliente_id);
-  }
-
-  const hit = all.find(c => {
-    const t = onlyDigits(c?.telefone || c?.phone || c?.remoteJid || c?.jid || '');
-    return t && (t.endsWith(p) || p.endsWith(t));
+  const exact = all.find((c) => {
+    const ck = getConversationIdFromRow(c);
+    return ck && ref.key && ck === ref.key;
   });
 
-  return hit ? idKey(hit.conversation_id ?? hit.id ?? hit.cliente_id) : null;
+  if (exact) return exact;
+
+  const byEntityInst = all.find((c) => {
+    const cr = normalizeConversationRef(c, c);
+
+    if (!cr?.kind || !cr?.entityId || !cr?.instId) return false;
+    if (cr.kind !== ref.kind) return false;
+    if (String(cr.entityId) !== String(ref.entityId)) return false;
+
+    return sameInstStrict(cr.instId, ref.instId);
+  });
+
+  if (byEntityInst) return byEntityInst;
+
+  /*
+    Telefone só pode ser usado se:
+    - for a mesma instância de verdade
+    - for o mesmo tipo de conversa
+    Nunca cruza instância.
+  */
+  const incomingPhone =
+    data?.telefone_norm ??
+    data?.telefone ??
+    data?.phone ??
+    data?.numero ??
+    data?.number ??
+    data?.remoteJid ??
+    data?.remote_jid ??
+    data?.jid ??
+    '';
+
+  if (incomingPhone) {
+    const byPhoneSameInst = all.find((c) => {
+      const cr = normalizeConversationRef(c, c);
+
+      if (!cr?.kind || !cr?.instId) return false;
+      if (cr.kind !== ref.kind) return false;
+      if (!sameInstStrict(cr.instId, ref.instId)) return false;
+
+      return samePhone(phoneFromRow(c), incomingPhone);
+    });
+
+    if (byPhoneSameInst) return byPhoneSameInst;
+  }
+
+  return null;
 }
 
-// ========================= contexto aberto (cliente + instância) =========================
+/* =========================================================
+   CONTEXTO ABERTO
+========================================================= */
+
 function getOpenContext() {
   try {
     const hist = document.getElementById('historico');
-    const cidDom = hist?.dataset?.clienteId ?? null;
-    const instDom = hist?.dataset?.instanciaId ?? null;
 
-    const cidState = idKey(
-      state?.clienteSel?.id ??
-      state?.clienteSel?.conversation_id ??
-      state?.clienteSel?.cliente_id ??
-      null
-    );
+    const rawDom =
+      hist?.dataset?.conversationKey ??
+      hist?.dataset?.conversationId ??
+      hist?.dataset?.convKey ??
+      null;
 
-    const instState = (
-      state?.clienteSel?.instancia_id ??
-      state?.clienteSel?.instancia ??
-      window.INSTANCIA_ATIVA ??
-      null
-    );
+    const selected =
+      state?.clienteSel ||
+      window?.clienteSel ||
+      null;
+
+    const domRef = normalizeConversationRef(rawDom, {
+      instancia_id: hist?.dataset?.instanciaId,
+      kind: hist?.dataset?.kind,
+      entity_id: hist?.dataset?.entityId,
+      cliente_id:
+        hist?.dataset?.apiClienteId ||
+        hist?.dataset?.backendClienteId ||
+        hist?.dataset?.clienteId,
+      grupo_id: hist?.dataset?.grupoId,
+    });
+
+    const selectedRef = normalizeConversationRef(selected, selected);
+
+    const key =
+      domRef?.key ||
+      selectedRef?.key ||
+      null;
+
+    const kind =
+      domRef?.kind ||
+      selectedRef?.kind ||
+      'c';
+
+    const entityId =
+      domRef?.entityId ||
+      selectedRef?.entityId ||
+      idKey(hist?.dataset?.entityId) ||
+      idKey(hist?.dataset?.apiClienteId) ||
+      idKey(hist?.dataset?.backendClienteId) ||
+      idKey(hist?.dataset?.clienteId) ||
+      null;
+
+    const instId =
+      domRef?.instId ||
+      selectedRef?.instId ||
+      instKey(hist?.dataset?.instanciaId) ||
+      instKey(selected?.instancia_id) ||
+      instKey(selected?.instanciaId) ||
+      null;
+
+    const phone =
+      hist?.dataset?.telefone ||
+      selected?.telefone_norm ||
+      selected?.telefone ||
+      selected?.phone ||
+      selected?.numero ||
+      selected?.number ||
+      selected?.remoteJid ||
+      selected?.remote_jid ||
+      '';
 
     return {
-      cliente_id: idKey(cidDom) || cidState || null,
-      instancia_id: (instDom ?? instState ?? null)
+      key,
+      kind,
+      entityId,
+      instId,
+      phone,
+      hist,
+      selected,
     };
   } catch {
-    return { cliente_id: null, instancia_id: null };
+    return {
+      key: null,
+      kind: 'c',
+      entityId: null,
+      instId: null,
+      phone: '',
+      hist: null,
+      selected: null,
+    };
   }
 }
 
-function isOpenChat(cliente_id) {
+function isOpenChat(refOrKey) {
   try {
-    const oc = getOpenContext();
-    return idEq(oc?.cliente_id, cliente_id);
+    const open = getOpenContext();
+    const ref = normalizeConversationRef(refOrKey, typeof refOrKey === 'object' ? refOrKey : null);
+
+    if (!open?.key || !ref?.key) return false;
+
+    if (open.key === ref.key) return true;
+
+    if (!open.kind || !open.entityId || !open.instId) return false;
+    if (!ref.kind || !ref.entityId || !ref.instId) return false;
+
+    if (open.kind !== ref.kind) return false;
+    if (String(open.entityId) !== String(ref.entityId)) return false;
+
+    return sameInstStrict(open.instId, ref.instId);
   } catch {
     return false;
   }
 }
 
-function isChatActive(cliente_id) {
+function getOpenRefIfMatchesIncoming(incomingRef) {
+  const open = getOpenContext();
+
+  if (!open?.key || !incomingRef?.key) return null;
+
+  if (!isOpenChat(incomingRef)) return null;
+
+  return {
+    key: open.key,
+    kind: open.kind || incomingRef.kind || 'c',
+    entityId: open.entityId || incomingRef.entityId || null,
+    instId: open.instId || incomingRef.instId || null,
+    from: 'open',
+  };
+}
+
+/* =========================================================
+   INSTÂNCIA / TOPIC
+========================================================= */
+
+function pickInstanciaFromAny(data) {
+  const direct =
+    data?.instancia_id ??
+    data?.instanciaId ??
+    data?.instancia ??
+    data?.instance_id ??
+    data?.instanceId ??
+    data?.instance_name ??
+    data?.instanceName ??
+    data?.instance ??
+    null;
+
+  const s = instKey(direct);
+  if (s) return s;
+
+  const ref = normalizeConversationRef(
+    data?.conversation_key ??
+    data?.conversationKey ??
+    data?.conversation_id ??
+    data?.conversationId ??
+    null
+  );
+
+  return ref?.instId || null;
+}
+
+function getActiveInstKey() {
   try {
-    const hist = document.getElementById('historico');
-    const visible = !!hist && hist.style.display !== 'none';
-    const focused = typeof document.hasFocus === 'function' ? document.hasFocus() : true;
-    return isOpenChat(cliente_id) && visible && focused;
-  } catch {
-    return false;
-  }
-}
+    const fromWin = instKey(window.INSTANCIA_ATIVA);
+    if (fromWin) return fromWin;
 
-// Sempre carimba/atualiza a instância no DOM do histórico
-function ensureDomContextFor(cliente_id, instancia_id) {
-  try {
-    const hist = document.getElementById('historico');
-    if (!hist) return false;
+    const lsKey = EMPRESA_ID ? `instAtiva:${EMPRESA_ID}` : null;
+    const fromLs = lsKey ? instKey(localStorage.getItem(lsKey) || '') : null;
+    if (fromLs) return fromLs;
+  } catch {}
 
-    const cid = idKey(cliente_id);
-    if (!cid) return false;
-
-    if (!hist.dataset?.clienteId || hist.dataset.clienteId === '0' || hist.dataset.clienteId === 'null') {
-      hist.dataset.clienteId = String(cid);
-    }
-
-    if (hist.dataset?.clienteId !== String(cid)) return false;
-
-    const newInst = String(instancia_id ?? '');
-    if (
-      newInst &&
-      (
-        !hist.dataset.instanciaId ||
-        hist.dataset.instanciaId === 'null' ||
-        hist.dataset.instanciaId !== newInst
-      )
-    ) {
-      hist.dataset.instanciaId = newInst;
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// ========================= WS infra =========================
-function wsUrlEmpresa(id) {
-  const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
-  const qs = new URLSearchParams({ cid: WS_CID });
-  return `${proto}://${location.host}/ws/emp:${id}?${qs.toString()}`;
-}
-
-function wsUrlInst(instanceKey, { wantQR = false } = {}) {
-  const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
-  const qs = new URLSearchParams({ cid: WS_CID, want_qr: wantQR ? '1' : '0' });
-  return `${proto}://${location.host}/ws/inst:${encodeURIComponent(instanceKey)}?${qs.toString()}`;
+  return null;
 }
 
 function resolveInstTopic() {
-  const sel = window.state?.instanciaSelecionada ?? window.INSTANCIA_ATIVA ?? null;
-  if (!sel) return null;
+  const active = getActiveInstKey();
+  if (!active) return null;
 
-  const s = String(sel);
-  if (/\D/.test(s)) return s;
-
-  try {
-    const arr = window.state?.instancias || window.INSTANCIAS || [];
-    const it = arr.find(x => String(x?.instancia_id ?? x?.id) === s || String(x?.id) === s);
-    const name = it?.instance_name || it?.instancia || it?.nome || null;
-    return name || s;
-  } catch {
-    return s;
-  }
+  const maybeName = resolveInstanceName(active);
+  return maybeName || active;
 }
 
-function resolveInstanceName(instKey) {
-  const raw = String(instKey ?? '').trim();
-  if (!raw) return null;
+/* =========================================================
+   PAYLOAD
+========================================================= */
 
-  try {
-    const arr = window.state?.instancias || window.INSTANCIAS || [];
+function unwrap(raw) {
+  let data = raw;
 
-    const byId =
-      arr.find(x => String(x?.instancia_id ?? x?.id ?? x?.instance_id ?? '') === raw) ||
-      arr.find(x => String(x?.id ?? '') === raw);
-    if (byId) return (byId.apelido || byId.nome || byId.instance_name || byId.instancia || null);
-
-    const q = raw.toLowerCase();
-    const byName =
-      arr.find(x => String(x?.instance_name || '').toLowerCase() === q) ||
-      arr.find(x => String(x?.instancia || '').toLowerCase() === q) ||
-      arr.find(x => String(x?.nome || '').toLowerCase() === q);
-    if (byName) return (byName.apelido || byName.nome || byName.instance_name || byName.instancia || null);
-
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-let sockEmp = null;
-let sockInst = null;
-let hbEmpTimer = null;
-let hbInstTimer = null;
-let lagTimer = null;
-let retryBaseEmp = 800;
-let retryBaseInst = 800;
-let closedEmpByMe = false;
-let closedInstByMe = false;
-let lastServerTs = 0;
-
-function heartbeat(ws) {
-  try { ws?.send?.('ping'); } catch {}
-}
-
-function scheduleHeartbeat(ws, which = 'emp') {
-  clearInterval(which === 'inst' ? hbInstTimer : hbEmpTimer);
-  const id = setInterval(() => heartbeat(ws), 30000);
-  if (which === 'inst') hbInstTimer = id;
-  else hbEmpTimer = id;
-}
-
-function jitter(ms) {
-  const delta = Math.round(ms * 0.2);
-  return ms + Math.round((Math.random() * 2 - 1) * delta);
-}
-
-function backoff(fn, baseRef) {
-  const wait = Math.min(baseRef.val, 10000);
-  const withJitter = Math.max(250, jitter(wait));
-  setTimeout(fn, withJitter);
-  baseRef.val = Math.min(baseRef.val * 1.6, 10000);
-}
-
-function safeJson(d) {
-  try { return JSON.parse(d); } catch { return null; }
-}
-
-function badge(text, cls) {
-  try {
-    const el = document.getElementById('realtime-badge');
-    if (!el) return;
-    if (text != null) el.textContent = text;
-    if (cls) {
-      el.classList.remove('ok', 'warn', 'crit', 'loading');
-      el.classList.add(cls);
+  if (typeof data === 'string') {
+    try {
+      data = JSON.parse(data);
+    } catch {
+      return data;
     }
+  }
+
+  if (!data || typeof data !== 'object') return data;
+
+  if (data.data && typeof data.data === 'object') {
+    const inner = data.data;
+
+    const outerType = data.type || data.event;
+    const innerType = inner.type || inner.event;
+
+    if (!innerType && outerType) {
+      inner.type = outerType;
+    }
+
+    if (data.serverTimestamp && !inner.serverTimestamp) {
+      inner.serverTimestamp = data.serverTimestamp;
+    }
+
+    return inner;
+  }
+
+  return data;
+}
+
+function safeJson(v) {
+  try {
+    return JSON.parse(v);
+  } catch {
+    return v;
+  }
+}
+
+function pickText(data) {
+  return (
+    data?.mensagem ??
+    data?.texto ??
+    data?.conteudo ??
+    data?.message ??
+    data?.body ??
+    data?.content ??
+    ''
+  );
+}
+
+function pickTimestamp(data) {
+  return (
+    data?.timestamp ??
+    data?.ts ??
+    data?.data ??
+    data?.created_at ??
+    data?.createdAt ??
+    data?.hora ??
+    null
+  );
+}
+
+function pickAck(data) {
+  const raw =
+    data?.ack ??
+    data?.delivery_ack ??
+    data?.status_ack ??
+    data?.statusAck ??
+    null;
+
+  if (raw == null) return null;
+
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function pickMsgId(data) {
+  return (
+    data?.msg_id ??
+    data?.msgId ??
+    data?.message_id ??
+    data?.messageId ??
+    data?.id ??
+    null
+  );
+}
+
+function normalizeIncomingConversationRef(data) {
+  const explicitKey =
+    data?.conversation_key ??
+    data?.conversationKey ??
+    data?.conversation_id ??
+    data?.conversationId ??
+    data?.conv_key ??
+    data?.convKey ??
+    null;
+
+  const explicitRef = normalizeConversationRef(explicitKey, data);
+  if (explicitRef?.key && explicitRef?.entityId && explicitRef?.instId) {
+    return explicitRef;
+  }
+
+  const inst = pickInstanciaFromAny(data);
+
+  const isGroup =
+    data?.is_group === true ||
+    data?.isGroup === true ||
+    data?.grupo === true ||
+    String(data?.kind || '').toLowerCase() === 'g' ||
+    String(data?.kind || '').toLowerCase() === 'grupo' ||
+    data?.grupo_id != null ||
+    data?.grupoId != null ||
+    data?.group_id != null ||
+    data?.groupId != null;
+
+  const kind = isGroup ? 'g' : 'c';
+
+  const entity =
+    idKey(data?.entity_id) ||
+    idKey(data?.entityId) ||
+    (kind === 'g'
+      ? (
+          idKey(data?.grupo_id) ||
+          idKey(data?.grupoId) ||
+          idKey(data?.group_id) ||
+          idKey(data?.groupId)
+        )
+      : (
+          idKey(data?.cliente_id) ||
+          idKey(data?.clienteId) ||
+          idKey(data?.client_id) ||
+          idKey(data?.clientId)
+        )
+    ) ||
+    null;
+
+  const key = buildConversationKey(kind, entity, inst);
+
+  return {
+    key,
+    kind,
+    entityId: entity,
+    instId: inst,
+  };
+}
+
+function resolveKnownRefForIncoming(data) {
+  const incoming = normalizeIncomingConversationRef(data);
+
+  if (!incoming?.kind || !incoming?.entityId || !incoming?.instId || !incoming?.key) {
+    return null;
+  }
+
+  const openRef = getOpenRefIfMatchesIncoming(incoming);
+  if (openRef?.key) return openRef;
+
+  const known = findKnownConversationByRef(incoming, data);
+  if (!known) return null;
+
+  const knownRef = normalizeConversationRef(known, known);
+
+  if (!knownRef?.key || !knownRef?.entityId || !knownRef?.instId) return null;
+
+  return {
+    ...knownRef,
+    from: 'known-list',
+  };
+}
+
+/* =========================================================
+   DOM
+========================================================= */
+
+function H() {
+  return document.getElementById('historico');
+}
+
+function ensureDomContextFor(convRef) {
+  const ref = normalizeConversationRef(convRef, typeof convRef === 'object' ? convRef : null);
+  if (!ref?.key) return false;
+
+  const hist = H();
+  if (!hist) return false;
+
+  hist.dataset.conversationKey = ref.key;
+  hist.dataset.conversationId = ref.key;
+  hist.dataset.convKey = ref.key;
+  hist.dataset.entityId = ref.entityId || '';
+  hist.dataset.kind = ref.kind || 'c';
+
+  if (ref.instId) {
+    hist.dataset.instanciaId = ref.instId;
+  }
+
+  if (ref.kind === 'g') {
+    hist.dataset.grupoId = ref.entityId || '';
+    hist.dataset.isGroup = 'true';
+    hist.dataset.clienteId = ref.key;
+  } else {
+    hist.dataset.apiClienteId = ref.entityId || '';
+    hist.dataset.backendClienteId = ref.entityId || '';
+    hist.dataset.clienteId = ref.entityId || '';
+    hist.dataset.isGroup = 'false';
+  }
+
+  return true;
+}
+
+function scrollBottomSoon() {
+  try {
+    requestAnimationFrame(() => {
+      const hist = H();
+      if (!hist) return;
+      hist.scrollTop = hist.scrollHeight;
+    });
   } catch {}
 }
 
-function startLagTimer() {
-  clearInterval(lagTimer);
-  lagTimer = setInterval(() => {
-    if (!lastServerTs) return;
-    const lag = Date.now() - lastServerTs;
-    if (lag < 5000) badge('Tempo real', 'ok');
-    else if (lag < 15000) badge(`Atraso ${Math.round(lag / 1000)}s`, 'warn');
-    else badge(`Atraso ${Math.round(lag / 1000)}s`, 'crit');
-  }, 1000);
+/* =========================================================
+   LISTA OFICIAL
+========================================================= */
+
+function requestOfficialListReload(reason = 'ws-reload') {
+  const now = Date.now();
+
+  if (now - __lastReloadListAt < 1200) return;
+  __lastReloadListAt = now;
+
+  clearTimeout(__reloadListTimer);
+
+  __reloadListTimer = setTimeout(() => {
+    try {
+      sessionStorage.setItem('convForceReload', '1');
+    } catch {}
+
+    try {
+      window.carregarClientes?.({
+        force: true,
+        reason,
+      });
+    } catch {}
+
+    try {
+      document.dispatchEvent(new CustomEvent('ws:reload_clientes', {
+        detail: {
+          type: 'reload_clientes',
+          reason,
+          serverTimestamp: Date.now(),
+        },
+      }));
+    } catch {}
+  }, 150);
 }
 
-// ========================= normalizadores =========================
-function pickMsgId(p) {
-  return (p?.msg_id ?? p?.msgId ?? p?.message_id ?? p?.messageId ?? p?.id ?? null);
-}
+/* =========================================================
+   UPDATE DE CONVERSA EXISTENTE
+========================================================= */
 
-function mapStatusToAck(status) {
-  if (!status) return null;
-  const s = String(status).toUpperCase();
-  if (s.includes('READ')) return 2;
-  if (s.includes('DELIVER')) return 1;
-  if (s.includes('SERVER') || s.includes('SENT')) return 0;
-  return null;
-}
-
-function mapEventToAck(ev) {
-  if (!ev) return null;
-  const e = String(ev).toUpperCase();
-  if (e.includes('READ')) return 2;
-  if (e.includes('DELIVERY')) return 1;
-  return null;
-}
-
-function pickAck(p) {
-  if (p?.ack != null) return Number(p.ack);
-  if (p?.delivery_ack != null) return Number(p.delivery_ack);
-  if (p?.status_ack != null) return Number(p.status_ack);
-
-  const fromStatus = mapStatusToAck(p?.status || p?.state);
-  if (fromStatus != null) return fromStatus;
-
-  const fromEvent = mapEventToAck(p?.event || p?.type);
-  if (fromEvent != null) return fromEvent;
-
-  return null;
-}
-
-/* ========================= Instância: sempre ID numérico se possível ========================= */
-function _toIdKey(key) {
-  const s = String(key ?? '').trim();
-  if (!s) return null;
-  if (/^\d+$/.test(s)) return s;
+function persistSafe() {
+  try {
+    state.persist?.();
+  } catch {}
 
   try {
-    const arr = window.state?.instancias || window.INSTANCIAS || [];
-    const q = s.toLowerCase();
-    const it = arr.find(x => {
-      const names = [x?.instance_name, x?.instancia, x?.nome].map(v => String(v || '').toLowerCase());
-      return names.includes(q) || String(x?.instancia_id ?? x?.id) === s;
-    });
-    return it ? String(it.instancia_id ?? it.id ?? s) : s;
-  } catch {
-    return s;
-  }
+    window.persist?.();
+  } catch {}
 }
 
-function pickInstanciaFromAny(payload) {
-  const direct =
-    payload?.instancia_id ??
-    payload?.instancia ??
-    payload?.instance_id ??
-    payload?.instanceId ??
-    null;
-  if (direct != null && String(direct).trim() !== '') return _toIdKey(direct);
-
-  const name = payload?.instance ?? payload?.instance_name ?? payload?.instanceName ?? null;
-  if (name && String(name).trim() !== '') return _toIdKey(name);
-
-  const cid = idKey(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? null);
-  if (cid) {
-    const c = getConversaById(cid);
-    const cached = c?.instancia_id ?? c?.instancia ?? null;
-    if (cached != null) return _toIdKey(cached);
-  }
-
-  const oc = getOpenContext();
-  if (cid && idEq(oc?.cliente_id, cid) && oc?.instancia_id) {
-    return _toIdKey(oc.instancia_id);
-  }
-
-  if (window.state?.instanciaSelecionada) return _toIdKey(window.state.instanciaSelecionada);
-  if (window.INSTANCIA_ATIVA) return _toIdKey(window.INSTANCIA_ATIVA);
-  return null;
-}
-
-// ========================= time helpers seguros =========================
-function firstValidTsMs(...values) {
-  for (const v of values) {
-    const ms = tsToMillis(v);
-    if (ms && Number.isFinite(ms) && ms > 0) return ms;
-  }
-  return null;
-}
-
-function resolveSafePreviewTsMs(rawTs, cid, inst = null) {
-  const parsed = firstValidTsMs(rawTs);
-  if (parsed) return parsed;
-
-  const cur = getConversaById(cid, inst);
-  const curParsed = firstValidTsMs(cur?.hora, cur?.last_ts);
-  if (curParsed) return curParsed;
-
-  return null;
-}
-
-function resolveMessageTime(payload, cid, inst = null) {
-  const directRaw =
-    payload?.timestamp ??
-    payload?.ts_iso ??
-    payload?.ts ??
-    payload?.created_at ??
-    payload?.data ??
-    null;
-
-  let ms = firstValidTsMs(directRaw);
-
-  if (!ms) {
-    ms = firstValidTsMs(payload?.serverTimestamp, payload?.server_ts);
-  }
-
-  if (ms) {
-    const raw = directRaw ?? new Date(ms).toISOString();
-    return { raw, ms };
-  }
-
-  const keepMs = resolveSafePreviewTsMs(null, cid, inst);
-  return {
-    raw: null,
-    ms: keepMs ?? null
-  };
-}
-
-// ========================= eco local (merge) =========================
-function squashPendingLocalEcho(inst, cliente_id, msg) {
-  try {
-    const instKey = inst ?? window.INSTANCIA_ATIVA ?? null;
-    const cid = idKey(cliente_id);
-    if (!cid) return false;
-
-    const arr = getHist(instKey, cid) || [];
-    if (!arr.length) return false;
-
-    const tsWs = Number(msg.ts || 0) || (new Date(msg.timestamp || Date.now()).getTime());
-    const txtWs = String(msg.conteudo || msg.texto || '').trim();
-
-    for (let i = arr.length - 1, seen = 0; i >= 0 && seen < 12; i--, seen++) {
-      const m = arr[i];
-      if (!(m && (m.tipo === 'saida' || m.from_me === true))) continue;
-
-      const noId = !m.msg_id && !m.id;
-      if (!noId) continue;
-
-      const tsLoc = Number(m.ts || 0) || (new Date(m.timestamp || Date.now()).getTime());
-      const txtLoc = String(m.conteudo || m.texto || '').trim();
-
-      const sameTxt = (txtLoc === txtWs);
-      const closeTs = Math.abs(tsWs - tsLoc) <= 15000;
-
-      if (sameTxt && closeTs) {
-        arr[i] = { ...m, ...msg };
-        try { primeWith(instKey, cid, arr, null); } catch {}
-        return true;
-      }
-    }
-
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-function appendToHistCache(inst, cliente_id, msg) {
-  const instKey = inst ?? pickInstanciaFromAny({ cliente_id }) ?? window.INSTANCIA_ATIVA ?? resolveInstTopic() ?? null;
-  const cid = idKey(cliente_id);
-  if (!cid) return;
-
-  try {
-    pushOneNew(instKey, cid, msg);
-  } catch (e) {
-    if (DEBUG_WS) console.warn('[HIST APPEND] falha; cli=', cid, 'inst=', instKey, e);
-  }
-}
-
-// ========================= delete no histórico =========================
-function applyDeleteToHist(inst, cliente_id, msg_id, flags = {}) {
-  try {
-    const instKey = inst ?? pickInstanciaFromAny({ cliente_id }) ?? window.INSTANCIA_ATIVA ?? resolveInstTopic() ?? null;
-    const cid = idKey(cliente_id);
-    if (!instKey || !cid || !msg_id) return false;
-
-    const arr = getHist(instKey, cid) || [];
-    if (!arr.length) return false;
-
-    const idStr = String(msg_id);
-    let changed = false;
-
-    for (let i = 0; i < arr.length; i++) {
-      const m = arr[i];
-      if (!m) continue;
-
-      const mid = String(m.msg_id || m.id || '');
-      if (!mid || mid !== idStr) continue;
-
-      if ('apagada_cliente' in flags) m.apagada_cliente = !!flags.apagada_cliente;
-      if ('apagada_usuario' in flags) m.apagada_usuario = !!flags.apagada_usuario;
-
-      changed = true;
-      break;
-    }
-
-    if (changed) {
-      try { primeWith(instKey, cid, arr, null); } catch {}
-    }
-
-    return changed;
-  } catch {
-    return false;
-  }
-}
-
-// ========================= helpers: unwrap de payload =========================
-function unwrap(any) {
-  if (!any || typeof any !== 'object') return any;
-
-  const pick = (k) => (any[k] && typeof any[k] === 'object') ? any[k] : null;
-  const layers = [pick('data'), pick('payload'), pick('message'), pick('event'), pick('body')].filter(Boolean);
-
-  if (!layers.length) return any;
-  return Object.assign({}, any, ...layers);
-}
-
-// ========================= STORE: upsert/preview/unread/pin =========================
-function storeUpsertConversation(cid, patch = {}, instanciaKey = null) {
-  const id = idKey(cid);
-  if (!id) return;
-
-  const inst = instanciaKey ?? patch?.instancia_id ?? patch?.instancia ?? null;
-  const prev = getConversaById(id, inst);
-  const keepPinned = Boolean(prev?.pinned);
-
-  const base = {
-    conversation_id: id,
-    cliente_id: id,
-    id: id,
-  };
-
-  const finalObj = {
-    ...base,
-    ...(prev || {}),
+/*
+  CRÍTICO:
+  Essa função NUNCA cria conversa.
+  Ela só atualiza item que já existe.
+*/
+function storeUpdateKnownConversation(convKey, patch, inst = null) {
+  const ref = normalizeConversationRef(convKey, {
     ...patch,
-    pinned: Boolean(patch?.pinned ?? keepPinned),
-  };
+    instancia_id: inst ?? patch?.instancia_id ?? patch?.instanciaId ?? null,
+  });
+
+  if (!ref?.kind || !ref?.entityId || !ref?.instId || !ref?.key) {
+    return null;
+  }
+
+  let updated = null;
+  let updatedKey = ref.key;
+
+  for (const entry of getAllConversationEntries()) {
+    const arr = entry.arr || [];
+
+    const idx = arr.findIndex((x) => {
+      const xr = normalizeConversationRef(x, x);
+
+      if (!xr?.kind || !xr?.entityId || !xr?.instId) return false;
+
+      if (xr.key && xr.key === ref.key) return true;
+
+      if (xr.kind !== ref.kind) return false;
+      if (String(xr.entityId) !== String(ref.entityId)) return false;
+
+      return sameInstStrict(xr.instId, ref.instId);
+    });
+
+    if (idx < 0) continue;
+
+    const old = arr[idx] || {};
+    const oldKey = getConversationIdFromRow(old) || ref.key;
+
+    const finalPatch = {
+      ...(patch || {}),
+      conversation_key: oldKey,
+      conversation_id: oldKey,
+      kind: ref.kind,
+      entity_id: ref.entityId,
+      instancia_id: ref.instId,
+    };
+
+    if (ref.kind === 'g') {
+      finalPatch.grupo_id = ref.entityId;
+      finalPatch.is_group = true;
+    } else {
+      finalPatch.cliente_id = ref.entityId;
+      finalPatch.is_group = false;
+    }
+
+    arr[idx] = {
+      ...old,
+      ...finalPatch,
+      id: old.id ?? finalPatch.id,
+    };
+
+    updated = arr[idx];
+    updatedKey = oldKey;
+  }
+
+  if (!updated) return null;
+
+  persistSafe();
 
   try {
-    replaceOrInsertConversa(finalObj, inst ?? null);
-  } catch {
-    const arr = Array.isArray(state.clientesCache) ? state.clientesCache.slice() : [];
-    const idx = arr.findIndex(c => idEq(c?.conversation_id ?? c?.id ?? c?.cliente_id, id));
-    if (idx >= 0) arr[idx] = { ...(arr[idx] || {}), ...finalObj };
-    else arr.push(finalObj);
-    state.clientesCache = arr;
-  }
+    moveConversaToTopKeyed(updatedKey);
+  } catch {}
+
+  return updated;
 }
 
-function bumpPreview(cid, { texto, tsMs, tipo, ack, instancia_id, instance_name, unreadDelta = 0 } = {}) {
-  const id = idKey(cid);
-  if (!id) return;
+function bumpPreview(convKey, msg, inst = null) {
+  const ref = normalizeConversationRef(convKey, {
+    ...msg,
+    instancia_id: inst ?? msg?.instancia_id ?? null,
+  });
 
-  const inst = instancia_id ?? null;
-  const patch = {};
+  if (!ref?.key) return null;
 
-  if (typeof texto === 'string') patch.ultima_mensagem = texto;
+  const text = pickText(msg);
+  const ts = pickTimestamp(msg);
+  const tsMs = tsToMillis(ts) || Date.now();
 
-  // ✅ só sobrescreve a hora se houver timestamp válido
-  if (tsMs != null && Number.isFinite(Number(tsMs)) && Number(tsMs) > 0) {
-    patch.hora = Number(tsMs);
+  const isOutgoing =
+    msg?.from_me === true ||
+    msg?.fromMe === true ||
+    msg?.tipo === 'saida' ||
+    msg?.origem === 'atendente';
+
+  const openNow = isOpenChat(ref);
+
+  const existingRow = findKnownConversationByRef(ref, msg);
+  const previousUnread = unreadFromRow(existingRow);
+
+  /*
+    Regra:
+    - conversa aberta: não mostra bolinha
+    - conversa fechada: soma +1
+  */
+  const unread = isOutgoing || openNow ? 0 : previousUnread + 1;
+
+  const patch = {
+    ultima_mensagem: text,
+    preview: text,
+    last_message: text,
+    last_msg: text,
+    timestamp: ts,
+    ultima_mensagem_ts: ts,
+    last_ts: tsMs,
+    updated_at: ts,
+
+    novas: unread,
+    unread: unread,
+    unread_count: unread,
+    nao_lidas: unread,
+    naoLidas: unread,
+    qtd_nao_lidas: unread,
+    qtdNaoLidas: unread,
+
+    instancia_id: ref.instId,
+    instance_name: msg?.instance_name || msg?.instanceName || resolveInstanceName(ref.instId) || null,
+
+    telefone: msg?.telefone || null,
+    telefone_norm: msg?.telefone_norm || null,
+  };
+
+  const updated = storeUpdateKnownConversation(ref.key, patch, ref.instId);
+
+  if (!updated) {
+    requestOfficialListReload('ws-preview-conversation-not-found');
+    return null;
   }
 
-  if (tipo) patch.last_tipo = (tipo === 'saida') ? 'saida' : 'entrada';
-
-  if (tipo === 'saida') {
-    patch.last_ack = (ack == null) ? 0 : Number(ack) || 0;
-  } else {
-    patch.last_ack = null;
-  }
-
-  if (inst != null) {
-    patch.instancia_id = inst;
-    patch.instancia = inst;
-  }
-  if (instance_name) patch.instance_name = instance_name;
-
-  if (unreadDelta) {
-    const cur = getConversaById(id, inst);
-    const curN = Number(cur?.novas || 0) || 0;
-    patch.novas = Math.max(0, curN + Number(unreadDelta || 0));
-  }
+  const finalKey = getConversationIdFromRow(updated) || ref.key;
 
   try {
-    moveConversaToTopKeyed(id, {
-      ultima_mensagem: patch.ultima_mensagem,
-      hora: patch.hora,
-      last_tipo: patch.last_tipo,
-      last_ack: patch.last_ack,
-      novas: patch.novas,
-      instancia_id: patch.instancia_id,
-      instancia: patch.instancia,
-      instance_name: patch.instance_name
-    }, inst ?? null);
-  } catch {
-    storeUpsertConversation(id, patch, inst);
-  }
-
-  try {
-    window.Lista?.updatePreview?.(id, {
-      texto: (typeof texto === 'string') ? texto : undefined,
-      ts: patch.hora ?? undefined,
-      ack: (tipo === 'saida') ? ack : null,
-      unreadDelta: unreadDelta || 0,
-      instancia_id: inst ?? null,
-      instance_name: instance_name ?? undefined,
-    });
+    window.Lista?.updatePreview?.(finalKey, patch);
   } catch {}
 
   try {
     window.recomputeUnread?.();
   } catch {}
-}
-
-// ========================= handlers: ACK & MSG & DELETE =========================
-function handleAckGeneric(payload) {
-  const inst = pickInstanciaFromAny(payload);
-
-  const cid =
-    idKey(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? null) ||
-    getConversaIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || payload?.jid || '', inst) ||
-    null;
-
-  if (!cid) return;
-
-  const msg_id = pickMsgId(payload) || null;
-  const ackVal = pickAck(payload);
-  if (ackVal == null) return;
 
   try {
-    updateAck(cid, msg_id, ackVal, inst ?? null);
-  } catch {}
-
-  const openByCliente = isOpenChat(cid);
-  const canFixDom = ensureDomContextFor(cid, inst);
-
-  const applied = window.applyAckUpdate?.({
-    instancia_id: inst ?? null,
-    cliente_id: cid,
-    msg_id,
-    ack: ackVal
-  });
-
-  if (!applied && (openByCliente || canFixDom)) {
-    window.reconcilePendingAcks?.();
-    setTimeout(() => window.reconcilePendingAcks?.(), 120);
-  }
-
-  try {
-    const cur = getConversaById(cid, inst);
-    const tipo = (cur?.last_tipo === 'saida') ? 'saida' : null;
-
-    if (tipo === 'saida') {
-      const instFinal = inst ?? (cur?.instancia_id ?? null);
-
-      bumpPreview(cid, {
-        tipo: 'saida',
-        ack: ackVal,
-        tsMs: resolveSafePreviewTsMs(cur?.hora ?? cur?.last_ts ?? null, cid, instFinal),
-        instancia_id: instFinal,
-        instance_name: resolveInstanceName(instFinal) ?? cur?.instance_name ?? null
-      });
-    }
-  } catch {}
-
-  try { window.Lista?.setAck?.(cid, ackVal, inst ?? null); } catch {}
-
-  if (DEBUG_WS) {
-    console.debug('[WS ACK]', {
-      cliente_id: cid,
-      msg_id,
-      ackVal,
-      inst,
-      openByCliente,
-      canFixDom
-    });
-  }
-}
-
-function handleNovaMensagem(payload) {
-  const inst = pickInstanciaFromAny(payload);
-
-  let cid = idKey(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? null);
-  if (!cid) {
-    const byPhone = getConversaIdByPhone(
-      payload?.telefone || payload?.phone || payload?.remoteJid || payload?.jid || '',
-      inst
-    );
-    if (byPhone) cid = byPhone;
-  }
-  if (!cid) return;
-
-  const textoRaw =
-    payload.mensagem ??
-    payload.texto ??
-    payload.message ??
-    payload.body ??
-    payload.content ??
-    '';
-
-  const tipo = (
-    payload.tipo === 'saida' ||
-    payload.from_me === true ||
-    payload.origem === 'atendente'
-  ) ? 'saida' : 'entrada';
-
-  const timeInfo = resolveMessageTime(payload, cid, inst);
-  const tsIso = timeInfo.raw;
-  const tsMsReal = timeInfo.ms;
-
-  let msgId = pickMsgId(payload) || null;
-  if (!msgId || String(msgId).trim() === '') {
-    const baseTs = tsMsReal || Date.now();
-    const sigTxt = String(textoRaw).slice(0, 32);
-    const slug = sigTxt.replace(/[^\w]/g, '').slice(0, 16) || 'noTxt';
-    msgId = `tmp:${cid}:${baseTs}:${sigTxt.length}:${slug}`;
-  }
-
-  const ackV = (tipo === 'saida') ? (pickAck(payload) ?? 0) : null;
-
-  const origem = payload.origem
-    || (payload.from_phone ? 'whatsapp_fisico' : (tipo === 'saida' ? 'atendente' : 'cliente'));
-
-  const autor_nome =
-    payload.atendente_nome ||
-    payload.user_nome ||
-    payload.operador_nome ||
-    payload.autor_nome ||
-    null;
-
-  const msg = {
-    id: msgId,
-    msg_id: msgId,
-    texto: textoRaw,
-    conteudo: textoRaw,
-    tipo,
-    timestamp: tsIso || null,
-    ts: tsMsReal || 0,
-    ack: ackV,
-    midias: Array.isArray(payload.midias) ? payload.midias : undefined,
-    instancia_id: inst,
-    origem,
-    autor_nome
-  };
-
-  let merged = false;
-  if (tipo === 'saida' && msg.msg_id) {
-    merged = squashPendingLocalEcho(inst, cid, msg);
-  }
-
-  if (!merged) {
-    appendToHistCache(inst, cid, msg);
-  }
-
-  try {
-    mergeIncomingMessage(cid, {
-      id: msgId,
-      msg_id: msgId,
-      texto: msg.conteudo,
-      conteudo: msg.conteudo,
-      tipo: msg.tipo,
-      ack: msg.ack,
-      ts: msg.ts,
-      timestamp: msg.timestamp,
-      instancia_id: inst ?? null
-    }, inst ?? null);
-  } catch {}
-
-  const openByCliente = isOpenChat(cid);
-  const canFixDom = ensureDomContextFor(cid, inst);
-
-  if (openByCliente || canFixDom) {
-    if (DEBUG_WS) {
-      console.debug('[WS MSG][RENDER]', {
-        cliente_id: cid,
-        inst,
-        append: !merged,
-        openByCliente,
-        canFixDom
-      });
-    }
-
-    renderHistoricoDoCache(cid, !merged);
-    if (msg.ack != null) {
-      window.applyAckUpdate?.({
-        instancia_id: inst ?? null,
-        cliente_id: cid,
-        msg_id: msg.msg_id,
-        ack: msg.ack
-      });
-    }
-
-    if (tipo === 'saida') {
-      try { window.OperatorLine?.set(msg.conteudo, tsIso, { origem, autor_nome }); } catch {}
-    }
-
-    if (tipo === 'entrada' && isChatActive(cid)) {
-      try { marcarLidas(cid, inst ?? null); } catch {}
-      try { window.recomputeUnread?.(); } catch {}
-    }
-  } else if (DEBUG_WS) {
-    const oc = getOpenContext();
-    console.debug('[WS MSG][SKIP RENDER]', { cliente_id: cid, inst, open_ctx: oc });
-  }
-
-  const safePreviewTsMs = resolveSafePreviewTsMs(tsMsReal ?? tsIso, cid, inst);
-  const instName = payload.instance_name ?? payload.instance ?? resolveInstanceName(inst) ?? null;
-  const active = isChatActive(cid);
-  const unreadDelta = (tipo === 'entrada' && !active) ? 1 : 0;
-
-  bumpPreview(cid, {
-    texto: msg.conteudo,
-    tsMs: safePreviewTsMs,
-    tipo,
-    ack: msg.ack,
-    instancia_id: inst,
-    instance_name: instName,
-    unreadDelta
-  });
-
-  try { window.syncPreviewFromCache?.(cid); } catch {}
-
-  if (DEBUG_WS) {
-    console.debug('[WS MSG]', {
-      cliente_id: cid,
-      inst,
-      merged,
-      openByCliente,
-      texto: msg.conteudo,
-      origem,
-      autor_nome
-    });
-  }
-}
-
-function handleDeleteMensagem(payload) {
-  const inst = pickInstanciaFromAny(payload);
-
-  const cid =
-    idKey(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? null) ||
-    getConversaIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || payload?.jid || '', inst) ||
-    null;
-
-  const msg_id = pickMsgId(payload);
-  if (!cid || !msg_id) return;
-
-  const flags = {
-    apagada_cliente: payload.apagada_cliente,
-    apagada_usuario: payload.apagada_usuario,
-  };
-
-  const changed = applyDeleteToHist(inst, cid, msg_id, flags);
-
-  const openByCliente = isOpenChat(cid);
-  const canFixDom = ensureDomContextFor(cid, inst);
-
-  if (changed && (openByCliente || canFixDom)) {
-    renderHistoricoDoCache(cid, false);
-  }
-
-  try {
-    window.syncPreviewFromCache?.(cid);
-  } catch {}
-
-  if (DEBUG_WS) {
-    console.debug('[WS MSG_DELETE]', {
-      cliente_id: cid,
-      inst,
-      msg_id,
-      flags,
-      changed
-    });
-  }
-}
-
-// ========================= conv_status & pin =========================
-function normalizeConvStatus(s) {
-  const v = String(s || '').trim().toLowerCase();
-  if (!v) return 'no_bot';
-
-  const BOT = ['bot', 'automatico', 'automático', 'auto', 'automatizado'];
-  const HUMAN = ['no_bot', 'humano', 'manual', 'atendente', 'agente', 'agent', 'operador', 'operadora'];
-
-  if (BOT.includes(v)) return 'bot';
-  if (HUMAN.includes(v)) return 'no_bot';
-  return v;
-}
-
-function handleConvStatus(payload) {
-  const inst = pickInstanciaFromAny(payload);
-
-  const cid =
-    idKey(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? null) ||
-    getConversaIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || '', inst) ||
-    null;
-
-  if (!cid) return;
-
-  const rawStatus = payload?.statusatendimento ?? payload?.status ?? payload?.state ?? payload?.modo ?? '';
-  const status = normalizeConvStatus(rawStatus);
-
-  const passesInst = _matchInstancia({ instancia_id: inst });
-  const openNow = isOpenChat(cid);
-  if (!passesInst && !openNow) return;
-
-  storeUpsertConversation(cid, {
-    status,
-    statusatendimento: status,
-    instancia_id: inst ?? (getConversaById(cid)?.instancia_id ?? null),
-    instancia: inst ?? (getConversaById(cid)?.instancia_id ?? null),
-    instance_name:
-      getConversaById(cid)?.instance_name ||
-      payload?.instance_name ||
-      payload?.instance ||
-      resolveInstanceName(inst) ||
-      null,
-  }, inst ?? null);
-
-  try {
-    const li = document.querySelector(`li.chat-item[data-id="${CSS.escape(String(cid))}"]`);
-    if (li) li.dataset.status = status;
-  } catch {}
-
-  try { window.Lista?.updatePreview?.(cid, { status, statusatendimento: status }); } catch {}
-  try {
-    document.dispatchEvent(new CustomEvent('ws:conv_status', {
-      detail: { cliente_id: cid, instancia_id: inst, status }
+    document.dispatchEvent(new CustomEvent('zc:unread-changed', {
+      detail: {
+        conversation_key: finalKey,
+        conversation_id: finalKey,
+        unread,
+        novas: unread,
+        unread_count: unread,
+      },
     }));
   } catch {}
 
-  if (DEBUG_WS) {
-    console.debug('[WS CONV_STATUS]', { cliente_id: cid, inst, status, rawStatus });
+  try {
+    document.dispatchEvent(new CustomEvent('ws:preview_updated', {
+      detail: {
+        conversation_key: finalKey,
+        conversation_id: finalKey,
+        ...patch,
+      },
+    }));
+  } catch {}
+
+  return updated;
+}
+
+/* =========================================================
+   HISTÓRICO
+========================================================= */
+
+function normalizeMsgForHist(data, convRef) {
+  const ref = normalizeConversationRef(convRef, typeof convRef === 'object' ? convRef : null);
+
+  const tipo =
+    data?.tipo === 'saida' ||
+    data?.from_me === true ||
+    data?.fromMe === true ||
+    data?.origem === 'atendente'
+      ? 'saida'
+      : 'entrada';
+
+  const text = pickText(data);
+  const msgId = pickMsgId(data);
+  const ts = pickTimestamp(data);
+
+  const out = {
+    msg_id: msgId ? String(msgId) : null,
+    conteudo: text || '',
+    texto: text || '',
+    mensagem: text || '',
+    tipo,
+    origem: tipo === 'saida' ? 'atendente' : 'cliente',
+    from_me: tipo === 'saida',
+    timestamp: ts,
+    ts: tsToMillis(ts) || Date.now(),
+    ack: tipo === 'saida' ? (pickAck(data) ?? 0) : null,
+    midias: Array.isArray(data?.midias) ? data.midias : [],
+    instancia_id: ref.instId || data?.instancia_id || data?.instanciaId || null,
+    instance_name: data?.instance_name || data?.instanceName || null,
+    conversation_key: ref.key,
+    conversation_id: ref.key,
+    kind: ref.kind,
+    entity_id: ref.entityId,
+  };
+
+  if (ref.kind === 'g') {
+    out.grupo_id = ref.entityId;
+    out.is_group = true;
+    out.author_jid = data?.author_jid || data?.participant || data?.participantJid || null;
+    out.autor_nome = data?.autor_nome || data?.senderName || data?.push_name || data?.pushName || null;
+    out.autor_cliente_id = data?.autor_cliente_id || null;
+  } else {
+    out.cliente_id = ref.entityId;
+    out.is_group = false;
   }
+
+  const quoted =
+    data?.quoted ??
+    data?.quote ??
+    data?.quotedMessage ??
+    data?.quoted_message ??
+    null;
+
+  const quotedPreview =
+    data?.quoted_preview ??
+    data?.quotedPreview ??
+    data?.reply_preview ??
+    data?.replyPreview ??
+    null;
+
+  if (quoted && typeof quoted === 'object') out.quoted = quoted;
+  if (quotedPreview && typeof quotedPreview === 'object') out.quoted_preview = quotedPreview;
+
+  if (data?.apagada_cliente != null) out.apagada_cliente = Boolean(data.apagada_cliente);
+  if (data?.apagada_usuario != null) out.apagada_usuario = Boolean(data.apagada_usuario);
+
+  return out;
+}
+
+function pushIncomingToHist(convKey, msg, inst = null) {
+  const ref = normalizeConversationRef(convKey, {
+    ...msg,
+    instancia_id: inst ?? msg?.instancia_id ?? null,
+  });
+
+  if (!ref?.key || !ref?.instId) return false;
+
+  const normalized = normalizeMsgForHist(msg, ref);
+
+  try {
+    pushOneNew(ref.instId, ref.key, normalized);
+  } catch {
+    try {
+      const current = getHist(ref.instId, ref.key) || [];
+      primeWith(ref.instId, ref.key, [...current, normalized]);
+    } catch {}
+  }
+
+  return true;
+}
+
+/* =========================================================
+   NOTIFICAÇÕES
+========================================================= */
+
+function notifyNewMessage(data, convKey) {
+  try {
+    document.dispatchEvent(new CustomEvent('ws:nova_mensagem', {
+      detail: {
+        ...data,
+        conversation_key: convKey,
+        conversation_id: convKey,
+      },
+    }));
+  } catch {}
+
+  try {
+    window.recomputeUnread?.();
+  } catch {}
+
+  try {
+    window.ZCNotif?.onNewMessage?.(data);
+  } catch {}
+}
+
+/* =========================================================
+   ACK
+========================================================= */
+
+function handleAckGeneric(data) {
+  const msgId = pickMsgId(data);
+  const ack = pickAck(data);
+
+  if (!msgId || ack == null) return;
+
+  const ref = resolveKnownRefForIncoming(data);
+  const key = ref?.key || null;
+
+  try {
+    updateAck(msgId, ack, key || undefined);
+  } catch {}
+
+  try {
+    document.dispatchEvent(new CustomEvent('ws:ack', {
+      detail: {
+        ...data,
+        msg_id: msgId,
+        ack,
+        conversation_key: key,
+        conversation_id: key,
+        instancia_id: ref?.instId || pickInstanciaFromAny(data),
+      },
+    }));
+  } catch {}
+
+  if (key && isOpenChat(ref)) {
+    try {
+      renderHistoricoDoCache(key, true);
+    } catch {}
+  }
+}
+
+/* =========================================================
+   DELETE
+========================================================= */
+
+function handleDeleteMensagem(data) {
+  const msgId = pickMsgId(data);
+  if (!msgId) return;
+
+  const ref = resolveKnownRefForIncoming(data);
+
+  if (!ref?.key || !ref?.instId) {
+    requestOfficialListReload('ws-delete-unknown-conversation');
+    return;
+  }
+
+  try {
+    const arr = getHist(ref.instId, ref.key) || [];
+
+    const next = arr.map((m) => {
+      const mid =
+        m?.msg_id ??
+        m?.msgId ??
+        m?.message_id ??
+        m?.messageId ??
+        m?.id ??
+        null;
+
+      if (String(mid || '') !== String(msgId)) return m;
+
+      return {
+        ...m,
+        apagada_cliente: Boolean(data.apagada_cliente ?? data.deleted_by_client ?? m.apagada_cliente),
+        apagada_usuario: Boolean(data.apagada_usuario ?? data.deleted_by_user ?? m.apagada_usuario),
+      };
+    });
+
+    primeWith(ref.instId, ref.key, next);
+  } catch {}
+
+  if (isOpenChat(ref)) {
+    try {
+      ensureDomContextFor(ref);
+      renderHistoricoDoCache(ref.key, true);
+    } catch {}
+  }
+
+  try {
+    document.dispatchEvent(new CustomEvent('ws:message_deleted', {
+      detail: {
+        ...data,
+        conversation_key: ref.key,
+        conversation_id: ref.key,
+        msg_id: msgId,
+      },
+    }));
+  } catch {}
+}
+
+/* =========================================================
+   NOVA MENSAGEM
+========================================================= */
+
+function handleNovaMensagem(data) {
+  const incomingRef = normalizeIncomingConversationRef(data);
+
+  if (!incomingRef?.key || !incomingRef?.kind || !incomingRef?.entityId || !incomingRef?.instId) {
+    if (DEBUG_WS) {
+      console.warn('[WS MSG][sem ref completa - reload oficial]', {
+        incomingRef,
+        data,
+      });
+    }
+
+    requestOfficialListReload('ws-message-without-complete-ref');
+    return;
+  }
+
+  const knownRef = resolveKnownRefForIncoming(data);
+
+  /*
+    WS NUNCA cria conversa.
+    Se a conversa não está aberta nem existe na lista/cache,
+    apenas recarrega a lista oficial.
+  */
+  if (!knownRef?.key || !knownRef?.instId) {
+    if (DEBUG_WS) {
+      console.warn('[WS MSG][conversa desconhecida - sem criar fantasma]', {
+        incomingRef,
+        data,
+      });
+    }
+
+    requestOfficialListReload('ws-new-message-unknown-conversation');
+    return;
+  }
+
+  const openNow = isOpenChat(knownRef);
+
+  const text = pickText(data);
+  const msgId = pickMsgId(data);
+
+  const normalizedPayload = {
+    ...data,
+    type: data.type || 'message',
+    event: data.event || 'message',
+
+    conversation_key: knownRef.key,
+    conversation_id: knownRef.key,
+    kind: knownRef.kind,
+    entity_id: knownRef.entityId,
+
+    instancia_id: knownRef.instId,
+    instance_name: data.instance_name || data.instanceName || resolveInstanceName(knownRef.instId) || null,
+
+    mensagem: text,
+    texto: text,
+    conteudo: text,
+    msg_id: msgId,
+
+    from_me: Boolean(data.from_me ?? data.fromMe ?? data.tipo === 'saida'),
+    is_group: knownRef.kind === 'g',
+  };
+
+  if (knownRef.kind === 'g') {
+    normalizedPayload.grupo_id = knownRef.entityId;
+    normalizedPayload.cliente_id = data.cliente_id ?? null;
+  } else {
+    normalizedPayload.cliente_id = knownRef.entityId;
+  }
+
+  try {
+    mergeIncomingMessage(knownRef.key, normalizedPayload, knownRef.instId);
+  } catch {}
+
+  pushIncomingToHist(knownRef, normalizedPayload, knownRef.instId);
+
+  const updated = bumpPreview(knownRef, normalizedPayload, knownRef.instId);
+
+  if (!updated && !openNow) {
+    requestOfficialListReload('ws-message-update-miss');
+    return;
+  }
+
+  if (openNow) {
+    try {
+      ensureDomContextFor(knownRef);
+
+      /*
+        CRÍTICO:
+        Mensagem nova via WS é append.
+        Nunca rebuilda histórico inteiro aqui.
+      */
+      renderHistoricoDoCache(knownRef.key, true);
+
+      scrollBottomSoon();
+
+      try {
+        marcarLidas(knownRef.key);
+      } catch {}
+
+      try {
+        if (knownRef.kind === 'c' && knownRef.entityId) {
+          document.dispatchEvent(new CustomEvent('zc:seen-current', {
+            detail: {
+              cliente_id: knownRef.entityId,
+              instancia_id: knownRef.instId,
+              conversation_key: knownRef.key,
+            },
+          }));
+        }
+      } catch {}
+    } catch (e) {
+      if (DEBUG_WS) console.warn('[WS MSG][render falhou]', e);
+    }
+  } else if (DEBUG_WS) {
+    console.debug('[WS MSG][não aberto - só preview/badge]', {
+      incoming: knownRef.key,
+      open: getOpenContext()?.key,
+      data: normalizedPayload,
+    });
+  }
+
+  notifyNewMessage(normalizedPayload, knownRef.key);
+
+  if (DEBUG_WS) {
+    console.debug('[WS MSG]', {
+      convKey: knownRef.key,
+      inst: knownRef.instId,
+      openNow,
+      text,
+      msgId,
+      raw: data,
+    });
+  }
+}
+
+/* =========================================================
+   STATUS / PIN
+========================================================= */
+
+function handleConvStatus(payload) {
+  const ref = resolveKnownRefForIncoming(payload);
+
+  if (!ref?.key) {
+    requestOfficialListReload('ws-status-unknown-conversation');
+    return;
+  }
+
+  const rawStatus =
+    payload?.status ??
+    payload?.statusatendimento ??
+    payload?.status_atendimento ??
+    null;
+
+  const status = String(rawStatus || '').trim().toLowerCase();
+  if (!status) return;
+
+  const updated = storeUpdateKnownConversation(ref, {
+    status,
+    statusatendimento: status,
+    instancia_id: ref.instId,
+    instance_name:
+      payload?.instance_name ||
+      payload?.instanceName ||
+      payload?.instance ||
+      resolveInstanceName(ref.instId) ||
+      null,
+  }, ref.instId);
+
+  if (!updated) {
+    requestOfficialListReload('ws-status-update-miss');
+    return;
+  }
+
+  try {
+    const li = document.querySelector(`li.chat-item[data-id="${CSS.escape(String(ref.key))}"]`);
+    if (li) li.dataset.status = status;
+  } catch {}
+
+  try {
+    window.Lista?.updatePreview?.(ref.key, { status, statusatendimento: status });
+  } catch {}
+
+  try {
+    document.dispatchEvent(new CustomEvent('ws:conv_status', {
+      detail: {
+        conversation_key: ref.key,
+        conversation_id: ref.key,
+        cliente_id: ref.kind === 'c' ? ref.entityId : null,
+        grupo_id: ref.kind === 'g' ? ref.entityId : null,
+        instancia_id: ref.instId,
+        status,
+      },
+    }));
+  } catch {}
 }
 
 function inferPinFlag(p) {
@@ -1008,50 +1578,140 @@ function inferPinFlag(p) {
   if (p.fixado != null) return !!p.fixado;
 
   const a = String(p.action || p.act || p.event || p.type || '').toLowerCase();
+
   if (a.includes('unpin') || a.includes('desfix') || a.includes('desafix')) return false;
   if (a.includes('pin') || a.includes('fix')) return true;
+
   return null;
 }
 
 function handleConvPin(payload) {
-  const inst = pickInstanciaFromAny(payload);
+  const ref = resolveKnownRefForIncoming(payload);
 
-  const cid =
-    idKey(payload?.cliente_id ?? payload?.client_id ?? payload?.conversation_id ?? null) ||
-    getConversaIdByPhone(payload?.telefone || payload?.phone || payload?.remoteJid || '', inst) ||
-    null;
-
-  if (!cid) return;
+  if (!ref?.key) {
+    requestOfficialListReload('ws-pin-unknown-conversation');
+    return;
+  }
 
   const flag = inferPinFlag(payload);
   if (flag == null) return;
 
-  storeUpsertConversation(cid, { pinned: !!flag }, inst ?? null);
+  const updated = storeUpdateKnownConversation(ref, { pinned: !!flag }, ref.instId);
 
-  try { window.Lista?.setPinned?.(cid, !!flag); } catch {}
+  if (!updated) {
+    requestOfficialListReload('ws-pin-update-miss');
+    return;
+  }
+
   try {
-    const li = document.querySelector(`li.chat-item[data-id="${CSS.escape(String(cid))}"]`);
+    window.Lista?.setPinned?.(ref.key, !!flag);
+  } catch {}
+
+  try {
+    const li = document.querySelector(`li.chat-item[data-id="${CSS.escape(String(ref.key))}"]`);
     if (li) li.classList.toggle('is-pinned', !!flag);
   } catch {}
 
-  try { sessionStorage.setItem('convForceReload', '1'); } catch {}
-
-  if (DEBUG_WS) {
-    console.debug('[WS CONV_PIN]', {
-      cliente_id: cid,
-      inst,
-      pinned: !!flag,
-      raw: payload
-    });
-  }
+  try {
+    sessionStorage.setItem('convForceReload', '1');
+  } catch {}
 }
 
-// ========================= dispatcher =========================
+/* =========================================================
+   WS URL / STATUS
+========================================================= */
+
+function protocolWs() {
+  return location.protocol === 'https:' ? 'wss:' : 'ws:';
+}
+
+function wsUrlInst(topic, { wantQR = false } = {}) {
+  const qs = new URLSearchParams();
+
+  qs.set('cid', WS_CID);
+
+  if (EMPRESA_ID) qs.set('empresa_id', String(EMPRESA_ID));
+  if (wantQR) qs.set('qr', '1');
+
+  try {
+    const token =
+      localStorage.getItem('access_token') ||
+      localStorage.getItem('token') ||
+      '';
+
+    if (token) qs.set('token', token);
+  } catch {}
+
+  return `${protocolWs()}//${location.host}/ws/instancia/${encodeURIComponent(topic)}?${qs.toString()}`;
+}
+
+function badge(text, mode = 'ok') {
+  try {
+    const el =
+      document.getElementById('status-bateria') ||
+      document.getElementById('zc-ws-status') ||
+      null;
+
+    if (!el) return;
+
+    el.dataset.ws = mode;
+    el.setAttribute('data-ws', mode);
+
+    if (text) {
+      el.title = text;
+    }
+  } catch {}
+}
+
+function startLagTimer() {
+  if (lagTimer) return;
+
+  lagTimer = setInterval(() => {
+    try {
+      if (!lastServerTs) return;
+
+      const lag = Date.now() - Number(lastServerTs || 0);
+
+      if (lag > 120000) badge('Tempo real atrasado', 'crit');
+      else if (lag > 45000) badge('Tempo real instável', 'warn');
+      else badge('Tempo real', 'ok');
+    } catch {}
+  }, 15000);
+}
+
+function scheduleHeartbeat(sock) {
+  clearInterval(hbInstTimer);
+
+  hbInstTimer = setInterval(() => {
+    try {
+      if (!sock || sock.readyState !== WebSocket.OPEN) return;
+      sock.send(JSON.stringify({ type: 'ping', cid: WS_CID, t: Date.now() }));
+    } catch {}
+  }, 25000);
+}
+
+function backoff(fn, ref) {
+  const wait = Math.min(ref.val || 800, 20000);
+
+  setTimeout(() => {
+    try {
+      fn();
+    } catch {}
+  }, wait);
+
+  ref.val = Math.min(wait * 1.7, 20000);
+}
+
+/* =========================================================
+   DISPATCHER
+========================================================= */
+
 function handleMessage(ev) {
   if (typeof ev?.data === 'string' && (ev.data === 'pong' || ev.data === 'ping')) return;
 
-  const raw = (typeof ev?.data === 'string') ? safeJson(ev.data) : ev?.data;
+  const raw = typeof ev?.data === 'string' ? safeJson(ev.data) : ev?.data;
   const data = unwrap(raw);
+
   if (!data || typeof data !== 'object') return;
 
   const sTs = Number(data.serverTimestamp ?? 0);
@@ -1069,22 +1729,23 @@ function handleMessage(ev) {
 
   if (data.type === 'reload_clientes' || data.type === 'reload_grupos') {
     document.dispatchEvent(new CustomEvent('ws:reload_clientes', { detail: data }));
-    try {
-      sessionStorage.setItem('convForceReload', '1');
-      window.carregarClientes?.({ force: true });
-    } catch {}
+    requestOfficialListReload(data.type);
     return;
   }
 
   if (data.reload || data.action === 'reload') {
-    console.warn('[WS] reload genérico ignorado');
+    if (DEBUG_WS) console.warn('[WS] reload genérico ignorado');
     document.dispatchEvent(new CustomEvent('ws:generic_reload', { detail: data }));
     return;
   }
 
   if (data.reload_whatsapp || data.type === 'reload_whatsapp') {
     document.dispatchEvent(new CustomEvent('ws:reload_whatsapp', { detail: data }));
-    try { window.loadInstances?.(EMPRESA_ID); } catch {}
+
+    try {
+      window.loadInstances?.(EMPRESA_ID);
+    } catch {}
+
     return;
   }
 
@@ -1122,28 +1783,38 @@ function handleMessage(ev) {
   }
 
   const maybeAck = pickAck(data);
+
   if (data.type === 'ack' || maybeAck != null) {
     handleAckGeneric(data);
   }
 
   const hasText =
-    (data.mensagem != null) ||
-    (data.texto != null) ||
-    (data.message != null) ||
-    (data.body != null) ||
-    (data.content != null);
+    data.mensagem != null ||
+    data.texto != null ||
+    data.conteudo != null ||
+    data.message != null ||
+    data.body != null ||
+    data.content != null;
 
   const hasMidias = Array.isArray(data.midias) && data.midias.length > 0;
 
-  const hasCliente =
-    (data.cliente_id != null) ||
-    (data.client_id != null) ||
-    (data.conversation_id != null) ||
-    (data.telefone != null) ||
-    (data.phone != null) ||
-    (data.remoteJid != null);
+  const hasConversation =
+    data.cliente_id != null ||
+    data.clienteId != null ||
+    data.client_id != null ||
+    data.clientId != null ||
+    data.grupo_id != null ||
+    data.grupoId != null ||
+    data.group_id != null ||
+    data.groupId != null ||
+    data.entity_id != null ||
+    data.entityId != null ||
+    data.conversation_id != null ||
+    data.conversationId != null ||
+    data.conversation_key != null ||
+    data.conversationKey != null;
 
-  if (hasCliente && (hasText || hasMidias)) {
+  if (hasConversation && (hasText || hasMidias)) {
     handleNovaMensagem(data);
     return;
   }
@@ -1151,7 +1822,10 @@ function handleMessage(ev) {
   if (DEBUG_WS) console.debug('[WS IGNORADO]', data);
 }
 
-// ========================= helpers de página =========================
+/* =========================================================
+   LIFECYCLE
+========================================================= */
+
 function isAtendimentosPage() {
   try {
     if (location.pathname.includes('/atendimentos')) return true;
@@ -1161,77 +1835,85 @@ function isAtendimentosPage() {
   }
 }
 
-// ========================= lifecycle: EMPRESA =========================
 function connectEmpresaWS() {
   if (!EMPRESA_ID) return;
-  if (sockEmp && (sockEmp.readyState === WebSocket.OPEN || sockEmp.readyState === WebSocket.CONNECTING)) return;
 
-  try { sockEmp?.close(); } catch {}
-  closedEmpByMe = false;
+  ensureCoreEmpresaWS(EMPRESA_ID);
 
-  const url = wsUrlEmpresa(EMPRESA_ID);
-  sockEmp = new WebSocket(url);
+  if (unsubEmpresaWS) return;
 
-  sockEmp.addEventListener('open', () => {
-    retryBaseEmp = 800;
-    scheduleHeartbeat(sockEmp, 'emp');
-    startLagTimer();
-    lastServerTs = Date.now();
-    badge('Tempo real', 'ok');
-    if (DEBUG_WS) console.debug('[WS OPEN EMP]', url);
-  });
+  unsubEmpresaWS = onCoreEmpresaMessage(EMPRESA_ID, (evt) => {
+    if (!evt || typeof evt !== 'object') return;
 
-  sockEmp.addEventListener('message', (ev) => {
-    if (typeof ev?.data === 'string') {
-      try {
-        const parsed = JSON.parse(ev.data);
-        const ts = Number(
-          parsed?.serverTimestamp ??
-          parsed?.ts ??
-          (parsed?.timestamp ? tsToMillis(parsed.timestamp) : 0)
-        );
-        if (Number.isFinite(ts) && ts > 0) {
-          lastServerTs = Math.max(lastServerTs || 0, ts);
-        }
-      } catch {}
+    if (evt.type === 'open') {
+      startLagTimer();
+      lastServerTs = Date.now();
+      badge('Tempo real', 'ok');
+
+      if (DEBUG_WS) {
+        console.debug('[WS OPEN EMP][shared ws-core]', EMPRESA_ID);
+      }
+
+      return;
     }
-    handleMessage(ev);
-  });
 
-  sockEmp.addEventListener('close', () => {
-    clearInterval(hbEmpTimer);
-    badge('Reconectando…', 'loading');
+    if (evt.type === 'close') {
+      badge('Reconectando…', 'loading');
 
-    if (!closedEmpByMe) {
-      if (DEBUG_WS) console.debug('[WS CLOSE EMP] retry');
-      backoff(connectEmpresaWS, {
-        get val() { return retryBaseEmp; },
-        set val(v) { retryBaseEmp = v; }
-      });
+      if (DEBUG_WS) {
+        console.debug('[WS CLOSE EMP][shared ws-core]', EMPRESA_ID);
+      }
+
+      return;
     }
-  });
 
-  sockEmp.addEventListener('error', () => {
-    try { sockEmp.close(); } catch {}
+    if (evt.type === 'error') {
+      badge('Reconectando…', 'loading');
+
+      if (DEBUG_WS) {
+        console.debug('[WS ERROR EMP][shared ws-core]', EMPRESA_ID);
+      }
+
+      return;
+    }
+
+    if (evt.type === 'heartbeat') return;
+
+    if (evt.type === 'message') {
+      handleMessage({ data: evt.data });
+    }
   });
 }
 
 function disconnectEmpresaWS() {
-  closedEmpByMe = true;
-  clearInterval(hbEmpTimer);
-  try { sockEmp?.close(); } catch {}
-  sockEmp = null;
+  try {
+    if (typeof unsubEmpresaWS === 'function') {
+      unsubEmpresaWS();
+    }
+  } catch {}
+
+  unsubEmpresaWS = null;
   badge('Desconectado', 'crit');
 }
 
-// ========================= lifecycle: INSTÂNCIA =========================
 function connectInstWS({ wantQR = false } = {}) {
   const topic = resolveInstTopic();
   if (!topic) return;
 
-  if (sockInst && (sockInst.readyState === WebSocket.OPEN || sockInst.readyState === WebSocket.CONNECTING)) return;
+  if (
+    sockInst &&
+    (
+      sockInst.readyState === WebSocket.OPEN ||
+      sockInst.readyState === WebSocket.CONNECTING
+    )
+  ) {
+    return;
+  }
 
-  try { sockInst?.close(); } catch {}
+  try {
+    sockInst?.close();
+  } catch {}
+
   closedInstByMe = false;
 
   const url = wsUrlInst(topic, { wantQR });
@@ -1239,9 +1921,10 @@ function connectInstWS({ wantQR = false } = {}) {
 
   sockInst.addEventListener('open', () => {
     retryBaseInst = 800;
-    scheduleHeartbeat(sockInst, 'inst');
+    scheduleHeartbeat(sockInst);
     startLagTimer();
     lastServerTs = Date.now();
+
     if (DEBUG_WS) console.debug('[WS OPEN INST]', url);
   });
 
@@ -1249,16 +1932,19 @@ function connectInstWS({ wantQR = false } = {}) {
     if (typeof ev?.data === 'string') {
       try {
         const parsed = JSON.parse(ev.data);
+
         const ts = Number(
           parsed?.serverTimestamp ??
           parsed?.ts ??
           (parsed?.timestamp ? tsToMillis(parsed.timestamp) : 0)
         );
+
         if (Number.isFinite(ts) && ts > 0) {
           lastServerTs = Math.max(lastServerTs || 0, ts);
         }
       } catch {}
     }
+
     handleMessage(ev);
   });
 
@@ -1267,55 +1953,91 @@ function connectInstWS({ wantQR = false } = {}) {
 
     if (!closedInstByMe) {
       if (DEBUG_WS) console.debug('[WS CLOSE INST] retry');
+
       backoff(() => connectInstWS({ wantQR: false }), {
-        get val() { return retryBaseInst; },
-        set val(v) { retryBaseInst = v; }
+        get val() {
+          return retryBaseInst;
+        },
+        set val(v) {
+          retryBaseInst = v;
+        },
       });
     }
   });
 
   sockInst.addEventListener('error', () => {
-    try { sockInst.close(); } catch {}
+    try {
+      sockInst.close();
+    } catch {}
   });
 }
 
 function disconnectInstWS() {
   closedInstByMe = true;
   clearInterval(hbInstTimer);
-  try { sockInst?.close(); } catch {}
+
+  try {
+    sockInst?.close();
+  } catch {}
+
   sockInst = null;
 }
 
-// ========================= boot/teardown =========================
+/* =========================================================
+   BOOT
+========================================================= */
+
 try {
   const boot = () => {
+    if (window.__ZC_WS_EMPRESA_BOOTED__) {
+      if (DEBUG_WS) console.debug('[WS] boot ignorado: websocket já inicializado nesta página');
+      return;
+    }
+
+    window.__ZC_WS_EMPRESA_BOOTED__ = true;
+
     connectEmpresaWS();
+
     if (isAtendimentosPage()) {
       connectInstWS({ wantQR: false });
     }
   };
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
+    document.addEventListener('DOMContentLoaded', boot, { once: true });
   } else {
     boot();
   }
 
-  document.addEventListener('inst:change', () => {
-    if (DEBUG_WS) console.debug('[WS] inst:change → reconnect inst');
-    disconnectInstWS();
-    connectInstWS({ wantQR: false });
-  });
+  if (!window.__ZC_WS_INST_CHANGE_BOUND__) {
+    window.__ZC_WS_INST_CHANGE_BOUND__ = true;
 
-  window.addEventListener('beforeunload', () => {
-    try { disconnectInstWS(); } catch {}
-    try { disconnectEmpresaWS(); } catch {}
-  });
+    document.addEventListener('inst:change', () => {
+      if (DEBUG_WS) console.debug('[WS] inst:change → reconnect inst');
+
+      disconnectInstWS();
+      connectInstWS({ wantQR: false });
+    });
+  }
+
+  if (!window.__ZC_WS_BEFOREUNLOAD_BOUND__) {
+    window.__ZC_WS_BEFOREUNLOAD_BOUND__ = true;
+
+    window.addEventListener('beforeunload', () => {
+      try {
+        disconnectInstWS();
+      } catch {}
+
+      try {
+        disconnectEmpresaWS();
+      } catch {}
+    });
+  }
 } catch {}
 
 export {
   connectEmpresaWS,
   disconnectEmpresaWS,
   connectInstWS,
-  disconnectInstWS
+  disconnectInstWS,
 };

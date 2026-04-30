@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="has-sidebar prepaint">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Filas – ZapsChat</title>
+
+  <script>
+    (function () {
+      try {
+        const t = localStorage.getItem('theme') || localStorage.getItem('zc:theme') || 'dark';
+        document.documentElement.classList.toggle('dark', t === 'dark');
+        document.documentElement.setAttribute('data-theme', t);
+      } catch {}
+    })();
+  </script>
+
+  <script src="/frontend/js/app-base.js" defer></script>
+  <script src="/frontend/js/auth.js" defer></script>
+  <script src="/frontend/js/page-guard.js" defer></script>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+  <style>
+    html.prepaint body{visibility:hidden}
+    html.prepaint[data-head-ready][data-loader-ready] body{visibility:visible;transition:opacity .25s ease}
+  </style>
+
+  <link rel="stylesheet" href="/frontend/css/atendimentos.css"/>
+  <link rel="stylesheet" href="/frontend/css/filas.css"/>
+
+  <script src="/frontend/js/pages/filas.js" defer></script>
+</head>
+
+<body data-page="filas">
+  <aside id="sidebar" data-src="/frontend/partials/sidebar-atendimentos.html"></aside>
+
+  <main class="main">
+    <div class="section-title">
+      <h1>
+        <i class="fa-solid fa-list-check title-ico"></i>
+        Gestão de Filas
+      </h1>
+
+      <span class="tag tag-fila">Fluxo do chatbot</span>
+
+      <div class="top-actions">
+        <button id="btnComoFuncionaFilas" type="button" class="help-trigger" aria-haspopup="dialog" aria-controls="filasHelpModal">
+          <i class="fa-solid fa-circle-question"></i>
+          <span>Como funciona</span>
+        </button>
+
+        <button id="btnRestaurarFilas" class="btn" type="button">
+          <i class="fa-solid fa-rotate-left"></i>
+          Restaurar
+        </button>
+
+        <button id="btnNovaFila" class="btn primary" type="button">
+          <i class="fa-solid fa-plus"></i>
+          Nova fila
+        </button>
+      </div>
+    </div>
+
+    <div class="inline-note">
+      <i class="fa-solid fa-circle-info"></i>
+      <div>
+        As filas organizam o atendimento depois que o cliente escolhe uma opção no <strong>chatbot</strong>.
+        Exemplo: Comercial, Suporte, Financeiro, Cobrança ou Jurídico.
+      </div>
+    </div>
+
+    <section class="summary-card" aria-label="Resumo das filas">
+      <div class="summary-head">
+        <div>
+          <h3>
+            <i class="fa-solid fa-diagram-project"></i>
+            Resumo da operação
+          </h3>
+          <p>Visão rápida das filas disponíveis para organização do atendimento.</p>
+        </div>
+
+        <div class="summary-badges">
+          <span class="summary-chip"><strong id="totalFilas">--</strong> filas cadastradas</span>
+        </div>
+      </div>
+
+      <div class="summary-grid">
+        <div class="summary-box">
+          <div class="k">Total de filas</div>
+          <div class="v" id="metricTotal">0</div>
+        </div>
+
+        <div class="summary-box">
+          <div class="k">Filas ativas</div>
+          <div class="v" id="metricAtivas">0</div>
+        </div>
+
+        <div class="summary-box">
+          <div class="k">Alta prioridade</div>
+          <div class="v" id="metricAlta">0</div>
+        </div>
+
+        <div class="summary-box">
+          <div class="k">SLA médio</div>
+          <div class="v" id="metricSla">--</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="filter-card" aria-label="Filtros de filas">
+      <div class="filter-head">
+        <div>
+          <h2>Filas configuradas</h2>
+          <p>Crie as opções que depois aparecem no fluxo do chatbot e organizam a equipe.</p>
+        </div>
+      </div>
+
+      <div class="dept-toolbar">
+        <label class="dept-search" for="buscaFila">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input
+            id="buscaFila"
+            type="search"
+            placeholder="Buscar fila, descrição, departamento ou mensagem..."
+            autocomplete="off"
+          />
+        </label>
+
+        <div class="filter-actions">
+          <select id="filtroStatus" class="select">
+            <option value="">Status: Todos</option>
+            <option value="ativa">Somente ativas</option>
+            <option value="inativa">Somente inativas</option>
+          </select>
+
+          <select id="filtroPrioridade" class="select">
+            <option value="">Prioridade: Todas</option>
+            <option value="baixa">Baixa</option>
+            <option value="normal">Normal</option>
+            <option value="alta">Alta</option>
+            <option value="urgente">Urgente</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section class="stack filas-stack-wrap" aria-label="Lista de filas">
+      <div id="tabelaFilas" class="filas-stack"></div>
+
+      <div id="emptyFilas" class="empty">
+        <div class="empty-icon">
+          <i class="fa-solid fa-inbox"></i>
+        </div>
+        <h3>Nenhuma fila encontrada</h3>
+        <p>Crie uma fila para aparecer como opção no menu do chatbot.</p>
+        <button id="btnNovaFilaEmpty" class="btn primary" type="button">
+          <i class="fa-solid fa-plus"></i>
+          Criar primeira fila
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <!-- MODAL NOVA / EDITAR FILA -->
+  <div id="modalFila" class="modal-back" aria-hidden="true">
+    <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalFilaTitulo">
+      <header class="modal-head">
+        <div>
+          <div class="modal-title">
+            <i class="fa-solid fa-list-check"></i>
+            <span id="modalFilaTitulo">Nova fila</span>
+          </div>
+          <p>Configure como essa fila será usada para organizar o atendimento.</p>
+        </div>
+
+        <button id="btnFecharModalFila" class="btn-close" type="button" aria-label="Fechar modal">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </header>
+
+      <form id="formFila" class="modal-body">
+        <input type="hidden" id="filaId"/>
+
+        <div class="modal-mini-note">
+          <i class="fa-solid fa-route"></i>
+          <div>
+            <strong>O que essa fila faz?</strong>
+            <span>Quando o cliente escolher essa opção no chatbot, a conversa fica organizada nessa fila para a equipe atender melhor.</span>
+          </div>
+        </div>
+
+        <div class="form-section-title">
+          <span>Configuração principal</span>
+        </div>
+
+        <div class="form-grid">
+          <label class="fi">
+            <span>Nome que aparece para a equipe <span class="req">*</span></span>
+            <input id="filaNome" class="input" type="text" placeholder="Ex: Suporte Técnico" maxlength="70" required/>
+          </label>
+
+          <label class="fi">
+            <span>Prioridade</span>
+            <select id="filaPrioridade" class="select">
+              <option value="baixa">Baixa</option>
+              <option value="normal" selected>Normal</option>
+              <option value="alta">Alta</option>
+              <option value="urgente">Urgente</option>
+            </select>
+          </label>
+
+          <label class="fi">
+            <span>Tempo ideal de resposta</span>
+            <select id="filaSla" class="select">
+              <option value="5">Até 5 minutos</option>
+              <option value="10" selected>Até 10 minutos</option>
+              <option value="15">Até 15 minutos</option>
+              <option value="30">Até 30 minutos</option>
+              <option value="60">Até 1 hora</option>
+            </select>
+          </label>
+
+          <label class="fi">
+            <span>Cor de identificação</span>
+            <select id="filaCor" class="select">
+              <option value="verde" selected>Verde</option>
+              <option value="azul">Azul</option>
+              <option value="amarelo">Amarelo</option>
+              <option value="vermelho">Vermelho</option>
+              <option value="roxo">Roxo</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="fi full-width">
+          <span>Explicação interna da fila</span>
+          <textarea
+            id="filaDescricao"
+            class="input"
+            rows="2"
+            placeholder="Ex: Fila destinada a dúvidas gerais e acompanhamento de chamados."></textarea>
+        </label>
+
+        <div class="form-section-title">
+          <span>Mensagem para o cliente</span>
+        </div>
+
+        <label class="fi full-width">
+          <span>Mensagem enviada quando o cliente entrar nessa fila</span>
+          <textarea
+            id="filaMensagem"
+            class="input"
+            rows="3"
+            placeholder="Ex: Olá! Você entrou na fila de suporte. Em instantes um especialista irá te atender."></textarea>
+        </label>
+
+        <div class="preview-card">
+          <div class="preview-title">
+            <i class="fa-regular fa-message"></i>
+            Prévia no atendimento
+          </div>
+          <pre id="filaPreviewText" class="preview-pre">A mensagem padrão aparecerá aqui.</pre>
+        </div>
+
+        <div class="form-section-title">
+          <span>Disponibilidade</span>
+        </div>
+
+        <label class="switch-line">
+          <div class="switch-info">
+            <strong>Fila ativa</strong>
+            <span>Se inativa, ela não aparece para novos direcionamentos.</span>
+          </div>
+
+          <label class="tswitch" id="swFilaAtiva" data-on="true" tabindex="0" aria-pressed="true">
+            <input id="filaAtiva" type="checkbox" checked aria-label="Ativar fila">
+            <span class="track"></span>
+            <span class="label off">off</span>
+            <span class="label on">on</span>
+            <span class="knob"></span>
+          </label>
+        </label>
+
+        <footer class="modal-foot">
+          <button id="btnExcluirFila" class="btn danger outline" type="button" hidden>
+            <i class="fa-solid fa-trash"></i>
+            Excluir
+          </button>
+
+          <span class="spacer"></span>
+
+          <button id="btnCancelarFila" class="btn ghost" type="button">Cancelar</button>
+
+          <button class="btn primary" type="submit">
+            <i class="fa-solid fa-check"></i>
+            Salvar fila
+          </button>
+        </footer>
+      </form>
+    </section>
+  </div>
+
+  <!-- MODAL COMO FUNCIONA EM SLIDES -->
+  <div id="filasHelpModal" class="help-modal" aria-hidden="true">
+    <div class="help-card help-slider-card" role="dialog" aria-modal="true" aria-labelledby="filasHelpTitle">
+      <div class="help-top">
+        <div>
+          <h2 id="filasHelpTitle">
+            <i class="fa-solid fa-circle-question"></i>
+            Como as filas funcionam
+          </h2>
+          <p>Entenda em poucos passos como o cliente sai do chatbot e chega organizado para sua equipe.</p>
+        </div>
+
+        <button type="button" class="help-close" data-close-modal="filasHelpModal" aria-label="Fechar">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="help-body">
+        <div class="help-slider">
+          <button type="button" class="slide-nav slide-prev" id="filasSlidePrev" aria-label="Slide anterior">
+            <i class="fa-solid fa-chevron-left"></i>
+          </button>
+
+          <div class="help-slides" id="filasHelpSlides">
+            <article class="help-slide is-active" data-slide="0">
+              <div class="slide-badge">1</div>
+              <div class="slide-icon">
+                <i class="fa-solid fa-robot"></i>
+              </div>
+              <h3>Cliente escolhe no chatbot</h3>
+              <p>
+                O chatbot mostra opções como Comercial, Suporte, Financeiro ou Cobrança.
+                O cliente responde com a opção desejada.
+              </p>
+              <div class="chat-demo">
+                <div class="bot-msg">Olá! Como podemos ajudar?<br>1 - Comercial<br>2 - Suporte<br>3 - Financeiro</div>
+                <div class="user-msg">2</div>
+              </div>
+            </article>
+
+            <article class="help-slide" data-slide="1">
+              <div class="slide-badge">2</div>
+              <div class="slide-icon">
+                <i class="fa-solid fa-inbox"></i>
+              </div>
+              <h3>A conversa entra na fila certa</h3>
+              <p>
+                A conversa fica marcada com a fila escolhida. Assim a equipe já sabe
+                qual assunto o cliente quer tratar.
+              </p>
+              <div class="slide-card-demo">
+                <span class="status-pill is-active">Suporte</span>
+                <strong>Cliente novo aguardando atendimento</strong>
+                <small>Fila: Suporte Técnico • Prioridade: Normal</small>
+              </div>
+            </article>
+
+            <article class="help-slide" data-slide="2">
+              <div class="slide-badge">3</div>
+              <div class="slide-icon">
+                <i class="fa-solid fa-headset"></i>
+              </div>
+              <h3>O atendente assume</h3>
+              <p>
+                O operador vê a fila, prioridade e tempo ideal de resposta.
+                Isso evita bagunça, conversa perdida e cliente sem retorno.
+              </p>
+              <div class="slide-card-demo">
+                <span class="prio-pill prio-normal">SLA até 10 min</span>
+                <strong>Atendente assume a conversa</strong>
+                <small>Histórico, status e responsável ficam organizados.</small>
+              </div>
+            </article>
+
+            <article class="help-slide" data-slide="3">
+              <div class="slide-badge">4</div>
+              <div class="slide-icon">
+                <i class="fa-regular fa-message"></i>
+              </div>
+              <h3>Mensagem padrão confirma para o cliente</h3>
+              <p>
+                Você pode deixar uma mensagem pronta para avisar que o cliente entrou
+                na fila e será atendido em instantes.
+              </p>
+              <div class="chat-demo">
+                <div class="bot-msg">Você entrou na fila de Suporte. Em instantes nossa equipe irá te atender.</div>
+              </div>
+            </article>
+          </div>
+
+          <button type="button" class="slide-nav slide-next" id="filasSlideNext" aria-label="Próximo slide">
+            <i class="fa-solid fa-chevron-right"></i>
+          </button>
+        </div>
+
+        <div class="slide-footer">
+          <div class="slide-dots" id="filasSlideDots">
+            <button type="button" class="slide-dot is-active" data-slide-dot="0" aria-label="Ir para slide 1"></button>
+            <button type="button" class="slide-dot" data-slide-dot="1" aria-label="Ir para slide 2"></button>
+            <button type="button" class="slide-dot" data-slide-dot="2" aria-label="Ir para slide 3"></button>
+            <button type="button" class="slide-dot" data-slide-dot="3" aria-label="Ir para slide 4"></button>
+          </div>
+
+          <div class="slide-counter" id="filasHelpCounter">1 de 4</div>
+        </div>
+
+        <div class="help-note">
+          <strong>Resumo:</strong> fila é o caminho que organiza o cliente depois da escolha no chatbot.
+          Ela ajuda sua equipe a saber quem atende, qual assunto é e qual prioridade seguir.
+        </div>
+
+        <div class="help-footer">
+          <button type="button" class="btn ghost" id="filasHelpBack">
+            <i class="fa-solid fa-arrow-left"></i>
+            Voltar
+          </button>
+
+          <button type="button" class="btn primary" id="filasHelpNext">
+            Próximo
+            <i class="fa-solid fa-arrow-right"></i>
+          </button>
+
+          <button type="button" class="btn primary" id="filasHelpDone" data-close-modal="filasHelpModal" hidden>
+            <i class="fa-solid fa-check"></i>
+            Entendi
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

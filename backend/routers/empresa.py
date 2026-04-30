@@ -100,25 +100,25 @@ def resolve_instancia_id(
     Retorna None se não encontrar.
     """
     q = db.query(models.EmpresaInstancia).filter(
-        models.EmpresaInstancia.empresa_id == empresa_id
+        models.EmpresaInstancia.empresa_id == int(empresa_id)
     )
 
     if instancia_id:
-        inst = q.filter(models.EmpresaInstancia.id == instancia_id).first()
+        inst = q.filter(models.EmpresaInstancia.id == int(instancia_id)).first()
         if inst:
-            return inst.id
+            return int(inst.id)
 
     name = _norm_instance_name(instance_name)
     if name:
         inst = q.filter(models.EmpresaInstancia.instance_name == name).first()
         if inst:
-            return inst.id
+            return int(inst.id)
 
     num = _norm_instance_number(numero_instancia)
     if num:
         inst = q.filter(models.EmpresaInstancia.numero_instancia == num).first()
         if inst:
-            return inst.id
+            return int(inst.id)
 
     return None
 
@@ -179,7 +179,7 @@ def get_empresa(
 ):
     _assert_empresa_access(empresa_id, identity)
 
-    emp = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
+    emp = db.query(models.Empresa).filter(models.Empresa.id == int(empresa_id)).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
 
@@ -187,7 +187,7 @@ def get_empresa(
     limite = plan_limit(emp)
 
     return {
-        "id": emp.id,
+        "id": int(emp.id),
         "nome": emp.nome,
         "telefone": emp.telefone,
         "assinatura": normalize_plan(emp.assinatura),
@@ -224,7 +224,7 @@ def update_login_config(
     """
     _assert_empresa_access(empresa_id, identity)
 
-    emp = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
+    emp = db.query(models.Empresa).filter(models.Empresa.id == int(empresa_id)).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
 
@@ -234,7 +234,7 @@ def update_login_config(
     db.refresh(emp)
 
     return {
-        "id": emp.id,
+        "id": int(emp.id),
         "nome": emp.nome,
         "requer_token_login": bool(getattr(emp, "requer_token_login", False)),
     }
@@ -252,7 +252,7 @@ def info_whatsapp(
     """
     _assert_empresa_access(empresa_id, identity)
 
-    emp = db.query(models.Empresa).filter(models.Empresa.id == empresa_id).first()
+    emp = db.query(models.Empresa).filter(models.Empresa.id == int(empresa_id)).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
 
@@ -261,8 +261,8 @@ def info_whatsapp(
 
     for i in (emp.instancias or []):
         item = {
-            "id": i.id,
-            "instancia_id": i.id,
+            "id": int(i.id),
+            "instancia_id": int(i.id),
             "apelido": i.apelido,
             "instance_name": i.instance_name,
             "numero_instancia": i.numero_instancia,
@@ -308,13 +308,13 @@ def update_apelido(
 ):
     inst = (
         db.query(models.EmpresaInstancia)
-        .filter(models.EmpresaInstancia.id == instancia_id)
+        .filter(models.EmpresaInstancia.id == int(instancia_id))
         .first()
     )
     if not inst:
         raise HTTPException(status_code=404, detail="Instância não encontrada")
 
-    _assert_empresa_access(inst.empresa_id, identity)
+    _assert_empresa_access(int(inst.empresa_id), identity)
 
     apelido = (body.apelido or "").strip()
     inst.apelido = apelido or None
@@ -322,4 +322,8 @@ def update_apelido(
     db.commit()
     db.refresh(inst)
 
-    return {"ok": True, "id": inst.id, "apelido": inst.apelido}
+    return {
+        "ok": True,
+        "id": int(inst.id),
+        "apelido": inst.apelido,
+    }

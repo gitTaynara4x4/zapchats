@@ -1,177 +1,1934 @@
 <!DOCTYPE html>
-<html lang="pt-BR" class="has-sidebar prepaint">
+<html lang="pt-BR" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Meu Plano – zapschat</title>
 
-  <script src="/frontend/js/app-base.js" defer></script>
-  <script src="/frontend/js/auth.js" defer></script>
+  <title>Meu Plano – ZapsChat</title>
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script>
+    (function () {
+      try {
+        const saved = localStorage.getItem("zc:theme") || localStorage.getItem("theme") || "dark";
+        const mode = String(saved).toLowerCase() === "light" ? "light" : "dark";
+        document.documentElement.setAttribute("data-theme", mode);
+        document.documentElement.classList.toggle("dark", mode === "dark");
+      } catch (_) {}
+    })();
+  </script>
 
-  <link rel="stylesheet" href="/frontend/css/meu-plano.css" />
+  <style>
+    :root {
+      --bg: #f4f7f6;
+      --bg-2: #eef3f1;
+      --panel: #ffffff;
+      --panel-2: #f8faf9;
+      --card: #ffffff;
+      --card-2: #f7faf9;
+      --text: #111827;
+      --muted: #667781;
+      --muted-2: #8a9aa3;
+      --border: rgba(17, 24, 39, .10);
+      --border-strong: rgba(17, 24, 39, .16);
+      --accent: #00a884;
+      --accent-2: #008069;
+      --green: #22c55e;
+      --yellow: #f59e0b;
+      --red: #ef4444;
+      --blue: #3b82f6;
+      --shadow: 0 22px 60px rgba(15, 23, 42, .12);
+      --radius: 22px;
+      --sidebar-w: 72px;
+      --topbar-h: 0px;
+    }
+
+    html[data-theme="dark"] {
+      --bg: #0b141a;
+      --bg-2: #101a20;
+      --panel: #111b21;
+      --panel-2: #182229;
+      --card: #111b21;
+      --card-2: #182229;
+      --text: #e9edef;
+      --muted: #8696a0;
+      --muted-2: #667781;
+      --border: rgba(134,150,160,.18);
+      --border-strong: rgba(134,150,160,.30);
+      --accent: #00a884;
+      --accent-2: #008069;
+      --green: #25d366;
+      --yellow: #fbbf24;
+      --red: #fb7185;
+      --blue: #53bdeb;
+      --shadow: 0 22px 70px rgba(0,0,0,.38);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", Roboto, Arial, sans-serif;
+    }
+
+    body {
+      overflow-x: hidden;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    .zc-shell {
+      min-height: 100vh;
+      display: flex;
+      background:
+        radial-gradient(circle at top left, rgba(0,168,132,.18), transparent 30%),
+        radial-gradient(circle at bottom right, rgba(83,189,235,.12), transparent 28%),
+        var(--bg);
+    }
+
+    #sidebar-slot {
+      flex: 0 0 auto;
+      min-height: 100vh;
+      z-index: 20;
+    }
+
+    .zc-main {
+      flex: 1;
+      min-width: 0;
+      padding: 28px;
+    }
+
+    .page {
+      max-width: 1220px;
+      margin: 0 auto;
+    }
+
+    .page-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: start;
+      margin-bottom: 22px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: fit-content;
+      padding: 7px 11px;
+      border: 1px solid rgba(0,168,132,.28);
+      border-radius: 999px;
+      color: var(--accent);
+      background: rgba(0,168,132,.10);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .02em;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+    }
+
+    .lead {
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.65;
+      max-width: 780px;
+    }
+
+    .head-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .btn {
+      appearance: none;
+      border: 0;
+      cursor: pointer;
+      border-radius: 999px;
+      min-height: 42px;
+      padding: 0 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-weight: 750;
+      font-size: 13px;
+      transition: transform .16s ease, box-shadow .16s ease, background .16s ease, border-color .16s ease, opacity .16s ease;
+      white-space: nowrap;
+      user-select: none;
+    }
+
+    .btn:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    .btn:not(:disabled):hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #fff;
+      box-shadow: 0 14px 28px rgba(0,168,132,.22);
+    }
+
+    .btn-soft {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+
+    .btn-danger {
+      background: rgba(239, 68, 68, .12);
+      color: var(--red);
+      border: 1px solid rgba(239, 68, 68, .20);
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr);
+      gap: 18px;
+      margin-bottom: 22px;
+    }
+
+    .current-card,
+    .billing-card,
+    .plan-card,
+    .panel-card {
+      background: linear-gradient(180deg, rgba(255,255,255,.02), transparent), var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .current-card {
+      padding: 24px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .current-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 90% 0%, rgba(0,168,132,.22), transparent 30%),
+        radial-gradient(circle at 0% 100%, rgba(83,189,235,.10), transparent 35%);
+      opacity: .9;
+    }
+
+    .current-card > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .current-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      margin-bottom: 18px;
+    }
+
+    .current-label {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+      margin-bottom: 8px;
+    }
+
+    .current-plan {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .current-plan strong {
+      font-size: clamp(30px, 5vw, 50px);
+      letter-spacing: -0.055em;
+      line-height: 1;
+    }
+
+    .current-plan span {
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 30px;
+      padding: 0 11px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--muted);
+    }
+
+    .pill.ok {
+      background: rgba(34,197,94,.13);
+      border-color: rgba(34,197,94,.24);
+      color: var(--green);
+    }
+
+    .pill.warn {
+      background: rgba(245,158,11,.13);
+      border-color: rgba(245,158,11,.24);
+      color: var(--yellow);
+    }
+
+    .pill.danger {
+      background: rgba(239,68,68,.12);
+      border-color: rgba(239,68,68,.22);
+      color: var(--red);
+    }
+
+    .pill.info {
+      background: rgba(59,130,246,.12);
+      border-color: rgba(59,130,246,.22);
+      color: var(--blue);
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .stat {
+      padding: 14px;
+      border-radius: 18px;
+      background: rgba(134,150,160,.08);
+      border: 1px solid var(--border);
+      min-width: 0;
+    }
+
+    .stat small {
+      display: block;
+      color: var(--muted);
+      font-weight: 650;
+      font-size: 12px;
+      margin-bottom: 7px;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 18px;
+      letter-spacing: -.03em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .billing-card {
+      padding: 20px;
+    }
+
+    .billing-card h2,
+    .panel-card h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+      letter-spacing: -.02em;
+    }
+
+    .billing-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .billing-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+      min-width: 0;
+    }
+
+    .billing-row:last-child {
+      border-bottom: 0;
+    }
+
+    .billing-row span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .billing-row strong {
+      text-align: right;
+      font-size: 13px;
+      max-width: 190px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 28px 0 14px;
+    }
+
+    .section-title h2 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: -.035em;
+    }
+
+    .section-title p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .plans-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .plan-card {
+      position: relative;
+      padding: 22px;
+      overflow: hidden;
+      min-height: 100%;
+    }
+
+    .plan-card.popular {
+      border-color: rgba(0,168,132,.52);
+      box-shadow: 0 24px 80px rgba(0,168,132,.18);
+    }
+
+    .popular-badge {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(0,168,132,.14);
+      border: 1px solid rgba(0,168,132,.28);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 850;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .plan-name {
+      font-size: 19px;
+      font-weight: 850;
+      margin: 0 0 12px;
+    }
+
+    .price {
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+      margin-bottom: 6px;
+    }
+
+    .price strong {
+      font-size: 36px;
+      letter-spacing: -.06em;
+      line-height: 1;
+    }
+
+    .price span {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .plan-sub {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+      margin: 0 0 18px;
+      min-height: 38px;
+    }
+
+    .features {
+      display: grid;
+      gap: 11px;
+      margin: 18px 0 22px;
+      padding: 0;
+      list-style: none;
+    }
+
+    .features li {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .check {
+      flex: 0 0 18px;
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      margin-top: -1px;
+      background: rgba(0,168,132,.14);
+      color: var(--accent);
+      font-weight: 900;
+      font-size: 12px;
+    }
+
+    .plan-actions {
+      display: grid;
+      gap: 9px;
+    }
+
+    .usage-panel {
+      margin-top: 18px;
+      padding: 20px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .usage-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .usage-item {
+      min-width: 0;
+    }
+
+    .usage-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      margin-bottom: 8px;
+    }
+
+    .bar {
+      height: 9px;
+      border-radius: 999px;
+      background: rgba(134,150,160,.16);
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .bar > span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      max-width: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--green));
+      transition: width .4s ease;
+    }
+
+    .empty-state {
+      padding: 28px;
+      border: 1px dashed var(--border-strong);
+      border-radius: var(--radius);
+      background: rgba(134,150,160,.07);
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .loading {
+      display: grid;
+      place-items: center;
+      min-height: 340px;
+      color: var(--muted);
+      gap: 14px;
+      text-align: center;
+    }
+
+    .spinner {
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      border: 3px solid rgba(134,150,160,.25);
+      border-top-color: var(--accent);
+      animation: spin .8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 22px;
+      background: rgba(0,0,0,.62);
+      backdrop-filter: blur(8px);
+    }
+
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal {
+      width: min(940px, 100%);
+      max-height: calc(100vh - 44px);
+      overflow: auto;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 26px;
+      box-shadow: 0 32px 120px rgba(0,0,0,.45);
+    }
+
+    .modal-head {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      background: color-mix(in srgb, var(--panel) 88%, transparent);
+      backdrop-filter: blur(14px);
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+    }
+
+    .modal-head h3 {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: -.025em;
+    }
+
+    .modal-head p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .icon-btn {
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      font-size: 20px;
+    }
+
+    .modal-body {
+      padding: 20px;
+    }
+
+    .checkout-grid {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      gap: 18px;
+    }
+
+    .checkout-summary {
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 18px;
+      background: var(--card-2);
+      height: fit-content;
+    }
+
+    .summary-plan {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+
+    .summary-plan strong {
+      font-size: 22px;
+      letter-spacing: -.035em;
+    }
+
+    .summary-price {
+      text-align: right;
+    }
+
+    .summary-price b {
+      display: block;
+      font-size: 22px;
+      letter-spacing: -.045em;
+    }
+
+    .summary-price span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .secure-note {
+      padding: 12px;
+      border-radius: 16px;
+      background: rgba(0,168,132,.10);
+      border: 1px solid rgba(0,168,132,.20);
+      color: var(--accent);
+      font-size: 12px;
+      line-height: 1.45;
+      font-weight: 700;
+      margin-top: 16px;
+    }
+
+    .method-tabs {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .method {
+      border: 1px solid var(--border);
+      background: var(--card-2);
+      color: var(--text);
+      border-radius: 18px;
+      padding: 14px;
+      cursor: pointer;
+      text-align: left;
+      transition: border-color .16s ease, background .16s ease, transform .16s ease;
+    }
+
+    .method:hover {
+      transform: translateY(-1px);
+    }
+
+    .method.active {
+      border-color: rgba(0,168,132,.55);
+      background: rgba(0,168,132,.10);
+    }
+
+    .method strong {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+
+    .method span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+      display: block;
+    }
+
+    .payment-box {
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 18px;
+      background: var(--card);
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .field {
+      display: grid;
+      gap: 7px;
+    }
+
+    .field.full {
+      grid-column: 1 / -1;
+    }
+
+    .field label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .input {
+      min-height: 42px;
+      width: 100%;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 0 12px;
+      outline: none;
+    }
+
+    .input:focus {
+      border-color: rgba(0,168,132,.55);
+      box-shadow: 0 0 0 4px rgba(0,168,132,.10);
+    }
+
+    .result {
+      margin-top: 16px;
+      display: none;
+    }
+
+    .result.show {
+      display: block;
+    }
+
+    .pix-card,
+    .boleto-card,
+    .card-result {
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 18px;
+      background: var(--card-2);
+    }
+
+    .pix-grid {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .qr-wrap {
+      background: #fff;
+      border-radius: 18px;
+      padding: 12px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(0,0,0,.08);
+    }
+
+    .qr-wrap img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .copy-box {
+      width: 100%;
+      min-height: 92px;
+      resize: vertical;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: 14px;
+      padding: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .result-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      transform: translateX(-50%) translateY(20px);
+      opacity: 0;
+      pointer-events: none;
+      z-index: 2000;
+      padding: 12px 16px;
+      border-radius: 999px;
+      background: #111827;
+      color: #fff;
+      box-shadow: 0 18px 40px rgba(0,0,0,.28);
+      font-size: 13px;
+      font-weight: 750;
+      transition: opacity .18s ease, transform .18s ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .alert {
+      border-radius: 16px;
+      padding: 12px 14px;
+      background: rgba(245,158,11,.12);
+      border: 1px solid rgba(245,158,11,.22);
+      color: var(--yellow);
+      font-size: 13px;
+      line-height: 1.45;
+      font-weight: 650;
+      margin-bottom: 14px;
+    }
+
+    .alert.error {
+      background: rgba(239,68,68,.12);
+      border-color: rgba(239,68,68,.22);
+      color: var(--red);
+    }
+
+    .alert.ok {
+      background: rgba(34,197,94,.12);
+      border-color: rgba(34,197,94,.22);
+      color: var(--green);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    @media (max-width: 1080px) {
+      .status-grid,
+      .plans-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .usage-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 820px) {
+      .zc-shell {
+        display: block;
+      }
+
+      #sidebar-slot {
+        min-height: auto;
+      }
+
+      .zc-main {
+        padding: 18px;
+      }
+
+      .page-head {
+        grid-template-columns: 1fr;
+      }
+
+      .head-actions {
+        justify-content: flex-start;
+      }
+
+      .stats {
+        grid-template-columns: 1fr;
+      }
+
+      .checkout-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .method-tabs {
+        grid-template-columns: 1fr;
+      }
+
+      .pix-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .qr-wrap {
+        max-width: 260px;
+      }
+
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
 </head>
+
 <body>
-  <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
+  <div class="zc-shell">
+    <div id="sidebar-slot"></div>
 
-  <main class="main">
-    <div class="plan-container">
-
-      <header class="section-title">
-        <div>
-          <h1>
-            <span class="title-ico is-active" aria-hidden="true">
-              <i class="fa-solid fa-crown"></i>
-            </span>
-            Meu Plano
-          </h1>
-          <p class="section-subtitle">
-            Veja seu plano atual, limites, recursos liberados e consumo da conta.
-          </p>
-        </div>
-
-        <div class="header-actions">
-          <a href="/planos" class="btn btn--outline">
-            <i class="fa-solid fa-layer-group"></i>
-            <span>Comparar planos</span>
-          </a>
-          <button type="button" class="btn btn--primary" id="btnReload">
-            <i class="fa-solid fa-rotate-right"></i>
-            <span>Atualizar</span>
-          </button>
-        </div>
-      </header>
-
-      <section id="alertArea" class="alert-stack"></section>
-
-      <section class="hero-grid">
-        <article class="hero-card box">
-          <div class="hero-top">
-            <div class="hero-main">
-              <p class="eyebrow">Plano atual</p>
-              <h2 id="planName">Carregando...</h2>
-              <div id="planBadges" class="badge-row"></div>
-            </div>
-
-            <div class="hero-price">
-              <span>Valor mensal</span>
-              <strong id="planPrice">—</strong>
-            </div>
-          </div>
-
-          <div id="heroMeta" class="hero-meta"></div>
-
-          <div class="hero-actions">
-            <a href="/planos" class="btn btn--outline">
-              <i class="fa-solid fa-arrow-up-right-from-square"></i>
-              <span>Ver planos</span>
-            </a>
-            <button type="button" class="btn btn--ghost" id="btnScrollCompare">
-              <i class="fa-solid fa-table-cells-large"></i>
-              <span>Comparativo</span>
-            </button>
-          </div>
-        </article>
-
-        <article class="summary-card box">
-          <div class="mini-stat">
-            <span>Contatos</span>
-            <strong id="statContacts">0</strong>
-          </div>
-          <div class="mini-stat">
-            <span>Equipe</span>
-            <strong id="statTeam">0</strong>
-          </div>
-          <div class="mini-stat">
-            <span>Departamentos</span>
-            <strong id="statDepartments">0</strong>
-          </div>
-          <div class="mini-stat">
-            <span>Números WhatsApp</span>
-            <strong id="statInstances">0</strong>
-          </div>
-          <div class="mini-stat">
-            <span>Disparos no mês</span>
-            <strong id="statBroadcasts">0</strong>
-          </div>
-          <div class="mini-stat">
-            <span>Campanhas ativas</span>
-            <strong id="statCampaigns">0</strong>
-          </div>
-        </article>
-      </section>
-
-      <section class="content-grid">
-        <article class="box">
-          <div class="card-head">
-            <div>
-              <h3>Recursos do seu plano</h3>
-              <p class="muted">Tudo o que está liberado para sua conta hoje.</p>
-            </div>
-          </div>
-          <div id="featuresList" class="feature-list"></div>
-        </article>
-
-        <article class="box">
-          <div class="card-head">
-            <div>
-              <h3>Uso atual</h3>
-              <p class="muted">Consumo versus limite efetivo da sua empresa.</p>
-            </div>
-          </div>
-          <div id="usageList" class="usage-list"></div>
-        </article>
-      </section>
-
-      <section class="content-grid bottom-grid">
-        <article class="box">
-          <div class="card-head">
-            <div>
-              <h3>Números / Instâncias</h3>
-              <p class="muted">Últimas conexões cadastradas na sua empresa.</p>
-            </div>
-          </div>
-          <div id="instancesList" class="data-list"></div>
-        </article>
-
-        <article class="box">
-          <div class="card-head">
-            <div>
-              <h3>Últimos disparos</h3>
-              <p class="muted">Resumo recente das campanhas e envios.</p>
-            </div>
-          </div>
-          <div id="broadcastList" class="data-list"></div>
-        </article>
-      </section>
-
-      <section class="box compare-box" id="compareSection">
-        <div class="card-head card-head-between">
+    <main class="zc-main">
+      <div class="page">
+        <section class="page-head">
           <div>
-            <h3>Comparativo rápido</h3>
-            <p class="muted">Veja a diferença entre os planos pagos disponíveis.</p>
+            <div class="eyebrow">💳 Assinatura ZapsChat</div>
+            <h1>Meu Plano</h1>
+            <p class="lead">
+              Gerencie sua assinatura, acompanhe o status de pagamento e escolha o melhor plano para a sua operação.
+              O pagamento é processado com segurança e o plano é liberado automaticamente após confirmação.
+            </p>
           </div>
-          <a href="/planos" class="btn btn--outline">
-            <i class="fa-solid fa-arrow-up-right-from-square"></i>
-            <span>Abrir página pública</span>
-          </a>
+
+          <div class="head-actions">
+            <button class="btn btn-soft" id="btnRefresh">Atualizar status</button>
+            <a class="btn btn-primary" href="#planos">Ver planos</a>
+          </div>
+        </section>
+
+        <div id="loading" class="loading">
+          <div class="spinner"></div>
+          <div>Carregando informações do plano...</div>
         </div>
-        <div id="planCompare" class="plan-compare-grid"></div>
-      </section>
 
+        <div id="content" class="hidden">
+          <section class="status-grid">
+            <article class="current-card">
+              <div class="current-top">
+                <div>
+                  <div class="current-label">Plano atual</div>
+                  <div class="current-plan">
+                    <strong id="currentPlanName">--</strong>
+                    <span id="currentPlanPrice"></span>
+                  </div>
+                </div>
+
+                <div id="currentStatusPill" class="pill info">Carregando</div>
+              </div>
+
+              <p class="lead" id="currentPlanDescription">
+                Informações do plano atual.
+              </p>
+
+              <div class="stats">
+                <div class="stat">
+                  <small>Vencimento</small>
+                  <strong id="planExpiresAt">--</strong>
+                </div>
+                <div class="stat">
+                  <small>Dias restantes</small>
+                  <strong id="planDaysLeft">--</strong>
+                </div>
+                <div class="stat">
+                  <small>Números conectados</small>
+                  <strong id="planInstances">--</strong>
+                </div>
+              </div>
+            </article>
+
+            <aside class="billing-card">
+              <h2>Status de pagamento</h2>
+
+              <div class="billing-list">
+                <div class="billing-row">
+                  <span>Processador</span>
+                  <strong id="billingProvider">--</strong>
+                </div>
+                <div class="billing-row">
+                  <span>Status</span>
+                  <strong id="billingStatus">--</strong>
+                </div>
+                <div class="billing-row">
+                  <span>Plano pendente</span>
+                  <strong id="billingPlanPending">--</strong>
+                </div>
+                <div class="billing-row">
+                  <span>Última cobrança</span>
+                  <strong id="billingPaymentId">--</strong>
+                </div>
+                <div class="billing-row">
+                  <span>Atualizado em</span>
+                  <strong id="billingUpdatedAt">--</strong>
+                </div>
+              </div>
+            </aside>
+          </section>
+
+          <section class="usage-panel">
+            <div class="section-title" style="margin-top:0;">
+              <div>
+                <h2>Uso do plano</h2>
+                <p>Acompanhe os principais limites da sua assinatura.</p>
+              </div>
+            </div>
+
+            <div class="usage-grid" id="usageGrid"></div>
+          </section>
+
+          <section id="planos">
+            <div class="section-title">
+              <div>
+                <h2>Escolha seu plano</h2>
+                <p>Ao gerar o pagamento, o ZapsChat cria a assinatura no Asaas e exibe Pix, boleto ou cartão dentro desta tela.</p>
+              </div>
+            </div>
+
+            <div class="plans-grid" id="plansGrid"></div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="checkoutModal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-head">
+        <div>
+          <h3 id="modalTitle">Assinar plano</h3>
+          <p id="modalSubtitle">Escolha a forma de pagamento para continuar.</p>
+        </div>
+        <button class="icon-btn" id="btnCloseModal" aria-label="Fechar">×</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="checkout-grid">
+          <aside class="checkout-summary">
+            <div class="summary-plan">
+              <div>
+                <div class="current-label">Plano escolhido</div>
+                <strong id="summaryPlan">--</strong>
+              </div>
+              <div class="summary-price">
+                <b id="summaryPrice">--</b>
+                <span>/mês</span>
+              </div>
+            </div>
+
+            <ul class="features" id="summaryFeatures"></ul>
+
+            <div class="secure-note">
+              🔒 Pagamento processado com segurança. O ZapsChat não salva dados sensíveis do cartão.
+            </div>
+          </aside>
+
+          <section>
+            <div class="method-tabs">
+              <button class="method active" data-method="PIX">
+                <strong>Pix</strong>
+                <span>QR Code e copia e cola dentro do ZapsChat.</span>
+              </button>
+
+              <button class="method" data-method="BOLETO">
+                <strong>Boleto</strong>
+                <span>Linha digitável e PDF da cobrança.</span>
+              </button>
+
+              <button class="method" data-method="CREDIT_CARD">
+                <strong>Cartão</strong>
+                <span>Assinatura mensal no cartão de crédito.</span>
+              </button>
+            </div>
+
+            <div id="paymentAlert" class="alert hidden"></div>
+
+            <div class="payment-box">
+              <div id="pixForm">
+                <p class="lead" style="margin-top:0;">
+                  Clique em gerar Pix. O QR Code e o código copia e cola aparecerão aqui.
+                </p>
+              </div>
+
+              <div id="boletoForm" class="hidden">
+                <p class="lead" style="margin-top:0;">
+                  Clique em gerar boleto. A linha digitável e o link do boleto aparecerão aqui.
+                </p>
+              </div>
+
+              <form id="cardForm" class="hidden">
+                <div class="form-grid">
+                  <div class="field full">
+                    <label>Nome impresso no cartão</label>
+                    <input class="input" name="holderName" autocomplete="cc-name" placeholder="Nome como está no cartão" />
+                  </div>
+
+                  <div class="field full">
+                    <label>Número do cartão</label>
+                    <input class="input" name="number" inputmode="numeric" autocomplete="cc-number" placeholder="0000 0000 0000 0000" />
+                  </div>
+
+                  <div class="field">
+                    <label>Mês</label>
+                    <input class="input" name="expiryMonth" inputmode="numeric" autocomplete="cc-exp-month" placeholder="MM" />
+                  </div>
+
+                  <div class="field">
+                    <label>Ano</label>
+                    <input class="input" name="expiryYear" inputmode="numeric" autocomplete="cc-exp-year" placeholder="AAAA" />
+                  </div>
+
+                  <div class="field">
+                    <label>CVV</label>
+                    <input class="input" name="ccv" inputmode="numeric" autocomplete="cc-csc" placeholder="123" />
+                  </div>
+
+                  <div class="field">
+                    <label>CPF/CNPJ do titular</label>
+                    <input class="input" name="cpfCnpj" inputmode="numeric" placeholder="Somente números" />
+                  </div>
+
+                  <div class="field full">
+                    <label>Nome completo do titular</label>
+                    <input class="input" name="name" autocomplete="name" placeholder="Nome completo" />
+                  </div>
+
+                  <div class="field">
+                    <label>E-mail</label>
+                    <input class="input" name="email" type="email" autocomplete="email" placeholder="email@empresa.com" />
+                  </div>
+
+                  <div class="field">
+                    <label>Telefone</label>
+                    <input class="input" name="phone" inputmode="numeric" autocomplete="tel" placeholder="DDD + número" />
+                  </div>
+
+                  <div class="field">
+                    <label>CEP</label>
+                    <input class="input" name="postalCode" inputmode="numeric" autocomplete="postal-code" placeholder="Somente números" />
+                  </div>
+
+                  <div class="field">
+                    <label>Número do endereço</label>
+                    <input class="input" name="addressNumber" placeholder="Ex.: 123" />
+                  </div>
+                </div>
+              </form>
+
+              <div class="result-actions">
+                <button class="btn btn-primary" id="btnGeneratePayment">Gerar pagamento</button>
+                <button class="btn btn-ghost" id="btnCheckStatus">Verificar status</button>
+              </div>
+
+              <div class="result" id="paymentResult"></div>
+            </div>
+          </section>
+        </div>
+      </div>
     </div>
+  </div>
 
-    <div id="meuPlanoToast" class="toast-message" role="alert" aria-live="assertive" aria-atomic="true">
-      <i class="toast-icon fa-solid"></i>
-      <span class="toast-text"></span>
-    </div>
-  </main>
+  <div class="toast" id="toast">Copiado</div>
 
-  <script src="/frontend/js/page-guard.js" defer></script>
-  <script src="/frontend/js/pages/meu-plano.js" defer></script>
+  <script>
+    const PLANS = {
+      START: {
+        code: "START",
+        name: "Start",
+        price: 97,
+        subtitle: "Para começar com organização.",
+        description: "Ideal para empresas que estão saindo do atendimento solto no WhatsApp.",
+        features: [
+          "2 números conectados",
+          "Até 10 colaboradores",
+          "Até 10 filas",
+          "Até 5.000 contatos",
+          "Até 5.000 disparos/mês",
+          "Automação básica"
+        ]
+      },
+      BUSINESS: {
+        code: "BUSINESS",
+        name: "Business",
+        price: 197,
+        subtitle: "Para equipes com volume e rotina comercial.",
+        description: "Plano recomendado para operação comercial, suporte e financeiro com mais controle.",
+        popular: true,
+        features: [
+          "4 números conectados",
+          "Até 30 colaboradores",
+          "Até 30 filas",
+          "Até 30.000 contatos",
+          "Até 30.000 disparos/mês",
+          "Automação completa"
+        ]
+      },
+      ENTERPRISE: {
+        code: "ENTERPRISE",
+        name: "Enterprise",
+        price: 497,
+        subtitle: "Para times maiores e operação robusta.",
+        description: "Mais limites, integrações e estrutura para operações maiores.",
+        features: [
+          "Até 10 números conectados",
+          "Até 100 colaboradores",
+          "Até 100 filas",
+          "Até 200.000 contatos",
+          "API, webhooks e integrações",
+          "Relatórios avançados"
+        ]
+      }
+    };
+
+    let state = {
+      status: null,
+      selectedPlan: null,
+      selectedMethod: "PIX",
+      polling: null
+    };
+
+    const $ = (sel, root = document) => root.querySelector(sel);
+    const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+    function formatMoney(value) {
+      const n = Number(value || 0);
+      return n.toLocaleString("pt-BR", {
+        style: "currency",
+        currency: "BRL"
+      });
+    }
+
+    function formatDate(value) {
+      if (!value) return "--";
+      try {
+        return new Date(value).toLocaleDateString("pt-BR", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric"
+        });
+      } catch (_) {
+        return String(value);
+      }
+    }
+
+    function formatDateTime(value) {
+      if (!value) return "--";
+      try {
+        return new Date(value).toLocaleString("pt-BR", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit"
+        });
+      } catch (_) {
+        return String(value);
+      }
+    }
+
+    function safe(value, fallback = "--") {
+      if (value === null || value === undefined || value === "") return fallback;
+      return String(value);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function toast(message) {
+      const el = $("#toast");
+      el.textContent = message || "Copiado";
+      el.classList.add("show");
+      clearTimeout(el._t);
+      el._t = setTimeout(() => el.classList.remove("show"), 1800);
+    }
+
+    async function copyText(value) {
+      try {
+        await navigator.clipboard.writeText(String(value || ""));
+        toast("Copiado com sucesso");
+      } catch (_) {
+        toast("Não foi possível copiar");
+      }
+    }
+
+    function getPlan(code) {
+      const normalized = String(code || "").toUpperCase();
+      return PLANS[normalized] || {
+        code: normalized || "FREE",
+        name: normalized || "Free",
+        price: 0,
+        subtitle: "Plano atual.",
+        description: "Plano atual da empresa.",
+        features: []
+      };
+    }
+
+    function billingLabel(status) {
+      const s = String(status || "").toLowerCase();
+
+      const map = {
+        active: "Ativo",
+        pending: "Aguardando pagamento",
+        customer_created: "Cliente criado",
+        past_due: "Pagamento atrasado",
+        refused: "Pagamento recusado",
+        attention: "Atenção",
+        canceled: "Cancelado",
+        cancelled: "Cancelado"
+      };
+
+      return map[s] || (status ? String(status) : "Sem cobrança");
+    }
+
+    function billingPillClass(status) {
+      const s = String(status || "").toLowerCase();
+      if (s === "active") return "ok";
+      if (s === "pending" || s === "customer_created") return "warn";
+      if (s === "past_due" || s === "refused" || s === "attention") return "danger";
+      return "info";
+    }
+
+    async function apiGet(url) {
+      const res = await fetch(url, {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          "Accept": "application/json"
+        }
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data?.detail?.message || data?.detail || "Erro na requisição.");
+      }
+
+      return data;
+    }
+
+    async function apiPost(url, body) {
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body || {})
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        const detail = data?.detail;
+        const msg = detail?.message || detail || data?.message || "Erro na requisição.";
+        const err = new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+        err.data = data;
+        throw err;
+      }
+
+      return data;
+    }
+
+    async function loadSidebar() {
+      const slot = $("#sidebar-slot");
+      if (!slot) return;
+
+      try {
+        const res = await fetch("/frontend/partials/sidebar.html", {
+          credentials: "include",
+          cache: "no-store"
+        });
+
+        if (!res.ok) return;
+
+        slot.innerHTML = await res.text();
+
+        slot.querySelectorAll("script").forEach((oldScript) => {
+          const script = document.createElement("script");
+          Array.from(oldScript.attributes).forEach((attr) => script.setAttribute(attr.name, attr.value));
+          script.textContent = oldScript.textContent;
+          oldScript.replaceWith(script);
+        });
+      } catch (_) {}
+    }
+
+    async function loadStatus() {
+      const data = await apiGet("/api/billing/asaas/status");
+      state.status = data;
+      return data;
+    }
+
+    function renderStatus(data) {
+      const planStatus = data?.plan_status || {};
+      const paid = planStatus?.paid || {};
+      const usage = planStatus?.usage || {};
+      const limits = planStatus?.limits || {};
+      const billing = data?.billing || {};
+
+      const currentCode = data?.assinatura || planStatus?.effective_tier || "FREE";
+      const plan = getPlan(currentCode);
+
+      $("#currentPlanName").textContent = plan.name || currentCode;
+      $("#currentPlanPrice").textContent = plan.price ? `${formatMoney(plan.price)}/mês` : "";
+      $("#currentPlanDescription").textContent = plan.description || "Plano atual da empresa.";
+
+      const locked = Boolean(planStatus?.billing_locked);
+      const active = Boolean(paid?.active) || String(currentCode).toUpperCase() !== "FREE";
+
+      const pill = $("#currentStatusPill");
+      if (locked) {
+        pill.className = "pill danger";
+        pill.textContent = "Bloqueado";
+      } else if (active) {
+        pill.className = "pill ok";
+        pill.textContent = "Ativo";
+      } else {
+        pill.className = "pill warn";
+        pill.textContent = "Sem plano ativo";
+      }
+
+      $("#planExpiresAt").textContent = formatDate(data?.plano_expira_em || paid?.expires_at);
+      $("#planDaysLeft").textContent = paid?.days_left !== undefined && paid?.days_left !== null
+        ? `${paid.days_left} dias`
+        : "--";
+
+      const instUse = usage?.whatsapp_instances ?? planStatus?.quantidade_instancias ?? 0;
+      const instMax = limits?.whatsapp_instances_max ?? planStatus?.limite_instancias ?? "--";
+      $("#planInstances").textContent = `${instUse}/${instMax}`;
+
+      $("#billingProvider").textContent = billing?.billing_provider ? String(billing.billing_provider).toUpperCase() : "Ainda não vinculado";
+      $("#billingStatus").textContent = billingLabel(billing?.billing_status);
+      $("#billingPlanPending").textContent = billing?.billing_plan_pending || "--";
+      $("#billingPaymentId").textContent = billing?.asaas_last_payment_id || "--";
+      $("#billingUpdatedAt").textContent = formatDateTime(billing?.billing_updated_at);
+
+      renderUsage(usage, limits);
+      renderPlans(currentCode, billing);
+    }
+
+    function renderUsage(usage, limits) {
+      const items = [
+        {
+          label: "Números",
+          used: usage?.whatsapp_instances || 0,
+          max: limits?.whatsapp_instances_max || 0
+        },
+        {
+          label: "Usuários",
+          used: usage?.users || 0,
+          max: limits?.users_max || 0
+        },
+        {
+          label: "Filas",
+          used: usage?.departments || 0,
+          max: limits?.departments_max || 0
+        },
+        {
+          label: "Contatos",
+          used: usage?.contacts || 0,
+          max: limits?.contacts_max || 0
+        },
+        {
+          label: "Disparos/mês",
+          used: usage?.broadcasts_month || 0,
+          max: limits?.broadcasts_per_month_max || 0
+        },
+        {
+          label: "Campanhas ativas",
+          used: usage?.active_campaigns || 0,
+          max: limits?.active_campaigns_max || 0
+        },
+        {
+          label: "Automações",
+          used: usage?.automation_rules || 0,
+          max: limits?.automation_rules_max || 0
+        }
+      ];
+
+      $("#usageGrid").innerHTML = items.map((item) => {
+        const max = Number(item.max || 0);
+        const used = Number(item.used || 0);
+        const percent = max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0;
+
+        return `
+          <div class="usage-item">
+            <div class="usage-head">
+              <span>${escapeHtml(item.label)}</span>
+              <span>${used}/${max || "--"}</span>
+            </div>
+            <div class="bar"><span style="width:${percent}%"></span></div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderPlans(currentCode, billing) {
+      const current = String(currentCode || "").toUpperCase();
+      const pending = String(billing?.billing_plan_pending || "").toUpperCase();
+      const billingStatus = String(billing?.billing_status || "").toLowerCase();
+
+      $("#plansGrid").innerHTML = Object.values(PLANS).map((plan) => {
+        const isCurrent = plan.code === current;
+        const isPending = plan.code === pending && billingStatus === "pending";
+
+        return `
+          <article class="plan-card ${plan.popular ? "popular" : ""}">
+            ${plan.popular ? `<div class="popular-badge">Mais escolhido</div>` : ""}
+            <h3 class="plan-name">${escapeHtml(plan.name)}</h3>
+            <div class="price">
+              <strong>${formatMoney(plan.price).replace(",00", "")}</strong>
+              <span>/mês</span>
+            </div>
+            <p class="plan-sub">${escapeHtml(plan.subtitle)}</p>
+
+            <ul class="features">
+              ${plan.features.map((f) => `
+                <li><span class="check">✓</span><span>${escapeHtml(f)}</span></li>
+              `).join("")}
+            </ul>
+
+            <div class="plan-actions">
+              ${
+                isPending
+                  ? `<button class="btn btn-primary" data-plan="${plan.code}">Ver pagamento pendente</button>`
+                  : `<button class="btn ${isCurrent ? "btn-soft" : "btn-primary"}" data-plan="${plan.code}">
+                      ${isCurrent ? "Renovar plano" : "Assinar " + escapeHtml(plan.name)}
+                    </button>`
+              }
+              ${isCurrent ? `<span class="pill ok" style="justify-content:center;">Plano atual</span>` : ""}
+            </div>
+          </article>
+        `;
+      }).join("");
+
+      $$("[data-plan]").forEach((btn) => {
+        btn.addEventListener("click", () => openCheckout(btn.getAttribute("data-plan")));
+      });
+    }
+
+    function setLoading(value) {
+      $("#loading").classList.toggle("hidden", !value);
+      $("#content").classList.toggle("hidden", value);
+    }
+
+    function setPaymentAlert(type, message) {
+      const el = $("#paymentAlert");
+      if (!message) {
+        el.className = "alert hidden";
+        el.textContent = "";
+        return;
+      }
+
+      el.className = `alert ${type || ""}`;
+      el.textContent = message;
+    }
+
+    function openCheckout(planCode) {
+      const plan = getPlan(planCode);
+      state.selectedPlan = plan;
+      state.selectedMethod = "PIX";
+
+      $("#modalTitle").textContent = `Assinar ${plan.name}`;
+      $("#modalSubtitle").textContent = "Escolha a forma de pagamento e gere a cobrança dentro do ZapsChat.";
+      $("#summaryPlan").textContent = plan.name;
+      $("#summaryPrice").textContent = formatMoney(plan.price).replace(",00", "");
+      $("#summaryFeatures").innerHTML = plan.features.map((f) => `
+        <li><span class="check">✓</span><span>${escapeHtml(f)}</span></li>
+      `).join("");
+
+      setPaymentAlert("", "");
+      $("#paymentResult").className = "result";
+      $("#paymentResult").innerHTML = "";
+
+      setMethod("PIX");
+
+      $("#checkoutModal").classList.add("open");
+      $("#checkoutModal").setAttribute("aria-hidden", "false");
+    }
+
+    function closeCheckout() {
+      $("#checkoutModal").classList.remove("open");
+      $("#checkoutModal").setAttribute("aria-hidden", "true");
+    }
+
+    function setMethod(method) {
+      state.selectedMethod = method;
+
+      $$(".method").forEach((btn) => {
+        btn.classList.toggle("active", btn.getAttribute("data-method") === method);
+      });
+
+      $("#pixForm").classList.toggle("hidden", method !== "PIX");
+      $("#boletoForm").classList.toggle("hidden", method !== "BOLETO");
+      $("#cardForm").classList.toggle("hidden", method !== "CREDIT_CARD");
+
+      $("#btnGeneratePayment").textContent =
+        method === "PIX" ? "Gerar Pix" :
+        method === "BOLETO" ? "Gerar boleto" :
+        "Assinar no cartão";
+
+      $("#paymentResult").className = "result";
+      $("#paymentResult").innerHTML = "";
+      setPaymentAlert("", "");
+    }
+
+    function readCardForm() {
+      const form = $("#cardForm");
+      const fd = new FormData(form);
+
+      const holderName = String(fd.get("holderName") || "").trim();
+      const number = String(fd.get("number") || "").replace(/\D+/g, "");
+      const expiryMonth = String(fd.get("expiryMonth") || "").replace(/\D+/g, "");
+      const expiryYear = String(fd.get("expiryYear") || "").replace(/\D+/g, "");
+      const ccv = String(fd.get("ccv") || "").replace(/\D+/g, "");
+
+      const name = String(fd.get("name") || "").trim();
+      const email = String(fd.get("email") || "").trim();
+      const cpfCnpj = String(fd.get("cpfCnpj") || "").replace(/\D+/g, "");
+      const postalCode = String(fd.get("postalCode") || "").replace(/\D+/g, "");
+      const addressNumber = String(fd.get("addressNumber") || "").trim();
+      const phone = String(fd.get("phone") || "").replace(/\D+/g, "");
+
+      const missing = [];
+
+      if (!holderName) missing.push("nome impresso no cartão");
+      if (!number) missing.push("número do cartão");
+      if (!expiryMonth) missing.push("mês");
+      if (!expiryYear) missing.push("ano");
+      if (!ccv) missing.push("CVV");
+      if (!name) missing.push("nome completo");
+      if (!email) missing.push("e-mail");
+      if (!cpfCnpj) missing.push("CPF/CNPJ");
+      if (!postalCode) missing.push("CEP");
+      if (!addressNumber) missing.push("número do endereço");
+      if (!phone) missing.push("telefone");
+
+      if (missing.length) {
+        throw new Error("Preencha: " + missing.join(", ") + ".");
+      }
+
+      return {
+        creditCard: {
+          holderName,
+          number,
+          expiryMonth,
+          expiryYear,
+          ccv
+        },
+        creditCardHolderInfo: {
+          name,
+          email,
+          cpfCnpj,
+          postalCode,
+          addressNumber,
+          phone,
+          mobilePhone: phone
+        }
+      };
+    }
+
+    async function generatePayment() {
+      if (!state.selectedPlan) return;
+
+      const btn = $("#btnGeneratePayment");
+      btn.disabled = true;
+
+      setPaymentAlert("", "");
+      $("#paymentResult").className = "result";
+      $("#paymentResult").innerHTML = "";
+
+      try {
+        const payload = {
+          plan: state.selectedPlan.code,
+          billing_type: state.selectedMethod
+        };
+
+        if (state.selectedMethod === "CREDIT_CARD") {
+          Object.assign(payload, readCardForm());
+        }
+
+        const data = await apiPost("/api/billing/asaas/subscribe", payload);
+
+        renderPaymentResult(data);
+
+        await refreshStatus(false);
+        startPolling();
+
+      } catch (err) {
+        console.error(err);
+        setPaymentAlert("error", err.message || "Erro ao gerar pagamento.");
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function renderPaymentResult(data) {
+      const result = $("#paymentResult");
+      result.className = "result show";
+
+      const invoiceUrl = data?.payment?.invoiceUrl || data?.subscription?.invoiceUrl || "";
+      const bankSlipUrl = data?.payment?.bankSlipUrl || "";
+
+      if (data?.pix?.encodedImage || data?.pix?.payload) {
+        const imgSrc = data?.pix?.encodedImage
+          ? `data:image/png;base64,${data.pix.encodedImage}`
+          : "";
+
+        result.innerHTML = `
+          <div class="pix-card">
+            <div class="alert ok">Pix gerado. Após o pagamento, o plano será confirmado automaticamente pelo webhook.</div>
+
+            <div class="pix-grid">
+              ${imgSrc ? `
+                <div class="qr-wrap">
+                  <img src="${imgSrc}" alt="QR Code Pix">
+                </div>
+              ` : ""}
+
+              <div>
+                <label class="current-label">Pix copia e cola</label>
+                <textarea class="copy-box" readonly id="pixPayload">${escapeHtml(data?.pix?.payload || "")}</textarea>
+
+                <div class="result-actions">
+                  <button class="btn btn-primary" type="button" id="copyPixBtn">Copiar Pix</button>
+                  ${invoiceUrl ? `<a class="btn btn-soft" href="${escapeHtml(invoiceUrl)}" target="_blank" rel="noopener">Abrir fatura</a>` : ""}
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        $("#copyPixBtn")?.addEventListener("click", () => copyText($("#pixPayload")?.value || data?.pix?.payload || ""));
+        return;
+      }
+
+      if (data?.boleto?.identificationField || bankSlipUrl || invoiceUrl) {
+        result.innerHTML = `
+          <div class="boleto-card">
+            <div class="alert ok">Boleto gerado. Após compensar, o plano será confirmado automaticamente pelo webhook.</div>
+
+            <div class="field">
+              <label>Linha digitável</label>
+              <textarea class="copy-box" readonly id="boletoLine">${escapeHtml(data?.boleto?.identificationField || "")}</textarea>
+            </div>
+
+            <div class="result-actions">
+              ${data?.boleto?.identificationField ? `<button class="btn btn-primary" type="button" id="copyBoletoBtn">Copiar linha digitável</button>` : ""}
+              ${bankSlipUrl ? `<a class="btn btn-soft" href="${escapeHtml(bankSlipUrl)}" target="_blank" rel="noopener">Abrir boleto PDF</a>` : ""}
+              ${invoiceUrl ? `<a class="btn btn-ghost" href="${escapeHtml(invoiceUrl)}" target="_blank" rel="noopener">Abrir fatura</a>` : ""}
+            </div>
+          </div>
+        `;
+
+        $("#copyBoletoBtn")?.addEventListener("click", () => copyText($("#boletoLine")?.value || data?.boleto?.identificationField || ""));
+        return;
+      }
+
+      result.innerHTML = `
+        <div class="card-result">
+          <div class="alert ok">
+            Assinatura enviada para processamento. Verifique o status do plano em alguns instantes.
+          </div>
+
+          <div class="billing-list">
+            <div class="billing-row">
+              <span>Plano</span>
+              <strong>${escapeHtml(data?.plan_name || data?.plan || "--")}</strong>
+            </div>
+            <div class="billing-row">
+              <span>Valor</span>
+              <strong>${formatMoney(data?.amount || 0)}</strong>
+            </div>
+            <div class="billing-row">
+              <span>Assinatura</span>
+              <strong>${escapeHtml(data?.subscription_id || "--")}</strong>
+            </div>
+          </div>
+
+          ${invoiceUrl ? `
+            <div class="result-actions">
+              <a class="btn btn-soft" href="${escapeHtml(invoiceUrl)}" target="_blank" rel="noopener">Abrir fatura</a>
+            </div>
+          ` : ""}
+        </div>
+      `;
+    }
+
+    async function refreshStatus(showToast = true) {
+      const data = await loadStatus();
+      renderStatus(data);
+      if (showToast) toast("Status atualizado");
+    }
+
+    function startPolling() {
+      if (state.polling) clearInterval(state.polling);
+
+      state.polling = setInterval(async () => {
+        try {
+          await refreshStatus(false);
+        } catch (_) {}
+      }, 10000);
+    }
+
+    async function init() {
+      await loadSidebar();
+
+      try {
+        setLoading(true);
+        const data = await loadStatus();
+        renderStatus(data);
+        setLoading(false);
+
+        const urlPlan = new URLSearchParams(location.search).get("plano");
+        if (urlPlan && PLANS[String(urlPlan).toUpperCase()]) {
+          openCheckout(String(urlPlan).toUpperCase());
+        }
+
+      } catch (err) {
+        console.error(err);
+        $("#loading").innerHTML = `
+          <div class="empty-state">
+            <strong>Não foi possível carregar o plano.</strong><br>
+            ${escapeHtml(err.message || "Erro desconhecido.")}
+          </div>
+        `;
+      }
+    }
+
+    $("#btnRefresh").addEventListener("click", () => refreshStatus(true));
+    $("#btnCheckStatus").addEventListener("click", () => refreshStatus(true));
+    $("#btnCloseModal").addEventListener("click", closeCheckout);
+    $("#checkoutModal").addEventListener("click", (e) => {
+      if (e.target === $("#checkoutModal")) closeCheckout();
+    });
+
+    $$(".method").forEach((btn) => {
+      btn.addEventListener("click", () => setMethod(btn.getAttribute("data-method")));
+    });
+
+    $("#btnGeneratePayment").addEventListener("click", generatePayment);
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeCheckout();
+    });
+
+    init();
+  </script>
 </body>
 </html>

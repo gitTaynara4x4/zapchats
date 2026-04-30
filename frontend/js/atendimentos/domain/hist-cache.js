@@ -40,8 +40,6 @@ function normMsg(m) {
   const isTmpId = typeof msg_id === 'string' && msg_id.startsWith('tmp:');
   const tsParsed = toMillis(tsRaw);
 
-  // ✅ mensagem antiga sem horário real NÃO vira "agora"
-  // ✅ só local echo tmp pode cair para Date.now()
   const ts = Number.isFinite(tsParsed) && tsParsed > 0
     ? tsParsed
     : (isTmpId ? Date.now() : 0);
@@ -64,7 +62,21 @@ function normMsg(m) {
   const autor_nome =
     m?.autor_nome ?? m?.atendente_nome ?? m?.user_nome ?? null;
 
-  return {
+  const quoted =
+    m?.quoted ??
+    m?.quote ??
+    m?.quotedMessage ??
+    m?.quoted_message ??
+    null;
+
+  const quoted_preview =
+    m?.quoted_preview ??
+    m?.quotedPreview ??
+    m?.reply_preview ??
+    m?.replyPreview ??
+    null;
+
+  const normalized = {
     msg_id: msg_id || null,
     conteudo: m?.conteudo ?? m?.texto ?? m?.mensagem ?? '',
     tipo,
@@ -79,6 +91,16 @@ function normMsg(m) {
     apagada_cliente: Boolean(m?.apagada_cliente),
     apagada_usuario: Boolean(m?.apagada_usuario),
   };
+
+  if (quoted && typeof quoted === 'object') {
+    normalized.quoted = quoted;
+  }
+
+  if (quoted_preview && typeof quoted_preview === 'object') {
+    normalized.quoted_preview = quoted_preview;
+  }
+
+  return normalized;
 }
 
 const _norm = (v) => (v ?? '').toString().trim();
@@ -171,6 +193,8 @@ function _mergeOrPushOne(out, seen, m) {
     if (m.origem != null) merged.origem = m.origem;
     if (m.autor_nome != null) merged.autor_nome = m.autor_nome;
     if (m.timestamp) merged.timestamp = m.timestamp;
+    if (m.quoted != null) merged.quoted = m.quoted;
+    if (m.quoted_preview != null) merged.quoted_preview = m.quoted_preview;
 
     const mergedTs = toMillis(
       merged.timestamp ??

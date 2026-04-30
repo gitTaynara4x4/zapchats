@@ -9,13 +9,16 @@
 // ✅ Alinhado com conversation_key canônica:
 //    c:<cliente_id>:<instancia_id> e g:<grupo_id>:<instancia_id>
 // ✅ Busca backend sempre por entity_id da conversa, mantendo cache por conversation_key
+// ✅ Resposta/quote renderizada dentro da bolha, igual WhatsApp
+// ✅ TRAVA: resposta atrasada não sobrescreve conversa atual
+// ✅ Aceita payload array, {items}, {data}, {results}
 
 import { formatChatTime, parseAtendimentoDate } from '../core/time.js';
 import { getHist, primeWith, mergeOld } from '../domain/hist-cache.js';
 import { EMPRESA_ID } from '../core/env.js';
 import { getConversationKey, getConversationEntityId, getConversationKind } from '../state/store.js';
 
-// ✅ IMPORT CORRETO: media-render é DOMAIN (não UI)
+// ✅ IMPORT CORRETO: media-render é UI
 import '../ui/media-render.js';
 
 export const HISTORICO_LIMIT = 20;
@@ -30,6 +33,7 @@ function HLOG(...args) {
     if (HIST_DEBUG && console?.log) console.log('[historico]', ...args);
   } catch {}
 }
+
 function HERR(...args) {
   try {
     if (HIST_DEBUG && console?.error) console.error('[historico][ERRO]', ...args);
@@ -37,12 +41,12 @@ function HERR(...args) {
 }
 
 /* ===================== Conversation helpers ===================== */
-// IDs: não use Number() na conversa (grupos/refs compostas podem ser string)
 const idKey = (v) => {
   const s = String(v ?? '').trim();
   if (!s || s === 'null' || s === 'undefined' || s === 'NaN') return null;
   return s;
 };
+
 const idEq = (a, b) => idKey(a) === idKey(b);
 
 function instKey(v) {
@@ -90,9 +94,13 @@ function getHistConversationRef(raw = null, row = null) {
   const candidate =
     raw ??
     hist?.dataset?.conversationKey ??
+    hist?.dataset?.conversationId ??
+    hist?.dataset?.convKey ??
     hist?.dataset?.clienteId ??
     selected?.conversation_key ??
+    selected?.conversationKey ??
     selected?.conversation_id ??
+    selected?.conversationId ??
     selected?.id ??
     null;
 
@@ -100,32 +108,51 @@ function getHistConversationRef(raw = null, row = null) {
     getConversationKey(
       candidate,
       selected,
-      selected?.instancia_id ?? selected?.instancia ?? hist?.dataset?.instanciaId ?? null
+      selected?.instancia_id ??
+        selected?.instanciaId ??
+        selected?.instancia ??
+        selected?.instance_id ??
+        selected?.instanceId ??
+        selected?.instance_name ??
+        selected?.instanceName ??
+        hist?.dataset?.instanciaId ??
+        null
     ) ||
     idKey(candidate);
 
   const parsed = parseConversationKey(convKey);
-
   if (parsed) return parsed;
 
   const entityId =
     getConversationEntityId(candidate, selected) ||
     idKey(hist?.dataset?.entityId) ||
+    idKey(hist?.dataset?.apiClienteId) ||
+    idKey(hist?.dataset?.backendClienteId) ||
     idKey(selected?.entity_id) ||
+    idKey(selected?.entityId) ||
     idKey(selected?.backend_id) ||
     idKey(selected?.api_id) ||
+    idKey(selected?.cliente_id) ||
+    idKey(selected?.grupo_id) ||
     null;
 
   const kind =
     getConversationKind(candidate, selected) ||
     idKey(hist?.dataset?.kind) ||
     selected?.kind ||
+    selected?.conversation_kind ||
+    selected?.tipo_conversa ||
     'c';
 
   const instId =
     instKey(hist?.dataset?.instanciaId) ||
     instKey(selected?.instancia_id) ||
+    instKey(selected?.instanciaId) ||
     instKey(selected?.instancia) ||
+    instKey(selected?.instance_id) ||
+    instKey(selected?.instanceId) ||
+    instKey(selected?.instance_name) ||
+    instKey(selected?.instanceName) ||
     null;
 
   const built = buildConversationKey(kind, entityId, instId) || convKey || '';
@@ -146,6 +173,60 @@ function getConversationEntityIdSafe(raw = null, row = null) {
 function getConversationKeySafe(raw = null, row = null) {
   const ref = getHistConversationRef(raw, row);
   return ref?.key || null;
+}
+
+/* ===================== Trava contra render atrasado ===================== */
+function getOpenHistKey(hist = H()) {
+  return idKey(
+    hist?.dataset?.conversationKey ||
+    hist?.dataset?.conversationId ||
+    hist?.dataset?.convKey ||
+    hist?.dataset?.clienteId ||
+    null
+  );
+}
+
+function isHistoricoStillOpenFor(convKey, hist = H()) {
+  const expected = idKey(convKey);
+  if (!hist || !expected) return false;
+
+  const current = getOpenHistKey(hist);
+
+  // Se ainda não tem chave setada, não bloqueia.
+  // Mas quando já tem, precisa bater 100%.
+  if (current && current !== expected) {
+    HLOG('render/fetch ignorado: conversa atual mudou', {
+      expected,
+      current,
+    });
+    return false;
+  }
+
+  return true;
+}
+
+function setOpenHistRef(hist, ref) {
+  if (!hist || !ref) return;
+
+  hist.dataset.conversationKey = String(ref.key || '');
+  hist.dataset.conversationId = String(ref.key || '');
+  hist.dataset.convKey = String(ref.key || '');
+  hist.dataset.clienteId = String(ref.key || '');
+  hist.dataset.entityId = String(ref.entityId || '');
+  hist.dataset.kind = String(ref.kind || 'c');
+
+  if (ref.instId) hist.dataset.instanciaId = String(ref.instId);
+  else hist.removeAttribute('data-instancia-id');
+}
+
+function extractItems(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.results)) return payload.results;
+  if (Array.isArray(payload?.mensagens)) return payload.mensagens;
+  if (Array.isArray(payload?.messages)) return payload.messages;
+  return [];
 }
 
 /* ===================== Scroll guard ===================== */
@@ -198,6 +279,23 @@ function escapeHtml(s) {
     '>': '&gt;',
     '"': '&quot;',
   }[ch]));
+}
+
+function cleanOneLine(s, fallback = '') {
+  const out = String(s ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return out || fallback;
+}
+
+function jsonAttr(obj) {
+  try {
+    if (!obj || typeof obj !== 'object') return '';
+    return escapeHtml(JSON.stringify(obj));
+  } catch {
+    return '';
+  }
 }
 
 function dayKeyFromDate(d) {
@@ -258,12 +356,106 @@ function parseMsgDate(m) {
   return d;
 }
 
+/* ===================== Reply / quote preview ===================== */
+function firstTextFromMessageObject(message) {
+  if (!message || typeof message !== 'object') return '';
+
+  return cleanOneLine(
+    message.conversation ||
+    message?.extendedTextMessage?.text ||
+    message?.imageMessage?.caption ||
+    message?.videoMessage?.caption ||
+    message?.documentMessage?.caption ||
+    ''
+  );
+}
+
+function mediaLabelFromMessageObject(message) {
+  if (!message || typeof message !== 'object') return '';
+
+  if (message.imageMessage) return '[imagem]';
+  if (message.videoMessage) return '[vídeo]';
+  if (message.audioMessage) return '[áudio]';
+  if (message.documentMessage) return '[documento]';
+  if (message.stickerMessage) return '[figurinha]';
+  if (message.locationMessage) return '[localização]';
+  if (message.contactMessage || message.contactsArrayMessage) return '[contato]';
+
+  return '';
+}
+
+function normalizeQuotedPreview(m) {
+  const direct =
+    m?.quoted_preview ||
+    m?.quotedPreview ||
+    m?.reply_preview ||
+    m?.replyPreview ||
+    null;
+
+  if (direct && typeof direct === 'object') {
+    const direction = String(direct.direction || '').toLowerCase().trim();
+
+    return {
+      msg_id: idKey(direct.msg_id || direct.id || direct.message_id || direct.wa_msg_id || ''),
+      text: cleanOneLine(direct.text || direct.conversation || direct.caption || '', '[mensagem]'),
+      author: cleanOneLine(
+        direct.author || direct.nome || direct.push_name || '',
+        direction === 'out' ? 'Você' : 'Contato'
+      ),
+      direction: direction === 'out' ? 'out' : 'in',
+    };
+  }
+
+  const quoted = m?.quoted || m?.quote || null;
+  if (!quoted || typeof quoted !== 'object') return null;
+
+  const key = quoted.key || quoted.messageKey || {};
+  const message = quoted.message || quoted.quotedMessage || quoted;
+
+  const text =
+    firstTextFromMessageObject(message) ||
+    mediaLabelFromMessageObject(message) ||
+    cleanOneLine(quoted.text || quoted.conteudo || quoted.caption || '', '[mensagem]');
+
+  const fromMe = Boolean(key?.fromMe);
+
+  return {
+    msg_id: idKey(key?.id || quoted.msg_id || quoted.id || quoted.message_id || ''),
+    text,
+    author: fromMe ? 'Você' : 'Contato',
+    direction: fromMe ? 'out' : 'in',
+  };
+}
+
+function renderQuotedPreview(q) {
+  if (!q || typeof q !== 'object') return '';
+
+  const msgId = escapeHtml(q.msg_id || q.id || '');
+  const author = escapeHtml(
+    q.author || (q.direction === 'out' ? 'Você' : 'Contato')
+  );
+  const text = escapeHtml(
+    q.text || q.conversation || '[mensagem]'
+  );
+
+  return `
+    <div class="zc-quoted-bubble" data-quoted-msg-id="${msgId}" title="Mensagem respondida">
+      <div class="zc-quoted-bar" aria-hidden="true"></div>
+      <div class="zc-quoted-content">
+        <div class="zc-quoted-author">${author}</div>
+        <div class="zc-quoted-text">${text}</div>
+      </div>
+    </div>
+  `;
+}
+
 function renderMsgsWithDividers(msgs, lastDayKey = null) {
   let html = '';
   let last = lastDayKey || null;
 
   for (const m of (Array.isArray(msgs) ? msgs : [])) {
     const d = parseMsgDate(m);
+
     if (d) {
       const k = dayKeyFromDate(d);
       if (k && k !== last) {
@@ -271,6 +463,7 @@ function renderMsgsWithDividers(msgs, lastDayKey = null) {
         last = k;
       }
     }
+
     html += criarHTMLDaMensagem(m);
   }
 
@@ -391,7 +584,12 @@ function getInstanciaForFetch(rawConversation = null) {
       instKey(hist?.dataset?.instanciaId) ||
       ref?.instId ||
       instKey(window.state?.clienteSel?.instancia_id) ||
+      instKey(window.state?.clienteSel?.instanciaId) ||
       instKey(window.state?.clienteSel?.instancia) ||
+      instKey(window.state?.clienteSel?.instance_id) ||
+      instKey(window.state?.clienteSel?.instanceId) ||
+      instKey(window.state?.clienteSel?.instance_name) ||
+      instKey(window.state?.clienteSel?.instanceName) ||
       instKey(window.INSTANCIA_ATIVA) ||
       null;
 
@@ -412,7 +610,7 @@ function getInstQuery(rawConversation = null) {
   }
 
   const n = Number(inst);
-  const q = Number.isFinite(n)
+  const q = Number.isFinite(n) && String(n) === String(inst)
     ? `&instancia_id=${n}`
     : `&instance=${encodeURIComponent(String(inst))}`;
 
@@ -420,7 +618,6 @@ function getInstQuery(rawConversation = null) {
   return q;
 }
 
-// ✅ deixa o renderer usar a mesma função (fallback)
 window._instQuery = getInstQuery;
 
 /* ===================== salvar cache unificado (compat) ===================== */
@@ -459,7 +656,14 @@ export function salvarNoCache(clienteId, novos) {
             ? (m.timestamp || m.data || m.created_at)
             : (prev.timestamp || prev.data || prev.created_at);
 
-        byId.set(k, { ...prev, ...m, ack, timestamp: ts });
+        byId.set(k, {
+          ...prev,
+          ...m,
+          ack,
+          timestamp: ts,
+          quoted: m.quoted ?? prev.quoted,
+          quoted_preview: m.quoted_preview ?? prev.quoted_preview,
+        });
       }
     } else {
       noId.push(m);
@@ -483,22 +687,47 @@ export function criarHTMLDaMensagem(m) {
   const isSaida = m.tipo === 'saida' || m.from_me === true || m.origem === 'atendente';
   const texto = String(m.conteudo ?? m.mensagem ?? m.texto ?? '').trim();
   const ackVal = Number(m.ack ?? 0);
-  const msgIdAttr = m.msg_id || '';
+  const msgIdAttr = String(m.msg_id || m.id || '').trim();
+  const msgIdEsc = escapeHtml(msgIdAttr);
+
+  const quotedPreview = normalizeQuotedPreview(m);
+  const quotedPreviewAttr = quotedPreview ? jsonAttr(quotedPreview) : '';
+  const quotedAttr = m?.quoted && typeof m.quoted === 'object' ? jsonAttr(m.quoted) : '';
 
   const ackHtml =
     isSaida && typeof window.getAckIcon === 'function'
       ? window.getAckIcon(ackVal).replace(
           '<span class="msg-ack"',
-          `<span class="msg-ack" data-msg-id="${msgIdAttr}"`
+          `<span class="msg-ack" data-msg-id="${msgIdEsc}"`
         )
       : '';
+
+  const quoteHtml = renderQuotedPreview(quotedPreview);
 
   const textHtml = texto
     ? `<div class="msg-text">${escapeHtml(texto)}</div>`
     : `<div class="msg-text">&nbsp;</div>`;
 
-  return `<div class="msg-row ${isSaida ? 'msg-sent' : 'msg-received'}" data-id="${msgIdAttr}" data-msg-id="${msgIdAttr}">
-    <div class="bubble ${isSaida ? 'bubble-out' : 'bubble-in'}" data-msg-id="${msgIdAttr}">
+  const quotedPreviewData = quotedPreviewAttr
+    ? ` data-quoted-preview="${quotedPreviewAttr}"`
+    : '';
+
+  const quotedData = quotedAttr
+    ? ` data-quoted="${quotedAttr}"`
+    : '';
+
+  return `<div class="msg-row ${isSaida ? 'msg-sent' : 'msg-received'}"
+      data-id="${msgIdEsc}"
+      data-msg-id="${msgIdEsc}"
+      data-message-id="${msgIdEsc}"
+      data-wa-msg-id="${msgIdEsc}"
+      data-from-me="${isSaida ? '1' : '0'}"${quotedPreviewData}${quotedData}>
+    <div class="bubble ${isSaida ? 'bubble-out' : 'bubble-in'}"
+        data-msg-id="${msgIdEsc}"
+        data-message-id="${msgIdEsc}"
+        data-wa-msg-id="${msgIdEsc}"
+        data-from-me="${isSaida ? '1' : '0'}"${quotedPreviewData}${quotedData}>
+      ${quoteHtml}
       ${textHtml}
       <div class="meta">
         ${ackHtml}
@@ -516,8 +745,7 @@ export function renderHistoricoDoCache(clienteId, append = false) {
   const convKey = getConversationKeySafe(clienteId) || idKey(clienteId);
   if (!convKey) return;
 
-  const histKey = idKey(hist.dataset.conversationKey || hist.dataset.clienteId || null);
-  if (histKey && histKey !== convKey) return;
+  if (!isHistoricoStillOpenFor(convKey, hist)) return;
 
   const inst =
     hist?.dataset?.instanciaId && hist.dataset.instanciaId !== 'null'
@@ -540,10 +768,15 @@ export function renderHistoricoDoCache(clienteId, append = false) {
   armHistoricoScrollGuard();
 
   if (!append) {
+    if (!isHistoricoStillOpenFor(convKey, hist)) return;
+
     hist.innerHTML = '';
     ensureTopLoader();
 
     const { html, lastDayKey } = renderMsgsWithDividers(msgs, null);
+
+    if (!isHistoricoStillOpenFor(convKey, hist)) return;
+
     hist.insertAdjacentHTML('beforeend', html);
 
     stripAckReceived();
@@ -551,11 +784,14 @@ export function renderHistoricoDoCache(clienteId, append = false) {
 
     hist.scrollTop = hist.scrollHeight;
     requestAnimationFrame(() => {
+      if (!isHistoricoStillOpenFor(convKey, hist)) return;
       try { hist.scrollTop = hist.scrollHeight; } catch {}
       armHistoricoScrollGuard();
     });
     setTimeout(() => armHistoricoScrollGuard(), 60);
   } else {
+    if (!isHistoricoStillOpenFor(convKey, hist)) return;
+
     const existingIds = new Set(
       Array.from(hist.querySelectorAll('.msg-row')).map(
         (n) => n.getAttribute('data-msg-id') || n.getAttribute('data-id') || ''
@@ -575,12 +811,16 @@ export function renderHistoricoDoCache(clienteId, append = false) {
       ensureTopLoader();
 
       const { html, lastDayKey } = renderMsgsWithDividers(msgs, null);
+
+      if (!isHistoricoStillOpenFor(convKey, hist)) return;
+
       hist.insertAdjacentHTML('beforeend', html);
 
       stripAckReceived();
       setHistLastDayKey(hist, lastDayKey);
       hist.scrollTop = hist.scrollHeight;
       requestAnimationFrame(() => {
+        if (!isHistoricoStillOpenFor(convKey, hist)) return;
         try { hist.scrollTop = hist.scrollHeight; } catch {}
         armHistoricoScrollGuard();
       });
@@ -607,6 +847,8 @@ export function renderHistoricoDoCache(clienteId, append = false) {
         const lastDayKey = getHistLastDayKey(hist);
         const out = renderMsgsWithDividers(novas, lastDayKey);
 
+        if (!isHistoricoStillOpenFor(convKey, hist)) return;
+
         const lastRow = hist.querySelector('.msg-row:last-of-type');
         if (lastRow) lastRow.insertAdjacentHTML('afterend', out.html);
         else hist.insertAdjacentHTML('beforeend', out.html);
@@ -617,6 +859,7 @@ export function renderHistoricoDoCache(clienteId, append = false) {
       stripAckReceived();
       hist.scrollTop = hist.scrollHeight;
       requestAnimationFrame(() => {
+        if (!isHistoricoStillOpenFor(convKey, hist)) return;
         try { hist.scrollTop = hist.scrollHeight; } catch {}
         armHistoricoScrollGuard();
       });
@@ -633,6 +876,12 @@ export function renderHistoricoDoCache(clienteId, append = false) {
   } catch (e) {
     HERR('renderHistoricoDoCache: reconcilePendingAcks erro', e);
   }
+
+  try {
+    window.dispatchEvent(new CustomEvent('historico:rendered', {
+      detail: { conversation_key: convKey, conversation_id: convKey, instancia_id: inst }
+    }));
+  } catch {}
 }
 
 /* ===================== append util ===================== */
@@ -676,8 +925,10 @@ export async function abrirHistorico(id) {
     return false;
   }
 
-  const convKey = getConversationKeySafe(id) || idKey(id);
-  const entityId = getConversationEntityIdSafe(id);
+  const ref = getHistConversationRef(id);
+  const convKey = ref?.key || getConversationKeySafe(id) || idKey(id);
+  const entityId = ref?.entityId || getConversationEntityIdSafe(id);
+
   if (!convKey || !entityId) {
     HERR('abrirHistorico: conversa inválida', { id, convKey, entityId });
     return false;
@@ -698,10 +949,7 @@ export async function abrirHistorico(id) {
     HERR('abrirHistorico: erro ao exibir UI', e);
   }
 
-  hist.dataset.conversationKey = String(convKey);
-  hist.dataset.clienteId = String(convKey); // compat legado
-  hist.dataset.entityId = String(entityId);
-  hist.dataset.kind = String(getHistConversationRef(convKey).kind || 'c');
+  setOpenHistRef(hist, ref);
   hist.dataset.noMore = '0';
 
   try {
@@ -719,11 +967,22 @@ export async function abrirHistorico(id) {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
 
     const data = await r.json();
-    const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+
+    if (!isHistoricoStillOpenFor(convKey, hist)) {
+      HLOG('abrirHistorico: resposta ignorada, conversa mudou', { convKey });
+      return false;
+    }
+
+    const items = extractItems(data);
 
     HLOG('abrirHistorico: itens recebidos', { convKey, count: items.length });
 
     if (items.length) salvarNoCache(convKey, items);
+
+    if (!isHistoricoStillOpenFor(convKey, hist)) {
+      HLOG('abrirHistorico: cache salvo, mas conversa mudou antes de render', { convKey });
+      return false;
+    }
 
     try {
       const inst = getInstanciaForFetch(convKey);
@@ -769,9 +1028,8 @@ export async function carregarMaisHistorico(id) {
     return false;
   }
 
-  const currentHistKey = idKey(hist?.dataset?.conversationKey || hist?.dataset?.clienteId || null);
-  if (!hist || currentHistKey !== String(convKey)) {
-    HLOG('carregarMaisHistorico: hist não bate', { convKey, histCid: currentHistKey });
+  if (!isHistoricoStillOpenFor(convKey, hist)) {
+    HLOG('carregarMaisHistorico: hist não bate', { convKey, histCid: getOpenHistKey(hist) });
     return false;
   }
 
@@ -807,6 +1065,11 @@ export async function carregarMaisHistorico(id) {
     const r = await fetch(url, { credentials: 'include' });
     HLOG('carregarMaisHistorico: resposta HTTP', { status: r.status });
 
+    if (!isHistoricoStillOpenFor(convKey, hist)) {
+      HLOG('carregarMaisHistorico: resposta HTTP chegou, mas conversa mudou', { convKey });
+      return false;
+    }
+
     if (!r.ok) {
       hist.dataset.noMore = '1';
       HLOG('carregarMaisHistorico: !ok, noMore=1', { convKey, status: r.status });
@@ -814,7 +1077,13 @@ export async function carregarMaisHistorico(id) {
     }
 
     const data = await r.json();
-    const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+
+    if (!isHistoricoStillOpenFor(convKey, hist)) {
+      HLOG('carregarMaisHistorico: payload chegou, mas conversa mudou', { convKey });
+      return false;
+    }
+
+    const items = extractItems(data);
     const n = items.length;
 
     HLOG('carregarMaisHistorico: itens', { convKey, n, offset: off });
@@ -842,8 +1111,16 @@ export async function carregarMaisHistorico(id) {
       HERR('carregarMaisHistorico: erro cache/salvar', e);
     }
 
+    if (!isHistoricoStillOpenFor(convKey, hist)) {
+      HLOG('carregarMaisHistorico: cache salvo, mas conversa mudou antes de render', { convKey });
+      return false;
+    }
+
     const prevBottom = beforeHeight - hist.scrollTop;
     renderHistoricoDoCache(convKey, false);
+
+    if (!isHistoricoStillOpenFor(convKey, hist)) return false;
+
     hist.scrollTop = hist.scrollHeight - prevBottom;
     armHistoricoScrollGuard();
 
@@ -884,7 +1161,7 @@ export async function carregarMaisHistorico(id) {
         if (loadingOld) return;
         if (hist.dataset.noMore === '1') return;
 
-        const convKey = getConversationKeySafe(hist.dataset.conversationKey || hist.dataset.clienteId);
+        const convKey = getConversationKeySafe(hist.dataset.conversationKey || hist.dataset.conversationId || hist.dataset.convKey || hist.dataset.clienteId);
         if (!convKey) return;
 
         if (hist.scrollTop <= 60) {
@@ -954,6 +1231,7 @@ window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
 
     if (!arr || !arr.length) {
       let inst = null;
+
       try {
         const lista = window.state?.clientesCache || window.clientesCache || [];
         const c = convObj || lista.find((x) => {
@@ -973,6 +1251,7 @@ window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
       } catch (e) {
         HERR('syncPreviewFromCache: erro ao inferir inst', e);
       }
+
       arr = getHist(inst, convKey) || [];
     }
 

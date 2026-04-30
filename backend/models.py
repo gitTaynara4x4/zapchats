@@ -67,14 +67,11 @@ class Empresa(Base):
     nome     = Column(String, nullable=False)
     telefone = Column(String, nullable=False)
 
-    # Plano atual selecionado (pago ou FREE)
     assinatura = Column(String, nullable=False, server_default=PLAN_FREE)
 
-    # Trial opcional (START / BUSINESS / ENTERPRISE)
     trial_tier       = Column(String, nullable=True)
     trial_expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
-    # Validade do plano PAGO (se estiver setado e no futuro, o pago prevalece)
     plano_expira_em  = Column(TIMESTAMP(timezone=True), nullable=True)
 
     quantidade_instancias = Column(Integer, nullable=False, server_default="0")
@@ -86,25 +83,31 @@ class Empresa(Base):
 
     cnpj_cpf = Column(String, nullable=True, index=True)
 
-    # Flag global da empresa pra exigir 2º fator (token) no login dos colaboradores
     requer_token_login = Column(Boolean, nullable=False, server_default="false")
 
     # =========================
-    # Módulo de E-mail (cotas independentes)
+    # Billing / Asaas
     # =========================
-    # Plano PAGO de E-mail
+    billing_provider = Column(String(30), nullable=True)
+    billing_status = Column(String(40), nullable=True)
+    billing_plan_pending = Column(String(40), nullable=True)
+
+    asaas_customer_id = Column(String(120), nullable=True)
+    asaas_subscription_id = Column(String(120), nullable=True)
+    asaas_last_payment_id = Column(String(120), nullable=True)
+
+    billing_updated_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    # =========================
+    # Módulo de E-mail
+    # =========================
     email_assinatura       = Column(String, nullable=True)
     email_plano_expira_em  = Column(TIMESTAMP(timezone=True), nullable=True)
 
-    # Trial de E-mail (opcional)
     email_trial_tier       = Column(String, nullable=True)
     email_trial_expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
-    # Override: quantidade máxima de contas (caixas) de e-mail
-    # NULL => usa plano/trial; 0 => bloqueia geral.
     max_email_accounts_override = Column(Integer, nullable=True)
-
-    # Override: limite de armazenamento total de e-mails (bytes) da EMPRESA
     email_storage_override_bytes = Column(Integer, nullable=True)
 
     # =========================
@@ -116,6 +119,20 @@ class Empresa(Base):
     setores         = relationship("Setor", back_populates="empresa", cascade="all, delete-orphan")
     colaboradores   = relationship("Colaborador", back_populates="empresa", cascade="all, delete-orphan")
     atendimentos    = relationship("Atendimento", back_populates="empresa", cascade="all, delete-orphan")
+
+    filas_atendimento = relationship(
+        "FilaAtendimento",
+        back_populates="empresa",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    atendimento_participantes = relationship(
+        "AtendimentoParticipante",
+        back_populates="empresa",
+        cascade="all, delete-orphan",
+    )
+
     midias          = relationship("Midia", back_populates="empresa", cascade="all, delete-orphan")
     grupos          = relationship("Grupo", back_populates="empresa", cascade="all, delete-orphan")
     mensagens_grupo = relationship("MensagemGrupo", back_populates="empresa", cascade="all, delete-orphan")
@@ -127,7 +144,6 @@ class Empresa(Base):
         passive_deletes=True,
     )
 
-    # Contas de e-mail conectadas (módulo E-mail)
     email_accounts = relationship(
         "EmailAccount",
         back_populates="empresa",
@@ -135,19 +151,21 @@ class Empresa(Base):
         passive_deletes=True,
     )
 
-    # navegar pelas mensagens/anexos de e-mail
     email_messages    = relationship("EmailMessage",    back_populates="empresa", cascade="all, delete-orphan")
     email_attachments = relationship("EmailAttachment", back_populates="empresa", cascade="all, delete-orphan")
 
-    # ---------- Helpers de plano (WhatsApp/instâncias) ----------
+    billing_asaas_events = relationship(
+        "BillingAsaasEvent",
+        back_populates="empresa",
+        passive_deletes=True,
+    )
+
     @property
     def plano(self) -> str:
-        """Alias para compat: lê o campo `assinatura`."""
         return normalize_plan(self.assinatura or PLAN_FREE)
 
     @plano.setter
     def plano(self, value: str) -> None:
-        """Alias para compat: escreve no campo `assinatura`."""
         self.assinatura = normalize_plan(value or PLAN_FREE)
 
     @property
@@ -156,18 +174,14 @@ class Empresa(Base):
 
     @property
     def paid_active(self) -> bool:
-        """Ativo se assinatura != FREE e (sem expiração ou não expirado)."""
         return plan_is_paid_active(self)
 
     @property
     def effective_tier(self) -> str:
-        """Prioridade: PAGO > TRIAL > FREE"""
         return resolve_effective_plan(self)
 
-    # ---------- Helpers do Módulo de E-mail ----------
     @property
     def email_paid_active(self) -> bool:
-        """Plano PAGO de e-mail está ativo?"""
         if not self.email_assinatura:
             return False
         if not self.email_plano_expira_em:
@@ -176,19 +190,12 @@ class Empresa(Base):
 
     @property
     def email_trial_active(self) -> bool:
-        """Trial de e-mail ativo?"""
         if not (self.email_trial_tier and self.email_trial_expires_at):
             return False
         return datetime.now(timezone.utc) < self.email_trial_expires_at
 
     @property
     def email_quota_effective(self) -> int:
-        """
-        Cota efetiva de caixas de e-mail:
-        override -> plano pago -> trial -> 0.
-
-        Mantive compatibilidade com tiers legados também.
-        """
         if self.max_email_accounts_override is not None:
             return int(self.max_email_accounts_override)
 
@@ -204,7 +211,6 @@ class Empresa(Base):
             PLAN_BUSINESS: 3,
             PLAN_ENTERPRISE: 10,
 
-            # compat legado eventual
             "PRATA": 1,
             "OURO": 3,
             "PLATINA": 10,
@@ -217,7 +223,7 @@ class Empresa(Base):
 
 
 # =========================
-# EmpresaInstancia (multi-whatsapp por empresa)
+# EmpresaInstancia
 # =========================
 class EmpresaInstancia(Base):
     __tablename__ = "empresas_instancias"
@@ -225,7 +231,6 @@ class EmpresaInstancia(Base):
     id = Column(Integer, primary_key=True)
     empresa_id = Column(Integer, ForeignKey("empresas.id", ondelete="CASCADE"), nullable=False)
 
-    # identificador/slug interno da instância no Evolution
     instance_name = Column(String, nullable=False, index=True, unique=True)
 
     apelido = Column(String, nullable=True)
@@ -234,30 +239,17 @@ class EmpresaInstancia(Base):
     connected = Column(Boolean, nullable=False, server_default="false")
     last_seen = Column(TIMESTAMP(timezone=True), nullable=True)
 
-    # =========================
-    # Saúde do Número
-    # =========================
-    # NULL = ainda não analisado
     score = Column(Integer, nullable=True, index=True)
-
-    # ex.: "boa" | "atencao" | "alto_risco" | "critico"
     score_status = Column(String(30), nullable=True, index=True)
-
-    # ex.: "Boa" | "Atenção" | "Alto risco" | "Crítico"
     score_label = Column(String(50), nullable=True)
-
-    # resumo curto para exibir no modal/tela
     score_resumo = Column(Text, nullable=True)
 
-    # listas e métricas salvas da última análise
     score_motivos = Column(JSONB, nullable=True)
     score_metricas = Column(JSONB, nullable=True)
     score_recomendacoes = Column(JSONB, nullable=True)
 
-    # quando foi feita a última análise
     score_atualizado_em = Column(TIMESTAMP(timezone=True), nullable=True)
 
-    # preferências de histórico: "none" | "24h" | "7d"
     historico_restaurar = Column(String, nullable=True, server_default="none")
 
     empresa = relationship("Empresa", back_populates="instancias")
@@ -299,6 +291,13 @@ class EmpresaInstancia(Base):
 
     atendimentos = relationship(
         "Atendimento",
+        back_populates="instancia",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    filas_instancias = relationship(
+        "FilaInstancia",
         back_populates="instancia",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -410,6 +409,8 @@ class Mensagem(Base):
     __table_args__ = (
         Index("ix_mensagens_msg_id", "msg_id"),
         Index("ix_mensagens_empresa_cliente_ts", "empresa_id", "cliente_id", "timestamp"),
+        Index("ix_mensagens_colaborador_id", "colaborador_id"),
+        Index("ix_mensagens_empresa_colab_ts", "empresa_id", "colaborador_id", "timestamp"),
         Index(
             "uq_mensagens_cliente_msgid_notnull",
             "cliente_id", "msg_id",
@@ -436,23 +437,37 @@ class Mensagem(Base):
         index=True,
     )
 
+    colaborador_id = Column(
+        Integer,
+        ForeignKey("colaboradores.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     conteudo  = Column(Text,   nullable=False)
-    tipo      = Column(String, nullable=False)  # 'entrada' | 'saida'
+    tipo      = Column(String, nullable=False)
     lida      = Column(Boolean, default=False)
     timestamp = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     msg_id = Column(String, index=True)
     ack    = Column(Integer, default=0)
 
+    quoted = Column(JSONB, nullable=True)
+    quoted_preview = Column(JSONB, nullable=True)
+
     cliente     = relationship("Cliente", back_populates="mensagens")
     instancia   = relationship("EmpresaInstancia", back_populates="mensagens")
     atendimento = relationship("Atendimento", back_populates="mensagens")
+    colaborador = relationship("Colaborador", foreign_keys=[colaborador_id], back_populates="mensagens_enviadas")
 
     apagada_cliente = Column(Boolean, nullable=False, default=False)
     apagada_usuario = Column(Boolean, nullable=False, default=False)
 
     def __repr__(self) -> str:
-        return f"<Mensagem id={self.id} cli={self.cliente_id} inst={self.instancia_id} atd={self.atendimento_id} tipo={self.tipo} ts={self.timestamp}>"
+        return (
+            f"<Mensagem id={self.id} cli={self.cliente_id} inst={self.instancia_id} "
+            f"atd={self.atendimento_id} colab={self.colaborador_id} tipo={self.tipo} ts={self.timestamp}>"
+        )
 
 
 # =========================
@@ -470,13 +485,20 @@ class Midia(Base):
         ),
         Index("ix_midias_instancia", "instancia_id"),
         Index("ix_midias_grupo_id", "grupo_id"),
+        Index("ix_midias_mensagem_grupo_id", "mensagem_grupo_id"),
     )
 
     id            = Column(Integer, primary_key=True, index=True)
     empresa_id    = Column(Integer, ForeignKey("empresas.id"))
     cliente_id    = Column(Integer, ForeignKey("clientes.id"))
     grupo_id      = Column(BigInteger, ForeignKey("grupos.id"), nullable=True, index=True)
-    mensagem_id   = Column(Integer, ForeignKey("mensagens.id"))
+    mensagem_id   = Column(Integer, ForeignKey("mensagens.id"), nullable=True)
+    mensagem_grupo_id = Column(
+        BigInteger,
+        ForeignKey("mensagens_grupo.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     instancia_id  = Column(Integer, ForeignKey("empresas_instancias.id", ondelete="SET NULL"), index=True, nullable=True)
 
     tipo          = Column(String)
@@ -498,6 +520,7 @@ class Midia(Base):
     cliente   = relationship("Cliente", back_populates="midias")
     grupo     = relationship("Grupo")
     mensagem  = relationship("Mensagem", foreign_keys=[mensagem_id])
+    mensagem_grupo = relationship("MensagemGrupo", foreign_keys=[mensagem_grupo_id])
 
 
 # =========================
@@ -566,6 +589,9 @@ class MensagemGrupo(Base):
     timestamp = Column(BigInteger, nullable=True)
     msg_id = Column(Text, nullable=False, index=True)
 
+    quoted = Column(JSONB, nullable=True)
+    quoted_preview = Column(JSONB, nullable=True)
+
     criado_em = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     empresa = relationship("Empresa", back_populates="mensagens_grupo")
@@ -621,6 +647,12 @@ class Departamento(Base):
         passive_deletes=True,
     )
 
+    filas_atendimento = relationship(
+        "FilaAtendimento",
+        back_populates="departamento",
+        passive_deletes=True,
+    )
+
     __table_args__ = (
         UniqueConstraint("empresa_id", "nome",   name="uq_departamentos_empresa_nome"),
         UniqueConstraint("empresa_id", "codigo", name="uq_departamentos_empresa_codigo"),
@@ -628,10 +660,6 @@ class Departamento(Base):
 
     def __repr__(self) -> str:
         return f"<Departamento id={self.id} emp={self.empresa_id} nome={self.nome!r}>"
-
-
-# =========================
-# Pivot={self.empresa_id} nome={self.nome!r}>"
 
 
 # =========================
@@ -659,28 +687,187 @@ class DepartamentoInstancia(Base):
         return f"<DepartamentoInstancia emp={self.empresa_id} dep={self.departamento_id} inst={self.instancia_id}>"
 
 
+# =========================
+# Filas de Atendimento
+# =========================
+class FilaAtendimento(Base):
+    __tablename__ = "filas_atendimento"
+    __table_args__ = (
+        UniqueConstraint("empresa_id", "nome", name="uq_filas_atendimento_empresa_nome"),
+        Index("ix_filas_empresa_ativa", "empresa_id", "ativa"),
+        Index("ix_filas_empresa_departamento", "empresa_id", "departamento_id"),
+        Index("ix_filas_empresa_prioridade", "empresa_id", "prioridade"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    empresa_id = Column(
+        Integer,
+        ForeignKey("empresas.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    departamento_id = Column(
+        Integer,
+        ForeignKey("departamentos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    nome = Column(String(80), nullable=False)
+    descricao = Column(Text, nullable=True)
+
+    prioridade = Column(String(20), nullable=False, server_default="normal")
+    sla_minutos = Column(Integer, nullable=True)
+
+    cor = Column(String(20), nullable=True)
+    mensagem_padrao = Column(Text, nullable=True)
+
+    ativa = Column(Boolean, nullable=False, server_default="true")
+    ordem = Column(Integer, nullable=False, server_default="0")
+
+    exigir_aceite = Column(Boolean, nullable=False, server_default="true")
+    retorno_ao_liberar = Column(Boolean, nullable=False, server_default="true")
+    auto_distribuir = Column(Boolean, nullable=False, server_default="false")
+
+    criada_em = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    atualizada_em = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    empresa = relationship("Empresa", back_populates="filas_atendimento")
+    departamento = relationship("Departamento", back_populates="filas_atendimento")
+
+    instancias = relationship(
+        "FilaInstancia",
+        back_populates="fila",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    atendimentos = relationship(
+        "Atendimento",
+        back_populates="fila",
+        passive_deletes=True,
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<FilaAtendimento id={self.id} emp={self.empresa_id} "
+            f"nome={self.nome!r} dep={self.departamento_id} ativa={self.ativa}>"
+        )
+
+
+class FilaInstancia(Base):
+    __tablename__ = "filas_instancias"
+    __table_args__ = (
+        UniqueConstraint("empresa_id", "fila_id", "instancia_id", name="uq_fila_instancia_emp_fila_inst"),
+        Index("ix_fila_instancia_fila", "fila_id"),
+        Index("ix_fila_instancia_inst", "instancia_id"),
+        Index("ix_fila_instancia_emp_inst", "empresa_id", "instancia_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    empresa_id = Column(
+        Integer,
+        ForeignKey("empresas.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    fila_id = Column(
+        Integer,
+        ForeignKey("filas_atendimento.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    instancia_id = Column(
+        Integer,
+        ForeignKey("empresas_instancias.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    criada_em = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+    fila = relationship("FilaAtendimento", back_populates="instancias")
+    instancia = relationship("EmpresaInstancia", back_populates="filas_instancias")
+
+    def __repr__(self) -> str:
+        return f"<FilaInstancia emp={self.empresa_id} fila={self.fila_id} inst={self.instancia_id}>"
+
+
 class AtendimentoPinnedConversa(Base):
     __tablename__ = "atendimento_pinned_conversas"
     __table_args__ = (
-        UniqueConstraint("empresa_id", "user_id", "conversa_id", name="pk_pinned_emp_user_conv"),
-        Index("ix_pinned_user", "empresa_id", "user_id"),
-        Index("ix_pinned_conv", "empresa_id", "conversa_id"),
+        UniqueConstraint(
+            "empresa_id",
+            "user_id",
+            "conversa_id",
+            "instancia_id",
+            name="uq_pinned_emp_user_conv_inst",
+        ),
+        Index("ix_pinned_user_inst", "empresa_id", "user_id", "instancia_id"),
+        Index("ix_pinned_conv_inst", "empresa_id", "conversa_id", "instancia_id"),
     )
 
-    empresa_id  = Column(Integer, ForeignKey("empresas.id",  ondelete="CASCADE"), nullable=False, primary_key=True)
-    user_id     = Column(Integer, ForeignKey("usuarios.id",  ondelete="CASCADE"), nullable=False, primary_key=True)
-    conversa_id = Column(Integer, ForeignKey("clientes.id",  ondelete="CASCADE"), nullable=False, primary_key=True)
+    empresa_id = Column(
+        Integer,
+        ForeignKey("empresas.id", ondelete="CASCADE"),
+        nullable=False,
+        primary_key=True,
+    )
 
-    pinned_at   = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    user_id = Column(
+        Integer,
+        ForeignKey("usuarios.id", ondelete="CASCADE"),
+        nullable=False,
+        primary_key=True,
+    )
 
-    empresa  = relationship("Empresa")
-    usuario  = relationship("Usuario")
+    conversa_id = Column(
+        Integer,
+        ForeignKey("clientes.id", ondelete="CASCADE"),
+        nullable=False,
+        primary_key=True,
+    )
+
+    instancia_id = Column(
+        Integer,
+        ForeignKey("empresas_instancias.id", ondelete="CASCADE"),
+        nullable=False,
+        primary_key=True,
+    )
+
+    pinned_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    atendimento_id = Column(
+        Integer,
+        ForeignKey("atendimentos.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    empresa = relationship("Empresa")
+    usuario = relationship("Usuario")
     conversa = relationship("Cliente")
-
-    atendimento_id = Column(Integer, ForeignKey("atendimentos.id"), nullable=True)
+    instancia = relationship("EmpresaInstancia")
+    atendimento = relationship("Atendimento")
 
     def __repr__(self) -> str:
-        return f"<Pinned emp={self.empresa_id} user={self.user_id} conv={self.conversa_id}>"
+        return (
+            f"<Pinned emp={self.empresa_id} user={self.user_id} "
+            f"conv={self.conversa_id} inst={self.instancia_id}>"
+        )
 
 
 # =========================
@@ -706,7 +893,14 @@ class Colaborador(Base):
     id         = Column(Integer, primary_key=True, index=True)
     empresa_id = Column(Integer, ForeignKey('empresas.id'), nullable=False)
     setor_id   = Column(Integer, ForeignKey('setores.id'), nullable=True)
-    usuario_id = Column(Integer, ForeignKey('usuarios.id'), nullable=True)
+
+    usuario_id = Column(
+        Integer,
+        ForeignKey('usuarios.id', ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
 
     nome       = Column(String(60), nullable=False)
     email      = Column(String(120), nullable=False, unique=True)
@@ -719,7 +913,7 @@ class Colaborador(Base):
 
     empresa = relationship("Empresa", back_populates="colaboradores")
     setor   = relationship("Setor", back_populates="colaboradores")
-    usuario = relationship("Usuario")
+    usuario = relationship("Usuario", back_populates="colaborador", foreign_keys=[usuario_id])
 
     hora_login_inicio = Column(String(5), nullable=True)
     hora_login_fim    = Column(String(5), nullable=True)
@@ -740,6 +934,18 @@ class Colaborador(Base):
         "Atendimento",
         foreign_keys="Atendimento.operador_id",
         back_populates="operador",
+    )
+
+    mensagens_enviadas = relationship(
+        "Mensagem",
+        foreign_keys="Mensagem.colaborador_id",
+        back_populates="colaborador",
+    )
+
+    participacoes_atendimento = relationship(
+        "AtendimentoParticipante",
+        back_populates="colaborador",
+        cascade="all, delete-orphan",
     )
 
 
@@ -766,6 +972,13 @@ class Usuario(Base):
     empresa      = relationship("Empresa", back_populates="usuarios")
     departamento = relationship("Departamento", back_populates="usuarios")
 
+    colaborador = relationship(
+        "Colaborador",
+        back_populates="usuario",
+        uselist=False,
+        foreign_keys="Colaborador.usuario_id",
+    )
+
 
 # =========================
 # Atendimentos
@@ -776,8 +989,10 @@ class Atendimento(Base):
         Index("ix_atendimentos_empresa_status", "empresa_id", "status"),
         Index("ix_atendimentos_empresa_inst_status", "empresa_id", "instancia_id", "status"),
         Index("ix_atendimentos_empresa_dep_status", "empresa_id", "departamento_id", "status"),
+        Index("ix_atendimentos_empresa_fila_status", "empresa_id", "fila_id", "status"),
         Index("ix_atendimentos_empresa_cli_inst", "empresa_id", "cliente_id", "instancia_id"),
         Index("ix_atendimentos_operador", "operador_id"),
+        Index("ix_atendimentos_fila", "fila_id"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -817,6 +1032,18 @@ class Atendimento(Base):
         index=True,
     )
 
+    fila_id = Column(
+        Integer,
+        ForeignKey("filas_atendimento.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    fila_escolhida_em = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+
     criado_em = Column(
         TIMESTAMP(timezone=True),
         server_default=func.now(),
@@ -827,6 +1054,11 @@ class Atendimento(Base):
         TIMESTAMP(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
+        nullable=True,
+    )
+
+    aceito_em = Column(
+        TIMESTAMP(timezone=True),
         nullable=True,
     )
 
@@ -845,6 +1077,7 @@ class Atendimento(Base):
     cliente = relationship("Cliente", back_populates="atendimentos")
     departamento = relationship("Departamento", back_populates="atendimentos")
     instancia = relationship("EmpresaInstancia", back_populates="atendimentos")
+    fila = relationship("FilaAtendimento", back_populates="atendimentos")
     operador = relationship("Colaborador", foreign_keys=[operador_id], back_populates="atendimentos_operados")
 
     mensagens = relationship(
@@ -853,10 +1086,75 @@ class Atendimento(Base):
         lazy="selectin",
     )
 
+    participantes = relationship(
+        "AtendimentoParticipante",
+        back_populates="atendimento",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
     def __repr__(self) -> str:
         return (
             f"<Atendimento id={self.id} emp={self.empresa_id} cli={self.cliente_id} "
-            f"dep={self.departamento_id} inst={self.instancia_id} status={self.status}>"
+            f"dep={self.departamento_id} fila={self.fila_id} inst={self.instancia_id} "
+            f"status={self.status} op={self.operador_id}>"
+        )
+
+
+# =========================
+# Participantes do atendimento
+# =========================
+class AtendimentoParticipante(Base):
+    __tablename__ = "atendimento_participantes"
+    __table_args__ = (
+        UniqueConstraint("empresa_id", "atendimento_id", "colaborador_id", name="uq_atd_participante"),
+        Index("ix_atd_participante_atendimento", "empresa_id", "atendimento_id"),
+        Index("ix_atd_participante_colaborador", "empresa_id", "colaborador_id"),
+        Index("ix_atd_participante_ativo", "empresa_id", "is_ativo"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    empresa_id = Column(
+        Integer,
+        ForeignKey("empresas.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    atendimento_id = Column(
+        Integer,
+        ForeignKey("atendimentos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    colaborador_id = Column(
+        Integer,
+        ForeignKey("colaboradores.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    role = Column(String(20), nullable=False, server_default="participant")
+    is_ativo = Column(Boolean, nullable=False, server_default="true")
+
+    entrou_em = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    saiu_em = Column(TIMESTAMP(timezone=True), nullable=True)
+    ultimo_envio_em = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    criado_em = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    atualizado_em = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    empresa = relationship("Empresa", back_populates="atendimento_participantes")
+    atendimento = relationship("Atendimento", back_populates="participantes")
+    colaborador = relationship("Colaborador", back_populates="participacoes_atendimento")
+
+    def __repr__(self) -> str:
+        return (
+            f"<AtendimentoParticipante id={self.id} emp={self.empresa_id} "
+            f"atd={self.atendimento_id} colab={self.colaborador_id} "
+            f"role={self.role} ativo={self.is_ativo}>"
         )
 
 
@@ -998,7 +1296,7 @@ class DisparoDestinatario(Base):
 
 
 # =========================
-# ChatbotConfig (por instancia_id)
+# ChatbotConfig
 # =========================
 class ChatbotConfig(Base):
     __tablename__ = "chatbot_configs"
@@ -1064,7 +1362,7 @@ class ChatbotConfig(Base):
 
 
 # =======================================================
-# Chat Interno — MODELO (1 tabela + estado de leitura)
+# Chat Interno
 # =======================================================
 class ChatKind(str, enum.Enum):
     HEAD   = "head"
@@ -1264,3 +1562,47 @@ class EmailAttachment(Base):
 
     empresa = relationship("Empresa", back_populates="email_attachments")
     message = relationship("EmailMessage", back_populates="attachments")
+
+
+# =========================
+# Billing / Asaas - Eventos de Webhook
+# =========================
+class BillingAsaasEvent(Base):
+    __tablename__ = "billing_asaas_events"
+    __table_args__ = (
+        UniqueConstraint("event_id", name="uq_billing_asaas_event_id"),
+        Index("ix_billing_asaas_events_empresa", "empresa_id"),
+        Index("ix_billing_asaas_events_payment", "payment_id"),
+        Index("ix_billing_asaas_events_subscription", "subscription_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    event_id = Column(String(180), nullable=False)
+
+    empresa_id = Column(
+        Integer,
+        ForeignKey("empresas.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    event = Column(String(80), nullable=True)
+    payment_id = Column(String(120), nullable=True)
+    subscription_id = Column(String(120), nullable=True)
+
+    payload = Column(JSONB, nullable=False)
+
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    empresa = relationship("Empresa", back_populates="billing_asaas_events")
+
+    def __repr__(self) -> str:
+        return (
+            f"<BillingAsaasEvent id={self.id} emp={self.empresa_id} "
+            f"event={self.event!r} payment={self.payment_id!r}>"
+        )

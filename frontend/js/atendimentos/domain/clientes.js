@@ -1,18 +1,16 @@
 // /frontend/js/atendimentos/domain/clientes.js
 // =====================================================================
 // LISTA DE CONVERSAS (render, dedupe, preview, paginação)
-// ✅ Falhou imagem => placeholder (SEM refresh)
-// ✅ Daily refresh 1x/dia: só sem foto, top 50, conc 2, localStorage
-// ✅ FIX GRUPOS: detecta JID @g.us, preserva jid/remoteJid, is_group, normaliza tel
-// ✅ FIX CHATKEY: conversation_key canônica = c:<cliente_id>:<instancia_id> / g:<grupo_id>:<instancia_id>
-// ✅ Dedupe seguro: conversa é identificada por conversation_key
-// ✅ Dedupe legado: fallback por entity_id + instância + kind quando vier item cru
-// ✅ Click/merge: mantém instância + dados canônicos (jid/tel_norm)
-// ✅ FIX BIGINT/GRUPOS: IDs string-first (NUNCA Number() no id da conversa)
-// ✅ ALINHADO COM store.js v2 (convsByInst + clientesCache legado)
-// ✅ FIX HORÁRIO: nunca inventa “agora” quando ts vier vazio/inválido
-// ✅ FIX STALE: primeira página é fonte da verdade (não reanexa conversas velhas do cache)
-// ✅ FIX PREVIEW: só chama syncPreviewFromCache quando JÁ existe histórico em cache
+// ✅ Reduz requests repetidas da lista
+// ✅ Evita render duplicado quando HTML não mudou
+// ✅ Evita prefetch pesado de históricos por padrão
+// ✅ Evita repetir request de avatar que já deu erro
+// ✅ Mantém comportamento tipo WhatsApp: mensagem nova continua aparecendo via WS/eventos
+// ✅ CHATKEY: conversation_key canônica = c:<cliente_id>:<instancia_id> / g:<grupo_id>:<instancia_id>
+// ✅ IDs string-first: NUNCA Number() no id da conversa
+// ✅ NOME OFICIAL: nome > nome_whatsapp > push_name > telefone
+// ✅ FIX bolinha verde: entende novas/unread/unread_count e cria badge se não existir
+// ✅ Avatar sem foto: cor fixa por conversa baseada no conversation_key
 // =====================================================================
 
 import { EMPRESA_ID } from '../core/env.js';
@@ -30,38 +28,139 @@ import { escapeHtml, formatarNumeroBR, badge } from '../core/format.js';
 import { primeWith, getHist } from './hist-cache.js';
 
 /* =========================================================
-   ID helpers (string-first)
+   Ajustes anti-loop / anti-request
+   ========================================================= */
+const LIST_CACHE_TTL_MS = 8_000;
+const LIST_FORCE_MIN_INTERVAL_MS = 2_500;
+const LIST_DEBOUNCE_MS = 700;
+const LIST_LOCAL_CACHE_VERSION = 'conversas:v3:nome-oficial-badge-fix-avatar-color';
+
+let __loadingConversasPromise = null;
+let __lastConversasFetchAt = 0;
+let __lastConversasKey = '';
+let __scheduledLoadTimer = null;
+let __loadingMoreConversas = false;
+
+if (typeof window !== 'undefined') {
+  if (window.PREFETCH_HISTORIES === undefined) {
+    window.PREFETCH_HISTORIES = false;
+  }
+}
+
+/* =========================================================
+   ID helpers
    ========================================================= */
 function idKey(v) {
   const s = String(v ?? '').trim();
   if (!s || s === 'null' || s === 'undefined' || s === 'NaN') return null;
   return s;
 }
+
 function idEq(a, b) {
   const A = idKey(a);
   const B = idKey(b);
   if (!A || !B) return false;
   return A === B;
 }
-function idToBig(v) {
-  const s = idKey(v);
-  if (!s) return 0n;
-  if (/^\d+$/.test(s)) {
-    try { return BigInt(s); } catch { return 0n; }
-  }
-  return 0n;
-}
+
 function normStr(v) {
   return String(v ?? '').trim();
 }
+
 function instKey(v) {
   const s = normStr(v);
   if (!s) return null;
   if (['null', 'undefined', 'nan', '0', 'all', '*', '-'].includes(s.toLowerCase())) return null;
   return s;
 }
+
 function onlyDigits(s) {
   return String(s ?? '').replace(/\D+/g, '');
+}
+
+function statusNorm(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+  return s || null;
+}
+
+function unreadFromAny(src) {
+  const raw =
+    src?.novas ??
+    src?.unread_count ??
+    src?.unread ??
+    src?.nao_lidas ??
+    src?.naoLidas ??
+    src?.qtd_nao_lidas ??
+    src?.qtdNaoLidas ??
+    0;
+
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/* =========================================================
+   Nome oficial
+   ========================================================= */
+function cleanName(v) {
+  const s = String(v ?? '').trim();
+  if (!s) return '';
+
+  const low = s.toLowerCase();
+  if (['null', 'undefined', 'nan', 'none'].includes(low)) return '';
+
+  return s;
+}
+
+function isPlaceholderName(v) {
+  const s = cleanName(v).toLowerCase();
+  if (!s) return true;
+
+  return [
+    'cliente',
+    'contato',
+    'sem nome',
+    'desconhecido',
+  ].includes(s);
+}
+
+function nomeOficialCliente(c) {
+  const nome = cleanName(c?.nome);
+  const nomeWhats = cleanName(c?.nome_whatsapp);
+  const push = cleanName(c?.push_name || c?.pushName);
+
+  if (nome && !isPlaceholderName(nome)) return nome;
+  if (nomeWhats && !isPlaceholderName(nomeWhats)) return nomeWhats;
+  if (push && !isPlaceholderName(push)) return push;
+
+  const tel = c?.telefone || c?.telefone_norm || c?.number || c?.numero || '';
+  const fmt = formatarNumeroBR(tel);
+  return fmt || nome || nomeWhats || push || 'Cliente';
+}
+
+function aplicarNomeOficialNoMerge(novo, antigo) {
+  if (!novo || !antigo) return novo;
+
+  const antigoNome = cleanName(antigo.nome);
+  const antigoNomeWhats = cleanName(antigo.nome_whatsapp);
+  const antigoPush = cleanName(antigo.push_name || antigo.pushName);
+
+  if (antigoNome && !isPlaceholderName(antigoNome)) {
+    novo.nome = antigoNome;
+  } else if (!cleanName(novo.nome) && antigoNome) {
+    novo.nome = antigoNome;
+  }
+
+  if (antigoNomeWhats && !isPlaceholderName(antigoNomeWhats)) {
+    novo.nome_whatsapp = antigoNomeWhats;
+  } else if (!cleanName(novo.nome_whatsapp) && antigoNomeWhats) {
+    novo.nome_whatsapp = antigoNomeWhats;
+  }
+
+  if (!cleanName(novo.push_name) && antigoPush) {
+    novo.push_name = antigoPush;
+  }
+
+  return novo;
 }
 
 /* =========================================================
@@ -70,8 +169,10 @@ function onlyDigits(s) {
 function parseConversationKey(raw) {
   const s = idKey(raw);
   if (!s) return null;
+
   const m = s.match(/^([cg]):(\d+):([^:]+)$/i);
   if (!m) return null;
+
   return {
     key: `${m[1].toLowerCase()}:${m[2]}:${m[3]}`,
     kind: m[1].toLowerCase(),
@@ -84,6 +185,7 @@ function buildConversationKey(kind, entityId, instanciaId) {
   const k = String(kind || '').toLowerCase() === 'g' ? 'g' : 'c';
   const eid = idKey(entityId);
   const iid = instKey(instanciaId);
+
   if (!eid) return null;
   return `${k}:${eid}:${iid ?? '0'}`;
 }
@@ -103,18 +205,24 @@ function convRefOf(itemOrId, row = null) {
     if (parsed) return parsed;
 
     const kind = getConversationKind(raw, item) || (Boolean(item?.is_group) ? 'g' : 'c');
+
     const entityId =
       getConversationEntityId(raw, item) ??
       idKey(item?.entity_id) ??
       idKey(kind === 'g' ? item?.grupo_id : item?.cliente_id) ??
       null;
+
     const instId =
       instKey(item?.instancia_id) ??
       instKey(item?.instancia) ??
       instKey(item?.instance_name) ??
       null;
 
-    const key = getConversationKey(raw, item, instId) || buildConversationKey(kind, entityId, instId) || idKey(raw);
+    const key =
+      getConversationKey(raw, item, instId) ||
+      buildConversationKey(kind, entityId, instId) ||
+      idKey(raw);
+
     const reparsed = parseConversationKey(key);
 
     return reparsed || {
@@ -147,9 +255,11 @@ function convRefOf(itemOrId, row = null) {
 function convKeyOf(itemOrId, row = null) {
   return convRefOf(itemOrId, row).key || null;
 }
+
 function convEntityIdOf(itemOrId, row = null) {
   return convRefOf(itemOrId, row).entityId || null;
 }
+
 function convKindOf(itemOrId, row = null) {
   return convRefOf(itemOrId, row).kind || 'c';
 }
@@ -157,10 +267,12 @@ function convKindOf(itemOrId, row = null) {
 function sameConversation(a, b) {
   const A = convKeyOf(a, typeof a === 'object' ? a : null);
   const B = convKeyOf(b, typeof b === 'object' ? b : null);
+
   if (A && B) return A === B;
 
   const ra = convRefOf(a, typeof a === 'object' ? a : null);
   const rb = convRefOf(b, typeof b === 'object' ? b : null);
+
   return !!ra.entityId && !!rb.entityId &&
     ra.entityId === rb.entityId &&
     (ra.kind || 'c') === (rb.kind || 'c') &&
@@ -168,16 +280,26 @@ function sameConversation(a, b) {
 }
 
 /* =========================================================
-   Toggle global: prefetch leve de mensagens (ligado por padrão)
+   Avatar color fixo por conversa
    ========================================================= */
-if (typeof window !== 'undefined') {
-  if (window.PREFETCH_HISTORIES === undefined) {
-    window.PREFETCH_HISTORIES = true;
+function avatarColorClassForConversation(seed) {
+  const s = String(seed || '').trim();
+
+  if (!s) return 'avatar-color-1';
+
+  let hash = 0;
+
+  for (let i = 0; i < s.length; i++) {
+    hash = ((hash << 5) - hash) + s.charCodeAt(i);
+    hash |= 0;
   }
+
+  const n = Math.abs(hash) % 6;
+  return `avatar-color-${n + 1}`;
 }
 
 /* =========================================================
-   Compat refs (legado)
+   Compat refs
    ========================================================= */
 function syncLegacyRefs() {
   try { window.clientesCache = Array.isArray(state.clientesCache) ? state.clientesCache : []; } catch {}
@@ -211,13 +333,36 @@ function syncActiveConvs(list, nextCursor = null) {
   state.clientesCache = items;
   state.nextCursor = nextCursor ?? null;
 
+  try { window.__zcListaConversas = items.slice(); } catch {}
+  try { window.__zcListaConversasNextCursor = nextCursor ?? null; } catch {}
+
   syncLegacyRefs();
   persist();
 }
 
 /* =========================================================
-   AVATAR: handlers globais (placeholder-only, sem refresh onerror)
+   Avatar
    ========================================================= */
+const __brokenAvatarUrls = new Set();
+
+function cleanAvatarUrl(value) {
+  const s = String(value || '').trim();
+  if (!s) return '';
+  if (/^(null|undefined|about:blank)$/i.test(s)) return '';
+  return s;
+}
+
+function markBrokenAvatar(url) {
+  const s = cleanAvatarUrl(url);
+  if (s) __brokenAvatarUrls.add(s);
+}
+
+function isBrokenAvatarUrl(url) {
+  const s = cleanAvatarUrl(url);
+  if (!s) return false;
+  return __brokenAvatarUrls.has(s);
+}
+
 function _ensureAvatarPlaceholder(span) {
   try {
     if (!span) return;
@@ -230,9 +375,15 @@ if (typeof window !== 'undefined') {
   window.handleListAvatarError = function (imgEl) {
     try {
       if (!imgEl) return;
+
+      const src = imgEl.getAttribute('src') || '';
+      markBrokenAvatar(src);
+
       try { imgEl.onerror = null; } catch {}
+
       const span = imgEl.closest?.('.avatar') || imgEl.parentElement;
       try { imgEl.remove(); } catch {}
+
       _ensureAvatarPlaceholder(span);
     } catch {}
   };
@@ -240,19 +391,27 @@ if (typeof window !== 'undefined') {
   window.handleAvatarError = function (imgEl) {
     try {
       if (!imgEl) return;
+
+      const src = imgEl.getAttribute('src') || '';
+      markBrokenAvatar(src);
+
       try { imgEl.onerror = null; } catch {}
+
       const span = imgEl.closest?.('.avatar') || imgEl.parentElement;
       try { imgEl.remove(); } catch {}
+
       if (span) {
         span.classList.add('avatar-default');
         span.innerHTML = '<i class="fa fa-user-circle text-2xl text-gray-400"></i>';
       }
     } catch {}
   };
+
+  window.zcAvatarBroken = window.zcAvatarBroken || isBrokenAvatarUrl;
 }
 
 /* =========================================================
-   Daily refresh (1x/dia) - só quem tá sem foto, top 50, conc 2
+   Daily refresh avatar
    ========================================================= */
 let __dailyKickScheduled = false;
 let __dailyRunning = false;
@@ -264,9 +423,11 @@ function _ymdLocal() {
   const dd = String(d.getDate()).padStart(2, '0');
   return `${yyyy}${mm}${dd}`;
 }
+
 function _dailyKey() {
   return `av_daily:v1:e${Number(EMPRESA_ID || 0)}:d${_ymdLocal()}`;
 }
+
 function _shouldRunDaily() {
   try {
     if (window.AVATAR_DAILY_REFRESH === false) return false;
@@ -276,6 +437,7 @@ function _shouldRunDaily() {
     return true;
   }
 }
+
 function _markDaily() {
   try { localStorage.setItem(_dailyKey(), String(Date.now())); } catch {}
 }
@@ -288,16 +450,19 @@ async function runDailyAvatarRefresh() {
 
     __dailyRunning = true;
 
-    const limit = Math.max(1, Math.min(200, Number(window.AVATAR_DAILY_LIMIT || 50)));
-    const conc = Math.max(1, Math.min(6, Number(window.AVATAR_DAILY_CONCURRENCY || 2)));
+    const limit = Math.max(1, Math.min(80, Number(window.AVATAR_DAILY_LIMIT || 30)));
+    const conc = Math.max(1, Math.min(3, Number(window.AVATAR_DAILY_CONCURRENCY || 1)));
 
     const base = Array.isArray(state.clientesCache) ? state.clientesCache.slice() : [];
-    if (!base.length) { _markDaily(); return; }
+    if (!base.length) {
+      _markDaily();
+      return;
+    }
 
     const topRecent = ordenarConversasDesc(base).slice(0, limit);
     const targets = topRecent.filter((c) => {
       if (c?.avatar_url) return false;
-      if (convKindOf(c) !== 'c') return false; // só contato, grupo não usa refresh de profile igual
+      if (convKindOf(c) !== 'c') return false;
       return true;
     });
 
@@ -335,7 +500,10 @@ async function runDailyAvatarRefresh() {
 function kickDailyAvatarRefreshSoon() {
   if (__dailyKickScheduled) return;
   __dailyKickScheduled = true;
-  setTimeout(() => { try { runDailyAvatarRefresh(); } catch {} }, 350);
+
+  setTimeout(() => {
+    try { runDailyAvatarRefresh(); } catch {}
+  }, 1200);
 }
 
 if (typeof window !== 'undefined') {
@@ -349,10 +517,12 @@ function isGroupJid(s) {
   const v = String(s || '');
   return /@g\.us$/i.test(v);
 }
+
 function looksLikeNumericGroupId(digits) {
   const d = String(digits || '');
   return d.startsWith('120') && d.length >= 15;
 }
+
 function normalizeJidOrPhone(raw) {
   const s = String(raw ?? '').trim();
   if (!s) return { is_group: false, jid: '', tel_norm: '' };
@@ -370,16 +540,21 @@ function normalizeJidOrPhone(raw) {
 
   const sem55 = (d.startsWith('55') && d.length > 11) ? d.slice(2) : d;
   const tel_norm = (sem55.length === 10 || sem55.length === 11) ? sem55 : '';
+
   return { is_group: false, jid: '', tel_norm };
 }
+
 function normalizaTelefoneBR(s) {
   const raw = String(s ?? '');
   if (raw.includes('@')) return '';
+
   const d = raw.replace(/\D/g, '');
   if (looksLikeNumericGroupId(d)) return '';
+
   const sem55 = (d.startsWith('55') && d.length > 11) ? d.slice(2) : d;
   return (sem55.length === 10 || sem55.length === 11) ? sem55 : '';
 }
+
 function normalizeName(s) {
   return String(s ?? '')
     .normalize('NFD')
@@ -387,8 +562,15 @@ function normalizeName(s) {
     .trim()
     .toLowerCase();
 }
+
 function temValor(v) {
   return v !== undefined && v !== null;
+}
+
+function boolish(v) {
+  if (typeof v === 'boolean') return v;
+  const s = String(v ?? '').trim().toLowerCase();
+  return ['1', 'true', 'sim', 'yes', 'on'].includes(s);
 }
 
 function scoreRecencia(c) {
@@ -401,6 +583,7 @@ function scoreRecencia(c) {
 
 function ordenarConversasDesc(arr) {
   const A = Array.isArray(arr) ? arr.slice() : [];
+
   return A.sort((a, b) => {
     const pinCmp = Number(b?.pinned ? 1 : 0) - Number(a?.pinned ? 1 : 0);
     if (pinCmp !== 0) return pinCmp;
@@ -454,15 +637,11 @@ function syncPreviewIfCached(convOrId) {
 
 /* =========================================================
    Dedupe
-   - prioridade total: conversation_key
-   - fallback: kind + entity_id + instância
-   - fallback legado apenas quando não houver entity_id
    ========================================================= */
 function dedupeConversas(arr) {
   if (!Array.isArray(arr)) return [];
 
   const base = ordenarConversasDesc(arr.map(normalizeCliente));
-
   const exact = new Map();
 
   for (const c of base) {
@@ -477,6 +656,7 @@ function dedupeConversas(arr) {
     if (!dedupeKey) continue;
 
     const cur = exact.get(dedupeKey);
+
     if (!cur || scoreRecencia(c) > scoreRecencia(cur)) {
       exact.set(dedupeKey, mergeConversaCanonica(c, cur));
     } else if (cur) {
@@ -485,18 +665,21 @@ function dedupeConversas(arr) {
   }
 
   const noEntity = [];
+
   for (const c of exact.values()) {
     const ref = convRefOf(c);
     if (!ref.entityId) noEntity.push(c);
   }
 
   const already = new Map();
+
   for (const c of exact.values()) {
     const ref = convRefOf(c);
     if (ref.entityId) already.set(convKeyOf(c), c);
   }
 
   const legacyMap = new Map();
+
   for (const c of noEntity) {
     const ref = convRefOf(c);
     const inst = ref.instId || instKey(c.instancia_id ?? c.instancia) || 'all';
@@ -512,26 +695,34 @@ function dedupeConversas(arr) {
 
       const key = `${inst}:__group__:${gid}`;
       const cur = legacyMap.get(key);
+
       if (!cur || scoreRecencia(c) > scoreRecencia(cur)) legacyMap.set(key, mergeConversaCanonica(c, cur));
       else if (cur) cur.pinned = Boolean(cur.pinned || c.pinned);
+
       continue;
     }
 
     const telNorm = normalizaTelefoneBR(c.telefone);
+
     if (telNorm) {
       const key = `${inst}:__fone__:${telNorm}`;
       const cur = legacyMap.get(key);
+
       if (!cur || scoreRecencia(c) > scoreRecencia(cur)) legacyMap.set(key, mergeConversaCanonica(c, cur));
       else if (cur) cur.pinned = Boolean(cur.pinned || c.pinned);
+
       continue;
     }
 
-    const nomeNorm = normalizeName(c.nome_whatsapp || c.nome || c.push_name);
+    const nomeNorm = normalizeName(c.nome || c.nome_whatsapp || c.push_name);
+
     if (nomeNorm) {
       const key = `${inst}:__nome__:${nomeNorm}`;
       const cur = legacyMap.get(key);
+
       if (!cur || scoreRecencia(c) > scoreRecencia(cur)) legacyMap.set(key, mergeConversaCanonica(c, cur));
       else if (cur) cur.pinned = Boolean(cur.pinned || c.pinned);
+
       continue;
     }
 
@@ -596,19 +787,35 @@ export function normalizeCliente(c) {
     '';
 
   const fotoRaw =
-    c.avatar_url || c.foto_url || c.foto || c.avatar || c.profile_pic_url || '';
-  const fotoStr = String(fotoRaw || '').trim();
-  const fotoOk = fotoStr && !/^(null|undefined|about:blank)$/i.test(fotoStr);
-  const foto = fotoOk ? fotoStr : '';
+    c.avatar_url ||
+    c.foto_url ||
+    c.foto ||
+    c.avatar ||
+    c.profile_pic_url ||
+    '';
+
+  const fotoStr = cleanAvatarUrl(fotoRaw);
+  const foto = fotoStr && !isBrokenAvatarUrl(fotoStr) ? fotoStr : '';
 
   const remote =
-    c.remoteJid ?? c.remote_jid ?? c.jid ?? c.chat_jid ?? c.key_remoteJid ??
-    c.telefone ?? c.number ?? c.wuid ?? c.numero ?? null;
+    c.remoteJid ??
+    c.remote_jid ??
+    c.jid ??
+    c.chat_jid ??
+    c.key_remoteJid ??
+    c.telefone ??
+    c.number ??
+    c.wuid ??
+    c.numero ??
+    null;
 
   const parsed = normalizeJidOrPhone(remote);
 
   const hintedGroup =
-    Boolean(c.is_group) || Boolean(c.grupo) || Boolean(c.isGroup) || kind === 'g';
+    Boolean(c.is_group) ||
+    Boolean(c.grupo) ||
+    Boolean(c.isGroup) ||
+    kind === 'g';
 
   let jid = parsed.jid || (isGroupJid(remote) ? String(remote) : '');
 
@@ -630,10 +837,31 @@ export function normalizeCliente(c) {
     ? (jid || String(remote || ''))
     : telRaw;
 
+  const unreadCount = unreadFromAny(c);
+
+  const statusValue = statusNorm(c.status ?? c.statusatendimento ?? c.status_atendimento ?? null);
+
+  const operadorId = idKey(c.operador_id ?? c.owner_id ?? c.responsavel_id ?? c.assigned_to ?? null);
+  const departamentoId = idKey(c.departamento_id ?? c.depto_id ?? c.setor_id ?? null);
+  const operadorNome = c.operador_nome ?? c.owner_name ?? c.responsavel_nome ?? c.assigned_name ?? null;
+
+  const participantesCount = Number(c.participantes_count ?? c.participants_count ?? 0) || 0;
+
+  const minhaParticipacao = boolish(
+    c.minha_participacao ??
+    c.me_participating ??
+    c.meu_acesso ??
+    c.participando ??
+    false
+  );
+
+  const nomeOfficial = cleanName(c.nome);
+  const nomeWhats = cleanName(c.nome_whatsapp);
+  const pushName = cleanName(c.push_name || c.pushName);
+
   return {
     ...c,
 
-    // identidade canônica
     id: conversation_key ?? idKey(c.id) ?? null,
     conversation_key,
     conversation_id: conversation_key,
@@ -645,9 +873,9 @@ export function normalizeCliente(c) {
     cliente_id: (is_group ? idKey(c.cliente_id) : (entityId ?? idKey(c.cliente_id))) ?? null,
     grupo_id: (is_group ? (entityId ?? idKey(c.grupo_id) ?? idKey(c.group_id)) : (idKey(c.grupo_id) ?? idKey(c.group_id))) ?? null,
 
-    nome_whatsapp: c.nome_whatsapp ?? null,
-    nome: c.nome ?? null,
-    push_name: c.push_name ?? null,
+    nome_whatsapp: nomeWhats || null,
+    nome: nomeOfficial || null,
+    push_name: pushName || null,
 
     telefone: telForUi,
     telefone_norm: tel_norm,
@@ -660,10 +888,17 @@ export function normalizeCliente(c) {
 
     ultima_msg_id: c.ultima_msg_id ?? c.last_msg_id ?? null,
     ultima_mensagem: preview,
+    preview,
+    last_message: preview,
+    last_msg: preview,
     hora: rawHora,
     last_ts: c.last_ts ?? rawHora ?? null,
 
-    novas: Number(c.novas ?? c.nao_lidas ?? c.unread ?? 0),
+    novas: unreadCount,
+    unread: unreadCount,
+    unread_count: unreadCount,
+    nao_lidas: unreadCount,
+
     last_tipo: c.ultima_tipo ?? c.last_tipo ?? c.tipo ?? null,
     last_ack: c.ultima_ack ?? c.last_ack ?? c.ack ?? null,
 
@@ -673,20 +908,39 @@ export function normalizeCliente(c) {
     pinned: Boolean(c.pinned || c.fixado || c.pin || false),
 
     instance_name: c.instance_name ?? c.instancia_nome ?? c.inst_name ?? inst ?? null,
-    status: c.status ?? c.statusatendimento ?? null,
-    statusatendimento: c.statusatendimento ?? c.status ?? null,
+
+    status: statusValue,
+    statusatendimento: statusValue,
+
+    operador_id: operadorId,
+    operador_nome: operadorNome,
+
+    departamento_id: departamentoId,
+
+    participantes_count: participantesCount,
+    minha_participacao: minhaParticipacao,
+
+    is_new: statusValue === 'novo',
+    is_waiting: statusValue === 'aguardando',
+    is_in_service: statusValue === 'em_atendimento',
+    is_paused: statusValue === 'pausado',
+    is_resolved: statusValue === 'resolvido',
+    is_transferred: statusValue === 'transferido',
+    is_accepted: !!operadorId,
   };
 }
 
 /* =========================================================
-   Merge canônico SOMENTE da mesma conversa
+   Merge canônico
    ========================================================= */
 function mergeConversaCanonica(novo, antigo) {
-  const n = normalizeCliente(novo || {});
+  let n = normalizeCliente(novo || {});
   const a = antigo ? normalizeCliente(antigo) : null;
-  if (!a) return n;
 
+  if (!a) return n;
   if (!sameConversation(n, a)) return n;
+
+  n = aplicarNomeOficialNoMerge(n, a);
 
   if (!n.jid && a.jid) n.jid = a.jid;
   if (!n.remoteJid && a.remoteJid) n.remoteJid = a.remoteJid;
@@ -709,6 +963,7 @@ function mergeConversaCanonica(novo, antigo) {
       n.telefone ||
       a.telefone ||
       '';
+
     if (keep) n.telefone = keep;
     n.telefone_norm = '';
   } else {
@@ -716,28 +971,48 @@ function mergeConversaCanonica(novo, antigo) {
     if (!n.telefone && a.telefone) n.telefone = a.telefone;
   }
 
-  if (!n.avatar_url && a.avatar_url) n.avatar_url = a.avatar_url;
-  if (!n.nome && a.nome) n.nome = a.nome;
-  if (!n.nome_whatsapp && a.nome_whatsapp) n.nome_whatsapp = a.nome_whatsapp;
-  if (!n.push_name && a.push_name) n.push_name = a.push_name;
+  if (!n.avatar_url && a.avatar_url && !isBrokenAvatarUrl(a.avatar_url)) n.avatar_url = a.avatar_url;
 
   const oldTs = tsToMillis(a?.hora || a?.last_ts);
   const newTs = tsToMillis(n.hora || n.last_ts);
 
   if (a && oldTs && newTs && oldTs > newTs) {
     if (a.ultima_mensagem && String(a.ultima_mensagem).trim()) n.ultima_mensagem = a.ultima_mensagem;
+    if (a.preview && String(a.preview).trim()) n.preview = a.preview;
+    if (a.last_message && String(a.last_message).trim()) n.last_message = a.last_message;
+    if (a.last_msg && String(a.last_msg).trim()) n.last_msg = a.last_msg;
+
     if (a.last_tipo) n.last_tipo = a.last_tipo;
+
     if (a.last_tipo === 'saida' && temValor(a.last_ack)) {
       n.last_ack = Math.max(Number(n.last_ack || 0), Number(a.last_ack || 0));
     }
-    if (temValor(a.novas) && (Number(n.novas) || 0) === 0) n.novas = Number(a.novas) || 0;
+
+    if (temValor(a.novas) && (Number(n.novas) || 0) === 0) {
+      const u = unreadFromAny(a);
+      n.novas = u;
+      n.unread = u;
+      n.unread_count = u;
+      n.nao_lidas = u;
+    }
+
     if (temValor(a.hora)) n.hora = a.hora;
     if (temValor(a.last_ts) && !temValor(n.last_ts)) n.last_ts = a.last_ts;
   } else {
     if ((!n.ultima_mensagem || !String(n.ultima_mensagem).trim()) && a?.ultima_mensagem) {
       n.ultima_mensagem = a.ultima_mensagem;
+      n.preview = a.ultima_mensagem;
+      n.last_message = a.ultima_mensagem;
+      n.last_msg = a.ultima_mensagem;
     }
-    if (temValor(a?.novas) && (Number(n.novas) || 0) === 0) n.novas = Number(a.novas) || 0;
+
+    if (temValor(a?.novas) && (Number(n.novas) || 0) === 0) {
+      const u = unreadFromAny(a);
+      n.novas = u;
+      n.unread = u;
+      n.unread_count = u;
+      n.nao_lidas = u;
+    }
   }
 
   if (temValor(a?.last_ack)) {
@@ -746,20 +1021,46 @@ function mergeConversaCanonica(novo, antigo) {
   }
 
   n.pinned = Boolean(n.pinned || a?.pinned);
+
   if (!n.instance_name && a?.instance_name) n.instance_name = a.instance_name;
   if (!n.instancia_id && a?.instancia_id) n.instancia_id = a.instancia_id;
   if (!n.instancia && a?.instancia) n.instancia = a.instancia;
+
   if (!n.status && a?.status) n.status = a.status;
   if (!n.statusatendimento && a?.statusatendimento) n.statusatendimento = a.statusatendimento;
+
+  if (!n.operador_id && a?.operador_id) n.operador_id = a.operador_id;
+  if (!n.operador_nome && a?.operador_nome) n.operador_nome = a.operador_nome;
+  if (!n.departamento_id && a?.departamento_id) n.departamento_id = a.departamento_id;
+
+  if (!temValor(n.participantes_count) && temValor(a?.participantes_count)) {
+    n.participantes_count = a.participantes_count;
+  }
+
+  if (!n.minha_participacao && a?.minha_participacao) {
+    n.minha_participacao = a.minha_participacao;
+  }
+
   if (!n.entity_id && a?.entity_id) n.entity_id = a.entity_id;
   if (!n.conversation_key && a?.conversation_key) n.conversation_key = a.conversation_key;
   if (!n.conversation_id && a?.conversation_id) n.conversation_id = a.conversation_id;
+
+  n.status = statusNorm(n.status ?? n.statusatendimento);
+  n.statusatendimento = n.status;
+
+  n.is_new = n.status === 'novo';
+  n.is_waiting = n.status === 'aguardando';
+  n.is_in_service = n.status === 'em_atendimento';
+  n.is_paused = n.status === 'pausado';
+  n.is_resolved = n.status === 'resolvido';
+  n.is_transferred = n.status === 'transferido';
+  n.is_accepted = !!n.operador_id;
 
   return n;
 }
 
 /* =========================================================
-   PRIME: baixar últimas 30 msgs por conversa (prefetch leve)
+   Prefetch opcional
    ========================================================= */
 function buildMsgsUrl(convKeyOrItem, instanciaId, extra = {}) {
   const entityId = typeof convKeyOrItem === 'object'
@@ -779,6 +1080,7 @@ function buildMsgsUrl(convKeyOrItem, instanciaId, extra = {}) {
   if (instFinal != null && instFinal !== '' && instFinal !== 'all') {
     qs.set('instancia_id', String(instFinal));
   }
+
   if (extra.since_ts) qs.set('since_ts', String(extra.since_ts));
   if (extra.since_id) qs.set('since_id', String(extra.since_id));
 
@@ -791,18 +1093,21 @@ async function fetchConv30(convOrItem, instanciaId) {
 
   const r = await fetch(url, { credentials: 'include' });
   if (!r.ok) throw new Error('Falha ao carregar mensagens da conversa');
+
   const data = await r.json();
   const items = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
+
   const cursors = {
     oldest: data?.prev_cursor ?? null,
     newest: data?.next_cursor ?? null,
   };
+
   return { items, cursors };
 }
 
-const PREFETCH_LIMIT = 10;
+const PREFETCH_LIMIT = 4;
 
-async function primeHistories(convs, { concurrency = 2 } = {}) {
+async function primeHistories(convs, { concurrency = 1 } = {}) {
   if (!window.PREFETCH_HISTORIES) return;
 
   const lista = Array.isArray(convs) ? convs.slice() : [];
@@ -836,34 +1141,85 @@ async function primeHistories(convs, { concurrency = 2 } = {}) {
 }
 
 /* =========================================================
-   Carregar primeira página (20 conversas)
+   Carregar conversas
    ========================================================= */
-let _isWired = false;
-let __loadingConversas = false;
+function currentConversasLoadKey() {
+  const instQuery = (_instQuery() || '').replace(/^[?&]+/, '') || 'all';
+  return `${LIST_LOCAL_CACHE_VERSION}:${EMPRESA_ID}:${instQuery}`;
+}
 
-export async function carregarClientes({ force = false } = {}) {
-  if (__loadingConversas) return state.clientesCache || [];
-  __loadingConversas = true;
+function scheduleCarregarClientes(opts = {}, delay = LIST_DEBOUNCE_MS) {
+  clearTimeout(__scheduledLoadTimer);
 
-  try {
+  __scheduledLoadTimer = setTimeout(() => {
+    __scheduledLoadTimer = null;
+    carregarClientes(opts).catch(() => {});
+  }, Math.max(80, Number(delay) || LIST_DEBOUNCE_MS));
+}
+
+export async function carregarClientes({ force = false, reason = '' } = {}) {
+  const loadKey = currentConversasLoadKey();
+  const now = Date.now();
+  const hasCache = Array.isArray(state.clientesCache) && state.clientesCache.length > 0;
+  const sameKey = __lastConversasKey === loadKey;
+  const elapsed = now - __lastConversasFetchAt;
+
+  if (__loadingConversasPromise) {
+    return __loadingConversasPromise;
+  }
+
+  if (!force && hasCache && sameKey && elapsed < LIST_CACHE_TTL_MS) {
+    renderListaClientes(state.clientesCache);
+    return state.clientesCache;
+  }
+
+  if (force && hasCache && sameKey && elapsed < LIST_FORCE_MIN_INTERVAL_MS) {
+    scheduleCarregarClientes(
+      { force: true, reason: reason ? `debounced:${reason}` : 'debounced' },
+      LIST_FORCE_MIN_INTERVAL_MS - elapsed + 80
+    );
+
+    renderListaClientes(state.clientesCache);
+    return state.clientesCache;
+  }
+
+  __lastConversasKey = loadKey;
+  __lastConversasFetchAt = now;
+
+  __loadingConversasPromise = (async () => {
     const instQuery = (_instQuery() || '').replace(/^[?&]+/, '') || 'all';
-    const key = `conversas:v1:${EMPRESA_ID}:${instQuery}`;
+    const cacheKey = `${LIST_LOCAL_CACHE_VERSION}:${EMPRESA_ID}:${instQuery}`;
     const url = `/api/atendimento/conversas?empresa_id=${EMPRESA_ID}&limit=20${_instQuery()}`;
 
-    const forceFlag = force || (sessionStorage.getItem('convForceReload') === '1');
-    if (forceFlag) { try { sessionStorage.removeItem('convForceReload'); } catch {} }
+    const forceSession = sessionStorage.getItem('convForceReload') === '1';
+
+    if (forceSession) {
+      try { sessionStorage.removeItem('convForceReload'); } catch {}
+    }
+
+    const forceFlag = Boolean(force || forceSession);
 
     const raw = await fetchWithCache(
       url,
-      { ttlMs: forceFlag ? 0 : 30_000, key, bust: forceFlag }
+      {
+        ttlMs: forceFlag ? 0 : LIST_CACHE_TTL_MS,
+        key: cacheKey,
+        bust: forceFlag,
+      }
     );
 
-    const items = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : []);
+    const items = Array.isArray(raw)
+      ? raw
+      : (Array.isArray(raw?.items) ? raw.items : []);
+
     const next = raw?.next_cursor ?? null;
 
     let cs = items.map(normalizeCliente).filter(_matchInstancia);
 
-    const antigo = Array.isArray(state.clientesCache) ? state.clientesCache.map(normalizeCliente) : [];
+    const antigo = Array.isArray(state.clientesCache)
+      ? state.clientesCache.map(normalizeCliente)
+      : [];
+
     const antigoMap = new Map();
 
     for (const a of antigo) {
@@ -879,8 +1235,10 @@ export async function carregarClientes({ force = false } = {}) {
     let all = dedupeConversas(cs);
 
     const selKey = convKeyOf(state?.clienteSel);
+
     if (selKey && !all.some((x) => convKeyOf(x) === selKey)) {
       const sel = antigoMap.get(selKey) || state?.clienteSel || null;
+
       if (sel) {
         const normSel = normalizeCliente(sel);
         all = dedupeConversas([...all, normSel]);
@@ -888,9 +1246,7 @@ export async function carregarClientes({ force = false } = {}) {
     }
 
     syncActiveConvs(all, next);
-
     renderListaClientes(all);
-    try { window.Lista?.render(all); } catch {}
 
     try {
       (state.clientesCache || []).forEach((c) => {
@@ -899,107 +1255,163 @@ export async function carregarClientes({ force = false } = {}) {
     } catch {}
 
     if (window.PREFETCH_HISTORIES) {
-      try { await primeHistories(state.clientesCache, { concurrency: 2 }); } catch {}
+      try { await primeHistories(state.clientesCache, { concurrency: 1 }); } catch {}
     }
 
     kickDailyAvatarRefreshSoon();
+
     return all;
+  })();
+
+  try {
+    return await __loadingConversasPromise;
   } finally {
-    __loadingConversas = false;
+    __loadingConversasPromise = null;
   }
 }
 
 /* =========================================================
-   Carregar mais conversas (botão)
+   Carregar mais
    ========================================================= */
-export function wireListaInfiniteScroll() {
-  if (_isWired) return;
-  _isWired = true;
-}
+export function wireListaInfiniteScroll() {}
 
 export async function loadMoreConversas() {
+  if (__loadingMoreConversas) return;
+
   const cursor = state.nextCursor;
   if (!cursor) return;
 
-  const url = `/api/atendimento/conversas?empresa_id=${EMPRESA_ID}&limit=20&cursor_last_msg_id=${encodeURIComponent(cursor)}${_instQuery()}`;
-  const r = await fetch(url, { credentials: 'include' });
-  if (!r.ok) return;
-  const data = await r.json();
+  __loadingMoreConversas = true;
 
-  const items = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
-  const next = data?.next_cursor ?? null;
+  try {
+    const url = `/api/atendimento/conversas?empresa_id=${EMPRESA_ID}&limit=20&cursor_last_msg_id=${encodeURIComponent(cursor)}${_instQuery()}`;
+    const r = await fetch(url, { credentials: 'include' });
 
-  const mais = items.map(normalizeCliente).filter(_matchInstancia);
+    if (!r.ok) return;
 
-  const map = new Map(
-    (state.clientesCache || []).map((c) => [String(convKeyOf(c) || ''), normalizeCliente(c)])
-  );
+    const data = await r.json();
 
-  for (const it of mais) {
-    const key = String(convKeyOf(it) || '');
-    if (!key) continue;
+    const items = Array.isArray(data?.items)
+      ? data.items
+      : (Array.isArray(data) ? data : []);
 
-    const prev = map.get(key) || {};
-    const merged = mergeConversaCanonica({ ...prev, ...it }, prev);
-    merged.pinned = Boolean((prev && prev.pinned) || it.pinned);
+    const next = data?.next_cursor ?? null;
+    const mais = items.map(normalizeCliente).filter(_matchInstancia);
 
-    merged.is_group = Boolean(
-      merged.is_group ||
-      prev?.is_group ||
-      it?.is_group ||
-      convKindOf(merged) === 'g' ||
-      isGroupJid(merged.telefone) ||
-      isGroupJid(merged.jid) ||
-      isGroupJid(merged.remoteJid)
+    const map = new Map(
+      (state.clientesCache || []).map((c) => [String(convKeyOf(c) || ''), normalizeCliente(c)])
     );
 
-    if (merged.is_group) {
-      const keep =
-        merged.jid ||
-        merged.remoteJid ||
-        prev?.jid ||
-        prev?.remoteJid ||
-        it?.jid ||
-        it?.remoteJid ||
-        merged.telefone ||
-        prev?.telefone ||
-        it?.telefone ||
-        '';
-      if (keep) merged.telefone = keep;
-      merged.telefone_norm = '';
-    } else {
-      if (!merged.telefone_norm) {
-        merged.telefone_norm =
-          prev?.telefone_norm ||
-          it?.telefone_norm ||
-          normalizaTelefoneBR(merged.telefone);
+    for (const it of mais) {
+      const key = String(convKeyOf(it) || '');
+      if (!key) continue;
+
+      const prev = map.get(key) || {};
+      const merged = mergeConversaCanonica({ ...prev, ...it }, prev);
+
+      merged.pinned = Boolean((prev && prev.pinned) || it.pinned);
+
+      merged.is_group = Boolean(
+        merged.is_group ||
+        prev?.is_group ||
+        it?.is_group ||
+        convKindOf(merged) === 'g' ||
+        isGroupJid(merged.telefone) ||
+        isGroupJid(merged.jid) ||
+        isGroupJid(merged.remoteJid)
+      );
+
+      if (merged.is_group) {
+        const keep =
+          merged.jid ||
+          merged.remoteJid ||
+          prev?.jid ||
+          prev?.remoteJid ||
+          it?.jid ||
+          it?.remoteJid ||
+          merged.telefone ||
+          prev?.telefone ||
+          it?.telefone ||
+          '';
+
+        if (keep) merged.telefone = keep;
+        merged.telefone_norm = '';
+      } else {
+        if (!merged.telefone_norm) {
+          merged.telefone_norm =
+            prev?.telefone_norm ||
+            it?.telefone_norm ||
+            normalizaTelefoneBR(merged.telefone);
+        }
       }
+
+      map.set(key, normalizeCliente(merged));
     }
 
-    map.set(key, normalizeCliente(merged));
+    const arr = dedupeConversas([...map.values()]);
+    syncActiveConvs(arr, next);
+
+    renderListaClientes(arr);
+
+    try {
+      (state.clientesCache || []).forEach((c) => {
+        syncPreviewIfCached(c);
+      });
+    } catch {}
+  } finally {
+    __loadingMoreConversas = false;
   }
-
-  const arr = dedupeConversas([...map.values()]);
-  syncActiveConvs(arr, next);
-
-  renderListaClientes(arr);
-  try { window.Lista?.render(arr); } catch {}
-  try {
-    (state.clientesCache || []).forEach((c) => {
-      syncPreviewIfCached(c);
-    });
-  } catch {}
 }
 
 /* =========================================================
    Render da lista
    ========================================================= */
+function wireListaClicks(ul) {
+  if (!ul || ul.__zcListaClickBound) return;
+
+  ul.__zcListaClickBound = true;
+
+  ul.addEventListener('click', async (ev) => {
+    const loadBtn = ev.target.closest('#lista-load-more .load-more-btn');
+
+    if (loadBtn) {
+      ev.preventDefault();
+      ev.stopPropagation();
+
+      if (!state.nextCursor) return;
+
+      loadBtn.disabled = true;
+      loadBtn.textContent = 'Carregando...';
+
+      try {
+        await loadMoreConversas();
+      } finally {
+        loadBtn.disabled = false;
+        loadBtn.textContent = 'Carregar mais conversas';
+      }
+
+      return;
+    }
+
+    const item = ev.target.closest('.chat-item.cliente-item');
+    if (!item || !ul.contains(item)) return;
+
+    const id = String(item.dataset.id || '');
+    if (!id) return;
+
+    window.selecionarClienteObj?.(id);
+  });
+}
+
 export function renderListaClientes(data) {
   const arr = dedupeConversas(
     (Array.isArray(data) ? data : []).map(normalizeCliente).filter(_matchInstancia)
   );
+
   const ul = document.getElementById('lista-clientes');
   if (!ul) return;
+
+  wireListaClicks(ul);
 
   const ordenado = ordenarConversasDesc(arr);
 
@@ -1008,11 +1420,11 @@ export function renderListaClientes(data) {
     const entityId = convEntityIdOf(c) ?? '';
     const kind = convKindOf(c) || 'c';
 
-    const nome = (c.nome_whatsapp && c.nome_whatsapp.trim())
-      ? c.nome_whatsapp.trim()
-      : (c.nome && c.nome.trim() && c.nome !== 'Cliente')
-        ? c.nome.trim()
-        : (c.push_name?.trim() || formatarNumeroBR(c.telefone));
+    const avatarColorClass = avatarColorClassForConversation(
+      convKey || `${kind}:${entityId}:${c.instancia_id ?? c.instancia ?? ''}`
+    );
+
+    const nome = nomeOficialCliente(c);
 
     const serverMs = tsToMillis(c.hora || c.last_ts) || 0;
     let when = serverMs ? formatChatTime(serverMs) : '';
@@ -1022,16 +1434,29 @@ export function renderListaClientes(data) {
 
     try {
       const instCanon = (c.instancia_id ?? c.instancia ?? parseConversationKey(convKey)?.instId ?? null) || null;
+
       const arrHistKeyed = getHist(instCanon, convKey);
       const arrHistLegacy = window.cacheHistoricos?.[convKey];
+
       const arrHist = Array.isArray(arrHistKeyed) && arrHistKeyed.length
         ? arrHistKeyed
         : (Array.isArray(arrHistLegacy) ? arrHistLegacy : []);
 
       if (Array.isArray(arrHist) && arrHist.length) {
         const last = arrHist[arrHist.length - 1];
-        const histMs = Number(last?.ts || 0) || Date.parse(last?.timestamp || '') || 0;
-        const rawHistText = (last?.texto || last?.text || last?.conteudo || last?.mensagem || '').trim();
+
+        const histMs =
+          Number(last?.ts || 0) ||
+          Date.parse(last?.timestamp || '') ||
+          0;
+
+        const rawHistText = (
+          last?.texto ||
+          last?.text ||
+          last?.conteudo ||
+          last?.mensagem ||
+          ''
+        ).trim();
 
         const useHist =
           (!serverMs && histMs) ||
@@ -1050,6 +1475,7 @@ export function renderListaClientes(data) {
             const a = Array.isArray(last?.midias) ? last.midias : [];
             const mime = String(a[0]?.mimetype || a[0]?.mime || '').toLowerCase();
             const hasAny = a.length > 0;
+
             preview = hasAny
               ? (mime.includes('image') ? '[Foto]'
                 : mime.includes('video') ? '[Vídeo]'
@@ -1075,20 +1501,44 @@ export function renderListaClientes(data) {
       ? `<span class="preview-ack" data-ack="${ackVal}">${window.getAckIcon(ackVal)}</span>`
       : '';
 
-    const avatarUrl = c.avatar_url ? String(c.avatar_url).replace(/"/g, '&quot;') : '';
-    const av = avatarUrl
-      ? `<span class="avatar"><img src="${avatarUrl}" alt="" data-entity-id="${escapeHtml(String(entityId))}" referrerpolicy="no-referrer"
+    const avatarUrlRaw = c.avatar_url ? String(c.avatar_url) : '';
+    const avatarUrl = cleanAvatarUrl(avatarUrlRaw);
+
+    const av = avatarUrl && !isBrokenAvatarUrl(avatarUrl)
+      ? `<span class="avatar"><img src="${escapeHtml(avatarUrl)}" alt="" data-entity-id="${escapeHtml(String(entityId))}" referrerpolicy="no-referrer"
                 onerror="window.handleListAvatarError && window.handleListAvatarError(this)" /></span>`
       : `<span class="avatar placeholder"><i class="fa fa-user-circle"></i></span>`;
 
+    const statusValue = statusNorm(c.status || c.statusatendimento || '');
+    const safeStatusClass = statusValue ? ` status-${statusValue.replace(/[^a-z0-9_-]+/gi, '-')}` : '';
+
     const pinClass = c.pinned ? ' is-pinned' : '';
-    const isGrp = Boolean(c.is_group) || kind === 'g' || isGroupJid(c.telefone || '') || isGroupJid(c.jid || '') || isGroupJid(c.remoteJid || '');
+    const acceptedClass = c.operador_id ? ' is-accepted' : '';
+    const unreadNumber = Number(c.novas || c.unread_count || c.unread || c.nao_lidas || 0) || 0;
+    const unreadClass = unreadNumber > 0 ? ' has-unread' : '';
+    const newClass = statusValue === 'novo' ? ' is-new' : '';
+
+    const isGrp =
+      Boolean(c.is_group) ||
+      kind === 'g' ||
+      isGroupJid(c.telefone || '') ||
+      isGroupJid(c.jid || '') ||
+      isGroupJid(c.remoteJid || '');
+
     const grpAttr = isGrp ? '1' : '0';
     const jidAttr = escapeHtml(String(c.jid || c.remoteJid || (isGrp ? c.telefone : '') || ''));
     const instAttr = escapeHtml(String(c.instancia_id ?? c.instancia ?? ''));
+    const unreadAttr = String(unreadNumber);
+    const operadorIdAttr = escapeHtml(String(c.operador_id || ''));
+    const operadorNomeAttr = escapeHtml(String(c.operador_nome || ''));
+    const departamentoIdAttr = escapeHtml(String(c.departamento_id || ''));
+    const participantesCountAttr = String(Number(c.participantes_count || 0) || 0);
+    const minhaParticipacaoAttr = c.minha_participacao ? '1' : '0';
+    const acceptedAttr = c.operador_id ? '1' : '0';
+    const isNewAttr = statusValue === 'novo' ? '1' : '0';
 
     return `
-      <li class="chat-item cliente-item${pinClass}${isGrp ? ' is-group' : ''}"
+      <li class="chat-item cliente-item ${avatarColorClass}${pinClass}${isGrp ? ' is-group' : ''}${acceptedClass}${unreadClass}${newClass}${safeStatusClass}"
           id="chat-${escapeHtml(convKey)}"
           data-id="${escapeHtml(convKey)}"
           data-conversation-key="${escapeHtml(convKey)}"
@@ -1099,7 +1549,20 @@ export function renderListaClientes(data) {
           data-jid="${jidAttr}"
           data-telefone="${escapeHtml(String(c.telefone || ''))}"
           data-last-outbound="${outbound ? '1' : '0'}"
-          data-last-dir="${dirStr}">
+          data-last-dir="${dirStr}"
+          data-status="${escapeHtml(String(statusValue || ''))}"
+          data-statusatendimento="${escapeHtml(String(statusValue || ''))}"
+          data-novas="${unreadAttr}"
+          data-unread="${unreadAttr}"
+          data-pinned="${c.pinned ? 'true' : 'false'}"
+          data-fixado="${c.pinned ? 'true' : 'false'}"
+          data-is-new="${isNewAttr}"
+          data-is-accepted="${acceptedAttr}"
+          data-operador-id="${operadorIdAttr}"
+          data-operador-nome="${operadorNomeAttr}"
+          data-departamento-id="${departamentoIdAttr}"
+          data-participantes-count="${participantesCountAttr}"
+          data-minha-participacao="${minhaParticipacaoAttr}">
         ${av}
         <div class="chat-text">
           <div class="chat-name">${escapeHtml(nome || '')}</div>
@@ -1110,12 +1573,13 @@ export function renderListaClientes(data) {
         </div>
         <div class="chat-meta">
           <div class="chat-time">${when}</div>
-          ${badge(c.novas)}
+          ${badge(unreadNumber)}
         </div>
       </li>`;
   }).join('');
 
   const hasMore = Boolean(state.nextCursor);
+
   if (hasMore) {
     html += `
       <li class="chat-item load-more-item" id="lista-load-more">
@@ -1123,13 +1587,26 @@ export function renderListaClientes(data) {
       </li>`;
   }
 
+  if (ul.__zcLastRenderedHtml === html) {
+    return;
+  }
+
+  ul.__zcLastRenderedHtml = html;
   ul.innerHTML = html;
+
   document.dispatchEvent(new CustomEvent('lista:rendered'));
+
+  window.dispatchEvent(new CustomEvent('zc:lista-conversas-atualizada', {
+    detail: {
+      items: ordenado.slice(),
+      nextCursor: state.nextCursor ?? null,
+    }
+  }));
 
   (function fixBrokenAvatars() {
     ul.querySelectorAll('.avatar img').forEach((img) => {
-      const src = String(img.getAttribute('src') || '').trim();
-      const isBadSrc = !src || /^(null|undefined|about:blank)$/i.test(src);
+      const src = cleanAvatarUrl(img.getAttribute('src') || '');
+      const isBadSrc = !src || isBrokenAvatarUrl(src);
 
       const fix = () => {
         try {
@@ -1138,6 +1615,7 @@ export function renderListaClientes(data) {
       };
 
       try { img.addEventListener('error', fix, { once: true }); } catch {}
+
       if (isBadSrc) return fix();
       if (img.complete && img.naturalWidth === 0) return fix();
     });
@@ -1149,31 +1627,34 @@ export function renderListaClientes(data) {
       }
     });
   })();
-
-  ul.querySelectorAll('.chat-item.cliente-item').forEach((el) => {
-    el.addEventListener('click', () => window.selecionarClienteObj?.(String(el.dataset.id || '')));
-  });
-
-  if (hasMore) {
-    const btn = ul.querySelector('#lista-load-more .load-more-btn');
-    if (btn) {
-      btn.addEventListener('click', async () => {
-        if (!state.nextCursor) return;
-        btn.disabled = true;
-        btn.textContent = 'Carregando...';
-        try { await loadMoreConversas(); } catch {}
-      });
-    }
-  }
 }
 
 /* =========================================================
-   SHIM opcional de UI
+   Lista API
    ========================================================= */
 function _findClienteIndex(id) {
-  const wanted = convKeyOf(id);
+  const wantedRaw = idKey(id);
+  const wantedKey = convKeyOf(id);
+  const wantedRef = convRefOf(id, null);
+  const wantedEntity = wantedRef?.entityId || (/^\d+$/.test(String(wantedRaw || '')) ? String(wantedRaw) : null);
+  const wantedKind = wantedRef?.kind || null;
+  const wantedInst = wantedRef?.instId || null;
+
   const arr = Array.isArray(state.clientesCache) ? state.clientesCache : [];
-  return arr.findIndex((c) => idEq(convKeyOf(c), wanted));
+
+  return arr.findIndex((c) => {
+    const cKey = convKeyOf(c);
+    if (wantedKey && idEq(cKey, wantedKey)) return true;
+
+    const cRef = convRefOf(c, c);
+    if (!wantedEntity || !cRef?.entityId) return false;
+    if (String(cRef.entityId) !== String(wantedEntity)) return false;
+
+    if (wantedKind && cRef.kind && String(cRef.kind) !== String(wantedKind)) return false;
+    if (wantedInst && cRef.instId && String(cRef.instId) !== String(wantedInst)) return false;
+
+    return true;
+  });
 }
 
 function _reRender() {
@@ -1189,12 +1670,15 @@ function _touchHora(c, tsLike) {
   if (!ms || !Number.isFinite(ms) || ms <= 0) return false;
 
   c.hora = ms;
+  c.last_ts = c.last_ts ?? ms;
   return true;
 }
 
 function _touchHoraNow(c) {
   if (!c) return;
-  c.hora = Date.now();
+  const now = Date.now();
+  c.hora = now;
+  c.last_ts = now;
 }
 
 if (!window.Lista) {
@@ -1203,27 +1687,128 @@ if (!window.Lista) {
       renderListaClientes(Array.isArray(data) ? data : (state.clientesCache || []));
     },
 
-    updatePreview(clienteId, { texto, ts, ack, unreadDelta, instancia_id, instance_name, status } = {}) {
+    updatePreview(clienteId, payload = {}) {
+      const {
+        texto,
+        mensagem,
+        conteudo,
+        preview,
+        ultima_mensagem,
+        last_message,
+        last_msg,
+
+        ts,
+        timestamp,
+        ultima_mensagem_ts,
+        last_ts,
+        updated_at,
+
+        ack,
+        unreadDelta,
+
+        novas,
+        unread,
+        unread_count,
+        nao_lidas,
+        naoLidas,
+        qtd_nao_lidas,
+        qtdNaoLidas,
+
+        instancia_id,
+        instance_name,
+        status,
+        operador_id,
+        operador_nome,
+        departamento_id
+      } = payload || {};
+
       const idx = _findClienteIndex(clienteId);
       if (idx < 0) return;
 
       const c = state.clientesCache[idx];
 
-      if (typeof texto === 'string') c.ultima_mensagem = texto;
-      if (temValor(instancia_id)) c.instancia_id = instancia_id, c.instancia = instancia_id;
+      const textoFinal =
+        typeof texto === 'string' ? texto :
+        typeof mensagem === 'string' ? mensagem :
+        typeof conteudo === 'string' ? conteudo :
+        typeof preview === 'string' ? preview :
+        typeof ultima_mensagem === 'string' ? ultima_mensagem :
+        typeof last_message === 'string' ? last_message :
+        typeof last_msg === 'string' ? last_msg :
+        null;
+
+      if (textoFinal !== null) {
+        c.ultima_mensagem = textoFinal;
+        c.preview = textoFinal;
+        c.last_message = textoFinal;
+        c.last_msg = textoFinal;
+      }
+
+      if (temValor(instancia_id)) {
+        c.instancia_id = instancia_id;
+        c.instancia = instancia_id;
+      }
+
       if (instance_name) c.instance_name = instance_name;
-      if (status) c.status = status, c.statusatendimento = status;
+
+      if (status !== undefined) {
+        const st = statusNorm(status);
+        c.status = st;
+        c.statusatendimento = st;
+        c.is_new = st === 'novo';
+        c.is_waiting = st === 'aguardando';
+        c.is_in_service = st === 'em_atendimento';
+        c.is_paused = st === 'pausado';
+        c.is_resolved = st === 'resolvido';
+        c.is_transferred = st === 'transferido';
+      }
+
+      if (operador_id !== undefined) {
+        c.operador_id = idKey(operador_id);
+        c.is_accepted = !!c.operador_id;
+      }
+
+      if (operador_nome !== undefined) c.operador_nome = operador_nome || null;
+      if (departamento_id !== undefined) c.departamento_id = idKey(departamento_id);
 
       if (temValor(ack)) {
         c.last_ack = Number(ack);
         c.last_tipo = 'saida';
       }
 
-      if (unreadDelta) {
-        c.novas = Math.max(0, Number(c.novas || 0) + Number(unreadDelta || 0));
+      const unreadExplicit =
+        temValor(novas) ? novas :
+        temValor(unread_count) ? unread_count :
+        temValor(unread) ? unread :
+        temValor(nao_lidas) ? nao_lidas :
+        temValor(naoLidas) ? naoLidas :
+        temValor(qtd_nao_lidas) ? qtd_nao_lidas :
+        temValor(qtdNaoLidas) ? qtdNaoLidas :
+        null;
+
+      if (temValor(unreadExplicit)) {
+        const n = Math.max(0, Number(unreadExplicit) || 0);
+        c.novas = n;
+        c.unread = n;
+        c.unread_count = n;
+        c.nao_lidas = n;
+      } else if (unreadDelta) {
+        const n = Math.max(0, Number(c.novas || 0) + Number(unreadDelta || 0));
+        c.novas = n;
+        c.unread = n;
+        c.unread_count = n;
+        c.nao_lidas = n;
       }
 
-      _touchHora(c, ts);
+      _touchHora(
+        c,
+        ts ??
+        timestamp ??
+        ultima_mensagem_ts ??
+        last_ts ??
+        updated_at
+      );
+
       _reRender();
     },
 
@@ -1241,6 +1826,46 @@ if (!window.Lista) {
       _reRender();
     },
 
+    setMeta(clienteId, meta = {}) {
+      const idx = _findClienteIndex(clienteId);
+      if (idx < 0) return;
+
+      const c = state.clientesCache[idx];
+
+      if (meta.instancia_id !== undefined) {
+        c.instancia_id = instKey(meta.instancia_id);
+        c.instancia = c.instancia_id;
+      }
+
+      if (meta.instance_name !== undefined) {
+        c.instance_name = meta.instance_name || null;
+      }
+
+      if (meta.status !== undefined) {
+        const st = statusNorm(meta.status);
+        c.status = st;
+        c.statusatendimento = st;
+        c.is_new = st === 'novo';
+        c.is_waiting = st === 'aguardando';
+        c.is_in_service = st === 'em_atendimento';
+        c.is_paused = st === 'pausado';
+        c.is_resolved = st === 'resolvido';
+        c.is_transferred = st === 'transferido';
+      }
+
+      if (meta.operador_id !== undefined) {
+        c.operador_id = idKey(meta.operador_id);
+        c.is_accepted = !!c.operador_id;
+      }
+
+      if (meta.operador_nome !== undefined) c.operador_nome = meta.operador_nome || null;
+      if (meta.departamento_id !== undefined) c.departamento_id = idKey(meta.departamento_id);
+      if (meta.participantes_count !== undefined) c.participantes_count = Number(meta.participantes_count || 0) || 0;
+      if (meta.minha_participacao !== undefined) c.minha_participacao = !!meta.minha_participacao;
+
+      _reRender();
+    },
+
     bumpToTop(clienteId) {
       const idx = _findClienteIndex(clienteId);
       if (idx < 0) return;
@@ -1254,7 +1879,13 @@ if (!window.Lista) {
       const idx = _findClienteIndex(clienteId);
       if (idx < 0) return;
 
-      state.clientesCache[idx].novas = 0;
+      const c = state.clientesCache[idx];
+
+      c.novas = 0;
+      c.unread = 0;
+      c.unread_count = 0;
+      c.nao_lidas = 0;
+
       _reRender();
     },
 
@@ -1262,8 +1893,49 @@ if (!window.Lista) {
       const idx = _findClienteIndex(clienteId);
       if (idx < 0) return;
 
-      state.clientesCache[idx].pinned = !!isPinned;
+      const flag = !!isPinned;
+      const alvo = state.clientesCache[idx];
+      const alvoRef = convRefOf(alvo, alvo);
+      const alvoKey = convKeyOf(alvo);
+      const alvoEntity = alvoRef?.entityId || null;
+      const alvoKind = alvoRef?.kind || null;
+      const alvoInst = alvoRef?.instId || null;
+
+      state.clientesCache = (Array.isArray(state.clientesCache) ? state.clientesCache : []).map((c) => {
+        const cRef = convRefOf(c, c);
+
+        const sameKey = alvoKey && idEq(convKeyOf(c), alvoKey);
+
+        const sameEntity = alvoEntity && cRef?.entityId &&
+          String(cRef.entityId) === String(alvoEntity) &&
+          (!alvoKind || !cRef.kind || String(cRef.kind) === String(alvoKind)) &&
+          (!alvoInst || !cRef.instId || String(cRef.instId) === String(alvoInst));
+
+        if (!sameKey && !sameEntity) return c;
+
+        return normalizeCliente({
+          ...c,
+          pinned: flag,
+          fixado: flag,
+          pin: flag,
+        });
+      });
+
+      syncActiveConvs(state.clientesCache, state.nextCursor ?? null);
       _reRender();
+
+      try {
+        const safeKey = CSS.escape(String(alvoKey || ''));
+        if (safeKey) {
+          const li = document.querySelector(`li.chat-item[data-id="${safeKey}"]`);
+          if (li) {
+            li.classList.toggle('is-pinned', flag);
+            li.classList.toggle('pinned', flag);
+            li.dataset.pinned = flag ? 'true' : 'false';
+            li.dataset.fixado = flag ? 'true' : 'false';
+          }
+        }
+      } catch {}
     }
   };
 }
@@ -1274,14 +1946,59 @@ if (!window.Lista) {
 (function () {
   'use strict';
 
-  function updatePreviewInline(clienteId, { texto, ack, ts, unreadDelta } = {}) {
+  function updatePreviewInline(clienteId, payload = {}) {
+    const {
+      texto,
+      mensagem,
+      conteudo,
+      preview,
+      ultima_mensagem,
+      last_message,
+      last_msg,
+
+      ack,
+
+      ts,
+      timestamp,
+      ultima_mensagem_ts,
+      last_ts,
+      updated_at,
+
+      unreadDelta,
+
+      novas,
+      unread,
+      unread_count,
+      nao_lidas,
+      naoLidas,
+      qtd_nao_lidas,
+      qtdNaoLidas,
+
+      status,
+      operador_id,
+      operador_nome,
+      departamento_id
+    } = payload || {};
+
     const id = String(convKeyOf(clienteId) || '');
+    if (!id) return;
+
     const li = document.querySelector(`li.chat-item[data-id="${CSS.escape(id)}"]`);
     if (!li) return;
 
-    if (typeof texto === 'string') {
-      const preview = li.querySelector('.preview-text');
-      if (preview) preview.textContent = texto;
+    const textoFinal =
+      typeof texto === 'string' ? texto :
+      typeof mensagem === 'string' ? mensagem :
+      typeof conteudo === 'string' ? conteudo :
+      typeof preview === 'string' ? preview :
+      typeof ultima_mensagem === 'string' ? ultima_mensagem :
+      typeof last_message === 'string' ? last_message :
+      typeof last_msg === 'string' ? last_msg :
+      null;
+
+    if (textoFinal !== null) {
+      const previewEl = li.querySelector('.preview-text');
+      if (previewEl) previewEl.textContent = textoFinal;
     }
 
     try {
@@ -1301,22 +2018,82 @@ if (!window.Lista) {
       }
     } catch {}
 
-    if (ts !== undefined && ts !== null && ts !== '') {
+    const tsFinal =
+      ts ??
+      timestamp ??
+      ultima_mensagem_ts ??
+      last_ts ??
+      updated_at;
+
+    if (tsFinal !== undefined && tsFinal !== null && tsFinal !== '') {
       const el = li.querySelector('.chat-time, time');
       if (el) {
-        const txt = formatChatTime(ts);
+        const txt = formatChatTime(tsFinal);
         if (txt) el.textContent = txt;
       }
     }
 
-    if (unreadDelta) {
-      const badgeEl = li.querySelector('.badge, .unread');
-      if (badgeEl) {
-        const cur = Number(badgeEl.textContent || '0') || 0;
-        const val = Math.max(0, cur + Number(unreadDelta || 0));
-        badgeEl.textContent = String(val);
-        badgeEl.hidden = val <= 0;
+    const unreadExplicit =
+      temValor(novas) ? novas :
+      temValor(unread_count) ? unread_count :
+      temValor(unread) ? unread :
+      temValor(nao_lidas) ? nao_lidas :
+      temValor(naoLidas) ? naoLidas :
+      temValor(qtd_nao_lidas) ? qtd_nao_lidas :
+      temValor(qtdNaoLidas) ? qtdNaoLidas :
+      null;
+
+    let finalUnread = null;
+
+    if (temValor(unreadExplicit)) {
+      finalUnread = Math.max(0, Number(unreadExplicit) || 0);
+    } else if (unreadDelta) {
+      finalUnread = Math.max(0, Number(li.dataset.novas || 0) + Number(unreadDelta || 0));
+    }
+
+    if (finalUnread !== null) {
+      let badgeEl = li.querySelector('.badge, .unread, .unread-badge, .conv-badge, .wpp-badge');
+
+      if (finalUnread > 0 && !badgeEl) {
+        const meta = li.querySelector('.chat-meta') || li;
+        badgeEl = document.createElement('span');
+        badgeEl.className = 'badge';
+        meta.appendChild(badgeEl);
       }
+
+      if (badgeEl) {
+        badgeEl.textContent = String(finalUnread);
+        badgeEl.hidden = finalUnread <= 0;
+        badgeEl.style.display = finalUnread > 0 ? '' : 'none';
+      }
+
+      li.dataset.novas = String(finalUnread);
+      li.dataset.unread = String(finalUnread);
+      li.dataset.isUnread = finalUnread > 0 ? '1' : '0';
+      li.classList.toggle('has-unread', finalUnread > 0);
+    }
+
+    if (status !== undefined) {
+      const st = statusNorm(status) || '';
+      li.dataset.status = st;
+      li.dataset.statusatendimento = st;
+      li.dataset.isNew = st === 'novo' ? '1' : '0';
+      li.classList.toggle('is-new', st === 'novo');
+    }
+
+    if (operador_id !== undefined) {
+      const opId = idKey(operador_id) || '';
+      li.dataset.operadorId = opId;
+      li.dataset.isAccepted = opId ? '1' : '0';
+      li.classList.toggle('is-accepted', !!opId);
+    }
+
+    if (operador_nome !== undefined) {
+      li.dataset.operadorNome = String(operador_nome || '');
+    }
+
+    if (departamento_id !== undefined) {
+      li.dataset.departamentoId = String(departamento_id || '');
     }
   }
 
@@ -1327,6 +2104,7 @@ if (!window.Lista) {
   const L = (window.Lista = window.Lista || {});
   const prevUpdate = typeof L.updatePreview === 'function' ? L.updatePreview.bind(L) : null;
   const prevSetAck = typeof L.setAck === 'function' ? L.setAck.bind(L) : null;
+  const prevSetMeta = typeof L.setMeta === 'function' ? L.setMeta.bind(L) : null;
 
   L.updatePreview = function (cid, payload) {
     try { updatePreviewInline(cid, payload || {}); } catch {}
@@ -1336,6 +2114,11 @@ if (!window.Lista) {
   L.setAck = function (cid, ack) {
     try { setAckInline(cid, ack); } catch {}
     return prevSetAck ? prevSetAck(cid, ack) : undefined;
+  };
+
+  L.setMeta = function (cid, meta) {
+    try { updatePreviewInline(cid, meta || {}); } catch {}
+    return prevSetMeta ? prevSetMeta(cid, meta) : undefined;
   };
 })();
 
@@ -1348,4 +2131,5 @@ try {
   window.renderListaClientes = renderListaClientes;
   window.carregarClientes = carregarClientes;
   window.loadMoreConversas = loadMoreConversas;
+  window.scheduleCarregarClientes = scheduleCarregarClientes;
 } catch {}

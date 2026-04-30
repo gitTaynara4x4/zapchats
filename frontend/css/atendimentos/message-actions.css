@@ -1,0 +1,356 @@
+/* /frontend/css/atendimentos/message-actions.css */
+
+/* =========================
+   SHELL DA MENSAGEM
+   ========================= */
+
+#historico .zc-msg-action-shell{
+  position:relative !important;
+  display:inline-block !important;
+  width:fit-content !important;
+  max-width:100% !important;
+  vertical-align:top;
+  overflow:visible !important;
+}
+
+#historico .zc-msg-action-shell.zc-msg-actions-open{
+  z-index:60 !important;
+}
+
+#historico .zc-msg-has-actions{
+  overflow:visible !important;
+}
+
+#historico .msg-row,
+#historico .linha-mensagem{
+  overflow:visible !important;
+}
+
+/* =========================
+   BOTÕES HOVER FORA DA BOLHA
+   ========================= */
+
+#historico .zc-msg-hover-actions{
+  position:absolute;
+  top:2px;
+  z-index:50;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  width:max-content;
+  opacity:0;
+  pointer-events:none;
+  transform:scale(.96);
+  transition:opacity .14s ease, transform .14s ease;
+}
+
+/* recebida: botões do lado direito */
+#historico .msg-row.msg-received .zc-msg-hover-actions,
+#historico .linha-mensagem.esquerda .zc-msg-hover-actions{
+  left:calc(100% + 8px);
+  right:auto;
+}
+
+/* enviada: botões do lado esquerdo */
+#historico .msg-row.msg-sent .zc-msg-hover-actions,
+#historico .linha-mensagem.direita .zc-msg-hover-actions{
+  right:calc(100% + 8px);
+  left:auto;
+}
+
+/* fallback */
+#historico .zc-msg-hover-actions{
+  left:calc(100% + 8px);
+  right:auto;
+}
+
+#historico .bubble-out + .zc-msg-hover-actions,
+#historico .bubble-out ~ .zc-msg-hover-actions{
+  right:calc(100% + 8px);
+  left:auto;
+}
+
+#historico .msg-row:hover .zc-msg-hover-actions,
+#historico .linha-mensagem:hover .zc-msg-hover-actions,
+#historico .zc-msg-action-shell:hover .zc-msg-hover-actions,
+#historico .zc-msg-action-shell.zc-msg-actions-open .zc-msg-hover-actions,
+#historico .zc-msg-hover-actions:hover{
+  opacity:1 !important;
+  pointer-events:auto !important;
+  transform:scale(1) !important;
+}
+
+/* ponte invisível para não sumir no caminho do mouse */
+#historico .zc-msg-hover-actions::before{
+  content:"";
+  position:absolute;
+  top:-10px;
+  bottom:-10px;
+  width:22px;
+  pointer-events:auto;
+}
+
+#historico .msg-row.msg-received .zc-msg-hover-actions::before,
+#historico .linha-mensagem.esquerda .zc-msg-hover-actions::before{
+  left:-22px;
+}
+
+#historico .msg-row.msg-sent .zc-msg-hover-actions::before,
+#historico .linha-mensagem.direita .zc-msg-hover-actions::before{
+  right:-22px;
+}
+
+#historico .zc-msg-hover-btn{
+  position:relative;
+  z-index:2;
+  width:28px;
+  height:28px;
+  border:1px solid rgba(255,255,255,.06);
+  border-radius:999px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  background:#161717;
+  color:#d1d7db;
+  box-shadow:0 6px 16px rgba(0,0,0,.22);
+  transition:background .14s ease, color .14s ease, transform .08s ease;
+}
+
+#historico .zc-msg-hover-btn:hover{
+  background:#1d1f20;
+  color:#ffffff;
+}
+
+#historico .zc-msg-hover-btn:active{
+  transform:translateY(1px);
+}
+
+#historico .zc-msg-hover-btn i{
+  font-size:12px;
+  line-height:1;
+}
+
+html[data-theme="light"] #historico .zc-msg-hover-btn{
+  background:#ffffff;
+  color:#1f2c33;
+  border-color:#d9e0e4;
+  box-shadow:0 6px 16px rgba(0,0,0,.12);
+}
+
+html[data-theme="light"] #historico .zc-msg-hover-btn:hover{
+  background:#f2f4f5;
+  color:#111b21;
+}
+
+/* =========================
+   MENU DE OPÇÕES
+   ========================= */
+
+.zc-msg-menu{
+  position:fixed;
+  z-index:10040;
+  min-width:210px;
+  padding:10px 0;
+  border-radius:14px;
+  background:#161717;
+  color:#f3f4f4;
+  box-shadow:0 16px 42px rgba(0,0,0,.36);
+  border:1px solid rgba(255,255,255,.06);
+  display:none;
+  overflow:hidden;
+}
+
+.zc-msg-menu.show{
+  display:block;
+}
+
+.zc-msg-menu-item{
+  width:100%;
+  min-height:42px;
+  display:flex;
+  align-items:center;
+  gap:14px;
+  padding:0 16px;
+  border:0;
+  background:transparent;
+  color:inherit;
+  cursor:pointer;
+  text-align:left;
+  font-size:14px;
+  font-family:inherit;
+}
+
+.zc-msg-menu-item:hover{
+  background:rgba(255,255,255,.06);
+}
+
+.zc-msg-menu-item i{
+  width:18px;
+  flex:0 0 18px;
+  display:inline-flex;
+  justify-content:center;
+  color:#cfd4d6;
+  font-size:14px;
+}
+
+.zc-msg-menu-item span{
+  min-width:0;
+  white-space:nowrap;
+}
+
+.zc-msg-menu-item.is-danger{
+  color:#f3f4f4;
+}
+
+.zc-msg-menu-item.is-danger i{
+  color:#aebac1;
+}
+
+.zc-msg-menu-sep{
+  height:1px;
+  margin:8px 14px;
+  background:rgba(255,255,255,.08);
+}
+
+html[data-theme="light"] .zc-msg-menu{
+  background:#ffffff;
+  color:#111b21;
+  border-color:#d9e0e4;
+  box-shadow:0 16px 42px rgba(0,0,0,.18);
+}
+
+html[data-theme="light"] .zc-msg-menu-item:hover{
+  background:#f2f4f5;
+}
+
+html[data-theme="light"] .zc-msg-menu-item i{
+  color:#54656f;
+}
+
+html[data-theme="light"] .zc-msg-menu-sep{
+  background:#e5e7eb;
+}
+
+/* =========================
+   POPUP DE REAÇÃO
+   ========================= */
+
+.zc-msg-react-pop{
+  position:fixed;
+  z-index:10045;
+  display:none;
+  align-items:center;
+  gap:4px;
+  padding:6px;
+  border-radius:999px;
+  background:#161717;
+  color:#fff;
+  box-shadow:0 16px 42px rgba(0,0,0,.36);
+  border:1px solid rgba(255,255,255,.06);
+}
+
+.zc-msg-react-pop.show{
+  display:flex;
+}
+
+.zc-msg-react-btn{
+  width:34px;
+  height:34px;
+  border:0;
+  border-radius:999px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  background:transparent;
+  cursor:pointer;
+  font-size:20px;
+  line-height:1;
+  transition:background .14s ease, transform .08s ease;
+}
+
+.zc-msg-react-btn:hover{
+  background:rgba(255,255,255,.08);
+}
+
+.zc-msg-react-btn:active{
+  transform:scale(.96);
+}
+
+.zc-msg-react-more{
+  color:#d1d7db;
+  font-size:13px;
+}
+
+html[data-theme="light"] .zc-msg-react-pop{
+  background:#ffffff;
+  border-color:#d9e0e4;
+  box-shadow:0 16px 42px rgba(0,0,0,.18);
+}
+
+html[data-theme="light"] .zc-msg-react-btn:hover{
+  background:#f2f4f5;
+}
+
+html[data-theme="light"] .zc-msg-react-more{
+  color:#54656f;
+}
+
+/* =========================
+   REAÇÃO LOCAL NA BOLHA
+   ========================= */
+
+#historico .zc-msg-local-reaction{
+  position:absolute;
+  right:8px;
+  bottom:-13px;
+  min-width:24px;
+  height:22px;
+  padding:0 5px;
+  border-radius:999px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  background:#161717;
+  border:1px solid rgba(255,255,255,.08);
+  box-shadow:0 4px 10px rgba(0,0,0,.22);
+  font-size:14px;
+  line-height:1;
+  z-index:5;
+}
+
+html[data-theme="light"] #historico .zc-msg-local-reaction{
+  background:#ffffff;
+  border-color:#d9e0e4;
+}
+
+/* =========================
+   MOBILE
+   ========================= */
+
+@media (max-width:920px){
+  #historico .zc-msg-hover-actions{
+    top:-34px;
+    left:auto !important;
+    right:0 !important;
+  }
+
+  #historico .msg-row.msg-sent .zc-msg-hover-actions,
+  #historico .linha-mensagem.direita .zc-msg-hover-actions{
+    right:0 !important;
+    left:auto !important;
+  }
+
+  #historico .zc-msg-hover-actions::before{
+    display:none;
+  }
+
+  #historico .zc-msg-hover-btn{
+    width:32px;
+    height:32px;
+  }
+
+  .zc-msg-menu{
+    min-width:220px;
+  }
+}
