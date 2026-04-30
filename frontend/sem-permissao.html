@@ -221,7 +221,7 @@
   (function(){
     const mainText   = document.getElementById('semperm-main');
     const btnHome    = document.getElementById('btn-home');
-    const btnLogout  = document.getElementById('btn-logout');
+    const btnlogout  = document.getElementById('btn-logout');
 
     // ==== Lê motivo que veio do backend (?motivo=...) ====
     (function applyMotivoFromQuery(){
@@ -267,7 +267,7 @@
       }
     }
 
-    async function doLogout(){
+    async function dologout(){
       // Se tiver ZAuth.logout, usa o fluxo oficial
       try{
         if (window.ZAuth && typeof ZAuth.logout === 'function'){
@@ -292,7 +292,7 @@
 
     // ==== Binds dos botões ====
     btnHome  && btnHome.addEventListener('click', goHomeSmart);
-    btnLogout&& btnLogout.addEventListener('click', doLogout);
+    btnlogout&& btnlogout.addEventListener('click', dologout);
 
     // ESC = Ir para o início
     document.addEventListener('keydown', function(e){

@@ -539,7 +539,7 @@
         }
       }
 
-      async function doLogout() {
+      async function dologout() {
         try {
           await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
         } catch {}
@@ -560,7 +560,7 @@
         const myPlanBtn = document.getElementById('wppMyPlanBtn');
         const configBtn = document.getElementById('wppConfigBtn');
         const themeBtn = document.getElementById('wppThemeBtn');
-        const logoutBtn = document.getElementById('wppLogoutBtn');
+        const logoutBtn = document.getElementById('wpplogoutBtn');
 
         const userNameEl = document.getElementById('wppUserName');
         const userEmailEl = document.getElementById('wppUserEmail');
@@ -666,7 +666,7 @@
           logoutBtn.dataset.bound = '1';
           logoutBtn.addEventListener('click', function () {
             closeUserMenu();
-            doLogout();
+            dologout();
           });
         }
 

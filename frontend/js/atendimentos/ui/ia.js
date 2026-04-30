@@ -2,7 +2,7 @@
  * ZapsChat – Atendimento: IA (JS-only) — logos 24px + responsivo
  * - Botão #btn-ia no header (sempre 24×24)
  * - Modal montado via JS (sem HTML extra)
- * - Logos por tema:
+ * - logos por tema:
  *    dark  -> /frontend/img/open-ai-logo-white.svg
  *    light -> /frontend/img/open-ai-logo-back.svg
  * - Endpoints:
@@ -19,7 +19,7 @@
   const $  = (s, r=document)=> r.querySelector(s);
   const on = (el, ev, fn)=> el && el.addEventListener(ev, fn);
 
-  // ---------- Tema / Logos ----------
+  // ---------- Tema / logos ----------
   function getTheme() {
     try {
       const t = document.documentElement.getAttribute('data-theme');
@@ -30,20 +30,20 @@
     } catch {}
     return 'dark';
   }
-  function getLogoSrc() {
+  function getlogoSrc() {
     return getTheme() === 'dark'
       ? '/frontend/img/open-ai-logo-white.svg'
       : '/frontend/img/open-ai-logo-back.svg';
   }
-  function updateAllLogos() {
-    const src = getLogoSrc();
+  function updateAlllogos() {
+    const src = getlogoSrc();
     $('#btn-ia .ia-logo')?.setAttribute('src', src);
     document.querySelectorAll('.ia-badge').forEach(img => img.setAttribute('src', src));
   }
-  new MutationObserver(updateAllLogos).observe(document.documentElement, { attributes:true, attributeFilter:['data-theme'] });
+  new MutationObserver(updateAlllogos).observe(document.documentElement, { attributes:true, attributeFilter:['data-theme'] });
   try {
     const mq = matchMedia('(prefers-color-scheme: dark)');
-    (mq.addEventListener ? mq.addEventListener('change', updateAllLogos) : mq.addListener(updateAllLogos));
+    (mq.addEventListener ? mq.addEventListener('change', updateAlllogos) : mq.addListener(updateAlllogos));
   } catch {}
 
   // ---------- Helpers ----------
@@ -160,7 +160,7 @@
       draft:         $('#ia-draft'),
     };
 
-    updateAllLogos();
+    updateAlllogos();
 
     on(refs.close,   'click', closeIA);
     on(refs.backdrop,'click', closeIA);
@@ -189,11 +189,11 @@
       btn.className = 'hdr-icon-btn';
       btn.title = 'Ferramentas de IA';
       btn.setAttribute('aria-label', 'Ferramentas de IA');
-      btn.innerHTML = `<img class="ia-logo" alt="IA">`; // src setado por updateAllLogos()
+      btn.innerHTML = `<img class="ia-logo" alt="IA">`; // src setado por updateAlllogos()
       hdr.appendChild(btn);
     }
 
-    updateAllLogos();
+    updateAlllogos();
 
     if (!btn._iaBound) {
       btn._iaBound = true;

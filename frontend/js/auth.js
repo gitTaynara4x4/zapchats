@@ -149,7 +149,7 @@
     } catch (e) {}
   }
 
-  // ======= Logout =======
+  // ======= logout =======
   async function logout(opts) {
     opts = opts || {};
     var redirect = opts.redirect || LOGIN_URL;

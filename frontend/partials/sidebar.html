@@ -820,9 +820,9 @@
   <header class="Valora-sidebar-header">
     <a href="/dashboard" class="Valora-logo-link" aria-label="Ir para dashboard">
       <div class="Valora-logo-wrap">
-        <img class="Valora-logo-fav" src="/img/fav-icon.png" alt="Logo ícone">
-        <img class="Valora-logo-light" src="/img/logo-s-fundo.png" alt="Logo">
-        <img class="Valora-logo-dark" src="/img/logo-white.png" alt="Logo">
+        <img class="Valora-logo-fav" src="/img/fav-icon.png" alt="logo ícone">
+        <img class="Valora-logo-light" src="/img/logo-s-fundo.png" alt="logo">
+        <img class="Valora-logo-dark" src="/img/logo-white.png" alt="logo">
       </div>
     </a>
 
@@ -951,7 +951,7 @@
 
       <div class="Valora-dropdown-divider"></div>
 
-      <button type="button" class="Valora-dropdown-item danger" id="ValoraLogoutBtn">
+      <button type="button" class="Valora-dropdown-item danger" id="ValoralogoutBtn">
         <span class="icon" aria-hidden="true">
           <svg viewBox="0 0 256 256"><path d="M222,128a6,6,0,0,1-6,6H117.66l37.17,37.17a6,6,0,0,1-8.49,8.49l-47.41-47.42a6,6,0,0,1,0-8.48l47.41-47.42a6,6,0,0,1,8.49,8.49L117.66,122H216A6,6,0,0,1,222,128ZM104,200a6,6,0,0,1-6,6H48a14,14,0,0,1-14-14V64A14,14,0,0,1,48,50H98a6,6,0,0,1,0,12H48a2,2,0,0,0-2,2V192a2,2,0,0,0,2,2H98A6,6,0,0,1,104,200Z"></path></svg>
         </span>
@@ -1018,7 +1018,7 @@
   var configBtn = document.getElementById('ValoraConfigBtn');
   var toggleThemeBtn = document.getElementById('ValoraToggleThemeBtn');
   var themeActionText = document.getElementById('ValoraThemeActionText');
-  var logoutBtn = document.getElementById('ValoraLogoutBtn');
+  var logoutBtn = document.getElementById('ValoralogoutBtn');
 
   var userNameEl = document.getElementById('ValoraUserName');
   var userEmailEl = document.getElementById('ValoraUserEmail');
@@ -1368,7 +1368,7 @@
     }
   }
 
-  async function doLogout() {
+  async function dologout() {
     try {
       await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
     } catch (e) {}
@@ -1487,7 +1487,7 @@
   if (logoutBtn) {
     logoutBtn.addEventListener('click', function () {
       closeUserDropdown();
-      doLogout();
+      dologout();
     });
   }
 

@@ -46,10 +46,10 @@
     location.href = redirect;
   }
 
-  function bindLogout(selector, redirect) {
+  function bindlogout(selector, redirect) {
     const el = typeof selector === 'string' ? document.querySelector(selector) : selector;
-    if (!el || el.dataset.boundLogout) return;
-    el.dataset.boundLogout = '1';
+    if (!el || el.dataset.boundlogout) return;
+    el.dataset.boundlogout = '1';
     el.addEventListener('click', (ev) => {
       ev.preventDefault();
       logout(redirect || el.getAttribute('href') || '/login.html');
@@ -57,9 +57,9 @@
   }
 
   // data-logout: <a data-logout href="/login.html">Sair</a>
-  function autobindLogout(root = document) {
+  function autobindlogout(root = document) {
     root.querySelectorAll('[data-logout]:not([data-bound-logout])').forEach(el => {
-      el.dataset.boundLogout = '1';
+      el.dataset.boundlogout = '1';
       el.addEventListener('click', (ev) => {
         ev.preventDefault();
         const redirect = el.getAttribute('href') || '/login.html';
@@ -200,8 +200,8 @@
      EXPORTA NO NAMESPACE GLOBAL
   =============================== */
   global.UI = Object.assign(global.UI || {}, {
-    // Logout
-    logout, bindLogout, autobindLogout,
+    // logout
+    logout, bindlogout, autobindlogout,
     // UI helpers
     initThemeToggle, initUserChip, initActiveLinks
   });
