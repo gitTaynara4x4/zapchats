@@ -11,7 +11,9 @@
 // ✅ Busca backend sempre por entity_id da conversa, mantendo cache por conversation_key
 // ✅ Resposta/quote renderizada dentro da bolha, igual WhatsApp
 // ✅ TRAVA: resposta atrasada não sobrescreve conversa atual
-// ✅ Aceita payload array, {items}, {data}, {results}
+// ✅ Aceita payload array, {items}, {data}, {results}, {mensagens}, {messages}
+// ✅ FIX PRINCIPAL: escuta eventos de refresh após envio/WS e busca mensagens novas do backend
+// ✅ Exports compat: window.carregarHistoricoCliente / window.forcarAtualizacaoHistorico
 
 import { formatChatTime, parseAtendimentoDate } from '../core/time.js';
 import { getHist, primeWith, mergeOld } from '../domain/hist-cache.js';
@@ -87,12 +89,42 @@ function currentSelectedRow() {
   }
 }
 
+function normalizeRawConversation(raw = null, row = null) {
+  if (raw && typeof raw === 'object') {
+    const obj = raw;
+
+    const candidate =
+      obj.conversation_key ??
+      obj.conversationKey ??
+      obj.conversation_id ??
+      obj.conversationId ??
+      obj.convKey ??
+      obj.id ??
+      obj.cliente_id ??
+      obj.clienteId ??
+      obj.grupo_id ??
+      obj.grupoId ??
+      null;
+
+    return {
+      raw: candidate,
+      row: row || obj,
+    };
+  }
+
+  return {
+    raw,
+    row,
+  };
+}
+
 function getHistConversationRef(raw = null, row = null) {
   const hist = H();
-  const selected = row || currentSelectedRow();
+  const norm = normalizeRawConversation(raw, row);
+  const selected = norm.row || currentSelectedRow();
 
   const candidate =
-    raw ??
+    norm.raw ??
     hist?.dataset?.conversationKey ??
     hist?.dataset?.conversationId ??
     hist?.dataset?.convKey ??
@@ -104,20 +136,19 @@ function getHistConversationRef(raw = null, row = null) {
     selected?.id ??
     null;
 
+  const instCandidate =
+    selected?.instancia_id ??
+    selected?.instanciaId ??
+    selected?.instancia ??
+    selected?.instance_id ??
+    selected?.instanceId ??
+    selected?.instance_name ??
+    selected?.instanceName ??
+    hist?.dataset?.instanciaId ??
+    null;
+
   const convKey =
-    getConversationKey(
-      candidate,
-      selected,
-      selected?.instancia_id ??
-        selected?.instanciaId ??
-        selected?.instancia ??
-        selected?.instance_id ??
-        selected?.instanceId ??
-        selected?.instance_name ??
-        selected?.instanceName ??
-        hist?.dataset?.instanciaId ??
-        null
-    ) ||
+    getConversationKey(candidate, selected, instCandidate) ||
     idKey(candidate);
 
   const parsed = parseConversationKey(convKey);
@@ -133,16 +164,20 @@ function getHistConversationRef(raw = null, row = null) {
     idKey(selected?.backend_id) ||
     idKey(selected?.api_id) ||
     idKey(selected?.cliente_id) ||
+    idKey(selected?.clienteId) ||
     idKey(selected?.grupo_id) ||
+    idKey(selected?.grupoId) ||
     null;
 
-  const kind =
+  const kindRaw =
     getConversationKind(candidate, selected) ||
     idKey(hist?.dataset?.kind) ||
     selected?.kind ||
     selected?.conversation_kind ||
     selected?.tipo_conversa ||
-    'c';
+    (selected?.is_group || selected?.grupo_id || selected?.grupoId ? 'g' : 'c');
+
+  const kind = String(kindRaw || 'c').toLowerCase().startsWith('g') ? 'g' : 'c';
 
   const instId =
     instKey(hist?.dataset?.instanciaId) ||
@@ -472,8 +507,9 @@ function renderMsgsWithDividers(msgs, lastDayKey = null) {
 
 function getLastRenderedMsgId(hist) {
   try {
-    const lastRow = hist?.querySelector?.('.msg-row:last-of-type');
-    if (!lastRow) return '';
+    const rows = hist?.querySelectorAll?.('.msg-row');
+    if (!rows || !rows.length) return '';
+    const lastRow = rows[rows.length - 1];
     return lastRow.getAttribute('data-msg-id') || lastRow.getAttribute('data-id') || '';
   } catch {
     return '';
@@ -640,9 +676,11 @@ export function salvarNoCache(clienteId, novos) {
   const noId = [];
 
   for (const m of merged) {
-    const k = m && m.msg_id ? String(m.msg_id) : '';
+    const k = m && (m.msg_id || m.message_id || m.wa_msg_id || m.id) ? String(m.msg_id || m.message_id || m.wa_msg_id || m.id) : '';
+
     if (k) {
       const prev = byId.get(k);
+
       if (!prev) {
         byId.set(k, m);
       } else {
@@ -659,6 +697,7 @@ export function salvarNoCache(clienteId, novos) {
         byId.set(k, {
           ...prev,
           ...m,
+          msg_id: m.msg_id || prev.msg_id || m.message_id || prev.message_id || m.wa_msg_id || prev.wa_msg_id || m.id || prev.id,
           ack,
           timestamp: ts,
           quoted: m.quoted ?? prev.quoted,
@@ -687,7 +726,7 @@ export function criarHTMLDaMensagem(m) {
   const isSaida = m.tipo === 'saida' || m.from_me === true || m.origem === 'atendente';
   const texto = String(m.conteudo ?? m.mensagem ?? m.texto ?? '').trim();
   const ackVal = Number(m.ack ?? 0);
-  const msgIdAttr = String(m.msg_id || m.id || '').trim();
+  const msgIdAttr = String(m.msg_id || m.message_id || m.wa_msg_id || m.id || '').trim();
   const msgIdEsc = escapeHtml(msgIdAttr);
 
   const quotedPreview = normalizeQuotedPreview(m);
@@ -799,7 +838,7 @@ export function renderHistoricoDoCache(clienteId, append = false) {
     );
 
     const hasNoIdInDom = existingIds.has('');
-    const hasNoIdInList = msgs.some((m) => !m.msg_id || String(m.msg_id).trim() === '');
+    const hasNoIdInList = msgs.some((m) => !m.msg_id && !m.message_id && !m.wa_msg_id && !m.id);
 
     if (hasNoIdInDom || hasNoIdInList) {
       HLOG('renderHistoricoDoCache: rebuild total (mensagem sem msg_id)', {
@@ -819,23 +858,31 @@ export function renderHistoricoDoCache(clienteId, append = false) {
       stripAckReceived();
       setHistLastDayKey(hist, lastDayKey);
       hist.scrollTop = hist.scrollHeight;
+
       requestAnimationFrame(() => {
         if (!isHistoricoStillOpenFor(convKey, hist)) return;
         try { hist.scrollTop = hist.scrollHeight; } catch {}
         armHistoricoScrollGuard();
       });
+
       setTimeout(() => armHistoricoScrollGuard(), 60);
     } else {
       const lastRenderedId = getLastRenderedMsgId(hist);
       let startIdx = -1;
 
       if (lastRenderedId) {
-        startIdx = msgs.findIndex((m) => String(m?.msg_id || '') === String(lastRenderedId));
+        startIdx = msgs.findIndex((m) => String(m?.msg_id || m?.message_id || m?.wa_msg_id || m?.id || '') === String(lastRenderedId));
       }
 
       let novas = [];
-      if (startIdx >= 0) novas = msgs.slice(startIdx + 1);
-      else novas = msgs.filter((m) => !existingIds.has(String(m.msg_id)));
+      if (startIdx >= 0) {
+        novas = msgs.slice(startIdx + 1);
+      } else {
+        novas = msgs.filter((m) => {
+          const mid = String(m?.msg_id || m?.message_id || m?.wa_msg_id || m?.id || '');
+          return mid && !existingIds.has(mid);
+        });
+      }
 
       HLOG('renderHistoricoDoCache: append novas', {
         novasCount: novas.length,
@@ -854,15 +901,29 @@ export function renderHistoricoDoCache(clienteId, append = false) {
         else hist.insertAdjacentHTML('beforeend', out.html);
 
         setHistLastDayKey(hist, out.lastDayKey);
+      } else {
+        // Mesmo sem mensagem nova, pode ter ACK novo.
+        try {
+          const fullHtml = hist.innerHTML;
+          if (!fullHtml || !hist.querySelector('.msg-row')) {
+            const { html, lastDayKey } = renderMsgsWithDividers(msgs, null);
+            hist.innerHTML = '';
+            ensureTopLoader();
+            hist.insertAdjacentHTML('beforeend', html);
+            setHistLastDayKey(hist, lastDayKey);
+          }
+        } catch {}
       }
 
       stripAckReceived();
       hist.scrollTop = hist.scrollHeight;
+
       requestAnimationFrame(() => {
         if (!isHistoricoStillOpenFor(convKey, hist)) return;
         try { hist.scrollTop = hist.scrollHeight; } catch {}
         armHistoricoScrollGuard();
       });
+
       setTimeout(() => armHistoricoScrollGuard(), 60);
     }
   }
@@ -887,7 +948,7 @@ export function renderHistoricoDoCache(clienteId, append = false) {
 /* ===================== append util ===================== */
 export function appendToHistory(clienteId, msg) {
   const convKey = getConversationKeySafe(clienteId) || idKey(clienteId);
-  HLOG('appendToHistory', { convKey, msgId: msg?.msg_id || null });
+  HLOG('appendToHistory', { convKey, msgId: msg?.msg_id || msg?.id || null });
   salvarNoCache(convKey, [msg]);
 }
 
@@ -957,11 +1018,17 @@ export async function abrirHistorico(id) {
       `/api/atendimento/conversas/${encodeURIComponent(entityId)}/mensagens` +
       `?empresa_id=${EMPRESA_ID}` +
       `&limit=${HISTORICO_LIMIT}` +
-      getInstQuery(convKey);
+      getInstQuery(convKey) +
+      `&__ts=${Date.now()}`;
 
     HLOG('abrirHistorico: fetch', { url, convKey, entityId });
 
-    const r = await fetch(url, { credentials: 'include' });
+    const r = await fetch(url, {
+      credentials: 'include',
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' },
+    });
+
     HLOG('abrirHistorico: resposta HTTP', { status: r.status });
 
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -1011,6 +1078,269 @@ export async function abrirHistorico(id) {
   }
 }
 
+/* ===================== refresh forçado do histórico aberto ===================== */
+let forceRefreshSeq = 0;
+let forceRefreshTimer = null;
+let forceRefreshInFlight = null;
+
+function eventDetailToConversation(detail = null) {
+  const d = detail && typeof detail === 'object' ? detail : {};
+
+  const raw =
+    d.conversation_key ??
+    d.conversationKey ??
+    d.conversation_id ??
+    d.conversationId ??
+    d.convKey ??
+    d.id ??
+    null;
+
+  if (raw) {
+    return {
+      ...d,
+      conversation_key: raw,
+      conversation_id: raw,
+      id: raw,
+    };
+  }
+
+  const kind =
+    String(d.kind || d.conversation_kind || d.tipo_conversa || '').toLowerCase().startsWith('g') ||
+    d.is_group === true ||
+    d.grupo_id != null
+      ? 'g'
+      : 'c';
+
+  const entityId =
+    d.entity_id ??
+    d.entityId ??
+    (kind === 'g' ? (d.grupo_id ?? d.grupoId) : (d.cliente_id ?? d.clienteId)) ??
+    null;
+
+  const inst =
+    d.instancia_id ??
+    d.instanciaId ??
+    d.instancia ??
+    d.instance_id ??
+    d.instanceId ??
+    d.instance_name ??
+    d.instanceName ??
+    H()?.dataset?.instanciaId ??
+    null;
+
+  const built = buildConversationKey(kind, entityId, inst);
+
+  return {
+    ...d,
+    kind,
+    is_group: kind === 'g',
+    entity_id: entityId,
+    cliente_id: kind === 'c' ? entityId : d.cliente_id,
+    grupo_id: kind === 'g' ? entityId : d.grupo_id,
+    instancia_id: inst,
+    conversation_key: built,
+    conversation_id: built,
+    id: built,
+  };
+}
+
+export async function forcarAtualizacaoHistorico(rawConversation = null, opts = {}) {
+  const hist = H();
+  if (!hist) return false;
+
+  const ref = getHistConversationRef(rawConversation || getOpenHistKey(hist));
+  const convKey = ref?.key || null;
+  const entityId = ref?.entityId || null;
+
+  if (!convKey || !entityId) {
+    HLOG('forcarAtualizacaoHistorico: sem convKey/entityId', { rawConversation, ref });
+    return false;
+  }
+
+  if (!isHistoricoStillOpenFor(convKey, hist)) {
+    HLOG('forcarAtualizacaoHistorico: ignorado, conversa não está aberta', {
+      convKey,
+      open: getOpenHistKey(hist),
+    });
+    return false;
+  }
+
+  const mySeq = ++forceRefreshSeq;
+  const limit = Number(opts.limit || HISTORICO_LIMIT) || HISTORICO_LIMIT;
+  const append = opts.append !== false;
+  const reason = opts.reason || 'force-refresh';
+
+  const url =
+    `/api/atendimento/conversas/${encodeURIComponent(entityId)}/mensagens` +
+    `?empresa_id=${EMPRESA_ID}` +
+    `&limit=${limit}` +
+    getInstQuery(convKey) +
+    `&__ts=${Date.now()}`;
+
+  HLOG('forcarAtualizacaoHistorico: fetch', {
+    url,
+    convKey,
+    entityId,
+    append,
+    reason,
+    seq: mySeq,
+  });
+
+  try {
+    const r = await fetch(url, {
+      credentials: 'include',
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' },
+    });
+
+    HLOG('forcarAtualizacaoHistorico: resposta HTTP', { status: r.status, seq: mySeq });
+
+    if (!r.ok) return false;
+
+    const data = await r.json();
+
+    if (!isHistoricoStillOpenFor(convKey, hist)) {
+      HLOG('forcarAtualizacaoHistorico: resposta ignorada, conversa mudou', { convKey });
+      return false;
+    }
+
+    const items = extractItems(data);
+
+    HLOG('forcarAtualizacaoHistorico: itens', {
+      convKey,
+      count: items.length,
+      seq: mySeq,
+    });
+
+    if (items.length) {
+      salvarNoCache(convKey, items);
+    }
+
+    if (!isHistoricoStillOpenFor(convKey, hist)) return false;
+
+    try {
+      const inst = getInstanciaForFetch(convKey);
+      const total = ensureArray(getHist(inst, convKey)).length;
+      setOffset(convKey, total);
+    } catch {}
+
+    renderHistoricoDoCache(convKey, append);
+
+    try {
+      window.syncPreviewFromCache?.(convKey);
+    } catch {}
+
+    return true;
+  } catch (e) {
+    HERR('forcarAtualizacaoHistorico erro', e);
+    return false;
+  }
+}
+
+function agendarRefreshHistorico(rawConversation = null, opts = {}) {
+  const hist = H();
+  if (!hist) return;
+
+  const convObj = eventDetailToConversation(rawConversation || {});
+  const ref = getHistConversationRef(convObj);
+  const convKey = ref?.key || getOpenHistKey(hist);
+
+  if (!convKey) return;
+
+  if (!isHistoricoStillOpenFor(convKey, hist)) {
+    HLOG('agendarRefreshHistorico: ignorado, conversa diferente', {
+      convKey,
+      open: getOpenHistKey(hist),
+    });
+    return;
+  }
+
+  clearTimeout(forceRefreshTimer);
+
+  const reason = String(opts.reason || convObj.reason || 'event-refresh');
+  const delay =
+    reason.includes('send') ||
+    reason.includes('envio') ||
+    reason.includes('message') ||
+    reason.includes('mensagem')
+      ? 420
+      : 180;
+
+  forceRefreshTimer = setTimeout(() => {
+    forceRefreshTimer = null;
+
+    if (forceRefreshInFlight) {
+      HLOG('agendarRefreshHistorico: já existe fetch em andamento, aguardando');
+      forceRefreshInFlight.finally(() => {
+        forcarAtualizacaoHistorico(convObj, {
+          append: true,
+          reason: `${reason}:after-inflight`,
+        }).catch(() => {});
+      });
+      return;
+    }
+
+    forceRefreshInFlight = forcarAtualizacaoHistorico(convObj, {
+      append: true,
+      reason,
+    });
+
+    forceRefreshInFlight
+      .then((ok) => {
+        // Retry leve: se o evento chegou antes do backend terminar de salvar,
+        // tenta de novo sem piscar e sem rebuild total.
+        if (!ok && isHistoricoStillOpenFor(convKey, H())) {
+          setTimeout(() => {
+            forcarAtualizacaoHistorico(convObj, {
+              append: true,
+              reason: `${reason}:retry`,
+            }).catch(() => {});
+          }, 900);
+        }
+      })
+      .finally(() => {
+        forceRefreshInFlight = null;
+      });
+  }, delay);
+}
+
+(function bindForceRefreshEvents() {
+  if (window.__ZC_HIST_FORCE_REFRESH_BOUND__) return;
+  window.__ZC_HIST_FORCE_REFRESH_BOUND__ = true;
+
+  const names = [
+    'zc:history-force-refresh',
+    'atendimento:history-force-refresh',
+    'historico:force-refresh',
+    'zc:send-success-refresh',
+    'atendimento:send-success',
+    'atendimento:mensagem-enviada',
+    'atendimento:mensagem-recebida',
+    'zc:message-upsert',
+    'zc:message-created',
+  ];
+
+  const handler = (ev) => {
+    const detail = ev?.detail || {};
+    const convObj = eventDetailToConversation(detail);
+
+    HLOG('evento refresh histórico recebido', {
+      type: ev?.type,
+      detail,
+      convObj,
+    });
+
+    agendarRefreshHistorico(convObj, {
+      reason: detail.reason || ev?.type || 'event',
+    });
+  };
+
+  for (const name of names) {
+    try { window.addEventListener(name, handler, true); } catch {}
+    try { document.addEventListener(name, handler, true); } catch {}
+  }
+})();
+
 /* ===================== paginação (scroll up) ===================== */
 let loadingOld = false;
 
@@ -1058,11 +1388,17 @@ export async function carregarMaisHistorico(id) {
     const url =
       `/api/atendimento/conversas/${encodeURIComponent(entityId)}/mensagens?empresa_id=${EMPRESA_ID}` +
       `&limit=${limit}&offset=${off}` +
-      `${getInstQuery(convKey)}`;
+      `${getInstQuery(convKey)}` +
+      `&__ts=${Date.now()}`;
 
     HLOG('carregarMaisHistorico: fetch', { url, convKey, entityId, limit, offset: off });
 
-    const r = await fetch(url, { credentials: 'include' });
+    const r = await fetch(url, {
+      credentials: 'include',
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' },
+    });
+
     HLOG('carregarMaisHistorico: resposta HTTP', { status: r.status });
 
     if (!isHistoricoStillOpenFor(convKey, hist)) {
@@ -1316,6 +1652,13 @@ window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
 window.renderHistoricoDoCache = renderHistoricoDoCache;
 window.salvarNoCache = salvarNoCache;
 window.abrirHistorico = abrirHistorico;
+
+// ✅ Compat com códigos antigos que procuram essa função
+window.carregarHistoricoCliente = abrirHistorico;
+
+// ✅ Função para testar no console
+window.forcarAtualizacaoHistorico = forcarAtualizacaoHistorico;
+window.zcForceHistoryRefresh = forcarAtualizacaoHistorico;
 
 try {
   window.getHist = getHist;

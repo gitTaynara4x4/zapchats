@@ -71,6 +71,16 @@ function instKey(v) {
   return s;
 }
 
+function cssEscape(v) {
+  try {
+    if (window.CSS && typeof window.CSS.escape === 'function') {
+      return window.CSS.escape(String(v));
+    }
+  } catch {}
+
+  return String(v ?? '').replace(/["\\]/g, '\\$&');
+}
+
 function parseJwt(token) {
   try {
     const payload = String(token || '').split('.')[1];
@@ -1075,6 +1085,545 @@ async function fetchJsonOrThrow(url, payload) {
 }
 
 /* =========================================================
+   ENVIO OTIMISTA DE TEXTO
+   - aparece no chat na hora com reloginho
+   - se backend confirmar, troca para check
+   - se backend falhar, marca como erro
+   ========================================================= */
+
+function makeTempMsgId() {
+  return `tmp:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getInstValueFromPayload(instPayload, convRef = null) {
+  return (
+    instPayload?.instancia_id ??
+    instPayload?.instance ??
+    convRef?.instId ??
+    getInstanciaForSend(convRef?.key) ??
+    null
+  );
+}
+
+function getCacheArrayForConv(convKey, inst = null) {
+  try {
+    const arr = window.getHist?.(inst, convKey);
+    if (Array.isArray(arr)) return arr.slice();
+  } catch {}
+
+  try {
+    const arr = window.cacheHistoricos?.[convKey];
+    if (Array.isArray(arr)) return arr.slice();
+  } catch {}
+
+  return [];
+}
+
+function saveHistoryArray(convKey, inst, arr) {
+  const safeArr = Array.isArray(arr) ? arr.slice() : [];
+
+  try {
+    if (typeof window.primeWith === 'function') {
+      window.primeWith(inst, convKey, safeArr, null);
+    }
+  } catch {}
+
+  try {
+    window.cacheHistoricos = window.cacheHistoricos || {};
+    window.cacheHistoricos[convKey] = safeArr;
+  } catch {}
+
+  try { window.salvarCache?.(); } catch {}
+}
+
+function sortHistoryArray(arr) {
+  return (Array.isArray(arr) ? arr.slice() : []).sort((a, b) => {
+    const ta =
+      Number(a?.ts || 0) ||
+      Date.parse(a?.timestamp || a?.created_at || a?.data || '') ||
+      0;
+
+    const tb =
+      Number(b?.ts || 0) ||
+      Date.parse(b?.timestamp || b?.created_at || b?.data || '') ||
+      0;
+
+    if (ta !== tb) return ta - tb;
+
+    const ia = String(a?.id ?? a?.msg_id ?? '');
+    const ib = String(b?.id ?? b?.msg_id ?? '');
+    return ia.localeCompare(ib, 'pt-BR', { numeric: true });
+  });
+}
+
+function renderHistorySafely(convKey, append = true) {
+  try {
+    if (!isOpenConversationSameAs(convKey)) return;
+    if (typeof window.renderHistoricoDoCache === 'function') {
+      window.renderHistoricoDoCache(convKey, append);
+    }
+  } catch {}
+}
+
+function addOptimisticTextMessage({ convRef, cli, text, instPayload }) {
+  const convKey = convRef?.key;
+  if (!convKey) return null;
+
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const tempId = makeTempMsgId();
+  const instValue = getInstValueFromPayload(instPayload, convRef);
+  const currentColabId = getCurrentColabId();
+
+  const msg = stripUndefined({
+    id: tempId,
+    msg_id: tempId,
+    message_id: tempId,
+    wa_msg_id: tempId,
+
+    conversation_key: convKey,
+    conversation_id: convKey,
+
+    cliente_id: convRef.kind === 'c' ? convRef.entityId : undefined,
+    grupo_id: convRef.kind === 'g' ? convRef.entityId : undefined,
+    instancia_id: instValue,
+
+    conteudo: text,
+    texto: text,
+    mensagem: text,
+
+    tipo: 'saida',
+    from_me: true,
+    origem: 'atendente',
+
+    ack: 0,
+    timestamp: nowIso,
+    created_at: nowIso,
+    data: nowIso,
+    ts: now.getTime(),
+
+    colaborador_id: currentColabId || undefined,
+    atendente_id: currentColabId || undefined,
+
+    pending: true,
+    failed: false,
+    temp: true,
+    optimistic: true,
+    __optimistic: true,
+    __temp_id: tempId,
+  });
+
+  try {
+    if (typeof window.salvarNoCache === 'function') {
+      window.salvarNoCache(convKey, [msg]);
+    } else {
+      const arr = getCacheArrayForConv(convKey, instValue);
+      arr.push(msg);
+      saveHistoryArray(convKey, instValue, sortHistoryArray(arr));
+    }
+  } catch {
+    const arr = getCacheArrayForConv(convKey, instValue);
+    arr.push(msg);
+    saveHistoryArray(convKey, instValue, sortHistoryArray(arr));
+  }
+
+  renderHistorySafely(convKey, true);
+
+  try {
+    window.Lista?.updatePreview?.(convKey, {
+      texto: text,
+      ts: nowIso,
+      ack: 0,
+    });
+  } catch {}
+
+  try {
+    window.Lista?.bumpToTop?.(convKey);
+  } catch {}
+
+  try {
+    window.dispatchEvent(new CustomEvent('zc:optimistic-message-created', {
+      detail: {
+        conversation_key: convKey,
+        conversation_id: convKey,
+        temp_id: tempId,
+        message: msg,
+      },
+    }));
+  } catch {}
+
+  return {
+    convKey,
+    tempId,
+    inst: instValue,
+    message: msg,
+    createdAt: nowIso,
+    cli,
+    convRef,
+  };
+}
+
+function getNested(obj, paths) {
+  for (const p of paths) {
+    try {
+      const parts = String(p).split('.');
+      let cur = obj;
+      for (const part of parts) {
+        if (cur == null) break;
+        cur = cur[part];
+      }
+      if (cur !== undefined && cur !== null && cur !== '') return cur;
+    } catch {}
+  }
+  return null;
+}
+
+function extractBackendSentMessage(resp, optimistic) {
+  const db = resp?.db || resp?.mensagem || resp?.message || resp?.data || {};
+  const evo = resp?.evolution || resp?.evo || resp?.evolution_response || {};
+
+  const msgId =
+    getNested(resp, [
+      'db.msg_id',
+      'db.wa_msg_id',
+      'db.evo_msg_id',
+      'db.message_id',
+      'db.id_msg',
+      'msg_id',
+      'wa_msg_id',
+      'evo_msg_id',
+      'message_id',
+      'evolution.key.id',
+      'evolution.data.key.id',
+      'evolution.message.key.id',
+      'evolution.response.key.id',
+      'evolution.result.key.id',
+      'evo.key.id',
+      'evo.data.key.id',
+    ]) ||
+    getNested(evo, [
+      'key.id',
+      'data.key.id',
+      'message.key.id',
+      'response.key.id',
+      'result.key.id',
+    ]);
+
+  const dbId =
+    getNested(resp, [
+      'db.id',
+      'db.mensagem_id',
+      'mensagem_id',
+      'message_db_id',
+      'id',
+    ]);
+
+  const ackRaw =
+    getNested(resp, [
+      'db.ack',
+      'ack',
+      'status_ack',
+      'db.status_ack',
+    ]);
+
+  const ackNum = Number(ackRaw);
+  const ack = Number.isFinite(ackNum) && ackNum >= 0 ? ackNum : 1;
+
+  const ts =
+    getNested(resp, [
+      'db.timestamp',
+      'db.created_at',
+      'timestamp',
+      'created_at',
+      'ts',
+    ]) ||
+    optimistic?.message?.timestamp ||
+    new Date().toISOString();
+
+  const atendimentoId =
+    getNested(resp, [
+      'db.atendimento_id',
+      'atendimento_id',
+    ]);
+
+  const instanciaId =
+    getNested(resp, [
+      'db.instancia_id',
+      'instancia_id',
+    ]) ||
+    optimistic?.message?.instancia_id ||
+    optimistic?.inst ||
+    null;
+
+  const finalMsgId = idKey(msgId) || optimistic?.tempId;
+
+  return {
+    ...(optimistic?.message || {}),
+
+    id: dbId ?? finalMsgId,
+    db_id: dbId ?? undefined,
+
+    msg_id: finalMsgId,
+    message_id: finalMsgId,
+    wa_msg_id: finalMsgId,
+
+    ack,
+    timestamp: ts,
+    created_at: ts,
+    data: ts,
+
+    atendimento_id: atendimentoId ?? optimistic?.message?.atendimento_id,
+    instancia_id: instanciaId,
+
+    pending: false,
+    failed: false,
+    temp: false,
+    optimistic: false,
+    sent: true,
+    __optimistic: false,
+    __temp_id: optimistic?.tempId,
+  };
+}
+
+function replaceOptimisticInCache(optimistic, finalMsg) {
+  if (!optimistic?.convKey || !optimistic?.tempId) return;
+
+  const convKey = optimistic.convKey;
+  const inst = finalMsg?.instancia_id ?? optimistic.inst ?? null;
+  const tempId = String(optimistic.tempId);
+  const realId = String(finalMsg?.msg_id || '');
+
+  const arr = getCacheArrayForConv(convKey, inst);
+  let replaced = false;
+
+  const out = [];
+
+  for (const item of arr) {
+    const itemMsgId = String(item?.msg_id ?? item?.message_id ?? item?.wa_msg_id ?? item?.id ?? '');
+
+    if (itemMsgId === tempId || String(item?.__temp_id || '') === tempId) {
+      if (!replaced) {
+        out.push(finalMsg);
+        replaced = true;
+      }
+      continue;
+    }
+
+    if (realId && itemMsgId === realId) {
+      if (!replaced) {
+        out.push({
+          ...item,
+          ...finalMsg,
+          ack: Math.max(Number(item?.ack || 0), Number(finalMsg?.ack || 0)),
+        });
+        replaced = true;
+      }
+      continue;
+    }
+
+    out.push(item);
+  }
+
+  if (!replaced) out.push(finalMsg);
+
+  const byKey = new Map();
+  const noKey = [];
+
+  for (const item of out) {
+    const k = String(item?.msg_id ?? item?.message_id ?? item?.wa_msg_id ?? '');
+    if (!k) {
+      noKey.push(item);
+      continue;
+    }
+
+    const prev = byKey.get(k);
+    if (!prev) {
+      byKey.set(k, item);
+    } else {
+      byKey.set(k, {
+        ...prev,
+        ...item,
+        ack: Math.max(Number(prev?.ack || 0), Number(item?.ack || 0)),
+      });
+    }
+  }
+
+  saveHistoryArray(convKey, inst, sortHistoryArray([...byKey.values(), ...noKey]));
+}
+
+function updateDomOptimisticSuccess(optimistic, finalMsg) {
+  try {
+    const tempId = optimistic?.tempId;
+    const realId = finalMsg?.msg_id || tempId;
+    if (!tempId) return;
+
+    const safeTemp = cssEscape(tempId);
+    const row = document.querySelector(
+      `.msg-row[data-msg-id="${safeTemp}"], .msg-row[data-id="${safeTemp}"]`
+    );
+
+    if (!row) return;
+
+    row.dataset.id = String(realId);
+    row.dataset.msgId = String(realId);
+    row.dataset.messageId = String(realId);
+    row.dataset.waMsgId = String(realId);
+    row.dataset.pending = '0';
+    row.dataset.failed = '0';
+    row.classList.remove('is-pending', 'is-failed');
+    row.classList.add('is-sent');
+
+    const bubble = row.querySelector('.bubble');
+    if (bubble) {
+      bubble.dataset.msgId = String(realId);
+      bubble.dataset.messageId = String(realId);
+      bubble.dataset.waMsgId = String(realId);
+      bubble.dataset.pending = '0';
+      bubble.dataset.failed = '0';
+      bubble.classList.remove('is-pending', 'is-failed');
+      bubble.classList.add('is-sent');
+    }
+
+    if (typeof window.getAckIcon === 'function') {
+      const meta = row.querySelector('.meta');
+      let ackEl = row.querySelector('.msg-ack');
+
+      const ackHtml = window.getAckIcon(Number(finalMsg?.ack ?? 1)).replace(
+        '<span class="msg-ack"',
+        `<span class="msg-ack" data-msg-id="${String(realId).replace(/"/g, '&quot;')}"`
+      );
+
+      if (ackEl) {
+        ackEl.outerHTML = ackHtml;
+      } else if (meta) {
+        meta.insertAdjacentHTML('afterbegin', ackHtml);
+      }
+    }
+
+    try {
+      window.dispatchEvent(new CustomEvent('zc:optimistic-message-confirmed', {
+        detail: {
+          conversation_key: optimistic.convKey,
+          conversation_id: optimistic.convKey,
+          temp_id: tempId,
+          msg_id: realId,
+          message: finalMsg,
+        },
+      }));
+    } catch {}
+  } catch {}
+}
+
+function updateDomOptimisticFailed(optimistic, err) {
+  try {
+    const tempId = optimistic?.tempId;
+    if (!tempId) return;
+
+    const safeTemp = cssEscape(tempId);
+    const row = document.querySelector(
+      `.msg-row[data-msg-id="${safeTemp}"], .msg-row[data-id="${safeTemp}"]`
+    );
+
+    if (!row) return;
+
+    row.dataset.pending = '0';
+    row.dataset.failed = '1';
+    row.title = err?.message || 'Falha ao enviar mensagem';
+    row.classList.remove('is-pending');
+    row.classList.add('is-failed');
+
+    const bubble = row.querySelector('.bubble');
+    if (bubble) {
+      bubble.dataset.pending = '0';
+      bubble.dataset.failed = '1';
+      bubble.title = err?.message || 'Falha ao enviar mensagem';
+      bubble.classList.remove('is-pending');
+      bubble.classList.add('is-failed');
+    }
+
+    const meta = row.querySelector('.meta');
+    const ackEl = row.querySelector('.msg-ack');
+
+    const failedHtml = `
+      <span class="msg-ack msg-ack-failed" data-msg-id="${String(tempId).replace(/"/g, '&quot;')}" title="Falha ao enviar">
+        <i class="fa-solid fa-circle-exclamation"></i>
+      </span>
+    `;
+
+    if (ackEl) {
+      ackEl.outerHTML = failedHtml;
+    } else if (meta) {
+      meta.insertAdjacentHTML('afterbegin', failedHtml);
+    }
+  } catch {}
+}
+
+function finalizeOptimisticTextMessage(optimistic, resp) {
+  if (!optimistic?.convKey) return;
+
+  const finalMsg = extractBackendSentMessage(resp, optimistic);
+  replaceOptimisticInCache(optimistic, finalMsg);
+  updateDomOptimisticSuccess(optimistic, finalMsg);
+
+  try {
+    window.Lista?.updatePreview?.(optimistic.convKey, {
+      texto: finalMsg.conteudo || finalMsg.texto || finalMsg.mensagem || optimistic.message?.conteudo || '',
+      ts: finalMsg.timestamp || optimistic.createdAt,
+      ack: Number(finalMsg.ack ?? 1),
+    });
+  } catch {}
+
+  try {
+    window.dispatchEvent(new CustomEvent('zc:send-success-refresh', {
+      detail: {
+        conversation_key: optimistic.convKey,
+        conversation_id: optimistic.convKey,
+        reason: 'send:text',
+        optimistic: true,
+        msg_id: finalMsg.msg_id,
+        temp_id: optimistic.tempId,
+      },
+    }));
+  } catch {}
+}
+
+function failOptimisticTextMessage(optimistic, err) {
+  if (!optimistic?.convKey) return;
+
+  const convKey = optimistic.convKey;
+  const inst = optimistic.inst ?? optimistic.message?.instancia_id ?? null;
+  const tempId = String(optimistic.tempId || '');
+
+  const arr = getCacheArrayForConv(convKey, inst).map((m) => {
+    const k = String(m?.msg_id ?? m?.message_id ?? m?.wa_msg_id ?? m?.id ?? '');
+    if (k !== tempId && String(m?.__temp_id || '') !== tempId) return m;
+
+    return {
+      ...m,
+      ack: -1,
+      pending: false,
+      failed: true,
+      erro_envio: err?.message || 'Falha ao enviar',
+      error: err?.message || 'Falha ao enviar',
+    };
+  });
+
+  saveHistoryArray(convKey, inst, arr);
+  updateDomOptimisticFailed(optimistic, err);
+
+  try {
+    window.dispatchEvent(new CustomEvent('zc:optimistic-message-failed', {
+      detail: {
+        conversation_key: convKey,
+        conversation_id: convKey,
+        temp_id: tempId,
+        error: err?.message || 'Falha ao enviar',
+      },
+    }));
+  } catch {}
+}
+
+/* =========================================================
    REFRESH LEVE APÓS ENVIAR
    IMPORTANTE:
    - NÃO chama selecionarClienteObj()
@@ -1213,6 +1762,23 @@ function afterSuccessfulSend(conversationKey = null, reason = 'send') {
         conversation_key: key,
         conversation_id: key,
         reason,
+      },
+    }));
+  } catch {}
+}
+
+function afterSuccessfulOptimisticTextSend(conversationKey = null, reason = 'send:text') {
+  const key = getOpenHistoryKey(conversationKey);
+
+  refreshListAfterSend(key, reason);
+
+  try {
+    window.dispatchEvent(new CustomEvent('zc:send-success-refresh', {
+      detail: {
+        conversation_key: key,
+        conversation_id: key,
+        reason,
+        optimistic: true,
       },
     }));
   } catch {}
@@ -2298,24 +2864,33 @@ function afterSuccessfulSend(conversationKey = null, reason = 'send') {
     const inst = requireInstPayloadOrWarn(convRef.key);
     if (!inst) return;
 
-    setSendingBusy(true);
+    const payload = stripUndefined({
+      empresa_id: EMPRESA_ID || undefined,
+      ...getIdentityPayload(cli || convRef.key),
+      number: dest,
+      text,
+      ...inst,
+    });
+
+    window.__debugLastSendPayload = payload;
+
+    const optimistic = addOptimisticTextMessage({
+      convRef,
+      cli,
+      text,
+      instPayload: inst,
+    });
+
+    inputMsg.value = '';
+    inputMsg.dispatchEvent(new Event('input', { bubbles: true }));
+    applyComposerInteractiveState();
 
     try {
-      const payload = stripUndefined({
-        empresa_id: EMPRESA_ID || undefined,
-        ...getIdentityPayload(cli || convRef.key),
-        number: dest,
-        text,
-        ...inst,
-      });
-
-      window.__debugLastSendPayload = payload;
-
       const resp = await fetchJsonOrThrow('/api/atendimento/send/text', payload);
       applyInstanceFromResponse(resp);
 
-      inputMsg.value = '';
-      afterSuccessfulSend(convRef.key, 'send:text');
+      finalizeOptimisticTextMessage(optimistic, resp);
+      afterSuccessfulOptimisticTextSend(convRef.key, 'send:text');
 
       try {
         window.dispatchEvent(new CustomEvent('atendimento:refresh-meta', {
@@ -2326,9 +2901,9 @@ function afterSuccessfulSend(conversationKey = null, reason = 'send') {
       try { window.focusComposer?.(); } catch {}
     } catch (e) {
       console.error('[send/text] erro', e);
+      failOptimisticTextMessage(optimistic, e);
       toast(e?.message || 'Falha ao enviar.', false);
     } finally {
-      setSendingBusy(false);
       applyComposerInteractiveState();
     }
   }
