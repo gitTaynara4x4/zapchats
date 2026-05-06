@@ -6,6 +6,7 @@ import {
 
 // ====== Config ======
 const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
+const PREP_OVERLAY_SECONDS = 30;
 const PRESENCE_REFRESH_INTERVAL_MS = 30000;
 const PRESENCE_COOLDOWN_MS = 15000;
 const PRESENCE_CONCURRENCY = 4;
@@ -619,7 +620,7 @@ function ensureOverlay(){
       </div>
       <div id="prep-ovl-title">Estamos organizando tudo para você.</div>
       <div id="prep-ovl-sub">Esta ação pode demorar um pouco.</div>
-      <div id="prep-ovl-time"><span class="time-pill">01:00</span></div>
+      <div id="prep-ovl-time"><span class="time-pill">00:30</span></div>
     </div>
   `;
   document.body.appendChild(ovl);
@@ -646,14 +647,19 @@ function setStatus(txt, fade=true){
 }
 
 function pickSequence(historico){
-  if ((historico||'none') === 'none') return ['Sincronizando seus contatos...'];
+  if ((historico || 'none') === 'none') {
+    return [
+      'Sincronizando seus contatos...',
+      'Organizando sua instância...',
+      'Preparando seu atendimento...'
+    ];
+  }
+
   return [
-    'Sincronizando suas mensagens...',
+    'Sincronizando suas mensagens recentes...',
     'Sincronizando seus contatos...',
-    'Sincronizando suas imagens...',
-    'Sincronizando seus vídeos...',
-    'Sincronizando seus documentos...',
-    'Sincronizando seus áudios...',
+    'Organizando suas conversas...',
+    'Preparando seu atendimento...'
   ];
 }
 
@@ -664,7 +670,7 @@ function startStatusLoop(){
   prep.seqIdx = 0;
   setStatus(items[0], true);
   prep.seqTmr = setInterval(() => {
-    prep.seqIdx = (prep.seqIdx + 1) % items.length;
+    prep.seqIdx = (prep.seqIdx + 1) % prep.seq.length;
     setStatus(prep.seq[prep.seqIdx], true);
   }, 4000);
 }
@@ -674,7 +680,7 @@ function paintTime(){
   if (pill) pill.textContent = formatClock(prep.left);
 }
 
-async function showPrepOverlayOneMinute(seconds=60, opts={}){
+async function showPrepOverlayOneMinute(seconds=PREP_OVERLAY_SECONDS, opts={}){
   if (prep.active) return;
   prep.active = true;
   prep.left = Math.max(1, Math.floor(seconds));
@@ -1297,7 +1303,7 @@ function handleConnected(instanceFromMsg){
   hideQR();
   try { hideModal(); } catch {}
   wantQR = false;
-  showPrepOverlayOneMinute(60, { historico: lastHistoricoUsed });
+  showPrepOverlayOneMinute(PREP_OVERLAY_SECONDS, { historico: lastHistoricoUsed });
   scheduleLoad(200);
 
   if (instanceFromMsg) schedulePresenceRefresh(200, { force:true, onlyInstances:[instanceFromMsg] });
