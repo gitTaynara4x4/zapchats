@@ -55,6 +55,14 @@ def _lock_instance_for_update(
 
 
 def _has_bound_data(db: Session, instancia_id: int) -> bool:
+    """
+    Verifica se a instância possui dados vinculados.
+
+    Importante:
+    - clientes.instancia_id conta como vínculo, mas NÃO significa que o cliente
+      será apagado. Cliente é compartilhado por empresa/telefone.
+    - A limpeza segura apenas solta/reatribui o cliente da instância removida.
+    """
     iid = int(instancia_id)
 
     checks = [
@@ -164,46 +172,7 @@ def _has_bound_data(db: Session, instancia_id: int) -> bool:
         if row:
             return True
 
-    # Mensagens ligadas aos clientes da instância,
-    # mesmo quando mensagens.instancia_id está NULL ou diferente.
-    row = db.execute(
-        text(
-            """
-            SELECT 1
-            FROM mensagens
-            WHERE cliente_id IN (
-                SELECT id
-                FROM clientes
-                WHERE instancia_id = :iid
-            )
-            LIMIT 1
-            """
-        ),
-        {"iid": iid},
-    ).first()
-    if row:
-        return True
-
-    # Mídias ligadas aos clientes da instância.
-    row = db.execute(
-        text(
-            """
-            SELECT 1
-            FROM midias
-            WHERE cliente_id IN (
-                SELECT id
-                FROM clientes
-                WHERE instancia_id = :iid
-            )
-            LIMIT 1
-            """
-        ),
-        {"iid": iid},
-    ).first()
-    if row:
-        return True
-
-    # Mídias ligadas às mensagens dos clientes da instância.
+    # Mídias ligadas às mensagens desta instância.
     row = db.execute(
         text(
             """
@@ -213,11 +182,6 @@ def _has_bound_data(db: Session, instancia_id: int) -> bool:
                 SELECT id
                 FROM mensagens
                 WHERE instancia_id = :iid
-                   OR cliente_id IN (
-                        SELECT id
-                        FROM clientes
-                        WHERE instancia_id = :iid
-                   )
             )
             LIMIT 1
             """
@@ -227,7 +191,7 @@ def _has_bound_data(db: Session, instancia_id: int) -> bool:
     if row:
         return True
 
-    # Mensagens de grupo ligadas aos grupos da instância.
+    # Mensagens de grupo ligadas aos grupos desta instância.
     row = db.execute(
         text(
             """
@@ -246,7 +210,7 @@ def _has_bound_data(db: Session, instancia_id: int) -> bool:
     if row:
         return True
 
-    # Mídias ligadas aos grupos da instância.
+    # Mídias ligadas aos grupos desta instância.
     row = db.execute(
         text(
             """
@@ -265,7 +229,7 @@ def _has_bound_data(db: Session, instancia_id: int) -> bool:
     if row:
         return True
 
-    # Mídias ligadas às mensagens de grupo da instância.
+    # Mídias ligadas às mensagens de grupo desta instância.
     row = db.execute(
         text(
             """
@@ -318,6 +282,7 @@ def _delete_remote_evolution(instance_name: str) -> None:
             else:
                 resp = sess.post(url, json=body, timeout=15)
 
+            # 404 aqui é aceitável: a instância remota já pode ter sido removida.
             if resp.status_code in (200, 202, 204, 404):
                 return
         except Exception:
@@ -338,6 +303,70 @@ def _recalc_empresa_counter(db: Session, empresa_id: int) -> int:
     return total_restantes
 
 
+def _reassign_clients_from_removed_instance(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+) -> None:
+    """
+    Nunca apaga clientes.
+
+    Como cliente é único por empresa/telefone, ele pode ter histórico em várias
+    instâncias. Ao remover uma instância:
+
+    1. Se o cliente.instancia_id apontava para a instância removida e ainda há
+       mensagens dele em outra instância, reatribui para outra instância.
+    2. Se não houver outra instância, seta instancia_id = NULL.
+    """
+
+    params = {
+        "empresa_id": int(empresa_id),
+        "instancia_id": int(instancia_id),
+    }
+
+    # Reatribui cliente para outra instância onde ele ainda tenha mensagens.
+    db.execute(
+        text(
+            """
+            WITH candidatos AS (
+                SELECT
+                    m.cliente_id,
+                    MAX(m.instancia_id) AS nova_instancia_id
+                FROM mensagens m
+                JOIN clientes c ON c.id = m.cliente_id
+                WHERE c.empresa_id = :empresa_id
+                  AND c.instancia_id = :instancia_id
+                  AND m.empresa_id = :empresa_id
+                  AND m.instancia_id IS NOT NULL
+                  AND m.instancia_id <> :instancia_id
+                GROUP BY m.cliente_id
+            )
+            UPDATE clientes c
+            SET instancia_id = candidatos.nova_instancia_id
+            FROM candidatos
+            WHERE c.id = candidatos.cliente_id
+              AND c.empresa_id = :empresa_id
+              AND c.instancia_id = :instancia_id
+            """
+        ),
+        params,
+    )
+
+    # O que sobrou apontando para a instância removida fica sem instância principal.
+    db.execute(
+        text(
+            """
+            UPDATE clientes
+            SET instancia_id = NULL
+            WHERE empresa_id = :empresa_id
+              AND instancia_id = :instancia_id
+            """
+        ),
+        params,
+    )
+
+
 def _delete_local_bound_data(
     db: Session,
     *,
@@ -345,19 +374,23 @@ def _delete_local_bound_data(
     instancia_id: int,
 ) -> None:
     """
-    Remove todos os dados locais vinculados à instância.
+    Remove dados locais vinculados SOMENTE à instância removida.
 
-    Ordem segura baseada no models.py:
+    Regra crítica:
+    - NÃO apagar clientes.
+    - NÃO apagar mensagens/mídias/atendimentos apenas porque o cliente estava com
+      clientes.instancia_id apontando para esta instância.
+    - Cliente é compartilhado por telefone dentro da empresa.
+    - Apagar uma instância nunca pode apagar o histórico do mesmo contato em
+      outras instâncias.
 
-    - atendimento_pinned_conversas depende de clientes/atendimentos/instância
-    - atendimento_participantes depende de atendimentos
-    - midias depende de clientes/mensagens/grupos/mensagens_grupo/instância
-    - mensagens depende de clientes/atendimentos/instância
-    - mensagens_grupo depende de grupos/instância
-    - atendimentos depende de clientes/instância
-    - grupos depende de instância
-    - clientes depende de empresa/instância
-    - pivôs dependem da instância
+    O que pode ser apagado:
+    - mensagens.instancia_id = instância removida
+    - atendimentos.instancia_id = instância removida
+    - grupos.instancia_id = instância removida
+    - mensagens_grupo da instância/grupos da instância
+    - mídias da instância/mensagens/grupos da instância
+    - vínculos de fila/departamento/chatbot/pins da instância
     """
 
     params = {
@@ -368,7 +401,7 @@ def _delete_local_bound_data(
     # ==========================================================
     # DISPAROS
     #
-    # Mantém o histórico de disparos, mas solta vínculos com a
+    # Mantém histórico de disparos, mas solta vínculos com a
     # instância e com mídias que serão removidas.
     # ==========================================================
     db.execute(
@@ -382,9 +415,9 @@ def _delete_local_bound_data(
                 WHERE empresa_id = :empresa_id
                   AND (
                         instancia_id = :instancia_id
-                        OR cliente_id IN (
+                        OR mensagem_id IN (
                             SELECT id
-                            FROM clientes
+                            FROM mensagens
                             WHERE empresa_id = :empresa_id
                               AND instancia_id = :instancia_id
                         )
@@ -393,20 +426,6 @@ def _delete_local_bound_data(
                             FROM grupos
                             WHERE empresa_id = :empresa_id
                               AND instancia_id = :instancia_id
-                        )
-                        OR mensagem_id IN (
-                            SELECT id
-                            FROM mensagens
-                            WHERE empresa_id = :empresa_id
-                              AND (
-                                    instancia_id = :instancia_id
-                                    OR cliente_id IN (
-                                        SELECT id
-                                        FROM clientes
-                                        WHERE empresa_id = :empresa_id
-                                          AND instancia_id = :instancia_id
-                                    )
-                              )
                         )
                         OR mensagem_grupo_id IN (
                             SELECT id
@@ -443,6 +462,10 @@ def _delete_local_bound_data(
 
     # ==========================================================
     # PINS DE CONVERSA
+    #
+    # Remove apenas pins vinculados diretamente à instância removida
+    # ou aos atendimentos da instância removida.
+    # Não remove por conversa_id/cliente_id.
     # ==========================================================
     db.execute(
         text(
@@ -451,25 +474,11 @@ def _delete_local_bound_data(
             WHERE empresa_id = :empresa_id
               AND (
                     instancia_id = :instancia_id
-                    OR conversa_id IN (
-                        SELECT id
-                        FROM clientes
-                        WHERE empresa_id = :empresa_id
-                          AND instancia_id = :instancia_id
-                    )
                     OR atendimento_id IN (
                         SELECT id
                         FROM atendimentos
                         WHERE empresa_id = :empresa_id
-                          AND (
-                                instancia_id = :instancia_id
-                                OR cliente_id IN (
-                                    SELECT id
-                                    FROM clientes
-                                    WHERE empresa_id = :empresa_id
-                                      AND instancia_id = :instancia_id
-                                )
-                          )
+                          AND instancia_id = :instancia_id
                     )
               )
             """
@@ -489,15 +498,7 @@ def _delete_local_bound_data(
                     SELECT id
                     FROM atendimentos
                     WHERE empresa_id = :empresa_id
-                      AND (
-                            instancia_id = :instancia_id
-                            OR cliente_id IN (
-                                SELECT id
-                                FROM clientes
-                                WHERE empresa_id = :empresa_id
-                                  AND instancia_id = :instancia_id
-                            )
-                      )
+                      AND instancia_id = :instancia_id
               )
             """
         ),
@@ -562,9 +563,13 @@ def _delete_local_bound_data(
     )
 
     # ==========================================================
-    # MÍDIAS VINCULADAS A MENSAGENS 1:1 / CLIENTES / INSTÂNCIA
+    # MÍDIAS 1:1 DA INSTÂNCIA
     #
-    # Precisa vir antes de apagar mensagens e clientes.
+    # Apaga:
+    # - mídia com midias.instancia_id = instância removida
+    # - mídia ligada a mensagem da instância removida
+    #
+    # NÃO apaga por cliente_id.
     # ==========================================================
     db.execute(
         text(
@@ -573,39 +578,11 @@ def _delete_local_bound_data(
             WHERE empresa_id = :empresa_id
               AND (
                     instancia_id = :instancia_id
-                    OR cliente_id IN (
-                        SELECT id
-                        FROM clientes
-                        WHERE empresa_id = :empresa_id
-                          AND instancia_id = :instancia_id
-                    )
                     OR mensagem_id IN (
                         SELECT id
                         FROM mensagens
                         WHERE empresa_id = :empresa_id
-                          AND (
-                                instancia_id = :instancia_id
-                                OR cliente_id IN (
-                                    SELECT id
-                                    FROM clientes
-                                    WHERE empresa_id = :empresa_id
-                                      AND instancia_id = :instancia_id
-                                )
-                                OR atendimento_id IN (
-                                    SELECT id
-                                    FROM atendimentos
-                                    WHERE empresa_id = :empresa_id
-                                      AND (
-                                            instancia_id = :instancia_id
-                                            OR cliente_id IN (
-                                                SELECT id
-                                                FROM clientes
-                                                WHERE empresa_id = :empresa_id
-                                                  AND instancia_id = :instancia_id
-                                            )
-                                      )
-                                )
-                          )
+                          AND instancia_id = :instancia_id
                     )
               )
             """
@@ -614,10 +591,7 @@ def _delete_local_bound_data(
     )
 
     # ==========================================================
-    # MÍDIAS VINCULADAS A GRUPOS / MENSAGENS DE GRUPO
-    #
-    # Corrige FK fk_midias_grupo:
-    # midias.grupo_id -> grupos.id
+    # MÍDIAS DE GRUPO DA INSTÂNCIA
     # ==========================================================
     db.execute(
         text(
@@ -652,53 +626,24 @@ def _delete_local_bound_data(
     )
 
     # ==========================================================
-    # MENSAGENS 1:1
+    # MENSAGENS 1:1 DA INSTÂNCIA
     #
-    # Corrige FK mensagens_cliente_id_fkey:
-    # mensagens.cliente_id -> clientes.id
-    #
-    # Apaga por:
-    # - mensagens.instancia_id
-    # - mensagens.cliente_id dos clientes da instância
-    # - mensagens.atendimento_id dos atendimentos da instância/cliente
+    # NÃO apaga por cliente_id, porque o cliente pode existir em
+    # outras instâncias.
     # ==========================================================
     db.execute(
         text(
             """
             DELETE FROM mensagens
             WHERE empresa_id = :empresa_id
-              AND (
-                    instancia_id = :instancia_id
-                    OR cliente_id IN (
-                        SELECT id
-                        FROM clientes
-                        WHERE empresa_id = :empresa_id
-                          AND instancia_id = :instancia_id
-                    )
-                    OR atendimento_id IN (
-                        SELECT id
-                        FROM atendimentos
-                        WHERE empresa_id = :empresa_id
-                          AND (
-                                instancia_id = :instancia_id
-                                OR cliente_id IN (
-                                    SELECT id
-                                    FROM clientes
-                                    WHERE empresa_id = :empresa_id
-                                      AND instancia_id = :instancia_id
-                                )
-                          )
-                    )
-              )
+              AND instancia_id = :instancia_id
             """
         ),
         params,
     )
 
     # ==========================================================
-    # MENSAGENS DE GRUPO
-    #
-    # Precisa vir antes de apagar grupos.
+    # MENSAGENS DE GRUPO DA INSTÂNCIA
     # ==========================================================
     db.execute(
         text(
@@ -720,34 +665,23 @@ def _delete_local_bound_data(
     )
 
     # ==========================================================
-    # ATENDIMENTOS
+    # ATENDIMENTOS DA INSTÂNCIA
     #
-    # Precisa vir antes de apagar clientes.
+    # NÃO apaga por cliente_id.
     # ==========================================================
     db.execute(
         text(
             """
             DELETE FROM atendimentos
             WHERE empresa_id = :empresa_id
-              AND (
-                    instancia_id = :instancia_id
-                    OR cliente_id IN (
-                        SELECT id
-                        FROM clientes
-                        WHERE empresa_id = :empresa_id
-                          AND instancia_id = :instancia_id
-                    )
-              )
+              AND instancia_id = :instancia_id
             """
         ),
         params,
     )
 
     # ==========================================================
-    # GRUPOS
-    #
-    # Agora pode apagar, porque midias e mensagens_grupo
-    # já foram apagadas.
+    # GRUPOS DA INSTÂNCIA
     # ==========================================================
     db.execute(
         text(
@@ -763,18 +697,13 @@ def _delete_local_bound_data(
     # ==========================================================
     # CLIENTES
     #
-    # Agora pode apagar, porque mensagens, mídias, atendimentos
-    # e pins já foram apagados.
+    # Nunca apagar clientes ao remover instância.
+    # Apenas reatribuir/soltar o ponteiro clientes.instancia_id.
     # ==========================================================
-    db.execute(
-        text(
-            """
-            DELETE FROM clientes
-            WHERE empresa_id = :empresa_id
-              AND instancia_id = :instancia_id
-            """
-        ),
-        params,
+    _reassign_clients_from_removed_instance(
+        db,
+        empresa_id=empresa_id,
+        instancia_id=instancia_id,
     )
 
 
@@ -804,8 +733,9 @@ def _remover_instancia_tx(
         )
 
     try:
-        # Mesmo se cascade=True, quando force=True fazemos limpeza manual.
-        # Isso protege contra FK antiga no banco sem ON DELETE CASCADE real.
+        # Mesmo se cascade=True, quando force=True fazemos limpeza manual segura.
+        # Isso evita FK antiga no banco e, principalmente, protege clientes
+        # compartilhados entre instâncias.
         if force:
             _delete_local_bound_data(
                 db,
@@ -815,6 +745,15 @@ def _remover_instancia_tx(
 
         elif not cascade:
             _delete_local_bound_data(
+                db,
+                empresa_id=empresa_id,
+                instancia_id=instancia_id,
+            )
+
+        else:
+            # Mesmo no modo cascade, precisamos soltar clientes antes de apagar
+            # a instância para evitar ON DELETE CASCADE acidental em clientes.
+            _reassign_clients_from_removed_instance(
                 db,
                 empresa_id=empresa_id,
                 instancia_id=instancia_id,
@@ -839,6 +778,7 @@ def _remover_instancia_tx(
             "restantes": restantes,
             "instancia_id": instancia_id,
             "instance_name": instance_name,
+            "clientes_preservados": True,
         }
 
     except HTTPException:
