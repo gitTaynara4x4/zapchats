@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
-load_dotenv()
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, HTMLResponse, JSONResponse
@@ -91,22 +90,32 @@ from backend.routers.billing_asaas import router as billing_asaas_router
 # =======================================
 # Config & utils
 # =======================================
+load_dotenv()
+
+
 def LOG(*args):
     print("[MAIN]", *args)
 
 
-load_dotenv()
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return bool(default)
+
+    s = str(raw).strip().lower()
+    if s in ("1", "true", "yes", "y", "on", "sim"):
+        return True
+    if s in ("0", "false", "no", "n", "off", "nao", "não", ""):
+        return False
+
+    return bool(default)
+
 
 ENV = (os.getenv("ENV", "dev") or "dev").lower()
 
 # =========================================================
 # Versão do build
 # =========================================================
-# Em produção, o ideal é você passar BUILD_ID pelo EasyPanel/Docker.
-# Exemplo:
-# BUILD_ID=202604300001
-#
-# Se não passar, ele gera um novo a cada start do app.
 BUILD_ID = os.getenv("BUILD_ID") or datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 
 # Caminhos do frontend
@@ -318,11 +327,12 @@ PROD_ORIGINS = [
 ALLOW_ORIGINS = DEV_ORIGINS if ENV == "dev" else PROD_ORIGINS
 
 # ---- Flags de integração Evolution/Rabbit ----
-USE_RABBIT = any(
+RABBIT_ENABLED_BY_ENV = _env_bool("USE_RABBIT", True)
+USE_RABBIT = RABBIT_ENABLED_BY_ENV and any(
     os.getenv(k)
     for k in ("RABBITMQ_URI", "RABBITMQ_URL", "AMQP_URL")
 )
-USE_EVO_WS = (os.getenv("EVOLUTION_WS_SUBSCRIBE", "true").lower() == "true")
+USE_EVO_WS = _env_bool("EVOLUTION_WS_SUBSCRIBE", True)
 
 # Cookies / CSRF
 ACCESS_COOKIE_NAME = os.getenv("ACCESS_COOKIE_NAME", "access_token")
@@ -338,16 +348,6 @@ CSRF_COOKIE_MAX_AGE = int(os.getenv("CSRF_COOKIE_MAX_AGE", str(60 * 60 * 24 * 30
 # =======================================
 # Trusted hosts
 # =======================================
-# Corrige "Invalid host header".
-# Inclui:
-# - localhost
-# - 127.0.0.1
-# - domínio oficial
-# - wildcard do EasyPanel
-# - IP da VPS
-#
-# Se precisar liberar tudo temporariamente:
-# ALLOWED_HOSTS=*
 ALLOWED_HOSTS_RAW = os.getenv(
     "ALLOWED_HOSTS",
     "localhost,127.0.0.1,zapschat.com.br,www.zapschat.com.br,ZapsChat.com.br,www.ZapsChat.com.br,*.easypanel.host,82.25.74.157",
@@ -1207,19 +1207,28 @@ async def _start_integrations():
     LOG(f"[STARTUP] BUILD_ID={BUILD_ID}")
     LOG(f"[STARTUP] ALLOWED_HOSTS={ALLOWED_HOSTS}")
 
+    db_ok = False
     for i in range(10):
         try:
             with engine.begin() as conn:
                 conn.exec_driver_sql("SELECT 1")
                 Base.metadata.create_all(bind=conn)
+            db_ok = True
             LOG("[STARTUP] DB ok e tabelas garantidas.")
             break
         except Exception as e:
             LOG(f"[STARTUP][DB] tentativa {i + 1}/10 falhou: {e}")
             time.sleep(2)
 
+    if not db_ok:
+        raise RuntimeError("DB indisponível após 10 tentativas no startup.")
+
     loop = asyncio.get_running_loop()
     app.state.loop = loop
+    app.state.rabbit_task = None
+    app.state.rabbit_stop = None
+    app.state.evo_task = None
+    app.state.evo_stop = None
 
     if USE_RABBIT:
         try:
@@ -1230,7 +1239,10 @@ async def _start_integrations():
         except Exception as e:
             LOG(f"[STARTUP][Rabbit] falha ao iniciar consumer: {e}")
     else:
-        LOG("[STARTUP] RabbitMQ desabilitado (sem RABBITMQ_URI/RABBITMQ_URL/AMQP_URL).")
+        if not RABBIT_ENABLED_BY_ENV:
+            LOG("[STARTUP] RabbitMQ desabilitado (USE_RABBIT=false).")
+        else:
+            LOG("[STARTUP] RabbitMQ desabilitado (sem RABBITMQ_URI/RABBITMQ_URL/AMQP_URL).")
 
     if USE_EVO_WS:
         try:
@@ -1247,38 +1259,76 @@ async def _start_integrations():
         LOG("⚠ RabbitMQ + Evolution WS ativos. Mensagens ficam no Rabbit; WS só QR/connection.")
 
 
-@app.on_event("shutdown")
-async def _stop_integrations():
-    stop = getattr(app.state, "rabbit_stop", None)
-    if stop:
-        try:
-            await stop()
-        except Exception:
-            pass
+async def _stop_named_task(task, *, name: str, timeout: float = 3.0) -> None:
+    if not task:
+        return
 
-    task = getattr(app.state, "rabbit_task", None)
-    if task:
+    try:
+        if task.done():
+            try:
+                task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                LOG(f"[SHUTDOWN][{name}] task já finalizada com erro: {e}")
+            return
+
         try:
-            await asyncio.wait_for(task, timeout=3)
-        except Exception:
+            await asyncio.wait_for(task, timeout=timeout)
+        except asyncio.CancelledError:
+            pass
+        except asyncio.TimeoutError:
             try:
                 task.cancel()
             except Exception:
                 pass
 
+            try:
+                await asyncio.wait_for(task, timeout=1.0)
+            except asyncio.CancelledError:
+                pass
+            except asyncio.TimeoutError:
+                LOG(f"[SHUTDOWN][{name}] task não finalizou após cancelamento.")
+            except Exception as e:
+                LOG(f"[SHUTDOWN][{name}] erro após cancelamento: {e}")
+
+        except Exception as e:
+            LOG(f"[SHUTDOWN][{name}] erro aguardando task: {e}")
+            try:
+                task.cancel()
+            except Exception:
+                pass
+
+    except asyncio.CancelledError:
+        pass
+
+
+@app.on_event("shutdown")
+async def _stop_integrations():
+    LOG("[SHUTDOWN] encerrando integrações...")
+
+    stop = getattr(app.state, "rabbit_stop", None)
+    if stop:
+        try:
+            await stop()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            LOG(f"[SHUTDOWN][Rabbit] erro no stop: {e}")
+
+    task = getattr(app.state, "rabbit_task", None)
+    await _stop_named_task(task, name="Rabbit", timeout=3.0)
+
     evo_stop = getattr(app.state, "evo_stop", None)
     if evo_stop:
         try:
             await evo_stop()
-        except Exception:
+        except asyncio.CancelledError:
             pass
+        except Exception as e:
+            LOG(f"[SHUTDOWN][EvoWS] erro no stop: {e}")
 
     evo_task = getattr(app.state, "evo_task", None)
-    if evo_task:
-        try:
-            await asyncio.wait_for(evo_task, timeout=3)
-        except Exception:
-            try:
-                evo_task.cancel()
-            except Exception:
-                pass
+    await _stop_named_task(evo_task, name="EvoWS", timeout=3.0)
+
+    LOG("[SHUTDOWN] integrações encerradas.")
