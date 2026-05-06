@@ -1,23 +1,39 @@
 # backend/security/deps.py
-from fastapi import Depends, HTTPException, status
-from jose import jwt, JWTError
-from sqlalchemy.orm import Session
-from backend.database import get_db
-from backend import models
+from __future__ import annotations
 
-JWT_SECRET = "seu-segredo"
-JWT_ALG = "HS256"
+from typing import Any
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> models.Usuario:
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
-        user_id = int(payload.get("sub"))
-        tv = int(payload.get("tv", 0))  # token_version embutida no token
-    except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
+from fastapi import Depends
 
-    user = db.query(models.Usuario).get(user_id)
-    if not user or not user.is_active or user.token_version != tv:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sessão expirada")
+from backend.routers.auth import (
+    get_current_user as _auth_get_current_user,
+    get_current_identity as _auth_get_current_identity,
+)
 
-    return user
+
+def get_current_user(
+    current_user: Any = Depends(_auth_get_current_user),
+) -> Any:
+    """
+    Compatibilidade para módulos antigos que importam:
+        from backend.security.deps import get_current_user
+
+    Este arquivo NÃO deve criar outro JWT_SECRET.
+    Ele reaproveita o auth oficial do projeto.
+    """
+    return current_user
+
+
+def get_current_identity(
+    identity: dict = Depends(_auth_get_current_identity),
+) -> dict:
+    """
+    Compatibilidade para módulos que precisam da identidade decodificada.
+    """
+    return identity
+
+
+__all__ = [
+    "get_current_user",
+    "get_current_identity",
+]

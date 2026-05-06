@@ -1,7 +1,7 @@
 #backend\integrations\evolution\services\group_sync_service.py
 
 
-from __future__ import annotation
+from __future__ import annotations
 import asyncio
 import time
 

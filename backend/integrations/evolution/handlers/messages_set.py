@@ -183,10 +183,19 @@ async def on_messages_set(inst_id: str, data):
             try:
                 await conexoes_ativas.send_message(
                     f"emp:{empresa_id}",
-                    {"type": "history_sync_done", "total": total, "imported": 0, "serverTimestamp": _server_ts_ms()},
+                    {
+                        "type": "history_sync_done",
+                        "total": total,
+                        "imported": 0,
+                        "serverTimestamp": _server_ts_ms(),
+                    },
                 )
             except Exception:
                 pass
+
+            if historico_opcao != "none":
+                _HISTORY_DONE_AT[inst_id] = _now_utc().timestamp()
+
             return
 
         got_lock = _try_acquire_hist_lock(db, empresa_id, inst.id)
@@ -202,6 +211,7 @@ async def on_messages_set(inst_id: str, data):
                 limite_tempo = _now_utc() - timedelta(days=dias)
 
             novas = 0
+            last_commit_novas = 0
             me_num = _me_number_by_inst(inst)
             cap = max(1, int(HISTORY_MAX_IMPORT))
 
@@ -483,7 +493,7 @@ async def on_messages_set(inst_id: str, data):
                         except Exception as e:
                             _log_ctx("[HIST][midia] erro ao salvar", idx=idx, msg_id=msg_id, err=str(e))
 
-                if novas % PROG_STEP == 0:
+                if idx % PROG_STEP == 0:
                     try:
                         await conexoes_ativas.send_message(
                             f"emp:{empresa_id}",
@@ -496,11 +506,12 @@ async def on_messages_set(inst_id: str, data):
                         )
                     except Exception:
                         pass
-                    _log_ctx("[HIST] progress", imported=novas, total=total)
+                    _log_ctx("[HIST] progress", imported=novas, total=total, processed=idx)
 
-                if novas % max(1, HISTORY_BATCH_COMMIT) == 0:
+                if novas > last_commit_novas and novas % max(1, HISTORY_BATCH_COMMIT) == 0:
                     try:
                         db.commit()
+                        last_commit_novas = novas
                         _log_ctx("[HIST] commit", imported=novas)
                     except Exception as e:
                         if _is_deadlock_error(e):
@@ -513,7 +524,7 @@ async def on_messages_set(inst_id: str, data):
                         else:
                             raise
 
-                if novas % max(1, HISTORY_SLEEP_EVERY) == 0:
+                if idx % max(1, HISTORY_SLEEP_EVERY) == 0:
                     await asyncio.sleep(0)
 
             try:
@@ -555,8 +566,8 @@ async def on_messages_set(inst_id: str, data):
             except Exception:
                 pass
 
-            if historico_opcao != "none" and novas > 0:
-                _HISTORY_DONE_AT[inst_id] = now_s
+            if historico_opcao != "none":
+                _HISTORY_DONE_AT[inst_id] = _now_utc().timestamp()
 
         finally:
             try:
