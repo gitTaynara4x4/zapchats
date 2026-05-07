@@ -12,6 +12,8 @@
 // - abertura via import { abrirPerfilAtual } ou window.abrirPerfilAtual(...)
 // - suporte a GRUPO: abre /api/atendimento/grupos/{grupo_id}/profile
 //   quando a conversa atual for g:{grupo_id}:{instancia_id}
+// - CACHE LOCAL: abrir/fechar/abrir não fica batendo no banco toda hora
+// - Botão "Atualizar" ignora cache e consulta Evolution
 
 const $ = (s, r = document) => r.querySelector(s);
 const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
@@ -29,6 +31,137 @@ let PERFIL_MEDIA_ITEMS = [];
 let PERFIL_MEDIA_FILTER = 'all';
 let mediaModalRefs = null;
 let mediaModalBound = false;
+
+/* =========================
+   CACHE LOCAL DO PERFIL
+   ========================= */
+
+const PERFIL_CACHE_TTL_MS = Number(window.ZC_PERFIL_CACHE_TTL_MS || 90_000);
+const PERFIL_STALE_CACHE_TTL_MS = Number(window.ZC_PERFIL_STALE_CACHE_TTL_MS || 10 * 60_000);
+const PERFIL_MEDIA_CACHE_TTL_MS = Number(window.ZC_PERFIL_MEDIA_CACHE_TTL_MS || 45_000);
+
+const perfilMemoryCache = new Map();
+
+function nowMs() {
+  return Date.now();
+}
+
+function safeJsonParse(raw) {
+  try {
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function perfilCacheBucket(type, kind, id) {
+  const k = String(kind || 'cliente') === 'grupo' ? 'grupo' : 'cliente';
+  const n = Number(id || 0);
+  if (!EMPRESA_ID || !n) return '';
+  return `${type}:${k}:${n}`;
+}
+
+function perfilStorageKey(bucket) {
+  return `zc:perfil:${EMPRESA_ID}:${bucket}`;
+}
+
+function getPerfilCache(type, kind, id, { allowStale = false } = {}) {
+  const bucket = perfilCacheBucket(type, kind, id);
+  if (!bucket) return { hit: false, fresh: false, value: null };
+
+  let obj = perfilMemoryCache.get(bucket) || null;
+
+  if (!obj) {
+    obj = safeJsonParse(localStorage.getItem(perfilStorageKey(bucket)));
+    if (obj && typeof obj === 'object') {
+      perfilMemoryCache.set(bucket, obj);
+    }
+  }
+
+  if (!obj || typeof obj !== 'object' || !('value' in obj)) {
+    return { hit: false, fresh: false, value: null };
+  }
+
+  const at = Number(obj.at || 0);
+  const exp = Number(obj.exp || 0);
+  const staleExp = Number(obj.staleExp || 0);
+  const ts = nowMs();
+
+  const fresh = exp > ts;
+  const staleOk = allowStale && staleExp > ts;
+
+  if (!fresh && !staleOk) {
+    try {
+      perfilMemoryCache.delete(bucket);
+      localStorage.removeItem(perfilStorageKey(bucket));
+    } catch {}
+    return { hit: false, fresh: false, value: null };
+  }
+
+  return {
+    hit: true,
+    fresh,
+    stale: !fresh && staleOk,
+    value: obj.value,
+    at,
+  };
+}
+
+function setPerfilCache(type, kind, id, value, ttlMs = PERFIL_CACHE_TTL_MS) {
+  const bucket = perfilCacheBucket(type, kind, id);
+  if (!bucket || value == null) return;
+
+  const ts = nowMs();
+
+  const obj = {
+    at: ts,
+    exp: ts + Number(ttlMs || PERFIL_CACHE_TTL_MS),
+    staleExp: ts + PERFIL_STALE_CACHE_TTL_MS,
+    value,
+  };
+
+  try {
+    perfilMemoryCache.set(bucket, obj);
+  } catch {}
+
+  try {
+    localStorage.setItem(perfilStorageKey(bucket), JSON.stringify(obj));
+  } catch {}
+}
+
+function delPerfilCache(type, kind, id) {
+  const bucket = perfilCacheBucket(type, kind, id);
+  if (!bucket) return;
+
+  try {
+    perfilMemoryCache.delete(bucket);
+  } catch {}
+
+  try {
+    localStorage.removeItem(perfilStorageKey(bucket));
+  } catch {}
+}
+
+function invalidatePerfilCache(kind, id) {
+  delPerfilCache('profile', kind, id);
+  delPerfilCache('media', kind, id);
+}
+
+function clearAllPerfilCache() {
+  try {
+    perfilMemoryCache.clear();
+  } catch {}
+
+  try {
+    const prefix = `zc:perfil:${EMPRESA_ID}:`;
+    Object.keys(localStorage).forEach((k) => {
+      if (k.startsWith(prefix)) localStorage.removeItem(k);
+    });
+  } catch {}
+}
+
+window.zcClearPerfilCache = clearAllPerfilCache;
+window.zcInvalidatePerfilCache = invalidatePerfilCache;
 
 /* =========================
    CONTROLE DE REQUEST ATIVO
@@ -853,7 +986,7 @@ function renderMediaModalItem(item = {}) {
   `;
 }
 
-async function tryLoadAllMedia() {
+async function tryLoadAllMedia({ bust = false } = {}) {
   if (PERFIL_KIND_ATUAL === 'grupo') {
     return PERFIL_MEDIA_ITEMS;
   }
@@ -862,10 +995,23 @@ async function tryLoadAllMedia() {
 
   if (!cid || !EMPRESA_ID) return PERFIL_MEDIA_ITEMS;
 
+  if (!bust) {
+    const cached = getPerfilCache('media', 'cliente', cid);
+
+    if (cached.hit && cached.fresh && Array.isArray(cached.value)) {
+      PERFIL_MEDIA_ITEMS = cached.value;
+      return PERFIL_MEDIA_ITEMS;
+    }
+  }
+
   try {
     const resp = await fetch(
       `/api/atendimento/clientes/${cid}/profile/media?empresa_id=${EMPRESA_ID}`,
-      { credentials: 'include' }
+      {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' },
+      }
     );
 
     if (!resp.ok) throw new Error(`status ${resp.status}`);
@@ -878,8 +1024,16 @@ async function tryLoadAllMedia() {
       PERFIL_MEDIA_ITEMS = data.items;
     }
 
+    setPerfilCache('media', 'cliente', cid, PERFIL_MEDIA_ITEMS, PERFIL_MEDIA_CACHE_TTL_MS);
+
     return PERFIL_MEDIA_ITEMS;
   } catch {
+    const cached = getPerfilCache('media', 'cliente', cid, { allowStale: true });
+
+    if (cached.hit && Array.isArray(cached.value)) {
+      PERFIL_MEDIA_ITEMS = cached.value;
+    }
+
     return PERFIL_MEDIA_ITEMS;
   }
 }
@@ -1700,11 +1854,13 @@ function setLoadingState(loading, text = '') {
    CARREGAR / ATUALIZAR
    ========================= */
 
-async function carregarPerfilBanco(explicitId = null) {
+async function carregarPerfilBanco(explicitId = null, opts = {}) {
   const kind = PERFIL_KIND_ATUAL === 'grupo' ? 'grupo' : 'cliente';
   const id = kind === 'grupo'
     ? getGrupoId(explicitId)
     : getClienteId(explicitId);
+
+  const bust = opts.bust === true || opts.force === true;
 
   if (!id || !EMPRESA_ID) {
     toastLocal({
@@ -1715,6 +1871,23 @@ async function carregarPerfilBanco(explicitId = null) {
     return null;
   }
 
+  if (!bust) {
+    const cached = getPerfilCache('profile', kind, id, { allowStale: true });
+
+    if (cached.hit) {
+      applyProfile(cached.value, {
+        syncForm: true,
+        syncNote: cached.fresh
+          ? 'Dados carregados do cache local. Use “Atualizar” para consultar o WhatsApp.'
+          : 'Exibindo cache local enquanto atualizamos os dados do sistema.',
+      });
+
+      if (cached.fresh) {
+        return cached.value;
+      }
+    }
+  }
+
   const req = beginPerfilRequest(id);
 
   try {
@@ -1723,6 +1896,8 @@ async function carregarPerfilBanco(explicitId = null) {
       {
         credentials: 'include',
         signal: req.signal,
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' },
       }
     );
 
@@ -1735,6 +1910,8 @@ async function carregarPerfilBanco(explicitId = null) {
     if (!isPerfilRequestStillValid(req.seq, id, kind)) {
       return null;
     }
+
+    setPerfilCache('profile', kind, id, j, PERFIL_CACHE_TTL_MS);
 
     applyProfile(j, {
       syncForm: true,
@@ -1751,6 +1928,17 @@ async function carregarPerfilBanco(explicitId = null) {
 
     if (!isPerfilRequestStillValid(req.seq, id, kind)) {
       return null;
+    }
+
+    const fallback = getPerfilCache('profile', kind, id, { allowStale: true });
+
+    if (fallback.hit) {
+      applyProfile(fallback.value, {
+        syncForm: true,
+        syncNote: 'Não conseguimos consultar o sistema agora. Exibindo último cache salvo.',
+      });
+
+      return fallback.value;
     }
 
     toastLocal({
@@ -1786,6 +1974,8 @@ async function refreshEvolutionProfile(explicitId = null) {
         method: 'POST',
         credentials: 'include',
         signal: req.signal,
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' },
       }
     );
 
@@ -1805,6 +1995,12 @@ async function refreshEvolutionProfile(explicitId = null) {
 
     if (kind === 'cliente' && canSyncEmail && j.email) {
       r.email.value = String(j.email || '').trim().toLowerCase();
+    }
+
+    setPerfilCache('profile', kind, id, j, PERFIL_CACHE_TTL_MS);
+
+    if (kind === 'cliente' && Array.isArray(j.midias_recentes)) {
+      setPerfilCache('media', kind, id, j.midias_recentes, PERFIL_MEDIA_CACHE_TTL_MS);
     }
 
     applyProfile(j, {
@@ -1942,12 +2138,15 @@ async function salvarPerfil() {
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        cache: 'no-store',
       }
     );
 
     if (!resp.ok) {
       throw new Error(`Falha ao salvar (${resp.status})`);
     }
+
+    invalidatePerfilCache('cliente', cid);
 
     setBannerTip('Dados salvos com sucesso.');
 
@@ -1957,7 +2156,7 @@ async function salvarPerfil() {
       type: 'ok',
     });
 
-    await carregarPerfilBanco(cid);
+    await carregarPerfilBanco(cid, { bust: true });
   } catch (err) {
     console.error('[perfil] salvar()', err);
 
