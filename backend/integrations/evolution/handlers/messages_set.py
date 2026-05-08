@@ -44,6 +44,7 @@ from .shared import (
     upsert_cliente,
 )
 
+
 ENABLE_MESSAGES_SET = (os.getenv("ENABLE_MESSAGES_SET", "true").lower() == "true")
 HISTORY_LIMIT_HOURS = int(os.getenv("HISTORY_LIMIT_HOURS", "0") or "0")
 HISTORY_IGNORE_AFTER_DONE_MIN = int(os.getenv("HISTORY_IGNORE_AFTER_DONE_MIN", "15") or "15")
@@ -130,6 +131,81 @@ def _resolve_remote_jid_history(
     return None
 
 
+async def _emit_history_start(
+    *,
+    empresa_id: int,
+    total: int,
+) -> None:
+    try:
+        await conexoes_ativas.send_message(
+            f"emp:{empresa_id}",
+            {
+                "type": "history_sync_start",
+                "total": int(total),
+                "serverTimestamp": _server_ts_ms(),
+            },
+        )
+    except Exception:
+        pass
+
+
+async def _emit_history_progress(
+    *,
+    empresa_id: int,
+    imported: int,
+    total: int,
+) -> None:
+    try:
+        await conexoes_ativas.send_message(
+            f"emp:{empresa_id}",
+            {
+                "type": "history_sync_progress",
+                "imported": int(imported),
+                "total": int(total),
+                "serverTimestamp": _server_ts_ms(),
+            },
+        )
+    except Exception:
+        pass
+
+
+async def _emit_history_done(
+    *,
+    empresa_id: int,
+    total: int,
+    imported: int,
+    reason: str | None = None,
+) -> None:
+    payload = {
+        "type": "history_sync_done",
+        "total": int(total),
+        "imported": int(imported),
+        "serverTimestamp": _server_ts_ms(),
+    }
+
+    if reason:
+        payload["reason"] = str(reason)
+
+    try:
+        await conexoes_ativas.send_message(f"emp:{empresa_id}", payload)
+    except Exception:
+        pass
+
+
+def _history_window(historico_opcao: str):
+    """
+    Calcula a janela real do histórico.
+
+    Se HISTORY_LIMIT_HOURS estiver definido, ele manda.
+    No seu env atual, HISTORY_LIMIT_HOURS=24, então 24h força 24h.
+    """
+    if HISTORY_LIMIT_HOURS > 0:
+        return _now_utc() - timedelta(hours=HISTORY_LIMIT_HOURS)
+
+    dias = 1 if historico_opcao == "24h" else (7 if historico_opcao == "7d" else 0)
+    return _now_utc() - timedelta(days=dias)
+
+
 @handler(EvoEvent.MESSAGES_SET)
 async def on_messages_set(inst_id: str, data):
     if not ENABLE_MESSAGES_SET:
@@ -147,7 +223,7 @@ async def on_messages_set(inst_id: str, data):
     with SessionLocal() as db:
         inst = _get_inst_row(db, inst_id)
         if not inst:
-            LOG(f"Instância não encontrada: {inst_id}")
+            LOG(f"[MESSAGES_SET] Instância não encontrada: {inst_id}")
             return
 
         empresa_id = int(inst.empresa_id)
@@ -171,31 +247,41 @@ async def on_messages_set(inst_id: str, data):
             HISTORY_BATCH_COMMIT=HISTORY_BATCH_COMMIT,
         )
 
-        try:
-            await conexoes_ativas.send_message(
-                f"emp:{empresa_id}",
-                {"type": "history_sync_start", "total": total, "serverTimestamp": _server_ts_ms()},
+        await _emit_history_start(empresa_id=empresa_id, total=total)
+
+        if historico_opcao == "none":
+            _log_ctx("[HIST] ignorado: historico_restaurar=none", inst=inst_id, total=total)
+
+            await _emit_history_done(
+                empresa_id=empresa_id,
+                total=total,
+                imported=0,
+                reason="history_option_none",
             )
-        except Exception:
-            pass
+            return
 
-        if historico_opcao == "none" or not mensagens:
-            try:
-                await conexoes_ativas.send_message(
-                    f"emp:{empresa_id}",
-                    {
-                        "type": "history_sync_done",
-                        "total": total,
-                        "imported": 0,
-                        "serverTimestamp": _server_ts_ms(),
-                    },
-                )
-            except Exception:
-                pass
+        if not mensagens:
+            """
+            Muito importante:
+            Se a opção é 24h/7d, mas a Evolution mandou MESSAGES_SET vazio,
+            NÃO marcamos _HISTORY_DONE_AT.
 
-            if historico_opcao != "none":
-                _HISTORY_DONE_AT[inst_id] = _now_utc().timestamp()
+            Antes isso podia fazer o sistema ignorar uma próxima tentativa
+            por HISTORY_IGNORE_AFTER_DONE_MIN minutos.
+            """
+            _log_ctx(
+                "[HIST] vazio: não marcar como concluído",
+                inst=inst_id,
+                historico_opcao=historico_opcao,
+                total=0,
+            )
 
+            await _emit_history_done(
+                empresa_id=empresa_id,
+                total=0,
+                imported=0,
+                reason="messages_set_empty",
+            )
             return
 
         got_lock = _try_acquire_hist_lock(db, empresa_id, inst.id)
@@ -204,18 +290,19 @@ async def on_messages_set(inst_id: str, data):
             return
 
         try:
-            if HISTORY_LIMIT_HOURS > 0:
-                limite_tempo = _now_utc() - timedelta(hours=HISTORY_LIMIT_HOURS)
-            else:
-                dias = 1 if historico_opcao == "24h" else (7 if historico_opcao == "7d" else 0)
-                limite_tempo = _now_utc() - timedelta(days=dias)
+            limite_tempo = _history_window(historico_opcao)
 
             novas = 0
             last_commit_novas = 0
             me_num = _me_number_by_inst(inst)
             cap = max(1, int(HISTORY_MAX_IMPORT))
 
-            _log_ctx("[HIST] janela/limites", limite_utc=_iso_utc(limite_tempo), cap=cap)
+            _log_ctx(
+                "[HIST] janela/limites",
+                limite_utc=_iso_utc(limite_tempo),
+                cap=cap,
+                historico_opcao=historico_opcao,
+            )
 
             try:
                 RECENT_SEC = int(os.getenv("HISTORY_RECENT_WS_SEC", "120") or "120")
@@ -263,6 +350,7 @@ async def on_messages_set(inst_id: str, data):
                     from_me = bool(key.get("fromMe", False))
                     author_j = (key.get("participant") or m.get("participant") or "")
                     author_j = jid_strip_device(author_j) if isinstance(author_j, str) else ""
+
                     conteudo = extract_text_from_baileys(m)
                     media_meta = None if DISABLE_MEDIA_ON_HISTORY else extract_media_meta(m)
 
@@ -288,9 +376,13 @@ async def on_messages_set(inst_id: str, data):
                     avatar = avatar_from_contact_like(m)
                     if avatar and (getattr(grupo, "avatar_url", None) or "") != avatar:
                         grupo.avatar_url = avatar
+
                     _carimbar_inst(grupo, inst)
 
-                    if msg_id and db.query(models.MensagemGrupo.id).filter_by(grupo_id=grupo.id, msg_id=str(msg_id)).first():
+                    if msg_id and db.query(models.MensagemGrupo.id).filter_by(
+                        grupo_id=grupo.id,
+                        msg_id=str(msg_id),
+                    ).first():
                         _log_ctx("[HIST][skip] duplicada (grupo)", idx=idx, msg_id=msg_id, grupo_id=grupo.id)
                         continue
 
@@ -391,6 +483,7 @@ async def on_messages_set(inst_id: str, data):
                             avatar_url=None,
                         ),
                     )
+
                     if not cli_id:
                         _log_ctx("[HIST][skip] upsert_cliente None", idx=idx, msg_id=msg_id, telefone=telefone)
                         continue
@@ -403,6 +496,7 @@ async def on_messages_set(inst_id: str, data):
                             msg_id=str(msg_id),
                             instancia_id=inst.id,
                         )
+
                         if existing:
                             _log_ctx(
                                 "[HIST][skip] duplicada (1:1)",
@@ -494,18 +588,11 @@ async def on_messages_set(inst_id: str, data):
                             _log_ctx("[HIST][midia] erro ao salvar", idx=idx, msg_id=msg_id, err=str(e))
 
                 if idx % PROG_STEP == 0:
-                    try:
-                        await conexoes_ativas.send_message(
-                            f"emp:{empresa_id}",
-                            {
-                                "type": "history_sync_progress",
-                                "imported": novas,
-                                "total": total,
-                                "serverTimestamp": _server_ts_ms(),
-                            },
-                        )
-                    except Exception:
-                        pass
+                    await _emit_history_progress(
+                        empresa_id=empresa_id,
+                        imported=novas,
+                        total=total,
+                    )
                     _log_ctx("[HIST] progress", imported=novas, total=total, processed=idx)
 
                 if novas > last_commit_novas and novas % max(1, HISTORY_BATCH_COMMIT) == 0:
@@ -519,6 +606,7 @@ async def on_messages_set(inst_id: str, data):
                                 db.rollback()
                             except Exception:
                                 pass
+
                             await asyncio.sleep(0.1)
                             _log_ctx("[HIST] commit-deadlock-rollback", err=str(e))
                         else:
@@ -543,30 +631,34 @@ async def on_messages_set(inst_id: str, data):
             try:
                 await conexoes_ativas.send_message(
                     f"emp:{empresa_id}",
-                    {"type": "reload_clientes", "serverTimestamp": _server_ts_ms()},
-                )
-            except Exception:
-                pass
-
-            try:
-                await conexoes_ativas.send_message(
-                    f"emp:{empresa_id}",
                     {
-                        "type": "history_sync_done",
-                        "total": total,
-                        "imported": novas,
+                        "type": "reload_clientes",
                         "serverTimestamp": _server_ts_ms(),
                     },
                 )
             except Exception:
                 pass
 
+            await _emit_history_done(
+                empresa_id=empresa_id,
+                total=total,
+                imported=novas,
+                reason="done",
+            )
+
             try:
                 invalidate_emp_cache(empresa_id)
             except Exception:
                 pass
 
-            if historico_opcao != "none":
+            """
+            Só marca como feito se realmente recebemos um pacote MESSAGES_SET
+            com mensagens dentro.
+
+            Mesmo que novas=0 por duplicidade/filtro, o evento existiu e foi processado.
+            Se total=0, a gente já retornou antes e NÃO marcou done.
+            """
+            if historico_opcao != "none" and total > 0:
                 _HISTORY_DONE_AT[inst_id] = _now_utc().timestamp()
 
         finally:

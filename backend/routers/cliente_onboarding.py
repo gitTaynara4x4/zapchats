@@ -1,3 +1,5 @@
+# backend/routers/cliente_onboarding.py
+
 from __future__ import annotations
 
 import os
@@ -181,6 +183,7 @@ def _evo_wait_instance_ready(sess: requests.Session, instance: str, timeout_s: i
                     return True
         except Exception:
             pass
+
         time.sleep(0.4)
 
     return False
@@ -269,9 +272,10 @@ def _analisar_saude_mensagens(msgs: list[models.Mensagem]) -> dict:
     if len(saidas) >= 2:
         saidas_ord = sorted(
             [m for m in saidas if m.timestamp],
-            key=lambda m: m.timestamp
+            key=lambda m: m.timestamp,
         )
         diffs = []
+
         for i in range(1, len(saidas_ord)):
             a = saidas_ord[i - 1].timestamp
             b = saidas_ord[i].timestamp
@@ -352,11 +356,18 @@ def _analisar_saude_mensagens(msgs: list[models.Mensagem]) -> dict:
 # =============================
 def _events_minimal() -> List[str]:
     return [
-        "MESSAGES_SET", "MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE",
+        "MESSAGES_SET",
+        "MESSAGES_UPSERT",
+        "MESSAGES_UPDATE",
+        "MESSAGES_DELETE",
         "SEND_MESSAGE",
-        "CONTACTS_SET", "CONTACTS_UPSERT", "CONTACTS_UPDATE",
+        "CONTACTS_SET",
+        "CONTACTS_UPSERT",
+        "CONTACTS_UPDATE",
         "PRESENCE_UPDATE",
-        "GROUPS_UPSERT", "GROUP_UPDATE", "GROUP_PARTICIPANTS_UPDATE",
+        "GROUPS_UPSERT",
+        "GROUP_UPDATE",
+        "GROUP_PARTICIPANTS_UPDATE",
     ]
 
 
@@ -364,10 +375,24 @@ def _ws_events_initial() -> List[str]:
     return ["QRCODE_UPDATED", "CONNECTION_UPDATE"]
 
 
+def _rabbit_bindings() -> List[str]:
+    return [
+        b.strip()
+        for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#").split(",")
+        if b.strip()
+    ]
+
+
 # =============================
 # Evolution – criação e assinatura inicial
 # =============================
 def _evo_create_instance(instance: str, use_pairing: bool) -> None:
+    """
+    Cria a instância já com Rabbit ouvindo os eventos mínimos.
+
+    Antes estava events=[].
+    Isso podia fazer o histórico MESSAGES_SET passar batido logo após o QR.
+    """
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return
 
@@ -379,12 +404,8 @@ def _evo_create_instance(instance: str, use_pairing: bool) -> None:
         "rabbitmq": {
             "enabled": True,
             "exchange": os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange"),
-            "bindings": [
-                b.strip()
-                for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#").split(",")
-                if b.strip()
-            ],
-            "events": [],
+            "bindings": _rabbit_bindings(),
+            "events": _events_minimal(),
         },
         "websocket": {
             "enabled": True,
@@ -403,6 +424,12 @@ def _evo_create_instance(instance: str, use_pairing: bool) -> None:
 
 
 def _evo_set_rabbit_initial(instance: str) -> None:
+    """
+    Configura o Rabbit antes de chamar /instance/connect.
+
+    Antes estava events=[].
+    Agora já inclui MESSAGES_SET para a restauração 24h poder chegar.
+    """
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return
 
@@ -411,14 +438,11 @@ def _evo_set_rabbit_initial(instance: str) -> None:
         "rabbitmq": {
             "enabled": True,
             "exchange": os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange"),
-            "bindings": [
-                b.strip()
-                for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#").split(",")
-                if b.strip()
-            ],
-            "events": [],
+            "bindings": _rabbit_bindings(),
+            "events": _events_minimal(),
         }
     }
+
     try:
         s.post(f"{EVOLUTION_URL}/rabbitmq/set/{instance}", json=body, timeout=20)
     except Exception:
@@ -431,6 +455,7 @@ def _evo_set_websocket_initial(instance: str) -> None:
 
     s = _http()
     body = {"websocket": {"enabled": True, "events": _ws_events_initial()}}
+
     try:
         s.post(f"{EVOLUTION_URL}/websocket/set/{instance}", json=body, timeout=15)
     except Exception:
@@ -604,11 +629,13 @@ def conectar(
     if pendente:
         if payload.apelido:
             pendente.apelido = payload.apelido.strip() or None
+
         pendente.historico_restaurar = payload.historico_restaurar
         db.commit()
 
         _evo_set_rabbit_initial(pendente.instance_name)
         _evo_set_websocket_initial(pendente.instance_name)
+
         conn_json = _evo_connect(pendente.instance_name, number_digits)
         _schedule_cleanup(pendente.instance_name)
 
@@ -621,6 +648,7 @@ def conectar(
                         "base64": qrd.get("base64") or qrd.get("image"),
                         "limit": qrd.get("limit") or qrd.get("timeout"),
                     }
+
                 if qrd.get("pairingCode") or qrd.get("code"):
                     qr = {
                         "pairingCode": qrd.get("pairingCode") or qrd.get("code"),
@@ -639,6 +667,7 @@ def conectar(
         models.EmpresaInstancia.numero_instancia == number_digits,
         models.EmpresaInstancia.connected.is_(True),
     ).first()
+
     if numero_con:
         raise HTTPException(409, "Este número já está conectado em outra instância.")
 
@@ -649,6 +678,7 @@ def conectar(
     exists_name = db.query(models.EmpresaInstancia).filter(
         models.EmpresaInstancia.instance_name == inst
     ).first()
+
     if exists_name:
         if int(exists_name.empresa_id) != int(empresa.id):
             raise HTTPException(409, "instance_name já está em uso.")
@@ -706,11 +736,13 @@ def conectar(
         if conflito and not conflito.connected and int(conflito.empresa_id) == int(empresa.id):
             if payload.apelido:
                 conflito.apelido = payload.apelido.strip() or None
+
             conflito.historico_restaurar = payload.historico_restaurar
             db.commit()
 
             _evo_set_rabbit_initial(conflito.instance_name)
             _evo_set_websocket_initial(conflito.instance_name)
+
             conn_json = _evo_connect(conflito.instance_name, number_digits)
             _schedule_cleanup(conflito.instance_name)
 
@@ -723,6 +755,7 @@ def conectar(
                             "base64": qrd.get("base64") or qrd.get("image"),
                             "limit": qrd.get("limit") or qrd.get("timeout"),
                         }
+
                     if qrd.get("pairingCode") or qrd.get("code"):
                         qr = {
                             "pairingCode": qrd.get("pairingCode") or qrd.get("code"),
@@ -751,6 +784,7 @@ def conectar(
                     "base64": qrd.get("base64") or qrd.get("image"),
                     "limit": qrd.get("limit") or qrd.get("timeout"),
                 }
+
             if qrd.get("pairingCode") or qrd.get("code"):
                 qr = {
                     "pairingCode": qrd.get("pairingCode") or qrd.get("code"),
@@ -778,6 +812,7 @@ def refresh_qr(
     row = db.query(models.EmpresaInstancia).filter(
         models.EmpresaInstancia.instance_name == instance
     ).first()
+
     if not row:
         raise HTTPException(status_code=404, detail="Instância não encontrada.")
 
@@ -788,6 +823,9 @@ def refresh_qr(
         empresa,
         message="Seu plano está vencido. Renove para reativar ou atualizar QR de instâncias.",
     )
+
+    _evo_set_rabbit_initial(instance)
+    _evo_set_websocket_initial(instance)
 
     js = _evo_try_refresh_qr(instance)
 
@@ -800,6 +838,7 @@ def refresh_qr(
                     "base64": qrd.get("base64") or qrd.get("image"),
                     "limit": qrd.get("limit") or qrd.get("timeout"),
                 }
+
             if qrd.get("pairingCode") or qrd.get("code"):
                 qr = {
                     "pairingCode": qrd.get("pairingCode") or qrd.get("code"),
@@ -835,6 +874,7 @@ def consultar_saude_numero(
         models.EmpresaInstancia.id == int(instancia_id),
         models.EmpresaInstancia.empresa_id == int(payload.empresa_id),
     ).first()
+
     if not inst:
         raise HTTPException(status_code=404, detail="Instância não encontrada.")
 
@@ -896,10 +936,14 @@ def marcar_conectado_e_cancelar_cleanup(instance: str, db: Session):
     row = db.query(models.EmpresaInstancia).filter(
         models.EmpresaInstancia.instance_name == instance
     ).first()
+
     if row:
         row.connected = True
+
         emp = db.query(models.Empresa).filter(models.Empresa.id == row.empresa_id).first()
         if emp and hasattr(emp, "quantidade_instancias"):
             emp.quantidade_instancias = _count_connected_instances(db, int(emp.id))
+
         db.commit()
+
     cancel_auto_cleanup(instance)

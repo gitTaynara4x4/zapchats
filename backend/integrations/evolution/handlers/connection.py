@@ -1,4 +1,5 @@
 # backend/integrations/evolution/handlers/connection.py
+
 from __future__ import annotations
 
 import asyncio
@@ -19,6 +20,7 @@ from ..utils.time_utils import _now_utc, _server_ts_ms
 from ..utils.cache_utils import invalidate_emp_cache
 from ..repositories.instancias_repo import get_instancia_by_name
 
+
 SYNC_CONTACTS_ON_CONNECT = (os.getenv("SYNC_CONTACTS_ON_CONNECT", "true").lower() == "true")
 SYNC_CHATS_ON_CONNECT = (os.getenv("SYNC_CHATS_ON_CONNECT", "true").lower() == "true")
 ENABLE_MESSAGES_SET = (os.getenv("ENABLE_MESSAGES_SET", "true").lower() == "true")
@@ -29,7 +31,10 @@ EVOLUTION_URL = (os.getenv("EVOLUTION_URL") or "").rstrip("/")
 EVOLUTION_KEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_KEY") or ""
 HEADERS = {"apikey": EVOLUTION_KEY, "Content-Type": "application/json"} if EVOLUTION_KEY else {}
 
-FULL_EVENTS_WS = ["QRCODE_UPDATED", "CONNECTION_UPDATE"]
+FULL_EVENTS_WS = [
+    "QRCODE_UPDATED",
+    "CONNECTION_UPDATE",
+]
 
 FULL_EVENTS_RABBIT = [
     "MESSAGES_SET",
@@ -40,6 +45,7 @@ FULL_EVENTS_RABBIT = [
     "PRESENCE_UPDATE",
     "GROUPS_UPSERT",
     "GROUPS_UPDATE",
+    "GROUP_UPDATE",
     "GROUP_PARTICIPANTS_UPDATE",
     "CONTACTS_SET",
     "CONTACTS_UPSERT",
@@ -51,11 +57,46 @@ FULL_EVENTS_RABBIT = [
 ]
 
 RABBIT_EXCHANGE = os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange")
-RABBIT_BINDINGS = [
-    b.strip()
-    for b in (os.getenv("RABBITMQ_BINDINGS", "#") or "#").split(",")
-    if b.strip()
-]
+
+
+def _env_csv_first(*names: str, default: str = "#") -> list[str]:
+    """
+    Lê bindings de forma tolerante.
+
+    Ordem:
+    1. RABBITMQ_BINDINGS
+    2. RABBITMQ_BINDING_KEY
+    3. RABBITMQ_ROUTING_KEY
+    4. default "#"
+
+    Isso evita cair por engano em "zapchats.backend" quando queremos "#".
+    """
+    raw = None
+
+    for name in names:
+        value = os.getenv(name)
+        if value is not None and str(value).strip():
+            raw = value
+            break
+
+    if raw is None:
+        raw = default
+
+    out = [
+        b.strip()
+        for b in str(raw or default).split(",")
+        if b.strip()
+    ]
+
+    return out or [default]
+
+
+RABBIT_BINDINGS = _env_csv_first(
+    "RABBITMQ_BINDINGS",
+    "RABBITMQ_BINDING_KEY",
+    "RABBITMQ_ROUTING_KEY",
+    default="#",
+)
 
 # Task viva por instância para não disparar sync duplicada.
 _CONNECT_SYNC_TASKS: dict[str, asyncio.Task] = {}
@@ -82,27 +123,49 @@ def _get_inst_row(db, instance: str):
     return get_instancia_by_name(db, instance_name=instance)
 
 
-def _evo_expand_websocket(instance: str) -> None:
+def _evo_expand_websocket(instance: str) -> bool:
     if not (EVOLUTION_URL and HEADERS and instance):
-        return
+        return False
 
-    body = {"websocket": {"enabled": True, "events": FULL_EVENTS_WS}}
+    body = {
+        "websocket": {
+            "enabled": True,
+            "events": FULL_EVENTS_WS,
+        }
+    }
 
     try:
-        requests.post(
+        r = requests.post(
             f"{EVOLUTION_URL}/websocket/set/{instance}",
             headers=HEADERS,
             json=body,
             timeout=15,
         )
+
+        if not r.ok:
+            LOG(
+                f"[WS] falha ao expandir inst={instance} "
+                f"status={r.status_code} body={str(r.text or '')[:200]}"
+            )
+            return False
+
         LOG(f"[WS] expandido para inst={instance} -> {len(FULL_EVENTS_WS)} eventos")
+        return True
+
     except Exception as e:
-        LOG(f"[WS] falha ao expandir: {e}")
+        LOG(f"[WS] falha ao expandir inst={instance}: {e}")
+        return False
 
 
-def _evo_expand_rabbit(instance: str) -> None:
+def _evo_expand_rabbit(instance: str) -> bool:
+    """
+    Reforça o Rabbit na Evolution com MESSAGES_SET antes/na hora da conexão.
+
+    Isso é idempotente:
+    pode chamar várias vezes sem problema.
+    """
     if not (EVOLUTION_URL and HEADERS and instance):
-        return
+        return False
 
     body = {
         "rabbitmq": {
@@ -114,15 +177,30 @@ def _evo_expand_rabbit(instance: str) -> None:
     }
 
     try:
-        requests.post(
+        r = requests.post(
             f"{EVOLUTION_URL}/rabbitmq/set/{instance}",
             headers=HEADERS,
             json=body,
             timeout=20,
         )
-        LOG(f"[Rabbit] expandido para inst={instance} -> {len(FULL_EVENTS_RABBIT)} eventos")
+
+        if not r.ok:
+            LOG(
+                f"[Rabbit] falha ao expandir inst={instance} "
+                f"status={r.status_code} body={str(r.text or '')[:200]}"
+            )
+            return False
+
+        LOG(
+            f"[Rabbit] expandido para inst={instance} "
+            f"exchange={RABBIT_EXCHANGE} bindings={RABBIT_BINDINGS} "
+            f"events={len(FULL_EVENTS_RABBIT)}"
+        )
+        return True
+
     except Exception as e:
-        LOG(f"[Rabbit] falha ao expandir: {e}")
+        LOG(f"[Rabbit] falha ao expandir inst={instance}: {e}")
+        return False
 
 
 def _mark_disconnected(instance: str):
@@ -179,13 +257,6 @@ def _mark_disconnected(instance: str):
 async def _run_connect_sync_safe(inst_id: str) -> None:
     """
     Roda sync pesada após conexão sem travar o handler CONNECTION_UPDATE.
-
-    Antes:
-      await sync_contatos_completos(...)
-      await sync_chats_completos(...)
-
-    Agora:
-      task separada, com log e proteção contra crash.
     """
     try:
         from .contacts import sync_contatos_completos, sync_chats_completos
@@ -307,12 +378,27 @@ async def on_conn_update(first: str, payload: dict):
         _cancel_connect_sync(inst_id)
         _mark_disconnected(inst_id)
 
-    if conectado and not was_connected:
+    if conectado:
         try:
             cancel_auto_cleanup(inst_id)
         except Exception as e:
             LOG(f"[CLEANUP] falha ao cancelar auto cleanup: {e}")
 
+        # Reforço principal:
+        # Mesmo que já estivesse conectado, reconfigura Rabbit/WebSocket.
+        # Isso garante MESSAGES_SET ativo para histórico 24h/7d.
+        rabbit_ok = _evo_expand_rabbit(inst_id)
+        ws_ok = _evo_expand_websocket(inst_id)
+
+        LOG(
+            f"[CONNECTION] connected inst={inst_id} "
+            f"was_connected={was_connected} "
+            f"historico={historico_opcao} "
+            f"rabbit_ok={rabbit_ok} "
+            f"ws_ok={ws_ok}"
+        )
+
+    if conectado and not was_connected:
         if empresa_id is not None and (historico_opcao in ("24h", "7d")):
             try:
                 await conexoes_ativas.send_message(
@@ -334,9 +420,6 @@ async def on_conn_update(first: str, payload: dict):
                 )
             except Exception as e:
                 LOG(f"[SYNC] falha ao emitir start/progress inicial: {e}")
-
-        _evo_expand_websocket(inst_id)
-        _evo_expand_rabbit(inst_id)
 
     await conexoes_ativas.send_message(
         f"inst:{inst_id}",
