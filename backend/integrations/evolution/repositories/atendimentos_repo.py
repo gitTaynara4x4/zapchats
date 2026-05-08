@@ -1,3 +1,5 @@
+# backend/integrations/evolution/repositories/atendimentos_repo.py
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -36,7 +38,12 @@ def _to_int(v) -> int | None:
     try:
         if v is None:
             return None
-        return int(v)
+
+        s = str(v).strip()
+        if not s:
+            return None
+
+        return int(s)
     except Exception:
         return None
 
@@ -47,7 +54,15 @@ def _now_utc():
 
 def _table_exists(db: Session, table_name: str) -> bool:
     try:
-        reg = db.execute(text(f"SELECT to_regclass('public.{table_name}')")).scalar()
+        name = str(table_name or "").strip()
+        if not name.replace("_", "").isalnum():
+            return False
+
+        reg = db.execute(
+            text("SELECT to_regclass(:table_name)"),
+            {"table_name": f"public.{name}"},
+        ).scalar()
+
         return reg is not None
     except Exception:
         return False
@@ -55,6 +70,115 @@ def _table_exists(db: Session, table_name: str) -> bool:
 
 def _participant_feature_enabled(db: Session) -> bool:
     return has_atendimento_participante_model() and _table_exists(db, "atendimento_participantes")
+
+
+def _cliente_exists_for_empresa(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente_id: int | None,
+) -> bool:
+    cid = _to_int(cliente_id)
+    if cid is None:
+        return False
+
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT 1
+                  FROM clientes
+                 WHERE id = :cliente_id
+                   AND empresa_id = :empresa_id
+                 LIMIT 1
+                """
+            ),
+            {
+                "cliente_id": int(cid),
+                "empresa_id": int(empresa_id),
+            },
+        ).first()
+
+        return bool(row)
+
+    except Exception:
+        _safe_rollback(db)
+        return False
+
+
+def _instancia_exists_for_empresa(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int | None,
+) -> bool:
+    iid = _to_int(instancia_id)
+    if iid is None:
+        return False
+
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT 1
+                  FROM empresa_instancias
+                 WHERE id = :instancia_id
+                   AND empresa_id = :empresa_id
+                 LIMIT 1
+                """
+            ),
+            {
+                "instancia_id": int(iid),
+                "empresa_id": int(empresa_id),
+            },
+        ).first()
+
+        return bool(row)
+
+    except Exception:
+        # compat caso a tabela no seu banco esteja com outro nome/modelo;
+        # não bloqueia atendimento por falha de introspecção.
+        try:
+            row = (
+                db.query(models.EmpresaInstancia.id)
+                .filter(
+                    models.EmpresaInstancia.id == int(iid),
+                    models.EmpresaInstancia.empresa_id == int(empresa_id),
+                )
+                .first()
+            )
+            return bool(row and row[0] is not None)
+        except Exception:
+            _safe_rollback(db)
+            return False
+
+
+def _atendimento_context_ok(
+    atendimento,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    cliente_id: int,
+) -> bool:
+    if atendimento is None:
+        return False
+
+    if hasattr(atendimento, "empresa_id"):
+        emp = _to_int(getattr(atendimento, "empresa_id", None))
+        if emp is not None and emp != int(empresa_id):
+            return False
+
+    if hasattr(atendimento, "cliente_id"):
+        cid = _to_int(getattr(atendimento, "cliente_id", None))
+        if cid is not None and cid != int(cliente_id):
+            return False
+
+    if hasattr(atendimento, "instancia_id"):
+        iid = _to_int(getattr(atendimento, "instancia_id", None))
+        if iid is not None and iid != int(instancia_id):
+            return False
+
+    return True
 
 
 def _status_abertos() -> list[object]:
@@ -69,17 +193,19 @@ def _status_abertos() -> list[object]:
                 except Exception:
                     pass
 
-    # compat legado
     vals.extend(["novo", "aguardando", "em_atendimento", "pausado", "aberto", "pendente"])
 
     out = []
     seen = set()
+
     for v in vals:
         key = str(v)
         if key in seen:
             continue
+
         seen.add(key)
         out.append(v)
+
     return out
 
 
@@ -113,6 +239,13 @@ def _query_open_atendimento(
     if Atendimento is None:
         return None
 
+    if not _cliente_exists_for_empresa(
+        db,
+        empresa_id=int(empresa_id),
+        cliente_id=int(cliente_id),
+    ):
+        return None
+
     q = db.query(Atendimento)
 
     if hasattr(Atendimento, "empresa_id"):
@@ -137,9 +270,18 @@ def _query_open_atendimento(
             pass
 
     try:
-        if hasattr(Atendimento, "id"):
-            return q.order_by(Atendimento.id.desc()).first()
-        return q.first()
+        row = q.order_by(Atendimento.id.desc()).first() if hasattr(Atendimento, "id") else q.first()
+
+        if not _atendimento_context_ok(
+            row,
+            empresa_id=int(empresa_id),
+            instancia_id=int(instancia_id),
+            cliente_id=int(cliente_id),
+        ):
+            return None
+
+        return row
+
     except Exception:
         _safe_rollback(db)
         return None
@@ -154,6 +296,13 @@ def _query_latest_open_atendimento_any_department(
 ):
     Atendimento = _get_atendimento_model()
     if Atendimento is None:
+        return None
+
+    if not _cliente_exists_for_empresa(
+        db,
+        empresa_id=int(empresa_id),
+        cliente_id=int(cliente_id),
+    ):
         return None
 
     q = db.query(Atendimento)
@@ -174,9 +323,18 @@ def _query_latest_open_atendimento_any_department(
             pass
 
     try:
-        if hasattr(Atendimento, "id"):
-            return q.order_by(Atendimento.id.desc()).first()
-        return q.first()
+        row = q.order_by(Atendimento.id.desc()).first() if hasattr(Atendimento, "id") else q.first()
+
+        if not _atendimento_context_ok(
+            row,
+            empresa_id=int(empresa_id),
+            instancia_id=int(instancia_id),
+            cliente_id=int(cliente_id),
+        ):
+            return None
+
+        return row
+
     except Exception:
         _safe_rollback(db)
         return None
@@ -203,9 +361,7 @@ def _list_active_participantes(
         q = q.filter(AP.saiu_em.is_(None))
 
     try:
-        if hasattr(AP, "id"):
-            return q.order_by(AP.id.asc()).all()
-        return q.all()
+        return q.order_by(AP.id.asc()).all() if hasattr(AP, "id") else q.all()
     except Exception:
         _safe_rollback(db)
         return []
@@ -222,11 +378,14 @@ def _list_active_participante_ids(
         empresa_id=int(empresa_id),
         atendimento_id=int(atendimento_id),
     )
+
     out: List[int] = []
+
     for row in rows:
         cid = _to_int(getattr(row, "colaborador_id", None))
         if cid is not None and cid not in out:
             out.append(cid)
+
     return out
 
 
@@ -355,7 +514,6 @@ def ensure_participante_ativo_repo(
         return None
 
     if not _participant_feature_enabled(db):
-        # fallback legado
         if hasattr(atendimento, "operador_id") and getattr(atendimento, "operador_id", None) is None:
             atendimento.operador_id = int(colaborador_id_i)
             db.add(atendimento)
@@ -364,6 +522,7 @@ def ensure_participante_ativo_repo(
 
     atendimento_id = _to_int(getattr(atendimento, "id", None))
     empresa_id = _to_int(getattr(atendimento, "empresa_id", None))
+
     if atendimento_id is None or empresa_id is None:
         return None
 
@@ -384,7 +543,6 @@ def ensure_participante_ativo_repo(
         is_responsavel=is_responsavel,
     )
 
-    # mantém compat legado
     if hasattr(atendimento, "operador_id") and getattr(atendimento, "operador_id", None) is None:
         atendimento.operador_id = int(colaborador_id_i)
         db.add(atendimento)
@@ -417,6 +575,22 @@ def get_or_open_atendimento_repo(
     departamento_id_i = _to_int(departamento_id)
     operador_id_i = _to_int(operador_id)
 
+    if not _cliente_exists_for_empresa(
+        db,
+        empresa_id=empresa_id_i,
+        cliente_id=cliente_id_i,
+    ):
+        return None
+
+    # Se a instância não existir para a empresa, não abre atendimento.
+    # Isso evita atendimento solto quando a instância foi apagada/recriada.
+    if not _instancia_exists_for_empresa(
+        db,
+        empresa_id=empresa_id_i,
+        instancia_id=instancia_id_i,
+    ):
+        return None
+
     try:
         if hasattr(db, "is_active") and not db.is_active:
             _safe_rollback(db)
@@ -430,6 +604,7 @@ def get_or_open_atendimento_repo(
         cliente_id=cliente_id_i,
         departamento_id=departamento_id_i,
     )
+
     if atendimento is not None:
         try:
             _bootstrap_legacy_operador_as_participante(db, atendimento=atendimento)
@@ -441,7 +616,17 @@ def get_or_open_atendimento_repo(
                     colaborador_id=operador_id_i,
                     preferir_responsavel_se_vazio=True,
                 )
-            return atendimento
+
+            if _atendimento_context_ok(
+                atendimento,
+                empresa_id=empresa_id_i,
+                instancia_id=instancia_id_i,
+                cliente_id=cliente_id_i,
+            ):
+                return atendimento
+
+            return None
+
         except Exception:
             _safe_rollback(db)
             return _query_open_atendimento(
@@ -458,6 +643,13 @@ def get_or_open_atendimento_repo(
         return None
 
     try:
+        if not _cliente_exists_for_empresa(
+            db,
+            empresa_id=empresa_id_i,
+            cliente_id=cliente_id_i,
+        ):
+            return None
+
         if hasattr(novo, "empresa_id"):
             novo.empresa_id = empresa_id_i
 
@@ -478,7 +670,6 @@ def get_or_open_atendimento_repo(
         if hasattr(novo, "direcao"):
             novo.direcao = direcao
 
-        # compat legado
         if hasattr(novo, "operador_id") and operador_id_i is not None:
             novo.operador_id = operador_id_i
 
@@ -496,6 +687,14 @@ def get_or_open_atendimento_repo(
 
         db.add(novo)
         db.flush()
+
+        if not _atendimento_context_ok(
+            novo,
+            empresa_id=empresa_id_i,
+            instancia_id=instancia_id_i,
+            cliente_id=cliente_id_i,
+        ):
+            return None
 
         if operador_id_i is not None:
             ensure_participante_ativo_repo(
@@ -546,6 +745,20 @@ def update_open_atendimento_departamento_repo(
     departamento_id_i = _to_int(departamento_id)
     operador_id_i = _to_int(operador_id)
 
+    if not _cliente_exists_for_empresa(
+        db,
+        empresa_id=empresa_id_i,
+        cliente_id=cliente_id_i,
+    ):
+        return None
+
+    if not _instancia_exists_for_empresa(
+        db,
+        empresa_id=empresa_id_i,
+        instancia_id=instancia_id_i,
+    ):
+        return None
+
     try:
         if hasattr(db, "is_active") and not db.is_active:
             _safe_rollback(db)
@@ -572,6 +785,14 @@ def update_open_atendimento_departamento_repo(
         )
 
     try:
+        if not _atendimento_context_ok(
+            atendimento,
+            empresa_id=empresa_id_i,
+            instancia_id=instancia_id_i,
+            cliente_id=cliente_id_i,
+        ):
+            return None
+
         changed = False
 
         _bootstrap_legacy_operador_as_participante(db, atendimento=atendimento)
@@ -641,6 +862,7 @@ def get_atendimento_id_repo(
         departamento_id=departamento_id,
         operador_id=operador_id,
     )
+
     if atendimento is None:
         return None
 
@@ -651,10 +873,13 @@ def get_atendimento_id_repo(
 def attach_atendimento_to_message_if_supported(msg_model, atendimento_id: int | None):
     if not has_mensagem_atendimento_field():
         return msg_model
+
     if atendimento_id is None:
         return msg_model
+
     if hasattr(msg_model, "atendimento_id"):
         setattr(msg_model, "atendimento_id", int(atendimento_id))
+
     return msg_model
 
 

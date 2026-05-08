@@ -1,19 +1,157 @@
-#backend\integrations\evolution\repositories\mensagens_repo.py
+# backend/integrations/evolution/repositories/mensagens_repo.py
 
 from __future__ import annotations
+
 from typing import Optional
+
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
+
 from backend import models
 
 
 def _stamp_inst(obj, instancia) -> None:
     if obj is None or instancia is None:
         return
+
     if hasattr(obj, "instancia_id") and getattr(obj, "instancia_id", None) is None:
         setattr(obj, "instancia_id", getattr(instancia, "id", None))
+
     if hasattr(obj, "instance_name") and not getattr(obj, "instance_name", None):
         setattr(obj, "instance_name", getattr(instancia, "instance_name", None))
+
+
+def _to_int(v) -> int | None:
+    try:
+        if v is None:
+            return None
+
+        s = str(v).strip()
+        if not s:
+            return None
+
+        return int(s)
+    except Exception:
+        return None
+
+
+def _cliente_exists_for_empresa(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente_id: int | None,
+) -> bool:
+    cid = _to_int(cliente_id)
+    if cid is None:
+        return False
+
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT 1
+                  FROM clientes
+                 WHERE id = :cliente_id
+                   AND empresa_id = :empresa_id
+                 LIMIT 1
+                """
+            ),
+            {
+                "cliente_id": int(cid),
+                "empresa_id": int(empresa_id),
+            },
+        ).first()
+
+        return bool(row)
+
+    except Exception:
+        return False
+
+
+def _sanitize_atendimento_id(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente_id: int | None,
+    instancia_id: int | None,
+    atendimento_id: int | None,
+) -> int | None:
+    """
+    Só mantém atendimento_id se ele realmente pertencer à mesma empresa,
+    ao mesmo cliente e, quando existir, à mesma instância.
+
+    Se não bater, retorna None para evitar FK ou vínculo errado.
+    """
+    aid = _to_int(atendimento_id)
+    cid = _to_int(cliente_id)
+    iid = _to_int(instancia_id)
+
+    if aid is None or cid is None:
+        return None
+
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT id
+                  FROM atendimentos
+                 WHERE id = :atendimento_id
+                   AND empresa_id = :empresa_id
+                   AND cliente_id = :cliente_id
+                   AND (
+                        :instancia_id IS NULL
+                        OR instancia_id IS NULL
+                        OR instancia_id = :instancia_id
+                   )
+                 ORDER BY id DESC
+                 LIMIT 1
+                """
+            ),
+            {
+                "atendimento_id": int(aid),
+                "empresa_id": int(empresa_id),
+                "cliente_id": int(cid),
+                "instancia_id": int(iid) if iid is not None else None,
+            },
+        ).first()
+
+        if row and row[0] is not None:
+            return int(row[0])
+
+    except Exception:
+        return None
+
+    return None
+
+
+def _assert_cliente_valido_para_mensagem(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente_id: int | None,
+    contexto: str = "mensagem",
+) -> int:
+    """
+    Barreira final contra mensagens_cliente_id_fkey.
+
+    Se chegar aqui com cliente inexistente, é melhor falhar com erro claro
+    antes do INSERT do Postgres explodir FK.
+    """
+    cid = _to_int(cliente_id)
+
+    if cid is None:
+        raise RuntimeError(f"{contexto}: cliente_id vazio/inválido")
+
+    if not _cliente_exists_for_empresa(
+        db,
+        empresa_id=int(empresa_id),
+        cliente_id=int(cid),
+    ):
+        raise RuntimeError(
+            f"{contexto}: cliente_id={cid} não existe em clientes para empresa_id={empresa_id}"
+        )
+
+    return int(cid)
 
 
 def is_statement_timeout_error(e: Exception) -> bool:
@@ -87,6 +225,7 @@ def find_existing_mensagem_11_id(
                 "msg_id": raw,
             },
         ).fetchone()
+
         if row and row[0] is not None:
             return int(row[0])
 
@@ -109,6 +248,7 @@ def find_existing_mensagem_11_id(
                 "msg_id": raw,
             },
         ).fetchone()
+
         if row and row[0] is not None:
             return int(row[0])
 
@@ -129,12 +269,76 @@ def insert_mensagem_11_on_conflict(
     instancia_id: int,
     atendimento_id: int | None,
 ) -> tuple[int | None, bool]:
+    """
+    Insere mensagem 1:1 com barreiras de segurança.
+
+    Regras:
+    1. Se msg_id já existe para a instância, retorna a existente e não tenta inserir.
+       Isso evita FK em replay/duplicata.
+    2. Confere se cliente_id existe na mesma empresa antes do INSERT.
+    3. Confere se atendimento_id pertence ao mesmo cliente/empresa/instância.
+       Se não pertencer, salva com atendimento_id=NULL.
+    """
+    raw_msg_id = str(msg_id or "").strip()
+    if not raw_msg_id:
+        raise RuntimeError("insert_mensagem_11_on_conflict: msg_id vazio")
+
+    empresa_id_i = int(empresa_id)
+    instancia_id_i = int(instancia_id)
+
+    existente_id = find_existing_mensagem_11_id(
+        db,
+        empresa_id=empresa_id_i,
+        cliente_id=cliente_id,
+        msg_id=raw_msg_id,
+        instancia_id=instancia_id_i,
+    )
+    if existente_id:
+        return int(existente_id), False
+
+    cliente_id_i = _assert_cliente_valido_para_mensagem(
+        db,
+        empresa_id=empresa_id_i,
+        cliente_id=cliente_id,
+        contexto=f"insert_mensagem_11_on_conflict msg_id={raw_msg_id}",
+    )
+
+    atendimento_id_i = _sanitize_atendimento_id(
+        db,
+        empresa_id=empresa_id_i,
+        cliente_id=cliente_id_i,
+        instancia_id=instancia_id_i,
+        atendimento_id=atendimento_id,
+    )
+
     sql = text(
         """
         INSERT INTO mensagens
-            (empresa_id, cliente_id, conteudo, tipo, lida, ack, timestamp, msg_id, instancia_id, atendimento_id)
+            (
+                empresa_id,
+                cliente_id,
+                conteudo,
+                tipo,
+                lida,
+                ack,
+                timestamp,
+                msg_id,
+                instancia_id,
+                atendimento_id
+            )
         VALUES
-            (:empresa_id, :cliente_id, :conteudo, :tipo, :lida, :ack, :timestamp, :msg_id, :instancia_id, :atendimento_id)
+            (
+                :empresa_id,
+                :cliente_id,
+                :conteudo,
+                :tipo,
+                :lida,
+                :ack,
+                :timestamp,
+                :msg_id,
+                :instancia_id,
+                :atendimento_id
+            )
         ON CONFLICT (instancia_id, msg_id)
         DO NOTHING
         RETURNING id
@@ -142,16 +346,16 @@ def insert_mensagem_11_on_conflict(
     )
 
     params = {
-        "empresa_id": int(empresa_id),
-        "cliente_id": int(cliente_id),
+        "empresa_id": empresa_id_i,
+        "cliente_id": cliente_id_i,
         "conteudo": conteudo,
         "tipo": tipo,
         "lida": bool(lida),
         "ack": ack,
         "timestamp": timestamp,
-        "msg_id": str(msg_id),
-        "instancia_id": int(instancia_id),
-        "atendimento_id": atendimento_id,
+        "msg_id": raw_msg_id,
+        "instancia_id": instancia_id_i,
+        "atendimento_id": atendimento_id_i,
     }
 
     row = db.execute(sql, params).fetchone()
@@ -160,11 +364,12 @@ def insert_mensagem_11_on_conflict(
 
     existente_id = find_existing_mensagem_11_id(
         db,
-        empresa_id=empresa_id,
-        cliente_id=cliente_id,
-        msg_id=msg_id,
-        instancia_id=instancia_id,
+        empresa_id=empresa_id_i,
+        cliente_id=cliente_id_i,
+        msg_id=raw_msg_id,
+        instancia_id=instancia_id_i,
     )
+
     return existente_id, False
 
 
@@ -181,20 +386,38 @@ def create_mensagem_sem_msgid(
     instancia,
     atendimento_id: int | None = None,
 ) -> models.Mensagem:
+    empresa_id_i = int(empresa_id)
+    instancia_id_i = _to_int(getattr(instancia, "id", None))
+
+    cliente_id_i = _assert_cliente_valido_para_mensagem(
+        db,
+        empresa_id=empresa_id_i,
+        cliente_id=cliente_id,
+        contexto="create_mensagem_sem_msgid",
+    )
+
+    atendimento_id_i = _sanitize_atendimento_id(
+        db,
+        empresa_id=empresa_id_i,
+        cliente_id=cliente_id_i,
+        instancia_id=instancia_id_i,
+        atendimento_id=atendimento_id,
+    )
+
     msg = models.Mensagem(
-        empresa_id=int(empresa_id),
-        cliente_id=int(cliente_id),
+        empresa_id=empresa_id_i,
+        cliente_id=cliente_id_i,
         conteudo=conteudo,
         tipo=tipo,
         lida=bool(lida),
         ack=ack,
         timestamp=timestamp,
         msg_id=None,
-        instancia_id=getattr(instancia, "id", None),
+        instancia_id=instancia_id_i,
     )
 
-    if atendimento_id is not None and hasattr(msg, "atendimento_id"):
-        setattr(msg, "atendimento_id", atendimento_id)
+    if atendimento_id_i is not None and hasattr(msg, "atendimento_id"):
+        setattr(msg, "atendimento_id", atendimento_id_i)
 
     _stamp_inst(msg, instancia)
 
@@ -338,12 +561,15 @@ def bulk_mark_messages_deleted(
     items: list[dict],
 ) -> list[dict]:
     out: list[dict] = []
+
     for item in items or []:
         if not isinstance(item, dict):
             continue
+
         msg_id = str(item.get("msg_id") or item.get("id") or "").strip()
         if not msg_id:
             continue
+
         result = mark_message_deleted(
             db,
             instancia_id=instancia_id,
@@ -352,6 +578,7 @@ def bulk_mark_messages_deleted(
         )
         if result:
             out.append(result)
+
     return out
 
 

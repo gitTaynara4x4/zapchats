@@ -74,15 +74,17 @@ def _is_cliente_fk_error(e: Exception) -> bool:
     )
 
 
-def _cliente_exists(db, cliente_id: int | None) -> bool:
+def _cliente_exists(db, cliente_id: int | None, empresa_id: int | None = None) -> bool:
     if not cliente_id:
         return False
+
     try:
-        row = (
-            db.query(models.Cliente.id)
-            .filter(models.Cliente.id == int(cliente_id))
-            .first()
-        )
+        q = db.query(models.Cliente.id).filter(models.Cliente.id == int(cliente_id))
+
+        if empresa_id is not None:
+            q = q.filter(models.Cliente.empresa_id == int(empresa_id))
+
+        row = q.first()
         return bool(row and row[0] is not None)
     except Exception:
         return False
@@ -178,12 +180,14 @@ async def _ensure_cliente_id_fk_safe(
 ) -> int | None:
     """
     Garante um cliente_id realmente existente na tabela clientes.
+
     Resolve:
-    - cli_id antigo após rollback
-    - retorno "fantasma" de upsert
-    - fallback por telefone_norm
+    - cliente_id antigo após rollback;
+    - retorno fantasma de upsert;
+    - cliente criado e apagado por rollback antes da mensagem;
+    - fallback por telefone_norm dentro da empresa.
     """
-    if current_cliente_id and _cliente_exists(db, current_cliente_id):
+    if current_cliente_id and _cliente_exists(db, current_cliente_id, empresa_id=empresa_id):
         return int(current_cliente_id)
 
     found = _find_cliente_id_by_phone(
@@ -192,8 +196,8 @@ async def _ensure_cliente_id_fk_safe(
         instancia_id=instancia_id,
         telefone=telefone,
     )
-    if found:
-        return found
+    if found and _cliente_exists(db, found, empresa_id=empresa_id):
+        return int(found)
 
     cli_id = await _ensure_cliente_id(
         db,
@@ -204,7 +208,7 @@ async def _ensure_cliente_id_fk_safe(
         nome_whatsapp=nome_whatsapp,
         avatar_url=avatar_url,
     )
-    if cli_id and _cliente_exists(db, cli_id):
+    if cli_id and _cliente_exists(db, cli_id, empresa_id=empresa_id):
         return int(cli_id)
 
     found = _find_cliente_id_by_phone(
@@ -213,10 +217,58 @@ async def _ensure_cliente_id_fk_safe(
         instancia_id=instancia_id,
         telefone=telefone,
     )
-    if found:
-        return found
+    if found and _cliente_exists(db, found, empresa_id=empresa_id):
+        return int(found)
 
     return None
+
+
+def _safe_atendimento_id_for_cliente(
+    db,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    cliente_id: int | None,
+    atendimento_id: int | None,
+) -> int | None:
+    """
+    Garante que o atendimento_id pertence ao mesmo cliente/empresa/instância.
+
+    Isso evita:
+    - mensagem vinculada em atendimento de outro cliente;
+    - WebSocket sair com atendimento_id antigo;
+    - atendimento_id criado antes de rollback ficar reaproveitado incorretamente.
+    """
+    if not _HAS_MSG_ATD_FIELD:
+        return None
+
+    if not atendimento_id or not cliente_id:
+        return None
+
+    Atendimento = getattr(models, "Atendimento", None)
+    if Atendimento is None:
+        return None
+
+    try:
+        q = db.query(Atendimento.id).filter(
+            Atendimento.id == int(atendimento_id),
+        )
+
+        if hasattr(Atendimento, "empresa_id"):
+            q = q.filter(Atendimento.empresa_id == int(empresa_id))
+
+        if hasattr(Atendimento, "cliente_id"):
+            q = q.filter(Atendimento.cliente_id == int(cliente_id))
+
+        if hasattr(Atendimento, "instancia_id"):
+            q = q.filter(Atendimento.instancia_id == int(instancia_id))
+
+        row = q.first()
+        return int(row[0]) if row and row[0] is not None else None
+
+    except Exception:
+        _safe_rollback(db)
+        return None
 
 
 def _resolve_atendimento_id_safe(
@@ -236,6 +288,9 @@ def _resolve_atendimento_id_safe(
     if not _HAS_MSG_ATD_FIELD:
         return None
 
+    if not _cliente_exists(db, cliente_id, empresa_id=empresa_id):
+        return None
+
     try:
         if hasattr(db, "is_active") and not db.is_active:
             _safe_rollback(db)
@@ -249,7 +304,16 @@ def _resolve_atendimento_id_safe(
             ts_dt=ts_dt,
             operador_id=None,
         )
-        return getattr(atendimento, "id", None) if atendimento is not None else None
+
+        atendimento_id = getattr(atendimento, "id", None) if atendimento is not None else None
+
+        return _safe_atendimento_id_for_cliente(
+            db,
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+            cliente_id=cliente_id,
+            atendimento_id=atendimento_id,
+        )
 
     except Exception as e:
         LOG(f"[UPsert][erro_atendimento] cli={cliente_id} err={e}")
@@ -278,8 +342,38 @@ async def _insert_mensagem_11_fk_safe(
 ):
     """
     Tenta inserir a mensagem.
-    Se estourar FK de cliente_id, reobtém um cliente_id válido e tenta 1 vez de novo.
+
+    Antes do insert:
+    - valida se cliente_id existe;
+    - valida se atendimento_id pertence ao cliente.
+
+    Se mesmo assim estourar FK:
+    - faz rollback;
+    - recria/reobtém cliente;
+    - salva a mensagem sem atendimento_id antigo.
     """
+    cliente_id = await _ensure_cliente_id_fk_safe(
+        db,
+        empresa_id=empresa_id,
+        instancia_id=instancia_id,
+        telefone=telefone,
+        nome=nome,
+        nome_whatsapp=nome_whatsapp,
+        avatar_url=avatar_url,
+        current_cliente_id=cliente_id,
+    )
+
+    if not cliente_id:
+        raise RuntimeError(f"cliente_id inválido antes do insert msg_id={msg_id} telefone={telefone}")
+
+    atendimento_id = _safe_atendimento_id_for_cliente(
+        db,
+        empresa_id=empresa_id,
+        instancia_id=instancia_id,
+        cliente_id=cliente_id,
+        atendimento_id=atendimento_id,
+    )
+
     try:
         msg_db_id, inserted_11 = await insert_mensagem_11_with_retry(
             db,
@@ -295,7 +389,7 @@ async def _insert_mensagem_11_fk_safe(
             atendimento_id=atendimento_id,
             idx=idx,
         )
-        return msg_db_id, inserted_11, int(cliente_id)
+        return msg_db_id, inserted_11, int(cliente_id), atendimento_id
 
     except Exception as e:
         if not _is_cliente_fk_error(e):
@@ -336,10 +430,10 @@ async def _insert_mensagem_11_fk_safe(
             timestamp=timestamp,
             msg_id=msg_id,
             instancia_id=instancia_id,
-            atendimento_id=None,  # evita reaproveitar atendimento após rollback
+            atendimento_id=None,
             idx=idx,
         )
-        return msg_db_id, inserted_11, int(cli_retry)
+        return msg_db_id, inserted_11, int(cli_retry), None
 
 
 async def _insert_mensagem_no_msgid_fk_safe(
@@ -361,6 +455,28 @@ async def _insert_mensagem_no_msgid_fk_safe(
     inst,
     avatar_url: str | None = None,
 ):
+    cliente_id = await _ensure_cliente_id_fk_safe(
+        db,
+        empresa_id=empresa_id,
+        instancia_id=instancia_id,
+        telefone=telefone,
+        nome=nome,
+        nome_whatsapp=nome_whatsapp,
+        avatar_url=avatar_url,
+        current_cliente_id=cliente_id,
+    )
+
+    if not cliente_id:
+        raise RuntimeError(f"cliente_id inválido antes do insert sem msg_id telefone={telefone}")
+
+    atendimento_id = _safe_atendimento_id_for_cliente(
+        db,
+        empresa_id=empresa_id,
+        instancia_id=instancia_id,
+        cliente_id=cliente_id,
+        atendimento_id=atendimento_id,
+    )
+
     def _build_model(cli_id: int, atd_id: int | None):
         msg_model = models.Mensagem(
             empresa_id=empresa_id,
@@ -382,7 +498,7 @@ async def _insert_mensagem_no_msgid_fk_safe(
         msg_model = _build_model(int(cliente_id), atendimento_id)
         db.add(msg_model)
         db.flush()
-        return int(msg_model.id), True, int(cliente_id)
+        return int(msg_model.id), True, int(cliente_id), atendimento_id
 
     except Exception as e:
         if not _is_cliente_fk_error(e):
@@ -408,13 +524,13 @@ async def _insert_mensagem_no_msgid_fk_safe(
         )
         if not cli_retry:
             raise RuntimeError(
-                f"cliente_id inválido após retry FK (sem msg_id) telefone={telefone}"
+                f"cliente_id inválido após retry FK sem msg_id telefone={telefone}"
             )
 
         msg_model = _build_model(int(cli_retry), None)
         db.add(msg_model)
         db.flush()
-        return int(msg_model.id), True, int(cli_retry)
+        return int(msg_model.id), True, int(cli_retry), None
 
 
 def _resolve_remote_jid_upsert(
@@ -661,21 +777,23 @@ async def on_messages_upsert(inst_id: str, data):
                         )
 
                     except IntegrityError:
+                        grupo_id_safe = getattr(grp, "id", None)
                         _safe_rollback(db)
 
-                        _log_skip("duplicada grupo (msg_id)", idx=idx, msg_id=msg_id, grupo_id=grp.id)
+                        _log_skip("duplicada grupo (msg_id)", idx=idx, msg_id=msg_id, grupo_id=grupo_id_safe)
                         inserted = False
 
                         try:
-                            gm_exist = (
-                                db.query(models.MensagemGrupo)
-                                .filter(
-                                    models.MensagemGrupo.grupo_id == grp.id,
-                                    models.MensagemGrupo.msg_id == str(msg_id),
+                            if grupo_id_safe:
+                                gm_exist = (
+                                    db.query(models.MensagemGrupo)
+                                    .filter(
+                                        models.MensagemGrupo.grupo_id == int(grupo_id_safe),
+                                        models.MensagemGrupo.msg_id == str(msg_id),
+                                    )
+                                    .first()
                                 )
-                                .first()
-                            )
-                            gm_id = getattr(gm_exist, "id", None) if gm_exist else None
+                                gm_id = getattr(gm_exist, "id", None) if gm_exist else None
                         except Exception as e:
                             gm_id = None
                             _log_ctx("[UPsert][grupo][dup][buscar-msg] falhou", idx=idx, msg_id=msg_id, err=str(e))
@@ -730,7 +848,6 @@ async def on_messages_upsert(inst_id: str, data):
                                 "grupo_id": int(grp.id),
                                 "is_group": True,
 
-                                # compatibilidade legado: evita usar id de grupo como cliente real
                                 "cliente_id": None,
 
                                 "instancia_id": int(inst.id),
@@ -793,8 +910,8 @@ async def on_messages_upsert(inst_id: str, data):
                     continue
 
                 formatted = formatar_telefone_br(telefone)
-                nome_cliente = (formatted if from_me else (push_name or formatted))
-                nome_whatsapp = (formatted if from_me else (push_name or formatted))
+                nome_cliente = formatted if from_me else (push_name or formatted)
+                nome_whatsapp = formatted if from_me else (push_name or formatted)
 
                 _log_ctx(
                     "[UPsert][resolved]",
@@ -853,7 +970,6 @@ async def on_messages_upsert(inst_id: str, data):
 
                 atendimento_id = None
 
-                # 1) tenta abrir/achar atendimento para o cliente atual
                 if _HAS_MSG_ATD_FIELD:
                     atendimento_id = _resolve_atendimento_id_safe(
                         db,
@@ -864,7 +980,6 @@ async def on_messages_upsert(inst_id: str, data):
                         ts_dt=ts_msg,
                     )
 
-                # 2) garante de novo o cliente após qualquer rollback anterior
                 cli_id = await _ensure_cliente_id_fk_safe(
                     db,
                     empresa_id=empresa_id,
@@ -884,7 +999,6 @@ async def on_messages_upsert(inst_id: str, data):
                     )
                     continue
 
-                # 3) re-resolve atendimento com o cliente final válido
                 if _HAS_MSG_ATD_FIELD:
                     atendimento_id = _resolve_atendimento_id_safe(
                         db,
@@ -893,6 +1007,14 @@ async def on_messages_upsert(inst_id: str, data):
                         cliente_id=cli_id,
                         direcao=direcao,
                         ts_dt=ts_msg,
+                    )
+
+                    atendimento_id = _safe_atendimento_id_for_cliente(
+                        db,
+                        empresa_id=empresa_id,
+                        instancia_id=inst.id,
+                        cliente_id=cli_id,
+                        atendimento_id=atendimento_id,
                     )
 
                 msg_db_id = None
@@ -912,7 +1034,7 @@ async def on_messages_upsert(inst_id: str, data):
                         )
                     else:
                         try:
-                            msg_db_id, inserted_11, cli_id = await _insert_mensagem_11_fk_safe(
+                            msg_db_id, inserted_11, cli_id, atendimento_id = await _insert_mensagem_11_fk_safe(
                                 db,
                                 empresa_id=empresa_id,
                                 cliente_id=cli_id,
@@ -931,6 +1053,14 @@ async def on_messages_upsert(inst_id: str, data):
                                 avatar_url=None,
                             )
 
+                            atendimento_id = _safe_atendimento_id_for_cliente(
+                                db,
+                                empresa_id=empresa_id,
+                                instancia_id=inst.id,
+                                cliente_id=cli_id,
+                                atendimento_id=atendimento_id,
+                            )
+
                             if inserted_11 and msg_db_id:
                                 try:
                                     db.commit()
@@ -945,6 +1075,7 @@ async def on_messages_upsert(inst_id: str, data):
                                     idx=idx,
                                     msg_id=msg_id,
                                     saved_id=msg_db_id,
+                                    cliente_id=cli_id,
                                     tipo=direcao,
                                     ack=ack_value,
                                     atendimento_id=atendimento_id,
@@ -971,7 +1102,7 @@ async def on_messages_upsert(inst_id: str, data):
 
                 else:
                     try:
-                        msg_db_id, inserted_11, cli_id = await _insert_mensagem_no_msgid_fk_safe(
+                        msg_db_id, inserted_11, cli_id, atendimento_id = await _insert_mensagem_no_msgid_fk_safe(
                             db,
                             empresa_id=empresa_id,
                             cliente_id=cli_id,
@@ -990,6 +1121,14 @@ async def on_messages_upsert(inst_id: str, data):
                             avatar_url=None,
                         )
 
+                        atendimento_id = _safe_atendimento_id_for_cliente(
+                            db,
+                            empresa_id=empresa_id,
+                            instancia_id=inst.id,
+                            cliente_id=cli_id,
+                            atendimento_id=atendimento_id,
+                        )
+
                         try:
                             db.commit()
                         except Exception as e:
@@ -1004,6 +1143,7 @@ async def on_messages_upsert(inst_id: str, data):
                             "[UPsert][saved-nomsgid]",
                             idx=idx,
                             saved_id=msg_db_id,
+                            cliente_id=cli_id,
                             atendimento_id=atendimento_id,
                             tipo=direcao,
                             ts=_iso_utc(ts_msg),
@@ -1060,8 +1200,6 @@ async def on_messages_upsert(inst_id: str, data):
                         remote_jid=remote_jid,
                     )
 
-                    # Reabre/relê o atendimento após a triagem, porque o departamento
-                    # pode ter sido definido agora no atendimento aberto.
                     if _HAS_MSG_ATD_FIELD and cli_id:
                         atendimento_id = _resolve_atendimento_id_safe(
                             db,
@@ -1070,6 +1208,14 @@ async def on_messages_upsert(inst_id: str, data):
                             cliente_id=cli_id,
                             direcao=direcao,
                             ts_dt=ts_msg,
+                        )
+
+                        atendimento_id = _safe_atendimento_id_for_cliente(
+                            db,
+                            empresa_id=empresa_id,
+                            instancia_id=inst.id,
+                            cliente_id=cli_id,
+                            atendimento_id=atendimento_id,
                         )
 
                 if inserted_11 and msg_db_id:
