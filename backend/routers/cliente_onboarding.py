@@ -6,6 +6,7 @@ import os
 import re
 import time
 import threading
+import unicodedata
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Literal, List, Dict, Any
@@ -125,7 +126,11 @@ def _enforce_instance_creation_allowed(db: Session, empresa: models.Empresa) -> 
 class ConnectPayload(BaseModel):
     empresa_id: int = Field(..., gt=0)
     empresa_nome: Optional[str] = None
-    whatsapp_numero: str
+
+    # QR Code não precisa de número.
+    # Pairing Code precisa.
+    whatsapp_numero: Optional[str] = ""
+
     historico_restaurar: Literal["none", "24h", "7d"] = "none"
     instance_name: Optional[str] = None
     use_pairing: bool = False
@@ -149,20 +154,90 @@ def _http() -> requests.Session:
     return s
 
 
-def _only_digits(s: str) -> str:
+def _only_digits(s: str | None) -> str:
     return re.sub(r"\D", "", s or "")
 
 
-def _slug(s: str) -> str:
-    s = re.sub(r"[^a-zA-Z0-9]+", "-", s or "").strip("-")
-    return s.lower() or "empresa"
+def _slug(
+    s: str | None,
+    *,
+    default: str = "empresa",
+    max_len: int | None = None,
+) -> str:
+    """
+    Gera slug seguro para instance_name da Evolution.
+
+    Ex:
+    "Taynara 4x Comercial" -> "taynara-4x-comercial"
+    "São José / Suporte"   -> "sao-jose-suporte"
+    """
+    raw = str(s or "").strip()
+
+    if raw:
+        raw = unicodedata.normalize("NFKD", raw)
+        raw = raw.encode("ascii", "ignore").decode("ascii")
+
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", raw).strip("-").lower()
+    slug = re.sub(r"-{2,}", "-", slug).strip("-")
+
+    if not slug:
+        slug = default
+
+    if max_len and max_len > 0 and len(slug) > max_len:
+        slug = slug[:max_len].strip("-") or default
+
+    return slug
 
 
-def _gen_instance_name(empresa: models.Empresa, phone_e164: str | None) -> str:
-    suffix = _only_digits(phone_e164 or "")
-    suffix = suffix[-4:] if suffix else "0000"
-    base = _slug(getattr(empresa, "nome", None) or "empresa")
-    return f"{base}-{suffix}"
+def _gen_instance_name(
+    empresa: models.Empresa,
+    phone_e164: str | None,
+    *,
+    apelido: str | None = None,
+) -> str:
+    """
+    Nome novo e legível para novas instâncias.
+
+    Com número conhecido:
+        emp5-comercial-5512991865418
+
+    Sem número no QR:
+        emp5-comercial-auto-123456
+
+    Importante:
+    - Não renomeia instâncias antigas.
+    - Não renomeia depois que conecta, porque a Evolution usa esse instance_name.
+    - O número real é salvo em numero_instancia pelo handler de CONNECTION_UPDATE.
+    """
+    digits = _only_digits(phone_e164 or "")
+
+    if digits:
+        phone_part = digits[-13:] if len(digits) > 13 else digits
+    else:
+        # QR Code: o número real ainda não existe antes da leitura.
+        # Usa marcador técnico único. Depois a tela mostra numero_instancia real.
+        phone_part = f"auto-{int(time.time())}"
+
+    empresa_id = getattr(empresa, "id", None)
+    try:
+        empresa_id_i = int(empresa_id) if empresa_id is not None else None
+    except Exception:
+        empresa_id_i = None
+
+    emp_part = f"emp{empresa_id_i}" if empresa_id_i else "emp"
+
+    label_raw = (
+        str(apelido or "").strip()
+        or str(getattr(empresa, "nome", "") or "").strip()
+        or "whatsapp"
+    )
+    label = _slug(label_raw, default="whatsapp", max_len=32)
+
+    return _slug(
+        f"{emp_part}-{label}-{phone_part}",
+        default=f"{emp_part}-{phone_part}",
+        max_len=90,
+    )
 
 
 def _evo_wait_instance_ready(sess: requests.Session, instance: str, timeout_s: int = 8) -> bool:
@@ -468,6 +543,8 @@ def _evo_connect(instance: str, number_digits: str | None) -> dict:
 
     s = _http()
     url = f"{EVOLUTION_URL}/instance/connect/{instance}"
+
+    # Pairing Code usa número. QR Code não precisa.
     if number_digits:
         url += f"?number={_only_digits(number_digits)}"
 
@@ -616,27 +693,40 @@ def conectar(
     # trava por vencimento + quota
     _enforce_instance_creation_allowed(db, empresa)
 
+    use_pairing = bool(payload.use_pairing)
     number_digits = _only_digits(payload.whatsapp_numero)
-    if not number_digits:
-        raise HTTPException(400, "Número de WhatsApp inválido.")
 
-    pendente = db.query(models.EmpresaInstancia).filter(
-        models.EmpresaInstancia.empresa_id == int(empresa.id),
-        models.EmpresaInstancia.numero_instancia == number_digits,
-        models.EmpresaInstancia.connected.is_(False),
-    ).first()
+    apelido_clean = str(payload.apelido or "").strip() or None
+
+    if not apelido_clean:
+        raise HTTPException(400, "Informe um apelido para identificar esta instância.")
+
+    # Pairing Code precisa de número. QR Code não.
+    if use_pairing and not number_digits:
+        raise HTTPException(400, "Número de WhatsApp inválido para Pairing Code.")
+
+    # Se veio número, tenta reaproveitar pendente daquele número.
+    # Se QR veio sem número, cria nova instância temporária e depois CONNECTION_UPDATE salva o número real.
+    pendente = None
+    if number_digits:
+        pendente = db.query(models.EmpresaInstancia).filter(
+            models.EmpresaInstancia.empresa_id == int(empresa.id),
+            models.EmpresaInstancia.numero_instancia == number_digits,
+            models.EmpresaInstancia.connected.is_(False),
+        ).first()
 
     if pendente:
-        if payload.apelido:
-            pendente.apelido = payload.apelido.strip() or None
-
+        pendente.apelido = apelido_clean
         pendente.historico_restaurar = payload.historico_restaurar
         db.commit()
 
         _evo_set_rabbit_initial(pendente.instance_name)
         _evo_set_websocket_initial(pendente.instance_name)
 
-        conn_json = _evo_connect(pendente.instance_name, number_digits)
+        conn_json = _evo_connect(
+            pendente.instance_name,
+            number_digits if use_pairing else None,
+        )
         _schedule_cleanup(pendente.instance_name)
 
         qr = {}
@@ -663,15 +753,26 @@ def conectar(
             "numero": pendente.numero_instancia,
         }
 
-    numero_con = db.query(models.EmpresaInstancia).filter(
-        models.EmpresaInstancia.numero_instancia == number_digits,
-        models.EmpresaInstancia.connected.is_(True),
-    ).first()
+    # Só bloqueia duplicidade por número se o número foi informado.
+    # No QR sem número, o número real só aparece depois da leitura.
+    if number_digits:
+        numero_con = db.query(models.EmpresaInstancia).filter(
+            models.EmpresaInstancia.numero_instancia == number_digits,
+            models.EmpresaInstancia.connected.is_(True),
+        ).first()
 
-    if numero_con:
-        raise HTTPException(409, "Este número já está conectado em outra instância.")
+        if numero_con:
+            raise HTTPException(409, "Este número já está conectado em outra instância.")
 
-    inst = (payload.instance_name or _gen_instance_name(empresa, number_digits)).strip()
+    if payload.instance_name:
+        inst = _slug(payload.instance_name, default="instancia", max_len=90)
+    else:
+        inst = _gen_instance_name(
+            empresa,
+            number_digits if number_digits else None,
+            apelido=apelido_clean,
+        )
+
     if not inst:
         raise HTTPException(400, "instance_name inválido.")
 
@@ -694,7 +795,7 @@ def conectar(
                 break
             i += 1
 
-    _evo_create_instance(inst, payload.use_pairing)
+    _evo_create_instance(inst, use_pairing)
     _evo_set_rabbit_initial(inst)
     _evo_set_websocket_initial(inst)
 
@@ -708,17 +809,20 @@ def conectar(
                 empresa_id=int(empresa.id),
                 instance_name=inst,
                 connected=False,
-                numero_instancia=number_digits,
-                apelido=(payload.apelido.strip() if payload.apelido else None),
+
+                # QR Code sem número: fica None até CONNECTION_UPDATE salvar o número real.
+                numero_instancia=(number_digits or None),
+
+                apelido=apelido_clean,
                 historico_restaurar=payload.historico_restaurar,
             )
             db.add(inst_row)
             db.flush()
         else:
-            if not getattr(inst_row, "numero_instancia", None):
+            if number_digits and not getattr(inst_row, "numero_instancia", None):
                 inst_row.numero_instancia = number_digits
-            if payload.apelido:
-                inst_row.apelido = payload.apelido.strip() or None
+
+            inst_row.apelido = apelido_clean
             inst_row.historico_restaurar = payload.historico_restaurar
 
         if hasattr(empresa, "quantidade_instancias"):
@@ -729,21 +833,24 @@ def conectar(
     except IntegrityError:
         db.rollback()
 
-        conflito = db.query(models.EmpresaInstancia).filter(
-            models.EmpresaInstancia.numero_instancia == number_digits
-        ).first()
+        conflito = None
+        if number_digits:
+            conflito = db.query(models.EmpresaInstancia).filter(
+                models.EmpresaInstancia.numero_instancia == number_digits
+            ).first()
 
         if conflito and not conflito.connected and int(conflito.empresa_id) == int(empresa.id):
-            if payload.apelido:
-                conflito.apelido = payload.apelido.strip() or None
-
+            conflito.apelido = apelido_clean
             conflito.historico_restaurar = payload.historico_restaurar
             db.commit()
 
             _evo_set_rabbit_initial(conflito.instance_name)
             _evo_set_websocket_initial(conflito.instance_name)
 
-            conn_json = _evo_connect(conflito.instance_name, number_digits)
+            conn_json = _evo_connect(
+                conflito.instance_name,
+                number_digits if use_pairing else None,
+            )
             _schedule_cleanup(conflito.instance_name)
 
             qr = {}
@@ -772,7 +879,10 @@ def conectar(
 
         raise HTTPException(409, "Este número já está cadastrado em uma instância.")
 
-    conn_json = _evo_connect(inst, number_digits)
+    conn_json = _evo_connect(
+        inst,
+        number_digits if use_pairing else None,
+    )
     _schedule_cleanup(inst)
 
     qr = {}

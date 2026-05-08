@@ -390,6 +390,65 @@ function hideModal(){
   els.modal.classList.add('hidden');
 }
 
+// ===== Campo número: QR não pede número, Pairing Code pede =====
+function isPairingMode(){
+  return !!els.chkPairing?.checked;
+}
+
+function fieldBoxFor(el){
+  if (!el) return null;
+
+  return (
+    el.closest('[data-field]') ||
+    el.closest('.form-field') ||
+    el.closest('.field') ||
+    el.closest('.form-group') ||
+    el.closest('label') ||
+    el.parentElement
+  );
+}
+
+function setBoxVisible(el, visible){
+  const box = fieldBoxFor(el);
+  if (!box) return;
+
+  box.classList.toggle('hidden', !visible);
+  box.setAttribute('aria-hidden', visible ? 'false' : 'true');
+}
+
+function updatePhoneModeUI(){
+  const pairing = isPairingMode();
+
+  if (els.inNumero) {
+    els.inNumero.disabled = !pairing;
+    els.inNumero.required = !!pairing;
+
+    if (!pairing) {
+      els.inNumero.value = '';
+      els.inNumero.placeholder = 'Número será detectado pelo QR Code';
+    } else {
+      els.inNumero.placeholder = '(31) 99999-9999';
+    }
+
+    setBoxVisible(els.inNumero, pairing);
+  }
+
+  if (els.selPais) {
+    els.selPais.disabled = !pairing;
+    setBoxVisible(els.selPais, pairing);
+  }
+
+  if (els.chkPairing) {
+    els.chkPairing.title = pairing
+      ? 'Pairing Code precisa do número do WhatsApp.'
+      : 'No QR Code, o número conectado será detectado automaticamente.';
+  }
+
+  if (els.btnGerarQR) {
+    els.btnGerarQR.textContent = pairing ? 'Gerar Pairing Code' : 'Gerar QR Code';
+  }
+}
+
 // ===== Modal Saúde =====
 function openSaudeModal(){
   els.modalSaude?.classList.remove('hidden');
@@ -1391,15 +1450,21 @@ async function handleConnectSubmit(ev){
   const numero    = onlyDigits(els.inNumero?.value);
   const ddi       = onlyDigits(els.selPais?.value) || '55';
   const historico = els.selHist?.value || 'none';
-  const usePairing = !!els.chkPairing?.checked;
+  const usePairing = isPairingMode();
 
-  if (!numero){
+  if (!apelido) {
     els.qrLoader?.classList.add('hidden');
-    showQRError('Informe um número de telefone válido.');
+    showQRError('Informe um apelido para identificar esta instância.');
     return;
   }
 
-  const e164 = `+${ddi}${numero}`;
+  if (usePairing && !numero){
+    els.qrLoader?.classList.add('hidden');
+    showQRError('Informe um número de telefone válido para usar Pairing Code.');
+    return;
+  }
+
+  const e164 = usePairing ? `+${ddi}${numero}` : '';
 
   try{
     const js = await apiPost('/api/onboarding/empresas/conectar', {
@@ -1464,6 +1529,8 @@ async function openReconnect(item){
   showQRError('');
   hideQR();
 
+  updatePhoneModeUI();
+
   attachInstWS(currentInstance);
 
   els.qrLoader?.classList.remove('hidden');
@@ -1525,8 +1592,22 @@ els.btnAdd?.addEventListener('click', () => {
   currentInstance = null;
   window.currentInstance = null;
 
+  setModalTitle('Conecte seu número de WhatsApp');
+
+  if (els.inApelido) els.inApelido.value = '';
+  if (els.inNumero) els.inNumero.value = '';
+  if (els.selPais) els.selPais.value = '55';
+  if (els.chkPairing) els.chkPairing.checked = false;
+
+  updatePhoneModeUI();
+
   const histRow = els.selHist?.closest('.form-row, .field, .mb-4, .mb-3, .grid, div') || null;
   if (histRow) histRow.classList.remove('hidden');
+});
+
+els.chkPairing?.addEventListener('change', () => {
+  updatePhoneModeUI();
+  showQRError('');
 });
 
 els.btnCloseMd?.addEventListener('click', hideModal);
@@ -1629,6 +1710,8 @@ function toast(msg){
 }
 
 // ===== Init =====
+updatePhoneModeUI();
+
 if (!empresaId){
   console.warn('empresa_id ausente no localStorage; não foi possível carregar a lista.');
 } else {

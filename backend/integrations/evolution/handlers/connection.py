@@ -36,24 +36,26 @@ FULL_EVENTS_WS = [
     "CONNECTION_UPDATE",
 ]
 
+# IMPORTANTE:
+# Não usar GROUPS_UPDATE aqui.
+# A Evolution aceita GROUP_UPDATE, sem "S".
+# Se mandar GROUPS_UPDATE, /rabbitmq/set retorna 400 e o histórico MESSAGES_SET não chega.
 FULL_EVENTS_RABBIT = [
     "MESSAGES_SET",
     "MESSAGES_UPSERT",
     "MESSAGES_UPDATE",
     "MESSAGES_DELETE",
     "SEND_MESSAGE",
-    "PRESENCE_UPDATE",
-    "GROUPS_UPSERT",
-    "GROUPS_UPDATE",
-    "GROUP_UPDATE",
-    "GROUP_PARTICIPANTS_UPDATE",
+
     "CONTACTS_SET",
     "CONTACTS_UPSERT",
     "CONTACTS_UPDATE",
-    "NEW_TOKEN",
-    "LOGOUT_INSTANCE",
-    "INSTANCE_DELETE",
-    "REMOVE_INSTANCE",
+
+    "PRESENCE_UPDATE",
+
+    "GROUPS_UPSERT",
+    "GROUP_UPDATE",
+    "GROUP_PARTICIPANTS_UPDATE",
 ]
 
 RABBIT_EXCHANGE = os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange")
@@ -68,8 +70,6 @@ def _env_csv_first(*names: str, default: str = "#") -> list[str]:
     2. RABBITMQ_BINDING_KEY
     3. RABBITMQ_ROUTING_KEY
     4. default "#"
-
-    Isso evita cair por engano em "zapchats.backend" quando queremos "#".
     """
     raw = None
 
@@ -145,7 +145,7 @@ def _evo_expand_websocket(instance: str) -> bool:
         if not r.ok:
             LOG(
                 f"[WS] falha ao expandir inst={instance} "
-                f"status={r.status_code} body={str(r.text or '')[:200]}"
+                f"status={r.status_code} body={str(r.text or '')[:300]}"
             )
             return False
 
@@ -159,7 +159,7 @@ def _evo_expand_websocket(instance: str) -> bool:
 
 def _evo_expand_rabbit(instance: str) -> bool:
     """
-    Reforça o Rabbit na Evolution com MESSAGES_SET antes/na hora da conexão.
+    Reforça o Rabbit na Evolution com MESSAGES_SET ativo.
 
     Isso é idempotente:
     pode chamar várias vezes sem problema.
@@ -187,7 +187,7 @@ def _evo_expand_rabbit(instance: str) -> bool:
         if not r.ok:
             LOG(
                 f"[Rabbit] falha ao expandir inst={instance} "
-                f"status={r.status_code} body={str(r.text or '')[:200]}"
+                f"status={r.status_code} body={str(r.text or '')[:500]}"
             )
             return False
 
