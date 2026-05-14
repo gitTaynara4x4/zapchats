@@ -1,0 +1,129 @@
+[
+  {
+    "headers": {
+      "host": "apps-n8n.9ywrah.easypanel.host",
+      "user-agent": "axios/1.13.2",
+      "content-length": "2465",
+      "accept": "application/json, text/plain, */*",
+      "accept-encoding": "gzip, compress, deflate, br",
+      "content-type": "application/json",
+      "x-forwarded-for": "172.18.0.1",
+      "x-forwarded-host": "apps-n8n.9ywrah.easypanel.host",
+      "x-forwarded-port": "443",
+      "x-forwarded-proto": "https",
+      "x-forwarded-server": "194e689d5c82",
+      "x-real-ip": "172.18.0.1"
+    },
+    "params": {},
+    "query": {},
+    "body": {
+      "event": "chats.set",
+      "instance": "emp5-zapsfioficial-auto-1778682016",
+      "data": [
+        {
+          "remoteJid": "101821007794374@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "182364311425240@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "186457499152524@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "0@s.whatsapp.net",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "128720237027350@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "208898720022543@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "49848095100980@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "81707944423445@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "218523959849064@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "61753694150745@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "44397378945098@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "221757868888238@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "147377658822877@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "2190735372443@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "92908967464964@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "227358472699979@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "47871873302603@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "121702444961815@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "53941115080813@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "186633727025184@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "14796850237689@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "31040097792229@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "241080826110063@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        },
+        {
+          "remoteJid": "120409441726513@lid",
+          "instanceId": "1e59e25a-435e-4cc9-991f-4117d4b8f008"
+        }
+      ],
+      "destination": "https://apps-n8n.9ywrah.easypanel.host/webhook/evolution-zapchats-evolutionaq",
+      "date_time": "2026-05-13T11:21:12.749Z",
+      "sender": "5512991865418@s.whatsapp.net",
+      "server_url": "https://zapchats-evolution-api.9ywrah.easypanel.host",
+      "apikey": "CCB77F03-4123-41E1-A9ED-F772A01AE92F"
+    },
+    "webhookUrl": "https://apps-n8n.9ywrah.easypanel.host/webhook/evolution-zapchats-evolutionaq",
+    "executionMode": "production"
+  }
+]

@@ -38,10 +38,12 @@ footer,
   z-index: 0;
   pointer-events: none;
   background-color: #0b141a !important;
-  background-image: url("/frontend/img/whatsapp-bg-dark.png") !important;
+  background-image:
+    linear-gradient(rgba(11,20,26,.92), rgba(11,20,26,.92)),
+    url("https://static.whatsapp.net/rsrc.php/yx/r/voSdkk88H7C.svg") !important;
   background-repeat: repeat !important;
-  background-position: 0 0 !important;
-  background-size: 400px 400px !important;
+  background-position: center !important;
+  background-size: 84px 84px !important;
   opacity: 1 !important;
   filter: none !important;
   backdrop-filter: none !important;
@@ -53,11 +55,14 @@ footer,
 
 html[data-theme="light"] #chat-footer::before{
   background-color: #efeae2 !important;
-  background-image: url("/frontend/img/whatsapp-bg-light.png") !important;
+  background-image:
+    linear-gradient(rgba(239,234,226,.86), rgba(239,234,226,.86)),
+    url("https://static.whatsapp.net/rsrc.php/yx/r/voSdkk88H7C.svg") !important;
   background-repeat: repeat !important;
-  background-position: 0 0 !important;
-  background-size: 400px 400px !important;
+  background-position: center !important;
+  background-size: 84px 84px !important;
 }
+
 
 #chat-footer > *{
   position: relative;

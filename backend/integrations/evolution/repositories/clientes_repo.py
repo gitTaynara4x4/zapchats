@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
@@ -12,6 +14,11 @@ from ..utils.phone_utils import (
     normalize_phone_for_send,
     phone_lookup_variants,
 )
+
+
+# =============================================================================
+# Helpers básicos
+# =============================================================================
 
 
 def _safe_rollback(db: Session) -> None:
@@ -35,6 +42,20 @@ def _to_int(v) -> int | None:
         return None
 
 
+def _only_digits(raw) -> str:
+    return re.sub(r"\D+", "", str(raw or ""))
+
+
+def _same_phone(a, b) -> bool:
+    da = _only_digits(a)
+    db = _only_digits(b)
+
+    if not da or not db:
+        return False
+
+    return da == db or da.endswith(db) or db.endswith(da)
+
+
 def _clean_str(raw: str | None) -> str | None:
     s = str(raw or "").strip()
     if not s:
@@ -46,7 +67,168 @@ def _clean_str(raw: str | None) -> str | None:
     return s
 
 
+# =============================================================================
+# Regra anti-LID / anti-placeholder
+# =============================================================================
+#
+# REGRA OFICIAL DO ZAPSCHAT:
+# - Cliente visível NÃO nasce de @lid.
+# - Cliente visível NÃO nasce de número gigante de LID.
+# - Cliente visível NÃO recebe nome "Contato do WhatsApp".
+# - Se o número real ainda não chegou, o handler deve ignorar/segurar.
+# =============================================================================
+
+
+def _raw_contains_lid(raw: str | None) -> bool:
+    s = str(raw or "").strip().lower()
+    if not s:
+        return False
+
+    return (
+        "@lid" in s
+        or s.startswith("lid:")
+        or s.startswith("lid-")
+        or s.startswith("lid_")
+        or s.startswith("lid ")
+    )
+
+
+def _telefone_raw_invalido_ou_lid(raw: str | None) -> bool:
+    """
+    Bloqueia entradas que claramente não são telefone real.
+
+    Exemplos bloqueados:
+    - 101821007794374@lid
+    - LID-101821007794374
+    - 101821007794374
+    - 0
+    - número com menos de 10 dígitos
+
+    Regras aceitas para Brasil:
+    - 10/11 dígitos nacionais.
+    - 12/13 dígitos começando com 55.
+    """
+    if raw is None:
+        return True
+
+    s = str(raw or "").strip()
+    if not s:
+        return True
+
+    if _raw_contains_lid(s):
+        return True
+
+    digits = _only_digits(s)
+
+    if not digits:
+        return True
+
+    if digits == "0":
+        return True
+
+    if len(digits) < 10:
+        return True
+
+    # Brasil com DDI 55:
+    # 55 + DDD + 8 dígitos = 12
+    # 55 + DDD + 9 dígitos = 13
+    if len(digits) > 13:
+        return True
+
+    # Se tem mais de 11 dígitos e não começa com 55, para nosso cenário é suspeito.
+    # Isso evita LID numérico virar telefone.
+    if len(digits) > 11 and not digits.startswith("55"):
+        return True
+
+    return False
+
+
+def _is_bad_cliente_name(name: str | None, *, telefone_raw: str | None = None) -> bool:
+    raw = str(name or "").strip()
+    if not raw:
+        return True
+
+    low = raw.lower().strip()
+    digits = _only_digits(raw)
+
+    if low in {
+        "0",
+        "voce",
+        "você",
+        "you",
+        "cliente",
+        "contato",
+        "sem nome",
+        "unknown",
+        "desconhecido",
+        "whatsapp",
+        "contato do whatsapp",
+        "contato whatsapp",
+    }:
+        return True
+
+    if low.startswith("contato do whatsapp"):
+        return True
+
+    if low.startswith("contato whatsapp"):
+        return True
+
+    if low.startswith("contato lid"):
+        return True
+
+    if low.startswith("lid "):
+        return True
+
+    if low.startswith("lid-"):
+        return True
+
+    if low.startswith("lid:"):
+        return True
+
+    if _raw_contains_lid(raw):
+        return True
+
+    # Nome puramente numérico gigante normalmente é LID.
+    if digits and digits == raw and len(digits) >= 13:
+        return True
+
+    # Nome tipo "147 377 658 822 877".
+    compact = re.sub(r"\s+", "", raw)
+    if digits and len(digits) >= 13 and digits == compact:
+        return True
+
+    if telefone_raw and digits and _same_phone(digits, telefone_raw):
+        return True
+
+    return False
+
+
+def _clean_name(raw: str | None, *, telefone_raw: str | None = None) -> str | None:
+    s = _clean_str(raw)
+    if not s:
+        return None
+
+    if _is_bad_cliente_name(s, telefone_raw=telefone_raw):
+        return None
+
+    return s
+
+
+def _clean_avatar(raw: str | None) -> str | None:
+    s = _clean_str(raw)
+    if not s:
+        return None
+
+    if not (s.startswith("http://") or s.startswith("https://") or s.startswith("data:image/")):
+        return None
+
+    return s
+
+
 def _telefone_norm(raw: str | None) -> str | None:
+    if _telefone_raw_invalido_ou_lid(raw):
+        return None
+
     return normalize_phone_for_db(raw)
 
 
@@ -68,7 +250,12 @@ def _lookup_variants_strong(raw: str | None) -> list[str]:
 
     Evita variante fraca só com número local (8/9 dígitos),
     porque isso pode misturar contatos diferentes.
+
+    Também bloqueia @lid/número gigante de LID.
     """
+    if _telefone_raw_invalido_ou_lid(raw):
+        return []
+
     out: list[str] = []
 
     for v in phone_lookup_variants(raw):
@@ -79,10 +266,21 @@ def _lookup_variants_strong(raw: str | None) -> list[str]:
         if len(s) < 10:
             continue
 
+        if len(s) > 13:
+            continue
+
+        if len(s) > 11 and not s.startswith("55"):
+            continue
+
         if s not in out:
             out.append(s)
 
     return out
+
+
+# =============================================================================
+# Cliente lookup / validação
+# =============================================================================
 
 
 def _cliente_id_exists(
@@ -144,99 +342,6 @@ def _return_valid_cliente_id(
             return int(found)
 
     return None
-
-
-UPSERT_CLIENTE_SQL = text(
-    """
-    INSERT INTO public.clientes
-        (empresa_id, instancia_id, telefone, nome, nome_whatsapp, avatar_url)
-    VALUES
-        (:empresa_id, :instancia_id, :telefone, :nome, :nome_whatsapp, :avatar_url)
-    ON CONFLICT (empresa_id, telefone_norm) DO UPDATE
-    SET
-        /*
-          Instância:
-          - só preenche se ainda estiver vazia.
-          - não fica trocando cliente de instância automaticamente.
-        */
-        instancia_id = COALESCE(public.clientes.instancia_id, EXCLUDED.instancia_id),
-
-        /*
-          Telefone:
-          - mantém o telefone atual se já existir.
-          - preenche apenas se estiver vazio.
-        */
-        telefone = CASE
-            WHEN COALESCE(BTRIM(public.clientes.telefone), '') = ''
-                THEN EXCLUDED.telefone
-            ELSE public.clientes.telefone
-        END,
-
-        /*
-          REGRA OFICIAL DO NOME:
-          - Cliente novo nasce com pushName/nome da Evolution.
-          - Cliente existente NÃO tem nome sobrescrito por pushName novo.
-          - Só preenche nome se estiver vazio ou com placeholder.
-          - Se alguém editou no painel, esse valor fica preservado.
-        */
-        nome = CASE
-            WHEN
-                COALESCE(BTRIM(EXCLUDED.nome), '') <> ''
-                AND (
-                    COALESCE(BTRIM(public.clientes.nome), '') = ''
-                    OR LOWER(BTRIM(public.clientes.nome)) IN (
-                        'cliente',
-                        'contato',
-                        'sem nome',
-                        'desconhecido'
-                    )
-                    OR (
-                        regexp_replace(COALESCE(public.clientes.nome, ''), '\\D', '', 'g') <> ''
-                        AND regexp_replace(COALESCE(public.clientes.nome, ''), '\\D', '', 'g')
-                            = regexp_replace(COALESCE(public.clientes.telefone, ''), '\\D', '', 'g')
-                    )
-                )
-                THEN EXCLUDED.nome
-            ELSE public.clientes.nome
-        END,
-
-        /*
-          nome_whatsapp:
-          - guarda o primeiro nome vindo da Evolution.
-          - não fica trocando a cada mensagem.
-          - só preenche se estiver vazio ou placeholder.
-        */
-        nome_whatsapp = CASE
-            WHEN
-                COALESCE(BTRIM(EXCLUDED.nome_whatsapp), '') <> ''
-                AND (
-                    COALESCE(BTRIM(public.clientes.nome_whatsapp), '') = ''
-                    OR LOWER(BTRIM(public.clientes.nome_whatsapp)) IN (
-                        'cliente',
-                        'contato',
-                        'sem nome',
-                        'desconhecido'
-                    )
-                )
-                THEN EXCLUDED.nome_whatsapp
-            ELSE public.clientes.nome_whatsapp
-        END,
-
-        /*
-          Avatar:
-          - evita trocar avatar toda hora.
-          - só preenche se ainda não existir.
-        */
-        avatar_url = CASE
-            WHEN
-                COALESCE(BTRIM(public.clientes.avatar_url), '') = ''
-                AND COALESCE(BTRIM(EXCLUDED.avatar_url), '') <> ''
-                THEN EXCLUDED.avatar_url
-            ELSE public.clientes.avatar_url
-        END
-    RETURNING id
-    """
-)
 
 
 def get_cliente_by_id(
@@ -317,6 +422,167 @@ def find_cliente_id_by_phone(
     return None
 
 
+# =============================================================================
+# UPSERT SQL
+# =============================================================================
+
+
+UPSERT_CLIENTE_SQL = text(
+    """
+    INSERT INTO public.clientes
+        (empresa_id, instancia_id, telefone, nome, nome_whatsapp, avatar_url)
+    VALUES
+        (:empresa_id, :instancia_id, :telefone, :nome, :nome_whatsapp, :avatar_url)
+    ON CONFLICT (empresa_id, telefone_norm) DO UPDATE
+    SET
+        /*
+          Instância:
+          - só preenche se ainda estiver vazia.
+          - não fica trocando cliente de instância automaticamente.
+        */
+        instancia_id = COALESCE(public.clientes.instancia_id, EXCLUDED.instancia_id),
+
+        /*
+          Telefone:
+          - mantém o telefone atual se já existir.
+          - preenche apenas se estiver vazio.
+        */
+        telefone = CASE
+            WHEN COALESCE(BTRIM(public.clientes.telefone), '') = ''
+                THEN EXCLUDED.telefone
+            ELSE public.clientes.telefone
+        END,
+
+        /*
+          REGRA OFICIAL DO NOME:
+          - Cliente novo nasce com nome real quando existir.
+          - Cliente existente NÃO tem nome sobrescrito por pushName novo.
+          - Só preenche nome se estiver vazio ou com placeholder.
+          - Se alguém editou no painel, esse valor fica preservado.
+          - Nunca aceita "Contato do WhatsApp", "Contato LID" ou número gigante.
+        */
+        nome = CASE
+            WHEN
+                COALESCE(BTRIM(EXCLUDED.nome), '') <> ''
+                AND LOWER(BTRIM(EXCLUDED.nome)) NOT IN (
+                    'cliente',
+                    'contato',
+                    'sem nome',
+                    'desconhecido',
+                    'unknown',
+                    'contato do whatsapp',
+                    'contato whatsapp',
+                    'whatsapp',
+                    '0'
+                )
+                AND EXCLUDED.nome NOT ILIKE 'Contato do WhatsApp%%'
+                AND EXCLUDED.nome NOT ILIKE 'Contato Whatsapp%%'
+                AND EXCLUDED.nome NOT ILIKE 'Contato LID%%'
+                AND EXCLUDED.nome NOT ILIKE 'LID %%'
+                AND NOT (EXCLUDED.nome ~ '^[0-9]{13,}$')
+                AND (
+                    COALESCE(BTRIM(public.clientes.nome), '') = ''
+                    OR LOWER(BTRIM(public.clientes.nome)) IN (
+                        'cliente',
+                        'contato',
+                        'sem nome',
+                        'desconhecido',
+                        'unknown',
+                        'contato do whatsapp',
+                        'contato whatsapp',
+                        'whatsapp',
+                        '0'
+                    )
+                    OR public.clientes.nome ILIKE 'Contato do WhatsApp%%'
+                    OR public.clientes.nome ILIKE 'Contato Whatsapp%%'
+                    OR public.clientes.nome ILIKE 'Contato LID%%'
+                    OR public.clientes.nome ILIKE 'LID %%'
+                    OR public.clientes.nome ~ '^[0-9]{13,}$'
+                    OR (
+                        regexp_replace(COALESCE(public.clientes.nome, ''), '\\D', '', 'g') <> ''
+                        AND regexp_replace(COALESCE(public.clientes.nome, ''), '\\D', '', 'g')
+                            = regexp_replace(COALESCE(public.clientes.telefone, ''), '\\D', '', 'g')
+                    )
+                    OR (
+                        regexp_replace(COALESCE(public.clientes.nome, ''), '\\D', '', 'g') <> ''
+                        AND regexp_replace(COALESCE(public.clientes.nome, ''), '\\D', '', 'g')
+                            = regexp_replace(COALESCE(public.clientes.telefone_norm, ''), '\\D', '', 'g')
+                    )
+                )
+                THEN EXCLUDED.nome
+            ELSE public.clientes.nome
+        END,
+
+        /*
+          nome_whatsapp:
+          - guarda nome real vindo da Evolution.
+          - não grava telefone formatado como se fosse nome do WhatsApp.
+          - não aceita placeholder.
+        */
+        nome_whatsapp = CASE
+            WHEN
+                COALESCE(BTRIM(EXCLUDED.nome_whatsapp), '') <> ''
+                AND LOWER(BTRIM(EXCLUDED.nome_whatsapp)) NOT IN (
+                    'cliente',
+                    'contato',
+                    'sem nome',
+                    'desconhecido',
+                    'unknown',
+                    'contato do whatsapp',
+                    'contato whatsapp',
+                    'whatsapp',
+                    '0'
+                )
+                AND EXCLUDED.nome_whatsapp NOT ILIKE 'Contato do WhatsApp%%'
+                AND EXCLUDED.nome_whatsapp NOT ILIKE 'Contato Whatsapp%%'
+                AND EXCLUDED.nome_whatsapp NOT ILIKE 'Contato LID%%'
+                AND EXCLUDED.nome_whatsapp NOT ILIKE 'LID %%'
+                AND NOT (EXCLUDED.nome_whatsapp ~ '^[0-9]{13,}$')
+                AND (
+                    COALESCE(BTRIM(public.clientes.nome_whatsapp), '') = ''
+                    OR LOWER(BTRIM(public.clientes.nome_whatsapp)) IN (
+                        'cliente',
+                        'contato',
+                        'sem nome',
+                        'desconhecido',
+                        'unknown',
+                        'contato do whatsapp',
+                        'contato whatsapp',
+                        'whatsapp',
+                        '0'
+                    )
+                    OR public.clientes.nome_whatsapp ILIKE 'Contato do WhatsApp%%'
+                    OR public.clientes.nome_whatsapp ILIKE 'Contato Whatsapp%%'
+                    OR public.clientes.nome_whatsapp ILIKE 'Contato LID%%'
+                    OR public.clientes.nome_whatsapp ILIKE 'LID %%'
+                    OR public.clientes.nome_whatsapp ~ '^[0-9]{13,}$'
+                )
+                THEN EXCLUDED.nome_whatsapp
+            ELSE public.clientes.nome_whatsapp
+        END,
+
+        /*
+          Avatar:
+          - evita trocar avatar toda hora.
+          - só preenche se ainda não existir.
+        */
+        avatar_url = CASE
+            WHEN
+                COALESCE(BTRIM(public.clientes.avatar_url), '') = ''
+                AND COALESCE(BTRIM(EXCLUDED.avatar_url), '') <> ''
+                THEN EXCLUDED.avatar_url
+            ELSE public.clientes.avatar_url
+        END
+    RETURNING id
+    """
+)
+
+
+# =============================================================================
+# Fallback ORM
+# =============================================================================
+
+
 def _create_cliente_orm_fallback(
     db: Session,
     *,
@@ -326,7 +592,7 @@ def _create_cliente_orm_fallback(
     telefone_fmt: str,
     telefone_norm: str,
     nome_final: str,
-    nome_wa_final: str,
+    nome_wa_final: str | None,
     avatar_clean: str | None,
 ) -> int | None:
     """
@@ -337,6 +603,9 @@ def _create_cliente_orm_fallback(
     - Depois cria via ORM.
     - Se der corrida/unique, dá rollback e procura de novo.
     """
+    if _telefone_raw_invalido_ou_lid(telefone_raw or telefone_norm):
+        return None
+
     found = find_cliente_id_by_phone(
         db,
         empresa_id=int(empresa_id),
@@ -386,6 +655,11 @@ def _create_cliente_orm_fallback(
     return None
 
 
+# =============================================================================
+# Upsert principal
+# =============================================================================
+
+
 def upsert_cliente_repo(
     db: Session,
     *,
@@ -400,13 +674,12 @@ def upsert_cliente_repo(
     UPSERT robusto por telefone_norm canônico.
 
     REGRA OFICIAL:
-    - Cliente novo:
-        usa pushName/nome recebido da Evolution uma única vez.
-
-    - Cliente existente:
-        NÃO sobrescreve clientes.nome com pushName novo.
-        NÃO sobrescreve clientes.nome_whatsapp se já existir.
-        Só preenche nome/nome_whatsapp se estiver vazio ou placeholder.
+    - Cliente novo só nasce com telefone real.
+    - @lid nunca vira cliente visível.
+    - Número gigante de LID nunca vira cliente visível.
+    - "Contato do WhatsApp" nunca é gravado como nome.
+    - Cliente existente não tem nome manual sobrescrito por pushName novo.
+    - Só preenche nome/nome_whatsapp se estiver vazio ou placeholder.
 
     Segurança:
     - Nunca retorna cliente_id fantasma.
@@ -416,15 +689,20 @@ def upsert_cliente_repo(
     empresa_id_i = int(empresa_id)
     instancia_id_i = int(instancia_id) if instancia_id is not None else None
 
+    if _telefone_raw_invalido_ou_lid(telefone_raw):
+        return None
+
     tel_norm = _telefone_norm(telefone_raw)
     if not tel_norm:
         return None
 
     telefone_fmt = _format_telefone_br(telefone_raw or tel_norm) or f"+55 {tel_norm}"
 
-    nome_clean = _clean_str(nome)
-    nome_wa_clean = _clean_str(nome_whatsapp)
+    nome_clean = _clean_name(nome, telefone_raw=telefone_raw or tel_norm)
+    nome_wa_clean = _clean_name(nome_whatsapp, telefone_raw=telefone_raw or tel_norm)
 
+    # Nome visível pode cair para telefone formatado.
+    # Isso é aceitável porque é número real, não LID.
     nome_final = (
         nome_clean
         or nome_wa_clean
@@ -432,14 +710,15 @@ def upsert_cliente_repo(
         or "Cliente"
     )
 
+    # nome_whatsapp só deve guardar nome real vindo do WhatsApp.
+    # Se não tiver nome real, deixa None para não poluir.
     nome_wa_final = (
         nome_wa_clean
         or nome_clean
-        or telefone_fmt
-        or "Cliente"
+        or None
     )
 
-    avatar_clean = _clean_str(avatar_url)
+    avatar_clean = _clean_avatar(avatar_url)
 
     # 1) UPSERT SQL principal
     try:

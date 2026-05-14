@@ -27,6 +27,7 @@ let saudeLoadingTmr = null;
 let saudeLoadingStepIdx = 0;
 let saudeLoadingMsgIdx = 0;
 let saudeCurrentItem = null;
+let editApelidoItem = null;
 
 // ===== Helpers =====
 const $  = (s, r=document) => r.querySelector(s);
@@ -150,12 +151,8 @@ function formatRelativeTimeBR(value){
   const hours = Math.round(diffMs / (1000 * 60 * 60));
   const days = Math.round(diffMs / (1000 * 60 * 60 * 24));
 
-  if (Math.abs(minutes) < 60) {
-    return rtf.format(minutes, 'minute');
-  }
-  if (Math.abs(hours) < 24) {
-    return rtf.format(hours, 'hour');
-  }
+  if (Math.abs(minutes) < 60) return rtf.format(minutes, 'minute');
+  if (Math.abs(hours) < 24) return rtf.format(hours, 'hour');
   return rtf.format(days, 'day');
 }
 
@@ -336,10 +333,7 @@ const els = {
   btnCloseMd:  $('#btn-close-modal'),
   form:        $('#form-conectar'),
   inApelido:   $('#form-conectar input[name="apelido"]'),
-  inNumero:    $('#numero'),
-  selPais:     $('#pais-select'),
   selHist:     $('#historico-select'),
-  chkPairing:  $('#use-pairing'),
   btnGerarQR:  $('#btn-gerar-qr'),
   btnCancel:   $('#btn-cancel'),
   btnRefresh:  $('#btn-refresh'),
@@ -357,6 +351,14 @@ const els = {
   btnRemYes:     $('#btn-confirmar-remover'),
   btnRemNo:      $('#btn-cancelar-remover'),
   remConsent:    $('#rem-consent'),
+
+  modalEditApelido: $('#modal-editar-apelido'),
+  btnCloseEditApelido: $('#btn-close-editar-apelido'),
+  btnCancelEditApelido: $('#btn-cancelar-editar-apelido'),
+  btnSaveEditApelido: $('#btn-salvar-editar-apelido'),
+  editApelidoInput: $('#editar-apelido-input'),
+  editApelidoErro: $('#editar-apelido-erro'),
+  editApelidoSubtitle: $('#editar-apelido-subtitle'),
 
   modalSaude: $('#modal-saude-numero'),
   btnCloseSaude: $('#btn-close-saude'),
@@ -390,62 +392,100 @@ function hideModal(){
   els.modal.classList.add('hidden');
 }
 
-// ===== Campo número: QR não pede número, Pairing Code pede =====
-function isPairingMode(){
-  return !!els.chkPairing?.checked;
-}
+// ===== Modal Editar Apelido =====
+function openEditApelidoModal(item){
+  if (!item?.id) return;
 
-function fieldBoxFor(el){
-  if (!el) return null;
+  editApelidoItem = item;
 
-  return (
-    el.closest('[data-field]') ||
-    el.closest('.form-field') ||
-    el.closest('.field') ||
-    el.closest('.form-group') ||
-    el.closest('label') ||
-    el.parentElement
-  );
-}
-
-function setBoxVisible(el, visible){
-  const box = fieldBoxFor(el);
-  if (!box) return;
-
-  box.classList.toggle('hidden', !visible);
-  box.setAttribute('aria-hidden', visible ? 'false' : 'true');
-}
-
-function updatePhoneModeUI(){
-  const pairing = isPairingMode();
-
-  if (els.inNumero) {
-    els.inNumero.disabled = !pairing;
-    els.inNumero.required = !!pairing;
-
-    if (!pairing) {
-      els.inNumero.value = '';
-      els.inNumero.placeholder = 'Número será detectado pelo QR Code';
-    } else {
-      els.inNumero.placeholder = '(31) 99999-9999';
-    }
-
-    setBoxVisible(els.inNumero, pairing);
+  if (els.editApelidoInput) {
+    els.editApelidoInput.value = item.apelido || item.instance_name || '';
   }
 
-  if (els.selPais) {
-    els.selPais.disabled = !pairing;
-    setBoxVisible(els.selPais, pairing);
+  if (els.editApelidoSubtitle) {
+    const numero = formatPhoneBR(item.numero_instancia || '');
+    els.editApelidoSubtitle.textContent = `${numero} • Nome técnico: ${item.instance_name || '—'}`;
   }
 
-  if (els.chkPairing) {
-    els.chkPairing.title = pairing
-      ? 'Pairing Code precisa do número do WhatsApp.'
-      : 'No QR Code, o número conectado será detectado automaticamente.';
+  if (els.editApelidoErro) {
+    els.editApelidoErro.textContent = '';
+    els.editApelidoErro.classList.add('hidden');
   }
 
-  if (els.btnGerarQR) {
-    els.btnGerarQR.textContent = pairing ? 'Gerar Pairing Code' : 'Gerar QR Code';
+  els.modalEditApelido?.classList.remove('hidden');
+
+  setTimeout(() => {
+    els.editApelidoInput?.focus?.();
+    els.editApelidoInput?.select?.();
+  }, 50);
+}
+
+function closeEditApelidoModal(){
+  editApelidoItem = null;
+
+  if (els.editApelidoErro) {
+    els.editApelidoErro.textContent = '';
+    els.editApelidoErro.classList.add('hidden');
+  }
+
+  els.modalEditApelido?.classList.add('hidden');
+}
+
+function showEditApelidoError(msg){
+  if (!els.editApelidoErro) return;
+  els.editApelidoErro.textContent = msg || 'Não foi possível atualizar o apelido.';
+  els.editApelidoErro.classList.remove('hidden');
+}
+
+async function salvarApelidoInstancia(){
+  if (!editApelidoItem?.id) return;
+
+  const novoApelido = String(els.editApelidoInput?.value || '').trim().replace(/\s+/g, ' ');
+
+  if (!novoApelido) {
+    showEditApelidoError('Informe um apelido para a instância.');
+    return;
+  }
+
+  if (novoApelido.length > 80) {
+    showEditApelidoError('O apelido pode ter no máximo 80 caracteres.');
+    return;
+  }
+
+  if (els.btnSaveEditApelido) els.btnSaveEditApelido.disabled = true;
+
+  try {
+    const js = await apiPost(
+      `/api/onboarding/empresas/instancias/${encodeURIComponent(editApelidoItem.id)}/apelido`,
+      {
+        empresa_id: empresaId,
+        apelido: novoApelido,
+      }
+    );
+
+    const apelidoSalvo = js?.apelido || novoApelido;
+    const instanciaId = String(editApelidoItem.id);
+
+    editApelidoItem.apelido = apelidoSalvo;
+
+    allItems = allItems.map((it) => {
+      if (String(it.id) === instanciaId) {
+        return {
+          ...it,
+          apelido: apelidoSalvo,
+        };
+      }
+      return it;
+    });
+
+    closeEditApelidoModal();
+    renderList(filterItemsByTab(allItems), lastPlanLabel);
+    toast('Apelido da instância atualizado com sucesso.');
+  } catch (e) {
+    const detail = e?.message || 'Não foi possível atualizar o apelido.';
+    showEditApelidoError(detail);
+  } finally {
+    if (els.btnSaveEditApelido) els.btnSaveEditApelido.disabled = false;
   }
 }
 
@@ -1018,6 +1058,7 @@ function rowHTML(item, planLabel){
     : 'Ainda não analisado';
 
   const menuItems = [];
+  menuItems.push('<button class="kebab-item js-edit-apelido">Alterar apelido</button>');
   menuItems.push('<button class="kebab-item js-saude">Saúde do Número</button>');
   if (!item.connected) menuItems.push('<button class="kebab-item js-reconnect">Reconectar</button>');
   menuItems.push('<button class="kebab-item js-remove">Remover número</button>');
@@ -1053,6 +1094,14 @@ function bindRowEvents(tr, item){
       $$('.kebab-menu').forEach(m => { if (m!==menu) m.classList.remove('show'); });
       menu.classList.toggle('show');
       btn.setAttribute('aria-expanded', menu.classList.contains('show') ? 'true' : 'false');
+    });
+  }
+
+  const btnEditApelido = $('.js-edit-apelido', tr);
+  if (btnEditApelido){
+    btnEditApelido.addEventListener('click', () => {
+      menu.classList.remove('show');
+      openEditApelidoModal(item);
     });
   }
 
@@ -1447,10 +1496,7 @@ async function handleConnectSubmit(ev){
   showIllustration();
 
   const apelido   = els.inApelido?.value?.trim() || '';
-  const numero    = onlyDigits(els.inNumero?.value);
-  const ddi       = onlyDigits(els.selPais?.value) || '55';
   const historico = els.selHist?.value || 'none';
-  const usePairing = isPairingMode();
 
   if (!apelido) {
     els.qrLoader?.classList.add('hidden');
@@ -1458,21 +1504,13 @@ async function handleConnectSubmit(ev){
     return;
   }
 
-  if (usePairing && !numero){
-    els.qrLoader?.classList.add('hidden');
-    showQRError('Informe um número de telefone válido para usar Pairing Code.');
-    return;
-  }
-
-  const e164 = usePairing ? `+${ddi}${numero}` : '';
-
   try{
     const js = await apiPost('/api/onboarding/empresas/conectar', {
       empresa_id: empresaId,
-      whatsapp_numero: e164,
+      whatsapp_numero: '',
       historico_restaurar: historico,
       instance_name: null,
-      use_pairing: usePairing,
+      use_pairing: false,
       apelido: apelido || null
     });
 
@@ -1516,20 +1554,16 @@ async function openReconnect(item){
 
   lastHistoricoUsed = 'none';
 
-  setModalTitle('Reconecte seu número de WhatsApp');
+  setModalTitle('Reconecte seu WhatsApp');
   const histRow = els.selHist?.closest('.form-row, .field, .mb-4, .mb-3, .grid, div') || null;
   if (histRow) histRow.classList.add('hidden');
 
   if (els.inApelido) els.inApelido.value = item.apelido || '';
-  if (els.selPais)   els.selPais.value = '55';
-  if (els.inNumero)  els.inNumero.value = onlyDigits(item.numero_instancia || '').slice(-11);
 
   showModal();
   showIllustration();
   showQRError('');
   hideQR();
-
-  updatePhoneModeUI();
 
   attachInstWS(currentInstance);
 
@@ -1578,10 +1612,6 @@ async function refreshQR(){
   }
 }
 
-async function gerarPrimeiroQR(){
-  await refreshQR();
-}
-
 // ===== Listeners de UI =====
 els.btnAdd?.addEventListener('click', () => {
   showModal();
@@ -1592,29 +1622,36 @@ els.btnAdd?.addEventListener('click', () => {
   currentInstance = null;
   window.currentInstance = null;
 
-  setModalTitle('Conecte seu número de WhatsApp');
+  setModalTitle('Conecte seu WhatsApp');
 
   if (els.inApelido) els.inApelido.value = '';
-  if (els.inNumero) els.inNumero.value = '';
-  if (els.selPais) els.selPais.value = '55';
-  if (els.chkPairing) els.chkPairing.checked = false;
-
-  updatePhoneModeUI();
 
   const histRow = els.selHist?.closest('.form-row, .field, .mb-4, .mb-3, .grid, div') || null;
   if (histRow) histRow.classList.remove('hidden');
-});
 
-els.chkPairing?.addEventListener('change', () => {
-  updatePhoneModeUI();
-  showQRError('');
+  els.btnGerarQR?.classList.remove('hidden');
+  els.btnRefresh?.classList.add('hidden');
 });
 
 els.btnCloseMd?.addEventListener('click', hideModal);
 els.btnCancel?.addEventListener('click', hideModal);
 els.form?.addEventListener('submit', handleConnectSubmit);
 els.btnRefresh?.addEventListener('click', refreshQR);
-els.btnGerarQR?.addEventListener('click', gerarPrimeiroQR);
+
+els.btnCloseEditApelido?.addEventListener('click', closeEditApelidoModal);
+els.btnCancelEditApelido?.addEventListener('click', closeEditApelidoModal);
+els.btnSaveEditApelido?.addEventListener('click', salvarApelidoInstancia);
+els.editApelidoInput?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    salvarApelidoInstancia();
+  }
+
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closeEditApelidoModal();
+  }
+});
 
 els.btnCloseSaude?.addEventListener('click', closeSaudeModal);
 els.btnFecharSaude?.addEventListener('click', closeSaudeModal);
@@ -1710,8 +1747,6 @@ function toast(msg){
 }
 
 // ===== Init =====
-updatePhoneModeUI();
-
 if (!empresaId){
   console.warn('empresa_id ausente no localStorage; não foi possível carregar a lista.');
 } else {

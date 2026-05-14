@@ -144,6 +144,13 @@ class Empresa(Base):
         passive_deletes=True,
     )
 
+    whatsapp_identidades = relationship(
+        "ContatoWhatsappIdentidade",
+        back_populates="empresa",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
     email_accounts = relationship(
         "EmailAccount",
         back_populates="empresa",
@@ -225,6 +232,9 @@ class Empresa(Base):
 # =========================
 # EmpresaInstancia
 # =========================
+# =========================
+# EmpresaInstancia
+# =========================
 class EmpresaInstancia(Base):
     __tablename__ = "empresas_instancias"
 
@@ -233,12 +243,34 @@ class EmpresaInstancia(Base):
 
     instance_name = Column(String, nullable=False, index=True, unique=True)
 
+    # Nome interno que o cliente vê no ZapsChat
     apelido = Column(String, nullable=True)
+
+    # Número real conectado nessa instância
     numero_instancia = Column(String, nullable=True)
 
     connected = Column(Boolean, nullable=False, server_default="false")
     last_seen = Column(TIMESTAMP(timezone=True), nullable=True)
 
+    # =========================
+    # Cache do perfil real do WhatsApp conectado
+    # =========================
+    perfil_nome_whatsapp = Column(Text, nullable=True)
+    perfil_recado = Column(Text, nullable=True)
+    perfil_avatar_url = Column(Text, nullable=True)
+
+    perfil_is_business = Column(Boolean, nullable=False, server_default="false")
+    perfil_business_email = Column(Text, nullable=True)
+    perfil_business_website = Column(Text, nullable=True)
+    perfil_business_description = Column(Text, nullable=True)
+
+    perfil_wuid = Column(Text, nullable=True)
+    perfil_raw_json = Column(JSONB, nullable=True)
+    perfil_atualizado_em = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    # =========================
+    # Score / qualidade da instância
+    # =========================
     score = Column(Integer, nullable=True, index=True)
     score_status = Column(String(30), nullable=True, index=True)
     score_label = Column(String(50), nullable=True)
@@ -303,13 +335,20 @@ class EmpresaInstancia(Base):
         passive_deletes=True,
     )
 
+    whatsapp_identidades = relationship(
+        "ContatoWhatsappIdentidade",
+        back_populates="instancia",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
     def __repr__(self) -> str:
         return (
             f"<EmpresaInstancia id={self.id} emp={self.empresa_id} "
             f"inst={self.instance_name!r} connected={self.connected} "
+            f"perfil_nome={self.perfil_nome_whatsapp!r} "
             f"score={self.score} status={self.score_status!r}>"
         )
-
 
 # =========================
 # Cliente
@@ -394,11 +433,153 @@ class Cliente(Base):
     midias       = relationship("Midia", back_populates="cliente", cascade="all, delete-orphan")
     atendimentos = relationship("Atendimento", back_populates="cliente", cascade="all, delete-orphan")
 
+    whatsapp_identidades = relationship(
+        "ContatoWhatsappIdentidade",
+        back_populates="cliente",
+        passive_deletes=True,
+    )
+
     colaborador      = relationship("Colaborador", foreign_keys=[colaborador_id])
     departamento_rel = relationship("Departamento")
 
     def __repr__(self) -> str:
         return f"<Cliente id={self.id} emp={self.empresa_id} tel={self.telefone!r} dep={self.departamento_id} inst={self.instancia_id}>"
+
+
+# =========================
+# Identidades WhatsApp / LID
+# =========================
+class ContatoWhatsappIdentidade(Base):
+    """
+    Mapa persistente para resolver identidades do WhatsApp.
+
+    Exemplo:
+    186457499152524@lid -> Taynara -> 553186419237@s.whatsapp.net
+
+    Essa tabela evita tratar LID como telefone real em clientes.telefone_norm.
+    """
+    __tablename__ = "contatos_whatsapp_identidades"
+    __table_args__ = (
+        Index(
+            "uq_cwi_emp_inst_remote_jid",
+            "empresa_id",
+            "instancia_id",
+            "remote_jid",
+            unique=True,
+        ),
+        Index(
+            "ix_cwi_emp_inst_lid",
+            "empresa_id",
+            "instancia_id",
+            "lid_jid",
+            postgresql_where=text("lid_jid IS NOT NULL"),
+        ),
+        Index(
+            "ix_cwi_emp_inst_real",
+            "empresa_id",
+            "instancia_id",
+            "real_jid",
+            postgresql_where=text("real_jid IS NOT NULL"),
+        ),
+        Index(
+            "ix_cwi_emp_inst_tel",
+            "empresa_id",
+            "instancia_id",
+            "telefone_norm",
+            postgresql_where=text("telefone_norm IS NOT NULL"),
+        ),
+        Index(
+            "ix_cwi_emp_inst_push_norm",
+            "empresa_id",
+            "instancia_id",
+            "push_name_norm",
+            postgresql_where=text("push_name_norm IS NOT NULL"),
+        ),
+        Index(
+            "ix_cwi_cliente",
+            "cliente_id",
+            postgresql_where=text("cliente_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_cwi_confirmado",
+            "empresa_id",
+            "instancia_id",
+            "confirmado",
+        ),
+        Index(
+            "ix_cwi_ultimo_evento",
+            "empresa_id",
+            "instancia_id",
+            text("ultimo_evento_em DESC"),
+        ),
+    )
+
+    id = Column(BigInteger, primary_key=True, index=True)
+
+    empresa_id = Column(
+        Integer,
+        ForeignKey("empresas.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    instancia_id = Column(
+        Integer,
+        ForeignKey("empresas_instancias.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    cliente_id = Column(
+        Integer,
+        ForeignKey("clientes.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    remote_jid = Column(Text, nullable=False)
+    jid_tipo = Column(String(30), nullable=False, server_default="unknown")
+
+    lid_jid = Column(Text, nullable=True)
+    real_jid = Column(Text, nullable=True)
+    telefone_norm = Column(String(32), nullable=True)
+
+    push_name = Column(Text, nullable=True)
+    push_name_norm = Column(Text, nullable=True)
+
+    profile_pic_url = Column(Text, nullable=True)
+    profile_pic_hash = Column(Text, nullable=True)
+
+    is_business = Column(Boolean, nullable=False, server_default="false")
+
+    origem = Column(String(80), nullable=True)
+
+    confirmado = Column(Boolean, nullable=False, server_default="false")
+    confianca = Column(Integer, nullable=False, server_default="0")
+    resolved_by = Column(String(120), nullable=True)
+
+    payload = Column(JSONB, nullable=True)
+
+    criado_em = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    atualizado_em = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    ultimo_evento_em = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+    empresa = relationship("Empresa", back_populates="whatsapp_identidades")
+    instancia = relationship("EmpresaInstancia", back_populates="whatsapp_identidades")
+    cliente = relationship("Cliente", back_populates="whatsapp_identidades")
+
+    def __repr__(self) -> str:
+        return (
+            f"<ContatoWhatsappIdentidade id={self.id} emp={self.empresa_id} "
+            f"inst={self.instancia_id} remote={self.remote_jid!r} "
+            f"lid={self.lid_jid!r} real={self.real_jid!r} "
+            f"nome={self.push_name!r} confirmado={self.confirmado}>"
+        )
 
 
 # =========================

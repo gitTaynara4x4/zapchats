@@ -24,7 +24,7 @@
     type="module">
   </script>
 
-  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260428-filas-aceite-1">
+  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260511-bg-mask-1">
 
   <link rel="stylesheet"
         href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
@@ -55,6 +55,101 @@
     #chat-footer[data-send-locked="0"] .zc-claim-bar #btnAceitarConversa,
     .zc-claim-bar.is-accepted #btnAceitarConversa{
       display:none !important;
+    }
+
+    /* =========================================================
+       FUNDO REAL DO WHATSAPP - SVG COMO MASK
+       O WhatsApp usa:
+       mask-image + mask-repeat + mask-size 540px 960px
+       ========================================================= */
+
+    #chat-main{
+      position:relative !important;
+      overflow:hidden !important;
+      background:#0b141a !important;
+    }
+
+    #chat-main.whatsapp-auto-bg,
+    #chat-main.whatsapp-bg-dark,
+    #chat-main.whatsapp-bg-light,
+    main.whatsapp-auto-bg,
+    main.whatsapp-bg-dark,
+    main.whatsapp-bg-light{
+      background:#0b141a !important;
+      background-image:none !important;
+    }
+
+    #historico,
+    #welcome-screen,
+    #chat-main.whatsapp-auto-bg #historico,
+    #chat-main.whatsapp-bg-dark #historico,
+    #chat-main.whatsapp-bg-light #historico,
+    main.whatsapp-auto-bg #historico,
+    main.whatsapp-bg-dark #historico,
+    main.whatsapp-bg-light #historico{
+      background:transparent !important;
+      background-image:none !important;
+    }
+
+    #chat-main::before{
+      content:"";
+      position:absolute;
+      inset:0;
+      z-index:0;
+      pointer-events:none;
+
+      background-color:rgba(255,255,255,.075);
+
+      -webkit-mask-image:url("https://static.whatsapp.net/rsrc.php/yx/r/voSdkk88H7C.svg");
+      mask-image:url("https://static.whatsapp.net/rsrc.php/yx/r/voSdkk88H7C.svg");
+
+      -webkit-mask-repeat:repeat;
+      mask-repeat:repeat;
+
+      -webkit-mask-mode:alpha;
+      mask-mode:alpha;
+
+      -webkit-mask-size:540px 960px;
+      mask-size:540px 960px;
+
+      -webkit-mask-position:top left;
+      mask-position:top left;
+    }
+
+    #chat-main > *{
+      position:relative !important;
+      z-index:2 !important;
+    }
+
+    #chat-footer{
+      background:transparent !important;
+      background-image:none !important;
+    }
+
+    #chat-footer::before{
+      background:transparent !important;
+      background-image:none !important;
+    }
+
+    html[data-theme="light"] #chat-main,
+    html:not(.dark)[data-theme="light"] #chat-main,
+    html[data-theme="light"] #chat-main.whatsapp-auto-bg,
+    html:not(.dark)[data-theme="light"] #chat-main.whatsapp-auto-bg,
+    html[data-theme="light"] main.whatsapp-auto-bg,
+    html:not(.dark)[data-theme="light"] main.whatsapp-auto-bg{
+      background:#efeae2 !important;
+      background-image:none !important;
+    }
+
+    html[data-theme="light"] #chat-main::before,
+    html:not(.dark)[data-theme="light"] #chat-main::before{
+      background-color:rgba(0,0,0,.12);
+    }
+
+    html[data-theme="light"] #chat-footer::before,
+    html:not(.dark)[data-theme="light"] #chat-footer::before{
+      background:transparent !important;
+      background-image:none !important;
     }
 
     @media (max-width: 640px){
@@ -556,7 +651,9 @@
         const userBtn = document.getElementById('wppUserMenuBtn');
         const userMenu = document.getElementById('wppUserMenu');
 
-        const openProfileBtn = document.getElementById('wppOpenProfileBtn');
+        const openProfileBtn =
+          document.getElementById('wppOpenSettingsPanelBtn') ||
+          document.getElementById('wppOpenProfileBtn');
         const myPlanBtn = document.getElementById('wppMyPlanBtn');
         const configBtn = document.getElementById('wppConfigBtn');
         const themeBtn = document.getElementById('wppThemeBtn');
@@ -632,9 +729,26 @@
 
         if (openProfileBtn && !openProfileBtn.dataset.bound) {
           openProfileBtn.dataset.bound = '1';
-          openProfileBtn.addEventListener('click', function () {
+          openProfileBtn.addEventListener('click', function (e) {
+            if (e) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+
             closeUserMenu();
-            goToUrl('/perfil.html');
+
+            if (typeof window.zcAbrirPainelConfigPerfilAtendimento === 'function') {
+              window.zcAbrirPainelConfigPerfilAtendimento();
+              return;
+            }
+
+            if (typeof window.zcAbrirPainelConfiguracoesAtendimento === 'function') {
+              window.zcAbrirPainelConfiguracoesAtendimento();
+              return;
+            }
+
+            const userBtnFallback = document.getElementById('wppUserMenuBtn');
+            if (userBtnFallback) userBtnFallback.click();
           });
         }
 
@@ -1224,5 +1338,923 @@
       }
     })();
   </script>
+
+  <script>
+    /*
+      Painel de perfil estilo WhatsApp Web.
+      Importante:
+      - Este script fica no atendimentos.html, não no sidebar-atendimentos.html.
+      - O sidebar é carregado via innerHTML, então scripts dentro dele podem não executar.
+      - Este bloco NÃO mexe no fundo/papel de parede do chat.
+    */
+    (function zcWhatsAppProfileSettingsPanel(){
+      if (window.__ZC_WPP_PROFILE_SETTINGS_PANEL_V3_NAO_COBRE_SIDEBAR__) return;
+      window.__ZC_WPP_PROFILE_SETTINGS_PANEL_V3_NAO_COBRE_SIDEBAR__ = true;
+
+      function pick() {
+        for (var i = 0; i < arguments.length; i++) {
+          try {
+            var v = localStorage.getItem(arguments[i]);
+            if (!v) continue;
+
+            if (
+              (v.startsWith('{') && v.endsWith('}')) ||
+              (v.startsWith('[') && v.endsWith(']'))
+            ) {
+              try { return JSON.parse(v); } catch(e) {}
+            }
+
+            return v;
+          } catch(e) {}
+        }
+
+        return '';
+      }
+
+      function jwtInfo() {
+        try {
+          var tok = pick('access_token', 'token');
+          if (!tok || String(tok).split('.').length !== 3) return {};
+          return JSON.parse(atob(tok.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) || {};
+        } catch(e) {
+          return {};
+        }
+      }
+
+      function getUser() {
+        var obj = pick('usuario', 'user', 'me', 'auth_user', 'profile', 'auth');
+        var jwt = jwtInfo();
+
+        var nome =
+          pick('usuario_nome', 'nome', 'name', 'displayName', 'user_name') ||
+          (obj && typeof obj === 'object' && (obj.nome || obj.name || obj.displayName)) ||
+          jwt.name ||
+          jwt.given_name ||
+          jwt.nickname ||
+          'Usuário';
+
+        var email =
+          pick('usuario_email', 'email', 'userEmail', 'loginEmail', 'user_email') ||
+          (obj && typeof obj === 'object' && (obj.email || (obj.user && obj.user.email))) ||
+          jwt.email ||
+          jwt.preferred_username ||
+          '';
+
+        var dept =
+          pick('usuario_departamento', 'departamento', 'setor', 'department', 'dept') ||
+          (obj && typeof obj === 'object' && (obj.departamento || obj.setor || obj.department || obj.dept)) ||
+          '';
+
+        var avatar =
+          localStorage.getItem('usuario_avatar') ||
+          localStorage.getItem('avatar_url') ||
+          jwt.picture ||
+          '';
+
+        return {
+          nome: String(nome || 'Usuário').trim(),
+          email: String(email || '').trim(),
+          dept: String(dept || '').trim(),
+          avatar: String(avatar || '').trim()
+        };
+      }
+
+      function getInitials(name) {
+        var s = String(name || '').trim();
+        if (!s) return 'U';
+        var p = s.split(/\s+/).filter(Boolean);
+        if (p.length === 1) return p[0].charAt(0).toUpperCase();
+        return (p[0].charAt(0) + p[p.length - 1].charAt(0)).toUpperCase();
+      }
+
+      function ensurePanel() {
+        var existing = document.getElementById('zcWppSettingsProfilePanel');
+        if (existing) return existing;
+
+        var style = document.createElement('style');
+        style.id = 'zcWppSettingsProfileStyle';
+        style.textContent = `
+          .zcWppSettingsOverlay{
+            position:fixed;
+            top:0;
+            right:0;
+            bottom:0;
+            left:64px;
+            width:calc(100vw - 64px);
+            max-width:calc(100vw - 64px);
+            height:100vh;
+            z-index:90000;
+            display:none;
+            background:#111b21;
+            color:#e9edef;
+            font-family:"Inter","Segoe UI",Arial,sans-serif;
+            box-sizing:border-box;
+            overflow:hidden;
+          }
+
+          .zcWppSettingsOverlay.is-open{
+            display:flex;
+          }
+
+          body.zc-settings-panel-open #wppAtendSidebar,
+          body.zc-settings-panel-open .wpp-leftbar{
+            z-index:100000 !important;
+          }
+
+          .zcWppSettingsPanel{
+            width:420px;
+            max-width:420px;
+            min-width:420px;
+            height:100vh;
+            border-right:1px solid rgba(255,255,255,.10);
+            background:#111b21;
+            display:flex;
+            flex-direction:column;
+            overflow:hidden;
+          }
+
+          .zcWppSettingsMain{
+            flex:1;
+            min-width:0;
+            height:100vh;
+            background:#0b141a;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            color:#aebac1;
+          }
+
+          .zcWppSettingsHead{
+            height:58px;
+            min-height:58px;
+            padding:0 14px;
+            display:flex;
+            align-items:center;
+            gap:14px;
+          }
+
+          .zcWppSettingsBack{
+            width:34px;
+            height:34px;
+            border:0;
+            border-radius:999px;
+            background:transparent;
+            color:#e9edef;
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            cursor:pointer;
+          }
+
+          .zcWppSettingsBack:hover{
+            background:rgba(255,255,255,.08);
+          }
+
+          .zcWppSettingsTitle{
+            font-size:18px;
+            font-weight:700;
+            color:#e9edef;
+          }
+
+          .zcWppSettingsSearch{
+            margin:0 14px 12px;
+            height:38px;
+            border-radius:999px;
+            border:1px solid #00a884;
+            display:flex;
+            align-items:center;
+            gap:10px;
+            padding:0 14px;
+            color:#aebac1;
+            background:#111b21;
+          }
+
+          .zcWppSettingsSearch input{
+            flex:1;
+            min-width:0;
+            border:0;
+            outline:0;
+            background:transparent;
+            color:#e9edef;
+            font:inherit;
+            font-size:14px;
+          }
+
+          .zcWppSettingsSearch input::placeholder{
+            color:#d1d7db;
+            opacity:.9;
+          }
+
+          .zcWppNotifyCard{
+            margin:0 14px 18px;
+            min-height:72px;
+            border:1px solid rgba(255,255,255,.10);
+            border-radius:12px;
+            background:#111b21;
+            display:flex;
+            align-items:flex-start;
+            gap:14px;
+            padding:14px;
+            position:relative;
+          }
+
+          .zcWppNotifyIcon{
+            width:28px;
+            height:28px;
+            color:#aebac1;
+            flex:0 0 auto;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            font-size:22px;
+          }
+
+          .zcWppNotifyText strong{
+            display:block;
+            color:#e9edef;
+            font-size:14px;
+            font-weight:700;
+            margin-bottom:5px;
+          }
+
+          .zcWppNotifyText span{
+            display:block;
+            color:#e9edef;
+            font-size:12.5px;
+            font-weight:600;
+            line-height:1.35;
+          }
+
+          .zcWppNotifyText a{
+            color:#25d366;
+            text-decoration:none;
+            font-weight:800;
+          }
+
+          .zcWppNotifyClose{
+            position:absolute;
+            top:10px;
+            right:10px;
+            border:0;
+            background:transparent;
+            color:#aebac1;
+            cursor:pointer;
+            font-size:18px;
+          }
+
+          .zcWppProfileHero{
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            justify-content:center;
+            padding:8px 16px 42px;
+          }
+
+          .zcWppProfileAvatar{
+            width:118px;
+            height:118px;
+            border-radius:999px;
+            background:#202c33;
+            overflow:hidden;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            color:#25d366;
+            font-size:36px;
+            font-weight:800;
+            margin-bottom:18px;
+          }
+
+          .zcWppProfileAvatar img{
+            width:100%;
+            height:100%;
+            object-fit:cover;
+            display:none;
+          }
+
+          .zcWppProfileName{
+            max-width:260px;
+            padding:10px 22px;
+            border-radius:999px;
+            border:1px solid rgba(255,255,255,.10);
+            background:#1d1f1f;
+            color:#e9edef;
+            font-size:13px;
+            font-weight:700;
+            text-align:center;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+          }
+
+          .zcWppSettingsList{
+            flex:1;
+            min-height:0;
+            overflow:auto;
+            padding:0 0 18px;
+          }
+
+          .zcWppSettingsItem{
+            width:100%;
+            border:0;
+            background:transparent;
+            color:#e9edef;
+            display:flex;
+            align-items:center;
+            gap:18px;
+            padding:12px 28px;
+            text-align:left;
+            cursor:pointer;
+            text-decoration:none;
+          }
+
+          .zcWppSettingsItem:hover{
+            background:rgba(255,255,255,.055);
+          }
+
+          .zcWppSettingsItemIcon{
+            width:24px;
+            min-width:24px;
+            color:#aebac1;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            font-size:17px;
+          }
+
+          .zcWppSettingsItemText{
+            min-width:0;
+            display:flex;
+            flex-direction:column;
+            gap:3px;
+          }
+
+          .zcWppSettingsItemText strong{
+            color:#e9edef;
+            font-size:14px;
+            font-weight:700;
+          }
+
+          .zcWppSettingsItemText span{
+            color:#aebac1;
+            font-size:12.5px;
+            font-weight:500;
+            line-height:1.25;
+          }
+
+          .zcWppSettingsItem.is-danger strong,
+          .zcWppSettingsItem.is-danger .zcWppSettingsItemIcon{
+            color:#ff4b5c;
+          }
+
+          .zcWppSettingsWelcome{
+            width:360px;
+            max-width:80vw;
+            border-radius:18px;
+            background:#151c20;
+            padding:36px 28px;
+            text-align:center;
+          }
+
+          .zcWppSettingsWelcomeIcon{
+            width:112px;
+            height:82px;
+            margin:0 auto 22px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            color:#25d366;
+            font-size:54px;
+          }
+
+          .zcWppSettingsWelcome h3{
+            margin:0 0 10px;
+            color:#e9edef;
+            font-size:20px;
+            line-height:1.2;
+          }
+
+          .zcWppSettingsWelcome p{
+            margin:0 0 18px;
+            color:#aebac1;
+            font-size:13px;
+            line-height:1.45;
+          }
+
+          .zcWppSettingsWelcome button{
+            border:0;
+            border-radius:999px;
+            background:#1f8f5f;
+            color:#fff;
+            padding:9px 18px;
+            font-weight:700;
+            cursor:pointer;
+          }
+
+          @media (max-width:920px){
+            body.zc-settings-panel-open #wppAtendSidebar,
+            body.zc-settings-panel-open .wpp-leftbar{
+              position:fixed !important;
+              top:0 !important;
+              left:0 !important;
+              width:64px !important;
+              min-width:64px !important;
+              max-width:64px !important;
+              height:100vh !important;
+              min-height:100vh !important;
+              transform:translateX(0) !important;
+              z-index:100000 !important;
+              box-shadow:none !important;
+              overflow:hidden !important;
+            }
+
+            body.zc-settings-panel-open .wpp-leftbar:hover{
+              width:64px !important;
+              min-width:64px !important;
+              max-width:64px !important;
+              box-shadow:none !important;
+            }
+
+            body.zc-settings-panel-open .wpp-leftbar .wpp-label,
+            body.zc-settings-panel-open .wpp-leftbar-user-info,
+            body.zc-settings-panel-open .wpp-leftbar-user-chevron,
+            body.zc-settings-panel-open .wpp-leftbar-section-label span{
+              display:none !important;
+              opacity:0 !important;
+              max-width:0 !important;
+            }
+
+            body.zc-settings-panel-open .wpp-leftbar-icons{
+              padding:8px 0 !important;
+              align-items:stretch !important;
+            }
+
+            body.zc-settings-panel-open .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon,
+            body.zc-settings-panel-open .wpp-leftbar:hover .wpp-leftbar-icons > .wpp-leftbar-icon{
+              justify-content:center !important;
+              gap:0 !important;
+              padding:11px 0 !important;
+            }
+
+            body.zc-settings-panel-open .wpp-leftbar-user-wrap{
+              padding:10px 0 !important;
+            }
+
+            body.zc-settings-panel-open .wpp-leftbar-user-btn,
+            body.zc-settings-panel-open .wpp-leftbar:hover .wpp-leftbar-user-btn{
+              justify-content:center !important;
+              padding:10px 0 !important;
+              gap:0 !important;
+            }
+
+            body.zc-settings-panel-open .wpp-leftbar-logo{
+              width:64px !important;
+              min-width:64px !important;
+              max-width:64px !important;
+              height:64px !important;
+              min-height:64px !important;
+              padding:0 !important;
+              justify-content:center !important;
+            }
+
+            body.zc-settings-panel-open .wpp-leftbar-logo-link,
+            body.zc-settings-panel-open .wpp-leftbar:hover .wpp-leftbar-logo-link{
+              width:64px !important;
+              min-width:64px !important;
+              height:64px !important;
+              justify-content:center !important;
+              padding-left:0 !important;
+            }
+
+            body.zc-settings-panel-open .wpp-leftbar-logo-fav{
+              display:block !important;
+            }
+
+            body.zc-settings-panel-open .wpp-leftbar-logo-light,
+            body.zc-settings-panel-open .wpp-leftbar-logo-dark,
+            body.zc-settings-panel-open .wpp-mobile-close,
+            body.zc-settings-panel-open .wpp-mobile-overlay,
+            body.zc-settings-panel-open #wppMobileOverlay,
+            body.zc-settings-panel-open #wppMobileToggle{
+              display:none !important;
+            }
+
+            .zcWppSettingsOverlay{
+              top:0 !important;
+              right:0 !important;
+              bottom:0 !important;
+              left:64px !important;
+              width:calc(100vw - 64px) !important;
+              max-width:calc(100vw - 64px) !important;
+              height:100vh !important;
+              display:none;
+              z-index:90000 !important;
+            }
+
+            .zcWppSettingsOverlay.is-open{
+              display:block;
+            }
+
+            .zcWppSettingsPanel{
+              width:100% !important;
+              max-width:100% !important;
+              min-width:0 !important;
+              height:100vh !important;
+            }
+
+            .zcWppSettingsMain{
+              display:none;
+            }
+          }
+        `;
+        document.head.appendChild(style);
+
+        var panel = document.createElement('div');
+        panel.id = 'zcWppSettingsProfilePanel';
+        panel.className = 'zcWppSettingsOverlay';
+        panel.innerHTML = `
+          <section class="zcWppSettingsPanel">
+            <div class="zcWppSettingsHead">
+              <button type="button" class="zcWppSettingsBack" id="zcWppSettingsClose" aria-label="Voltar">
+                <i class="fa-solid fa-arrow-left"></i>
+              </button>
+              <div class="zcWppSettingsTitle" id="zcWppSettingsTitle">Perfil</div>
+            </div>
+
+            <label class="zcWppSettingsSearch">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="text" placeholder="Pesquisar">
+            </label>
+
+            <div class="zcWppNotifyCard" id="zcWppNotifyCard">
+              <div class="zcWppNotifyIcon">
+                <i class="fa-regular fa-lightbulb"></i>
+              </div>
+              <div class="zcWppNotifyText">
+                <strong>Escolha suas notificações</strong>
+                <span>Receba notificações de mensagens, grupos ou atualizações de status. <a href="javascript:void(0)">Escolher agora</a></span>
+              </div>
+              <button type="button" class="zcWppNotifyClose" id="zcWppNotifyClose">×</button>
+            </div>
+
+            <div class="zcWppProfileHero">
+              <div class="zcWppProfileAvatar">
+                <img id="zcWppSettingsAvatar" alt="Avatar">
+                <span id="zcWppSettingsInitials">U</span>
+              </div>
+              <div class="zcWppProfileName" id="zcWppSettingsName">Usuário</div>
+            </div>
+
+            <div class="zcWppSettingsList">
+              <button type="button" class="zcWppSettingsItem" data-section="profile">
+                <span class="zcWppSettingsItemIcon"><i class="fa-regular fa-circle-user"></i></span>
+                <span class="zcWppSettingsItemText">
+                  <strong>Perfil</strong>
+                  <span>Nome, foto do perfil</span>
+                </span>
+              </button>
+
+              <button type="button" class="zcWppSettingsItem" data-section="account">
+                <span class="zcWppSettingsItemIcon"><i class="fa-solid fa-key"></i></span>
+                <span class="zcWppSettingsItemText">
+                  <strong>Conta</strong>
+                  <span>Notificações de segurança, dados da conta</span>
+                </span>
+              </button>
+
+              <button type="button" class="zcWppSettingsItem" data-section="privacy">
+                <span class="zcWppSettingsItemIcon"><i class="fa-solid fa-lock"></i></span>
+                <span class="zcWppSettingsItemText">
+                  <strong>Privacidade</strong>
+                  <span>Contatos bloqueados, mensagens temporárias</span>
+                </span>
+              </button>
+
+              <button type="button" class="zcWppSettingsItem" data-section="conversations">
+                <span class="zcWppSettingsItemIcon"><i class="fa-regular fa-message"></i></span>
+                <span class="zcWppSettingsItemText">
+                  <strong>Conversas</strong>
+                  <span>Tema, papel de parede, configurações de conversas</span>
+                </span>
+              </button>
+
+              <button type="button" class="zcWppSettingsItem" data-section="notifications">
+                <span class="zcWppSettingsItemIcon"><i class="fa-regular fa-bell"></i></span>
+                <span class="zcWppSettingsItemText">
+                  <strong>Notificações</strong>
+                  <span>Mensagens, grupos, sons</span>
+                </span>
+              </button>
+
+              <button type="button" class="zcWppSettingsItem" data-section="shortcuts">
+                <span class="zcWppSettingsItemIcon"><i class="fa-regular fa-keyboard"></i></span>
+                <span class="zcWppSettingsItemText">
+                  <strong>Atalhos do teclado</strong>
+                  <span>Ações rápidas</span>
+                </span>
+              </button>
+
+              <button type="button" class="zcWppSettingsItem" data-section="help">
+                <span class="zcWppSettingsItemIcon"><i class="fa-regular fa-circle-question"></i></span>
+                <span class="zcWppSettingsItemText">
+                  <strong>Ajuda e feedback</strong>
+                  <span>Central de Ajuda, fale conosco, Política de Privacidade</span>
+                </span>
+              </button>
+
+              <button type="button" class="zcWppSettingsItem is-danger" id="zcWppSettingsLogout">
+                <span class="zcWppSettingsItemIcon"><i class="fa-solid fa-arrow-right-from-bracket"></i></span>
+                <span class="zcWppSettingsItemText">
+                  <strong>Desconectar</strong>
+                </span>
+              </button>
+            </div>
+          </section>
+
+          <main class="zcWppSettingsMain">
+            <div class="zcWppSettingsWelcome">
+              <div class="zcWppSettingsWelcomeIcon">
+                <i class="fa-solid fa-laptop"></i>
+              </div>
+              <h3>Baixar o WhatsApp para Windows</h3>
+              <p>Tenha acesso a recursos extras, como ligações de voz e vídeo, compartilhamento de tela e muito mais.</p>
+              <button type="button">Baixar</button>
+            </div>
+          </main>
+        `;
+
+        document.body.appendChild(panel);
+
+        panel.querySelector('#zcWppSettingsClose').addEventListener('click', closePanel);
+
+        panel.querySelector('#zcWppNotifyClose').addEventListener('click', function(){
+          var card = panel.querySelector('#zcWppNotifyCard');
+          if (card) card.style.display = 'none';
+        });
+
+        function openInternalSection(section, label) {
+          var title = panel.querySelector('#zcWppSettingsTitle');
+          var welcome = panel.querySelector('.zcWppSettingsWelcome');
+          var welcomeTitle = welcome ? welcome.querySelector('h3') : null;
+          var welcomeText = welcome ? welcome.querySelector('p') : null;
+          var icon = welcome ? welcome.querySelector('.zcWppSettingsWelcomeIcon i') : null;
+
+          panel.querySelectorAll('.zcWppSettingsItem').forEach(function(item){
+            item.classList.toggle('is-active', item.getAttribute('data-section') === section);
+          });
+
+          var titles = {
+            profile: 'Perfil',
+            account: 'Conta',
+            privacy: 'Privacidade',
+            conversations: 'Conversas',
+            notifications: 'Notificações',
+            shortcuts: 'Atalhos do teclado',
+            help: 'Ajuda e feedback'
+          };
+
+          var subtitles = {
+            profile: 'Nome, foto e informações do usuário no ZapsChat.',
+            account: 'Dados da conta, segurança e acesso.',
+            privacy: 'Contatos bloqueados, mensagens temporárias e controles de privacidade.',
+            conversations: 'Tema, papel de parede e comportamento das conversas.',
+            notifications: 'Mensagens, grupos, sons e alertas.',
+            shortcuts: 'Ações rápidas para agilizar o atendimento.',
+            help: 'Central de ajuda, feedback e informações do sistema.'
+          };
+
+          var icons = {
+            profile: 'fa-regular fa-circle-user',
+            account: 'fa-solid fa-key',
+            privacy: 'fa-solid fa-lock',
+            conversations: 'fa-regular fa-message',
+            notifications: 'fa-regular fa-bell',
+            shortcuts: 'fa-regular fa-keyboard',
+            help: 'fa-regular fa-circle-question'
+          };
+
+          var safeTitle = label || titles[section] || 'Configurações';
+          if (title) title.textContent = safeTitle;
+          if (welcomeTitle) welcomeTitle.textContent = safeTitle;
+          if (welcomeText) welcomeText.textContent = subtitles[section] || 'Configuração selecionada.';
+          if (icon) icon.className = icons[section] || 'fa-solid fa-gear';
+        }
+
+        function openPerfilInstanciaSeguro() {
+          closePanel();
+
+          function getFn() {
+            return (
+              window.abrirPerfilInstanciaUsuario ||
+              (window.ZCPerfilInstancia && window.ZCPerfilInstancia.openMeuPerfil) ||
+              window.zcAbrirMeuPerfilAtendimento ||
+              null
+            );
+          }
+
+          var fn = getFn();
+          if (typeof fn === 'function') {
+            try {
+              fn();
+              return;
+            } catch(e) {}
+          }
+
+          var tries = 0;
+          var timer = setInterval(function(){
+            tries += 1;
+            var retry = getFn();
+            if (typeof retry === 'function') {
+              clearInterval(timer);
+              try { retry(); } catch(e) {}
+              return;
+            }
+            if (tries >= 20) clearInterval(timer);
+          }, 120);
+        }
+
+        panel.querySelectorAll('[data-section]').forEach(function(btn){
+          btn.addEventListener('click', function(e){
+            e.preventDefault();
+            e.stopPropagation();
+
+            var section = btn.getAttribute('data-section') || '';
+            var labelEl = btn.querySelector('.zcWppSettingsItemText strong');
+            var label = labelEl ? labelEl.textContent.trim() : '';
+
+            if (section === 'profile') {
+              openPerfilInstanciaSeguro();
+              return;
+            }
+
+            openInternalSection(section, label);
+          });
+        });
+
+        panel.querySelector('#zcWppSettingsLogout').addEventListener('click', async function(){
+          try {
+            await fetch('/api/auth/logout', {
+              method:'POST',
+              credentials:'include'
+            });
+          } catch(e) {}
+
+          try {
+            localStorage.clear();
+            sessionStorage.clear();
+          } catch(e) {}
+
+          window.location.replace('/');
+        });
+
+        return panel;
+      }
+
+      function renderUser(panel) {
+        var user = getUser();
+
+        var titleEl = panel.querySelector('#zcWppSettingsTitle');
+        var nameEl = panel.querySelector('#zcWppSettingsName');
+        var avatar = panel.querySelector('#zcWppSettingsAvatar');
+        var initials = panel.querySelector('#zcWppSettingsInitials');
+
+        if (titleEl) titleEl.textContent = user.nome || 'Perfil';
+        if (nameEl) nameEl.textContent = user.nome || 'Usuário';
+
+        if (initials) {
+          initials.textContent = getInitials(user.nome || user.email || 'Usuário');
+          initials.style.display = '';
+        }
+
+        if (avatar) {
+          if (user.avatar) {
+            avatar.onerror = function(){
+              avatar.removeAttribute('src');
+              avatar.style.display = 'none';
+              if (initials) initials.style.display = '';
+            };
+
+            var src = user.avatar;
+            if (!src.startsWith('data:')) {
+              src += (src.indexOf('?') >= 0 ? '&' : '?') + 'v=' + encodeURIComponent(localStorage.getItem('usuario_avatar_v') || Date.now());
+            }
+
+            avatar.src = src;
+            avatar.style.display = 'block';
+            if (initials) initials.style.display = 'none';
+          } else {
+            avatar.removeAttribute('src');
+            avatar.style.display = 'none';
+            if (initials) initials.style.display = '';
+          }
+        }
+      }
+
+      function openPanel() {
+        var oldMenu = document.getElementById('wppUserMenu');
+        var oldBtn = document.getElementById('wppUserMenuBtn');
+
+        if (oldMenu) oldMenu.classList.remove('show');
+        if (oldBtn) {
+          oldBtn.classList.remove('active');
+          oldBtn.setAttribute('aria-expanded', 'false');
+        }
+
+        var panel = ensurePanel();
+        renderUser(panel);
+
+        panel.classList.add('is-open');
+        document.body.classList.add('zc-settings-panel-open');
+
+        try {
+          document.documentElement.style.overflow = 'hidden';
+          document.body.style.overflow = 'hidden';
+        } catch(e) {}
+      }
+
+      function closePanel() {
+        var panel = document.getElementById('zcWppSettingsProfilePanel');
+        if (panel) panel.classList.remove('is-open');
+
+        document.body.classList.remove('zc-settings-panel-open');
+
+        try {
+          document.documentElement.style.overflow = '';
+          document.body.style.overflow = '';
+        } catch(e) {}
+      }
+
+      window.zcAbrirPainelConfigPerfilAtendimento = openPanel;
+      window.zcAbrirPainelConfiguracoesAtendimento = openPanel;
+      window.zcFecharPainelConfigPerfilAtendimento = closePanel;
+      window.zcFecharPainelConfiguracoesAtendimento = closePanel;
+
+      document.addEventListener('click', function(e){
+        var clickedProfile =
+          e.target.closest('#wppUserMenuBtn') ||
+          e.target.closest('#wppOpenSettingsPanelBtn') ||
+          e.target.closest('#wppOpenProfileBtn') ||
+          e.target.closest('.wpp-leftbar-user-wrap') ||
+          e.target.closest('.wpp-leftbar-avatar');
+
+        if (!clickedProfile) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof e.stopImmediatePropagation === 'function') {
+          e.stopImmediatePropagation();
+        }
+
+        openPanel();
+      }, true);
+
+      document.addEventListener('keydown', function(e){
+        if (e.key === 'Escape') closePanel();
+      });
+    })();
+  </script>
+
+  <script>
+    (function zcBlockPerfilRedirectAtendimentos(){
+      if (window.__ZC_BLOCK_PERFIL_REDIRECT_ATENDIMENTOS__) return;
+      window.__ZC_BLOCK_PERFIL_REDIRECT_ATENDIMENTOS__ = true;
+
+      document.addEventListener('click', function(event){
+        var target = event.target && event.target.closest
+          ? event.target.closest('[data-go], a[href], button[data-href]')
+          : null;
+
+        if (!target) return;
+
+        var raw =
+          target.getAttribute('data-go') ||
+          target.getAttribute('href') ||
+          target.getAttribute('data-href') ||
+          '';
+
+        raw = String(raw || '').trim();
+        var perfilHtmlPath = '/perfil' + '.html';
+        if (raw !== '/perfil' && raw !== perfilHtmlPath) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === 'function') {
+          event.stopImmediatePropagation();
+        }
+
+        var perfilFn =
+          window.abrirPerfilInstanciaUsuario ||
+          (window.ZCPerfilInstancia && window.ZCPerfilInstancia.openMeuPerfil) ||
+          window.zcAbrirMeuPerfilAtendimento;
+
+        if (typeof perfilFn === 'function') {
+          perfilFn();
+        } else if (typeof window.zcAbrirPainelConfigPerfilAtendimento === 'function') {
+          window.zcAbrirPainelConfigPerfilAtendimento();
+        }
+      }, true);
+    })();
+  </script>
+
 </body>
 </html>

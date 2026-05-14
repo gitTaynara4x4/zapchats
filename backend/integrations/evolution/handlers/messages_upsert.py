@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 from sqlalchemy.exc import IntegrityError
 
@@ -47,11 +48,38 @@ from .shared import (
     insert_mensagem_11_with_retry,
     is_nome_grupo_ruim,
     evo_get_group_subject,
+    merge_lid_cliente_into_real_cliente,
+    resolve_lid_identity,
     run_triagem_pos_commit,
     save_group_media_with_db,
     save_media_pos_commit_11,
     upsert_cliente,
+    upsert_whatsapp_identity,
 )
+
+
+def _bool_env_value(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+
+    if raw is None:
+        return bool(default)
+
+    value = str(raw).strip().lower()
+
+    if value in {"1", "true", "yes", "sim", "on"}:
+        return True
+
+    if value in {"0", "false", "no", "nao", "não", "off"}:
+        return False
+
+    return bool(default)
+
+
+# REGRA OFICIAL DO ZAPSCHAT:
+# LID sem número real NÃO pode virar cliente visível.
+# Deixe false em produção.
+# Se colocar true, volta o comportamento antigo de importar LID como telefone provisório.
+UPSERT_IMPORT_UNRESOLVED_LID = _bool_env_value("EVO_UPSERT_IMPORT_UNRESOLVED_LID", False)
 
 
 def _safe_rollback(db) -> None:
@@ -59,6 +87,20 @@ def _safe_rollback(db) -> None:
         db.rollback()
     except Exception:
         pass
+
+
+def _only_digits(raw) -> str:
+    return "".join(ch for ch in str(raw or "") if ch.isdigit())
+
+
+def _same_phone(a, b) -> bool:
+    da = _only_digits(a)
+    db = _only_digits(b)
+
+    if not da or not db:
+        return False
+
+    return da == db or da.endswith(db) or db.endswith(da)
 
 
 def _is_cliente_fk_error(e: Exception) -> bool:
@@ -233,11 +275,6 @@ def _safe_atendimento_id_for_cliente(
 ) -> int | None:
     """
     Garante que o atendimento_id pertence ao mesmo cliente/empresa/instância.
-
-    Isso evita:
-    - mensagem vinculada em atendimento de outro cliente;
-    - WebSocket sair com atendimento_id antigo;
-    - atendimento_id criado antes de rollback ficar reaproveitado incorretamente.
     """
     if not _HAS_MSG_ATD_FIELD:
         return None
@@ -282,8 +319,6 @@ def _resolve_atendimento_id_safe(
 ) -> int | None:
     """
     Resolve o atendimento usando o cliente final já validado no banco.
-    O helper compartilhado já busca departamento/operador do cliente quando
-    eles não forem passados explicitamente.
     """
     if not _HAS_MSG_ATD_FIELD:
         return None
@@ -533,7 +568,344 @@ async def _insert_mensagem_no_msgid_fk_safe(
         return int(msg_model.id), True, int(cli_retry), None
 
 
+def _lid_digits_from_jid(raw: str | None) -> str | None:
+    s = jid_strip_device(raw or "")
+    if not s or not is_lid_jid(s):
+        return None
+
+    left = s.split("@", 1)[0]
+    digits = _only_digits(left)
+    return digits or None
+
+
+def _bad_push_name(name: str | None, *, raw_lid: str | None = None, telefone: str | None = None) -> bool:
+    s = str(name or "").strip()
+    if not s:
+        return True
+
+    low = s.lower().strip()
+
+    if low in {
+        "você",
+        "voce",
+        "you",
+        "cliente",
+        "contato",
+        "unknown",
+        "desconhecido",
+        "0",
+        "contato do whatsapp",
+        "contato whatsapp",
+        "whatsapp",
+    }:
+        return True
+
+    if low.startswith("contato do whatsapp"):
+        return True
+
+    if low.startswith("contato whatsapp"):
+        return True
+
+    if low.startswith("contato lid"):
+        return True
+
+    if low.startswith("lid "):
+        return True
+
+    digits = _only_digits(s)
+    lid_digits = _lid_digits_from_jid(raw_lid)
+
+    if lid_digits and digits and digits == lid_digits:
+        return True
+
+    if telefone and digits and _same_phone(digits, telefone):
+        return True
+
+    if digits and digits == s and len(digits) >= 13:
+        return True
+
+    compact = "".join(str(s).split())
+    if digits and len(digits) >= 13 and digits == compact:
+        return True
+
+    return False
+
+
+def _real_jid_candidate(value, *, me_number: str | None = None, raw_lid: str | None = None) -> str | None:
+    if value is None:
+        return None
+
+    raw = jid_strip_device(str(value or "").strip())
+    if not raw:
+        return None
+
+    if raw_lid and raw == jid_strip_device(raw_lid):
+        return None
+
+    low = raw.lower()
+
+    if is_lid_jid(raw):
+        return None
+
+    if low.endswith("@g.us"):
+        return None
+
+    if low.endswith("@s.whatsapp.net") or low.endswith("@c.us"):
+        tel = remote_to_num(raw)
+        if not tel:
+            return None
+
+        if me_number and _same_phone(tel, me_number):
+            return None
+
+        return f"{tel}@s.whatsapp.net"
+
+    if "@" in raw:
+        return None
+
+    digits = _only_digits(raw)
+    if len(digits) < 10 or len(digits) > 15:
+        return None
+
+    if me_number and _same_phone(digits, me_number):
+        return None
+
+    send_e164 = normalize_phone_for_send(digits)
+    if send_e164:
+        return f"{send_e164}@s.whatsapp.net"
+
+    return f"{digits}@s.whatsapp.net"
+
+
+def _identity_hint_for_remote(
+    db,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    remote_jid: str | None,
+) -> dict:
+    raw = jid_strip_device(remote_jid or "")
+    out = {
+        "remote_jid": raw,
+        "real_jid": None,
+        "lid_jid": raw if is_lid_jid(raw) else None,
+        "telefone_norm": None,
+        "push_name": None,
+        "profile_pic_url": None,
+        "cliente_id": None,
+        "resolved": False,
+        "confianca": 0,
+        "resolved_by": None,
+    }
+
+    if not raw:
+        return out
+
+    try:
+        if is_lid_jid(raw):
+            info = resolve_lid_identity(
+                db,
+                empresa_id=int(empresa_id),
+                instancia_id=int(instancia_id),
+                lid_jid=raw,
+            )
+            if isinstance(info, dict):
+                out.update(info)
+
+            if _bad_push_name(
+                out.get("push_name"),
+                raw_lid=raw,
+                telefone=out.get("telefone_norm"),
+            ):
+                out["push_name"] = None
+
+            return out
+
+        row = (
+            db.query(models.ContatoWhatsappIdentidade)
+            .filter(
+                models.ContatoWhatsappIdentidade.empresa_id == int(empresa_id),
+                models.ContatoWhatsappIdentidade.instancia_id == int(instancia_id),
+                models.ContatoWhatsappIdentidade.remote_jid == raw,
+            )
+            .first()
+        )
+        if row:
+            out.update(
+                {
+                    "remote_jid": row.real_jid or row.remote_jid or raw,
+                    "real_jid": row.real_jid,
+                    "lid_jid": row.lid_jid,
+                    "telefone_norm": row.telefone_norm,
+                    "push_name": row.push_name,
+                    "profile_pic_url": row.profile_pic_url,
+                    "cliente_id": row.cliente_id,
+                    "resolved": bool(row.real_jid),
+                    "confianca": int(row.confianca or 0),
+                    "resolved_by": row.resolved_by,
+                }
+            )
+
+            if _bad_push_name(
+                out.get("push_name"),
+                raw_lid=raw,
+                telefone=out.get("telefone_norm"),
+            ):
+                out["push_name"] = None
+
+    except Exception as e:
+        LOG(
+            f"[UPsert][identity-hint][erro] empresa_id={empresa_id} "
+            f"instancia_id={instancia_id} remote={raw} err={e}"
+        )
+        _safe_rollback(db)
+
+    return out
+
+
+def _find_lid_cliente_id_for_merge(
+    db,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    lid_jid: str,
+    real_cliente_id: int,
+) -> int | None:
+    """
+    Mantido apenas para corrigir sujeira antiga.
+    Depois da correção, cliente LID novo não deve mais ser criado.
+    """
+    lid = jid_strip_device(lid_jid or "")
+    if not lid or not is_lid_jid(lid):
+        return None
+
+    try:
+        row = (
+            db.query(models.ContatoWhatsappIdentidade.cliente_id)
+            .filter(
+                models.ContatoWhatsappIdentidade.empresa_id == int(empresa_id),
+                models.ContatoWhatsappIdentidade.instancia_id == int(instancia_id),
+                models.ContatoWhatsappIdentidade.lid_jid == lid,
+                models.ContatoWhatsappIdentidade.cliente_id.isnot(None),
+            )
+            .order_by(models.ContatoWhatsappIdentidade.confianca.desc())
+            .first()
+        )
+        if row and row[0] and int(row[0]) != int(real_cliente_id):
+            return int(row[0])
+    except Exception:
+        _safe_rollback(db)
+
+    lid_digits = _lid_digits_from_jid(lid)
+    if not lid_digits:
+        return None
+
+    tel_norm = normalize_phone_for_db(lid_digits) or lid_digits
+
+    try:
+        row = (
+            db.query(models.Cliente.id)
+            .filter(
+                models.Cliente.empresa_id == int(empresa_id),
+                models.Cliente.instancia_id == int(instancia_id),
+                models.Cliente.telefone_norm == tel_norm,
+                models.Cliente.id != int(real_cliente_id),
+            )
+            .order_by(models.Cliente.id.desc())
+            .first()
+        )
+        if row and row[0]:
+            return int(row[0])
+    except Exception:
+        _safe_rollback(db)
+
+    try:
+        row = (
+            db.query(models.Cliente.id)
+            .filter(
+                models.Cliente.empresa_id == int(empresa_id),
+                models.Cliente.telefone_norm == tel_norm,
+                models.Cliente.id != int(real_cliente_id),
+            )
+            .order_by(models.Cliente.id.desc())
+            .first()
+        )
+        if row and row[0]:
+            return int(row[0])
+    except Exception:
+        _safe_rollback(db)
+
+    return None
+
+
+def _merge_lid_history_with_new_session(
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    lid_jid: str | None,
+    real_jid: str | None,
+    real_cliente_id: int | None,
+) -> bool:
+    if not lid_jid or not real_jid or not real_cliente_id:
+        return False
+
+    lid = jid_strip_device(lid_jid)
+    real = jid_strip_device(real_jid)
+
+    if not is_lid_jid(lid):
+        return False
+
+    if not real or is_lid_jid(real):
+        return False
+
+    with SessionLocal() as db_merge:
+        try:
+            lid_cliente_id = _find_lid_cliente_id_for_merge(
+                db_merge,
+                empresa_id=int(empresa_id),
+                instancia_id=int(instancia_id),
+                lid_jid=lid,
+                real_cliente_id=int(real_cliente_id),
+            )
+
+            if not lid_cliente_id:
+                return False
+
+            ok = merge_lid_cliente_into_real_cliente(
+                db_merge,
+                empresa_id=int(empresa_id),
+                instancia_id=int(instancia_id),
+                lid_cliente_id=int(lid_cliente_id),
+                real_cliente_id=int(real_cliente_id),
+                lid_jid=lid,
+                real_jid=real,
+            )
+
+            if ok:
+                db_merge.commit()
+                LOG(
+                    f"[UPsert][identity-merge-ok] emp={empresa_id} inst={instancia_id} "
+                    f"lid={lid} real={real} lid_cliente={lid_cliente_id} real_cliente={real_cliente_id}"
+                )
+                return True
+
+            db_merge.rollback()
+            return False
+
+        except Exception as e:
+            try:
+                db_merge.rollback()
+            except Exception:
+                pass
+            LOG(
+                f"[UPsert][identity-merge-erro] emp={empresa_id} inst={instancia_id} "
+                f"lid={lid} real={real} real_cliente={real_cliente_id} err={e}"
+            )
+            return False
+
+
 def _resolve_remote_jid_upsert(
+    db,
     *,
     empresa_id: int,
     instancia_id: int,
@@ -556,6 +928,26 @@ def _resolve_remote_jid_upsert(
     if not is_lid_jid(raw_remote):
         return raw_remote
 
+    # 1. Primeiro tenta a tabela alimentada por contacts.upsert/update.
+    try:
+        ident = resolve_lid_identity(
+            db,
+            empresa_id=int(empresa_id),
+            instancia_id=int(instancia_id),
+            lid_jid=raw_remote,
+        )
+        real_from_identity = jid_strip_device((ident or {}).get("real_jid") or "")
+        if real_from_identity and not is_lid_jid(real_from_identity):
+            _lid_map_set(empresa_id, instancia_id, raw_remote, real_from_identity)
+            return real_from_identity
+    except Exception as e:
+        LOG(
+            f"[UPsert][identity-resolve][erro] emp={empresa_id} "
+            f"inst={instancia_id} raw={raw_remote} err={e}"
+        )
+        _safe_rollback(db)
+
+    # 2. Campos alternativos diretos.
     alt_jid = (
         key.get("remoteJidAlt")
         or key.get("remote_jid_alt")
@@ -563,25 +955,112 @@ def _resolve_remote_jid_upsert(
         or message_item.get("remote_jid_alt")
     )
 
-    if isinstance(alt_jid, str) and "@" in alt_jid:
-        real = jid_strip_device(alt_jid)
-        _lid_map_set(empresa_id, instancia_id, raw_remote, real)
-        return real
+    real_alt = _real_jid_candidate(alt_jid, me_number=me_number, raw_lid=raw_remote)
+    if real_alt:
+        _lid_map_set(empresa_id, instancia_id, raw_remote, real_alt)
+        return real_alt
 
+    # 3. Mesmo raciocínio antigo do upsert: tenta resolver contraparte.
     tel_fallback, alt = _resolve_counterparty_num_1to1(message_item, me_number)
-    if isinstance(alt, str) and "@" in alt:
-        real = jid_strip_device(alt)
-        _lid_map_set(empresa_id, instancia_id, raw_remote, real)
-        return real
+
+    real_alt = _real_jid_candidate(alt, me_number=me_number, raw_lid=raw_remote)
+    if real_alt:
+        _lid_map_set(empresa_id, instancia_id, raw_remote, real_alt)
+        return real_alt
 
     if tel_fallback and not str(tel_fallback).startswith("LID-"):
-        send_e164 = normalize_phone_for_send(tel_fallback)
-        if send_e164:
-            real = f"{send_e164}@s.whatsapp.net"
-            _lid_map_set(empresa_id, instancia_id, raw_remote, real)
-            return real
+        real_tel = _real_jid_candidate(tel_fallback, me_number=me_number, raw_lid=raw_remote)
+        if real_tel:
+            _lid_map_set(empresa_id, instancia_id, raw_remote, real_tel)
+            return real_tel
 
-    return raw_remote
+    if UPSERT_IMPORT_UNRESOLVED_LID:
+        LOG(
+            f"[UPsert][lid-fallback][legacy] sem telefone real para {raw_remote}; "
+            "EVO_UPSERT_IMPORT_UNRESOLVED_LID=true, então vou manter LID."
+        )
+        return raw_remote
+
+    LOG(
+        f"[UPsert][lid-pending] sem telefone real para {raw_remote}; "
+        "não vou criar cliente/conversa visível com LID."
+    )
+    return None
+
+
+def _save_identity_for_1to1(
+    db,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    raw_remote: str | None,
+    remote_jid: str,
+    telefone: str,
+    cli_id: int,
+    push_name: str | None,
+    avatar_url: str | None,
+) -> tuple[str | None, str | None]:
+    """
+    Atualiza a tabela contatos_whatsapp_identidades quando chega mensagem nova.
+
+    Se raw_remote era @lid e remote_jid foi resolvido para @s.whatsapp.net,
+    grava:
+    LID -> real_jid -> cliente_id
+    """
+    raw_norm = jid_strip_device(raw_remote or "")
+    remote_norm = jid_strip_device(remote_jid or "")
+
+    lid_for_merge = raw_norm if is_lid_jid(raw_norm) else None
+    real_for_merge = remote_norm if remote_norm and not is_lid_jid(remote_norm) else None
+
+    safe_push_name = None if _bad_push_name(push_name, raw_lid=raw_norm, telefone=telefone) else push_name
+
+    try:
+        if raw_norm:
+            upsert_whatsapp_identity(
+                db,
+                empresa_id=int(empresa_id),
+                instancia_id=int(instancia_id),
+                remote_jid=raw_norm,
+                push_name=safe_push_name,
+                profile_pic_url=avatar_url,
+                origem="messages.upsert",
+                cliente_id=int(cli_id),
+                real_jid=real_for_merge if lid_for_merge else None,
+                confirmado=bool(lid_for_merge and real_for_merge),
+                confianca=(100 if lid_for_merge and real_for_merge else 70),
+                resolved_by=("messages_upsert_resolved" if lid_for_merge and real_for_merge else "messages_upsert_seen"),
+                payload=None,
+                commit=False,
+            )
+
+        if remote_norm and remote_norm != raw_norm and not is_lid_jid(remote_norm):
+            upsert_whatsapp_identity(
+                db,
+                empresa_id=int(empresa_id),
+                instancia_id=int(instancia_id),
+                remote_jid=remote_norm,
+                push_name=safe_push_name,
+                profile_pic_url=avatar_url,
+                origem="messages.upsert",
+                cliente_id=int(cli_id),
+                confirmado=True,
+                confianca=100,
+                resolved_by="messages_upsert_real_jid",
+                payload=None,
+                commit=False,
+            )
+
+        if lid_for_merge and real_for_merge:
+            _lid_map_set(empresa_id, instancia_id, lid_for_merge, real_for_merge)
+
+    except Exception as e:
+        LOG(
+            f"[UPsert][identity-save][erro] emp={empresa_id} inst={instancia_id} "
+            f"raw={raw_norm} remote={remote_norm} cli={cli_id} err={e}"
+        )
+
+    return lid_for_merge, real_for_merge
 
 
 @handler(EvoEvent.MESSAGES_UPSERT)
@@ -593,6 +1072,7 @@ async def on_messages_upsert(inst_id: str, data):
             return
 
         empresa_id = int(inst.empresa_id)
+        instancia_id = int(inst.id)
         me_number_raw = _me_number_by_inst(inst)
         me_number_db = normalize_phone_for_db(me_number_raw)
 
@@ -601,8 +1081,10 @@ async def on_messages_upsert(inst_id: str, data):
             "[UPsert] batch",
             inst=inst_id,
             empresa_id=empresa_id,
+            instancia_id=instancia_id,
             total=len(mensagens),
             type_data=type(data).__name__,
+            UPSERT_IMPORT_UNRESOLVED_LID=UPSERT_IMPORT_UNRESOLVED_LID,
         )
 
         if not mensagens:
@@ -627,6 +1109,7 @@ async def on_messages_upsert(inst_id: str, data):
                     or m.get("chatId")
                     or ""
                 )
+                raw_remote = jid_strip_device(raw_remote)
 
                 msg_id = key.get("id") or m.get("id")
                 ts_raw = m.get("messageTimestamp") or m.get("timestamp") or 0
@@ -647,17 +1130,28 @@ async def on_messages_upsert(inst_id: str, data):
                     continue
 
                 remote_jid = _resolve_remote_jid_upsert(
+                    db,
                     empresa_id=empresa_id,
-                    instancia_id=inst.id,
+                    instancia_id=instancia_id,
                     key=key,
                     message_item=m,
                     me_number=me_number_raw,
                 )
-                remote_jid = jid_strip_device(remote_jid)
+
+                remote_jid = jid_strip_device(remote_jid or "")
+
+                if not remote_jid:
+                    _log_skip(
+                        "remote_jid real não resolvido; não cria cliente visível",
+                        idx=idx,
+                        msg_id=msg_id,
+                        raw_remote=raw_remote,
+                    )
+                    continue
 
                 from_me = bool(key.get("fromMe", m.get("fromMe", False)))
                 direcao = "saida" if from_me else "entrada"
-                push_name = m.get("pushName") or m.get("senderName")
+                push_name_raw = m.get("pushName") or m.get("senderName")
                 ts_msg = _to_dt_utc(ts_raw)
                 conteudo = extract_text_from_baileys(m)
                 media_meta = extract_media_meta(m)
@@ -718,18 +1212,19 @@ async def on_messages_upsert(inst_id: str, data):
                         pass
 
                     cli_autor_id = None
-                    autor_nome = push_name or participant or None
+                    autor_nome = push_name_raw or participant or None
 
                     try:
                         tel_autor = remote_to_num(participant) if participant else None
                         if tel_autor and (not me_number_db or tel_autor != me_number_db):
+                            nome_autor = push_name_raw if not _bad_push_name(push_name_raw, telefone=tel_autor) else formatar_telefone_br(tel_autor)
                             cli_autor_id = await _ensure_cliente_id_fk_safe(
                                 db,
                                 empresa_id=empresa_id,
                                 instancia_id=inst.id,
                                 telefone=tel_autor,
-                                nome=(push_name or formatar_telefone_br(tel_autor)),
-                                nome_whatsapp=(push_name or formatar_telefone_br(tel_autor)),
+                                nome=nome_autor,
+                                nome_whatsapp=(nome_autor if nome_autor != formatar_telefone_br(tel_autor) else None),
                                 avatar_url=None,
                                 current_cliente_id=None,
                             )
@@ -900,9 +1395,33 @@ async def on_messages_upsert(inst_id: str, data):
                 # =========================
                 # 1:1
                 # =========================
+                identity_info = _identity_hint_for_remote(
+                    db,
+                    empresa_id=empresa_id,
+                    instancia_id=instancia_id,
+                    remote_jid=raw_remote,
+                )
+
+                identity_real_jid = jid_strip_device(identity_info.get("real_jid") or "")
+                identity_push_name = identity_info.get("push_name")
+                identity_avatar_url = identity_info.get("profile_pic_url")
+
+                if is_lid_jid(remote_jid) and identity_real_jid and not is_lid_jid(identity_real_jid):
+                    remote_jid = identity_real_jid
+
+                if is_lid_jid(remote_jid):
+                    _log_skip(
+                        "LID sem número real; não cria cliente visível",
+                        idx=idx,
+                        msg_id=msg_id,
+                        remote_jid=remote_jid,
+                        raw_remote=raw_remote,
+                    )
+                    continue
+
                 telefone = remote_to_num(remote_jid)
                 if not telefone:
-                    _log_skip("telefone inválido", idx=idx, msg_id=msg_id, remote_jid=remote_jid)
+                    _log_skip("telefone inválido", idx=idx, msg_id=msg_id, remote_jid=remote_jid, raw_remote=raw_remote)
                     continue
 
                 if me_number_db and telefone == me_number_db:
@@ -910,17 +1429,32 @@ async def on_messages_upsert(inst_id: str, data):
                     continue
 
                 formatted = formatar_telefone_br(telefone)
-                nome_cliente = formatted if from_me else (push_name or formatted)
-                nome_whatsapp = formatted if from_me else (push_name or formatted)
+
+                push_name_ok = None
+                if not _bad_push_name(push_name_raw, raw_lid=raw_remote, telefone=telefone):
+                    push_name_ok = str(push_name_raw).strip()
+
+                identity_name_ok = None
+                if not _bad_push_name(identity_push_name, raw_lid=raw_remote, telefone=telefone):
+                    identity_name_ok = str(identity_push_name).strip()
+
+                nome_final = push_name_ok or identity_name_ok or formatted
+                avatar_final = identity_avatar_url or avatar_from_contact_like(m)
+
+                nome_cliente = nome_final
+                nome_whatsapp = (push_name_ok or identity_name_ok)
 
                 _log_ctx(
                     "[UPsert][resolved]",
                     idx=idx,
                     msg_id=msg_id,
+                    raw_remote=raw_remote,
                     remote_jid=remote_jid,
                     telefone=telefone,
                     from_me=from_me,
-                    push_name=_short(push_name, 60),
+                    push_name=_short(push_name_raw, 60),
+                    identity_name=_short(identity_push_name, 60),
+                    identity_real=identity_real_jid or None,
                     ts=_iso_utc(ts_msg),
                     preview=_short(conteudo),
                 )
@@ -932,13 +1466,37 @@ async def on_messages_upsert(inst_id: str, data):
                     telefone=telefone,
                     nome=nome_cliente,
                     nome_whatsapp=nome_whatsapp,
-                    avatar_url=None,
+                    avatar_url=avatar_final,
                     current_cliente_id=None,
                 )
 
                 if not cli_id:
                     _log_skip("cli_id vazio/fk-inválido (upsert)", idx=idx, msg_id=msg_id, telefone=telefone)
                     continue
+
+                pending_lid_merge: tuple[str, str, int] | None = None
+
+                try:
+                    lid_for_merge, real_for_merge = _save_identity_for_1to1(
+                        db,
+                        empresa_id=empresa_id,
+                        instancia_id=instancia_id,
+                        raw_remote=raw_remote,
+                        remote_jid=remote_jid,
+                        telefone=telefone,
+                        cli_id=int(cli_id),
+                        push_name=nome_whatsapp,
+                        avatar_url=avatar_final,
+                    )
+
+                    if lid_for_merge and real_for_merge:
+                        pending_lid_merge = (lid_for_merge, real_for_merge, int(cli_id))
+
+                except Exception as e:
+                    LOG(
+                        f"[UPsert][identity][erro] idx={idx} msg_id={msg_id} "
+                        f"raw={raw_remote} remote={remote_jid} cli={cli_id} err={e}"
+                    )
 
                 replay_existing_msg_id = None
 
@@ -987,7 +1545,7 @@ async def on_messages_upsert(inst_id: str, data):
                     telefone=telefone,
                     nome=nome_cliente,
                     nome_whatsapp=nome_whatsapp,
-                    avatar_url=None,
+                    avatar_url=avatar_final,
                     current_cliente_id=cli_id,
                 )
                 if not cli_id:
@@ -998,6 +1556,9 @@ async def on_messages_upsert(inst_id: str, data):
                         telefone=telefone,
                     )
                     continue
+
+                if pending_lid_merge:
+                    pending_lid_merge = (pending_lid_merge[0], pending_lid_merge[1], int(cli_id))
 
                 if _HAS_MSG_ATD_FIELD:
                     atendimento_id = _resolve_atendimento_id_safe(
@@ -1032,6 +1593,21 @@ async def on_messages_upsert(inst_id: str, data):
                             existing_id=replay_existing_msg_id,
                             instancia_id=inst.id,
                         )
+
+                        if pending_lid_merge:
+                            try:
+                                db.commit()
+                            except Exception:
+                                _safe_rollback(db)
+
+                            _merge_lid_history_with_new_session(
+                                empresa_id=empresa_id,
+                                instancia_id=instancia_id,
+                                lid_jid=pending_lid_merge[0],
+                                real_jid=pending_lid_merge[1],
+                                real_cliente_id=pending_lid_merge[2],
+                            )
+
                     else:
                         try:
                             msg_db_id, inserted_11, cli_id, atendimento_id = await _insert_mensagem_11_fk_safe(
@@ -1050,7 +1626,7 @@ async def on_messages_upsert(inst_id: str, data):
                                 telefone=telefone,
                                 nome=nome_cliente,
                                 nome_whatsapp=nome_whatsapp,
-                                avatar_url=None,
+                                avatar_url=avatar_final,
                             )
 
                             atendimento_id = _safe_atendimento_id_for_cliente(
@@ -1068,6 +1644,15 @@ async def on_messages_upsert(inst_id: str, data):
                                     _safe_rollback(db)
                                     LOG(f"[UPsert][commit-msg-erro] idx={idx} msg_id={msg_id} err={e}")
                                     continue
+
+                                if pending_lid_merge:
+                                    _merge_lid_history_with_new_session(
+                                        empresa_id=empresa_id,
+                                        instancia_id=instancia_id,
+                                        lid_jid=pending_lid_merge[0],
+                                        real_jid=pending_lid_merge[1],
+                                        real_cliente_id=int(cli_id),
+                                    )
 
                                 novas += 1
                                 _log_ctx(
@@ -1095,6 +1680,20 @@ async def on_messages_upsert(inst_id: str, data):
                                     instancia_id=inst.id,
                                 )
 
+                                if pending_lid_merge:
+                                    try:
+                                        db.commit()
+                                    except Exception:
+                                        _safe_rollback(db)
+
+                                    _merge_lid_history_with_new_session(
+                                        empresa_id=empresa_id,
+                                        instancia_id=instancia_id,
+                                        lid_jid=pending_lid_merge[0],
+                                        real_jid=pending_lid_merge[1],
+                                        real_cliente_id=int(cli_id),
+                                    )
+
                         except Exception as e:
                             LOG(f"[UPsert][erro upsert mensagem] idx={idx} msg_id={msg_id} err={e}")
                             _safe_rollback(db)
@@ -1118,7 +1717,7 @@ async def on_messages_upsert(inst_id: str, data):
                             nome=nome_cliente,
                             nome_whatsapp=nome_whatsapp,
                             inst=inst,
-                            avatar_url=None,
+                            avatar_url=avatar_final,
                         )
 
                         atendimento_id = _safe_atendimento_id_for_cliente(
@@ -1135,6 +1734,15 @@ async def on_messages_upsert(inst_id: str, data):
                             _safe_rollback(db)
                             LOG(f"[UPsert][commit-msg-sem-id-erro] idx={idx} err={e}")
                             continue
+
+                        if pending_lid_merge:
+                            _merge_lid_history_with_new_session(
+                                empresa_id=empresa_id,
+                                instancia_id=instancia_id,
+                                lid_jid=pending_lid_merge[0],
+                                real_jid=pending_lid_merge[1],
+                                real_cliente_id=int(cli_id),
+                            )
 
                         novas += 1
                         inserted_11 = True
@@ -1260,9 +1868,9 @@ async def on_messages_upsert(inst_id: str, data):
                             "telefone": formatar_telefone_br(telefone),
                             "telefone_norm": telefone,
 
-                            "avatar_url": getattr(cliente, "avatar_url", None) if cliente else None,
-                            "push_name": getattr(cliente, "nome_whatsapp", None) if cliente else None,
-                            "nome": getattr(cliente, "nome", None) if cliente else formatted,
+                            "avatar_url": getattr(cliente, "avatar_url", None) if cliente else avatar_final,
+                            "push_name": getattr(cliente, "nome_whatsapp", None) if cliente else nome_whatsapp,
+                            "nome": getattr(cliente, "nome", None) if cliente else nome_cliente,
 
                             "mensagem": conteudo,
                             "texto": conteudo,

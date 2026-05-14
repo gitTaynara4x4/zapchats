@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const MAIN_VERSION = 'zc-atendimentos-main-v2-anti-loop';
+  const MAIN_VERSION = 'zc-atendimentos-main-v2-anti-loop-settings-pages';
 
   /*
     Se este arquivo for carregado duas vezes por engano
@@ -83,8 +83,27 @@
     await import('../ui/splash.js');
     await import('../ui/envio.js');
     await import('../ui/notif.js');
+
+    /*
+      Mantém o perfil.js antigo.
+      Mantém o perfil-instancia.js que você já criou.
+    */
     await import('../ui/perfil.js');
+    await import('../ui/perfil-instancia.js');
     await import('../ui/perfil_quick.js');
+
+    /*
+      Novas páginas internas do painel estilo WhatsApp:
+      Conta, Privacidade, Conversas, Notificações, Atalhos e Ajuda.
+    */
+    await import('../ui/settings-panel-pages.js');
+    await import('../ui/conta.js');
+    await import('../ui/privacidade.js');
+    await import('../ui/conversas.js');
+    await import('../ui/notificacao.js');
+    await import('../ui/atalhos-teclado.js');
+    await import('../ui/ajuda-feedback.js');
+
     await import('../ui/search.js');
     await import('../ui/inst-switch.js');
     await import('../ui/notes-drawer.js');

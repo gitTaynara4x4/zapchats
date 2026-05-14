@@ -1,0 +1,39 @@
+[
+  {
+    "headers": {
+      "host": "apps-n8n.9ywrah.easypanel.host",
+      "user-agent": "axios/1.13.2",
+      "content-length": "496",
+      "accept": "application/json, text/plain, */*",
+      "accept-encoding": "gzip, compress, deflate, br",
+      "content-type": "application/json",
+      "x-forwarded-for": "172.18.0.1",
+      "x-forwarded-host": "apps-n8n.9ywrah.easypanel.host",
+      "x-forwarded-port": "443",
+      "x-forwarded-proto": "https",
+      "x-forwarded-server": "194e689d5c82",
+      "x-real-ip": "172.18.0.1"
+    },
+    "params": {},
+    "query": {},
+    "body": {
+      "event": "labels.edit",
+      "instance": "emp5-zapsfioficial-auto-1778682016",
+      "data": {
+        "id": "1",
+        "name": "‎Novo cliente",
+        "color": 1,
+        "deleted": false,
+        "predefinedId": "1",
+        "instance": "emp5-zapsfioficial-auto-1778682016"
+      },
+      "destination": "https://apps-n8n.9ywrah.easypanel.host/webhook/evolution-zapchats-evolutionaq",
+      "date_time": "2026-05-13T11:21:14.612Z",
+      "sender": "5512991865418@s.whatsapp.net",
+      "server_url": "https://zapchats-evolution-api.9ywrah.easypanel.host",
+      "apikey": "CCB77F03-4123-41E1-A9ED-F772A01AE92F"
+    },
+    "webhookUrl": "https://apps-n8n.9ywrah.easypanel.host/webhook/evolution-zapchats-evolutionaq",
+    "executionMode": "production"
+  }
+]

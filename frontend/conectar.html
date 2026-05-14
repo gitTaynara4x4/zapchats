@@ -62,35 +62,17 @@
     <div id="modal" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:10000;">
       <div class="card" style="background:var(--card); color:var(--fg); border:1px solid var(--border); border-radius:14px; width:min(760px,92vw);">
         <div style="display:flex; align-items:center; justify-content:space-between; padding:1rem 1.1rem; border-bottom:1px solid var(--border);">
-          <h2 class="modal-title" style="margin:0; font-size:1.05rem; font-weight:800;">Conecte seu número de WhatsApp</h2>
+          <h2 class="modal-title" style="margin:0; font-size:1.05rem; font-weight:800;">Conecte seu WhatsApp</h2>
           <button id="btn-close-modal" class="kebab-btn" aria-label="Fechar">✕</button>
         </div>
 
         <form id="form-conectar" style="padding:1.1rem; max-height:78vh; overflow:auto; display:grid; gap:1rem;">
-          <input name="apelido" type="text" placeholder="Apelido" autocomplete="off"
-                 style="width:100%; padding:.75rem .85rem; border-radius:.75rem; border:1px solid var(--border); background:var(--bg); color:var(--fg);" />
-
-          <input id="numero" name="numero" type="tel" required inputmode="numeric" placeholder="(31) 99999-9999" autocomplete="off"
-                 style="width:100%; padding:.75rem .85rem; border-radius:.75rem; border:1px solid var(--border); background:var(--bg); color:var(--fg);" />
-
-          <div style="display:flex; gap:1rem; flex-wrap:wrap;">
-            <div style="flex:1; min-width:240px;">
-              <label class="muted" style="display:block; margin-bottom:.4rem;">País de origem</label>
-              <select id="pais-select"
-                      style="width:100%; padding:.75rem .85rem; border-radius:.75rem; border:1px solid var(--border); background:var(--bg); color:var(--fg);">
-                <option value="55" selected>🇧🇷 Brasil (+55)</option>
-                <option value="351">🇵🇹 Portugal (+351)</option>
-                <option value="34">🇪🇸 Espanha (+34)</option>
-                <option value="1">🇺🇸 Estados Unidos (+1)</option>
-              </select>
-            </div>
-
-            <div style="flex:1; min-width:240px;">
-              <label class="muted" style="display:block; margin-bottom:.4rem;">Origem dos contatos</label>
-              <div style="display:flex">
-                <button type="button" data-origem="NAC" class="btn" style="flex:1; border-top-right-radius:0; border-bottom-right-radius:0;">Nacional</button>
-                <button type="button" data-origem="INT" class="btn btn--primary" style="flex:1; border-top-left-radius:0; border-bottom-left-radius:0;">Nacional/Internacional</button>
-              </div>
+          <div>
+            <label class="muted" style="display:block; margin-bottom:.4rem;">Apelido da instância</label>
+            <input name="apelido" type="text" placeholder="Ex: Comercial, Suporte, ZapsChat Oficial" autocomplete="off"
+                   style="width:100%; padding:.75rem .85rem; border-radius:.75rem; border:1px solid var(--border); background:var(--bg); color:var(--fg);" />
+            <div class="muted" style="font-size:.82rem; margin-top:.35rem; line-height:1.35;">
+              Esse nome é só para você identificar a instância dentro do ZapsChat.
             </div>
           </div>
 
@@ -105,11 +87,6 @@
               Para manter a conexão rápida e estável, a restauração inicial busca no máximo as últimas 24 horas.
             </div>
           </div>
-
-          <label style="display:flex;align-items:center;gap:.6rem;">
-            <input id="use-pairing" type="checkbox">
-            <span class="muted" style="font-size:.95rem;">Usar <strong>Pairing Code</strong> em vez de QR (se disponível)</span>
-          </label>
 
           <div id="qr-area">
             <p id="qr-instru" class="muted hidden" style="font-size:.86rem;">Após fazer a leitura do QR Code, aguarde.</p>
@@ -165,6 +142,39 @@
         <div style="padding:1rem 1.1rem; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:.6rem;">
           <button id="btn-cancelar-remover" class="btn">Cancelar</button>
           <button id="btn-confirmar-remover" class="btn btn--primary" disabled>Remover definitivamente</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Editar Apelido -->
+    <div id="modal-editar-apelido" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:10003;">
+      <div class="card" style="background:var(--card); color:var(--fg); border:1px solid var(--border); border-radius:14px; width:min(520px,92vw);">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:1rem 1.1rem; border-bottom:1px solid var(--border);">
+          <div>
+            <h2 style="margin:0; font-size:1.05rem; font-weight:800;">Alterar apelido</h2>
+            <div id="editar-apelido-subtitle" class="muted" style="font-size:.86rem; margin-top:.2rem;">
+              Esse nome é usado apenas dentro do ZapsChat.
+            </div>
+          </div>
+          <button id="btn-close-editar-apelido" class="kebab-btn" aria-label="Fechar">✕</button>
+        </div>
+
+        <div style="padding:1.1rem; display:grid; gap:.8rem;">
+          <div>
+            <label class="muted" style="display:block; margin-bottom:.4rem;">Novo apelido</label>
+            <input id="editar-apelido-input" type="text" maxlength="80" placeholder="Ex: Comercial, Suporte, Financeiro"
+                   style="width:100%; padding:.75rem .85rem; border-radius:.75rem; border:1px solid var(--border); background:var(--bg); color:var(--fg);" />
+            <div class="muted" style="font-size:.82rem; margin-top:.35rem; line-height:1.35;">
+              Isso não altera o nome técnico da Evolution, apenas o apelido exibido no ZapsChat.
+            </div>
+          </div>
+
+          <div id="editar-apelido-erro" class="hidden" style="color:#ef4444; font-weight:700; font-size:.9rem;"></div>
+        </div>
+
+        <div style="padding:1rem 1.1rem; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:.6rem;">
+          <button id="btn-cancelar-editar-apelido" class="btn">Cancelar</button>
+          <button id="btn-salvar-editar-apelido" class="btn btn--primary">Salvar apelido</button>
         </div>
       </div>
     </div>

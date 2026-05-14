@@ -1386,6 +1386,620 @@ def evolution_fetch_profile(
 
 
 # =========================================================
+# ROTAS EVOLUTION: perfil da instância conectada
+# =========================================================
+_INSTANCIA_PROFILE_MEMORY_CACHE: dict[str, Dict[str, Any]] = {}
+
+
+def _instancia_profile_cache_key(empresa_id: int, instancia_id: int) -> str:
+    return f"perfil_instancia:{int(empresa_id)}:{int(instancia_id)}"
+
+
+def _first_clean_text(*values: Any) -> Optional[str]:
+    for value in values:
+        if value is None:
+            continue
+
+        if isinstance(value, dict):
+            continue
+
+        s = str(value).strip()
+        if not s:
+            continue
+
+        if re.match(r"^(null|undefined|nan|none)$", s, re.I):
+            continue
+
+        return s
+
+    return None
+
+
+def _nested_dict(data: dict, *keys: str) -> dict:
+    cur: Any = data
+
+    for key in keys:
+        if not isinstance(cur, dict):
+            return {}
+        cur = cur.get(key)
+
+    return cur if isinstance(cur, dict) else {}
+
+
+def _extract_profile_name(data: dict) -> Optional[str]:
+    if not isinstance(data, dict):
+        return None
+
+    profile = _nested_dict(data, "profile")
+    instance = _nested_dict(data, "instance")
+    user = _nested_dict(data, "user")
+    me = _nested_dict(data, "me")
+    business = _nested_dict(data, "businessProfile")
+
+    return _first_clean_text(
+        data.get("name"),
+        data.get("pushName"),
+        data.get("profileName"),
+        data.get("notifyName"),
+        data.get("verifiedName"),
+        data.get("displayName"),
+        profile.get("name"),
+        profile.get("pushName"),
+        profile.get("profileName"),
+        profile.get("displayName"),
+        instance.get("profileName"),
+        instance.get("profile_name"),
+        instance.get("name"),
+        user.get("name"),
+        user.get("pushName"),
+        me.get("name"),
+        me.get("pushName"),
+        business.get("name"),
+        business.get("verifiedName"),
+    )
+
+
+def _extract_profile_about(data: dict) -> Optional[str]:
+    if not isinstance(data, dict):
+        return None
+
+    profile = _nested_dict(data, "profile")
+    status_obj = data.get("status") if isinstance(data.get("status"), dict) else {}
+    instance = _nested_dict(data, "instance")
+    user = _nested_dict(data, "user")
+    me = _nested_dict(data, "me")
+    business = _nested_dict(data, "businessProfile")
+
+    status_text = data.get("status") if isinstance(data.get("status"), str) else None
+
+    return _first_clean_text(
+        data.get("about"),
+        data.get("description"),
+        data.get("statusMessage"),
+        data.get("status_text"),
+        data.get("recado"),
+        status_text,
+        status_obj.get("status"),
+        status_obj.get("text"),
+        status_obj.get("message"),
+        profile.get("about"),
+        profile.get("description"),
+        profile.get("status"),
+        profile.get("statusMessage"),
+        instance.get("about"),
+        instance.get("status"),
+        user.get("about"),
+        user.get("status"),
+        me.get("about"),
+        me.get("status"),
+        business.get("description"),
+        business.get("about"),
+    )
+
+
+def _extract_profile_wuid(data: dict) -> Optional[str]:
+    if not isinstance(data, dict):
+        return None
+
+    profile = _nested_dict(data, "profile")
+    instance = _nested_dict(data, "instance")
+    user = _nested_dict(data, "user")
+    me = _nested_dict(data, "me")
+
+    return _first_clean_text(
+        data.get("wuid"),
+        data.get("wid"),
+        data.get("jid"),
+        data.get("id"),
+        profile.get("wuid"),
+        profile.get("wid"),
+        profile.get("jid"),
+        profile.get("id"),
+        instance.get("wuid"),
+        instance.get("wid"),
+        instance.get("jid"),
+        instance.get("ownerJid"),
+        user.get("id"),
+        user.get("jid"),
+        me.get("id"),
+        me.get("jid"),
+    )
+
+
+def _extract_profile_is_business(data: dict) -> bool:
+    if not isinstance(data, dict):
+        return False
+
+    value = data.get("isBusiness")
+    if value is None:
+        value = data.get("business")
+    if value is None:
+        value = data.get("is_business")
+    if value is None:
+        value = _nested_dict(data, "profile").get("isBusiness")
+    if value is None:
+        value = bool(_nested_dict(data, "businessProfile"))
+
+    return bool(value)
+
+
+def _extract_business_info(data: dict, *, is_business: bool) -> Optional[Dict[str, Any]]:
+    if not is_business or not isinstance(data, dict):
+        return None
+
+    business_profile = _nested_dict(data, "businessProfile")
+    profile = _nested_dict(data, "profile")
+
+    email = _first_clean_text(
+        data.get("email"),
+        business_profile.get("email"),
+        profile.get("email"),
+    )
+
+    description = _first_clean_text(
+        data.get("description"),
+        data.get("about"),
+        business_profile.get("description"),
+        business_profile.get("about"),
+        profile.get("description"),
+        profile.get("about"),
+    )
+
+    website = _first_clean_text(
+        data.get("website"),
+        data.get("site"),
+        business_profile.get("website"),
+        business_profile.get("site"),
+        profile.get("website"),
+    )
+
+    if not any([email, description, website]):
+        return None
+
+    return {
+        "email": email,
+        "description": description,
+        "website": website,
+    }
+
+
+def _instancia_profile_has_db_cache(inst) -> bool:
+    fields = [
+        "perfil_nome_whatsapp",
+        "perfil_recado",
+        "perfil_avatar_url",
+        "perfil_business_email",
+        "perfil_business_website",
+        "perfil_business_description",
+        "perfil_wuid",
+        "perfil_atualizado_em",
+    ]
+
+    for field in fields:
+        if hasattr(inst, field) and getattr(inst, field, None):
+            return True
+
+    return False
+
+
+def _build_instancia_profile_payload(
+    inst,
+    *,
+    source: str = "db",
+    profile_source: str = "db",
+    message: Optional[str] = None,
+    evolution: Optional[Dict[str, Any]] = None,
+    evolution_error: Optional[str] = None,
+    refreshed: bool = False,
+    cache_hit: bool = False,
+) -> Dict[str, Any]:
+    instance_name = (getattr(inst, "instance_name", None) or "").strip()
+    apelido = (getattr(inst, "apelido", None) or "").strip() or None
+    connected = bool(getattr(inst, "connected", False))
+    last_seen = getattr(inst, "last_seen", None)
+
+    numero_raw = (getattr(inst, "numero_instancia", None) or "").strip() or None
+    numero_db_norm, numero_send_norm = _normalize_lookup_number(numero_raw)
+    telefone_fmt = formatar_telefone_br(numero_send_norm) if numero_send_norm else None
+
+    perfil_nome = _first_clean_text(getattr(inst, "perfil_nome_whatsapp", None))
+    perfil_recado = _first_clean_text(getattr(inst, "perfil_recado", None))
+    perfil_avatar = _first_clean_text(getattr(inst, "perfil_avatar_url", None))
+    perfil_wuid = _first_clean_text(getattr(inst, "perfil_wuid", None))
+    perfil_atualizado_em = getattr(inst, "perfil_atualizado_em", None)
+
+    perfil_is_business = bool(getattr(inst, "perfil_is_business", False))
+
+    business_info = None
+    if perfil_is_business:
+        business_info = {
+            "email": _first_clean_text(getattr(inst, "perfil_business_email", None)),
+            "description": _first_clean_text(getattr(inst, "perfil_business_description", None)),
+            "website": _first_clean_text(getattr(inst, "perfil_business_website", None)),
+        }
+        if not any(business_info.values()):
+            business_info = None
+
+    profile_name_final = perfil_nome or apelido or instance_name or "Instância"
+
+    payload: Dict[str, Any] = {
+        "ok": True,
+        "kind": "instancia",
+        "source": source,
+        "profile_source": profile_source,
+        "cache_hit": bool(cache_hit),
+        "refreshed": bool(refreshed),
+
+        "id": int(inst.id),
+        "instancia_id": int(inst.id),
+        "empresa_id": int(inst.empresa_id),
+        "instance_name": instance_name,
+        "apelido": apelido,
+
+        "connected": connected,
+        "last_seen": last_seen.isoformat() if hasattr(last_seen, "isoformat") else None,
+
+        "numero_instancia": numero_raw,
+        "numero": numero_send_norm or numero_db_norm or numero_raw,
+        "telefone": numero_raw,
+        "telefone_norm": numero_db_norm,
+        "telefone_e164": numero_send_norm,
+        "telefone_fmt": telefone_fmt,
+
+        "nome": profile_name_final,
+        "nome_whatsapp": perfil_nome,
+        "push_name": perfil_nome,
+
+        "about": perfil_recado,
+        "recado": perfil_recado,
+        "status_text": perfil_recado,
+
+        "avatar_url": perfil_avatar,
+        "avatar_remote_url": perfil_avatar,
+        "picture": perfil_avatar,
+        "profilePictureUrl": perfil_avatar,
+
+        "is_business": perfil_is_business,
+        "business_info": business_info,
+
+        "wuid": perfil_wuid,
+        "perfil_atualizado_em": perfil_atualizado_em.isoformat() if hasattr(perfil_atualizado_em, "isoformat") else None,
+        "evolution": evolution,
+        "evolution_error": evolution_error,
+    }
+
+    if message:
+        payload["message"] = message
+
+    return payload
+
+
+def _save_instancia_profile_cache(
+    db: Session,
+    inst,
+    *,
+    evo_data: Dict[str, Any],
+    picture_url: Optional[str],
+    nome_whatsapp: Optional[str],
+    about: Optional[str],
+    wuid: Optional[str],
+    is_business: bool,
+    business_info: Optional[Dict[str, Any]],
+) -> None:
+    now = datetime.now(timezone.utc)
+
+    try:
+        if picture_url and hasattr(inst, "perfil_avatar_url"):
+            inst.perfil_avatar_url = picture_url
+
+        if nome_whatsapp and hasattr(inst, "perfil_nome_whatsapp"):
+            inst.perfil_nome_whatsapp = nome_whatsapp
+
+        if about and hasattr(inst, "perfil_recado"):
+            inst.perfil_recado = about
+
+        if hasattr(inst, "perfil_is_business"):
+            inst.perfil_is_business = bool(is_business)
+
+        if business_info and isinstance(business_info, dict):
+            if hasattr(inst, "perfil_business_email"):
+                inst.perfil_business_email = _first_clean_text(business_info.get("email"))
+            if hasattr(inst, "perfil_business_website"):
+                inst.perfil_business_website = _first_clean_text(business_info.get("website"))
+            if hasattr(inst, "perfil_business_description"):
+                inst.perfil_business_description = _first_clean_text(business_info.get("description"))
+        elif hasattr(inst, "perfil_is_business") and not is_business:
+            if hasattr(inst, "perfil_business_email"):
+                inst.perfil_business_email = None
+            if hasattr(inst, "perfil_business_website"):
+                inst.perfil_business_website = None
+            if hasattr(inst, "perfil_business_description"):
+                inst.perfil_business_description = None
+
+        if wuid and hasattr(inst, "perfil_wuid"):
+            inst.perfil_wuid = wuid
+
+        if hasattr(inst, "perfil_raw_json"):
+            inst.perfil_raw_json = evo_data or {}
+
+        if hasattr(inst, "perfil_atualizado_em"):
+            inst.perfil_atualizado_em = now
+
+        numero_from_wuid = _only_digits(wuid) if wuid else None
+        if numero_from_wuid and not (getattr(inst, "numero_instancia", None) or "").strip():
+            inst.numero_instancia = numero_from_wuid
+
+        db.commit()
+        db.refresh(inst)
+    except Exception:
+        db.rollback()
+        raise
+
+
+def _cache_instancia_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        empresa_id = int(payload.get("empresa_id"))
+        instancia_id = int(payload.get("instancia_id"))
+        _INSTANCIA_PROFILE_MEMORY_CACHE[_instancia_profile_cache_key(empresa_id, instancia_id)] = dict(payload)
+    except Exception:
+        pass
+    return payload
+
+
+def _evo_fetch_instance_profile_by_number(instance_name: str, numero_send_norm: str) -> Dict[str, Any]:
+    """
+    Busca o perfil do próprio WhatsApp conectado usando o número salvo da instância.
+
+    A Evolution não deve receber instância fixa aqui. Sempre usamos o instance_name
+    vindo de empresas_instancias.
+    """
+    if not EVOLUTION_URL or not instance_name or not numero_send_norm:
+        return {}
+
+    data = _evo_fetch_profile(instance_name, numero_send_norm)
+    picture_url = _extract_picture_url(data) if data else None
+
+    if not picture_url:
+        picture_url = _evo_fetch_profile_picture_url(instance_name, numero_send_norm)
+
+    if not data:
+        data = {}
+
+    if picture_url:
+        data = dict(data)
+        data["profilePictureUrl"] = picture_url
+        data["picture"] = data.get("picture") or picture_url
+
+    return data
+
+
+@router.get("/atendimento/instancias/{instancia_id}/perfil")
+def get_instancia_whatsapp_profile(
+    instancia_id: int = Path(..., ge=1),
+    empresa_id: int | None = Query(None),
+    refresh: bool = Query(False, description="Se true, força consultar Evolution e atualizar o cache do banco."),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    """
+    Perfil do WhatsApp conectado em uma instância específica.
+
+    Regra:
+    - Sem refresh: primeiro tenta cache de memória, depois banco.
+    - Se não tiver cache salvo no banco, consulta Evolution uma vez e salva.
+    - Com ?refresh=1: força Evolution, atualiza banco e cache de memória.
+    - Este endpoint NÃO resolve "Todos". O frontend deve tratar "Todos" sem chamar esta rota.
+    """
+    ensure_perm(identity, "atendimento.ver")
+
+    empresa_id_eff = assert_same_company(identity, empresa_id)
+
+    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=int(empresa_id_eff))
+    allowed = acl_ctx["allowed_instancias"]
+
+    assert_instancia_allowed(
+        allowed_instancias=allowed,
+        instancia_id=int(instancia_id),
+    )
+
+    inst = (
+        db.query(models.EmpresaInstancia)
+        .filter(
+            models.EmpresaInstancia.empresa_id == int(empresa_id_eff),
+            models.EmpresaInstancia.id == int(instancia_id),
+        )
+        .first()
+    )
+
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instância não encontrada para a empresa.")
+
+    instance_name = (getattr(inst, "instance_name", None) or "").strip()
+    connected = bool(getattr(inst, "connected", False))
+    numero_raw = (getattr(inst, "numero_instancia", None) or "").strip() or None
+    _numero_db_norm, numero_send_norm = _normalize_lookup_number(numero_raw)
+
+    if not instance_name:
+        return _build_instancia_profile_payload(
+            inst,
+            source="db",
+            profile_source="db_missing_instance_name",
+            message="Instância sem instance_name configurado.",
+        ) | {"ok": False}
+
+    cache_key = _instancia_profile_cache_key(int(empresa_id_eff), int(instancia_id))
+
+    # 1) Cache rápido em memória: só usa quando não for refresh e já existir.
+    if not refresh:
+        cached = _INSTANCIA_PROFILE_MEMORY_CACHE.get(cache_key)
+        if isinstance(cached, dict) and cached:
+            cached = dict(cached)
+            cached["cache_hit"] = True
+            cached["source"] = cached.get("source") or "memory"
+            cached["profile_source"] = cached.get("profile_source") or "memory"
+            cached["connected"] = connected
+            return cached
+
+    # 2) Banco: se já tem cache salvo e não é refresh, NÃO chama Evolution.
+    if not refresh and _instancia_profile_has_db_cache(inst):
+        payload = _build_instancia_profile_payload(
+            inst,
+            source="db_cache",
+            profile_source="db_cache",
+            message="Perfil carregado do banco. Use refresh=1 para atualizar pela Evolution.",
+            cache_hit=True,
+        )
+        return _cache_instancia_payload(payload)
+
+    # 3) Se não tem cache salvo e está desconectada, não tem como chamar Evolution.
+    if not connected:
+        if _instancia_profile_has_db_cache(inst):
+            payload = _build_instancia_profile_payload(
+                inst,
+                source="db_cache",
+                profile_source="db_cache_disconnected",
+                message="Instância desconectada. Mostrando último perfil salvo no banco.",
+                cache_hit=True,
+            )
+            return _cache_instancia_payload(payload)
+
+        return _build_instancia_profile_payload(
+            inst,
+            source="disconnected",
+            profile_source="disconnected",
+            message="Instância desconectada. Conecte o WhatsApp para carregar foto, nome e recado.",
+        )
+
+    # 4) Para primeira carga ou refresh=1, precisa de Evolution configurada e número salvo.
+    if not EVOLUTION_URL:
+        if _instancia_profile_has_db_cache(inst):
+            payload = _build_instancia_profile_payload(
+                inst,
+                source="db_cache",
+                profile_source="db_cache_evolution_url_missing",
+                message="EVOLUTION_URL não configurada. Mostrando último perfil salvo no banco.",
+                evolution_error="EVOLUTION_URL não configurada no servidor.",
+                cache_hit=True,
+            )
+            return _cache_instancia_payload(payload)
+
+        return _build_instancia_profile_payload(
+            inst,
+            source="db",
+            profile_source="db_evolution_url_missing",
+            message="EVOLUTION_URL não configurada no servidor.",
+            evolution_error="EVOLUTION_URL não configurada no servidor.",
+        )
+
+    if not numero_send_norm:
+        if _instancia_profile_has_db_cache(inst):
+            payload = _build_instancia_profile_payload(
+                inst,
+                source="db_cache",
+                profile_source="db_cache_missing_number",
+                message="Número da instância não identificado. Mostrando último perfil salvo no banco.",
+                cache_hit=True,
+            )
+            return _cache_instancia_payload(payload)
+
+        return _build_instancia_profile_payload(
+            inst,
+            source="db",
+            profile_source="db_missing_number",
+            message="Número da instância ainda não foi identificado. Reconecte a instância ou aguarde o connection.update.",
+        )
+
+    # 5) Chama Evolution somente na primeira carga sem cache ou quando refresh=1.
+    evolution_error = None
+    try:
+        evo_data = _evo_fetch_instance_profile_by_number(instance_name, numero_send_norm)
+    except Exception as e:
+        evo_data = {}
+        evolution_error = str(e)
+
+    if not evo_data:
+        if _instancia_profile_has_db_cache(inst):
+            payload = _build_instancia_profile_payload(
+                inst,
+                source="db_cache",
+                profile_source="db_cache_evolution_empty",
+                message="A Evolution não retornou perfil. Mostrando último perfil salvo no banco.",
+                evolution_error=evolution_error,
+                cache_hit=True,
+            )
+            return _cache_instancia_payload(payload)
+
+        return _build_instancia_profile_payload(
+            inst,
+            source="evolution_empty",
+            profile_source="evolution_empty",
+            message="A Evolution não retornou perfil para esta instância.",
+            evolution_error=evolution_error,
+        )
+
+    picture_url = _extract_picture_url(evo_data)
+    nome_whatsapp = _extract_profile_name(evo_data)
+    about = _extract_profile_about(evo_data)
+    wuid = _extract_profile_wuid(evo_data)
+    is_business = _extract_profile_is_business(evo_data)
+    business_info = _extract_business_info(evo_data, is_business=is_business)
+
+    try:
+        _save_instancia_profile_cache(
+            db,
+            inst,
+            evo_data=evo_data,
+            picture_url=picture_url,
+            nome_whatsapp=nome_whatsapp,
+            about=about,
+            wuid=wuid,
+            is_business=bool(is_business),
+            business_info=business_info,
+        )
+    except Exception as e:
+        evolution_error = evolution_error or str(e)
+
+    evolution_summary = {
+        "numberExists": evo_data.get("numberExists") if "numberExists" in evo_data else evo_data.get("exists"),
+        "status": evo_data.get("status"),
+        "raw_keys": sorted([str(k) for k in evo_data.keys()])[:80],
+    }
+
+    payload = _build_instancia_profile_payload(
+        inst,
+        source="evolution",
+        profile_source="evolution",
+        message="Perfil atualizado pela Evolution e salvo no banco.",
+        evolution=evolution_summary,
+        evolution_error=evolution_error,
+        refreshed=True,
+        cache_hit=False,
+    )
+
+    return _cache_instancia_payload(payload)
+
+
+# =========================================================
 # AVATAR PROXY: cliente ou grupo
 # =========================================================
 @router.get("/atendimento/avatar/{conversation_id}")

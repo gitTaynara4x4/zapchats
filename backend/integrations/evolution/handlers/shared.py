@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import re
+import unicodedata
 from typing import Any, Callable
 
 from sqlalchemy import text
@@ -47,13 +48,21 @@ HANDLERS: dict[str, Callable[..., Any]] = {}
 
 class EvoEvent:
     APPLICATION_STARTUP = "APPLICATION_STARTUP"
+    INSTANCE_CREATE = "INSTANCE_CREATE"
     QRCODE_UPDATED = "QRCODE_UPDATED"
     CONNECTION_UPDATE = "CONNECTION_UPDATE"
     MESSAGES_SET = "MESSAGES_SET"
     MESSAGES_UPSERT = "MESSAGES_UPSERT"
     MESSAGES_UPDATE = "MESSAGES_UPDATE"
     MESSAGES_DELETE = "MESSAGES_DELETE"
+    MESSAGES_EDITED = "MESSAGES_EDITED"
     SEND_MESSAGE = "SEND_MESSAGE"
+
+    CHATS_SET = "CHATS_SET"
+    CHATS_UPSERT = "CHATS_UPSERT"
+    CHATS_UPDATE = "CHATS_UPDATE"
+    CHATS_DELETE = "CHATS_DELETE"
+
     CONTACTS_SET = "CONTACTS_SET"
     CONTACTS_UPSERT = "CONTACTS_UPSERT"
     CONTACTS_UPDATE = "CONTACTS_UPDATE"
@@ -62,6 +71,9 @@ class EvoEvent:
     GROUPS_UPDATE = "GROUPS_UPDATE"
     GROUP_UPDATE = "GROUP_UPDATE"
     GROUP_PARTICIPANTS_UPDATE = "GROUP_PARTICIPANTS_UPDATE"
+    LABELS_EDIT = "LABELS_EDIT"
+    LABELS_ASSOCIATION = "LABELS_ASSOCIATION"
+    LABELS_UPDATE = "LABELS_UPDATE"
     NEW_TOKEN = "NEW_TOKEN"
     CALL = "CALL"
     LOGOUT_INSTANCE = "LOGOUT_INSTANCE"
@@ -119,7 +131,8 @@ def handler(*event_names: str):
 _GROUP_INFO_CACHE: dict[tuple[str, str], tuple[str, int]] = {}
 _GROUP_INFO_TTL = 60 * 60
 
-# lid map provisório em memória até consolidar repo/state definitivo
+# Mapa em memória rápido.
+# O mapa definitivo fica também na tabela contatos_whatsapp_identidades.
 _LID_MAP: dict[tuple[int, int, str], str] = {}
 
 
@@ -130,6 +143,171 @@ def _to_int(v) -> int | None:
         return int(v)
     except Exception:
         return None
+
+
+def _only_digits(raw: Any) -> str:
+    return re.sub(r"\D+", "", str(raw or ""))
+
+
+def _clean_text(raw: Any) -> str | None:
+    s = str(raw or "").strip()
+    return s or None
+
+
+def normalize_contact_name(raw: Any) -> str | None:
+    """
+    Normaliza nome para comparação:
+    - remove acento
+    - lower
+    - remove excesso de espaço
+    """
+    s = str(raw or "").strip()
+    if not s:
+        return None
+
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    s = re.sub(r"\s+", " ", s).strip().lower()
+
+    return s or None
+
+
+def _is_bad_push_name(name: Any) -> bool:
+    """
+    Nome ruim/falso que NÃO pode ser gravado como push_name real.
+
+    Isso resolve o bug:
+    messages.set criava identidade com push_name='Contato do WhatsApp',
+    depois o backfill achava que esse era o nome real e não corrigia direito.
+    """
+    s = str(name or "").strip()
+    if not s:
+        return True
+
+    low = s.lower().strip()
+    low_norm = normalize_contact_name(low) or low
+
+    if low_norm in {
+        "voce",
+        "você",
+        "you",
+        "cliente",
+        "contato",
+        "unknown",
+        "desconhecido",
+        "0",
+        "contato do whatsapp",
+        "contato whatsapp",
+        "whatsapp",
+    }:
+        return True
+
+    if low_norm.startswith("contato do whatsapp"):
+        return True
+
+    if low_norm.startswith("contato lid"):
+        return True
+
+    if low_norm.startswith("lid "):
+        return True
+
+    digits = _only_digits(s)
+
+    # pushName igual número gigante/LID geralmente não é nome real.
+    if digits and digits == s and len(digits) >= 13:
+        return True
+
+    # nomes tipo "147 377 658 822 877"
+    if digits and len(digits) >= 13 and len(digits) >= max(1, len(s.replace(" ", "")) - 3):
+        return True
+
+    return False
+
+
+def _jid_tipo(remote_jid: str | None) -> str:
+    jid = jid_strip_device(remote_jid or "")
+    low = jid.lower()
+
+    if not jid:
+        return "unknown"
+
+    if low.endswith("@lid"):
+        return "lid"
+
+    if low.endswith("@s.whatsapp.net"):
+        return "whatsapp"
+
+    if low.endswith("@c.us"):
+        return "cus"
+
+    if low.endswith("@g.us"):
+        return "grupo"
+
+    return "unknown"
+
+
+def _real_jid_from_remote(remote_jid: str | None) -> str | None:
+    jid = jid_strip_device(remote_jid or "")
+    if not jid:
+        return None
+
+    tipo = _jid_tipo(jid)
+
+    if tipo == "whatsapp":
+        return jid
+
+    if tipo == "cus":
+        tel = remote_to_num(jid)
+        if tel:
+            return f"{tel}@s.whatsapp.net"
+
+    return None
+
+
+def _telefone_norm_from_remote(remote_jid: str | None) -> str | None:
+    real = _real_jid_from_remote(remote_jid)
+    if real:
+        tel = remote_to_num(real)
+        if tel:
+            return _only_digits(tel) or None
+
+    jid = jid_strip_device(remote_jid or "")
+    if not jid:
+        return None
+
+    if "@" not in jid:
+        digits = _only_digits(jid)
+        if 10 <= len(digits) <= 15:
+            return digits
+
+    return None
+
+
+def _payload_safe(payload: Any) -> Any:
+    """
+    Mantém payload pequeno o suficiente para debug sem entupir banco.
+    """
+    if payload is None:
+        return None
+
+    if isinstance(payload, dict):
+        out = {}
+        for k, v in payload.items():
+            if k in {"message", "contextInfo"}:
+                continue
+            if isinstance(v, (str, int, float, bool)) or v is None:
+                out[k] = v
+            elif isinstance(v, dict):
+                out[k] = {
+                    kk: vv
+                    for kk, vv in v.items()
+                    if isinstance(vv, (str, int, float, bool)) or vv is None
+                }
+            else:
+                out[k] = str(type(v).__name__)
+        return out
+
+    return {"raw_type": type(payload).__name__, "raw": str(payload)[:1000]}
 
 
 def _carimbar_inst(obj, inst) -> None:
@@ -270,6 +448,9 @@ def _invalidate_emp_cache(emp_id: int) -> None:
     invalidate_emp_cache(int(emp_id))
 
 
+# =========================================================
+# Identidades WhatsApp / LID
+# =========================================================
 def _lid_map_key(empresa_id: int, instancia_id: int, lid_jid: str | None) -> tuple[int, int, str]:
     return (
         int(empresa_id),
@@ -281,9 +462,18 @@ def _lid_map_key(empresa_id: int, instancia_id: int, lid_jid: str | None) -> tup
 def _lid_map_set(empresa_id: int, instancia_id: int, lid_jid: str, real_jid: str) -> bool:
     lid_norm = jid_strip_device(lid_jid)
     real_norm = jid_strip_device(real_jid)
+
     if not lid_norm or not real_norm:
         return False
-    _LID_MAP[_lid_map_key(empresa_id, instancia_id, lid_norm)] = real_norm
+
+    if not is_lid_jid(lid_norm):
+        return False
+
+    real_norm_2 = _real_jid_from_remote(real_norm)
+    if not real_norm_2:
+        return False
+
+    _LID_MAP[_lid_map_key(empresa_id, instancia_id, lid_norm)] = real_norm_2
     return True
 
 
@@ -292,14 +482,626 @@ def _lid_map_get(empresa_id: int, instancia_id: int, lid_jid: str | None) -> str
     return _LID_MAP.get(key)
 
 
+def upsert_whatsapp_identity(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int | None,
+    remote_jid: str,
+    push_name: str | None = None,
+    profile_pic_url: str | None = None,
+    origem: str | None = None,
+    cliente_id: int | None = None,
+    real_jid: str | None = None,
+    confirmado: bool | None = None,
+    confianca: int | None = None,
+    resolved_by: str | None = None,
+    payload: Any = None,
+    commit: bool = False,
+) -> models.ContatoWhatsappIdentidade | None:
+    """
+    Salva/atualiza identidade recebida da Evolution.
+
+    Importante:
+    - fallback visual como "Contato do WhatsApp" NÃO é salvo como push_name.
+    - se já existir push_name fake antigo, limpa.
+    """
+    remote = jid_strip_device(remote_jid or "")
+    if not remote:
+        return None
+
+    empresa_id = int(empresa_id)
+    inst_id = int(instancia_id) if instancia_id is not None else None
+
+    tipo = _jid_tipo(remote)
+    lid_jid = remote if tipo == "lid" else None
+
+    real_from_remote = _real_jid_from_remote(remote)
+    real_final = _real_jid_from_remote(real_jid) or real_from_remote
+
+    telefone_norm = _telefone_norm_from_remote(real_final or remote)
+
+    name = _clean_text(push_name)
+    name_is_good = bool(name and not _is_bad_push_name(name))
+    name_norm = normalize_contact_name(name) if name_is_good else None
+
+    foto = _clean_text(profile_pic_url)
+
+    if confianca is None:
+        if confirmado:
+            confianca = 100
+        elif real_final and lid_jid:
+            confianca = 90
+        elif real_final:
+            confianca = 70
+        elif name_is_good and foto:
+            confianca = 60
+        elif name_is_good:
+            confianca = 35
+        else:
+            confianca = 10
+
+    try:
+        row = (
+            db.query(models.ContatoWhatsappIdentidade)
+            .filter(
+                models.ContatoWhatsappIdentidade.empresa_id == empresa_id,
+                models.ContatoWhatsappIdentidade.instancia_id == inst_id,
+                models.ContatoWhatsappIdentidade.remote_jid == remote,
+            )
+            .first()
+        )
+
+        if not row:
+            row = models.ContatoWhatsappIdentidade(
+                empresa_id=empresa_id,
+                instancia_id=inst_id,
+                remote_jid=remote,
+                jid_tipo=tipo,
+            )
+            db.add(row)
+            db.flush()
+
+        row.jid_tipo = tipo
+
+        if lid_jid:
+            row.lid_jid = lid_jid
+
+        if real_final:
+            row.real_jid = real_final
+            row.telefone_norm = telefone_norm
+
+        elif telefone_norm and not row.telefone_norm:
+            row.telefone_norm = telefone_norm
+
+        if cliente_id is not None:
+            row.cliente_id = int(cliente_id)
+
+        # Limpa push_name fake já salvo anteriormente.
+        if row.push_name and _is_bad_push_name(row.push_name):
+            row.push_name = None
+            row.push_name_norm = None
+            try:
+                row.confianca = min(int(row.confianca or 10), 10)
+            except Exception:
+                row.confianca = 10
+
+        # Só grava nome se for nome real.
+        if name_is_good:
+            row.push_name = name
+            row.push_name_norm = name_norm
+
+        if foto:
+            row.profile_pic_url = foto
+
+        if origem:
+            row.origem = str(origem)[:80]
+
+        if confirmado is not None:
+            row.confirmado = bool(confirmado)
+
+        if confianca is not None:
+            try:
+                row.confianca = max(int(getattr(row, "confianca", 0) or 0), int(confianca))
+            except Exception:
+                row.confianca = int(confianca)
+
+        if resolved_by:
+            row.resolved_by = str(resolved_by)[:120]
+
+        safe_payload = _payload_safe(payload)
+        if safe_payload is not None:
+            row.payload = safe_payload
+
+        row.ultimo_evento_em = _now_utc()
+        row.atualizado_em = _now_utc()
+
+        db.add(row)
+
+        if lid_jid and real_final:
+            _lid_map_set(empresa_id, inst_id or 0, lid_jid, real_final)
+
+        if commit:
+            db.commit()
+
+        return row
+
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        LOG(
+            f"[IDENTITY][upsert][erro] empresa_id={empresa_id} instancia_id={inst_id} "
+            f"remote={remote} err={e}"
+        )
+        return None
+
+
+def upsert_whatsapp_identities_from_contacts(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int | None,
+    contatos: list[dict],
+    origem: str,
+    commit: bool = False,
+) -> int:
+    """
+    Salva todos os contacts.upsert/update e depois tenta vincular LID -> real_jid.
+
+    A versão nova da Evolution manda coisas assim:
+    186457499152524@lid -> Taynara
+    553186419237@s.whatsapp.net -> Taynara
+    """
+    total = 0
+
+    for c in contatos or []:
+        if not isinstance(c, dict):
+            continue
+
+        remote = (
+            c.get("remoteJid")
+            or c.get("remote_jid")
+            or c.get("id")
+            or c.get("jid")
+        )
+
+        if not remote:
+            continue
+
+        nome = name_from_contact_like(c)
+        if _is_bad_push_name(nome):
+            nome = None
+
+        row = upsert_whatsapp_identity(
+            db,
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+            remote_jid=str(remote),
+            push_name=nome,
+            profile_pic_url=avatar_from_contact_like(c),
+            origem=origem,
+            payload=c,
+            commit=False,
+        )
+
+        if row:
+            total += 1
+
+    try:
+        vincular_lids_por_nome_e_foto(
+            db,
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+        )
+    except Exception as e:
+        LOG(
+            f"[IDENTITY][contacts][vincular-falhou] empresa_id={empresa_id} "
+            f"instancia_id={instancia_id} err={e}"
+        )
+
+    if commit:
+        db.commit()
+
+    LOG(
+        f"[IDENTITY][contacts] origem={origem} empresa_id={empresa_id} "
+        f"instancia_id={instancia_id} total={total}"
+    )
+
+    return total
+
+
+def vincular_lids_por_nome_e_foto(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int | None,
+) -> int:
+    """
+    Tenta confirmar LID -> número real usando os contatos da própria Evolution.
+
+    Regra segura:
+    - se LID tem mesmo push_name_norm de exatamente 1 contato real, vincula.
+    - se tiver profile_pic_url igual, aumenta confiança.
+    - se nome for ruim ou duplicado demais, não chuta.
+    """
+    empresa_id = int(empresa_id)
+    inst_id = int(instancia_id) if instancia_id is not None else None
+
+    lids = (
+        db.query(models.ContatoWhatsappIdentidade)
+        .filter(
+            models.ContatoWhatsappIdentidade.empresa_id == empresa_id,
+            models.ContatoWhatsappIdentidade.instancia_id == inst_id,
+            models.ContatoWhatsappIdentidade.lid_jid.isnot(None),
+        )
+        .all()
+    )
+
+    vinculados = 0
+
+    for lid_row in lids:
+        if lid_row.real_jid:
+            continue
+
+        name_norm = normalize_contact_name(getattr(lid_row, "push_name", None))
+        if not name_norm:
+            continue
+
+        if _is_bad_push_name(getattr(lid_row, "push_name", None)):
+            continue
+
+        candidatos_q = (
+            db.query(models.ContatoWhatsappIdentidade)
+            .filter(
+                models.ContatoWhatsappIdentidade.empresa_id == empresa_id,
+                models.ContatoWhatsappIdentidade.instancia_id == inst_id,
+                models.ContatoWhatsappIdentidade.real_jid.isnot(None),
+                models.ContatoWhatsappIdentidade.push_name_norm == name_norm,
+            )
+        )
+
+        candidatos = candidatos_q.all()
+
+        if not candidatos:
+            continue
+
+        # Preferência 1: mesma foto.
+        foto_lid = getattr(lid_row, "profile_pic_url", None)
+        if foto_lid:
+            mesmos_foto = [
+                c for c in candidatos
+                if getattr(c, "profile_pic_url", None)
+                and getattr(c, "profile_pic_url", None) == foto_lid
+            ]
+            if len(mesmos_foto) == 1:
+                cand = mesmos_foto[0]
+                lid_row.real_jid = cand.real_jid
+                lid_row.telefone_norm = cand.telefone_norm
+                lid_row.cliente_id = cand.cliente_id
+                lid_row.confirmado = True
+                lid_row.confianca = max(int(lid_row.confianca or 0), 95)
+                lid_row.resolved_by = "same_push_name_and_photo"
+                lid_row.atualizado_em = _now_utc()
+                lid_row.ultimo_evento_em = _now_utc()
+
+                _lid_map_set(empresa_id, inst_id or 0, lid_row.lid_jid, cand.real_jid)
+                vinculados += 1
+                continue
+
+        # Preferência 2: nome único.
+        if len(candidatos) == 1:
+            cand = candidatos[0]
+            lid_row.real_jid = cand.real_jid
+            lid_row.telefone_norm = cand.telefone_norm
+            lid_row.cliente_id = cand.cliente_id
+            lid_row.confirmado = False
+            lid_row.confianca = max(int(lid_row.confianca or 0), 75)
+            lid_row.resolved_by = "unique_same_push_name"
+            lid_row.atualizado_em = _now_utc()
+            lid_row.ultimo_evento_em = _now_utc()
+
+            _lid_map_set(empresa_id, inst_id or 0, lid_row.lid_jid, cand.real_jid)
+            vinculados += 1
+
+    if vinculados:
+        LOG(
+            f"[IDENTITY][vincular] empresa_id={empresa_id} instancia_id={inst_id} "
+            f"vinculados={vinculados}"
+        )
+
+    return vinculados
+
+
+def get_identity_by_remote(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int | None,
+    remote_jid: str,
+) -> models.ContatoWhatsappIdentidade | None:
+    remote = jid_strip_device(remote_jid or "")
+    if not remote:
+        return None
+
+    return (
+        db.query(models.ContatoWhatsappIdentidade)
+        .filter(
+            models.ContatoWhatsappIdentidade.empresa_id == int(empresa_id),
+            models.ContatoWhatsappIdentidade.instancia_id == (int(instancia_id) if instancia_id is not None else None),
+            models.ContatoWhatsappIdentidade.remote_jid == remote,
+        )
+        .first()
+    )
+
+
+def resolve_lid_identity(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int | None,
+    lid_jid: str,
+) -> dict[str, Any]:
+    """
+    Resolve uma LID para uso no messages.set/messages.upsert.
+    """
+    lid = jid_strip_device(lid_jid or "")
+
+    out = {
+        "remote_jid": lid,
+        "real_jid": None,
+        "lid_jid": lid if is_lid_jid(lid) else None,
+        "telefone_norm": None,
+        "push_name": None,
+        "profile_pic_url": None,
+        "cliente_id": None,
+        "resolved": False,
+        "confianca": 0,
+        "resolved_by": None,
+    }
+
+    if not lid:
+        return out
+
+    if not is_lid_jid(lid):
+        real = _real_jid_from_remote(lid)
+        tel = _telefone_norm_from_remote(real or lid)
+        out.update(
+            {
+                "remote_jid": real or lid,
+                "real_jid": real,
+                "telefone_norm": tel,
+                "resolved": bool(real),
+            }
+        )
+        return out
+
+    empresa_id = int(empresa_id)
+    inst_id = int(instancia_id) if instancia_id is not None else None
+
+    mapped_memory = _lid_map_get(empresa_id, inst_id or 0, lid)
+    if mapped_memory:
+        out["remote_jid"] = mapped_memory
+        out["real_jid"] = mapped_memory
+        out["telefone_norm"] = _telefone_norm_from_remote(mapped_memory)
+        out["resolved"] = True
+        out["confianca"] = 100
+        out["resolved_by"] = "memory_map"
+
+    row = (
+        db.query(models.ContatoWhatsappIdentidade)
+        .filter(
+            models.ContatoWhatsappIdentidade.empresa_id == empresa_id,
+            models.ContatoWhatsappIdentidade.instancia_id == inst_id,
+            models.ContatoWhatsappIdentidade.lid_jid == lid,
+        )
+        .order_by(
+            models.ContatoWhatsappIdentidade.confirmado.desc(),
+            models.ContatoWhatsappIdentidade.confianca.desc(),
+        )
+        .first()
+    )
+
+    if row:
+        if row.real_jid:
+            out["remote_jid"] = row.real_jid
+            out["real_jid"] = row.real_jid
+            out["telefone_norm"] = row.telefone_norm or _telefone_norm_from_remote(row.real_jid)
+            out["resolved"] = True
+            _lid_map_set(empresa_id, inst_id or 0, lid, row.real_jid)
+
+        push = row.push_name
+        if _is_bad_push_name(push):
+            push = None
+
+        out["push_name"] = push
+        out["profile_pic_url"] = row.profile_pic_url
+        out["cliente_id"] = row.cliente_id
+        out["confianca"] = max(int(out.get("confianca") or 0), int(row.confianca or 0))
+        out["resolved_by"] = row.resolved_by
+
+    return out
+
+
+def _resolve_remote_jid_db(
+    empresa_id: int,
+    instancia_id: int,
+    raw_remote: str | None,
+) -> str | None:
+    raw = jid_strip_device(raw_remote or "")
+    if not raw or not is_lid_jid(raw):
+        return raw or None
+
+    with SessionLocal() as db:
+        try:
+            resolved = resolve_lid_identity(
+                db,
+                empresa_id=empresa_id,
+                instancia_id=instancia_id,
+                lid_jid=raw,
+            )
+            real = resolved.get("real_jid")
+            if real:
+                return jid_strip_device(real)
+        except Exception as e:
+            LOG(
+                f"[IDENTITY][resolve-db][erro] empresa_id={empresa_id} "
+                f"instancia_id={instancia_id} raw={raw} err={e}"
+            )
+
+    return None
+
+
 def _resolve_remote_jid(empresa_id: int, instancia_id: int, raw_remote: str | None) -> str | None:
     raw = jid_strip_device(raw_remote)
     if not raw:
         return None
+
     if not is_lid_jid(raw):
         return raw
+
     mapped = _lid_map_get(empresa_id, instancia_id, raw)
-    return jid_strip_device(mapped) if mapped else None
+    if mapped:
+        return jid_strip_device(mapped)
+
+    mapped_db = _resolve_remote_jid_db(empresa_id, instancia_id, raw)
+    if mapped_db:
+        return jid_strip_device(mapped_db)
+
+    return None
+
+
+def merge_lid_cliente_into_real_cliente(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int | None,
+    lid_cliente_id: int | None,
+    real_cliente_id: int | None,
+    lid_jid: str | None = None,
+    real_jid: str | None = None,
+) -> bool:
+    """
+    Mescla histórico salvo provisoriamente no cliente LID para o cliente real.
+    """
+    if not lid_cliente_id or not real_cliente_id:
+        return False
+
+    lid_cliente_id = int(lid_cliente_id)
+    real_cliente_id = int(real_cliente_id)
+
+    if lid_cliente_id == real_cliente_id:
+        return False
+
+    empresa_id = int(empresa_id)
+    inst_id = int(instancia_id) if instancia_id is not None else None
+
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE mensagens
+                   SET cliente_id = :real_cliente_id
+                 WHERE empresa_id = :empresa_id
+                   AND cliente_id = :lid_cliente_id
+                   AND (:instancia_id IS NULL OR instancia_id = :instancia_id)
+                """
+            ),
+            {
+                "empresa_id": empresa_id,
+                "instancia_id": inst_id,
+                "lid_cliente_id": lid_cliente_id,
+                "real_cliente_id": real_cliente_id,
+            },
+        )
+
+        db.execute(
+            text(
+                """
+                UPDATE midias
+                   SET cliente_id = :real_cliente_id
+                 WHERE empresa_id = :empresa_id
+                   AND cliente_id = :lid_cliente_id
+                   AND (:instancia_id IS NULL OR instancia_id = :instancia_id)
+                """
+            ),
+            {
+                "empresa_id": empresa_id,
+                "instancia_id": inst_id,
+                "lid_cliente_id": lid_cliente_id,
+                "real_cliente_id": real_cliente_id,
+            },
+        )
+
+        db.execute(
+            text(
+                """
+                UPDATE atendimentos
+                   SET cliente_id = :real_cliente_id
+                 WHERE empresa_id = :empresa_id
+                   AND cliente_id = :lid_cliente_id
+                   AND (:instancia_id IS NULL OR instancia_id = :instancia_id)
+                """
+            ),
+            {
+                "empresa_id": empresa_id,
+                "instancia_id": inst_id,
+                "lid_cliente_id": lid_cliente_id,
+                "real_cliente_id": real_cliente_id,
+            },
+        )
+
+        db.execute(
+            text(
+                """
+                UPDATE contatos_whatsapp_identidades
+                   SET cliente_id = :real_cliente_id,
+                       real_jid = COALESCE(real_jid, :real_jid),
+                       confirmado = CASE WHEN :real_jid IS NOT NULL THEN true ELSE confirmado END,
+                       confianca = GREATEST(confianca, 95),
+                       resolved_by = COALESCE(resolved_by, 'merge_lid_cliente_into_real_cliente'),
+                       atualizado_em = NOW(),
+                       ultimo_evento_em = NOW()
+                 WHERE empresa_id = :empresa_id
+                   AND (:instancia_id IS NULL OR instancia_id = :instancia_id)
+                   AND (
+                        cliente_id = :lid_cliente_id
+                        OR lid_jid = :lid_jid
+                   )
+                """
+            ),
+            {
+                "empresa_id": empresa_id,
+                "instancia_id": inst_id,
+                "lid_cliente_id": lid_cliente_id,
+                "real_cliente_id": real_cliente_id,
+                "lid_jid": jid_strip_device(lid_jid or "") or None,
+                "real_jid": _real_jid_from_remote(real_jid) if real_jid else None,
+            },
+        )
+
+        if lid_jid and real_jid:
+            _lid_map_set(empresa_id, inst_id or 0, lid_jid, real_jid)
+
+        LOG(
+            f"[IDENTITY][merge] emp={empresa_id} inst={inst_id} "
+            f"lid_cliente={lid_cliente_id} real_cliente={real_cliente_id} "
+            f"lid_jid={lid_jid} real_jid={real_jid}"
+        )
+
+        return True
+
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        LOG(
+            f"[IDENTITY][merge][erro] emp={empresa_id} inst={inst_id} "
+            f"lid_cliente={lid_cliente_id} real_cliente={real_cliente_id} err={e}"
+        )
+        return False
 
 
 def is_nome_grupo_ruim(nome: str | None) -> bool:
@@ -717,9 +1519,18 @@ __all__ = [
     "_get_or_open_atendimento",
     "_retry_deadlock",
     "_invalidate_emp_cache",
+
     "_lid_map_set",
     "_lid_map_get",
     "_resolve_remote_jid",
+    "upsert_whatsapp_identity",
+    "upsert_whatsapp_identities_from_contacts",
+    "vincular_lids_por_nome_e_foto",
+    "get_identity_by_remote",
+    "resolve_lid_identity",
+    "merge_lid_cliente_into_real_cliente",
+    "normalize_contact_name",
+
     "upsert_cliente",
     "is_statement_timeout_error",
     "is_duplicate_key_error",

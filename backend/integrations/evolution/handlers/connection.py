@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+from datetime import datetime, timezone
+from typing import Any
 
 import requests
 
@@ -26,6 +28,28 @@ SYNC_CHATS_ON_CONNECT = (os.getenv("SYNC_CHATS_ON_CONNECT", "true").lower() == "
 ENABLE_MESSAGES_SET = (os.getenv("ENABLE_MESSAGES_SET", "true").lower() == "true")
 SYNC_ON_CONNECT_AFTER_QR = (os.getenv("SYNC_ON_CONNECT_AFTER_QR", "true").lower() == "true")
 QR_CONNECT_SYNC_WINDOW_MIN = int(os.getenv("QR_CONNECT_SYNC_WINDOW_MIN", "30") or "30")
+
+# Reaplica settings depois do connection.open.
+# Esse é o ponto crítico para a Evolution/Baileys gerar MESSAGES_SET.
+HISTORY_REAPPLY_SETTINGS_AFTER_OPEN = (
+    os.getenv("EVO_HISTORY_REAPPLY_SETTINGS_AFTER_OPEN", "true").strip().lower()
+    in {"1", "true", "yes", "sim", "on"}
+)
+HISTORY_SETTINGS_RETRY = int(os.getenv("EVO_HISTORY_SETTINGS_RETRY", "3") or "3")
+HISTORY_SETTINGS_RETRY_DELAY_SEC = float(os.getenv("EVO_HISTORY_SETTINGS_RETRY_DELAY_SEC", "1.2") or "1.2")
+
+# Segurança contra avalanche depois de rebuild/restart da Evolution:
+# Por padrão, instância antiga que já estava conectada NÃO reconfigura Rabbit/WS de novo
+# e NÃO dispara sync pesado.
+RECONFIGURE_ALREADY_CONNECTED_ON_UPDATE = (
+    os.getenv("RECONFIGURE_ALREADY_CONNECTED_ON_UPDATE", "false").strip().lower()
+    in {"1", "true", "yes", "sim", "on"}
+)
+
+# Janela para considerar uma instância como "primeiro login/QR recém-criado".
+HISTORY_PENDING_FIRST_LOGIN_MAX_AGE_MIN = int(
+    os.getenv("HISTORY_PENDING_FIRST_LOGIN_MAX_AGE_MIN", "180") or "180"
+)
 
 EVOLUTION_URL = (os.getenv("EVOLUTION_URL") or "").rstrip("/")
 EVOLUTION_KEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_KEY") or ""
@@ -57,6 +81,16 @@ FULL_EVENTS_RABBIT = [
     "GROUP_UPDATE",
     "GROUP_PARTICIPANTS_UPDATE",
 ]
+
+HISTORY_SYNC_OPTIONS = {
+    "24h",
+    "7d",
+    "all",
+    "full",
+    "tudo",
+    "disponivel",
+    "available",
+}
 
 RABBIT_EXCHANGE = os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange")
 
@@ -102,6 +136,287 @@ RABBIT_BINDINGS = _env_csv_first(
 _CONNECT_SYNC_TASKS: dict[str, asyncio.Task] = {}
 
 
+def _only_digits(raw: Any) -> str:
+    return re.sub(r"\D", "", str(raw or ""))
+
+
+def _clean_whatsapp_number(raw: Any) -> str | None:
+    """
+    Extrai número real de valores comuns da Evolution.
+
+    Aceita:
+    - 5512999999999@s.whatsapp.net
+    - 5512999999999@c.us
+    - 5512999999999
+    - +55 12 99999-9999
+
+    Ignora:
+    - grupos
+    - lid
+    - strings muito curtas
+    """
+    if raw is None:
+        return None
+
+    s = str(raw or "").strip()
+    if not s:
+        return None
+
+    s_lower = s.lower()
+
+    if "@g.us" in s_lower or "@lid" in s_lower:
+        return None
+
+    if "@" in s:
+        left = s.split("@", 1)[0]
+        digits = _only_digits(left)
+    else:
+        digits = _only_digits(s)
+
+    if len(digits) < 10:
+        return None
+
+    if len(digits) > 15:
+        return None
+
+    return digits
+
+
+def _extract_num_from_any(obj: Any, *, depth: int = 0) -> str | None:
+    """
+    Busca número em estruturas da Evolution.
+
+    Faz busca segura e limitada em dict/list, priorizando campos conhecidos.
+    """
+    if depth > 4:
+        return None
+
+    if obj is None:
+        return None
+
+    if isinstance(obj, str):
+        return _clean_whatsapp_number(obj)
+
+    if isinstance(obj, (int, float)):
+        return _clean_whatsapp_number(obj)
+
+    if isinstance(obj, dict):
+        priority_keys = [
+            "ownerJid",
+            "owner",
+            "wuid",
+            "wid",
+            "jid",
+            "remoteJid",
+            "remote_jid",
+            "number",
+            "phone",
+            "phoneNumber",
+            "phone_number",
+            "user",
+            "id",
+        ]
+
+        for key in priority_keys:
+            if key in obj:
+                found = _extract_num_from_any(obj.get(key), depth=depth + 1)
+                if found:
+                    return found
+
+        nested_keys = [
+            "me",
+            "account",
+            "profile",
+            "instance",
+            "instanceInfo",
+            "instance_info",
+            "data",
+            "connection",
+        ]
+
+        for key in nested_keys:
+            if key in obj:
+                found = _extract_num_from_any(obj.get(key), depth=depth + 1)
+                if found:
+                    return found
+
+        for value in obj.values():
+            found = _extract_num_from_any(value, depth=depth + 1)
+            if found:
+                return found
+
+        return None
+
+    if isinstance(obj, (list, tuple)):
+        for item in obj:
+            found = _extract_num_from_any(item, depth=depth + 1)
+            if found:
+                return found
+
+    return None
+
+
+def _extract_number_from_connection_payload(payload: dict | list, data: dict) -> str | None:
+    found = _extract_num_from_any(data)
+    if found:
+        return found
+
+    found = _extract_num_from_any(payload)
+    if found:
+        return found
+
+    return None
+
+
+def _obj_instance_name(obj: Any) -> str | None:
+    if not isinstance(obj, dict):
+        return None
+
+    for key in ("instanceName", "instance_name", "instance", "name"):
+        val = obj.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+
+    nested = obj.get("instance")
+    if isinstance(nested, dict):
+        for key in ("instanceName", "instance_name", "instance", "name"):
+            val = nested.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+
+    return None
+
+
+def _find_instance_obj_in_response(obj: Any, instance_name: str, *, depth: int = 0) -> dict | None:
+    """
+    Procura o objeto da instância dentro do retorno /instances.
+    """
+    if depth > 5:
+        return None
+
+    if isinstance(obj, dict):
+        name = _obj_instance_name(obj)
+        if name == instance_name:
+            return obj
+
+        for value in obj.values():
+            found = _find_instance_obj_in_response(value, instance_name, depth=depth + 1)
+            if found:
+                return found
+
+    elif isinstance(obj, list):
+        for item in obj:
+            found = _find_instance_obj_in_response(item, instance_name, depth=depth + 1)
+            if found:
+                return found
+
+    return None
+
+
+def _evo_fetch_connected_number(instance: str) -> str | None:
+    """
+    Fallback quando CONNECTION_UPDATE não traz número.
+
+    Consulta a Evolution e tenta achar o ownerJid/number da instância.
+    """
+    if not (EVOLUTION_URL and HEADERS and instance):
+        return None
+
+    endpoints = [
+        f"{EVOLUTION_URL}/instances",
+        f"{EVOLUTION_URL}/instance/fetchInstances",
+        f"{EVOLUTION_URL}/instance/connectionState/{instance}",
+    ]
+
+    for url in endpoints:
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=15)
+            if not r.ok:
+                continue
+
+            try:
+                js = r.json()
+            except Exception:
+                continue
+
+            if isinstance(js, list):
+                inst_obj = _find_instance_obj_in_response(js, instance)
+                if inst_obj:
+                    num = _extract_num_from_any(inst_obj)
+                    if num:
+                        LOG(f"[CONNECTION] número encontrado via Evolution /instances inst={instance} numero={num}")
+                        return num
+
+            if isinstance(js, dict):
+                inst_obj = _find_instance_obj_in_response(js, instance)
+                if inst_obj:
+                    num = _extract_num_from_any(inst_obj)
+                    if num:
+                        LOG(f"[CONNECTION] número encontrado via Evolution inst={instance} numero={num}")
+                        return num
+
+                num = _extract_num_from_any(js)
+                if num:
+                    LOG(f"[CONNECTION] número encontrado via Evolution direto inst={instance} numero={num}")
+                    return num
+
+        except Exception as e:
+            LOG(f"[CONNECTION] falha buscando número na Evolution inst={instance}: {e}")
+
+    return None
+
+
+def _attach_numero_instancia_safely(db, inst, numero: str | None) -> str | None:
+    """
+    Salva numero_instancia evitando conflito com linha antiga da mesma empresa.
+    """
+    numero_digits = _clean_whatsapp_number(numero)
+    if not numero_digits:
+        return None
+
+    try:
+        inst_id = int(getattr(inst, "id", 0) or 0)
+        empresa_id = int(getattr(inst, "empresa_id", 0) or 0)
+    except Exception:
+        inst_id = 0
+        empresa_id = 0
+
+    try:
+        conflito = (
+            db.query(models.EmpresaInstancia)
+            .filter(
+                models.EmpresaInstancia.empresa_id == empresa_id,
+                models.EmpresaInstancia.numero_instancia == numero_digits,
+                models.EmpresaInstancia.id != inst_id,
+            )
+            .first()
+        )
+
+        if conflito:
+            LOG(
+                "[CONNECTION] número já estava em outra instância da mesma empresa; "
+                f"limpando conflito antigo atual={getattr(inst, 'instance_name', None)} "
+                f"conflito={getattr(conflito, 'instance_name', None)} "
+                f"numero={numero_digits}"
+            )
+
+            conflito.connected = False
+            conflito.numero_instancia = None
+            conflito.last_seen = _now_utc()
+            db.add(conflito)
+
+    except Exception as e:
+        LOG(f"[CONNECTION] falha ao checar conflito de número: {e}")
+
+    try:
+        inst.numero_instancia = numero_digits
+        db.add(inst)
+        return numero_digits
+    except Exception as e:
+        LOG(f"[CONNECTION] falha ao setar numero_instancia: {e}")
+        return None
+
+
 def _inst_from_payload(first: str, payload: dict | list) -> str:
     if isinstance(payload, dict):
         for key in ("instance", "instanceName", "instanceId"):
@@ -121,6 +436,180 @@ def _inst_from_payload(first: str, payload: dict | list) -> str:
 
 def _get_inst_row(db, instance: str):
     return get_instancia_by_name(db, instance_name=instance)
+
+
+def _historico_pede_sync(historico_opcao: str | None) -> bool:
+    h = str(historico_opcao or "none").strip().lower()
+    return h in HISTORY_SYNC_OPTIONS
+
+
+def _qr_recente(inst_id: str) -> bool:
+    try:
+        now_s = int(_now_utc().timestamp())
+        qr_s = QR_RECENT.get(inst_id)
+        return bool(qr_s and (now_s - int(qr_s)) <= (QR_CONNECT_SYNC_WINDOW_MIN * 60))
+    except Exception:
+        return False
+
+
+def _as_utc_dt(value: Any) -> datetime | None:
+    if not value:
+        return None
+
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    try:
+        s = str(value or "").strip()
+        if not s:
+            return None
+        s = s.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _epoch_suffix_from_instance_name(instance_name: str) -> int | None:
+    """
+    Extrai timestamp Unix do final do nome:
+    emp5-zapschataquinovo-auto-1778277055
+    """
+    try:
+        m = re.search(r"-(\d{10})$", str(instance_name or "").strip())
+        if not m:
+            return None
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
+def _inst_created_recent_for_history(inst: Any, inst_id: str) -> bool:
+    """
+    Define se a instância parece recém-criada.
+
+    Objetivo:
+    - permitir histórico no primeiro QR mesmo se was_connected=True no segundo CONNECTION_UPDATE;
+    - evitar avalanche em instâncias antigas depois de restart/rebuild da Evolution.
+    """
+    max_min = max(1, int(HISTORY_PENDING_FIRST_LOGIN_MAX_AGE_MIN or 180))
+    now = _now_utc()
+
+    for attr in (
+        "created_at",
+        "criado_em",
+        "data_criacao",
+        "createdAt",
+        "created_on",
+        "inserted_at",
+    ):
+        try:
+            dt = _as_utc_dt(getattr(inst, attr, None))
+            if not dt:
+                continue
+
+            age_min = abs((now - dt).total_seconds()) / 60.0
+            if age_min <= max_min:
+                LOG(
+                    f"[SYNC][connect] instância recente por {attr} "
+                    f"inst={inst_id} age_min={age_min:.1f} max_min={max_min}"
+                )
+                return True
+        except Exception:
+            pass
+
+    try:
+        epoch = _epoch_suffix_from_instance_name(inst_id)
+        if epoch:
+            age_min = abs((now.timestamp() - float(epoch))) / 60.0
+            if age_min <= max_min:
+                LOG(
+                    f"[SYNC][connect] instância recente por sufixo unix "
+                    f"inst={inst_id} age_min={age_min:.1f} max_min={max_min}"
+                )
+                return True
+    except Exception:
+        pass
+
+    return False
+
+
+def _history_settings_payload(sync_full_history: bool) -> dict:
+    """
+    Payload tolerante para settings da Evolution.
+
+    O ponto principal é syncFullHistory.
+    """
+    return {
+        "rejectCall": False,
+        "msgCall": "",
+        "groupsIgnore": False,
+        "alwaysOnline": False,
+        "readMessages": False,
+        "readStatus": False,
+        "syncFullHistory": bool(sync_full_history),
+    }
+
+
+def _evo_set_settings_history(instance: str, *, sync_full_history: bool) -> bool:
+    """
+    Reaplica settings depois do connection.open.
+
+    Sem isso, o Rabbit pode estar com MESSAGES_SET habilitado,
+    mas a Evolution/Baileys pode não gerar o pacote de histórico.
+    """
+    if not (EVOLUTION_URL and HEADERS and instance):
+        LOG(
+            f"[HISTORY][settings] não aplicado: EVOLUTION_URL/HEADERS/instance ausente "
+            f"inst={instance}"
+        )
+        return False
+
+    payload = _history_settings_payload(sync_full_history)
+
+    urls = [
+        f"{EVOLUTION_URL}/settings/set/{instance}",
+        f"{EVOLUTION_URL}/instance/settings/{instance}",
+    ]
+
+    ok_any = False
+    last_status = None
+    last_body = ""
+
+    for url in urls:
+        try:
+            r = requests.post(
+                url,
+                headers=HEADERS,
+                json=payload,
+                timeout=20,
+            )
+
+            last_status = r.status_code
+            last_body = str(r.text or "")[:500]
+
+            if r.ok:
+                ok_any = True
+                LOG(
+                    f"[HISTORY][settings] syncFullHistory={bool(sync_full_history)} "
+                    f"reaplicado após connection.open inst={instance} endpoint={url}"
+                )
+                break
+
+        except Exception as e:
+            last_body = str(e)[:500]
+
+    if not ok_any:
+        LOG(
+            f"[HISTORY][settings] falha ao reaplicar syncFullHistory={bool(sync_full_history)} "
+            f"inst={instance} status={last_status} body={last_body}"
+        )
+
+    return ok_any
 
 
 def _evo_expand_websocket(instance: str) -> bool:
@@ -203,6 +692,68 @@ def _evo_expand_rabbit(instance: str) -> bool:
         return False
 
 
+async def _evo_force_history_settings_after_open(instance: str, *, historico_opcao: str | None) -> dict[str, Any]:
+    """
+    Força a ordem correta depois do QR lido:
+
+    connection.open
+    -> Rabbit com MESSAGES_SET
+    -> settings syncFullHistory=true
+    -> Rabbit de novo
+
+    Isso não importa mensagens diretamente; só força a Evolution a emitir MESSAGES_SET.
+    """
+    h = str(historico_opcao or "none").strip().lower()
+    should_sync = _historico_pede_sync(h)
+
+    result: dict[str, Any] = {
+        "should_sync": bool(should_sync),
+        "rabbit_before": None,
+        "settings": None,
+        "rabbit_after": None,
+        "attempts": 0,
+    }
+
+    if not should_sync:
+        LOG(f"[HISTORY][force-open] ignorado inst={instance} historico={h}")
+        return result
+
+    if not HISTORY_REAPPLY_SETTINGS_AFTER_OPEN:
+        LOG(
+            f"[HISTORY][force-open] desabilitado por EVO_HISTORY_REAPPLY_SETTINGS_AFTER_OPEN=false "
+            f"inst={instance} historico={h}"
+        )
+        return result
+
+    attempts = max(1, int(HISTORY_SETTINGS_RETRY or 1))
+    delay = max(0.0, float(HISTORY_SETTINGS_RETRY_DELAY_SEC or 0.0))
+
+    for attempt in range(1, attempts + 1):
+        result["attempts"] = attempt
+
+        rabbit_before = _evo_expand_rabbit(instance)
+        settings_ok = _evo_set_settings_history(instance, sync_full_history=True)
+        rabbit_after = _evo_expand_rabbit(instance)
+
+        result["rabbit_before"] = bool(rabbit_before)
+        result["settings"] = bool(settings_ok)
+        result["rabbit_after"] = bool(rabbit_after)
+
+        LOG(
+            f"[HISTORY][force-open] tentativa={attempt}/{attempts} "
+            f"inst={instance} historico={h} "
+            f"rabbit_before={rabbit_before} settings={settings_ok} rabbit_after={rabbit_after}"
+        )
+
+        if settings_ok and (rabbit_before or rabbit_after):
+            return result
+
+        if attempt < attempts and delay > 0:
+            await asyncio.sleep(delay)
+
+    return result
+
+
 def _mark_disconnected(instance: str):
     if not instance:
         return
@@ -254,20 +805,80 @@ def _mark_disconnected(instance: str):
         db.close()
 
 
+def _read_history_option_for_instance(inst_id: str) -> tuple[str, bool, int | None]:
+    """
+    Lê do banco a opção atual de histórico.
+
+    Retorna:
+    - historico_opcao
+    - historico_pendente
+    - empresa_id
+    """
+    with SessionLocal() as db:
+        inst = _get_inst_row(db, inst_id)
+        if not inst:
+            return "none", False, None
+
+        historico = str(getattr(inst, "historico_restaurar", None) or "none").strip().lower()
+        empresa_id = getattr(inst, "empresa_id", None)
+
+        try:
+            empresa_id = int(empresa_id) if empresa_id is not None else None
+        except Exception:
+            empresa_id = None
+
+        return historico, _historico_pede_sync(historico), empresa_id
+
+
 async def _run_connect_sync_safe(inst_id: str) -> None:
     """
-    Roda sync pesada após conexão sem travar o handler CONNECTION_UPDATE.
+    Roda sync pós-conexão sem travar o handler CONNECTION_UPDATE.
+
+    Agora também força a Evolution a gerar MESSAGES_SET quando histórico está pendente:
+    - reaplica Rabbit com MESSAGES_SET;
+    - reaplica settings syncFullHistory=true;
+    - só depois roda contatos/chats.
     """
     try:
         from .contacts import sync_contatos_completos, sync_chats_completos
+
+        historico_opcao, historico_pendente, empresa_id = _read_history_option_for_instance(inst_id)
 
         LOG(
             "[SYNC][connect] início "
             f"inst={inst_id} "
             f"contacts={SYNC_CONTACTS_ON_CONNECT} "
             f"chats={SYNC_CHATS_ON_CONNECT} "
-            f"messages_set={ENABLE_MESSAGES_SET}"
+            f"messages_set={ENABLE_MESSAGES_SET} "
+            f"historico={historico_opcao} "
+            f"historico_pendente={historico_pendente}"
         )
+
+        if ENABLE_MESSAGES_SET and historico_pendente:
+            force_result = await _evo_force_history_settings_after_open(
+                inst_id,
+                historico_opcao=historico_opcao,
+            )
+
+            LOG(
+                f"[HISTORY][force-open] resultado inst={inst_id} "
+                f"historico={historico_opcao} result={force_result}"
+            )
+
+            if empresa_id is not None:
+                try:
+                    await conexoes_ativas.send_message(
+                        f"emp:{empresa_id}",
+                        {
+                            "type": "history_sync_progress",
+                            "imported": 0,
+                            "total": 0,
+                            "force_open": force_result,
+                            "serverTimestamp": _server_ts_ms(),
+                        },
+                    )
+                except Exception:
+                    pass
 
         if SYNC_CONTACTS_ON_CONNECT:
             try:
@@ -282,7 +893,16 @@ async def _run_connect_sync_safe(inst_id: str) -> None:
                 LOG(f"[SYNC][connect][chats] falha inst={inst_id}: {e}")
 
         if ENABLE_MESSAGES_SET:
-            LOG("[MESSAGES_SET] aguardando histórico (none/24h/7d).")
+            if historico_pendente:
+                LOG(
+                    f"[MESSAGES_SET] aguardando histórico após force-open "
+                    f"inst={inst_id} historico={historico_opcao}"
+                )
+            else:
+                LOG(
+                    f"[MESSAGES_SET] não aguardando histórico; historico_restaurar={historico_opcao} "
+                    f"inst={inst_id}"
+                )
 
         LOG(f"[SYNC][connect] fim inst={inst_id}")
 
@@ -348,6 +968,10 @@ async def on_conn_update(first: str, payload: dict):
     was_connected = False
     empresa_id = None
     historico_opcao = "none"
+    historico_pendente = False
+    historico_primeiro_login = False
+    numero_instancia = None
+    numero_atual_db = None
 
     with SessionLocal() as db:
         inst = _get_inst_row(db, inst_id)
@@ -355,22 +979,47 @@ async def on_conn_update(first: str, payload: dict):
             return
 
         was_connected = bool(getattr(inst, "connected", False))
+        numero_atual_db = getattr(inst, "numero_instancia", None)
+
         inst.connected = bool(conectado)
 
-        wuid = (
-            data.get("id")
-            or data.get("wid")
-            or (data.get("me") or {}).get("id")
-        ) if isinstance(data, dict) else None
+        if conectado:
+            numero_payload = _extract_number_from_connection_payload(payload, data)
 
-        if isinstance(wuid, str) and wuid.endswith("@s.whatsapp.net"):
-            inst.numero_instancia = re.sub(r"\D", "", wuid.split("@", 1)[0])
+            if not numero_payload and (not was_connected or not numero_atual_db):
+                numero_payload = _evo_fetch_connected_number(inst_id)
+
+            if numero_payload:
+                numero_instancia = _attach_numero_instancia_safely(db, inst, numero_payload)
+                if numero_instancia:
+                    LOG(f"[CONNECTION] numero_instancia salvo inst={inst_id} numero={numero_instancia}")
+            else:
+                numero_instancia = _clean_whatsapp_number(numero_atual_db)
+                if not numero_instancia:
+                    LOG(f"[CONNECTION] conectado mas sem número detectado inst={inst_id}")
 
         inst.last_seen = _now_utc()
         empresa_id = inst.empresa_id
         historico_opcao = (inst.historico_restaurar or "none").lower()
+        historico_pendente = _historico_pede_sync(historico_opcao)
 
-        db.commit()
+        historico_primeiro_login = bool(
+            historico_pendente
+            and (
+                _qr_recente(inst_id)
+                or _inst_created_recent_for_history(inst, inst_id)
+            )
+        )
+
+        try:
+            db.commit()
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            LOG(f"[CONNECTION] falha ao salvar conexão inst={inst_id}: {e}")
+            return
 
     if (not conectado) and (st in ("close", "closed", "disconnected", "logout", "loggedout")):
         INSTANCIAS_SYNC.discard(inst_id)
@@ -384,80 +1033,143 @@ async def on_conn_update(first: str, payload: dict):
         except Exception as e:
             LOG(f"[CLEANUP] falha ao cancelar auto cleanup: {e}")
 
-        # Reforço principal:
-        # Mesmo que já estivesse conectado, reconfigura Rabbit/WebSocket.
-        # Isso garante MESSAGES_SET ativo para histórico 24h/7d.
-        rabbit_ok = _evo_expand_rabbit(inst_id)
-        ws_ok = _evo_expand_websocket(inst_id)
+        should_reconfigure = (
+            (not was_connected)
+            or RECONFIGURE_ALREADY_CONNECTED_ON_UPDATE
+            or historico_primeiro_login
+        )
+
+        if should_reconfigure:
+            rabbit_ok = _evo_expand_rabbit(inst_id)
+            ws_ok = _evo_expand_websocket(inst_id)
+
+            if historico_primeiro_login and was_connected:
+                LOG(
+                    f"[CONNECTION] reconfig permitida por histórico pendente/primeiro login "
+                    f"inst={inst_id} historico={historico_opcao}"
+                )
+        else:
+            rabbit_ok = None
+            ws_ok = None
+
+            if was_connected:
+                if historico_pendente:
+                    LOG(
+                        f"[CONNECTION] reconfig ignorada inst={inst_id}: "
+                        f"já estava conectado e histórico pendente não parece primeiro login "
+                        f"(historico={historico_opcao})."
+                    )
+                else:
+                    LOG(
+                        f"[CONNECTION] reconfig ignorada inst={inst_id}: "
+                        "já estava conectado (was_connected=True)."
+                    )
 
         LOG(
             f"[CONNECTION] connected inst={inst_id} "
             f"was_connected={was_connected} "
             f"historico={historico_opcao} "
+            f"historico_pendente={historico_pendente} "
+            f"historico_primeiro_login={historico_primeiro_login} "
+            f"numero={numero_instancia or '-'} "
             f"rabbit_ok={rabbit_ok} "
             f"ws_ok={ws_ok}"
         )
 
-    if conectado and not was_connected:
-        if empresa_id is not None and (historico_opcao in ("24h", "7d")):
-            try:
-                await conexoes_ativas.send_message(
-                    f"emp:{empresa_id}",
-                    {
-                        "type": "history_sync_start",
-                        "total": 0,
-                        "serverTimestamp": _server_ts_ms(),
-                    },
-                )
-                await conexoes_ativas.send_message(
-                    f"emp:{empresa_id}",
-                    {
-                        "type": "history_sync_progress",
-                        "imported": 0,
-                        "total": 0,
-                        "serverTimestamp": _server_ts_ms(),
-                    },
-                )
-            except Exception as e:
-                LOG(f"[SYNC] falha ao emitir start/progress inicial: {e}")
+    if conectado and empresa_id is not None and historico_pendente and ((not was_connected) or historico_primeiro_login):
+        try:
+            await conexoes_ativas.send_message(
+                f"emp:{empresa_id}",
+                {
+                    "type": "history_sync_start",
+                    "total": 0,
+                    "serverTimestamp": _server_ts_ms(),
+                },
+            )
+            await conexoes_ativas.send_message(
+                f"emp:{empresa_id}",
+                {
+                    "type": "history_sync_progress",
+                    "imported": 0,
+                    "total": 0,
+                    "serverTimestamp": _server_ts_ms(),
+                },
+            )
+        except Exception as e:
+            LOG(f"[SYNC] falha ao emitir start/progress inicial: {e}")
 
-    await conexoes_ativas.send_message(
-        f"inst:{inst_id}",
-        {
-            "type": "connection",
-            "status": "CONNECTED" if conectado else "DISCONNECTED",
-            "serverTimestamp": _server_ts_ms(),
-        },
-    )
-
-    if empresa_id is not None:
+    try:
         await conexoes_ativas.send_message(
-            f"emp:{empresa_id}",
+            f"inst:{inst_id}",
             {
                 "type": "connection",
-                "inst_status": {
-                    "connected": bool(conectado),
-                    "instance": inst_id,
-                },
-                "reload_whatsapp": True,
+                "status": "CONNECTED" if conectado else "DISCONNECTED",
                 "serverTimestamp": _server_ts_ms(),
             },
         )
+    except Exception as e:
+        LOG(f"[CONNECTION] falha ao emitir WS inst={inst_id}: {e}")
 
+    if empresa_id is not None:
+        try:
+            await conexoes_ativas.send_message(
+                f"emp:{empresa_id}",
+                {
+                    "type": "connection",
+                    "inst_status": {
+                        "connected": bool(conectado),
+                        "instance": inst_id,
+                        "numero_instancia": numero_instancia,
+                    },
+                    "reload_whatsapp": True,
+                    "serverTimestamp": _server_ts_ms(),
+                },
+            )
+        except Exception as e:
+            LOG(f"[CONNECTION] falha ao emitir WS emp={empresa_id} inst={inst_id}: {e}")
+
+    # =========================
+    # SYNC PÓS-CONEXÃO
+    # =========================
+    # Regra correta:
+    # - Reconexão normal antiga: NÃO dispara histórico.
+    # - Primeiro QR/histórico pendente: dispara, mesmo se was_connected=True no segundo update.
     if conectado and inst_id not in INSTANCIAS_SYNC:
-        do_sync = True
+        do_sync = False
 
-        if SYNC_ON_CONNECT_AFTER_QR:
-            now_s = int(_now_utc().timestamp())
-            qr_s = QR_RECENT.get(inst_id)
-            do_sync = bool(qr_s and (now_s - int(qr_s)) <= (QR_CONNECT_SYNC_WINDOW_MIN * 60))
+        if historico_pendente and ((not was_connected) or historico_primeiro_login):
+            do_sync = True
+            LOG(
+                f"[SYNC][connect] permitido por histórico pendente "
+                f"historico={historico_opcao} inst={inst_id} "
+                f"was_connected={was_connected} primeiro_login={historico_primeiro_login}"
+            )
+
+        elif was_connected:
+            LOG(
+                f"[SYNC][connect] ignorado inst={inst_id}: "
+                f"reconexão normal/antiga was_connected=True, historico={historico_opcao}, "
+                f"primeiro_login={historico_primeiro_login}."
+            )
+
+        elif SYNC_ON_CONNECT_AFTER_QR:
+            do_sync = _qr_recente(inst_id)
+
+            if do_sync:
+                LOG(
+                    f"[SYNC][connect] permitido por QR recente "
+                    f"inst={inst_id} window_min={QR_CONNECT_SYNC_WINDOW_MIN}"
+                )
+            else:
+                LOG(
+                    f"[SYNC][connect] ignorado: fora da janela QR "
+                    f"inst={inst_id} window_min={QR_CONNECT_SYNC_WINDOW_MIN}"
+                )
 
         if do_sync:
             INSTANCIAS_SYNC.add(inst_id)
             QR_RECENT.pop(inst_id, None)
 
-            # Importante:
-            # não usar await aqui, senão o evento de conexão fica preso na sync.
             _schedule_connect_sync(inst_id)
 
 

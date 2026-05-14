@@ -144,6 +144,11 @@ class SaudeNumeroPayload(BaseModel):
     forcar_recalculo: bool = True
 
 
+class AtualizarApelidoInstanciaPayload(BaseModel):
+    empresa_id: int = Field(..., gt=0)
+    apelido: str = Field(..., min_length=1, max_length=80)
+
+
 # =============================
 # HTTP / Evolution helpers
 # =============================
@@ -262,6 +267,69 @@ def _evo_wait_instance_ready(sess: requests.Session, instance: str, timeout_s: i
         time.sleep(0.4)
 
     return False
+
+
+def _should_sync_full_history(historico_restaurar: str | None) -> bool:
+    """
+    Liga Sync Full History somente quando o usuário pediu restauração.
+
+    Importante:
+    - Isso NÃO significa que vamos importar 7 dias no ZapsChat.
+    - O filtro real continua no messages_set.py com HISTORY_LIMIT_HOURS=24.
+    - Aqui só autorizamos a Evolution/Baileys a gerar o pacote MESSAGES_SET.
+    """
+    h = str(historico_restaurar or "none").strip().lower()
+    return h in {"24h", "7d"}
+
+
+def _settings_payload(sync_full_history: bool) -> dict:
+    """
+    Payload tolerante para /settings/set/{instance}.
+
+    Mantemos opções conservadoras para não alterar comportamento do cliente.
+    O ponto essencial aqui é syncFullHistory.
+    """
+    return {
+        "rejectCall": False,
+        "msgCall": "",
+        "groupsIgnore": False,
+        "alwaysOnline": False,
+        "readMessages": False,
+        "readStatus": False,
+        "syncFullHistory": bool(sync_full_history),
+    }
+
+
+def _evo_set_settings_initial(instance: str, *, sync_full_history: bool) -> bool:
+    """
+    Configura settings antes do /instance/connect.
+
+    Sem isso, MESSAGES_SET pode estar marcado no Rabbit,
+    mas a Evolution/Baileys pode não gerar o pacote de histórico.
+    """
+    if not (EVOLUTION_URL and EVOLUTION_KEY and instance):
+        return False
+
+    s = _http()
+    body = _settings_payload(sync_full_history)
+
+    urls = [
+        f"{EVOLUTION_URL}/settings/set/{instance}",
+        f"{EVOLUTION_URL}/instance/settings/{instance}",
+    ]
+
+    ok_any = False
+
+    for url in urls:
+        try:
+            r = s.post(url, json=body, timeout=20)
+            if r.ok:
+                ok_any = True
+                break
+        except Exception:
+            pass
+
+    return ok_any
 
 
 # =============================
@@ -461,12 +529,17 @@ def _rabbit_bindings() -> List[str]:
 # =============================
 # Evolution – criação e assinatura inicial
 # =============================
-def _evo_create_instance(instance: str, use_pairing: bool) -> None:
+def _evo_create_instance(
+    instance: str,
+    use_pairing: bool,
+    *,
+    sync_full_history: bool = False,
+) -> None:
     """
     Cria a instância já com Rabbit ouvindo os eventos mínimos.
 
-    Antes estava events=[].
-    Isso podia fazer o histórico MESSAGES_SET passar batido logo após o QR.
+    Agora também envia syncFullHistory quando o usuário escolhe restaurar histórico.
+    Isso é necessário para a Evolution/Baileys gerar o pacote MESSAGES_SET.
     """
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return
@@ -476,6 +549,10 @@ def _evo_create_instance(instance: str, use_pairing: bool) -> None:
         "instanceName": instance,
         "integration": "WHATSAPP-BAILEYS",
         "qrcode": (not use_pairing),
+
+        # Essencial para histórico inicial:
+        "syncFullHistory": bool(sync_full_history),
+
         "rabbitmq": {
             "enabled": True,
             "exchange": os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange"),
@@ -486,6 +563,7 @@ def _evo_create_instance(instance: str, use_pairing: bool) -> None:
             "enabled": True,
             "events": _ws_events_initial(),
         },
+        "settings": _settings_payload(sync_full_history),
     }
 
     try:
@@ -496,6 +574,9 @@ def _evo_create_instance(instance: str, use_pairing: bool) -> None:
         pass
 
     _evo_wait_instance_ready(s, instance, timeout_s=8)
+
+    # Garante também pelo endpoint de settings, antes de conectar o QR.
+    _evo_set_settings_initial(instance, sync_full_history=sync_full_history)
 
 
 def _evo_set_rabbit_initial(instance: str) -> None:
@@ -537,6 +618,18 @@ def _evo_set_websocket_initial(instance: str) -> None:
         pass
 
 
+def _evo_prepare_instance_before_connect(instance: str, *, sync_full_history: bool) -> None:
+    """
+    Ordem importante antes de gerar/conectar QR:
+    1. Settings com syncFullHistory
+    2. Rabbit com MESSAGES_SET
+    3. WebSocket básico para QR/conexão
+    """
+    _evo_set_settings_initial(instance, sync_full_history=sync_full_history)
+    _evo_set_rabbit_initial(instance)
+    _evo_set_websocket_initial(instance)
+
+
 def _evo_connect(instance: str, number_digits: str | None) -> dict:
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return {}
@@ -558,7 +651,8 @@ def _evo_connect(instance: str, number_digits: str | None) -> dict:
     return {}
 
 
-def _evo_try_refresh_qr(instance: str) -> dict:
+def _evo_try_refresh_qr(instance: str, *, sync_full_history: bool = False) -> dict:
+    _evo_prepare_instance_before_connect(instance, sync_full_history=sync_full_history)
     return _evo_connect(instance, None)
 
 
@@ -695,6 +789,7 @@ def conectar(
 
     use_pairing = bool(payload.use_pairing)
     number_digits = _only_digits(payload.whatsapp_numero)
+    sync_full_history = _should_sync_full_history(payload.historico_restaurar)
 
     apelido_clean = str(payload.apelido or "").strip() or None
 
@@ -720,8 +815,10 @@ def conectar(
         pendente.historico_restaurar = payload.historico_restaurar
         db.commit()
 
-        _evo_set_rabbit_initial(pendente.instance_name)
-        _evo_set_websocket_initial(pendente.instance_name)
+        _evo_prepare_instance_before_connect(
+            pendente.instance_name,
+            sync_full_history=sync_full_history,
+        )
 
         conn_json = _evo_connect(
             pendente.instance_name,
@@ -795,9 +892,15 @@ def conectar(
                 break
             i += 1
 
-    _evo_create_instance(inst, use_pairing)
-    _evo_set_rabbit_initial(inst)
-    _evo_set_websocket_initial(inst)
+    _evo_create_instance(
+        inst,
+        use_pairing,
+        sync_full_history=sync_full_history,
+    )
+    _evo_prepare_instance_before_connect(
+        inst,
+        sync_full_history=sync_full_history,
+    )
 
     inst_row = db.query(models.EmpresaInstancia).filter(
         models.EmpresaInstancia.instance_name == inst
@@ -844,8 +947,10 @@ def conectar(
             conflito.historico_restaurar = payload.historico_restaurar
             db.commit()
 
-            _evo_set_rabbit_initial(conflito.instance_name)
-            _evo_set_websocket_initial(conflito.instance_name)
+            _evo_prepare_instance_before_connect(
+                conflito.instance_name,
+                sync_full_history=sync_full_history,
+            )
 
             conn_json = _evo_connect(
                 conflito.instance_name,
@@ -934,10 +1039,17 @@ def refresh_qr(
         message="Seu plano está vencido. Renove para reativar ou atualizar QR de instâncias.",
     )
 
-    _evo_set_rabbit_initial(instance)
-    _evo_set_websocket_initial(instance)
+    sync_full_history = _should_sync_full_history(getattr(row, "historico_restaurar", None))
 
-    js = _evo_try_refresh_qr(instance)
+    _evo_prepare_instance_before_connect(
+        instance,
+        sync_full_history=sync_full_history,
+    )
+
+    js = _evo_try_refresh_qr(
+        instance,
+        sync_full_history=sync_full_history,
+    )
 
     qr = {}
     if isinstance(js, dict):
@@ -956,6 +1068,54 @@ def refresh_qr(
                 }
 
     return {"ok": True, "instance": instance, "qrcode": (qr or None)}
+
+
+@router.post("/empresas/instancias/{instancia_id}/apelido")
+def atualizar_apelido_instancia(
+    instancia_id: int,
+    payload: AtualizarApelidoInstanciaPayload,
+    db: Session = Depends(get_db),
+    identity=Depends(require_admin),
+):
+    """
+    Atualiza somente o apelido interno da instância no ZapsChat.
+
+    Importante:
+    - Não renomeia a instância na Evolution.
+    - Não altera instance_name.
+    - Não desconecta o WhatsApp.
+    """
+    _assert_empresa_access(identity, int(payload.empresa_id))
+
+    apelido_clean = re.sub(r"\s+", " ", str(payload.apelido or "").strip())
+
+    if not apelido_clean:
+        raise HTTPException(status_code=400, detail="Informe um apelido para a instância.")
+
+    if len(apelido_clean) > 80:
+        raise HTTPException(status_code=400, detail="O apelido pode ter no máximo 80 caracteres.")
+
+    inst = db.query(models.EmpresaInstancia).filter(
+        models.EmpresaInstancia.id == int(instancia_id),
+        models.EmpresaInstancia.empresa_id == int(payload.empresa_id),
+    ).first()
+
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instância não encontrada.")
+
+    inst.apelido = apelido_clean
+
+    db.add(inst)
+    db.commit()
+    db.refresh(inst)
+
+    return {
+        "ok": True,
+        "instancia_id": int(inst.id),
+        "instance": inst.instance_name,
+        "apelido": inst.apelido,
+        "numero": inst.numero_instancia,
+    }
 
 
 @router.post("/empresas/instancias/{instancia_id}/saude")
