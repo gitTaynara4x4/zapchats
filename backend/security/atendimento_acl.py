@@ -246,6 +246,152 @@ def assert_instancia_allowed(
 # =========================================================
 # Departamentos permitidos
 # =========================================================
+def _expand_departamento_ids_with_descendants(
+    db: Session,
+    *,
+    empresa_id: int,
+    departamento_ids: List[int],
+) -> List[int]:
+    """
+    Se o colaborador atende um departamento pai, também libera os filhos.
+    Exemplo:
+    - Financeiro
+      - Cobrança
+      - Contabilidade
+
+    Se o colaborador atende Financeiro, ele também vê Cobrança/Contabilidade.
+    """
+    base: List[int] = []
+
+    for raw in departamento_ids or []:
+        n = _to_int(raw)
+        if n and n not in base:
+            base.append(int(n))
+
+    if not base:
+        return []
+
+    if not hasattr(models.Departamento, "parent_id"):
+        return base
+
+    try:
+        rows = (
+            db.query(models.Departamento.id, models.Departamento.parent_id)
+            .filter(models.Departamento.empresa_id == int(empresa_id))
+            .all()
+        )
+    except Exception:
+        return base
+
+    children_by_parent: dict[int, list[int]] = {}
+
+    for dep_id_raw, parent_id_raw in rows:
+        dep_id = _to_int(dep_id_raw)
+        parent_id = _to_int(parent_id_raw)
+
+        if dep_id is None or parent_id is None:
+            continue
+
+        children_by_parent.setdefault(int(parent_id), []).append(int(dep_id))
+
+    out: List[int] = []
+    queue: List[int] = list(base)
+
+    while queue:
+        dep_id = queue.pop(0)
+
+        if dep_id in out:
+            continue
+
+        out.append(dep_id)
+
+        for child_id in children_by_parent.get(dep_id, []):
+            if child_id not in out:
+                queue.append(child_id)
+
+    return out
+
+
+def _fallback_departamentos_do_colaborador_por_setor(
+    db: Session,
+    *,
+    empresa_id: int,
+    colaborador_id: int,
+) -> List[int]:
+    """
+    Compatibilidade com dados antigos.
+
+    Antes do Modelo 2, muitos colaboradores tinham só colaboradores.setor_id.
+    Agora o correto é departamentos_membros.
+
+    Esse fallback evita quebrar tudo enquanto os dados antigos não foram migrados:
+    - se setor_id aponta para um Departamento existente, usa esse departamento;
+    - se setor_id aponta para um Setor antigo, procura Departamento com o mesmo nome.
+    """
+    colab = (
+        db.query(models.Colaborador)
+        .filter(
+            models.Colaborador.empresa_id == int(empresa_id),
+            models.Colaborador.id == int(colaborador_id),
+        )
+        .first()
+    )
+
+    if not colab:
+        return []
+
+    setor_id = _to_int(getattr(colab, "setor_id", None))
+    if not setor_id:
+        return []
+
+    out: List[int] = []
+
+    dep_direct = (
+        db.query(models.Departamento.id)
+        .filter(
+            models.Departamento.empresa_id == int(empresa_id),
+            models.Departamento.id == int(setor_id),
+        )
+        .first()
+    )
+
+    if dep_direct and dep_direct[0] is not None:
+        out.append(int(dep_direct[0]))
+
+    setor_nome = None
+
+    try:
+        setor = (
+            db.query(models.Setor)
+            .filter(
+                models.Setor.empresa_id == int(empresa_id),
+                models.Setor.id == int(setor_id),
+            )
+            .first()
+        )
+        setor_nome = getattr(setor, "nome", None) if setor else None
+    except Exception:
+        setor_nome = None
+
+    if setor_nome:
+        dep_by_name = (
+            db.query(models.Departamento.id)
+            .filter(
+                models.Departamento.empresa_id == int(empresa_id),
+                text("lower(trim(nome)) = lower(trim(:nome))"),
+            )
+            .params(nome=str(setor_nome).strip())
+            .first()
+        )
+
+        if dep_by_name and dep_by_name[0] is not None:
+            dep_id = int(dep_by_name[0])
+            if dep_id not in out:
+                out.append(dep_id)
+
+    return out
+
+
 def allowed_departamento_ids(
     db: Session,
     *,
@@ -253,10 +399,15 @@ def allowed_departamento_ids(
     empresa_id: int,
 ) -> Optional[List[int]]:
     """
-    Retorna:
+    Modelo 2:
       - None => sem restrição (admin / usuário master)
-      - []   => sem departamentos permitidos
-      - [..] => departamentos do colaborador
+      - []   => colaborador sem nenhum departamento permitido
+      - [..] => departamentos do colaborador em departamentos_membros
+
+    Regra:
+      - Colaborador usa departamentos_membros.
+      - Se não tiver dados novos, cai no fallback por setor_id antigo.
+      - Departamento pai libera filhos.
     """
     if _is_admin(identity):
         return None
@@ -278,38 +429,58 @@ def allowed_departamento_ids(
             FROM departamentos_membros
             WHERE empresa_id = :emp
               AND colaborador_id = :cid
+            ORDER BY is_primary DESC, departamento_id ASC
             """
         ),
         {"emp": int(empresa_id), "cid": int(colab_id)},
     ).fetchall()
 
-    deps = [int(r[0]) for r in rows if r and r[0] is not None]
-    return deps
+    deps: List[int] = []
+
+    for r in rows:
+        dep_id = _to_int(r[0] if r else None)
+        if dep_id and dep_id not in deps:
+            deps.append(int(dep_id))
+
+    if not deps:
+        deps = _fallback_departamentos_do_colaborador_por_setor(
+            db,
+            empresa_id=int(empresa_id),
+            colaborador_id=int(colab_id),
+        )
+
+    return _expand_departamento_ids_with_descendants(
+        db,
+        empresa_id=int(empresa_id),
+        departamento_ids=deps,
+    )
 
 
 def assert_departamento_allowed(
     *,
     allowed_departamentos: Optional[List[int]],
     departamento_id: Optional[int],
-    allow_unassigned: bool = False,
+    allow_unassigned: bool = True,
     detail: str = "Departamento não permitido para este usuário",
 ) -> None:
+    """
+    Modelo 2:
+    - Se a conversa ainda NÃO tem departamento, não bloqueia por departamento.
+    - Se tem departamento, precisa estar em departamentos_membros.
+    """
     if allowed_departamentos is None:
         return
-
-    if not allowed_departamentos:
-        if departamento_id is None and allow_unassigned:
-            return
-
-        raise HTTPException(
-            status_code=403,
-            detail="Sem departamentos permitidos para este colaborador",
-        )
 
     if departamento_id is None:
         if allow_unassigned:
             return
         raise HTTPException(status_code=403, detail=detail)
+
+    if not allowed_departamentos:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem departamentos permitidos para este colaborador",
+        )
 
     if int(departamento_id) not in set(int(x) for x in allowed_departamentos):
         raise HTTPException(status_code=403, detail=detail)
@@ -324,7 +495,7 @@ def assert_atendimento_acl(
     allowed_departamentos: Optional[List[int]],
     instancia_id: Optional[int],
     departamento_id: Optional[int],
-    allow_unassigned_department: bool = False,
+    allow_unassigned_department: bool = True,
 ) -> None:
     assert_instancia_allowed(
         allowed_instancias=allowed_instancias,
@@ -556,7 +727,7 @@ def assert_atendimento_access(
     identity: Any,
     empresa_id: int | None,
     atendimento_id: int,
-    allow_unassigned_department: bool = False,
+    allow_unassigned_department: bool = True,
 ):
     ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id)
     atendimento = get_atendimento_or_404(
@@ -583,7 +754,7 @@ def assert_cliente_access(
     empresa_id: int | None,
     cliente_id: int,
     instancia_id: int | None = None,
-    allow_unassigned_department: bool = False,
+    allow_unassigned_department: bool = True,
 ):
     ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id)
 
@@ -633,7 +804,7 @@ def assert_atendimento_interaction_access(
     identity: Any,
     empresa_id: int | None,
     atendimento_id: int,
-    allow_unassigned_department: bool = False,
+    allow_unassigned_department: bool = True,
     allow_when_no_participants: bool = False,
 ):
     """
@@ -667,7 +838,7 @@ def assert_cliente_interaction_access(
     empresa_id: int | None,
     cliente_id: int,
     instancia_id: int | None = None,
-    allow_unassigned_department: bool = False,
+    allow_unassigned_department: bool = True,
     allow_when_no_participants: bool = False,
 ):
     """

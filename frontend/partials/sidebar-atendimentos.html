@@ -1746,9 +1746,9 @@
           <span class="zc-wa-settings-item-copy"><strong>Privacidade</strong><span>Contatos bloqueados, mensagens temporárias</span></span>
         </button>
 
-        <button type="button" class="zc-wa-settings-item" data-zc-settings-tab="conversations" data-search="conversas tema papel de parede configurações">
-          <span class="zc-wa-settings-item-icon"><svg viewBox="0 0 256 256"><path d="M224,48H32A16,16,0,0,0,16,64V192a16,16,0,0,0,16,16H224a16,16,0,0,0,16-16V64A16,16,0,0,0,224,48ZM32,64H224V88H32Zm0,128V104H224v88Z"></path></svg></span>
-          <span class="zc-wa-settings-item-copy"><strong>Conversas</strong><span>Tema, papel de parede, configurações de conversas</span></span>
+        <button type="button" class="zc-wa-settings-item" data-zc-settings-tab="settings" data-search="configurações ajustes preferências atendimento">
+          <span class="zc-wa-settings-item-icon"><svg viewBox="0 0 256 256"><path d="M230.94,123.05l-14.27-8.25c.24-2.24.33-4.52.33-6.8s-.09-4.56-.33-6.8l14.27-8.25a14,14,0,0,0,5.12-19.11l-12-20.78a14,14,0,0,0-18.52-5.5l-14.3,8.26a78.65,78.65,0,0,0-11.77-6.8V32a14,14,0,0,0-14-14H142a14,14,0,0,0-14,14V48.02a78.65,78.65,0,0,0-11.77,6.8l-14.3-8.26a14,14,0,0,0-18.52,5.5l-12,20.78a14,14,0,0,0,5.12,19.11l14.27,8.25c-.24,2.24-.33,4.52-.33,6.8s.09,4.56.33,6.8l-14.27,8.25a14,14,0,0,0-5.12,19.11l12,20.78a14,14,0,0,0,18.52,5.5l14.3-8.26a78.65,78.65,0,0,0,11.77,6.8V224a14,14,0,0,0,14,14h24a14,14,0,0,0,14-14V207.98a78.65,78.65,0,0,0,11.77-6.8l14.3,8.26a14,14,0,0,0,18.52-5.5l12-20.78A14,14,0,0,0,230.94,123.05ZM154,128a26,26,0,1,1-26-26A26,26,0,0,1,154,128Z"></path></svg></span>
+          <span class="zc-wa-settings-item-copy"><strong>Configurações</strong><span>Ajustes do painel de atendimento</span></span>
         </button>
 
         <button type="button" class="zc-wa-settings-item" data-zc-settings-tab="notifications" data-search="notificações mensagens grupos sons">
@@ -1947,13 +1947,42 @@
     }
   }
 
+  function resetSettingsHome(){
+    overlay.querySelectorAll('[data-zc-settings-tab]').forEach(function(item){
+      item.classList.toggle('is-active', item.getAttribute('data-zc-settings-tab') === 'settings');
+    });
+
+    var home = document.getElementById('zcWaSettingsHomeCard');
+    var detail = document.getElementById('zcWaSettingsDetail');
+
+    if (home) home.style.display = '';
+    if (detail) detail.classList.remove('is-open');
+    if (search) search.value = '';
+
+    overlay.querySelectorAll('.zc-wa-settings-item[data-search]').forEach(function(item){
+      item.classList.remove('is-hidden-search');
+    });
+  }
+
   function openPanel(tab){
     syncUser();
     closeOldMenu();
     overlay.classList.add('is-open');
     overlay.setAttribute('aria-hidden', 'false');
     try { document.body.style.overflow = 'hidden'; } catch(e) {}
-    if (tab) activateTab(tab);
+
+    /*
+      O clique no avatar/nome do sidebar deve abrir este painel.
+      Antes ele chamava activateTab('profile'), que fechava este painel e tentava
+      abrir direto o perfil-instancia.js. Se esse JS ainda não estivesse pronto,
+      parecia que o botão não fazia nada.
+    */
+    if (tab && tab !== 'profile' && tab !== 'perfil') {
+      activateTab(tab);
+    } else {
+      resetSettingsHome();
+    }
+
     setTimeout(function(){ try { if (search) search.focus(); } catch(e) {} }, 60);
   }
 
@@ -2027,8 +2056,13 @@
             return;
           }
 
-          if (btn.action === 'conversations' || btn.action === 'settings') {
+          if (btn.action === 'conversations') {
             activateTab('conversations');
+            return;
+          }
+
+          if (btn.action === 'settings') {
+            openPanel();
             return;
           }
 
@@ -2079,6 +2113,9 @@
     if (tab === 'profile') {
       openPerfilInstancia();
       return;
+    } else if (tab === 'settings') {
+      resetSettingsHome();
+      return;
     } else if (tab === 'account') {
       setDetail('Conta', 'Segurança', 'Dados da conta e permissões', 'Gerencie informações da conta e plano.', [
         { text:'Meu plano', href:'/meu-plano' }
@@ -2107,7 +2144,7 @@
       e.preventDefault();
       e.stopPropagation();
       if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-      openPanel('profile');
+      openPanel();
     }, true);
   }
 
@@ -2123,7 +2160,12 @@
         return;
       }
 
-      openPanel(btn === oldMyPlanBtn ? 'account' : 'conversations');
+      if (btn === oldMyPlanBtn) {
+        openPanel('account');
+        return;
+      }
+
+      openPanel();
     }, true);
   });
 
@@ -2690,28 +2732,8 @@
     closeMenu();
     closeSidebar();
 
-    if ((tab || 'profile') === 'profile') {
-      var perfilFn = window.abrirPerfilInstanciaUsuario || window.zcAbrirMeuPerfilAtendimento;
-
-      if (typeof perfilFn === 'function') {
-        try {
-          perfilFn();
-          return true;
-        } catch (e) {}
-      }
-
-      setTimeout(function () {
-        var retry = window.abrirPerfilInstanciaUsuario || window.zcAbrirMeuPerfilAtendimento;
-        if (typeof retry === 'function') {
-          try { retry(); } catch (e) {}
-        }
-      }, 180);
-
-      return true;
-    }
-
     if (typeof window.ZCOpenWppSettingsPanel === 'function') {
-      window.ZCOpenWppSettingsPanel(tab || 'conversations');
+      window.ZCOpenWppSettingsPanel(tab || 'profile');
       return true;
     }
 
@@ -2826,7 +2848,16 @@
 
   if (userBtn) {
     userBtn.addEventListener('click', function (e) {
-      e.stopPropagation();
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+
+      if (typeof window.ZCOpenWppSettingsPanel === 'function') {
+        window.ZCOpenWppSettingsPanel('profile');
+        return;
+      }
+
       toggleMenu();
     });
   }
@@ -2888,7 +2919,7 @@
         e.stopPropagation();
         if (e.stopImmediatePropagation) e.stopImmediatePropagation();
       }
-      openSettingsPanel('conversations');
+      openSettingsPanel();
     }, true);
   }
 

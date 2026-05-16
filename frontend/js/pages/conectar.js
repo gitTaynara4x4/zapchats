@@ -6,7 +6,7 @@ import {
 
 // ====== Config ======
 const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
-const PREP_OVERLAY_SECONDS = 30;
+const PREP_OVERLAY_SECONDS = 20;
 const PRESENCE_REFRESH_INTERVAL_MS = 30000;
 const PRESENCE_COOLDOWN_MS = 15000;
 const PRESENCE_CONCURRENCY = 4;
@@ -15,7 +15,7 @@ const PRESENCE_CONCURRENCY = 4;
 let wantQR = false;
 let currentInstance = null;
 let timerId = null;
-let lastHistoricoUsed = 'none';
+let lastHistoricoUsed = '24h';
 
 let lastWhatsPayload = null;
 let presenceInFlight = false;
@@ -41,6 +41,107 @@ const cssEscape = (s) => {
   try { return (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s).replace(/["\\]/g,'\\$&'); }
   catch { return String(s).replace(/["\\]/g,'\\$&'); }
 };
+
+function normalizeHistorico(value){
+  const v = String(value || '').trim().toLowerCase();
+
+  if (v === 'none') return 'none';
+  if (v === '24h') return '24h';
+  if (v === '7d') return '7d';
+  if (v === '30d') return '30d';
+
+  return '24h';
+}
+
+function getHistoricoInfo(value){
+  const v = normalizeHistorico(value);
+
+  if (v === 'none') {
+    return {
+      value: 'none',
+      label: 'Não restaurar',
+      help: 'Conecta mais rápido, sem trazer mensagens antigas. As novas mensagens passam a chegar normalmente após a conexão.',
+      warning: '',
+      overlaySeconds: 15,
+      heavy: false,
+      sequence: [
+        'Sincronizando seus contatos...',
+        'Organizando sua instância...',
+        'Preparando seu atendimento...'
+      ]
+    };
+  }
+
+  if (v === '7d') {
+    return {
+      value: '7d',
+      label: 'Últimos 7 dias',
+      help: 'Boa opção para migração. Traz mais contexto das conversas recentes, mas pode demorar um pouco mais.',
+      warning: 'A restauração de 7 dias pode levar alguns minutos dependendo do volume de conversas.',
+      overlaySeconds: 25,
+      heavy: true,
+      sequence: [
+        'Sincronizando mensagens dos últimos 7 dias...',
+        'Sincronizando seus contatos...',
+        'Organizando suas conversas...',
+        'Preparando seu atendimento...'
+      ]
+    };
+  }
+
+  if (v === '30d') {
+    return {
+      value: '30d',
+      label: 'Últimos 30 dias',
+      help: 'Opção avançada para quem precisa trazer bastante histórico na primeira conexão.',
+      warning: 'A restauração de 30 dias é mais pesada e pode demorar alguns minutos. O sistema deve continuar funcionando enquanto importa em segundo plano.',
+      overlaySeconds: 30,
+      heavy: true,
+      sequence: [
+        'Iniciando restauração avançada...',
+        'Sincronizando mensagens dos últimos 30 dias...',
+        'Sincronizando seus contatos...',
+        'Organizando suas conversas...',
+        'Preparando seu atendimento...'
+      ]
+    };
+  }
+
+  return {
+    value: '24h',
+    label: 'Últimas 24 horas',
+    help: 'Recomendado para a maioria dos casos. Traz conversas recentes sem pesar muito a conexão inicial.',
+    warning: '',
+    overlaySeconds: 20,
+    heavy: false,
+    sequence: [
+      'Sincronizando suas mensagens recentes...',
+      'Sincronizando seus contatos...',
+      'Organizando suas conversas...',
+      'Preparando seu atendimento...'
+    ]
+  };
+}
+
+function updateHistoricoUI(value){
+  const info = getHistoricoInfo(value);
+
+  if (els.histHelp) {
+    els.histHelp.textContent = info.help;
+  }
+
+  if (els.histWarning) {
+    if (info.warning) {
+      els.histWarning.textContent = info.warning;
+      els.histWarning.classList.remove('hidden');
+    } else {
+      els.histWarning.textContent = '';
+      els.histWarning.classList.add('hidden');
+    }
+  }
+
+  return info;
+}
 
 function formatPhoneBR(num) {
   const d = onlyDigits(num);
@@ -334,6 +435,8 @@ const els = {
   form:        $('#form-conectar'),
   inApelido:   $('#form-conectar input[name="apelido"]'),
   selHist:     $('#historico-select'),
+  histHelp:    $('#historico-help'),
+  histWarning: $('#historico-warning'),
   btnGerarQR:  $('#btn-gerar-qr'),
   btnCancel:   $('#btn-cancel'),
   btnRefresh:  $('#btn-refresh'),
@@ -704,7 +807,7 @@ function loadLottie(){
 }
 
 // ===== Overlay =====
-const prep = { active:false, left:0, tmr:null, anim:null, seq:[], seqIdx:0, seqTmr:null, historico:'none' };
+const prep = { active:false, left:0, tmr:null, anim:null, seq:[], seqIdx:0, seqTmr:null, historico:'24h' };
 
 function ensureOverlay(){
   let ovl = document.getElementById('sync-overlay');
@@ -715,11 +818,11 @@ function ensureOverlay(){
     <div class="sync-wrap" role="dialog" aria-live="polite">
       <div id="prep-ovl-lottie"></div>
       <div id="prep-ovl-status" class="think">
-        Sincronizando seus contatos<span class="typing" aria-hidden="true"><span></span><span></span><span></span></span>
+        Sincronizando suas mensagens recentes<span class="typing" aria-hidden="true"><span></span><span></span><span></span></span>
       </div>
       <div id="prep-ovl-title">Estamos organizando tudo para você.</div>
-      <div id="prep-ovl-sub">Esta ação pode demorar um pouco.</div>
-      <div id="prep-ovl-time"><span class="time-pill">00:30</span></div>
+      <div id="prep-ovl-sub">Você poderá usar o sistema enquanto a importação termina.</div>
+      <div id="prep-ovl-time"><span class="time-pill">00:20</span></div>
     </div>
   `;
   document.body.appendChild(ovl);
@@ -746,20 +849,7 @@ function setStatus(txt, fade=true){
 }
 
 function pickSequence(historico){
-  if ((historico || 'none') === 'none') {
-    return [
-      'Sincronizando seus contatos...',
-      'Organizando sua instância...',
-      'Preparando seu atendimento...'
-    ];
-  }
-
-  return [
-    'Sincronizando suas mensagens recentes...',
-    'Sincronizando seus contatos...',
-    'Organizando suas conversas...',
-    'Preparando seu atendimento...'
-  ];
+  return getHistoricoInfo(historico).sequence;
 }
 
 function startStatusLoop(){
@@ -781,13 +871,25 @@ function paintTime(){
 
 async function showPrepOverlayOneMinute(seconds=PREP_OVERLAY_SECONDS, opts={}){
   if (prep.active) return;
+
+  const historico = normalizeHistorico(opts?.historico || '24h');
+  const info = getHistoricoInfo(historico);
+
   prep.active = true;
-  prep.left = Math.max(1, Math.floor(seconds));
-  prep.historico = String(opts?.historico || 'none');
+  prep.left = Math.max(1, Math.floor(seconds || info.overlaySeconds || PREP_OVERLAY_SECONDS));
+  prep.historico = historico;
 
   const ovl = ensureOverlay();
   ovl.classList.add('show');
   document.body.style.overflow = 'hidden';
+
+  const title = $('#prep-ovl-title', ovl);
+  const sub = $('#prep-ovl-sub', ovl);
+
+  if (title) title.textContent = info.heavy ? 'A importação começou em segundo plano.' : 'Estamos organizando tudo para você.';
+  if (sub) sub.textContent = info.heavy
+    ? 'Você pode continuar usando o ZapsChat enquanto o histórico termina de importar.'
+    : 'Você poderá usar o sistema enquanto a importação termina.';
 
   try {
     const lottie = await loadLottie();
@@ -1411,7 +1513,10 @@ function handleConnected(instanceFromMsg){
   hideQR();
   try { hideModal(); } catch {}
   wantQR = false;
-  showPrepOverlayOneMinute(PREP_OVERLAY_SECONDS, { historico: lastHistoricoUsed });
+
+  const info = getHistoricoInfo(lastHistoricoUsed);
+  showPrepOverlayOneMinute(info.overlaySeconds, { historico: lastHistoricoUsed });
+
   scheduleLoad(200);
 
   if (instanceFromMsg) schedulePresenceRefresh(200, { force:true, onlyInstances:[instanceFromMsg] });
@@ -1495,8 +1600,8 @@ async function handleConnectSubmit(ev){
   els.qrLoader?.classList.remove('hidden');
   showIllustration();
 
-  const apelido   = els.inApelido?.value?.trim() || '';
-  const historico = els.selHist?.value || 'none';
+  const apelido = els.inApelido?.value?.trim() || '';
+  const historico = normalizeHistorico(els.selHist?.value || '24h');
 
   if (!apelido) {
     els.qrLoader?.classList.add('hidden');
@@ -1505,6 +1610,8 @@ async function handleConnectSubmit(ev){
   }
 
   try{
+    lastHistoricoUsed = historico || '24h';
+
     const js = await apiPost('/api/onboarding/empresas/conectar', {
       empresa_id: empresaId,
       whatsapp_numero: '',
@@ -1513,8 +1620,6 @@ async function handleConnectSubmit(ev){
       use_pairing: false,
       apelido: apelido || null
     });
-
-    lastHistoricoUsed = historico || 'none';
 
     currentInstance = js?.instance || null;
     window.currentInstance = currentInstance;
@@ -1626,11 +1731,20 @@ els.btnAdd?.addEventListener('click', () => {
 
   if (els.inApelido) els.inApelido.value = '';
 
+  if (els.selHist) {
+    els.selHist.value = '24h';
+    updateHistoricoUI('24h');
+  }
+
   const histRow = els.selHist?.closest('.form-row, .field, .mb-4, .mb-3, .grid, div') || null;
   if (histRow) histRow.classList.remove('hidden');
 
   els.btnGerarQR?.classList.remove('hidden');
   els.btnRefresh?.classList.add('hidden');
+});
+
+els.selHist?.addEventListener('change', () => {
+  updateHistoricoUI(els.selHist?.value || '24h');
 });
 
 els.btnCloseMd?.addEventListener('click', hideModal);
@@ -1751,6 +1865,12 @@ if (!empresaId){
   console.warn('empresa_id ausente no localStorage; não foi possível carregar a lista.');
 } else {
   attachEmpresaWS();
+
+  if (els.selHist) {
+    els.selHist.value = normalizeHistorico(els.selHist.value || '24h');
+    updateHistoricoUI(els.selHist.value);
+  }
+
   loadWhatsAppStatus();
 
   presenceIntervalId = setInterval(() => {

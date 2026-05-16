@@ -43,6 +43,12 @@ import {
   saveInsts
 } from './instancias.js';
 import {
+  renderDepartamentosView,
+  ensureDepartamentosEdit,
+  getDepartamentosSelecionadosEdit,
+  saveDepartamentos
+} from './departamentos.js';
+import {
   ensurePermsEdit,
   getPermsSelecionadasEdit,
   savePerms
@@ -321,6 +327,7 @@ export async function renderPerfilView(colab){
     ePerms.innerHTML = '';
   }
 
+  await renderDepartamentosView(colab);
   await renderInstsView(colab);
 
   if (avatarHint) {
@@ -539,6 +546,7 @@ export function enterInlineEdit(){
     dPerms.style.display = 'none';
   }
 
+  ensureDepartamentosEdit();
   ensureInstsEdit();
 
   const wrapSenha = $('#wrap-senha');
@@ -685,6 +693,7 @@ export async function saveInline(){
   }
 
   const instsSel = getInstsSelecionadasEdit();
+  const deptosSel = getDepartamentosSelecionadosEdit();
   const permsSel = getPermsSelecionadasEdit();
   const horarioModo = buildHorarioModoPayload(setor, expOn);
 
@@ -722,6 +731,10 @@ export async function saveInline(){
       fd.append('permissoes[]', String(p));
     });
 
+    deptosSel.forEach(n => {
+      fd.append('departamentos_ids[]', String(n));
+    });
+
     instsSel.forEach(n => {
       fd.append('instancias_ids[]', String(n));
     });
@@ -734,6 +747,12 @@ export async function saveInline(){
       const created = await apiForm('/api/colaboradores/', 'POST', fd);
 
       if (created?.id != null){
+        try {
+          await saveDepartamentos(created.id, deptosSel);
+        } catch (eDept){
+          console.warn('departamentos create', eDept);
+        }
+
         try {
           await savePerms(created.id, permsSel);
         } catch (ePerm){
@@ -768,6 +787,7 @@ export async function saveInline(){
       const fresh = await loadColabFull(created.id);
 
       fresh.instancias_ids = instsSel;
+      fresh.departamentos_ids = deptosSel;
 
       if (permsSel.length) {
         fresh.permissoes = permsSel;
@@ -809,6 +829,7 @@ export async function saveInline(){
     telefone: telE164(tel),
     cargo: (cargo || '').trim(),
     instancias_ids: instsSel,
+    departamentos_ids: deptosSel,
     atualizar_usuario: !!state.viewing?.usuario_id,
     horario_modo: horarioModo
   };
@@ -857,6 +878,15 @@ export async function saveInline(){
       console.warn('Erro ao salvar permissões (edit)', ePerm);
     }
 
+    let deptosUpdated = true;
+
+    try {
+      deptosUpdated = await saveDepartamentos(id, deptosSel);
+    } catch (eDept){
+      deptosUpdated = false;
+      console.warn('Erro ao salvar departamentos (edit)', eDept);
+    }
+
     let instsUpdated = true;
 
     try {
@@ -869,6 +899,7 @@ export async function saveInline(){
 
     const msg = [
       'Alterações salvas.',
+      deptosUpdated ? 'Departamentos OK.' : '',
       permsUpdated ? 'Permissões OK.' : '',
       instsUpdated ? 'Instâncias OK.' : ''
     ].filter(Boolean).join(' ');
@@ -878,6 +909,7 @@ export async function saveInline(){
     const fresh = await loadColabFull(id);
 
     fresh.instancias_ids = instsSel;
+    fresh.departamentos_ids = deptosSel;
 
     if (permsSel.length) {
       fresh.permissoes = permsSel;
@@ -976,6 +1008,7 @@ export async function openNovo(){
     setor_id: null,
     permissoes: [],
     instancias_ids: [],
+    departamentos_ids: [],
     hora_login_inicio: null,
     hora_login_fim: null,
     horario_modo: 'livre'

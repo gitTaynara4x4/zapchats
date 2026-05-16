@@ -43,12 +43,14 @@ def _status_abertos() -> list[object]:
 
     out = []
     seen = set()
+
     for v in vals:
         key = str(v)
         if key in seen:
             continue
         seen.add(key)
         out.append(v)
+
     return out
 
 
@@ -85,30 +87,6 @@ def _fetch_primary_colab_id(
         return None
 
 
-def _instancia_tem_vinculos_departamento(
-    db: Session,
-    *,
-    empresa_id: int,
-    instancia_id: int,
-) -> bool:
-    row = db.execute(
-        text(
-            """
-            SELECT 1
-            FROM departamentos_instancias
-            WHERE empresa_id = :empresa_id
-              AND instancia_id = :instancia_id
-            LIMIT 1
-            """
-        ),
-        {
-            "empresa_id": int(empresa_id),
-            "instancia_id": int(instancia_id),
-        },
-    ).first()
-    return bool(row)
-
-
 def _departamento_permitido_na_instancia(
     db: Session,
     *,
@@ -116,35 +94,20 @@ def _departamento_permitido_na_instancia(
     departamento_id: int,
     instancia_id: Optional[int],
 ) -> bool:
-    if instancia_id is None:
-        return True
+    """
+    Modelo 2:
 
-    has_links = _instancia_tem_vinculos_departamento(
-        db,
-        empresa_id=int(empresa_id),
-        instancia_id=int(instancia_id),
-    )
-    if not has_links:
-        return True
+    Departamento NÃO controla mais quais WhatsApps pode usar.
 
-    row = db.execute(
-        text(
-            """
-            SELECT 1
-            FROM departamentos_instancias
-            WHERE empresa_id = :empresa_id
-              AND departamento_id = :departamento_id
-              AND instancia_id = :instancia_id
-            LIMIT 1
-            """
-        ),
-        {
-            "empresa_id": int(empresa_id),
-            "departamento_id": int(departamento_id),
-            "instancia_id": int(instancia_id),
-        },
-    ).first()
-    return bool(row)
+    Agora:
+    - Departamento = setor/roteamento/estrutura.
+    - Colaborador = controla quais departamentos atende.
+    - Colaborador = controla quais instâncias/WhatsApps pode acessar.
+
+    Por isso, na transferência, qualquer departamento ativo da empresa
+    pode receber uma conversa.
+    """
+    return True
 
 
 def _listar_departamentos_transferiveis(
@@ -196,7 +159,13 @@ def listar_departamentos_transferiveis(
     ensure_perm(identity, "atendimento.transferir")
 
     empresa_id_eff = assert_same_company(identity, empresa_id)
-    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=int(empresa_id_eff))
+
+    acl_ctx = resolve_acl_context(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id_eff),
+    )
+
     allowed_instancias = acl_ctx["allowed_instancias"]
 
     if instancia_id is not None:
@@ -211,7 +180,7 @@ def listar_departamentos_transferiveis(
         empresa_id=int(empresa_id_eff),
         cliente_id=int(cliente_id),
         instancia_id=instancia_id,
-        allow_unassigned_department=False,
+        allow_unassigned_department=True,
     )
 
     inst_id_eff = (
@@ -269,7 +238,13 @@ async def transferir_conversa_departamento(
     ensure_perm(identity, "atendimento.transferir")
 
     empresa_id_eff = assert_same_company(identity, payload.empresa_id)
-    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=int(empresa_id_eff))
+
+    acl_ctx = resolve_acl_context(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id_eff),
+    )
+
     allowed_instancias = acl_ctx["allowed_instancias"]
 
     if payload.instancia_id is not None:
@@ -284,7 +259,7 @@ async def transferir_conversa_departamento(
         empresa_id=int(empresa_id_eff),
         cliente_id=int(cliente_id),
         instancia_id=payload.instancia_id,
-        allow_unassigned_department=False,
+        allow_unassigned_department=True,
     )
 
     instancia_id_eff = (
@@ -310,6 +285,7 @@ async def transferir_conversa_departamento(
         )
         .first()
     )
+
     if not dep_destino:
         raise HTTPException(status_code=404, detail="Departamento de destino não encontrado")
 
@@ -331,11 +307,20 @@ async def transferir_conversa_departamento(
     )
 
     dep_anterior_nome = None
+
     if dep_anterior_id:
-        dep_old = db.query(models.Departamento).filter(models.Departamento.id == int(dep_anterior_id)).first()
+        dep_old = (
+            db.query(models.Departamento)
+            .filter(
+                models.Departamento.empresa_id == int(empresa_id_eff),
+                models.Departamento.id == int(dep_anterior_id),
+            )
+            .first()
+        )
         dep_anterior_nome = getattr(dep_old, "nome", None) if dep_old else None
 
     primary_colab_id = None
+
     if payload.atribuir_responsavel_primario:
         primary_colab_id = _fetch_primary_colab_id(
             db,
@@ -344,6 +329,7 @@ async def transferir_conversa_departamento(
         )
 
     cliente.departamento_id = int(dep_destino.id)
+
     if hasattr(cliente, "departamento"):
         cliente.departamento = dep_destino.nome
 

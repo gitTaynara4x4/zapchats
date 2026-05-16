@@ -16,7 +16,14 @@ from backend.websocket_manager import conexoes_ativas
 from backend.routers.cliente_onboarding import cancel_auto_cleanup
 
 from .shared import EvoEvent, HANDLERS, handler
-from ._state import INSTANCIAS_SYNC, QR_RECENT
+from ._state import (
+    INSTANCIAS_SYNC,
+    QR_RECENT,
+    history_clear_messages_set_state,
+    history_messages_set_started_at,
+    history_messages_set_count,
+    history_messages_set_last_total,
+)
 from ..utils.log_utils import LOG
 from ..utils.time_utils import _now_utc, _server_ts_ms
 from ..utils.cache_utils import invalidate_emp_cache
@@ -29,26 +36,72 @@ ENABLE_MESSAGES_SET = (os.getenv("ENABLE_MESSAGES_SET", "true").lower() == "true
 SYNC_ON_CONNECT_AFTER_QR = (os.getenv("SYNC_ON_CONNECT_AFTER_QR", "true").lower() == "true")
 QR_CONNECT_SYNC_WINDOW_MIN = int(os.getenv("QR_CONNECT_SYNC_WINDOW_MIN", "30") or "30")
 
+
+def _bool_env_value(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+
+    if raw is None:
+        return bool(default)
+
+    value = str(raw).strip().lower()
+
+    if value in {"1", "true", "yes", "sim", "on"}:
+        return True
+
+    if value in {"0", "false", "no", "nao", "não", "off"}:
+        return False
+
+    return bool(default)
+
+
+def _float_env_value(name: str, default: float) -> float:
+    try:
+        raw = os.getenv(name)
+        if raw is None or str(raw).strip() == "":
+            return float(default)
+        return float(raw)
+    except Exception:
+        return float(default)
+
+
+def _int_env_value(name: str, default: int) -> int:
+    try:
+        raw = os.getenv(name)
+        if raw is None or str(raw).strip() == "":
+            return int(default)
+        return int(raw)
+    except Exception:
+        return int(default)
+
+
 # Reaplica settings depois do connection.open.
 # Esse é o ponto crítico para a Evolution/Baileys gerar MESSAGES_SET.
-HISTORY_REAPPLY_SETTINGS_AFTER_OPEN = (
-    os.getenv("EVO_HISTORY_REAPPLY_SETTINGS_AFTER_OPEN", "true").strip().lower()
-    in {"1", "true", "yes", "sim", "on"}
+HISTORY_REAPPLY_SETTINGS_AFTER_OPEN = _bool_env_value(
+    "EVO_HISTORY_REAPPLY_SETTINGS_AFTER_OPEN",
+    True,
 )
-HISTORY_SETTINGS_RETRY = int(os.getenv("EVO_HISTORY_SETTINGS_RETRY", "3") or "3")
-HISTORY_SETTINGS_RETRY_DELAY_SEC = float(os.getenv("EVO_HISTORY_SETTINGS_RETRY_DELAY_SEC", "1.2") or "1.2")
+HISTORY_SETTINGS_RETRY = _int_env_value("EVO_HISTORY_SETTINGS_RETRY", 3)
+HISTORY_SETTINGS_RETRY_DELAY_SEC = _float_env_value("EVO_HISTORY_SETTINGS_RETRY_DELAY_SEC", 1.2)
+
+# Watchdog:
+# Se depois do force-open a Evolution não entregar MESSAGES_SET válido,
+# reaplica rabbit/settings de novo algumas vezes.
+HISTORY_WATCHDOG_ENABLED = _bool_env_value("EVO_HISTORY_WATCHDOG_ENABLED", True)
+HISTORY_WATCHDOG_WAIT_SEC = max(1.0, _float_env_value("EVO_HISTORY_WATCHDOG_WAIT_SEC", 20.0))
+HISTORY_WATCHDOG_REAPPLIES = max(0, _int_env_value("EVO_HISTORY_WATCHDOG_REAPPLIES", 2))
 
 # Segurança contra avalanche depois de rebuild/restart da Evolution:
 # Por padrão, instância antiga que já estava conectada NÃO reconfigura Rabbit/WS de novo
 # e NÃO dispara sync pesado.
-RECONFIGURE_ALREADY_CONNECTED_ON_UPDATE = (
-    os.getenv("RECONFIGURE_ALREADY_CONNECTED_ON_UPDATE", "false").strip().lower()
-    in {"1", "true", "yes", "sim", "on"}
+RECONFIGURE_ALREADY_CONNECTED_ON_UPDATE = _bool_env_value(
+    "RECONFIGURE_ALREADY_CONNECTED_ON_UPDATE",
+    False,
 )
 
 # Janela para considerar uma instância como "primeiro login/QR recém-criado".
-HISTORY_PENDING_FIRST_LOGIN_MAX_AGE_MIN = int(
-    os.getenv("HISTORY_PENDING_FIRST_LOGIN_MAX_AGE_MIN", "180") or "180"
+HISTORY_PENDING_FIRST_LOGIN_MAX_AGE_MIN = _int_env_value(
+    "HISTORY_PENDING_FIRST_LOGIN_MAX_AGE_MIN",
+    180,
 )
 
 EVOLUTION_URL = (os.getenv("EVOLUTION_URL") or "").rstrip("/")
@@ -85,10 +138,12 @@ FULL_EVENTS_RABBIT = [
 HISTORY_SYNC_OPTIONS = {
     "24h",
     "7d",
+    "30d",
     "all",
     "full",
     "tudo",
     "disponivel",
+    "disponível",
     "available",
 }
 
@@ -117,7 +172,7 @@ def _env_csv_first(*names: str, default: str = "#") -> list[str]:
         raw = default
 
     out = [
-        b.strip()
+        b.strip().strip('"').strip("'")
         for b in str(raw or default).split(",")
         if b.strip()
     ]
@@ -138,6 +193,39 @@ _CONNECT_SYNC_TASKS: dict[str, asyncio.Task] = {}
 
 def _only_digits(raw: Any) -> str:
     return re.sub(r"\D", "", str(raw or ""))
+
+
+def _normalize_historico_opcao(raw: str | None) -> str:
+    h = str(raw or "none").strip().lower()
+
+    if h in {"", "none", "no", "nao", "não", "off", "false", "0"}:
+        return "none"
+
+    if h in {"24h", "24", "1d", "1dia", "1_dia", "dia", "ultimas_24h", "últimas_24h"}:
+        return "24h"
+
+    if h in {"7d", "7", "7dias", "7_dias", "semana", "1w", "week"}:
+        return "7d"
+
+    if h in {
+        "30d",
+        "30",
+        "30dias",
+        "30_dias",
+        "1m",
+        "1mes",
+        "1_mes",
+        "mes",
+        "mês",
+        "month",
+        "30days",
+    }:
+        return "30d"
+
+    if h in {"all", "full", "tudo", "disponivel", "disponível", "available"}:
+        return "all"
+
+    return "none"
 
 
 def _clean_whatsapp_number(raw: Any) -> str | None:
@@ -439,8 +527,8 @@ def _get_inst_row(db, instance: str):
 
 
 def _historico_pede_sync(historico_opcao: str | None) -> bool:
-    h = str(historico_opcao or "none").strip().lower()
-    return h in HISTORY_SYNC_OPTIONS
+    h = _normalize_historico_opcao(historico_opcao)
+    return h in {"24h", "7d", "30d", "all"}
 
 
 def _qr_recente(inst_id: str) -> bool:
@@ -703,11 +791,12 @@ async def _evo_force_history_settings_after_open(instance: str, *, historico_opc
 
     Isso não importa mensagens diretamente; só força a Evolution a emitir MESSAGES_SET.
     """
-    h = str(historico_opcao or "none").strip().lower()
+    h = _normalize_historico_opcao(historico_opcao)
     should_sync = _historico_pede_sync(h)
 
     result: dict[str, Any] = {
         "should_sync": bool(should_sync),
+        "historico": h,
         "rabbit_before": None,
         "settings": None,
         "rabbit_after": None,
@@ -752,6 +841,185 @@ async def _evo_force_history_settings_after_open(instance: str, *, historico_opc
             await asyncio.sleep(delay)
 
     return result
+
+
+async def _emit_history_watchdog_progress(
+    empresa_id: int | None,
+    *,
+    inst_id: str,
+    historico_opcao: str,
+    status: str,
+    cycle: int,
+    reapply_result: dict[str, Any] | None = None,
+) -> None:
+    if empresa_id is None:
+        return
+
+    try:
+        await conexoes_ativas.send_message(
+            f"emp:{empresa_id}",
+            {
+                "type": "history_sync_progress",
+                "imported": 0,
+                "total": 0,
+                "watchdog": {
+                    "status": status,
+                    "instance": inst_id,
+                    "historico": historico_opcao,
+                    "cycle": cycle,
+                    "messages_set_count": history_messages_set_count(inst_id),
+                    "messages_set_total": history_messages_set_last_total(inst_id),
+                    "reapply_result": reapply_result,
+                },
+                "serverTimestamp": _server_ts_ms(),
+            },
+        )
+    except Exception:
+        pass
+
+
+def _history_messages_set_arrived(inst_id: str) -> bool:
+    """
+    Só considera que o histórico chegou quando o MESSAGES_SET veio com mensagens.
+
+    A Evolution pode mandar primeiro um MESSAGES_SET vazio:
+    total=0
+
+    Esse pacote vazio NÃO pode encerrar o watchdog.
+    Se encerrar, o sistema para antes do pacote cheio chegar.
+    """
+    started_at = history_messages_set_started_at(inst_id)
+
+    if started_at is None:
+        return False
+
+    try:
+        total = int(history_messages_set_last_total(inst_id) or 0)
+    except Exception:
+        total = 0
+
+    if total <= 0:
+        LOG(
+            f"[HISTORY][watchdog] MESSAGES_SET vazio recebido, mas ainda não conta como histórico válido "
+            f"inst={inst_id} count={history_messages_set_count(inst_id)} last_total={total}"
+        )
+        return False
+
+    return True
+
+
+async def _history_watchdog_wait_and_retry(
+    *,
+    inst_id: str,
+    historico_opcao: str,
+    empresa_id: int | None,
+) -> bool:
+    """
+    Aguarda o MESSAGES_SET chegar.
+
+    Se não chegar, reaplica Rabbit/settings novamente.
+    Isso corrige o caso onde a Evolution conecta, aceita settings,
+    mas não entrega MESSAGES_SET válido na primeira tentativa.
+    """
+    h = _normalize_historico_opcao(historico_opcao)
+
+    if not HISTORY_WATCHDOG_ENABLED:
+        LOG(
+            f"[HISTORY][watchdog] desabilitado por EVO_HISTORY_WATCHDOG_ENABLED=false "
+            f"inst={inst_id} historico={h}"
+        )
+        return False
+
+    if not _historico_pede_sync(h):
+        LOG(f"[HISTORY][watchdog] ignorado; histórico não pendente inst={inst_id} historico={h}")
+        return False
+
+    if not ENABLE_MESSAGES_SET:
+        LOG(f"[HISTORY][watchdog] ignorado; ENABLE_MESSAGES_SET=false inst={inst_id}")
+        return False
+
+    wait_sec = max(1.0, float(HISTORY_WATCHDOG_WAIT_SEC or 20.0))
+    reapplies = max(0, int(HISTORY_WATCHDOG_REAPPLIES or 0))
+
+    LOG(
+        f"[HISTORY][watchdog] iniciado inst={inst_id} historico={h} "
+        f"wait_sec={wait_sec} reapplies={reapplies}"
+    )
+
+    for cycle in range(0, reapplies + 1):
+        if _history_messages_set_arrived(inst_id):
+            LOG(
+                f"[HISTORY][watchdog] MESSAGES_SET válido já chegou antes da espera "
+                f"inst={inst_id} count={history_messages_set_count(inst_id)} "
+                f"last_total={history_messages_set_last_total(inst_id)}"
+            )
+            await _emit_history_watchdog_progress(
+                empresa_id,
+                inst_id=inst_id,
+                historico_opcao=h,
+                status="arrived",
+                cycle=cycle,
+            )
+            return True
+
+        LOG(
+            f"[HISTORY][watchdog] aguardando MESSAGES_SET válido "
+            f"inst={inst_id} historico={h} cycle={cycle}/{reapplies} wait_sec={wait_sec}"
+        )
+
+        await asyncio.sleep(wait_sec)
+
+        if _history_messages_set_arrived(inst_id):
+            LOG(
+                f"[HISTORY][watchdog] MESSAGES_SET válido chegou "
+                f"inst={inst_id} historico={h} "
+                f"count={history_messages_set_count(inst_id)} "
+                f"last_total={history_messages_set_last_total(inst_id)}"
+            )
+            await _emit_history_watchdog_progress(
+                empresa_id,
+                inst_id=inst_id,
+                historico_opcao=h,
+                status="arrived",
+                cycle=cycle,
+            )
+            return True
+
+        if cycle < reapplies:
+            LOG(
+                f"[HISTORY][watchdog] MESSAGES_SET válido não chegou; reaplicando settings/rabbit "
+                f"inst={inst_id} historico={h} cycle={cycle + 1}/{reapplies}"
+            )
+
+            reapply_result = await _evo_force_history_settings_after_open(
+                inst_id,
+                historico_opcao=h,
+            )
+
+            await _emit_history_watchdog_progress(
+                empresa_id,
+                inst_id=inst_id,
+                historico_opcao=h,
+                status="reapplied",
+                cycle=cycle + 1,
+                reapply_result=reapply_result,
+            )
+
+    LOG(
+        f"[HISTORY][watchdog] MESSAGES_SET válido não chegou após tentativas "
+        f"inst={inst_id} historico={h} reapplies={reapplies} wait_sec={wait_sec} "
+        f"count={history_messages_set_count(inst_id)} last_total={history_messages_set_last_total(inst_id)}"
+    )
+
+    await _emit_history_watchdog_progress(
+        empresa_id,
+        inst_id=inst_id,
+        historico_opcao=h,
+        status="not_arrived",
+        cycle=reapplies,
+    )
+
+    return False
 
 
 def _mark_disconnected(instance: str):
@@ -810,7 +1078,7 @@ def _read_history_option_for_instance(inst_id: str) -> tuple[str, bool, int | No
     Lê do banco a opção atual de histórico.
 
     Retorna:
-    - historico_opcao
+    - historico_opcao normalizado
     - historico_pendente
     - empresa_id
     """
@@ -819,7 +1087,7 @@ def _read_history_option_for_instance(inst_id: str) -> tuple[str, bool, int | No
         if not inst:
             return "none", False, None
 
-        historico = str(getattr(inst, "historico_restaurar", None) or "none").strip().lower()
+        historico = _normalize_historico_opcao(getattr(inst, "historico_restaurar", None))
         empresa_id = getattr(inst, "empresa_id", None)
 
         try:
@@ -834,10 +1102,11 @@ async def _run_connect_sync_safe(inst_id: str) -> None:
     """
     Roda sync pós-conexão sem travar o handler CONNECTION_UPDATE.
 
-    Agora também força a Evolution a gerar MESSAGES_SET quando histórico está pendente:
+    Também força a Evolution a gerar MESSAGES_SET quando histórico está pendente:
     - reaplica Rabbit com MESSAGES_SET;
     - reaplica settings syncFullHistory=true;
-    - só depois roda contatos/chats.
+    - roda contatos/chats;
+    - watchdog aguarda MESSAGES_SET válido e reaplica se não chegar.
     """
     try:
         from .contacts import sync_contatos_completos, sync_chats_completos
@@ -851,7 +1120,8 @@ async def _run_connect_sync_safe(inst_id: str) -> None:
             f"chats={SYNC_CHATS_ON_CONNECT} "
             f"messages_set={ENABLE_MESSAGES_SET} "
             f"historico={historico_opcao} "
-            f"historico_pendente={historico_pendente}"
+            f"historico_pendente={historico_pendente} "
+            f"watchdog={HISTORY_WATCHDOG_ENABLED}"
         )
 
         if ENABLE_MESSAGES_SET and historico_pendente:
@@ -898,6 +1168,13 @@ async def _run_connect_sync_safe(inst_id: str) -> None:
                     f"[MESSAGES_SET] aguardando histórico após force-open "
                     f"inst={inst_id} historico={historico_opcao}"
                 )
+
+                await _history_watchdog_wait_and_retry(
+                    inst_id=inst_id,
+                    historico_opcao=historico_opcao,
+                    empresa_id=empresa_id,
+                )
+
             else:
                 LOG(
                     f"[MESSAGES_SET] não aguardando histórico; historico_restaurar={historico_opcao} "
@@ -1000,7 +1277,8 @@ async def on_conn_update(first: str, payload: dict):
 
         inst.last_seen = _now_utc()
         empresa_id = inst.empresa_id
-        historico_opcao = (inst.historico_restaurar or "none").lower()
+
+        historico_opcao = _normalize_historico_opcao(getattr(inst, "historico_restaurar", None))
         historico_pendente = _historico_pede_sync(historico_opcao)
 
         historico_primeiro_login = bool(
@@ -1024,6 +1302,7 @@ async def on_conn_update(first: str, payload: dict):
     if (not conectado) and (st in ("close", "closed", "disconnected", "logout", "loggedout")):
         INSTANCIAS_SYNC.discard(inst_id)
         QR_RECENT.pop(inst_id, None)
+        history_clear_messages_set_state(inst_id)
         _cancel_connect_sync(inst_id)
         _mark_disconnected(inst_id)
 
@@ -1170,12 +1449,18 @@ async def on_conn_update(first: str, payload: dict):
             INSTANCIAS_SYNC.add(inst_id)
             QR_RECENT.pop(inst_id, None)
 
+            # Importante:
+            # limpa o estado anterior antes de começar o novo ciclo.
+            # Assim o watchdog não confunde MESSAGES_SET antigo com o atual.
+            history_clear_messages_set_state(inst_id)
+
             _schedule_connect_sync(inst_id)
 
 
 async def on_logout_instance(instance: str, payload: dict):
     INSTANCIAS_SYNC.discard(instance)
     QR_RECENT.pop(instance, None)
+    history_clear_messages_set_state(instance)
     _cancel_connect_sync(instance)
     _mark_disconnected(instance)
 

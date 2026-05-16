@@ -94,18 +94,27 @@ def _get_colab_id(identity: Any) -> Optional[int]:
 def _nome_colaborador(db: Session, colaborador_id: Optional[int]) -> Optional[str]:
     if colaborador_id is None:
         return None
-    row = db.query(models.Colaborador).filter(models.Colaborador.id == int(colaborador_id)).first()
+
+    row = (
+        db.query(models.Colaborador)
+        .filter(models.Colaborador.id == int(colaborador_id))
+        .first()
+    )
+
     return row.nome if row else None
 
 
 def _iso_utc(ts) -> Optional[str]:
     if ts is None:
         return None
+
     try:
         if hasattr(ts, "tzinfo") and ts.tzinfo is None:
             return ts.replace(tzinfo=timezone.utc).isoformat(timespec="microseconds")
+
         if hasattr(ts, "isoformat"):
             return ts.isoformat(timespec="microseconds")
+
         return str(ts)
     except Exception:
         return str(ts)
@@ -117,6 +126,7 @@ def _epoch_from_dt(dt: datetime) -> int:
             dt = dt.replace(tzinfo=timezone.utc)
         else:
             dt = dt.astimezone(timezone.utc)
+
         return int(dt.timestamp())
     except Exception:
         return 0
@@ -218,8 +228,10 @@ def _resolve_instancia_id(
             )
             .first()
         )
+
         if row:
             return int(row.id), row.instance_name
+
         return None, None
 
     if instance:
@@ -231,8 +243,10 @@ def _resolve_instancia_id(
             )
             .first()
         )
+
         if row:
             return int(row.id), row.instance_name
+
         return None, None
 
     return None, None
@@ -432,6 +446,7 @@ def _active_participants_snapshot(
             int(x.get("colaborador_id") or 0),
         )
     )
+
     return out
 
 
@@ -522,6 +537,7 @@ def _build_participacao_state(
     )
 
     responsavel = next((p for p in participants if p.get("is_responsavel")), None)
+
     if responsavel is None and participants:
         responsavel = participants[0]
 
@@ -657,17 +673,21 @@ def listar_mensagens(
             empresa_id=empresa_id_eff,
             cliente_id=int(cliente_id),
             instancia_id=resolved_inst_id,
-            allow_unassigned_department=False,
+            allow_unassigned_department=True,
         )
 
         instancia_filters = []
+
         if resolved_inst_id is not None:
             instancia_filters.append(models.Mensagem.instancia_id == int(resolved_inst_id))
         else:
             if allowed_instancias is not None:
                 if not allowed_instancias:
                     return {"conversa": None, "items": [], "mensagens": []}
-                instancia_filters.append(models.Mensagem.instancia_id.in_([int(x) for x in allowed_instancias]))
+
+                instancia_filters.append(
+                    models.Mensagem.instancia_id.in_([int(x) for x in allowed_instancias])
+                )
 
         q = (
             db.query(
@@ -698,6 +718,7 @@ def listar_mensagens(
 
         if since_id is not None:
             q = q.filter(models.Mensagem.id > int(since_id))
+
         if since_ts is not None:
             q = q.filter(models.Mensagem.timestamp > since_ts)
 
@@ -729,6 +750,7 @@ def listar_mensagens(
         )
 
         items = []
+
         for r in rows:
             ts_iso = _iso_utc(r.timestamp) if r.timestamp is not None else None
             row_conv_key = _conv_ref_cliente(int(cliente_acl.id), r.instancia_id or effective_inst_id)
@@ -823,17 +845,22 @@ def listar_mensagens(
         )
         .first()
     )
+
     if not grp:
         raise HTTPException(status_code=404, detail="Conversa não encontrada nessa empresa.")
 
     instancia_filters_g = []
+
     if resolved_inst_id is not None:
         instancia_filters_g.append(models.MensagemGrupo.instancia_id == int(resolved_inst_id))
     else:
         if allowed_instancias is not None:
             if not allowed_instancias:
                 return {"conversa": None, "items": [], "mensagens": []}
-            instancia_filters_g.append(models.MensagemGrupo.instancia_id.in_([int(x) for x in allowed_instancias]))
+
+            instancia_filters_g.append(
+                models.MensagemGrupo.instancia_id.in_([int(x) for x in allowed_instancias])
+            )
 
     qg = (
         db.query(
@@ -893,6 +920,7 @@ def listar_mensagens(
     )
 
     items_g = []
+
     for r in rows_g:
         try:
             ts_iso = datetime.fromtimestamp(int(r.timestamp or 0), tz=timezone.utc).isoformat(timespec="microseconds")
@@ -972,6 +1000,7 @@ def listar_mensagens_alias_historico(
     identity=Depends(get_current_identity),
 ):
     empresa_id_eff = assert_same_company(identity, empresa_id)
+
     return listar_mensagens(
         cliente_id=cliente_id,
         empresa_id=empresa_id_eff,
@@ -1015,7 +1044,7 @@ async def apagar_mensagem_atendimento(
             empresa_id=empresa_id_eff,
             cliente_id=int(cliente_id),
             instancia_id=None,
-            allow_unassigned_department=False,
+            allow_unassigned_department=True,
         )
     except HTTPException:
         pass
@@ -1032,9 +1061,11 @@ async def apagar_mensagem_atendimento(
     if allowed_instancias is not None:
         if not allowed_instancias:
             raise HTTPException(status_code=404, detail="Mensagem não encontrada")
+
         q = q.filter(models.Mensagem.instancia_id.in_([int(x) for x in allowed_instancias]))
 
     rows = q.all()
+
     if not rows:
         raise HTTPException(status_code=404, detail="Mensagem não encontrada")
 

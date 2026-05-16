@@ -131,7 +131,13 @@ class ConnectPayload(BaseModel):
     # Pairing Code precisa.
     whatsapp_numero: Optional[str] = ""
 
-    historico_restaurar: Literal["none", "24h", "7d"] = "none"
+    # Opções oficiais do onboarding:
+    # none = não restaurar
+    # 24h  = últimas 24 horas
+    # 7d   = últimos 7 dias
+    # 30d  = últimos 30 dias
+    historico_restaurar: Literal["none", "24h", "7d", "30d"] = "none"
+
     instance_name: Optional[str] = None
     use_pairing: bool = False
     apelido: Optional[str] = None
@@ -163,19 +169,55 @@ def _only_digits(s: str | None) -> str:
     return re.sub(r"\D", "", s or "")
 
 
+def _normalize_historico_opcao(raw: str | None) -> str:
+    """
+    Normaliza a opção de histórico vinda do front/banco.
+
+    O onboarding público aceita:
+    - none
+    - 24h
+    - 7d
+    - 30d
+
+    Outras opções como all/full ficam reservadas para uso interno, mas aqui não são aceitas
+    pelo ConnectPayload.
+    """
+    h = str(raw or "none").strip().lower()
+
+    if h in {"", "none", "no", "nao", "não", "off", "false", "0"}:
+        return "none"
+
+    if h in {"24h", "24", "1d", "1dia", "1_dia", "dia", "ultimas_24h", "últimas_24h"}:
+        return "24h"
+
+    if h in {"7d", "7", "7dias", "7_dias", "semana", "1w", "week"}:
+        return "7d"
+
+    if h in {
+        "30d",
+        "30",
+        "30dias",
+        "30_dias",
+        "1m",
+        "1mes",
+        "1_mes",
+        "mes",
+        "mês",
+        "month",
+        "30days",
+    }:
+        return "30d"
+
+    # Segurança: opção desconhecida não dispara restauração.
+    return "none"
+
+
 def _slug(
     s: str | None,
     *,
     default: str = "empresa",
     max_len: int | None = None,
 ) -> str:
-    """
-    Gera slug seguro para instance_name da Evolution.
-
-    Ex:
-    "Taynara 4x Comercial" -> "taynara-4x-comercial"
-    "São José / Suporte"   -> "sao-jose-suporte"
-    """
     raw = str(s or "").strip()
 
     if raw:
@@ -271,15 +313,15 @@ def _evo_wait_instance_ready(sess: requests.Session, instance: str, timeout_s: i
 
 def _should_sync_full_history(historico_restaurar: str | None) -> bool:
     """
-    Liga Sync Full History somente quando o usuário pediu restauração.
+    Liga Sync Full History quando o usuário pediu restauração.
 
     Importante:
-    - Isso NÃO significa que vamos importar 7 dias no ZapsChat.
-    - O filtro real continua no messages_set.py com HISTORY_LIMIT_HOURS=24.
-    - Aqui só autorizamos a Evolution/Baileys a gerar o pacote MESSAGES_SET.
+    - Isso autoriza a Evolution/Baileys a gerar MESSAGES_SET.
+    - O filtro real por período fica no messages_set.py:
+      24h, 7d ou 30d.
     """
-    h = str(historico_restaurar or "none").strip().lower()
-    return h in {"24h", "7d"}
+    h = _normalize_historico_opcao(historico_restaurar)
+    return h in {"24h", "7d", "30d"}
 
 
 def _settings_payload(sync_full_history: bool) -> dict:
@@ -538,7 +580,7 @@ def _evo_create_instance(
     """
     Cria a instância já com Rabbit ouvindo os eventos mínimos.
 
-    Agora também envia syncFullHistory quando o usuário escolhe restaurar histórico.
+    Também envia syncFullHistory quando o usuário escolhe restaurar histórico.
     Isso é necessário para a Evolution/Baileys gerar o pacote MESSAGES_SET.
     """
     if not (EVOLUTION_URL and EVOLUTION_KEY):
@@ -583,8 +625,7 @@ def _evo_set_rabbit_initial(instance: str) -> None:
     """
     Configura o Rabbit antes de chamar /instance/connect.
 
-    Antes estava events=[].
-    Agora já inclui MESSAGES_SET para a restauração 24h poder chegar.
+    Inclui MESSAGES_SET para a restauração chegar pelo Rabbit.
     """
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return
@@ -789,7 +830,8 @@ def conectar(
 
     use_pairing = bool(payload.use_pairing)
     number_digits = _only_digits(payload.whatsapp_numero)
-    sync_full_history = _should_sync_full_history(payload.historico_restaurar)
+    historico_restaurar = _normalize_historico_opcao(payload.historico_restaurar)
+    sync_full_history = _should_sync_full_history(historico_restaurar)
 
     apelido_clean = str(payload.apelido or "").strip() or None
 
@@ -812,7 +854,7 @@ def conectar(
 
     if pendente:
         pendente.apelido = apelido_clean
-        pendente.historico_restaurar = payload.historico_restaurar
+        pendente.historico_restaurar = historico_restaurar
         db.commit()
 
         _evo_prepare_instance_before_connect(
@@ -848,6 +890,7 @@ def conectar(
             "instancia_id": int(pendente.id),
             "qrcode": qr or None,
             "numero": pendente.numero_instancia,
+            "historico_restaurar": pendente.historico_restaurar,
         }
 
     # Só bloqueia duplicidade por número se o número foi informado.
@@ -917,7 +960,7 @@ def conectar(
                 numero_instancia=(number_digits or None),
 
                 apelido=apelido_clean,
-                historico_restaurar=payload.historico_restaurar,
+                historico_restaurar=historico_restaurar,
             )
             db.add(inst_row)
             db.flush()
@@ -926,7 +969,7 @@ def conectar(
                 inst_row.numero_instancia = number_digits
 
             inst_row.apelido = apelido_clean
-            inst_row.historico_restaurar = payload.historico_restaurar
+            inst_row.historico_restaurar = historico_restaurar
 
         if hasattr(empresa, "quantidade_instancias"):
             empresa.quantidade_instancias = _count_connected_instances(db, int(empresa.id))
@@ -944,7 +987,7 @@ def conectar(
 
         if conflito and not conflito.connected and int(conflito.empresa_id) == int(empresa.id):
             conflito.apelido = apelido_clean
-            conflito.historico_restaurar = payload.historico_restaurar
+            conflito.historico_restaurar = historico_restaurar
             db.commit()
 
             _evo_prepare_instance_before_connect(
@@ -980,6 +1023,7 @@ def conectar(
                 "instancia_id": int(conflito.id),
                 "qrcode": qr or None,
                 "numero": conflito.numero_instancia,
+                "historico_restaurar": conflito.historico_restaurar,
             }
 
         raise HTTPException(409, "Este número já está cadastrado em uma instância.")
@@ -1012,6 +1056,7 @@ def conectar(
         "instancia_id": int(inst_row.id),
         "qrcode": qr or None,
         "numero": inst_row.numero_instancia,
+        "historico_restaurar": inst_row.historico_restaurar,
     }
 
 
@@ -1039,7 +1084,8 @@ def refresh_qr(
         message="Seu plano está vencido. Renove para reativar ou atualizar QR de instâncias.",
     )
 
-    sync_full_history = _should_sync_full_history(getattr(row, "historico_restaurar", None))
+    historico_restaurar = _normalize_historico_opcao(getattr(row, "historico_restaurar", None))
+    sync_full_history = _should_sync_full_history(historico_restaurar)
 
     _evo_prepare_instance_before_connect(
         instance,
@@ -1067,7 +1113,12 @@ def refresh_qr(
                     "limit": qrd.get("limit") or qrd.get("timeout"),
                 }
 
-    return {"ok": True, "instance": instance, "qrcode": (qr or None)}
+    return {
+        "ok": True,
+        "instance": instance,
+        "qrcode": (qr or None),
+        "historico_restaurar": historico_restaurar,
+    }
 
 
 @router.post("/empresas/instancias/{instancia_id}/apelido")

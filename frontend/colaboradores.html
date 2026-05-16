@@ -396,7 +396,8 @@
       background:rgba(255,255,255,.018);
     }
 
-    #modal-perfil #insts-wrap.fieldbox{
+    #modal-perfil #insts-wrap.fieldbox,
+    #modal-perfil #deptos-wrap.fieldbox{
       height:auto !important;
       min-height:auto !important;
       display:flex;
@@ -407,7 +408,8 @@
       background:var(--card2, rgba(255,255,255,.025));
     }
 
-    #modal-perfil .inst-title-line{
+    #modal-perfil .inst-title-line,
+    #modal-perfil .dept-title-line{
       display:flex;
       flex-wrap:wrap;
       align-items:baseline;
@@ -415,28 +417,33 @@
       font-weight:400;
     }
 
-    #modal-perfil .inst-title-line span:first-child{
+    #modal-perfil .inst-title-line span:first-child,
+    #modal-perfil .dept-title-line span:first-child{
       font-weight:500;
       color:var(--text, #e5e7eb);
     }
 
-    #modal-perfil #inst-actions{
+    #modal-perfil #inst-actions,
+    #modal-perfil #dept-actions{
       gap:.5rem;
       flex-wrap:wrap;
     }
 
-    #modal-perfil #inst-actions .btn{
+    #modal-perfil #inst-actions .btn,
+    #modal-perfil #dept-actions .btn{
       padding:.34rem .62rem;
       font-size:.84rem;
       font-weight:400;
     }
 
-    #modal-perfil #e-insts{
+    #modal-perfil #e-insts,
+    #modal-perfil #e-deptos{
       grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
       gap:.55rem;
     }
 
-    #modal-perfil #d-insts{
+    #modal-perfil #d-insts,
+    #modal-perfil #d-deptos{
       display:flex;
       flex-wrap:wrap;
       gap:.5rem;
@@ -736,7 +743,7 @@
                   </div>
 
                   <div class="full">
-                    <dt>Departamento</dt>
+                    <dt>Departamento principal</dt>
                     <dd>
                       <div class="fieldbox" id="fb-depto">
                         <span id="v-depto">—</span>
@@ -807,7 +814,7 @@
                 <div class="panel-title">
                   <div>
                     <h3><i class="fa-solid fa-key"></i> Acessos</h3>
-                    <p>Senha de acesso e WhatsApps que este colaborador pode visualizar.</p>
+                    <p>Defina senha, departamentos atendidos e WhatsApps permitidos.</p>
                   </div>
                 </div>
 
@@ -826,6 +833,26 @@
                         <small class="help-text" id="senha-help" style="display:none">
                           Defina a senha inicial do colaborador. Ele poderá trocá-la depois.
                         </small>
+                      </div>
+                    </dd>
+                  </div>
+
+                  <div class="full" id="deptos-full">
+                    <dt>Departamentos que atende</dt>
+                    <dd>
+                      <div id="deptos-wrap" class="fieldbox">
+                        <div class="dept-title-line">
+                          <span>Quais departamentos este colaborador pode atender?</span>
+                          <span class="muted">Obrigatório para abrir conversas roteadas por departamento.</span>
+                        </div>
+
+                        <div id="dept-actions" style="display:none">
+                          <button type="button" id="dept-select-all" class="btn btn-ghost">Selecionar todos</button>
+                          <button type="button" id="dept-clear" class="btn btn-ghost">Limpar</button>
+                        </div>
+
+                        <div id="e-deptos" style="display:none"></div>
+                        <div id="d-deptos" class="chips"></div>
                       </div>
                     </dd>
                   </div>
@@ -906,6 +933,6 @@
 
   <div id="toast" role="status" aria-live="polite"></div>
 
-  <script src="/frontend/js/pages/colaboradores.js?v=split-fast-3" type="module"></script>
+  <script src="/frontend/js/pages/colaboradores.js?v=split-fast-3" defer></script>
 </body>
 </html>

@@ -6,6 +6,7 @@
  * - Perfil da instância agora usa o mesmo padrão visual do conta.js.
  * - Não cria mais overlay/tela cheia para o meu perfil.
  * - Não cobre o sidebar.
+ * - Visual mais clean: menos negrito, badges suaves e linhas leves.
  * - Mantém cache em memória + localStorage.
  * - Mantém regra do topo em "Todos": não chama backend/Evolution.
  * - Cache fresco no navegador não chama backend/BD.
@@ -18,7 +19,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 'zc-perfil-instancia-v9-front-conta';
+  const VERSION = 'zc-perfil-instancia-v10-front-conta-clean';
   const LS_PREFIX = 'zc:perfil-instancia:v2:';
   const PERFIL_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
 
@@ -82,6 +83,7 @@
   function firstValue() {
     for (let i = 0; i < arguments.length; i++) {
       const value = arguments[i];
+
       if (value === null || value === undefined) continue;
 
       if (typeof value === 'string') {
@@ -124,6 +126,7 @@
     if (!el || !el.dataset) return {};
 
     const out = {};
+
     Object.entries(el.dataset).forEach(([key, value]) => {
       if (hasValue(value)) out[key] = value;
     });
@@ -187,6 +190,7 @@
     }
 
     if (raw.startsWith('+')) return raw;
+
     return digits;
   }
 
@@ -242,6 +246,7 @@
       }
 
       let src = clean(list[index++]);
+
       if (!src) {
         next();
         return;
@@ -363,6 +368,7 @@
   function getSelectedInstanceLabel() {
     const labelEl = qs('#zc-inst-current-label');
     const label = clean(labelEl?.textContent || '');
+
     if (label) return label;
 
     const active = getSelectedInstanceButton();
@@ -498,7 +504,10 @@
       ].map(clean).filter(Boolean);
 
       const found = possibleValues.some((v) => rowValues.includes(v));
-      if (found && rowId) return onlyDigits(rowId);
+
+      if (found && rowId) {
+        return onlyDigits(rowId);
+      }
     }
 
     return '';
@@ -670,7 +679,9 @@
   function isPerfilCacheFresh(user) {
     if (!user || typeof user !== 'object') return false;
 
-    if (user.__fromLocalStorage) return !!user.__cacheFresh;
+    if (user.__fromLocalStorage) {
+      return !!user.__cacheFresh;
+    }
 
     if (user.__memorySavedAt) {
       const ageMs = Date.now() - Number(user.__memorySavedAt || 0);
@@ -720,6 +731,7 @@
 
     meuPerfilCachePorInstancia.set(key, cleanUser);
     perfilUsuarioCache = cleanUser;
+
     savePerfilLocalStorage(key, cleanUser);
   }
 
@@ -827,7 +839,11 @@
 
   function buildMeuPerfilUrl(instanciaId, refresh) {
     let url = '/api/atendimento/instancias/' + encodeURIComponent(instanciaId) + '/perfil';
-    if (refresh) url += '?refresh=1';
+
+    if (refresh) {
+      url += '?refresh=1';
+    }
+
     return url;
   }
 
@@ -850,7 +866,7 @@
         ok: false,
         connected: false,
         nome: 'Instância não identificada',
-        about: 'Não consegui identificar o ID da instância selecionada. O botão da instância precisa ter data-value com o ID.',
+        about: 'Não consegui identificar o ID da instância selecionada. O botão precisa ter data-value com o ID.',
         telefone: '',
         telefone_fmt: '',
         avatar_url: '',
@@ -915,7 +931,9 @@
     } catch (err) {
       const stored = getPerfilVisualCache(debug.instanciaId);
 
-      if (stored && !refresh) return stored;
+      if (stored && !refresh) {
+        return stored;
+      }
 
       perfilUsuarioCache = {
         kind: 'erro',
@@ -956,6 +974,7 @@
 
   function ensureMeuPerfilInlineStyle() {
     let style = document.getElementById('zcMeuPerfilSettingsStyle');
+
     if (!style) {
       style = document.createElement('style');
       style.id = 'zcMeuPerfilSettingsStyle';
@@ -971,9 +990,9 @@
       }
 
       .zc-meu-perfil-inline-avatar{
-        width:74px;
-        height:74px;
-        min-width:74px;
+        width:72px;
+        height:72px;
+        min-width:72px;
         border-radius:999px;
         overflow:hidden;
         background:#202c33;
@@ -981,9 +1000,9 @@
         display:flex;
         align-items:center;
         justify-content:center;
-        font-size:24px;
-        font-weight:700;
-        box-shadow:0 8px 22px rgba(0,0,0,.20);
+        font-size:23px;
+        font-weight:500;
+        box-shadow:0 6px 16px rgba(0,0,0,.16);
       }
 
       .zc-meu-perfil-inline-avatar img{
@@ -1000,16 +1019,18 @@
 
       .zc-meu-perfil-inline-name{
         color:var(--zc-settings-title, #e9edef);
-        font-size:16px;
-        font-weight:700;
-        line-height:1.2;
+        font-size:15.5px;
+        font-weight:500;
+        line-height:1.25;
         word-break:break-word;
+        letter-spacing:-.01em;
       }
 
       .zc-meu-perfil-inline-desc{
         margin-top:5px;
         color:var(--zc-settings-muted, #aebac1);
         font-size:13px;
+        font-weight:400;
         line-height:1.4;
         word-break:break-word;
       }
@@ -1026,22 +1047,27 @@
         display:inline-flex;
         align-items:center;
         gap:6px;
-        min-height:24px;
+        min-height:23px;
         border-radius:999px;
         padding:4px 9px;
-        background:rgba(37,211,102,.12);
+        background:rgba(37,211,102,.10);
         color:#25d366;
-        font-size:12px;
-        font-weight:700;
+        font-size:11.5px;
+        font-weight:500;
+        line-height:1;
+      }
+
+      .zc-meu-perfil-badge i{
+        font-size:8px;
       }
 
       .zc-meu-perfil-badge.is-off{
-        background:rgba(255,255,255,.08);
+        background:rgba(255,255,255,.07);
         color:#aebac1;
       }
 
       .zc-meu-perfil-badge.is-muted{
-        background:rgba(255,255,255,.07);
+        background:rgba(255,255,255,.055);
         color:#aebac1;
       }
 
@@ -1051,6 +1077,7 @@
         gap:10px;
         color:var(--zc-settings-muted, #aebac1);
         font-size:14px;
+        font-weight:400;
         padding:4px 0;
       }
 
@@ -1058,7 +1085,7 @@
         width:17px;
         height:17px;
         border-radius:999px;
-        border:2px solid rgba(255,255,255,.18);
+        border:2px solid rgba(255,255,255,.16);
         border-top-color:#25d366;
         animation:zcMeuPerfilSpin .8s linear infinite;
       }
@@ -1084,12 +1111,36 @@
         height:46px;
         min-width:46px;
         border-radius:999px;
-        background:rgba(37,211,102,.12);
+        background:rgba(37,211,102,.10);
         color:#25d366;
         display:flex;
         align-items:center;
         justify-content:center;
         font-size:20px;
+      }
+
+      #zcMeuPerfilContent .zc-settings-row strong,
+      #zcMeuPerfilContent .zc-settings-row-title,
+      #zcMeuPerfilContent .zc-settings-row-main strong{
+        font-weight:500 !important;
+        letter-spacing:-.01em;
+      }
+
+      #zcMeuPerfilContent .zc-settings-row small,
+      #zcMeuPerfilContent .zc-settings-row-desc,
+      #zcMeuPerfilContent .zc-settings-row-main small{
+        font-weight:400 !important;
+        color:var(--zc-settings-muted, #aebac1);
+      }
+
+      #zcMeuPerfilContent .zc-settings-row,
+      #zcMeuPerfilContent button.zc-settings-row{
+        font-weight:400 !important;
+      }
+
+      #zcMeuPerfilContent .zc-settings-row [class*="side"],
+      #zcMeuPerfilContent .zc-settings-row-side{
+        font-weight:500 !important;
       }
 
       .zc-meu-perfil-toast{
@@ -1103,7 +1154,7 @@
         background:#202c33;
         color:#e9edef;
         font-size:13px;
-        font-weight:500;
+        font-weight:400;
         opacity:0;
         pointer-events:none;
         transition:opacity .16s ease;
@@ -1122,7 +1173,10 @@
 
   function helperBlock(title, body) {
     const H = meuPerfilHelper || window.ZCSettingsPage;
-    if (H && typeof H.block === 'function') return H.block(title, body);
+
+    if (H && typeof H.block === 'function') {
+      return H.block(title, body);
+    }
 
     return `
       <section class="zc-settings-block">
@@ -1134,13 +1188,20 @@
 
   function helperList(body) {
     const H = meuPerfilHelper || window.ZCSettingsPage;
-    if (H && typeof H.list === 'function') return H.list(body);
+
+    if (H && typeof H.list === 'function') {
+      return H.list(body);
+    }
+
     return `<div class="zc-settings-list">${body}</div>`;
   }
 
   function helperRow(config) {
     const H = meuPerfilHelper || window.ZCSettingsPage;
-    if (H && typeof H.row === 'function') return H.row(config);
+
+    if (H && typeof H.row === 'function') {
+      return H.row(config);
+    }
 
     const action = config.action ? ` data-action="${escapeHtml(config.action)}"` : '';
     const side = config.side ? `<span>${escapeHtml(config.side)}</span>` : '';
@@ -1167,6 +1228,7 @@
           </div>
         `)}
       </div>
+
       <div class="zc-meu-perfil-toast" id="zcMeuPerfilToast">Copiado</div>
     `;
   }
@@ -1197,6 +1259,7 @@
           <div class="zc-meu-perfil-empty-icon">
             <i class="fa-brands fa-whatsapp"></i>
           </div>
+
           <div class="zc-meu-perfil-inline-main">
             <div class="zc-meu-perfil-inline-name">${escapeHtml(title)}</div>
             <div class="zc-meu-perfil-inline-desc">${escapeHtml(desc)}</div>
@@ -1220,7 +1283,11 @@
 
   function setMeuPerfilRefreshingState(isLoading) {
     const root = meuPerfilPageEl || document;
-    const buttons = qsa('[data-action="refresh-meu-perfil"], [data-action="reload-meu-perfil"], .zc-meu-perfil-action-btn', root);
+
+    const buttons = qsa(
+      '[data-action="refresh-meu-perfil"], [data-action="reload-meu-perfil"], .zc-meu-perfil-action-btn',
+      root
+    );
 
     buttons.forEach((btn) => {
       btn.disabled = !!isLoading;
@@ -1270,11 +1337,13 @@
           <div class="zc-meu-perfil-inline-main">
             <div class="zc-meu-perfil-inline-name">${escapeHtml(nome)}</div>
             <div class="zc-meu-perfil-inline-desc">${escapeHtml(phone)}</div>
+
             <div class="zc-meu-perfil-inline-badges">
               <span class="zc-meu-perfil-badge${statusClass}">
                 <i class="fa-solid fa-circle"></i>
                 ${escapeHtml(statusText)}
               </span>
+
               <span class="zc-meu-perfil-badge is-muted">
                 <i class="fa-solid fa-database"></i>
                 ${escapeHtml(sourceText)}
@@ -1377,7 +1446,9 @@
     if (visualCache && !refresh) {
       renderMeuPerfil(visualCache, { forceAvatarReload: false });
 
-      if (isPerfilCacheFresh(visualCache)) return;
+      if (isPerfilCacheFresh(visualCache)) {
+        return;
+      }
 
       fetchMeuPerfil({ refresh: false })
         .then((user) => {
@@ -1467,6 +1538,7 @@
 
   function bindMeuPerfilPageEvents(page) {
     if (!page || page.__ZC_MEU_PERFIL_EVENTS__) return;
+
     page.__ZC_MEU_PERFIL_EVENTS__ = true;
 
     page.addEventListener('click', function (event) {
@@ -1483,6 +1555,7 @@
 
       if (action === 'copy-phone') {
         event.preventDefault();
+
         const user = meuPerfilLastUser || perfilUsuarioCache;
         const phoneToCopy = user?.telefone_fmt || user?.telefone || user?.raw?.telefone_e164 || user?.raw?.numero || '';
 
@@ -1504,6 +1577,7 @@
 
   function registerMeuPerfilSettingsPage() {
     const H = window.ZCSettingsPage;
+
     if (!H || typeof H.register !== 'function') return false;
     if (settingsRegistered) return true;
 
@@ -1519,6 +1593,7 @@
       onOpen(page, helper) {
         meuPerfilPageEl = page;
         meuPerfilHelper = helper || H;
+
         ensureMeuPerfilInlineStyle();
         bindMeuPerfilPageEvents(page);
         loadMeuPerfilIntoPage({ refresh: false });
@@ -1541,6 +1616,7 @@
 
     return candidates.find((el) => {
       const text = clean(el.textContent || '').toLowerCase();
+
       const attrs = [
         el.getAttribute('data-settings-page'),
         el.getAttribute('data-page'),
@@ -1566,6 +1642,7 @@
 
       for (const name of methods) {
         if (typeof H[name] !== 'function') continue;
+
         try {
           H[name]('Perfil');
           return true;
@@ -1574,11 +1651,16 @@
     }
 
     const btn = findSettingsProfileButton();
+
     if (btn && !btn.__ZC_OPENING_BY_PERFIL_INSTANCIA__) {
       try {
         btn.__ZC_OPENING_BY_PERFIL_INSTANCIA__ = true;
         btn.click();
-        setTimeout(() => { btn.__ZC_OPENING_BY_PERFIL_INSTANCIA__ = false; }, 100);
+
+        setTimeout(() => {
+          btn.__ZC_OPENING_BY_PERFIL_INSTANCIA__ = false;
+        }, 100);
+
         return true;
       } catch {
         btn.__ZC_OPENING_BY_PERFIL_INSTANCIA__ = false;
@@ -1630,6 +1712,7 @@
 
     const beforeAt = jid.split('@')[0] || '';
     const digits = onlyDigits(beforeAt);
+
     if (digits.length >= 8) return digits;
 
     return '';
@@ -1656,7 +1739,15 @@
       data?.whatsappJid
     )).toLowerCase();
 
-    if (tipo === 'grupo' || tipo === 'group' || tipo === 'g' || jid.includes('@g.us')) return 'grupo';
+    if (
+      tipo === 'grupo' ||
+      tipo === 'group' ||
+      tipo === 'g' ||
+      jid.includes('@g.us')
+    ) {
+      return 'grupo';
+    }
+
     return 'cliente';
   }
 
@@ -1741,6 +1832,7 @@
     );
 
     if (direct) return direct;
+
     return numberFromRemoteJid(normalizeRemote(data));
   }
 
@@ -1845,13 +1937,17 @@
     const img = avatarBox?.querySelector?.('img');
 
     let headerAvatar = '';
-    if (img) headerAvatar = img.currentSrc || img.src || '';
+
+    if (img) {
+      headerAvatar = img.currentSrc || img.src || '';
+    }
 
     if (!headerAvatar && avatarBox) {
       try {
         const style = window.getComputedStyle(avatarBox);
         const bg = style.backgroundImage || '';
         const match = bg.match(/url\(["']?(.+?)["']?\)/i);
+
         if (match) headerAvatar = match[1];
       } catch {}
     }
@@ -1879,6 +1975,7 @@
     ];
 
     let el = null;
+
     for (const selector of selectors) {
       el = qs(selector);
       if (el) break;
@@ -2015,6 +2112,7 @@
     }
 
     urls.push('/api/atendimento/avatar' + buildQuery(params));
+
     if (profile.avatar) urls.push(profile.avatar);
 
     const headerAvatar = objectFromHeader().avatar_url;
@@ -2031,10 +2129,12 @@
     }
 
     abortCtrl = new AbortController();
+
     const urls = buildProfileUrls(profile, force);
 
     for (const url of urls) {
       const data = await fetchJson(url, abortCtrl.signal);
+
       if (!data || typeof data !== 'object') continue;
 
       const payload =
@@ -2047,7 +2147,9 @@
         data.result ||
         data;
 
-      if (payload && typeof payload === 'object') return mergeObjects(payload, data);
+      if (payload && typeof payload === 'object') {
+        return mergeObjects(payload, data);
+      }
     }
 
     return {};
@@ -2055,6 +2157,7 @@
 
   function ensureConversaStyle() {
     let style = document.getElementById('zcPerfilConversaStyle');
+
     if (!style) {
       style = document.createElement('style');
       style.id = 'zcPerfilConversaStyle';
@@ -2072,7 +2175,9 @@
         font-weight:400;
       }
 
-      .zc-perfil-conv-overlay.is-open{ display:block; }
+      .zc-perfil-conv-overlay.is-open{
+        display:block;
+      }
 
       .zc-perfil-conv-drawer{
         position:absolute;
@@ -2091,7 +2196,9 @@
         overflow:hidden;
       }
 
-      .zc-perfil-conv-overlay.is-open .zc-perfil-conv-drawer{ transform:translateX(0); }
+      .zc-perfil-conv-overlay.is-open .zc-perfil-conv-drawer{
+        transform:translateX(0);
+      }
 
       .zc-perfil-conv-head{
         height:64px;
@@ -2118,7 +2225,9 @@
         font-size:18px;
       }
 
-      .zc-perfil-conv-back:hover{ background:rgba(255,255,255,.08); }
+      .zc-perfil-conv-back:hover{
+        background:rgba(255,255,255,.08);
+      }
 
       .zc-perfil-conv-title{
         min-width:0;
@@ -2166,7 +2275,9 @@
         animation:zcPerfilConvSpin .8s linear infinite;
       }
 
-      @keyframes zcPerfilConvSpin{ to{ transform:rotate(360deg); } }
+      @keyframes zcPerfilConvSpin{
+        to{ transform:rotate(360deg); }
+      }
 
       .zc-perfil-conv-hero{
         background:#111b21;
@@ -2285,8 +2396,13 @@
         font:inherit;
       }
 
-      button.zc-perfil-conv-item{ cursor:pointer; }
-      button.zc-perfil-conv-item:hover{ background:rgba(255,255,255,.055); }
+      button.zc-perfil-conv-item{
+        cursor:pointer;
+      }
+
+      button.zc-perfil-conv-item:hover{
+        background:rgba(255,255,255,.055);
+      }
 
       .zc-perfil-conv-item-icon{
         width:24px;
@@ -2337,7 +2453,9 @@
       }
 
       .zc-perfil-conv-toast.is-on,
-      .zc-perfil-conv-toast.show{ opacity:1; }
+      .zc-perfil-conv-toast.show{
+        opacity:1;
+      }
     `;
   }
 
@@ -2429,6 +2547,7 @@
 
       <section class="zc-perfil-conv-section">
         <p class="zc-perfil-conv-label">Recado</p>
+
         <div class="zc-perfil-conv-row">
           <div class="zc-perfil-conv-value">${escapeHtml(about)}</div>
         </div>
@@ -2436,8 +2555,10 @@
 
       <section class="zc-perfil-conv-section">
         <p class="zc-perfil-conv-label">Telefone</p>
+
         <div class="zc-perfil-conv-row">
           <div class="zc-perfil-conv-value">${escapeHtml(phone)}</div>
+
           <button type="button" class="zc-perfil-conv-icon-btn" id="zcPerfilConversaCopyPhone" title="Copiar telefone" aria-label="Copiar telefone">
             <i class="fa-regular fa-copy"></i>
           </button>
@@ -2446,7 +2567,10 @@
 
       <div class="zc-perfil-conv-list">
         <button type="button" class="zc-perfil-conv-item" id="zcPerfilConversaRefresh">
-          <span class="zc-perfil-conv-item-icon"><i class="fa-solid fa-rotate-right"></i></span>
+          <span class="zc-perfil-conv-item-icon">
+            <i class="fa-solid fa-rotate-right"></i>
+          </span>
+
           <span class="zc-perfil-conv-item-main">
             <strong>Atualizar dados do WhatsApp</strong>
             <span>Busca novamente foto, nome e recado usando a instância desta conversa.</span>
@@ -2454,7 +2578,10 @@
         </button>
 
         <div class="zc-perfil-conv-item">
-          <span class="zc-perfil-conv-item-icon"><i class="fa-solid fa-mobile-screen"></i></span>
+          <span class="zc-perfil-conv-item-icon">
+            <i class="fa-solid fa-mobile-screen"></i>
+          </span>
+
           <span class="zc-perfil-conv-item-main">
             <strong>Instância</strong>
             <span>${escapeHtml(instance)}</span>
@@ -2462,7 +2589,10 @@
         </div>
 
         <div class="zc-perfil-conv-item">
-          <span class="zc-perfil-conv-item-icon"><i class="fa-solid fa-fingerprint"></i></span>
+          <span class="zc-perfil-conv-item-icon">
+            <i class="fa-solid fa-fingerprint"></i>
+          </span>
+
           <span class="zc-perfil-conv-item-main">
             <strong>Identificador WhatsApp</strong>
             <span>${escapeHtml(jid)}</span>
@@ -2500,11 +2630,12 @@
 
     overlay.classList.add('is-open');
     overlay.setAttribute('aria-hidden', 'false');
-    lockPage(true);
 
+    lockPage(true);
     renderConversaLoading();
 
     const baseData = getCurrentConversationData();
+
     let apiData = {};
 
     try {
@@ -2611,7 +2742,6 @@
       const isPerfilLink = raw === '/perfil' || raw === '/perfil.html' || raw === 'perfil';
 
       if (!isPerfilLink && !shouldOpenMeuPerfilFromClick(ev.target)) return;
-
       if (targetEl.__ZC_OPENING_BY_PERFIL_INSTANCIA__) return;
 
       ev.preventDefault();
@@ -2653,7 +2783,9 @@
 
     events.forEach(function (eventName) {
       window.addEventListener(eventName, function (ev) {
-        if (ev && ev.detail && typeof ev.detail === 'object') rememberConversation(ev.detail);
+        if (ev && ev.detail && typeof ev.detail === 'object') {
+          rememberConversation(ev.detail);
+        }
       });
     });
 

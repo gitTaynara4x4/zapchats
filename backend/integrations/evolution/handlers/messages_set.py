@@ -26,7 +26,10 @@ from ..utils.jid_utils import is_lid_jid, jid_strip_device
 from ..utils.log_utils import LOG, _log_ctx, _short
 from ..utils.phone_utils import _resolve_counterparty_num_1to1, formatar_telefone_br, remote_to_num
 from ..utils.time_utils import _iso_utc, _now_utc, _server_ts_ms, _to_dt_utc
-from ._state import _HISTORY_DONE_AT
+from ._state import (
+    _HISTORY_DONE_AT,
+    history_mark_messages_set_started,
+)
 from .shared import (
     EvoEvent,
     _carimbar_inst,
@@ -77,17 +80,37 @@ def _float_env_value(name: str, default: float) -> float:
 
 ENABLE_MESSAGES_SET = (os.getenv("ENABLE_MESSAGES_SET", "true").lower() == "true")
 
-# Histórico
+# =============================================================================
+# Histórico / janela de importação
+# =============================================================================
+#
+# REGRA NOVA:
+# - O período escolhido no painel manda.
+# - HISTORY_DISABLE_TIME_FILTER não pode ignorar 24h/7d/30d.
+# - Sem filtro só quando historico_restaurar for all/full/tudo/disponivel.
+# =============================================================================
+
 HISTORY_LIMIT_HOURS = int(os.getenv("HISTORY_LIMIT_HOURS", "0") or "0")
+
+# Mantido por compatibilidade, mas NÃO desativa filtro quando o usuário escolhe
+# 24h, 7d ou 30d.
 HISTORY_DISABLE_TIME_FILTER = (
     os.getenv("HISTORY_DISABLE_TIME_FILTER", "false").strip().lower()
     in {"1", "true", "yes", "sim", "on"}
 )
+
 HISTORY_IGNORE_AFTER_DONE_MIN = int(os.getenv("HISTORY_IGNORE_AFTER_DONE_MIN", "15") or "15")
-ALLOW_HISTORY_7D = (os.getenv("ALLOW_HISTORY_7D", "false").lower() == "true")
+
+# Agora 7d e 30d ficam liberados por padrão porque o front oferece essas opções.
+ALLOW_HISTORY_7D = _bool_env_value("ALLOW_HISTORY_7D", True)
+ALLOW_HISTORY_30D = _bool_env_value("ALLOW_HISTORY_30D", True)
+
 HISTORY_MAX_IMPORT = int(os.getenv("HISTORY_MAX_IMPORT", "5000") or "5000")
 HISTORY_BATCH_COMMIT = int(os.getenv("HISTORY_BATCH_COMMIT", "250") or "250")
-HISTORY_SLEEP_EVERY = int(os.getenv("HISTORY_SLEEP_EVERY", "500") or "500")
+
+# Menor por padrão para o backend respirar mais durante importação.
+HISTORY_SLEEP_EVERY = int(os.getenv("HISTORY_SLEEP_EVERY", "50") or "50")
+
 DISABLE_MEDIA_ON_HISTORY = (os.getenv("DISABLE_MEDIA_ON_HISTORY", "true").lower() == "true")
 
 HISTORY_MARK_DONE_IN_DB = (
@@ -106,8 +129,9 @@ HISTORY_FORCE_BACKFILL_AFTER_IMPORT = _bool_env_value("EVO_HISTORY_FORCE_BACKFIL
 HISTORY_IMPORT_UNRESOLVED_LID = _bool_env_value("EVO_HISTORY_IMPORT_UNRESOLVED_LID", False)
 
 # Log/diagnóstico
+# Deixe false em produção para não travar o terminal/sistema com logs demais.
 HISTORY_TRACE_ITEMS = (
-    os.getenv("HISTORY_TRACE_ITEMS", "true").strip().lower()
+    os.getenv("HISTORY_TRACE_ITEMS", "false").strip().lower()
     in {"1", "true", "yes", "sim", "on"}
 )
 HISTORY_TRACE_FIRST_N = int(os.getenv("HISTORY_TRACE_FIRST_N", "20") or "20")
@@ -116,6 +140,10 @@ HISTORY_TRACE_EVERY = int(os.getenv("HISTORY_TRACE_EVERY", "100") or "100")
 HISTORY_RUNTIME_LOCK_WAIT_SEC = float(os.getenv("HISTORY_RUNTIME_LOCK_WAIT_SEC", "120") or "120")
 
 _HISTORY_RUNTIME_LOCKS: dict[tuple[int, int], asyncio.Lock] = {}
+
+# Guarda a opção usada quando marcamos DONE.
+# Serve para o caso de chegar pacote extra logo depois com historico_restaurar já none.
+_HISTORY_DONE_OPTION: dict[str, str] = {}
 
 
 def _is_deadlock_error(e: Exception) -> bool:
@@ -154,6 +182,40 @@ def _telefone_invalido_para_1to1(telefone: Any) -> bool:
         return True
 
     return False
+
+
+def _normalize_historico_opcao(raw: str | None) -> str:
+    h = str(raw or "none").strip().lower()
+
+    if h in {"", "none", "no", "nao", "não", "off", "false", "0"}:
+        return "none"
+
+    if h in {"24h", "24", "1d", "1dia", "1_dia", "dia", "ultimas_24h", "últimas_24h"}:
+        return "24h"
+
+    if h in {"7d", "7", "7dias", "7_dias", "semana", "1w", "week"}:
+        return "7d"
+
+    if h in {
+        "30d",
+        "30",
+        "30dias",
+        "30_dias",
+        "1m",
+        "1mes",
+        "1_mes",
+        "mes",
+        "mês",
+        "month",
+        "30days",
+    }:
+        return "30d"
+
+    if h in {"all", "full", "tudo", "disponivel", "disponível", "available"}:
+        return "all"
+
+    # Segurança: opção desconhecida não importa tudo.
+    return "none"
 
 
 def _get_runtime_lock(empresa_id: int, instancia_id: int) -> asyncio.Lock:
@@ -208,31 +270,37 @@ def _release_runtime_lock(lock: asyncio.Lock | None, empresa_id: int, instancia_
 
 
 def _historico_sem_filtro_tempo(historico_opcao: str | None) -> bool:
-    h = str(historico_opcao or "none").strip().lower()
+    h = _normalize_historico_opcao(historico_opcao)
 
-    if HISTORY_DISABLE_TIME_FILTER:
+    # Sem filtro somente se o usuário/operação pediu explicitamente tudo.
+    if h == "all":
         return True
 
-    if h in {"all", "full", "tudo", "disponivel", "available"}:
-        return True
-
+    # IMPORTANTE:
+    # Mesmo se HISTORY_DISABLE_TIME_FILTER=true no .env, não deixamos isso
+    # passar por cima de 24h/7d/30d. Essa era a causa de importar tudo.
     return False
 
 
 def _calcular_limite_tempo(historico_opcao: str | None):
-    h = str(historico_opcao or "none").strip().lower()
+    h = _normalize_historico_opcao(historico_opcao)
+
+    if h == "24h":
+        return _now_utc() - timedelta(hours=24)
+
+    if h == "7d":
+        return _now_utc() - timedelta(days=7)
+
+    if h == "30d":
+        return _now_utc() - timedelta(days=30)
 
     if _historico_sem_filtro_tempo(h):
         return None
 
-    if HISTORY_LIMIT_HOURS > 0:
+    # Fallback legado somente para opção desconhecida/custom.
+    # Como normalizamos opção desconhecida para none, isso praticamente não entra.
+    if HISTORY_LIMIT_HOURS > 0 and h not in {"none", "24h", "7d", "30d", "all"}:
         return _now_utc() - timedelta(hours=HISTORY_LIMIT_HOURS)
-
-    if h == "24h":
-        return _now_utc() - timedelta(days=1)
-
-    if h == "7d":
-        return _now_utc() - timedelta(days=7)
 
     return None
 
@@ -1049,15 +1117,16 @@ def _mark_history_done_in_db(
     skips: int,
     erros: int,
     lid_pending_skips: int,
+    time_window_skips: int,
 ) -> bool:
     """
     Marca histórico como concluído.
 
-    CORREÇÃO PRINCIPAL:
-    - Se não importou nada porque estava tudo como LID pendente,
-      NÃO muda historico_restaurar para none.
-    - Assim, quando o contacts_ready chegar e vier o pacote grande depois,
-      o backend ainda pode processar.
+    Regras:
+    - Se salvou mensagem ou só encontrou duplicadas, pode concluir.
+    - Se não salvou nada porque tudo era LID pendente, NÃO conclui.
+    - Se não salvou nada porque tudo estava fora da janela escolhida, conclui.
+      Exemplo: usuário escolheu 24h e todas as mensagens eram antigas.
     """
     if not HISTORY_MARK_DONE_IN_DB:
         LOG(
@@ -1066,7 +1135,7 @@ def _mark_history_done_in_db(
         )
         return False
 
-    h = str(historico_opcao or "none").strip().lower()
+    h = _normalize_historico_opcao(historico_opcao)
 
     if h == "none":
         return False
@@ -1078,25 +1147,37 @@ def _mark_history_done_in_db(
         LOG(
             f"[HIST][done-db] não marquei como concluído porque houve erros "
             f"inst={inst_id} total={total} novas={novas} duplicadas={duplicadas} "
-            f"skips={skips} erros={erros}"
+            f"skips={skips} lid_pending_skips={lid_pending_skips} "
+            f"time_window_skips={time_window_skips} erros={erros}"
         )
         return False
 
     if int(novas or 0) <= 0 and int(duplicadas or 0) <= 0:
-        LOG(
-            f"[HIST][done-db] NÃO marquei como concluído porque não importou nenhuma mensagem "
-            f"inst={inst_id} total={total} novas={novas} duplicadas={duplicadas} "
-            f"skips={skips} lid_pending_skips={lid_pending_skips}. "
-            "Vou manter historico_restaurar pendente para aceitar pacote maior depois."
-        )
-        return False
+        if int(lid_pending_skips or 0) > 0:
+            LOG(
+                f"[HIST][done-db] NÃO marquei como concluído porque não importou nenhuma mensagem "
+                f"e houve LID pendente. inst={inst_id} total={total} novas={novas} "
+                f"duplicadas={duplicadas} skips={skips} lid_pending_skips={lid_pending_skips} "
+                f"time_window_skips={time_window_skips}. "
+                "Vou manter historico_restaurar pendente para aceitar pacote maior depois."
+            )
+            return False
 
-    if int(lid_pending_skips or 0) > 0 and int(novas or 0) <= 0:
-        LOG(
-            f"[HIST][done-db] NÃO marquei como concluído porque só houve LID pendente "
-            f"inst={inst_id} total={total} lid_pending_skips={lid_pending_skips}"
-        )
-        return False
+        if int(time_window_skips or 0) > 0 and int(time_window_skips or 0) >= int(skips or 0):
+            LOG(
+                f"[HIST][done-db] vou marcar como concluído porque o pacote foi processado "
+                f"e todas as mensagens estavam fora da janela escolhida. "
+                f"inst={inst_id} historico={h} total={total} "
+                f"time_window_skips={time_window_skips}"
+            )
+        else:
+            LOG(
+                f"[HIST][done-db] NÃO marquei como concluído porque não importou nenhuma mensagem "
+                f"inst={inst_id} total={total} novas={novas} duplicadas={duplicadas} "
+                f"skips={skips} lid_pending_skips={lid_pending_skips} "
+                f"time_window_skips={time_window_skips}."
+            )
+            return False
 
     try:
         row = (
@@ -1141,7 +1222,9 @@ def _mark_history_done_in_db(
         LOG(
             f"[HIST][done-db] histórico concluído e historico_restaurar=none "
             f"inst={inst_id} empresa_id={empresa_id} instancia_id={instancia_id} "
-            f"total={total} novas={novas} duplicadas={duplicadas} skips={skips}"
+            f"historico={h} total={total} novas={novas} duplicadas={duplicadas} "
+            f"skips={skips} lid_pending_skips={lid_pending_skips} "
+            f"time_window_skips={time_window_skips}"
         )
 
         return True
@@ -1226,27 +1309,49 @@ async def on_messages_set(inst_id: str, data):
 
         empresa_id = int(inst.empresa_id)
         instancia_id = int(inst.id)
-        historico_opcao = (getattr(inst, "historico_restaurar", None) or "none").lower()
+        historico_original = getattr(inst, "historico_restaurar", None)
+        historico_opcao = _normalize_historico_opcao(historico_original)
 
         if historico_opcao == "7d" and not ALLOW_HISTORY_7D:
             _log_ctx("[HIST] downgrade 7d→24h", inst=inst_id)
             historico_opcao = "24h"
 
+        if historico_opcao == "30d" and not ALLOW_HISTORY_30D:
+            if ALLOW_HISTORY_7D:
+                _log_ctx("[HIST] downgrade 30d→7d", inst=inst_id)
+                historico_opcao = "7d"
+            else:
+                _log_ctx("[HIST] downgrade 30d→24h", inst=inst_id)
+                historico_opcao = "24h"
+
         mensagens = extract_messages_any_shape(data)
         total = len(mensagens)
+
+        # ============================================================
+        # Watchdog:
+        # marca que o MESSAGES_SET chegou para esta instância.
+        # O connection.py vai consultar isso para saber se precisa reaplicar
+        # syncFullHistory/rabbit quando a Evolution não entrega histórico.
+        # ============================================================
+        history_mark_messages_set_started(inst_id, total=total)
+        LOG(f"[HISTORY][watchdog] MESSAGES_SET recebido inst={inst_id} total={total}")
 
         _log_ctx(
             "[HIST] start",
             inst=inst_id,
             empresa_id=empresa_id,
             instancia_id=instancia_id,
+            historico_original=historico_original,
             historico_opcao=historico_opcao,
             total=total,
             HISTORY_DISABLE_TIME_FILTER=HISTORY_DISABLE_TIME_FILTER,
             HISTORY_LIMIT_HOURS=HISTORY_LIMIT_HOURS,
+            ALLOW_HISTORY_7D=ALLOW_HISTORY_7D,
+            ALLOW_HISTORY_30D=ALLOW_HISTORY_30D,
             DISABLE_MEDIA_ON_HISTORY=DISABLE_MEDIA_ON_HISTORY,
             HISTORY_MAX_IMPORT=HISTORY_MAX_IMPORT,
             HISTORY_BATCH_COMMIT=HISTORY_BATCH_COMMIT,
+            HISTORY_SLEEP_EVERY=HISTORY_SLEEP_EVERY,
             HISTORY_RUNTIME_LOCK_WAIT_SEC=HISTORY_RUNTIME_LOCK_WAIT_SEC,
             HISTORY_MARK_DONE_IN_DB=HISTORY_MARK_DONE_IN_DB,
             CONTACTS_READY_WAIT_ENABLED=CONTACTS_READY_WAIT_ENABLED,
@@ -1255,6 +1360,13 @@ async def on_messages_set(inst_id: str, data):
             HISTORY_IMPORT_UNRESOLVED_LID=HISTORY_IMPORT_UNRESOLVED_LID,
             data_type=type(data).__name__,
         )
+
+        if HISTORY_DISABLE_TIME_FILTER and historico_opcao in {"24h", "7d", "30d"}:
+            LOG(
+                f"[HIST][janela] HISTORY_DISABLE_TIME_FILTER=true está no env, "
+                f"mas será ignorado porque o período escolhido foi {historico_opcao}. "
+                "O filtro por data será aplicado normalmente."
+            )
 
         if not mensagens:
             LOG(
@@ -1286,10 +1398,13 @@ async def on_messages_set(inst_id: str, data):
             return
 
         if historico_opcao == "none" and done_recente:
+            historico_recente = _normalize_historico_opcao(_HISTORY_DONE_OPTION.get(inst_id) or "24h")
             LOG(
                 f"[MESSAGES_SET] historico_restaurar=none, mas DONE é recente; "
-                f"vou processar pacote real mesmo assim inst={inst_id} total={total}"
+                f"vou processar pacote extra usando janela anterior={historico_recente} "
+                f"inst={inst_id} total={total}"
             )
+            historico_opcao = historico_recente
 
         await _wait_contacts_ready_before_history(
             inst_id=inst_id,
@@ -1316,6 +1431,7 @@ async def on_messages_set(inst_id: str, data):
             skips = 0
             erros = 0
             lid_pending_skips = 0
+            time_window_skips = 0
             last_commit_novas = 0
             me_num = _me_number_by_inst(inst)
             cap = max(1, int(HISTORY_MAX_IMPORT))
@@ -1332,12 +1448,18 @@ async def on_messages_set(inst_id: str, data):
             if limite_tempo is None:
                 _log_ctx(
                     "[HIST] janela/limites",
+                    historico=historico_opcao,
                     limite_utc="SEM_FILTRO_DE_TEMPO",
                     cap=cap,
                     detalhe="aceitando tudo que a Evolution mandar",
                 )
             else:
-                _log_ctx("[HIST] janela/limites", limite_utc=_iso_utc(limite_tempo), cap=cap)
+                _log_ctx(
+                    "[HIST] janela/limites",
+                    historico=historico_opcao,
+                    limite_utc=_iso_utc(limite_tempo),
+                    cap=cap,
+                )
 
             try:
                 RECENT_SEC = int(os.getenv("HISTORY_RECENT_WS_SEC", "120") or "120")
@@ -1370,7 +1492,16 @@ async def on_messages_set(inst_id: str, data):
 
                 if limite_tempo is not None and ts_msg < limite_tempo:
                     skips += 1
-                    _log_ctx("[HIST][skip] fora da janela", idx=idx, msg_id=msg_id, ts=_iso_utc(ts_msg))
+                    time_window_skips += 1
+
+                    _log_ctx(
+                        "[HIST][skip] fora da janela escolhida",
+                        idx=idx,
+                        msg_id=msg_id,
+                        historico=historico_opcao,
+                        ts=_iso_utc(ts_msg),
+                        limite_utc=_iso_utc(limite_tempo),
+                    )
                     continue
 
                 remote_jid = _resolve_remote_jid_history(
@@ -1813,6 +1944,7 @@ async def on_messages_set(inst_id: str, data):
                         duplicadas=duplicadas,
                         skips=skips,
                         lid_pending_skips=lid_pending_skips,
+                        time_window_skips=time_window_skips,
                         erros=erros,
                     )
 
@@ -1844,6 +1976,7 @@ async def on_messages_set(inst_id: str, data):
                     duplicadas=duplicadas,
                     skips=skips,
                     lid_pending_skips=lid_pending_skips,
+                    time_window_skips=time_window_skips,
                     erros=erros,
                 )
             except Exception as e:
@@ -1868,6 +2001,7 @@ async def on_messages_set(inst_id: str, data):
                 skips=skips,
                 erros=erros,
                 lid_pending_skips=lid_pending_skips,
+                time_window_skips=time_window_skips,
             )
 
             post_backfill = _force_contacts_backfill_after_history(
@@ -1897,12 +2031,15 @@ async def on_messages_set(inst_id: str, data):
 
             if marked_done and historico_opcao != "none":
                 _HISTORY_DONE_AT[inst_id] = _now_utc().timestamp()
+                _HISTORY_DONE_OPTION[inst_id] = historico_opcao
 
             LOG(
                 f"[MESSAGES_SET] finalizado inst={inst_id} "
                 f"empresa_id={empresa_id} instancia_id={instancia_id} "
-                f"total={total} novas={novas} duplicadas={duplicadas} skips={skips} "
-                f"lid_pending_skips={lid_pending_skips} erros={erros} "
+                f"historico={historico_opcao} total={total} novas={novas} "
+                f"duplicadas={duplicadas} skips={skips} "
+                f"lid_pending_skips={lid_pending_skips} "
+                f"time_window_skips={time_window_skips} erros={erros} "
                 f"marked_done={marked_done} post_backfill={post_backfill}"
             )
 
