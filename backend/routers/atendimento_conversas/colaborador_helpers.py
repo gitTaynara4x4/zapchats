@@ -1,4 +1,4 @@
-#backend\routers\atendimento_conversas\colaborador_helpers.py
+# backend/routers/atendimento_conversas/colaborador_helpers.py
 from __future__ import annotations
 
 from typing import Optional, List, Any
@@ -76,11 +76,14 @@ def _is_admin_identity(identity: Any) -> bool:
     if bool(_id_get(identity, "is_admin")):
         return True
 
+    if bool(_id_get(identity, "admin")):
+        return True
+
     role = str(_id_get(identity, "role") or "").strip().lower()
     if role == "admin":
         return True
 
-    kind = str(_id_get(identity, "kind") or "").strip().lower()
+    kind = str(_id_get(identity, "kind") or _id_get(identity, "tipo") or "").strip().lower()
     if kind == "usuario":
         return True
 
@@ -89,6 +92,22 @@ def _is_admin_identity(identity: Any) -> bool:
         maybe = _to_int(sub)
         if maybe:
             return True
+
+    perms = _id_get(identity, "permissoes") or _id_get(identity, "permissions") or []
+    if isinstance(perms, dict):
+        perms = [k for k, v in perms.items() if v]
+
+    perms_lower = set(str(p).strip().lower() for p in (perms or []))
+    if any(
+        p in perms_lower
+        for p in (
+            "admin",
+            "root",
+            "clientes.gerenciar",
+            "atendimento.gerenciar",
+        )
+    ):
+        return True
 
     return False
 
@@ -258,12 +277,101 @@ def _all_empresa_instancias_ids(
         .order_by(models.EmpresaInstancia.id.asc())
         .all()
     )
+
     out: List[int] = []
+
     for row in rows:
         iid = _to_int(row[0] if isinstance(row, tuple) else getattr(row, "id", None))
         if iid:
             out.append(int(iid))
+
     return out
+
+
+def _all_empresa_departamentos_ids(
+    db: Session,
+    *,
+    empresa_id: int,
+) -> List[int]:
+    if not hasattr(models, "Departamento"):
+        return []
+
+    rows = (
+        db.query(models.Departamento.id)
+        .filter(models.Departamento.empresa_id == int(empresa_id))
+        .order_by(models.Departamento.id.asc())
+        .all()
+    )
+
+    out: List[int] = []
+
+    for row in rows:
+        dep_id = _to_int(row[0] if isinstance(row, tuple) else getattr(row, "id", None))
+        if dep_id:
+            out.append(int(dep_id))
+
+    return out
+
+
+def _sync_admin_departamentos_membros(
+    db: Session,
+    *,
+    empresa_id: int,
+    colaborador_id: int,
+) -> None:
+    """
+    Para o admin criado automaticamente como colaborador,
+    garante vínculo com todos os departamentos.
+
+    Mesmo que admin normalmente tenha bypass, isso ajuda em telas antigas
+    que validam direto pelo colaborador_id.
+    """
+    if not hasattr(models, "DepartamentoMembro"):
+        return
+
+    if not _table_exists(db, "departamentos_membros"):
+        return
+
+    dep_ids = _all_empresa_departamentos_ids(db, empresa_id=int(empresa_id))
+    if not dep_ids:
+        return
+
+    existing_rows = (
+        db.query(models.DepartamentoMembro.departamento_id)
+        .filter(
+            models.DepartamentoMembro.empresa_id == int(empresa_id),
+            models.DepartamentoMembro.colaborador_id == int(colaborador_id),
+        )
+        .all()
+    )
+
+    existing = {
+        int(r[0])
+        for r in existing_rows
+        if r and r[0] is not None
+    }
+
+    first = True
+
+    for dep_id in dep_ids:
+        if int(dep_id) in existing:
+            continue
+
+        db.add(
+            models.DepartamentoMembro(
+                empresa_id=int(empresa_id),
+                departamento_id=int(dep_id),
+                colaborador_id=int(colaborador_id),
+                role="member",
+                is_primary=bool(first),
+            )
+        )
+        first = False
+
+    try:
+        db.flush()
+    except Exception:
+        pass
 
 
 def _ensure_admin_identity_as_colaborador(
@@ -295,6 +403,7 @@ def _ensure_admin_identity_as_colaborador(
         identity=identity,
         empresa_id=int(empresa_id),
     )
+
     if existing:
         updated = False
 
@@ -318,6 +427,12 @@ def _ensure_admin_identity_as_colaborador(
                 db.flush()
             except Exception:
                 pass
+
+        _sync_admin_departamentos_membros(
+            db,
+            empresa_id=int(empresa_id),
+            colaborador_id=int(existing.id),
+        )
 
         return existing
 
@@ -367,7 +482,13 @@ def _ensure_admin_identity_as_colaborador(
         identity=identity,
         empresa_id=int(empresa_id),
     )
+
     if row:
+        _sync_admin_departamentos_membros(
+            db,
+            empresa_id=int(empresa_id),
+            colaborador_id=int(row.id),
+        )
         return row
 
     # último fallback: tenta achar pelo usuario_id criado
@@ -380,7 +501,13 @@ def _ensure_admin_identity_as_colaborador(
             )
             .first()
         )
+
         if row:
+            _sync_admin_departamentos_membros(
+                db,
+                empresa_id=int(empresa_id),
+                colaborador_id=int(row.id),
+            )
             return row
 
     return None
@@ -473,31 +600,227 @@ def _latest_atendimento_for_cliente_instancia(
     return q.order_by(models.Atendimento.id.desc()).first()
 
 
+def _expand_departamento_ids_with_descendants(
+    db: Session,
+    *,
+    empresa_id: int,
+    departamento_ids: List[int],
+) -> List[int]:
+    """
+    Modelo 2:
+    se o colaborador atende um departamento pai, libera também os filhos.
+    """
+    base: List[int] = []
+
+    for raw in departamento_ids or []:
+        dep_id = _to_int(raw)
+        if dep_id and dep_id not in base:
+            base.append(int(dep_id))
+
+    if not base:
+        return []
+
+    if not hasattr(models, "Departamento"):
+        return base
+
+    if not hasattr(models.Departamento, "parent_id"):
+        return base
+
+    try:
+        rows = (
+            db.query(models.Departamento.id, models.Departamento.parent_id)
+            .filter(models.Departamento.empresa_id == int(empresa_id))
+            .all()
+        )
+    except Exception:
+        return base
+
+    children_by_parent: dict[int, list[int]] = {}
+
+    for dep_id_raw, parent_id_raw in rows:
+        dep_id = _to_int(dep_id_raw)
+        parent_id = _to_int(parent_id_raw)
+
+        if dep_id is None or parent_id is None:
+            continue
+
+        children_by_parent.setdefault(int(parent_id), []).append(int(dep_id))
+
+    out: List[int] = []
+    queue: List[int] = list(base)
+
+    while queue:
+        dep_id = queue.pop(0)
+
+        if dep_id in out:
+            continue
+
+        out.append(int(dep_id))
+
+        for child_id in children_by_parent.get(int(dep_id), []):
+            if child_id not in out:
+                queue.append(int(child_id))
+
+    return out
+
+
+def _fallback_departamentos_do_colaborador_por_setor(
+    db: Session,
+    *,
+    empresa_id: int,
+    colaborador_id: int,
+) -> List[int]:
+    """
+    Compatibilidade com dados antigos.
+
+    Antes do Modelo 2, muitos colaboradores tinham apenas setor_id.
+    Agora o correto é departamentos_membros.
+    """
+    colab = (
+        db.query(models.Colaborador)
+        .filter(
+            models.Colaborador.empresa_id == int(empresa_id),
+            models.Colaborador.id == int(colaborador_id),
+        )
+        .first()
+    )
+
+    if not colab:
+        return []
+
+    setor_id = _to_int(getattr(colab, "setor_id", None))
+    if not setor_id:
+        return []
+
+    out: List[int] = []
+
+    dep_direct = (
+        db.query(models.Departamento.id)
+        .filter(
+            models.Departamento.empresa_id == int(empresa_id),
+            models.Departamento.id == int(setor_id),
+        )
+        .first()
+    )
+
+    if dep_direct and dep_direct[0] is not None:
+        out.append(int(dep_direct[0]))
+
+    setor_nome = None
+
+    if hasattr(models, "Setor"):
+        try:
+            setor = (
+                db.query(models.Setor)
+                .filter(
+                    models.Setor.empresa_id == int(empresa_id),
+                    models.Setor.id == int(setor_id),
+                )
+                .first()
+            )
+            setor_nome = getattr(setor, "nome", None) if setor else None
+        except Exception:
+            setor_nome = None
+
+    if setor_nome:
+        dep_by_name = (
+            db.query(models.Departamento.id)
+            .filter(
+                models.Departamento.empresa_id == int(empresa_id),
+                func.lower(func.trim(models.Departamento.nome)) == func.lower(func.trim(str(setor_nome))),
+            )
+            .first()
+        )
+
+        if dep_by_name and dep_by_name[0] is not None:
+            dep_id = int(dep_by_name[0])
+            if dep_id not in out:
+                out.append(dep_id)
+
+    return out
+
+
+def _departamentos_permitidos_para_colaborador(
+    db: Session,
+    *,
+    colaborador_id: int,
+    empresa_id: int,
+) -> List[int]:
+    """
+    Retorna departamentos do colaborador pelo Modelo 2.
+
+    Fonte principal:
+      departamentos_membros
+
+    Fallback:
+      colaboradores.setor_id
+    """
+    if not hasattr(models, "DepartamentoMembro"):
+        return []
+
+    if not _table_exists(db, "departamentos_membros"):
+        return []
+
+    rows = (
+        db.query(models.DepartamentoMembro.departamento_id)
+        .filter(
+            models.DepartamentoMembro.empresa_id == int(empresa_id),
+            models.DepartamentoMembro.colaborador_id == int(colaborador_id),
+        )
+        .order_by(
+            models.DepartamentoMembro.is_primary.desc(),
+            models.DepartamentoMembro.departamento_id.asc(),
+        )
+        .all()
+    )
+
+    deps: List[int] = []
+
+    for row in rows:
+        dep_id = _to_int(row[0] if isinstance(row, tuple) else getattr(row, "departamento_id", None))
+        if dep_id and dep_id not in deps:
+            deps.append(int(dep_id))
+
+    if not deps:
+        deps = _fallback_departamentos_do_colaborador_por_setor(
+            db,
+            empresa_id=int(empresa_id),
+            colaborador_id=int(colaborador_id),
+        )
+
+    return _expand_departamento_ids_with_descendants(
+        db,
+        empresa_id=int(empresa_id),
+        departamento_ids=deps,
+    )
+
+
 def _assert_departamento_acl_for_row(
     *,
     allowed_dep_ids: Optional[List[int]],
     departamento_id: Optional[int],
 ) -> None:
     """
-    Regras:
-    - None => admin/usuario master -> sem filtro
-    - []   => colaborador sem membership -> só pode ver SEM departamento
-    - [..] => pode ver depto dele + SEM departamento
+    Modelo 2:
+
+    - None => admin/usuário master -> sem filtro
+    - []   => colaborador sem departamento permitido
+    - [..] => departamentos permitidos
+
+    Conversa SEM departamento não bloqueia aqui.
+    Se tiver departamento, precisa estar permitido.
     """
     if allowed_dep_ids is None:
         return
 
-    if not allowed_dep_ids:
-        if departamento_id is None:
-            return
-
-        raise HTTPException(
-            status_code=403,
-            detail="Departamento não permitido para este colaborador",
-        )
-
     if departamento_id is None:
         return
+
+    if not allowed_dep_ids:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem departamentos permitidos para este colaborador",
+        )
 
     if int(departamento_id) not in set(int(x) for x in allowed_dep_ids):
         raise HTTPException(
@@ -525,8 +848,15 @@ def _instancia_permitida_para_colaborador(
     if not colab:
         return False
 
+    # Colaborador admin/dono local passa.
+    cargo = str(getattr(colab, "cargo", "") or "").strip().lower()
+    if cargo == "admin":
+        return True
+
     raw = getattr(colab, "instancias_ver", None)
 
+    # Regra atual do seu sistema:
+    # sem instancias_ver = sem acesso específico.
     if not raw:
         return False
 
@@ -545,23 +875,42 @@ def _departamento_permitido_para_colaborador(
     empresa_id: int,
     departamento_id: Optional[int],
 ) -> bool:
+    """
+    Modelo 2:
+    - departamento_id None => permitido.
+    - departamento preenchido => precisa existir em departamentos_membros.
+    - departamento pai libera filhos.
+    - fallback por setor_id antigo.
+    """
     if departamento_id is None:
         return True
 
-    if not _table_exists(db, "departamentos_membros"):
-        return True
-
-    row = (
-        db.query(models.DepartamentoMembro.id)
+    colab = (
+        db.query(models.Colaborador)
         .filter(
-            models.DepartamentoMembro.empresa_id == int(empresa_id),
-            models.DepartamentoMembro.colaborador_id == int(colaborador_id),
-            models.DepartamentoMembro.departamento_id == int(departamento_id),
+            models.Colaborador.id == int(colaborador_id),
+            models.Colaborador.empresa_id == int(empresa_id),
         )
         .first()
     )
 
-    return bool(row)
+    if not colab:
+        return False
+
+    cargo = str(getattr(colab, "cargo", "") or "").strip().lower()
+    if cargo == "admin":
+        return True
+
+    allowed = _departamentos_permitidos_para_colaborador(
+        db,
+        colaborador_id=int(colaborador_id),
+        empresa_id=int(empresa_id),
+    )
+
+    if not allowed:
+        return False
+
+    return int(departamento_id) in set(int(x) for x in allowed)
 
 
 def _nome_colaborador(

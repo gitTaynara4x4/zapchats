@@ -141,13 +141,38 @@ export function ensureInstsSection(){
       <dd>
         <div id="insts-wrap" class="fieldbox">
           <div class="inst-title-line">
-            <span>Quais WhatsApps este atendente pode acessar?</span>
-            <span class="muted">(se não marcar nenhum, ele vê todos)</span>
+            <span>WhatsApps que este colaborador pode acessar</span>
+            <span class="muted">Controle quais números aparecem para ele no atendimento.</span>
+          </div>
+
+          <div
+            class="muted"
+            style="
+              display:grid;
+              gap:.35rem;
+              margin:.55rem 0 .75rem;
+              line-height:1.45;
+              font-size:.92rem;
+            "
+          >
+            <div>
+              Marque os WhatsApps que este colaborador poderá visualizar e atender.
+            </div>
+
+            <div>
+              Se uma conversa ainda estiver sem setor, ela aparece como
+              <b>Entrada geral</b> para quem tem acesso ao WhatsApp onde a mensagem chegou.
+            </div>
+
+            <div>
+              Se nenhum WhatsApp for marcado, este colaborador ficará com acesso a
+              <b>todos os WhatsApps</b> da empresa. Para restringir, marque apenas os permitidos.
+            </div>
           </div>
 
           <div id="inst-actions" style="display:none">
             <button type="button" id="inst-select-all" class="btn btn-ghost">Selecionar todos</button>
-            <button type="button" id="inst-clear" class="btn btn-ghost">Limpar</button>
+            <button type="button" id="inst-clear" class="btn btn-ghost">Limpar seleção</button>
           </div>
 
           <div id="e-insts" style="display:none"></div>
@@ -162,10 +187,13 @@ export function ensureInstsSection(){
       dPerms?.parentElement?.closest('.full') ||
       ePerms?.parentElement?.closest('.full');
 
+    const guideFull = document.getElementById('zc-colab-access-guide');
     const grid = document.querySelector('#details-grid, .details-grid');
 
     if (permFull && permFull.parentElement){
       permFull.parentElement.insertBefore(full, permFull);
+    } else if (guideFull && guideFull.parentElement){
+      guideFull.parentElement.insertBefore(full, guideFull.nextSibling);
     } else if (grid){
       grid.appendChild(full);
     }
@@ -193,7 +221,7 @@ export async function renderInstsView(colab){
   const ids = coalesceInstIds(colab);
 
   if (!ids.length){
-    if (chipsWrap) chipsWrap.textContent = 'Todas';
+    if (chipsWrap) chipsWrap.appendChild(chip('Todos os WhatsApps'));
     return;
   }
 

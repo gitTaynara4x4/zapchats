@@ -25,13 +25,17 @@
     type="module">
   </script>
 
-  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260514-sidebar-only-1">
+  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260516-sidebar-settings-order-1">
 
-  <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
+  />
 
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
-        rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  >
 
   <style>
     html,
@@ -176,6 +180,10 @@
       Sidebar oficial do atendimento.
       Todo perfil/configurações/notificações/conta fica em:
       /frontend/partials/sidebar-atendimentos.html
+
+      Importante:
+      - Este slot é preenchido antes do main.js do atendimento iniciar.
+      - Assim os JS de painel conseguem encontrar #zcWaSettingsOverlay.
     -->
     <div id="sidebar-atendimentos-slot"></div>
 
@@ -421,31 +429,140 @@
     });
   </script>
 
-  <script type="module" src="/frontend/js/atendimentos/boot/main.js"></script>
-  <script type="module" src="/frontend/js/pages/atendimentos-autoopen.js"></script>
-  <script src="/frontend/js/atendimentos/ui/agenda.js"></script>
-
   <script>
     /*
-      Carrega somente a sidebar oficial do atendimento.
+      Boot ordenado do atendimento.
 
-      Importante:
-      - O atendimento NÃO cria painel de perfil/configurações.
-      - O painel fica no arquivo:
-        /frontend/partials/sidebar-atendimentos.html
+      Ordem correta:
+      1. Carrega /frontend/partials/sidebar-atendimentos.html
+      2. Executa scripts internos do sidebar
+      3. Carrega os JS das páginas do painel:
+         - settings-panel-pages.js
+         - perfil-instancia.js
+         - conta.js
+         - privacidade.js
+         - notificacao.js
+         - atalhos-teclado.js
+         - ajuda-feedback.js
+      4. Carrega o boot/main.js do atendimento
+      5. Carrega atendimentos-autoopen.js
+      6. Carrega agenda.js
 
-      Por quê reexecutar scripts?
-      - Quando usamos innerHTML, scripts dentro do HTML carregado não executam automaticamente.
-      - Então este loader insere o HTML e recria os scripts do partial.
+      Motivo:
+      - O sidebar tem a casca #zcWaSettingsOverlay.
+      - Os JS das páginas registram conteúdo via window.ZCSettingsPage.
+      - O main.js não deve iniciar antes da sidebar existir no DOM.
     */
-    (function zcLoadSidebarAtendimentosOnly(){
-      if (window.__ZC_LOAD_SIDEBAR_ATENDIMENTOS_ONLY_20260514__) return;
-      window.__ZC_LOAD_SIDEBAR_ATENDIMENTOS_ONLY_20260514__ = true;
+    (function zcBootAtendimentosOrdered(){
+      if (window.__ZC_ATENDIMENTOS_ORDERED_BOOT_20260516__) return;
+      window.__ZC_ATENDIMENTOS_ORDERED_BOOT_20260516__ = true;
 
       const SIDEBAR_URL = '/frontend/partials/sidebar-atendimentos.html';
 
+      const SETTINGS_JS = [
+        '/frontend/js/atendimentos/ui/settings-panel-pages.js',
+        '/frontend/js/atendimentos/ui/perfil-instancia.js',
+        '/frontend/js/atendimentos/ui/conta.js',
+        '/frontend/js/atendimentos/ui/privacidade.js',
+        '/frontend/js/atendimentos/ui/notificacao.js',
+        '/frontend/js/atendimentos/ui/atalhos-teclado.js',
+        '/frontend/js/atendimentos/ui/ajuda-feedback.js'
+      ];
+
+      const APP_JS = [
+        {
+          src: '/frontend/js/atendimentos/boot/main.js',
+          type: 'module',
+          key: 'main'
+        },
+        {
+          src: '/frontend/js/pages/atendimentos-autoopen.js',
+          type: 'module',
+          key: 'autoopen'
+        },
+        {
+          src: '/frontend/js/atendimentos/ui/agenda.js',
+          type: '',
+          key: 'agenda'
+        }
+      ];
+
       function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
+      }
+
+      function normalizeSrc(src) {
+        try {
+          return new URL(src, location.origin).href;
+        } catch {
+          return String(src || '');
+        }
+      }
+
+      function findExistingScript(src) {
+        const target = normalizeSrc(src);
+
+        return Array.from(document.scripts || []).find(script => {
+          try {
+            return normalizeSrc(script.getAttribute('src') || script.src || '') === target;
+          } catch {
+            return false;
+          }
+        }) || null;
+      }
+
+      function scriptIdFromSrc(src) {
+        return 'zc-script-' + String(src || '')
+          .replace(/^https?:\/\//i, '')
+          .replace(/[^a-z0-9_-]+/gi, '-')
+          .replace(/^-+|-+$/g, '');
+      }
+
+      function loadScriptOnce(src, options) {
+        options = options || {};
+
+        return new Promise(resolve => {
+          try {
+            const existing = findExistingScript(src);
+
+            if (existing) {
+              if (existing.dataset.zcLoaded === '1') {
+                resolve(true);
+                return;
+              }
+
+              existing.addEventListener('load', () => resolve(true), { once:true });
+              existing.addEventListener('error', () => resolve(false), { once:true });
+
+              setTimeout(() => resolve(true), 1500);
+              return;
+            }
+
+            const script = document.createElement('script');
+            script.id = scriptIdFromSrc(src);
+            script.src = src;
+            script.async = false;
+
+            if (options.type) {
+              script.type = options.type;
+            }
+
+            script.onload = function () {
+              script.dataset.zcLoaded = '1';
+              resolve(true);
+            };
+
+            script.onerror = function () {
+              console.error('[ZapsChat] Erro ao carregar script:', src);
+              resolve(false);
+            };
+
+            document.body.appendChild(script);
+          } catch (err) {
+            console.error('[ZapsChat] Falha ao inserir script:', src, err);
+            resolve(false);
+          }
+        });
       }
 
       async function executeScriptsFrom(container) {
@@ -464,11 +581,8 @@
           oldScript.remove();
 
           if (src) {
-            await new Promise(resolve => {
-              script.onload = resolve;
-              script.onerror = resolve;
-              script.src = src;
-              document.body.appendChild(script);
+            await loadScriptOnce(src, {
+              type: script.getAttribute('type') || ''
             });
           } else {
             script.textContent = code;
@@ -484,38 +598,74 @@
         document.querySelectorAll('.wpp-leftbar .wpp-leftbar-icons a[href]').forEach(a => {
           try {
             const href = new URL(a.getAttribute('href'), location.origin).pathname.replace(/\/+$/, '') || '/';
+
             if (href === path) {
               a.setAttribute('aria-current', 'page');
               a.classList.add('is-active');
+            } else {
+              a.removeAttribute('aria-current');
+              a.classList.remove('is-active');
             }
           } catch {}
         });
       }
 
-      async function loadSidebar() {
+      async function loadSidebarAtendimentos() {
         const slot = document.getElementById('sidebar-atendimentos-slot');
-        if (!slot) return;
+        if (!slot) return false;
+
+        if (slot.dataset.loaded === '1') {
+          return true;
+        }
 
         try {
           const res = await fetch(SIDEBAR_URL, { cache: 'no-store' });
           if (!res.ok) throw new Error('HTTP ' + res.status);
 
           slot.innerHTML = await res.text();
+          slot.dataset.loaded = '1';
 
           await executeScriptsFrom(slot);
 
           markActiveSidebarItem();
 
           window.dispatchEvent(new CustomEvent('zc:sidebar-atendimentos-loaded'));
+
+          return true;
         } catch (err) {
           console.error('Erro ao carregar sidebar-atendimentos.html:', err);
+          return false;
         }
       }
 
+      async function loadSettingsPagesJs() {
+        for (const src of SETTINGS_JS) {
+          await loadScriptOnce(src);
+        }
+
+        window.dispatchEvent(new CustomEvent('zc:settings-pages-js-loaded'));
+      }
+
+      async function loadAppJs() {
+        for (const item of APP_JS) {
+          await loadScriptOnce(item.src, { type: item.type });
+        }
+
+        window.dispatchEvent(new CustomEvent('zc:atendimentos-app-js-loaded'));
+      }
+
+      async function boot() {
+        await loadSidebarAtendimentos();
+        await loadSettingsPagesJs();
+        await loadAppJs();
+
+        window.dispatchEvent(new CustomEvent('zc:atendimentos-ready'));
+      }
+
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', loadSidebar, { once:true });
+        document.addEventListener('DOMContentLoaded', boot, { once:true });
       } else {
-        loadSidebar();
+        boot();
       }
     })();
   </script>
@@ -687,6 +837,7 @@
       setTimeout(syncDropdown, 250);
       setTimeout(syncDropdown, 700);
       window.addEventListener('load', syncDropdown);
+      window.addEventListener('zc:atendimentos-ready', syncDropdown);
     })();
   </script>
 
@@ -713,6 +864,7 @@
 
       window.addEventListener('load', syncMainThemeBackground);
       window.addEventListener('zc:theme-changed', syncMainThemeBackground);
+      window.addEventListener('zc:atendimentos-ready', syncMainThemeBackground);
     })();
   </script>
 
@@ -1005,6 +1157,7 @@
         window.addEventListener('zc:atendimento-accepted', scheduleSync);
         window.addEventListener('zc:conversa-atualizada', scheduleSync);
         window.addEventListener('zc:historico-rendered', scheduleSync);
+        window.addEventListener('zc:atendimentos-ready', scheduleSync);
         window.addEventListener('load', scheduleSync);
 
         setTimeout(scheduleSync, 150);

@@ -1878,7 +1878,7 @@ async def _send_core(
             empresa_id=int(empresa.id),
             cliente_id=int(body.cliente_id),
             instancia_id=int(inst_id_checked),
-            allow_unassigned_department=False,
+            allow_unassigned_department=True,
         )
 
         _assert_number_matches_cliente(
@@ -1901,7 +1901,7 @@ async def _send_core(
                 empresa_id=int(empresa.id),
                 cliente_id=int(cliente_existing_by_number.id),
                 instancia_id=int(inst_id_checked),
-                allow_unassigned_department=False,
+                allow_unassigned_department=True,
             )
 
     cliente_para_regra = cliente_acl or cliente_existing_by_number
@@ -2340,7 +2340,7 @@ async def send_reaction(
                         empresa_id=int(empresa.id),
                         cliente_id=int(msg.cliente_id),
                         instancia_id=getattr(msg, "instancia_id", None),
-                        allow_unassigned_department=False,
+                        allow_unassigned_department=True,
                     )
                 except HTTPException:
                     msg = None

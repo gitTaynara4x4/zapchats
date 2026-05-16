@@ -363,6 +363,42 @@ tbody tr.drop-target{
   color:var(--muted);
 }
 
+/* ==================== AVISO DEPARTAMENTO ==================== */
+.dept-info-box{
+  display:grid;
+  gap:.45rem;
+  width:min(620px,100%);
+  padding:.85rem .95rem;
+  border-radius:.9rem;
+  border:1px solid color-mix(in oklab, var(--ok) 34%, var(--border));
+  background:color-mix(in oklab, var(--ok) 10%, transparent);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+}
+
+.dept-info-title{
+  display:flex;
+  align-items:center;
+  gap:.55rem;
+  font-weight:900;
+  font-size:.96rem;
+}
+
+.dept-info-title i{
+  color:var(--ok);
+}
+
+.dept-info-box p{
+  margin:0;
+  color:var(--muted);
+  font-size:.91rem;
+  line-height:1.45;
+}
+
+.dept-info-box b{
+  color:var(--fg);
+  font-weight:900;
+}
+
 /* ==================== MODAL ==================== */
 .modal-back{
   position:fixed;
@@ -1255,6 +1291,22 @@ html[data-theme="light"] body[data-page="departamentos"] .empty,
 body[data-theme="light"][data-page="departamentos"] .empty{
   background:#f9fafb;
   border-color:#d1d5db;
+}
+
+html[data-theme="light"] body[data-page="departamentos"] .dept-info-box,
+body[data-theme="light"][data-page="departamentos"] .dept-info-box{
+  background:#ecfdf5;
+  border-color:#bbf7d0;
+}
+
+html[data-theme="light"] body[data-page="departamentos"] .dept-info-box p,
+body[data-theme="light"][data-page="departamentos"] .dept-info-box p{
+  color:#374151;
+}
+
+html[data-theme="light"] body[data-page="departamentos"] .dept-info-box b,
+body[data-theme="light"][data-page="departamentos"] .dept-info-box b{
+  color:#111827;
 }
 
 /* ==================== RESPONSIVO MODAL ==================== */

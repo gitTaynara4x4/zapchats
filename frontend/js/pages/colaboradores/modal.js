@@ -121,6 +121,88 @@ function renderAdminBadge(colab){
   badge.style.display = isAdminFlag(colab) ? '' : 'none';
 }
 
+function ensureAccessExplanationBox(){
+  let full = document.getElementById('zc-colab-access-guide');
+
+  if (!full){
+    const { dPerms, ePerms } = els();
+
+    full = document.createElement('div');
+    full.id = 'zc-colab-access-guide';
+    full.className = 'full';
+
+    full.innerHTML = `
+      <dt>Acesso no atendimento</dt>
+      <dd>
+        <div
+          class="fieldbox zc-access-guide"
+          style="
+            display:grid;
+            gap:.55rem;
+            padding:.85rem .95rem;
+            border:1px solid rgba(34,197,94,.24);
+            background:rgba(34,197,94,.07);
+            border-radius:14px;
+          "
+        >
+          <div style="display:flex; align-items:center; gap:.55rem; font-weight:700;">
+            <i class="fa fa-circle-info" style="color:#22c55e;"></i>
+            <span>Como funciona o acesso deste colaborador</span>
+          </div>
+
+          <div class="muted" style="line-height:1.45;">
+            Para o colaborador ver uma conversa, ele precisa ter acesso ao
+            <b>WhatsApp</b> onde a mensagem chegou e ao <b>setor</b> da conversa.
+          </div>
+
+          <div style="display:grid; gap:.35rem; font-size:.92rem; line-height:1.45;">
+            <div>
+              <b>Setores que atende:</b>
+              define de quais setores/departamentos ele poderá ver e atender conversas.
+            </div>
+
+            <div>
+              <b>WhatsApps que pode acessar:</b>
+              define quais números de WhatsApp aparecem para ele no atendimento.
+            </div>
+
+            <div>
+              <b>Permissões:</b>
+              define o que ele pode fazer no sistema, como ver atendimento,
+              enviar mensagem ou gerenciar equipe.
+            </div>
+
+            <div>
+              <b>Entrada geral:</b>
+              conversas que ainda não têm setor aparecem para quem tem acesso
+              ao WhatsApp onde a mensagem chegou.
+            </div>
+          </div>
+        </div>
+      </dd>
+    `;
+
+    const permFull =
+      dPerms?.closest('.full') ||
+      ePerms?.closest('.full') ||
+      dPerms?.parentElement?.closest('.full') ||
+      ePerms?.parentElement?.closest('.full');
+
+    const instsFull = document.getElementById('insts-full');
+    const grid = document.querySelector('#details-grid, .details-grid');
+
+    if (instsFull && instsFull.parentElement){
+      instsFull.parentElement.insertBefore(full, instsFull);
+    } else if (permFull && permFull.parentElement){
+      permFull.parentElement.insertBefore(full, permFull);
+    } else if (grid){
+      grid.appendChild(full);
+    }
+  }
+
+  return full;
+}
+
 async function loadColabFull(id){
   const c = await apiGet(`/api/colaboradores/${id}`);
 
@@ -327,6 +409,8 @@ export async function renderPerfilView(colab){
     ePerms.innerHTML = '';
   }
 
+  ensureAccessExplanationBox();
+
   await renderDepartamentosView(colab);
   await renderInstsView(colab);
 
@@ -371,6 +455,8 @@ export function enterInlineEdit(){
 
   state.inlineEdit = true;
   state.showErrors = false;
+
+  ensureAccessExplanationBox();
 
   if (pEdit) pEdit.style.display = 'none';
   if (pSave) pSave.style.display = 'none';

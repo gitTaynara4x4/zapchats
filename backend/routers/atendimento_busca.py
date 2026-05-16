@@ -65,7 +65,7 @@ def _cliente_acl_ok(
             empresa_id=int(empresa_id),
             cliente_id=int(cliente_id),
             instancia_id=instancia_id,
-            allow_unassigned_department=False,
+            allow_unassigned_department=True,
         )
         ok = True
     except HTTPException:
@@ -1347,7 +1347,7 @@ def evolution_fetch_profile(
             empresa_id=empresa_id_eff,
             cliente_id=int(cli.id),
             instancia_id=resolved_inst_id,
-            allow_unassigned_department=False,
+            allow_unassigned_department=True,
         )
 
         changed |= _set_if_changed(cli, "is_business", bool(normalized.get("isBusiness")))
@@ -2116,7 +2116,7 @@ def atendimento_avatar(
         empresa_id=int(empresa_id_eff),
         cliente_id=int(conversation_id),
         instancia_id=resolved_inst_id,
-        allow_unassigned_department=False,
+        allow_unassigned_department=True,
     )
 
     raw_url = (getattr(cli, "avatar_url", None) or "").strip()
@@ -2184,7 +2184,7 @@ def get_cliente_profile(
         empresa_id=empresa_id_eff,
         cliente_id=int(cliente_id),
         instancia_id=None,
-        allow_unassigned_department=False,
+        allow_unassigned_department=True,
     )
 
     return _build_profile_payload(db, cli, atd)
@@ -2210,7 +2210,7 @@ def refresh_cliente_profile(
         empresa_id=empresa_id_eff,
         cliente_id=int(cliente_id),
         instancia_id=None,
-        allow_unassigned_department=False,
+        allow_unassigned_department=True,
     )
 
     acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
@@ -2255,7 +2255,7 @@ def merge_cliente_profile(
         empresa_id=empresa_id_eff,
         cliente_id=int(cliente_id),
         instancia_id=None,
-        allow_unassigned_department=False,
+        allow_unassigned_department=True,
     )
 
     norm = dict(payload or {})
@@ -2434,7 +2434,7 @@ def cliente_get(
         empresa_id=empresa_id_eff,
         cliente_id=int(cliente_id),
         instancia_id=None,
-        allow_unassigned_department=False,
+        allow_unassigned_department=True,
     )
 
     return {
@@ -2475,7 +2475,7 @@ def cliente_put(
         empresa_id=empresa_id_eff,
         cliente_id=int(cliente_id),
         instancia_id=None,
-        allow_unassigned_department=False,
+        allow_unassigned_department=True,
     )
 
     if hasattr(payload, "model_dump"):

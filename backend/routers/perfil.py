@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import base64
+import html
 from typing import Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -95,6 +96,28 @@ def _avatar_to_data_url(actor) -> Optional[str]:
 
     b64 = base64.b64encode(bytes(avatar_data)).decode("ascii")
     return f"data:{avatar_mime};base64,{b64}"
+
+
+def _avatar_svg_fallback(actor) -> str:
+    nome = _clean_str(getattr(actor, "nome", None)) or _clean_str(getattr(actor, "email", None)) or "Usuário"
+
+    parts = [p for p in str(nome).replace("@", " ").replace(".", " ").split() if p]
+    if len(parts) >= 2:
+        initials = (parts[0][0] + parts[1][0]).upper()
+    elif parts:
+        initials = parts[0][:2].upper()
+    else:
+        initials = "US"
+
+    initials = html.escape(initials[:2])
+    label = html.escape(str(nome))
+
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="{label}">
+  <rect width="160" height="160" rx="80" fill="#16a34a"/>
+  <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle"
+        font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700"
+        fill="#ffffff">{initials}</text>
+</svg>"""
 
 
 def _verify_password(raw_password: str, stored_password: Optional[str]) -> bool:
@@ -282,6 +305,52 @@ def atualizar_minha_senha(
         raise HTTPException(status_code=400, detail="Erro ao atualizar a senha.")
 
     return {"ok": True, "mensagem": "Senha atualizada com sucesso."}
+
+
+@router.get("/avatar")
+def obter_avatar(
+    identity=Depends(get_current_identity),
+    db: Session = Depends(get_db),
+):
+    """
+    GET usado pelo sidebar:
+      <img src="/api/perfil/avatar?v=..." />
+
+    Antes só existia POST/DELETE, então o navegador recebia 405.
+    Agora sempre devolve uma imagem:
+      - avatar real se existir;
+      - SVG com iniciais se não existir.
+    """
+    _, actor = _get_actor(identity, db)
+
+    avatar_data = getattr(actor, "avatar_data", None)
+    avatar_mime = _clean_str(getattr(actor, "avatar_mime", None))
+
+    if avatar_data and isinstance(avatar_data, (bytes, bytearray)):
+        raw = bytes(avatar_data)
+
+        if not avatar_mime or not avatar_mime.startswith("image/"):
+            avatar_mime = _detect_image_mime(raw)
+
+        if avatar_mime in ALLOWED_IMAGE_MIMES:
+            return Response(
+                content=raw,
+                media_type=avatar_mime,
+                headers={
+                    "Cache-Control": "private, no-store, max-age=0",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+
+    svg = _avatar_svg_fallback(actor)
+    return Response(
+        content=svg.encode("utf-8"),
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "private, no-store, max-age=0",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.post("/avatar")

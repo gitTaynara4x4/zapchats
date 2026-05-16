@@ -66,12 +66,15 @@ def _lock_for(key: str) -> threading.Lock:
 def _allowed_ints(allowed: Optional[List[int]]) -> Optional[List[int]]:
     if allowed is None:
         return None
+
     out: List[int] = []
+
     for x in allowed:
         try:
             out.append(int(x))
         except Exception:
             pass
+
     return out
 
 
@@ -91,8 +94,10 @@ def _resolve_instancia(
             )
             .first()
         )
+
         if row:
             return int(row.id), row.instance_name
+
         return None, None
 
     if instance:
@@ -104,8 +109,10 @@ def _resolve_instancia(
             )
             .first()
         )
+
         if row:
             return int(row.id), row.instance_name
+
         return None, None
 
     return None, None
@@ -115,17 +122,20 @@ def _find_b64(d):
     if isinstance(d, dict):
         for k in ("base64", "b64", "fileBase64", "data"):
             v = d.get(k)
+
             if isinstance(v, str) and v:
                 return v
 
         for v in d.values():
             b = _find_b64(v)
+
             if b:
                 return b
 
     elif isinstance(d, list):
         for v in d:
             b = _find_b64(v)
+
             if b:
                 return b
 
@@ -161,6 +171,7 @@ def _sniff_mime(raw: bytes) -> str:
 
 def _decode_any(b64: str) -> tuple[bytes, str]:
     m = re.match(r"^data:([^;]+);base64,(.+)$", str(b64 or ""))
+
     if m:
         raw = base64.b64decode(m.group(2), validate=False)
         mime = (m.group(1) or "").strip().lower() or _sniff_mime(raw)
@@ -177,6 +188,7 @@ def _fix_filename(name: str | None, mime: str) -> str:
         base = base[:-4]
 
     ext_from_mime = (mimetypes.guess_extension((mime or "").lower()) or "").lower()
+
     if ext_from_mime == ".jpe":
         ext_from_mime = ".jpg"
 
@@ -228,6 +240,7 @@ def _cache_write(prefix: str, raw: bytes, mime: str, name: str | None):
     prefix = _sanitize_cache_key(prefix)
 
     ext = mimetypes.guess_extension(mime or "") or ""
+
     if ext == ".jpe":
         ext = ".jpg"
 
@@ -264,6 +277,7 @@ def _sanitize_cd_filename(name: str) -> str:
 def _if_none_match_hits(inm: str | None, etag: str) -> bool:
     if not inm or not etag:
         return False
+
     return etag in inm
 
 
@@ -289,6 +303,7 @@ def _serve_cached(path: str, request: Request):
     name = _sanitize_cd_filename(name)
 
     mime = mimetypes.guess_type(path)[0]
+
     if not mime:
         try:
             with open(path, "rb") as f:
@@ -345,6 +360,7 @@ def _bucket_for(mime: str, media_type: str | None = None) -> str:
     if m.startswith("image/"):
         if m == "image/webp" and "sticker" in mt:
             return "sticker"
+
         return "image"
 
     if m.startswith("video/"):
@@ -407,6 +423,7 @@ def _serve_midia_model(md: Any, request: Request | None = None) -> Response:
     filename = _sanitize_cd_filename(filename)
 
     raw = getattr(md, "data", None) or getattr(md, "conteudo", None)
+
     if raw:
         raw_b = bytes(raw)
         return _inline(raw_b, mimetype, filename, request=request)
@@ -438,6 +455,7 @@ def _serve_midia_model(md: Any, request: Request | None = None) -> Response:
         return FileResponse(local_path, media_type=mimetype, headers=headers)
 
     url = getattr(md, "url", None)
+
     if url:
         return RedirectResponse(url)
 
@@ -455,13 +473,19 @@ def _assert_midia_acl_cliente(
     cliente_id: int,
     instancia_id: int | None,
 ) -> None:
+    """
+    Modelo 2:
+    - Departamento não controla mais WhatsApp.
+    - Se a conversa ainda estiver sem departamento, não bloqueia mídia/avatar.
+    - Se tiver departamento, segue validando departamentos_membros pelo ACL central.
+    """
     assert_cliente_access(
         db,
         identity=identity,
         empresa_id=int(empresa_id),
         cliente_id=int(cliente_id),
         instancia_id=(int(instancia_id) if instancia_id is not None else None),
-        allow_unassigned_department=False,
+        allow_unassigned_department=True,
     )
 
 
@@ -475,6 +499,7 @@ def _assert_grupo_acl(
         raise HTTPException(403, "Grupo não pertence à sua empresa")
 
     gid_inst = getattr(grupo, "instancia_id", None)
+
     if gid_inst is not None:
         assert_instancia_allowed(
             allowed_instancias=allowed_instancias,
@@ -493,8 +518,10 @@ def _evo_payloads_for_cliente(
 
     if jid:
         jid = "".join(ch for ch in jid if ch.isdigit())
+
         if jid and not jid.startswith("55"):
             jid = "55" + jid
+
         jid = f"{jid}@s.whatsapp.net" if jid else None
     else:
         jid = None
@@ -648,6 +675,7 @@ def _persist_midia_cliente(
     local_path: str | None = None,
 ):
     MediaModel = _media_model()
+
     if MediaModel is None:
         return None
 
@@ -709,6 +737,7 @@ def _persist_midia_cliente(
 
     if (mime or "").lower() == "application/pdf":
         pc = _pdf_page_count(raw)
+
         if pc:
             _set_attr_if_exists(midia, "page_count", pc)
 
@@ -733,6 +762,7 @@ def _persist_midia_grupo(
     local_path: str | None = None,
 ):
     MediaModel = _media_model()
+
     if MediaModel is None:
         return None
 
@@ -804,6 +834,7 @@ def _persist_midia_grupo(
 
     if (mime or "").lower() == "application/pdf":
         pc = _pdf_page_count(raw)
+
         if pc:
             _set_attr_if_exists(midia, "page_count", pc)
 
@@ -827,6 +858,7 @@ def _find_midia_cliente_by_msg(
     msg_id: str,
 ):
     MediaModel = _media_model()
+
     if MediaModel is None:
         return None
 
@@ -836,6 +868,7 @@ def _find_midia_cliente_by_msg(
         conditions.append(getattr(MediaModel, "mensagem_id") == int(msg.id))
 
     match = _media_match_condition(MediaModel, msg_id)
+
     if match is not None:
         conditions.append(match)
 
@@ -866,10 +899,12 @@ def _find_midia_grupo_by_msg(
     msg_id: str,
 ):
     MediaModel = _media_model()
+
     if MediaModel is None:
         return None
 
     match = _media_match_condition(MediaModel, msg_id)
+
     if match is None:
         return None
 
@@ -914,9 +949,11 @@ def _resolve_msg_cliente(
         q = q.filter(models.Mensagem.instancia_id == int(resolved_inst_id))
 
     allowed_int = _allowed_ints(allowed_inst)
+
     if allowed_int is not None:
         if not allowed_int:
             raise HTTPException(403, "Sem instâncias permitidas para este colaborador")
+
         q = q.filter(models.Mensagem.instancia_id.in_(allowed_int))
 
     return q.first()
@@ -944,9 +981,11 @@ def _resolve_msg_grupo(
         q = q.filter(models.MensagemGrupo.instancia_id == int(resolved_inst_id))
 
     allowed_int = _allowed_ints(allowed_inst)
+
     if allowed_int is not None:
         if not allowed_int:
             raise HTTPException(403, "Sem instâncias permitidas para este colaborador")
+
         q = q.filter(models.MensagemGrupo.instancia_id.in_(allowed_int))
 
     return q.first()
@@ -999,6 +1038,7 @@ def midia_resolve(
         )
 
     MediaModel = _media_model()
+
     if MediaModel is None:
         raise HTTPException(500, "Modelo de mídia não disponível no schema.")
 
@@ -1012,10 +1052,12 @@ def midia_resolve(
         raise HTTPException(404, "Mídia não encontrada")
 
     mid_empresa_id = getattr(mid, "empresa_id", None)
+
     if mid_empresa_id is not None and int(mid_empresa_id) != int(empresa_id_eff):
         raise HTTPException(403, "Mídia não pertence à sua empresa")
 
     mid_instancia_id = getattr(mid, "instancia_id", None)
+
     if mid_instancia_id is not None:
         assert_instancia_allowed(
             allowed_instancias=allowed_inst,
@@ -1050,13 +1092,19 @@ def midia_resolve(
 
             if msg and msg.msg_id:
                 qs = [f"empresa_id={empresa_id_eff}"]
+
                 if instancia_id is not None:
                     qs.append(f"instancia_id={int(instancia_id)}")
+
                 if instance:
                     qs.append(f"instance={instance}")
 
                 q = "?" + "&".join(qs)
-                return RedirectResponse(url=f"/api/atendimento/midias/msg/{msg.msg_id}{q}", status_code=307)
+
+                return RedirectResponse(
+                    url=f"/api/atendimento/midias/msg/{msg.msg_id}{q}",
+                    status_code=307,
+                )
 
         return _serve_midia_model(mid, request=request)
 
@@ -1107,6 +1155,7 @@ def midia_por_msg(
     ensure_perm(identity, "atendimento.ver")
 
     msg_id = str(msg_id or "").strip()
+
     if not msg_id:
         raise HTTPException(400, "msg_id inválido")
 
@@ -1159,6 +1208,7 @@ def midia_por_msg(
         )
 
         cached = _cache_glob_for(msg_id)
+
         if cached:
             return _serve_cached(cached, request)
 
@@ -1173,6 +1223,7 @@ def midia_por_msg(
 
             if raw:
                 raw_b = bytes(raw)
+
                 mime = (
                     getattr(mid_db, "mimetype", None)
                     or getattr(mid_db, "mime", None)
@@ -1199,8 +1250,10 @@ def midia_por_msg(
                 pass
 
         lock = _lock_for(_sanitize_cache_key(msg_id))
+
         with lock:
             cached2 = _cache_glob_for(msg_id)
+
             if cached2:
                 return _serve_cached(cached2, request)
 
@@ -1234,7 +1287,10 @@ def midia_por_msg(
                     except Exception:
                         pass
 
-                raise HTTPException(404, f"Não foi possível obter a mídia 1:1 por msg_id ({evo_err})")
+                raise HTTPException(
+                    404,
+                    f"Não foi possível obter a mídia 1:1 por msg_id ({evo_err})",
+                )
 
     # =====================================================
     # 2) tenta resolver como mensagem de GRUPO
@@ -1265,6 +1321,7 @@ def midia_por_msg(
     )
 
     cached = _cache_glob_for(msg_id)
+
     if cached:
         return _serve_cached(cached, request)
 
@@ -1280,6 +1337,7 @@ def midia_por_msg(
 
         if raw:
             raw_b = bytes(raw)
+
             mime = (
                 getattr(mid_g, "mimetype", None)
                 or getattr(mid_g, "mime", None)
@@ -1306,8 +1364,10 @@ def midia_por_msg(
             pass
 
     lock = _lock_for(_sanitize_cache_key(msg_id))
+
     with lock:
         cached2 = _cache_glob_for(msg_id)
+
         if cached2:
             return _serve_cached(cached2, request)
 
@@ -1343,4 +1403,7 @@ def midia_por_msg(
                 except Exception:
                     pass
 
-            raise HTTPException(404, f"Não foi possível obter a mídia de grupo por msg_id ({evo_err})")
+            raise HTTPException(
+                404,
+                f"Não foi possível obter a mídia de grupo por msg_id ({evo_err})",
+            )

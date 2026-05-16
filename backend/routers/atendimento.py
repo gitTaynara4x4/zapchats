@@ -1636,43 +1636,119 @@ def listar_clientes(
 async def marcar_lidas(
     cliente_id: int,
     empresa_id: Optional[int] = Query(None),
+    instancia_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
+    """
+    Marca mensagens de entrada como lidas.
+
+    Importante:
+    - Essa rota é chamada em segundo plano pelo front ao abrir a conversa.
+    - Ela NÃO deve quebrar a tela se não conseguir resolver o cliente.
+    - Se o cliente/conversa não existir para o usuário atual, retorna ok=True e marcadas=0.
+    - Continua respeitando empresa, permissão e instâncias permitidas.
+    """
     empresa_id = _assert_empresa_user(identity, empresa_id)
     _ensure_perm(identity, "atendimento.ver")
 
     cliente_pk = _resolve_cliente_pk(db, int(empresa_id), int(cliente_id))
     if not cliente_pk:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+        return {
+            "ok": True,
+            "marcadas": 0,
+            "cliente_id": int(cliente_id),
+            "motivo": "cliente_nao_encontrado",
+        }
 
     allowed = _allowed_instancia_ids(db, identity, empresa_id)
-    _assert_cliente_access_by_instancias(db, empresa_id=empresa_id, cliente_id=cliente_pk, allowed=allowed)
+
+    if allowed is not None:
+        allowed_set = {int(x) for x in allowed if x is not None}
+
+        if not allowed_set:
+            return {
+                "ok": True,
+                "marcadas": 0,
+                "cliente_id": int(cliente_pk),
+                "motivo": "sem_instancias_permitidas",
+            }
+
+        if instancia_id is not None:
+            try:
+                inst_req = int(instancia_id)
+            except Exception:
+                inst_req = None
+
+            if inst_req is not None and inst_req not in allowed_set:
+                return {
+                    "ok": True,
+                    "marcadas": 0,
+                    "cliente_id": int(cliente_pk),
+                    "instancia_id": inst_req,
+                    "motivo": "instancia_nao_permitida",
+                }
 
     q = (
         db.query(models.Mensagem)
         .filter(
-            models.Mensagem.cliente_id == cliente_pk,
-            models.Mensagem.empresa_id == empresa_id,
+            models.Mensagem.cliente_id == int(cliente_pk),
+            models.Mensagem.empresa_id == int(empresa_id),
             models.Mensagem.tipo == "entrada",
             models.Mensagem.lida.is_(False),
         )
     )
 
-    if allowed is not None:
+    if instancia_id is not None:
+        try:
+            q = q.filter(models.Mensagem.instancia_id == int(instancia_id))
+        except Exception:
+            pass
+    elif allowed is not None:
         q = q.filter(models.Mensagem.instancia_id.in_([int(x) for x in allowed]))
 
-    total = q.update({models.Mensagem.lida: True}, synchronize_session=False)
-    db.commit()
+    try:
+        total = q.update({models.Mensagem.lida: True}, synchronize_session=False)
+        db.commit()
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
-    _cache_del(_k("clientes", LIST_CACHE_VERSION, "emp", str(empresa_id), "dep", ""))
-    _cache_del(_k("clientes", "emp", str(empresa_id), "dep", ""))
-    _invalidate_conversas_cache(int(empresa_id))
+        LOG("[/clientes/{cliente_id}/seen][ERRO]", repr(e))
+        return {
+            "ok": True,
+            "marcadas": 0,
+            "cliente_id": int(cliente_pk),
+            "motivo": "erro_ao_marcar_lidas",
+        }
 
-    await conexoes_ativas.send_message(f"emp:{empresa_id}", {"type": "reload_clientes"})
+    total_int = int(total or 0)
 
-    return {"ok": True, "marcadas": int(total)}
+    if total_int > 0:
+        _cache_del(_k("clientes", LIST_CACHE_VERSION, "emp", str(empresa_id), "dep", ""))
+        _cache_del(_k("clientes", "emp", str(empresa_id), "dep", ""))
+        _invalidate_conversas_cache(int(empresa_id))
 
+        try:
+            await conexoes_ativas.send_message(
+                f"emp:{empresa_id}",
+                {
+                    "type": "reload_clientes",
+                    "cliente_id": int(cliente_pk),
+                    "instancia_id": int(instancia_id) if instancia_id is not None else None,
+                },
+            )
+        except Exception:
+            pass
+
+    return {
+        "ok": True,
+        "marcadas": total_int,
+        "cliente_id": int(cliente_pk),
+        "instancia_id": int(instancia_id) if instancia_id is not None else None,
+    }
 
 @router.get("/conversas/pin")
 def listar_pins(
