@@ -450,14 +450,6 @@ class Cliente(Base):
 # Identidades WhatsApp / LID
 # =========================
 class ContatoWhatsappIdentidade(Base):
-    """
-    Mapa persistente para resolver identidades do WhatsApp.
-
-    Exemplo:
-    186457499152524@lid -> Taynara -> 553186419237@s.whatsapp.net
-
-    Essa tabela evita tratar LID como telefone real em clientes.telefone_norm.
-    """
     __tablename__ = "contatos_whatsapp_identidades"
     __table_args__ = (
         Index(

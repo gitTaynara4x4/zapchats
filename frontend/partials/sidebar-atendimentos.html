@@ -50,12 +50,12 @@
     --zc-mobile-overlay:rgba(15,23,42,.50);
     --zc-mobile-btn-bg:#f3f4f6;
 
-    --zc-wa-bg:#0b0f10;
-    --zc-wa-panel:#111b21;
-    --zc-wa-panel-2:#161c1f;
-    --zc-wa-input:#202c33;
-    --zc-wa-hover:#182229;
-    --zc-wa-border:rgba(255,255,255,.08);
+    --zc-wa-bg:#161717;
+    --zc-wa-panel:#161717;
+    --zc-wa-panel-2:#161717;
+    --zc-wa-input:#0b141a;
+    --zc-wa-hover:rgba(255,255,255,.055);
+    --zc-wa-border:rgba(255,255,255,.075);
     --zc-wa-text:#e9edef;
     --zc-wa-muted:#aebac1;
     --zc-wa-soft:#8696a0;
@@ -80,18 +80,30 @@
     --zc-leftbar-shadow:12px 0 32px rgba(0,0,0,.34);
     --zc-mobile-overlay:rgba(0,0,0,.62);
     --zc-mobile-btn-bg:#202020;
+
+    --zc-wa-bg:#161717;
+    --zc-wa-panel:#161717;
+    --zc-wa-panel-2:#161717;
+    --zc-wa-input:#0b141a;
+    --zc-wa-hover:rgba(255,255,255,.055);
+    --zc-wa-border:rgba(255,255,255,.075);
+    --zc-wa-text:#e9edef;
+    --zc-wa-muted:#aebac1;
+    --zc-wa-soft:#8696a0;
+    --zc-wa-accent:#00a884;
+    --zc-wa-accent-2:#25d366;
   }
 
   html[data-theme="light"]:not(.dark){
-    --zc-wa-bg:#f3f4f6;
+    --zc-wa-bg:#ffffff;
     --zc-wa-panel:#ffffff;
     --zc-wa-panel-2:#ffffff;
-    --zc-wa-input:#f3f4f6;
-    --zc-wa-hover:#f3f4f6;
-    --zc-wa-border:rgba(17,24,39,.09);
-    --zc-wa-text:#111827;
-    --zc-wa-muted:#6b7280;
-    --zc-wa-soft:#9ca3af;
+    --zc-wa-input:#f6f7f8;
+    --zc-wa-hover:rgba(17,27,33,.045);
+    --zc-wa-border:rgba(17,27,33,.085);
+    --zc-wa-text:#111b21;
+    --zc-wa-muted:#667781;
+    --zc-wa-soft:#667781;
     --zc-wa-accent:#008069;
     --zc-wa-accent-2:#00a884;
   }
@@ -565,7 +577,7 @@
     width:calc(100vw - 64px);
     z-index:70;
     display:none;
-    background:var(--zc-wa-bg);
+    background:var(--zc-wa-bg) !important;
     color:var(--zc-wa-text);
     font-family:var(--zc-font, "Inter", "Segoe UI", Arial, sans-serif) !important;
   }
@@ -593,7 +605,7 @@
     height:100vh;
     display:flex;
     flex-direction:column;
-    background:var(--zc-wa-panel);
+    background:var(--zc-wa-panel) !important;
     border-right:1px solid var(--zc-wa-border);
     overflow:hidden;
   }
@@ -605,9 +617,9 @@
     justify-content:space-between;
     gap:12px;
     padding:0 18px;
-    background:var(--zc-wa-panel);
+    background:var(--zc-wa-panel) !important;
     color:var(--zc-wa-text);
-    border-bottom:1px solid rgba(255,255,255,.04);
+    border-bottom:1px solid var(--zc-wa-border);
   }
 
   .zc-wa-settings-title{
@@ -662,7 +674,7 @@
 
   .zc-wa-settings-search{
     padding:10px 16px 8px;
-    background:var(--zc-wa-panel);
+    background:var(--zc-wa-panel) !important;
   }
 
   .zc-wa-settings-searchbox{
@@ -708,6 +720,7 @@
     min-height:0;
     overflow:auto;
     padding:8px 0 18px;
+    background:var(--zc-wa-panel) !important;
     scrollbar-width:thin;
     scrollbar-color:#3b4a54 transparent;
   }
@@ -720,7 +733,7 @@
     gap:14px;
     padding:14px 16px;
     border-radius:12px;
-    background:var(--zc-wa-panel);
+    background:var(--zc-wa-panel) !important;
     border:1px solid var(--zc-wa-border);
     color:var(--zc-wa-text);
   }
@@ -877,6 +890,7 @@
     display:flex;
     flex-direction:column;
     padding:0 0 8px;
+    background:var(--zc-wa-panel) !important;
   }
 
   .zc-wa-settings-item{
@@ -960,7 +974,7 @@
     align-items:center;
     justify-content:center;
     padding:34px;
-    background:var(--zc-wa-bg);
+    background:var(--zc-wa-bg) !important;
     overflow:auto;
     position:relative;
   }
@@ -968,7 +982,7 @@
   .zc-wa-settings-card{
     width:min(420px, 88vw);
     border-radius:18px;
-    background:var(--zc-wa-panel-2);
+    background:var(--zc-wa-panel-2) !important;
     border:1px solid var(--zc-wa-border);
     padding:36px 28px 28px;
     text-align:center;
@@ -1246,13 +1260,11 @@
     }
 
     #zcWaSettingsOverlay.zc-settings-page-open .zc-wa-settings-panel{
-      display:none !important;
+      display:flex !important;
     }
 
     #zcWaSettingsOverlay.zc-settings-page-open .zc-wa-settings-content{
-      display:flex !important;
-      align-items:stretch !important;
-      justify-content:flex-start !important;
+      display:none !important;
     }
   }
 </style>
@@ -1527,8 +1539,8 @@
 
 <script>
 (function () {
-  if (window.__ZC_SIDEBAR_ATENDIMENTOS_CLEAN_20260516__) return;
-  window.__ZC_SIDEBAR_ATENDIMENTOS_CLEAN_20260516__ = true;
+  if (window.__ZC_SIDEBAR_ATENDIMENTOS_PROFILE_FIX_20260516__) return;
+  window.__ZC_SIDEBAR_ATENDIMENTOS_PROFILE_FIX_20260516__ = true;
 
   var JS_BASE = '/frontend/js/atendimentos/ui/';
 
@@ -2014,16 +2026,26 @@
 
   function openProfilePage() {
     ensureSettingsJs().then(function () {
+      /*
+        Perfil agora abre pelo mesmo fluxo das outras páginas:
+        ZCSettingsPage -> página dentro do painel esquerdo -> botão voltar limpa corretamente.
+        Isso evita travar o segundo clique depois de voltar.
+      */
+      if (openRegisteredTitle('Perfil')) {
+        return;
+      }
+
+      /*
+        Fallback antigo, só se o registro do Perfil ainda não existir.
+        Não deve ser o caminho principal.
+      */
       var fn = window.abrirPerfilInstanciaUsuario || window.zcAbrirMeuPerfilAtendimento;
 
       if (typeof fn === 'function') {
         try {
           fn();
-          return;
         } catch (e) {}
       }
-
-      openRegisteredTitle('Perfil');
     });
   }
 

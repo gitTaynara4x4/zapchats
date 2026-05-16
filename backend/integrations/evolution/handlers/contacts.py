@@ -673,25 +673,6 @@ def _is_cliente_name_provisorio_sql() -> str:
 
 
 def _backfill_clientes_lid_from_payload(db, *, empresa_id: int, instancia_id: int, contatos: list[dict]) -> int:
-    """
-    Corrige clientes provisórios antigos criados antes desta correção.
-
-    Exemplo antigo:
-      cliente.telefone = 186457499152524
-      cliente.nome = Contato do WhatsApp
-
-    Evento:
-      remoteJid = 186457499152524@lid
-      pushName = Taynara
-
-    Resultado:
-      cliente.nome = Taynara
-      cliente.nome_whatsapp = Taynara
-
-    Regra:
-    - NÃO cria cliente novo por LID.
-    - Só atualiza cliente que já existe e claramente era provisório.
-    """
     empresa_id = int(empresa_id)
     instancia_id = int(instancia_id)
 
@@ -795,15 +776,7 @@ def _backfill_clientes_lid_from_payload(db, *, empresa_id: int, instancia_id: in
 
 
 def _backfill_clientes_reais_from_payload(db, *, empresa_id: int, instancia_id: int, contatos: list[dict]) -> int:
-    """
-    Atualiza nomes/fotos de clientes reais quando contacts.upsert/update vem com:
-      remoteJid = 553186419237@s.whatsapp.net
-      pushName = Tes
 
-    Regra:
-    - Só atualiza se o nome atual for provisório/vazio/telefone.
-    - Não sobrescreve nome editado manualmente no painel.
-    """
     empresa_id = int(empresa_id)
     instancia_id = int(instancia_id)
 

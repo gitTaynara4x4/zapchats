@@ -58,15 +58,14 @@
     const raw = norm(val);
     if (!raw) return 'Todos os WhatsApps';
 
-    // 1) label persistida (rápido)
     try {
       const savedLabel = localStorage.getItem(LS_KEY_LABEL);
       const savedInst  = localStorage.getItem(LS_KEY_INST);
       if (savedLabel && savedInst && String(savedInst) === raw) return savedLabel;
     } catch {}
 
-    // 2) procurar na lista
     const list = getInstanciasList();
+
     const byId = (x) => String(x?.instancia_id ?? x?.id ?? x?.instance_id ?? '') === raw;
     const bySlug = (x) => String(x?.instance_name ?? x?.instancia ?? '').toLowerCase() === raw.toLowerCase();
 
@@ -105,11 +104,14 @@
     if (!el) return;
 
     const c = window.state?.clienteSel || {};
+
     const v = norm(
       c.instancia_id ??
       c.instancia ??
       window.INSTANCIA_ATIVA ??
-      (function(){ try { return localStorage.getItem(LS_KEY_INST) } catch { return '' } })()
+      (function () {
+        try { return localStorage.getItem(LS_KEY_INST); } catch { return ''; }
+      })()
     );
 
     const txt = document.getElementById('inst-badge-text');
@@ -122,37 +124,53 @@
     try {
       const b = ensureInstBadge();
       if (!b) return;
+
       b.classList.add('shake');
       setTimeout(() => b.classList.remove('shake'), 420);
     } catch {}
   }
 
-  // ✅ Função central (envio.js e init.js usam)
   function setInstanciaAtiva(value, opt = {}) {
     const v = norm(value);
+
     window.INSTANCIA_ATIVA = v ? v : null;
 
-    try { localStorage.setItem(LS_KEY_INST, v); } catch {}
+    try {
+      localStorage.setItem(LS_KEY_INST, v);
+    } catch {}
 
-    try { window.setInstanceChip?.(v); } catch {}
+    try {
+      window.setInstanceChip?.(v);
+    } catch {}
 
-    try { zcUpdateInstBadge(); } catch {}
+    try {
+      zcUpdateInstBadge();
+    } catch {}
 
     try {
       document.dispatchEvent(new CustomEvent('inst:change', {
-        detail: { value: window.INSTANCIA_ATIVA }
+        detail: {
+          value: window.INSTANCIA_ATIVA
+        }
       }));
     } catch {}
 
     if (opt && opt.reloadList) {
-      try { window.carregarClientes?.({ force: true, reason: 'inst:change' }); } catch {}
+      try {
+        window.carregarClientes?.({
+          force: true,
+          reason: 'inst:change'
+        });
+      } catch {}
     }
   }
 
   function getInstanciaAtiva() {
     return norm(
       window.INSTANCIA_ATIVA ??
-      (function(){ try { return localStorage.getItem(LS_KEY_INST) } catch { return '' } })()
+      (function () {
+        try { return localStorage.getItem(LS_KEY_INST); } catch { return ''; }
+      })()
     );
   }
 
@@ -162,14 +180,26 @@
   window.setInstanciaAtiva  = setInstanciaAtiva;
   window.getInstanciaAtiva  = getInstanciaAtiva;
 
-  document.addEventListener('inst:change', () => { try { zcUpdateInstBadge(); } catch {} });
-  document.addEventListener('inst:list',   () => { try { zcUpdateInstBadge(); } catch {} });
+  document.addEventListener('inst:change', () => {
+    try { zcUpdateInstBadge(); } catch {}
+  });
 
-  setTimeout(() => { try { zcUpdateInstBadge(); } catch {} }, 0);
+  document.addEventListener('inst:list', () => {
+    try { zcUpdateInstBadge(); } catch {}
+  });
+
+  setTimeout(() => {
+    try { zcUpdateInstBadge(); } catch {}
+  }, 0);
 })();
 
 /* =========================================================
-   Switch (pílulas) — filtra instâncias permitidas
+   Switch (pílulas)
+   - Busca todas as instâncias da empresa
+   - Se for admin/usuário master: mostra todas
+   - Se for colaborador: valida cada instância no backend
+   - NÃO usa cache de permissão
+   - Limpa instância antiga salva quando login é colaborador
 ========================================================= */
 (function () {
   const wrap = document.getElementById('inst-switch');
@@ -180,8 +210,6 @@
   const KEY_VAL   = (id) => `instAtiva:${id}`;
   const KEY_LABEL = (id) => `instAtivaLabel:${id}`;
   const KEY_MAP   = (id, val) => `instLabel:${id}:${val}`;
-
-  let LAST = localStorage.getItem(KEY_VAL(EMPRESA_ID)) || '';
 
   function norm(v) {
     const s = (v == null ? '' : String(v)).trim();
@@ -228,7 +256,7 @@
       sessionStorage.getItem('usuario'),
       sessionStorage.getItem('user'),
       sessionStorage.getItem('identity'),
-      sessionStorage.getItem('current_user'),
+      sessionStorage.getItem('current_user')
     ]
       .map(parseJSONSafe)
       .filter(Boolean);
@@ -242,7 +270,7 @@
       'colaborador_id',
       'id_colaborador',
       'colab_id',
-      'cid',
+      'cid'
     ];
 
     for (const k of keys) {
@@ -251,6 +279,7 @@
     }
 
     const sub = String(identity?.sub || '').trim().toLowerCase();
+
     if (sub.startsWith('colab-')) {
       const n = Number(sub.split('-', 2)[1]);
       if (Number.isFinite(n) && n > 0) return n;
@@ -272,36 +301,33 @@
     const kind = String(identity.kind || identity.tipo || '').trim().toLowerCase();
     if (kind === 'usuario') return true;
 
-    const role = String(identity.role || identity.cargo || '').trim().toLowerCase();
-    if (role === 'admin' || role === 'administrador' || role === 'owner' || role === 'dono') {
+    const role = String(identity.role || '').trim().toLowerCase();
+    if (
+      role === 'admin' ||
+      role === 'administrador' ||
+      role === 'owner' ||
+      role === 'dono' ||
+      role === 'root'
+    ) {
       return true;
     }
 
     const sub = String(identity.sub || '').trim().toLowerCase();
+
     if (sub && !sub.startsWith('colab-') && Number.isFinite(Number(sub))) {
       return true;
     }
 
-    const perms = identity.permissoes || identity.permissions || [];
-    const arr = Array.isArray(perms)
-      ? perms
-      : Object.keys(perms || {}).filter(k => perms[k]);
-
-    const set = new Set(arr.map(x => String(x).toLowerCase()));
-
-    return (
-      set.has('admin') ||
-      set.has('root') ||
-      set.has('atendimento.gerenciar') ||
-      set.has('colaboradores.gerenciar')
-    );
+    return false;
   }
 
   function isColaboradorIdentity(identity) {
     if (!identity || typeof identity !== 'object') return false;
+
     if (isAdminIdentity(identity)) return false;
 
     const kind = String(identity.kind || identity.tipo || '').trim().toLowerCase();
+
     if (kind === 'colaborador') return true;
 
     if (getColaboradorId(identity)) return true;
@@ -312,86 +338,38 @@
     return false;
   }
 
-  function normalizeIdList(raw) {
-    if (raw == null) return null;
+  const identityAtBoot = getIdentity();
+  const isColaboradorAtBoot = isColaboradorIdentity(identityAtBoot);
 
-    if (Array.isArray(raw)) {
-      const out = raw
-        .map(x => {
-          if (x && typeof x === 'object') {
-            return Number(
-              x.id ??
-              x.instancia_id ??
-              x.instance_id ??
-              x.value ??
-              x.whatsapp_id
-            );
-          }
+  let LAST = localStorage.getItem(KEY_VAL(EMPRESA_ID)) || '';
 
-          return Number(x);
-        })
-        .filter(n => Number.isFinite(n) && n > 0);
+  /*
+   * Importante:
+   * Se ficou salva uma instância antiga no navegador, o boot pode tentar
+   * carregar conversas dela antes do seletor terminar de filtrar.
+   *
+   * Para colaborador, limpamos a seleção antiga já no começo.
+   * O seletor vai escolher uma permitida depois:
+   * - se tiver uma só, seleciona automaticamente
+   * - se tiver várias, deixa em "Todos permitidos"
+   */
+  if (isColaboradorAtBoot) {
+    try {
+      localStorage.setItem(KEY_VAL(EMPRESA_ID), '');
+      localStorage.removeItem(KEY_LABEL(EMPRESA_ID));
+    } catch {}
 
-      return out.length ? Array.from(new Set(out)) : [];
-    }
+    LAST = '';
+    window.INSTANCIA_ATIVA = null;
 
-    if (typeof raw === 'string') {
-      const trimmed = raw.trim();
-      if (!trimmed) return [];
-
-      try {
-        const arr = JSON.parse(trimmed);
-        if (Array.isArray(arr)) return normalizeIdList(arr);
-      } catch {}
-
-      const out = trimmed
-        .split(',')
-        .map(x => Number(String(x).trim()))
-        .filter(n => Number.isFinite(n) && n > 0);
-
-      return out.length ? Array.from(new Set(out)) : [];
-    }
-
-    if (typeof raw === 'object') {
-      return normalizeIdList(Object.values(raw).filter(Boolean));
-    }
-
-    return null;
-  }
-
-  function getAllowedIdsFromIdentity(identity) {
-    const keys = [
-      'instancias_ver',
-      'instancias_ids',
-      'instancia_ids',
-      'instances_ids',
-      'whatsapp_instancias_ids',
-      'whatsapp_ids',
-      'whatsapps_ids',
-      'instancias',
-      'instances',
-    ];
-
-    for (const key of keys) {
-      const ids = normalizeIdList(identity?.[key]);
-      if (Array.isArray(ids)) return ids;
-    }
-
-    const storageKeys = [
-      'instancias_ver',
-      'instancias_ids',
-      'whatsapp_instancias_ids',
-      'whatsapp_ids',
-      `instancias_ver:${EMPRESA_ID}`,
-      `instancias_ids:${EMPRESA_ID}`,
-    ];
-
-    for (const key of storageKeys) {
-      const ids = normalizeIdList(localStorage.getItem(key));
-      if (Array.isArray(ids)) return ids;
-    }
-
-    return null;
+    try {
+      document.dispatchEvent(new CustomEvent('inst:change', {
+        detail: {
+          value: null,
+          reason: 'clear-old-saved-instance-for-colaborador'
+        }
+      }));
+    } catch {}
   }
 
   function getInstValue(i) {
@@ -453,118 +431,48 @@
   async function backendAllowsInstance(instanciaId) {
     if (!EMPRESA_ID || !instanciaId) return false;
 
-    const url = `/api/atendimento/conversas?empresa_id=${encodeURIComponent(EMPRESA_ID)}&limit=1&instancia_id=${encodeURIComponent(instanciaId)}`;
+    const url =
+      `/api/atendimento/conversas` +
+      `?empresa_id=${encodeURIComponent(EMPRESA_ID)}` +
+      `&limit=1` +
+      `&instancia_id=${encodeURIComponent(instanciaId)}` +
+      `&__inst_acl_ts=${Date.now()}`;
 
     try {
       const r = await fetch(url, {
         credentials: 'include',
-        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        headers: {
+          Accept: 'application/json',
+          'Cache-Control': 'no-cache'
+        }
       });
 
       if (r.status === 403 || r.status === 401) return false;
       if (r.ok) return true;
 
-      // Se a rota responder outro erro não relacionado à permissão,
-      // não libera para evitar mostrar instância indevida.
       return false;
     } catch {
       return false;
     }
-  }
-
-  function cacheKeyForProbe(identity, list) {
-    const colabId = getColaboradorId(identity) || 'user';
-    const ids = uniqueInstances(list)
-      .map(i => getInstNumericId(i) || getInstValue(i))
-      .join(',');
-
-    return `instSwitchAllowedProbe:${EMPRESA_ID}:${colabId}:${ids}`;
-  }
-
-  function readProbeCache(identity, list) {
-    try {
-      const key = cacheKeyForProbe(identity, list);
-      const raw = sessionStorage.getItem(key);
-      if (!raw) return null;
-
-      const parsed = JSON.parse(raw);
-      if (!parsed || !Array.isArray(parsed.ids)) return null;
-
-      const ts = Number(parsed.ts || 0);
-      const age = Date.now() - ts;
-
-      // 5 minutos
-      if (age > 5 * 60 * 1000) return null;
-
-      return parsed.ids.map(Number).filter(n => Number.isFinite(n) && n > 0);
-    } catch {
-      return null;
-    }
-  }
-
-  function writeProbeCache(identity, list, ids) {
-    try {
-      const key = cacheKeyForProbe(identity, list);
-      sessionStorage.setItem(key, JSON.stringify({
-        ts: Date.now(),
-        ids: Array.from(new Set((ids || []).map(Number).filter(n => Number.isFinite(n) && n > 0))),
-      }));
-    } catch {}
   }
 
   async function filterInstancesByPermission(rawList) {
     const list = uniqueInstances(rawList);
     const identity = getIdentity();
 
-    // Admin/usuário master vê todas.
-    if (!isColaboradorIdentity(identity)) {
+    const isColaborador = isColaboradorIdentity(identity);
+
+    if (!isColaborador) {
       return {
         list,
         identity,
         isColaborador: false,
-        filtered: false,
+        filtered: false
       };
     }
 
-    // Primeiro tenta usar lista explícita do token/localStorage.
-    const explicitAllowedIds = getAllowedIdsFromIdentity(identity);
-
-    if (Array.isArray(explicitAllowedIds)) {
-      const allowedSet = new Set(explicitAllowedIds.map(Number));
-
-      const filtered = list.filter(i => {
-        const id = getInstNumericId(i);
-        if (!id) return false;
-        return allowedSet.has(Number(id));
-      });
-
-      return {
-        list: filtered,
-        identity,
-        isColaborador: true,
-        filtered: true,
-      };
-    }
-
-    // Se o token não trouxe instancias_ver, usa o backend como fonte da verdade:
-    // testa a listagem com instancia_id. Se der 200, mostra. Se der 403, esconde.
-    const cachedIds = readProbeCache(identity, list);
-
-    if (Array.isArray(cachedIds)) {
-      const allowedSet = new Set(cachedIds.map(Number));
-
-      return {
-        list: list.filter(i => {
-          const id = getInstNumericId(i);
-          return id && allowedSet.has(Number(id));
-        }),
-        identity,
-        isColaborador: true,
-        filtered: true,
-      };
-    }
-
-    const allowedIds = [];
+    const allowed = [];
 
     for (const inst of list) {
       const id = getInstNumericId(inst);
@@ -573,27 +481,23 @@
 
       const ok = await backendAllowsInstance(id);
 
-      if (ok) allowedIds.push(Number(id));
+      if (ok) {
+        allowed.push(inst);
+      }
     }
 
-    writeProbeCache(identity, list, allowedIds);
-
-    const allowedSet = new Set(allowedIds.map(Number));
-
     return {
-      list: list.filter(i => {
-        const id = getInstNumericId(i);
-        return id && allowedSet.has(Number(id));
-      }),
+      list: allowed,
       identity,
       isColaborador: true,
-      filtered: true,
+      filtered: true
     };
   }
 
   function markActive(val) {
     wrap.querySelectorAll('.inst-pill').forEach(b => {
       const isActive = (b.dataset.value || '') === (val || '');
+
       b.classList.toggle('is-active', isActive);
       b.setAttribute('aria-pressed', isActive ? 'true' : 'false');
       b.setAttribute('aria-selected', isActive ? 'true' : 'false');
@@ -605,9 +509,15 @@
   };
 
   function applyInstance(value) {
-    window.setInstanciaAtiva?.(value === '' ? null : String(value), { reloadList: true });
+    window.setInstanciaAtiva?.(value === '' ? null : String(value), {
+      reloadList: true
+    });
+
     markActive(value || '');
-    try { window.zcUpdateInstBadge?.(); } catch {}
+
+    try {
+      window.zcUpdateInstBadge?.();
+    } catch {}
   }
 
   function saveSelection(value, label) {
@@ -635,13 +545,16 @@
 
   function pill({ label, value, active, muted }) {
     const b = document.createElement('button');
+
     b.type = 'button';
     b.className = 'inst-pill' + (active ? ' is-active' : '') + (muted ? ' is-muted' : '');
     b.textContent = label;
     b.title = `Selecionar ${label}`;
+
     b.dataset.value = String(value ?? '');
     b.dataset.label = String(label ?? '');
     b.dataset.instanciaId = String(value ?? '');
+
     b.setAttribute('aria-pressed', active ? 'true' : 'false');
     b.setAttribute('aria-selected', active ? 'true' : 'false');
 
@@ -662,7 +575,11 @@
 
     const label = document.createElement('div');
     label.className = 'inst-section-label';
-    label.innerHTML = `<span class="dot"></span><span>WhatsApps</span><span class="inst-section-count"> (0)</span>`;
+    label.innerHTML = `
+      <span class="dot"></span>
+      <span>WhatsApps</span>
+      <span class="inst-section-count"> (0)</span>
+    `;
     wrap.appendChild(label);
 
     const empty = document.createElement('div');
@@ -692,16 +609,15 @@
         .filter(Boolean)
     );
 
-    // Se LAST aponta para uma instância que o colaborador não pode mais ver, limpa.
     if (LAST && !values.has(String(LAST))) {
       LAST = '';
+
       try {
         localStorage.setItem(KEY_VAL(EMPRESA_ID), '');
         localStorage.removeItem(KEY_LABEL(EMPRESA_ID));
       } catch {}
     }
 
-    // Colaborador com uma única instância: seleciona automaticamente.
     if (isColaborador && list.length === 1) {
       const only = list[0];
       const value = getInstValue(only);
@@ -726,7 +642,11 @@
 
     const label = document.createElement('div');
     label.className = 'inst-section-label';
-    label.innerHTML = `<span class="dot"></span><span>WhatsApps</span><span class="inst-section-count"> (${list.length || 0})</span>`;
+    label.innerHTML = `
+      <span class="dot"></span>
+      <span>WhatsApps</span>
+      <span class="inst-section-count"> (${list.length || 0})</span>
+    `;
     wrap.appendChild(label);
 
     if (!list.length) {
@@ -740,7 +660,7 @@
         label: isColaborador ? 'Todos permitidos' : 'Todos',
         value: '',
         active: !LAST,
-        muted: isColaborador,
+        muted: isColaborador
       }));
     }
 
@@ -753,7 +673,7 @@
       wrap.appendChild(pill({
         label: labelTxt,
         value: String(value),
-        active: String(LAST) === String(value),
+        active: String(LAST) === String(value)
       }));
     });
 
@@ -766,7 +686,7 @@
       document.dispatchEvent(new CustomEvent('inst:list', {
         detail: {
           instancias: list,
-          filtrado_por_permissao: isColaborador,
+          filtrado_por_permissao: isColaborador
         }
       }));
     } catch {}
@@ -776,7 +696,9 @@
       localStorage.getItem(KEY_LABEL(EMPRESA_ID)) ||
       '';
 
-    if (LAST && cachedLabel) saveSelection(LAST, cachedLabel);
+    if (LAST && cachedLabel) {
+      saveSelection(LAST, cachedLabel);
+    }
 
     applyInstance(LAST || '');
   }
@@ -786,7 +708,11 @@
 
     const label = document.createElement('div');
     label.className = 'inst-section-label';
-    label.innerHTML = `<span class="dot"></span><span>WhatsApps</span><span class="inst-section-count"> (...)</span>`;
+    label.innerHTML = `
+      <span class="dot"></span>
+      <span>WhatsApps</span>
+      <span class="inst-section-count"> (...)</span>
+    `;
     wrap.appendChild(label);
 
     const loading = document.createElement('div');
@@ -800,6 +726,7 @@
     renderLoading();
 
     const result = await filterInstancesByPermission(rawList);
+
     renderFiltered(result.list, result);
   }
 
@@ -809,14 +736,19 @@
     }
 
     try {
-      const r = await fetch(`/api/empresas/${EMPRESA_ID}/whatsapp`, {
+      const r = await fetch(`/api/empresas/${EMPRESA_ID}/whatsapp?__ts=${Date.now()}`, {
         credentials: 'include',
-        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        headers: {
+          Accept: 'application/json',
+          'Cache-Control': 'no-cache'
+        }
       });
 
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
 
       const j = await r.json();
+
       const list = Array.isArray(j?.instancias)
         ? j.instancias
         : (Array.isArray(j) ? j : []);

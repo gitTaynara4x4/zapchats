@@ -647,13 +647,7 @@ def upsert_whatsapp_identities_from_contacts(
     origem: str,
     commit: bool = False,
 ) -> int:
-    """
-    Salva todos os contacts.upsert/update e depois tenta vincular LID -> real_jid.
 
-    A versão nova da Evolution manda coisas assim:
-    186457499152524@lid -> Taynara
-    553186419237@s.whatsapp.net -> Taynara
-    """
     total = 0
 
     for c in contatos or []:
