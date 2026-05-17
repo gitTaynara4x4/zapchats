@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Optional, Tuple, Any, Dict, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -130,6 +130,19 @@ def _epoch_from_dt(dt: datetime) -> int:
         return int(dt.timestamp())
     except Exception:
         return 0
+
+
+def _day_bounds_utc(target_date: date) -> Tuple[datetime, datetime]:
+    """
+    Recebe uma data YYYY-MM-DD e gera o intervalo do dia em UTC.
+
+    Observação:
+    - Mensagens 1:1 usam timestamp datetime.
+    - Mensagens de grupo usam timestamp epoch.
+    """
+    start_dt = datetime.combine(target_date, time.min).replace(tzinfo=timezone.utc)
+    end_dt = start_dt + timedelta(days=1)
+    return start_dt, end_dt
 
 
 # =========================================================
@@ -612,6 +625,395 @@ def _build_participacao_state(
         "exigir_aceite": True,
         "aceite_obrigatorio": True,
         "aguardando_aceite": aguardando_aceite,
+    }
+
+
+# =========================================================
+# REST: buscar mensagens por data
+# =========================================================
+@router.get("/conversas/{cliente_id}/mensagens/por-data")
+def listar_mensagens_por_data(
+    cliente_id: int,
+    data: date = Query(..., description="Data no formato YYYY-MM-DD."),
+    empresa_id: int | None = Query(None, description="(Opcional) Empresa. Se omitido, usa a do token."),
+    limit: int = Query(200, ge=1, le=500),
+    instancia_id: int | None = Query(None, description="(Opcional) Filtra mensagens por instância id numérico"),
+    instance: str | None = Query(None, description="(Opcional) Filtra mensagens por instância slug/nome"),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    """
+    Busca mensagens de uma conversa em uma data específica.
+
+    Usado pelo front para o botão:
+      "Ir para uma data"
+
+    Retorna:
+      - Cliente 1:1 quando cliente_id existir em clientes.
+      - Grupo quando o mesmo id existir em grupos.
+    """
+    ensure_perm(identity, "atendimento.ver")
+
+    empresa_id_eff = assert_same_company(identity, empresa_id)
+    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
+    allowed_instancias = acl_ctx["allowed_instancias"]
+    current_colab_id = _get_colab_id(identity)
+
+    start_dt, end_dt = _day_bounds_utc(data)
+    start_epoch = _epoch_from_dt(start_dt)
+    end_epoch = _epoch_from_dt(end_dt)
+
+    resolved_inst_id, resolved_inst_name = _resolve_instancia_id(
+        db,
+        empresa_id=empresa_id_eff,
+        instancia_id=instancia_id,
+        instance=instance,
+    )
+
+    if (instancia_id is not None or instance) and resolved_inst_id is None:
+        raise HTTPException(status_code=404, detail="Instância não encontrada para a empresa.")
+
+    if resolved_inst_id is not None:
+        assert_instancia_allowed(
+            allowed_instancias=allowed_instancias,
+            instancia_id=resolved_inst_id,
+        )
+
+    # ============================================
+    # 1) tenta como CLIENTE
+    # ============================================
+    cli = (
+        db.query(models.Cliente)
+        .filter(
+            models.Cliente.id == int(cliente_id),
+            models.Cliente.empresa_id == int(empresa_id_eff),
+        )
+        .first()
+    )
+
+    if cli:
+        cliente_acl, atendimento_acl = assert_cliente_access(
+            db,
+            identity=identity,
+            empresa_id=empresa_id_eff,
+            cliente_id=int(cliente_id),
+            instancia_id=resolved_inst_id,
+            allow_unassigned_department=True,
+        )
+
+        instancia_filters = []
+
+        if resolved_inst_id is not None:
+            instancia_filters.append(models.Mensagem.instancia_id == int(resolved_inst_id))
+        else:
+            if allowed_instancias is not None:
+                if not allowed_instancias:
+                    return {
+                        "ok": True,
+                        "found": False,
+                        "target_date": data.isoformat(),
+                        "conversa": None,
+                        "items": [],
+                        "mensagens": [],
+                    }
+
+                instancia_filters.append(
+                    models.Mensagem.instancia_id.in_([int(x) for x in allowed_instancias])
+                )
+
+        q = (
+            db.query(
+                models.Mensagem.id,
+                models.Mensagem.msg_id,
+                models.Mensagem.conteudo,
+                models.Mensagem.tipo,
+                models.Mensagem.ack,
+                models.Mensagem.timestamp,
+                models.Mensagem.instancia_id,
+                models.Mensagem.quoted,
+                models.Mensagem.quoted_preview,
+                models.EmpresaInstancia.instance_name.label("instance_name"),
+                models.Mensagem.apagada_cliente,
+                models.Mensagem.apagada_usuario,
+            )
+            .outerjoin(
+                models.EmpresaInstancia,
+                models.EmpresaInstancia.id == models.Mensagem.instancia_id,
+            )
+            .filter(
+                models.Mensagem.empresa_id == int(empresa_id_eff),
+                models.Mensagem.cliente_id == int(cliente_id),
+                models.Mensagem.apagada_usuario == False,  # noqa: E712
+                models.Mensagem.timestamp >= start_dt,
+                models.Mensagem.timestamp < end_dt,
+                *instancia_filters,
+            )
+            .order_by(models.Mensagem.timestamp.asc(), models.Mensagem.id.asc())
+            .limit(int(limit))
+        )
+
+        rows = q.all()
+
+        effective_inst_id, effective_inst_name = _pick_effective_instancia_from_rows(
+            resolved_inst_id=resolved_inst_id,
+            resolved_inst_name=resolved_inst_name,
+            rows=list(rows),
+            fallback_inst_id=(
+                _to_int(getattr(atendimento_acl, "instancia_id", None))
+                if atendimento_acl is not None
+                else _to_int(getattr(cliente_acl, "instancia_id", None))
+            ),
+            fallback_inst_name=resolved_inst_name,
+        )
+
+        conv_fields = _conversation_payload_fields(
+            kind="c",
+            entity_id=int(cliente_acl.id),
+            instancia_id=effective_inst_id,
+        )
+
+        items = []
+
+        for r in rows:
+            ts_iso = _iso_utc(r.timestamp) if r.timestamp is not None else None
+            row_conv_key = _conv_ref_cliente(int(cliente_acl.id), r.instancia_id or effective_inst_id)
+
+            items.append(
+                {
+                    "id": int(r.id),
+                    "msg_id": r.msg_id,
+                    "conteudo": r.conteudo,
+                    "tipo": r.tipo,
+                    "ack": r.ack,
+                    "timestamp": ts_iso,
+                    "instancia_id": r.instancia_id,
+                    "instance_name": r.instance_name,
+                    "quoted": r.quoted,
+                    "quoted_preview": r.quoted_preview,
+                    "apagada_cliente": bool(r.apagada_cliente),
+                    "apagada_usuario": bool(r.apagada_usuario),
+                    "is_group": False,
+                    "conversation_key": row_conv_key,
+                    "conversation_id": row_conv_key,
+                    "kind": "c",
+                    "entity_id": int(cliente_acl.id),
+                    "cliente_id": int(cliente_acl.id),
+                }
+            )
+
+        telefone_br = _format_phone_br(getattr(cliente_acl, "telefone", None))
+        telefone_norm = _normalize_phone(getattr(cliente_acl, "telefone", None))
+
+        operador_id = getattr(atendimento_acl, "operador_id", None) if atendimento_acl is not None else None
+        operador_nome = _nome_colaborador(db, operador_id) if operador_id is not None else None
+        status_atd = getattr(atendimento_acl, "status", None) if atendimento_acl is not None else None
+
+        fila_state = _fila_state_for_atendimento(
+            db,
+            atendimento=atendimento_acl,
+        )
+
+        part_state = _build_participacao_state(
+            db,
+            atendimento=atendimento_acl,
+            current_colab_id=current_colab_id,
+            is_group=False,
+            exigir_aceite=bool(fila_state.get("exigir_aceite")),
+        )
+
+        conversa = {
+            "id": int(cliente_acl.id),
+            **conv_fields,
+            "is_group": False,
+            "telefone": getattr(cliente_acl, "telefone", None),
+            "telefone_norm": telefone_norm,
+            "telefone_fmt": telefone_br,
+            "nome": getattr(cliente_acl, "nome", None),
+            "push_name": getattr(cliente_acl, "nome_whatsapp", None),
+            "nome_whatsapp": getattr(cliente_acl, "nome_whatsapp", None),
+            "avatar_url": _public_avatar_url(
+                kind="cliente",
+                conversation_id=int(cliente_acl.id),
+                raw_avatar_url=getattr(cliente_acl, "avatar_url", None),
+            ),
+            "instancia_id": effective_inst_id,
+            "instance_name": effective_inst_name,
+            "atendimento_id": getattr(atendimento_acl, "id", None) if atendimento_acl else None,
+            "departamento_id": (
+                getattr(atendimento_acl, "departamento_id", None)
+                if atendimento_acl is not None
+                else getattr(cliente_acl, "departamento_id", None)
+            ),
+            "operador_id": operador_id,
+            "operador_nome": operador_nome,
+            "status": status_atd.value if hasattr(status_atd, "value") else status_atd,
+            **fila_state,
+            **part_state,
+        }
+
+        return {
+            "ok": True,
+            "found": bool(items),
+            "target_date": data.isoformat(),
+            "start_ts": _iso_utc(start_dt),
+            "end_ts": _iso_utc(end_dt),
+            "conversa": conversa,
+            "items": items,
+            "mensagens": items,
+        }
+
+    # ============================================
+    # 2) fallback: tenta como GRUPO
+    # ============================================
+    grp = (
+        db.query(models.Grupo)
+        .filter(
+            models.Grupo.id == int(cliente_id),
+            models.Grupo.empresa_id == int(empresa_id_eff),
+        )
+        .first()
+    )
+
+    if not grp:
+        raise HTTPException(status_code=404, detail="Conversa não encontrada nessa empresa.")
+
+    instancia_filters_g = []
+
+    if resolved_inst_id is not None:
+        instancia_filters_g.append(models.MensagemGrupo.instancia_id == int(resolved_inst_id))
+    else:
+        if allowed_instancias is not None:
+            if not allowed_instancias:
+                return {
+                    "ok": True,
+                    "found": False,
+                    "target_date": data.isoformat(),
+                    "conversa": None,
+                    "items": [],
+                    "mensagens": [],
+                }
+
+            instancia_filters_g.append(
+                models.MensagemGrupo.instancia_id.in_([int(x) for x in allowed_instancias])
+            )
+
+    qg = (
+        db.query(
+            models.MensagemGrupo.id,
+            models.MensagemGrupo.msg_id,
+            models.MensagemGrupo.conteudo,
+            models.MensagemGrupo.tipo,
+            models.MensagemGrupo.ack,
+            models.MensagemGrupo.timestamp,
+            models.MensagemGrupo.instancia_id,
+            models.MensagemGrupo.quoted,
+            models.MensagemGrupo.quoted_preview,
+            models.EmpresaInstancia.instance_name.label("instance_name"),
+            models.MensagemGrupo.author_jid,
+            models.MensagemGrupo.from_me,
+            models.MensagemGrupo.message_type,
+        )
+        .outerjoin(
+            models.EmpresaInstancia,
+            models.EmpresaInstancia.id == models.MensagemGrupo.instancia_id,
+        )
+        .filter(
+            models.MensagemGrupo.empresa_id == int(empresa_id_eff),
+            models.MensagemGrupo.grupo_id == int(grp.id),
+            models.MensagemGrupo.timestamp >= int(start_epoch),
+            models.MensagemGrupo.timestamp < int(end_epoch),
+            *instancia_filters_g,
+        )
+        .order_by(models.MensagemGrupo.id.asc())
+        .limit(int(limit))
+    )
+
+    rows_g = qg.all()
+
+    effective_inst_id_g, effective_inst_name_g = _pick_effective_instancia_from_rows(
+        resolved_inst_id=resolved_inst_id,
+        resolved_inst_name=resolved_inst_name,
+        rows=list(rows_g),
+        fallback_inst_id=_to_int(getattr(grp, "instancia_id", None)),
+        fallback_inst_name=resolved_inst_name,
+    )
+
+    conv_fields_g = _conversation_payload_fields(
+        kind="g",
+        entity_id=int(grp.id),
+        instancia_id=effective_inst_id_g,
+    )
+
+    items_g = []
+
+    for r in rows_g:
+        try:
+            ts_iso = datetime.fromtimestamp(int(r.timestamp or 0), tz=timezone.utc).isoformat(timespec="microseconds")
+        except Exception:
+            ts_iso = None
+
+        row_conv_key = _conv_ref_grupo(int(grp.id), r.instancia_id or effective_inst_id_g)
+
+        items_g.append(
+            {
+                "id": int(r.id),
+                "msg_id": r.msg_id,
+                "conteudo": r.conteudo,
+                "tipo": r.tipo,
+                "ack": r.ack,
+                "timestamp": ts_iso,
+                "instancia_id": r.instancia_id,
+                "instance_name": r.instance_name,
+                "quoted": r.quoted,
+                "quoted_preview": r.quoted_preview,
+                "author_jid": r.author_jid,
+                "from_me": bool(r.from_me),
+                "message_type": r.message_type,
+                "apagada_cliente": False,
+                "apagada_usuario": False,
+                "is_group": True,
+                "grupo_id": int(grp.id),
+                "conversation_key": row_conv_key,
+                "conversation_id": row_conv_key,
+                "kind": "g",
+                "entity_id": int(grp.id),
+            }
+        )
+
+    part_state_g = _build_participacao_state(
+        db,
+        atendimento=None,
+        current_colab_id=current_colab_id,
+        is_group=True,
+        exigir_aceite=False,
+    )
+
+    conversa_g = {
+        "id": int(grp.id),
+        **conv_fields_g,
+        "is_group": True,
+        "remote_jid": getattr(grp, "remote_jid", None),
+        "nome": getattr(grp, "nome", None),
+        "avatar_url": _public_avatar_url(
+            kind="grupo",
+            conversation_id=int(grp.id),
+            raw_avatar_url=getattr(grp, "avatar_url", None),
+        ),
+        "instancia_id": effective_inst_id_g,
+        "instance_name": effective_inst_name_g,
+        **_default_fila_state(),
+        **part_state_g,
+    }
+
+    return {
+        "ok": True,
+        "found": bool(items_g),
+        "target_date": data.isoformat(),
+        "start_ts": _iso_utc(start_dt),
+        "end_ts": _iso_utc(end_dt),
+        "conversa": conversa_g,
+        "items": items_g,
+        "mensagens": items_g,
     }
 
 

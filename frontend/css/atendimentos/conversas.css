@@ -7,8 +7,11 @@
   min-height:0;
   overflow-y:auto;
   list-style:none;
-  padding:0 0 6px;
   margin:0;
+  padding:6px 8px 10px;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
 }
 
 /* =========================
@@ -210,30 +213,45 @@ html[data-theme="light"] .logo-dark{ display:none; }
    ========================= */
 
 .chat-item{
+  min-height:72px;
   display:flex;
   align-items:center;
-  gap:10px;
-  padding:10px 14px;
+  gap:12px;
+  padding:9px 10px;
+  margin:0;
   cursor:pointer;
-  transition:background .14s;
-  border-bottom:1px solid color-mix(in oklab, var(--border) 58%, transparent);
+  transition:background .12s ease;
+  border:0;
+  border-radius:12px;
   background:transparent;
 }
 
-.chat-item:hover,
-.chat-active{
-  background:color-mix(in oklab, var(--panel-2) 48%, transparent);
+.chat-item:hover{
+  background:rgba(255,255,255,.045);
+}
+
+.chat-active,
+.chat-item.chat-active,
+.chat-item.active,
+.chat-item.ativo,
+.chat-item.is-active{
+  background:#2a3942;
 }
 
 .chat-text{
   flex:1;
   min-width:0;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  gap:4px;
 }
 
 .chat-name{
-  font-size:.98rem;
-  font-weight:590;
-  color:var(--text);
+  font-size:15.5px;
+  line-height:1.22;
+  font-weight:500;
+  color:#e9edef;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
@@ -243,9 +261,11 @@ html[data-theme="light"] .logo-dark{ display:none; }
   display:flex;
   align-items:center;
   min-width:0;
-  margin-top:2px;
-  color:color-mix(in oklab, var(--text-2) 94%, transparent);
-  font-size:.89rem;
+  margin-top:0;
+  color:#aebac1;
+  font-size:14px;
+  line-height:1.25;
+  font-weight:400;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
@@ -264,14 +284,16 @@ html[data-theme="light"] .logo-dark{ display:none; }
   display:flex;
   flex-direction:column;
   align-items:flex-end;
-  justify-content:flex-start;
-  gap:4px;
+  justify-content:center;
+  gap:6px;
   text-align:right;
 }
 
 .chat-time{
-  color:#96a3aa;
-  font-size:.86em;
+  color:#8696a0;
+  font-size:12px;
+  line-height:1.2;
+  font-weight:400;
   white-space:nowrap;
 }
 
@@ -282,21 +304,21 @@ html[data-theme="light"] .logo-dark{ display:none; }
 .badge{
   min-width:19px;
   height:19px;
-  padding:0 5px;
+  padding:0 6px;
   display:inline-flex;
   align-items:center;
   justify-content:center;
   border-radius:999px;
   background:#25d366;
-  color:#0b141a;
-  font-size:11px;
-  font-weight:700;
-  line-height:1;
+  color:#06130a;
+  font-size:12px;
+  font-weight:600;
+  line-height:19px;
   white-space:nowrap;
 }
 
 .chat-meta .badge{
-  margin-top:4px;
+  margin-top:0;
   margin-left:auto;
 }
 
@@ -305,9 +327,11 @@ html[data-theme="light"] .logo-dark{ display:none; }
    ========================= */
 
 .avatar{
-  width:40px;
-  height:40px;
-  margin-right:8px;
+  width:48px;
+  height:48px;
+  min-width:48px;
+  max-width:48px;
+  margin-right:0;
   display:flex;
   align-items:center;
   justify-content:center;
@@ -317,7 +341,7 @@ html[data-theme="light"] .logo-dark{ display:none; }
   font-weight:bold;
   font-size:15px;
   color:var(--muted);
-  flex:0 0 auto;
+  flex:0 0 48px;
 }
 
 .avatar img{
@@ -331,7 +355,7 @@ html[data-theme="light"] .logo-dark{ display:none; }
   box-shadow:none;
 }
 
-/* Avatar sem foto estilo WhatsApp Web */
+/* Avatar sem foto base */
 .avatar.placeholder,
 .avatar.avatar-default,
 #chat-avatar .avatar.placeholder,
@@ -359,44 +383,63 @@ html[data-theme="light"] .logo-dark{ display:none; }
   content:"\f007";
 }
 
-/* Cores fixas por conversa.
-   A classe avatar-color-X vem do clientes.js baseada no conversation_key.
-   Assim a cor não muda com F5, mensagem nova ou mudança de posição. */
+/* =========================
+   CORES FIXAS POR CONVERSA
+   LISTA + HEADER DO CHAT
+   ========================= */
 
+/* Verde */
 #lista-clientes .chat-item.avatar-color-1 .avatar.placeholder,
-#lista-clientes .chat-item.avatar-color-1 .avatar.avatar-default{
-  background:#123f2c;
-  color:#35d979;
+#lista-clientes .chat-item.avatar-color-1 .avatar.avatar-default,
+#chat-avatar.avatar-color-1 .avatar.placeholder,
+#chat-avatar.avatar-color-1 .avatar.avatar-default{
+  background:#123f2c !important;
+  color:#35d979 !important;
 }
 
+/* Azul */
 #lista-clientes .chat-item.avatar-color-2 .avatar.placeholder,
-#lista-clientes .chat-item.avatar-color-2 .avatar.avatar-default{
-  background:#1d2f55;
-  color:#6ea8ff;
+#lista-clientes .chat-item.avatar-color-2 .avatar.avatar-default,
+#chat-avatar.avatar-color-2 .avatar.placeholder,
+#chat-avatar.avatar-color-2 .avatar.avatar-default{
+  background:#1d2f55 !important;
+  color:#6ea8ff !important;
 }
 
+/* Roxo */
 #lista-clientes .chat-item.avatar-color-3 .avatar.placeholder,
-#lista-clientes .chat-item.avatar-color-3 .avatar.avatar-default{
-  background:#33245f;
-  color:#a78bfa;
+#lista-clientes .chat-item.avatar-color-3 .avatar.avatar-default,
+#chat-avatar.avatar-color-3 .avatar.placeholder,
+#chat-avatar.avatar-color-3 .avatar.avatar-default{
+  background:#33245f !important;
+  color:#a78bfa !important;
 }
 
+/* Rosa */
 #lista-clientes .chat-item.avatar-color-4 .avatar.placeholder,
-#lista-clientes .chat-item.avatar-color-4 .avatar.avatar-default{
-  background:#552436;
-  color:#fb7185;
+#lista-clientes .chat-item.avatar-color-4 .avatar.avatar-default,
+#chat-avatar.avatar-color-4 .avatar.placeholder,
+#chat-avatar.avatar-color-4 .avatar.avatar-default{
+  background:#552436 !important;
+  color:#fb7185 !important;
 }
 
+/* Amarelo */
 #lista-clientes .chat-item.avatar-color-5 .avatar.placeholder,
-#lista-clientes .chat-item.avatar-color-5 .avatar.avatar-default{
-  background:#4a3516;
-  color:#fbbf24;
+#lista-clientes .chat-item.avatar-color-5 .avatar.avatar-default,
+#chat-avatar.avatar-color-5 .avatar.placeholder,
+#chat-avatar.avatar-color-5 .avatar.avatar-default{
+  background:#4a3516 !important;
+  color:#fbbf24 !important;
 }
 
+/* Ciano */
 #lista-clientes .chat-item.avatar-color-6 .avatar.placeholder,
-#lista-clientes .chat-item.avatar-color-6 .avatar.avatar-default{
-  background:#173f46;
-  color:#22d3ee;
+#lista-clientes .chat-item.avatar-color-6 .avatar.avatar-default,
+#chat-avatar.avatar-color-6 .avatar.placeholder,
+#chat-avatar.avatar-color-6 .avatar.avatar-default{
+  background:#173f46 !important;
+  color:#22d3ee !important;
 }
 
 /* Avatar do header quando não tem foto */
@@ -404,9 +447,10 @@ html[data-theme="light"] .logo-dark{ display:none; }
 #chat-avatar .avatar.avatar-default{
   width:40px;
   height:40px;
+  min-width:40px;
+  max-width:40px;
+  flex:0 0 40px;
   margin-right:0;
-  background:#123f2c;
-  color:#35d979;
 }
 
 /* Tema claro */
@@ -415,6 +459,31 @@ html[data-theme="light"] .avatar.avatar-default,
 html[data-theme="light"] #chat-avatar .avatar.placeholder,
 html[data-theme="light"] #chat-avatar .avatar.avatar-default{
   box-shadow:inset 0 0 0 1px rgba(15,23,42,.07);
+}
+
+/* =========================
+   TEMA CLARO LISTA
+   ========================= */
+
+html[data-theme="light"] .chat-item:hover{
+  background:#f0f2f5;
+}
+
+html[data-theme="light"] .chat-active,
+html[data-theme="light"] .chat-item.chat-active,
+html[data-theme="light"] .chat-item.active,
+html[data-theme="light"] .chat-item.ativo,
+html[data-theme="light"] .chat-item.is-active{
+  background:#e9edef;
+}
+
+html[data-theme="light"] .chat-name{
+  color:#111b21;
+}
+
+html[data-theme="light"] .chat-last,
+html[data-theme="light"] .chat-time{
+  color:#667781;
 }
 
 /* =========================
@@ -478,6 +547,8 @@ html[data-theme="light"] #chat-avatar .avatar.avatar-default{
 .sr-item .avatar{
   width:40px;
   height:40px;
+  min-width:40px;
+  max-width:40px;
   margin-right:0;
   border-radius:50%;
   overflow:hidden;
@@ -485,6 +556,7 @@ html[data-theme="light"] #chat-avatar .avatar.avatar-default{
   display:flex;
   align-items:center;
   justify-content:center;
+  flex:0 0 40px;
 }
 
 .search-item .avatar.placeholder,
@@ -636,9 +708,9 @@ html[data-theme="light"] #chat-avatar .avatar.avatar-default{
 .cliente-item.is-pinned,
 .list-item.is-pinned,
 li.is-pinned{
-  border:1px solid color-mix(in oklab, #facc15 28%, transparent);
-  border-radius:10px;
-  margin:4px 8px;
+  border:0;
+  border-radius:12px;
+  margin:0;
 }
 
 .chat-item.is-pinned .chat-name::after{
@@ -1172,6 +1244,28 @@ button#btnKebabHeader{
   .zc-inst-option{
     padding:9px 10px;
     font-size:12.5px;
+  }
+
+  .chat-item{
+    min-height:70px;
+    padding:8px 10px;
+    gap:11px;
+  }
+
+  .avatar{
+    width:46px;
+    height:46px;
+    min-width:46px;
+    max-width:46px;
+    flex-basis:46px;
+  }
+
+  .chat-name{
+    font-size:15px;
+  }
+
+  .chat-last{
+    font-size:13.5px;
   }
 }
 

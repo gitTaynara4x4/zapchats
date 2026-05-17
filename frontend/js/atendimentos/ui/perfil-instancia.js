@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 'zc-perfil-instancia-v10-front-conta-clean';
+  const VERSION = 'zc-perfil-instancia-v11-no-chat-header-click';
   const LS_PREFIX = 'zc:perfil-instancia:v2:';
   const PERFIL_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
 
@@ -2708,6 +2708,21 @@
   function shouldOpenConversaFromClick(target) {
     if (!target) return false;
 
+    /*
+      IMPORTANTE:
+      Foto/nome do header (#chat-avatar / #chat-title) pertencem ao perfil.js
+      através do perfil_quick.js, que chama window.abrirPerfilAtual().
+
+      Este arquivo (perfil-instancia.js) NÃO pode capturar esse clique,
+      senão abre o perfil da instância/conversa e bloqueia o perfil.js.
+
+      Aqui só abrimos perfil-instancia quando algum elemento pedir
+      explicitamente com data-open-perfil-instancia ou .js-open-perfil-instancia.
+    */
+    if (target.closest('#chat-avatar')) return false;
+    if (target.closest('#chat-title')) return false;
+    if (target.closest('[data-open-contact-drawer="1"]')) return false;
+
     if (target.closest('#btn-sobre')) return false;
     if (target.closest('#btnTransferirDepartamento')) return false;
     if (target.closest('.chat-header-actions')) return false;
@@ -2716,8 +2731,6 @@
     if (target.closest('.zc-chat-icon-btn')) return false;
 
     return !!(
-      target.closest('#chat-avatar') ||
-      target.closest('#chat-title') ||
       target.closest('[data-open-perfil-instancia]') ||
       target.closest('.js-open-perfil-instancia')
     );

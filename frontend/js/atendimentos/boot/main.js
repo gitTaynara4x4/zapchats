@@ -9,12 +9,15 @@
  * - evitar boot duplicado
  * - reduzir risco de loops/requisições duplicadas
  * - manter comportamento tipo WhatsApp: mensagem nova continua chegando via realtime
+ * - carregar media-render dividido em módulos menores
+ * - carregar header-actions dividido em módulos menores
+ * - manter conversa aberta marcada na lista lateral
  * ==================================================================== */
 
 (function () {
   'use strict';
 
-  const MAIN_VERSION = 'zc-atendimentos-main-v2-anti-loop-settings-pages';
+  const MAIN_VERSION = 'zc-atendimentos-main-v5-media-render-header-actions-split';
 
   /*
     Se este arquivo for carregado duas vezes por engano
@@ -73,13 +76,31 @@
     await import('../domain/historico.js');
     await import('../domain/instances.js');
 
-    // -------- MEDIA ---------------------------------------------------
-    await import('../ui/media-render.js');
+    // -------- MEDIA RENDER DIVIDIDO ----------------------------------
+    /*
+      Media render dividido.
+      IMPORTANTE:
+      - Não carregar mais ../ui/media-render.js antigo junto.
+      - A ordem abaixo precisa ser mantida.
+    */
+    await import('../ui/media-render/core.js');
+    await import('../ui/media-render/css.js');
+    await import('../ui/media-render/urls.js');
+    await import('../ui/media-render/avatars.js');
+    await import('../ui/media-render/icons.js');
+    await import('../ui/media-render/audio.js');
+    await import('../ui/media-render/fallbacks.js');
+    await import('../ui/media-render/markers.js');
+    await import('../ui/media-render/gallery.js');
+    await import('../ui/media-render/quoted.js');
+    await import('../ui/media-render/viewer.js');
+    await import('../ui/media-render/render-message.js');
+    await import('../ui/media-render/boot.js');
 
     // -------- REALTIME -----------------------------------------------
     await import('../realtime/ws-empresa.js');
 
-    // -------- UI ------------------------------------------------------
+    // -------- UI BASE -------------------------------------------------
     await import('../ui/splash.js');
     await import('../ui/envio.js');
     await import('../ui/notif.js');
@@ -104,6 +125,7 @@
     await import('../ui/atalhos-teclado.js');
     await import('../ui/ajuda-feedback.js');
 
+    // -------- UI DO ATENDIMENTO --------------------------------------
     await import('../ui/search.js');
     await import('../ui/inst-switch.js');
     await import('../ui/notes-drawer.js');
@@ -111,9 +133,36 @@
     await import('../ui/context-menu.js');
     await import('../ui/new-chat.js');
     await import('../ui/filtros.js');
+
+    /*
+      Mantém a conversa aberta marcada na lista lateral.
+      Isso não mexe em backend, não recarrega lista e não altera cache.
+      Só sincroniza classes visuais:
+      active / is-active / chat-active.
+    */
+    await import('../ui/lista-active-sync.js');
+
     await import('../ui/apagar.js');
     await import('../ui/transferir-departamento.js');
-    await import('../ui/header-actions.js');
+
+    /*
+      Header actions dividido.
+      IMPORTANTE:
+      - Não carregar mais ../ui/header-actions.js antigo junto.
+      - A ordem abaixo precisa ser mantida.
+    */
+    await import('../ui/header-actions/core.js');
+    await import('../ui/header-actions/conversation.js');
+    await import('../ui/header-actions/media.js');
+    await import('../ui/header-actions/send-api.js');
+    await import('../ui/header-actions/buttons.js');
+    await import('../ui/header-actions/date-jump.js');
+    await import('../ui/header-actions/search.js');
+    await import('../ui/header-actions/select-mode.js');
+    await import('../ui/header-actions/forward.js');
+    await import('../ui/header-actions/menu.js');
+    await import('../ui/header-actions/boot.js');
+
     await import('../ui/message-actions.js');
     await import('../ui/aceitar-conversa.js');
     await import('../ui/message-selection.js');
@@ -168,6 +217,7 @@
 
       try {
         const splash = document.getElementById('app-splash') || document.getElementById('splash');
+
         if (splash) {
           splash.innerHTML = `
             <div style="padding:18px;text-align:center;color:#fff">

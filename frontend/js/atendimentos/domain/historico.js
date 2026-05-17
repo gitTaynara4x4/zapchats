@@ -22,8 +22,19 @@ import { EMPRESA_ID } from '../core/env.js';
 import { getConversationKey, getConversationEntityId, getConversationKind } from '../state/store.js';
 
 // ✅ IMPORT CORRETO: media-render é UI
-import '../ui/media-render.js';
-
+import '../ui/media-render/core.js';
+import '../ui/media-render/css.js';
+import '../ui/media-render/urls.js';
+import '../ui/media-render/avatars.js';
+import '../ui/media-render/icons.js';
+import '../ui/media-render/audio.js';
+import '../ui/media-render/fallbacks.js';
+import '../ui/media-render/markers.js';
+import '../ui/media-render/gallery.js';
+import '../ui/media-render/quoted.js';
+import '../ui/media-render/viewer.js';
+import '../ui/media-render/render-message.js';
+import '../ui/media-render/boot.js';
 export const HISTORICO_LIMIT = 20;
 const H = () => document.getElementById('historico');
 
@@ -979,6 +990,47 @@ export function criarHTMLDaMensagem(m) {
   </div>`;
 }
 
+function isDateJumpScrollLocked() {
+  try {
+    const until = Number(window.__ZC_DATE_JUMP_LOCK_UNTIL || 0);
+
+    if (until && Date.now() < until) {
+      return true;
+    }
+
+    if (window.__ZC_DATE_JUMP_ACTIVE === true && until && Date.now() < until) {
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function scrollToBottomIfAllowed(hist, convKey, reason = '') {
+  if (!hist) return;
+
+  if (isDateJumpScrollLocked()) {
+    HLOG('auto-scroll para o fim bloqueado pelo calendário', {
+      convKey,
+      reason,
+    });
+    return;
+  }
+
+  try {
+    hist.scrollTop = hist.scrollHeight;
+  } catch {}
+}
+
+function scrollToBottomNextFrameIfAllowed(hist, convKey, reason = '') {
+  requestAnimationFrame(() => {
+    if (!isHistoricoStillOpenFor(convKey, hist)) return;
+
+    scrollToBottomIfAllowed(hist, convKey, reason);
+    armHistoricoScrollGuard();
+  });
+}
+
 /* =====================
    render histórico
    ===================== */
@@ -1028,12 +1080,8 @@ export function renderHistoricoDoCache(clienteId, append = false) {
     updateExistingRowsFromCache(hist, msgs);
     setHistLastDayKey(hist, lastDayKey);
 
-    hist.scrollTop = hist.scrollHeight;
-    requestAnimationFrame(() => {
-      if (!isHistoricoStillOpenFor(convKey, hist)) return;
-      try { hist.scrollTop = hist.scrollHeight; } catch {}
-      armHistoricoScrollGuard();
-    });
+    scrollToBottomIfAllowed(hist, convKey, 'render-total');
+    scrollToBottomNextFrameIfAllowed(hist, convKey, 'render-total-raf');
     setTimeout(() => armHistoricoScrollGuard(), 60);
   } else {
     if (!isHistoricoStillOpenFor(convKey, hist)) return;
@@ -1065,13 +1113,8 @@ export function renderHistoricoDoCache(clienteId, append = false) {
       stripAckReceived();
       updateExistingRowsFromCache(hist, msgs);
       setHistLastDayKey(hist, lastDayKey);
-      hist.scrollTop = hist.scrollHeight;
-
-      requestAnimationFrame(() => {
-        if (!isHistoricoStillOpenFor(convKey, hist)) return;
-        try { hist.scrollTop = hist.scrollHeight; } catch {}
-        armHistoricoScrollGuard();
-      });
+      scrollToBottomIfAllowed(hist, convKey, 'append-rebuild');
+      scrollToBottomNextFrameIfAllowed(hist, convKey, 'append-rebuild-raf');
 
       setTimeout(() => armHistoricoScrollGuard(), 60);
     } else {
@@ -1118,13 +1161,8 @@ export function renderHistoricoDoCache(clienteId, append = false) {
       }
 
       stripAckReceived();
-      hist.scrollTop = hist.scrollHeight;
-
-      requestAnimationFrame(() => {
-        if (!isHistoricoStillOpenFor(convKey, hist)) return;
-        try { hist.scrollTop = hist.scrollHeight; } catch {}
-        armHistoricoScrollGuard();
-      });
+      scrollToBottomIfAllowed(hist, convKey, 'append-rebuild');
+      scrollToBottomNextFrameIfAllowed(hist, convKey, 'append-rebuild-raf');
 
       setTimeout(() => armHistoricoScrollGuard(), 60);
     }

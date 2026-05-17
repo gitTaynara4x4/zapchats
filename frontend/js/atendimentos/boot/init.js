@@ -1032,7 +1032,7 @@ function updateOperatorBannerForConversation(conversationRef) {
   } catch {}
 }
 
-/* ================= Avatar fallback anti-404 ================= */
+/* ================= Avatar fallback anti-404 + proteção anti-foto trocada ================= */
 (function ensureAvatar404Guard() {
   if (window.__ZC_AVATAR_404_GUARD__) return;
   window.__ZC_AVATAR_404_GUARD__ = true;
@@ -1062,6 +1062,177 @@ function updateOperatorBannerForConversation(conversationRef) {
     return broken.has(String(url));
   };
 })();
+
+/*
+  Blindagem do avatar do header:
+  - ao abrir uma conversa nova, o avatar antigo é limpo imediatamente;
+  - foto só é aplicada se a conversa ainda for a mesma;
+  - se o cliente atual não tiver foto, sempre renderiza avatar padrão;
+  - evita foto da conversa anterior ficar presa no header.
+*/
+function escapeAttr(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function getHeaderConversationKey() {
+  const head = document.getElementById('chat-header');
+  const hist = document.getElementById('historico');
+
+  return (
+    head?.dataset?.conversationKey ||
+    head?.dataset?.conversationId ||
+    head?.dataset?.convKey ||
+    hist?.dataset?.conversationKey ||
+    hist?.dataset?.conversationId ||
+    hist?.dataset?.convKey ||
+    ''
+  );
+}
+
+function avatarDefaultHtml(ref = {}) {
+  return `
+    <span
+      class="avatar avatar-default"
+      data-conversation-key="${escapeAttr(ref.key || '')}"
+      data-cliente-id="${escapeAttr(ref.entityId || '')}"
+      data-instancia-id="${escapeAttr(ref.instId || '')}"
+    >
+      <i class="fa fa-user-circle text-2xl text-gray-400"></i>
+    </span>
+  `;
+}
+
+function avatarImageHtml(ref = {}, avatarUrl = '') {
+  const safeUrl = escapeAttr(avatarUrl);
+
+  return `
+    <span
+      class="avatar"
+      data-conversation-key="${escapeAttr(ref.key || '')}"
+      data-cliente-id="${escapeAttr(ref.entityId || '')}"
+      data-instancia-id="${escapeAttr(ref.instId || '')}"
+    >
+      <img
+        src="${safeUrl}"
+        alt=""
+        data-conversation-key="${escapeAttr(ref.key || '')}"
+        data-cliente-id="${escapeAttr(ref.entityId || '')}"
+        data-instancia-id="${escapeAttr(ref.instId || '')}"
+        onerror="window.handleAvatarError && window.handleAvatarError(this)"
+      >
+    </span>
+  `;
+}
+
+function isCurrentHeaderConversation(ref) {
+  if (!ref?.key) return false;
+
+  const currentKey = getHeaderConversationKey();
+
+  if (!currentKey) return true;
+
+  return String(currentKey) === String(ref.key);
+}
+
+function setHeaderAvatarDefault(ref) {
+  const av = document.getElementById('chat-avatar');
+  if (!av || !ref?.key) return false;
+
+  av.dataset.conversationKey = String(ref.key || '');
+  av.dataset.conversationId = String(ref.key || '');
+  av.dataset.convKey = String(ref.key || '');
+  av.dataset.clienteId = String(ref.entityId || '');
+  av.dataset.entityId = String(ref.entityId || '');
+
+  if (ref.instId) av.dataset.instanciaId = String(ref.instId);
+  else av.removeAttribute('data-instancia-id');
+
+  av.innerHTML = avatarDefaultHtml(ref);
+  return true;
+}
+
+function setHeaderAvatarImage(ref, avatarUrl) {
+  const av = document.getElementById('chat-avatar');
+  if (!av || !ref?.key) return false;
+
+  const url = String(avatarUrl || '').trim();
+
+  if (!url || (window.zcAvatarBroken && window.zcAvatarBroken(url))) {
+    return setHeaderAvatarDefault(ref);
+  }
+
+  if (!isCurrentHeaderConversation(ref)) {
+    return false;
+  }
+
+  av.dataset.conversationKey = String(ref.key || '');
+  av.dataset.conversationId = String(ref.key || '');
+  av.dataset.convKey = String(ref.key || '');
+  av.dataset.clienteId = String(ref.entityId || '');
+  av.dataset.entityId = String(ref.entityId || '');
+
+  if (ref.instId) av.dataset.instanciaId = String(ref.instId);
+  else av.removeAttribute('data-instancia-id');
+
+  av.innerHTML = avatarImageHtml(ref, url);
+  return true;
+}
+
+function setHeaderAvatarSafe(ref, avatarUrl = '') {
+  if (!ref?.key) return false;
+
+  if (!isCurrentHeaderConversation(ref)) {
+    return false;
+  }
+
+  const url = String(avatarUrl || '').trim();
+
+  if (url) {
+    return setHeaderAvatarImage(ref, url);
+  }
+
+  return setHeaderAvatarDefault(ref);
+}
+
+function setHeaderTitleSafe(ref, cliente = {}) {
+  if (!ref?.key || !isCurrentHeaderConversation(ref)) return false;
+
+  const t = document.getElementById('chat-title');
+  if (!t) return false;
+
+  t.textContent =
+    cliente.nome ||
+    cliente.nome_whatsapp ||
+    cliente.push_name ||
+    cliente.pushName ||
+    cliente.telefone ||
+    cliente.phone ||
+    '';
+
+  return true;
+}
+
+window.zcSetHeaderAvatarSafe = function zcSetHeaderAvatarSafe(refLike, avatarUrl = '', row = null) {
+  try {
+    const ref = parseConversationRef(refLike, row || (typeof refLike === 'object' ? refLike : null));
+    return setHeaderAvatarSafe(ref, avatarUrl);
+  } catch {
+    return false;
+  }
+};
+
+window.zcClearHeaderAvatarSafe = function zcClearHeaderAvatarSafe(refLike, row = null) {
+  try {
+    const ref = parseConversationRef(refLike, row || (typeof refLike === 'object' ? refLike : null));
+    return setHeaderAvatarDefault(ref);
+  } catch {
+    return false;
+  }
+};
 
 /* ================= Seleção de cliente + preparo da UI ================= */
 let selecionarClienteSeq = 0;
@@ -1258,29 +1429,20 @@ async function selecionarClienteObj(id, opts = {}) {
   const t = document.getElementById('chat-title');
   const av = document.getElementById('chat-avatar');
 
-  if (t) {
-    t.textContent =
-      c.nome ||
-      c.nome_whatsapp ||
-      c.push_name ||
-      c.pushName ||
-      c.telefone ||
-      c.phone ||
-      '';
-  }
+  /*
+    Proteção principal contra avatar trocado:
+    assim que a conversa é aberta, antes de qualquer fetch/render assíncrono,
+    já limpa a foto anterior e grava a conversation_key atual no header.
+  */
+  setHeaderTitleSafe(ref, c);
+  setHeaderAvatarDefault(ref);
 
   if (av) {
-    const avatarUrl = c.avatar_url ? String(c.avatar_url) : '';
-
-    if (avatarUrl && !(window.zcAvatarBroken && window.zcAvatarBroken(avatarUrl))) {
-      const safeUrl = avatarUrl.replace(/"/g, '&quot;');
-      av.innerHTML = `<span class="avatar"><img src="${safeUrl}" alt="" data-cliente-id="${String(ref.entityId || '')}"
-           onerror="window.handleAvatarError && window.handleAvatarError(this)"></span>`;
-    } else {
-      av.innerHTML =
-        `<span class="avatar avatar-default"><i class="fa fa-user-circle text-2xl text-gray-400"></i></span>`;
-    }
+    av.style.cursor = 'pointer';
   }
+
+  const avatarUrl = c.avatar_url ? String(c.avatar_url).trim() : '';
+  setHeaderAvatarSafe(ref, avatarUrl);
 
   try {
     const openPerfil = () => abrirPerfilAtual && abrirPerfilAtual(false);

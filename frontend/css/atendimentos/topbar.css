@@ -990,32 +990,6 @@ html:not(.dark)[data-theme="light"] #chat-footer .zc-claim-actions #btnLiberarCo
     line-height:1 !important;
   }
 
-  #chat-avatar{
-    flex:0 0 34px !important;
-    width:34px !important;
-    height:34px !important;
-    min-width:34px !important;
-    max-width:34px !important;
-    margin:0 !important;
-    display:inline-flex !important;
-    align-items:center !important;
-    justify-content:center !important;
-    overflow:hidden !important;
-  }
-
-  #chat-avatar .avatar,
-  #chat-avatar img,
-  #chat-avatar picture,
-  #chat-avatar svg{
-    width:34px !important;
-    height:34px !important;
-    min-width:34px !important;
-    max-width:34px !important;
-    border-radius:999px !important;
-    object-fit:cover !important;
-    margin:0 !important;
-  }
-
   #chat-title{
     flex:1 1 auto !important;
     min-width:0 !important;
@@ -1174,24 +1148,6 @@ html:not(.dark)[data-theme="light"] #chat-footer .zc-claim-actions #btnLiberarCo
     max-width:32px !important;
   }
 
-  #chat-avatar{
-    flex-basis:32px !important;
-    width:32px !important;
-    height:32px !important;
-    min-width:32px !important;
-    max-width:32px !important;
-  }
-
-  #chat-avatar .avatar,
-  #chat-avatar img,
-  #chat-avatar picture,
-  #chat-avatar svg{
-    width:32px !important;
-    height:32px !important;
-    min-width:32px !important;
-    max-width:32px !important;
-  }
-
   #chat-title{
     font-size:15px !important;
   }
@@ -1202,5 +1158,131 @@ html:not(.dark)[data-theme="light"] #chat-footer .zc-claim-actions #btnLiberarCo
     width:36px !important;
     min-width:36px !important;
     max-width:36px !important;
+  }
+}
+
+/* =========================================================
+   FIX DEFINITIVO — AVATAR DO HEADER
+   Foto e ícone sem foto sempre com o mesmo tamanho.
+   Também impede quadrado no fundo.
+   ========================================================= */
+
+#chat-avatar{
+  width:40px !important;
+  height:40px !important;
+  min-width:40px !important;
+  max-width:40px !important;
+  flex:0 0 40px !important;
+  margin:0 !important;
+  padding:0 !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  background:transparent !important;
+  border:0 !important;
+  border-radius:0 !important;
+  box-shadow:none !important;
+  overflow:visible !important;
+}
+
+#chat-avatar .avatar,
+#chat-avatar .avatar.placeholder,
+#chat-avatar .avatar.avatar-default,
+#chat-avatar img,
+#chat-avatar picture,
+#chat-avatar svg{
+  width:40px !important;
+  height:40px !important;
+  min-width:40px !important;
+  max-width:40px !important;
+  flex:0 0 40px !important;
+  margin:0 !important;
+  padding:0 !important;
+  border-radius:50% !important;
+  object-fit:cover !important;
+  overflow:hidden !important;
+}
+
+#chat-avatar .avatar,
+#chat-avatar .avatar.placeholder,
+#chat-avatar .avatar.avatar-default{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+}
+
+#chat-avatar .avatar i,
+#chat-avatar .avatar.placeholder i,
+#chat-avatar .avatar.avatar-default i{
+  font-size:16px !important;
+  line-height:1 !important;
+  margin:0 !important;
+}
+
+#chat-avatar > img{
+  display:block !important;
+}
+
+@media (max-width:920px){
+  #chat-avatar{
+    width:34px !important;
+    height:34px !important;
+    min-width:34px !important;
+    max-width:34px !important;
+    flex:0 0 34px !important;
+    background:transparent !important;
+    border-radius:0 !important;
+    overflow:visible !important;
+  }
+
+  #chat-avatar .avatar,
+  #chat-avatar .avatar.placeholder,
+  #chat-avatar .avatar.avatar-default,
+  #chat-avatar img,
+  #chat-avatar picture,
+  #chat-avatar svg{
+    width:34px !important;
+    height:34px !important;
+    min-width:34px !important;
+    max-width:34px !important;
+    flex:0 0 34px !important;
+    border-radius:50% !important;
+    object-fit:cover !important;
+    overflow:hidden !important;
+  }
+
+  #chat-avatar .avatar i,
+  #chat-avatar .avatar.placeholder i,
+  #chat-avatar .avatar.avatar-default i{
+    font-size:15px !important;
+  }
+}
+
+@media (max-width:420px){
+  #chat-avatar{
+    width:32px !important;
+    height:32px !important;
+    min-width:32px !important;
+    max-width:32px !important;
+    flex:0 0 32px !important;
+  }
+
+  #chat-avatar .avatar,
+  #chat-avatar .avatar.placeholder,
+  #chat-avatar .avatar.avatar-default,
+  #chat-avatar img,
+  #chat-avatar picture,
+  #chat-avatar svg{
+    width:32px !important;
+    height:32px !important;
+    min-width:32px !important;
+    max-width:32px !important;
+    flex:0 0 32px !important;
+  }
+
+  #chat-avatar .avatar i,
+  #chat-avatar .avatar.placeholder i,
+  #chat-avatar .avatar.avatar-default i{
+    font-size:14px !important;
   }
 }

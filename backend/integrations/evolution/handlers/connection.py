@@ -104,6 +104,15 @@ HISTORY_PENDING_FIRST_LOGIN_MAX_AGE_MIN = _int_env_value(
     180,
 )
 
+# Corrige lixo legado no banco:
+# se uma instância antiga já tinha numero_instancia salvo e ficou com
+# historico_restaurar=24h/7d/30d/all preso, o connection.open limpa para none
+# em vez de disparar MESSAGES_SET em reconexão normal.
+AUTO_CLEAR_STALE_HISTORY_ON_CONNECT = _bool_env_value(
+    "EVO_AUTO_CLEAR_STALE_HISTORY_ON_CONNECT",
+    True,
+)
+
 EVOLUTION_URL = (os.getenv("EVOLUTION_URL") or "").rstrip("/")
 EVOLUTION_KEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_KEY") or ""
 HEADERS = {"apikey": EVOLUTION_KEY, "Content-Type": "application/json"} if EVOLUTION_KEY else {}
@@ -622,6 +631,45 @@ def _inst_created_recent_for_history(inst: Any, inst_id: str) -> bool:
                 return True
     except Exception:
         pass
+
+    return False
+
+
+def _should_clear_stale_history_on_connect(
+    *,
+    conectado: bool,
+    historico_pendente: bool,
+    historico_primeiro_login: bool,
+    numero_atual_db: Any,
+) -> bool:
+    """
+    Decide se devemos limpar historico_restaurar antigo preso no banco.
+
+    Regra:
+    - Só limpa quando está conectado;
+    - Só limpa quando historico_restaurar ainda pede histórico;
+    - Nunca limpa se for primeiro login/QR recente;
+    - Só limpa quando já existia numero_instancia ANTES desse connection.open.
+
+    Isso evita matar histórico de uma instância recém-criada que acabou de ler QR,
+    mas corrige instâncias antigas que ficaram presas com 24h/7d/30d/all.
+    """
+    if not AUTO_CLEAR_STALE_HISTORY_ON_CONNECT:
+        return False
+
+    if not conectado:
+        return False
+
+    if not historico_pendente:
+        return False
+
+    if historico_primeiro_login:
+        return False
+
+    # Ponto de segurança:
+    # se já tinha número no banco antes desse evento, não é primeiro QR agora.
+    if _clean_whatsapp_number(numero_atual_db):
+        return True
 
     return False
 
@@ -1289,6 +1337,27 @@ async def on_conn_update(first: str, payload: dict):
             )
         )
 
+        if _should_clear_stale_history_on_connect(
+            conectado=bool(conectado),
+            historico_pendente=bool(historico_pendente),
+            historico_primeiro_login=bool(historico_primeiro_login),
+            numero_atual_db=numero_atual_db,
+        ):
+            LOG(
+                f"[SYNC][connect] limpando historico_restaurar antigo preso "
+                f"inst={inst_id} historico={historico_opcao} "
+                f"was_connected={was_connected} primeiro_login={historico_primeiro_login} "
+                f"numero_atual_db={_clean_whatsapp_number(numero_atual_db) or '-'}"
+            )
+
+            try:
+                inst.historico_restaurar = "none"
+                historico_opcao = "none"
+                historico_pendente = False
+                historico_primeiro_login = False
+            except Exception as e:
+                LOG(f"[SYNC][connect] falha ao limpar historico_restaurar antigo inst={inst_id}: {e}")
+
         try:
             db.commit()
         except Exception as e:
@@ -1355,7 +1424,7 @@ async def on_conn_update(first: str, payload: dict):
             f"ws_ok={ws_ok}"
         )
 
-    if conectado and empresa_id is not None and historico_pendente and ((not was_connected) or historico_primeiro_login):
+    if conectado and empresa_id is not None and historico_pendente and historico_primeiro_login:
         try:
             await conexoes_ativas.send_message(
                 f"emp:{empresa_id}",
@@ -1416,12 +1485,20 @@ async def on_conn_update(first: str, payload: dict):
     if conectado and inst_id not in INSTANCIAS_SYNC:
         do_sync = False
 
-        if historico_pendente and ((not was_connected) or historico_primeiro_login):
+        if historico_pendente and historico_primeiro_login:
             do_sync = True
             LOG(
-                f"[SYNC][connect] permitido por histórico pendente "
+                f"[SYNC][connect] permitido por histórico pendente de primeiro login "
                 f"historico={historico_opcao} inst={inst_id} "
                 f"was_connected={was_connected} primeiro_login={historico_primeiro_login}"
+            )
+
+        elif historico_pendente:
+            LOG(
+                f"[SYNC][connect] ignorado: histórico pendente antigo/não confirmado por QR "
+                f"inst={inst_id} historico={historico_opcao} "
+                f"was_connected={was_connected} primeiro_login={historico_primeiro_login}. "
+                "Não vou aguardar MESSAGES_SET em reconexão comum."
             )
 
         elif was_connected:

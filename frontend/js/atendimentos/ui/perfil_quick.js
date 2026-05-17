@@ -11,9 +11,10 @@
 // - Não chama renderListaClientes() ao atualizar avatar.
 // - Não tenta abrir /clientes/{id}/profile quando a conversa é grupo.
 // - Atualiza header/lista/caches apenas quando recebe evento, seleção ou refresh real.
+// - Blindagem: header não reaproveita foto de outra conversa.
 
 (() => {
-  const VERSION = 'zc-perfil-quick-v8-light-avatar-group-safe';
+  const VERSION = 'zc-perfil-quick-v9-avatar-header-strict';
 
   if (window.__ZC_PERFIL_QUICK_VERSION__ === VERSION) return;
   window.__ZC_PERFIL_QUICK_VERSION__ = VERSION;
@@ -40,19 +41,44 @@
     );
   }
 
+  function cleanStr(v) {
+    return String(v ?? '').trim();
+  }
+
+  function instKey(v) {
+    const s = cleanStr(v);
+    if (!s) return '';
+
+    const low = s.toLowerCase();
+    if (
+      low === 'null' ||
+      low === 'undefined' ||
+      low === 'nan' ||
+      low === '0' ||
+      low === 'all' ||
+      low === 'todos' ||
+      low === '*' ||
+      low === '-'
+    ) {
+      return '';
+    }
+
+    return s;
+  }
+
   function parseConversationKey(value) {
     const raw = String(value || '').trim();
     if (!raw) return null;
 
-    const m = raw.match(/^([cg]):(\d+):(\d+)$/i);
+    const m = raw.match(/^([cg]):(\d+):([^:]+)$/i);
     if (!m) return null;
 
     return {
-      raw,
+      raw: `${m[1].toLowerCase()}:${m[2]}:${m[3]}`,
       kind: m[1].toLowerCase() === 'g' ? 'grupo' : 'cliente',
       prefix: m[1].toLowerCase(),
       entityId: Number(m[2]),
-      instanciaId: Number(m[3]) || null,
+      instanciaId: instKey(m[3]) || null,
     };
   }
 
@@ -84,15 +110,21 @@
       hist?.dataset?.conversationKey,
       hist?.dataset?.conversationId,
       hist?.dataset?.chatKey,
+      hist?.dataset?.convKey,
+
       head?.dataset?.conversationKey,
       head?.dataset?.conversationId,
       head?.dataset?.chatKey,
+      head?.dataset?.convKey,
+
       sel?.conversation_key,
       sel?.conversationKey,
       sel?.conversation_id,
       sel?.conversationId,
       sel?.chat_key,
       sel?.chatKey,
+      sel?.conv_key,
+      sel?.convKey,
       sel?.key,
     ];
 
@@ -117,10 +149,12 @@
       hist?.dataset?.grupo,
       hist?.dataset?.kind,
       hist?.dataset?.tipo,
+
       head?.dataset?.isGroup,
       head?.dataset?.grupo,
       head?.dataset?.kind,
       head?.dataset?.tipo,
+
       sel?.is_group,
       sel?.isGroup,
       sel?.grupo,
@@ -240,6 +274,130 @@
     return getSelectedKind() === 'grupo'
       ? getSelectedGroupId()
       : getSelectedClienteId();
+  }
+
+  function getSelectedInstId() {
+    const key = parseConversationKey(getSelectedConversationKey());
+    if (key?.instanciaId) return String(key.instanciaId);
+
+    const hist = $('#historico');
+    const head = $('#chat-header');
+    const sel = getStateSelected();
+
+    return (
+      instKey(hist?.dataset?.instanciaId) ||
+      instKey(hist?.dataset?.instancia) ||
+      instKey(head?.dataset?.instanciaId) ||
+      instKey(head?.dataset?.instancia) ||
+      instKey(sel?.instancia_id) ||
+      instKey(sel?.instanciaId) ||
+      instKey(sel?.instancia) ||
+      instKey(sel?.instance_id) ||
+      instKey(sel?.instanceId) ||
+      instKey(sel?.instance) ||
+      instKey(sel?.instance_name) ||
+      instKey(sel?.instanceName) ||
+      ''
+    );
+  }
+
+  function getSelectedRef() {
+    const key = parseConversationKey(getSelectedConversationKey());
+    if (key) {
+      return {
+        conversationKey: key.raw,
+        kind: key.kind,
+        entityId: key.entityId,
+        instanciaId: key.instanciaId || '',
+      };
+    }
+
+    const kind = getSelectedKind();
+    const entityId = getSelectedEntityId();
+    const instanciaId = getSelectedInstId();
+
+    return {
+      conversationKey: kind && entityId && instanciaId
+        ? `${kind === 'grupo' ? 'g' : 'c'}:${entityId}:${instanciaId}`
+        : '',
+      kind,
+      entityId,
+      instanciaId,
+    };
+  }
+
+  function refFromIdKind(id, kind, opts = {}) {
+    const k = kind === 'grupo' ? 'grupo' : 'cliente';
+
+    const rawKey =
+      opts.conversation_key ||
+      opts.conversationKey ||
+      opts.conversation_id ||
+      opts.conversationId ||
+      opts.chat_key ||
+      opts.chatKey ||
+      '';
+
+    const parsed = parseConversationKey(rawKey);
+    if (parsed) {
+      return {
+        conversationKey: parsed.raw,
+        kind: parsed.kind,
+        entityId: parsed.entityId,
+        instanciaId: parsed.instanciaId || '',
+      };
+    }
+
+    const entityId = idFromAny(id);
+    const instanciaId =
+      instKey(opts.instancia_id) ||
+      instKey(opts.instanciaId) ||
+      instKey(opts.instancia) ||
+      instKey(opts.instance_id) ||
+      instKey(opts.instanceId) ||
+      instKey(opts.instance) ||
+      instKey(opts.instance_name) ||
+      instKey(opts.instanceName) ||
+      '';
+
+    return {
+      conversationKey: entityId && instanciaId
+        ? `${k === 'grupo' ? 'g' : 'c'}:${entityId}:${instanciaId}`
+        : '',
+      kind: k,
+      entityId,
+      instanciaId,
+    };
+  }
+
+  function isCurrentHeaderTarget(id, kind, opts = {}) {
+    const current = getSelectedRef();
+    const target = refFromIdKind(id, kind, opts);
+
+    if (!current.entityId || !target.entityId) return false;
+    if (current.kind !== target.kind) return false;
+    if (Number(current.entityId) !== Number(target.entityId)) return false;
+
+    /*
+      Se os dois têm conversation_key completa, precisa bater exatamente.
+      Isso evita avatar de uma conversa ser jogado no header de outra.
+    */
+    if (current.conversationKey && target.conversationKey) {
+      return String(current.conversationKey) === String(target.conversationKey);
+    }
+
+    /*
+      Se temos instância dos dois lados, também precisa bater.
+    */
+    if (current.instanciaId && target.instanciaId) {
+      return String(current.instanciaId) === String(target.instanciaId);
+    }
+
+    /*
+      Compatibilidade com dados antigos sem instância:
+      se não existe instância no evento, ainda permite quando ID e tipo batem.
+    */
+    return true;
   }
 
   function hasOpenChat() {
@@ -367,6 +525,49 @@
     img.src = url;
     box.innerHTML = '';
     box.appendChild(img);
+  }
+
+  function setDefaultAvatarBox(box, id, kind) {
+    if (!box) return;
+
+    const finalKind = kind === 'grupo' ? 'grupo' : 'cliente';
+
+    box.innerHTML = `
+      <span
+        class="avatar avatar-default"
+        data-avatar-id="${escAttr(id || '')}"
+        data-avatar-kind="${escAttr(finalKind)}"
+      >
+        <i class="fa fa-user-circle text-2xl text-gray-400"></i>
+      </span>
+    `;
+  }
+
+  function clearHeaderAvatar(id, kind, opts = {}) {
+    try {
+      if (!isCurrentHeaderTarget(id, kind, opts)) return;
+
+      if (typeof window.zcClearHeaderAvatarSafe === 'function') {
+        try {
+          const current = getSelectedRef();
+          const refLike = current.conversationKey || {
+            id,
+            cliente_id: kind === 'cliente' ? id : undefined,
+            grupo_id: kind === 'grupo' ? id : undefined,
+            kind: kind === 'grupo' ? 'g' : 'c',
+            instancia_id: current.instanciaId || undefined,
+          };
+
+          const ok = window.zcClearHeaderAvatarSafe(refLike);
+          if (ok) return;
+        } catch {}
+      }
+
+      const av = document.getElementById('chat-avatar');
+      if (!av) return;
+
+      setDefaultAvatarBox(av, id, kind);
+    } catch {}
   }
 
   function candidateIdForCacheItem(c, kind) {
@@ -503,19 +704,37 @@
     } catch {}
   }
 
-  function updateHeaderAvatar(id, url, kind) {
+  function updateHeaderAvatar(id, url, kind, opts = {}) {
     try {
-      const currentKind = getSelectedKind();
-      const currentId = getSelectedEntityId();
-
-      if (currentKind !== kind || currentId !== id) return;
+      if (!isCurrentHeaderTarget(id, kind, opts)) return;
 
       const av = document.getElementById('chat-avatar');
       if (!av) return;
 
+      if (!url) {
+        clearHeaderAvatar(id, kind, opts);
+        return;
+      }
+
+      if (typeof window.zcSetHeaderAvatarSafe === 'function') {
+        try {
+          const current = getSelectedRef();
+          const refLike = current.conversationKey || {
+            id,
+            cliente_id: kind === 'cliente' ? id : undefined,
+            grupo_id: kind === 'grupo' ? id : undefined,
+            kind: kind === 'grupo' ? 'g' : 'c',
+            instancia_id: current.instanciaId || undefined,
+          };
+
+          const ok = window.zcSetHeaderAvatarSafe(refLike, url);
+          if (ok) return;
+        } catch {}
+      }
+
       const existing =
         av.querySelector('img') ||
-        av.matches?.('img') && av;
+        (av.matches?.('img') ? av : null);
 
       if (existing) {
         setImgSrc(existing, url, id, kind);
@@ -528,15 +747,21 @@
     } catch {}
   }
 
-  function updateListAvatar(id, url, kind) {
+  function updateListAvatar(id, url, kind, opts = {}) {
     try {
-      const convKey = getSelectedConversationKey();
+      const selected = getSelectedRef();
+      const selectedMatches =
+        selected.kind === kind &&
+        Number(selected.entityId) === Number(id);
+
+      const convKey = selectedMatches ? selected.conversationKey : '';
       const selectors = [];
 
       if (convKey) {
         const ck = cssEscapeSafe(convKey);
         selectors.push(
           `#lista-clientes [data-conversation-key="${ck}"]`,
+          `#lista-clientes [data-conversation-id="${ck}"]`,
           `#lista-clientes [data-chat-key="${ck}"]`,
           `#lista-clientes [data-key="${ck}"]`,
           `.cliente-item[data-conversation-key="${ck}"]`,
@@ -553,6 +778,8 @@
           `#lista-clientes [data-grupo-id="${id}"]`,
           `#lista-clientes [data-group-id="${id}"]`,
           `#lista-clientes [data-entity-id="${id}"][data-is-group="1"]`,
+          `#lista-clientes [data-entity-id="${id}"][data-kind="g"]`,
+          `#lista-clientes [data-entity-id="${id}"][data-kind="grupo"]`,
           `.cliente-item[data-grupo-id="${id}"]`,
           `.cliente-item[data-group-id="${id}"]`,
           `.chat-item[data-grupo-id="${id}"]`,
@@ -564,7 +791,10 @@
           `#lista-clientes [data-cliente-id="${id}"]`,
           `#lista-clientes [data-api-cliente-id="${id}"]`,
           `#lista-clientes [data-backend-cliente-id="${id}"]`,
-          `#lista-clientes [data-entity-id="${id}"]`,
+          `#lista-clientes [data-entity-id="${id}"][data-is-group="0"]`,
+          `#lista-clientes [data-entity-id="${id}"][data-is-group="false"]`,
+          `#lista-clientes [data-entity-id="${id}"][data-kind="c"]`,
+          `#lista-clientes [data-entity-id="${id}"][data-kind="cliente"]`,
           `.cliente-item[data-id="${id}"]`,
           `.cliente-item[data-cliente-id="${id}"]`,
           `.cliente-item[data-api-cliente-id="${id}"]`,
@@ -698,8 +928,8 @@
 
     updateSelectedState(id, url, kind);
     updateKnownCaches(id, url, kind);
-    updateHeaderAvatar(id, url, kind);
-    updateListAvatar(id, url, kind);
+    updateHeaderAvatar(id, url, kind, opts);
+    updateListAvatar(id, url, kind, opts);
     updateAgendaAvatar(id, url, kind);
     updateDrawerAvatar(id, url, kind);
     dispatchAvatarEvent(id, url, kind);
@@ -734,6 +964,7 @@
       const t = setTimeout(() => {
         try {
           applyAvatarGeneric(id, avatarUrl, {
+            ...opts,
             kind,
             bust: !!opts.bust,
             force: ms === 350,
@@ -944,7 +1175,16 @@
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['class', 'style', 'data-conversation-key', 'data-cliente-id', 'data-grupo-id'],
+      attributeFilter: [
+        'class',
+        'style',
+        'data-conversation-key',
+        'data-conversation-id',
+        'data-conv-key',
+        'data-cliente-id',
+        'data-grupo-id',
+        'data-instancia-id',
+      ],
     });
 
     hdr.__zcPerfilQuickObs = mo;
@@ -983,7 +1223,11 @@
           null;
 
         if (id) {
-          scheduleAvatarSpread(id, url, { kind: 'cliente', bust: true });
+          scheduleAvatarSpread(id, url, {
+            ...d,
+            kind: 'cliente',
+            bust: true,
+          });
         }
       });
     });
@@ -1019,7 +1263,11 @@
           null;
 
         if (id) {
-          scheduleAvatarSpread(id, url, { kind: 'grupo', bust: true });
+          scheduleAvatarSpread(id, url, {
+            ...d,
+            kind: 'grupo',
+            bust: true,
+          });
         }
       });
     });
@@ -1051,7 +1299,11 @@
           null;
 
         if (realId) {
-          scheduleAvatarSpread(realId, url, { kind: 'cliente', bust: true });
+          scheduleAvatarSpread(realId, url, {
+            ...(resp || {}),
+            kind: 'cliente',
+            bust: true,
+          });
         }
 
         return resp;
@@ -1106,7 +1358,11 @@
             null;
 
           if (realId) {
-            scheduleAvatarSpread(realId, url, { kind: 'grupo', bust: true });
+            scheduleAvatarSpread(realId, url, {
+              ...(resp || {}),
+              kind: 'grupo',
+              bust: true,
+            });
           }
 
           return resp;
@@ -1143,14 +1399,39 @@
 
     if (kind === 'grupo') {
       const gid = getSelectedGroupId();
+
       if (gid) {
-        scheduleAvatarSpread(gid, null, { kind: 'grupo', bust: false });
+        const sel = getStateSelected();
+        const raw =
+          sel?.group_avatar_url ||
+          sel?.grupo_avatar_url ||
+          sel?.avatar_url ||
+          sel?.profilePictureUrl ||
+          sel?.profile_pic_url ||
+          sel?.avatar ||
+          sel?.foto ||
+          sel?.foto_url ||
+          null;
+
+        if (raw) {
+          scheduleAvatarSpread(gid, raw, {
+            kind: 'grupo',
+            bust: false,
+            conversation_key: getSelectedConversationKey(),
+          });
+        } else {
+          clearHeaderAvatar(gid, 'grupo', {
+            conversation_key: getSelectedConversationKey(),
+          });
+        }
       }
+
       return;
     }
 
     const cid = getSelectedClienteId();
     const sel = getStateSelected();
+
     const raw =
       sel?.avatar_url ||
       sel?.profilePictureUrl ||
@@ -1161,7 +1442,23 @@
       null;
 
     if (cid && raw) {
-      scheduleAvatarSpread(cid, raw, { kind: 'cliente', bust: false });
+      scheduleAvatarSpread(cid, raw, {
+        kind: 'cliente',
+        bust: false,
+        conversation_key: getSelectedConversationKey(),
+      });
+      return;
+    }
+
+    /*
+      Ponto crítico:
+      se a conversa atual não tem foto, limpa o header.
+      Assim a foto da conversa anterior nunca fica presa.
+    */
+    if (cid) {
+      clearHeaderAvatar(cid, 'cliente', {
+        conversation_key: getSelectedConversationKey(),
+      });
     }
   }
 
