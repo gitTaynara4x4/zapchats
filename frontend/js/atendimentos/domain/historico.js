@@ -525,19 +525,57 @@ function msgKey(m) {
   return String(m?.msg_id || m?.message_id || m?.wa_msg_id || m?.id || '').trim();
 }
 
-function isTempMsg(m) {
-  const k = msgKey(m);
-  return (
-    k.startsWith('tmp:') ||
-    m?.temp === true ||
-    m?.pending === true ||
-    m?.optimistic === true ||
-    m?.__optimistic === true
-  );
+function ackNum(m) {
+  const n = Number(m?.ack ?? 0);
+  return Number.isFinite(n) ? n : 0;
 }
 
 function isSaidaMsg(m) {
   return m?.tipo === 'saida' || m?.from_me === true || m?.origem === 'atendente';
+}
+
+/*
+  Regra anti-reloginho preso:
+  - pending só manda quando ack <= 0.
+  - se ack virou 1/2/3, a mensagem NÃO pode continuar como temp/pendente
+    só porque algum objeto antigo ainda veio com pending:true.
+*/
+function normalizeMessageState(m) {
+  if (!m || typeof m !== 'object') return m;
+
+  const out = { ...m };
+  const ack = ackNum(out);
+
+  if (isSaidaMsg(out) && ack > 0) {
+    out.ack = ack;
+    out.pending = false;
+    out.optimistic = false;
+    out.__optimistic = false;
+    out.temp = false;
+    out.failed = false;
+  }
+
+  return out;
+}
+
+function isTempMsg(m) {
+  const k = msgKey(m);
+  const ack = ackNum(m);
+
+  if (k.startsWith('tmp:')) return true;
+
+  /*
+    Se já tem ACK positivo e msg_id real, não é temporária.
+    Isso evita a bolha ficar com relógio por causa de pending:true antigo.
+  */
+  if (ack > 0 && k) return false;
+
+  return (
+    m?.temp === true ||
+    m?.optimistic === true ||
+    m?.__optimistic === true ||
+    (m?.pending === true && ack <= 0)
+  );
 }
 
 function msgText(m) {
@@ -702,10 +740,11 @@ function updateExistingRowsFromCache(hist, msgs) {
 
     if (!k || !byId.has(k)) return;
 
-    const m = byId.get(k);
+    const m = normalizeMessageState(byId.get(k));
     const bubble = row.querySelector('.bubble');
-    const failed = m.failed === true || Number(m.ack ?? 0) < 0;
-    const pending = !failed && (m.pending === true || Number(m.ack ?? 0) <= 0) && isSaidaMsg(m);
+    const ackVal = ackNum(m);
+    const failed = m.failed === true || ackVal < 0;
+    const pending = isSaidaMsg(m) && !failed && ackVal <= 0;
 
     row.dataset.pending = pending ? '1' : '0';
     row.dataset.failed = failed ? '1' : '0';
@@ -879,8 +918,9 @@ export function salvarNoCache(clienteId, novos) {
 
   HLOG('salvarNoCache IN', { convKey, inst, novosCount: Array.isArray(novos) ? novos.length : 0 });
 
-  const cur = ensureArray(getHist(inst, convKey));
-  const merged = [...cur, ...ensureArray(novos)];
+  const cur = ensureArray(getHist(inst, convKey)).map(normalizeMessageState);
+  const incoming = ensureArray(novos).map(normalizeMessageState);
+  const merged = [...cur, ...incoming];
 
   const byId = new Map();
   const noId = [];
@@ -894,7 +934,7 @@ export function salvarNoCache(clienteId, novos) {
       if (!prev) {
         byId.set(k, m);
       } else {
-        const ack = Math.max(Number(prev.ack || 0), Number(m.ack || 0));
+        const ack = Math.max(ackNum(prev), ackNum(m));
 
         const prevTs = parseAtendimentoDate(prev.timestamp || prev.data || prev.created_at || '')?.getTime() || 0;
         const curTs = parseAtendimentoDate(m.timestamp || m.data || m.created_at || '')?.getTime() || 0;
@@ -904,7 +944,7 @@ export function salvarNoCache(clienteId, novos) {
             ? (m.timestamp || m.data || m.created_at)
             : (prev.timestamp || prev.data || prev.created_at);
 
-        byId.set(k, {
+        byId.set(k, normalizeMessageState({
           ...prev,
           ...m,
           msg_id: m.msg_id || prev.msg_id || m.message_id || prev.message_id || m.wa_msg_id || prev.wa_msg_id || m.id || prev.id,
@@ -912,15 +952,15 @@ export function salvarNoCache(clienteId, novos) {
           timestamp: ts,
           quoted: m.quoted ?? prev.quoted,
           quoted_preview: m.quoted_preview ?? prev.quoted_preview,
-        });
+        }));
       }
     } else {
       noId.push(m);
     }
   }
 
-  const deduped = removeOptimisticDuplicates([...byId.values(), ...noId]);
-  const finalArr = ordenarMensagens(deduped);
+  const deduped = removeOptimisticDuplicates([...byId.values(), ...noId].map(normalizeMessageState));
+  const finalArr = ordenarMensagens(deduped.map(normalizeMessageState));
 
   HLOG('salvarNoCache OUT', { convKey, inst, total: finalArr.length });
 
@@ -933,22 +973,24 @@ export function salvarNoCache(clienteId, novos) {
    render de 1 mensagem
    ===================== */
 export function criarHTMLDaMensagem(m) {
+  const msg = normalizeMessageState(m);
+
   if (typeof window.criarHTMLDaMensagem === 'function') {
-    return window.criarHTMLDaMensagem(m);
+    return window.criarHTMLDaMensagem(msg);
   }
 
-  const isSaida = isSaidaMsg(m);
-  const texto = String(m.conteudo ?? m.mensagem ?? m.texto ?? '').trim();
-  const ackVal = Number(m.ack ?? 0);
-  const msgIdAttr = msgKey(m);
+  const isSaida = isSaidaMsg(msg);
+  const texto = String(msg.conteudo ?? msg.mensagem ?? msg.texto ?? '').trim();
+  const ackVal = ackNum(msg);
+  const msgIdAttr = msgKey(msg);
   const msgIdEsc = escapeHtml(msgIdAttr);
 
-  const pending = isSaida && !m.failed && ackVal <= 0;
-  const failed = isSaida && (m.failed === true || ackVal < 0);
+  const pending = isSaida && !msg.failed && ackVal <= 0;
+  const failed = isSaida && (msg.failed === true || ackVal < 0);
 
-  const quotedPreview = normalizeQuotedPreview(m);
+  const quotedPreview = normalizeQuotedPreview(msg);
   const quotedPreviewAttr = quotedPreview ? jsonAttr(quotedPreview) : '';
-  const quotedAttr = m?.quoted && typeof m.quoted === 'object' ? jsonAttr(m.quoted) : '';
+  const quotedAttr = msg?.quoted && typeof msg.quoted === 'object' ? jsonAttr(msg.quoted) : '';
 
   const ackHtml = renderAckHtml(m);
   const quoteHtml = renderQuotedPreview(quotedPreview);
@@ -984,7 +1026,7 @@ export function criarHTMLDaMensagem(m) {
       ${textHtml}
       <div class="meta">
         ${ackHtml}
-        <span class="msg-time">${formatChatTime(m.timestamp || m.data || m.created_at || '')}</span>
+        <span class="msg-time">${formatChatTime(msg.timestamp || msg.data || msg.created_at || '')}</span>
       </div>
     </div>
   </div>`;
@@ -1048,7 +1090,11 @@ export function renderHistoricoDoCache(clienteId, append = false) {
       ? hist.dataset.instanciaId
       : getInstanciaForFetch(convKey);
 
-  const msgs = ordenarMensagens(removeOptimisticDuplicates(ensureArray(getHist(inst, convKey))));
+  const msgs = ordenarMensagens(
+    removeOptimisticDuplicates(
+      ensureArray(getHist(inst, convKey)).map(normalizeMessageState)
+    ).map(normalizeMessageState)
+  );
 
   HLOG('renderHistoricoDoCache', { convKey, inst, append, msgsCount: msgs.length });
 
@@ -1855,7 +1901,7 @@ window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
       return;
     }
 
-    arr = removeOptimisticDuplicates(arr);
+    arr = removeOptimisticDuplicates(arr.map(normalizeMessageState)).map(normalizeMessageState);
 
     const last = arr[arr.length - 1];
 

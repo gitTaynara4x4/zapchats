@@ -103,6 +103,167 @@ def _same_phone(a, b) -> bool:
     return da == db or da.endswith(db) or db.endswith(da)
 
 
+
+def _int_or_none(value) -> int | None:
+    try:
+        if value is None:
+            return None
+        raw = str(value).strip()
+        if not raw:
+            return None
+        return int(raw)
+    except Exception:
+        return None
+
+
+def _ack_from_status_safe_for_upsert(status, *, from_me: bool) -> int:
+    """
+    ACK seguro para messages.upsert.
+
+    Problema que corrigimos:
+    - A Evolution pode devolver/enviar status="PENDING" para uma mensagem fromMe.
+    - _ack_from_status("PENDING") normalmente vira 0.
+    - Se esse 0 entra no banco/WS, o front mostra relógio mesmo depois do envio ter dado 201.
+
+    Regra do ZapsChat:
+    - mensagem from_me recebida via upsert já foi aceita pela Evolution;
+    - portanto o mínimo visual deve ser ack=1;
+    - nunca usamos messages.upsert para rebaixar ACK.
+    """
+    if not from_me:
+        return 0
+
+    try:
+        ack = int(_ack_from_status(status) or 0)
+    except Exception:
+        ack = 0
+
+    if ack <= 0:
+        ack = 1
+
+    if ack > 3:
+        ack = 3
+
+    return int(ack)
+
+
+def _raise_ack_on_model_if_newer(row, ack_value: int | None) -> int:
+    """
+    Atualiza ACK somente para frente.
+    Retorna o ACK final que deve ser usado no payload.
+    """
+    new_ack = _int_or_none(ack_value) or 0
+    old_ack = _int_or_none(getattr(row, "ack", None)) or 0
+
+    final_ack = max(old_ack, new_ack)
+
+    if row is not None and final_ack > old_ack:
+        try:
+            setattr(row, "ack", int(final_ack))
+            if hasattr(row, "lida") and final_ack > 0:
+                setattr(row, "lida", True)
+        except Exception:
+            pass
+
+    return int(final_ack)
+
+
+def _raise_ack_existing_mensagem_11(
+    db,
+    *,
+    empresa_id: int,
+    cliente_id: int | None,
+    instancia_id: int | None,
+    msg_id: str | None,
+    mensagem_id: int | None,
+    ack_value: int,
+) -> int:
+    """
+    Quando messages.upsert chega duplicado para uma mensagem já salva pelo send,
+    não deve criar outra bolha e também não deve rebaixar ACK.
+    Se o ACK novo for maior, atualiza o registro existente.
+    """
+    if not ack_value:
+        return 0
+
+    try:
+        q = db.query(models.Mensagem)
+
+        if mensagem_id:
+            q = q.filter(models.Mensagem.id == int(mensagem_id))
+        else:
+            if not msg_id:
+                return int(ack_value)
+            q = q.filter(
+                models.Mensagem.empresa_id == int(empresa_id),
+                models.Mensagem.msg_id == str(msg_id),
+            )
+            if cliente_id is not None:
+                q = q.filter(models.Mensagem.cliente_id == int(cliente_id))
+            if instancia_id is not None:
+                q = q.filter(models.Mensagem.instancia_id == int(instancia_id))
+
+        row = q.order_by(models.Mensagem.id.desc()).first()
+        if not row:
+            return int(ack_value)
+
+        final_ack = _raise_ack_on_model_if_newer(row, int(ack_value))
+        db.flush()
+        return int(final_ack)
+
+    except Exception as e:
+        LOG(f"[UPsert][ack-safe][cliente] falha ao preservar ACK msg_id={msg_id} err={e}")
+        _safe_rollback(db)
+        return int(ack_value)
+
+
+def _raise_ack_existing_mensagem_grupo(
+    db,
+    *,
+    empresa_id: int,
+    grupo_id: int | None,
+    instancia_id: int | None,
+    msg_id: str | None,
+    mensagem_grupo_id: int | None,
+    ack_value: int,
+) -> int:
+    """
+    Mesma regra para grupos: ACK só anda para frente.
+    """
+    if not ack_value:
+        return 0
+
+    try:
+        q = db.query(models.MensagemGrupo)
+
+        if mensagem_grupo_id:
+            q = q.filter(models.MensagemGrupo.id == int(mensagem_grupo_id))
+        else:
+            if not msg_id:
+                return int(ack_value)
+            q = q.filter(
+                models.MensagemGrupo.empresa_id == int(empresa_id),
+                models.MensagemGrupo.msg_id == str(msg_id),
+            )
+            if grupo_id is not None:
+                q = q.filter(models.MensagemGrupo.grupo_id == int(grupo_id))
+            if instancia_id is not None:
+                q = q.filter(models.MensagemGrupo.instancia_id == int(instancia_id))
+
+        row = q.order_by(models.MensagemGrupo.id.desc()).first()
+        if not row:
+            return int(ack_value)
+
+        final_ack = _raise_ack_on_model_if_newer(row, int(ack_value))
+        db.flush()
+        return int(final_ack)
+
+    except Exception as e:
+        LOG(f"[UPsert][ack-safe][grupo] falha ao preservar ACK msg_id={msg_id} err={e}")
+        _safe_rollback(db)
+        return int(ack_value)
+
+
 def _is_cliente_fk_error(e: Exception) -> bool:
     base = getattr(e, "orig", e)
     msg = str(base).lower()
@@ -1156,7 +1317,7 @@ async def on_messages_upsert(inst_id: str, data):
                 conteudo = extract_text_from_baileys(m)
                 media_meta = extract_media_meta(m)
 
-                ack_value = int(_ack_from_status(status) if from_me else 0)
+                ack_value = _ack_from_status_safe_for_upsert(status, from_me=bool(from_me))
 
                 # =========================
                 # GRUPO
@@ -1283,12 +1444,32 @@ async def on_messages_upsert(inst_id: str, data):
                                 gm_exist = (
                                     db.query(models.MensagemGrupo)
                                     .filter(
+                                        models.MensagemGrupo.empresa_id == int(empresa_id),
                                         models.MensagemGrupo.grupo_id == int(grupo_id_safe),
                                         models.MensagemGrupo.msg_id == str(msg_id),
                                     )
+                                    .order_by(models.MensagemGrupo.id.desc())
                                     .first()
                                 )
                                 gm_id = getattr(gm_exist, "id", None) if gm_exist else None
+
+                                if from_me and gm_id:
+                                    ack_value = _raise_ack_existing_mensagem_grupo(
+                                        db,
+                                        empresa_id=int(empresa_id),
+                                        grupo_id=int(grupo_id_safe),
+                                        instancia_id=int(getattr(inst, "id", 0) or 0),
+                                        msg_id=str(msg_id),
+                                        mensagem_grupo_id=int(gm_id),
+                                        ack_value=int(ack_value),
+                                    )
+                                    _log_ctx(
+                                        "[UPsert][grupo][ack-safe]",
+                                        idx=idx,
+                                        msg_id=msg_id,
+                                        grupo_id=grupo_id_safe,
+                                        ack=ack_value,
+                                    )
                         except Exception as e:
                             gm_id = None
                             _log_ctx("[UPsert][grupo][dup][buscar-msg] falhou", idx=idx, msg_id=msg_id, err=str(e))
@@ -1516,6 +1697,18 @@ async def on_messages_upsert(inst_id: str, data):
 
                     if msg_existente_id:
                         replay_existing_msg_id = int(msg_existente_id)
+
+                        if from_me:
+                            ack_value = _raise_ack_existing_mensagem_11(
+                                db,
+                                empresa_id=int(empresa_id),
+                                cliente_id=int(cli_id),
+                                instancia_id=int(inst.id),
+                                msg_id=str(msg_id),
+                                mensagem_id=int(replay_existing_msg_id),
+                                ack_value=int(ack_value),
+                            )
+
                         _log_ctx(
                             "[UPsert][skip-replay-existing-msgid]",
                             idx=idx,
@@ -1524,6 +1717,7 @@ async def on_messages_upsert(inst_id: str, data):
                             existing_id=replay_existing_msg_id,
                             status=status,
                             from_me=from_me,
+                            ack=ack_value,
                         )
 
                 atendimento_id = None
@@ -1671,6 +1865,17 @@ async def on_messages_upsert(inst_id: str, data):
                                 if msg_db_id:
                                     replay_existing_msg_id = int(msg_db_id)
 
+                                if from_me and replay_existing_msg_id:
+                                    ack_value = _raise_ack_existing_mensagem_11(
+                                        db,
+                                        empresa_id=int(empresa_id),
+                                        cliente_id=int(cli_id),
+                                        instancia_id=int(inst.id),
+                                        msg_id=str(msg_id),
+                                        mensagem_id=int(replay_existing_msg_id),
+                                        ack_value=int(ack_value),
+                                    )
+
                                 _log_skip(
                                     "duplicada (upsert)",
                                     idx=idx,
@@ -1678,6 +1883,7 @@ async def on_messages_upsert(inst_id: str, data):
                                     cliente_id=cli_id,
                                     existing_id=replay_existing_msg_id,
                                     instancia_id=inst.id,
+                                    ack=ack_value,
                                 )
 
                                 if pending_lid_merge:

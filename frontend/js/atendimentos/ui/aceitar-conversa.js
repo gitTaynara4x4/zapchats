@@ -1031,7 +1031,331 @@
     }
   }
 
+
+  function ensureTransferColabModalStyle() {
+    if (document.getElementById("zc-transfer-colab-modal-style")) return;
+
+    const style = document.createElement("style");
+    style.id = "zc-transfer-colab-modal-style";
+    style.textContent = `
+      #zcTransferirColaboradorModal,
+      .zc-transfer-dep-modal{
+        position:fixed !important;
+        inset:0 !important;
+        z-index:10080 !important;
+        display:none !important;
+        align-items:center !important;
+        justify-content:center !important;
+        padding:18px !important;
+        box-sizing:border-box !important;
+        background:rgba(0,0,0,.52) !important;
+        backdrop-filter:blur(2px) !important;
+        -webkit-backdrop-filter:blur(2px) !important;
+        color:#e9edef !important;
+        font-family:"Inter","Segoe UI","Helvetica Neue",Arial,sans-serif !important;
+      }
+
+      #zcTransferirColaboradorModal.is-open,
+      .zc-transfer-dep-modal.is-open{
+        display:flex !important;
+      }
+
+      .zc-transfer-dep-card{
+        width:min(420px, calc(100vw - 32px)) !important;
+        max-height:min(92vh, 560px) !important;
+        display:flex !important;
+        flex-direction:column !important;
+        overflow:hidden !important;
+        border-radius:18px !important;
+        border:1px solid rgba(255,255,255,.10) !important;
+        background:#161717 !important;
+        box-shadow:0 22px 70px rgba(0,0,0,.48) !important;
+        color:#e9edef !important;
+        animation:zcTransferColabIn .16s ease-out both !important;
+      }
+
+      @keyframes zcTransferColabIn{
+        from{ opacity:0; transform:translateY(8px) scale(.98); }
+        to{ opacity:1; transform:translateY(0) scale(1); }
+      }
+
+      .zc-transfer-dep-head{
+        min-height:58px !important;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:space-between !important;
+        gap:12px !important;
+        padding:0 16px !important;
+        border-bottom:1px solid rgba(255,255,255,.08) !important;
+        background:#1b1c1d !important;
+      }
+
+      .zc-transfer-dep-title{
+        min-width:0 !important;
+        font-size:16px !important;
+        line-height:1.2 !important;
+        font-weight:700 !important;
+        letter-spacing:-.2px !important;
+        color:#f4f6f7 !important;
+        white-space:nowrap !important;
+        overflow:hidden !important;
+        text-overflow:ellipsis !important;
+      }
+
+      .zc-transfer-dep-close{
+        width:34px !important;
+        height:34px !important;
+        flex:0 0 34px !important;
+        display:grid !important;
+        place-items:center !important;
+        border:0 !important;
+        border-radius:999px !important;
+        background:transparent !important;
+        color:#aebac1 !important;
+        font-size:18px !important;
+        line-height:1 !important;
+        cursor:pointer !important;
+        transition:background .14s ease,color .14s ease,transform .08s ease !important;
+      }
+
+      .zc-transfer-dep-close:hover{
+        background:rgba(255,255,255,.07) !important;
+        color:#ffffff !important;
+      }
+
+      .zc-transfer-dep-close:active{
+        transform:translateY(1px) !important;
+      }
+
+      .zc-transfer-dep-body{
+        display:grid !important;
+        gap:10px !important;
+        padding:16px !important;
+        background:#161717 !important;
+      }
+
+      .zc-transfer-dep-label{
+        display:block !important;
+        margin:0 !important;
+        font-size:13px !important;
+        line-height:1.2 !important;
+        font-weight:600 !important;
+        color:#cfd7dc !important;
+      }
+
+      .zc-transfer-dep-select{
+        width:100% !important;
+        height:42px !important;
+        box-sizing:border-box !important;
+        border:1px solid rgba(255,255,255,.10) !important;
+        border-radius:12px !important;
+        outline:none !important;
+        padding:0 12px !important;
+        background:#202123 !important;
+        color:#e9edef !important;
+        font:500 14px/1.2 "Inter","Segoe UI","Helvetica Neue",Arial,sans-serif !important;
+        color-scheme:dark !important;
+      }
+
+      .zc-transfer-dep-select:focus{
+        border-color:rgba(37,211,102,.72) !important;
+        box-shadow:0 0 0 3px rgba(37,211,102,.14) !important;
+      }
+
+      .zc-transfer-dep-select:disabled{
+        opacity:.72 !important;
+        cursor:not-allowed !important;
+      }
+
+      .zc-transfer-dep-help{
+        margin:0 !important;
+        font-size:12.5px !important;
+        line-height:1.38 !important;
+        color:#9ca3af !important;
+      }
+
+      .zc-transfer-dep-error{
+        display:none !important;
+        margin-top:2px !important;
+        padding:9px 10px !important;
+        border-radius:10px !important;
+        border:1px solid rgba(239,68,68,.28) !important;
+        background:rgba(239,68,68,.10) !important;
+        color:#fecaca !important;
+        font-size:12.5px !important;
+        line-height:1.35 !important;
+      }
+
+      .zc-transfer-dep-error.is-visible{
+        display:block !important;
+      }
+
+      .zc-transfer-dep-foot{
+        display:flex !important;
+        align-items:center !important;
+        justify-content:flex-end !important;
+        gap:8px !important;
+        padding:12px 16px 16px !important;
+        border-top:1px solid rgba(255,255,255,.06) !important;
+        background:#161717 !important;
+      }
+
+      .zc-transfer-dep-btn-secondary,
+      .zc-transfer-dep-btn-primary{
+        min-width:96px !important;
+        height:38px !important;
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:7px !important;
+        border:0 !important;
+        border-radius:999px !important;
+        padding:0 15px !important;
+        font:700 13px/1 "Inter","Segoe UI","Helvetica Neue",Arial,sans-serif !important;
+        cursor:pointer !important;
+        transition:background .14s ease,color .14s ease,opacity .14s ease,transform .08s ease !important;
+      }
+
+      .zc-transfer-dep-btn-secondary{
+        background:#252728 !important;
+        color:#d1d7db !important;
+      }
+
+      .zc-transfer-dep-btn-secondary:hover{
+        background:#2f3334 !important;
+        color:#ffffff !important;
+      }
+
+      .zc-transfer-dep-btn-primary{
+        background:#25d366 !important;
+        color:#071d12 !important;
+      }
+
+      .zc-transfer-dep-btn-primary:hover{
+        background:#20bd5a !important;
+        color:#04160d !important;
+      }
+
+      .zc-transfer-dep-btn-secondary:active,
+      .zc-transfer-dep-btn-primary:active{
+        transform:translateY(1px) !important;
+      }
+
+      .zc-transfer-dep-btn-secondary:disabled,
+      .zc-transfer-dep-btn-primary:disabled{
+        opacity:.62 !important;
+        cursor:not-allowed !important;
+        transform:none !important;
+      }
+
+      html[data-theme="light"] #zcTransferirColaboradorModal,
+      html[data-theme="light"] .zc-transfer-dep-modal{
+        background:rgba(17,27,33,.28) !important;
+        color:#111b21 !important;
+      }
+
+      html[data-theme="light"] .zc-transfer-dep-card{
+        background:#ffffff !important;
+        color:#111b21 !important;
+        border-color:rgba(17,27,33,.10) !important;
+        box-shadow:0 22px 64px rgba(17,27,33,.18) !important;
+      }
+
+      html[data-theme="light"] .zc-transfer-dep-head,
+      html[data-theme="light"] .zc-transfer-dep-body,
+      html[data-theme="light"] .zc-transfer-dep-foot{
+        background:#ffffff !important;
+      }
+
+      html[data-theme="light"] .zc-transfer-dep-head,
+      html[data-theme="light"] .zc-transfer-dep-foot{
+        border-color:rgba(17,27,33,.10) !important;
+      }
+
+      html[data-theme="light"] .zc-transfer-dep-title{
+        color:#111b21 !important;
+      }
+
+      html[data-theme="light"] .zc-transfer-dep-close{
+        color:#667781 !important;
+      }
+
+      html[data-theme="light"] .zc-transfer-dep-close:hover{
+        background:#f0f2f5 !important;
+        color:#111b21 !important;
+      }
+
+      html[data-theme="light"] .zc-transfer-dep-label{
+        color:#3b4a54 !important;
+      }
+
+      html[data-theme="light"] .zc-transfer-dep-select{
+        background:#f0f2f5 !important;
+        color:#111b21 !important;
+        border-color:#d9dee2 !important;
+        color-scheme:light !important;
+      }
+
+      html[data-theme="light"] .zc-transfer-dep-help{
+        color:#667781 !important;
+      }
+
+      html[data-theme="light"] .zc-transfer-dep-error{
+        background:#fff1f2 !important;
+        border-color:#fecdd3 !important;
+        color:#b42318 !important;
+      }
+
+      html[data-theme="light"] .zc-transfer-dep-btn-secondary{
+        background:#f0f2f5 !important;
+        color:#3b4a54 !important;
+      }
+
+      html[data-theme="light"] .zc-transfer-dep-btn-secondary:hover{
+        background:#e9edef !important;
+        color:#111b21 !important;
+      }
+
+      html[data-theme="light"] .zc-transfer-dep-btn-primary{
+        background:#00a884 !important;
+        color:#ffffff !important;
+      }
+
+      html[data-theme="light"] .zc-transfer-dep-btn-primary:hover{
+        background:#008f72 !important;
+      }
+
+      @media (max-width:640px){
+        #zcTransferirColaboradorModal,
+        .zc-transfer-dep-modal{
+          align-items:flex-end !important;
+          padding:10px !important;
+        }
+
+        .zc-transfer-dep-card{
+          width:100% !important;
+          border-radius:18px !important;
+        }
+
+        .zc-transfer-dep-foot{
+          display:grid !important;
+          grid-template-columns:1fr 1fr !important;
+        }
+
+        .zc-transfer-dep-btn-secondary,
+        .zc-transfer-dep-btn-primary{
+          width:100% !important;
+          min-width:0 !important;
+        }
+      }
+    `;
+
+    document.head.appendChild(style);
+  }
+
   function ensureModal() {
+    ensureTransferColabModalStyle();
+
     if (document.getElementById(MODAL_ID)) return;
 
     const html = `

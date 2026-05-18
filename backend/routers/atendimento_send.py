@@ -1032,7 +1032,71 @@ def _ts_seconds_from_evo(evo: Dict[str, Any]) -> int:
 
 
 def _ack_from_send_success() -> int:
+    # A Evolution pode responder status=PENDING mesmo com HTTP 201.
+    # Para o ZapsChat, HTTP 2xx + key.id significa: enviado para a Evolution.
+    # Então o ACK inicial precisa ser 1 para não ficar preso no relógio.
     return 1
+
+
+def _send_ok_envelope(
+    *,
+    evolution: Dict[str, Any],
+    db_payload: Optional[Dict[str, Any]],
+    instance_name: str,
+    msg_id: Optional[str],
+    ack: int,
+    timestamp_iso: Optional[str],
+    conversation_key: Optional[str],
+    kind: Optional[str],
+    entity_id: Optional[int],
+    instancia_id: Optional[int],
+    is_group: bool,
+) -> Dict[str, Any]:
+    """
+    Resposta padronizada para o front.
+
+    Motivo:
+    - A Evolution frequentemente devolve status=PENDING no primeiro retorno,
+      mesmo tendo aceitado a mensagem com HTTP 201 e key.id.
+    - O front não deve usar esse PENDING da Evolution para manter relógio.
+    - O ACK canônico do ZapsChat aqui é ack=1 quando o POST para a Evolution
+      foi aceito e a mensagem foi salva/broadcastada.
+    """
+    final_ack = int(ack or 0)
+    final_msg_id = str(msg_id or "").strip() or None
+
+    out = {
+        "ok": True,
+        "sent": True,
+        "pending": final_ack <= 0,
+        "ack": final_ack,
+        "status": "sent" if final_ack > 0 else "pending",
+        "msg_id": final_msg_id,
+        "message_id": final_msg_id,
+        "wa_msg_id": final_msg_id,
+        "timestamp": timestamp_iso,
+        "conversation_id": conversation_key,
+        "conversation_key": conversation_key,
+        "kind": kind,
+        "entity_id": entity_id,
+        "instancia_id": instancia_id,
+        "instance_name": instance_name,
+        "is_group": bool(is_group),
+        "evolution_status": (evolution or {}).get("status"),
+        "evolution": evolution,
+        "db": db_payload,
+    }
+
+    if db_payload is not None:
+        db_payload.setdefault("ack", final_ack)
+        db_payload.setdefault("pending", final_ack <= 0)
+        db_payload.setdefault("status", "sent" if final_ack > 0 else "pending")
+        db_payload.setdefault("msg_id", final_msg_id)
+        db_payload.setdefault("message_id", final_msg_id)
+        db_payload.setdefault("wa_msg_id", final_msg_id)
+        db_payload.setdefault("timestamp", timestamp_iso)
+
+    return out
 
 
 def _get_or_create_grupo(
@@ -1999,21 +2063,40 @@ async def _send_core(
             quoted_preview=quoted_preview_payload,
         )
 
-        return {
-            "evolution": evo,
-            "db": {
-                "mensagem_grupo_id": getattr(msg_g, "id", None),
-                "grupo_id": getattr(grp, "id", None),
-                "conversation_id": conv_ref,
-                "conversation_key": conv_ref,
-                "kind": "g",
-                "entity_id": int(getattr(grp, "id", 0) or 0),
-                "instancia_id": inst_id_checked,
-                "quoted": quoted_payload,
-                "quoted_preview": quoted_preview_payload,
-            },
-            "instance_name": inst_name,
+        msg_id_final = evo_msg_id or str(getattr(msg_g, "msg_id", None) or getattr(msg_g, "id", "") or "")
+
+        db_payload = {
+            "mensagem_grupo_id": getattr(msg_g, "id", None),
+            "grupo_id": getattr(grp, "id", None),
+            "conversation_id": conv_ref,
+            "conversation_key": conv_ref,
+            "kind": "g",
+            "entity_id": int(getattr(grp, "id", 0) or 0),
+            "instancia_id": inst_id_checked,
+            "msg_id": msg_id_final,
+            "message_id": msg_id_final,
+            "wa_msg_id": msg_id_final,
+            "ack": ack_now,
+            "pending": False,
+            "status": "sent",
+            "timestamp": ts_iso,
+            "quoted": quoted_payload,
+            "quoted_preview": quoted_preview_payload,
         }
+
+        return _send_ok_envelope(
+            evolution=evo,
+            db_payload=db_payload,
+            instance_name=inst_name,
+            msg_id=msg_id_final,
+            ack=ack_now,
+            timestamp_iso=ts_iso,
+            conversation_key=conv_ref,
+            kind="g",
+            entity_id=int(getattr(grp, "id", 0) or 0),
+            instancia_id=inst_id_checked,
+            is_group=True,
+        )
 
     cliente = cliente_acl
     if not cliente and cliente_existing_by_number is not None:
@@ -2023,7 +2106,20 @@ async def _send_core(
         cliente = _get_or_create_cliente(db, empresa, numero_db_norm, inst_id_checked)
 
     if not cliente:
-        return {"evolution": evo, "db": None, "instance_name": inst_name}
+        msg_id_final = str(evo_msg_id or "").strip() or None
+        return _send_ok_envelope(
+            evolution=evo,
+            db_payload=None,
+            instance_name=inst_name,
+            msg_id=msg_id_final,
+            ack=ack_now,
+            timestamp_iso=datetime.fromtimestamp(_ts_seconds_from_evo(evo), tz=timezone.utc).isoformat(timespec="microseconds"),
+            conversation_key=None,
+            kind="c",
+            entity_id=None,
+            instancia_id=inst_id_checked,
+            is_group=False,
+        )
 
     # Se veio conversation_key/conversation_id de cliente, o cliente final precisa ser o mesmo.
     if explicit_kind == "cliente" and explicit_entity_id is not None:
@@ -2096,23 +2192,43 @@ async def _send_core(
         quoted_preview=quoted_preview_payload,
     )
 
-    return {
-        "evolution": evo,
-        "db": {
-            "mensagem_id": msg.id,
-            "cliente_id": cliente.id,
-            "atendimento_id": atendimento_id,
-            "departamento_id": departamento_id,
-            "conversation_id": conv_ref,
-            "conversation_key": conv_ref,
-            "kind": "c",
-            "entity_id": int(cliente.id),
-            "instancia_id": inst_id_checked,
-            "quoted": quoted_payload,
-            "quoted_preview": quoted_preview_payload,
-        },
-        "instance_name": inst_name,
+    msg_id_final = msg.msg_id or evo_msg_id or str(msg.id)
+    timestamp_iso = msg.timestamp.isoformat(timespec="microseconds")
+
+    db_payload = {
+        "mensagem_id": msg.id,
+        "cliente_id": cliente.id,
+        "atendimento_id": atendimento_id,
+        "departamento_id": departamento_id,
+        "conversation_id": conv_ref,
+        "conversation_key": conv_ref,
+        "kind": "c",
+        "entity_id": int(cliente.id),
+        "instancia_id": inst_id_checked,
+        "msg_id": msg_id_final,
+        "message_id": msg_id_final,
+        "wa_msg_id": msg_id_final,
+        "ack": int(msg.ack or ack_now),
+        "pending": False,
+        "status": "sent",
+        "timestamp": timestamp_iso,
+        "quoted": quoted_payload,
+        "quoted_preview": quoted_preview_payload,
     }
+
+    return _send_ok_envelope(
+        evolution=evo,
+        db_payload=db_payload,
+        instance_name=inst_name,
+        msg_id=msg_id_final,
+        ack=int(msg.ack or ack_now),
+        timestamp_iso=timestamp_iso,
+        conversation_key=conv_ref,
+        kind="c",
+        entity_id=int(cliente.id),
+        instancia_id=inst_id_checked,
+        is_group=False,
+    )
 
 
 # =========================================================

@@ -10,6 +10,12 @@
 // - WS só renderiza bolha se a conversa aberta bater com a instância correta
 // - Conversa aberta: sem bolinha de nova mensagem
 // - Conversa fechada: soma bolinha de nova mensagem
+//
+// Correção desta versão:
+// - Se a conversa está aberta, mas o item da lista/cache não bateu ainda,
+//   o WS usa o contexto aberto e renderiza a bolha mesmo assim.
+// - Dispara eventos compatíveis com historico.js:
+//   atendimento:mensagem-recebida, zc:message-upsert, zc:message-created.
 // ====================================================================
 
 import { tsToMillis } from '../core/time.js';
@@ -93,6 +99,7 @@ function instKey(v) {
     low === 'nan' ||
     low === '0' ||
     low === 'all' ||
+    low === 'todos' ||
     low === '*' ||
     low === '-'
   ) {
@@ -537,11 +544,15 @@ function findKnownConversationByRef(ref, data = null) {
 function getOpenContext() {
   try {
     const hist = document.getElementById('historico');
+    const head = document.getElementById('chat-header');
 
     const rawDom =
       hist?.dataset?.conversationKey ??
       hist?.dataset?.conversationId ??
       hist?.dataset?.convKey ??
+      head?.dataset?.conversationKey ??
+      head?.dataset?.conversationId ??
+      head?.dataset?.convKey ??
       null;
 
     const selected =
@@ -550,14 +561,44 @@ function getOpenContext() {
       null;
 
     const domRef = normalizeConversationRef(rawDom, {
-      instancia_id: hist?.dataset?.instanciaId,
-      kind: hist?.dataset?.kind,
-      entity_id: hist?.dataset?.entityId,
+      instancia_id:
+        hist?.dataset?.instanciaId ||
+        head?.dataset?.instanciaId ||
+        selected?.instancia_id ||
+        selected?.instanciaId,
+      instancia:
+        hist?.dataset?.instancia ||
+        head?.dataset?.instancia ||
+        selected?.instancia,
+      instance_name:
+        hist?.dataset?.instanceName ||
+        head?.dataset?.instanceName ||
+        selected?.instance_name ||
+        selected?.instanceName,
+      kind:
+        hist?.dataset?.kind ||
+        head?.dataset?.kind ||
+        selected?.kind,
+      entity_id:
+        hist?.dataset?.entityId ||
+        head?.dataset?.entityId ||
+        selected?.entity_id ||
+        selected?.entityId,
       cliente_id:
         hist?.dataset?.apiClienteId ||
         hist?.dataset?.backendClienteId ||
-        hist?.dataset?.clienteId,
-      grupo_id: hist?.dataset?.grupoId,
+        hist?.dataset?.clienteId ||
+        head?.dataset?.apiClienteId ||
+        head?.dataset?.backendClienteId ||
+        head?.dataset?.clienteId ||
+        selected?.cliente_id ||
+        selected?.clienteId ||
+        selected?.id,
+      grupo_id:
+        hist?.dataset?.grupoId ||
+        head?.dataset?.grupoId ||
+        selected?.grupo_id ||
+        selected?.grupoId,
     });
 
     const selectedRef = normalizeConversationRef(selected, selected);
@@ -576,21 +617,31 @@ function getOpenContext() {
       domRef?.entityId ||
       selectedRef?.entityId ||
       idKey(hist?.dataset?.entityId) ||
+      idKey(head?.dataset?.entityId) ||
       idKey(hist?.dataset?.apiClienteId) ||
       idKey(hist?.dataset?.backendClienteId) ||
       idKey(hist?.dataset?.clienteId) ||
+      idKey(head?.dataset?.apiClienteId) ||
+      idKey(head?.dataset?.backendClienteId) ||
+      idKey(head?.dataset?.clienteId) ||
+      idKey(selected?.cliente_id) ||
+      idKey(selected?.clienteId) ||
+      idKey(selected?.id) ||
       null;
 
     const instId =
       domRef?.instId ||
       selectedRef?.instId ||
       instKey(hist?.dataset?.instanciaId) ||
+      instKey(head?.dataset?.instanciaId) ||
       instKey(selected?.instancia_id) ||
       instKey(selected?.instanciaId) ||
+      instKey(window.INSTANCIA_ATIVA) ||
       null;
 
     const phone =
       hist?.dataset?.telefone ||
+      head?.dataset?.phone ||
       selected?.telefone_norm ||
       selected?.telefone ||
       selected?.phone ||
@@ -607,6 +658,7 @@ function getOpenContext() {
       instId,
       phone,
       hist,
+      head,
       selected,
     };
   } catch {
@@ -617,6 +669,7 @@ function getOpenContext() {
       instId: null,
       phone: '',
       hist: null,
+      head: null,
       selected: null,
     };
   }
@@ -627,36 +680,130 @@ function isOpenChat(refOrKey) {
     const open = getOpenContext();
     const ref = normalizeConversationRef(refOrKey, typeof refOrKey === 'object' ? refOrKey : null);
 
-    if (!open?.key || !ref?.key) return false;
+    if (!open || !ref) return false;
 
-    if (open.key === ref.key) return true;
+    /*
+      1) Match perfeito por conversation_key.
+    */
+    if (open.key && ref.key && open.key === ref.key) return true;
 
-    if (!open.kind || !open.entityId || !open.instId) return false;
-    if (!ref.kind || !ref.entityId || !ref.instId) return false;
+    /*
+      2) Match por tipo + entidade + instância.
+      Esse é o mais importante quando o DOM ainda não atualizou todos os datasets.
+    */
+    if (open.kind && ref.kind && open.kind !== ref.kind) return false;
 
-    if (open.kind !== ref.kind) return false;
-    if (String(open.entityId) !== String(ref.entityId)) return false;
+    if (open.entityId && ref.entityId && String(open.entityId) !== String(ref.entityId)) {
+      return false;
+    }
 
-    return sameInstStrict(open.instId, ref.instId);
+    if (open.instId && ref.instId) {
+      return sameInstStrict(open.instId, ref.instId);
+    }
+
+    /*
+      3) Fallback seguro:
+      se ambos têm entityId igual, mas só um lado tem instância,
+      aceita apenas quando a instância que existe é a instância ativa.
+    */
+    if (open.entityId && ref.entityId && String(open.entityId) === String(ref.entityId)) {
+      const active = getActiveInstKey();
+      const onlyInst = open.instId || ref.instId;
+
+      if (active && onlyInst && sameInstStrict(active, onlyInst)) {
+        return true;
+      }
+    }
+
+    return false;
   } catch {
     return false;
   }
 }
 
-function getOpenRefIfMatchesIncoming(incomingRef) {
+function getOpenRefIfMatchesIncoming(incomingRef, data = null) {
   const open = getOpenContext();
 
-  if (!open?.key || !incomingRef?.key) return null;
+  if (!open) return null;
 
-  if (!isOpenChat(incomingRef)) return null;
+  const incoming = normalizeConversationRef(incomingRef, typeof incomingRef === 'object' ? incomingRef : data);
 
-  return {
-    key: open.key,
-    kind: open.kind || incomingRef.kind || 'c',
-    entityId: open.entityId || incomingRef.entityId || null,
-    instId: open.instId || incomingRef.instId || null,
-    from: 'open',
+  if (!incoming?.kind || !incoming?.entityId) return null;
+
+  const openLike = {
+    key: open.key || buildConversationKey(open.kind || incoming.kind, open.entityId || incoming.entityId, open.instId || incoming.instId),
+    kind: open.kind || incoming.kind || 'c',
+    entityId: open.entityId || incoming.entityId || null,
+    instId: open.instId || incoming.instId || null,
   };
+
+  if (!openLike.entityId) return null;
+
+  const sameKind = (openLike.kind || 'c') === (incoming.kind || 'c');
+  const sameEntity = String(openLike.entityId) === String(incoming.entityId);
+  const sameInst =
+    openLike.instId && incoming.instId
+      ? sameInstStrict(openLike.instId, incoming.instId)
+      : false;
+
+  if (sameKind && sameEntity && sameInst) {
+    const finalKey =
+      open.key ||
+      incoming.key ||
+      buildConversationKey(openLike.kind, openLike.entityId, openLike.instId);
+
+    return {
+      key: finalKey,
+      kind: openLike.kind,
+      entityId: openLike.entityId,
+      instId: openLike.instId || incoming.instId,
+      from: 'open',
+    };
+  }
+
+  /*
+    Fallback por telefone só para 1:1 e com instância batendo.
+  */
+  const incomingPhone =
+    data?.telefone_norm ??
+    data?.telefone ??
+    data?.phone ??
+    data?.numero ??
+    data?.number ??
+    data?.remoteJid ??
+    data?.remote_jid ??
+    data?.jid ??
+    '';
+
+  if (
+    incoming.kind === 'c' &&
+    openLike.kind === 'c' &&
+    incomingPhone &&
+    open.phone &&
+    samePhone(open.phone, incomingPhone)
+  ) {
+    const instOk =
+      openLike.instId && incoming.instId
+        ? sameInstStrict(openLike.instId, incoming.instId)
+        : false;
+
+    if (instOk) {
+      const finalKey =
+        open.key ||
+        incoming.key ||
+        buildConversationKey('c', openLike.entityId || incoming.entityId, openLike.instId || incoming.instId);
+
+      return {
+        key: finalKey,
+        kind: 'c',
+        entityId: openLike.entityId || incoming.entityId,
+        instId: openLike.instId || incoming.instId,
+        from: 'open-phone',
+      };
+    }
+  }
+
+  return null;
 }
 
 /* =========================================================
@@ -870,7 +1017,12 @@ function resolveKnownRefForIncoming(data) {
     return null;
   }
 
-  const openRef = getOpenRefIfMatchesIncoming(incoming);
+  /*
+    Primeiro tenta a conversa aberta.
+    Isso resolve o problema: mensagem chega via WS, está na conversa aberta,
+    mas a lista/cache ainda não reconheceu o item.
+  */
+  const openRef = getOpenRefIfMatchesIncoming(incoming, data);
   if (openRef?.key) return openRef;
 
   const known = findKnownConversationByRef(incoming, data);
@@ -899,30 +1051,54 @@ function ensureDomContextFor(convRef) {
   if (!ref?.key) return false;
 
   const hist = H();
-  if (!hist) return false;
+  const head = document.getElementById('chat-header');
 
-  hist.dataset.conversationKey = ref.key;
-  hist.dataset.conversationId = ref.key;
-  hist.dataset.convKey = ref.key;
-  hist.dataset.entityId = ref.entityId || '';
-  hist.dataset.kind = ref.kind || 'c';
+  if (hist) {
+    hist.dataset.conversationKey = ref.key;
+    hist.dataset.conversationId = ref.key;
+    hist.dataset.convKey = ref.key;
+    hist.dataset.entityId = ref.entityId || '';
+    hist.dataset.kind = ref.kind || 'c';
 
-  if (ref.instId) {
-    hist.dataset.instanciaId = ref.instId;
+    if (ref.instId) {
+      hist.dataset.instanciaId = ref.instId;
+    }
+
+    if (ref.kind === 'g') {
+      hist.dataset.grupoId = ref.entityId || '';
+      hist.dataset.isGroup = 'true';
+      hist.dataset.clienteId = ref.key;
+    } else {
+      hist.dataset.apiClienteId = ref.entityId || '';
+      hist.dataset.backendClienteId = ref.entityId || '';
+      hist.dataset.clienteId = ref.entityId || '';
+      hist.dataset.isGroup = 'false';
+    }
   }
 
-  if (ref.kind === 'g') {
-    hist.dataset.grupoId = ref.entityId || '';
-    hist.dataset.isGroup = 'true';
-    hist.dataset.clienteId = ref.key;
-  } else {
-    hist.dataset.apiClienteId = ref.entityId || '';
-    hist.dataset.backendClienteId = ref.entityId || '';
-    hist.dataset.clienteId = ref.entityId || '';
-    hist.dataset.isGroup = 'false';
+  if (head) {
+    head.dataset.conversationKey = ref.key;
+    head.dataset.conversationId = ref.key;
+    head.dataset.convKey = ref.key;
+    head.dataset.entityId = ref.entityId || '';
+    head.dataset.kind = ref.kind || 'c';
+
+    if (ref.instId) {
+      head.dataset.instanciaId = ref.instId;
+    }
+
+    if (ref.kind === 'g') {
+      head.dataset.grupoId = ref.entityId || '';
+      head.dataset.isGroup = 'true';
+    } else {
+      head.dataset.apiClienteId = ref.entityId || '';
+      head.dataset.backendClienteId = ref.entityId || '';
+      head.dataset.clienteId = ref.entityId || '';
+      head.dataset.isGroup = 'false';
+    }
   }
 
-  return true;
+  return !!hist;
 }
 
 function scrollBottomSoon() {
@@ -933,6 +1109,33 @@ function scrollBottomSoon() {
       hist.scrollTop = hist.scrollHeight;
     });
   } catch {}
+}
+
+function renderOpenConversationFromWs(convRef) {
+  const ref = normalizeConversationRef(convRef, typeof convRef === 'object' ? convRef : null);
+  if (!ref?.key) return;
+
+  try {
+    ensureDomContextFor(ref);
+  } catch {}
+
+  const renderOnce = () => {
+    try {
+      renderHistoricoDoCache(ref.key, true);
+      scrollBottomSoon();
+    } catch (e) {
+      if (DEBUG_WS) console.warn('[WS MSG][renderOpenConversationFromWs] falhou', e);
+    }
+  };
+
+  renderOnce();
+
+  try {
+    requestAnimationFrame(renderOnce);
+  } catch {}
+
+  setTimeout(renderOnce, 80);
+  setTimeout(renderOnce, 250);
 }
 
 /* =========================================================
@@ -1254,6 +1457,32 @@ function pushIncomingToHist(convKey, msg, inst = null) {
   return true;
 }
 
+function dispatchRealtimeMessageEvents(payload) {
+  const detail = {
+    ...payload,
+    conversation_key: payload.conversation_key || payload.conversation_id,
+    conversation_id: payload.conversation_id || payload.conversation_key,
+  };
+
+  [
+    'atendimento:mensagem-recebida',
+    'zc:message-upsert',
+    'zc:message-created',
+    'zc:message-received',
+    'zc:new-message',
+    'atendimento:message',
+    'atendimento:message-received',
+  ].forEach((name) => {
+    try {
+      document.dispatchEvent(new CustomEvent(name, { detail }));
+    } catch {}
+
+    try {
+      window.dispatchEvent(new CustomEvent(name, { detail }));
+    } catch {}
+  });
+}
+
 /* =========================================================
    NOTIFICAÇÕES
 ========================================================= */
@@ -1310,7 +1539,7 @@ function handleAckGeneric(data) {
 
   if (key && isOpenChat(ref)) {
     try {
-      renderHistoricoDoCache(key, true);
+      renderOpenConversationFromWs(ref);
     } catch {}
   }
 }
@@ -1356,8 +1585,7 @@ function handleDeleteMensagem(data) {
 
   if (isOpenChat(ref)) {
     try {
-      ensureDomContextFor(ref);
-      renderHistoricoDoCache(ref.key, true);
+      renderOpenConversationFromWs(ref);
     } catch {}
   }
 
@@ -1395,23 +1623,69 @@ function handleNovaMensagem(data) {
   const knownRef = resolveKnownRefForIncoming(data);
 
   /*
-    WS NUNCA cria conversa.
-    Se a conversa não está aberta nem existe na lista/cache,
-    apenas recarrega a lista oficial.
+    WS NUNCA cria conversa fantasma na lista.
+    Mas se a conversa JÁ ESTÁ ABERTA, pode renderizar usando o contexto aberto.
   */
   if (!knownRef?.key || !knownRef?.instId) {
-    if (DEBUG_WS) {
-      console.warn('[WS MSG][conversa desconhecida - sem criar fantasma]', {
-        incomingRef,
-        data,
-      });
+    const openRef = getOpenRefIfMatchesIncoming(incomingRef, data);
+
+    if (!openRef?.key || !openRef?.instId) {
+      if (DEBUG_WS) {
+        console.warn('[WS MSG][conversa desconhecida - sem criar fantasma]', {
+          incomingRef,
+          data,
+        });
+      }
+
+      requestOfficialListReload('ws-new-message-unknown-conversation');
+      return;
     }
 
-    requestOfficialListReload('ws-new-message-unknown-conversation');
+    const textOpen = pickText(data);
+    const msgIdOpen = pickMsgId(data);
+
+    const normalizedOpenPayload = {
+      ...data,
+      type: data.type || 'message',
+      event: data.event || 'message',
+
+      conversation_key: openRef.key,
+      conversation_id: openRef.key,
+      kind: openRef.kind,
+      entity_id: openRef.entityId,
+
+      instancia_id: openRef.instId,
+      instance_name: data.instance_name || data.instanceName || resolveInstanceName(openRef.instId) || null,
+
+      mensagem: textOpen,
+      texto: textOpen,
+      conteudo: textOpen,
+      msg_id: msgIdOpen,
+
+      from_me: Boolean(data.from_me ?? data.fromMe ?? data.tipo === 'saida'),
+      is_group: openRef.kind === 'g',
+    };
+
+    if (openRef.kind === 'g') {
+      normalizedOpenPayload.grupo_id = openRef.entityId;
+      normalizedOpenPayload.cliente_id = data.cliente_id ?? null;
+    } else {
+      normalizedOpenPayload.cliente_id = openRef.entityId;
+    }
+
+    try {
+      mergeIncomingMessage(openRef.key, normalizedOpenPayload, openRef.instId);
+    } catch {}
+
+    pushIncomingToHist(openRef, normalizedOpenPayload, openRef.instId);
+    dispatchRealtimeMessageEvents(normalizedOpenPayload);
+    renderOpenConversationFromWs(openRef);
+    notifyNewMessage(normalizedOpenPayload, openRef.key);
+
     return;
   }
 
-  const openNow = isOpenChat(knownRef);
+  const openNow = isOpenChat(knownRef) || knownRef.from === 'open' || knownRef.from === 'open-phone';
 
   const text = pickText(data);
   const msgId = pickMsgId(data);
@@ -1453,6 +1727,8 @@ function handleNovaMensagem(data) {
 
   const updated = bumpPreview(knownRef, normalizedPayload, knownRef.instId);
 
+  dispatchRealtimeMessageEvents(normalizedPayload);
+
   if (!updated && !openNow) {
     requestOfficialListReload('ws-message-update-miss');
     return;
@@ -1460,16 +1736,7 @@ function handleNovaMensagem(data) {
 
   if (openNow) {
     try {
-      ensureDomContextFor(knownRef);
-
-      /*
-        CRÍTICO:
-        Mensagem nova via WS é append.
-        Nunca rebuilda histórico inteiro aqui.
-      */
-      renderHistoricoDoCache(knownRef.key, true);
-
-      scrollBottomSoon();
+      renderOpenConversationFromWs(knownRef);
 
       try {
         marcarLidas(knownRef.key);
@@ -1998,8 +2265,13 @@ try {
 
     connectEmpresaWS();
 
+    /*
+      Na tela de atendimentos não abrimos /ws/instancia.
+      O tempo real das mensagens vem pelo WS da empresa.
+      Isso evita loop quando o Engine.IO/Socket.IO da Evolution fecha.
+    */
     if (isAtendimentosPage()) {
-      connectInstWS({ wantQR: false });
+      disconnectInstWS();
     }
   };
 
@@ -2013,10 +2285,13 @@ try {
     window.__ZC_WS_INST_CHANGE_BOUND__ = true;
 
     document.addEventListener('inst:change', () => {
-      if (DEBUG_WS) console.debug('[WS] inst:change → reconnect inst');
+      if (DEBUG_WS) console.debug('[WS] inst:change → mantendo somente WS empresa');
 
+      /*
+        Troca de instância no atendimento não precisa abrir /ws/instancia.
+        A lista/histórico continuam recebendo mensagem pelo WS da empresa.
+      */
       disconnectInstWS();
-      connectInstWS({ wantQR: false });
     });
   }
 

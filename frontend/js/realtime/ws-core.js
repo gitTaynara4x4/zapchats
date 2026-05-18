@@ -1,9 +1,12 @@
-/*frontend\js\realtime\ws-core.js*/
+/*frontend/js/realtime/ws-core.js*/
 
 /* ws-core.js — gestor único de WebSockets com idempotência forte
-   ✅ FIX: não usa localStorage/sessionStorage para cid
-   ✅ FIX: estado global compartilhado mesmo se o módulo for importado mais de uma vez
-   ✅ FIX: evita reconexão duplicada/stale close
+   ✅ singleton global mesmo com import ?_v=
+   ✅ não usa localStorage/sessionStorage para cid
+   ✅ evita reconexão duplicada/stale close
+   ✅ envia empresa_id/token na query como fallback
+   ✅ garante cookie empresa_id quando existir em window/localStorage
+   ✅ logs opcionais com window.DEBUG_WS_CORE = true
 */
 
 const ROOT = window.__ZC_WS_CORE__ || (window.__ZC_WS_CORE__ = {
@@ -11,11 +14,27 @@ const ROOT = window.__ZC_WS_CORE__ || (window.__ZC_WS_CORE__ = {
   cid: null,
 });
 
-const _topics = ROOT.topics; // topic -> { ws, listeners:Set, wantOpen, lastOpenAt, retries, hbTimer, reopenTimer, openSeq, _opts }
+const _topics = ROOT.topics;
 
-const _baseRetry = 800;    // ms
-const _maxRetry  = 10000;  // ms
-const _pingEach  = 30000;  // ms (ping app-level)
+const _baseRetry = 800;
+const _maxRetry = 10000;
+const _pingEach = 30000;
+
+function _debug(...args) {
+  try {
+    if (window.DEBUG_WS_CORE === true || window.DEBUG_WS === true) {
+      console.debug('[ws-core]', ...args);
+    }
+  } catch {}
+}
+
+function _warn(...args) {
+  try {
+    if (window.DEBUG_WS_CORE === true || window.DEBUG_WS === true) {
+      console.warn('[ws-core]', ...args);
+    }
+  } catch {}
+}
 
 function _newCID() {
   try {
@@ -29,9 +48,6 @@ function _newCID() {
 }
 
 function _getCID() {
-  // IMPORTANTE:
-  // Não usar localStorage/sessionStorage.
-  // localStorage/sessionStorage mantém o mesmo cid entre páginas/abas e causa briga no backend.
   try {
     if (ROOT.cid) return ROOT.cid;
 
@@ -88,7 +104,6 @@ function _clearReopen(topic) {
 function _scheduleReopen(topic) {
   const st = _topicState(topic);
   if (!st.wantOpen) return;
-
   if (st.reopenTimer) return;
 
   const wait = Math.min(
@@ -120,13 +135,119 @@ function _scheduleReopen(topic) {
   st.retries = Math.min((st.retries || 0) + 1, 20);
 }
 
+function _safeGetLS(key) {
+  try {
+    return localStorage.getItem(key) || '';
+  } catch {
+    return '';
+  }
+}
+
+function _readCookie(name) {
+  try {
+    const parts = String(document.cookie || '').split(';');
+    const prefix = `${name}=`;
+
+    for (const part of parts) {
+      const p = part.trim();
+      if (p.startsWith(prefix)) {
+        return decodeURIComponent(p.slice(prefix.length));
+      }
+    }
+  } catch {}
+
+  return '';
+}
+
+function _setCookie(name, value) {
+  try {
+    const v = String(value || '').trim();
+    if (!v) return;
+
+    const secure = location.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = `${name}=${encodeURIComponent(v)}; Path=/; SameSite=Lax${secure}`;
+  } catch {}
+}
+
+function _empresaIdFromTopic(topic) {
+  try {
+    const s = String(topic || '').trim();
+    const m = s.match(/^emp:(\d+)$/i);
+    return m ? m[1] : '';
+  } catch {
+    return '';
+  }
+}
+
+function _getEmpresaId(topic = '') {
+  const fromTopic = _empresaIdFromTopic(topic);
+  if (fromTopic) return fromTopic;
+
+  const candidates = [
+    window.EMPRESA_ID,
+    window.APP_EMPRESA_ID,
+    window.empresa_id,
+    _safeGetLS('empresa_id'),
+    _safeGetLS('EMPRESA_ID'),
+  ];
+
+  for (const c of candidates) {
+    const s = String(c ?? '').trim();
+    if (/^\d+$/.test(s) && Number(s) > 0) return s;
+  }
+
+  return '';
+}
+
+function _getToken() {
+  const cookieToken = _readCookie('access_token');
+  if (cookieToken) return cookieToken;
+
+  const candidates = [
+    _safeGetLS('access_token'),
+    _safeGetLS('token'),
+    window.access_token,
+    window.ACCESS_TOKEN,
+  ];
+
+  for (const c of candidates) {
+    const s = String(c ?? '').trim();
+    if (s) return s;
+  }
+
+  return '';
+}
+
+function _ensureEmpresaCookie(topic) {
+  const empresaId = _getEmpresaId(topic);
+  if (!empresaId) return;
+
+  const current = _readCookie('empresa_id') || _readCookie('EMPRESA_ID');
+
+  if (!current || String(current) !== String(empresaId)) {
+    _setCookie('empresa_id', empresaId);
+  }
+}
+
 function _wsURLForTopic(topic, opts = {}) {
-  const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const enc = encodeURIComponent(topic);
   const cid = _getCID();
-  const want = opts.wantQR ? '&want_qr=1' : '';
 
-  return `${proto}://${location.host}/ws/${enc}?cid=${encodeURIComponent(cid)}${want}`;
+  _ensureEmpresaCookie(topic);
+
+  const qs = new URLSearchParams();
+  qs.set('cid', cid);
+
+  const empresaId = _getEmpresaId(topic);
+  if (empresaId) qs.set('empresa_id', empresaId);
+
+  const token = _getToken();
+  if (token) qs.set('token', token);
+
+  if (opts.wantQR) qs.set('want_qr', '1');
+
+  return `${proto}://${location.host}/ws/${enc}?${qs.toString()}`;
 }
 
 function _safeJson(x) {
@@ -145,6 +266,15 @@ function _emit(topic, payload) {
       fn(payload);
     } catch {}
   });
+
+  try {
+    window.dispatchEvent(new CustomEvent('zc:ws-core', {
+      detail: {
+        topic,
+        payload,
+      },
+    }));
+  } catch {}
 }
 
 function _startHB(topic) {
@@ -202,21 +332,48 @@ function _open(topic, opts = {}) {
   st.lastOpenAt = Date.now();
   st._opts = opts;
 
+  _debug('abrindo', {
+    topic,
+    url: url.replace(/token=([^&]+)/, 'token=***'),
+    seq,
+  });
+
   ws.addEventListener('open', () => {
     if (st.ws !== ws || st.openSeq !== seq) return;
 
     st.retries = 0;
     _clearReopen(topic);
     _startHB(topic);
-    _emit(topic, { type: 'open' });
+
+    _debug('open', { topic, seq });
+
+    _emit(topic, {
+      type: 'open',
+      topic,
+      readyState: ws.readyState,
+    });
   });
 
-  ws.addEventListener('close', () => {
-    // close antigo não pode derrubar socket novo
+  ws.addEventListener('close', (ev) => {
     if (st.ws !== ws || st.openSeq !== seq) return;
 
     _stopHB(topic);
-    _emit(topic, { type: 'close' });
+
+    _warn('close', {
+      topic,
+      code: ev?.code,
+      reason: ev?.reason,
+      wasClean: ev?.wasClean,
+      seq,
+    });
+
+    _emit(topic, {
+      type: 'close',
+      topic,
+      code: ev?.code,
+      reason: ev?.reason,
+      wasClean: ev?.wasClean,
+    });
 
     st.ws = null;
 
@@ -225,14 +382,24 @@ function _open(topic, opts = {}) {
     }
   });
 
-  ws.addEventListener('error', () => {
+  ws.addEventListener('error', (ev) => {
     if (st.ws !== ws || st.openSeq !== seq) return;
+
+    _warn('error', {
+      topic,
+      seq,
+      ev,
+    });
 
     try {
       ws.close();
     } catch {}
 
-    _emit(topic, { type: 'error' });
+    _emit(topic, {
+      type: 'error',
+      topic,
+      ev,
+    });
   });
 
   ws.addEventListener('message', (ev) => {
@@ -242,7 +409,11 @@ function _open(topic, opts = {}) {
       typeof ev?.data === 'string' &&
       (ev.data === 'pong' || ev.data === 'ping')
     ) {
-      _emit(topic, { type: 'heartbeat', data: ev.data });
+      _emit(topic, {
+        type: 'heartbeat',
+        topic,
+        data: ev.data,
+      });
       return;
     }
 
@@ -250,7 +421,16 @@ function _open(topic, opts = {}) {
       ? _safeJson(ev.data)
       : ev?.data;
 
-    _emit(topic, { type: 'message', data });
+    _debug('message', {
+      topic,
+      data,
+    });
+
+    _emit(topic, {
+      type: 'message',
+      topic,
+      data,
+    });
   });
 }
 
@@ -276,7 +456,6 @@ function _ensure(topic, opts = {}) {
 
   const now = Date.now();
 
-  // anti-rajada: se acabou de tentar abrir, agenda em vez de abrir na força
   if (st.lastOpenAt && (now - st.lastOpenAt) < 1200) {
     _scheduleReopen(topic);
     return;
@@ -297,6 +476,11 @@ function _close(topic) {
   } catch {}
 
   st.ws = null;
+
+  _emit(topic, {
+    type: 'closed-by-client',
+    topic,
+  });
 }
 
 function _on(topic, fn) {
@@ -312,34 +496,53 @@ function _on(topic, fn) {
 }
 
 /* ====== API pública ====== */
+
 export function ensureEmpresaWS(empresaId) {
-  if (!empresaId) return;
-  _ensure(`emp:${empresaId}`);
+  const id = String(empresaId || '').trim();
+  if (!id) return;
+
+  try {
+    window.APP_EMPRESA_ID = id;
+    window.EMPRESA_ID = window.EMPRESA_ID || id;
+    _setCookie('empresa_id', id);
+  } catch {}
+
+  _ensure(`emp:${id}`);
 }
 
 export function closeEmpresaWS(empresaId) {
-  if (!empresaId) return;
-  _close(`emp:${empresaId}`);
+  const id = String(empresaId || '').trim();
+  if (!id) return;
+
+  _close(`emp:${id}`);
 }
 
 export function onEmpresaMessage(empresaId, handler) {
-  if (!empresaId || typeof handler !== 'function') return () => {};
-  return _on(`emp:${empresaId}`, handler);
+  const id = String(empresaId || '').trim();
+  if (!id || typeof handler !== 'function') return () => {};
+
+  return _on(`emp:${id}`, handler);
 }
 
 export function ensureInstWS(instance, opts = {}) {
-  if (!instance) return;
-  _ensure(`inst:${instance}`, opts);
+  const inst = String(instance || '').trim();
+  if (!inst) return;
+
+  _ensure(`inst:${inst}`, opts);
 }
 
 export function closeInstWS(instance) {
-  if (!instance) return;
-  _close(`inst:${instance}`);
+  const inst = String(instance || '').trim();
+  if (!inst) return;
+
+  _close(`inst:${inst}`);
 }
 
 export function onInstMessage(instance, handler) {
-  if (!instance || typeof handler !== 'function') return () => {};
-  return _on(`inst:${instance}`, handler);
+  const inst = String(instance || '').trim();
+  if (!inst || typeof handler !== 'function') return () => {};
+
+  return _on(`inst:${inst}`, handler);
 }
 
 export function getWSStatus() {
@@ -369,3 +572,11 @@ export function closeAllWS() {
     } catch {}
   });
 }
+
+/* Debug manual no console:
+   window.ZC_WS_CORE_STATUS()
+*/
+try {
+  window.ZC_WS_CORE_STATUS = getWSStatus;
+  window.ZC_CLOSE_ALL_WS = closeAllWS;
+} catch {}

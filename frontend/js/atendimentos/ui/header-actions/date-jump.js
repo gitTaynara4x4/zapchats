@@ -1,6 +1,6 @@
 // /frontend/js/atendimentos/ui/header-actions/date-jump.js
 // Agenda / Ir para uma data da conversa
-// - Abre modal com input date
+// - Abre modal com campo de data sem usar seletor nativo do navegador
 // - Procura mensagem já renderizada
 // - Busca no backend por data
 // - Mescla mensagens no cache
@@ -60,6 +60,105 @@
     getSelectedConversationKey,
     hasOpenChat,
   } = H;
+
+
+  const DATE_JUMP_FETCH_TIMEOUT_MS = 9000;
+  const DATE_JUMP_LOAD_MORE_TIMEOUT_MS = 4500;
+  const DATE_JUMP_RENDER_WAIT_LOOPS = 10;
+  const DATE_JUMP_RENDER_WAIT_MS = 80;
+  const DATE_JUMP_LOAD_MORE_MAX_PAGES = 2;
+
+  let __dateJumpSerial = 0;
+  let __dateJumpAbortController = null;
+
+  function abortActiveDateJump() {
+    try {
+      if (__dateJumpAbortController) {
+        __dateJumpAbortController.abort();
+      }
+    } catch {}
+
+    __dateJumpAbortController = null;
+  }
+
+  function createAbortPack(externalSignal = null, timeoutMs = DATE_JUMP_FETCH_TIMEOUT_MS) {
+    if (typeof AbortController === 'undefined') {
+      return {
+        signal: externalSignal || undefined,
+        cleanup() {},
+      };
+    }
+
+    const controller = new AbortController();
+    let done = false;
+
+    const cleanupFns = [];
+
+    function abort() {
+      if (done) return;
+      done = true;
+
+      try {
+        controller.abort();
+      } catch {}
+    }
+
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        abort();
+      } else {
+        const onAbort = () => abort();
+        externalSignal.addEventListener('abort', onAbort, { once:true });
+        cleanupFns.push(() => {
+          try { externalSignal.removeEventListener('abort', onAbort); } catch {}
+        });
+      }
+    }
+
+    const timer = setTimeout(abort, Number(timeoutMs || DATE_JUMP_FETCH_TIMEOUT_MS));
+    cleanupFns.push(() => clearTimeout(timer));
+
+    return {
+      signal: controller.signal,
+      cleanup() {
+        cleanupFns.forEach((fn) => {
+          try { fn(); } catch {}
+        });
+      },
+    };
+  }
+
+  function isAbortError(err) {
+    return Boolean(
+      err &&
+      (
+        err.name === 'AbortError' ||
+        String(err.message || '').toLowerCase().includes('abort') ||
+        String(err.message || '').toLowerCase().includes('cancel')
+      )
+    );
+  }
+
+  function throwIfDateJumpAborted(signal) {
+    if (signal && signal.aborted) {
+      throw new Error('Busca cancelada.');
+    }
+  }
+
+  function withTimeout(promise, timeoutMs, message) {
+    let timer = null;
+
+    return Promise.race([
+      Promise.resolve(promise),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(message || 'A operação demorou demais.'));
+        }, Number(timeoutMs || 4500));
+      }),
+    ]).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
+  }
 
   function ensureDateJumpStyle() {
     injectStyle('zc-datejump-style', `
@@ -644,7 +743,12 @@
             <input
               id="zc-datejump-input"
               class="zc-datejump-input"
-              type="date"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              placeholder="dd/mm/aaaa"
+              maxlength="10"
+              aria-label="Data no formato dia mês ano"
             />
           </span>
         </label>
@@ -694,11 +798,11 @@
           const kind = btn.getAttribute('data-datejump-quick');
 
           if (kind === 'today') {
-            input.value = todayISO();
+            setDateJumpInputValue(input, todayISO());
           } else if (kind === 'yesterday') {
-            input.value = dateDaysAgoISO(1);
+            setDateJumpInputValue(input, dateDaysAgoISO(1));
           } else if (kind === 'seven') {
-            input.value = dateDaysAgoISO(7);
+            setDateJumpInputValue(input, dateDaysAgoISO(7));
           }
 
           input.focus();
@@ -712,20 +816,34 @@
         jumpToConversationDate(value);
       });
 
-    modal
-      .querySelector('#zc-datejump-input')
-      ?.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          closeDateJumpDialog();
-          return;
-        }
+    const dateInput = modal.querySelector('#zc-datejump-input');
 
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          jumpToConversationDate(e.currentTarget.value || '');
-        }
-      });
+    dateInput?.addEventListener('input', (e) => {
+      const el = e.currentTarget;
+      el.value = maskDateInput(el.value);
+    });
+
+    dateInput?.addEventListener('blur', (e) => {
+      const el = e.currentTarget;
+      const iso = isoFromDateLike(el.value || '');
+
+      if (iso) {
+        setDateJumpInputValue(el, iso);
+      }
+    });
+
+    dateInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeDateJumpDialog();
+        return;
+      }
+
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        jumpToConversationDate(e.currentTarget.value || '');
+      }
+    });
   }
 
   function ensureDateJumpToastHost() {
@@ -837,6 +955,32 @@
     return localISODate(d);
   }
 
+  function formatISOToBR(value) {
+    const iso = String(value || '').trim();
+    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+    if (!m) return iso;
+
+    return `${m[3]}/${m[2]}/${m[1]}`;
+  }
+
+  function maskDateInput(value) {
+    const digits = String(value || '')
+      .replace(/\D+/g, '')
+      .slice(0, 8);
+
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+
+    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+  }
+
+  function setDateJumpInputValue(input, isoDate) {
+    if (!input) return;
+
+    input.value = formatISOToBR(isoDate);
+  }
+
   function setDateJumpScrollLock(active, ttlMs = 6500) {
     try {
       if (active) {
@@ -872,7 +1016,7 @@
     modal?.classList.add('is-open');
 
     if (input && !input.value) {
-      input.value = todayISO();
+      setDateJumpInputValue(input, todayISO());
     }
 
     setTimeout(() => {
@@ -1115,7 +1259,7 @@
     };
   }
 
-  async function fetchMessagesByDateFromBackend(isoDate) {
+  async function fetchMessagesByDateFromBackend(isoDate, options = {}) {
     const params = getCurrentDateJumpParams();
 
     if (!params.empresaId || !params.clienteId) {
@@ -1141,15 +1285,30 @@
     const url =
       `/api/atendimento/conversas/${encodeURIComponent(params.clienteId)}/mensagens/por-data?${qs.toString()}`;
 
-    const r = await fetch(url, {
-      method: 'GET',
-      credentials: 'include',
-      cache: 'no-store',
-      headers: {
-        Accept: 'application/json',
-        'Cache-Control': 'no-cache',
-      },
-    });
+    const abortPack = createAbortPack(options.signal || null, options.timeoutMs || DATE_JUMP_FETCH_TIMEOUT_MS);
+
+    let r;
+
+    try {
+      r = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        cache: 'no-store',
+        signal: abortPack.signal,
+        headers: {
+          Accept: 'application/json',
+          'Cache-Control': 'no-cache',
+        },
+      });
+    } catch (err) {
+      if (isAbortError(err)) {
+        throw new Error('A busca demorou demais ou foi cancelada. Tente outra data.');
+      }
+
+      throw err;
+    } finally {
+      abortPack.cleanup();
+    }
 
     const txt = await r.text().catch(() => '');
 
@@ -1427,8 +1586,8 @@
 
     renderHistoryFromCache(convKey);
 
-    for (let i = 0; i < 20; i++) {
-      await sleep(80);
+    for (let i = 0; i < DATE_JUMP_RENDER_WAIT_LOOPS; i++) {
+      await sleep(DATE_JUMP_RENDER_WAIT_MS);
 
       for (const msg of normalized) {
         const mid = String(
@@ -1459,8 +1618,8 @@
     return false;
   }
 
-  async function tryBackendDateJump(isoDate) {
-    const data = await fetchMessagesByDateFromBackend(isoDate);
+  async function tryBackendDateJump(isoDate, options = {}) {
+    const data = await fetchMessagesByDateFromBackend(isoDate, options);
 
     const items = Array.isArray(data?.items)
       ? data.items
@@ -1477,22 +1636,36 @@
     return focusBackendDateMessages(items, isoDate);
   }
 
-  async function tryLoadMoreUntilDate(isoDate, maxPages = 24) {
+  async function tryLoadMoreUntilDate(isoDate, maxPages = DATE_JUMP_LOAD_MORE_MAX_PAGES, options = {}) {
     const cid = resolveCurrentClienteId();
+    const signal = options.signal || null;
+    const pages = Math.max(0, Math.min(Number(maxPages || 0), DATE_JUMP_LOAD_MORE_MAX_PAGES));
 
-    if (!cid || typeof window.carregarMaisHistorico !== 'function') {
+    if (!pages || !cid || typeof window.carregarMaisHistorico !== 'function') {
       return false;
     }
 
-    for (let i = 0; i < maxPages; i++) {
+    for (let i = 0; i < pages; i++) {
+      throwIfDateJumpAborted(signal);
+
       let loaded = false;
 
       try {
-        loaded = await window.carregarMaisHistorico(cid);
+        loaded = await withTimeout(
+          window.carregarMaisHistorico(cid),
+          DATE_JUMP_LOAD_MORE_TIMEOUT_MS,
+          'Carregar mensagens antigas demorou demais.'
+        );
       } catch (err) {
+        if (isAbortError(err)) {
+          throw err;
+        }
+
         console.warn('[header-actions][date-jump] carregarMaisHistorico falhou', err);
         loaded = false;
       }
+
+      throwIfDateJumpAborted(signal);
 
       if (!loaded) {
         return false;
@@ -1512,8 +1685,6 @@
   }
 
   async function jumpToConversationDate(rawDate) {
-    if (H.state.dateJumping) return;
-
     const isoDate = isoFromDateLike(rawDate);
 
     if (!isoDate) {
@@ -1540,7 +1711,25 @@
       return;
     }
 
+    /*
+      Antes essa função simplesmente dava return quando H.state.dateJumping era true.
+      Resultado: se uma busca demorasse, o modal parecia travado e você não conseguia
+      escolher outra data. Agora uma nova tentativa cancela a anterior.
+    */
+    if (H.state.dateJumping) {
+      abortActiveDateJump();
+      H.state.dateJumping = false;
+    }
+
     const goBtn = document.getElementById('zc-datejump-go');
+    const mySerial = ++__dateJumpSerial;
+
+    let controller = null;
+
+    if (typeof AbortController !== 'undefined') {
+      controller = new AbortController();
+      __dateJumpAbortController = controller;
+    }
 
     try {
       H.state.dateJumping = true;
@@ -1579,11 +1768,17 @@
       let backendError = null;
 
       try {
-        found = await tryBackendDateJump(isoDate);
+        found = await tryBackendDateJump(isoDate, {
+          signal: controller?.signal || null,
+          timeoutMs: DATE_JUMP_FETCH_TIMEOUT_MS,
+        });
       } catch (err) {
         backendError = err;
         console.warn('[header-actions][date-jump] busca por data no backend falhou', err);
       }
+
+      if (mySerial !== __dateJumpSerial) return;
+      throwIfDateJumpAborted(controller?.signal || null);
 
       if (found) {
         closeDateJumpDialog();
@@ -1599,15 +1794,28 @@
         return;
       }
 
-      notifyDateJump({
-        id: 'date-jump-status',
-        type: 'loading',
-        title: 'Carregando mensagens antigas',
-        msg: 'Buscando páginas anteriores da conversa...',
-        loading: true,
-      });
+      if (DATE_JUMP_LOAD_MORE_MAX_PAGES > 0) {
+        notifyDateJump({
+          id: 'date-jump-status',
+          type: 'loading',
+          title: 'Buscando um pouco mais',
+          msg: 'Vou tentar carregar poucas mensagens antigas, sem travar a tela.',
+          loading: true,
+        });
 
-      found = await tryLoadMoreUntilDate(isoDate, 24);
+        try {
+          found = await tryLoadMoreUntilDate(isoDate, DATE_JUMP_LOAD_MORE_MAX_PAGES, {
+            signal: controller?.signal || null,
+          });
+        } catch (err) {
+          backendError = backendError || err;
+          console.warn('[header-actions][date-jump] fallback de páginas antigas falhou', err);
+          found = false;
+        }
+      }
+
+      if (mySerial !== __dateJumpSerial) return;
+      throwIfDateJumpAborted(controller?.signal || null);
 
       if (found) {
         closeDateJumpDialog();
@@ -1630,12 +1838,28 @@
         msg: backendError?.message || 'Não encontrei mensagens nesta conversa para a data selecionada.',
         timeout: 5200,
       });
+    } catch (err) {
+      if (!isAbortError(err) && String(err?.message || '') !== 'Busca cancelada.') {
+        notifyDateJump({
+          id: 'date-jump-status',
+          type: 'error',
+          title: 'Não consegui buscar a data',
+          msg: err?.message || 'Tente novamente em alguns segundos.',
+          timeout: 5200,
+        });
+      }
     } finally {
-      H.state.dateJumping = false;
+      if (mySerial === __dateJumpSerial) {
+        H.state.dateJumping = false;
 
-      if (goBtn) {
-        goBtn.disabled = false;
-        goBtn.innerHTML = '<span>Ir para data</span>';
+        if (__dateJumpAbortController === controller) {
+          __dateJumpAbortController = null;
+        }
+
+        if (goBtn) {
+          goBtn.disabled = false;
+          goBtn.innerHTML = '<span>Ir para data</span>';
+        }
       }
     }
   }
@@ -1644,6 +1868,7 @@
     ensureDateJumpStyle,
     ensureDateJumpNotifyStyle,
     ensureDateJumpDialog,
+    abortActiveDateJump,
 
     ensureDateJumpToastHost,
     notifyDateJump,
@@ -1651,6 +1876,9 @@
 
     todayISO,
     dateDaysAgoISO,
+    formatISOToBR,
+    maskDateInput,
+    setDateJumpInputValue,
     setDateJumpScrollLock,
     openDateJumpDialog,
     closeDateJumpDialog,
