@@ -14,6 +14,10 @@
 // Correção desta versão:
 // - Se a conversa está aberta, mas o item da lista/cache não bateu ainda,
 //   o WS usa o contexto aberto e renderiza a bolha mesmo assim.
+// - Corrige match aberto quando a instância aparece como ID em um lugar
+//   e como instance_name em outro.
+// - Prefere a conversation_key canônica recebida pelo WS quando ela pertence
+//   à conversa aberta.
 // - Dispara eventos compatíveis com historico.js:
 //   atendimento:mensagem-recebida, zc:message-upsert, zc:message-created.
 // ====================================================================
@@ -257,6 +261,65 @@ function resolveInstanceName(inst) {
   }
 
   return null;
+}
+
+/*
+  Match tolerante SOMENTE para a conversa aberta.
+
+  Por que existe:
+  - às vezes o DOM aberto fica com instância como instance_name;
+  - o payload do WS chega com instancia_id numérico;
+  - se usarmos só sameInstStrict(), openNow vira false e a bolha não renderiza
+    até clicar/F5.
+
+  Segurança:
+  - só é usado depois de confirmar mesmo kind + mesmo cliente/grupo;
+  - nunca cria conversa nova na lista.
+*/
+function sameInstForOpen(a, b) {
+  const A = instKey(a);
+  const B = instKey(b);
+
+  if (!A || !B) return false;
+  if (sameInstStrict(A, B)) return true;
+
+  const active = getActiveInstKey();
+
+  if (active) {
+    const aLooksActive = A === active || sameInstStrict(A, active);
+    const bLooksActive = B === active || sameInstStrict(B, active);
+
+    if (aLooksActive || bLooksActive) return true;
+  }
+
+  const nameA = resolveInstanceName(A);
+  const nameB = resolveInstanceName(B);
+
+  if (nameA && (nameA === B || sameInstStrict(nameA, B))) return true;
+  if (nameB && (nameB === A || sameInstStrict(nameB, A))) return true;
+
+  return false;
+}
+
+function pickCanonicalOpenRef(open, incoming, fallbackKind = 'c') {
+  const kind = incoming?.kind || open?.kind || fallbackKind || 'c';
+  const entityId = incoming?.entityId || open?.entityId || null;
+  const instId = incoming?.instId || open?.instId || getActiveInstKey() || null;
+
+  const key =
+    incoming?.key ||
+    buildConversationKey(kind, entityId, instId) ||
+    open?.key ||
+    null;
+
+  if (!key || !entityId || !instId) return null;
+
+  return {
+    key,
+    kind,
+    entityId,
+    instId,
+  };
 }
 
 function conversationKindFromRow(row) {
@@ -688,8 +751,8 @@ function isOpenChat(refOrKey) {
     if (open.key && ref.key && open.key === ref.key) return true;
 
     /*
-      2) Match por tipo + entidade + instância.
-      Esse é o mais importante quando o DOM ainda não atualizou todos os datasets.
+      2) Match por tipo + entidade.
+      A instância entra depois com tolerância controlada.
     */
     if (open.kind && ref.kind && open.kind !== ref.kind) return false;
 
@@ -698,19 +761,19 @@ function isOpenChat(refOrKey) {
     }
 
     if (open.instId && ref.instId) {
-      return sameInstStrict(open.instId, ref.instId);
+      return sameInstForOpen(open.instId, ref.instId);
     }
 
     /*
       3) Fallback seguro:
-      se ambos têm entityId igual, mas só um lado tem instância,
-      aceita apenas quando a instância que existe é a instância ativa.
+      se a entidade bate e a instância existente é a instância ativa,
+      considera aberta.
     */
     if (open.entityId && ref.entityId && String(open.entityId) === String(ref.entityId)) {
       const active = getActiveInstKey();
       const onlyInst = open.instId || ref.instId;
 
-      if (active && onlyInst && sameInstStrict(active, onlyInst)) {
+      if (active && onlyInst && sameInstForOpen(active, onlyInst)) {
         return true;
       }
     }
@@ -741,28 +804,26 @@ function getOpenRefIfMatchesIncoming(incomingRef, data = null) {
 
   const sameKind = (openLike.kind || 'c') === (incoming.kind || 'c');
   const sameEntity = String(openLike.entityId) === String(incoming.entityId);
+
   const sameInst =
     openLike.instId && incoming.instId
-      ? sameInstStrict(openLike.instId, incoming.instId)
+      ? sameInstForOpen(openLike.instId, incoming.instId)
       : false;
 
   if (sameKind && sameEntity && sameInst) {
-    const finalKey =
-      open.key ||
-      incoming.key ||
-      buildConversationKey(openLike.kind, openLike.entityId, openLike.instId);
+    const canon = pickCanonicalOpenRef(openLike, incoming, openLike.kind);
+
+    if (!canon?.key || !canon?.instId) return null;
 
     return {
-      key: finalKey,
-      kind: openLike.kind,
-      entityId: openLike.entityId,
-      instId: openLike.instId || incoming.instId,
+      ...canon,
       from: 'open',
     };
   }
 
   /*
-    Fallback por telefone só para 1:1 e com instância batendo.
+    Fallback por telefone só para 1:1.
+    Ainda exige instância compatível com a conversa aberta/ativa.
   */
   const incomingPhone =
     data?.telefone_norm ??
@@ -784,20 +845,21 @@ function getOpenRefIfMatchesIncoming(incomingRef, data = null) {
   ) {
     const instOk =
       openLike.instId && incoming.instId
-        ? sameInstStrict(openLike.instId, incoming.instId)
+        ? sameInstForOpen(openLike.instId, incoming.instId)
         : false;
 
     if (instOk) {
-      const finalKey =
-        open.key ||
-        incoming.key ||
-        buildConversationKey('c', openLike.entityId || incoming.entityId, openLike.instId || incoming.instId);
+      const canon = pickCanonicalOpenRef(
+        { ...openLike, kind: 'c' },
+        { ...incoming, kind: 'c', entityId: openLike.entityId || incoming.entityId },
+        'c'
+      );
+
+      if (!canon?.key || !canon?.instId) return null;
 
       return {
-        key: finalKey,
+        ...canon,
         kind: 'c',
-        entityId: openLike.entityId || incoming.entityId,
-        instId: openLike.instId || incoming.instId,
         from: 'open-phone',
       };
     }
@@ -1435,6 +1497,44 @@ function normalizeMsgForHist(data, convRef) {
   return out;
 }
 
+function candidateInstKeysForCache(ref, msg = null, explicitInst = null) {
+  const out = new Set();
+
+  const add = (v) => {
+    const s = instKey(v);
+    if (s) out.add(s);
+  };
+
+  add(ref?.instId);
+  add(explicitInst);
+  add(msg?.instancia_id);
+  add(msg?.instanciaId);
+  add(msg?.instance_id);
+  add(msg?.instanceId);
+  add(msg?.instance_name);
+  add(msg?.instanceName);
+  add(msg?.instance);
+  add(msg?.instancia);
+
+  const active = getActiveInstKey();
+  if (active && ref?.instId && sameInstForOpen(active, ref.instId)) {
+    add(active);
+  }
+
+  try {
+    const open = getOpenContext();
+    if (open?.entityId && ref?.entityId && String(open.entityId) === String(ref.entityId)) {
+      if (!open.kind || !ref.kind || open.kind === ref.kind) {
+        if (!open.instId || !ref.instId || sameInstForOpen(open.instId, ref.instId)) {
+          add(open.instId);
+        }
+      }
+    }
+  } catch {}
+
+  return [...out];
+}
+
 function pushIncomingToHist(convKey, msg, inst = null) {
   const ref = normalizeConversationRef(convKey, {
     ...msg,
@@ -1444,17 +1544,27 @@ function pushIncomingToHist(convKey, msg, inst = null) {
   if (!ref?.key || !ref?.instId) return false;
 
   const normalized = normalizeMsgForHist(msg, ref);
+  const instCandidates = candidateInstKeysForCache(ref, msg, inst);
 
-  try {
-    pushOneNew(ref.instId, ref.key, normalized);
-  } catch {
+  if (!instCandidates.length) return false;
+
+  let okAny = false;
+
+  for (const instCandidate of instCandidates) {
     try {
-      const current = getHist(ref.instId, ref.key) || [];
-      primeWith(ref.instId, ref.key, [...current, normalized]);
+      pushOneNew(instCandidate, ref.key, normalized);
+      okAny = true;
+      continue;
+    } catch {}
+
+    try {
+      const current = getHist(instCandidate, ref.key) || [];
+      primeWith(instCandidate, ref.key, [...current, normalized]);
+      okAny = true;
     } catch {}
   }
 
-  return true;
+  return okAny;
 }
 
 function dispatchRealtimeMessageEvents(payload) {
@@ -1620,14 +1730,15 @@ function handleNovaMensagem(data) {
     return;
   }
 
-  const knownRef = resolveKnownRefForIncoming(data);
+  const openRefDirect = getOpenRefIfMatchesIncoming(incomingRef, data);
+  const knownRef = openRefDirect || resolveKnownRefForIncoming(data);
 
   /*
     WS NUNCA cria conversa fantasma na lista.
     Mas se a conversa JÁ ESTÁ ABERTA, pode renderizar usando o contexto aberto.
   */
   if (!knownRef?.key || !knownRef?.instId) {
-    const openRef = getOpenRefIfMatchesIncoming(incomingRef, data);
+    const openRef = openRefDirect || getOpenRefIfMatchesIncoming(incomingRef, data);
 
     if (!openRef?.key || !openRef?.instId) {
       if (DEBUG_WS) {
@@ -1685,7 +1796,7 @@ function handleNovaMensagem(data) {
     return;
   }
 
-  const openNow = isOpenChat(knownRef) || knownRef.from === 'open' || knownRef.from === 'open-phone';
+  const openNow = Boolean(openRefDirect) || isOpenChat(knownRef) || knownRef.from === 'open' || knownRef.from === 'open-phone';
 
   const text = pickText(data);
   const msgId = pickMsgId(data);

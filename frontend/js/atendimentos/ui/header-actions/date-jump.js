@@ -1202,6 +1202,145 @@
     }) || null;
   }
 
+  function messageISODateFromCacheItem(item) {
+    if (!item || typeof item !== 'object') return '';
+
+    const candidates = [
+      item.date,
+      item.data_dia,
+      item.dia,
+      item.day,
+      item.created_at,
+      item.createdAt,
+      item.timestamp,
+      item.datetime,
+      item.time,
+      item.ts,
+      item.messageTimestamp,
+      item.message_timestamp,
+    ];
+
+    for (const c of candidates) {
+      const iso = isoFromDateLike(c);
+
+      if (iso) {
+        return iso;
+      }
+    }
+
+    return '';
+  }
+
+  function getCachedHistoryCandidates(params = getCurrentDateJumpParams()) {
+    const convKey =
+      params.conversationKey ||
+      getSelectedConversationKey() ||
+      historyEl()?.dataset?.conversationKey ||
+      historyEl()?.dataset?.conversationId ||
+      null;
+
+    const inst =
+      params.instanciaId ||
+      getConversationInstancia() ||
+      getInstanciaAtivaGlobal() ||
+      null;
+
+    const out = [];
+    const seenArrays = new Set();
+
+    function pushArray(arr) {
+      if (!Array.isArray(arr)) return;
+      if (seenArrays.has(arr)) return;
+      seenArrays.add(arr);
+      out.push(...arr);
+    }
+
+    try {
+      pushArray(window.getHist?.(inst, convKey));
+    } catch {}
+
+    try {
+      pushArray(window.cacheHistoricos?.[convKey]);
+    } catch {}
+
+    try {
+      pushArray(window.__ZC_HIST_CACHE__?.[convKey]);
+    } catch {}
+
+    try {
+      pushArray(window.ZC_HIST_CACHE?.[convKey]);
+    } catch {}
+
+    try {
+      const byInst = window.cacheHistoricosPorInstancia?.[inst];
+      pushArray(byInst?.[convKey]);
+    } catch {}
+
+    try {
+      const hist = historyEl();
+      const raw =
+        hist?.dataset?.messages ||
+        hist?.dataset?.mensagens ||
+        '';
+
+      if (raw && raw.length < 2000000) {
+        const parsed = JSON.parse(raw);
+        pushArray(parsed);
+      }
+    } catch {}
+
+    const map = new Map();
+
+    for (const item of out) {
+      if (!item || typeof item !== 'object') continue;
+
+      const key = String(
+        item?.msg_id ??
+        item?.message_id ??
+        item?.wa_msg_id ??
+        item?.id ??
+        `${item?.timestamp || item?.created_at || item?.data || item?.ts || ''}:${item?.conteudo || item?.texto || item?.mensagem || ''}`
+      );
+
+      if (!key) continue;
+      map.set(key, item);
+    }
+
+    return Array.from(map.values());
+  }
+
+  function findMessagesByISODateInCache(isoDate) {
+    const wanted = String(isoDate || '').trim();
+
+    if (!wanted) return [];
+
+    const params = getCurrentDateJumpParams();
+    const convKey = params.conversationKey || getSelectedConversationKey() || null;
+    const all = getCachedHistoryCandidates(params);
+
+    const matched = all.filter((item) => {
+      const itemConvKey = item?.conversation_key || item?.conversation_id || convKey || null;
+
+      if (convKey && itemConvKey && String(itemConvKey) !== String(convKey)) {
+        return false;
+      }
+
+      return messageISODateFromCacheItem(item) === wanted;
+    });
+
+    return sortMessagesByTime(matched);
+  }
+
+  async function tryCacheDateJump(isoDate) {
+    const cached = findMessagesByISODateInCache(isoDate);
+
+    if (!cached.length) {
+      return false;
+    }
+
+    return focusBackendDateMessages(cached, isoDate);
+  }
+
   function focusDateRow(row) {
     if (!row) return;
 
@@ -1759,13 +1898,45 @@
       notifyDateJump({
         id: 'date-jump-status',
         type: 'loading',
-        title: 'Buscando no histórico',
-        msg: 'Procurando mensagens desta data...',
+        title: 'Verificando cache',
+        msg: 'Vou procurar primeiro nas mensagens já salvas desta conversa.',
         loading: true,
       });
 
       let found = false;
       let backendError = null;
+
+      try {
+        found = await tryCacheDateJump(isoDate);
+      } catch (err) {
+        console.warn('[header-actions][date-jump] busca por data no cache falhou', err);
+        found = false;
+      }
+
+      if (mySerial !== __dateJumpSerial) return;
+      throwIfDateJumpAborted(controller?.signal || null);
+
+      if (found) {
+        closeDateJumpDialog();
+
+        notifyDateJump({
+          id: 'date-jump-status',
+          type: 'ok',
+          title: 'Mensagem encontrada no cache',
+          msg: 'Não precisei buscar novamente no banco.',
+          timeout: 2800,
+        });
+
+        return;
+      }
+
+      notifyDateJump({
+        id: 'date-jump-status',
+        type: 'loading',
+        title: 'Buscando no histórico',
+        msg: 'Não achei no cache. Agora vou consultar o banco.',
+        loading: true,
+      });
 
       try {
         found = await tryBackendDateJump(isoDate, {
@@ -1893,6 +2064,10 @@
     rowISODate,
     allVisibleMessageRows,
     findFirstRowByISODate,
+    messageISODateFromCacheItem,
+    getCachedHistoryCandidates,
+    findMessagesByISODateInCache,
+    tryCacheDateJump,
     focusDateRow,
 
     getCurrentDateJumpParams,

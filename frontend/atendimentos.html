@@ -25,7 +25,7 @@
     type="module">
   </script>
 
-  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260516-sidebar-settings-order-1">
+  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260517-chat-bg-wallpaper-fix-3">
 
   <link
     rel="stylesheet"
@@ -43,14 +43,6 @@
       font-family:"Inter","Segoe UI","Helvetica Neue",Arial,sans-serif;
     }
 
-    #welcome-screen .zc-welcome-lottie{
-      width:300px;
-      height:220px;
-      max-width:min(76vw, 320px);
-      margin-bottom:18px;
-      display:block;
-    }
-
     /*
       Regra visual:
       - Sem fila exigindo aceite: claim bar fica escondida.
@@ -63,13 +55,16 @@
     }
 
     /* =========================================================
-       FUNDO REAL DO WHATSAPP - SVG COMO MASK
+       TELA VAZIA + FUNDO DO CHAT
+       - Sem conversa aberta: fundo liso #161717
+       - Com conversa aberta: papel de parede WhatsApp
        ========================================================= */
 
     #chat-main{
       position:relative !important;
       overflow:hidden !important;
-      background:#0b141a !important;
+      background:#161717 !important;
+      background-image:none !important;
     }
 
     #chat-main.whatsapp-auto-bg,
@@ -78,28 +73,67 @@
     main.whatsapp-auto-bg,
     main.whatsapp-bg-dark,
     main.whatsapp-bg-light{
-      background:#0b141a !important;
+      background:#161717 !important;
       background-image:none !important;
     }
 
-    #historico,
-    #welcome-screen,
-    #chat-main.whatsapp-auto-bg #historico,
-    #chat-main.whatsapp-bg-dark #historico,
-    #chat-main.whatsapp-bg-light #historico,
-    main.whatsapp-auto-bg #historico,
-    main.whatsapp-bg-dark #historico,
-    main.whatsapp-bg-light #historico{
+    #historico{
       background:transparent !important;
       background-image:none !important;
     }
 
+    /* Tela inicial sem conversa aberta */
+    #welcome-screen{
+      position:absolute !important;
+      inset:0 !important;
+      z-index:10 !important;
+
+      display:flex !important;
+      flex-direction:column !important;
+      align-items:center !important;
+      justify-content:center !important;
+
+      text-align:center !important;
+      padding:0 24px !important;
+
+      background:#161717 !important;
+      background-image:none !important;
+    }
+
+    #welcome-screen .zc-welcome-lottie{
+      width:300px;
+      height:220px;
+      max-width:min(76vw, 320px);
+      margin:0 0 18px 0 !important;
+      display:block;
+      flex:0 0 auto;
+    }
+
+    #welcome-screen h2{
+      color:#e9edef !important;
+      margin:0 0 8px 0 !important;
+      font-weight:700 !important;
+    }
+
+    #welcome-screen p{
+      color:#aebac1 !important;
+      margin:0 !important;
+      line-height:1.45 !important;
+      font-weight:500 !important;
+    }
+
+    /*
+      Por padrão o papel de parede fica desligado.
+      Ele só aparece quando o JS adiciona .has-open-chat.
+    */
     #chat-main::before{
       content:"";
       position:absolute;
       inset:0;
       z-index:0;
       pointer-events:none;
+
+      display:none;
 
       background-color:rgba(255,255,255,.075);
 
@@ -119,6 +153,26 @@
       mask-position:top left;
     }
 
+    /*
+      Quando conversa está aberta:
+      - ativa fundo escuro do WhatsApp
+      - liga o papel de parede
+    */
+    #chat-main.has-open-chat,
+    #chat-main.has-open-chat.whatsapp-auto-bg,
+    #chat-main.has-open-chat.whatsapp-bg-dark,
+    #chat-main.has-open-chat.whatsapp-bg-light,
+    main.has-open-chat.whatsapp-auto-bg,
+    main.has-open-chat.whatsapp-bg-dark,
+    main.has-open-chat.whatsapp-bg-light{
+      background:#0b141a !important;
+      background-image:none !important;
+    }
+
+    #chat-main.has-open-chat::before{
+      display:block;
+    }
+
     #chat-main > *{
       position:relative !important;
       z-index:2 !important;
@@ -134,18 +188,49 @@
       background-image:none !important;
     }
 
+    /*
+      Light mode:
+      - tela vazia branca
+      - conversa aberta usa fundo claro do WhatsApp
+    */
     html[data-theme="light"] #chat-main,
     html:not(.dark)[data-theme="light"] #chat-main,
     html[data-theme="light"] #chat-main.whatsapp-auto-bg,
     html:not(.dark)[data-theme="light"] #chat-main.whatsapp-auto-bg,
     html[data-theme="light"] main.whatsapp-auto-bg,
     html:not(.dark)[data-theme="light"] main.whatsapp-auto-bg{
+      background:#ffffff !important;
+      background-image:none !important;
+    }
+
+    html[data-theme="light"] #welcome-screen,
+    html:not(.dark)[data-theme="light"] #welcome-screen{
+      background:#ffffff !important;
+      background-image:none !important;
+    }
+
+    html[data-theme="light"] #welcome-screen h2,
+    html:not(.dark)[data-theme="light"] #welcome-screen h2{
+      color:#111b21 !important;
+    }
+
+    html[data-theme="light"] #welcome-screen p,
+    html:not(.dark)[data-theme="light"] #welcome-screen p{
+      color:#667781 !important;
+    }
+
+    html[data-theme="light"] #chat-main.has-open-chat,
+    html:not(.dark)[data-theme="light"] #chat-main.has-open-chat,
+    html[data-theme="light"] #chat-main.has-open-chat.whatsapp-auto-bg,
+    html:not(.dark)[data-theme="light"] #chat-main.has-open-chat.whatsapp-auto-bg,
+    html[data-theme="light"] main.has-open-chat.whatsapp-auto-bg,
+    html:not(.dark)[data-theme="light"] main.has-open-chat.whatsapp-auto-bg{
       background:#efeae2 !important;
       background-image:none !important;
     }
 
-    html[data-theme="light"] #chat-main::before,
-    html:not(.dark)[data-theme="light"] #chat-main::before{
+    html[data-theme="light"] #chat-main.has-open-chat::before,
+    html:not(.dark)[data-theme="light"] #chat-main.has-open-chat::before{
       background-color:rgba(0,0,0,.12);
     }
 
@@ -159,8 +244,83 @@
       #welcome-screen .zc-welcome-lottie{
         width:260px;
         height:200px;
-        margin-bottom:14px;
+        margin-bottom:14px !important;
       }
+    }
+
+    /* =========================================================
+       FIX FINAL FUNDO CHAT
+       - Welcome centralizado
+       - Histórico transparente para deixar o ::before aparecer
+       - Papel de parede só quando conversa aberta
+       ========================================================= */
+
+    #chat-main > #welcome-screen{
+      position:absolute !important;
+      inset:0 !important;
+      z-index:10 !important;
+      display:flex !important;
+      flex-direction:column !important;
+      align-items:center !important;
+      justify-content:center !important;
+      text-align:center !important;
+      background:#161717 !important;
+      background-image:none !important;
+    }
+
+    #chat-main.has-open-chat > #welcome-screen,
+    body.has-open-chat #welcome-screen{
+      display:none !important;
+    }
+
+    #chat-main > #chat-header,
+    #chat-main > #historico,
+    #chat-main > #chat-loading,
+    #chat-main > #chat-footer{
+      position:relative !important;
+      z-index:2 !important;
+    }
+
+    #chat-main.has-open-chat #historico,
+    #chat-main.has-open-chat.whatsapp-auto-bg #historico,
+    #chat-main.has-open-chat.whatsapp-bg-dark #historico,
+    #chat-main.has-open-chat.whatsapp-bg-light #historico,
+    main#chat-main.has-open-chat.whatsapp-auto-bg #historico,
+    main#chat-main.has-open-chat.whatsapp-bg-dark #historico,
+    main#chat-main.has-open-chat.whatsapp-bg-light #historico,
+    body.has-open-chat #chat-main #historico{
+      background:transparent !important;
+      background-color:transparent !important;
+      background-image:none !important;
+    }
+
+    #chat-main.has-open-chat::before{
+      display:block !important;
+      opacity:1 !important;
+      background-color:rgba(255,255,255,.105) !important;
+    }
+
+    #chat-main:not(.has-open-chat){
+      background:#161717 !important;
+      background-image:none !important;
+    }
+
+    html[data-theme="light"] #chat-main > #welcome-screen,
+    html:not(.dark)[data-theme="light"] #chat-main > #welcome-screen{
+      background:#ffffff !important;
+      background-image:none !important;
+    }
+
+    html[data-theme="light"] #chat-main.has-open-chat #historico,
+    html:not(.dark)[data-theme="light"] #chat-main.has-open-chat #historico{
+      background:transparent !important;
+      background-color:transparent !important;
+      background-image:none !important;
+    }
+
+    html[data-theme="light"] #chat-main.has-open-chat::before,
+    html:not(.dark)[data-theme="light"] #chat-main.has-open-chat::before{
+      background-color:rgba(0,0,0,.13) !important;
     }
   </style>
 </head>
@@ -865,6 +1025,153 @@
       window.addEventListener('load', syncMainThemeBackground);
       window.addEventListener('zc:theme-changed', syncMainThemeBackground);
       window.addEventListener('zc:atendimentos-ready', syncMainThemeBackground);
+    })();
+  </script>
+
+  <script>
+    /*
+      Controla o papel de parede do WhatsApp.
+
+      Regra:
+      - Sem conversa aberta: fundo liso #161717 e tela inicial centralizada.
+      - Com conversa aberta: esconde tela inicial e mostra papel de parede.
+    */
+    (function zcChatWallpaperOnlyWhenConversationOpen(){
+      if (window.__ZC_CHAT_WALLPAPER_ONLY_OPEN_V3__) return;
+      window.__ZC_CHAT_WALLPAPER_ONLY_OPEN_V3__ = true;
+
+      let raf = 0;
+
+      function isVisible(el) {
+        if (!el) return false;
+        if (el.hidden) return false;
+
+        const cs = window.getComputedStyle(el);
+        if (!cs) return false;
+
+        return (
+          cs.display !== 'none' &&
+          cs.visibility !== 'hidden' &&
+          cs.opacity !== '0'
+        );
+      }
+
+      function hasMessagesInsideHistorico(historico) {
+        if (!historico) return false;
+
+        return !!historico.querySelector(
+          '.bubble, .bolha-mensagem, .msg-row, .linha-mensagem, .date-chip, .zc-day-divider, [data-message-id], [data-msg-id]'
+        );
+      }
+
+      function syncWallpaper() {
+        raf = 0;
+
+        const main = document.getElementById('chat-main');
+        const welcome = document.getElementById('welcome-screen');
+        const historico = document.getElementById('historico');
+        const header = document.getElementById('chat-header');
+        const footer = document.getElementById('chat-footer');
+        const title = document.getElementById('chat-title');
+
+        if (!main) return;
+
+        const headerVisible = isVisible(header);
+        const historicoVisible = isVisible(historico);
+        const footerVisible = isVisible(footer);
+        const titleText = String(title && title.textContent || '').trim();
+        const hasMessages = hasMessagesInsideHistorico(historico);
+
+        const hasOpenChat =
+          headerVisible ||
+          footerVisible ||
+          historicoVisible ||
+          !!titleText ||
+          hasMessages ||
+          document.body.classList.contains('is-chat-open');
+
+        main.classList.toggle('has-open-chat', !!hasOpenChat);
+        document.body.classList.toggle('has-open-chat', !!hasOpenChat);
+
+        if (welcome) {
+          if (hasOpenChat) {
+            welcome.style.setProperty('display', 'none', 'important');
+          } else {
+            welcome.style.removeProperty('display');
+          }
+        }
+      }
+
+      function scheduleSync() {
+        if (raf) return;
+        raf = requestAnimationFrame(syncWallpaper);
+      }
+
+      function observe(el, subtree) {
+        if (!el) return;
+
+        try {
+          new MutationObserver(scheduleSync).observe(el, {
+            attributes:true,
+            attributeFilter:['style', 'class', 'hidden'],
+            childList:true,
+            subtree:!!subtree
+          });
+        } catch {}
+      }
+
+      function init() {
+        const main = document.getElementById('chat-main');
+        const welcome = document.getElementById('welcome-screen');
+        const historico = document.getElementById('historico');
+        const header = document.getElementById('chat-header');
+        const footer = document.getElementById('chat-footer');
+        const title = document.getElementById('chat-title');
+
+        observe(main, false);
+        observe(welcome, false);
+        observe(historico, true);
+        observe(header, true);
+        observe(footer, true);
+        observe(title, true);
+        observe(document.body, false);
+
+        window.addEventListener('load', scheduleSync);
+        window.addEventListener('resize', scheduleSync);
+        window.addEventListener('zc:theme-changed', scheduleSync);
+        window.addEventListener('zc:conversation-changed', scheduleSync);
+        window.addEventListener('zc:conversation-opened', scheduleSync);
+        window.addEventListener('zc:historico-rendered', scheduleSync);
+        window.addEventListener('zc:atendimentos-ready', scheduleSync);
+
+        document.addEventListener('click', function(ev){
+          if (
+            ev.target.closest('#lista-clientes li') ||
+            ev.target.closest('.chat-item') ||
+            ev.target.closest('.cliente-item') ||
+            ev.target.closest('#chat-back-mobile')
+          ) {
+            setTimeout(scheduleSync, 30);
+            setTimeout(scheduleSync, 120);
+            setTimeout(scheduleSync, 300);
+            setTimeout(scheduleSync, 700);
+          }
+        });
+
+        scheduleSync();
+        setTimeout(scheduleSync, 100);
+        setTimeout(scheduleSync, 400);
+        setTimeout(scheduleSync, 1000);
+        setTimeout(scheduleSync, 1800);
+      }
+
+      window.zcSyncChatWallpaper = scheduleSync;
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init, { once:true });
+      } else {
+        init();
+      }
     })();
   </script>
 
