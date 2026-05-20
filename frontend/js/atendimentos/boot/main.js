@@ -7,17 +7,19 @@
  * Objetivo desta versão:
  * - carregar módulos uma única vez
  * - evitar boot duplicado
+ * - reduzir imports duplicados entre sidebar-atendimentos.html e main.js
+ * - manter IA / Notas / Transferir funcionando no menu dos 3 pontinhos
  * - reduzir risco de loops/requisições duplicadas
  * - manter comportamento tipo WhatsApp: mensagem nova continua chegando via realtime
- * - carregar media-render dividido em módulos menores
- * - carregar header-actions dividido em módulos menores
+ * - manter media-render dividido
+ * - manter header-actions dividido
  * - manter conversa aberta marcada na lista lateral
  * ==================================================================== */
 
 (function () {
   'use strict';
 
-  const MAIN_VERSION = 'zc-atendimentos-main-v5-media-render-header-actions-split';
+  const MAIN_VERSION = 'zc-atendimentos-main-v8-menu-seguro';
 
   /*
     Se este arquivo for carregado duas vezes por engano
@@ -59,6 +61,25 @@
     }
   }
 
+  /*
+    Import seguro:
+    - Se o módulo já foi carregado pelo sidebar-atendimentos.html, não importa de novo.
+    - Se não foi carregado, o main.js carrega normalmente.
+    - Isso reduz duplicação sem quebrar o funcionamento atual.
+  */
+  async function importIfMissing(flagName, modulePath) {
+    try {
+      if (flagName && window[flagName]) {
+        return null;
+      }
+
+      return await import(modulePath);
+    } catch (err) {
+      console.error('[ZapsChat][main] erro ao importar módulo:', modulePath, err);
+      throw err;
+    }
+  }
+
   async function importarModulos() {
     // -------- CORE ----------------------------------------------------
     await import('../core/env.js');
@@ -78,10 +99,9 @@
 
     // -------- MEDIA RENDER DIVIDIDO ----------------------------------
     /*
-      Media render dividido.
-      IMPORTANTE:
-      - Não carregar mais ../ui/media-render.js antigo junto.
-      - A ordem abaixo precisa ser mantida.
+      Mantido por segurança.
+      Alguns módulos também são dependência do historico.js.
+      O navegador reaproveita módulos ES já carregados pela mesma URL.
     */
     await import('../ui/media-render/core.js');
     await import('../ui/media-render/css.js');
@@ -106,33 +126,45 @@
     await import('../ui/notif.js');
 
     /*
-      Mantém o perfil.js antigo.
-      Mantém o perfil-instancia.js que você já criou.
+      Perfil da conversa / perfil rápido continuam no main.
     */
     await import('../ui/perfil.js');
-    await import('../ui/perfil-instancia.js');
     await import('../ui/perfil_quick.js');
 
     /*
-      Novas páginas internas do painel estilo WhatsApp:
-      Conta, Privacidade, Conversas, Notificações, Atalhos e Ajuda.
+      Esses abaixo eram os principais duplicados no log:
+      - sidebar-atendimentos.html carregava primeiro
+      - main.js carregava de novo depois
+
+      Agora:
+      - se o sidebar já carregou, main.js pula
+      - se o sidebar não carregou, main.js carrega
     */
-    await import('../ui/settings-panel-pages.js');
-    await import('../ui/conta.js');
-    await import('../ui/privacidade.js');
-    await import('../ui/conversas.js');
-    await import('../ui/notificacao.js');
-    await import('../ui/atalhos-teclado.js');
-    await import('../ui/ajuda-feedback.js');
+    await importIfMissing('__ZC_SETTINGS_PANEL_PAGES_HELPER__', '../ui/settings-panel-pages.js');
+    await importIfMissing('__ZC_PERFIL_INSTANCIA_LOADED__', '../ui/perfil-instancia.js');
+    await importIfMissing('__ZC_SETTINGS_CONTA__', '../ui/conta.js');
+    await importIfMissing('__ZC_SETTINGS_PRIVACIDADE__', '../ui/privacidade.js');
+    await importIfMissing('__ZC_SETTINGS_CONVERSAS__', '../ui/conversas.js');
+    await importIfMissing('__ZC_SETTINGS_NOTIFICACAO__', '../ui/notificacao.js');
+    await importIfMissing('__ZC_SETTINGS_ATALHOS__', '../ui/atalhos-teclado.js');
+    await importIfMissing('__ZC_SETTINGS_AJUDA__', '../ui/ajuda-feedback.js');
 
     // -------- UI DO ATENDIMENTO --------------------------------------
     await import('../ui/search.js');
     await import('../ui/inst-switch.js');
+
+    /*
+      IMPORTANTE:
+      Esses 3 voltaram para o carregamento inicial porque eles criam/registram
+      ações usadas pelo menu dos 3 pontinhos.
+      Sem eles, IA / Notas / alguns atalhos do menu podem parar.
+    */
     await import('../ui/notes-drawer.js');
     await import('../ui/ia.js');
+    await import('../ui/filtros.js');
+
     await import('../ui/context-menu.js');
     await import('../ui/new-chat.js');
-    await import('../ui/filtros.js');
 
     /*
       Mantém a conversa aberta marcada na lista lateral.
@@ -143,6 +175,11 @@
     await import('../ui/lista-active-sync.js');
 
     await import('../ui/apagar.js');
+
+    /*
+      Transferência precisa vir ANTES do menu dos 3 pontinhos,
+      porque o menu chama o botão original #btnTransferirDepartamento.
+    */
     await import('../ui/transferir-departamento.js');
 
     /*

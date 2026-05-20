@@ -44,6 +44,7 @@ let __lastConversasFetchAt = 0;
 let __lastConversasKey = '';
 let __scheduledLoadTimer = null;
 let __loadingMoreConversas = false;
+let __lastConversasUsedSafeFallback = false;
 
 if (typeof window !== 'undefined') {
   if (window.PREFETCH_HISTORIES === undefined) {
@@ -1726,9 +1727,248 @@ function renderListaError(onRetry = null) {
 /* =========================================================
    Carregar conversas
    ========================================================= */
+
+/*
+  Correção defensiva da lista:
+  - A API atual retorna { items, next_cursor }.
+  - Alguns estados antigos de empresa/instância no localStorage podem fazer o front
+    montar query errada ou _matchInstancia zerar tudo.
+  - Se a API trouxe conversas, o front não deve transformar isso em lista vazia.
+*/
+let __warnedMatchInstancia = false;
+
+function empresaIdForQuery() {
+  const s = String(EMPRESA_ID ?? '').trim();
+  if (!s || ['null', 'undefined', 'nan', '0'].includes(s.toLowerCase())) return null;
+
+  const n = Number(s);
+  if (!Number.isFinite(n) || n <= 0) return null;
+
+  return String(Math.trunc(n));
+}
+
+function safeInstQueryString() {
+  try {
+    const raw = String((typeof _instQuery === 'function' ? _instQuery() : '') || '').trim();
+    if (!raw) return '';
+
+    const cleaned = raw.replace(/^[?&]+/, '');
+    if (!cleaned) return '';
+
+    const inParams = new URLSearchParams(cleaned);
+    const out = new URLSearchParams();
+
+    for (const [key, value] of inParams.entries()) {
+      const k = String(key || '').trim();
+      const v = String(value ?? '').trim();
+
+      if (!k || !v) continue;
+      if (['empresa_id', 'limit', 'cursor_last_msg_id'].includes(k)) continue;
+
+      // Evita mandar instancia=all/0/null e depois o próprio front filtrar tudo.
+      if (/inst/i.test(k)) {
+        if (!instKey(v)) continue;
+      }
+
+      out.append(k, v);
+    }
+
+    const qs = out.toString();
+    return qs ? `&${qs}` : '';
+  } catch {
+    try {
+      const raw = String((typeof _instQuery === 'function' ? _instQuery() : '') || '').trim();
+      if (!raw) return '';
+      return raw.startsWith('&') ? raw : `&${raw.replace(/^[?&]+/, '')}`;
+    } catch {
+      return '';
+    }
+  }
+}
+
+function currentInstQueryKey() {
+  return (safeInstQueryString() || '').replace(/^[?&]+/, '') || 'all';
+}
+
+function instQueryValues() {
+  try {
+    const qs = safeInstQueryString().replace(/^[?&]+/, '');
+    if (!qs) return [];
+
+    const params = new URLSearchParams(qs);
+    const vals = [];
+
+    for (const [key, value] of params.entries()) {
+      if (!/inst/i.test(String(key || ''))) continue;
+
+      const v = instKey(value);
+      if (v) vals.push(String(v));
+    }
+
+    return vals;
+  } catch {
+    return [];
+  }
+}
+
+function hasSpecificInstQuery() {
+  return instQueryValues().length > 0;
+}
+
+function buildConversasListUrl({
+  limit = 20,
+  cursor = null,
+  includeEmpresa = true,
+  includeInst = true,
+} = {}) {
+  const qs = new URLSearchParams();
+
+  const empresaId = empresaIdForQuery();
+  if (includeEmpresa && empresaId) {
+    qs.set('empresa_id', empresaId);
+  }
+
+  qs.set('limit', String(limit || 20));
+
+  if (cursor !== null && cursor !== undefined && String(cursor).trim() !== '') {
+    qs.set('cursor_last_msg_id', String(cursor));
+  }
+
+  let url = `/api/atendimento/conversas?${qs.toString()}`;
+
+  if (includeInst) {
+    url += safeInstQueryString();
+  }
+
+  return url;
+}
+
+function extractConversasPayload(payload) {
+  const items = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.items)
+      ? payload.items
+      : Array.isArray(payload?.conversas)
+        ? payload.conversas
+        : Array.isArray(payload?.data)
+          ? payload.data
+          : [];
+
+  const next =
+    payload?.next_cursor ??
+    payload?.nextCursor ??
+    payload?.cursor_next ??
+    payload?.cursor ??
+    null;
+
+  return { items, next };
+}
+
+function itemInstValues(c) {
+  const parsed = parseConversationKey(c?.conversation_key || c?.conversation_id || c?.id || '');
+
+  return [
+    c?.instancia_id,
+    c?.instancia,
+    c?.instancia_slug,
+    c?.instance_id,
+    c?.instance,
+    c?.instance_name,
+    c?.session,
+    c?.sessionName,
+    parsed?.instId,
+  ]
+    .map((v) => instKey(v))
+    .filter(Boolean)
+    .map(String);
+}
+
+function manualMatchInstancia(c) {
+  const queryVals = instQueryValues();
+
+  // Modo "Todos": não filtra no front.
+  if (!queryVals.length) return true;
+
+  const vals = itemInstValues(c);
+  if (!vals.length) return true;
+
+  return vals.some((v) => queryVals.includes(String(v)));
+}
+
+function matchInstanciaSafe(c) {
+  try {
+    return _matchInstancia(c) !== false;
+  } catch (e) {
+    if (!__warnedMatchInstancia) {
+      __warnedMatchInstancia = true;
+      try { console.warn('[clientes] _matchInstancia falhou; usando filtro seguro.', e); } catch {}
+    }
+    return manualMatchInstancia(c);
+  }
+}
+
+function normalizeAndFilterConversas(items, reason = '') {
+  const normalized = (Array.isArray(items) ? items : [])
+    .map(normalizeCliente)
+    .filter(Boolean);
+
+  if (!normalized.length) return [];
+
+  const filtered = normalized.filter(matchInstanciaSafe);
+  if (filtered.length) return filtered;
+
+  const manual = normalized.filter(manualMatchInstancia);
+  if (manual.length) {
+    try {
+      console.warn('[clientes] _matchInstancia zerou a lista; usando filtro manual.', {
+        reason,
+        total: normalized.length,
+        manual: manual.length,
+        instQuery: safeInstQueryString() || 'all',
+      });
+    } catch {}
+
+    return manual;
+  }
+
+  /*
+    Última defesa:
+    Se chegou até aqui, a API trouxe conversas, mas o estado local do front
+    filtrou todas. Preferimos renderizar o retorno real da API em vez de mostrar
+    "Nenhuma conversa encontrada" indevidamente.
+  */
+  try {
+    console.warn('[clientes] filtro de instância zerou retorno da API; renderizando retorno original.', {
+      reason,
+      total: normalized.length,
+      activeInst: getActiveInstKey(),
+      instQuery: safeInstQueryString() || 'all',
+    });
+  } catch {}
+
+  return normalized;
+}
+
+async function fetchConversasSemFiltroFallback(limit = 20) {
+  const url = buildConversasListUrl({
+    limit,
+    includeEmpresa: false,
+    includeInst: false,
+  });
+
+  const r = await fetch(url, {
+    credentials: 'include',
+    cache: 'no-store',
+  });
+
+  if (!r.ok) return null;
+
+  return r.json();
+}
+
 function currentConversasLoadKey() {
-  const instQuery = (_instQuery() || '').replace(/^[?&]+/, '') || 'all';
-  return `${LIST_LOCAL_CACHE_VERSION}:${EMPRESA_ID}:${instQuery}`;
+  const instQuery = currentInstQueryKey();
+  return `${LIST_LOCAL_CACHE_VERSION}:${empresaIdForQuery() || 'sessao'}:${instQuery}`;
 }
 
 function scheduleCarregarClientes(opts = {}, delay = LIST_DEBOUNCE_MS) {
@@ -1775,9 +2015,9 @@ export async function carregarClientes({ force = false, reason = '' } = {}) {
   __lastConversasFetchAt = now;
 
   __loadingConversasPromise = (async () => {
-    const instQuery = (_instQuery() || '').replace(/^[?&]+/, '') || 'all';
-    const cacheKey = `${LIST_LOCAL_CACHE_VERSION}:${EMPRESA_ID}:${instQuery}`;
-    const url = `/api/atendimento/conversas?empresa_id=${EMPRESA_ID}&limit=20${_instQuery()}`;
+    const instQuery = currentInstQueryKey();
+    const cacheKey = `${LIST_LOCAL_CACHE_VERSION}:${empresaIdForQuery() || 'sessao'}:${instQuery}`;
+    const url = buildConversasListUrl({ limit: 20 });
 
     const forceSession = sessionStorage.getItem('convForceReload') === '1';
 
@@ -1797,13 +2037,40 @@ export async function carregarClientes({ force = false, reason = '' } = {}) {
         }
       );
 
-      const items = Array.isArray(raw)
-        ? raw
-        : (Array.isArray(raw?.items) ? raw.items : []);
+      let { items, next } = extractConversasPayload(raw);
+      let usedFallback = false;
 
-      const next = raw?.next_cursor ?? null;
+      /*
+        Se empresa_id/instância salvos no front estiverem errados, a chamada
+        com query pode voltar vazia, enquanto a sessão real ainda tem conversas.
+        Foi exatamente o sintoma visto no console: /api/atendimento/conversas
+        sem query retornou 20 conversas.
+      */
+      if (!items.length && (empresaIdForQuery() || safeInstQueryString())) {
+        try {
+          const fallbackRaw = await fetchConversasSemFiltroFallback(20);
+          const fallbackPayload = extractConversasPayload(fallbackRaw);
 
-      let cs = items.map(normalizeCliente).filter(_matchInstancia);
+          if (fallbackPayload.items.length) {
+            items = fallbackPayload.items;
+            next = fallbackPayload.next;
+            usedFallback = true;
+
+            try {
+              console.warn('[clientes] query com empresa/instância voltou vazia; usando sessão como fallback.', {
+                url,
+                fallback_items: items.length,
+              });
+            } catch {}
+          }
+        } catch (e) {
+          try { console.warn('[clientes] fallback sem filtros falhou:', e); } catch {}
+        }
+      }
+
+      __lastConversasUsedSafeFallback = usedFallback;
+
+      let cs = normalizeAndFilterConversas(items, 'carregarClientes');
 
       const antigo = Array.isArray(state.clientesCache)
         ? state.clientesCache.map(normalizeCliente)
@@ -1894,19 +2161,21 @@ export async function loadMoreConversas() {
   __loadingMoreConversas = true;
 
   try {
-    const url = `/api/atendimento/conversas?empresa_id=${EMPRESA_ID}&limit=20&cursor_last_msg_id=${encodeURIComponent(cursor)}${_instQuery()}`;
+    const url = buildConversasListUrl({
+      limit: 20,
+      cursor,
+      includeEmpresa: !__lastConversasUsedSafeFallback,
+      includeInst: !__lastConversasUsedSafeFallback,
+    });
+
     const r = await fetch(url, { credentials: 'include' });
 
     if (!r.ok) return;
 
     const data = await r.json();
 
-    const items = Array.isArray(data?.items)
-      ? data.items
-      : (Array.isArray(data) ? data : []);
-
-    const next = data?.next_cursor ?? null;
-    const mais = items.map(normalizeCliente).filter(_matchInstancia);
+    const { items, next } = extractConversasPayload(data);
+    const mais = normalizeAndFilterConversas(items, 'loadMoreConversas');
 
     const map = new Map(
       (state.clientesCache || []).map((c) => [String(convKeyOf(c) || ''), normalizeCliente(c)])
@@ -2011,7 +2280,7 @@ function wireListaClicks(ul) {
 
 export function renderListaClientes(data) {
   const arr = dedupeConversas(
-    (Array.isArray(data) ? data : []).map(normalizeCliente).filter(_matchInstancia)
+    normalizeAndFilterConversas(Array.isArray(data) ? data : [], 'renderListaClientes')
   );
 
   const ul = getListaEl();

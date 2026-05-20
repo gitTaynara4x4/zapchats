@@ -6,6 +6,11 @@
 // - instância da conversa
 // - número/JID para API
 // - payloads de identidade para envio/ações
+//
+// Correção importante:
+// - aceita conversation_key composta: c:cliente_id:instancia_id / g:grupo_id:instancia_id
+// - não depende só de Number(cliente_id)
+// - evita o menu dos 3 pontinhos achar que "não tem conversa aberta"
 
 (function () {
   'use strict';
@@ -30,6 +35,10 @@
     cleanText,
     historyEl,
   } = H;
+
+  function headerEl() {
+    return document.getElementById('chat-header');
+  }
 
   function parseConversationKey(raw) {
     const s = idKey(raw);
@@ -63,6 +72,7 @@
       obj.kind ??
       obj.conversation_kind ??
       obj.tipo_conversa ??
+      obj.tipo ??
       null;
 
     const e = String(explicit || '').trim().toLowerCase();
@@ -82,6 +92,20 @@
     return 'c';
   }
 
+  function numericIdFromAny(raw) {
+    const parsed = parseConversationKey(raw);
+    if (parsed?.entityId) return parsed.entityId;
+
+    const s = idKey(raw);
+    if (!s) return null;
+
+    if (/^\d+$/.test(s)) {
+      return s;
+    }
+
+    return null;
+  }
+
   function entityIdFromAny(raw, row = null) {
     const parsed = parseConversationKey(raw);
     if (parsed?.entityId) return parsed.entityId;
@@ -93,22 +117,29 @@
         row.api_id ??
         (kindFromObject(row) === 'g' ? row.grupo_id : row.cliente_id) ??
         row.id_backend ??
+        row.id ??
         null;
 
-      const d = idKey(direct);
+      const d = numericIdFromAny(direct);
 
-      if (d && /^\d+$/.test(d)) {
+      if (d) {
         return d;
+      }
+
+      const directKey =
+        row.conversation_key ??
+        row.conversation_id ??
+        row.conv_key ??
+        null;
+
+      const parsedKey = parseConversationKey(directKey);
+
+      if (parsedKey?.entityId) {
+        return parsedKey.entityId;
       }
     }
 
-    const s = idKey(raw);
-
-    if (s && /^\d+$/.test(s)) {
-      return s;
-    }
-
-    return null;
+    return numericIdFromAny(raw);
   }
 
   function instIdFromAny(raw, row = null) {
@@ -135,6 +166,7 @@
       const directRaw =
         obj.conversation_key ??
         obj.conversation_id ??
+        obj.conv_key ??
         obj.id ??
         null;
 
@@ -192,29 +224,140 @@
     );
   }
 
-  function resolveCurrentClienteId() {
+  function getSelectedRawCandidates() {
     const hist = historyEl();
+    const hdr = headerEl();
     const sel = window.state?.clienteSel || window.clienteSel || null;
 
-    const candidates = [
+    return [
+      // histórico
+      hist?.dataset?.conversationKey,
+      hist?.dataset?.conversationId,
+      hist?.dataset?.convKey,
       hist?.dataset?.clienteId,
       hist?.dataset?.entityId,
+      hist?.dataset?.grupoId,
       hist?.dataset?.id,
+
+      // header
+      hdr?.dataset?.conversationKey,
+      hdr?.dataset?.conversationId,
+      hdr?.dataset?.convKey,
+      hdr?.dataset?.clienteId,
+      hdr?.dataset?.entityId,
+      hdr?.dataset?.grupoId,
+      hdr?.dataset?.id,
+
+      // state
+      sel?.conversation_key,
+      sel?.conversation_id,
+      sel?.conv_key,
       sel?.id,
       sel?.cliente_id,
+      sel?.grupo_id,
       sel?.backend_id,
       sel?.entity_id,
-      sel?.conversation_id,
+      sel?.api_id,
+
+      // globais antigos/compatibilidade
+      window.CONVERSATION_KEY_ATUAL,
+      window.conversationKeyAtual,
       window.CLIENTE_ID_ATUAL,
       window.currentClienteId,
       window.__perfilClienteIdAtual,
-    ];
+      window.GRUPO_ID_ATUAL,
+      window.currentGrupoId,
+    ].filter((v) => v !== undefined && v !== null && String(v).trim() !== '');
+  }
+
+  function resolveCurrentConversationRef() {
+    const hist = historyEl();
+    const hdr = headerEl();
+    const sel = window.state?.clienteSel || window.clienteSel || null;
+
+    const candidates = getSelectedRawCandidates();
+
+    for (const raw of candidates) {
+      const ref = conversationRefOf(raw, sel || null);
+
+      if (ref?.key || ref?.entityId) {
+        return ref;
+      }
+    }
+
+    if (sel) {
+      const ref = conversationRefOf(sel, sel);
+
+      if (ref?.key || ref?.entityId) {
+        return ref;
+      }
+    }
+
+    /*
+      Fallback visual:
+      se existe histórico com mensagem ou título preenchido,
+      considera que tem chat aberto mesmo que algum dataset antigo esteja ausente.
+    */
+    const hasVisualChat =
+      !!hist?.querySelector?.('.msg-row, .msg, .bubble') ||
+      !!cleanText($('#chat-title')) ||
+      !!cleanText($('#chat-header .title')) ||
+      !!cleanText($('#chatTitle'));
+
+    if (hasVisualChat) {
+      const kind =
+        hdr?.dataset?.kind ||
+        hist?.dataset?.kind ||
+        'c';
+
+      const entityId =
+        numericIdFromAny(hdr?.dataset?.entityId) ||
+        numericIdFromAny(hist?.dataset?.entityId) ||
+        numericIdFromAny(hdr?.dataset?.clienteId) ||
+        numericIdFromAny(hist?.dataset?.clienteId) ||
+        null;
+
+      const instId =
+        instKey(hdr?.dataset?.instanciaId) ||
+        instKey(hist?.dataset?.instanciaId) ||
+        instKey(hdr?.dataset?.instancia) ||
+        instKey(hist?.dataset?.instancia) ||
+        getInstanciaAtivaGlobal();
+
+      return {
+        key: entityId ? buildConversationKey(kind, entityId, instId) : null,
+        kind: String(kind || 'c').toLowerCase() === 'g' ? 'g' : 'c',
+        entityId,
+        instId,
+      };
+    }
+
+    return {
+      key: null,
+      kind: 'c',
+      entityId: null,
+      instId: null,
+    };
+  }
+
+  function resolveCurrentClienteId() {
+    const ref = resolveCurrentConversationRef();
+
+    if (ref?.entityId && /^\d+$/.test(String(ref.entityId))) {
+      return Number(ref.entityId);
+    }
+
+    const candidates = getSelectedRawCandidates();
 
     for (const v of candidates) {
-      const n = Number(v);
+      const id = numericIdFromAny(v);
 
-      if (Number.isFinite(n) && n > 0) {
-        return n;
+      if (id) {
+        const n = Number(id);
+
+        if (Number.isFinite(n) && n > 0) {
+          return n;
+        }
       }
     }
 
@@ -222,7 +365,18 @@
   }
 
   function hasOpenChat() {
-    return resolveCurrentClienteId() > 0;
+    const ref = resolveCurrentConversationRef();
+
+    if (ref?.key) return true;
+    if (ref?.entityId) return true;
+
+    const hist = historyEl();
+
+    if (hist?.querySelector?.('.msg-row, .msg, .bubble')) {
+      return true;
+    }
+
+    return false;
   }
 
   function currentChatTitle() {
@@ -237,38 +391,45 @@
   }
 
   function getSelectedConversationKey() {
-    const hist = historyEl();
     const sel = window.state?.clienteSel || window.clienteSel || null;
 
-    const raw =
-      idKey(hist?.dataset?.conversationKey) ||
-      idKey(hist?.dataset?.clienteId) ||
-      idKey(sel?.conversation_key) ||
-      idKey(sel?.conversation_id) ||
-      idKey(sel?.id) ||
-      null;
+    const candidates = getSelectedRawCandidates();
 
-    return conversationRefOf(raw, sel).key || null;
+    for (const raw of candidates) {
+      const ref = conversationRefOf(raw, sel || null);
+
+      if (ref?.key) {
+        return ref.key;
+      }
+    }
+
+    const ref = resolveCurrentConversationRef();
+
+    return ref?.key || null;
   }
 
   function getConversationPools() {
     return [
       ...(Array.isArray(window.state?.clientesCache) ? window.state.clientesCache : []),
       ...(Array.isArray(window.state?.todosContatosCache) ? window.state.todosContatosCache : []),
+      ...(Array.isArray(window.clientesCache) ? window.clientesCache : []),
+      ...(Array.isArray(window.todosContatosCache) ? window.todosContatosCache : []),
       ...(window.state?.clienteSel ? [window.state.clienteSel] : []),
       ...(window.clienteSel ? [window.clienteSel] : []),
     ].filter(Boolean);
   }
 
   function getConversationByRef(conversationRef = null) {
-    const targetKey = conversationRefOf(
+    const target = conversationRefOf(
       conversationRef ?? getSelectedConversationKey(),
-      window.state?.clienteSel || null
-    ).key;
+      window.state?.clienteSel || window.clienteSel || null
+    );
 
-    if (!targetKey) return null;
+    const targetKey = target?.key;
 
-    return getConversationPools().find((x) => sameConversation(x, targetKey)) || null;
+    if (!targetKey && !target?.entityId) return null;
+
+    return getConversationPools().find((x) => sameConversation(x, targetKey || target)) || null;
   }
 
   function resolveRawTel(cli) {
@@ -325,19 +486,22 @@
     return instKey(
       window.getInstanciaAtiva?.() ??
       window.INSTANCIA_ATIVA ??
+      window.instanciaAtiva ??
+      localStorage.getItem('instancia_id') ??
       null
     );
   }
 
   function getConversationInstancia(conversationRef = null) {
     const cli = getConversationByRef(conversationRef);
-    const ref = conversationRefOf(cli || conversationRef, cli || null);
+    const ref = conversationRefOf(cli || conversationRef || getSelectedConversationKey(), cli || null);
 
     return (
       instKey(cli?.instancia_id) ||
       instKey(cli?.instancia) ||
       instKey(cli?.instance_name) ||
       ref.instId ||
+      getInstanciaAtivaGlobal() ||
       null
     );
   }
@@ -364,7 +528,7 @@
         ? conversationRef
         : getConversationByRef(conversationRef);
 
-    const ref = conversationRefOf(conversationRef || cli, cli);
+    const ref = conversationRefOf(conversationRef || cli || getSelectedConversationKey(), cli);
 
     return stripUndefined({
       conversation_key: ref.key || undefined,
@@ -397,10 +561,13 @@
     parseConversationKey,
     buildConversationKey,
     kindFromObject,
+    numericIdFromAny,
     entityIdFromAny,
     instIdFromAny,
     conversationRefOf,
     sameConversation,
+    getSelectedRawCandidates,
+    resolveCurrentConversationRef,
     resolveCurrentClienteId,
     hasOpenChat,
     currentChatTitle,
@@ -417,5 +584,5 @@
     getCurrentInstanceText,
   });
 
-  console.log('[header-actions] conversation carregado');
+  console.log('[header-actions] conversation carregado: zc-conversation-v2-composite-key-safe');
 })();

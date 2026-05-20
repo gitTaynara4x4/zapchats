@@ -4,6 +4,7 @@
 // ✅ Mostra aviso estilo WhatsApp Web: "Clique neste aviso para carregar mensagens mais antigas"
 // ✅ Mostra loader dentro da conversa ANTES de consultar o banco quando não acha cache
 // ✅ Ao carregar mensagens antigas, NÃO volta para o fim da conversa
+// ✅ Igual WhatsApp Web: mensagens antigas entram acima sem mexer no que você está vendo
 // ✅ Não grava mais cache pesado legado em cacheHistoricos:<empresa>
 // ✅ Usa hist-cache.js como cache limitado/leve
 // ✅ Render de mídias/áudio fica no media-render.js
@@ -328,6 +329,137 @@ function isPreservingOldScroll(hist = H()) {
   } catch {
     return false;
   }
+}
+
+/* =====================
+   Âncora estilo WhatsApp Web
+   ===================== */
+function getFirstVisibleMsgRow(hist = H()) {
+  try {
+    if (!hist) return null;
+
+    const histBox = hist.getBoundingClientRect();
+    const topLimit = histBox.top + 8;
+    const bottomLimit = histBox.bottom - 8;
+
+    const rows = Array.from(hist.querySelectorAll('.msg-row'));
+    if (!rows.length) return null;
+
+    for (const row of rows) {
+      const box = row.getBoundingClientRect();
+
+      if (box.bottom >= topLimit && box.top <= bottomLimit) {
+        return row;
+      }
+    }
+
+    return rows[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+function restoreAnchorPosition(hist, anchor, oldTop) {
+  try {
+    if (!hist || !anchor || !anchor.isConnected) return;
+
+    const newTop = anchor.getBoundingClientRect().top;
+    const delta = newTop - oldTop;
+
+    if (Math.abs(delta) > 0.5) {
+      hist.scrollTop += delta;
+    }
+  } catch {}
+}
+
+function prependOldMessagesSemMexerTela(convKey, items) {
+  const hist = H();
+  if (!hist || !convKey) return false;
+
+  const incoming = ensureArray(items)
+    .map(normalizeMessageState)
+    .filter(Boolean);
+
+  if (!incoming.length) return false;
+
+  const anchor = getFirstVisibleMsgRow(hist);
+  const anchorTop = anchor ? anchor.getBoundingClientRect().top : null;
+
+  const existingIds = new Set(
+    Array.from(hist.querySelectorAll('.msg-row')).map((row) => (
+      row.getAttribute('data-msg-id') ||
+      row.getAttribute('data-id') ||
+      row.getAttribute('data-message-id') ||
+      row.getAttribute('data-wa-msg-id') ||
+      ''
+    )).filter(Boolean)
+  );
+
+  const msgs = ordenarMensagens(incoming).filter((m) => {
+    const k = msgKey(m);
+    if (k && existingIds.has(k)) return false;
+    return true;
+  });
+
+  if (!msgs.length) return false;
+
+  hist.__zcPreserveOldScrollUntil = Date.now() + 2200;
+
+  const { html } = renderMsgsWithDividers(msgs, null);
+  if (!html) return false;
+
+  const notice = ensureTopNotice();
+
+  if (notice && notice.parentElement === hist) {
+    notice.insertAdjacentHTML('afterend', html);
+  } else {
+    hist.insertAdjacentHTML('afterbegin', html);
+  }
+
+  try {
+    const inst = getInstanciaForFetch(convKey);
+    const all = ensureArray(getHist(inst, convKey)).map(normalizeMessageState);
+    updateExistingRowsFromCache(hist, all);
+  } catch {}
+
+  const restore = () => {
+    if (!isHistoricoStillOpenFor(convKey, hist)) return;
+
+    hist.__zcPreserveOldScrollUntil = Date.now() + 1200;
+
+    if (anchor && anchorTop !== null) {
+      restoreAnchorPosition(hist, anchor, anchorTop);
+    }
+
+    armHistoricoScrollGuard();
+  };
+
+  restore();
+
+  requestAnimationFrame(() => {
+    restore();
+  });
+
+  setTimeout(() => {
+    restore();
+  }, 80);
+
+  try { window.ensureMsgMediaCss?.(); } catch {}
+  try { window.zcMediaRenderScheduleEnhance?.(hist); } catch {}
+  try { window.initAudioPlayers?.(hist); } catch {}
+  try { window.initMediaFallbacks?.(hist); } catch {}
+
+  try {
+    window.dispatchEvent(new CustomEvent('historico:rendered', {
+      detail: {
+        conversation_key: convKey,
+        conversation_id: convKey,
+        prepend_old: true,
+      },
+    }));
+  } catch {}
+
+  return true;
 }
 
 /* =====================
@@ -2033,11 +2165,7 @@ export async function carregarMaisHistorico(id) {
       return false;
     }
 
-    const beforeHeight = hist.scrollHeight;
-    const beforeScrollTop = hist.scrollTop;
-    const distanceFromBottom = beforeHeight - beforeScrollTop;
-
-    hist.__zcPreserveOldScrollUntil = Date.now() + 1800;
+    hist.__zcPreserveOldScrollUntil = Date.now() + 2200;
 
     mergeOld(getInstanciaForFetch(convKey), convKey, items);
 
@@ -2055,31 +2183,11 @@ export async function carregarMaisHistorico(id) {
     }
 
     if (!isHistoricoStillOpenFor(convKey, hist)) {
-      HLOG('carregarMaisHistorico: cache salvo, mas conversa mudou antes de render', { convKey });
+      HLOG('carregarMaisHistorico: cache salvo, mas conversa mudou antes de inserir no DOM', { convKey });
       return false;
     }
 
-    renderHistoricoDoCache(convKey, false);
-
-    if (!isHistoricoStillOpenFor(convKey, hist)) return false;
-
-    const restoreScroll = () => {
-      if (!isHistoricoStillOpenFor(convKey, hist)) return;
-
-      hist.__zcPreserveOldScrollUntil = Date.now() + 900;
-      hist.scrollTop = Math.max(0, hist.scrollHeight - distanceFromBottom);
-      armHistoricoScrollGuard();
-    };
-
-    restoreScroll();
-
-    requestAnimationFrame(() => {
-      restoreScroll();
-    });
-
-    setTimeout(() => {
-      restoreScroll();
-    }, 80);
+    prependOldMessagesSemMexerTela(convKey, items);
 
     setOffset(convKey, off + n);
 
