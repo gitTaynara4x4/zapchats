@@ -630,13 +630,17 @@ async def login_autoredirect(request: Request, call_next):
         if token and emp:
             try:
                 auth_router._decode_token(token)
-            except Exception:
+            except Exception as e:
+                print("[LOGIN_AUTOREDIRECT] token inválido/quebrado:", repr(e))
                 resp = await call_next(request)
                 _clear_auth_cookies(resp, request)
                 resp.headers["X-Auth-Gate"] = "login-bad-token-cleared"
                 return resp
 
             next_url = request.query_params.get("next") or "/dashboard"
+            if not str(next_url).startswith("/") or str(next_url).startswith("//"):
+                next_url = "/dashboard"
+
             return RedirectResponse(url=next_url, status_code=302)
 
         # Sessão quebrada: tem só um pedaço do cookie.
@@ -678,8 +682,18 @@ async def block_direct_frontend(request: Request, call_next):
         if is_html:
             token = request.cookies.get(ACCESS_COOKIE_NAME)
             empresa_cookie = request.cookies.get("empresa_id") or request.cookies.get("EMPRESA_ID")
+
             if token and empresa_cookie:
-                return await call_next(request)
+                try:
+                    auth_router._decode_token(token)
+                    return await call_next(request)
+                except Exception as e:
+                    print("[FRONTEND_GATE] token inválido/quebrado:", repr(e))
+                    next_url = p + (("?" + request.url.query) if request.url.query else "")
+                    resp = RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
+                    resp.headers["X-Auth-Gate"] = "frontend-bad-token"
+                    _clear_auth_cookies(resp, request)
+                    return resp
 
             next_url = p + (("?" + request.url.query) if request.url.query else "")
             resp = RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
@@ -771,10 +785,13 @@ def _is_public(path: str) -> bool:
         "/healthz",
         "/ping",
         "/version.json",
+        "/__app_alive",
+        "/__alive",
     )
 
     if p in PUBLIC_HTML_PATHS:
         return True
+
     return any(p.startswith(pref) for pref in PUBLIC_PREFIXES)
 
 
@@ -792,6 +809,7 @@ async def auth_html_gate(request: Request, call_next):
 
     token = request.cookies.get(ACCESS_COOKIE_NAME)
     empresa_cookie = request.cookies.get("empresa_id") or request.cookies.get("EMPRESA_ID")
+
     if not (token and empresa_cookie):
         next_url = path + (("?" + request.url.query) if request.url.query else "")
         resp = RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
@@ -801,10 +819,12 @@ async def auth_html_gate(request: Request, call_next):
 
     try:
         payload = auth_router._decode_token(token)
-    except HTTPException:
+    except Exception as e:
+        print("[AUTH_GATE] token inválido/quebrado:", repr(e))
+
         next_url = path + (("?" + request.url.query) if request.url.query else "")
         resp = RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
-        resp.headers["X-Auth-Gate"] = "bad-token"
+        resp.headers["X-Auth-Gate"] = "bad-token-or-session-error"
         _clear_auth_cookies(resp, request)
         return resp
 
@@ -846,7 +866,8 @@ async def auth_html_gate(request: Request, call_next):
 
     try:
         colab_id = int(sub.split("colab-", 1)[1])
-    except Exception:
+    except Exception as e:
+        print("[AUTH_GATE] sub inválido:", repr(e), "sub=", repr(sub))
         return _html_forbidden("Identidade inválida no token de sessão.")
 
     db: Session = SessionLocal()
@@ -863,6 +884,13 @@ async def auth_html_gate(request: Request, call_next):
             {"cid": colab_id},
         ).fetchall()
         perms = {r[0] for r in rows}
+    except Exception as e:
+        print("[AUTH_GATE] erro consultando permissões:", repr(e))
+        next_url = path + (("?" + request.url.query) if request.url.query else "")
+        resp = RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
+        resp.headers["X-Auth-Gate"] = "permission-query-error"
+        _clear_auth_cookies(resp, request)
+        return resp
     finally:
         db.close()
 
@@ -1280,8 +1308,8 @@ async def root_redirect(request: Request):
         try:
             auth_router._decode_token(token)
             return RedirectResponse(url="/dashboard", status_code=302)
-        except Exception:
-            pass
+        except Exception as e:
+            print("[ROOT] token inválido/quebrado:", repr(e))
 
     f = _page_file("inicio")
     if f.is_file():
