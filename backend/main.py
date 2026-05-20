@@ -749,6 +749,13 @@ def _is_public(path: str) -> bool:
         "/frontend/admin-planos.html",
         "/frontend/planos.html",
         "/frontend/admin-assinaturas.html",
+
+        # ✅ Rotas públicas para limpar sessão/cookie antigo.
+        # Se não ficarem públicas, o auth_html_gate pode bloquear antes de limpar.
+        "/limpar-sessao",
+        "/limpar-sessao.html",
+        "/sair",
+        "/logout",
     }
 
     PUBLIC_PREFIXES = (
@@ -1122,6 +1129,50 @@ def version_json():
             "X-ZC-Build": str(BUILD_ID),
         },
     )
+
+
+# =======================================
+# Limpeza manual de sessão/cookies antigos
+# =======================================
+@app.get("/limpar-sessao", include_in_schema=False)
+def limpar_sessao(request: Request):
+    next_url = request.query_params.get("next") or "/login"
+
+    if not str(next_url).startswith("/") or str(next_url).startswith("//"):
+        next_url = "/login"
+
+    resp = RedirectResponse(url=next_url, status_code=302)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    resp.headers["X-Auth-Gate"] = "manual-session-clear"
+
+    _clear_auth_cookies(resp, request)
+    return resp
+
+
+@app.get("/sair", include_in_schema=False)
+def sair(request: Request):
+    resp = RedirectResponse(url="/login?logout=1", status_code=302)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    resp.headers["X-Auth-Gate"] = "manual-logout"
+
+    _clear_auth_cookies(resp, request)
+    return resp
+
+
+@app.get("/logout", include_in_schema=False)
+def logout_alias(request: Request):
+    resp = RedirectResponse(url="/login?logout=1", status_code=302)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    resp.headers["X-Auth-Gate"] = "manual-logout-alias"
+
+    _clear_auth_cookies(resp, request)
+    return resp
 
 
 # =======================================

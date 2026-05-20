@@ -3,6 +3,7 @@
 // ✅ Não carrega histórico antigo sozinho ao chegar no topo
 // ✅ Mostra aviso estilo WhatsApp Web: "Clique neste aviso para carregar mensagens mais antigas"
 // ✅ Mostra loader dentro da conversa ANTES de consultar o banco quando não acha cache
+// ✅ Ao carregar mensagens antigas, NÃO volta para o fim da conversa
 // ✅ Não grava mais cache pesado legado em cacheHistoricos:<empresa>
 // ✅ Usa hist-cache.js como cache limitado/leve
 // ✅ Render de mídias/áudio fica no media-render.js
@@ -319,6 +320,14 @@ function armHistoricoScrollGuard(ms = HIST_SCROLL_GUARD_MS) {
 function historicoScrollGuardActive(hist = H()) {
   if (!hist) return false;
   return Number(hist.__zcScrollGuardUntil || 0) > Date.now();
+}
+
+function isPreservingOldScroll(hist = H()) {
+  try {
+    return Number(hist?.__zcPreserveOldScrollUntil || 0) > Date.now();
+  } catch {
+    return false;
+  }
 }
 
 /* =====================
@@ -1206,6 +1215,14 @@ function isDateJumpScrollLocked() {
 function scrollToBottomIfAllowed(hist, convKey, reason = '') {
   if (!hist) return;
 
+  if (isPreservingOldScroll(hist)) {
+    HLOG('auto-scroll para o fim bloqueado: carregando mensagens antigas', {
+      convKey,
+      reason,
+    });
+    return;
+  }
+
   if (isDateJumpScrollLocked()) {
     HLOG('auto-scroll para o fim bloqueado pelo calendário', {
       convKey,
@@ -1506,9 +1523,6 @@ export async function abrirHistorico(id) {
     showInitialLoading(convKey);
   }
 
-  // Aqui é a correção principal:
-  // se não tem cache, mostra "Carregando mensagens do banco..."
-  // e espera o navegador pintar antes de fazer o fetch.
   await nextPaint();
 
   try {
@@ -2020,6 +2034,10 @@ export async function carregarMaisHistorico(id) {
     }
 
     const beforeHeight = hist.scrollHeight;
+    const beforeScrollTop = hist.scrollTop;
+    const distanceFromBottom = beforeHeight - beforeScrollTop;
+
+    hist.__zcPreserveOldScrollUntil = Date.now() + 1800;
 
     mergeOld(getInstanciaForFetch(convKey), convKey, items);
 
@@ -2041,14 +2059,27 @@ export async function carregarMaisHistorico(id) {
       return false;
     }
 
-    const prevBottom = beforeHeight - hist.scrollTop;
-
     renderHistoricoDoCache(convKey, false);
 
     if (!isHistoricoStillOpenFor(convKey, hist)) return false;
 
-    hist.scrollTop = hist.scrollHeight - prevBottom;
-    armHistoricoScrollGuard();
+    const restoreScroll = () => {
+      if (!isHistoricoStillOpenFor(convKey, hist)) return;
+
+      hist.__zcPreserveOldScrollUntil = Date.now() + 900;
+      hist.scrollTop = Math.max(0, hist.scrollHeight - distanceFromBottom);
+      armHistoricoScrollGuard();
+    };
+
+    restoreScroll();
+
+    requestAnimationFrame(() => {
+      restoreScroll();
+    });
+
+    setTimeout(() => {
+      restoreScroll();
+    }, 80);
 
     setOffset(convKey, off + n);
 
