@@ -345,6 +345,10 @@ CSRF_COOKIE_NAME = os.getenv("CSRF_COOKIE_NAME", "csrf_token")
 CSRF_COOKIE_PATH = os.getenv("CSRF_COOKIE_PATH", "/api/auth/refresh")
 CSRF_COOKIE_MAX_AGE = int(os.getenv("CSRF_COOKIE_MAX_AGE", str(60 * 60 * 24 * 30)))
 
+# Mesmo domínio usado pelo auth.py.
+# Importante para conseguir apagar cookies antigos em produção.
+COOKIE_DOMAIN = (os.getenv("COOKIE_DOMAIN") or "").strip() or None
+
 # =======================================
 # Trusted hosts
 # =======================================
@@ -426,17 +430,90 @@ def _apply_hsts(resp: StarletteResponse):
     resp.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
 
 
-def _clear_auth_cookies(resp: StarletteResponse):
+def _cookie_delete_domains(request: Request | None = None) -> list[str | None]:
+    """
+    Retorna variações de domínio para apagar cookies antigos.
+
+    Por que isso existe:
+    - cookie host-only precisa ser apagado sem domain;
+    - cookie com COOKIE_DOMAIN precisa ser apagado com domain;
+    - cookies antigos podem ter sido salvos em www.zapschat.com.br,
+      zapschat.com.br ou .zapschat.com.br.
+    """
+    domains: list[str | None] = [None]
+
+    def add_domain(d: str | None):
+        if not d:
+            return
+
+        s = str(d).strip().lower()
+        if not s:
+            return
+
+        variants = [s]
+
+        if s.startswith("."):
+            variants.append(s[1:])
+        else:
+            variants.append("." + s)
+
+        if s.startswith("www."):
+            root = s[4:]
+            variants.append(root)
+            variants.append("." + root)
+
+        for item in variants:
+            if item and item not in domains:
+                domains.append(item)
+
+    add_domain(COOKIE_DOMAIN)
+
     try:
-        resp.delete_cookie(ACCESS_COOKIE_NAME, path="/")
+        host = (request.headers.get("host") or "").split(":", 1)[0].strip().lower() if request else ""
+        add_domain(host)
     except Exception:
         pass
 
-    for k in ("empresa_id", "EMPRESA_ID"):
-        try:
-            resp.delete_cookie(k, path="/")
-        except Exception:
-            pass
+    # Segurança extra para o domínio público atual.
+    add_domain("zapschat.com.br")
+    add_domain("www.zapschat.com.br")
+
+    return domains
+
+
+def _clear_auth_cookies(resp: StarletteResponse, request: Request | None = None):
+    """
+    Limpa cookies de autenticação quebrados/antigos.
+
+    Importante:
+    - se o cookie foi criado com domain, precisa apagar com domain;
+    - se foi criado sem domain, precisa apagar sem domain;
+    - access_token é httpOnly, então o front não consegue apagar sozinho.
+    """
+    names = (
+        ACCESS_COOKIE_NAME,
+        "empresa_id",
+        "EMPRESA_ID",
+        CSRF_COOKIE_NAME,
+    )
+
+    paths = (
+        "/",
+        CSRF_COOKIE_PATH,
+        "/api/auth/refresh",
+    )
+
+    for domain in _cookie_delete_domains(request):
+        for name in names:
+            for path in paths:
+                try:
+                    resp.delete_cookie(
+                        key=name,
+                        path=path,
+                        domain=domain,
+                    )
+                except Exception:
+                    pass
 
 
 def _int_or_none(v):
@@ -544,20 +621,31 @@ async def ensure_csrf_cookie(request: Request, call_next):
 @app.middleware("http")
 async def login_autoredirect(request: Request, call_next):
     p = request.url.path
+
     if p in ("/login", "/login.html"):
         token = request.cookies.get(ACCESS_COOKIE_NAME)
         emp = request.cookies.get("empresa_id") or request.cookies.get("EMPRESA_ID")
 
+        # Sessão completa: valida token antes de redirecionar.
         if token and emp:
             try:
                 auth_router._decode_token(token)
             except Exception:
                 resp = await call_next(request)
-                _clear_auth_cookies(resp)
+                _clear_auth_cookies(resp, request)
+                resp.headers["X-Auth-Gate"] = "login-bad-token-cleared"
                 return resp
 
             next_url = request.query_params.get("next") or "/dashboard"
             return RedirectResponse(url=next_url, status_code=302)
+
+        # Sessão quebrada: tem só um pedaço do cookie.
+        # Ex.: empresa_id ficou, access_token sumiu/expirou.
+        if token or emp:
+            resp = await call_next(request)
+            _clear_auth_cookies(resp, request)
+            resp.headers["X-Auth-Gate"] = "login-partial-cookie-cleared"
+            return resp
 
     return await call_next(request)
 
@@ -594,7 +682,10 @@ async def block_direct_frontend(request: Request, call_next):
                 return await call_next(request)
 
             next_url = p + (("?" + request.url.query) if request.url.query else "")
-            return RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
+            resp = RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
+            resp.headers["X-Auth-Gate"] = "frontend-missing-cookie"
+            _clear_auth_cookies(resp, request)
+            return resp
 
         return await call_next(request)
 
@@ -698,6 +789,7 @@ async def auth_html_gate(request: Request, call_next):
         next_url = path + (("?" + request.url.query) if request.url.query else "")
         resp = RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
         resp.headers["X-Auth-Gate"] = "missing-cookie"
+        _clear_auth_cookies(resp, request)
         return resp
 
     try:
@@ -706,7 +798,7 @@ async def auth_html_gate(request: Request, call_next):
         next_url = path + (("?" + request.url.query) if request.url.query else "")
         resp = RedirectResponse(url=f"/login.html?next={next_url}", status_code=302)
         resp.headers["X-Auth-Gate"] = "bad-token"
-        _clear_auth_cookies(resp)
+        _clear_auth_cookies(resp, request)
         return resp
 
     norm = _norm_path_for_perm(path)
@@ -1134,15 +1226,27 @@ async def root_redirect(request: Request):
     emp = request.cookies.get("empresa_id") or request.cookies.get("EMPRESA_ID")
 
     if token and emp:
-        return RedirectResponse(url="/dashboard", status_code=302)
+        try:
+            auth_router._decode_token(token)
+            return RedirectResponse(url="/dashboard", status_code=302)
+        except Exception:
+            pass
 
     f = _page_file("inicio")
     if f.is_file():
-        return _html_response_from_file(f)
+        resp = _html_response_from_file(f)
+        if token or emp:
+            _clear_auth_cookies(resp, request)
+            resp.headers["X-Auth-Gate"] = "root-stale-cookie-cleared"
+        return resp
 
     target = "login" if "login" in PAGES else ("index" if "index" in PAGES else None)
     if target and _page_file(target).is_file():
-        return _html_response_from_file(_page_file(target))
+        resp = _html_response_from_file(_page_file(target))
+        if token or emp:
+            _clear_auth_cookies(resp, request)
+            resp.headers["X-Auth-Gate"] = "root-stale-cookie-cleared"
+        return resp
 
     return {
         "ok": True,

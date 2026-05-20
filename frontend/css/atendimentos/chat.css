@@ -47,6 +47,7 @@ main.whatsapp-bg-light #historico{
     linear-gradient(rgba(239,234,226,.86), rgba(239,234,226,.86)),
     url("https://static.whatsapp.net/rsrc.php/yx/r/voSdkk88H7C.svg") !important;
 }
+
 /* =========================
    LOADER TOPO HISTÓRICO
    ========================= */
@@ -93,6 +94,257 @@ html[data-theme="light"] #historico .hist-loader .spinner{
 
 @keyframes histSpin{
   to{ transform:rotate(360deg); }
+}
+
+/* =========================
+   AVISO WHATSAPP WEB / CARREGAMENTO LEVE
+   ========================= */
+
+#historico .hist-old-notice{
+  position:sticky;
+  top:8px;
+  z-index:8;
+  align-self:center;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  min-height:34px;
+  max-width:min(92%, 560px);
+  margin:4px auto 12px;
+  padding:8px 14px;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:999px;
+  background:#182229;
+  color:#d1d7db;
+  font-size:12.5px;
+  font-weight:500;
+  line-height:1.2;
+  box-shadow:0 8px 22px rgba(0,0,0,.18);
+  cursor:pointer;
+  user-select:none;
+  transition:background .16s ease, color .16s ease, border-color .16s ease, transform .12s ease, opacity .16s ease;
+}
+
+#historico .hist-old-notice:hover{
+  background:#1f2c34;
+  border-color:rgba(255,255,255,.13);
+  color:#ffffff;
+}
+
+#historico .hist-old-notice:active{
+  transform:scale(.985);
+}
+
+#historico .hist-old-notice:disabled{
+  cursor:default;
+  transform:none;
+  opacity:.88;
+}
+
+#historico .hist-old-notice[data-state="loading"]{
+  pointer-events:none;
+  background:#182229;
+  color:#aebac1;
+}
+
+#historico .hist-old-notice[data-state="done"]{
+  pointer-events:none;
+  background:rgba(0,168,132,.13);
+  border-color:rgba(0,168,132,.22);
+  color:#9debd7;
+}
+
+#historico .hist-old-notice[data-state="error"]{
+  background:rgba(255, 74, 74, .12);
+  border-color:rgba(255, 74, 74, .22);
+  color:#ffb4b4;
+}
+
+#historico .hist-old-notice-icon{
+  width:18px;
+  height:18px;
+  flex:0 0 18px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  color:inherit;
+}
+
+#historico .hist-old-notice-icon i{
+  font-size:13px;
+  line-height:1;
+}
+
+#historico .hist-old-notice-text{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+#historico .spinner,
+.zc-chat-search-spinner{
+  width:16px;
+  height:16px;
+  border-radius:999px;
+  border:2px solid rgba(255,255,255,.22);
+  border-top-color:#25d366;
+  animation:histSpin .8s linear infinite;
+}
+
+#historico .hist-initial-loading{
+  width:100%;
+  flex:1 1 auto;
+  min-height:220px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:12px;
+  color:#aebac1;
+  user-select:none;
+}
+
+#historico .hist-initial-loading .spinner{
+  width:26px;
+  height:26px;
+  border-width:3px;
+}
+
+#historico .hist-initial-loading .txt{
+  font-size:13px;
+  font-weight:500;
+}
+
+#historico .hist-empty-state{
+  width:min(92%, 360px);
+  margin:auto;
+  min-height:220px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  text-align:center;
+  color:#aebac1;
+  user-select:none;
+}
+
+#historico .hist-empty-icon{
+  width:48px;
+  height:48px;
+  border-radius:999px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  background:rgba(255,255,255,.06);
+  color:#d1d7db;
+  font-size:20px;
+  margin-bottom:2px;
+}
+
+#historico .hist-empty-title{
+  color:#e9edef;
+  font-size:14px;
+  font-weight:700;
+}
+
+#historico .hist-empty-sub{
+  color:#aebac1;
+  font-size:12.5px;
+  line-height:1.4;
+}
+
+#historico .hist-empty-error .hist-empty-icon{
+  background:rgba(255, 74, 74, .12);
+  color:#ffb4b4;
+}
+
+#historico .hist-retry-btn{
+  height:34px;
+  margin-top:8px;
+  padding:0 14px;
+  border:none;
+  border-radius:999px;
+  background:#00a884;
+  color:#ffffff;
+  font-size:12.5px;
+  font-weight:700;
+  cursor:pointer;
+  transition:filter .16s ease, transform .12s ease;
+}
+
+#historico .hist-retry-btn:hover{
+  filter:brightness(1.06);
+}
+
+#historico .hist-retry-btn:active{
+  transform:scale(.98);
+}
+
+html[data-theme="light"] #historico .hist-old-notice{
+  background:#ffffff;
+  border-color:rgba(17,27,33,.10);
+  color:#3b4a54;
+  box-shadow:0 8px 22px rgba(17,27,33,.10);
+}
+
+html[data-theme="light"] #historico .hist-old-notice:hover{
+  background:#f7f8fa;
+  border-color:rgba(17,27,33,.16);
+  color:#111b21;
+}
+
+html[data-theme="light"] #historico .hist-old-notice[data-state="loading"]{
+  background:#ffffff;
+  color:#667781;
+}
+
+html[data-theme="light"] #historico .hist-old-notice[data-state="done"]{
+  background:rgba(0,168,132,.10);
+  border-color:rgba(0,168,132,.18);
+  color:#00785f;
+}
+
+html[data-theme="light"] #historico .hist-old-notice[data-state="error"]{
+  background:rgba(217, 45, 32, .08);
+  border-color:rgba(217, 45, 32, .16);
+  color:#b42318;
+}
+
+html[data-theme="light"] #historico .spinner,
+html[data-theme="light"] .zc-chat-search-spinner{
+  border-color:rgba(17,27,33,.13);
+  border-top-color:#00a884;
+}
+
+html[data-theme="light"] #historico .hist-initial-loading,
+html[data-theme="light"] #historico .hist-empty-state{
+  color:#667781;
+}
+
+html[data-theme="light"] #historico .hist-empty-icon{
+  background:rgba(17,27,33,.06);
+  color:#3b4a54;
+}
+
+html[data-theme="light"] #historico .hist-empty-title{
+  color:#111b21;
+}
+
+html[data-theme="light"] #historico .hist-empty-sub{
+  color:#667781;
+}
+
+html[data-theme="light"] #historico .hist-empty-error .hist-empty-icon{
+  background:rgba(217,45,32,.08);
+  color:#b42318;
+}
+
+/* Compat com loader antigo */
+#historico[data-loading-old="1"] .hist-old-notice{
+  display:inline-flex;
 }
 
 /* =========================
@@ -1779,6 +2031,21 @@ html[data-theme="light"] .zc-forward-badge{
   .zc-forward-item{
     padding:10px 12px;
   }
+
+  #historico .hist-old-notice{
+    max-width:94%;
+    font-size:12px;
+    padding:8px 12px;
+  }
+
+  #historico .hist-old-notice-text{
+    max-width:calc(100vw - 100px);
+  }
+
+  #historico .hist-initial-loading,
+  #historico .hist-empty-state{
+    min-height:180px;
+  }
 }
 
 @media (max-width:480px){
@@ -1795,5 +2062,11 @@ html[data-theme="light"] .zc-forward-badge{
   .date-chip{
     font-size:11px;
     padding:4px 9px;
+  }
+
+  #historico .hist-old-notice{
+    top:6px;
+    min-height:32px;
+    margin:2px auto 10px;
   }
 }

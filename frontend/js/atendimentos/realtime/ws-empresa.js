@@ -1790,6 +1790,15 @@ function handleNovaMensagem(data) {
 
     pushIncomingToHist(openRef, normalizedOpenPayload, openRef.instId);
     dispatchRealtimeMessageEvents(normalizedOpenPayload);
+
+    /*
+      Mesmo quando a conversa aberta renderiza pelo histórico, a lista lateral
+      também precisa atualizar preview/hora/ordem.
+      Como aqui caímos no caminho "openRef" sem item conhecido na lista/cache,
+      forçamos reload oficial da lista com debounce.
+    */
+    requestOfficialListReload('ws-open-message-list-refresh');
+
     renderOpenConversationFromWs(openRef);
     notifyNewMessage(normalizedOpenPayload, openRef.key);
 
@@ -1840,9 +1849,26 @@ function handleNovaMensagem(data) {
 
   dispatchRealtimeMessageEvents(normalizedPayload);
 
-  if (!updated && !openNow) {
-    requestOfficialListReload('ws-message-update-miss');
-    return;
+  /*
+    A bolha do chat e a lista lateral são fluxos diferentes.
+
+    Antes: quando openNow=true e bumpPreview falhava, o chat atualizava,
+    mas a lista não recarregava. Resultado: mensagem aparecia no chat,
+    porém preview/hora/ordem da lista ficavam antigos.
+
+    Agora:
+    - se bumpPreview falhar, recarrega a lista mesmo com a conversa aberta;
+    - se a conversa está aberta, faz um refresh leve/debounced da lista também,
+      garantindo preview/hora sem depender do cache local acertar 100%.
+  */
+  if (!updated) {
+    requestOfficialListReload(openNow ? 'ws-open-message-list-update-miss' : 'ws-message-update-miss');
+
+    if (!openNow) {
+      return;
+    }
+  } else if (openNow) {
+    requestOfficialListReload('ws-open-message-list-soft-refresh');
   }
 
   if (openNow) {

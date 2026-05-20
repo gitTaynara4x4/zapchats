@@ -34,7 +34,10 @@ import { primeWith, getHist } from './hist-cache.js';
 const LIST_CACHE_TTL_MS = 8_000;
 const LIST_FORCE_MIN_INTERVAL_MS = 2_500;
 const LIST_DEBOUNCE_MS = 700;
-const LIST_LOCAL_CACHE_VERSION = 'conversas:v4:nome-oficial-badge-fix-avatar-color-filas';
+const LIST_LOCAL_CACHE_VERSION = 'conversas:v5-loading-leve-sem-hist-prefetch';
+const LIST_LOADING_TEXT = 'Carregando suas conversas…';
+const LIST_EMPTY_TEXT = 'Nenhuma conversa encontrada.';
+const LIST_ERROR_TEXT = 'Não foi possível carregar suas conversas.';
 
 let __loadingConversasPromise = null;
 let __lastConversasFetchAt = 0;
@@ -1643,6 +1646,83 @@ async function primeHistories(convs, { concurrency = 1 } = {}) {
   await Promise.all(runners);
 }
 
+
+/* =========================================================
+   UI leve de carregamento da lista
+   ========================================================= */
+function getListaEl() {
+  return document.getElementById('lista-clientes');
+}
+
+function renderListaLoading(reason = '') {
+  const ul = getListaEl();
+  if (!ul) return;
+
+  if (ul.dataset.loadingConversas === '1') return;
+
+  ul.dataset.loadingConversas = '1';
+  ul.__zcLastRenderedHtml = '';
+
+  ul.innerHTML = `
+    <li class="chat-list-state chat-list-loading" data-list-state="loading">
+      <div class="chat-list-state-spinner" aria-hidden="true"></div>
+      <div class="chat-list-state-text">${escapeHtml(LIST_LOADING_TEXT)}</div>
+    </li>
+  `;
+
+  try {
+    window.dispatchEvent(new CustomEvent('zc:lista-conversas-loading', {
+      detail: { reason: reason || '' }
+    }));
+  } catch {}
+}
+
+function clearListaLoading() {
+  const ul = getListaEl();
+  if (!ul) return;
+  delete ul.dataset.loadingConversas;
+}
+
+function renderListaEmpty() {
+  const ul = getListaEl();
+  if (!ul) return;
+
+  clearListaLoading();
+  ul.__zcLastRenderedHtml = '';
+  ul.innerHTML = `
+    <li class="chat-list-state chat-list-empty" data-list-state="empty">
+      <div class="chat-list-state-icon"><i class="fa-regular fa-comments"></i></div>
+      <div class="chat-list-state-title">${escapeHtml(LIST_EMPTY_TEXT)}</div>
+      <div class="chat-list-state-sub">Quando chegarem mensagens, elas aparecerão aqui.</div>
+    </li>
+  `;
+}
+
+function renderListaError(onRetry = null) {
+  const ul = getListaEl();
+  if (!ul) return;
+
+  clearListaLoading();
+  ul.__zcLastRenderedHtml = '';
+  ul.innerHTML = `
+    <li class="chat-list-state chat-list-error" data-list-state="error">
+      <div class="chat-list-state-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+      <div class="chat-list-state-title">${escapeHtml(LIST_ERROR_TEXT)}</div>
+      <button type="button" class="chat-list-retry-btn">Tentar novamente</button>
+    </li>
+  `;
+
+  try {
+    const btn = ul.querySelector('.chat-list-retry-btn');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        if (typeof onRetry === 'function') onRetry();
+        else carregarClientes({ force: true, reason: 'retry-list-error' }).catch(() => {});
+      });
+    }
+  } catch {}
+}
+
 /* =========================================================
    Carregar conversas
    ========================================================= */
@@ -1668,6 +1748,7 @@ export async function carregarClientes({ force = false, reason = '' } = {}) {
   const elapsed = now - __lastConversasFetchAt;
 
   if (__loadingConversasPromise) {
+    if (!hasCache) renderListaLoading(reason || 'in-flight');
     return __loadingConversasPromise;
   }
 
@@ -1686,6 +1767,10 @@ export async function carregarClientes({ force = false, reason = '' } = {}) {
     return state.clientesCache;
   }
 
+  if (!hasCache) {
+    renderListaLoading(reason || 'initial-load');
+  }
+
   __lastConversasKey = loadKey;
   __lastConversasFetchAt = now;
 
@@ -1702,74 +1787,96 @@ export async function carregarClientes({ force = false, reason = '' } = {}) {
 
     const forceFlag = Boolean(force || forceSession);
 
-    const raw = await fetchWithCache(
-      url,
-      {
-        ttlMs: forceFlag ? 0 : LIST_CACHE_TTL_MS,
-        key: cacheKey,
-        bust: forceFlag,
-      }
-    );
-
-    const items = Array.isArray(raw)
-      ? raw
-      : (Array.isArray(raw?.items) ? raw.items : []);
-
-    const next = raw?.next_cursor ?? null;
-
-    let cs = items.map(normalizeCliente).filter(_matchInstancia);
-
-    const antigo = Array.isArray(state.clientesCache)
-      ? state.clientesCache.map(normalizeCliente)
-      : [];
-
-    const antigoMap = new Map();
-
-    for (const a of antigo) {
-      const k = convKeyOf(a);
-      if (k) antigoMap.set(k, a);
-    }
-
-    cs = cs.map((n) => {
-      const k = convKeyOf(n);
-      return mergeConversaCanonica(n, k ? antigoMap.get(k) : null);
-    });
-
-    let all = dedupeConversas(cs);
-
-    const selKey = convKeyOf(state?.clienteSel);
-
-    if (selKey && !all.some((x) => convKeyOf(x) === selKey)) {
-      const sel = antigoMap.get(selKey) || state?.clienteSel || null;
-
-      if (sel) {
-        const normSel = normalizeCliente(sel);
-        all = dedupeConversas([...all, normSel]);
-      }
-    }
-
-    syncActiveConvs(all, next);
-    renderListaClientes(all);
-
     try {
-      (state.clientesCache || []).forEach((c) => {
-        syncPreviewIfCached(c);
+      const raw = await fetchWithCache(
+        url,
+        {
+          ttlMs: forceFlag ? 0 : LIST_CACHE_TTL_MS,
+          key: cacheKey,
+          bust: forceFlag,
+        }
+      );
+
+      const items = Array.isArray(raw)
+        ? raw
+        : (Array.isArray(raw?.items) ? raw.items : []);
+
+      const next = raw?.next_cursor ?? null;
+
+      let cs = items.map(normalizeCliente).filter(_matchInstancia);
+
+      const antigo = Array.isArray(state.clientesCache)
+        ? state.clientesCache.map(normalizeCliente)
+        : [];
+
+      const antigoMap = new Map();
+
+      for (const a of antigo) {
+        const k = convKeyOf(a);
+        if (k) antigoMap.set(k, a);
+      }
+
+      cs = cs.map((n) => {
+        const k = convKeyOf(n);
+        return mergeConversaCanonica(n, k ? antigoMap.get(k) : null);
       });
-    } catch {}
 
-    if (window.PREFETCH_HISTORIES) {
-      try { await primeHistories(state.clientesCache, { concurrency: 1 }); } catch {}
+      let all = dedupeConversas(cs);
+
+      const selKey = convKeyOf(state?.clienteSel);
+
+      if (selKey && !all.some((x) => convKeyOf(x) === selKey)) {
+        const sel = antigoMap.get(selKey) || state?.clienteSel || null;
+
+        if (sel) {
+          const normSel = normalizeCliente(sel);
+          all = dedupeConversas([...all, normSel]);
+        }
+      }
+
+      syncActiveConvs(all, next);
+
+      if (all.length) {
+        renderListaClientes(all);
+      } else {
+        renderListaEmpty();
+      }
+
+      /*
+        Importante para performance:
+        - Não varrer histórico de todas as conversas só para montar preview.
+        - O backend já entrega a última mensagem da lista.
+        - Histórico completo só carrega quando abrir a conversa.
+      */
+
+      if (window.PREFETCH_HISTORIES === true) {
+        try { await primeHistories(state.clientesCache, { concurrency: 1 }); } catch {}
+      }
+
+      kickDailyAvatarRefreshSoon();
+
+      return all;
+    } catch (e) {
+      try { console.error('[clientes] carregarClientes erro:', e); } catch {}
+
+      if (hasCache) {
+        renderListaClientes(state.clientesCache);
+        return state.clientesCache;
+      }
+
+      renderListaError(() => {
+        carregarClientes({ force: true, reason: 'retry-after-error' }).catch(() => {});
+      });
+
+      return [];
     }
-
-    kickDailyAvatarRefreshSoon();
-
-    return all;
   })();
 
   try {
     return await __loadingConversasPromise;
   } finally {
     __loadingConversasPromise = null;
+    clearListaLoading();
   }
 }
 
@@ -1856,11 +1963,7 @@ export async function loadMoreConversas() {
 
     renderListaClientes(arr);
 
-    try {
-      (state.clientesCache || []).forEach((c) => {
-        syncPreviewIfCached(c);
-      });
-    } catch {}
+    // Preview da lista vem do backend; histórico só é lido quando abrir a conversa.
   } finally {
     __loadingMoreConversas = false;
   }
@@ -1911,12 +2014,18 @@ export function renderListaClientes(data) {
     (Array.isArray(data) ? data : []).map(normalizeCliente).filter(_matchInstancia)
   );
 
-  const ul = document.getElementById('lista-clientes');
+  const ul = getListaEl();
   if (!ul) return;
 
+  clearListaLoading();
   wireListaClicks(ul);
 
   const ordenado = ordenarConversasDesc(arr);
+
+  if (!ordenado.length) {
+    renderListaEmpty();
+    return;
+  }
 
   let html = ordenado.map((c) => {
     const convKey = convKeyOf(c) ?? '';
@@ -1938,12 +2047,10 @@ export function renderListaClientes(data) {
     try {
       const instCanon = (c.instancia_id ?? c.instancia ?? parseConversationKey(convKey)?.instId ?? null) || null;
 
-      const arrHistKeyed = getHist(instCanon, convKey);
+      // Performance: não chamar getHist() aqui, porque ele pode ler localStorage
+      // para cada conversa da lista. Usamos somente cache em memória da conversa aberta.
       const arrHistLegacy = window.cacheHistoricos?.[convKey];
-
-      const arrHist = Array.isArray(arrHistKeyed) && arrHistKeyed.length
-        ? arrHistKeyed
-        : (Array.isArray(arrHistLegacy) ? arrHistLegacy : []);
+      const arrHist = Array.isArray(arrHistLegacy) ? arrHistLegacy : [];
 
       if (Array.isArray(arrHist) && arrHist.length) {
         const last = arrHist[arrHist.length - 1];

@@ -1,27 +1,25 @@
 // /frontend/js/atendimentos/domain/historico.js
-// Histórico com paginação “puxar pra cima” + ACK único + persistência LS + merge de ACK
-// ✅ #historico buscado dinamicamente (H()) em todas as funções
-// ✅ Render de mídias/áudio fica no media-render.js (player WPP), historico só delega
-// ✅ Divisores de data (Hoje / Ontem / dd/mm/aaaa) estilo WhatsApp Web
-// ✅ FIX: evita auto-paginação logo após abrir/renderizar conversa
-// ✅ FIX: syncPreviewFromCache silencioso quando não existe cache
-// ✅ FIX: logs controlados por window.HIST_DEBUG === true
+// Histórico com carregamento leve + aviso clicável para mensagens antigas
+// ✅ Não carrega histórico antigo sozinho ao chegar no topo
+// ✅ Mostra aviso estilo WhatsApp Web: "Clique neste aviso para carregar mensagens mais antigas"
+// ✅ Mostra loader dentro da conversa ANTES de consultar o banco quando não acha cache
+// ✅ Não grava mais cache pesado legado em cacheHistoricos:<empresa>
+// ✅ Usa hist-cache.js como cache limitado/leve
+// ✅ Render de mídias/áudio fica no media-render.js
+// ✅ Divisores de data estilo WhatsApp Web
 // ✅ Alinhado com conversation_key canônica:
 //    c:<cliente_id>:<instancia_id> e g:<grupo_id>:<instancia_id>
-// ✅ Busca backend sempre por entity_id da conversa, mantendo cache por conversation_key
-// ✅ Resposta/quote renderizada dentro da bolha, igual WhatsApp
-// ✅ TRAVA: resposta atrasada não sobrescreve conversa atual
-// ✅ Aceita payload array, {items}, {data}, {results}, {mensagens}, {messages}
-// ✅ Escuta eventos de refresh após envio/WS e busca mensagens novas do backend
+// ✅ Busca backend sempre por entity_id da conversa
+// ✅ Resposta/quote renderizada dentro da bolha
+// ✅ Trava resposta atrasada para não sobrescrever conversa atual
 // ✅ Compat com envio otimista: tmp msg, reloginho, ack, falha, dedupe temp -> real
-// ✅ Exports compat: window.carregarHistoricoCliente / window.forcarAtualizacaoHistorico
 
 import { formatChatTime, parseAtendimentoDate } from '../core/time.js';
 import { getHist, primeWith, mergeOld } from '../domain/hist-cache.js';
 import { EMPRESA_ID } from '../core/env.js';
 import { getConversationKey, getConversationEntityId, getConversationKind } from '../state/store.js';
 
-// ✅ IMPORT CORRETO: media-render é UI
+// Media-render dividido
 import '../ui/media-render/core.js';
 import '../ui/media-render/css.js';
 import '../ui/media-render/urls.js';
@@ -35,8 +33,28 @@ import '../ui/media-render/quoted.js';
 import '../ui/media-render/viewer.js';
 import '../ui/media-render/render-message.js';
 import '../ui/media-render/boot.js';
+
 export const HISTORICO_LIMIT = 20;
+
 const H = () => document.getElementById('historico');
+
+const INITIAL_LOADING_TEXT = 'Carregando mensagens do banco…';
+const OLD_NOTICE_TEXT = 'Clique neste aviso para carregar mensagens mais antigas.';
+const OLD_LOADING_TEXT = 'Carregando mensagens mais antigas…';
+const OLD_DONE_TEXT = 'Não há mensagens mais antigas para carregar.';
+const OLD_ERROR_TEXT = 'Não foi possível carregar mensagens antigas. Clique para tentar novamente.';
+
+/* =====================
+   PAINT HELPER
+   ===================== */
+
+function nextPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(resolve);
+    });
+  });
+}
 
 /* =====================
    DEBUG
@@ -98,7 +116,9 @@ function buildConversationKey(kind, entityId, instId) {
   const k = String(kind || '').toLowerCase() === 'g' ? 'g' : 'c';
   const eid = idKey(entityId);
   const iid = instKey(instId);
+
   if (!eid) return null;
+
   return `${k}:${eid}:${iid ?? '0'}`;
 }
 
@@ -250,8 +270,6 @@ function isHistoricoStillOpenFor(convKey, hist = H()) {
 
   const current = getOpenHistKey(hist);
 
-  // Se ainda não tem chave setada, não bloqueia.
-  // Mas quando já tem, precisa bater 100%.
   if (current && current !== expected) {
     HLOG('render/fetch ignorado: conversa atual mudou', {
       expected,
@@ -304,33 +322,167 @@ function historicoScrollGuardActive(hist = H()) {
 }
 
 /* =====================
-   Loader “puxar pra cima”
+   Aviso estilo WhatsApp Web
    ===================== */
-function ensureTopLoader() {
+function getTopNotice(hist = H()) {
+  if (!hist) return null;
+  return hist.querySelector('.hist-old-notice');
+}
+
+function ensureTopNotice() {
   const hist = H();
   if (!hist) return null;
 
-  let l = hist.querySelector('.hist-loader');
-  if (!l) {
-    l = document.createElement('div');
-    l.className = 'hist-loader';
-    l.innerHTML = `<div class="spinner" aria-hidden="true"></div><div class="txt">Carregando mensagens…</div>`;
-    hist.insertAdjacentElement('afterbegin', l);
+  let notice = getTopNotice(hist);
+
+  if (!notice) {
+    notice = document.createElement('button');
+    notice.type = 'button';
+    notice.className = 'hist-old-notice';
+    notice.setAttribute('data-state', 'idle');
+    notice.setAttribute('aria-label', OLD_NOTICE_TEXT);
+    notice.innerHTML = `
+      <span class="hist-old-notice-icon" aria-hidden="true">
+        <i class="fa-solid fa-clock-rotate-left"></i>
+      </span>
+      <span class="hist-old-notice-text">${escapeHtml(OLD_NOTICE_TEXT)}</span>
+    `;
+
+    notice.addEventListener('click', () => {
+      const convKey = getConversationKeySafe(
+        hist.dataset.conversationKey ||
+        hist.dataset.conversationId ||
+        hist.dataset.convKey ||
+        hist.dataset.clienteId
+      );
+
+      if (!convKey) return;
+      if (notice.dataset.state === 'loading') return;
+      if (hist.dataset.noMore === '1') return;
+
+      carregarMaisHistorico(convKey);
+    });
+
+    hist.insertAdjacentElement('afterbegin', notice);
   }
-  return l;
+
+  return notice;
+}
+
+function setTopNoticeState(state = 'idle') {
+  const hist = H();
+  if (!hist) return;
+
+  const notice = ensureTopNotice();
+  if (!notice) return;
+
+  const textEl = notice.querySelector('.hist-old-notice-text');
+  const iconEl = notice.querySelector('.hist-old-notice-icon');
+
+  notice.dataset.state = state;
+
+  if (state === 'loading') {
+    notice.disabled = true;
+    if (textEl) textEl.textContent = OLD_LOADING_TEXT;
+    if (iconEl) {
+      iconEl.innerHTML = `<span class="spinner" aria-hidden="true"></span>`;
+    }
+    return;
+  }
+
+  if (state === 'done') {
+    notice.disabled = true;
+    if (textEl) textEl.textContent = OLD_DONE_TEXT;
+    if (iconEl) {
+      iconEl.innerHTML = `<i class="fa-solid fa-check"></i>`;
+    }
+    return;
+  }
+
+  if (state === 'error') {
+    notice.disabled = false;
+    if (textEl) textEl.textContent = OLD_ERROR_TEXT;
+    if (iconEl) {
+      iconEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i>`;
+    }
+    return;
+  }
+
+  notice.disabled = false;
+  if (textEl) textEl.textContent = OLD_NOTICE_TEXT;
+  if (iconEl) {
+    iconEl.innerHTML = `<i class="fa-solid fa-clock-rotate-left"></i>`;
+  }
 }
 
 function showTopLoader() {
   const hist = H();
   if (!hist) return;
-  ensureTopLoader();
+
+  hist.style.display = 'flex';
+  ensureTopNotice();
   hist.setAttribute('data-loading-old', '1');
+  setTopNoticeState('loading');
 }
 
 function hideTopLoader() {
   const hist = H();
   if (!hist) return;
   hist.removeAttribute('data-loading-old');
+
+  if (hist.dataset.noMore === '1') {
+    setTopNoticeState('done');
+  } else {
+    setTopNoticeState('idle');
+  }
+}
+
+function showInitialLoading(convKey = null) {
+  const hist = H();
+  if (!hist) return;
+
+  hist.style.display = 'flex';
+
+  hist.innerHTML = `
+    <div class="hist-initial-loading" data-hist-initial-loading="1">
+      <div class="spinner" aria-hidden="true"></div>
+      <div class="txt">${escapeHtml(INITIAL_LOADING_TEXT)}</div>
+    </div>
+  `;
+
+  if (convKey) {
+    try {
+      hist.dataset.loadingConversationKey = String(convKey);
+    } catch {}
+  }
+}
+
+function clearInitialLoading() {
+  const hist = H();
+  if (!hist) return;
+
+  try {
+    hist.querySelectorAll('[data-hist-initial-loading="1"]').forEach((n) => n.remove());
+  } catch {}
+
+  try {
+    delete hist.dataset.loadingConversationKey;
+  } catch {}
+}
+
+function showEmptyMessage() {
+  const hist = H();
+  if (!hist) return;
+
+  hist.style.display = 'flex';
+
+  hist.innerHTML = `
+    <div class="hist-empty-state">
+      <div class="hist-empty-icon"><i class="fa-regular fa-comments"></i></div>
+      <div class="hist-empty-title">Nenhuma mensagem encontrada</div>
+      <div class="hist-empty-sub">Quando houver mensagens, elas aparecerão aqui.</div>
+    </div>
+  `;
 }
 
 /* =====================
@@ -405,6 +557,7 @@ function parseMsgDate(m) {
   if (!raw) return null;
 
   let d = null;
+
   try {
     d = parseAtendimentoDate(raw);
   } catch {
@@ -420,6 +573,7 @@ function parseMsgDate(m) {
   }
 
   if (!d || Number.isNaN(d.getTime())) return null;
+
   return d;
 }
 
@@ -534,12 +688,6 @@ function isSaidaMsg(m) {
   return m?.tipo === 'saida' || m?.from_me === true || m?.origem === 'atendente';
 }
 
-/*
-  Regra anti-reloginho preso:
-  - pending só manda quando ack <= 0.
-  - se ack virou 1/2/3, a mensagem NÃO pode continuar como temp/pendente
-    só porque algum objeto antigo ainda veio com pending:true.
-*/
 function normalizeMessageState(m) {
   if (!m || typeof m !== 'object') return m;
 
@@ -564,10 +712,6 @@ function isTempMsg(m) {
 
   if (k.startsWith('tmp:')) return true;
 
-  /*
-    Se já tem ACK positivo e msg_id real, não é temporária.
-    Isso evita a bolha ficar com relógio por causa de pending:true antigo.
-  */
   if (ack > 0 && k) return false;
 
   return (
@@ -585,13 +729,16 @@ function msgText(m) {
 function msgTimeMs(m) {
   try {
     const raw = m?.timestamp || m?.data || m?.created_at || m?.hora || null;
+
     if (raw) {
       let d = null;
+
       try {
         d = parseAtendimentoDate(raw);
       } catch {
         d = null;
       }
+
       if (!d || Number.isNaN(d.getTime())) d = new Date(raw);
       if (d && !Number.isNaN(d.getTime())) return d.getTime();
     }
@@ -642,6 +789,7 @@ function renderMsgsWithDividers(msgs, lastDayKey = null) {
 
     if (d) {
       const k = dayKeyFromDate(d);
+
       if (k && k !== last) {
         html += dayDividerHtml(dayLabelFromDate(d));
         last = k;
@@ -651,14 +799,19 @@ function renderMsgsWithDividers(msgs, lastDayKey = null) {
     html += criarHTMLDaMensagem(m);
   }
 
-  return { html, lastDayKey: last };
+  return {
+    html,
+    lastDayKey: last,
+  };
 }
 
 function getLastRenderedMsgId(hist) {
   try {
     const rows = hist?.querySelectorAll?.('.msg-row');
     if (!rows || !rows.length) return '';
+
     const lastRow = rows[rows.length - 1];
+
     return lastRow.getAttribute('data-msg-id') || lastRow.getAttribute('data-id') || '';
   } catch {
     return '';
@@ -723,6 +876,7 @@ function updateExistingRowsFromCache(hist, msgs) {
   if (!hist || !Array.isArray(msgs) || !msgs.length) return;
 
   const byId = new Map();
+
   for (const m of msgs) {
     const k = msgKey(m);
     if (k) byId.set(k, m);
@@ -775,71 +929,17 @@ function updateExistingRowsFromCache(hist, msgs) {
 }
 
 /* =====================
-   Persistência LS
+   Cache leve
    ===================== */
-if (!window.cacheHistoricos) window.cacheHistoricos = {};
+if (!window.cacheHistoricos) window.cacheHistoricos = Object.create(null);
 
-if (!window.salvarCache) {
-  window.salvarCache = () => {
-    try {
-      const LS_HIST = `cacheHistoricos:${EMPRESA_ID}`;
-      localStorage.setItem(LS_HIST, JSON.stringify(window.cacheHistoricos || {}));
-      HLOG('salvarCache: gravado no LS', LS_HIST);
-    } catch (e) {
-      HERR('salvarCache: erro ao gravar no LS', e);
-    }
-  };
-}
-
-/* ====== Hidrata cache do LS pra sobreviver ao F5 ====== */
-(function hydrateHistFromLocalStorage() {
+window.salvarCache = function salvarCacheLeve() {
   try {
-    const LS_HIST = `cacheHistoricos:${EMPRESA_ID}`;
-    const raw = localStorage.getItem(LS_HIST);
-    if (!raw) {
-      HLOG('hydrate: sem cache para', LS_HIST);
-      return;
+    if (isHistDebug()) {
+      HLOG('salvarCache: ignorado no historico.js; persistência é do hist-cache.js');
     }
-
-    const data = JSON.parse(raw);
-    if (!data || typeof data !== 'object') return;
-
-    HLOG('hydrate: carregando cache', { key: LS_HIST, convs: Object.keys(data).length });
-    window.cacheHistoricos = data;
-
-    Object.keys(data).forEach((storedKey) => {
-      const cid = getConversationKeySafe(storedKey) || idKey(storedKey);
-      if (!cid) return;
-
-      const arr = Array.isArray(data[storedKey]) ? data[storedKey] : [];
-      const groups = new Map();
-
-      for (const m of arr) {
-        const inst = (m && (m.instancia_id ?? m.instancia)) ?? parseConversationKey(cid)?.instId ?? null;
-        const key = `${inst}::${cid}`;
-        if (!groups.has(key)) groups.set(key, { inst, items: [] });
-        groups.get(key).items.push(m);
-      }
-
-      groups.forEach(({ inst, items }) => {
-        try {
-          primeWith(inst, cid, items, null);
-          HLOG('hydrate: primeWith', { inst, cid, count: items.length });
-        } catch (e) {
-          HERR('hydrate: erro no primeWith', { inst, cid, e });
-        }
-      });
-
-      if (storedKey !== cid) {
-        try {
-          window.cacheHistoricos[cid] = arr;
-        } catch {}
-      }
-    });
-  } catch (e) {
-    HERR('hydrate: erro geral', e);
-  }
-})();
+  } catch {}
+};
 
 function ensureArray(a) {
   return Array.isArray(a) ? a : [];
@@ -849,6 +949,7 @@ function ordenarMensagens(arr) {
   return ensureArray(arr).sort((a, b) => {
     const aD = parseAtendimentoDate(a.timestamp || a.data || a.created_at || '') || new Date(a.ts || 0);
     const bD = parseAtendimentoDate(b.timestamp || b.data || b.created_at || '') || new Date(b.ts || 0);
+
     return (aD ? aD.getTime() : 0) - (bD ? bD.getTime() : 0);
   });
 }
@@ -874,7 +975,11 @@ function getInstanciaForFetch(rawConversation = null) {
       instKey(window.INSTANCIA_ATIVA) ||
       null;
 
-    HLOG('getInstanciaForFetch', { instRaw: inst, inst });
+    HLOG('getInstanciaForFetch', {
+      instRaw: inst,
+      inst,
+    });
+
     return inst;
   } catch (e) {
     HERR('getInstanciaForFetch: erro', e);
@@ -887,17 +992,23 @@ function getInstanciaForFetch(rawConversation = null) {
    ===================== */
 function getInstQuery(rawConversation = null) {
   const inst = getInstanciaForFetch(rawConversation);
+
   if (!inst) {
     HLOG('getInstQuery: sem inst');
     return '';
   }
 
   const n = Number(inst);
+
   const q = Number.isFinite(n) && String(n) === String(inst)
     ? `&instancia_id=${n}`
     : `&instance=${encodeURIComponent(String(inst))}`;
 
-  HLOG('getInstQuery', { inst, query: q });
+  HLOG('getInstQuery', {
+    inst,
+    query: q,
+  });
+
   return q;
 }
 
@@ -912,11 +1023,24 @@ export function salvarNoCache(clienteId, novos) {
 
   const inst =
     getInstanciaForFetch(convKey) ||
-    (Array.isArray(novos) ? (novos[0]?.instancia_id ?? novos[0]?.instancia ?? parseConversationKey(convKey)?.instId ?? null) : null) ||
+    (
+      Array.isArray(novos)
+        ? (
+            novos[0]?.instancia_id ??
+            novos[0]?.instancia ??
+            parseConversationKey(convKey)?.instId ??
+            null
+          )
+        : null
+    ) ||
     parseConversationKey(convKey)?.instId ||
     null;
 
-  HLOG('salvarNoCache IN', { convKey, inst, novosCount: Array.isArray(novos) ? novos.length : 0 });
+  HLOG('salvarNoCache IN', {
+    convKey,
+    inst,
+    novosCount: Array.isArray(novos) ? novos.length : 0,
+  });
 
   const cur = ensureArray(getHist(inst, convKey)).map(normalizeMessageState);
   const incoming = ensureArray(novos).map(normalizeMessageState);
@@ -947,7 +1071,15 @@ export function salvarNoCache(clienteId, novos) {
         byId.set(k, normalizeMessageState({
           ...prev,
           ...m,
-          msg_id: m.msg_id || prev.msg_id || m.message_id || prev.message_id || m.wa_msg_id || prev.wa_msg_id || m.id || prev.id,
+          msg_id:
+            m.msg_id ||
+            prev.msg_id ||
+            m.message_id ||
+            prev.message_id ||
+            m.wa_msg_id ||
+            prev.wa_msg_id ||
+            m.id ||
+            prev.id,
           ack,
           timestamp: ts,
           quoted: m.quoted ?? prev.quoted,
@@ -959,14 +1091,23 @@ export function salvarNoCache(clienteId, novos) {
     }
   }
 
-  const deduped = removeOptimisticDuplicates([...byId.values(), ...noId].map(normalizeMessageState));
+  const deduped = removeOptimisticDuplicates(
+    [...byId.values(), ...noId].map(normalizeMessageState)
+  );
+
   const finalArr = ordenarMensagens(deduped.map(normalizeMessageState));
 
-  HLOG('salvarNoCache OUT', { convKey, inst, total: finalArr.length });
+  HLOG('salvarNoCache OUT', {
+    convKey,
+    inst,
+    total: finalArr.length,
+  });
 
   primeWith(inst, convKey, finalArr, null);
-  window.cacheHistoricos[convKey] = finalArr;
-  window.salvarCache?.();
+
+  try {
+    window.cacheHistoricos[convKey] = finalArr;
+  } catch {}
 }
 
 /* =====================
@@ -992,7 +1133,7 @@ export function criarHTMLDaMensagem(m) {
   const quotedPreviewAttr = quotedPreview ? jsonAttr(quotedPreview) : '';
   const quotedAttr = msg?.quoted && typeof msg.quoted === 'object' ? jsonAttr(msg.quoted) : '';
 
-  const ackHtml = renderAckHtml(m);
+  const ackHtml = renderAckHtml(msg);
   const quoteHtml = renderQuotedPreview(quotedPreview);
 
   const textHtml = texto
@@ -1034,14 +1175,28 @@ export function criarHTMLDaMensagem(m) {
 
 function isDateJumpScrollLocked() {
   try {
-    const until = Number(window.__ZC_DATE_JUMP_LOCK_UNTIL || 0);
+    const now = Date.now();
 
-    if (until && Date.now() < until) {
+    const candidates = [
+      window.__ZC_SUPPRESS_AUTO_SCROLL_UNTIL,
+      window.__ZC_DATE_JUMP_ACTIVE_UNTIL,
+      window.__ZC_DATE_JUMP_LOCK_UNTIL,
+    ]
+      .map((v) => Number(v || 0))
+      .filter((v) => Number.isFinite(v) && v > 0);
+
+    const maxUntil = candidates.length ? Math.max(...candidates) : 0;
+
+    if (maxUntil && now < maxUntil) {
       return true;
     }
 
-    if (window.__ZC_DATE_JUMP_ACTIVE === true && until && Date.now() < until) {
-      return true;
+    if (window.__ZC_DATE_JUMP_ACTIVE === true) {
+      const startedAt = Number(window.__ZC_DATE_JUMP_ACTIVE_STARTED_AT || 0);
+
+      if (startedAt && now - startedAt < 8000) {
+        return true;
+      }
     }
   } catch {}
 
@@ -1096,9 +1251,12 @@ export function renderHistoricoDoCache(clienteId, append = false) {
     ).map(normalizeMessageState)
   );
 
-  HLOG('renderHistoricoDoCache', { convKey, inst, append, msgsCount: msgs.length });
-
-  ensureTopLoader();
+  HLOG('renderHistoricoDoCache', {
+    convKey,
+    inst,
+    append,
+    msgsCount: msgs.length,
+  });
 
   const stripAckReceived = () => {
     try {
@@ -1114,7 +1272,10 @@ export function renderHistoricoDoCache(clienteId, append = false) {
     if (!isHistoricoStillOpenFor(convKey, hist)) return;
 
     hist.innerHTML = '';
-    ensureTopLoader();
+    ensureTopNotice();
+
+    if (hist.dataset.noMore === '1') setTopNoticeState('done');
+    else setTopNoticeState('idle');
 
     const { html, lastDayKey } = renderMsgsWithDividers(msgs, null);
 
@@ -1132,6 +1293,8 @@ export function renderHistoricoDoCache(clienteId, append = false) {
   } else {
     if (!isHistoricoStillOpenFor(convKey, hist)) return;
 
+    ensureTopNotice();
+
     const existingIds = new Set(
       Array.from(hist.querySelectorAll('.msg-row')).map(
         (n) => n.getAttribute('data-msg-id') || n.getAttribute('data-id') || ''
@@ -1148,7 +1311,7 @@ export function renderHistoricoDoCache(clienteId, append = false) {
       });
 
       hist.innerHTML = '';
-      ensureTopLoader();
+      ensureTopNotice();
 
       const { html, lastDayKey } = renderMsgsWithDividers(msgs, null);
 
@@ -1159,6 +1322,7 @@ export function renderHistoricoDoCache(clienteId, append = false) {
       stripAckReceived();
       updateExistingRowsFromCache(hist, msgs);
       setHistLastDayKey(hist, lastDayKey);
+
       scrollToBottomIfAllowed(hist, convKey, 'append-rebuild');
       scrollToBottomNextFrameIfAllowed(hist, convKey, 'append-rebuild-raf');
 
@@ -1174,6 +1338,7 @@ export function renderHistoricoDoCache(clienteId, append = false) {
       }
 
       let novas = [];
+
       if (startIdx >= 0) {
         novas = msgs.slice(startIdx + 1);
       } else {
@@ -1196,13 +1361,13 @@ export function renderHistoricoDoCache(clienteId, append = false) {
         if (!isHistoricoStillOpenFor(convKey, hist)) return;
 
         const lastRow = hist.querySelector('.msg-row:last-of-type');
+
         if (lastRow) lastRow.insertAdjacentHTML('afterend', out.html);
         else hist.insertAdjacentHTML('beforeend', out.html);
 
         setHistLastDayKey(hist, out.lastDayKey);
         updateExistingRowsFromCache(hist, msgs);
       } else {
-        // Mesmo sem mensagem nova, pode ter ACK novo / pending -> sent.
         updateExistingRowsFromCache(hist, msgs);
       }
 
@@ -1215,6 +1380,7 @@ export function renderHistoricoDoCache(clienteId, append = false) {
   }
 
   try { window.ensureMsgMediaCss?.(); } catch {}
+  try { window.zcMediaRenderScheduleEnhance?.(hist); } catch {}
   try { window.initAudioPlayers?.(hist); } catch {}
   try { window.initMediaFallbacks?.(hist); } catch {}
 
@@ -1226,7 +1392,11 @@ export function renderHistoricoDoCache(clienteId, append = false) {
 
   try {
     window.dispatchEvent(new CustomEvent('historico:rendered', {
-      detail: { conversation_key: convKey, conversation_id: convKey, instancia_id: inst }
+      detail: {
+        conversation_key: convKey,
+        conversation_id: convKey,
+        instancia_id: inst,
+      },
     }));
   } catch {}
 }
@@ -1236,7 +1406,12 @@ export function renderHistoricoDoCache(clienteId, append = false) {
    ===================== */
 export function appendToHistory(clienteId, msg) {
   const convKey = getConversationKeySafe(clienteId) || idKey(clienteId);
-  HLOG('appendToHistory', { convKey, msgId: msgKey(msg) || null });
+
+  HLOG('appendToHistory', {
+    convKey,
+    msgId: msgKey(msg) || null,
+  });
+
   salvarNoCache(convKey, [msg]);
 }
 
@@ -1253,16 +1428,27 @@ function getOffset(id) {
   const convKey = getConversationKeySafe(id) || idKey(id);
   const table = getOffsetsObj();
   const v = convKey && typeof table[convKey] === 'number' ? table[convKey] : HISTORICO_LIMIT;
-  HLOG('getOffset', { convKey, offset: v });
+
+  HLOG('getOffset', {
+    convKey,
+    offset: v,
+  });
+
   return v;
 }
 
 function setOffset(id, val) {
   const convKey = getConversationKeySafe(id) || idKey(id);
   if (!convKey) return;
+
   const table = getOffsetsObj();
   table[convKey] = Number(val) || 0;
-  HLOG('setOffset', { convKey, offset: table[convKey] });
+
+  HLOG('setOffset', {
+    convKey,
+    offset: table[convKey],
+  });
+
   try {
     window.persist?.();
   } catch {}
@@ -1273,6 +1459,7 @@ function setOffset(id, val) {
    ===================== */
 export async function abrirHistorico(id) {
   const hist = H();
+
   if (!hist) {
     HERR('abrirHistorico: sem #historico', { id });
     return false;
@@ -1283,7 +1470,11 @@ export async function abrirHistorico(id) {
   const entityId = ref?.entityId || getConversationEntityIdSafe(id);
 
   if (!convKey || !entityId) {
-    HERR('abrirHistorico: conversa inválida', { id, convKey, entityId });
+    HERR('abrirHistorico: conversa inválida', {
+      id,
+      convKey,
+      entityId,
+    });
     return false;
   }
 
@@ -1294,9 +1485,10 @@ export async function abrirHistorico(id) {
 
     if (header) header.style.display = '';
     if (footer) footer.style.display = '';
-    hist.style.display = '';
+    hist.style.display = 'flex';
 
     if (welcome) welcome.style.display = 'none';
+
     document.body.dataset.chatOpen = '1';
   } catch (e) {
     HERR('abrirHistorico: erro ao exibir UI', e);
@@ -1304,6 +1496,20 @@ export async function abrirHistorico(id) {
 
   setOpenHistRef(hist, ref);
   hist.dataset.noMore = '0';
+
+  const inst = getInstanciaForFetch(convKey);
+  const cached = ensureArray(getHist(inst, convKey));
+
+  if (cached.length) {
+    renderHistoricoDoCache(convKey, false);
+  } else {
+    showInitialLoading(convKey);
+  }
+
+  // Aqui é a correção principal:
+  // se não tem cache, mostra "Carregando mensagens do banco..."
+  // e espera o navegador pintar antes de fazer o fetch.
+  await nextPaint();
 
   try {
     const url =
@@ -1313,15 +1519,23 @@ export async function abrirHistorico(id) {
       getInstQuery(convKey) +
       `&__ts=${Date.now()}`;
 
-    HLOG('abrirHistorico: fetch', { url, convKey, entityId });
+    HLOG('abrirHistorico: fetch', {
+      url,
+      convKey,
+      entityId,
+    });
 
     const r = await fetch(url, {
       credentials: 'include',
       cache: 'no-store',
-      headers: { 'Cache-Control': 'no-cache' },
+      headers: {
+        'Cache-Control': 'no-cache',
+      },
     });
 
-    HLOG('abrirHistorico: resposta HTTP', { status: r.status });
+    HLOG('abrirHistorico: resposta HTTP', {
+      status: r.status,
+    });
 
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
 
@@ -1334,9 +1548,16 @@ export async function abrirHistorico(id) {
 
     const items = extractItems(data);
 
-    HLOG('abrirHistorico: itens recebidos', { convKey, count: items.length });
+    HLOG('abrirHistorico: itens recebidos', {
+      convKey,
+      count: items.length,
+    });
 
-    if (items.length) salvarNoCache(convKey, items);
+    clearInitialLoading();
+
+    if (items.length) {
+      salvarNoCache(convKey, items);
+    }
 
     if (!isHistoricoStillOpenFor(convKey, hist)) {
       HLOG('abrirHistorico: cache salvo, mas conversa mudou antes de render', { convKey });
@@ -1344,15 +1565,28 @@ export async function abrirHistorico(id) {
     }
 
     try {
-      const inst = getInstanciaForFetch(convKey);
-      const total = ensureArray(getHist(inst, convKey)).length;
-      HLOG('abrirHistorico: setOffset total', { convKey, total, inst });
+      const instNow = getInstanciaForFetch(convKey);
+      const total = ensureArray(getHist(instNow, convKey)).length;
+
+      HLOG('abrirHistorico: setOffset total', {
+        convKey,
+        total,
+        inst: instNow,
+      });
+
       setOffset(convKey, total);
     } catch (e) {
       HERR('abrirHistorico: erro ao calcular offset', e);
     }
 
-    renderHistoricoDoCache(convKey, false);
+    const finalInst = getInstanciaForFetch(convKey);
+    const finalMsgs = ensureArray(getHist(finalInst, convKey));
+
+    if (!finalMsgs.length) {
+      showEmptyMessage();
+    } else {
+      renderHistoricoDoCache(convKey, false);
+    }
 
     try {
       window.syncPreviewFromCache?.(convKey);
@@ -1363,9 +1597,28 @@ export async function abrirHistorico(id) {
     return true;
   } catch (e) {
     HERR('abrirHistorico erro', e);
+
+    if (isHistoricoStillOpenFor(convKey, hist) && !cached.length) {
+      hist.style.display = 'flex';
+      hist.innerHTML = `
+        <div class="hist-empty-state hist-empty-error">
+          <div class="hist-empty-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+          <div class="hist-empty-title">Não foi possível carregar as mensagens</div>
+          <button type="button" class="hist-retry-btn">Tentar novamente</button>
+        </div>
+      `;
+
+      try {
+        hist.querySelector('.hist-retry-btn')?.addEventListener('click', () => {
+          abrirHistorico(convKey);
+        });
+      } catch {}
+    }
+
     try {
       console.error('[historico] abrirHistorico', e);
     } catch {}
+
     return false;
   }
 }
@@ -1408,7 +1661,11 @@ function eventDetailToConversation(detail = null) {
   const entityId =
     d.entity_id ??
     d.entityId ??
-    (kind === 'g' ? (d.grupo_id ?? d.grupoId) : (d.cliente_id ?? d.clienteId)) ??
+    (
+      kind === 'g'
+        ? (d.grupo_id ?? d.grupoId)
+        : (d.cliente_id ?? d.clienteId)
+    ) ??
     null;
 
   const inst =
@@ -1447,7 +1704,10 @@ export async function forcarAtualizacaoHistorico(rawConversation = null, opts = 
   const entityId = ref?.entityId || null;
 
   if (!convKey || !entityId) {
-    HLOG('forcarAtualizacaoHistorico: sem convKey/entityId', { rawConversation, ref });
+    HLOG('forcarAtualizacaoHistorico: sem convKey/entityId', {
+      rawConversation,
+      ref,
+    });
     return false;
   }
 
@@ -1484,10 +1744,15 @@ export async function forcarAtualizacaoHistorico(rawConversation = null, opts = 
     const r = await fetch(url, {
       credentials: 'include',
       cache: 'no-store',
-      headers: { 'Cache-Control': 'no-cache' },
+      headers: {
+        'Cache-Control': 'no-cache',
+      },
     });
 
-    HLOG('forcarAtualizacaoHistorico: resposta HTTP', { status: r.status, seq: mySeq });
+    HLOG('forcarAtualizacaoHistorico: resposta HTTP', {
+      status: r.status,
+      seq: mySeq,
+    });
 
     if (!r.ok) return false;
 
@@ -1566,12 +1831,14 @@ function agendarRefreshHistorico(rawConversation = null, opts = {}) {
 
     if (forceRefreshInFlight) {
       HLOG('agendarRefreshHistorico: já existe fetch em andamento, aguardando');
+
       forceRefreshInFlight.finally(() => {
         forcarAtualizacaoHistorico(convObj, {
           append: true,
           reason: `${reason}:after-inflight`,
         }).catch(() => {});
       });
+
       return;
     }
 
@@ -1582,8 +1849,6 @@ function agendarRefreshHistorico(rawConversation = null, opts = {}) {
 
     forceRefreshInFlight
       .then((ok) => {
-        // Retry leve: se o evento chegou antes do backend terminar de salvar,
-        // tenta de novo sem piscar e sem rebuild total.
         if (!ok && isHistoricoStillOpenFor(convKey, H())) {
           setTimeout(() => {
             forcarAtualizacaoHistorico(convObj, {
@@ -1618,8 +1883,6 @@ function agendarRefreshHistorico(rawConversation = null, opts = {}) {
   const handler = (ev) => {
     const detail = ev?.detail || {};
 
-    // Não força fetch no evento de criação otimista,
-    // porque essa mensagem já entrou no cache local e renderizou na hora.
     if (ev?.type === 'zc:optimistic-message-created') return;
 
     const convObj = eventDetailToConversation(detail);
@@ -1642,7 +1905,7 @@ function agendarRefreshHistorico(rawConversation = null, opts = {}) {
 })();
 
 /* =====================
-   paginação scroll up
+   paginação por clique
    ===================== */
 let loadingOld = false;
 
@@ -1661,12 +1924,16 @@ export async function carregarMaisHistorico(id) {
   }
 
   if (!isHistoricoStillOpenFor(convKey, hist)) {
-    HLOG('carregarMaisHistorico: hist não bate', { convKey, histCid: getOpenHistKey(hist) });
+    HLOG('carregarMaisHistorico: hist não bate', {
+      convKey,
+      histCid: getOpenHistKey(hist),
+    });
     return false;
   }
 
   if (hist.dataset.noMore === '1') {
     HLOG('carregarMaisHistorico: noMore=1', { convKey });
+    setTopNoticeState('done');
     return false;
   }
 
@@ -1683,6 +1950,8 @@ export async function carregarMaisHistorico(id) {
   loadingOld = true;
   showTopLoader();
 
+  await nextPaint();
+
   const limit = HISTORICO_LIMIT;
   const off = getOffset(convKey);
 
@@ -1693,15 +1962,25 @@ export async function carregarMaisHistorico(id) {
       `${getInstQuery(convKey)}` +
       `&__ts=${Date.now()}`;
 
-    HLOG('carregarMaisHistorico: fetch', { url, convKey, entityId, limit, offset: off });
+    HLOG('carregarMaisHistorico: fetch', {
+      url,
+      convKey,
+      entityId,
+      limit,
+      offset: off,
+    });
 
     const r = await fetch(url, {
       credentials: 'include',
       cache: 'no-store',
-      headers: { 'Cache-Control': 'no-cache' },
+      headers: {
+        'Cache-Control': 'no-cache',
+      },
     });
 
-    HLOG('carregarMaisHistorico: resposta HTTP', { status: r.status });
+    HLOG('carregarMaisHistorico: resposta HTTP', {
+      status: r.status,
+    });
 
     if (!isHistoricoStillOpenFor(convKey, hist)) {
       HLOG('carregarMaisHistorico: resposta HTTP chegou, mas conversa mudou', { convKey });
@@ -1709,8 +1988,11 @@ export async function carregarMaisHistorico(id) {
     }
 
     if (!r.ok) {
-      hist.dataset.noMore = '1';
-      HLOG('carregarMaisHistorico: !ok, noMore=1', { convKey, status: r.status });
+      setTopNoticeState('error');
+      HLOG('carregarMaisHistorico: !ok', {
+        convKey,
+        status: r.status,
+      });
       return false;
     }
 
@@ -1724,10 +2006,15 @@ export async function carregarMaisHistorico(id) {
     const items = extractItems(data);
     const n = items.length;
 
-    HLOG('carregarMaisHistorico: itens', { convKey, n, offset: off });
+    HLOG('carregarMaisHistorico: itens', {
+      convKey,
+      n,
+      offset: off,
+    });
 
     if (!n) {
       hist.dataset.noMore = '1';
+      setTopNoticeState('done');
       HLOG('carregarMaisHistorico: n=0, noMore=1', { convKey });
       return false;
     }
@@ -1739,14 +2026,14 @@ export async function carregarMaisHistorico(id) {
     try {
       const inst = getInstanciaForFetch(convKey);
       window.cacheHistoricos[convKey] = ensureArray(getHist(inst, convKey));
+
       HLOG('carregarMaisHistorico: cacheHistoricos atualizado', {
         convKey,
         inst,
         total: window.cacheHistoricos[convKey]?.length || 0,
       });
-      window.salvarCache?.();
     } catch (e) {
-      HERR('carregarMaisHistorico: erro cache/salvar', e);
+      HERR('carregarMaisHistorico: erro cache', e);
     }
 
     if (!isHistoricoStillOpenFor(convKey, hist)) {
@@ -1755,6 +2042,7 @@ export async function carregarMaisHistorico(id) {
     }
 
     const prevBottom = beforeHeight - hist.scrollTop;
+
     renderHistoricoDoCache(convKey, false);
 
     if (!isHistoricoStillOpenFor(convKey, hist)) return false;
@@ -1773,18 +2061,30 @@ export async function carregarMaisHistorico(id) {
     return true;
   } catch (e) {
     HERR('carregarMaisHistorico erro', e);
+
     try {
       console.error('[historico] carregarMaisHistorico', e);
     } catch {}
+
+    setTopNoticeState('error');
+
     return false;
   } finally {
-    hideTopLoader();
     loadingOld = false;
+
+    if (hist?.dataset?.noMore === '1') {
+      setTopNoticeState('done');
+      hist.removeAttribute('data-loading-old');
+    } else {
+      hideTopLoader();
+    }
   }
 }
 
 /* =====================
    Scroll binding dinâmico
+   Agora NÃO busca automaticamente.
+   Só garante que o aviso fique visível no topo.
    ===================== */
 (function bindScroll() {
   const tryBind = () => {
@@ -1798,15 +2098,19 @@ export async function carregarMaisHistorico(id) {
       () => {
         if (!hist) return;
         if (historicoScrollGuardActive(hist)) return;
-        if (loadingOld) return;
-        if (hist.dataset.noMore === '1') return;
 
-        const convKey = getConversationKeySafe(hist.dataset.conversationKey || hist.dataset.conversationId || hist.dataset.convKey || hist.dataset.clienteId);
+        const convKey = getConversationKeySafe(
+          hist.dataset.conversationKey ||
+          hist.dataset.conversationId ||
+          hist.dataset.convKey ||
+          hist.dataset.clienteId
+        );
+
         if (!convKey) return;
 
-        if (hist.scrollTop <= 60) {
-          HLOG('bindScroll: topo => carregarMaisHistorico', { convKey });
-          carregarMaisHistorico(convKey);
+        if (hist.scrollTop <= 80 && hist.dataset.noMore !== '1') {
+          ensureTopNotice();
+          setTopNoticeState(loadingOld ? 'loading' : 'idle');
         }
       },
       { passive: true }
@@ -1819,7 +2123,10 @@ export async function carregarMaisHistorico(id) {
   else tryBind();
 
   const mo = new MutationObserver(tryBind);
-  mo.observe(document.documentElement, { childList: true, subtree: true });
+  mo.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
 })();
 
 /* =====================
@@ -1835,12 +2142,19 @@ window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
 
     try {
       const lista = window.state?.clientesCache || window.clientesCache || [];
+
       convObj =
         lista.find((x) => {
           const k = getConversationKeySafe(
-            x?.conversation_key ?? x?.conversation_id ?? x?.id ?? x?.cliente_id ?? x?.grupo_id ?? null,
+            x?.conversation_key ??
+            x?.conversation_id ??
+            x?.id ??
+            x?.cliente_id ??
+            x?.grupo_id ??
+            null,
             x
           );
+
           return idEq(k, convKey);
         }) || null;
 
@@ -1856,11 +2170,13 @@ window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
 
         if (rawTs) {
           let d = null;
+
           try {
             d = parseAtendimentoDate(rawTs);
           } catch {
             d = null;
           }
+
           if (!d || Number.isNaN(d.getTime())) d = new Date(rawTs);
           if (d && !Number.isNaN(d.getTime())) convTsMs = d.getTime();
         }
@@ -1869,7 +2185,9 @@ window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
       HERR('syncPreviewFromCache: erro ao ler lista', e);
     }
 
-    let arr = Array.isArray(window.cacheHistoricos?.[convKey]) ? window.cacheHistoricos[convKey] : null;
+    let arr = Array.isArray(window.cacheHistoricos?.[convKey])
+      ? window.cacheHistoricos[convKey]
+      : null;
 
     if (!arr || !arr.length) {
       let inst = null;
@@ -1878,9 +2196,15 @@ window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
         const lista = window.state?.clientesCache || window.clientesCache || [];
         const c = convObj || lista.find((x) => {
           const k = getConversationKeySafe(
-            x?.conversation_key ?? x?.conversation_id ?? x?.id ?? x?.cliente_id ?? x?.grupo_id ?? null,
+            x?.conversation_key ??
+            x?.conversation_id ??
+            x?.id ??
+            x?.cliente_id ??
+            x?.grupo_id ??
+            null,
             x
           );
+
           return idEq(k, convKey);
         });
 
@@ -1919,18 +2243,24 @@ window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
 
     if (!tsIso) {
       if (window.Lista?.updatePreview && last?.ack != null) {
-        window.Lista.updatePreview(convKey, { ack: Number(last.ack || 0) });
+        window.Lista.updatePreview(convKey, {
+          ack: Number(last.ack || 0),
+        });
       }
       return;
     }
 
     let histTsMs = 0;
+
     try {
       let d = parseAtendimentoDate(tsIso);
       if (!d || Number.isNaN(d.getTime())) d = new Date(tsIso);
       if (d && !Number.isNaN(d.getTime())) histTsMs = d.getTime();
     } catch (e) {
-      HERR('syncPreviewFromCache: erro parse tsIso', { tsIso, e });
+      HERR('syncPreviewFromCache: erro parse tsIso', {
+        tsIso,
+        e,
+      });
     }
 
     const textoRaw = msgText(last);
@@ -1939,7 +2269,9 @@ window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
 
     if (convTsMs && histTsMs && histTsMs <= convTsMs) {
       if (window.Lista?.updatePreview && ackVal != null) {
-        window.Lista.updatePreview(convKey, { ack: ackVal });
+        window.Lista.updatePreview(convKey, {
+          ack: ackVal,
+        });
       }
       return;
     }
@@ -1962,13 +2294,12 @@ window.syncPreviewFromCache = function syncPreviewFromCache(clienteId) {
 window.renderHistoricoDoCache = renderHistoricoDoCache;
 window.salvarNoCache = salvarNoCache;
 window.abrirHistorico = abrirHistorico;
-
-// ✅ Compat com códigos antigos que procuram essa função
 window.carregarHistoricoCliente = abrirHistorico;
 
-// ✅ Função para testar no console
 window.forcarAtualizacaoHistorico = forcarAtualizacaoHistorico;
 window.zcForceHistoryRefresh = forcarAtualizacaoHistorico;
+
+window.carregarMaisHistorico = carregarMaisHistorico;
 
 try {
   window.getHist = getHist;

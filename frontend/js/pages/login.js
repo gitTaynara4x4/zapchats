@@ -1,31 +1,107 @@
 // /frontend/js/pages/login.js
 
-// === Guard: se já está logado (pelos COOKIES), não mostra /login ===
+// === Guard seguro: só redireciona se o BACKEND confirmar sessão válida ===
 (function alreadyLoggedGuard(){
-  function hasCookie(name){
+  var CHECK_URL = '/api/auth/me';
+  var LOGOUT_URL = '/api/auth/logout';
+  var checking = false;
+
+  function getSafeNext(){
     try {
-      var re = new RegExp('(?:^|;\\s*)' + name.replace(/[-[\]/{}()*+?.\\^$|]/g, '\\$&') + '=');
-      return re.test(document.cookie || '');
-    } catch (e) { return false; }
-  }
-  function hasSessionCookie() {
-    // backend grava 'empresa_id' (legível). 'access_token' é httpOnly.
-    return hasCookie('empresa_id');
-  }
-  function redirectHome(){
-    var params = new URLSearchParams(location.search || '');
-    var next = params.get('next');
-    var target = (next && /^\/[^\s]*$/.test(next)) ? next : '/dashboard';
-    window.location.replace(target);
+      var params = new URLSearchParams(location.search || '');
+      var next = params.get('next');
+
+      // Aceita só caminho interno normal. Bloqueia //site.com e espaços.
+      if (next && /^\/(?!\/)[^\s]*$/.test(next)) {
+        return next;
+      }
+    } catch (e) {}
+
+    return '/dashboard';
   }
 
-  if (hasSessionCookie()) redirectHome();
+  function clearClientSession(){
+    try {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('token');
+      localStorage.removeItem('empresa_id');
+      localStorage.removeItem('EMPRESA_ID');
+      localStorage.removeItem('usuario_role');
+      localStorage.removeItem('role');
+      localStorage.removeItem('nome');
+      localStorage.removeItem('email');
+      localStorage.removeItem('usuario_avatar');
+    } catch (e) {}
+
+    // Só cookies NÃO httpOnly conseguem ser apagados pelo front.
+    // O access_token httpOnly será apagado pelo backend em /api/auth/logout
+    // e também pelo main.py quando a gente ajustar o próximo arquivo.
+    try {
+      document.cookie = 'empresa_id=; Max-Age=0; path=/';
+      document.cookie = 'EMPRESA_ID=; Max-Age=0; path=/';
+      document.cookie = 'csrf_token=; Max-Age=0; path=/';
+      document.cookie = 'csrf_token=; Max-Age=0; path=/api/auth/refresh';
+    } catch (e) {}
+  }
+
+  async function backendLogout(){
+    try {
+      await fetch(LOGOUT_URL, {
+        method: 'POST',
+        credentials: 'include',
+        cache: 'no-store',
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+    } catch (e) {}
+  }
+
+  async function checkSessionAndRedirect(){
+    if (checking) return;
+    checking = true;
+
+    try {
+      var res = await fetch(CHECK_URL, {
+        method: 'GET',
+        credentials: 'include',
+        cache: 'no-store',
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+
+      if (res.ok) {
+        window.location.replace(getSafeNext());
+        return;
+      }
+
+      // Sessão quebrada/expirada: não redireciona.
+      // Limpa o que der e deixa o login aparecer normalmente.
+      clearClientSession();
+      await backendLogout();
+      clearClientSession();
+
+    } catch (e) {
+      // Se a API falhar, NÃO redireciona.
+      // Melhor mostrar o login do que criar loop infinito.
+      clearClientSession();
+    } finally {
+      checking = false;
+    }
+  }
+
+  checkSessionAndRedirect();
 
   window.addEventListener('pageshow', function (e) {
-    var nav = (performance && performance.getEntriesByType) ? performance.getEntriesByType('navigation') : null;
+    var nav = (performance && performance.getEntriesByType)
+      ? performance.getEntriesByType('navigation')
+      : null;
+
     var backForward = !!(nav && nav[0] && nav[0].type === 'back_forward');
+
     if (e.persisted || backForward) {
-      if (hasSessionCookie()) redirectHome();
+      checkSessionAndRedirect();
     }
   });
 })();
@@ -331,7 +407,7 @@ function showEmailHelp(msg){
     }
     var params = new URLSearchParams(window.location.search || '');
     var next = params.get('next');
-    var target = (next && /^\/[^\s]*$/.test(next)) ? next : '/dashboard';
+    var target = (next && /^\/(?!\/)[^\s]*$/.test(next)) ? next : '/dashboard';
     window.location.replace(target);
   }
 

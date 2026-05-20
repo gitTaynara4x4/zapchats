@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import os
 import asyncio
 import json
@@ -16,6 +17,7 @@ import backend.routers.auth as auth_router  # 🔒 para validar token
 log = logging.getLogger("ws")
 
 # ========================= Config (env + defaults) =========================
+
 def _get_float(env: str, default: float) -> float:
     try:
         v = float(os.getenv(env, "").strip() or default)
@@ -39,12 +41,14 @@ def _json_default(o: Any) -> str:
             return o.isoformat()  # type: ignore[no-any-return]
     except Exception:
         pass
+
     try:
         import uuid as _uuid  # type: ignore
         if isinstance(o, _uuid.UUID):
             return str(o)
     except Exception:
         pass
+
     return str(o)
 
 
@@ -64,8 +68,21 @@ def _inject_server_ts(data: Any) -> Any:
             d["serverTimestamp"] = _now_ms()
             return d
         return data
-    # para listas/strings/binary não mexemos (frontend já trata)
+
     return data
+
+
+def _first_non_empty(*values: Any) -> Optional[str]:
+    for v in values:
+        if v is None:
+            continue
+
+        s = str(v).strip()
+
+        if s:
+            return s
+
+    return None
 
 
 def _stable_auto_cid(ws: WebSocket, topic: str) -> str:
@@ -75,27 +92,85 @@ def _stable_auto_cid(ws: WebSocket, topic: str) -> str:
     """
     try:
         ua = (ws.headers.get("user-agent") or "")[:160]
-        ref = (ws.headers.get("referer") or "")
+        ref = ws.headers.get("referer") or ""
+
         try:
             ref_path = urlparse(ref).path or ""
         except Exception:
             ref_path = ""
+
         ip = (getattr(ws.client, "host", "") or "")[:64]
         raw = f"{topic}|{ip}|{ua}|{ref_path}"
         h = hashlib.sha1(raw.encode("utf-8", "ignore")).hexdigest()[:20]
+
         return f"auto-{h}"
     except Exception:
-        # fallback totalmente aleatório (último caso)
         return f"anon-{uuid.uuid4().hex}"
 
 
+def _decode_token_safe(token: str | None) -> Optional[dict]:
+    if not token:
+        return None
+
+    try:
+        decoded = auth_router._decode_token(token)
+
+        if isinstance(decoded, dict):
+            return decoded
+
+        return {}
+    except Exception:
+        return None
+
+
+def _empresa_id_from_token(decoded: dict | None) -> Optional[int]:
+    if not isinstance(decoded, dict):
+        return None
+
+    for key in (
+        "empresa_id",
+        "empresaId",
+        "empresa",
+        "eid",
+    ):
+        try:
+            value = decoded.get(key)
+
+            if value is None:
+                continue
+
+            return int(value)
+        except Exception:
+            continue
+
+    return None
+
+
+def _parse_topic_empresa(topic: str) -> Optional[int]:
+    try:
+        if not str(topic or "").startswith("emp:"):
+            return None
+
+        raw = str(topic).split("emp:", 1)[1].strip()
+
+        if not raw:
+            return None
+
+        return int(raw)
+    except Exception:
+        return None
+
+
 # ========================= Manager =========================
+
 class WebSocketManager:
     """
     Gerencia conexões por grupo (ex.: 'emp:3', 'inst:4xtec-9237').
-    - Dedup por CID
-    - Snapshot por grupo (replayed no handshake)
-    - Envio com timeout e limpeza de conexões mortas
+
+    - Dedup por CID.
+    - Snapshot por grupo.
+    - Envio com timeout.
+    - Limpeza de conexões mortas.
     """
 
     def __init__(self) -> None:
@@ -109,28 +184,41 @@ class WebSocketManager:
 
     async def connect(self, websocket: WebSocket, grupo: str, cid: Optional[str] = None) -> str:
         await websocket.accept()
-        cid_eff = (cid.strip() if isinstance(cid, str) and cid.strip() else None) or _stable_auto_cid(websocket, grupo)
+
+        cid_eff = (
+            cid.strip()
+            if isinstance(cid, str) and cid.strip()
+            else None
+        ) or _stable_auto_cid(websocket, grupo)
 
         old: Optional[WebSocket] = None
+
         async with self._lock:
             bucket = self.grupos.setdefault(grupo, {})
             old = bucket.get(cid_eff)
             bucket[cid_eff] = websocket
 
-        # fecha conexão antiga com o mesmo cid (dedupe)
+        # Fecha conexão antiga com o mesmo cid.
         if old and old is not websocket:
             try:
                 await old.close()
             except Exception:
                 pass
 
-        log.debug("WS connected grp=%s cid=%s live=%d", grupo, cid_eff, len(self.grupos.get(grupo, {})))
+        log.info(
+            "WS connected grp=%s cid=%s live=%d",
+            grupo,
+            cid_eff,
+            len(self.grupos.get(grupo, {})),
+        )
 
-        # Reenvia snapshot do grupo (se houver)
+        # Reenvia snapshot do grupo se houver.
         try:
             snap = self._snapshots.get(grupo)
+
             if snap is not None:
                 ok = await self._send_one(websocket, _inject_server_ts(snap))
+
                 if not ok:
                     await self.disconnect(websocket, grupo, cid=cid_eff)
                     raise WebSocketDisconnect()
@@ -143,8 +231,10 @@ class WebSocketManager:
         try:
             async with self._lock:
                 bucket = self.grupos.get(grupo)
+
                 if bucket:
                     key_to_drop: Optional[str] = None
+
                     if cid and cid in bucket and bucket.get(cid) is websocket:
                         key_to_drop = cid
                     else:
@@ -152,43 +242,54 @@ class WebSocketManager:
                             if v is websocket:
                                 key_to_drop = k
                                 break
+
                     if key_to_drop is not None:
                         bucket.pop(key_to_drop, None)
+
                         if not bucket:
                             self.grupos.pop(grupo, None)
+
             try:
                 await websocket.close()
             except Exception:
                 pass
-            log.debug("WS disconnected grp=%s cid=%s", grupo, cid or "-")
+
+            log.info("WS disconnected grp=%s cid=%s", grupo, cid or "-")
         except Exception as e:
             log.debug("WS disconnect erro grp=%s cid=%s: %s", grupo, cid or "-", e)
 
     def _maybe_store_snapshot(self, grupo: str, data: Any) -> None:
         try:
             s = json.dumps(data, default=_json_default)
+
             if len(s.encode("utf-8", "ignore")) <= SNAPSHOT_MAX_BYTES:
                 self._snapshots[grupo] = data
             else:
-                log.debug("WS snapshot ignorado (payload > %dB) grp=%s", SNAPSHOT_MAX_BYTES, grupo)
+                log.debug("WS snapshot ignorado payload > %dB grp=%s", SNAPSHOT_MAX_BYTES, grupo)
         except Exception:
-            log.debug("WS snapshot ignorado (não serializável) grp=%s", grupo)
+            log.debug("WS snapshot ignorado não serializável grp=%s", grupo)
 
     async def _send_one(self, ws: WebSocket, data: Any) -> bool:
         try:
             payload = _inject_server_ts(data)
+
             try:
                 await asyncio.wait_for(ws.send_json(payload), timeout=SEND_TIMEOUT)
                 return True
             except (TypeError, ValueError):
-                await asyncio.wait_for(ws.send_text(json.dumps(payload, default=_json_default)), timeout=SEND_TIMEOUT)
+                await asyncio.wait_for(
+                    ws.send_text(json.dumps(payload, default=_json_default)),
+                    timeout=SEND_TIMEOUT,
+                )
                 return True
+
         except asyncio.CancelledError:
             try:
                 await ws.close()
             except Exception:
                 pass
             return False
+
         except Exception:
             try:
                 await ws.close()
@@ -197,7 +298,6 @@ class WebSocketManager:
             return False
 
     async def send_message(self, grupo: str, data: Any, *, cache_snapshot: bool = True) -> None:
-        # snapshot (se solicitado) antes do envio
         if cache_snapshot:
             self._maybe_store_snapshot(grupo, data)
 
@@ -205,13 +305,24 @@ class WebSocketManager:
             bucket = dict(self.grupos.get(grupo, {}))
 
         if not bucket:
-            log.debug("WS sem assinantes para grp=%s (payload guardado=%s)", grupo, "sim" if cache_snapshot else "não")
+            log.warning(
+                "WS sem assinantes para grp=%s payload_guardado=%s",
+                grupo,
+                "sim" if cache_snapshot else "não",
+            )
             return
 
-        tasks = {cid: asyncio.create_task(self._send_one(ws, data)) for cid, ws in bucket.items()}
+        log.info("WS emit grp=%s assinantes=%d", grupo, len(bucket))
+
+        tasks = {
+            cid: asyncio.create_task(self._send_one(ws, data))
+            for cid, ws in bucket.items()
+        }
+
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
 
         dead: List[str] = []
+
         for (cid, _t), ok in zip(tasks.items(), results):
             if ok is not True:
                 dead.append(cid)
@@ -219,19 +330,26 @@ class WebSocketManager:
         if dead:
             async with self._lock:
                 live = self.grupos.get(grupo)
+
                 if live:
                     for cid in dead:
                         live.pop(cid, None)
+
                     if not live:
                         self.grupos.pop(grupo, None)
 
     async def send_message_many(self, grupos: Iterable[str], data: Any, *, cache_snapshot: bool = True) -> None:
-        await asyncio.gather(*(self.send_message(g, data, cache_snapshot=cache_snapshot) for g in grupos))
+        await asyncio.gather(
+            *(self.send_message(g, data, cache_snapshot=cache_snapshot) for g in grupos)
+        )
 
     async def broadcast_all(self, data: Any, *, cache_snapshot: bool = False) -> None:
         async with self._lock:
             grupos = list(self.grupos.keys())
-        await asyncio.gather(*(self.send_message(g, data, cache_snapshot=cache_snapshot) for g in grupos))
+
+        await asyncio.gather(
+            *(self.send_message(g, data, cache_snapshot=cache_snapshot) for g in grupos)
+        )
 
     async def broadcast(self, grupo: str, data: Any, *, cache_snapshot: bool = True) -> None:
         await self.send_message(grupo, data, cache_snapshot=cache_snapshot)
@@ -244,6 +362,7 @@ class WebSocketManager:
 
 
 # ========================= FastAPI Router =========================
+
 conexoes_ativas = WebSocketManager()
 router = APIRouter()
 
@@ -254,58 +373,110 @@ async def ws_topic(
     topic: str,
     cid: Optional[str] = Query(None, description="UUID/cookie do cliente p/ deduplicar"),
     want_qr: bool = Query(False, description="Se True, disparamos force_qr no handshake"),
+
+    # ✅ NOVO:
+    # O navegador nem sempre chega com cookies no WS.
+    # Então aceitamos fallback por query também.
+    token: Optional[str] = Query(None, description="JWT fallback quando cookie não vier no WebSocket"),
+    access_token: Optional[str] = Query(None, description="Alias de token JWT"),
+    empresa_id: Optional[str] = Query(None, description="Empresa fallback quando cookie não vier no WebSocket"),
+    empresaId: Optional[str] = Query(None, description="Alias de empresa_id"),
 ):
     """
     Endpoint WS genérico.
+
     Tópicos previstos:
       - emp:{empresa_id}
       - inst:{instance_key ou instancia_id}
 
     Query:
-      - cid     : identificador estável por aba/cliente (evita conexões duplicadas)
-      - want_qr : apenas para inst:, força emissão de QR no handshake quando True
+      - cid
+      - want_qr
+      - token / access_token
+      - empresa_id / empresaId
+
+    Regra nova:
+      - Para emp:{empresa_id}, aceita autenticação por cookie OU query.
+      - Isso resolve o caso do front abrir /ws/emp%3A5?empresa_id=5&token=...
     """
 
-    # 🔒 AUTENTICAÇÃO / ISOLAÇÃO POR EMPRESA
-    # Lê cookies de sessão, igual no main.py
-    token = ws.cookies.get(ACCESS_COOKIE_NAME)
-    empresa_cookie = ws.cookies.get("empresa_id") or ws.cookies.get("EMPRESA_ID")
-
+    # =========================
+    # Autenticação para canal da empresa
+    # =========================
     if topic.startswith("emp:"):
-        # Para ouvir eventos de uma empresa, precisa:
-        # - ter token válido
-        # - ter empresa_id no cookie
-        # - empresa do cookie bater com emp:{id} do tópico
-        if not (token and empresa_cookie):
-            # 4401 = unauthorized (código "não oficial" mas comum)
-            await ws.close(code=4401)
-            return
+        emp_from_topic = _parse_topic_empresa(topic)
 
-        # valida token (se for inválido, fecha)
-        try:
-            auth_router._decode_token(token)
-        except Exception:
-            await ws.close(code=4401)
-            return
-
-        try:
-            emp_from_topic = int(topic.split("emp:", 1)[1] or "0")
-            emp_from_cookie = int(empresa_cookie)
-        except Exception:
-            await ws.close(code=4403)  # forbidden
-            return
-
-        if emp_from_topic != emp_from_cookie:
-            # usuário de uma empresa tentando ouvir outra
+        if not emp_from_topic:
             await ws.close(code=4403)
             return
 
-    # Conecta (dedupe por cid; se não vier, geramos determinístico)
+        token_eff = _first_non_empty(
+            ws.cookies.get(ACCESS_COOKIE_NAME),
+            ws.cookies.get("access_token"),
+            token,
+            access_token,
+        )
+
+        empresa_eff = _first_non_empty(
+            ws.cookies.get("empresa_id"),
+            ws.cookies.get("EMPRESA_ID"),
+            empresa_id,
+            empresaId,
+        )
+
+        if not token_eff:
+            log.warning("WS auth fail topic=%s motivo=sem_token", topic)
+            await ws.close(code=4401)
+            return
+
+        decoded = _decode_token_safe(token_eff)
+
+        if decoded is None:
+            log.warning("WS auth fail topic=%s motivo=token_invalido", topic)
+            await ws.close(code=4401)
+            return
+
+        try:
+            emp_from_param = int(empresa_eff) if empresa_eff is not None else None
+        except Exception:
+            emp_from_param = None
+
+        emp_from_token = _empresa_id_from_token(decoded)
+
+        # Segurança:
+        # - tópico precisa bater com query/cookie quando existir;
+        # - tópico também precisa bater com empresa_id do token quando existir.
+        if emp_from_param is not None and int(emp_from_param) != int(emp_from_topic):
+            log.warning(
+                "WS auth fail topic=%s motivo=empresa_param_diferente param=%s",
+                topic,
+                emp_from_param,
+            )
+            await ws.close(code=4403)
+            return
+
+        if emp_from_token is not None and int(emp_from_token) != int(emp_from_topic):
+            log.warning(
+                "WS auth fail topic=%s motivo=empresa_token_diferente token_emp=%s",
+                topic,
+                emp_from_token,
+            )
+            await ws.close(code=4403)
+            return
+
+        # Se token não tem empresa_id, exige pelo menos cookie/query.
+        if emp_from_token is None and emp_from_param is None:
+            log.warning("WS auth fail topic=%s motivo=sem_empresa", topic)
+            await ws.close(code=4403)
+            return
+
+    # Conecta.
     cid_eff = await conexoes_ativas.connect(ws, topic, cid=cid)
 
-    # Só força QR quando o cliente pedir explicitamente
+    # Só força QR quando o cliente pedir explicitamente.
     if topic.startswith("inst:") and want_qr:
         inst_id = topic.split("inst:", 1)[1]
+
         if inst_id:
             try:
                 from backend.integrations.evo_handlers import force_qr_for_instance  # lazy import
@@ -313,21 +484,19 @@ async def ws_topic(
             except Exception as e:
                 log.debug("WS inst:%s force_qr_for_instance skip: %s", inst_id, e)
 
-    # Keepalive (ping) — o cliente responde com 'pong'
+    # Keepalive.
     stop_keepalive = asyncio.Event()
 
     async def _keepalive() -> None:
         if KEEPALIVE_SEC <= 0:
             return
+
         try:
             while not stop_keepalive.is_set():
                 try:
-                    # espera KEEPALIVE_SEC por um "stop"
                     await asyncio.wait_for(stop_keepalive.wait(), timeout=KEEPALIVE_SEC)
-                    # se não deu TimeoutError, o evento foi setado -> sair
                     break
                 except asyncio.TimeoutError:
-                    # timeout normal -> manda ping
                     try:
                         await ws.send_text("ping")
                     except Exception:
@@ -338,6 +507,7 @@ async def ws_topic(
             log.debug("WS keepalive erro topic=%s cid=%s: %s", topic, cid_eff, e)
 
     ka_task: Optional[asyncio.Task] = None
+
     if KEEPALIVE_SEC > 0:
         ka_task = asyncio.create_task(_keepalive())
 
@@ -353,31 +523,36 @@ async def ws_topic(
                 log.debug("WS receive erro topic=%s cid=%s: %s", topic, cid_eff, e)
                 break
 
-            # Tipos que o Starlette/FastAPI podem entregar:
-            # {'type': 'websocket.receive', 'text': '...'} | {'type': 'websocket.disconnect', ...}
             if isinstance(msg, dict) and msg.get("type") == "websocket.disconnect":
                 break
 
             txt = msg.get("text") if isinstance(msg, dict) else None
+
             if isinstance(txt, str):
                 txt_l = txt.strip().lower()
+
                 if txt_l == "ping":
-                    # cliente pingando o servidor
                     try:
                         await ws.send_text("pong")
                     except Exception:
                         break
-                # aqui você pode tratar outras mensagens do cliente -> servidor
+
+                elif txt_l == "pong":
+                    pass
+
     except Exception as e:
         log.warning("WS error topic=%s cid=%s: %s", topic, cid_eff, e)
+
     finally:
         try:
             stop_keepalive.set()
+
             if ka_task is not None:
                 try:
                     ka_task.cancel()
                 except Exception:
                     pass
+
             await conexoes_ativas.disconnect(ws, topic, cid=cid_eff)
         except Exception:
             pass
