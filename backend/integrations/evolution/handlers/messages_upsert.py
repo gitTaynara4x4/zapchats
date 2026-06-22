@@ -82,6 +82,119 @@ def _bool_env_value(name: str, default: bool = False) -> bool:
 UPSERT_IMPORT_UNRESOLVED_LID = _bool_env_value("EVO_UPSERT_IMPORT_UNRESOLVED_LID", False)
 
 
+def _int_env_value(name: str, default: int = 0) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return int(default)
+    try:
+        return int(float(str(raw).strip()))
+    except Exception:
+        return int(default)
+
+
+# Anti-enxurrada: se o cliente mandar várias mensagens seguidas, o chatbot/triagem
+# roda uma vez só depois que a enxurrada parar. 0 desliga e volta ao comportamento antigo.
+EVO_CHATBOT_BURST_DEBOUNCE_MS = max(
+    0,
+    _int_env_value("EVO_CHATBOT_BURST_DEBOUNCE_MS", 2200),
+)
+
+# V23 modo seguro:
+# O log mostrou que a mensagem salva no banco, mas o navegador trava exatamente
+# depois do backend empurrar o payload pelo WebSocket.
+# Por padrão, corta o PUSH ao vivo de mensagens para não congelar a tela.
+# As mensagens continuam salvando normalmente no banco.
+# Para reativar o tempo real depois que o front estiver estabilizado:
+# WS_EMIT_MESSAGES=true
+WS_EMIT_MESSAGES = _bool_env_value("WS_EMIT_MESSAGES", False)
+
+# V11: o log mostrou atraso entre [ws-live][skip] e [commit-final].
+# O ponto nessa janela é invalidate_emp_cache(), que pode fazer scan/delete em Redis remoto
+# e travar a finalização do processamento. Por padrão, NÃO invalida cache no fluxo
+# de mensagem recebida. Para reativar manualmente: EVO_INVALIDATE_CACHE_ON_MESSAGE=true
+EVO_INVALIDATE_CACHE_ON_MESSAGE = _bool_env_value("EVO_INVALIDATE_CACHE_ON_MESSAGE", False)
+
+def _should_invalidate_cache_on_message() -> bool:
+    return bool(EVO_INVALIDATE_CACHE_ON_MESSAGE)
+
+def _invalidate_emp_cache_after_message_safe(empresa_id: int, *, where: str = "") -> None:
+    if not _should_invalidate_cache_on_message():
+        try:
+            LOG(f"[UPsert][cache][skip] EVO_INVALIDATE_CACHE_ON_MESSAGE=false where={where} emp={empresa_id}")
+        except Exception:
+            pass
+        return
+    try:
+        invalidate_emp_cache(empresa_id)
+    except Exception as e:
+        try:
+            LOG(f"[UPsert][cache][erro] where={where} emp={empresa_id} err={e}")
+        except Exception:
+            pass
+
+def _ws_emit_messages_enabled() -> bool:
+    return bool(WS_EMIT_MESSAGES)
+
+_CHATBOT_BURST_TASKS: dict[tuple[int, int, str], asyncio.Task] = {}
+
+
+async def _run_or_schedule_triagem_pos_commit(
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    telefone: str,
+    conteudo: str,
+    direcao: str,
+    remote_jid: str,
+) -> None:
+    if EVO_CHATBOT_BURST_DEBOUNCE_MS <= 0:
+        await run_triagem_pos_commit(
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+            telefone=telefone,
+            conteudo=conteudo,
+            direcao=direcao,
+            remote_jid=remote_jid,
+        )
+        return
+
+    key = (int(empresa_id), int(instancia_id), str(telefone or ""))
+    delay = EVO_CHATBOT_BURST_DEBOUNCE_MS / 1000.0
+
+    old_task = _CHATBOT_BURST_TASKS.get(key)
+    if old_task and not old_task.done():
+        old_task.cancel()
+
+    async def _runner():
+        try:
+            await asyncio.sleep(delay)
+            await run_triagem_pos_commit(
+                empresa_id=empresa_id,
+                instancia_id=instancia_id,
+                telefone=telefone,
+                conteudo=conteudo,
+                direcao=direcao,
+                remote_jid=remote_jid,
+            )
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            LOG(
+                f"[CHATBOT][burst-debounce][erro] emp={empresa_id} "
+                f"inst={instancia_id} telefone={telefone} err={e}"
+            )
+        finally:
+            if _CHATBOT_BURST_TASKS.get(key) is task:
+                _CHATBOT_BURST_TASKS.pop(key, None)
+
+    task = asyncio.create_task(_runner())
+    _CHATBOT_BURST_TASKS[key] = task
+    LOG(
+        f"[CHATBOT][burst-debounce] agendado emp={empresa_id} inst={instancia_id} "
+        f"telefone={telefone} delay_ms={EVO_CHATBOT_BURST_DEBOUNCE_MS}"
+    )
+
+
 def _safe_rollback(db) -> None:
     try:
         db.rollback()
@@ -1556,7 +1669,10 @@ async def on_messages_upsert(inst_id: str, data):
                                 "serverTimestamp": _server_ts_ms(),
                             }
 
-                            await conexoes_ativas.send_message(f"emp:{empresa_id}", ws_payload_grupo)
+                            if _ws_emit_messages_enabled():
+                                await conexoes_ativas.send_message(f"emp:{empresa_id}", ws_payload_grupo)
+                            else:
+                                LOG(f"[UPsert][grupo][ws-live][skip] WS_EMIT_MESSAGES=false msg_id={msg_id}")
                         except Exception as e:
                             LOG(f"[UPsert][grupo][ws-live] falha ao emitir: {e}")
 
@@ -2005,7 +2121,7 @@ async def on_messages_upsert(inst_id: str, data):
                             should_run_chatbot = True
 
                 if should_run_chatbot:
-                    await run_triagem_pos_commit(
+                    await _run_or_schedule_triagem_pos_commit(
                         empresa_id=empresa_id,
                         instancia_id=inst.id,
                         telefone=telefone,
@@ -2094,14 +2210,14 @@ async def on_messages_upsert(inst_id: str, data):
                             "serverTimestamp": _server_ts_ms(),
                         }
 
-                        await conexoes_ativas.send_message(f"emp:{empresa_id}", ws_payload)
+                        if _ws_emit_messages_enabled():
+                            await conexoes_ativas.send_message(f"emp:{empresa_id}", ws_payload)
+                        else:
+                            LOG(f"[UPsert][ws-live][skip] WS_EMIT_MESSAGES=false msg_id={msg_id}")
                     except Exception as e:
                         LOG(f"[UPsert][ws] falha ao emitir: {e}")
 
-                    try:
-                        invalidate_emp_cache(empresa_id)
-                    except Exception:
-                        pass
+                    _invalidate_emp_cache_after_message_safe(empresa_id, where="after-ws")
 
                 if (novas % 500) == 0:
                     await asyncio.sleep(0)
@@ -2118,11 +2234,8 @@ async def on_messages_upsert(inst_id: str, data):
             _safe_rollback(db)
             LOG(f"[UPsert][commit-final-erro] {e}")
 
-        try:
-            if novas > 0 and empresa_id:
-                _invalidate_emp_cache(empresa_id)
-        except Exception:
-            pass
+        if novas > 0 and empresa_id:
+            _invalidate_emp_cache_after_message_safe(empresa_id, where="final")
 
         LOG(f"[UPsert] inst={inst_id} novas={novas}")
 

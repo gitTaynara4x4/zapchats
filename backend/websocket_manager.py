@@ -30,6 +30,41 @@ SEND_TIMEOUT = _get_float("WS_SEND_TIMEOUT", 2.5)            # segundos
 KEEPALIVE_SEC = _get_float("WS_KEEPALIVE_SEC", 25)           # segundos
 SNAPSHOT_MAX_BYTES = int(float(os.getenv("WS_SNAPSHOT_MAX_BYTES", "1048576")))  # 1MB
 
+# IMPORTANTE:
+# Antes o manager guardava o último payload enviado ao grupo e reenviava
+# automaticamente quando o navegador reconectava. Isso é perigoso para a
+# tela de atendimentos: um evento antigo de mensagem era reenviado no meio
+# do boot do frontend, fechava/reabria o WS e deixava a lista em loading.
+# Snapshot agora fica desligado por padrão. Só ligue com WS_SNAPSHOT_ENABLED=true
+# se for um canal que realmente precisa de replay.
+def _env_bool(name: str, default: bool = False) -> bool:
+    v = os.getenv(name)
+    if v is None:
+        return default
+    return str(v).strip().lower() in {"1", "true", "yes", "on", "sim"}
+
+WS_SNAPSHOT_ENABLED = _env_bool("WS_SNAPSHOT_ENABLED", False)
+WS_SNAPSHOT_ALLOW_TYPES = {
+    t.strip().lower()
+    for t in os.getenv("WS_SNAPSHOT_ALLOW_TYPES", "qrcode,connection").split(",")
+    if t.strip()
+}
+WS_SNAPSHOT_DENY_TYPES = {
+    "message",
+    "mensagem",
+    "ack",
+    "msg_deleted",
+    "messages_delete",
+    "reload_clientes",
+    "reload_grupos",
+    "contacts_sync_start",
+    "contacts_sync_progress",
+    "contacts_sync_done",
+    "history_sync_start",
+    "history_sync_progress",
+    "history_sync_done",
+}
+
 # mesmo nome de cookie usado em main.py
 ACCESS_COOKIE_NAME = os.getenv("ACCESS_COOKIE_NAME", "access_token")
 
@@ -212,18 +247,9 @@ class WebSocketManager:
             len(self.grupos.get(grupo, {})),
         )
 
-        # Reenvia snapshot do grupo se houver.
-        try:
-            snap = self._snapshots.get(grupo)
-
-            if snap is not None:
-                ok = await self._send_one(websocket, _inject_server_ts(snap))
-
-                if not ok:
-                    await self.disconnect(websocket, grupo, cid=cid_eff)
-                    raise WebSocketDisconnect()
-        except Exception as e:
-            log.debug("WS snapshot replay falhou grp=%s cid=%s: %s", grupo, cid_eff, e)
+        # v8: não faz replay de payload antigo no reconnect.
+        # Mensagem de atendimento precisa chegar apenas em tempo real; se reconectar,
+        # a tela busca o estado atual pela API.
 
         return cid_eff
 
@@ -259,7 +285,22 @@ class WebSocketManager:
             log.debug("WS disconnect erro grp=%s cid=%s: %s", grupo, cid or "-", e)
 
     def _maybe_store_snapshot(self, grupo: str, data: Any) -> None:
+        # Replay/snapshot desligado por padrão. O antigo comportamento reenviava
+        # a última mensagem ao reconectar e era a causa do loop/loading no atendimento.
+        if not WS_SNAPSHOT_ENABLED:
+            return
+
         try:
+            typ = ""
+            if isinstance(data, dict):
+                typ = str(data.get("type") or data.get("event") or "").strip().lower()
+
+            if typ and typ in WS_SNAPSHOT_DENY_TYPES:
+                return
+
+            if WS_SNAPSHOT_ALLOW_TYPES and typ and typ not in WS_SNAPSHOT_ALLOW_TYPES:
+                return
+
             s = json.dumps(data, default=_json_default)
 
             if len(s.encode("utf-8", "ignore")) <= SNAPSHOT_MAX_BYTES:
@@ -297,7 +338,7 @@ class WebSocketManager:
                 pass
             return False
 
-    async def send_message(self, grupo: str, data: Any, *, cache_snapshot: bool = True) -> None:
+    async def send_message(self, grupo: str, data: Any, *, cache_snapshot: bool = False) -> None:
         if cache_snapshot:
             self._maybe_store_snapshot(grupo, data)
 
@@ -308,7 +349,7 @@ class WebSocketManager:
             log.warning(
                 "WS sem assinantes para grp=%s payload_guardado=%s",
                 grupo,
-                "sim" if cache_snapshot else "não",
+                "sim" if (cache_snapshot and WS_SNAPSHOT_ENABLED) else "não",
             )
             return
 
@@ -338,7 +379,7 @@ class WebSocketManager:
                     if not live:
                         self.grupos.pop(grupo, None)
 
-    async def send_message_many(self, grupos: Iterable[str], data: Any, *, cache_snapshot: bool = True) -> None:
+    async def send_message_many(self, grupos: Iterable[str], data: Any, *, cache_snapshot: bool = False) -> None:
         await asyncio.gather(
             *(self.send_message(g, data, cache_snapshot=cache_snapshot) for g in grupos)
         )
@@ -351,7 +392,7 @@ class WebSocketManager:
             *(self.send_message(g, data, cache_snapshot=cache_snapshot) for g in grupos)
         )
 
-    async def broadcast(self, grupo: str, data: Any, *, cache_snapshot: bool = True) -> None:
+    async def broadcast(self, grupo: str, data: Any, *, cache_snapshot: bool = False) -> None:
         await self.send_message(grupo, data, cache_snapshot=cache_snapshot)
 
     def list_groups(self) -> List[str]:

@@ -781,6 +781,8 @@ def listar_mensagens_por_data(
             items.append(
                 {
                     "id": int(r.id),
+                    "db_id": int(r.id),
+                    "mensagem_id": int(r.id),
                     "msg_id": r.msg_id,
                     "conteudo": r.conteudo,
                     "tipo": r.tipo,
@@ -957,6 +959,8 @@ def listar_mensagens_por_data(
         items_g.append(
             {
                 "id": int(r.id),
+                "db_id": int(r.id),
+                "mensagem_id": int(r.id),
                 "msg_id": r.msg_id,
                 "conteudo": r.conteudo,
                 "tipo": r.tipo,
@@ -1026,6 +1030,7 @@ def listar_mensagens(
     empresa_id: int | None = Query(None, description="(Opcional) Empresa. Se omitido, usa a do token."),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    before_id: int | None = Query(None, ge=1, description="(Opcional) Cursor: mensagens mais antigas que este id."),
     instancia_id: int | None = Query(None, description="(Opcional) Filtra mensagens por instância id numérico"),
     instance: str | None = Query(None, description="(Opcional) Filtra mensagens por instância slug/nome"),
     since_ts: datetime | None = Query(None, description="(Opcional) Cursor: mensagens com timestamp > since_ts ISO."),
@@ -1124,10 +1129,16 @@ def listar_mensagens(
         if since_ts is not None:
             q = q.filter(models.Mensagem.timestamp > since_ts)
 
+        if before_id is not None and since_id is None and since_ts is None:
+            q = q.filter(models.Mensagem.id < int(before_id))
+
         incremental = (since_ts is not None) or (since_id is not None)
+        cursor_old = before_id is not None and not incremental
 
         if incremental:
             q = q.order_by(models.Mensagem.timestamp.asc(), models.Mensagem.id.asc()).limit(limit)
+        elif cursor_old:
+            q = q.order_by(models.Mensagem.id.desc()).limit(limit)
         else:
             q = q.order_by(models.Mensagem.timestamp.desc(), models.Mensagem.id.desc()).offset(offset).limit(limit)
 
@@ -1160,6 +1171,8 @@ def listar_mensagens(
             items.append(
                 {
                     "id": int(r.id),
+                    "db_id": int(r.id),
+                    "mensagem_id": int(r.id),
                     "msg_id": r.msg_id,
                     "conteudo": r.conteudo,
                     "tipo": r.tipo,
@@ -1298,10 +1311,16 @@ def listar_mensagens(
         since_epoch = _epoch_from_dt(since_ts)
         qg = qg.filter(models.MensagemGrupo.timestamp > since_epoch)
 
+    if before_id is not None and since_id is None and since_ts is None:
+        qg = qg.filter(models.MensagemGrupo.id < int(before_id))
+
     incremental = (since_ts is not None) or (since_id is not None)
+    cursor_old = before_id is not None and not incremental
 
     if incremental:
         qg = qg.order_by(models.MensagemGrupo.id.asc()).limit(limit)
+    elif cursor_old:
+        qg = qg.order_by(models.MensagemGrupo.id.desc()).limit(limit)
     else:
         qg = qg.order_by(models.MensagemGrupo.id.desc()).offset(offset).limit(limit)
 
@@ -1334,6 +1353,8 @@ def listar_mensagens(
         items_g.append(
             {
                 "id": int(r.id),
+                "db_id": int(r.id),
+                "mensagem_id": int(r.id),
                 "msg_id": r.msg_id,
                 "conteudo": r.conteudo,
                 "tipo": r.tipo,
@@ -1394,6 +1415,7 @@ def listar_mensagens_alias_historico(
     empresa_id: int | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    before_id: int | None = Query(None, ge=1),
     instancia_id: int | None = Query(None),
     instance: str | None = Query(None),
     since_ts: datetime | None = Query(None),
@@ -1408,6 +1430,7 @@ def listar_mensagens_alias_historico(
         empresa_id=empresa_id_eff,
         limit=limit,
         offset=offset,
+        before_id=before_id,
         instancia_id=instancia_id,
         instance=instance,
         since_ts=since_ts,

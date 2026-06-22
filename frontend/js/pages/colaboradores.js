@@ -21,7 +21,7 @@
     releasePageLoader();
 
     try {
-      const mod = await import('./colaboradores/index.js?v=split-fast-2');
+      const mod = await import('./colaboradores/index.js?v=colab-modal-clean-1');
       await mod.initColaboradoresPage();
     } catch (e) {
       console.error('[colaboradores] erro ao iniciar:', e);

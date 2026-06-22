@@ -24,7 +24,7 @@ import { cacheGet, cacheSet, cacheDel } from '../core/cache.js';
   - não estoura memória;
   - histórico antigo continua vindo do banco quando precisar.
 */
-const HIST_MAX_MESSAGES = Number(window.ZC_HIST_MAX_MESSAGES || 180);
+const HIST_MAX_MESSAGES = Number(window.ZC_HIST_MAX_MESSAGES || 80);
 
 /*
   Tempo que o histórico fica salvo no localStorage.
@@ -46,7 +46,7 @@ const HIST_CURSOR_TTL_MS = Number(
   Isso impede o window.cacheHistoricos de virar um monstro.
 */
 const HIST_MIRROR_MAX_CONVERSAS = Number(
-  window.ZC_HIST_MIRROR_MAX_CONVERSAS || 25
+  window.ZC_HIST_MIRROR_MAX_CONVERSAS || 6
 );
 
 /*
@@ -61,6 +61,13 @@ const HIST_BIG_CACHE_BYTES = Number(
   Isso é importante porque o sistema novo já usa chave por instância + conversa.
 */
 const HIST_REMOVE_LEGACY_CACHE = window.ZC_HIST_REMOVE_LEGACY_CACHE !== false;
+
+/*
+  RAM primeiro: por padrão NÃO persistimos histórico no localStorage.
+  Mantemos só em memória limitada. O banco é a fonte real do histórico.
+  Se algum dia quiser voltar a salvar, defina window.ZC_HIST_SAVE_TO_LS = true antes do boot.
+*/
+const HIST_SAVE_TO_LOCALSTORAGE = window.ZC_HIST_SAVE_TO_LS === true;
 
 /* =====================================================================
    Utils
@@ -92,7 +99,7 @@ function clampInt(v, min, max, fallback) {
   return Math.max(min, Math.min(max, n));
 }
 
-const MAX_MESSAGES_SAFE = clampInt(HIST_MAX_MESSAGES, 50, 500, 180);
+const MAX_MESSAGES_SAFE = clampInt(HIST_MAX_MESSAGES, 30, 180, 80);
 
 function _norm(v) {
   return (v ?? '').toString().trim();
@@ -248,8 +255,18 @@ function normMsg(m) {
     m?.replyPreview ??
     null;
 
+  const db_id =
+    m?.db_id ??
+    m?.mensagem_id ??
+    m?.message_db_id ??
+    m?.messageDbId ??
+    (m?.msg_id ? m?.id : null) ??
+    null;
+
   const normalized = {
     msg_id: msg_id || null,
+    db_id: db_id || null,
+    mensagem_id: db_id || null,
     conteudo: m?.conteudo ?? m?.texto ?? m?.mensagem ?? '',
     tipo,
     timestamp: tsRaw || (isTmpId ? new Date(ts).toISOString() : null),
@@ -448,6 +465,9 @@ function getMirror(convId) {
    ===================================================================== */
 
 function buildIdKey(m) {
+  const dbId = m.db_id || m.mensagem_id || m.message_db_id || null;
+  if (dbId) return `db:${dbId}`;
+
   if (m.msg_id && !(typeof m.msg_id === 'string' && m.msg_id.startsWith('tmp:'))) {
     return `id:${m.msg_id}`;
   }
@@ -608,6 +628,9 @@ try {
   if (!window.__ZC_HIST_CACHE_CLEANED_ONCE__) {
     window.__ZC_HIST_CACHE_CLEANED_ONCE__ = true;
 
+    // Limpa antes de qualquer getHist/cacheGet para não parsear JSON gigante antigo.
+    cleanupHeavyHistoryStorage();
+
     setTimeout(() => {
       cleanupHeavyHistoryStorage();
     }, 800);
@@ -620,6 +643,12 @@ try {
 
 export function getHist(inst, convId) {
   const key = kHist(inst, convId);
+
+  if (!HIST_SAVE_TO_LOCALSTORAGE) {
+    const mem = getMirror(convId);
+    return mem.length ? compactMessages(mem, 'latest') : [];
+  }
+
   const arr = cacheGet(key);
 
   if (Array.isArray(arr)) {
@@ -648,7 +677,12 @@ export function getHist(inst, convId) {
 export function setHist(inst, convId, arr, mode = 'latest') {
   const safe = compactMessages(arr, mode);
 
-  cacheSet(kHist(inst, convId), safe, HIST_CACHE_TTL_MS);
+  if (HIST_SAVE_TO_LOCALSTORAGE) {
+    cacheSet(kHist(inst, convId), safe, HIST_CACHE_TTL_MS);
+  } else {
+    try { cacheDel(kHist(inst, convId)); } catch {}
+  }
+
   setMirror(convId, safe);
 
   return safe;
@@ -665,10 +699,21 @@ export function mergeOld(inst, convId, msgs) {
   const cur = getHist(inst, convId);
   const merged = mergeMessages(cur, msgs, 'old');
 
-  return setHist(inst, convId, merged, 'oldest');
+  // Mantém uma parte das antigas + as recentes. Assim o usuário pode carregar
+  // histórico sem o cache esquecer o final da conversa.
+  return setHist(inst, convId, merged, 'balanced');
 }
 
 export function getCursors(inst, convId) {
+  if (!HIST_SAVE_TO_LOCALSTORAGE) {
+    const mem = window.__ZC_HIST_CURSOR_MEM__ || {};
+    const prefix = `${String(inst || 'all')}:${String(convId)}`;
+    return {
+      oldest: mem[`${prefix}:oldest`] ?? null,
+      newest: mem[`${prefix}:newest`] ?? null,
+    };
+  }
+
   return {
     oldest: cacheGet(kCurOld(inst, convId)) ?? null,
     newest: cacheGet(kCurNew(inst, convId)) ?? null,
@@ -676,6 +721,14 @@ export function getCursors(inst, convId) {
 }
 
 export function setCursors(inst, convId, { oldest, newest } = {}) {
+  if (!HIST_SAVE_TO_LOCALSTORAGE) {
+    window.__ZC_HIST_CURSOR_MEM__ = window.__ZC_HIST_CURSOR_MEM__ || {};
+    const prefix = `${String(inst || 'all')}:${String(convId)}`;
+    if (oldest !== undefined) window.__ZC_HIST_CURSOR_MEM__[`${prefix}:oldest`] = oldest;
+    if (newest !== undefined) window.__ZC_HIST_CURSOR_MEM__[`${prefix}:newest`] = newest;
+    return;
+  }
+
   if (oldest !== undefined) {
     cacheSet(kCurOld(inst, convId), oldest, HIST_CURSOR_TTL_MS);
   }
@@ -744,6 +797,15 @@ export function pushOneOld(inst, convId, msg) {
 /* =====================================================================
    Compatibilidade com módulos antigos
    ===================================================================== */
+
+
+try {
+  if (!HIST_SAVE_TO_LOCALSTORAGE) {
+    for (const key of lsKeys()) {
+      if (isHistStorageKey(key)) localStorage.removeItem(key);
+    }
+  }
+} catch {}
 
 try {
   window.salvarNoCache = function (convId, msgs) {

@@ -13,615 +13,141 @@
   <style>
     html.prepaint body{visibility:hidden}
     html.prepaint[data-head-ready][data-loader-ready] body{visibility:visible}
-
-    #zc-confirm.modal-back{
-      position:fixed;
-      inset:0;
-      display:none;
-      place-items:center;
-      background:var(--overlay, rgba(0,0,0,.55));
-      z-index:2147483600;
-      padding:16px;
-    }
-    #zc-confirm[aria-hidden="false"]{ display:grid; }
-    #zc-confirm .modal-card{
-      width:min(420px,100%);
-      max-height:80vh;
-      display:flex;
-      flex-direction:column;
-      background:var(--card, #111827);
-      border:1px solid var(--border, rgba(255,255,255,.12));
-      border-radius:14px;
-      box-shadow:0 20px 70px rgba(0,0,0,.5);
-      color:var(--text,#e5e7eb);
-    }
-    #zc-confirm .modal-head{
-      display:flex;
-      align-items:center;
-      padding:12px 16px;
-      border-bottom:1px solid var(--border, rgba(255,255,255,.12));
-    }
-    #zc-confirm .modal-head .title{
-      display:flex;
-      align-items:center;
-      gap:.5rem;
-    }
-    #zc-confirm .modal-head .title i{ color:#f97316; }
-    #zc-confirm .modal-body{ padding:14px 16px; }
-    #zc-confirm .modal-body p{ margin:0; font-size:.95rem; }
-    #zc-confirm .foot{
-      display:flex;
-      justify-content:flex-end;
-      gap:.6rem;
-      padding:10px 16px 12px;
-      border-top:1px solid var(--border, rgba(255,255,255,.12));
-    }
-    #zc-confirm .btn.btn-primary{
-      background:#b91c1c !important;
-      border-color:#7f1d1d !important;
-      color:#fff !important;
-    }
-    #zc-confirm .btn.btn-primary:focus-visible{
-      box-shadow:0 0 0 3px rgba(239,68,68,.35);
-    }
-
-    /* ======================================================
-       COLABORADORES MODAL — minimalista
-       ====================================================== */
-
-    #modal-perfil .perfil-modal-card{
-      width:min(1120px, calc(100vw - 32px));
-      background:var(--card, #111827);
-      border:1px solid var(--border, rgba(255,255,255,.09));
-      box-shadow:0 22px 70px rgba(0,0,0,.42);
-    }
-
-    #modal-perfil .modal-head{
-      gap:14px;
-      padding:14px 16px;
-      border-bottom:1px solid var(--border, rgba(255,255,255,.08));
-    }
-
-    #modal-perfil .modal-head .title{
-      display:flex;
-      align-items:center;
-      gap:9px;
-      font-weight:500;
-      color:var(--text, #e5e7eb);
-    }
-
-    #modal-perfil .modal-head .title i{
-      color:var(--muted, #9ca3af);
-      font-size:.95rem;
-    }
-
-    #modal-perfil .modal-head-actions{
-      display:flex;
-      align-items:center;
-      gap:.5rem;
-      flex-wrap:wrap;
-      justify-content:flex-end;
-    }
-
-    #modal-perfil .modal-body{
-      padding:16px;
-    }
-
-    #modal-perfil .colab-layout{
-      display:grid;
-      grid-template-columns:300px minmax(0, 1fr);
-      gap:16px;
-      align-items:start;
-    }
-
-    #modal-perfil .colab-side{
-      position:sticky;
-      top:0;
-      display:grid;
-      gap:12px;
-    }
-
-    #modal-perfil .profile-card{
-      display:grid;
-      gap:12px;
-      justify-items:center;
-      text-align:center;
-      background:var(--card, #111827);
-      border:1px solid var(--border, rgba(255,255,255,.08));
-      box-shadow:none;
-    }
-
-    #modal-perfil .avatar-wrap{
-      width:144px;
-      height:144px;
-      border-radius:22px;
-      background:var(--card2, rgba(255,255,255,.035));
-      border:1px solid var(--border, rgba(255,255,255,.09));
-      box-shadow:none;
-    }
-
-    #modal-perfil #p-mono{
-      font-size:2.35rem;
-      font-weight:500;
-      letter-spacing:.02em;
-    }
-
-    #modal-perfil .side-preview{
-      width:100%;
-      display:grid;
-      gap:9px;
-      padding-top:2px;
-    }
-
-    #modal-perfil .side-preview-name{
-      margin:0;
-      font-size:1.02rem;
-      font-weight:500;
-      color:var(--text, #e5e7eb);
-      line-height:1.22;
-    }
-
-    #modal-perfil .side-preview-role{
-      margin:0;
-      color:var(--muted, #9ca3af);
-      font-size:.88rem;
-      font-weight:400;
-      line-height:1.4;
-    }
-
-    #modal-perfil .side-preview-meta{
-      width:100%;
-      display:grid;
-      gap:7px;
-      margin-top:2px;
-    }
-
-    #modal-perfil .side-preview-pill{
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      gap:8px;
-      min-height:32px;
-      padding:7px 10px;
-      border-radius:11px;
-      background:transparent;
-      border:1px solid var(--border, rgba(255,255,255,.08));
-      color:var(--muted, #9ca3af);
-      font-size:.84rem;
-      font-weight:400;
-      line-height:1.2;
-    }
-
-    #modal-perfil .side-preview-pill i{
-      color:var(--muted, #9ca3af);
-      font-size:.84rem;
-      opacity:.85;
-    }
-
-    #modal-perfil .avatar-hint{
-      background:transparent;
-      border:1px dashed var(--border, rgba(255,255,255,.12));
-      box-shadow:none;
-    }
-
-    #modal-perfil .avatar-hint .txt strong{
-      font-weight:500;
-      font-size:.88rem;
-    }
-
-    #modal-perfil .avatar-hint .txt span{
-      font-weight:400;
-      font-size:.82rem;
-    }
-
-    #modal-perfil .status-left{
-      font-weight:400;
-      color:var(--muted, #9ca3af);
-    }
-
-    #modal-perfil .status-left::before{
-      font-weight:400;
-      opacity:.65;
-    }
-
-    #modal-perfil .colab-main{
-      min-width:0;
-      display:grid;
-      gap:12px;
-    }
-
-    #modal-perfil .colab-tabs{
-      display:flex;
-      align-items:center;
-      gap:6px;
-      padding:5px;
-      border-radius:14px;
-      background:var(--card2, rgba(255,255,255,.025));
-      border:1px solid var(--border, rgba(255,255,255,.08));
-      overflow:auto;
-    }
-
-    #modal-perfil .colab-tab{
-      appearance:none;
-      border:1px solid transparent;
-      min-height:38px;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      gap:7px;
-      padding:8px 13px;
-      border-radius:11px;
-      color:var(--muted, #9ca3af);
-      background:transparent;
-      cursor:pointer;
-      font-size:.9rem;
-      font-weight:400;
-      white-space:nowrap;
-      transition:background .15s ease, color .15s ease, border-color .15s ease;
-    }
-
-    #modal-perfil .colab-tab i{
-      font-size:.86rem;
-      opacity:.85;
-    }
-
-    #modal-perfil .colab-tab:hover{
-      background:rgba(255,255,255,.045);
-      color:var(--text, #e5e7eb);
-    }
-
-    #modal-perfil .colab-tab.active,
-    #modal-perfil .colab-tab[aria-selected="true"]{
-      background:rgba(0,139,50,.11);
-      border-color:rgba(0,139,50,.28);
-      color:#7ddf9a;
-      font-weight:500;
-    }
-
-    #modal-perfil .colab-tab.active i,
-    #modal-perfil .colab-tab[aria-selected="true"] i{
-      color:#7ddf9a;
-      opacity:1;
-    }
-
-    #modal-perfil .colab-panel-card{
-      background:var(--card, #111827);
-      border:1px solid var(--border, rgba(255,255,255,.08));
-      border-radius:16px;
-      padding:16px;
-      box-shadow:none;
-    }
-
-    #modal-perfil .colab-panel[hidden]{
-      display:none !important;
-    }
-
-    #modal-perfil .colab-panel.active{
-      display:block;
-    }
-
-    #modal-perfil .panel-title{
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap:12px;
-      padding-bottom:12px;
-      margin-bottom:14px;
-      border-bottom:1px solid var(--border, rgba(255,255,255,.075));
-    }
-
-    #modal-perfil .panel-title h3{
-      margin:0;
-      display:flex;
-      align-items:center;
-      gap:8px;
-      font-size:.98rem;
-      font-weight:500;
-      color:var(--text, #e5e7eb);
-    }
-
-    #modal-perfil .panel-title h3 i{
-      color:var(--muted, #9ca3af);
-      font-size:.9rem;
-      font-weight:400;
-    }
-
-    #modal-perfil .panel-title p{
-      margin:.22rem 0 0;
-      color:var(--muted, #9ca3af);
-      font-size:.84rem;
-      font-weight:400;
-      line-height:1.38;
-    }
-
-    #modal-perfil .details-grid dt{
-      font-size:.78rem;
-      font-weight:400;
-      color:var(--muted, #9ca3af);
-      letter-spacing:0;
-      margin-bottom:.38rem;
-    }
-
-    #modal-perfil .details-grid dd,
-    #modal-perfil .details-grid span,
-    #modal-perfil .details-grid a{
-      font-weight:400;
-    }
-
-    #modal-perfil .fieldbox{
-      font-weight:400 !important;
-      background:var(--card2, rgba(255,255,255,.026));
-      border:1px solid var(--border, rgba(255,255,255,.08));
-      box-shadow:none;
-    }
-
-    #modal-perfil .fieldbox a{
-      font-weight:400;
-    }
-
-    #modal-perfil .fieldbox.is-editing{
-      background:transparent;
-      border-color:transparent;
-    }
-
-    #modal-perfil .details-grid .input,
-    #modal-perfil .details-grid .select{
-      font-weight:400 !important;
-    }
-
-    #modal-perfil .chk-line{
-      font-weight:400;
-    }
-
-    #modal-perfil .chk-line strong{
-      font-weight:500;
-    }
-
-    #modal-perfil .muted,
-    #modal-perfil .help-text{
-      font-weight:400;
-    }
-
-    #modal-perfil .chip{
-      font-weight:400;
-      background:transparent;
-      border:1px solid var(--border, rgba(255,255,255,.09));
-    }
-
-    #modal-perfil .perms-grid .chk-line{
-      font-weight:400;
-      padding:7px 8px;
-      border-radius:10px;
-      border:1px solid rgba(255,255,255,.06);
-      background:rgba(255,255,255,.018);
-    }
-
-    #modal-perfil #insts-wrap.fieldbox,
-    #modal-perfil #deptos-wrap.fieldbox{
-      height:auto !important;
-      min-height:auto !important;
-      display:flex;
-      flex-direction:column;
-      align-items:stretch;
-      gap:12px;
-      padding:14px;
-      background:var(--card2, rgba(255,255,255,.025));
-    }
-
-    #modal-perfil .inst-title-line,
-    #modal-perfil .dept-title-line{
-      display:flex;
-      flex-wrap:wrap;
-      align-items:baseline;
-      gap:6px;
-      font-weight:400;
-    }
-
-    #modal-perfil .inst-title-line span:first-child,
-    #modal-perfil .dept-title-line span:first-child{
-      font-weight:500;
-      color:var(--text, #e5e7eb);
-    }
-
-    #modal-perfil #inst-actions,
-    #modal-perfil #dept-actions{
-      gap:.5rem;
-      flex-wrap:wrap;
-    }
-
-    #modal-perfil #inst-actions .btn,
-    #modal-perfil #dept-actions .btn{
-      padding:.34rem .62rem;
-      font-size:.84rem;
-      font-weight:400;
-    }
-
-    #modal-perfil #e-insts,
-    #modal-perfil #e-deptos{
-      grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
-      gap:.55rem;
-    }
-
-    #modal-perfil #d-insts,
-    #modal-perfil #d-deptos{
-      display:flex;
-      flex-wrap:wrap;
-      gap:.5rem;
-    }
-
-    #modal-perfil #fb-senha{
-      background:transparent;
-      border:0;
-    }
-
-    #modal-perfil #fb-senha .input-group{
-      background:var(--card2, rgba(255,255,255,.026));
-      border:1px solid var(--border, rgba(255,255,255,.08));
-      box-shadow:none;
-    }
-
-    #modal-perfil .btn{
-      font-weight:400;
-    }
-
-    #modal-perfil .btn.btn-primary{
-      font-weight:500;
-    }
-
-    #modal-perfil .foot{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-      padding:12px 16px;
-      border-top:1px solid var(--border, rgba(255,255,255,.08));
-    }
-
-    #modal-perfil .foot-note{
-      color:var(--muted, #9ca3af);
-      font-size:.82rem;
-      font-weight:400;
-    }
-
-    #modal-perfil .foot-actions{
-      display:flex;
-      align-items:center;
-      justify-content:flex-end;
-      gap:.6rem;
-      flex-wrap:wrap;
-    }
-
-    @media (max-width:980px){
-      #modal-perfil .colab-layout{
-        grid-template-columns:1fr;
-      }
-
-      #modal-perfil .colab-side{
-        position:static;
-      }
-
-      #modal-perfil .profile-card{
-        grid-template-columns:auto 1fr;
-        justify-items:start;
-        text-align:left;
-        align-items:center;
-      }
-
-      #modal-perfil .avatar-wrap{
-        width:92px;
-        height:92px;
-        border-radius:18px;
-      }
-
-      #modal-perfil .avatar-hint,
-      #modal-perfil .status-left{
-        grid-column:1 / -1;
-        justify-self:stretch;
-        text-align:center;
-      }
-    }
-
-    @media (max-width:640px){
-      #modal-perfil .perfil-modal-card{
-        width:100%;
-        max-height:94vh;
-      }
-
-      #modal-perfil .modal-head{
-        align-items:flex-start;
-        flex-direction:column;
-      }
-
-      #modal-perfil .modal-head-actions{
-        width:100%;
-        justify-content:flex-start;
-      }
-
-      #modal-perfil .modal-body{
-        padding:12px;
-      }
-
-      #modal-perfil .colab-panel-card{
-        padding:12px;
-        border-radius:14px;
-      }
-
-      #modal-perfil .panel-title{
-        display:block;
-      }
-    }
   </style>
 
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/frontend/css/base.css">
-  <link rel="stylesheet" href="/frontend/css/colaboradores.css">
+  <link rel="stylesheet" href="/frontend/css/colaboradores.css?v=colab-modal-clean-1">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 </head>
 
-<body data-page="colaboradores">
+<body data-page="colaboradores" class="colab-midias-match">
   <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
 
-  <main class="main">
-    <div class="section-title">
-      <h1><i class="fa fa-user-friends title-ico" aria-hidden="true"></i> Colaboradores</h1>
-    </div>
+  <main class="main colab-midias-page">
+    <header class="colab-top" aria-label="Cabeçalho de colaboradores">
+      <div class="colab-title-block">
+        <div class="colab-breadcrumb">
+          <strong>ZapsChat</strong>
+          <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+          <span>Equipe</span>
+        </div>
+        <h1>
+          <span class="title-folder" aria-hidden="true"><i class="fa-solid fa-user-group"></i></span>
+          <span class="title-text">Colaboradores</span>
+        </h1>
+      </div>
 
-    <section id="sec-login-config" class="box" aria-label="Segurança de login">
-      <label class="chk-line" style="align-items:flex-start;gap:.5rem;cursor:pointer">
-        <input type="checkbox" id="chk-requer-token">
-        <span>
-          <strong style="font-weight:500">Exigir código de login (token)</strong>
-          <span class="muted" style="display:block;font-size:.85rem;margin-top:2px;font-weight:400;">
-            Quando ativado, depois de digitar e-mail e senha o colaborador
-            precisa informar um código enviado por e-mail para concluir o login.
-          </span>
-        </span>
-      </label>
+      <div class="colab-top-actions">
+        <div class="colab-total-pill" aria-label="Total de usuários">
+          <strong id="count-colaboradores">0</strong>
+          <span>usuários</span>
+        </div>
+
+        <button id="btn-export-colaboradores" class="btn btn-soft" type="button">
+          <i class="fa-solid fa-download" aria-hidden="true"></i>
+          <span>Exportar CSV</span>
+        </button>
+
+        <button id="btn-add-colaborador" class="btn btn-primary" type="button">
+          <i class="fa fa-plus" aria-hidden="true"></i>
+          <span>Novo colaborador</span>
+        </button>
+      </div>
+    </header>
+
+    <section class="colab-searchbar" aria-label="Busca e filtros de colaboradores">
+      <div class="search-wrap">
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+        <input id="filtro" class="input" type="search" placeholder="Buscar por nome, e-mail ou cargo..." autocomplete="off"/>
+      </div>
+
+      <div class="colab-filter-actions">
+        <select id="filtro-depto" class="select" aria-label="Filtrar por departamento">
+          <option value="">Todos os departamentos</option>
+        </select>
+
+        <button id="btn-filtrar" class="btn btn-soft" type="button">
+          <i class="fa fa-filter" aria-hidden="true"></i>
+          <span>Filtrar</span>
+        </button>
+      </div>
     </section>
 
-    <section class="filter" aria-label="Filtros de colaboradores">
-      <label for="filtro">Buscar:</label>
-      <input id="filtro" class="input" type="search" placeholder="Nome ou e-mail…"/>
+    <section class="colab-shell" aria-label="Gerenciador de colaboradores">
+      <div class="colab-workspace">
+        <section class="panel colab-table-panel" aria-labelledby="colab-list-title">
+          <div class="panel-head files-head">
+            <div>
+              <h2 id="colab-list-title">Equipe cadastrada</h2>
+              <p>Lista limpa com status, e-mail, departamentos e ações rápidas.</p>
+            </div>
+          </div>
 
-      <label for="filtro-depto">Departamento:</label>
-      <select id="filtro-depto" class="select">
-        <option value="">Todos</option>
-      </select>
-
-      <button id="btn-filtrar" class="btn btn-ghost" type="button">
-        <i class="fa fa-filter"></i> Filtrar
-      </button>
-
-      <button id="btn-add-colaborador" class="btn btn-primary" type="button">
-        <i class="fa fa-user-plus"></i> Novo colaborador
-      </button>
-
-      <span class="count"><span id="count-colaboradores">0</span> colaborador(es)</span>
-    </section>
-
-    <section aria-label="Lista de colaboradores">
-      <div class="box">
-        <div class="table-wrap">
-          <div class="table-scroller">
-            <table class="colabs">
+          <div class="table-wrap">
+            <table class="colabs" aria-label="Lista de colaboradores">
               <thead>
                 <tr>
-                  <th>#</th>
-                  <th style="width:72px">Foto</th>
+                  <th class="check-col">
+                    <input id="colab-select-all" type="checkbox" aria-label="Selecionar todos os colaboradores">
+                  </th>
                   <th>Nome</th>
+                  <th>Status</th>
                   <th>E-mail</th>
-                  <th>Departamento</th>
-                  <th style="width:150px">Ações</th>
+                  <th>Departamentos</th>
+                  <th class="actions-col">Ações</th>
                 </tr>
               </thead>
               <tbody id="tabela-colaboradores"></tbody>
             </table>
           </div>
-        </div>
 
-        <div id="empty-state" class="empty empty-bordered">
-          <span><i class="fa fa-inbox" aria-hidden="true"></i> Nenhum colaborador para os filtros aplicados.</span>
-        </div>
+          <div id="empty-state" class="empty empty-bordered">
+            <span><i class="fa fa-inbox" aria-hidden="true"></i> Nenhum colaborador encontrado.</span>
+          </div>
+        </section>
       </div>
+
+      <aside class="colab-aside" aria-label="Resumo e segurança">
+        <section class="side-card security-card" id="sec-login-config" aria-label="Segurança de login">
+          <div class="side-card-head">
+            <h2>Segurança</h2>
+            <button type="button" class="ghost-menu" aria-label="Mais opções"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+          </div>
+
+          <label class="security-toggle" for="chk-requer-token">
+            <span class="toggle-copy">
+              <strong>Exigir código de login</strong>
+              <small>Após e-mail e senha, o colaborador informa um código enviado por e-mail.</small>
+            </span>
+            <input type="checkbox" id="chk-requer-token">
+          </label>
+        </section>
+
+        <section class="side-card overview-card">
+          <div class="side-card-head">
+            <h2>Resumo</h2>
+            <button type="button" class="ghost-menu" aria-label="Mais opções"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+          </div>
+
+          <div class="overview-list">
+            <div class="overview-row">
+              <span><i class="fa-regular fa-user"></i> Usuários exibidos</span>
+              <strong id="overview-colab-total">0</strong>
+            </div>
+            <div class="overview-row">
+              <span><i class="fa-regular fa-circle-check"></i> Selecionados</span>
+              <strong id="overview-colab-selected">0</strong>
+            </div>
+            <div class="overview-row">
+              <span><i class="fa-regular fa-building"></i> Filtro</span>
+              <strong id="overview-colab-filter">Todos</strong>
+            </div>
+          </div>
+        </section>
+      </aside>
     </section>
   </main>
 
@@ -933,6 +459,6 @@
 
   <div id="toast" role="status" aria-live="polite"></div>
 
-  <script src="/frontend/js/pages/colaboradores.js?v=split-fast-3" defer></script>
+  <script src="/frontend/js/pages/colaboradores.js?v=colab-modal-clean-1" defer></script>
 </body>
 </html>

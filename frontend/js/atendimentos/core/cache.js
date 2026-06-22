@@ -23,7 +23,20 @@ export function cacheGet(key) {
 export function cacheSet(key, val, ttlMs = null) {
   try {
     const exp = ttlMs ? nowMs() + ttlMs : 0;
-    localStorage.setItem(cacheKey(key), JSON.stringify({ exp, val }));
+    const fullKey = cacheKey(key);
+    const raw = JSON.stringify({ exp, val });
+
+    // Proteção de RAM: localStorage gigante trava o Chrome ao abrir o app.
+    // Histórico/cache pesado deve ficar no banco; no navegador só cache leve.
+    const maxBytes = Number(window.ZC_LOCALSTORAGE_MAX_BYTES || 900000);
+    const isHistoryLike = String(key || '').includes('hist:') || String(key || '').includes('cursor:');
+
+    if (isHistoryLike && raw.length > maxBytes) {
+      try { localStorage.removeItem(fullKey); } catch {}
+      return;
+    }
+
+    localStorage.setItem(fullKey, raw);
   } catch {}
 }
 

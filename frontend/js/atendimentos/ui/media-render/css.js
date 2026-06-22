@@ -626,6 +626,98 @@
         overflow:hidden;
       }
 
+      img[data-zc-lazy-media],
+      video[data-zc-lazy-media]{
+        background:#eef2f1;
+      }
+
+      img[data-zc-lazy-media]:not(.zc-lazy-loaded){
+        min-height:120px;
+        object-fit:cover;
+      }
+
+      .msg-sticker[data-zc-lazy-media]:not(.zc-lazy-loaded){
+        width:120px;
+        height:120px;
+        background:#eef2f1;
+        border-radius:12px;
+      }
+
+      .zc-lazy-media-host{
+        position:relative;
+        overflow:hidden;
+      }
+
+      .msg-media-img.zc-lazy-media-host,
+      .msg-media-cell.zc-lazy-media-host{
+        display:block;
+        background:#eef2f1;
+      }
+
+      .zc-lazy-media-host.zc-media-loading::before,
+      .zc-lazy-media-host.zc-media-failed::before{
+        content:'';
+        position:absolute;
+        left:50%;
+        top:50%;
+        width:34px;
+        height:34px;
+        margin-left:-17px;
+        margin-top:-31px;
+        border-radius:999px;
+        background:rgba(255,255,255,.92);
+        box-shadow:0 6px 18px rgba(31,41,55,.12);
+        z-index:4;
+        pointer-events:none;
+      }
+
+      .zc-lazy-media-host.zc-media-loading::before{
+        background:
+          linear-gradient(rgba(255,255,255,.92), rgba(255,255,255,.92)) padding-box,
+          conic-gradient(from 0deg, #22c55e, #d1fae5, #22c55e) border-box;
+        border:3px solid transparent;
+        animation:zcMediaSpin .9s linear infinite;
+      }
+
+      .zc-lazy-media-host.zc-media-failed::before{
+        background:rgba(254,242,242,.96);
+      }
+
+      .zc-lazy-media-host.zc-media-loading::after,
+      .zc-lazy-media-host.zc-media-failed::after{
+        content:attr(data-zc-media-loading-label);
+        position:absolute;
+        left:50%;
+        top:50%;
+        transform:translate(-50%, 10px);
+        max-width:82%;
+        padding:6px 10px;
+        border-radius:999px;
+        background:rgba(255,255,255,.94);
+        color:#4b5563;
+        font-size:12px;
+        font-weight:600;
+        line-height:1.2;
+        text-align:center;
+        white-space:nowrap;
+        box-shadow:0 6px 18px rgba(31,41,55,.10);
+        z-index:4;
+        pointer-events:none;
+      }
+
+      .zc-lazy-media-host.zc-media-failed::after{
+        color:#b91c1c;
+      }
+
+      .zc-lazy-media-host.zc-media-loaded::before,
+      .zc-lazy-media-host.zc-media-loaded::after{
+        display:none;
+      }
+
+      @keyframes zcMediaSpin{
+        to{ transform:rotate(360deg); }
+      }
+
       @media (max-width:720px){
         .zc-media-viewer__stage{
           inset:58px 10px 88px;

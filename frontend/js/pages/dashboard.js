@@ -84,8 +84,31 @@
     }
   };
 
-  // Paleta Moderna
-  const PALETTE = ['#6366f1','#ec4899','#10b981','#f59e0b','#8b5cf6','#f43f5e','#06b6d4','#14b8a6'];
+  // Paleta e tema do dashboard (lê as variáveis do CSS para bater com claro/escuro)
+  const PALETTE = ['#008169','#39a98f','#E6FFDA','#14b86a','#f59e0b','#ef4444','#06b6d4','#94d3bf'];
+
+  function cssVar(name, fallback){
+    try{
+      const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      return v || fallback;
+    }catch{
+      return fallback;
+    }
+  }
+
+  function chartTheme(){
+    return {
+      grid: cssVar('--chart-grid', '#edf0f5'),
+      text: cssVar('--chart-text', '#7a8293'),
+      line: cssVar('--chart-line', '#008169'),
+      line2: cssVar('--chart-line-2', '#39a98f'),
+      fill: cssVar('--chart-fill', 'rgba(0,129,105,.10)'),
+      bar: cssVar('--chart-bar', '#008169'),
+      bar2: cssVar('--chart-bar-2', '#E6FFDA'),
+      tooltipBg: cssVar('--dash-title', '#111827'),
+      tooltipText: cssVar('--dash-card', '#ffffff')
+    };
+  }
 
   const toNum = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
   const fmtDateISO = (d)=>{ const x = (d instanceof Date)? d : new Date(d);
@@ -149,16 +172,44 @@
 
   function setDemoBadge(active){
     document.querySelectorAll('.charts .box .demo-badge').forEach(n=>n.remove());
+    document.querySelectorAll('.charts .box.is-demo').forEach(n=>n.classList.remove('is-demo'));
     if(!active) return;
+
     const targets = [
       document.getElementById('pizzaAtendimento'),
       document.getElementById('funilAtendimento')
     ].filter(Boolean).map(c => c.closest('.box')).filter(Boolean);
+
     for (const box of targets){
-      const b = document.createElement('div');
+      box.classList.add('is-demo');
+
+      const title = box.querySelector('.chart-title');
+      const legend = box.querySelector('.chart-legend');
+      let side = title?.querySelector('.chart-title-side') || null;
+
+      // O badge não pode ficar absoluto em cima da legenda.
+      // Então a lateral do título vira um grupo flex: [Modo demonstração] [Legenda].
+      if (title && !side) {
+        side = document.createElement('div');
+        side.className = 'chart-title-side';
+
+        if (legend) {
+          title.insertBefore(side, legend);
+          side.appendChild(legend);
+        } else {
+          title.appendChild(side);
+        }
+      }
+
+      const b = document.createElement('span');
       b.className = 'demo-badge';
       b.textContent = 'Modo Demonstração';
-      box.appendChild(b);
+
+      if (side) {
+        side.insertBefore(b, side.firstChild);
+      } else {
+        box.appendChild(b);
+      }
     }
   }
 
@@ -221,48 +272,83 @@
   }
 
   function renderPizza(distrib){
-    const ctx = document.getElementById('pizzaAtendimento'); if (!hasChart() || !ctx) return;
+    const ctx = document.getElementById('pizzaAtendimento');
+    if (!hasChart() || !ctx) return;
+
     const labels = (distrib?.labels) || Object.keys(distrib?.data||{});
-    const data   = Array.isArray(distrib?.data) ? distrib.data : labels.map(k => toNum(distrib?.data?.[k]) ?? 0);
-    
+    const data = Array.isArray(distrib?.data)
+      ? distrib.data.map(v => toNum(v) ?? 0)
+      : labels.map(k => toNum(distrib?.data?.[k]) ?? 0);
+
+    const t = chartTheme();
+
     chartPizza = upsertChart(ctx, chartPizza, {
-      type:'doughnut',
-      data:{ 
-        labels, 
-        datasets:[{ 
-          data, 
-          backgroundColor: PALETTE.slice(0, data.length), 
-          borderWidth:0,
-          hoverOffset:10,
-          borderRadius: 4,
-          spacing: 2
-        }] 
+      type:'line',
+      data:{
+        labels,
+        datasets:[
+          {
+            label:'Volume',
+            data,
+            tension:.42,
+            borderColor:t.line,
+            backgroundColor:t.fill,
+            pointBackgroundColor:t.line,
+            pointBorderColor:t.line,
+            pointRadius:3,
+            pointHoverRadius:5,
+            fill:true,
+            borderWidth:2.4
+          },
+          {
+            label:'Tendência',
+            data:data.map((v,i,arr)=>{
+              const prev = arr[i-1] ?? v;
+              const next = arr[i+1] ?? v;
+              return Math.round((prev + v + next) / 3);
+            }),
+            tension:.42,
+            borderColor:t.line2,
+            backgroundColor:'transparent',
+            pointRadius:0,
+            pointHoverRadius:0,
+            fill:false,
+            borderWidth:1.8
+          }
+        ]
       },
       options:{
         responsive:true,
-        cutout:'78%', // Anel mais fino e moderno
-        plugins:{ 
-          legend:{ 
-            position:'right', 
-            labels:{ 
-              boxWidth:8, 
-              boxHeight:8, 
-              usePointStyle:true, 
-              padding: 15,
-              font: { size: 11, family: "'Plus Jakarta Sans', sans-serif" } 
-            } 
-          }, 
-          tooltip:{ 
-            mode:'index', 
+        maintainAspectRatio:false,
+        interaction:{ mode:'index', intersect:false },
+        plugins:{
+          legend:{
+            display:false
+          },
+          tooltip:{
+            mode:'index',
             intersect:false,
-            backgroundColor: 'rgba(9, 9, 11, 0.95)',
-            borderColor: 'rgba(255,255,255,0.1)',
-            borderWidth: 1,
-            padding: 10,
-            cornerRadius: 8
-          } 
+            backgroundColor:t.tooltipBg,
+            titleColor:t.tooltipText,
+            bodyColor:t.tooltipText,
+            borderColor:cssVar('--dash-border', '#edf2ee'),
+            borderWidth:1,
+            padding:11,
+            cornerRadius:10,
+            displayColors:false
+          }
         },
-        layout: { padding: 10 }
+        scales:{
+          y:{
+            beginAtZero:true,
+            ticks:{ precision:0, color:t.text, font:{ size:11, weight:'500' } },
+            grid:{ color:t.grid, drawBorder:false, tickLength:0 }
+          },
+          x:{
+            grid:{ display:false, drawBorder:false },
+            ticks:{ color:t.text, maxRotation:0, minRotation:0, autoSkip:true, font:{ size:11, weight:'500' } }
+          }
+        }
       }
     });
   }
@@ -272,53 +358,81 @@
     const map = { 'Recebidas':'Rec.','Qualificadas':'Quali.','Em Progresso':'Prog.','Resolvidas':'Res.' };
     if (map[label]) return map[label];
     const w = String(label).split(/\s+/);
-    if (w.length === 1) return (w[0].slice(0,4) + (w[0].length>4?'.':'')); 
-    return (w[0].slice(0,3) + '.'); 
+    if (w.length === 1) return (w[0].slice(0,4) + (w[0].length>4?'.':''));
+    return (w[0].slice(0,3) + '.');
   }
 
   function renderFunil(funil){
-    const ctx = document.getElementById('funilAtendimento'); if (!hasChart() || !ctx) return;
+    const ctx = document.getElementById('funilAtendimento');
+    if (!hasChart() || !ctx) return;
+
     const labelsFull = (funil?.labels) || Object.keys(funil?.data||{});
-    const labels     = labelsFull.map(shortenFunnelLabel);
-    const data       = Array.isArray(funil?.data) ? funil.data : labelsFull.map(k => toNum(funil?.data?.[k]) ?? 0);
+    const labels = labelsFull.map(shortenFunnelLabel);
+    const data = Array.isArray(funil?.data)
+      ? funil.data.map(v => toNum(v) ?? 0)
+      : labelsFull.map(k => toNum(funil?.data?.[k]) ?? 0);
+
+    const t = chartTheme();
 
     chartFunil = upsertChart(ctx, chartFunil, {
       type:'bar',
-      data:{ 
-        labels, 
-        datasets:[{ 
-          data, 
-          backgroundColor: PALETTE.slice(0, data.length), 
-          borderWidth:0, 
-          borderRadius: 6, // Barras arredondadas
-          barThickness: 28, 
-          maxBarThickness: 40 
-        }] 
+      data:{
+        labels,
+        datasets:[
+          {
+            label:'Conversas',
+            data,
+            backgroundColor:data.map((_,i)=> i % 2 === 0 ? t.bar : t.bar2),
+            borderWidth:0,
+            borderRadius:8,
+            barThickness:IS_MOBILE ? 22 : 34,
+            maxBarThickness:42
+          }
+        ]
       },
       options:{
-        responsive:true, maintainAspectRatio:false,
-        plugins:{ 
+        responsive:true,
+        maintainAspectRatio:false,
+        interaction:{ mode:'index', intersect:false },
+        plugins:{
           legend:{ display:false },
-          tooltip:{ 
-            mode:'index', intersect:false,
-            backgroundColor: 'rgba(9, 9, 11, 0.95)',
-            borderColor: 'rgba(255,255,255,0.1)',
-            borderWidth: 1,
-            cornerRadius: 8,
-            padding: 10,
-            callbacks:{ title: (items)=> { if (!items?.length) return ''; const i = items[0].dataIndex; return IS_MOBILE ? labelsFull[i] : items[0].label; } } 
-          } 
+          tooltip:{
+            mode:'index',
+            intersect:false,
+            backgroundColor:t.tooltipBg,
+            titleColor:t.tooltipText,
+            bodyColor:t.tooltipText,
+            borderColor:cssVar('--dash-border', '#edf2ee'),
+            borderWidth:1,
+            cornerRadius:10,
+            padding:11,
+            displayColors:false,
+            callbacks:{
+              title:(items)=>{
+                if (!items?.length) return '';
+                const i = items[0].dataIndex;
+                return IS_MOBILE ? labelsFull[i] : items[0].label;
+              }
+            }
+          }
         },
-        scales:{ 
-          y:{ 
-            beginAtZero:true, 
-            ticks:{ precision:0, color: '#71717a', font: {size: 10} }, 
-            grid:{ color: '#27272a', drawBorder: false, tickLength: 0 } // Grade muito sutil
-          }, 
-          x:{ 
-            grid:{ display:false, drawBorder: false }, // Sem grade vertical
-            ticks:{ maxRotation:0, minRotation:0, autoSkip:true, maxTicksLimit: Math.min(5, labels.length), color: '#a1a1aa', font: {size: 11} } 
-          } 
+        scales:{
+          y:{
+            beginAtZero:true,
+            ticks:{ precision:0, color:t.text, font:{ size:11, weight:'500' } },
+            grid:{ color:t.grid, drawBorder:false, tickLength:0 }
+          },
+          x:{
+            grid:{ display:false, drawBorder:false },
+            ticks:{
+              maxRotation:0,
+              minRotation:0,
+              autoSkip:true,
+              maxTicksLimit:Math.min(5, labels.length),
+              color:t.text,
+              font:{ size:11, weight:'500' }
+            }
+          }
         }
       }
     });
@@ -503,6 +617,11 @@
     btnLimpar?.addEventListener('click', ()=> setDateISO(elDate, ''));
 
     const doLoad = ()=> loadAll(elDate?.value || todayISO);
+
+    window.addEventListener('zapschat-theme-changed', function(){
+      const iso = elDate?.value || todayISO;
+      loadAll(iso);
+    });
     if (window.ZAuth?.softEnsureAuth) ZAuth.softEnsureAuth().finally(doLoad);
     else doLoad();
   }

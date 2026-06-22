@@ -1928,3 +1928,3437 @@ body[data-page="colaboradores"] ::-webkit-scrollbar-track{
     transition:none;
   }
 }
+/* =======================================================
+   Redesign 2026 — Colaboradores estilo SaaS/lista + ficha
+   Mantém IDs, classes funcionais e backend atual.
+   ======================================================= */
+
+body[data-page="colaboradores"]{
+  background:#eef1f5 !important;
+  color:#1f2937 !important;
+}
+
+body[data-page="colaboradores"] .colab-page-shell{
+  --card:#ffffff;
+  --card2:#f7f8fb;
+  --text:#1f2937;
+  --muted:#6b7280;
+  --border:#e5e7eb;
+  --border-hairline:#e8ebf0;
+  --border-hairline-strong:#dfe4eb;
+  --green:#008b32;
+  --green-border:#087b34;
+  color:#1f2937;
+  padding-top:18px;
+}
+
+.colab-hero{
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:18px;
+  padding:22px;
+  margin-bottom:14px;
+  border:1px solid rgba(229,231,235,.95);
+  border-radius:22px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(0,139,50,.10), transparent 30%),
+    linear-gradient(135deg, #ffffff 0%, #f7f9fc 100%);
+  box-shadow:0 18px 45px rgba(15,23,42,.07);
+}
+
+.colab-hero-text{
+  min-width:0;
+  display:grid;
+  gap:7px;
+}
+
+.colab-hero .eyebrow{
+  width:max-content;
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:7px 10px;
+  border-radius:999px;
+  color:#087b34;
+  background:rgba(0,139,50,.09);
+  border:1px solid rgba(0,139,50,.14);
+  font-size:.82rem;
+  font-weight:600;
+}
+
+.colab-hero h1{
+  margin:0;
+  font-size:clamp(1.55rem, 2.4vw, 2.15rem);
+  line-height:1.05;
+  letter-spacing:-.04em;
+  color:#111827;
+  font-weight:700;
+}
+
+.colab-hero p{
+  max-width:720px;
+  margin:0;
+  color:#64748b;
+  font-size:.96rem;
+  line-height:1.5;
+}
+
+.colab-hero-actions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:10px;
+  flex:0 0 auto;
+}
+
+.colab-stats{
+  display:grid;
+  grid-template-columns:repeat(4, minmax(0,1fr));
+  gap:12px;
+  margin-bottom:14px;
+}
+
+.colab-stat-card{
+  min-height:108px;
+  padding:16px;
+  display:grid;
+  align-content:space-between;
+  gap:10px;
+  background:#fff;
+  border:1px solid rgba(229,231,235,.95);
+  border-radius:18px;
+  box-shadow:0 14px 32px rgba(15,23,42,.055);
+}
+
+.colab-stat-card .stat-label{
+  color:#6b7280;
+  font-size:.84rem;
+  font-weight:500;
+}
+
+.colab-stat-card .stat-value{
+  color:#111827;
+  font-size:2rem;
+  line-height:1;
+  letter-spacing:-.04em;
+  font-weight:700;
+}
+
+.colab-stat-card .stat-foot{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  color:#8b95a5;
+  font-size:.78rem;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.colab-stat-card .stat-foot i{
+  color:#008b32;
+}
+
+.stat-card-avatars .stat-avatars{
+  display:flex;
+  align-items:center;
+  min-height:36px;
+}
+
+.stat-card-avatars .stat-avatars span,
+.stat-card-avatars .stat-avatars img{
+  width:34px;
+  height:34px;
+  margin-right:-8px;
+  display:grid;
+  place-items:center;
+  border-radius:999px;
+  overflow:hidden;
+  object-fit:cover;
+  background:linear-gradient(135deg,#dfe7f2,#f8fafc);
+  border:2px solid #fff;
+  color:#64748b;
+  font-size:.78rem;
+  font-weight:700;
+  box-shadow:0 6px 14px rgba(15,23,42,.10);
+}
+
+.colab-workbench{
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) 340px;
+  align-items:start;
+  gap:14px;
+}
+
+.colab-list-pane{
+  min-width:0;
+  display:grid;
+  gap:12px;
+}
+
+body[data-page="colaboradores"] .colab-searchbar{
+  position:relative;
+  display:grid;
+  grid-template-columns:minmax(220px,1fr) minmax(180px,240px) auto;
+  gap:10px;
+  padding:12px;
+  margin:0;
+  background:#fff !important;
+  border:1px solid rgba(229,231,235,.95) !important;
+  border-radius:18px !important;
+  box-shadow:0 14px 32px rgba(15,23,42,.05);
+}
+
+.colab-searchbar label,
+.colab-searchbar .count{
+  display:none !important;
+}
+
+.search-field{
+  min-width:0;
+  position:relative;
+}
+
+.search-field i{
+  position:absolute;
+  left:13px;
+  top:50%;
+  transform:translateY(-50%);
+  color:#9aa4b2;
+  z-index:1;
+  font-size:.88rem;
+}
+
+body[data-page="colaboradores"] .search-field .input{
+  width:100%;
+  padding-left:38px !important;
+}
+
+body[data-page="colaboradores"] .colab-page-shell input[type="text"],
+body[data-page="colaboradores"] .colab-page-shell input[type="email"],
+body[data-page="colaboradores"] .colab-page-shell input[type="number"],
+body[data-page="colaboradores"] .colab-page-shell input[type="tel"],
+body[data-page="colaboradores"] .colab-page-shell input[type="password"],
+body[data-page="colaboradores"] .colab-page-shell input[type="search"],
+body[data-page="colaboradores"] .colab-page-shell select,
+body[data-page="colaboradores"] .colab-page-shell textarea{
+  min-height:42px;
+  background:#f8fafc !important;
+  border:1px solid #e3e8ef !important;
+  color:#111827 !important;
+  border-radius:13px !important;
+  padding:10px 12px;
+  box-shadow:0 1px 0 rgba(15,23,42,.02) inset;
+}
+
+body[data-page="colaboradores"] .colab-page-shell input:focus,
+body[data-page="colaboradores"] .colab-page-shell select:focus,
+body[data-page="colaboradores"] .colab-page-shell textarea:focus{
+  outline:none;
+  border-color:rgba(0,139,50,.40) !important;
+  box-shadow:0 0 0 4px rgba(0,139,50,.10) !important;
+}
+
+.colab-table-card{
+  padding:0 !important;
+  overflow:hidden;
+  background:#fff !important;
+  border:1px solid rgba(229,231,235,.95) !important;
+  border-radius:22px !important;
+  box-shadow:0 18px 45px rgba(15,23,42,.065);
+}
+
+.table-card-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:18px 18px 10px;
+}
+
+.table-card-head h2{
+  margin:0;
+  color:#111827;
+  font-size:1.02rem;
+  letter-spacing:-.02em;
+  font-weight:700;
+}
+
+.table-card-head p{
+  margin:4px 0 0;
+  color:#7b8797;
+  font-size:.84rem;
+}
+
+body[data-page="colaboradores"] .colab-table-card .table-wrap{
+  padding:0 12px 12px;
+  border:0 !important;
+  border-radius:0 !important;
+  background:#fff !important;
+  overflow:visible;
+}
+
+body[data-page="colaboradores"] .colab-table-card .table-scroller{
+  max-height:min(70vh, 820px);
+  border-radius:16px;
+  background:#f6f8fb;
+  padding:6px;
+}
+
+body[data-page="colaboradores"] table.colabs{
+  border-collapse:separate !important;
+  border-spacing:0 7px !important;
+  background:transparent !important;
+  color:#243041 !important;
+}
+
+body[data-page="colaboradores"] table.colabs thead th{
+  position:sticky;
+  top:0;
+  background:#f6f8fb !important;
+  color:#8a95a5 !important;
+  border:0 !important;
+  padding:9px 12px !important;
+  font-size:.76rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  z-index:2;
+}
+
+body[data-page="colaboradores"] table.colabs tbody tr{
+  background:#fff !important;
+  border-radius:14px;
+  box-shadow:0 6px 18px rgba(15,23,42,.045);
+  transition:transform .14s ease, box-shadow .14s ease, background .14s ease;
+}
+
+body[data-page="colaboradores"] table.colabs tbody tr:hover{
+  transform:translateY(-1px);
+  background:#fff !important;
+  box-shadow:0 10px 24px rgba(15,23,42,.075);
+}
+
+body[data-page="colaboradores"] table.colabs td,
+body[data-page="colaboradores"] table.colabs th{
+  border:0 !important;
+}
+
+body[data-page="colaboradores"] table.colabs tbody td{
+  padding:10px 12px !important;
+  color:#344054 !important;
+  background:#fff;
+  border-top:1px solid #eef1f5 !important;
+  border-bottom:1px solid #eef1f5 !important;
+}
+
+body[data-page="colaboradores"] table.colabs tbody td:first-child{
+  border-left:1px solid #eef1f5 !important;
+  border-radius:14px 0 0 14px;
+  color:#94a3b8 !important;
+}
+
+body[data-page="colaboradores"] table.colabs tbody td:last-child{
+  border-right:1px solid #eef1f5 !important;
+  border-radius:0 14px 14px 0;
+}
+
+body[data-page="colaboradores"] .avatar-mini{
+  width:38px;
+  height:38px;
+  border:2px solid #fff;
+  box-shadow:0 5px 14px rgba(15,23,42,.12);
+}
+
+body[data-page="colaboradores"] .td-actions{
+  justify-content:flex-end;
+  gap:6px;
+}
+
+body[data-page="colaboradores"] .td-actions .btn.btn-ghost,
+body[data-page="colaboradores"] .colab-searchbar .btn.btn-ghost{
+  min-height:38px;
+  border:1px solid #e3e8ef !important;
+  background:#fff !important;
+  color:#475467 !important;
+  border-radius:12px !important;
+  box-shadow:0 5px 12px rgba(15,23,42,.045);
+}
+
+body[data-page="colaboradores"] .td-actions .btn.btn-ghost:hover,
+body[data-page="colaboradores"] .colab-searchbar .btn.btn-ghost:hover{
+  background:#f8fafc !important;
+  color:#111827 !important;
+}
+
+body[data-page="colaboradores"] #btn-add-colaborador{
+  min-height:44px;
+  padding:0 18px !important;
+  border-radius:999px !important;
+  border:1px solid rgba(0,139,50,.48) !important;
+  background:linear-gradient(135deg, #0f9f4b 0%, #008b32 100%) !important;
+  color:#fff !important;
+  box-shadow:0 14px 26px rgba(0,139,50,.24);
+}
+
+.colab-detail-pane{
+  min-width:0;
+  display:grid;
+  gap:12px;
+  position:sticky;
+  top:16px;
+}
+
+.detail-pane-card{
+  background:#fff !important;
+  border:1px solid rgba(229,231,235,.95) !important;
+  border-radius:22px !important;
+  box-shadow:0 18px 45px rgba(15,23,42,.065);
+}
+
+.detail-profile-preview{
+  position:relative;
+  padding:0 18px 18px;
+  overflow:hidden;
+  text-align:center;
+}
+
+.detail-cover{
+  height:82px;
+  margin:0 -18px;
+  background:
+    radial-gradient(circle at 75% 15%, rgba(255,255,255,.6), transparent 22%),
+    linear-gradient(135deg, #e8f8ee 0%, #d9eefc 100%);
+}
+
+.detail-avatar{
+  width:82px;
+  height:82px;
+  margin:-41px auto 12px;
+  display:grid;
+  place-items:center;
+  background:#fff;
+  color:#008b32;
+  border:4px solid #fff;
+  border-radius:24px;
+  box-shadow:0 12px 30px rgba(15,23,42,.14);
+  font-size:1.9rem;
+}
+
+.detail-profile-preview h2{
+  margin:0;
+  color:#111827;
+  font-size:1.05rem;
+  font-weight:700;
+  letter-spacing:-.02em;
+}
+
+.detail-profile-preview p{
+  margin:8px 0 16px;
+  color:#667085;
+  font-size:.88rem;
+  line-height:1.5;
+}
+
+.detail-actions-preview{
+  display:grid;
+  gap:8px;
+  text-align:left;
+}
+
+.detail-actions-preview span{
+  display:flex;
+  align-items:center;
+  gap:9px;
+  min-height:38px;
+  padding:9px 11px;
+  border:1px solid #edf0f4;
+  border-radius:13px;
+  color:#475467;
+  background:#f9fafb;
+  font-size:.86rem;
+}
+
+.detail-actions-preview i{
+  color:#008b32;
+}
+
+body[data-page="colaboradores"] #sec-login-config.detail-pane-card{
+  padding:16px !important;
+}
+
+body[data-page="colaboradores"] #sec-login-config .chk-line{
+  color:#344054 !important;
+}
+
+body[data-page="colaboradores"] #sec-login-config .muted{
+  color:#667085 !important;
+}
+
+body[data-page="colaboradores"] #sec-login-config input[type="checkbox"]{
+  accent-color:#008b32;
+  margin-top:3px;
+}
+
+body[data-page="colaboradores"] .empty-bordered{
+  margin:0 12px 12px;
+  background:#f9fafb;
+  color:#667085;
+  border-color:#d9dee7;
+}
+
+/* Modal fica com a mesma estrutura/IDs, mas visual mais claro e próximo da referência */
+#modal-perfil.modal-back{
+  background:rgba(15,23,42,.42) !important;
+  backdrop-filter:blur(3px) !important;
+  -webkit-backdrop-filter:blur(3px) !important;
+}
+
+#modal-perfil .perfil-modal-card{
+  background:#ffffff !important;
+  color:#1f2937 !important;
+  border:1px solid rgba(229,231,235,.95) !important;
+  box-shadow:0 28px 90px rgba(15,23,42,.22) !important;
+}
+
+#modal-perfil .modal-head,
+#modal-perfil .foot{
+  background:#ffffff !important;
+  border-color:#e8ebf0 !important;
+}
+
+#modal-perfil .modal-head .title,
+#modal-perfil .panel-title h3,
+#modal-perfil .side-preview-name,
+#modal-perfil .avatar-hint strong,
+#modal-perfil .inst-title-line span:first-child,
+#modal-perfil .dept-title-line span:first-child{
+  color:#111827 !important;
+}
+
+#modal-perfil .modal-head .title i{
+  background:#f5f7fa !important;
+  border-color:#e8ebf0 !important;
+  color:#008b32 !important;
+}
+
+#modal-perfil .profile-card,
+#modal-perfil .colab-panel-card{
+  background:#ffffff !important;
+  border-color:#e8ebf0 !important;
+}
+
+#modal-perfil .colab-tabs{
+  background:#f6f8fb !important;
+  border-color:#e8ebf0 !important;
+}
+
+#modal-perfil .colab-tab{
+  color:#667085 !important;
+}
+
+#modal-perfil .colab-tab:hover{
+  background:#ffffff !important;
+  color:#111827 !important;
+}
+
+#modal-perfil .colab-tab.active,
+#modal-perfil .colab-tab[aria-selected="true"]{
+  background:#ffffff !important;
+  color:#008b32 !important;
+  border-color:#dfe6ee !important;
+  box-shadow:0 8px 18px rgba(15,23,42,.06);
+}
+
+#modal-perfil .fieldbox,
+#modal-perfil #insts-wrap.fieldbox,
+#modal-perfil #deptos-wrap.fieldbox,
+#modal-perfil #fb-senha .input-group,
+#fb-senha .input-group{
+  background:#f8fafc !important;
+  border-color:#e3e8ef !important;
+  color:#111827 !important;
+}
+
+#modal-perfil .fieldbox > span,
+#modal-perfil .fieldbox > a,
+#modal-perfil .details-grid dd,
+#modal-perfil .details-grid span,
+#modal-perfil .details-grid a,
+#modal-perfil .chk-line{
+  color:#344054 !important;
+}
+
+#modal-perfil .details-grid dt,
+#modal-perfil .side-preview-role,
+#modal-perfil .side-preview-pill,
+#modal-perfil .avatar-hint span,
+#modal-perfil .status-left,
+#modal-perfil .help-text,
+#modal-perfil .muted,
+#modal-perfil .panel-title p,
+#modal-perfil .foot-note{
+  color:#667085 !important;
+}
+
+#modal-perfil .input,
+#modal-perfil .select{
+  background:#ffffff !important;
+  border-color:#dfe4eb !important;
+  color:#111827 !important;
+}
+
+#modal-perfil .chip,
+#modal-perfil .chips span,
+#modal-perfil #e-insts .chk-line,
+#modal-perfil #e-perms .chk-line{
+  background:#ffffff !important;
+  border-color:#e3e8ef !important;
+  color:#344054 !important;
+}
+
+#modal-perfil .avatar-wrap{
+  background:linear-gradient(135deg, #effaf2, #e8f1ff) !important;
+  border-color:#e3e8ef !important;
+}
+
+#modal-perfil .avatar-wrap #p-mono{
+  color:#008b32 !important;
+}
+
+@media (max-width:1180px){
+  .colab-workbench{
+    grid-template-columns:1fr;
+  }
+
+  .colab-detail-pane{
+    position:static;
+    grid-template-columns:1fr 1fr;
+  }
+}
+
+@media (max-width:900px){
+  .colab-stats{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+
+  body[data-page="colaboradores"] .colab-searchbar{
+    grid-template-columns:1fr;
+  }
+
+  .colab-hero{
+    align-items:stretch;
+    flex-direction:column;
+  }
+
+  .colab-hero-actions{
+    justify-content:flex-start;
+  }
+
+  .colab-detail-pane{
+    grid-template-columns:1fr;
+  }
+}
+
+@media (max-width:620px){
+  body[data-page="colaboradores"] .colab-page-shell{
+    padding:12px;
+  }
+
+  .colab-hero,
+  .colab-table-card,
+  .detail-pane-card{
+    border-radius:18px !important;
+  }
+
+  .colab-stats{
+    grid-template-columns:1fr;
+  }
+
+  .table-card-head{
+    padding:15px 14px 8px;
+  }
+
+  body[data-page="colaboradores"] table.colabs thead{
+    display:none;
+  }
+
+  body[data-page="colaboradores"] table.colabs,
+  body[data-page="colaboradores"] table.colabs tbody,
+  body[data-page="colaboradores"] table.colabs tr,
+  body[data-page="colaboradores"] table.colabs td{
+    display:block;
+    width:100%;
+  }
+
+  body[data-page="colaboradores"] table.colabs tbody tr{
+    padding:10px;
+  }
+
+  body[data-page="colaboradores"] table.colabs tbody td{
+    border:0 !important;
+    border-radius:0 !important;
+    padding:7px 8px !important;
+  }
+
+  body[data-page="colaboradores"] .td-actions{
+    justify-content:flex-start;
+    margin-top:6px;
+  }
+}
+
+
+/* =======================================================
+   COLABORADORES — V2 inspirado na referência enviada
+   Mantém IDs e classes antigos para não quebrar o JS/back.
+   ======================================================= */
+
+body.colab-reference-v2[data-page="colaboradores"]{
+  --zc-ref-bg:#b8c0c6;
+  --zc-ref-app:#f6f4f5;
+  --zc-ref-panel:#ffffff;
+  --zc-ref-panel-soft:#fbfafb;
+  --zc-ref-line:#ece7e9;
+  --zc-ref-line-strong:#ddd7db;
+  --zc-ref-text:#26272b;
+  --zc-ref-muted:#8f8b92;
+  --zc-ref-soft:#f3eff2;
+  --zc-ref-accent:#fb5b3f;
+  --zc-ref-accent-2:#ffefe9;
+  --zc-ref-green:#b8e36a;
+  --zc-ref-shadow:0 22px 70px rgba(51,43,48,.18);
+  background:var(--zc-ref-bg) !important;
+  color:var(--zc-ref-text) !important;
+  color-scheme:light;
+  font-family:Inter, Poppins, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .main.colab-page-shell{
+  min-height:calc(100vh - 34px);
+  margin:28px 28px 28px calc(var(--sidebar-w, 250px) + 28px);
+  padding:24px 22px 22px;
+  border-radius:28px;
+  background:linear-gradient(180deg, rgba(255,255,255,.72), rgba(246,244,245,.98));
+  border:1px solid rgba(255,255,255,.72);
+  box-shadow:var(--zc-ref-shadow);
+  overflow:hidden;
+  position:relative;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .main.colab-page-shell::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background:
+    radial-gradient(circle at 72% 0%, rgba(255,255,255,.86), transparent 38%),
+    linear-gradient(90deg, rgba(255,255,255,.28), transparent 26%);
+  opacity:.8;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .main.colab-page-shell > *{
+  position:relative;
+  z-index:1;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .studio-topbar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  padding:0 0 14px;
+  margin:0;
+  background:transparent !important;
+  border:0 !important;
+  box-shadow:none !important;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .colab-hero-text{
+  display:grid;
+  gap:3px;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .eyebrow{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  width:max-content;
+  color:#c77363;
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:.01em;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .colab-hero h1{
+  margin:0;
+  color:#27262b;
+  font-size:22px;
+  line-height:1.12;
+  letter-spacing:-.035em;
+  font-weight:700;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .colab-hero p{
+  max-width:560px;
+  margin:0;
+  color:#8e8990;
+  font-size:13px;
+  font-weight:400;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] #btn-add-colaborador{
+  min-height:36px;
+  padding:0 14px !important;
+  border-radius:10px !important;
+  border:0 !important;
+  background:#fb5b3f !important;
+  color:#fff !important;
+  box-shadow:0 10px 20px rgba(251,91,63,.20);
+  font-size:12px;
+  font-weight:700 !important;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] #btn-add-colaborador:hover{
+  background:#ef4f35 !important;
+  box-shadow:0 12px 24px rgba(251,91,63,.24);
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .colab-stats{
+  display:grid;
+  grid-template-columns:repeat(4, minmax(0,1fr));
+  gap:14px;
+  margin:0 0 14px;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .colab-stat-card{
+  min-height:76px;
+  padding:13px 14px;
+  border-radius:11px;
+  background:rgba(255,255,255,.82);
+  border:1px solid rgba(236,231,233,.94);
+  box-shadow:0 8px 20px rgba(77,68,75,.055);
+  display:grid;
+  align-content:center;
+  gap:5px;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .stat-label{
+  color:#858089;
+  font-size:11px;
+  line-height:1.2;
+  font-weight:650;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .stat-value{
+  color:#28262b;
+  font-size:26px;
+  line-height:1;
+  font-weight:600;
+  letter-spacing:-.04em;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .stat-foot{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  color:#a49fa7;
+  font-size:11px;
+  line-height:1.2;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .stat-foot i{
+  color:#fb5b3f;
+  font-size:10px;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .stat-avatars{
+  display:flex;
+  align-items:center;
+  min-height:28px;
+  padding-top:2px;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .stat-avatars img,
+body.colab-reference-v2[data-page="colaboradores"] .stat-avatars span{
+  width:26px;
+  height:26px;
+  margin-left:-7px;
+  border-radius:999px;
+  border:2px solid #fff;
+  background:#ded9dc;
+  color:#7e7780;
+  display:grid;
+  place-items:center;
+  font-size:10px;
+  font-weight:800;
+  object-fit:cover;
+  box-shadow:0 3px 8px rgba(70,61,68,.08);
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .stat-avatars img:first-child,
+body.colab-reference-v2[data-page="colaboradores"] .stat-avatars span:first-child{ margin-left:0; }
+
+body.colab-reference-v2[data-page="colaboradores"] .colab-workbench{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 374px;
+  gap:0;
+  align-items:stretch;
+  min-height:610px;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .colab-list-pane{
+  min-width:0;
+  background:rgba(255,255,255,.62);
+  border:1px solid rgba(236,231,233,.94);
+  border-radius:14px 0 0 14px;
+  overflow:hidden;
+  box-shadow:0 8px 22px rgba(77,68,75,.055);
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .colab-searchbar.filter{
+  margin:0;
+  padding:14px 15px 12px;
+  border:0;
+  border-radius:0;
+  background:#fff !important;
+  border-bottom:1px solid var(--zc-ref-line);
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .search-field{
+  position:relative;
+  flex:1 1 260px;
+  min-width:180px;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .search-field i{
+  position:absolute;
+  left:12px;
+  top:50%;
+  transform:translateY(-50%);
+  color:#b2adb5;
+  font-size:12px;
+  pointer-events:none;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] input.input,
+body.colab-reference-v2[data-page="colaboradores"] select.select,
+body.colab-reference-v2[data-page="colaboradores"] textarea{
+  min-height:34px;
+  border-radius:8px;
+  border:1px solid #ebe5e8;
+  background:#fbfafb;
+  color:#38353b;
+  padding:0 10px;
+  font-size:12px;
+  font-weight:500;
+  box-shadow:none !important;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .search-field input.input{
+  width:100%;
+  padding-left:32px;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] select.select{
+  max-width:180px;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .btn.btn-ghost{
+  min-height:34px;
+  border-radius:8px;
+  border:1px solid #ebe5e8;
+  background:#fbfafb;
+  color:#6e6870;
+  font-size:12px;
+  font-weight:650;
+  box-shadow:none;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .btn.btn-ghost:hover{
+  background:#f7f3f5;
+  color:#2e2b30;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .colab-table-section,
+body.colab-reference-v2[data-page="colaboradores"] .colab-table-card,
+body.colab-reference-v2[data-page="colaboradores"] .box{
+  background:transparent;
+  border:0;
+  box-shadow:none;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .colab-table-card{
+  padding:0;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .table-card-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:14px 16px 10px;
+  background:#fff;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .table-card-head h2{
+  margin:0;
+  color:#29272c;
+  font-size:16px;
+  line-height:1.15;
+  font-weight:700;
+  letter-spacing:-.025em;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .table-card-head p{
+  margin:4px 0 0;
+  color:#9a949d;
+  font-size:11px;
+  font-weight:500;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .table-wrap{
+  margin:0;
+  padding:0 10px 10px;
+  background:#fff;
+  border:0;
+  border-radius:0;
+  overflow:auto;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .table-wrap .table-scroller{
+  max-height:530px;
+  border-radius:0;
+  overflow:auto;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] table.colabs{
+  width:100%;
+  min-width:720px;
+  background:#fff;
+  color:#4a454c;
+  border-collapse:separate;
+  border-spacing:0;
+  table-layout:auto;
+  font-size:12px;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] table.colabs thead th{
+  position:sticky;
+  top:0;
+  z-index:2;
+  padding:10px 10px;
+  background:#fff;
+  border-bottom:1px solid var(--zc-ref-line);
+  color:#8b858e;
+  font-size:11px;
+  font-weight:700;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] table.colabs td,
+body.colab-reference-v2[data-page="colaboradores"] table.colabs th{
+  padding:8px 10px;
+  border-bottom:1px solid #eee9ec;
+  color:#58535a;
+  vertical-align:middle;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] table.colabs tbody tr{
+  background:#fff !important;
+  transition:background .14s ease, box-shadow .14s ease;
+  cursor:default;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] table.colabs tbody tr:nth-child(even){ background:#fcfbfc !important; }
+
+body.colab-reference-v2[data-page="colaboradores"] table.colabs tbody tr:hover,
+body.colab-reference-v2[data-page="colaboradores"] table.colabs tbody tr.is-previewed{
+  background:#f4f1f3 !important;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .avatar-mini{
+  width:30px;
+  height:30px;
+  border:2px solid #fff;
+  box-shadow:0 3px 8px rgba(70,61,68,.12);
+  background:#ded9dc;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .avatar-mini-initials{
+  color:#7b747d;
+  font-size:10px;
+  font-weight:800;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .td-actions{
+  gap:5px;
+  justify-content:flex-start;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .td-actions .btn{
+  min-height:28px;
+  padding:0 9px !important;
+  border-radius:7px !important;
+  font-size:11px !important;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .colab-detail-pane{
+  min-width:0;
+  margin-left:-1px;
+  background:#fff;
+  border:1px solid rgba(236,231,233,.98);
+  border-radius:0 14px 14px 0;
+  box-shadow:-16px 0 34px rgba(77,68,75,.07);
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .detail-pane-card{
+  border:0;
+  border-radius:0;
+  background:#fff;
+  box-shadow:none;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .detail-profile-preview{
+  position:relative;
+  padding:86px 28px 20px;
+  min-height:330px;
+  border-bottom:1px solid var(--zc-ref-line);
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .detail-cover{
+  position:absolute;
+  inset:0 0 auto;
+  height:112px;
+  background:
+    radial-gradient(circle at 82% 20%, rgba(255,182,151,.5), transparent 26%),
+    linear-gradient(135deg,#fff0e8,#f7f2f4 65%,#fff);
+  border-bottom:1px solid #f1e9ec;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .detail-avatar{
+  position:relative;
+  z-index:1;
+  width:104px;
+  height:104px;
+  border-radius:10px;
+  border:6px solid #fff;
+  background:#d8c6c9;
+  color:#fff;
+  box-shadow:0 10px 24px rgba(60,52,58,.16);
+  display:grid;
+  place-items:center;
+  overflow:hidden;
+  margin-bottom:13px;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .detail-avatar img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .detail-avatar span{
+  font-size:30px;
+  font-weight:800;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .detail-profile-preview h2{
+  margin:0 0 4px;
+  color:#171519;
+  font-size:18px;
+  line-height:1.15;
+  font-weight:800;
+  letter-spacing:-.035em;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .detail-profile-preview p{
+  margin:0;
+  color:#89838c;
+  font-size:12px;
+  line-height:1.45;
+  font-weight:500;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .detail-actions-preview{
+  display:flex;
+  flex-wrap:wrap;
+  gap:7px;
+  margin-top:16px;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .detail-actions-preview span{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  min-height:27px;
+  padding:0 10px;
+  border-radius:7px;
+  background:#fbfafb;
+  border:1px solid #eee9ec;
+  color:#676169;
+  font-size:11px;
+  font-weight:700;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .detail-actions-preview span:first-child{
+  background:#ffefe9;
+  color:#e9573b;
+  border-color:#ffdfd3;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] #sec-login-config.detail-pane-card{
+  padding:18px 22px;
+  background:#fff;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .token-card-line{
+  color:#302d32;
+  font-size:12px;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .token-card-line input{
+  margin-top:2px;
+  accent-color:#fb5b3f;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .token-card-line .muted{
+  color:#908a93 !important;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] .empty-bordered{
+  margin:14px;
+  background:#fff;
+  border-color:#eee9ec;
+  color:#8f8991;
+}
+
+/* Modal também fica branco/leve para combinar com a referência. */
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil.modal-back{
+  background:rgba(44,38,42,.32) !important;
+  backdrop-filter:blur(2px) !important;
+  -webkit-backdrop-filter:blur(2px) !important;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .perfil-modal-card{
+  background:#fff !important;
+  color:#28262b !important;
+  border:1px solid rgba(236,231,233,.98) !important;
+  box-shadow:0 24px 80px rgba(50,43,48,.22) !important;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .modal-head,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .foot,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .colab-panel-card,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .profile-card{
+  background:#fff !important;
+  color:#28262b !important;
+  border-color:#eee9ec !important;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .modal-head .title,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .panel-title h3,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .side-preview-name,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .chk-line,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .details-grid dd,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .details-grid span,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .details-grid a{
+  color:#28262b !important;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .modal-head .title i,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .side-preview-role,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .details-grid dt,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .muted,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .help-text,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .panel-title p{
+  color:#8f8991 !important;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .fieldbox,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .input,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .select,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil #fb-senha .input-group{
+  background:#fbfafb !important;
+  color:#28262b !important;
+  border-color:#eee9ec !important;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .colab-tabs{
+  background:#fbfafb !important;
+  border-color:#eee9ec !important;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .colab-tab{
+  color:#756f77 !important;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .colab-tab.active,
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .colab-tab[aria-selected="true"]{
+  background:#ffefe9 !important;
+  border-color:#ffdfd3 !important;
+  color:#e9573b !important;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] #modal-perfil .btn.btn-primary{
+  background:#fb5b3f !important;
+  border-color:#fb5b3f !important;
+  color:#fff !important;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] #zc-confirm .modal-card{
+  background:#fff;
+  color:#28262b;
+  border-color:#eee9ec;
+}
+
+body.colab-reference-v2[data-page="colaboradores"] #zc-confirm .modal-head,
+body.colab-reference-v2[data-page="colaboradores"] #zc-confirm .foot{
+  border-color:#eee9ec;
+}
+
+@media (max-width:1180px){
+  body.colab-reference-v2[data-page="colaboradores"] .main.colab-page-shell{
+    margin:18px 14px 18px calc(var(--sidebar-w, 250px) + 14px);
+    padding:18px;
+    border-radius:22px;
+  }
+  body.colab-reference-v2[data-page="colaboradores"] .colab-workbench{
+    grid-template-columns:1fr;
+  }
+  body.colab-reference-v2[data-page="colaboradores"] .colab-list-pane{
+    border-radius:14px 14px 0 0;
+  }
+  body.colab-reference-v2[data-page="colaboradores"] .colab-detail-pane{
+    border-radius:0 0 14px 14px;
+    margin-left:0;
+    box-shadow:0 -14px 28px rgba(77,68,75,.06);
+  }
+}
+
+@media (max-width:860px){
+  body.colab-reference-v2[data-page="colaboradores"] .main.colab-page-shell{
+    margin:12px;
+    padding:14px;
+  }
+  body.colab-reference-v2[data-page="colaboradores"] .colab-stats{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  body.colab-reference-v2[data-page="colaboradores"] .studio-topbar{
+    align-items:flex-start;
+    flex-direction:column;
+  }
+}
+
+@media (max-width:560px){
+  body.colab-reference-v2[data-page="colaboradores"] .colab-stats{
+    grid-template-columns:1fr;
+  }
+  body.colab-reference-v2[data-page="colaboradores"] .colab-searchbar.filter{
+    align-items:stretch;
+    flex-direction:column;
+  }
+  body.colab-reference-v2[data-page="colaboradores"] .search-field,
+  body.colab-reference-v2[data-page="colaboradores"] select.select,
+  body.colab-reference-v2[data-page="colaboradores"] .btn.btn-ghost{
+    width:100%;
+    max-width:none;
+  }
+  body.colab-reference-v2[data-page="colaboradores"] .detail-profile-preview{
+    padding-left:18px;
+    padding-right:18px;
+  }
+}
+
+
+/* =======================================================
+   COLABORADORES — referência Pinterest/Team members
+   Compacto, limpo, sem quebrar IDs do JS/backend.
+   ======================================================= */
+
+body.colab-members-reference[data-page="colaboradores"]{
+  --members-bg:#f2f3f5;
+  --members-card:#ffffff;
+  --members-soft:#fafafa;
+  --members-line:#edf0f2;
+  --members-line-strong:#e2e7ec;
+  --members-text:#15181d;
+  --members-muted:#6f7782;
+  --members-muted-2:#9aa3ad;
+  --members-primary:#111827;
+  --members-green:#16a34a;
+  --members-green-bg:#eaf8ef;
+  --members-red:#dc2626;
+  --members-red-bg:#fff1f2;
+  --members-shadow:0 18px 45px rgba(15,23,42,.055);
+  background:var(--members-bg) !important;
+  color:var(--members-text) !important;
+  color-scheme:light;
+  font-family:Inter, Poppins, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .main.colab-page-shell{
+  padding:22px !important;
+  margin-left:var(--sidebar-w, 250px);
+  min-height:100vh;
+  background:transparent !important;
+  color:var(--members-text) !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .main.colab-page-shell::before,
+body.colab-members-reference[data-page="colaboradores"] .main.colab-page-shell::after{
+  content:none !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .members-card{
+  width:100%;
+  min-height:calc(100vh - 44px);
+  background:var(--members-card);
+  border:1px solid var(--members-line);
+  border-radius:10px;
+  box-shadow:var(--members-shadow);
+  overflow:hidden;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .members-head{
+  min-height:58px;
+  padding:14px 18px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  border-bottom:1px solid var(--members-line);
+  background:#fff;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .members-title{
+  min-width:0;
+  display:grid;
+  gap:4px;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .members-title h1{
+  margin:0;
+  display:flex;
+  flex-wrap:wrap;
+  align-items:baseline;
+  gap:8px;
+  color:var(--members-text);
+  font-size:15px;
+  line-height:1.2;
+  letter-spacing:-.01em;
+  font-weight:700;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .members-title h1 span{
+  color:var(--members-muted-2);
+  font-size:12px;
+  font-weight:600;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .members-title p{
+  margin:0;
+  color:var(--members-muted);
+  font-size:12px;
+  line-height:1.35;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .members-actions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .btn{
+  min-height:34px;
+  padding:0 12px !important;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  border-radius:8px !important;
+  font-size:12px !important;
+  line-height:1;
+  font-weight:650 !important;
+  white-space:nowrap;
+  transition:background .14s ease, border-color .14s ease, color .14s ease, transform .14s ease, box-shadow .14s ease;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .btn.btn-ghost,
+body.colab-members-reference[data-page="colaboradores"] .btn-export{
+  background:#fff !important;
+  border:1px solid var(--members-line-strong) !important;
+  color:#344054 !important;
+  box-shadow:none !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .btn.btn-ghost:hover,
+body.colab-members-reference[data-page="colaboradores"] .btn-export:hover{
+  background:#f8fafc !important;
+  border-color:#d8dee6 !important;
+  color:#111827 !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] #btn-add-colaborador{
+  min-height:34px;
+  padding:0 13px !important;
+  border:1px solid #111827 !important;
+  border-radius:8px !important;
+  background:#111827 !important;
+  color:#fff !important;
+  box-shadow:none !important;
+  font-size:12px !important;
+  font-weight:700 !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] #btn-add-colaborador:hover{
+  background:#020617 !important;
+  border-color:#020617 !important;
+  transform:translateY(-1px);
+}
+
+body.colab-members-reference[data-page="colaboradores"] .members-filter.filter{
+  margin:0;
+  padding:12px 18px;
+  display:grid;
+  grid-template-columns:minmax(240px,1fr) minmax(180px,240px) auto;
+  align-items:center;
+  gap:10px;
+  background:#fff !important;
+  border:0 !important;
+  border-bottom:1px solid var(--members-line) !important;
+  border-radius:0 !important;
+  box-shadow:none !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .sr-only{
+  position:absolute !important;
+  width:1px !important;
+  height:1px !important;
+  padding:0 !important;
+  margin:-1px !important;
+  overflow:hidden !important;
+  clip:rect(0,0,0,0) !important;
+  white-space:nowrap !important;
+  border:0 !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .search-field{
+  position:relative;
+  min-width:0;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .search-field i{
+  position:absolute;
+  left:12px;
+  top:50%;
+  transform:translateY(-50%);
+  color:#98a2b3;
+  font-size:12px;
+  pointer-events:none;
+}
+
+body.colab-members-reference[data-page="colaboradores"] input.input,
+body.colab-members-reference[data-page="colaboradores"] select.select,
+body.colab-members-reference[data-page="colaboradores"] textarea{
+  min-height:34px !important;
+  border-radius:8px !important;
+  border:1px solid var(--members-line-strong) !important;
+  background:#fff !important;
+  color:#1f2937 !important;
+  font-size:12px !important;
+  font-weight:500 !important;
+  box-shadow:none !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .search-field input.input{
+  width:100%;
+  padding-left:34px !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .select{
+  padding-right:30px !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] input:focus,
+body.colab-members-reference[data-page="colaboradores"] select:focus,
+body.colab-members-reference[data-page="colaboradores"] textarea:focus{
+  outline:none !important;
+  border-color:#98a2b3 !important;
+  box-shadow:0 0 0 3px rgba(17,24,39,.06) !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .token-strip{
+  padding:10px 18px;
+  background:#fff;
+  border-bottom:1px solid var(--members-line);
+}
+
+body.colab-members-reference[data-page="colaboradores"] .token-card-line{
+  display:flex;
+  align-items:flex-start;
+  gap:9px;
+  width:max-content;
+  max-width:100%;
+  color:#344054;
+  cursor:pointer;
+  font-size:12px;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .token-card-line input{
+  width:15px;
+  height:15px;
+  margin-top:1px;
+  accent-color:#111827;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .token-card-line strong{
+  display:block;
+  color:#1d2939;
+  font-size:12px;
+  font-weight:700;
+  line-height:1.25;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .token-card-line small{
+  display:block;
+  margin-top:2px;
+  color:#7b8490;
+  font-size:11px;
+  line-height:1.35;
+  font-weight:500;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .colab-table-card{
+  padding:0 !important;
+  background:#fff !important;
+  border:0 !important;
+  border-radius:0 !important;
+  box-shadow:none !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .table-wrap{
+  margin:0;
+  padding:0 !important;
+  background:#fff !important;
+  border:0 !important;
+  border-radius:0 !important;
+  overflow:hidden !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .table-wrap .table-scroller{
+  max-height:calc(100vh - 214px);
+  overflow:auto;
+  border-radius:0 !important;
+  background:#fff !important;
+  padding:0 !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] table.colabs{
+  width:100%;
+  min-width:820px;
+  border-collapse:collapse !important;
+  border-spacing:0 !important;
+  background:#fff !important;
+  color:var(--members-text) !important;
+  table-layout:auto;
+  font-size:12px;
+}
+
+body.colab-members-reference[data-page="colaboradores"] table.colabs thead th{
+  position:sticky;
+  top:0;
+  z-index:2;
+  height:38px;
+  padding:0 14px !important;
+  background:#fff !important;
+  border:0 !important;
+  border-bottom:1px solid var(--members-line) !important;
+  color:#606a76 !important;
+  font-size:11px !important;
+  font-weight:700 !important;
+  text-transform:none !important;
+  letter-spacing:0 !important;
+  text-align:left;
+  white-space:nowrap;
+}
+
+body.colab-members-reference[data-page="colaboradores"] table.colabs tbody tr{
+  background:#fff !important;
+  border-radius:0 !important;
+  box-shadow:none !important;
+  transition:background .12s ease !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] table.colabs tbody tr:nth-child(even){
+  background:#fff !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] table.colabs tbody tr:hover{
+  transform:none !important;
+  background:#fbfcfd !important;
+  box-shadow:none !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] table.colabs td,
+body.colab-members-reference[data-page="colaboradores"] table.colabs th{
+  border:0 !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] table.colabs tbody td{
+  height:52px;
+  padding:7px 14px !important;
+  color:#344054 !important;
+  background:transparent !important;
+  border-bottom:1px solid var(--members-line) !important;
+  vertical-align:middle;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .check-col{
+  width:44px;
+  text-align:center !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .check-col input,
+body.colab-members-reference[data-page="colaboradores"] .row-select{
+  width:15px;
+  height:15px;
+  accent-color:#111827;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .member-cell{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-width:0;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .member-copy{
+  min-width:0;
+  display:grid;
+  gap:2px;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .member-name{
+  color:#24272d;
+  font-size:12px;
+  line-height:1.2;
+  font-weight:700;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .member-user{
+  color:#858e99;
+  font-size:11px;
+  line-height:1.2;
+  font-weight:500;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .avatar-mini{
+  width:30px !important;
+  height:30px !important;
+  border-radius:999px !important;
+  border:1px solid #e5e7eb !important;
+  box-shadow:none !important;
+  background:#f1f5f9;
+  flex:0 0 30px;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .avatar-mini-initials{
+  color:#475467 !important;
+  font-size:10px !important;
+  font-weight:800 !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .avatar-mini-img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  border-radius:inherit;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .status-pill{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  min-height:22px;
+  padding:0 8px;
+  border-radius:999px;
+  background:var(--members-green-bg);
+  color:#12813d;
+  font-size:11px;
+  font-weight:700;
+  white-space:nowrap;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .status-pill::before{
+  content:"";
+  width:5px;
+  height:5px;
+  border-radius:999px;
+  background:currentColor;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .status-pill.offline{
+  background:#f3f4f6;
+  color:#6b7280;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .status-pill.warn{
+  background:#fff7ed;
+  color:#c2410c;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .email-link{
+  color:#344054;
+  text-decoration:none;
+  font-size:12px;
+  font-weight:500;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .email-link:hover{
+  color:#111827;
+  text-decoration:underline;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .team-tags{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:6px;
+  max-width:380px;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .team-chip{
+  display:inline-flex;
+  align-items:center;
+  min-height:22px;
+  padding:0 8px;
+  border-radius:999px;
+  border:1px solid transparent;
+  font-size:11px;
+  line-height:1;
+  font-weight:700;
+  white-space:nowrap;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .team-chip.tone-1{ background:#eef2ff; color:#4f46e5; border-color:#e0e7ff; }
+body.colab-members-reference[data-page="colaboradores"] .team-chip.tone-2{ background:#eff6ff; color:#2563eb; border-color:#dbeafe; }
+body.colab-members-reference[data-page="colaboradores"] .team-chip.tone-3{ background:#ecfdf5; color:#059669; border-color:#d1fae5; }
+body.colab-members-reference[data-page="colaboradores"] .team-chip.tone-4{ background:#fdf2f8; color:#db2777; border-color:#fce7f3; }
+body.colab-members-reference[data-page="colaboradores"] .team-chip.tone-muted{ background:#f5f5f5; color:#737373; border-color:#ededed; }
+
+body.colab-members-reference[data-page="colaboradores"] .actions-col{
+  width:92px;
+  text-align:right !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .td-actions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end !important;
+  gap:8px !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .td-actions .btn{
+  width:28px;
+  height:28px;
+  min-height:28px !important;
+  padding:0 !important;
+  border-radius:7px !important;
+  background:transparent !important;
+  border:0 !important;
+  color:#6b7280 !important;
+  box-shadow:none !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .td-actions .btn:hover{
+  background:#f3f4f6 !important;
+  color:#111827 !important;
+  transform:none !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .td-actions .btn[data-action="del"]:hover{
+  background:#fff1f2 !important;
+  color:#dc2626 !important;
+}
+
+body.colab-members-reference[data-page="colaboradores"] .empty-bordered{
+  display:none;
+  margin:16px 18px 18px;
+  padding:34px 18px;
+  align-items:center;
+  justify-content:center;
+  background:#fbfcfd !important;
+  border:1px dashed #d9dee7 !important;
+  border-radius:10px !important;
+  color:#667085 !important;
+  font-size:13px;
+}
+
+body.colab-members-reference[data-page="colaboradores"] #toast{
+  color:#fff;
+}
+
+@media (max-width:980px){
+  body.colab-members-reference[data-page="colaboradores"] .main.colab-page-shell{
+    margin-left:0;
+    padding:12px !important;
+  }
+
+  body.colab-members-reference[data-page="colaboradores"] .members-card{
+    min-height:calc(100vh - 24px);
+  }
+}
+
+@media (max-width:760px){
+  body.colab-members-reference[data-page="colaboradores"] .members-head{
+    align-items:flex-start;
+    flex-direction:column;
+  }
+
+  body.colab-members-reference[data-page="colaboradores"] .members-actions{
+    width:100%;
+    justify-content:flex-start;
+  }
+
+  body.colab-members-reference[data-page="colaboradores"] .members-filter.filter{
+    grid-template-columns:1fr;
+  }
+
+  body.colab-members-reference[data-page="colaboradores"] .members-filter .btn,
+  body.colab-members-reference[data-page="colaboradores"] .members-filter .select{
+    width:100%;
+    max-width:none;
+  }
+
+  body.colab-members-reference[data-page="colaboradores"] .token-card-line{
+    width:100%;
+  }
+
+  body.colab-members-reference[data-page="colaboradores"] .table-wrap .table-scroller{
+    max-height:none;
+  }
+}
+
+
+/* =======================================================
+   Redesign final — Colaboradores alinhado ao Dashboard/Mídias
+   Remove o card gigante centralizado e usa o mesmo shell do dashboard.
+   ======================================================= */
+
+body.colab-dashboard-match[data-page="colaboradores"]{
+  --dash-bg:#f5f6f8;
+  --dash-card:#ffffff;
+  --dash-card-soft:#f8fafc;
+  --dash-border:#e6e8ee;
+  --dash-border-strong:#d7dce5;
+  --dash-text:#475467;
+  --dash-title:#111827;
+  --dash-muted:#6b7280;
+  --dash-soft:#98a2b3;
+  --dash-hover:#f3f5f8;
+  --dash-primary:#111827;
+  --dash-primary-soft:#eef1f5;
+  --dash-green:#008b32;
+  --dash-green-soft:rgba(0,139,50,.11);
+  --dash-amber:#c2410c;
+  --dash-amber-soft:#fff7ed;
+  --dash-red:#dc2626;
+  --dash-red-soft:#fff1f2;
+  --dash-radius:18px;
+  --dash-shadow:0 18px 45px rgba(15,23,42,.08);
+  --dash-shadow-sm:0 10px 30px rgba(15,23,42,.055);
+  --dash-font:Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  margin:0;
+  min-height:100vh;
+  background:var(--dash-bg) !important;
+  color:var(--dash-text) !important;
+  font-family:var(--dash-font);
+  font-synthesis-weight:none;
+  overflow-x:hidden;
+}
+
+html.dark body.colab-dashboard-match,
+html[data-theme="dark"] body.colab-dashboard-match{
+  --dash-bg:#212121;
+  --dash-card:#262626;
+  --dash-card-soft:#2a2a2a;
+  --dash-border:#333333;
+  --dash-border-strong:#3a3a3a;
+  --dash-text:#ececec;
+  --dash-title:#f5f5f5;
+  --dash-muted:#b4b4b4;
+  --dash-soft:#8f8f8f;
+  --dash-hover:#303030;
+  --dash-primary:#ececec;
+  --dash-primary-soft:#303030;
+  --dash-green:#5ee59a;
+  --dash-green-soft:rgba(94,229,154,.12);
+  --dash-amber:#fbbf24;
+  --dash-amber-soft:rgba(251,191,36,.14);
+  --dash-red:#ff6b6b;
+  --dash-red-soft:rgba(255,107,107,.12);
+  --dash-shadow:0 18px 45px rgba(0,0,0,.28);
+  --dash-shadow-sm:0 10px 30px rgba(0,0,0,.20);
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] *,
+body.colab-dashboard-match[data-page="colaboradores"] *::before,
+body.colab-dashboard-match[data-page="colaboradores"] *::after{
+  box-sizing:border-box;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .main.colab-dashboard-shell{
+  min-height:100vh;
+  padding:24px !important;
+  display:flex;
+  flex-direction:column;
+  gap:18px;
+  max-width:none !important;
+  width:auto !important;
+  margin:0 !important;
+  background:transparent !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .dash-hero{
+  position:relative;
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:18px;
+  background:var(--dash-card) !important;
+  border:1px solid var(--dash-border) !important;
+  border-radius:var(--dash-radius) !important;
+  padding:18px !important;
+  box-shadow:var(--dash-shadow-sm) !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .dash-hero-copy{
+  min-width:0;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .dash-eyebrow{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  margin-bottom:8px;
+  color:var(--dash-muted);
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:.03em;
+  text-transform:uppercase;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .dash-eyebrow::before{
+  content:"";
+  width:8px;
+  height:8px;
+  border-radius:999px;
+  background:var(--dash-primary);
+  box-shadow:0 0 0 5px var(--dash-primary-soft);
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .dash-hero h1{
+  margin:0;
+  color:var(--dash-title);
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-size:24px;
+  line-height:1.15;
+  letter-spacing:-.035em;
+  font-weight:750;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .dash-hero p{
+  margin:8px 0 0;
+  color:var(--dash-muted);
+  font-size:13px;
+  line-height:1.55;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .title-ico{
+  width:30px;
+  height:30px;
+  flex:0 0 30px;
+  display:inline-grid;
+  place-items:center;
+  border-radius:10px;
+  color:var(--dash-primary);
+  background:var(--dash-primary-soft);
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .title-ico i{
+  font-size:14px;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .dash-hero-actions,
+body.colab-dashboard-match[data-page="colaboradores"] .colab-hero-actions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:10px;
+  flex-wrap:wrap;
+  max-width:620px;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .top-total{
+  min-height:40px;
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  padding:0 12px;
+  border:1px solid var(--dash-border);
+  border-radius:12px;
+  background:var(--dash-card-soft);
+  color:var(--dash-title);
+  font-size:13px;
+  font-weight:700;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .top-total #count-colaboradores{
+  font-size:18px;
+  color:var(--dash-title);
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .top-total small{
+  color:var(--dash-muted);
+  font-size:12px;
+  font-weight:600;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .btn-ghost,
+body.colab-dashboard-match[data-page="colaboradores"] .btn.btn-ghost{
+  height:40px;
+  min-height:40px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  padding:0 12px !important;
+  border:1px solid var(--dash-border) !important;
+  border-radius:12px !important;
+  background:var(--dash-card-soft) !important;
+  color:var(--dash-title) !important;
+  font-size:12px;
+  font-weight:750 !important;
+  line-height:1;
+  cursor:pointer;
+  box-shadow:none !important;
+  text-decoration:none;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .btn-ghost:hover,
+body.colab-dashboard-match[data-page="colaboradores"] .btn.btn-ghost:hover{
+  background:var(--dash-hover) !important;
+  border-color:var(--dash-border-strong) !important;
+  filter:none !important;
+  transform:none !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] #btn-add-colaborador{
+  height:40px;
+  min-height:40px;
+  padding:0 14px !important;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  border-radius:12px !important;
+  border:1px solid #101828 !important;
+  background:#111827 !important;
+  color:#fff !important;
+  font-size:12px;
+  font-weight:800 !important;
+  box-shadow:0 12px 24px rgba(15,23,42,.16) !important;
+}
+
+html.dark body.colab-dashboard-match #btn-add-colaborador,
+html[data-theme="dark"] body.colab-dashboard-match #btn-add-colaborador{
+  background:#f5f5f5 !important;
+  border-color:#f5f5f5 !important;
+  color:#111 !important;
+  box-shadow:none !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] #btn-add-colaborador:hover{
+  opacity:.94;
+  filter:none !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .analytics-panel,
+body.colab-dashboard-match[data-page="colaboradores"] .colab-list-panel{
+  background:var(--dash-card) !important;
+  border:1px solid var(--dash-border) !important;
+  border-radius:var(--dash-radius) !important;
+  box-shadow:var(--dash-shadow-sm) !important;
+  overflow:hidden;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .panel-title-row,
+body.colab-dashboard-match[data-page="colaboradores"] .colab-panel-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:14px;
+  padding:16px 18px 12px;
+  border-bottom:1px solid var(--dash-border);
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .panel-title-row h2,
+body.colab-dashboard-match[data-page="colaboradores"] .colab-panel-head h2{
+  margin:0;
+  color:var(--dash-title);
+  font-size:15px;
+  line-height:1.25;
+  letter-spacing:-.02em;
+  font-weight:800;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .panel-title-row p,
+body.colab-dashboard-match[data-page="colaboradores"] .colab-panel-head p{
+  margin:4px 0 0;
+  color:var(--dash-muted);
+  font-size:12px;
+  line-height:1.45;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .members-filter.filter{
+  display:grid !important;
+  grid-template-columns:minmax(260px,1fr) minmax(180px,240px) auto;
+  gap:10px;
+  align-items:center;
+  margin:0 !important;
+  padding:14px 18px !important;
+  background:var(--dash-card) !important;
+  border:0 !important;
+  border-bottom:1px solid var(--dash-border) !important;
+  border-radius:0 !important;
+  box-shadow:none !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .members-filter label,
+body.colab-dashboard-match[data-page="colaboradores"] .members-filter .count{
+  display:none !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .search-field{
+  position:relative;
+  min-width:0;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .search-field i{
+  position:absolute;
+  left:12px;
+  top:50%;
+  transform:translateY(-50%);
+  color:var(--dash-soft);
+  font-size:12px;
+  pointer-events:none;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] input.input,
+body.colab-dashboard-match[data-page="colaboradores"] select.select,
+body.colab-dashboard-match[data-page="colaboradores"] textarea.input{
+  width:100%;
+  height:40px;
+  min-height:40px;
+  background:var(--dash-card-soft) !important;
+  border:1px solid var(--dash-border) !important;
+  border-radius:12px !important;
+  color:var(--dash-title) !important;
+  padding:0 12px !important;
+  font-size:12px;
+  font-weight:650;
+  outline:none !important;
+  box-shadow:none !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .search-field input.input{
+  padding-left:34px !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] select.select{
+  padding-right:30px !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] input.input::placeholder{
+  color:var(--dash-soft);
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] input.input:focus,
+body.colab-dashboard-match[data-page="colaboradores"] select.select:focus,
+body.colab-dashboard-match[data-page="colaboradores"] textarea.input:focus{
+  border-color:var(--dash-border-strong) !important;
+  box-shadow:0 0 0 3px rgba(17,24,39,.055) !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .token-strip{
+  padding:12px 18px;
+  background:var(--dash-card);
+  border-bottom:1px solid var(--dash-border);
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .token-card-line{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  width:max-content;
+  max-width:100%;
+  color:var(--dash-text);
+  cursor:pointer;
+  font-size:12px;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .token-card-line input{
+  width:15px;
+  height:15px;
+  margin-top:1px;
+  accent-color:var(--dash-primary);
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .token-card-line strong{
+  display:block;
+  color:var(--dash-title);
+  font-size:12px;
+  font-weight:800;
+  line-height:1.25;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .token-card-line small{
+  display:block;
+  margin-top:2px;
+  color:var(--dash-muted);
+  font-size:11px;
+  line-height:1.35;
+  font-weight:550;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .colab-table-card,
+body.colab-dashboard-match[data-page="colaboradores"] .table-card{
+  padding:0 !important;
+  background:var(--dash-card) !important;
+  border:0 !important;
+  border-radius:0 !important;
+  box-shadow:none !important;
+  overflow:hidden;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .table-wrap{
+  margin:0;
+  padding:0 !important;
+  background:var(--dash-card) !important;
+  border:0 !important;
+  border-radius:0 !important;
+  overflow:hidden !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .table-wrap .table-scroller{
+  max-height:calc(100vh - 304px);
+  min-height:280px;
+  overflow:auto;
+  border-radius:0 !important;
+  background:var(--dash-card) !important;
+  padding:0 !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] table.colabs{
+  width:100%;
+  min-width:860px;
+  border-collapse:collapse !important;
+  border-spacing:0 !important;
+  background:var(--dash-card) !important;
+  color:var(--dash-text) !important;
+  table-layout:auto;
+  font-size:12px;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] table.colabs thead th{
+  position:sticky;
+  top:0;
+  z-index:2;
+  height:40px;
+  padding:0 14px !important;
+  background:var(--dash-card) !important;
+  border:0 !important;
+  border-bottom:1px solid var(--dash-border) !important;
+  color:var(--dash-muted) !important;
+  font-size:11px !important;
+  font-weight:800 !important;
+  text-transform:none !important;
+  letter-spacing:0 !important;
+  text-align:left;
+  white-space:nowrap;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] table.colabs tbody tr{
+  background:var(--dash-card) !important;
+  border-radius:0 !important;
+  box-shadow:none !important;
+  transition:background .12s ease !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] table.colabs tbody tr:nth-child(even){
+  background:var(--dash-card) !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] table.colabs tbody tr:hover{
+  transform:none !important;
+  background:var(--dash-card-soft) !important;
+  box-shadow:none !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] table.colabs td,
+body.colab-dashboard-match[data-page="colaboradores"] table.colabs th{
+  border:0 !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] table.colabs tbody td{
+  height:54px;
+  padding:7px 14px !important;
+  color:var(--dash-text) !important;
+  background:transparent !important;
+  border-bottom:1px solid var(--dash-border) !important;
+  vertical-align:middle;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .check-col{
+  width:44px;
+  text-align:center !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .check-col input,
+body.colab-dashboard-match[data-page="colaboradores"] .row-select{
+  width:15px;
+  height:15px;
+  accent-color:var(--dash-primary);
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .member-cell{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-width:0;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .member-copy{
+  min-width:0;
+  display:grid;
+  gap:2px;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .member-name{
+  color:var(--dash-title);
+  font-size:12px;
+  line-height:1.2;
+  font-weight:800;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .member-user{
+  color:var(--dash-soft);
+  font-size:11px;
+  line-height:1.2;
+  font-weight:550;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .avatar-mini{
+  width:30px !important;
+  height:30px !important;
+  border-radius:999px !important;
+  border:1px solid var(--dash-border) !important;
+  box-shadow:none !important;
+  background:var(--dash-card-soft);
+  flex:0 0 30px;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .avatar-mini-initials{
+  color:var(--dash-text) !important;
+  font-size:10px !important;
+  font-weight:850 !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .avatar-mini-img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  border-radius:inherit;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .status-pill{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  min-height:22px;
+  padding:0 8px;
+  border-radius:999px;
+  background:var(--dash-green-soft);
+  color:var(--dash-green);
+  font-size:11px;
+  font-weight:800;
+  white-space:nowrap;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .status-pill::before{
+  content:"";
+  width:5px;
+  height:5px;
+  border-radius:999px;
+  background:currentColor;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .status-pill.offline{
+  background:var(--dash-card-soft);
+  color:var(--dash-soft);
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .status-pill.warn{
+  background:var(--dash-amber-soft);
+  color:var(--dash-amber);
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .email-link{
+  color:var(--dash-text);
+  text-decoration:none;
+  font-size:12px;
+  font-weight:650;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .email-link:hover{
+  color:var(--dash-title);
+  text-decoration:underline;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .team-tags{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:6px;
+  max-width:460px;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .team-chip{
+  display:inline-flex;
+  align-items:center;
+  min-height:22px;
+  padding:0 8px;
+  border-radius:999px;
+  border:1px solid transparent;
+  font-size:11px;
+  line-height:1;
+  font-weight:800;
+  white-space:nowrap;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .team-chip.tone-1{ background:#eef2ff; color:#4f46e5; border-color:#e0e7ff; }
+body.colab-dashboard-match[data-page="colaboradores"] .team-chip.tone-2{ background:#eff6ff; color:#2563eb; border-color:#dbeafe; }
+body.colab-dashboard-match[data-page="colaboradores"] .team-chip.tone-3{ background:#ecfdf5; color:#059669; border-color:#d1fae5; }
+body.colab-dashboard-match[data-page="colaboradores"] .team-chip.tone-4{ background:#fdf2f8; color:#db2777; border-color:#fce7f3; }
+body.colab-dashboard-match[data-page="colaboradores"] .team-chip.tone-muted{ background:var(--dash-card-soft); color:var(--dash-soft); border-color:var(--dash-border); }
+
+html.dark body.colab-dashboard-match .team-chip,
+html[data-theme="dark"] body.colab-dashboard-match .team-chip{
+  background:var(--dash-card-soft) !important;
+  border-color:var(--dash-border) !important;
+  color:var(--dash-text) !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .actions-col{
+  width:92px;
+  text-align:right !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .td-actions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end !important;
+  gap:8px !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .td-actions .btn{
+  width:28px;
+  height:28px;
+  min-height:28px !important;
+  padding:0 !important;
+  border-radius:8px !important;
+  background:transparent !important;
+  border:0 !important;
+  color:var(--dash-muted) !important;
+  box-shadow:none !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .td-actions .btn:hover{
+  background:var(--dash-hover) !important;
+  color:var(--dash-title) !important;
+  transform:none !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .td-actions .btn[data-action="del"]:hover{
+  background:var(--dash-red-soft) !important;
+  color:var(--dash-red) !important;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] .empty-bordered{
+  display:none;
+  margin:16px 18px 18px;
+  padding:34px 18px;
+  align-items:center;
+  justify-content:center;
+  background:var(--dash-card-soft) !important;
+  border:1px dashed var(--dash-border-strong) !important;
+  border-radius:15px !important;
+  color:var(--dash-text) !important;
+  font-size:13px;
+}
+
+body.colab-dashboard-match[data-page="colaboradores"] #toast{
+  color:#fff;
+}
+
+@media (max-width:1180px){
+  body.colab-dashboard-match[data-page="colaboradores"] .dash-hero{
+    flex-direction:column;
+    align-items:stretch;
+  }
+
+  body.colab-dashboard-match[data-page="colaboradores"] .dash-hero-actions{
+    justify-content:flex-start;
+    max-width:none;
+  }
+}
+
+@media (max-width:920px){
+  body.colab-dashboard-match[data-page="colaboradores"] #sidebar{
+    display:none!important;
+  }
+
+  body.colab-dashboard-match[data-page="colaboradores"] .main.colab-dashboard-shell{
+    padding:16px !important;
+    padding-top:calc(76px + env(safe-area-inset-top)) !important;
+  }
+}
+
+@media (max-width:760px){
+  body.colab-dashboard-match[data-page="colaboradores"] .members-filter.filter{
+    grid-template-columns:1fr;
+  }
+
+  body.colab-dashboard-match[data-page="colaboradores"] .members-filter .btn-ghost,
+  body.colab-dashboard-match[data-page="colaboradores"] .members-filter .select{
+    width:100%;
+    max-width:none;
+  }
+
+  body.colab-dashboard-match[data-page="colaboradores"] .token-card-line{
+    width:100%;
+  }
+
+  body.colab-dashboard-match[data-page="colaboradores"] .table-wrap .table-scroller{
+    max-height:none;
+  }
+}
+
+@media (max-width:640px){
+  body.colab-dashboard-match[data-page="colaboradores"] .main.colab-dashboard-shell{
+    padding-left:12px !important;
+    padding-right:12px !important;
+    gap:14px;
+  }
+
+  body.colab-dashboard-match[data-page="colaboradores"] .dash-hero,
+  body.colab-dashboard-match[data-page="colaboradores"] .analytics-panel{
+    border-radius:16px !important;
+  }
+
+  body.colab-dashboard-match[data-page="colaboradores"] .dash-hero{
+    padding:15px !important;
+  }
+
+  body.colab-dashboard-match[data-page="colaboradores"] .dash-hero h1{
+    font-size:21px;
+  }
+
+  body.colab-dashboard-match[data-page="colaboradores"] .dash-hero-actions{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:8px;
+  }
+
+  body.colab-dashboard-match[data-page="colaboradores"] .top-total,
+  body.colab-dashboard-match[data-page="colaboradores"] .btn-ghost,
+  body.colab-dashboard-match[data-page="colaboradores"] #btn-add-colaborador{
+    width:100%;
+    justify-content:space-between;
+  }
+
+  body.colab-dashboard-match[data-page="colaboradores"] .panel-title-row{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+}
+
+
+/* =======================================================
+   COLABORADORES — FINAL LIMPO IGUAL MÍDIAS
+   Só aplica quando o body tem .colab-midias-match.
+   ======================================================= */
+
+body.colab-midias-match[data-page="colaboradores"]{
+  --zc-bg:#f7f8fb;
+  --zc-surface:#ffffff;
+  --zc-surface-2:#fbfcfe;
+  --zc-border:#e8ebf0;
+  --zc-border-2:#dde3ec;
+  --zc-text:#1f2937;
+  --zc-title:#101828;
+  --zc-muted:#667085;
+  --zc-soft:#98a2b3;
+  --zc-hover:#f4f7fa;
+  --zc-brand:#008169;
+  --zc-brand-2:#00a884;
+  --zc-brand-soft:#E6FFDA;
+  --zc-danger:#ef4444;
+  --zc-danger-soft:#fff1f2;
+  --zc-amber:#f59e0b;
+  --zc-amber-soft:#fff7ed;
+  --zc-blue:#5b6ee1;
+  --zc-blue-soft:#eef2ff;
+  --zc-shadow:0 18px 50px rgba(15,23,42,.06);
+  --zc-shadow-sm:0 10px 30px rgba(15,23,42,.045);
+  --zc-radius:22px;
+  --zc-radius-sm:14px;
+  --zc-font:"Inter",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+
+  margin:0;
+  min-height:100vh;
+  background:var(--zc-bg) !important;
+  color:var(--zc-text) !important;
+  font-family:var(--zc-font) !important;
+  font-synthesis-weight:none;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  text-rendering:optimizeLegibility;
+  color-scheme:light;
+  overflow-x:hidden;
+}
+
+html.dark body.colab-midias-match[data-page="colaboradores"],
+html[data-theme="dark"] body.colab-midias-match[data-page="colaboradores"]{
+  --zc-bg:#212121;
+  --zc-surface:#2a2a2a;
+  --zc-surface-2:#262626;
+  --zc-border:#383838;
+  --zc-border-2:#444444;
+  --zc-text:#ececec;
+  --zc-title:#f5f5f5;
+  --zc-muted:#b4b4b4;
+  --zc-soft:#8f8f8f;
+  --zc-hover:#303030;
+  --zc-brand:#33d19a;
+  --zc-brand-2:#5ee0ad;
+  --zc-brand-soft:rgba(51,209,154,.14);
+  --zc-danger:#ff6b6b;
+  --zc-danger-soft:rgba(255,107,107,.12);
+  --zc-amber:#fbbf24;
+  --zc-amber-soft:rgba(251,191,36,.14);
+  --zc-blue:#a7b0ff;
+  --zc-blue-soft:rgba(167,176,255,.12);
+  --zc-shadow:0 18px 50px rgba(0,0,0,.28);
+  --zc-shadow-sm:0 10px 30px rgba(0,0,0,.18);
+}
+
+body.colab-midias-match[data-page="colaboradores"] *,
+body.colab-midias-match[data-page="colaboradores"] *::before,
+body.colab-midias-match[data-page="colaboradores"] *::after{box-sizing:border-box}
+
+body.colab-midias-match[data-page="colaboradores"] button,
+body.colab-midias-match[data-page="colaboradores"] input,
+body.colab-midias-match[data-page="colaboradores"] select,
+body.colab-midias-match[data-page="colaboradores"] textarea{font-family:var(--zc-font) !important}
+
+body.colab-midias-match[data-page="colaboradores"] #sidebar{display:block;width:0;min-height:0}
+
+body.colab-midias-match[data-page="colaboradores"] .main.colab-midias-page{
+  min-height:100vh;
+  padding:22px 24px 28px !important;
+  display:flex !important;
+  flex-direction:column !important;
+  gap:14px !important;
+  background:transparent !important;
+  color:var(--zc-text) !important;
+  margin:0 !important;
+  max-width:none !important;
+  box-shadow:none !important;
+  border:0 !important;
+}
+
+body.colab-midias-match[data-page="colaboradores"] .colab-top{
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:18px;
+  min-height:54px;
+  padding:0;
+  background:transparent !important;
+  border:0 !important;
+  box-shadow:none !important;
+}
+body.colab-midias-match[data-page="colaboradores"] .colab-title-block{min-width:0}
+body.colab-midias-match[data-page="colaboradores"] .colab-breadcrumb{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  color:var(--zc-muted);
+  font-size:13px;
+  line-height:1.2;
+  font-weight:500;
+  margin-bottom:4px;
+}
+body.colab-midias-match[data-page="colaboradores"] .colab-breadcrumb strong{
+  color:var(--zc-title);
+  font-weight:600;
+}
+body.colab-midias-match[data-page="colaboradores"] .colab-breadcrumb i{font-size:10px;color:var(--zc-soft)}
+body.colab-midias-match[data-page="colaboradores"] .colab-top h1{
+  margin:0;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  color:var(--zc-title);
+  font-size:26px;
+  line-height:1.15;
+  letter-spacing:-.025em;
+  font-weight:650;
+}
+body.colab-midias-match[data-page="colaboradores"] .title-folder{
+  width:32px;
+  height:32px;
+  display:inline-grid;
+  place-items:center;
+  border-radius:12px;
+  background:var(--zc-brand-soft);
+  color:var(--zc-brand);
+  font-size:15px;
+  flex:0 0 32px;
+}
+body.colab-midias-match[data-page="colaboradores"] .colab-top-actions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+  flex-wrap:wrap;
+}
+body.colab-midias-match[data-page="colaboradores"] .colab-total-pill{
+  height:38px;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:0 12px;
+  border:1px solid var(--zc-border);
+  border-radius:999px;
+  background:var(--zc-surface);
+  color:var(--zc-muted);
+  font-size:13px;
+  line-height:1;
+  box-shadow:none;
+}
+body.colab-midias-match[data-page="colaboradores"] .colab-total-pill strong{
+  color:var(--zc-title);
+  font-size:15px;
+  font-weight:650;
+}
+
+body.colab-midias-match[data-page="colaboradores"] .btn,
+body.colab-midias-match[data-page="colaboradores"] .btn-ghost,
+body.colab-midias-match[data-page="colaboradores"] .round-btn,
+body.colab-midias-match[data-page="colaboradores"] .ghost-menu{
+  height:38px;
+  min-height:38px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  padding:0 13px;
+  border:1px solid var(--zc-border) !important;
+  border-radius:999px !important;
+  background:var(--zc-surface) !important;
+  color:var(--zc-title) !important;
+  font-size:13px;
+  line-height:1;
+  font-weight:550 !important;
+  cursor:pointer;
+  box-shadow:none !important;
+  outline:none;
+  text-decoration:none;
+  transition:background .16s ease,border-color .16s ease,box-shadow .16s ease,transform .16s ease,opacity .16s ease,color .16s ease;
+}
+body.colab-midias-match[data-page="colaboradores"] .btn:hover,
+body.colab-midias-match[data-page="colaboradores"] .btn-ghost:hover,
+body.colab-midias-match[data-page="colaboradores"] .round-btn:hover,
+body.colab-midias-match[data-page="colaboradores"] .ghost-menu:hover{
+  background:var(--zc-hover) !important;
+  border-color:var(--zc-border-2) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] .btn:active,
+body.colab-midias-match[data-page="colaboradores"] .btn-ghost:active{transform:translateY(1px)}
+body.colab-midias-match[data-page="colaboradores"] .btn-primary,
+body.colab-midias-match[data-page="colaboradores"] #btn-add-colaborador{
+  height:38px !important;
+  min-height:38px !important;
+  padding:0 14px !important;
+  background:#635bff !important;
+  color:#fff !important;
+  border-color:#635bff !important;
+  box-shadow:0 10px 24px rgba(99,91,255,.22) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] .btn-primary:hover,
+body.colab-midias-match[data-page="colaboradores"] #btn-add-colaborador:hover{
+  background:#554cff !important;
+  border-color:#554cff !important;
+  color:#fff !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #btn-add-colaborador i,
+body.colab-midias-match[data-page="colaboradores"] .btn-primary i{color:inherit !important}
+
+body.colab-midias-match[data-page="colaboradores"] .colab-searchbar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  padding:0 !important;
+  margin:0 !important;
+  background:transparent !important;
+  border:0 !important;
+  box-shadow:none !important;
+}
+body.colab-midias-match[data-page="colaboradores"] .search-wrap{
+  position:relative;
+  width:min(520px,100%);
+  display:flex;
+  align-items:center;
+}
+body.colab-midias-match[data-page="colaboradores"] .search-wrap > i{
+  position:absolute;
+  left:14px;
+  color:var(--zc-muted);
+  font-size:13px;
+  pointer-events:none;
+  z-index:1;
+}
+body.colab-midias-match[data-page="colaboradores"] .input,
+body.colab-midias-match[data-page="colaboradores"] .select{
+  height:38px !important;
+  min-height:38px !important;
+  border:1px solid var(--zc-border) !important;
+  border-radius:14px !important;
+  background:var(--zc-surface) !important;
+  color:var(--zc-title) !important;
+  font-size:13px !important;
+  line-height:1 !important;
+  font-weight:450 !important;
+  outline:none;
+  box-shadow:none !important;
+  transition:border-color .16s ease,box-shadow .16s ease,background .16s ease;
+}
+body.colab-midias-match[data-page="colaboradores"] .input{
+  width:100%;
+  padding:0 14px 0 38px !important;
+}
+body.colab-midias-match[data-page="colaboradores"] .select{
+  width:auto;
+  min-width:210px;
+  padding:0 34px 0 12px !important;
+  appearance:none;
+  cursor:pointer;
+}
+body.colab-midias-match[data-page="colaboradores"] .input::placeholder{color:var(--zc-soft)}
+body.colab-midias-match[data-page="colaboradores"] .input:focus,
+body.colab-midias-match[data-page="colaboradores"] .select:focus{
+  border-color:color-mix(in srgb,var(--zc-brand) 42%,var(--zc-border)) !important;
+  box-shadow:0 0 0 4px color-mix(in srgb,var(--zc-brand) 16%,transparent) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] .colab-filter-actions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+body.colab-midias-match[data-page="colaboradores"] .colab-shell{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 320px;
+  gap:18px;
+  align-items:start;
+}
+body.colab-midias-match[data-page="colaboradores"] .colab-workspace{
+  display:flex;
+  flex-direction:column;
+  gap:18px;
+  min-width:0;
+}
+body.colab-midias-match[data-page="colaboradores"] .panel,
+body.colab-midias-match[data-page="colaboradores"] .side-card{
+  background:var(--zc-surface) !important;
+  border:1px solid var(--zc-border) !important;
+  border-radius:var(--zc-radius) !important;
+  box-shadow:var(--zc-shadow-sm) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] .panel{padding:18px !important}
+body.colab-midias-match[data-page="colaboradores"] .panel-head,
+body.colab-midias-match[data-page="colaboradores"] .side-card-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  margin:0 0 14px;
+  padding:0 !important;
+  border:0 !important;
+  background:transparent !important;
+}
+body.colab-midias-match[data-page="colaboradores"] .files-head{align-items:center}
+body.colab-midias-match[data-page="colaboradores"] .panel-head h2,
+body.colab-midias-match[data-page="colaboradores"] .side-card-head h2{
+  margin:0;
+  color:var(--zc-title);
+  font-size:15px;
+  line-height:1.25;
+  letter-spacing:-.01em;
+  font-weight:650;
+}
+body.colab-midias-match[data-page="colaboradores"] .panel-head p,
+body.colab-midias-match[data-page="colaboradores"] .side-card small{
+  margin:4px 0 0;
+  color:var(--zc-muted);
+  font-size:12px;
+  line-height:1.45;
+  font-weight:450;
+}
+
+body.colab-midias-match[data-page="colaboradores"] .table-wrap{
+  width:100% !important;
+  overflow:auto !important;
+  border:1px solid var(--zc-border) !important;
+  border-radius:18px !important;
+  padding:0 !important;
+  background:transparent !important;
+  box-shadow:none !important;
+}
+body.colab-midias-match[data-page="colaboradores"] .table-scroller{
+  max-height:none !important;
+  overflow:visible !important;
+  border-radius:0 !important;
+  padding:0 !important;
+  background:transparent !important;
+}
+body.colab-midias-match[data-page="colaboradores"] table.colabs{
+  width:100% !important;
+  min-width:760px;
+  border-collapse:separate !important;
+  border-spacing:0 !important;
+  background:var(--zc-surface) !important;
+  color:var(--zc-text) !important;
+  table-layout:auto;
+}
+body.colab-midias-match[data-page="colaboradores"] table.colabs th,
+body.colab-midias-match[data-page="colaboradores"] table.colabs td{
+  padding:13px 14px !important;
+  border:0 !important;
+  border-bottom:1px solid var(--zc-border) !important;
+  text-align:left;
+  vertical-align:middle;
+  font-size:13px !important;
+  background:transparent !important;
+  color:var(--zc-text) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] table.colabs th{
+  position:static !important;
+  top:auto !important;
+  color:var(--zc-muted) !important;
+  background:var(--zc-surface-2) !important;
+  font-weight:600 !important;
+  font-size:12px !important;
+  line-height:1;
+  white-space:nowrap;
+  text-transform:none !important;
+  letter-spacing:0 !important;
+}
+body.colab-midias-match[data-page="colaboradores"] table.colabs tbody tr{
+  background:transparent !important;
+  border-radius:0 !important;
+  box-shadow:none !important;
+  transition:background .14s ease;
+  transform:none !important;
+}
+body.colab-midias-match[data-page="colaboradores"] table.colabs tbody tr:hover{
+  background:var(--zc-hover) !important;
+  box-shadow:none !important;
+  transform:none !important;
+}
+body.colab-midias-match[data-page="colaboradores"] table.colabs tbody tr:last-child td{border-bottom:0 !important}
+body.colab-midias-match[data-page="colaboradores"] .check-col{width:42px !important;text-align:center !important}
+body.colab-midias-match[data-page="colaboradores"] .actions-col{text-align:right !important;width:120px}
+body.colab-midias-match[data-page="colaboradores"] .td-actions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:6px;
+}
+body.colab-midias-match[data-page="colaboradores"] .td-actions .btn{
+  width:30px !important;
+  height:30px !important;
+  min-height:30px !important;
+  padding:0 !important;
+  border:0 !important;
+  border-radius:999px !important;
+  background:transparent !important;
+  color:var(--zc-muted) !important;
+  box-shadow:none !important;
+}
+body.colab-midias-match[data-page="colaboradores"] .td-actions .btn:hover{
+  background:var(--zc-hover) !important;
+  color:var(--zc-title) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] .member-cell{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-width:0;
+}
+body.colab-midias-match[data-page="colaboradores"] .td-avatar,
+body.colab-midias-match[data-page="colaboradores"] .avatar-mini{
+  width:34px !important;
+  height:34px !important;
+  flex:0 0 34px;
+  border-radius:12px !important;
+  border:1px solid var(--zc-border) !important;
+  box-shadow:none !important;
+  overflow:hidden;
+}
+body.colab-midias-match[data-page="colaboradores"] .avatar-mini-initials{
+  font-size:12px;
+  font-weight:650;
+}
+body.colab-midias-match[data-page="colaboradores"] .member-copy{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+}
+body.colab-midias-match[data-page="colaboradores"] .member-name{
+  color:var(--zc-title);
+  font-size:13px;
+  font-weight:600;
+  line-height:1.25;
+  max-width:310px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+body.colab-midias-match[data-page="colaboradores"] .member-user{
+  color:var(--zc-muted);
+  font-size:11px;
+  font-weight:450;
+  line-height:1.2;
+  max-width:310px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+body.colab-midias-match[data-page="colaboradores"] .email-link{
+  color:var(--zc-muted) !important;
+  font-weight:450;
+  text-decoration:none !important;
+  white-space:nowrap;
+}
+body.colab-midias-match[data-page="colaboradores"] .email-link:hover{color:var(--zc-title) !important}
+body.colab-midias-match[data-page="colaboradores"] .status-pill,
+body.colab-midias-match[data-page="colaboradores"] .team-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  min-height:22px;
+  padding:0 8px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:650;
+  white-space:nowrap;
+  border:1px solid var(--zc-border);
+  background:var(--zc-surface-2);
+  color:var(--zc-muted);
+}
+body.colab-midias-match[data-page="colaboradores"] .status-pill::before{
+  content:"";
+  width:6px;
+  height:6px;
+  border-radius:999px;
+  background:currentColor;
+}
+body.colab-midias-match[data-page="colaboradores"] .status-pill.active{
+  background:rgba(22,163,74,.10);
+  border-color:rgba(22,163,74,.18);
+  color:#128044;
+}
+body.colab-midias-match[data-page="colaboradores"] .status-pill.warn{
+  background:var(--zc-amber-soft);
+  border-color:color-mix(in srgb,var(--zc-amber) 22%,var(--zc-border));
+  color:#b45309;
+}
+body.colab-midias-match[data-page="colaboradores"] .status-pill.offline{
+  background:var(--zc-surface-2);
+  color:var(--zc-soft);
+}
+body.colab-midias-match[data-page="colaboradores"] .team-tags{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+body.colab-midias-match[data-page="colaboradores"] .team-chip.tone-1{background:var(--zc-blue-soft);border-color:color-mix(in srgb,var(--zc-blue) 20%,var(--zc-border));color:var(--zc-blue)}
+body.colab-midias-match[data-page="colaboradores"] .team-chip.tone-2{background:var(--zc-brand-soft);border-color:color-mix(in srgb,var(--zc-brand) 20%,var(--zc-border));color:var(--zc-brand)}
+body.colab-midias-match[data-page="colaboradores"] .team-chip.tone-3{background:#fff7ed;border-color:#fed7aa;color:#c2410c}
+body.colab-midias-match[data-page="colaboradores"] .team-chip.tone-4{background:#fdf2f8;border-color:#fbcfe8;color:#be185d}
+body.colab-midias-match[data-page="colaboradores"] .team-chip.tone-muted{background:var(--zc-surface-2);color:var(--zc-muted)}
+
+body.colab-midias-match[data-page="colaboradores"] input[type="checkbox"]{
+  width:16px;
+  height:16px;
+  margin:0;
+  border-radius:5px;
+  accent-color:var(--zc-brand);
+}
+
+body.colab-midias-match[data-page="colaboradores"] .colab-aside{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+  position:sticky;
+  top:18px;
+}
+body.colab-midias-match[data-page="colaboradores"] .side-card{padding:16px !important}
+body.colab-midias-match[data-page="colaboradores"] .ghost-menu{
+  width:30px;
+  height:30px;
+  min-height:30px;
+  padding:0;
+  border:0 !important;
+  border-radius:10px !important;
+  color:var(--zc-soft) !important;
+  background:transparent !important;
+}
+body.colab-midias-match[data-page="colaboradores"] .security-toggle{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:14px;
+  padding:14px;
+  border:1px solid var(--zc-border);
+  border-radius:18px;
+  background:var(--zc-surface-2);
+  cursor:pointer;
+}
+body.colab-midias-match[data-page="colaboradores"] .toggle-copy{display:grid;gap:5px;min-width:0}
+body.colab-midias-match[data-page="colaboradores"] .toggle-copy strong{
+  color:var(--zc-title);
+  font-size:13px;
+  line-height:1.25;
+  font-weight:650;
+}
+body.colab-midias-match[data-page="colaboradores"] .toggle-copy small{
+  color:var(--zc-muted);
+  font-size:12px;
+  line-height:1.45;
+  font-weight:450;
+}
+body.colab-midias-match[data-page="colaboradores"] .overview-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+body.colab-midias-match[data-page="colaboradores"] .overview-row{
+  min-height:42px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:0 2px;
+  border-bottom:1px solid var(--zc-border);
+}
+body.colab-midias-match[data-page="colaboradores"] .overview-row:last-child{border-bottom:0}
+body.colab-midias-match[data-page="colaboradores"] .overview-row span{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  color:var(--zc-muted);
+  font-size:12px;
+  font-weight:500;
+}
+body.colab-midias-match[data-page="colaboradores"] .overview-row i{color:var(--zc-soft)}
+body.colab-midias-match[data-page="colaboradores"] .overview-row strong{
+  color:var(--zc-title);
+  font-size:13px;
+  font-weight:650;
+  text-align:right;
+}
+body.colab-midias-match[data-page="colaboradores"] .empty-bordered{
+  display:none;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  margin:14px 0 0;
+  padding:18px;
+  border:1px dashed var(--zc-border-2) !important;
+  border-radius:18px;
+  background:var(--zc-surface-2) !important;
+  color:var(--zc-muted) !important;
+}
+
+/* Modal claro, sem cara pesada antiga */
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil.modal-back{
+  background:rgba(15,23,42,.42) !important;
+  backdrop-filter:blur(3px) !important;
+  -webkit-backdrop-filter:blur(3px) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .perfil-modal-card{
+  background:var(--zc-surface) !important;
+  color:var(--zc-text) !important;
+  border:1px solid var(--zc-border) !important;
+  border-radius:22px !important;
+  box-shadow:0 28px 90px rgba(15,23,42,.22) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .modal-head,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .foot{
+  background:var(--zc-surface) !important;
+  border-color:var(--zc-border) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .modal-head .title,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .panel-title h3,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .side-preview-name,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .avatar-hint strong,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .inst-title-line span:first-child,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .dept-title-line span:first-child{
+  color:var(--zc-title) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .modal-head .title i,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .title i{
+  background:var(--zc-brand-soft) !important;
+  border-color:color-mix(in srgb,var(--zc-brand) 22%,var(--zc-border)) !important;
+  color:var(--zc-brand) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .profile-card,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .colab-panel-card{
+  background:var(--zc-surface) !important;
+  border-color:var(--zc-border) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .colab-tabs{
+  background:var(--zc-surface-2) !important;
+  border-color:var(--zc-border) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .colab-tab{
+  color:var(--zc-muted) !important;
+  background:transparent !important;
+  border-radius:999px !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .colab-tab:hover{
+  background:var(--zc-hover) !important;
+  color:var(--zc-title) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .colab-tab.active,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .colab-tab[aria-selected="true"]{
+  background:var(--zc-brand-soft) !important;
+  color:var(--zc-brand) !important;
+  border-color:color-mix(in srgb,var(--zc-brand) 28%,var(--zc-border)) !important;
+  box-shadow:none !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .fieldbox,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil #insts-wrap.fieldbox,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil #deptos-wrap.fieldbox,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil #fb-senha .input-group,
+body.colab-midias-match[data-page="colaboradores"] #fb-senha .input-group{
+  background:var(--zc-surface-2) !important;
+  border-color:var(--zc-border) !important;
+  color:var(--zc-title) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .fieldbox > span,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .fieldbox > a,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .details-grid dd,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .details-grid span,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .details-grid a,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .chk-line{
+  color:var(--zc-text) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .details-grid dt,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .side-preview-role,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .side-preview-pill,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .avatar-hint span,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .status-left,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .help-text,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .muted,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .panel-title p,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .foot-note{
+  color:var(--zc-muted) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .input,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .select{
+  background:var(--zc-surface) !important;
+  border-color:var(--zc-border-2) !important;
+  color:var(--zc-title) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .chip,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .chips span,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil #e-insts .chk-line,
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil #e-perms .chk-line{
+  background:var(--zc-surface) !important;
+  border-color:var(--zc-border) !important;
+  color:var(--zc-text) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .avatar-wrap{
+  background:linear-gradient(135deg, var(--zc-brand-soft), var(--zc-blue-soft)) !important;
+  border-color:var(--zc-border) !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .avatar-wrap #p-mono{color:var(--zc-brand) !important}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .btn.btn-primary{
+  background:#635bff !important;
+  border-color:#635bff !important;
+  color:#fff !important;
+}
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .btn.btn-ghost{
+  background:var(--zc-surface) !important;
+  border:1px solid var(--zc-border) !important;
+  color:var(--zc-title) !important;
+}
+
+@media (max-width:1100px){
+  body.colab-midias-match[data-page="colaboradores"] .colab-shell{grid-template-columns:1fr}
+  body.colab-midias-match[data-page="colaboradores"] .colab-aside{position:static;display:grid;grid-template-columns:1fr 1fr}
+}
+@media (max-width:780px){
+  body.colab-midias-match[data-page="colaboradores"] .main.colab-midias-page{padding:16px !important}
+  body.colab-midias-match[data-page="colaboradores"] .colab-top{align-items:flex-start;flex-direction:column}
+  body.colab-midias-match[data-page="colaboradores"] .colab-top-actions{justify-content:flex-start;width:100%}
+  body.colab-midias-match[data-page="colaboradores"] .colab-searchbar{align-items:stretch;flex-direction:column}
+  body.colab-midias-match[data-page="colaboradores"] .search-wrap{width:100%}
+  body.colab-midias-match[data-page="colaboradores"] .colab-filter-actions{justify-content:flex-start;width:100%}
+  body.colab-midias-match[data-page="colaboradores"] .select{flex:1 1 220px}
+  body.colab-midias-match[data-page="colaboradores"] .colab-aside{grid-template-columns:1fr}
+  body.colab-midias-match[data-page="colaboradores"] .panel{padding:14px !important;border-radius:18px !important}
+  body.colab-midias-match[data-page="colaboradores"] .side-card{border-radius:18px !important}
+}
+@media (max-width:620px){
+  body.colab-midias-match[data-page="colaboradores"] .colab-top h1{font-size:22px}
+  body.colab-midias-match[data-page="colaboradores"] .colab-top-actions .btn span{display:none}
+  body.colab-midias-match[data-page="colaboradores"] .colab-total-pill span{display:inline}
+}

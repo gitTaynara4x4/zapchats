@@ -21,6 +21,8 @@
 
   const REQUIRED = [
     'escapeHtml',
+    'eagerImgAttrs',
+    'lazyImgAttrs',
     'H',
     'resolveUrlsForMedia',
   ];
@@ -31,6 +33,8 @@
 
   const {
     escapeHtml,
+    eagerImgAttrs,
+    lazyImgAttrs,
     H,
     resolveUrlsForMedia,
   } = M;
@@ -57,6 +61,29 @@
       tipo.includes('sticker');
 
     return mime.startsWith('image/') && !isSticker;
+  }
+
+
+  function attachmentBytes(a) {
+    const raw = Number(
+      a?.size ??
+      a?.bytes ??
+      a?.length ??
+      a?.file_size ??
+      a?.filesize ??
+      0
+    );
+    return Number.isFinite(raw) ? raw : 0;
+  }
+
+  function shouldUseEagerImage(a) {
+    const mime = String(a?.mimetype || a?.mime || '').toLowerCase();
+    const tipo = String(a?.tipo || a?.tipo_midia || '').toLowerCase();
+    const bytes = attachmentBytes(a);
+    if (tipo.includes('figurinha') || tipo.includes('sticker')) return true;
+    if (!mime.startsWith('image/') && !tipo.includes('imagem') && !tipo.includes('image')) return false;
+    if (!bytes) return true;
+    return bytes <= 420000;
   }
 
   function buildViewerItemsFromAttachments(m, list) {
@@ -107,6 +134,10 @@
       a?.fileName ||
       'imagem';
 
+    const imgAttrs = shouldUseEagerImage(a)
+      ? eagerImgAttrs(url, alts.join('|'))
+      : lazyImgAttrs(url, alts.join('|'));
+
     return `
       <a
         class="msg-media-cell ${escapeHtml(extraClass)}"
@@ -119,10 +150,8 @@
         data-name="${escapeHtml(name)}"
       >
         <img
-          src="${escapeHtml(url)}"
-          data-alt="${escapeHtml(alts.join('|'))}"
+          ${imgAttrs}
           alt="${escapeHtml(name)}"
-          loading="lazy"
         >
         ${overlay ? `<span class="msg-media-more">+${escapeHtml(overlay)}</span>` : ''}
       </a>
@@ -187,10 +216,8 @@
               data-name="${escapeHtml(item.name)}"
             >
               <img
-                src="${escapeHtml(item.thumb || item.src)}"
-                data-alt="${escapeHtml(item.altList || '')}"
+                ${eagerImgAttrs(item.thumb || item.src, item.altList || '')}
                 alt="${escapeHtml(item.name)}"
-                loading="lazy"
               >
               ${overlay ? `<span class="msg-media-more">+${escapeHtml(overlay)}</span>` : ''}
             </a>
@@ -246,8 +273,8 @@
       img,
       dir: bubble.classList.contains('bubble-out') ? 'out' : 'in',
       metaHtml: bubble.querySelector('.meta')?.innerHTML || '',
-      href: anchor.getAttribute('href') || img.getAttribute('src') || '',
-      src: img.getAttribute('src') || '',
+      href: anchor.getAttribute('href') || img.dataset.zcLazySrc || img.getAttribute('src') || '',
+      src: img.dataset.zcLazySrc || img.getAttribute('src') || '',
       altList: img.dataset.alt || '',
       name:
         anchor.dataset?.name ||

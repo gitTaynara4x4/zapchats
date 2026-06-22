@@ -298,6 +298,34 @@
         }
       };
 
+      window.forceReady = function() {
+        try { window.PageLoading && window.PageLoading.reset && window.PageLoading.reset(); } catch (e) {}
+        try { window.PageLoading && window.PageLoading.hide && window.PageLoading.hide(); } catch (e) {}
+        try {
+          var overlay = document.getElementById('page-loading') || document.getElementById('app-loading');
+          if (overlay) {
+            overlay.classList.remove('show');
+            overlay.style.display = 'none';
+            overlay.style.pointerEvents = 'none';
+          }
+          document.documentElement.style.overflow = '';
+          delete document.documentElement.dataset.pageLoadingLock;
+        } catch (e) {}
+      };
+
+      window.addEventListener('load', function(){ setTimeout(window.forceReady, 400); }, { once: true });
+      window.addEventListener('zc:atendimentos-ready', function(){ setTimeout(window.forceReady, 100); });
+
+      // Correção v5: na tela de atendimentos, nunca deixa o PageLoading global
+      // travado por cima do chat. O atendimento possui loaders internos próprios.
+      if ((location.pathname || '').replace(/\/+$/, '') === '/atendimentos') {
+        [200, 800, 1600, 3000, 6000].forEach(function(ms){
+          setTimeout(function(){ try { window.forceReady && window.forceReady(); } catch(e){} }, ms);
+        });
+      }
+
+      setTimeout(window.forceReady, 9000);
+
       document.documentElement.setAttribute('data-loader-ready', '1');
     })();
 
@@ -455,8 +483,39 @@
       if (!shouldIntercept(a)) return;
 
       try {
+        var u2 = new URL(a.getAttribute('href') || '', location.origin);
+        var cur2 = (location.pathname || '').replace(/\/+$/, '') || '/';
+        var dst2 = (u2.pathname || '').replace(/\/+$/, '') || '/';
+        if (cur2 === dst2) {
+          // v6: clicar no item ativo da sidebar não pode recarregar a mesma página.
+          // Esse reload fechava o WebSocket com CLOSE 1001 e parecia que o atendimento caía.
+          try { e.preventDefault(); } catch (ee) {}
+          try { e.stopPropagation(); } catch (ee) {}
+          try { if (e.stopImmediatePropagation) e.stopImmediatePropagation(); } catch (ee) {}
+          try { window.forceReady && window.forceReady(); } catch (ee) {}
+          try { window.ZCForceClearLoading && window.ZCForceClearLoading('same-page-nav-app-base'); } catch (ee) {}
+          return;
+        }
+
+        // Correção v5:
+        // A tela de atendimentos tem boot próprio e muitos módulos ES.
+        // O overlay global do app-base ficava por cima enquanto o atendimento
+        // ainda estava inicializando, e parecia que a página "caiu".
+        // Para /atendimentos, não mostramos o PageLoading global; o próprio
+        // atendimento controla seus loaders internos.
+        if (dst2 === '/atendimentos') {
+          setTimeout(function(){ try { window.forceReady && window.forceReady(); } catch(e){} }, 50);
+          setTimeout(function(){ try { window.forceReady && window.forceReady(); } catch(e){} }, 500);
+          setTimeout(function(){ try { window.forceReady && window.forceReady(); } catch(e){} }, 1500);
+          return;
+        }
+      } catch (err0) {}
+
+      try {
         if (window.PageLoading && typeof window.PageLoading.show === 'function') {
           window.PageLoading.show('Carregando…', { scope: 'body' });
+          setTimeout(function(){ try { window.forceReady && window.forceReady(); } catch(e){} }, 2500);
+          setTimeout(function(){ try { window.forceReady && window.forceReady(); } catch(e){} }, 9000);
         }
       } catch (err) {}
     }, { capture: true });

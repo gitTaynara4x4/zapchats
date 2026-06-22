@@ -24,6 +24,9 @@
 
   const REQUIRED = [
     'escapeHtml',
+    'eagerImgAttrs',
+    'lazyImgAttrs',
+    'lazyVideoAttrs',
     'humanSize',
     'formatOnlyTime',
 
@@ -52,6 +55,9 @@
 
   const {
     escapeHtml,
+    eagerImgAttrs,
+    lazyImgAttrs,
+    lazyVideoAttrs,
     humanSize,
     formatOnlyTime,
 
@@ -189,6 +195,32 @@
     );
   }
 
+
+  function attachmentBytes(a) {
+    const raw = Number(
+      a?.size ??
+      a?.bytes ??
+      a?.length ??
+      a?.file_size ??
+      a?.filesize ??
+      0
+    );
+    return Number.isFinite(raw) ? raw : 0;
+  }
+
+  function shouldUseEagerImage(a) {
+    const tipo = attachmentTipo(a);
+    const mime = attachmentMime(a);
+    const bytes = attachmentBytes(a);
+
+    if (tipo.includes('figurinha') || tipo.includes('sticker')) return true;
+    if (!mime.startsWith('image/') && !tipo.includes('imagem') && !tipo.includes('image')) return false;
+
+    // Mais parecido com WhatsApp Web: miniaturas e imagens leves aparecem logo.
+    if (!bytes) return true;
+    return bytes <= 420000;
+  }
+
   function renderImageAttachment(m, a, url, alts) {
     const mime = attachmentMime(a);
     const tipo = attachmentTipo(a);
@@ -197,10 +229,8 @@
     if (tipo.includes('figurinha') || tipo.includes('sticker')) {
       return `<img
         class="msg-sticker"
-        src="${escapeHtml(url)}"
-        data-alt="${escapeHtml(alts.join('|'))}"
+        ${eagerImgAttrs(url, alts.join('|'))}
         alt="${escapeHtml(name)}"
-        loading="lazy"
       >`;
     }
 
@@ -209,6 +239,10 @@
       filename: name,
       url,
     });
+
+    const imgAttrs = shouldUseEagerImage(a)
+      ? eagerImgAttrs(url, alts.join('|'))
+      : lazyImgAttrs(url, alts.join('|'));
 
     return `<a
       class="msg-media-img msg-media-img--single"
@@ -224,10 +258,8 @@
       aria-label="${escapeHtml(fileName)}"
     >
       <img
-        src="${escapeHtml(url)}"
-        data-alt="${escapeHtml(alts.join('|'))}"
+        ${imgAttrs}
         alt="${escapeHtml(name)}"
-        loading="lazy"
       >
     </a>`;
   }
@@ -236,9 +268,7 @@
     return `<video
       class="msg-media-video"
       controls
-      preload="metadata"
-      src="${escapeHtml(url)}"
-      data-alt="${escapeHtml(alts.join('|'))}"
+      ${lazyVideoAttrs(url, alts.join('|'))}
     ></video>`;
   }
 

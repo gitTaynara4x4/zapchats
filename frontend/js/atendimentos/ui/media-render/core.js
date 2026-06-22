@@ -11,7 +11,7 @@
   'use strict';
 
   const ROOT_KEY = 'ZCMediaRender';
-  const MEDIA_RENDER_VERSION = 'zc-media-render-split-v1-core';
+  const MEDIA_RENDER_VERSION = 'zc-media-render-v17-wpp-like-core';
 
   window[ROOT_KEY] = window[ROOT_KEY] || {};
 
@@ -266,6 +266,57 @@
     return String(raw).trim();
   }
 
+
+
+  /* =====================================================================
+     Mídia preguiçosa / controle de RAM
+     ===================================================================== */
+
+  const LAZY_MEDIA_PLACEHOLDER = window.ZC_LAZY_MEDIA_PLACEHOLDER || (
+    'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="220" viewBox="0 0 320 220">' +
+      '<rect width="320" height="220" rx="14" fill="#eef2f1"/>' +
+      '<circle cx="160" cy="102" r="26" fill="#d5dedb"/>' +
+      '<path d="M70 174l58-60 38 38 26-26 58 48z" fill="#d5dedb"/>' +
+      '</svg>'
+    )
+  );
+
+  function eagerImgAttrs(src, altList = '') {
+    const safe = escapeHtml(src || '');
+    return [
+      `src="${safe}"`,
+      'data-zc-eager-media="img"',
+      `data-alt="${escapeHtml(altList || '')}"`,
+      'loading="eager"',
+      'decoding="async"',
+      'fetchpriority="low"'
+    ].join(' ');
+  }
+
+  function lazyImgAttrs(src, altList = '') {
+    const safe = escapeHtml(src || '');
+    return [
+      `src="${escapeHtml(LAZY_MEDIA_PLACEHOLDER)}"`,
+      'data-zc-lazy-media="img"',
+      `data-zc-lazy-src="${safe}"`,
+      `data-alt="${escapeHtml(altList || '')}"`,
+      'loading="lazy"',
+      'decoding="async"',
+      'fetchpriority="low"'
+    ].join(' ');
+  }
+
+  function lazyVideoAttrs(src, altList = '') {
+    const safe = escapeHtml(src || '');
+    return [
+      'preload="none"',
+      'data-zc-lazy-media="video"',
+      `data-zc-lazy-src="${safe}"`,
+      `data-alt="${escapeHtml(altList || '')}"`
+    ].join(' ');
+  }
+
   function extend(methods = {}) {
     Object.keys(methods || {}).forEach((key) => {
       M[key] = methods[key];
@@ -342,6 +393,11 @@
     exposeGlobal,
 
     currentEmpresaId,
+
+    LAZY_MEDIA_PLACEHOLDER,
+    eagerImgAttrs,
+    lazyImgAttrs,
+    lazyVideoAttrs,
   });
 
   console.log('[media-render] core carregado:', MEDIA_RENDER_VERSION);

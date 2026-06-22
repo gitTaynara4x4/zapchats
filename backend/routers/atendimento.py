@@ -1731,17 +1731,28 @@ async def marcar_lidas(
         _cache_del(_k("clientes", "emp", str(empresa_id), "dep", ""))
         _invalidate_conversas_cache(int(empresa_id))
 
-        try:
-            await conexoes_ativas.send_message(
-                f"emp:{empresa_id}",
-                {
-                    "type": "reload_clientes",
-                    "cliente_id": int(cliente_pk),
-                    "instancia_id": int(instancia_id) if instancia_id is not None else None,
-                },
-            )
-        except Exception:
-            pass
+        # IMPORTANTE - correção v10:
+        # Marcar mensagem como lida não pode mandar reload_clientes global.
+        # Esse evento estava derrubando/recarregando a tela inteira depois de mensagem recebida,
+        # mesmo com WS_EMIT_MESSAGES=false. O front já consegue atualizar o estado localmente.
+        if str(os.getenv("WS_EMIT_SEEN_RELOAD_CLIENTES", "false")).strip().lower() in {"1", "true", "yes", "on"}:
+            try:
+                await conexoes_ativas.send_message(
+                    f"emp:{empresa_id}",
+                    {
+                        "type": "reload_clientes",
+                        "cliente_id": int(cliente_pk),
+                        "instancia_id": int(instancia_id) if instancia_id is not None else None,
+                        "source": "seen",
+                    },
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                LOG(f"[/clientes/{{cliente_id}}/seen][ws-skip] reload_clientes desativado cliente_id={int(cliente_pk)}")
+            except Exception:
+                pass
 
     return {
         "ok": True,

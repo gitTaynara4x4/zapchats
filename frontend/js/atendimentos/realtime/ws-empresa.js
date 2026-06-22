@@ -18,8 +18,8 @@
 //   e como instance_name em outro.
 // - Prefere a conversation_key canônica recebida pelo WS quando ela pertence
 //   à conversa aberta.
-// - Dispara eventos compatíveis com historico.js:
-//   atendimento:mensagem-recebida, zc:message-upsert, zc:message-created.
+// - Mensagem recebida via WS atualiza bolha/cache/lista sem forçar reload
+//   pesado do histórico quando a conversa já está aberta.
 // ====================================================================
 
 import { tsToMillis } from '../core/time.js';
@@ -77,6 +77,75 @@ let lagTimer = null;
 
 let __reloadListTimer = null;
 let __lastReloadListAt = 0;
+
+// v12: evita processar a mesma mensagem duas vezes quando existem 2 listeners/abas/loads rápidos.
+const LIVE_MSG_DEDUPE_MS = 60_000;
+const LIVE_MSG_SEEN = (() => {
+  try {
+    return window.__ZC_WS_LIVE_MSG_SEEN__ || (window.__ZC_WS_LIVE_MSG_SEEN__ = new Map());
+  } catch {
+    return new Map();
+  }
+})();
+
+function isPageActuallyVisible() {
+  try {
+    if (document.hidden) return false;
+    if (typeof document.hasFocus === 'function' && !document.hasFocus()) return false;
+  } catch {}
+
+  return true;
+}
+
+function isOpenChatVisualized(convRef) {
+  return Boolean(isOpenChat(convRef) && isPageActuallyVisible());
+}
+
+function messageDedupeKey(data = {}) {
+  const id = pickMsgId(data);
+  const conv =
+    data?.conversation_key ??
+    data?.conversationKey ??
+    data?.conversation_id ??
+    data?.conversationId ??
+    data?.cliente_id ??
+    data?.clienteId ??
+    data?.grupo_id ??
+    data?.grupoId ??
+    '';
+
+  if (id) return `${conv || 'msg'}:${id}`;
+
+  const ts = pickTimestamp(data) || data?.serverTimestamp || '';
+  const txt = pickText(data) || '';
+  const inst = pickInstanciaFromAny(data) || '';
+  return `${conv}:${inst}:${ts}:${txt}`.slice(0, 260);
+}
+
+function shouldSkipDuplicateLiveMessage(data = {}) {
+  try {
+    const k = messageDedupeKey(data);
+    if (!k || k === ':::') return false;
+
+    const now = Date.now();
+
+    for (const [key, at] of LIVE_MSG_SEEN.entries()) {
+      if (!at || now - Number(at) > LIVE_MSG_DEDUPE_MS) {
+        LIVE_MSG_SEEN.delete(key);
+      }
+    }
+
+    const prev = LIVE_MSG_SEEN.get(k);
+    if (prev && now - Number(prev) < LIVE_MSG_DEDUPE_MS) {
+      if (DEBUG_WS) console.debug('[WS MSG][duplicada ignorada]', k);
+      return true;
+    }
+
+    LIVE_MSG_SEEN.set(k, now);
+  } catch {}
+
+  return false;
+}
 
 /* =========================================================
    BASE HELPERS
@@ -1213,27 +1282,31 @@ function requestOfficialListReload(reason = 'ws-reload') {
   clearTimeout(__reloadListTimer);
 
   __reloadListTimer = setTimeout(() => {
+    // Correção v10:
+    // Nunca força reload pesado da lista a partir de WS.
+    // O force:true + convForceReload era o gatilho do carregamento infinito.
     try {
-      sessionStorage.setItem('convForceReload', '1');
+      sessionStorage.removeItem('convForceReload');
     } catch {}
 
     try {
       window.carregarClientes?.({
-        force: true,
-        reason,
+        force: false,
+        reason: `soft:${reason}`,
+        noLoading: true,
       });
     } catch {}
 
     try {
-      document.dispatchEvent(new CustomEvent('ws:reload_clientes', {
+      document.dispatchEvent(new CustomEvent('ws:reload_clientes_soft', {
         detail: {
-          type: 'reload_clientes',
+          type: 'reload_clientes_soft',
           reason,
           serverTimestamp: Date.now(),
         },
       }));
     } catch {}
-  }, 150);
+  }, 250);
 }
 
 /* =========================================================
@@ -1345,7 +1418,7 @@ function bumpPreview(convKey, msg, inst = null) {
     msg?.tipo === 'saida' ||
     msg?.origem === 'atendente';
 
-  const openNow = isOpenChat(ref);
+  const openNow = isOpenChatVisualized(ref);
 
   const existingRow = findKnownConversationByRef(ref, msg);
   const previousUnread = unreadFromRow(existingRow);
@@ -1716,6 +1789,8 @@ function handleDeleteMensagem(data) {
 ========================================================= */
 
 function handleNovaMensagem(data) {
+  if (shouldSkipDuplicateLiveMessage(data)) return;
+
   const incomingRef = normalizeIncomingConversationRef(data);
 
   if (!incomingRef?.key || !incomingRef?.kind || !incomingRef?.entityId || !incomingRef?.instId) {
@@ -1792,12 +1867,10 @@ function handleNovaMensagem(data) {
     dispatchRealtimeMessageEvents(normalizedOpenPayload);
 
     /*
-      Mesmo quando a conversa aberta renderiza pelo histórico, a lista lateral
-      também precisa atualizar preview/hora/ordem.
-      Como aqui caímos no caminho "openRef" sem item conhecido na lista/cache,
-      forçamos reload oficial da lista com debounce.
+      A conversa já está aberta e recebeu a mensagem pelo WebSocket.
+      Não força reload oficial aqui, porque isso reabre /atendimentos,
+      mostra spinner e pode parecer que a tela caiu.
     */
-    requestOfficialListReload('ws-open-message-list-refresh');
 
     renderOpenConversationFromWs(openRef);
     notifyNewMessage(normalizedOpenPayload, openRef.key);
@@ -1805,7 +1878,8 @@ function handleNovaMensagem(data) {
     return;
   }
 
-  const openNow = Boolean(openRefDirect) || isOpenChat(knownRef) || knownRef.from === 'open' || knownRef.from === 'open-phone';
+  const openNow = (Boolean(openRefDirect) || isOpenChat(knownRef) || knownRef.from === 'open' || knownRef.from === 'open-phone');
+  const visualizedNow = openNow && isPageActuallyVisible();
 
   const text = pickText(data);
   const msgId = pickMsgId(data);
@@ -1852,26 +1926,19 @@ function handleNovaMensagem(data) {
   /*
     A bolha do chat e a lista lateral são fluxos diferentes.
 
-    Antes: quando openNow=true e bumpPreview falhava, o chat atualizava,
-    mas a lista não recarregava. Resultado: mensagem aparecia no chat,
-    porém preview/hora/ordem da lista ficavam antigos.
+    Se a conversa está aberta, o WS já empurra a bolha e bumpPreview tenta
+    atualizar a lista em memória. Não força reload oficial, porque o reload
+    chama carregarClientes(), troca o estado da tela e gera o spinner infinito.
 
-    Agora:
-    - se bumpPreview falhar, recarrega a lista mesmo com a conversa aberta;
-    - se a conversa está aberta, faz um refresh leve/debounced da lista também,
-      garantindo preview/hora sem depender do cache local acertar 100%.
+    Se a conversa NÃO está aberta e o preview não conseguiu atualizar, aí sim
+    recarrega a lista para criar/posicionar a conversa corretamente.
   */
-  if (!updated) {
-    requestOfficialListReload(openNow ? 'ws-open-message-list-update-miss' : 'ws-message-update-miss');
-
-    if (!openNow) {
-      return;
-    }
-  } else if (openNow) {
-    requestOfficialListReload('ws-open-message-list-soft-refresh');
+  if (!updated && !openNow) {
+    requestOfficialListReload('ws-message-update-miss');
+    return;
   }
 
-  if (openNow) {
+  if (visualizedNow) {
     try {
       renderOpenConversationFromWs(knownRef);
 
@@ -1894,7 +1961,7 @@ function handleNovaMensagem(data) {
       if (DEBUG_WS) console.warn('[WS MSG][render falhou]', e);
     }
   } else if (DEBUG_WS) {
-    console.debug('[WS MSG][não aberto - só preview/badge]', {
+    console.debug(openNow ? '[WS MSG][aberto mas não visualizado - mantém bolha]' : '[WS MSG][não aberto - só preview/badge]', {
       incoming: knownRef.key,
       open: getOpenContext()?.key,
       data: normalizedPayload,
@@ -2132,8 +2199,20 @@ function handleMessage(ev) {
   }
 
   if (data.type === 'reload_clientes' || data.type === 'reload_grupos') {
-    document.dispatchEvent(new CustomEvent('ws:reload_clientes', { detail: data }));
-    requestOfficialListReload(data.type);
+    // Correção v10:
+    // reload_clientes vindo por WS não pode forçar carregarClientes(force:true),
+    // nem setar convForceReload, porque isso recarrega /atendimentos e fecha o WS com 1001.
+    // Mantemos apenas o evento leve para quem quiser atualizar badge/localmente.
+    try {
+      document.dispatchEvent(new CustomEvent('ws:reload_clientes', { detail: data }));
+    } catch {}
+
+    if (window.ZC_ALLOW_WS_RELOAD_CLIENTES === true) {
+      requestOfficialListReload(data.type);
+    } else if (DEBUG_WS) {
+      console.debug('[WS] reload_clientes ignorado para não travar a tela', data);
+    }
+
     return;
   }
 

@@ -23,6 +23,8 @@
 
   const REQUIRED = [
     'escapeHtml',
+    'lazyImgAttrs',
+    'lazyVideoAttrs',
     'buildCanonUrlByMsgId',
     'makeWaAudioHTML',
   ];
@@ -33,6 +35,8 @@
 
   const {
     escapeHtml,
+    lazyImgAttrs,
+    lazyVideoAttrs,
     buildCanonUrlByMsgId,
     makeWaAudioHTML,
   } = M;
@@ -86,16 +90,15 @@
       data-name="imagem"
       aria-label="imagem"
     >
-      <img src="${escapeHtml(src)}" alt="imagem" loading="lazy">
+      <img ${lazyImgAttrs(src, '')} alt="imagem">
     </a>`;
   }
 
   function renderMarkerSticker(src) {
     return `<img
       class="msg-sticker"
-      src="${escapeHtml(src)}"
+      ${lazyImgAttrs(src, '')}
       alt="figurinha"
-      loading="lazy"
     >`;
   }
 
@@ -103,8 +106,7 @@
     return `<video
       class="msg-media-video"
       controls
-      preload="metadata"
-      src="${escapeHtml(src)}"
+      ${lazyVideoAttrs(src, '')}
     ></video>`;
   }
 

@@ -1,1359 +1,1171 @@
 <!-- /frontend/partials/sidebar.html -->
 
-<link rel="preload" as="image" href="/img/logo-s-fundo.png">
-<link rel="preload" as="image" href="/img/logo-white.png">
 <link rel="preload" as="image" href="/img/fav-icon.png">
 
 <script>
   (function () {
     try {
-      var root = document.documentElement;
-      var saved =
-        (window.AppTheme && typeof window.AppTheme.current === 'function'
-          ? window.AppTheme.current()
-          : (localStorage.getItem('theme') || localStorage.getItem('valora_theme') || 'dark')
-        ) || 'dark';
+      var saved = localStorage.getItem("zapschat_theme");
 
-      var isDark = String(saved).toLowerCase() === 'dark';
-      root.classList.toggle('dark', isDark);
-      root.setAttribute('data-theme', isDark ? 'dark' : 'light');
-    } catch (e) {}
+      if (saved !== "dark" && saved !== "light") {
+        saved = "light";
+        localStorage.setItem("zapschat_theme", "light");
+      }
+
+      var isDark = saved === "dark";
+
+      document.documentElement.classList.toggle("dark", isDark);
+      document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
+    } catch (e) {
+      document.documentElement.classList.remove("dark");
+      document.documentElement.setAttribute("data-theme", "light");
+    }
   })();
 </script>
 
 <style>
   :root {
-    --vs-sidebar-bg: #ffffff;
-    --vs-sidebar-border: #e5e7eb;
-    --vs-text-main: #111827;
-    --vs-text-muted: #6b7280;
-    --vs-nav-muted: #9ca3af;
-    --vs-hover-bg: #f3f4f6;
-    --vs-dropdown-bg: #ffffff;
-    --vs-dropdown-hover: #f3f4f6;
-    --vs-dropdown-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
-    --vs-accent: #25d366;
-    --vs-accent-soft: rgba(37, 211, 102, 0.12);
-    --vs-danger: #ef4444;
-    --vs-danger-soft: rgba(239, 68, 68, 0.08);
-    --vs-radius: 10px;
-    --vs-mobile-btn-bg: #f3f4f6;
-    --vs-overlay: rgba(15, 23, 42, 0.5);
-    --vs-topbar-bg: rgba(255, 255, 255, 0.88);
+    --zc-sidebar-width: 250px;
+    --zc-sidebar-collapsed-width: 76px;
+    --zc-mobile-topbar-height: 60px;
 
-    --vs-sidebar-w-collapsed: 72px;
-    --vs-sidebar-w-expanded: 260px;
+    --zc-bg: #ffffff;
+    --zc-border: #e7ebf0;
+    --zc-text: #101828;
+    --zc-title: #111827;
+    --zc-muted: #667085;
+    --zc-soft: #98a2b3;
 
-    --vs-mobile-topbar-h: 60px;
-    --vs-mobile-drawer-w: min(86vw, 320px);
+    --zc-active: #2563eb;
+    --zc-active-bg: #edf5ff;
+
+    --zc-hover: #f6f8fb;
+    --zc-dropdown-bg: #ffffff;
+    --zc-mobile-bg: rgba(255, 255, 255, 0.92);
+
+    --zc-danger: #ef4444;
+    --zc-danger-bg: #fff1f2;
+
+    --zc-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
+    --zc-font: "Poppins", Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 
   html.dark,
   html[data-theme="dark"] {
-    --vs-sidebar-bg: #181818;
-    --vs-sidebar-border: #262626;
-    --vs-text-main: #f5f5f5;
-    --vs-text-muted: #b0b0b0;
-    --vs-nav-muted: #8a8a8a;
-    --vs-hover-bg: #222222;
-    --vs-dropdown-bg: #1e1e1e;
-    --vs-dropdown-hover: #2a2a2a;
-    --vs-dropdown-shadow: 0 16px 35px rgba(0, 0, 0, 0.42);
-    --vs-accent: #25d366;
-    --vs-accent-soft: rgba(37, 211, 102, 0.16);
-    --vs-danger: #ef4444;
-    --vs-danger-soft: rgba(239, 68, 68, 0.12);
-    --vs-mobile-btn-bg: #202020;
-    --vs-overlay: rgba(0, 0, 0, 0.62);
-    --vs-topbar-bg: rgba(24, 24, 24, 0.88);
+    --zc-bg: #212121;
+    --zc-border: #303030;
+    --zc-text: #ececec;
+    --zc-title: #f5f5f5;
+    --zc-muted: #b4b4b4;
+    --zc-soft: #8f8f8f;
+
+    --zc-active: #ffffff;
+    --zc-active-bg: #303030;
+
+    --zc-hover: #2a2a2a;
+    --zc-dropdown-bg: #262626;
+    --zc-mobile-bg: rgba(33, 33, 33, 0.94);
+
+    --zc-danger: #ff6b6b;
+    --zc-danger-bg: rgba(255, 107, 107, 0.12);
+
+    --zc-shadow: 0 18px 45px rgba(0, 0, 0, 0.42);
   }
 
-  html, body {
+  html,
+  body {
     margin: 0;
     padding: 0;
   }
 
-  body.Valora-sidebar-ready {
-    padding-left: var(--vs-sidebar-w-collapsed);
-    transition: padding-left 0.2s ease, padding-top 0.2s ease;
+  body.zc-sidebar-ready {
+    padding-left: var(--zc-sidebar-width);
+    transition: padding-left .22s ease, padding-top .22s ease;
   }
 
-  .Valora-mobile-topbar {
+  body.zc-sidebar-collapsed {
+    padding-left: var(--zc-sidebar-collapsed-width);
+  }
+
+  .zc-mobile-topbar {
     display: none;
   }
 
-  .Valora-mobile-overlay {
+  .zc-sidebar-overlay {
     position: fixed;
     inset: 0;
-    background: var(--vs-overlay);
+    background: rgba(15, 23, 42, .48);
+    z-index: 1190;
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
-    transition: opacity 0.2s ease, visibility 0.2s ease;
-    z-index: 1190;
+    transition: opacity .2s ease, visibility .2s ease;
   }
 
-  .Valora-mobile-overlay.show {
+  .zc-sidebar-overlay.show {
     opacity: 1;
     visibility: visible;
     pointer-events: auto;
   }
 
-  .Valora-app-sidebar {
+  .zc-sidebar {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: var(--vs-sidebar-w-collapsed);
+    inset: 0 auto 0 0;
+    width: var(--zc-sidebar-width);
     height: 100vh;
-    background: var(--vs-sidebar-bg);
-    border-right: 1px solid var(--vs-sidebar-border);
-    padding: 24px 10px 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
     z-index: 1200;
-    transition:
-      background 0.2s ease,
-      border-color 0.2s ease,
-      width 0.22s ease,
-      padding-left 0.22s ease,
-      padding-right 0.22s ease,
-      transform 0.22s ease,
-      box-shadow 0.22s ease;
-    box-shadow: none;
-    box-sizing: border-box;
-    overflow-x: hidden;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(127,127,127,.45) transparent;
-  }
-
-  .Valora-app-sidebar::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  .Valora-app-sidebar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .Valora-app-sidebar::-webkit-scrollbar-thumb {
-    background: rgba(127,127,127,.42);
-    border-radius: 999px;
-  }
-
-  .Valora-app-sidebar::-webkit-scrollbar-thumb:hover {
-    background: rgba(127,127,127,.65);
-  }
-
-  .Valora-app-sidebar:hover {
-    width: var(--vs-sidebar-w-expanded);
-    padding-left: 16px;
-    padding-right: 16px;
-    box-shadow: 10px 0 28px rgba(0, 0, 0, 0.12);
-  }
-
-  html.dark .Valora-app-sidebar:hover,
-  html[data-theme="dark"] .Valora-app-sidebar:hover {
-    box-shadow: 12px 0 32px rgba(0, 0, 0, 0.34);
-  }
-
-  .Valora-sidebar-header {
+    background: var(--zc-bg);
+    border-right: 1px solid var(--zc-border);
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 0 6px 22px;
-    border-bottom: 1px solid var(--vs-sidebar-border);
-    position: relative;
+    padding: 18px 14px 16px;
+    box-sizing: border-box;
+    font-family: var(--zc-font);
+    overflow: hidden;
+    transition:
+      width .22s ease,
+      transform .22s ease,
+      box-shadow .22s ease,
+      background .18s ease,
+      border-color .18s ease;
   }
 
-  .Valora-logo-link {
-    display: block;
-    width: 100%;
-    text-decoration: none;
+  .zc-sidebar.is-collapsed {
+    width: var(--zc-sidebar-collapsed-width);
   }
 
-  .Valora-logo-wrap {
-    width: 100%;
-    min-height: 42px;
-    display: grid;
-    justify-items: center;
+  .zc-sidebar-scroll {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 2px;
+    scrollbar-width: none;
+  }
+
+  .zc-sidebar-scroll::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
+  .zc-brand {
+    height: 44px;
+    display: flex;
     align-items: center;
-    position: relative;
+    gap: 10px;
+    text-decoration: none;
+    color: var(--zc-text);
+    padding: 0 4px 16px;
+    margin-bottom: 8px;
   }
 
-  .Valora-app-sidebar:hover .Valora-logo-wrap {
-    justify-items: start;
+  .zc-brand-icon {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    border-radius: 0;
+    background: transparent;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: none;
+    overflow: visible;
   }
 
-  .Valora-logo-fav,
-  .Valora-logo-light,
-  .Valora-logo-dark {
-    grid-area: 1 / 1;
-    transition: opacity 0.18s ease, transform 0.22s ease;
-    will-change: opacity, transform;
-  }
-
-  .Valora-logo-fav {
+  .zc-brand-icon img {
     width: 32px;
     height: 32px;
     object-fit: contain;
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  .Valora-logo-light,
-  .Valora-logo-dark {
-    max-width: 100%;
-    height: 38px;
-    width: auto;
-    opacity: 0;
-    transform: scale(0.985);
-    pointer-events: none;
-  }
-
-  html.dark .Valora-logo-light,
-  html[data-theme="dark"] .Valora-logo-light {
-    display: none;
-  }
-
-  html:not(.dark):not([data-theme="dark"]) .Valora-logo-dark {
-    display: none;
-  }
-
-  .Valora-app-sidebar:hover .Valora-logo-fav {
-    opacity: 0;
-    transform: scale(0.96);
-  }
-
-  .Valora-app-sidebar:hover .Valora-logo-light,
-  .Valora-app-sidebar:hover .Valora-logo-dark {
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  .Valora-logo-caption {
-    font-size: 14px;
-    color: var(--vs-text-muted);
-    font-weight: 500;
-    height: 20px;
-    line-height: 20px;
-    margin: 0;
-    opacity: 0;
-    visibility: hidden;
-    pointer-events: none;
-    white-space: nowrap;
-    transition: opacity 0.16s ease;
-  }
-
-  .Valora-app-sidebar:hover .Valora-logo-caption {
-    opacity: 1;
-    visibility: visible;
-  }
-
-  .Valora-sidebar-section {
-    margin-top: 2px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .Valora-section-label {
-    font-size: 12px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--vs-nav-muted);
-    height: 16px;
-    line-height: 16px;
-    margin: 8px 8px 6px;
-    opacity: 0;
-    visibility: hidden;
-    pointer-events: none;
-    white-space: nowrap;
-    transition: opacity 0.16s ease;
-  }
-
-  .Valora-app-sidebar:hover .Valora-section-label {
-    opacity: 1;
-    visibility: visible;
-  }
-
-  .Valora-nav-item {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0;
-    border-radius: var(--vs-radius);
-    border: 1px solid transparent;
-    background: transparent;
-    padding: 11px 12px;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--vs-text-muted);
-    cursor: pointer;
-    text-align: left;
-    transition: all 0.18s ease;
-    width: 100%;
-    text-decoration: none;
-    min-height: 44px;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .Valora-app-sidebar:hover .Valora-nav-item {
-    justify-content: flex-start;
-    gap: 10px;
-  }
-
-  .Valora-nav-item:hover {
-    background: var(--vs-hover-bg);
-    color: var(--vs-text-main);
-  }
-
-  .Valora-nav-icon {
-    width: 22px;
-    height: 22px;
-    min-width: 22px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--vs-nav-muted);
-    transition: color 0.18s ease;
-  }
-
-  .Valora-nav-icon svg {
-    width: 22px;
-    height: 22px;
     display: block;
-    fill: currentColor;
   }
 
-  .Valora-nav-item:hover .Valora-nav-icon {
-    color: var(--vs-text-main);
+  .zc-brand-icon span {
+    color: var(--zc-active);
+    font-size: 18px;
+    font-weight: 800;
+    line-height: 1;
+    display: none;
   }
 
-  .Valora-nav-item > span:not(.Valora-nav-icon) {
+  .zc-brand-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--zc-title);
+    white-space: nowrap;
+    letter-spacing: -.01em;
+    transition: opacity .18s ease, transform .18s ease, max-width .18s ease;
+  }
+
+  .zc-sidebar.is-collapsed .zc-brand {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .zc-sidebar.is-collapsed .zc-brand-name {
     opacity: 0;
     max-width: 0;
     overflow: hidden;
+    transform: translateX(-4px);
+  }
+
+  .zc-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-top: 2px;
+  }
+
+  .zc-nav-item {
+    height: 42px;
+    border-radius: 10px;
+    color: var(--zc-muted);
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 11px;
+    box-sizing: border-box;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1;
+    transition: background .16s ease, color .16s ease, transform .16s ease;
+    position: relative;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .zc-nav-item:hover {
+    background: var(--zc-hover);
+    color: var(--zc-text);
+  }
+
+  .zc-nav-item.is-active,
+  .zc-nav-item[aria-current="page"] {
+    background: var(--zc-active-bg);
+    color: var(--zc-active);
+    font-weight: 600;
+  }
+
+  .zc-nav-icon {
+    width: 19px;
+    height: 19px;
+    min-width: 19px;
+    color: currentColor;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .zc-icon {
+    width: 19px;
+    height: 19px;
+    display: block;
+    stroke: currentColor;
+  }
+
+  .zc-nav-label {
     white-space: nowrap;
-    transform: scale(0.98);
-    transform-origin: left center;
-    transition:
-      opacity 0.18s ease,
-      max-width 0.22s ease,
-      transform 0.22s ease;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: opacity .18s ease, max-width .18s ease, transform .18s ease;
   }
 
-  .Valora-app-sidebar:hover .Valora-nav-item > span:not(.Valora-nav-icon) {
+  .zc-sidebar.is-collapsed .zc-nav-item {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+    gap: 0;
+  }
+
+  .zc-sidebar.is-collapsed .zc-nav-label {
+    opacity: 0;
+    max-width: 0;
+    transform: translateX(-4px);
+  }
+
+  .zc-sidebar.is-collapsed .zc-nav-item::after,
+  .zc-sidebar.is-collapsed .zc-user-button::after,
+  .zc-sidebar.is-collapsed .zc-collapse-btn::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: #111827;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    padding: 7px 9px;
+    border-radius: 8px;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity .16s ease, visibility .16s ease;
+    box-shadow: 0 12px 30px rgba(0,0,0,.16);
+    z-index: 50;
+  }
+
+  .zc-sidebar.is-collapsed .zc-nav-item:hover::after,
+  .zc-sidebar.is-collapsed .zc-user-button:hover::after,
+  .zc-sidebar.is-collapsed .zc-collapse-btn:hover::after {
     opacity: 1;
-    max-width: 180px;
-    transform: scale(1);
+    visibility: visible;
   }
 
-  .Valora-nav-item.is-active,
-  .Valora-nav-item[aria-current="page"] {
-    background: var(--vs-accent-soft);
-    border-color: rgba(37, 211, 102, 0.18);
-    color: var(--vs-accent);
+  .zc-bottom {
+    padding-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-top: 1px solid var(--zc-border);
   }
 
-  .Valora-nav-item.is-active .Valora-nav-icon,
-  .Valora-nav-item[aria-current="page"] .Valora-nav-icon {
-    color: var(--vs-accent);
-  }
-
-  .Valora-user-container {
-    margin-top: auto;
+  .zc-user-area {
     position: relative;
   }
 
-  .Valora-user-profile {
-    padding: 10px;
-    border-top: 1px solid var(--vs-sidebar-border);
+  .zc-user-button {
+    width: 100%;
+    min-height: 48px;
+    border: 0;
+    background: transparent;
+    border-radius: 12px;
+    padding: 7px;
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 0;
-    border-radius: var(--vs-radius);
+    gap: 10px;
     cursor: pointer;
-    transition: background 0.18s ease, padding 0.18s ease, justify-content 0.18s ease;
-    user-select: none;
+    color: var(--zc-text);
+    font-family: var(--zc-font);
+    text-align: left;
+    position: relative;
+    transition: background .16s ease;
   }
 
-  .Valora-app-sidebar:hover .Valora-user-profile {
-    justify-content: flex-start;
-    padding: 12px;
-    gap: 12px;
+  .zc-user-button:hover,
+  .zc-user-button.active {
+    background: var(--zc-hover);
   }
 
-  .Valora-user-profile:hover,
-  .Valora-user-profile.active {
-    background: var(--vs-hover-bg);
-  }
-
-  .Valora-user-avatar {
-    width: 38px;
-    height: 38px;
+  .zc-user-avatar {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
     border-radius: 999px;
-    background: var(--vs-accent-soft);
-    color: var(--vs-accent);
+    background: var(--zc-active-bg);
+    color: var(--zc-active);
     display: flex;
     align-items: center;
     justify-content: center;
+    font-size: 12px;
     font-weight: 700;
-    font-size: 14px;
-    flex-shrink: 0;
     overflow: hidden;
   }
 
-  .Valora-user-avatar img {
+  .zc-user-avatar img {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: none;
   }
 
-  .Valora-user-info {
+  .zc-user-info {
+    min-width: 0;
+    flex: 1;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
-    flex-grow: 1;
-    min-width: 0;
+    gap: 3px;
+    transition: opacity .18s ease, max-width .18s ease, transform .18s ease;
   }
 
-  .Valora-user-info strong {
-    font-size: 13px;
+  .zc-user-info strong {
+    font-size: 12px;
     font-weight: 600;
-    color: var(--vs-text-main);
+    color: var(--zc-title);
     white-space: nowrap;
-    text-overflow: ellipsis;
     overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .Valora-user-info span {
-    font-size: 11px;
-    color: var(--vs-text-muted);
+  .zc-user-info span {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--zc-muted);
     white-space: nowrap;
+    overflow: hidden;
     text-overflow: ellipsis;
-    overflow: hidden;
   }
 
-  .Valora-user-info,
-  .Valora-user-chevron {
-    opacity: 0;
-    max-width: 0;
-    overflow: hidden;
-    transform: scale(0.98);
-    transform-origin: left center;
-    transition:
-      opacity 0.18s ease,
-      max-width 0.22s ease,
-      transform 0.22s ease;
-  }
-
-  .Valora-app-sidebar:hover .Valora-user-info,
-  .Valora-app-sidebar:hover .Valora-user-chevron {
-    opacity: 1;
-    max-width: 180px;
-    transform: scale(1);
-  }
-
-  .Valora-user-chevron {
+  .zc-user-chevron {
     width: 16px;
     height: 16px;
-    color: var(--vs-nav-muted);
-    transition: transform 0.2s ease, opacity 0.18s ease, max-width 0.22s ease;
-    flex-shrink: 0;
+    color: var(--zc-soft);
+    transition: transform .18s ease, opacity .18s ease, max-width .18s ease;
   }
 
-  .Valora-user-chevron svg {
-    width: 16px;
-    height: 16px;
-    display: block;
-    fill: currentColor;
-  }
-
-  .Valora-user-profile.active .Valora-user-chevron {
+  .zc-user-button.active .zc-user-chevron {
     transform: rotate(180deg);
   }
 
-  .Valora-user-dropdown {
-    position: absolute;
-    bottom: calc(100% + 8px);
-    left: 0;
-    right: auto;
-    width: 230px;
-    background: var(--vs-dropdown-bg);
-    border: 1px solid var(--vs-sidebar-border);
-    border-radius: var(--vs-radius);
-    padding: 8px;
-    box-shadow: var(--vs-dropdown-shadow);
-    opacity: 0;
-    visibility: hidden;
-    transform: translateY(10px);
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    z-index: 30;
+  .zc-sidebar.is-collapsed .zc-user-button {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
   }
 
-  .Valora-app-sidebar:hover .Valora-user-dropdown {
-    width: auto;
+  .zc-sidebar.is-collapsed .zc-user-info,
+  .zc-sidebar.is-collapsed .zc-user-chevron {
+    opacity: 0;
+    max-width: 0;
+    overflow: hidden;
+    transform: translateX(-4px);
+  }
+
+  .zc-user-dropdown {
+    position: absolute;
     left: 0;
     right: 0;
+    bottom: calc(100% + 8px);
+    background: var(--zc-dropdown-bg);
+    border: 1px solid var(--zc-border);
+    border-radius: 14px;
+    padding: 7px;
+    box-shadow: var(--zc-shadow);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(8px);
+    pointer-events: none;
+    transition:
+      opacity .18s ease,
+      visibility .18s ease,
+      transform .18s ease,
+      background .18s ease,
+      border-color .18s ease;
+    z-index: 60;
   }
 
-  .Valora-user-dropdown.show {
+  .zc-sidebar.is-collapsed .zc-user-dropdown {
+    left: 0;
+    width: 230px;
+    right: auto;
+  }
+
+  .zc-user-dropdown.show {
     opacity: 1;
     visibility: visible;
     transform: translateY(0);
+    pointer-events: auto;
   }
 
-  .Valora-dropdown-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
+  .zc-dropdown-item {
     width: 100%;
-    padding: 10px 12px;
+    min-height: 38px;
     border: 0;
     background: transparent;
-    color: var(--vs-text-main);
-    font-size: 13px;
+    color: var(--zc-text);
+    border-radius: 9px;
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 12px;
     font-weight: 500;
-    border-radius: 8px;
+    font-family: var(--zc-font);
     cursor: pointer;
-    text-align: left;
-    transition: background 0.15s ease, color 0.15s ease;
     text-decoration: none;
+    box-sizing: border-box;
   }
 
-  .Valora-dropdown-item:hover {
-    background: var(--vs-dropdown-hover);
+  .zc-dropdown-item:hover {
+    background: var(--zc-hover);
   }
 
-  .Valora-dropdown-item .icon {
-    width: 16px;
-    height: 16px;
-    color: var(--vs-nav-muted);
-    flex-shrink: 0;
+  .zc-dropdown-item.danger {
+    color: var(--zc-danger);
   }
 
-  .Valora-dropdown-item .icon svg {
-    width: 16px;
-    height: 16px;
-    display: block;
-    fill: currentColor;
+  .zc-dropdown-item.danger:hover {
+    background: var(--zc-danger-bg);
   }
 
-  .Valora-dropdown-item__label {
-    flex: 1 1 auto;
-    min-width: 0;
+  .zc-dropdown-item .zc-icon {
+    width: 17px;
+    height: 17px;
+    min-width: 17px;
   }
 
-  .Valora-dropdown-badge {
+  .zc-dropdown-label {
+    flex: 1;
+    text-align: left;
+  }
+
+  .zc-dropdown-badge {
     min-width: 20px;
     height: 20px;
     padding: 0 6px;
     border-radius: 999px;
-    background: linear-gradient(135deg, #ef4444, #dc2626);
+    background: #ef4444;
     color: #fff;
-    display: inline-flex;
+    display: none;
     align-items: center;
     justify-content: center;
     font-size: 10px;
     font-weight: 800;
-    box-shadow: 0 8px 16px rgba(220,38,38,.22);
-    flex-shrink: 0;
   }
 
-  .Valora-dropdown-divider {
+  .zc-dropdown-divider {
     height: 1px;
-    background: var(--vs-sidebar-border);
-    margin: 6px 0;
+    background: var(--zc-border);
+    margin: 6px 4px;
   }
 
-  .Valora-dropdown-item.danger {
-    color: var(--vs-danger);
-  }
-
-  .Valora-dropdown-item.danger .icon {
-    color: var(--vs-danger);
-  }
-
-  .Valora-dropdown-item.danger:hover {
-    background: var(--vs-danger-soft);
-  }
-
-  .Valora-mobile-close {
-    display: none;
-  }
-
-  .Valora-app-sidebar:not(:hover) .Valora-logo-caption,
-  .Valora-app-sidebar:not(:hover) .Valora-section-label {
-    opacity: 1;
-    visibility: visible;
-    color: transparent;
+  .zc-collapse-btn {
+    width: 100%;
+    height: 42px;
+    border: 0;
+    background: transparent;
+    color: var(--zc-muted);
+    border-radius: 10px;
+    padding: 0 11px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: var(--zc-font);
+    cursor: pointer;
     position: relative;
-    pointer-events: none;
+    transition: background .16s ease, color .16s ease;
   }
 
-  .Valora-app-sidebar:not(:hover) .Valora-logo-caption::after {
-    content: "";
-    display: block;
-    width: 34px;
-    height: 1px;
-    background: var(--vs-sidebar-border);
-    border-radius: 999px;
-    margin: 9px auto 0;
-    opacity: 0.9;
+  .zc-collapse-btn:hover {
+    background: var(--zc-hover);
+    color: var(--zc-text);
   }
 
-  .Valora-app-sidebar:not(:hover) .Valora-section-label::after {
-    content: "";
-    display: block;
-    width: 28px;
-    height: 1px;
-    background: var(--vs-sidebar-border);
-    border-radius: 999px;
-    margin: 7px auto 0;
-    opacity: 0.75;
+  .zc-collapse-icon {
+    width: 19px;
+    height: 19px;
+    min-width: 19px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform .18s ease;
   }
 
-  .Valora-app-sidebar:hover .Valora-logo-caption,
-  .Valora-app-sidebar:hover .Valora-section-label {
-    color: inherit;
+  .zc-sidebar.is-collapsed .zc-collapse-btn {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+    gap: 0;
   }
 
-  .Valora-app-sidebar:hover .Valora-logo-caption::after,
-  .Valora-app-sidebar:hover .Valora-section-label::after {
+  .zc-sidebar.is-collapsed .zc-collapse-text {
+    opacity: 0;
+    max-width: 0;
+    overflow: hidden;
+  }
+
+  .zc-sidebar.is-collapsed .zc-collapse-icon {
+    transform: rotate(180deg);
+  }
+
+  .zc-mobile-close {
     display: none;
+  }
+
+  .zc-svg-sprite {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
   }
 
   @media (max-width: 920px) {
-    body.Valora-sidebar-ready {
+    body.zc-sidebar-ready,
+    body.zc-sidebar-collapsed {
       padding-left: 0;
-      padding-top: var(--vs-mobile-topbar-h);
+      padding-top: var(--zc-mobile-topbar-height);
     }
 
-    .Valora-mobile-topbar {
+    .zc-mobile-topbar {
       position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: var(--vs-mobile-topbar-h);
+      inset: 0 0 auto 0;
+      height: var(--zc-mobile-topbar-height);
+      background: var(--zc-mobile-bg);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--zc-border);
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 0 12px;
-      background: var(--vs-topbar-bg);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--vs-sidebar-border);
+      padding: 0 14px;
       z-index: 1210;
+      box-sizing: border-box;
+      font-family: var(--zc-font);
     }
 
-    .Valora-mobile-toggle {
+    .zc-mobile-toggle {
       width: 40px;
       height: 40px;
-      min-width: 40px;
+      border-radius: 11px;
+      border: 1px solid var(--zc-border);
+      background: var(--zc-bg);
+      color: var(--zc-text);
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      border-radius: 10px;
-      border: 1px solid var(--vs-sidebar-border);
-      background: var(--vs-mobile-btn-bg);
-      color: var(--vs-text-main);
       cursor: pointer;
-      padding: 0;
     }
 
-    .Valora-mobile-toggle svg,
-    .Valora-mobile-close svg {
-      width: 20px;
-      height: 20px;
-      display: block;
-      fill: currentColor;
-    }
-
-    .Valora-mobile-brand {
+    .zc-mobile-title {
       min-width: 0;
       display: flex;
       flex-direction: column;
-      line-height: 1.15;
+      gap: 2px;
     }
 
-    .Valora-mobile-brand strong {
-      font-size: 14px;
-      color: var(--vs-text-main);
+    .zc-mobile-title strong {
+      font-size: 13px;
+      color: var(--zc-title);
       font-weight: 700;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      line-height: 1.1;
     }
 
-    .Valora-mobile-brand span {
-      font-size: 12px;
-      color: var(--vs-text-muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+    .zc-mobile-title span {
+      font-size: 11px;
+      color: var(--zc-muted);
+      font-weight: 500;
+      line-height: 1.1;
     }
 
-    .Valora-app-sidebar,
-    .Valora-app-sidebar:hover {
-      width: var(--vs-mobile-drawer-w);
-      max-width: var(--vs-mobile-drawer-w);
-      padding: 24px 16px 16px;
-      box-shadow: 12px 0 30px rgba(0, 0, 0, 0.28);
+    .zc-sidebar,
+    .zc-sidebar.is-collapsed {
+      width: min(86vw, 320px);
       transform: translateX(-110%);
-      z-index: 1220;
-      box-sizing: border-box;
-      overflow-x: hidden;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-      overscroll-behavior: contain;
+      box-shadow: 18px 0 45px rgba(15,23,42,.18);
     }
 
-    .Valora-app-sidebar.show {
+    html.dark .zc-sidebar,
+    html[data-theme="dark"] .zc-sidebar,
+    html.dark .zc-sidebar.is-collapsed,
+    html[data-theme="dark"] .zc-sidebar.is-collapsed {
+      box-shadow: 18px 0 45px rgba(0,0,0,.45);
+    }
+
+    .zc-sidebar.show {
       transform: translateX(0);
     }
 
-    .Valora-sidebar-header {
-      padding: 0 6px 22px;
-    }
-
-    .Valora-logo-wrap,
-    .Valora-app-sidebar:hover .Valora-logo-wrap {
-      justify-items: start;
-    }
-
-    .Valora-mobile-close {
-      display: inline-flex;
-      position: absolute;
-      right: 6px;
-      top: 6px;
-      width: 36px;
-      height: 36px;
-      align-items: center;
-      justify-content: center;
-      border-radius: 10px;
-      border: 1px solid var(--vs-sidebar-border);
-      background: var(--vs-mobile-btn-bg);
-      color: var(--vs-text-main);
-      cursor: pointer;
-      padding: 0;
-    }
-
-    .Valora-logo-fav {
-      display: none;
-    }
-
-    .Valora-logo-light,
-    .Valora-logo-dark {
+    .zc-sidebar.is-collapsed .zc-brand-name,
+    .zc-sidebar.is-collapsed .zc-nav-label,
+    .zc-sidebar.is-collapsed .zc-user-info,
+    .zc-sidebar.is-collapsed .zc-user-chevron,
+    .zc-sidebar.is-collapsed .zc-collapse-text {
       opacity: 1;
-      transform: none;
-    }
-
-    .Valora-logo-caption,
-    .Valora-section-label,
-    .Valora-user-info,
-    .Valora-user-chevron,
-    .Valora-nav-item > span:not(.Valora-nav-icon) {
-      opacity: 1;
-      visibility: visible;
-      max-width: 999px;
-      max-height: none;
+      max-width: unset;
       overflow: visible;
       transform: none;
-      pointer-events: auto;
     }
 
-    .Valora-nav-item,
-    .Valora-app-sidebar:hover .Valora-nav-item {
+    .zc-sidebar.is-collapsed .zc-nav-item,
+    .zc-sidebar.is-collapsed .zc-user-button,
+    .zc-sidebar.is-collapsed .zc-collapse-btn {
       justify-content: flex-start;
-      gap: 10px;
-      padding: 11px 12px;
-      font-size: 15px;
-    }
-
-    .Valora-user-profile,
-    .Valora-app-sidebar:hover .Valora-user-profile {
-      justify-content: flex-start;
+      padding-left: 11px;
+      padding-right: 11px;
       gap: 12px;
-      padding: 12px;
     }
 
-    .Valora-user-dropdown,
-    .Valora-app-sidebar:hover .Valora-user-dropdown {
-      width: auto;
+    .zc-sidebar.is-collapsed .zc-nav-item::after,
+    .zc-sidebar.is-collapsed .zc-user-button::after,
+    .zc-sidebar.is-collapsed .zc-collapse-btn::after {
+      display: none;
+    }
+
+    .zc-collapse-btn {
+      display: none;
+    }
+
+    .zc-mobile-close {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      display: inline-flex;
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      border: 1px solid var(--zc-border);
+      background: var(--zc-bg);
+      color: var(--zc-text);
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .zc-user-dropdown,
+    .zc-sidebar.is-collapsed .zc-user-dropdown {
       left: 0;
       right: 0;
-    }
-
-    .Valora-app-sidebar:not(:hover) .Valora-logo-caption,
-    .Valora-app-sidebar:not(:hover) .Valora-section-label {
-      color: inherit;
-    }
-
-    .Valora-app-sidebar:not(:hover) .Valora-logo-caption::after,
-    .Valora-app-sidebar:not(:hover) .Valora-section-label::after {
-      display: none;
+      width: auto;
     }
   }
 </style>
 
-<div class="Valora-mobile-topbar" id="ValoraMobileTopbar">
-  <button type="button" class="Valora-mobile-toggle" id="ValoraSidebarToggle" aria-label="Abrir menu" aria-expanded="false">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v2H4V6Zm0 5h16v2H4v-2Zm0 5h16v2H4v-2Z"></path></svg>
+<div class="zc-mobile-topbar" id="ZcMobileTopbar">
+  <button type="button" class="zc-mobile-toggle" id="ZcSidebarToggle" aria-label="Abrir menu" aria-expanded="false">
+    <svg class="zc-icon" aria-hidden="true"><use href="#zc-i-menu"></use></svg>
   </button>
 
-  <div class="Valora-mobile-brand">
-    <strong>Menu</strong>
-    <span id="ValoraMobileSubtitle">Dashboard</span>
+  <div class="zc-mobile-title">
+    <strong>ZapsChat</strong>
+    <span id="ZcMobileSubtitle">Dashboard</span>
   </div>
 </div>
 
-<div class="Valora-mobile-overlay" id="ValoraMobileOverlay"></div>
+<div class="zc-sidebar-overlay" id="ZcSidebarOverlay"></div>
 
-<aside class="Valora-app-sidebar" id="ValoraAppSidebar" aria-label="Menu lateral">
-  <header class="Valora-sidebar-header">
-    <a href="/dashboard" class="Valora-logo-link" aria-label="Ir para dashboard">
-      <div class="Valora-logo-wrap">
-        <img class="Valora-logo-fav" src="/img/fav-icon.png" alt="logo ícone">
-        <img class="Valora-logo-light" src="/img/logo-s-fundo.png" alt="logo">
-        <img class="Valora-logo-dark" src="/img/logo-white.png" alt="logo">
-      </div>
-    </a>
+<aside class="zc-sidebar" id="ZcSidebar" aria-label="Menu lateral">
+  <svg class="zc-svg-sprite" aria-hidden="true">
+    <symbol id="zc-i-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 10.8 12 3l9 7.8"></path>
+      <path d="M5.5 9.6V21h13V9.6"></path>
+      <path d="M9.5 21v-6h5v6"></path>
+    </symbol>
 
-    <span class="Valora-logo-caption">Central do Sistema</span>
+    <symbol id="zc-i-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 5h16v12.5A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5V5Z"></path>
+      <path d="M4 13h4l2 3h4l2-3h4"></path>
+    </symbol>
 
-    <button type="button" class="Valora-mobile-close" id="ValoraMobileClose" aria-label="Fechar menu">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.3 5.71 12 12l6.3 6.29-1.42 1.42L10.59 13.4 4.29 19.7 2.87 18.3 9.17 12l-6.3-6.29L4.29 4.3l6.3 6.3 6.29-6.3Z"></path></svg>
-    </button>
-  </header>
+    <symbol id="zc-i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M16 19.5c0-2.2-1.8-4-4-4s-4 1.8-4 4"></path>
+      <circle cx="12" cy="9" r="3.2"></circle>
+      <path d="M20.5 18.5c0-1.8-1.2-3.2-3-3.7"></path>
+      <path d="M16.8 6.2a2.7 2.7 0 0 1 0 5.2"></path>
+      <path d="M3.5 18.5c0-1.8 1.2-3.2 3-3.7"></path>
+      <path d="M7.2 6.2a2.7 2.7 0 0 0 0 5.2"></path>
+    </symbol>
 
-  <nav class="Valora-sidebar-section">
-    <p class="Valora-section-label">Menu Principal</p>
+    <symbol id="zc-i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3.5 6.5A2.5 2.5 0 0 1 6 4h4l2 2.5h6A2.5 2.5 0 0 1 20.5 9v8.5A2.5 2.5 0 0 1 18 20h-12a2.5 2.5 0 0 1-2.5-2.5v-11Z"></path>
+    </symbol>
 
-    <a class="Valora-nav-item" data-menu="dashboard" href="/dashboard">
-      <span class="Valora-nav-icon" aria-hidden="true">
-        <svg viewBox="0 0 256 256"><path d="M224,98H182V56a6,6,0,0,0-6-6H54V40a6,6,0,0,0-12,0V216a6,6,0,0,0,12,0V206h90a6,6,0,0,0,6-6V158h74a6,6,0,0,0,6-6V104A6,6,0,0,0,224,98ZM170,62V98H54V62ZM138,194H54V158h84Zm80-48H54V110H218Z"></path></svg>
-      </span>
-      <span>Dashboard</span>
-    </a>
+    <symbol id="zc-i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5 18.5 3.8 22l3.7-1.1A9.2 9.2 0 1 0 5 18.5Z"></path>
+      <path d="M8 11h8"></path>
+      <path d="M8 14h5"></path>
+    </symbol>
 
-    <a class="Valora-nav-item" data-menu="atendimentos" href="/atendimentos">
-      <span class="Valora-nav-icon" aria-hidden="true">
-        <svg viewBox="0 0 256 256"><path d="M225.88,30.12a13.83,13.83,0,0,0-13.7-3.58l-.11,0L20.14,84.77A14,14,0,0,0,18,110.85l85.56,41.64L145.12,238a13.87,13.87,0,0,0,12.61,8c.4,0,.81,0,1.21-.05a13.9,13.9,0,0,0,12.29-10.09l58.2-191.93,0-.11A13.83,13.83,0,0,0,225.88,30.12Zm-8,10.4L159.73,232.43l0,.11a2,2,0,0,1-3.76.26l-40.68-83.58,49-49a6,6,0,1,0-8.49-8.49l-49,49L23.15,100a2,2,0,0,1,.31-3.74l.11,0L215.48,38.08a1.94,1.94,0,0,1,1.92.52A2,2,0,0,1,217.92,40.52Z"></path></svg>
-      </span>
-      <span>Atendimentos</span>
-    </a>
+    <symbol id="zc-i-building" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4.5 21h15"></path>
+      <path d="M6 21V5.5A2.5 2.5 0 0 1 8.5 3h7A2.5 2.5 0 0 1 18 5.5V21"></path>
+      <path d="M9 7h1"></path>
+      <path d="M14 7h1"></path>
+      <path d="M9 11h1"></path>
+      <path d="M14 11h1"></path>
+      <path d="M9 15h1"></path>
+      <path d="M14 15h1"></path>
+    </symbol>
 
-    <a class="Valora-nav-item" data-menu="midias" href="/midias">
-      <span class="Valora-nav-icon" aria-hidden="true">
-        <svg viewBox="0 0 256 256"><path d="M243.36,111.81A14,14,0,0,0,232,106H214V88a14,14,0,0,0-14-14H130L101.74,52.8a14.06,14.06,0,0,0-8.4-2.8H40A14,14,0,0,0,26,64V208a6,6,0,0,0,6,6H211.1a6,6,0,0,0,5.69-4.1l28.49-85.47A14,14,0,0,0,243.36,111.81ZM40,62H93.34a2,2,0,0,1,1.2.4L124.4,84.8A6,6,0,0,0,128,86h72a2,2,0,0,1,2,2v18H69.77a14,14,0,0,0-13.28,9.57L38,171V64A2,2,0,0,1,40,62Zm193.9,58.63L206.78,202H40.33l27.54-82.63a2,2,0,0,1,1.9-1.37H232a2,2,0,0,1,1.9,2.63Z"></path></svg>
-      </span>
-      <span>Arquivos</span>
-    </a>
+    <symbol id="zc-i-bot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="5" y="7" width="14" height="11" rx="3"></rect>
+      <path d="M12 7V4"></path>
+      <path d="M8.5 12h.01"></path>
+      <path d="M15.5 12h.01"></path>
+      <path d="M9 15h6"></path>
+    </symbol>
 
-    <a class="Valora-nav-item" data-menu="chat-interno" href="/chat-interno">
-      <span class="Valora-nav-icon" aria-hidden="true">
-        <svg viewBox="0 0 256 256"><path d="M229.93,186.58A78,78,0,0,0,168.16,74.42,78,78,0,1,0,26.07,138.58L18.58,164A14,14,0,0,0,36,181.42l25.46-7.49a78,78,0,0,0,26.39,7.63,78,78,0,0,0,106.77,40.37L220,229.42A14,14,0,0,0,237.42,212ZM62,161.5a6.05,6.05,0,0,0-1.69.24l-27.77,8.17a2,2,0,0,1-2.48-2.48l8.17-27.77a6.05,6.05,0,0,0-.47-4.53,66,66,0,1,1,27.08,27.08A6,6,0,0,0,62,161.5Zm155.71,26.16,8.17,27.77a2,2,0,0,1-2.48,2.48l-27.77-8.17a6.06,6.06,0,0,0-4.53.47,66,66,0,0,1-90-28.4,77.92,77.92,0,0,0,71-94.68,66,66,0,0,1,46.07,96A6.05,6.05,0,0,0,217.74,187.66Z"></path></svg>
-      </span>
-      <span>Chat Interno</span>
-    </a>
+    <symbol id="zc-i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 3 10 14"></path>
+      <path d="M21 3 14 21l-4-7-7-4 18-7Z"></path>
+    </symbol>
 
-    <a class="Valora-nav-item" data-menu="clientes" href="/clientes">
-      <span class="Valora-nav-icon" aria-hidden="true">
-        <svg viewBox="0 0 256 256"><path d="M154,80a6,6,0,0,1,6-6h88a6,6,0,0,1,0,12H160A6,6,0,0,1,154,80Zm94,42H160a6,6,0,0,0,0,12h88a6,6,0,0,0,0-12Zm0,48H184a6,6,0,0,0,0,12h64a6,6,0,0,0,0-12Zm-98.19,20.5a6,6,0,1,1-11.62,3C131.7,168.29,107.23,150,80,150s-51.7,18.29-58.19,43.49a6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"></path></svg>
-      </span>
-      <span>Clientes</span>
-    </a>
-  </nav>
+    <symbol id="zc-i-qr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 4h6v6H4V4Z"></path>
+      <path d="M14 4h6v6h-6V4Z"></path>
+      <path d="M4 14h6v6H4v-6Z"></path>
+      <path d="M14 14h2"></path>
+      <path d="M20 14v2"></path>
+      <path d="M14 18h6v2"></path>
+      <path d="M18 16v4"></path>
+    </symbol>
 
-  <nav class="Valora-sidebar-section">
-    <p class="Valora-section-label">Operação</p>
+    <symbol id="zc-i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 15.2A3.2 3.2 0 1 0 12 8.8a3.2 3.2 0 0 0 0 6.4Z"></path>
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.05.05a2.05 2.05 0 0 1-2.9 2.9l-.05-.05A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 0 1-4 0v-.08A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.88.34l-.05.05a2.05 2.05 0 0 1-2.9-2.9l.05-.05A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 0 1 0-4h.08A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.05-.05a2.05 2.05 0 0 1 2.9-2.9l.05.05A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 0 1 4 0v.08A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.88-.34l.05-.05a2.05 2.05 0 0 1 2.9 2.9l-.05.05A1.7 1.7 0 0 0 19.4 9c.18.61.72 1 1.55 1H21a2 2 0 0 1 0 4h-.08A1.7 1.7 0 0 0 19.4 15Z"></path>
+    </symbol>
 
-    <a class="Valora-nav-item" data-menu="colaboradores" href="/colaboradores">
-      <span class="Valora-nav-icon" aria-hidden="true">
-        <svg viewBox="0 0 256 256"><path d="M243.6,148.8a6,6,0,0,1-8.4-1.2A53.58,53.58,0,0,0,192,126a6,6,0,0,1,0-12,26,26,0,1,0-25.18-32.5,6,6,0,0,1-11.62-3,38,38,0,1,1,59.91,39.63A65.69,65.69,0,0,1,244.8,140.4,6,6,0,0,1,243.6,148.8ZM189.19,213a6,6,0,0,1-2.19,8.2,5.9,5.9,0,0,1-3,.81,6,6,0,0,1-5.2-3,59,59,0,0,0-101.62,0,6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"></path></svg>
-      </span>
-      <span>Colaboradores</span>
-    </a>
+    <symbol id="zc-i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path>
+      <path d="M13.7 21a2 2 0 0 1-3.4 0"></path>
+    </symbol>
 
-    <a class="Valora-nav-item" data-menu="departamentos" href="/departamentos">
-      <span class="Valora-nav-icon" aria-hidden="true">
-        <svg viewBox="0 0 256 256"><path d="M248,210H230V94h2a6,6,0,0,0,0-12H182V46h2a6,6,0,0,0,0-12H40a6,6,0,0,0,0,12h2V210H24a6,6,0,0,0,0,12H248a6,6,0,0,0,0-12ZM218,94V210H182V94ZM54,46H170V210H142V160a6,6,0,0,0-6-6H88a6,6,0,0,0-6,6v50H54Zm76,164H94V166h36ZM74,80a6,6,0,0,1,6-6H96a6,6,0,0,1,0,12H80A6,6,0,0,1,74,80Zm48,0a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,80ZM80,126a6,6,0,0,1,0-12H96a6,6,0,0,1,0,12Zm42-6a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,120Z"></path></svg>
-      </span>
-      <span>Departamentos</span>
-    </a>
+    <symbol id="zc-i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="8" r="4"></circle>
+      <path d="M4.5 21c1.5-4 4-6 7.5-6s6 2 7.5 6"></path>
+    </symbol>
 
-    <a class="Valora-nav-item" data-menu="chatbot" href="/chatbot">
-      <span class="Valora-nav-icon" aria-hidden="true">
-        <svg viewBox="0 0 256 256"><path d="M222,114.56a54,54,0,0,0-58.67-74.73,54,54,0,0,0-94,13.46A54,54,0,0,0,34,141.44a54,54,0,0,0,35.56,73.65A54.54,54.54,0,0,0,83.59,217a52.86,52.86,0,0,0,9.06-.78,54,54,0,0,0,94-13.46A54,54,0,0,0,222,114.56ZM183.37,52.5a42,42,0,0,1,29.21,53.14,54.84,54.84,0,0,0-5.08-3.33L163,76.62a6,6,0,0,0-6,0l-47,27.13V80.66l41.5-24A41.73,41.73,0,0,1,183.37,52.5ZM78,72a42,42,0,0,1,72.92-28.43,56.18,56.18,0,0,0-5.42,2.74L101,72a6,6,0,0,0-3,5.19v54.27L78,119.92ZM39.13,85.93a41.75,41.75,0,0,1,27.22-20A55.09,55.09,0,0,0,66,72v51.38a6,6,0,0,0,3,5.2l47,27.13L96,167.26l-41.5-24A42,42,0,0,1,39.13,85.93ZM72.63,203.5a42,42,0,0,1-29.21-53.14,54.84,54.84,0,0,0,5.08,3.33L93,179.38a6,6,0,0,0,6,0l47-27.13v23.09l-41.5,24A41.73,41.73,0,0,1,72.63,203.5ZM178,184a42,42,0,0,1-72.92,28.43,56.18,56.18,0,0,0,5.42-2.74L155,184a6,6,0,0,0,3-5.19V124.54l20,11.54Zm38.87-13.93a41.75,41.75,0,0,1-27.22,20A55.09,55.09,0,0,0,190,184V132.62a6,6,0,0,1-3-5.2l-47-27.13,20-11.55,41.5,24A42,42,0,0,1,216.87,170.07Z"></path></svg>
-      </span>
-      <span>Chatbot</span>
-    </a>
+    <symbol id="zc-i-card" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3.5" y="5.5" width="17" height="13" rx="2.5"></rect>
+      <path d="M3.5 10h17"></path>
+      <path d="M7 15h3"></path>
+    </symbol>
 
-    <a class="Valora-nav-item" data-menu="disparos" href="/disparos">
-      <span class="Valora-nav-icon" aria-hidden="true">
-        <svg viewBox="0 0 256 256"><path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z"></path></svg>
-      </span>
-      <span>Disparador</span>
-    </a>
+    <symbol id="zc-i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 14.6A8.4 8.4 0 0 1 9.4 3 7.8 7.8 0 1 0 21 14.6Z"></path>
+    </symbol>
 
-    <a class="Valora-nav-item" data-menu="conectar" href="/conectar">
-      <span class="Valora-nav-icon" aria-hidden="true">
-        <svg viewBox="0 0 256 256"><path d="M104,42H56A14,14,0,0,0,42,56v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,104,42Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-2,34H56a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V152A14,14,0,0,0,104,138Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V152a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2ZM200,42H152a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,200,42Zm2,62a2,2,0,0,1-2,2H152a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-64,72V144a6,6,0,0,1,12,0v32a6,6,0,0,1-12,0Zm76-16a6,6,0,0,1-6,6H182v42a6,6,0,0,1-6,6H144a6,6,0,0,0,0,12h26V144a6,6,0,0,1,12,0v10h26A6,6,0,0,1,214,160Zm0,32v16a6,6,0,0,1-12,0V192a6,6,0,0,1,12,0Z"></path></svg>
-      </span>
-      <span>Conectar WhatsApp</span>
-    </a>
-  </nav>
+    <symbol id="zc-i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="4"></circle>
+      <path d="M12 2v2"></path>
+      <path d="M12 20v2"></path>
+      <path d="M4.93 4.93l1.41 1.41"></path>
+      <path d="M17.66 17.66l1.41 1.41"></path>
+      <path d="M2 12h2"></path>
+      <path d="M20 12h2"></path>
+      <path d="M4.93 19.07l1.41-1.41"></path>
+      <path d="M17.66 6.34l1.41-1.41"></path>
+    </symbol>
 
-  <div class="Valora-user-container">
-    <div class="Valora-user-dropdown" id="ValoraUserDropdown">
-      <button type="button" class="Valora-dropdown-item" id="ValoraOpenProfileBtn">
-        <span class="icon" aria-hidden="true">
-          <svg viewBox="0 0 256 256"><path d="M128,128A48,48,0,1,0,80,80,48.05,48.05,0,0,0,128,128Zm0-84a36,36,0,1,1-36,36A36,36,0,0,1,128,44Zm0,100c-44.11,0-80,25.12-80,56a6,6,0,0,0,12,0c0-23.93,30.5-44,68-44s68,20.07,68,44a6,6,0,0,0,12,0C208,169.12,172.11,144,128,144Z"></path></svg>
-        </span>
-        <span class="Valora-dropdown-item__label">Meu Perfil</span>
-      </button>
+    <symbol id="zc-i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 17l5-5-5-5"></path>
+      <path d="M15 12H3"></path>
+      <path d="M14 4h4a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3h-4"></path>
+    </symbol>
 
-      <button type="button" class="Valora-dropdown-item" id="ValoraMyPlanBtn">
-        <span class="icon" aria-hidden="true">
-          <svg viewBox="0 0 256 256"><path d="M232,88H182.33l-22.92-45.84A14,14,0,0,0,146.89,34H109.11A14,14,0,0,0,96.59,42.16L73.67,88H24a14,14,0,0,0-14,14v20a22,22,0,0,0,18,21.64V208a14,14,0,0,0,14,14H214a14,14,0,0,0,14-14V143.64A22,22,0,0,0,246,122V102A14,14,0,0,0,232,88ZM109.11,46h37.78a2,2,0,0,1,1.79,1.11L169,88H87l20.32-40.89A2,2,0,0,1,109.11,46ZM216,208a2,2,0,0,1-2,2H42a2,2,0,0,1-2-2V144h69.76l9.37,18.73A14,14,0,0,0,131.65,170h-7.3a14,14,0,0,0,12.52-7.27L146.24,144H216Zm18-86a10,10,0,0,1-10,10H143.76a6,6,0,0,0-5.37,3.32l-12.25,24.5a2,2,0,0,1-1.79,1.1h7.3a2,2,0,0,1-1.79-1.1l-12.25-24.5a6,6,0,0,0-5.37-3.32H32a10,10,0,0,1-10-10V102a2,2,0,0,1,2-2H232a2,2,0,0,1,2,2Z"></path></svg>
-        </span>
-        <span class="Valora-dropdown-item__label">Meu Plano</span>
-      </button>
+    <symbol id="zc-i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m6 9 6 6 6-6"></path>
+    </symbol>
 
-      <a class="Valora-dropdown-item" id="ValoraNotifBtn" href="/notificacoes.html">
-        <span class="icon" aria-hidden="true">
-          <svg viewBox="0 0 256 256"><path d="M221.8,175.94C216.25,169.38,208,157,208,128.45V120a80,80,0,0,0-160,0v8.45C48,157,39.75,169.39,34.2,175.94A15.59,15.59,0,0,0,32,192a16,16,0,0,0,14.87,10H96a32,32,0,0,0,64,0h49.13A16,16,0,0,0,224,192,15.59,15.59,0,0,0,221.8,175.94ZM128,216a16,16,0,0,1-15.2-11h30.4A16,16,0,0,1,128,216Zm81.27-30H46.73c7.4-8.73,17.27-24.26,17.27-57.55V120a64,64,0,0,1,128,0v8.45C192,161.74,201.87,177.27,209.27,186Z"></path></svg>
-        </span>
-        <span class="Valora-dropdown-item__label">Notificações</span>
-        <span class="Valora-dropdown-badge" id="ValoraNotifBadge" style="display:none;">0</span>
+    <symbol id="zc-i-collapse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M15 18 9 12l6-6"></path>
+      <path d="M20 12H9"></path>
+      <path d="M4 5v14"></path>
+    </symbol>
+
+    <symbol id="zc-i-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 7h16"></path>
+      <path d="M4 12h16"></path>
+      <path d="M4 17h16"></path>
+    </symbol>
+
+    <symbol id="zc-i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 6 6 18"></path>
+      <path d="m6 6 12 12"></path>
+    </symbol>
+  </svg>
+
+  <button type="button" class="zc-mobile-close" id="ZcMobileClose" aria-label="Fechar menu">
+    <svg class="zc-icon" aria-hidden="true"><use href="#zc-i-x"></use></svg>
+  </button>
+
+  <a class="zc-brand" href="/dashboard" aria-label="Ir para dashboard">
+    <span class="zc-brand-icon">
+      <img src="/img/fav-icon.png" alt="" id="ZcBrandImg">
+      <span id="ZcBrandFallback">Z</span>
+    </span>
+    <span class="zc-brand-name">ZapsChat</span>
+  </a>
+
+  <div class="zc-sidebar-scroll">
+    <nav class="zc-nav" aria-label="Menu principal">
+      <a class="zc-nav-item" data-menu="dashboard" data-tooltip="Dashboard" href="/dashboard" title="Dashboard">
+        <span class="zc-nav-icon"><svg class="zc-icon" aria-hidden="true"><use href="#zc-i-home"></use></svg></span>
+        <span class="zc-nav-label">Dashboard</span>
       </a>
 
-      <button type="button" class="Valora-dropdown-item" id="ValoraConfigBtn">
-        <span class="icon" aria-hidden="true">
-          <svg viewBox="0 0 256 256"><path d="M230.94,123.05l-14.27-8.25c.24-2.24.33-4.52.33-6.8s-.09-4.56-.33-6.8l14.27-8.25a14,14,0,0,0,5.12-19.11l-12-20.78a14,14,0,0,0-18.52-5.5l-14.3,8.26a78.65,78.65,0,0,0-11.77-6.8V32a14,14,0,0,0-14-14H142a14,14,0,0,0-14,14V48.02a78.65,78.65,0,0,0-11.77,6.8l-14.3-8.26a14,14,0,0,0-18.52,5.5l-12,20.78a14,14,0,0,0,5.12,19.11l14.27,8.25c-.24,2.24-.33,4.52-.33,6.8s.09,4.56.33,6.8l-14.27,8.25a14,14,0,0,0-5.12,19.11l12,20.78a14,14,0,0,0,18.52,5.5l14.3-8.26a78.65,78.65,0,0,0,11.77,6.8V224a14,14,0,0,0,14,14h24a14,14,0,0,0,14-14V207.98a78.65,78.65,0,0,0,11.77-6.8l14.3,8.26a14,14,0,0,0,18.52-5.5l12-20.78A14,14,0,0,0,230.94,123.05ZM154,128a26,26,0,1,1-26-26A26,26,0,0,1,154,128Z"></path></svg>
-        </span>
-        <span class="Valora-dropdown-item__label">Configurações</span>
-      </button>
+      <a class="zc-nav-item" data-menu="atendimentos" data-tooltip="Atendimentos" href="/atendimentos" title="Atendimentos">
+        <span class="zc-nav-icon"><svg class="zc-icon" aria-hidden="true"><use href="#zc-i-inbox"></use></svg></span>
+        <span class="zc-nav-label">Atendimentos</span>
+      </a>
 
-      <button type="button" class="Valora-dropdown-item" id="ValoraToggleThemeBtn">
-        <span class="icon" aria-hidden="true">
-          <svg viewBox="0 0 256 256"><path d="M120,40V24a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66a8,8,0,0,0,11.32-11.32L58.34,47A8,8,0,0,0,47,58.34ZM40,120H24a8,8,0,0,0,0,16H40a8,8,0,0,0,0-16Zm18.34,66.34L47,197.66A8,8,0,0,0,58.34,209l11.32-11.31a8,8,0,0,0-11.32-11.32ZM136,216v16a8,8,0,0,1-16,0V216a8,8,0,0,1,16,0Zm72.69-18.34A8,8,0,0,0,197.37,209l11.32,11.31A8,8,0,0,0,220,209Zm23.31-77.66H216a8,8,0,0,0,0,16h16a8,8,0,0,0,0-16Zm-34.63-50.34A8,8,0,0,0,209,69.66L220.31,58.34A8,8,0,0,0,209,47L197.37,58.34A8,8,0,0,0,197.37,69.66Z"></path></svg>
-        </span>
-        <span class="Valora-dropdown-item__label" id="ValoraThemeActionText">Alternar tema</span>
-      </button>
+      <a class="zc-nav-item" data-menu="clientes" data-tooltip="Clientes" href="/clientes" title="Clientes">
+        <span class="zc-nav-icon"><svg class="zc-icon" aria-hidden="true"><use href="#zc-i-users"></use></svg></span>
+        <span class="zc-nav-label">Clientes</span>
+      </a>
 
-      <div class="Valora-dropdown-divider"></div>
+      <a class="zc-nav-item" data-menu="midias" data-tooltip="Arquivos" href="/midias" title="Arquivos">
+        <span class="zc-nav-icon"><svg class="zc-icon" aria-hidden="true"><use href="#zc-i-folder"></use></svg></span>
+        <span class="zc-nav-label">Arquivos</span>
+      </a>
 
-      <button type="button" class="Valora-dropdown-item danger" id="ValoralogoutBtn">
-        <span class="icon" aria-hidden="true">
-          <svg viewBox="0 0 256 256"><path d="M222,128a6,6,0,0,1-6,6H117.66l37.17,37.17a6,6,0,0,1-8.49,8.49l-47.41-47.42a6,6,0,0,1,0-8.48l47.41-47.42a6,6,0,0,1,8.49,8.49L117.66,122H216A6,6,0,0,1,222,128ZM104,200a6,6,0,0,1-6,6H48a14,14,0,0,1-14-14V64A14,14,0,0,1,48,50H98a6,6,0,0,1,0,12H48a2,2,0,0,0-2,2V192a2,2,0,0,0,2,2H98A6,6,0,0,1,104,200Z"></path></svg>
+      <a class="zc-nav-item" data-menu="chat-interno" data-tooltip="Chat Interno" href="/chat-interno" title="Chat Interno">
+        <span class="zc-nav-icon"><svg class="zc-icon" aria-hidden="true"><use href="#zc-i-chat"></use></svg></span>
+        <span class="zc-nav-label">Chat Interno</span>
+      </a>
+
+      <a class="zc-nav-item" data-menu="colaboradores" data-tooltip="Colaboradores" href="/colaboradores" title="Colaboradores">
+        <span class="zc-nav-icon"><svg class="zc-icon" aria-hidden="true"><use href="#zc-i-users"></use></svg></span>
+        <span class="zc-nav-label">Colaboradores</span>
+      </a>
+
+      <a class="zc-nav-item" data-menu="departamentos" data-tooltip="Departamentos" href="/departamentos" title="Departamentos">
+        <span class="zc-nav-icon"><svg class="zc-icon" aria-hidden="true"><use href="#zc-i-building"></use></svg></span>
+        <span class="zc-nav-label">Departamentos</span>
+      </a>
+
+      <a class="zc-nav-item" data-menu="chatbot" data-tooltip="Chatbot" href="/chatbot" title="Chatbot">
+        <span class="zc-nav-icon"><svg class="zc-icon" aria-hidden="true"><use href="#zc-i-bot"></use></svg></span>
+        <span class="zc-nav-label">Chatbot</span>
+      </a>
+
+      <a class="zc-nav-item" data-menu="disparos" data-tooltip="Disparador" href="/disparos" title="Disparador">
+        <span class="zc-nav-icon"><svg class="zc-icon" aria-hidden="true"><use href="#zc-i-send"></use></svg></span>
+        <span class="zc-nav-label">Disparador</span>
+      </a>
+
+      <a class="zc-nav-item" data-menu="conectar" data-tooltip="Conectar WhatsApp" href="/conectar" title="Conectar WhatsApp">
+        <span class="zc-nav-icon"><svg class="zc-icon" aria-hidden="true"><use href="#zc-i-qr"></use></svg></span>
+        <span class="zc-nav-label">Conectar WhatsApp</span>
+      </a>
+
+      <a class="zc-nav-item" data-menu="configuracoes" data-tooltip="Configurações" href="/configuracoes.html" title="Configurações">
+        <span class="zc-nav-icon"><svg class="zc-icon" aria-hidden="true"><use href="#zc-i-settings"></use></svg></span>
+        <span class="zc-nav-label">Configurações</span>
+      </a>
+    </nav>
+  </div>
+
+  <div class="zc-bottom">
+    <div class="zc-user-area">
+      <div class="zc-user-dropdown" id="ZcUserDropdown">
+        <button type="button" class="zc-dropdown-item" id="ZcOpenProfileBtn">
+          <svg class="zc-icon" aria-hidden="true"><use href="#zc-i-user"></use></svg>
+          <span class="zc-dropdown-label">Meu Perfil</span>
+        </button>
+
+        <button type="button" class="zc-dropdown-item" id="ZcMyPlanBtn">
+          <svg class="zc-icon" aria-hidden="true"><use href="#zc-i-card"></use></svg>
+          <span class="zc-dropdown-label">Meu Plano</span>
+        </button>
+
+        <a class="zc-dropdown-item" id="ZcNotifBtn" href="/notificacoes.html">
+          <svg class="zc-icon" aria-hidden="true"><use href="#zc-i-bell"></use></svg>
+          <span class="zc-dropdown-label">Notificações</span>
+          <span class="zc-dropdown-badge" id="ZcNotifBadge">0</span>
+        </a>
+
+        <button type="button" class="zc-dropdown-item" id="ZcToggleThemeBtn">
+          <svg class="zc-icon" aria-hidden="true" id="ZcThemeIcon"><use href="#zc-i-moon"></use></svg>
+          <span class="zc-dropdown-label" id="ZcThemeActionText">Usar tema escuro</span>
+        </button>
+
+        <div class="zc-dropdown-divider"></div>
+
+        <button type="button" class="zc-dropdown-item danger" id="ZcLogoutBtn">
+          <svg class="zc-icon" aria-hidden="true"><use href="#zc-i-logout"></use></svg>
+          <span class="zc-dropdown-label">Sair do Sistema</span>
+        </button>
+      </div>
+
+      <button type="button" class="zc-user-button" id="ZcUserButton" data-tooltip="Usuário" aria-haspopup="true" aria-expanded="false">
+        <span class="zc-user-avatar">
+          <img id="ZcUserAvatarImg" alt="Avatar do usuário" referrerpolicy="no-referrer">
+          <span id="ZcUserInitials">U</span>
         </span>
-        <span class="Valora-dropdown-item__label">Sair do Sistema</span>
+
+        <span class="zc-user-info">
+          <strong id="ZcUserName">Usuário</strong>
+          <span id="ZcUserEmail">email@empresa.com</span>
+        </span>
+
+        <svg class="zc-user-chevron" aria-hidden="true"><use href="#zc-i-chevron"></use></svg>
       </button>
     </div>
 
-    <div class="Valora-user-profile" id="ValoraUserProfileBtn" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false">
-      <div class="Valora-user-avatar" id="ValoraUserAvatarBox">
-        <img id="ValoraUserAvatarImg" alt="Avatar do usuário" referrerpolicy="no-referrer">
-        <span id="ValoraUserInitials">U</span>
-      </div>
-
-      <div class="Valora-user-info">
-        <strong id="ValoraUserName">Usuário</strong>
-        <span id="ValoraUserEmail">email@empresa.com</span>
-      </div>
-
-      <span class="Valora-user-chevron" aria-hidden="true">
-        <svg viewBox="0 0 256 256"><path d="M128,168a8,8,0,0,1-5.66-2.34l-56-56a8,8,0,0,1,11.32-11.32L128,148.69l50.34-50.35a8,8,0,0,1,11.32,11.32l-56,56A8,8,0,0,1,128,168Z"></path></svg>
+    <button type="button" class="zc-collapse-btn" id="ZcCollapseBtn" data-tooltip="Collapse" aria-label="Recolher menu">
+      <span class="zc-collapse-icon">
+        <svg class="zc-icon" aria-hidden="true"><use href="#zc-i-collapse"></use></svg>
       </span>
-    </div>
+      <span class="zc-collapse-text" id="ZcCollapseText">Collapse</span>
+    </button>
   </div>
 </aside>
 
 <script>
-(async function () {
-  'use strict';
+(function () {
+  "use strict";
+
+  if (window.__ZC_CLEAR_SIDEBAR_LOADED__) return;
+  window.__ZC_CLEAR_SIDEBAR_LOADED__ = true;
 
   var body = document.body;
-  if (body) body.classList.add('Valora-sidebar-ready');
+  var root = document.documentElement;
 
-  var MENU_LABELS = {
-    'dashboard': 'Dashboard',
-    'atendimentos': 'Atendimentos',
-    'midias': 'Arquivos',
-    'chat-interno': 'Chat Interno',
-    'clientes': 'Clientes',
-    'colaboradores': 'Colaboradores',
-    'departamentos': 'Departamentos',
-    'chatbot': 'Chatbot',
-    'disparos': 'Disparador',
-    'conectar': 'Conectar WhatsApp',
-    'notificacoes': 'Notificações',
-    'configuracoes': 'Configurações',
-    'perfil': 'Meu Perfil',
-    'meu-plano': 'Meu Plano'
-  };
+  var sidebar = document.getElementById("ZcSidebar");
+  var overlay = document.getElementById("ZcSidebarOverlay");
+  var mobileToggle = document.getElementById("ZcSidebarToggle");
+  var mobileClose = document.getElementById("ZcMobileClose");
+  var mobileSubtitle = document.getElementById("ZcMobileSubtitle");
+
+  var collapseBtn = document.getElementById("ZcCollapseBtn");
+  var collapseText = document.getElementById("ZcCollapseText");
+
+  var userButton = document.getElementById("ZcUserButton");
+  var userDropdown = document.getElementById("ZcUserDropdown");
+  var userNameEl = document.getElementById("ZcUserName");
+  var userEmailEl = document.getElementById("ZcUserEmail");
+  var userInitialsEl = document.getElementById("ZcUserInitials");
+  var userAvatarImg = document.getElementById("ZcUserAvatarImg");
+
+  var openProfileBtn = document.getElementById("ZcOpenProfileBtn");
+  var myPlanBtn = document.getElementById("ZcMyPlanBtn");
+  var toggleThemeBtn = document.getElementById("ZcToggleThemeBtn");
+  var themeActionText = document.getElementById("ZcThemeActionText");
+  var themeIcon = document.getElementById("ZcThemeIcon");
+  var logoutBtn = document.getElementById("ZcLogoutBtn");
+  var notifBadge = document.getElementById("ZcNotifBadge");
+
+  var brandImg = document.getElementById("ZcBrandImg");
+  var brandFallback = document.getElementById("ZcBrandFallback");
 
   var MOBILE_BREAKPOINT = 920;
+  var COLLAPSE_KEY = "zapschat_sidebar_collapsed";
 
-  var sidebar = document.getElementById('ValoraAppSidebar');
-  var overlay = document.getElementById('ValoraMobileOverlay');
-  var toggleBtn = document.getElementById('ValoraSidebarToggle');
-  var closeBtn = document.getElementById('ValoraMobileClose');
-  var mobileSubtitle = document.getElementById('ValoraMobileSubtitle');
+  var MENU_LABELS = {
+    "dashboard": "Dashboard",
+    "atendimentos": "Atendimentos",
+    "clientes": "Clientes",
+    "midias": "Arquivos",
+    "chat-interno": "Chat Interno",
+    "colaboradores": "Colaboradores",
+    "departamentos": "Departamentos",
+    "chatbot": "Chatbot",
+    "disparos": "Disparador",
+    "conectar": "Conectar WhatsApp",
+    "configuracoes": "Configurações",
+    "notificacoes": "Notificações",
+    "perfil": "Meu Perfil",
+    "meu-plano": "Meu Plano"
+  };
 
-  var userProfileBtn = document.getElementById('ValoraUserProfileBtn');
-  var userDropdown = document.getElementById('ValoraUserDropdown');
-  var notifBadge = document.getElementById('ValoraNotifBadge');
+  if (body) body.classList.add("zc-sidebar-ready");
 
-  var openProfileBtn = document.getElementById('ValoraOpenProfileBtn');
-  var myPlanBtn = document.getElementById('ValoraMyPlanBtn');
-  var configBtn = document.getElementById('ValoraConfigBtn');
-  var toggleThemeBtn = document.getElementById('ValoraToggleThemeBtn');
-  var themeActionText = document.getElementById('ValoraThemeActionText');
-  var logoutBtn = document.getElementById('ValoralogoutBtn');
-
-  var userNameEl = document.getElementById('ValoraUserName');
-  var userEmailEl = document.getElementById('ValoraUserEmail');
-  var userInitialsEl = document.getElementById('ValoraUserInitials');
-  var userAvatarImg = document.getElementById('ValoraUserAvatarImg');
+  if (brandImg) {
+    brandImg.addEventListener("error", function () {
+      brandImg.style.display = "none";
+      if (brandFallback) brandFallback.style.display = "block";
+    });
+  }
 
   function isMobile() {
-    return window.matchMedia('(max-width: ' + MOBILE_BREAKPOINT + 'px)').matches;
+    return window.matchMedia("(max-width: " + MOBILE_BREAKPOINT + "px)").matches;
   }
 
   function normalizePath(path) {
-    path = String(path || '').toLowerCase().trim();
-    path = path.split('?')[0].split('#')[0];
-    path = path.replace(/\/+$/, '');
-    return path || '/';
+    path = String(path || "").toLowerCase().trim();
+    path = path.split("?")[0].split("#")[0].replace(/\/+$/, "");
+    return path || "/";
   }
 
   function resolveCurrentMenu() {
     var path = normalizePath(location.pathname);
 
-    if (path === '/' || path === '/dashboard' || path === '/home' || path === '/inicio' || path === '/dashboard.html') return 'dashboard';
-    if (path.indexOf('/atendimentos') === 0 || path === '/atendimentos.html') return 'atendimentos';
-    if (path.indexOf('/midias') === 0 || path === '/midias.html') return 'midias';
-    if (path.indexOf('/chat-interno') === 0 || path === '/chat-interno.html') return 'chat-interno';
-    if (path.indexOf('/clientes') === 0 || path === '/clientes.html') return 'clientes';
-    if (path.indexOf('/colaboradores') === 0 || path === '/colaboradores.html') return 'colaboradores';
-    if (path.indexOf('/departamentos') === 0 || path === '/departamentos.html') return 'departamentos';
-    if (path.indexOf('/chatbot') === 0 || path === '/chatbot.html') return 'chatbot';
-    if (path.indexOf('/disparos') === 0 || path === '/disparos.html') return 'disparos';
-    if (path.indexOf('/conectar') === 0 || path === '/conectar.html') return 'conectar';
-    if (path.indexOf('/notificacoes') === 0 || path === '/notificacoes.html') return 'notificacoes';
-    if (path.indexOf('/configuracoes') === 0 || path === '/configuracoes.html' || path === '/config.html') return 'configuracoes';
-    if (path.indexOf('/perfil') === 0 || path === '/perfil.html') return 'perfil';
-    if (path.indexOf('/meu-plano') === 0 || path === '/meu-plano.html') return 'meu-plano';
+    if (path === "/" || path === "/dashboard" || path === "/home" || path === "/inicio" || path === "/dashboard.html") return "dashboard";
+    if (path.indexOf("/atendimentos") === 0 || path === "/atendimentos.html") return "atendimentos";
+    if (path.indexOf("/clientes") === 0 || path === "/clientes.html") return "clientes";
+    if (path.indexOf("/midias") === 0 || path === "/midias.html") return "midias";
+    if (path.indexOf("/chat-interno") === 0 || path === "/chat-interno.html") return "chat-interno";
+    if (path.indexOf("/colaboradores") === 0 || path === "/colaboradores.html") return "colaboradores";
+    if (path.indexOf("/departamentos") === 0 || path === "/departamentos.html") return "departamentos";
+    if (path.indexOf("/chatbot") === 0 || path === "/chatbot.html") return "chatbot";
+    if (path.indexOf("/disparos") === 0 || path === "/disparos.html") return "disparos";
+    if (path.indexOf("/conectar") === 0 || path === "/conectar.html") return "conectar";
+    if (path.indexOf("/configuracoes") === 0 || path === "/configuracoes.html" || path === "/config.html") return "configuracoes";
+    if (path.indexOf("/notificacoes") === 0 || path === "/notificacoes.html") return "notificacoes";
+    if (path.indexOf("/perfil") === 0 || path === "/perfil.html") return "perfil";
+    if (path.indexOf("/meu-plano") === 0 || path === "/meu-plano.html") return "meu-plano";
 
-    return 'dashboard';
+    return "dashboard";
   }
 
   function syncActiveMenu() {
     var current = resolveCurrentMenu();
 
-    document.querySelectorAll('.Valora-nav-item[data-menu]').forEach(function (item) {
-      var active = item.getAttribute('data-menu') === current;
-      item.classList.toggle('is-active', active);
-      if (active) item.setAttribute('aria-current', 'page');
-      else item.removeAttribute('aria-current');
+    document.querySelectorAll(".zc-nav-item[data-menu]").forEach(function (item) {
+      var active = item.getAttribute("data-menu") === current;
+      item.classList.toggle("is-active", active);
+
+      if (active) {
+        item.setAttribute("aria-current", "page");
+      } else {
+        item.removeAttribute("aria-current");
+      }
     });
 
     if (mobileSubtitle) {
-      mobileSubtitle.textContent = MENU_LABELS[current] || 'Menu';
+      mobileSubtitle.textContent = MENU_LABELS[current] || "Menu";
     }
+  }
+
+  function getSavedCollapsed() {
+    try {
+      return localStorage.getItem(COLLAPSE_KEY) === "1";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function setCollapsed(collapsed) {
+    if (!sidebar || !body) return;
+
+    collapsed = !!collapsed;
+
+    sidebar.classList.toggle("is-collapsed", collapsed);
+    body.classList.toggle("zc-sidebar-collapsed", collapsed);
+
+    if (collapseText) {
+      collapseText.textContent = collapsed ? "Expandir" : "Collapse";
+    }
+
+    if (collapseBtn) {
+      collapseBtn.setAttribute("aria-label", collapsed ? "Expandir menu" : "Recolher menu");
+      collapseBtn.setAttribute("data-tooltip", collapsed ? "Expandir" : "Collapse");
+    }
+
+    try {
+      localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0");
+    } catch (e) {}
   }
 
   function openSidebar() {
     if (!isMobile()) return;
-    if (sidebar) sidebar.classList.add('show');
-    if (overlay) overlay.classList.add('show');
-    if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'true');
-    document.documentElement.style.overflow = 'hidden';
-    document.body.style.overflow = 'hidden';
+
+    if (sidebar) sidebar.classList.add("show");
+    if (overlay) overlay.classList.add("show");
+    if (mobileToggle) mobileToggle.setAttribute("aria-expanded", "true");
+
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
   }
 
   function closeSidebar() {
-    if (sidebar) sidebar.classList.remove('show');
-    if (overlay) overlay.classList.remove('show');
-    if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
-    document.documentElement.style.overflow = '';
-    document.body.style.overflow = '';
+    if (sidebar) sidebar.classList.remove("show");
+    if (overlay) overlay.classList.remove("show");
+    if (mobileToggle) mobileToggle.setAttribute("aria-expanded", "false");
+
+    document.documentElement.style.overflow = "";
+    document.body.style.overflow = "";
   }
 
   function closeUserDropdown() {
-    if (userDropdown) userDropdown.classList.remove('show');
-    if (userProfileBtn) {
-      userProfileBtn.classList.remove('active');
-      userProfileBtn.setAttribute('aria-expanded', 'false');
+    if (userDropdown) userDropdown.classList.remove("show");
+
+    if (userButton) {
+      userButton.classList.remove("active");
+      userButton.setAttribute("aria-expanded", "false");
     }
   }
 
   function toggleUserDropdown() {
-    if (!userDropdown || !userProfileBtn) return;
-    var willOpen = !userDropdown.classList.contains('show');
-    userDropdown.classList.toggle('show', willOpen);
-    userProfileBtn.classList.toggle('active', willOpen);
-    userProfileBtn.setAttribute('aria-expanded', String(willOpen));
-  }
+    if (!userDropdown || !userButton) return;
 
-  function isDarkTheme() {
-    return document.documentElement.classList.contains('dark') ||
-           document.documentElement.getAttribute('data-theme') === 'dark';
-  }
+    var willOpen = !userDropdown.classList.contains("show");
 
-  function setTheme(mode) {
-    var dark = String(mode) === 'dark';
-    var root = document.documentElement;
-
-    try {
-      if (window.AppTheme && typeof window.AppTheme.set === 'function') {
-        window.AppTheme.set(dark ? 'dark' : 'light');
-      }
-    } catch (e) {}
-
-    root.classList.toggle('dark', dark);
-    root.setAttribute('data-theme', dark ? 'dark' : 'light');
-
-    try {
-      localStorage.setItem('theme', dark ? 'dark' : 'light');
-      localStorage.setItem('valora_theme', dark ? 'dark' : 'light');
-    } catch (e) {}
-
-    syncThemeLabel();
-  }
-
-  function toggleTheme() {
-    setTheme(isDarkTheme() ? 'light' : 'dark');
-  }
-
-  function syncThemeLabel() {
-    if (themeActionText) {
-      themeActionText.textContent = isDarkTheme() ? 'Usar tema claro' : 'Usar tema escuro';
-    }
-  }
-
-  function pick() {
-    for (var i = 0; i < arguments.length; i++) {
-      var key = arguments[i];
-      try {
-        var value = localStorage.getItem(key);
-        if (!value) continue;
-
-        if (
-          (value.startsWith('{') && value.endsWith('}')) ||
-          (value.startsWith('[') && value.endsWith(']'))
-        ) {
-          try { return JSON.parse(value); } catch (e) {}
-        }
-
-        return value;
-      } catch (e) {}
-    }
-    return '';
-  }
-
-  function jwtInfo() {
-    try {
-      var tok = pick('access_token', 'token');
-      if (!tok || String(tok).split('.').length !== 3) return {};
-      return JSON.parse(atob(tok.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) || {};
-    } catch (e) {
-      return {};
-    }
-  }
-
-  function getUserInfo() {
-    var nome = pick('nome', 'name', 'displayName', 'usuario_nome', 'user_name');
-    if (nome && typeof nome === 'object') nome = nome.nome || nome.name || nome.displayName || '';
-
-    var dept = pick('departamento', 'setor', 'department', 'dept', 'usuario_departamento', 'user_department');
-    if (dept && typeof dept === 'object') dept = dept.departamento || dept.setor || dept.department || dept.dept || '';
-
-    var email = pick('email', 'userEmail', 'loginEmail', 'usuario_email', 'user_email');
-
-    var obj = pick('usuario', 'user', 'me', 'auth_user', 'profile', 'auth');
-    if (obj && typeof obj === 'object') {
-      email = email || obj.email || (obj.user && obj.user.email) || '';
-      nome  = nome  || obj.nome || obj.name || (obj.user && (obj.user.nome || obj.user.name)) || '';
-      dept  = dept  || obj.departamento || obj.setor || (obj.user && (obj.user.departamento || obj.user.setor)) || '';
-    }
-
-    var jwt = jwtInfo();
-    email = email || jwt.email || jwt.preferred_username || jwt.sub || '';
-    nome  = nome  || jwt.name || jwt.given_name || jwt.nickname || '';
-
-    return {
-      nome: String(nome || '').trim(),
-      dept: String(dept || '').trim(),
-      email: String(email || '').trim()
-    };
-  }
-
-  function normalizeUrlMaybeRelative(value) {
-    var s = String(value || '').trim();
-    if (!s) return '';
-    if (s.indexOf('data:') === 0) return s;
-    if (/^https?:\/\//i.test(s)) return s;
-    if (s.charAt(0) === '/') return s;
-    return '/' + s.replace(/^\/+/, '');
-  }
-
-  function base64ToDataUrl(base64, mime) {
-    var raw = String(base64 || '').trim();
-    if (!raw) return '';
-    if (raw.indexOf('data:') === 0) return raw;
-    return 'data:' + (mime || 'image/png') + ';base64,' + raw;
-  }
-
-  function getAvatar() {
-    try {
-      var avatar =
-        localStorage.getItem('usuario_avatar') ||
-        localStorage.getItem('avatar_url') ||
-        '';
-
-      if (!avatar) {
-        var jwt = jwtInfo();
-        avatar = (jwt && jwt.picture) || '';
-      }
-
-      return avatar || '';
-    } catch (e) {
-      return '';
-    }
-  }
-
-  function getInitials(name) {
-    var safe = String(name || '').trim();
-    if (!safe) return 'U';
-    var parts = safe.split(/\s+/).filter(Boolean);
-    if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
-    return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
-  }
-
-  function renderUser() {
-    var user = getUserInfo();
-    var avatar = getAvatar();
-
-    if (userNameEl) userNameEl.textContent = user.nome || 'Usuário';
-    if (userEmailEl) userEmailEl.textContent = user.email || user.dept || 'Sem e-mail';
-
-    if (userInitialsEl) {
-      userInitialsEl.textContent = getInitials(user.nome || user.email || 'Usuário');
-      userInitialsEl.style.display = '';
-    }
-
-    if (userAvatarImg) {
-      if (avatar) {
-        var v = '';
-        try { v = localStorage.getItem('usuario_avatar_v') || ''; } catch (e) {}
-
-        var src = avatar;
-        if (String(avatar).indexOf('data:') !== 0) {
-          src = avatar + (String(avatar).includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(v || Date.now());
-        }
-
-        userAvatarImg.onerror = function () {
-          userAvatarImg.removeAttribute('src');
-          userAvatarImg.style.display = 'none';
-          if (userInitialsEl) userInitialsEl.style.display = '';
-        };
-
-        userAvatarImg.src = src;
-        userAvatarImg.style.display = 'block';
-        if (userInitialsEl) userInitialsEl.style.display = 'none';
-      } else {
-        userAvatarImg.removeAttribute('src');
-        userAvatarImg.style.display = 'none';
-        if (userInitialsEl) userInitialsEl.style.display = '';
-      }
-    }
-  }
-
-  async function hydrateUserFromApi() {
-    try {
-      var res = await fetch('/api/perfil', {
-        method: 'GET',
-        credentials: 'include',
-        headers: {
-          'Accept': 'application/json'
-        }
-      });
-
-      if (!res.ok) return;
-
-      var data = await res.json();
-      if (!data || typeof data !== 'object') return;
-
-      var nome =
-        data.nome ||
-        data.name ||
-        data.usuario_nome ||
-        '';
-
-      var email =
-        data.email ||
-        data.usuario_email ||
-        '';
-
-      var dept =
-        data.departamento ||
-        data.setor ||
-        data.department ||
-        data.dept ||
-        data.cargo ||
-        '';
-
-      var avatar =
-        data.avatar_url ||
-        data.foto_url ||
-        data.avatar ||
-        data.foto ||
-        data.picture ||
-        '';
-
-      var avatarBase64 =
-        data.avatar_base64 ||
-        data.foto_base64 ||
-        data.avatar_data ||
-        '';
-
-      var avatarMime =
-        data.avatar_mime ||
-        data.foto_mime ||
-        'image/png';
-
-      if (!avatar && avatarBase64) {
-        avatar = base64ToDataUrl(avatarBase64, avatarMime);
-      }
-
-      if (!avatar) {
-        avatar = '/api/perfil/avatar';
-      }
-
-      avatar = normalizeUrlMaybeRelative(avatar);
-
-      try {
-        if (nome) localStorage.setItem('usuario_nome', String(nome));
-        if (email) localStorage.setItem('usuario_email', String(email));
-        if (dept) localStorage.setItem('usuario_departamento', String(dept));
-
-        if (avatar) {
-          localStorage.setItem('usuario_avatar', avatar);
-          localStorage.setItem('avatar_url', avatar);
-          localStorage.setItem('usuario_avatar_v', String(Date.now()));
-        }
-      } catch (e) {}
-    } catch (e) {}
+    userDropdown.classList.toggle("show", willOpen);
+    userButton.classList.toggle("active", willOpen);
+    userButton.setAttribute("aria-expanded", String(willOpen));
   }
 
   function goToUrl(url) {
@@ -1368,19 +1180,327 @@
     }
   }
 
-  async function dologout() {
+  function pick() {
+    for (var i = 0; i < arguments.length; i++) {
+      var key = arguments[i];
+
+      try {
+        var value = localStorage.getItem(key);
+        if (!value) continue;
+
+        if (
+          (value.startsWith("{") && value.endsWith("}")) ||
+          (value.startsWith("[") && value.endsWith("]"))
+        ) {
+          try {
+            return JSON.parse(value);
+          } catch (e) {}
+        }
+
+        return value;
+      } catch (e) {}
+    }
+
+    return "";
+  }
+
+  function jwtInfo() {
     try {
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      var token = pick("access_token", "token");
+      if (!token || String(token).split(".").length !== 3) return {};
+
+      var payload = String(token).split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+      return JSON.parse(atob(payload)) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function getUserInfo() {
+    var nome = pick("usuario_nome", "nome", "name", "displayName", "user_name");
+    var email = pick("usuario_email", "email", "userEmail", "loginEmail", "user_email");
+    var dept = pick("usuario_departamento", "departamento", "setor", "department", "dept");
+
+    if (nome && typeof nome === "object") nome = nome.nome || nome.name || nome.displayName || "";
+    if (email && typeof email === "object") email = email.email || "";
+    if (dept && typeof dept === "object") dept = dept.departamento || dept.setor || dept.department || "";
+
+    var obj = pick("usuario", "user", "me", "auth_user", "profile", "auth");
+    if (obj && typeof obj === "object") {
+      nome = nome || obj.nome || obj.name || (obj.user && (obj.user.nome || obj.user.name)) || "";
+      email = email || obj.email || (obj.user && obj.user.email) || "";
+      dept = dept || obj.departamento || obj.setor || obj.department || (obj.user && (obj.user.departamento || obj.user.setor)) || "";
+    }
+
+    var jwt = jwtInfo();
+
+    nome = nome || jwt.name || jwt.given_name || jwt.nickname || "";
+    email = email || jwt.email || jwt.preferred_username || jwt.sub || "";
+
+    return {
+      nome: String(nome || "").trim(),
+      email: String(email || "").trim(),
+      dept: String(dept || "").trim()
+    };
+  }
+
+  function getInitials(value) {
+    var safe = String(value || "").trim();
+
+    if (!safe) return "U";
+
+    if (safe.indexOf("@") >= 0) {
+      return safe.charAt(0).toUpperCase();
+    }
+
+    var parts = safe.split(/\s+/).filter(Boolean);
+
+    if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+
+    return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+  }
+
+  function normalizeUrl(value) {
+    var s = String(value || "").trim();
+
+    if (!s) return "";
+    if (s.indexOf("data:") === 0) return s;
+    if (/^https?:\/\//i.test(s)) return s;
+    if (s.charAt(0) === "/") return s;
+
+    return "/" + s.replace(/^\/+/, "");
+  }
+
+  function base64ToDataUrl(base64, mime) {
+    var raw = String(base64 || "").trim();
+
+    if (!raw) return "";
+    if (raw.indexOf("data:") === 0) return raw;
+
+    return "data:" + (mime || "image/png") + ";base64," + raw;
+  }
+
+  function getAvatar() {
+    try {
+      var avatar =
+        localStorage.getItem("usuario_avatar") ||
+        localStorage.getItem("avatar_url") ||
+        "";
+
+      if (!avatar) {
+        var jwt = jwtInfo();
+        avatar = jwt.picture || "";
+      }
+
+      return avatar || "";
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function renderUser() {
+    var user = getUserInfo();
+    var avatar = getAvatar();
+
+    if (userNameEl) userNameEl.textContent = user.nome || "Usuário";
+    if (userEmailEl) userEmailEl.textContent = user.email || user.dept || "Sem e-mail";
+
+    if (userInitialsEl) {
+      userInitialsEl.textContent = getInitials(user.nome || user.email || "Usuário");
+      userInitialsEl.style.display = "";
+    }
+
+    if (!userAvatarImg) return;
+
+    if (avatar) {
+      var src = avatar;
+
+      if (String(src).indexOf("data:") !== 0) {
+        try {
+          var version = localStorage.getItem("usuario_avatar_v") || "";
+          src = src + (String(src).indexOf("?") >= 0 ? "&" : "?") + "v=" + encodeURIComponent(version || Date.now());
+        } catch (e) {}
+      }
+
+      userAvatarImg.onerror = function () {
+        userAvatarImg.removeAttribute("src");
+        userAvatarImg.style.display = "none";
+
+        if (userInitialsEl) userInitialsEl.style.display = "";
+      };
+
+      userAvatarImg.src = src;
+      userAvatarImg.style.display = "block";
+
+      if (userInitialsEl) userInitialsEl.style.display = "none";
+    } else {
+      userAvatarImg.removeAttribute("src");
+      userAvatarImg.style.display = "none";
+
+      if (userInitialsEl) userInitialsEl.style.display = "";
+    }
+  }
+
+  async function hydrateUserFromApi() {
+    try {
+      var res = await fetch("/api/perfil", {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          "Accept": "application/json"
+        }
+      });
+
+      if (!res.ok) return;
+
+      var data = await res.json();
+      if (!data || typeof data !== "object") return;
+
+      var nome = data.nome || data.name || data.usuario_nome || "";
+      var email = data.email || data.usuario_email || "";
+      var dept = data.departamento || data.setor || data.department || data.dept || data.cargo || "";
+
+      var avatar =
+        data.avatar_url ||
+        data.foto_url ||
+        data.avatar ||
+        data.foto ||
+        data.picture ||
+        "";
+
+      var avatarBase64 =
+        data.avatar_base64 ||
+        data.foto_base64 ||
+        data.avatar_data ||
+        "";
+
+      var avatarMime =
+        data.avatar_mime ||
+        data.foto_mime ||
+        "image/png";
+
+      if (!avatar && avatarBase64) {
+        avatar = base64ToDataUrl(avatarBase64, avatarMime);
+      }
+
+      if (!avatar) {
+        avatar = "/api/perfil/avatar";
+      }
+
+      avatar = normalizeUrl(avatar);
+
+      try {
+        if (nome) localStorage.setItem("usuario_nome", String(nome));
+        if (email) localStorage.setItem("usuario_email", String(email));
+        if (dept) localStorage.setItem("usuario_departamento", String(dept));
+
+        if (avatar) {
+          localStorage.setItem("usuario_avatar", avatar);
+          localStorage.setItem("avatar_url", avatar);
+          localStorage.setItem("usuario_avatar_v", String(Date.now()));
+        }
+      } catch (e) {}
+    } catch (e) {}
+  }
+
+  function isDarkTheme() {
+    return root.classList.contains("dark") || root.getAttribute("data-theme") === "dark";
+  }
+
+  function setTheme(mode) {
+    var dark = String(mode) === "dark";
+    var theme = dark ? "dark" : "light";
+
+    try {
+      if (window.AppTheme && typeof window.AppTheme.set === "function") {
+        window.AppTheme.set(theme);
+      }
+    } catch (e) {}
+
+    root.classList.toggle("dark", dark);
+    root.setAttribute("data-theme", theme);
+
+    try {
+      localStorage.setItem("zapschat_theme", theme);
+      localStorage.setItem("theme", theme);
+    } catch (e) {}
+
+    syncThemeLabel();
+
+    try {
+      window.dispatchEvent(new CustomEvent("zapschat-theme-changed", {
+        detail: {
+          theme: theme
+        }
+      }));
+    } catch (e) {}
+  }
+
+  function toggleTheme() {
+    setTheme(isDarkTheme() ? "light" : "dark");
+  }
+
+  function syncThemeLabel() {
+    var dark = isDarkTheme();
+
+    if (themeActionText) {
+      themeActionText.textContent = dark ? "Usar tema claro" : "Usar tema escuro";
+    }
+
+    if (themeIcon) {
+      themeIcon.innerHTML = dark ? '<use href="#zc-i-sun"></use>' : '<use href="#zc-i-moon"></use>';
+    }
+  }
+
+  function getNotifUnread() {
+    try {
+      if (window.PlanNotifications && typeof window.PlanNotifications.getUnreadCount === "function") {
+        return Number(window.PlanNotifications.getUnreadCount() || 0);
+      }
     } catch (e) {}
 
     try {
-      var past = 'Thu, 01 Jan 1970 00:00:00 GMT';
-      var names = (document.cookie || '').split(/;\s*/).filter(Boolean).map(function (c) {
-        return c.split('=')[0];
+      var empresaId = (document.cookie.match(/(?:^|;\s*)(?:empresa_id|EMPRESA_ID)=([^;]+)/) || [])[1] || "0";
+      var raw = localStorage.getItem("plan_notif:" + decodeURIComponent(empresaId) + ":unread");
+      return Math.max(0, Number(JSON.parse(raw || "0") || 0));
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function syncNotifBadge() {
+    if (!notifBadge) return;
+
+    var unread = getNotifUnread();
+
+    if (unread > 0) {
+      notifBadge.style.display = "inline-flex";
+      notifBadge.textContent = unread > 99 ? "99+" : String(unread);
+    } else {
+      notifBadge.style.display = "none";
+      notifBadge.textContent = "0";
+    }
+  }
+
+  async function doLogout() {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include"
       });
+    } catch (e) {}
+
+    try {
+      var past = "Thu, 01 Jan 1970 00:00:00 GMT";
+      var names = (document.cookie || "")
+        .split(/;\s*/)
+        .filter(Boolean)
+        .map(function (cookie) {
+          return cookie.split("=")[0];
+        });
 
       names.forEach(function (name) {
-        document.cookie = name + '=; Expires=' + past + '; Path=/';
+        document.cookie = name + "=; Expires=" + past + "; Path=/";
       });
     } catch (e) {}
 
@@ -1389,155 +1509,151 @@
       sessionStorage.clear();
     } catch (e) {}
 
-    if ('caches' in window) {
+    if ("caches" in window) {
       try {
         var keys = await caches.keys();
-        await Promise.all(keys.map(function (k) { return caches.delete(k); }));
+        await Promise.all(keys.map(function (key) {
+          return caches.delete(key);
+        }));
       } catch (e) {}
     }
 
-    window.location.replace('/');
+    window.location.replace("/");
   }
 
-  function getNotifApi() {
-    return window.PlanNotifications || null;
-  }
+  if (mobileToggle) mobileToggle.addEventListener("click", openSidebar);
+  if (mobileClose) mobileClose.addEventListener("click", closeSidebar);
+  if (overlay) overlay.addEventListener("click", closeSidebar);
 
-  function getNotifUnread() {
-    var api = getNotifApi();
-    if (api && typeof api.getUnreadCount === 'function') {
-      return Number(api.getUnreadCount() || 0);
-    }
-
-    try {
-      var empresaId = (document.cookie.match(/(?:^|;\s*)(?:empresa_id|EMPRESA_ID)=([^;]+)/) || [])[1] || '0';
-      var raw = localStorage.getItem('plan_notif:' + decodeURIComponent(empresaId) + ':unread');
-      return Math.max(0, Number(JSON.parse(raw || '0') || 0));
-    } catch (e) {
-      return 0;
-    }
-  }
-
-  function syncNotifBadge() {
-    if (!notifBadge) return;
-    var unread = getNotifUnread();
-
-    if (unread > 0) {
-      notifBadge.style.display = 'inline-flex';
-      notifBadge.textContent = unread > 99 ? '99+' : String(unread);
-    } else {
-      notifBadge.style.display = 'none';
-      notifBadge.textContent = '0';
-    }
-  }
-
-  if (toggleBtn) toggleBtn.addEventListener('click', openSidebar);
-  if (closeBtn) closeBtn.addEventListener('click', closeSidebar);
-  if (overlay) overlay.addEventListener('click', closeSidebar);
-
-  document.querySelectorAll('.Valora-nav-item[href]').forEach(function (link) {
-    link.addEventListener('click', function () {
-      if (isMobile()) closeSidebar();
+  if (collapseBtn) {
+    collapseBtn.addEventListener("click", function () {
+      setCollapsed(!sidebar.classList.contains("is-collapsed"));
       closeUserDropdown();
+    });
+  }
+
+  document.querySelectorAll(".zc-nav-item[href]").forEach(function (link) {
+    link.addEventListener("click", function () {
+      closeUserDropdown();
+
+      if (isMobile()) closeSidebar();
     });
   });
 
-  if (userProfileBtn) {
-    userProfileBtn.addEventListener('click', function (e) {
-      e.stopPropagation();
+  if (userButton) {
+    userButton.addEventListener("click", function (event) {
+      event.stopPropagation();
       toggleUserDropdown();
     });
 
-    userProfileBtn.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
+    userButton.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
         toggleUserDropdown();
       }
     });
   }
 
   if (openProfileBtn) {
-    openProfileBtn.addEventListener('click', function () {
+    openProfileBtn.addEventListener("click", function () {
       closeUserDropdown();
-      goToUrl('/perfil.html');
+      goToUrl("/perfil.html");
     });
   }
 
   if (myPlanBtn) {
-    myPlanBtn.addEventListener('click', function () {
+    myPlanBtn.addEventListener("click", function () {
       closeUserDropdown();
-      goToUrl('/meu-plano');
-    });
-  }
-
-  if (configBtn) {
-    configBtn.addEventListener('click', function () {
-      closeUserDropdown();
-      goToUrl('/configuracoes.html');
+      goToUrl("/meu-plano");
     });
   }
 
   if (toggleThemeBtn) {
-    toggleThemeBtn.addEventListener('click', function () {
+    toggleThemeBtn.addEventListener("click", function () {
       toggleTheme();
       closeUserDropdown();
     });
   }
 
   if (logoutBtn) {
-    logoutBtn.addEventListener('click', function () {
+    logoutBtn.addEventListener("click", function () {
       closeUserDropdown();
-      dologout();
+      doLogout();
     });
   }
 
-  document.addEventListener('click', function (e) {
-    if (!userDropdown || !userProfileBtn) return;
-    if (!userDropdown.contains(e.target) && !userProfileBtn.contains(e.target)) {
+  document.addEventListener("click", function (event) {
+    if (!userDropdown || !userButton) return;
+
+    if (!userDropdown.contains(event.target) && !userButton.contains(event.target)) {
       closeUserDropdown();
     }
   });
 
-  document.addEventListener('plan-notifications:updated', function () {
-    syncNotifBadge();
-  });
+  document.addEventListener("plan-notifications:updated", syncNotifBadge);
 
-  window.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') {
+  window.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") {
       closeUserDropdown();
       closeSidebar();
     }
   });
 
-  window.addEventListener('resize', function () {
+  window.addEventListener("resize", function () {
     if (!isMobile()) closeSidebar();
     syncActiveMenu();
   });
 
-  window.addEventListener('storage', function (e) {
+  window.addEventListener("storage", function (event) {
+    var key = String(event.key || "");
+
     if ([
-      'usuario_nome', 'nome', 'name', 'displayName',
-      'usuario_departamento', 'departamento', 'setor', 'department', 'dept',
-      'usuario_email', 'email', 'userEmail', 'loginEmail',
-      'usuario_avatar', 'avatar_url', 'usuario_avatar_v',
-      'usuario', 'user', 'me', 'auth_user', 'profile', 'auth',
-      'access_token', 'token', 'theme', 'valora_theme'
-    ].indexOf(e.key) >= 0) {
+      "usuario_nome",
+      "nome",
+      "name",
+      "displayName",
+      "usuario_departamento",
+      "departamento",
+      "setor",
+      "department",
+      "dept",
+      "usuario_email",
+      "email",
+      "userEmail",
+      "loginEmail",
+      "usuario_avatar",
+      "avatar_url",
+      "usuario_avatar_v",
+      "usuario",
+      "user",
+      "me",
+      "auth_user",
+      "profile",
+      "auth",
+      "access_token",
+      "token",
+      "theme",
+      "zapschat_theme"
+    ].indexOf(key) >= 0) {
       renderUser();
       syncThemeLabel();
       syncActiveMenu();
     }
 
-    if (String(e.key || '').indexOf('plan_notif:') === 0) {
+    if (key.indexOf("plan_notif:") === 0) {
       syncNotifBadge();
     }
   });
 
-  await hydrateUserFromApi();
-  renderUser();
-  syncThemeLabel();
+  setCollapsed(getSavedCollapsed());
   syncActiveMenu();
+  syncThemeLabel();
   syncNotifBadge();
+  renderUser();
+
+  hydrateUserFromApi().then(function () {
+    renderUser();
+  });
 
   setTimeout(syncNotifBadge, 400);
   setTimeout(syncNotifBadge, 1200);

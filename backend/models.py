@@ -1551,6 +1551,8 @@ class ChatEvento(Base):
     __table_args__ = (
         Index("idx_chat_eventos_emp_created", "empresa_id", "created_at"),
         Index("idx_chat_eventos_thread_created", "thread_id", "created_at"),
+        Index("idx_chat_eventos_emp_thread_created", "empresa_id", "thread_id", "created_at"),
+        Index("idx_chat_eventos_emp_kind_thread", "empresa_id", "kind", "thread_id"),
         Index("idx_chat_eventos_participantes", "participantes", postgresql_using="gin"),
     )
 
@@ -1577,6 +1579,7 @@ class ChatReadState(Base):
     __table_args__ = (
         UniqueConstraint("empresa_id", "thread_id", "user_id", name="pk_chat_read_state"),
         Index("idx_read_state_user", "empresa_id", "user_id"),
+        Index("idx_read_state_thread_user", "empresa_id", "thread_id", "user_id"),
     )
 
     empresa_id   = Column(Integer, ForeignKey("empresas.id", ondelete="CASCADE"), nullable=False, primary_key=True)

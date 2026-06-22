@@ -6,7 +6,7 @@ import { VIEW_PERM } from './state.js';
 import { preloadPerms } from './permissions.js';
 import { loadEmpresa } from './empresa.js';
 import { loadSetores } from './setores.js';
-import { loadColaboradores, renderLista, startPoller, stopPoller, bindLista } from './lista.js';
+import { loadColaboradores, renderLista, startPoller, stopPoller, bindLista } from './lista.js?v=midias-match-3';
 import { bindModal } from './modal.js';
 
 import { initColaboradoresTabs } from './ui/tabs.js';

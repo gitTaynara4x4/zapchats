@@ -9,6 +9,7 @@
   const LAST_SCOPE_KEY = 'midiasLastScope:v3';
   const getEmpresaId = () => LS.getItem('empresa_id') || '';
   const getToken     = () => LS.getItem('token') || LS.getItem('auth_token') || '';
+  const onlyDigits = (s) => String(s ?? '').replace(/\D/g, '');
   const KEY_INST     = (empresa) => `instAtiva:${empresa || ''}`;
 
   function getClienteIdFromContext(){
@@ -112,7 +113,20 @@
     instMenu:  document.getElementById('inst-menu'),
     instList:  document.getElementById('instMenuList'),
     instLabel: document.getElementById('instMenuLabel'),
-    box: document.querySelector('.box'),
+    box: document.querySelector('.files-panel') || document.querySelector('.box'),
+    tableBody: document.getElementById('midias-table-body'),
+    scopeName: document.getElementById('midias-current-scope'),
+    detailPanel: document.getElementById('file-detail-panel'),
+    detailPreview: document.getElementById('detail-preview'),
+    detailIcon: document.getElementById('detail-icon'),
+    detailKind: document.getElementById('detail-kind'),
+    detailName: document.getElementById('detail-name'),
+    detailDate: document.getElementById('detail-date'),
+    overviewTotal: document.getElementById('overview-total'),
+    overviewSelected: document.getElementById('overview-selected'),
+    overviewKind: document.getElementById('overview-kind'),
+    overviewDate: document.getElementById('overview-date'),
+    insightTotal: document.getElementById('insight-total'),
     btnMore: null,
     moreWrap: null,
   };
@@ -212,7 +226,7 @@
     return `${nome}${gid ? ` (${gid})` : ''}`;
   }
 
-  const PAGE_LIMIT = 5;
+  const PAGE_LIMIT = 12;
   let lastItems = [];
   const byId = new Map();
   const selected = new Set();
@@ -335,6 +349,7 @@
     }
 
     updateSearchPlaceholder();
+    updateScopeTitle();
     updateUploadState();
     saveLastScope();
   }
@@ -636,6 +651,11 @@
       if (cap){ cap.textContent = ui; cap.title = item.nome; }
       card.title = item.nome;
     }
+    const row = els.tableBody?.querySelector(`tr[data-id="${CSS.escape(String(item.id))}"]`);
+    if (row){
+      const title = row.querySelector('.table-file-name');
+      if (title){ title.textContent = ui; title.title = item.nome || ui; }
+    }
     if (modalTitle) modalTitle.textContent = ui;
   }
 
@@ -803,6 +823,7 @@
     const nomeUi  = friendlyName(it);
     const nomeRaw = it.nome || nomeUi;
 
+    updateDetailsPanel(it);
     modalTitle.textContent = nomeUi;
 
     const kind = kindFromNameOrMime(it.nome||'', it.tipo||'');
@@ -867,10 +888,183 @@
     document.addEventListener('keydown', (modal._onKey = (e)=>{ if(e.key==='Escape') modal._close(); }));
   }
 
+
+  function formatBytes(bytes){
+    const n = Number(bytes);
+    if (!Number.isFinite(n) || n <= 0) return '';
+    const units = ['B','KB','MB','GB','TB'];
+    let v = n, i = 0;
+    while (v >= 1024 && i < units.length - 1){ v = v / 1024; i++; }
+    const dec = v >= 10 || i === 0 ? 0 : 1;
+    return `${v.toFixed(dec)} ${units[i]}`;
+  }
+
+  function kindLabel(kind){
+    switch((kind||'').toLowerCase()){
+      case 'imagem': return 'Imagem';
+      case 'video': return 'Vídeo';
+      case 'audio': return 'Áudio';
+      case 'documento': return 'Documento';
+      default: return 'Arquivo';
+    }
+  }
+
+  function kindIconClass(kind){
+    switch((kind||'').toLowerCase()){
+      case 'imagem': return 'fa-regular fa-image';
+      case 'video': return 'fa-solid fa-video';
+      case 'audio': return 'fa-solid fa-microphone-lines';
+      case 'documento': return 'fa-regular fa-file-lines';
+      default: return 'fa-regular fa-file';
+    }
+  }
+
+  function kindIconModifier(kind){
+    switch((kind||'').toLowerCase()){
+      case 'imagem': return 'is-img';
+      case 'video': return 'is-video';
+      case 'audio': return 'is-audio';
+      default: return 'is-doc';
+    }
+  }
+
+  function getOriginLabel(it){
+    if (it?.is_group || it?.grupo_id) return it?.grupo_nome ? `Grupo: ${it.grupo_nome}` : 'Grupo';
+    if (it?.cliente_nome) return it.cliente_nome;
+    if (isScopeMeus()) return 'Meus Arquivos';
+    if (isScopeInst()) return getCurrentScopeLabel();
+    return 'Empresa';
+  }
+
+  function shortDate(ts){
+    try{
+      const d = new Date(ts || Date.now());
+      return d.toLocaleDateString('pt-BR', { timeZone:'America/Sao_Paulo' });
+    }catch{ return '-'; }
+  }
+
+  function updateScopeTitle(){
+    if (els.scopeName) els.scopeName.textContent = getCurrentScopeLabel();
+  }
+
+  function refreshSummary(){
+    const total = lastItems.length || (els.grid?.querySelectorAll('.media-card').length || 0);
+    if (els.overviewTotal) els.overviewTotal.textContent = String(total);
+    if (els.overviewSelected) els.overviewSelected.textContent = String(selected.size);
+    if (els.insightTotal) els.insightTotal.textContent = String(total);
+  }
+
+  function resetDetailsPanel(){
+    if (!els.detailPanel) return;
+    els.detailPreview?.classList.remove('has-image');
+    const oldImg = els.detailPreview?.querySelector('img.detail-img');
+    oldImg?.remove();
+    if (els.detailIcon) els.detailIcon.innerHTML = '<i class="fa-regular fa-file-lines"></i>';
+    if (els.detailKind) els.detailKind.textContent = 'Arquivo';
+    if (els.detailName) els.detailName.textContent = 'Selecione um arquivo';
+    if (els.detailDate) els.detailDate.textContent = 'Os detalhes aparecem aqui.';
+    if (els.overviewKind) els.overviewKind.textContent = '-';
+    if (els.overviewDate) els.overviewDate.textContent = '-';
+    refreshSummary();
+  }
+
+  function updateDetailsPanel(it){
+    if (!els.detailPanel || !it) return;
+    const kind = kindFromNameOrMime(it.nome||'', it.tipo||'');
+    const label = kindLabel(kind);
+    const nomeUi = friendlyName(it);
+    const ext = extOf(it);
+    const date = formatDateTime(it.timestamp);
+    const size = formatBytes(it.tamanho || it.size || it.bytes);
+
+    els.detailPreview?.classList.remove('has-image');
+    const oldImg = els.detailPreview?.querySelector('img.detail-img');
+    oldImg?.remove();
+
+    if (els.detailIcon) els.detailIcon.innerHTML = `<i class="${kindIconClass(kind)}"></i>`;
+    if (els.detailKind) els.detailKind.textContent = label;
+    if (els.detailName) els.detailName.textContent = nomeUi;
+    if (els.detailDate) els.detailDate.textContent = `${ext}${size ? ' • ' + size : ''} • ${date}`;
+    if (els.overviewKind) els.overviewKind.textContent = label;
+    if (els.overviewDate) els.overviewDate.textContent = shortDate(it.timestamp);
+
+    if (kind === 'imagem' && it.url && els.detailPreview){
+      const img = new Image();
+      img.className = 'detail-img';
+      img.alt = nomeUi;
+      img.src = it.url;
+      els.detailPreview.prepend(img);
+      els.detailPreview.classList.add('has-image');
+    }
+
+    els.grid?.querySelectorAll('.media-card.is-active').forEach(el=>el.classList.remove('is-active'));
+    els.tableBody?.querySelectorAll('tr.is-active').forEach(el=>el.classList.remove('is-active'));
+    const id = String(idOf(it));
+    els.grid?.querySelector(`.media-card[data-id="${CSS.escape(id)}"]`)?.classList.add('is-active');
+    els.tableBody?.querySelector(`tr[data-id="${CSS.escape(id)}"]`)?.classList.add('is-active');
+    refreshSummary();
+  }
+
+  function rowForItem(it, id){
+    const ext = extOf(it);
+    const kind = kindFromNameOrMime(it.nome||'', it.tipo||'');
+    const nomeUi = friendlyName(it);
+    const nomeRaw = it.nome || nomeUi;
+    const origin = getOriginLabel(it);
+    const size = formatBytes(it.tamanho || it.size || it.bytes);
+
+    const row = document.createElement('tr');
+    row.className = 'media-row';
+    row.dataset.id = String(id);
+    row.innerHTML = `
+      <td>
+        <div class="table-file">
+          <button type="button" class="table-pick" aria-label="Selecionar arquivo" aria-pressed="false"><i class="fa-solid fa-check"></i></button>
+          <span class="table-file-icon ${kindIconModifier(kind)}"><i class="${kindIconClass(kind)}"></i></span>
+          <span class="table-file-main">
+            <span class="table-file-name" title="${escapeHtml(nomeRaw)}">${escapeHtml(nomeUi)}</span>
+            <span class="table-file-sub">${escapeHtml(ext)}${size ? ` • ${escapeHtml(size)}` : ''}</span>
+          </span>
+        </div>
+      </td>
+      <td><span class="table-chip">${escapeHtml(kindLabel(kind))}</span></td>
+      <td><span class="table-origin" title="${escapeHtml(origin)}">${escapeHtml(origin)}</span></td>
+      <td><span class="table-date">${escapeHtml(formatDateTime(it.timestamp))}</span></td>
+      <td>
+        <div class="row-actions">
+          <button type="button" class="row-action table-open" title="Abrir"><i class="fa-solid fa-up-right-from-square"></i></button>
+          <button type="button" class="row-action table-download" title="Baixar"><i class="fa-solid fa-download"></i></button>
+        </div>
+      </td>
+    `;
+
+    row.addEventListener('click', (e)=>{
+      if (e.target.closest('button')) return;
+      updateDetailsPanel(it);
+      openModal(it);
+    });
+    row.querySelector('.table-pick')?.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      setSelectedById(String(id), !selected.has(String(id)));
+      updateBulkUI();
+    });
+    row.querySelector('.table-open')?.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      updateDetailsPanel(it);
+      openModal(it);
+    });
+    row.querySelector('.table-download')?.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      downloadUrl(it.url, nomeRaw);
+    });
+    return row;
+  }
+
   function appendCards(items){
     if (!els.grid || !Array.isArray(items) || items.length === 0) return;
 
     const frag = document.createDocumentFragment();
+    const tableFrag = document.createDocumentFragment();
 
     items.forEach((it)=>{
       const id = idOf(it);
@@ -982,9 +1176,13 @@
       card.appendChild(prev);
       card.appendChild(body);
       frag.appendChild(card);
+      tableFrag.appendChild(rowForItem(it, id));
     });
 
     els.grid.appendChild(frag);
+    if (els.tableBody) els.tableBody.appendChild(tableFrag);
+    if (lastItems.length === 0 && items.length > 0) updateDetailsPanel(items[0]);
+    refreshSummary();
   }
 
   function cardsIndex(card){
@@ -1039,7 +1237,7 @@
     if (!els.q) return;
     els.q.placeholder = selectedClient
       ? `Cliente selecionado: ${selectedClient.nome}`
-      : 'Buscar arquivo ou cliente…';
+      : 'Buscar arquivo, cliente ou telefone…';
   }
 
   function ensureClientAutocomplete(){
@@ -1111,6 +1309,42 @@
     acList.classList.add('show');
   }
 
+  function findExactPhoneClient(term, items){
+    const digits = onlyDigits(term);
+    if (digits.length < 8 || !Array.isArray(items) || !items.length) return null;
+
+    const exact = items.find(it => {
+      const tel = onlyDigits(it?.telefone || it?.celular || it?.whatsapp || '');
+      return tel && (tel === digits || tel.endsWith(digits) || digits.endsWith(tel));
+    });
+    if (exact) return exact;
+
+    return items.length === 1 ? items[0] : null;
+  }
+
+  async function autoSelectClientByTerm(term){
+    const empresaId = getEmpresaId();
+    const raw = (term || '').trim();
+    if (!empresaId || onlyDigits(raw).length < 8) return false;
+
+    try{
+      const url = `/api/clientes/search?empresa_id=${encodeURIComponent(empresaId)}&q=${encodeURIComponent(raw)}&limit=8`;
+      const r = await authFetch(url);
+      if (r.status === 401 || r.status === 403 || !r.ok) return false;
+
+      const data = await r.json().catch(()=>({ items: [] }));
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const found = findExactPhoneClient(raw, items);
+      if (!found) return false;
+
+      selectClient(found);
+      return true;
+    }catch(e){
+      if (e?.__authRedirect) return true;
+      return false;
+    }
+  }
+
   async function fetchClientSuggestions(term){
     const empresaId = getEmpresaId();
     if (!empresaId || !term || term.trim().length < 2){
@@ -1133,6 +1367,11 @@
 
       const data = await r.json().catch(()=>({ items: [] }));
       const items = Array.isArray(data?.items) ? data.items : [];
+      const phoneMatch = findExactPhoneClient(term, items);
+      if (phoneMatch){
+        selectClient(phoneMatch);
+        return;
+      }
       renderAutocomplete(items);
     }catch(e){
       if (e?.name === 'AbortError' || e?.__authRedirect) return;
@@ -1211,7 +1450,7 @@
       acTimer = setTimeout(()=> fetchClientSuggestions(val), 220);
     });
 
-    els.q?.addEventListener('keydown', e=>{
+    els.q?.addEventListener('keydown', async e=>{
       if (acList?.classList.contains('show') && acItems.length){
         if (e.key === 'ArrowDown'){
           e.preventDefault();
@@ -1237,7 +1476,12 @@
 
       if (e.key === 'Enter'){
         e.preventDefault();
+        const val = (els.q?.value || '').trim();
         closeAutocomplete();
+
+        const selectedByPhone = await autoSelectClientByTerm(val);
+        if (selectedByPhone) return;
+
         fetchPage({ reset:true }).then(()=>saveState());
       }
     });
@@ -1491,7 +1735,9 @@
       selected.clear();
       lastClickedIndex = -1;
       if (els.grid) els.grid.innerHTML = '';
+      if (els.tableBody) els.tableBody.innerHTML = '';
       if (els.meta) els.meta.textContent = '0';
+      resetDetailsPanel();
       toggleEmpty(true);
       ensureLoadMore();
       setMoreVisibility(true);
@@ -1525,6 +1771,7 @@
 
       if (els.meta) els.meta.textContent = String(lastItems.length);
       toggleEmpty(lastItems.length === 0);
+      refreshSummary();
 
       if (pageAll.length < paging.limit) {
         paging.more = false;
@@ -1565,10 +1812,26 @@
     updateBulkUI();
   }
 
-  function setCardSelected(card, on){
-    const id = card.dataset.id;
-    card.classList.toggle('selected', !!on);
+  function setSelectedById(id, on){
+    id = String(id ?? '');
+    if (!id) return;
     if (on) selected.add(id); else selected.delete(id);
+
+    const card = els.grid?.querySelector(`.media-card[data-id="${CSS.escape(id)}"]`);
+    if (card) card.classList.toggle('selected', !!on);
+
+    const row = els.tableBody?.querySelector(`tr[data-id="${CSS.escape(id)}"]`);
+    if (row){
+      row.classList.toggle('selected', !!on);
+      const pick = row.querySelector('.table-pick');
+      if (pick) pick.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+    refreshSummary();
+  }
+
+  function setCardSelected(card, on){
+    const id = card?.dataset?.id;
+    setSelectedById(id, !!on);
   }
 
   function updateBulkUI(){
@@ -1578,6 +1841,7 @@
       els.btnLimpar.innerHTML = n>0 ? `<i class="fa fa-trash"></i> Limpar (${n})` : `<i class="fa fa-trash"></i> Limpar`;
       els.btnLimpar.disabled = n===0;
     }
+    refreshSummary();
   }
 
   let confirmModal=null, cmBody=null, cmOk=null, cmCancel=null;
@@ -1618,13 +1882,19 @@
 
       ids.forEach(id=>{
         const el = els.grid.querySelector(`.media-card[data-id="${CSS.escape(String(id))}"]`);
+        const row = els.tableBody?.querySelector(`tr[data-id="${CSS.escape(String(id))}"]`);
         el?.remove();
+        row?.remove();
         byId.delete(id);
       });
       ids.forEach(id=> selected.delete(id));
       updateBulkUI();
-      if (els.meta) els.meta.textContent = String(els.grid.querySelectorAll('.media-card').length);
-      toggleEmpty(els.grid.querySelectorAll('.media-card').length===0);
+      lastItems = lastItems.filter(it => !ids.includes(String(idOf(it))));
+      const totalNow = els.grid.querySelectorAll('.media-card').length;
+      if (els.meta) els.meta.textContent = String(totalNow);
+      toggleEmpty(totalNow===0);
+      if (totalNow===0) resetDetailsPanel();
+      refreshSummary();
       toast('Arquivos removidos.');
     };
     confirmModal.classList.add('open');

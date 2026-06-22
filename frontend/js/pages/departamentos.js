@@ -97,12 +97,21 @@
   }
 
   async function apiJSON(path, method, body){
-    const r = await authFetch(withEmpresaIdQuery(path), {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
+    const upperMethod = String(method || 'GET').toUpperCase();
 
+    const opt = {
+      method: upperMethod,
+      headers: {}
+    };
+
+    // DELETE no FastAPI não precisa de body.
+    // Enviar {} em alguns proxies/backends gera erro estranho e dificulta debug.
+    if (body !== undefined && body !== null && upperMethod !== 'DELETE') {
+      opt.headers['Content-Type'] = 'application/json';
+      opt.body = JSON.stringify(body);
+    }
+
+    const r = await authFetch(withEmpresaIdQuery(path), opt);
     const data = await parseMaybeJSON(r);
 
     if (!r.ok) throwHTTP(r, data);
@@ -188,8 +197,10 @@
     q: '',
     editing: null,
     expanded: new Set(),
-    view: 'table',
+    view: 'org',
     companyName: null,
+    didAutoExpand: false,
+    orgTouched: false,
     highlightId: null,
     animateNext: false
   };
@@ -327,10 +338,15 @@
 
       state.flat = normalizeRows(rows);
       buildNested();
+
+      if (!state.didAutoExpand) {
+        state.flat.forEach(d => state.expanded.add(d.id));
+        state.didAutoExpand = true;
+      }
+
       fillParentSelect();
 
-      if (state.view === 'table') renderTable();
-      if (state.view === 'org') renderOrg();
+      renderOrg();
 
     } finally {
       Loader.hide();
@@ -585,168 +601,531 @@
     await apiJSON(`/api/departamentos/${id}/move`, 'PATCH', body);
   }
 
+  function countDescendants(n){
+    return (n?.children || []).reduce((total, child) => total + 1 + countDescendants(child), 0);
+  }
+
+  function initialsOf(text){
+    const words = String(text || '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2);
+
+    const initials = words.map(w => w[0]).join('').toUpperCase();
+    return initials || 'ZC';
+  }
+
   function renderOrg(){
     if (!orgContainer) return;
 
     orgContainer.innerHTML = '';
 
+    const total = state.flat.length;
+    const active = state.flat.filter(d => d.ativo !== false).length;
+    const totalHero = document.getElementById('dept-total');
+    if (totalHero) totalHero.textContent = String(total);
+    const q = (state.q || '').toLowerCase();
+
+    const topbar = document.createElement('div');
+    topbar.className = 'org-topbar';
+    topbar.innerHTML = `
+      <div class="org-topbar-title">
+        <span class="org-kicker"><i class="fa-solid fa-diagram-project"></i> Organograma</span>
+        <strong>${escapeHtml(state.companyName || 'ZapsChat')}</strong>
+      </div>
+      <div class="org-stats" aria-label="Resumo dos departamentos">
+        <span><b>${total}</b> departamentos</span>
+        <span><b>${active}</b> ativos</span>
+      </div>
+    `;
+
     const toolbar = document.createElement('div');
     toolbar.className = 'org-toolbar';
     toolbar.innerHTML = `
-      <button type="button" class="org-zoom-out" aria-label="Diminuir">−</button>
-      <button type="button" class="org-zoom-reset" aria-label="Centralizar">⤿</button>
-      <button type="button" class="org-zoom-in" aria-label="Aumentar">+</button>
+      <button type="button" class="org-zoom-out" aria-label="Diminuir zoom" title="Diminuir">−</button>
+      <button type="button" class="org-zoom-reset" aria-label="Centralizar organograma" title="Centralizar"><i class="fa-solid fa-location-crosshairs"></i></button>
+      <button type="button" class="org-zoom-in" aria-label="Aumentar zoom" title="Aumentar">+</button>
     `;
 
     const viewport = document.createElement('div');
     viewport.className = 'org-viewport';
 
     const stage = document.createElement('div');
-    stage.className = 'org-stage';
+    stage.className = 'org-stage org-board';
 
-    const inner = document.createElement('div');
-    inner.className = 'org-inner';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.classList.add('org-svg');
+    svg.setAttribute('aria-hidden', 'true');
 
-    const rootLi = document.createElement('li');
+    const layer = document.createElement('div');
+    layer.className = 'org-nodes-layer';
 
-    const rootCard = buildNodeCard({
+    const cloneVisible = n => {
+      if (!hasMatchInSubtree(n, q)) return null;
+
+      const isOpen = !!q || state.expanded.has(n.id) || IS_MOBILE;
+      const children = isOpen
+        ? (n.children || []).map(cloneVisible).filter(Boolean)
+        : [];
+
+      return {
+        ...n,
+        children,
+        _allChildren: (n.children || []).length,
+        _descendants: countDescendants(n),
+        _collapsed: !!((n.children || []).length && !isOpen)
+      };
+    };
+
+    const visibleRoots = (state.nested || []).map(cloneVisible).filter(Boolean);
+
+    const root = {
       id: 0,
-      nome: state.companyName || 'Empresa',
-      path: [],
+      nome: state.companyName || 'ZapsChat',
+      descricao: 'Estrutura da empresa',
+      codigo: 'ORG',
       ativo: true,
-      children: state.nested
-    }, true);
+      path: [],
+      children: visibleRoots,
+      _root: true,
+      _allChildren: visibleRoots.length,
+      _descendants: total,
+      _collapsed: false
+    };
 
-    rootLi.appendChild(rootCard);
+    const viewWForLayout = Math.max(
+      360,
+      Number(orgContainer.clientWidth || 0),
+      Number(window.innerWidth || 0) - 34
+    );
 
-    const ulRoots = document.createElement('ul');
-    rootLi.appendChild(ulRoots);
+    const CARD_W = IS_MOBILE ? 246 : 292;
+    const CARD_H = IS_MOBILE ? 126 : 132;
+    const GAP_X = IS_MOBILE ? 16 : 28;
+    const GAP_Y = IS_MOBILE ? 54 : 68;
+    const ROW_GAP = IS_MOBILE ? 32 : 38;
+    const PAD_X = IS_MOBILE ? 18 : 56;
+    const PAD_Y = IS_MOBILE ? 18 : 26;
+    const BUS_GAP = IS_MOBILE ? 18 : 24;
 
-    const ulTop = document.createElement('ul');
-    ulTop.className = 'org';
-    ulTop.appendChild(rootLi);
+    const maxCols = (() => {
+      const usable = Math.max(CARD_W, viewWForLayout - PAD_X * 2);
+      const byWidth = Math.max(1, Math.floor((usable + GAP_X) / (CARD_W + GAP_X)));
 
-    inner.appendChild(ulTop);
-    stage.appendChild(inner);
+      if (IS_MOBILE || viewWForLayout <= 560) return Math.min(1, byWidth);
+      if (viewWForLayout <= 860) return Math.min(2, byWidth);
+      if (viewWForLayout <= 1220) return Math.min(3, byWidth);
+      return Math.min(4, byWidth);
+    })();
+
+    const measure = node => {
+      if (!node.children?.length) {
+        node._subW = CARD_W;
+        node._subH = CARD_H;
+        return node._subW;
+      }
+
+      const childrenW = node.children.reduce((sum, child, index) => (
+        sum + measure(child) + (index ? GAP_X : 0)
+      ), 0);
+
+      const maxChildH = Math.max(...node.children.map(child => child._subH || CARD_H), CARD_H);
+      node._subW = Math.max(CARD_W, childrenW);
+      node._subH = CARD_H + GAP_Y + maxChildH;
+      return node._subW;
+    };
+
+    const placeSubtree = (node, left, top, depth) => {
+      node._x = left + (node._subW / 2) - (CARD_W / 2);
+      node._y = top;
+      node._depth = depth;
+
+      if (!node.children?.length) return;
+
+      const childrenW = node.children.reduce((sum, child, index) => (
+        sum + child._subW + (index ? GAP_X : 0)
+      ), 0);
+
+      let cursor = left + (node._subW - childrenW) / 2;
+
+      node.children.forEach((child, index) => {
+        if (index) cursor += GAP_X;
+        placeSubtree(child, cursor, top + CARD_H + GAP_Y, depth + 1);
+        cursor += child._subW;
+      });
+    };
+
+    root.children.forEach(measure);
+
+    const packRows = children => {
+      const usable = Math.max(CARD_W, viewWForLayout - PAD_X * 2);
+      const rows = [];
+      let row = [];
+      let rowW = 0;
+
+      children.forEach(child => {
+        const itemW = Math.max(CARD_W, child._subW || CARD_W);
+        const nextW = rowW + (row.length ? GAP_X : 0) + itemW;
+        const shouldBreak = row.length && (
+          row.length >= maxCols ||
+          (nextW > usable && row.length >= Math.min(maxCols, 2))
+        );
+
+        if (shouldBreak) {
+          rows.push({ items: row, width: rowW, height: Math.max(...row.map(x => x._subH || CARD_H), CARD_H) });
+          row = [];
+          rowW = 0;
+        }
+
+        rowW += (row.length ? GAP_X : 0) + itemW;
+        row.push(child);
+      });
+
+      if (row.length) {
+        rows.push({ items: row, width: rowW, height: Math.max(...row.map(x => x._subH || CARD_H), CARD_H) });
+      }
+
+      return rows;
+    };
+
+    const rootRows = packRows(root.children || []);
+    const widestRow = rootRows.reduce((max, row) => Math.max(max, row.width), CARD_W);
+    const boardWTarget = Math.max(CARD_W + PAD_X * 2, widestRow + PAD_X * 2, viewWForLayout);
+    let boardW = Math.ceil(boardWTarget);
+
+    root._subW = CARD_W;
+    root._subH = CARD_H;
+    root._x = Math.round((boardW - CARD_W) / 2);
+    root._y = PAD_Y;
+    root._depth = 0;
+
+    let rowTop = root._y + CARD_H + GAP_Y;
+    const rowMeta = [];
+
+    rootRows.forEach((row, rowIndex) => {
+      let cursor = Math.round((boardW - row.width) / 2);
+      row.top = rowTop;
+      row.busY = rowTop - BUS_GAP;
+      row.centers = [];
+
+      row.items.forEach((child, index) => {
+        if (index) cursor += GAP_X;
+
+        child._rootRow = rowIndex;
+        placeSubtree(child, cursor, rowTop, 1);
+        row.centers.push(child._x + CARD_W / 2);
+
+        cursor += Math.max(CARD_W, child._subW || CARD_W);
+      });
+
+      rowMeta.push(row);
+      rowTop += row.height + ROW_GAP;
+    });
+
+    const allNodes = [];
+    const links = [];
+    const rootLinks = [];
+
+    const collect = (node, parent = null) => {
+      allNodes.push(node);
+
+      if (parent) {
+        if (parent._root) rootLinks.push({ parent, child: node });
+        else links.push({ parent, child: node });
+      }
+
+      node.children?.forEach(child => collect(child, node));
+    };
+
+    collect(root);
+    const maxRight = Math.max(...allNodes.map(n => n._x + CARD_W), CARD_W) + PAD_X;
+    const maxBottom = Math.max(...allNodes.map(n => n._y + CARD_H), CARD_H) + PAD_Y;
+    boardW = Math.ceil(Math.max(maxRight, boardW));
+    const boardH = Math.ceil(Math.max(maxBottom, 420));
+
+    stage.style.width = `${boardW}px`;
+    stage.style.height = `${boardH}px`;
+    stage.dataset.boardW = String(boardW);
+    stage.dataset.boardH = String(boardH);
+
+    svg.setAttribute('width', String(boardW));
+    svg.setAttribute('height', String(boardH));
+    svg.setAttribute('viewBox', `0 0 ${boardW} ${boardH}`);
+
+    const makePath = d => {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', d);
+      path.setAttribute('class', 'org-link');
+      svg.appendChild(path);
+      return path;
+    };
+
+    const makeDot = (x, y, r = 4.5) => {
+      const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot.setAttribute('cx', String(x));
+      dot.setAttribute('cy', String(y));
+      dot.setAttribute('r', String(r));
+      dot.setAttribute('class', 'org-link-dot');
+      svg.appendChild(dot);
+      return dot;
+    };
+
+    if (rootLinks.length && rowMeta.length) {
+      const rootX = root._x + CARD_W / 2;
+      const rootY = root._y + CARD_H;
+
+      rowMeta.forEach(row => {
+        const centers = row.items.map(child => child._x + CARD_W / 2);
+        if (!centers.length) return;
+
+        const minX = Math.min(...centers);
+        const maxX = Math.max(...centers);
+        const busY = row.busY;
+        const rootKneeY = Math.min(busY, rootY + 22);
+
+        makePath(`M ${rootX} ${rootY} C ${rootX} ${rootKneeY}, ${rootX} ${busY}, ${rootX} ${busY}`);
+
+        if (Math.abs(maxX - minX) > 1) {
+          makePath(`M ${minX} ${busY} L ${maxX} ${busY}`);
+        }
+
+        row.items.forEach(child => {
+          const cX = child._x + CARD_W / 2;
+          const cY = child._y;
+          makePath(`M ${cX} ${busY} C ${cX} ${busY + 10}, ${cX} ${cY - 10}, ${cX} ${cY}`);
+          makeDot(cX, cY);
+        });
+      });
+    }
+
+    links.forEach(({ parent, child }) => {
+      const pX = parent._x + CARD_W / 2;
+      const pY = parent._y + CARD_H;
+      const cX = child._x + CARD_W / 2;
+      const cY = child._y;
+      const midY = pY + Math.max(24, (cY - pY) * .45);
+
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', `M ${pX} ${pY} C ${pX} ${midY}, ${cX} ${midY}, ${cX} ${cY}`);
+      path.setAttribute('class', 'org-link');
+      svg.appendChild(path);
+
+      const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot.setAttribute('cx', String(cX));
+      dot.setAttribute('cy', String(cY));
+      dot.setAttribute('r', '4.5');
+      dot.setAttribute('class', 'org-link-dot');
+      svg.appendChild(dot);
+    });
+
+    allNodes.forEach((node, index) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'org-card-wrap';
+      wrap.style.setProperty('--node-delay', `${Math.min(index * 38, 380)}ms`);
+      wrap.style.left = `${node._x}px`;
+      wrap.style.top = `${node._y}px`;
+      wrap.style.width = `${CARD_W}px`;
+      wrap.style.height = `${CARD_H}px`;
+
+      const card = buildNodeCard(node, !!node._root);
+
+      if (!q || labelOf(node).toLowerCase().includes(q) || node._root) {
+        if (q && !node._root && labelOf(node).toLowerCase().includes(q)) {
+          card.classList.add('match');
+        }
+      }
+
+      wrap.appendChild(card);
+      layer.appendChild(wrap);
+    });
+
+    if (!total) {
+      const emptyHint = document.createElement('div');
+      emptyHint.className = 'org-empty-hint';
+      emptyHint.innerHTML = `
+        <i class="fa-regular fa-folder-open"></i>
+        <strong>Nenhum departamento criado ainda.</strong>
+        <span>Clique em <b>Novo</b> para começar a montar a estrutura.</span>
+      `;
+      layer.appendChild(emptyHint);
+    }
+
+    svg.querySelectorAll('.org-link').forEach((el, index) => {
+      el.setAttribute('pathLength', '1');
+      el.style.setProperty('--line-delay', `${Math.min(index * 28, 360)}ms`);
+    });
+
+    svg.querySelectorAll('.org-link-dot').forEach((el, index) => {
+      el.style.setProperty('--dot-delay', `${Math.min(160 + index * 22, 460)}ms`);
+    });
+
+    stage.appendChild(svg);
+    stage.appendChild(layer);
     viewport.appendChild(stage);
 
+    orgContainer.appendChild(topbar);
     orgContainer.appendChild(viewport);
     orgContainer.appendChild(toolbar);
 
-    const q = (state.q || '').toLowerCase();
-
-    const draw = (n, parentUL) => {
-      if (!hasMatchInSubtree(n, q)) return;
-
-      const li = document.createElement('li');
-      li.className = 'node-li';
-
-      const card = buildNodeCard(n, false);
-
-      if (!q || labelOf(n).toLowerCase().includes(q)) {
-        card.classList.add('match');
-      }
-
-      li.appendChild(card);
-
-      const expanded = state.expanded.has(n.id) || !!q || IS_MOBILE;
-
-      if (n.children?.length) {
-        const childUL = document.createElement('ul');
-
-        if (expanded) {
-          n.children.forEach(c => draw(c, childUL));
-        }
-
-        li.appendChild(childUL);
-      }
-
-      parentUL.appendChild(li);
-    };
-
-    state.nested.forEach(n => draw(n, ulRoots));
-
     setupSimplePanZoom(viewport, stage);
+
+    if (!state.orgTouched) {
+      resetStage(stage, viewport);
+    } else {
+      applyStageTransform(stage);
+    }
 
     toolbar.querySelector('.org-zoom-in')?.addEventListener('click', () => zoomStage(stage, viewport, 1.15));
     toolbar.querySelector('.org-zoom-out')?.addEventListener('click', () => zoomStage(stage, viewport, 1 / 1.15));
-    toolbar.querySelector('.org-zoom-reset')?.addEventListener('click', () => resetStage(stage));
+    toolbar.querySelector('.org-zoom-reset')?.addEventListener('click', () => resetStage(stage, viewport));
   }
 
   function buildNodeCard(n, isRoot){
     const card = document.createElement('div');
-    card.className = 'node-card' + (isRoot ? ' is-root' : '');
+    const tone = Math.abs(Number(n.id || 0)) % 6;
+
+    card.className = `node-card org-node-card tone-${tone}` + (isRoot ? ' is-root' : '') + (n.ativo === false ? ' is-inactive' : '');
+    card.dataset.id = String(n.id || 0);
+
+    const label = isRoot ? (state.companyName || 'ZapsChat') : labelOf(n);
+    const childTotal = isRoot ? state.flat.length : Number(n._descendants || 0);
+    const directChildren = Number(n._allChildren || 0);
+    const code = isRoot ? 'Empresa' : (n.codigo || 'Setor');
+    const description = isRoot
+      ? 'Estrutura organizacional'
+      : (n.descricao || (Array.isArray(n.path) && n.path.length ? n.path.join(' / ') : 'Departamento do atendimento'));
 
     const head = document.createElement('div');
-    head.className = 'node-head';
+    head.className = 'org-card-head';
 
-    const title = document.createElement('div');
-    title.className = 'node-title';
-    title.textContent = isRoot ? (state.companyName || 'Empresa') : labelOf(n);
+    const avatar = document.createElement('div');
+    avatar.className = 'org-avatar';
+    avatar.innerHTML = isRoot
+      ? '<i class="fa-solid fa-building"></i>'
+      : `<span>${escapeHtml(initialsOf(label))}</span>`;
+
+    const text = document.createElement('div');
+    text.className = 'org-card-text';
+    text.innerHTML = `
+      <div class="node-title" title="${escapeHtml(label)}">${escapeHtml(label)}</div>
+      <div class="node-path" title="${escapeHtml(description)}">${escapeHtml(description)}</div>
+    `;
 
     const twist = document.createElement('button');
     twist.type = 'button';
-    twist.className = 'node-twisty' + (n.children?.length ? '' : ' is-leaf');
-
-    twist.innerHTML = n.children?.length
-      ? '<i class="fa-solid fa-chevron-right" aria-hidden="true"></i>'
-      : '';
+    twist.className = 'node-twisty' + (directChildren ? '' : ' is-leaf') + ((directChildren && !n._collapsed) ? ' is-open' : '');
+    twist.title = n._collapsed ? 'Expandir' : 'Recolher';
+    twist.setAttribute('aria-label', twist.title);
+    twist.innerHTML = directChildren
+      ? '<i class="fa-solid fa-chevron-down" aria-hidden="true"></i>'
+      : '<i class="fa-solid fa-circle" aria-hidden="true"></i>';
 
     twist.addEventListener('click', ev => {
       ev.stopPropagation();
-
-      if (!n.children?.length) return;
+      if (!directChildren || isRoot) return;
 
       const expanded = state.expanded.has(n.id);
-
       if (expanded) state.expanded.delete(n.id);
       else state.expanded.add(n.id);
 
       renderOrg();
     });
 
-    head.appendChild(title);
+    head.appendChild(avatar);
+    head.appendChild(text);
     head.appendChild(twist);
-
-    const path = document.createElement('div');
-    path.className = 'node-path';
-    path.textContent = isRoot ? '' : (Array.isArray(n.path) ? n.path.join(' / ') : '');
-
-    const actions = document.createElement('div');
-    actions.className = 'node-actions';
-
-    if (!isRoot) {
-      actions.innerHTML = `
-        <button class="btn" data-action="edit" data-id="${n.id}" title="Editar" type="button" aria-label="Editar">${SVGS.edit}</button>
-        <button class="btn" data-action="add-child" data-id="${n.id}" title="Adicionar filho" type="button" aria-label="Adicionar filho">${SVGS.add}</button>
-        <button class="btn" data-action="del" data-id="${n.id}" title="Remover" type="button" aria-label="Remover">${SVGS.trash}</button>
-      `;
-    }
-
     card.appendChild(head);
 
+    const meta = document.createElement('div');
+    meta.className = 'org-card-meta';
+
+    const metaParts = [
+      isRoot
+        ? `<span><i class="fa-solid fa-building"></i>${escapeHtml(code)}</span>`
+        : `<span><i class="fa-solid fa-tag"></i>${escapeHtml(code)}</span>`
+    ];
+
+    if (isRoot || directChildren > 0) {
+      metaParts.push(`<span><i class="fa-solid fa-sitemap"></i>${directChildren} direto${directChildren === 1 ? '' : 's'}</span>`);
+    }
+
+    if (isRoot || childTotal > directChildren) {
+      metaParts.push(`<span><i class="fa-solid fa-layer-group"></i>${childTotal} total</span>`);
+    }
+
+    meta.innerHTML = metaParts.join('');
+    card.appendChild(meta);
+
     if (!isRoot) {
-      card.appendChild(path);
+      const actions = document.createElement('div');
+      actions.className = 'node-actions org-card-actions';
+      actions.innerHTML = `
+        <button class="btn" data-action="edit" data-id="${n.id}" title="Editar" type="button" aria-label="Editar">${SVGS.edit}</button>
+        <button class="btn" data-action="add-child" data-id="${n.id}" title="Adicionar abaixo" type="button" aria-label="Adicionar abaixo">${SVGS.add}</button>
+        <button class="btn" data-action="del" data-id="${n.id}" title="Remover" type="button" aria-label="Remover">${SVGS.trash}</button>
+      `;
       card.appendChild(actions);
+
+      card.addEventListener('dblclick', () => {
+        const item = state.flat.find(x => Number(x.id) === Number(n.id));
+        if (item) openModalEditar(item);
+      });
     }
 
     return card;
   }
 
-  function resetStage(stage){
-    state.zoom = 1;
-    state.tx = 0;
-    state.ty = 0;
+  function clampNumber(value, min, max){
+    return Math.min(max, Math.max(min, Number(value) || 0));
+  }
+
+  function resetStage(stage, viewport){
+    const boardW = Number(stage?.dataset?.boardW || 0);
+    const boardH = Number(stage?.dataset?.boardH || 0);
+    const viewW = Number(viewport?.clientWidth || 0);
+    const viewH = Number(viewport?.clientHeight || 0);
+
+    const pad = IS_MOBILE ? 16 : 28;
+    const fitX = boardW > 0 && viewW > 0 ? (viewW - pad * 2) / boardW : 1;
+    const fitY = boardH > 0 && viewH > 0 ? (viewH - pad * 2) / boardH : 1;
+
+    // V5: primeiro ele quebra em linhas. O zoom só ajusta levemente,
+    // para não deixar os cards minúsculos como na versão anterior.
+    const minZoom = IS_MOBILE ? 0.64 : 0.76;
+    const nextZoom = clampNumber(Math.min(1, fitX, fitY), minZoom, 1);
+
+    state.zoom = nextZoom;
+    state.tx = Math.round((viewW - boardW * nextZoom) / 2);
+    state.ty = Math.round(Math.max(pad, (viewH - boardH * nextZoom) / 2));
+    state.orgTouched = false;
+
+    applyStageTransform(stage);
+  }
+
+  function zoomAt(stage, viewport, nextZoom, anchorX, anchorY){
+    const oldZoom = state.zoom || 1;
+    const oldTx = state.tx || 0;
+    const oldTy = state.ty || 0;
+
+    const safeZoom = clampNumber(nextZoom, IS_MOBILE ? 0.62 : 0.72, 2.5);
+    const ax = Number.isFinite(anchorX) ? anchorX : (Number(viewport?.clientWidth || 0) / 2);
+    const ay = Number.isFinite(anchorY) ? anchorY : (Number(viewport?.clientHeight || 0) / 2);
+
+    state.zoom = safeZoom;
+    state.tx = ax - ((ax - oldTx) / oldZoom) * safeZoom;
+    state.ty = ay - ((ay - oldTy) / oldZoom) * safeZoom;
+    state.orgTouched = true;
+
     applyStageTransform(stage);
   }
 
   function zoomStage(stage, viewport, factor){
-    state.zoom = Math.min(2.5, Math.max(0.5, (state.zoom || 1) * factor));
-    applyStageTransform(stage, viewport);
+    zoomAt(stage, viewport, (state.zoom || 1) * factor);
   }
 
   function applyStageTransform(stage){
-    stage.style.transform = `translate(${state.tx || 0}px, ${state.ty || 0}px) scale(${state.zoom || 1})`;
+    stage.style.transform = `translate3d(${state.tx || 0}px, ${state.ty || 0}px, 0) scale(${state.zoom || 1})`;
   }
 
   function setupSimplePanZoom(viewport, stage){
@@ -763,6 +1142,7 @@
     viewport.addEventListener('pointerdown', e => {
       if (e.target.closest('button,a,input,select,textarea')) return;
 
+      state.orgTouched = true;
       pan = true;
       lx = e.clientX;
       ly = e.clientY;
@@ -801,10 +1181,15 @@
     viewport.addEventListener('wheel', e => {
       e.preventDefault();
 
+      const rect = viewport.getBoundingClientRect();
       const factor = Math.pow(1.0015, -e.deltaY);
-      state.zoom = Math.min(2.5, Math.max(0.5, (state.zoom || 1) * factor));
-
-      applyStageTransform(stage);
+      zoomAt(
+        stage,
+        viewport,
+        (state.zoom || 1) * factor,
+        e.clientX - rect.left,
+        e.clientY - rect.top
+      );
     }, { passive: false });
   }
 
@@ -812,6 +1197,7 @@
     if (!modal) return;
 
     modal.style.display = 'grid';
+    modal.classList.add('open');
     modal.setAttribute('aria-hidden', 'false');
     document.documentElement.classList.add('modal-open');
     document.addEventListener('keydown', onEscClose);
@@ -822,6 +1208,7 @@
 
     modal.style.display = 'none';
     modal.setAttribute('aria-hidden', 'true');
+    modal.classList.remove('open');
     modal.classList.remove('is-new');
 
     document.documentElement.classList.remove('modal-open');
@@ -977,23 +1364,50 @@
   }
 
   async function deleteDepto(id){
-    if (!confirm('Remover este departamento?')) return;
+    if (!id) {
+      toast('Departamento inválido para remover.', 'err');
+      return;
+    }
+
+    if (!confirm('Remover este departamento? Os filhos sobem um nível e os vínculos antigos ficam sem departamento.')) return;
 
     try {
       Loader.show('Removendo...');
 
-      try {
-        await apiJSON(`/api/atendimento/clientes/departamentos/${id}`, 'DELETE', {});
-      } catch {
-        await apiJSON(`/api/departamentos/${id}`, 'DELETE', {});
+      let lastError = null;
+      let removed = false;
+
+      const urls = [
+        `/api/atendimento/clientes/departamentos/${id}`,
+        `/api/departamentos/${id}`
+      ];
+
+      for (const url of urls) {
+        try {
+          await apiJSON(url, 'DELETE');
+          removed = true;
+          lastError = null;
+          break;
+        } catch (err) {
+          lastError = err;
+
+          // Só tenta a rota compatível se a rota oficial realmente não existir.
+          // Se deu 400/403/409/500, é erro real do backend e não adianta duplicar chamada.
+          if (![404, 405].includes(Number(err?.status || 0))) {
+            break;
+          }
+        }
       }
+
+      if (!removed) throw lastError || new Error('Erro ao remover.');
 
       toast('Departamento removido.');
       await loadTree();
 
     } catch (e) {
       console.error(e);
-      toast(e?.data?.detail || 'Erro ao remover.', 'err');
+      const msg = e?.data?.detail || e?.data?.message || e?.message || 'Erro ao remover.';
+      toast(msg, 'err');
     } finally {
       Loader.hide();
     }
@@ -1115,19 +1529,20 @@
   }
 
   function setView(view){
-    state.view = view === 'org' ? 'org' : 'table';
+    // Versão visual: a tela de Departamentos agora usa somente o organograma.
+    // A tabela antiga foi removida da interface para ficar igual às referências.
+    state.view = 'org';
 
-    if (sectionTable) sectionTable.style.display = state.view === 'table' ? '' : 'none';
-    if (sectionOrg) sectionOrg.style.display = state.view === 'org' ? '' : 'none';
+    if (sectionTable) sectionTable.style.display = 'none';
+    if (sectionOrg) sectionOrg.style.display = '';
 
-    if (btnViewTable) btnViewTable.setAttribute('aria-selected', String(state.view === 'table'));
-    if (btnViewOrg) btnViewOrg.setAttribute('aria-selected', String(state.view === 'org'));
+    if (btnViewTable) btnViewTable.setAttribute('aria-selected', 'false');
+    if (btnViewOrg) btnViewOrg.setAttribute('aria-selected', 'true');
 
-    btnViewTable?.classList.toggle('is-active', state.view === 'table');
-    btnViewOrg?.classList.toggle('is-active', state.view === 'org');
+    btnViewTable?.classList.remove('is-active');
+    btnViewOrg?.classList.add('is-active');
 
-    if (state.view === 'table') renderTable();
-    if (state.view === 'org') renderOrg();
+    renderOrg();
   }
 
   function bindActions(){
@@ -1170,27 +1585,33 @@
 
     filtro?.addEventListener('input', debounce(() => {
       state.q = filtro.value.trim();
+      state.orgTouched = false;
 
-      if (state.view === 'table') renderTable();
-      if (state.view === 'org') renderOrg();
+      renderOrg();
     }, 180));
 
     btnExpand?.addEventListener('click', () => {
       state.flat.forEach(d => state.expanded.add(d.id));
+      state.orgTouched = false;
 
-      if (state.view === 'table') renderTable();
-      if (state.view === 'org') renderOrg();
+      renderOrg();
     });
 
     btnCollapse?.addEventListener('click', () => {
       state.expanded.clear();
+      state.orgTouched = false;
 
-      if (state.view === 'table') renderTable();
-      if (state.view === 'org') renderOrg();
+      renderOrg();
     });
 
     btnViewTable?.addEventListener('click', () => setView('table'));
     btnViewOrg?.addEventListener('click', () => setView('org'));
+
+    window.addEventListener('resize', debounce(() => {
+      if (state.view !== 'org') return;
+      state.orgTouched = false;
+      renderOrg();
+    }, 160), { passive: true });
 
     inpNome?.addEventListener('input', updatePathPreview);
     selParent?.addEventListener('change', () => {
@@ -1250,7 +1671,7 @@
     if (IS_MOBILE) {
       setView('table');
     } else {
-      setView('table');
+      setView('org');
     }
 
     await loadEmpresaName();

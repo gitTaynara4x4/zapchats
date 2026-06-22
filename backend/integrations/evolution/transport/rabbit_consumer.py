@@ -6,6 +6,7 @@ import json
 import os
 import time
 import traceback
+import threading
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
 import aio_pika
@@ -1026,7 +1027,122 @@ async def start_rabbit_consumer(
     HANDLERS: Dict[Any, Callable],
     EvoEvent: Any,
 ):
-    return await start(loop, HANDLERS, EvoEvent)
+    """
+    Inicia o consumer RabbitMQ fora do event loop do FastAPI por padrão.
+
+    Motivo:
+    - os handlers da Evolution usam SQLAlchemy síncrono e várias rotinas de banco;
+    - quando o consumer roda no mesmo loop do Uvicorn, uma mensagem recebida pode
+      travar todas as páginas enquanto o handler processa/commit/cache/chatbot;
+    - rodando em uma thread dedicada, o atendimento pode salvar mensagem sem
+      congelar dashboard, mídias, colaboradores etc.
+
+    Para voltar ao modo antigo, usar:
+      RABBITMQ_DEDICATED_THREAD=false
+    """
+    use_thread = _bool_env("RABBITMQ_DEDICATED_THREAD", default=True)
+
+    if not use_thread:
+        print("[RABBIT] modo antigo: consumer no event loop principal do FastAPI.")
+        return await start(loop, HANDLERS, EvoEvent)
+
+    stop_flag = threading.Event()
+    ready_flag = threading.Event()
+    holder: dict[str, Any] = {
+        "loop": None,
+        "task": None,
+        "stop": None,
+        "error": None,
+    }
+
+    def _thread_main() -> None:
+        thread_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(thread_loop)
+        holder["loop"] = thread_loop
+
+        async def _boot_and_wait():
+            try:
+                task, inner_stop = await start(thread_loop, HANDLERS, EvoEvent)
+                holder["task"] = task
+                holder["stop"] = inner_stop
+                ready_flag.set()
+
+                while not stop_flag.is_set():
+                    await asyncio.sleep(0.25)
+
+                if inner_stop:
+                    await inner_stop()
+
+                if task:
+                    try:
+                        await asyncio.wait_for(task, timeout=3.0)
+                    except asyncio.CancelledError:
+                        pass
+                    except asyncio.TimeoutError:
+                        try:
+                            task.cancel()
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        print(f"[RABBIT][thread] erro ao encerrar task: {e}")
+
+            except Exception as e:
+                holder["error"] = e
+                ready_flag.set()
+                print(f"[RABBIT][thread] falha no consumer dedicado: {e}")
+                raise
+
+        try:
+            thread_loop.run_until_complete(_boot_and_wait())
+        finally:
+            try:
+                pending = [t for t in asyncio.all_tasks(thread_loop) if not t.done()]
+                for t in pending:
+                    t.cancel()
+                if pending:
+                    thread_loop.run_until_complete(
+                        asyncio.gather(*pending, return_exceptions=True)
+                    )
+            except Exception:
+                pass
+
+            try:
+                thread_loop.close()
+            except Exception:
+                pass
+
+    thread = threading.Thread(
+        target=_thread_main,
+        name="zapschat-rabbit-consumer",
+        daemon=True,
+    )
+    thread.start()
+    ready_flag.wait(timeout=8.0)
+
+    if holder.get("error"):
+        raise holder["error"]
+
+    print("[RABBIT] consumer isolado em thread dedicada ligado.")
+
+    async def _stop_thread():
+        stop_flag.set()
+
+        thread_loop = holder.get("loop")
+        if thread_loop and not thread_loop.is_closed():
+            try:
+                thread_loop.call_soon_threadsafe(lambda: None)
+            except Exception:
+                pass
+
+        if thread.is_alive():
+            try:
+                await asyncio.to_thread(thread.join, 3.0)
+            except Exception:
+                pass
+
+    # Não devolvemos a task interna porque ela pertence a outro event loop/thread.
+    # O shutdown usa rabbit_stop para encerrar.
+    return (None, _stop_thread)
 
 
 __all__ = [

@@ -1,811 +1,398 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-BR" class="has-sidebar prepaint">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Chatbot – Funcionalidades</title>
+  <title>Chatbot – ZapsChat</title>
 
   <script>
-    (function(){try{
-      const t = localStorage.getItem('theme') || 'dark';
-      document.documentElement.classList.toggle('dark', t === 'dark');
-    }catch{}})();
+    (function () {
+      try {
+        var saved = localStorage.getItem('zapschat_theme') || localStorage.getItem('theme') || 'light';
+        if (saved !== 'dark' && saved !== 'light') saved = 'light';
+        localStorage.setItem('zapschat_theme', saved);
+        localStorage.setItem('theme', saved);
+        document.documentElement.classList.toggle('dark', saved === 'dark');
+        document.documentElement.setAttribute('data-theme', saved);
+      } catch (e) {
+        document.documentElement.classList.remove('dark');
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
   </script>
-
-  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
-  <link rel="stylesheet" href="/frontend/css/chatbot.css"/>
-
-  <style>
-    .inst-trigger{
-      display:inline-flex;align-items:center;gap:.5rem;padding:.45rem .8rem;border-radius:.75rem;
-      font-weight:700;font-size:.92rem;background:var(--card);border:1px solid var(--border);
-      color:var(--fg);cursor:pointer
-    }
-    .inst-trigger:hover{background:var(--hover)}
-    .inst-trigger .chev{font-size:.9rem;opacity:.85}
-
-    .inst-menu{
-      position:absolute;top:100%;left:0;margin-top:.55rem;z-index:50;min-width:280px;max-height:340px;
-      overflow:auto;background:var(--card);color:var(--fg);border:1px solid var(--border);
-      border-radius:.9rem;box-shadow:0 12px 32px rgba(0,0,0,.45);display:none
-    }
-    .inst-menu[aria-hidden="false"]{display:block}
-    .inst-menu .head{
-      position:sticky;top:0;background:var(--card);padding:.7rem .85rem;font-weight:800;font-size:.92rem;
-      border-bottom:1px solid var(--border)
-    }
-    .inst-menu ul{list-style:none;margin:0;padding:.45rem}
-    .inst-menu li{margin:0;padding:0}
-    .inst-item{
-      width:100%;text-align:left;border:0;background:transparent;color:inherit;padding:.6rem .7rem;
-      border-radius:.7rem;display:flex;align-items:center;gap:.55rem;cursor:pointer
-    }
-    .inst-item:hover{background:var(--hover)}
-    .inst-item[aria-selected="true"]{
-      outline:2px solid var(--ring);outline-offset:0;
-      background:color-mix(in oklab, var(--ring) 7%, transparent)
-    }
-    .inst-item .radio{
-      width:16px;height:16px;border-radius:999px;border:2px solid var(--border);
-      display:inline-flex;align-items:center;justify-content:center
-    }
-    .inst-item[aria-selected="true"] .radio{border-color:var(--ring)}
-    .inst-item[aria-selected="true"] .radio::after{
-      content:"";width:8px;height:8px;border-radius:999px;background:var(--ring);display:block
-    }
-
-    .top-actions{
-      display:flex;
-      align-items:center;
-      gap:.65rem;
-      flex-wrap:wrap;
-      margin-left:auto;
-    }
-
-    .help-trigger{
-      display:inline-flex;
-      align-items:center;
-      gap:.5rem;
-      padding:.5rem .85rem;
-      border-radius:.8rem;
-      border:1px solid var(--border);
-      background:linear-gradient(180deg, color-mix(in oklab, var(--card) 88%, transparent), var(--card));
-      color:var(--fg);
-      font-weight:800;
-      cursor:pointer;
-      transition:.18s ease;
-      box-shadow:0 10px 26px rgba(0,0,0,.18);
-    }
-    .help-trigger:hover{transform:translateY(-1px);background:var(--hover)}
-    .help-trigger i{color:#60a5fa}
-
-    .helper-line{
-      margin:.15rem 0 .9rem;
-      color:var(--muted);
-      font-size:.93rem;
-      line-height:1.55;
-    }
-
-    .inline-note{
-      margin:0 0 1rem;
-      padding:.9rem 1rem;
-      border:1px solid rgba(245,158,11,.30);
-      background:rgba(245,158,11,.08);
-      color:#fbbf24;
-      border-radius:16px;
-      line-height:1.5;
-      font-size:.93rem;
-      display:flex;
-      align-items:flex-start;
-      gap:.7rem;
-    }
-    .inline-note strong{color:#fde68a}
-
-    .sched{margin:.35rem 0 .6rem;display:none}
-    .sched.show{display:block}
-    .time-grid{display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:.5rem}
-    .time-grid label{display:block;font-size:.8rem;color:var(--muted)}
-    .time-grid input[type="time"]{
-      width:100%;padding:.55rem .65rem;border:1px solid var(--border);
-      background:var(--card);color:var(--fg);border-radius:.6rem
-    }
-    .time-grid input[disabled]{opacity:.6;cursor:not-allowed}
-
-    .chips{display:flex;flex-wrap:wrap;gap:.4rem;margin:.45rem 0}
-    .chip{
-      padding:.34rem .65rem;border-radius:.7rem;border:1px solid var(--border);
-      background:var(--bg);cursor:pointer;font-size:.84rem;color:var(--fg)
-    }
-    .chip:hover{background:var(--hover)}
-
-    .preview-card{
-      margin-top:.75rem;border:1px solid var(--border);background:var(--bg);
-      border-radius:.95rem;padding:.85rem;
-    }
-    .preview-title{
-      font-size:.85rem;color:var(--muted);margin-bottom:.45rem;
-      display:flex;align-items:center;gap:.4rem;
-    }
-    .preview-pre{
-      margin:0;white-space:pre-wrap;word-break:break-word;font:inherit;
-      color:var(--fg);line-height:1.58;
-    }
-
-    .mode-notice{
-      display:flex;
-      align-items:flex-start;
-      gap:.65rem;
-      padding:.9rem 1rem;
-      margin-bottom:1rem;
-      border:1px solid rgba(245,158,11,.35);
-      background:rgba(245,158,11,.10);
-      color:#fbbf24;
-      border-radius:16px;
-      font-size:.95rem;
-      line-height:1.45;
-    }
-    .mode-notice i{margin-top:.1rem;opacity:.95}
-    .mode-notice strong{color:#fde68a}
-
-    .help-modal{
-      position:fixed;
-      inset:0;
-      z-index:100200;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      padding:20px;
-      background:rgba(0,0,0,.55);
-      opacity:0;
-      pointer-events:none;
-      transition:opacity .18s ease;
-    }
-    .help-modal.show{
-      opacity:1;
-      pointer-events:auto;
-    }
-    .help-card{
-      width:min(1100px, 96vw);
-      max-height:90vh;
-      overflow:auto;
-      background:var(--card);
-      color:var(--fg);
-      border:1px solid var(--border);
-      border-radius:22px;
-      box-shadow:0 24px 60px rgba(0,0,0,.45);
-    }
-    .help-top{
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap:1rem;
-      padding:1.15rem 1.2rem 1rem;
-      border-bottom:1px solid var(--border);
-      position:sticky;
-      top:0;
-      background:var(--card);
-      z-index:5;
-    }
-    .help-top h2{
-      margin:0;
-      font-size:1.18rem;
-      display:flex;
-      align-items:center;
-      gap:.65rem;
-    }
-    .help-top p{
-      margin:.35rem 0 0;
-      color:var(--muted);
-      line-height:1.55;
-      font-size:.95rem;
-    }
-    .help-close{
-      width:40px;height:40px;border-radius:12px;border:1px solid var(--border);
-      background:var(--bg);color:var(--fg);cursor:pointer;flex:0 0 auto;
-    }
-    .help-close:hover{background:var(--hover)}
-    .help-body{
-      padding:1rem 1.2rem 1.2rem;
-      display:flex;
-      flex-direction:column;
-      gap:1rem;
-    }
-
-    .summary-card{
-      margin:0;
-      border:1px solid var(--border);
-      border-radius:18px;
-      background:linear-gradient(180deg, color-mix(in oklab, var(--card) 92%, transparent), var(--card));
-      padding:1rem 1rem .95rem;
-      box-shadow:0 12px 28px rgba(0,0,0,.14);
-    }
-    .summary-head{
-      display:flex;
-      justify-content:space-between;
-      gap:1rem;
-      align-items:flex-start;
-      margin-bottom:.85rem;
-      flex-wrap:wrap;
-    }
-    .summary-head h3{
-      margin:0;
-      font-size:1rem;
-      display:flex;
-      align-items:center;
-      gap:.55rem;
-    }
-    .summary-head p{
-      margin:.35rem 0 0;
-      color:var(--muted);
-      line-height:1.5;
-      font-size:.93rem;
-    }
-    .summary-badges{
-      display:flex;
-      gap:.5rem;
-      flex-wrap:wrap;
-    }
-    .summary-chip{
-      padding:.38rem .65rem;
-      border-radius:999px;
-      border:1px solid var(--border);
-      background:var(--bg);
-      font-size:.85rem;
-      font-weight:700;
-      color:var(--fg);
-    }
-    .summary-grid{
-      display:grid;
-      grid-template-columns:repeat(4,minmax(0,1fr));
-      gap:.7rem;
-    }
-    @media (max-width:980px){
-      .summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-    }
-    @media (max-width:620px){
-      .summary-grid{grid-template-columns:1fr}
-    }
-    .summary-box{
-      border:1px solid var(--border);
-      border-radius:14px;
-      padding:.85rem;
-      background:var(--bg);
-    }
-    .summary-box .k{
-      font-size:.8rem;
-      color:var(--muted);
-      margin-bottom:.25rem;
-    }
-    .summary-box .v{
-      font-size:1rem;
-      font-weight:800;
-      color:var(--fg);
-      line-height:1.4;
-      word-break:break-word;
-    }
-
-    .global-mode-warning{
-      margin:0;
-      display:flex;
-      align-items:flex-start;
-      gap:.75rem;
-      padding:.95rem 1rem;
-      border:1px solid rgba(245,158,11,.35);
-      background:rgba(245,158,11,.10);
-      color:#fbbf24;
-      border-radius:16px;
-      line-height:1.5;
-      font-size:.95rem;
-    }
-    .global-mode-warning strong{color:#fde68a}
-
-    .help-section-title{
-      font-size:1rem;
-      font-weight:800;
-      margin:.2rem 0 0;
-      display:flex;
-      align-items:center;
-      gap:.55rem;
-    }
-
-    .help-grid{
-      display:grid;
-      grid-template-columns:repeat(2,minmax(0,1fr));
-      gap:1rem;
-    }
-    @media (max-width:900px){
-      .help-grid{grid-template-columns:1fr}
-    }
-
-    .help-box{
-      border:1px solid var(--border);
-      border-radius:16px;
-      padding:1rem;
-      background:color-mix(in oklab, var(--card) 90%, transparent);
-    }
-    .help-box h3{
-      margin:0 0 .45rem;
-      font-size:1rem;
-      display:flex;
-      align-items:center;
-      gap:.55rem;
-    }
-    .help-box p{
-      margin:.35rem 0 0;
-      color:var(--muted);
-      line-height:1.55;
-      font-size:.95rem;
-    }
-    .help-steps{
-      display:flex;
-      flex-direction:column;
-      gap:.65rem;
-      margin-top:.5rem;
-    }
-    .help-step{
-      display:flex;
-      gap:.7rem;
-      align-items:flex-start;
-      padding:.7rem .8rem;
-      border:1px solid var(--border);
-      border-radius:14px;
-      background:var(--bg);
-    }
-    .help-step .n{
-      width:24px;height:24px;border-radius:999px;display:grid;place-items:center;
-      font-size:.82rem;font-weight:800;background:#2563eb;color:#fff;flex:0 0 24px;margin-top:.1rem;
-    }
-    .help-step .txt{
-      color:var(--fg);
-      line-height:1.5;
-      font-size:.94rem;
-    }
-
-    .help-note{
-      border:1px solid rgba(245,158,11,.28);
-      background:rgba(245,158,11,.08);
-      color:#fcd34d;
-      border-radius:16px;
-      padding:.95rem 1rem;
-      line-height:1.55;
-      font-size:.95rem;
-    }
-
-    .help-example{
-      border:1px dashed var(--border);
-      border-radius:16px;
-      padding:1rem;
-      background:var(--bg);
-      margin-top:.85rem;
-    }
-    .help-example h4{
-      margin:0 0 .55rem;
-      font-size:.96rem;
-    }
-    .help-example pre{
-      margin:0;
-      white-space:pre-wrap;
-      word-break:break-word;
-      font:inherit;
-      line-height:1.6;
-      color:var(--fg);
-    }
-
-    .sim-wrap{
-      display:grid;
-      grid-template-columns:340px 1fr;
-      gap:1rem;
-    }
-    @media (max-width:920px){
-      .sim-wrap{grid-template-columns:1fr}
-    }
-    .sim-side{
-      border:1px solid var(--border);
-      border-radius:16px;
-      padding:1rem;
-      background:var(--bg);
-    }
-    .sim-side h3{
-      margin:0 0 .45rem;
-      font-size:1rem;
-    }
-    .sim-side p{
-      margin:.25rem 0 0;
-      color:var(--muted);
-      line-height:1.55;
-      font-size:.94rem;
-    }
-    .sim-actions{
-      display:flex;
-      flex-direction:column;
-      gap:.55rem;
-      margin-top:.9rem;
-    }
-    .sim-actions .btn{
-      justify-content:flex-start;
-      width:100%;
-    }
-    .sim-chat{
-      border:1px solid var(--border);
-      border-radius:18px;
-      background:#0b141a;
-      min-height:440px;
-      display:flex;
-      flex-direction:column;
-      overflow:hidden;
-    }
-    .sim-head{
-      padding:.85rem 1rem;
-      border-bottom:1px solid rgba(255,255,255,.08);
-      color:#e9edef;
-      background:#202c33;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:.75rem;
-      flex-wrap:wrap;
-    }
-    .sim-head .badge{
-      padding:.28rem .55rem;
-      border-radius:999px;
-      font-size:.78rem;
-      font-weight:700;
-      background:rgba(255,255,255,.08);
-      color:#d1d5db;
-    }
-    .sim-body{
-      flex:1;
-      padding:1rem;
-      display:flex;
-      flex-direction:column;
-      gap:.65rem;
-      overflow:auto;
-      background-image:
-        radial-gradient(circle at 25px 25px, rgba(255,255,255,.04) 2px, transparent 0),
-        radial-gradient(circle at 75px 75px, rgba(255,255,255,.03) 2px, transparent 0);
-      background-size:100px 100px;
-    }
-    .sim-bubble{
-      max-width:min(78%, 560px);
-      border-radius:14px;
-      padding:.65rem .8rem;
-      line-height:1.55;
-      white-space:pre-wrap;
-      word-break:break-word;
-      box-shadow:0 2px 8px rgba(0,0,0,.18);
-      font-size:.94rem;
-    }
-    .sim-bubble.client{
-      align-self:flex-end;
-      background:#005c4b;
-      color:#fff;
-      border-bottom-right-radius:5px;
-    }
-    .sim-bubble.bot{
-      align-self:flex-start;
-      background:#202c33;
-      color:#e9edef;
-      border-bottom-left-radius:5px;
-    }
-    .sim-input-row{
-      display:flex;
-      gap:.55rem;
-      padding:.9rem 1rem;
-      border-top:1px solid rgba(255,255,255,.08);
-      background:#202c33;
-    }
-    .sim-input-row input{
-      flex:1;
-      padding:.75rem .85rem;
-      border-radius:12px;
-      border:1px solid rgba(255,255,255,.12);
-      background:#111b21;
-      color:#e9edef;
-      outline:0;
-    }
-    .sim-hint{
-      margin-top:.75rem;
-      color:var(--muted);
-      font-size:.9rem;
-      line-height:1.5;
-    }
-
-    .help-footer{
-      display:flex;
-      justify-content:flex-end;
-      gap:.6rem;
-      padding-top:.2rem;
-    }
-
-    .fila-soft-warning{
-      margin:.75rem 0 0;
-      border:1px solid rgba(96,165,250,.28);
-      background:rgba(96,165,250,.08);
-      color:#bfdbfe;
-      padding:.8rem .9rem;
-      border-radius:14px;
-      font-size:.92rem;
-      line-height:1.45;
-    }
-  </style>
 
   <script src="/frontend/js/app-base.js" defer></script>
   <script src="/frontend/js/auth.js" defer></script>
+  <script src="/frontend/js/page-guard.js" defer></script>
   <script src="/frontend/js/pages/chatbot.js" defer></script>
+
+  <style>
+    html.prepaint body{visibility:hidden}
+    html.prepaint[data-head-ready][data-loader-ready] body{visibility:visible}
+  </style>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <link rel="stylesheet" href="/frontend/css/chatbot.css"/>
 </head>
 <body>
-  <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
+  <aside id="sidebar"
+         data-src="/frontend/partials/sidebar.html"
+         data-src-mobile="/frontend/partials/sidebar-mobile.html"></aside>
 
-  <main class="main">
-    <div class="section-title" style="position:relative;flex-wrap:wrap">
-      <h1><i class="fa-solid fa-robot title-ico"></i> Chatbot</h1>
-      <span class="tag tag-ia">Funcionalidades</span>
+  <main class="main chatbot-page">
+    <header class="chatbot-top" aria-label="Topo da página do chatbot">
+      <div class="chatbot-title-block section-title">
+        <div class="chatbot-breadcrumb" aria-label="Caminho">
+          <span>Automação</span>
+          <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+          <strong>Chatbot</strong>
+        </div>
+        <h1>
+          <span class="title-icon" aria-hidden="true"><i class="fa-solid fa-robot"></i></span>
+          <span>Chatbot</span>
+        </h1>
+        <p>Configure mensagens automáticas sem encher a tela. Abra somente o que precisar editar.</p>
+      </div>
 
       <div class="top-actions">
-        <button id="helpChatbotBtn" type="button" class="help-trigger" aria-haspopup="dialog" aria-controls="chatbotHelpModal">
-          <i class="fa-solid fa-circle-question"></i>
-          <span>Como funciona</span>
-        </button>
+        <div class="inst-wrap">
+          <button id="instMenuBtnChat" type="button" role="button" class="inst-trigger"
+                  aria-haspopup="listbox" aria-expanded="false" aria-controls="inst-menu-chat">
+            <span class="wa-dot" aria-hidden="true"><i class="fa-brands fa-whatsapp"></i></span>
+            <span class="inst-text">
+              <strong id="instMenuLabelChat">Selecione uma instância</strong>
+              <small>WhatsApp conectado</small>
+            </span>
+            <span class="chev"><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
+          </button>
 
-        <button id="instMenuBtnChat" type="button" role="button" class="inst-trigger"
-                aria-haspopup="listbox" aria-expanded="false" aria-controls="inst-menu-chat">
-          <span id="instMenuLabelChat">Todas as instâncias</span>
-          <span class="chev">▾</span>
-        </button>
-      </div>
-
-      <div id="inst-menu-chat" class="inst-menu" role="listbox" aria-hidden="true" aria-label="Selecionar instância">
-        <div class="head">WhatsApps</div>
-        <ul id="instMenuListChat"></ul>
-      </div>
-    </div>
-
-    <div class="inline-note">
-      <i class="fa-solid fa-circle-info"></i>
-      <div>
-        Configure a instância e salve.
-        No modo de filas, o cliente escolhe a fila pelo menu do chatbot. A fila não fica marcada automaticamente no cliente.
-      </div>
-    </div>
-
-    <section class="stack" aria-label="Funcionalidades do chatbot">
-      <article class="item" id="it-auto">
-        <header class="head" data-toggle="auto" role="button" aria-expanded="false">
-          <div class="ico"><i class="fa-solid fa-comments"></i></div>
-          <div>
-            <div class="title">Resposta automática simples</div>
-            <div class="desc">Use quando quiser só responder automaticamente, sem pedir opção ao cliente.</div>
-          </div>
-          <div class="right">
-            <span id="pillAutoHdr" class="pill off">off</span>
-            <label class="tswitch" id="swAutoHdr" data-on="false" title="Ativar/desativar mensagens automáticas" tabindex="0" aria-pressed="false">
-              <input type="checkbox" aria-label="Ativar/desativar mensagens automáticas">
-              <span class="track"></span>
-              <span class="label off">off</span>
-              <span class="label on">on</span>
-              <span class="knob"></span>
-            </label>
-            <i class="fa-solid fa-chevron-down chev"></i>
-          </div>
-        </header>
-
-        <div class="body" id="body-auto" aria-hidden="true" style="height:0;opacity:0;pointer-events:none">
-          <div class="body-inner">
-            <div id="autoModeNotice" class="mode-notice" hidden>
-              <i class="fa-solid fa-triangle-exclamation"></i>
-              <span>
-                Este modo não pode ficar ativo ao mesmo tempo que o <strong>Menu para o cliente escolher a fila</strong>.
-              </span>
-            </div>
-
-            <div class="helper-line">
-              Configure uma mensagem automática de boas-vindas ou de fora do horário.
-            </div>
-
-            <div class="cols">
-              <div class="col-card">
-                <div class="block-head">
-                  <div class="block-title">Boas-vindas</div>
-                  <div class="block-ctrl">
-                    <span id="pillWelcome" class="pill off">off</span>
-                    <label class="tswitch" id="swWelcome" data-on="false" title="toggle welcome" tabindex="0">
-                      <input type="checkbox" aria-label="toggle welcome">
-                      <span class="track"></span>
-                      <span class="label off">off</span>
-                      <span class="label on">on</span>
-                      <span class="knob"></span>
-                    </label>
-                  </div>
-                </div>
-
-                <div class="helper-line">
-                  Primeira mensagem automática enviada ao cliente dentro do horário configurado.
-                </div>
-
-                <div id="schedWelcome" class="sched">
-                  <div class="time-grid">
-                    <div>
-                      <label for="wStart">Início</label>
-                      <input type="time" id="wStart" value="08:00">
-                    </div>
-                    <div>
-                      <label for="wEnd">Fim</label>
-                      <input type="time" id="wEnd" value="18:00">
-                    </div>
-                  </div>
-                </div>
-
-                <textarea id="msgWelcome" placeholder="Olá! 👋 Como posso ajudar?" disabled></textarea>
-                <div class="counter" id="wcCount">0 caracteres</div>
-              </div>
-
-              <div class="col-card">
-                <div class="block-head">
-                  <div class="block-title">Fora do horário</div>
-                  <div class="block-ctrl">
-                    <span id="pillOff" class="pill off">off</span>
-                    <label class="tswitch" id="swOff" data-on="false" title="toggle off-hours" tabindex="0">
-                      <input type="checkbox" aria-label="toggle off-hours">
-                      <span class="track"></span>
-                      <span class="label off">off</span>
-                      <span class="label on">on</span>
-                      <span class="knob"></span>
-                    </label>
-                  </div>
-                </div>
-
-                <div class="helper-line">
-                  Responde quando o cliente mandar mensagem fora do expediente que você definiu.
-                </div>
-
-                <div id="schedOff" class="sched">
-                  <div class="time-grid">
-                    <div>
-                      <label for="oStart">Início</label>
-                      <input type="time" id="oStart" value="18:00">
-                    </div>
-                    <div>
-                      <label for="oEnd">Fim</label>
-                      <input type="time" id="oEnd" value="08:00">
-                    </div>
-                  </div>
-                </div>
-
-                <textarea id="msgOff" placeholder="Atendemos de 08:00 às 18:00. Deixe sua mensagem e responderemos no próximo expediente." disabled></textarea>
-                <div class="counter" id="offCount">0 caracteres</div>
-              </div>
-            </div>
-
-            <div class="preview" aria-label="Pré-visualização">
-              <div class="muted" style="margin-bottom:.4rem"><i class="fa-solid fa-eye"></i> Preview</div>
-              <div class="bubble" id="prevW" style="margin-bottom:.5rem"><div id="prevWText">—</div></div>
-              <div class="bubble" id="prevO">—</div>
-            </div>
-
-            <div style="margin-top:.75rem;display:flex;gap:.5rem;justify-content:flex-end">
-              <button class="btn" id="cancelAuto" type="button"><i class="fa-solid fa-ban"></i> Cancelar</button>
-              <button class="btn primary" id="saveAuto" type="button"><i class="fa-solid fa-save"></i> Salvar</button>
-            </div>
+          <div id="inst-menu-chat" class="inst-menu" role="listbox" aria-hidden="true" aria-label="Selecionar instância">
+            <div class="head">WhatsApps</div>
+            <ul id="instMenuListChat"></ul>
           </div>
         </div>
-      </article>
 
-      <article class="item" id="it-auto-dept">
-        <header class="head" data-toggle="auto-dept" role="button" aria-expanded="false">
-          <div class="ico"><i class="fa-solid fa-list-check"></i></div>
+        <span class="save-status" id="chatbotSavedStatus">
+          <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+          Configuração salva
+        </span>
+
+        <button id="helpChatbotBtn" type="button" class="btn btn-soft" aria-haspopup="dialog" aria-controls="chatbotHelpModal">
+          <i class="fa-regular fa-circle-play" aria-hidden="true"></i>
+          <span>Testar</span>
+        </button>
+
+        <button id="saveGlobal" type="button" class="btn btn-primary">
+          <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+          <span>Salvar</span>
+        </button>
+      </div>
+    </header>
+
+    <section class="chatbot-shell" aria-label="Configuração do chatbot">
+      <div class="chatbot-workspace">
+        <section class="intro-card" aria-label="Configuração inicial">
           <div>
-            <div class="title">Menu para o cliente escolher a fila</div>
-            <div class="desc">Use quando quiser que o cliente escolha entre filas como Comercial, Financeiro, Suporte, Cobrança e outras.</div>
+            <h2>Configuração inicial</h2>
+            <p>Escolha entre resposta simples ou menu de filas. Os detalhes aparecem apenas ao abrir o card ou ativar uma opção.</p>
           </div>
-          <div class="right">
-            <span id="pillDeptHdr" class="pill off">off</span>
-            <label class="tswitch" id="swDeptHdr" data-on="false" title="Ativar/desativar menu de filas" tabindex="0" aria-pressed="false">
-              <input type="checkbox" aria-label="Ativar/desativar menu de filas">
-              <span class="track"></span>
-              <span class="label off">off</span>
-              <span class="label on">on</span>
-              <span class="knob"></span>
-            </label>
-            <i class="fa-solid fa-chevron-down chev"></i>
-          </div>
-        </header>
+          <span class="intro-pill"><i class="fa-solid fa-bolt" aria-hidden="true"></i> Automação</span>
+        </section>
 
-        <div class="body" id="body-auto-dept" aria-hidden="true" style="height:0;opacity:0;pointer-events:none">
-          <div class="body-inner">
-            <div id="deptModeNotice" class="mode-notice" hidden>
-              <i class="fa-solid fa-triangle-exclamation"></i>
-              <span>
-                Este modo não pode ficar ativo ao mesmo tempo que as <strong>Mensagens automáticas</strong>.
-              </span>
+        <section class="stack" aria-label="Funcionalidades do chatbot">
+          <article class="item bot-card" id="it-auto">
+            <header class="head bot-card-head" data-toggle="auto" role="button" aria-expanded="false" tabindex="0">
+              <div class="card-title-row">
+                <span class="step-number">1</span>
+                <div>
+                  <h2>Resposta automática simples</h2>
+                  <p>Boas-vindas e mensagem fora do horário comercial.</p>
+                </div>
+              </div>
+
+              <div class="card-actions">
+                <span id="pillAutoHdr" class="pill off" aria-hidden="true">off</span>
+                <label class="tswitch" id="swAutoHdr" data-on="false" title="Ativar/desativar mensagens automáticas" tabindex="0" aria-pressed="false">
+                  <input type="checkbox" aria-label="Ativar/desativar mensagens automáticas">
+                  <span></span>
+                </label>
+                <span class="card-chevron" aria-hidden="true"><i class="fa-solid fa-chevron-down"></i></span>
+              </div>
+            </header>
+
+            <div class="body bot-card-body" id="body-auto" aria-hidden="true" style="height:0;opacity:0;pointer-events:none">
+              <div id="autoModeNotice" class="mode-notice" hidden>
+                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                <span>Este modo não pode ficar ativo ao mesmo tempo que o <strong>Menu para o cliente escolher fila</strong>.</span>
+              </div>
+
+              <div class="editor-grid two-cols">
+                <section class="editor-panel">
+                  <div class="editor-head">
+                    <div>
+                      <h3>Mensagem de boas-vindas</h3>
+                      <p>Enviada automaticamente quando o cliente inicia a conversa.</p>
+                    </div>
+                    <div class="mini-toggle">
+                      <span id="pillWelcome" class="pill off" aria-hidden="true">off</span>
+                      <label class="tswitch tswitch-mini" id="swWelcome" data-on="false" title="Ativar boas-vindas" tabindex="0">
+                        <input type="checkbox" aria-label="Ativar mensagem de boas-vindas">
+                        <span></span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div id="schedWelcome" class="sched">
+                    <div class="time-grid">
+                      <label>Início <input type="time" id="wStart" value="08:00"></label>
+                      <label>Fim <input type="time" id="wEnd" value="18:00"></label>
+                    </div>
+                  </div>
+
+                  <div class="textarea-wrap">
+                    <textarea id="msgWelcome" maxlength="1024" placeholder="Olá! 👋 Como posso ajudar?" disabled></textarea>
+                    <div class="textarea-footer">
+                      <span class="counter" id="wcCount">0 caracteres</span>
+                      <button type="button" class="insert-variable" data-target="msgWelcome">
+                        <i class="fa-regular fa-face-smile" aria-hidden="true"></i>
+                        Inserir variável
+                        <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="editor-panel">
+                  <div class="editor-head">
+                    <div>
+                      <h3>Mensagem fora do horário comercial</h3>
+                      <p>Enviada quando não houver atendimento disponível.</p>
+                    </div>
+                    <div class="mini-toggle">
+                      <span id="pillOff" class="pill off" aria-hidden="true">off</span>
+                      <label class="tswitch tswitch-mini" id="swOff" data-on="false" title="Ativar fora do horário" tabindex="0">
+                        <input type="checkbox" aria-label="Ativar mensagem fora do horário">
+                        <span></span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div id="schedOff" class="sched">
+                    <div class="time-grid">
+                      <label>Início <input type="time" id="oStart" value="18:00"></label>
+                      <label>Fim <input type="time" id="oEnd" value="08:00"></label>
+                    </div>
+                  </div>
+
+                  <div class="textarea-wrap">
+                    <textarea id="msgOff" maxlength="1024" placeholder="Atendemos de 08:00 às 18:00. Deixe sua mensagem e responderemos no próximo expediente." disabled></textarea>
+                    <div class="textarea-footer">
+                      <span class="counter" id="offCount">0 caracteres</span>
+                      <button type="button" class="insert-variable" data-target="msgOff">
+                        <i class="fa-regular fa-face-smile" aria-hidden="true"></i>
+                        Inserir variável
+                        <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+                      </button>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <div class="card-footer-actions">
+                <button class="link-action" id="cancelAuto" type="button">Redefinir</button>
+                <button class="btn btn-primary small" id="saveAuto" type="button">
+                  <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+                  Salvar
+                </button>
+              </div>
+            </div>
+          </article>
+
+          <article class="item bot-card" id="it-auto-dept">
+            <header class="head bot-card-head" data-toggle="auto-dept" role="button" aria-expanded="false" tabindex="0">
+              <div class="card-title-row">
+                <span class="step-number">2</span>
+                <div>
+                  <h2>Menu para o cliente escolher fila</h2>
+                  <p>Mostre opções de atendimento e encaminhe para a fila certa.</p>
+                </div>
+              </div>
+
+              <div class="card-actions">
+                <span id="pillDeptHdr" class="pill off" aria-hidden="true">off</span>
+                <label class="tswitch" id="swDeptHdr" data-on="false" title="Ativar/desativar menu de filas" tabindex="0" aria-pressed="false">
+                  <input type="checkbox" aria-label="Ativar/desativar menu de filas">
+                  <span></span>
+                </label>
+                <span class="card-chevron" aria-hidden="true"><i class="fa-solid fa-chevron-down"></i></span>
+              </div>
+            </header>
+
+            <div class="body bot-card-body" id="body-auto-dept" aria-hidden="true" style="height:0;opacity:0;pointer-events:none">
+              <div id="deptModeNotice" class="mode-notice" hidden>
+                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                <span>Este modo não pode ficar ativo ao mesmo tempo que a <strong>Resposta automática simples</strong>.</span>
+              </div>
+
+              <div class="editor-grid fila-grid">
+                <section class="editor-panel">
+                  <div class="editor-head">
+                    <div>
+                      <h3>Mensagem inicial da escolha de fila</h3>
+                      <p>Texto enviado junto com as opções disponíveis.</p>
+                    </div>
+                    <div class="mini-toggle">
+                      <span id="pillDeptWelcome" class="pill off" aria-hidden="true">off</span>
+                      <label class="tswitch tswitch-mini" id="swDeptWelcome" data-on="false" title="Ativar mensagem inicial do menu" tabindex="0">
+                        <input type="checkbox" aria-label="Ativar mensagem inicial da escolha de fila">
+                        <span></span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div id="schedDeptWelcome" class="sched">
+                    <div class="time-grid">
+                      <label>Início <input type="time" id="dwStart" value="08:00"></label>
+                      <label>Fim <input type="time" id="dwEnd" value="18:00"></label>
+                    </div>
+                  </div>
+
+                  <div id="deptChips" class="chips" aria-label="Sugestões de mensagem"></div>
+
+                  <div class="textarea-wrap">
+                    <textarea id="msgDeptWelcome" maxlength="1024" placeholder="Mensagem inicial da escolha de fila" disabled></textarea>
+                    <div class="textarea-footer">
+                      <span class="counter" id="dwCount">0 caracteres</span>
+                      <button type="button" class="insert-variable" data-target="msgDeptWelcome">
+                        <i class="fa-regular fa-face-smile" aria-hidden="true"></i>
+                        Inserir variável
+                        <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                <aside class="editor-panel filas-panel">
+                  <div class="editor-head compact">
+                    <div>
+                      <h3>Filas disponíveis</h3>
+                      <p>Escolha quais filas aparecem para o cliente.</p>
+                    </div>
+                    <span id="deptCount" class="selected-count">0 selecionadas</span>
+                  </div>
+
+                  <div class="fila-soft-warning">
+                    <i class="fa-regular fa-circle-question" aria-hidden="true"></i>
+                    <span>As filas vêm da tela <strong>Gestão de Filas</strong>. Aqui você só escolhe quais aparecem no chatbot.</span>
+                  </div>
+
+                  <div class="fila-toolbar">
+                    <div class="search-field">
+                      <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                      <input type="search" id="deptSearch" placeholder="Buscar fila…">
+                    </div>
+                    <button class="btn btn-soft xs" id="deptAll" type="button">Todas</button>
+                    <button class="btn btn-soft xs" id="deptNone" type="button">Nenhuma</button>
+                  </div>
+
+                  <div id="deptList" class="dept-list" role="list"></div>
+                </aside>
+              </div>
+
+              <div class="card-footer-actions">
+                <button class="link-action" id="cancelDept" type="button">Redefinir</button>
+                <button class="btn btn-primary small" id="saveDept" type="button">
+                  <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+                  Salvar
+                </button>
+              </div>
+            </div>
+          </article>
+        </section>
+      </div>
+
+      <aside class="chatbot-aside" aria-label="Preview e resumo">
+        <section class="side-card preview-side-card">
+          <div class="side-card-head">
+            <div>
+              <h2>Preview no WhatsApp</h2>
+              <p>Simulação da primeira resposta enviada ao cliente.</p>
+            </div>
+            <span class="preview-pill">Simulação</span>
+          </div>
+
+          <div class="flow-mini" aria-label="Resumo do fluxo">
+            <div class="flow-step">
+              <span><i class="fa-regular fa-message" aria-hidden="true"></i></span>
+              <small>Boas-vindas</small>
+            </div>
+            <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+            <div class="flow-step">
+              <span><i class="fa-solid fa-list-ul" aria-hidden="true"></i></span>
+              <small>Escolha da fila</small>
+            </div>
+            <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+            <div class="flow-step">
+              <span><i class="fa-regular fa-user" aria-hidden="true"></i></span>
+              <small>Encaminhamento</small>
+            </div>
+          </div>
+
+          <div class="whatsapp-preview">
+            <div class="message-row sent">
+              <div class="wa-bubble wa-user">Olá <span>10:30 <i class="fa-solid fa-check-double" aria-hidden="true"></i></span></div>
             </div>
 
-            <div class="helper-line">
-              Configure a mensagem inicial e escolha quais filas o cliente poderá ver.
-            </div>
+            <div class="preview-empty" id="previewEmptyText">Ative uma opção para visualizar a mensagem aqui.</div>
 
-            <div class="col-card">
-              <div class="block-head">
-                <div class="block-title">Mensagem inicial da escolha de fila</div>
-                <div class="block-ctrl">
-                  <span id="pillDeptWelcome" class="pill off">off</span>
-                  <label class="tswitch" id="swDeptWelcome" data-on="false" title="toggle filas welcome" tabindex="0">
-                    <input type="checkbox" aria-label="toggle filas welcome">
-                    <span class="track"></span>
-                    <span class="label off">off</span>
-                    <span class="label on">on</span>
-                    <span class="knob"></span>
-                  </label>
-                </div>
-              </div>
-
-              <div class="helper-line">
-                Essa é a mensagem que o cliente recebe primeiro, junto com a lista de filas disponíveis.
-              </div>
-
-              <div id="schedDeptWelcome" class="sched">
-                <div class="time-grid">
-                  <div>
-                    <label for="dwStart">Início</label>
-                    <input type="time" id="dwStart" value="08:00">
-                  </div>
-                  <div>
-                    <label for="dwEnd">Fim</label>
-                    <input type="time" id="dwEnd" value="18:00">
-                  </div>
-                </div>
-              </div>
-
-              <div class="dept-picker" aria-label="Filas na triagem">
-                <div class="dept-picker-head">
-                  <div class="dept-picker-title">Filas no menu do cliente</div>
-                  <div class="dept-picker-sub">Marque quais opções o cliente verá no menu do WhatsApp.</div>
-                </div>
-
-                <div class="fila-soft-warning">
-                  <i class="fa-solid fa-circle-info"></i>
-                  As filas vêm da tela <strong>Gestão de Filas</strong>. Aqui você só escolhe quais delas aparecem no chatbot desta instância.
-                </div>
-
-                <div class="dept-toolbar" style="margin-top:.65rem">
-                  <div class="dept-search">
-                    <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-                    <input type="search" id="deptSearch" placeholder="Buscar fila…">
-                  </div>
-                  <div class="dept-actions">
-                    <button class="btn xs" id="deptAll" type="button">Todas</button>
-                    <button class="btn xs" id="deptNone" type="button">Nenhuma</button>
-                  </div>
-                </div>
-
-                <div id="deptList" class="dept-list" role="list"></div>
-
-                <div class="dept-foot">
-                  <span id="deptCount" class="muted">0 selecionadas</span>
-                </div>
-              </div>
-
-              <div id="deptChips" class="chips" aria-label="Sugestões de mensagem"></div>
-
-              <textarea id="msgDeptWelcome" placeholder="Mensagem inicial da escolha de fila" disabled></textarea>
-              <div class="counter" id="dwCount">0 caracteres</div>
-
-              <div id="prevDept" class="preview-card" style="display:none">
-                <div class="preview-title">
-                  <i class="fa-solid fa-eye"></i>
-                  Prévia da mensagem para o cliente
-                </div>
-                <pre id="prevDeptText" class="preview-pre">—</pre>
-              </div>
-
-              <div style="margin-top:.75rem;display:flex;gap:.5rem;justify-content:flex-end">
-                <button class="btn" id="cancelDept" type="button"><i class="fa-solid fa-ban"></i> Cancelar</button>
-                <button class="btn primary" id="saveDept" type="button"><i class="fa-solid fa-save"></i> Salvar</button>
-              </div>
+            <div class="bubble wa-bubble wa-bot" id="prevW" style="display:none"><div id="prevWText">—</div><small>10:30</small></div>
+            <div class="bubble wa-bubble wa-bot" id="prevO" style="display:none">—</div>
+            <div id="prevDept" class="wa-bubble wa-bot menu-preview" style="display:none">
+              <pre id="prevDeptText">—</pre>
+              <small>10:30</small>
             </div>
           </div>
-        </div>
-      </article>
+
+          <div class="preview-note">
+            <i class="fa-regular fa-circle-info" aria-hidden="true"></i>
+            Esta é uma simulação. As mensagens podem variar.
+          </div>
+        </section>
+
+        <section class="side-card summary-card">
+          <div class="side-card-head">
+            <div>
+              <h2>Resumo da configuração</h2>
+              <p>Status da automação desta instância.</p>
+            </div>
+            <span class="status-pill">Ativo</span>
+          </div>
+
+          <div class="summary-table">
+            <div class="summary-row">
+              <span>Instância</span>
+              <strong id="sumInstValue">—</strong>
+            </div>
+            <div class="summary-row">
+              <span>Modo ativo</span>
+              <strong id="sumModeValue">Nenhum ativo</strong>
+            </div>
+            <div class="summary-row">
+              <span>Status</span>
+              <strong id="sumBehaviorValue" class="success-text">Nada configurado</strong>
+            </div>
+          </div>
+
+          <div class="summary-hidden" aria-hidden="true">
+            <span id="sumInstLabel">Instância: —</span>
+            <span id="sumModeBadge">Modo: nenhum</span>
+            <span id="sumDeptValue">0</span>
+          </div>
+        </section>
+      </aside>
     </section>
   </main>
 
@@ -813,214 +400,34 @@
     <div class="help-card" role="dialog" aria-modal="true" aria-labelledby="chatbotHelpTitle">
       <div class="help-top">
         <div>
-          <h2 id="chatbotHelpTitle">
-            <i class="fa-solid fa-circle-question" style="color:#60a5fa"></i>
-            Como funciona
-          </h2>
-          <p>
-            Aqui ficam as explicações, resumo da instância, exemplos e simulação do chatbot.
-          </p>
+          <h2 id="chatbotHelpTitle"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i> Simulação do chatbot</h2>
+          <p>Teste rapidamente como o cliente verá a primeira resposta.</p>
         </div>
-        <button type="button" class="help-close" data-close-modal="chatbotHelpModal" aria-label="Fechar ajuda">
-          <i class="fa-solid fa-xmark"></i>
+        <button type="button" class="help-close" data-close-modal="chatbotHelpModal" aria-label="Fechar simulação">
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
         </button>
       </div>
 
       <div class="help-body">
-        <section class="summary-card" aria-label="Resumo da configuração">
-          <div class="summary-head">
-            <div>
-              <h3><i class="fa-solid fa-chart-simple"></i> Resumo desta instância</h3>
-              <p>Veja rapidamente o que está ativo neste número e qual será o comportamento do chatbot.</p>
-            </div>
-            <div class="summary-badges">
-              <span class="summary-chip" id="sumInstLabel">Instância: —</span>
-              <span class="summary-chip" id="sumModeBadge">Modo: nenhum</span>
-            </div>
-          </div>
-
-          <div class="summary-grid">
-            <div class="summary-box">
-              <div class="k">Instância selecionada</div>
-              <div class="v" id="sumInstValue">—</div>
-            </div>
-            <div class="summary-box">
-              <div class="k">Modo ativo</div>
-              <div class="v" id="sumModeValue">Nenhum ativo</div>
-            </div>
-            <div class="summary-box">
-              <div class="k">Mensagem enviada ao cliente</div>
-              <div class="v" id="sumBehaviorValue">Nada configurado</div>
-            </div>
-            <div class="summary-box">
-              <div class="k">Filas no menu</div>
-              <div class="v" id="sumDeptValue">0</div>
-            </div>
-          </div>
-        </section>
-
-        <div class="global-mode-warning">
-          <i class="fa-solid fa-triangle-exclamation"></i>
-          <div>
-            <strong>Escolha 1 modo por instância.</strong><br>
-            Use <strong>Resposta automática simples</strong> quando quiser só uma mensagem automática.
-            Use <strong>Menu para o cliente escolher a fila</strong> quando quiser que o cliente escolha para onde o atendimento deve ir.
-          </div>
+        <div class="sim-toolbar">
+          <button class="btn btn-soft" type="button" id="simFirstBtn">Primeiro contato</button>
+          <button class="btn btn-soft" type="button" id="simInvalidBtn">Opção inválida</button>
+          <button class="btn btn-soft" type="button" id="simValidBtn">Opção válida</button>
+          <button class="btn btn-soft" type="button" id="simOffBtn">Fora do horário</button>
+          <button class="btn btn-soft" type="button" id="simClearBtn">Limpar</button>
         </div>
 
-        <div class="help-grid">
-          <div class="help-box">
-            <h3><i class="fa-solid fa-mobile-screen-button"></i> Seleção de instância</h3>
-            <p>
-              No topo da tela você escolhe qual WhatsApp quer configurar.
-              Tudo que for salvo vale somente para a instância selecionada.
-            </p>
-          </div>
-
-          <div class="help-box">
-            <h3><i class="fa-solid fa-shield-halved"></i> Regra importante</h3>
-            <p>
-              Você pode usar <strong>ou</strong> a resposta automática simples, <strong>ou</strong> o menu de filas.
-              Os dois não ficam ativos juntos na mesma instância.
-            </p>
-          </div>
+        <div class="sim-head">
+          <span class="badge" id="simModeBadge">Modo: —</span>
         </div>
 
-        <div class="help-section-title">
-          <i class="fa-solid fa-shuffle" style="color:#a78bfa"></i>
-          Qual modo devo usar?
-        </div>
+        <div class="sim-body" id="simChatBody"></div>
 
-        <div class="help-grid">
-          <div class="help-box">
-            <h3><i class="fa-solid fa-comments"></i> Use “Resposta automática simples” se:</h3>
-            <div class="help-steps">
-              <div class="help-step"><div class="n">1</div><div class="txt">Você quer só cumprimentar o cliente automaticamente.</div></div>
-              <div class="help-step"><div class="n">2</div><div class="txt">Você quer mandar mensagem fora do horário.</div></div>
-              <div class="help-step"><div class="n">3</div><div class="txt">Você não precisa que o cliente escolha uma fila.</div></div>
-            </div>
-          </div>
-
-          <div class="help-box">
-            <h3><i class="fa-solid fa-list-check"></i> Use “Menu para o cliente escolher a fila” se:</h3>
-            <div class="help-steps">
-              <div class="help-step"><div class="n">1</div><div class="txt">Você quer separar o atendimento por filas.</div></div>
-              <div class="help-step"><div class="n">2</div><div class="txt">Você quer que o cliente escolha uma opção, como Comercial ou Financeiro.</div></div>
-              <div class="help-step"><div class="n">3</div><div class="txt">Você quer que a conversa entre aguardando na fila escolhida pelo cliente.</div></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="help-box">
-          <h3><i class="fa-solid fa-list-check"></i> Menu para o cliente escolher a fila</h3>
-          <p>
-            Esse modo é para quando o cliente precisa escolher uma fila, como Comercial, Financeiro, Suporte ou Cobrança.
-            A fila não fica fixa no cliente. Ela só é aplicada no atendimento depois da escolha.
-          </p>
-
-          <div class="help-steps">
-            <div class="help-step">
-              <div class="n">1</div>
-              <div class="txt"><strong>Ative o modo</strong> de escolha de fila.</div>
-            </div>
-            <div class="help-step">
-              <div class="n">2</div>
-              <div class="txt">Marque quais <strong>filas</strong> quer mostrar no menu.</div>
-            </div>
-            <div class="help-step">
-              <div class="n">3</div>
-              <div class="txt">Escreva a <strong>mensagem inicial</strong> que o cliente vai receber.</div>
-            </div>
-            <div class="help-step">
-              <div class="n">4</div>
-              <div class="txt">O cliente responde com o <strong>número da opção</strong> ou com o nome da fila.</div>
-            </div>
-          </div>
-
-          <div class="help-example">
-            <h4>Exemplo real</h4>
-            <pre>Cliente manda:
-"Oi"
-
-Cliente recebe:
-"1 - Comercial
-2 - Financeiro
-3 - Suporte"
-
-Cliente responde:
-"2"
-
-Cliente recebe:
-"Perfeito! Vou te encaminhar para Financeiro."</pre>
-          </div>
-        </div>
-
-        <div class="help-note">
-          <strong>Dica importante:</strong>
-          se você quer só cumprimentar o cliente automaticamente, use <strong>Resposta automática simples</strong>.
-          Se você quer que ele escolha para onde quer ir, use <strong>Menu para o cliente escolher a fila</strong>.
-        </div>
-
-        <div class="help-section-title">
-          <i class="fa-solid fa-mobile-screen" style="color:#34d399"></i>
-          Testar como cliente
-        </div>
-
-        <div class="sim-wrap">
-          <div class="sim-side">
-            <h3>Simulações rápidas</h3>
-            <p>
-              Use os botões abaixo para ver o comportamento do chatbot do jeito que ele está configurado agora.
-            </p>
-
-            <div class="sim-actions">
-              <button class="btn" type="button" id="simFirstBtn">
-                <i class="fa-solid fa-message"></i>
-                Primeiro contato
-              </button>
-              <button class="btn" type="button" id="simInvalidBtn">
-                <i class="fa-solid fa-triangle-exclamation"></i>
-                Opção inválida
-              </button>
-              <button class="btn" type="button" id="simValidBtn">
-                <i class="fa-solid fa-check"></i>
-                Opção válida
-              </button>
-              <button class="btn" type="button" id="simOffBtn">
-                <i class="fa-solid fa-clock"></i>
-                Fora do horário
-              </button>
-              <button class="btn" type="button" id="simClearBtn">
-                <i class="fa-solid fa-eraser"></i>
-                Limpar simulação
-              </button>
-            </div>
-
-            <div class="sim-hint">
-              O simulador usa a mensagem que está escrita na tela agora, as filas marcadas e o modo ativo da instância.
-            </div>
-          </div>
-
-          <div class="sim-chat">
-            <div class="sim-head">
-              <div style="font-weight:800">Prévia da conversa</div>
-              <span class="badge" id="simModeBadge">Modo: —</span>
-            </div>
-            <div class="sim-body" id="simChatBody"></div>
-            <div class="sim-input-row">
-              <input type="text" id="simClientInput" placeholder='Digite algo como "Oi", "2", "Financeiro"...'>
-              <button class="btn primary" type="button" id="simSendBtn">
-                <i class="fa-solid fa-paper-plane"></i>
-                Simular
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="help-footer">
-          <button type="button" class="btn primary" data-close-modal="chatbotHelpModal">
-            <i class="fa-solid fa-check"></i>
-            Fechar
+        <div class="sim-input-row">
+          <input type="text" id="simClientInput" placeholder='Digite algo como "Oi", "2", "Financeiro"...'>
+          <button class="btn btn-primary" type="button" id="simSendBtn">
+            <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+            Enviar
           </button>
         </div>
       </div>

@@ -15,7 +15,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import text, func
 
 from backend.database import get_db
@@ -93,6 +93,35 @@ def _assert_participa(
         )
 
 
+def _chat_read_col(db: Session) -> str:
+    """
+    Compatibilidade segura:
+    - versão correta atual do model: chat_read_state.last_read_at
+    - banco antigo pode ter sido criado com: chat_read_state.last_read
+
+    Retorna apenas nomes fixos/permitidos para não abrir risco de SQL injection.
+    """
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT column_name
+                  FROM information_schema.columns
+                 WHERE table_name = 'chat_read_state'
+                   AND column_name IN ('last_read_at', 'last_read')
+                """
+            )
+        ).scalars().all()
+        cols = {str(c) for c in rows}
+        if "last_read_at" in cols:
+            return "last_read_at"
+        if "last_read" in cols:
+            return "last_read"
+    except Exception:
+        pass
+    return "last_read_at"
+
+
 def _new_thread_id() -> str:
     return uuid.uuid4().hex
 
@@ -142,6 +171,11 @@ class ChatColabOut(TypedDict, total=False):
     nome: str
     nome_completo: Optional[str]
     setor_nome: Optional[str]
+    email: Optional[str]
+    telefone: Optional[str]
+    cargo: Optional[str]
+    created_at: Optional[str]
+    avatar_url: Optional[str]
 
 
 # =====================================================================================
@@ -177,6 +211,7 @@ def chat_roster(
     # Só colaboradores da empresa logada, ordenados por nome (case-insensitive)
     rows = (
         db.query(Colab)
+        .options(joinedload(Colab.setor))
         .filter(Colab.empresa_id == emp_id)
         .order_by(func.lower(Colab.nome))
         .all()
@@ -203,12 +238,18 @@ def chat_roster(
                 if dep:
                     setor_nome = dep.nome
 
+        created_at = getattr(c, "created_at", None) or getattr(c, "timestamp", None)
         out.append(
             {
                 "id": int(c.id),
                 "nome": c.nome,
-                "nome_completo": getattr(c, "nome_completo", None),
+                "nome_completo": getattr(c, "nome_completo", None) or c.nome,
                 "setor_nome": setor_nome,
+                "email": getattr(c, "email", None),
+                "telefone": getattr(c, "telefone", None),
+                "cargo": getattr(c, "cargo", None),
+                "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else None,
+                "avatar_url": f"/api/colaboradores/{int(c.id)}/avatar",
             }
         )
 
@@ -227,38 +268,69 @@ def list_conversations(
     emp_id = int(ident["empresa_id"])
     uid = _resolve_colab_id(db, ident)
 
+    read_col = _chat_read_col(db)
     sql = text(
-        """
-        WITH my_threads AS (
-            SELECT h.thread_id
+        f"""
+        WITH my_heads AS (
+            SELECT h.thread_id,
+                   h.titulo,
+                   h.participantes,
+                   h.created_at AS head_created_at,
+                   CASE
+                     WHEN cardinality(COALESCE(h.participantes, ARRAY[]::integer[])) = 2 THEN (
+                       SELECT string_agg(p::text, ':' ORDER BY p)
+                         FROM unnest(h.participantes) AS p
+                     )
+                     ELSE h.thread_id::text
+                   END AS conv_key
               FROM chat_eventos h
              WHERE h.empresa_id = :emp
                AND h.kind = 'head'
                AND EXISTS (
                      SELECT 1
-                       FROM unnest(h.participantes) AS p
+                       FROM unnest(COALESCE(h.participantes, ARRAY[]::integer[])) AS p
                       WHERE p = :uid
                )
         ),
         last_msg AS (
             SELECT DISTINCT ON (e.thread_id)
-                   e.thread_id, e.texto AS last_texto, e.kind AS last_kind, e.created_at AS last_created_at
+                   e.thread_id,
+                   e.texto AS last_texto,
+                   e.kind AS last_kind,
+                   e.created_at AS last_created_at
               FROM chat_eventos e
-              JOIN my_threads t ON t.thread_id = e.thread_id
+              JOIN my_heads t ON t.thread_id = e.thread_id
              WHERE e.empresa_id = :emp
                AND e.deleted_at IS NULL
              ORDER BY e.thread_id, e.created_at DESC
         ),
-        head AS (
-            SELECT h.thread_id, h.titulo, h.participantes
-              FROM chat_eventos h
-              JOIN my_threads t ON t.thread_id = h.thread_id
-             WHERE h.kind = 'head'
+        ranked_heads AS (
+            SELECT h.thread_id,
+                   h.titulo,
+                   h.participantes,
+                   h.conv_key,
+                   lm.last_texto,
+                   lm.last_kind,
+                   lm.last_created_at,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY h.conv_key
+                     ORDER BY
+                       CASE WHEN lm.last_kind = 'msg' THEN 0 ELSE 1 END,
+                       lm.last_created_at DESC NULLS LAST,
+                       h.head_created_at DESC NULLS LAST
+                   ) AS rn
+              FROM my_heads h
+              JOIN last_msg lm ON lm.thread_id = h.thread_id
+        ),
+        chosen AS (
+            SELECT *
+              FROM ranked_heads
+             WHERE rn = 1
         ),
         unread AS (
             SELECT e.thread_id, COUNT(*) AS unread_count
               FROM chat_eventos e
-              JOIN my_threads t ON t.thread_id = e.thread_id
+              JOIN chosen t ON t.thread_id = e.thread_id
               LEFT JOIN chat_read_state rs
                      ON rs.empresa_id = :emp
                     AND rs.thread_id  = e.thread_id
@@ -266,19 +338,18 @@ def list_conversations(
              WHERE e.empresa_id = :emp
                AND e.deleted_at IS NULL
                AND e.kind IN ('msg','system')
-               AND e.created_at > COALESCE(rs.last_read, 'epoch'::timestamptz)
+               AND e.created_at > COALESCE(rs.{read_col}, 'epoch'::timestamptz)
              GROUP BY e.thread_id
         )
         SELECT h.thread_id,
                h.titulo,
                h.participantes,
-               lm.last_texto,
-               lm.last_kind,
-               lm.last_created_at,
+               h.last_texto,
+               h.last_kind,
+               h.last_created_at,
                COALESCE(u.unread_count, 0) AS unread_count
-          FROM head h
-          JOIN last_msg lm ON lm.thread_id = h.thread_id
-     LEFT JOIN unread u   ON u.thread_id  = h.thread_id
+          FROM chosen h
+     LEFT JOIN unread u ON u.thread_id = h.thread_id
          WHERE (:q IS NULL
                 OR h.titulo ILIKE '%' || :q || '%'
                 OR EXISTS (
@@ -289,7 +360,7 @@ def list_conversations(
                         AND e2.kind IN ('msg','system')
                         AND e2.texto ILIKE '%' || :q || '%'
                 ))
-         ORDER BY lm.last_created_at DESC NULLS LAST
+         ORDER BY h.last_created_at DESC NULLS LAST
          LIMIT :limit OFFSET :offset
     """
     )
@@ -308,6 +379,67 @@ def list_conversations(
     return [dict(r) for r in rows]
 
 
+
+@router.get("/mentions")
+def list_mentions(
+    limit: int = Query(80, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    ident=Depends(get_current_identity),
+    db: Session = Depends(get_db),
+) -> List[ChatMentionOut]:
+    """Lista mensagens com @ nas conversas em que o usuário participa."""
+    emp_id = int(ident["empresa_id"])
+    uid = _resolve_colab_id(db, ident)
+
+    sql = text(
+        """
+        WITH my_threads AS (
+            SELECT h.thread_id, h.titulo, h.participantes
+              FROM chat_eventos h
+             WHERE h.empresa_id = :emp
+               AND h.kind = 'head'
+               AND EXISTS (
+                     SELECT 1
+                       FROM unnest(h.participantes) AS p
+                      WHERE p = :uid
+               )
+        )
+        SELECT e.id,
+               e.thread_id,
+               t.titulo,
+               t.participantes,
+               e.autor_id,
+               e.texto,
+               e.created_at
+          FROM chat_eventos e
+          JOIN my_threads t ON t.thread_id = e.thread_id
+         WHERE e.empresa_id = :emp
+           AND e.deleted_at IS NULL
+           AND e.kind = 'msg'
+           AND e.texto ILIKE '%@%'
+         ORDER BY e.created_at DESC
+         LIMIT :limit OFFSET :offset
+        """
+    )
+    rows = db.execute(
+        sql,
+        {
+            "emp": emp_id,
+            "uid": uid,
+            "limit": limit,
+            "offset": offset,
+        },
+    ).mappings().all()
+
+    out: List[ChatMentionOut] = []
+    for r in rows:
+        d = dict(r)
+        if hasattr(d.get("created_at"), "isoformat"):
+            d["created_at"] = d["created_at"].isoformat()
+        out.append(d)
+    return out
+
+
 @router.post("/conversations", status_code=201)
 def create_conversation(
     payload: NewConversationIn = Body(...),
@@ -317,9 +449,69 @@ def create_conversation(
     emp_id = int(ident["empresa_id"])
     uid = _resolve_colab_id(db, ident)
 
-    titulo = (payload.get("titulo") or "").strip() or "Conversa"
-    # sempre garante que o próprio usuário entra nos participantes
-    participantes = list(dict.fromkeys((payload.get("participantes") or []) + [uid]))
+    titulo_raw = (payload.get("titulo") or "").strip()
+    titulo = titulo_raw or "Conversa"
+
+    # Sempre garante que o próprio usuário entra nos participantes.
+    # Também normaliza para evitar [eu, outro] e [outro, eu] virarem conversas diferentes.
+    participantes = []
+    for p in (payload.get("participantes") or []) + [uid]:
+        try:
+            n = int(p)
+        except Exception:
+            continue
+        if n > 0 and n not in participantes:
+            participantes.append(n)
+
+    # Chat 1x1 não deve duplicar.
+    # Se já existe uma conversa direta entre os mesmos 2 colaboradores, reutiliza a thread.
+    # Grupos continuam podendo ser criados normalmente.
+    if len(participantes) == 2 and not titulo_raw:
+        parts_sorted = sorted(participantes)
+        existing = (
+            db.execute(
+                text(
+                    """
+            SELECT h.thread_id,
+                   h.titulo,
+                   h.participantes,
+                   lm.last_texto,
+                   lm.last_kind,
+                   lm.last_created_at
+              FROM chat_eventos h
+         LEFT JOIN LATERAL (
+                    SELECT e.texto AS last_texto,
+                           e.kind  AS last_kind,
+                           e.created_at AS last_created_at
+                      FROM chat_eventos e
+                     WHERE e.empresa_id = h.empresa_id
+                       AND e.thread_id = h.thread_id
+                       AND e.deleted_at IS NULL
+                     ORDER BY e.created_at DESC
+                     LIMIT 1
+                 ) lm ON TRUE
+             WHERE h.empresa_id = :emp
+               AND h.kind = 'head'
+               AND cardinality(COALESCE(h.participantes, ARRAY[]::integer[])) = 2
+               AND h.participantes @> CAST(:parts AS integer[])
+               AND CAST(:parts AS integer[]) @> h.participantes
+             ORDER BY
+               CASE WHEN lm.last_kind = 'msg' THEN 0 ELSE 1 END,
+               lm.last_created_at DESC NULLS LAST,
+               h.created_at DESC NULLS LAST
+             LIMIT 1
+        """
+                ),
+                {"emp": emp_id, "parts": parts_sorted},
+            )
+            .mappings()
+            .first()
+        )
+        if existing:
+            d = dict(existing)
+            if hasattr(d.get("last_created_at"), "isoformat"):
+                d["last_created_at"] = d["last_created_at"].isoformat()
+            return d
 
     tid = _new_thread_id()
     db.execute(
@@ -482,20 +674,21 @@ def mark_read(
     ident=Depends(get_current_identity),
     db: Session = Depends(get_db),
 ):
-    """Marca conversa como lida (upsert em chat_read_state.last_read)."""
+    """Marca conversa como lida. Compatível com last_read_at e com banco antigo last_read."""
     emp_id = int(ident["empresa_id"])
     uid = _resolve_colab_id(db, ident)
     _assert_participa(db, emp_id, thread_id, uid)
 
+    read_col = _chat_read_col(db)
     row = (
         db.execute(
             text(
-                """
-        INSERT INTO chat_read_state (empresa_id, thread_id, user_id, last_read)
+                f"""
+        INSERT INTO chat_read_state (empresa_id, thread_id, user_id, {read_col})
         VALUES (:emp, :tid, :uid, NOW())
         ON CONFLICT (empresa_id, thread_id, user_id)
-        DO UPDATE SET last_read = EXCLUDED.last_read
-        RETURNING last_read
+        DO UPDATE SET {read_col} = EXCLUDED.{read_col}
+        RETURNING {read_col} AS last_read_at
     """
             ),
             {"emp": emp_id, "tid": thread_id, "uid": uid},
@@ -505,16 +698,14 @@ def mark_read(
     )
     db.commit()
 
-    # WS
+    last_read_at = (row or {}).get("last_read_at")
     _broadcast_emp(
         emp_id,
         {
             "type": "read.updated",
             "thread_id": thread_id,
             "user_id": uid,
-            "last_read": (row or {}).get("last_read", None).isoformat()
-            if row
-            else None,
+            "last_read_at": last_read_at.isoformat() if hasattr(last_read_at, "isoformat") else None,
         },
     )
     return

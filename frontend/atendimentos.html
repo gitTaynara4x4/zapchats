@@ -323,9 +323,79 @@
       background-color:rgba(0,0,0,.13) !important;
     }
   </style>
+
+  <script>
+    // Correção v5: tela de atendimento não pode deixar WebSocket/lista
+    // disparar reload oficial pesado durante mensagens em tempo real.
+    window.ZC_STRICT_NO_WS_LIST_RELOAD = true;
+  </script>
+
+
+  <style id="zc-atendimentos-hard-no-global-loading">
+    /* ZapsChat v6: a tela de atendimento não pode ficar coberta por loader global. */
+    body.zc-atendimentos-page #page-loading,
+    body.zc-atendimentos-page #app-loading,
+    body.zc-atendimentos-page .page-loading,
+    body.zc-atendimentos-page .app-loading {
+      display:none !important;
+      opacity:0 !important;
+      visibility:hidden !important;
+      pointer-events:none !important;
+    }
+  </style>
+  <script id="zc-atendimentos-self-nav-guard">
+    // v6: bloqueia navegação para /atendimentos quando já estamos em /atendimentos.
+    // Isso evita CLOSE 1001 + reload da tela ao clicar no item ativo da sidebar
+    // ou quando algum script antigo tenta abrir a mesma página de novo.
+    (function(){
+      window.ZC_STRICT_NO_WS_LIST_RELOAD = true;
+      window.ZC_ATENDIMENTOS_NO_SELF_NAV = true;
+      try { document.body && document.body.classList.add('zc-atendimentos-page'); } catch(e){}
+
+      function normPath(p){ return String(p || '').split('?')[0].split('#')[0].replace(/\/+$/,'') || '/'; }
+      function isAtendimentos(){ return normPath(location.pathname) === '/atendimentos'; }
+      function isSelfAtendimentosHref(href){
+        try {
+          var u = new URL(href || '', location.origin);
+          return u.origin === location.origin && normPath(u.pathname) === '/atendimentos' && isAtendimentos();
+        } catch(e){ return false; }
+      }
+      function clearLoaders(reason){
+        try { window.PageLoading && window.PageLoading.reset && window.PageLoading.reset(); } catch(e){}
+        try { window.PageLoading && window.PageLoading.hide && window.PageLoading.hide(); } catch(e){}
+        try { window.Splash && window.Splash.hide && window.Splash.hide(); } catch(e){}
+        try { window.ZCForceClearLoading && window.ZCForceClearLoading(reason || 'self-nav'); } catch(e){}
+        try {
+          document.documentElement.classList.remove('is-loading','prepaint');
+          document.body.classList.remove('is-loading');
+          ['page-loading','app-loading','splash-screen','app-splash','splash'].forEach(function(id){
+            var el = document.getElementById(id);
+            if (el) { el.style.display='none'; el.style.pointerEvents='none'; el.classList.remove('show','is-visible','active','loading'); }
+          });
+        } catch(e){}
+      }
+
+      document.addEventListener('click', function(ev){
+        var a = ev.target && ev.target.closest && ev.target.closest('a[href]');
+        if (!a) return;
+        if (!isSelfAtendimentosHref(a.getAttribute('href'))) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+        clearLoaders('blocked-self-atendimentos-click');
+        try { console.warn('[ZapsChat][v6] navegação repetida para /atendimentos bloqueada', a); } catch(e){}
+      }, true);
+
+      window.addEventListener('pageshow', function(){ clearLoaders('pageshow'); });
+      setTimeout(function(){ clearLoaders('startup-1500'); }, 1500);
+      setTimeout(function(){ clearLoaders('startup-5000'); }, 5000);
+      setTimeout(function(){ clearLoaders('startup-10000'); }, 10000);
+    })();
+  </script>
+
 </head>
 
-<body style="display:none">
+<body class="zc-atendimentos-page" style="display:none">
   <script>
     (function () {
       const EMPRESA_ID = Number(localStorage.getItem('empresa_id'));
@@ -617,7 +687,19 @@
       if (window.__ZC_ATENDIMENTOS_ORDERED_BOOT_20260516__) return;
       window.__ZC_ATENDIMENTOS_ORDERED_BOOT_20260516__ = true;
 
-      const SIDEBAR_URL = '/frontend/partials/sidebar-atendimentos.html';
+      const ZC_BUILD = String(window.ZC_BUILD_ID || window.__ASSET_VER__ || Date.now());
+
+      function withBuild(url) {
+        try {
+          const u = new URL(url, location.origin);
+          u.searchParams.set('v', ZC_BUILD);
+          return u.pathname + u.search + u.hash;
+        } catch {
+          return String(url || '') + (String(url || '').includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(ZC_BUILD);
+        }
+      }
+
+      const SIDEBAR_URL = withBuild('/frontend/partials/sidebar-atendimentos.html');
 
       const SETTINGS_JS = [
         '/frontend/js/atendimentos/ui/settings-panel-pages.js',
@@ -653,9 +735,11 @@
 
       function normalizeSrc(src) {
         try {
-          return new URL(src, location.origin).href;
+          const u = new URL(src, location.origin);
+          // Para detectar duplicado, ignora cache-bust (?v=...), mas mantém path real.
+          return u.origin + u.pathname;
         } catch {
-          return String(src || '');
+          return String(src || '').split('?')[0];
         }
       }
 
@@ -672,7 +756,7 @@
       }
 
       function scriptIdFromSrc(src) {
-        return 'zc-script-' + String(src || '')
+        return 'zc-script-' + String(src || '').split('?')[0]
           .replace(/^https?:\/\//i, '')
           .replace(/[^a-z0-9_-]+/gi, '-')
           .replace(/^-+|-+$/g, '');
@@ -700,7 +784,7 @@
 
             const script = document.createElement('script');
             script.id = scriptIdFromSrc(src);
-            script.src = src;
+            script.src = withBuild(src);
             script.async = false;
 
             if (options.type) {

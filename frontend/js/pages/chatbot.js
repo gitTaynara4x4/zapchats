@@ -11,7 +11,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 'zc-chatbot-filas-v2-sem-marcacao-default';
+  const VERSION = 'zc-chatbot-saas-midias-clean-v3';
   if (window.__ZC_CHATBOT_PAGE_VERSION__ === VERSION) return;
   window.__ZC_CHATBOT_PAGE_VERSION__ = VERSION;
 
@@ -307,6 +307,8 @@
   const bodyAutoDept = document.getElementById('body-auto-dept');
   const saveDept = document.getElementById('saveDept');
   const cancelDept = document.getElementById('cancelDept');
+  const saveGlobal = document.getElementById('saveGlobal');
+  const previewEmptyText = document.getElementById('previewEmptyText');
 
   const swDeptWelcome   = document.getElementById('swDeptWelcome');
   const pillDeptWelcome = document.getElementById('pillDeptWelcome');
@@ -698,12 +700,21 @@ Digite apenas o número da opção desejada.`
     }
   }
 
+  function syncPreviewEmpty() {
+    if (!previewEmptyText) return;
+    const welcomeVisible = !!(prevW && prevW.style.display !== 'none');
+    const offVisible = !!(prevO && prevO.style.display !== 'none');
+    const filaVisible = !!(prevDept && prevDept.style.display !== 'none');
+    previewEmptyText.classList.toggle('is-hidden', welcomeVisible || offVisible || filaVisible);
+  }
+
   function renderFilaPreview() {
     if (!prevDept || !prevDeptText) return;
 
     const on = getSwitch(swDeptWelcome) && getSwitch(swDeptHdr);
     prevDept.style.display = on ? '' : 'none';
     prevDeptText.textContent = renderFilaTemplate(msgDeptWelcome?.value || '');
+    syncPreviewEmpty();
   }
 
   function renderFilaPicker() {
@@ -905,6 +916,9 @@ Digite apenas o número da opção desejada.`
     renderFilaPreview();
     renderFilaPicker();
 
+    if (getSwitch(swAutoHdr)) setAccordionOpen(headAuto, bodyAuto, true);
+    if (getSwitch(swDeptHdr)) setAccordionOpen(headAutoDept, bodyAutoDept, true);
+
     updateSaveButtons();
     updateScheduleVisibility();
     updateModeNotices();
@@ -917,6 +931,7 @@ Digite apenas o número da opção desejada.`
 
     if (prevW) prevW.style.display = on ? '' : 'none';
     if (prevWText) prevWText.textContent = (msgWelcome?.value || '—').trim() || '—';
+    syncPreviewEmpty();
   }
 
   function renderOffPreview() {
@@ -924,6 +939,7 @@ Digite apenas o número da opção desejada.`
 
     if (prevO) prevO.style.display = on ? '' : 'none';
     if (prevO) prevO.textContent = (msgOff?.value || '—').trim() || '—';
+    syncPreviewEmpty();
   }
 
   function syncCfgFromUI() {
@@ -1108,6 +1124,10 @@ Digite apenas o número da opção desejada.`
       }
 
       setSwitch(labelEl, newVal, pillEl);
+
+      if (labelEl === swAutoHdr) setAccordionOpen(headAuto, bodyAuto, newVal);
+      if (labelEl === swDeptHdr) setAccordionOpen(headAutoDept, bodyAutoDept, newVal);
+
       onToggle?.(newVal);
 
       if (!cfg?.features) return;
@@ -1186,6 +1206,7 @@ Digite apenas o número da opção desejada.`
   function updateSaveButtons() {
     if (saveAuto) saveAuto.disabled = __persisting;
     if (saveDept) saveDept.disabled = __persisting;
+    if (saveGlobal) saveGlobal.disabled = __persisting;
   }
 
   async function getConfig() {
@@ -2222,6 +2243,10 @@ Digite apenas o número da opção desejada.`
 
       saveAuto?.addEventListener('click', saveAutoBlock);
       saveDept?.addEventListener('click', saveFilaBlock);
+      saveGlobal?.addEventListener('click', () => {
+        if (getSwitch(swDeptHdr)) return saveFilaBlock();
+        return saveAutoBlock();
+      });
 
       cancelAuto?.addEventListener('click', () => restoreSnapshot(true));
       cancelDept?.addEventListener('click', () => restoreSnapshot(true));

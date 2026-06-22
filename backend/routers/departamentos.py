@@ -821,6 +821,121 @@ def mover(
     return None
 
 
+def _cleanup_departamento_references_before_delete(
+    db: Session,
+    *,
+    empresa_id: int,
+    dept_id: int,
+    parent_id: Optional[int],
+) -> None:
+    """
+    Prepara o departamento para exclusão sem quebrar FK.
+
+    Faz:
+    - filhos sobem um nível;
+    - vínculos/pivôs são removidos;
+    - registros de negócio que aceitam NULL ficam sem departamento;
+    - se existir FK obrigatória em tabela de negócio, retorna 409 claro em vez de 500.
+    """
+    dept_id = int(dept_id)
+    empresa_id = int(empresa_id)
+    new_parent_id = int(parent_id) if parent_id else None
+
+    if new_parent_id == dept_id:
+        new_parent_id = None
+
+    # 1) Filhos do departamento sobem para o superior do departamento removido.
+    if has_column(models.Departamento, "parent_id"):
+        q_children = db.query(models.Departamento).filter(
+            models.Departamento.empresa_id == empresa_id,
+            models.Departamento.parent_id == dept_id,
+        )
+        q_children.update(
+            {"parent_id": new_parent_id},
+            synchronize_session=False,
+        )
+
+    # 2) Remove vínculo com instâncias/WhatsApps, se existir.
+    if hasattr(models, "DepartamentoInstancia"):
+        q_inst = db.query(models.DepartamentoInstancia).filter(
+            models.DepartamentoInstancia.departamento_id == dept_id,
+        )
+
+        if has_column(models.DepartamentoInstancia, "empresa_id"):
+            q_inst = q_inst.filter(models.DepartamentoInstancia.empresa_id == empresa_id)
+
+        q_inst.delete(synchronize_session=False)
+
+    # 3) Varre os models e resolve FKs que apontam para Departamento.
+    dept_table = getattr(models.Departamento, "__table__", None)
+    dept_table_name = getattr(dept_table, "name", "departamentos")
+
+    seen_tables: set[str] = set()
+
+    for model in vars(models).values():
+        table = getattr(model, "__table__", None)
+
+        if table is None or model is models.Departamento:
+            continue
+
+        table_name = str(getattr(table, "name", "") or "")
+        if not table_name or table_name in seen_tables:
+            continue
+
+        seen_tables.add(table_name)
+
+        for col in table.columns:
+            col_name = str(getattr(col, "name", "") or "")
+            if not col_name:
+                continue
+
+            refs_departamento = any(
+                getattr(getattr(fk.column, "table", None), "name", None) == dept_table_name
+                and getattr(fk.column, "name", None) == "id"
+                for fk in getattr(col, "foreign_keys", set())
+            )
+
+            # fallback para projetos onde a FK não está declarada no SQLAlchemy,
+            # mas a coluna segue o nome padrão.
+            if not refs_departamento and col_name != "departamento_id":
+                continue
+
+            attr = getattr(model, col_name, None)
+            if attr is None:
+                continue
+
+            q = db.query(model).filter(attr == dept_id)
+
+            if hasattr(model, "empresa_id"):
+                q = q.filter(getattr(model, "empresa_id") == empresa_id)
+
+            # Tabela pivô/associação: pode apagar o vínculo.
+            table_lower = table_name.lower()
+            is_pivot_or_link = (
+                "departamento" in table_lower
+                and any(k in table_lower for k in ("instancia", "usuario", "user", "whatsapp", "setor", "permiss"))
+            )
+
+            if is_pivot_or_link:
+                q.delete(synchronize_session=False)
+                continue
+
+            # Tabela de negócio: não apaga o registro, apenas remove o setor.
+            if getattr(col, "nullable", True):
+                q.update({col_name: None}, synchronize_session=False)
+                continue
+
+            # FK obrigatória: melhor mostrar erro claro do que 500.
+            if q.first():
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Não dá para remover este departamento porque ele ainda está em uso "
+                        f"na tabela '{table_name}'. Primeiro remova/troque o departamento desses registros."
+                    ),
+                )
+
+
 @router.delete("/{dept_id}", status_code=status.HTTP_204_NO_CONTENT)
 def excluir(
     dept_id: int,
@@ -831,14 +946,32 @@ def excluir(
 
     dept = get_departamento_or_404(db, empresa_id, dept_id)
 
-    db.delete(dept)
+    try:
+        _cleanup_departamento_references_before_delete(
+            db,
+            empresa_id=int(empresa_id),
+            dept_id=int(dept.id),
+            parent_id=getattr(dept, "parent_id", None),
+        )
 
-    db.flush()
-    _rebuild_db_paths_for_empresa(db, int(empresa_id))
+        db.delete(dept)
+        db.flush()
 
-    db.commit()
+        _rebuild_db_paths_for_empresa(db, int(empresa_id))
 
-    return None
+        db.commit()
+        return None
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao remover departamento: {exc}",
+        )
 
 
 # ==========================================================

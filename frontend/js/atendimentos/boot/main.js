@@ -48,6 +48,76 @@
   // Exige instância resolvida antes de abrir/enviar.
   window.ZC_REQUIRE_INSTANCE = true;
 
+  // v7: WebSocket só liga depois que lista/módulos/boot terminarem.
+  // Isso evita mensagem/replay chegando no meio do carregamento.
+  window.ZC_WS_DELAY_BOOT_UNTIL_READY = true;
+
+
+  /*
+    Limpeza emergencial ANTES de importar o store.
+    Versões antigas gravavam histórico/base64/listas gigantes no localStorage.
+    Se o store importar antes de limpar, o JSON gigante é parseado e o Chrome pode ir para vários GB de RAM.
+  */
+  function cleanupZapsChatHeavyStorageEarly() {
+    try {
+      const BIG_LIST_BYTES = Number(window.ZC_BIG_LIST_CACHE_BYTES || 900000); // ~0.9 MB
+      const HUGE_ANY_BYTES = Number(window.ZC_HUGE_LOCALSTORAGE_BYTES || 1800000); // ~1.8 MB
+      const prefixes = [
+        'cacheHistoricos:',
+        'zc:hist:v2:',
+      ];
+
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k) keys.push(k);
+      }
+
+      let removed = 0;
+
+      for (const k of keys) {
+        let raw = null;
+        try { raw = localStorage.getItem(k); } catch { raw = null; }
+        const len = raw ? raw.length : 0;
+        const low = String(k).toLowerCase();
+
+        const isHistory =
+          prefixes.some((p) => String(k).startsWith(p)) ||
+          low.includes(':hist:') ||
+          low.includes(':cursor:') ||
+          low.includes('cachehistoricos');
+
+        const isBigConversationList =
+          (String(k).startsWith('clientesCache:') || String(k).startsWith('zc:convs:v2:')) &&
+          len > BIG_LIST_BYTES;
+
+        const isHugeZapsKey =
+          len > HUGE_ANY_BYTES &&
+          (
+            String(k).startsWith('zc:') ||
+            String(k).startsWith('atend:') ||
+            String(k).startsWith('clientesCache:') ||
+            low.includes('historico') ||
+            low.includes('conversa')
+          );
+
+        if (isHistory || isBigConversationList || isHugeZapsKey) {
+          try {
+            localStorage.removeItem(k);
+            removed += 1;
+          } catch {}
+        }
+      }
+
+      if (removed) {
+        try { console.warn('[ZapsChat] cache pesado removido antes do boot:', removed); } catch {}
+        try { sessionStorage.setItem('convForceReload', '1'); } catch {}
+      }
+    } catch {}
+  }
+
+  cleanupZapsChatHeavyStorageEarly();
+
   // Guardas de request/reload.
   window.ZC_DISABLE_BOOT_DUPLICADO = true;
   window.ZC_CONVERSAS_RELOAD_DEBOUNCE_MS = window.ZC_CONVERSAS_RELOAD_DEBOUNCE_MS || 700;
@@ -116,9 +186,6 @@
     await import('../ui/media-render/viewer.js');
     await import('../ui/media-render/render-message.js');
     await import('../ui/media-render/boot.js');
-
-    // -------- REALTIME -----------------------------------------------
-    await import('../realtime/ws-empresa.js');
 
     // -------- UI BASE -------------------------------------------------
     await import('../ui/splash.js');
@@ -238,6 +305,23 @@
           window.__ZC_ATENDIMENTOS_BOOT_CALLING__ = true;
 
           Promise.resolve(boot())
+            .then(async () => {
+              try {
+                window.__ZC_ATENDIMENTOS_RUNTIME_READY = true;
+                window.dispatchEvent(new CustomEvent('zc:atendimentos-runtime-ready'));
+
+                // Importa e liga o WS somente agora, depois de carregar a lista inicial.
+                await import('../realtime/ws-empresa.js');
+                try {
+                  window.dispatchEvent(new CustomEvent('zc:start-empresa-ws'));
+                } catch (_) {}
+                try {
+                  window.ZCStartEmpresaWS && window.ZCStartEmpresaWS();
+                } catch (_) {}
+              } catch (wsErr) {
+                console.error('[ZapsChat][main] erro ao iniciar WS após boot:', wsErr);
+              }
+            })
             .catch((err) => {
               console.error('[ZapsChat][main] erro no boot:', err);
             })

@@ -1286,3 +1286,80 @@ html:not(.dark)[data-theme="light"] #chat-footer .zc-claim-actions #btnLiberarCo
     font-size:14px !important;
   }
 }
+/* =========================================================
+   ZapsChat v9 - Correção: pesquisar/lista não somem ao abrir conversa
+   Motivo: em notebook com zoom/escala, 1080px pode virar < 920px em CSS,
+   ativando o modo mobile e escondendo o aside quando body.is-chat-open.
+   Aqui mantemos o layout dividido em telas médias e deixamos o modo
+   chat-only apenas para mobile real.
+   ========================================================= */
+@media (min-width:769px) and (max-width:920px){
+  :root,
+  html[data-theme="light"],
+  html[data-theme="dark"]{
+    --aside-w:min(420px, 43vw) !important;
+  }
+
+  .wpp-root{
+    display:grid !important;
+    grid-template-columns:64px var(--aside-w) minmax(0,1fr) !important;
+    width:100vw !important;
+    max-width:100vw !important;
+    min-width:0 !important;
+  }
+
+  .wpp-root > aside{
+    grid-column:2 / 3 !important;
+    display:flex !important;
+    flex-direction:column !important;
+    width:var(--aside-w) !important;
+    min-width:280px !important;
+    max-width:var(--aside-w) !important;
+    height:100vh !important;
+    max-height:100vh !important;
+    overflow:hidden !important;
+    position:relative !important;
+    z-index:2 !important;
+    border-right:1px solid color-mix(in oklab, var(--leftbar-border, var(--border)) 70%, transparent) !important;
+  }
+
+  body.is-chat-open .wpp-root > aside{
+    display:flex !important;
+    visibility:visible !important;
+    opacity:1 !important;
+    pointer-events:auto !important;
+  }
+
+  .wpp-root > main,
+  body.is-chat-open .wpp-root > main{
+    grid-column:3 / 4 !important;
+    display:flex !important;
+    width:auto !important;
+    max-width:none !important;
+    min-width:0 !important;
+    height:100vh !important;
+    max-height:100vh !important;
+    overflow:hidden !important;
+    position:relative !important;
+    z-index:1 !important;
+  }
+
+  body.is-chat-open #chat-main{
+    display:flex !important;
+  }
+
+  #chat-back-mobile{
+    display:none !important;
+    visibility:hidden !important;
+    pointer-events:none !important;
+  }
+
+  #chat-header,
+  body.is-chat-open #chat-header{
+    padding:0 12px !important;
+  }
+
+  #chat-title{
+    max-width:min(42vw, 520px) !important;
+  }
+}

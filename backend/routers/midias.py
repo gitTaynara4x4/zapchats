@@ -14,7 +14,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import select, desc, asc, or_, and_
+from sqlalchemy import select, desc, asc, or_, and_, func
 
 import jwt
 
@@ -227,18 +227,29 @@ def list_midias(
         stmt = stmt.where(inst_filter)
 
     if q:
-        like = f"%{q.strip()}%"
-        stmt = stmt.where(
-            or_(
-                Midia.filename.ilike(like),
-                Midia.nome_original.ilike(like),
-                Cliente.nome.ilike(like),
-                Cliente.nome_completo.ilike(like),
-                Cliente.nome_whatsapp.ilike(like),
-                Cliente.telefone.ilike(like),
-                Cliente.email.ilike(like),
-            )
-        )
+        q_clean = q.strip()
+        like = f"%{q_clean}%"
+
+        conds = [
+            Midia.filename.ilike(like),
+            Midia.nome_original.ilike(like),
+            Cliente.nome.ilike(like),
+            Cliente.nome_completo.ilike(like),
+            Cliente.nome_whatsapp.ilike(like),
+            Cliente.telefone.ilike(like),
+            Cliente.email.ilike(like),
+        ]
+
+        # Busca por telefone sem depender da máscara salva no banco.
+        # Ex.: usuário digita 12999998888 e o banco está como (12) 99999-8888.
+        digits = re.sub(r"\D+", "", q_clean)
+        if digits:
+            telefone_limpo = Cliente.telefone
+            for ch in ("(", ")", "-", " ", ".", "+"):
+                telefone_limpo = func.replace(telefone_limpo, ch, "")
+            conds.append(telefone_limpo.ilike(f"%{digits}%"))
+
+        stmt = stmt.where(or_(*conds))
 
     try:
         if inicio:

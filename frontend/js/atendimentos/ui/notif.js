@@ -485,6 +485,9 @@
   /* ==================== Auto-limpeza ao foco/visível ==================== */
   async function clearUnreadOfOpenChatAndPingServer() {
     try {
+      // v12: não limpa bolha/seen se a conversa não estiver realmente visualizada.
+      if (document.hidden) return;
+      if (typeof document.hasFocus === 'function' && !document.hasFocus()) return;
       const selectedRef = getSelectedConversationRef();
       const selectedKind = getSelectedKind();
       const entityId = getSelectedEntityId();

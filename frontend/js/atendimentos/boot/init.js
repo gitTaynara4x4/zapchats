@@ -87,6 +87,162 @@ function mergeDefined(base = {}, override = {}) {
   return out;
 }
 
+function sanitizeLightObject(obj, depth = 0) {
+  if (obj == null) return obj;
+
+  if (typeof obj === 'string') {
+    if (obj.length > 4000) return '';
+    if (/^data:/i.test(obj) && obj.length > 1000) return '';
+    return obj;
+  }
+
+  if (typeof obj !== 'object') return obj;
+  if (depth > 3) return null;
+
+  if (Array.isArray(obj)) {
+    return obj.slice(0, 20).map((x) => sanitizeLightObject(x, depth + 1)).filter(Boolean);
+  }
+
+  const heavyKeys = new Set([
+    'base64', 'b64', 'filebase64', 'file_base64', 'media_base64', 'mediaBase64',
+    'bodybase64', 'raw', 'buffer', 'bytes', 'binary', 'stream', 'data'
+  ]);
+
+  const out = {};
+  Object.entries(obj).forEach(([k, v]) => {
+    const key = String(k || '').trim().toLowerCase();
+    if (heavyKeys.has(key)) return;
+    if (typeof v === 'string' && v.length > 4000) return;
+    out[k] = sanitizeLightObject(v, depth + 1);
+  });
+
+  return out;
+}
+
+function sanitizeMidiasLight(midias) {
+  if (!Array.isArray(midias)) return [];
+  return midias.slice(0, 20).map((m) => sanitizeLightObject(m)).filter(Boolean);
+}
+
+function cleanHeaderText(v) {
+  const s = String(v ?? '').replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+
+  const low = s.toLowerCase();
+  if (['null', 'undefined', 'nan', 'none', 'sem nome', 'desconhecido'].includes(low)) return '';
+  if (/^[cg]:\d+:[^:]+$/i.test(s)) return '';
+
+  return s;
+}
+
+function formatPhoneForHeader(v) {
+  let n = digitsOnly(v);
+  if (!n) return '';
+
+  if (n.length < 8) return '';
+  if (!n.startsWith('55') && (n.length === 10 || n.length === 11)) n = `55${n}`;
+
+  if (n.startsWith('55') && n.length >= 12) {
+    const ddd = n.slice(2, 4);
+    const rest = n.slice(4);
+
+    if (rest.length === 9) return `+55 ${ddd} ${rest.slice(0, 5)}-${rest.slice(5)}`;
+    if (rest.length === 8) return `+55 ${ddd} ${rest.slice(0, 4)}-${rest.slice(4)}`;
+
+    return `+55 ${ddd} ${rest}`;
+  }
+
+  return n;
+}
+
+function headerTitleFromDom(ref = {}) {
+  const ck = String(ref?.key || '').trim();
+  const eid = String(ref?.entityId || '').trim();
+  const iid = String(ref?.instId || '').trim();
+
+  const candidates = [];
+
+  try {
+    document
+      .querySelectorAll('#lista-clientes .cliente-item, #lista-clientes .chat-item, #search-results .sr-item')
+      .forEach((el) => {
+        const d = el.dataset || {};
+        const sameKey = ck && (d.conversationKey === ck || d.conversationId === ck || d.convKey === ck || d.id === ck);
+        const sameEntity = eid && String(d.entityId || d.clienteId || d.backendClienteId || '').trim() === eid;
+        const sameInst = !iid || !String(d.instanciaId || '').trim() || String(d.instanciaId || '').trim() === iid;
+
+        if (sameKey || (sameEntity && sameInst)) candidates.push(el);
+      });
+  } catch {}
+
+  for (const el of candidates) {
+    const direct = cleanHeaderText(el.dataset?.nome || el.dataset?.name || el.dataset?.title || '');
+    if (direct) return direct;
+
+    const nameNode = el.querySelector?.('.chat-name, .sr-name, .name, .cliente-nome, [data-role="name"]');
+    const text = cleanHeaderText(nameNode?.textContent || '');
+    if (text) {
+      // Em resultado de busca pode vir "Nome · +55..."; o cabeçalho fica mais limpo só com o nome.
+      return cleanHeaderText(text.split(' · ')[0]) || text;
+    }
+  }
+
+  return '';
+}
+
+function resolveHeaderTitle(cliente = {}, ref = {}) {
+  const c = cliente || {};
+
+  const candidates = [
+    c.nome,
+    c.nome_whatsapp,
+    c.nomeWhatsapp,
+    c.push_name,
+    c.pushName,
+    c.cliente_nome,
+    c.nome_cliente,
+    c.contato_nome,
+    c.display_name,
+    c.displayName,
+    c.name,
+    c.title,
+    c.label,
+    c.nome_exibicao,
+    c.nomeExibicao,
+    c.apelido,
+    headerTitleFromDom(ref),
+    c.telefone_fmt,
+    c.cliente_telefone_fmt,
+    c.telefone_formatado,
+    c.phone_formatted,
+    c.telefone,
+    c.cliente_telefone,
+    c.celular,
+    c.whatsapp,
+    c.numero,
+    c.number,
+    c.phone,
+    c.telefone_norm,
+    c.telefone_e164,
+    c.remote_jid,
+    c.remoteJid,
+    c.jid,
+  ];
+
+  for (const raw of candidates) {
+    const text = cleanHeaderText(raw);
+    if (!text) continue;
+
+    const phone = formatPhoneForHeader(text);
+    if (phone) return phone;
+
+    return text;
+  }
+
+  if (ref?.entityId) return `Cliente #${ref.entityId}`;
+  return '';
+}
+
 function getInstanciasList() {
   try {
     const candidates = [
@@ -557,6 +713,99 @@ function toast(msg, ok = true) {
   }, 1700);
 }
 
+
+/* ================= Loading inicial da conversa ================= */
+function escapeHtmlLite(v) {
+  return String(v ?? '').replace(/[&<>"]/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+  }[ch]));
+}
+
+function nextPaint() {
+  return new Promise((resolve) => {
+    try {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    } catch {
+      setTimeout(resolve, 0);
+    }
+  });
+}
+
+function showConversationLoading(ref = {}, label = 'Carregando conversa…') {
+  const hist = document.getElementById('historico');
+  if (!hist || !ref?.key) return;
+
+  const currentKey =
+    hist.dataset?.conversationKey ||
+    hist.dataset?.conversationId ||
+    hist.dataset?.convKey ||
+    '';
+
+  if (currentKey && currentKey !== ref.key) return;
+
+  hist.style.display = 'flex';
+  hist.setAttribute('aria-busy', 'true');
+  hist.dataset.loadingConversationKey = String(ref.key);
+
+  hist.innerHTML = `
+    <div class="hist-initial-loading" data-hist-initial-loading="1" data-conversation-key="${escapeHtmlLite(ref.key)}">
+      <div class="spinner" aria-hidden="true"></div>
+      <div class="txt">${escapeHtmlLite(label)}</div>
+      <div class="subtxt">Buscando mensagens no banco de dados.</div>
+    </div>
+  `;
+}
+
+function clearConversationLoading(ref = {}) {
+  const hist = document.getElementById('historico');
+  if (!hist) return;
+
+  const loadingKey = String(hist.dataset?.loadingConversationKey || '');
+  if (ref?.key && loadingKey && loadingKey !== String(ref.key)) return;
+
+  hist.removeAttribute('aria-busy');
+  delete hist.dataset.loadingConversationKey;
+
+  try {
+    hist.querySelectorAll('[data-hist-initial-loading="1"]').forEach((n) => n.remove());
+  } catch {}
+}
+
+function showConversationLoadError(ref = {}, cliente = null, message = 'Não foi possível carregar a conversa.') {
+  const hist = document.getElementById('historico');
+  if (!hist || !ref?.key) return;
+
+  const currentKey =
+    hist.dataset?.conversationKey ||
+    hist.dataset?.conversationId ||
+    hist.dataset?.convKey ||
+    '';
+
+  if (currentKey && currentKey !== ref.key) return;
+
+  hist.style.display = 'flex';
+  hist.removeAttribute('aria-busy');
+  delete hist.dataset.loadingConversationKey;
+
+  hist.innerHTML = `
+    <div class="hist-empty-state hist-empty-error">
+      <div class="hist-empty-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+      <div class="hist-empty-title">${escapeHtmlLite(message)}</div>
+      <div class="hist-empty-sub">Confira a conexão com o banco e tente novamente.</div>
+      <button type="button" class="hist-retry-btn" data-retry-conversation="1">Tentar novamente</button>
+    </div>
+  `;
+
+  try {
+    hist.querySelector('[data-retry-conversation="1"]')?.addEventListener('click', () => {
+      selecionarClienteObj(cliente || ref.key, { forceReload: true });
+    });
+  } catch {}
+}
+
 /* ================= Helpers de prontidão (Splash) ================= */
 function readyPart(key) {
   if (window.AppReady && typeof window.AppReady.mark === 'function') {
@@ -665,6 +914,18 @@ function readyPart(key) {
 
 /* ================= Utils ================= */
 
+function canMarkSeenNow(force = false) {
+  if (force) return true;
+
+  try {
+    if (window.ZC_DISABLE_AUTO_SEEN === true) return false;
+    if (document.hidden) return false;
+    if (typeof document.hasFocus === 'function' && !document.hasFocus()) return false;
+  } catch {}
+
+  return true;
+}
+
 async function markChatAsSeenNow(conversationRef, row = null, { force = false } = {}) {
   try {
     const ref = parseConversationRef(conversationRef, row);
@@ -678,6 +939,10 @@ async function markChatAsSeenNow(conversationRef, row = null, { force = false } 
     // Só marca visto se a conversa ainda estiver aberta.
     // Isso evita seen em conversa que já foi trocada.
     if (!isConversationOpen(convKey)) return;
+
+    // v12: só marca como visto se a conversa estiver realmente visualizada.
+    // Se a aba estiver em segundo plano/sem foco, mantém a bolha de não lidas.
+    if (!canMarkSeenNow(force)) return;
 
     const now = Date.now();
     const old = __seenState.get(convKey);
@@ -936,7 +1201,7 @@ async function ensureMensagensCarregadas(conversationRef, opts = {}) {
         tipo: tipoMsg,
         timestamp: rawTs || null,
         ack: isSaida ? ackNum : null,
-        midias: Array.isArray(m.midias) ? m.midias : [],
+        midias: sanitizeMidiasLight(m.midias),
         instancia_id: m.instancia_id ?? (inst || null),
         origem: m.origem ?? (isSaida ? 'atendente' : 'cliente'),
         autor_nome: m.autor_nome ?? m.atendente_nome ?? m.user_nome ?? null,
@@ -958,8 +1223,8 @@ async function ensureMensagensCarregadas(conversationRef, opts = {}) {
         m.replyPreview ??
         null;
 
-      if (quoted && typeof quoted === 'object') out.quoted = quoted;
-      if (quotedPreview && typeof quotedPreview === 'object') out.quoted_preview = quotedPreview;
+      if (quoted && typeof quoted === 'object') out.quoted = sanitizeLightObject(quoted);
+      if (quotedPreview && typeof quotedPreview === 'object') out.quoted_preview = sanitizeLightObject(quotedPreview);
 
       return out;
     });
@@ -970,11 +1235,11 @@ async function ensureMensagensCarregadas(conversationRef, opts = {}) {
 
     const finalHist = getHist(inst, finalConvKey) || [];
 
-    state.cacheHistoricos = {
-      ...(state.cacheHistoricos || {}),
-      [finalConvKey]: (window.cacheHistoricos || {})[finalConvKey],
-    };
+    // Não copiar histórico para o store por spread.
+    // O hist-cache já mantém um espelho limitado; espalhar aqui recriava objetos grandes na RAM.
+    state.cacheHistoricos = window.cacheHistoricos || state.cacheHistoricos || Object.create(null);
 
+    state.mensagensOffset = state.mensagensOffset || {};
     state.mensagensOffset[finalConvKey] = finalHist.length;
     persist();
 
@@ -1204,14 +1469,17 @@ function setHeaderTitleSafe(ref, cliente = {}) {
   const t = document.getElementById('chat-title');
   if (!t) return false;
 
-  t.textContent =
-    cliente.nome ||
-    cliente.nome_whatsapp ||
-    cliente.push_name ||
-    cliente.pushName ||
-    cliente.telefone ||
-    cliente.phone ||
-    '';
+  const title = resolveHeaderTitle(cliente, ref);
+
+  t.textContent = title;
+  t.title = title;
+  t.dataset.conversationKey = String(ref.key || '');
+  t.dataset.entityId = String(ref.entityId || '');
+  if (ref.instId) t.dataset.instanciaId = String(ref.instId);
+  else t.removeAttribute('data-instancia-id');
+
+  // Garante que o nome não fique invisível depois de abrir via busca/lista.
+  t.style.display = title ? '' : '';
 
   return true;
 }
@@ -1240,6 +1508,7 @@ let selecionarClienteSeq = 0;
 async function selecionarClienteObj(id, opts = {}) {
   const mySeq = ++selecionarClienteSeq;
   const forceReload = Boolean(opts?.forceReload || opts?.force || opts?.reload);
+  const searchJump = Boolean(opts?.searchJump || opts?.fromSearchResult || opts?.keepSearchPosition);
 
   const inputObj = id && typeof id === 'object' ? id : null;
   const rawInput =
@@ -1460,37 +1729,88 @@ async function selecionarClienteObj(id, opts = {}) {
     window.zcUpdateInstBadge?.();
   } catch {}
 
+  let hasCachedBeforeLoad = false;
+
   try {
     const cached = getHist(instFinal, convKey) || [];
-    if (cached.length && !forceReload) {
+    hasCachedBeforeLoad = cached.length > 0;
+
+    if (hasCachedBeforeLoad && !forceReload) {
       renderHistoricoDoCache(convKey);
       updateOperatorBannerForConversation(convKey);
+    } else {
+      showConversationLoading(
+        ref,
+        searchJump ? 'Carregando conversa e localizando mensagem…' : 'Carregando conversa…'
+      );
     }
-  } catch {}
+  } catch {
+    showConversationLoading(
+      ref,
+      searchJump ? 'Carregando conversa e localizando mensagem…' : 'Carregando conversa…'
+    );
+  }
 
-  try {
-    await ensureMensagensCarregadas(convKey, { force: forceReload });
+  const loadAndMaybeRender = async () => {
+    try {
+      if (!hasCachedBeforeLoad || forceReload) {
+        await nextPaint();
+      }
 
-    if (mySeq !== selecionarClienteSeq) return;
+      await ensureMensagensCarregadas(convKey, { force: forceReload });
 
-    const currentHistKey =
-      hist?.dataset?.conversationKey ||
-      hist?.dataset?.conversationId ||
-      hist?.dataset?.convKey ||
-      '';
+      if (mySeq !== selecionarClienteSeq) return false;
 
-    if (currentHistKey && currentHistKey !== convKey) {
-      console.warn('[selecionarClienteObj] resposta antiga ignorada', {
-        esperado: convKey,
-        atual: currentHistKey,
-      });
-      return;
+      const currentHistKey =
+        hist?.dataset?.conversationKey ||
+        hist?.dataset?.conversationId ||
+        hist?.dataset?.convKey ||
+        '';
+
+      if (currentHistKey && currentHistKey !== convKey) {
+        console.warn('[selecionarClienteObj] resposta antiga ignorada', {
+          esperado: convKey,
+          atual: currentHistKey,
+        });
+        return false;
+      }
+
+      clearConversationLoading(ref);
+
+      // v7: nunca deixa a conversa vazia.
+      // Na v6, quando a conversa era aberta por resultado de mensagem, o init pulava
+      // renderHistoricoDoCache enquanto o search.js tentava carregar a janela da mensagem.
+      // Se essa janela demorasse/falhasse, o cabeçalho abria mas o histórico ficava branco.
+      // Agora renderiza o cache normal quando ainda não há mensagens na tela. Se o search.js
+      // já tiver renderizado a janela exata, aí sim evitamos re-render para não mexer sozinho.
+      const searchJumpStillActive =
+        searchJump && Number(window.__ZC_SEARCH_JUMP_ACTIVE_UNTIL || window.__ZC_SUPPRESS_AUTO_SCROLL_UNTIL || 0) > Date.now();
+      const hasRenderedRows = !!hist?.querySelector?.('.msg-row, .bubble');
+
+      if (!searchJumpStillActive || !hasRenderedRows) {
+        renderHistoricoDoCache(convKey);
+      }
+
+      return true;
+    } catch (e) {
+      console.warn('[selecionarClienteObj] carregar mensagens falhou:', e?.message || e);
+
+      const hasAnyRenderedRows = !!hist?.querySelector?.('.msg-row, .bubble');
+      if (!hasAnyRenderedRows) {
+        showConversationLoadError(ref, c, 'Não foi possível carregar a conversa');
+      } else {
+        clearConversationLoading(ref);
+      }
+
+      return false;
     }
+  };
 
-    renderHistoricoDoCache(convKey);
-  } catch (e) {
-    console.warn('[selecionarClienteObj] carregar mensagens falhou:', e?.message || e);
-    return;
+  if (searchJump) {
+    loadAndMaybeRender();
+  } else {
+    const okLoad = await loadAndMaybeRender();
+    if (!okLoad) return;
   }
 
   if (!state.mensagensOffset || typeof state.mensagensOffset !== 'object') {
@@ -1620,7 +1940,7 @@ function bindRealtimeSeenGuard() {
         tipo === 'out' ||
         tipo === 'atendente';
 
-      if (!fromMe) {
+      if (!fromMe && canMarkSeenNow(false)) {
         scheduleMarkChatAsSeen(key, detail, { delay: 1400 });
       }
     } catch {}

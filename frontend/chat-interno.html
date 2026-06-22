@@ -1,98 +1,187 @@
 <!DOCTYPE html>
-<html lang="pt-BR" class="has-sidebar prepaint">
+<html lang="pt-BR" class="has-sidebar">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Chat Interno – ZapsChat</title>
 
-  <!-- CSS -->
-  <link rel="stylesheet" href="/frontend/css/chat-interno.css"/>
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("zapschat_theme") || localStorage.getItem("theme");
+        if (saved !== "dark" && saved !== "light") saved = "light";
+        localStorage.setItem("zapschat_theme", saved);
+        localStorage.setItem("theme", saved);
+        document.documentElement.classList.toggle("dark", saved === "dark");
+        document.documentElement.setAttribute("data-theme", saved);
+      } catch (e) {
+        document.documentElement.classList.remove("dark");
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    })();
+  </script>
 
-  <!-- Shell global (externos) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <link rel="stylesheet" href="/frontend/css/chat-interno.css?v=20260620-chat-fast"/>
+
   <script src="/frontend/js/app-base.js" defer></script>
   <script src="/frontend/js/auth.js" defer></script>
   <script src="/frontend/js/page-guard.js" defer></script>
-
-  <!-- Página (JS abaixo) -->
-  <script src="/frontend/js/pages/chat-interno.js" defer></script>
+  <script src="/frontend/js/pages/chat-interno.js?v=20260620-chat-fast" defer></script>
 </head>
 <body data-pane="list">
-  <!-- Sidebar -->
-  <aside id="sidebar"
-        data-src="/frontend/partials/sidebar.html"></aside>
+  <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
 
-  <main class="main" role="main" aria-label="Chat Interno">
-    <div class="section-title">
-      <h1><i class="fa fa-comments title-ico"></i> Chat Interno</h1>
-      <div class="top-total"><span id="totalConversas">—</span> conversas</div>
-    </div>
-
-    <section class="grid-chat" aria-label="Área do chat">
-      <!-- Lista -->
-      <aside class="box pane-list" aria-label="Lista de conversas">
-        <div class="list-head">
-          <div class="search" role="search">
-            <svg aria-hidden="true" viewBox="0 0 256 256" fill="currentColor">
-              <path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/>
-            </svg>
-            <input id="inpSearch" type="search" placeholder="Procurar conversa ou pessoa" aria-label="Procurar"/>
-          </div>
-
-          <!-- + -->
-          <button class="icon-btn" id="btnNewChannel" title="Nova conversa" aria-label="Nova conversa">
-            <svg viewBox="0 0 256 256" fill="currentColor">
-              <path d="M254,136a6,6,0,0,1-6,6H230v18a6,6,0,0,1-12,0V142H200a6,6,0,0,1,0-12h18V112a6,6,0,0,1,12,0v18h18A6,6,0,0,1,254,136Zm-57.41,60.14a6,6,0,1,1-9.18,7.72C166.9,179.45,138.69,166,108,166s-58.89,13.45-79.41,37.86a6,6,0,0,1-9.18-7.72C35.14,177.41,55,164.48,77,158.25a66,66,0,1,1,62,0C161,164.48,180.86,177.41,196.59,196.14ZM108,154a54,54,0,1,0-54-54A54.06,54.06,0,0,0,108,154Z"/>
-            </svg>
-          </button>
+  <main class="main chat-interno-page" role="main" aria-label="Chat Interno">
+    <section class="chat-shell" aria-label="Chat interno">
+      <aside class="workspace-rail" aria-label="Menu do chat interno">
+        <div class="rail-search" role="search">
+          <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+          <input id="inpSearch" type="search" placeholder="Search" aria-label="Procurar conversa ou pessoa"/>
         </div>
+
+
+        <nav class="rail-nav" aria-label="Seções">
+          <button type="button" class="rail-link active" id="navChats" data-view="chats"><i class="fa-regular fa-comments"></i><span>Chats</span><b id="totalConversas">—</b></button>
+          <button type="button" class="rail-link" id="navGroups" data-view="groups" title="Ver grupos"><i class="fa-solid fa-user-group"></i><span>Grupos</span><em>Novo</em></button>
+          <button type="button" class="rail-link" id="navMentions" data-view="mentions"><i class="fa-regular fa-at"></i><span>Menções</span></button>
+          <button type="button" class="rail-link" id="navContacts" data-view="contacts"><i class="fa-regular fa-address-book"></i><span>Contatos</span></button>
+        </nav>
+
+        <div class="rail-section">
+          <div class="rail-section-head">
+            <span>Favoritos</span>
+            <button type="button" id="btnNewChannel" class="mini-add" title="Nova conversa" aria-label="Nova conversa">
+              <i class="fa-solid fa-plus"></i>
+            </button>
+          </div>
+          <div id="rosterList" class="roster-list" aria-label="Colaboradores"></div>
+        </div>
+      </aside>
+
+      <aside class="conversation-pane" aria-label="Lista de conversas">
+        <header class="conversation-head">
+          <div>
+            <h1 id="conversationTitle">Chats</h1>
+            <small id="conversationSubtitle">Conversas da equipe</small>
+          </div>
+          <div class="conversation-actions">
+            <button type="button" class="create-group-btn" id="btnCreateGroup" title="Criar grupo" aria-label="Criar grupo">
+              <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+              <span>Criar grupo</span>
+            </button>
+            <button type="button" class="filter-btn" id="btnFilter" title="Filtrar" aria-label="Filtrar">
+              <i class="fa-solid fa-filter" aria-hidden="true"></i>
+              <span id="filterLabel">Filtrar</span>
+            </button>
+          </div>
+        </header>
 
         <ul class="list" role="listbox" aria-label="Conversas" id="listaConversas"></ul>
       </aside>
 
-      <!-- Chat -->
-      <section class="box pane-chat" aria-label="Conversa ativa">
+      <section class="chat-pane" aria-label="Conversa ativa">
         <header class="chat-head">
           <button id="btnBackList" class="icon-btn btn-back" aria-label="Voltar para lista">
-            <svg viewBox="0 0 256 256" fill="currentColor">
-              <path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/>
-            </svg>
+            <i class="fa-solid fa-arrow-left"></i>
           </button>
 
-          <div class="peer">
-            <div class="avatar" aria-hidden="true"></div>
+          <div class="peer" aria-label="Conversa selecionada">
+            <div class="avatar peer-avatar has-user-icon" id="peerAvatar" aria-hidden="true"><i class="fa-solid fa-user"></i></div>
             <div class="who">
               <div class="name" id="peerName">Selecionar conversa</div>
-              <div class="status" id="peerStatus">—</div>
+              <div class="status" id="peerStatus">Escolha uma conversa para começar</div>
             </div>
           </div>
 
-          <button class="icon-btn" id="btnKebabHeader" aria-haspopup="menu" aria-expanded="false" title="Mais opções">
-            <svg class="ico-closed" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
-              <path d="M222,128a6,6,0,0,1-6,6H112a6,6,0,0,1,0-12H216A6,6,0,0,1,222,128ZM112,70H216a6,6,0,0,0,0-12H112a6,6,0,0,0,0,12ZM216,186H40a6,6,0,0,0,0,12H216a6,6,0,0,0,0-12ZM72,142a6,6,0,0,0,4.24-10.24L40.49,96,76.24,60.24a6,6,0,0,0-8.48-8.48l-40,40a6,6,0,0,0,0,8.48l-40,40A6,6,0,0,0,72,142Z"/>
-            </svg>
-            <svg class="ico-open" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
-              <path d="M222,128a6,6,0,0,1-6,6H112a6,6,0,0,1,0-12H216A6,6,0,0,1,222,128ZM112,70H216a6,6,0,0,0,0-12H112a6,6,0,0,0,0,12ZM216,186H40a6,6,0,0,0,0,12H216a6,6,0,0,0,0-12ZM35.76,140.24a6,6,0,0,0,8.48,0l40-40a6,6,0,0,0,0-8.48l-40-40a6,6,0,0,0-8.48,8.48L71.51,96,35.76,131.76A6,6,0,0,0,35.76,140.24Z"/>
-            </svg>
-          </button>
+          <div class="head-actions" aria-label="Ações da conversa">
+            <button class="icon-btn" type="button" title="Perfil" id="btnInfoProfile" aria-label="Abrir perfil">
+              <i class="fa-regular fa-address-card"></i>
+            </button>
+            <button class="icon-btn" id="btnKebabHeader" aria-haspopup="menu" aria-expanded="false" title="Mais opções" aria-label="Mais opções">
+              <i class="fa-solid fa-ellipsis"></i>
+            </button>
+          </div>
         </header>
 
         <div class="msgs" id="msgsScroll" aria-live="polite">
-          <div class="empty" id="emptyState">Selecione uma conversa para começar.</div>
+          <div class="empty" id="emptyState">
+            <i class="fa-regular fa-comments" aria-hidden="true"></i>
+            <strong>Selecione uma conversa</strong>
+            <span>Escolha alguém na lista para iniciar o atendimento interno.</span>
+          </div>
         </div>
 
         <footer class="composer" aria-label="Enviar mensagem">
-          <button class="attach" id="btnAttach" title="Anexar" aria-label="Anexar">
-            <svg viewBox="0 0 256 256" fill="currentColor"><path d="M205.66,122.34l-82,82a54,54,0,0,1-76.36-76.36l96-96a38,38,0,1,1,53.74,53.74l-96,96a22,22,0,0,1-31.12-31.12l82-82a6,6,0,0,1,8.48,8.48l-82,82a34,34,0,0,0,48.08,48.08l96-96a26,26,0,0,0-36.76-36.76l-96,96a10,10,0,1,0,14.14,14.14l82-82a6,6,0,0,1,8.48,8.48Z"/></svg>
-          </button>
-          <div class="input-wrap">
+          <div class="composer-box">
             <label class="sr-only" for="txtMsg">Mensagem</label>
             <textarea id="txtMsg" placeholder="Escreva uma mensagem…" rows="1"></textarea>
+            <div class="composer-actions">
+              <button type="button" class="compose-icon" id="btnMention" title="Mencionar"><i class="fa-solid fa-at"></i></button>
+              <button type="button" class="compose-icon" title="Emoji"><i class="fa-regular fa-face-smile"></i></button>
+              <button type="button" class="compose-icon" id="btnAttach" title="Anexar" aria-label="Anexar"><i class="fa-solid fa-paperclip"></i></button>
+              <button type="button" class="compose-icon" title="Áudio"><i class="fa-solid fa-microphone"></i></button>
+              <button type="button" class="compose-icon" title="Câmera"><i class="fa-regular fa-image"></i></button>
+            </div>
           </div>
+
           <button class="send" id="btnSend" title="Enviar" aria-label="Enviar">
-            <svg viewBox="0 0 256 256" fill="currentColor"><path d="M230.91,123.55l-176-96A14,14,0,0,0,34,39.41V120a6,6,0,0,0,6,6h92a6,6,0,0,1,0,12H40a6,6,0,0,0-6,6v80.59A14,14,0,0,0,54.91,228l176-96a14,14,0,0,0,0-24.89Z"/></svg>
+            <i class="fa-solid fa-paper-plane"></i>
           </button>
         </footer>
       </section>
+
+      <aside class="profile-pane" id="profilePanel" aria-label="Perfil">
+        <header class="profile-head">
+          <h2>Perfil</h2>
+          <button type="button" class="profile-close" id="btnCloseProfile" aria-label="Fechar perfil">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </header>
+
+        <div class="profile-main">
+          <div class="profile-avatar avatar has-user-icon" id="profileAvatar" aria-hidden="true"><i class="fa-solid fa-user"></i></div>
+          <strong id="profileName">Nenhuma conversa</strong>
+          <small id="profileRole">Selecione um colaborador</small>
+
+          <div class="profile-actions">
+            <button type="button" title="Mensagem"><i class="fa-regular fa-comment-dots"></i></button>
+            <button type="button" title="Telefone"><i class="fa-solid fa-phone"></i></button>
+            <button type="button" title="E-mail"><i class="fa-regular fa-envelope"></i></button>
+            <button type="button" title="Mais"><i class="fa-solid fa-ellipsis"></i></button>
+          </div>
+        </div>
+
+        <div class="profile-details">
+          <div class="detail-row">
+            <span><i class="fa-solid fa-phone"></i> Phone</span>
+            <strong id="profilePhone">—</strong>
+          </div>
+          <div class="detail-row">
+            <span><i class="fa-regular fa-envelope"></i> Email</span>
+            <strong id="profileEmail">—</strong>
+          </div>
+          <div class="detail-row">
+            <span><i class="fa-regular fa-user"></i> Full name</span>
+            <strong id="profileFullName">—</strong>
+          </div>
+          <div class="detail-row">
+            <span><i class="fa-solid fa-location-dot"></i> Setor</span>
+            <strong id="profileLocation">—</strong>
+          </div>
+          <div class="detail-row">
+            <span><i class="fa-regular fa-calendar"></i> Membro desde</span>
+            <strong id="profileSince">—</strong>
+          </div>
+          <div class="detail-row">
+            <span><i class="fa-solid fa-globe"></i> Website</span>
+            <strong id="profileWebsite">—</strong>
+          </div>
+        </div>
+      </aside>
     </section>
   </main>
 </body>

@@ -3,7 +3,31 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Dashboard – ZapsChats</title>
+  <title>Dashboard – ZapsChat</title>
+
+  <!-- Fonte padrão do painel: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Tema nativo do ZapsChat: claro por padrão; escuro cinza se o usuário escolher -->
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("zapschat_theme");
+        if (saved !== "dark" && saved !== "light") {
+          saved = "light";
+          localStorage.setItem("zapschat_theme", "light");
+        }
+        localStorage.setItem("theme", saved);
+        document.documentElement.classList.toggle("dark", saved === "dark");
+        document.documentElement.setAttribute("data-theme", saved);
+      } catch (e) {
+        document.documentElement.classList.remove("dark");
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    })();
+  </script>
 
   <!-- Shell global (injeta head-base + loader + tema + sidebar) -->
   <script src="/frontend/js/app-base.js" defer></script>
@@ -28,87 +52,157 @@
 </head>
 <body>
   <!-- Sidebar (carregado via app-base.js) -->
-  <aside id="sidebar"
-        data-src="/frontend/partials/sidebar.html"></aside>
+  <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
 
-  <main class="main">
-    <div class="section-title">
-      <h1>
-        <span class="title-ico is-active" aria-hidden="true">
-          <svg class="title-ico-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-            <path d="M224,98H182V56a6,6,0,0,0-6-6H54V40a6,6,0,0,0-12,0V216a6,6,0,0,0,12,0V206h90a6,6,0,0,0,6-6V158h74a6,6,0,0,0,6-6V104A6,6,0,0,0,224,98ZM170,62V98H54V62ZM138,194H54V158h84Zm80-48H54V110H218Z"/>
-          </svg>
-        </span>
-        Dashboard
-        <!-- Dropdown de instâncias -->
+  <main class="main dashboard-analytics">
+    <section class="dash-hero" aria-label="Cabeçalho do dashboard">
+      <div class="dash-hero-copy">
+        <span class="dash-eyebrow">ZapsChat Analytics</span>
+        <h1>
+          <span class="title-ico is-active" aria-hidden="true">
+            <svg class="title-ico-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M224,98H182V56a6,6,0,0,0-6-6H54V40a6,6,0,0,0-12,0V216a6,6,0,0,0,12,0V206h90a6,6,0,0,0,6-6V158h74a6,6,0,0,0,6-6V104A6,6,0,0,0,224,98ZM170,62V98H54V62ZM138,194H54V158h84Zm80-48H54V110H218Z"/>
+            </svg>
+          </span>
+          Dashboard
+        </h1>
+        <p>Visão clara de atendimentos, mensagens, clientes online e conexão do WhatsApp.</p>
+      </div>
+
+      <div class="dash-hero-actions">
+        <div class="top-total">
+          <span id="qtdAtendimentos">--</span>
+          <small>atendimentos</small>
+        </div>
+
         <button id="instMenuBtn" type="button" role="button" class="inst-trigger"
                 aria-haspopup="listbox" aria-expanded="false" aria-controls="inst-menu">
           <span id="instMenuLabel">Todas as instâncias</span>
           <span class="chev">▾</span>
         </button>
-      </h1>
 
-      <div class="top-total"><span id="qtdAtendimentos">--</span> atendimentos</div>
+        <div class="filter" aria-label="Filtros do dashboard">
+          <label for="filtroData" class="sr-only">Filtrar por dia</label>
+          <input type="text" id="filtroData" placeholder="dd/mm/aaaa" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Selecionar data"/>
+
+          <div class="quick" aria-label="Ações rápidas de data">
+            <button type="button" id="btnHoje" class="btn-ghost">Hoje</button>
+            <button type="button" id="btnOntem" class="btn-ghost">Ontem</button>
+            <button type="button" id="btnLimpar" class="btn-ghost">Limpar</button>
+          </div>
+
+          <span class="count"><span id="qtdAtendimentos_legacy">--</span> atendimentos</span>
+        </div>
+      </div>
 
       <div id="inst-menu" class="inst-menu" role="listbox" aria-hidden="true" aria-label="Selecionar instância">
         <div class="head">WhatsApps</div>
         <ul id="instMenuList"><!-- itens via JS --></ul>
       </div>
-    </div>
-
-    <section class="filter" aria-label="Filtros do dashboard">
-      <label for="filtroData">Filtrar por dia:</label>
-      <input type="text" id="filtroData" placeholder="dd/mm/aaaa" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Selecionar data"/>
-
-      <!-- Ações rápidas -->
-      <div class="quick">
-        <button type="button" id="btnHoje"   class="btn-ghost">Hoje</button>
-        <button type="button" id="btnOntem"  class="btn-ghost">Ontem</button>
-        <button type="button" id="btnLimpar" class="btn-ghost">Limpar</button>
-      </div>
-
-      <span class="count"><span id="qtdAtendimentos_legacy">--</span> atendimentos</span>
     </section>
 
-    <section class="cards" aria-label="Indicadores principais">
-      <div class="box"><div class="muted">Mensagens Hoje</div><div class="stat card-mensagens">0</div></div>
-      <div class="box"><div class="muted">Atendimentos em Aberto</div><div class="stat card-abertos">0</div></div>
-      <div class="box"><div class="muted">Clientes Online</div><div class="stat card-clientes">0</div></div>
+    <section class="analytics-panel" aria-label="Indicadores principais">
+      <div class="panel-title-row">
+        <div>
+          <h2>Atendimento Analytics</h2>
+          <p>Resumo operacional do período selecionado.</p>
+        </div>
+        <span class="save-report">LIVE REPORT</span>
+      </div>
 
-      <div class="box card-wpp-status">
-        <div class="muted">Status WhatsApp</div>
-        <div style="display:flex;align-items:center;gap:.5rem;font-weight:600">
-          <span class="status-dot" aria-hidden="true"></span>
-          <span class="status-text">Checando…</span>
+      <div class="cards metric-grid">
+        <div class="box metric-card">
+          <div class="metric-head">
+            <span class="muted">Mensagens Hoje</span>
+            <span class="metric-chip good">ativo</span>
+          </div>
+          <div class="stat card-mensagens">0</div>
+          <small class="metric-sub">Total de mensagens processadas</small>
+        </div>
+
+        <div class="box metric-card">
+          <div class="metric-head">
+            <span class="muted">Atendimentos em Aberto</span>
+            <span class="metric-chip warn">fila</span>
+          </div>
+          <div class="stat card-abertos">0</div>
+          <small class="metric-sub">Conversas aguardando resolução</small>
+        </div>
+
+        <div class="box metric-card">
+          <div class="metric-head">
+            <span class="muted">Clientes Online</span>
+            <span class="metric-chip good">agora</span>
+          </div>
+          <div class="stat card-clientes">0</div>
+          <small class="metric-sub">Clientes ativos nos últimos minutos</small>
+        </div>
+
+        <div class="box metric-card card-wpp-status">
+          <div class="metric-head">
+            <span class="muted">Status WhatsApp</span>
+            <span class="status-dot" aria-hidden="true"></span>
+          </div>
+          <div class="status-line">
+            <span class="status-text">Checando…</span>
+          </div>
+          <small class="metric-sub">Conexão da instância selecionada</small>
         </div>
       </div>
     </section>
 
-    <section class="charts" aria-label="Gráficos">
-      <div class="box">
-        <h3>Distribuição de Atendimentos</h3>
+    <section class="charts analytics-charts" aria-label="Gráficos">
+      <div class="box chart-card">
+        <div class="chart-title">
+          <div>
+            <h3>Fluxo de Atendimentos</h3>
+            <p>Distribuição por etapa/status.</p>
+          </div>
+          <div class="chart-legend">
+            <span><i></i> Volume</span>
+          </div>
+        </div>
         <div class="chart-h"><canvas id="pizzaAtendimento"></canvas></div>
       </div>
-      <div class="box">
-        <h3>Funil de Conversas</h3>
+
+      <div class="box chart-card">
+        <div class="chart-title">
+          <div>
+            <h3>Performance do Funil</h3>
+            <p>Conversas recebidas, qualificadas e resolvidas.</p>
+          </div>
+          <div class="chart-legend alt">
+            <span><i></i> Conversas</span>
+          </div>
+        </div>
         <div class="chart-h"><canvas id="funilAtendimento"></canvas></div>
       </div>
     </section>
 
-    <section class="last" aria-label="Últimos atendimentos">
-      <div class="box" id="lastBox">
-        <h3>Últimos Atendimentos</h3>
+    <section class="last analytics-table-section" aria-label="Últimos atendimentos">
+      <div class="box table-card" id="lastBox">
+        <div class="table-card-head">
+          <div>
+            <h3>Últimos Atendimentos</h3>
+            <p>Movimentações mais recentes do período.</p>
+          </div>
+        </div>
 
         <div class="table-wrap">
           <table id="tabelaAtendimentos">
             <thead>
-              <tr><th>Cliente</th><th>Telefone</th><th>Status</th><th>Horário</th><th>Data</th></tr>
+              <tr>
+                <th>Cliente</th>
+                <th>Telefone</th>
+                <th>Status</th>
+                <th>Horário</th>
+                <th>Data</th>
+              </tr>
             </thead>
             <tbody><!-- preenchido via JS --></tbody>
           </table>
         </div>
 
-        <!-- Estado vazio amigável -->
         <div id="lastEmpty" class="empty-list" aria-live="polite" hidden>
           <i class="fa-solid fa-inbox" aria-hidden="true"></i>
           <div>
@@ -243,7 +337,6 @@
         listEl.innerHTML = '';
         listEl.appendChild(itemTpl('Todas as instâncias','', false));
 
-        // >>> usa guardFetch/authFetch para não vazar dados em anônimo
         const F = (window.ZAuth?.guardFetch || window.ZAuth?.authFetch || fetch);
 
         let items = [];

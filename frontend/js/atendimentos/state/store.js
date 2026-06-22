@@ -49,6 +49,11 @@ const MAX_MSGS_PER_CONVERSA = Number(window.ZC_STORE_MAX_MSGS_PER_CONVERSA || 18
 */
 const STORE_SAVE_HISTORY_TO_LS = false;
 
+// Se caches antigos/listas antigas estiverem gigantes, apaga antes de fazer JSON.parse.
+// Isso evita o Chrome subir para vários GB de RAM só abrindo o ZapsChat.
+const STORE_MAX_BOOT_JSON_BYTES = Number(window.ZC_STORE_MAX_BOOT_JSON_BYTES || 900000);
+const STORE_MAX_ANY_ZAPS_STORAGE_BYTES = Number(window.ZC_STORE_MAX_ANY_ZAPS_STORAGE_BYTES || 1800000);
+
 /* =========================
    DB_MODE flags
    ========================= */
@@ -73,6 +78,23 @@ function getLS(key, fallback = null) {
   try {
     const v = localStorage.getItem(key);
     return v == null ? fallback : v;
+  } catch {
+    return fallback;
+  }
+}
+
+function getLSBounded(key, fallback = null, limit = STORE_MAX_BOOT_JSON_BYTES) {
+  try {
+    const v = localStorage.getItem(key);
+    if (v == null) return fallback;
+
+    if (String(v).length > limit) {
+      localStorage.removeItem(key);
+      try { console.warn('[store] cache grande removido antes do parse:', key, String(v).length); } catch {}
+      return fallback;
+    }
+
+    return v;
   } catch {
     return fallback;
   }
@@ -198,6 +220,42 @@ function cleanupHistoryStorageFromOldStore() {
         k.includes(':cursor:')
       ) {
         localStorage.removeItem(k);
+      }
+    }
+  } catch {}
+}
+
+function cleanupHeavyStorageBeforeHydrate() {
+  try {
+    for (const k of localStorageKeys()) {
+      let raw = null;
+      try { raw = localStorage.getItem(k); } catch { raw = null; }
+      const len = raw ? String(raw).length : 0;
+      const low = String(k).toLowerCase();
+
+      const isHistory =
+        k.startsWith('cacheHistoricos:') ||
+        k.startsWith(`zc:hist:v2:${EID}`) ||
+        low.includes(':hist:') ||
+        low.includes(':cursor:') ||
+        low.includes('cachehistoricos');
+
+      const isHugeList =
+        (k === LS_CLIENTES_LEGACY || k === LS_CONVS_V2) &&
+        len > STORE_MAX_BOOT_JSON_BYTES;
+
+      const isHugeZapsCache =
+        len > STORE_MAX_ANY_ZAPS_STORAGE_BYTES &&
+        (
+          k.startsWith('zc:') ||
+          k.startsWith('atend:') ||
+          k.startsWith('clientesCache:') ||
+          low.includes('historico') ||
+          low.includes('conversa')
+        );
+
+      if (isHistory || isHugeList || isHugeZapsCache) {
+        try { localStorage.removeItem(k); } catch {}
       }
     }
   } catch {}
@@ -614,10 +672,14 @@ function normalizeConversa(item) {
   }
 
   const ref = parseConversationRef(conversation_key, {
-    ...src,
     kind,
     entity_id: entityId,
     instancia_id: inst,
+    conversation_key,
+    conversation_id: conversation_key,
+    id: src?.id ?? null,
+    cliente_id: src?.cliente_id ?? null,
+    grupo_id: src?.grupo_id ?? null,
   });
 
   const finalKey = ref.key || conversation_key || null;
@@ -633,13 +695,14 @@ function normalizeConversa(item) {
     src?.last_message_at ??
     null;
 
-  const preview =
+  const preview = String(
     src?.ultima_texto ??
     src?.ultima_mensagem ??
     src?.preview ??
     src?.last_text ??
     src?.ultima ??
-    '';
+    ''
+  );
 
   const is_group =
     finalKind === 'g' ||
@@ -656,10 +719,22 @@ function normalizeConversa(item) {
       : (idKey(src?.grupo_id) ?? idKey(src?.group_id) ?? null);
 
   const unread = unreadFrom(src);
+  const statusValue = src?.status ?? src?.statusatendimento ?? src?.status_atendimento ?? null;
+
+  let avatarUrl =
+    src?.avatar_url ??
+    src?.foto_url ??
+    src?.foto ??
+    src?.avatar ??
+    src?.profile_pic_url ??
+    null;
+
+  if (avatarUrl != null) {
+    avatarUrl = String(avatarUrl || '').trim();
+    if (/^data:/i.test(avatarUrl) || avatarUrl.length > 1500) avatarUrl = null;
+  }
 
   return {
-    ...src,
-
     id: finalKey ?? idKey(src?.id) ?? null,
     conversation_key: finalKey,
     conversation_id: finalKey,
@@ -681,27 +756,42 @@ function normalizeConversa(item) {
     jid: src?.jid ?? src?.remoteJid ?? null,
     remoteJid: src?.remoteJid ?? src?.jid ?? null,
 
-    avatar_url:
-      src?.avatar_url ??
-      src?.foto_url ??
-      src?.foto ??
-      src?.avatar ??
-      src?.profile_pic_url ??
-      null,
+    avatar_url: avatarUrl,
 
     ultima_msg_id: src?.ultima_msg_id ?? src?.last_msg_id ?? null,
-    ultima_mensagem: String(preview || ''),
+    ultima_mensagem: preview,
+    preview,
+    last_message: preview,
+    last_msg: preview,
     hora: lastTs,
     last_ts: src?.last_ts ?? lastTs ?? null,
     last_tipo: src?.ultima_tipo ?? src?.last_tipo ?? src?.tipo ?? null,
     last_ack: src?.ultima_ack ?? src?.last_ack ?? src?.ack ?? null,
 
     novas: unread,
+    unread: unread,
     unread_count: unread,
+    nao_lidas: unread,
 
     instancia_id: finalInst,
     instancia: finalInst,
-    instance_name: src?.instance_name ?? src?.instance ?? finalInst ?? null,
+    instance_name: src?.instance_name ?? src?.instancia_nome ?? src?.inst_name ?? src?.instance ?? finalInst ?? null,
+
+    status: statusValue,
+    statusatendimento: statusValue,
+
+    operador_id: idKey(src?.operador_id ?? src?.owner_id ?? src?.responsavel_id ?? src?.assigned_to ?? null),
+    operador_nome: src?.operador_nome ?? src?.owner_name ?? src?.responsavel_nome ?? src?.assigned_name ?? null,
+    departamento_id: idKey(src?.departamento_id ?? src?.depto_id ?? src?.setor_id ?? null),
+
+    fila_id: idKey(src?.fila_id ?? src?.queue_id ?? null),
+    fila_nome: src?.fila_nome ?? src?.queue_name ?? null,
+    fila_prioridade: src?.fila_prioridade ?? src?.queue_priority ?? null,
+    fila_sla_minutos: src?.fila_sla_minutos ?? src?.queue_sla_minutes ?? null,
+    fila_cor: src?.fila_cor ?? src?.queue_color ?? null,
+    fila_ativa: Boolean(src?.fila_ativa ?? src?.queue_active ?? false),
+    fila_exigir_aceite: Boolean(src?.fila_exigir_aceite ?? src?.exigir_aceite ?? src?.aceite_obrigatorio ?? false),
+    aguardando_aceite: Boolean(src?.aguardando_aceite ?? src?.waiting_accept ?? false),
 
     pinned: Boolean(src?.pinned || src?.fixado || src?.pin || false),
     is_group,
@@ -765,9 +855,11 @@ function compactMsgs(msgs) {
 /* =========================
    Estado inicial
    ========================= */
-const _legacyClientes = safeJsonParse(getLS(LS_CLIENTES_LEGACY, '[]'), []);
-const _v2Convs = safeJsonParse(getLS(LS_CONVS_V2, '{}'), {});
-const _meta = safeJsonParse(getLS(LS_META, '{"ver":3}'), { ver: 3 });
+cleanupHeavyStorageBeforeHydrate();
+
+const _legacyClientes = safeJsonParse(getLSBounded(LS_CLIENTES_LEGACY, '[]'), []);
+const _v2Convs = safeJsonParse(getLSBounded(LS_CONVS_V2, '{}'), {});
+const _meta = safeJsonParse(getLSBounded(LS_META, '{"ver":3}', 120000), { ver: 3 });
 
 /*
   IMPORTANTE:
@@ -873,7 +965,11 @@ export function persist() {
 
     setLS(
       LS_CLIENTES_LEGACY,
-      JSON.stringify(Array.isArray(state.clientesCache) ? compactConversas(state.clientesCache) : [])
+      JSON.stringify(
+        Array.isArray(state.clientesCache)
+          ? compactConversas(state.clientesCache.map(normalizeConversa))
+          : []
+      )
     );
 
     /*

@@ -822,7 +822,10 @@ function getActiveInstKey() {
 }
 
 function syncActiveConvs(list, nextCursor = null) {
-  const items = Array.isArray(list) ? list.slice() : [];
+  // Mantém somente o formato leve/canônico. Nunca guardar payload bruto do backend.
+  const items = dedupeConversas(
+    normalizeAndFilterConversas(Array.isArray(list) ? list : [], 'syncActiveConvs')
+  );
   const instKeyNow = getActiveInstKey();
 
   state.convsByInst = state.convsByInst || {};
@@ -851,6 +854,11 @@ function cleanAvatarUrl(value) {
   const s = String(value || '').trim();
   if (!s) return '';
   if (/^(null|undefined|about:blank)$/i.test(s)) return '';
+
+  // Evita avatar em base64/dataURL dentro da lista. Isso explode RAM e localStorage.
+  if (/^data:/i.test(s)) return '';
+  if (s.length > 1500) return '';
+
   return s;
 }
 
@@ -1364,8 +1372,6 @@ export function normalizeCliente(c) {
   const filaState = normalizeFilaState(c);
 
   return {
-    ...c,
-
     id: conversation_key ?? idKey(c.id) ?? null,
     conversation_key,
     conversation_id: conversation_key,
@@ -1980,7 +1986,7 @@ function scheduleCarregarClientes(opts = {}, delay = LIST_DEBOUNCE_MS) {
   }, Math.max(80, Number(delay) || LIST_DEBOUNCE_MS));
 }
 
-export async function carregarClientes({ force = false, reason = '' } = {}) {
+export async function carregarClientes({ force = false, reason = '', noLoading = false } = {}) {
   const loadKey = currentConversasLoadKey();
   const now = Date.now();
   const hasCache = Array.isArray(state.clientesCache) && state.clientesCache.length > 0;
@@ -1988,7 +1994,7 @@ export async function carregarClientes({ force = false, reason = '' } = {}) {
   const elapsed = now - __lastConversasFetchAt;
 
   if (__loadingConversasPromise) {
-    if (!hasCache) renderListaLoading(reason || 'in-flight');
+    if (!hasCache && !noLoading) renderListaLoading(reason || 'in-flight');
     return __loadingConversasPromise;
   }
 
@@ -2007,7 +2013,7 @@ export async function carregarClientes({ force = false, reason = '' } = {}) {
     return state.clientesCache;
   }
 
-  if (!hasCache) {
+  if (!hasCache && !noLoading) {
     renderListaLoading(reason || 'initial-load');
   }
 
@@ -2274,7 +2280,23 @@ function wireListaClicks(ul) {
     const id = String(item.dataset.id || '');
     if (!id) return;
 
-    window.selecionarClienteObj?.(id);
+    // Envia também os dados visíveis da linha.
+    // Antes passava só a conversation_key; se o cache não tinha nome/telefone,
+    // o cabeçalho abria apenas com avatar + badge do WhatsApp.
+    window.selecionarClienteObj?.({
+      id,
+      conversation_key: String(item.dataset.conversationKey || id),
+      conversation_id: String(item.dataset.conversationKey || id),
+      kind: String(item.dataset.kind || ''),
+      entity_id: String(item.dataset.entityId || ''),
+      cliente_id: String(item.dataset.entityId || '').replace(/\D+/g, '') || undefined,
+      instancia_id: String(item.dataset.instanciaId || ''),
+      nome: String(item.dataset.nome || item.querySelector('.chat-name')?.textContent || '').trim(),
+      nome_whatsapp: String(item.dataset.nome || item.querySelector('.chat-name')?.textContent || '').trim(),
+      push_name: String(item.dataset.nome || item.querySelector('.chat-name')?.textContent || '').trim(),
+      telefone: String(item.dataset.telefone || ''),
+      avatar_url: String(item.dataset.avatarUrl || ''),
+    });
   });
 }
 
@@ -2439,6 +2461,8 @@ export function renderListaClientes(data) {
           data-kind="${escapeHtml(kind)}"
           data-entity-id="${escapeHtml(String(entityId))}"
           data-instancia-id="${instAttr}"
+          data-nome="${escapeHtml(nome || '')}"
+          data-avatar-url="${escapeHtml(avatarUrl || '')}"
           data-is-group="${grpAttr}"
           data-jid="${jidAttr}"
           data-telefone="${escapeHtml(String(c.telefone || ''))}"

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func
+from sqlalchemy import or_, func, text
 from sqlalchemy.exc import ProgrammingError
 
 from backend.database import get_db
@@ -29,6 +29,11 @@ from backend.security.atendimento_acl import (
     resolve_acl_context,
     assert_instancia_allowed,
     assert_cliente_access,
+)
+
+from backend.routers.atendimento_conversas.query_helpers import (
+    _query_clientes_ultima_por_conversa,
+    _build_cliente_payload_from_row,
 )
 
 router = APIRouter(tags=["Atendimento – Perfil / Evolution & Busca/Arquivo"])
@@ -2539,8 +2544,86 @@ def cliente_put(
 
 
 # =========================================================
-# Busca global
+# Busca global rápida
 # =========================================================
+def _conversation_key_cliente(cliente_id: int | None, instancia_id: int | None) -> str | None:
+    if not cliente_id or not instancia_id:
+        return None
+    return f"c:{int(cliente_id)}:{int(instancia_id)}"
+
+
+def _digits_only(v: str | None) -> str:
+    return re.sub(r"\D+", "", str(v or ""))
+
+
+def _row_cliente_payload(
+    db: Session,
+    *,
+    cli,
+    empresa_id_eff: int,
+    filtros_inst: list,
+    identity,
+    acl_cache: dict[int, bool],
+) -> Optional[Dict[str, Any]]:
+    """Monta o card de contato sem varrer a tabela inteira de mensagens."""
+    m = models.Mensagem
+
+    last_msg = (
+        db.query(m.conteudo, m.tipo, m.ack, m.timestamp, m.instancia_id)
+        .filter(m.empresa_id == empresa_id_eff, m.cliente_id == int(cli.id), *filtros_inst)
+        .order_by(m.id.desc())
+        .first()
+    )
+
+    last_txt = last_msg[0] if last_msg else ""
+    last_tipo = last_msg[1] if last_msg else None
+    last_ack = last_msg[2] if last_msg else 0
+    last_ts = last_msg[3] if last_msg else None
+    last_instancia_id = _to_int(last_msg[4] if last_msg else getattr(cli, "instancia_id", None))
+
+    inst_final = _to_int(getattr(cli, "instancia_id", None)) or last_instancia_id
+    if not inst_final:
+        return None
+
+    if not _cliente_acl_ok(
+        db,
+        identity=identity,
+        empresa_id=empresa_id_eff,
+        cliente_id=int(cli.id),
+        instancia_id=inst_final,
+        cache=acl_cache,
+    ):
+        return None
+
+    nome = (getattr(cli, "nome_whatsapp", None) or getattr(cli, "nome", None) or "").strip()
+    tel = (getattr(cli, "telefone", None) or "").strip()
+    raw_avatar = (getattr(cli, "avatar_url", None) or "").strip()
+
+    telefone_db_norm, telefone_send_norm = _normalize_lookup_number(tel)
+    telefone_fmt = formatar_telefone_br(telefone_send_norm) if telefone_send_norm else tel
+    ts_iso = last_ts.isoformat() if last_ts else None
+
+    return {
+        "id": int(cli.id),
+        "cliente_id": int(cli.id),
+        "instancia_id": int(inst_final),
+        "conversation_key": _conversation_key_cliente(int(cli.id), int(inst_final)),
+        "nome": nome or telefone_fmt,
+        "push_name": nome or None,
+        "telefone": tel,
+        "telefone_norm": telefone_db_norm,
+        "telefone_e164": telefone_send_norm,
+        "telefone_fmt": telefone_fmt,
+        "avatar_url": _avatar_proxy_url(int(cli.id)) if raw_avatar else None,
+        "avatar_remote_url": raw_avatar or None,
+        "ultima_mensagem": (last_txt or "").strip(),
+        "hora": ts_iso,
+        "last_ts": ts_iso,
+        "last_tipo": last_tipo,
+        "last_ack": int(last_ack or 0) if last_tipo == "saida" else None,
+    }
+
+
 @router.get("/atendimento/search")
 def atendimento_search(
     empresa_id: int = Query(...),
@@ -2548,19 +2631,36 @@ def atendimento_search(
     limit: int = Query(50, ge=1, le=200),
     instancia_id: int | None = Query(None),
     instance: str | None = Query(None),
+    deep: bool = Query(False, description="Quando true, pesquisa o histórico completo de mensagens."),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
+    """
+    Busca global da tela de atendimento.
+
+    v8: volta a usar a mesma base de conversas visíveis da lista lateral
+    (_query_clientes_ultima_por_conversa). Isso evita o bug de dar
+    "Nenhum resultado" quando Cliente.instancia_id está nulo/desatualizado
+    ou quando o filtro de instância/departamento é diferente do usado na lista.
+    """
     ensure_perm(identity, "atendimento.ver")
 
     empresa_id_eff = assert_same_company(identity, empresa_id)
 
-    qn = _normalize_text(q)
-    if not qn:
+    q_raw = (q or "").strip()
+    qn = _normalize_text(q_raw)
+    q_digits = _digits_only(q_raw)
+
+    if not qn and not q_digits:
+        return {"contatos": [], "mensagens": []}
+
+    # 1 caractere costuma gerar ruído e consultas ruins.
+    if len(qn) < 2 and len(q_digits) < 2:
         return {"contatos": [], "mensagens": []}
 
     acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
-    allowed = acl_ctx["allowed_instancias"]
+    allowed_instancias = acl_ctx["allowed_instancias"]
+    allowed_departamentos = acl_ctx.get("allowed_departamentos")
 
     resolved_inst_id, _resolved_inst_name = _resolve_instancia_id(
         db,
@@ -2573,143 +2673,421 @@ def atendimento_search(
         raise HTTPException(404, "Instância não encontrada para a empresa.")
 
     if resolved_inst_id is not None:
-        assert_instancia_allowed(allowed_instancias=allowed, instancia_id=resolved_inst_id)
+        assert_instancia_allowed(allowed_instancias=allowed_instancias, instancia_id=resolved_inst_id)
 
-    m = models.Mensagem
+    if allowed_instancias is not None and not allowed_instancias:
+        return {"contatos": [], "mensagens": []}
+
+    M = models.Mensagem
+    C = models.Cliente
+
+    like = f"%{q_raw}%"
+    like_digits = f"%{q_digits}%" if q_digits else None
+
+    contatos: List[Dict[str, Any]] = []
+    mensagens: List[Dict[str, Any]] = []
+    seen_contact_keys: set[str] = set()
+    seen_msg_ids: set[str] = set()
     acl_cache: dict[int, bool] = {}
 
-    filtros_inst = []
-
-    if resolved_inst_id is not None:
-        filtros_inst.append(m.instancia_id == int(resolved_inst_id))
-    else:
-        if allowed is not None:
-            if not allowed:
-                return {"contatos": [], "mensagens": []}
-            filtros_inst.append(m.instancia_id.in_([int(x) for x in allowed]))
-
-    sub_last = (
-        db.query(
-            m.cliente_id.label("cid"),
-            func.max(m.id).label("last_msg_id"),
+    def _norm_payload_key(payload: Dict[str, Any]) -> str:
+        return str(
+            payload.get("conversation_key")
+            or payload.get("conversation_id")
+            or _conversation_key_cliente(payload.get("cliente_id"), payload.get("instancia_id"))
+            or ""
         )
-        .filter(m.empresa_id == empresa_id_eff, *filtros_inst)
-        .group_by(m.cliente_id)
-        .subquery()
-    )
 
-    rows = (
-        db.query(
-            models.Cliente,
-            m.conteudo,
-            m.tipo,
-            m.ack,
-            m.timestamp,
-            m.instancia_id,
-        )
-        .join(sub_last, sub_last.c.cid == models.Cliente.id)
-        .join(m, m.id == sub_last.c.last_msg_id)
-        .filter(models.Cliente.empresa_id == empresa_id_eff)
-        .order_by(m.timestamp.desc())
-        .limit(400)
-        .all()
-    )
+    def _payload_matches_contact(payload: Dict[str, Any]) -> bool:
+        txt = " ".join([
+            str(payload.get("nome") or ""),
+            str(payload.get("nome_whatsapp") or ""),
+            str(payload.get("push_name") or ""),
+            str(payload.get("telefone") or ""),
+            str(payload.get("telefone_fmt") or ""),
+        ])
+        if qn and qn in _normalize_text(txt):
+            return True
+        if q_digits and q_digits in _digits_only(txt):
+            return True
+        return False
 
-    contatos: List[Dict] = []
+    def _add_contato(payload: Dict[str, Any]) -> None:
+        key = _norm_payload_key(payload)
+        if not key or key in seen_contact_keys:
+            return
+        seen_contact_keys.add(key)
+        contatos.append(payload)
 
-    for cli, last_txt, last_tipo, last_ack, last_ts, last_instancia_id in rows:
-        if not _cliente_acl_ok(
-            db,
-            identity=identity,
-            empresa_id=empresa_id_eff,
-            cliente_id=int(cli.id),
-            instancia_id=_to_int(last_instancia_id),
-            cache=acl_cache,
-        ):
-            continue
+    def _add_msg_result(
+        *,
+        mid: int | None,
+        wa_msg_id: str | None,
+        cid: int,
+        txt: str | None,
+        ts,
+        msg_instancia_id: int | None,
+        cli_nome: str | None,
+        cli_tel: str | None,
+        cli_nome_whats: str | None,
+    ) -> None:
+        inst_final = _to_int(msg_instancia_id)
+        if not inst_final:
+            return
 
-        nome = (getattr(cli, "nome_whatsapp", None) or cli.nome or "").strip()
-        tel = (cli.telefone or "").strip()
-        last = (last_txt or "").strip()
-        raw_avatar = (getattr(cli, "avatar_url", None) or "").strip()
-
-        telefone_db_norm, telefone_send_norm = _normalize_lookup_number(tel)
-        telefone_fmt = formatar_telefone_br(telefone_send_norm) if telefone_send_norm else tel
-
-        if qn in _normalize_text(nome) or qn in _normalize_text(tel) or qn in _normalize_text(last):
-            ts_iso = last_ts.isoformat() if last_ts else None
-
-            contatos.append({
-                "id": cli.id,
-                "nome": nome or telefone_fmt,
-                "telefone": cli.telefone,
-                "telefone_norm": telefone_db_norm,
-                "telefone_e164": telefone_send_norm,
-                "telefone_fmt": telefone_fmt,
-                "avatar_url": _avatar_proxy_url(int(cli.id)) if raw_avatar else None,
-                "avatar_remote_url": raw_avatar or None,
-                "ultima_mensagem": last,
-                "hora": ts_iso,
-                "last_ts": ts_iso,
-                "last_tipo": last_tipo,
-                "last_ack": int(last_ack or 0) if last_tipo == "saida" else None,
-            })
-
-            if len(contatos) >= limit:
-                break
-
-    like = f"%{q}%"
-
-    msgs_rows = (
-        db.query(
-            m.cliente_id,
-            m.conteudo,
-            m.timestamp,
-            m.instancia_id,
-            models.Cliente.nome,
-            models.Cliente.telefone,
-            models.Cliente.nome_whatsapp,
-        )
-        .join(models.Cliente, models.Cliente.id == m.cliente_id)
-        .filter(m.empresa_id == empresa_id_eff, *filtros_inst, m.conteudo.ilike(like))
-        .order_by(m.timestamp.desc())
-        .limit(min(limit * 4, 120))
-        .all()
-    )
-
-    mensagens: List[Dict] = []
-
-    for cid, txt, ts, msg_instancia_id, cli_nome, cli_tel, cli_nome_whats in msgs_rows:
         if not _cliente_acl_ok(
             db,
             identity=identity,
             empresa_id=empresa_id_eff,
             cliente_id=int(cid),
-            instancia_id=_to_int(msg_instancia_id),
+            instancia_id=inst_final,
             cache=acl_cache,
         ):
-            continue
+            return
+
+        msg_key = str(mid or wa_msg_id or f"{cid}:{inst_final}:{ts}:{(txt or '')[:40]}")
+        if msg_key in seen_msg_ids:
+            return
+        seen_msg_ids.add(msg_key)
 
         nome = (cli_nome_whats or cli_nome or "").strip()
         tel = (cli_tel or "").strip()
-
         telefone_db_norm, telefone_send_norm = _normalize_lookup_number(tel)
         telefone_fmt = formatar_telefone_br(telefone_send_norm) if telefone_send_norm else tel
+        contact_key = _conversation_key_cliente(int(cid), int(inst_final))
+        ts_iso = ts.isoformat() if ts else None
 
-        mensagens.append(
-            {
+        mensagens.append({
+            "mensagem_id": int(mid) if mid else None,
+            "db_id": int(mid) if mid else None,
+            "msg_id": wa_msg_id,
+            "cliente_id": int(cid),
+            "id": int(cid),
+            "instancia_id": int(inst_final),
+            "conversation_key": contact_key,
+            "conversation_id": contact_key,
+            "cliente_nome": nome or telefone_fmt,
+            "cliente_telefone": tel,
+            "cliente_telefone_norm": telefone_db_norm,
+            "cliente_telefone_e164": telefone_send_norm,
+            "cliente_telefone_fmt": telefone_fmt,
+            "snippet": (txt or ""),
+            "hora": ts_iso,
+        })
+
+        # Mantém também um card de contato para conseguir abrir a conversa sem depender do cache lateral.
+        if contact_key and contact_key not in seen_contact_keys and len(contatos) < limit:
+            seen_contact_keys.add(contact_key)
+            contatos.append({
+                "id": int(cid),
                 "cliente_id": int(cid),
-                "cliente_nome": nome or telefone_fmt,
-                "cliente_telefone": tel,
-                "cliente_telefone_norm": telefone_db_norm,
-                "cliente_telefone_e164": telefone_send_norm,
-                "cliente_telefone_fmt": telefone_fmt,
-                "snippet": (txt or ""),
-                "hora": ts.isoformat() if ts else None,
+                "instancia_id": int(inst_final),
+                "conversation_key": contact_key,
+                "conversation_id": contact_key,
+                "nome": nome or telefone_fmt,
+                "nome_whatsapp": nome or None,
+                "push_name": nome or None,
+                "telefone": tel,
+                "telefone_norm": telefone_db_norm,
+                "telefone_e164": telefone_send_norm,
+                "telefone_fmt": telefone_fmt,
+                "avatar_url": None,
+                "ultima_mensagem": (txt or ""),
+                "hora": ts_iso,
+                "last_ts": ts_iso,
+                "last_tipo": None,
+                "last_ack": None,
+                "is_group": False,
+            })
+
+    # 1) Resultado da MESMA query usada para montar a lista lateral.
+    # Assim, se a conversa aparece na lista, ela também aparece na busca.
+    visible_filters = []
+    for col_name in ("nome", "nome_whatsapp", "telefone"):
+        col = getattr(C, col_name, None)
+        if col is not None and q_raw:
+            visible_filters.append(col.ilike(like))
+
+    if q_digits:
+        if getattr(C, "telefone", None) is not None:
+            visible_filters.append(C.telefone.ilike(like_digits))
+        if getattr(C, "telefone_norm", None) is not None:
+            visible_filters.append(C.telefone_norm.ilike(like_digits))
+
+    if q_raw and len(qn) >= 2:
+        visible_filters.append(M.conteudo.ilike(like))
+
+    if visible_filters:
+        visible_q = _query_clientes_ultima_por_conversa(
+            db,
+            empresa_id=int(empresa_id_eff),
+            resolved_inst_id=resolved_inst_id,
+            allowed_inst_ids=allowed_instancias,
+            allowed_dep_ids=allowed_departamentos,
+        ).filter(or_(*visible_filters))
+
+        rows_visible = (
+            visible_q
+            .order_by(M.timestamp.desc().nullslast(), M.id.desc())
+            .limit(min(max(limit * 4, 80), 260))
+            .all()
+        )
+
+        for r in rows_visible:
+            payload = _build_cliente_payload_from_row(r)
+            last_txt = getattr(r, "ultima_mensagem", None) or ""
+
+            # Se bateu no contato/nome/telefone, mostra como Contato.
+            # Se bateu na última mensagem, também mostra em Mensagens.
+            if _payload_matches_contact(payload) or not last_txt:
+                _add_contato(payload)
+
+            if qn and qn in _normalize_text(last_txt):
+                _add_msg_result(
+                    mid=int(getattr(r, "ultima_msg_id", 0) or 0) or None,
+                    wa_msg_id=None,
+                    cid=int(getattr(r, "cliente_id")),
+                    txt=last_txt,
+                    ts=getattr(r, "hora", None),
+                    msg_instancia_id=_to_int(getattr(r, "instancia_id", None)),
+                    cli_nome=getattr(r, "nome", None),
+                    cli_tel=getattr(r, "telefone", None),
+                    cli_nome_whats=getattr(r, "nome_whatsapp", None),
+                )
+
+            if len(contatos) >= limit and len(mensagens) >= limit:
+                break
+
+    # 2) Busca em mensagens. quick = janela recente; deep = histórico completo.
+    search_messages = len(qn) >= 3 or len(q_digits) >= 4
+
+    if search_messages and len(mensagens) < limit:
+        msg_filters = [
+            M.empresa_id == int(empresa_id_eff),
+            M.apagada_usuario == False,  # noqa: E712
+        ]
+
+        if resolved_inst_id is not None:
+            msg_filters.append(M.instancia_id == int(resolved_inst_id))
+        elif allowed_instancias is not None:
+            msg_filters.append(M.instancia_id.in_([int(x) for x in allowed_instancias]))
+
+        msg_or = []
+        if q_raw:
+            msg_or.append(M.conteudo.ilike(like))
+        if q_digits and like_digits:
+            msg_or.append(M.conteudo.ilike(like_digits))
+
+        if msg_or:
+            if deep:
+                try:
+                    db.execute(text("SET LOCAL statement_timeout = '22000ms'"))
+                except Exception:
+                    pass
+
+                rows_msg = (
+                    db.query(
+                        M.id, M.msg_id, M.cliente_id, M.conteudo, M.timestamp, M.instancia_id,
+                        C.nome, C.telefone, C.nome_whatsapp,
+                    )
+                    .join(C, C.id == M.cliente_id)
+                    .filter(*msg_filters, or_(*msg_or))
+                    .order_by(M.timestamp.desc().nullslast(), M.id.desc())
+                    .limit(min(max(limit * 4, 120), 300))
+                    .all()
+                )
+            else:
+                # Janela recente: primeiro pega mensagens recentes da empresa/instância,
+                # depois filtra em Python. Evita travar com ILIKE em bases sem índice.
+                scan_limit = min(max(limit * 160, 4000), 12000)
+                recent_rows = (
+                    db.query(
+                        M.id, M.msg_id, M.cliente_id, M.conteudo, M.timestamp, M.instancia_id,
+                        C.nome, C.telefone, C.nome_whatsapp,
+                    )
+                    .join(C, C.id == M.cliente_id)
+                    .filter(*msg_filters)
+                    .order_by(M.id.desc())
+                    .limit(scan_limit)
+                    .all()
+                )
+
+                rows_msg = []
+                for row in recent_rows:
+                    txt = row.conteudo or ""
+                    if (qn and qn in _normalize_text(txt)) or (q_digits and q_digits in _digits_only(txt)):
+                        rows_msg.append(row)
+                    if len(rows_msg) >= min(limit * 2, 120):
+                        break
+
+            for row in rows_msg:
+                _add_msg_result(
+                    mid=int(row.id) if row.id is not None else None,
+                    wa_msg_id=row.msg_id,
+                    cid=int(row.cliente_id),
+                    txt=row.conteudo,
+                    ts=row.timestamp,
+                    msg_instancia_id=_to_int(row.instancia_id),
+                    cli_nome=row.nome,
+                    cli_tel=row.telefone,
+                    cli_nome_whats=row.nome_whatsapp,
+                )
+                if len(mensagens) >= limit:
+                    break
+
+    return {
+        "contatos": contatos[:limit],
+        "mensagens": mensagens[:limit],
+        "deep": bool(deep),
+        "modo": "profunda" if deep else "rapida",
+    }
+
+
+@router.get("/atendimento/search/mensagem-contexto")
+def atendimento_search_mensagem_contexto(
+    empresa_id: int = Query(...),
+    mensagem_id: int = Query(..., ge=1),
+    cliente_id: int | None = Query(None),
+    instancia_id: int | None = Query(None),
+    instance: str | None = Query(None),
+    limit: int = Query(80, ge=20, le=200),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    """Carrega uma janela de mensagens ao redor de um resultado de busca antigo."""
+    ensure_perm(identity, "atendimento.ver")
+    empresa_id_eff = assert_same_company(identity, empresa_id)
+
+    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
+    allowed = acl_ctx["allowed_instancias"]
+
+    target = (
+        db.query(models.Mensagem)
+        .filter(
+            models.Mensagem.id == int(mensagem_id),
+            models.Mensagem.empresa_id == int(empresa_id_eff),
+            models.Mensagem.apagada_usuario == False,  # noqa: E712
+        )
+        .first()
+    )
+
+    if not target:
+        raise HTTPException(404, "Mensagem não encontrada.")
+
+    if cliente_id is not None and int(target.cliente_id) != int(cliente_id):
+        raise HTTPException(404, "Mensagem não pertence a essa conversa.")
+
+    resolved_inst_id, resolved_inst_name = _resolve_instancia_id(
+        db,
+        empresa_id=empresa_id_eff,
+        instancia_id=instancia_id,
+        instance=instance,
+    )
+
+    if (instancia_id is not None or instance) and resolved_inst_id is None:
+        raise HTTPException(404, "Instância não encontrada para a empresa.")
+
+    effective_inst_id = _to_int(resolved_inst_id) or _to_int(target.instancia_id)
+
+    if effective_inst_id is not None:
+        assert_instancia_allowed(allowed_instancias=allowed, instancia_id=effective_inst_id)
+
+    if not _cliente_acl_ok(
+        db,
+        identity=identity,
+        empresa_id=empresa_id_eff,
+        cliente_id=int(target.cliente_id),
+        instancia_id=effective_inst_id,
+        cache=None,
+    ):
+        raise HTTPException(403, "Sem permissão para acessar essa conversa.")
+
+    m = models.Mensagem
+    inst_filters = []
+
+    if effective_inst_id is not None:
+        inst_filters.append(m.instancia_id == int(effective_inst_id))
+    elif allowed is not None:
+        if not allowed:
+            return {"found": False, "items": [], "mensagens": []}
+        inst_filters.append(m.instancia_id.in_([int(x) for x in allowed]))
+
+    cols = (
+        m.id,
+        m.msg_id,
+        m.conteudo,
+        m.tipo,
+        m.ack,
+        m.timestamp,
+        m.instancia_id,
+        m.quoted,
+        m.quoted_preview,
+        m.apagada_cliente,
+        m.apagada_usuario,
+        models.EmpresaInstancia.instance_name.label("instance_name"),
+    )
+
+    base = (
+        db.query(*cols)
+        .outerjoin(models.EmpresaInstancia, models.EmpresaInstancia.id == m.instancia_id)
+        .filter(
+            m.empresa_id == int(empresa_id_eff),
+            m.cliente_id == int(target.cliente_id),
+            m.apagada_usuario == False,  # noqa: E712
+            *inst_filters,
+        )
+    )
+
+    half = max(10, int(limit) // 2)
+    older = (
+        base.filter(m.id <= int(target.id))
+        .order_by(m.id.desc())
+        .limit(half + 1)
+        .all()
+    )
+    newer = (
+        base.filter(m.id > int(target.id))
+        .order_by(m.id.asc())
+        .limit(max(5, int(limit) - len(older)))
+        .all()
+    )
+
+    rows = sorted([*older, *newer], key=lambda r: int(r.id or 0))
+
+    items: List[Dict[str, Any]] = []
+    for r in rows:
+        inst_row = _to_int(r.instancia_id) or effective_inst_id
+        row_conv_key = _conversation_key_cliente(int(target.cliente_id), inst_row)
+        items.append(
+            {
+                "id": int(r.id),
+                "db_id": int(r.id),
+                "mensagem_id": int(r.id),
+                "msg_id": r.msg_id,
+                "conteudo": r.conteudo,
+                "tipo": r.tipo,
+                "ack": r.ack,
+                "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+                "instancia_id": inst_row,
+                "instance_name": r.instance_name or resolved_inst_name,
+                "quoted": r.quoted,
+                "quoted_preview": r.quoted_preview,
+                "apagada_cliente": bool(r.apagada_cliente),
+                "apagada_usuario": bool(r.apagada_usuario),
+                "is_group": False,
+                "conversation_key": row_conv_key,
+                "conversation_id": row_conv_key,
+                "kind": "c",
+                "entity_id": int(target.cliente_id),
+                "cliente_id": int(target.cliente_id),
             }
         )
 
-        if len(mensagens) >= limit:
-            break
-
-    return {"contatos": contatos, "mensagens": mensagens}
+    return {
+        "found": True,
+        "target_message_id": int(target.id),
+        "target_wa_msg_id": target.msg_id,
+        "conversation_key": _conversation_key_cliente(int(target.cliente_id), effective_inst_id),
+        "items": items,
+        "mensagens": items,
+    }

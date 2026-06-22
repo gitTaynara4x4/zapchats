@@ -5,6 +5,24 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Mídias – ZapsChat</title>
 
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("zapschat_theme");
+        if (saved !== "dark" && saved !== "light") {
+          saved = "light";
+          localStorage.setItem("zapschat_theme", "light");
+        }
+        localStorage.setItem("theme", saved);
+        document.documentElement.classList.toggle("dark", saved === "dark");
+        document.documentElement.setAttribute("data-theme", saved);
+      } catch (e) {
+        document.documentElement.classList.remove("dark");
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    })();
+  </script>
+
   <script src="/frontend/js/app-base.js" defer></script>
   <script src="/frontend/js/auth.js" defer></script>
   <script src="/frontend/js/page-guard.js" defer></script>
@@ -14,6 +32,9 @@
     html.prepaint[data-head-ready][data-loader-ready] body{visibility:visible}
   </style>
 
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
   <link rel="stylesheet" href="/frontend/css/midias.css"/>
 </head>
@@ -22,76 +43,184 @@
          data-src="/frontend/partials/sidebar.html"
          data-src-mobile="/frontend/partials/sidebar-mobile.html"></aside>
 
-  <main class="main">
-    <div class="section-title">
-      <h1>
-        <i class="fa fa-folder-open title-ico"></i>
-        <span class="title-text">Mídias</span>
+  <main class="main midias-page">
+    <header class="midias-top" aria-label="Topo da página de mídias">
+      <div class="midias-title-block">
+        <div class="midias-breadcrumb" aria-label="Caminho">
+          <span>Mídias</span>
+          <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+          <strong id="midias-current-scope">Todos os arquivos</strong>
+        </div>
+        <h1>
+          <span class="title-folder" aria-hidden="true"><i class="fa-solid fa-folder-open"></i></span>
+          <span class="title-text">Biblioteca de Mídias</span>
+        </h1>
+      </div>
 
+      <div class="midias-top-actions">
         <button id="instMenuBtn" type="button" class="inst-trigger" aria-haspopup="listbox"
                 aria-expanded="false" aria-controls="inst-menu">
           <span id="instMenuLabel">Todos os arquivos</span>
-          <span class="chev">▾</span>
+          <span class="chev"><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         </button>
 
-        <button id="btn-meus-arquivos" type="button" class="btn">
-          <i class="fa fa-user-gear"></i>
+        <button id="btn-meus-arquivos" type="button" class="btn btn-soft">
+          <i class="fa fa-user-gear" aria-hidden="true"></i>
           <span class="hide-xs">Meus Arquivos</span>
           <span class="show-xs">Meus</span>
         </button>
-      </h1>
 
-      <div class="top-meta"><strong id="midias-meta">0</strong> itens</div>
+        <button id="btn-upload" class="btn btn-primary">
+          <i class="fa fa-upload" aria-hidden="true"></i>
+          <span>Enviar</span>
+        </button>
+
+        <button id="btn-limpar" class="btn btn-soft">
+          <i class="fa fa-trash" aria-hidden="true"></i>
+          <span>Limpar</span>
+        </button>
+      </div>
 
       <div id="inst-menu" class="inst-menu" role="listbox" aria-hidden="true" aria-label="Selecionar instância">
         <div class="head">WhatsApps</div>
         <ul id="instMenuList"></ul>
       </div>
-    </div>
+    </header>
 
-    <section class="filter" aria-label="Filtros de mídias">
-      <div class="group group-search">
-        <label for="q">Buscar:</label>
-        <input class="input" id="q" type="text" placeholder="nome, tag..." autocomplete="off"/>
+    <section class="midias-searchbar" aria-label="Busca e filtros">
+      <div class="search-wrap group-search">
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+        <input class="input" id="q" type="search" placeholder="Buscar arquivos, clientes ou tags..." autocomplete="off"/>
       </div>
 
-      <div class="group group-tabs">
-        <div class="tabs" role="tablist" aria-label="Tipo de mídia">
-          <button class="tab" id="tab-all"  role="tab" aria-selected="true"  data-type="all">Tudo</button>
-          <button class="tab" id="tab-docs" role="tab" aria-selected="false" data-type="documento">
-            <i class="fa fa-file-lines" style="margin-right:.35rem"></i> Documentos
-          </button>
-          <button class="tab" id="tab-imgs" role="tab" aria-selected="false" data-type="imagem">Imagens</button>
-          <button class="tab" id="tab-vids" role="tab" aria-selected="false" data-type="video">Vídeos</button>
-          <button class="tab" id="tab-auds" role="tab" aria-selected="false" data-type="audio">Áudio</button>
-        </div>
-      </div>
-
-      <div class="group group-order">
-        <label for="ordenar">Ordenar:</label>
-        <select class="select" id="ordenar">
-          <option value="recent">Mais recentes</option>
-          <option value="old">Mais antigas</option>
-          <option value="az">A–Z</option>
-          <option value="za">Z–A</option>
-        </select>
-      </div>
-
-      <div class="spacer"></div>
-
-      <div class="group group-actions">
-        <button id="btn-upload" class="btn primary"><i class="fa fa-upload"></i> <span>Enviar</span></button>
-        <button id="btn-limpar"  class="btn"><i class="fa fa-eraser"></i> <span>Limpar</span></button>
+      <div class="quick-actions" aria-label="Ações rápidas">
+        <button type="button" class="round-btn" title="Configurações" aria-label="Configurações">
+          <i class="fa-solid fa-gear" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="round-btn" title="Copiar link" aria-label="Copiar link">
+          <i class="fa-solid fa-link" aria-hidden="true"></i>
+        </button>
       </div>
     </section>
 
-    <section class="box">
-      <div id="empty" class="empty"><div>
-        <p>Nenhum arquivo encontrado.</p>
-        <small>Dica: ajuste os filtros acima ou envie novos arquivos.</small>
-      </div></div>
+    <section class="midias-shell" aria-label="Gerenciador de mídias">
+      <div class="midias-workspace">
+        <section class="panel recent-panel" aria-labelledby="recent-title">
+          <div class="panel-head">
+            <div>
+              <h2 id="recent-title">Arquivos Recentes</h2>
+              <p>Últimos arquivos enviados ou recebidos.</p>
+            </div>
+            <div class="order-wrap group-order">
+              <label for="ordenar">Ordenar</label>
+              <select class="select" id="ordenar">
+                <option value="recent">Mais recentes</option>
+                <option value="old">Mais antigas</option>
+                <option value="az">A–Z</option>
+                <option value="za">Z–A</option>
+              </select>
+            </div>
+          </div>
 
-      <div id="midias-list" class="grid" aria-live="polite" aria-busy="false"></div>
+          <div id="midias-list" class="recent-grid" aria-live="polite" aria-busy="false"></div>
+        </section>
+
+        <section class="panel files-panel" aria-labelledby="files-title">
+          <div class="panel-head files-head">
+            <div>
+              <h2 id="files-title">Arquivos</h2>
+              <p><strong id="midias-meta">0</strong> itens encontrados</p>
+            </div>
+
+            <div class="table-tools">
+              <div class="tabs" role="tablist" aria-label="Tipo de mídia">
+                <button class="tab" id="tab-all"  role="tab" aria-selected="true"  data-type="all">Tudo</button>
+                <button class="tab" id="tab-docs" role="tab" aria-selected="false" data-type="documento">Documentos</button>
+                <button class="tab" id="tab-imgs" role="tab" aria-selected="false" data-type="imagem">Imagens</button>
+                <button class="tab" id="tab-vids" role="tab" aria-selected="false" data-type="video">Vídeos</button>
+                <button class="tab" id="tab-auds" role="tab" aria-selected="false" data-type="audio">Áudio</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table class="files-table" aria-label="Lista de arquivos">
+              <thead>
+                <tr>
+                  <th>Arquivo</th>
+                  <th>Tipo</th>
+                  <th>Origem</th>
+                  <th>Última modificação</th>
+                  <th class="th-actions">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="midias-table-body"></tbody>
+            </table>
+          </div>
+
+          <div id="empty" class="empty" aria-live="polite">
+            <div class="empty-icon"><i class="fa-regular fa-folder-open" aria-hidden="true"></i></div>
+            <div>
+              <p>Nenhum arquivo encontrado.</p>
+              <small>Ajuste os filtros ou envie novos arquivos em “Meus Arquivos”.</small>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <aside class="file-aside" aria-label="Detalhes do arquivo">
+        <section class="side-card file-detail-card" id="file-detail-panel">
+          <div class="side-card-head">
+            <h2>Detalhes do Arquivo</h2>
+            <button type="button" class="ghost-menu" aria-label="Mais opções"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+          </div>
+
+          <div class="file-preview" id="detail-preview">
+            <div class="file-preview-icon" id="detail-icon"><i class="fa-regular fa-file-lines"></i></div>
+            <span class="detail-pill" id="detail-kind">Arquivo</span>
+            <strong id="detail-name">Selecione um arquivo</strong>
+            <small id="detail-date">Os detalhes aparecem aqui.</small>
+          </div>
+        </section>
+
+        <section class="side-card overview-card">
+          <div class="side-card-head">
+            <h2>Resumo</h2>
+            <button type="button" class="ghost-menu" aria-label="Mais opções"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+          </div>
+
+          <div class="overview-list">
+            <div class="overview-row">
+              <span><i class="fa-regular fa-eye"></i> Itens exibidos</span>
+              <strong id="overview-total">0</strong>
+            </div>
+            <div class="overview-row">
+              <span><i class="fa-regular fa-pen-to-square"></i> Selecionados</span>
+              <strong id="overview-selected">0</strong>
+            </div>
+            <div class="overview-row">
+              <span><i class="fa-regular fa-file-lines"></i> Tipo</span>
+              <strong id="overview-kind">-</strong>
+            </div>
+            <div class="overview-row">
+              <span><i class="fa-regular fa-calendar"></i> Data</span>
+              <strong id="overview-date">-</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="side-card insights-card">
+          <div class="side-card-head">
+            <h2>Insights</h2>
+            <button type="button" class="ghost-menu" aria-label="Mais opções"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+          </div>
+          <div class="insight-number" id="insight-total">0</div>
+          <small>arquivos carregados na visualização atual</small>
+          <div class="mini-chart" aria-hidden="true">
+            <span style="height:28%"></span><span style="height:46%"></span><span style="height:72%"></span><span style="height:38%"></span><span style="height:64%"></span><span style="height:52%"></span>
+          </div>
+        </section>
+      </aside>
     </section>
   </main>
 

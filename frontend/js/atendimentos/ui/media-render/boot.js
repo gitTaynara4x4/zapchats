@@ -45,6 +45,10 @@
   const OBSERVER_DEBOUNCE_MS = Number(window.ZC_MEDIA_OBSERVER_DEBOUNCE_MS || 220);
   const RESIZE_DEBOUNCE_MS = Number(window.ZC_MEDIA_RESIZE_DEBOUNCE_MS || 260);
 
+  const LAZY_MEDIA_MAX_LOADED = Number(window.ZC_LAZY_MEDIA_MAX_LOADED || 12);
+  const LAZY_MEDIA_ROOT_MARGIN = String(window.ZC_LAZY_MEDIA_ROOT_MARGIN || '520px 0px');
+  const LAZY_PLACEHOLDER = M.LAZY_MEDIA_PLACEHOLDER || window.ZC_LAZY_MEDIA_PLACEHOLDER || '';
+
   /*
     Segurança:
     se alguma versão antiga deixou intervalos vivos, mata aqui.
@@ -115,8 +119,298 @@
     call('groupConsecutiveImageRows', root);
   }
 
+  function initControlledLazyMediaSafe(root) {
+    initControlledLazyMedia(root);
+  }
+
   function getSafeRoot(root) {
     return root || H() || document;
+  }
+
+
+  /* =====================================================================
+     Lazy media com limite de RAM
+     ===================================================================== */
+
+  function getLazyState(hist) {
+    const key = '__zcLazyMediaState';
+    const root = hist || document;
+
+    if (!root[key]) {
+      root[key] = {
+        observer: null,
+        loaded: new Set(),
+      };
+    }
+
+    return root[key];
+  }
+
+  function lazyScope(root) {
+    return getSafeRoot(root);
+  }
+
+  function isLoadedLazyMedia(el) {
+    return el && el.dataset && el.dataset.zcLazyLoaded === '1';
+  }
+
+  function getLazyMediaLabel(el) {
+    try {
+      const tag = String(el?.tagName || '').toLowerCase();
+      const raw = String(el?.dataset?.alt || el?.getAttribute?.('alt') || '').toLowerCase();
+
+      if (tag === 'video') return 'Carregando vídeo...';
+      if (el?.classList?.contains('msg-sticker') || raw.includes('figurinha') || raw.includes('sticker')) {
+        return 'Carregando figurinha...';
+      }
+      return 'Carregando imagem...';
+    } catch {
+      return 'Carregando mídia...';
+    }
+  }
+
+  function getLazyMediaHost(el) {
+    try {
+      return (
+        el?.closest?.('.msg-media-img, .msg-media-cell, .msg-media-video-wrap, .msg-media-group, .msg-bubble, .bubble, .message-bubble') ||
+        el?.parentElement ||
+        null
+      );
+    } catch {
+      return el?.parentElement || null;
+    }
+  }
+
+  function setLazyMediaStatus(el, status) {
+    try {
+      if (!el) return;
+
+      const host = getLazyMediaHost(el);
+      const st = String(status || 'loading');
+      const label = st === 'failed' ? 'Não foi possível carregar mídia' : getLazyMediaLabel(el);
+
+      el.dataset.zcLazyStatus = st;
+
+      if (!host) return;
+
+      host.classList.add('zc-lazy-media-host');
+      host.classList.toggle('zc-media-loading', st === 'loading' || st === 'idle');
+      host.classList.toggle('zc-media-loaded', st === 'loaded');
+      host.classList.toggle('zc-media-failed', st === 'failed');
+      host.dataset.zcMediaLoadingLabel = label;
+    } catch {}
+  }
+
+  function bindLazyMediaStatusEvents(el) {
+    try {
+      if (!el || el.__zcLazyStatusBound) return;
+      el.__zcLazyStatusBound = true;
+
+      const tag = String(el.tagName || '').toLowerCase();
+      const loaded = () => {
+        if (el.dataset?.zcLazyLoaded === '1') {
+          setLazyMediaStatus(el, 'loaded');
+        }
+      };
+      const failed = () => setLazyMediaStatus(el, 'failed');
+
+      if (tag === 'video') {
+        el.addEventListener('loadedmetadata', loaded);
+        el.addEventListener('loadeddata', loaded);
+        el.addEventListener('canplay', loaded);
+        el.addEventListener('error', failed);
+      } else {
+        el.addEventListener('load', loaded);
+        el.addEventListener('error', failed);
+      }
+    } catch {}
+  }
+
+  function isElementNearViewport(el, margin = 260) {
+    try {
+      const hist = H();
+      const box = el.getBoundingClientRect();
+      const rootBox = hist ? hist.getBoundingClientRect() : {
+        top: 0,
+        bottom: window.innerHeight || document.documentElement.clientHeight || 0,
+      };
+
+      return box.bottom >= rootBox.top - margin && box.top <= rootBox.bottom + margin;
+    } catch {
+      return false;
+    }
+  }
+
+  function loadLazyMedia(el, state) {
+    try {
+      if (!el || isLoadedLazyMedia(el)) return;
+
+      const src = el.dataset?.zcLazySrc || '';
+      if (!src) return;
+
+      const tag = String(el.tagName || '').toLowerCase();
+
+      bindLazyMediaStatusEvents(el);
+      setLazyMediaStatus(el, 'loading');
+
+      if (tag === 'video') {
+        el.src = src;
+        try { el.load(); } catch {}
+      } else {
+        el.src = src;
+      }
+
+      el.dataset.zcLazyLoaded = '1';
+      el.classList.add('zc-lazy-loaded');
+      state?.loaded?.add(el);
+
+      /*
+        Se a mídia já veio do cache do navegador, o evento load pode não disparar
+        depois da troca de src. Então confirma no próximo tick.
+      */
+      setTimeout(() => {
+        try {
+          if (tag !== 'video' && el.complete && el.naturalWidth > 0) {
+            setLazyMediaStatus(el, 'loaded');
+          }
+        } catch {}
+      }, 60);
+    } catch {}
+  }
+
+  function unloadLazyMedia(el) {
+    try {
+      if (!el || !isLoadedLazyMedia(el)) return;
+      if (isElementNearViewport(el, 180)) return;
+
+      const tag = String(el.tagName || '').toLowerCase();
+
+      if (tag === 'video') {
+        try { el.pause(); } catch {}
+        el.removeAttribute('src');
+        try { el.load(); } catch {}
+      } else if (LAZY_PLACEHOLDER) {
+        el.src = LAZY_PLACEHOLDER;
+      } else {
+        el.removeAttribute('src');
+      }
+
+      el.dataset.zcLazyLoaded = '0';
+      el.classList.remove('zc-lazy-loaded');
+      setLazyMediaStatus(el, 'loading');
+    } catch {}
+  }
+
+  function pruneLazyLoadedMedia(state) {
+    try {
+      if (!state?.loaded) return;
+
+      const arr = Array.from(state.loaded).filter((el) => el && el.isConnected && isLoadedLazyMedia(el));
+      state.loaded = new Set(arr);
+
+      const max = Math.max(4, Math.min(40, Number(LAZY_MEDIA_MAX_LOADED) || 12));
+      if (arr.length <= max) return;
+
+      const candidates = arr.filter((el) => !isElementNearViewport(el, 220));
+      const extra = arr.length - max;
+
+      candidates.slice(0, extra).forEach((el) => {
+        unloadLazyMedia(el);
+        state.loaded.delete(el);
+      });
+    } catch {}
+  }
+
+  function initControlledLazyMedia(root) {
+    try {
+      const hist = H() || document;
+      const scope = lazyScope(root);
+      const state = getLazyState(hist);
+
+      const nodes = Array.from(
+        scope.querySelectorAll?.('[data-zc-lazy-media][data-zc-lazy-src]') || []
+      );
+
+      nodes.forEach((el) => {
+        bindLazyMediaStatusEvents(el);
+        if (isLoadedLazyMedia(el)) {
+          setLazyMediaStatus(el, 'loaded');
+        } else {
+          setLazyMediaStatus(el, 'loading');
+        }
+      });
+
+      if (!nodes.length) {
+        pruneLazyLoadedMedia(state);
+        return;
+      }
+
+      const eagerMax = Math.max(4, Math.min(12, Number(LAZY_MEDIA_MAX_LOADED) || 12));
+      const visibleNow = nodes.filter((el) => !isLoadedLazyMedia(el) && isElementNearViewport(el, 260));
+      visibleNow.slice(0, eagerMax).forEach((el) => loadLazyMedia(el, state));
+
+      if (!('IntersectionObserver' in window)) {
+        nodes
+          .filter((el) => !isLoadedLazyMedia(el))
+          .slice(0, eagerMax)
+          .forEach((el) => loadLazyMedia(el, state));
+        pruneLazyLoadedMedia(state);
+        return;
+      }
+
+      if (!state.observer) {
+        state.observer = new IntersectionObserver((entries) => {
+          entries.forEach((entry) => {
+            const el = entry.target;
+            if (entry.isIntersecting || entry.intersectionRatio > 0) {
+              loadLazyMedia(el, state);
+            }
+          });
+
+          pruneLazyLoadedMedia(state);
+        }, {
+          root: hist && hist.id === 'historico' ? hist : null,
+          rootMargin: LAZY_MEDIA_ROOT_MARGIN,
+          threshold: 0.01,
+        });
+      }
+
+      nodes.forEach((el) => {
+        if (isElementNearViewport(el, 260) && !isLoadedLazyMedia(el)) {
+          loadLazyMedia(el, state);
+        }
+        if (el.__zcLazyObserved) return;
+        el.__zcLazyObserved = true;
+        state.observer.observe(el);
+      });
+
+      clearTimeout(state.__zcLazyKickTimer);
+      state.__zcLazyKickTimer = setTimeout(() => {
+        try {
+          nodes
+            .filter((el) => el && el.isConnected && !isLoadedLazyMedia(el) && isElementNearViewport(el, 320))
+            .slice(0, eagerMax)
+            .forEach((el) => loadLazyMedia(el, state));
+          pruneLazyLoadedMedia(state);
+        } catch {}
+      }, 250);
+
+      if (hist && !hist.__zcLazyScrollBound) {
+        hist.__zcLazyScrollBound = true;
+        hist.addEventListener('scroll', () => {
+          try {
+            const liveNodes = Array.from(hist.querySelectorAll('[data-zc-lazy-media][data-zc-lazy-src]'));
+            liveNodes
+              .filter((el) => !isLoadedLazyMedia(el) && isElementNearViewport(el, 280))
+              .slice(0, eagerMax)
+              .forEach((el) => loadLazyMedia(el, state));
+            pruneLazyLoadedMedia(state);
+          } catch {}
+        }, { passive: true });
+      }
+
+      pruneLazyLoadedMedia(state);
+    } catch {}
   }
 
   function isElementInsideHistorico(el) {
@@ -199,6 +493,7 @@
       bindQuotedPreviewClicksSafe(document);
 
       groupConsecutiveImageRowsSafe(root);
+      initControlledLazyMediaSafe(root);
     } finally {
       M.state.enhancing = false;
     }
@@ -241,6 +536,13 @@
 
     try {
       clearTimeout(hist.__zcMediaRenderTimer);
+    } catch {}
+
+    try {
+      if (hist.__zcLazyMediaState?.observer) {
+        hist.__zcLazyMediaState.observer.disconnect();
+      }
+      hist.__zcLazyMediaState = null;
     } catch {}
 
     try {
@@ -390,6 +692,7 @@
 
         resizeTimer = setTimeout(() => {
           groupConsecutiveImageRowsSafe(H() || document);
+          initControlledLazyMediaSafe(H() || document);
         }, RESIZE_DEBOUNCE_MS);
       },
       {
@@ -449,6 +752,7 @@
 
     try {
       window.zcMediaRenderEnhance = enhance;
+      window.zcInitControlledLazyMedia = initControlledLazyMedia;
       window.zcMediaRenderScheduleEnhance = scheduleEnhance;
       window.zcMediaRenderRefreshAudioAvatars = function () {
         scheduleAvatarRefresh(H() || document, 80);
@@ -485,6 +789,7 @@
     observeHistory,
     bootObserver,
     bindMediaRenderEvents,
+    initControlledLazyMedia,
     startIntervals,
     stopIntervals,
     exposeGlobals,

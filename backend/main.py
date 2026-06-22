@@ -272,10 +272,11 @@ def _rewrite_html_cache_bust(html: str, inject_build_script: bool = True) -> str
           }}
         }} catch (e) {{}}
 
-        var url = new URL(window.location.href);
-        url.searchParams.set("v", BUILD);
-        window.location.replace(url.toString());
-        return;
+        // Antes este trecho fazia window.location.replace(...?v=BUILD).
+        // Isso derrubava o WebSocket com CLOSE 1001 e parecia que o atendimento "caía".
+        // Os assets já recebem ?v=BUILD pelo rewrite do backend, então não precisamos
+        // recarregar a página inteira só porque o build mudou.
+        // Mantém apenas a limpeza de caches/service worker acima.
       }}
 
       localStorage.setItem(KEY, BUILD);
