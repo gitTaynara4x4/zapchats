@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import unicodedata
@@ -52,6 +53,28 @@ def _norm_txt(s: str) -> str:
     s = unicodedata.normalize("NFD", s)
     s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
     return s
+
+
+def _normalize_chatbot_config_aliases(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Aceita configs antigas salvas como auto_messages_filas."""
+    if not isinstance(cfg, dict):
+        return {}
+
+    out: Dict[str, Any] = dict(cfg)
+    features_in = out.get("features") or {}
+    if not isinstance(features_in, dict):
+        out["features"] = {}
+        return out
+
+    features = dict(features_in)
+    old = features.get("auto_messages_filas")
+    new = features.get("auto_messages_departments")
+    if not isinstance(new, dict) and isinstance(old, dict):
+        features["auto_messages_departments"] = old
+
+    features.pop("auto_messages_filas", None)
+    out["features"] = features
+    return out
 
 
 def _ensure_br_country(d: str) -> str:
@@ -203,7 +226,7 @@ def _fetch_chatbot_config(db: Session, *, empresa_id: int, instancia_id: int) ->
         return {}
 
     cfg = row.config or {}
-    return cfg if isinstance(cfg, dict) else {}
+    return _normalize_chatbot_config_aliases(cfg if isinstance(cfg, dict) else {})
 
 
 def _fetch_departamentos(db: Session, *, empresa_id: int, instancia_id: int) -> List[Dict[str, Any]]:
@@ -229,7 +252,7 @@ def _fetch_departamentos(db: Session, *, empresa_id: int, instancia_id: int) -> 
                     AND di2.instancia_id = :instancia_id
                 )
               )
-            ORDER BY d.id ASC
+            ORDER BY d.nome ASC, d.id ASC
             """
         ),
         {"empresa_id": empresa_id, "instancia_id": instancia_id},
@@ -402,9 +425,9 @@ def _fetch_primary_colab_id(db: Session, *, empresa_id: int, departamento_id: in
         return None
 
 
-def _send_text(db: Session, *, instancia_nome: str, remote_jid: str, text_msg: str) -> None:
+def _send_text(db: Session, *, instancia_nome: str, remote_jid: str, text_msg: str) -> Optional[Dict[str, Any]]:
     if not instancia_nome or not remote_jid or not text_msg:
-        return
+        return None
 
     jid = str(remote_jid).strip()
 
@@ -420,7 +443,181 @@ def _send_text(db: Session, *, instancia_nome: str, remote_jid: str, text_msg: s
         "text": text_msg,
     }
 
-    _evo_post("/message/sendText", instancia_nome, payload)
+    return _evo_post("/message/sendText", instancia_nome, payload)
+
+
+def _evo_message_id(evo: Optional[Dict[str, Any]]) -> Optional[str]:
+    try:
+        mid = ((evo or {}).get("key") or {}).get("id")
+        mid = str(mid or "").strip()
+        return mid or None
+    except Exception:
+        return None
+
+
+def _evo_timestamp_dt(evo: Optional[Dict[str, Any]], fallback: Optional[datetime] = None) -> datetime:
+    raw = None
+    try:
+        raw = (evo or {}).get("messageTimestamp")
+    except Exception:
+        raw = None
+
+    try:
+        if isinstance(raw, dict):
+            raw = raw.get("low") or raw.get("seconds") or raw.get("value")
+        if raw is not None and str(raw).strip():
+            return datetime.fromtimestamp(int(raw), tz=timezone.utc)
+    except Exception:
+        pass
+
+    return _as_aware_utc(fallback) or _now_utc()
+
+
+def _bot_msg_id(*, empresa_id: int, instancia_id: int, cliente_id: int, text_msg: str, ts_dt: datetime) -> str:
+    base = f"{int(empresa_id)}:{int(instancia_id)}:{int(cliente_id)}:{ts_dt.timestamp()}:{text_msg}"
+    safe = hashlib.sha1(base.encode("utf-8", errors="ignore")).hexdigest()[:24]
+    return f"bot:{int(instancia_id)}:{int(cliente_id)}:{safe}"
+
+
+def _latest_open_atendimento_id(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    cliente_id: int,
+) -> Optional[int]:
+    Atendimento = getattr(models, "Atendimento", None)
+    if Atendimento is None:
+        return None
+
+    try:
+        q = db.query(Atendimento.id).filter(
+            Atendimento.empresa_id == int(empresa_id),
+            Atendimento.cliente_id == int(cliente_id),
+        )
+        if hasattr(Atendimento, "instancia_id"):
+            q = q.filter(Atendimento.instancia_id == int(instancia_id))
+        if hasattr(Atendimento, "status"):
+            try:
+                q = q.filter(Atendimento.status.in_(_open_status_values()))
+            except Exception:
+                pass
+        row = q.order_by(Atendimento.id.desc()).first()
+        return int(row.id) if row and row.id is not None else None
+    except Exception:
+        return None
+
+
+def _persist_bot_saida_message(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    cliente_id: int,
+    text_msg: str,
+    evo: Optional[Dict[str, Any]] = None,
+    ts_dt: Optional[datetime] = None,
+) -> Optional[models.Mensagem]:
+    """Salva mensagem automática do chatbot no histórico do atendimento.
+
+    Sem isso o cliente recebe o menu/ack no WhatsApp, mas o operador não vê
+    a mensagem dentro do ZapsChat. Mensagens do bot ficam como saída, sem
+    colaborador_id, e com msg_id prefixado quando a Evolution não retornar id.
+    """
+    if not empresa_id or not instancia_id or not cliente_id or not str(text_msg or "").strip():
+        return None
+
+    try:
+        ts = _evo_timestamp_dt(evo, fallback=ts_dt)
+        msg_id = _evo_message_id(evo) or _bot_msg_id(
+            empresa_id=int(empresa_id),
+            instancia_id=int(instancia_id),
+            cliente_id=int(cliente_id),
+            text_msg=str(text_msg),
+            ts_dt=ts,
+        )
+
+        existing = None
+        if msg_id:
+            existing = (
+                db.query(models.Mensagem)
+                .filter(
+                    models.Mensagem.empresa_id == int(empresa_id),
+                    models.Mensagem.cliente_id == int(cliente_id),
+                    models.Mensagem.msg_id == str(msg_id),
+                )
+                .first()
+            )
+
+        atendimento_id = _latest_open_atendimento_id(
+            db,
+            empresa_id=int(empresa_id),
+            instancia_id=int(instancia_id),
+            cliente_id=int(cliente_id),
+        )
+
+        if existing is not None:
+            existing.conteudo = str(text_msg)
+            existing.tipo = "saida"
+            existing.ack = int(existing.ack or 1)
+            existing.lida = True
+            existing.instancia_id = int(instancia_id)
+            if atendimento_id and hasattr(existing, "atendimento_id"):
+                existing.atendimento_id = int(atendimento_id)
+            db.add(existing)
+            db.commit()
+            return existing
+
+        msg = models.Mensagem(
+            empresa_id=int(empresa_id),
+            cliente_id=int(cliente_id),
+            instancia_id=int(instancia_id),
+            atendimento_id=atendimento_id,
+            colaborador_id=None,
+            conteudo=str(text_msg),
+            tipo="saida",
+            lida=True,
+            timestamp=ts,
+            msg_id=str(msg_id) if msg_id else None,
+            ack=1,
+        )
+        db.add(msg)
+        db.commit()
+        return msg
+    except Exception as exc:
+        try:
+            print("[CHATBOT][persist-bot-msg][erro]", repr(exc))
+        except Exception:
+            pass
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return None
+
+
+def _send_and_persist_bot_message(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    cliente_id: int,
+    instancia_nome: str,
+    remote_jid: str,
+    text_msg: str,
+    ts_dt: Optional[datetime] = None,
+) -> Optional[Dict[str, Any]]:
+    evo = _send_text(db, instancia_nome=instancia_nome, remote_jid=remote_jid, text_msg=text_msg)
+    _persist_bot_saida_message(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=int(instancia_id),
+        cliente_id=int(cliente_id),
+        text_msg=text_msg,
+        evo=evo,
+        ts_dt=ts_dt,
+    )
+    return evo
 
 
 def _replace_tokens(template: str, *, empresa_nome: str, menu_departamentos: str) -> str:
@@ -597,6 +794,9 @@ def _sync_open_atendimento_departamento(
     departamento_id: int | None,
     ts_dt: datetime | None,
     operador_id: int | None = None,
+    status_aguardando: bool = False,
+    clear_operador: bool = False,
+    clear_participantes: bool = False,
 ) -> None:
     try:
         update_open_atendimento_departamento_repo(
@@ -607,9 +807,197 @@ def _sync_open_atendimento_departamento(
             departamento_id=departamento_id,
             ts_dt=ts_dt,
             operador_id=operador_id,
+            status_aguardando=status_aguardando,
+            clear_operador=clear_operador,
+            clear_participantes=clear_participantes,
         )
     except Exception:
         return
+
+
+def _status_aguardando_value():
+    status_enum = getattr(models, "StatusAtendimento", None)
+    if status_enum is not None and hasattr(status_enum, "AGUARDANDO"):
+        try:
+            return status_enum.AGUARDANDO
+        except Exception:
+            pass
+    return "aguardando"
+
+
+def _status_novo_value():
+    status_enum = getattr(models, "StatusAtendimento", None)
+    if status_enum is not None and hasattr(status_enum, "NOVO"):
+        try:
+            return status_enum.NOVO
+        except Exception:
+            pass
+    return "novo"
+
+
+def _open_status_values() -> list[Any]:
+    status_enum = getattr(models, "StatusAtendimento", None)
+    vals: list[Any] = []
+    if status_enum is not None:
+        for attr in ("NOVO", "AGUARDANDO", "EM_ATENDIMENTO", "PAUSADO"):
+            if hasattr(status_enum, attr):
+                try:
+                    vals.append(getattr(status_enum, attr))
+                except Exception:
+                    pass
+    vals.extend(["novo", "aguardando", "em_atendimento", "pausado", "aberto", "pendente"])
+
+    out: list[Any] = []
+    seen: set[str] = set()
+    for v in vals:
+        k = str(v)
+        if k not in seen:
+            seen.add(k)
+            out.append(v)
+    return out
+
+
+def _clear_active_participants_safe(db: Session, *, empresa_id: int, atendimento_id: int) -> None:
+    """Remove participantes ativos quando o bot recoloca a conversa em aguardando."""
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE atendimento_participantes
+                   SET is_ativo = false,
+                       is_responsavel = false
+                 WHERE empresa_id = :empresa_id
+                   AND atendimento_id = :atendimento_id
+                   AND is_ativo IS TRUE
+                """
+            ),
+            {"empresa_id": int(empresa_id), "atendimento_id": int(atendimento_id)},
+        )
+    except Exception:
+        # Compatível com banco sem tabela/colunas de participantes.
+        pass
+
+
+def _ensure_waiting_atendimento_for_triage(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    cliente_id: int,
+    departamento_id: int,
+    ts_dt: datetime | None,
+) -> Any | None:
+    """
+    Persistência direta e segura da escolha de departamento.
+
+    Motivo:
+    - O helper legado de atendimento pode dar rollback interno em alguns schemas.
+    - Esse rollback desfazia cliente.departamento_id antes do commit.
+    - Aqui o cliente já foi commitado antes; então, mesmo se o atendimento falhar,
+      a lista ainda consegue usar clientes.departamento_id.
+    """
+    Atendimento = getattr(models, "Atendimento", None)
+    if Atendimento is None:
+        return None
+
+    try:
+        q = db.query(Atendimento).filter(
+            Atendimento.empresa_id == int(empresa_id),
+            Atendimento.cliente_id == int(cliente_id),
+        )
+
+        if hasattr(Atendimento, "instancia_id"):
+            q = q.filter(Atendimento.instancia_id == int(instancia_id))
+
+        if hasattr(Atendimento, "status"):
+            try:
+                q = q.filter(Atendimento.status.in_(_open_status_values()))
+            except Exception:
+                pass
+
+        atendimento = q.order_by(Atendimento.id.desc()).first()
+
+        if atendimento is None:
+            kwargs: dict[str, Any] = {
+                "empresa_id": int(empresa_id),
+                "cliente_id": int(cliente_id),
+            }
+            if hasattr(Atendimento, "instancia_id"):
+                kwargs["instancia_id"] = int(instancia_id)
+            if hasattr(Atendimento, "departamento_id"):
+                kwargs["departamento_id"] = int(departamento_id)
+            if hasattr(Atendimento, "operador_id"):
+                kwargs["operador_id"] = None
+            if hasattr(Atendimento, "status"):
+                kwargs["status"] = _status_aguardando_value()
+            if hasattr(Atendimento, "criado_em") and ts_dt is not None:
+                kwargs["criado_em"] = ts_dt
+            if hasattr(Atendimento, "atualizado_em") and ts_dt is not None:
+                kwargs["atualizado_em"] = ts_dt
+
+            atendimento = Atendimento(**kwargs)
+            db.add(atendimento)
+            db.flush()
+        else:
+            if hasattr(atendimento, "departamento_id"):
+                atendimento.departamento_id = int(departamento_id)
+            if hasattr(atendimento, "operador_id"):
+                atendimento.operador_id = None
+            if hasattr(atendimento, "status"):
+                atendimento.status = _status_aguardando_value()
+            if hasattr(atendimento, "fila_id"):
+                try:
+                    atendimento.fila_id = None
+                except Exception:
+                    pass
+            if hasattr(atendimento, "fila_escolhida_em"):
+                try:
+                    atendimento.fila_escolhida_em = None
+                except Exception:
+                    pass
+            if hasattr(atendimento, "atualizado_em") and ts_dt is not None:
+                atendimento.atualizado_em = ts_dt
+            db.add(atendimento)
+            db.flush()
+
+        atendimento_id = getattr(atendimento, "id", None)
+        if atendimento_id:
+            _clear_active_participants_safe(
+                db,
+                empresa_id=int(empresa_id),
+                atendimento_id=int(atendimento_id),
+            )
+
+        return atendimento
+
+    except Exception as exc:
+        try:
+            print("[CHATBOT][triagem][persist-atendimento][erro]", repr(exc))
+        except Exception:
+            pass
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return None
+
+
+def _commit_cliente_departamento_triagem(
+    db: Session,
+    *,
+    cliente: models.Cliente,
+    departamento_id: int,
+    now: datetime,
+) -> None:
+    """Grava a escolha do departamento antes de qualquer helper legado poder dar rollback."""
+    cliente.departamento_id = int(departamento_id)
+    cliente.colaborador_id = None
+    cliente.triagem_ativa = False
+    cliente.triagem_tentativas = int(cliente.triagem_tentativas or 0) + 1
+    cliente.triagem_ultima_msg_em = now
+    db.add(cliente)
+    db.flush()
+    db.commit()
 
 
 def auto_messages_handle_inbound(
@@ -700,7 +1088,16 @@ def auto_messages_handle_inbound(
     if welcome_enabled and welcome_in_window:
         text_msg = _replace_auto_tokens(str(welcome_cfg.get("text") or "").strip(), empresa_nome=empresa_nome)
         db.commit()
-        _send_text(db, instancia_nome=instancia_nome, remote_jid=remote_jid, text_msg=text_msg)
+        _send_and_persist_bot_message(
+            db,
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+            cliente_id=int(cliente.id),
+            instancia_nome=instancia_nome,
+            remote_jid=remote_jid,
+            text_msg=text_msg,
+            ts_dt=_now_utc(),
+        )
         return {
             "ok": True,
             "action": "sent_welcome",
@@ -711,7 +1108,16 @@ def auto_messages_handle_inbound(
     if off_enabled and off_in_window:
         text_msg = _replace_auto_tokens(str(off_cfg.get("text") or "").strip(), empresa_nome=empresa_nome)
         db.commit()
-        _send_text(db, instancia_nome=instancia_nome, remote_jid=remote_jid, text_msg=text_msg)
+        _send_and_persist_bot_message(
+            db,
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+            cliente_id=int(cliente.id),
+            instancia_nome=instancia_nome,
+            remote_jid=remote_jid,
+            text_msg=text_msg,
+            ts_dt=_now_utc(),
+        )
         return {
             "ok": True,
             "action": "sent_off_hours",
@@ -808,7 +1214,7 @@ def triagem_handle_inbound(
             cliente_id=int(cliente.id),
             departamento_id=int(cliente.departamento_id) if cliente.departamento_id is not None else None,
             ts_dt=now,
-            operador_id=int(cliente.colaborador_id) if cliente.colaborador_id is not None else None,
+            operador_id=None,
         )
         db.commit()
         return {"ok": True, "action": "noop_has_departamento"}
@@ -827,6 +1233,8 @@ def triagem_handle_inbound(
             departamento_id=None,
             ts_dt=now,
             operador_id=None,
+            clear_operador=True,
+            clear_participantes=True,
         )
         db.commit()
         return {"ok": True, "action": "noop_no_deps_enabled"}
@@ -843,12 +1251,23 @@ def triagem_handle_inbound(
             departamento_id=None,
             ts_dt=now,
             operador_id=None,
+            clear_operador=True,
+            clear_participantes=True,
         )
 
         menu = _build_menu_message(empresa_nome=empresa_nome, deps=deps, cfg=cfg)
         db.commit()
 
-        _send_text(db, instancia_nome=instancia_nome, remote_jid=remote_jid, text_msg=menu)
+        _send_and_persist_bot_message(
+            db,
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+            cliente_id=int(cliente.id),
+            instancia_nome=instancia_nome,
+            remote_jid=remote_jid,
+            text_msg=menu,
+            ts_dt=now,
+        )
         return {
             "ok": True,
             "action": "send_menu_ttl_reset",
@@ -859,14 +1278,18 @@ def triagem_handle_inbound(
     dep_id, dep_idx, dep_nome, dep_obj = _parse_departamento_choice(texto, deps)
 
     if dep_id:
-        cliente.departamento_id = dep_id
-        cliente.triagem_ativa = False
-        cliente.triagem_tentativas = int(cliente.triagem_tentativas or 0) + 1
+        # 1) Grava o departamento no cliente primeiro e já commita.
+        # Isso é o que a lista lateral usa como fallback: COALESCE(atendimento.departamento_id, cliente.departamento_id).
+        # Antes, um rollback interno do helper legado podia desfazer essa alteração e a Amanda ficava sem ver nada.
+        _commit_cliente_departamento_triagem(
+            db,
+            cliente=cliente,
+            departamento_id=int(dep_id),
+            now=now,
+        )
 
-        primary = _fetch_primary_colab_id(db, empresa_id=empresa_id, departamento_id=dep_id)
-        if primary:
-            cliente.colaborador_id = primary
-
+        # 2) Depois tenta sincronizar/criar o atendimento aguardando.
+        # Se algum helper legado falhar, o cliente já ficou com departamento_id salvo.
         _sync_open_atendimento_departamento(
             db,
             empresa_id=empresa_id,
@@ -874,19 +1297,48 @@ def triagem_handle_inbound(
             cliente_id=int(cliente.id),
             departamento_id=int(dep_id),
             ts_dt=now,
-            operador_id=int(primary) if primary is not None else None,
+            operador_id=None,
+            status_aguardando=True,
+            clear_operador=True,
+            clear_participantes=True,
         )
 
-        db.commit()
+        _ensure_waiting_atendimento_for_triage(
+            db,
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+            cliente_id=int(cliente.id),
+            departamento_id=int(dep_id),
+            ts_dt=now,
+        )
+
+        try:
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
         ack = _build_assign_ack(empresa_nome=empresa_nome, dep=dep_obj)
-        _send_text(db, instancia_nome=instancia_nome, remote_jid=remote_jid, text_msg=ack)
+        _send_and_persist_bot_message(
+            db,
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+            cliente_id=int(cliente.id),
+            instancia_nome=instancia_nome,
+            remote_jid=remote_jid,
+            text_msg=ack,
+            ts_dt=now,
+        )
         return {
             "ok": True,
-            "action": "assign",
+            "action": "assign_department_waiting",
             "departamento_id": dep_id,
             "departamento_idx": dep_idx,
             "departamento_nome": dep_nome,
+            "status": "aguardando",
+            "operador_id": None,
         }
 
     tentativas_antes = int(cliente.triagem_tentativas or 0)
@@ -915,7 +1367,16 @@ def triagem_handle_inbound(
         db.commit()
 
         fallback_msg = _build_fallback_message(empresa_nome=empresa_nome, cfg=cfg)
-        _send_text(db, instancia_nome=instancia_nome, remote_jid=remote_jid, text_msg=fallback_msg)
+        _send_and_persist_bot_message(
+            db,
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+            cliente_id=int(cliente.id),
+            instancia_nome=instancia_nome,
+            remote_jid=remote_jid,
+            text_msg=fallback_msg,
+            ts_dt=now,
+        )
         return {
             "ok": True,
             "action": "fallback",
@@ -930,7 +1391,16 @@ def triagem_handle_inbound(
 
     db.commit()
 
-    _send_text(db, instancia_nome=instancia_nome, remote_jid=remote_jid, text_msg=menu)
+    _send_and_persist_bot_message(
+        db,
+        empresa_id=empresa_id,
+        instancia_id=instancia_id,
+        cliente_id=int(cliente.id),
+        instancia_nome=instancia_nome,
+        remote_jid=remote_jid,
+        text_msg=menu,
+        ts_dt=now,
+    )
     return {
         "ok": True,
         "action": "send_menu",

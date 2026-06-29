@@ -58,6 +58,7 @@ from backend.routers import chatbot_config as chatbot_config_router
 from backend.routers import admin_planos
 from backend.routers.perfil import router as perfil_router
 from backend.routers.meu_plano import router as meu_plano_router
+from backend.routers.integracoes_valora import router as integracoes_valora_router
 
 # ✅ Router de filas
 from backend.routers import filas as filas_router
@@ -1021,6 +1022,7 @@ app.include_router(clientes.router, prefix="/api", tags=["Clientes"])
 
 app.include_router(atendimento_conversas_router, prefix="/api/atendimento")
 app.include_router(atendimento.router, prefix="/api/atendimento", tags=["Atendimento"])
+app.include_router(integracoes_valora_router, prefix="/api/atendimento", tags=["Integrações - Valora"])
 
 app.include_router(email_router)
 app.include_router(disparos_router)
@@ -1334,6 +1336,29 @@ async def root_redirect(request: Request):
         "build": BUILD_ID,
     }
 
+
+
+@app.get("/zapschat/abrir-conversa", include_in_schema=False)
+def zapschat_abrir_conversa(
+    telefone: str = "",
+    origem: str = "valora",
+    cliente_id: str = "",
+):
+    digits = re.sub(r"\D+", "", str(telefone or ""))
+
+    params = {
+        "origem": origem or "valora",
+    }
+
+    if digits:
+        params["abrir_telefone"] = digits
+    else:
+        params["abrir_erro"] = "telefone_invalido"
+
+    if cliente_id:
+        params["valora_cliente_id"] = str(cliente_id)
+
+    return RedirectResponse(url=f"/atendimentos?{urlencode(params)}", status_code=302)
 
 @app.get("/dashboard", include_in_schema=False)
 def dashboard():

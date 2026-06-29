@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 import re
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -100,6 +101,21 @@ class DepartamentoOut(BaseModel):
 
 class MoveIn(BaseModel):
     new_parent_id: int | None = Field(default=None)
+
+
+class DepartamentoMembroOut(BaseModel):
+    id: int
+    nome: str
+    email: str | None = None
+    telefone: str | None = None
+    cargo: str | None = None
+    avatar_url: str | None = None
+    role: str = "member"
+    is_primary: bool = False
+
+
+class DepartamentoMembrosUpdate(BaseModel):
+    colaboradores_ids: List[int] = Field(default_factory=list)
 
 
 # ==========================================================
@@ -588,6 +604,164 @@ def _rows_departamentos_empresa(db: Session, empresa_id: int) -> list[Dict[str, 
 
 
 # ==========================================================
+# Helpers: membros do departamento
+# ==========================================================
+def _avatar_url_colaborador(nome: Optional[str], email: Optional[str]) -> str:
+    seed = (nome or email or "Colaborador").strip() or "Colaborador"
+    return (
+        "https://api.dicebear.com/7.x/initials/svg"
+        f"?seed={quote(seed)}&radius=12&scale=100"
+    )
+
+
+def _normalize_int_list(raw: Any) -> list[int]:
+    if raw is None:
+        return []
+
+    if isinstance(raw, str):
+        raw = [p for p in re.split(r"[\s,;]+", raw.strip()) if p]
+
+    if not isinstance(raw, list):
+        raw = [raw]
+
+    out: list[int] = []
+    seen: set[int] = set()
+
+    for item in raw:
+        if isinstance(item, dict):
+            item = item.get("id") or item.get("colaborador_id") or item.get("value")
+
+        try:
+            n = int(item)
+        except Exception:
+            continue
+
+        if n <= 0 or n in seen:
+            continue
+
+        seen.add(n)
+        out.append(n)
+
+    return out
+
+
+def _validate_colaboradores_ids_empresa(
+    db: Session,
+    *,
+    empresa_id: int,
+    colaboradores_ids: list[int],
+) -> list[int]:
+    ids = _normalize_int_list(colaboradores_ids)
+
+    if not ids:
+        return []
+
+    rows = (
+        db.query(models.Colaborador.id)
+        .filter(
+            models.Colaborador.empresa_id == int(empresa_id),
+            models.Colaborador.id.in_(ids),
+        )
+        .all()
+    )
+
+    valid_ids = {int(r[0]) for r in rows if r and r[0] is not None}
+    invalid = [x for x in ids if x not in valid_ids]
+
+    if invalid:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Colaborador(es) inválido(s) para a empresa: {invalid}",
+        )
+
+    return [x for x in ids if x in valid_ids]
+
+
+def _get_departamento_membros(
+    db: Session,
+    *,
+    empresa_id: int,
+    departamento_id: int,
+) -> list[DepartamentoMembroOut]:
+    rows = (
+        db.query(models.DepartamentoMembro, models.Colaborador)
+        .join(
+            models.Colaborador,
+            models.Colaborador.id == models.DepartamentoMembro.colaborador_id,
+        )
+        .filter(
+            models.DepartamentoMembro.empresa_id == int(empresa_id),
+            models.DepartamentoMembro.departamento_id == int(departamento_id),
+            models.Colaborador.empresa_id == int(empresa_id),
+        )
+        .order_by(
+            models.DepartamentoMembro.is_primary.desc(),
+            func.lower(models.Colaborador.nome),
+        )
+        .all()
+    )
+
+    out: list[DepartamentoMembroOut] = []
+
+    for membro, colab in rows:
+        out.append(
+            DepartamentoMembroOut(
+                id=int(colab.id),
+                nome=colab.nome or "Colaborador",
+                email=colab.email,
+                telefone=getattr(colab, "telefone", None),
+                cargo=getattr(colab, "cargo", None),
+                avatar_url=_avatar_url_colaborador(colab.nome, colab.email),
+                role=getattr(membro, "role", None) or "member",
+                is_primary=bool(getattr(membro, "is_primary", False)),
+            )
+        )
+
+    return out
+
+
+def _sync_departamento_membros(
+    db: Session,
+    *,
+    empresa_id: int,
+    departamento_id: int,
+    colaboradores_ids: list[int],
+) -> list[DepartamentoMembroOut]:
+    ids = _validate_colaboradores_ids_empresa(
+        db,
+        empresa_id=int(empresa_id),
+        colaboradores_ids=colaboradores_ids,
+    )
+
+    (
+        db.query(models.DepartamentoMembro)
+        .filter(
+            models.DepartamentoMembro.empresa_id == int(empresa_id),
+            models.DepartamentoMembro.departamento_id == int(departamento_id),
+        )
+        .delete(synchronize_session=False)
+    )
+
+    for idx, colab_id in enumerate(ids):
+        db.add(
+            models.DepartamentoMembro(
+                empresa_id=int(empresa_id),
+                departamento_id=int(departamento_id),
+                colaborador_id=int(colab_id),
+                role="member",
+                is_primary=(idx == 0),
+            )
+        )
+
+    db.flush()
+    return _get_departamento_membros(
+        db,
+        empresa_id=int(empresa_id),
+        departamento_id=int(departamento_id),
+    )
+
+
+# ==========================================================
 # Rotas
 # ==========================================================
 @router.get("", response_model=List[DepartamentoOut])
@@ -637,6 +811,49 @@ def obter(
     out["path"] = path_by_id.get(int(dept.id), out.get("path"))
 
     return DepartamentoOut(**out)
+
+
+@router.get("/{dept_id}/membros", response_model=List[DepartamentoMembroOut])
+def listar_membros(
+    dept_id: int,
+    empresa_id: int = Depends(resolve_empresa_id),
+    db: Session = Depends(get_db),
+):
+    ensure_empresa_exists(db, empresa_id)
+    get_departamento_or_404(db, empresa_id, dept_id)
+
+    return _get_departamento_membros(
+        db,
+        empresa_id=int(empresa_id),
+        departamento_id=int(dept_id),
+    )
+
+
+@router.put("/{dept_id}/membros", response_model=List[DepartamentoMembroOut])
+def atualizar_membros(
+    dept_id: int,
+    payload: DepartamentoMembrosUpdate,
+    empresa_id: int = Depends(resolve_empresa_id),
+    db: Session = Depends(get_db),
+):
+    ensure_empresa_exists(db, empresa_id)
+    get_departamento_or_404(db, empresa_id, dept_id)
+
+    try:
+        membros = _sync_departamento_membros(
+            db,
+            empresa_id=int(empresa_id),
+            departamento_id=int(dept_id),
+            colaboradores_ids=_normalize_int_list(payload.colaboradores_ids),
+        )
+        db.commit()
+        return membros
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.post("", response_model=DepartamentoOut, status_code=status.HTTP_201_CREATED)
@@ -913,7 +1130,20 @@ def _cleanup_departamento_references_before_delete(
             table_lower = table_name.lower()
             is_pivot_or_link = (
                 "departamento" in table_lower
-                and any(k in table_lower for k in ("instancia", "usuario", "user", "whatsapp", "setor", "permiss"))
+                and any(
+                    k in table_lower
+                    for k in (
+                        "instancia",
+                        "usuario",
+                        "user",
+                        "whatsapp",
+                        "setor",
+                        "permiss",
+                        "membro",
+                        "member",
+                        "colaborador",
+                    )
+                )
             )
 
             if is_pivot_or_link:
@@ -988,6 +1218,8 @@ compat_router = APIRouter(
 compat_router.add_api_route("", listar, methods=["GET"], response_model=List[DepartamentoOut])
 compat_router.add_api_route("/tree", tree, methods=["GET"], response_model=List[DepartamentoOut])
 compat_router.add_api_route("/{dept_id}", obter, methods=["GET"], response_model=DepartamentoOut)
+compat_router.add_api_route("/{dept_id}/membros", listar_membros, methods=["GET"], response_model=List[DepartamentoMembroOut])
+compat_router.add_api_route("/{dept_id}/membros", atualizar_membros, methods=["PUT"], response_model=List[DepartamentoMembroOut])
 compat_router.add_api_route("", criar, methods=["POST"], response_model=DepartamentoOut, status_code=status.HTTP_201_CREATED)
 compat_router.add_api_route("/{dept_id}", atualizar, methods=["PUT"], response_model=DepartamentoOut)
 compat_router.add_api_route("/{dept_id}", mover, methods=["PATCH"], status_code=status.HTTP_204_NO_CONTENT)

@@ -44,7 +44,7 @@
     }
 
     .brand-side {
-      background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
+      background: url("/img/cadastro-zapschat-side.png") center center / cover no-repeat;
       display: flex;
       flex-direction: column;
       justify-content: center;
@@ -57,15 +57,12 @@
       content: "";
       position: absolute;
       inset: 0;
-      background-image: radial-gradient(rgba(255,255,255,0.15) 1px, transparent 1px);
-      background-size: 24px 24px;
-      opacity: 0.6;
+      background: transparent;
+      pointer-events: none;
     }
 
     .brand-content {
-      position: relative;
-      z-index: 2;
-      max-width: 480px;
+      display: none;
     }
 
     .brand-quote {

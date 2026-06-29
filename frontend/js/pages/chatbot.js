@@ -2,16 +2,16 @@
 // Chatbot Config – ZapsChat
 // ✅ Modo 1: Resposta automática simples
 // ✅ Modo 2: Menu para o cliente escolher a FILA
-// ✅ Busca filas em: /api/filas/publicas?empresa_id=...&instancia_id=...
+// ✅ Usa departamentos retornados por: /api/chatbot/config?empresa_id=...&instancia_id=...
 // ✅ Mantém IDs antigos "dept..." no DOM para não quebrar CSS/HTML
 // ✅ Salva config em /api/chatbot/config
-// ✅ A fila NÃO fica fixa no cliente; ela será aplicada depois no atendimento quando o cliente escolher.
-// ✅ Corrigido: filas NÃO vêm marcadas por padrão. O usuário precisa marcar manualmente.
+// ✅ O departamento é aplicado no atendimento quando o cliente escolher.
+// ✅ Corrigido: departamentos NÃO vêm marcados por padrão. O usuário precisa marcar manualmente.
 
 (() => {
   'use strict';
 
-  const VERSION = 'zc-chatbot-saas-midias-clean-v3';
+  const VERSION = 'zc-chatbot-departamentos-v2';
   if (window.__ZC_CHATBOT_PAGE_VERSION__ === VERSION) return;
   window.__ZC_CHATBOT_PAGE_VERSION__ = VERSION;
 
@@ -61,9 +61,9 @@
 
     box.style.cssText =
       'min-width:280px;max-width:520px;padding:12px 14px;border-radius:12px;' +
-      'box-shadow:0 8px 28px rgba(0,0,0,.25);font:14px/1.35 system-ui;transition:.25s';
+      'box-shadow:0 8px 28px rgba(0,0,0,.25);font:14px/1.35 Inter,system-ui;transition:.25s';
 
-    const color = kind === 'error' ? '#fee2e2' : kind === 'warn' ? '#fef3c7' : '#dbeafe';
+    const color = kind === 'error' ? '#fee2e2' : kind === 'warn' ? '#fef3c7' : '#ecfeff';
     box.style.background = color;
     box.style.color = '#0f172a';
     box.textContent = msg;
@@ -77,72 +77,134 @@
     }, 2800);
   }
 
+  function showRobotCelebration() {
+    const box = document.getElementById('robotCelebration');
+    if (!box) return;
+    box.classList.remove('show');
+    box.setAttribute('aria-hidden', 'false');
+    clearTimeout(showRobotCelebration._t);
+    requestAnimationFrame(() => {
+      box.classList.add('show');
+      showRobotCelebration._t = setTimeout(() => {
+        box.classList.remove('show');
+        box.setAttribute('aria-hidden', 'true');
+      }, 3200);
+    });
+  }
+
+  function initRobotUI() {
+    const onboard = document.getElementById('robotOnboarding');
+    const onboardClose = document.getElementById('robotOnboardingClose');
+    const tip = document.getElementById('robotTipCard');
+    const tipClose = document.getElementById('robotTipClose');
+
+    const ONBOARD_KEY = 'zc-chatbot-robot-onboarding-closed:v1';
+    const TIP_KEY = 'zc-chatbot-robot-tip-closed:v1';
+
+    try {
+      if (onboard && LS.getItem(ONBOARD_KEY) !== '1') onboard.hidden = false;
+      if (tip && LS.getItem(TIP_KEY) !== '1') tip.hidden = false;
+    } catch (_) {
+      if (onboard) onboard.hidden = false;
+      if (tip) tip.hidden = false;
+    }
+
+    onboardClose?.addEventListener('click', () => {
+      if (onboard) onboard.hidden = true;
+      try { LS.setItem(ONBOARD_KEY, '1'); } catch (_) {}
+    });
+
+    tipClose?.addEventListener('click', () => {
+      if (tip) tip.hidden = true;
+      try { LS.setItem(TIP_KEY, '1'); } catch (_) {}
+    });
+  }
+
   function notify({ title = 'Atenção', message = '', kind = 'warn', details = null, actions = [] } = {}) {
     const overlay = el('div');
-    overlay.style.cssText =
-      'position:fixed;inset:0;background:rgba(0,0,0,.28);z-index:100000;' +
-      'display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.className = `zc-clean-modal zc-clean-modal--${kind || 'warn'}`;
+    overlay.setAttribute('role', 'presentation');
 
     const card = el('div');
-    card.style.cssText =
-      'width:min(680px,96vw);background:#0b0b13;color:#e5e7eb;border:1px solid #1f2937;' +
-      'border-radius:16px;padding:18px 18px 14px;box-shadow:0 10px 40px rgba(0,0,0,.45);' +
-      'font:14px/1.5 system-ui';
+    card.className = 'zc-clean-dialog';
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-modal', 'true');
+    card.setAttribute('aria-labelledby', 'zc-clean-notify-title');
 
     const head = el('div');
-    head.style.cssText =
-      'font-weight:700;font-size:16px;margin-bottom:8px;display:flex;gap:8px;align-items:center';
+    head.className = 'zc-clean-dialog__head';
 
-    const dot = el('span');
-    dot.style.cssText = 'width:10px;height:10px;border-radius:50%';
-    dot.style.background = kind === 'error' ? '#ef4444' : (kind === 'warn' ? '#f59e0b' : '#60a5fa');
+    const icon = el('span');
+    icon.className = 'zc-clean-dialog__icon';
+    icon.innerHTML = kind === 'error'
+      ? '<i class="fa-solid fa-triangle-exclamation"></i>'
+      : (kind === 'success' ? '<i class="fa-solid fa-check"></i>' : '<i class="fa-solid fa-circle-info"></i>');
 
-    const h = el('span');
+    const titleWrap = el('div');
+    titleWrap.className = 'zc-clean-dialog__titlewrap';
+
+    const h = el('h3');
+    h.id = 'zc-clean-notify-title';
     h.textContent = title;
-    head.append(dot, h);
 
-    const p = el('div');
-    p.innerHTML = String(message || '').replace(/\n/g, '<br>');
-    p.style.marginBottom = '8px';
+    titleWrap.append(h);
+    head.append(icon, titleWrap);
+
+    const body = el('div');
+    body.className = 'zc-clean-dialog__body';
+    body.innerHTML = String(message || '').replace(/\n/g, '<br>');
 
     const detWrap = el('div');
-    detWrap.style.display = details ? '' : 'none';
+    detWrap.className = 'zc-clean-dialog__details';
+    detWrap.hidden = !details;
 
     const toggle = el('button');
     toggle.type = 'button';
+    toggle.className = 'zc-clean-dialog__details-btn';
     toggle.textContent = 'Ver detalhes técnicos';
-    toggle.style.cssText = 'background:none;border:0;color:#93c5fd;text-decoration:underline;cursor:pointer;padding:0;margin:6px 0';
 
     const pre = el('pre');
     pre.textContent = details || '';
-    pre.style.cssText =
-      'white-space:pre-wrap;margin:8px 0 0;background:#0f172a;border:1px solid #1f2937;' +
-      'border-radius:10px;padding:10px;max-height:38vh;overflow:auto;font-size:12px;display:none';
+    pre.hidden = true;
 
     toggle.addEventListener('click', () => {
-      pre.style.display = pre.style.display === 'none' ? 'block' : 'none';
+      pre.hidden = !pre.hidden;
+      toggle.textContent = pre.hidden ? 'Ver detalhes técnicos' : 'Ocultar detalhes técnicos';
     });
 
     detWrap.append(toggle, pre);
 
     const footer = el('div');
-    footer.style.cssText = 'display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:12px';
+    footer.className = 'zc-clean-dialog__footer';
+
+    actions.forEach((actionBtn) => {
+      if (actionBtn && actionBtn.nodeType === 1) {
+        actionBtn.classList.add('zc-clean-dialog__action');
+      }
+    });
 
     const ok = el('button');
     ok.type = 'button';
     ok.textContent = 'OK';
-    ok.style.cssText = 'padding:8px 14px;border-radius:10px;background:#c7d2fe;color:#111827;border:0;font-weight:600;cursor:pointer';
+    ok.className = 'zc-clean-dialog__btn zc-clean-dialog__btn--primary';
     ok.addEventListener('click', () => overlay.remove());
 
     footer.append(...actions, ok);
-    card.append(head, p, detWrap, footer);
+    card.append(head, body, detWrap, footer);
 
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) overlay.remove();
     });
 
+    document.addEventListener('keydown', function onEsc(e){
+      if (e.key !== 'Escape') return;
+      overlay.remove();
+      document.removeEventListener('keydown', onEsc);
+    });
+
     overlay.appendChild(card);
     document.body.appendChild(overlay);
+    setTimeout(() => ok.focus?.(), 0);
   }
 
   function confirmAction({
@@ -154,47 +216,50 @@
   } = {}) {
     return new Promise((resolve) => {
       const overlay = el('div');
-      overlay.style.cssText =
-        'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:100001;' +
-        'display:flex;align-items:center;justify-content:center;padding:20px';
+      overlay.className = `zc-clean-modal zc-clean-modal--${kind || 'warn'}`;
+      overlay.setAttribute('role', 'presentation');
 
       const card = el('div');
-      card.style.cssText =
-        'width:min(520px,96vw);background:#0b0b13;color:#e5e7eb;border:1px solid #1f2937;' +
-        'border-radius:16px;padding:18px 18px 14px;box-shadow:0 10px 40px rgba(0,0,0,.45);' +
-        'font:14px/1.5 system-ui';
+      card.className = 'zc-clean-dialog zc-clean-dialog--confirm';
+      card.setAttribute('role', 'dialog');
+      card.setAttribute('aria-modal', 'true');
+      card.setAttribute('aria-labelledby', 'zc-clean-confirm-title');
 
       const head = el('div');
-      head.style.cssText =
-        'font-weight:700;font-size:16px;margin-bottom:8px;display:flex;gap:8px;align-items:center';
+      head.className = 'zc-clean-dialog__head';
 
-      const dot = el('span');
-      dot.style.cssText = 'width:10px;height:10px;border-radius:50%';
-      dot.style.background = kind === 'error' ? '#ef4444' : (kind === 'warn' ? '#f59e0b' : '#60a5fa');
+      const icon = el('span');
+      icon.className = 'zc-clean-dialog__icon';
+      icon.innerHTML = kind === 'error'
+        ? '<i class="fa-solid fa-trash-can"></i>'
+        : (kind === 'success' ? '<i class="fa-solid fa-check"></i>' : '<i class="fa-solid fa-power-off"></i>');
 
-      const h = el('span');
+      const titleWrap = el('div');
+      titleWrap.className = 'zc-clean-dialog__titlewrap';
+
+      const h = el('h3');
+      h.id = 'zc-clean-confirm-title';
       h.textContent = title;
-      head.append(dot, h);
 
-      const p = el('div');
-      p.innerHTML = String(message || '').replace(/\n/g, '<br>');
+      titleWrap.append(h);
+      head.append(icon, titleWrap);
+
+      const body = el('div');
+      body.className = 'zc-clean-dialog__body';
+      body.innerHTML = String(message || '').replace(/\n/g, '<br>');
 
       const footer = el('div');
-      footer.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:16px';
+      footer.className = 'zc-clean-dialog__footer';
 
       const cancel = el('button');
       cancel.type = 'button';
       cancel.textContent = cancelText;
-      cancel.style.cssText =
-        'padding:8px 14px;border-radius:10px;background:#111827;color:#e5e7eb;' +
-        'border:1px solid #374151;font-weight:600;cursor:pointer';
+      cancel.className = 'zc-clean-dialog__btn zc-clean-dialog__btn--ghost';
 
       const confirm = el('button');
       confirm.type = 'button';
       confirm.textContent = confirmText;
-      confirm.style.cssText =
-        'padding:8px 14px;border-radius:10px;background:#ef4444;color:#fff;' +
-        'border:0;font-weight:700;cursor:pointer';
+      confirm.className = 'zc-clean-dialog__btn zc-clean-dialog__btn--danger';
 
       function close(v) {
         overlay.remove();
@@ -207,10 +272,17 @@
         if (e.target === overlay) close(false);
       });
 
+      document.addEventListener('keydown', function onEsc(e){
+        if (e.key !== 'Escape') return;
+        close(false);
+        document.removeEventListener('keydown', onEsc);
+      });
+
       footer.append(cancel, confirm);
-      card.append(head, p, footer);
+      card.append(head, body, footer);
       overlay.appendChild(card);
       document.body.appendChild(overlay);
+      setTimeout(() => cancel.focus?.(), 0);
     });
   }
 
@@ -220,7 +292,7 @@
       400: ['Não foi possível salvar', 'Revise os horários e os textos das mensagens.'],
       401: ['Sessão expirada', 'Faça login novamente para continuar.'],
       403: ['Permissão negada', 'Você não pode alterar esta instância.'],
-      404: ['Não encontrado', 'A instância, configuração ou fila não foi encontrada.'],
+      404: ['Não encontrado', 'A instância, configuração ou departamento não foi encontrada.'],
       409: ['Conflito', 'As configurações mudaram enquanto você editava.'],
       422: ['Dados incompletos', 'Preencha os campos obrigatórios e salve de novo.'],
       429: ['Muitas tentativas', 'Aguarde alguns segundos e tente novamente.'],
@@ -249,7 +321,7 @@
   function lockUI(locked, msg) {
     const controls = document.querySelectorAll(
       '.tswitch input, textarea, input[type="time"], #saveAuto, #saveDept, ' +
-      'button:not(#instMenuBtnChat):not(.inst-item):not(#helpChatbotBtn):not(.help-close):not([data-close-modal]), select'
+      'button:not(#instMenuBtnChat):not(.inst-item):not(#helpChatbotBtn):not(#automationHelpBtn):not(.help-close):not([data-close-modal]), select'
     );
 
     controls.forEach(x => {
@@ -359,7 +431,7 @@
           end: '08:00'
         }
       },
-      auto_messages_filas: {
+      auto_messages_departments: {
         enabled: false,
         welcome: {
           enabled: false,
@@ -387,7 +459,7 @@ Bem-vindo(a) à {empresa}.
 
 Para direcionar seu atendimento, escolha uma opção abaixo:
 
-{menu_filas}
+{menu_departamentos}
 
 Digite apenas o número da opção desejada.`
     );
@@ -441,6 +513,12 @@ Digite apenas o número da opção desejada.`
   function ensureMasters(c) {
     c.features ??= {};
 
+    // Compatibilidade com configs antigas salvas como auto_messages_filas.
+    if (!c.features.auto_messages_departments && c.features.auto_messages_filas) {
+      c.features.auto_messages_departments = c.features.auto_messages_filas;
+    }
+    delete c.features.auto_messages_filas;
+
     c.features.auto_messages ??= {};
     if (typeof c.features.auto_messages.enabled !== 'boolean') {
       c.features.auto_messages.enabled = false;
@@ -460,7 +538,7 @@ Digite apenas o número da opção desejada.`
       end: '08:00'
     };
 
-    c.features.auto_messages_filas ??= {
+    c.features.auto_messages_departments ??= {
       enabled: false,
       welcome: {
         enabled: false,
@@ -471,15 +549,15 @@ Digite apenas o número da opção desejada.`
       items: {}
     };
 
-    c.features.auto_messages_filas.welcome ??= {
+    c.features.auto_messages_departments.welcome ??= {
       enabled: false,
       text: '',
       start: '08:00',
       end: '18:00'
     };
 
-    if (!c.features.auto_messages_filas.items || typeof c.features.auto_messages_filas.items !== 'object' || Array.isArray(c.features.auto_messages_filas.items)) {
-      c.features.auto_messages_filas.items = {};
+    if (!c.features.auto_messages_departments.items || typeof c.features.auto_messages_departments.items !== 'object' || Array.isArray(c.features.auto_messages_departments.items)) {
+      c.features.auto_messages_departments.items = {};
     }
 
     c.timezone = (c.timezone || '').trim() || FALLBACK_TZ;
@@ -487,7 +565,7 @@ Digite apenas o número da opção desejada.`
 
   function filaFeature() {
     ensureMasters(cfg);
-    return cfg.features.auto_messages_filas;
+    return cfg.features.auto_messages_departments;
   }
 
   function ensureFilaItems() {
@@ -516,10 +594,184 @@ Digite apenas o número da opção desejada.`
     } catch {}
 
     if (ta === msgWelcome && wcCount) wcCount.textContent = `${ta.value.length} caracteres`;
+    if (ta === msgOff && offCount) offCount.textContent = `${ta.value.length} caracteres`;
     if (ta === msgDeptWelcome && dwCount) dwCount.textContent = `${ta.value.length} caracteres`;
 
     if (ta === msgWelcome) renderWelcomePreview();
+    if (ta === msgOff) renderOffPreview();
     if (ta === msgDeptWelcome) renderFilaPreview();
+
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function variableOptionsFor(targetId) {
+    const common = [
+      {
+        label: 'Nome da empresa',
+        value: '{empresa}',
+        hint: 'O sistema coloca o nome da empresa sozinho.'
+      },
+      {
+        label: 'Saudação pronta',
+        value: 'Olá! 👋\n',
+        hint: 'Coloca um começo simples para a mensagem.'
+      }
+    ];
+
+    if (targetId === 'msgDeptWelcome') {
+      return [
+        ...common,
+        {
+          label: 'Lista de departamentos/opções',
+          value: '{menu_departamentos}',
+          hint: 'Mostra as opções para o cliente escolher, tipo Vendas, Suporte e Financeiro.'
+        },
+        {
+          label: 'Instrução para escolher',
+          value: 'Digite apenas o número da opção desejada.',
+          hint: 'Explica para o cliente o que ele deve fazer.'
+        }
+      ];
+    }
+
+    return common;
+  }
+
+  function closeVariablePopover() {
+    const old = document.getElementById('zcVariablePopover');
+    if (old) old.remove();
+    document.removeEventListener('keydown', closeVariablePopover._esc);
+    document.removeEventListener('click', closeVariablePopover._doc, true);
+  }
+
+  function activateEditorForVariable(targetId) {
+    if (targetId === 'msgWelcome') {
+      setHeaderSwitch(swAutoHdr, pillAutoHdr, true);
+      setSwitch(swWelcome, true, pillWelcome);
+    }
+
+    if (targetId === 'msgOff') {
+      setHeaderSwitch(swAutoHdr, pillAutoHdr, true);
+      setSwitch(swOff, true, pillOff);
+    }
+
+    if (targetId === 'msgDeptWelcome') {
+      setHeaderSwitch(swDeptHdr, pillDeptHdr, true);
+      setSwitch(swDeptWelcome, true, pillDeptWelcome);
+    }
+
+    syncSectionState();
+  }
+
+  function openVariablePopover(btn, textarea) {
+    if (!btn || !textarea) return;
+
+    closeVariablePopover();
+
+    const targetId = btn.dataset.target || textarea.id || '';
+    const items = variableOptionsFor(targetId);
+
+    const pop = document.createElement('div');
+    pop.id = 'zcVariablePopover';
+    pop.className = 'variable-popover';
+    pop.setAttribute('role', 'menu');
+    pop.innerHTML = `
+      <div class="variable-popover-title"><strong>Adicionar informação automática</strong><small>Escolha o que o sistema coloca sozinho na mensagem.</small></div>
+      <div class="variable-popover-list"></div>
+    `;
+
+    const list = pop.querySelector('.variable-popover-list');
+
+    items.forEach(item => {
+      const opt = document.createElement('button');
+      opt.type = 'button';
+      opt.className = 'variable-option';
+      opt.setAttribute('role', 'menuitem');
+      opt.innerHTML = `
+        <span>
+          <strong>${escapeHtml(item.label)}</strong>
+          <small>${escapeHtml(item.hint || item.value)}</small>
+        </span>
+        <code>${escapeHtml(item.value)}</code>
+      `;
+
+      opt.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        activateEditorForVariable(targetId);
+        insertAtCaret(textarea, item.value);
+        updateSaveButtons();
+        schedulePersist(250, { silent: true });
+        scheduleSummaryRefresh();
+        closeVariablePopover();
+      });
+
+      list.appendChild(opt);
+    });
+
+    document.body.appendChild(pop);
+
+    const r = btn.getBoundingClientRect();
+    const pr = pop.getBoundingClientRect();
+    const top = Math.min(window.innerHeight - pr.height - 12, r.bottom + 8);
+    const left = Math.max(12, Math.min(window.innerWidth - pr.width - 12, r.right - pr.width));
+
+    pop.style.top = `${Math.max(12, top)}px`;
+    pop.style.left = `${left}px`;
+
+    closeVariablePopover._esc = (e) => {
+      if (e.key === 'Escape') closeVariablePopover();
+    };
+    closeVariablePopover._doc = (e) => {
+      if (!pop.contains(e.target) && !btn.contains(e.target)) closeVariablePopover();
+    };
+
+    setTimeout(() => {
+      document.addEventListener('keydown', closeVariablePopover._esc);
+      document.addEventListener('click', closeVariablePopover._doc, true);
+    }, 0);
+  }
+
+  function handleVariableButtonClick(e, btn) {
+    if (!btn) return;
+
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
+
+    const targetId = btn.dataset.target || '';
+    const textarea = targetId ? document.getElementById(targetId) : null;
+
+    if (!textarea) {
+      toast('Campo de mensagem não encontrado.', 'warn');
+      return;
+    }
+
+    /*
+      Importante: em algumas versões o clique não chegava no botão porque
+      outros listeners do card/accordion interceptavam o evento. Por isso
+      o clique agora também é tratado por delegação em capture.
+    */
+    activateEditorForVariable(targetId);
+    openVariablePopover(btn, textarea);
+  }
+
+  function bindVariableButtons() {
+    if (document.documentElement.dataset.zcVariableDelegated !== '1') {
+      document.documentElement.dataset.zcVariableDelegated = '1';
+
+      document.addEventListener('click', (e) => {
+        const btn = e.target?.closest?.('.insert-variable');
+        if (!btn) return;
+        handleVariableButtonClick(e, btn);
+      }, true);
+    }
+
+    $$('.insert-variable').forEach(btn => {
+      if (btn.dataset.boundVariable === '1') return;
+      btn.dataset.boundVariable = '1';
+
+      btn.addEventListener('click', (e) => handleVariableButtonClick(e, btn));
+    });
   }
 
   function timeValid(v) {
@@ -591,7 +843,7 @@ Digite apenas o número da opção desejada.`
     const selected = getSelectedFilas();
 
     if (!selected.length) {
-      return 'Nenhuma fila selecionada';
+      return 'Nenhum departamento selecionado';
     }
 
     return selected
@@ -626,11 +878,11 @@ Digite apenas o número da opção desejada.`
     wrap.innerHTML = '';
 
     const chips = [
-      { label: '{empresa}', insert: '{empresa}' },
-      { label: '{menu_filas}', insert: '{menu_filas}' },
-      { label: '👋 Saudação', insert: 'Olá! 👋\nBem-vindo(a) à {empresa}.\n\n' },
-      { label: '📋 Direcionar', insert: 'Para direcionar seu atendimento, escolha uma opção abaixo:\n\n{menu_filas}\n\n' },
-      { label: '🔢 Instrução final', insert: 'Digite apenas o número da opção desejada.' },
+      { label: 'Empresa', insert: '{empresa}' },
+      { label: 'Lista de departamentos', insert: '{menu_departamentos}' },
+      { label: 'Saudação pronta', insert: 'Olá! 👋\nBem-vindo(a) à {empresa}.\n\n' },
+      { label: 'Texto do menu', insert: 'Para direcionar seu atendimento, escolha uma opção abaixo:\n\n{menu_departamentos}\n\n' },
+      { label: 'Instrução final', insert: 'Digite apenas o número da opção desejada.' },
     ];
 
     chips.forEach(c => {
@@ -689,10 +941,10 @@ Digite apenas o número da opção desejada.`
 
     const isDefaultLike =
       !current ||
-      current.includes('{menu_filas}') ||
+      current.includes('{menu_departamentos}') ||
       current.includes('{menu_departamentos}') ||
       current.includes('Digite apenas o número da opção desejada.') ||
-      current.includes('Você está falando com o setor');
+      current.includes('Você está falando com o departamento');
 
     if (msgDeptWelcome && isDefaultLike) {
       msgDeptWelcome.value = buildFilaTriagemTemplate();
@@ -733,7 +985,7 @@ Digite apenas o número da opção desejada.`
     if (!Array.isArray(_filaCache) || !_filaCache.length) {
       const empty = document.createElement('div');
       empty.className = 'dept-empty';
-      empty.innerHTML = 'Nenhuma fila encontrada. Cadastre filas em <strong>Gestão de Filas</strong> para usar este modo.';
+      empty.innerHTML = 'Nenhum departamento encontrado. Cadastre departamentos em <strong>Departamentos</strong> para usar este modo.';
       deptList.appendChild(empty);
 
       if (deptCount) deptCount.textContent = '0 selecionadas';
@@ -845,6 +1097,20 @@ Digite apenas o número da opção desejada.`
     });
   }
 
+  function syncHiddenChildToggles() {
+    const autoOn = getSwitch(swAutoHdr);
+    const filaOn = getSwitch(swDeptHdr);
+
+    /*
+      A tela ficou mais simples para usuário leigo: existe só o toggle do modo.
+      Estes switches internos continuam no DOM apenas para compatibilidade com o backend antigo,
+      mas são sincronizados automaticamente e não aparecem na interface.
+    */
+    setSwitch(swWelcome, autoOn, pillWelcome);
+    setSwitch(swOff, autoOn, pillOff);
+    setSwitch(swDeptWelcome, filaOn, pillDeptWelcome);
+  }
+
   function updateScheduleVisibility() {
     const onA = getSwitch(swAutoHdr);
     const wOn = onA && getSwitch(swWelcome);
@@ -861,7 +1127,7 @@ Digite apenas o número da opção desejada.`
 
   function updateModeNotices() {
     const autoOn = !!cfg?.features?.auto_messages?.enabled;
-    const filaOn = !!cfg?.features?.auto_messages_filas?.enabled;
+    const filaOn = !!cfg?.features?.auto_messages_departments?.enabled;
 
     if (autoModeNotice) autoModeNotice.hidden = !filaOn;
     if (deptModeNotice) deptModeNotice.hidden = !autoOn;
@@ -898,18 +1164,18 @@ Digite apenas o número da opção desejada.`
   function syncSectionState() {
     if (!cfg?.features) return;
 
-    cfg.features.auto_messages.enabled = !!getSwitch(swAutoHdr);
-
     ensureMasters(cfg);
+    syncHiddenChildToggles();
 
-    cfg.features.auto_messages_filas.enabled = !!getSwitch(swDeptHdr);
+    cfg.features.auto_messages.enabled = !!getSwitch(swAutoHdr);
+    cfg.features.auto_messages_departments.enabled = !!getSwitch(swDeptHdr);
 
     (cfg.features.auto_messages.welcome ||= {}).enabled = !!getSwitch(swWelcome);
     (cfg.features.auto_messages.off_hours ||= {}).enabled = !!getSwitch(swOff);
-    (cfg.features.auto_messages_filas.welcome ||= {}).enabled = !!getSwitch(swDeptWelcome);
+    (cfg.features.auto_messages_departments.welcome ||= {}).enabled = !!getSwitch(swDeptWelcome);
 
     setAutoChildrenEnabled(!!cfg.features.auto_messages.enabled);
-    setFilaChildrenEnabled(!!cfg.features.auto_messages_filas.enabled);
+    setFilaChildrenEnabled(!!cfg.features.auto_messages_departments.enabled);
 
     renderWelcomePreview();
     renderOffPreview();
@@ -935,7 +1201,9 @@ Digite apenas o número da opção desejada.`
   }
 
   function renderOffPreview() {
-    const on = getSwitch(swOff) && getSwitch(swAutoHdr);
+    // Preview lateral mostra a primeira resposta para não poluir.
+    // A mensagem fora do horário continua salva e usada pelo backend, mas não aparece junto da boas-vindas.
+    const on = getSwitch(swOff) && getSwitch(swAutoHdr) && !getSwitch(swWelcome);
 
     if (prevO) prevO.style.display = on ? '' : 'none';
     if (prevO) prevO.textContent = (msgOff?.value || '—').trim() || '—';
@@ -946,6 +1214,7 @@ Digite apenas o número da opção desejada.`
     if (!cfg?.features) return;
 
     ensureMasters(cfg);
+    syncHiddenChildToggles();
 
     cfg.timezone = (cfg.timezone || '').trim() || FALLBACK_TZ;
 
@@ -967,10 +1236,10 @@ Digite apenas o número da opção desejada.`
       end: (oEnd?.value || '08:00'),
     };
 
-    cfg.features.auto_messages_filas.enabled = !!getSwitch(swDeptHdr);
+    cfg.features.auto_messages_departments.enabled = !!getSwitch(swDeptHdr);
 
-    cfg.features.auto_messages_filas.welcome = {
-      ...(cfg.features.auto_messages_filas.welcome || {}),
+    cfg.features.auto_messages_departments.welcome = {
+      ...(cfg.features.auto_messages_departments.welcome || {}),
       enabled: !!(getSwitch(swDeptHdr) && getSwitch(swDeptWelcome)),
       text: (msgDeptWelcome?.value || '').trim(),
       start: (dwStart?.value || '08:00'),
@@ -989,7 +1258,7 @@ Digite apenas o número da opção desejada.`
     const filaOn = getSwitch(swDeptHdr);
 
     if (autoOn && !validateBeforeSave('auto')) return;
-    if (filaOn && !validateBeforeSave('fila')) return;
+    if (filaOn && !validateBeforeSave('dept')) return;
 
     __persisting = true;
     updateSaveButtons();
@@ -997,7 +1266,10 @@ Digite apenas o número da opção desejada.`
     try {
       await putConfig(cfg);
       _lastLoadedSnapshot = JSON.stringify(cfg);
-      if (!silent) toast('Configurações salvas com sucesso.');
+      if (!silent) {
+        toast('Configurações salvas com sucesso.');
+        showRobotCelebration();
+      }
     } catch (_) {
       // putConfig já mostra notify
     } finally {
@@ -1015,10 +1287,10 @@ Digite apenas o número da opção desejada.`
 
   function getConfirmMessage(labelEl) {
     if (labelEl === swAutoHdr) return 'Tem certeza que deseja desligar as mensagens automáticas?';
-    if (labelEl === swDeptHdr) return 'Tem certeza que deseja desligar o menu de filas?';
+    if (labelEl === swDeptHdr) return 'Tem certeza que deseja desligar o menu de departamentos?';
     if (labelEl === swWelcome) return 'Tem certeza que deseja desligar a mensagem de boas-vindas?';
     if (labelEl === swOff) return 'Tem certeza que deseja desligar a mensagem de fora do horário?';
-    if (labelEl === swDeptWelcome) return 'Tem certeza que deseja desligar a mensagem inicial do menu de filas?';
+    if (labelEl === swDeptWelcome) return 'Tem certeza que deseja desligar a mensagem inicial do menu?';
     return 'Tem certeza que deseja desligar esta opção?';
   }
 
@@ -1061,8 +1333,8 @@ Digite apenas o número da opção desejada.`
       if (labelEl === swAutoHdr && newVal && getSwitch(swDeptHdr)) {
         const ok = await confirmAction({
           title: 'Ativar mensagens automáticas?',
-          message: 'O menu de filas será desligado, porque os dois modos não podem ficar ativos ao mesmo tempo.',
-          confirmText: 'Ativar e desligar menu de filas',
+          message: 'O menu de departamentos será desligado, porque só um modo pode ficar ativo por vez.',
+          confirmText: 'Ativar e desligar menu',
           cancelText: 'Cancelar',
           kind: 'warn'
         });
@@ -1072,15 +1344,15 @@ Digite apenas o número da opção desejada.`
         setHeaderSwitch(swDeptHdr, pillDeptHdr, false);
         setSwitch(swDeptWelcome, false, pillDeptWelcome);
 
-        cfg.features.auto_messages_filas.enabled = false;
-        (cfg.features.auto_messages_filas.welcome ||= {}).enabled = false;
+        cfg.features.auto_messages_departments.enabled = false;
+        (cfg.features.auto_messages_departments.welcome ||= {}).enabled = false;
       }
 
       if (labelEl === swDeptHdr && newVal && getSwitch(swAutoHdr)) {
         const ok = await confirmAction({
-          title: 'Ativar menu de filas?',
+          title: 'Ativar menu de departamentos?',
           message: 'As mensagens automáticas serão desligadas, porque os dois modos não podem ficar ativos ao mesmo tempo.',
-          confirmText: 'Ativar filas e desligar automático',
+          confirmText: 'Ativar menu e desligar automático',
           cancelText: 'Cancelar',
           kind: 'warn'
         });
@@ -1099,7 +1371,7 @@ Digite apenas o número da opção desejada.`
       if (labelEl === swWelcome && newVal && getSwitch(swDeptHdr)) {
         notify({
           title: 'Modo incompatível',
-          message: 'Desligue primeiro o menu de filas para ativar a mensagem de boas-vindas.',
+          message: 'Desligue primeiro o menu de departamentos para ativar a resposta automática.',
           kind: 'warn'
         });
         return;
@@ -1108,7 +1380,7 @@ Digite apenas o número da opção desejada.`
       if (labelEl === swOff && newVal && getSwitch(swDeptHdr)) {
         notify({
           title: 'Modo incompatível',
-          message: 'Desligue primeiro o menu de filas para ativar a mensagem de fora do horário.',
+          message: 'Desligue primeiro o menu de departamentos para ativar a resposta automática.',
           kind: 'warn'
         });
         return;
@@ -1117,7 +1389,7 @@ Digite apenas o número da opção desejada.`
       if (labelEl === swDeptWelcome && newVal && getSwitch(swAutoHdr)) {
         notify({
           title: 'Modo incompatível',
-          message: 'Desligue primeiro as mensagens automáticas para ativar o menu de filas.',
+          message: 'Desligue primeiro a resposta automática para ativar o menu de departamentos.',
           kind: 'warn'
         });
         return;
@@ -1151,11 +1423,11 @@ Digite apenas o número da opção desejada.`
       }
 
       if (labelEl === swDeptHdr) {
-        cfg.features.auto_messages_filas.enabled = newVal;
+        cfg.features.auto_messages_departments.enabled = newVal;
 
         if (!newVal) {
           setSwitch(swDeptWelcome, false, pillDeptWelcome);
-          (cfg.features.auto_messages_filas.welcome ||= {}).enabled = false;
+          (cfg.features.auto_messages_departments.welcome ||= {}).enabled = false;
         }
 
         syncSectionState();
@@ -1192,10 +1464,10 @@ Digite apenas o número da opção desejada.`
       if (labelEl === swDeptWelcome) {
         if (newVal && !getSwitch(swDeptHdr)) {
           setHeaderSwitch(swDeptHdr, pillDeptHdr, true);
-          cfg.features.auto_messages_filas.enabled = true;
+          cfg.features.auto_messages_departments.enabled = true;
         }
 
-        (cfg.features.auto_messages_filas.welcome ||= {}).enabled = newVal;
+        (cfg.features.auto_messages_departments.welcome ||= {}).enabled = newVal;
 
         syncSectionState();
         schedulePersist(200, { silent: false });
@@ -1229,6 +1501,16 @@ Digite apenas o número da opção desejada.`
       try { LS.setItem('empresa_nome', _empresaNome); } catch {}
     }
 
+    _filaCache = Array.isArray(data?.departamentos)
+      ? data.departamentos.map(dep => ({
+          id: String(dep.id),
+          nome: cleanLabel(dep.nome),
+          departamento_id: dep.id || null,
+          departamento_nome: dep.nome || '',
+          prioridade: 'normal'
+        })).filter(dep => dep.id && dep.nome)
+      : [];
+
     const merged = deepMerge(structuredClone(LOCAL_DEFAULTS), data?.config || {});
     merged.timezone = (merged.timezone || '').trim() || FALLBACK_TZ;
 
@@ -1238,32 +1520,12 @@ Digite apenas o número da opção desejada.`
   }
 
   async function loadFilasPublicas() {
-    const empresaId = EMPRESA_ID();
-    const instId = requireActiveInstKey();
-
-    if (!empresaId || !instId) {
-      _filaCache = [];
-      return [];
-    }
-
-    const url = new URL('/api/filas/publicas', location.origin);
-    url.searchParams.set('empresa_id', String(empresaId));
-    url.searchParams.set('instancia_id', String(instId));
-
-    const r = await authFetch(url.toString());
-
-    if (!r.ok) {
-      let detail = '';
-      try { detail = await r.text(); } catch {}
-
-      console.warn('[chatbot] erro ao carregar filas públicas', r.status, detail);
-      _filaCache = [];
-      return [];
-    }
-
-    const data = await r.json();
-    _filaCache = Array.isArray(data?.items) ? data.items : [];
-
+    /*
+      Compatibilidade: o código antigo chamava este bloco de "filas públicas".
+      Agora o menu do chatbot é por departamento e os departamentos já vêm no
+      GET /api/chatbot/config, no campo data.departamentos.
+    */
+    if (!Array.isArray(_filaCache)) _filaCache = [];
     return _filaCache;
   }
 
@@ -1340,12 +1602,12 @@ Digite apenas o número da opção desejada.`
         }
 
         if (wStart && !timeValid(wStart.value)) {
-          errors.push('Horário inicial da Boas-vindas inválido.');
+          errors.push('Horário inicial do atendimento inválido.');
           markInvalid(wStart, true);
         }
 
         if (wEnd && !timeValid(wEnd.value)) {
-          errors.push('Horário final da Boas-vindas inválido.');
+          errors.push('Horário final do atendimento inválido.');
           markInvalid(wEnd, true);
         }
       }
@@ -1357,18 +1619,18 @@ Digite apenas o número da opção desejada.`
         }
 
         if (oStart && !timeValid(oStart.value)) {
-          errors.push('Horário inicial de Fora do horário inválido.');
+          errors.push('Horário de fechamento inválido.');
           markInvalid(oStart, true);
         }
 
         if (oEnd && !timeValid(oEnd.value)) {
-          errors.push('Horário final de Fora do horário inválido.');
+          errors.push('Horário de abertura inválido.');
           markInvalid(oEnd, true);
         }
       }
 
       if (!getSwitch(swWelcome) && !getSwitch(swOff)) {
-        errors.push('Ative ao menos uma mensagem (Boas-vindas ou Fora do horário).');
+        errors.push('Ative a resposta automática simples para editar as mensagens.');
       }
 
       const both = getSwitch(swWelcome) && getSwitch(swOff)
@@ -1391,7 +1653,7 @@ Digite apenas o número da opção desejada.`
 
           const fix = document.createElement('button');
           fix.type = 'button';
-          fix.textContent = `Ajustar “Fora do horário → Início” para ${wEnd.value}`;
+          fix.textContent = `Ajustar “Quando fecha” para ${wEnd.value}`;
           fix.style.cssText = 'padding:8px 12px;border-radius:10px;background:#10b981;color:#111827;border:0;font-weight:700;cursor:pointer';
 
           fix.addEventListener('click', () => {
@@ -1411,7 +1673,7 @@ Digite apenas o número da opção desejada.`
           fix.addEventListener('click', () => {
             oStart.value = wEnd.value;
             oEnd.value = wStart.value;
-            toast('Faixa de “Fora do horário” complementada.');
+            toast('Horário fora do atendimento ajustado.');
           });
 
           errors.push('Os intervalos não são complementares (pode sobrar horário sem mensagem).');
@@ -1420,32 +1682,32 @@ Digite apenas o número da opção desejada.`
       }
     }
 
-    if (kind === 'fila' && getSwitch(swDeptHdr)) {
+    if (kind === 'dept' && getSwitch(swDeptHdr)) {
       if (getSwitch(swDeptWelcome)) {
         if (!msgDeptWelcome?.value?.trim()) {
-          errors.push('Mensagem do menu de filas não pode ficar vazia.');
+          errors.push('Mensagem do menu de departamentos não pode ficar vazia.');
           markInvalid(msgDeptWelcome, true);
         }
 
         if (dwStart && !timeValid(dwStart.value)) {
-          errors.push('Horário inicial do menu de filas inválido.');
+          errors.push('Horário inicial do atendimento inválido.');
           markInvalid(dwStart, true);
         }
 
         if (dwEnd && !timeValid(dwEnd.value)) {
-          errors.push('Horário final do menu de filas inválido.');
+          errors.push('Horário final do atendimento inválido.');
           markInvalid(dwEnd, true);
         }
       } else {
-        errors.push('Ative a mensagem inicial do menu de filas para salvar este bloco.');
+        errors.push('Ative o menu para salvar este bloco.');
       }
 
       if (Array.isArray(_filaCache) && _filaCache.length) {
         if (countSelectedFilas() <= 0) {
-          errors.push('Selecione ao menos 1 fila para o menu do cliente.');
+          errors.push('Selecione ao menos 1 departamento para o menu do cliente.');
         }
       } else {
-        errors.push('Nenhuma fila ativa encontrada. Cadastre uma fila em Gestão de Filas primeiro.');
+        errors.push('Nenhum departamento ativo encontrado. Cadastre um departamento primeiro.');
       }
     }
 
@@ -1491,11 +1753,11 @@ Digite apenas o número da opção desejada.`
       /\{empresa\}/i.test(v) ||
       /\{menu_filas\}/i.test(v) ||
       /\{menu_departamentos\}/i.test(v) ||
-      v.includes('Você está falando com o setor')
+      v.includes('Você está falando com o departamento')
     ) {
       msgDeptWelcome.value = buildFilaTriagemTemplate();
     } else {
-      msgDeptWelcome.value = msgDeptWelcome.value.replace(/\{menu_departamentos\}/gi, '{menu_filas}');
+      msgDeptWelcome.value = msgDeptWelcome.value.replace(/\{menu_filas\}/gi, '{menu_departamentos}');
     }
 
     if (dwCount) dwCount.textContent = `${msgDeptWelcome.value.length} caracteres`;
@@ -1514,7 +1776,7 @@ Digite apenas o número da opção desejada.`
     _lastLoadedSnapshot = JSON.stringify(cfg);
 
     setHeaderSwitch(swAutoHdr, pillAutoHdr, !!cfg.features.auto_messages.enabled);
-    setHeaderSwitch(swDeptHdr, pillDeptHdr, !!cfg.features.auto_messages_filas.enabled);
+    setHeaderSwitch(swDeptHdr, pillDeptHdr, !!cfg.features.auto_messages_departments.enabled);
 
     const w = cfg.features.auto_messages.welcome || {};
     setSwitch(swWelcome, !!w.enabled, pillWelcome);
@@ -1531,7 +1793,7 @@ Digite apenas o número da opção desejada.`
     if (oEnd) oEnd.value = o.end ?? '08:00';
     if (offCount) offCount.textContent = `${(msgOff?.value || '').length} caracteres`;
 
-    const fw = cfg.features.auto_messages_filas.welcome || {};
+    const fw = cfg.features.auto_messages_departments.welcome || {};
     setSwitch(swDeptWelcome, !!fw.enabled, pillDeptWelcome);
 
     if (msgDeptWelcome) {
@@ -1565,7 +1827,7 @@ Digite apenas o número da opção desejada.`
       ensureMasters(cfg);
 
       setHeaderSwitch(swAutoHdr, pillAutoHdr, !!cfg.features.auto_messages.enabled);
-      setHeaderSwitch(swDeptHdr, pillDeptHdr, !!cfg.features.auto_messages_filas.enabled);
+      setHeaderSwitch(swDeptHdr, pillDeptHdr, !!cfg.features.auto_messages_departments.enabled);
 
       const w = cfg.features.auto_messages.welcome || {};
       setSwitch(swWelcome, !!w.enabled, pillWelcome);
@@ -1582,7 +1844,7 @@ Digite apenas o número da opção desejada.`
       if (oEnd) oEnd.value = o.end ?? '08:00';
       if (offCount) offCount.textContent = `${(msgOff?.value || '').length} caracteres`;
 
-      const fw = cfg.features.auto_messages_filas.welcome || {};
+      const fw = cfg.features.auto_messages_departments.welcome || {};
       setSwitch(swDeptWelcome, !!fw.enabled, pillDeptWelcome);
 
       if (msgDeptWelcome) {
@@ -1795,7 +2057,7 @@ Digite apenas o número da opção desejada.`
   }
 
   function activeMode() {
-    if (getSwitch(swDeptHdr) && getSwitch(swDeptWelcome)) return 'fila';
+    if (getSwitch(swDeptHdr) && getSwitch(swDeptWelcome)) return 'dept';
     if (getSwitch(swAutoHdr) && (getSwitch(swWelcome) || getSwitch(swOff))) return 'auto';
     return 'none';
   }
@@ -1820,10 +2082,10 @@ Digite apenas o número da opção desejada.`
       } else if (getSwitch(swOff)) {
         behavior = 'Envia mensagem de fora do horário';
       }
-    } else if (mode === 'fila') {
-      modeLabel = 'Menu para escolher fila';
-      badge = 'Modo: filas';
-      behavior = `Mostra menu com ${filas.length || 0} fila(s)`;
+    } else if (mode === 'dept') {
+      modeLabel = 'Menu para escolher departamento';
+      badge = 'Modo: departamentos';
+      behavior = `Mostra menu com ${filas.length || 0} departamento(s)`;
     }
 
     const instVal = document.getElementById('sumInstValue');
@@ -1901,7 +2163,7 @@ Digite apenas o número da opção desejada.`
     const mode = activeMode();
 
     if (mode === 'auto') el.textContent = 'Modo: resposta simples';
-    else if (mode === 'fila') el.textContent = 'Modo: menu de filas';
+    else if (mode === 'dept') el.textContent = 'Modo: menu de departamentos';
     else el.textContent = 'Modo: nenhum ativo';
   }
 
@@ -1932,7 +2194,7 @@ Digite apenas o número da opção desejada.`
 
     const mode = activeMode();
 
-    if (mode === 'fila') {
+    if (mode === 'dept') {
       addBubble(renderFilaMessage(), 'bot');
       return;
     }
@@ -1961,8 +2223,8 @@ Digite apenas o número da opção desejada.`
 
     addBubble('tempo', 'client');
 
-    if (activeMode() !== 'fila') {
-      addBubble('Essa simulação faz mais sentido quando o menu de filas está ativo.', 'bot');
+    if (activeMode() !== 'dept') {
+      addBubble('Essa simulação faz mais sentido quando o menu de departamentos está ativo.', 'bot');
       return;
     }
 
@@ -1973,8 +2235,8 @@ Digite apenas o número da opção desejada.`
     clearSim();
     updateSimulatorBadge();
 
-    if (activeMode() !== 'fila') {
-      addBubble('Essa simulação faz mais sentido quando o menu de filas está ativo.', 'bot');
+    if (activeMode() !== 'dept') {
+      addBubble('Essa simulação faz mais sentido quando o menu de departamentos está ativo.', 'bot');
       return;
     }
 
@@ -1982,7 +2244,7 @@ Digite apenas o número da opção desejada.`
 
     if (!filas.length) {
       addBubble('Oi', 'client');
-      addBubble('Nenhuma fila foi selecionada para aparecer no menu.', 'bot');
+      addBubble('Nenhum departamento foi selecionado para aparecer no menu.', 'bot');
       return;
     }
 
@@ -2015,6 +2277,7 @@ Digite apenas o número da opção desejada.`
 
   function bindHelpModal() {
     const helpBtn = document.getElementById('helpChatbotBtn');
+    const automationHelpBtn = document.getElementById('automationHelpBtn');
 
     function openModal(id) {
       const modal = document.getElementById(id);
@@ -2045,6 +2308,7 @@ Digite apenas o número da opção desejada.`
       scheduleSummaryRefresh();
     }
 
+    automationHelpBtn?.addEventListener('click', () => openModal('automationHelpModal'));
     helpBtn?.addEventListener('click', () => openModal('chatbotHelpModal'));
 
     document.querySelectorAll('[data-close-modal]').forEach(btn => {
@@ -2096,7 +2360,7 @@ Digite apenas o número da opção desejada.`
 
       clearSim();
 
-      if (mode === 'fila') {
+      if (mode === 'dept') {
         addBubble(val, 'client');
 
         const chosen = parseChoice(val);
@@ -2128,6 +2392,7 @@ Digite apenas o número da opção desejada.`
       bindAccordion(headAuto, bodyAuto);
       bindAccordion(headAutoDept, bodyAutoDept);
       bindHelpModal();
+      bindVariableButtons();
 
       bindSwitch(swAutoHdr, pillAutoHdr, (on) => {
         if (cfg?.features) cfg.features.auto_messages.enabled = on;
@@ -2137,7 +2402,7 @@ Digite apenas o número da opção desejada.`
       bindSwitch(swDeptHdr, pillDeptHdr, (on) => {
         if (cfg?.features) {
           ensureMasters(cfg);
-          cfg.features.auto_messages_filas.enabled = on;
+          cfg.features.auto_messages_departments.enabled = on;
         }
         syncSectionState();
       });
@@ -2155,7 +2420,7 @@ Digite apenas o número da opção desejada.`
       bindSwitch(swDeptWelcome, pillDeptWelcome, (on) => {
         if (cfg) {
           ensureMasters(cfg);
-          (cfg.features.auto_messages_filas.welcome ||= {}).enabled = on;
+          (cfg.features.auto_messages_departments.welcome ||= {}).enabled = on;
         }
         syncSectionState();
       });
@@ -2250,6 +2515,8 @@ Digite apenas o número da opção desejada.`
 
       cancelAuto?.addEventListener('click', () => restoreSnapshot(true));
       cancelDept?.addEventListener('click', () => restoreSnapshot(true));
+
+      initRobotUI();
 
       await initInstDropdown();
 

@@ -227,6 +227,83 @@ def _set_status_inicial(novo) -> None:
         pass
 
 
+def _set_status_aguardando(atendimento) -> None:
+    """Coloca o atendimento na fila compartilhada do departamento."""
+    if not hasattr(atendimento, "status"):
+        return
+
+    status_enum = getattr(models, "StatusAtendimento", None)
+    if status_enum is not None and hasattr(status_enum, "AGUARDANDO"):
+        try:
+            atendimento.status = status_enum.AGUARDANDO
+            return
+        except Exception:
+            pass
+
+    try:
+        atendimento.status = "aguardando"
+    except Exception:
+        pass
+
+
+def _set_status_novo(atendimento) -> None:
+    """Volta o atendimento para novo quando ainda não existe departamento escolhido."""
+    if not hasattr(atendimento, "status"):
+        return
+
+    status_enum = getattr(models, "StatusAtendimento", None)
+    if status_enum is not None and hasattr(status_enum, "NOVO"):
+        try:
+            atendimento.status = status_enum.NOVO
+            return
+        except Exception:
+            pass
+
+    try:
+        atendimento.status = "novo"
+    except Exception:
+        pass
+
+
+def _clear_active_participantes_for_triage(db: Session, *, atendimento) -> None:
+    """
+    Quando o robô só direciona para um departamento, ninguém assumiu ainda.
+    Então participantes antigos precisam ficar inativos para a conversa voltar para
+    a fila compartilhada do departamento.
+    """
+    AP = _get_participante_model()
+    if AP is None or not _participant_feature_enabled(db):
+        return
+
+    atendimento_id = _to_int(getattr(atendimento, "id", None))
+    empresa_id = _to_int(getattr(atendimento, "empresa_id", None))
+    if atendimento_id is None or empresa_id is None:
+        return
+
+    try:
+        rows = _list_active_participantes(
+            db,
+            empresa_id=int(empresa_id),
+            atendimento_id=int(atendimento_id),
+        )
+        if not rows:
+            return
+
+        now = _now_utc()
+        for row in rows:
+            if hasattr(row, "is_ativo"):
+                row.is_ativo = False
+            if hasattr(row, "saiu_em"):
+                row.saiu_em = now
+            if hasattr(row, "atualizado_em"):
+                row.atualizado_em = now
+            if hasattr(row, "updated_at"):
+                row.updated_at = now
+            db.add(row)
+    except Exception:
+        return
+
+
 def _query_open_atendimento(
     db: Session,
     *,
@@ -727,10 +804,16 @@ def update_open_atendimento_departamento_repo(
     departamento_id: int | None,
     ts_dt=None,
     operador_id: int | None = None,
+    status_aguardando: bool = False,
+    clear_operador: bool = False,
+    clear_participantes: bool = False,
 ) -> Any | None:
     """
     Atualiza o atendimento aberto mais recente da conversa para o departamento informado.
     Se não existir atendimento aberto, cria um já no departamento correto.
+
+    Para triagem por departamento, use status_aguardando=True e clear_operador=True:
+    o robô só escolhe o departamento, mas nenhum colaborador assume ainda.
     """
     if not has_mensagem_atendimento_field():
         return None
@@ -773,7 +856,7 @@ def update_open_atendimento_departamento_repo(
     )
 
     if atendimento is None:
-        return get_or_open_atendimento_repo(
+        atendimento = get_or_open_atendimento_repo(
             db,
             empresa_id=empresa_id_i,
             instancia_id=instancia_id_i,
@@ -781,8 +864,32 @@ def update_open_atendimento_departamento_repo(
             direcao="entrada",
             ts_dt=ts_dt,
             departamento_id=departamento_id_i,
-            operador_id=operador_id_i,
+            operador_id=None if clear_operador else operador_id_i,
         )
+
+        if atendimento is not None:
+            changed = False
+
+            if hasattr(atendimento, "operador_id") and clear_operador:
+                atendimento.operador_id = None
+                changed = True
+
+            if clear_participantes:
+                _clear_active_participantes_for_triage(db, atendimento=atendimento)
+                changed = True
+
+            if status_aguardando and departamento_id_i is not None:
+                _set_status_aguardando(atendimento)
+                changed = True
+            elif departamento_id_i is None and clear_operador:
+                _set_status_novo(atendimento)
+                changed = True
+
+            if changed:
+                db.add(atendimento)
+                db.flush()
+
+        return atendimento
 
     try:
         if not _atendimento_context_ok(
@@ -803,11 +910,26 @@ def update_open_atendimento_departamento_repo(
                 atendimento.departamento_id = departamento_id_i
                 changed = True
 
-        if hasattr(atendimento, "operador_id") and operador_id_i is not None:
+        if hasattr(atendimento, "operador_id"):
             atual_operador = _to_int(getattr(atendimento, "operador_id", None))
-            if atual_operador is None:
+
+            if clear_operador and atual_operador is not None:
+                atendimento.operador_id = None
+                changed = True
+            elif (not clear_operador) and operador_id_i is not None and atual_operador is None:
                 atendimento.operador_id = operador_id_i
                 changed = True
+
+        if clear_participantes:
+            _clear_active_participantes_for_triage(db, atendimento=atendimento)
+            changed = True
+
+        if status_aguardando and departamento_id_i is not None:
+            _set_status_aguardando(atendimento)
+            changed = True
+        elif departamento_id_i is None and clear_operador:
+            _set_status_novo(atendimento)
+            changed = True
 
         if ts_dt is not None:
             if hasattr(atendimento, "atualizado_em"):
@@ -820,7 +942,7 @@ def update_open_atendimento_departamento_repo(
         if changed:
             db.flush()
 
-        if operador_id_i is not None:
+        if (not clear_operador) and operador_id_i is not None:
             ensure_participante_ativo_repo(
                 db,
                 atendimento=atendimento,

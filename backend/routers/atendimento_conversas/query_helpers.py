@@ -28,6 +28,8 @@ def _query_clientes_ultima_por_conversa(
     resolved_inst_id: Optional[int],
     allowed_inst_ids: Optional[List[int]],
     allowed_dep_ids: Optional[List[int]],
+    current_colab_id: Optional[int] = None,
+    allow_unassigned_department: bool = False,
 ):
     M = models.Mensagem
     C = models.Cliente
@@ -53,6 +55,35 @@ def _query_clientes_ultima_por_conversa(
             sub_msg = sub_msg.filter(M.instancia_id.in_([int(x) for x in allowed_inst_ids]))
 
     sub_msg = sub_msg.group_by(M.cliente_id, M.instancia_id).subquery()
+
+    # Contador oficial das mensagens novas da lista lateral.
+    # Antes a conversa subia para o topo pela última mensagem, mas o payload
+    # voltava com novas=0; por isso a bolha (1), (2), ... não aparecia.
+    sub_novas = (
+        db.query(
+            M.cliente_id.label("cid"),
+            M.instancia_id.label("iid"),
+            func.count(M.id).label("novas"),
+        )
+        .filter(
+            M.empresa_id == int(empresa_id),
+            M.cliente_id.isnot(None),
+            M.instancia_id.isnot(None),
+            M.tipo == "entrada",
+            M.lida.isnot(True),
+        )
+    )
+
+    if resolved_inst_id is not None:
+        sub_novas = sub_novas.filter(M.instancia_id == int(resolved_inst_id))
+
+    elif allowed_inst_ids is not None:
+        if not allowed_inst_ids:
+            sub_novas = sub_novas.filter(literal(False))
+        else:
+            sub_novas = sub_novas.filter(M.instancia_id.in_([int(x) for x in allowed_inst_ids]))
+
+    sub_novas = sub_novas.group_by(M.cliente_id, M.instancia_id).subquery()
 
     caps = _get_atendimento_caps()
     A = caps["model"]
@@ -160,6 +191,7 @@ def _query_clientes_ultima_por_conversa(
                 M.ack.label("ultima_ack"),
                 M.timestamp.label("hora"),
                 M.instancia_id.label("instancia_id"),
+                func.coalesce(sub_novas.c.novas, 0).label("novas"),
 
                 (EI.instance_name if hasattr(EI, "instance_name") else literal(None)).label("instance_name"),
 
@@ -186,6 +218,13 @@ def _query_clientes_ultima_por_conversa(
             )
             .join(sub_msg, and_(sub_msg.c.cid == C.id))
             .join(M, M.id == sub_msg.c.last_msg_id)
+            .outerjoin(
+                sub_novas,
+                and_(
+                    sub_novas.c.cid == C.id,
+                    sub_novas.c.iid == M.instancia_id,
+                ),
+            )
             .outerjoin(
                 sub_atd,
                 and_(
@@ -227,6 +266,7 @@ def _query_clientes_ultima_por_conversa(
                 M.ack.label("ultima_ack"),
                 M.timestamp.label("hora"),
                 M.instancia_id.label("instancia_id"),
+                func.coalesce(sub_novas.c.novas, 0).label("novas"),
 
                 (EI.instance_name if hasattr(EI, "instance_name") else literal(None)).label("instance_name"),
 
@@ -253,20 +293,78 @@ def _query_clientes_ultima_por_conversa(
             )
             .join(sub_msg, and_(sub_msg.c.cid == C.id))
             .join(M, M.id == sub_msg.c.last_msg_id)
+            .outerjoin(
+                sub_novas,
+                and_(
+                    sub_novas.c.cid == C.id,
+                    sub_novas.c.iid == M.instancia_id,
+                ),
+            )
             .outerjoin(EI, EI.id == M.instancia_id)
             .filter(C.empresa_id == int(empresa_id))
         )
 
+    # ACL por departamento na lista de atendimento.
+    #
+    # Regra do modelo por departamento + assumir atendimento:
+    # - Admin/gestor => allowed_dep_ids=None => vê tudo.
+    # - Colaborador restrito vê:
+    #     1) conversas do(s) departamento(s) dele que ainda NÃO foram assumidas;
+    #     2) conversas já atribuídas a ele;
+    #     3) sem departamento APENAS se allow_unassigned_department=True.
+    #
+    # Importante:
+    # depois que Amanda assume Financeiro, Luiza também pertence ao Financeiro,
+    # mas NÃO deve continuar vendo aquela conversa na fila compartilhada.
     if allowed_dep_ids is not None:
-        if not allowed_dep_ids:
-            q = q.filter(acl_dep_expr.is_(None))
-        else:
-            q = q.filter(
-                or_(
-                    acl_dep_expr.in_([int(x) for x in allowed_dep_ids]),
-                    acl_dep_expr.is_(None),
+        acl_conditions = []
+
+        dep_ids = [int(x) for x in (allowed_dep_ids or []) if x is not None]
+        has_operator_acl = bool(caps["usable"] and caps.get("has_operador_id"))
+
+        if has_operator_acl:
+            owner_is_empty = A.operador_id.is_(None)
+            owner_is_me = literal(False)
+
+            if current_colab_id is not None:
+                try:
+                    owner_is_me = A.operador_id == int(current_colab_id)
+                except Exception:
+                    owner_is_me = literal(False)
+
+            if dep_ids:
+                acl_conditions.append(
+                    and_(
+                        acl_dep_expr.in_(dep_ids),
+                        or_(owner_is_empty, owner_is_me),
+                    )
                 )
-            )
+
+            if allow_unassigned_department:
+                acl_conditions.append(
+                    and_(
+                        acl_dep_expr.is_(None),
+                        owner_is_empty,
+                    )
+                )
+
+            if current_colab_id is not None:
+                try:
+                    acl_conditions.append(A.operador_id == int(current_colab_id))
+                except Exception:
+                    pass
+
+        else:
+            if dep_ids:
+                acl_conditions.append(acl_dep_expr.in_(dep_ids))
+
+            if allow_unassigned_department:
+                acl_conditions.append(acl_dep_expr.is_(None))
+
+        if acl_conditions:
+            q = q.filter(or_(*acl_conditions))
+        else:
+            q = q.filter(literal(False))
 
     return q
 

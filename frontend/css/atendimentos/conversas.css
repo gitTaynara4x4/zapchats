@@ -1334,3 +1334,23 @@ button#btnKebabHeader{
 #historico .search-hit.search-hit-fade{
   transition:outline-color .5s ease, box-shadow .5s ease;
 }
+
+/* Correção: quando a conversa é aberta, JS coloca hidden/display none na bolha. */
+.chat-item:not(.has-unread) .badge,
+.chat-item:not(.has-unread) .unread-badge,
+.chat-item:not(.has-unread) .zc-unread-badge,
+.chat-item .badge[hidden],
+.chat-item .unread-badge[hidden],
+.chat-item .zc-unread-badge[hidden]{
+  display:none !important;
+  visibility:hidden !important;
+  opacity:0 !important;
+}
+
+.chat-item.has-unread .badge,
+.chat-item.has-unread .unread-badge,
+.chat-item.has-unread .zc-unread-badge{
+  display:inline-flex !important;
+  visibility:visible !important;
+  opacity:1 !important;
+}

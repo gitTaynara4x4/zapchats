@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any, Optional, List
 
 from fastapi import HTTPException
@@ -120,6 +121,63 @@ def _get_empresa_id(identity: Any) -> Optional[int]:
     if not identity:
         return None
     return _to_int(_id_get(identity, "empresa_id"))
+
+
+def _norm_dept_name(value: Any) -> str:
+    """
+    Normaliza nomes antigos como "02 - Financeiro" para comparar com
+    departamentos reais como "Financeiro".
+    """
+    try:
+        txt = str(value or "").strip().lower()
+        if not txt:
+            return ""
+        txt = unicodedata.normalize("NFKD", txt)
+        txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+        txt = re.sub(r"^\s*\d+\s*[-–—.:/)]+\s*", "", txt)
+        txt = re.sub(r"[^a-z0-9]+", " ", txt)
+        txt = re.sub(r"\s+", " ", txt).strip()
+        return txt
+    except Exception:
+        return ""
+
+
+def _find_departamento_ids_by_fuzzy_name(
+    db: Session,
+    *,
+    empresa_id: int,
+    nome: Any,
+) -> List[int]:
+    """
+    Resolve Setor antigo -> Departamento novo mesmo quando um lado tem código
+    visual no nome. Ex.: Setor "02 - Financeiro" e Departamento "Financeiro".
+    """
+    alvo = _norm_dept_name(nome)
+    if not alvo:
+        return []
+
+    try:
+        rows = (
+            db.query(models.Departamento.id, models.Departamento.nome)
+            .filter(models.Departamento.empresa_id == int(empresa_id))
+            .all()
+        )
+    except Exception:
+        return []
+
+    out: List[int] = []
+    for dep_id, dep_nome in rows:
+        dep_norm = _norm_dept_name(dep_nome)
+        if not dep_norm:
+            continue
+        if dep_norm == alvo or dep_norm.endswith(" " + alvo) or alvo.endswith(" " + dep_norm):
+            try:
+                did = int(dep_id)
+                if did not in out:
+                    out.append(did)
+            except Exception:
+                pass
+    return out
 
 
 def _table_exists(db: Session, table_name: str) -> bool:
@@ -319,14 +377,14 @@ def _fallback_departamentos_do_colaborador_por_setor(
     colaborador_id: int,
 ) -> List[int]:
     """
-    Compatibilidade com dados antigos.
+    Compatibilidade com dados antigos e com o cadastro visual do colaborador.
 
-    Antes do Modelo 2, muitos colaboradores tinham só colaboradores.setor_id.
-    Agora o correto é departamentos_membros.
+    O campo colaboradores.setor_id pode apontar para:
+    1) um Setor antigo; nesse caso resolvemos o Departamento pelo nome do Setor;
+    2) um Departamento real; nesse caso usamos o próprio id.
 
-    Esse fallback evita quebrar tudo enquanto os dados antigos não foram migrados:
-    - se setor_id aponta para um Departamento existente, usa esse departamento;
-    - se setor_id aponta para um Setor antigo, procura Departamento com o mesmo nome.
+    Importante: primeiro tenta Setor por nome. Assim evitamos confundir
+    setor_id=2 com departamento_id=2 quando o Financeiro real tem outro id.
     """
     colab = (
         db.query(models.Colaborador)
@@ -346,18 +404,7 @@ def _fallback_departamentos_do_colaborador_por_setor(
 
     out: List[int] = []
 
-    dep_direct = (
-        db.query(models.Departamento.id)
-        .filter(
-            models.Departamento.empresa_id == int(empresa_id),
-            models.Departamento.id == int(setor_id),
-        )
-        .first()
-    )
-
-    if dep_direct and dep_direct[0] is not None:
-        out.append(int(dep_direct[0]))
-
+    # 1) Preferência: setor antigo -> departamento com mesmo nome.
     setor_nome = None
 
     try:
@@ -374,20 +421,45 @@ def _fallback_departamentos_do_colaborador_por_setor(
         setor_nome = None
 
     if setor_nome:
-        dep_by_name = (
+        # Compatibilidade: Setor antigo pode ter código visual no nome
+        # (ex.: "02 - Financeiro") enquanto Departamento novo é "Financeiro".
+        for dep_id in _find_departamento_ids_by_fuzzy_name(
+            db,
+            empresa_id=int(empresa_id),
+            nome=setor_nome,
+        ):
+            if dep_id not in out:
+                out.append(dep_id)
+
+        if not out:
+            dep_by_name = (
+                db.query(models.Departamento.id)
+                .filter(
+                    models.Departamento.empresa_id == int(empresa_id),
+                    text("lower(trim(nome)) = lower(trim(:nome))"),
+                )
+                .params(nome=str(setor_nome).strip())
+                .first()
+            )
+
+            if dep_by_name and dep_by_name[0] is not None:
+                dep_id = int(dep_by_name[0])
+                if dep_id not in out:
+                    out.append(dep_id)
+
+    # 2) Compatibilidade: se não achou por Setor, tenta tratar setor_id como Departamento.
+    if not out:
+        dep_direct = (
             db.query(models.Departamento.id)
             .filter(
                 models.Departamento.empresa_id == int(empresa_id),
-                text("lower(trim(nome)) = lower(trim(:nome))"),
+                models.Departamento.id == int(setor_id),
             )
-            .params(nome=str(setor_nome).strip())
             .first()
         )
 
-        if dep_by_name and dep_by_name[0] is not None:
-            dep_id = int(dep_by_name[0])
-            if dep_id not in out:
-                out.append(dep_id)
+        if dep_direct and dep_direct[0] is not None:
+            out.append(int(dep_direct[0]))
 
     return out
 
@@ -442,12 +514,20 @@ def allowed_departamento_ids(
         if dep_id and dep_id not in deps:
             deps.append(int(dep_id))
 
-    if not deps:
-        deps = _fallback_departamentos_do_colaborador_por_setor(
-            db,
-            empresa_id=int(empresa_id),
-            colaborador_id=int(colab_id),
-        )
+    # Junta o vínculo novo (departamentos_membros) com o departamento principal
+    # do cadastro do colaborador. Isso evita o caso: tela mostra Amanda no
+    # Financeiro, mas a lista fica vazia porque o Financeiro salvo no atendimento
+    # tem outro id interno.
+    fallback_deps = _fallback_departamentos_do_colaborador_por_setor(
+        db,
+        empresa_id=int(empresa_id),
+        colaborador_id=int(colab_id),
+    )
+
+    for dep_id in fallback_deps:
+        dep_id = _to_int(dep_id)
+        if dep_id and dep_id not in deps:
+            deps.append(int(dep_id))
 
     return _expand_departamento_ids_with_descendants(
         db,
@@ -506,6 +586,16 @@ def assert_atendimento_acl(
         departamento_id=departamento_id,
         allow_unassigned=allow_unassigned_department,
     )
+
+
+def _atendimento_is_owned_by_identity(identity: Any, atendimento: Any) -> bool:
+    """Permite manter acesso ao atendimento que já foi assumido pelo próprio colaborador."""
+    try:
+        colab_id = _get_colab_id(identity)
+        operador_id = _to_int(getattr(atendimento, "operador_id", None))
+        return bool(colab_id and operador_id and int(colab_id) == int(operador_id))
+    except Exception:
+        return False
 
 
 def resolve_acl_context(
@@ -736,13 +826,19 @@ def assert_atendimento_access(
         atendimento_id=int(atendimento_id),
     )
 
-    assert_atendimento_acl(
-        allowed_instancias=ctx["allowed_instancias"],
-        allowed_departamentos=ctx["allowed_departamentos"],
-        instancia_id=getattr(atendimento, "instancia_id", None),
-        departamento_id=getattr(atendimento, "departamento_id", None),
-        allow_unassigned_department=allow_unassigned_department,
-    )
+    if _atendimento_is_owned_by_identity(identity, atendimento):
+        assert_instancia_allowed(
+            allowed_instancias=ctx["allowed_instancias"],
+            instancia_id=getattr(atendimento, "instancia_id", None),
+        )
+    else:
+        assert_atendimento_acl(
+            allowed_instancias=ctx["allowed_instancias"],
+            allowed_departamentos=ctx["allowed_departamentos"],
+            instancia_id=getattr(atendimento, "instancia_id", None),
+            departamento_id=getattr(atendimento, "departamento_id", None),
+            allow_unassigned_department=allow_unassigned_department,
+        )
 
     return atendimento
 
@@ -772,13 +868,19 @@ def assert_cliente_access(
     )
 
     if atendimento is not None:
-        assert_atendimento_acl(
-            allowed_instancias=ctx["allowed_instancias"],
-            allowed_departamentos=ctx["allowed_departamentos"],
-            instancia_id=getattr(atendimento, "instancia_id", None),
-            departamento_id=getattr(atendimento, "departamento_id", None),
-            allow_unassigned_department=allow_unassigned_department,
-        )
+        if _atendimento_is_owned_by_identity(identity, atendimento):
+            assert_instancia_allowed(
+                allowed_instancias=ctx["allowed_instancias"],
+                instancia_id=getattr(atendimento, "instancia_id", None),
+            )
+        else:
+            assert_atendimento_acl(
+                allowed_instancias=ctx["allowed_instancias"],
+                allowed_departamentos=ctx["allowed_departamentos"],
+                instancia_id=getattr(atendimento, "instancia_id", None),
+                departamento_id=getattr(atendimento, "departamento_id", None),
+                allow_unassigned_department=allow_unassigned_department,
+            )
         return cliente, atendimento
 
     fallback_instancia_id = instancia_id

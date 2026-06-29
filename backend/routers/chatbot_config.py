@@ -36,7 +36,36 @@ def _trace(e: Exception) -> str:
         return f"{e.__class__.__name__}: {e}"
 
 
+def _normalize_config_aliases(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Compatibilidade com o frontend antigo, que salvava o menu como
+    features.auto_messages_filas. O padrão oficial agora é
+    features.auto_messages_departments.
+    """
+    if not isinstance(cfg, dict):
+        return {}
+
+    out: Dict[str, Any] = dict(cfg)
+    features_in = out.get("features") or {}
+    if not isinstance(features_in, dict):
+        out["features"] = {}
+        return out
+
+    features = dict(features_in)
+    old = features.get("auto_messages_filas")
+    new = features.get("auto_messages_departments")
+
+    if not isinstance(new, dict) and isinstance(old, dict):
+        features["auto_messages_departments"] = old
+
+    # Nunca persiste/devolve o alias antigo para não manter dois contratos ativos.
+    features.pop("auto_messages_filas", None)
+    out["features"] = features
+    return out
+
+
 def _prune_for_storage(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    cfg = _normalize_config_aliases(cfg)
     data: Dict[str, Any] = {}
 
     if "ativo" in cfg:
@@ -160,7 +189,7 @@ def _mode_is_active(features: Dict[str, Any], mode: str) -> bool:
         )
 
     if mode == "dept":
-        dept = (features.get("auto_messages_departments") or {}) if isinstance(features, dict) else {}
+        dept = (features.get("auto_messages_departments") or features.get("auto_messages_filas") or {}) if isinstance(features, dict) else {}
         return bool(
             isinstance(dept, dict)
             and dept.get("enabled", False)
@@ -255,7 +284,7 @@ def _has_advanced_automation_usage(cfg: Dict[str, Any]) -> bool:
     o bloco por departamentos.
     """
     features = (cfg.get("features") or {}) if isinstance(cfg, dict) else {}
-    dept = (features.get("auto_messages_departments") or {}) if isinstance(features, dict) else {}
+    dept = (features.get("auto_messages_departments") or features.get("auto_messages_filas") or {}) if isinstance(features, dict) else {}
 
     if not isinstance(dept, dict):
         return False
@@ -296,7 +325,7 @@ def get_config(
         raise HTTPException(status_code=404, detail="Instância não encontrada para esta empresa")
 
     row = _safe_select_chatbot_config(db, empresa_id, instancia_id)
-    cfg_raw = row.config if row and getattr(row, "config", None) else {}
+    cfg_raw = _normalize_config_aliases(row.config if row and getattr(row, "config", None) else {})
 
     empresa = db.get(models.Empresa, empresa_id)
     empresa_nome = empresa.nome.strip() if empresa and empresa.nome else None
@@ -382,6 +411,8 @@ def put_config(
     cfg_in = payload.get("config") or {}
     if not isinstance(cfg_in, dict):
         raise HTTPException(status_code=400, detail="Campo 'config' inválido")
+
+    cfg_in = _normalize_config_aliases(cfg_in)
 
     empresa = db.get(models.Empresa, empresa_id)
     if empresa:

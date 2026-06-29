@@ -69,34 +69,65 @@ function ensureFooterButtons(){
 
   if (!container) return;
 
+  // O HTML novo já tem os botões do wizard. Reutiliza eles em vez de criar duplicado.
+  const existingSave = perfilModal?.querySelector('#perfil-salvar-foot');
+  const existingCancel = perfilModal?.querySelector('#perfil-cancelar-foot');
+
   if (!state.pSaveFoot){
-    state.pSaveFoot = document.createElement('button');
-    state.pSaveFoot.id = 'perfil-salvar-foot';
-    state.pSaveFoot.className = 'btn btn-primary';
-    state.pSaveFoot.type = 'button';
-    state.pSaveFoot.innerHTML = '<i class="fa fa-check"></i> Salvar';
-    state.pSaveFoot.addEventListener('click', saveInline);
+    state.pSaveFoot = existingSave || document.createElement('button');
 
-    const before = pClose2 && pClose2.parentElement === container
-      ? pClose2
-      : container.lastElementChild;
+    if (!existingSave){
+      state.pSaveFoot.id = 'perfil-salvar-foot';
+      state.pSaveFoot.className = 'btn btn-primary';
+      state.pSaveFoot.type = 'button';
+      state.pSaveFoot.innerHTML = '<i class="fa fa-check"></i> Salvar';
 
-    container.insertBefore(state.pSaveFoot, before || null);
+      const before = pClose2 && pClose2.parentElement === container
+        ? pClose2
+        : container.lastElementChild;
+
+      container.insertBefore(state.pSaveFoot, before || null);
+    }
+
+    if (!state.pSaveFoot.dataset.boundSaveInline){
+      state.pSaveFoot.addEventListener('click', ev => {
+        ev.preventDefault();
+
+        const modal = els().perfilModal;
+        const { idx } = activeWizardStep(modal);
+
+        // Segurança extra: se algum CSS antigo fizer o botão de rodapé aparecer
+        // antes da última etapa, ele avança no wizard em vez de tentar salvar
+        // e cobrar senha antes da hora.
+        if (modal?.classList.contains('editing') && idx < WIZARD_STEPS.length - 1) {
+          goWizardStep(modal, WIZARD_STEPS[Math.min(WIZARD_STEPS.length - 1, idx + 1)]);
+          return;
+        }
+
+        saveInline();
+      });
+      state.pSaveFoot.dataset.boundSaveInline = '1';
+    }
   }
 
   if (!state.pCancelFoot){
-    state.pCancelFoot = document.createElement('button');
-    state.pCancelFoot.id = 'perfil-cancelar-foot';
-    state.pCancelFoot.className = 'btn btn-ghost';
-    state.pCancelFoot.type = 'button';
-    state.pCancelFoot.textContent = 'Cancelar';
+    state.pCancelFoot = existingCancel || document.createElement('button');
 
-    state.pCancelFoot.addEventListener('click', () => {
-      if (els().perfilModal?.dataset.mode === 'create') closePerfil();
-      else exitInlineEdit(true);
-    });
+    if (!existingCancel){
+      state.pCancelFoot.id = 'perfil-cancelar-foot';
+      state.pCancelFoot.className = 'btn btn-ghost';
+      state.pCancelFoot.type = 'button';
+      state.pCancelFoot.textContent = 'Cancelar';
+      container.insertBefore(state.pCancelFoot, state.pSaveFoot);
+    }
 
-    container.insertBefore(state.pCancelFoot, state.pSaveFoot);
+    if (!state.pCancelFoot.dataset.boundCancelInline){
+      state.pCancelFoot.addEventListener('click', () => {
+        if (els().perfilModal?.dataset.mode === 'create') closePerfil();
+        else exitInlineEdit(true);
+      });
+      state.pCancelFoot.dataset.boundCancelInline = '1';
+    }
   }
 }
 
@@ -318,6 +349,13 @@ export async function renderPerfilView(colab){
       : (coalesceName(colab) || 'Perfil do colaborador');
   }
 
+  const pSubtitle = document.querySelector('#perfil-subtitle');
+  if (pSubtitle) {
+    pSubtitle.textContent = perfilModal?.dataset.mode === 'create'
+      ? 'Convide alguém para acessar a plataforma'
+      : 'Gerencie perfil, acesso e permissões deste colaborador';
+  }
+
   const photoURL = await fetchAvatarURLFor(colab);
   setPerfilAvatar(coalesceName(colab), photoURL);
 
@@ -411,8 +449,26 @@ export async function renderPerfilView(colab){
 
   ensureAccessExplanationBox();
 
-  await renderDepartamentosView(colab);
-  await renderInstsView(colab);
+  const isCreate = perfilModal?.dataset.mode === 'create';
+
+  if (isCreate) {
+    const dDeptos = document.querySelector('#d-deptos');
+    const eDeptos = document.querySelector('#e-deptos');
+    const dInsts = document.querySelector('#d-insts');
+    const eInsts = document.querySelector('#e-insts');
+    const deptActions = document.querySelector('#dept-actions');
+    const instActions = document.querySelector('#inst-actions');
+
+    if (dDeptos) { dDeptos.innerHTML = ''; dDeptos.style.display = ''; }
+    if (eDeptos) { eDeptos.innerHTML = ''; eDeptos.style.display = 'none'; }
+    if (dInsts) { dInsts.innerHTML = ''; dInsts.style.display = ''; }
+    if (eInsts) { eInsts.innerHTML = ''; eInsts.style.display = 'none'; }
+    if (deptActions) deptActions.style.display = 'none';
+    if (instActions) instActions.style.display = 'none';
+  } else {
+    await renderDepartamentosView(colab);
+    await renderInstsView(colab);
+  }
 
   if (avatarHint) {
     avatarHint.style.display = perfilModal?.dataset.mode === 'create'
@@ -422,7 +478,6 @@ export async function renderPerfilView(colab){
 
   const wrapSenha = $('#wrap-senha');
   const senhaHelp = $('#senha-help');
-  const isCreate = perfilModal?.dataset.mode === 'create';
   const canPass = canEditPassword();
 
   if (wrapSenha) {
@@ -437,6 +492,132 @@ export async function renderPerfilView(colab){
 
   bindAvatarDnDAndPaste();
   exitInlineEdit(false);
+}
+
+
+
+function setPermGroupOpen(group, open){
+  if (!group) return;
+
+  const head = group.querySelector('.perm-group-head');
+  const body = group.querySelector('.perm-group-body');
+
+  group.classList.toggle('open', !!open);
+  group.dataset.open = open ? '1' : '0';
+
+  if (head) head.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (body) body.hidden = !open;
+}
+
+function setupPermAccordion(root, opts = {}){
+  if (!root) return;
+
+  const groups = Array.from(root.querySelectorAll('.perm-group'));
+  if (!groups.length) return;
+
+  const collapseAll = opts.collapseAll !== false;
+
+  groups.forEach((group, index) => {
+    const head = group.querySelector('.perm-group-head');
+    const body = group.querySelector('.perm-group-body');
+    if (!head || !body) return;
+
+    group.classList.add('is-collapsible');
+
+    if (!body.id) body.id = `perm-group-body-${index + 1}`;
+
+    head.setAttribute('role', 'button');
+    head.setAttribute('tabindex', '0');
+    head.setAttribute('aria-controls', body.id);
+
+    const title = head.querySelector('.perm-group-title') || head;
+    if (!title.querySelector('.perm-collapse-ico')) {
+      const ico = document.createElement('span');
+      ico.className = 'perm-collapse-ico';
+      ico.setAttribute('aria-hidden', 'true');
+      ico.textContent = '›';
+      title.prepend(ico);
+    }
+
+    if (!head.dataset.accordionBound) {
+      head.dataset.accordionBound = '1';
+
+      const toggle = ev => {
+        if (ev?.target?.closest?.('button,input,label,select,a,.perm-group-controls')) return;
+        setPermGroupOpen(group, !group.classList.contains('open'));
+      };
+
+      head.addEventListener('click', toggle);
+      head.addEventListener('keydown', ev => {
+        if (ev.key !== 'Enter' && ev.key !== ' ') return;
+        ev.preventDefault();
+        toggle(ev);
+      });
+    }
+
+    if (collapseAll && group.dataset.open !== '1') {
+      setPermGroupOpen(group, false);
+    } else {
+      setPermGroupOpen(group, group.classList.contains('open'));
+    }
+  });
+}
+
+function resetLazyEditFlags(){
+  const { perfilModal } = els();
+  if (!perfilModal) return;
+
+  delete perfilModal.dataset.deptosEditLoaded;
+  delete perfilModal.dataset.instsEditLoaded;
+  delete perfilModal.dataset.permsEditLoaded;
+}
+
+function ensureLazyEditStep(key){
+  const { perfilModal, dPerms, ePerms } = els();
+  if (!perfilModal || !state.inlineEdit) return;
+
+  const step = key || activeWizardStep(perfilModal).key || 'perfil';
+
+  function runOnce(flag, loader){
+    if (perfilModal.dataset[flag] === '1' || perfilModal.dataset[flag] === 'loading') return;
+
+    perfilModal.dataset[flag] = 'loading';
+
+    Promise.resolve()
+      .then(loader)
+      .then(() => {
+        perfilModal.dataset[flag] = '1';
+      })
+      .catch(e => {
+        delete perfilModal.dataset[flag];
+        console.warn('[colaboradores] falha ao carregar etapa do modal', step, e);
+      });
+  }
+
+  if (step === 'acessos') {
+    runOnce('deptosEditLoaded', ensureDepartamentosEdit);
+    runOnce('instsEditLoaded', ensureInstsEdit);
+  }
+
+  if (step === 'permissoes') {
+    if (dPerms) dPerms.style.display = 'none';
+    if (ePerms) {
+      ePerms.style.display = 'grid';
+      if (!ePerms.children.length) {
+        ePerms.innerHTML = '<div class="muted">Carregando permissões…</div>';
+      }
+    }
+
+    if (perfilModal.dataset.permsEditLoaded === '1') {
+      setTimeout(() => setupPermAccordion(ePerms, { collapseAll:false }), 0);
+    } else {
+      runOnce('permsEditLoaded', () => {
+        ensurePermsEdit();
+        setTimeout(() => setupPermAccordion(ePerms, { collapseAll:true }), 0);
+        setTimeout(() => setupPermAccordion(ePerms, { collapseAll:false }), 120);
+      });
+    }
+  }
 }
 
 export function enterInlineEdit(){
@@ -459,20 +640,20 @@ export function enterInlineEdit(){
   ensureAccessExplanationBox();
 
   if (pEdit) pEdit.style.display = 'none';
-  if (pSave) pSave.style.display = 'none';
+  if (pSave) pSave.style.display = 'inline-flex';
   if (pCancel) pCancel.style.display = 'none';
   if (pClose) pClose.style.display = '';
 
   ensureFooterButtons();
 
-  if (state.pSaveFoot) state.pSaveFoot.style.display = '';
-  if (state.pCancelFoot) state.pCancelFoot.style.display = '';
+  if (state.pSaveFoot) state.pSaveFoot.style.display = 'none';
+  if (state.pCancelFoot) state.pCancelFoot.style.display = 'none';
   if (pClose2) pClose2.style.display = 'none';
 
   if (state.pSaveFoot){
     state.pSaveFoot.innerHTML = perfilModal?.dataset.mode === 'create'
-      ? '<i class="fa fa-check"></i> Criar'
-      : '<i class="fa fa-check"></i> Salvar';
+      ? '<i class="fa fa-check"></i> Criar colaborador'
+      : '<i class="fa fa-check"></i> Salvar alterações';
   }
 
   perfilModal?.classList.add('editing');
@@ -624,16 +805,17 @@ export function enterInlineEdit(){
   }
 
   if (ePerms){
-    ePerms.style.display = 'grid';
-    ensurePermsEdit();
+    ePerms.style.display = 'none';
+    ePerms.innerHTML = '';
   }
 
   if (dPerms) {
     dPerms.style.display = 'none';
   }
 
-  ensureDepartamentosEdit();
-  ensureInstsEdit();
+  // Não carrega permissões/WhatsApps/departamentos no primeiro clique.
+  // Cada bloco entra sob demanda quando a pessoa chega na etapa do wizard.
+  ensureLazyEditStep(activeWizardStep(perfilModal).key);
 
   const wrapSenha = $('#wrap-senha');
   const senhaHelp = $('#senha-help');
@@ -692,6 +874,7 @@ export function enterInlineEdit(){
   }
 
   validateFormLive(false);
+  updateWizardFooter(perfilModal);
 }
 
 export function exitInlineEdit(restore = true){
@@ -718,9 +901,9 @@ export function exitInlineEdit(restore = true){
   if (pEdit) pEdit.style.display = '';
   if (pSave) pSave.style.display = 'none';
   if (pCancel) pCancel.style.display = 'none';
-  if (pClose) pClose.style.display = 'none';
+  if (pClose) pClose.style.display = '';
 
-  if (pClose2) pClose2.style.display = '';
+  if (pClose2) pClose2.style.display = 'none';
   if (state.pSaveFoot) state.pSaveFoot.style.display = 'none';
   if (state.pCancelFoot) state.pCancelFoot.style.display = 'none';
 
@@ -742,6 +925,14 @@ export function exitInlineEdit(restore = true){
 
 export async function saveInline(){
   const { perfilModal } = els();
+
+  // O cadastro é em etapas. Se algum botão antigo/duplicado chamar salvar
+  // antes da última etapa, não valida senha ainda: apenas avança.
+  const { idx } = activeWizardStep(perfilModal);
+  if (perfilModal?.classList.contains('editing') && idx < WIZARD_STEPS.length - 1) {
+    goWizardStep(perfilModal, WIZARD_STEPS[Math.min(WIZARD_STEPS.length - 1, idx + 1)]);
+    return;
+  }
 
   validateFormLive(false);
 
@@ -774,6 +965,15 @@ export async function saveInline(){
   const check = validateFormLive(true);
 
   if (!check.ok){
+    if (check.msgs.some(m => String(m).toLowerCase().includes('senha'))) {
+      goWizardStep(perfilModal, 'acessos');
+
+      setTimeout(() => {
+        const senhaEl = document.querySelector('#e-senha');
+        senhaEl?.focus?.();
+      }, 80);
+    }
+
     toast('Corrija os campos:\n' + check.msgs.join('\n'), 'warn');
     return;
   }
@@ -792,6 +992,10 @@ export async function saveInline(){
     fd.append('telefone', telE164(tel));
     fd.append('cargo', (cargo || '').trim());
     fd.append('horario_modo', horarioModo);
+
+    // Cria também o usuário de login vinculado ao colaborador.
+    // Sem isso, a senha era enviada, mas o backend criava apenas o registro em colaboradores.
+    fd.append('criar_usuario', 'true');
 
     if (expOn){
       fd.append('hora_login_inicio', hIni);
@@ -1029,6 +1233,7 @@ export async function openPerfil(id){
       return;
     }
 
+    resetLazyEditFlags();
     perfilModal.dataset.mode = 'view';
     perfilModal.setAttribute('aria-hidden','false');
     document.documentElement.classList.add('modal-open');
@@ -1044,6 +1249,13 @@ export async function openPerfil(id){
     if (pEdit) {
       pEdit.style.display = hasPerm('colaboradores.gerenciar') ? '' : 'none';
     }
+
+    const { pSave, pCancel, pClose, pClose2 } = els();
+    if (pSave) pSave.style.display = 'none';
+    if (pCancel) pCancel.style.display = 'none';
+    if (pClose) pClose.style.display = '';
+    if (pClose2) pClose2.style.display = 'none';
+    updateWizardFooter(perfilModal);
   } catch (e) {
     console.error(e);
     toast('Não foi possível abrir o perfil.', 'err');
@@ -1054,6 +1266,7 @@ export function closePerfil(){
   const { perfilModal } = els();
 
   clearValidationErrors();
+  resetLazyEditFlags();
 
   perfilModal?.setAttribute('aria-hidden','true');
   document.documentElement.classList.remove('modal-open');
@@ -1104,6 +1317,14 @@ export async function openNovo(){
   perfilModal.dataset.currentId = '';
 
   state.showErrors = false;
+  resetLazyEditFlags();
+  setPlaceholderPerfil();
+
+  const tituloNovo = document.querySelector('#perfil-title');
+  if (tituloNovo) tituloNovo.textContent = 'Novo colaborador';
+
+  perfilModal.setAttribute('aria-hidden','false');
+  document.documentElement.classList.add('modal-open');
 
   await renderPerfilView(blank);
 
@@ -1158,15 +1379,124 @@ export async function openNovo(){
     }
   }
 
-  perfilModal.setAttribute('aria-hidden','false');
-  document.documentElement.classList.add('modal-open');
-
   enterInlineEdit();
+  goWizardStep(perfilModal, 'perfil');
+  updateWizardFooter(perfilModal);
+}
+
+
+const WIZARD_STEPS = ['perfil', 'acessos', 'permissoes'];
+
+function activeWizardStep(modal){
+  const active = modal?.querySelector('.colab-tab.active');
+  const key = active?.dataset?.tab || 'perfil';
+  const idx = Math.max(0, WIZARD_STEPS.indexOf(key));
+  return { key, idx };
+}
+
+function updateWizardFooter(modal){
+  if (!modal) return;
+
+  const { key, idx } = activeWizardStep(modal);
+  modal.dataset.activeStep = key;
+
+  const prev = modal.querySelector('#perfil-voltar-step');
+  const next = modal.querySelector('#perfil-continuar-step');
+  const saveFoot = modal.querySelector('#perfil-salvar-foot');
+  const cancelFoot = modal.querySelector('#perfil-cancelar-foot');
+  const closeFoot = modal.querySelector('#perfil-fechar2');
+  const headerSave = modal.querySelector('#perfil-salvar');
+  const headerEdit = modal.querySelector('#perfil-editar');
+  const headerCancel = modal.querySelector('#perfil-cancelar');
+  const title = modal.querySelector('#perfil-title');
+
+  // Mantém os botões antigos no DOM para compatibilidade, mas eles não aparecem.
+  [prev, next, saveFoot, cancelFoot, closeFoot, headerCancel].forEach(btn => {
+    if (btn) btn.style.display = 'none';
+  });
+
+  const isEditing = modal.classList.contains('editing') || modal.dataset.mode === 'create';
+  const isView = modal.dataset.mode === 'view' && !isEditing;
+  const isLast = idx >= WIZARD_STEPS.length - 1;
+  const isNovo = String(title?.textContent || '').toLowerCase().includes('novo') || modal.dataset.mode === 'create';
+
+  if (headerEdit) {
+    headerEdit.style.display = isView ? '' : 'none';
+  }
+
+  if (!headerSave) return;
+
+  headerSave.style.display = isEditing ? 'inline-flex' : 'none';
+  headerSave.dataset.wizardAction = isLast ? 'save' : 'next';
+  headerSave.classList.remove('btn-soft-disabled');
+  headerSave.removeAttribute('aria-disabled');
+
+  if (!isEditing) return;
+
+  if (isLast){
+    headerSave.innerHTML = isNovo
+      ? '<i class="fa-solid fa-check" aria-hidden="true"></i><span>Criar colaborador</span>'
+      : '<i class="fa-solid fa-check" aria-hidden="true"></i><span>Salvar alterações</span>';
+  } else {
+    headerSave.innerHTML = '<span>Continuar</span><i class="fa-solid fa-arrow-right" aria-hidden="true"></i>';
+  }
+}
+
+function goWizardStep(modal, key){
+  const btn = modal?.querySelector('.colab-tab[data-tab="' + key + '"]');
+  if (btn) btn.click();
+  setTimeout(() => updateWizardFooter(modal), 20);
+}
+
+function bindWizardModal(){
+  const { perfilModal } = els();
+  const modal = perfilModal;
+
+  if (!modal || modal.dataset.wizardBound === '1') return;
+  modal.dataset.wizardBound = '1';
+
+  const prev = modal.querySelector('#perfil-voltar-step');
+  const next = modal.querySelector('#perfil-continuar-step');
+  const save = modal.querySelector('#perfil-salvar-foot');
+  const cancel = modal.querySelector('.wizard-footer-nav #perfil-cancelar-foot');
+  const expCheck = modal.querySelector('#e-exp-personalizar');
+
+  prev?.addEventListener('click', () => {
+    const { idx } = activeWizardStep(modal);
+    goWizardStep(modal, WIZARD_STEPS[Math.max(0, idx - 1)]);
+  });
+
+  next?.addEventListener('click', () => {
+    const { idx } = activeWizardStep(modal);
+    goWizardStep(modal, WIZARD_STEPS[Math.min(WIZARD_STEPS.length - 1, idx + 1)]);
+  });
+
+  // Salvar/Cancelar são conectados em ensureFooterButtons().
+  // Assim o clique não dispara duas vezes quando o modal entra em modo edição/criação.
+
+  if (expCheck){
+    const syncExp = () => modal.classList.toggle('exp-custom', !!expCheck.checked);
+    expCheck.addEventListener('change', syncExp);
+    syncExp();
+  }
+
+  modal.querySelectorAll('.colab-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      setTimeout(() => {
+        updateWizardFooter(modal);
+        ensureLazyEditStep(activeWizardStep(modal).key);
+      }, 20);
+    });
+  });
+
+  updateWizardFooter(modal);
 }
 
 export function bindModal(){
   if (state.didBindModal) return;
   state.didBindModal = true;
+
+  bindWizardModal();
 
   const {
     perfilModal,
@@ -1194,7 +1524,20 @@ export function bindModal(){
     else exitInlineEdit(true);
   });
 
-  pSave?.addEventListener('click', saveInline);
+  pSave?.addEventListener('click', ev => {
+    ev.preventDefault();
+
+    const modal = els().perfilModal;
+    const action = pSave.dataset.wizardAction || 'save';
+
+    if (action === 'next') {
+      const { idx } = activeWizardStep(modal);
+      goWizardStep(modal, WIZARD_STEPS[Math.min(WIZARD_STEPS.length - 1, idx + 1)]);
+      return;
+    }
+
+    saveInline();
+  });
 
   perfilModal?.addEventListener('mousedown', ev => {
     const card = perfilModal.querySelector('.modal-card');

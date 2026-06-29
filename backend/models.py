@@ -1090,6 +1090,7 @@ class Colaborador(Base):
 
     hora_login_inicio = Column(String(5), nullable=True)
     hora_login_fim    = Column(String(5), nullable=True)
+    horario_modo      = Column(String(20), nullable=True)
 
     login_token = Column(String(20), nullable=True)
     login_token_expires_at = Column(DateTime(timezone=True), nullable=True)

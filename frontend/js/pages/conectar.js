@@ -11,6 +11,21 @@ const PRESENCE_REFRESH_INTERVAL_MS = 30000;
 const PRESENCE_COOLDOWN_MS = 15000;
 const PRESENCE_CONCURRENCY = 4;
 
+// Tempo mínimo visual para a Saúde do Número.
+// A API pode responder rápido, mas seguramos a tela para parecer uma análise real.
+const SAUDE_ANALISE_MIN_MS = 10000;
+const SAUDE_REANALISE_MIN_MS = 6500;
+const SAUDE_ERROR_MIN_MS = 2500;
+const SAUDE_FINAL_PAUSE_MS = 650;
+
+const SAUDE_LOADING_MESSAGES = [
+  'Buscando mensagens recentes...',
+  'Analisando padrão de envio...',
+  'Verificando repetição de conteúdo...',
+  'Calculando risco do número...',
+  'Montando relatório final...'
+];
+
 // ====== Estado ======
 let wantQR = false;
 let currentInstance = null;
@@ -27,6 +42,8 @@ let saudeLoadingTmr = null;
 let saudeLoadingStepIdx = 0;
 let saudeLoadingMsgIdx = 0;
 let saudeCurrentItem = null;
+let saudeRunToken = 0;
+let saudeLoadingStartedAt = 0;
 let editApelidoItem = null;
 
 // ===== Helpers =====
@@ -412,6 +429,7 @@ async function refreshPresenceStatuses({ force=false, onlyInstances=null } = {})
         updateTopTotal(lastPlanLabel, lastWhatsPayload, allItems);
         updateAddButton(lastWhatsPayload, allItems);
       }
+      updateSummaryCards(allItems);
 
       renderList(filterItemsByTab(allItems), lastPlanLabel);
     }
@@ -425,12 +443,22 @@ const els = {
   tabAtivos:   $('button[data-tab="ativos"]'),
   tabInativos: $('button[data-tab="inativos"]'),
   placeholder: $('#placeholder-zap'),
+  tabEmpty:    $('#tab-empty-zap'),
+  actions:     $('.actions'),
   table:       $('#lista-zap'),
   tbody:       $('#lista-zap tbody'),
   btnAdd:      $('#btn-open-modal'),
+  btnHelp:     $('#btn-open-help'),
   countPro:    $('#count-pro'),
+  summaryActive: $('#zc-summary-active'),
+  summaryQr: $('#zc-summary-qr'),
+  summaryReconnect: $('#zc-summary-reconnect'),
+  tableFoot: $('#zc-table-foot'),
+  wizardSteps: $$('.zc-wizard-step'),
+  wizardHint: $('#zc-wizard-hint'),
 
   modal:       $('#modal'),
+  modalHelp:   $('#modal-ajuda-conectar'),
   btnCloseMd:  $('#btn-close-modal'),
   form:        $('#form-conectar'),
   inApelido:   $('#form-conectar input[name="apelido"]'),
@@ -480,6 +508,12 @@ const els = {
   saudeRecomendacoes: $('#saude-recomendacoes'),
   saudeMetricas: $('#saude-metricas'),
   saudeConsultadoEm: $('#saude-consultado-em'),
+  saudeConsultadoPill: $('#saude-consultado-pill'),
+  saudeScoreProgress: $('#saude-score-progress'),
+  saudeRiskLabel: $('#saude-risk-label'),
+  saudeStatusTitle: $('#saude-status-title'),
+  saudeStabilityLabel: $('#saude-stability-label'),
+  saudeLoadingProgress: $('#saude-loading-progress-bar'),
 };
 
 const modalTitle = $('#modal [data-modal-title], #modal .modal-title, #modal h3, #modal h2');
@@ -493,6 +527,35 @@ function showModal(){
 function hideModal(){
   if (!els.modal) return;
   els.modal.classList.add('hidden');
+}
+
+function setConnectWizardStep(step){
+  const n = Number(step) || 1;
+  els.wizardSteps?.forEach?.((el) => {
+    const current = Number(el.dataset.step || 0);
+    el.classList.toggle('is-active', current === n);
+    el.classList.toggle('is-done', current < n);
+  });
+
+  if (els.wizardHint) {
+    els.wizardHint.textContent =
+      n === 4 ? 'Conexão confirmada. Estamos preparando sua instância.' :
+      n === 3 ? 'Escaneie o QR Code com o WhatsApp do celular.' :
+      n === 2 ? 'Escolha quanto histórico deseja restaurar.' :
+      'Configure o apelido, escolha o histórico e escaneie o QR Code.';
+  }
+}
+
+function openHelpModal(){
+  if (!els.modalHelp) return;
+  els.modalHelp.classList.remove('hidden');
+  els.modalHelp.setAttribute('aria-hidden', 'false');
+}
+
+function closeHelpModal(){
+  if (!els.modalHelp) return;
+  els.modalHelp.classList.add('hidden');
+  els.modalHelp.setAttribute('aria-hidden', 'true');
 }
 
 // ===== Modal Editar Apelido =====
@@ -598,10 +661,29 @@ function openSaudeModal(){
 }
 
 function closeSaudeModal(){
+  saudeRunToken += 1;
   clearInterval(saudeLoadingTmr);
   saudeLoadingTmr = null;
   saudeCurrentItem = null;
   els.modalSaude?.classList.add('hidden');
+}
+
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, Math.max(0, ms || 0)));
+
+function setSaudeLoadingStep(activeIdx, { completeAll=false, progress=null } = {}){
+  const steps = $$('#saude-loading .saude-step');
+
+  steps.forEach((el, idx) => {
+    const done = completeAll || idx < activeIdx;
+    const active = !completeAll && idx === activeIdx;
+
+    el.classList.toggle('done', done);
+    el.classList.toggle('active', active);
+  });
+
+  if (els.saudeLoadingProgress && typeof progress === 'number') {
+    els.saudeLoadingProgress.style.width = `${Math.max(0, Math.min(100, progress))}%`;
+  }
 }
 
 function resetSaudeModal(){
@@ -609,6 +691,7 @@ function resetSaudeModal(){
   saudeLoadingTmr = null;
   saudeLoadingStepIdx = 0;
   saudeLoadingMsgIdx = 0;
+  saudeLoadingStartedAt = 0;
 
   els.saudeError?.classList.add('hidden');
   if (els.saudeError) els.saudeError.textContent = '';
@@ -617,32 +700,60 @@ function resetSaudeModal(){
   els.saudeLoading?.classList.remove('hidden');
   els.btnReanalisarSaude?.classList.add('hidden');
 
-  const msg = 'Analisando padrão das últimas mensagens...';
-  if (els.saudeLoadingText) els.saudeLoadingText.textContent = msg;
+  if (els.saudeLoadingText) els.saudeLoadingText.textContent = SAUDE_LOADING_MESSAGES[0];
+  if (els.saudeLoadingProgress) els.saudeLoadingProgress.style.width = '0%';
 
-  const steps = $$('#saude-loading .saude-step');
-  steps.forEach((el, idx) => el.classList.toggle('active', idx === 0));
+  setSaudeLoadingStep(0, { progress:0 });
 }
 
-function startSaudeLoadingAnimation(){
-  const msgs = [
-    'Analisando padrão das últimas mensagens...',
-    'Verificando repetição de conteúdo...',
-    'Calculando velocidade de envio...',
-    'Medindo taxa de resposta...',
-    'Montando diagnóstico do número...'
-  ];
-
+function startSaudeLoadingAnimation(minMs=SAUDE_ANALISE_MIN_MS){
   const steps = $$('#saude-loading .saude-step');
+  const totalSteps = Math.max(steps.length, 1);
+  const minDuration = Math.max(2500, Number(minMs) || SAUDE_ANALISE_MIN_MS);
+
   clearInterval(saudeLoadingTmr);
+  saudeLoadingStartedAt = Date.now();
 
-  saudeLoadingTmr = setInterval(() => {
-    saudeLoadingMsgIdx = (saudeLoadingMsgIdx + 1) % msgs.length;
-    saudeLoadingStepIdx = (saudeLoadingStepIdx + 1) % Math.max(steps.length, 1);
+  const tick = () => {
+    const elapsed = Date.now() - saudeLoadingStartedAt;
+    const ratio = Math.min(1, elapsed / minDuration);
+    const idx = Math.min(totalSteps - 1, Math.floor(ratio * totalSteps));
+    const progress = Math.min(94, Math.max(6, ratio * 94));
 
-    if (els.saudeLoadingText) els.saudeLoadingText.textContent = msgs[saudeLoadingMsgIdx];
-    steps.forEach((el, idx) => el.classList.toggle('active', idx === saudeLoadingStepIdx));
-  }, 1200);
+    saudeLoadingStepIdx = idx;
+    saudeLoadingMsgIdx = Math.min(SAUDE_LOADING_MESSAGES.length - 1, idx);
+
+    if (els.saudeLoadingText) {
+      els.saudeLoadingText.textContent = SAUDE_LOADING_MESSAGES[saudeLoadingMsgIdx] || 'Analisando dados do número...';
+    }
+
+    setSaudeLoadingStep(idx, { progress });
+  };
+
+  tick();
+  saudeLoadingTmr = setInterval(tick, 220);
+}
+
+async function finishSaudeLoadingBeforeResult(runToken){
+  if (runToken !== saudeRunToken) return false;
+
+  clearInterval(saudeLoadingTmr);
+  saudeLoadingTmr = null;
+
+  if (els.saudeLoadingText) {
+    els.saudeLoadingText.textContent = 'Relatório concluído. Preparando resultado...';
+  }
+
+  setSaudeLoadingStep(999, { completeAll:true, progress:100 });
+  await delay(SAUDE_FINAL_PAUSE_MS);
+
+  return runToken === saudeRunToken;
+}
+
+async function waitSaudeMinimumTime(startedAt, minMs){
+  const elapsed = Date.now() - startedAt;
+  const remaining = Math.max(0, Number(minMs || 0) - elapsed);
+  if (remaining > 0) await delay(remaining);
 }
 
 function fillSaudeList(container, items, fallback){
@@ -662,22 +773,80 @@ function fillSaudeList(container, items, fallback){
   });
 }
 
+function getSaudeStatusMeta(status, score){
+  const s = String(status || '').toLowerCase();
+  const n = Number(score);
+
+  if (s === 'critico') {
+    return {
+      key: 'critico',
+      risk: 'Risco crítico',
+      title: 'Ação necessária agora',
+      stability: 'Crítico',
+      icon: 'fa-triangle-exclamation'
+    };
+  }
+
+  if (s === 'alto_risco') {
+    return {
+      key: 'alto',
+      risk: 'Alto risco',
+      title: 'Revise o padrão de envio',
+      stability: 'Instável',
+      icon: 'fa-circle-exclamation'
+    };
+  }
+
+  if (s === 'atencao') {
+    return {
+      key: 'atencao',
+      risk: 'Atenção',
+      title: 'Atenção ao padrão recente',
+      stability: 'Em observação',
+      icon: 'fa-clock'
+    };
+  }
+
+  if (s === 'boa' || (Number.isFinite(n) && n <= 20)) {
+    return {
+      key: 'boa',
+      risk: 'Risco muito baixo',
+      title: 'Tudo certo por aqui!',
+      stability: 'Estável',
+      icon: 'fa-shield-halved'
+    };
+  }
+
+  return {
+    key: 'na',
+    risk: 'Risco não calculado',
+    title: 'Análise ainda não disponível',
+    stability: 'Sem análise',
+    icon: 'fa-shield-halved'
+  };
+}
+
 function renderSaudeMetricas(metricas){
   if (!els.saudeMetricas) return;
   const m = metricas || {};
   const rows = [
-    ['Mensagens analisadas', formatMetricValue(m.mensagens_analisadas)],
-    ['Mensagens de saída', formatMetricValue(m.saidas)],
-    ['Mensagens de entrada', formatMetricValue(m.entradas)],
-    ['Repetição', `${formatMetricValue(m.repeticao_pct)}%`],
-    ['Intervalo médio', m.intervalo_medio_seg == null ? '—' : `${formatMetricValue(m.intervalo_medio_seg)} s`],
-    ['Sem resposta', `${formatMetricValue(m.taxa_sem_resposta_pct)}%`],
+    ['Mensagens analisadas', formatMetricValue(m.mensagens_analisadas), 'fa-regular fa-comments', ''],
+    ['Mensagens de saída', formatMetricValue(m.saidas), 'fa-regular fa-paper-plane', 'saude-metrica-icon--blue'],
+    ['Mensagens de entrada', formatMetricValue(m.entradas), 'fa-solid fa-arrow-down', ''],
+    ['Repetição', `${formatMetricValue(m.repeticao_pct)}%`, 'fa-solid fa-arrows-rotate', 'saude-metrica-icon--warn'],
+    ['Intervalo médio', m.intervalo_medio_seg == null ? '—' : `${formatMetricValue(m.intervalo_medio_seg)} s`, 'fa-regular fa-clock', ''],
+    ['Sem resposta', `${formatMetricValue(m.taxa_sem_resposta_pct)}%`, 'fa-solid fa-ban', 'saude-metrica-icon--muted'],
   ];
 
-  els.saudeMetricas.innerHTML = rows.map(([k, v]) => `
+  els.saudeMetricas.innerHTML = rows.map(([k, v, icon, extra]) => `
     <div class="saude-metrica-item">
-      <span class="saude-metrica-label">${htmlEscape(k)}</span>
-      <strong class="saude-metrica-value">${htmlEscape(v)}</strong>
+      <div class="saude-metrica-icon ${extra || ''}" aria-hidden="true">
+        <i class="${icon}"></i>
+      </div>
+      <div>
+        <span class="saude-metrica-label">${htmlEscape(k)}</span>
+        <strong class="saude-metrica-value">${htmlEscape(v)}</strong>
+      </div>
     </div>
   `).join('');
 }
@@ -687,13 +856,28 @@ function renderSaudeResult(item, payload){
   saudeLoadingTmr = null;
 
   const saude = payload?.saude || {};
-  const score = Number(saude.score ?? payload?.score ?? 0);
+  const scoreRaw = Number(saude.score ?? payload?.score ?? 0);
+  const score = Number.isFinite(scoreRaw) ? Math.max(0, Math.min(100, scoreRaw)) : null;
   const label = saude.label || payload?.score_label || 'Não analisado';
   const status = saude.status || payload?.score_status || 'na';
+  const meta = getSaudeStatusMeta(status, score);
+  const consultadoEm = saude.consultado_em || payload?.score_atualizado_em;
 
   els.saudeLoading?.classList.add('hidden');
   els.saudeResult?.classList.remove('hidden');
   els.btnReanalisarSaude?.classList.remove('hidden');
+  els.saudeError?.classList.add('hidden');
+
+  if (els.saudeResult) {
+    els.saudeResult.classList.remove(
+      'saude-state--boa',
+      'saude-state--atencao',
+      'saude-state--alto',
+      'saude-state--critico',
+      'saude-state--na'
+    );
+    els.saudeResult.classList.add(`saude-state--${meta.key}`);
+  }
 
   if (els.saudeSubtitle) {
     const nome = item?.apelido || item?.instance_name || 'Instância';
@@ -706,9 +890,33 @@ function renderSaudeResult(item, payload){
     els.saudeLabelBadge.textContent = label;
   }
 
-  if (els.saudeScoreNumber) els.saudeScoreNumber.textContent = Number.isFinite(score) ? String(score) : '—';
-  if (els.saudeScoreLine) els.saudeScoreLine.textContent = Number.isFinite(score) ? `Score: ${score}/100` : 'Score: —';
-  if (els.saudeResumo) els.saudeResumo.textContent = saude.resumo || payload?.score_resumo || 'Sem resumo disponível.';
+  if (els.saudeRiskLabel) {
+    els.saudeRiskLabel.textContent = meta.risk;
+  }
+
+  if (els.saudeStatusTitle) {
+    els.saudeStatusTitle.textContent = meta.title;
+  }
+
+  if (els.saudeStabilityLabel) {
+    els.saudeStabilityLabel.textContent = meta.stability;
+  }
+
+  if (els.saudeScoreNumber) {
+    els.saudeScoreNumber.textContent = score == null ? '—' : String(score);
+  }
+
+  if (els.saudeScoreLine) {
+    els.saudeScoreLine.textContent = score == null ? 'Score: —' : `Score: ${score}/100`;
+  }
+
+  if (els.saudeScoreProgress) {
+    els.saudeScoreProgress.style.width = `${score == null ? 0 : score}%`;
+  }
+
+  if (els.saudeResumo) {
+    els.saudeResumo.textContent = saude.resumo || payload?.score_resumo || 'Sem resumo disponível.';
+  }
 
   fillSaudeList(
     els.saudeMotivos,
@@ -724,25 +932,28 @@ function renderSaudeResult(item, payload){
 
   renderSaudeMetricas(saude.metricas || payload?.score_metricas || {});
 
-  const consultadoEm = saude.consultado_em || payload?.score_atualizado_em;
   if (els.saudeConsultadoEm) {
     if (consultadoEm) {
       const absoluto = formatDateTimeBR(consultadoEm);
       const relativo = formatRelativeTimeBR(consultadoEm);
 
-      els.saudeConsultadoEm.textContent = relativo
-        ? `Analisado ${relativo} • ${absoluto}`
-        : `Atualizado em: ${absoluto}`;
+      els.saudeConsultadoEm.textContent = absoluto;
+      els.saudeConsultadoEm.title = relativo ? `${relativo} • ${absoluto}` : absoluto;
 
-      els.saudeConsultadoEm.title = absoluto;
+      if (els.saudeConsultadoPill) {
+        els.saudeConsultadoPill.textContent = relativo || '';
+        els.saudeConsultadoPill.classList.toggle('hidden', !relativo);
+      }
     } else {
       els.saudeConsultadoEm.textContent = 'Ainda não há data da última análise.';
       els.saudeConsultadoEm.removeAttribute('title');
+      els.saudeConsultadoPill?.classList.add('hidden');
+      if (els.saudeConsultadoPill) els.saudeConsultadoPill.textContent = '';
     }
   }
 
   if (item) {
-    item.score = score;
+    item.score = score == null ? scoreRaw : score;
     item.score_status = status;
     item.score_label = label;
     item.score_resumo = saude.resumo || payload?.score_resumo || null;
@@ -765,13 +976,17 @@ function showSaudeError(msg){
   els.btnReanalisarSaude?.classList.remove('hidden');
 }
 
-async function consultarSaudeNumero(item, { force=true } = {}){
+async function consultarSaudeNumero(item, { force=true, reanalise=false } = {}){
   if (!item?.id) return;
+
+  const runToken = ++saudeRunToken;
+  const startedAt = Date.now();
+  const minMs = reanalise ? SAUDE_REANALISE_MIN_MS : SAUDE_ANALISE_MIN_MS;
 
   saudeCurrentItem = item;
   openSaudeModal();
   resetSaudeModal();
-  startSaudeLoadingAnimation();
+  startSaudeLoadingAnimation(minMs);
 
   try{
     const res = await apiPost(
@@ -784,9 +999,15 @@ async function consultarSaudeNumero(item, { force=true } = {}){
       }
     );
 
+    await waitSaudeMinimumTime(startedAt, minMs);
+    const canRender = await finishSaudeLoadingBeforeResult(runToken);
+    if (!canRender) return;
+
     renderSaudeResult(item, res);
     toast('Saúde do Número consultada com sucesso.');
   } catch (e) {
+    await waitSaudeMinimumTime(startedAt, SAUDE_ERROR_MIN_MS);
+    if (runToken !== saudeRunToken) return;
     showSaudeError(e?.message || 'Não foi possível consultar a saúde do número.');
   }
 }
@@ -1141,23 +1362,37 @@ function hidePrepOverlay(){
 })();
 
 // ===== Lista de instâncias =====
+function getConnectionStatusVisual(item){
+  const connected = !!item?.connected;
+  const lastSeen = item?.last_seen || item?.updated_at || item?.ultimo_status_em || null;
+  const relative = lastSeen ? formatRelativeTimeBR(lastSeen) : '';
+
+  if (connected) {
+    return {
+      pill: 'Conectado agora',
+      klass: 'zc-status-pill--online',
+      dot: 'st-dot--on',
+      title: 'Ativo',
+      sub: relative ? `Última atividade ${relative}` : 'Presença verificada agora'
+    };
+  }
+
+  return {
+    pill: 'Precisa reconectar',
+    klass: 'zc-status-pill--offline',
+    dot: 'st-dot--off',
+    title: 'Inativo',
+    sub: relative ? `Última atividade ${relative}` : 'Clique em ações para reconectar'
+  };
+}
+
 function rowHTML(item, planLabel){
   const apelido = htmlEscape(item.apelido || item.instance_name || '');
   const numero  = formatPhoneBR(item.numero_instancia);
   const inst    = htmlEscape(String(item.instance_name || ''));
+  const st      = getConnectionStatusVisual(item);
 
-  const statusCls = item.connected ? 'st-dot--on' : 'st-dot--off';
-  const status = `<span class="st-dot ${statusCls} js-status-dot" data-inst="${inst}" title="${item.connected ? 'Ativo' : 'Inativo'}"></span>`;
-
-  const saude = getSaudeVisual(item);
-  const saudeClass = chipClassByStatus(saude.status);
-  const saudeLabel = htmlEscape(saude.label);
-
-  const atualizadoEm = item?.score_atualizado_em || null;
-  const absoluto = atualizadoEm ? formatDateTimeBR(atualizadoEm) : '';
-  const chipTitle = atualizadoEm
-    ? `Analisado em ${absoluto}`
-    : 'Ainda não analisado';
+  const status = `<span class="st-dot ${st.dot} js-status-dot" data-inst="${inst}" title="${htmlEscape(st.title)}"></span>`;
 
   const menuItems = [];
   menuItems.push('<button class="kebab-item js-edit-apelido">Alterar apelido</button>');
@@ -1166,14 +1401,17 @@ function rowHTML(item, planLabel){
   menuItems.push('<button class="kebab-item js-remove">Remover número</button>');
 
   return `
-    <tr class="border-b last:border-0 relative" data-id="${htmlEscape(String(item.id))}" data-instance="${inst}">
-      <td class="py-2">${apelido || '—'}</td>
-      <td class="py-2">${numero}</td>
+    <tr class="zc-number-row border-b last:border-0 relative" data-id="${htmlEscape(String(item.id))}" data-instance="${inst}">
+      <td class="py-2"><span class="zc-number-name">${apelido || '—'}</span></td>
+      <td class="py-2"><span class="zc-number-phone">${numero}</span></td>
       <td class="py-2"><span class="plan-pill">${htmlEscape(planLabel)}</span></td>
       <td class="py-2">
-        <div class="saude-inline">
-          ${status}
-          <span class="saude-chip-sm ${saudeClass}" title="${htmlEscape(chipTitle)}">${saudeLabel}</span>
+        <div class="zc-status-smart">
+          <div class="zc-status-main">
+            ${status}
+            <span class="zc-status-pill ${st.klass}">${htmlEscape(st.pill)}</span>
+          </div>
+          <small>${htmlEscape(st.sub)}</small>
         </div>
       </td>
       <td class="py-2 text-right">
@@ -1243,14 +1481,49 @@ function renderList(items, planLabel){
   if (!els.tbody) return;
   els.tbody.innerHTML = '';
 
-  if (!Array.isArray(items) || items.length === 0){
+  const hasItemsInTab = Array.isArray(items) && items.length > 0;
+  const totalItems = Array.isArray(allItems) ? allItems.length : 0;
+
+  els.placeholder?.classList.add('hidden');
+  els.tabEmpty?.classList.add('hidden');
+  els.tableFoot?.classList.add('hidden');
+
+  if (!hasItemsInTab){
     els.table?.classList.add('hidden');
-    els.placeholder?.classList.remove('hidden');
+
+    if (totalItems === 0) {
+      els.actions?.classList.add('hidden');
+      els.placeholder?.classList.remove('hidden');
+    } else {
+      els.actions?.classList.remove('hidden');
+
+      if (els.tabEmpty) {
+        const title = els.tabEmpty.querySelector('strong');
+        const desc = els.tabEmpty.querySelector('span');
+
+        if (currentTab === 'ativos') {
+          if (title) title.textContent = 'Nenhum número ativo agora';
+          if (desc) desc.textContent = 'Os números desconectados aparecem na aba Inativos.';
+        } else {
+          if (title) title.textContent = 'Nenhum número inativo agora';
+          if (desc) desc.textContent = 'Todos os seus números cadastrados estão ativos.';
+        }
+
+        els.tabEmpty.classList.remove('hidden');
+      }
+    }
+
     return;
   }
 
-  els.placeholder?.classList.add('hidden');
+  els.actions?.classList.remove('hidden');
   els.table?.classList.remove('hidden');
+
+  if (els.tableFoot) {
+    const suffix = totalItems === 1 ? 'número' : 'números';
+    els.tableFoot.textContent = `Mostrando ${items.length} de ${totalItems} ${suffix}`;
+    els.tableFoot.classList.remove('hidden');
+  }
 
   const tpl = document.createElement('template');
   const frag = document.createDocumentFragment();
@@ -1284,9 +1557,21 @@ els.tabAtivos?.addEventListener('click', () => activateTab('ativos'));
 els.tabInativos?.addEventListener('click', () => activateTab('inativos'));
 
 // ===== Contadores / limite / botão adicionar =====
+function updateSummaryCards(list){
+  const arr = Array.isArray(list) ? list : [];
+  const active = arr.filter(it => !!it.connected).length;
+  const reconnect = arr.filter(it => !it.connected).length;
+  const qrPending = wantQR && currentInstance ? 1 : 0;
+
+  if (els.summaryActive) els.summaryActive.textContent = String(active);
+  if (els.summaryQr) els.summaryQr.textContent = String(qrPending);
+  if (els.summaryReconnect) els.summaryReconnect.textContent = String(reconnect);
+}
+
 function updateTabCounts(totalAtivos, totalInativos){
   if (els.tabAtivos)   els.tabAtivos.textContent   = `Ativos (${totalAtivos})`;
   if (els.tabInativos) els.tabInativos.textContent = `Inativos (${totalInativos})`;
+  updateSummaryCards(allItems);
 }
 
 function getInstanceLimit(payload){
@@ -1382,6 +1667,7 @@ async function loadWhatsAppStatus(){
     updateTabCounts(totalAtivos, totalInativos);
     updateTopTotal(tier, js, list);
     updateAddButton(js, list);
+    updateSummaryCards(list);
 
     renderList(filterItemsByTab(allItems), tier);
     schedulePresenceRefresh(150, { force:false });
@@ -1459,6 +1745,7 @@ function startTimer(sec){
 
 function renderQRFromBase64(b64, limit){
   if (!b64 || !els.qrImg) return;
+  setConnectWizardStep(3);
   const src = b64.startsWith('data:') ? b64 : `data:image/png;base64,${b64}`;
   els.qrLoader?.classList.add('hidden');
   hideIllustration();
@@ -1473,6 +1760,7 @@ function renderQRFromBase64(b64, limit){
 
 function renderQRFromText(text, limit){
   if (!els.qrCanvas) return;
+  setConnectWizardStep(3);
   els.qrLoader?.classList.add('hidden');
   hideIllustration();
   try{
@@ -1509,10 +1797,12 @@ function renderQRFromResponse(qr){
 // ===== Conectado → overlay =====
 function handleConnected(instanceFromMsg){
   if (currentInstance && instanceFromMsg && instanceFromMsg !== currentInstance) return;
+  setConnectWizardStep(4);
   clearInterval(timerId);
   hideQR();
   try { hideModal(); } catch {}
   wantQR = false;
+  updateSummaryCards(allItems);
 
   const info = getHistoricoInfo(lastHistoricoUsed);
   showPrepOverlayOneMinute(info.overlaySeconds, { historico: lastHistoricoUsed });
@@ -1595,6 +1885,7 @@ function attachInstWS(instance) {
 // ===== Carga principal / submit =====
 async function handleConnectSubmit(ev){
   ev.preventDefault?.();
+  setConnectWizardStep(3);
   showQRError('');
   hideQR();
   els.qrLoader?.classList.remove('hidden');
@@ -1604,6 +1895,7 @@ async function handleConnectSubmit(ev){
   const historico = normalizeHistorico(els.selHist?.value || '24h');
 
   if (!apelido) {
+    setConnectWizardStep(1);
     els.qrLoader?.classList.add('hidden');
     showQRError('Informe um apelido para identificar esta instância.');
     return;
@@ -1626,6 +1918,7 @@ async function handleConnectSubmit(ev){
 
     if (currentInstance) attachInstWS(currentInstance);
     wantQR = true;
+    updateSummaryCards(allItems);
 
     const rendered = renderQRFromResponse(js?.qrcode || {});
     els.qrLoader?.classList.add('hidden');
@@ -1654,6 +1947,7 @@ async function handleConnectSubmit(ev){
 
 async function openReconnect(item){
   if (!item?.instance_name) return;
+  setConnectWizardStep(3);
   currentInstance = item.instance_name;
   window.currentInstance = currentInstance;
 
@@ -1696,6 +1990,7 @@ async function openReconnect(item){
 
 async function refreshQR(){
   if (!window.currentInstance) return;
+  setConnectWizardStep(3);
   try{
     hideQR();
     els.qrLoader?.classList.remove('hidden');
@@ -1718,7 +2013,8 @@ async function refreshQR(){
 }
 
 // ===== Listeners de UI =====
-els.btnAdd?.addEventListener('click', () => {
+function openConnectModal(){
+  setConnectWizardStep(1);
   showModal();
   showIllustration();
   showQRError('');
@@ -1727,7 +2023,7 @@ els.btnAdd?.addEventListener('click', () => {
   currentInstance = null;
   window.currentInstance = null;
 
-  setModalTitle('Conecte seu WhatsApp');
+  setModalTitle('Conectar novo número');
 
   if (els.inApelido) els.inApelido.value = '';
 
@@ -1741,6 +2037,40 @@ els.btnAdd?.addEventListener('click', () => {
 
   els.btnGerarQR?.classList.remove('hidden');
   els.btnRefresh?.classList.add('hidden');
+}
+
+els.btnAdd?.addEventListener('click', openConnectModal);
+els.btnHelp?.addEventListener('click', openHelpModal);
+
+$$('[data-open-connect-modal]').forEach((btn) => {
+  btn.addEventListener('click', openConnectModal);
+});
+
+$$('[data-help-open], [data-empty-help]').forEach((btn) => {
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    openHelpModal();
+  });
+});
+
+$$('[data-help-close]').forEach((btn) => {
+  btn.addEventListener('click', closeHelpModal);
+});
+
+$$('[data-help-video]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    toast('Tutorial em vídeo em breve.');
+  });
+});
+
+$$('[data-help-support]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    toast('Chame o suporte para ajudar na conexão.');
+  });
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeHelpModal();
 });
 
 els.selHist?.addEventListener('change', () => {
@@ -1771,7 +2101,7 @@ els.btnCloseSaude?.addEventListener('click', closeSaudeModal);
 els.btnFecharSaude?.addEventListener('click', closeSaudeModal);
 els.btnReanalisarSaude?.addEventListener('click', async () => {
   if (!saudeCurrentItem) return;
-  await consultarSaudeNumero(saudeCurrentItem, { force:true });
+  await consultarSaudeNumero(saudeCurrentItem, { force:true, reanalise:true });
   renderList(filterItemsByTab(allItems), lastPlanLabel);
 });
 

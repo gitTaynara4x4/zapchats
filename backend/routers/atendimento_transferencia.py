@@ -180,7 +180,7 @@ def listar_departamentos_transferiveis(
         empresa_id=int(empresa_id_eff),
         cliente_id=int(cliente_id),
         instancia_id=instancia_id,
-        allow_unassigned_department=True,
+        allow_unassigned_department=False,
     )
 
     inst_id_eff = (
@@ -259,7 +259,7 @@ async def transferir_conversa_departamento(
         empresa_id=int(empresa_id_eff),
         cliente_id=int(cliente_id),
         instancia_id=payload.instancia_id,
-        allow_unassigned_department=True,
+        allow_unassigned_department=False,
     )
 
     instancia_id_eff = (

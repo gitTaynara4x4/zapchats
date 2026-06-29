@@ -6,6 +6,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Conectar WhatsApp – ZapsChat</title>
 
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;550;600;650;700;750;800&display=swap" rel="stylesheet">
+
   <script src="/frontend/js/app-base.js" defer></script>
   <script src="/frontend/js/auth.js" defer></script>
 
@@ -28,9 +32,41 @@
         <button class="tab-btn" role="tab" id="tab-inativos" aria-controls="panel-inativos" data-tab="inativos" aria-selected="false">Inativos (0)</button>
       </div>
 
+      <div class="zc-smart-summary" aria-label="Resumo dos números WhatsApp">
+        <div class="zc-smart-card zc-smart-card--ok">
+          <div class="zc-smart-icon" aria-hidden="true"><i class="fa-solid fa-check"></i></div>
+          <div>
+            <span>Ativos</span>
+            <strong id="zc-summary-active">0</strong>
+          </div>
+        </div>
+
+        <div class="zc-smart-card zc-smart-card--pending">
+          <div class="zc-smart-icon" aria-hidden="true"><i class="fa-regular fa-clock"></i></div>
+          <div>
+            <span>QR pendente</span>
+            <strong id="zc-summary-qr">0</strong>
+          </div>
+        </div>
+
+        <div class="zc-smart-card zc-smart-card--danger">
+          <div class="zc-smart-icon" aria-hidden="true"><i class="fa-solid fa-rotate"></i></div>
+          <div>
+            <span>Precisa reconectar</span>
+            <strong id="zc-summary-reconnect">0</strong>
+          </div>
+        </div>
+      </div>
+
       <div class="actions">
         <button id="btn-open-modal" type="button" class="btn">
+          <i class="fa-solid fa-plus" aria-hidden="true"></i>
           Adicionar novo número ZapsChat
+        </button>
+
+        <button id="btn-open-help" type="button" class="btn zc-btn-help" data-help-open>
+          <i class="fa-regular fa-circle-play" aria-hidden="true"></i>
+          Ver como funciona
         </button>
       </div>
 
@@ -38,8 +74,46 @@
         <div class="loader-spin"></div>Carregando números...
       </div>
 
-      <div id="placeholder-zap" class="muted" style="padding:.9rem 1rem; border-radius:.8rem; background:var(--hover-strong);">
-        ⚠️ Não foram encontrados registros!
+      <div id="placeholder-zap" class="zc-empty-state hidden" role="status" aria-live="polite">
+        <div class="zc-empty-card">
+          <div class="zc-empty-art" aria-hidden="true">
+            <img src="/frontend/img/zc-robot-qr.png" alt="">
+          </div>
+
+          <h2>Nenhum WhatsApp conectado ainda</h2>
+          <p>Conecte seu primeiro número para começar a atender no ZapsChat.</p>
+
+          <button type="button" class="btn btn--primary zc-empty-cta" data-open-connect-modal>
+            <i class="fa-brands fa-whatsapp" aria-hidden="true"></i>
+            Conectar WhatsApp
+          </button>
+
+          <div class="zc-empty-divider" aria-hidden="true">
+            <span></span>
+            <b>ou</b>
+            <span></span>
+          </div>
+
+          <div class="zc-empty-links" aria-label="Ajuda para conectar WhatsApp">
+            <button type="button" class="zc-empty-link" data-help-open>
+              <i class="fa-solid fa-book-open" aria-hidden="true"></i>
+              Ver como funciona
+            </button>
+
+            <button type="button" class="zc-empty-link" data-help-open>
+              <i class="fa-regular fa-circle-play" aria-hidden="true"></i>
+              Assistir tutorial
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="tab-empty-zap" class="zc-tab-empty hidden" role="status" aria-live="polite">
+        <div class="zc-tab-empty-icon">
+          <i class="fa-brands fa-whatsapp" aria-hidden="true"></i>
+        </div>
+        <strong>Nenhum número nesta aba</strong>
+        <span>Use as abas acima para alternar entre números ativos e inativos.</span>
       </div>
 
       <div class="table-wrap">
@@ -56,80 +130,339 @@
           <tbody></tbody>
         </table>
       </div>
+
+      <div id="zc-table-foot" class="zc-table-foot hidden" aria-live="polite"></div>
     </section>
 
-    <!-- Modal: Conectar -->
-    <div id="modal" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:10000;">
-      <div class="card" style="background:var(--card); color:var(--fg); border:1px solid var(--border); border-radius:14px; width:min(760px,92vw);">
-        <div style="display:flex; align-items:center; justify-content:space-between; padding:1rem 1.1rem; border-bottom:1px solid var(--border);">
-          <h2 class="modal-title" style="margin:0; font-size:1.05rem; font-weight:800;">Conecte seu WhatsApp</h2>
-          <button id="btn-close-modal" class="kebab-btn" aria-label="Fechar">✕</button>
+<!-- Modal: Conectar -->
+    <div id="modal" class="hidden zc-modal zc-modal-wizard" aria-hidden="true">
+      <div class="zc-modal-backdrop"></div>
+
+      <div class="card zc-connect-modal zc-connect-modal--wizard" role="dialog" aria-modal="true" aria-labelledby="zc-connect-title">
+        <div class="zc-connect-head zc-wizard-head">
+          <div>
+            <h2 id="zc-connect-title" class="modal-title">Conectar novo número</h2>
+            <p id="zc-wizard-hint">Configure o apelido, escolha o histórico e escaneie o QR Code.</p>
+          </div>
+
+          <button id="btn-close-modal" type="button" class="zc-icon-btn" aria-label="Fechar modal">
+            <span aria-hidden="true">×</span>
+          </button>
         </div>
 
-        <form id="form-conectar" style="padding:1.1rem; max-height:78vh; overflow:auto; display:grid; gap:1rem;">
-          <div>
-            <label class="muted" style="display:block; margin-bottom:.4rem;">Apelido da instância</label>
-            <input name="apelido" type="text" placeholder="Ex: Comercial, Suporte, ZapsChat Oficial" autocomplete="off"
-                   style="width:100%; padding:.75rem .85rem; border-radius:.75rem; border:1px solid var(--border); background:var(--bg); color:var(--fg);" />
-            <div class="muted" style="font-size:.82rem; margin-top:.35rem; line-height:1.35;">
-              Esse nome é só para você identificar a instância dentro do ZapsChat.
-            </div>
+        <form id="form-conectar" class="zc-connect-body zc-connect-body--wizard">
+          <ol class="zc-wizard-steps" aria-label="Etapas da conexão">
+            <li class="zc-wizard-step is-active" data-step="1">
+              <span>1</span>
+              <b>Nome do número</b>
+            </li>
+            <li class="zc-wizard-step" data-step="2">
+              <span>2</span>
+              <b>Histórico</b>
+            </li>
+            <li class="zc-wizard-step" data-step="3">
+              <span>3</span>
+              <b>QR Code</b>
+            </li>
+            <li class="zc-wizard-step" data-step="4">
+              <span>4</span>
+              <b>Sucesso</b>
+            </li>
+          </ol>
+
+          <p class="zc-wizard-subtitle">Escaneie o QR Code com o WhatsApp do celular para conectar.</p>
+
+          <div class="zc-wizard-grid">
+            <section class="zc-wizard-card zc-wizard-fields" aria-label="Dados do número">
+              <div class="zc-field">
+                <label for="zc-apelido">Apelido do número</label>
+                <div class="zc-input-with-icon">
+                  <input id="zc-apelido" name="apelido" type="text" maxlength="80" placeholder="Ex: Comercial, Suporte, Atendimento" autocomplete="off" />
+                  <i class="fa-regular fa-pen-to-square" aria-hidden="true"></i>
+                </div>
+                <small>Use um nome simples para identificar esse WhatsApp dentro do ZapsChat.</small>
+              </div>
+
+              <div class="zc-field">
+                <label for="historico-select">Histórico de mensagens</label>
+                <select id="historico-select">
+                  <option value="none">Não restaurar</option>
+                  <option value="24h" selected>Últimas 24 horas — recomendado</option>
+                  <option value="7d">Últimos 7 dias — pode demorar</option>
+                  <option value="30d">Últimos 30 dias — avançado</option>
+                </select>
+
+                <small id="historico-help">Recomendado para a maioria dos casos. Traz conversas recentes sem pesar muito a conexão inicial.</small>
+
+                <div id="historico-warning" class="zc-warning hidden">
+                  Essa restauração pode demorar mais. Você poderá usar o sistema enquanto o histórico termina de importar.
+                </div>
+              </div>
+
+              <div class="zc-history-tip">
+                <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                <span>Recomendamos importar as últimas 24 horas para manter suas conversas mais recentes.</span>
+              </div>
+            </section>
+
+            <section class="zc-wizard-card zc-wizard-qr-panel" aria-label="QR Code da conexão">
+              <div id="qr-area" class="zc-qr-area zc-qr-area--wizard">
+                <div id="qr-loader" class="wpp-loader hidden" aria-live="polite">
+                  <div class="loader-spin"></div>
+                  <span>Gerando QR Code...</span>
+                </div>
+
+                <p id="qr-instru" class="zc-qr-status hidden">
+                  <span></span>
+                  Aguardando leitura do QR Code
+                </p>
+
+                <div class="zc-qr-box">
+                  <img id="qr-illustration" src="/frontend/img/qrcode.png" alt="Aponte a câmera para o QR Code" />
+                  <canvas id="qr-canvas" class="hidden"></canvas>
+                  <img id="qr-img" class="hidden" alt="QR Code do WhatsApp" />
+                </div>
+
+                <div id="qr-timer" class="zc-qr-timer hidden">
+                  Expira em <strong><span id="qr-timer-count">60</span>s</strong>
+                </div>
+              </div>
+            </section>
           </div>
 
-          <div>
-            <label class="muted" style="display:block; margin-bottom:.4rem;">Restaurar histórico</label>
-            <select id="historico-select"
-                    style="width:100%; padding:.75rem .85rem; border-radius:.75rem; border:1px solid var(--border); background:var(--bg); color:var(--fg);">
-              <option value="none">Não restaurar</option>
-              <option value="24h" selected>Últimas 24 horas — recomendado</option>
-              <option value="7d">Últimos 7 dias — pode demorar</option>
-              <option value="30d">Últimos 30 dias — avançado</option>
-            </select>
-
-            <div id="historico-help" class="muted" style="font-size:.82rem; margin-top:.35rem; line-height:1.35;">
-              Recomendado para a maioria dos casos. Traz conversas recentes sem pesar muito a conexão inicial.
+          <section class="zc-scan-help" aria-label="Como escanear o QR Code">
+            <div class="zc-scan-art" aria-hidden="true">
+              <i class="fa-solid fa-mobile-screen-button"></i>
+              <span></span>
             </div>
-
-            <div id="historico-warning" class="hidden" style="font-size:.82rem; margin-top:.5rem; line-height:1.4; padding:.65rem .75rem; border-radius:.75rem; border:1px solid rgba(245,158,11,.35); background:rgba(245,158,11,.10); color:#f59e0b; font-weight:700;">
-              Essa restauração pode demorar mais. Você poderá usar o sistema enquanto o histórico termina de importar.
+            <div>
+              <strong>Como escanear</strong>
+              <ol>
+                <li>Abra o WhatsApp no seu celular.</li>
+                <li>Toque em Menu ou Configurações &gt; Dispositivos conectados.</li>
+                <li>Toque em Conectar um dispositivo.</li>
+                <li>Aponte a câmera para este QR Code.</li>
+              </ol>
             </div>
-          </div>
+          </section>
 
-          <div id="qr-area">
-            <p id="qr-instru" class="muted hidden" style="font-size:.86rem;">Após fazer a leitura do QR Code, aguarde.</p>
+          <div id="qr-erro" class="zc-error hidden"></div>
 
-            <img id="qr-illustration" src="/frontend/img/qrcode.png" alt="Aponte a câmera para o QR Code" class="hidden"/>
+          <div class="zc-wizard-actions">
+            <button id="btn-cancel" type="button" class="btn zc-btn-cancel">Cancelar</button>
 
-            <div id="qr-loader" class="wpp-loader hidden" aria-live="polite">
-              <div class="loader-spin"></div>Gerando QR Code...
-            </div>
+            <button type="submit" id="btn-gerar-qr" class="btn btn--primary zc-btn-main">
+              <i class="fa-solid fa-qrcode"></i>
+              Gerar QR Code
+            </button>
 
-            <canvas id="qr-canvas" class="hidden" style="width:214px; height:214px; border-radius:.7rem; background:var(--hover-strong)"></canvas>
-            <img id="qr-img" class="hidden" alt="QR" style="width:214px; height:214px; border-radius:.7rem;"/>
-
-            <div id="qr-timer" class="hidden" style="margin-top:.3rem; font-size:.86rem; font-weight:800;">
-              Expira em <span id="qr-timer-count">60</span> segundos
-            </div>
-
-            <button type="button" id="btn-refresh" class="btn btn--primary hidden" style="margin-top:.4rem; font-size:.9rem;">
-              Gerar QR Code Novamente
+            <button type="button" id="btn-refresh" class="btn btn--primary zc-btn-main hidden">
+              <i class="fa-solid fa-rotate-right"></i>
+              Atualizar QR Code
             </button>
           </div>
 
-          <button type="submit" id="btn-gerar-qr" class="btn btn--primary" style="width:100%; justify-content:center; margin-top:.1rem;">
-            Gerar QR Code
-          </button>
+          <section class="zc-connect-problems" aria-label="Problemas comuns">
+            <strong>Problemas comuns</strong>
 
-          <div style="display:flex; justify-content:flex-end; gap:.6rem;">
-            <button id="btn-cancel" type="button" class="btn">Cancelar</button>
-          </div>
+            <div class="zc-connect-problem-grid">
+              <div class="zc-connect-problem">
+                <i class="fa-regular fa-clock" aria-hidden="true"></i>
+                <span><b>QR expirado</b><small>Atualize o código.</small></span>
+              </div>
+
+              <div class="zc-connect-problem">
+                <i class="fa-solid fa-camera" aria-hidden="true"></i>
+                <span><b>Câmera bloqueada</b><small>Verifique permissões.</small></span>
+              </div>
+
+              <div class="zc-connect-problem">
+                <i class="fa-solid fa-wifi" aria-hidden="true"></i>
+                <span><b>Celular sem internet</b><small>Conecte-se à internet.</small></span>
+              </div>
+            </div>
+          </section>
         </form>
-
-        <div id="qr-erro" class="hidden" style="padding:0 1.1rem 1.1rem; color:#ef4444; text-align:center;"></div>
       </div>
     </div>
 
-    <!-- Modal Remover número -->
+    <!-- Modal Ajuda: Como conectar WhatsApp -->
+    <div id="modal-ajuda-conectar" class="hidden zc-help-modal" aria-hidden="true">
+      <div class="zc-help-backdrop" data-help-close></div>
+
+      <aside class="zc-help-drawer" role="dialog" aria-modal="true" aria-labelledby="zc-help-title">
+        <div class="zc-help-head">
+          <div class="zc-help-title-wrap">
+            <div class="zc-help-badge" aria-hidden="true">
+              <i class="fa-solid fa-question"></i>
+            </div>
+            <div>
+              <h2 id="zc-help-title">Como conectar seu WhatsApp</h2>
+              <p>Siga o passo a passo abaixo para conectar seu número com ZapsChat.</p>
+            </div>
+          </div>
+
+          <button type="button" class="zc-icon-btn zc-help-close" data-help-close aria-label="Fechar ajuda">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+
+        <div class="zc-help-body">
+          <div class="zc-help-grid" aria-label="Passo a passo ilustrado">
+            <article class="zc-help-step-card">
+              <div class="zc-help-step-head">
+                <span class="zc-help-step-num">1</span>
+                <div>
+                  <strong>Abra o WhatsApp no celular</strong>
+                  <small>Abra o WhatsApp no seu celular.</small>
+                </div>
+              </div>
+
+              <div class="zc-phone zc-phone--chat" aria-hidden="true">
+                <div class="zc-phone-screen">
+                  <div class="zc-phone-top">
+                    <b>WhatsApp</b>
+                    <span>⋮</span>
+                  </div>
+                  <div class="zc-phone-tabs">
+                    <span class="active">Conversas</span>
+                    <span>Status</span>
+                    <span>Chamadas</span>
+                  </div>
+                  <div class="zc-chat-line">
+                    <div class="zc-chat-avatar"><i class="fa-brands fa-whatsapp"></i></div>
+                    <div>
+                      <b>ZapsChat</b>
+                      <span>Olá! 👋</span>
+                    </div>
+                    <small>09:30</small>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <article class="zc-help-step-card">
+              <div class="zc-help-step-head">
+                <span class="zc-help-step-num">2</span>
+                <div>
+                  <strong>Toque em Dispositivos conectados</strong>
+                  <small>No menu, toque em Dispositivos conectados.</small>
+                </div>
+              </div>
+
+              <div class="zc-phone" aria-hidden="true">
+                <div class="zc-phone-screen">
+                  <div class="zc-settings-title"><i class="fa-solid fa-arrow-left"></i> Configurações</div>
+                  <div class="zc-profile-line">
+                    <div></div>
+                    <span><b>Seu nome</b><small>Olá! Eu estou usando WhatsApp.</small></span>
+                  </div>
+                  <div class="zc-settings-list">
+                    <span><i class="fa-solid fa-key"></i> Conta</span>
+                    <span><i class="fa-solid fa-lock"></i> Privacidade</span>
+                    <span class="is-highlight"><i class="fa-solid fa-desktop"></i> Dispositivos conectados</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <article class="zc-help-step-card">
+              <div class="zc-help-step-head">
+                <span class="zc-help-step-num">3</span>
+                <div>
+                  <strong>Escolha Conectar um dispositivo</strong>
+                  <small>Toque em Conectar um dispositivo.</small>
+                </div>
+              </div>
+
+              <div class="zc-phone" aria-hidden="true">
+                <div class="zc-phone-screen">
+                  <div class="zc-settings-title"><i class="fa-solid fa-arrow-left"></i> Dispositivos conectados</div>
+                  <div class="zc-device-art">
+                    <i class="fa-solid fa-mobile-screen-button"></i>
+                    <i class="fa-solid fa-arrow-right"></i>
+                    <i class="fa-solid fa-laptop"></i>
+                  </div>
+                  <p>Use o WhatsApp em outros dispositivos</p>
+                  <div class="zc-device-btn">Conectar um dispositivo</div>
+                </div>
+              </div>
+            </article>
+
+            <article class="zc-help-step-card">
+              <div class="zc-help-step-head">
+                <span class="zc-help-step-num">4</span>
+                <div>
+                  <strong>Escaneie o QR Code na tela</strong>
+                  <small>Escaneie o QR Code exibido no ZapsChat.</small>
+                </div>
+              </div>
+
+              <div class="zc-phone" aria-hidden="true">
+                <div class="zc-phone-screen">
+                  <div class="zc-settings-title"><i class="fa-solid fa-arrow-left"></i> Escanear QR code</div>
+                  <div class="zc-scan-box">
+                    <span></span><span></span><span></span><span></span>
+                    <div class="zc-fake-qr"></div>
+                  </div>
+                  <p>Aponte a câmera para o QR Code.</p>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <section class="zc-help-problems" aria-label="Problemas comuns">
+            <div class="zc-help-problems-title">
+              <i class="fa-regular fa-lightbulb" aria-hidden="true"></i>
+              <div>
+                <strong>Problemas comuns</strong>
+                <span>Se algo não funcionar, veja o que pode estar acontecendo.</span>
+              </div>
+            </div>
+
+            <div class="zc-problem-list">
+              <div class="zc-problem-item">
+                <i class="fa-regular fa-clock" aria-hidden="true"></i>
+                <div>
+                  <strong>QR Code expirado</strong>
+                  <span>Gere um novo QR Code e tente novamente.</span>
+                </div>
+              </div>
+
+              <div class="zc-problem-item">
+                <i class="fa-solid fa-camera" aria-hidden="true"></i>
+                <div>
+                  <strong>Câmera bloqueada</strong>
+                  <span>Permita o acesso da câmera para escanear.</span>
+                </div>
+              </div>
+
+              <div class="zc-problem-item">
+                <i class="fa-solid fa-wifi" aria-hidden="true"></i>
+                <div>
+                  <strong>Celular sem internet</strong>
+                  <span>Conecte o celular à internet e tente de novo.</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="zc-help-footer">
+          <button type="button" class="zc-help-footer-btn" data-help-video>
+            <i class="fa-regular fa-circle-play" aria-hidden="true"></i>
+            Assistir tutorial em vídeo
+          </button>
+
+          <button type="button" class="zc-help-support" data-help-support>
+            Ainda com dúvidas? <strong>Fale com o suporte</strong>
+            <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+          </button>
+        </div>
+      </aside>
+    </div>
+
+        <!-- Modal Remover número -->
     <div id="modal-remover-numero" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:10000;">
       <div class="card" style="background:var(--card); color:var(--fg); border:1px solid var(--border); border-radius:14px; width:min(560px,92vw);">
         <div style="padding:1rem 1.1rem; border-bottom:1px solid var(--border); font-weight:800;">Remover número</div>
@@ -187,76 +520,161 @@
     </div>
 
     <!-- Modal Saúde do Número -->
-    <div id="modal-saude-numero" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,.58); display:flex; align-items:center; justify-content:center; z-index:10002;">
-      <div class="card saude-modal-card" style="background:var(--card); color:var(--fg); border:1px solid var(--border); border-radius:16px; width:min(760px,92vw); max-height:86vh; overflow:auto;">
-        <div style="display:flex; align-items:center; justify-content:space-between; padding:1rem 1.1rem; border-bottom:1px solid var(--border);">
-          <div style="display:grid; gap:.15rem;">
-            <h2 style="margin:0; font-size:1.05rem; font-weight:800;">Saúde do Número</h2>
-            <div id="saude-modal-subtitle" class="muted" style="font-size:.9rem;">Análise sob demanda do padrão recente desta instância.</div>
-          </div>
-          <button id="btn-close-saude" class="kebab-btn" aria-label="Fechar">✕</button>
-        </div>
+    <div id="modal-saude-numero" class="hidden zc-saude-modal" aria-hidden="true">
+      <div class="zc-saude-backdrop"></div>
 
-        <div id="saude-body" style="padding:1.1rem;">
+      <div class="card saude-modal-card saude-modal-card--pro" role="dialog" aria-modal="true" aria-labelledby="saude-title">
+        <header class="saude-modal-header">
+          <div class="saude-title-wrap">
+            <div class="saude-title-icon" aria-hidden="true">
+              <i class="fa-solid fa-heart-pulse"></i>
+            </div>
+            <div>
+              <h2 id="saude-title">Saúde do Número</h2>
+              <p id="saude-modal-subtitle" class="saude-subtitle">Análise sob demanda do padrão recente desta instância.</p>
+            </div>
+          </div>
+
+          <button id="btn-close-saude" class="saude-close-btn" type="button" aria-label="Fechar">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </header>
+
+        <div id="saude-body" class="saude-modal-body">
           <div id="saude-loading" class="saude-loading hidden">
-            <div class="saude-loading-top">
+            <div class="saude-loading-orb">
               <div class="loader-spin"></div>
             </div>
 
-            <div class="saude-loading-title">Consultando saúde do número...</div>
-            <div id="saude-loading-text" class="saude-loading-text">Analisando padrão das últimas mensagens...</div>
+            <div class="saude-loading-title">Analisando saúde do número...</div>
+            <div id="saude-loading-text" class="saude-loading-text">Buscando mensagens recentes...</div>
+
+            <div class="saude-loading-progress" aria-hidden="true">
+              <div id="saude-loading-progress-bar"></div>
+            </div>
 
             <div class="saude-loading-steps">
-              <div class="saude-step active">Lendo mensagens recentes</div>
+              <div class="saude-step active">Buscando mensagens recentes</div>
+              <div class="saude-step">Analisando padrão de envio</div>
               <div class="saude-step">Verificando repetição de conteúdo</div>
-              <div class="saude-step">Calculando velocidade de envio</div>
-              <div class="saude-step">Montando diagnóstico</div>
+              <div class="saude-step">Calculando risco do número</div>
+              <div class="saude-step">Montando relatório final</div>
             </div>
           </div>
 
-          <div id="saude-result" class="hidden">
-            <div class="saude-head">
-              <div>
-                <div id="saude-label-badge" class="saude-badge saude-badge--na">Não analisado</div>
-                <div id="saude-score-line" class="saude-score-line">Score: —</div>
+          <div id="saude-result" class="saude-result hidden">
+            <section class="saude-overview" aria-label="Resumo da saúde do número">
+              <div class="saude-overview-main">
+                <div class="saude-status-row">
+                  <div class="saude-status-icon" aria-hidden="true">
+                    <i class="fa-solid fa-shield-halved"></i>
+                  </div>
+
+                  <div>
+                    <div id="saude-label-badge" class="saude-badge saude-badge--na">Não analisado</div>
+                    <h3 id="saude-risk-label" class="saude-risk-title">Risco não calculado</h3>
+                  </div>
+                </div>
+
+                <div class="saude-score-box">
+                  <div class="saude-score-top">
+                    <span>Score de risco</span>
+                    <span id="saude-score-line">Score: —</span>
+                  </div>
+
+                  <div class="saude-score-big">
+                    <strong id="saude-score-number">—</strong>
+                    <span>/100</span>
+                  </div>
+
+                  <div class="saude-score-track" aria-hidden="true">
+                    <div id="saude-score-progress" class="saude-score-progress"></div>
+                  </div>
+
+                  <div class="saude-score-scale" aria-hidden="true">
+                    <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
+                  </div>
+                </div>
+
+                <div class="saude-stability">
+                  <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i>
+                  <div>
+                    <strong id="saude-stability-label">Estável</strong>
+                    <span>Sem alterações recentes</span>
+                  </div>
+                </div>
               </div>
-              <div class="saude-score-card">
-                <div class="saude-score-number" id="saude-score-number">—</div>
-                <div class="saude-score-caption">Risco atual</div>
-              </div>
-            </div>
 
-            <div id="saude-resumo" class="saude-resumo">
-              Ainda não há análise disponível para esta instância.
-            </div>
+              <aside class="saude-diagnosis-card">
+                <div class="saude-diagnosis-head">
+                  <i class="fa-regular fa-circle-check" aria-hidden="true"></i>
+                  <strong id="saude-status-title">Tudo certo por aqui!</strong>
+                </div>
 
-            <div class="saude-grid">
-              <section class="saude-section">
-                <h3>Principais riscos</h3>
-                <ul id="saude-motivos" class="saude-list"></ul>
-              </section>
+                <p id="saude-resumo">Ainda não há análise disponível para esta instância.</p>
 
-              <section class="saude-section">
-                <h3>Recomendado agora</h3>
-                <ul id="saude-recomendacoes" class="saude-list"></ul>
-              </section>
-            </div>
+                <div class="saude-diagnosis-divider"></div>
 
-            <section class="saude-section">
-              <h3>Métricas analisadas</h3>
-              <div id="saude-metricas" class="saude-metricas"></div>
+                <div class="saude-last-analysis">
+                  <i class="fa-regular fa-clock" aria-hidden="true"></i>
+                  <div>
+                    <span>Última análise</span>
+                    <strong id="saude-consultado-em">Ainda não há data da última análise.</strong>
+                  </div>
+                  <b id="saude-consultado-pill" class="saude-time-pill hidden"></b>
+                </div>
+              </aside>
             </section>
 
-            <div id="saude-consultado-em" class="muted" style="margin-top:1rem; font-size:.88rem;"></div>
+            <div class="saude-grid saude-grid--pro">
+              <section class="saude-section saude-section--pro">
+                <div class="saude-section-icon saude-section-icon--risk" aria-hidden="true">
+                  <i class="fa-solid fa-shield-halved"></i>
+                </div>
+                <div>
+                  <h3>Principais riscos</h3>
+                  <ul id="saude-motivos" class="saude-list saude-list--pro"></ul>
+                </div>
+              </section>
+
+              <section class="saude-section saude-section--pro">
+                <div class="saude-section-icon saude-section-icon--idea" aria-hidden="true">
+                  <i class="fa-regular fa-lightbulb"></i>
+                </div>
+                <div>
+                  <h3>Recomendado agora</h3>
+                  <ul id="saude-recomendacoes" class="saude-list saude-list--pro"></ul>
+                </div>
+              </section>
+            </div>
+
+            <section class="saude-metrics-panel">
+              <div class="saude-metrics-title">
+                <i class="fa-solid fa-chart-simple" aria-hidden="true"></i>
+                <h3>Métricas analisadas</h3>
+              </div>
+
+              <div id="saude-metricas" class="saude-metricas saude-metricas--pro"></div>
+            </section>
           </div>
 
-          <div id="saude-error" class="hidden" style="padding:.4rem 0; color:#ef4444; font-weight:700;"></div>
+          <div id="saude-error" class="saude-error hidden"></div>
         </div>
 
-        <div style="padding:1rem 1.1rem; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:.6rem;">
-          <button id="btn-reanalisar-saude" class="btn btn--primary hidden">Reanalisar agora</button>
-          <button id="btn-fechar-saude" class="btn">Fechar</button>
-        </div>
+        <footer class="saude-modal-footer">
+          <div class="saude-footer-note">
+            <i class="fa-regular fa-circle-info" aria-hidden="true"></i>
+            <span>Use essa análise como apoio para melhorar o uso do número.</span>
+          </div>
+
+          <div class="saude-footer-actions">
+            <button id="btn-reanalisar-saude" class="btn zc-btn-outline hidden" type="button">
+              <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+              Reanalisar agora
+            </button>
+            <button id="btn-fechar-saude" class="btn btn--primary" type="button">Fechar</button>
+          </div>
+        </footer>
       </div>
     </div>
 

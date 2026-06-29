@@ -1,5 +1,6 @@
 // frontend/js/pages/colaboradores/ui/selects.js
 // Select customizado da página Colaboradores.
+// Corrige o <select> nativo abrindo por cima do modal e deixando a tela bagunçada.
 
 export function initColaboradoresSelects(){
   'use strict';
@@ -9,27 +10,103 @@ export function initColaboradoresSelects(){
 
   if (document.body.dataset.page !== 'colaboradores') return;
 
-  function getSurfaceColor(el){
-    let n = el;
+  const CLOSE_EVENTS = ['pointerdown', 'keydown'];
 
-    while (n && n !== document.documentElement){
-      const bg = getComputedStyle(n).backgroundColor;
+  function isVisible(el){
+    return !!(el && el.offsetParent !== null);
+  }
 
-      if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
-        return bg;
-      }
+  function getText(sel){
+    const opt = sel?.options?.[sel.selectedIndex];
+    return String(opt?.text || 'Selecione…').trim() || 'Selecione…';
+  }
 
-      n = n.parentElement;
-    }
+  function setOpen(wrap, open){
+    if (!wrap) return;
 
-    return getComputedStyle(document.body).backgroundColor;
+    const btn = wrap.querySelector('.x-sel-btn');
+    const list = wrap.querySelector('.x-sel-list');
+
+    wrap.classList.toggle('open', !!open);
+    btn?.setAttribute('aria-expanded', open ? 'true' : 'false');
+
+    if (!open) return;
+
+    // Abre para cima quando estiver perto do rodapé do modal.
+    try {
+      const rect = wrap.getBoundingClientRect();
+      const modalBody = wrap.closest('.modal-body');
+      const area = modalBody?.getBoundingClientRect();
+      const bottomLimit = area?.bottom || window.innerHeight;
+      const spaceBelow = bottomLimit - rect.bottom;
+      wrap.classList.toggle('drop-up', spaceBelow < 210 && rect.top > 240);
+    } catch {}
+
+    const current = list?.querySelector('[aria-selected="true"]');
+    current?.scrollIntoView({ block:'nearest' });
+  }
+
+  function closeAll(except){
+    document.querySelectorAll('.x-select.open').forEach(wrap => {
+      if (except && wrap === except) return;
+      setOpen(wrap, false);
+    });
+  }
+
+  function syncOne(sel){
+    const wrap = sel.closest('.x-select');
+    if (!wrap) return;
+
+    const btn = wrap.querySelector('.x-sel-btn');
+    const list = wrap.querySelector('.x-sel-list');
+    if (!btn || !list) return;
+
+    btn.textContent = getText(sel);
+    btn.disabled = !!sel.disabled;
+
+    const currentValue = String(sel.value || '');
+    list.innerHTML = '';
+
+    Array.from(sel.options || []).forEach((opt, idx) => {
+      const value = String(opt.value || '');
+      const selected = value === currentValue;
+
+      const li = document.createElement('li');
+      li.className = 'x-sel-opt';
+      li.type = 'button';
+      li.setAttribute('role','option');
+      li.setAttribute('tabindex','-1');
+      li.dataset.value = value;
+      li.dataset.index = String(idx);
+      li.textContent = opt.text || '—';
+
+      if (selected) li.setAttribute('aria-selected','true');
+
+      li.addEventListener('click', ev => {
+        ev.preventDefault();
+        ev.stopPropagation();
+
+        sel.value = value;
+        sel.dispatchEvent(new Event('change', { bubbles:true }));
+        syncOne(sel);
+        setOpen(wrap, false);
+        btn.focus({ preventScroll:true });
+      });
+
+      list.appendChild(li);
+    });
   }
 
   function enhanceSelect(sel){
-    if (!sel || sel.dataset.enhanced) return;
+    if (!sel || sel.dataset.enhanced === '1') return;
+
+    // Só troca selects do modal. O filtro da tela continua nativo e leve.
+    if (!sel.closest('#modal-perfil')) return;
 
     sel.dataset.enhanced = '1';
     sel.classList.add('select--replaced');
+    sel.setAttribute('tabindex','-1');
+    sel.setAttribute('aria-hidden','true');
 
     const wrap = document.createElement('div');
     wrap.className = 'x-select';
@@ -37,102 +114,105 @@ export function initColaboradoresSelects(){
     sel.parentNode.insertBefore(wrap, sel);
     wrap.appendChild(sel);
 
-    wrap.style.setProperty('--x-surface', getSurfaceColor(wrap));
-
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'x-sel-btn';
     btn.setAttribute('aria-haspopup','listbox');
     btn.setAttribute('aria-expanded','false');
 
-    wrap.appendChild(btn);
-
     const list = document.createElement('ul');
     list.className = 'x-sel-list';
     list.setAttribute('role','listbox');
 
+    wrap.appendChild(btn);
     wrap.appendChild(list);
 
-    function render(){
-      btn.textContent = sel.options[sel.selectedIndex]?.text || 'Selecione…';
-      list.innerHTML = '';
+    btn.addEventListener('click', ev => {
+      ev.preventDefault();
+      ev.stopPropagation();
 
-      Array.from(sel.options).forEach(opt => {
-        const li = document.createElement('li');
-        li.className = 'x-sel-opt';
-        li.setAttribute('role','option');
-        li.dataset.value = opt.value;
-        li.textContent = opt.text;
-
-        if (opt.selected) {
-          li.setAttribute('aria-selected','true');
-        }
-
-        li.addEventListener('click', () => {
-          sel.value = opt.value;
-          sel.dispatchEvent(new Event('change', { bubbles:true } ));
-          btn.textContent = opt.text;
-          close();
-        });
-
-        list.appendChild(li);
-      });
-    }
-
-    function open(){
-      wrap.classList.add('open');
-      btn.setAttribute('aria-expanded','true');
-
-      const cur = list.querySelector('[aria-selected="true"]');
-      if (cur) cur.scrollIntoView({ block:'nearest' });
-
-      window.addEventListener('click', onDocClick, { once:true });
-    }
-
-    function close(){
-      wrap.classList.remove('open');
-      btn.setAttribute('aria-expanded','false');
-    }
-
-    function onDocClick(e){
-      if (!wrap.contains(e.target)) close();
-    }
-
-    btn.addEventListener('click', () => {
-      if (wrap.classList.contains('open')) close();
-      else open();
+      const willOpen = !wrap.classList.contains('open');
+      closeAll(wrap);
+      syncOne(sel);
+      setOpen(wrap, willOpen);
     });
 
-    sel.addEventListener('change', render);
+    btn.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'ArrowDown') {
+        ev.preventDefault();
+        closeAll(wrap);
+        syncOne(sel);
+        setOpen(wrap, true);
+        list.querySelector('[aria-selected="true"], .x-sel-opt')?.focus({ preventScroll:true });
+        return;
+      }
 
-    btn.addEventListener('keydown', e => {
-      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        open();
-      } else if (e.key === 'Escape') {
-        close();
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        setOpen(wrap, false);
       }
     });
 
-    const syncDisabled = () => {
-      btn.disabled = sel.disabled;
-    };
+    list.addEventListener('keydown', ev => {
+      const opts = Array.from(list.querySelectorAll('.x-sel-opt'));
+      const current = document.activeElement;
+      const idx = Math.max(0, opts.indexOf(current));
 
-    const mo = new MutationObserver(syncDisabled);
-    mo.observe(sel, { attributes:true, attributeFilter:['disabled'] });
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        setOpen(wrap, false);
+        btn.focus({ preventScroll:true });
+        return;
+      }
 
-    syncDisabled();
-    render();
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        const dir = ev.key === 'ArrowDown' ? 1 : -1;
+        const next = opts[(idx + dir + opts.length) % opts.length];
+        next?.focus({ preventScroll:true });
+        return;
+      }
+
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        current?.click?.();
+      }
+    });
+
+    sel.addEventListener('change', () => syncOne(sel));
+
+    const optObs = new MutationObserver(() => syncOne(sel));
+    optObs.observe(sel, { childList:true, subtree:true, attributes:true, attributeFilter:['disabled', 'selected', 'value'] });
+
+    syncOne(sel);
   }
 
   function scan(){
     document
-      .querySelectorAll('#modal-perfil .select:not([data-enhanced]), .details-grid .select:not([data-enhanced])')
+      .querySelectorAll('#modal-perfil select.select:not([data-enhanced])')
       .forEach(enhanceSelect);
   }
+
+  function onGlobalEvent(ev){
+    if (ev.type === 'keydown') {
+      if (ev.key === 'Escape') closeAll();
+      return;
+    }
+
+    const target = ev.target;
+    if (target?.closest?.('.x-select')) return;
+    closeAll();
+  }
+
+  CLOSE_EVENTS.forEach(name => {
+    document.addEventListener(name, onGlobalEvent, true);
+  });
 
   scan();
 
   const rootObs = new MutationObserver(scan);
   rootObs.observe(document.body, { childList:true, subtree:true });
+
+  window.addEventListener('resize', () => closeAll(), { passive:true });
+  window.addEventListener('scroll', () => closeAll(), true);
 }

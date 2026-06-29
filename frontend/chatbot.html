@@ -80,6 +80,11 @@
           Configuração salva
         </span>
 
+        <button id="automationHelpBtn" type="button" class="btn btn-soft btn-help-simple" aria-haspopup="dialog" aria-controls="automationHelpModal">
+          <i class="fa-regular fa-circle-question" aria-hidden="true"></i>
+          <span>Ajuda</span>
+        </button>
+
         <button id="helpChatbotBtn" type="button" class="btn btn-soft" aria-haspopup="dialog" aria-controls="chatbotHelpModal">
           <i class="fa-regular fa-circle-play" aria-hidden="true"></i>
           <span>Testar</span>
@@ -97,9 +102,43 @@
         <section class="intro-card" aria-label="Configuração inicial">
           <div>
             <h2>Configuração inicial</h2>
-            <p>Escolha entre resposta simples ou menu de filas. Os detalhes aparecem apenas ao abrir o card ou ativar uma opção.</p>
+            <p>Escolha entre resposta simples ou menu de departamentos. Os detalhes aparecem apenas ao abrir o card ou ativar uma opção.</p>
           </div>
           <span class="intro-pill"><i class="fa-solid fa-bolt" aria-hidden="true"></i> Automação</span>
+        </section>
+
+        <section class="robot-onboarding" id="robotOnboarding" aria-label="Guia inicial do chatbot" hidden>
+          <div class="zc-robot zc-robot--lg" aria-hidden="true">
+            <span class="zc-robot__head"><span class="zc-robot__face"><i></i><i></i></span></span>
+            <span class="zc-robot__body"></span>
+            <span class="zc-robot__arm zc-robot__arm--left"></span>
+            <span class="zc-robot__arm zc-robot__arm--right"></span>
+          </div>
+          <div class="robot-onboarding__content">
+            <span class="robot-kicker">Assistente de configuração</span>
+            <h2>Vamos configurar seu chatbot em poucos passos.</h2>
+            <p>Ative uma opção, personalize a mensagem e salve. O preview mostra como o cliente vai receber.</p>
+            <div class="robot-dots" aria-hidden="true"><span class="active"></span><span></span><span></span></div>
+          </div>
+          <button type="button" class="robot-close" id="robotOnboardingClose" aria-label="Fechar guia inicial">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </section>
+
+        <section class="robot-tip-card" id="robotTipCard" aria-label="Dica rápida do chatbot" hidden>
+          <div class="zc-robot zc-robot--sm" aria-hidden="true">
+            <span class="zc-robot__head"><span class="zc-robot__face"><i></i><i></i></span></span>
+            <span class="zc-robot__body"></span>
+            <span class="zc-robot__arm zc-robot__arm--left"></span>
+            <span class="zc-robot__arm zc-robot__arm--right"></span>
+          </div>
+          <div class="robot-tip-card__bubble">
+            <button type="button" class="robot-tip-close" id="robotTipClose" aria-label="Fechar dica">
+              <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+            </button>
+            <strong>Dica: use informações automáticas para personalizar as mensagens.</strong>
+            <p>Exemplo: o sistema coloca o nome da empresa sozinho, sem você digitar toda vez.</p>
+          </div>
         </section>
 
         <section class="stack" aria-label="Funcionalidades do chatbot">
@@ -126,7 +165,7 @@
             <div class="body bot-card-body" id="body-auto" aria-hidden="true" style="height:0;opacity:0;pointer-events:none">
               <div id="autoModeNotice" class="mode-notice" hidden>
                 <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
-                <span>Este modo não pode ficar ativo ao mesmo tempo que o <strong>Menu para o cliente escolher fila</strong>.</span>
+                <span>Você pode usar apenas um modo por vez. Ao ligar este modo, o outro será desligado.</span>
               </div>
 
               <div class="editor-grid two-cols">
@@ -136,7 +175,7 @@
                       <h3>Mensagem de boas-vindas</h3>
                       <p>Enviada automaticamente quando o cliente inicia a conversa.</p>
                     </div>
-                    <div class="mini-toggle">
+                    <div class="mini-toggle internal-toggle" aria-hidden="true">
                       <span id="pillWelcome" class="pill off" aria-hidden="true">off</span>
                       <label class="tswitch tswitch-mini" id="swWelcome" data-on="false" title="Ativar boas-vindas" tabindex="0">
                         <input type="checkbox" aria-label="Ativar mensagem de boas-vindas">
@@ -145,10 +184,18 @@
                     </div>
                   </div>
 
+                  <div class="repeat-info repeat-info--green" aria-label="Quando a mensagem de boas-vindas repete">
+                    <i class="fa-regular fa-clock" aria-hidden="true"></i>
+                    <div>
+                      <strong>Vai mandar toda hora?</strong>
+                      <span>Não. Se o cliente mandar várias mensagens seguidas, o sistema não repete. No padrão atual, só aparece de novo depois de 60 minutos sem conversa.</span>
+                    </div>
+                  </div>
+
                   <div id="schedWelcome" class="sched">
                     <div class="time-grid">
-                      <label>Início <input type="time" id="wStart" value="08:00"></label>
-                      <label>Fim <input type="time" id="wEnd" value="18:00"></label>
+                      <label>Atendimento começa <input type="time" id="wStart" value="08:00"></label>
+                      <label>Atendimento termina <input type="time" id="wEnd" value="18:00"></label>
                     </div>
                   </div>
 
@@ -158,7 +205,7 @@
                       <span class="counter" id="wcCount">0 caracteres</span>
                       <button type="button" class="insert-variable" data-target="msgWelcome">
                         <i class="fa-regular fa-face-smile" aria-hidden="true"></i>
-                        Inserir variável
+                        Adicionar informação automática
                         <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
                       </button>
                     </div>
@@ -168,10 +215,10 @@
                 <section class="editor-panel">
                   <div class="editor-head">
                     <div>
-                      <h3>Mensagem fora do horário comercial</h3>
-                      <p>Enviada quando não houver atendimento disponível.</p>
+                      <h3>Mensagem fora do horário</h3>
+                      <p>Será enviada quando estiver fora do atendimento.</p>
                     </div>
-                    <div class="mini-toggle">
+                    <div class="mini-toggle internal-toggle" aria-hidden="true">
                       <span id="pillOff" class="pill off" aria-hidden="true">off</span>
                       <label class="tswitch tswitch-mini" id="swOff" data-on="false" title="Ativar fora do horário" tabindex="0">
                         <input type="checkbox" aria-label="Ativar mensagem fora do horário">
@@ -180,10 +227,18 @@
                     </div>
                   </div>
 
+                  <div class="repeat-info repeat-info--amber" aria-label="Quando a mensagem fora do horário repete">
+                    <i class="fa-regular fa-clock" aria-hidden="true"></i>
+                    <div>
+                      <strong>Também não fica repetindo.</strong>
+                      <span>Quando o cliente chama fora do horário, o sistema avisa uma vez e espera um tempo antes de avisar de novo.</span>
+                    </div>
+                  </div>
+
                   <div id="schedOff" class="sched">
                     <div class="time-grid">
-                      <label>Início <input type="time" id="oStart" value="18:00"></label>
-                      <label>Fim <input type="time" id="oEnd" value="08:00"></label>
+                      <label>Quando fecha <input type="time" id="oStart" value="18:00"></label>
+                      <label>Quando abre <input type="time" id="oEnd" value="08:00"></label>
                     </div>
                   </div>
 
@@ -193,7 +248,7 @@
                       <span class="counter" id="offCount">0 caracteres</span>
                       <button type="button" class="insert-variable" data-target="msgOff">
                         <i class="fa-regular fa-face-smile" aria-hidden="true"></i>
-                        Inserir variável
+                        Adicionar informação automática
                         <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
                       </button>
                     </div>
@@ -216,15 +271,15 @@
               <div class="card-title-row">
                 <span class="step-number">2</span>
                 <div>
-                  <h2>Menu para o cliente escolher fila</h2>
-                  <p>Mostre opções de atendimento e encaminhe para a fila certa.</p>
+                  <h2>Menu para o cliente escolher departamento</h2>
+                  <p>Mostre os departamentos e encaminhe o atendimento para a equipe certa.</p>
                 </div>
               </div>
 
               <div class="card-actions">
                 <span id="pillDeptHdr" class="pill off" aria-hidden="true">off</span>
-                <label class="tswitch" id="swDeptHdr" data-on="false" title="Ativar/desativar menu de filas" tabindex="0" aria-pressed="false">
-                  <input type="checkbox" aria-label="Ativar/desativar menu de filas">
+                <label class="tswitch" id="swDeptHdr" data-on="false" title="Ativar/desativar menu de departamentos" tabindex="0" aria-pressed="false">
+                  <input type="checkbox" aria-label="Ativar/desativar menu de departamentos">
                   <span></span>
                 </label>
                 <span class="card-chevron" aria-hidden="true"><i class="fa-solid fa-chevron-down"></i></span>
@@ -234,65 +289,73 @@
             <div class="body bot-card-body" id="body-auto-dept" aria-hidden="true" style="height:0;opacity:0;pointer-events:none">
               <div id="deptModeNotice" class="mode-notice" hidden>
                 <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
-                <span>Este modo não pode ficar ativo ao mesmo tempo que a <strong>Resposta automática simples</strong>.</span>
+                <span>Você pode usar apenas um modo por vez. Ao ligar este modo, o outro será desligado.</span>
               </div>
 
-              <div class="editor-grid fila-grid">
+              <div class="editor-grid departamento-grid">
                 <section class="editor-panel">
                   <div class="editor-head">
                     <div>
-                      <h3>Mensagem inicial da escolha de fila</h3>
-                      <p>Texto enviado junto com as opções disponíveis.</p>
+                      <h3>Mensagem inicial do menu</h3>
+                      <p>Texto enviado junto com as opções que o cliente pode escolher.</p>
                     </div>
-                    <div class="mini-toggle">
+                    <div class="mini-toggle internal-toggle" aria-hidden="true">
                       <span id="pillDeptWelcome" class="pill off" aria-hidden="true">off</span>
                       <label class="tswitch tswitch-mini" id="swDeptWelcome" data-on="false" title="Ativar mensagem inicial do menu" tabindex="0">
-                        <input type="checkbox" aria-label="Ativar mensagem inicial da escolha de fila">
+                        <input type="checkbox" aria-label="Ativar mensagem inicial do menu">
                         <span></span>
                       </label>
                     </div>
                   </div>
 
-                  <div id="schedDeptWelcome" class="sched">
-                    <div class="time-grid">
-                      <label>Início <input type="time" id="dwStart" value="08:00"></label>
-                      <label>Fim <input type="time" id="dwEnd" value="18:00"></label>
+                  <div class="repeat-info repeat-info--purple" aria-label="Quando o menu de departamentos repete">
+                    <i class="fa-regular fa-clock" aria-hidden="true"></i>
+                    <div>
+                      <strong>O cliente não escolhe toda hora.</strong>
+                      <span>Depois que ele escolhe um departamento, fica naquele atendimento. No padrão atual, o menu só volta depois de 6 horas ou se o atendimento for encerrado.</span>
                     </div>
                   </div>
 
-                  <div id="deptChips" class="chips" aria-label="Sugestões de mensagem"></div>
+                  <div id="schedDeptWelcome" class="sched">
+                    <div class="time-grid">
+                      <label>Atendimento começa <input type="time" id="dwStart" value="08:00"></label>
+                      <label>Atendimento termina <input type="time" id="dwEnd" value="18:00"></label>
+                    </div>
+                  </div>
+
+                  <div id="deptChips" class="chips" aria-label="Sugestões de mensagem" hidden></div>
 
                   <div class="textarea-wrap">
-                    <textarea id="msgDeptWelcome" maxlength="1024" placeholder="Mensagem inicial da escolha de fila" disabled></textarea>
+                    <textarea id="msgDeptWelcome" maxlength="1024" placeholder="Mensagem inicial do menu" disabled></textarea>
                     <div class="textarea-footer">
                       <span class="counter" id="dwCount">0 caracteres</span>
                       <button type="button" class="insert-variable" data-target="msgDeptWelcome">
                         <i class="fa-regular fa-face-smile" aria-hidden="true"></i>
-                        Inserir variável
+                        Adicionar informação automática
                         <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
                       </button>
                     </div>
                   </div>
                 </section>
 
-                <aside class="editor-panel filas-panel">
+                <aside class="editor-panel departamentos-panel">
                   <div class="editor-head compact">
                     <div>
-                      <h3>Filas disponíveis</h3>
-                      <p>Escolha quais filas aparecem para o cliente.</p>
+                      <h3>Departamentos disponíveis</h3>
+                      <p>Escolha quais departamentos aparecem para o cliente.</p>
                     </div>
                     <span id="deptCount" class="selected-count">0 selecionadas</span>
                   </div>
 
-                  <div class="fila-soft-warning">
+                  <div class="departamento-soft-warning">
                     <i class="fa-regular fa-circle-question" aria-hidden="true"></i>
-                    <span>As filas vêm da tela <strong>Gestão de Filas</strong>. Aqui você só escolhe quais aparecem no chatbot.</span>
+                    <span>Os departamentos vêm da tela <strong>Departamentos</strong>. Aqui você só escolhe quais aparecem para o cliente.</span>
                   </div>
 
-                  <div class="fila-toolbar">
+                  <div class="departamento-toolbar">
                     <div class="search-field">
                       <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-                      <input type="search" id="deptSearch" placeholder="Buscar fila…">
+                      <input type="search" id="deptSearch" placeholder="Buscar departamento…">
                     </div>
                     <button class="btn btn-soft xs" id="deptAll" type="button">Todas</button>
                     <button class="btn btn-soft xs" id="deptNone" type="button">Nenhuma</button>
@@ -332,7 +395,7 @@
             <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
             <div class="flow-step">
               <span><i class="fa-solid fa-list-ul" aria-hidden="true"></i></span>
-              <small>Escolha da fila</small>
+              <small>Escolha do departamento</small>
             </div>
             <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
             <div class="flow-step">
@@ -395,6 +458,156 @@
       </aside>
     </section>
   </main>
+
+  <div class="robot-celebration" id="robotCelebration" aria-live="polite" aria-hidden="true">
+    <div class="robot-celebration__confetti" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+    <div class="zc-robot zc-robot--celebrate" aria-hidden="true">
+      <span class="zc-robot__head"><span class="zc-robot__face"><i></i><i></i></span></span>
+      <span class="zc-robot__body"></span>
+      <span class="zc-robot__arm zc-robot__arm--left"></span>
+      <span class="zc-robot__arm zc-robot__arm--right"></span>
+    </div>
+    <div class="robot-celebration__card">
+      <span class="robot-celebration__check"><i class="fa-solid fa-check" aria-hidden="true"></i></span>
+      <div>
+        <strong>Configuração salva</strong>
+        <p>Seu chatbot foi atualizado com sucesso.</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="automationHelpModal" class="help-modal automation-help-modal" hidden>
+    <div class="help-card automation-help-card" role="dialog" aria-modal="true" aria-labelledby="automationHelpTitle">
+      <div class="automation-help-top">
+        <div class="automation-help-robot">
+          <div class="zc-robot zc-robot--lg" aria-hidden="true">
+            <span class="zc-robot__head"><span class="zc-robot__face"><i></i><i></i></span></span>
+            <span class="zc-robot__body"></span>
+            <span class="zc-robot__arm zc-robot__arm--left"></span>
+            <span class="zc-robot__arm zc-robot__arm--right"></span>
+          </div>
+        </div>
+        <div class="automation-help-title">
+          <span>Ajuda rápida</span>
+          <h2 id="automationHelpTitle">Qual automação eu uso?</h2>
+          <p>Explicação bem simples para escolher entre resposta pronta ou menu de departamentos.</p>
+        </div>
+        <button type="button" class="help-close" data-close-modal="automationHelpModal" aria-label="Fechar ajuda">
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+      </div>
+
+      <div class="automation-help-body">
+        <div class="automation-help-grid">
+          <section class="automation-explain-card is-simple">
+            <div class="automation-explain-head">
+              <span class="explain-icon"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i></span>
+              <div>
+                <h3>Resposta automática simples</h3>
+                <p>É uma mensagem pronta que o sistema manda sozinho.</p>
+              </div>
+            </div>
+
+            <div class="mini-whatsapp-demo">
+              <div class="mini-msg mini-msg-user">Oi <small>10:30</small></div>
+              <div class="mini-msg mini-msg-bot">Olá! Seja bem-vindo(a).<br>Em breve vamos te atender. <small>10:30</small></div>
+            </div>
+
+            <div class="simple-steps">
+              <div><b>1</b><span>O cliente manda mensagem</span></div>
+              <div><b>2</b><span>O sistema responde sozinho</span></div>
+              <div><b>3</b><span>Pronto. A mensagem foi enviada.</span></div>
+            </div>
+
+            <div class="use-box green">
+              <strong>Use quando:</strong>
+              <span>você só quer mandar uma resposta pronta, sem escolher departamento.</span>
+            </div>
+          </section>
+
+          <section class="automation-explain-card is-menu">
+            <div class="automation-explain-head">
+              <span class="explain-icon purple"><i class="fa-solid fa-list-ul" aria-hidden="true"></i></span>
+              <div>
+                <h3>Menu para o cliente escolher departamento</h3>
+                <p>O cliente escolhe o departamento e vai para o lugar certo.</p>
+              </div>
+            </div>
+
+            <div class="mini-whatsapp-demo">
+              <div class="mini-msg mini-msg-bot">Olá! Escolha uma opção:<br>1 - Financeiro<br>2 - Suporte<br>3 - Comercial <small>10:30</small></div>
+              <div class="mini-msg mini-msg-user">2 <small>10:31</small></div>
+              <div class="mini-route"><i class="fa-solid fa-headset" aria-hidden="true"></i> Cliente enviado para: <b>Suporte</b></div>
+            </div>
+
+            <div class="simple-steps purple-steps">
+              <div><b>1</b><span>O cliente recebe as opções</span></div>
+              <div><b>2</b><span>Ele escolhe um número</span></div>
+              <div><b>3</b><span>O sistema manda para o departamento certo</span></div>
+            </div>
+
+            <div class="use-box purple-box">
+              <strong>Use quando:</strong>
+              <span>você tem departamentos como Vendas, Suporte ou Financeiro.</span>
+            </div>
+          </section>
+        </div>
+
+        <section class="repeat-help-card" aria-label="Explicação sobre repetição das mensagens automáticas">
+          <div class="repeat-help-title">
+            <i class="fa-regular fa-clock" aria-hidden="true"></i>
+            <div>
+              <h3>Vai repetir toda hora?</h3>
+              <p>Não. O sistema foi feito para não incomodar o cliente.</p>
+            </div>
+          </div>
+
+          <div class="repeat-help-grid">
+            <div>
+              <strong>Resposta automática simples</strong>
+              <span>Manda uma vez quando o cliente chama. Se ele mandar mais mensagens em seguida, não fica repetindo.</span>
+              <small>Padrão atual: espera 60 minutos sem conversa para poder aparecer de novo.</small>
+            </div>
+            <div>
+              <strong>Menu para escolher departamento</strong>
+              <span>Depois que o cliente escolhe Vendas, Suporte ou Financeiro, ele não precisa escolher de novo a cada mensagem.</span>
+              <small>Padrão atual: o menu só volta depois de 6 horas ou quando o atendimento é encerrado.</small>
+            </div>
+          </div>
+        </section>
+
+        <section class="which-use-card">
+          <div class="which-use-title">
+            <i class="fa-regular fa-lightbulb" aria-hidden="true"></i>
+            <div>
+              <h3>Qual eu escolho?</h3>
+              <p>Escolha só um modo principal. Os dois não ficam ligados ao mesmo tempo.</p>
+            </div>
+          </div>
+
+          <div class="which-use-options">
+            <div>
+              <strong>Quero só responder “Oi, já vamos atender”.</strong>
+              <span>Use <b>Resposta automática simples</b>.</span>
+            </div>
+            <div>
+              <strong>Quero separar por Vendas, Suporte ou Financeiro.</strong>
+              <span>Use <b>Menu para escolher departamento</b>.</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="automation-help-note">
+          <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+          <span><strong>Bem simples:</strong> “departamento” é o lugar interno que vai receber o atendimento. Exemplo: Vendas, Suporte ou Financeiro.</span>
+        </div>
+
+        <div class="automation-help-footer">
+          <button type="button" class="btn btn-primary" data-close-modal="automationHelpModal">Entendi</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div id="chatbotHelpModal" class="help-modal" hidden>
     <div class="help-card" role="dialog" aria-modal="true" aria-labelledby="chatbotHelpTitle">

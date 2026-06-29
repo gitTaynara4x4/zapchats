@@ -118,6 +118,45 @@ function getCurrentColabId() {
   return null;
 }
 
+function readCookieValue(name) {
+  try {
+    const wanted = `${name}=`;
+    const parts = String(document.cookie || '').split(';');
+    for (const part of parts) {
+      const s = part.trim();
+      if (s.startsWith(wanted)) return decodeURIComponent(s.slice(wanted.length));
+    }
+  } catch {}
+  return '';
+}
+
+function cleanUserNameValue(v) {
+  const s = String(v || '').trim();
+  if (!s || ['null', 'undefined', 'nan', '0'].includes(s.toLowerCase())) return '';
+  return s;
+}
+
+function getCurrentColabName() {
+  const jwt = getIdentityJwt();
+
+  for (const val of [
+    jwt.nome,
+    jwt.nome_completo,
+    jwt.name,
+    jwt.email,
+    localStorage.getItem('user_nome'),
+    localStorage.getItem('usuario_nome'),
+    localStorage.getItem('colaborador_nome'),
+    localStorage.getItem('nome'),
+    readCookieValue('user_nome'),
+  ]) {
+    const name = cleanUserNameValue(val);
+    if (name) return name;
+  }
+
+  return '';
+}
+
 function stripUndefined(o) {
   Object.keys(o).forEach((k) => {
     if (o[k] === undefined) delete o[k];
@@ -1174,6 +1213,7 @@ function addOptimisticTextMessage({ convRef, cli, text, instPayload }) {
   const tempId = makeTempMsgId();
   const instValue = getInstValueFromPayload(instPayload, convRef);
   const currentColabId = getCurrentColabId();
+  const currentColabName = getCurrentColabName();
 
   const msg = stripUndefined({
     id: tempId,
@@ -1196,7 +1236,10 @@ function addOptimisticTextMessage({ convRef, cli, text, instPayload }) {
     from_me: true,
     origem: 'atendente',
 
-    ack: 0,
+    // Depois da Evolution confirmar, o backend salva ack=1.
+    // Para não deixar o usuário preso no reloginho quando o DOM/cache não atualiza
+    // instantaneamente, a bolha otimista já nasce como enviada. Se falhar, vira erro.
+    ack: 1,
     timestamp: nowIso,
     created_at: nowIso,
     data: nowIso,
@@ -1204,6 +1247,10 @@ function addOptimisticTextMessage({ convRef, cli, text, instPayload }) {
 
     colaborador_id: currentColabId || undefined,
     atendente_id: currentColabId || undefined,
+    colaborador_nome: currentColabName || undefined,
+    atendente_nome: currentColabName || undefined,
+    autor_nome: currentColabName || undefined,
+    enviado_por_nome: currentColabName || undefined,
 
     pending: true,
     failed: false,
@@ -1233,7 +1280,7 @@ function addOptimisticTextMessage({ convRef, cli, text, instPayload }) {
     window.Lista?.updatePreview?.(convKey, {
       texto: text,
       ts: nowIso,
-      ack: 0,
+      ack: 1,
     });
   } catch {}
 
@@ -1355,6 +1402,32 @@ function extractBackendSentMessage(resp, optimistic) {
     optimistic?.inst ||
     null;
 
+  const senderName =
+    getNested(resp, [
+      'db.autor_nome',
+      'db.enviado_por_nome',
+      'db.colaborador_nome',
+      'db.atendente_nome',
+      'autor_nome',
+      'enviado_por_nome',
+      'colaborador_nome',
+      'atendente_nome',
+    ]) ||
+    optimistic?.message?.autor_nome ||
+    optimistic?.message?.atendente_nome ||
+    '';
+
+  const senderColabId =
+    getNested(resp, [
+      'db.colaborador_id',
+      'db.atendente_id',
+      'colaborador_id',
+      'atendente_id',
+    ]) ||
+    optimistic?.message?.colaborador_id ||
+    optimistic?.message?.atendente_id ||
+    null;
+
   const finalMsgId = idKey(msgId) || optimistic?.tempId;
 
   return {
@@ -1374,6 +1447,13 @@ function extractBackendSentMessage(resp, optimistic) {
 
     atendimento_id: atendimentoId ?? optimistic?.message?.atendimento_id,
     instancia_id: instanciaId,
+
+    colaborador_id: senderColabId || undefined,
+    atendente_id: senderColabId || undefined,
+    colaborador_nome: senderName || undefined,
+    atendente_nome: senderName || undefined,
+    autor_nome: senderName || undefined,
+    enviado_por_nome: senderName || undefined,
 
     pending: false,
     failed: false,
@@ -1482,6 +1562,42 @@ function updateDomOptimisticSuccess(optimistic, finalMsg) {
       bubble.dataset.failed = '0';
       bubble.classList.remove('is-pending', 'is-failed');
       bubble.classList.add('is-sent');
+
+      const authorName = String(
+        finalMsg?.autor_nome ||
+        finalMsg?.enviado_por_nome ||
+        finalMsg?.colaborador_nome ||
+        finalMsg?.atendente_nome ||
+        ''
+      ).trim();
+
+      if (authorName) {
+        const firstName = typeof window.ZCGetAuthorFirstName === 'function'
+          ? window.ZCGetAuthorFirstName(authorName)
+          : String(authorName).trim().split(/\s+/)[0];
+        const authorKey = typeof window.ZCNormalizeAuthorKey === 'function'
+          ? window.ZCNormalizeAuthorKey(authorName)
+          : String(authorName || '').trim().toLowerCase();
+
+        let authorEl = bubble.querySelector('.zc-msg-author');
+        if (!authorEl) {
+          authorEl = document.createElement('div');
+          authorEl.className = 'zc-msg-author zc-msg-author-out';
+          bubble.insertBefore(authorEl, bubble.firstChild);
+        }
+        authorEl.textContent = firstName || authorName;
+        authorEl.title = authorName;
+        authorEl.dataset.authorKey = authorKey;
+
+        row.dataset.authorName = authorName;
+        row.dataset.authorKey = authorKey;
+        bubble.dataset.authorName = authorName;
+        bubble.dataset.authorKey = authorKey;
+      }
+
+      try {
+        window.ZCApplyOutgoingAuthorGrouping?.(document.querySelector('#historico') || document);
+      } catch {}
     }
 
     if (typeof window.getAckIcon === 'function') {

@@ -56,8 +56,13 @@ export function setSaveEnabled(ok){
   [state.pSaveFoot, pSave].forEach(btn => {
     if (!btn) return;
 
-    btn.classList.toggle('btn-soft-disabled', !ok);
-    btn.setAttribute('aria-disabled', String(!ok));
+    // Quando o botão do topo está como "Continuar", ele não pode parecer bloqueado.
+    // A validação pesada fica para o último passo, quando a ação vira salvar/criar.
+    const isNextAction = btn.dataset?.wizardAction === 'next';
+    const allowed = isNextAction ? true : !!ok;
+
+    btn.classList.toggle('btn-soft-disabled', !allowed);
+    btn.setAttribute('aria-disabled', String(!allowed));
   });
 }
 
@@ -181,13 +186,18 @@ export function validateFormLive(forceShow){
     const s = (senhaEl.value || '').trim();
 
     if (isCreate) {
-      senhaOk = s.length >= 6 && s.length <= 72;
+      const activeStep = perfilModal?.dataset.activeStep || document.querySelector('#modal-perfil .colab-tab.active')?.dataset?.tab || 'perfil';
+      const headerSave = document.querySelector('#perfil-salvar');
+      const isFinalSave = headerSave?.dataset?.wizardAction === 'save';
+      const shouldValidateSenha = activeStep === 'acessos' || activeStep === 'permissoes' || isFinalSave || show;
 
-      if (!senhaOk) msgs.push('• Senha (mín. 6 caracteres)');
+      senhaOk = shouldValidateSenha ? (s.length >= 6 && s.length <= 72) : true;
+
+      if (shouldValidateSenha && !senhaOk) msgs.push('• Senha (mín. 6 caracteres)');
 
       markValidity(
         senhaEl,
-        show ? senhaOk : true,
+        (show && shouldValidateSenha) ? senhaOk : true,
         senhaOk ? '' : 'Senha (mín. 6 caracteres)'
       );
     } else {

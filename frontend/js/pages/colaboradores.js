@@ -1,42 +1,15 @@
 // frontend/js/pages/colaboradores.js
-
-(function BootColaboradores(){
+// Compatibilidade: carrega e inicia a versão modular corrigida.
+(function(){
   'use strict';
+  if (window.__zcColaboradoresModuloShimLoaded) return;
+  window.__zcColaboradoresModuloShimLoaded = true;
 
-  if (window.__zcColaboradoresBootLoaded) return;
-  window.__zcColaboradoresBootLoaded = true;
-
-  function releasePageLoader(){
-    try { window.ready?.(); } catch {}
-    try { window.Page?.ready?.(); } catch {}
-
-    try {
-      document.documentElement.classList.remove('prepaint');
-      document.documentElement.setAttribute('data-head-ready', '1');
-      document.documentElement.setAttribute('data-loader-ready', '1');
-    } catch {}
-  }
-
-  async function boot(){
-    releasePageLoader();
-
-    try {
-      const mod = await import('./colaboradores/index.js?v=colab-modal-clean-1');
-      await mod.initColaboradoresPage();
-    } catch (e) {
-      console.error('[colaboradores] erro ao iniciar:', e);
-    } finally {
-      releasePageLoader();
-    }
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot, { once:true });
-  } else {
-    boot();
-  }
-
-  setTimeout(releasePageLoader, 300);
-  setTimeout(releasePageLoader, 1000);
-  setTimeout(releasePageLoader, 2500);
+  import('/frontend/js/pages/colaboradores/index.js?v=colab-wizard-final-click-fix-20260628')
+    .then(mod => {
+      if (mod && typeof mod.initColaboradoresPage === 'function') {
+        mod.initColaboradoresPage();
+      }
+    })
+    .catch(err => console.error('[colaboradores] falha ao carregar módulo principal', err));
 })();

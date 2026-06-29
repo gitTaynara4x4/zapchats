@@ -27,7 +27,7 @@ REDIS_TTL_S = int(os.getenv("REDIS_TTL_SECONDS", "120"))
 # IMPORTANTE:
 # A versão fica depois de emp no cache_key para permitir limpar com:
 # _cache_del_pattern(_k("conv", "list", "emp", str(empresa_id)))
-LIST_CACHE_VERSION = "nome-oficial-v3-unread-realtime"
+LIST_CACHE_VERSION = "nome-oficial-v15-unread-badge"
 
 _redis = None
 if REDIS_URL:
@@ -1176,7 +1176,7 @@ def _recalcular_unread_para_items_cache(
             m.empresa_id == int(empresa_id),
             m.cliente_id.in_([int(x) for x in cliente_ids]),
             m.tipo == "entrada",
-            m.lida.is_(False),
+            m.lida.isnot(True),
         )
     )
 
@@ -1413,7 +1413,7 @@ def listar_conversas(
                     m.empresa_id == empresa_id,
                     m.cliente_id.in_(cliente_ids),
                     m.tipo == "entrada",
-                    m.lida.is_(False),
+                    m.lida.isnot(True),
                 )
             )
 
@@ -1587,7 +1587,7 @@ def listar_clientes(
                 m.cliente_id == c.id,
                 m.empresa_id == empresa_id,
                 m.tipo == "entrada",
-                m.lida.is_(False),
+                m.lida.isnot(True),
             )
         )
 
@@ -1695,7 +1695,7 @@ async def marcar_lidas(
             models.Mensagem.cliente_id == int(cliente_pk),
             models.Mensagem.empresa_id == int(empresa_id),
             models.Mensagem.tipo == "entrada",
-            models.Mensagem.lida.is_(False),
+            models.Mensagem.lida.isnot(True),
         )
     )
 

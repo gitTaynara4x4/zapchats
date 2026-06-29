@@ -485,7 +485,7 @@ def _assert_midia_acl_cliente(
         empresa_id=int(empresa_id),
         cliente_id=int(cliente_id),
         instancia_id=(int(instancia_id) if instancia_id is not None else None),
-        allow_unassigned_department=True,
+        allow_unassigned_department=False,
     )
 
 

@@ -1,4 +1,4 @@
-<!-- /frontend/pages/departamentos.html -->
+<!-- /frontend/departamentos.html -->
 <!DOCTYPE html>
 <html lang="pt-BR" class="has-sidebar prepaint">
 <head>
@@ -21,48 +21,51 @@
 <body data-page="departamentos">
   <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
 
-  <main class="main dashboard-analytics">
-    <section class="dash-hero dept-hero" aria-label="Cabeçalho de departamentos">
-      <div class="dash-hero-copy">
-        <span class="dash-eyebrow">ZapsChat Gestão</span>
-        <h1>
-          <span class="title-ico" aria-hidden="true">
-            <i class="fa-solid fa-diagram-project"></i>
-          </span>
-          Departamentos
-        </h1>
-        <p>Monte a estrutura da empresa em organograma, sem tabela e com o mesmo visual do dashboard.</p>
+  <main class="departments-page" aria-label="Estrutura de departamentos">
+    <header class="dept-topbar" aria-label="Barra de departamentos">
+      <div class="dept-topbar-title">
+        <h1>Estrutura da empresa</h1>
+        <button class="topbar-star" type="button" aria-label="Favoritar tela" title="Favoritar">
+          <i class="fa-regular fa-star"></i>
+        </button>
       </div>
 
-      <div class="dash-hero-actions dept-hero-actions">
-        <div class="top-total">
-          <span id="dept-total">--</span>
-          <small>departamentos</small>
+      <div class="dept-topbar-actions">
+        <button id="btn-add" class="btn-add-dept" type="button">
+          <i class="fa-solid fa-plus"></i>
+          <span>ADICIONAR</span>
+        </button>
+
+        <button id="btn-collapse" class="topbar-icon" type="button" title="Recolher estrutura" aria-label="Recolher estrutura">
+          <i class="fa-solid fa-bars-staggered"></i>
+        </button>
+
+        <button id="btn-expand" class="topbar-icon" type="button" title="Expandir estrutura" aria-label="Expandir estrutura">
+          <i class="fa-solid fa-arrows-up-down-left-right"></i>
+        </button>
+
+        <label class="topbar-search" for="filtro">
+          <input id="filtro" type="search" placeholder="Buscar" autocomplete="off" spellcheck="false"/>
+          <i class="fa-solid fa-magnifying-glass"></i>
+        </label>
+      </div>
+    </header>
+
+    <section class="dept-layout" aria-label="Organograma e detalhes">
+      <section class="dept-canvas" aria-label="Organograma">
+        <div id="org-container" class="org-container" aria-live="polite"></div>
+
+        <div class="org-controls" aria-label="Controle de zoom">
+          <button id="org-zoom-out" type="button" aria-label="Diminuir zoom">−</button>
+          <span id="org-zoom-label">100%</span>
+          <button id="org-zoom-in" type="button" aria-label="Aumentar zoom">+</button>
+          <button id="org-zoom-reset" type="button" aria-label="Centralizar organograma" title="Centralizar">
+            <i class="fa-solid fa-location-crosshairs"></i>
+          </button>
         </div>
+      </section>
 
-        <div class="filter dept-filter" aria-label="Filtros de departamentos">
-          <label for="filtro" class="sr-only">Buscar departamento</label>
-          <input id="filtro" class="input" type="search" placeholder="Buscar departamento…" spellcheck="false" autocomplete="off"/>
-
-          <button id="btn-expand" class="btn" type="button" title="Expandir tudo">
-            <i class="fa-solid fa-angles-down"></i> Expandir
-          </button>
-
-          <button id="btn-collapse" class="btn" type="button" title="Recolher tudo">
-            <i class="fa-solid fa-angles-up"></i> Recolher
-          </button>
-
-          <button id="btn-add" class="btn primary" type="button">
-            <i class="fa-solid fa-plus"></i> Novo
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <section aria-label="Organograma de departamentos" id="section-org">
-      <div class="box">
-        <div id="org-container" class="orgchart" aria-live="polite"></div>
-      </div>
+      <aside id="dept-side-panel" class="dept-side-panel" aria-label="Detalhes do departamento"></aside>
     </section>
   </main>
 
@@ -70,166 +73,155 @@
 
   <div id="modal-depto" class="modal-back" aria-hidden="true">
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <button id="modal-fechar" class="modal-close" type="button" aria-label="Fechar">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+
       <div class="modal-head">
-        <div class="title">
-          <i class="fa-solid fa-sitemap"></i>
-          <span id="modal-title">Novo departamento</span>
+        <span id="modal-step-label" class="modal-step-label">Etapa 1 de 3</span>
+        <h2 id="modal-title">Nome e descrição do departamento</h2>
+        <div class="modal-progress" aria-hidden="true">
+          <span class="active"></span>
+          <span></span>
+          <span></span>
         </div>
+      </div>
 
-        <button id="modal-fechar" class="close-x" type="button" aria-label="Fechar modal">
-          Fechar
+      <form id="form-depto" class="modal-form" autocomplete="off">
+        <input type="hidden" name="id"/>
+        <select id="d-parent" class="sr-only" aria-hidden="true" tabindex="-1">
+          <option value="">Bitrix</option>
+        </select>
+
+        <section class="wizard-step is-active" data-step="1">
+          <div class="modal-grid two-col">
+            <div class="modal-col form-col">
+              <div class="fi parent-fi">
+                <label>Departamento principal</label>
+                <div class="parent-picker">
+                  <span id="parent-chip" class="parent-chip">
+                    <i class="fa-solid fa-building"></i>
+                    <span>Bitrix</span>
+                  </span>
+                  <button id="parent-edit" type="button">+ Editar</button>
+                </div>
+
+                <div id="parent-panel" class="parent-panel" role="listbox" aria-label="Escolher departamento principal"></div>
+              </div>
+
+              <div class="fi">
+                <label for="d-nome">Nome</label>
+                <input id="d-nome" class="input" type="text" maxlength="120" placeholder="Digite o nome do departamento" required/>
+              </div>
+
+              <div class="fi">
+                <label for="d-desc">Descrição</label>
+                <textarea id="d-desc" class="input" rows="5" maxlength="300" placeholder="Digite a descrição do departamento"></textarea>
+              </div>
+
+              <div class="form-inline">
+                <label class="toggle-line">
+                  <input id="d-ativo" type="checkbox" checked/>
+                  <span>Departamento ativo</span>
+                </label>
+
+                <label class="compact-field">
+                  <span>Código</span>
+                  <input id="d-codigo" class="input" type="text" maxlength="64" placeholder="Opcional"/>
+                </label>
+              </div>
+            </div>
+
+            <div class="modal-col preview-col">
+              <div class="preview-title">Departamento da empresa <span><i class="fa-solid fa-building"></i> <b id="preview-company">Bitrix</b></span></div>
+              <div id="wizard-preview" class="wizard-preview"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="wizard-step" data-step="2">
+          <div class="modal-grid two-col">
+            <div class="modal-col form-col">
+              <div class="fi people-field">
+                <label>Supervisores</label>
+                <button id="btn-supervisores" class="add-people-btn" type="button">
+                  <i class="fa-solid fa-plus"></i> Adicionar
+                </button>
+                <small>Vários supervisores são possíveis.</small>
+              </div>
+
+              <div class="fi people-field">
+                <label>Supervisor adjunto</label>
+                <button id="btn-adjuntos" class="add-people-btn" type="button">
+                  <i class="fa-solid fa-plus"></i> Adicionar
+                </button>
+                <small>Vários supervisores adjuntos são possíveis.</small>
+              </div>
+
+              <div class="fi members-field">
+                <div class="members-label-row">
+                  <label>Colaboradores</label>
+                  <span id="d-membros-count" class="members-count">0 selecionados</span>
+                </div>
+
+                <div class="members-toolbar">
+                  <label class="members-search" for="d-membros-search">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input id="d-membros-search" type="search" placeholder="Buscar colaborador" autocomplete="off" spellcheck="false"/>
+                  </label>
+                  <button id="d-membros-all" type="button">Todos</button>
+                  <button id="d-membros-clear" type="button">Nenhum</button>
+                </div>
+
+                <div id="d-membros-list" class="members-list">
+                  <div class="members-empty">Carregando colaboradores...</div>
+                </div>
+              </div>
+
+              <div class="transfer-line">
+                Os usuários selecionados serão: <button type="button">transferidos de seus departamentos <i class="fa-solid fa-angle-down"></i></button>
+              </div>
+            </div>
+
+            <div class="modal-col preview-col">
+              <div class="preview-title">Departamento da empresa <span><i class="fa-solid fa-building"></i> <b id="preview-company-2">Bitrix</b></span></div>
+              <div id="wizard-preview-2" class="wizard-preview"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="wizard-step" data-step="3">
+          <div class="review-wrap">
+            <div class="review-card">
+              <span class="review-kicker">Etapa 3 de 3</span>
+              <h3>Revisar e salvar</h3>
+              <p>Confira o nome, o departamento principal e os colaboradores antes de salvar.</p>
+
+              <div class="review-list">
+                <div><span>Departamento</span><strong id="review-nome">—</strong></div>
+                <div><span>Principal</span><strong id="review-parent">Bitrix</strong></div>
+                <div><span>Colaboradores</span><strong id="review-colabs">0 selecionados</strong></div>
+                <div><span>Status</span><strong id="review-status">Ativo</strong></div>
+              </div>
+            </div>
+
+            <div class="review-preview">
+              <div class="preview-title">Prévia final</div>
+              <div id="wizard-preview-3" class="wizard-preview"></div>
+            </div>
+          </div>
+        </section>
+      </form>
+
+      <div class="modal-foot">
+        <button id="modal-voltar" class="btn-modal secondary" type="button">
+          <i class="fa-solid fa-angle-left"></i> Voltar
         </button>
-      </div>
-
-      <div class="modal-body">
-        <form id="form-depto" autocomplete="off">
-          <input type="hidden" name="id"/>
-
-          <div class="fi fi-nome">
-            <label for="d-nome">Nome do departamento</label>
-
-            <input
-              id="d-nome"
-              class="input"
-              type="text"
-              placeholder="Ex.: Suporte"
-              maxlength="120"
-              required
-              autocomplete="off"
-              aria-describedby="h-nome"
-              aria-expanded="false"
-              aria-owns="nome-dropdown"
-              role="combobox"
-              list="departamento-sugestoes"
-            />
-
-            <datalist id="departamento-sugestoes"></datalist>
-            <div id="nome-dropdown" class="dropdown-suggestions" role="listbox" aria-label="Sugestões de nomes"></div>
-
-            <small id="h-nome" class="hint">Como será exibido para a equipe.</small>
-          </div>
-
-          <div class="fi" id="fi-parent">
-            <label for="parent-btn">Departamento superior</label>
-
-            <div class="multi">
-              <button
-                type="button"
-                class="input"
-                id="parent-btn"
-                aria-expanded="false"
-                aria-controls="parent-panel">
-                Empresa (raiz)
-              </button>
-
-              <div
-                class="dropdown-suggestions"
-                id="parent-panel"
-                role="listbox"
-                aria-label="Departamentos">
-              </div>
-            </div>
-
-            <select id="d-parent" class="input" aria-describedby="h-parent" style="display:none">
-              <option value="">Empresa (raiz)</option>
-            </select>
-
-            <small id="h-parent" class="hint">
-              Escolha o departamento imediatamente acima. Para topo, deixe “Empresa (raiz)”.
-            </small>
-          </div>
-
-          <div class="fi">
-            <label class="switch">
-              <input id="d-ativo" type="checkbox" checked/>
-              <span>Mostrar para a equipe</span>
-            </label>
-
-            <small class="hint">Se desligar, esse setor não aparece nas seleções.</small>
-          </div>
-
-          <div class="fi">
-            <div class="dept-info-box">
-              <div class="dept-info-title">
-                <i class="fa-solid fa-circle-info"></i>
-                <span>Como este departamento é usado no atendimento?</span>
-              </div>
-
-              <p>
-                O departamento define o <b>setor da conversa</b>, como Comercial,
-                Financeiro, Suporte ou Cobrança.
-              </p>
-
-              <p>
-                O acesso aos <b>WhatsApps</b> não é configurado aqui. Agora ele é
-                definido na tela de <b>Colaboradores</b>, junto com os setores que
-                cada pessoa atende.
-              </p>
-
-              <p>
-                Conversas que ainda não têm setor aparecem como <b>Entrada geral</b>
-                para colaboradores que têm acesso ao WhatsApp onde a mensagem chegou.
-              </p>
-            </div>
-          </div>
-
-          <div class="fi" id="fi-expediente">
-            <label>Expediente padrão do departamento</label>
-
-            <div class="row" style="gap:.5rem; align-items:center;">
-              <input id="d-exp-ini" class="input" type="time" step="60" />
-              <span class="muted">até</span>
-              <input id="d-exp-fim" class="input" type="time" step="60" />
-            </div>
-
-            <small class="hint">
-              Deixe vazio para <b>sem restrição</b>. O colaborador pode usar o padrão, personalizar, ou ficar sem restrição.
-            </small>
-          </div>
-
-          <details class="details">
-            <summary><i class="fa-solid fa-sliders"></i> Opções avançadas</summary>
-
-            <div class="details-body">
-              <div class="fi">
-                <label for="d-codigo">Sigla / código interno (opcional)</label>
-                <input
-                  id="d-codigo"
-                  class="input"
-                  type="text"
-                  maxlength="64"
-                  placeholder="Ex.: FIN, TI-SUP"
-                  aria-describedby="h-codigo"
-                />
-                <small id="h-codigo" class="hint">Para integrações e filtros. Se não souber, deixe em branco.</small>
-              </div>
-
-              <div class="fi">
-                <label for="d-desc">Descrição (opcional)</label>
-                <textarea
-                  id="d-desc"
-                  class="input"
-                  rows="3"
-                  maxlength="300"
-                  placeholder="Ex.: Usado para chamados de suporte técnico."
-                  aria-describedby="h-desc"></textarea>
-                <small id="h-desc" class="hint">Ajuda a equipe a escolher o lugar certo.</small>
-              </div>
-            </div>
-          </details>
-
-          <div class="fi" id="path-preview" style="display:none">
-            <label>Prévia</label>
-            <div class="chips" style="font-size:.95rem; opacity:.9">
-              <code id="path-preview-code">—</code>
-            </div>
-          </div>
-        </form>
-      </div>
-
-      <div class="foot">
-        <button id="modal-cancelar" class="btn" type="button">Cancelar</button>
-        <button id="modal-salvar" class="btn primary" type="button">Salvar</button>
+        <div class="modal-foot-actions">
+          <button id="modal-cancelar" class="btn-modal ghost" type="button">Cancelar</button>
+          <button id="modal-avancar" class="btn-modal primary" type="button">Avançar</button>
+          <button id="modal-salvar" class="btn-modal primary" type="button">Salvar e sair</button>
+        </div>
       </div>
     </div>
   </div>

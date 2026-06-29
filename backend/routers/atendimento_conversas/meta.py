@@ -53,6 +53,81 @@ def _identity_empresa_id(identity) -> Optional[int]:
         return None
 
 
+
+
+def _is_status_aberto_para_claim(status: Optional[str]) -> bool:
+    st = str(status or "").strip().lower()
+    if not st:
+        return True
+    return st in {"novo", "aguardando", "em_atendimento", "pausado", "aberto", "pendente"}
+
+
+def _merge_department_claim_state(
+    base: Dict[str, Any],
+    *,
+    atendimento,
+    departamento_id: Optional[int],
+    operador_id: Optional[int],
+    operador_nome: Optional[str],
+    status_atd: Optional[str],
+    current_colab_id: Optional[int],
+) -> Dict[str, Any]:
+    """
+    Regra do atendimento por departamento:
+    - departamento + sem operador => colaborador do departamento precisa clicar Atender;
+    - operador = colaborador atual => pode responder;
+    - operador de outro colaborador => fica bloqueado para este usuário.
+
+    Não mexe em conversa encerrada/resolvida.
+    """
+    out = dict(base or {})
+
+    if departamento_id is None or not _is_status_aberto_para_claim(status_atd):
+        out.setdefault("claim_mode", None)
+        out.setdefault("departamento_claim", False)
+        return out
+
+    operador_int = None
+    try:
+        if operador_id is not None:
+            operador_int = int(operador_id)
+    except Exception:
+        operador_int = None
+
+    colab_int = None
+    try:
+        if current_colab_id is not None:
+            colab_int = int(current_colab_id)
+    except Exception:
+        colab_int = None
+
+    assigned_to_me = bool(operador_int is not None and colab_int is not None and operador_int == colab_int)
+    assigned_to_other = bool(operador_int is not None and not assigned_to_me)
+    waiting = bool(operador_int is None)
+
+    # Para conversa de departamento, o claim também funciona como aceite.
+    out.update({
+        "claim_mode": "departamento",
+        "departamento_claim": True,
+        "exigir_aceite": True,
+        "aceite_obrigatorio": True,
+        "aguardando_aceite": bool(waiting or assigned_to_other),
+        "pode_aceitar": bool(colab_int is not None and waiting),
+        "pode_liberar": bool(assigned_to_me),
+        "pode_responder": bool(assigned_to_me or colab_int is None),
+        "aceita_por_mim": bool(assigned_to_me),
+        "accepted_by_me": bool(assigned_to_me),
+        "accepted_by_anyone": bool(operador_int is not None),
+        "tem_participantes": bool(operador_int is not None or out.get("tem_participantes")),
+        "responsavel_id": operador_int,
+        "responsavel_nome": operador_nome or out.get("responsavel_nome"),
+        "operador_id": operador_int,
+        "operador_nome": operador_nome or out.get("operador_nome"),
+        "status": status_atd,
+    })
+
+    return out
+
 def _empresa_id_segura(identity, empresa_id_payload: Optional[int] = None) -> int:
     """
     Segurança multiempresa:
@@ -169,7 +244,7 @@ def obter_meta_conversa(
         current_colab_id=current_colab_id,
     )
 
-    return {
+    meta_payload = {
         "cliente_id": int(cliente.id),
         "instancia_id": int(resolved_inst_id) if resolved_inst_id is not None else None,
         "atendimento_id": int(atd.id) if atd is not None else None,
@@ -202,6 +277,16 @@ def obter_meta_conversa(
         "tem_participantes": part_info["tem_participantes"],
         "is_group": False,
     }
+
+    return _merge_department_claim_state(
+        meta_payload,
+        atendimento=atd,
+        departamento_id=(int(departamento_acl) if departamento_acl is not None else None),
+        operador_id=(int(operador_id) if operador_id is not None else None),
+        operador_nome=operador_nome,
+        status_atd=status_atd,
+        current_colab_id=current_colab_id,
+    )
 
 
 # =========================================================

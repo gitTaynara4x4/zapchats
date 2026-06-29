@@ -70,7 +70,7 @@ def _cliente_acl_ok(
             empresa_id=int(empresa_id),
             cliente_id=int(cliente_id),
             instancia_id=instancia_id,
-            allow_unassigned_department=True,
+            allow_unassigned_department=False,
         )
         ok = True
     except HTTPException:
@@ -124,6 +124,28 @@ def _to_int(v) -> Optional[int]:
         return int(v)
     except Exception:
         return None
+
+
+def _identity_colab_id(identity) -> Optional[int]:
+    try:
+        if not identity:
+            return None
+
+        def get(k):
+            return identity.get(k) if isinstance(identity, dict) else getattr(identity, k, None)
+
+        for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
+            n = _to_int(get(key))
+            if n:
+                return int(n)
+
+        sub = str(get("sub") or "").strip().lower()
+        if sub.startswith("colab-"):
+            return _to_int(sub.split("-", 1)[1])
+    except Exception:
+        return None
+
+    return None
 
 
 # =========================================================
@@ -1352,7 +1374,7 @@ def evolution_fetch_profile(
             empresa_id=empresa_id_eff,
             cliente_id=int(cli.id),
             instancia_id=resolved_inst_id,
-            allow_unassigned_department=True,
+            allow_unassigned_department=False,
         )
 
         changed |= _set_if_changed(cli, "is_business", bool(normalized.get("isBusiness")))
@@ -2121,7 +2143,7 @@ def atendimento_avatar(
         empresa_id=int(empresa_id_eff),
         cliente_id=int(conversation_id),
         instancia_id=resolved_inst_id,
-        allow_unassigned_department=True,
+        allow_unassigned_department=False,
     )
 
     raw_url = (getattr(cli, "avatar_url", None) or "").strip()
@@ -2189,7 +2211,7 @@ def get_cliente_profile(
         empresa_id=empresa_id_eff,
         cliente_id=int(cliente_id),
         instancia_id=None,
-        allow_unassigned_department=True,
+        allow_unassigned_department=False,
     )
 
     return _build_profile_payload(db, cli, atd)
@@ -2215,7 +2237,7 @@ def refresh_cliente_profile(
         empresa_id=empresa_id_eff,
         cliente_id=int(cliente_id),
         instancia_id=None,
-        allow_unassigned_department=True,
+        allow_unassigned_department=False,
     )
 
     acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
@@ -2260,7 +2282,7 @@ def merge_cliente_profile(
         empresa_id=empresa_id_eff,
         cliente_id=int(cliente_id),
         instancia_id=None,
-        allow_unassigned_department=True,
+        allow_unassigned_department=False,
     )
 
     norm = dict(payload or {})
@@ -2439,7 +2461,7 @@ def cliente_get(
         empresa_id=empresa_id_eff,
         cliente_id=int(cliente_id),
         instancia_id=None,
-        allow_unassigned_department=True,
+        allow_unassigned_department=False,
     )
 
     return {
@@ -2480,7 +2502,7 @@ def cliente_put(
         empresa_id=empresa_id_eff,
         cliente_id=int(cliente_id),
         instancia_id=None,
-        allow_unassigned_department=True,
+        allow_unassigned_department=False,
     )
 
     if hasattr(payload, "model_dump"):
@@ -2661,6 +2683,7 @@ def atendimento_search(
     acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
     allowed_instancias = acl_ctx["allowed_instancias"]
     allowed_departamentos = acl_ctx.get("allowed_departamentos")
+    current_colab_id = _identity_colab_id(identity)
 
     resolved_inst_id, _resolved_inst_name = _resolve_instancia_id(
         db,
@@ -2824,6 +2847,8 @@ def atendimento_search(
             resolved_inst_id=resolved_inst_id,
             allowed_inst_ids=allowed_instancias,
             allowed_dep_ids=allowed_departamentos,
+            current_colab_id=current_colab_id,
+            allow_unassigned_department=False,
         ).filter(or_(*visible_filters))
 
         rows_visible = (

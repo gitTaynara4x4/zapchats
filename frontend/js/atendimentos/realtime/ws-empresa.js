@@ -78,75 +78,6 @@ let lagTimer = null;
 let __reloadListTimer = null;
 let __lastReloadListAt = 0;
 
-// v12: evita processar a mesma mensagem duas vezes quando existem 2 listeners/abas/loads rápidos.
-const LIVE_MSG_DEDUPE_MS = 60_000;
-const LIVE_MSG_SEEN = (() => {
-  try {
-    return window.__ZC_WS_LIVE_MSG_SEEN__ || (window.__ZC_WS_LIVE_MSG_SEEN__ = new Map());
-  } catch {
-    return new Map();
-  }
-})();
-
-function isPageActuallyVisible() {
-  try {
-    if (document.hidden) return false;
-    if (typeof document.hasFocus === 'function' && !document.hasFocus()) return false;
-  } catch {}
-
-  return true;
-}
-
-function isOpenChatVisualized(convRef) {
-  return Boolean(isOpenChat(convRef) && isPageActuallyVisible());
-}
-
-function messageDedupeKey(data = {}) {
-  const id = pickMsgId(data);
-  const conv =
-    data?.conversation_key ??
-    data?.conversationKey ??
-    data?.conversation_id ??
-    data?.conversationId ??
-    data?.cliente_id ??
-    data?.clienteId ??
-    data?.grupo_id ??
-    data?.grupoId ??
-    '';
-
-  if (id) return `${conv || 'msg'}:${id}`;
-
-  const ts = pickTimestamp(data) || data?.serverTimestamp || '';
-  const txt = pickText(data) || '';
-  const inst = pickInstanciaFromAny(data) || '';
-  return `${conv}:${inst}:${ts}:${txt}`.slice(0, 260);
-}
-
-function shouldSkipDuplicateLiveMessage(data = {}) {
-  try {
-    const k = messageDedupeKey(data);
-    if (!k || k === ':::') return false;
-
-    const now = Date.now();
-
-    for (const [key, at] of LIVE_MSG_SEEN.entries()) {
-      if (!at || now - Number(at) > LIVE_MSG_DEDUPE_MS) {
-        LIVE_MSG_SEEN.delete(key);
-      }
-    }
-
-    const prev = LIVE_MSG_SEEN.get(k);
-    if (prev && now - Number(prev) < LIVE_MSG_DEDUPE_MS) {
-      if (DEBUG_WS) console.debug('[WS MSG][duplicada ignorada]', k);
-      return true;
-    }
-
-    LIVE_MSG_SEEN.set(k, now);
-  } catch {}
-
-  return false;
-}
-
 /* =========================================================
    BASE HELPERS
 ========================================================= */
@@ -809,6 +740,10 @@ function getOpenContext() {
 
 function isOpenChat(refOrKey) {
   try {
+    // Sem conversa realmente aberta na tela, não usa state.clienteSel antigo.
+    // Isso evita zerar/travar a bolha quando a lista está aberta e o chat não.
+    if (!isChatUiActuallyOpen()) return false;
+
     const open = getOpenContext();
     const ref = normalizeConversationRef(refOrKey, typeof refOrKey === 'object' ? refOrKey : null);
 
@@ -854,6 +789,10 @@ function isOpenChat(refOrKey) {
 }
 
 function getOpenRefIfMatchesIncoming(incomingRef, data = null) {
+  // Não considera conversa aberta só por state antigo.
+  // Precisa existir chat visível de verdade.
+  if (!isChatUiActuallyOpen()) return null;
+
   const open = getOpenContext();
 
   if (!open) return null;
@@ -1177,6 +1116,279 @@ function H() {
   return document.getElementById('historico');
 }
 
+function isElementVisible(el) {
+  try {
+    if (!el || el.hidden) return false;
+    const cs = window.getComputedStyle(el);
+    if (!cs) return false;
+    return cs.display !== 'none' && cs.visibility !== 'hidden' && cs.opacity !== '0';
+  } catch {
+    return false;
+  }
+}
+
+function isChatUiActuallyOpen() {
+  try {
+    const hist = document.getElementById('historico');
+    const head = document.getElementById('chat-header');
+    const footer = document.getElementById('chat-footer');
+    const title = document.getElementById('chat-title');
+
+    if (isElementVisible(head) || isElementVisible(hist) || isElementVisible(footer)) return true;
+
+    const titleText = String(title?.textContent || '').trim();
+    if (titleText && isElementVisible(title)) return true;
+
+    const hasMessages = !!hist?.querySelector(
+      '.bubble, .bolha-mensagem, .msg-row, .linha-mensagem, .date-chip, .zc-day-divider, [data-message-id], [data-msg-id]'
+    );
+
+    return hasMessages && isElementVisible(hist);
+  } catch {
+    return false;
+  }
+}
+
+function cssEscapeSafe(value) {
+  const s = String(value ?? '');
+
+  try {
+    return CSS.escape(s);
+  } catch {
+    return s.replace(/["\\]/g, '\\$&');
+  }
+}
+
+function findConversationListItems(refOrKey, patch = null) {
+  const ref = normalizeConversationRef(refOrKey, typeof refOrKey === 'object' ? refOrKey : patch);
+
+  if (!ref?.kind || !ref?.entityId) return [];
+
+  const found = [];
+  const seen = new Set();
+
+  const add = (el) => {
+    if (!el || seen.has(el)) return;
+    seen.add(el);
+    found.push(el);
+  };
+
+  const trySelector = (sel) => {
+    try {
+      document.querySelectorAll(sel).forEach(add);
+    } catch {}
+  };
+
+  if (ref.key) {
+    const k = cssEscapeSafe(ref.key);
+
+    trySelector(`.chat-item[data-id="${k}"]`);
+    trySelector(`.cliente-item[data-id="${k}"]`);
+    trySelector(`[data-conversation-key="${k}"]`);
+    trySelector(`[data-conversation-id="${k}"]`);
+    trySelector(`[data-conv-key="${k}"]`);
+  }
+
+  const entity = cssEscapeSafe(ref.entityId);
+
+  if (ref.kind === 'c') {
+    trySelector(`.chat-item[data-cliente-id="${entity}"]`);
+    trySelector(`.cliente-item[data-cliente-id="${entity}"]`);
+    trySelector(`.chat-item[data-api-cliente-id="${entity}"]`);
+    trySelector(`.chat-item[data-backend-cliente-id="${entity}"]`);
+    trySelector(`.cliente-item[data-api-cliente-id="${entity}"]`);
+    trySelector(`.cliente-item[data-backend-cliente-id="${entity}"]`);
+  } else {
+    trySelector(`.chat-item[data-grupo-id="${entity}"]`);
+    trySelector(`.cliente-item[data-grupo-id="${entity}"]`);
+  }
+
+  trySelector(`.chat-item[data-entity-id="${entity}"]`);
+  trySelector(`.cliente-item[data-entity-id="${entity}"]`);
+  trySelector(`.chat-item[data-id="${entity}"]`);
+  trySelector(`.cliente-item[data-id="${entity}"]`);
+
+  const phoneIncoming =
+    patch?.telefone_norm ??
+    patch?.telefone ??
+    patch?.phone ??
+    patch?.numero ??
+    patch?.number ??
+    '';
+
+  document.querySelectorAll('.chat-item, .cliente-item').forEach((li) => {
+    try {
+      if (seen.has(li)) return;
+
+      const d = li.dataset || {};
+
+      const rowLike = {
+        conversation_key:
+          d.conversationKey ||
+          d.conversationId ||
+          d.convKey ||
+          d.id ||
+          null,
+
+        kind:
+          d.kind ||
+          d.tipoConversa ||
+          d.tipoRef ||
+          (d.grupoId ? 'g' : 'c'),
+
+        entity_id:
+          d.entityId ||
+          d.clienteId ||
+          d.apiClienteId ||
+          d.backendClienteId ||
+          d.grupoId ||
+          d.id ||
+          null,
+
+        cliente_id:
+          d.clienteId ||
+          d.apiClienteId ||
+          d.backendClienteId ||
+          null,
+
+        grupo_id:
+          d.grupoId ||
+          null,
+
+        instancia_id:
+          d.instanciaId ||
+          d.instancia ||
+          d.instanceId ||
+          d.instanceName ||
+          d.instance ||
+          null,
+
+        telefone:
+          d.telefone ||
+          d.phone ||
+          d.numero ||
+          d.number ||
+          null,
+
+        telefone_norm:
+          d.telefoneNorm ||
+          d.telefone ||
+          null,
+      };
+
+      const liRef = normalizeConversationRef(rowLike, rowLike);
+
+      if (liRef?.key && ref.key && liRef.key === ref.key) {
+        add(li);
+        return;
+      }
+
+      if (liRef?.kind && liRef?.entityId) {
+        const sameKind = liRef.kind === ref.kind;
+        const sameEntity = String(liRef.entityId) === String(ref.entityId);
+
+        if (sameKind && sameEntity) {
+          const liInst = liRef.instId || rowLike.instancia_id;
+
+          if (!ref.instId || !liInst || sameInstStrict(liInst, ref.instId) || sameInstForOpen(liInst, ref.instId)) {
+            add(li);
+            return;
+          }
+        }
+      }
+
+      if (
+        ref.kind === 'c' &&
+        phoneIncoming &&
+        samePhone(rowLike.telefone_norm || rowLike.telefone, phoneIncoming)
+      ) {
+        const liInst = liRef?.instId || rowLike.instancia_id;
+
+        if (!ref.instId || !liInst || sameInstStrict(liInst, ref.instId) || sameInstForOpen(liInst, ref.instId)) {
+          add(li);
+          return;
+        }
+      }
+    } catch {}
+  });
+
+  return found;
+}
+
+function ensureUnreadBadgeElement(li) {
+  if (!li) return null;
+
+  let badgeEl = li.querySelector('.zc-unread-badge, .unread-badge, .badge');
+
+  if (badgeEl) return badgeEl;
+
+  badgeEl = document.createElement('span');
+  badgeEl.className = 'badge zc-unread-badge unread-badge';
+  badgeEl.setAttribute('aria-label', 'Mensagens não lidas');
+
+  const anchor =
+    li.querySelector('.chat-meta, .cliente-meta, .chat-side, .chat-right, .chat-time')?.parentElement ||
+    li.querySelector('.chat-meta, .cliente-meta, .chat-side, .chat-right') ||
+    li;
+
+  anchor.appendChild(badgeEl);
+
+  return badgeEl;
+}
+
+function forceUnreadBadgeDom(refOrKey, unread, patch = null) {
+  const ref = normalizeConversationRef(refOrKey, typeof refOrKey === 'object' ? refOrKey : patch);
+
+  if (!ref?.kind || !ref?.entityId) return 0;
+
+  const nRaw = Number(unread);
+  const n = Number.isFinite(nRaw) && nRaw > 0 ? Math.floor(nRaw) : 0;
+
+  const items = findConversationListItems(ref, patch);
+
+  for (const li of items) {
+    try {
+      li.dataset.novas = String(n);
+      li.dataset.unread = String(n);
+      li.dataset.unreadCount = String(n);
+      li.dataset.naoLidas = String(n);
+
+      li.classList.toggle('has-unread', n > 0);
+      li.classList.toggle('unread', n > 0);
+      li.classList.toggle('is-unread', n > 0);
+
+      const badgeEl = ensureUnreadBadgeElement(li);
+
+      if (badgeEl) {
+        badgeEl.textContent = n > 0 ? String(n) : '';
+        badgeEl.style.display = n > 0 ? 'inline-flex' : 'none';
+        badgeEl.hidden = n <= 0;
+        badgeEl.setAttribute('data-count', String(n));
+      }
+
+      const timeEl = li.querySelector('.chat-time, .cliente-time, [data-role="time"]');
+      if (timeEl) {
+        timeEl.classList.toggle('has-unread-time', n > 0);
+      }
+    } catch {}
+  }
+
+  try {
+    if (items.length && DEBUG_WS) {
+      console.debug('[WS MSG][badge-dom]', {
+        conversation_key: ref.key,
+        entity_id: ref.entityId,
+        instancia_id: ref.instId,
+        unread: n,
+        items: items.length,
+      });
+    }
+  } catch {}
+
+  return items.length;
+}
+
+
 function ensureDomContextFor(convRef) {
   const ref = normalizeConversationRef(convRef, typeof convRef === 'object' ? convRef : null);
   if (!ref?.key) return false;
@@ -1267,6 +1479,21 @@ function renderOpenConversationFromWs(convRef) {
 
   setTimeout(renderOnce, 80);
   setTimeout(renderOnce, 250);
+}
+
+function scheduleForceUnreadBadgeDom(refOrKey, unread, patch = null) {
+  const run = () => {
+    try { forceUnreadBadgeDom(refOrKey, unread, patch); } catch {}
+  };
+
+  run();
+
+  try { requestAnimationFrame(run); } catch {}
+  try { setTimeout(run, 0); } catch {}
+  try { setTimeout(run, 60); } catch {}
+  try { setTimeout(run, 180); } catch {}
+  try { setTimeout(run, 420); } catch {}
+  try { setTimeout(run, 900); } catch {}
 }
 
 /* =========================================================
@@ -1418,17 +1645,44 @@ function bumpPreview(convKey, msg, inst = null) {
     msg?.tipo === 'saida' ||
     msg?.origem === 'atendente';
 
-  const openNow = isOpenChatVisualized(ref);
+  const openNow = isOpenChat(ref);
 
   const existingRow = findKnownConversationByRef(ref, msg);
   const previousUnread = unreadFromRow(existingRow);
 
+  const rawUnread =
+    msg?.novas ??
+    msg?.unread_count ??
+    msg?.unread ??
+    msg?.nao_lidas ??
+    msg?.naoLidas ??
+    msg?.qtd_nao_lidas ??
+    msg?.qtdNaoLidas ??
+    null;
+
+  const explicitUnread = Number(rawUnread);
+  const hasExplicitUnread =
+    rawUnread !== null &&
+    rawUnread !== undefined &&
+    Number.isFinite(explicitUnread) &&
+    explicitUnread >= 0;
+
   /*
     Regra:
+    - mensagem enviada por atendente: não mostra bolinha
     - conversa aberta: não mostra bolinha
-    - conversa fechada: soma +1
+    - conversa fechada: usa contador real do backend; se não vier, soma +1
   */
-  const unread = isOutgoing || openNow ? 0 : previousUnread + 1;
+  const unread =
+    openNow
+      ? 0
+      : isOutgoing
+        // Mensagem de saída/automática NÃO pode apagar contador de conversa fechada.
+        // Ela só muda preview/hora. Quem limpa bolha é abrir conversa ou marcar como lida.
+        ? previousUnread
+        : hasExplicitUnread
+          ? explicitUnread
+          : previousUnread + 1;
 
   const patch = {
     ultima_mensagem: text,
@@ -1465,7 +1719,33 @@ function bumpPreview(convKey, msg, inst = null) {
   const finalKey = getConversationIdFromRow(updated) || ref.key;
 
   try {
+    scheduleForceUnreadBadgeDom(finalKey, unread, {
+      ...patch,
+      conversation_key: finalKey,
+      conversation_id: finalKey,
+      kind: ref.kind,
+      entity_id: ref.entityId,
+      cliente_id: ref.kind === 'c' ? ref.entityId : patch?.cliente_id,
+      grupo_id: ref.kind === 'g' ? ref.entityId : patch?.grupo_id,
+      instancia_id: ref.instId,
+    });
+  } catch {}
+
+  try {
     window.Lista?.updatePreview?.(finalKey, patch);
+  } catch {}
+
+  try {
+    scheduleForceUnreadBadgeDom(finalKey, unread, {
+      ...patch,
+      conversation_key: finalKey,
+      conversation_id: finalKey,
+      kind: ref.kind,
+      entity_id: ref.entityId,
+      cliente_id: ref.kind === 'c' ? ref.entityId : patch?.cliente_id,
+      grupo_id: ref.kind === 'g' ? ref.entityId : patch?.grupo_id,
+      instancia_id: ref.instId,
+    });
   } catch {}
 
   try {
@@ -1704,7 +1984,9 @@ function handleAckGeneric(data) {
   const key = ref?.key || null;
 
   try {
-    updateAck(msgId, ack, key || undefined);
+    if (key) {
+      updateAck(key, msgId, ack, ref?.instId || pickInstanciaFromAny(data));
+    }
   } catch {}
 
   try {
@@ -1789,8 +2071,6 @@ function handleDeleteMensagem(data) {
 ========================================================= */
 
 function handleNovaMensagem(data) {
-  if (shouldSkipDuplicateLiveMessage(data)) return;
-
   const incomingRef = normalizeIncomingConversationRef(data);
 
   if (!incomingRef?.key || !incomingRef?.kind || !incomingRef?.entityId || !incomingRef?.instId) {
@@ -1878,8 +2158,7 @@ function handleNovaMensagem(data) {
     return;
   }
 
-  const openNow = (Boolean(openRefDirect) || isOpenChat(knownRef) || knownRef.from === 'open' || knownRef.from === 'open-phone');
-  const visualizedNow = openNow && isPageActuallyVisible();
+  const openNow = Boolean(openRefDirect) || isOpenChat(knownRef) || knownRef.from === 'open' || knownRef.from === 'open-phone';
 
   const text = pickText(data);
   const msgId = pickMsgId(data);
@@ -1921,6 +2200,18 @@ function handleNovaMensagem(data) {
 
   const updated = bumpPreview(knownRef, normalizedPayload, knownRef.instId);
 
+  try {
+    const explicitUnread = unreadFromRow(normalizedPayload);
+    const existingUnread = unreadFromRow(findKnownConversationByRef(knownRef, normalizedPayload));
+    const fallbackUnread = existingUnread > 0 ? existingUnread : explicitUnread;
+
+    if (!openNow) {
+      scheduleForceUnreadBadgeDom(knownRef, fallbackUnread, normalizedPayload);
+    } else {
+      scheduleForceUnreadBadgeDom(knownRef, 0, normalizedPayload);
+    }
+  } catch {}
+
   dispatchRealtimeMessageEvents(normalizedPayload);
 
   /*
@@ -1938,13 +2229,16 @@ function handleNovaMensagem(data) {
     return;
   }
 
-  if (visualizedNow) {
+  if (openNow) {
     try {
-      renderOpenConversationFromWs(knownRef);
+      // Conversa aberta: nunca deixa bolha pendurada na lista lateral.
+      try { marcarLidas(knownRef.key, knownRef.instId); } catch {}
+      try { window.Lista?.resetUnread?.(knownRef.key); } catch {}
+      try { window.zcClearUnreadBadge?.(knownRef.key); } catch {}
+      try { window.recomputeUnread?.(); } catch {}
+      try { window.zcScheduleMarkChatAsSeen?.(knownRef.key, normalizedPayload, { delay: 700 }); } catch {}
 
-      try {
-        marcarLidas(knownRef.key);
-      } catch {}
+      renderOpenConversationFromWs(knownRef);
 
       try {
         if (knownRef.kind === 'c' && knownRef.entityId) {
@@ -1961,7 +2255,7 @@ function handleNovaMensagem(data) {
       if (DEBUG_WS) console.warn('[WS MSG][render falhou]', e);
     }
   } else if (DEBUG_WS) {
-    console.debug(openNow ? '[WS MSG][aberto mas não visualizado - mantém bolha]' : '[WS MSG][não aberto - só preview/badge]', {
+    console.debug('[WS MSG][não aberto - só preview/badge]', {
       incoming: knownRef.key,
       open: getOpenContext()?.key,
       data: normalizedPayload,
@@ -1969,6 +2263,51 @@ function handleNovaMensagem(data) {
   }
 
   notifyNewMessage(normalizedPayload, knownRef.key);
+
+  try {
+    const outgoingPayload =
+      normalizedPayload?.from_me === true ||
+      normalizedPayload?.fromMe === true ||
+      normalizedPayload?.tipo === 'saida' ||
+      normalizedPayload?.origem === 'atendente';
+
+    const rowAfter = findKnownConversationByRef(knownRef, normalizedPayload);
+    const currentUnread = unreadFromRow(rowAfter);
+
+    const rawUnreadFinal =
+      normalizedPayload?.novas ??
+      normalizedPayload?.unread_count ??
+      normalizedPayload?.unread ??
+      normalizedPayload?.nao_lidas ??
+      normalizedPayload?.naoLidas ??
+      normalizedPayload?.qtd_nao_lidas ??
+      normalizedPayload?.qtdNaoLidas ??
+      null;
+
+    const explicitFinal = Number(rawUnreadFinal);
+    const hasExplicitFinal =
+      rawUnreadFinal !== null &&
+      rawUnreadFinal !== undefined &&
+      Number.isFinite(explicitFinal) &&
+      explicitFinal >= 0;
+
+    const deltaFinal = Number(
+      normalizedPayload?.unreadDelta ??
+      normalizedPayload?.unread_delta ??
+      normalizedPayload?.unreadIncrement ??
+      0
+    );
+
+    const finalBadgeUnread = openNow
+      ? 0
+      : outgoingPayload
+        ? currentUnread
+        : hasExplicitFinal
+          ? explicitFinal
+          : Math.max(0, currentUnread + (Number.isFinite(deltaFinal) ? deltaFinal : 1));
+
+    scheduleForceUnreadBadgeDom(knownRef, finalBadgeUnread, normalizedPayload);
+  } catch {}
 
   if (DEBUG_WS) {
     console.debug('[WS MSG]', {
@@ -2524,6 +2863,11 @@ try {
       } catch {}
     });
   }
+} catch {}
+
+try {
+  window.zcForceUnreadBadgeDom = forceUnreadBadgeDom;
+  window.zcScheduleForceUnreadBadgeDom = scheduleForceUnreadBadgeDom;
 } catch {}
 
 export {

@@ -103,6 +103,27 @@ function unreadFromAny(src) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+function hasExplicitUnreadAny(src) {
+  if (!src || typeof src !== 'object') return false;
+
+  const keys = [
+    'novas',
+    'unread_count',
+    'unread',
+    'nao_lidas',
+    'naoLidas',
+    'qtd_nao_lidas',
+    'qtdNaoLidas',
+  ];
+
+  return keys.some((k) => {
+    if (!Object.prototype.hasOwnProperty.call(src, k)) return false;
+    const v = src[k];
+    if (v === undefined || v === null) return false;
+    return String(v).trim() !== '';
+  });
+}
+
 /* =========================================================
    Nome oficial
    ========================================================= */
@@ -1501,12 +1522,15 @@ function mergeConversaCanonica(novo, antigo) {
       n.last_ack = Math.max(Number(n.last_ack || 0), Number(a.last_ack || 0));
     }
 
-    if (temValor(a.novas) && (Number(n.novas) || 0) === 0) {
+    if (!hasExplicitUnreadAny(novo) && temValor(a.novas) && (Number(n.novas) || 0) === 0) {
       const u = unreadFromAny(a);
       n.novas = u;
       n.unread = u;
       n.unread_count = u;
       n.nao_lidas = u;
+      n.naoLidas = u;
+      n.qtd_nao_lidas = u;
+      n.qtdNaoLidas = u;
     }
 
     if (temValor(a.hora)) n.hora = a.hora;
@@ -1519,12 +1543,15 @@ function mergeConversaCanonica(novo, antigo) {
       n.last_msg = a.ultima_mensagem;
     }
 
-    if (temValor(a?.novas) && (Number(n.novas) || 0) === 0) {
+    if (!hasExplicitUnreadAny(novo) && temValor(a?.novas) && (Number(n.novas) || 0) === 0) {
       const u = unreadFromAny(a);
       n.novas = u;
       n.unread = u;
       n.unread_count = u;
       n.nao_lidas = u;
+      n.naoLidas = u;
+      n.qtd_nao_lidas = u;
+      n.qtdNaoLidas = u;
     }
   }
 
@@ -2815,7 +2842,11 @@ if (!window.Lista) {
       c.unread = 0;
       c.unread_count = 0;
       c.nao_lidas = 0;
+      c.naoLidas = 0;
+      c.qtd_nao_lidas = 0;
+      c.qtdNaoLidas = 0;
 
+      try { persist(); } catch {}
       _reRender();
     },
 
@@ -3051,6 +3082,120 @@ if (!window.Lista) {
   L.setMeta = function (cid, meta) {
     try { updatePreviewInline(cid, meta || {}); } catch {}
     return prevSetMeta ? prevSetMeta(cid, meta) : undefined;
+  };
+})();
+
+
+/* =========================================================
+   LIMPAR BOLHA AO ABRIR CONVERSA
+   - Corrige o caso em que a conversa abre, mas o merge preserva o contador antigo.
+   - Limpa state + DOM imediatamente.
+   ========================================================= */
+(function () {
+  'use strict';
+
+  function safeCss(v) {
+    const s = String(v || '');
+    try { return CSS.escape(s); } catch { return s.replace(/"/g, '\\"'); }
+  }
+
+  function clearUnreadInline(clienteId) {
+    const key = String(convKeyOf(clienteId) || '');
+    if (!key) return;
+
+    const safeKey = safeCss(key);
+    const li =
+      document.querySelector(`li.chat-item[data-id="${safeKey}"]`) ||
+      document.querySelector(`li.cliente-item[data-id="${safeKey}"]`) ||
+      document.getElementById(`chat-${key}`);
+
+    if (!li) return;
+
+    li.dataset.novas = '0';
+    li.dataset.unread = '0';
+    li.dataset.unreadCount = '0';
+    li.dataset.isUnread = '0';
+    li.classList.remove('has-unread');
+
+    li.querySelectorAll('.zc-unread-badge, .unread-badge, .badge, .unread, .conv-badge, .wpp-badge, [data-unread]').forEach((el) => {
+      el.textContent = '';
+      el.hidden = true;
+      el.setAttribute('hidden', '');
+      el.style.display = 'none';
+      el.style.visibility = 'hidden';
+      el.style.opacity = '0';
+    });
+  }
+
+  function clearOne(c) {
+    if (!c) return c;
+    c.novas = 0;
+    c.unread = 0;
+    c.unread_count = 0;
+    c.nao_lidas = 0;
+    c.naoLidas = 0;
+    c.qtd_nao_lidas = 0;
+    c.qtdNaoLidas = 0;
+    c.__seen_local = true;
+    c.__unread_cleared = true;
+    return c;
+  }
+
+  function clearUnreadState(clienteId) {
+    const key = String(convKeyOf(clienteId) || '');
+    if (!key) return;
+
+    try {
+      state.clientesCache = (Array.isArray(state.clientesCache) ? state.clientesCache : []).map((c) => {
+        return idEq(convKeyOf(c), key) ? clearOne({ ...c }) : c;
+      });
+    } catch {}
+
+    try {
+      Object.keys(state.convsByInst || {}).forEach((boxKey) => {
+        const box = state.convsByInst[boxKey] || {};
+        const items = Array.isArray(box.items) ? box.items : [];
+        let changed = false;
+
+        const nextItems = items.map((c) => {
+          if (!idEq(convKeyOf(c), key)) return c;
+          changed = true;
+          return clearOne({ ...c });
+        });
+
+        if (changed) {
+          state.convsByInst[boxKey] = {
+            ...box,
+            items: nextItems,
+            ts: Date.now(),
+          };
+        }
+      });
+    } catch {}
+
+    try { persist(); } catch {}
+  }
+
+  window.zcClearUnreadBadge = function (cid) {
+    try { clearUnreadState(cid); } catch {}
+    try { clearUnreadInline(cid); } catch {}
+    try { window.recomputeUnread?.(); } catch {}
+  };
+
+  const L = (window.Lista = window.Lista || {});
+  const prevResetUnread = typeof L.resetUnread === 'function' ? L.resetUnread.bind(L) : null;
+
+  L.resetUnread = function (cid) {
+    try { clearUnreadState(cid); } catch {}
+    try { clearUnreadInline(cid); } catch {}
+
+    const ret = prevResetUnread ? prevResetUnread(cid) : undefined;
+
+    try { clearUnreadState(cid); } catch {}
+    try { clearUnreadInline(cid); } catch {}
+    try { window.recomputeUnread?.(); } catch {}
+
+    return ret;
   };
 })();
 

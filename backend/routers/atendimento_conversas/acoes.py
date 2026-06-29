@@ -89,6 +89,85 @@ def _empresa_id_segura(identity, empresa_id_payload: Optional[int] = None) -> in
     return int(emp_real)
 
 
+
+
+def _claim_single_responsavel(db: Session, *, atendimento, colaborador_id: int):
+    """
+    Modelo por departamento: quem clicar em Atender primeiro assume.
+    Mantém no máximo um participante ativo/responsável para esse atendimento.
+    """
+    if not _participant_feature_enabled(db):
+        return None
+
+    AP = models.AtendimentoParticipante
+    atendimento_id = int(getattr(atendimento, "id"))
+    empresa_id = int(getattr(atendimento, "empresa_id"))
+
+    # Desativa qualquer participante anterior diferente do novo responsável.
+    rows = (
+        db.query(AP)
+        .filter(
+            AP.empresa_id == empresa_id,
+            AP.atendimento_id == atendimento_id,
+        )
+        .all()
+    )
+
+    for row in rows:
+        rid = _to_int(getattr(row, "colaborador_id", None))
+
+        if rid != int(colaborador_id):
+            if hasattr(row, "is_ativo"):
+                row.is_ativo = False
+            if hasattr(row, "is_responsavel"):
+                row.is_responsavel = False
+            db.add(row)
+
+    row = _upsert_participante_ativo(
+        db,
+        atendimento=atendimento,
+        colaborador_id=int(colaborador_id),
+    )
+
+    if row is not None and hasattr(row, "is_responsavel"):
+        row.is_responsavel = True
+        db.add(row)
+
+    return row
+
+
+def _department_claim_enabled(atendimento) -> bool:
+    try:
+        return getattr(atendimento, "departamento_id", None) is not None
+    except Exception:
+        return False
+
+
+def _claim_mode_payload(part_info: Dict[str, Any], atendimento, current_colab_id: Optional[int]) -> Dict[str, Any]:
+    """Campos extras para o front diferenciar fila antiga de Atender por departamento."""
+    dep_claim = _department_claim_enabled(atendimento)
+    if not dep_claim:
+        return {}
+
+    operador_id = _to_int(getattr(atendimento, "operador_id", None))
+    colab_id = _to_int(current_colab_id)
+    assigned_to_me = bool(operador_id is not None and colab_id is not None and operador_id == colab_id)
+    waiting = operador_id is None
+
+    return {
+        "claim_mode": "departamento",
+        "departamento_claim": True,
+        "exigir_aceite": True,
+        "aceite_obrigatorio": True,
+        "aguardando_aceite": bool(waiting or not assigned_to_me),
+        "pode_aceitar": bool(waiting and colab_id is not None),
+        "pode_liberar": bool(assigned_to_me),
+        "pode_responder": bool(assigned_to_me or colab_id is None),
+        "aceita_por_mim": bool(assigned_to_me),
+        "accepted_by_me": bool(assigned_to_me),
+        "accepted_by_anyone": bool(operador_id is not None),
+    }
+
 # =========================================================
 # POST /conversas/{cliente_id}/aceitar
 # =========================================================
@@ -231,68 +310,42 @@ def aceitar_conversa(
     ):
         atd.departamento_id = getattr(cliente, "departamento_id", None)
 
-    already_accepted = False
+    operador_atual = (
+        getattr(atd, "operador_id", None)
+        if hasattr(atd, "operador_id")
+        else None
+    )
 
-    if _participant_feature_enabled(db):
-        active_before = _active_participants_snapshot_map(
-            db,
-            empresa_id=int(empresa_id),
-            atendimento_ids=[int(atd.id)],
-        ).get(int(atd.id), [])
+    status_atual = (
+        _status_to_str(getattr(atd, "status", None))
+        if hasattr(atd, "status")
+        else None
+    )
 
-        already_accepted = any(
-            int(p["colaborador_id"]) == int(colab_id)
-            for p in active_before
-            if p.get("colaborador_id") is not None
+    if operador_atual is not None and int(operador_atual) != int(colab_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Esse atendimento já foi assumido por outro colaborador",
         )
 
-        _upsert_participante_ativo(
+    already_accepted = (
+        operador_atual is not None
+        and int(operador_atual) == int(colab_id)
+        and status_atual == "em_atendimento"
+    )
+
+    if _participant_feature_enabled(db):
+        _claim_single_responsavel(
             db,
             atendimento=atd,
             colaborador_id=int(colab_id),
         )
 
-        preferred = getattr(atd, "operador_id", None) if hasattr(atd, "operador_id") else None
+    if hasattr(atd, "operador_id"):
+        atd.operador_id = int(colab_id)
 
-        if preferred is None:
-            preferred = int(colab_id)
-
-        _sync_atendimento_from_participants(
-            db,
-            atendimento=atd,
-            preferred_responsavel_id=_to_int(preferred),
-        )
-
-    else:
-        operador_atual = (
-            getattr(atd, "operador_id", None)
-            if hasattr(atd, "operador_id")
-            else None
-        )
-
-        status_atual = (
-            _status_to_str(getattr(atd, "status", None))
-            if hasattr(atd, "status")
-            else None
-        )
-
-        if operador_atual is not None and int(operador_atual) != int(colab_id):
-            raise HTTPException(
-                status_code=409,
-                detail="Essa conversa já foi aceita por outro colaborador",
-            )
-
-        already_accepted = (
-            operador_atual is not None
-            and int(operador_atual) == int(colab_id)
-            and status_atual == "em_atendimento"
-        )
-
-        if hasattr(atd, "operador_id"):
-            atd.operador_id = int(colab_id)
-
-        if hasattr(atd, "status"):
-            atd.status = STATUS_EM_ATENDIMENTO
+    if hasattr(atd, "status"):
+        atd.status = STATUS_EM_ATENDIMENTO
 
     db.add(atd)
     db.commit()
@@ -345,6 +398,7 @@ def aceitar_conversa(
         "pode_aceitar": part_info["pode_aceitar"],
         "pode_liberar": part_info["pode_liberar"],
         "pode_responder": part_info.get("pode_responder", True),
+        **_claim_mode_payload(part_info, atd, int(colab_id)),
     }
 
 
@@ -529,6 +583,7 @@ def liberar_conversa(
         "pode_aceitar": part_info["pode_aceitar"],
         "pode_liberar": part_info["pode_liberar"],
         "pode_responder": part_info.get("pode_responder", True),
+        **_claim_mode_payload(part_info, atd, int(colab_id)),
     }
 
 
@@ -738,4 +793,5 @@ def transferir_colaborador(
         "pode_aceitar": part_info["pode_aceitar"],
         "pode_liberar": part_info["pode_liberar"],
         "pode_responder": part_info.get("pode_responder", True),
+        **_claim_mode_payload(part_info, atd, current_colab_id),
     }

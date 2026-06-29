@@ -1,128 +1,113 @@
-from datetime import datetime
-import pytz
-from backend import models
-import requests
-from fastapi import HTTPException
-from dotenv import load_dotenv
+# backend/atendimentobot.py
+from __future__ import annotations
+
 import os
+import re
+from typing import Any, Dict
+
+from dotenv import load_dotenv
+from fastapi import HTTPException
+
+from backend import models
 
 load_dotenv()
 
-# Configurações da Evolution API
+# Mantido apenas para não quebrar imports antigos.
+# Não use este arquivo para disparar chatbot novo.
 EVOLUTION_URL = os.getenv("EVOLUTION_URL")
 EVOLUTION_APIKEY = os.getenv("EVOLUTION_APIKEY")
 HEADERS = {"apikey": EVOLUTION_APIKEY, "Content-Type": "application/json"} if EVOLUTION_APIKEY else {}
 
-
 MENU_SETORES = "*Atendimento ZapsChat 🤖*\nDigite o número do setor desejado:\n\n"
 
-async def enviar_menu_se_novo_ou_24h(db, empresa, cliente, conexoes_ativas, HEADERS, EVOLUTION_URL):
-    agora = datetime.now(pytz.timezone("America/Sao_Paulo"))
-    
-    # Verificar se é a primeira mensagem do cliente
-    ultima_entrada = db.query(models.Mensagem).filter_by(cliente_id=cliente.id, tipo="entrada").order_by(models.Mensagem.timestamp.desc()).first()
-    
-    if not ultima_entrada:  # Primeira mensagem do cliente
-        # Buscar setores da empresa
-        setores = db.query(models.Setor).filter_by(empresa_id=empresa.id).all()
-        
-        if not setores:
-            return "Nenhum setor cadastrado para esta empresa."
-        
-        # Montar menu dinâmico de setores
-        menu_seletor = MENU_SETORES
-        for index, setor in enumerate(setores, 1):
-            menu_seletor += f"{index}️⃣ {setor.nome}\n"
-        
-        # Salvar mensagem no banco
-        msg = models.Mensagem(
-            empresa_id=empresa.id,
-            cliente_id=cliente.id,
-            conteudo=menu_seletor,
-            tipo="saida",
-            lida=True,
-            timestamp=agora.replace(tzinfo=None)
-        )
-        db.add(msg)
-        db.commit()
 
-        # Enviar para o Evolution (API)
-        if empresa.instance_name and HEADERS:
-            try:
-                r = requests.post(
-                    f"{EVOLUTION_URL}/message/sendText/{empresa.instance_name}",
-                    json={"number": cliente.telefone, "text": menu_seletor},
-                    headers=HEADERS, timeout=10
-                )
-                print("[BOT] Enviado via Evolution:", r.status_code)
-            except Exception as e:
-                print("[BOT] Falha no envio Evolution:", e)
-
-        # Enviar a mensagem para o painel do atendente via WebSocket
-        await conexoes_ativas.send_message(
-            f"emp:{empresa.id}",
-            {
-                "empresa_id": empresa.id,
-                "cliente_id": cliente.id,
-                "telefone": cliente.telefone,
-                "avatar_url": cliente.avatar_url,
-                "mensagem": menu_seletor,
-                "tipo": "saida",
-                "origem": "bot",
-                "timestamp": msg.timestamp.isoformat()
-            }
-        )
+def _digits(s: str) -> str:
+    return re.sub(r"\D", "", s or "")
 
 
-# Função que processa a resposta do cliente e redireciona para o atendente
-async def redirecionar_para_atendente(db, empresa, cliente, setor_id, conexoes_ativas):
-    # Buscar setor escolhido
+def _remote_jid_from_cliente(cliente) -> str:
+    tel = _digits(str(getattr(cliente, "telefone", "") or ""))
+    if len(tel) == 11 and not tel.startswith("55"):
+        tel = "55" + tel
+    return f"{tel}@s.whatsapp.net" if tel else ""
+
+
+def _resolve_instancia_id(db, empresa, cliente) -> int:
+    try:
+        if getattr(cliente, "instancia_id", None):
+            return int(cliente.instancia_id)
+    except Exception:
+        pass
+
+    instance_name = str(
+        getattr(empresa, "instance_name", None)
+        or getattr(empresa, "instancia_nome", None)
+        or ""
+    ).strip()
+
+    if not instance_name:
+        return 0
+
+    try:
+        from backend.routers.chatbot_setores import _resolve_emp_inst_from_instance_name
+
+        inst_id, emp_id = _resolve_emp_inst_from_instance_name(db, instance_name)
+        if int(emp_id or 0) == int(getattr(empresa, "id", 0) or 0):
+            return int(inst_id or 0)
+    except Exception:
+        return 0
+
+    return 0
+
+
+async def enviar_menu_se_novo_ou_24h(db, empresa, cliente, conexoes_ativas=None, HEADERS=None, EVOLUTION_URL=None):
+    """
+    Compatibilidade com código antigo.
+
+    Antes esta função enviava menu direto pela Evolution sem olhar a tela do chatbot.
+    Agora ela delega para o runtime novo, que só envia se chatbot_configs.ativo=True
+    e se o modo por departamento estiver realmente ligado para a instância.
+    """
+    try:
+        from backend.routers.chatbot_setores import triagem_handle_inbound
+    except Exception:
+        return {"ok": True, "action": "noop_legacy_runtime_unavailable"}
+
+    empresa_id = int(getattr(empresa, "id", 0) or 0)
+    instancia_id = _resolve_instancia_id(db, empresa, cliente)
+    telefone = _digits(str(getattr(cliente, "telefone", "") or ""))
+
+    if not empresa_id or not instancia_id or not telefone:
+        return {"ok": True, "action": "noop_legacy_invalid"}
+
+    return triagem_handle_inbound(
+        db,
+        empresa_id=empresa_id,
+        instancia_id=instancia_id,
+        telefone_digits=telefone,
+        texto="oi",
+        direction="entrada",
+        remote_jid=_remote_jid_from_cliente(cliente),
+    )
+
+
+async def redirecionar_para_atendente(db, empresa, cliente, setor_id, conexoes_ativas=None):
+    """
+    Compatibilidade com fluxo velho de setores.
+    O fluxo novo usa departamentos/filas pelo backend.routers.chatbot_setores.
+    """
     setor = db.query(models.Setor).filter_by(id=setor_id, empresa_id=empresa.id).first()
-    
     if not setor:
         raise HTTPException(status_code=404, detail="Setor não encontrado")
-    
-    # Buscar o colaborador responsável pelo setor
+
     colaborador = db.query(models.Colaborador).filter_by(setor_id=setor.id).first()
-    
     if not colaborador:
         raise HTTPException(status_code=404, detail="Colaborador não encontrado para o setor.")
-    
-    # Redirecionar a conversa para o colaborador
-    msg = models.Mensagem(
-        empresa_id=empresa.id,
-        cliente_id=cliente.id,
-        conteudo=f"Você foi redirecionado para o setor {setor.nome}, atendido por {colaborador.nome}.",
-        tipo="saida",
-        lida=True,
-        timestamp=datetime.now(pytz.timezone("America/Sao_Paulo")).replace(tzinfo=None)
-    )
-    db.add(msg)
-    db.commit()
 
-    # Enviar para o Evolution (API) ou painel de atendimento
-    if empresa.instance_name and HEADERS:
-        try:
-            r = requests.post(
-                f"{EVOLUTION_URL}/message/sendText/{empresa.instance_name}",
-                json={"number": cliente.telefone, "text": msg.conteudo},
-                headers=HEADERS, timeout=10
-            )
-            print("[BOT] Enviado via Evolution:", r.status_code)
-        except Exception as e:
-            print("[BOT] Falha no envio Evolution:", e)
-
-    # Enviar a mensagem para o painel do atendente via WebSocket
-    await conexoes_ativas.send_message(
-        f"emp:{empresa.id}",
-        {
-            "empresa_id": empresa.id,
-            "cliente_id": cliente.id,
-            "telefone": cliente.telefone,
-            "avatar_url": cliente.avatar_url,
-            "mensagem": msg.conteudo,
-            "tipo": "saida",
-            "origem": "bot",
-            "timestamp": msg.timestamp.isoformat()
-        }
-    )
+    # Não envia mensagem pela Evolution aqui. Evita disparo fantasma do bot antigo.
+    return {
+        "ok": True,
+        "action": "legacy_redirect_no_send",
+        "setor_id": int(setor.id),
+        "colaborador_id": int(colaborador.id),
+    }

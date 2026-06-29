@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from backend import models
@@ -2162,8 +2163,74 @@ async def on_messages_upsert(inst_id: str, data):
                         )
 
                     try:
-                        with SessionLocal() as db_ws:
-                            cliente = _fetch_cliente(db_ws, cli_id)
+                        # V16: contador da bolha verde no tempo real.
+                        #
+                        # Problema observado:
+                        # - a mensagem nova chegava no front;
+                        # - o preview da conversa atualizava;
+                        # - mas a bolha não subia de 2 para 3.
+                        #
+                        # Regra:
+                        # - mensagem de saída nunca aumenta bolha;
+                        # - mensagem de entrada envia contador explícito do banco;
+                        # - se o contador falhar por sessão/cache/transação, envia unreadDelta=1
+                        #   para o front conseguir somar no contador atual da lista.
+                        cliente = None
+                        unread_count_live = 0
+
+                        try:
+                            with SessionLocal() as db_ws:
+                                cliente = _fetch_cliente(db_ws, cli_id)
+
+                                if not from_me:
+                                    unread_count_live = int(
+                                        db_ws.query(func.count(models.Mensagem.id))
+                                        .filter(
+                                            models.Mensagem.empresa_id == int(empresa_id),
+                                            models.Mensagem.cliente_id == int(cli_id),
+                                            models.Mensagem.instancia_id == int(inst.id),
+                                            models.Mensagem.tipo == "entrada",
+                                            models.Mensagem.lida.isnot(True),
+                                        )
+                                        .scalar()
+                                        or 0
+                                    )
+                        except Exception as e:
+                            LOG(
+                                f"[UPsert][ws][unread-count-session-erro] "
+                                f"emp={empresa_id} cli={cli_id} inst={getattr(inst, 'id', None)} err={e}"
+                            )
+
+                        if not from_me and unread_count_live <= 0:
+                            try:
+                                # Fallback usando a sessão principal.
+                                # Normalmente a mensagem já foi commitada antes deste bloco,
+                                # mas esse fallback evita bolha zerada se a sessão nova falhar.
+                                unread_count_live = int(
+                                    db.query(func.count(models.Mensagem.id))
+                                    .filter(
+                                        models.Mensagem.empresa_id == int(empresa_id),
+                                        models.Mensagem.cliente_id == int(cli_id),
+                                        models.Mensagem.instancia_id == int(inst.id),
+                                        models.Mensagem.tipo == "entrada",
+                                        models.Mensagem.lida.isnot(True),
+                                    )
+                                    .scalar()
+                                    or 0
+                                )
+                            except Exception as e:
+                                LOG(
+                                    f"[UPsert][ws][unread-count-main-erro] "
+                                    f"emp={empresa_id} cli={cli_id} inst={getattr(inst, 'id', None)} err={e}"
+                                )
+
+                        if not from_me and unread_count_live <= 0:
+                            # Última proteção: como entrou uma mensagem recebida agora,
+                            # o front pelo menos precisa somar +1.
+                            unread_count_live = 1
+
+                        unread_payload = 0 if from_me else int(unread_count_live or 1)
+                        unread_delta_payload = 0 if from_me else 1
 
                         conv_key_cliente = f"c:{int(cli_id)}:{int(inst.id or 0)}"
 
@@ -2206,9 +2273,30 @@ async def on_messages_upsert(inst_id: str, data):
                             "msg_id": (str(msg_id) if msg_id else (str(msg_db_id) if msg_db_id else None)),
                             "ack": (ack_value if from_me else None),
 
+                            # Contador explícito para a bolha verde.
+                            "novas": unread_payload,
+                            "unread": unread_payload,
+                            "unread_count": unread_payload,
+                            "nao_lidas": unread_payload,
+                            "naoLidas": unread_payload,
+                            "qtd_nao_lidas": unread_payload,
+                            "qtdNaoLidas": unread_payload,
+
+                            # Fallback para o front: se algum handler ignorar o contador
+                            # explícito, ele ainda consegue somar +1 no valor atual.
+                            "unreadDelta": unread_delta_payload,
+                            "unread_delta": unread_delta_payload,
+                            "unreadIncrement": unread_delta_payload,
+
                             "midias": [],
                             "serverTimestamp": _server_ts_ms(),
                         }
+
+                        LOG(
+                            f"[UPsert][ws][payload] emp={empresa_id} cli={cli_id} "
+                            f"inst={getattr(inst, 'id', None)} from_me={from_me} "
+                            f"unread={unread_payload} delta={unread_delta_payload} msg_id={msg_id}"
+                        )
 
                         if _ws_emit_messages_enabled():
                             await conexoes_ativas.send_message(f"emp:{empresa_id}", ws_payload)

@@ -123,6 +123,128 @@
     );
   }
 
+  function getOutgoingAuthorName(m) {
+    const raw = (
+      m?.autor_nome ||
+      m?.enviado_por_nome ||
+      m?.colaborador_nome ||
+      m?.atendente_nome ||
+      m?.sender_name ||
+      m?.user_nome ||
+      m?.operador_nome ||
+      ''
+    );
+
+    const name = String(raw || '').trim();
+    if (name && !['null', 'undefined', 'nan'].includes(name.toLowerCase())) {
+      return name;
+    }
+
+    const msgId = getMessageId(m).toLowerCase();
+    const origem = String(m?.origem || m?.origin || m?.source || '').trim().toLowerCase();
+    if (msgId.startsWith('bot:') || origem === 'bot' || origem === 'chatbot') {
+      return 'Bot';
+    }
+
+    // Saída sem colaborador identificado = mensagem enviada fora do ZapsChat,
+    // normalmente direto pelo WhatsApp/celular conectado.
+    // Não inventamos atendente; exibimos uma origem neutra e clara.
+    return 'WhatsApp';
+  }
+
+  function normalizeAuthorKey(name) {
+    try {
+      return String(name || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ');
+    } catch {
+      return String(name || '').trim().toLowerCase();
+    }
+  }
+
+  function getAuthorFirstName(name) {
+    const full = String(name || '').trim().replace(/\s+/g, ' ');
+    if (!full) return '';
+
+    const first = full.split(' ')[0] || full;
+    if (!first) return '';
+
+    return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+  }
+
+  function applyOutgoingAuthorGrouping(root) {
+    try {
+      const scope = root || document;
+      const nodes = Array.from(scope.querySelectorAll('.zc-day-divider, .msg-row'));
+      let lastDir = '';
+      let lastAuthorKey = '';
+
+      for (const node of nodes) {
+        if (node?.matches?.('.zc-day-divider')) {
+          lastDir = '';
+          lastAuthorKey = '';
+          continue;
+        }
+
+        const row = node;
+        const bubble = row.querySelector?.('.bubble');
+        const authorEl = bubble?.querySelector?.('.zc-msg-author');
+        const isOut =
+          row.classList?.contains('msg-sent') ||
+          bubble?.classList?.contains('bubble-out') ||
+          row.dataset?.fromMe === '1' ||
+          bubble?.dataset?.fromMe === '1';
+
+        if (!isOut) {
+          lastDir = 'in';
+          lastAuthorKey = '';
+          continue;
+        }
+
+        if (!authorEl) {
+          lastDir = 'out';
+          lastAuthorKey = '';
+          continue;
+        }
+
+        const rawName = (
+          row.dataset?.authorName ||
+          bubble?.dataset?.authorName ||
+          authorEl.getAttribute('title') ||
+          authorEl.textContent ||
+          ''
+        );
+        const key = row.dataset?.authorKey || bubble?.dataset?.authorKey || normalizeAuthorKey(rawName);
+
+        if (!key) {
+          authorEl.style.display = 'none';
+          bubble?.classList?.add('zc-author-hidden');
+          row.classList?.add('zc-author-repeated');
+          lastDir = 'out';
+          lastAuthorKey = '';
+          continue;
+        }
+
+        const repeated = lastDir === 'out' && lastAuthorKey === key;
+        row.classList?.toggle('zc-author-repeated', repeated);
+        bubble?.classList?.toggle('zc-author-hidden', repeated);
+        authorEl.style.display = repeated ? 'none' : '';
+
+        lastDir = 'out';
+        lastAuthorKey = key;
+      }
+    } catch {}
+  }
+
+  try {
+    window.ZCNormalizeAuthorKey = window.ZCNormalizeAuthorKey || normalizeAuthorKey;
+    window.ZCGetAuthorFirstName = window.ZCGetAuthorFirstName || getAuthorFirstName;
+    window.ZCApplyOutgoingAuthorGrouping = applyOutgoingAuthorGrouping;
+  } catch {}
+
   function collectMessageAttachments(m) {
     let anexos = [];
 
@@ -430,6 +552,14 @@
     const msgIdEsc = escapeHtml(msgId);
 
     const ackHtml = getAckHtml(m, msgIdEsc, isSaida);
+    const authorName = isSaida ? getOutgoingAuthorName(m) : '';
+    const authorLabel = authorName ? getAuthorFirstName(authorName) : '';
+    const authorKey = authorName ? normalizeAuthorKey(authorName) : '';
+    const authorNameEsc = escapeHtml(authorName);
+    const authorKeyEsc = escapeHtml(authorKey);
+    const authorHtml = authorLabel
+      ? `<div class="zc-msg-author zc-msg-author-out" title="${authorNameEsc}" data-author-key="${authorKeyEsc}">${escapeHtml(authorLabel)}</div>`
+      : '';
 
     const quotedData = buildQuotedRenderData(m);
     const quotedPreview = quotedData.quotedPreview;
@@ -470,17 +600,22 @@
       quotedPreview ? 'has-quoted' : '',
     ].filter(Boolean).join(' ');
 
+    const authorDataAttrs = authorKey
+      ? ` data-author-key="${authorKeyEsc}" data-author-name="${authorNameEsc}"`
+      : '';
+
     return `<div class="${rowClasses}"
       data-id="${msgIdEsc}"
       data-msg-id="${msgIdEsc}"
       data-message-id="${msgIdEsc}"
       data-wa-msg-id="${msgIdEsc}"
-      data-from-me="${isSaida ? '1' : '0'}"${quotedPreviewData}${quotedDataAttr}>
+      data-from-me="${isSaida ? '1' : '0'}"${authorDataAttrs}${quotedPreviewData}${quotedDataAttr}>
       <div class="${bubbleClasses}"
         data-msg-id="${msgIdEsc}"
         data-message-id="${msgIdEsc}"
         data-wa-msg-id="${msgIdEsc}"
-        data-from-me="${isSaida ? '1' : '0'}"${quotedPreviewData}${quotedDataAttr}>
+        data-from-me="${isSaida ? '1' : '0'}"${authorDataAttrs}${quotedPreviewData}${quotedDataAttr}>
+        ${authorHtml}
         ${quoteHtml}
         ${mediaHtml}
         ${textHtml}
@@ -497,6 +632,7 @@
     getMessageText,
     getMessageId,
     getMessageTimestamp,
+    getOutgoingAuthorName,
     collectMessageAttachments,
 
     getAckHtml,

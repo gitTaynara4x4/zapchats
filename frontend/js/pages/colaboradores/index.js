@@ -10,7 +10,7 @@ import { loadColaboradores, renderLista, startPoller, stopPoller, bindLista } fr
 import { bindModal } from './modal.js';
 
 import { initColaboradoresTabs } from './ui/tabs.js';
-import { initColaboradoresSelects } from './ui/selects.js';
+import { initColaboradoresSelects } from './ui/selects.js?v=colab-select-fix-1';
 
 let didInit = false;
 
@@ -72,3 +72,17 @@ export async function initColaboradoresPage(){
     releasePageLoader();
   }
 }
+
+// Auto-inicialização da página.
+// Sem isso o arquivo era carregado, mas nada ligava os cliques da tela.
+function bootColaboradoresPage(){
+  initColaboradoresPage();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootColaboradoresPage, { once: true });
+} else {
+  bootColaboradoresPage();
+}
+
+window.initColaboradoresPage = initColaboradoresPage;

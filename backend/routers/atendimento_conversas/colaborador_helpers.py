@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from typing import Optional, List, Any
+import re
+import unicodedata
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -15,6 +17,51 @@ from .utils import (
     _to_int,
     _id_get,
 )
+
+
+def _norm_dept_name(value: Any) -> str:
+    try:
+        txt = str(value or "").strip().lower()
+        if not txt:
+            return ""
+        txt = unicodedata.normalize("NFKD", txt)
+        txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+        txt = re.sub(r"^\s*\d+\s*[-–—.:/)]+\s*", "", txt)
+        txt = re.sub(r"[^a-z0-9]+", " ", txt)
+        txt = re.sub(r"\s+", " ", txt).strip()
+        return txt
+    except Exception:
+        return ""
+
+
+def _find_departamento_ids_by_fuzzy_name(
+    db: Session,
+    *,
+    empresa_id: int,
+    nome: Any,
+) -> List[int]:
+    alvo = _norm_dept_name(nome)
+    if not alvo:
+        return []
+    try:
+        rows = (
+            db.query(models.Departamento.id, models.Departamento.nome)
+            .filter(models.Departamento.empresa_id == int(empresa_id))
+            .all()
+        )
+    except Exception:
+        return []
+    out: List[int] = []
+    for dep_id, dep_nome in rows:
+        dep_norm = _norm_dept_name(dep_nome)
+        if dep_norm and (dep_norm == alvo or dep_norm.endswith(" " + alvo) or alvo.endswith(" " + dep_norm)):
+            try:
+                did = int(dep_id)
+                if did not in out:
+                    out.append(did)
+            except Exception:
+                pass
+    return out
 
 
 def _get_colab_id(identity: Any) -> Optional[int]:
@@ -723,19 +770,28 @@ def _fallback_departamentos_do_colaborador_por_setor(
             setor_nome = None
 
     if setor_nome:
-        dep_by_name = (
-            db.query(models.Departamento.id)
-            .filter(
-                models.Departamento.empresa_id == int(empresa_id),
-                func.lower(func.trim(models.Departamento.nome)) == func.lower(func.trim(str(setor_nome))),
-            )
-            .first()
-        )
-
-        if dep_by_name and dep_by_name[0] is not None:
-            dep_id = int(dep_by_name[0])
+        for dep_id in _find_departamento_ids_by_fuzzy_name(
+            db,
+            empresa_id=int(empresa_id),
+            nome=setor_nome,
+        ):
             if dep_id not in out:
                 out.append(dep_id)
+
+        if not out:
+            dep_by_name = (
+                db.query(models.Departamento.id)
+                .filter(
+                    models.Departamento.empresa_id == int(empresa_id),
+                    func.lower(func.trim(models.Departamento.nome)) == func.lower(func.trim(str(setor_nome))),
+                )
+                .first()
+            )
+
+            if dep_by_name and dep_by_name[0] is not None:
+                dep_id = int(dep_by_name[0])
+                if dep_id not in out:
+                    out.append(dep_id)
 
     return out
 

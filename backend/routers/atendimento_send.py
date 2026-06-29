@@ -464,7 +464,23 @@ def _ensure_sender_can_send_existing_cliente(
     if atendimento is None:
         return
 
-    # PONTO PRINCIPAL:
+    # Atendimento por departamento:
+    # se já existe departamento e o atendimento ainda não foi assumido,
+    # o colaborador precisa clicar em Atender antes de responder.
+    departamento_id = _to_int(getattr(atendimento, "departamento_id", None))
+    operador_id = _to_int(getattr(atendimento, "operador_id", None))
+    status_atd = str(getattr(atendimento, "status", "") or "").split(".")[-1].lower()
+
+    if departamento_id is not None:
+        if operador_id is None or status_atd in {"novo", "aguardando", "pendente"}:
+            raise HTTPException(409, "Clique em Atender antes de responder.")
+
+        if int(operador_id) != int(current_colab_id):
+            raise HTTPException(409, "Esse atendimento está com outro responsável.")
+
+        return
+
+    # PONTO PRINCIPAL legado:
     # só exige aceite se a fila escolhida exigir.
     exige_aceite = _atendimento_exige_aceite(db, atendimento=atendimento)
     if not exige_aceite:
@@ -996,7 +1012,8 @@ def _insert_msg_saida(
     msg_id: Optional[str],
     instancia_id: Optional[int],
     atendimento_id: Optional[int],
-    ack: int,
+    colaborador_id: Optional[int] = None,
+    ack: int = 0,
     quoted: Optional[Dict[str, Any]] = None,
     quoted_preview: Optional[Dict[str, Any]] = None,
 ) -> models.Mensagem:
@@ -1011,6 +1028,7 @@ def _insert_msg_saida(
         msg_id=msg_id,
         instancia_id=instancia_id,
         atendimento_id=atendimento_id,
+        colaborador_id=colaborador_id,
         quoted=quoted,
         quoted_preview=quoted_preview,
     )
@@ -1194,6 +1212,50 @@ def _identity_ctx(identity: Any) -> Tuple[int, Optional[str]]:
     return empresa_id, atendente_nome
 
 
+def _resolve_sender_display_name(
+    db: Session,
+    *,
+    identity: Any,
+    empresa_id: int,
+    colaborador_id: Optional[int],
+    fallback_nome: Optional[str] = None,
+) -> Optional[str]:
+    """Nome exibido em cima da bolha de saída.
+
+    Para colaborador, busca no banco para não depender do JWT ter nome.
+    Para admin/usuário sem colaborador, usa o nome/e-mail da sessão.
+    """
+    if colaborador_id is not None:
+        try:
+            row = (
+                db.query(models.Colaborador.nome)
+                .filter(
+                    models.Colaborador.id == int(colaborador_id),
+                    models.Colaborador.empresa_id == int(empresa_id),
+                )
+                .first()
+            )
+            if row and row[0]:
+                txt = str(row[0]).strip()
+                if txt:
+                    return txt
+        except Exception:
+            pass
+
+    for val in (
+        fallback_nome,
+        _id_get(identity, "nome", None),
+        _id_get(identity, "nome_completo", None),
+        _id_get(identity, "name", None),
+        _id_get(identity, "email", None),
+    ):
+        txt = str(val or "").strip()
+        if txt and txt.lower() not in {"null", "undefined", "nan"}:
+            return txt
+
+    return None
+
+
 # =========================================================
 # Broadcast
 # =========================================================
@@ -1207,6 +1269,7 @@ async def _broadcast_msg_saida_cliente(
     instancia_id: Optional[int],
     instance_name: Optional[str],
     atendente_nome: Optional[str],
+    colaborador_id: Optional[int],
     ack: int,
     atendimento_id: Optional[int],
     departamento_id: Optional[int],
@@ -1241,6 +1304,11 @@ async def _broadcast_msg_saida_cliente(
         "instancia_id": instancia_id,
         "instance_name": instance_name,
         "atendente_nome": atendente_nome,
+        "autor_nome": atendente_nome,
+        "enviado_por_nome": atendente_nome,
+        "colaborador_nome": atendente_nome,
+        "colaborador_id": colaborador_id,
+        "atendente_id": colaborador_id,
         "atendimento_id": atendimento_id,
         "departamento_id": departamento_id,
     }
@@ -1931,6 +1999,13 @@ async def _send_core(
     quoted_preview_payload = _quoted_preview_from_body_or_payload(body, quoted_payload)
 
     operador_id = _current_operador_id(identity)
+    atendente_nome = _resolve_sender_display_name(
+        db,
+        identity=identity,
+        empresa_id=int(empresa.id),
+        colaborador_id=operador_id,
+        fallback_nome=atendente_nome,
+    )
 
     cliente_acl = None
     atendimento_acl = None
@@ -1942,7 +2017,7 @@ async def _send_core(
             empresa_id=int(empresa.id),
             cliente_id=int(body.cliente_id),
             instancia_id=int(inst_id_checked),
-            allow_unassigned_department=True,
+            allow_unassigned_department=False,
         )
 
         _assert_number_matches_cliente(
@@ -1965,7 +2040,7 @@ async def _send_core(
                 empresa_id=int(empresa.id),
                 cliente_id=int(cliente_existing_by_number.id),
                 instancia_id=int(inst_id_checked),
-                allow_unassigned_department=True,
+                allow_unassigned_department=False,
             )
 
     cliente_para_regra = cliente_acl or cliente_existing_by_number
@@ -2168,6 +2243,7 @@ async def _send_core(
         msg_id=evo_msg_id,
         instancia_id=inst_id_checked,
         atendimento_id=atendimento_id,
+        colaborador_id=operador_id,
         ack=ack_now,
         quoted=quoted_payload,
         quoted_preview=quoted_preview_payload,
@@ -2184,6 +2260,7 @@ async def _send_core(
         instancia_id=msg.instancia_id,
         instance_name=inst_name,
         atendente_nome=atendente_nome,
+        colaborador_id=operador_id,
         ack=ack_now,
         atendimento_id=atendimento_id,
         departamento_id=departamento_id,
@@ -2200,6 +2277,12 @@ async def _send_core(
         "cliente_id": cliente.id,
         "atendimento_id": atendimento_id,
         "departamento_id": departamento_id,
+        "colaborador_id": operador_id,
+        "atendente_id": operador_id,
+        "colaborador_nome": atendente_nome,
+        "atendente_nome": atendente_nome,
+        "autor_nome": atendente_nome,
+        "enviado_por_nome": atendente_nome,
         "conversation_id": conv_ref,
         "conversation_key": conv_ref,
         "kind": "c",
@@ -2456,7 +2539,7 @@ async def send_reaction(
                         empresa_id=int(empresa.id),
                         cliente_id=int(msg.cliente_id),
                         instancia_id=getattr(msg, "instancia_id", None),
-                        allow_unassigned_department=True,
+                        allow_unassigned_department=False,
                     )
                 except HTTPException:
                     msg = None

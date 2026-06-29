@@ -1,6 +1,7 @@
 # backend\routers\atendimento_conversas\listagem.py
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
@@ -110,6 +111,50 @@ def _identity_user_id(identity) -> Optional[int]:
         )
     except Exception:
         return None
+
+
+def _identity_has_any_perm(identity, *perms: str) -> bool:
+    try:
+        if not identity:
+            return False
+
+        if bool(identity.get("is_admin") if isinstance(identity, dict) else getattr(identity, "is_admin", False)):
+            return True
+
+        raw = (
+            identity.get("permissoes") or identity.get("permissions") or []
+            if isinstance(identity, dict)
+            else getattr(identity, "permissoes", None) or getattr(identity, "permissions", None) or []
+        )
+
+        if isinstance(raw, dict):
+            raw = [k for k, v in raw.items() if v]
+
+        current = {str(p).strip().lower() for p in (raw or []) if str(p).strip()}
+        wanted = {str(p).strip().lower() for p in perms if str(p).strip()}
+        return bool(current.intersection(wanted))
+    except Exception:
+        return False
+
+
+def _allow_entrada_geral_colaborador(identity) -> bool:
+    """
+    Conversas sem departamento não devem vazar para todo atendente.
+
+    Default seguro: colaborador NÃO vê Entrada geral.
+    Para liberar, dê uma permissão explícita no futuro ou use env local:
+      ATENDIMENTO_ENTRADA_GERAL_COLABORADOR=true
+    """
+    env = os.getenv("ATENDIMENTO_ENTRADA_GERAL_COLABORADOR", "false").strip().lower()
+    if env in ("1", "true", "t", "sim", "yes", "y", "on"):
+        return True
+
+    return _identity_has_any_perm(
+        identity,
+        "atendimento.entrada_geral",
+        "atendimento.ver_entrada_geral",
+        "atendimento.geral",
+    )
 
 
 def _row_cliente_id(row) -> Optional[int]:
@@ -270,6 +315,8 @@ def listar_conversas(
         resolved_inst_id=resolved_inst_id,
         allowed_inst_ids=allowed_inst_ids,
         allowed_dep_ids=allowed_dep_ids,
+        current_colab_id=current_colab_id,
+        allow_unassigned_department=_allow_entrada_geral_colaborador(identity),
     )
 
     if cursor_id is not None and cursor_ts is not None:

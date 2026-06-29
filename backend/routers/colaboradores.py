@@ -904,7 +904,12 @@ async def criar_colaborador(
 
     usuario_id = None
 
-    if criar_usuario:
+    # Regra segura: se veio senha no cadastro, o colaborador também precisa virar
+    # usuário de login. Assim front antigo que esqueça criar_usuario=true não
+    # salva um colaborador com senha, mas sem acesso ao sistema.
+    deve_criar_usuario = bool(criar_usuario) or bool(str(senha or "").strip())
+
+    if deve_criar_usuario:
         if not senha:
             raise HTTPException(
                 status_code=422,

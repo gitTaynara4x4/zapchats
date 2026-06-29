@@ -26,6 +26,42 @@
 
   function ensureMsgMediaCss() {
     M.injectStyle('zc-media-render-css', `
+      .zc-msg-author{
+        display:block;
+        max-width:100%;
+        margin:0 0 3px;
+        font-size:12px;
+        line-height:1.15;
+        font-weight:600;
+        letter-spacing:-.01em;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        opacity:.95;
+      }
+
+      .zc-msg-author-out{
+        color:#baf0a6;
+      }
+
+      .bubble-out .zc-msg-author-out{
+        color:#baf0a6;
+        text-shadow:0 1px 0 rgba(0,0,0,.10);
+      }
+
+      html[data-theme="dark"] .bubble-out .zc-msg-author-out{
+        color:#c7f7b7;
+      }
+
+      .bubble.zc-author-hidden .zc-msg-author,
+      .msg-row.zc-author-repeated .zc-msg-author{
+        display:none !important;
+      }
+
+      .bubble.has-media-single .zc-msg-author{
+        padding:4px 6px 0;
+      }
+
       .zc-quoted-bubble{
         position:relative;
         display:flex;

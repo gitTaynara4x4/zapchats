@@ -160,8 +160,8 @@ export function ensureInstsSection(){
             </div>
 
             <div>
-              Se uma conversa ainda estiver sem setor, ela aparece como
-              <b>Entrada geral</b> para quem tem acesso ao WhatsApp onde a mensagem chegou.
+              Se uma conversa ainda estiver sem departamento, ela só aparece na
+              <b>Entrada geral</b> para admin/gestor ou para quem tiver essa liberação.
             </div>
 
             <div>

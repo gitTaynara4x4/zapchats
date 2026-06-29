@@ -1,6 +1,6 @@
 // /frontend/js/atendimentos/boot/init.js
 
-import { state, persist, setClienteSel } from '../state/store.js';
+import { state, persist, setClienteSel, marcarLidas } from '../state/store.js';
 import { EMPRESA_ID } from '../core/env.js';
 import { carregarClientes } from '../domain/clientes.js';
 import { salvarNoCache, renderHistoricoDoCache } from '../domain/historico.js';
@@ -8,6 +8,7 @@ import { salvarNoCache, renderHistoricoDoCache } from '../domain/historico.js';
 // Base unificada de histórico local
 import { getHist } from '../domain/hist-cache.js';
 import { abrirPerfilAtual } from '../ui/perfil.js';
+import '../ui/loading-guard.js';
 
 // ====== Flag global: esconder banner do topo (Operadora: …) ======
 window.SHOW_TOP_OPERATOR_BANNER = false;
@@ -815,6 +816,26 @@ function readyPart(key) {
   }
 }
 
+function zcHardHideLoaders(reason = 'init') {
+  try { window.PageLoading?.reset?.(); } catch {}
+  try { window.PageLoading?.hide?.(); } catch {}
+  try { window.Splash?.hide?.(); } catch {}
+  try {
+    document.documentElement.classList.remove('is-loading', 'prepaint');
+    document.body.classList.remove('is-loading');
+    document.documentElement.style.overflow = '';
+    delete document.documentElement.dataset.pageLoadingLock;
+  } catch {}
+  try {
+    const cl = document.getElementById('chat-loading');
+    if (cl) {
+      cl.classList.add('hidden');
+      cl.style.display = 'none';
+      cl.setAttribute('aria-hidden', 'true');
+    }
+  } catch {}
+}
+
 /* ================= OperatorLine (banner “Operadora: …”) ================= */
 (function () {
   const SELECTORS = ['#historico', '.chat-history', '.mensagens', '#mensagens', '#history'];
@@ -914,16 +935,33 @@ function readyPart(key) {
 
 /* ================= Utils ================= */
 
-function canMarkSeenNow(force = false) {
-  if (force) return true;
-
+function clearUnreadLocal(conversationRef, row = null) {
   try {
-    if (window.ZC_DISABLE_AUTO_SEEN === true) return false;
-    if (document.hidden) return false;
-    if (typeof document.hasFocus === 'function' && !document.hasFocus()) return false;
-  } catch {}
+    const ref = parseConversationRef(conversationRef, row);
+    if (ref.kind !== 'c' || !ref.entityId || !ref.instId) return;
 
-  return true;
+    const convKey = ref.key || buildConversationKey('c', ref.entityId, ref.instId);
+    if (!convKey) return;
+
+    try { marcarLidas(convKey, ref.instId); } catch {}
+    try { window.Lista?.resetUnread?.(convKey); } catch {}
+    try { window.zcClearUnreadBadge?.(convKey); } catch {}
+    try { window.recomputeUnread?.(); } catch {}
+
+    try {
+      document.dispatchEvent(new CustomEvent('zc:unread-changed', {
+        detail: {
+          conversation_key: convKey,
+          conversation_id: convKey,
+          cliente_id: ref.entityId,
+          instancia_id: ref.instId,
+          unread: 0,
+          novas: 0,
+          unread_count: 0,
+        },
+      }));
+    } catch {}
+  } catch {}
 }
 
 async function markChatAsSeenNow(conversationRef, row = null, { force = false } = {}) {
@@ -940,9 +978,8 @@ async function markChatAsSeenNow(conversationRef, row = null, { force = false } 
     // Isso evita seen em conversa que já foi trocada.
     if (!isConversationOpen(convKey)) return;
 
-    // v12: só marca como visto se a conversa estiver realmente visualizada.
-    // Se a aba estiver em segundo plano/sem foco, mantém a bolha de não lidas.
-    if (!canMarkSeenNow(force)) return;
+    // Limpa visual/cache na hora. O POST abaixo persiste no banco.
+    clearUnreadLocal(convKey, row);
 
     const now = Date.now();
     const old = __seenState.get(convKey);
@@ -955,9 +992,18 @@ async function markChatAsSeenNow(conversationRef, row = null, { force = false } 
       return old.promise;
     }
 
+    const params = new URLSearchParams({
+      empresa_id: String(EMPRESA_ID),
+    });
+
+    if (ref.instId && /^\d+$/.test(String(ref.instId))) {
+      params.set('instancia_id', String(ref.instId));
+    } else if (row?.instance_name) {
+      params.set('instance', String(row.instance_name));
+    }
+
     const url =
-      `/api/atendimento/clientes/${encodeURIComponent(ref.entityId)}/seen` +
-      `?empresa_id=${encodeURIComponent(String(EMPRESA_ID))}`;
+      `/api/atendimento/clientes/${encodeURIComponent(ref.entityId)}/seen?${params.toString()}`;
 
     const promise = fetch(url, {
       method: 'POST',
@@ -993,6 +1039,9 @@ function scheduleMarkChatAsSeen(conversationRef, row = null, { delay = ZC_SEEN_D
 
     const convKey = ref.key || buildConversationKey('c', ref.entityId, ref.instId);
     if (!convKey) return;
+
+    // Mesmo com debounce no POST, a bolha deve sumir imediatamente ao abrir/visualizar.
+    clearUnreadLocal(convKey, row);
 
     const old = __seenState.get(convKey) || {};
     if (old.timer) clearTimeout(old.timer);
@@ -1577,6 +1626,7 @@ async function selecionarClienteObj(id, opts = {}) {
   const foot = document.getElementById('chat-footer');
 
   if (repeatedSameSelection && !forceReload) {
+    clearUnreadLocal(convKey, c);
     scheduleMarkChatAsSeen(convKey, c);
 
     try {
@@ -1638,6 +1688,9 @@ async function selecionarClienteObj(id, opts = {}) {
   }
 
   setClienteSel(c);
+
+  // Limpa a bolha no clique, antes mesmo do histórico terminar de carregar.
+  clearUnreadLocal(convKey, c);
 
   // TRAVA/SYNC de instância antes de qualquer fetch/render
   instFinal = syncInstanciaFromCliente(c) || ref.instId;
@@ -1776,6 +1829,7 @@ async function selecionarClienteObj(id, opts = {}) {
       }
 
       clearConversationLoading(ref);
+      zcHardHideLoaders('conversation-loaded');
 
       // v7: nunca deixa a conversa vazia.
       // Na v6, quando a conversa era aberta por resultado de mensagem, o init pulava
@@ -1800,6 +1854,7 @@ async function selecionarClienteObj(id, opts = {}) {
         showConversationLoadError(ref, c, 'Não foi possível carregar a conversa');
       } else {
         clearConversationLoading(ref);
+        zcHardHideLoaders('conversation-load-error-with-rows');
       }
 
       return false;
@@ -1826,6 +1881,7 @@ async function selecionarClienteObj(id, opts = {}) {
     window.syncPreviewFromCache?.(convKey);
   } catch {}
 
+  clearUnreadLocal(convKey, c);
   scheduleMarkChatAsSeen(convKey, c);
 
   try {
@@ -1867,6 +1923,112 @@ async function selecionarClienteObj(id, opts = {}) {
     try {
       history.pushState({ chatOpen: true, id: convKey }, '', location.href);
     } catch {}
+  }
+}
+
+
+/* ================= Integração Valora -> ZapChats ================= */
+function getValoraOpenParams() {
+  try {
+    const qs = new URLSearchParams(window.location.search || '');
+
+    const telefone =
+      qs.get('abrir_telefone') ||
+      qs.get('telefone') ||
+      qs.get('phone') ||
+      '';
+
+    const conversa =
+      qs.get('abrir_conversa') ||
+      qs.get('conversation_key') ||
+      qs.get('conversation_id') ||
+      '';
+
+    const erro = qs.get('abrir_erro') || '';
+
+    if (!telefone && !conversa && !erro) return null;
+
+    return {
+      telefone: digitsOnly(telefone),
+      conversa: String(conversa || '').trim(),
+      origem: qs.get('origem') || 'valora',
+      valoraClienteId: qs.get('valora_cliente_id') || qs.get('cliente_id') || '',
+      erro,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function clearValoraOpenParamsFromUrl() {
+  try {
+    const url = new URL(window.location.href);
+    [
+      'abrir_telefone',
+      'telefone',
+      'phone',
+      'abrir_conversa',
+      'conversation_key',
+      'conversation_id',
+      'origem',
+      'valora_cliente_id',
+      'cliente_id',
+      'abrir_erro',
+    ].forEach((key) => url.searchParams.delete(key));
+
+    history.replaceState(history.state || {}, '', url.pathname + (url.search ? url.search : '') + url.hash);
+  } catch {}
+}
+
+async function handleValoraOpenConversationDeepLink() {
+  const params = getValoraOpenParams();
+  if (!params) return;
+
+  try {
+    if (params.erro === 'telefone_invalido') {
+      toast('O Valora não enviou um telefone válido para abrir no ZapChats.', false);
+      return;
+    }
+
+    if (params.conversa) {
+      await selecionarClienteObj(params.conversa, { forceReload: true });
+      return;
+    }
+
+    if (!params.telefone) {
+      toast('Cliente sem WhatsApp/telefone para abrir no ZapChats.', false);
+      return;
+    }
+
+    const qs = new URLSearchParams({
+      telefone: params.telefone,
+      origem: params.origem || 'valora',
+    });
+
+    if (params.valoraClienteId) qs.set('cliente_id', params.valoraClienteId);
+
+    const resp = await fetch(`/api/atendimento/integracoes/valora/abrir-conversa?${qs.toString()}`, {
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+
+    const data = await resp.json().catch(() => null);
+
+    if (!resp.ok) {
+      throw new Error(data?.detail || data?.message || 'Não foi possível localizar a conversa.');
+    }
+
+    if (!data?.found || !data?.conversa) {
+      toast(data?.detail || 'Nenhuma conversa encontrada para este telefone no ZapChats.', false);
+      return;
+    }
+
+    await selecionarClienteObj(data.conversa, { forceReload: true });
+  } catch (e) {
+    console.warn('[Valora -> ZapChats] erro ao abrir conversa:', e);
+    toast(e?.message || 'Não foi possível abrir a conversa do Valora.', false);
+  } finally {
+    clearValoraOpenParamsFromUrl();
   }
 }
 
@@ -1940,7 +2102,7 @@ function bindRealtimeSeenGuard() {
         tipo === 'out' ||
         tipo === 'atendente';
 
-      if (!fromMe && canMarkSeenNow(false)) {
+      if (!fromMe) {
         scheduleMarkChatAsSeen(key, detail, { delay: 1400 });
       }
     } catch {}
@@ -1998,14 +2160,22 @@ export async function boot() {
     }
 
     try {
+      await handleValoraOpenConversationDeepLink();
+    } catch (e) {
+      console.warn('[boot] deeplink Valora falhou:', e);
+    }
+
+    try {
       window.zcUpdateInstBadge?.();
     } catch {}
 
     readyPart('boot');
+    zcHardHideLoaders('boot-complete');
   } catch (e) {
     console.error('[boot]', e);
     readyPart('boot');
     readyPart('clientes');
+    zcHardHideLoaders('boot-error');
   }
 
   if (!window.__ZC_ATENDIMENTOS_POPSTATE_BOUND__) {

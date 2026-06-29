@@ -120,6 +120,18 @@ def _iso_utc(ts) -> Optional[str]:
         return str(ts)
 
 
+def _autor_saida_nome_from_row(r) -> Optional[str]:
+    try:
+        tipo = str(getattr(r, "tipo", "") or "").strip().lower()
+        msg_id = str(getattr(r, "msg_id", "") or "").strip().lower()
+        colab_nome = getattr(r, "colaborador_nome", None)
+        if tipo == "saida" and msg_id.startswith("bot:"):
+            return "Bot"
+        return colab_nome
+    except Exception:
+        return getattr(r, "colaborador_nome", None)
+
+
 def _epoch_from_dt(dt: datetime) -> int:
     try:
         if dt.tzinfo is None:
@@ -698,7 +710,7 @@ def listar_mensagens_por_data(
             empresa_id=empresa_id_eff,
             cliente_id=int(cliente_id),
             instancia_id=resolved_inst_id,
-            allow_unassigned_department=True,
+            allow_unassigned_department=False,
         )
 
         instancia_filters = []
@@ -730,6 +742,8 @@ def listar_mensagens_por_data(
                 models.Mensagem.ack,
                 models.Mensagem.timestamp,
                 models.Mensagem.instancia_id,
+                models.Mensagem.colaborador_id,
+                models.Colaborador.nome.label("colaborador_nome"),
                 models.Mensagem.quoted,
                 models.Mensagem.quoted_preview,
                 models.EmpresaInstancia.instance_name.label("instance_name"),
@@ -739,6 +753,10 @@ def listar_mensagens_por_data(
             .outerjoin(
                 models.EmpresaInstancia,
                 models.EmpresaInstancia.id == models.Mensagem.instancia_id,
+            )
+            .outerjoin(
+                models.Colaborador,
+                models.Colaborador.id == models.Mensagem.colaborador_id,
             )
             .filter(
                 models.Mensagem.empresa_id == int(empresa_id_eff),
@@ -790,6 +808,12 @@ def listar_mensagens_por_data(
                     "timestamp": ts_iso,
                     "instancia_id": r.instancia_id,
                     "instance_name": r.instance_name,
+                    "colaborador_id": r.colaborador_id,
+                    "atendente_id": r.colaborador_id,
+                    "colaborador_nome": _autor_saida_nome_from_row(r),
+                    "atendente_nome": _autor_saida_nome_from_row(r),
+                    "autor_nome": _autor_saida_nome_from_row(r),
+                    "enviado_por_nome": _autor_saida_nome_from_row(r),
                     "quoted": r.quoted,
                     "quoted_preview": r.quoted_preview,
                     "apagada_cliente": bool(r.apagada_cliente),
@@ -1080,7 +1104,7 @@ def listar_mensagens(
             empresa_id=empresa_id_eff,
             cliente_id=int(cliente_id),
             instancia_id=resolved_inst_id,
-            allow_unassigned_department=True,
+            allow_unassigned_department=False,
         )
 
         instancia_filters = []
@@ -1105,6 +1129,8 @@ def listar_mensagens(
                 models.Mensagem.ack,
                 models.Mensagem.timestamp,
                 models.Mensagem.instancia_id,
+                models.Mensagem.colaborador_id,
+                models.Colaborador.nome.label("colaborador_nome"),
                 models.Mensagem.quoted,
                 models.Mensagem.quoted_preview,
                 models.EmpresaInstancia.instance_name.label("instance_name"),
@@ -1114,6 +1140,10 @@ def listar_mensagens(
             .outerjoin(
                 models.EmpresaInstancia,
                 models.EmpresaInstancia.id == models.Mensagem.instancia_id,
+            )
+            .outerjoin(
+                models.Colaborador,
+                models.Colaborador.id == models.Mensagem.colaborador_id,
             )
             .filter(
                 models.Mensagem.empresa_id == int(empresa_id_eff),
@@ -1180,6 +1210,12 @@ def listar_mensagens(
                     "timestamp": ts_iso,
                     "instancia_id": r.instancia_id,
                     "instance_name": r.instance_name,
+                    "colaborador_id": r.colaborador_id,
+                    "atendente_id": r.colaborador_id,
+                    "colaborador_nome": _autor_saida_nome_from_row(r),
+                    "atendente_nome": _autor_saida_nome_from_row(r),
+                    "autor_nome": _autor_saida_nome_from_row(r),
+                    "enviado_por_nome": _autor_saida_nome_from_row(r),
                     "quoted": r.quoted,
                     "quoted_preview": r.quoted_preview,
                     "apagada_cliente": bool(r.apagada_cliente),
@@ -1469,7 +1505,7 @@ async def apagar_mensagem_atendimento(
             empresa_id=empresa_id_eff,
             cliente_id=int(cliente_id),
             instancia_id=None,
-            allow_unassigned_department=True,
+            allow_unassigned_department=False,
         )
     except HTTPException:
         pass

@@ -402,6 +402,49 @@
     return true;
   }
 
+
+  function isDepartmentClaim(meta) {
+    return Boolean(
+      meta?.claim_mode === "departamento" ||
+      meta?.departamento_claim === true ||
+      meta?.tipo_aceite === "departamento"
+    );
+  }
+
+  function claimWords(meta) {
+    const dep = isDepartmentClaim(meta);
+
+    return dep
+      ? {
+          accept: "Atender",
+          accepting: "Atendendo...",
+          accepted: "Atendimento assumido",
+          acceptedByYou: "Atendimento com você",
+          acceptTitle: "Atender conversa",
+          waitingTitle: "Atenda para responder",
+          waitingSubtitle: "Clique em Atender para assumir este atendimento.",
+          acceptedSubtitle: "Agora você pode responder normalmente.",
+          otherTitle: "Atendimento em andamento",
+          otherSubtitle: "Esse atendimento já foi assumido por outro colaborador.",
+          success: "Atendimento assumido com sucesso.",
+          already: "Esse atendimento já estava com você."
+        }
+      : {
+          accept: "Aceitar",
+          accepting: "Aceitando...",
+          accepted: "Aceita",
+          acceptedByYou: "Conversa aceita por você",
+          acceptTitle: "Aceitar conversa",
+          waitingTitle: "Aceite a conversa para responder",
+          waitingSubtitle: "Enquanto você não aceitar, o envio fica bloqueado.",
+          acceptedSubtitle: "Agora você já pode responder normalmente.",
+          otherTitle: "Conversa em atendimento",
+          otherSubtitle: "Você não pode responder enquanto a conversa estiver em atendimento.",
+          success: "Conversa aceita com sucesso.",
+          already: "Essa conversa já estava com você."
+        };
+  }
+
   async function fetchMeta(conv) {
     const empresaId = getEmpresaId();
 
@@ -520,6 +563,9 @@
       fila_id: meta?.fila_id ?? null,
       fila_nome: meta?.fila_nome ?? null,
       fila_exigir_aceite: Boolean(meta?.fila_exigir_aceite),
+
+      claim_mode: meta?.claim_mode || null,
+      departamento_claim: Boolean(meta?.departamento_claim),
 
       raw: meta || null
     };
@@ -659,11 +705,13 @@
     }
 
     const exigeAceite = metaRequiresAcceptance(meta);
+    const words = claimWords(meta);
 
     /*
       REGRA PRINCIPAL:
-      Se não veio de fila que exige aceite, não mostra barra,
-      não trava composer e não exibe "Carregando" nem "Em atendimento".
+      Só mostra barra quando a conversa exige ação:
+      - fila com aceite obrigatório; ou
+      - atendimento por departamento aguardando alguém clicar em Atender.
     */
     if (!exigeAceite) {
       hideClaimUi();
@@ -685,9 +733,9 @@
 
     if (podeAceitar) {
       setBtnBase(aceitar, {
-        text: "Aceitar",
-        icon: "fa-solid fa-hand",
-        title: "Aceitar conversa",
+        text: words.accept,
+        icon: "fa-solid fa-headset",
+        title: words.acceptTitle,
         disabled: false,
         hidden: false
       });
@@ -699,7 +747,7 @@
         icon: "fa-solid fa-user-arrow-down",
         title: "Transferir para outro colaborador",
         disabled: false,
-        hidden: false
+        hidden: isDepartmentClaim(meta)
       });
 
       setClaimBarState({
@@ -707,8 +755,8 @@
         locked: true,
         accepted: false,
         busy: false,
-        title: "Aceite a conversa para responder",
-        subtitle: "Enquanto você não aceitar, o envio fica bloqueado."
+        title: words.waitingTitle,
+        subtitle: words.waitingSubtitle
       });
 
       return;
@@ -719,9 +767,9 @@
       (operadorId && currentColabId && operadorId === currentColabId)
     ) {
       setBtnBase(aceitar, {
-        text: "Aceita",
+        text: words.accepted,
         icon: "fa-solid fa-circle-check",
-        title: "Essa conversa já está com você",
+        title: words.acceptedByYou,
         disabled: true,
         hidden: true,
         accepted: true
@@ -748,8 +796,8 @@
         locked: false,
         accepted: true,
         busy: false,
-        title: "Conversa aceita por você",
-        subtitle: "Agora você já pode responder normalmente."
+        title: words.acceptedByYou,
+        subtitle: words.acceptedSubtitle
       });
 
       return;
@@ -760,7 +808,7 @@
       icon: "fa-solid fa-user-check",
       title: operadorNome
         ? `Responsável atual: ${operadorNome}`
-        : "Essa conversa já está em atendimento",
+        : words.otherTitle,
       disabled: true,
       hidden: false
     });
@@ -781,9 +829,9 @@
       accepted: false,
       busy: false,
       title: operadorNome
-        ? `Conversa em atendimento por ${operadorNome}`
-        : "Conversa em atendimento",
-      subtitle: "Você não pode responder enquanto a conversa estiver em atendimento."
+        ? `Atendimento em andamento por ${operadorNome}`
+        : words.otherTitle,
+      subtitle: words.otherSubtitle
     });
   }
 
@@ -864,10 +912,15 @@
     }
 
     try {
+      const prevMeta = window.getConversationMeta
+        ? window.getConversationMeta(buildConversationKey(conv))
+        : null;
+      const words = claimWords(prevMeta || {});
+
       setBtnBase(aceitar, {
-        text: "Aceitando...",
+        text: words.accepting,
         icon: "fa-solid fa-spinner fa-spin",
-        title: "Aceitando conversa",
+        title: words.acceptTitle,
         disabled: true,
         hidden: false,
         busy: true
@@ -878,7 +931,7 @@
         locked: true,
         accepted: false,
         busy: true,
-        title: "Aceitando conversa...",
+        title: words.accepting,
         subtitle: "Aguarde um instante."
       });
 
@@ -895,11 +948,15 @@
         }
       );
 
+      const isDeptClaim = isDepartmentClaim(data) || isDepartmentClaim(prevMeta);
+
       const optimisticMeta = saveMetaCache(conv, {
         ...data,
+        claim_mode: isDeptClaim ? "departamento" : (data?.claim_mode || prevMeta?.claim_mode || null),
+        departamento_claim: isDeptClaim,
         exigir_aceite: true,
         aceite_obrigatorio: true,
-        fila_exigir_aceite: true,
+        fila_exigir_aceite: isDeptClaim ? false : true,
         pode_aceitar: false,
         pode_liberar: true,
         pode_responder: true,
@@ -924,8 +981,8 @@
 
       showToast(
         data?.already_accepted
-          ? "Essa conversa já estava com você."
-          : "Conversa aceita com sucesso.",
+          ? words.already
+          : words.success,
         "success"
       );
 
@@ -994,9 +1051,12 @@
       );
 
       const exigeAceite = metaRequiresAcceptance(data);
+      const isDeptClaim = isDepartmentClaim(data);
 
       const optimisticMeta = saveMetaCache(conv, {
         ...data,
+        claim_mode: isDeptClaim ? "departamento" : (data?.claim_mode || null),
+        departamento_claim: isDeptClaim,
         pode_aceitar: exigeAceite,
         pode_liberar: false,
         pode_responder: !exigeAceite,
