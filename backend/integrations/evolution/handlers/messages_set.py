@@ -218,6 +218,16 @@ def _normalize_historico_opcao(raw: str | None) -> str:
     return "none"
 
 
+def _messages_set_deve_processar(historico_opcao: str | None) -> bool:
+    """Processa MESSAGES_SET quando o ENV permitir ou quando há histórico escolhido.
+
+    Assim 24h/7d/30d funcionam no QR mesmo em ambiente onde
+    ENABLE_MESSAGES_SET=false foi usado para deixar produção leve.
+    """
+    h = _normalize_historico_opcao(historico_opcao)
+    return bool(ENABLE_MESSAGES_SET or h in {"24h", "7d", "30d", "all"})
+
+
 def _get_runtime_lock(empresa_id: int, instancia_id: int) -> asyncio.Lock:
     key = (int(empresa_id), int(instancia_id))
     lock = _HISTORY_RUNTIME_LOCKS.get(key)
@@ -1295,10 +1305,6 @@ async def _emit_history_done(empresa_id: int, *, total: int, imported: int) -> N
 
 @handler(EvoEvent.MESSAGES_SET)
 async def on_messages_set(inst_id: str, data):
-    if not ENABLE_MESSAGES_SET:
-        LOG("[MESSAGES_SET] Ignorado (ENABLE_MESSAGES_SET=false).")
-        return
-
     PROG_STEP = 100
 
     with SessionLocal() as db:
@@ -1311,6 +1317,19 @@ async def on_messages_set(inst_id: str, data):
         instancia_id = int(inst.id)
         historico_original = getattr(inst, "historico_restaurar", None)
         historico_opcao = _normalize_historico_opcao(historico_original)
+
+        if not _messages_set_deve_processar(historico_opcao):
+            LOG(
+                f"[MESSAGES_SET] Ignorado: ENABLE_MESSAGES_SET=false e sem histórico pendente "
+                f"inst={inst_id} historico={historico_opcao}"
+            )
+            return
+
+        if not ENABLE_MESSAGES_SET and historico_opcao != "none":
+            LOG(
+                f"[MESSAGES_SET] ENABLE_MESSAGES_SET=false no ENV, mas vou processar porque "
+                f"historico_restaurar={historico_opcao} foi escolhido para inst={inst_id}"
+            )
 
         if historico_opcao == "7d" and not ALLOW_HISTORY_7D:
             _log_ctx("[HIST] downgrade 7d→24h", inst=inst_id)

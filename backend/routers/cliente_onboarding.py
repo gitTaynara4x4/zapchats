@@ -287,6 +287,23 @@ def _gen_instance_name(
     )
 
 
+def _remember_qr_recent_for_history(instance: str | None) -> None:
+    """Marca QR/pairing gerado para liberar histórico no CONNECTION_UPDATE.
+
+    O QR também pode ser retornado direto por /instance/connect, sem passar antes
+    pelo evento QRCODE_UPDATED. Por isso marcamos aqui também.
+    """
+    inst = str(instance or "").strip()
+    if not inst:
+        return
+
+    try:
+        from backend.integrations.evolution.handlers._state import remember_qr_emitted
+        remember_qr_emitted(inst)
+    except Exception:
+        pass
+
+
 def _evo_wait_instance_ready(sess: requests.Session, instance: str, timeout_s: int = 8) -> bool:
     if not EVOLUTION_URL:
         return False
@@ -674,6 +691,11 @@ def _evo_prepare_instance_before_connect(instance: str, *, sync_full_history: bo
 def _evo_connect(instance: str, number_digits: str | None) -> dict:
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return {}
+
+    # Importante para o histórico escolhido no modal funcionar quando o QR for lido.
+    # Às vezes a Evolution devolve o QR diretamente nesse endpoint e não dispara
+    # QRCODE_UPDATED antes do CONNECTION_UPDATE.
+    _remember_qr_recent_for_history(instance)
 
     s = _http()
     url = f"{EVOLUTION_URL}/instance/connect/{instance}"

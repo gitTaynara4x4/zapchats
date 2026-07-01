@@ -540,6 +540,16 @@ def _historico_pede_sync(historico_opcao: str | None) -> bool:
     return h in {"24h", "7d", "30d", "all"}
 
 
+def _messages_set_deve_rodar(historico_opcao: str | None = None) -> bool:
+    """MESSAGES_SET pode ficar desligado globalmente, mas histórico escolhido no QR manda.
+
+    Produção normal continua leve quando historico_restaurar=none.
+    Se o usuário escolheu 24h/7d/30d, o sync precisa rodar mesmo com
+    ENABLE_MESSAGES_SET=false no ENV antigo.
+    """
+    return bool(ENABLE_MESSAGES_SET or _historico_pede_sync(historico_opcao))
+
+
 def _qr_recente(inst_id: str) -> bool:
     try:
         now_s = int(_now_utc().timestamp())
@@ -982,8 +992,8 @@ async def _history_watchdog_wait_and_retry(
         LOG(f"[HISTORY][watchdog] ignorado; histórico não pendente inst={inst_id} historico={h}")
         return False
 
-    if not ENABLE_MESSAGES_SET:
-        LOG(f"[HISTORY][watchdog] ignorado; ENABLE_MESSAGES_SET=false inst={inst_id}")
+    if not _messages_set_deve_rodar(h):
+        LOG(f"[HISTORY][watchdog] ignorado; MESSAGES_SET global desligado e sem histórico pendente inst={inst_id}")
         return False
 
     wait_sec = max(1.0, float(HISTORY_WATCHDOG_WAIT_SEC or 20.0))
@@ -1166,13 +1176,14 @@ async def _run_connect_sync_safe(inst_id: str) -> None:
             f"inst={inst_id} "
             f"contacts={SYNC_CONTACTS_ON_CONNECT} "
             f"chats={SYNC_CHATS_ON_CONNECT} "
-            f"messages_set={ENABLE_MESSAGES_SET} "
+            f"messages_set_env={ENABLE_MESSAGES_SET} "
+            f"messages_set_effective={_messages_set_deve_rodar(historico_opcao)} "
             f"historico={historico_opcao} "
             f"historico_pendente={historico_pendente} "
             f"watchdog={HISTORY_WATCHDOG_ENABLED}"
         )
 
-        if ENABLE_MESSAGES_SET and historico_pendente:
+        if historico_pendente:
             force_result = await _evo_force_history_settings_after_open(
                 inst_id,
                 historico_opcao=historico_opcao,
@@ -1210,7 +1221,7 @@ async def _run_connect_sync_safe(inst_id: str) -> None:
             except Exception as e:
                 LOG(f"[SYNC][connect][chats] falha inst={inst_id}: {e}")
 
-        if ENABLE_MESSAGES_SET:
+        if _messages_set_deve_rodar(historico_opcao):
             if historico_pendente:
                 LOG(
                     f"[MESSAGES_SET] aguardando histórico após force-open "

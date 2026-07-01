@@ -242,8 +242,9 @@
     const items = [];
 
     /*
-      IA, Notas e Transferir departamento ficam dentro dos 3 pontinhos.
-      Isso vale para desktop e mobile.
+      Menu limpo/profissional para atendimento.
+      Não trazemos opções "copiadas" do WhatsApp que ainda não têm função real
+      ou que poluem a operação do atendente.
     */
     items.push(
       {
@@ -261,7 +262,7 @@
         },
       },
       {
-        label: 'Transferir departamento',
+        label: 'Transferir atendimento',
         icon: 'fa-solid fa-arrow-right-arrow-left',
         action() {
           transferirDepartamentoFromMenu();
@@ -343,7 +344,7 @@
         },
       },
       {
-        label: 'Pesquisar',
+        label: 'Pesquisar na conversa',
         icon: 'fa-solid fa-magnifying-glass',
         action() {
           openSearchFromMenu();
@@ -360,70 +361,10 @@
         divider: true,
       },
       {
-        label: 'Silenciar notificações',
-        icon: 'fa-regular fa-bell-slash',
-        action() {
-          notImplemented();
-        },
-      },
-      {
-        label: 'Mensagens temporárias',
-        icon: 'fa-regular fa-clock',
-        action() {
-          notImplemented();
-        },
-      },
-      {
-        label: 'Adicionar aos Favoritos',
-        icon: 'fa-regular fa-heart',
-        action() {
-          notImplemented();
-        },
-      },
-      {
-        label: 'Adicionar à lista',
-        icon: 'fa-regular fa-rectangle-list',
-        action() {
-          notImplemented();
-        },
-      },
-      {
-        label: 'Fechar conversa',
+        label: 'Encerrar atendimento',
         icon: 'fa-regular fa-circle-xmark',
         action() {
           closeCurrentChat();
-        },
-      },
-      {
-        divider: true,
-      },
-      {
-        label: 'Denunciar',
-        icon: 'fa-regular fa-flag',
-        action() {
-          notImplemented();
-        },
-      },
-      {
-        label: 'Bloquear',
-        icon: 'fa-solid fa-ban',
-        action() {
-          notImplemented();
-        },
-      },
-      {
-        label: 'Limpar conversa',
-        icon: 'fa-regular fa-trash-can',
-        action() {
-          notImplemented();
-        },
-      },
-      {
-        label: 'Apagar conversa',
-        icon: 'fa-regular fa-trash-can',
-        danger: true,
-        action() {
-          notImplemented();
         },
       }
     );
@@ -576,5 +517,5 @@
     toggleMenu,
   });
 
-  console.log('[header-actions] menu carregado');
+  console.log('[header-actions] menu carregado: zc-menu-limpo-v9-19');
 })();

@@ -14,6 +14,30 @@ INSTANCIAS_SYNC: set[str] = set()
 # instance -> unix seconds when a QR was last emitted.
 QR_RECENT: dict[str, int] = {}
 
+
+def remember_qr_emitted(inst_id: str, ts: int | None = None) -> None:
+    """Marca que um QR/pairing code foi gerado para esta instância.
+
+    O CONNECTION_UPDATE usa isso para diferenciar primeiro login por QR
+    de uma reconexão antiga. Se essa marcação ficar em outro módulo,
+    o histórico escolhido (24h/7d/30d) pode nunca disparar.
+    """
+    instance = str(inst_id or "").strip()
+    if not instance:
+        return
+
+    try:
+        QR_RECENT[instance] = int(ts if ts is not None else time.time())
+    except Exception:
+        QR_RECENT[instance] = int(time.time())
+
+
+def forget_qr_recent(inst_id: str) -> None:
+    instance = str(inst_id or "").strip()
+    if not instance:
+        return
+    QR_RECENT.pop(instance, None)
+
 # instance -> unix timestamp de quando o histórico foi marcado como concluído.
 _HISTORY_DONE_AT: dict[str, float] = {}
 
@@ -162,6 +186,8 @@ def chatbot_should_process_msg(empresa_id: int, instancia_db_id: int, msg_id: st
 __all__ = [
     "INSTANCIAS_SYNC",
     "QR_RECENT",
+    "remember_qr_emitted",
+    "forget_qr_recent",
     "_HISTORY_DONE_AT",
 
     "HISTORY_MESSAGES_SET_STARTED_AT",

@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ..state.runtime_flags import remember_qr_emitted
+from ._state import remember_qr_emitted
 from ..state.sync_locks import qr_force_lock_acquire
 from ..transport.evolution_http_client import evo_connect
 from ..transport.websocket_emitters import emit_qrcode

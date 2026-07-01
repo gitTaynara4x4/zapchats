@@ -1959,12 +1959,31 @@ function manualMatchInstancia(c) {
   if (!queryVals.length) return true;
 
   const vals = itemInstValues(c);
-  if (!vals.length) return true;
+
+  /*
+    IMPORTANTE — isolamento por WhatsApp/instância.
+    Quando o usuário escolhe uma instância específica, conversa sem
+    instancia_id/conversation_key confiável NÃO pode aparecer.
+
+    Antes retornava true quando vals vinha vazio. Isso era seguro para
+    o modo "Todos", mas errado para instância específica, porque fazia
+    a lista de outro WhatsApp vazar no seletor atual.
+  */
+  if (!vals.length) return false;
 
   return vals.some((v) => queryVals.includes(String(v)));
 }
 
 function matchInstanciaSafe(c) {
+  /*
+    Se tem instância específica selecionada, usa SEMPRE o filtro manual
+    estrito. O helper _matchInstancia antigo era permissivo quando o item
+    vinha sem instância, e isso podia misturar listas entre WhatsApps.
+  */
+  if (hasSpecificInstQuery()) {
+    return manualMatchInstancia(c);
+  }
+
   try {
     return _matchInstancia(c) !== false;
   } catch (e) {
@@ -2001,13 +2020,30 @@ function normalizeAndFilterConversas(items, reason = '') {
   }
 
   /*
-    Última defesa:
+    Se existe instância específica selecionada, NUNCA renderiza o retorno
+    original quando o filtro zerou. Isso misturava conversas de outro WhatsApp.
+    O correto é mostrar lista vazia/aguardando importação daquela instância.
+  */
+  if (hasSpecificInstQuery()) {
+    try {
+      console.warn('[clientes] instância específica sem conversas compatíveis; mantendo lista vazia.', {
+        reason,
+        total: normalized.length,
+        activeInst: getActiveInstKey(),
+        instQuery: safeInstQueryString() || 'all',
+      });
+    } catch {}
+
+    return [];
+  }
+
+  /*
+    Última defesa apenas no modo "Todos":
     Se chegou até aqui, a API trouxe conversas, mas o estado local do front
-    filtrou todas. Preferimos renderizar o retorno real da API em vez de mostrar
-    "Nenhuma conversa encontrada" indevidamente.
+    filtrou todas. No modo Todos podemos renderizar o retorno real da API.
   */
   try {
-    console.warn('[clientes] filtro de instância zerou retorno da API; renderizando retorno original.', {
+    console.warn('[clientes] filtro zerou retorno da API no modo Todos; renderizando retorno original.', {
       reason,
       total: normalized.length,
       activeInst: getActiveInstKey(),
@@ -2110,12 +2146,14 @@ export async function carregarClientes({ force = false, reason = '', noLoading =
       let usedFallback = false;
 
       /*
-        Se empresa_id/instância salvos no front estiverem errados, a chamada
-        com query pode voltar vazia, enquanto a sessão real ainda tem conversas.
-        Foi exatamente o sintoma visto no console: /api/atendimento/conversas
-        sem query retornou 20 conversas.
+        Fallback sem filtro só pode existir quando NÃO há instância específica.
+        Se o usuário escolheu "Allison", "Evolua" etc., e a API voltou vazia,
+        a lista dessa instância deve ficar vazia/aguardando importação.
+
+        Antes o front buscava /api/atendimento/conversas sem instancia_id como
+        fallback. Isso fazia dois WhatsApps diferentes exibirem a MESMA lista.
       */
-      if (!items.length && (empresaIdForQuery() || safeInstQueryString())) {
+      if (!items.length && !hasSpecificInstQuery() && empresaIdForQuery()) {
         try {
           const fallbackRaw = await fetchConversasSemFiltroFallback(20);
           const fallbackPayload = extractConversasPayload(fallbackRaw);
@@ -2126,7 +2164,7 @@ export async function carregarClientes({ force = false, reason = '', noLoading =
             usedFallback = true;
 
             try {
-              console.warn('[clientes] query com empresa/instância voltou vazia; usando sessão como fallback.', {
+              console.warn('[clientes] query com empresa voltou vazia; usando sessão como fallback no modo Todos.', {
                 url,
                 fallback_items: items.length,
               });
