@@ -1500,6 +1500,7 @@
   }
 
   function watchAppMount() {
+    if (window.ZC_SKIP_QUICK_PROFILE_OBSERVERS === true || window.ZC_MODO_ULTRA_LEVE_RAM === true) return;
     if (document.__zcPerfilQuickMountObsVersion === VERSION) return;
     document.__zcPerfilQuickMountObsVersion = VERSION;
 
@@ -1547,9 +1548,11 @@
     removeLegacyQuickProfile();
     bindHeaderOnce();
     bindConversationEvents();
-    bindAvatarRefreshHooks();
-    watchHeader();
-    watchAppMount();
+    if (!(window.ZC_DISABLE_REMOTE_AVATARS === true || window.ZC_MODO_ULTRA_LEVE_RAM === true)) {
+      bindAvatarRefreshHooks();
+      watchHeader();
+      watchAppMount();
+    }
     applyClickableState();
 
     setTimeout(syncAfterConversationChange, 150);

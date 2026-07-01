@@ -147,6 +147,7 @@ async def _run_or_schedule_triagem_pos_commit(
     conteudo: str,
     direcao: str,
     remote_jid: str,
+    message_ts=None,
 ) -> None:
     if EVO_CHATBOT_BURST_DEBOUNCE_MS <= 0:
         await run_triagem_pos_commit(
@@ -156,6 +157,7 @@ async def _run_or_schedule_triagem_pos_commit(
             conteudo=conteudo,
             direcao=direcao,
             remote_jid=remote_jid,
+            message_ts=message_ts,
         )
         return
 
@@ -176,6 +178,7 @@ async def _run_or_schedule_triagem_pos_commit(
                 conteudo=conteudo,
                 direcao=direcao,
                 remote_jid=remote_jid,
+                message_ts=message_ts,
             )
         except asyncio.CancelledError:
             return
@@ -2129,6 +2132,7 @@ async def on_messages_upsert(inst_id: str, data):
                         conteudo=conteudo,
                         direcao=direcao,
                         remote_jid=remote_jid,
+                        message_ts=ts_msg,
                     )
 
                     if _HAS_MSG_ATD_FIELD and cli_id:

@@ -90,10 +90,10 @@ def extract_text_from_baileys(obj: dict) -> str:
 
     if "reactionMessage" in m:
         rm = m.get("reactionMessage") or {}
-        text = rm.get("text") or ""
-        key = rm.get("key", {}) or {}
-        reacted_to = key.get("id")
-        return f"[Reação] {text} ⇢ {reacted_to}" if text else "[Reação]"
+        text = str(rm.get("text") or "").strip()
+        # Não mostrar key/id técnico da mensagem reagida no chat.
+        # A key continua no payload bruto/metadata quando necessário; o texto visual fica limpo.
+        return f"[Reação] {text}" if text else "[Reação]"
 
     if "imageMessage" in m:
         return (m["imageMessage"] or {}).get("caption") or "[Imagem]"

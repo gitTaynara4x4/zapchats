@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Usuários | Valora CRM</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <link rel="stylesheet" href="/frontend/css/app.css?v=20260630-dark-chatgpt-v6" />
+  <link rel="stylesheet" href="/frontend/css/validacao.css?v=20260614-required-circle" />
+  <link rel="stylesheet" href="/frontend/css/usuarios.css?v=20260625-usuarios-final" />
+
+  <script src="/frontend/js/pages/app.js?v=20260626-ajuda-global" defer></script>
+  <script src="/frontend/js/shared/validacao.js?v=20260614-required-circle" defer></script>
+  <script src="/frontend/js/pages/usuarios.js?v=20260625-usuarios-final" defer></script>
+  <link rel="stylesheet" href="/frontend/css/campos-longos.css?v=20260614-global-inline" />
+  <script src="/frontend/js/shared/campos-longos.js?v=20260614-global-inline" defer></script>
+  <link rel="stylesheet" href="/frontend/css/layout-compacto.css?v=20260615-tipografia-sem-centralizar" />
+  <link rel="stylesheet" href="/frontend/css/responsivo-global.css?v=20260615-mobile-real">
+  <link rel="stylesheet" href="/frontend/css/dark-chatgpt-fix.css?v=20260630-dark-v7" />
+</head>
+
+<body>
+  <div class="layout">
+    <iframe
+      src="/frontend/partials/sidebar.html?v=20260615-menu-fix"
+      class="sidebar-frame"
+      title="Menu lateral"
+      loading="eager">
+    </iframe>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <span class="eyebrow">Gestão de Acesso</span>
+          <h1>Usuários</h1>
+        </div>
+
+        <div class="topbar-actions">
+          <button class="btn btn-primary" type="button" id="btn-novo-usuario">
+            <i class="fa-solid fa-user-plus"></i>
+            Novo usuário
+          </button>
+        </div>
+      </header>
+
+      <div class="search-row">
+        <div class="search-box">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input
+            id="busca-usuarios"
+            type="text"
+            placeholder="Buscar por nome, e-mail, telefone, cargo ou papel..."
+            autocomplete="off"
+          />
+        </div>
+        <span id="contagem-usuarios" class="counter-text">0 usuários</span>
+      </div>
+
+      <article class="panel-card panel-card-table">
+        <div class="panel-head panel-head-table">
+          <div>
+            <h3>Equipe da Empresa</h3>
+            <p>Cadastre e gerencie os usuários que podem acessar o sistema.</p>
+          </div>
+        </div>
+
+        <div class="valora-table-wrapper">
+          <table class="valora-table">
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>E-mail</th>
+                <th>Telefone</th>
+                <th>Cargo</th>
+                <th>Papel</th>
+                <th>Status</th>
+                <th style="text-align:right;">Ações</th>
+              </tr>
+            </thead>
+            <tbody id="tabela-usuarios">
+              <tr>
+                <td colspan="7" class="empty-state table-loading">Carregando usuários...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <div class="modal-overlay" id="modal-usuario-backdrop" hidden>
+        <div class="modal-content modal-content-large">
+          <div class="modal-header">
+            <div>
+              <span class="modal-kicker">Cadastro</span>
+              <h3 id="modal-title">Novo usuário</h3>
+            </div>
+            <button class="btn-close" type="button" id="btn-fechar-modal" aria-label="Fechar" data-modal-close="modal-usuario-backdrop">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+
+          <div class="modal-body">
+            <form id="form-usuario" class="valora-form">
+              <input type="hidden" id="usuario-id" />
+
+              <div class="avatar-upload-group">
+                <label for="usuario-foto" class="avatar-preview-wrap">
+                  <i class="fa-solid fa-user default-icon" id="avatar-default-icon"></i>
+                  <img id="avatar-preview" class="avatar-preview" src="" alt="Preview da foto" style="display: none;" />
+                  <div class="avatar-overlay">
+                    <i class="fa-solid fa-camera"></i>
+                  </div>
+                </label>
+                <input type="file" id="usuario-foto" accept="image/*" class="sr-only" />
+                
+                <div class="avatar-texts">
+                  <span class="avatar-title">Foto de perfil</span>
+                  <span class="avatar-help">JPG ou PNG. Máximo de 2MB.</span>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="usuario-nome">Nome completo *</label>
+                <input type="text" id="usuario-nome" required />
+              </div>
+
+              <div class="form-group">
+                <label for="usuario-email">E-mail *</label>
+                <input type="email" id="usuario-email" required />
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="usuario-telefone">Telefone</label>
+                  <input type="text" id="usuario-telefone" />
+                </div>
+
+                <div class="form-group">
+                  <label for="usuario-cargo">Cargo</label>
+                  <input type="text" id="usuario-cargo" />
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="usuario-papel">Papel do usuário *</label>
+                  <select id="usuario-papel" required>
+                    <option value="owner">Owner</option>
+                    <option value="admin">Admin</option>
+                    <option value="colaborador" selected>Colaborador</option>
+                    <option value="visualizador">Visualizador</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="usuario-ativo">Status</label>
+                  <select id="usuario-ativo">
+                    <option value="true" selected>Ativo</option>
+                    <option value="false">Inativo</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-group" id="grupo-senha">
+                <label for="usuario-senha">Senha *</label>
+                <input type="password" id="usuario-senha" placeholder="Defina uma senha de acesso" autocomplete="new-password" />
+                <small class="field-help">
+                  No modo edição, deixe em branco para manter a senha atual.
+                </small>
+              </div>
+
+              <section class="permissions-section">
+                <div class="permissions-head">
+                  <div>
+                    <h4>Permissões</h4>
+                    <p>Defina exatamente quais módulos este usuário poderá acessar.</p>
+                  </div>
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-marcar-leitura">
+                    Liberar somente leitura
+                  </button>
+                </div>
+
+                <div class="permissions-note" id="permissions-note">
+                  Usuários com papel <strong>owner</strong> ou <strong>admin</strong> possuem acesso amplo. Para
+                  <strong>colaborador</strong> e <strong>visualizador</strong>, configure as permissões abaixo.
+                </div>
+
+                <div class="permissions-grid-wrap" id="bloco-permissoes">
+                  <div class="permissions-grid permissions-grid-header">
+                    <div class="perm-modulo-title">Módulo</div>
+                    <div>Ver</div>
+                    <div>Criar</div>
+                    <div>Editar</div>
+                    <div>Excluir</div>
+                  </div>
+
+                  <div id="permissions-grid-body"></div>
+                </div>
+              </section>
+            </form>
+          </div>
+
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" id="btn-cancelar-modal">Cancelar</button>
+            <button type="submit" form="form-usuario" class="btn btn-primary" id="btn-salvar-usuario">
+              Salvar usuário
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-overlay" id="Valora-confirm-backdrop" hidden>
+        <div class="modal-content modal-content-confirm">
+          <div class="modal-body modal-confirm-body">
+            <i class="fa-solid fa-triangle-exclamation confirm-icon"></i>
+            <h3 id="Valora-confirm-title">Confirmar</h3>
+            <p id="Valora-confirm-message"></p>
+            <div class="confirm-actions">
+              <button class="btn btn-secondary" id="Valora-confirm-cancel">Cancelar</button>
+              <button class="btn btn-primary btn-danger" id="Valora-confirm-ok">Excluir</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="valora-toast" class="toast-message"></div>
+    </main>
+  </div>
+</body>
+</html>

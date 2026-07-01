@@ -474,7 +474,7 @@
     bindHistory();
     bindGlobal();
 
-    if (!window.__zcSelectionEnsureInterval) {
+    if (!window.__zcSelectionEnsureInterval && window.ZC_DISABLE_SELECTION_INTERVAL !== true) {
       window.__zcSelectionEnsureInterval = setInterval(() => {
         ensureSelectionBar();
         bindHistory();

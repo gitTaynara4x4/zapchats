@@ -1363,3 +1363,38 @@ html:not(.dark)[data-theme="light"] #chat-footer .zc-claim-actions #btnLiberarCo
     max-width:min(42vw, 520px) !important;
   }
 }
+
+
+/* Etapa 8.1: quando a conversa está aguardando assumir, o botão Atender
+   precisa aparecer mesmo se algum script antigo resetar data-send-locked=0. */
+.zc-claim-bar.is-open.is-can-accept .zc-claim-card{
+  cursor:pointer !important;
+}
+
+.zc-claim-bar.is-open.is-can-accept .zc-claim-actions{
+  display:flex !important;
+  visibility:visible !important;
+  opacity:1 !important;
+  pointer-events:auto !important;
+}
+
+.zc-claim-bar.is-open.is-can-accept #btnAceitarConversa,
+#chat-footer[data-send-locked="0"] .zc-claim-bar.is-open.is-can-accept #btnAceitarConversa{
+  display:inline-flex !important;
+  visibility:visible !important;
+  opacity:1 !important;
+  pointer-events:auto !important;
+  width:auto !important;
+  min-width:118px !important;
+  max-width:none !important;
+  padding:0 18px !important;
+  margin:0 !important;
+  border:1px solid #10a37f !important;
+  background:#10a37f !important;
+  color:#fff !important;
+  overflow:visible !important;
+}
+
+.zc-claim-bar.is-open.is-can-accept #btnAceitarConversa .hdr-pill-btn-text{
+  display:inline-block !important;
+}

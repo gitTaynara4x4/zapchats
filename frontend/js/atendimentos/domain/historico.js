@@ -36,7 +36,7 @@ import '../ui/media-render/viewer.js';
 import '../ui/media-render/render-message.js';
 import '../ui/media-render/boot.js';
 
-export const HISTORICO_LIMIT = Number(window.ZC_HIST_PAGE_SIZE || 25);
+export const HISTORICO_LIMIT = Number(window.ZC_HIST_PAGE_SIZE || 12);
 const HIST_DOM_MAX_ROWS = Number(window.ZC_HIST_DOM_MAX_ROWS || 160);
 
 const H = () => document.getElementById('historico');
@@ -401,9 +401,11 @@ function compactMessageForMemory(m) {
     mensagem: safeSmallString(content, 3500) || '',
     texto: safeSmallString(content, 3500) || '',
 
-    tipo: m.tipo ?? (m.from_me === true || m.fromMe === true || m.origem === 'atendente' ? 'saida' : 'entrada'),
-    from_me: m.from_me ?? m.fromMe ?? null,
-    origem: m.origem ?? null,
+    tipo: zcIsSystemEventMessage(m, content, msgId) ? 'sistema' : (m.tipo ?? (m.from_me === true || m.fromMe === true || m.origem === 'atendente' ? 'saida' : 'entrada')),
+    from_me: zcIsSystemEventMessage(m, content, msgId) ? false : (m.from_me ?? m.fromMe ?? null),
+    origem: zcIsSystemEventMessage(m, content, msgId) ? 'sistema' : (m.origem ?? null),
+    message_type: zcIsSystemEventMessage(m, content, msgId) ? 'system' : (m.message_type ?? m.messageType ?? null),
+    system_event: zcIsSystemEventMessage(m, content, msgId),
     autor_nome: safeSmallString(m.autor_nome ?? m.atendente_nome ?? m.user_nome ?? '', 120) || null,
 
     timestamp,
@@ -992,6 +994,42 @@ function isSaidaMsg(m) {
   return m?.tipo === 'saida' || m?.from_me === true || m?.origem === 'atendente';
 }
 
+function zcLooksLikeSystemEventText(value) {
+  try {
+    const txt = String(value || '').trim().toLowerCase();
+    if (!txt) return false;
+    return (
+      txt.includes('assumiu este atendimento') ||
+      txt.includes('liberou este atendimento') ||
+      txt.includes('transferiu este atendimento') ||
+      txt.includes('atendimento liberado automaticamente') ||
+      (txt.includes('voltou para') && txt.includes('expediente'))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function zcIsSystemEventMessage(m, content, msgId) {
+  try {
+    const tipo = String(m?.tipo || m?.message_type || m?.messageType || '').trim().toLowerCase();
+    const origem = String(m?.origem || m?.origin || m?.source || '').trim().toLowerCase();
+    const id = String(msgId || m?.msg_id || m?.msgId || '').trim().toLowerCase();
+
+    return (
+      tipo === 'sistema' ||
+      tipo === 'system' ||
+      tipo === 'evento' ||
+      origem === 'sistema' ||
+      origem === 'system' ||
+      id.startsWith('sys:') ||
+      zcLooksLikeSystemEventText(content)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function normalizeMessageState(m) {
   if (!m || typeof m !== 'object') return m;
 
@@ -1425,7 +1463,9 @@ export function criarHTMLDaMensagem(m) {
   }
 
   const isSaida = isSaidaMsg(msg);
-  const texto = String(msg.conteudo ?? msg.mensagem ?? msg.texto ?? '').trim();
+  const textoRaw = String(msg.conteudo ?? msg.mensagem ?? msg.texto ?? '').trim();
+  const isReactionFallback = /^\[\s*Rea[cç][aã]o\s*\]/i.test(textoRaw);
+  const texto = isReactionFallback ? normalizeReactionChatText(textoRaw) : textoRaw;
   const ackVal = ackNum(msg);
   const msgIdAttr = msgKey(msg);
   const msgIdEsc = escapeHtml(msgIdAttr);
@@ -1443,7 +1483,7 @@ export function criarHTMLDaMensagem(m) {
   const quoteHtml = renderQuotedPreview(quotedPreview);
 
   const textHtml = texto
-    ? `<div class="msg-text">${escapeHtml(texto)}</div>`
+    ? `<div class="msg-text${isReactionFallback ? ' msg-reaction-text' : ''}">${escapeHtml(texto)}</div>`
     : `<div class="msg-text">&nbsp;</div>`;
 
   const quotedPreviewData = quotedPreviewAttr
@@ -1454,7 +1494,7 @@ export function criarHTMLDaMensagem(m) {
     ? ` data-quoted="${quotedAttr}"`
     : '';
 
-  return `<div class="msg-row ${isSaida ? 'msg-sent' : 'msg-received'}${pending ? ' is-pending' : ''}${failed ? ' is-failed' : ''}${isSaida && !pending && !failed ? ' is-sent' : ''}"
+  return `<div class="msg-row ${isSaida ? 'msg-sent' : 'msg-received'}${isReactionFallback ? ' msg-reaction-row' : ''}${pending ? ' is-pending' : ''}${failed ? ' is-failed' : ''}${isSaida && !pending && !failed ? ' is-sent' : ''}"
       data-id="${msgIdEsc}"
       data-msg-id="${msgIdEsc}"
       data-message-id="${msgIdEsc}"
@@ -1464,7 +1504,7 @@ export function criarHTMLDaMensagem(m) {
       data-from-me="${isSaida ? '1' : '0'}"
       data-pending="${pending ? '1' : '0'}"
       data-failed="${failed ? '1' : '0'}"${quotedPreviewData}${quotedData}>
-    <div class="bubble ${isSaida ? 'bubble-out' : 'bubble-in'}${pending ? ' is-pending' : ''}${failed ? ' is-failed' : ''}${isSaida && !pending && !failed ? ' is-sent' : ''}"
+    <div class="bubble ${isSaida ? 'bubble-out' : 'bubble-in'}${isReactionFallback ? ' bubble-reaction' : ''}${pending ? ' is-pending' : ''}${failed ? ' is-failed' : ''}${isSaida && !pending && !failed ? ' is-sent' : ''}"
         data-msg-id="${msgIdEsc}"
         data-message-id="${msgIdEsc}"
         data-wa-msg-id="${msgIdEsc}"
@@ -1481,6 +1521,17 @@ export function criarHTMLDaMensagem(m) {
       </div>
     </div>
   </div>`;
+}
+
+
+function normalizeReactionChatText(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const m = raw.match(/^\[\s*Rea[cç][aã]o\s*\]\s*(.*)$/i);
+  if (!m) return raw;
+  let rest = String(m[1] || '').trim();
+  rest = rest.replace(/\s*(?:[→⇢➜➡]|-{1,2}>|=>)\s*[A-Za-z0-9._:@-]+.*$/u, '').trim();
+  return rest || '[Reação]';
 }
 
 function isDateJumpScrollLocked() {
@@ -1946,6 +1997,7 @@ export async function abrirHistorico(id) {
       `/api/atendimento/conversas/${encodeURIComponent(entityId)}/mensagens` +
       `?empresa_id=${EMPRESA_ID}` +
       `&limit=${HISTORICO_LIMIT}` +
+      `&light=1` +
       getInstQuery(convKey) +
       `&__ts=${Date.now()}`;
 
@@ -2157,7 +2209,8 @@ export async function forcarAtualizacaoHistorico(rawConversation = null, opts = 
   const url =
     `/api/atendimento/conversas/${encodeURIComponent(entityId)}/mensagens` +
     `?empresa_id=${EMPRESA_ID}` +
-    `&limit=${limit}` +
+    `&limit=${Math.min(Number(limit || HISTORICO_LIMIT) || HISTORICO_LIMIT, Number(window.ZC_HIST_OPEN_LIMIT || 12))}` +
+    `&light=1` +
     getInstQuery(convKey) +
     `&__ts=${Date.now()}`;
 
@@ -2226,6 +2279,76 @@ export async function forcarAtualizacaoHistorico(rawConversation = null, opts = 
   }
 }
 
+function zcMakeSystemEventMessage(raw = {}) {
+  const now = new Date().toISOString();
+  const msgId = String(
+    raw.msg_id ||
+    raw.msgId ||
+    raw.message_id ||
+    raw.messageId ||
+    `sys:front:${Date.now()}:${Math.random().toString(16).slice(2)}`
+  );
+
+  const texto = String(
+    raw.conteudo ??
+    raw.texto ??
+    raw.mensagem ??
+    raw.body ??
+    ''
+  ).trim();
+
+  if (!texto) return null;
+
+  return normalizeMessageState({
+    ...raw,
+    id: raw.id || msgId,
+    msg_id: msgId,
+    message_id: msgId,
+    conteudo: texto,
+    texto,
+    mensagem: texto,
+    tipo: 'sistema',
+    origem: 'sistema',
+    message_type: 'system',
+    messageType: 'system',
+    system_event: true,
+    lida: true,
+    ack: Number(raw.ack ?? 3),
+    timestamp: raw.timestamp || raw.created_at || raw.createdAt || now,
+    created_at: raw.created_at || raw.createdAt || raw.timestamp || now,
+  });
+}
+
+window.zcAppendSystemEventToOpenHistory = function zcAppendSystemEventToOpenHistory(raw = {}) {
+  try {
+    const hist = H();
+    if (!hist) return false;
+
+    const convObj = eventDetailToConversation(raw || {});
+    const ref = getHistConversationRef(convObj);
+    const convKey = ref?.key || convObj.conversation_key || getOpenHistKey(hist);
+
+    if (!convKey || !isHistoricoStillOpenFor(convKey, hist)) {
+      return false;
+    }
+
+    const msg = zcMakeSystemEventMessage(raw);
+    if (!msg) return false;
+
+    salvarNoCache(convKey, [msg]);
+    renderHistoricoDoCache(convKey, true);
+
+    try {
+      window.syncPreviewFromCache?.(convKey);
+    } catch {}
+
+    return true;
+  } catch (e) {
+    HERR('zcAppendSystemEventToOpenHistory erro', e);
+    return false;
+  }
+};
+
 function agendarRefreshHistorico(rawConversation = null, opts = {}) {
   const hist = H();
   if (!hist) return;
@@ -2256,6 +2379,8 @@ function agendarRefreshHistorico(rawConversation = null, opts = {}) {
       ? 420
       : 180;
 
+  const eventLimit = Number(opts.limit || convObj.limit || 0) || undefined;
+
   forceRefreshTimer = setTimeout(() => {
     forceRefreshTimer = null;
 
@@ -2266,6 +2391,7 @@ function agendarRefreshHistorico(rawConversation = null, opts = {}) {
         forcarAtualizacaoHistorico(convObj, {
           append: true,
           reason: `${reason}:after-inflight`,
+          limit: eventLimit,
         }).catch(() => {});
       });
 
@@ -2275,6 +2401,7 @@ function agendarRefreshHistorico(rawConversation = null, opts = {}) {
     forceRefreshInFlight = forcarAtualizacaoHistorico(convObj, {
       append: true,
       reason,
+      limit: eventLimit,
     });
 
     forceRefreshInFlight
@@ -2284,6 +2411,7 @@ function agendarRefreshHistorico(rawConversation = null, opts = {}) {
             forcarAtualizacaoHistorico(convObj, {
               append: true,
               reason: `${reason}:retry`,
+              limit: eventLimit,
             }).catch(() => {});
           }, 900);
         }
@@ -2388,6 +2516,7 @@ export async function carregarMaisHistorico(id) {
     const url =
       `/api/atendimento/conversas/${encodeURIComponent(entityId)}/mensagens?empresa_id=${EMPRESA_ID}` +
       `&limit=${limit}${cursorPart}` +
+      `&light=1` +
       `${getInstQuery(convKey)}` +
       `&__ts=${Date.now()}`;
 

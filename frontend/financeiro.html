@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Financeiro | Valora CRM</title>
+  <script>(() => { const t = localStorage.getItem("valora_theme") || "light"; document.documentElement.setAttribute("data-theme", t); })();</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="/frontend/css/app.css?v=20260630-dark-chatgpt-v6" />
+  <link rel="stylesheet" href="/frontend/css/financeiro.css?v=20260630-dark-chatgpt-v6" />
+  <link rel="stylesheet" href="/frontend/css/responsivo-global.css?v=20260629-valora-saas-financeiro" />
+  <script src="/frontend/js/pages/app.js?v=20260629-valora-saas-financeiro" defer></script>
+  <script src="/frontend/js/pages/financeiro.js?v=20260629-valora-saas-financeiro" defer></script>
+  <link rel="stylesheet" href="/frontend/css/dark-chatgpt-fix.css?v=20260630-dark-v7" />
+</head>
+<body>
+  <div class="layout">
+    <iframe src="/frontend/partials/sidebar.html?v=20260629-valora-saas-financeiro" class="sidebar-frame" title="Menu Valora" loading="eager"></iframe>
+
+    <main class="main financeiro-page financeiro-page--overview" data-financeiro-page="dashboard">
+      <header class="financeiro-saas-header">
+        <div class="financeiro-saas-title">
+          <span class="financeiro-kicker">Financeiro</span>
+          <h1>Financeiro</h1>
+          <p>Visão geral das contas a receber, contas a pagar, fluxo de caixa e saúde financeira do Valora.</p>
+        </div>
+
+        <div class="financeiro-saas-actions">
+          <button class="financeiro-filter-chip" type="button" id="btn-periodo-financeiro">
+            <i class="fa-regular fa-calendar"></i>
+            <span>Período: Últimos 30 dias</span>
+            <i class="fa-solid fa-chevron-down"></i>
+          </button>
+          <button class="financeiro-filter-chip" type="button">
+            <i class="fa-regular fa-building"></i>
+            <span>Empresa: Todas</span>
+            <i class="fa-solid fa-chevron-down"></i>
+          </button>
+          <button class="btn btn-secondary" type="button" id="btn-exportar-financeiro"><i class="fa-solid fa-download"></i> Exportar CSV</button>
+          <button class="btn btn-secondary" type="button" id="btn-toggle-filtros"><i class="fa-solid fa-filter"></i> Filtros</button>
+          <button class="btn btn-primary btn-novo-registro" type="button" data-new=""><i class="fa-solid fa-plus"></i> Novo lançamento</button>
+        </div>
+      </header>
+
+      <div class="financeiro-toolbar financeiro-toolbar--saas">
+        <nav class="financeiro-tabs">
+          <a href="/financeiro" class="active"><i class="fa-regular fa-clipboard"></i><span>Visão Geral</span></a>
+          <a href="/contas-receber"><i class="fa-regular fa-calendar-check"></i><span>Contas a Receber</span></a>
+          <a href="/contas-pagar"><i class="fa-regular fa-file-lines"></i><span>Contas a Pagar</span></a>
+          <a href="/fluxo-caixa"><i class="fa-solid fa-wave-square"></i><span>Fluxo de Caixa</span></a>
+          <a href="/categorias-financeiras"><i class="fa-regular fa-folder-open"></i><span>Categorias</span></a>
+          <a href="/formas-pagamento"><i class="fa-regular fa-credit-card"></i><span>Formas</span></a>
+          <a href="/contas-bancos"><i class="fa-solid fa-building-columns"></i><span>Contas/Bancos</span></a>
+          <a href="/relatorios-financeiros"><i class="fa-regular fa-chart-bar"></i><span>Relatórios</span></a>
+        </nav>
+        <span class="financeiro-muted financeiro-toolbar-status" id="financeiro-status-text">Carregando dados reais...</span>
+      </div>
+
+      <section class="financeiro-panel financeiro-filter-panel" id="financeiro-filtros">
+        <div class="financeiro-filters-grid">
+          <div class="financeiro-field"><label>Busca</label><input id="filtro-busca" placeholder="Descrição, documento, cliente ou fornecedor"></div>
+          <div class="financeiro-field"><label>Status</label><select id="filtro-status"><option value="">Todos</option><option value="aberto">Aberto</option><option value="vencido">Vencido</option><option value="parcial">Parcial</option><option value="recebido">Recebido</option><option value="pago">Pago</option><option value="cancelado">Cancelado</option></select></div>
+          <div class="financeiro-field"><label>Data inicial</label><input id="filtro-data-inicio" type="date"></div>
+          <div class="financeiro-field"><label>Data final</label><input id="filtro-data-fim" type="date"></div>
+        </div>
+        <div class="financeiro-toolbar" style="margin:14px 0 0;"><span class="financeiro-muted">Use os filtros para refinar o painel.</span><div><button class="btn btn-secondary" type="button" id="btn-limpar-filtros">Limpar</button> <button class="btn btn-primary" type="button" id="btn-aplicar-filtros">Aplicar</button></div></div>
+      </section>
+
+      <section class="financeiro-metrics-grid">
+        <article class="financeiro-saas-metric metric-receber">
+          <span class="metric-icon"><i class="fa-regular fa-wallet"></i></span>
+          <div>
+            <p>A receber</p>
+            <strong data-kpi="total-receber">R$ 0,00</strong>
+            <small><span class="trend up" data-kpi="trend-receber">↑ 0,00%</span> do total financeiro</small>
+          </div>
+        </article>
+        <article class="financeiro-saas-metric metric-pagar">
+          <span class="metric-icon"><i class="fa-regular fa-file-lines"></i></span>
+          <div>
+            <p>A pagar</p>
+            <strong data-kpi="total-pagar">R$ 0,00</strong>
+            <small><span class="trend down" data-kpi="trend-pagar">↑ 0,00%</span> do total financeiro</small>
+          </div>
+        </article>
+        <article class="financeiro-saas-metric metric-realizado">
+          <span class="metric-icon"><i class="fa-solid fa-money-bill-trend-up"></i></span>
+          <div>
+            <p>Recebido no mês</p>
+            <strong data-kpi="total-recebido">R$ 0,00</strong>
+            <small><span class="trend up" data-kpi="trend-recebido">↑ 0,00%</span> realizado no período</small>
+          </div>
+        </article>
+        <article class="financeiro-saas-metric metric-saldo">
+          <span class="metric-icon"><i class="fa-solid fa-chart-line"></i></span>
+          <div>
+            <p>Saldo previsto</p>
+            <strong data-kpi="saldo-previsto">R$ 0,00</strong>
+            <small><span class="trend up" data-kpi="trend-saldo">↑ 0,00%</span> saldo estimado</small>
+          </div>
+        </article>
+      </section>
+
+      <section class="financeiro-dashboard-grid">
+        <article class="financeiro-saas-card financeiro-chart-card">
+          <div class="financeiro-card-head">
+            <div>
+              <h3>Fluxo financeiro</h3>
+              <p id="financeiro-chart-subtitle">Saldo acumulado por vencimento.</p>
+            </div>
+            <button class="financeiro-select-mini" type="button">Diário <i class="fa-solid fa-chevron-down"></i></button>
+          </div>
+          <div class="financeiro-chart-wrap" id="financeiro-chart">
+            <div class="financeiro-empty-chart">Carregando gráfico...</div>
+          </div>
+        </article>
+
+        <article class="financeiro-saas-card financeiro-list-card">
+          <div class="financeiro-card-head">
+            <div>
+              <h3>Top clientes</h3>
+              <p>Maiores valores a receber.</p>
+            </div>
+            <a href="/contas-receber">Ver todos</a>
+          </div>
+          <div class="financeiro-top-list" id="financeiro-top-clientes">
+            <div class="financeiro-empty-soft">Carregando clientes...</div>
+          </div>
+        </article>
+      </section>
+
+      <section class="financeiro-bottom-grid">
+        <article class="financeiro-saas-card">
+          <div class="financeiro-card-head compact">
+            <div>
+              <h3>Últimos lançamentos</h3>
+              <p>Movimentações recentes.</p>
+            </div>
+            <button class="btn btn-primary btn-novo-registro" type="button" data-new=""><i class="fa-solid fa-plus"></i> Novo</button>
+          </div>
+          <div class="financeiro-table-wrap financeiro-table-wrap--compact">
+            <table class="financeiro-table financeiro-table--saas" id="financeiro-table">
+              <thead><tr><th>Descrição</th><th>Tipo</th><th>Valor</th><th>Status</th><th>Ações</th></tr></thead>
+              <tbody id="tbody-dashboard"><tr><td class="financeiro-empty" colspan="5">Carregando...</td></tr></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="financeiro-saas-card">
+          <div class="financeiro-card-head compact">
+            <div>
+              <h3>Categorias</h3>
+              <p>Distribuição por tipo.</p>
+            </div>
+            <a href="/categorias-financeiras">Ver todas</a>
+          </div>
+          <div class="financeiro-category-list" id="financeiro-categorias-dashboard">
+            <div class="financeiro-empty-soft">Carregando categorias...</div>
+          </div>
+        </article>
+
+        <article class="financeiro-saas-card">
+          <div class="financeiro-card-head compact">
+            <div>
+              <h3>Status dos lançamentos</h3>
+              <p>Resumo do período.</p>
+            </div>
+            <a href="/relatorios-financeiros">Ver relatório</a>
+          </div>
+          <div class="financeiro-status-dashboard" id="financeiro-status-dashboard">
+            <div class="financeiro-empty-soft">Carregando status...</div>
+          </div>
+        </article>
+      </section>
+
+      <p class="financeiro-saas-note">Os valores exibidos estão em Reais (R$) e podem sofrer alterações conforme filtros e baixas.</p>
+    </main>
+  </div>
+
+<div class="financeiro-modal-backdrop" id="modal-lancamento" aria-hidden="true">
+  <div class="financeiro-modal financeiro-modal--ficha">
+    <form id="form-lancamento" class="financeiro-ficha-form">
+      <aside class="financeiro-ficha-sidebar">
+        <div class="financeiro-ficha-brand">
+          <div class="financeiro-ficha-icon">
+            <i class="fa-solid fa-sack-dollar"></i>
+          </div>
+          <strong>Financeiro</strong>
+          <span>Lançamento financeiro</span>
+        </div>
+
+        <nav class="financeiro-ficha-nav" aria-label="Seções do lançamento">
+          <button type="button" class="is-active" data-financeiro-section="fin-sec-lancamento">
+            <i class="fa-regular fa-clipboard"></i>
+            <span>Lançamento</span>
+          </button>
+          <button type="button" data-financeiro-section="fin-sec-envolvidos">
+            <i class="fa-regular fa-user"></i>
+            <span>Envolvidos</span>
+          </button>
+          <button type="button" data-financeiro-section="fin-sec-pagamento">
+            <i class="fa-regular fa-credit-card"></i>
+            <span>Pagamento</span>
+          </button>
+          <button type="button" data-financeiro-section="fin-sec-parcelamento">
+            <i class="fa-solid fa-layer-group"></i>
+            <span>Parcelamento</span>
+          </button>
+          <button type="button" data-financeiro-section="fin-sec-observacoes">
+            <i class="fa-regular fa-comment-dots"></i>
+            <span>Observações</span>
+          </button>
+        </nav>
+
+        <div class="financeiro-ficha-helper">
+          <label>
+            <input type="checkbox" data-financeiro-ficha-principal>
+            <span>Usar ficha principal</span>
+          </label>
+          <p>Mostrar somente os campos essenciais do lançamento.</p>
+        </div>
+      </aside>
+
+      <section class="financeiro-ficha-main">
+        <div class="financeiro-modal-head financeiro-modal-head--ficha">
+          <div class="financeiro-modal-title">
+            <h3 id="modal-lancamento-titulo">Novo lançamento</h3>
+            <p id="modal-lancamento-subtitulo">Preencha os dados financeiros do lançamento.</p>
+          </div>
+          <div class="financeiro-modal-head-actions">
+            <span class="financeiro-modal-chip" id="modal-lancamento-chip">Aberto</span>
+            <button class="financeiro-close" type="button" data-close-modal><i class="fa-solid fa-xmark"></i></button>
+          </div>
+        </div>
+
+        <div class="financeiro-modal-body financeiro-modal-body--ficha">
+          <input type="hidden" name="id">
+
+          <section class="financeiro-editor-card" id="fin-sec-lancamento">
+            <div class="financeiro-editor-card-head">
+              <div>
+                <h4>Dados do lançamento</h4>
+                <p>Defina o tipo, status, documento, descrição, moeda, valores e datas principais.</p>
+              </div>
+            </div>
+
+            <div class="financeiro-form-grid cols-3">
+              <div class="financeiro-field"><label>Tipo</label><select name="tipo" required><option value="receber">Receber</option><option value="pagar">Pagar</option></select></div>
+              <div class="financeiro-field"><label>Status</label><select name="status"><option value="aberto">Aberto</option><option value="vencido">Vencido</option><option value="parcial">Parcial</option><option value="recebido">Recebido</option><option value="pago">Pago</option><option value="cancelado">Cancelado</option></select></div>
+              <div class="financeiro-field"><label>Documento</label><input name="documento" placeholder="NF, boleto, contrato..."></div>
+              <div class="financeiro-field full"><label>Descrição</label><input name="descricao" required placeholder="Ex.: Monitoramento mensal"></div>
+
+              <div class="financeiro-field"><label>Moeda</label><select name="moeda" data-money-currency><option value="BRL">R$ Real</option><option value="USD">US$ Dólar</option><option value="EUR">€ Euro</option><option value="GBP">£ Libra</option></select></div>
+              <div class="financeiro-field"><label>Valor total</label><input name="valor_total" class="financeiro-money-input" data-money-input required inputmode="decimal" autocomplete="off" placeholder="R$ 0,00"></div>
+              <div class="financeiro-field"><label>Valor pago/recebido</label><input name="valor_pago" class="financeiro-money-input" data-money-input inputmode="decimal" autocomplete="off" placeholder="R$ 0,00"></div>
+
+              <div class="financeiro-field"><label>Emissão</label><input name="data_emissao" type="date"></div>
+              <div class="financeiro-field"><label>Vencimento</label><input name="data_vencimento" type="date" required></div>
+              <div class="financeiro-field"><label>Pagamento/Recebimento</label><input name="data_pagamento" type="date"></div>
+            </div>
+          </section>
+
+          <section class="financeiro-editor-card" id="fin-sec-envolvidos">
+            <div class="financeiro-editor-card-head">
+              <div>
+                <h4>Envolvidos e classificação</h4>
+                <p>Associe o lançamento ao cliente, fornecedor e categoria financeira.</p>
+              </div>
+            </div>
+
+            <div class="financeiro-form-grid cols-3">
+              <div class="financeiro-field"><label>Cliente</label><select name="cliente_id" data-select="clientes"><option value="">Selecione...</option></select></div>
+              <div class="financeiro-field"><label>Fornecedor</label><select name="fornecedor_id" data-select="fornecedores"><option value="">Selecione...</option></select></div>
+              <div class="financeiro-field"><label>Categoria</label><select name="categoria_id" data-select="categorias"><option value="">Selecione...</option></select></div>
+            </div>
+          </section>
+
+          <section class="financeiro-editor-card" id="fin-sec-pagamento">
+            <div class="financeiro-editor-card-head">
+              <div>
+                <h4>Pagamento</h4>
+                <p>Escolha a forma de pagamento e a conta ou banco usado no lançamento.</p>
+              </div>
+            </div>
+
+            <div class="financeiro-form-grid cols-2">
+              <div class="financeiro-field"><label>Forma de pagamento</label><select name="forma_pagamento_id" data-select="formas"><option value="">Selecione...</option></select></div>
+              <div class="financeiro-field"><label>Conta/Banco</label><select name="conta_banco_id" data-select="contas"><option value="">Selecione...</option></select></div>
+            </div>
+          </section>
+
+          <section class="financeiro-editor-card" id="fin-sec-parcelamento">
+            <div class="financeiro-editor-card-head">
+              <div>
+                <h4>Parcelamento</h4>
+                <p>Use estes campos quando o lançamento for parcelado.</p>
+              </div>
+            </div>
+
+            <div class="financeiro-form-grid cols-3">
+              <div class="financeiro-field"><label>Parcelado?</label><select name="parcelado"><option value="false">Não</option><option value="true">Sim</option></select></div>
+              <div class="financeiro-field"><label>Parcela nº</label><input name="parcela_numero" type="number" min="1"></div>
+              <div class="financeiro-field"><label>Total parcelas</label><input name="parcela_total" type="number" min="1"></div>
+            </div>
+          </section>
+
+          <section class="financeiro-editor-card" id="fin-sec-observacoes">
+            <div class="financeiro-editor-card-head">
+              <div>
+                <h4>Observações</h4>
+                <p>Adicione informações internas ou detalhes importantes sobre este lançamento.</p>
+              </div>
+            </div>
+
+            <div class="financeiro-form-grid cols-1">
+              <div class="financeiro-field full"><label>Observações</label><textarea name="observacoes" placeholder="Observações internas"></textarea></div>
+            </div>
+          </section>
+        </div>
+
+        <div class="financeiro-modal-foot financeiro-modal-foot--ficha">
+          <button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button>
+          <button class="btn btn-primary" type="submit"><i class="fa-solid fa-floppy-disk"></i> Salvar lançamento</button>
+        </div>
+      </section>
+    </form>
+  </div>
+</div>
+
+
+<div class="financeiro-modal-backdrop" id="modal-baixa" aria-hidden="true">
+  <div class="financeiro-modal sm">
+    <form id="form-baixa">
+      <div class="financeiro-modal-head"><div class="financeiro-modal-title"><h3>Baixar lançamento</h3><p>Confirme o pagamento/recebimento.</p></div><button class="financeiro-close" type="button" data-close-modal><i class="fa-solid fa-xmark"></i></button></div>
+      <div class="financeiro-modal-body">
+        <input type="hidden" name="id">
+        <div class="financeiro-form-grid cols-2">
+          <div class="financeiro-field"><label>Valor pago/recebido</label><input name="valor_pago" class="financeiro-money-input" data-money-input required inputmode="decimal" autocomplete="off" placeholder="R$ 0,00"></div>
+          <div class="financeiro-field"><label>Data</label><input name="data_pagamento" type="date" required></div>
+          <div class="financeiro-field"><label>Forma</label><select name="forma_pagamento_id" data-select="formas"><option value="">Manter/selecionar...</option></select></div>
+          <div class="financeiro-field"><label>Conta/Banco</label><select name="conta_banco_id" data-select="contas"><option value="">Manter/selecionar...</option></select></div>
+        </div>
+      </div>
+      <div class="financeiro-modal-foot"><button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button><button class="btn btn-primary" type="submit">Confirmar baixa</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="financeiro-modal-backdrop" id="modal-auxiliar" aria-hidden="true">
+  <div class="financeiro-modal sm">
+    <form id="form-auxiliar">
+      <div class="financeiro-modal-head"><div class="financeiro-modal-title"><h3 id="modal-auxiliar-titulo">Cadastro</h3><p>Cadastro auxiliar do financeiro.</p></div><button class="financeiro-close" type="button" data-close-modal><i class="fa-solid fa-xmark"></i></button></div>
+      <div class="financeiro-modal-body" id="modal-auxiliar-body"></div>
+      <div class="financeiro-modal-foot"><button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button><button class="btn btn-primary" type="submit">Salvar</button></div>
+    </form>
+  </div>
+</div>
+
+</body>
+</html>

@@ -50,6 +50,13 @@ if (typeof window !== 'undefined') {
   if (window.PREFETCH_HISTORIES === undefined) {
     window.PREFETCH_HISTORIES = false;
   }
+
+  // Modo leve: fotos remotas de perfil podem decodificar imagens grandes no Chrome.
+  // Usa avatar padrão/ícone e evita dezenas de requests /api/atendimento/avatar.
+  if (window.ZC_MODO_ULTRA_LEVE_RAM === undefined) window.ZC_MODO_ULTRA_LEVE_RAM = true;
+  if (window.ZC_DISABLE_REMOTE_AVATARS === undefined) window.ZC_DISABLE_REMOTE_AVATARS = true;
+  window.AVATAR_DAILY_REFRESH = false;
+  window.AVATAR_DAILY_LIMIT = 0;
 }
 
 /* =========================================================
@@ -70,6 +77,21 @@ function idEq(a, b) {
 
 function normStr(v) {
   return String(v ?? '').trim();
+}
+
+function normalizeReactionPreviewText(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+
+  const m = raw.match(/^\[\s*Rea[cç][aã]o\s*\]\s*(.*)$/i);
+  if (!m) return raw;
+
+  let rest = String(m[1] || '').trim();
+  rest = rest
+    .replace(/\s*(?:[→⇢➜➡]|-{1,2}>|=>)\s*[A-Za-z0-9._:@-]+.*$/u, '')
+    .trim();
+
+  return rest ? `[Reação] ${rest}` : '[Reação]';
 }
 
 function instKey(v) {
@@ -871,7 +893,19 @@ function syncActiveConvs(list, nextCursor = null) {
    ========================================================= */
 const __brokenAvatarUrls = new Set();
 
+function remoteAvatarsDisabled() {
+  try {
+    return window.ZC_DISABLE_REMOTE_AVATARS === true || window.ZC_MODO_ULTRA_LEVE_RAM === true;
+  } catch {
+    return true;
+  }
+}
+
 function cleanAvatarUrl(value) {
+  // RAM: por padrão não carregamos fotos remotas na lista/header.
+  // Isso mantém a tela leve e evita Chrome decodificar imagens enormes do WhatsApp.
+  if (remoteAvatarsDisabled()) return '';
+
   const s = String(value || '').trim();
   if (!s) return '';
   if (/^(null|undefined|about:blank)$/i.test(s)) return '';
@@ -961,11 +995,12 @@ function _dailyKey() {
 
 function _shouldRunDaily() {
   try {
+    if (remoteAvatarsDisabled()) return false;
     if (window.AVATAR_DAILY_REFRESH === false) return false;
     const k = _dailyKey();
     return !localStorage.getItem(k);
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -1309,13 +1344,14 @@ export function normalizeCliente(c) {
     c.timestamp ??
     null;
 
-  const preview =
+  const preview = normalizeReactionPreviewText(
     c.ultima_texto ??
     c.ultima_mensagem ??
     c.ultima ??
     c.last_text ??
     c.preview ??
-    '';
+    ''
+  );
 
   const fotoRaw =
     c.avatar_url ||
@@ -2322,7 +2358,7 @@ function wireListaClicks(ul) {
       nome_whatsapp: String(item.dataset.nome || item.querySelector('.chat-name')?.textContent || '').trim(),
       push_name: String(item.dataset.nome || item.querySelector('.chat-name')?.textContent || '').trim(),
       telefone: String(item.dataset.telefone || ''),
-      avatar_url: String(item.dataset.avatarUrl || ''),
+      avatar_url: remoteAvatarsDisabled() ? '' : String(item.dataset.avatarUrl || ''),
     });
   });
 }
@@ -2358,7 +2394,7 @@ export function renderListaClientes(data) {
 
     const serverMs = tsToMillis(c.hora || c.last_ts) || 0;
     let when = serverMs ? formatChatTime(serverMs) : '';
-    let preview = (c.ultima_mensagem || '').trim();
+    let preview = normalizeReactionPreviewText(c.ultima_mensagem || '');
     let outboundFlag = (c.last_tipo === 'saida');
     let ackValForIcon = Number(c.last_ack ?? 0) || 0;
 
@@ -2398,7 +2434,7 @@ export function renderListaClientes(data) {
           if (histMs) when = formatChatTime(histMs);
 
           if (rawHistText) {
-            preview = rawHistText;
+            preview = normalizeReactionPreviewText(rawHistText);
           } else {
             const a = Array.isArray(last?.midias) ? last.midias : [];
             const mime = String(a[0]?.mimetype || a[0]?.mime || '').toLowerCase();
@@ -2691,10 +2727,11 @@ if (!window.Lista) {
         null;
 
       if (textoFinal !== null) {
-        c.ultima_mensagem = textoFinal;
-        c.preview = textoFinal;
-        c.last_message = textoFinal;
-        c.last_msg = textoFinal;
+        const textoPreview = normalizeReactionPreviewText(textoFinal);
+        c.ultima_mensagem = textoPreview;
+        c.preview = textoPreview;
+        c.last_message = textoPreview;
+        c.last_msg = textoPreview;
       }
 
       if (temValor(instancia_id)) {
@@ -2959,7 +2996,7 @@ if (!window.Lista) {
 
     if (textoFinal !== null) {
       const previewEl = li.querySelector('.preview-text');
-      if (previewEl) previewEl.textContent = textoFinal;
+      if (previewEl) previewEl.textContent = normalizeReactionPreviewText(textoFinal);
     }
 
     try {

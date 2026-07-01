@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Painel | Valora CRM</title>
+
+  <script>
+    (() => {
+      const savedTheme = localStorage.getItem("valora_theme") || "light";
+      document.documentElement.setAttribute("data-theme", savedTheme);
+    })();
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  >
+
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+  >
+
+  <link rel="stylesheet" href="/frontend/css/app.css?v=20260630-dark-chatgpt-v6" />
+  <link rel="stylesheet" href="/frontend/css/layout-compacto.css?v=20260615-tipografia-sem-centralizar" />
+  <link rel="stylesheet" href="/frontend/css/responsivo-global.css?v=20260615-mobile-real" />
+
+  <script src="/frontend/js/pages/app.js?v=20260626-ajuda-global" defer></script>
+  <script src="/frontend/js/pages/dashboard.js?v=20260615-dashboard-fix" defer></script>
+  <link rel="stylesheet" href="/frontend/css/dark-chatgpt-fix.css?v=20260630-dark-v7" />
+</head>
+
+<body>
+  <div class="layout">
+    <iframe
+      src="/frontend/partials/sidebar.html?v=20260615-menu-fix"
+      class="sidebar-frame"
+      title="Menu lateral"
+      loading="eager">
+    </iframe>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <span class="eyebrow">Visão Geral</span>
+          <h1>Painel de Controle</h1>
+        </div>
+
+        <div class="user-badge">
+          <div class="user-avatar" id="userAvatar">U</div>
+
+          <div class="user-meta">
+            <strong id="userName">Usuário</strong>
+            <span id="userEmail">email@empresa.com</span>
+          </div>
+        </div>
+      </header>
+
+      <section class="hero-card">
+        <div class="hero-content">
+          <div class="status-indicator">
+            <span class="dot"></span>
+            <span id="dashboardStatusText">Sistema online e ativo</span>
+          </div>
+
+          <h2 id="welcomeTitle">Pronto para começar?</h2>
+
+          <p id="welcomeText">
+            Configure sua conta, cadastre seus primeiros clientes e comece a gerar propostas
+            de forma rápida e profissional.
+          </p>
+
+          <div class="hero-actions">
+            <a href="/clientes" class="btn btn-primary">
+              <i class="fa-solid fa-user-plus"></i>
+              Cadastrar cliente
+            </a>
+
+            <a href="/propostas" class="btn btn-secondary">
+              <i class="fa-solid fa-file-circle-plus"></i>
+              Criar proposta
+            </a>
+          </div>
+        </div>
+
+        <aside class="plan-card">
+          <span class="plan-label">Seu plano</span>
+          <strong id="planName">Essencial</strong>
+          <small id="companyIdInfo">ID da Empresa: #--</small>
+        </aside>
+      </section>
+
+      <section class="stats-grid" aria-label="Indicadores do painel">
+        <article class="stat-card">
+          <span class="stat-label">Total de clientes</span>
+          <strong class="stat-value" id="statClientes">0</strong>
+        </article>
+
+        <article class="stat-card">
+          <span class="stat-label">Propostas ativas</span>
+          <strong class="stat-value" id="statPropostas">0</strong>
+        </article>
+
+        <article class="stat-card">
+          <span class="stat-label">Usuários</span>
+          <strong class="stat-value" id="statUsuarios">1</strong>
+        </article>
+
+        <article class="stat-card">
+          <span class="stat-label">Status da licença</span>
+          <strong class="stat-value online" id="statLicenca">Regular</strong>
+        </article>
+      </section>
+
+      <section class="content-grid">
+        <article class="panel-card">
+          <div class="panel-head">
+            <h3>Acesso rápido</h3>
+            <p>Atalhos para as funções mais usadas.</p>
+          </div>
+
+          <div class="quick-grid">
+            <a href="/clientes" class="quick-card">
+              <strong>Gestão de clientes</strong>
+              <small>Adicione ou edite contatos</small>
+            </a>
+
+            <a href="/propostas" class="quick-card">
+              <strong>Módulo de propostas</strong>
+              <small>Gere novos orçamentos</small>
+            </a>
+
+            <a href="/configuracoes" class="quick-card">
+              <strong>Configurações</strong>
+              <small>Ajustes da sua empresa</small>
+            </a>
+
+            <a href="/ajuda" class="quick-card">
+              <strong>Central de ajuda</strong>
+              <small>Tutoriais e suporte</small>
+            </a>
+          </div>
+        </article>
+
+        <article class="panel-card">
+          <div class="panel-head">
+            <h3>Primeiros passos</h3>
+            <p>Conclua estas etapas para configurar seu CRM.</p>
+          </div>
+
+          <div class="checklist">
+            <label class="check-item">
+              <input type="checkbox" id="checkConfig" />
+              <span class="fake-check"></span>
+              <span class="check-text">Confirmar dados nas configurações</span>
+            </label>
+
+            <label class="check-item">
+              <input type="checkbox" id="checkClientes" />
+              <span class="fake-check"></span>
+              <span class="check-text">Cadastrar cliente de teste</span>
+            </label>
+
+            <label class="check-item">
+              <input type="checkbox" id="checkPropostas" />
+              <span class="fake-check"></span>
+              <span class="check-text">Gerar proposta modelo</span>
+            </label>
+
+            <label class="check-item">
+              <input type="checkbox" id="checkSeguranca" />
+              <span class="fake-check"></span>
+              <span class="check-text">Ativar segurança da conta</span>
+            </label>
+          </div>
+        </article>
+      </section>
+
+      <div id="valora-toast" class="toast-message" aria-live="polite"></div>
+    </main>
+  </div>
+</body>
+</html>

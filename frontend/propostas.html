@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <title>Propostas | Valora CRM</title>
+
+  <script>
+    (() => {
+      const savedTheme = localStorage.getItem("valora_theme") || "light";
+      document.documentElement.setAttribute("data-theme", savedTheme);
+    })();
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  >
+
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+  >
+
+  <link rel="stylesheet" href="/frontend/css/app.css?v=20260630-dark-chatgpt-v6" />
+  <link rel="stylesheet" href="/frontend/css/validacao.css?v=20260614-required-circle" />
+  <link rel="stylesheet" href="/frontend/css/propostas.css" />
+  <link rel="stylesheet" href="/frontend/css/forms-respiro.css?v=20260614-bitrix-layout" />
+  <link rel="stylesheet" href="/frontend/css/campos-longos.css?v=20260614-global-inline" />
+  <link rel="stylesheet" href="/frontend/css/layout-compacto.css?v=20260615-tipografia-sem-centralizar" />
+  <link rel="stylesheet" href="/frontend/css/responsivo-global.css?v=20260615-mobile-real" />
+
+  <script src="/frontend/js/pages/app.js?v=20260626-ajuda-global" defer></script>
+  <script src="/frontend/js/shared/validacao.js?v=20260614-required-circle" defer></script>
+  <script src="/frontend/js/shared/campos-longos.js?v=20260614-global-inline" defer></script>
+  <script src="/frontend/js/pages/propostas.js?v=20260525-propostas-modal-tabs" defer></script>
+  <link rel="stylesheet" href="/frontend/css/dark-chatgpt-fix.css?v=20260630-dark-v7" />
+</head>
+
+<body>
+  <div class="layout">
+    <iframe
+      src="/frontend/partials/sidebar.html?v=20260615-menu-fix"
+      class="sidebar-frame"
+      title="Menu lateral"
+      loading="eager">
+    </iframe>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <span class="eyebrow">Comercial</span>
+
+          <h1>Propostas</h1>
+
+          <p class="topbar-subtitle proposal-topbar-subtitle">
+            Crie, gerencie e envie direto pelo
+            <i class="fa-brands fa-whatsapp whatsapp-icon"></i>
+            <strong>WhatsApp</strong>
+          </p>
+        </div>
+
+        <div class="topbar-actions">
+          <div class="proposal-whatsapp-badge">
+            <i class="fa-brands fa-whatsapp"></i>
+            Integrado ao WPP
+          </div>
+
+          <button class="btn btn-secondary" type="button" id="btn-configurar-campos">
+            <i class="fa-solid fa-sliders"></i>
+            Campos extras
+          </button>
+
+          <button class="btn btn-primary" type="button" id="btn-nova-proposta">
+            <i class="fa-solid fa-file-circle-plus"></i>
+            Nova proposta
+          </button>
+        </div>
+      </header>
+
+      <div class="search-row">
+        <div class="search-box">
+          <i class="fa-solid fa-magnifying-glass"></i>
+
+          <input
+            id="busca-propostas"
+            type="text"
+            placeholder="Código, título, cliente, status..."
+            autocomplete="off"
+          />
+        </div>
+
+        <span id="contagem-propostas" class="counter-text">0 propostas</span>
+      </div>
+
+      <article class="panel-card panel-card-table">
+        <div class="valora-table-wrapper">
+          <table class="valora-table">
+            <thead>
+              <tr>
+                <th>Código</th>
+                <th>Título</th>
+                <th>Cliente</th>
+                <th>Status</th>
+                <th>Total</th>
+                <th class="text-right">Ações</th>
+              </tr>
+            </thead>
+
+            <tbody id="tbody-propostas">
+              <tr>
+                <td colspan="6" class="empty-state">Carregando...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <div class="modal-overlay" id="proposal-modal" hidden>
+        <div class="modal-content modal-xl proposal-modal-content" data-close-target="false">
+          <div class="modal-header proposal-modal-header">
+            <div>
+              <h3 id="proposal-modal-title">Nova proposta</h3>
+
+              <p id="proposal-modal-subtitle" class="proposal-modal-subtitle">
+                Preencha os dados da proposta, adicione os itens e salve.
+              </p>
+            </div>
+
+            <div class="proposal-header-actions">
+              <button type="button" class="btn btn-secondary" id="btn-configurar-campos-proposta">
+                <i class="fa-solid fa-sliders"></i>
+                Campos extras
+              </button>
+
+              <button type="button" class="btn btn-secondary is-hidden" id="btn-whatsapp-proposta">
+                <i class="fa-brands fa-whatsapp whatsapp-icon"></i>
+                WhatsApp
+              </button>
+
+              <button
+                type="button"
+                class="btn-close"
+                id="btn-fechar-modal"
+                title="Fechar"
+                data-modal-close="proposal-modal">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="proposal-tabs">
+            <button type="button" class="proposal-tab-btn active" data-tab="tab-proposta-dados">
+              <i class="fa-solid fa-file-lines"></i>
+              Dados
+            </button>
+
+            <button type="button" class="proposal-tab-btn" data-tab="tab-proposta-itens">
+              <i class="fa-solid fa-list-check"></i>
+              Itens
+            </button>
+
+            <button type="button" class="proposal-tab-btn" data-tab="tab-proposta-totais">
+              <i class="fa-solid fa-calculator"></i>
+              Totais
+            </button>
+
+            <button type="button" class="proposal-tab-btn" data-tab="tab-proposta-campos">
+              <i class="fa-solid fa-sliders"></i>
+              Campos extras
+            </button>
+          </div>
+
+          <div class="modal-body proposal-modal-body">
+            <form class="valora-form" onsubmit="return false;">
+              <section class="proposal-tab-panel active" id="tab-proposta-dados">
+                <section class="proposal-card">
+                  <div class="proposal-section-head">
+                    <h4 class="section-title">Dados principais</h4>
+                    <span class="proposal-status-chip" id="proposal-chip-status">Rascunho</span>
+                  </div>
+
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="proposta-codigo">Código</label>
+
+                      <input
+                        id="proposta-codigo"
+                        type="text"
+                        inputmode="numeric"
+                        pattern="[0-9]*"
+                        placeholder="Gerado ao salvar"
+                        readonly
+                      />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="proposta-titulo">Título *</label>
+
+                      <input
+                        id="proposta-titulo"
+                        type="text"
+                        placeholder="Ex.: Proposta comercial"
+                      />
+                    </div>
+                  </div>
+
+                  <div class="form-row">
+                    <div class="form-group client-picker">
+                      <label for="proposta-cliente-busca">Cliente</label>
+
+                      <input
+                        id="proposta-cliente-busca"
+                        type="text"
+                        placeholder="Buscar cliente por nome, WhatsApp ou e-mail"
+                        autocomplete="off"
+                      />
+
+                      <input id="proposta-cliente-id" type="hidden" />
+
+                      <div id="proposta-cliente-resultados" class="autocomplete-list" hidden></div>
+
+                      <small class="field-hint">
+                        Selecione um cliente da lista para vincular à proposta.
+                      </small>
+                    </div>
+
+                    <div class="form-group">
+                      <label for="proposta-status">Status</label>
+
+                      <select id="proposta-status">
+                        <option value="rascunho">Rascunho</option>
+                        <option value="enviada">Enviada</option>
+                        <option value="aprovada">Aprovada</option>
+                        <option value="rejeitada">Rejeitada</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="proposta-validade">Validade (dias)</label>
+
+                      <input
+                        id="proposta-validade"
+                        type="number"
+                        placeholder="7"
+                      />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="proposta-observacoes">Observações para o cliente</label>
+
+                      <textarea
+                        id="proposta-observacoes"
+                        rows="4"
+                        placeholder="Observações gerais que aparecerão no PDF"></textarea>
+                    </div>
+                  </div>
+                </section>
+              </section>
+
+              <section class="proposal-tab-panel" id="tab-proposta-itens">
+                <section class="proposal-card">
+                  <div class="proposal-section-head">
+                    <h4 class="section-title">Itens da proposta</h4>
+
+                    <button id="btn-add-item" class="btn btn-secondary btn-sm" type="button">
+                      <i class="fa-solid fa-plus"></i>
+                      Adicionar linha
+                    </button>
+                  </div>
+
+                  <div class="proposal-table-wrap">
+                    <table class="valora-table proposal-items-table">
+                      <thead>
+                        <tr>
+                          <th class="proposal-col-description">Descrição</th>
+                          <th>Qtd</th>
+                          <th>Unid.</th>
+                          <th>Vlr. Unit.</th>
+                          <th>Vlr. Total</th>
+                          <th class="text-right">Ações</th>
+                        </tr>
+                      </thead>
+
+                      <tbody id="proposal-items-body"></tbody>
+                    </table>
+                  </div>
+                </section>
+              </section>
+
+              <section class="proposal-tab-panel" id="tab-proposta-totais">
+                <section class="proposal-card">
+                  <div class="proposal-section-head">
+                    <h4 class="section-title">Totais da proposta</h4>
+                  </div>
+
+                  <div class="form-row proposal-totals-grid">
+                    <div class="form-group">
+                      <label for="proposta-subtotal">Subtotal (R$)</label>
+                      <input id="proposta-subtotal" type="text" placeholder="0,00" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="proposta-desconto">Desconto (R$)</label>
+                      <input id="proposta-desconto" type="text" placeholder="0,00" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="proposta-total">Total Final (R$)</label>
+                      <input id="proposta-total" class="proposal-total-input" type="text" placeholder="0,00" />
+                    </div>
+                  </div>
+                </section>
+              </section>
+
+              <section class="proposal-tab-panel" id="tab-proposta-campos">
+                <section class="proposal-card is-hidden" id="proposal-card-campos-extras">
+                  <div class="proposal-section-head">
+                    <h4 class="section-title">Campos adicionais</h4>
+
+                    <button
+                      type="button"
+                      class="btn btn-secondary btn-sm"
+                      id="btn-configurar-campos-proposta-atalho">
+                      <i class="fa-solid fa-sliders"></i>
+                      Configurar
+                    </button>
+                  </div>
+
+                  <div id="proposal-campos-extras" class="proposal-extra-grid"></div>
+                </section>
+
+                <section class="proposal-card proposal-empty-extra-card" id="proposal-card-campos-vazio">
+                  <div class="proposal-section-head">
+                    <h4 class="section-title">Campos extras</h4>
+                  </div>
+
+                  <div class="empty-state">
+                    Nenhum campo extra ativo para propostas. Use “Campos extras” para configurar quando precisar.
+                  </div>
+                </section>
+              </section>
+            </form>
+          </div>
+
+          <div class="modal-footer proposal-modal-footer">
+            <button type="button" class="btn btn-secondary" id="btn-cancelar-proposta-footer">
+              Cancelar
+            </button>
+
+            <button type="button" class="btn btn-primary" id="btn-salvar-proposta">
+              <i class="fa-solid fa-floppy-disk"></i>
+              Salvar proposta
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-overlay" id="fields-config-modal" hidden>
+        <div class="modal-content modal-xl fields-config-modal-content" data-close-target="false">
+          <div class="modal-header fields-config-modal-header">
+            <div>
+              <h3>Configurar campos da proposta</h3>
+
+              <p class="modal-subtitle">
+                Crie os campos personalizados que aparecerão automaticamente no formulário de propostas.
+              </p>
+            </div>
+
+            <div class="modal-header-actions">
+              <button type="button" class="btn btn-secondary" id="btn-fechar-fields-config-modal">
+                Fechar
+              </button>
+            </div>
+          </div>
+
+          <div class="modal-body">
+            <section class="config-card">
+              <div class="config-toolbar">
+                <div class="search-box search-box-compact">
+                  <i class="fa-solid fa-magnifying-glass"></i>
+
+                  <input
+                    id="busca-campos-config"
+                    type="text"
+                    placeholder="Buscar por nome, slug ou tipo..."
+                    autocomplete="off"
+                  />
+                </div>
+
+                <button class="btn btn-primary" type="button" id="btn-novo-campo-config">
+                  <i class="fa-solid fa-plus"></i>
+                  Novo campo
+                </button>
+              </div>
+
+              <div class="config-layout">
+                <div class="config-table-panel">
+                  <div class="config-panel-head">
+                    <div>
+                      <h4>Campos cadastrados</h4>
+                      <p><span id="contagem-campos-config">0 campos</span></p>
+                    </div>
+                  </div>
+
+                  <div class="valora-table-wrapper">
+                    <table class="valora-table config-table">
+                      <thead>
+                        <tr>
+                          <th>Nome</th>
+                          <th>Tipo</th>
+                          <th>Obrig.</th>
+                          <th>Ativo</th>
+                          <th>Ordem</th>
+                          <th class="text-right">Ações</th>
+                        </tr>
+                      </thead>
+
+                      <tbody id="fields-config-body">
+                        <tr>
+                          <td colspan="6" class="empty-state">Carregando...</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div class="config-form-panel">
+                  <div class="config-form-head">
+                    <div>
+                      <h4 id="campo-form-title">Novo campo</h4>
+
+                      <p id="campo-form-subtitle">
+                        Configure um novo campo personalizado.
+                      </p>
+                    </div>
+
+                    <span class="config-status-chip" id="campo-chip-status">Ativo</span>
+                  </div>
+
+                  <form class="valora-form" onsubmit="return false;">
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label for="campo-nome">Nome *</label>
+                        <input id="campo-nome" type="text" placeholder="Ex.: Prazo de entrega" />
+                      </div>
+
+                      <div class="form-group">
+                        <label for="campo-slug">Slug</label>
+                        <input id="campo-slug" type="text" placeholder="Ex.: prazo-entrega" />
+                        <small class="field-hint">Pode deixar em branco que o sistema gera.</small>
+                      </div>
+                    </div>
+
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label for="campo-tipo">Tipo *</label>
+
+                        <select id="campo-tipo">
+                          <option value="texto">Texto</option>
+                          <option value="textarea">Texto longo</option>
+                          <option value="numero">Número</option>
+                          <option value="data">Data</option>
+                          <option value="select">Lista (select)</option>
+                          <option value="checkbox">Checkbox</option>
+                        </select>
+                      </div>
+
+                      <div class="form-group">
+                        <label for="campo-ordem">Ordem</label>
+                        <input id="campo-ordem" type="number" min="0" placeholder="0" />
+                      </div>
+                    </div>
+
+                    <div class="checks-row">
+                      <label class="check-card">
+                        <input id="campo-obrigatorio" type="checkbox" />
+
+                        <span>
+                          <strong>Obrigatório</strong>
+                          <small>Exige preenchimento na proposta.</small>
+                        </span>
+                      </label>
+
+                      <label class="check-card">
+                        <input id="campo-ativo" type="checkbox" checked />
+
+                        <span>
+                          <strong>Ativo</strong>
+                          <small>Campos ativos aparecem na proposta.</small>
+                        </span>
+                      </label>
+                    </div>
+
+                    <div class="form-group is-hidden" id="campo-opcoes-row">
+                      <label for="campo-opcoes">Opções do select</label>
+
+                      <textarea
+                        id="campo-opcoes"
+                        rows="5"
+                        placeholder="Uma opção por linha&#10;Ex.:&#10;À vista&#10;30 dias&#10;45 dias"></textarea>
+
+                      <small class="field-hint">Preencha somente para campos do tipo lista.</small>
+                    </div>
+
+                    <div class="config-form-actions">
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-danger-soft is-hidden"
+                        id="btn-excluir-campo-config">
+                        <i class="fa-solid fa-trash"></i>
+                        Excluir
+                      </button>
+
+                      <div class="config-form-actions-right">
+                        <button type="button" class="btn btn-secondary" id="btn-limpar-campo-config">
+                          Limpar
+                        </button>
+
+                        <button type="button" class="btn btn-primary" id="btn-salvar-campo-config">
+                          <i class="fa-solid fa-floppy-disk"></i>
+                          Salvar campo
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-overlay" id="Valora-confirm-backdrop" hidden>
+        <div class="modal-content confirm-content">
+          <div class="modal-body confirm-body">
+            <i class="fa-solid fa-triangle-exclamation confirm-icon"></i>
+
+            <h3 id="Valora-confirm-title">Confirmar</h3>
+
+            <p id="Valora-confirm-message"></p>
+
+            <div class="confirm-actions">
+              <button class="btn btn-secondary" id="Valora-confirm-cancel">
+                Cancelar
+              </button>
+
+              <button class="btn btn-primary btn-danger-confirm" id="Valora-confirm-ok">
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="valora-toast" class="toast-message" aria-live="polite"></div>
+    </main>
+  </div>
+</body>
+</html>

@@ -38,20 +38,10 @@ def _status_abertos() -> list[object]:
                     vals.append(getattr(status_enum, attr))
                 except Exception:
                     pass
+        if vals:
+            return vals
 
-    vals.extend(["novo", "aguardando", "em_atendimento", "pausado", "aberto", "pendente"])
-
-    out = []
-    seen = set()
-
-    for v in vals:
-        key = str(v)
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(v)
-
-    return out
+    return ["novo", "aguardando", "em_atendimento", "pausado"]
 
 
 def _fetch_primary_colab_id(

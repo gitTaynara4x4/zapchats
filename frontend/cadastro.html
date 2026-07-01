@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Cadastro | Valora CRM</title>
+
+  <script>
+    (() => {
+      const savedTheme = localStorage.getItem("valora_theme") || "light";
+      document.documentElement.setAttribute("data-theme", savedTheme);
+    })();
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  >
+
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+  >
+
+  <link rel="stylesheet" href="/frontend/css/app.css?v=20260630-dark-chatgpt-v6" />
+  <link rel="stylesheet" href="/frontend/css/cadastro.css" />
+  <link rel="stylesheet" href="/frontend/css/validacao.css?v=20260614-required-circle" />
+
+  <script src="/frontend/js/shared/validacao.js?v=20260614-required-circle" defer></script>
+  <script src="/frontend/js/pages/cadastro.js" defer></script>
+  <link rel="stylesheet" href="/frontend/css/dark-chatgpt-fix.css?v=20260630-dark-v7" />
+</head>
+
+<body>
+  <div class="register-wrapper">
+    <aside class="register-visual">
+      <div class="visual-top">
+        <div class="brand-display">
+          <div class="logo-icon" aria-hidden="true">
+            <i class="fa-solid fa-layer-group"></i>
+          </div>
+
+          <span>Valora CRM</span>
+        </div>
+
+        <div class="visual-copy">
+          <h1>
+            Crie sua conta e<br>
+            comece a organizar<br>
+            suas vendas.
+          </h1>
+
+          <p>
+            Cadastre sua empresa, crie o usuário administrador e impulsione o seu comercial hoje mesmo.
+          </p>
+        </div>
+      </div>
+
+      <div class="visual-footer">
+        <p>© 2026 Valora CRM. Todos os direitos reservados.</p>
+      </div>
+    </aside>
+
+    <main class="register-form-container">
+      <section class="form-box" aria-label="Cadastro Valora CRM">
+        <header>
+          <h2>Criar conta</h2>
+          <p>
+            Preencha os dados abaixo. Enviaremos um código para seu e-mail para confirmar a criação.
+          </p>
+        </header>
+
+        <div class="selected-plan" id="selectedPlanBox">
+          <span class="selected-plan-label">Plano selecionado</span>
+          <strong id="selectedPlanName">Essencial — R$ 0</strong>
+          <small id="selectedPlanDesc">Plano gratuito para começar.</small>
+        </div>
+
+        <form id="form-cadastro" novalidate>
+          <div id="step1-fields">
+            <div class="input-group">
+              <label for="empresa_nome">Nome da empresa</label>
+              <input
+                type="text"
+                id="empresa_nome"
+                placeholder="Ex: Valora Tecnologia"
+                autocomplete="organization"
+                required
+              />
+            </div>
+
+            <div class="input-group">
+              <label for="responsavel_nome">Nome do responsável</label>
+              <input
+                type="text"
+                id="responsavel_nome"
+                placeholder="Ex: João da Silva"
+                autocomplete="name"
+                required
+              />
+            </div>
+
+            <div class="input-group">
+              <label for="email">E-mail</label>
+              <input
+                type="email"
+                id="email"
+                placeholder="ex: nome@empresa.com.br"
+                autocomplete="email"
+                required
+              />
+            </div>
+
+            <div class="input-group">
+              <label for="telefone">Telefone</label>
+              <input
+                type="text"
+                id="telefone"
+                placeholder="(12) 99999-9999"
+                maxlength="15"
+                autocomplete="tel"
+                required
+              />
+            </div>
+
+            <div class="input-row">
+              <div class="input-group">
+                <label for="senha">Senha</label>
+
+                <div class="password-wrapper">
+                  <input
+                    type="password"
+                    id="senha"
+                    placeholder="Mínimo 6 caracteres"
+                    autocomplete="new-password"
+                    required
+                  />
+
+                  <button
+                    type="button"
+                    class="toggle-pass"
+                    data-target="senha"
+                    aria-label="Mostrar senha">
+                    <i class="fa-regular fa-eye"></i>
+                  </button>
+                </div>
+              </div>
+
+              <div class="input-group">
+                <label for="confirmar_senha">Confirmar senha</label>
+
+                <div class="password-wrapper">
+                  <input
+                    type="password"
+                    id="confirmar_senha"
+                    placeholder="Repita a senha"
+                    autocomplete="new-password"
+                    required
+                  />
+
+                  <button
+                    type="button"
+                    class="toggle-pass"
+                    data-target="confirmar_senha"
+                    aria-label="Mostrar senha">
+                    <i class="fa-regular fa-eye"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <label class="custom-checkbox">
+              <input type="checkbox" id="exigir_token_login" />
+
+              <span class="checkmark" aria-hidden="true"></span>
+
+              <span class="label-text">
+                Exigir código de segurança a cada login (Autenticação em 2 Fatores)
+              </span>
+            </label>
+          </div>
+
+          <div id="step2-fields" class="hidden">
+            <div class="token-alert">
+              <div class="icon" aria-hidden="true">
+                <i class="fa-regular fa-envelope"></i>
+              </div>
+
+              <p id="token-info">
+                Enviamos um código de 6 dígitos para o seu e-mail. Verifique a caixa de entrada ou spam.
+              </p>
+            </div>
+
+            <div class="input-group">
+              <label for="cadastro-token">Código de confirmação</label>
+
+              <input
+                type="text"
+                id="cadastro-token"
+                class="token-code-input"
+                placeholder="000000"
+                maxlength="6"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+              />
+            </div>
+
+            <button type="button" id="btn-token-back" class="link-back">
+              Voltar para edição dos dados
+            </button>
+          </div>
+
+          <button type="submit" id="btn-cadastrar" class="btn btn-primary">
+            Enviar código
+          </button>
+        </form>
+
+        <footer>
+          <p>Já tem acesso? <a href="/login">Entrar na minha conta</a></p>
+        </footer>
+      </section>
+    </main>
+  </div>
+
+  <div id="valora-toast" class="toast-message" aria-live="polite"></div>
+</body>
+</html>

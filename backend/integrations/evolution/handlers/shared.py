@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
 import re
 import unicodedata
-from typing import Any, Callable
+from datetime import datetime, timezone
+from typing import Any, Callable, Optional
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -42,6 +44,50 @@ from ..utils.jid_utils import is_lid_jid, jid_strip_device
 from ..utils.log_utils import LOG, _log_ctx, _short
 from ..utils.phone_utils import _resolve_counterparty_num_1to1, formatar_telefone_br, remote_to_num
 from ..utils.time_utils import _int_unix, _iso_utc, _now_utc, _server_ts_ms
+
+
+# Segurança do chatbot contra replay/backlog:
+# quando o servidor ficou desligado, a Evolution/Rabbit pode entregar mensagens antigas.
+# Essas mensagens antigas podem ser salvas no histórico, mas NÃO devem disparar bot/menu.
+def _env_int_chatbot(name: str, default: int) -> int:
+    try:
+        return int(float(str(os.getenv(name, default)).strip()))
+    except Exception:
+        return int(default)
+
+
+CHATBOT_MAX_INBOUND_AGE_SECONDS = max(0, _env_int_chatbot("CHATBOT_MAX_INBOUND_AGE_SECONDS", 600))
+
+
+def _as_aware_utc_chatbot(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                return value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc)
+        raw = str(value).strip()
+        if not raw:
+            return None
+        if raw.replace('.', '', 1).isdigit():
+            return datetime.fromtimestamp(float(raw), tz=timezone.utc)
+    except Exception:
+        return None
+    return None
+
+
+def _chatbot_should_skip_stale_inbound(*, message_ts: Any = None) -> tuple[bool, float]:
+    if CHATBOT_MAX_INBOUND_AGE_SECONDS <= 0:
+        return False, 0.0
+    ts = _as_aware_utc_chatbot(message_ts)
+    if ts is None:
+        return False, 0.0
+    try:
+        age = (datetime.now(timezone.utc) - ts).total_seconds()
+    except Exception:
+        return False, 0.0
+    return age > float(CHATBOT_MAX_INBOUND_AGE_SECONDS), float(age)
 
 HANDLERS: dict[str, Callable[..., Any]] = {}
 
@@ -1328,8 +1374,18 @@ async def run_triagem_pos_commit(
     conteudo: str,
     direcao: str,
     remote_jid: str,
+    message_ts: Any = None,
 ):
     if not conteudo or direcao != "entrada" or not _is_textual_content(conteudo):
+        return
+
+    skip_stale, age_seconds = _chatbot_should_skip_stale_inbound(message_ts=message_ts)
+    if skip_stale:
+        LOG(
+            f"[CHATBOT][skip-stale] emp={empresa_id} inst={instancia_id} "
+            f"telefone={telefone} age_s={int(age_seconds)} "
+            f"max_s={CHATBOT_MAX_INBOUND_AGE_SECONDS}"
+        )
         return
 
     with SessionLocal() as db_triagem:

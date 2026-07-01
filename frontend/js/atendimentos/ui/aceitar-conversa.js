@@ -268,7 +268,56 @@
     return data;
   }
 
+  function ensureClaimActionButtons() {
+    const bar = document.getElementById("zc-claim-bar");
+    if (!bar) return;
+
+    let actions = bar.querySelector(".zc-claim-actions");
+    if (!actions) {
+      actions = document.createElement("div");
+      actions.className = "zc-claim-actions";
+      const card = bar.querySelector(".zc-claim-card") || bar;
+      card.appendChild(actions);
+    }
+
+    function makeButton(id, text, title) {
+      let btn = document.getElementById(id);
+      if (btn) return btn;
+
+      btn = document.createElement("button");
+      btn.id = id;
+      btn.type = "button";
+      btn.className = "hdr-pill-btn";
+      btn.title = title || text;
+      btn.setAttribute("aria-label", title || text);
+      btn.hidden = true;
+
+      const span = document.createElement("span");
+      span.className = "hdr-pill-btn-text";
+      span.textContent = text;
+      btn.appendChild(span);
+
+      return btn;
+    }
+
+    const aceitar = makeButton(BTN_ACEITAR_ID, "Atender", "Atender conversa");
+    const liberar = makeButton(BTN_LIBERAR_ID, "Liberar", "Liberar atendimento");
+    const transferir = makeButton(BTN_TRANSFERIR_ID, "Transferir", "Transferir atendimento");
+
+    if (!aceitar.parentElement) actions.appendChild(aceitar);
+    if (!liberar.parentElement) {
+      if (aceitar.parentElement === actions && aceitar.nextSibling) {
+        actions.insertBefore(liberar, aceitar.nextSibling);
+      } else {
+        actions.appendChild(liberar);
+      }
+    }
+    if (!transferir.parentElement) actions.appendChild(transferir);
+  }
+
   function getButtons() {
+    ensureClaimActionButtons();
+
     return {
       aceitar: document.getElementById(BTN_ACEITAR_ID),
       liberar: document.getElementById(BTN_LIBERAR_ID),
@@ -334,6 +383,9 @@
     locked = false,
     accepted = false,
     busy = false,
+    canAccept = false,
+    canRelease = false,
+    canTransfer = false,
     title = "",
     subtitle = ""
   } = {}) {
@@ -343,8 +395,17 @@
 
     if (!open) {
       bar.hidden = true;
-      bar.classList.remove("is-open", "is-locked", "is-accepted", "is-busy");
+      bar.classList.remove("is-open", "is-locked", "is-accepted", "is-busy", "is-can-accept", "is-can-release", "is-can-transfer");
+      bar.dataset.canAccept = "0";
+      bar.dataset.podeAceitar = "0";
+      bar.dataset.podeLiberar = "0";
+      bar.dataset.podeTransferir = "0";
+      bar.dataset.aceitaPorMim = "0";
+      bar.dataset.exigirAceite = "0";
       footer.dataset.sendLocked = "0";
+      footer.dataset.podeLiberar = "0";
+      footer.dataset.aceitaPorMim = "0";
+      footer.dataset.exigirAceite = "0";
       return;
     }
 
@@ -353,6 +414,22 @@
     bar.classList.toggle("is-locked", !!locked);
     bar.classList.toggle("is-accepted", !!accepted);
     bar.classList.toggle("is-busy", !!busy);
+    bar.classList.toggle("is-can-accept", !!canAccept);
+    bar.classList.toggle("is-can-release", !!canRelease);
+    bar.classList.toggle("is-can-transfer", !!canTransfer);
+    bar.dataset.canAccept = canAccept ? "1" : "0";
+    bar.dataset.podeAceitar = canAccept ? "1" : "0";
+    bar.dataset.podeLiberar = canRelease ? "1" : "0";
+    bar.dataset.canRelease = canRelease ? "1" : "0";
+    bar.dataset.podeTransferir = canTransfer ? "1" : "0";
+    bar.dataset.aceitaPorMim = accepted ? "1" : "0";
+    bar.dataset.acceptedByMe = accepted ? "1" : "0";
+    bar.dataset.exigirAceite = "1";
+    footer.dataset.podeLiberar = canRelease ? "1" : "0";
+    footer.dataset.canRelease = canRelease ? "1" : "0";
+    footer.dataset.aceitaPorMim = accepted ? "1" : "0";
+    footer.dataset.acceptedByMe = accepted ? "1" : "0";
+    footer.dataset.exigirAceite = "1";
 
     if (titleEl && title != null) titleEl.textContent = title;
     if (subtitleEl && subtitle != null) subtitleEl.textContent = subtitle;
@@ -404,10 +481,17 @@
 
 
   function isDepartmentClaim(meta) {
+    const depId =
+      toInt(meta?.departamento_id) ||
+      toInt(meta?.atendimento_departamento_id) ||
+      toInt(meta?.cliente_departamento_id) ||
+      toInt(meta?.departamento?.id);
+
     return Boolean(
       meta?.claim_mode === "departamento" ||
       meta?.departamento_claim === true ||
-      meta?.tipo_aceite === "departamento"
+      meta?.tipo_aceite === "departamento" ||
+      (depId && (meta?.aguardando_aceite === true || meta?.pode_aceitar === true || meta?.can_accept === true))
     );
   }
 
@@ -651,6 +735,60 @@
     } catch {}
   }
 
+  function dispatchLightHistoryRefresh(conv, reason = "claim-action") {
+    if (!conv) return;
+
+    const conversationKey = buildConversationKey(conv);
+    const detail = {
+      conversation_key: conversationKey,
+      conversation_id: conversationKey,
+      cliente_id: conv.id || null,
+      entity_id: conv.id || null,
+      instancia_id: conv.instancia_id || null,
+      is_group: !!conv.is_group,
+      limit: 6,
+      reason
+    };
+
+    try {
+      window.dispatchEvent(new CustomEvent("zc:history-force-refresh", { detail }));
+    } catch {}
+  }
+
+  function appendSystemEventToHistory(conv, data, reason = "claim-system-event") {
+    if (!conv || conv.is_group) return;
+
+    const event = data?.system_event || data?.evento_sistema || null;
+
+    if (!event) {
+      // Sem evento novo = normalmente requisição idempotente/duplo clique.
+      return;
+    }
+
+    const conversationKey = buildConversationKey(conv);
+    const detail = {
+      ...event,
+      conversation_key: conversationKey,
+      conversation_id: conversationKey,
+      cliente_id: event.cliente_id || conv.id || null,
+      entity_id: event.cliente_id || conv.id || null,
+      instancia_id: event.instancia_id || conv.instancia_id || null,
+      is_group: false,
+      reason
+    };
+
+    if (typeof window.zcAppendSystemEventToOpenHistory === "function") {
+      try {
+        window.zcAppendSystemEventToOpenHistory(detail);
+        return;
+      } catch (err) {
+        console.warn("[aceitar-conversa] append system event falhou; usando refresh leve", err);
+      }
+    }
+
+    dispatchLightHistoryRefresh(conv, reason);
+  }
+
   window.getConversationMeta = function (conversationKey) {
     const key =
       typeof conversationKey === "string"
@@ -732,10 +870,11 @@
       null;
 
     if (podeAceitar) {
+      const depClaim = isDepartmentClaim(meta);
       setBtnBase(aceitar, {
-        text: words.accept,
+        text: depClaim ? "Atender" : words.accept,
         icon: "fa-solid fa-headset",
-        title: words.acceptTitle,
+        title: depClaim ? "Atender conversa" : words.acceptTitle,
         disabled: false,
         hidden: false
       });
@@ -755,6 +894,9 @@
         locked: true,
         accepted: false,
         busy: false,
+        canAccept: true,
+        canRelease: false,
+        canTransfer: !isDepartmentClaim(meta),
         title: words.waitingTitle,
         subtitle: words.waitingSubtitle
       });
@@ -778,7 +920,7 @@
       setBtnBase(liberar, {
         text: "Liberar",
         icon: "fa-solid fa-unlock",
-        title: "Liberar conversa",
+        title: "Liberar atendimento",
         disabled: !podeLiberar,
         hidden: false
       });
@@ -796,6 +938,9 @@
         locked: false,
         accepted: true,
         busy: false,
+        canAccept: false,
+        canRelease: podeLiberar || aceitaPorMim || (operadorId && currentColabId && operadorId === currentColabId),
+        canTransfer: true,
         title: words.acceptedByYou,
         subtitle: words.acceptedSubtitle
       });
@@ -896,6 +1041,10 @@
   }
 
   async function aceitarConversaAtual() {
+    if (window.__zcAceitarAtendimentoBusy === true) {
+      return;
+    }
+
     const conv = getCurrentConversation();
     const empresaId = getEmpresaId();
     const currentColabId = getCurrentColabId();
@@ -912,6 +1061,8 @@
     }
 
     try {
+      window.__zcAceitarAtendimentoBusy = true;
+
       const prevMeta = window.getConversationMeta
         ? window.getConversationMeta(buildConversationKey(conv))
         : null;
@@ -931,6 +1082,9 @@
         locked: true,
         accepted: false,
         busy: true,
+        canAccept: false,
+        canRelease: false,
+        canTransfer: false,
         title: words.accepting,
         subtitle: "Aguarde um instante."
       });
@@ -978,6 +1132,7 @@
       emitMetaEvents(optimisticMeta);
 
       renderClaimFromMeta(conv, optimisticMeta);
+      appendSystemEventToHistory(conv, data, "claim-accepted");
 
       showToast(
         data?.already_accepted
@@ -995,15 +1150,26 @@
         })
       );
 
-      await refreshAfterAction();
+      refreshAfterAction({
+        light: true,
+        conv,
+        data,
+        reason: "claim-accepted"
+      }).catch(() => {});
     } catch (err) {
       console.error("[aceitar-conversa] erro:", err);
       showToast(err?.message || "Falha ao aceitar conversa.", "error");
       await refreshResponsavelButtons({ force: true });
+    } finally {
+      window.__zcAceitarAtendimentoBusy = false;
     }
   }
 
   async function liberarConversaAtual() {
+    if (window.__zcLiberarAtendimentoBusy === true) {
+      return;
+    }
+
     const conv = getCurrentConversation();
     const empresaId = getEmpresaId();
     const { liberar } = getButtons();
@@ -1019,10 +1185,12 @@
     }
 
     try {
+      window.__zcLiberarAtendimentoBusy = true;
+
       setBtnBase(liberar, {
         text: "Liberando...",
         icon: "fa-solid fa-spinner fa-spin",
-        title: "Liberando conversa",
+        title: "Liberando atendimento",
         disabled: true,
         hidden: false,
         busy: true
@@ -1033,7 +1201,10 @@
         locked: true,
         accepted: false,
         busy: true,
-        title: "Liberando conversa...",
+        canAccept: false,
+        canRelease: false,
+        canTransfer: false,
+        title: "Liberando atendimento...",
         subtitle: "Aguarde um instante."
       });
 
@@ -1071,8 +1242,9 @@
 
       emitMetaEvents(optimisticMeta);
       renderClaimFromMeta(conv, optimisticMeta);
+      appendSystemEventToHistory(conv, data, "claim-released");
 
-      showToast("Conversa liberada com sucesso.", "success");
+      showToast("Atendimento liberado para o departamento.", "success");
 
       window.dispatchEvent(
         new CustomEvent("zc:conversation-released", {
@@ -1083,11 +1255,18 @@
         })
       );
 
-      await refreshAfterAction();
+      refreshAfterAction({
+        light: true,
+        conv,
+        data,
+        reason: "claim-released"
+      }).catch(() => {});
     } catch (err) {
       console.error("[liberar-conversa] erro:", err);
-      showToast(err?.message || "Falha ao liberar conversa.", "error");
+      showToast(err?.message || "Falha ao liberar atendimento.", "error");
       await refreshResponsavelButtons({ force: true });
+    } finally {
+      window.__zcLiberarAtendimentoBusy = false;
     }
   }
 
@@ -1667,7 +1846,39 @@
     }
   }
 
-  async function refreshAfterAction() {
+  async function refreshAfterAction(options = {}) {
+    const light = options.light !== false;
+    const conv = options.conv || getCurrentConversation();
+    const reason = options.reason || "claim-action";
+
+    if (light) {
+      // Modo leve: não recarrega lista inteira nem histórico inteiro.
+      // O backend já confirmou; aqui só sincronizamos o meta/card atual.
+      if (conv) {
+        try {
+          await fetchAndCacheMeta(conv, { force: true });
+        } catch {}
+      }
+
+      try { await refreshResponsavelButtons({ force: true }); } catch {}
+
+      try {
+        window.dispatchEvent(new CustomEvent("zc:conversation-light-refresh", {
+          detail: {
+            ...(options.data || {}),
+            conversation_key: conv ? buildConversationKey(conv) : null,
+            cliente_id: conv?.id || options.data?.cliente_id || null,
+            instancia_id: conv?.instancia_id || options.data?.instancia_id || null,
+            reason
+          }
+        }));
+      } catch {}
+
+      return;
+    }
+
+    // Fallback pesado/manual: mantido para telas antigas, mas não usado no
+    // Atender/Liberar normal porque pesa e dá sensação de travamento.
     if (typeof window.carregarClientes === "function") {
       try { await window.carregarClientes(); } catch {}
     }
@@ -1680,8 +1891,6 @@
       try { await window.recarregarConversaAtual(); } catch {}
     }
 
-    const conv = getCurrentConversation();
-
     if (conv) {
       try {
         await fetchAndCacheMeta(conv, { force: true });
@@ -1692,12 +1901,26 @@
   }
 
   function bindButtons() {
+    ensureClaimActionButtons();
     const { aceitar, liberar, transferir } = getButtons();
 
     if (aceitar && aceitar.dataset.bound !== "1") {
       aceitar.dataset.bound = "1";
 
       aceitar.addEventListener("click", function (e) {
+        e.preventDefault();
+        aceitarConversaAtual();
+      });
+    }
+
+    const { bar } = getClaimEls();
+    if (bar && bar.dataset.cardClickBound !== "1") {
+      bar.dataset.cardClickBound = "1";
+
+      bar.addEventListener("click", function (e) {
+        if (e.target.closest("button,a,input,select,textarea")) return;
+        if (bar.dataset.canAccept !== "1") return;
+
         e.preventDefault();
         aceitarConversaAtual();
       });

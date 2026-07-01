@@ -34,10 +34,29 @@ export function invalidateAvatarThumb(id){
   state.avatarThumbInflight.delete(n);
 }
 
+function shouldFetchAvatarURL(url){
+  const s = String(url || '');
+  return /\/api\/(colaboradores|usuarios)\/\d+\/avatar/.test(s);
+}
+
+async function fetchAvatarAsBlobURL(url){
+  try {
+    const r = await authFetch(withEmpresa(url));
+
+    if (r.ok && r.status === 200){
+      const blob = await r.blob();
+      return URL.createObjectURL(blob);
+    }
+  } catch {}
+
+  return null;
+}
+
 export async function fetchAvatarThumbURLFor(colab){
   const id = Number(colab?.id || 0) || 0;
+  const directURL = colab?.avatar_url || null;
 
-  if (!id) return colab?.avatar_url || null;
+  if (!id) return directURL;
 
   if (state.avatarThumbCache.has(id)) {
     return state.avatarThumbCache.get(id);
@@ -50,28 +69,19 @@ export async function fetchAvatarThumbURLFor(colab){
   const p = (async () => {
     let url = null;
 
-    try {
-      const r1 = await authFetch(withEmpresa(`/api/colaboradores/${id}/avatar`));
-
-      if (r1.ok && r1.status === 200){
-        const blob = await r1.blob();
-        url = URL.createObjectURL(blob);
-      }
-    } catch {}
-
-    if (!url && colab?.usuario_id){
-      try {
-        const r2 = await authFetch(withEmpresa(`/api/usuarios/${colab.usuario_id}/avatar`));
-
-        if (r2.ok && r2.status === 200){
-          const blob = await r2.blob();
-          url = URL.createObjectURL(blob);
-        }
-      } catch {}
+    // Se o backend mandou um avatar gerado externo, usa direto.
+    // Assim evitamos chamar /avatar para todo colaborador e encher o console com 404.
+    if (directURL && !shouldFetchAvatarURL(directURL)) {
+      url = directURL;
     }
 
-    if (!url && colab?.avatar_url) {
-      url = colab.avatar_url;
+    // Se o backend mandou /api/.../avatar, aí sim busca como blob autenticado.
+    if (!url && directURL && shouldFetchAvatarURL(directURL)) {
+      url = await fetchAvatarAsBlobURL(directURL);
+    }
+
+    if (!url && colab?.usuario_id){
+      url = await fetchAvatarAsBlobURL(`/api/usuarios/${colab.usuario_id}/avatar`);
     }
 
     state.avatarThumbCache.set(id, url || null);
@@ -165,27 +175,23 @@ export async function fetchAvatarURLFor(colab){
     return colab && colab.avatar_url ? colab.avatar_url : null;
   }
 
-  try {
-    const r1 = await authFetch(withEmpresa(`/api/colaboradores/${colab.id}/avatar`));
+  const directURL = colab.avatar_url || null;
 
-    if (r1.ok && r1.status === 200) {
-      const blob = await r1.blob();
-      return URL.createObjectURL(blob);
-    }
-  } catch {}
-
-  if (colab.usuario_id){
-    try {
-      const r2 = await authFetch(withEmpresa(`/api/usuarios/${colab.usuario_id}/avatar`));
-
-      if (r2.ok && r2.status === 200){
-        const blob = await r2.blob();
-        return URL.createObjectURL(blob);
-      }
-    } catch {}
+  if (directURL && !shouldFetchAvatarURL(directURL)) {
+    return directURL;
   }
 
-  return colab.avatar_url || null;
+  if (directURL && shouldFetchAvatarURL(directURL)) {
+    const got = await fetchAvatarAsBlobURL(directURL);
+    if (got) return got;
+  }
+
+  if (colab.usuario_id){
+    const got = await fetchAvatarAsBlobURL(`/api/usuarios/${colab.usuario_id}/avatar`);
+    if (got) return got;
+  }
+
+  return directURL || null;
 }
 
 function convertToPng(file){

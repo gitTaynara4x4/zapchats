@@ -80,112 +80,154 @@
       <div class="modal-head">
         <span id="modal-step-label" class="modal-step-label">Etapa 1 de 3</span>
         <h2 id="modal-title">Nome e descrição do departamento</h2>
-        <div class="modal-progress" aria-hidden="true">
-          <span class="active"></span>
-          <span></span>
-          <span></span>
+
+        <div class="modal-progress wizard-stepper" aria-label="Etapas do cadastro">
+          <div class="wizard-stepper-item is-active" data-step-index="1">
+            <span class="step-dot">1</span>
+            <span class="step-text">Nome e descrição</span>
+          </div>
+          <span class="step-line" aria-hidden="true"></span>
+          <div class="wizard-stepper-item" data-step-index="2">
+            <span class="step-dot">2</span>
+            <span class="step-text">Horário, instâncias e colaboradores</span>
+          </div>
+          <span class="step-line" aria-hidden="true"></span>
+          <div class="wizard-stepper-item" data-step-index="3">
+            <span class="step-dot">3</span>
+            <span class="step-text">Revisão e conclusão</span>
+          </div>
         </div>
       </div>
 
       <form id="form-depto" class="modal-form" autocomplete="off">
         <input type="hidden" name="id"/>
         <select id="d-parent" class="sr-only" aria-hidden="true" tabindex="-1">
-          <option value="">Bitrix</option>
+          <option value="">Empresa</option>
         </select>
 
         <section class="wizard-step is-active" data-step="1">
-          <div class="modal-grid two-col">
-            <div class="modal-col form-col">
-              <div class="fi parent-fi">
-                <label>Departamento principal</label>
-                <div class="parent-picker">
-                  <span id="parent-chip" class="parent-chip">
-                    <i class="fa-solid fa-building"></i>
-                    <span>Bitrix</span>
-                  </span>
-                  <button id="parent-edit" type="button">+ Editar</button>
-                </div>
-
-                <div id="parent-panel" class="parent-panel" role="listbox" aria-label="Escolher departamento principal"></div>
+          <div class="step1-clean">
+            <div class="fi parent-fi">
+              <label>Departamento principal</label>
+              <div class="parent-picker">
+                <span id="parent-chip" class="parent-chip">
+                  <i class="fa-solid fa-building"></i>
+                  <span>Empresa</span>
+                </span>
+                <button id="parent-edit" type="button">+ Editar</button>
               </div>
 
-              <div class="fi">
-                <label for="d-nome">Nome</label>
-                <input id="d-nome" class="input" type="text" maxlength="120" placeholder="Digite o nome do departamento" required/>
-              </div>
-
-              <div class="fi">
-                <label for="d-desc">Descrição</label>
-                <textarea id="d-desc" class="input" rows="5" maxlength="300" placeholder="Digite a descrição do departamento"></textarea>
-              </div>
-
-              <div class="form-inline">
-                <label class="toggle-line">
-                  <input id="d-ativo" type="checkbox" checked/>
-                  <span>Departamento ativo</span>
-                </label>
-
-                <label class="compact-field">
-                  <span>Código</span>
-                  <input id="d-codigo" class="input" type="text" maxlength="64" placeholder="Opcional"/>
-                </label>
-              </div>
+              <div id="parent-panel" class="parent-panel" role="listbox" aria-label="Escolher departamento principal"></div>
             </div>
 
-            <div class="modal-col preview-col">
-              <div class="preview-title">Departamento da empresa <span><i class="fa-solid fa-building"></i> <b id="preview-company">Bitrix</b></span></div>
-              <div id="wizard-preview" class="wizard-preview"></div>
+            <div class="fi">
+              <label for="d-nome">Nome</label>
+              <input id="d-nome" class="input" type="text" maxlength="120" placeholder="Digite o nome do departamento" required/>
             </div>
+
+            <div class="fi">
+              <label for="d-desc">Descrição</label>
+              <textarea id="d-desc" class="input" rows="5" maxlength="300" placeholder="Digite a descrição do departamento"></textarea>
+            </div>
+
+            <div class="form-inline refined-inline">
+              <label class="toggle-line refined-toggle">
+                <input id="d-ativo" type="checkbox" checked/>
+                <span class="toggle-copy">
+                  <strong>Departamento ativo</strong>
+                  <small>Departamentos inativos não aparecerão no organograma.</small>
+                </span>
+              </label>
+
+              <label class="compact-field code-field">
+                <span>Código</span>
+                <input id="d-codigo" class="input" type="text" maxlength="64" placeholder="Opcional"/>
+              </label>
+            </div>
+
+            <div id="wizard-preview" class="wizard-preview" hidden></div>
           </div>
         </section>
 
         <section class="wizard-step" data-step="2">
-          <div class="modal-grid two-col">
-            <div class="modal-col form-col">
-              <div class="fi people-field">
-                <label>Supervisores</label>
-                <button id="btn-supervisores" class="add-people-btn" type="button">
-                  <i class="fa-solid fa-plus"></i> Adicionar
-                </button>
-                <small>Vários supervisores são possíveis.</small>
-              </div>
-
-              <div class="fi people-field">
-                <label>Supervisor adjunto</label>
-                <button id="btn-adjuntos" class="add-people-btn" type="button">
-                  <i class="fa-solid fa-plus"></i> Adicionar
-                </button>
-                <small>Vários supervisores adjuntos são possíveis.</small>
-              </div>
-
-              <div class="fi members-field">
-                <div class="members-label-row">
-                  <label>Colaboradores</label>
-                  <span id="d-membros-count" class="members-count">0 selecionados</span>
-                </div>
-
-                <div class="members-toolbar">
-                  <label class="members-search" for="d-membros-search">
-                    <i class="fa-solid fa-magnifying-glass"></i>
-                    <input id="d-membros-search" type="search" placeholder="Buscar colaborador" autocomplete="off" spellcheck="false"/>
-                  </label>
-                  <button id="d-membros-all" type="button">Todos</button>
-                  <button id="d-membros-clear" type="button">Nenhum</button>
-                </div>
-
-                <div id="d-membros-list" class="members-list">
-                  <div class="members-empty">Carregando colaboradores...</div>
-                </div>
-              </div>
-
-              <div class="transfer-line">
-                Os usuários selecionados serão: <button type="button">transferidos de seus departamentos <i class="fa-solid fa-angle-down"></i></button>
+          <div class="step2-clean">
+            <div class="step2-hero">
+              <div>
+                <span>Configuração rápida</span>
+                <h3>Horário e acesso do departamento</h3>
+                <p>Defina só o essencial: horário padrão, números vinculados e colaboradores.</p>
               </div>
             </div>
 
-            <div class="modal-col preview-col">
-              <div class="preview-title">Departamento da empresa <span><i class="fa-solid fa-building"></i> <b id="preview-company-2">Bitrix</b></span></div>
-              <div id="wizard-preview-2" class="wizard-preview"></div>
+            <div class="config-grid-clean">
+              <article class="config-card-clean config-card-time">
+                <div class="config-card-head-clean">
+                  <span class="config-icon"><i class="fa-regular fa-clock"></i></span>
+                  <div>
+                    <h4>Horário padrão</h4>
+                    <p>Opcional para controle de login do setor.</p>
+                  </div>
+                </div>
+
+                <div class="schedule-compact">
+                  <label class="time-mini-field">
+                    <span>Entrada</span>
+                    <input id="d-hora-inicio" class="input" type="time" step="60" />
+                  </label>
+                  <label class="time-mini-field">
+                    <span>Saída</span>
+                    <input id="d-hora-fim" class="input" type="time" step="60" />
+                  </label>
+                </div>
+              </article>
+
+              <article class="config-card-clean config-card-instances">
+                <div class="config-card-head-clean with-actions">
+                  <span class="config-icon"><i class="fa-brands fa-whatsapp"></i></span>
+                  <div>
+                    <h4>Instâncias</h4>
+                    <p><strong id="d-instancias-count">0 selecionadas</strong></p>
+                  </div>
+                  <div class="mini-actions">
+                    <button id="d-instancias-all" type="button">Todas</button>
+                    <button id="d-instancias-clear" type="button">Limpar</button>
+                  </div>
+                </div>
+
+                <div id="d-instancias-list" class="instancias-list instancias-pills">
+                  <div class="members-empty">Carregando instâncias...</div>
+                </div>
+              </article>
+
+              <article class="config-card-clean config-card-members">
+                <div class="config-card-head-clean with-actions">
+                  <span class="config-icon"><i class="fa-solid fa-users"></i></span>
+                  <div>
+                    <h4>Colaboradores</h4>
+                    <p><strong id="d-membros-count">0 selecionados</strong></p>
+                  </div>
+                  <button id="d-membros-toggle" class="manage-members-btn" type="button">Gerenciar</button>
+                </div>
+
+                <div id="d-membros-summary" class="members-summary-clean">
+                  Nenhum colaborador selecionado.
+                </div>
+
+                <div id="d-membros-panel" class="members-panel-clean" hidden>
+                  <div class="members-toolbar clean-toolbar">
+                    <label class="members-search" for="d-membros-search">
+                      <i class="fa-solid fa-magnifying-glass"></i>
+                      <input id="d-membros-search" type="search" placeholder="Buscar colaborador" autocomplete="off" spellcheck="false"/>
+                    </label>
+                    <button id="d-membros-all" type="button">Todos</button>
+                    <button id="d-membros-clear" type="button">Nenhum</button>
+                  </div>
+
+                  <div id="d-membros-list" class="members-list members-list-clean">
+                    <div class="members-empty">Carregando colaboradores...</div>
+                  </div>
+                </div>
+              </article>
             </div>
           </div>
         </section>
@@ -199,9 +241,11 @@
 
               <div class="review-list">
                 <div><span>Departamento</span><strong id="review-nome">—</strong></div>
-                <div><span>Principal</span><strong id="review-parent">Bitrix</strong></div>
+                <div><span>Principal</span><strong id="review-parent">Empresa</strong></div>
                 <div><span>Colaboradores</span><strong id="review-colabs">0 selecionados</strong></div>
                 <div><span>Status</span><strong id="review-status">Ativo</strong></div>
+                <div><span>Horário padrão</span><strong id="review-horario">Não definido</strong></div>
+                <div><span>Instâncias</span><strong id="review-instancias">0 selecionadas</strong></div>
               </div>
             </div>
 
@@ -219,8 +263,8 @@
         </button>
         <div class="modal-foot-actions">
           <button id="modal-cancelar" class="btn-modal ghost" type="button">Cancelar</button>
-          <button id="modal-avancar" class="btn-modal primary" type="button">Avançar</button>
-          <button id="modal-salvar" class="btn-modal primary" type="button">Salvar e sair</button>
+          <button id="modal-avancar" class="btn-modal primary" type="button">Avançar <i class="fa-solid fa-arrow-right"></i></button>
+          <button id="modal-salvar" class="btn-modal primary" type="button">Salvar <i class="fa-solid fa-check"></i></button>
         </div>
       </div>
     </div>

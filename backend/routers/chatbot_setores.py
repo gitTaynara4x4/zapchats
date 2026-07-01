@@ -31,6 +31,13 @@ router = APIRouter(prefix="/api", tags=["Chatbot (Triagem Setores)"])
 TRIAGEM_TTL_HOURS = int(os.getenv("TRIAGEM_TTL_HOURS", "6"))
 AUTO_MESSAGE_DEDUP_MINUTES = int(os.getenv("AUTO_MESSAGE_DEDUP_MINUTES", "60"))
 
+# Enquanto a triagem está aguardando escolha, não reenvia o mesmo menu
+# repetidamente para o cliente. Isso evita spam quando chegam mensagens repetidas
+# ou quando algum backlog antigo tenta processar de novo.
+CHATBOT_MENU_REPEAT_BLOCK_MINUTES = int(
+    os.getenv("CHATBOT_MENU_REPEAT_BLOCK_MINUTES", str(max(60, TRIAGEM_TTL_HOURS * 60)))
+)
+
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -596,6 +603,50 @@ def _persist_bot_saida_message(
         return None
 
 
+def _recent_bot_menu_sent(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    cliente_id: int,
+    now: Optional[datetime] = None,
+    block_minutes: Optional[int] = None,
+) -> bool:
+    """Retorna True se o menu da triagem já foi enviado recentemente.
+
+    O menu automático tem que aparecer no histórico, mas não pode ser disparado
+    várias vezes para o cliente quando o servidor volta e recebe backlog/replay.
+    """
+    try:
+        minutes = int(block_minutes if block_minutes is not None else CHATBOT_MENU_REPEAT_BLOCK_MINUTES)
+    except Exception:
+        minutes = CHATBOT_MENU_REPEAT_BLOCK_MINUTES
+
+    if minutes <= 0:
+        return False
+
+    try:
+        since = (_as_aware_utc(now) or _now_utc()) - timedelta(minutes=minutes)
+        q = (
+            db.query(models.Mensagem.id)
+            .filter(
+                models.Mensagem.empresa_id == int(empresa_id),
+                models.Mensagem.cliente_id == int(cliente_id),
+                models.Mensagem.instancia_id == int(instancia_id),
+                models.Mensagem.tipo == "saida",
+                models.Mensagem.timestamp >= since,
+                models.Mensagem.conteudo.ilike("%Digite apenas o número da opção desejada%"),
+            )
+        )
+
+        if hasattr(models.Mensagem, "colaborador_id"):
+            q = q.filter(models.Mensagem.colaborador_id.is_(None))
+
+        return q.order_by(models.Mensagem.id.desc()).first() is not None
+    except Exception:
+        return False
+
+
 def _send_and_persist_bot_message(
     db: Session,
     *,
@@ -608,6 +659,19 @@ def _send_and_persist_bot_message(
     ts_dt: Optional[datetime] = None,
 ) -> Optional[Dict[str, Any]]:
     evo = _send_text(db, instancia_nome=instancia_nome, remote_jid=remote_jid, text_msg=text_msg)
+
+    # Se algum helper anterior deixou a sessão em estado abortado, limpa antes
+    # de salvar o registro da mensagem do Bot. As chamadas atuais chegam aqui
+    # depois de commit, então esse rollback não desfaz dados bons.
+    try:
+        if hasattr(db, "is_active") and not db.is_active:
+            db.rollback()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
     _persist_bot_saida_message(
         db,
         empresa_id=int(empresa_id),
@@ -811,7 +875,18 @@ def _sync_open_atendimento_departamento(
             clear_operador=clear_operador,
             clear_participantes=clear_participantes,
         )
-    except Exception:
+    except Exception as exc:
+        # Importante: se uma query falhar no Postgres, a transação fica abortada.
+        # Sem rollback, a próxima tentativa de salvar a mensagem do Bot também falha
+        # com "current transaction is aborted".
+        try:
+            print("[CHATBOT][sync-atendimento][erro]", repr(exc))
+        except Exception:
+            pass
+        try:
+            db.rollback()
+        except Exception:
+            pass
         return
 
 
@@ -838,6 +913,10 @@ def _status_novo_value():
 def _open_status_values() -> list[Any]:
     status_enum = getattr(models, "StatusAtendimento", None)
     vals: list[Any] = []
+
+    # Se o model usa Enum nativo do Postgres, NÃO misture strings inválidas
+    # como "aberto"/"pendente" na cláusula IN. Isso quebra a transação e,
+    # em seguida, impede salvar a mensagem automática do Bot no histórico.
     if status_enum is not None:
         for attr in ("NOVO", "AGUARDANDO", "EM_ATENDIMENTO", "PAUSADO"):
             if hasattr(status_enum, attr):
@@ -845,16 +924,10 @@ def _open_status_values() -> list[Any]:
                     vals.append(getattr(status_enum, attr))
                 except Exception:
                     pass
-    vals.extend(["novo", "aguardando", "em_atendimento", "pausado", "aberto", "pendente"])
+        if vals:
+            return vals
 
-    out: list[Any] = []
-    seen: set[str] = set()
-    for v in vals:
-        k = str(v)
-        if k not in seen:
-            seen.add(k)
-            out.append(v)
-    return out
+    return ["novo", "aguardando", "em_atendimento", "pausado"]
 
 
 def _clear_active_participants_safe(db: Session, *, empresa_id: int, atendimento_id: int) -> None:
@@ -1255,6 +1328,21 @@ def triagem_handle_inbound(
             clear_participantes=True,
         )
 
+        if _recent_bot_menu_sent(
+            db,
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+            cliente_id=int(cliente.id),
+            now=now,
+        ):
+            db.commit()
+            return {
+                "ok": True,
+                "action": "noop_menu_already_sent",
+                "reason": "recent_menu_block",
+                "attempts": int(cliente.triagem_tentativas or 0),
+            }
+
         menu = _build_menu_message(empresa_nome=empresa_nome, deps=deps, cfg=cfg)
         db.commit()
 
@@ -1385,6 +1473,20 @@ def triagem_handle_inbound(
         }
 
     if tentativas_antes == 0:
+        if _recent_bot_menu_sent(
+            db,
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+            cliente_id=int(cliente.id),
+            now=now,
+        ):
+            db.commit()
+            return {
+                "ok": True,
+                "action": "noop_menu_already_sent",
+                "reason": "recent_menu_block",
+                "attempts": int(cliente.triagem_tentativas or 0),
+            }
         menu = _build_menu_message(empresa_nome=empresa_nome, deps=deps, cfg=cfg)
     else:
         menu = _build_invalid_choice_message(empresa_nome=empresa_nome, deps=deps, cfg=cfg)

@@ -35,6 +35,8 @@ from .participantes import (
     _response_atendimento_estado,
 )
 
+from .schemas import EditarNomeClienteIn
+
 router = APIRouter(tags=["Atendimento – Conversas"])
 
 
@@ -287,6 +289,127 @@ def obter_meta_conversa(
         status_atd=status_atd,
         current_colab_id=current_colab_id,
     )
+
+
+
+
+# =========================================================
+# PATCH /conversas/{cliente_id}/nome
+# =========================================================
+@router.patch("/conversas/{cliente_id}/nome")
+def editar_nome_cliente_conversa(
+    cliente_id: int,
+    payload: EditarNomeClienteIn,
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    """
+    Edita apenas o nome exibido do contato dentro do atendimento.
+
+    Segurança:
+    - usa a empresa da sessão como verdade;
+    - respeita ACL de instância e departamento;
+    - não altera telefone/JID;
+    - funciona para atendente que tem acesso ao atendimento.
+    """
+    ensure_perm(identity, "atendimento.ver")
+
+    empresa_id_req = _empresa_id_segura(identity, payload.empresa_id)
+
+    acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_req)
+    empresa_id = int(acl_ctx["empresa_id"])
+    allowed_inst_ids = acl_ctx["allowed_instancias"]
+    allowed_dep_ids = acl_ctx["allowed_departamentos"]
+
+    nome = (payload.nome or "").replace("\r", " ").replace("\n", " ").strip()
+    nome = " ".join(nome.split())
+
+    if not nome:
+        raise HTTPException(status_code=400, detail="Informe um nome para o cliente.")
+
+    if len(nome) > 140:
+        raise HTTPException(status_code=400, detail="Nome muito longo. Use até 140 caracteres.")
+
+    cliente = (
+        db.query(models.Cliente)
+        .filter(
+            models.Cliente.empresa_id == int(empresa_id),
+            models.Cliente.id == int(cliente_id),
+        )
+        .first()
+    )
+
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    resolved_inst_id, _resolved_inst_name = _resolve_instancia_id(
+        db,
+        empresa_id=empresa_id,
+        instancia_id=payload.instancia_id,
+        instance=payload.instance,
+    )
+
+    if (payload.instancia_id is not None or payload.instance) and resolved_inst_id is None:
+        raise HTTPException(status_code=404, detail="Instância não encontrada para a empresa.")
+
+    if resolved_inst_id is None:
+        resolved_inst_id = _cliente_instancia_mais_recente(
+            db,
+            empresa_id=empresa_id,
+            cliente_id=int(cliente_id),
+            allowed_inst_ids=allowed_inst_ids,
+        )
+
+    if resolved_inst_id is None:
+        resolved_inst_id = getattr(cliente, "instancia_id", None)
+
+    if resolved_inst_id is not None:
+        assert_instancia_allowed(
+            allowed_instancias=allowed_inst_ids,
+            instancia_id=resolved_inst_id,
+        )
+
+    atd = _latest_atendimento_for_cliente_instancia(
+        db,
+        empresa_id=empresa_id,
+        cliente_id=int(cliente_id),
+        instancia_id=resolved_inst_id,
+    )
+
+    departamento_acl = (
+        getattr(atd, "departamento_id", None)
+        if atd is not None and hasattr(atd, "departamento_id")
+        else getattr(cliente, "departamento_id", None)
+    )
+
+    _assert_departamento_acl_for_row(
+        allowed_dep_ids=allowed_dep_ids,
+        departamento_id=departamento_acl,
+    )
+
+    cliente.nome = nome
+
+    try:
+        db.add(cliente)
+        db.commit()
+        db.refresh(cliente)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Não foi possível salvar o nome do cliente: {exc}")
+
+    conv_key = f"c:{int(cliente.id)}:{int(resolved_inst_id or 0)}"
+
+    return {
+        "ok": True,
+        "cliente_id": int(cliente.id),
+        "entity_id": int(cliente.id),
+        "conversation_key": conv_key,
+        "conversation_id": conv_key,
+        "instancia_id": int(resolved_inst_id) if resolved_inst_id is not None else None,
+        "nome": cliente.nome,
+        "nome_whatsapp": getattr(cliente, "nome_whatsapp", None),
+        "telefone": getattr(cliente, "telefone", None),
+    }
 
 
 # =========================================================

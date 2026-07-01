@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Minha Empresa | Valora CRM</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <link rel="stylesheet" href="/frontend/css/app.css?v=20260630-dark-chatgpt-v6" />
+  <link rel="stylesheet" href="/frontend/css/validacao.css?v=20260614-required-circle" />
+  <script src="/frontend/js/pages/app.js?v=20260626-ajuda-global" defer></script>
+  <script src="/frontend/js/shared/validacao.js?v=20260614-required-circle" defer></script>
+  
+  <link rel="stylesheet" href="/frontend/css/empresa.css" />
+  <script src="/frontend/js/pages/empresa.js" defer></script>
+  <link rel="stylesheet" href="/frontend/css/campos-longos.css?v=20260614-global-inline" />
+  <script src="/frontend/js/shared/campos-longos.js?v=20260614-global-inline" defer></script>
+  <link rel="stylesheet" href="/frontend/css/layout-compacto.css?v=20260615-tipografia-sem-centralizar" />
+  <link rel="stylesheet" href="/frontend/css/responsivo-global.css?v=20260615-mobile-real">
+  <link rel="stylesheet" href="/frontend/css/dark-chatgpt-fix.css?v=20260630-dark-v7" />
+</head>
+<body>
+  <div class="layout">
+    <iframe src="/frontend/partials/sidebar.html?v=20260615-menu-fix" class="sidebar-frame" title="Menu lateral"></iframe>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <span class="eyebrow">Configurações de Conta</span>
+          <h1>Minha Empresa</h1>
+        </div>
+      </header>
+
+      <div class="settings-layout">
+        
+        <div class="settings-col">
+          
+          <article class="panel-card">
+            <div class="panel-head">
+              <h3>Logo da Empresa</h3>
+              <p>Esta imagem será exibida no cabeçalho das suas propostas e orçamentos.</p>
+            </div>
+            
+            <div class="logo-upload-box">
+              <div class="logo-preview" id="logoPreviewBox">
+                <i class="fa-solid fa-building" id="logoPlaceholderIcon"></i>
+              </div>
+              <div class="avatar-actions">
+                <input type="file" id="logoInput" accept="image/png, image/jpeg, image/webp" style="display: none;" />
+                <button type="button" class="btn btn-secondary" id="btnUploadLogo">
+                  <i class="fa-solid fa-upload" style="margin-right: 8px;"></i> Carregar nova logo
+                </button>
+                <button type="button" class="btn btn-text" id="btnRemoveLogo">Remover</button>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel-card">
+            <div class="panel-head">
+              <h3>Dados da Empresa</h3>
+              <p>Informações comerciais do seu negócio.</p>
+            </div>
+
+            <form class="valora-form" id="formEmpresa">
+              <div class="form-group">
+                <label for="empNome">Nome Fantasia / Razão Social *</label>
+                <input type="text" id="empNome" required placeholder="Ex: Valora Tecnologia Ltda" />
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="empCNPJ">CNPJ</label>
+                  <input type="text" id="empCNPJ" placeholder="00.000.000/0001-00" />
+                </div>
+                <div class="form-group">
+                  <label for="empTelefone">Telefone Comercial</label>
+                  <input type="text" id="empTelefone" placeholder="(00) 0000-0000" />
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="empEmail">E-mail de Contato Comercial</label>
+                <input type="email" id="empEmail" placeholder="contato@suaempresa.com.br" />
+              </div>
+
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary" id="btnSalvarEmpresa">Salvar informações</button>
+              </div>
+            </form>
+          </article>
+
+        </div>
+
+        <div class="settings-col">
+          
+          <article class="panel-card">
+            <div class="panel-head">
+              <h3>Endereço Comercial</h3>
+              <p>Opcional. Será exibido no rodapé dos seus documentos.</p>
+            </div>
+
+            <form class="valora-form" id="formEndereco">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="empCEP">CEP</label>
+                  <input type="text" id="empCEP" placeholder="00000-000" />
+                </div>
+                <div class="form-group">
+                  <label for="empEstado">Estado (UF)</label>
+                  <select id="empEstado">
+                    <option value="">Selecione...</option>
+                    <option value="AC">Acre (AC)</option>
+                    <option value="AL">Alagoas (AL)</option>
+                    <option value="AP">Amapá (AP)</option>
+                    <option value="AM">Amazonas (AM)</option>
+                    <option value="BA">Amazonas (BA)</option>
+                    <option value="CE">Ceará (CE)</option>
+                    <option value="DF">Distrito Federal (DF)</option>
+                    <option value="ES">Espírito Santo (ES)</option>
+                    <option value="GO">Goiás (GO)</option>
+                    <option value="MA">Maranhão (MA)</option>
+                    <option value="MT">Mato Grosso (MT)</option>
+                    <option value="MS">Mato Grosso do Sul (MS)</option>
+                    <option value="MG">Minas Gerais (MG)</option>
+                    <option value="PA">Pará (PA)</option>
+                    <option value="PB">Paraíba (PB)</option>
+                    <option value="PR">Paraná (PR)</option>
+                    <option value="PE">Pernambuco (PE)</option>
+                    <option value="PI">Piauí (PI)</option>
+                    <option value="RJ">Rio de Janeiro (RJ)</option>
+                    <option value="RN">Rio Grande do Norte (RN)</option>
+                    <option value="RS">Rio Grande do Sul (RS)</option>
+                    <option value="RO">Rondônia (RO)</option>
+                    <option value="RR">Roraima (RR)</option>
+                    <option value="SC">Santa Catarina (SC)</option>
+                    <option value="SP">São Paulo (SP)</option>
+                    <option value="SE">Sergipe (SE)</option>
+                    <option value="TO">Tocantins (TO)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="empCidade">Cidade</label>
+                <input type="text" id="empCidade" placeholder="Ex: São José dos Campos" />
+              </div>
+
+              <div class="form-row" style="grid-template-columns: 2fr 1fr;">
+                <div class="form-group">
+                  <label for="empRua">Endereço (Rua, Av)</label>
+                  <input type="text" id="empRua" placeholder="Ex: Av. Principal" />
+                </div>
+                <div class="form-group">
+                  <label for="empNumero">Número</label>
+                  <input type="text" id="empNumero" placeholder="123" />
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="empComplemento">Complemento / Bairro</label>
+                <input type="text" id="empComplemento" placeholder="Sala 4, Centro" />
+              </div>
+
+              <div class="form-actions">
+                <button type="submit" class="btn btn-secondary" id="btnSalvarEndereco">Atualizar endereço</button>
+              </div>
+            </form>
+          </article>
+
+        </div>
+
+      </div>
+    </main>
+  </div>
+</body>
+</html>

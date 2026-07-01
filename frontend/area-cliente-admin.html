@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Área do Cliente | Valora CRM</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="/frontend/css/app.css?v=20260630-dark-chatgpt-v6" />
+  <link rel="stylesheet" href="/frontend/css/validacao.css?v=20260614-required-circle" />
+  <link rel="stylesheet" href="/frontend/css/area-cliente-admin.css" />
+
+  <script src="/frontend/js/pages/app.js?v=20260626-ajuda-global" defer></script>
+  <script src="/frontend/js/shared/validacao.js?v=20260614-required-circle" defer></script>
+  <script type="module" src="/frontend/js/pages/area-cliente-admin.js"></script>
+  <link rel="stylesheet" href="/frontend/css/campos-longos.css?v=20260614-global-inline" />
+  <script src="/frontend/js/shared/campos-longos.js?v=20260614-global-inline" defer></script>
+  <link rel="stylesheet" href="/frontend/css/layout-compacto.css?v=20260615-tipografia-sem-centralizar" />
+  <link rel="stylesheet" href="/frontend/css/responsivo-global.css?v=20260615-mobile-real">
+  <link rel="stylesheet" href="/frontend/css/dark-chatgpt-fix.css?v=20260630-dark-v7" />
+</head>
+<body>
+  <div class="layout">
+    <iframe src="/frontend/partials/sidebar.html?v=20260615-menu-fix" class="sidebar-frame" title="Menu lateral"></iframe>
+
+    <main class="main area-cliente-main">
+      <header class="topbar area-cliente-topbar">
+        <div class="topbar-title">
+          <span class="eyebrow">Área do Cliente</span>
+          <h1>Dados para contrato</h1>
+          <p class="page-subtitle">
+            Gerencie os dados complementares do cliente e gere o acesso provisório para preenchimento futuro pelo portal.
+          </p>
+        </div>
+
+        <div class="topbar-actions area-cliente-actions">
+          <button class="btn btn-secondary" type="button" id="btn-recarregar">
+            <i class="fa-solid fa-rotate"></i>
+            Recarregar
+          </button>
+
+          <button class="btn btn-primary" type="button" id="btn-salvar-topo">
+            <i class="fa-solid fa-floppy-disk"></i>
+            Salvar dados
+          </button>
+        </div>
+      </header>
+
+      <section class="area-intro">
+        <article class="intro-card intro-card-main">
+          <div class="intro-icon">
+            <i class="fa-solid fa-address-card"></i>
+          </div>
+          <div>
+            <strong>Dados complementares</strong>
+            <span>Campos PF/PJ necessários para emissão do contrato.</span>
+          </div>
+        </article>
+
+        <article class="intro-card">
+          <div class="intro-icon">
+            <i class="fa-solid fa-key"></i>
+          </div>
+          <div>
+            <strong>Acesso provisório</strong>
+            <span>Gere link, código do cliente e senha temporária para envio manual.</span>
+          </div>
+        </article>
+
+        <article class="intro-card">
+          <div class="intro-icon">
+            <i class="fa-solid fa-clock-rotate-left"></i>
+          </div>
+          <div>
+            <strong>Histórico</strong>
+            <span>Acompanhe alterações feitas nos dados do cliente.</span>
+          </div>
+        </article>
+      </section>
+
+      <section class="area-grid">
+        <aside class="panel-card cliente-panel">
+          <div class="panel-head compact-head">
+            <h3>Cliente</h3>
+            <p>Selecione o cliente para carregar os dados e acessos.</p>
+          </div>
+
+          <div class="form-group">
+            <label for="cliente_id">Cliente *</label>
+            <select id="cliente_id">
+              <option value="">Carregando clientes...</option>
+            </select>
+          </div>
+
+          <div class="cliente-resumo" id="cliente-resumo">
+            <div class="cliente-resumo-icon">
+              <i class="fa-solid fa-user"></i>
+            </div>
+            <div>
+              <strong>Nenhum cliente selecionado</strong>
+              <span>Escolha um cliente para continuar.</span>
+            </div>
+          </div>
+
+          <div class="status-box" id="status-geral">
+            Carregando dados iniciais...
+          </div>
+        </aside>
+
+        <section class="area-content">
+          <article class="panel-card acesso-card" id="acesso-card" hidden>
+            <div class="panel-head acesso-head">
+              <div>
+                <span class="eyebrow">Acesso do cliente</span>
+                <h3>Link e senha provisória</h3>
+                <p>
+                  Gere o acesso para o cliente preencher os dados no portal público quando essa etapa estiver ativa.
+                </p>
+              </div>
+
+              <span class="soft-badge" id="acesso-status-badge">Sem acesso</span>
+            </div>
+
+            <div class="acesso-ativo-box" id="acesso-ativo-box">
+              <div class="acesso-ativo-icon">
+                <i class="fa-solid fa-circle-info"></i>
+              </div>
+              <div>
+                <strong id="acesso-ativo-titulo">Nenhum acesso ativo</strong>
+                <span id="acesso-ativo-texto">
+                  Gere um novo acesso provisório para este cliente.
+                </span>
+              </div>
+            </div>
+
+            <div class="gerar-acesso-box">
+              <div class="form-row gerar-acesso-row">
+                <div class="form-group">
+                  <label for="expira_em_dias">Expiração</label>
+                  <select id="expira_em_dias">
+                    <option value="3">3 dias</option>
+                    <option value="7" selected>7 dias</option>
+                    <option value="15">15 dias</option>
+                    <option value="30">30 dias</option>
+                    <option value="60">60 dias</option>
+                    <option value="90">90 dias</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="base_url_acesso">URL base do portal</label>
+                  <input id="base_url_acesso" type="text" value="https://segsis.com.br/area-cliente" />
+                </div>
+              </div>
+
+              <label class="check-line">
+                <input id="revogar_anteriores" type="checkbox" checked />
+                <span>Revogar acessos pendentes anteriores deste cliente</span>
+              </label>
+
+              <div class="acesso-actions">
+                <button class="btn btn-primary" type="button" id="btn-gerar-acesso">
+                  <i class="fa-solid fa-key"></i>
+                  Gerar acesso provisório
+                </button>
+
+                <button class="btn btn-secondary" type="button" id="btn-recarregar-acessos">
+                  <i class="fa-solid fa-rotate"></i>
+                  Atualizar acessos
+                </button>
+              </div>
+            </div>
+
+            <div class="acesso-gerado-box" id="acesso-gerado-box" hidden>
+              <div class="alerta-senha">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                <span>
+                  A senha provisória aparece apenas agora. Copie o link, a senha e a mensagem antes de atualizar a página.
+                </span>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="link_publico_gerado">Link gerado</label>
+                  <div class="copy-control">
+                    <input id="link_publico_gerado" type="text" readonly />
+                    <button class="btn btn-secondary btn-icon" type="button" id="btn-copiar-link" title="Copiar link">
+                      <i class="fa-regular fa-copy"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="senha_provisoria_gerada">Senha provisória</label>
+                  <div class="copy-control">
+                    <input id="senha_provisoria_gerada" type="text" readonly />
+                    <button class="btn btn-secondary btn-icon" type="button" id="btn-copiar-senha" title="Copiar senha">
+                      <i class="fa-regular fa-copy"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="mensagem_whatsapp_gerada">Mensagem pronta para WhatsApp/e-mail</label>
+                <textarea id="mensagem_whatsapp_gerada" rows="8" readonly></textarea>
+              </div>
+
+              <div class="acesso-actions">
+                <button class="btn btn-primary" type="button" id="btn-copiar-mensagem">
+                  <i class="fa-brands fa-whatsapp"></i>
+                  Copiar mensagem
+                </button>
+              </div>
+            </div>
+
+            <div class="acessos-list-wrap">
+              <div class="section-title-row">
+                <div>
+                  <h4>Acessos gerados</h4>
+                  <p>Histórico de acessos provisórios deste cliente.</p>
+                </div>
+              </div>
+
+              <div class="acessos-status" id="acessos-status">
+                Selecione um cliente para carregar os acessos.
+              </div>
+
+              <div class="acessos-lista" id="acessos-lista"></div>
+            </div>
+          </article>
+
+          <form class="valora-form panel-card dados-card" id="form-dados-cliente">
+            <div class="form-card-head">
+              <div>
+                <span class="eyebrow">Cadastro complementar</span>
+                <h3>Informações para emissão do contrato</h3>
+                <p>Dados exigidos no fluxo de Área do Cliente.</p>
+              </div>
+
+              <span class="record-meta" id="registro-meta">Nenhum cliente selecionado</span>
+            </div>
+
+            <section class="form-section">
+              <div class="section-title-row">
+                <div>
+                  <h4>Tipo de cadastro</h4>
+                  <p>Defina se os dados serão de pessoa física ou jurídica.</p>
+                </div>
+              </div>
+
+              <div class="form-row three-cols">
+                <div class="form-group">
+                  <label for="tipo_pessoa">Tipo de pessoa *</label>
+                  <select id="tipo_pessoa" name="tipo_pessoa">
+                    <option value="PF">Pessoa Física</option>
+                    <option value="PJ">Pessoa Jurídica</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="status_preenchimento">Status do preenchimento</label>
+                  <select id="status_preenchimento" name="status_preenchimento">
+                    <option value="rascunho">Rascunho</option>
+                    <option value="pendente_cliente">Pendente cliente</option>
+                    <option value="em_analise">Em análise</option>
+                    <option value="concluido">Concluído</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="origem_preenchimento">Origem</label>
+                  <select id="origem_preenchimento" name="origem_preenchimento">
+                    <option value="admin">Admin interno</option>
+                    <option value="portal">Portal do cliente</option>
+                  </select>
+                </div>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <div class="section-title-row">
+                <div>
+                  <h4>Pessoa Física</h4>
+                  <p>Dados pessoais do cliente quando o contrato for PF.</p>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="nome_completo">Nome completo</label>
+                  <input id="nome_completo" name="nome_completo" type="text" />
+                </div>
+
+                <div class="form-group">
+                  <label for="cpf">CPF</label>
+                  <input id="cpf" name="cpf" type="text" />
+                </div>
+              </div>
+
+              <div class="form-row three-cols">
+                <div class="form-group">
+                  <label for="rg">RG</label>
+                  <input id="rg" name="rg" type="text" />
+                </div>
+
+                <div class="form-group">
+                  <label for="nacionalidade">Nacionalidade</label>
+                  <input id="nacionalidade" name="nacionalidade" type="text" placeholder="Brasileira" />
+                </div>
+
+                <div class="form-group">
+                  <label for="profissao">Profissão</label>
+                  <input id="profissao" name="profissao" type="text" />
+                </div>
+              </div>
+
+              <div class="form-row three-cols">
+                <div class="form-group">
+                  <label for="estado_civil">Estado civil</label>
+                  <input id="estado_civil" name="estado_civil" type="text" />
+                </div>
+
+                <div class="form-group">
+                  <label for="data_nascimento">Data de nascimento</label>
+                  <input id="data_nascimento" name="data_nascimento" type="date" />
+                </div>
+
+                <div class="form-group">
+                  <label for="telefone_pessoal">Telefone pessoal</label>
+                  <input id="telefone_pessoal" name="telefone_pessoal" type="text" />
+                </div>
+              </div>
+
+              <div class="form-row single-col">
+                <div class="form-group">
+                  <label for="email_pessoal">E-mail pessoal</label>
+                  <input id="email_pessoal" name="email_pessoal" type="email" />
+                </div>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <div class="section-title-row">
+                <div>
+                  <h4>Pessoa Jurídica</h4>
+                  <p>Dados da empresa e do representante.</p>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="razao_social">Razão social</label>
+                  <input id="razao_social" name="razao_social" type="text" />
+                </div>
+
+                <div class="form-group">
+                  <label for="cnpj">CNPJ</label>
+                  <input id="cnpj" name="cnpj" type="text" />
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="email_empresa">E-mail empresa</label>
+                  <input id="email_empresa" name="email_empresa" type="email" />
+                </div>
+
+                <div class="form-group">
+                  <label for="telefone_whatsapp_empresa">Telefone/WhatsApp empresa</label>
+                  <input id="telefone_whatsapp_empresa" name="telefone_whatsapp_empresa" type="text" />
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="representante_nome">Nome do representante</label>
+                  <input id="representante_nome" name="representante_nome" type="text" />
+                </div>
+
+                <div class="form-group">
+                  <label for="representante_cpf">CPF do representante</label>
+                  <input id="representante_cpf" name="representante_cpf" type="text" />
+                </div>
+              </div>
+
+              <div class="form-row three-cols">
+                <div class="form-group">
+                  <label for="representante_rg">RG do representante</label>
+                  <input id="representante_rg" name="representante_rg" type="text" />
+                </div>
+
+                <div class="form-group">
+                  <label for="representante_nacionalidade">Nacionalidade</label>
+                  <input id="representante_nacionalidade" name="representante_nacionalidade" type="text" />
+                </div>
+
+                <div class="form-group">
+                  <label for="representante_profissao">Profissão</label>
+                  <input id="representante_profissao" name="representante_profissao" type="text" />
+                </div>
+              </div>
+
+              <div class="form-row three-cols">
+                <div class="form-group">
+                  <label for="representante_estado_civil">Estado civil</label>
+                  <input id="representante_estado_civil" name="representante_estado_civil" type="text" />
+                </div>
+
+                <div class="form-group">
+                  <label for="representante_data_nascimento">Data de nascimento</label>
+                  <input id="representante_data_nascimento" name="representante_data_nascimento" type="date" />
+                </div>
+
+                <div class="form-group">
+                  <label for="representante_telefone_pessoal">Telefone pessoal</label>
+                  <input id="representante_telefone_pessoal" name="representante_telefone_pessoal" type="text" />
+                </div>
+              </div>
+
+              <div class="form-row single-col">
+                <div class="form-group">
+                  <label for="representante_email_pessoal">E-mail pessoal do representante</label>
+                  <input id="representante_email_pessoal" name="representante_email_pessoal" type="email" />
+                </div>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <div class="section-title-row">
+                <div>
+                  <h4>Endereço do imóvel</h4>
+                  <p>Endereço onde o serviço/sistema será instalado ou monitorado.</p>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="endereco_rua">Rua</label>
+                  <input id="endereco_rua" name="endereco_rua" type="text" />
+                </div>
+
+                <div class="form-group form-small">
+                  <label for="endereco_numero">Número</label>
+                  <input id="endereco_numero" name="endereco_numero" type="text" />
+                </div>
+              </div>
+
+              <div class="form-row three-cols">
+                <div class="form-group">
+                  <label for="endereco_bairro">Bairro</label>
+                  <input id="endereco_bairro" name="endereco_bairro" type="text" />
+                </div>
+
+                <div class="form-group">
+                  <label for="endereco_cidade">Cidade</label>
+                  <input id="endereco_cidade" name="endereco_cidade" type="text" />
+                </div>
+
+                <div class="form-group">
+                  <label for="endereco_uf">UF</label>
+                  <input id="endereco_uf" name="endereco_uf" type="text" maxlength="2" />
+                </div>
+              </div>
+
+              <div class="form-row single-col">
+                <div class="form-group">
+                  <label for="endereco_cep">CEP</label>
+                  <input id="endereco_cep" name="endereco_cep" type="text" />
+                </div>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <div class="section-title-row">
+                <div>
+                  <h4>Observações</h4>
+                  <p>Registre informações internas e motivo da alteração.</p>
+                </div>
+              </div>
+
+              <div class="form-row single-col">
+                <div class="form-group">
+                  <label for="observacoes_contrato">Observações para contrato</label>
+                  <textarea id="observacoes_contrato" name="observacoes_contrato" rows="4"></textarea>
+                </div>
+              </div>
+
+              <div class="form-row single-col">
+                <div class="form-group">
+                  <label for="motivo_alteracao">Motivo da alteração</label>
+                  <textarea id="motivo_alteracao" name="motivo_alteracao" rows="3" placeholder="Ex.: Cadastro inicial dos dados complementares para contrato."></textarea>
+                </div>
+              </div>
+            </section>
+
+            <div class="form-actions sticky-actions">
+              <button class="btn btn-secondary" type="button" id="btn-limpar-form">
+                <i class="fa-solid fa-eraser"></i>
+                Limpar
+              </button>
+
+              <button class="btn btn-primary" type="submit" id="btn-salvar-dados">
+                <i class="fa-solid fa-floppy-disk"></i>
+                Salvar dados
+              </button>
+            </div>
+          </form>
+
+          <article class="panel-card historico-card" id="historico-card" hidden>
+            <div class="panel-head history-head">
+              <div>
+                <h3>Histórico de alterações</h3>
+                <p>Alterações registradas nos dados complementares do cliente.</p>
+              </div>
+
+              <button class="btn btn-secondary btn-sm" type="button" id="btn-recarregar-historico">
+                <i class="fa-solid fa-clock-rotate-left"></i>
+                Atualizar histórico
+              </button>
+            </div>
+
+            <div class="history-list" id="historico-lista"></div>
+          </article>
+        </section>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from typing import Optional, Dict, Any
+from uuid import uuid4
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
@@ -90,6 +92,105 @@ def _empresa_id_segura(identity, empresa_id_payload: Optional[int] = None) -> in
 
 
 
+
+
+
+def _nome_departamento(db: Session, departamento_id: Optional[int]) -> Optional[str]:
+    did = _to_int(departamento_id)
+    if did is None:
+        return None
+
+    try:
+        row = (
+            db.query(models.Departamento)
+            .filter(models.Departamento.id == int(did))
+            .first()
+        )
+        return getattr(row, "nome", None) if row else None
+    except Exception:
+        return None
+
+
+def _criar_evento_sistema_atendimento(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente_id: int,
+    instancia_id: Optional[int],
+    atendimento_id: Optional[int],
+    texto: str,
+) -> Optional[models.Mensagem]:
+    """
+    Cria um card interno no histórico da conversa.
+
+    Importante:
+    - tipo='sistema' não é enviado para o WhatsApp;
+    - aparece só no ZapsChat para registrar quem assumiu/liberou/transferiu;
+    - msg_id começa com sys: para não confundir com mensagem da Evolution.
+    """
+    texto = str(texto or "").strip()
+    if not texto:
+        return None
+
+    agora = datetime.now(timezone.utc)
+
+    msg = models.Mensagem(
+        empresa_id=int(empresa_id),
+        cliente_id=int(cliente_id),
+        instancia_id=int(instancia_id) if instancia_id is not None else None,
+        atendimento_id=int(atendimento_id) if atendimento_id is not None else None,
+        colaborador_id=None,
+        conteudo=texto,
+        tipo="sistema",
+        lida=True,
+        ack=3,
+        timestamp=agora,
+        msg_id=f"sys:atendimento:{int(atendimento_id or 0)}:{uuid4().hex}",
+    )
+    db.add(msg)
+    return msg
+
+
+def _payload_evento_sistema(msg: Optional[models.Mensagem]) -> Optional[Dict[str, Any]]:
+    """
+    Retorno leve para o frontend inserir o card central sem recarregar
+    histórico inteiro. O banco continua sendo a verdade.
+    """
+    if msg is None:
+        return None
+
+    ts = getattr(msg, "timestamp", None)
+    try:
+        ts_out = ts.isoformat() if ts is not None else datetime.now(timezone.utc).isoformat()
+    except Exception:
+        ts_out = datetime.now(timezone.utc).isoformat()
+
+    return {
+        "id": int(getattr(msg, "id", 0) or 0) or None,
+        "msg_id": str(getattr(msg, "msg_id", "") or f"sys:front:{uuid4().hex}"),
+        "empresa_id": int(getattr(msg, "empresa_id", 0) or 0) or None,
+        "cliente_id": int(getattr(msg, "cliente_id", 0) or 0) or None,
+        "instancia_id": (
+            int(getattr(msg, "instancia_id", 0) or 0)
+            if getattr(msg, "instancia_id", None) is not None
+            else None
+        ),
+        "atendimento_id": (
+            int(getattr(msg, "atendimento_id", 0) or 0)
+            if getattr(msg, "atendimento_id", None) is not None
+            else None
+        ),
+        "conteudo": str(getattr(msg, "conteudo", "") or ""),
+        "texto": str(getattr(msg, "conteudo", "") or ""),
+        "tipo": "sistema",
+        "origem": "sistema",
+        "message_type": "system",
+        "system_event": True,
+        "lida": True,
+        "ack": 3,
+        "timestamp": ts_out,
+        "created_at": ts_out,
+    }
 
 def _claim_single_responsavel(db: Session, *, atendimento, colaborador_id: int):
     """
@@ -348,6 +449,21 @@ def aceitar_conversa(
         atd.status = STATUS_EM_ATENDIMENTO
 
     db.add(atd)
+
+    evento_sistema = None
+
+    if not already_accepted:
+        colab_nome = _nome_colaborador(db, int(colab_id)) or "Atendente"
+        evento_sistema = _criar_evento_sistema_atendimento(
+            db,
+            empresa_id=int(empresa_id),
+            cliente_id=int(cliente.id),
+            instancia_id=int(resolved_inst_id),
+            atendimento_id=int(getattr(atd, "id", 0) or 0),
+            texto=f"{colab_nome} assumiu este atendimento.",
+        )
+        db.flush()
+
     db.commit()
     db.refresh(atd)
 
@@ -398,6 +514,7 @@ def aceitar_conversa(
         "pode_aceitar": part_info["pode_aceitar"],
         "pode_liberar": part_info["pode_liberar"],
         "pode_responder": part_info.get("pode_responder", True),
+        "system_event": _payload_evento_sistema(evento_sistema),
         **_claim_mode_payload(part_info, atd, int(colab_id)),
     }
 
@@ -491,25 +608,40 @@ def liberar_conversa(
         departamento_id=departamento_acl,
     )
 
+    operador_atual_inicial = _to_int(getattr(atd, "operador_id", None))
+    liberado_de_verdade = False
+    ja_estava_liberado = False
+
     if _participant_feature_enabled(db):
-        released = _release_participante(
+        active_info_before = _response_atendimento_estado(
             db,
             atendimento=atd,
-            colaborador_id=int(colab_id),
+            current_colab_id=int(colab_id),
         )
 
-        if not released:
-            active_info = _response_atendimento_estado(
-                db,
-                atendimento=atd,
-                current_colab_id=int(colab_id),
-            )
+        aceita_por_mim_antes = bool(active_info_before.get("aceita_por_mim"))
+        sou_operador_atual = bool(
+            operador_atual_inicial is not None
+            and int(operador_atual_inicial) == int(colab_id)
+        )
 
-            if not active_info["aceita_por_mim"]:
+        # Idempotência: duplo clique ou requisição repetida não pode gerar
+        # dois cards de sistema nem erro visual para o usuário.
+        if not aceita_por_mim_antes and not sou_operador_atual:
+            if operador_atual_inicial is None:
+                ja_estava_liberado = True
+            else:
                 raise HTTPException(
                     status_code=409,
-                    detail="Você não participa dessa conversa",
+                    detail="Somente o responsável atual pode liberar a conversa",
                 )
+        else:
+            _release_participante(
+                db,
+                atendimento=atd,
+                colaborador_id=int(colab_id),
+            )
+            liberado_de_verdade = True
 
         _sync_atendimento_from_participants(
             db,
@@ -518,22 +650,42 @@ def liberar_conversa(
         )
 
     else:
-        operador_atual = getattr(atd, "operador_id", None)
+        operador_atual = operador_atual_inicial
 
-        if operador_atual is not None and int(operador_atual) != int(colab_id):
+        # Idempotência: se já está sem operador, não cria outro evento.
+        if operador_atual is None:
+            ja_estava_liberado = True
+        elif int(operador_atual) != int(colab_id):
             raise HTTPException(
                 status_code=409,
                 detail="Somente o responsável atual pode liberar a conversa",
             )
-
-        atd.operador_id = None
-        atd.status = (
-            models.StatusAtendimento.AGUARDANDO
-            if getattr(atd, "departamento_id", None) is not None
-            else models.StatusAtendimento.NOVO
-        )
+        else:
+            atd.operador_id = None
+            atd.status = (
+                models.StatusAtendimento.AGUARDANDO
+                if getattr(atd, "departamento_id", None) is not None
+                else models.StatusAtendimento.NOVO
+            )
+            liberado_de_verdade = True
 
     db.add(atd)
+
+    evento_sistema = None
+
+    if liberado_de_verdade and not ja_estava_liberado:
+        colab_nome = _nome_colaborador(db, int(colab_id)) or "Atendente"
+        dep_nome = _nome_departamento(db, getattr(atd, "departamento_id", None)) or "o departamento"
+        evento_sistema = _criar_evento_sistema_atendimento(
+            db,
+            empresa_id=int(empresa_id),
+            cliente_id=int(cliente.id),
+            instancia_id=int(resolved_inst_id),
+            atendimento_id=int(getattr(atd, "id", 0) or 0),
+            texto=f"{colab_nome} liberou este atendimento para {dep_nome}.",
+        )
+        db.flush()
+
     db.commit()
     db.refresh(atd)
 
@@ -545,6 +697,8 @@ def liberar_conversa(
 
     return {
         "ok": True,
+        "already_released": bool(ja_estava_liberado),
+        "released": bool(liberado_de_verdade),
         "cliente_id": int(cliente.id),
         "instancia_id": int(resolved_inst_id),
         "atendimento_id": int(atd.id),
@@ -583,6 +737,7 @@ def liberar_conversa(
         "pode_aceitar": part_info["pode_aceitar"],
         "pode_liberar": part_info["pode_liberar"],
         "pode_responder": part_info.get("pode_responder", True),
+        "system_event": _payload_evento_sistema(evento_sistema),
         **_claim_mode_payload(part_info, atd, int(colab_id)),
     }
 

@@ -62,6 +62,133 @@
         padding:4px 6px 0;
       }
 
+      .msg-row.msg-reaction-row{
+        margin-top:2px !important;
+        margin-bottom:2px !important;
+      }
+
+      .bubble.bubble-reaction{
+        width:auto !important;
+        min-width:0 !important;
+        max-width:132px !important;
+        padding:6px 8px !important;
+        border-radius:18px !important;
+        display:inline-flex !important;
+        align-items:flex-end !important;
+        gap:6px !important;
+      }
+
+      .bubble.bubble-reaction .zc-msg-author,
+      .bubble.bubble-reaction .zc-quoted-bubble{
+        display:none !important;
+      }
+
+      .bubble.bubble-reaction .msg-reaction-text{
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        font-size:24px !important;
+        line-height:1 !important;
+        white-space:nowrap !important;
+      }
+
+      .bubble.bubble-reaction .meta{
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1 !important;
+        font-size:10px !important;
+        opacity:.72 !important;
+      }
+
+
+      .msg-system{
+        width:100% !important;
+        display:flex !important;
+        justify-content:center !important;
+        align-items:center !important;
+        margin:8px 0 !important;
+        padding:0 14px !important;
+        clear:both !important;
+      }
+
+      .msg-system .zc-system-card{
+        width:auto;
+        max-width:min(680px, calc(100% - 28px));
+        display:inline-flex;
+        flex-direction:row;
+        align-items:center;
+        justify-content:center;
+        gap:7px;
+        padding:6px 11px;
+        border-radius:999px;
+        border:1px solid rgba(15,23,42,.08);
+        background:rgba(255,255,255,.82);
+        box-shadow:0 4px 14px rgba(15,23,42,.07);
+        color:#475569;
+        text-align:center;
+        font-family:"Inter","Segoe UI",Arial,sans-serif;
+        backdrop-filter:blur(8px);
+        -webkit-backdrop-filter:blur(8px);
+      }
+
+      .zc-system-icon{
+        width:16px;
+        height:16px;
+        flex:0 0 16px;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        border-radius:999px;
+        background:#dbeafe;
+        color:#2563eb;
+        font-size:10px;
+        line-height:1;
+        font-weight:900;
+        font-family:Inter,"Segoe UI",Arial,sans-serif;
+      }
+
+      .zc-system-title{
+        display:none !important;
+      }
+
+      .zc-system-text{
+        min-width:0;
+        font-size:12.5px;
+        line-height:1.25;
+        font-weight:650;
+        color:#334155;
+      }
+
+      .zc-system-time{
+        flex:0 0 auto;
+        margin-left:2px;
+        font-size:10.5px;
+        line-height:1;
+        font-weight:700;
+        color:#94a3b8;
+      }
+
+      html[data-theme="dark"] .msg-system .zc-system-card{
+        border-color:rgba(255,255,255,.08);
+        background:rgba(32,44,51,.74);
+        box-shadow:0 6px 18px rgba(0,0,0,.20);
+      }
+
+      html[data-theme="dark"] .zc-system-icon{
+        background:rgba(37,99,235,.22);
+        color:#93c5fd;
+      }
+
+      html[data-theme="dark"] .zc-system-text{
+        color:#d1d7db;
+      }
+
+      html[data-theme="dark"] .zc-system-time{
+        color:#8696a0;
+      }
+
       .zc-quoted-bubble{
         position:relative;
         display:flex;

@@ -463,6 +463,27 @@
     }
   }
 
+  function rootHasMedia(root) {
+    try {
+      const scope = root || H() || document;
+      return !!scope.querySelector?.([
+        '[data-zc-lazy-media]',
+        '[data-zc-lazy-src]',
+        '.zc-media',
+        '.zc-gallery',
+        '.msg-media',
+        '.wa-audio',
+        'audio',
+        'video',
+        'img[data-zc-lazy-src]',
+        'img.zc-msg-img',
+        '.document-card',
+      ].join(','));
+    } catch {
+      return false;
+    }
+  }
+
   function enhance(root) {
     root = getSafeRoot(root);
 
@@ -473,11 +494,13 @@
     try {
       M.state.enhancing = true;
 
-      /*
-        CSS pode ser garantido sempre.
-        O resto tenta ficar restrito ao root recebido.
-      */
       ensureMsgMediaCssSafe();
+
+      // Se não tem mídia, não varre/reprocessa tudo. Conversa de texto fica leve.
+      if (!rootHasMedia(root) && window.ZC_MEDIA_RENDER_FOR_TEXT !== true) {
+        bindQuotedPreviewClicksSafe(document);
+        return;
+      }
 
       upgradeNativeAudiosSafe(root);
       injectMarkerMediasSafe(root);
@@ -485,13 +508,7 @@
       initAudioPlayersSafe(root);
       refreshAudioAvatarsSafe(root);
       bindViewerClicksSafe(root);
-
-      /*
-        Quoted preview usa delegate/click global em algumas versões.
-        Chamar com document mantém compatibilidade, mas não roda em loop.
-      */
       bindQuotedPreviewClicksSafe(document);
-
       groupConsecutiveImageRowsSafe(root);
       initControlledLazyMediaSafe(root);
     } finally {
@@ -556,6 +573,13 @@
       return;
     }
 
+    // RAM seguro: não mantém MutationObserver permanente no histórico.
+    // O enhance roda por evento historico:rendered e só quando há mídia.
+    if (window.ZC_DISABLE_MEDIA_RENDER_OBSERVER === true) {
+      try { disconnectObserverFor(hist); } catch {}
+      return;
+    }
+
     /*
       Se já está observando esse mesmo elemento, não faz nada.
     */
@@ -573,6 +597,10 @@
         disconnectObserverFor(oldHist);
       }
     } catch {}
+
+    if (window.ZC_DISABLE_MEDIA_RENDER_OBSERVER === true || window.ZC_ESSENTIAL_CHAT_MODE === true) {
+      return;
+    }
 
     const obs = new MutationObserver((mutations) => {
       clearTimeout(hist.__zcMediaRenderTimer);

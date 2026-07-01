@@ -79,6 +79,50 @@ def _assert_mesma_empresa(a: int, b: int) -> None:
         )
 
 
+
+def _usuario_is_admin_real(usuario: Any) -> bool:
+    try:
+        return bool(getattr(usuario, "is_admin", False))
+    except Exception:
+        return False
+
+
+def _admin_usuario_vinculado_ou_mesmo_email(db: Session, colab: models.Colaborador):
+    """Retorna usuário admin ligado ao colaborador, se existir.
+
+    Usado para impedir que o colaborador operacional do dono/admin seja apagado.
+    Colaboradores comuns podem ter usuario_id para login, mas is_admin=False.
+    """
+    usuario = None
+
+    uid = getattr(colab, "usuario_id", None)
+    if uid:
+        try:
+            usuario = db.query(models.Usuario).get(uid)
+        except Exception:
+            usuario = None
+
+    if usuario and _usuario_is_admin_real(usuario):
+        return usuario
+
+    email = (getattr(colab, "email", None) or "").strip().lower()
+    empresa_id = getattr(colab, "empresa_id", None)
+    if email and empresa_id:
+        try:
+            return (
+                db.query(models.Usuario)
+                .filter(
+                    models.Usuario.empresa_id == int(empresa_id),
+                    func.lower(models.Usuario.email) == email,
+                    models.Usuario.is_admin == True,  # noqa: E712
+                )
+                .first()
+            )
+        except Exception:
+            return None
+
+    return None
+
 def normalize_phone_e164_br(raw: Optional[str]) -> Optional[str]:
     if not raw:
         return None
@@ -638,15 +682,10 @@ def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
     u = None
     uid = getattr(c, "usuario_id", None)
 
-    need_user = (
-        (not c.nome)
-        or (not c.email)
-        or (not c.telefone)
-        or (not c.cargo)
-        or (setor_nome is None)
-    )
-
-    if need_user and uid:
+    # Carrega o usuário vinculado sempre que existir.
+    # Além de completar dados faltantes, isso evita usar cargo textual
+    # para decidir se alguém é admin. Admin real vem de usuarios.is_admin.
+    if uid:
         try:
             u = db.query(models.Usuario).get(uid)
         except Exception:
@@ -665,8 +704,12 @@ def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
 
     cargo_plano = c.cargo or getattr(u, "cargo", None)
 
-    avatar_url = build_avatar_url(nome_plano, email_plano)
-    is_admin_flag = (cargo_plano or "").lower() == "admin"
+    avatar_url = (
+        f"/api/colaboradores/{int(c.id)}/avatar"
+        if getattr(c, "avatar_data", None)
+        else build_avatar_url(nome_plano, email_plano)
+    )
+    is_admin_flag = _usuario_is_admin_real(u)
 
     modo_raw = getattr(c, "horario_modo", None)
     horario_modo_out = _norm_horario_modo(modo_raw, default=None)
@@ -1280,22 +1323,163 @@ def excluir_colaborador(
 
     _assert_mesma_empresa(colab.empresa_id, empresa_id)
 
-    try:
-        (
-            db.query(models.DepartamentoMembro)
-            .filter(
-                models.DepartamentoMembro.empresa_id == int(colab.empresa_id),
-                models.DepartamentoMembro.colaborador_id == int(colab.id),
-            )
-            .delete(synchronize_session=False)
+    admin_usuario = _admin_usuario_vinculado_ou_mesmo_email(db, colab)
+    if admin_usuario:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Este colaborador é o acesso administrativo da empresa. "
+                "Ele não pode ser removido pela tela de colaboradores."
+            ),
         )
+
+    usuario_vinculado = None
+    if getattr(colab, "usuario_id", None):
+        try:
+            usuario_vinculado = db.query(models.Usuario).get(colab.usuario_id)
+        except Exception:
+            usuario_vinculado = None
+
+    try:
+        colab_id_int = int(colab.id)
+        empresa_id_int = int(colab.empresa_id)
+
+        # Antes de apagar o colaborador, solta/deleta vínculos conhecidos.
+        # Isso evita erro 500 por FK em instalações onde o banco não aplicou
+        # ON DELETE SET NULL / CASCADE nas tabelas antigas.
+        if hasattr(models, "Cliente"):
+            (
+                db.query(models.Cliente)
+                .filter(
+                    models.Cliente.empresa_id == empresa_id_int,
+                    models.Cliente.colaborador_id == colab_id_int,
+                )
+                .update({models.Cliente.colaborador_id: None}, synchronize_session=False)
+            )
+
+        if hasattr(models, "Mensagem"):
+            (
+                db.query(models.Mensagem)
+                .filter(
+                    models.Mensagem.empresa_id == empresa_id_int,
+                    models.Mensagem.colaborador_id == colab_id_int,
+                )
+                .update({models.Mensagem.colaborador_id: None}, synchronize_session=False)
+            )
+
+        if hasattr(models, "Atendimento"):
+            (
+                db.query(models.Atendimento)
+                .filter(
+                    models.Atendimento.empresa_id == empresa_id_int,
+                    models.Atendimento.operador_id == colab_id_int,
+                )
+                .update({models.Atendimento.operador_id: None}, synchronize_session=False)
+            )
+
+        if hasattr(models, "AtendimentoParticipante"):
+            (
+                db.query(models.AtendimentoParticipante)
+                .filter(
+                    models.AtendimentoParticipante.empresa_id == empresa_id_int,
+                    models.AtendimentoParticipante.colaborador_id == colab_id_int,
+                )
+                .delete(synchronize_session=False)
+            )
+
+        if hasattr(models, "DepartamentoMembro"):
+            (
+                db.query(models.DepartamentoMembro)
+                .filter(
+                    models.DepartamentoMembro.empresa_id == empresa_id_int,
+                    models.DepartamentoMembro.colaborador_id == colab_id_int,
+                )
+                .delete(synchronize_session=False)
+            )
+
+        # Permissões: NÃO apagar manualmente a tabela colaboradores_permissoes aqui.
+        # A relação Colaborador.permissoes é carregada pelo SQLAlchemy (lazy="joined").
+        # Se apagarmos via query.delete() e depois dermos db.delete(colab), o ORM tenta
+        # apagar a mesma relação de novo e gera StaleDataError.
+        try:
+            colab.permissoes = []
+            db.flush()
+        except Exception:
+            db.rollback()
+            colab = db.query(models.Colaborador).get(colab_id_int)
+            if not colab:
+                return
+            _assert_mesma_empresa(colab.empresa_id, empresa_id)
+            colab.permissoes = []
+            db.flush()
+
+        if hasattr(models, "Disparo"):
+            (
+                db.query(models.Disparo)
+                .filter(
+                    models.Disparo.empresa_id == empresa_id_int,
+                    models.Disparo.colaborador_id == colab_id_int,
+                )
+                .update({models.Disparo.colaborador_id: None}, synchronize_session=False)
+            )
+
+        if hasattr(models, "ChatEvento"):
+            (
+                db.query(models.ChatEvento)
+                .filter(
+                    models.ChatEvento.empresa_id == empresa_id_int,
+                    models.ChatEvento.autor_id == colab_id_int,
+                )
+                .update({models.ChatEvento.autor_id: None}, synchronize_session=False)
+            )
+
+        if hasattr(models, "ChatReadState"):
+            (
+                db.query(models.ChatReadState)
+                .filter(
+                    models.ChatReadState.empresa_id == empresa_id_int,
+                    models.ChatReadState.user_id == colab_id_int,
+                )
+                .delete(synchronize_session=False)
+            )
+
+        if hasattr(models, "EmailAccount"):
+            (
+                db.query(models.EmailAccount)
+                .filter(
+                    models.EmailAccount.empresa_id == empresa_id_int,
+                    models.EmailAccount.colaborador_id == colab_id_int,
+                )
+                .update({models.EmailAccount.colaborador_id: None}, synchronize_session=False)
+            )
+
+        # Se o colaborador tinha usuário de login comum, NÃO damos db.delete(usuario),
+        # porque esse usuário pode ter FK em histórico/conversas. Em vez disso,
+        # desativamos o acesso e liberamos o e-mail original para cadastro futuro.
+        if usuario_vinculado and not _usuario_is_admin_real(usuario_vinculado):
+            usuario_vinculado.email = (
+                f"deleted-colaborador-{colab_id_int}-usuario-{int(usuario_vinculado.id)}@deleted.local.invalid"
+            )
+            usuario_vinculado.senha_hash = bcrypt.hash(
+                f"deleted:{colab_id_int}:{int(usuario_vinculado.id)}"
+            )
+            usuario_vinculado.is_admin = False
+            usuario_vinculado.cargo = None
+            usuario_vinculado.departamento_id = None
+
+        colab.usuario_id = None
+        db.flush()
 
         db.delete(colab)
         db.commit()
 
-    except Exception:
+    except Exception as exc:
         db.rollback()
-        raise
+        print(f"[colaboradores] erro ao excluir colaborador {colab_id}: {exc!r}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Não foi possível remover este colaborador. Verifique vínculos antigos no banco.",
+        )
 
     return
 

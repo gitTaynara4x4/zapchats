@@ -90,9 +90,12 @@ export function coalesceHorarioFim(c){
 }
 
 export function isAdminFlag(c){
+  // Admin real vem do backend/campo booleano.
+  // Cargo textual "admin" não deve transformar colaborador comum em administrador.
   return !!(c && (
     c.is_admin === true ||
-    /^\s*admin\s*$/i.test(coalesceCargo(c) || '') ||
-    (c.usuario && c.usuario.is_admin === true)
+    c.admin === true ||
+    (c.usuario && c.usuario.is_admin === true) ||
+    (c.user && c.user.is_admin === true)
   ));
 }

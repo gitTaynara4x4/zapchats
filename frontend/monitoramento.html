@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Monitoramento | Valora CRM</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <link rel="stylesheet" href="/frontend/css/app.css?v=20260630-dark-chatgpt-v6" />
+  <link rel="stylesheet" href="/frontend/css/validacao.css?v=20260614-required-circle" />
+  <link rel="stylesheet" href="/frontend/css/monitoramento.css?v=4" />
+
+  <script src="/frontend/js/pages/app.js?v=20260626-ajuda-global" defer></script>
+  <script src="/frontend/js/shared/validacao.js?v=20260614-required-circle" defer></script>
+  <script type="module" src="/frontend/js/pages/monitoramento.js?v=4"></script>
+  <link rel="stylesheet" href="/frontend/css/campos-longos.css?v=20260614-global-inline" />
+  <script src="/frontend/js/shared/campos-longos.js?v=20260614-global-inline" defer></script>
+  <link rel="stylesheet" href="/frontend/css/layout-compacto.css?v=20260615-tipografia-sem-centralizar" />
+  <link rel="stylesheet" href="/frontend/css/responsivo-global.css?v=20260615-mobile-real">
+  <link rel="stylesheet" href="/frontend/css/dark-chatgpt-fix.css?v=20260630-dark-v7" />
+</head>
+
+<body>
+  <div class="layout">
+    <iframe src="/frontend/partials/sidebar.html?v=20260615-menu-fix" class="sidebar-frame" title="Menu lateral"></iframe>
+
+    <main class="main">
+      <!-- =====================================================
+           LISTAGEM GERAL
+      ====================================================== -->
+      <section id="monitoramento-list-view">
+        <header class="topbar">
+          <div class="topbar-title">
+            <span class="eyebrow">Operação</span>
+            <h1>Monitoramento</h1>
+          </div>
+
+          <div class="topbar-actions">
+            <button class="btn btn-secondary" type="button" id="btn-atualizar-monitoramento">
+              <i class="fa-solid fa-rotate"></i> Atualizar
+            </button>
+
+            <button class="btn btn-primary" type="button" id="btn-nova-conta-monitoramento">
+              <i class="fa-solid fa-shield-halved"></i> Nova conta
+            </button>
+          </div>
+        </header>
+
+        <article class="panel-card monitoramento-filter-card">
+          <div class="panel-head">
+            <h3>Localizar contas</h3>
+            <p>Filtro rápido por cliente, conta, contrato, grupo, telefone e cidade.</p>
+          </div>
+
+          <div class="filters-grid">
+            <div class="form-group">
+              <label for="filtro-monitoramento-busca">Busca</label>
+              <input id="filtro-monitoramento-busca" type="text" placeholder="Cliente, conta, contrato, telefone..." />
+            </div>
+
+            <div class="form-group">
+              <label for="filtro-monitoramento-status">Status</label>
+              <select id="filtro-monitoramento-status">
+                <option value="">Todos</option>
+                <option value="habilitado">Habilitado</option>
+                <option value="desabilitado">Desabilitado</option>
+                <option value="suspenso">Suspenso</option>
+                <option value="teste">Teste</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="filtro-monitoramento-ativo">Situação</label>
+              <select id="filtro-monitoramento-ativo">
+                <option value="">Todas</option>
+                <option value="true">Ativas</option>
+                <option value="false">Inativas</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="filtro-monitoramento-cidade">Cidade</label>
+              <input id="filtro-monitoramento-cidade" type="text" placeholder="Cidade" />
+            </div>
+          </div>
+
+          <div class="footer-actions filter-actions">
+            <span id="monitoramento-counter" class="counter-text">0 contas</span>
+
+            <button class="btn btn-secondary" type="button" id="btn-limpar-monitoramento">
+              Limpar filtros
+            </button>
+
+            <button class="btn btn-primary" type="button" id="btn-filtrar-monitoramento">
+              Filtrar
+            </button>
+          </div>
+        </article>
+
+        <article class="panel-card panel-card-table">
+          <div class="valora-table-wrapper">
+            <table class="valora-table">
+              <thead>
+                <tr>
+                  <th>Conta</th>
+                  <th>Cliente</th>
+                  <th>Status</th>
+                  <th>Grupo</th>
+                  <th>Cidade / UF</th>
+                  <th>Contato</th>
+                  <th>Rota / Risco</th>
+                  <th>Itens</th>
+                  <th class="text-right">Ações</th>
+                </tr>
+              </thead>
+
+              <tbody id="tbody-monitoramento">
+                <tr>
+                  <td colspan="9" class="empty-state">
+                    Carregando...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <!-- =====================================================
+           DETALHE DA CONTA - ESTILO SEGWARE
+      ====================================================== -->
+      <section id="monitoramento-detail-view" hidden>
+        <header class="monitoramento-detail-top">
+          <div class="detail-title-wrap">
+            <div class="detail-title-line">
+              <span class="detail-home-icon">
+                <i class="fa-solid fa-house"></i>
+              </span>
+
+              <div>
+                <h1 id="detail-cliente-nome">Cliente</h1>
+                <p id="detail-cliente-subtitle">Conta de monitoramento</p>
+              </div>
+            </div>
+
+            <div class="detail-info-row">
+              <div>
+                <span>Conta</span>
+                <strong id="detail-conta-codigo">-</strong>
+              </div>
+
+              <div>
+                <span>Grupo</span>
+                <strong id="detail-grupo-cliente">-</strong>
+              </div>
+
+              <div>
+                <span>Status</span>
+                <strong id="detail-status-monitoramento">-</strong>
+              </div>
+
+              <div>
+                <span>Cidade / UF</span>
+                <strong id="detail-cidade-uf">-</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="detail-actions">
+            <button class="btn btn-secondary" type="button" id="btn-voltar-monitoramento">
+              <i class="fa-solid fa-arrow-left"></i> Voltar
+            </button>
+
+            <button class="btn btn-secondary" type="button" id="btn-editar-conta-detail">
+              <i class="fa-solid fa-pen"></i> Editar conta
+            </button>
+          </div>
+        </header>
+
+        <article class="detail-tabs-card">
+          <div class="detail-tabs">
+            <button type="button" class="detail-tab-btn active" data-detail-tab="detail-tab-contatos">
+              Usuários e contatos
+            </button>
+
+            <button type="button" class="detail-tab-btn" data-detail-tab="detail-tab-dados">
+              Dados da conta
+            </button>
+
+            <button type="button" class="detail-tab-btn" data-detail-tab="detail-tab-produtos">
+              Produtos
+            </button>
+
+            <button type="button" class="detail-tab-btn" data-detail-tab="detail-tab-caracteristicas">
+              Características
+            </button>
+          </div>
+        </article>
+
+        <section class="detail-tab active" id="detail-tab-contatos">
+          <article class="panel-card detail-panel">
+            <div class="detail-panel-head">
+              <div>
+                <h3 id="detail-contatos-title">Conta > Usuários e contatos</h3>
+                <p>Lista de contatos operacionais, responsáveis, prestadores e usuários do painel.</p>
+              </div>
+
+              <div class="detail-panel-actions">
+                <button class="btn btn-secondary" type="button" id="btn-atualizar-conta-detail">
+                  <i class="fa-solid fa-rotate"></i> Atualizar
+                </button>
+
+                <button class="btn btn-primary" type="button" id="btn-novo-contato-detail">
+                  <i class="fa-solid fa-plus"></i> Novo contato
+                </button>
+              </div>
+            </div>
+
+            <div class="valora-table-wrapper contatos-table-wrapper">
+              <table class="valora-table contatos-segware-table">
+                <thead>
+                  <tr>
+                    <th>Contato</th>
+                    <th>Lista</th>
+                    <th>Prioridade</th>
+                    <th>Nome</th>
+                    <th>Função</th>
+                    <th>Código no painel</th>
+                    <th>Fone 1</th>
+                    <th>WhatsApp</th>
+                    <th>Fone 2</th>
+                    <th>WhatsApp</th>
+                    <th class="text-right">Ações</th>
+                  </tr>
+                </thead>
+
+                <tbody id="tbody-detail-contatos">
+                  <tr>
+                    <td colspan="11" class="empty-state">
+                      Nenhum contato cadastrado.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="detail-tab" id="detail-tab-dados">
+          <article class="panel-card detail-panel">
+            <div class="detail-panel-head">
+              <div>
+                <h3>Dados da conta</h3>
+                <p>Resumo das informações técnicas da conta selecionada.</p>
+              </div>
+            </div>
+
+            <div class="detail-summary-grid" id="detail-dados-grid"></div>
+          </article>
+        </section>
+
+        <section class="detail-tab" id="detail-tab-produtos">
+          <article class="panel-card detail-panel">
+            <div class="detail-panel-head">
+              <div>
+                <h3>Produtos e equipamentos</h3>
+                <p>Itens vinculados à conta de monitoramento.</p>
+              </div>
+            </div>
+
+            <div class="mini-list" id="detail-produtos-list"></div>
+          </article>
+        </section>
+
+        <section class="detail-tab" id="detail-tab-caracteristicas">
+          <article class="panel-card detail-panel">
+            <div class="detail-panel-head">
+              <div>
+                <h3>Características adicionais</h3>
+                <p>Classificações da conta, tipo de cliente, tipo de imóvel, contrato e outras marcações.</p>
+              </div>
+            </div>
+
+            <div class="mini-list" id="detail-caracteristicas-list"></div>
+          </article>
+        </section>
+      </section>
+
+      <!-- =====================================================
+           MODAL CONTA
+      ====================================================== -->
+      <div class="modal-overlay" id="modal-monitoramento-backdrop" hidden>
+        <div class="modal-content modal-xl" data-close-target="false">
+          <div class="modal-header">
+            <h3 id="modal-monitoramento-titulo">Nova conta de monitoramento</h3>
+
+            <button class="btn-close" type="button" id="btn-fechar-modal-monitoramento">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+
+          <div class="modal-body">
+            <form class="valora-form" id="formMonitoramento" onsubmit="return false;">
+              <div class="cliente-tabs">
+                <button type="button" class="cliente-tab-btn active" data-tab="tab-monitoramento-conta">Conta</button>
+                <button type="button" class="cliente-tab-btn" data-tab="tab-monitoramento-detalhes">Detalhes do local</button>
+                <button type="button" class="cliente-tab-btn" data-tab="tab-monitoramento-contatos">Contatos</button>
+                <button type="button" class="cliente-tab-btn" data-tab="tab-monitoramento-produtos">Produtos</button>
+                <button type="button" class="cliente-tab-btn" data-tab="tab-monitoramento-caracteristicas">Características</button>
+              </div>
+
+              <section class="cliente-tab active" id="tab-monitoramento-conta">
+                <article class="section-card">
+                  <h4>Identificação da conta</h4>
+
+                  <div class="form-row">
+                    <div class="form-group span-all">
+                      <label for="mon-cliente-busca">Cliente vinculado</label>
+
+                      <div class="cliente-search-row">
+                        <input id="mon-cliente-busca" type="text" placeholder="Busque por nome, telefone, código..." />
+
+                        <button type="button" class="btn btn-secondary" id="btn-buscar-cliente-monitoramento">
+                          <i class="fa-solid fa-magnifying-glass"></i> Buscar
+                        </button>
+                      </div>
+
+                      <select id="mon-cliente-id">
+                        <option value="">Busque e selecione um cliente</option>
+                      </select>
+
+                      <small class="field-help">
+                        A conta técnica fica ligada a um cliente já cadastrado no CRM.
+                      </small>
+                    </div>
+
+                    <div class="form-group">
+                      <label for="mon-codigo-conta">Código da conta</label>
+                      <input id="mon-codigo-conta" type="text" placeholder="Ex.: 0022" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="mon-sistema-origem">Sistema origem</label>
+                      <select id="mon-sistema-origem">
+                        <option value="manual">Manual</option>
+                        <option value="segware" selected>Segware</option>
+                        <option value="sigma">SIGMA</option>
+                        <option value="intelbras">Intelbras</option>
+                        <option value="outro">Outro</option>
+                      </select>
+                    </div>
+
+                    <div class="form-group">
+                      <label for="mon-grupo-cliente">Grupo do cliente</label>
+                      <input id="mon-grupo-cliente" type="text" placeholder="Ex.: Monit24hs - Alarme" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="mon-empresa-monitoramento">Empresa monitoramento</label>
+                      <input id="mon-empresa-monitoramento" type="text" placeholder="Ex.: SEG Sistemas" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="mon-status-monitoramento">Status</label>
+                      <select id="mon-status-monitoramento">
+                        <option value="habilitado">Habilitado</option>
+                        <option value="desabilitado">Desabilitado</option>
+                        <option value="suspenso">Suspenso</option>
+                        <option value="teste">Teste</option>
+                      </select>
+                    </div>
+
+                    <div class="form-group">
+                      <label for="mon-data-cadastro">Data de cadastro</label>
+                      <input id="mon-data-cadastro" type="date" />
+                    </div>
+
+                    <label class="check-card monitoramento-check">
+                      <input type="checkbox" id="mon-monitoramento-habilitado" checked />
+                      <span>
+                        <strong>Monitoramento habilitado</strong>
+                        <small>Conta ativa operacionalmente.</small>
+                      </span>
+                    </label>
+
+                    <label class="check-card monitoramento-check">
+                      <input type="checkbox" id="mon-ativo" checked />
+                      <span>
+                        <strong>Cadastro ativo</strong>
+                        <small>Registro disponível no sistema.</small>
+                      </span>
+                    </label>
+                  </div>
+                </article>
+              </section>
+
+              <section class="cliente-tab" id="tab-monitoramento-detalhes">
+                <article class="section-card">
+                  <h4>Detalhes operacionais do local</h4>
+
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="mon-nome-responsavel">Nome do responsável</label>
+                      <input id="mon-nome-responsavel" type="text" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="mon-email-responsavel">E-mail do responsável</label>
+                      <input id="mon-email-responsavel" type="email" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="mon-contrato">Contrato</label>
+                      <input id="mon-contrato" type="text" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="mon-nivel-risco">Nível de risco</label>
+                      <input id="mon-nivel-risco" type="text" placeholder="Ex.: Furto: Nível 1" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="mon-rota-1">Rota 1</label>
+                      <input id="mon-rota-1" type="text" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="mon-rota-2">Rota 2</label>
+                      <input id="mon-rota-2" type="text" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="mon-ramo-atividade">Ramo de atividade</label>
+                      <input id="mon-ramo-atividade" type="text" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="mon-instalador">Instalador</label>
+                      <input id="mon-instalador" type="text" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="mon-vendedor">Vendedor</label>
+                      <input id="mon-vendedor" type="text" />
+                    </div>
+
+                    <label class="check-card monitoramento-check">
+                      <input type="checkbox" id="mon-possui-chaves" />
+                      <span>
+                        <strong>Chaves do local</strong>
+                        <small>Indica chaveiro/chaves disponíveis.</small>
+                      </span>
+                    </label>
+
+                    <div class="form-group">
+                      <label for="mon-numero-chaveiro">Número do chaveiro</label>
+                      <input id="mon-numero-chaveiro" type="text" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="mon-latitude">Latitude</label>
+                      <input id="mon-latitude" type="text" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="mon-longitude">Longitude</label>
+                      <input id="mon-longitude" type="text" />
+                    </div>
+
+                    <div class="form-group span-all">
+                      <label for="mon-referencia-localizacao">Referência sobre localização</label>
+                      <textarea id="mon-referencia-localizacao" rows="3"></textarea>
+                    </div>
+
+                    <div class="form-group span-all">
+                      <label for="mon-informacoes-adicionais">Informações adicionais sobre o local</label>
+                      <textarea id="mon-informacoes-adicionais" rows="3"></textarea>
+                    </div>
+
+                    <div class="form-group span-all">
+                      <label for="mon-providencias-local">Providências para o local</label>
+                      <textarea id="mon-providencias-local" rows="3"></textarea>
+                    </div>
+
+                    <div class="form-group span-all">
+                      <label for="mon-observacoes">Observações</label>
+                      <textarea id="mon-observacoes" rows="3"></textarea>
+                    </div>
+                  </div>
+                </article>
+              </section>
+
+              <section class="cliente-tab" id="tab-monitoramento-contatos">
+                <article class="section-card">
+                  <div class="mini-actions">
+                    <div class="left">
+                      <strong>Usuários e contatos da conta</strong>
+                      <span class="subtle">Use a tela de detalhe para visualizar no formato completo.</span>
+                    </div>
+
+                    <button class="btn btn-secondary btn-sm" type="button" id="btn-ir-contatos-detail">
+                      <i class="fa-solid fa-table-list"></i> Abrir tabela completa
+                    </button>
+                  </div>
+
+                  <div id="lista-monitoramento-contatos" class="mini-list"></div>
+                </article>
+              </section>
+
+              <section class="cliente-tab" id="tab-monitoramento-produtos">
+                <article class="section-card">
+                  <div class="mini-actions">
+                    <div class="left">
+                      <strong>Produtos e equipamentos</strong>
+                      <span class="subtle">Painel, teclado, bateria, CFTV, cerca elétrica e outros itens.</span>
+                    </div>
+                  </div>
+
+                  <div class="mini-item">
+                    <div class="mini-item-grid">
+                      <input id="mon-produto-codigo" type="text" placeholder="Código" />
+                      <input id="mon-produto-nome" type="text" placeholder="Produto" />
+                      <input id="mon-produto-valor" type="number" step="0.01" placeholder="Valor" />
+                      <input id="mon-produto-marca" type="text" placeholder="Marca" />
+                      <input id="mon-produto-grupo" type="text" placeholder="Grupo" />
+                    </div>
+
+                    <div class="mini-item-actions">
+                      <button type="button" class="btn btn-secondary btn-sm" id="btn-add-produto-monitoramento">
+                        <i class="fa-solid fa-plus"></i> Adicionar produto
+                      </button>
+                    </div>
+                  </div>
+
+                  <div id="lista-monitoramento-produtos" class="mini-list"></div>
+                </article>
+              </section>
+
+              <section class="cliente-tab" id="tab-monitoramento-caracteristicas">
+                <article class="section-card">
+                  <div class="mini-actions">
+                    <div class="left">
+                      <strong>Características adicionais</strong>
+                      <span class="subtle">Tipo de cliente, tipo de imóvel, contrato, risco e classificações.</span>
+                    </div>
+                  </div>
+
+                  <div class="mini-item">
+                    <div class="mini-item-grid">
+                      <input id="mon-caracteristica-codigo" type="text" placeholder="Código" />
+                      <input id="mon-caracteristica-nome" type="text" placeholder="Nome" />
+                      <input id="mon-caracteristica-grupo" type="text" placeholder="Grupo" />
+                    </div>
+
+                    <div class="mini-item-actions">
+                      <button type="button" class="btn btn-secondary btn-sm" id="btn-add-caracteristica-monitoramento">
+                        <i class="fa-solid fa-plus"></i> Adicionar característica
+                      </button>
+                    </div>
+                  </div>
+
+                  <div id="lista-monitoramento-caracteristicas" class="mini-list"></div>
+                </article>
+              </section>
+
+              <div class="footer-actions modal-client-footer">
+                <button type="button" class="btn btn-secondary" id="btn-cancelar-monitoramento">
+                  Cancelar
+                </button>
+
+                <button type="button" class="btn btn-primary" id="btn-salvar-monitoramento">
+                  <i class="fa-solid fa-floppy-disk"></i> Salvar conta
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- =====================================================
+           MODAL CONTATO
+      ====================================================== -->
+      <div class="modal-overlay" id="modal-contato-backdrop" hidden>
+        <div class="modal-content modal-md">
+          <div class="modal-header">
+            <h3 id="modal-contato-titulo">Novo contato</h3>
+
+            <button class="btn-close" type="button" id="btn-fechar-modal-contato">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+
+          <div class="modal-body">
+            <form id="formContatoMonitoramento" onsubmit="return false;">
+              <input type="hidden" id="contato-id" />
+
+              <article class="section-card contato-form-card">
+                <h4>Dados do contato</h4>
+
+                <div class="form-row">
+                  <label class="check-card monitoramento-check">
+                    <input type="checkbox" id="contato-ativo" checked />
+                    <span>
+                      <strong>Contato ativo</strong>
+                      <small>Mostrar na lista de contatos.</small>
+                    </span>
+                  </label>
+
+                  <div class="form-group">
+                    <label for="contato-lista">Lista</label>
+                    <input id="contato-lista" type="number" min="0" placeholder="Ex.: 2" />
+                  </div>
+
+                  <div class="form-group">
+                    <label for="contato-prioridade">Prioridade</label>
+                    <input id="contato-prioridade" type="number" min="0" placeholder="Ex.: 1" />
+                  </div>
+
+                  <div class="form-group">
+                    <label for="contato-codigo-painel">Código no painel</label>
+                    <input id="contato-codigo-painel" type="text" placeholder="Ex.: 1" />
+                  </div>
+
+                  <div class="form-group span-2">
+                    <label for="contato-nome">Nome</label>
+                    <input id="contato-nome" type="text" placeholder="Ex.: Pasqualina O. Camphora" />
+                  </div>
+
+                  <div class="form-group span-2">
+                    <label for="contato-funcao">Função</label>
+                    <input id="contato-funcao" type="text" placeholder="Ex.: 07.01 - Sócio" />
+                  </div>
+
+                  <div class="form-group">
+                    <label for="contato-telefone-1">Fone 1</label>
+                    <input id="contato-telefone-1" type="text" placeholder="Ex.: 12 99999-9999" />
+                  </div>
+
+                  <label class="check-card monitoramento-check">
+                    <input type="checkbox" id="contato-whatsapp-1" />
+                    <span>
+                      <strong>WhatsApp 1</strong>
+                      <small>Fone 1 é WhatsApp.</small>
+                    </span>
+                  </label>
+
+                  <div class="form-group">
+                    <label for="contato-telefone-2">Fone 2</label>
+                    <input id="contato-telefone-2" type="text" placeholder="Ex.: 3632-1611" />
+                  </div>
+
+                  <label class="check-card monitoramento-check">
+                    <input type="checkbox" id="contato-whatsapp-2" />
+                    <span>
+                      <strong>WhatsApp 2</strong>
+                      <small>Fone 2 é WhatsApp.</small>
+                    </span>
+                  </label>
+
+                  <div class="form-group span-all">
+                    <label for="contato-observacoes">Observações</label>
+                    <textarea id="contato-observacoes" rows="3" placeholder="Observações internas sobre este contato."></textarea>
+                  </div>
+                </div>
+              </article>
+            </form>
+          </div>
+
+          <div class="footer-actions modal-client-footer">
+            <button type="button" class="btn btn-secondary" id="btn-cancelar-contato">
+              Cancelar
+            </button>
+
+            <button type="button" class="btn btn-primary" id="btn-salvar-contato">
+              <i class="fa-solid fa-floppy-disk"></i> Salvar contato
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="valora-toast" class="toast-message" aria-live="polite"></div>
+    </main>
+  </div>
+</body>
+</html>

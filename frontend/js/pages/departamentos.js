@@ -1,5 +1,5 @@
 // /frontend/js/pages/departamentos.js
-// Departamentos v3 - organograma estilo Bitrix, isolado desta tela.
+// Departamentos - organograma profissional e isolado desta tela.
 (function DepartamentosPage(){
   'use strict';
 
@@ -21,6 +21,10 @@
     colaboradores: [],
     membrosLoaded: false,
     membrosLoading: false,
+    instancias: [],
+    instanciasLoaded: false,
+    instanciasLoading: false,
+    instanciasSelecionadas: new Set(),
     editing: null,
     modalStep: 1,
     zoom: 1,
@@ -31,6 +35,10 @@
     stage: null,
     didAutoExpand: false
   };
+
+  function companyLabel(){
+    return String(state.companyName || '').trim() || 'Empresa';
+  }
 
   const Loader = {
     show(t){
@@ -48,9 +56,10 @@
   let filtro, btnAdd, btnExpand, btnCollapse, orgContainer, sidePanel;
   let zoomOut, zoomIn, zoomReset, zoomLabel;
   let modal, modalTitle, modalStepLabel, modalProgress, btnX, btnBack, btnNext, btnSave, btnCancel, form;
-  let inpId, inpNome, txtDesc, inpCodigo, chkAtivo, selParent;
+  let inpId, inpNome, txtDesc, inpCodigo, chkAtivo, selParent, inpHoraInicio, inpHoraFim;
   let parentChip, parentEdit, parentPanel;
-  let membrosSearch, membrosList, membrosCount, membrosAll, membrosClear;
+  let membrosSearch, membrosList, membrosCount, membrosAll, membrosClear, membrosToggle, membrosPanel, membrosSummary;
+  let instanciasList, instanciasCount, instanciasAll, instanciasClear;
   let toastEl;
 
   function releasePageLoader(){
@@ -200,6 +209,28 @@
     return out;
   }
 
+
+  function normalizeInstancias(data){
+    const raw = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.instancias)
+        ? data.instancias
+        : Array.isArray(data?.items)
+          ? data.items
+          : [];
+
+    const seen = new Set();
+    return raw.map(item => {
+      const id = Number(item?.id ?? item?.instancia_id ?? item?.value);
+      if (!Number.isFinite(id) || id <= 0 || seen.has(id)) return null;
+      seen.add(id);
+      const nome = String(item?.apelido || item?.instance_name || item?.nome || item?.label || `Instância ${id}`).trim();
+      const numero = String(item?.numero_instancia || item?.numero || item?.phone || '').trim();
+      const connected = item?.connected === true || item?.conectada === true || item?.status === 'connected';
+      return { id, nome, numero, connected };
+    }).filter(Boolean).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  }
+
   function labelOf(n){
     if (n?.nome && String(n.nome).trim()) return String(n.nome).trim();
     if (Array.isArray(n?.path) && n.path.length) return String(n.path[n.path.length - 1]).trim();
@@ -270,7 +301,8 @@
       if (state.selectedId && state.selectedId !== 0 && !findDept(state.selectedId)) state.selectedId = 0;
       fillParentSelect();
       renderAll();
-      await loadSelectedMembers();
+      if (state.selectedId) await loadSelectedMembers();
+      else renderSidePanel(false);
     } finally {
       Loader.hide();
       releasePageLoader();
@@ -292,6 +324,35 @@
       return [];
     } finally {
       state.membrosLoading = false;
+    }
+  }
+
+
+  async function loadInstancias(force = false){
+    if (!EMPRESA_ID) {
+      state.instancias = [];
+      state.instanciasLoaded = true;
+      return [];
+    }
+    if (!force && state.instanciasLoaded) return state.instancias;
+    state.instanciasLoading = true;
+    try {
+      let data = null;
+      try { data = await apiGet(`/api/empresas/${EMPRESA_ID}/whatsapp`); }
+      catch {
+        try { data = await apiGet('/api/instancias/list'); }
+        catch { data = { instancias: [] }; }
+      }
+      state.instancias = normalizeInstancias(data);
+      state.instanciasLoaded = true;
+      return state.instancias;
+    } catch (err) {
+      console.warn('[departamentos] falha ao carregar instâncias', err);
+      state.instancias = [];
+      state.instanciasLoaded = true;
+      return [];
+    } finally {
+      state.instanciasLoading = false;
     }
   }
 
@@ -331,9 +392,8 @@
   }
 
   async function loadSelectedMembers(){
-    await loadColaboradores();
     if (!state.selectedId) {
-      state.selectedMembers = state.colaboradores.slice(0, 60);
+      state.selectedMembers = [];
       renderSidePanel();
       return;
     }
@@ -379,7 +439,7 @@
     const roots = (state.nested || []).map(cloneVisible).filter(Boolean);
     const root = {
       id: 0,
-      nome: state.companyName || 'Bitrix',
+      nome: companyLabel(),
       descricao: 'Departamento da empresa',
       codigo: 'Empresa',
       ativo: true,
@@ -581,7 +641,10 @@
       wrap.style.top = `${node._y}px`;
       wrap.style.width = `${CARD_W}px`;
       wrap.style.height = `${CARD_H}px`;
-      wrap.style.zIndex = String(10 + index);
+      const nodeId = Number(node.id || 0);
+      const menuOpen = state.openMenuId === nodeId;
+      if (menuOpen) wrap.classList.add('is-menu-open');
+      wrap.style.zIndex = menuOpen ? '9000' : String(10 + index);
       wrap.appendChild(buildNodeCard(node, !!node._root, q));
       layer.appendChild(wrap);
     });
@@ -613,7 +676,7 @@
     const direct = Number(n._allChildren || 0);
     const total = Number(n._descendants || 0);
     const memberCount = isRoot ? state.colaboradores.length : Number(n.colaboradores_count || 0);
-    const title = isRoot ? (state.companyName || 'Bitrix') : labelOf(n);
+    const title = isRoot ? (companyLabel()) : labelOf(n);
     const description = isRoot ? 'Departamento da empresa' : (n.descricao || 'Departamento');
     const match = q && !isRoot && `${title} ${n.codigo || ''} ${n.descricao || ''}`.toLowerCase().includes(q);
 
@@ -621,8 +684,9 @@
     card.dataset.id = String(n.id || 0);
 
     const showBadge = selected || isRoot;
+    const badgeLabel = isRoot ? 'EMPRESA' : 'SELECIONADO';
     card.innerHTML = `
-      ${showBadge ? '<div class="org-selected-badge">SEU DEPARTAMENTO</div>' : ''}
+      ${showBadge ? `<div class="org-selected-badge">${badgeLabel}</div>` : ''}
       <div class="org-card-main">
         <div class="org-icon">${isRoot ? '<i class="fa-solid fa-building"></i>' : escapeHtml(shortCode(n))}</div>
         <div class="org-info">
@@ -630,13 +694,13 @@
           <div class="org-sub" title="${escapeHtml(description)}">${escapeHtml(description)}</div>
           <div class="org-count">${memberCount} colaborador${memberCount === 1 ? '' : 'es'}</div>
         </div>
-        <button class="org-menu-btn" type="button" aria-label="Ações" title="Ações" data-menu-id="${n.id || 0}">
+        <button class="org-menu-btn${state.openMenuId === Number(n.id || 0) ? ' is-open' : ''}" type="button" aria-label="Ações" title="Ações" data-menu-id="${n.id || 0}">
           <i class="fa-solid fa-ellipsis"></i>
         </button>
       </div>
-      <button class="org-footer" type="button" data-toggle-id="${n.id || 0}">
-        <span>${isRoot ? direct : direct} departamento${(isRoot ? direct : direct) === 1 ? '' : 's'}</span>
-        <i class="fa-solid ${n._collapsed ? 'fa-angle-right' : 'fa-angle-up'}"></i>
+      <button class="org-footer${direct ? '' : ' is-empty'}" type="button" data-toggle-id="${n.id || 0}" ${direct ? '' : 'aria-disabled="true"'}>
+        <span>${direct} ${isRoot ? 'departamento' : 'subdepartamento'}${direct === 1 ? '' : 's'}</span>
+        ${direct ? `<i class="fa-solid ${n._collapsed ? 'fa-angle-right' : 'fa-angle-up'}"></i>` : ''}
       </button>
     `;
 
@@ -644,16 +708,14 @@
       const menu = document.createElement('div');
       menu.className = 'org-action-menu';
       menu.innerHTML = isRoot ? `
-        <button type="button" data-action="add-child" data-id="0"><i class="fa-solid fa-plus"></i><strong>Adicionar departamento</strong><span>Crie um departamento abaixo da empresa.</span></button>
-        <button type="button" data-action="fit" data-id="0"><i class="fa-solid fa-crosshairs"></i><strong>Encontrar a mim</strong><span>Centralize o organograma na empresa.</span></button>
+        <button type="button" data-action="add-child" data-id="0"><i class="fa-solid fa-plus"></i><strong>Novo departamento</strong><span>Criar abaixo da empresa.</span></button>
+        <button type="button" data-action="fit" data-id="0"><i class="fa-solid fa-crosshairs"></i><strong>Centralizar organograma</strong><span>Voltar para a visão completa.</span></button>
       ` : `
-        <button type="button" data-action="edit" data-id="${n.id}"><i class="fa-solid fa-pen-to-square"></i><strong>Editar departamento</strong><span>Altere nome, descrição e departamento principal.</span></button>
-        <button type="button" data-action="add-child" data-id="${n.id}"><i class="fa-solid fa-folder-plus"></i><strong>Adicionar subdepartamento</strong><span>Torne um departamento subordinado a este.</span></button>
-        <button type="button" data-action="members" data-id="${n.id}"><i class="fa-solid fa-users-gear"></i><strong>Editar colaboradores e supervisores</strong><span>Edite colaboradores, supervisores e adjuntos.</span></button>
-        <button type="button" data-action="transfer" data-id="${n.id}"><i class="fa-solid fa-right-left"></i><strong>Transferir do departamento</strong><span>Altere o departamento principal deste setor.</span></button>
-        <button type="button" data-action="invite" data-id="${n.id}"><i class="fa-solid fa-user-plus"></i><strong>Convidar para o sistema</strong><span>O novo colaborador será adicionado a este departamento.</span></button>
-        <button type="button" data-action="members" data-id="${n.id}"><i class="fa-solid fa-user-check"></i><strong>Adicionar colaborador com múltiplas funções</strong><span>Selecione colaboradores existentes.</span></button>
-        <button type="button" class="danger" data-action="del" data-id="${n.id}"><i class="fa-solid fa-trash-can"></i><strong>Remover departamento</strong><span>Remove este departamento da estrutura.</span></button>
+        <button type="button" data-action="edit" data-id="${n.id}"><i class="fa-solid fa-pen-to-square"></i><strong>Editar departamento</strong><span>Nome, descrição, código e status.</span></button>
+        <button type="button" data-action="add-child" data-id="${n.id}"><i class="fa-solid fa-folder-plus"></i><strong>Novo subdepartamento</strong><span>Criar abaixo deste setor.</span></button>
+        <button type="button" data-action="members" data-id="${n.id}"><i class="fa-solid fa-users-gear"></i><strong>Colaboradores</strong><span>Selecionar membros deste departamento.</span></button>
+        <button type="button" data-action="transfer" data-id="${n.id}"><i class="fa-solid fa-right-left"></i><strong>Mover departamento</strong><span>Trocar o departamento principal.</span></button>
+        <button type="button" class="danger" data-action="del" data-id="${n.id}"><i class="fa-solid fa-trash-can"></i><strong>Remover</strong><span>Excluir da estrutura.</span></button>
       `;
       card.appendChild(menu);
     }
@@ -787,18 +849,18 @@
     if (!sidePanel) return;
     const isRoot = !state.selectedId;
     const dept = isRoot ? null : findDept(state.selectedId);
-    const title = isRoot ? (state.companyName || 'Bitrix') : (dept ? labelOf(dept) : 'Departamento');
+    const title = isRoot ? (companyLabel()) : (dept ? labelOf(dept) : 'Departamento');
     const subtitle = isRoot ? 'Raiz da empresa' : (dept?.descricao || dept?.codigo || 'Departamento');
-    const members = loading ? [] : (isRoot ? state.colaboradores.slice(0, 60) : state.selectedMembers || []);
-    const total = isRoot ? state.colaboradores.length : members.length;
+    const members = loading ? [] : (isRoot ? [] : state.selectedMembers || []);
+    const total = isRoot ? state.flat.length : members.length;
     const supervisorCount = 0;
 
     const peopleHtml = members.length ? members.map(p => personRowHtml(p)).join('') : `
       <div class="side-empty">
-        <div class="empty-illustration"><i class="fa-solid fa-id-card-clip"></i></div>
-        <strong>Adicionar colaboradores</strong>
-        <p>Transfira colaboradores de outros departamentos ou convide novos usuários para este departamento.</p>
-        <button class="blue-add" type="button" data-action="members" data-id="${state.selectedId || 0}">Adicionar</button>
+        <div class="empty-illustration"><i class="fa-solid fa-sitemap"></i></div>
+        <strong>${isRoot ? 'Selecione um departamento' : 'Adicionar colaboradores'}</strong>
+        <p>${isRoot ? 'Clique em um card do organograma para ver os colaboradores e detalhes.' : 'Vincule colaboradores a este departamento na etapa de configurações.'}</p>
+        ${isRoot ? '' : `<button class="blue-add" type="button" data-action="members" data-id="${state.selectedId || 0}">Adicionar</button>`}
       </div>
     `;
 
@@ -815,8 +877,8 @@
       </div>
       <div class="side-body">
         <div class="side-summary">
-          <div class="summary-box"><span>Total de colaboradores</span><strong>${loading ? '...' : total}</strong></div>
-          <div class="summary-box"><span>Bate-papos e canais</span><em class="soon">Em breve</em></div>
+          <div class="summary-box"><span>${isRoot ? 'Departamentos cadastrados' : 'Total de colaboradores'}</span><strong>${loading ? '...' : total}</strong></div>
+          <div class="summary-box"><span>Configurações</span><em class="soon">${isRoot ? 'Geral' : 'Departamento'}</em></div>
         </div>
         <label class="side-search">
           <i class="fa-solid fa-magnifying-glass"></i>
@@ -833,6 +895,7 @@
         <div class="side-bottom">
           <div class="info-box"><span>Status</span><strong>${isRoot || dept?.ativo !== false ? 'Ativo' : 'Inativo'}</strong></div>
           <div class="info-box"><span>Código</span><strong>${escapeHtml(isRoot ? 'Empresa' : (dept?.codigo || 'Departamento'))}</strong></div>
+          <div class="info-box"><span>Horário</span><strong>${escapeHtml(isRoot ? 'Geral' : ([dept?.hora_login_inicio_padrao, dept?.hora_login_fim_padrao].filter(Boolean).join(' às ') || 'Não definido'))}</strong></div>
         </div>
       </div>
     `;
@@ -863,7 +926,7 @@
   function fillParentSelect(){
     if (!selParent) return;
     const current = selParent.value;
-    selParent.innerHTML = '<option value="">Bitrix</option>';
+    selParent.innerHTML = `<option value="">${escapeHtml(companyLabel())}</option>`;
     const editingId = Number(state.editing?.id || 0);
     const descendants = new Set();
     if (editingId) collectDescendantIds(editingId, descendants);
@@ -902,8 +965,8 @@
 
   function setParentUi(){
     if (!selParent || !parentChip) return;
-    const text = selParent.options[selParent.selectedIndex]?.textContent?.replace(/^—\s*/g, '').trim() || 'Bitrix';
-    parentChip.querySelector('span').textContent = text || 'Bitrix';
+    const text = selParent.options[selParent.selectedIndex]?.textContent?.replace(/^—\s*/g, '').trim() || companyLabel();
+    parentChip.querySelector('span').textContent = text || companyLabel();
   }
 
   function toggleParentPanel(force){
@@ -930,7 +993,7 @@
       });
       parentPanel.appendChild(item);
     };
-    addItem('', 'Bitrix', 0);
+    addItem('', companyLabel(), 0);
     const editingId = Number(state.editing?.id || 0);
     const descendants = new Set();
     if (editingId) collectDescendantIds(editingId, descendants);
@@ -1017,11 +1080,78 @@
     updateMembrosCount();
   }
 
+  function renderInstanciasList(){
+    if (!instanciasList) return;
+    const list = state.instancias || [];
+    if (!list.length) {
+      instanciasList.innerHTML = '<div class="members-empty">Nenhuma instância encontrada para esta empresa.</div>';
+      updateInstanciasCount();
+      return;
+    }
+
+    instanciasList.innerHTML = '';
+    list.forEach(inst => {
+      const row = document.createElement('label');
+      row.className = 'instancia-pill';
+      row.innerHTML = `
+        <input type="checkbox" value="${inst.id}" ${state.instanciasSelecionadas.has(Number(inst.id)) ? 'checked' : ''}>
+        <span class="instancia-main">
+          <strong>${escapeHtml(inst.nome)}</strong>
+          <small>${escapeHtml(inst.numero || 'Sem número informado')}</small>
+        </span>
+        <span class="instancia-badge">${inst.connected ? 'Conectada' : 'Off'}</span>
+      `;
+      const input = $('input', row);
+      input?.addEventListener('change', () => {
+        const id = Number(input.value || 0);
+        if (input.checked) state.instanciasSelecionadas.add(id);
+        else state.instanciasSelecionadas.delete(id);
+        updateInstanciasCount();
+        renderWizardPreview();
+      });
+      instanciasList.appendChild(row);
+    });
+    updateInstanciasCount();
+  }
+
+  function updateInstanciasCount(){
+    const qtd = state.instanciasSelecionadas?.size || 0;
+    const text = qtd === 1 ? '1 selecionada' : `${qtd} selecionadas`;
+    if (instanciasCount) instanciasCount.textContent = text;
+    const reviewInst = $('#review-instancias');
+    const reviewInline = $('#review-instancias-inline');
+    if (reviewInst) reviewInst.textContent = text;
+    if (reviewInline) reviewInline.textContent = text;
+  }
+
+  function getInstanciasSelecionadas(){
+    return Array.from(state.instanciasSelecionadas || []).map(Number).filter(n => Number.isFinite(n) && n > 0);
+  }
+
+  function renderMembrosSummary(){
+    if (!membrosSummary) return;
+    const ids = getMembrosSelecionados();
+    if (!ids.length) {
+      membrosSummary.textContent = 'Nenhum colaborador selecionado.';
+      return;
+    }
+
+    const byId = new Map((state.colaboradores || []).map(c => [Number(c.id), c]));
+    const chips = ids.slice(0, 4).map(id => {
+      const c = byId.get(Number(id));
+      const nome = c?.nome || `Colaborador ${id}`;
+      return `<span class="member-chip-clean"><b>${escapeHtml(nome)}</b></span>`;
+    });
+    const extra = ids.length > 4 ? `<span class="member-chip-more">+${ids.length - 4}</span>` : '';
+    membrosSummary.innerHTML = chips.join('') + extra;
+  }
+
   function updateMembrosCount(){
     const qtd = state.membrosSelecionados?.size || 0;
     if (membrosCount) membrosCount.textContent = qtd === 1 ? '1 selecionado' : `${qtd} selecionados`;
     const reviewColabs = $('#review-colabs');
     if (reviewColabs) reviewColabs.textContent = qtd === 1 ? '1 selecionado' : `${qtd} selecionados`;
+    renderMembrosSummary();
   }
 
   function getMembrosSelecionados(){
@@ -1045,10 +1175,28 @@
     document.documentElement.classList.remove('modal-open');
     document.removeEventListener('keydown', onEscClose);
     toggleParentPanel(false);
+    if (membrosPanel) membrosPanel.hidden = true;
+    if (membrosToggle) membrosToggle.textContent = 'Gerenciar';
     state.editing = null;
   }
 
   function onEscClose(e){ if (e.key === 'Escape') closeModal(); }
+
+  async function ensureModalListsReady(deptId = null){
+    await loadInstancias();
+    renderInstanciasList();
+    await prepareMembrosModal(deptId);
+  }
+
+  function resetModalListsPlaceholders(){
+    state.membrosSelecionados = new Set();
+    if (membrosList) membrosList.innerHTML = '<div class="members-empty">Abra o gerenciador para carregar a lista.</div>';
+    if (membrosPanel) membrosPanel.hidden = true;
+    if (membrosToggle) membrosToggle.textContent = 'Gerenciar';
+    if (instanciasList) instanciasList.innerHTML = '<div class="members-empty">Carregando instâncias...</div>';
+    updateMembrosCount();
+    updateInstanciasCount();
+  }
 
   async function openModalNovo(parentId = null, step = 1){
     state.editing = null;
@@ -1059,10 +1207,14 @@
     txtDesc.value = '';
     inpCodigo.value = '';
     chkAtivo.checked = true;
+    if (inpHoraInicio) inpHoraInicio.value = '';
+    if (inpHoraFim) inpHoraFim.value = '';
+    state.instanciasSelecionadas = new Set();
     selParent.value = parentId ? String(parentId) : '';
     setParentUi();
+    resetModalListsPlaceholders();
+    if (step >= 2) await ensureModalListsReady(null);
     setModalStep(step);
-    await prepareMembrosModal(null);
     showModal();
     setTimeout(() => inpNome?.focus(), 60);
   }
@@ -1076,6 +1228,9 @@
     txtDesc.value = item.descricao || '';
     inpCodigo.value = item.codigo || '';
     chkAtivo.checked = item.ativo !== false;
+    if (inpHoraInicio) inpHoraInicio.value = normTime(item.hora_login_inicio_padrao);
+    if (inpHoraFim) inpHoraFim.value = normTime(item.hora_login_fim_padrao);
+    state.instanciasSelecionadas = new Set(Array.isArray(item.whatsapp_instancias) ? item.whatsapp_instancias.map(Number).filter(Boolean) : []);
     selParent.value = item.parent_id ? String(item.parent_id) : '';
     setParentUi();
 
@@ -1084,11 +1239,15 @@
       if (det) {
         txtDesc.value = det.descricao ?? det.obs ?? txtDesc.value ?? '';
         inpCodigo.value = det.codigo ?? det.code ?? inpCodigo.value ?? '';
+        if (inpHoraInicio) inpHoraInicio.value = normTime(det.hora_login_inicio_padrao ?? det.login_inicio_padrao ?? item.hora_login_inicio_padrao);
+        if (inpHoraFim) inpHoraFim.value = normTime(det.hora_login_fim_padrao ?? det.login_fim_padrao ?? item.hora_login_fim_padrao);
+        state.instanciasSelecionadas = new Set((det.whatsapp_instancias || item.whatsapp_instancias || []).map(Number).filter(Boolean));
       }
     } catch {}
 
+    resetModalListsPlaceholders();
+    if (step >= 2) await ensureModalListsReady(item.id);
     setModalStep(step);
-    await prepareMembrosModal(item.id);
     showModal();
     setTimeout(() => (step === 1 ? inpNome : membrosSearch)?.focus(), 60);
   }
@@ -1101,12 +1260,29 @@
       modalTitle.textContent = state.modalStep === 1
         ? 'Nome e descrição do departamento'
         : state.modalStep === 2
-          ? 'Supervisores e colaboradores do departamento'
-          : 'Revisar e salvar';
+          ? 'Horário, instâncias e colaboradores'
+          : 'Revisão e conclusão';
     }
+
     if (modalProgress) {
-      $$('span', modalProgress).forEach((bar, idx) => bar.classList.toggle('active', idx < state.modalStep));
+      const stepItems = $$('.wizard-stepper-item', modalProgress);
+      if (stepItems.length) {
+        stepItems.forEach(item => {
+          const idx = Number(item.dataset.stepIndex || 0);
+          item.classList.toggle('is-active', idx === state.modalStep);
+          item.classList.toggle('is-complete', idx < state.modalStep);
+          const dot = $('.step-dot', item);
+          if (dot) dot.innerHTML = idx < state.modalStep ? '<i class="fa-solid fa-check"></i>' : String(idx || '');
+        });
+        $$('.step-line', modalProgress).forEach((line, idx) => {
+          line.classList.toggle('is-complete', idx + 1 < state.modalStep);
+          line.classList.toggle('is-active', idx + 1 === state.modalStep - 1);
+        });
+      } else {
+        $$('span', modalProgress).forEach((bar, idx) => bar.classList.toggle('active', idx < state.modalStep));
+      }
     }
+
     if (btnBack) btnBack.style.visibility = state.modalStep > 1 ? 'visible' : 'hidden';
     if (btnNext) btnNext.style.display = state.modalStep < 3 ? 'inline-flex' : 'none';
     if (btnSave) btnSave.style.display = state.modalStep === 3 ? 'inline-flex' : 'none';
@@ -1119,15 +1295,27 @@
       inpNome.focus();
       return false;
     }
+    if (step === 2) {
+      const hi = normTime(inpHoraInicio?.value);
+      const hf = normTime(inpHoraFim?.value);
+      if (hi && hf && hi > hf) {
+        toast('O horário de entrada não pode ser maior que o de saída.', 'warn');
+        inpHoraInicio?.focus();
+        return false;
+      }
+    }
     return true;
   }
 
   function renderWizardPreview(){
-    const company = state.companyName || 'Bitrix';
+    const company = companyLabel();
     ['preview-company','preview-company-2'].forEach(id => { const el = $('#' + id); if (el) el.textContent = company; });
     const name = (inpNome?.value || '').trim() || 'Departamento de Vendas';
     const parentText = selParent?.options[selParent.selectedIndex]?.textContent?.replace(/^—\s*/g, '').trim() || company;
     const count = state.membrosSelecionados?.size || 0;
+    const horarios = [normTime(inpHoraInicio?.value), normTime(inpHoraFim?.value)].filter(Boolean);
+    const horarioLabel = horarios.length === 2 ? `${horarios[0]} às ${horarios[1]}` : horarios.length === 1 ? horarios[0] : 'Não definido';
+    const instanciasQtd = state.instanciasSelecionadas?.size || 0;
 
     const previewHtml = `
       <div class="preview-company-box">${escapeHtml(company)}</div>
@@ -1140,7 +1328,7 @@
         </div>
         <div class="preview-dept-meta">
           <span>Colaboradores <b>${count} colaborador${count === 1 ? '' : 'es'}</b></span>
-          <span>Supervisores adjuntos <b>0</b></span>
+          <span>Instâncias <b>${instanciasQtd}</b></span>
         </div>
       </div>
     `;
@@ -1149,10 +1337,15 @@
     const reviewNome = $('#review-nome');
     const reviewParent = $('#review-parent');
     const reviewStatus = $('#review-status');
+    const reviewHorario = $('#review-horario');
+    const reviewHorarioInline = $('#review-horario-inline');
     if (reviewNome) reviewNome.textContent = name;
     if (reviewParent) reviewParent.textContent = parentText;
     if (reviewStatus) reviewStatus.textContent = chkAtivo?.checked ? 'Ativo' : 'Inativo';
+    if (reviewHorario) reviewHorario.textContent = horarioLabel;
+    if (reviewHorarioInline) reviewHorarioInline.textContent = horarioLabel;
     updateMembrosCount();
+    updateInstanciasCount();
   }
 
   function getPayload(){
@@ -1162,8 +1355,9 @@
       parent_id: selParent.value ? Number(selParent.value) : null,
       codigo: (inpCodigo.value || '').trim() || null,
       ativo: !!chkAtivo.checked,
-      hora_login_inicio_padrao: null,
-      hora_login_fim_padrao: null
+      hora_login_inicio_padrao: normTime(inpHoraInicio?.value) || null,
+      hora_login_fim_padrao: normTime(inpHoraFim?.value) || null,
+      whatsapp_instancias: getInstanciasSelecionadas()
     };
   }
 
@@ -1260,9 +1454,18 @@
     btnX?.addEventListener('click', closeModal);
     btnCancel?.addEventListener('click', closeModal);
     btnBack?.addEventListener('click', () => setModalStep(state.modalStep - 1));
-    btnNext?.addEventListener('click', () => {
+    btnNext?.addEventListener('click', async () => {
       if (!validateStep(state.modalStep)) return;
-      setModalStep(state.modalStep + 1);
+      const nextStep = state.modalStep + 1;
+      if (nextStep === 2) {
+        try {
+          Loader.show('Carregando configurações...');
+          await ensureModalListsReady(state.editing?.id || null);
+        } finally {
+          Loader.hide();
+        }
+      }
+      setModalStep(nextStep);
     });
     btnSave?.addEventListener('click', saveDepto);
     modal?.addEventListener('mousedown', ev => {
@@ -1276,8 +1479,26 @@
     txtDesc?.addEventListener('input', renderWizardPreview);
     chkAtivo?.addEventListener('change', renderWizardPreview);
     selParent?.addEventListener('change', () => { setParentUi(); renderWizardPreview(); });
+    inpHoraInicio?.addEventListener('input', renderWizardPreview);
+    inpHoraFim?.addEventListener('input', renderWizardPreview);
 
     membrosSearch?.addEventListener('input', debounce(renderMembrosList, 120));
+    membrosToggle?.addEventListener('click', () => {
+      if (!membrosPanel) return;
+      membrosPanel.hidden = !membrosPanel.hidden;
+      if (membrosToggle) membrosToggle.textContent = membrosPanel.hidden ? 'Gerenciar' : 'Fechar';
+      if (!membrosPanel.hidden) setTimeout(() => membrosSearch?.focus(), 30);
+    });
+    instanciasAll?.addEventListener('click', () => {
+      state.instancias.forEach(i => state.instanciasSelecionadas.add(Number(i.id)));
+      renderInstanciasList();
+      renderWizardPreview();
+    });
+    instanciasClear?.addEventListener('click', () => {
+      state.instanciasSelecionadas.clear();
+      renderInstanciasList();
+      renderWizardPreview();
+    });
     membrosAll?.addEventListener('click', () => {
       state.colaboradores.forEach(c => state.membrosSelecionados.add(Number(c.id)));
       renderMembrosList();
@@ -1288,9 +1509,6 @@
       renderMembrosList();
       renderWizardPreview();
     });
-
-    $('#btn-supervisores')?.addEventListener('click', () => toast('Supervisores ainda usam a lista de colaboradores nesta versão visual.', 'warn'));
-    $('#btn-adjuntos')?.addEventListener('click', () => toast('Supervisor adjunto ainda é apenas visual. Colaboradores são salvos normalmente.', 'warn'));
 
     document.addEventListener('click', ev => {
       const actionBtn = ev.target.closest('[data-action]');
@@ -1308,7 +1526,7 @@
         else if (action === 'transfer' && item) openModalEditar(item, 1);
         else if (action === 'del') deleteDepto(id);
         else if (action === 'fit') resetStage();
-        else if (action === 'invite') toast('Convite fica para a tela de colaboradores. Aqui deixei o atalho visual igual ao Bitrix.', 'warn');
+        else if (action === 'invite') toast('Convite fica para a tela de colaboradores. Aqui deixei apenas o atalho visual para facilitar.', 'warn');
         renderOrg();
         return;
       }
@@ -1355,6 +1573,8 @@
     txtDesc = $('#d-desc');
     inpCodigo = $('#d-codigo');
     chkAtivo = $('#d-ativo');
+    inpHoraInicio = $('#d-hora-inicio');
+    inpHoraFim = $('#d-hora-fim');
     selParent = $('#d-parent');
     parentChip = $('#parent-chip');
     parentEdit = $('#parent-edit');
@@ -1364,6 +1584,13 @@
     membrosCount = $('#d-membros-count');
     membrosAll = $('#d-membros-all');
     membrosClear = $('#d-membros-clear');
+    membrosToggle = $('#d-membros-toggle');
+    membrosPanel = $('#d-membros-panel');
+    membrosSummary = $('#d-membros-summary');
+    instanciasList = $('#d-instancias-list');
+    instanciasCount = $('#d-instancias-count');
+    instanciasAll = $('#d-instancias-all');
+    instanciasClear = $('#d-instancias-clear');
   }
 
   async function boot(){
@@ -1372,7 +1599,6 @@
     setModalStep(1);
     renderSidePanel(true);
     await loadEmpresaName();
-    await loadColaboradores();
     await loadTree();
     releasePageLoader();
   }

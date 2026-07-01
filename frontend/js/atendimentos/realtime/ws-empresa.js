@@ -1454,6 +1454,12 @@ function scrollBottomSoon() {
   } catch {}
 }
 
+const WS_RENDER_DEBOUNCE_MS = Number(
+  window.ZC_WS_RENDER_DEBOUNCE_MS || (window.ZC_LOW_RAM_MODE ? 180 : 0)
+);
+let __zcWsOpenRenderTimer = 0;
+let __zcWsOpenRenderKey = '';
+
 function renderOpenConversationFromWs(convRef) {
   const ref = normalizeConversationRef(convRef, typeof convRef === 'object' ? convRef : null);
   if (!ref?.key) return;
@@ -1471,6 +1477,18 @@ function renderOpenConversationFromWs(convRef) {
     }
   };
 
+  // Modo leve: uma mensagem via WS não precisa redesenhar o chat 4 vezes.
+  // Debounce evita estouro de RAM quando chegam mensagens/ACKs em lote.
+  if (window.ZC_LOW_RAM_MODE || WS_RENDER_DEBOUNCE_MS > 0) {
+    __zcWsOpenRenderKey = ref.key;
+    if (__zcWsOpenRenderTimer) clearTimeout(__zcWsOpenRenderTimer);
+    __zcWsOpenRenderTimer = setTimeout(() => {
+      if (__zcWsOpenRenderKey !== ref.key) return;
+      renderOnce();
+    }, WS_RENDER_DEBOUNCE_MS || 180);
+    return;
+  }
+
   renderOnce();
 
   try {
@@ -1487,6 +1505,11 @@ function scheduleForceUnreadBadgeDom(refOrKey, unread, patch = null) {
   };
 
   run();
+
+  if (window.ZC_LOW_RAM_MODE || window.ZC_WS_BADGE_REPEAT_LIGHT === true) {
+    try { setTimeout(run, 120); } catch {}
+    return;
+  }
 
   try { requestAnimationFrame(run); } catch {}
   try { setTimeout(run, 0); } catch {}

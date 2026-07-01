@@ -40,19 +40,30 @@ const LS_HIST_V2 = `zc:hist:v2:${EID}`;
 /* =========================
    Performance config
    ========================= */
-const MAX_CONVS_PER_INST = Number(window.ZC_STORE_MAX_CONVS_PER_INST || 300);
-const MAX_MSGS_PER_CONVERSA = Number(window.ZC_STORE_MAX_MSGS_PER_CONVERSA || 180);
+const MAX_CONVS_PER_INST = Number(
+  window.ZC_STORE_MAX_CONVS_PER_INST || (window.ZC_LOW_RAM_MODE ? 80 : 300)
+);
+const MAX_MSGS_PER_CONVERSA = Number(
+  window.ZC_STORE_MAX_MSGS_PER_CONVERSA || (window.ZC_LOW_RAM_MODE ? 60 : 180)
+);
 
 /*
   Segurança: lista de conversas pode ficar em localStorage.
   Histórico NÃO.
 */
 const STORE_SAVE_HISTORY_TO_LS = false;
+const STORE_SAVE_CONVERSAS_TO_LS = window.ZC_STORE_SAVE_CONVERSAS_TO_LS === undefined
+  ? !window.ZC_LOW_RAM_MODE
+  : window.ZC_STORE_SAVE_CONVERSAS_TO_LS !== false;
 
 // Se caches antigos/listas antigas estiverem gigantes, apaga antes de fazer JSON.parse.
 // Isso evita o Chrome subir para vários GB de RAM só abrindo o ZapsChat.
-const STORE_MAX_BOOT_JSON_BYTES = Number(window.ZC_STORE_MAX_BOOT_JSON_BYTES || 900000);
-const STORE_MAX_ANY_ZAPS_STORAGE_BYTES = Number(window.ZC_STORE_MAX_ANY_ZAPS_STORAGE_BYTES || 1800000);
+const STORE_MAX_BOOT_JSON_BYTES = Number(
+  window.ZC_STORE_MAX_BOOT_JSON_BYTES || (window.ZC_LOW_RAM_MODE ? 250000 : 900000)
+);
+const STORE_MAX_ANY_ZAPS_STORAGE_BYTES = Number(
+  window.ZC_STORE_MAX_ANY_ZAPS_STORAGE_BYTES || (window.ZC_LOW_RAM_MODE ? 500000 : 1800000)
+);
 
 /* =========================
    DB_MODE flags
@@ -142,8 +153,18 @@ function clampNumber(v, min, max, fallback) {
   return Math.max(min, Math.min(max, Math.floor(n)));
 }
 
-const MAX_CONVS_SAFE = clampNumber(MAX_CONVS_PER_INST, 50, 1000, 300);
-const MAX_MSGS_SAFE = clampNumber(MAX_MSGS_PER_CONVERSA, 50, 500, 180);
+const MAX_CONVS_SAFE = clampNumber(
+  MAX_CONVS_PER_INST,
+  20,
+  1000,
+  window.ZC_LOW_RAM_MODE ? 80 : 300
+);
+const MAX_MSGS_SAFE = clampNumber(
+  MAX_MSGS_PER_CONVERSA,
+  20,
+  500,
+  window.ZC_LOW_RAM_MODE ? 60 : 180
+);
 
 function instValue(v) {
   const s = normStr(v);
@@ -952,7 +973,11 @@ export function persist() {
 
     state.convsByInst = safeConvs;
 
-    setLS(LS_CONVS_V2, JSON.stringify(safeConvs));
+    if (STORE_SAVE_CONVERSAS_TO_LS) {
+      setLS(LS_CONVS_V2, JSON.stringify(safeConvs));
+    } else {
+      delLS(LS_CONVS_V2);
+    }
 
     setLS(
       LS_META,
@@ -960,17 +985,22 @@ export function persist() {
         ...(state.meta || { ver: 3 }),
         ver: 3,
         historyInStoreDisabled: true,
+        conversationListLocalStorageDisabled: !STORE_SAVE_CONVERSAS_TO_LS,
       })
     );
 
-    setLS(
-      LS_CLIENTES_LEGACY,
-      JSON.stringify(
-        Array.isArray(state.clientesCache)
-          ? compactConversas(state.clientesCache.map(normalizeConversa))
-          : []
-      )
-    );
+    if (STORE_SAVE_CONVERSAS_TO_LS) {
+      setLS(
+        LS_CLIENTES_LEGACY,
+        JSON.stringify(
+          Array.isArray(state.clientesCache)
+            ? compactConversas(state.clientesCache.map(normalizeConversa))
+            : []
+        )
+      );
+    } else {
+      delLS(LS_CLIENTES_LEGACY);
+    }
 
     /*
       Segurança:
@@ -1868,6 +1898,8 @@ export function getStoreStats() {
     totalHistKeysMemory: histKeys.length,
     totalLegacyHistKeysMemory: legacyHistKeys.length,
     historySavedToLocalStorage: STORE_SAVE_HISTORY_TO_LS,
+    conversationListSavedToLocalStorage: STORE_SAVE_CONVERSAS_TO_LS,
+    lowRamMode: !!window.ZC_LOW_RAM_MODE,
     maxConvsPerInst: MAX_CONVS_SAFE,
     maxMsgsPerConversationMemory: MAX_MSGS_SAFE,
   };

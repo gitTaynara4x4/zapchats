@@ -1636,9 +1636,23 @@
     document.addEventListener('cliente:selecionado', () => clearReplyPreview(false));
     document.addEventListener('zc:cliente_sel', () => clearReplyPreview(false));
 
+    const scheduleEnhanceSafe = (() => {
+      let t = null;
+      return (delay = 80) => {
+        clearTimeout(t);
+        t = setTimeout(() => {
+          try { enhanceAll(); } catch {}
+        }, Math.max(40, Number(delay) || 80));
+      };
+    })();
+
     document.addEventListener('historico:ready', () => {
       closeAllPopups();
-      setTimeout(enhanceAll, 40);
+      scheduleEnhanceSafe(80);
+    });
+
+    document.addEventListener('historico:rendered', () => {
+      scheduleEnhanceSafe(90);
     });
   }
 
@@ -1646,13 +1660,24 @@
     const hist = $(HIST_SELECTOR);
     if (!hist || observer) return;
 
+    // RAM seguro: não observa subtree inteiro do chat.
+    // Quando renderiza histórico já temos evento historico:rendered para aplicar ações.
+    if (window.ZC_DISABLE_MSG_ACTION_OBSERVER === true) {
+      return;
+    }
+
+    let raf = null;
     observer = new MutationObserver(() => {
-      window.requestAnimationFrame(enhanceAll);
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = null;
+        enhanceAll();
+      });
     });
 
     observer.observe(hist, {
       childList: true,
-      subtree: true
+      subtree: false
     });
   }
 

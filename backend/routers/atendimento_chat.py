@@ -75,6 +75,123 @@ def _id_get(obj: Any, key: str, default: Any = None) -> Any:
     return getattr(obj, key, default)
 
 
+# =========================================================
+# Payload leve para histórico (proteção de RAM no Chrome)
+# =========================================================
+HISTORY_TEXT_MAX_CHARS = 3500
+HISTORY_JSON_MAX_DEPTH = 3
+HISTORY_JSON_MAX_LIST_ITEMS = 8
+HISTORY_JSON_MAX_STRING_CHARS = 1500
+
+_HEAVY_PAYLOAD_KEYS = {
+    "base64", "b64", "filebase64", "file_base64", "media_base64", "mediabase64",
+    "bodybase64", "raw", "buffer", "bytes", "binary", "stream", "data", "payload",
+    "message", "messagejson", "message_json", "source", "contextinfo", "context_info",
+}
+
+_LIGHT_QUOTED_KEYS = {
+    "id", "msg_id", "message_id", "key", "conteudo", "texto", "body", "caption",
+    "tipo", "message_type", "from_me", "author", "author_jid", "timestamp",
+}
+
+
+def _safe_history_text(value: Any, max_chars: int = HISTORY_TEXT_MAX_CHARS) -> str:
+    """Nunca devolve texto/base64 gigante no histórico do atendimento."""
+    if value is None:
+        return ""
+
+    text_value = str(value)
+    low = text_value[:80].lower()
+
+    if low.startswith("data:") or ";base64," in low:
+        return "[mídia]"
+
+    if len(text_value) > max_chars:
+        return text_value[:max_chars].rstrip() + "…"
+
+    return text_value
+
+
+def _looks_like_big_encoded_string(value: str) -> bool:
+    if not value:
+        return False
+
+    s = str(value)
+    low = s[:120].lower()
+
+    if low.startswith("data:") or ";base64," in low:
+        return True
+
+    if len(s) < 4096:
+        return False
+
+    # strings gigantes com muitos caracteres de base64/JSON bruto não devem ir para o navegador
+    sample = s[:4096]
+    allowed = sum(1 for ch in sample if ch.isalnum() or ch in "+/=\n\r")
+    return allowed / max(1, len(sample)) > 0.88
+
+
+def _safe_history_json(value: Any, depth: int = 0) -> Any:
+    """Remove payload pesado de quoted/preview antes do FastAPI serializar JSON."""
+    if value is None:
+        return None
+
+    if depth > HISTORY_JSON_MAX_DEPTH:
+        return None
+
+    if isinstance(value, str):
+        if _looks_like_big_encoded_string(value):
+            return ""
+        if len(value) > HISTORY_JSON_MAX_STRING_CHARS:
+            return value[:HISTORY_JSON_MAX_STRING_CHARS].rstrip() + "…"
+        return value
+
+    if isinstance(value, (int, float, bool)):
+        return value
+
+    if isinstance(value, (datetime, date)):
+        try:
+            return value.isoformat()
+        except Exception:
+            return str(value)
+
+    if isinstance(value, (list, tuple)):
+        return [
+            _safe_history_json(item, depth + 1)
+            for item in list(value)[:HISTORY_JSON_MAX_LIST_ITEMS]
+        ]
+
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for key, val in value.items():
+            k = str(key)
+            lk = k.replace("-", "_").lower()
+
+            if lk in _HEAVY_PAYLOAD_KEYS:
+                continue
+
+            # Em quoted, guarda só dados realmente úteis para exibir a resposta.
+            if depth == 0 and lk not in _LIGHT_QUOTED_KEYS:
+                # Mantém alguns metadados pequenos, ignora objetos grandes desconhecidos.
+                if isinstance(val, (dict, list, tuple)):
+                    continue
+                if isinstance(val, str) and len(val) > 240:
+                    continue
+
+            safe_val = _safe_history_json(val, depth + 1)
+            if safe_val in (None, "", [], {}):
+                continue
+            out[k] = safe_val
+
+        return out or None
+
+    # Qualquer outro objeto SQL/bytes/etc. não entra no JSON do histórico.
+    return None
+
+
+def _safe_quoted_payload(value: Any) -> Any:
+    return _safe_history_json(value, 0)
+
 def _get_colab_id(identity: Any) -> Optional[int]:
     for key in ("id_colab", "colaborador_id", "id_colaborador", "colab_id", "cid"):
         cid = _to_int(_id_get(identity, key))
@@ -120,16 +237,74 @@ def _iso_utc(ts) -> Optional[str]:
         return str(ts)
 
 
+def _looks_like_chatbot_message_text(value: Any) -> bool:
+    try:
+        txt = str(value or "").strip().lower()
+        if not txt:
+            return False
+
+        # Mensagens automáticas oficiais da triagem/chatbot.
+        # Isso cobre também as mensagens que a Evolution devolve com msg_id real,
+        # sem prefixo bot:, evitando aparecer como "WhatsApp" no histórico.
+        markers = (
+            "para direcionar seu atendimento",
+            "digite apenas o número da opção desejada",
+            "bem-vindo(a)",
+            "vou te encaminhar para",
+            "não entendi sua opção",
+            "não consegui identificar a opção desejada",
+        )
+
+        return any(m in txt for m in markers)
+    except Exception:
+        return False
+
+
 def _autor_saida_nome_from_row(r) -> Optional[str]:
     try:
         tipo = str(getattr(r, "tipo", "") or "").strip().lower()
         msg_id = str(getattr(r, "msg_id", "") or "").strip().lower()
         colab_nome = getattr(r, "colaborador_nome", None)
-        if tipo == "saida" and msg_id.startswith("bot:"):
+        conteudo = getattr(r, "conteudo", None)
+
+        if tipo == "saida" and (msg_id.startswith("bot:") or _looks_like_chatbot_message_text(conteudo)):
             return "Bot"
+
         return colab_nome
     except Exception:
         return getattr(r, "colaborador_nome", None)
+
+
+def _looks_like_system_event_text(value: Any) -> bool:
+    try:
+        txt = str(value or "").strip().lower()
+        if not txt:
+            return False
+
+        return (
+            "assumiu este atendimento" in txt
+            or "liberou este atendimento" in txt
+            or "transferiu este atendimento" in txt
+            or "atendimento liberado automaticamente" in txt
+            or ("voltou para" in txt and "expediente" in txt)
+        )
+    except Exception:
+        return False
+
+
+def _is_system_event_from_row(r) -> bool:
+    try:
+        tipo = str(getattr(r, "tipo", "") or "").strip().lower()
+        msg_id = str(getattr(r, "msg_id", "") or "").strip().lower()
+        conteudo = getattr(r, "conteudo", None)
+
+        return (
+            tipo in {"sistema", "system", "evento"}
+            or msg_id.startswith("sys:")
+            or _looks_like_system_event_text(conteudo)
+        )
+    except Exception:
+        return False
 
 
 def _epoch_from_dt(dt: datetime) -> int:
@@ -648,7 +823,7 @@ def listar_mensagens_por_data(
     cliente_id: int,
     data: date = Query(..., description="Data no formato YYYY-MM-DD."),
     empresa_id: int | None = Query(None, description="(Opcional) Empresa. Se omitido, usa a do token."),
-    limit: int = Query(200, ge=1, le=500),
+    limit: int = Query(80, ge=1, le=120),
     instancia_id: int | None = Query(None, description="(Opcional) Filtra mensagens por instância id numérico"),
     instance: str | None = Query(None, description="(Opcional) Filtra mensagens por instância slug/nome"),
     db: Session = Depends(get_db),
@@ -665,6 +840,7 @@ def listar_mensagens_por_data(
       - Grupo quando o mesmo id existir em grupos.
     """
     ensure_perm(identity, "atendimento.ver")
+    limit = max(1, min(int(limit or 25), 60))
 
     empresa_id_eff = assert_same_company(identity, empresa_id)
     acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
@@ -802,8 +978,11 @@ def listar_mensagens_por_data(
                     "db_id": int(r.id),
                     "mensagem_id": int(r.id),
                     "msg_id": r.msg_id,
-                    "conteudo": r.conteudo,
-                    "tipo": r.tipo,
+                    "conteudo": _safe_history_text(r.conteudo),
+                    "tipo": "sistema" if _is_system_event_from_row(r) else r.tipo,
+                    "origem": "sistema" if _is_system_event_from_row(r) else None,
+                    "message_type": "system" if _is_system_event_from_row(r) else None,
+                    "system_event": bool(_is_system_event_from_row(r)),
                     "ack": r.ack,
                     "timestamp": ts_iso,
                     "instancia_id": r.instancia_id,
@@ -814,8 +993,8 @@ def listar_mensagens_por_data(
                     "atendente_nome": _autor_saida_nome_from_row(r),
                     "autor_nome": _autor_saida_nome_from_row(r),
                     "enviado_por_nome": _autor_saida_nome_from_row(r),
-                    "quoted": r.quoted,
-                    "quoted_preview": r.quoted_preview,
+                    "quoted": _safe_quoted_payload(r.quoted),
+                    "quoted_preview": _safe_quoted_payload(r.quoted_preview),
                     "apagada_cliente": bool(r.apagada_cliente),
                     "apagada_usuario": bool(r.apagada_usuario),
                     "is_group": False,
@@ -986,14 +1165,14 @@ def listar_mensagens_por_data(
                 "db_id": int(r.id),
                 "mensagem_id": int(r.id),
                 "msg_id": r.msg_id,
-                "conteudo": r.conteudo,
+                "conteudo": _safe_history_text(r.conteudo),
                 "tipo": r.tipo,
                 "ack": r.ack,
                 "timestamp": ts_iso,
                 "instancia_id": r.instancia_id,
                 "instance_name": r.instance_name,
-                "quoted": r.quoted,
-                "quoted_preview": r.quoted_preview,
+                "quoted": _safe_quoted_payload(r.quoted),
+                "quoted_preview": _safe_quoted_payload(r.quoted_preview),
                 "author_jid": r.author_jid,
                 "from_me": bool(r.from_me),
                 "message_type": r.message_type,
@@ -1052,7 +1231,8 @@ def listar_mensagens_por_data(
 def listar_mensagens(
     cliente_id: int,
     empresa_id: int | None = Query(None, description="(Opcional) Empresa. Se omitido, usa a do token."),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(25, ge=1, le=60),
+    light: bool = Query(True, description="Resposta leve: remove payload bruto/base64 do histórico."),
     offset: int = Query(0, ge=0),
     before_id: int | None = Query(None, ge=1, description="(Opcional) Cursor: mensagens mais antigas que este id."),
     instancia_id: int | None = Query(None, description="(Opcional) Filtra mensagens por instância id numérico"),
@@ -1063,6 +1243,7 @@ def listar_mensagens(
     identity=Depends(get_current_identity),
 ):
     ensure_perm(identity, "atendimento.ver")
+    limit = max(1, min(int(limit or 25), 60))
 
     empresa_id_eff = assert_same_company(identity, empresa_id)
     acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
@@ -1204,8 +1385,11 @@ def listar_mensagens(
                     "db_id": int(r.id),
                     "mensagem_id": int(r.id),
                     "msg_id": r.msg_id,
-                    "conteudo": r.conteudo,
-                    "tipo": r.tipo,
+                    "conteudo": _safe_history_text(r.conteudo),
+                    "tipo": "sistema" if _is_system_event_from_row(r) else r.tipo,
+                    "origem": "sistema" if _is_system_event_from_row(r) else None,
+                    "message_type": "system" if _is_system_event_from_row(r) else None,
+                    "system_event": bool(_is_system_event_from_row(r)),
                     "ack": r.ack,
                     "timestamp": ts_iso,
                     "instancia_id": r.instancia_id,
@@ -1216,8 +1400,8 @@ def listar_mensagens(
                     "atendente_nome": _autor_saida_nome_from_row(r),
                     "autor_nome": _autor_saida_nome_from_row(r),
                     "enviado_por_nome": _autor_saida_nome_from_row(r),
-                    "quoted": r.quoted,
-                    "quoted_preview": r.quoted_preview,
+                    "quoted": _safe_quoted_payload(r.quoted),
+                    "quoted_preview": _safe_quoted_payload(r.quoted_preview),
                     "apagada_cliente": bool(r.apagada_cliente),
                     "apagada_usuario": bool(r.apagada_usuario),
                     "is_group": False,
@@ -1392,14 +1576,14 @@ def listar_mensagens(
                 "db_id": int(r.id),
                 "mensagem_id": int(r.id),
                 "msg_id": r.msg_id,
-                "conteudo": r.conteudo,
+                "conteudo": _safe_history_text(r.conteudo),
                 "tipo": r.tipo,
                 "ack": r.ack,
                 "timestamp": ts_iso,
                 "instancia_id": r.instancia_id,
                 "instance_name": r.instance_name,
-                "quoted": r.quoted,
-                "quoted_preview": r.quoted_preview,
+                "quoted": _safe_quoted_payload(r.quoted),
+                "quoted_preview": _safe_quoted_payload(r.quoted_preview),
                 "author_jid": r.author_jid,
                 "from_me": bool(r.from_me),
                 "message_type": r.message_type,
@@ -1449,7 +1633,8 @@ def listar_mensagens(
 def listar_mensagens_alias_historico(
     cliente_id: int,
     empresa_id: int | None = Query(None),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(25, ge=1, le=60),
+    light: bool = Query(True, description="Resposta leve: remove payload bruto/base64 do histórico."),
     offset: int = Query(0, ge=0),
     before_id: int | None = Query(None, ge=1),
     instancia_id: int | None = Query(None),

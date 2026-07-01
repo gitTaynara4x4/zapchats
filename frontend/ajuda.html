@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Central de Ajuda | Valora CRM</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <link rel="icon" type="image/png" href="/frontend/img//logo-favicon.jpg" />
+  
+  <link rel="stylesheet" href="/frontend/css/app.css?v=20260630-dark-chatgpt-v6" />
+  <link rel="stylesheet" href="/frontend/css/validacao.css?v=20260614-required-circle" />
+  <script src="/frontend/js/pages/app.js?v=20260626-ajuda-global" defer></script>
+  <script src="/frontend/js/shared/validacao.js?v=20260614-required-circle" defer></script>
+  
+  <link rel="stylesheet" href="/frontend/css/ajuda.css" />
+  <script src="/frontend/js/pages/ajuda.js" defer></script>
+  <link rel="stylesheet" href="/frontend/css/campos-longos.css?v=20260614-global-inline" />
+  <script src="/frontend/js/shared/campos-longos.js?v=20260614-global-inline" defer></script>
+  <link rel="stylesheet" href="/frontend/css/layout-compacto.css?v=20260615-tipografia-sem-centralizar" />
+  <link rel="stylesheet" href="/frontend/css/responsivo-global.css?v=20260615-mobile-real">
+  <link rel="stylesheet" href="/frontend/css/dark-chatgpt-fix.css?v=20260630-dark-v7" />
+</head>
+<body>
+  <div class="layout">
+    <iframe src="/frontend/partials/sidebar.html?v=20260615-menu-fix" class="sidebar-frame" title="Menu lateral"></iframe>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <span class="eyebrow">Suporte</span>
+          <h1>Central de Ajuda</h1>
+        </div>
+      </header>
+
+      <div class="help-layout">
+        
+        <div class="help-col-main">
+          <article class="panel-card">
+            <div class="panel-head">
+              <h3>Perguntas Frequentes</h3>
+              <p>Respostas rápidas para as dúvidas mais comuns sobre o Valora CRM.</p>
+            </div>
+            
+            <div class="faq-accordion">
+              <div class="faq-item">
+                <button class="faq-question">
+                  <span>Como crio campos personalizados para meus clientes?</span>
+                  <i class="fa-solid fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                  <p>Acesse o menu <strong>Clientes</strong> e clique no botão superior <strong>"Novo campo"</strong>. Você poderá escolher se a resposta será um texto curto, um número, uma data ou até mesmo uma lista de opções pré-definidas. Esses campos aparecerão sempre que você cadastrar um novo cliente.</p>
+                </div>
+              </div>
+
+              <div class="faq-item">
+                <button class="faq-question">
+                  <span>Como altero entre o Modo Claro e o Modo Escuro?</span>
+                  <i class="fa-solid fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                  <p>Acesse o menu <strong>Configurações</strong> na barra lateral esquerda. Lá, na seção "Aparência", você encontrará um menu para escolher o seu tema preferido. O sistema salvará sua escolha automaticamente.</p>
+                </div>
+              </div>
+
+              <div class="faq-item">
+                <button class="faq-question">
+                  <span>Como atualizo minha foto de perfil e senha?</span>
+                  <i class="fa-solid fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                  <p>Clique no seu nome/foto lá no canto inferior esquerdo do menu principal e selecione <strong>"Meu Perfil"</strong>. Nesta tela, você poderá fazer o upload de uma nova foto, atualizar seus dados de contato e redefinir sua senha com segurança.</p>
+                </div>
+              </div>
+
+              <div class="faq-item">
+                <button class="faq-question">
+                  <span>Posso importar meus clientes de uma planilha do Excel?</span>
+                  <i class="fa-solid fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                  <p>Sim! Na tela de <strong>Clientes</strong>, clique no botão <strong>"Importar"</strong>. O sistema aceita planilhas nos formatos .XLSX e .CSV, além de arquivos .JSON. O sistema automaticamente associará os cabeçalhos da sua planilha aos campos do sistema.</p>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div class="help-col-side">
+          <article class="panel-card support-card">
+            <div class="support-icon">
+              <i class="fa-solid fa-headset"></i>
+            </div>
+            <h3>Precisa de ajuda humana?</h3>
+            <p>Nossa equipe de especialistas está pronta para te ajudar com qualquer desafio na plataforma.</p>
+            
+            <div class="support-info">
+              <div class="support-detail">
+                <i class="fa-regular fa-clock"></i>
+                <span>Segunda a Sexta, 09h às 18h</span>
+              </div>
+              <div class="support-detail">
+                <i class="fa-solid fa-bolt"></i>
+                <span>Tempo médio de resposta: 5 min</span>
+              </div>
+            </div>
+
+            <a href="https://wa.me/5512991865418?text=Olá!%20Preciso%20de%20ajuda%20com%20o%20Valora%20CRM." target="_blank" class="btn btn-whatsapp">
+              <i class="fa-brands fa-whatsapp"></i>
+              Chamar no WhatsApp
+            </a>
+          </article>
+        </div>
+
+      </div>
+    </main>
+  </div>
+</body>
+</html>

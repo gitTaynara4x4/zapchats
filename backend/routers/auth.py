@@ -189,6 +189,19 @@ def _is_active_obj(obj: Any) -> bool:
     return True
 
 
+
+
+def _usuario_is_admin(user: Any) -> bool:
+    """Retorna True somente para usuários administrativos reais.
+
+    Importante: colaborador criado em /colaboradores também pode ter registro
+    em usuarios para login, mas deve continuar is_admin=False.
+    """
+    try:
+        return bool(getattr(user, "is_admin", False))
+    except Exception:
+        return False
+
 def _mask_secret(v: str | None) -> str:
     if not v:
         return ""
@@ -362,14 +375,16 @@ def _ensure_admin_colaborador(
     user: "models.Usuario",
 ) -> Optional["models.Colaborador"]:
     """
-    Garante que todo usuário admin tenha um colaborador operacional vinculado.
+    Garante colaborador operacional somente para usuário admin real.
 
-    Regra:
-    - primeiro tenta por usuario_id
-    - depois reaproveita colaborador da mesma empresa com mesmo e-mail
-    - se não existir, cria automaticamente
+    Colaboradores comuns também podem ter registro em usuarios para login,
+    mas NUNCA podem cair neste fluxo, senão viram admin e podem ser recriados
+    após exclusão.
     """
     if not user or not getattr(user, "empresa_id", None):
+        return None
+
+    if not _usuario_is_admin(user):
         return None
 
     colab = None
@@ -413,7 +428,7 @@ def _ensure_admin_colaborador(
             "nome": (user.nome or "Administrador").strip(),
             "email": (user.email or "").strip().lower(),
             "senha": user.senha_hash,
-            "cargo": "admin",
+            "cargo": "Administrador",
             "telefone": None,
         }
 
@@ -445,8 +460,9 @@ def _ensure_admin_colaborador(
         colab.email = email_user
         changed = True
 
-    if (getattr(colab, "cargo", None) or "").strip().lower() != "admin":
-        colab.cargo = "admin"
+    # Mantém um cargo legível no cadastro, mas admin real vem de usuarios.is_admin.
+    if (getattr(colab, "cargo", None) or "").strip().lower() in ("", "admin"):
+        colab.cargo = "Administrador"
         changed = True
 
     if getattr(colab, "senha", None) != user.senha_hash:
@@ -480,11 +496,17 @@ def _admin_token_payload(db: Session, user: "models.Usuario") -> dict:
 def _colab_token_payload(colaborador: "models.Colaborador") -> dict:
     colab_id = int(colaborador.id)
     empresa_id = int(colaborador.empresa_id)
+    role = (getattr(colaborador, "cargo", None) or "colaborador").strip() or "colaborador"
+
+    # Segurança: cargo textual não pode virar papel administrativo no token.
+    if role.lower() in ("admin", "administrador", "owner", "dono", "root"):
+        role = "colaborador"
 
     return {
         "sub": f"colab-{colab_id}",
         "empresa_id": empresa_id,
-        "role": colaborador.cargo,
+        "role": role,
+        "is_admin": False,
         "usuario_id": getattr(colaborador, "usuario_id", None),
         "colaborador_id": colab_id,
         "id_colab": colab_id,
@@ -809,7 +831,10 @@ def get_current_identity(
                 "Fora do horário permitido de acesso para este colaborador.",
             )
 
-        is_admin = (role == "admin") or ((colab.cargo or "").lower() == "admin")
+        is_admin = False
+        role_safe = (colab.cargo or role or "colaborador").strip() or "colaborador"
+        if role_safe.lower() in ("admin", "administrador", "owner", "dono", "root"):
+            role_safe = "colaborador"
 
         perms: list[str] = []
         try:
@@ -847,7 +872,7 @@ def get_current_identity(
             "empresa_id": colab.empresa_id,
             "nome": colab.nome,
             "email": colab.email,
-            "role": colab.cargo or role or "colaborador",
+            "role": role_safe,
             "is_admin": is_admin,
             "permissoes": perms,
         }
@@ -863,6 +888,9 @@ def get_current_identity(
 
     if not _is_active_obj(user):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Usuário inativo ou bloqueado")
+
+    if not _usuario_is_admin(user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Este usuário não é administrador. Faça login como colaborador.")
 
     _ensure_empresa_exists_and_active(db, user.empresa_id)
 
@@ -975,6 +1003,9 @@ def get_current_user(
     if not _is_active_obj(user):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Usuário inativo ou bloqueado")
 
+    if not _usuario_is_admin(user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Apenas administradores")
+
     _ensure_empresa_exists_and_active(db, user.empresa_id)
 
     return user
@@ -1032,7 +1063,7 @@ def login(
         )
 
     user = _find_usuario_by_email(db, email)
-    if user and _is_active_obj(user) and verify_pwd(form.senha, user.senha_hash):
+    if user and _usuario_is_admin(user) and _is_active_obj(user) and verify_pwd(form.senha, user.senha_hash):
         reset_fail(db, email, ip)
 
         _ensure_empresa_exists_and_active(db, user.empresa_id)
@@ -1069,7 +1100,7 @@ def login(
             "csrf_token": csrf_token,
             "empresa_id": user.empresa_id,
             "nome": user.nome,
-            "cargo": "admin",
+            "cargo": "Administrador",
             "is_admin": True,
             "colaborador_id": int(admin_colab.id) if admin_colab else None,
         }
@@ -1146,7 +1177,7 @@ def login(
             "empresa_id": colaborador.empresa_id,
             "nome": colaborador.nome,
             "cargo": colaborador.cargo,
-            "is_admin": (colaborador.cargo or "").lower() == "admin",
+            "is_admin": False,
             "colaborador_id": colaborador.id,
         }
 
@@ -1244,7 +1275,7 @@ def confirmar_login_token(
         "empresa_id": colaborador.empresa_id,
         "nome": colaborador.nome,
         "cargo": colaborador.cargo,
-        "is_admin": (colaborador.cargo or "").lower() == "admin",
+        "is_admin": False,
         "colaborador_id": colaborador.id,
     }
 
@@ -1305,6 +1336,9 @@ def refresh_token(
         user = db.query(models.Usuario).filter(models.Usuario.id == user_id).first()
         if not user or not _is_active_obj(user):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Usuário não encontrado")
+
+        if not _usuario_is_admin(user):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Este usuário não é administrador. Faça login como colaborador.")
 
         _ensure_empresa_exists_and_active(db, user.empresa_id)
 

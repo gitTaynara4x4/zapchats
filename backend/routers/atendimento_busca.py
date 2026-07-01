@@ -6,6 +6,8 @@ import os
 import re
 import unicodedata
 import requests
+import io
+import time
 from urllib.parse import quote
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
@@ -45,6 +47,21 @@ router = APIRouter(tags=["Atendimento – Perfil / Evolution & Busca/Arquivo"])
 EVOLUTION_URL = (os.getenv("EVOLUTION_URL", "").rstrip("/"))
 EVOLUTION_KEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_KEY")
 HEADERS = {"apikey": EVOLUTION_KEY, "Content-Type": "application/json"} if EVOLUTION_KEY else {}
+
+# Cache pequeno de avatar em memória.
+# Evita baixar/decodificar a mesma foto toda hora quando a lista renderiza.
+_AVATAR_BINARY_CACHE: dict[str, tuple[float, bytes, str]] = {}
+_AVATAR_BINARY_CACHE_TTL = int(os.getenv("ZC_AVATAR_CACHE_TTL_SECONDS", "3600") or "3600")
+_AVATAR_BINARY_CACHE_MAX = int(os.getenv("ZC_AVATAR_CACHE_MAX", "250") or "250")
+_AVATAR_DOWNLOAD_MAX_BYTES = int(os.getenv("ZC_AVATAR_DOWNLOAD_MAX_BYTES", "1800000") or "1800000")
+_AVATAR_OUTPUT_MAX_PX = int(os.getenv("ZC_AVATAR_OUTPUT_MAX_PX", "112") or "112")
+
+try:
+    from PIL import Image, ImageOps  # type: ignore
+except Exception:  # pragma: no cover
+    Image = None  # type: ignore
+    ImageOps = None  # type: ignore
+
 
 
 # =========================================================
@@ -695,9 +712,91 @@ def _resolve_instance_name_for_grupo(
 # =========================================================
 # Download/avatar
 # =========================================================
+def _avatar_cache_get(url: str) -> Optional[Tuple[bytes, str]]:
+    try:
+        item = _AVATAR_BINARY_CACHE.get(url)
+        if not item:
+            return None
+        ts, content, content_type = item
+        if time.time() - float(ts) > _AVATAR_BINARY_CACHE_TTL:
+            _AVATAR_BINARY_CACHE.pop(url, None)
+            return None
+        return content, content_type
+    except Exception:
+        return None
+
+
+def _avatar_cache_set(url: str, content: bytes, content_type: str) -> None:
+    try:
+        if len(_AVATAR_BINARY_CACHE) >= _AVATAR_BINARY_CACHE_MAX:
+            # remove os mais antigos
+            for k, _v in sorted(_AVATAR_BINARY_CACHE.items(), key=lambda kv: kv[1][0])[:40]:
+                _AVATAR_BINARY_CACHE.pop(k, None)
+        _AVATAR_BINARY_CACHE[url] = (time.time(), content, content_type)
+    except Exception:
+        pass
+
+
+def _optimize_avatar_binary(content: bytes, content_type: str) -> Tuple[bytes, str]:
+    """
+    Reduz avatar para um tamanho pequeno, estilo WhatsApp Web.
+    Isso evita que o Chrome decodifique foto enorme só para mostrar uma bolinha de 48px.
+    Se Pillow não estiver disponível, devolve a imagem original apenas se ela for pequena.
+    """
+    if not content:
+        return content, content_type
+
+    ct = str(content_type or "image/jpeg").lower()
+
+    # SVG não passa pelo Pillow; se for pequeno, mantém.
+    if "svg" in ct:
+        return content[:120_000], "image/svg+xml"
+
+    if Image is None:
+        # Sem Pillow, evita devolver arquivos gigantes.
+        if len(content) > 220_000:
+            return b"", ""
+        return content, content_type
+
+    try:
+        im = Image.open(io.BytesIO(content))
+        im = ImageOps.exif_transpose(im)
+        im.thumbnail((_AVATAR_OUTPUT_MAX_PX, _AVATAR_OUTPUT_MAX_PX))
+
+        if im.mode not in {"RGB", "L"}:
+            bg = Image.new("RGB", im.size, (255, 255, 255))
+            try:
+                bg.paste(im, mask=im.getchannel("A"))
+            except Exception:
+                bg.paste(im.convert("RGB"))
+            im = bg
+        else:
+            im = im.convert("RGB")
+
+        out = io.BytesIO()
+        im.save(out, format="JPEG", quality=78, optimize=True, progressive=False)
+        data = out.getvalue()
+        if data:
+            return data, "image/jpeg"
+    except Exception:
+        pass
+
+    if len(content) > 220_000:
+        return b"", ""
+    return content, content_type
+
+
 def _download_avatar_binary(url: str) -> Optional[Tuple[bytes, str]]:
     if not url:
         return None
+
+    # Agora o padrão permite avatar; o front carrega de forma preguiçosa e o backend comprime/cacheia.
+    if str(os.getenv('ZC_DISABLE_REMOTE_AVATARS', 'false')).lower() in {'1', 'true', 'yes', 'sim'}:
+        return None
+
+    cached = _avatar_cache_get(url)
+    if cached is not None:
+        return cached
 
     headers = {}
 
@@ -705,19 +804,44 @@ def _download_avatar_binary(url: str) -> Optional[Tuple[bytes, str]]:
         headers = {"apikey": EVOLUTION_KEY}
 
     try:
-        r = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+        r = requests.get(url, headers=headers, timeout=(4, 12), allow_redirects=True, stream=True)
     except Exception:
         return None
 
-    if r.status_code != 200 or not r.content:
-        return None
+    try:
+        if r.status_code != 200:
+            return None
 
-    content_type = r.headers.get("content-type") or "image/jpeg"
+        content_type = r.headers.get("content-type") or "image/jpeg"
 
-    if not str(content_type).lower().startswith("image/"):
-        return None
+        if not str(content_type).lower().startswith("image/"):
+            return None
 
-    return r.content, content_type
+        chunks: list[bytes] = []
+        total = 0
+        for chunk in r.iter_content(chunk_size=32_768):
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > _AVATAR_DOWNLOAD_MAX_BYTES:
+                return None
+            chunks.append(chunk)
+
+        content = b"".join(chunks)
+        if not content:
+            return None
+
+        content, content_type = _optimize_avatar_binary(content, content_type)
+        if not content or not content_type:
+            return None
+
+        _avatar_cache_set(url, content, content_type)
+        return content, content_type
+    finally:
+        try:
+            r.close()
+        except Exception:
+            pass
 
 
 def _avatar_response_from_url(raw_url: str | None):
@@ -731,7 +855,7 @@ def _avatar_response_from_url(raw_url: str | None):
 
     content, content_type = downloaded
     resp = Response(content=content, media_type=content_type)
-    resp.headers["Cache-Control"] = "private, max-age=3600"
+    resp.headers["Cache-Control"] = "private, max-age=43200"
     return resp
 
 

@@ -24,7 +24,9 @@ import { cacheGet, cacheSet, cacheDel } from '../core/cache.js';
   - não estoura memória;
   - histórico antigo continua vindo do banco quando precisar.
 */
-const HIST_MAX_MESSAGES = Number(window.ZC_HIST_MAX_MESSAGES || 80);
+const HIST_MAX_MESSAGES = Number(
+  window.ZC_HIST_MAX_MESSAGES || (window.ZC_LOW_RAM_MODE ? 50 : 80)
+);
 
 /*
   Tempo que o histórico fica salvo no localStorage.
@@ -46,15 +48,15 @@ const HIST_CURSOR_TTL_MS = Number(
   Isso impede o window.cacheHistoricos de virar um monstro.
 */
 const HIST_MIRROR_MAX_CONVERSAS = Number(
-  window.ZC_HIST_MIRROR_MAX_CONVERSAS || 6
+  window.ZC_HIST_MIRROR_MAX_CONVERSAS || (window.ZC_LOW_RAM_MODE ? 2 : 6)
 );
 
 /*
   Se algum cache antigo estiver gigante, limpa automaticamente.
 */
 const HIST_BIG_CACHE_BYTES = Number(
-  window.ZC_HIST_BIG_CACHE_BYTES || 1_500_000
-); // ~1.5 MB por chave
+  window.ZC_HIST_BIG_CACHE_BYTES || (window.ZC_LOW_RAM_MODE ? 300000 : 1_500_000)
+); // por chave
 
 /*
   Por padrão vamos remover cache legado de histórico.
@@ -99,7 +101,12 @@ function clampInt(v, min, max, fallback) {
   return Math.max(min, Math.min(max, n));
 }
 
-const MAX_MESSAGES_SAFE = clampInt(HIST_MAX_MESSAGES, 30, 180, 80);
+const MAX_MESSAGES_SAFE = clampInt(
+  HIST_MAX_MESSAGES,
+  20,
+  180,
+  window.ZC_LOW_RAM_MODE ? 50 : 80
+);
 
 function _norm(v) {
   return (v ?? '').toString().trim();

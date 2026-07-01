@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Produtos | Valora CRM</title>
+
+  <script>
+    (() => {
+      const savedTheme = localStorage.getItem("valora_theme") || "light";
+      document.documentElement.setAttribute("data-theme", savedTheme);
+    })();
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <link rel="stylesheet" href="/frontend/css/app.css?v=20260630-dark-chatgpt-v6" />
+  <link rel="stylesheet" href="/frontend/css/validacao.css?v=20260614-required-circle" />
+  <link rel="stylesheet" href="/frontend/css/ficha-principal.css?v=20260627-sidebar-icons-v2" />
+  <link rel="stylesheet" href="/frontend/css/produtos.css?v=20260627-sidebar-icons-v2" />
+  <link rel="stylesheet" href="/frontend/css/forms-respiro.css?v=20260614-bitrix-layout" />
+  <link rel="stylesheet" href="/frontend/css/campos-longos.css?v=20260614-global-inline" />
+  <link rel="stylesheet" href="/frontend/css/layout-compacto.css?v=20260615-tipografia-sem-centralizar" />
+  <link rel="stylesheet" href="/frontend/css/responsivo-global.css?v=20260615-mobile-real">
+  <link rel="stylesheet" href="/frontend/css/ficha-principal-ajustes.css?v=20260630-ficha-sidebar-v5" />
+
+  <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="/frontend/js/pages/app.js?v=20260617-modal-unificado-real" defer></script>
+  <script src="/frontend/js/shared/validacao.js?v=20260614-required-circle" defer></script>
+  <script src="/frontend/js/shared/ficha-principal.js?v=20260630-ficha-sidebar-v5" defer></script>
+  <script src="/frontend/js/shared/campos-longos.js?v=20260614-global-inline" defer></script>
+  <script src="/frontend/js/pages/produtos.js?v=20260630-readonly-v5" defer></script>
+  <link rel="stylesheet" href="/frontend/css/dark-chatgpt-fix.css?v=20260630-dark-v7" />
+</head>
+
+<body>
+  <div class="layout">
+    <iframe src="/frontend/partials/sidebar.html?v=20260615-menu-fix" class="sidebar-frame" title="Menu lateral" loading="eager"></iframe>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <span class="eyebrow">Catálogo</span>
+          <h1>Produtos</h1>
+        </div>
+
+        <div class="topbar-actions">
+          <button class="btn btn-secondary" type="button" id="btn-importar-produtos">
+            <i class="fa-solid fa-file-import"></i> Importar
+          </button>
+
+          <button class="btn btn-secondary" type="button" id="btn-exportar-produtos-csv">
+            <i class="fa-solid fa-file-csv"></i> Exportar CSV
+          </button>
+
+          <button class="btn btn-secondary" type="button" id="btn-exportar-produtos-json">
+            <i class="fa-solid fa-file-code"></i> Exportar JSON
+          </button>
+
+          <button class="btn btn-secondary" type="button" id="btn-gerenciar-formulario-produto">
+            <i class="fa-solid fa-sliders"></i> Gerenciar formulário
+          </button>
+
+          <button class="btn btn-primary" type="button" id="btn-novo-produto">
+            <i class="fa-solid fa-box-open"></i> Novo produto
+          </button>
+
+          <input
+            id="input-importar-produtos"
+            type="file"
+            accept=".json,.csv,.xlsx,text/csv,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            hidden
+          />
+        </div>
+      </header>
+
+      <article class="panel-card produtos-filter-card">
+        <div class="panel-head">
+          <h3>Localizar produtos</h3>
+          <p>Filtro rápido por nome, código, categoria, descrição e campos da ficha.</p>
+        </div>
+
+        <div class="search-row">
+          <div class="search-box">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input id="busca-produtos" type="text" placeholder="Buscar por nome, código, categoria..." autocomplete="off" />
+          </div>
+
+          <span id="contagem-produtos" class="counter-text">0 produtos</span>
+        </div>
+      </article>
+
+      <article class="panel-card panel-card-table">
+        <div class="valora-table-wrapper">
+          <table class="valora-table">
+            <thead>
+              <tr>
+                <th>Código</th>
+                <th>Produto</th>
+                <th>Categoria</th>
+                <th>Preço</th>
+                <th>Estoque</th>
+                <th class="text-right">Ações</th>
+              </tr>
+            </thead>
+
+            <tbody id="tbody-produtos">
+              <tr>
+                <td colspan="6" class="empty-state">Carregando...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="table-pagination" id="paginacao-produtos"></div>
+      </article>
+
+      <div class="modal-overlay" id="modal-produto-backdrop" hidden>
+        <div class="modal-content modal-xl cliente-modal-content produto-modal-content" data-close-target="false">
+          <form class="valora-form cliente-modal-shell produto-modal-shell" id="formProduto" data-skip-valora-validation="true" onsubmit="return false;">
+            <aside class="cliente-modal-sidebar produto-modal-sidebar">
+              <div class="cliente-sidebar-top produto-sidebar-top">
+                <div class="cliente-sidebar-avatar produto-sidebar-avatar">
+                  <i class="fa-solid fa-box-open"></i>
+                </div>
+
+                <div class="cliente-sidebar-user produto-sidebar-user">
+                  <strong>Produto</strong>
+                  <span>Ficha do catálogo</span>
+                </div>
+              </div>
+
+              <nav class="cliente-tabs cliente-sidebar-nav produto-tabs produto-sidebar-nav" aria-label="Seções do produto">
+                <button type="button" class="cliente-tab-btn produto-tab-btn active" data-tab="tab-produto-dados">
+                  <i class="fa-solid fa-box-open"></i>
+                  <span>Dados nativos</span>
+                </button>
+
+                <button type="button" class="cliente-tab-btn produto-tab-btn" data-tab="tab-produto-ficha">
+                  <i class="fa-solid fa-layer-group"></i>
+                  <span>Campos personalizados</span>
+                </button>
+              </nav>
+
+              <div class="cliente-sidebar-bottom produto-sidebar-bottom">
+                <label class="produto-ficha-toggle ficha-principal-toggle">
+                  <input type="checkbox" id="toggle-ficha-principal-produto" />
+                  <span>
+                    <strong>Usar ficha principal</strong>
+                    <small>Marcar o formulário de Produtos como ficha principal.</small>
+                  </span>
+                </label>
+              </div>
+            </aside>
+
+            <section class="cliente-modal-main produto-modal-main">
+              <header class="cliente-modal-topbar produto-modal-topbar">
+                <div>
+                  <span class="section-kicker">Cadastro de produto</span>
+                  <h3 id="modal-produto-titulo">Novo produto</h3>
+                  <p id="produto-formulario-descricao-topo">Ficha carregada do construtor de formulários.</p>
+                </div>
+
+                <div class="cliente-modal-top-actions produto-modal-top-actions">
+                  <span class="cliente-status-pill produto-status-pill">
+                    <i class="fa-solid fa-circle"></i>
+                    Catálogo
+                  </span>
+
+                  <button class="btn-close" type="button" id="btn-fechar-modal-produto" title="Fechar">
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+              </header>
+
+              <div class="cliente-modal-scroll produto-modal-scroll">
+                <section class="cliente-tab produto-tab active" id="tab-produto-dados">
+                  <article class="section-card cliente-main-card produto-main-card produto-native-card">
+                    <div class="cliente-section-head produto-section-head">
+                      <div>
+                        <span class="section-kicker">Campos nativos</span>
+                        <h4>Dados do produto</h4>
+                        <p>Esses campos são fixos do sistema e aparecem na lista, busca, preço e estoque.</p>
+                      </div>
+                    </div>
+
+                    <div class="produto-native-grid">
+                      <div class="form-group">
+                        <label for="campo-codigo-produto">Código</label>
+                        <input
+                          type="text"
+                          id="campo-codigo-produto"
+                          inputmode="numeric"
+                          pattern="[0-9]*"
+                          readonly
+                          placeholder="Gerado ao salvar"
+                        />
+                      </div>
+
+                      <div class="form-group span-2">
+                        <label for="campo-nome-produto">Nome do produto *</label>
+                        <input
+                          type="text"
+                          id="campo-nome-produto"
+                          placeholder="Ex.: Cabo CFTV 4mm"
+                          data-required="true"
+                          required
+                        />
+                      </div>
+
+                      <div class="form-group">
+                        <label for="campo-ativo-produto">Status</label>
+                        <select id="campo-ativo-produto">
+                          <option value="true">Ativo</option>
+                          <option value="false">Inativo</option>
+                        </select>
+                      </div>
+
+                      <div class="form-group">
+                        <label for="campo-categoria-produto">Categoria</label>
+                        <input type="text" id="campo-categoria-produto" placeholder="Ex.: CFTV" />
+                      </div>
+
+                      <div class="form-group">
+                        <label for="campo-unidade-produto">Unidade</label>
+                        <input type="text" id="campo-unidade-produto" placeholder="Un, cx, m..." />
+                      </div>
+
+                      <div class="form-group">
+                        <label for="campo-preco-venda-produto">Preço de venda</label>
+                        <input type="text" id="campo-preco-venda-produto" inputmode="decimal" placeholder="0,00" />
+                      </div>
+
+                      <div class="form-group">
+                        <label for="campo-custo-produto">Custo</label>
+                        <input type="text" id="campo-custo-produto" inputmode="decimal" placeholder="0,00" />
+                      </div>
+
+                      <div class="form-group">
+                        <label for="campo-estoque-atual-produto">Estoque atual</label>
+                        <input type="text" id="campo-estoque-atual-produto" inputmode="decimal" placeholder="0" />
+                      </div>
+
+                      <div class="form-group span-all">
+                        <label for="campo-descricao-produto">Descrição</label>
+                        <textarea
+                          id="campo-descricao-produto"
+                          rows="3"
+                          placeholder="Descrição, detalhes técnicos ou observações do produto."></textarea>
+                      </div>
+                    </div>
+                  </article>
+                </section>
+
+                <section class="cliente-tab produto-tab" id="tab-produto-ficha">
+                  <article class="produto-ficha-code-card ficha-principal-code-card" id="produto-ficha-principal-code" hidden>
+                    <div>
+                      <span class="section-kicker">Código do sistema</span>
+                      <h4>Código do produto</h4>
+                      <p>Este código é gerado pelo próprio sistema e não pode ser removido da ficha.</p>
+                    </div>
+
+                    <div class="ficha-principal-system-fields">
+                      <div class="form-group produto-ficha-code-field ficha-principal-code-field">
+                        <label for="campo-codigo-ficha-principal-produto">Código</label>
+                        <input type="text" id="campo-codigo-ficha-principal-produto" inputmode="numeric" pattern="[0-9]*" readonly placeholder="Gerado ao salvar" />
+                      </div>
+
+                      <div class="form-group ficha-principal-date-field">
+                        <label for="campo-data-cadastro-ficha-principal-produto">Data de cadastro</label>
+                        <input type="text" id="campo-data-cadastro-ficha-principal-produto" readonly placeholder="Gerada ao salvar" />
+                      </div>
+                    </div>
+                  </article>
+
+                  <article class="section-card cliente-main-card produto-main-card custom-fields-card produto-ficha-card">
+                    <div class="cliente-section-head produto-section-head custom-fields-head">
+                      <div>
+                        <span class="section-kicker">Formulário configurado</span>
+                        <h4 id="produto-formulario-nome">Ficha do produto</h4>
+                        <p id="produto-formulario-descricao">Cadastro completo do produto organizado por seções.</p>
+                      </div>
+
+                      <button class="btn btn-secondary btn-sm" type="button" id="btn-atualizar-formulario-produto">
+                        <i class="fa-solid fa-rotate-right"></i> Atualizar ficha
+                      </button>
+                    </div>
+
+                    <div class="custom-fields-info produto-custom-info">
+                      <i class="fa-solid fa-layer-group"></i>
+                      <span>Os campos abaixo vêm do construtor de formulários do módulo Produtos.</span>
+                    </div>
+
+                    <div id="custom-fields-container" class="custom-fields-container custom-form-sections">
+                      <div class="empty-state">Carregando ficha do produto...</div>
+                    </div>
+                  </article>
+                </section>
+              </div>
+
+              <footer class="footer-actions modal-client-footer produto-modal-footer">
+                <button class="btn btn-secondary" type="button" id="btn-cancelar-produto">Cancelar</button>
+
+                <button class="btn btn-primary" type="button" id="btn-salvar-produto" data-skip-valora-validation="true">
+                  <i class="fa-solid fa-floppy-disk"></i> Salvar produto
+                </button>
+              </footer>
+            </section>
+          </form>
+        </div>
+      </div>
+
+      <div class="modal-overlay" id="Valora-confirm-backdrop" hidden>
+        <div class="modal-content modal-sm confirm-modal">
+          <div class="modal-body">
+            <i class="fa-solid fa-triangle-exclamation confirm-icon"></i>
+
+            <h3 id="Valora-confirm-title">Confirmar</h3>
+            <p id="Valora-confirm-message"></p>
+
+            <div class="confirm-actions">
+              <button class="btn btn-secondary" type="button" id="Valora-confirm-cancel">Cancelar</button>
+              <button class="btn btn-primary danger-action" type="button" id="Valora-confirm-ok">Excluir</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="valora-toast" class="toast-message" aria-live="polite"></div>
+    </main>
+  </div>
+</body>
+</html>

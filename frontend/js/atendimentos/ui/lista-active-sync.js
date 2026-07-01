@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 'zc-lista-active-sync-v4-avatar-circle-only';
+  const VERSION = 'zc-lista-active-sync-v5-no-mutation-loop';
 
   if (window.__ZC_LISTA_ACTIVE_SYNC__ === VERSION) return;
   window.__ZC_LISTA_ACTIVE_SYNC__ = VERSION;
@@ -19,6 +19,11 @@
     'avatar-color-5',
     'avatar-color-6',
   ];
+
+  // Evita loop mortal:
+  // observer da lista via mudança de class -> sync -> muda class -> observer -> sync...
+  let isSyncingActiveList = false;
+  let scheduledTimer = 0;
 
   function $(sel, root = document) {
     return root.querySelector(sel);
@@ -281,8 +286,27 @@
       });
   }
 
-  function clearActive() {
+  function hasAnyActiveClass(el) {
+    return !!(
+      el &&
+      (
+        el.classList.contains('active') ||
+        el.classList.contains('ativo') ||
+        el.classList.contains('is-active') ||
+        el.classList.contains('chat-active') ||
+        el.classList.contains('selected') ||
+        el.classList.contains('is-selected') ||
+        el.getAttribute('aria-current') === 'true' ||
+        el.getAttribute('aria-selected') === 'true'
+      )
+    );
+  }
+
+  function clearActive(exceptEl = null) {
     getListItems().forEach((el) => {
+      if (!el || el === exceptEl) return;
+      if (!hasAnyActiveClass(el)) return;
+
       el.classList.remove(
         'active',
         'ativo',
@@ -292,17 +316,19 @@
         'is-selected'
       );
 
-      el.removeAttribute('aria-current');
-      el.setAttribute('aria-selected', 'false');
+      if (el.hasAttribute('aria-current')) el.removeAttribute('aria-current');
+      if (el.getAttribute('aria-selected') !== 'false') el.setAttribute('aria-selected', 'false');
     });
   }
 
   function markElementActive(el) {
     if (!el) return;
 
-    el.classList.add('active', 'is-active', 'chat-active');
-    el.setAttribute('aria-current', 'true');
-    el.setAttribute('aria-selected', 'true');
+    if (!el.classList.contains('active')) el.classList.add('active');
+    if (!el.classList.contains('is-active')) el.classList.add('is-active');
+    if (!el.classList.contains('chat-active')) el.classList.add('chat-active');
+    if (el.getAttribute('aria-current') !== 'true') el.setAttribute('aria-current', 'true');
+    if (el.getAttribute('aria-selected') !== 'true') el.setAttribute('aria-selected', 'true');
   }
 
   function getAvatarColorClassFromItem(item) {
@@ -444,16 +470,34 @@
       }
     }
 
-    clearActive();
+    if (isSyncingActiveList) return;
 
-    if (found) {
-      markElementActive(found);
-      applyAvatarColorToHeaderFromItem(found);
+    try {
+      isSyncingActiveList = true;
+
+      clearActive(found);
+
+      if (found) {
+        markElementActive(found);
+        applyAvatarColorToHeaderFromItem(found);
+      }
+    } finally {
+      setTimeout(() => { isSyncingActiveList = false; }, 0);
     }
   }
 
   function scheduleSync(ms = 0) {
-    setTimeout(syncActiveListItem, ms);
+    const delay = Math.max(0, Number(ms || 0));
+
+    if (scheduledTimer) {
+      clearTimeout(scheduledTimer);
+      scheduledTimer = 0;
+    }
+
+    scheduledTimer = setTimeout(() => {
+      scheduledTimer = 0;
+      syncActiveListItem();
+    }, delay);
   }
 
   function bindEvents() {
@@ -498,63 +542,45 @@
 
       if (!item) return;
 
-      clearActive();
-      markElementActive(item);
-      applyAvatarColorToHeaderFromItem(item);
+      try {
+        isSyncingActiveList = true;
+        clearActive(item);
+        markElementActive(item);
+        applyAvatarColorToHeaderFromItem(item);
+      } finally {
+        setTimeout(() => { isSyncingActiveList = false; }, 0);
+      }
 
-      scheduleSync(80);
       scheduleSync(250);
-      scheduleSync(600);
-      scheduleSync(1200);
     }, true);
 
     const list = $('#lista-clientes');
     if (list) {
       const obs = new MutationObserver(() => {
-        scheduleSync(0);
+        if (isSyncingActiveList) return;
         scheduleSync(120);
-        scheduleSync(400);
-        scheduleSync(900);
       });
 
       obs.observe(list, {
         childList: true,
-        subtree: true,
+        subtree: false,
         attributes: true,
+        // Não observar class: este próprio módulo muda classes active/is-active.
+        // Observar class aqui criava loop infinito e fazia a aba bater 3GB/5GB.
         attributeFilter: [
           'data-conversation-key',
           'data-conversation-id',
           'data-chat-key',
           'data-cliente-id',
           'data-grupo-id',
-          'class',
-        ],
-      });
-    }
-
-    const header = $('#chat-header');
-    if (header) {
-      const obsHeader = new MutationObserver(() => {
-        scheduleSync(0);
-        scheduleSync(80);
-        scheduleSync(300);
-      });
-
-      obsHeader.observe(header, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: [
-          'data-conversation-key',
-          'data-conversation-id',
-          'data-conv-key',
-          'data-cliente-id',
-          'data-grupo-id',
           'data-instancia-id',
-          'class',
         ],
       });
     }
+
+    // Removido observer do header.
+    // Ele observava class/subtree e o próprio sync mudava classe/estilo do avatar,
+    // gerando repaint e loops em algumas máquinas. Eventos acima já cobrem troca de conversa.
   }
 
   function init() {

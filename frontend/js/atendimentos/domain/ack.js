@@ -156,7 +156,22 @@ const _ackObserver = new MutationObserver(muts=>{
     }
   }
 });
-try{ _ackObserver.observe(document.documentElement, { childList:true, subtree:true }); }catch{}
+try{
+  if (window.ZC_DISABLE_GLOBAL_ACK_OBSERVER === true) {
+    const bindAckHist = () => {
+      const h = document.getElementById('historico');
+      if (h && !h.__zcAckObserverBound) {
+        h.__zcAckObserverBound = true;
+        _ackObserver.observe(h, { childList:true, subtree:true });
+      }
+    };
+    document.addEventListener('historico:rendered', bindAckHist);
+    document.addEventListener('historico:ready', bindAckHist);
+    bindAckHist();
+  } else {
+    _ackObserver.observe(document.documentElement, { childList:true, subtree:true });
+  }
+}catch{}
 
 /* ============================ Globais ============================ */
 try{

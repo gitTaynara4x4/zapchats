@@ -156,6 +156,29 @@ function formatPhoneForHeader(v) {
   return n;
 }
 
+function looksLikePhoneOnlyForHeader(v) {
+  const s = cleanHeaderText(v);
+  if (!s) return false;
+
+  // Se tem letra, é nome/código de cliente, não telefone.
+  // Exemplo real: "000000/0104 - Guiomar /Antonio..." não pode virar "+55 00 0000-0104".
+  if (/[a-zÀ-ÿ]/i.test(s)) return false;
+
+  // Telefone puro pode ter só dígitos e pontuação comum de telefone.
+  if (!/^[+\d\s().\-]+$/.test(s)) return false;
+
+  const n = digitsOnly(s);
+  return n.length >= 8;
+}
+
+function firstCleanHeaderText(values = []) {
+  for (const raw of values) {
+    const text = cleanHeaderText(raw);
+    if (text) return text;
+  }
+  return '';
+}
+
 function headerTitleFromDom(ref = {}) {
   const ck = String(ref?.key || '').trim();
   const eid = String(ref?.entityId || '').trim();
@@ -194,12 +217,8 @@ function headerTitleFromDom(ref = {}) {
 function resolveHeaderTitle(cliente = {}, ref = {}) {
   const c = cliente || {};
 
-  const candidates = [
+  const nameCandidates = [
     c.nome,
-    c.nome_whatsapp,
-    c.nomeWhatsapp,
-    c.push_name,
-    c.pushName,
     c.cliente_nome,
     c.nome_cliente,
     c.contato_nome,
@@ -212,12 +231,30 @@ function resolveHeaderTitle(cliente = {}, ref = {}) {
     c.nomeExibicao,
     c.apelido,
     headerTitleFromDom(ref),
+    c.nome_whatsapp,
+    c.nomeWhatsapp,
+    c.push_name,
+    c.pushName,
+  ];
+
+  // Primeiro tenta nome de verdade. Não formata candidato de nome como telefone,
+  // porque muitos clientes têm código no início do nome: "000000/0104 - Guiomar...".
+  for (const raw of nameCandidates) {
+    const text = cleanHeaderText(raw);
+    if (!text) continue;
+    if (looksLikePhoneOnlyForHeader(text)) continue;
+    return text;
+  }
+
+  // Só depois usa telefone, e apenas nos campos que são realmente de telefone/JID.
+  const phoneCandidates = [
     c.telefone_fmt,
     c.cliente_telefone_fmt,
     c.telefone_formatado,
     c.phone_formatted,
     c.telefone,
     c.cliente_telefone,
+    c.tel,
     c.celular,
     c.whatsapp,
     c.numero,
@@ -228,16 +265,15 @@ function resolveHeaderTitle(cliente = {}, ref = {}) {
     c.remote_jid,
     c.remoteJid,
     c.jid,
+    firstCleanHeaderText(nameCandidates),
   ];
 
-  for (const raw of candidates) {
+  for (const raw of phoneCandidates) {
     const text = cleanHeaderText(raw);
     if (!text) continue;
 
     const phone = formatPhoneForHeader(text);
     if (phone) return phone;
-
-    return text;
   }
 
   if (ref?.entityId) return `Cliente #${ref.entityId}`;
@@ -816,6 +852,49 @@ function readyPart(key) {
   }
 }
 
+
+function setChatShellOpenState(open = true) {
+  try {
+    const main = document.getElementById('chat-main') || document.querySelector('main#chat-main');
+    const welcome = document.getElementById('welcome-screen');
+    const hist = document.getElementById('historico');
+    const head = document.getElementById('chat-header');
+    const foot = document.getElementById('chat-footer');
+
+    document.body.classList.toggle('has-open-chat', !!open);
+
+    if (main) {
+      main.classList.toggle('has-open-chat', !!open);
+      if (open) main.classList.add('whatsapp-auto-bg');
+    }
+
+    if (open) {
+      if (welcome) {
+        welcome.hidden = true;
+        welcome.style.setProperty('display', 'none', 'important');
+        welcome.setAttribute('aria-hidden', 'true');
+      }
+      if (head) {
+        head.hidden = false;
+        head.style.setProperty('display', 'flex', 'important');
+        head.removeAttribute('aria-hidden');
+      }
+      if (hist) {
+        hist.hidden = false;
+        hist.style.setProperty('display', 'flex', 'important');
+        hist.removeAttribute('aria-hidden');
+      }
+      if (foot) {
+        foot.hidden = false;
+        foot.style.setProperty('display', 'flex', 'important');
+        foot.removeAttribute('aria-hidden');
+      }
+    }
+  } catch (err) {
+    try { console.warn('[ZapsChat] setChatShellOpenState falhou:', err); } catch {}
+  }
+}
+
 function zcHardHideLoaders(reason = 'init') {
   try { window.PageLoading?.reset?.(); } catch {}
   try { window.PageLoading?.hide?.(); } catch {}
@@ -1203,7 +1282,8 @@ async function ensureMensagensCarregadas(conversationRef, opts = {}) {
   const promise = (async () => {
     const qs = new URLSearchParams({
       empresa_id: String(EMPRESA_ID),
-      limit: '50',
+      limit: String(window.ZC_HIST_OPEN_LIMIT || 12),
+      light: '1',
     });
 
     if (inst) {
@@ -1420,6 +1500,14 @@ function avatarDefaultHtml(ref = {}) {
   `;
 }
 
+function remoteAvatarsDisabled() {
+  try {
+    return window.ZC_DISABLE_REMOTE_AVATARS === true || window.ZC_MODO_ULTRA_LEVE_RAM === true;
+  } catch {
+    return true;
+  }
+}
+
 function avatarImageHtml(ref = {}, avatarUrl = '') {
   const safeUrl = escapeAttr(avatarUrl);
 
@@ -1473,9 +1561,13 @@ function setHeaderAvatarImage(ref, avatarUrl) {
   const av = document.getElementById('chat-avatar');
   if (!av || !ref?.key) return false;
 
+  if (remoteAvatarsDisabled()) {
+    return setHeaderAvatarDefault(ref);
+  }
+
   const url = String(avatarUrl || '').trim();
 
-  if (!url || (window.zcAvatarBroken && window.zcAvatarBroken(url))) {
+  if (!url || /^data:/i.test(url) || url.length > 1500 || (window.zcAvatarBroken && window.zcAvatarBroken(url))) {
     return setHeaderAvatarDefault(ref);
   }
 
@@ -1654,18 +1746,31 @@ async function selecionarClienteObj(id, opts = {}) {
       hist.dataset.noMore = '0';
     }
 
-    hist.style.display = 'block';
+    hist.style.setProperty('display', 'flex', 'important');
+    hist.hidden = false;
+    hist.removeAttribute('aria-hidden');
     setConversationDatasets(hist, ref);
   }
 
-  if (ws) ws.style.display = 'none';
+  if (ws) {
+    ws.hidden = true;
+    ws.style.setProperty('display', 'none', 'important');
+    ws.setAttribute('aria-hidden', 'true');
+  }
 
   if (head) {
-    head.style.display = 'flex';
+    head.hidden = false;
+    head.style.setProperty('display', 'flex', 'important');
     setConversationDatasets(head, ref);
   }
 
-  if (foot) foot.style.display = 'flex';
+  if (foot) {
+    foot.hidden = false;
+    foot.style.setProperty('display', 'flex', 'important');
+    foot.removeAttribute('aria-hidden');
+  }
+
+  setChatShellOpenState(true);
 
   readyPart('ui');
 
@@ -1763,7 +1868,7 @@ async function selecionarClienteObj(id, opts = {}) {
     av.style.cursor = 'pointer';
   }
 
-  const avatarUrl = c.avatar_url ? String(c.avatar_url).trim() : '';
+  const avatarUrl = remoteAvatarsDisabled() ? '' : (c.avatar_url ? String(c.avatar_url).trim() : '');
   setHeaderAvatarSafe(ref, avatarUrl);
 
   try {

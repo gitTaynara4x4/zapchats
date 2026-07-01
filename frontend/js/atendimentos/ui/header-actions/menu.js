@@ -283,17 +283,17 @@
 
       if (isUsableButton(btnAccept)) {
         items.push({
-          label: 'Aceitar conversa',
+          label: 'Atender conversa',
           icon: 'fa-solid fa-check',
           action() {
-            clickExistingButton('#btnAceitarConversa', 'Aceite não encontrado');
+            clickExistingButton('#btnAceitarConversa', 'Atendimento não encontrado');
           },
         });
       }
 
       if (isUsableButton(btnRelease)) {
         items.push({
-          label: 'Liberar conversa',
+          label: 'Liberar atendimento',
           icon: 'fa-solid fa-unlock',
           action() {
             clickExistingButton('#btnLiberarConversa', 'Liberação não encontrada');

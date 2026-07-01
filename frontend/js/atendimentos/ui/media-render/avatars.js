@@ -17,6 +17,15 @@
   if (M.__avatarsReady) return;
   M.__avatarsReady = true;
 
+  if (window.ZC_DISABLE_AUDIO_AVATAR === true || window.ZC_DISABLE_REMOTE_AVATARS === true || window.ZC_MODO_ULTRA_LEVE_RAM === true) {
+    M.extend({
+      getCurrentChatAvatarUrl: () => '',
+      setAudioAvatar: () => {},
+      refreshAudioAvatars: () => {},
+    });
+    return;
+  }
+
   const AVATAR_SELS = [
     '#chat-avatar img[data-cliente-id]',
     '#chat-avatar img',

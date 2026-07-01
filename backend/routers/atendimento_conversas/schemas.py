@@ -23,3 +23,10 @@ class TransferirColaboradorIn(BaseModel):
     instancia_id: Optional[int] = None
     instance: Optional[str] = None
     colaborador_id: int
+
+
+class EditarNomeClienteIn(BaseModel):
+    empresa_id: Optional[int] = None
+    instancia_id: Optional[int] = None
+    instance: Optional[str] = None
+    nome: str

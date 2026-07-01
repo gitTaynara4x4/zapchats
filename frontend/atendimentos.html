@@ -6,6 +6,106 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Painel de Atendimento – ZapsChat</title>
 
+
+  <script id="zc-ram-safe-mode">
+    /*
+      Modo leve do Atendimento.
+      O Chrome estava subindo para vários GB porque versões antigas deixavam
+      cache grande no localStorage e alguns observadores/renderizações rodavam
+      vezes demais no chat. Este bloco entra antes de qualquer módulo pesado.
+    */
+    (function zcRamSafeMode(){
+      if (window.__ZC_RAM_SAFE_MODE__) return;
+      window.__ZC_RAM_SAFE_MODE__ = true;
+
+      window.ZC_LOW_RAM_MODE = true;
+      window.ZC_ESSENTIAL_CHAT_MODE = true;
+      window.ZC_DISABLE_OPTIONAL_CHAT_MODULES = true;
+      window.ZC_DISABLE_SETTINGS_BOOT = true;
+      window.ZC_DISABLE_WALLPAPER_OBSERVER = true;
+      window.ZC_DISABLE_INLINE_CLAIM_GUARD = true;
+      window.ZC_DISABLE_REMOTE_AVATARS = false;
+      // Fotos de perfil voltam, mas sem refresh em massa/observer pesado.
+      window.ZC_MODO_ULTRA_LEVE_RAM = false;
+      window.ZC_SKIP_QUICK_PROFILE_OBSERVERS = true;
+      window.ZC_DISABLE_AUDIO_AVATAR = true;
+      window.AVATAR_DAILY_REFRESH = false;
+      window.AVATAR_DAILY_LIMIT = 0;
+      window.AVATAR_DAILY_CONCURRENCY = 1;
+      window.ZC_DISABLE_MSG_ACTION_OBSERVER = true;
+      window.ZC_DISABLE_MEDIA_RENDER_OBSERVER = true;
+      window.ZC_DISABLE_HISTORY_PREFETCH = true;
+      window.PREFETCH_HISTORIES = false;
+      window.ZC_HIST_SAVE_TO_LS = false;
+      window.ZC_STORE_SAVE_CONVERSAS_TO_LS = false;
+
+      window.ZC_HIST_MAX_MESSAGES = window.ZC_HIST_MAX_MESSAGES || 50;
+      window.ZC_HIST_MIRROR_MAX_CONVERSAS = window.ZC_HIST_MIRROR_MAX_CONVERSAS || 2;
+      window.ZC_STORE_MAX_CONVS_PER_INST = window.ZC_STORE_MAX_CONVS_PER_INST || 80;
+      window.ZC_STORE_MAX_MSGS_PER_CONVERSA = window.ZC_STORE_MAX_MSGS_PER_CONVERSA || 60;
+      window.ZC_WS_RENDER_DEBOUNCE_MS = window.ZC_WS_RENDER_DEBOUNCE_MS || 180;
+      window.ZC_WS_BADGE_REPEAT_LIGHT = true;
+      window.ZC_BIG_LIST_CACHE_BYTES = window.ZC_BIG_LIST_CACHE_BYTES || 250000;
+      window.ZC_HUGE_LOCALSTORAGE_BYTES = window.ZC_HUGE_LOCALSTORAGE_BYTES || 500000;
+      window.ZC_STORE_MAX_BOOT_JSON_BYTES = window.ZC_STORE_MAX_BOOT_JSON_BYTES || 250000;
+      window.ZC_STORE_MAX_ANY_ZAPS_STORAGE_BYTES = window.ZC_STORE_MAX_ANY_ZAPS_STORAGE_BYTES || 500000;
+      window.ZC_HIST_BIG_CACHE_BYTES = window.ZC_HIST_BIG_CACHE_BYTES || 300000;
+
+      function cleanupHeavyStorage(){
+        try {
+          const keys = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k) keys.push(k);
+          }
+
+          let removed = 0;
+          for (const k of keys) {
+            let raw = null;
+            try { raw = localStorage.getItem(k); } catch { raw = null; }
+            const len = raw ? String(raw).length : 0;
+            const low = String(k).toLowerCase();
+
+            const isHistory =
+              String(k).startsWith('cacheHistoricos:') ||
+              String(k).startsWith('zc:hist:') ||
+              low.includes(':hist:') ||
+              low.includes(':cursor:') ||
+              low.includes('cachehistoricos') ||
+              low.includes('historico');
+
+            const isListCache =
+              String(k).startsWith('clientesCache:') ||
+              String(k).startsWith('zc:convs:v2:');
+
+            const isHugeZapsKey =
+              len > Number(window.ZC_HUGE_LOCALSTORAGE_BYTES || 500000) &&
+              (
+                String(k).startsWith('zc:') ||
+                String(k).startsWith('atend:') ||
+                String(k).startsWith('clientesCache:') ||
+                low.includes('conversa') ||
+                low.includes('historico')
+              );
+
+            if (isHistory || isListCache || isHugeZapsKey) {
+              try { localStorage.removeItem(k); removed += 1; } catch {}
+            }
+          }
+
+          if (removed) {
+            try { console.warn('[ZapsChat][RAM] cache pesado removido:', removed); } catch {}
+            try { sessionStorage.setItem('convForceReload', '1'); } catch {}
+          }
+        } catch {}
+      }
+
+      cleanupHeavyStorage();
+      setTimeout(cleanupHeavyStorage, 1000);
+      window.ZCClearHeavyCache = cleanupHeavyStorage;
+    })();
+  </script>
+
   <script>
     (function () {
       try {
@@ -20,10 +120,8 @@
     })();
   </script>
 
-  <script
-    src="https://unpkg.com/@lottiefiles/dotlottie-wc@0.9.10/dist/dotlottie-wc.js"
-    type="module">
-  </script>
+  <!-- RAM SAFE: dotlottie desativado no painel de atendimento.
+       O atendimento não precisa carregar runtime externo de animação para abrir conversas. -->
 
   <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260517-chat-bg-wallpaper-fix-3">
 
@@ -883,6 +981,11 @@
       }
 
       async function loadSettingsPagesJs() {
+        if (window.ZC_DISABLE_SETTINGS_BOOT === true || window.ZC_ESSENTIAL_CHAT_MODE === true) {
+          window.dispatchEvent(new CustomEvent('zc:settings-pages-js-skipped'));
+          return;
+        }
+
         for (const src of SETTINGS_JS) {
           await loadScriptOnce(src);
         }
@@ -892,6 +995,9 @@
 
       async function loadAppJs() {
         for (const item of APP_JS) {
+          if (window.ZC_ESSENTIAL_CHAT_MODE === true && item.key !== 'main') {
+            continue;
+          }
           await loadScriptOnce(item.src, { type: item.type });
         }
 
@@ -1121,6 +1227,7 @@
       - Com conversa aberta: esconde tela inicial e mostra papel de parede.
     */
     (function zcChatWallpaperOnlyWhenConversationOpen(){
+      if (window.ZC_DISABLE_WALLPAPER_OBSERVER === true || window.ZC_ESSENTIAL_CHAT_MODE === true) return;
       if (window.__ZC_CHAT_WALLPAPER_ONLY_OPEN_V3__) return;
       window.__ZC_CHAT_WALLPAPER_ONLY_OPEN_V3__ = true;
 
@@ -1174,13 +1281,20 @@
           hasMessages ||
           document.body.classList.contains('is-chat-open');
 
-        main.classList.toggle('has-open-chat', !!hasOpenChat);
-        document.body.classList.toggle('has-open-chat', !!hasOpenChat);
+        if (main.classList.contains('has-open-chat') !== !!hasOpenChat) {
+          main.classList.toggle('has-open-chat', !!hasOpenChat);
+        }
+
+        if (document.body.classList.contains('has-open-chat') !== !!hasOpenChat) {
+          document.body.classList.toggle('has-open-chat', !!hasOpenChat);
+        }
 
         if (welcome) {
           if (hasOpenChat) {
-            welcome.style.setProperty('display', 'none', 'important');
-          } else {
+            if (welcome.style.display !== 'none') {
+              welcome.style.setProperty('display', 'none', 'important');
+            }
+          } else if (welcome.style.display) {
             welcome.style.removeProperty('display');
           }
         }
@@ -1214,10 +1328,12 @@
 
         observe(main, false);
         observe(welcome, false);
-        observe(historico, true);
-        observe(header, true);
-        observe(footer, true);
-        observe(title, true);
+        // Modo leve: observar subtree do histórico inteiro causa muito trabalho
+        // quando chegam mensagens/acks em lote. Observar só o próprio nó já basta.
+        observe(historico, false);
+        observe(header, false);
+        observe(footer, false);
+        observe(title, false);
         observe(document.body, false);
 
         window.addEventListener('load', scheduleSync);
@@ -1261,20 +1377,51 @@
 
   <script>
     /*
-      Guard da barra de aceite.
+      Guard leve da barra de atendimento.
 
-      Só mostra barra se a conversa realmente exigir aceite.
-      Sem fila exigindo aceite, libera composer e esconde a barra.
+      Importante:
+      - Este script não pode esconder o botão Liberar quando o atendimento
+        já está com o colaborador atual.
+      - O estado principal vem de aceitar-conversa.js via zc:claim-updated
+        e também pelos data-* do card.
     */
     (function zcClaimBarLightGuard(){
+      if (window.ZC_DISABLE_INLINE_CLAIM_GUARD === true || window.ZC_ESSENTIAL_CHAT_MODE === true) return;
       let raf = 0;
+      let lastMeta = null;
 
       function boolish(v) {
         if (v === true || v === 1) return true;
         if (v === false || v === 0 || v == null) return false;
-
         const s = String(v).trim().toLowerCase();
         return ['1', 'true', 'sim', 's', 'yes', 'y', 'on'].includes(s);
+      }
+
+      function toInt(v) {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      }
+
+      function getJwt() {
+        try {
+          const token = localStorage.getItem('access_token') || localStorage.getItem('token') || '';
+          const payload = token.split('.')[1];
+          if (!payload) return {};
+          return JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+        } catch {
+          return {};
+        }
+      }
+
+      function currentColabId() {
+        const jwt = getJwt();
+        for (const key of ['id_colab','colaborador_id','id_colaborador','colab_id','cid']) {
+          const val = toInt(jwt[key]) || toInt(localStorage.getItem(key));
+          if (val) return val;
+        }
+        const sub = String(jwt.sub || '').trim().toLowerCase();
+        if (sub.startsWith('colab-')) return toInt(sub.slice(6));
+        return null;
       }
 
       function getDeep(obj, path) {
@@ -1289,10 +1436,21 @@
         const footer = document.getElementById('chat-footer');
         const bar = document.getElementById('zc-claim-bar');
         const hist = document.getElementById('historico');
+        const convKey = hist?.dataset?.conversationId || hist?.dataset?.conversationKey || '';
+        let cachedMeta = null;
+
+        try {
+          if (convKey && typeof window.getConversationMeta === 'function') {
+            cachedMeta = window.getConversationMeta(convKey);
+          }
+        } catch {}
 
         const arr = [
+          lastMeta,
+          cachedMeta,
           window.__ZC_CONVERSA_ATUAL,
           window.__zcConversaAtual,
+          window.__zcCurrentConversation,
           window.__zcSelectedConversation,
           window.__ZC_SELECTED_CONVERSATION,
           window.__clienteSelecionado,
@@ -1303,12 +1461,11 @@
           window.ZCStore && window.ZCStore.state && window.ZCStore.state.clienteSel,
           getDeep(window, 'ZCAtendimento.conversaAtual'),
           getDeep(window, 'ZCAtendimento.currentConversation'),
-          getDeep(window, 'AtendimentoStore.state.clienteSel'),
+          getDeep(window, 'AtendimentoStore.state.clienteSel')
         ].filter(Boolean);
 
         [footer, bar, hist].forEach(el => {
-          if (!el || !el.dataset) return;
-          arr.push(el.dataset);
+          if (el && el.dataset) arr.push(el.dataset);
         });
 
         return arr;
@@ -1318,95 +1475,72 @@
         for (const obj of candidates()) {
           for (const key of keys) {
             if (!obj) continue;
-
-            if (Object.prototype.hasOwnProperty.call(obj, key)) {
-              return obj[key];
-            }
-
-            const dataKey = key.replace(/_([a-z])/g, function(_, c){
-              return c.toUpperCase();
-            });
-
-            if (Object.prototype.hasOwnProperty.call(obj, dataKey)) {
-              return obj[dataKey];
-            }
+            if (Object.prototype.hasOwnProperty.call(obj, key)) return obj[key];
+            const dataKey = key.replace(/_([a-z])/g, function(_, c){ return c.toUpperCase(); });
+            if (Object.prototype.hasOwnProperty.call(obj, dataKey)) return obj[dataKey];
           }
         }
-
         return undefined;
       }
 
       function currentClaimState() {
         const exigir = boolish(readFirst([
-          'exigir_aceite',
-          'aceite_obrigatorio',
-          'fila_exigir_aceite',
-          'filaExigirAceite',
-          'requires_accept',
-          'requiresAccept'
+          'exigir_aceite','aceite_obrigatorio','fila_exigir_aceite','filaExigirAceite',
+          'aguardando_aceite','requires_accept','requiresAccept'
         ]));
 
-        const aceitaPorMim = boolish(readFirst([
-          'aceita_por_mim',
-          'aceitaPorMim',
-          'accepted_by_me',
-          'acceptedByMe'
-        ]));
+        const colabId = currentColabId();
+        const operadorId = toInt(readFirst(['responsavel_id','operador_id','responsavelId','operadorId']));
 
-        const podeAceitarRaw = readFirst([
-          'pode_aceitar',
-          'podeAceitar',
-          'can_accept',
-          'canAccept'
-        ]);
+        const aceitaRaw = readFirst(['aceita_por_mim','aceitaPorMim','accepted_by_me','acceptedByMe']);
+        const aceitaPorMim = aceitaRaw !== undefined
+          ? boolish(aceitaRaw)
+          : Boolean(operadorId && colabId && operadorId === colabId);
 
-        const podeLiberar = boolish(readFirst([
-          'pode_liberar',
-          'podeLiberar',
-          'can_release',
-          'canRelease'
-        ]));
-
-        const aguardandoRaw = readFirst([
-          'aguardando_aceite',
-          'aguardandoAceite',
-          'waiting_accept',
-          'waitingAccept'
-        ]);
+        const podeAceitarRaw = readFirst(['pode_aceitar','podeAceitar','can_accept','canAccept']);
+        const podeLiberarRaw = readFirst(['pode_liberar','podeLiberar','can_release','canRelease']);
+        const aguardandoRaw = readFirst(['aguardando_aceite','aguardandoAceite','waiting_accept','waitingAccept']);
 
         let aguardando = false;
-
         if (exigir) {
-          if (aguardandoRaw !== undefined) {
-            aguardando = boolish(aguardandoRaw);
-          } else if (podeAceitarRaw !== undefined) {
-            aguardando = boolish(podeAceitarRaw) && !aceitaPorMim;
-          } else {
-            aguardando = !aceitaPorMim;
-          }
+          if (aguardandoRaw !== undefined) aguardando = boolish(aguardandoRaw);
+          else if (podeAceitarRaw !== undefined) aguardando = boolish(podeAceitarRaw) && !aceitaPorMim;
+          else aguardando = !aceitaPorMim;
         }
 
-        return {
-          exigir,
-          aceitaPorMim,
-          podeAceitar: exigir && (podeAceitarRaw === undefined ? aguardando : boolish(podeAceitarRaw)),
-          podeLiberar: exigir && podeLiberar,
-          aguardando
-        };
+        const podeAceitar = exigir && (podeAceitarRaw === undefined ? aguardando : boolish(podeAceitarRaw));
+        const podeLiberar = exigir && (
+          podeLiberarRaw === undefined ? aceitaPorMim : boolish(podeLiberarRaw)
+        );
+
+        return { exigir, aceitaPorMim, podeAceitar, podeLiberar, aguardando };
       }
 
       function setBtnText(btn, text) {
-        if (!btn) return;
+        if (!btn || !text) return;
         const span = btn.querySelector('.hdr-pill-btn-text');
-        if (span && span.textContent.trim() !== text) {
-          span.textContent = text;
-        }
+        if (span && span.textContent.trim() !== text) span.textContent = text;
+        else if (!span && btn.textContent.trim() !== text) btn.textContent = text;
       }
 
       function setHidden(el, hidden) {
         if (!el) return;
-        el.hidden = !!hidden;
-        el.style.display = hidden ? 'none' : '';
+        const desiredHidden = !!hidden;
+        const desiredDisplay = desiredHidden ? 'none' : '';
+        if (el.hidden !== desiredHidden) el.hidden = desiredHidden;
+        if (el.style.display !== desiredDisplay) el.style.display = desiredDisplay;
+      }
+
+      function setDataset(el, name, value) {
+        if (!el || !el.dataset) return;
+        const v = String(value);
+        if (el.dataset[name] !== v) el.dataset[name] = v;
+      }
+
+      function toggleClass(el, cls, on) {
+        if (!el) return;
+        const has = el.classList.contains(cls);
+        if (has !== !!on) el.classList.toggle(cls, !!on);
       }
 
       function syncClaimBar() {
@@ -1422,15 +1556,15 @@
 
         if (!footer || !bar) return;
 
-        setBtnText(btnAccept, 'Aceitar');
+        setBtnText(btnAccept, 'Atender');
         setBtnText(btnRelease, 'Liberar');
         setBtnText(btnTransfer, 'Transferir');
 
         const st = currentClaimState();
 
         if (!st.exigir) {
-          footer.dataset.sendLocked = '0';
-          bar.classList.remove('is-locked', 'is-accepted', 'is-busy');
+          setDataset(footer, 'sendLocked', '0');
+          bar.classList.remove('is-locked','is-accepted','is-busy','is-can-accept','is-can-release');
           setHidden(bar, true);
           setHidden(btnAccept, true);
           setHidden(btnRelease, true);
@@ -1441,39 +1575,37 @@
         setHidden(bar, false);
 
         if (st.aguardando) {
-          footer.dataset.sendLocked = '1';
-          bar.classList.add('is-locked');
-          bar.classList.remove('is-accepted');
+          setDataset(footer, 'sendLocked', '1');
+          toggleClass(bar, 'is-locked', true);
+          toggleClass(bar, 'is-can-accept', true);
+          toggleClass(bar, 'is-accepted', false);
+          toggleClass(bar, 'is-can-release', false);
+          setDataset(bar, 'canAccept', st.podeAceitar ? '1' : '0');
+          setDataset(bar, 'podeLiberar', '0');
 
-          if (title && title.textContent.trim() !== 'Conversa aguardando aceite') {
-            title.textContent = 'Conversa aguardando aceite';
-          }
-
-          if (subtitle && subtitle.textContent.trim() !== 'Aceite para responder ou transfira para outro atendente.') {
-            subtitle.textContent = 'Aceite para responder ou transfira para outro atendente.';
-          }
+          if (title && !title.textContent.trim()) title.textContent = 'Atenda para responder';
+          if (subtitle && !subtitle.textContent.trim()) subtitle.textContent = 'Clique em Atender para assumir este atendimento.';
 
           setHidden(btnAccept, !st.podeAceitar);
           setHidden(btnRelease, true);
-          setHidden(btnTransfer, false);
+          setHidden(btnTransfer, true);
           return;
         }
 
-        footer.dataset.sendLocked = '0';
-        bar.classList.remove('is-locked');
-        bar.classList.add('is-accepted');
+        setDataset(footer, 'sendLocked', '0');
+        toggleClass(bar, 'is-locked', false);
+        toggleClass(bar, 'is-can-accept', false);
+        toggleClass(bar, 'is-accepted', true);
+        toggleClass(bar, 'is-can-release', !!st.podeLiberar);
+        setDataset(bar, 'canAccept', '0');
+        setDataset(bar, 'podeLiberar', st.podeLiberar ? '1' : '0');
 
-        if (title && title.textContent.trim() !== 'Conversa aceita por você') {
-          title.textContent = 'Conversa aceita por você';
-        }
-
-        if (subtitle && subtitle.textContent.trim() !== 'Agora você já pode responder normalmente.') {
-          subtitle.textContent = 'Agora você já pode responder normalmente.';
-        }
+        if (title && !title.textContent.trim()) title.textContent = 'Atendimento com você';
+        if (subtitle && !subtitle.textContent.trim()) subtitle.textContent = 'Agora você pode responder normalmente.';
 
         setHidden(btnAccept, true);
         setHidden(btnRelease, !st.podeLiberar);
-        setHidden(btnTransfer, false);
+        setHidden(btnTransfer, true);
       }
 
       function scheduleSync() {
@@ -1483,9 +1615,7 @@
 
       function observeSafe(el, opts) {
         if (!el) return;
-        try {
-          new MutationObserver(scheduleSync).observe(el, opts);
-        } catch {}
+        try { new MutationObserver(scheduleSync).observe(el, opts); } catch {}
       }
 
       function init() {
@@ -1495,62 +1625,30 @@
         const bar = document.getElementById('zc-claim-bar');
         const hist = document.getElementById('historico');
 
-        observeSafe(footer, {
-          attributes:true,
-          attributeFilter:[
-            'data-send-locked',
-            'data-exigir-aceite',
-            'data-aceite-obrigatorio',
-            'data-fila-exigir-aceite',
-            'data-aguardando-aceite',
-            'data-pode-aceitar',
-            'data-aceita-por-mim'
-          ]
-        });
-
-        observeSafe(bar, {
-          attributes:true,
-          attributeFilter:[
-            'class',
-            'hidden',
-            'data-exigir-aceite',
-            'data-aceite-obrigatorio',
-            'data-fila-exigir-aceite',
-            'data-aguardando-aceite',
-            'data-pode-aceitar',
-            'data-aceita-por-mim'
-          ]
-        });
-
-        observeSafe(hist, {
-          attributes:true,
-          attributeFilter:[
-            'data-exigir-aceite',
-            'data-aceite-obrigatorio',
-            'data-fila-exigir-aceite',
-            'data-aguardando-aceite',
-            'data-pode-aceitar',
-            'data-aceita-por-mim'
-          ]
-        });
+        observeSafe(footer, { attributes:true });
+        observeSafe(bar, { attributes:true });
+        observeSafe(hist, { attributes:true });
 
         document.addEventListener('click', function(e){
-          if (e.target.closest('#btnAceitarConversa')) {
+          if (e.target.closest('#btnAceitarConversa,#btnLiberarConversa')) {
             setTimeout(scheduleSync, 120);
             setTimeout(scheduleSync, 450);
             setTimeout(scheduleSync, 900);
           }
         });
 
-        window.addEventListener('zc:conversation-changed', scheduleSync);
-        window.addEventListener('zc:conversation-opened', scheduleSync);
-        window.addEventListener('zc:claim-updated', scheduleSync);
-        window.addEventListener('zc:atendimento-accepted', scheduleSync);
-        window.addEventListener('zc:conversa-atualizada', scheduleSync);
-        window.addEventListener('zc:historico-rendered', scheduleSync);
-        window.addEventListener('zc:atendimentos-ready', scheduleSync);
-        window.addEventListener('load', scheduleSync);
+        [
+          'atendimento:meta','atendimento:meta-updated','atendimento:refresh-meta','zc:claim-updated',
+          'zc:conversation-changed','zc:conversation-opened','zc:conversation-accepted','zc:conversation-released',
+          'zc:atendimento-accepted','zc:conversa-atualizada','zc:historico-rendered','zc:atendimentos-ready'
+        ].forEach(function(evt){
+          window.addEventListener(evt, function(e){
+            if (e && e.detail) lastMeta = e.detail;
+            scheduleSync();
+          });
+        });
 
+        window.addEventListener('load', scheduleSync);
         setTimeout(scheduleSync, 150);
         setTimeout(scheduleSync, 700);
         setTimeout(scheduleSync, 1500);

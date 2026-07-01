@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  const MAIN_VERSION = 'zc-atendimentos-main-v8-menu-seguro';
+  const MAIN_VERSION = 'zc-atendimentos-main-v11-avatar-lazy-safe';
 
   /*
     Se este arquivo for carregado duas vezes por engano
@@ -51,6 +51,12 @@
   // v7: WebSocket só liga depois que lista/módulos/boot terminarem.
   // Isso evita mensagem/replay chegando no meio do carregamento.
   window.ZC_WS_DELAY_BOOT_UNTIL_READY = true;
+
+  // RAM: ao abrir conversa, busca primeiro uma janela pequena.
+  window.ZC_HIST_OPEN_LIMIT = window.ZC_HIST_OPEN_LIMIT || 12;
+  window.ZC_HIST_PAGE_SIZE = window.ZC_HIST_PAGE_SIZE || 12;
+  window.ZC_HIST_DOM_MAX_ROWS = window.ZC_HIST_DOM_MAX_ROWS || 80;
+  window.ZC_HIST_MAX_MESSAGES = window.ZC_HIST_MAX_MESSAGES || 60;
 
 
   /*
@@ -150,7 +156,81 @@
     }
   }
 
+  async function importarModulosEssencial() {
+    // Modo essencial: carrega só o necessário para lista, abrir conversa, enviar, atender/liberar.
+    // Remove módulos com observers/menus/recursos extras para isolar consumo de CPU/RAM.
+    await import('../core/env.js');
+    await import('../core/format.js');
+    await import('../core/time.js');
+    await import('../core/cache.js');
+    await import('../core/dom.js');
+
+    await import('../state/store.js');
+
+    await import('../domain/ack.js');
+    await import('../domain/clientes.js');
+    await import('../domain/instances.js');
+    await import('../domain/historico.js');
+
+    await import('../ui/splash.js');
+    await import('../ui/envio.js');
+    await import('../ui/notif.js');
+
+    // Abre conversa e mantém RAM baixa.
+    await import('../ui/conversas.js');
+    await import('../ui/open-conversation-safe.js');
+
+    await import('../ui/search.js');
+    await import('../ui/inst-switch.js');
+    await import('../ui/filtros.js');
+
+    // Recursos que voltaram: perfil, fotos, notas/IA e menu dos 3 pontinhos.
+    // Mantemos fora apenas observers pesados/duplicados da lista.
+    await import('../ui/perfil.js');
+    await import('../ui/perfil_quick.js');
+    await importIfMissing('__ZC_PERFIL_INSTANCIA_LOADED__', '../ui/perfil-instancia.js');
+    await import('../ui/notes-drawer.js');
+    await import('../ui/ia.js');
+    await import('../ui/new-chat.js');
+    await import('../ui/context-menu.js');
+    await import('../ui/apagar.js');
+
+    // A lista ativa fica com a versão corrigida, sem observer de class.
+    await import('../ui/lista-active-sync.js');
+    await import('../ui/avatar-lazy-safe.js');
+
+    await import('../ui/transferir-departamento.js');
+
+    // Header actions dividido: volta lupa/calendário/3 pontinhos sem reativar o loop.
+    await import('../ui/header-actions/core.js');
+    await import('../ui/header-actions/conversation.js');
+    await import('../ui/header-actions/media.js');
+    await import('../ui/header-actions/send-api.js');
+    await import('../ui/header-actions/buttons.js');
+    await import('../ui/header-actions/date-jump.js');
+    await import('../ui/header-actions/search.js');
+    await import('../ui/header-actions/select-mode.js');
+    await import('../ui/header-actions/forward.js');
+    await import('../ui/header-actions/menu.js');
+    await import('../ui/header-actions/boot.js');
+
+    // Editar nome do cliente: isolado, sem desligar 3 pontinhos/menu.
+    await import('../ui/editar-nome-cliente.js');
+
+    await import('../ui/message-actions.js');
+    await import('../ui/aceitar-conversa.js');
+    await import('../ui/message-selection.js');
+    await import('../ui/forward-picker.js');
+    await import('../ui/loading-guard.js');
+
+    return import('./init.js');
+  }
+
   async function importarModulos() {
+    if (window.ZC_ESSENTIAL_CHAT_MODE === true || window.ZC_DISABLE_OPTIONAL_CHAT_MODULES === true) {
+      return importarModulosEssencial();
+    }
+
     // -------- CORE ----------------------------------------------------
     await import('../core/env.js');
     await import('../core/format.js');
@@ -240,6 +320,7 @@
       active / is-active / chat-active.
     */
     await import('../ui/lista-active-sync.js');
+    await import('../ui/avatar-lazy-safe.js');
 
     await import('../ui/apagar.js');
 
@@ -266,6 +347,9 @@
     await import('../ui/header-actions/forward.js');
     await import('../ui/header-actions/menu.js');
     await import('../ui/header-actions/boot.js');
+
+    // Editar nome do cliente: isolado, sem desligar 3 pontinhos/menu.
+    await import('../ui/editar-nome-cliente.js');
 
     await import('../ui/message-actions.js');
     await import('../ui/aceitar-conversa.js');

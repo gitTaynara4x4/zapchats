@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Contratos | Valora CRM</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="/frontend/css/app.css?v=20260630-dark-chatgpt-v6" />
+  <link rel="stylesheet" href="/frontend/css/validacao.css?v=20260614-required-circle" />
+  <link rel="stylesheet" href="/frontend/css/contratos-admin.css" />
+
+  <script src="/frontend/js/pages/app.js?v=20260626-ajuda-global" defer></script>
+  <script src="/frontend/js/shared/validacao.js?v=20260614-required-circle" defer></script>
+  <script type="module" src="/frontend/js/pages/contratos-admin.js"></script>
+  <link rel="stylesheet" href="/frontend/css/campos-longos.css?v=20260614-global-inline" />
+  <script src="/frontend/js/shared/campos-longos.js?v=20260614-global-inline" defer></script>
+  <link rel="stylesheet" href="/frontend/css/layout-compacto.css?v=20260615-tipografia-sem-centralizar" />
+  <link rel="stylesheet" href="/frontend/css/responsivo-global.css?v=20260615-mobile-real">
+  <link rel="stylesheet" href="/frontend/css/dark-chatgpt-fix.css?v=20260630-dark-v7" />
+</head>
+<body>
+  <div class="layout">
+    <iframe src="/frontend/partials/sidebar.html?v=20260615-menu-fix" class="sidebar-frame" title="Menu lateral"></iframe>
+
+    <main class="main contratos-main">
+      <header class="topbar contratos-topbar">
+        <div class="topbar-title">
+          <span class="eyebrow">Contratos</span>
+          <h1>Contratos do cliente</h1>
+          <p class="page-subtitle">
+            Crie, consulte e atualize contratos vinculados aos clientes do ValoraCRM.
+          </p>
+        </div>
+
+        <div class="topbar-actions contratos-actions">
+          <button class="btn btn-secondary" type="button" id="btn-recarregar">
+            <i class="fa-solid fa-rotate"></i>
+            Recarregar
+          </button>
+          <button class="btn btn-primary" type="button" id="btn-novo-contrato">
+            <i class="fa-solid fa-plus"></i>
+            Novo contrato
+          </button>
+        </div>
+      </header>
+
+      <section class="contratos-intro">
+        <article class="intro-card intro-card-main">
+          <div class="intro-icon"><i class="fa-solid fa-file-contract"></i></div>
+          <div>
+            <strong>Parte 2D</strong>
+            <span>Tela administrativa para contratos, propostas aprovadas e anexos do contrato.</span>
+          </div>
+        </article>
+
+        <article class="intro-card">
+          <div class="intro-icon"><i class="fa-solid fa-file-import"></i></div>
+          <div>
+            <strong>Importar proposta</strong>
+            <span>Vincule uma proposta aprovada e importe vendedor, aprovação, indicação e resumo.</span>
+          </div>
+        </article>
+
+        <article class="intro-card">
+          <div class="intro-icon"><i class="fa-solid fa-paperclip"></i></div>
+          <div>
+            <strong>Anexos</strong>
+            <span>Envie contrato assinado, contrato emitido, comprovantes e documentos do cliente.</span>
+          </div>
+        </article>
+      </section>
+
+      <section class="contratos-grid">
+        <aside class="panel-card contratos-list-card">
+          <div class="panel-head compact-head">
+            <h3>Contratos cadastrados</h3>
+            <p>Busque por cliente, número, tipo, proposta ou documento.</p>
+          </div>
+
+          <div class="contratos-filtros">
+            <div class="form-group">
+              <label for="busca-contrato">Buscar</label>
+              <div class="search-control">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input id="busca-contrato" type="text" placeholder="Número, cliente, proposta..." autocomplete="off" />
+              </div>
+            </div>
+
+            <div class="form-row filtro-row">
+              <div class="form-group">
+                <label for="filtro-status">Status</label>
+                <select id="filtro-status">
+                  <option value="">Todos</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="filtro-cliente">Cliente</label>
+                <select id="filtro-cliente">
+                  <option value="">Todos</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="contratos-status" id="contratos-status">Carregando contratos...</div>
+          <div class="contratos-list" id="contratos-lista"></div>
+        </aside>
+
+        <section class="contratos-content">
+          <article class="panel-card selected-contract-card">
+            <div class="selected-contract-header">
+              <div>
+                <span class="eyebrow" id="modo-label">Novo contrato</span>
+                <h2 id="contrato-titulo">Preencha os dados do contrato</h2>
+                <p id="contrato-subtitulo">Selecione um cliente para gerar o número automático.</p>
+              </div>
+
+              <div class="selected-contract-badges">
+                <span class="soft-badge" id="badge-tipo">Contrato</span>
+                <span class="soft-badge soft-badge-green" id="badge-status">Rascunho</span>
+              </div>
+            </div>
+          </article>
+
+          <form class="valora-form panel-card contrato-form-card" id="form-contrato">
+            <div class="form-card-head">
+              <div>
+                <h3>Dados do contrato</h3>
+                <p>Campos iniciais para emissão e controle interno do contrato.</p>
+              </div>
+              <div class="record-meta" id="registro-meta">Novo registro</div>
+            </div>
+
+            <section class="form-section">
+              <div class="section-title-row">
+                <div>
+                  <h4>Cliente e identificação</h4>
+                  <p>Escolha o cliente e deixe o ValoraCRM sugerir o número do contrato.</p>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="cliente_id">Cliente *</label>
+                  <select id="cliente_id" name="cliente_id" required>
+                    <option value="">Selecione um cliente</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="numero_contrato">Número do contrato *</label>
+                  <div class="inline-control">
+                    <input id="numero_contrato" name="numero_contrato" type="text" readonly aria-readonly="true" />
+                    <button class="btn btn-secondary btn-icon" type="button" id="btn-gerar-numero" title="Gerar número automático">
+                      <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="tipo_contrato">Tipo de contrato *</label>
+                  <select id="tipo_contrato" name="tipo_contrato" required>
+                    <option value="outro">Carregando...</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="status">Status *</label>
+                  <select id="status" name="status" required>
+                    <option value="rascunho">Rascunho</option>
+                  </select>
+                </div>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <div class="section-title-row">
+                <div>
+                  <h4>Proposta aprovada</h4>
+                  <p>Selecione uma proposta aprovada do cliente e importe os dados principais para o contrato.</p>
+                </div>
+              </div>
+
+              <div class="form-row proposta-row">
+                <div class="form-group">
+                  <label for="proposta_id">Proposta aprovada</label>
+                  <select id="proposta_id" name="proposta_id">
+                    <option value="">Sem proposta vinculada</option>
+                  </select>
+                </div>
+
+                <div class="form-group proposta-action-group">
+                  <label>Importação</label>
+                  <button class="btn btn-secondary btn-importar-proposta" type="button" id="btn-importar-proposta" disabled>
+                    <i class="fa-solid fa-file-import"></i>
+                    Importar dados da proposta
+                  </button>
+                </div>
+              </div>
+
+              <div class="proposta-preview" id="proposta-preview" hidden>
+                <div class="proposta-preview-icon">
+                  <i class="fa-solid fa-file-invoice-dollar"></i>
+                </div>
+
+                <div class="proposta-preview-content">
+                  <strong id="proposta-preview-titulo">Proposta selecionada</strong>
+                  <span id="proposta-preview-meta">Selecione uma proposta para ver o resumo.</span>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="vendedor_nome">Vendedor</label>
+                  <input id="vendedor_nome" name="vendedor_nome" type="text" placeholder="Nome do vendedor" />
+                </div>
+
+                <div class="form-group">
+                  <label for="data_aprovacao">Data de aprovação</label>
+                  <input id="data_aprovacao" name="data_aprovacao" type="date" />
+                </div>
+              </div>
+
+              <div class="form-row single-col">
+                <div class="form-group">
+                  <label for="indicacao">Indicação</label>
+                  <input id="indicacao" name="indicacao" type="text" placeholder="Ex.: indicação, campanha, parceiro..." />
+                </div>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <div class="section-title-row">
+                <div>
+                  <h4>Valores e datas</h4>
+                  <p>Dados básicos do contrato, conforme previsto na especificação.</p>
+                </div>
+              </div>
+
+              <div class="form-row three-cols">
+                <div class="form-group">
+                  <label for="valor_mensal">Valor mensal</label>
+                  <input id="valor_mensal" name="valor_mensal" type="text" inputmode="decimal" placeholder="199,90" />
+                </div>
+
+                <div class="form-group">
+                  <label for="data_pagamento">Data de pagamento</label>
+                  <input id="data_pagamento" name="data_pagamento" type="date" />
+                </div>
+
+                <div class="form-group">
+                  <label for="data_inicio">Data de início</label>
+                  <input id="data_inicio" name="data_inicio" type="date" />
+                </div>
+              </div>
+
+              <div class="form-row three-cols">
+                <div class="form-group">
+                  <label for="data_fim">Data de fim</label>
+                  <input id="data_fim" name="data_fim" type="date" />
+                </div>
+
+                <div class="form-group">
+                  <label for="data_assinatura">Data de assinatura</label>
+                  <input id="data_assinatura" name="data_assinatura" type="date" />
+                </div>
+
+                <div class="form-group muted-helper">
+                  <label>Assinatura digital</label>
+                  <div class="helper-box">
+                    <i class="fa-solid fa-circle-info"></i>
+                    Fica para uma fase futura.
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <div class="section-title-row">
+                <div>
+                  <h4>Observações e motivo</h4>
+                  <p>Use o motivo da alteração para registrar mudanças no histórico.</p>
+                </div>
+              </div>
+
+              <div class="form-row single-col">
+                <div class="form-group">
+                  <label for="observacoes">Observações do contrato</label>
+                  <textarea id="observacoes" name="observacoes" rows="4" placeholder="Informações internas sobre este contrato."></textarea>
+                </div>
+              </div>
+
+              <div class="form-row single-col" id="motivo-row">
+                <div class="form-group">
+                  <label for="motivo_alteracao">Motivo da alteração</label>
+                  <textarea id="motivo_alteracao" name="motivo_alteracao" rows="3" placeholder="Ex.: Ajuste solicitado pelo administrativo."></textarea>
+                </div>
+              </div>
+            </section>
+
+            <div class="form-actions sticky-actions">
+              <button class="btn btn-secondary" type="button" id="btn-limpar-form">
+                <i class="fa-solid fa-eraser"></i>
+                Limpar
+              </button>
+
+              <button class="btn btn-primary" type="submit" id="btn-salvar-contrato">
+                <i class="fa-solid fa-floppy-disk"></i>
+                Salvar contrato
+              </button>
+            </div>
+          </form>
+
+          <article class="panel-card anexos-card" id="anexos-card" hidden>
+            <div class="panel-head compact-head history-head">
+              <div>
+                <h3>Anexos do contrato</h3>
+                <p>Envie contrato assinado, contrato emitido, documentos e comprovantes.</p>
+              </div>
+              <button class="btn btn-secondary btn-sm" type="button" id="btn-recarregar-anexos">
+                <i class="fa-solid fa-paperclip"></i>
+                Atualizar anexos
+              </button>
+            </div>
+
+            <form class="anexo-upload-box" id="form-anexo">
+              <div class="form-row anexo-upload-row">
+                <div class="form-group">
+                  <label for="tipo_anexo">Tipo do documento</label>
+                  <select id="tipo_anexo" name="tipo_anexo">
+                    <option value="contrato_assinado">Contrato assinado</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="descricao_anexo">Descrição</label>
+                  <input id="descricao_anexo" name="descricao_anexo" type="text" placeholder="Ex.: contrato assinado pelo cliente" />
+                </div>
+              </div>
+
+              <div class="form-row anexo-upload-row-2">
+                <div class="form-group">
+                  <label for="arquivo_anexo">Arquivo</label>
+                  <input id="arquivo_anexo" name="arquivo_anexo" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx,.txt" />
+                  <small class="field-hint">PDF, imagem, Word, Excel ou TXT. Limite atual: 20 MB.</small>
+                </div>
+
+                <div class="form-group anexo-submit-group">
+                  <label>&nbsp;</label>
+                  <button class="btn btn-primary btn-enviar-anexo" type="submit" id="btn-enviar-anexo">
+                    <i class="fa-solid fa-upload"></i>
+                    Enviar anexo
+                  </button>
+                </div>
+              </div>
+            </form>
+
+            <div class="anexos-status" id="anexos-status">Selecione um contrato para ver os anexos.</div>
+            <div class="anexos-list" id="anexos-lista"></div>
+          </article>
+
+          <article class="panel-card historico-card" id="historico-card" hidden>
+            <div class="panel-head compact-head history-head">
+              <div>
+                <h3>Histórico do contrato</h3>
+                <p>Registros gerados ao criar ou alterar este contrato.</p>
+              </div>
+              <button class="btn btn-secondary btn-sm" type="button" id="btn-recarregar-historico">
+                <i class="fa-solid fa-clock-rotate-left"></i>
+                Atualizar
+              </button>
+            </div>
+
+            <div class="history-list" id="historico-lista"></div>
+          </article>
+        </section>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
