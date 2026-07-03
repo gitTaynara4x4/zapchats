@@ -10,6 +10,8 @@ const PREP_OVERLAY_SECONDS = 20;
 const PRESENCE_REFRESH_INTERVAL_MS = 30000;
 const PRESENCE_COOLDOWN_MS = 15000;
 const PRESENCE_CONCURRENCY = 4;
+const CONNECTION_WATCH_INTERVAL_MS = 2500;
+const CONNECTION_WATCH_MAX_MS = 180000;
 
 // Tempo mínimo visual para a Saúde do Número.
 // A API pode responder rápido, mas seguramos a tela para parecer uma análise real.
@@ -29,7 +31,13 @@ const SAUDE_LOADING_MESSAGES = [
 // ====== Estado ======
 let wantQR = false;
 let currentInstance = null;
+let currentConnectMethod = 'qrcode';
+let currentReconnectItem = null;
 let timerId = null;
+let connectionWatchTimer = null;
+let connectionWatchStartedAt = 0;
+let connectionWatchInstance = null;
+let connectedHandledInstance = null;
 let lastHistoricoUsed = '24h';
 
 let lastWhatsPayload = null;
@@ -167,6 +175,35 @@ function formatPhoneBR(num) {
   if (d.length === 12) return `+${d.slice(0,2)} ${d.slice(2,4)} ${d.slice(4,8)}-${d.slice(8)}`;
   if (d.length === 11) return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`;
   if (d.length === 10) return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;
+  return `+${d}`;
+}
+
+function normalizePairingNumber(value){
+  let d = onlyDigits(value);
+  if (!d) return '';
+
+  // Usuário costuma digitar só DDD + número. Neste caso assumimos Brasil.
+  if (d.length === 10 || d.length === 11) {
+    d = `55${d}`;
+  }
+
+  return d;
+}
+
+function maskPhoneInput(value){
+  const d = onlyDigits(value).slice(0, 13);
+  if (!d) return '';
+
+  if (d.startsWith('55')) {
+    const rest = d.slice(2);
+    if (rest.length <= 2) return `+55 ${rest}`;
+    const ddd = rest.slice(0, 2);
+    const num = rest.slice(2);
+    if (num.length <= 4) return `+55 ${ddd} ${num}`;
+    if (num.length <= 8) return `+55 ${ddd} ${num.slice(0, 4)}-${num.slice(4)}`;
+    return `+55 ${ddd} ${num.slice(0, 5)}-${num.slice(5)}`;
+  }
+
   return `+${d}`;
 }
 
@@ -456,12 +493,19 @@ const els = {
   tableFoot: $('#zc-table-foot'),
   wizardSteps: $$('.zc-wizard-step'),
   wizardHint: $('#zc-wizard-hint'),
+  wizardSubtitle: $('#zc-wizard-subtitle'),
 
   modal:       $('#modal'),
   modalHelp:   $('#modal-ajuda-conectar'),
   btnCloseMd:  $('#btn-close-modal'),
   form:        $('#form-conectar'),
   inApelido:   $('#form-conectar input[name="apelido"]'),
+  inNumero:    $('#zc-whatsapp-numero'),
+  phoneField:  $('#zc-phone-field'),
+  methodRadios: $$('input[name="connect_method"]'),
+  methodOptions: $$('.zc-method-option'),
+  scanHelpTitle: $('#zc-scan-help-title'),
+  scanHelpLast: $('#zc-scan-help-last'),
   selHist:     $('#historico-select'),
   histHelp:    $('#historico-help'),
   histWarning: $('#historico-warning'),
@@ -477,6 +521,8 @@ const els = {
   qrInstru:    $('#qr-instru'),
   qrErro:      $('#qr-erro'),
   qrIllustration: $('#qr-illustration'),
+  pairingBox:  $('#pairing-code-box'),
+  pairingCodeValue: $('#pairing-code-value'),
 
   modalRem:      $('#modal-remover-numero'),
   btnRemYes:     $('#btn-confirmar-remover'),
@@ -529,8 +575,16 @@ function hideModal(){
   els.modal.classList.add('hidden');
 }
 
+function getConnectMethod(){
+  const checked = els.methodRadios?.find?.(r => r.checked);
+  const method = checked?.value || currentConnectMethod || 'qrcode';
+  return method === 'pairing' ? 'pairing' : 'qrcode';
+}
+
 function setConnectWizardStep(step){
   const n = Number(step) || 1;
+  const method = getConnectMethod();
+
   els.wizardSteps?.forEach?.((el) => {
     const current = Number(el.dataset.step || 0);
     el.classList.toggle('is-active', current === n);
@@ -540,9 +594,67 @@ function setConnectWizardStep(step){
   if (els.wizardHint) {
     els.wizardHint.textContent =
       n === 4 ? 'Conexão confirmada. Estamos preparando sua instância.' :
+      n === 3 && method === 'pairing' ? 'Digite o código no WhatsApp do celular.' :
       n === 3 ? 'Escaneie o QR Code com o WhatsApp do celular.' :
       n === 2 ? 'Escolha quanto histórico deseja restaurar.' :
-      'Configure o apelido, escolha o histórico e escaneie o QR Code.';
+      'Configure o apelido, escolha o histórico e escolha como deseja conectar.';
+  }
+
+  if (els.wizardSubtitle) {
+    els.wizardSubtitle.textContent =
+      method === 'pairing'
+        ? 'Gere um código e digite no WhatsApp pelo caminho “Conectar com número de telefone”.'
+        : 'Escaneie o QR Code com o WhatsApp do celular para conectar.';
+  }
+}
+
+function updateConnectMethodUI(methodRaw){
+  const method = methodRaw === 'pairing' ? 'pairing' : 'qrcode';
+  currentConnectMethod = method;
+
+  els.methodRadios?.forEach?.((r) => { r.checked = r.value === method; });
+  els.methodOptions?.forEach?.((opt) => {
+    opt.classList.toggle('is-selected', opt.dataset.methodOption === method);
+  });
+
+  const isPairing = method === 'pairing';
+  els.phoneField?.classList.toggle('hidden', !isPairing);
+
+  if (els.qrLoader) {
+    const label = els.qrLoader.querySelector('span');
+    if (label) label.textContent = isPairing ? 'Gerando código...' : 'Gerando QR Code...';
+  }
+
+  if (els.btnGerarQR) {
+    const label = isPairing ? 'Gerar código' : 'Gerar QR Code';
+    els.btnGerarQR.innerHTML = `<i class="fa-solid ${isPairing ? 'fa-key' : 'fa-qrcode'}"></i><span>${label}</span>`;
+  }
+
+  if (els.btnRefresh) {
+    const label = isPairing ? 'Gerar novo código' : 'Atualizar QR Code';
+    els.btnRefresh.innerHTML = `<i class="fa-solid fa-rotate-right"></i><span>${label}</span>`;
+  }
+
+  if (els.scanHelpTitle) {
+    els.scanHelpTitle.textContent = isPairing ? 'Como conectar com código' : 'Como escanear';
+  }
+
+  if (els.scanHelpLast) {
+    els.scanHelpLast.textContent = isPairing
+      ? 'Toque em “Conectar com número de telefone” e digite o código exibido aqui.'
+      : 'Aponte a câmera para este QR Code.';
+  }
+
+  setConnectWizardStep(1);
+}
+
+function setConnectMethod(methodRaw, { focusPhone=false } = {}){
+  updateConnectMethodUI(methodRaw);
+  hideQR();
+  showQRError('');
+
+  if (focusPhone && currentConnectMethod === 'pairing') {
+    setTimeout(() => els.inNumero?.focus?.(), 40);
   }
 }
 
@@ -1670,6 +1782,17 @@ async function loadWhatsAppStatus(){
     updateSummaryCards(list);
 
     renderList(filterItemsByTab(allItems), tier);
+
+    // Se a conexão foi feita por código, às vezes o WebSocket não chega no front.
+    // Quando o status já aparece conectado na listagem, fecha o modal e mostra sucesso.
+    if (wantQR && currentInstance) {
+      const current = allItems.find(it => String(it?.instance_name || '') === String(currentInstance));
+      if (current?.connected) {
+        handleConnected(currentInstance);
+        return;
+      }
+    }
+
     schedulePresenceRefresh(150, { force:false });
 
   }catch(e){
@@ -1700,6 +1823,8 @@ function hideQR(){
   els.qrCanvas?.classList.add('hidden');
   const ctx = els.qrCanvas?.getContext?.('2d');
   if (ctx) ctx.clearRect(0,0,els.qrCanvas.width, els.qrCanvas.height);
+  els.pairingBox?.classList.add('hidden');
+  if (els.pairingCodeValue) els.pairingCodeValue.textContent = '--------';
   els.qrTimerWrap?.classList.add('hidden');
   els.qrInstru?.classList.add('hidden');
   els.qrLoader?.classList.add('hidden');
@@ -1752,7 +1877,10 @@ function renderQRFromBase64(b64, limit){
   els.qrCanvas?.classList.add('hidden');
   els.qrImg.src = src;
   els.qrImg.classList.remove('hidden');
-  els.qrInstru?.classList.remove('hidden');
+  if (els.qrInstru) {
+    els.qrInstru.innerHTML = '<span></span>Aguardando leitura do QR Code';
+    els.qrInstru.classList.remove('hidden');
+  }
   if (limit) startTimer(secondsFromLimit(limit));
   els.btnGerarQR?.classList.add('hidden');
   els.btnRefresh?.classList.remove('hidden');
@@ -1772,13 +1900,47 @@ function renderQRFromText(text, limit){
     });
     els.qrCanvas.classList.remove('hidden');
     els.qrImg?.classList.add('hidden');
-    els.qrInstru?.classList.remove('hidden');
+    els.pairingBox?.classList.add('hidden');
+    if (els.qrInstru) {
+      els.qrInstru.innerHTML = '<span></span>Aguardando leitura do QR Code';
+      els.qrInstru.classList.remove('hidden');
+    }
     if (limit) startTimer(secondsFromLimit(limit));
     els.btnGerarQR?.classList.add('hidden');
     els.btnRefresh?.classList.remove('hidden');
   }catch(e){
     showQRError('Falha ao gerar QR. Tente novamente.');
   }
+}
+
+function formatPairingCode(code){
+  const raw = String(code || '').trim().replace(/\s+/g, '').toUpperCase();
+  if (!raw) return '';
+  return raw.length === 8 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : raw;
+}
+
+function renderPairingCode(code, limit){
+  const formatted = formatPairingCode(code);
+  if (!formatted) return false;
+
+  setConnectWizardStep(3);
+  els.qrLoader?.classList.add('hidden');
+  hideIllustration();
+  els.qrImg?.classList.add('hidden');
+  els.qrCanvas?.classList.add('hidden');
+
+  if (els.pairingCodeValue) els.pairingCodeValue.textContent = formatted;
+  els.pairingBox?.classList.remove('hidden');
+
+  if (els.qrInstru) {
+    els.qrInstru.innerHTML = '<span></span>Digite este código no WhatsApp do celular';
+    els.qrInstru.classList.remove('hidden');
+  }
+
+  if (limit) startTimer(secondsFromLimit(limit));
+  els.btnGerarQR?.classList.add('hidden');
+  els.btnRefresh?.classList.remove('hidden');
+  return true;
 }
 
 function renderQRFromResponse(qr){
@@ -1788,15 +1950,80 @@ function renderQRFromResponse(qr){
     return true;
   }
   if (qr.pairingCode) {
-    renderQRFromText(qr.pairingCode, qr.limit);
+    renderPairingCode(qr.pairingCode, qr.limit);
     return true;
   }
   return false;
 }
 
+function stopConnectionWatch(){
+  if (connectionWatchTimer) {
+    clearTimeout(connectionWatchTimer);
+    connectionWatchTimer = null;
+  }
+  connectionWatchStartedAt = 0;
+  connectionWatchInstance = null;
+}
+
+async function checkInstanceConnected(instance){
+  if (!instance) return false;
+
+  // 1) Primeiro tenta o endpoint novo, que consulta DB e também a Evolution.
+  try {
+    const st = await apiGet(`/api/onboarding/empresas/connection/status/${encodeURIComponent(instance)}`);
+    if (st?.connected === true || isConnectedPayload(st)) return true;
+  } catch {}
+
+  // 2) Fallback: usa a lista normal do cliente.
+  try {
+    const js = await apiGet(`/api/empresas/${empresaId}/whatsapp`);
+    const list = Array.isArray(js?.instancias) ? js.instancias : [];
+    const row = list.find(i => String(i?.instance_name || '') === String(instance));
+    if (row && isConnectedPayload(row)) return true;
+  } catch {}
+
+  return false;
+}
+
+function startConnectionWatch(instance){
+  if (!instance) return;
+  stopConnectionWatch();
+
+  connectionWatchInstance = instance;
+  connectionWatchStartedAt = Date.now();
+
+  const tick = async () => {
+    if (!wantQR || !connectionWatchInstance || connectionWatchInstance !== instance) {
+      stopConnectionWatch();
+      return;
+    }
+
+    if (Date.now() - connectionWatchStartedAt > CONNECTION_WATCH_MAX_MS) {
+      stopConnectionWatch();
+      return;
+    }
+
+    const ok = await checkInstanceConnected(instance);
+    if (ok) {
+      handleConnected(instance);
+      return;
+    }
+
+    connectionWatchTimer = setTimeout(tick, CONNECTION_WATCH_INTERVAL_MS);
+  };
+
+  connectionWatchTimer = setTimeout(tick, 1000);
+}
+
 // ===== Conectado → overlay =====
 function handleConnected(instanceFromMsg){
   if (currentInstance && instanceFromMsg && instanceFromMsg !== currentInstance) return;
+
+  const handledKey = instanceFromMsg || currentInstance || window.currentInstance || '__connected__';
+  if (connectedHandledInstance === handledKey) return;
+  connectedHandledInstance = handledKey;
+
+  stopConnectionWatch();
   setConnectWizardStep(4);
   clearInterval(timerId);
   hideQR();
@@ -1835,7 +2062,7 @@ function attachEmpresaWS() {
       }
       const ttl = m.qr_limit ?? m.expires_in ?? m.ttl ?? 60;
       if (m.base64)           renderQRFromBase64(m.base64, ttl);
-      else if (m.pairingCode) renderQRFromText(m.pairingCode, ttl);
+      else if (m.pairingCode) renderPairingCode(m.pairingCode, ttl);
       return;
     }
     if (m?.type === 'connection' || m?.type === 'connected' || m?.status || m?.state || m?.inst_status){
@@ -1869,7 +2096,7 @@ function attachInstWS(instance) {
       }
       const ttl = m.qr_limit ?? m.expires_in ?? m.ttl ?? 60;
       if (m.base64)           renderQRFromBase64(m.base64, ttl);
-      else if (m.pairingCode) renderQRFromText(m.pairingCode, ttl);
+      else if (m.pairingCode) renderPairingCode(m.pairingCode, ttl);
       return;
     }
     if (m?.type === 'connection' || m?.type === 'connected' || m?.status || m?.state) {
@@ -1893,6 +2120,9 @@ async function handleConnectSubmit(ev){
 
   const apelido = els.inApelido?.value?.trim() || '';
   const historico = normalizeHistorico(els.selHist?.value || '24h');
+  const method = getConnectMethod();
+  const usePairing = method === 'pairing';
+  const numeroPairing = normalizePairingNumber(els.inNumero?.value || '');
 
   if (!apelido) {
     setConnectWizardStep(1);
@@ -1901,20 +2131,30 @@ async function handleConnectSubmit(ev){
     return;
   }
 
+  if (usePairing && !numeroPairing) {
+    setConnectWizardStep(1);
+    els.qrLoader?.classList.add('hidden');
+    showQRError('Informe o número do WhatsApp com DDI/DDD para gerar o código.');
+    els.inNumero?.focus?.();
+    return;
+  }
+
   try{
     lastHistoricoUsed = historico || '24h';
+    currentConnectMethod = method;
 
     const js = await apiPost('/api/onboarding/empresas/conectar', {
       empresa_id: empresaId,
-      whatsapp_numero: '',
+      whatsapp_numero: usePairing ? numeroPairing : '',
       historico_restaurar: historico,
       instance_name: null,
-      use_pairing: false,
+      use_pairing: usePairing,
       apelido: apelido || null
     });
 
     currentInstance = js?.instance || null;
     window.currentInstance = currentInstance;
+    connectedHandledInstance = null;
 
     if (currentInstance) attachInstWS(currentInstance);
     wantQR = true;
@@ -1927,6 +2167,7 @@ async function handleConnectSubmit(ev){
 
     if (currentInstance) {
       schedulePresenceRefresh(150, { force:true, onlyInstances:[currentInstance] });
+      startConnectionWatch(currentInstance);
     }
 
     if (rendered){
@@ -1945,11 +2186,37 @@ async function handleConnectSubmit(ev){
   }
 }
 
+
+async function requestConnectionRefresh(instance, { method=null, phone=null } = {}){
+  const usePairing = (method || getConnectMethod()) === 'pairing';
+  const numeroPairing = normalizePairingNumber(
+    phone ||
+    els.inNumero?.value ||
+    currentReconnectItem?.numero_instancia ||
+    ''
+  );
+
+  if (usePairing && !numeroPairing) {
+    showQRError('Informe o número do WhatsApp com DDI/DDD para gerar o código.');
+    els.inNumero?.focus?.();
+    return null;
+  }
+
+  return apiPost(
+    `/api/onboarding/empresas/qr/refresh/${encodeURIComponent(instance)}`,
+    {
+      use_pairing: usePairing,
+      whatsapp_numero: usePairing ? numeroPairing : ''
+    }
+  );
+}
+
 async function openReconnect(item){
   if (!item?.instance_name) return;
-  setConnectWizardStep(3);
+  currentReconnectItem = item;
   currentInstance = item.instance_name;
   window.currentInstance = currentInstance;
+  connectedHandledInstance = null;
 
   lastHistoricoUsed = 'none';
 
@@ -1958,6 +2225,9 @@ async function openReconnect(item){
   if (histRow) histRow.classList.add('hidden');
 
   if (els.inApelido) els.inApelido.value = item.apelido || '';
+  if (els.inNumero) els.inNumero.value = maskPhoneInput(item.numero_instancia || '');
+
+  setConnectMethod(item.numero_instancia ? 'pairing' : 'qrcode');
 
   showModal();
   showIllustration();
@@ -1968,10 +2238,18 @@ async function openReconnect(item){
 
   els.qrLoader?.classList.remove('hidden');
   try {
-    const res = await apiPost(
-      `/api/onboarding/empresas/qr/refresh/${encodeURIComponent(currentInstance)}`,
-      {}
+    const res = await requestConnectionRefresh(
+      currentInstance,
+      {
+        method: getConnectMethod(),
+        phone: item.numero_instancia || els.inNumero?.value || ''
+      }
     );
+    if (!res) {
+      els.qrLoader?.classList.add('hidden');
+      showIllustration();
+      return;
+    }
     els.qrLoader?.classList.add('hidden');
     const ok = renderQRFromResponse(res?.qrcode || {});
     wantQR = true;
@@ -1982,6 +2260,7 @@ async function openReconnect(item){
   }
 
   schedulePresenceRefresh(150, { force:true, onlyInstances:[currentInstance] });
+  startConnectionWatch(currentInstance);
 
   els.btnGerarQR?.classList.add('hidden');
   els.btnRefresh?.classList.remove('hidden');
@@ -1995,25 +2274,36 @@ async function refreshQR(){
     hideQR();
     els.qrLoader?.classList.remove('hidden');
     showIllustration();
-    const res = await apiPost(
-      `/api/onboarding/empresas/qr/refresh/${encodeURIComponent(window.currentInstance)}`,
-      {}
+    const res = await requestConnectionRefresh(
+      window.currentInstance,
+      {
+        method: getConnectMethod(),
+        phone: els.inNumero?.value || currentReconnectItem?.numero_instancia || ''
+      }
     );
+    if (!res) {
+      els.qrLoader?.classList.add('hidden');
+      showIllustration();
+      return;
+    }
     els.qrLoader?.classList.add('hidden');
     const ok = renderQRFromResponse(res?.qrcode || {});
     wantQR = true;
     if (!ok) showIllustration();
 
     schedulePresenceRefresh(200, { force:true, onlyInstances:[window.currentInstance] });
+    startConnectionWatch(window.currentInstance);
 
   }catch(e){
     els.qrLoader?.classList.add('hidden');
-    showQRError('Não foi possível atualizar o QR.');
+    showQRError('Não foi possível atualizar a conexão.');
   }
 }
 
 // ===== Listeners de UI =====
 function openConnectModal(){
+  stopConnectionWatch();
+  connectedHandledInstance = null;
   setConnectWizardStep(1);
   showModal();
   showIllustration();
@@ -2021,11 +2311,14 @@ function openConnectModal(){
   hideQR();
   wantQR = false;
   currentInstance = null;
+  currentReconnectItem = null;
   window.currentInstance = null;
 
   setModalTitle('Conectar novo número');
 
   if (els.inApelido) els.inApelido.value = '';
+  if (els.inNumero) els.inNumero.value = '';
+  setConnectMethod('qrcode');
 
   if (els.selHist) {
     els.selHist.value = '24h';
@@ -2073,12 +2366,29 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeHelpModal();
 });
 
+els.methodRadios?.forEach?.((radio) => {
+  radio.addEventListener('change', () => setConnectMethod(radio.value, { focusPhone: radio.value === 'pairing' }));
+});
+
+els.methodOptions?.forEach?.((option) => {
+  option.addEventListener('click', () => {
+    const method = option.dataset.methodOption || 'qrcode';
+    setConnectMethod(method, { focusPhone: method === 'pairing' });
+  });
+});
+
+els.inNumero?.addEventListener('input', () => {
+  const before = els.inNumero.value;
+  const masked = maskPhoneInput(before);
+  if (masked !== before) els.inNumero.value = masked;
+});
+
 els.selHist?.addEventListener('change', () => {
   updateHistoricoUI(els.selHist?.value || '24h');
 });
 
-els.btnCloseMd?.addEventListener('click', hideModal);
-els.btnCancel?.addEventListener('click', hideModal);
+els.btnCloseMd?.addEventListener('click', () => { stopConnectionWatch(); hideModal(); });
+els.btnCancel?.addEventListener('click', () => { stopConnectionWatch(); hideModal(); });
 els.form?.addEventListener('submit', handleConnectSubmit);
 els.btnRefresh?.addEventListener('click', refreshQR);
 
@@ -2211,6 +2521,7 @@ if (!empresaId){
 
 // ===== Teardown SPA =====
 function teardownConectar() {
+  stopConnectionWatch();
   try { offEmp?.(); offEmp = null; } catch {}
   try { offInst?.(); offInst = null; } catch {}
   try { if (empresaId) closeEmpresaWS(empresaId); } catch {}

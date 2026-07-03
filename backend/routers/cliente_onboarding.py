@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Literal, List, Dict, Any
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -141,6 +141,13 @@ class ConnectPayload(BaseModel):
     instance_name: Optional[str] = None
     use_pairing: bool = False
     apelido: Optional[str] = None
+
+
+class RefreshQRPayload(BaseModel):
+    # QR Code não precisa de número.
+    # Código de pareamento precisa do número com DDI/DDD.
+    whatsapp_numero: Optional[str] = ""
+    use_pairing: bool = False
 
 
 class SaudeNumeroPayload(BaseModel):
@@ -714,6 +721,119 @@ def _evo_connect(instance: str, number_digits: str | None) -> dict:
     return {}
 
 
+def _evo_extract_connection_state(obj: Any, *, instance: str | None = None, depth: int = 0) -> str | None:
+    """
+    Extrai o estado de conexão de respostas diferentes da Evolution.
+    Versões diferentes podem retornar state/status/connectionStatus em locais diferentes.
+    """
+    if depth > 5 or obj is None:
+        return None
+
+    if isinstance(obj, str):
+        raw = obj.strip()
+        low = raw.lower()
+        if low in {"open", "connected", "close", "closed", "connecting", "disconnected", "logout", "loggedout"}:
+            return raw
+        return None
+
+    if isinstance(obj, dict):
+        inst_ref = str(instance or "").strip()
+
+        # Quando a resposta é uma lista de instâncias transformada em dict, valida pelo nome.
+        if inst_ref:
+            possible_name = (
+                obj.get("instanceName")
+                or obj.get("instance_name")
+                or obj.get("instance")
+                or obj.get("name")
+            )
+            if isinstance(possible_name, dict):
+                possible_name = (
+                    possible_name.get("instanceName")
+                    or possible_name.get("instance_name")
+                    or possible_name.get("instance")
+                    or possible_name.get("name")
+                )
+            if possible_name and str(possible_name) != inst_ref:
+                # Ainda pode ser um wrapper com data/instance dentro, então não retorna aqui.
+                pass
+
+        for key in ("state", "status", "connectionStatus", "connection", "connection_state"):
+            if key in obj:
+                found = _evo_extract_connection_state(obj.get(key), instance=instance, depth=depth + 1)
+                if found:
+                    return found
+
+        for key in ("instance", "data", "response", "result"):
+            if key in obj:
+                found = _evo_extract_connection_state(obj.get(key), instance=instance, depth=depth + 1)
+                if found:
+                    return found
+
+        for value in obj.values():
+            found = _evo_extract_connection_state(value, instance=instance, depth=depth + 1)
+            if found:
+                return found
+
+    if isinstance(obj, list):
+        inst_ref = str(instance or "").strip()
+        for item in obj:
+            if isinstance(item, dict) and inst_ref:
+                possible_name = (
+                    item.get("instanceName")
+                    or item.get("instance_name")
+                    or item.get("name")
+                )
+                inst_obj = item.get("instance")
+                if isinstance(inst_obj, dict):
+                    possible_name = possible_name or inst_obj.get("instanceName") or inst_obj.get("instance_name") or inst_obj.get("name")
+                elif isinstance(inst_obj, str):
+                    possible_name = possible_name or inst_obj
+
+                if possible_name and str(possible_name) != inst_ref:
+                    continue
+
+            found = _evo_extract_connection_state(item, instance=instance, depth=depth + 1)
+            if found:
+                return found
+
+    return None
+
+
+def _state_is_connected(raw: Any) -> bool:
+    return str(raw or "").strip().lower() in {"open", "connected"}
+
+
+def _evo_connection_state(instance: str) -> tuple[bool, str | None, Dict[str, Any] | list | None]:
+    """
+    Consulta a Evolution quando o WebSocket/Rabbit não chega no front a tempo.
+    Isso é especialmente útil no Pairing Code: o celular conecta, mas a tela do código fica aberta.
+    """
+    if not (EVOLUTION_URL and EVOLUTION_KEY and instance):
+        return False, None, None
+
+    s = _http()
+    urls = [
+        f"{EVOLUTION_URL}/instance/connectionState/{instance}",
+        f"{EVOLUTION_URL}/instance/fetchInstances?instanceName={instance}",
+    ]
+
+    for url in urls:
+        try:
+            r = s.get(url, timeout=12)
+            if not r.ok:
+                continue
+
+            data = r.json() if "application/json" in (r.headers.get("content-type") or "").lower() else None
+            state = _evo_extract_connection_state(data, instance=instance)
+            if state:
+                return _state_is_connected(state), str(state), data
+        except Exception:
+            continue
+
+    return False, None, None
+
+
 def _evo_try_refresh_qr(instance: str, *, sync_full_history: bool = False) -> dict:
     _evo_prepare_instance_before_connect(instance, sync_full_history=sync_full_history)
     return _evo_connect(instance, None)
@@ -1082,14 +1202,75 @@ def conectar(
     }
 
 
+@router.get("/empresas/connection/status/{instance}")
+def connection_status(
+    instance: str,
+    db: Session = Depends(get_db),
+    identity=Depends(require_admin),
+):
+    """
+    Status usado pelo front enquanto espera QR/Pairing Code.
+    Se a Evolution já conectou mas o evento não chegou no navegador, este endpoint confirma,
+    atualiza o banco e permite fechar a tela com "conectado com sucesso".
+    """
+    instance = str(instance or "").strip()
+    if not instance:
+        raise HTTPException(400, "instance inválida.")
+
+    row = db.query(models.EmpresaInstancia).filter(
+        models.EmpresaInstancia.instance_name == instance
+    ).first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Instância não encontrada.")
+
+    _assert_empresa_access(identity, int(row.empresa_id))
+
+    db_connected = bool(getattr(row, "connected", False))
+    state = "connected" if db_connected else None
+    evo_connected = False
+
+    if not db_connected:
+        evo_connected, state, _raw = _evo_connection_state(instance)
+
+        if evo_connected:
+            try:
+                row.connected = True
+                row.last_seen = datetime.now(timezone.utc)
+                db.commit()
+            except Exception:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+
+            try:
+                cancel_auto_cleanup(instance)
+            except Exception:
+                pass
+
+    return {
+        "ok": True,
+        "instance": instance,
+        "connected": bool(db_connected or evo_connected),
+        "db_connected": bool(db_connected),
+        "evolution_connected": bool(evo_connected),
+        "state": state,
+        "numero": getattr(row, "numero_instancia", None),
+    }
+
+
 @router.post("/empresas/qr/refresh/{instance}")
 def refresh_qr(
     instance: str,
+    payload: Optional[RefreshQRPayload] = Body(default=None),
     db: Session = Depends(get_db),
     identity=Depends(require_admin),
 ):
     if not instance:
         raise HTTPException(400, "instance inválida.")
+
+    payload = payload or RefreshQRPayload()
 
     row = db.query(models.EmpresaInstancia).filter(
         models.EmpresaInstancia.instance_name == instance
@@ -1103,8 +1284,15 @@ def refresh_qr(
     empresa = _get_empresa_or_404(db, int(row.empresa_id))
     enforce_billing_active(
         empresa,
-        message="Seu plano está vencido. Renove para reativar ou atualizar QR de instâncias.",
+        message="Seu plano está vencido. Renove para reativar ou atualizar QR/código de instâncias.",
     )
+
+    use_pairing = bool(payload.use_pairing)
+    number_digits = _only_digits(payload.whatsapp_numero) or _only_digits(getattr(row, "numero_instancia", None))
+
+    # Pairing Code precisa de número. QR Code não.
+    if use_pairing and not number_digits:
+        raise HTTPException(400, "Informe o número do WhatsApp com DDI/DDD para gerar o código.")
 
     historico_restaurar = _normalize_historico_opcao(getattr(row, "historico_restaurar", None))
     sync_full_history = _should_sync_full_history(historico_restaurar)
@@ -1114,9 +1302,9 @@ def refresh_qr(
         sync_full_history=sync_full_history,
     )
 
-    js = _evo_try_refresh_qr(
+    js = _evo_connect(
         instance,
-        sync_full_history=sync_full_history,
+        number_digits if use_pairing else None,
     )
 
     qr = {}
@@ -1139,6 +1327,8 @@ def refresh_qr(
         "ok": True,
         "instance": instance,
         "qrcode": (qr or None),
+        "method": "pairing" if use_pairing else "qrcode",
+        "numero": number_digits or getattr(row, "numero_instancia", None),
         "historico_restaurar": historico_restaurar,
     }
 

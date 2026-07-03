@@ -20,6 +20,115 @@
   'use strict';
 
   const MAIN_VERSION = 'zc-atendimentos-main-v11-avatar-lazy-safe';
+  // v13/teste: se o usuário clicou para sair do Atendimento durante uma rajada de WS,
+  // impede que qualquer boot atrasado desta página recoloque /atendimentos na frente.
+  function getHardLeaveTarget() {
+    try {
+      const until = Number(sessionStorage.getItem('zc:atendimentos:leaving_until') || '0');
+      const to = sessionStorage.getItem('zc:atendimentos:leaving_to') || '';
+      if (!to || !until || Date.now() > until) return null;
+      const u = new URL(to, location.origin);
+      const dst = (u.pathname || '').replace(/\/+$/, '') || '/';
+      if (dst && dst !== '/atendimentos') return u.href;
+    } catch (e) {}
+    return null;
+  }
+
+  const __ZC_HARD_LEAVE_TARGET__ = getHardLeaveTarget();
+  if (__ZC_HARD_LEAVE_TARGET__) {
+    try { window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ = true; } catch (e) {}
+    try { window.location.replace(__ZC_HARD_LEAVE_TARGET__); } catch (e) { try { window.location.href = __ZC_HARD_LEAVE_TARGET__; } catch (_) {} }
+    return;
+  }
+
+  // v9: app-base.js não é carregado dentro do /atendimentos.
+  // Então a navegação forte precisa existir aqui também, no boot da própria tela.
+  // Sem isso, clique em Arquivos/Mídias podia ficar na fila atrás de render/WS.
+  (function bindAtendimentoHardNavEarly() {
+    if (window.__ZC_ATENDIMENTOS_HARD_NAV_EARLY_BOUND__) return;
+    window.__ZC_ATENDIMENTOS_HARD_NAV_EARLY_BOUND__ = true;
+
+    function norm(p) {
+      return String(p || '').split('?')[0].split('#')[0].replace(/\/+$/, '') || '/';
+    }
+
+    function isInternalLink(a) {
+      if (!a) return null;
+      try {
+        const href = a.getAttribute('href') || '';
+        if (!href || href.charAt(0) === '#') return null;
+        if (a.target && a.target !== '_self') return null;
+        const u = new URL(href, location.origin);
+        if (u.origin !== location.origin) return null;
+        return u;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function markLeaving(u, reason) {
+      try {
+        const until = String(Date.now() + 20000);
+        window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ = true;
+        window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__ = u.href;
+        sessionStorage.setItem('zc:atendimentos:leaving_until', until);
+        sessionStorage.setItem('zc:atendimentos:leaving_to', u.href);
+        sessionStorage.setItem('zc:atendimentos:leaving_reason', reason || 'atendimento-main-nav');
+      } catch (_) {}
+
+      try { window.dispatchEvent(new CustomEvent('zc:navigate-away', { detail: { from: location.pathname, to: u.pathname, reason: reason || 'atendimento-main-nav', hard: true } })); } catch (_) {}
+      try { window.zcAtendimentoWsMarkNavigatingAway && window.zcAtendimentoWsMarkNavigatingAway(reason || 'atendimento-main-nav'); } catch (_) {}
+      try { window.zcAtendimentoWsClearPendingWork && window.zcAtendimentoWsClearPendingWork(reason || 'atendimento-main-nav'); } catch (_) {}
+      try { window.zcHistoricoClearOpenRealtimeWork && window.zcHistoricoClearOpenRealtimeWork(reason || 'atendimento-main-nav'); } catch (_) {}
+      try { window.ZCForceClearLoading && window.ZCForceClearLoading(reason || 'atendimento-main-nav'); } catch (_) {}
+      try { window.PageLoading && window.PageLoading.hide && window.PageLoading.hide(); } catch (_) {}
+      try { window.PageLoading && window.PageLoading.reset && window.PageLoading.reset(); } catch (_) {}
+      try { window.Splash && window.Splash.hide && window.Splash.hide(); } catch (_) {}
+    }
+
+    function hardGo(u, ev, reason) {
+      try { ev && ev.preventDefault && ev.preventDefault(); } catch (_) {}
+      try { ev && ev.stopPropagation && ev.stopPropagation(); } catch (_) {}
+      try { ev && ev.stopImmediatePropagation && ev.stopImmediatePropagation(); } catch (_) {}
+
+      markLeaving(u, reason);
+
+      try { location.assign(u.href); } catch (_) {
+        try { location.href = u.href; } catch (__) {}
+      }
+
+      // reforços curtos contra handlers atrasados do Atendimento
+      [0, 40, 120, 300].forEach((delay) => {
+        setTimeout(() => {
+          try {
+            if (window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__ && location.href !== window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__) {
+              location.assign(window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__);
+            }
+          } catch (_) {}
+        }, delay);
+      });
+    }
+
+    function onNavIntent(ev) {
+      try {
+        const a = ev.target && ev.target.closest && ev.target.closest('a[href]');
+        const u = isInternalLink(a);
+        if (!u) return;
+
+        const cur = norm(location.pathname);
+        const dst = norm(u.pathname);
+        if (cur !== '/atendimentos' || dst === '/atendimentos' || cur === dst) return;
+
+        hardGo(u, ev, ev.type || 'atendimento-main-nav');
+      } catch (_) {}
+    }
+
+    document.addEventListener('pointerdown', onNavIntent, { capture: true });
+    document.addEventListener('mousedown', onNavIntent, { capture: true });
+    document.addEventListener('click', onNavIntent, { capture: true });
+    try { document.addEventListener('touchstart', onNavIntent, { capture: true, passive: false }); } catch (_) {}
+  })();
+
 
   /*
     Se este arquivo for carregado duas vezes por engano

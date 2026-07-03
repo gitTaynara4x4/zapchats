@@ -50,6 +50,13 @@ const EMPRESA_ID = Number(
 
 const DEBUG_WS = Boolean(window.DEBUG_WS ?? false);
 
+// v11/teste: deixa o WS do atendimento leve por padrão.
+// O problema testado aqui: ao chegar mensagem em tempo real, o frontend fazia
+// render/badge várias vezes e podia atrasar clique/navegação para outras telas.
+const WS_LIGHT_MODE = window.ZC_WS_LIGHT_MODE !== false;
+const WS_BADGE_REPEAT_LIGHT = window.ZC_WS_BADGE_REPEAT_LIGHT !== false;
+
+
 const WS_CID = (() => {
   try {
     if (window.__ZC_WS_CID__) return window.__ZC_WS_CID__;
@@ -77,6 +84,50 @@ let lagTimer = null;
 
 let __reloadListTimer = null;
 let __lastReloadListAt = 0;
+let __zcWsNavigatingAway = false;
+
+// v12/teste: quando chegam várias mensagens em sequência, não podemos
+// martelar o DOM várias vezes por mensagem. Mantemos só a última atualização
+// de badge por conversa e aplicamos em lote pequeno.
+const __zcWsBadgeTimers = new Map();
+const __zcWsBadgeLatest = new Map();
+
+function isNavigatingAway() {
+  try {
+    if (__zcWsNavigatingAway) return true;
+    if (window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ === true) return true;
+    try {
+      const until = Number(sessionStorage.getItem('zc:atendimentos:leaving_until') || '0');
+      const to = sessionStorage.getItem('zc:atendimentos:leaving_to') || '';
+      if (until && Date.now() < until && to) return true;
+    } catch {}
+    if (!String(location.pathname || '').includes('/atendimentos')) return true;
+  } catch {}
+  return false;
+}
+
+function clearWsPendingWork(reason = 'nav-away') {
+  try { if (__zcWsOpenRenderTimer) clearTimeout(__zcWsOpenRenderTimer); } catch {}
+  try { if (__reloadListTimer) clearTimeout(__reloadListTimer); } catch {}
+  try { for (const t of __zcWsBadgeTimers.values()) clearTimeout(t); } catch {}
+  try { __zcWsBadgeTimers.clear(); __zcWsBadgeLatest.clear(); } catch {}
+  try { __zcWsEventQueue.length = 0; } catch {}
+  try { if (__zcWsEventFlushTimer) clearTimeout(__zcWsEventFlushTimer); } catch {}
+  __zcWsOpenRenderTimer = 0;
+  __reloadListTimer = null;
+  __zcWsEventFlushTimer = 0;
+
+  try { window.ZCForceClearLoading?.(reason); } catch {}
+  try { window.PageLoading?.hide?.(); } catch {}
+  try { window.PageLoading?.reset?.(); } catch {}
+  try { window.Splash?.hide?.(); } catch {}
+}
+
+function markWsNavigatingAway(reason = 'nav-away') {
+  __zcWsNavigatingAway = true;
+  try { window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ = true; } catch {}
+  clearWsPendingWork(reason);
+}
 
 /* =========================================================
    BASE HELPERS
@@ -876,6 +927,93 @@ function getOpenRefIfMatchesIncoming(incomingRef, data = null) {
   return null;
 }
 
+
+function getOpenRefForIncomingUsingOpenKey(incomingRef, data = null) {
+  /*
+    Fallback seguro para conversa JÁ ABERTA.
+
+    Para o histórico aberto, a key que manda é a key que está no DOM.
+    Se o evento WS vem com outra representação de instância, renderizar pela
+    key do evento faz o historico.js ignorar o append por segurança.
+  */
+  try {
+    if (!isChatUiActuallyOpen()) return null;
+
+    const open = getOpenContext();
+    if (!open) return null;
+
+    const incoming = normalizeConversationRef(
+      incomingRef,
+      typeof incomingRef === 'object' ? incomingRef : data
+    );
+
+    if (!incoming?.kind || !incoming?.entityId) return null;
+
+    const openKind = open.kind || incoming.kind || 'c';
+    if (String(openKind || 'c') !== String(incoming.kind || 'c')) return null;
+
+    let sameEntity = false;
+
+    if (open.entityId && incoming.entityId) {
+      sameEntity = String(open.entityId) === String(incoming.entityId);
+    }
+
+    if (!sameEntity && incoming.kind === 'c') {
+      const incomingPhone =
+        data?.telefone_norm ??
+        data?.telefone ??
+        data?.phone ??
+        data?.numero ??
+        data?.number ??
+        data?.remoteJid ??
+        data?.remote_jid ??
+        data?.jid ??
+        '';
+
+      if (incomingPhone && open.phone && samePhone(open.phone, incomingPhone)) {
+        sameEntity = true;
+      }
+    }
+
+    if (!sameEntity) return null;
+
+    let instOk = false;
+
+    if (open.instId && incoming.instId) {
+      instOk = sameInstForOpen(open.instId, incoming.instId);
+    }
+
+    if (!instOk) {
+      const active = getActiveInstKey();
+      if (active && incoming.instId && sameInstForOpen(active, incoming.instId)) {
+        if (!open.instId || sameInstForOpen(open.instId, active)) instOk = true;
+      }
+    }
+
+    if (!instOk && !open.instId && incoming.instId) {
+      instOk = true;
+    }
+
+    if (!instOk) return null;
+
+    const entityId = open.entityId || incoming.entityId;
+    const instId = open.instId || getActiveInstKey() || incoming.instId;
+    const key = open.key || buildConversationKey(openKind, entityId, instId);
+
+    if (!key || !entityId || !instId) return null;
+
+    return {
+      key,
+      kind: openKind,
+      entityId,
+      instId,
+      from: 'open-dom',
+    };
+  } catch {
+    return null;
+  }
+}
+
 /* =========================================================
    INSTÂNCIA / TOPIC
 ========================================================= */
@@ -1092,7 +1230,7 @@ function resolveKnownRefForIncoming(data) {
     Isso resolve o problema: mensagem chega via WS, está na conversa aberta,
     mas a lista/cache ainda não reconheceu o item.
   */
-  const openRef = getOpenRefIfMatchesIncoming(incoming, data);
+  const openRef = getOpenRefForIncomingUsingOpenKey(incoming, data) || getOpenRefIfMatchesIncoming(incoming, data);
   if (openRef?.key) return openRef;
 
   const known = findKnownConversationByRef(incoming, data);
@@ -1455,12 +1593,14 @@ function scrollBottomSoon() {
 }
 
 const WS_RENDER_DEBOUNCE_MS = Number(
-  window.ZC_WS_RENDER_DEBOUNCE_MS || (window.ZC_LOW_RAM_MODE ? 180 : 0)
+  window.ZC_WS_RENDER_DEBOUNCE_MS ?? (WS_LIGHT_MODE ? 180 : (window.ZC_LOW_RAM_MODE ? 250 : 0))
 );
 let __zcWsOpenRenderTimer = 0;
 let __zcWsOpenRenderKey = '';
 
 function renderOpenConversationFromWs(convRef) {
+  if (isNavigatingAway()) return;
+
   const ref = normalizeConversationRef(convRef, typeof convRef === 'object' ? convRef : null);
   if (!ref?.key) return;
 
@@ -1469,6 +1609,7 @@ function renderOpenConversationFromWs(convRef) {
   } catch {}
 
   const renderOnce = () => {
+    if (isNavigatingAway()) return;
     try {
       renderHistoricoDoCache(ref.key, true);
       scrollBottomSoon();
@@ -1483,9 +1624,10 @@ function renderOpenConversationFromWs(convRef) {
     __zcWsOpenRenderKey = ref.key;
     if (__zcWsOpenRenderTimer) clearTimeout(__zcWsOpenRenderTimer);
     __zcWsOpenRenderTimer = setTimeout(() => {
+      if (isNavigatingAway()) return;
       if (__zcWsOpenRenderKey !== ref.key) return;
       renderOnce();
-    }, WS_RENDER_DEBOUNCE_MS || 180);
+    }, WS_RENDER_DEBOUNCE_MS || 120);
     return;
   }
 
@@ -1499,18 +1641,54 @@ function renderOpenConversationFromWs(convRef) {
   setTimeout(renderOnce, 250);
 }
 
+function badgeKeyFromRef(refOrKey, patch = null) {
+  try {
+    if (typeof refOrKey === 'string') return refOrKey || 'unknown';
+    if (refOrKey?.key) return String(refOrKey.key);
+    if (refOrKey?.conversation_key) return String(refOrKey.conversation_key);
+    if (refOrKey?.conversation_id) return String(refOrKey.conversation_id);
+    if (patch?.conversation_key) return String(patch.conversation_key);
+    if (patch?.conversation_id) return String(patch.conversation_id);
+    const k = normalizeConversationRef(refOrKey, patch)?.key;
+    if (k) return String(k);
+  } catch {}
+  return 'unknown';
+}
+
 function scheduleForceUnreadBadgeDom(refOrKey, unread, patch = null) {
-  const run = () => {
-    try { forceUnreadBadgeDom(refOrKey, unread, patch); } catch {}
+  if (isNavigatingAway()) return;
+
+  const runNow = (r, u, p) => {
+    if (isNavigatingAway()) return;
+    try { forceUnreadBadgeDom(r, u, p); } catch {}
   };
 
-  run();
+  // v12/teste: em modo leve, debounce por conversa. Sem isso, 7 mensagens
+  // geravam várias passagens completas no DOM e podiam atrasar clique/navegação.
+  if (WS_LIGHT_MODE || window.ZC_LOW_RAM_MODE || WS_BADGE_REPEAT_LIGHT) {
+    const key = badgeKeyFromRef(refOrKey, patch);
+    __zcWsBadgeLatest.set(key, { refOrKey, unread, patch });
 
-  if (window.ZC_LOW_RAM_MODE || window.ZC_WS_BADGE_REPEAT_LIGHT === true) {
-    try { setTimeout(run, 120); } catch {}
+    try {
+      const oldTimer = __zcWsBadgeTimers.get(key);
+      if (oldTimer) clearTimeout(oldTimer);
+    } catch {}
+
+    const timer = setTimeout(() => {
+      if (isNavigatingAway()) return;
+      const latest = __zcWsBadgeLatest.get(key);
+      __zcWsBadgeTimers.delete(key);
+      __zcWsBadgeLatest.delete(key);
+      if (!latest) return;
+      runNow(latest.refOrKey, latest.unread, latest.patch);
+    }, Number(window.ZC_WS_BADGE_DEBOUNCE_MS ?? 160));
+
+    __zcWsBadgeTimers.set(key, timer);
     return;
   }
 
+  const run = () => runNow(refOrKey, unread, patch);
+  run();
   try { requestAnimationFrame(run); } catch {}
   try { setTimeout(run, 0); } catch {}
   try { setTimeout(run, 60); } catch {}
@@ -1518,12 +1696,13 @@ function scheduleForceUnreadBadgeDom(refOrKey, unread, patch = null) {
   try { setTimeout(run, 420); } catch {}
   try { setTimeout(run, 900); } catch {}
 }
-
 /* =========================================================
    LISTA OFICIAL
 ========================================================= */
 
 function requestOfficialListReload(reason = 'ws-reload') {
+  if (isNavigatingAway()) return;
+
   const now = Date.now();
 
   if (now - __lastReloadListAt < 1200) return;
@@ -1532,6 +1711,8 @@ function requestOfficialListReload(reason = 'ws-reload') {
   clearTimeout(__reloadListTimer);
 
   __reloadListTimer = setTimeout(() => {
+    if (isNavigatingAway()) return;
+
     // Correção v10:
     // Nunca força reload pesado da lista a partir de WS.
     // O force:true + convForceReload era o gatilho do carregamento infinito.
@@ -1742,22 +1923,12 @@ function bumpPreview(convKey, msg, inst = null) {
   const finalKey = getConversationIdFromRow(updated) || ref.key;
 
   try {
-    scheduleForceUnreadBadgeDom(finalKey, unread, {
-      ...patch,
-      conversation_key: finalKey,
-      conversation_id: finalKey,
-      kind: ref.kind,
-      entity_id: ref.entityId,
-      cliente_id: ref.kind === 'c' ? ref.entityId : patch?.cliente_id,
-      grupo_id: ref.kind === 'g' ? ref.entityId : patch?.grupo_id,
-      instancia_id: ref.instId,
-    });
-  } catch {}
-
-  try {
     window.Lista?.updatePreview?.(finalKey, patch);
   } catch {}
 
+  // v11/teste: uma única atualização de badge é suficiente.
+  // Antes essa chamada aparecia duas vezes no mesmo bumpPreview(),
+  // multiplicando timers/DOM quando chegava mensagem via WS.
   try {
     scheduleForceUnreadBadgeDom(finalKey, unread, {
       ...patch,
@@ -1871,6 +2042,53 @@ function normalizeMsgForHist(data, convRef) {
   if (data?.apagada_usuario != null) out.apagada_usuario = Boolean(data.apagada_usuario);
 
   return out;
+}
+
+
+
+let __zcWsOpenDbRefreshTimer = 0;
+let __zcWsOpenDbRefreshKey = '';
+
+function forceRefreshOpenConversationFromDbSoon(convRef, reason = 'ws-open-db-refresh') {
+  if (isNavigatingAway()) return;
+
+  const ref = normalizeConversationRef(convRef, typeof convRef === 'object' ? convRef : null);
+  if (!ref?.key) return;
+
+  const open = getOpenContext();
+  const openKey = open?.key || ref.key;
+
+  if (!openKey) return;
+
+  __zcWsOpenDbRefreshKey = String(openKey);
+
+  if (__zcWsOpenDbRefreshTimer) clearTimeout(__zcWsOpenDbRefreshTimer);
+
+  __zcWsOpenDbRefreshTimer = setTimeout(() => {
+    if (isNavigatingAway()) return;
+
+    const current = getOpenContext();
+    const currentKey = current?.key || '';
+
+    if (currentKey && String(currentKey) !== __zcWsOpenDbRefreshKey) return;
+
+    try {
+      if (typeof window.zcForceHistoryRefresh === 'function') {
+        window.zcForceHistoryRefresh(__zcWsOpenDbRefreshKey, {
+          append: true,
+          limit: 12,
+          reason,
+        });
+        return;
+      }
+    } catch {}
+
+    try {
+      if (typeof window.abrirHistorico === 'function') {
+        window.abrirHistorico(__zcWsOpenDbRefreshKey);
+      }
+    } catch {}
+  }, Number(window.ZC_WS_OPEN_DB_REFRESH_MS || 450));
 }
 
 function candidateInstKeysForCache(ref, msg = null, explicitInst = null) {
@@ -2094,6 +2312,8 @@ function handleDeleteMensagem(data) {
 ========================================================= */
 
 function handleNovaMensagem(data) {
+  if (isNavigatingAway()) return;
+
   const incomingRef = normalizeIncomingConversationRef(data);
 
   if (!incomingRef?.key || !incomingRef?.kind || !incomingRef?.entityId || !incomingRef?.instId) {
@@ -2108,7 +2328,7 @@ function handleNovaMensagem(data) {
     return;
   }
 
-  const openRefDirect = getOpenRefIfMatchesIncoming(incomingRef, data);
+  const openRefDirect = getOpenRefForIncomingUsingOpenKey(incomingRef, data) || getOpenRefIfMatchesIncoming(incomingRef, data);
   const knownRef = openRefDirect || resolveKnownRefForIncoming(data);
 
   /*
@@ -2116,7 +2336,7 @@ function handleNovaMensagem(data) {
     Mas se a conversa JÁ ESTÁ ABERTA, pode renderizar usando o contexto aberto.
   */
   if (!knownRef?.key || !knownRef?.instId) {
-    const openRef = openRefDirect || getOpenRefIfMatchesIncoming(incomingRef, data);
+    const openRef = openRefDirect || getOpenRefForIncomingUsingOpenKey(incomingRef, data) || getOpenRefIfMatchesIncoming(incomingRef, data);
 
     if (!openRef?.key || !openRef?.instId) {
       if (DEBUG_WS) {
@@ -2176,6 +2396,7 @@ function handleNovaMensagem(data) {
     */
 
     renderOpenConversationFromWs(openRef);
+    forceRefreshOpenConversationFromDbSoon(openRef, 'ws-open-unknown');
     notifyNewMessage(normalizedOpenPayload, openRef.key);
 
     return;
@@ -2223,17 +2444,19 @@ function handleNovaMensagem(data) {
 
   const updated = bumpPreview(knownRef, normalizedPayload, knownRef.instId);
 
-  try {
-    const explicitUnread = unreadFromRow(normalizedPayload);
-    const existingUnread = unreadFromRow(findKnownConversationByRef(knownRef, normalizedPayload));
-    const fallbackUnread = existingUnread > 0 ? existingUnread : explicitUnread;
+  if (!WS_LIGHT_MODE) {
+    try {
+      const explicitUnread = unreadFromRow(normalizedPayload);
+      const existingUnread = unreadFromRow(findKnownConversationByRef(knownRef, normalizedPayload));
+      const fallbackUnread = existingUnread > 0 ? existingUnread : explicitUnread;
 
-    if (!openNow) {
-      scheduleForceUnreadBadgeDom(knownRef, fallbackUnread, normalizedPayload);
-    } else {
-      scheduleForceUnreadBadgeDom(knownRef, 0, normalizedPayload);
-    }
-  } catch {}
+      if (!openNow) {
+        scheduleForceUnreadBadgeDom(knownRef, fallbackUnread, normalizedPayload);
+      } else {
+        scheduleForceUnreadBadgeDom(knownRef, 0, normalizedPayload);
+      }
+    } catch {}
+  }
 
   dispatchRealtimeMessageEvents(normalizedPayload);
 
@@ -2262,6 +2485,7 @@ function handleNovaMensagem(data) {
       try { window.zcScheduleMarkChatAsSeen?.(knownRef.key, normalizedPayload, { delay: 700 }); } catch {}
 
       renderOpenConversationFromWs(knownRef);
+      forceRefreshOpenConversationFromDbSoon(knownRef, 'ws-open-known');
 
       try {
         if (knownRef.kind === 'c' && knownRef.entityId) {
@@ -2329,7 +2553,9 @@ function handleNovaMensagem(data) {
           ? explicitFinal
           : Math.max(0, currentUnread + (Number.isFinite(deltaFinal) ? deltaFinal : 1));
 
-    scheduleForceUnreadBadgeDom(knownRef, finalBadgeUnread, normalizedPayload);
+    if (!WS_LIGHT_MODE) {
+      scheduleForceUnreadBadgeDom(knownRef, finalBadgeUnread, normalizedPayload);
+    }
   } catch {}
 
   if (DEBUG_WS) {
@@ -2539,7 +2765,74 @@ function backoff(fn, ref) {
    DISPATCHER
 ========================================================= */
 
+
+// v12/teste: fila cooperativa. Em rajadas, processa poucos eventos por vez
+// e devolve o controle para o navegador entre eles, para clique no menu não
+// ficar preso esperando o Atendimento terminar render/badge/seen.
+const WS_EVENT_QUEUE_ENABLED = window.ZC_WS_EVENT_QUEUE_ENABLED !== false;
+const WS_EVENT_CHUNK_DELAY_MS = Number(window.ZC_WS_EVENT_CHUNK_DELAY_MS ?? 35);
+const WS_EVENT_MAX_PER_TICK = Math.max(1, Number(window.ZC_WS_EVENT_MAX_PER_TICK ?? 1));
+let __zcWsEventQueue = [];
+let __zcWsEventFlushTimer = 0;
+let __zcWsEventFlushing = false;
+
+function scheduleWsEventFlush() {
+  if (isNavigatingAway()) {
+    __zcWsEventQueue.length = 0;
+    return;
+  }
+  if (__zcWsEventFlushTimer) return;
+  __zcWsEventFlushTimer = setTimeout(flushWsEventQueue, WS_EVENT_CHUNK_DELAY_MS);
+}
+
+function flushWsEventQueue() {
+  __zcWsEventFlushTimer = 0;
+  if (isNavigatingAway()) {
+    __zcWsEventQueue.length = 0;
+    return;
+  }
+  if (__zcWsEventFlushing) return;
+
+  __zcWsEventFlushing = true;
+  try {
+    let count = 0;
+    while (count < WS_EVENT_MAX_PER_TICK && __zcWsEventQueue.length && !isNavigatingAway()) {
+      const ev = __zcWsEventQueue.shift();
+      try { handleMessageImmediate(ev); } catch (e) {
+        if (DEBUG_WS) console.warn('[WS][queue] falha processando evento', e);
+      }
+      count += 1;
+    }
+  } finally {
+    __zcWsEventFlushing = false;
+  }
+
+  if (__zcWsEventQueue.length && !isNavigatingAway()) {
+    scheduleWsEventFlush();
+  }
+}
+
 function handleMessage(ev) {
+  if (isNavigatingAway()) return;
+  if (!WS_EVENT_QUEUE_ENABLED) {
+    handleMessageImmediate(ev);
+    return;
+  }
+
+  __zcWsEventQueue.push(ev);
+
+  // Proteção: se vier rajada absurda, preserva eventos recentes e não deixa
+  // o navegador afogar em backlog velho.
+  if (__zcWsEventQueue.length > 80) {
+    __zcWsEventQueue = __zcWsEventQueue.slice(-80);
+  }
+
+  scheduleWsEventFlush();
+}
+
+function handleMessageImmediate(ev) {
+  if (isNavigatingAway()) return;
+
   if (typeof ev?.data === 'string' && (ev.data === 'pong' || ev.data === 'ping')) return;
 
   const raw = typeof ev?.data === 'string' ? safeJson(ev.data) : ev?.data;
@@ -2681,6 +2974,7 @@ function isAtendimentosPage() {
 }
 
 function connectEmpresaWS() {
+  if (isNavigatingAway()) return;
   if (!EMPRESA_ID) return;
 
   ensureCoreEmpresaWS(EMPRESA_ID);
@@ -2834,6 +3128,10 @@ function disconnectInstWS() {
 
 try {
   const boot = () => {
+    if (isNavigatingAway()) {
+      try { clearWsPendingWork('boot-navigating-away'); } catch {}
+      return;
+    }
     if (window.__ZC_WS_EMPRESA_BOOTED__) {
       if (DEBUG_WS) console.debug('[WS] boot ignorado: websocket já inicializado nesta página');
       return;
@@ -2873,10 +3171,24 @@ try {
     });
   }
 
+  if (!window.__ZC_WS_NAV_AWAY_BOUND__) {
+    window.__ZC_WS_NAV_AWAY_BOUND__ = true;
+
+    window.addEventListener('zc:navigate-away', () => {
+      try { markWsNavigatingAway('zc:navigate-away'); } catch {}
+    });
+
+    window.addEventListener('pagehide', () => {
+      try { markWsNavigatingAway('pagehide'); } catch {}
+    });
+  }
+
   if (!window.__ZC_WS_BEFOREUNLOAD_BOUND__) {
     window.__ZC_WS_BEFOREUNLOAD_BOUND__ = true;
 
     window.addEventListener('beforeunload', () => {
+      try { markWsNavigatingAway('beforeunload'); } catch {}
+
       try {
         disconnectInstWS();
       } catch {}
@@ -2891,6 +3203,8 @@ try {
 try {
   window.zcForceUnreadBadgeDom = forceUnreadBadgeDom;
   window.zcScheduleForceUnreadBadgeDom = scheduleForceUnreadBadgeDom;
+  window.zcAtendimentoWsMarkNavigatingAway = markWsNavigatingAway;
+  window.zcAtendimentoWsClearPendingWork = clearWsPendingWork;
 } catch {}
 
 export {

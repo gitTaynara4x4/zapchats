@@ -473,19 +473,84 @@
       }
     }
 
+    function markHardAtendimentoLeave(u, reason) {
+      try {
+        var until = String(Date.now() + 15000);
+        window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ = true;
+        window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__ = u.href;
+        sessionStorage.setItem('zc:atendimentos:leaving_until', until);
+        sessionStorage.setItem('zc:atendimentos:leaving_to', u.href);
+        sessionStorage.setItem('zc:atendimentos:leaving_reason', reason || 'nav');
+      } catch (ee) {}
+
+      try { window.dispatchEvent(new CustomEvent('zc:navigate-away', { detail: { from: location.pathname, to: u.pathname, reason: reason || 'nav', hard: true } })); } catch (ee) {}
+      try { window.zcAtendimentoWsMarkNavigatingAway && window.zcAtendimentoWsMarkNavigatingAway(reason || 'hard-nav'); } catch (ee) {}
+      try { window.zcAtendimentoWsClearPendingWork && window.zcAtendimentoWsClearPendingWork(reason || 'hard-nav'); } catch (ee) {}
+      try { window.zcHistoricoClearOpenRealtimeWork && window.zcHistoricoClearOpenRealtimeWork(reason || 'hard-nav'); } catch (ee) {}
+      try { window.ZCForceClearLoading && window.ZCForceClearLoading(reason || 'hard-nav'); } catch (ee) {}
+      try { window.PageLoading && window.PageLoading.hide && window.PageLoading.hide(); } catch (ee) {}
+      try { window.PageLoading && window.PageLoading.reset && window.PageLoading.reset(); } catch (ee) {}
+      try { window.Splash && window.Splash.hide && window.Splash.hide(); } catch (ee) {}
+    }
+
+    function hardNavigateNow(u, reason) {
+      try { markHardAtendimentoLeave(u, reason); } catch (ee) {}
+      try { window.location.replace(u.href); } catch (ee) {
+        try { window.location.href = u.href; } catch (eee) {}
+      }
+      // Se algum handler antigo tentar recolocar /atendimentos no mesmo ciclo,
+      // reforça a rota alvo por alguns ticks curtos.
+      setTimeout(function(){ try { if (window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__ && location.href !== window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__) location.replace(window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__); } catch(e){} }, 0);
+      setTimeout(function(){ try { if (window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__ && location.href !== window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__) location.replace(window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__); } catch(e){} }, 80);
+      setTimeout(function(){ try { if (window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__ && location.href !== window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__) location.replace(window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__); } catch(e){} }, 250);
+    }
+
+    function forceImmediateLeaveAtendimentos(e) {
+      try {
+        var a = e.target && e.target.closest && e.target.closest('a[href]');
+        if (!a) return;
+
+        if (!shouldIntercept(a)) return;
+
+        var u = new URL(a.getAttribute('href') || '', location.origin);
+        var cur = (location.pathname || '').replace(/\/+$/, '') || '/';
+        var dst = (u.pathname || '').replace(/\/+$/, '') || '/';
+
+        // v8: dentro de /atendimentos, QUALQUER link interno para outra tela
+        // precisa ganhar prioridade. O menu "Arquivos/Mídias" pode estar fora
+        // de .app-sidebar/nav; antes ele caía no click normal e ficava preso
+        // atrás dos timers de histórico/WS.
+        if (cur !== '/atendimentos' || dst === '/atendimentos' || cur === dst) return;
+
+        // v12/teste: usa pointerdown/touchstart, antes do click. Em rajada de WS,
+        // o click podia ficar para trás; aqui a intenção de navegação ganha prioridade.
+        try { e.preventDefault(); } catch (ee) {}
+        try { e.stopPropagation(); } catch (ee) {}
+        try { if (e.stopImmediatePropagation) e.stopImmediatePropagation(); } catch (ee) {}
+
+        try { window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ = true; } catch (ee) {}
+        try { window.dispatchEvent(new CustomEvent('zc:navigate-away', { detail: { from: cur, to: dst, early: true } })); } catch (ee) {}
+        hardNavigateNow(u, 'app-base-pointer-nav');
+      } catch (err) {}
+    }
+
+    document.addEventListener('pointerdown', forceImmediateLeaveAtendimentos, { capture: true });
+    document.addEventListener('mousedown', forceImmediateLeaveAtendimentos, { capture: true });
+    try { document.addEventListener('touchstart', forceImmediateLeaveAtendimentos, { capture: true, passive: false }); } catch (e) {}
+
     document.addEventListener('click', function(e) {
       var a = e.target.closest && e.target.closest('a[href]');
       if (!a) return;
 
+      if (!shouldIntercept(a)) return;
       var inMenu = a.closest('.app-sidebar, nav');
       var wantsWait = a.hasAttribute('data-wait');
-      if (!inMenu && !wantsWait) return;
-      if (!shouldIntercept(a)) return;
 
       try {
         var u2 = new URL(a.getAttribute('href') || '', location.origin);
         var cur2 = (location.pathname || '').replace(/\/+$/, '') || '/';
         var dst2 = (u2.pathname || '').replace(/\/+$/, '') || '/';
+        if (!(cur2 === '/atendimentos' && dst2 !== '/atendimentos') && !inMenu && !wantsWait) return;
         if (cur2 === dst2) {
           // v6: clicar no item ativo da sidebar não pode recarregar a mesma página.
           // Esse reload fechava o WebSocket com CLOSE 1001 e parecia que o atendimento caía.
@@ -507,6 +572,21 @@
           setTimeout(function(){ try { window.forceReady && window.forceReady(); } catch(e){} }, 50);
           setTimeout(function(){ try { window.forceReady && window.forceReady(); } catch(e){} }, 500);
           setTimeout(function(){ try { window.forceReady && window.forceReady(); } catch(e){} }, 1500);
+          return;
+        }
+
+        // v11/teste Atendimento WS:
+        // Se o usuário está saindo de /atendimentos para outra página,
+        // a navegação precisa ganhar prioridade sobre renderizações/timers do WS.
+        // Sem isso, mensagem chegando ao vivo podia deixar o clique no menu
+        // parecendo preso até terminar o ciclo visual do atendimento.
+        if (cur2 === '/atendimentos' && dst2 !== '/atendimentos') {
+          try { e.preventDefault(); } catch (ee) {}
+          try { e.stopPropagation(); } catch (ee) {}
+          try { if (e.stopImmediatePropagation) e.stopImmediatePropagation(); } catch (ee) {}
+          try { window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ = true; } catch (ee) {}
+          try { window.dispatchEvent(new CustomEvent('zc:navigate-away', { detail: { from: cur2, to: dst2 } })); } catch (ee) {}
+          hardNavigateNow(u2, 'app-base-nav-away');
           return;
         }
       } catch (err0) {}

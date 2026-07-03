@@ -1814,15 +1814,57 @@ export function renderHistoricoDoCache(clienteId, append = false) {
 
       const lastRenderedId = getLastRenderedMsgId(hist);
       let startIdx = -1;
+      let lastRenderedTs = 0;
 
       if (lastRenderedId) {
         startIdx = msgs.findIndex((m) => msgKey(m) === String(lastRenderedId));
+        if (startIdx >= 0) {
+          lastRenderedTs = msgTimeMs(msgs[startIdx]) || 0;
+        }
       }
 
       let novas = [];
 
       if (startIdx >= 0) {
-        novas = msgs.slice(startIdx + 1);
+        novas = msgs.slice(startIdx + 1).filter((m) => {
+          const mid = msgKey(m);
+          return mid && !existingIds.has(mid);
+        });
+
+        /*
+          Correção ZapsChat v6:
+          Quando o cliente manda várias mensagens rápidas, principalmente textos
+          iguais como "1", "1", "1" e depois "11", várias podem chegar com o
+          mesmo segundo de timestamp. O cache ordena por tempo e, nesses empates,
+          uma mensagem nova pode ficar ANTES do último data-msg-id que está no DOM.
+
+          A lógica antiga fazia só msgs.slice(startIdx + 1), então essa mensagem
+          nova ficava no cache/lista lateral, mas nunca entrava no bate-papo.
+
+          Aqui pegamos também mensagens ausentes no DOM que estejam no mesmo
+          bloco temporal do último renderizado. Assim não jogamos histórico antigo
+          no final, mas não perdemos rajadas de tempo real.
+        */
+        const SAME_BURST_WINDOW_MS = Number(window.ZC_HIST_APPEND_BURST_WINDOW_MS || 5000);
+        const burstMissing = msgs.filter((m) => {
+          const mid = msgKey(m);
+          if (!mid || existingIds.has(mid)) return false;
+
+          const mt = msgTimeMs(m) || 0;
+          if (!lastRenderedTs || !mt) return true;
+
+          return mt >= (lastRenderedTs - SAME_BURST_WINDOW_MS);
+        });
+
+        if (burstMissing.length) {
+          const byMid = new Map();
+          [...novas, ...burstMissing].forEach((m) => {
+            const mid = msgKey(m);
+            if (mid && !byMid.has(mid)) byMid.set(mid, m);
+          });
+          novas = Array.from(byMid.values());
+          novas = ordenarMensagens(novas.map(normalizeMessageState));
+        }
       } else {
         novas = msgs.filter((m) => {
           const mid = msgKey(m);
@@ -1834,6 +1876,7 @@ export function renderHistoricoDoCache(clienteId, append = false) {
         novasCount: novas.length,
         lastRenderedId,
         startIdx,
+        lastRenderedTs,
       });
 
       if (novas.length) {
@@ -2457,6 +2500,269 @@ function agendarRefreshHistorico(rawConversation = null, opts = {}) {
     try { window.addEventListener(name, handler, true); } catch {}
     try { document.addEventListener(name, handler, true); } catch {}
   }
+})();
+
+
+
+/* =====================
+   render aberto via eventos de tempo real
+   ===================== */
+
+function zcIsAtendimentoNavigatingAway() {
+  try {
+    if (window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__) return true;
+    const until = Number(sessionStorage.getItem('zc:atendimentos:leaving_until') || '0');
+    const to = String(sessionStorage.getItem('zc:atendimentos:leaving_to') || '');
+    return until > Date.now() && !!to && !to.includes('/atendimentos');
+  } catch {
+    return false;
+  }
+}
+
+function zcClearOpenRealtimeWork(reason = 'clear') {
+  try {
+    for (const arr of zcOpenRealtimeTimers.values()) {
+      try { (arr || []).forEach((t) => clearTimeout(t)); } catch {}
+    }
+    zcOpenRealtimeTimers.clear();
+  } catch {}
+  try { zcOpenRealtimePendingIds.clear(); } catch {}
+  try { zcOpenRealtimeHandledEvents.clear(); } catch {}
+  try { HLOG('realtime aberto: timers limpos', { reason }); } catch {}
+}
+
+function zcRealtimeMsgId(detail = {}) {
+  return String(
+    detail?.msg_id ??
+    detail?.msgId ??
+    detail?.message_id ??
+    detail?.messageId ??
+    detail?.wa_msg_id ??
+    detail?.id ??
+    ''
+  ).trim();
+}
+
+function zcDomHasMsgId(hist, msgId) {
+  if (!hist || !msgId) return false;
+
+  const id = String(msgId);
+  const esc = (() => {
+    try { return CSS.escape(id); }
+    catch { return id.replace(/["\\]/g, '\\$&'); }
+  })();
+
+  try {
+    return !!hist.querySelector(
+      `[data-msg-id="${esc}"],` +
+      `[data-message-id="${esc}"],` +
+      `[data-wa-msg-id="${esc}"],` +
+      `[data-id="${esc}"]`
+    );
+  } catch {
+    return false;
+  }
+}
+
+function zcDetailMatchesOpenHistory(detail = {}) {
+  const hist = H();
+  if (!hist) return null;
+
+  const openKey = getOpenHistKey(hist);
+  if (!openKey) return null;
+
+  const convObj = eventDetailToConversation(detail || {});
+  const ref = getHistConversationRef(convObj || detail || openKey);
+  const convKey = ref?.key || convObj?.conversation_key || null;
+
+  if (!convKey || String(convKey) !== String(openKey)) {
+    HLOG('realtime aberto ignorado: conversa diferente', {
+      openKey,
+      convKey,
+      detail,
+    });
+    return null;
+  }
+
+  if (!isHistoricoStillOpenFor(openKey, hist)) return null;
+
+  return { hist, convKey: openKey, ref, convObj };
+}
+
+const zcOpenRealtimePendingIds = new Map();
+const zcOpenRealtimeTimers = new Map();
+const zcOpenRealtimeHandledEvents = new Map();
+
+function zcCleanupHandledRealtimeEvents(now = Date.now()) {
+  try {
+    if (zcOpenRealtimeHandledEvents.size < 250) return;
+    for (const [key, ts] of zcOpenRealtimeHandledEvents.entries()) {
+      if (now - Number(ts || 0) > 5000) zcOpenRealtimeHandledEvents.delete(key);
+    }
+    if (zcOpenRealtimeHandledEvents.size > 500) zcOpenRealtimeHandledEvents.clear();
+  } catch {}
+}
+
+function zcQueueOpenRealtimeRender(detail = {}, reason = 'realtime-open') {
+  if (zcIsAtendimentoNavigatingAway()) return;
+  const match = zcDetailMatchesOpenHistory(detail);
+  if (!match || zcIsAtendimentoNavigatingAway()) return;
+
+  const { hist, convKey, convObj } = match;
+  const msgId = zcRealtimeMsgId(detail);
+
+  // v9: o ws-empresa dispara vários nomes de evento para a mesma mensagem
+  // (atendimento:mensagem-recebida, zc:message-upsert, ws:nova_mensagem etc.)
+  // e historico.js também escutava document + window. Isso fazia uma mensagem
+  // virar muitas renderizações imediatas; em rajada, o clique em Arquivos ficava
+  // preso atrás da fila de render. Processa cada msg_id uma vez por janela curta.
+  if (msgId) {
+    const eventKey = `${convKey}:${msgId}`;
+    const now = Date.now();
+    const last = Number(zcOpenRealtimeHandledEvents.get(eventKey) || 0);
+    if (last && now - last < 2500) return;
+    zcOpenRealtimeHandledEvents.set(eventKey, now);
+    zcCleanupHandledRealtimeEvents(now);
+  }
+
+  /*
+    Correção ZapsChat v7:
+    O ws-empresa.js atualiza lista/cache, mas em alguns caminhos `openNow`
+    fica falso e ele não chama o render do histórico aberto. O sintoma é:
+    lista lateral atualiza, cache tem a mensagem, mas a bolha não aparece.
+
+    Aqui o historico.js fica dono do render da conversa que já está aberta:
+    qualquer evento de mensagem recebido para a mesma conversation_key renderiza
+    o cache aberto. Se a mensagem ainda não entrou no DOM, faz um refresh leve
+    só desta conversa.
+  */
+  try {
+    if (msgId) {
+      const pending = zcOpenRealtimePendingIds.get(convKey) || new Map();
+      pending.set(msgId, Date.now());
+      zcOpenRealtimePendingIds.set(convKey, pending);
+    }
+  } catch {}
+
+  try {
+    // Garante que o payload do próprio evento também esteja no cache aberto.
+    // Se o WS já colocou, salvarNoCache apenas mescla por msg_id.
+    if (msgId || detail?.texto || detail?.mensagem || detail?.conteudo) {
+      salvarNoCache(convKey, [{
+        ...detail,
+        conversation_key: convKey,
+        conversation_id: convKey,
+        msg_id: msgId || detail?.msg_id || detail?.id,
+        id: msgId || detail?.id || detail?.msg_id,
+        instancia_id: convObj?.instancia_id || detail?.instancia_id || detail?.instanciaId || hist?.dataset?.instanciaId,
+      }]);
+    }
+  } catch (e) {
+    HLOG('realtime aberto: salvarNoCache falhou', e);
+  }
+
+  const runRender = (stage) => {
+    try {
+      if (zcIsAtendimentoNavigatingAway()) return;
+      if (!isHistoricoStillOpenFor(convKey, H())) return;
+      renderHistoricoDoCache(convKey, true);
+    } catch (e) {
+      HERR('realtime aberto: render falhou', { stage, e });
+    }
+  };
+
+  runRender('immediate');
+
+  const timerKey = String(convKey);
+  const prev = zcOpenRealtimeTimers.get(timerKey) || [];
+  prev.forEach((t) => clearTimeout(t));
+
+  const timers = [];
+
+  [80, 220, 520].forEach((delay) => {
+    timers.push(setTimeout(() => runRender(`delay-${delay}`), delay));
+  });
+
+  timers.push(setTimeout(async () => {
+    if (zcIsAtendimentoNavigatingAway()) return;
+    const h = H();
+    if (!h || !isHistoricoStillOpenFor(convKey, h)) return;
+
+    const pending = zcOpenRealtimePendingIds.get(convKey) || new Map();
+    const now = Date.now();
+
+    // Remove ids antigos para não crescer memória.
+    for (const [id, ts] of pending.entries()) {
+      if (now - Number(ts || 0) > 15000 || zcDomHasMsgId(h, id)) {
+        pending.delete(id);
+      }
+    }
+
+    const missing = [...pending.keys()].filter((id) => !zcDomHasMsgId(h, id));
+
+    if (!missing.length) {
+      runRender('verify-ok');
+      return;
+    }
+
+    HLOG('realtime aberto: mensagens ainda fora do DOM, refresh leve', {
+      convKey,
+      reason,
+      missingCount: missing.length,
+      missing: missing.slice(0, 5),
+    });
+
+    try {
+      await forcarAtualizacaoHistorico(convKey, {
+        append: true,
+        limit: 20,
+        reason: `open-realtime:${reason}`,
+      });
+    } catch (e) {
+      HERR('realtime aberto: refresh leve falhou', e);
+    }
+
+    runRender('after-refresh');
+
+    try {
+      for (const id of [...pending.keys()]) {
+        if (zcDomHasMsgId(H(), id)) pending.delete(id);
+      }
+    } catch {}
+  }, 900));
+
+  zcOpenRealtimeTimers.set(timerKey, timers);
+}
+
+(function bindOpenRealtimeRenderEvents() {
+  if (window.__ZC_HIST_OPEN_REALTIME_RENDER_BOUND__) return;
+  window.__ZC_HIST_OPEN_REALTIME_RENDER_BOUND__ = true;
+
+  const names = [
+    'atendimento:mensagem-recebida',
+    'zc:message-upsert',
+    'zc:message-created',
+    'zc:message-received',
+    'zc:new-message',
+    'atendimento:message',
+    'atendimento:message-received',
+    'ws:nova_mensagem',
+  ];
+
+  const handler = (ev) => {
+    const detail = ev?.detail || {};
+    zcQueueOpenRealtimeRender(detail, ev?.type || 'realtime-open');
+  };
+
+  for (const name of names) {
+    try { document.addEventListener(name, handler, true); } catch {}
+    try { window.addEventListener(name, handler, true); } catch {}
+  }
+
+  try { window.zcHistoricoClearOpenRealtimeWork = zcClearOpenRealtimeWork; } catch {}
+  try { window.addEventListener('zc:navigate-away', (ev) => zcClearOpenRealtimeWork(ev?.detail?.reason || 'navigate-away'), true); } catch {}
+  try { window.addEventListener('pagehide', () => zcClearOpenRealtimeWork('pagehide'), true); } catch {}
+  try { window.addEventListener('beforeunload', () => zcClearOpenRealtimeWork('beforeunload'), true); } catch {}
 })();
 
 /* =====================
