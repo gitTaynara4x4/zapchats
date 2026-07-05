@@ -31,15 +31,59 @@ window.ZC_REQUIRE_INSTANCE = true;
 */
 const ZC_SELECT_SAME_CONV_COOLDOWN_MS = 900;
 const ZC_MESSAGE_LOAD_TTL_MS = 1800;
-const ZC_SEEN_TTL_MS = 6000;
-const ZC_SEEN_DEBOUNCE_MS = 900;
+const ZC_SEEN_TTL_MS = Number(window.ZC_SEEN_TTL_MS || 15000);
+const ZC_SEEN_DEBOUNCE_MS = Number(window.ZC_SEEN_DEBOUNCE_MS || 4500);
+const ZC_CLEAR_UNREAD_TTL_MS = Number(window.ZC_CLEAR_UNREAD_TTL_MS || 2500);
+const ZC_CLEAR_UNREAD_RENDER_TTL_MS = Number(window.ZC_CLEAR_UNREAD_RENDER_TTL_MS || 7000);
+// Seen é operação secundária. Não pode segurar troca de página.
+const ZC_SEEN_FETCH_TIMEOUT_MS = Number(window.ZC_SEEN_FETCH_TIMEOUT_MS || 1200);
 
 const __msgLoadState = new Map(); // key -> { at, promise }
 const __seenState = new Map(); // key -> { at, promise, timer }
+const __seenAbortControllers = new Set();
+const __clearUnreadState = new Map(); // key -> { at, renderAt }
+const __seenEventState = new Map(); // key/msg -> timestamp
 const __selectState = {
   lastKey: '',
   lastAt: 0,
 };
+
+function isAtendimentoLeaving(reason = '') {
+  try {
+    return Boolean(
+      window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ === true ||
+      window.__ZC_APP_NAVIGATING_AWAY__ === true ||
+      document.body?.dataset?.zcLeaving === '1' ||
+      document.documentElement?.dataset?.zcLeaving === '1'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function abortSeenRequests(reason = 'abort-seen') {
+  try {
+    for (const ctrl of Array.from(__seenAbortControllers)) {
+      try { ctrl.abort(reason); } catch {}
+    }
+    __seenAbortControllers.clear();
+  } catch {}
+
+  try {
+    for (const st of __seenState.values()) {
+      try { if (st?.timer) clearTimeout(st.timer); } catch {}
+      if (st) st.promise = null;
+      if (st) st.timer = null;
+    }
+  } catch {}
+}
+
+try {
+  window.zcAbortSeenRequests = abortSeenRequests;
+  window.addEventListener('zc:navigate-away', () => abortSeenRequests('zc:navigate-away'), true);
+  window.addEventListener('pagehide', () => abortSeenRequests('pagehide'), true);
+  window.addEventListener('beforeunload', () => abortSeenRequests('beforeunload'), true);
+} catch {}
 
 /* ================= ID / REF helpers (string-first) ================= */
 function normStr(v) {
@@ -1014,7 +1058,7 @@ function zcHardHideLoaders(reason = 'init') {
 
 /* ================= Utils ================= */
 
-function clearUnreadLocal(conversationRef, row = null) {
+function clearUnreadLocal(conversationRef, row = null, opts = {}) {
   try {
     const ref = parseConversationRef(conversationRef, row);
     if (ref.kind !== 'c' || !ref.entityId || !ref.instId) return;
@@ -1022,10 +1066,33 @@ function clearUnreadLocal(conversationRef, row = null) {
     const convKey = ref.key || buildConversationKey('c', ref.entityId, ref.instId);
     if (!convKey) return;
 
+    const now = Date.now();
+    const old = __clearUnreadState.get(convKey) || {};
+    const force = opts?.force === true;
+    const allowRender = opts?.renderList === true;
+
+    // Em realtime a mesma mensagem dispara vários eventos. Repetir resetUnread()
+    // rende a lista inteira e prende o clique para Dashboard/Mídias.
+    if (!force && old.at && now - Number(old.at || 0) < ZC_CLEAR_UNREAD_TTL_MS) {
+      return;
+    }
+
     try { marcarLidas(convKey, ref.instId); } catch {}
-    try { window.Lista?.resetUnread?.(convKey); } catch {}
+
+    // Limpa cache + badge inline sem renderizar a lista inteira a cada evento.
     try { window.zcClearUnreadBadge?.(convKey); } catch {}
+
+    const shouldRenderList = allowRender && (!old.renderAt || now - Number(old.renderAt || 0) > ZC_CLEAR_UNREAD_RENDER_TTL_MS);
+    if (shouldRenderList) {
+      try { window.Lista?.resetUnread?.(convKey); } catch {}
+    }
+
     try { window.recomputeUnread?.(); } catch {}
+
+    __clearUnreadState.set(convKey, {
+      at: now,
+      renderAt: shouldRenderList ? now : (old.renderAt || 0),
+    });
 
     try {
       document.dispatchEvent(new CustomEvent('zc:unread-changed', {
@@ -1045,20 +1112,19 @@ function clearUnreadLocal(conversationRef, row = null) {
 
 async function markChatAsSeenNow(conversationRef, row = null, { force = false } = {}) {
   try {
+    if (isAtendimentoLeaving('seen-now')) return null;
+
     const ref = parseConversationRef(conversationRef, row);
 
     // endpoint é de CLIENTE, então grupo não entra aqui
-    if (ref.kind !== 'c' || !ref.entityId || !ref.instId) return;
+    if (ref.kind !== 'c' || !ref.entityId || !ref.instId) return null;
 
     const convKey = ref.key || buildConversationKey('c', ref.entityId, ref.instId);
-    if (!convKey) return;
+    if (!convKey) return null;
 
     // Só marca visto se a conversa ainda estiver aberta.
     // Isso evita seen em conversa que já foi trocada.
-    if (!isConversationOpen(convKey)) return;
-
-    // Limpa visual/cache na hora. O POST abaixo persiste no banco.
-    clearUnreadLocal(convKey, row);
+    if (!isConversationOpen(convKey)) return null;
 
     const now = Date.now();
     const old = __seenState.get(convKey);
@@ -1070,6 +1136,17 @@ async function markChatAsSeenNow(conversationRef, row = null, { force = false } 
     if (!force && old?.promise) {
       return old.promise;
     }
+
+    // Limpa visual/cache uma vez por janela curta. O POST abaixo persiste no banco.
+    clearUnreadLocal(convKey, row);
+
+    // V4: se acabou de chegar uma rajada WS, não abre POST /seen agora.
+    // O visual já foi limpo localmente; o server pode ser marcado depois.
+    // Isso evita ocupar conexões do navegador e atrasar /dashboard.
+    try {
+      const lastIn = Number(window.__ZC_WS_LAST_INBOUND_AT__ || 0);
+      if (!force && lastIn && Date.now() - lastIn < 6000) return null;
+    } catch {}
 
     const params = new URLSearchParams({
       empresa_id: String(EMPRESA_ID),
@@ -1084,12 +1161,22 @@ async function markChatAsSeenNow(conversationRef, row = null, { force = false } 
     const url =
       `/api/atendimento/clientes/${encodeURIComponent(ref.entityId)}/seen?${params.toString()}`;
 
+    const ctrl = new AbortController();
+    __seenAbortControllers.add(ctrl);
+
+    const timeout = setTimeout(() => {
+      try { ctrl.abort('seen-timeout'); } catch {}
+    }, Math.max(800, ZC_SEEN_FETCH_TIMEOUT_MS));
+
     const promise = fetch(url, {
       method: 'POST',
       credentials: 'include',
+      signal: ctrl.signal,
     })
       .catch(() => null)
       .finally(() => {
+        try { clearTimeout(timeout); } catch {}
+        try { __seenAbortControllers.delete(ctrl); } catch {}
         const cur = __seenState.get(convKey);
         if (cur) {
           cur.at = Date.now();
@@ -1113,19 +1200,26 @@ async function markChatAsSeenNow(conversationRef, row = null, { force = false } 
 
 function scheduleMarkChatAsSeen(conversationRef, row = null, { delay = ZC_SEEN_DEBOUNCE_MS, force = false } = {}) {
   try {
+    if (isAtendimentoLeaving('schedule-seen')) return;
+
     const ref = parseConversationRef(conversationRef, row);
     if (ref.kind !== 'c' || !ref.entityId || !ref.instId) return;
 
     const convKey = ref.key || buildConversationKey('c', ref.entityId, ref.instId);
     if (!convKey) return;
 
-    // Mesmo com debounce no POST, a bolha deve sumir imediatamente ao abrir/visualizar.
-    clearUnreadLocal(convKey, row);
+    // Mesmo com debounce no POST, a bolha deve sumir imediatamente ao abrir/visualizar,
+    // mas sem redesenhar a lista inteira em cada evento WS.
+    clearUnreadLocal(convKey, row, { force });
 
     const old = __seenState.get(convKey) || {};
+    if (!force && old.at && Date.now() - Number(old.at || 0) < ZC_SEEN_TTL_MS && old.timer) {
+      return;
+    }
     if (old.timer) clearTimeout(old.timer);
 
     const timer = setTimeout(() => {
+      if (isAtendimentoLeaving('seen-timer')) return;
       const cur = __seenState.get(convKey) || {};
       cur.timer = null;
       __seenState.set(convKey, cur);
@@ -1718,8 +1812,8 @@ async function selecionarClienteObj(id, opts = {}) {
   const foot = document.getElementById('chat-footer');
 
   if (repeatedSameSelection && !forceReload) {
-    clearUnreadLocal(convKey, c);
-    scheduleMarkChatAsSeen(convKey, c);
+    clearUnreadLocal(convKey, c, { force: true, renderList: true });
+    scheduleMarkChatAsSeen(convKey, c, { force: true });
 
     try {
       window.dispatchEvent(
@@ -1795,7 +1889,7 @@ async function selecionarClienteObj(id, opts = {}) {
   setClienteSel(c);
 
   // Limpa a bolha no clique, antes mesmo do histórico terminar de carregar.
-  clearUnreadLocal(convKey, c);
+  clearUnreadLocal(convKey, c, { force: true, renderList: true });
 
   // TRAVA/SYNC de instância antes de qualquer fetch/render
   instFinal = syncInstanciaFromCliente(c) || ref.instId;
@@ -1986,10 +2080,11 @@ async function selecionarClienteObj(id, opts = {}) {
     window.syncPreviewFromCache?.(convKey);
   } catch {}
 
-  clearUnreadLocal(convKey, c);
-  scheduleMarkChatAsSeen(convKey, c);
+  clearUnreadLocal(convKey, c, { force: true, renderList: true });
+  scheduleMarkChatAsSeen(convKey, c, { force: true });
 
   try {
+    // Conversa recém-aberta: aqui o reset completo ainda é aceitável.
     window.Lista?.resetUnread?.(convKey);
     window.recomputeUnread?.();
   } catch {
@@ -2208,7 +2303,17 @@ function bindRealtimeSeenGuard() {
         tipo === 'atendente';
 
       if (!fromMe) {
-        scheduleMarkChatAsSeen(key, detail, { delay: 1400 });
+        const msgId = String(
+          detail.msg_id || detail.msgId || detail.message_id || detail.messageId || detail.id || ''
+        ).trim();
+        const dedupeKey = `${key}:${msgId || ev?.type || 'msg'}`;
+        const now = Date.now();
+        const last = Number(__seenEventState.get(dedupeKey) || 0);
+        if (last && now - last < 4000) return;
+        __seenEventState.set(dedupeKey, now);
+        if (__seenEventState.size > 500) __seenEventState.clear();
+
+        scheduleMarkChatAsSeen(key, detail, { delay: 1800 });
       }
     } catch {}
   };

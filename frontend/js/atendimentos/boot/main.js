@@ -19,27 +19,107 @@
 (function () {
   'use strict';
 
-  const MAIN_VERSION = 'zc-atendimentos-main-v11-avatar-lazy-safe';
-  // v13/teste: se o usuário clicou para sair do Atendimento durante uma rajada de WS,
-  // impede que qualquer boot atrasado desta página recoloque /atendimentos na frente.
-  function getHardLeaveTarget() {
+  const MAIN_VERSION = 'zc-atendimentos-main-v15-hard-leave-fetch-abort';
+
+  // v14:
+  // A versão anterior gravava zc:atendimentos:leaving_to no sessionStorage e,
+  // ao abrir /atendimentos de novo, o boot redirecionava sozinho para a última tela
+  // de destino (/departamentos, /dashboard etc.). Isso causava loop:
+  // /atendimentos -> main.js -> /departamentos -> /atendimentos -> main.js...
+  // Ao entrar de verdade no Atendimento, limpamos qualquer marca antiga.
+  function clearStaleHardLeaveMarks() {
     try {
-      const until = Number(sessionStorage.getItem('zc:atendimentos:leaving_until') || '0');
-      const to = sessionStorage.getItem('zc:atendimentos:leaving_to') || '';
-      if (!to || !until || Date.now() > until) return null;
-      const u = new URL(to, location.origin);
-      const dst = (u.pathname || '').replace(/\/+$/, '') || '/';
-      if (dst && dst !== '/atendimentos') return u.href;
-    } catch (e) {}
-    return null;
+      delete window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__;
+      window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ = false;
+      window.__ZC_ATENDIMENTOS_HARD_NAV_STARTED__ = false;
+      sessionStorage.removeItem('zc:atendimentos:leaving_until');
+      sessionStorage.removeItem('zc:atendimentos:leaving_to');
+      sessionStorage.removeItem('zc:atendimentos:leaving_reason');
+    } catch (_) {}
   }
 
-  const __ZC_HARD_LEAVE_TARGET__ = getHardLeaveTarget();
-  if (__ZC_HARD_LEAVE_TARGET__) {
-    try { window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ = true; } catch (e) {}
-    try { window.location.replace(__ZC_HARD_LEAVE_TARGET__); } catch (e) { try { window.location.href = __ZC_HARD_LEAVE_TARGET__; } catch (_) {} }
-    return;
-  }
+  clearStaleHardLeaveMarks();
+
+  // v15:
+  // Quando o atendimento está aberto, chegam vários GETs leves/pesados
+  // (/conversas, /mensagens, /avatar, /usuarios/me). Se o usuário clica no
+  // menu durante uma rajada de mensagens, esses fetches podem ocupar conexões
+  // do navegador e atrasar a navegação para Dashboard/Departamentos.
+  // Este guard só injeta AbortController em GETs do Atendimento e aborta todos
+  // imediatamente quando começa uma navegação para fora da tela.
+  (function installAtendimentoFetchGuardEarly() {
+    if (window.__ZC_ATENDIMENTO_FETCH_GUARD_INSTALLED__) return;
+    window.__ZC_ATENDIMENTO_FETCH_GUARD_INSTALLED__ = true;
+
+    const nativeFetch = window.fetch ? window.fetch.bind(window) : null;
+    if (!nativeFetch || typeof AbortController === 'undefined') return;
+
+    const pending = new Set();
+
+    function isAtendimentoGet(input, init) {
+      try {
+        const method = String((init && init.method) || 'GET').toUpperCase();
+        if (method !== 'GET') return false;
+
+        const raw = typeof input === 'string'
+          ? input
+          : (input && (input.url || input.href)) || '';
+        if (!raw) return false;
+
+        const u = new URL(raw, location.origin);
+        if (u.origin !== location.origin) return false;
+
+        const p = u.pathname || '';
+        return (
+          p.startsWith('/api/atendimento/') ||
+          p.startsWith('/api/empresas/') ||
+          p === '/api/usuarios/me'
+        );
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function abortAll(reason) {
+      try {
+        for (const ctrl of Array.from(pending)) {
+          try { ctrl.abort(reason || 'zc:navigate-away'); } catch (_) {}
+        }
+        pending.clear();
+      } catch (_) {}
+    }
+
+    window.__ZC_ATENDIMENTO_FETCH_GUARD__ = {
+      abortAll,
+      count: () => pending.size,
+    };
+
+    window.fetch = function zcAtendimentoFetchGuard(input, init) {
+      try {
+        if (
+          String(location.pathname || '').includes('/atendimentos') &&
+          !window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ &&
+          isAtendimentoGet(input, init)
+        ) {
+          const originalSignal = init && init.signal;
+          if (!originalSignal) {
+            const ctrl = new AbortController();
+            pending.add(ctrl);
+            const nextInit = Object.assign({}, init || {}, { signal: ctrl.signal });
+            return nativeFetch(input, nextInit).finally(() => {
+              try { pending.delete(ctrl); } catch (_) {}
+            });
+          }
+        }
+      } catch (_) {}
+
+      return nativeFetch(input, init);
+    };
+
+    window.addEventListener('zc:navigate-away', () => abortAll('zc:navigate-away'), true);
+    window.addEventListener('pagehide', () => abortAll('pagehide'), true);
+    window.addEventListener('beforeunload', () => abortAll('beforeunload'), true);
+  })();
 
   // v9: app-base.js não é carregado dentro do /atendimentos.
   // Então a navegação forte precisa existir aqui também, no boot da própria tela.
@@ -68,7 +148,7 @@
 
     function markLeaving(u, reason) {
       try {
-        const until = String(Date.now() + 20000);
+        const until = String(Date.now() + 15000);
         window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ = true;
         window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__ = u.href;
         sessionStorage.setItem('zc:atendimentos:leaving_until', until);
@@ -79,6 +159,8 @@
       try { window.dispatchEvent(new CustomEvent('zc:navigate-away', { detail: { from: location.pathname, to: u.pathname, reason: reason || 'atendimento-main-nav', hard: true } })); } catch (_) {}
       try { window.zcAtendimentoWsMarkNavigatingAway && window.zcAtendimentoWsMarkNavigatingAway(reason || 'atendimento-main-nav'); } catch (_) {}
       try { window.zcAtendimentoWsClearPendingWork && window.zcAtendimentoWsClearPendingWork(reason || 'atendimento-main-nav'); } catch (_) {}
+      try { window.__ZC_ATENDIMENTO_FETCH_GUARD__?.abortAll?.(reason || 'atendimento-main-nav'); } catch (_) {}
+      try { window.ZC_CLOSE_ALL_WS && window.ZC_CLOSE_ALL_WS(); } catch (_) {}
       try { window.zcHistoricoClearOpenRealtimeWork && window.zcHistoricoClearOpenRealtimeWork(reason || 'atendimento-main-nav'); } catch (_) {}
       try { window.ZCForceClearLoading && window.ZCForceClearLoading(reason || 'atendimento-main-nav'); } catch (_) {}
       try { window.PageLoading && window.PageLoading.hide && window.PageLoading.hide(); } catch (_) {}
@@ -86,27 +168,42 @@
       try { window.Splash && window.Splash.hide && window.Splash.hide(); } catch (_) {}
     }
 
+    let __zcHardNavStarted = false;
+
     function hardGo(u, ev, reason) {
       try { ev && ev.preventDefault && ev.preventDefault(); } catch (_) {}
       try { ev && ev.stopPropagation && ev.stopPropagation(); } catch (_) {}
       try { ev && ev.stopImmediatePropagation && ev.stopImmediatePropagation(); } catch (_) {}
 
+      // Navegação de saída tem que acontecer UMA vez só.
+      // Repetir location.replace/assign cancela a própria navegação no Chrome
+      // e aparece no Network como vários '/departamentos (canceled)'.
+      if (__zcHardNavStarted || window.__ZC_ATENDIMENTOS_HARD_NAV_STARTED__) return;
+      __zcHardNavStarted = true;
+      window.__ZC_ATENDIMENTOS_HARD_NAV_STARTED__ = true;
+
       markLeaving(u, reason);
 
-      try { location.assign(u.href); } catch (_) {
+      // Prioridade absoluta: primeiro inicia a navegação do documento.
+      // Em versões anteriores o window.stop() vinha antes do location.assign();
+      // em alguns Chromes isso podia cancelar/atrasar a própria troca de página.
+      try {
+        location.assign(u.href);
+      } catch (_) {
         try { location.href = u.href; } catch (__) {}
       }
 
-      // reforços curtos contra handlers atrasados do Atendimento
-      [0, 40, 120, 300].forEach((delay) => {
+      // Fallback sem bloquear: se algum listener/loader antigo tentar segurar a tela,
+      // reforça a troca poucos ms depois. Não usa window.stop() aqui.
+      try {
         setTimeout(() => {
           try {
-            if (window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__ && location.href !== window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__) {
-              location.assign(window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__);
+            if (String(location.pathname || '') === '/atendimentos') {
+              location.replace(u.href);
             }
-          } catch (_) {}
-        }, delay);
-      });
+          } catch (__) {}
+        }, 120);
+      } catch (_) {}
     }
 
     function onNavIntent(ev) {

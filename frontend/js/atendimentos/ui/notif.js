@@ -483,12 +483,53 @@
   window.isChatActiveForNotif = isChatActive;
 
   /* ==================== Auto-limpeza ao foco/visível ==================== */
-  async function clearUnreadOfOpenChatAndPingServer() {
+  const ZC_NOTIF_SEEN_FOCUS_DEBOUNCE_MS = Number(window.ZC_NOTIF_SEEN_FOCUS_DEBOUNCE_MS || 1600);
+  let __zcNotifSeenTimer = 0;
+  let __zcNotifSeenLastAt = 0;
+
+  function isAtendimentoLeaving() {
+    try {
+      return Boolean(
+        window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ === true ||
+        window.__ZC_APP_NAVIGATING_AWAY__ === true ||
+        document.body?.dataset?.zcLeaving === '1' ||
+        document.documentElement?.dataset?.zcLeaving === '1'
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function scheduleClearUnreadOfOpenChat(reason = 'focus') {
+    try {
+      if (isAtendimentoLeaving()) return;
+      clearTimeout(__zcNotifSeenTimer);
+      __zcNotifSeenTimer = setTimeout(() => {
+        if (isAtendimentoLeaving()) return;
+        clearUnreadOfOpenChatAndPingServer(reason);
+      }, ZC_NOTIF_SEEN_FOCUS_DEBOUNCE_MS);
+    } catch {}
+  }
+
+  try {
+    window.addEventListener('zc:navigate-away', () => {
+      try { clearTimeout(__zcNotifSeenTimer); } catch {}
+    }, true);
+    window.addEventListener('pagehide', () => {
+      try { clearTimeout(__zcNotifSeenTimer); } catch {}
+    }, true);
+    window.addEventListener('beforeunload', () => {
+      try { clearTimeout(__zcNotifSeenTimer); } catch {}
+    }, true);
+  } catch {}
+
+  async function clearUnreadOfOpenChatAndPingServer(reason = 'manual') {
     try {
       const selectedRef = getSelectedConversationRef();
       const selectedKind = getSelectedKind();
       const entityId = getSelectedEntityId();
 
+      if (isAtendimentoLeaving()) return;
       if (!selectedRef || !entityId) return;
 
       // seen atual só é para cliente
@@ -509,6 +550,8 @@
 
       const cl = arr.find((x) => sameConversation(x, selectedRef));
 
+      const hadUnread = Boolean(cl && Number(cl.novas || 0) > 0);
+
       if (cl && Number(cl.novas || 0) > 0) {
         cl.novas = 0;
 
@@ -519,22 +562,27 @@
         recomputeUnread();
       }
 
-      await fetch(
-        `/api/atendimento/clientes/${encodeURIComponent(entityId)}/seen?empresa_id=${encodeURIComponent(String(EMPRESA_ID))}`,
-        {
-          method: 'POST',
-          credentials: 'include'
-        }
-      ).catch(() => {});
+      // Não faz POST paralelo próprio. Usa o markChatAsSeen centralizado do boot/init.js,
+      // que tem dedupe + timeout + abort no navigate-away. Isso evita 3 ou 4 /seen
+      // pendurados segurando pagehide quando o usuário sai do Atendimento.
+      if (!hadUnread && reason !== 'force') return;
+
+      const now = Date.now();
+      if (now - __zcNotifSeenLastAt < 5000) return;
+      __zcNotifSeenLastAt = now;
+
+      if (typeof window.zcMarkChatAsSeen === 'function') {
+        await window.zcMarkChatAsSeen(selectedRef, cl || null).catch(() => null);
+      }
     } catch {}
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) clearUnreadOfOpenChatAndPingServer();
+    if (!document.hidden) scheduleClearUnreadOfOpenChat('visibility');
   });
 
   window.addEventListener('focus', () => {
-    clearUnreadOfOpenChatAndPingServer();
+    scheduleClearUnreadOfOpenChat('focus');
     recomputeUnread();
   }, { passive: true });
 

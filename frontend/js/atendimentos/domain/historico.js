@@ -2510,10 +2510,11 @@ function agendarRefreshHistorico(rawConversation = null, opts = {}) {
 
 function zcIsAtendimentoNavigatingAway() {
   try {
+    if (!String(location.pathname || '').includes('/atendimentos')) return true;
     if (window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__) return true;
-    const until = Number(sessionStorage.getItem('zc:atendimentos:leaving_until') || '0');
-    const to = String(sessionStorage.getItem('zc:atendimentos:leaving_to') || '');
-    return until > Date.now() && !!to && !to.includes('/atendimentos');
+    // Não depender de sessionStorage: ele pode estar velho quando o usuário volta
+    // para /atendimentos depois de sair para outra tela.
+    return false;
   } catch {
     return false;
   }
@@ -2671,65 +2672,67 @@ function zcQueueOpenRealtimeRender(detail = {}, reason = 'realtime-open') {
     }
   };
 
-  runRender('immediate');
-
   const timerKey = String(convKey);
   const prev = zcOpenRealtimeTimers.get(timerKey) || [];
   prev.forEach((t) => clearTimeout(t));
 
   const timers = [];
+  const renderDelay = Number(window.ZC_HIST_OPEN_RENDER_DEBOUNCE_MS || 140);
 
-  [80, 220, 520].forEach((delay) => {
-    timers.push(setTimeout(() => runRender(`delay-${delay}`), delay));
-  });
+  // v10: uma rajada não pode renderizar o chat 4 vezes por mensagem.
+  // Salva no cache imediatamente e renderiza uma vez por lote curto.
+  timers.push(setTimeout(() => runRender('debounced'), renderDelay));
 
-  timers.push(setTimeout(async () => {
-    if (zcIsAtendimentoNavigatingAway()) return;
-    const h = H();
-    if (!h || !isHistoricoStillOpenFor(convKey, h)) return;
+  // O refresh DB automático fica desligado por padrão. Ele era útil como rede de
+  // segurança, mas em produção fazia GET /mensagens em toda mensagem aberta e
+  // prendia a navegação. Para depurar, use window.ZC_HIST_OPEN_VERIFY_REFRESH=true.
+  if (window.ZC_HIST_OPEN_VERIFY_REFRESH === true) {
+    timers.push(setTimeout(async () => {
+      if (zcIsAtendimentoNavigatingAway()) return;
+      const h = H();
+      if (!h || !isHistoricoStillOpenFor(convKey, h)) return;
 
-    const pending = zcOpenRealtimePendingIds.get(convKey) || new Map();
-    const now = Date.now();
+      const pending = zcOpenRealtimePendingIds.get(convKey) || new Map();
+      const now = Date.now();
 
-    // Remove ids antigos para não crescer memória.
-    for (const [id, ts] of pending.entries()) {
-      if (now - Number(ts || 0) > 15000 || zcDomHasMsgId(h, id)) {
-        pending.delete(id);
+      for (const [id, ts] of pending.entries()) {
+        if (now - Number(ts || 0) > 15000 || zcDomHasMsgId(h, id)) {
+          pending.delete(id);
+        }
       }
-    }
 
-    const missing = [...pending.keys()].filter((id) => !zcDomHasMsgId(h, id));
+      const missing = [...pending.keys()].filter((id) => !zcDomHasMsgId(h, id));
 
-    if (!missing.length) {
-      runRender('verify-ok');
-      return;
-    }
+      if (!missing.length) {
+        return;
+      }
 
-    HLOG('realtime aberto: mensagens ainda fora do DOM, refresh leve', {
-      convKey,
-      reason,
-      missingCount: missing.length,
-      missing: missing.slice(0, 5),
-    });
-
-    try {
-      await forcarAtualizacaoHistorico(convKey, {
-        append: true,
-        limit: 20,
-        reason: `open-realtime:${reason}`,
+      HLOG('realtime aberto: mensagens ainda fora do DOM, refresh leve', {
+        convKey,
+        reason,
+        missingCount: missing.length,
+        missing: missing.slice(0, 5),
       });
-    } catch (e) {
-      HERR('realtime aberto: refresh leve falhou', e);
-    }
 
-    runRender('after-refresh');
-
-    try {
-      for (const id of [...pending.keys()]) {
-        if (zcDomHasMsgId(H(), id)) pending.delete(id);
+      try {
+        await forcarAtualizacaoHistorico(convKey, {
+          append: true,
+          limit: 20,
+          reason: `open-realtime:${reason}`,
+        });
+      } catch (e) {
+        HERR('realtime aberto: refresh leve falhou', e);
       }
-    } catch {}
-  }, 900));
+
+      runRender('after-refresh');
+
+      try {
+        for (const id of [...pending.keys()]) {
+          if (zcDomHasMsgId(H(), id)) pending.delete(id);
+        }
+      } catch {}
+    }, Number(window.ZC_HIST_OPEN_VERIFY_DELAY_MS || 1100)));
+  }
 
   zcOpenRealtimeTimers.set(timerKey, timers);
 }
@@ -2755,8 +2758,9 @@ function zcQueueOpenRealtimeRender(detail = {}, reason = 'realtime-open') {
   };
 
   for (const name of names) {
+    // O ws-empresa já dispara vários nomes de evento. Escutar document + window
+    // dobra o trabalho. Mantém document, que é onde o WS publica os eventos principais.
     try { document.addEventListener(name, handler, true); } catch {}
-    try { window.addEventListener(name, handler, true); } catch {}
   }
 
   try { window.zcHistoricoClearOpenRealtimeWork = zcClearOpenRealtimeWork; } catch {}

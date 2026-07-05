@@ -15,13 +15,51 @@
     - Só mostra barra se a conversa realmente exigir aceite
     - Debounce + cache curto para não bater no backend toda hora
   */
-  const META_CACHE_TTL_MS = 2500;
+  const META_CACHE_TTL_MS = Number(window.ZC_META_CACHE_TTL_MS || 30000);
+  const META_FETCH_TIMEOUT_MS = Number(window.ZC_META_FETCH_TIMEOUT_MS || 2500);
   const REFRESH_DEBOUNCE_MS = 180;
 
   let __refreshTimer = null;
   let __lastRenderedConversationKey = "";
   let __refreshSerial = 0;
+  let __zcMetaLeaving = false;
   const __metaInFlightByKey = new Map();
+  const __metaAbortByKey = new Map();
+
+  function isAtendimentoLeaving() {
+    try {
+      return Boolean(
+        __zcMetaLeaving === true ||
+        window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ === true ||
+        window.__ZC_APP_NAVIGATING_AWAY__ === true ||
+        document.body?.dataset?.zcLeaving === "1" ||
+        document.documentElement?.dataset?.zcLeaving === "1"
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function abortMetaRequests(reason = "abort-meta") {
+    __zcMetaLeaving = true;
+    try { if (__refreshTimer) clearTimeout(__refreshTimer); } catch {}
+    __refreshTimer = null;
+    try { __refreshSerial++; } catch {}
+    try {
+      for (const ctrl of __metaAbortByKey.values()) {
+        try { ctrl.abort(reason); } catch {}
+      }
+      __metaAbortByKey.clear();
+    } catch {}
+    try { __metaInFlightByKey.clear(); } catch {}
+  }
+
+  try {
+    window.zcAbortConversationMetaRequests = abortMetaRequests;
+    window.addEventListener("zc:navigate-away", () => abortMetaRequests("zc:navigate-away"), true);
+    window.addEventListener("pagehide", () => abortMetaRequests("pagehide"), true);
+    window.addEventListener("beforeunload", () => abortMetaRequests("beforeunload"), true);
+  } catch {}
 
   function toInt(v) {
     const n = Number(v);
@@ -236,15 +274,31 @@
   }
 
   async function fetchJSON(url, options = {}) {
-    const res = await fetch(url, {
-      credentials: "same-origin",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        ...(options.headers || {})
-      },
-      ...options
-    });
+    const { timeoutMs = 0, controller = null, headers = {}, ...fetchOptions } = options || {};
+    const ctrl = controller || (timeoutMs ? new AbortController() : null);
+    let timeout = 0;
+
+    if (timeoutMs && ctrl) {
+      timeout = setTimeout(() => {
+        try { ctrl.abort("fetch-timeout"); } catch {}
+      }, Math.max(500, Number(timeoutMs) || 0));
+    }
+
+    let res;
+    try {
+      res = await fetch(url, {
+        credentials: "same-origin",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(headers || {})
+        },
+        ...fetchOptions,
+        ...(ctrl ? { signal: ctrl.signal } : {})
+      });
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
 
     const text = await res.text();
     let data = null;
@@ -532,8 +586,10 @@
   async function fetchMeta(conv) {
     const empresaId = getEmpresaId();
 
+    if (isAtendimentoLeaving()) return null;
     if (!empresaId || !conv || conv.is_group) return null;
 
+    const key = buildConversationKey(conv) || String(conv.id || "");
     const url = new URL(`/api/atendimento/conversas/${conv.id}/meta`, window.location.origin);
     url.searchParams.set("empresa_id", String(empresaId));
 
@@ -541,7 +597,19 @@
       url.searchParams.set("instancia_id", String(conv.instancia_id));
     }
 
-    return await fetchJSON(url.toString());
+    const ctrl = new AbortController();
+    if (key) __metaAbortByKey.set(key, ctrl);
+
+    try {
+      return await fetchJSON(url.toString(), {
+        controller: ctrl,
+        timeoutMs: META_FETCH_TIMEOUT_MS,
+      });
+    } finally {
+      if (key && __metaAbortByKey.get(key) === ctrl) {
+        __metaAbortByKey.delete(key);
+      }
+    }
   }
 
   function getMetaCache() {
@@ -676,7 +744,11 @@
     const cache = getMetaCache();
     const cached = cache[key];
 
-    if (!force && cached && cached._cached_at) {
+    if (isAtendimentoLeaving()) {
+      return cached || null;
+    }
+
+    if (cached && cached._cached_at) {
       const age = Date.now() - Number(cached._cached_at || 0);
 
       if (age >= 0 && age < META_CACHE_TTL_MS) {
@@ -685,17 +757,22 @@
     }
 
     if (!force && __metaInFlightByKey.has(key)) {
-      return await __metaInFlightByKey.get(key);
+      return await __metaInFlightByKey.get(key).catch(() => cached || null);
     }
 
     const promise = (async () => {
-      const meta = await fetchMeta(conv);
-      if (!meta) return null;
+      try {
+        const meta = await fetchMeta(conv);
+        if (!meta) return cached || null;
 
-      const detail = saveMetaCache(conv, meta);
-      emitMetaEvents(detail);
+        const detail = saveMetaCache(conv, meta);
+        emitMetaEvents(detail);
 
-      return detail;
+        return detail;
+      } catch (err) {
+        if (cached) return cached;
+        throw err;
+      }
     })();
 
     __metaInFlightByKey.set(key, promise);
@@ -981,6 +1058,8 @@
   }
 
   async function refreshResponsavelButtons(options = {}) {
+    if (isAtendimentoLeaving()) return;
+
     const force = !!options.force;
     const conv = getCurrentConversation();
 
@@ -1021,6 +1100,8 @@
 
       renderClaimFromMeta(conv, meta);
     } catch (err) {
+      if (isAtendimentoLeaving() || err?.name === "AbortError") return;
+
       console.error("[aceitar-conversa] refresh erro:", err);
 
       /*
@@ -1033,9 +1114,12 @@
   }
 
   function scheduleRefreshResponsavelButtons(options = {}) {
+    if (isAtendimentoLeaving()) return;
+
     clearTimeout(__refreshTimer);
 
     __refreshTimer = setTimeout(() => {
+      if (isAtendimentoLeaving()) return;
       refreshResponsavelButtons(options);
     }, REFRESH_DEBOUNCE_MS);
   }

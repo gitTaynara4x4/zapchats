@@ -2086,6 +2086,10 @@ function scheduleCarregarClientes(opts = {}, delay = LIST_DEBOUNCE_MS) {
 }
 
 export async function carregarClientes({ force = false, reason = '', noLoading = false } = {}) {
+  if (zcListaIsNavigatingAway()) {
+    return Array.isArray(state.clientesCache) ? state.clientesCache : [];
+  }
+
   const loadKey = currentConversasLoadKey();
   const now = Date.now();
   const hasCache = Array.isArray(state.clientesCache) && state.clientesCache.length > 0;
@@ -2208,6 +2212,10 @@ export async function carregarClientes({ force = false, reason = '', noLoading =
         }
       }
 
+      if (zcListaIsNavigatingAway()) {
+        return all;
+      }
+
       syncActiveConvs(all, next);
 
       if (all.length) {
@@ -2250,7 +2258,7 @@ export async function carregarClientes({ force = false, reason = '', noLoading =
     return await __loadingConversasPromise;
   } finally {
     __loadingConversasPromise = null;
-    clearListaLoading();
+    if (!zcListaIsNavigatingAway()) clearListaLoading();
   }
 }
 
@@ -2684,6 +2692,54 @@ function _findClienteIndex(id) {
   });
 }
 
+let __zcListaPreviewMissReloadTimer = null;
+let __zcListaPreviewMissReloadAt = 0;
+function zcListaIsNavigatingAway() {
+  try {
+    // Fora da tela de Atendimento, não renderiza mais lista antiga.
+    if (!String(location.pathname || '').includes('/atendimentos')) return true;
+
+    // Durante a saída real, hardGo marca esta flag no window atual.
+    if (window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ === true) return true;
+
+    // Não usar sessionStorage como verdade aqui: ele sobrevive à navegação.
+    // A versão anterior deixava zc:atendimentos:leaving_to=/departamentos por alguns
+    // segundos/minutos; ao voltar para /atendimentos, a lista achava que ainda estava
+    // saindo e podia mostrar "Não foi possível carregar suas conversas".
+  } catch {}
+  return false;
+}
+
+function zcListaClearPendingReload(reason = 'navigate-away') {
+  try { if (__zcListaPreviewMissReloadTimer) clearTimeout(__zcListaPreviewMissReloadTimer); } catch {}
+  __zcListaPreviewMissReloadTimer = null;
+}
+
+try { window.addEventListener('zc:navigate-away', () => zcListaClearPendingReload('navigate-away'), true); } catch {}
+try { window.addEventListener('pagehide', () => zcListaClearPendingReload('pagehide'), true); } catch {}
+
+
+function scheduleListaPreviewMissReload(reason = 'lista-preview-miss') {
+  if (zcListaIsNavigatingAway()) return;
+
+  const now = Date.now();
+  if (now - __zcListaPreviewMissReloadAt < 1800) return;
+  __zcListaPreviewMissReloadAt = now;
+
+  clearTimeout(__zcListaPreviewMissReloadTimer);
+  __zcListaPreviewMissReloadTimer = setTimeout(() => {
+    __zcListaPreviewMissReloadTimer = null;
+    if (zcListaIsNavigatingAway()) return;
+    try {
+      carregarClientes({
+        force: true,
+        noLoading: true,
+        reason,
+      }).catch(() => {});
+    } catch {}
+  }, 900);
+}
+
 function _reRender() {
   const arr = dedupeConversas(state.clientesCache || []);
   syncActiveConvs(arr, state.nextCursor ?? null);
@@ -2750,7 +2806,13 @@ if (!window.Lista) {
       } = payload || {};
 
       const idx = _findClienteIndex(clienteId);
-      if (idx < 0) return;
+      if (idx < 0) {
+        // v11: se o WS atualizou o chat aberto, mas a lista/cache ainda não
+        // tem a conversa com a chave canônica, não pode simplesmente ignorar.
+        // Busca a lista oficial sem spinner e com debounce.
+        scheduleListaPreviewMissReload('lista-update-preview-miss');
+        return;
+      }
 
       const c = state.clientesCache[idx];
 

@@ -1027,19 +1027,6 @@ async def start_rabbit_consumer(
     HANDLERS: Dict[Any, Callable],
     EvoEvent: Any,
 ):
-    """
-    Inicia o consumer RabbitMQ fora do event loop do FastAPI por padrão.
-
-    Motivo:
-    - os handlers da Evolution usam SQLAlchemy síncrono e várias rotinas de banco;
-    - quando o consumer roda no mesmo loop do Uvicorn, uma mensagem recebida pode
-      travar todas as páginas enquanto o handler processa/commit/cache/chatbot;
-    - rodando em uma thread dedicada, o atendimento pode salvar mensagem sem
-      congelar dashboard, mídias, colaboradores etc.
-
-    Para voltar ao modo antigo, usar:
-      RABBITMQ_DEDICATED_THREAD=false
-    """
     use_thread = _bool_env("RABBITMQ_DEDICATED_THREAD", default=True)
 
     if not use_thread:

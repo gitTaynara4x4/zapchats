@@ -38,7 +38,9 @@ import { EMPRESA_ID as EMPRESA_ID_ENV } from '../core/env.js';
 
 import {
   ensureEmpresaWS as ensureCoreEmpresaWS,
-  onEmpresaMessage as onCoreEmpresaMessage
+  onEmpresaMessage as onCoreEmpresaMessage,
+  closeEmpresaWS as closeCoreEmpresaWS,
+  closeAllWS as closeCoreAllWS
 } from '../../realtime/ws-core.js';
 
 const EMPRESA_ID = Number(
@@ -55,6 +57,17 @@ const DEBUG_WS = Boolean(window.DEBUG_WS ?? false);
 // render/badge várias vezes e podia atrasar clique/navegação para outras telas.
 const WS_LIGHT_MODE = window.ZC_WS_LIGHT_MODE !== false;
 const WS_BADGE_REPEAT_LIGHT = window.ZC_WS_BADGE_REPEAT_LIGHT !== false;
+const WS_OPEN_SEEN_DELAY_MS = Number(window.ZC_WS_OPEN_SEEN_DELAY_MS || 6500);
+const WS_BURST_NAV_GRACE_MS = Number(window.ZC_WS_BURST_NAV_GRACE_MS || 1800);
+// V5: fila de mensagens WS. Em rajada, o navegador não pode processar 4/10 mensagens
+// de uma vez antes de aceitar clique no menu. Processa 1 por vez e sempre deixa o
+// event-loop respirar. Ao sair da tela, a fila é descartada imediatamente.
+const WS_MESSAGE_QUEUE_DELAY_MS = Number(window.ZC_WS_MESSAGE_QUEUE_DELAY_MS || 180);
+const WS_MESSAGE_QUEUE_MAX_PENDING = Number(window.ZC_WS_MESSAGE_QUEUE_MAX_PENDING || 200);
+let __zcWsLastInboundAt = 0;
+let __zcWsMessageQueue = [];
+let __zcWsMessageFlushTimer = 0;
+let __zcWsMessageProcessing = false;
 
 
 const WS_CID = (() => {
@@ -94,28 +107,31 @@ const __zcWsBadgeLatest = new Map();
 
 function isNavigatingAway() {
   try {
+    if (!String(location.pathname || '').includes('/atendimentos')) return true;
     if (__zcWsNavigatingAway) return true;
     if (window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ === true) return true;
-    try {
-      const until = Number(sessionStorage.getItem('zc:atendimentos:leaving_until') || '0');
-      const to = sessionStorage.getItem('zc:atendimentos:leaving_to') || '';
-      if (until && Date.now() < until && to) return true;
-    } catch {}
-    if (!String(location.pathname || '').includes('/atendimentos')) return true;
+    // Não usar sessionStorage aqui. Ele fica vivo entre páginas e pode fazer o
+    // Atendimento novo achar que ainda está saindo, mesmo depois de voltar.
   } catch {}
   return false;
 }
 
 function clearWsPendingWork(reason = 'nav-away') {
+  try { window.__ZC_ATENDIMENTO_FETCH_GUARD__?.abortAll?.(reason || 'ws-clear'); } catch {}
   try { if (__zcWsOpenRenderTimer) clearTimeout(__zcWsOpenRenderTimer); } catch {}
+  try { if (__zcWsOpenDbRefreshTimer) clearTimeout(__zcWsOpenDbRefreshTimer); } catch {}
   try { if (__reloadListTimer) clearTimeout(__reloadListTimer); } catch {}
   try { for (const t of __zcWsBadgeTimers.values()) clearTimeout(t); } catch {}
   try { __zcWsBadgeTimers.clear(); __zcWsBadgeLatest.clear(); } catch {}
   try { __zcWsEventQueue.length = 0; } catch {}
   try { if (__zcWsEventFlushTimer) clearTimeout(__zcWsEventFlushTimer); } catch {}
+  try { if (__zcWsMessageFlushTimer) clearTimeout(__zcWsMessageFlushTimer); } catch {}
+  try { __zcWsMessageQueue.length = 0; } catch {}
+  __zcWsMessageProcessing = false;
   __zcWsOpenRenderTimer = 0;
   __reloadListTimer = null;
   __zcWsEventFlushTimer = 0;
+  __zcWsMessageFlushTimer = 0;
 
   try { window.ZCForceClearLoading?.(reason); } catch {}
   try { window.PageLoading?.hide?.(); } catch {}
@@ -127,6 +143,8 @@ function markWsNavigatingAway(reason = 'nav-away') {
   __zcWsNavigatingAway = true;
   try { window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ = true; } catch {}
   clearWsPendingWork(reason);
+  try { closeCoreAllWS(); } catch {}
+  try { disconnectInstWS(); } catch {}
 }
 
 /* =========================================================
@@ -1527,6 +1545,193 @@ function forceUnreadBadgeDom(refOrKey, unread, patch = null) {
 }
 
 
+// V6: atualização local da lista lateral sem chamar /api/atendimento/conversas.
+// A V4/V5 precisou bloquear reload pesado da lista para não travar a navegação.
+// Este patch mantém a lista visual atualizada mexendo só no <li> da conversa.
+function formatListTimeFromPayload(payload = null) {
+  try {
+    const raw =
+      payload?.timestamp ??
+      payload?.ts ??
+      payload?.ultima_mensagem_ts ??
+      payload?.last_ts ??
+      payload?.updated_at ??
+      payload?.created_at ??
+      Date.now();
+
+    let ms = tsToMillis(raw);
+    if (!ms && typeof raw === 'number') ms = raw < 10000000000 ? raw * 1000 : raw;
+    if (!ms) ms = Date.now();
+
+    const d = new Date(ms);
+    if (Number.isNaN(d.getTime())) return '';
+
+    const now = new Date();
+    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startMsg = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const oneDay = 24 * 60 * 60 * 1000;
+
+    if (startMsg === startToday) {
+      return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    }
+    if (startToday - startMsg === oneDay) return 'ontem';
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+function previewTextFromPayloadLocal(payload = null) {
+  try {
+    const text = pickText(payload);
+    if (text && String(text).trim()) return String(text).trim();
+
+    const tipo = String(
+      payload?.messageType ??
+      payload?.tipo_midia ??
+      payload?.media_type ??
+      payload?.type ??
+      ''
+    ).toLowerCase();
+
+    if (tipo.includes('audio') || payload?.audio || payload?.ptt) return '[Áudio]';
+    if (tipo.includes('image') || tipo.includes('imagem') || payload?.image || payload?.imagem) return '[Imagem]';
+    if (tipo.includes('video') || payload?.video) return '[Vídeo]';
+    if (tipo.includes('document') || tipo.includes('arquivo') || payload?.documento || payload?.file) return '[Arquivo]';
+    if (Array.isArray(payload?.midias) && payload.midias.length) return '[Mídia]';
+  } catch {}
+  return '';
+}
+
+function patchConversationListPreviewDom(refOrKey, payload = null, opts = {}) {
+  if (isNavigatingAway()) return 0;
+
+  const ref = normalizeConversationRef(refOrKey, typeof refOrKey === 'object' ? refOrKey : payload);
+  if (!ref?.kind || !ref?.entityId) return 0;
+
+  const text = previewTextFromPayloadLocal(payload);
+  const timeText = formatListTimeFromPayload(payload);
+
+  const isOutgoing =
+    payload?.from_me === true ||
+    payload?.fromMe === true ||
+    payload?.tipo === 'saida' ||
+    payload?.origem === 'atendente';
+
+  const openNow = opts.openNow === true || isOpenChat(ref);
+
+  const items = findConversationListItems(ref, payload);
+  if (!items.length) return 0;
+
+  const rawUnread =
+    payload?.novas ??
+    payload?.unread_count ??
+    payload?.unread ??
+    payload?.nao_lidas ??
+    payload?.naoLidas ??
+    payload?.qtd_nao_lidas ??
+    payload?.qtdNaoLidas ??
+    null;
+
+  for (const li of items) {
+    try {
+      if (ref.key) {
+        li.dataset.id = li.dataset.id || ref.key;
+        li.dataset.conversationKey = ref.key;
+        li.dataset.conversationId = ref.key;
+      }
+      li.dataset.kind = ref.kind || li.dataset.kind || 'c';
+      li.dataset.entityId = ref.entityId || li.dataset.entityId || '';
+      if (ref.instId) li.dataset.instanciaId = ref.instId;
+      if (ref.kind === 'c') li.dataset.clienteId = ref.entityId;
+      if (ref.kind === 'g') li.dataset.grupoId = ref.entityId;
+
+      if (text) {
+        li.dataset.preview = text;
+        li.dataset.ultimaMensagem = text;
+        li.dataset.lastMessage = text;
+
+        const previewEl =
+          li.querySelector('.preview-text') ||
+          li.querySelector('[data-role="preview"]') ||
+          li.querySelector('.chat-preview') ||
+          li.querySelector('.cliente-preview') ||
+          li.querySelector('.last-message') ||
+          li.querySelector('.last-line');
+
+        if (previewEl) {
+          previewEl.textContent = text;
+        } else {
+          const last = li.querySelector('.chat-last, .cliente-last');
+          if (last) last.textContent = text;
+        }
+      }
+
+      if (timeText) {
+        li.dataset.lastTs = String(tsToMillis(payload?.timestamp ?? payload?.ts ?? payload?.ultima_mensagem_ts ?? payload?.last_ts ?? payload?.updated_at) || Date.now());
+        const timeEl = li.querySelector('.chat-time, .cliente-time, time, [data-role="time"]');
+        if (timeEl) timeEl.textContent = timeText;
+      }
+
+      let unread = null;
+      if (openNow) {
+        unread = 0;
+      } else if (rawUnread !== null && rawUnread !== undefined && rawUnread !== '') {
+        const n = Number(rawUnread);
+        unread = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
+      } else if (!isOutgoing) {
+        const prev = Number(li.dataset.novas || li.dataset.unread || 0);
+        unread = Math.max(0, (Number.isFinite(prev) ? prev : 0) + 1);
+      }
+
+      if (unread !== null) {
+        li.dataset.novas = String(unread);
+        li.dataset.unread = String(unread);
+        li.dataset.unreadCount = String(unread);
+        li.dataset.naoLidas = String(unread);
+        li.classList.toggle('has-unread', unread > 0);
+        li.classList.toggle('unread', unread > 0);
+        li.classList.toggle('is-unread', unread > 0);
+
+        const badgeEl = ensureUnreadBadgeElement(li);
+        if (badgeEl) {
+          badgeEl.textContent = unread > 0 ? String(unread) : '';
+          badgeEl.hidden = unread <= 0;
+          badgeEl.style.display = unread > 0 ? 'inline-flex' : 'none';
+          badgeEl.setAttribute('data-count', String(unread));
+        }
+      }
+
+      // Mantém a conversa no topo sem recarregar a lista inteira.
+      if (opts.moveTop !== false) {
+        const parent = li.parentElement;
+        if (parent && parent.firstElementChild !== li) {
+          const firstReal = Array.from(parent.children).find(el => el && el.classList && !el.classList.contains('load-more-item'));
+          if (firstReal && firstReal !== li) parent.insertBefore(li, firstReal);
+        }
+      }
+    } catch {}
+  }
+
+  try {
+    document.dispatchEvent(new CustomEvent('ws:list_preview_patched', {
+      detail: {
+        conversation_key: ref.key,
+        conversation_id: ref.key,
+        kind: ref.kind,
+        entity_id: ref.entityId,
+        instancia_id: ref.instId,
+        preview: text,
+        openNow,
+        items: items.length,
+      },
+    }));
+  } catch {}
+
+  return items.length;
+}
+
+
 function ensureDomContextFor(convRef) {
   const ref = normalizeConversationRef(convRef, typeof convRef === 'object' ? convRef : null);
   if (!ref?.key) return false;
@@ -1703,9 +1908,14 @@ function scheduleForceUnreadBadgeDom(refOrKey, unread, patch = null) {
 function requestOfficialListReload(reason = 'ws-reload') {
   if (isNavigatingAway()) return;
 
+  // Mensagem chegando na conversa aberta não pode buscar lista oficial.
+  // O payload WS já atualiza cache/preview/bolha. Esse GET era um dos pedidos
+  // que ficavam pendurados e atrasavam pagehide ao sair do Atendimento.
+  if (String(reason || '').startsWith('ws-open-')) return;
+
   const now = Date.now();
 
-  if (now - __lastReloadListAt < 1200) return;
+  if (now - __lastReloadListAt < 1800) return;
   __lastReloadListAt = now;
 
   clearTimeout(__reloadListTimer);
@@ -1722,8 +1932,10 @@ function requestOfficialListReload(reason = 'ws-reload') {
 
     try {
       window.carregarClientes?.({
-        force: false,
-        reason: `soft:${reason}`,
+        // v11: precisa buscar do backend quando o patch local da lista falhar.
+        // force:false só redesenha cache fresco e não traz o preview novo.
+        force: true,
+        reason: `soft-force:${reason}`,
         noLoading: true,
       });
     } catch {}
@@ -1737,7 +1949,7 @@ function requestOfficialListReload(reason = 'ws-reload') {
         },
       }));
     } catch {}
-  }, 250);
+  }, 900);
 }
 
 /* =========================================================
@@ -1916,7 +2128,9 @@ function bumpPreview(convKey, msg, inst = null) {
   const updated = storeUpdateKnownConversation(ref.key, patch, ref.instId);
 
   if (!updated) {
-    requestOfficialListReload('ws-preview-conversation-not-found');
+    // v12: bumpPreview não agenda reload sozinho. O chamador sabe se a conversa
+    // está aberta e decide um fallback leve/debounced. Duplicar aqui fazia uma
+    // busca da lista oficial em cada rajada e prendia a saída da tela.
     return null;
   }
 
@@ -2051,6 +2265,12 @@ let __zcWsOpenDbRefreshKey = '';
 
 function forceRefreshOpenConversationFromDbSoon(convRef, reason = 'ws-open-db-refresh') {
   if (isNavigatingAway()) return;
+
+  // Produção: não faz GET /mensagens em toda mensagem recebida na conversa aberta.
+  // O payload WS já foi salvo no cache e renderizado. O refresh DB fica só como
+  // fallback manual/diagnóstico, porque ele era uma das causas do atraso ao sair
+  // de /atendimentos para Dashboard/Mídias.
+  if (window.ZC_WS_FORCE_DB_REFRESH !== true) return;
 
   const ref = normalizeConversationRef(convRef, typeof convRef === 'object' ? convRef : null);
   if (!ref?.key) return;
@@ -2311,8 +2531,64 @@ function handleDeleteMensagem(data) {
    NOVA MENSAGEM
 ========================================================= */
 
+
+function scheduleWsMessageQueueFlush(delay = WS_MESSAGE_QUEUE_DELAY_MS) {
+  if (isNavigatingAway()) {
+    try { __zcWsMessageQueue.length = 0; } catch {}
+    return;
+  }
+  if (__zcWsMessageFlushTimer) return;
+  __zcWsMessageFlushTimer = setTimeout(() => {
+    __zcWsMessageFlushTimer = 0;
+    flushWsMessageQueue();
+  }, Math.max(0, Number(delay || 0)));
+}
+
+function flushWsMessageQueue() {
+  if (isNavigatingAway()) {
+    try { __zcWsMessageQueue.length = 0; } catch {}
+    __zcWsMessageProcessing = false;
+    return;
+  }
+  if (__zcWsMessageProcessing) return;
+
+  const item = __zcWsMessageQueue.shift();
+  if (!item) return;
+
+  __zcWsMessageProcessing = true;
+  try {
+    processNovaMensagemNow(item);
+  } catch (e) {
+    if (DEBUG_WS) console.warn('[WS MSG][queue][erro]', e);
+  } finally {
+    __zcWsMessageProcessing = false;
+  }
+
+  if (__zcWsMessageQueue.length) {
+    scheduleWsMessageQueueFlush(WS_MESSAGE_QUEUE_DELAY_MS);
+  }
+}
+
 function handleNovaMensagem(data) {
   if (isNavigatingAway()) return;
+
+  // V5: prioridade absoluta para clique/navegação.
+  // Mensagem WS entra na fila e o processamento pesado fica para um tick separado.
+  try { __zcWsLastInboundAt = Date.now(); window.__ZC_WS_LAST_INBOUND_AT__ = __zcWsLastInboundAt; } catch {}
+
+  try {
+    __zcWsMessageQueue.push(data);
+    if (__zcWsMessageQueue.length > WS_MESSAGE_QUEUE_MAX_PENDING) {
+      __zcWsMessageQueue.splice(0, __zcWsMessageQueue.length - WS_MESSAGE_QUEUE_MAX_PENDING);
+    }
+  } catch {}
+
+  scheduleWsMessageQueueFlush(__zcWsMessageQueue.length <= 1 ? 0 : WS_MESSAGE_QUEUE_DELAY_MS);
+}
+
+function processNovaMensagemNow(data) {
+  if (isNavigatingAway()) return;
+  try { __zcWsLastInboundAt = Date.now(); window.__ZC_WS_LAST_INBOUND_AT__ = __zcWsLastInboundAt; } catch {}
 
   const incomingRef = normalizeIncomingConversationRef(data);
 
@@ -2387,17 +2663,31 @@ function handleNovaMensagem(data) {
     } catch {}
 
     pushIncomingToHist(openRef, normalizedOpenPayload, openRef.instId);
+
+    // v11: este é o caminho que causava "atualiza só a conversa".
+    // Quando o WS acha a conversa aberta, mas não acha o item na lista/cache,
+    // ele renderizava a bolha e saía sem tocar na lista lateral.
+    // Tenta patch local; se não achar a linha da lista, faz reload oficial leve.
+    const updatedOpen = bumpPreview(openRef, normalizedOpenPayload, openRef.instId);
+    try { patchConversationListPreviewDom(openRef, normalizedOpenPayload, { openNow: true, moveTop: true }); } catch {}
+    if (!updatedOpen) {
+      // Conversa aberta: não chama /api/atendimento/conversas.
+      // A bolha já foi empurrada pelo WS; a lista lateral é corrigida localmente acima.
+    }
+
     dispatchRealtimeMessageEvents(normalizedOpenPayload);
 
     /*
       A conversa já está aberta e recebeu a mensagem pelo WebSocket.
-      Não força reload oficial aqui, porque isso reabre /atendimentos,
+      Não força reload pesado aqui, porque isso reabre /atendimentos,
       mostra spinner e pode parecer que a tela caiu.
+      Se a lista não bateu, o reload acima é leve/noLoading e debounced.
     */
 
     renderOpenConversationFromWs(openRef);
-    forceRefreshOpenConversationFromDbSoon(openRef, 'ws-open-unknown');
-    notifyNewMessage(normalizedOpenPayload, openRef.key);
+    // V4: conversa aberta não faz refresh DB nem notificação desktop/toast.
+    // Em rajada, isso competia com o clique para sair.
+    // forceRefreshOpenConversationFromDbSoon(openRef, 'ws-open-unknown');
 
     return;
   }
@@ -2443,6 +2733,7 @@ function handleNovaMensagem(data) {
   pushIncomingToHist(knownRef, normalizedPayload, knownRef.instId);
 
   const updated = bumpPreview(knownRef, normalizedPayload, knownRef.instId);
+  try { patchConversationListPreviewDom(knownRef, normalizedPayload, { openNow, moveTop: true }); } catch {}
 
   if (!WS_LIGHT_MODE) {
     try {
@@ -2470,34 +2761,25 @@ function handleNovaMensagem(data) {
     Se a conversa NÃO está aberta e o preview não conseguiu atualizar, aí sim
     recarrega a lista para criar/posicionar a conversa corretamente.
   */
-  if (!updated && !openNow) {
-    requestOfficialListReload('ws-message-update-miss');
-    return;
+  if (!updated) {
+    if (!openNow) {
+      requestOfficialListReload('ws-message-update-miss');
+      return;
+    }
+    // Conversa aberta: não chama /api/atendimento/conversas durante rajada de WS.
+    // Isso evita request pendurado segurando navegação para Dashboard/Departamentos.
   }
 
   if (openNow) {
     try {
-      // Conversa aberta: nunca deixa bolha pendurada na lista lateral.
-      try { marcarLidas(knownRef.key, knownRef.instId); } catch {}
-      try { window.Lista?.resetUnread?.(knownRef.key); } catch {}
-      try { window.zcClearUnreadBadge?.(knownRef.key); } catch {}
-      try { window.recomputeUnread?.(); } catch {}
-      try { window.zcScheduleMarkChatAsSeen?.(knownRef.key, normalizedPayload, { delay: 700 }); } catch {}
+      // V4: em rajada de mensagens com a conversa aberta, não faz seen/meta/lista
+      // imediatamente. Limpa visualmente e agenda um seen tardio e único.
+      // Se o usuário sair, o fetch guard aborta/cancela antes de ocupar conexão.
+      try { window.zcScheduleMarkChatAsSeen?.(knownRef.key, normalizedPayload, { delay: WS_OPEN_SEEN_DELAY_MS }); } catch {}
 
       renderOpenConversationFromWs(knownRef);
-      forceRefreshOpenConversationFromDbSoon(knownRef, 'ws-open-known');
-
-      try {
-        if (knownRef.kind === 'c' && knownRef.entityId) {
-          document.dispatchEvent(new CustomEvent('zc:seen-current', {
-            detail: {
-              cliente_id: knownRef.entityId,
-              instancia_id: knownRef.instId,
-              conversation_key: knownRef.key,
-            },
-          }));
-        }
-      } catch {}
+      // O payload WS já atualiza o cache/histórico local; refresh DB fica desligado.
+      // forceRefreshOpenConversationFromDbSoon(knownRef, 'ws-open-known');
     } catch (e) {
       if (DEBUG_WS) console.warn('[WS MSG][render falhou]', e);
     }
@@ -2509,7 +2791,9 @@ function handleNovaMensagem(data) {
     });
   }
 
-  notifyNewMessage(normalizedPayload, knownRef.key);
+  if (!openNow) {
+    notifyNewMessage(normalizedPayload, knownRef.key);
+  }
 
   try {
     const outgoingPayload =
@@ -3032,6 +3316,11 @@ function disconnectEmpresaWS() {
   } catch {}
 
   unsubEmpresaWS = null;
+
+  try {
+    closeCoreEmpresaWS(EMPRESA_ID);
+  } catch {}
+
   badge('Desconectado', 'crit');
 }
 

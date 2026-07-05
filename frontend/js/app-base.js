@@ -493,16 +493,17 @@
       try { window.Splash && window.Splash.hide && window.Splash.hide(); } catch (ee) {}
     }
 
+    var __zcAppBaseHardNavStarted = false;
+
     function hardNavigateNow(u, reason) {
+      if (__zcAppBaseHardNavStarted || window.__ZC_ATENDIMENTOS_HARD_NAV_STARTED__) return;
+      __zcAppBaseHardNavStarted = true;
+      try { window.__ZC_ATENDIMENTOS_HARD_NAV_STARTED__ = true; } catch (ee) {}
       try { markHardAtendimentoLeave(u, reason); } catch (ee) {}
-      try { window.location.replace(u.href); } catch (ee) {
+      try { window.stop && window.stop(); } catch (ee) {}
+      try { window.location.assign(u.href); } catch (ee) {
         try { window.location.href = u.href; } catch (eee) {}
       }
-      // Se algum handler antigo tentar recolocar /atendimentos no mesmo ciclo,
-      // reforça a rota alvo por alguns ticks curtos.
-      setTimeout(function(){ try { if (window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__ && location.href !== window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__) location.replace(window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__); } catch(e){} }, 0);
-      setTimeout(function(){ try { if (window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__ && location.href !== window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__) location.replace(window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__); } catch(e){} }, 80);
-      setTimeout(function(){ try { if (window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__ && location.href !== window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__) location.replace(window.__ZC_ATENDIMENTOS_FORCE_NEXT_URL__); } catch(e){} }, 250);
     }
 
     function forceImmediateLeaveAtendimentos(e) {

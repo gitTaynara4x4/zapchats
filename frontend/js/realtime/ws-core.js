@@ -573,6 +573,20 @@ export function closeAllWS() {
   });
 }
 
+// Fecha sockets imediatamente quando uma página do app sinaliza saída.
+// Isso evita conexão WS/fila de retry viva competindo com a próxima navegação.
+try {
+  if (!window.__ZC_WS_CORE_LIFECYCLE_CLOSE_BOUND__) {
+    window.__ZC_WS_CORE_LIFECYCLE_CLOSE_BOUND__ = true;
+    const closeBecauseLeaving = () => {
+      try { closeAllWS(); } catch {}
+    };
+    window.addEventListener('zc:navigate-away', closeBecauseLeaving, true);
+    window.addEventListener('pagehide', closeBecauseLeaving, true);
+    window.addEventListener('beforeunload', closeBecauseLeaving, true);
+  }
+} catch {}
+
 /* Debug manual no console:
    window.ZC_WS_CORE_STATUS()
 */

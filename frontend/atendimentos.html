@@ -7,6 +7,189 @@
   <title>Painel de Atendimento – ZapsChat</title>
 
 
+  <script id="zc-atendimento-hard-leave-fetch-guard-v6">
+    /*
+      V5: guardião ANTES de todos os módulos do Atendimento.
+      Objetivo: em rajada de mensagens, se o usuário clicar em Dashboard/Departamentos,
+      abortar imediatamente TODOS os fetches antigos de /api/atendimento e navegar sem
+      esperar /seen, /meta, /conversas ou render de WS terminar.
+    */
+    (function zcAtendimentoHardLeaveFetchGuardV6(){
+      if (window.__ZC_ATENDIMENTO_HARD_LEAVE_FETCH_GUARD_V6__) return;
+      window.__ZC_ATENDIMENTO_HARD_LEAVE_FETCH_GUARD_V6__ = true;
+
+      var leaving = false;
+      var navStarted = false;
+      var active = new Map();
+      var seq = 0;
+
+      function normPath(p){
+        return String(p || '').split('?')[0].split('#')[0].replace(/\/+$/,'') || '/';
+      }
+
+      function isAtendimentos(){
+        return normPath(location.pathname) === '/atendimentos';
+      }
+
+      function isInternalUrl(raw){
+        try {
+          if (!raw) return null;
+          var u = new URL(String(raw), location.origin);
+          if (u.origin !== location.origin) return null;
+          return u;
+        } catch(e){ return null; }
+      }
+
+      function shouldTrackUrl(u){
+        try {
+          var p = String(u && u.pathname || '');
+          // tudo que é da tela antiga e costuma ficar pendurado
+          return p.indexOf('/api/atendimento/') === 0 || p === '/api/atendimento';
+        } catch(e){ return false; }
+      }
+
+      function abortAll(reason){
+        try {
+          active.forEach(function(item){
+            try { item.ctrl && item.ctrl.abort(reason || 'atendimento-leaving'); } catch(e){}
+          });
+          active.clear();
+        } catch(e){}
+      }
+
+      function markLeaving(toUrl, reason){
+        if (leaving) return;
+        leaving = true;
+        try { window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ = true; } catch(e){}
+        try { window.__ZC_ATENDIMENTOS_HARD_NAV_STARTED__ = true; } catch(e){}
+        try { window.__ZC_APP_NAVIGATING_AWAY__ = true; } catch(e){}
+        try { document.documentElement.dataset.zcLeaving = '1'; } catch(e){}
+        try { document.body && (document.body.dataset.zcLeaving = '1'); } catch(e){}
+        try {
+          sessionStorage.setItem('zc:atendimentos:leaving_until', String(Date.now() + 15000));
+          sessionStorage.setItem('zc:atendimentos:leaving_to', String(toUrl || ''));
+          sessionStorage.setItem('zc:atendimentos:leaving_reason', reason || 'hard-leave-v5');
+        } catch(e){}
+        abortAll(reason || 'hard-leave-v5');
+        try {
+          window.dispatchEvent(new CustomEvent('zc:navigate-away', {
+            detail: { from: location.pathname, to: String(toUrl || ''), reason: reason || 'hard-leave-v5', hard: true }
+          }));
+        } catch(e){}
+      }
+
+      window.__ZC_ATENDIMENTO_FETCH_GUARD__ = {
+        version: 'v6-no-window-stop',
+        abortAll: abortAll,
+        markLeaving: markLeaving,
+        isLeaving: function(){ return leaving || window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ === true; },
+        activeCount: function(){ return active.size; }
+      };
+
+      var oldFetch = window.fetch;
+      window.fetch = function(input, init){
+        var raw = input && input.url ? input.url : input;
+        var u = isInternalUrl(raw);
+        var track = u && shouldTrackUrl(u);
+
+        if ((leaving || window.__ZC_ATENDIMENTOS_NAVIGATING_AWAY__ === true) && track) {
+          return Promise.reject(new DOMException('Abortado: saindo do atendimento', 'AbortError'));
+        }
+
+        if (!track) return oldFetch.apply(this, arguments);
+
+        var id = 'afg-' + (++seq);
+        var ctrl = new AbortController();
+        var nextInit = Object.assign({}, init || {});
+        var oldSignal = nextInit.signal || (input && input.signal);
+
+        if (oldSignal) {
+          if (oldSignal.aborted) {
+            try { ctrl.abort(oldSignal.reason || 'old-signal-aborted'); } catch(e){ try { ctrl.abort(); } catch(_){} }
+          } else {
+            try { oldSignal.addEventListener('abort', function(){
+              try { ctrl.abort(oldSignal.reason || 'old-signal-aborted'); } catch(e){ try { ctrl.abort(); } catch(_){} }
+            }, { once:true }); } catch(e){}
+          }
+        }
+
+        nextInit.signal = ctrl.signal;
+
+        var pathname = u.pathname || '';
+        var timeoutMs = 4500;
+        if (pathname.indexOf('/seen') >= 0) timeoutMs = 1200;
+        else if (pathname.indexOf('/meta') >= 0) timeoutMs = 1500;
+        else if (pathname.indexOf('/mensagens') >= 0) timeoutMs = 2500;
+        else if (pathname.indexOf('/conversas') >= 0) timeoutMs = 2500;
+
+        var timer = setTimeout(function(){
+          try { ctrl.abort('atendimento-fetch-timeout-v5'); } catch(e){}
+        }, timeoutMs);
+
+        active.set(id, { ctrl: ctrl, url: u.pathname + u.search, at: Date.now() });
+
+        return oldFetch.call(this, input, nextInit).finally(function(){
+          try { clearTimeout(timer); } catch(e){}
+          active.delete(id);
+        });
+      };
+
+      function hardNavigate(u, ev, reason){
+        if (!u || !isAtendimentos()) return false;
+        var dst = normPath(u.pathname);
+        if (dst === '/atendimentos') return false;
+        if (navStarted) {
+          try { ev && ev.preventDefault && ev.preventDefault(); } catch(e){}
+          return true;
+        }
+        navStarted = true;
+
+        try { ev && ev.preventDefault && ev.preventDefault(); } catch(e){}
+        try { ev && ev.stopPropagation && ev.stopPropagation(); } catch(e){}
+        try { ev && ev.stopImmediatePropagation && ev.stopImmediatePropagation(); } catch(e){}
+
+        markLeaving(u.href, reason || 'hard-nav-v5');
+        // NÃO usar window.stop() aqui.
+        // Ele pode cancelar/atrasar a própria navegação de documento quando há
+        // fetch/WebSocket em andamento no Atendimento. Primeiro troca a página.
+        try { location.assign(u.href); } catch(e){ try { location.href = u.href; } catch(_){} }
+
+        // Fallback leve: se algum script antigo impedir a saída, tenta de novo.
+        try {
+          setTimeout(function(){
+            try {
+              if (normPath(location.pathname) === '/atendimentos') {
+                location.replace(u.href);
+              }
+            } catch(_){}
+          }, 120);
+        } catch(e){}
+        return true;
+      }
+
+      function onAnyNavIntent(ev){
+        try {
+          var a = ev.target && ev.target.closest && ev.target.closest('a[href]');
+          if (!a) return;
+          if (a.target && a.target !== '_self') return;
+          var u = isInternalUrl(a.getAttribute('href') || a.href);
+          if (!u) return;
+          hardNavigate(u, ev, ev.type || 'hard-nav-v5');
+        } catch(e){}
+      }
+
+      try { document.addEventListener('pointerdown', onAnyNavIntent, { capture:true, passive:false }); } catch(e){}
+      try { document.addEventListener('mousedown', onAnyNavIntent, true); } catch(e){}
+      try { document.addEventListener('click', onAnyNavIntent, true); } catch(e){}
+      try { document.addEventListener('touchstart', onAnyNavIntent, { capture:true, passive:false }); } catch(e){}
+
+      try { window.addEventListener('beforeunload', function(){ markLeaving(location.href, 'beforeunload-v5'); }, true); } catch(e){}
+      try { window.addEventListener('pagehide', function(){ abortAll('pagehide-v5'); }, true); } catch(e){}
+    })();
+  </script>
+
+
+
   <script id="zc-ram-safe-mode">
     /*
       Modo leve do Atendimento.
@@ -35,6 +218,9 @@
       window.ZC_DISABLE_MSG_ACTION_OBSERVER = true;
       window.ZC_DISABLE_MEDIA_RENDER_OBSERVER = true;
       window.ZC_DISABLE_HISTORY_PREFETCH = true;
+      window.ZC_SEEN_DEBOUNCE_MS = window.ZC_SEEN_DEBOUNCE_MS || 4500;
+      window.ZC_SEEN_FETCH_TIMEOUT_MS = window.ZC_SEEN_FETCH_TIMEOUT_MS || 1200;
+      window.ZC_META_FETCH_TIMEOUT_MS = window.ZC_META_FETCH_TIMEOUT_MS || 1500;
       window.PREFETCH_HISTORIES = false;
       window.ZC_HIST_SAVE_TO_LS = false;
       window.ZC_STORE_SAVE_CONVERSAS_TO_LS = false;
@@ -43,7 +229,9 @@
       window.ZC_HIST_MIRROR_MAX_CONVERSAS = window.ZC_HIST_MIRROR_MAX_CONVERSAS || 2;
       window.ZC_STORE_MAX_CONVS_PER_INST = window.ZC_STORE_MAX_CONVS_PER_INST || 80;
       window.ZC_STORE_MAX_MSGS_PER_CONVERSA = window.ZC_STORE_MAX_MSGS_PER_CONVERSA || 60;
-      window.ZC_WS_RENDER_DEBOUNCE_MS = window.ZC_WS_RENDER_DEBOUNCE_MS || 180;
+      window.ZC_WS_RENDER_DEBOUNCE_MS = window.ZC_WS_RENDER_DEBOUNCE_MS || 900;
+      window.ZC_WS_MESSAGE_QUEUE_DELAY_MS = window.ZC_WS_MESSAGE_QUEUE_DELAY_MS || 180;
+      window.ZC_WS_MESSAGE_QUEUE_MAX_PENDING = window.ZC_WS_MESSAGE_QUEUE_MAX_PENDING || 200;
       window.ZC_WS_BADGE_REPEAT_LIGHT = true;
       window.ZC_BIG_LIST_CACHE_BYTES = window.ZC_BIG_LIST_CACHE_BYTES || 250000;
       window.ZC_HUGE_LOCALSTORAGE_BYTES = window.ZC_HUGE_LOCALSTORAGE_BYTES || 500000;
