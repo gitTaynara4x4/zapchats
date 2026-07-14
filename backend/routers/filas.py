@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend import models
 from backend.database import get_db
+from backend.services.atendimento_claim_state import set_waiting_department
 from backend.routers.auth import get_current_identity
 from backend.security.atendimento_acl import (
     assert_same_company,
@@ -564,6 +565,25 @@ def aplicar_escolha_fila_cliente(
     if instancia_id_eff is None:
         instancia_id_eff = _to_int(getattr(cliente, "instancia_id", None))
 
+    if instancia_id_eff is None:
+        last_atd = (
+            db.query(models.Atendimento.instancia_id)
+            .filter(
+                models.Atendimento.empresa_id == empresa_id,
+                models.Atendimento.cliente_id == cliente_id,
+                models.Atendimento.instancia_id.is_not(None),
+            )
+            .order_by(models.Atendimento.id.desc())
+            .first()
+        )
+        instancia_id_eff = _to_int(last_atd[0]) if last_atd else None
+
+    if instancia_id_eff is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Não foi possível identificar o WhatsApp desta conversa.",
+        )
+
     fila = _get_fila(
         db,
         empresa_id=empresa_id,
@@ -585,58 +605,31 @@ def aplicar_escolha_fila_cliente(
             detail="Esta fila não está disponível para a instância desta conversa.",
         )
 
-    atendimento = (
-        db.query(models.Atendimento)
-        .filter(
-            models.Atendimento.empresa_id == empresa_id,
-            models.Atendimento.cliente_id == cliente_id,
-        )
-        .filter(models.Atendimento.status.in_(_status_abertos()))
-        .filter(
-            or_(
-                models.Atendimento.instancia_id == instancia_id_eff,
-                models.Atendimento.instancia_id.is_(None),
-            )
-            if instancia_id_eff is not None
-            else text("1=1")
-        )
-        .order_by(models.Atendimento.id.desc())
-        .first()
+    departamento_id = _to_int(getattr(fila, "departamento_id", None))
+    atendimento = set_waiting_department(
+        db,
+        empresa_id=empresa_id,
+        cliente_id=cliente_id,
+        instancia_id=int(instancia_id_eff),
+        departamento_id=departamento_id,
+        ts_dt=_now_utc(),
     )
-
-    if not atendimento:
-        atendimento = models.Atendimento(
-            empresa_id=empresa_id,
-            cliente_id=cliente_id,
-            instancia_id=instancia_id_eff,
-            status=_status_atendimento_value("AGUARDANDO", "aguardando"),
+    if atendimento is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Não foi possível criar ou atualizar o atendimento da fila.",
         )
-        db.add(atendimento)
-        db.flush()
 
     atendimento.fila_id = int(fila.id)
     atendimento.fila_escolhida_em = _now_utc()
+    atendimento.instancia_id = int(instancia_id_eff)
 
-    if hasattr(atendimento, "status"):
-        atendimento.status = _status_atendimento_value("AGUARDANDO", "aguardando")
+    if departamento_id is not None:
+        atendimento.departamento_id = int(departamento_id)
 
-    if hasattr(atendimento, "operador_id"):
-        atendimento.operador_id = None
-
-    if hasattr(atendimento, "aceito_em"):
-        atendimento.aceito_em = None
-
-    if hasattr(atendimento, "instancia_id") and instancia_id_eff is not None:
-        atendimento.instancia_id = int(instancia_id_eff)
-
-    if getattr(fila, "departamento_id", None) is not None:
-        atendimento.departamento_id = int(fila.departamento_id)
-
-        # Compatibilidade:
-        # algumas regras antigas de ACL/listagem ainda olham Cliente.departamento_id.
-        # A fila continua NÃO ficando marcada no cliente.
+        # Compatibilidade com ACL/listagens antigas.
         if hasattr(cliente, "departamento_id"):
-            cliente.departamento_id = int(fila.departamento_id)
+            cliente.departamento_id = int(departamento_id)
 
         if hasattr(cliente, "departamento"):
             dep_nome = getattr(getattr(fila, "departamento", None), "nome", None)
@@ -649,9 +642,9 @@ def aplicar_escolha_fila_cliente(
     if hasattr(cliente, "triagem_ultima_msg_em"):
         cliente.triagem_ultima_msg_em = _now_utc()
 
-    if hasattr(atendimento, "atualizado_em"):
-        atendimento.atualizado_em = _now_utc()
-
+    atendimento.atualizado_em = _now_utc()
+    db.add(cliente)
+    db.add(atendimento)
     db.flush()
 
     return {

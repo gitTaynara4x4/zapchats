@@ -500,10 +500,26 @@
       __zcAppBaseHardNavStarted = true;
       try { window.__ZC_ATENDIMENTOS_HARD_NAV_STARTED__ = true; } catch (ee) {}
       try { markHardAtendimentoLeave(u, reason); } catch (ee) {}
-      try { window.stop && window.stop(); } catch (ee) {}
+
+      // NÃO usar window.stop() aqui.
+      // Quando o Atendimento recebe mensagem/WS/fetch ao mesmo tempo em que o usuário
+      // troca de tela, window.stop() pode cancelar ou atrasar o próprio document navigation.
+      // A saída correta é iniciar a navegação primeiro e só reforçar com fallback leve.
       try { window.location.assign(u.href); } catch (ee) {
         try { window.location.href = u.href; } catch (eee) {}
       }
+
+      try {
+        setTimeout(function() {
+          try {
+            var cur = (location.pathname || '').replace(/\/+$/, '') || '/';
+            var dst = (u.pathname || '').replace(/\/+$/, '') || '/';
+            if (cur !== dst && cur === '/atendimentos') {
+              location.replace(u.href);
+            }
+          } catch (eee) {}
+        }, 120);
+      } catch (ee) {}
     }
 
     function forceImmediateLeaveAtendimentos(e) {

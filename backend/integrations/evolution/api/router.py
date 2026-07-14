@@ -7,7 +7,17 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
 import requests
-from fastapi import APIRouter, Body, Header, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+
+from backend import models
+from backend.database import get_db_session
+from backend.routers.auth import get_current_identity
+from backend.security.atendimento_acl import (
+    allowed_instancia_ids,
+    assert_instancia_allowed,
+    ensure_perm,
+)
 
 router = APIRouter(tags=["Evolution"])
 
@@ -18,6 +28,104 @@ def _now_utc() -> datetime:
 
 def _only_digits(s: Any) -> str:
     return re.sub(r"\D", "", str(s or ""))
+
+
+def _ensure_any_permission(identity: Dict[str, Any], *permissions: str) -> None:
+    """Exige ao menos uma permissão sem enfraquecer o bypass do administrador."""
+    if bool(identity.get("is_admin")):
+        return
+
+    current = identity.get("permissoes") or identity.get("permissions") or []
+    if isinstance(current, dict):
+        current = [key for key, enabled in current.items() if enabled]
+
+    current_set = {str(item).strip().lower() for item in current if str(item).strip()}
+    expected = {str(item).strip().lower() for item in permissions if str(item).strip()}
+    if current_set.intersection(expected):
+        return
+
+    detail = " ou ".join(permissions)
+    raise HTTPException(status_code=403, detail=f"Sem permissão ({detail})")
+
+
+def _identity_empresa_id(identity: Dict[str, Any]) -> int:
+    """Obtém a empresa exclusivamente da sessão autenticada."""
+    try:
+        empresa_id = int(identity.get("empresa_id"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Empresa inválida na sessão")
+
+    if empresa_id <= 0:
+        raise HTTPException(status_code=401, detail="Empresa inválida na sessão")
+
+    return empresa_id
+
+
+def _require_owned_instance(
+    db: Session,
+    identity: Dict[str, Any],
+    instance: str,
+) -> models.EmpresaInstancia:
+    """
+    Garante isolamento multiempresa antes de qualquer chamada à Evolution.
+
+    O nome recebido na URL nunca é suficiente: a instância precisa existir no
+    banco e pertencer à empresa presente no token/cookie autenticado.
+    """
+    instance_name = str(instance or "").strip()
+    if not instance_name or len(instance_name) > 120:
+        raise HTTPException(status_code=404, detail="Instância não encontrada")
+
+    empresa_id = _identity_empresa_id(identity)
+    row = (
+        db.query(models.EmpresaInstancia)
+        .filter(
+            models.EmpresaInstancia.empresa_id == empresa_id,
+            models.EmpresaInstancia.instance_name == instance_name,
+        )
+        .first()
+    )
+
+    if not row:
+        # Resposta intencionalmente genérica para não revelar instâncias de
+        # outras empresas a um usuário autenticado.
+        raise HTTPException(status_code=404, detail="Instância não encontrada")
+
+    allowed = allowed_instancia_ids(db, identity=identity)
+    assert_instancia_allowed(
+        allowed_instancias=allowed,
+        instancia_id=int(row.id),
+        detail="Instância não permitida para este usuário",
+    )
+
+    return row
+
+
+def _safe_evolution_payload(value: Any) -> Any:
+    """Remove segredos caso alguma versão da Evolution os devolva."""
+    sensitive = {
+        "apikey",
+        "api_key",
+        "authorization",
+        "access_token",
+        "accesstoken",
+        "secret",
+        "password",
+    }
+
+    if isinstance(value, dict):
+        cleaned: Dict[str, Any] = {}
+        for key, item in value.items():
+            normalized = re.sub(r"[^a-z0-9_]", "", str(key).lower())
+            if normalized in sensitive:
+                continue
+            cleaned[key] = _safe_evolution_payload(item)
+        return cleaned
+
+    if isinstance(value, list):
+        return [_safe_evolution_payload(item) for item in value]
+
+    return value
 
 
 def _infer_state(obj: Any) -> str:
@@ -81,7 +189,7 @@ class EvolutionClient:
         url = f"{self.base_url}{path}/{instance}"
         resp = requests.post(url, headers=self._headers, data=json.dumps(payload), timeout=timeout)
         if resp.status_code >= 400:
-            raise HTTPException(resp.status_code, f"Evolution error {resp.status_code}: {resp.text}")
+            raise HTTPException(resp.status_code, f"Falha na Evolution API (HTTP {resp.status_code})")
         try:
             return resp.json()
         except Exception:
@@ -91,7 +199,7 @@ class EvolutionClient:
         url = f"{self.base_url}{path}/{instance}"
         resp = requests.get(url, headers=self._headers, timeout=timeout)
         if resp.status_code >= 400:
-            raise HTTPException(resp.status_code, f"Evolution error {resp.status_code}: {resp.text}")
+            raise HTTPException(resp.status_code, f"Falha na Evolution API (HTTP {resp.status_code})")
         try:
             return resp.json()
         except Exception:
@@ -200,7 +308,14 @@ def _resolve_connected_from_calls(
 
 
 @router.get("/instance/connectionState/{instance}")
-def connection_state(instance: str):
+def connection_state(
+    instance: str,
+    db: Session = Depends(get_db_session),
+    identity: Dict[str, Any] = Depends(get_current_identity),
+):
+    _ensure_any_permission(identity, "dashboard.ver", "atendimento.ver", "integracoes.whatsapp")
+    _require_owned_instance(db, identity, instance)
+
     evo = EvolutionClient()
     js = evo.get_connection_state(instance)
     return {
@@ -208,13 +323,20 @@ def connection_state(instance: str):
         "instance": instance,
         "connected": _infer_connected(js),
         "state": _infer_state(js),
-        "evolution": js,
+        "evolution": _safe_evolution_payload(js),
         "server_time": _now_utc().isoformat(),
     }
 
 
 @router.get("/instance/connect/{instance}")
-def connect_instance(instance: str):
+def connect_instance(
+    instance: str,
+    db: Session = Depends(get_db_session),
+    identity: Dict[str, Any] = Depends(get_current_identity),
+):
+    ensure_perm(identity, "integracoes.whatsapp")
+    _require_owned_instance(db, identity, instance)
+
     evo = EvolutionClient()
     js = evo.connect(instance)
     return {
@@ -222,7 +344,7 @@ def connect_instance(instance: str):
         "instance": instance,
         "connected": _infer_connected(js),
         "state": _infer_state(js),
-        "evolution": js,
+        "evolution": _safe_evolution_payload(js),
         "server_time": _now_utc().isoformat(),
     }
 
@@ -232,11 +354,13 @@ def set_presence(
     instance: str,
     presence: str = Query("available"),
     body: Dict[str, Any] = Body(default_factory=dict),
-    x_empresa_id: Optional[str] = Header(default=None, alias="X-Empresa-Id"),
+    db: Session = Depends(get_db_session),
+    identity: Dict[str, Any] = Depends(get_current_identity),
 ):
-    _ = x_empresa_id
-    evo = EvolutionClient()
+    _ensure_any_permission(identity, "dashboard.ver", "atendimento.ver", "integracoes.whatsapp")
+    _require_owned_instance(db, identity, instance)
 
+    evo = EvolutionClient()
     connected, state, js_presence, js_state = _resolve_connected_from_calls(evo, instance, presence)
 
     me_number = None
@@ -259,14 +383,22 @@ def set_presence(
         "state": state,
         "me_number": me_number or None,
         "request_body": body or {},
-        "evolution_presence": js_presence,
-        "evolution_state": js_state,
+        "evolution_presence": _safe_evolution_payload(js_presence),
+        "evolution_state": _safe_evolution_payload(js_state),
         "server_time": _now_utc().isoformat(),
     }
 
 
 @router.post("/message/sendText/{instance}")
-def send_text(instance: str, body: Dict[str, Any] = Body(...)):
+def send_text(
+    instance: str,
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db_session),
+    identity: Dict[str, Any] = Depends(get_current_identity),
+):
+    ensure_perm(identity, "atendimento.enviar")
+    _require_owned_instance(db, identity, instance)
+
     number = str(body.get("number") or "").strip()
     text = str(body.get("text") or "").strip()
     if not number or not text:
@@ -274,11 +406,19 @@ def send_text(instance: str, body: Dict[str, Any] = Body(...)):
 
     evo = EvolutionClient()
     js = evo.send_text(instance, number=number, text=text)
-    return {"ok": True, "instance": instance, "evolution": js}
+    return {"ok": True, "instance": instance, "evolution": _safe_evolution_payload(js)}
 
 
 @router.post("/message/sendMedia/{instance}")
-def send_media(instance: str, body: Dict[str, Any] = Body(...)):
+def send_media(
+    instance: str,
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db_session),
+    identity: Dict[str, Any] = Depends(get_current_identity),
+):
+    ensure_perm(identity, "atendimento.enviar")
+    _require_owned_instance(db, identity, instance)
+
     number = str(body.get("number") or "").strip()
     mediatype = str(body.get("mediatype") or "").strip()
     media = str(body.get("media") or "").strip()
@@ -296,11 +436,19 @@ def send_media(instance: str, body: Dict[str, Any] = Body(...)):
         caption=body.get("caption"),
         fileName=body.get("fileName"),
     )
-    return {"ok": True, "instance": instance, "evolution": js}
+    return {"ok": True, "instance": instance, "evolution": _safe_evolution_payload(js)}
 
 
 @router.post("/message/sendWhatsAppAudio/{instance}")
-def send_audio(instance: str, body: Dict[str, Any] = Body(...)):
+def send_audio(
+    instance: str,
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db_session),
+    identity: Dict[str, Any] = Depends(get_current_identity),
+):
+    ensure_perm(identity, "atendimento.enviar")
+    _require_owned_instance(db, identity, instance)
+
     number = str(body.get("number") or "").strip()
     audio = str(body.get("audio") or "").strip()
     if not number or not audio:
@@ -308,11 +456,19 @@ def send_audio(instance: str, body: Dict[str, Any] = Body(...)):
 
     evo = EvolutionClient()
     js = evo.send_audio(instance, number=number, audio=audio)
-    return {"ok": True, "instance": instance, "evolution": js}
+    return {"ok": True, "instance": instance, "evolution": _safe_evolution_payload(js)}
 
 
 @router.post("/message/sendSticker/{instance}")
-def send_sticker(instance: str, body: Dict[str, Any] = Body(...)):
+def send_sticker(
+    instance: str,
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db_session),
+    identity: Dict[str, Any] = Depends(get_current_identity),
+):
+    ensure_perm(identity, "atendimento.enviar")
+    _require_owned_instance(db, identity, instance)
+
     number = str(body.get("number") or "").strip()
     sticker = str(body.get("sticker") or "").strip()
     if not number or not sticker:
@@ -320,11 +476,19 @@ def send_sticker(instance: str, body: Dict[str, Any] = Body(...)):
 
     evo = EvolutionClient()
     js = evo.send_sticker(instance, number=number, sticker=sticker)
-    return {"ok": True, "instance": instance, "evolution": js}
+    return {"ok": True, "instance": instance, "evolution": _safe_evolution_payload(js)}
 
 
 @router.post("/message/sendContact/{instance}")
-def send_contact(instance: str, body: Dict[str, Any] = Body(...)):
+def send_contact(
+    instance: str,
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db_session),
+    identity: Dict[str, Any] = Depends(get_current_identity),
+):
+    ensure_perm(identity, "atendimento.enviar")
+    _require_owned_instance(db, identity, instance)
+
     number = str(body.get("number") or "").strip()
     contact = body.get("contact")
     if not number or not isinstance(contact, list) or not contact:
@@ -332,11 +496,19 @@ def send_contact(instance: str, body: Dict[str, Any] = Body(...)):
 
     evo = EvolutionClient()
     js = evo.send_contact(instance, number=number, contact=contact)
-    return {"ok": True, "instance": instance, "evolution": js}
+    return {"ok": True, "instance": instance, "evolution": _safe_evolution_payload(js)}
 
 
 @router.post("/message/sendReaction/{instance}")
-def send_reaction(instance: str, body: Dict[str, Any] = Body(...)):
+def send_reaction(
+    instance: str,
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db_session),
+    identity: Dict[str, Any] = Depends(get_current_identity),
+):
+    ensure_perm(identity, "atendimento.enviar")
+    _require_owned_instance(db, identity, instance)
+
     key = body.get("key")
     reaction = str(body.get("reaction") or "").strip()
     if not isinstance(key, dict) or not reaction:
@@ -344,11 +516,19 @@ def send_reaction(instance: str, body: Dict[str, Any] = Body(...)):
 
     evo = EvolutionClient()
     js = evo.send_reaction(instance, key=key, reaction=reaction)
-    return {"ok": True, "instance": instance, "evolution": js}
+    return {"ok": True, "instance": instance, "evolution": _safe_evolution_payload(js)}
 
 
 @router.post("/chat/getBase64FromMediaMessage/{instance}")
-def get_base64_from_media_message(instance: str, body: Dict[str, Any] = Body(...)):
+def get_base64_from_media_message(
+    instance: str,
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db_session),
+    identity: Dict[str, Any] = Depends(get_current_identity),
+):
+    _ensure_any_permission(identity, "arquivos.ver", "atendimento.ver")
+    _require_owned_instance(db, identity, instance)
+
     message = body.get("message")
     convert_to_mp4 = bool(body.get("convertToMp4", False))
     if not isinstance(message, dict):
@@ -356,7 +536,7 @@ def get_base64_from_media_message(instance: str, body: Dict[str, Any] = Body(...
 
     evo = EvolutionClient()
     js = evo.get_base64_from_message(instance, message=message, convert_to_mp4=convert_to_mp4)
-    return {"ok": True, "instance": instance, "evolution": js}
+    return {"ok": True, "instance": instance, "evolution": _safe_evolution_payload(js)}
 
 
 __all__ = [

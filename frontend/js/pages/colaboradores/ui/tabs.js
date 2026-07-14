@@ -77,6 +77,13 @@ export function initColaboradoresTabs(){
     return text;
   }
 
+  function selectedDeptAccessText(fallback = ''){
+    const firstChecked = $('#e-deptos input[name="dept-edit"]:checked');
+    const card = firstChecked?.closest('label');
+    const text = String(card?.querySelector('strong')?.textContent || '').trim();
+    return text || fallback;
+  }
+
   function syncSidePreviewNow(){
     const modal = getModal();
     if (!modal) return;
@@ -85,7 +92,7 @@ export function initColaboradoresTabs(){
       name: inputValue('#e-nome', textValue('#v-nome', 'Novo colaborador')),
       role: inputValue('#e-cargo', textValue('#v-cargo', '')) || inputValue('#e-email', textValue('#v-email', '')),
       company: textValue('#v-empresa', 'Empresa atual'),
-      dept: selectedText('#e-setor', textValue('#v-depto', 'Não definido'))
+      dept: selectedDeptAccessText(selectedText('#e-setor', textValue('#v-depto', 'Defina no acesso')))
     };
 
     if (!next.name) next.name = 'Novo colaborador';
@@ -145,10 +152,12 @@ export function initColaboradoresTabs(){
     });
 
     modal.addEventListener('change', ev => {
-      if (ev.target.matches('#e-setor')) {
+      if (ev.target.matches('#e-setor') || ev.target.matches('#e-deptos input[name="dept-edit"]')) {
         scheduleSyncSidePreview();
       }
     });
+
+    document.addEventListener('colaboradores:departamentos-change', scheduleSyncSidePreview);
 
     document.addEventListener('keydown', ev => {
       if (modal.getAttribute('aria-hidden') === 'true') return;
@@ -165,8 +174,8 @@ export function initColaboradoresTabs(){
       if (next) {
         ev.preventDefault();
         next.focus();
-        activateTab(next.dataset.tab || 'perfil');
-        scheduleSyncSidePreview();
+        // Usa o clique real para passar pela mesma validação das etapas.
+        next.click();
       }
     });
 

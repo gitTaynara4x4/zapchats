@@ -3171,6 +3171,49 @@ function handleMessageImmediate(ev) {
     return;
   }
 
+  if (data.type === 'atendimento_claim_updated') {
+    const convKey =
+      data.conversation_key ||
+      data.conversation_id ||
+      (
+        data.cliente_id && data.instancia_id
+          ? `c:${data.cliente_id}:${data.instancia_id}`
+          : null
+      );
+
+    const ref = convKey ? normalizeConversationRef(convKey, data) : null;
+
+    if (ref?.key) {
+      storeUpdateKnownConversation(ref, {
+        operador_id: data.operador_id ?? data.responsavel_id ?? null,
+        responsavel_id: data.responsavel_id ?? data.operador_id ?? null,
+        operador_nome: data.operador_nome ?? data.responsavel_nome ?? null,
+        responsavel_nome: data.responsavel_nome ?? data.operador_nome ?? null,
+        status: data.status ?? null,
+        statusatendimento: data.status ?? null,
+        departamento_id: data.departamento_id ?? null,
+        instancia_id: ref.instId,
+        is_accepted: Boolean(data.operador_id ?? data.responsavel_id),
+      }, ref.instId);
+    }
+
+    const detail = {
+      ...data,
+      conversation_key: ref?.key || convKey,
+      conversation_id: ref?.key || convKey,
+    };
+
+    try {
+      window.dispatchEvent(new CustomEvent('zc:remote-claim-updated', { detail }));
+    } catch {}
+
+    try {
+      document.dispatchEvent(new CustomEvent('ws:atendimento_claim_updated', { detail }));
+    } catch {}
+
+    return;
+  }
+
   if (data.type === 'conv_status') {
     handleConvStatus(data);
     return;

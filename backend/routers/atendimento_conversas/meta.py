@@ -1,6 +1,7 @@
 #backend\routers\atendimento_conversas\meta.py
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -29,10 +30,18 @@ from .colaborador_helpers import (
     _instancia_permitida_para_colaborador,
     _departamento_permitido_para_colaborador,
     _nome_colaborador,
+    _is_admin_identity,
 )
 
 from .participantes import (
     _response_atendimento_estado,
+)
+
+from backend.services.atendimento_claim_state import set_waiting_department
+from backend.services.chatbot_claim_policy import (
+    customer_has_department_triage_marker,
+    department_chatbot_active,
+    department_claim_required,
 )
 
 from .schemas import EditarNomeClienteIn
@@ -64,29 +73,144 @@ def _is_status_aberto_para_claim(status: Optional[str]) -> bool:
     return st in {"novo", "aguardando", "em_atendimento", "pausado", "aberto", "pendente"}
 
 
+def _triagem_departamento_do_cliente(cliente, departamento_id: Optional[int]) -> bool:
+    return customer_has_department_triage_marker(cliente, departamento_id)
+
+
+def _status_indica_fluxo_departamento(status: Optional[str]) -> bool:
+    st = str(status or "").split(".")[-1].strip().lower()
+    return st in {"aguardando", "em_atendimento", "pausado", "pendente"}
+
+
+def _repair_missing_triage_atendimento(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente,
+    instancia_id: Optional[int],
+):
+    """Repara legados usando a mesma regra transacional do chatbot."""
+    if cliente is None or instancia_id is None:
+        return None
+
+    departamento_id = getattr(cliente, "departamento_id", None)
+    if departamento_id is None:
+        return None
+
+    if not _triagem_departamento_do_cliente(cliente, int(departamento_id)):
+        return None
+
+    # Chatbot desligado não pode recriar um atendimento aguardando aceite
+    # apenas porque o cliente ainda possui marcadores antigos de triagem.
+    if not department_chatbot_active(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=int(instancia_id),
+    ):
+        return None
+
+    try:
+        atendimento = set_waiting_department(
+            db,
+            empresa_id=int(empresa_id),
+            cliente_id=int(cliente.id),
+            instancia_id=int(instancia_id),
+            departamento_id=int(departamento_id),
+            ts_dt=datetime.now(timezone.utc),
+        )
+        if atendimento is None:
+            return None
+        db.commit()
+        db.refresh(atendimento)
+        return atendimento
+    except Exception as exc:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        try:
+            print(
+                "[ATENDIMENTO][meta][repair-triagem][erro]",
+                {
+                    "empresa_id": int(empresa_id),
+                    "cliente_id": int(getattr(cliente, "id", 0) or 0),
+                    "instancia_id": int(instancia_id),
+                    "erro": repr(exc),
+                },
+            )
+        except Exception:
+            pass
+        return _latest_atendimento_for_cliente_instancia(
+            db,
+            empresa_id=int(empresa_id),
+            cliente_id=int(cliente.id),
+            instancia_id=int(instancia_id),
+        )
+
+
 def _merge_department_claim_state(
+    db: Session,
     base: Dict[str, Any],
     *,
     atendimento,
+    cliente=None,
     departamento_id: Optional[int],
     operador_id: Optional[int],
     operador_nome: Optional[str],
     status_atd: Optional[str],
     current_colab_id: Optional[int],
+    admin_can_intervene: bool = False,
 ) -> Dict[str, Any]:
     """
-    Regra do atendimento por departamento:
-    - departamento + sem operador => colaborador do departamento precisa clicar Atender;
-    - operador = colaborador atual => pode responder;
-    - operador de outro colaborador => fica bloqueado para este usuário.
+    Regra inteligente do atendimento por departamento.
 
-    Não mexe em conversa encerrada/resolvida.
+    Conversa normal com departamento no cadastro NÃO trava resposta.
+
+    O botão/barra "Atender" aparece quando:
+    - é fila com aceite obrigatório; OU
+    - é triagem/menu do chatbot por departamento:
+      cliente escolheu uma opção, atendimento ficou em aguardando/em_atendimento
+      e ainda precisa ser assumido pelo colaborador do departamento.
     """
     out = dict(base or {})
 
     if departamento_id is None or not _is_status_aberto_para_claim(status_atd):
-        out.setdefault("claim_mode", None)
-        out.setdefault("departamento_claim", False)
+        out["claim_mode"] = None
+        out["departamento_claim"] = False
+        return out
+
+    fila_id = None
+    try:
+        fila_id = out.get("fila_id")
+        if fila_id is None and atendimento is not None:
+            fila_id = getattr(atendimento, "fila_id", None)
+        fila_id = int(fila_id) if fila_id is not None else None
+    except Exception:
+        fila_id = None
+
+    fila_exige_aceite = bool(
+        out.get("fila_exigir_aceite") is True
+        or out.get("exigir_aceite") is True
+        or out.get("aceite_obrigatorio") is True
+    )
+
+    triagem_por_departamento = department_claim_required(
+        db,
+        atendimento=atendimento,
+        cliente=cliente,
+    )
+
+    claim_required = bool((fila_id is not None and fila_exige_aceite) or triagem_por_departamento)
+
+    if not claim_required:
+        out["claim_mode"] = None
+        out["departamento_claim"] = False
+        out["exigir_aceite"] = False
+        out["aceite_obrigatorio"] = False
+        out["aguardando_aceite"] = False
+        out["pode_aceitar"] = False
+        out["pode_liberar"] = False
+        out["pode_responder"] = True
         return out
 
     operador_int = None
@@ -106,8 +230,8 @@ def _merge_department_claim_state(
     assigned_to_me = bool(operador_int is not None and colab_int is not None and operador_int == colab_int)
     assigned_to_other = bool(operador_int is not None and not assigned_to_me)
     waiting = bool(operador_int is None)
+    admin_intervening = bool(admin_can_intervene and assigned_to_other)
 
-    # Para conversa de departamento, o claim também funciona como aceite.
     out.update({
         "claim_mode": "departamento",
         "departamento_claim": True,
@@ -116,7 +240,7 @@ def _merge_department_claim_state(
         "aguardando_aceite": bool(waiting or assigned_to_other),
         "pode_aceitar": bool(colab_int is not None and waiting),
         "pode_liberar": bool(assigned_to_me),
-        "pode_responder": bool(assigned_to_me or colab_int is None),
+        "pode_responder": bool(assigned_to_me or colab_int is None or admin_intervening),
         "aceita_por_mim": bool(assigned_to_me),
         "accepted_by_me": bool(assigned_to_me),
         "accepted_by_anyone": bool(operador_int is not None),
@@ -126,9 +250,12 @@ def _merge_department_claim_state(
         "operador_id": operador_int,
         "operador_nome": operador_nome or out.get("operador_nome"),
         "status": status_atd,
+        "admin_can_intervene": bool(admin_can_intervene),
+        "admin_intervening": bool(admin_intervening),
     })
 
     return out
+
 
 def _empresa_id_segura(identity, empresa_id_payload: Optional[int] = None) -> int:
     """
@@ -225,6 +352,16 @@ def obter_meta_conversa(
         instancia_id=resolved_inst_id,
     )
 
+    # Auto-reparo de registros antigos afetados pelo bug do chatbot: o cliente
+    # já estava no departamento, mas não existia atendimento para ser aceito.
+    if atd is None:
+        atd = _repair_missing_triage_atendimento(
+            db,
+            empresa_id=int(empresa_id),
+            cliente=cliente,
+            instancia_id=resolved_inst_id,
+        )
+
     departamento_acl = (
         getattr(atd, "departamento_id", None)
         if atd is not None and hasattr(atd, "departamento_id")
@@ -281,13 +418,16 @@ def obter_meta_conversa(
     }
 
     return _merge_department_claim_state(
+        db,
         meta_payload,
         atendimento=atd,
+        cliente=cliente,
         departamento_id=(int(departamento_acl) if departamento_acl is not None else None),
         operador_id=(int(operador_id) if operador_id is not None else None),
         operador_nome=operador_nome,
         status_atd=status_atd,
         current_colab_id=current_colab_id,
+        admin_can_intervene=_is_admin_identity(identity),
     )
 
 

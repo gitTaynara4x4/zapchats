@@ -4111,3 +4111,143 @@ html.dark .saude-loading-progress{ background:#111827; border-color:rgba(255,255
 html.dark .saude-step{ background:#111827 !important; border-color:rgba(255,255,255,.10) !important; color:#cbd5e1 !important; }
 html.dark .saude-step.active{ background:rgba(34,197,94,.11) !important; color:#f8fafc !important; }
 html.dark .saude-step.done{ background:rgba(34,197,94,.08) !important; color:#e5e7eb !important; }
+
+
+/* === Método de conexão: QR Code ou código de pareamento === */
+.zc-connect-method-field{
+  margin-top:.1rem;
+}
+
+.zc-method-toggle{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+  gap:.75rem;
+}
+
+.zc-method-option{
+  display:grid;
+  grid-template-columns:auto 1fr;
+  align-items:center;
+  gap:.72rem;
+  min-height:82px;
+  padding:.86rem .9rem;
+  border:1px solid var(--border);
+  border-radius:1rem;
+  background:var(--card);
+  cursor:pointer;
+  transition:border-color .16s ease, background .16s ease, box-shadow .16s ease, transform .02s ease;
+}
+
+.zc-method-option:hover{
+  background:var(--hover);
+  border-color:rgba(0,139,50,.24);
+}
+
+.zc-method-option:active{
+  transform:translateY(1px);
+}
+
+.zc-method-option input{
+  position:absolute;
+  opacity:0;
+  pointer-events:none;
+}
+
+.zc-method-option.is-selected{
+  border-color:rgba(0,139,50,.52);
+  background:rgba(0,139,50,.07);
+  box-shadow:0 10px 24px rgba(0,139,50,.10);
+}
+
+.zc-method-icon{
+  width:40px;
+  height:40px;
+  border-radius:14px;
+  display:inline-grid;
+  place-items:center;
+  color:#008B32;
+  background:rgba(0,139,50,.11);
+}
+
+.zc-method-option b{
+  display:block;
+  font-size:.92rem;
+  line-height:1.2;
+}
+
+.zc-method-option small{
+  display:block;
+  margin-top:.25rem;
+  color:var(--muted);
+  font-size:.78rem;
+  line-height:1.35;
+}
+
+.zc-phone-field{
+  animation:zcSoftIn .16s ease both;
+}
+
+@keyframes zcSoftIn{
+  from{ opacity:0; transform:translateY(-4px); }
+  to{ opacity:1; transform:translateY(0); }
+}
+
+.zc-pairing-code-box{
+  width:min(330px, 100%);
+  margin:0 auto;
+  padding:1rem;
+  border-radius:1rem;
+  border:1px solid rgba(0,139,50,.24);
+  background:rgba(0,139,50,.07);
+  text-align:center;
+  display:grid;
+  gap:.45rem;
+}
+
+.zc-pairing-code-box span{
+  color:var(--muted);
+  font-size:.82rem;
+  font-weight:800;
+  letter-spacing:.02em;
+  text-transform:uppercase;
+}
+
+.zc-pairing-code-box strong{
+  font-size:2rem;
+  line-height:1.05;
+  letter-spacing:.12em;
+  font-weight:900;
+  color:var(--fg);
+  font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.zc-pairing-code-box small{
+  color:var(--muted);
+  font-size:.83rem;
+  line-height:1.4;
+}
+
+@media (max-width: 720px){
+  .zc-method-toggle{
+    grid-template-columns:1fr;
+  }
+
+  .zc-pairing-code-box strong{
+    font-size:1.6rem;
+  }
+}
+
+[data-theme="dark"] .zc-method-option,
+.dark .zc-method-option{
+  background:rgba(15,23,42,.72);
+}
+
+[data-theme="dark"] .zc-method-option.is-selected,
+.dark .zc-method-option.is-selected{
+  background:rgba(0,139,50,.13);
+}
+
+[data-theme="dark"] .zc-pairing-code-box,
+.dark .zc-pairing-code-box{
+  background:rgba(0,139,50,.12);
+}

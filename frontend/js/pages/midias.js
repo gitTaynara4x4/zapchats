@@ -8,7 +8,7 @@
   const STATE_KEY = 'midiasState:v3';
   const LAST_SCOPE_KEY = 'midiasLastScope:v3';
   const getEmpresaId = () => LS.getItem('empresa_id') || '';
-  const getToken     = () => LS.getItem('token') || LS.getItem('auth_token') || '';
+  const getToken     = () => LS.getItem('token') || LS.getItem('access_token') || LS.getItem('auth_token') || '';
   const onlyDigits = (s) => String(s ?? '').replace(/\D/g, '');
   const KEY_INST     = (empresa) => `instAtiva:${empresa || ''}`;
 

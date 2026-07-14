@@ -187,7 +187,8 @@
     ['chatinterno.ver',        '/chat-interno'],
     ['usuarios.gerenciar',     '/usuarios'],
     ['colaboradores.gerenciar','/colaboradores'],
-    ['config.editar',          '/configuracoes'],
+    ['departamentos.gerenciar','/departamentos'],
+    ['configuracoes.editar',   '/configuracoes'],
     ['integracoes.whatsapp',   '/integracoes/whatsapp']
   ];
 

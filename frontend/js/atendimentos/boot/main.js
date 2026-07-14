@@ -387,7 +387,7 @@
     await import('../ui/open-conversation-safe.js');
 
     await import('../ui/search.js');
-    await import('../ui/inst-switch.js');
+    await import('../ui/inst-switch.js?v=zc-inst-acl-v2-20260710');
     await import('../ui/filtros.js');
 
     // Recursos que voltaram: perfil, fotos, notas/IA e menu dos 3 pontinhos.
@@ -504,7 +504,7 @@
 
     // -------- UI DO ATENDIMENTO --------------------------------------
     await import('../ui/search.js');
-    await import('../ui/inst-switch.js');
+    await import('../ui/inst-switch.js?v=zc-inst-acl-v2-20260710');
 
     /*
       IMPORTANTE:

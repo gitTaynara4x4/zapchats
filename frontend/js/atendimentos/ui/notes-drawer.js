@@ -42,6 +42,13 @@
     return s;
   }
 
+  function isNotesAbortLike(err) {
+    if (!err) return false;
+    if (err.name === 'AbortError') return true;
+    const msg = String(err.message || err.reason || err || '').toLowerCase();
+    return msg.includes('atendimento-fetch-timeout') || msg.includes('abortado');
+  }
+
   function instKey(v) {
     const s = String(v ?? '').trim();
     if (!s) return null;
@@ -350,8 +357,12 @@
     const expectedKey = makeKey(ctx);
 
     try {
+      const params = new URLSearchParams();
+      params.set('empresa_id', String(ctx.empresaId || ''));
+      if (ctx.instanciaId) params.set('instancia_id', String(ctx.instanciaId));
+
       const res = await authFetchJson(
-        `/api/atendimento/clientes/${encodeURIComponent(ctx.clienteId)}/profile?empresa_id=${encodeURIComponent(String(ctx.empresaId || ''))}`,
+        `/api/atendimento/clientes/${encodeURIComponent(ctx.clienteId)}/profile?${params.toString()}`,
         { method: 'GET' }
       );
 
@@ -372,6 +383,10 @@
 
       saveToStorage(ctxNow, ta.value || '');
     } catch (err) {
+      if (isNotesAbortLike(err)) {
+        console.debug('[NOTES] carga de nota cancelada/timeout leve:', err);
+        return;
+      }
       console.error('[NOTES] erro ao carregar nota do BD:', err);
     }
   }
@@ -386,8 +401,12 @@
     const payload = { sobre_cliente: txt || null };
 
     try {
+      const params = new URLSearchParams();
+      params.set('empresa_id', String(ctx.empresaId || ''));
+      if (ctx.instanciaId) params.set('instancia_id', String(ctx.instanciaId));
+
       const res = await authFetchJson(
-        `/api/atendimento/clientes/${encodeURIComponent(ctx.clienteId)}/profile?empresa_id=${encodeURIComponent(String(ctx.empresaId || ''))}`,
+        `/api/atendimento/clientes/${encodeURIComponent(ctx.clienteId)}/profile?${params.toString()}`,
         {
           method: 'PATCH',
           body: JSON.stringify(payload),
@@ -404,6 +423,11 @@
       showStatus('Notas salvas com sucesso.', 'ok');
       return true;
     } catch (err) {
+      if (isNotesAbortLike(err)) {
+        console.debug('[NOTES] salvamento cancelado/timeout leve:', err);
+        showStatus('Não foi possível salvar agora. Tente novamente.', 'err');
+        return false;
+      }
       console.error('[NOTES] erro ao salvar nota no BD:', err);
       showStatus('Erro de conexão ao salvar as notas.', 'err');
       return false;

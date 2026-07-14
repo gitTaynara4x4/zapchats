@@ -269,8 +269,7 @@ export async function renderDepartamentosView(colab){
 
 function makeDeptCheckbox(dep, selectedSet){
   const label = document.createElement('label');
-  label.className = 'chk-line';
-  label.style.alignItems = 'flex-start';
+  label.className = 'chk-line access-option-card';
 
   const input = document.createElement('input');
   input.type = 'checkbox';
@@ -278,28 +277,19 @@ function makeDeptCheckbox(dep, selectedSet){
   input.value = String(dep.id);
   input.checked = selectedSet.has(Number(dep.id));
 
-  const span = document.createElement('span');
-
-  const strong = document.createElement('strong');
-  strong.textContent = labelDepto(dep);
-
-  const small = document.createElement('span');
-  small.className = 'muted';
-  small.style.display = 'block';
-  small.style.fontSize = '.84rem';
-  small.style.marginTop = '2px';
-
-  if (dep.ativo === false) {
-    small.textContent = 'Inativo';
-  } else {
-    small.textContent = 'Pode atender conversas deste departamento';
-  }
-
-  span.appendChild(strong);
-  span.appendChild(small);
+  const text = document.createElement('span');
+  text.className = 'access-option-name';
+  text.textContent = labelDepto(dep);
 
   label.appendChild(input);
-  label.appendChild(span);
+  label.appendChild(text);
+
+  if (dep.ativo === false) {
+    const status = document.createElement('span');
+    status.className = 'access-option-status';
+    status.textContent = 'Inativo';
+    label.appendChild(status);
+  }
 
   return label;
 }
@@ -334,6 +324,19 @@ export async function ensureDepartamentosEdit(){
     eWrap.appendChild(makeDeptCheckbox(dep, selected));
   });
 
+  eWrap.querySelectorAll('input[name="dept-edit"]').forEach(input => {
+    if (input.dataset.boundDeptAccess === '1') return;
+    input.dataset.boundDeptAccess = '1';
+    input.addEventListener('change', () => {
+      try {
+        const evt = new CustomEvent('colaboradores:departamentos-change', {
+          detail: { ids: getDepartamentosSelecionadosEdit() }
+        });
+        document.dispatchEvent(evt);
+      } catch {}
+    });
+  });
+
   eWrap.style.display = 'grid';
 
   if (dWrap) {
@@ -351,6 +354,7 @@ export async function ensureDepartamentosEdit(){
         .forEach(input => {
           input.checked = true;
         });
+      document.dispatchEvent(new CustomEvent('colaboradores:departamentos-change', { detail:{ ids:getDepartamentosSelecionadosEdit() } }));
     };
   }
 
@@ -361,6 +365,7 @@ export async function ensureDepartamentosEdit(){
         .forEach(input => {
           input.checked = false;
         });
+      document.dispatchEvent(new CustomEvent('colaboradores:departamentos-change', { detail:{ ids:getDepartamentosSelecionadosEdit() } }));
     };
   }
 }

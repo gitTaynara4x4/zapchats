@@ -12,6 +12,14 @@ from backend import models
 from backend.database import get_db
 from backend.routers.auth import get_current_identity
 from backend.websocket_manager import conexoes_ativas
+from backend.services.atendimento_claim_state import (
+    claim_exclusive_operator,
+    claim_if_available,
+    ensure_open_atendimento_locked,
+    get_open_atendimento_locked,
+    release_to_queue,
+    repair_single_responsible,
+)
 from backend.security.atendimento_acl import (
     ensure_perm,
     assert_same_company,
@@ -318,44 +326,85 @@ async def transferir_conversa_departamento(
             departamento_id=int(dep_destino.id),
         )
 
-    cliente.departamento_id = int(dep_destino.id)
+    # Bloqueia a conversa antes de alterar departamento/responsável.
+    cliente = (
+        db.query(models.Cliente)
+        .filter(
+            models.Cliente.empresa_id == int(empresa_id_eff),
+            models.Cliente.id == int(cliente_id),
+        )
+        .with_for_update()
+        .first()
+    )
+    if cliente is None:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
+    if instancia_id_eff is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Não foi possível identificar o WhatsApp desta conversa.",
+        )
+
+    cliente.departamento_id = int(dep_destino.id)
     if hasattr(cliente, "departamento"):
         cliente.departamento = dep_destino.nome
 
-    if payload.limpar_operador_atual:
-        cliente.colaborador_id = int(primary_colab_id) if primary_colab_id else None
-    elif primary_colab_id and not getattr(cliente, "colaborador_id", None):
-        cliente.colaborador_id = int(primary_colab_id)
-
-    q_atd = (
-        db.query(models.Atendimento)
-        .filter(
-            models.Atendimento.empresa_id == int(empresa_id_eff),
-            models.Atendimento.cliente_id == int(cliente.id),
-        )
+    atd = get_open_atendimento_locked(
+        db,
+        empresa_id=int(empresa_id_eff),
+        cliente_id=int(cliente.id),
+        instancia_id=int(instancia_id_eff),
     )
+    if atd is None:
+        atd = ensure_open_atendimento_locked(
+            db,
+            empresa_id=int(empresa_id_eff),
+            cliente_id=int(cliente.id),
+            instancia_id=int(instancia_id_eff),
+            departamento_id=int(dep_destino.id),
+            initial_status=models.StatusAtendimento.AGUARDANDO,
+        )
+    if atd is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Não foi possível criar ou atualizar o atendimento.",
+        )
 
-    if instancia_id_eff is not None:
-        q_atd = q_atd.filter(models.Atendimento.instancia_id == int(instancia_id_eff))
-
-    try:
-        q_atd = q_atd.filter(models.Atendimento.status.in_(_status_abertos()))
-    except Exception:
-        pass
-
-    atendimentos_abertos = q_atd.all()
     now = _now_utc()
+    atd.departamento_id = int(dep_destino.id)
+    atd.instancia_id = int(instancia_id_eff)
+    atd.fila_id = None
+    if hasattr(atd, "fila_escolhida_em"):
+        atd.fila_escolhida_em = None
 
-    for atd in atendimentos_abertos:
-        atd.departamento_id = int(dep_destino.id)
-        atd.atualizado_em = now
+    if payload.limpar_operador_atual:
+        if primary_colab_id is not None:
+            atd = claim_exclusive_operator(
+                db,
+                atendimento=atd,
+                colaborador_id=int(primary_colab_id),
+            )
+            cliente.colaborador_id = int(primary_colab_id)
+        else:
+            atd = release_to_queue(db, atendimento=atd)
+            cliente.colaborador_id = None
+    elif primary_colab_id is not None and getattr(atd, "operador_id", None) is None:
+        atd = claim_if_available(
+            db,
+            atendimento=atd,
+            colaborador_id=int(primary_colab_id),
+        ) or atd
+        if getattr(atd, "operador_id", None) is not None:
+            cliente.colaborador_id = int(atd.operador_id)
+    else:
+        atd = repair_single_responsible(db, atendimento=atd) or atd
+        cliente.colaborador_id = (
+            int(atd.operador_id) if getattr(atd, "operador_id", None) is not None else None
+        )
 
-        if payload.limpar_operador_atual:
-            atd.operador_id = int(primary_colab_id) if primary_colab_id else None
-        elif primary_colab_id and not getattr(atd, "operador_id", None):
-            atd.operador_id = int(primary_colab_id)
-
+    atd.atualizado_em = now
+    db.add(cliente)
+    db.add(atd)
     db.commit()
 
     conv_key = f"c:{int(cliente.id)}:{int(instancia_id_eff or 0)}"

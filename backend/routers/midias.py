@@ -23,16 +23,35 @@ from backend.models import Midia, Cliente
 
 JWT_SECRET = os.getenv("JWT_SECRET", "troque-me")
 JWT_ALG = os.getenv("JWT_ALGORITHM", "HS256")
+ACCESS_COOKIE_NAME = os.getenv("ACCESS_COOKIE_NAME", "access_token")
 STORAGE_DIR = os.getenv("MIDIAS_DIR", os.path.join("storage", "midias"))
 
 router = APIRouter(prefix="/api/midias", tags=["Mídias"])
 
 
 def _decode_token(req: Request) -> dict:
-    auth = req.headers.get("Authorization")
-    if not auth or not auth.lower().startswith("bearer "):
+    """
+    Aceita autenticação pelo mesmo padrão do restante do sistema:
+    1) Authorization: Bearer <token>
+    2) cookie httpOnly access_token
+
+    A tela de Mídias pode abrir logo após o cadastro, quando o backend já
+    gravou o cookie, mas o token ainda não foi copiado para o localStorage.
+    Se esta rota aceitar só Bearer, ela retorna 401 e o front entra em loop
+    redirecionando para /login?next=/midias.
+    """
+    auth = req.headers.get("Authorization") or ""
+    tok = None
+
+    if auth.lower().startswith("bearer "):
+        tok = auth.split(" ", 1)[1].strip()
+
+    if not tok:
+        tok = req.cookies.get(ACCESS_COOKIE_NAME)
+
+    if not tok:
         raise HTTPException(status_code=401, detail="Token ausente")
-    tok = auth.split(" ", 1)[1]
+
     try:
         return jwt.decode(tok, JWT_SECRET, algorithms=[JWT_ALG]) or {}
     except jwt.PyJWTError:

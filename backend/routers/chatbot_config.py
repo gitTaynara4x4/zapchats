@@ -6,7 +6,7 @@ import os
 import logging
 import traceback
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select, and_
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -15,8 +15,45 @@ from backend.database import get_db
 from backend import models
 from backend.routers.auth import get_current_user
 from backend.utils.entitlements import enforce_feature
+from backend.websocket_manager import conexoes_ativas
+from backend.services.chatbot_claim_policy import release_unassigned_department_claims
 
 router = APIRouter(prefix="/api/chatbot", tags=["ChatBot – Config"])
+
+
+def _queue_released_conversations_ws(
+    background_tasks: BackgroundTasks,
+    *,
+    empresa_id: int,
+    released: list[dict[str, Any]],
+) -> None:
+    """Atualiza atendimentos abertos sem exigir F5 após desligar o menu."""
+    for item in released or []:
+        payload = dict(item)
+        payload.update(
+            {
+                "type": "atendimento_claim_updated",
+                "action": "chatbot_disabled_release",
+                "conversation_key": f"c:{int(item['cliente_id'])}:{int(item['instancia_id'])}",
+                "conversation_id": f"c:{int(item['cliente_id'])}:{int(item['instancia_id'])}",
+                "origin": "chatbot_config",
+            }
+        )
+        background_tasks.add_task(
+            conexoes_ativas.send_message,
+            f"emp:{int(empresa_id)}",
+            payload,
+        )
+
+    if released:
+        background_tasks.add_task(
+            conexoes_ativas.send_message,
+            f"emp:{int(empresa_id)}",
+            {
+                "type": "reload_clientes",
+                "reason": "chatbot_department_disabled",
+            },
+        )
 
 # ========= logging =========
 _LOGLEVEL = os.getenv("CHATBOT_CFG_LOGLEVEL", "INFO").upper()
@@ -384,6 +421,7 @@ def get_config(
 @router.put("/config")
 def put_config(
     payload: Dict[str, Any],
+    background_tasks: BackgroundTasks,
     empresa_id: int = Query(..., description="ID da empresa"),
     instancia_id: int = Query(..., description="ID da instância"),
     db: Session = Depends(get_db),
@@ -465,7 +503,17 @@ def put_config(
         row.instancia_nome = inst.instance_name
         _apply_columns_from_config(row, to_store)
 
+    # Chatbot de departamentos desligado: libera atendimentos antigos sem
+    # responsável para resposta manual direta, mantendo o departamento.
+    released_waiting: list[dict[str, Any]] = []
+
     try:
+        if not dept_active:
+            released_waiting = release_unassigned_department_claims(
+                db,
+                empresa_id=int(empresa_id),
+                instancia_id=int(instancia_id),
+            )
         db.commit()
     except IntegrityError as e:
         db.rollback()
@@ -492,16 +540,25 @@ def put_config(
     except Exception:
         pass
 
+    _queue_released_conversations_ws(
+        background_tasks,
+        empresa_id=int(empresa_id),
+        released=released_waiting,
+    )
+
     logger.info(
-        "PUT chatbot/config OK emp=%s inst=%s creating=%s ativo=%s",
+        "PUT chatbot/config OK emp=%s inst=%s creating=%s ativo=%s released_waiting=%s",
         empresa_id,
         instancia_id,
         creating,
         row.ativo,
+        len(released_waiting),
     )
     return {
         "empresa_id": empresa_id,
         "instancia_id": instancia_id,
         "ativo": bool(row.ativo),
+        "department_mode_active": bool(dept_active),
+        "released_waiting_count": len(released_waiting),
         "config": row.config or {},
     }

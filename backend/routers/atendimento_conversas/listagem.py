@@ -375,7 +375,29 @@ def listar_conversas(
 
     rows_grupos = []
 
-    if cursor_last_msg_id is None:
+    # ✅ ACL de grupos na lista.
+    #
+    # Conversas de grupo não possuem departamento_id. Antes elas sempre entravam
+    # na lista quando o colaborador tinha acesso à instância, mesmo que o login
+    # estivesse limitado a um departamento específico, exemplo: somente Cobrança.
+    #
+    # Regra segura:
+    # - admin/gestor (allowed_dep_ids=None) continua vendo grupos;
+    # - colaborador restrito por departamento NÃO vê grupos por padrão;
+    # - se quiser liberar grupos para um colaborador restrito, dê uma permissão
+    #   explícita de grupos.
+    can_list_groups = (
+        allowed_dep_ids is None
+        or _identity_has_any_perm(
+            identity,
+            "atendimento.grupos",
+            "atendimento.grupos.ver",
+            "atendimento.ver_grupos",
+            "atendimento.grupos.gerenciar",
+        )
+    )
+
+    if cursor_last_msg_id is None and can_list_groups:
         q_grupos = _query_grupos_ultima_por_conversa(
             db,
             empresa_id=empresa_id,

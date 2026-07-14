@@ -5,12 +5,13 @@ from typing import Optional, Dict, Any
 from uuid import uuid4
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend import models
 from backend.routers.auth import get_current_identity
+from backend.websocket_manager import conexoes_ativas
 from backend.security.atendimento_acl import (
     ensure_perm,
     resolve_acl_context,
@@ -27,14 +28,12 @@ from .utils import (
     _resolve_instancia_id,
     _status_to_str,
     _to_int,
-    _get_atendimento_caps,
     _participant_feature_enabled,
 )
 
 from .colaborador_helpers import (
     _resolve_identity_colab_id,
     _cliente_instancia_mais_recente,
-    _latest_atendimento_for_cliente_instancia,
     _assert_departamento_acl_for_row,
     _instancia_permitida_para_colaborador,
     _departamento_permitido_para_colaborador,
@@ -42,14 +41,59 @@ from .colaborador_helpers import (
 )
 
 from .participantes import (
-    _active_participants_snapshot_map,
-    _upsert_participante_ativo,
-    _sync_atendimento_from_participants,
-    _release_participante,
+    _claim_exclusive_participant,
+    _release_all_participants,
     _response_atendimento_estado,
 )
 
+from backend.services.atendimento_claim_state import (
+    ensure_open_atendimento_locked,
+    get_open_atendimento_locked,
+)
+from backend.services.chatbot_claim_policy import (
+    customer_has_department_triage_marker,
+    department_chatbot_active,
+    department_claim_required,
+)
+
 router = APIRouter(tags=["Atendimento – Conversas"])
+
+
+def _queue_claim_update_ws(
+    background_tasks: BackgroundTasks,
+    *,
+    empresa_id: int,
+    action: str,
+    response: Dict[str, Any],
+) -> None:
+    """Notifica todas as abas da empresa após aceitar, liberar ou transferir."""
+    try:
+        payload = dict(response or {})
+        payload.update(
+            {
+                "type": "atendimento_claim_updated",
+                "action": str(action or "updated"),
+                "conversation_key": (
+                    f"c:{int(payload.get('cliente_id'))}:{int(payload.get('instancia_id'))}"
+                    if payload.get("cliente_id") is not None and payload.get("instancia_id") is not None
+                    else payload.get("conversation_key")
+                ),
+                "conversation_id": (
+                    f"c:{int(payload.get('cliente_id'))}:{int(payload.get('instancia_id'))}"
+                    if payload.get("cliente_id") is not None and payload.get("instancia_id") is not None
+                    else payload.get("conversation_id")
+                ),
+                "origin": "atendimento_conversas",
+            }
+        )
+        background_tasks.add_task(
+            conexoes_ativas.send_message,
+            f"emp:{int(empresa_id)}",
+            payload,
+        )
+    except Exception:
+        # O estado já está confirmado no banco. Falha de WS não pode desfazer a ação.
+        return
 
 
 def _identity_empresa_id(identity) -> Optional[int]:
@@ -192,61 +236,77 @@ def _payload_evento_sistema(msg: Optional[models.Mensagem]) -> Optional[Dict[str
         "created_at": ts_out,
     }
 
-def _claim_single_responsavel(db: Session, *, atendimento, colaborador_id: int):
-    """
-    Modelo por departamento: quem clicar em Atender primeiro assume.
-    Mantém no máximo um participante ativo/responsável para esse atendimento.
-    """
-    if not _participant_feature_enabled(db):
-        return None
-
-    AP = models.AtendimentoParticipante
-    atendimento_id = int(getattr(atendimento, "id"))
-    empresa_id = int(getattr(atendimento, "empresa_id"))
-
-    # Desativa qualquer participante anterior diferente do novo responsável.
-    rows = (
-        db.query(AP)
-        .filter(
-            AP.empresa_id == empresa_id,
-            AP.atendimento_id == atendimento_id,
-        )
-        .all()
-    )
-
-    for row in rows:
-        rid = _to_int(getattr(row, "colaborador_id", None))
-
-        if rid != int(colaborador_id):
-            if hasattr(row, "is_ativo"):
-                row.is_ativo = False
-            if hasattr(row, "is_responsavel"):
-                row.is_responsavel = False
-            db.add(row)
-
-    row = _upsert_participante_ativo(
-        db,
-        atendimento=atendimento,
-        colaborador_id=int(colaborador_id),
-    )
-
-    if row is not None and hasattr(row, "is_responsavel"):
-        row.is_responsavel = True
-        db.add(row)
-
-    return row
+def _status_norm(value: Any) -> str:
+    return str(value or "").split(".")[-1].strip().lower()
 
 
-def _department_claim_enabled(atendimento) -> bool:
+def _is_status_aberto_para_department_claim(status: Optional[str]) -> bool:
+    st = _status_norm(status)
+    if not st:
+        return True
+    return st in {"novo", "aguardando", "em_atendimento", "pausado", "aberto", "pendente"}
+
+
+def _triagem_departamento_do_cliente(cliente, departamento_id: Optional[int]) -> bool:
+    if cliente is None or departamento_id is None:
+        return False
+
     try:
-        return getattr(atendimento, "departamento_id", None) is not None
+        dep_cli = getattr(cliente, "departamento_id", None)
+        if dep_cli is None or int(dep_cli) != int(departamento_id):
+            return False
     except Exception:
         return False
 
+    try:
+        if int(getattr(cliente, "triagem_tentativas", 0) or 0) > 0:
+            return True
+    except Exception:
+        pass
 
-def _claim_mode_payload(part_info: Dict[str, Any], atendimento, current_colab_id: Optional[int]) -> Dict[str, Any]:
+    return bool(
+        getattr(cliente, "triagem_iniciada_em", None) is not None
+        or getattr(cliente, "triagem_ultima_msg_em", None) is not None
+    )
+
+
+def _department_claim_enabled(
+    db: Session,
+    part_info: Dict[str, Any],
+    atendimento,
+    cliente=None,
+) -> bool:
+    """Fila segue sua configuração; menu por departamento segue o estado do chatbot."""
+    if atendimento is None:
+        return False
+
+    fila_id = getattr(atendimento, "fila_id", None)
+    if fila_id is None:
+        fila_id = (part_info or {}).get("fila_id")
+
+    if fila_id is not None and bool(
+        (part_info or {}).get("fila_exigir_aceite") is True
+        or (part_info or {}).get("exigir_aceite") is True
+        or (part_info or {}).get("aceite_obrigatorio") is True
+    ):
+        return True
+
+    return department_claim_required(
+        db,
+        atendimento=atendimento,
+        cliente=cliente,
+    )
+
+
+def _claim_mode_payload(
+    db: Session,
+    part_info: Dict[str, Any],
+    atendimento,
+    current_colab_id: Optional[int],
+    cliente=None,
+) -> Dict[str, Any]:
     """Campos extras para o front diferenciar fila antiga de Atender por departamento."""
-    dep_claim = _department_claim_enabled(atendimento)
+    dep_claim = _department_claim_enabled(db, part_info, atendimento, cliente=cliente)
     if not dep_claim:
         return {}
 
@@ -275,6 +335,7 @@ def _claim_mode_payload(part_info: Dict[str, Any], atendimento, current_colab_id
 @router.post("/conversas/{cliente_id}/aceitar")
 def aceitar_conversa(
     cliente_id: int,
+    background_tasks: BackgroundTasks,
     payload: Optional[AceitarConversaIn] = Body(None),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
@@ -303,6 +364,7 @@ def aceitar_conversa(
             models.Cliente.empresa_id == int(empresa_id),
             models.Cliente.id == int(cliente_id),
         )
+        .with_for_update()
         .first()
     )
 
@@ -338,11 +400,11 @@ def aceitar_conversa(
         instancia_id=resolved_inst_id,
     )
 
-    atd = _latest_atendimento_for_cliente_instancia(
+    atd = get_open_atendimento_locked(
         db,
         empresa_id=empresa_id,
         cliente_id=int(cliente_id),
-        instancia_id=resolved_inst_id,
+        instancia_id=int(resolved_inst_id),
     )
 
     departamento_acl = (
@@ -356,50 +418,20 @@ def aceitar_conversa(
         departamento_id=departamento_acl,
     )
 
-    status_enum = getattr(models, "StatusAtendimento", None)
-
-    STATUS_NOVO = (
-        getattr(status_enum, "NOVO", "novo")
-        if status_enum is not None
-        else "novo"
-    )
-
-    STATUS_EM_ATENDIMENTO = (
-        getattr(status_enum, "EM_ATENDIMENTO", "em_atendimento")
-        if status_enum is not None
-        else "em_atendimento"
-    )
-
     if atd is None:
-        caps = _get_atendimento_caps()
-        A = caps["model"]
-
-        if A is None or not caps["usable"]:
+        atd = ensure_open_atendimento_locked(
+            db,
+            empresa_id=int(empresa_id),
+            cliente_id=int(cliente_id),
+            instancia_id=int(resolved_inst_id),
+            departamento_id=getattr(cliente, "departamento_id", None),
+            initial_status=models.StatusAtendimento.NOVO,
+        )
+        if atd is None:
             raise HTTPException(
                 status_code=500,
-                detail="Model Atendimento indisponível para criar aceite da conversa",
+                detail="Não foi possível criar o atendimento da conversa",
             )
-
-        create_data: Dict[str, Any] = {
-            "cliente_id": int(cliente_id),
-            "instancia_id": int(resolved_inst_id),
-        }
-
-        if caps["has_empresa_id"]:
-            create_data["empresa_id"] = int(empresa_id)
-
-        if caps["has_departamento_id"]:
-            create_data["departamento_id"] = getattr(cliente, "departamento_id", None)
-
-        if caps["has_operador_id"]:
-            create_data["operador_id"] = None
-
-        if caps["has_status"]:
-            create_data["status"] = STATUS_NOVO
-
-        atd = A(**create_data)
-        db.add(atd)
-        db.flush()
 
     if hasattr(atd, "instancia_id"):
         atd.instancia_id = int(resolved_inst_id)
@@ -435,18 +467,13 @@ def aceitar_conversa(
         and status_atual == "em_atendimento"
     )
 
-    if _participant_feature_enabled(db):
-        _claim_single_responsavel(
-            db,
-            atendimento=atd,
-            colaborador_id=int(colab_id),
-        )
-
-    if hasattr(atd, "operador_id"):
-        atd.operador_id = int(colab_id)
-
-    if hasattr(atd, "status"):
-        atd.status = STATUS_EM_ATENDIMENTO
+    atd = _claim_exclusive_participant(
+        db,
+        atendimento=atd,
+        colaborador_id=int(colab_id),
+    )
+    if atd is None:
+        raise HTTPException(status_code=404, detail="Atendimento não encontrado")
 
     db.add(atd)
 
@@ -473,7 +500,7 @@ def aceitar_conversa(
         current_colab_id=int(colab_id),
     )
 
-    return {
+    response = {
         "ok": True,
         "already_accepted": already_accepted,
         "cliente_id": int(cliente.id),
@@ -515,8 +542,16 @@ def aceitar_conversa(
         "pode_liberar": part_info["pode_liberar"],
         "pode_responder": part_info.get("pode_responder", True),
         "system_event": _payload_evento_sistema(evento_sistema),
-        **_claim_mode_payload(part_info, atd, int(colab_id)),
+        **_claim_mode_payload(db, part_info, atd, int(colab_id), cliente=cliente),
     }
+
+    _queue_claim_update_ws(
+        background_tasks,
+        empresa_id=int(empresa_id),
+        action="accepted",
+        response=response,
+    )
+    return response
 
 
 # =========================================================
@@ -525,6 +560,7 @@ def aceitar_conversa(
 @router.post("/conversas/{cliente_id}/liberar")
 def liberar_conversa(
     cliente_id: int,
+    background_tasks: BackgroundTasks,
     payload: Optional[LiberarConversaIn] = Body(None),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
@@ -553,6 +589,7 @@ def liberar_conversa(
             models.Cliente.empresa_id == int(empresa_id),
             models.Cliente.id == int(cliente_id),
         )
+        .with_for_update()
         .first()
     )
 
@@ -588,11 +625,11 @@ def liberar_conversa(
         instancia_id=resolved_inst_id,
     )
 
-    atd = _latest_atendimento_for_cliente_instancia(
+    atd = get_open_atendimento_locked(
         db,
         empresa_id=empresa_id,
         cliente_id=int(cliente_id),
-        instancia_id=resolved_inst_id,
+        instancia_id=int(resolved_inst_id),
     )
 
     if atd is None:
@@ -625,34 +662,24 @@ def liberar_conversa(
             and int(operador_atual_inicial) == int(colab_id)
         )
 
-        # Idempotência: duplo clique ou requisição repetida não pode gerar
-        # dois cards de sistema nem erro visual para o usuário.
-        if not aceita_por_mim_antes and not sou_operador_atual:
-            if operador_atual_inicial is None:
-                ja_estava_liberado = True
-            else:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Somente o responsável atual pode liberar a conversa",
-                )
-        else:
-            _release_participante(
-                db,
-                atendimento=atd,
-                colaborador_id=int(colab_id),
+        if operador_atual_inicial is not None and not sou_operador_atual:
+            raise HTTPException(
+                status_code=409,
+                detail="Somente o responsável atual pode liberar a conversa",
             )
+
+        if operador_atual_inicial is None and not aceita_por_mim_antes:
+            ja_estava_liberado = True
+        else:
             liberado_de_verdade = True
 
-        _sync_atendimento_from_participants(
-            db,
-            atendimento=atd,
-            preferred_responsavel_id=None,
-        )
+        atd = _release_all_participants(db, atendimento=atd)
+        if atd is None:
+            raise HTTPException(status_code=404, detail="Atendimento não encontrado")
 
     else:
         operador_atual = operador_atual_inicial
 
-        # Idempotência: se já está sem operador, não cria outro evento.
         if operador_atual is None:
             ja_estava_liberado = True
         elif int(operador_atual) != int(colab_id):
@@ -661,13 +688,31 @@ def liberar_conversa(
                 detail="Somente o responsável atual pode liberar a conversa",
             )
         else:
-            atd.operador_id = None
-            atd.status = (
-                models.StatusAtendimento.AGUARDANDO
-                if getattr(atd, "departamento_id", None) is not None
-                else models.StatusAtendimento.NOVO
-            )
             liberado_de_verdade = True
+
+        atd.operador_id = None
+        atd.status = (
+            models.StatusAtendimento.AGUARDANDO
+            if getattr(atd, "departamento_id", None) is not None
+            else models.StatusAtendimento.NOVO
+        )
+        if hasattr(atd, "aceito_em"):
+            atd.aceito_em = None
+
+    # Se o menu de departamentos está desligado, liberar significa devolver
+    # a conversa ao atendimento manual, não colocá-la novamente em aceite.
+    if (
+        getattr(atd, "fila_id", None) is None
+        and customer_has_department_triage_marker(
+            cliente, getattr(atd, "departamento_id", None)
+        )
+        and not department_chatbot_active(
+            db,
+            empresa_id=int(empresa_id),
+            instancia_id=int(resolved_inst_id),
+        )
+    ):
+        atd.status = models.StatusAtendimento.NOVO
 
     db.add(atd)
 
@@ -695,7 +740,7 @@ def liberar_conversa(
         current_colab_id=int(colab_id),
     )
 
-    return {
+    response = {
         "ok": True,
         "already_released": bool(ja_estava_liberado),
         "released": bool(liberado_de_verdade),
@@ -738,8 +783,16 @@ def liberar_conversa(
         "pode_liberar": part_info["pode_liberar"],
         "pode_responder": part_info.get("pode_responder", True),
         "system_event": _payload_evento_sistema(evento_sistema),
-        **_claim_mode_payload(part_info, atd, int(colab_id)),
+        **_claim_mode_payload(db, part_info, atd, int(colab_id), cliente=cliente),
     }
+
+    _queue_claim_update_ws(
+        background_tasks,
+        empresa_id=int(empresa_id),
+        action="released",
+        response=response,
+    )
+    return response
 
 
 # =========================================================
@@ -748,6 +801,7 @@ def liberar_conversa(
 @router.post("/conversas/{cliente_id}/transferir-colaborador")
 def transferir_colaborador(
     cliente_id: int,
+    background_tasks: BackgroundTasks,
     payload: TransferirColaboradorIn = Body(...),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
@@ -767,6 +821,7 @@ def transferir_colaborador(
             models.Cliente.empresa_id == int(empresa_id),
             models.Cliente.id == int(cliente_id),
         )
+        .with_for_update()
         .first()
     )
 
@@ -802,24 +857,27 @@ def transferir_colaborador(
         instancia_id=resolved_inst_id,
     )
 
-    atd = _latest_atendimento_for_cliente_instancia(
+    atd = get_open_atendimento_locked(
         db,
         empresa_id=empresa_id,
         cliente_id=int(cliente_id),
-        instancia_id=resolved_inst_id,
+        instancia_id=int(resolved_inst_id),
     )
 
     if atd is None:
-        atd = models.Atendimento(
+        atd = ensure_open_atendimento_locked(
+            db,
             empresa_id=int(empresa_id),
             cliente_id=int(cliente_id),
             instancia_id=int(resolved_inst_id),
             departamento_id=getattr(cliente, "departamento_id", None),
-            operador_id=None,
-            status=models.StatusAtendimento.NOVO,
+            initial_status=models.StatusAtendimento.NOVO,
         )
-        db.add(atd)
-        db.flush()
+        if atd is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Não foi possível criar o atendimento da conversa",
+            )
 
     departamento_acl = (
         getattr(atd, "departamento_id", None)
@@ -874,22 +932,13 @@ def transferir_colaborador(
     ):
         atd.departamento_id = getattr(cliente, "departamento_id", None)
 
-    if _participant_feature_enabled(db):
-        _upsert_participante_ativo(
-            db,
-            atendimento=atd,
-            colaborador_id=int(target.id),
-        )
-
-        _sync_atendimento_from_participants(
-            db,
-            atendimento=atd,
-            preferred_responsavel_id=int(target.id),
-        )
-
-    else:
-        atd.operador_id = int(target.id)
-        atd.status = models.StatusAtendimento.EM_ATENDIMENTO
+    atd = _claim_exclusive_participant(
+        db,
+        atendimento=atd,
+        colaborador_id=int(target.id),
+    )
+    if atd is None:
+        raise HTTPException(status_code=404, detail="Atendimento não encontrado")
 
     db.add(atd)
     db.commit()
@@ -908,7 +957,7 @@ def transferir_colaborador(
         current_colab_id=current_colab_id,
     )
 
-    return {
+    response = {
         "ok": True,
         "cliente_id": int(cliente.id),
         "instancia_id": int(resolved_inst_id),
@@ -948,5 +997,13 @@ def transferir_colaborador(
         "pode_aceitar": part_info["pode_aceitar"],
         "pode_liberar": part_info["pode_liberar"],
         "pode_responder": part_info.get("pode_responder", True),
-        **_claim_mode_payload(part_info, atd, current_colab_id),
+        **_claim_mode_payload(db, part_info, atd, current_colab_id, cliente=cliente),
     }
+
+    _queue_claim_update_ws(
+        background_tasks,
+        empresa_id=int(empresa_id),
+        action="transferred",
+        response=response,
+    )
+    return response

@@ -50,8 +50,9 @@ export function applyExpPersonalizarUI(){
   rowFim.style.display = on ? '' : 'none';
 
   const sel = document.getElementById('e-setor');
-  const setorId = sel?.value || '';
-  const setorNome = sel?.options?.[sel.selectedIndex]?.text || '';
+  const checkedDept = document.querySelector('#e-deptos input[name="dept-edit"]:checked');
+  const setorId = sel?.value || checkedDept?.value || '';
+  const setorNome = sel?.options?.[sel.selectedIndex]?.text || checkedDept?.closest('label')?.querySelector('strong')?.textContent || '';
 
   renderDeptHintBySetorId(setorId, {
     personalizar: on,

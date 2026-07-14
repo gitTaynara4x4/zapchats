@@ -142,7 +142,7 @@
         <div class="zc-connect-head zc-wizard-head">
           <div>
             <h2 id="zc-connect-title" class="modal-title">Conectar novo número</h2>
-            <p id="zc-wizard-hint">Configure o apelido, escolha o histórico e escaneie o QR Code.</p>
+            <p id="zc-wizard-hint">Configure o apelido, escolha o histórico e escolha como deseja conectar.</p>
           </div>
 
           <button id="btn-close-modal" type="button" class="zc-icon-btn" aria-label="Fechar modal">
@@ -162,7 +162,7 @@
             </li>
             <li class="zc-wizard-step" data-step="3">
               <span>3</span>
-              <b>QR Code</b>
+              <b>Conexão</b>
             </li>
             <li class="zc-wizard-step" data-step="4">
               <span>4</span>
@@ -170,7 +170,7 @@
             </li>
           </ol>
 
-          <p class="zc-wizard-subtitle">Escaneie o QR Code com o WhatsApp do celular para conectar.</p>
+          <p id="zc-wizard-subtitle" class="zc-wizard-subtitle">Use QR Code ou código de pareamento pelo número do telefone.</p>
 
           <div class="zc-wizard-grid">
             <section class="zc-wizard-card zc-wizard-fields" aria-label="Dados do número">
@@ -181,6 +181,41 @@
                   <i class="fa-regular fa-pen-to-square" aria-hidden="true"></i>
                 </div>
                 <small>Use um nome simples para identificar esse WhatsApp dentro do ZapsChat.</small>
+              </div>
+
+              <div class="zc-field zc-connect-method-field">
+                <label>Forma de conexão</label>
+
+                <div class="zc-method-toggle" role="radiogroup" aria-label="Forma de conexão do WhatsApp">
+                  <label class="zc-method-option is-selected" data-method-option="qrcode">
+                    <input type="radio" name="connect_method" value="qrcode" checked />
+                    <span class="zc-method-icon"><i class="fa-solid fa-qrcode" aria-hidden="true"></i></span>
+                    <span>
+                      <b>QR Code</b>
+                      <small>Escanear com a câmera do WhatsApp.</small>
+                    </span>
+                  </label>
+
+                  <label class="zc-method-option" data-method-option="pairing">
+                    <input type="radio" name="connect_method" value="pairing" />
+                    <span class="zc-method-icon"><i class="fa-solid fa-key" aria-hidden="true"></i></span>
+                    <span>
+                      <b>Código no telefone</b>
+                      <small>Use quando aparecer “Continuar no outro dispositivo”.</small>
+                    </span>
+                  </label>
+                </div>
+
+                <small>Se o WhatsApp pedir chave de acesso/passkey, escolha <b>Código no telefone</b>.</small>
+              </div>
+
+              <div id="zc-phone-field" class="zc-field zc-phone-field hidden">
+                <label for="zc-whatsapp-numero">Número do WhatsApp</label>
+                <div class="zc-input-with-icon">
+                  <input id="zc-whatsapp-numero" name="whatsapp_numero" type="tel" inputmode="numeric" placeholder="Ex: 55 12 99999-9999" autocomplete="tel" />
+                  <i class="fa-brands fa-whatsapp" aria-hidden="true"></i>
+                </div>
+                <small>Informe com DDI e DDD. Exemplo: 55 12 99999-9999.</small>
               </div>
 
               <div class="zc-field">
@@ -223,6 +258,12 @@
                   <img id="qr-img" class="hidden" alt="QR Code do WhatsApp" />
                 </div>
 
+                <div id="pairing-code-box" class="zc-pairing-code-box hidden" aria-live="polite">
+                  <span>Código de pareamento</span>
+                  <strong id="pairing-code-value">--------</strong>
+                  <small>No WhatsApp: Dispositivos conectados &gt; Conectar com número de telefone.</small>
+                </div>
+
                 <div id="qr-timer" class="zc-qr-timer hidden">
                   Expira em <strong><span id="qr-timer-count">60</span>s</strong>
                 </div>
@@ -236,12 +277,12 @@
               <span></span>
             </div>
             <div>
-              <strong>Como escanear</strong>
+              <strong id="zc-scan-help-title">Como conectar</strong>
               <ol>
                 <li>Abra o WhatsApp no seu celular.</li>
                 <li>Toque em Menu ou Configurações &gt; Dispositivos conectados.</li>
                 <li>Toque em Conectar um dispositivo.</li>
-                <li>Aponte a câmera para este QR Code.</li>
+                <li id="zc-scan-help-last">Aponte a câmera para este QR Code.</li>
               </ol>
             </div>
           </section>
@@ -253,12 +294,12 @@
 
             <button type="submit" id="btn-gerar-qr" class="btn btn--primary zc-btn-main">
               <i class="fa-solid fa-qrcode"></i>
-              Gerar QR Code
+              Gerar conexão
             </button>
 
             <button type="button" id="btn-refresh" class="btn btn--primary zc-btn-main hidden">
               <i class="fa-solid fa-rotate-right"></i>
-              Atualizar QR Code
+              Atualizar conexão
             </button>
           </div>
 
@@ -696,5 +737,6 @@
       });
     })();
   </script>
+  <script src="/frontend/js/help/help-conectar.js?v=20260708-conectar-tour-responsive-final" defer></script>
 </body>
 </html>

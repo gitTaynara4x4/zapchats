@@ -56,7 +56,11 @@
 
   function resolveInstLabel(val) {
     const raw = norm(val);
-    if (!raw) return 'Todos os WhatsApps';
+    if (!raw) {
+      return window.__ZC_SEM_INSTANCIAS_PERMITIDAS__
+        ? 'Nenhum WhatsApp liberado'
+        : 'Todos os WhatsApps';
+    }
 
     try {
       const savedLabel = localStorage.getItem(LS_KEY_LABEL);
@@ -431,11 +435,13 @@
   async function backendAllowsInstance(instanciaId) {
     if (!EMPRESA_ID || !instanciaId) return false;
 
+    // Esta rota aplica o ACL da instância antes de devolver o perfil.
+    // Não usamos /conversas para testar permissão porque essa rota pode
+    // responder 200 com lista vazia quando o colaborador não tem acesso.
     const url =
-      `/api/atendimento/conversas` +
+      `/api/atendimento/instancias/${encodeURIComponent(instanciaId)}/perfil` +
       `?empresa_id=${encodeURIComponent(EMPRESA_ID)}` +
-      `&limit=1` +
-      `&instancia_id=${encodeURIComponent(instanciaId)}` +
+      `&refresh=0` +
       `&__inst_acl_ts=${Date.now()}`;
 
     try {
@@ -448,10 +454,8 @@
         }
       });
 
-      if (r.status === 403 || r.status === 401) return false;
-      if (r.ok) return true;
-
-      return false;
+      if (r.status === 401 || r.status === 403 || r.status === 404) return false;
+      return r.ok;
     } catch {
       return false;
     }
@@ -650,8 +654,16 @@
     wrap.appendChild(label);
 
     if (!list.length) {
-      return renderEmpty('Nenhum WhatsApp liberado para este colaborador.');
+      window.__ZC_SEM_INSTANCIAS_PERMITIDAS__ = isColaborador;
+
+      return renderEmpty(
+        isColaborador
+          ? 'Nenhum WhatsApp liberado para este colaborador.'
+          : 'Nenhum WhatsApp disponível para esta empresa.'
+      );
     }
+
+    window.__ZC_SEM_INSTANCIAS_PERMITIDAS__ = false;
 
     const showTodos = !isColaborador || list.length > 1;
 

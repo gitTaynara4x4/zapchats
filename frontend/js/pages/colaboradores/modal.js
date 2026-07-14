@@ -39,26 +39,162 @@ import {
 import {
   renderInstsView,
   ensureInstsEdit,
-  getInstsSelecionadasEdit,
-  saveInsts
-} from './instancias.js';
+  getInstsSelecionadasEdit
+} from './instancias.js?v=colab-instancias-selection-20260711';
 import {
   renderDepartamentosView,
   ensureDepartamentosEdit,
-  getDepartamentosSelecionadosEdit,
-  saveDepartamentos
+  getDepartamentosSelecionadosEdit
 } from './departamentos.js';
 import {
   ensurePermsEdit,
-  getPermsSelecionadasEdit,
-  savePerms
+  getPermsSelecionadasEdit
 } from './permissoes.js';
 import {
   clearValidationErrors,
   validateFormLive,
   getEditInputs
-} from './validacao.js';
+} from './validacao.js?v=colab-required-20260713';
 import { loadColaboradores, renderLista } from './lista.js';
+
+let saveStatusTimer = null;
+
+function getSaveStatusElements(modal = els().perfilModal){
+  return {
+    wrap: modal?.querySelector('#perfil-save-status') || null,
+    title: modal?.querySelector('#perfil-save-status-title') || null,
+    detail: modal?.querySelector('#perfil-save-status-detail') || null,
+    saveButton: modal?.querySelector('#perfil-salvar-foot') || null
+  };
+}
+
+function clearSaveStatus(){
+  const modal = els().perfilModal;
+  const { wrap } = getSaveStatusElements(modal);
+
+  clearTimeout(saveStatusTimer);
+  saveStatusTimer = null;
+
+  if (wrap){
+    wrap.hidden = true;
+    wrap.classList.remove('is-loading', 'is-success', 'is-warning', 'is-error');
+  }
+}
+
+function setSaveStatus(type, titleText, detailText = ''){
+  const modal = els().perfilModal;
+  const { wrap, title, detail } = getSaveStatusElements(modal);
+
+  if (!wrap) return;
+
+  wrap.hidden = false;
+  wrap.classList.remove('is-loading', 'is-success', 'is-warning', 'is-error');
+  wrap.classList.add(`is-${type || 'loading'}`);
+
+  if (title) title.textContent = titleText || 'Salvando colaborador...';
+  if (detail) {
+    detail.textContent = detailText || '';
+    detail.hidden = !detailText;
+  }
+}
+
+function setModalControlsLocked(modal, locked){
+  if (!modal) return;
+
+  const controls = modal.querySelectorAll('button, input, select, textarea');
+
+  controls.forEach(control => {
+    if (locked){
+      if (control.dataset.saveLock !== '1') {
+        control.dataset.saveWasDisabled = control.disabled ? '1' : '0';
+      }
+
+      control.dataset.saveLock = '1';
+      control.disabled = true;
+      return;
+    }
+
+    if (control.dataset.saveLock === '1') {
+      control.disabled = control.dataset.saveWasDisabled === '1';
+      delete control.dataset.saveLock;
+      delete control.dataset.saveWasDisabled;
+    }
+  });
+}
+
+function beginModalSave({ mode = 'edit', title, detail } = {}){
+  const modal = els().perfilModal;
+  if (!modal || state.saving) return false;
+
+  clearTimeout(saveStatusTimer);
+  saveStatusTimer = null;
+
+  state.saving = true;
+  modal.dataset.saving = '1';
+  modal.classList.add('is-saving');
+  modal.setAttribute('aria-busy', 'true');
+
+  const isCreate = mode === 'create';
+  const mainText = title || (isCreate ? 'Criando colaborador...' : 'Salvando alterações...');
+  const detailText = detail || (
+    isCreate
+      ? 'Salvando dados, acessos e permissões.'
+      : 'Atualizando os dados do colaborador.'
+  );
+
+  setSaveStatus('loading', mainText, detailText);
+  setModalControlsLocked(modal, true);
+
+  const { saveButton } = getSaveStatusElements(modal);
+  if (saveButton){
+    saveButton.style.display = 'inline-flex';
+    saveButton.innerHTML = `
+      <span class="colab-button-spinner" aria-hidden="true"></span>
+      <span>${mainText}</span>
+    `;
+  }
+
+  return true;
+}
+
+function updateModalSave(title, detail = ''){
+  if (!state.saving) return;
+
+  const modal = els().perfilModal;
+  const { saveButton } = getSaveStatusElements(modal);
+
+  setSaveStatus('loading', title, detail);
+
+  if (saveButton){
+    saveButton.innerHTML = `
+      <span class="colab-button-spinner" aria-hidden="true"></span>
+      <span>${title}</span>
+    `;
+  }
+}
+
+function finishModalSave({ type = 'success', title, detail = '', keepMs } = {}){
+  const modal = els().perfilModal;
+
+  state.saving = false;
+
+  if (modal){
+    delete modal.dataset.saving;
+    modal.classList.remove('is-saving');
+    modal.removeAttribute('aria-busy');
+    setModalControlsLocked(modal, false);
+    updateWizardFooter(modal);
+  }
+
+  setSaveStatus(type, title, detail);
+
+  const delay = Number.isFinite(Number(keepMs))
+    ? Number(keepMs)
+    : (type === 'success' ? 2400 : 4200);
+
+  clearTimeout(saveStatusTimer);
+  saveStatusTimer = setTimeout(clearSaveStatus, delay);
+}
 
 function ensureFooterButtons(){
   const { perfilModal, pClose2 } = els();
@@ -93,6 +229,8 @@ function ensureFooterButtons(){
       state.pSaveFoot.addEventListener('click', ev => {
         ev.preventDefault();
 
+        if (state.saving) return;
+
         const modal = els().perfilModal;
         const { idx } = activeWizardStep(modal);
 
@@ -123,6 +261,7 @@ function ensureFooterButtons(){
 
     if (!state.pCancelFoot.dataset.boundCancelInline){
       state.pCancelFoot.addEventListener('click', () => {
+        if (state.saving) return;
         if (els().perfilModal?.dataset.mode === 'create') closePerfil();
         else exitInlineEdit(true);
       });
@@ -153,85 +292,28 @@ function renderAdminBadge(colab){
 }
 
 function ensureAccessExplanationBox(){
-  let full = document.getElementById('zc-colab-access-guide');
+  // O guia grande poluía o wizard. Agora a explicação fica no ícone de ajuda
+  // do título da etapa Acesso. Também remove qualquer box antigo já injetado.
+  const old = document.getElementById('zc-colab-access-guide');
+  if (old) old.remove();
 
-  if (!full){
-    const { dPerms, ePerms } = els();
+  const panelTitle = document.querySelector('#modal-perfil [data-panel="acessos"] .panel-title h3');
+  if (!panelTitle) return null;
 
-    full = document.createElement('div');
-    full.id = 'zc-colab-access-guide';
-    full.className = 'full';
-
-    full.innerHTML = `
-      <dt>Acesso no atendimento</dt>
-      <dd>
-        <div
-          class="fieldbox zc-access-guide"
-          style="
-            display:grid;
-            gap:.55rem;
-            padding:.85rem .95rem;
-            border:1px solid rgba(34,197,94,.24);
-            background:rgba(34,197,94,.07);
-            border-radius:14px;
-          "
-        >
-          <div style="display:flex; align-items:center; gap:.55rem; font-weight:700;">
-            <i class="fa fa-circle-info" style="color:#22c55e;"></i>
-            <span>Como funciona o acesso deste colaborador</span>
-          </div>
-
-          <div class="muted" style="line-height:1.45;">
-            Para o colaborador ver uma conversa, ele precisa ter acesso ao
-            <b>WhatsApp</b> onde a mensagem chegou e ao <b>setor</b> da conversa.
-          </div>
-
-          <div style="display:grid; gap:.35rem; font-size:.92rem; line-height:1.45;">
-            <div>
-              <b>Setores que atende:</b>
-              define de quais setores/departamentos ele poderá ver e atender conversas.
-            </div>
-
-            <div>
-              <b>WhatsApps que pode acessar:</b>
-              define quais números de WhatsApp aparecem para ele no atendimento.
-            </div>
-
-            <div>
-              <b>Permissões:</b>
-              define o que ele pode fazer no sistema, como ver atendimento,
-              enviar mensagem ou gerenciar equipe.
-            </div>
-
-            <div>
-              <b>Entrada geral:</b>
-              conversas que ainda não têm setor aparecem para quem tem acesso
-              ao WhatsApp onde a mensagem chegou.
-            </div>
-          </div>
-        </div>
-      </dd>
-    `;
-
-    const permFull =
-      dPerms?.closest('.full') ||
-      ePerms?.closest('.full') ||
-      dPerms?.parentElement?.closest('.full') ||
-      ePerms?.parentElement?.closest('.full');
-
-    const instsFull = document.getElementById('insts-full');
-    const grid = document.querySelector('#details-grid, .details-grid');
-
-    if (instsFull && instsFull.parentElement){
-      instsFull.parentElement.insertBefore(full, instsFull);
-    } else if (permFull && permFull.parentElement){
-      permFull.parentElement.insertBefore(full, permFull);
-    } else if (grid){
-      grid.appendChild(full);
-    }
+  let help = panelTitle.querySelector('#acesso-help-icon') || panelTitle.querySelector('#zc-colab-access-help');
+  if (!help) {
+    help = document.createElement('span');
+    help.id = 'zc-colab-access-help';
+    help.className = 'zc-help-icon';
+    help.tabIndex = 0;
+    help.setAttribute('role', 'button');
+    help.setAttribute('aria-label', 'Ajuda sobre acesso no atendimento');
+    help.innerHTML = '<i class="fa-regular fa-circle-question" aria-hidden="true"></i>';
+    panelTitle.appendChild(help);
   }
 
-  return full;
+  help.dataset.help = 'Para ver uma conversa, o colaborador precisa ter acesso ao WhatsApp onde a mensagem chegou e ao departamento da conversa. Permissões definem ações como ver atendimento, enviar mensagem ou gerenciar equipe.';
+  return help;
 }
 
 async function loadColabFull(id){
@@ -308,6 +390,18 @@ function restoreFieldbox(boxId){
   }
 }
 
+function updateProfilePreview({ nome = '', cargo = '', empresa = '', departamento = '' } = {}){
+  const nameEl = document.querySelector('#side-preview-name');
+  const roleEl = document.querySelector('#side-preview-role');
+  const companyEl = document.querySelector('#side-preview-company');
+  const deptEl = document.querySelector('#side-preview-dept');
+
+  if (nameEl) nameEl.textContent = String(nome || '').trim() || 'Novo colaborador';
+  if (roleEl) roleEl.textContent = String(cargo || '').trim() || 'Personalize o perfil do colaborador';
+  if (companyEl) companyEl.textContent = String(empresa || '').trim() || 'Empresa atual';
+  if (deptEl) deptEl.textContent = String(departamento || '').trim() || 'Não definido';
+}
+
 export async function renderPerfilView(colab){
   const {
     perfilModal,
@@ -320,6 +414,7 @@ export async function renderPerfilView(colab){
   } = els();
 
   clearValidationErrors();
+  clearWizardStepErrors(perfilModal);
 
   state.viewing = colab;
   state.showErrors = false;
@@ -353,7 +448,7 @@ export async function renderPerfilView(colab){
   if (pSubtitle) {
     pSubtitle.textContent = perfilModal?.dataset.mode === 'create'
       ? 'Convide alguém para acessar a plataforma'
-      : 'Gerencie perfil, acesso e permissões deste colaborador';
+      : 'Gerencie dados, acesso e permissões deste colaborador';
   }
 
   const photoURL = await fetchAvatarURLFor(colab);
@@ -395,6 +490,13 @@ export async function renderPerfilView(colab){
   if (vCargo) vCargo.textContent = adm ? '' : (cargoVal || '—');
 
   renderAdminBadge(colab);
+
+  updateProfilePreview({
+    nome,
+    cargo: adm ? 'Administrador' : cargoVal,
+    empresa: empresa?.nome || '',
+    departamento: depName || ''
+  });
 
   const colIni = coalesceHorarioInicio(colab);
   const colFim = coalesceHorarioFim(colab);
@@ -471,24 +573,10 @@ export async function renderPerfilView(colab){
   }
 
   if (avatarHint) {
-    avatarHint.style.display = perfilModal?.dataset.mode === 'create'
-      ? 'grid'
-      : 'none';
+    avatarHint.style.display = isCreate ? '' : 'none';
   }
 
-  const wrapSenha = $('#wrap-senha');
-  const senhaHelp = $('#senha-help');
-  const canPass = canEditPassword();
-
-  if (wrapSenha) {
-    wrapSenha.style.display = (canPass && (isCreate || state.inlineEdit))
-      ? 'flex'
-      : 'none';
-  }
-
-  if (senhaHelp) {
-    senhaHelp.style.display = (canPass && isCreate) ? '' : 'none';
-  }
+  applyAccessModeUI();
 
   bindAvatarDnDAndPaste();
   exitInlineEdit(false);
@@ -572,6 +660,181 @@ function resetLazyEditFlags(){
   delete perfilModal.dataset.permsEditLoaded;
 }
 
+
+function getAcessoModo(){
+  const checked = document.querySelector('#modal-perfil input[name="acesso_modo"]:checked');
+  const value = String(checked?.value || '').trim().toLowerCase();
+
+  if (value === 'manual') return 'manual';
+  if (value === 'convite') return 'convite';
+
+  // Na edição nenhuma opção começa selecionada. Isso significa manter a senha atual.
+  return 'manter';
+}
+
+function getAccessEmailCopy(isCreate){
+  if (isCreate) {
+    return {
+      label: 'Enviar convite por e-mail',
+      description: 'O colaborador cria a própria senha pelo e-mail.',
+      help: 'O colaborador recebe um convite no e-mail cadastrado e cria a própria senha.'
+    };
+  }
+
+  if (!state.viewing?.usuario_id && !state.viewing?.tem_usuario) {
+    return {
+      label: 'Enviar convite por e-mail',
+      description: 'Cria o acesso e envia o link para definir a senha.',
+      help: 'Como este colaborador ainda não possui usuário de acesso, o sistema criará o login e enviará um convite por e-mail.'
+    };
+  }
+
+  if (state.viewing?.convite_pendente) {
+    return {
+      label: 'Reenviar convite por e-mail',
+      description: 'Gera um novo código e reenvia o convite.',
+      help: 'O convite anterior será substituído por um novo código de confirmação enviado ao e-mail cadastrado.'
+    };
+  }
+
+  return {
+    label: 'Enviar link de redefinição por e-mail',
+    description: 'O colaborador define uma nova senha pelo e-mail.',
+    help: 'Envia um novo código para o colaborador redefinir a própria senha com segurança.'
+  };
+}
+
+function resetAccessModeSelection(){
+  const { perfilModal } = els();
+  const isCreate = perfilModal?.dataset.mode === 'create';
+  const conviteRadio = document.querySelector('#acesso-modo-convite');
+  const manualRadio = document.querySelector('#acesso-modo-manual');
+  const senhaInput = document.querySelector('#e-senha');
+
+  if (conviteRadio) conviteRadio.checked = !!isCreate;
+  if (manualRadio) manualRadio.checked = false;
+
+  if (senhaInput) {
+    senhaInput.value = '';
+    senhaInput.type = 'password';
+  }
+
+  const toggleIcon = document.querySelector('#toggle-senha i');
+  if (toggleIcon) {
+    toggleIcon.classList.add('fa-eye');
+    toggleIcon.classList.remove('fa-eye-slash');
+  }
+}
+
+function applyAccessModeUI(){
+  const { perfilModal } = els();
+  const isCreate = perfilModal?.dataset.mode === 'create';
+  const isEditing = isCreate || state.inlineEdit || perfilModal?.classList.contains('editing');
+  const canPass = canEditPassword();
+  let modo = getAcessoModo();
+
+  const manualRadio = document.querySelector('#acesso-modo-manual');
+  const conviteRadio = document.querySelector('#acesso-modo-convite');
+  const accessTitle = document.querySelector('#access-mode-title');
+  const accessModeHelp = document.querySelector('#access-mode-help');
+  const emailLabel = document.querySelector('#access-email-label');
+  const emailDescription = document.querySelector('#access-email-description');
+  const emailHelp = document.querySelector('#access-email-help');
+  const manualLabel = document.querySelector('#access-manual-label');
+  const manualDescription = document.querySelector('#access-manual-description');
+  const manualHelp = document.querySelector('#access-manual-help');
+
+  const emailCopy = getAccessEmailCopy(isCreate);
+
+  if (accessTitle) accessTitle.textContent = isCreate ? 'Forma de acesso' : 'Alterar acesso ou senha';
+  if (emailLabel) emailLabel.textContent = emailCopy.label;
+  if (emailDescription) emailDescription.textContent = emailCopy.description;
+  if (emailHelp) emailHelp.dataset.help = emailCopy.help;
+
+  if (manualLabel) {
+    manualLabel.textContent = isCreate
+      ? 'Definir senha manualmente'
+      : 'Definir nova senha temporária';
+  }
+
+  if (manualDescription) {
+    manualDescription.textContent = isCreate
+      ? 'Cria uma senha temporária e exige a troca depois.'
+      : 'Substitui a senha atual e exige uma nova troca no próximo acesso.';
+  }
+
+  if (manualHelp) {
+    manualHelp.dataset.help = isCreate
+      ? 'Use somente quando o colaborador não consegue acessar o e-mail agora. A senha é temporária e o sistema exige troca no primeiro acesso.'
+      : 'A senha atual será substituída por uma senha temporária. No próximo acesso, o colaborador será direcionado para criar uma nova senha pessoal.';
+  }
+
+  if (accessModeHelp) {
+    accessModeHelp.dataset.help = isCreate
+      ? 'Escolha como o primeiro acesso será criado. Convite por e-mail é a opção recomendada.'
+      : 'Nenhuma opção começa marcada. Escolha uma delas apenas quando quiser alterar o acesso ou a senha; caso contrário, a senha atual será mantida.';
+  }
+
+  if (manualRadio) manualRadio.disabled = !canPass;
+  if (conviteRadio) conviteRadio.disabled = !canPass;
+
+  if (!canPass) {
+    if (manualRadio) manualRadio.checked = false;
+    if (conviteRadio) conviteRadio.checked = false;
+    modo = 'manter';
+  }
+
+  const grid = document.querySelector('#access-mode-grid');
+  const manualPanel = document.querySelector('#manual-senha-panel');
+  const wrapSenha = document.querySelector('#wrap-senha');
+  const senhaHelp = document.querySelector('#senha-help');
+  const senhaInput = document.querySelector('#e-senha');
+
+  if (grid) grid.style.display = (isEditing && canPass) ? 'grid' : 'none';
+
+  const showManual = isEditing && canPass && modo === 'manual';
+
+  if (manualPanel) manualPanel.style.display = showManual ? 'block' : 'none';
+  if (wrapSenha) wrapSenha.style.display = showManual ? 'flex' : 'none';
+
+  if (!showManual && senhaInput) senhaInput.value = '';
+
+  if (senhaInput) {
+    senhaInput.placeholder = isCreate
+      ? 'Defina a senha temporária'
+      : 'Digite a nova senha temporária';
+    senhaInput.required = showManual;
+    senhaInput.setAttribute('aria-required', String(showManual));
+  }
+
+  if (senhaHelp) {
+    senhaHelp.style.display = isEditing ? 'block' : 'none';
+
+    if (!isEditing) {
+      senhaHelp.textContent = '';
+    } else if (!canPass) {
+      senhaHelp.textContent = 'Você não possui permissão para redefinir a senha deste colaborador.';
+    } else if (isCreate) {
+      senhaHelp.textContent = modo === 'manual'
+        ? 'Defina uma senha temporária de 6 a 72 caracteres. O colaborador será obrigado a criar outra senha no primeiro acesso.'
+        : 'O colaborador receberá um convite por e-mail para criar a própria senha.';
+    } else if (modo === 'manual') {
+      senhaHelp.textContent = 'Digite uma nova senha temporária. A senha atual será substituída e o colaborador deverá trocá-la no próximo acesso.';
+    } else if (modo === 'convite') {
+      senhaHelp.textContent = emailCopy.label + '. A senha atual não será exibida nem enviada.';
+    } else {
+      senhaHelp.textContent = 'Escolha uma opção somente se quiser alterar o acesso ou a senha. Sem seleção, a senha atual será mantida.';
+    }
+  }
+
+  const acessoHelp = document.querySelector('#acesso-help-icon');
+  if (acessoHelp) {
+    acessoHelp.dataset.help = isCreate
+      ? 'Configure como o colaborador criará a senha e quais atendimentos poderá acessar.'
+      : 'A edição não altera a senha automaticamente. Selecione e-mail ou senha temporária apenas quando quiser redefinir o acesso.';
+  }
+}
+
 function ensureLazyEditStep(key){
   const { perfilModal, dPerms, ePerms } = els();
   if (!perfilModal || !state.inlineEdit) return;
@@ -637,10 +900,14 @@ export function enterInlineEdit(){
   state.inlineEdit = true;
   state.showErrors = false;
 
+  // Sempre remonta departamentos, WhatsApps e permissões ao iniciar uma nova edição.
+  // Sem isso, uma flag antiga podia impedir a restauração dos checks.
+  resetLazyEditFlags();
+
   ensureAccessExplanationBox();
 
   if (pEdit) pEdit.style.display = 'none';
-  if (pSave) pSave.style.display = 'inline-flex';
+  if (pSave) pSave.style.display = 'none';
   if (pCancel) pCancel.style.display = 'none';
   if (pClose) pClose.style.display = '';
 
@@ -658,6 +925,29 @@ export function enterInlineEdit(){
 
   perfilModal?.classList.add('editing');
 
+  // Exibe o editor de foto somente quando o perfil está realmente em edição.
+  // A sidebar estava escondida pelo CSS final da página e o hint também era
+  // mantido como display:none, por isso não havia nenhuma ação visível.
+  const avatarHintEdit = document.querySelector('#avatar-hint');
+  const avatarButtonEdit = document.querySelector('#btn-add-avatar');
+
+  if (avatarHintEdit) avatarHintEdit.style.display = '';
+
+  if (avatarButtonEdit) {
+    const label = avatarButtonEdit.querySelector('strong');
+    const help = avatarButtonEdit.querySelector('small');
+    const hasAvatar = Boolean(
+      state.newAvatarFile ||
+      state.viewing?.avatar_url ||
+      document.querySelector('#p-avatar')?.getAttribute('src')
+    );
+
+    if (label) label.textContent = hasAvatar ? 'Alterar foto' : 'Adicionar foto';
+    if (help) help.textContent = 'JPG, PNG ou WEBP de até 5 MB';
+  }
+
+  bindAvatarDnDAndPaste();
+
   swapFieldbox(
     'fb-nome',
     `<input id="e-nome" class="input" type="text" maxlength="120" required autocomplete="off" placeholder="Seu nome completo">`
@@ -668,43 +958,13 @@ export function enterInlineEdit(){
     `<input id="e-email" class="input" type="email" maxlength="160" required autocomplete="off" placeholder="nome@empresa.com">`
   );
 
-  const selHtml = `
-    <select id="e-setor" class="select" required>
-      <option value="">Selecione…</option>
-      ${state.setores.map(s => `<option value="${s.id}">${s.nome}</option>`).join('')}
-    </select>
-  `;
-
-  const sel = swapFieldbox('fb-depto', selHtml);
-
-  const depIdRaw = coalesceDeptId(state.viewing);
-  const depName = coalesceDeptName(state.viewing);
-
-  let depValue = '';
-
-  if (depIdRaw != null) {
-    depValue = String(depIdRaw);
-  } else if (depName && state.setores.length) {
-    const alvo = normStr(depName);
-    const found = state.setores.find(s => normStr(s?.nome) === alvo);
-
-    if (found) depValue = String(found.id);
-  }
-
-  if (sel && depValue) {
-    const hasOpt = Array.from(sel.options || [])
-      .some(o => o.value === depValue);
-
-    if (!hasOpt) {
-      sel.appendChild(new Option(depName || 'Departamento atual', depValue));
-    }
-
-    sel.value = depValue;
-  }
+  // Departamento principal foi removido do cadastro.
+  // A fonte oficial agora é "Departamentos que atende" em departamentos_membros.
+  const sel = null;
 
   swapFieldbox(
     'fb-tel',
-    `<input id="e-tel" class="input" type="tel" required inputmode="numeric" placeholder="(DD) 9 9999-9999">`
+    `<input id="e-tel" class="input" type="tel" inputmode="numeric" placeholder="(DD) 9 9999-9999">`
   );
 
   swapFieldbox(
@@ -728,6 +988,21 @@ export function enterInlineEdit(){
     ? maskPhoneBR(coalescePhone(state.viewing))
     : '';
   $('#e-cargo').value = coalesceCargo(state.viewing) || '';
+
+  const syncProfilePreview = () => {
+    updateProfilePreview({
+      nome: $('#e-nome')?.value || '',
+      cargo: $('#e-cargo')?.value || '',
+      empresa: document.querySelector('#v-empresa')?.textContent || '',
+      departamento: document.querySelector('#side-preview-dept')?.textContent || ''
+    });
+  };
+
+  ['#e-nome', '#e-cargo'].forEach(selector => {
+    const input = document.querySelector(selector);
+    if (input) input.addEventListener('input', syncProfilePreview);
+  });
+  syncProfilePreview();
 
   const hIni = coalesceHorarioInicio(state.viewing) || '';
   const hFim = coalesceHorarioFim(state.viewing) || '';
@@ -817,20 +1092,11 @@ export function enterInlineEdit(){
   // Cada bloco entra sob demanda quando a pessoa chega na etapa do wizard.
   ensureLazyEditStep(activeWizardStep(perfilModal).key);
 
-  const wrapSenha = $('#wrap-senha');
-  const senhaHelp = $('#senha-help');
+  resetAccessModeSelection();
+  applyAccessModeUI();
+
   const toggle = $('#toggle-senha');
   const canPass = canEditPassword();
-
-  if (wrapSenha) {
-    wrapSenha.style.display = canPass ? 'flex' : 'none';
-  }
-
-  if (senhaHelp) {
-    senhaHelp.style.display = (canPass && perfilModal?.dataset.mode === 'create')
-      ? ''
-      : 'none';
-  }
 
   if (toggle){
     const input = $('#e-senha');
@@ -909,6 +1175,13 @@ export function exitInlineEdit(restore = true){
 
   perfilModal?.classList.remove('editing');
 
+  const avatarHintView = document.querySelector('#avatar-hint');
+  if (avatarHintView) {
+    avatarHintView.style.display = 'none';
+  }
+
+  resetLazyEditFlags();
+
   const rowToggle = document.getElementById('row-exp-toggle');
   if (rowToggle) rowToggle.style.display = 'none';
 
@@ -925,6 +1198,8 @@ export function exitInlineEdit(restore = true){
 
 export async function saveInline(){
   const { perfilModal } = els();
+
+  if (state.saving) return;
 
   // O cadastro é em etapas. Se algum botão antigo/duplicado chamar salvar
   // antes da última etapa, não valida senha ainda: apenas avança.
@@ -943,7 +1218,6 @@ export async function saveInline(){
   const {
     eNome,
     eEmail,
-    eSetor,
     eTel,
     eCargo,
     eExpIni,
@@ -953,7 +1227,6 @@ export async function saveInline(){
 
   const nome = eNome?.value.trim();
   const email = eEmail?.value.trim();
-  const setor = eSetor?.value || '';
   const tel = eTel?.value || '';
   const cargo = eCargo?.value || '';
   const expOn = !!eExpPersonalizar?.checked;
@@ -962,60 +1235,108 @@ export async function saveInline(){
 
   state.showErrors = true;
 
-  const check = validateFormLive(true);
+  const check = validateFormLive(true, { scope: 'all' });
 
   if (!check.ok){
-    if (check.msgs.some(m => String(m).toLowerCase().includes('senha'))) {
-      goWizardStep(perfilModal, 'acessos');
+    markWizardStepErrors(perfilModal, check.fields);
 
-      setTimeout(() => {
-        const senhaEl = document.querySelector('#e-senha');
-        senhaEl?.focus?.();
-      }, 80);
-    }
+    const firstInvalid = check.fields?.[0] ||
+      perfilModal?.querySelector('[aria-invalid="true"]');
+    const targetStep = wizardStepForField(firstInvalid);
+
+    focusValidationField(perfilModal, firstInvalid, targetStep);
 
     toast('Corrija os campos:\n' + check.msgs.join('\n'), 'warn');
     return;
   }
 
+  clearWizardStepErrors(perfilModal);
+
   const instsSel = getInstsSelecionadasEdit();
   const deptosSel = getDepartamentosSelecionadosEdit();
   const permsSel = getPermsSelecionadasEdit();
-  const horarioModo = buildHorarioModoPayload(setor, expOn);
+
+  const usaAtendimento = permsSel.some(perm => {
+    const idPerm = String(perm || '').trim().toLowerCase();
+    return idPerm === 'atendimento.ver' || idPerm === 'atendimento.enviar';
+  });
+
+  if (usaAtendimento && !instsSel.length) {
+    goWizardStep(perfilModal, 'acessos');
+
+    setTimeout(() => {
+      const warning = document.querySelector('#inst-selection-warning');
+      if (warning) warning.hidden = false;
+
+      document.querySelector('#inst-select-all')?.focus?.();
+    }, 80);
+
+    toast(
+      'Selecione pelo menos um WhatsApp para este colaborador atender. Para liberar todos, clique em “Selecionar todos”.',
+      'warn'
+    );
+    return;
+  }
+
+  const departamentoPrincipalId = deptosSel.length ? deptosSel[0] : null;
+  const horarioModo = buildHorarioModoPayload(departamentoPrincipalId, expOn);
+  const acessoModo = getAcessoModo();
+  const senhaEl = document.querySelector('#e-senha');
+  const newPass = (senhaEl?.value || '').trim();
+
+  if (acessoModo === 'manual') {
+    if (!canPass) {
+      toast(
+        mode === 'create'
+          ? 'Você não tem permissão para definir senha deste colaborador.'
+          : 'Você não tem permissão para redefinir a senha deste colaborador.',
+        'warn'
+      );
+      return;
+    }
+
+    if (newPass.length < 6 || newPass.length > 72) {
+      goWizardStep(perfilModal, 'acessos');
+      toast(
+        mode === 'create'
+          ? 'Defina uma senha temporária entre 6 e 72 caracteres.'
+          : 'Defina uma nova senha temporária entre 6 e 72 caracteres.',
+        'warn'
+      );
+      senhaEl?.focus?.();
+      return;
+    }
+  }
 
   if (mode === 'create'){
     const fd = new FormData();
 
     fd.append('nome', nome);
     fd.append('email', email);
-    fd.append('setor_id', String(Number(setor)));
     fd.append('telefone', telE164(tel));
     fd.append('cargo', (cargo || '').trim());
     fd.append('horario_modo', horarioModo);
+    fd.append('modo_acesso', acessoModo);
 
     // Cria também o usuário de login vinculado ao colaborador.
-    // Sem isso, a senha era enviada, mas o backend criava apenas o registro em colaboradores.
+    // Convite por e-mail é o padrão; senha manual vira senha temporária.
     fd.append('criar_usuario', 'true');
+
+    if (departamentoPrincipalId) {
+      // Compatibilidade: backend antigo pode usar setor_id como fallback,
+      // mas a regra oficial fica em departamentos_ids[].
+      fd.append('setor_id', String(Number(departamentoPrincipalId)));
+    }
 
     if (expOn){
       fd.append('hora_login_inicio', hIni);
       fd.append('hora_login_fim', hFim);
     }
 
-    if (!canPass){
-      toast('Você não tem permissão para definir senha deste colaborador.', 'warn');
-      return;
+    if (acessoModo === 'manual') {
+      fd.append('senha', newPass);
+      fd.append('forcar_troca_senha', 'true');
     }
-
-    const senhaInp = document.querySelector('#e-senha');
-    const s = (senhaInp?.value || '').trim();
-
-    if (s.length < 6 || s.length > 72) {
-      toast('Defina uma senha entre 6 e 72 caracteres.', 'warn');
-      return;
-    }
-
-    fd.append('senha', s);
 
     permsSel.forEach(p => {
       fd.append('permissoes[]', String(p));
@@ -1033,80 +1354,87 @@ export async function saveInline(){
       fd.append('avatar', state.newAvatarFile);
     }
 
+    if (!beginModalSave({
+      mode: 'create',
+      title: 'Criando colaborador...',
+      detail: 'Salvando dados, acessos, permissões e foto de perfil.'
+    })) return;
+
     try {
       const created = await apiForm('/api/colaboradores/', 'POST', fd);
 
-      if (created?.id != null){
-        try {
-          await saveDepartamentos(created.id, deptosSel);
-        } catch (eDept){
-          console.warn('departamentos create', eDept);
-        }
-
-        try {
-          await savePerms(created.id, permsSel);
-        } catch (ePerm){
-          console.warn('perm create', ePerm);
-        }
+      if (!created?.id) {
+        throw new Error('A API não retornou o colaborador criado.');
       }
 
-      toast('Colaborador criado.');
+      updateModalSave(
+        'Atualizando a equipe...',
+        'O cadastro foi concluído. Estamos atualizando a lista de colaboradores.'
+      );
 
       if (state.newAvatarFile) {
-        let upOK = false;
-
-        if (created?.usuario_id){
-          upOK = await uploadAvatarTo(`/api/usuarios/${created.usuario_id}/avatar`, state.newAvatarFile);
-        }
-
-        if (!upOK && created?.id){
-          upOK = await uploadAvatarTo(`/api/colaboradores/${created.id}/avatar`, state.newAvatarFile);
-        }
-
-        if (created?.id) {
-          invalidateAvatarThumb(created.id);
-        }
+        invalidateAvatarThumb(created.id);
       }
+
+      const fresh = {
+        ...created,
+        instancias_ids: instsSel,
+        departamentos_ids: deptosSel,
+        permissoes: permsSel,
+        hora_login_inicio: expOn ? (hIni || null) : null,
+        hora_login_fim: expOn ? (hFim || null) : null,
+        horario_modo: horarioModo
+      };
 
       state.newAvatarFile = null;
       state.showErrors = false;
+      state.viewing = fresh;
 
       perfilModal.dataset.mode = 'view';
-      perfilModal.dataset.currentId = String(created?.id || '');
-
-      const fresh = await loadColabFull(created.id);
-
-      fresh.instancias_ids = instsSel;
-      fresh.departamentos_ids = deptosSel;
-
-      if (permsSel.length) {
-        fresh.permissoes = permsSel;
-      }
-
-      fresh.hora_login_inicio = expOn ? (hIni || null) : null;
-      fresh.hora_login_fim = expOn ? (hFim || null) : null;
-      fresh.horario_modo = horarioModo;
-
-      state.viewing = fresh;
+      perfilModal.dataset.currentId = String(created.id);
 
       await loadColaboradores();
       renderLista();
 
-      await renderPerfilView(fresh);
       exitInlineEdit(false);
-    } catch (e) {
-      console.error('[create error]', e.status, e.data);
+      await renderPerfilView(fresh);
 
-      const msg = (e?.data && (
+      const successDetail = acessoModo === 'manual'
+        ? 'A senha temporária foi criada e deverá ser alterada no primeiro acesso.'
+        : 'O convite de acesso foi enviado para o e-mail cadastrado.';
+
+      finishModalSave({
+        type: 'success',
+        title: 'Colaborador criado com sucesso',
+        detail: successDetail
+      });
+
+      toast(
+        acessoModo === 'manual'
+          ? 'Colaborador criado. Ele deverá trocar a senha no primeiro acesso.'
+          : 'Colaborador criado e convite enviado por e-mail.'
+      );
+    } catch (e) {
+      console.error('[create error]', e?.status, e?.data || e);
+
+      const apiMessage = (e?.data && (
         e.data.detail ||
         e.data.message ||
         (typeof e.data === 'string' ? e.data : '')
       )) || null;
 
-      if (e.status === 409) return toast('E-mail já cadastrado.', 'warn');
-      if (e.status === 422) return toast(msg || 'Dados inválidos (422).', 'warn');
+      let userMessage = apiMessage || 'Tente novamente em alguns instantes.';
 
-      toast(msg || 'Erro ao criar.', 'err');
+      if (e?.status === 409) userMessage = 'Este e-mail já está cadastrado.';
+      if (e?.status === 422) userMessage = apiMessage || 'Confira os dados informados.';
+
+      finishModalSave({
+        type: 'error',
+        title: 'Não foi possível criar o colaborador',
+        detail: userMessage
+      });
+
+      toast(userMessage, e?.status === 409 || e?.status === 422 ? 'warn' : 'err');
     }
 
     return;
@@ -1115,117 +1443,150 @@ export async function saveInline(){
   const payload = {
     nome,
     email,
-    setor_id: Number(setor),
     telefone: telE164(tel),
     cargo: (cargo || '').trim(),
     instancias_ids: instsSel,
     departamentos_ids: deptosSel,
+    permissoes: permsSel,
     atualizar_usuario: !!state.viewing?.usuario_id,
-    horario_modo: horarioModo
+    horario_modo: horarioModo,
+    setor_id: departamentoPrincipalId ? Number(departamentoPrincipalId) : null,
+    hora_login_inicio: expOn ? (hIni || null) : null,
+    hora_login_fim: expOn ? (hFim || null) : null
   };
 
-  payload.hora_login_inicio = expOn ? (hIni || null) : null;
-  payload.hora_login_fim = expOn ? (hFim || null) : null;
-
-  const senhaEl = document.querySelector('#e-senha');
-  const newPass = (senhaEl?.value || '').trim();
-
-  if (canPass && newPass) {
+  if (acessoModo === 'manual') {
     payload.senha = newPass;
     payload.atualizar_usuario = true;
+    payload.forcar_troca_senha = true;
   }
 
+  if (!beginModalSave({
+    mode: 'edit',
+    title: 'Salvando alterações...',
+    detail: 'Atualizando dados, departamentos, WhatsApps e permissões.'
+  })) return;
+
+  let accessEmailSent = false;
+  let accessEmailFailed = false;
+  let avatarUploadFailed = false;
+
   try {
-    await apiJSON(`/api/colaboradores/${id}`, 'PUT', payload);
+    const updated = await apiJSON(`/api/colaboradores/${id}`, 'PUT', payload);
+
+    if (acessoModo === 'convite') {
+      updateModalSave(
+        'Enviando e-mail de acesso...',
+        'Os dados já foram salvos. Agora estamos enviando o link ao colaborador.'
+      );
+
+      try {
+        await apiJSON(`/api/colaboradores/${id}/enviar-acesso-email`, 'POST', {});
+        accessEmailSent = true;
+      } catch (emailError) {
+        accessEmailFailed = true;
+        console.warn('Erro ao enviar acesso por e-mail', emailError);
+      }
+    }
 
     if (state.newAvatarFile){
+      updateModalSave(
+        'Enviando foto de perfil...',
+        'Finalizando a atualização do colaborador.'
+      );
+
       let upOK = false;
 
-      if (state.viewing?.usuario_id){
-        upOK = await uploadAvatarTo(`/api/usuarios/${state.viewing.usuario_id}/avatar`, state.newAvatarFile);
-      }
+      // O endpoint do colaborador é a fonte principal da tela de equipe e já
+      // sincroniza a mesma imagem com o usuário de login. Mantemos a rota de
+      // usuário apenas como fallback para instalações antigas.
+      upOK = await uploadAvatarTo(`/api/colaboradores/${id}/avatar`, state.newAvatarFile);
 
-      if (!upOK){
-        upOK = await uploadAvatarTo(`/api/colaboradores/${id}/avatar`, state.newAvatarFile);
+      if (!upOK && state.viewing?.usuario_id){
+        upOK = await uploadAvatarTo(`/api/usuarios/${state.viewing.usuario_id}/avatar`, state.newAvatarFile);
       }
 
       if (upOK){
         invalidateAvatarThumb(id);
         state.newAvatarFile = null;
+      } else {
+        avatarUploadFailed = true;
       }
     }
 
-    let permsUpdated = true;
+    updateModalSave(
+      'Atualizando a equipe...',
+      'As alterações foram salvas. Estamos atualizando a lista de colaboradores.'
+    );
 
-    try {
-      permsUpdated = await savePerms(id, permsSel);
-
-      if (permsUpdated) {
-        state.viewing.permissoes = permsSel;
-      }
-    } catch (ePerm){
-      permsUpdated = false;
-      console.warn('Erro ao salvar permissões (edit)', ePerm);
-    }
-
-    let deptosUpdated = true;
-
-    try {
-      deptosUpdated = await saveDepartamentos(id, deptosSel);
-    } catch (eDept){
-      deptosUpdated = false;
-      console.warn('Erro ao salvar departamentos (edit)', eDept);
-    }
-
-    let instsUpdated = true;
-
-    try {
-      instsUpdated = await saveInsts(id, instsSel);
-    } catch {
-      instsUpdated = false;
-    }
+    const fresh = {
+      ...(state.viewing || {}),
+      ...(updated || {}),
+      instancias_ids: instsSel,
+      departamentos_ids: deptosSel,
+      permissoes: permsSel,
+      hora_login_inicio: expOn ? (hIni || null) : null,
+      hora_login_fim: expOn ? (hFim || null) : null,
+      horario_modo: horarioModo
+    };
 
     state.showErrors = false;
-
-    const msg = [
-      'Alterações salvas.',
-      deptosUpdated ? 'Departamentos OK.' : '',
-      permsUpdated ? 'Permissões OK.' : '',
-      instsUpdated ? 'Instâncias OK.' : ''
-    ].filter(Boolean).join(' ');
-
-    toast(msg || 'Alterações salvas.');
-
-    const fresh = await loadColabFull(id);
-
-    fresh.instancias_ids = instsSel;
-    fresh.departamentos_ids = deptosSel;
-
-    if (permsSel.length) {
-      fresh.permissoes = permsSel;
-    }
-
-    fresh.hora_login_inicio = expOn ? (hIni || null) : null;
-    fresh.hora_login_fim = expOn ? (hFim || null) : null;
-    fresh.horario_modo = horarioModo;
-
     state.viewing = fresh;
 
     await loadColaboradores();
     renderLista();
-    renderPerfilView(fresh);
+
+    exitInlineEdit(false);
+    await renderPerfilView(fresh);
+
+    const warnings = [];
+    if (accessEmailFailed) warnings.push('O e-mail de acesso não pôde ser enviado.');
+    if (avatarUploadFailed) warnings.push('A foto de perfil não pôde ser enviada.');
+
+    if (warnings.length) {
+      finishModalSave({
+        type: 'warning',
+        title: 'Alterações salvas com uma pendência',
+        detail: warnings.join(' ')
+      });
+      toast(`Alterações salvas. ${warnings.join(' ')}`, 'warn');
+    } else {
+      const successParts = ['Dados atualizados com sucesso.'];
+      if (acessoModo === 'manual') successParts.push('Nova senha temporária definida.');
+      if (accessEmailSent) successParts.push('E-mail de acesso enviado.');
+
+      finishModalSave({
+        type: 'success',
+        title: 'Alterações salvas',
+        detail: successParts.join(' ')
+      });
+      toast(successParts.join(' '));
+    }
   } catch (e) {
-    console.error(e);
+    console.error('[colaboradores/save]', e);
 
-    if (e.status === 409) return toast('E-mail já cadastrado.', 'warn');
-    if (e.status === 404) return toast('Registro não encontrado.', 'warn');
+    let userMessage = 'Tente novamente em alguns instantes.';
 
-    toast('Erro ao salvar.', 'err');
+    if (e?.status === 409) userMessage = 'Este e-mail já está cadastrado.';
+    if (e?.status === 404) userMessage = 'O colaborador não foi encontrado.';
+    if (e?.status === 422) {
+      userMessage = e?.data?.detail || e?.data?.message || 'Confira os dados informados.';
+    }
+
+    finishModalSave({
+      type: 'error',
+      title: 'Não foi possível salvar as alterações',
+      detail: userMessage
+    });
+
+    toast(userMessage, e?.status === 409 || e?.status === 422 ? 'warn' : 'err');
   }
 }
 
 export async function openPerfil(id){
   const { perfilModal, pEdit } = els();
+
+  clearSaveStatus();
 
   try {
     if (Number.isNaN(Number(id)) || !Number(id)){
@@ -1265,7 +1626,11 @@ export async function openPerfil(id){
 export function closePerfil(){
   const { perfilModal } = els();
 
+  if (state.saving) return;
+
+  clearSaveStatus();
   clearValidationErrors();
+  clearWizardStepErrors(perfilModal);
   resetLazyEditFlags();
 
   perfilModal?.setAttribute('aria-hidden','true');
@@ -1293,10 +1658,7 @@ export async function openNovo(){
     return;
   }
 
-  if (!canEditPassword()) {
-    toast('Sem permissão para criar (requer permissão de redefinir senha).', 'warn');
-    return;
-  }
+  clearSaveStatus();
 
   const blank = {
     id: null,
@@ -1347,13 +1709,10 @@ export async function openNovo(){
 
   bindAvatarDnDAndPaste();
 
-  const wrapSenha = document.querySelector('#wrap-senha');
+  applyAccessModeUI();
+
   const toggle = document.querySelector('#toggle-senha');
   const canPass = canEditPassword();
-
-  if (wrapSenha) {
-    wrapSenha.style.display = canPass ? 'flex' : 'none';
-  }
 
   if (toggle){
     const input = document.querySelector('#e-senha');
@@ -1394,8 +1753,96 @@ function activeWizardStep(modal){
   return { key, idx };
 }
 
+function wizardStepForField(field){
+  const id = String(field?.id || '');
+
+  if (id === 'e-senha' || field?.closest?.('[data-panel="acessos"]')) {
+    return 'acessos';
+  }
+
+  if (field?.closest?.('[data-panel="permissoes"]')) {
+    return 'permissoes';
+  }
+
+  return 'perfil';
+}
+
+function clearWizardStepErrors(modal){
+  modal?.querySelectorAll('.colab-tab.has-error').forEach(tab => {
+    tab.classList.remove('has-error');
+  });
+}
+
+function markWizardStepErrors(modal, fields = []){
+  clearWizardStepErrors(modal);
+
+  fields.forEach(field => {
+    const step = wizardStepForField(field);
+    modal?.querySelector(`.colab-tab[data-tab="${step}"]`)?.classList.add('has-error');
+  });
+}
+
+function focusValidationField(modal, field, stepKey){
+  if (!field) return;
+
+  const targetStep = stepKey || wizardStepForField(field);
+  const currentStep = activeWizardStep(modal).key;
+
+  if (targetStep && currentStep !== targetStep) {
+    goWizardStep(modal, targetStep);
+  }
+
+  window.setTimeout(() => {
+    const target = document.getElementById(field.id) || field;
+    const scrollTarget = target?.closest?.('.fieldbox') || target;
+
+    try {
+      scrollTarget?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    } catch {
+      scrollTarget?.scrollIntoView?.();
+    }
+
+    window.setTimeout(() => {
+      try {
+        target?.focus?.({ preventScroll: true });
+      } catch {
+        target?.focus?.();
+      }
+    }, 120);
+  }, 60);
+}
+
+function validateWizardStep(modal, stepKey, { notify = true, focus = true } = {}){
+  let check = { ok: true, msgs: [], fields: [] };
+
+  if (stepKey === 'perfil') {
+    check = validateFormLive(true, { scope: 'perfil' });
+  } else if (stepKey === 'acessos') {
+    check = validateFormLive(true, { scope: 'acessos' });
+  }
+
+  const tab = modal?.querySelector(`.colab-tab[data-tab="${stepKey}"]`);
+  tab?.classList.toggle('has-error', !check.ok);
+
+  if (!check.ok) {
+    if (notify) {
+      toast(
+        'Preencha os campos obrigatórios antes de continuar:\n' + check.msgs.join('\n'),
+        'warn'
+      );
+    }
+
+    if (focus) {
+      focusValidationField(modal, check.fields?.[0], stepKey);
+    }
+  }
+
+  return check;
+}
+
 function updateWizardFooter(modal){
   if (!modal) return;
+  if (state.saving || modal.dataset.saving === '1') return;
 
   const { key, idx } = activeWizardStep(modal);
   modal.dataset.activeStep = key;
@@ -1405,13 +1852,12 @@ function updateWizardFooter(modal){
   const saveFoot = modal.querySelector('#perfil-salvar-foot');
   const cancelFoot = modal.querySelector('#perfil-cancelar-foot');
   const closeFoot = modal.querySelector('#perfil-fechar2');
-  const headerSave = modal.querySelector('#perfil-salvar');
-  const headerEdit = modal.querySelector('#perfil-editar');
-  const headerCancel = modal.querySelector('#perfil-cancelar');
+  const legacySave = modal.querySelector('#perfil-salvar');
+  const editButton = modal.querySelector('#perfil-editar');
+  const legacyCancel = modal.querySelector('#perfil-cancelar');
   const title = modal.querySelector('#perfil-title');
 
-  // Mantém os botões antigos no DOM para compatibilidade, mas eles não aparecem.
-  [prev, next, saveFoot, cancelFoot, closeFoot, headerCancel].forEach(btn => {
+  [prev, next, saveFoot, cancelFoot, closeFoot, legacySave, editButton, legacyCancel].forEach(btn => {
     if (btn) btn.style.display = 'none';
   });
 
@@ -1420,25 +1866,30 @@ function updateWizardFooter(modal){
   const isLast = idx >= WIZARD_STEPS.length - 1;
   const isNovo = String(title?.textContent || '').toLowerCase().includes('novo') || modal.dataset.mode === 'create';
 
-  if (headerEdit) {
-    headerEdit.style.display = isView ? '' : 'none';
+  if (isView){
+    if (closeFoot) closeFoot.style.display = 'inline-flex';
+    if (editButton && hasPerm(EDIT_PERM)) editButton.style.display = 'inline-flex';
+    return;
   }
-
-  if (!headerSave) return;
-
-  headerSave.style.display = isEditing ? 'inline-flex' : 'none';
-  headerSave.dataset.wizardAction = isLast ? 'save' : 'next';
-  headerSave.classList.remove('btn-soft-disabled');
-  headerSave.removeAttribute('aria-disabled');
 
   if (!isEditing) return;
 
-  if (isLast){
-    headerSave.innerHTML = isNovo
+  if (cancelFoot) cancelFoot.style.display = 'inline-flex';
+
+  if (idx > 0 && prev) {
+    prev.style.display = 'inline-flex';
+  }
+
+  if (!isLast && next){
+    next.style.display = 'inline-flex';
+    next.innerHTML = '<span>Continuar</span><i class="fa-solid fa-arrow-right" aria-hidden="true"></i>';
+  }
+
+  if (isLast && saveFoot){
+    saveFoot.style.display = 'inline-flex';
+    saveFoot.innerHTML = isNovo
       ? '<i class="fa-solid fa-check" aria-hidden="true"></i><span>Criar colaborador</span>'
       : '<i class="fa-solid fa-check" aria-hidden="true"></i><span>Salvar alterações</span>';
-  } else {
-    headerSave.innerHTML = '<span>Continuar</span><i class="fa-solid fa-arrow-right" aria-hidden="true"></i>';
   }
 }
 
@@ -1460,13 +1911,75 @@ function bindWizardModal(){
   const save = modal.querySelector('#perfil-salvar-foot');
   const cancel = modal.querySelector('.wizard-footer-nav #perfil-cancelar-foot');
   const expCheck = modal.querySelector('#e-exp-personalizar');
+  const acessoRadios = Array.from(modal.querySelectorAll('input[name="acesso_modo"]'));
+
+  // Impede avançar enquanto os campos obrigatórios da etapa atual estiverem
+  // incompletos. O listener em captura roda antes do controle visual das abas.
+  modal.addEventListener('click', ev => {
+    const tab = ev.target.closest('.colab-tab');
+    if (!tab || !modal.contains(tab)) return;
+
+    if (state.saving) {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      return;
+    }
+
+    const { key: currentKey, idx: currentIdx } = activeWizardStep(modal);
+    const targetKey = tab.dataset.tab || currentKey;
+    const targetIdx = WIZARD_STEPS.indexOf(targetKey);
+
+    if (targetIdx <= currentIdx) return;
+
+    const check = validateWizardStep(modal, currentKey, {
+      notify: true,
+      focus: true
+    });
+
+    if (!check.ok) {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      return;
+    }
+
+    // Não permite pular uma etapa pelo cabeçalho. Se a etapa atual estiver
+    // válida, segue para a próxima etapa na ordem 1 → 2 → 3.
+    if (targetIdx > currentIdx + 1) {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+
+      window.setTimeout(() => {
+        goWizardStep(modal, WIZARD_STEPS[currentIdx + 1]);
+      }, 0);
+    }
+  }, true);
+
+  acessoRadios.forEach(radio => {
+    if (radio.dataset.boundAccessMode === '1') return;
+    radio.dataset.boundAccessMode = '1';
+    radio.addEventListener('change', () => {
+      applyAccessModeUI();
+      validateFormLive(false);
+    });
+  });
+
+
+  if (modal.dataset.boundDeptChangeHint !== '1') {
+    modal.dataset.boundDeptChangeHint = '1';
+    document.addEventListener('colaboradores:departamentos-change', () => {
+      applyExpPersonalizarUI();
+      validateFormLive(false);
+    });
+  }
 
   prev?.addEventListener('click', () => {
+    if (state.saving) return;
     const { idx } = activeWizardStep(modal);
     goWizardStep(modal, WIZARD_STEPS[Math.max(0, idx - 1)]);
   });
 
   next?.addEventListener('click', () => {
+    if (state.saving) return;
     const { idx } = activeWizardStep(modal);
     goWizardStep(modal, WIZARD_STEPS[Math.min(WIZARD_STEPS.length - 1, idx + 1)]);
   });
@@ -1520,12 +2033,15 @@ export function bindModal(){
   });
 
   pCancel?.addEventListener('click', () => {
+    if (state.saving) return;
     if (perfilModal?.dataset.mode === 'create') closePerfil();
     else exitInlineEdit(true);
   });
 
   pSave?.addEventListener('click', ev => {
     ev.preventDefault();
+
+    if (state.saving) return;
 
     const modal = els().perfilModal;
     const action = pSave.dataset.wizardAction || 'save';

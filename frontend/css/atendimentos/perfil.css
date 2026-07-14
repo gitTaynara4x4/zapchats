@@ -339,6 +339,7 @@ html[data-theme="light"] .zcPerfil-selectWrap select option{
   background:var(--input-bg,#0b141a);
   display:grid;
   place-items:center;
+  position:relative;
 }
 
 .zcPerfilAvatar{
@@ -355,6 +356,31 @@ html[data-theme="light"] .zcPerfil-selectWrap select option{
   place-items:center;
   color:#9aa7ad;
   font-size:28px;
+}
+
+.zcPerfilAvatarLoader{
+  position:absolute;
+  inset:0;
+  display:grid;
+  place-items:center;
+  background:rgba(11,20,26,.56);
+  backdrop-filter:blur(1px);
+  z-index:3;
+  pointer-events:none;
+}
+
+.zcPerfilAvatarLoader span{
+  width:20px;
+  height:20px;
+  border-radius:999px;
+  border:3px solid rgba(255,255,255,.45);
+  border-top-color:#00a884;
+  animation:zcPerfilSpin .75s linear infinite;
+}
+
+.zcPerfilAvatarWrap.is-loading-avatar .zcPerfilAvatar,
+.zcPerfilAvatarWrap.is-loading-avatar .zcPerfilAvatarFallback{
+  opacity:.45;
 }
 
 .zcPerfilHeroInfo{
@@ -888,6 +914,15 @@ html[data-theme="light"] .zcPerfilAvatarFallback{
   color:#6b7280;
 }
 
+html[data-theme="light"] .zcPerfilAvatarLoader{
+  background:rgba(255,255,255,.68);
+}
+
+html[data-theme="light"] .zcPerfilAvatarLoader span{
+  border-color:rgba(15,23,42,.18);
+  border-top-color:#00a884;
+}
+
 html[data-theme="light"] .zcPerfilPill,
 html[data-theme="light"] .zcPerfilMiniCard,
 html[data-theme="light"] .zcPerfilMediaCard,
@@ -1056,4 +1091,10 @@ html[data-theme="light"] .zcPerfilBusinessList span{
   .zcPerfilMediaModalGrid{
     grid-template-columns:repeat(2, minmax(0, 1fr));
   }
+}
+/* v12: garante que foto antiga do drawer nunca fique visível quando o avatar estiver oculto */
+.zcPerfilAvatar[hidden],
+.zcPerfilAvatarFallback[hidden],
+.zcPerfilAvatarLoader[hidden]{
+  display:none !important;
 }

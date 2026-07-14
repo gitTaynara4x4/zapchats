@@ -140,6 +140,32 @@
   bindTokenInput();
 
   // =========================
+  // Convite de colaborador: preenche e-mail e já abre etapa do código
+  // =========================
+  (function applyInviteQuery(){
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+      const emailFromUrl = (params.get("email") || "").trim().toLowerCase();
+      const isConvite = params.get("convite") === "1";
+
+      if (emailFromUrl && emailInput) {
+        emailInput.value = emailFromUrl;
+      }
+
+      if (isConvite) {
+        resetSection?.classList.remove("hidden");
+
+        const heroTitle = document.querySelector(".logo-header .title");
+        const heroSubtitle = document.querySelector(".logo-header .subtitle");
+        if (heroTitle) heroTitle.textContent = "Crie sua senha";
+        if (heroSubtitle) heroSubtitle.textContent = "Informe o código enviado por e-mail e defina sua senha.";
+
+        setTimeout(() => inputTok?.focus(), 120);
+      }
+    } catch {}
+  })();
+
+  // =========================
   // Passo 1: solicitar token
   // =========================
   if (formForgot) {

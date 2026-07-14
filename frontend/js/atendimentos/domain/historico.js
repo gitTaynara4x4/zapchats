@@ -2053,6 +2053,7 @@ export async function abrirHistorico(id) {
     const r = await fetch(url, {
       credentials: 'include',
       cache: 'no-store',
+      zcTimeoutMs: 30000,
       headers: {
         'Cache-Control': 'no-cache',
       },
@@ -2128,7 +2129,8 @@ export async function abrirHistorico(id) {
       hist.innerHTML = `
         <div class="hist-empty-state hist-empty-error">
           <div class="hist-empty-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
-          <div class="hist-empty-title">Não foi possível carregar as mensagens</div>
+          <div class="hist-empty-title">A conversa demorou para carregar</div>
+          <div class="hist-empty-sub">Clique em tentar novamente para consultar o histórico com mais tempo.</div>
           <button type="button" class="hist-retry-btn">Tentar novamente</button>
         </div>
       `;
@@ -2270,6 +2272,7 @@ export async function forcarAtualizacaoHistorico(rawConversation = null, opts = 
     const r = await fetch(url, {
       credentials: 'include',
       cache: 'no-store',
+      zcTimeoutMs: 30000,
       headers: {
         'Cache-Control': 'no-cache',
       },
@@ -2842,6 +2845,7 @@ export async function carregarMaisHistorico(id) {
     const r = await fetch(url, {
       credentials: 'include',
       cache: 'no-store',
+      zcTimeoutMs: 30000,
       headers: {
         'Cache-Control': 'no-cache',
       },

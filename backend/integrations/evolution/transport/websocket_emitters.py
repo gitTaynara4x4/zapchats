@@ -30,7 +30,13 @@ async def emit_to_instance(instance_key: str, payload: dict[str, Any]) -> None:
         LOG(f"[WS_EMIT][instance] inst={instance_key} err={e}")
 
 
-async def emit_qrcode(instance_key: str, base64: str | None, pairing_code: str | None = None, qr_limit: int | None = None) -> None:
+async def emit_qrcode(
+    instance_key: str,
+    base64: str | None,
+    pairing_code: str | None = None,
+    qr_limit: int | None = None,
+    qr_text: str | None = None,
+) -> None:
     await emit_to_instance(
         instance_key,
         {
@@ -38,8 +44,10 @@ async def emit_qrcode(instance_key: str, base64: str | None, pairing_code: str |
             "instance": instance_key,
             "base64": base64,
             "pairingCode": pairing_code,
+            "qrText": qr_text,
+            "code": qr_text,
             "qr_limit": qr_limit,
-            "waiting": False if (base64 or pairing_code) else True,
+            "waiting": False if (base64 or pairing_code or qr_text) else True,
         },
     )
 

@@ -66,6 +66,7 @@ from backend.routers import filas as filas_router
 # DB
 from backend.database import Base, engine, SessionLocal
 from backend import models
+from backend.migrations.atendimento_claim_state import normalize_atendimento_claim_state
 
 # Integrações Evolution
 from backend.integrations.evolution.api.remove_instance import router as remove_instance_router
@@ -719,7 +720,7 @@ REQUIRED_PERMS = {
     "/colaboradores/novo": "colaboradores.gerenciar",
     "/colaborador-perfil": "colaboradores.gerenciar",
     "/usuarios": "usuarios.gerenciar",
-    "/configuracoes": "config.editar",
+    "/configuracoes": "configuracoes.editar",
     "/chat-interno": "chatinterno.ver",
     "/chatbot": "chatbot.configurar",
     "/atendimentos": "atendimento.ver",
@@ -1262,13 +1263,27 @@ def serve_media_bin(
 
 
 @app.get("/api/env/evolution")
-def evolution_env():
+def evolution_env(identity: dict = Depends(auth_router.get_current_identity)):
+    """
+    Compatibilidade segura para clientes antigos.
+
+    A URL e a chave da Evolution são segredos exclusivos do backend e nunca
+    devem ser entregues ao navegador. A rota também exige sessão válida.
+    """
+    _ = identity
+    configured = bool(
+        str(os.getenv("EVOLUTION_URL", "")).strip()
+        and str(
+            os.getenv("EVOLUTION_APIKEY", "")
+            or os.getenv("EVOLUTION_KEY", "")
+        ).strip()
+    )
     return JSONResponse(
         {
-            "apiUrl": os.getenv("EVOLUTION_URL", ""),
-            "apiKey": os.getenv("EVOLUTION_APIKEY", ""),
-            "defaultInstance": os.getenv("EVOLUTION_DEFAULT_INSTANCE", ""),
-        }
+            "configured": configured,
+            "directBrowserAccess": False,
+        },
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -1422,6 +1437,7 @@ async def _start_integrations():
             with engine.begin() as conn:
                 conn.exec_driver_sql("SELECT 1")
                 Base.metadata.create_all(bind=conn)
+            normalize_atendimento_claim_state(engine, LOG)
             db_ok = True
             LOG("[STARTUP] DB ok e tabelas garantidas.")
             break

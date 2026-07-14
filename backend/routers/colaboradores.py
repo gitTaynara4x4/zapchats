@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 from typing import Optional, List, Any
+import os
 import re
 import json
+import secrets
+from datetime import datetime, timedelta
 from urllib.parse import quote
 
 from fastapi import (
@@ -27,12 +30,124 @@ from passlib.hash import bcrypt
 
 from backend.database import get_db
 from backend import models
-from backend.routers.auth import get_current_user
+from backend.routers.auth import (
+    get_current_user,
+    gerar_codigo_reset_5d,
+    RESET_CODE_TTL_MIN,
+    _smtp_send,
+)
 
 from backend.utils.entitlements import enforce_quota
 from backend.utils.usage import usage_counts
 
 router = APIRouter(prefix="/colaboradores", tags=["Colaboradores"])
+
+
+FORCE_PASSWORD_CHANGE_MARKER = "FORCE_PASS_CHANGE"
+
+
+def _boolish(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in ("1", "true", "yes", "sim", "on")
+
+
+def _norm_modo_acesso(modo: Optional[str], *, senha: Optional[str] = None) -> str:
+    s = str(modo or "").strip().lower()
+
+    if s in ("manual", "senha", "senha_manual", "definir_senha"):
+        return "manual"
+
+    if s in ("convite", "email", "e-mail", "email_convite", "enviar_convite"):
+        return "convite"
+
+    # Compatibilidade com front antigo: se veio senha, presume senha manual.
+    if str(senha or "").strip():
+        return "manual"
+
+    return "convite"
+
+
+def _new_reset_token(db: Session) -> str:
+    for _ in range(10):
+        token = gerar_codigo_reset_5d()
+        exists = db.query(models.Usuario).filter_by(reset_token=token).first()
+        if not exists:
+            return token
+
+    raise HTTPException(status_code=500, detail="Erro ao gerar convite de acesso. Tente novamente.")
+
+
+def _reset_token_expira() -> datetime:
+    return datetime.utcnow() + timedelta(minutes=RESET_CODE_TTL_MIN)
+
+
+def _public_url(path: str) -> str:
+    base = (
+        os.getenv("APP_PUBLIC_URL")
+        or os.getenv("FRONTEND_URL")
+        or os.getenv("PUBLIC_URL")
+        or ""
+    ).strip().rstrip("/")
+
+    if not base:
+        return path
+
+    return f"{base}{path if path.startswith('/') else '/' + path}"
+
+
+def _enviar_email_acesso_colaborador(
+    *,
+    email_destino: str,
+    token: str,
+    nome_colaborador: str,
+    nome_empresa: Optional[str] = None,
+    modo: str = "convite",
+) -> None:
+    empresa_txt = f" da {nome_empresa}" if nome_empresa else ""
+    link = _public_url(
+        f"/esqueci_senha.html?email={quote(email_destino)}&convite=1"
+    )
+
+    if modo == "manual":
+        assunto = f"[{nome_empresa or 'ZapsChat'}] Troque sua senha inicial"
+        intro = (
+            "Seu acesso foi criado com uma senha temporária. "
+            "Antes de usar a plataforma, crie uma nova senha pessoal."
+        )
+    elif modo == "redefinicao":
+        assunto = f"[{nome_empresa or 'ZapsChat'}] Redefina sua senha"
+        intro = (
+            f"Foi solicitada uma redefinição da sua senha de acesso{empresa_txt}. "
+            "Use o código abaixo para criar uma nova senha pessoal."
+        )
+    else:
+        assunto = f"[{nome_empresa or 'ZapsChat'}] Convite para acessar a plataforma"
+        intro = (
+            f"Você foi convidado para acessar a plataforma{empresa_txt}. "
+            "Crie sua senha pessoal para começar."
+        )
+
+    corpo = f"""
+Olá {nome_colaborador or ''},
+
+{intro}
+
+Código de confirmação:
+
+    {token}
+
+Abra este link e informe o código acima:
+{link}
+
+Por segurança, este código vence em {RESET_CODE_TTL_MIN} minutos.
+
+Equipe ZapsChat
+"""
+
+    _smtp_send(email_destino, assunto, corpo)
 
 
 # =========================================================
@@ -80,6 +195,41 @@ def _assert_mesma_empresa(a: int, b: int) -> None:
 
 
 
+def _assert_pode_redefinir_senha(db: Session, user: Any) -> None:
+    if _usuario_is_admin_real(user):
+        return
+
+    usuario_id = _get_attr(user, "id")
+    empresa_id = _user_empresa_id(user)
+
+    try:
+        usuario_id_int = int(usuario_id)
+    except Exception:
+        usuario_id_int = 0
+
+    if not usuario_id_int:
+        raise HTTPException(status_code=403, detail="Sem permissão para redefinir senha")
+
+    ator = (
+        db.query(models.Colaborador)
+        .options(joinedload(models.Colaborador.permissoes))
+        .filter(
+            models.Colaborador.empresa_id == int(empresa_id),
+            models.Colaborador.usuario_id == usuario_id_int,
+        )
+        .first()
+    )
+
+    permissoes = {
+        str(getattr(perm, "id", "") or "").strip()
+        for perm in (getattr(ator, "permissoes", None) or [])
+    }
+
+    if not ({"colaboradores.redefinir_senha", "colaboradores.gerenciar"} & permissoes):
+        raise HTTPException(status_code=403, detail="Sem permissão para redefinir senha")
+
+
+
 def _usuario_is_admin_real(usuario: Any) -> bool:
     try:
         return bool(getattr(usuario, "is_admin", False))
@@ -122,6 +272,81 @@ def _admin_usuario_vinculado_ou_mesmo_email(db: Session, colab: models.Colaborad
             return None
 
     return None
+
+def _ensure_usuario_login_colaborador(
+    db: Session,
+    colab: models.Colaborador,
+    *,
+    senha_hash: Optional[str] = None,
+) -> models.Usuario:
+    """Obtém ou cria o usuário de login vinculado ao colaborador.
+
+    Não reaproveita usuário de outra empresa, administrador ou usuário já
+    vinculado a outro colaborador.
+    """
+    usuario = None
+
+    if getattr(colab, "usuario_id", None):
+        usuario = db.query(models.Usuario).get(int(colab.usuario_id))
+
+    email_norm = str(getattr(colab, "email", "") or "").lower().strip()
+
+    if not email_norm:
+        raise HTTPException(status_code=422, detail="O colaborador precisa ter um e-mail válido")
+
+    if usuario is None:
+        existente = (
+            db.query(models.Usuario)
+            .filter(func.lower(models.Usuario.email) == email_norm)
+            .first()
+        )
+
+        if existente is not None:
+            if int(getattr(existente, "empresa_id", 0) or 0) != int(colab.empresa_id):
+                raise HTTPException(status_code=409, detail="E-mail já cadastrado em outra empresa")
+
+            outro_colaborador = (
+                db.query(models.Colaborador)
+                .filter(
+                    models.Colaborador.id != int(colab.id),
+                    models.Colaborador.usuario_id == int(existente.id),
+                )
+                .first()
+            )
+
+            if _usuario_is_admin_real(existente) or outro_colaborador is not None:
+                raise HTTPException(status_code=409, detail="E-mail já vinculado a outro usuário")
+
+            usuario = existente
+        else:
+            usuario = models.Usuario(
+                empresa_id=int(colab.empresa_id),
+                nome=str(colab.nome or "").strip(),
+                email=email_norm,
+                senha_hash=senha_hash or bcrypt.hash(secrets.token_urlsafe(32)),
+                cargo=colab.cargo or None,
+                is_admin=False,
+            )
+            db.add(usuario)
+            db.flush()
+
+        colab.usuario_id = int(usuario.id)
+
+    usuario.nome = str(colab.nome or "").strip()
+    usuario.email = email_norm
+    usuario.cargo = colab.cargo or None
+
+    if senha_hash:
+        usuario.senha_hash = senha_hash
+
+    if getattr(colab, "avatar_data", None):
+        usuario.avatar_data = colab.avatar_data
+        usuario.avatar_mime = colab.avatar_mime
+
+    db.add(usuario)
+    db.add(colab)
+    return usuario
+
 
 def normalize_phone_e164_br(raw: Optional[str]) -> Optional[str]:
     if not raw:
@@ -621,6 +846,8 @@ class ColaboradorOut(BaseModel):
 
     setor_nome: Optional[str] = None
     tem_usuario: bool = False
+    convite_pendente: bool = False
+    troca_senha_pendente: bool = False
     avatar_url: Optional[str] = None
     is_admin: bool = False
 
@@ -640,6 +867,7 @@ class ColaboradorUpdate(BaseModel):
 
     senha: Optional[str] = None
     atualizar_usuario: Optional[bool] = False
+    forcar_troca_senha: Optional[bool] = False
     permissoes: Optional[List[str]] = None
     instancias_ids: Optional[List[int]] = None
     departamentos_ids: Optional[List[int]] = None
@@ -704,12 +932,18 @@ def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
 
     cargo_plano = c.cargo or getattr(u, "cargo", None)
 
-    avatar_url = (
-        f"/api/colaboradores/{int(c.id)}/avatar"
-        if getattr(c, "avatar_data", None)
-        else build_avatar_url(nome_plano, email_plano)
-    )
+    # A foto pode existir no perfil operacional (Colaborador) ou no usuário de login.
+    # A lista precisa usar a mesma fonte que o modal para não cair nas iniciais
+    # quando a imagem foi gravada apenas em usuarios.avatar_data.
+    if getattr(c, "avatar_data", None):
+        avatar_url = f"/api/colaboradores/{int(c.id)}/avatar"
+    elif u is not None and getattr(u, "avatar_data", None):
+        avatar_url = f"/api/usuarios/{int(u.id)}/avatar"
+    else:
+        avatar_url = build_avatar_url(nome_plano, email_plano)
     is_admin_flag = _usuario_is_admin_real(u)
+    force_change = str(getattr(c, "login_token", "") or "") == FORCE_PASSWORD_CHANGE_MARKER
+    reset_pendente = bool(getattr(u, "reset_token", None)) if u else False
 
     modo_raw = getattr(c, "horario_modo", None)
     horario_modo_out = _norm_horario_modo(modo_raw, default=None)
@@ -737,6 +971,8 @@ def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
         ),
         setor_nome=setor_nome,
         tem_usuario=bool(uid),
+        convite_pendente=bool(reset_pendente and not force_change),
+        troca_senha_pendente=bool(force_change),
         avatar_url=avatar_url,
         is_admin=is_admin_flag,
         hora_login_inicio=c.hora_login_inicio,
@@ -817,6 +1053,8 @@ async def criar_colaborador(
     horario_modo: Optional[str] = Form(None),
     criar_usuario: Optional[bool] = Form(False),
     senha: Optional[str] = Form(None),
+    modo_acesso: Optional[str] = Form(None),
+    forcar_troca_senha: Optional[bool] = Form(False),
     permissoes: Optional[str] = Form(None),
     avatar: Optional[UploadFile] = File(None),
 ):
@@ -839,6 +1077,11 @@ async def criar_colaborador(
             cargo = payload.get("cargo", cargo)
             criar_usuario = payload.get("criar_usuario", criar_usuario)
             senha = payload.get("senha", senha)
+            modo_acesso = payload.get("modo_acesso", payload.get("acesso_modo", modo_acesso))
+            forcar_troca_senha = payload.get(
+                "forcar_troca_senha",
+                payload.get("obrigar_trocar_senha", forcar_troca_senha),
+            )
             hora_login_inicio = payload.get("hora_login_inicio", hora_login_inicio)
             hora_login_fim = payload.get("hora_login_fim", hora_login_fim)
             horario_modo = payload.get("horario_modo", horario_modo)
@@ -946,27 +1189,58 @@ async def criar_colaborador(
             avatar_mime = avatar.content_type or "application/octet-stream"
 
     usuario_id = None
+    convite_email_payload: Optional[dict[str, Any]] = None
 
-    # Regra segura: se veio senha no cadastro, o colaborador também precisa virar
-    # usuário de login. Assim front antigo que esqueça criar_usuario=true não
-    # salva um colaborador com senha, mas sem acesso ao sistema.
-    deve_criar_usuario = bool(criar_usuario) or bool(str(senha or "").strip())
+    senha_limpa = str(senha or "").strip()
+
+    if modo_acesso is None and not _boolish(criar_usuario) and not senha_limpa:
+        modo_acesso_norm = "sem_login"
+    else:
+        modo_acesso_norm = _norm_modo_acesso(modo_acesso, senha=senha)
+
+    deve_criar_usuario = (
+        _boolish(criar_usuario)
+        or modo_acesso_norm in ("convite", "manual")
+        or bool(senha_limpa)
+    )
+    forcar_troca = _boolish(forcar_troca_senha) or modo_acesso_norm == "manual"
+
+    senha_colab_hash: str
 
     if deve_criar_usuario:
-        if not senha:
-            raise HTTPException(
-                status_code=422,
-                detail="Senha é obrigatória para criar usuário",
-            )
+        if modo_acesso_norm == "manual":
+            if not senha_limpa:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Informe uma senha temporária para criar o acesso manual",
+                )
+
+            senha_colab_hash = bcrypt.hash(senha_limpa)
+        else:
+            # Convite por e-mail: não existe senha padrão conhecida por ninguém.
+            # A senha real será criada pelo colaborador no fluxo de redefinição.
+            senha_colab_hash = bcrypt.hash(secrets.token_urlsafe(32))
 
         u = models.Usuario(
             empresa_id=int(empresa_id),
             nome=str(nome).strip(),
             email=email_norm,
-            senha_hash=bcrypt.hash(senha),
+            senha_hash=senha_colab_hash,
             cargo=cargo or None,
             is_admin=False,
         )
+
+        if modo_acesso_norm == "convite" or forcar_troca:
+            token = _new_reset_token(db)
+            u.reset_token = token
+            u.reset_token_expira = _reset_token_expira()
+            convite_email_payload = {
+                "email_destino": email_norm,
+                "token": token,
+                "nome_colaborador": str(nome).strip(),
+                "nome_empresa": getattr(emp, "nome", None),
+                "modo": modo_acesso_norm,
+            }
 
         if avatar_bytes:
             u.avatar_data = avatar_bytes
@@ -982,8 +1256,9 @@ async def criar_colaborador(
                 status_code=409,
                 detail="E-mail já cadastrado em usuários",
             )
-
-    senha_colab_hash = bcrypt.hash(senha) if senha else bcrypt.hash("temp@123")
+    else:
+        # Colaborador sem login: hash aleatório impossível de saber.
+        senha_colab_hash = bcrypt.hash(secrets.token_urlsafe(32))
 
     hi_norm = _norm_hora(hora_login_inicio)
     hf_norm = _norm_hora(hora_login_fim)
@@ -1029,6 +1304,10 @@ async def criar_colaborador(
         instancias_ver=instancias_ids_norm,
     )
 
+    if modo_acesso_norm == "manual" and forcar_troca:
+        colab.login_token = FORCE_PASSWORD_CHANGE_MARKER
+        colab.login_token_expires_at = None
+
     if hasattr(colab, "horario_modo"):
         setattr(colab, "horario_modo", horario_modo_norm)
 
@@ -1056,6 +1335,12 @@ async def criar_colaborador(
 
         db.commit()
 
+        if convite_email_payload:
+            try:
+                _enviar_email_acesso_colaborador(**convite_email_payload)
+            except Exception as e:
+                print("[COLAB CONVITE EMAIL] erro ao enviar convite:", repr(e))
+
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="E-mail já cadastrado")
@@ -1070,6 +1355,77 @@ async def criar_colaborador(
     )
 
     return _to_out(db, c)
+
+
+@router.post("/{colab_id}/enviar-acesso-email")
+def enviar_acesso_colaborador_por_email(
+    colab_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    empresa_id = _user_empresa_id(user)
+    _assert_pode_redefinir_senha(db, user)
+
+    colab = db.query(models.Colaborador).get(colab_id)
+
+    if not colab:
+        raise HTTPException(status_code=404, detail="Colaborador não encontrado")
+
+    _assert_mesma_empresa(colab.empresa_id, empresa_id)
+
+    tinha_usuario = bool(getattr(colab, "usuario_id", None))
+    usuario_anterior = (
+        db.query(models.Usuario).get(int(colab.usuario_id))
+        if getattr(colab, "usuario_id", None)
+        else None
+    )
+    convite_ja_pendente = bool(
+        usuario_anterior
+        and getattr(usuario_anterior, "reset_token", None)
+        and str(getattr(colab, "login_token", "") or "") != FORCE_PASSWORD_CHANGE_MARKER
+    )
+
+    try:
+        usuario = _ensure_usuario_login_colaborador(db, colab)
+        token = _new_reset_token(db)
+        usuario.reset_token = token
+        usuario.reset_token_expira = _reset_token_expira()
+        db.add(usuario)
+        db.add(colab)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="E-mail já cadastrado em outro usuário")
+    except Exception:
+        db.rollback()
+        raise
+
+    empresa = db.query(models.Empresa).get(int(empresa_id))
+    modo_email = "convite" if (not tinha_usuario or convite_ja_pendente) else "redefinicao"
+
+    try:
+        _enviar_email_acesso_colaborador(
+            email_destino=str(usuario.email).lower().strip(),
+            token=token,
+            nome_colaborador=str(colab.nome or "").strip(),
+            nome_empresa=getattr(empresa, "nome", None),
+            modo=modo_email,
+        )
+    except Exception as exc:
+        print("[COLAB ACESSO EMAIL] erro ao enviar:", repr(exc))
+        raise HTTPException(
+            status_code=502,
+            detail="O acesso foi preparado, mas o e-mail não pôde ser enviado",
+        )
+
+    return {
+        "ok": True,
+        "tipo": modo_email,
+        "detail": "Convite enviado por e-mail" if modo_email == "convite" else "Link de redefinição enviado por e-mail",
+    }
 
 
 @router.put("/{colab_id}", response_model=ColaboradorOut)
@@ -1093,6 +1449,9 @@ def atualizar_colaborador(
     _assert_mesma_empresa(colab.empresa_id, empresa_id)
 
     data = payload.model_dump(exclude_unset=True)
+
+    if "senha" in data and data.get("senha"):
+        _assert_pode_redefinir_senha(db, user)
 
     if "nome" in data and data["nome"] is not None:
         colab.nome = data["nome"].strip()
@@ -1139,15 +1498,30 @@ def atualizar_colaborador(
     )
 
     if "senha" in data and data["senha"]:
-        nova_senha = data["senha"]
-        colab.senha = bcrypt.hash(nova_senha)
+        nova_senha = str(data["senha"]).strip()
 
-        if atualizar_usuario_flag and colab.usuario_id:
-            u = db.query(models.Usuario).get(colab.usuario_id)
+        if len(nova_senha) < 6 or len(nova_senha) > 72:
+            raise HTTPException(
+                status_code=422,
+                detail="A senha temporária deve ter entre 6 e 72 caracteres",
+            )
 
-            if u:
-                u.senha_hash = bcrypt.hash(nova_senha)
-                db.add(u)
+        nova_senha_hash = bcrypt.hash(nova_senha)
+        colab.senha = nova_senha_hash
+
+        if atualizar_usuario_flag:
+            u = _ensure_usuario_login_colaborador(
+                db,
+                colab,
+                senha_hash=nova_senha_hash,
+            )
+            u.reset_token = None
+            u.reset_token_expira = None
+            db.add(u)
+
+        if _boolish(data.get("forcar_troca_senha")):
+            colab.login_token = FORCE_PASSWORD_CHANGE_MARKER
+            colab.login_token_expires_at = None
 
     if atualizar_usuario_flag and colab.usuario_id:
         u = db.query(models.Usuario).get(colab.usuario_id)
@@ -1543,11 +1917,26 @@ def get_colaborador_avatar(
 
     _assert_mesma_empresa(c.empresa_id, empresa_id)
 
-    if not c.avatar_data:
+    avatar_data = getattr(c, "avatar_data", None)
+    avatar_mime = getattr(c, "avatar_mime", None)
+
+    # Compatibilidade com cadastros antigos: algumas fotos foram salvas apenas
+    # no usuário vinculado. O endpoint do colaborador passa a enxergar as duas
+    # fontes, mantendo modal e lista sempre iguais.
+    if not avatar_data and c.usuario_id:
+        u = db.query(models.Usuario).get(c.usuario_id)
+        if u:
+            avatar_data = getattr(u, "avatar_data", None)
+            avatar_mime = getattr(u, "avatar_mime", None)
+
+    if not avatar_data:
         raise HTTPException(status_code=404, detail="Colaborador sem avatar")
 
     return Response(
-        content=bytes(c.avatar_data),
-        media_type=c.avatar_mime or "application/octet-stream",
-        headers={"Cache-Control": "private, max-age=300"},
+        content=bytes(avatar_data),
+        media_type=avatar_mime or "application/octet-stream",
+        headers={
+            "Cache-Control": "private, no-store, max-age=0",
+            "Pragma": "no-cache",
+        },
     )

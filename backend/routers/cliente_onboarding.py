@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Literal, List, Dict, Any
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -162,6 +162,12 @@ class AtualizarApelidoInstanciaPayload(BaseModel):
     apelido: str = Field(..., min_length=1, max_length=80)
 
 
+class ImportarHistoricoInstanciaPayload(BaseModel):
+    empresa_id: int = Field(..., gt=0)
+    # Importação manual só aceita as opções exibidas no painel.
+    historico_restaurar: Literal["24h", "7d", "30d"] = "24h"
+
+
 # =============================
 # HTTP / Evolution helpers
 # =============================
@@ -174,6 +180,66 @@ def _http() -> requests.Session:
 
 def _only_digits(s: str | None) -> str:
     return re.sub(r"\D", "", s or "")
+
+
+def _looks_like_pairing_code(value: str | None) -> bool:
+    raw = str(value or "").strip().replace("-", "").replace(" ", "")
+    return bool(raw) and len(raw) <= 12 and raw.isalnum()
+
+
+def _first_non_empty(*values):
+    for value in values:
+        if value is None:
+            continue
+        s = str(value).strip()
+        if s:
+            return s
+    return ""
+
+
+def _extract_qr_payload(js: dict | None, *, prefer_pairing: bool = False) -> dict:
+    if not isinstance(js, dict):
+        return {}
+
+    qrd = js.get("qrcode") or js.get("qr") or js
+    if not isinstance(qrd, dict):
+        if qrd:
+            return {"code": str(qrd)}
+        return {}
+
+    limit = qrd.get("limit") or qrd.get("timeout") or qrd.get("count") or qrd.get("qr_limit")
+
+    b64 = _first_non_empty(
+        qrd.get("base64"),
+        qrd.get("image"),
+        qrd.get("codeBase64"),
+        qrd.get("qrBase64"),
+    )
+    if b64:
+        return {"base64": b64, "limit": limit}
+
+    explicit_pairing = _first_non_empty(
+        qrd.get("pairingCode"),
+        qrd.get("pairing_code"),
+        qrd.get("pairing"),
+    )
+    if explicit_pairing:
+        return {"pairingCode": explicit_pairing, "limit": limit}
+
+    code = _first_non_empty(
+        qrd.get("qrText"),
+        qrd.get("qr_text"),
+        qrd.get("qrCode"),
+        qrd.get("qr_code"),
+        qrd.get("qr"),
+        qrd.get("code"),
+    )
+    if code:
+        if prefer_pairing and _looks_like_pairing_code(code):
+            return {"pairingCode": code, "limit": limit}
+        return {"code": code, "qrText": code, "limit": limit}
+
+    return {}
 
 
 def _normalize_historico_opcao(raw: str | None) -> str:
@@ -619,10 +685,11 @@ def _evo_create_instance(
         # Essencial para histórico inicial:
         "syncFullHistory": bool(sync_full_history),
 
+        # A Evolution controla exchange/fila pelo modo global do próprio container.
+        # No /instance/create e /rabbitmq/set, mande só enabled/events;
+        # campos como exchange/bindings são ignorados ou podem quebrar o DTO em algumas versões.
         "rabbitmq": {
             "enabled": True,
-            "exchange": os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange"),
-            "bindings": _rabbit_bindings(),
             "events": _events_minimal(),
         },
         "websocket": {
@@ -641,33 +708,47 @@ def _evo_create_instance(
 
     _evo_wait_instance_ready(s, instance, timeout_s=8)
 
-    # Garante também pelo endpoint de settings, antes de conectar o QR.
-    _evo_set_settings_initial(instance, sync_full_history=sync_full_history)
+    # Não chama settings aqui de novo. O fluxo de conectar chama
+    # _evo_prepare_instance_before_connect uma única vez logo depois.
 
 
-def _evo_set_rabbit_initial(instance: str) -> None:
+def _evo_rabbit_payloads() -> list[dict]:
+    """Payloads compatíveis com versões diferentes da Evolution.
+
+    Algumas versões esperam {"rabbitmq": {...}}; outras aceitam o corpo flat
+    {"enabled": true, "events": [...]}. Em ambos os casos, NÃO mandamos
+    exchange/bindings aqui, porque isso pertence ao modo global do container
+    Evolution, não ao endpoint por instância.
     """
-    Configura o Rabbit antes de chamar /instance/connect.
+    events = _events_minimal()
+    return [
+        {"rabbitmq": {"enabled": True, "events": events}},
+        {"enabled": True, "events": events},
+    ]
 
-    Inclui MESSAGES_SET para a restauração chegar pelo Rabbit.
+
+def _evo_set_rabbit_initial(instance: str) -> bool:
+    """Configura Rabbit por instância com MESSAGES_SET habilitado.
+
+    Observação importante: esse endpoint NÃO define a fila global do ZapsChat.
+    A fila/exchange global deve estar no .env da própria Evolution API.
     """
-    if not (EVOLUTION_URL and EVOLUTION_KEY):
-        return
+    if not (EVOLUTION_URL and EVOLUTION_KEY and instance):
+        return False
 
     s = _http()
-    body = {
-        "rabbitmq": {
-            "enabled": True,
-            "exchange": os.getenv("RABBITMQ_EXCHANGE_NAME", "evolution_exchange"),
-            "bindings": _rabbit_bindings(),
-            "events": _events_minimal(),
-        }
-    }
+    ok_any = False
 
-    try:
-        s.post(f"{EVOLUTION_URL}/rabbitmq/set/{instance}", json=body, timeout=20)
-    except Exception:
-        pass
+    for body in _evo_rabbit_payloads():
+        try:
+            r = s.post(f"{EVOLUTION_URL}/rabbitmq/set/{instance}", json=body, timeout=20)
+            if r.ok:
+                ok_any = True
+                break
+        except Exception:
+            pass
+
+    return ok_any
 
 
 def _evo_set_websocket_initial(instance: str) -> None:
@@ -1010,21 +1091,7 @@ def conectar(
         )
         _schedule_cleanup(pendente.instance_name)
 
-        qr = {}
-        if isinstance(conn_json, dict):
-            qrd = conn_json.get("qrcode") or conn_json
-            if isinstance(qrd, dict):
-                if qrd.get("base64") or qrd.get("image"):
-                    qr = {
-                        "base64": qrd.get("base64") or qrd.get("image"),
-                        "limit": qrd.get("limit") or qrd.get("timeout"),
-                    }
-
-                if qrd.get("pairingCode") or qrd.get("code"):
-                    qr = {
-                        "pairingCode": qrd.get("pairingCode") or qrd.get("code"),
-                        "limit": qrd.get("limit") or qrd.get("timeout"),
-                    }
+        qr = _extract_qr_payload(conn_json, prefer_pairing=use_pairing)
 
         return {
             "ok": True,
@@ -1143,21 +1210,7 @@ def conectar(
             )
             _schedule_cleanup(conflito.instance_name)
 
-            qr = {}
-            if isinstance(conn_json, dict):
-                qrd = conn_json.get("qrcode") or conn_json
-                if isinstance(qrd, dict):
-                    if qrd.get("base64") or qrd.get("image"):
-                        qr = {
-                            "base64": qrd.get("base64") or qrd.get("image"),
-                            "limit": qrd.get("limit") or qrd.get("timeout"),
-                        }
-
-                    if qrd.get("pairingCode") or qrd.get("code"):
-                        qr = {
-                            "pairingCode": qrd.get("pairingCode") or qrd.get("code"),
-                            "limit": qrd.get("limit") or qrd.get("timeout"),
-                        }
+            qr = _extract_qr_payload(conn_json, prefer_pairing=use_pairing)
 
             return {
                 "ok": True,
@@ -1176,21 +1229,7 @@ def conectar(
     )
     _schedule_cleanup(inst)
 
-    qr = {}
-    if isinstance(conn_json, dict):
-        qrd = conn_json.get("qrcode") or conn_json
-        if isinstance(qrd, dict):
-            if qrd.get("base64") or qrd.get("image"):
-                qr = {
-                    "base64": qrd.get("base64") or qrd.get("image"),
-                    "limit": qrd.get("limit") or qrd.get("timeout"),
-                }
-
-            if qrd.get("pairingCode") or qrd.get("code"):
-                qr = {
-                    "pairingCode": qrd.get("pairingCode") or qrd.get("code"),
-                    "limit": qrd.get("limit") or qrd.get("timeout"),
-                }
+    qr = _extract_qr_payload(conn_json, prefer_pairing=use_pairing)
 
     return {
         "ok": True,
@@ -1205,13 +1244,16 @@ def conectar(
 @router.get("/empresas/connection/status/{instance}")
 def connection_status(
     instance: str,
+    force_evolution: bool = Query(False),
     db: Session = Depends(get_db),
     identity=Depends(require_admin),
 ):
     """
     Status usado pelo front enquanto espera QR/Pairing Code.
-    Se a Evolution já conectou mas o evento não chegou no navegador, este endpoint confirma,
-    atualiza o banco e permite fechar a tela com "conectado com sucesso".
+
+    Importante: em reconexão o banco pode ainda estar como connected=True,
+    mesmo com a Evolution mostrando disconnected. Quando force_evolution=1,
+    consulta a Evolution e sincroniza o banco para evitar falso "Conectado agora".
     """
     instance = str(instance or "").strip()
     if not instance:
@@ -1226,35 +1268,47 @@ def connection_status(
 
     _assert_empresa_access(identity, int(row.empresa_id))
 
-    db_connected = bool(getattr(row, "connected", False))
-    state = "connected" if db_connected else None
+    db_connected_before = bool(getattr(row, "connected", False))
+    state = "connected" if db_connected_before else None
     evo_connected = False
+    checked_evolution = False
 
-    if not db_connected:
+    if force_evolution or not db_connected_before:
+        checked_evolution = True
         evo_connected, state, _raw = _evo_connection_state(instance)
 
-        if evo_connected:
-            try:
-                row.connected = True
+        try:
+            changed = False
+            if bool(getattr(row, "connected", False)) != bool(evo_connected):
+                row.connected = bool(evo_connected)
+                changed = True
+            if evo_connected:
                 row.last_seen = datetime.now(timezone.utc)
-                db.commit()
-            except Exception:
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
+                changed = True
 
+            if changed:
+                db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
+        if evo_connected:
             try:
                 cancel_auto_cleanup(instance)
             except Exception:
                 pass
 
+    connected_final = bool(evo_connected if checked_evolution else db_connected_before)
+
     return {
         "ok": True,
         "instance": instance,
-        "connected": bool(db_connected or evo_connected),
-        "db_connected": bool(db_connected),
+        "connected": connected_final,
+        "db_connected": bool(db_connected_before),
         "evolution_connected": bool(evo_connected),
+        "checked_evolution": bool(checked_evolution),
         "state": state,
         "numero": getattr(row, "numero_instancia", None),
     }
@@ -1307,26 +1361,26 @@ def refresh_qr(
         number_digits if use_pairing else None,
     )
 
-    qr = {}
-    if isinstance(js, dict):
-        qrd = js.get("qrcode") or js
-        if isinstance(qrd, dict):
-            if qrd.get("base64") or qrd.get("image"):
-                qr = {
-                    "base64": qrd.get("base64") or qrd.get("image"),
-                    "limit": qrd.get("limit") or qrd.get("timeout"),
-                }
+    qr = _extract_qr_payload(js, prefer_pairing=use_pairing)
 
-            if qrd.get("pairingCode") or qrd.get("code"):
-                qr = {
-                    "pairingCode": qrd.get("pairingCode") or qrd.get("code"),
-                    "limit": qrd.get("limit") or qrd.get("timeout"),
-                }
+    if qr:
+        # Gerou QR/Pairing Code para reconectar: ainda NÃO está conectado.
+        # Evita a tela continuar exibindo "Conectado agora" por valor antigo do banco.
+        try:
+            row.connected = False
+            db.add(row)
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
     return {
         "ok": True,
         "instance": instance,
         "qrcode": (qr or None),
+        "connected": False if qr else None,
         "method": "pairing" if use_pairing else "qrcode",
         "numero": number_digits or getattr(row, "numero_instancia", None),
         "historico_restaurar": historico_restaurar,
@@ -1378,6 +1432,118 @@ def atualizar_apelido_instancia(
         "instance": inst.instance_name,
         "apelido": inst.apelido,
         "numero": inst.numero_instancia,
+    }
+
+
+@router.post("/empresas/instancias/{instancia_id}/historico/importar")
+def importar_historico_instancia(
+    instancia_id: int,
+    payload: ImportarHistoricoInstanciaPayload,
+    db: Session = Depends(get_db),
+    identity=Depends(require_admin),
+):
+    """Solicita importação manual de histórico da instância selecionada.
+
+    Regra: o MESSAGES_SET só será processado quando esta rota marcar
+    historico_restaurar como 24h, 7d ou 30d para a instância.
+    """
+    _assert_empresa_access(identity, int(payload.empresa_id))
+
+    periodo = _normalize_historico_opcao(payload.historico_restaurar)
+    if periodo not in {"24h", "7d", "30d"}:
+        raise HTTPException(status_code=400, detail="Período inválido. Use 24h, 7d ou 30d.")
+
+    empresa = _get_empresa_or_404(db, int(payload.empresa_id))
+    enforce_billing_active(
+        empresa,
+        message="Seu plano está vencido. Renove para importar histórico.",
+    )
+
+    inst = db.query(models.EmpresaInstancia).filter(
+        models.EmpresaInstancia.id == int(instancia_id),
+        models.EmpresaInstancia.empresa_id == int(payload.empresa_id),
+    ).first()
+
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instância não encontrada.")
+
+    instance_name = str(inst.instance_name or "").strip()
+    if not instance_name:
+        raise HTTPException(status_code=400, detail="Instância sem nome válido.")
+
+    # Marca a janela escolhida. O handler messages_set.py só aceita MESSAGES_SET
+    # quando este campo estiver como 24h/7d/30d.
+    inst.historico_restaurar = periodo
+
+    for attr in ("historico_status", "history_status"):
+        if hasattr(inst, attr):
+            try:
+                setattr(inst, attr, "pending")
+            except Exception:
+                pass
+
+    db.add(inst)
+    db.commit()
+    db.refresh(inst)
+
+    # Limpa watchdog antigo para não confundir MESSAGES_SET anterior com este pedido.
+    try:
+        from backend.integrations.evolution.handlers._state import (
+            history_clear_messages_set_state,
+            remember_qr_emitted,
+        )
+
+        history_clear_messages_set_state(instance_name)
+        # Se a Evolution emitir connection.update após o connect/settings, isso libera
+        # o fluxo de sync mesmo quando a instância já existia.
+        remember_qr_emitted(instance_name)
+    except Exception:
+        pass
+
+    # Reforça settings e Rabbit na Evolution.
+    # Isso não define fila global; só habilita o evento por instância.
+    rabbit_ok = _evo_set_rabbit_initial(instance_name)
+    settings_ok = _evo_set_settings_initial(instance_name, sync_full_history=True)
+
+    # Tenta cutucar a Evolution para reaplicar o estado da instância.
+    # Se ela estiver desconectada, pode retornar QR; se já estiver conectada, normalmente
+    # apenas retorna o estado sem desconectar.
+    connect_json = _evo_connect(instance_name, None)
+    qr = _extract_qr_payload(connect_json, prefer_pairing=False)
+
+    fallback_agendado = False
+    try:
+        # Importação manual em instância já conectada pode não gerar novo connection.update.
+        # Então agendamos um fallback: se não vier messages.set, busca /chat/findMessages
+        # e manda para o mesmo handler do MESSAGES_SET.
+        from backend.integrations.evolution.handlers.connection import (
+            trigger_history_findmessages_fallback_later,
+        )
+
+        fallback_agendado = bool(
+            trigger_history_findmessages_fallback_later(
+                instance_name,
+                periodo,
+                empresa_id=int(inst.empresa_id),
+                reason="manual_import_route",
+            )
+        )
+    except Exception:
+        fallback_agendado = False
+
+    return {
+        "ok": True,
+        "instancia_id": int(inst.id),
+        "instance": instance_name,
+        "numero": inst.numero_instancia,
+        "historico_restaurar": periodo,
+        "syncFullHistory": True,
+        "rabbit_ok": bool(rabbit_ok),
+        "settings_ok": bool(settings_ok),
+        "fallback_findmessages_agendado": bool(fallback_agendado),
+        "connected": bool(getattr(inst, "connected", False)),
+        "qrcode": qr or None,
+        "message": "Importação solicitada. O backend vai aceitar o próximo messages.set somente dentro do período escolhido.",
     }
 
 

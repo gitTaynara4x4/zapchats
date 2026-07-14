@@ -17,6 +17,7 @@ from sqlalchemy import text, or_
 
 from backend.database import get_db
 from backend import models
+from backend.services.chatbot_claim_policy import department_claim_required
 from backend.websocket_manager import conexoes_ativas
 from backend.routers.auth import get_current_identity
 
@@ -32,6 +33,7 @@ from backend.integrations.evolution.repositories.clientes_repo import (
 from backend.integrations.evolution.repositories.atendimentos_repo import (
     get_or_open_atendimento_repo,
 )
+from backend.services.atendimento_claim_state import claim_if_available
 from backend.security.atendimento_acl import (
     ensure_perm,
     assert_same_company,
@@ -126,6 +128,21 @@ def _current_operador_id(identity: Any) -> Optional[int]:
     return None
 
 
+def _is_admin_identity(identity: Any) -> bool:
+    """Retorna True somente para o administrador real da empresa."""
+    if identity is None:
+        return False
+
+    if bool(_id_get(identity, "is_admin")) or bool(_id_get(identity, "admin")):
+        return True
+
+    role = str(_id_get(identity, "role", "") or "").strip().lower()
+    if role in {"admin", "administrador", "owner", "dono", "root"}:
+        return True
+
+    return False
+
+
 def _table_exists(db: Session, table_name: str) -> bool:
     try:
         reg = db.execute(text(f"SELECT to_regclass('public.{table_name}')")).scalar()
@@ -147,21 +164,42 @@ def _fila_feature_enabled(db: Session) -> bool:
     )
 
 
+def _status_norm(value: Any) -> str:
+    return str(value or "").split(".")[-1].strip().lower()
+
+
+def _is_department_claim_atendimento(
+    db: Session,
+    *,
+    atendimento: Optional[models.Atendimento],
+    cliente: Optional[models.Cliente] = None,
+) -> bool:
+    """Usa a mesma política da rota /meta e da configuração do chatbot."""
+    return department_claim_required(
+        db,
+        atendimento=atendimento,
+        cliente=cliente,
+    )
+
+
 def _atendimento_exige_aceite(
     db: Session,
     *,
     atendimento: Optional[models.Atendimento],
+    cliente: Optional[models.Cliente] = None,
 ) -> bool:
     """
-    Regra nova:
-    - Sem atendimento => não exige aceite.
-    - Atendimento sem fila_id => não exige aceite.
-    - Atendimento com fila_id => só exige se filas_atendimento.exigir_aceite=True.
+    Exige aceite quando:
+    - atendimento tem fila e a fila exige aceite; ou
+    - atendimento foi encaminhado pelo menu/chatbot para um departamento.
 
-    Isso impede o envio de bloquear conversas normais só porque ainda não foram aceitas.
+    Departamento normal no cadastro do cliente não bloqueia envio.
     """
     if atendimento is None:
         return False
+
+    if _is_department_claim_atendimento(db, atendimento=atendimento, cliente=cliente):
+        return True
 
     fila_id = _to_int(getattr(atendimento, "fila_id", None))
     if fila_id is None:
@@ -435,6 +473,7 @@ def _ensure_sender_can_send_existing_cliente(
     empresa_id: int,
     cliente_exists_before_send: bool,
     atendimento: Optional[models.Atendimento],
+    cliente: Optional[models.Cliente] = None,
 ):
     """
     Regra corrigida:
@@ -451,8 +490,9 @@ def _ensure_sender_can_send_existing_cliente(
         e o colaborador atual ainda não aceitou/participa.
     """
     current_colab_id = _current_operador_id(identity)
+    is_admin = _is_admin_identity(identity)
 
-    # admin/usuário master ou identidade sem colaborador operacional passa.
+    # Identidade sem colaborador operacional passa (admin legado/master).
     if current_colab_id is None:
         return
 
@@ -464,14 +504,23 @@ def _ensure_sender_can_send_existing_cliente(
     if atendimento is None:
         return
 
-    # Atendimento por departamento:
-    # se já existe departamento e o atendimento ainda não foi assumido,
-    # o colaborador precisa clicar em Atender antes de responder.
     departamento_id = _to_int(getattr(atendimento, "departamento_id", None))
     operador_id = _to_int(getattr(atendimento, "operador_id", None))
-    status_atd = str(getattr(atendimento, "status", "") or "").split(".")[-1].lower()
+    status_atd = _status_norm(getattr(atendimento, "status", None))
 
-    if departamento_id is not None:
+    # Administrador pode intervir em atendimento já assumido por outra pessoa,
+    # sem trocar operador_id e sem "roubar" o atendimento do responsável atual.
+    # Se ainda não existe responsável, o admin continua usando o fluxo normal de Atender.
+    if is_admin and operador_id is not None:
+        return
+
+    exige_aceite = _atendimento_exige_aceite(db, atendimento=atendimento, cliente=cliente)
+    if not exige_aceite:
+        return
+
+    if departamento_id is not None and _is_department_claim_atendimento(
+        db, atendimento=atendimento, cliente=cliente
+    ):
         if operador_id is None or status_atd in {"novo", "aguardando", "pendente"}:
             raise HTTPException(409, "Clique em Atender antes de responder.")
 
@@ -482,9 +531,6 @@ def _ensure_sender_can_send_existing_cliente(
 
     # PONTO PRINCIPAL legado:
     # só exige aceite se a fila escolhida exigir.
-    exige_aceite = _atendimento_exige_aceite(db, atendimento=atendimento)
-    if not exige_aceite:
-        return
 
     participant_ids = _active_participant_ids(
         db,
@@ -513,61 +559,21 @@ def _sync_sender_as_participant_if_needed(
     colaborador_id: Optional[int],
 ):
     """
-    Auto-sincroniza participação quando a conversa realmente exige aceite.
+    Normaliza o remetente como responsável somente quando o atendimento está
+    livre ou já pertence a ele. Nunca cria um segundo participante ativo e
+    nunca toma o atendimento de outro colaborador.
     """
     if atendimento is None or colaborador_id is None:
-        return
+        return None
 
     if not _participant_feature_enabled(db):
-        return
+        return None
 
-    AP = models.AtendimentoParticipante
-    empresa_id = int(getattr(atendimento, "empresa_id"))
-    atendimento_id = int(getattr(atendimento, "id"))
-
-    active_ids = _active_participant_ids(
+    return claim_if_available(
         db,
-        empresa_id=empresa_id,
-        atendimento_id=atendimento_id,
+        atendimento=atendimento,
+        colaborador_id=int(colaborador_id),
     )
-    make_responsavel = not active_ids
-
-    q = db.query(AP).filter(
-        AP.empresa_id == int(empresa_id),
-        AP.atendimento_id == int(atendimento_id),
-        AP.colaborador_id == int(colaborador_id),
-    )
-    row = q.order_by(AP.id.desc()).first() if hasattr(AP, "id") else q.first()
-
-    if row:
-        if hasattr(row, "is_ativo"):
-            row.is_ativo = True
-        if hasattr(row, "saiu_em"):
-            row.saiu_em = None
-        if hasattr(row, "aceito_em") and getattr(row, "aceito_em", None) is None:
-            row.aceito_em = _now_sp()
-        if hasattr(row, "is_responsavel") and make_responsavel:
-            row.is_responsavel = True
-        db.add(row)
-    else:
-        data: Dict[str, Any] = {
-            "empresa_id": int(empresa_id),
-            "atendimento_id": int(atendimento_id),
-            "colaborador_id": int(colaborador_id),
-        }
-        if hasattr(AP, "aceito_em"):
-            data["aceito_em"] = _now_sp()
-        if hasattr(AP, "is_ativo"):
-            data["is_ativo"] = True
-        if hasattr(AP, "is_responsavel"):
-            data["is_responsavel"] = bool(make_responsavel)
-
-        row = AP(**data)
-        db.add(row)
-
-    if make_responsavel and hasattr(atendimento, "operador_id"):
-        atendimento.operador_id = int(colaborador_id)
-        db.add(atendimento)
 
 
 # =========================================================
@@ -2060,6 +2066,7 @@ async def _send_core(
             empresa_id=int(empresa.id),
             cliente_exists_before_send=bool(cliente_exists_before_send),
             atendimento=atendimento_acl,
+            cliente=cliente_para_regra,
         )
 
     evo = _evo_post(evo_path, inst_name, evo_payload)
@@ -2215,12 +2222,24 @@ async def _send_core(
         destino=str(destino),
     )
 
+    responsavel_antes_do_envio = (
+        _to_int(getattr(atendimento_acl, "operador_id", None))
+        if atendimento_acl is not None
+        else None
+    )
+    admin_intervencao_preexistente = bool(
+        _is_admin_identity(identity)
+        and responsavel_antes_do_envio is not None
+        and operador_id is not None
+        and int(responsavel_antes_do_envio) != int(operador_id)
+    )
+
     atd_obj, atendimento_id, departamento_id = _resolve_atendimento_for_send(
         db,
         empresa_id=int(empresa.id),
         cliente=cliente,
         instancia_id=inst_id_checked,
-        operador_id=operador_id,
+        operador_id=(None if admin_intervencao_preexistente else operador_id),
         ts_dt=_now_sp(),
         atendimento_acl=atendimento_acl,
     )
@@ -2228,7 +2247,18 @@ async def _send_core(
     # Antes isso sempre criava/sincronizava participante ao enviar.
     # Agora só faz isso se a conversa realmente exigir aceite.
     # Assim uma conversa normal não vira "aceita" artificialmente.
-    if _atendimento_exige_aceite(db, atendimento=atd_obj):
+    responsavel_atual_id = _to_int(getattr(atd_obj, "operador_id", None)) if atd_obj is not None else None
+    admin_intervindo = bool(
+        _is_admin_identity(identity)
+        and responsavel_atual_id is not None
+        and operador_id is not None
+        and int(responsavel_atual_id) != int(operador_id)
+    )
+
+    if (
+        _atendimento_exige_aceite(db, atendimento=atd_obj, cliente=cliente)
+        and not admin_intervindo
+    ):
         _sync_sender_as_participant_if_needed(
             db,
             atendimento=atd_obj,

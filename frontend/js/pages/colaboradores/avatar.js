@@ -4,7 +4,7 @@ import { state } from './state.js';
 import { authFetch, withEmpresa, apiForm } from './api.js';
 import { $, els } from './dom.js';
 import { toast } from './feedback.js';
-import { initials, hashColor, replaceExt } from './helpers.js';
+import { initials, hashColor, avatarTone, replaceExt } from './helpers.js';
 import { coalesceName, coalesceEmail } from './coalesce.js';
 
 export function revokeBlobURL(u){
@@ -39,6 +39,20 @@ function shouldFetchAvatarURL(url){
   return /\/api\/(colaboradores|usuarios)\/\d+\/avatar/.test(s);
 }
 
+function isGeneratedInitialAvatarURL(url){
+  const s = String(url || '').trim().toLowerCase();
+  if (!s) return false;
+
+  return (
+    s.includes('api.dicebear.com/') && s.includes('/initials/')
+  ) || s.includes('ui-avatars.com/api/');
+}
+
+function realAvatarURL(url){
+  const s = String(url || '').trim();
+  return s && !isGeneratedInitialAvatarURL(s) ? s : null;
+}
+
 async function fetchAvatarAsBlobURL(url){
   try {
     const r = await authFetch(withEmpresa(url));
@@ -54,7 +68,7 @@ async function fetchAvatarAsBlobURL(url){
 
 export async function fetchAvatarThumbURLFor(colab){
   const id = Number(colab?.id || 0) || 0;
-  const directURL = colab?.avatar_url || null;
+  const directURL = realAvatarURL(colab?.avatar_url);
 
   if (!id) return directURL;
 
@@ -103,7 +117,14 @@ export function mountMiniAvatarInto(td, colab){
 
   const wrap = document.createElement('div');
   wrap.className = 'avatar-mini';
-  wrap.style.background = hashColor(String(name));
+
+  const tone = avatarTone(name);
+  wrap.style.setProperty('--colab-avatar-bg', tone.bg);
+  wrap.style.setProperty('--colab-avatar-fg', tone.fg);
+  wrap.style.setProperty('--colab-avatar-ring', tone.ring);
+  wrap.style.background = tone.bg;
+  wrap.style.color = tone.fg;
+  wrap.style.borderColor = tone.ring;
 
   const span = document.createElement('span');
   span.className = 'avatar-mini-initials';
@@ -117,15 +138,12 @@ export function mountMiniAvatarInto(td, colab){
   img.style.display = 'none';
 
   img.onload = () => {
-    img.style.display = 'block';
-    span.style.display = 'none';
-    wrap.style.background = 'transparent';
+    wrap.classList.add('has-photo');
   };
 
   img.onerror = () => {
+    wrap.classList.remove('has-photo');
     img.removeAttribute('src');
-    img.style.display = 'none';
-    span.style.display = 'grid';
   };
 
   wrap.appendChild(span);
@@ -144,38 +162,52 @@ export function mountMiniAvatarInto(td, colab){
 
 export function setPerfilAvatar(nome, url){
   const { pAvatar, pMono } = els();
-
-  if (url){
-    if (pAvatar){
-      pAvatar.src = url;
-      pAvatar.style.display = 'block';
-    }
-
-    if (pMono) pMono.style.display = 'none';
-    return;
-  }
+  const preview = pMono?.parentElement || pAvatar?.parentElement || null;
+  const realURL = realAvatarURL(url);
 
   if (pMono){
     pMono.textContent = initials(nome);
-    pMono.style.display = 'grid';
 
     if (pMono.parentElement) {
-      pMono.parentElement.style.background = hashColor(nome || 'ZapsChat');
+      const tone = avatarTone(nome || 'ZapsChat');
+      pMono.parentElement.style.setProperty('--colab-avatar-bg', tone.bg);
+      pMono.parentElement.style.setProperty('--colab-avatar-fg', tone.fg);
+      pMono.parentElement.style.setProperty('--colab-avatar-ring', tone.ring);
+      pMono.parentElement.style.background = tone.bg;
+      pMono.parentElement.style.color = tone.fg;
+      pMono.parentElement.style.borderColor = tone.ring;
     }
   }
 
-  if (pAvatar){
+  if (!pAvatar){
+    preview?.classList.remove('has-photo');
+    return;
+  }
+
+  pAvatar.onload = () => {
+    preview?.classList.add('has-photo');
+  };
+
+  pAvatar.onerror = () => {
+    preview?.classList.remove('has-photo');
     pAvatar.removeAttribute('src');
-    pAvatar.style.display = 'none';
+  };
+
+  if (realURL){
+    preview?.classList.remove('has-photo');
+    pAvatar.src = realURL;
+  } else {
+    preview?.classList.remove('has-photo');
+    pAvatar.removeAttribute('src');
   }
 }
 
 export async function fetchAvatarURLFor(colab){
   if (!colab || !colab.id) {
-    return colab && colab.avatar_url ? colab.avatar_url : null;
+    return colab ? realAvatarURL(colab.avatar_url) : null;
   }
 
-  const directURL = colab.avatar_url || null;
+  const directURL = realAvatarURL(colab.avatar_url);
 
   if (directURL && !shouldFetchAvatarURL(directURL)) {
     return directURL;
@@ -252,6 +284,12 @@ export async function uploadAvatarTo(url, file){
 export async function handleAvatarFile(file){
   if (!file) return;
 
+  const maxBytes = 5 * 1024 * 1024;
+  if (Number(file.size || 0) > maxBytes) {
+    toast('A foto deve ter no máximo 5 MB.', 'warn');
+    return;
+  }
+
   const okByMime = /^image\//i.test(file.type || '');
   const okByExt = /\.(png|jpe?g|webp|gif|bmp|svg|avif|heic|heif)$/i.test(file.name || '');
 
@@ -272,6 +310,9 @@ export async function handleAvatarFile(file){
 
   state.newAvatarFile = file;
 
+  const actionLabel = document.querySelector('#btn-add-avatar strong');
+  if (actionLabel) actionLabel.textContent = 'Alterar foto';
+
   const url = URL.createObjectURL(file);
 
   setPerfilAvatar(
@@ -284,17 +325,41 @@ export function bindAvatarDnDAndPaste(){
   const { pAvatarInput } = els();
 
   const avatarWrap = $('#avatar-wrap');
+  const addButton = $('#btn-add-avatar');
   const fileInput = pAvatarInput;
 
   if (!avatarWrap) return;
+
+  const openPicker = () => {
+    if (!fileInput) return;
+    fileInput.value = '';
+    fileInput.click();
+  };
 
   if (fileInput){
     fileInput.setAttribute('accept','image/*,.svg,.webp,.avif,.heic,.heif');
 
     avatarWrap.onclick = () => {
-      fileInput.value = '';
-      fileInput.click();
+      const modal = document.querySelector('#modal-perfil');
+      const isViewMode = modal?.dataset?.mode === 'view' && !modal.classList.contains('editing');
+
+      // Se está apenas visualizando o perfil, o clique no avatar já entra em edição.
+      // Assim a pessoa consegue escolher a foto e o botão de salvar fica disponível.
+      if (isViewMode) {
+        document.querySelector('#perfil-editar')?.click();
+      }
+
+      window.setTimeout(openPicker, isViewMode ? 80 : 0);
     };
+
+    if (addButton && addButton.dataset.avatarBound !== '1') {
+      addButton.dataset.avatarBound = '1';
+      addButton.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        openPicker();
+      });
+    }
 
     fileInput.onchange = () => {
       handleAvatarFile(fileInput.files?.[0] || null);

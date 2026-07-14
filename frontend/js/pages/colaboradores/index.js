@@ -7,9 +7,9 @@ import { preloadPerms } from './permissions.js';
 import { loadEmpresa } from './empresa.js';
 import { loadSetores } from './setores.js';
 import { loadColaboradores, renderLista, startPoller, stopPoller, bindLista } from './lista.js?v=midias-match-3';
-import { bindModal } from './modal.js';
+import { bindModal } from './modal.js?v=colab-required-20260713';
 
-import { initColaboradoresTabs } from './ui/tabs.js';
+import { initColaboradoresTabs } from './ui/tabs.js?v=colab-required-20260713';
 import { initColaboradoresSelects } from './ui/selects.js?v=colab-select-fix-1';
 
 let didInit = false;

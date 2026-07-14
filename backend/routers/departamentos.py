@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend.database import get_db
 from backend.routers.auth import get_current_identity
+from backend.security.atendimento_acl import ensure_perm
 from backend.utils.entitlements import enforce_quota
 from backend.utils.usage import usage_counts
 
@@ -96,6 +97,9 @@ class DepartamentoOut(BaseModel):
     # O frontend usa isso para marcar as instâncias no editar.
     whatsapp_instancias: List[int] = Field(default_factory=list)
 
+    # Contagem direta para cards/organograma.
+    colaboradores_count: int = 0
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -114,6 +118,17 @@ class DepartamentoMembroOut(BaseModel):
     is_primary: bool = False
 
 
+class DepartamentoColaboradorOut(BaseModel):
+    id: int
+    nome: str
+    email: str | None = None
+    telefone: str | None = None
+    cargo: str | None = None
+    avatar_url: str | None = None
+    ativo: bool = True
+    departamentos_ids: List[int] = Field(default_factory=list)
+
+
 class DepartamentoMembrosUpdate(BaseModel):
     colaboradores_ids: List[int] = Field(default_factory=list)
 
@@ -126,28 +141,31 @@ HORA_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 def _norm_hora(h: Optional[str]) -> Optional[str]:
     """
+    Normaliza horário para HH:MM.
+
     Aceita:
     - None
     - ""
     - "08:00"
     - "08:00:00"
 
-    Retorna:
-    - None
-    - "HH:MM"
+    Horário inválido não é ignorado silenciosamente: retorna 422.
+    Isso evita apagar o expediente do departamento por erro de frontend/payload.
     """
     if h is None:
         return None
 
-    h = str(h).strip()
-    if not h:
+    raw = str(h).strip()
+    if not raw:
         return None
 
-    if len(h) >= 5 and h[2] == ":":
-        h = h[:5]
+    h = raw[:5] if len(raw) >= 5 and raw[2] == ":" else raw
 
     if not HORA_RE.match(h):
-        return None
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Horário inválido. Use o formato HH:MM, exemplo 08:00.",
+        )
 
     return h
 
@@ -208,6 +226,12 @@ def resolve_empresa_id(
         raise HTTPException(status_code=403, detail="Empresa não permitida")
 
     return empresa_id
+
+
+def require_departamentos_gerenciar(identity=Depends(get_current_identity)):
+    """Exige permissão real no backend para ações sensíveis de Departamentos."""
+    ensure_perm(identity, "departamentos.gerenciar")
+    return identity
 
 
 def ensure_empresa_exists(db: Session, empresa_id: int) -> None:
@@ -547,6 +571,29 @@ def _sync_departamento_instancias(
         )
 
 
+def _get_departamento_membros_count(
+    db: Session | None,
+    *,
+    empresa_id: int,
+    departamento_id: int,
+) -> int:
+    if db is None or not hasattr(models, "DepartamentoMembro"):
+        return 0
+
+    try:
+        return int(
+            db.query(func.count(models.DepartamentoMembro.id))
+            .filter(
+                models.DepartamentoMembro.empresa_id == int(empresa_id),
+                models.DepartamentoMembro.departamento_id == int(departamento_id),
+            )
+            .scalar()
+            or 0
+        )
+    except Exception:
+        return 0
+
+
 # ==========================================================
 # Serialização
 # ==========================================================
@@ -577,6 +624,11 @@ def dept_to_dict(
             else None
         ),
         "whatsapp_instancias": [],
+        "colaboradores_count": _get_departamento_membros_count(
+            db,
+            empresa_id=int(row.empresa_id),
+            departamento_id=int(row.id),
+        ),
     }
 
     if include_instancias and db is not None:
@@ -761,9 +813,79 @@ def _sync_departamento_membros(
     )
 
 
+def _colaborador_ativo(colab: Any) -> bool:
+    for attr in ("ativo", "active", "is_active"):
+        if hasattr(colab, attr):
+            return bool(getattr(colab, attr))
+    return True
+
+
+def _departamentos_ids_por_colaborador(
+    db: Session,
+    *,
+    empresa_id: int,
+) -> dict[int, list[int]]:
+    rows = (
+        db.query(
+            models.DepartamentoMembro.colaborador_id,
+            models.DepartamentoMembro.departamento_id,
+        )
+        .filter(models.DepartamentoMembro.empresa_id == int(empresa_id))
+        .all()
+    )
+
+    out: dict[int, list[int]] = {}
+    for colab_id, dep_id in rows:
+        try:
+            cid = int(colab_id)
+            did = int(dep_id)
+        except Exception:
+            continue
+        out.setdefault(cid, [])
+        if did not in out[cid]:
+            out[cid].append(did)
+    return out
+
+
 # ==========================================================
 # Rotas
 # ==========================================================
+@router.get("/colaboradores", response_model=List[DepartamentoColaboradorOut])
+def listar_colaboradores_para_departamentos(
+    empresa_id: int = Depends(resolve_empresa_id),
+    _identity=Depends(require_departamentos_gerenciar),
+    db: Session = Depends(get_db),
+):
+    """Lista enxuta e segura para a tela de Departamentos.
+
+    Evita depender de /api/colaboradores, que pode exigir permissão diferente
+    e fazer a tela parecer vazia para quem só gerencia departamentos.
+    """
+    ensure_empresa_exists(db, empresa_id)
+
+    deps_por_colab = _departamentos_ids_por_colaborador(db, empresa_id=int(empresa_id))
+    rows = (
+        db.query(models.Colaborador)
+        .filter(models.Colaborador.empresa_id == int(empresa_id))
+        .order_by(func.lower(models.Colaborador.nome))
+        .all()
+    )
+
+    return [
+        DepartamentoColaboradorOut(
+            id=int(c.id),
+            nome=c.nome or "Colaborador",
+            email=getattr(c, "email", None),
+            telefone=getattr(c, "telefone", None),
+            cargo=getattr(c, "cargo", None),
+            avatar_url=_avatar_url_colaborador(getattr(c, "nome", None), getattr(c, "email", None)),
+            ativo=_colaborador_ativo(c),
+            departamentos_ids=deps_por_colab.get(int(c.id), []),
+        )
+        for c in rows
+    ]
+
+
 @router.get("", response_model=List[DepartamentoOut])
 def listar(
     empresa_id: int = Depends(resolve_empresa_id),
@@ -834,6 +956,7 @@ def atualizar_membros(
     dept_id: int,
     payload: DepartamentoMembrosUpdate,
     empresa_id: int = Depends(resolve_empresa_id),
+    _identity=Depends(require_departamentos_gerenciar),
     db: Session = Depends(get_db),
 ):
     ensure_empresa_exists(db, empresa_id)
@@ -860,6 +983,7 @@ def atualizar_membros(
 def criar(
     payload: DepartamentoIn,
     empresa_id: int = Depends(resolve_empresa_id),
+    _identity=Depends(require_departamentos_gerenciar),
     db: Session = Depends(get_db),
 ):
     ensure_empresa_exists(db, empresa_id)
@@ -937,6 +1061,7 @@ def atualizar(
     dept_id: int,
     payload: DepartamentoIn,
     empresa_id: int = Depends(resolve_empresa_id),
+    _identity=Depends(require_departamentos_gerenciar),
     db: Session = Depends(get_db),
 ):
     ensure_empresa_exists(db, empresa_id)
@@ -1000,6 +1125,7 @@ def mover(
     dept_id: int,
     payload: MoveIn,
     empresa_id: int = Depends(resolve_empresa_id),
+    _identity=Depends(require_departamentos_gerenciar),
     db: Session = Depends(get_db),
 ):
     ensure_empresa_exists(db, empresa_id)
@@ -1170,6 +1296,7 @@ def _cleanup_departamento_references_before_delete(
 def excluir(
     dept_id: int,
     empresa_id: int = Depends(resolve_empresa_id),
+    _identity=Depends(require_departamentos_gerenciar),
     db: Session = Depends(get_db),
 ):
     ensure_empresa_exists(db, empresa_id)
@@ -1217,6 +1344,7 @@ compat_router = APIRouter(
 
 compat_router.add_api_route("", listar, methods=["GET"], response_model=List[DepartamentoOut])
 compat_router.add_api_route("/tree", tree, methods=["GET"], response_model=List[DepartamentoOut])
+compat_router.add_api_route("/colaboradores", listar_colaboradores_para_departamentos, methods=["GET"], response_model=List[DepartamentoColaboradorOut])
 compat_router.add_api_route("/{dept_id}", obter, methods=["GET"], response_model=DepartamentoOut)
 compat_router.add_api_route("/{dept_id}/membros", listar_membros, methods=["GET"], response_model=List[DepartamentoMembroOut])
 compat_router.add_api_route("/{dept_id}/membros", atualizar_membros, methods=["PUT"], response_model=List[DepartamentoMembroOut])

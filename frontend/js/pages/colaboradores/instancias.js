@@ -5,6 +5,38 @@ import { apiGet, apiJSON } from './api.js';
 import { els } from './dom.js';
 import { chip } from './helpers.js';
 
+// Mantém uma fotografia explícita da seleção exibida no modo de visualização.
+// Isso evita perder os checks quando a grade de edição é recriada de forma assíncrona.
+let lastRenderedInstIds = [];
+
+function normalizeInstIds(values){
+  return [...new Set(
+    (Array.isArray(values) ? values : [])
+      .map(value => Number(value))
+      .filter(value => Number.isInteger(value) && value > 0)
+  )];
+}
+
+function readStoredInstIds(wrap){
+  try {
+    const parsed = JSON.parse(wrap?.dataset?.selectedInstIds || '[]');
+    return normalizeInstIds(parsed);
+  } catch {
+    return [];
+  }
+}
+
+function storeInstIds(wrap, ids){
+  const normalized = normalizeInstIds(ids);
+  lastRenderedInstIds = normalized;
+
+  if (wrap) {
+    wrap.dataset.selectedInstIds = JSON.stringify(normalized);
+  }
+
+  return normalized;
+}
+
 export async function fetchInstances(){
   if (state.instsCache) return state.instsCache;
 
@@ -165,14 +197,19 @@ export function ensureInstsSection(){
             </div>
 
             <div>
-              Se nenhum WhatsApp for marcado, este colaborador ficará com acesso a
-              <b>todos os WhatsApps</b> da empresa. Para restringir, marque apenas os permitidos.
+              Se nenhum WhatsApp for marcado, este colaborador ficará <b>sem acesso</b>
+              aos atendimentos de WhatsApp. Para liberar todos, use “Selecionar todos”.
             </div>
           </div>
 
           <div id="inst-actions" style="display:none">
             <button type="button" id="inst-select-all" class="btn btn-ghost">Selecionar todos</button>
             <button type="button" id="inst-clear" class="btn btn-ghost">Limpar seleção</button>
+          </div>
+
+          <div id="inst-selection-warning" class="muted" hidden
+               style="margin:.55rem 0;color:#b45309;font-weight:600;">
+            Nenhum WhatsApp selecionado. Este colaborador não verá conversas.
           </div>
 
           <div id="e-insts" style="display:none"></div>
@@ -209,7 +246,9 @@ export async function renderInstsView(colab){
   const chipsWrap = wrap.querySelector('#d-insts');
   const editGrid = wrap.querySelector('#e-insts');
   const actions = wrap.querySelector('#inst-actions');
+  const selectionWarning = wrap.querySelector('#inst-selection-warning');
 
+  if (selectionWarning) selectionWarning.hidden = true;
   if (actions) actions.style.display = 'none';
   if (editGrid) editGrid.style.display = 'none';
 
@@ -218,10 +257,10 @@ export async function renderInstsView(colab){
     chipsWrap.innerHTML = '';
   }
 
-  const ids = coalesceInstIds(colab);
+  const ids = storeInstIds(wrap, coalesceInstIds(colab));
 
   if (!ids.length){
-    if (chipsWrap) chipsWrap.appendChild(chip('Todos os WhatsApps'));
+    if (chipsWrap) chipsWrap.appendChild(chip('Nenhum WhatsApp permitido'));
     return;
   }
 
@@ -255,13 +294,35 @@ export async function ensureInstsEdit(){
 
   if (actions) actions.style.display = 'flex';
 
+  // Capture a seleção antes de qualquer await. O fallback usa exatamente os IDs
+  // que estavam aparecendo como chips no modo de visualização.
+  const stateIds = normalizeInstIds(coalesceInstIds(state.viewing));
+  const storedIds = readStoredInstIds(wrap);
+  const currentIds = stateIds.length
+    ? stateIds
+    : (storedIds.length ? storedIds : normalizeInstIds(lastRenderedInstIds));
+  const current = new Set(currentIds.map(String));
+
   const items = await fetchInstances();
 
   if (!editGrid) return;
 
   editGrid.innerHTML = '';
 
-  const current = new Set(coalesceInstIds(state.viewing).map(String));
+  const selectionWarning = wrap.querySelector('#inst-selection-warning');
+
+  const updateSelectionWarning = () => {
+    if (!editGrid) return;
+
+    const selectedNow = [...editGrid.querySelectorAll('input[name="inst-edit"]:checked')]
+      .map(input => Number(input.value));
+
+    storeInstIds(wrap, selectedNow);
+
+    if (selectionWarning) {
+      selectionWarning.hidden = selectedNow.length > 0;
+    }
+  };
 
   if (!items.length){
     editGrid.innerHTML = '<div class="muted">Nenhuma instância encontrada.</div>';
@@ -278,17 +339,26 @@ export async function ensureInstsEdit(){
       if (i.id == null) return;
 
       const lab = document.createElement('label');
-      lab.className = 'chk-line';
+      lab.className = 'chk-line access-instance-row';
 
-      const labelTxt = [
-        i.name || i.slug,
-        i.number ? ` • ${i.number}` : '',
-        i.connected ? '' : ' • offline'
-      ].join('');
+      const safeName = String(i.name || i.slug || 'WhatsApp');
+      const safeNumber = String(i.number || 'Número não informado');
+      const statusText = i.connected ? 'Online' : 'Offline';
+      const statusClass = i.connected ? 'online' : 'offline';
 
       lab.innerHTML = `
         <input type="checkbox" name="inst-edit" value="${i.id}">
-        <span>${labelTxt}</span>
+        <span class="access-instance-icon" aria-hidden="true">
+          <i class="fa-brands fa-whatsapp"></i>
+        </span>
+        <span class="access-instance-copy">
+          <strong>${safeName}</strong>
+          <small>${safeNumber}</small>
+        </span>
+        <span class="access-instance-status ${statusClass}">
+          <span class="access-instance-dot" aria-hidden="true"></span>
+          ${statusText}
+        </span>
       `;
 
       const cb = lab.querySelector('input');
@@ -297,6 +367,7 @@ export async function ensureInstsEdit(){
         cb.checked = true;
       }
 
+      cb?.addEventListener('change', updateSelectionWarning);
       editGrid.appendChild(lab);
     });
   }
@@ -309,6 +380,8 @@ export async function ensureInstsEdit(){
       editGrid.querySelectorAll('input[name="inst-edit"]').forEach(cb => {
         cb.checked = true;
       });
+
+      updateSelectionWarning();
     };
   }
 
@@ -317,6 +390,10 @@ export async function ensureInstsEdit(){
       editGrid.querySelectorAll('input[name="inst-edit"]').forEach(cb => {
         cb.checked = false;
       });
+
+      updateSelectionWarning();
     };
   }
+
+  updateSelectionWarning();
 }

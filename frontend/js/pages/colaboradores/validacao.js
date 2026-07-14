@@ -79,12 +79,16 @@ export function getEditInputs(){
   };
 }
 
-export function validateFormLive(forceShow){
+export function validateFormLive(forceShow, options = {}){
   const { perfilModal } = els();
 
   const show = (typeof forceShow === 'boolean')
     ? forceShow
     : state.showErrors;
+
+  const scope = String(options?.scope || 'all').toLowerCase();
+  const validateProfile = scope === 'all' || scope === 'perfil';
+  const validateAccess = scope === 'all' || scope === 'acessos';
 
   const {
     eNome,
@@ -99,7 +103,6 @@ export function validateFormLive(forceShow){
 
   const nome = eNome?.value.trim() || '';
   const email = (eEmail?.value || '').trim();
-  const setor = eSetor?.value || '';
   const tel = eTel?.value || '';
   const cargo = eCargo?.value.trim() || '';
   const hIni = eExpIni?.value.trim() || '';
@@ -107,36 +110,59 @@ export function validateFormLive(forceShow){
   const expOn = !!eExpPersonalizar?.checked;
 
   const msgs = [];
+  const fields = [];
 
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const telDigits = digits(tel);
   const nomeOk = nome.length >= 2;
-  const setorOk = !!setor;
-  const telOk = telDigits.length >= 10;
+  const telOk = !telDigits.length || telDigits.length >= 10;
   const cargoOk = cargo.length >= 2;
 
-  if (!nomeOk) msgs.push('• Nome completo (mín. 2 letras)');
-  if (!emailOk) msgs.push('• E-mail inválido');
-  if (!setorOk) msgs.push('• Departamento (selecione um)');
-  if (!telOk) msgs.push('• Telefone com DDD (10–11 dígitos)');
-  if (!cargoOk) msgs.push('• Cargo (mín. 2 letras)');
+  if (validateProfile) {
+    if (!nomeOk) {
+      msgs.push('• Nome completo (mín. 2 letras)');
+      if (eNome) fields.push(eNome);
+    }
 
-  markValidity(eNome, show ? nomeOk : true, nomeOk ? '' : 'Nome completo (mín. 2 letras)');
-  markValidity(eEmail, show ? emailOk : true, emailOk ? '' : 'E-mail inválido');
-  markValidity(eSetor, show ? setorOk : true, setorOk ? '' : 'Selecione um departamento');
-  markValidity(eTel, show ? telOk : true, telOk ? '' : 'Telefone com DDD (10–11 dígitos)');
-  markValidity(eCargo, show ? cargoOk : true, cargoOk ? '' : 'Cargo (mín. 2 letras)');
+    if (!emailOk) {
+      msgs.push('• E-mail inválido');
+      if (eEmail) fields.push(eEmail);
+    }
+
+    if (!telOk) {
+      msgs.push('• Telefone com DDD (10–11 dígitos), se informado');
+      if (eTel) fields.push(eTel);
+    }
+
+    if (!cargoOk) {
+      msgs.push('• Cargo (mín. 2 letras)');
+      if (eCargo) fields.push(eCargo);
+    }
+
+    markValidity(eNome, show ? nomeOk : true, nomeOk ? '' : 'Nome completo (mín. 2 letras)');
+    markValidity(eEmail, show ? emailOk : true, emailOk ? '' : 'E-mail inválido');
+    markValidity(eSetor, true, '');
+    markValidity(eTel, show ? telOk : true, telOk ? '' : 'Telefone com DDD (10–11 dígitos)');
+    markValidity(eCargo, show ? cargoOk : true, cargoOk ? '' : 'Cargo (mín. 2 letras)');
+  }
 
   let hIniOk = true;
   let hFimOk = true;
   let hOrderOk = true;
 
-  if (expOn){
+  if (validateProfile && expOn){
     hIniOk = isValidTimeHHMM(hIni);
     hFimOk = isValidTimeHHMM(hFim);
 
-    if (!hIniOk) msgs.push('• Entrada do expediente no formato HH:MM');
-    if (!hFimOk) msgs.push('• Saída do expediente no formato HH:MM');
+    if (!hIniOk) {
+      msgs.push('• Entrada do expediente no formato HH:MM');
+      if (eExpIni) fields.push(eExpIni);
+    }
+
+    if (!hFimOk) {
+      msgs.push('• Saída do expediente no formato HH:MM');
+      if (eExpFim) fields.push(eExpFim);
+    }
 
     if (hIniOk && hFimOk){
       const mi = timeToMinutes(hIni);
@@ -145,6 +171,7 @@ export function validateFormLive(forceShow){
       if (mi != null && mf != null && mi >= mf){
         hOrderOk = false;
         msgs.push('• Início do expediente deve ser antes do fim');
+        if (eExpIni && !fields.includes(eExpIni)) fields.push(eExpIni);
       }
     }
 
@@ -167,13 +194,9 @@ export function validateFormLive(forceShow){
         okField ? '' : 'Informe no formato HH:MM (ex.: 18:00)'
       );
     }
-  } else {
+  } else if (validateProfile) {
     if (eExpIni) markValidity(eExpIni, true, '');
     if (eExpFim) markValidity(eExpFim, true, '');
-
-    hIniOk = true;
-    hFimOk = true;
-    hOrderOk = true;
   }
 
   let senhaOk = true;
@@ -181,57 +204,41 @@ export function validateFormLive(forceShow){
   const senhaEl = document.querySelector('#e-senha');
   const isCreate = perfilModal?.dataset.mode === 'create';
   const canPass = canEditPassword();
+  const acessoModo = document.querySelector('#modal-perfil input[name="acesso_modo"]:checked')?.value || (isCreate ? 'convite' : 'manter');
 
-  if (senhaEl && canPass) {
+  if (senhaEl && canPass && validateAccess) {
     const s = (senhaEl.value || '').trim();
+    const senhaManual = acessoModo === 'manual';
 
-    if (isCreate) {
-      const activeStep = perfilModal?.dataset.activeStep || document.querySelector('#modal-perfil .colab-tab.active')?.dataset?.tab || 'perfil';
-      const headerSave = document.querySelector('#perfil-salvar');
-      const isFinalSave = headerSave?.dataset?.wizardAction === 'save';
-      const shouldValidateSenha = activeStep === 'acessos' || activeStep === 'permissoes' || isFinalSave || show;
+    senhaOk = senhaManual ? (s.length >= 6 && s.length <= 72) : true;
 
-      senhaOk = shouldValidateSenha ? (s.length >= 6 && s.length <= 72) : true;
-
-      if (shouldValidateSenha && !senhaOk) msgs.push('• Senha (mín. 6 caracteres)');
-
-      markValidity(
-        senhaEl,
-        (show && shouldValidateSenha) ? senhaOk : true,
-        senhaOk ? '' : 'Senha (mín. 6 caracteres)'
-      );
-    } else {
-      if (s.length > 0) {
-        senhaOk = s.length >= 6 && s.length <= 72;
-
-        if (!senhaOk) msgs.push('• Senha (mín. 6 caracteres)');
-
-        markValidity(
-          senhaEl,
-          show ? senhaOk : true,
-          senhaOk ? '' : 'Senha (mín. 6 caracteres)'
-        );
-      } else {
-        markValidity(senhaEl, true, '');
-      }
+    if (!senhaOk) {
+      msgs.push('• Senha temporária (mín. 6 caracteres)');
+      fields.push(senhaEl);
     }
-  } else if (senhaEl) {
+
+    markValidity(
+      senhaEl,
+      show ? senhaOk : true,
+      senhaOk ? '' : 'Senha temporária (mín. 6 caracteres)'
+    );
+  } else if (senhaEl && validateAccess) {
     markValidity(senhaEl, true, '');
     senhaOk = true;
   }
 
+  const profileOk = nomeOk && emailOk && telOk && cargoOk && hIniOk && hFimOk && hOrderOk;
+  const accessOk = senhaOk;
   const ok =
-    nomeOk &&
-    emailOk &&
-    setorOk &&
-    telOk &&
-    cargoOk &&
-    senhaOk &&
-    hIniOk &&
-    hFimOk &&
-    hOrderOk;
+    (validateProfile ? profileOk : true) &&
+    (validateAccess ? accessOk : true);
 
-  setSaveEnabled(ok);
+  // O botão de salvar só representa o formulário completo. A validação de uma
+  // etapa isolada não deve habilitar/desabilitar o salvamento final por engano.
+  if (scope === 'all') {
+    setSaveEnabled(ok);
+  }
 
-  return { ok, msgs };
+  return { ok, msgs, fields, scope };
 }
+

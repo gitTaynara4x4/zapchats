@@ -8,6 +8,7 @@
   const EMPRESA_ID = Number(localStorage.getItem('empresa_id') || '') || null;
   const IS_COARSE = window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : false;
   const IS_MOBILE = IS_COARSE || window.innerWidth <= 920;
+  const HORA_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
   const state = {
     flat: [],
@@ -27,11 +28,13 @@
     instanciasSelecionadas: new Set(),
     editing: null,
     modalStep: 1,
+    modalMode: 'members',
     zoom: 1,
     tx: 0,
     ty: 0,
     orgTouched: false,
     openMenuId: null,
+    sideMenuOpen: false,
     stage: null,
     didAutoExpand: false
   };
@@ -56,7 +59,8 @@
   let filtro, btnAdd, btnExpand, btnCollapse, orgContainer, sidePanel;
   let zoomOut, zoomIn, zoomReset, zoomLabel;
   let modal, modalTitle, modalStepLabel, modalProgress, btnX, btnBack, btnNext, btnSave, btnCancel, form;
-  let inpId, inpNome, txtDesc, inpCodigo, chkAtivo, selParent, inpHoraInicio, inpHoraFim;
+  let modalHelpToggle, modalHelpPopover, modalHelpPopoverContent;
+  let inpId, inpNome, txtDesc, inpCodigo, chkAtivo, selParent, inpHoraInicio, inpHoraFim, chkUsarHorarioGeral;
   let parentChip, parentEdit, parentPanel;
   let membrosSearch, membrosList, membrosCount, membrosAll, membrosClear, membrosToggle, membrosPanel, membrosSummary;
   let instanciasList, instanciasCount, instanciasAll, instanciasClear;
@@ -155,7 +159,36 @@
   function normTime(val){
     const s = String(val ?? '').trim();
     const m = s.match(/^(\d{1,2}):(\d{2})/);
-    return m ? `${String(m[1]).padStart(2, '0')}:${m[2]}` : '';
+    if (!m) return '';
+    const hhmm = `${String(m[1]).padStart(2, '0')}:${m[2]}`;
+    return HORA_RE.test(hhmm) ? hhmm : '';
+  }
+
+  function hasInvalidTime(input){
+    if (!input) return false;
+    const raw = String(input.value ?? '').trim();
+    return !!raw && !normTime(raw);
+  }
+
+  function hasHorarioPersonalizado(){
+    return !!(normTime(inpHoraInicio?.value) || normTime(inpHoraFim?.value));
+  }
+
+  function syncDisponibilidadeUi(){
+    const usaGeral = chkUsarHorarioGeral ? !!chkUsarHorarioGeral.checked : !hasHorarioPersonalizado();
+    if (chkUsarHorarioGeral) chkUsarHorarioGeral.checked = usaGeral;
+    [inpHoraInicio, inpHoraFim].forEach(input => {
+      if (!input) return;
+      input.disabled = usaGeral;
+      input.closest('.time-mini-field')?.classList.toggle('is-disabled', usaGeral);
+    });
+    modal?.querySelector('.availability-custom')?.classList.toggle('is-disabled', usaGeral);
+    modal?.querySelector('.availability-card-main')?.classList.toggle('is-active', usaGeral);
+  }
+
+  function setDisponibilidadeFromCurrentValues(){
+    if (chkUsarHorarioGeral) chkUsarHorarioGeral.checked = !hasHorarioPersonalizado();
+    syncDisponibilidadeUi();
   }
 
   function normalizeRows(rows){
@@ -313,7 +346,9 @@
     if (!force && state.membrosLoaded) return state.colaboradores;
     state.membrosLoading = true;
     try {
-      const data = await apiGet('/api/colaboradores');
+      let data = null;
+      try { data = await apiGet('/api/atendimento/clientes/departamentos/colaboradores'); }
+      catch { data = await apiGet('/api/departamentos/colaboradores'); }
       state.colaboradores = normalizeColaboradores(data);
       state.membrosLoaded = true;
       return state.colaboradores;
@@ -450,14 +485,14 @@
       _collapsed: false
     };
 
-    const CARD_W = IS_MOBILE ? 250 : 282;
-    const CARD_H = IS_MOBILE ? 136 : 138;
-    const GAP_X = IS_MOBILE ? 26 : 36;
-    const GAP_Y = IS_MOBILE ? 62 : 72;
-    const ROW_GAP = IS_MOBILE ? 32 : 40;
-    const PAD_X = IS_MOBILE ? 34 : 76;
-    const PAD_Y = IS_MOBILE ? 36 : 72;
-    const BUS_GAP = IS_MOBILE ? 22 : 28;
+    const CARD_W = IS_MOBILE ? 220 : 242;
+    const CARD_H = IS_MOBILE ? 112 : 112;
+    const GAP_X = IS_MOBILE ? 18 : 26;
+    const GAP_Y = IS_MOBILE ? 48 : 56;
+    const ROW_GAP = IS_MOBILE ? 24 : 30;
+    const PAD_X = IS_MOBILE ? 28 : 58;
+    const PAD_Y = IS_MOBILE ? 30 : 56;
+    const BUS_GAP = IS_MOBILE ? 18 : 22;
 
     const viewW = Math.max(360, Number(orgContainer.clientWidth || 0));
     const maxCols = (() => {
@@ -714,10 +749,21 @@
         <button type="button" data-action="edit" data-id="${n.id}"><i class="fa-solid fa-pen-to-square"></i><strong>Editar departamento</strong><span>Nome, descrição, código e status.</span></button>
         <button type="button" data-action="add-child" data-id="${n.id}"><i class="fa-solid fa-folder-plus"></i><strong>Novo subdepartamento</strong><span>Criar abaixo deste setor.</span></button>
         <button type="button" data-action="members" data-id="${n.id}"><i class="fa-solid fa-users-gear"></i><strong>Colaboradores</strong><span>Selecionar membros deste departamento.</span></button>
+        <button type="button" data-action="schedule" data-id="${n.id}"><i class="fa-solid fa-clock"></i><strong>Disponibilidade</strong><span>Quando este setor recebe atendimentos.</span></button>
+        <button type="button" data-action="instances" data-id="${n.id}"><i class="fa-solid fa-mobile-screen-button"></i><strong>Canais de entrada</strong><span>WhatsApps que podem rotear para o setor.</span></button>
         <button type="button" data-action="transfer" data-id="${n.id}"><i class="fa-solid fa-right-left"></i><strong>Mover departamento</strong><span>Trocar o departamento principal.</span></button>
         <button type="button" class="danger" data-action="del" data-id="${n.id}"><i class="fa-solid fa-trash-can"></i><strong>Remover</strong><span>Excluir da estrutura.</span></button>
       `;
       card.appendChild(menu);
+
+      // O menu fica dentro do canvas do organograma. Sem estes stops,
+      // wheel/touch podem vazar para o pan/zoom do canvas e impedir
+      // que a lista do menu role até o final.
+      menu.addEventListener('wheel', ev => ev.stopPropagation(), { passive: true });
+      menu.addEventListener('touchmove', ev => ev.stopPropagation(), { passive: true });
+
+      const menuTrigger = card.querySelector('.org-menu-btn');
+      placeOrgActionMenu(menu, menuTrigger, card);
     }
 
     card.addEventListener('click', ev => {
@@ -759,10 +805,77 @@
     return Math.min(max, Math.max(min, Number(value) || 0));
   }
 
+  function placeOrgActionMenu(menu, trigger, card){
+    if (!menu || !trigger || !card) return;
+    const canvas = document.querySelector('.dept-canvas') || document.querySelector('.org-container') || document.body;
+
+    menu.classList.remove('is-flip-y', 'is-align-right');
+    menu.style.top = '';
+    menu.style.bottom = '';
+    menu.style.left = '';
+    menu.style.right = '';
+    menu.style.maxHeight = '';
+
+    const canvasRect = canvas.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const triggerRect = trigger.getBoundingClientRect();
+
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const safeTop = Math.max(canvasRect.top, 12);
+    const safeBottom = Math.min(canvasRect.bottom, viewportHeight - 12);
+    const safeLeft = Math.max(canvasRect.left, 12);
+    const safeRight = Math.min(canvasRect.right, viewportWidth - 12);
+
+    const openBelowTop = Math.max(40, triggerRect.bottom - cardRect.top + 8);
+    const openAboveBottom = Math.max(8, cardRect.bottom - triggerRect.top + 8);
+    const spaceBelow = Math.max(180, Math.floor(safeBottom - triggerRect.bottom - 12));
+    const spaceAbove = Math.max(180, Math.floor(triggerRect.top - safeTop - 12));
+
+    if (spaceBelow < 280 && spaceAbove > spaceBelow) {
+      menu.classList.add('is-flip-y');
+      menu.style.bottom = `${openAboveBottom}px`;
+      menu.style.maxHeight = `${Math.min(spaceAbove, 560)}px`;
+    } else {
+      menu.style.top = `${openBelowTop}px`;
+      menu.style.maxHeight = `${Math.min(spaceBelow, 560)}px`;
+    }
+
+    requestAnimationFrame(() => {
+      const rect = menu.getBoundingClientRect();
+      if (rect.right > safeRight) {
+        menu.classList.add('is-align-right');
+        menu.style.left = 'auto';
+        menu.style.right = '0';
+      }
+      const rect2 = menu.getBoundingClientRect();
+      if (rect2.left < safeLeft) {
+        menu.classList.remove('is-align-right');
+        menu.style.left = '0';
+        menu.style.right = 'auto';
+      }
+    });
+  }
+
+  function snapZoom(value){
+    const z = Number(value) || 1;
+    return Math.abs(z - 1) < .055 ? 1 : z;
+  }
+
   function applyStageTransform(){
     if (!state.stage) return;
-    state.stage.style.transform = `translate3d(${state.tx || 0}px, ${state.ty || 0}px, 0) scale(${state.zoom || 1})`;
-    if (zoomLabel) zoomLabel.textContent = `${Math.round((state.zoom || 1) * 100)}%`;
+    const zoom = snapZoom(state.zoom || 1);
+    state.zoom = zoom;
+    const tx = zoom === 1 ? Math.round(state.tx || 0) : Number((state.tx || 0).toFixed(2));
+    const ty = zoom === 1 ? Math.round(state.ty || 0) : Number((state.ty || 0).toFixed(2));
+
+    /* Evita scale fracionado no estado normal.
+       scale(0.95/0.98) deixa texto e ícones com aparência borrada no Chrome. */
+    state.stage.style.transform = zoom === 1
+      ? `translate(${tx}px, ${ty}px)`
+      : `translate(${tx}px, ${ty}px) scale(${Number(zoom.toFixed(4))})`;
+
+    if (zoomLabel) zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
   }
 
   function resetStage(){
@@ -777,7 +890,10 @@
     const fitX = boardW > 0 && viewW > 0 ? (viewW - pad * 2) / boardW : 1;
     const fitY = boardH > 0 && viewH > 0 ? (viewH - pad * 2) / boardH : 1;
     const minZoom = IS_MOBILE ? .62 : .72;
-    state.zoom = clampNumber(Math.min(1, fitX, fitY), minZoom, 1);
+    const rawFitZoom = clampNumber(Math.min(1, fitX, fitY), minZoom, 1);
+    /* Quando cabe quase inteiro, mantém 100% para não borrar as fontes.
+       Se ficar levemente maior, o usuário ainda pode arrastar ou centralizar. */
+    state.zoom = (!IS_MOBILE && rawFitZoom >= .90) ? 1 : rawFitZoom;
     state.tx = Math.round((viewW - boardW * state.zoom) / 2);
     state.ty = Math.round(Math.max(pad, (viewH - boardH * state.zoom) / 2));
     state.orgTouched = false;
@@ -792,7 +908,7 @@
     const viewH = Number(orgContainer?.clientHeight || 0);
     const ax = Number.isFinite(anchorX) ? anchorX : viewW / 2;
     const ay = Number.isFinite(anchorY) ? anchorY : viewH / 2;
-    state.zoom = clampNumber(nextZoom, .5, 2.2);
+    state.zoom = snapZoom(clampNumber(nextZoom, .5, 2.2));
     state.tx = ax - ((ax - oldTx) / oldZoom) * state.zoom;
     state.ty = ay - ((ay - oldTy) / oldZoom) * state.zoom;
     state.orgTouched = true;
@@ -830,6 +946,15 @@
     orgContainer.onpointerup = up;
     orgContainer.onpointercancel = up;
     orgContainer.onwheel = e => {
+      // Quando o mouse está em cima do menu de ações, a rolagem deve
+      // descer/subir o próprio menu. Antes o canvas interceptava o wheel,
+      // dava preventDefault e transformava tudo em zoom, por isso o menu
+      // parecia travado.
+      if (e.target.closest('.org-action-menu')) {
+        e.stopPropagation();
+        return;
+      }
+
       e.preventDefault();
       const rect = orgContainer.getBoundingClientRect();
       const factor = Math.pow(1.0015, -e.deltaY);
@@ -845,6 +970,28 @@
     loadSelectedMembers().catch(err => console.warn('[departamentos] membros painel', err));
   }
 
+  function sideActionMenuHtml(isRoot, id){
+    if (!state.sideMenuOpen) return '';
+    if (isRoot) {
+      return `
+        <div class="side-action-menu" role="menu">
+          <button type="button" data-action="add-child" data-id="0"><i class="fa-solid fa-plus"></i><span>Novo departamento</span></button>
+          <button type="button" data-action="fit" data-id="0"><i class="fa-solid fa-crosshairs"></i><span>Centralizar</span></button>
+        </div>
+      `;
+    }
+    return `
+      <div class="side-action-menu" role="menu">
+        <button type="button" data-action="edit" data-id="${id}"><i class="fa-solid fa-pen-to-square"></i><span>Editar departamento</span></button>
+        <button type="button" data-action="members" data-id="${id}"><i class="fa-solid fa-users-gear"></i><span>Colaboradores</span></button>
+        <button type="button" data-action="schedule" data-id="${id}"><i class="fa-solid fa-clock"></i><span>Disponibilidade</span></button>
+        <button type="button" data-action="instances" data-id="${id}"><i class="fa-solid fa-mobile-screen-button"></i><span>Canais de entrada</span></button>
+        <button type="button" data-action="transfer" data-id="${id}"><i class="fa-solid fa-right-left"></i><span>Mover departamento</span></button>
+        <button type="button" class="danger" data-action="del" data-id="${id}"><i class="fa-solid fa-trash-can"></i><span>Remover</span></button>
+      </div>
+    `;
+  }
+
   function renderSidePanel(loading = false){
     if (!sidePanel) return;
     const isRoot = !state.selectedId;
@@ -853,7 +1000,6 @@
     const subtitle = isRoot ? 'Raiz da empresa' : (dept?.descricao || dept?.codigo || 'Departamento');
     const members = loading ? [] : (isRoot ? [] : state.selectedMembers || []);
     const total = isRoot ? state.flat.length : members.length;
-    const supervisorCount = 0;
 
     const peopleHtml = members.length ? members.map(p => personRowHtml(p)).join('') : `
       <div class="side-empty">
@@ -871,8 +1017,9 @@
           <small>${escapeHtml(subtitle)}</small>
         </div>
         <div class="side-icons">
-          <button type="button" data-action="menu" data-id="${state.selectedId || 0}" title="Ações"><i class="fa-solid fa-ellipsis"></i></button>
+          <button type="button" class="${state.sideMenuOpen ? 'is-open' : ''}" data-action="menu" data-id="${state.selectedId || 0}" title="Ações"><i class="fa-solid fa-ellipsis"></i></button>
           <button type="button" data-action="fit" data-id="0" title="Centralizar"><i class="fa-solid fa-arrow-down-short-wide"></i></button>
+          ${sideActionMenuHtml(isRoot, state.selectedId || 0)}
         </div>
       </div>
       <div class="side-body">
@@ -884,18 +1031,19 @@
           <i class="fa-solid fa-magnifying-glass"></i>
           <input id="side-people-search" type="search" placeholder="Buscar por nome ou cargo" autocomplete="off" spellcheck="false">
         </label>
+        ${isRoot ? '' : `
         <section class="side-section">
-          <div class="section-head"><h3>Supervisores <b>${supervisorCount}</b></h3><button type="button" data-action="members" data-id="${state.selectedId || 0}">Ações <i class="fa-solid fa-caret-down"></i></button></div>
-          <div class="assign-box"><i class="fa-solid fa-id-badge"></i><span>Atribuir supervisores</span></div>
-        </section>
-        <section class="side-section">
-          <div class="section-head"><h3>Colaboradores <b>${loading ? '' : total}</b></h3><button type="button" data-action="members" data-id="${state.selectedId || 0}">Ações <i class="fa-solid fa-caret-down"></i></button></div>
+          <div class="section-head">
+            <h3>Colaboradores <b>${loading ? '' : total}</b></h3>
+            <button type="button" class="section-action-btn" data-action="members" data-id="${state.selectedId || 0}">Gerenciar</button>
+          </div>
           <div id="side-people-list" class="people-list">${loading ? '<div class="members-empty">Carregando...</div>' : peopleHtml}</div>
         </section>
+        `}
         <div class="side-bottom">
           <div class="info-box"><span>Status</span><strong>${isRoot || dept?.ativo !== false ? 'Ativo' : 'Inativo'}</strong></div>
           <div class="info-box"><span>Código</span><strong>${escapeHtml(isRoot ? 'Empresa' : (dept?.codigo || 'Departamento'))}</strong></div>
-          <div class="info-box"><span>Horário</span><strong>${escapeHtml(isRoot ? 'Geral' : ([dept?.hora_login_inicio_padrao, dept?.hora_login_fim_padrao].filter(Boolean).join(' às ') || 'Não definido'))}</strong></div>
+          <div class="info-box"><span>Disponibilidade</span><strong>${escapeHtml(isRoot ? 'Geral' : ([dept?.hora_login_inicio_padrao, dept?.hora_login_fim_padrao].filter(Boolean).join(' às ') || 'Geral da empresa'))}</strong></div>
         </div>
       </div>
     `;
@@ -984,7 +1132,7 @@
       item.type = 'button';
       item.className = 'parent-item' + (String(selParent.value || '') === String(value || '') ? ' selected' : '');
       item.style.paddingLeft = `${10 + level * 18}px`;
-      item.innerHTML = `<i class="fa-solid ${value ? 'fa-sitemap' : 'fa-building'}"></i><span>${escapeHtml(text)}</span>`;
+      item.innerHTML = `<span class="parent-item-symbol" aria-hidden="true">${value ? 'D' : 'E'}</span><span>${escapeHtml(text)}</span>`;
       item.addEventListener('click', () => {
         selParent.value = value == null ? '' : String(value);
         setParentUi();
@@ -1158,8 +1306,54 @@
     return Array.from(state.membrosSelecionados || []).map(Number).filter(n => Number.isFinite(n) && n > 0);
   }
 
+
+  const HELP_CONTENT = {
+    step1: '<strong>Etapa 1</strong><p>Defina o local do departamento na estrutura, o nome e uma descrição opcional.</p>',
+    step2: '<strong>Etapa 2</strong><p>Selecione os colaboradores que poderão visualizar e atender este departamento.</p>',
+    step3: '<strong>Etapa 3</strong><p>Revise os dados antes de salvar.</p>',
+    parent: '<strong>Fica dentro de</strong><p>Escolha onde este departamento aparece na estrutura. Se ele ficar direto na raiz, deixe como Empresa.</p>',
+    nome: '<strong>Nome</strong><p>Use um nome curto e claro, como Financeiro, Comercial ou Suporte.</p>',
+    descricao: '<strong>Descrição</strong><p>Explique rapidamente a função do departamento ou o tipo de atendimento que ele faz.</p>',
+    codigo: '<strong>Código</strong><p>Opcional. Pode ser uma sigla interna, como FIN, COM ou SUP.</p>',
+    schedule: '<strong>Disponibilidade do setor</strong><p>Define quando este departamento pode receber novos atendimentos. Isso não altera o horário dos colaboradores.</p>',
+    instances: '<strong>Canais de entrada</strong><p>Use apenas para roteamento: estes WhatsApps podem encaminhar conversas para o departamento. Isso não libera acesso ao número para colaboradores; esse acesso continua em Colaboradores.</p>'
+  };
+
+  function currentStepHelpKey(){
+    if (state.modalStep === 2 && state.modalMode === 'schedule') return 'schedule';
+    if (state.modalStep === 2 && state.modalMode === 'instances') return 'instances';
+    return state.modalStep === 1 ? 'step1' : state.modalStep === 2 ? 'step2' : 'step3';
+  }
+
+  function openHelpPopover(anchor, key){
+    if (!modalHelpPopover || !modalHelpPopoverContent || !anchor) return;
+    const html = HELP_CONTENT[key] || HELP_CONTENT[currentStepHelpKey()] || '';
+    modalHelpPopoverContent.innerHTML = html;
+    modalHelpPopover.hidden = false;
+    modalHelpPopover.dataset.key = key || '';
+
+    const card = modal?.querySelector('.modal-card');
+    if (!card) return;
+    const a = anchor.getBoundingClientRect();
+    const c = card.getBoundingClientRect();
+    const top = (a.bottom - c.top) + 10;
+    let left = (a.left - c.left) - 120;
+    const minLeft = 20;
+    const maxLeft = Math.max(20, c.width - 300);
+    left = Math.max(minLeft, Math.min(maxLeft, left));
+    modalHelpPopover.style.top = `${top}px`;
+    modalHelpPopover.style.left = `${left}px`;
+  }
+
+  function closeHelpPopover(){
+    if (!modalHelpPopover) return;
+    modalHelpPopover.hidden = true;
+    modalHelpPopover.dataset.key = '';
+  }
+
   function showModal(){
     if (!modal) return;
+    closeHelpPopover();
     modal.classList.add('open');
     modal.style.display = 'grid';
     modal.setAttribute('aria-hidden', 'false');
@@ -1177,29 +1371,40 @@
     toggleParentPanel(false);
     if (membrosPanel) membrosPanel.hidden = true;
     if (membrosToggle) membrosToggle.textContent = 'Gerenciar';
+    closeHelpPopover();
     state.editing = null;
   }
 
   function onEscClose(e){ if (e.key === 'Escape') closeModal(); }
 
   async function ensureModalListsReady(deptId = null){
-    await loadInstancias();
-    renderInstanciasList();
+    const mode = state.modalMode || 'members';
+    if (mode === 'instances') {
+      await loadInstancias();
+      renderInstanciasList();
+      renderWizardPreview();
+      return;
+    }
+    if (mode === 'schedule') {
+      renderWizardPreview();
+      return;
+    }
     await prepareMembrosModal(deptId);
   }
 
   function resetModalListsPlaceholders(){
     state.membrosSelecionados = new Set();
-    if (membrosList) membrosList.innerHTML = '<div class="members-empty">Abra o gerenciador para carregar a lista.</div>';
-    if (membrosPanel) membrosPanel.hidden = true;
+    if (membrosList) membrosList.innerHTML = '<div class="members-empty">Carregando colaboradores...</div>';
+    if (membrosPanel) membrosPanel.hidden = false;
     if (membrosToggle) membrosToggle.textContent = 'Gerenciar';
-    if (instanciasList) instanciasList.innerHTML = '<div class="members-empty">Carregando instâncias...</div>';
+    if (instanciasList) instanciasList.innerHTML = '';
     updateMembrosCount();
     updateInstanciasCount();
   }
 
-  async function openModalNovo(parentId = null, step = 1){
+  async function openModalNovo(parentId = null, step = 1, mode = 'members'){
     state.editing = null;
+    state.modalMode = mode || 'members';
     fillParentSelect();
     form?.reset();
     inpId.value = '';
@@ -1209,6 +1414,8 @@
     chkAtivo.checked = true;
     if (inpHoraInicio) inpHoraInicio.value = '';
     if (inpHoraFim) inpHoraFim.value = '';
+    if (chkUsarHorarioGeral) chkUsarHorarioGeral.checked = true;
+    syncDisponibilidadeUi();
     state.instanciasSelecionadas = new Set();
     selParent.value = parentId ? String(parentId) : '';
     setParentUi();
@@ -1219,9 +1426,10 @@
     setTimeout(() => inpNome?.focus(), 60);
   }
 
-  async function openModalEditar(item, step = 1){
+  async function openModalEditar(item, step = 1, mode = 'members'){
     if (!item) return;
     state.editing = item;
+    state.modalMode = mode || 'members';
     fillParentSelect();
     inpId.value = String(item.id);
     inpNome.value = item.nome || labelOf(item) || '';
@@ -1230,6 +1438,7 @@
     chkAtivo.checked = item.ativo !== false;
     if (inpHoraInicio) inpHoraInicio.value = normTime(item.hora_login_inicio_padrao);
     if (inpHoraFim) inpHoraFim.value = normTime(item.hora_login_fim_padrao);
+    setDisponibilidadeFromCurrentValues();
     state.instanciasSelecionadas = new Set(Array.isArray(item.whatsapp_instancias) ? item.whatsapp_instancias.map(Number).filter(Boolean) : []);
     selParent.value = item.parent_id ? String(item.parent_id) : '';
     setParentUi();
@@ -1241,6 +1450,7 @@
         inpCodigo.value = det.codigo ?? det.code ?? inpCodigo.value ?? '';
         if (inpHoraInicio) inpHoraInicio.value = normTime(det.hora_login_inicio_padrao ?? det.login_inicio_padrao ?? item.hora_login_inicio_padrao);
         if (inpHoraFim) inpHoraFim.value = normTime(det.hora_login_fim_padrao ?? det.login_fim_padrao ?? item.hora_login_fim_padrao);
+        setDisponibilidadeFromCurrentValues();
         state.instanciasSelecionadas = new Set((det.whatsapp_instancias || item.whatsapp_instancias || []).map(Number).filter(Boolean));
       }
     } catch {}
@@ -1249,18 +1459,30 @@
     if (step >= 2) await ensureModalListsReady(item.id);
     setModalStep(step);
     showModal();
-    setTimeout(() => (step === 1 ? inpNome : membrosSearch)?.focus(), 60);
+    setTimeout(() => {
+      if (step === 1) inpNome?.focus();
+      else if (state.modalMode === 'schedule') chkUsarHorarioGeral?.focus();
+      else if (state.modalMode === 'instances') instanciasList?.querySelector('input')?.focus();
+      else membrosSearch?.focus();
+    }, 60);
   }
 
   function setModalStep(step){
     state.modalStep = clampNumber(step, 1, 3);
+    const mode = state.modalMode || 'members';
+    const modalCard = modal?.querySelector('.modal-card');
+    if (modalCard) {
+      modalCard.classList.toggle('modal-mode-members', mode === 'members');
+      modalCard.classList.toggle('modal-mode-schedule', mode === 'schedule');
+      modalCard.classList.toggle('modal-mode-instances', mode === 'instances');
+    }
     $$('.wizard-step').forEach(el => el.classList.toggle('is-active', Number(el.dataset.step) === state.modalStep));
     if (modalStepLabel) modalStepLabel.textContent = `Etapa ${state.modalStep} de 3`;
     if (modalTitle) {
       modalTitle.textContent = state.modalStep === 1
         ? 'Nome e descrição do departamento'
         : state.modalStep === 2
-          ? 'Horário, instâncias e colaboradores'
+          ? (mode === 'schedule' ? 'Disponibilidade do setor' : mode === 'instances' ? 'Canais de entrada do departamento' : 'Equipe do departamento')
           : 'Revisão e conclusão';
     }
 
@@ -1269,10 +1491,12 @@
       if (stepItems.length) {
         stepItems.forEach(item => {
           const idx = Number(item.dataset.stepIndex || 0);
+          const textEl = $('.step-text', item);
+          if (idx === 2 && textEl) textEl.textContent = mode === 'schedule' ? 'Disponibilidade' : mode === 'instances' ? 'Canais' : 'Equipe';
           item.classList.toggle('is-active', idx === state.modalStep);
           item.classList.toggle('is-complete', idx < state.modalStep);
           const dot = $('.step-dot', item);
-          if (dot) dot.innerHTML = idx < state.modalStep ? '<i class="fa-solid fa-check"></i>' : String(idx || '');
+          if (dot) dot.textContent = idx < state.modalStep ? '✓' : String(idx || '');
         });
         $$('.step-line', modalProgress).forEach((line, idx) => {
           line.classList.toggle('is-complete', idx + 1 < state.modalStep);
@@ -1283,9 +1507,18 @@
       }
     }
 
-    if (btnBack) btnBack.style.visibility = state.modalStep > 1 ? 'visible' : 'hidden';
-    if (btnNext) btnNext.style.display = state.modalStep < 3 ? 'inline-flex' : 'none';
-    if (btnSave) btnSave.style.display = state.modalStep === 3 ? 'inline-flex' : 'none';
+    const isScheduleQuick = state.modalStep === 2 && mode === 'schedule';
+    if (btnBack) btnBack.style.visibility = (state.modalStep > 1 && !isScheduleQuick) ? 'visible' : 'hidden';
+    if (btnNext) btnNext.style.display = (state.modalStep < 3 && !isScheduleQuick) ? 'inline-flex' : 'none';
+    if (btnSave) {
+      btnSave.style.display = (state.modalStep === 3 || isScheduleQuick) ? 'inline-flex' : 'none';
+      btnSave.innerHTML = isScheduleQuick
+        ? 'Salvar disponibilidade <i class="fa-solid fa-check"></i>'
+        : 'Salvar <i class="fa-solid fa-check"></i>';
+    }
+    if (modalHelpToggle) modalHelpToggle.title = isScheduleQuick ? 'Ajuda sobre disponibilidade' : 'Ajuda da etapa';
+    if (isScheduleQuick) syncDisponibilidadeUi();
+    closeHelpPopover();
     renderWizardPreview();
   }
 
@@ -1298,6 +1531,17 @@
     if (step === 2) {
       const hi = normTime(inpHoraInicio?.value);
       const hf = normTime(inpHoraFim?.value);
+      const usaGeral = chkUsarHorarioGeral ? !!chkUsarHorarioGeral.checked : !hasHorarioPersonalizado();
+      if ((state.modalMode || 'members') === 'schedule' && !usaGeral && (hasInvalidTime(inpHoraInicio) || hasInvalidTime(inpHoraFim))) {
+        toast('Horário inválido. Use o formato HH:MM, exemplo 08:00.', 'warn');
+        (hasInvalidTime(inpHoraInicio) ? inpHoraInicio : inpHoraFim)?.focus();
+        return false;
+      }
+      if ((state.modalMode || 'members') === 'schedule' && !usaGeral && (!hi || !hf)) {
+        toast('Informe entrada e saída ou use o horário geral da empresa.', 'warn');
+        (!hi ? inpHoraInicio : inpHoraFim)?.focus();
+        return false;
+      }
       if (hi && hf && hi > hf) {
         toast('O horário de entrada não pode ser maior que o de saída.', 'warn');
         inpHoraInicio?.focus();
@@ -1314,7 +1558,8 @@
     const parentText = selParent?.options[selParent.selectedIndex]?.textContent?.replace(/^—\s*/g, '').trim() || company;
     const count = state.membrosSelecionados?.size || 0;
     const horarios = [normTime(inpHoraInicio?.value), normTime(inpHoraFim?.value)].filter(Boolean);
-    const horarioLabel = horarios.length === 2 ? `${horarios[0]} às ${horarios[1]}` : horarios.length === 1 ? horarios[0] : 'Não definido';
+    const usarHorarioGeral = chkUsarHorarioGeral ? !!chkUsarHorarioGeral.checked : horarios.length === 0;
+    const horarioLabel = usarHorarioGeral ? 'Geral da empresa' : (horarios.length === 2 ? `${horarios[0]} às ${horarios[1]}` : horarios.length === 1 ? horarios[0] : 'Não definido');
     const instanciasQtd = state.instanciasSelecionadas?.size || 0;
 
     const previewHtml = `
@@ -1328,7 +1573,6 @@
         </div>
         <div class="preview-dept-meta">
           <span>Colaboradores <b>${count} colaborador${count === 1 ? '' : 'es'}</b></span>
-          <span>Instâncias <b>${instanciasQtd}</b></span>
         </div>
       </div>
     `;
@@ -1349,20 +1593,30 @@
   }
 
   function getPayload(){
-    return {
+    const usaHorarioGeral = chkUsarHorarioGeral ? !!chkUsarHorarioGeral.checked : !hasHorarioPersonalizado();
+    const payload = {
       nome: (inpNome.value || '').trim(),
       descricao: (txtDesc.value || '').trim() || null,
       parent_id: selParent.value ? Number(selParent.value) : null,
       codigo: (inpCodigo.value || '').trim() || null,
       ativo: !!chkAtivo.checked,
-      hora_login_inicio_padrao: normTime(inpHoraInicio?.value) || null,
-      hora_login_fim_padrao: normTime(inpHoraFim?.value) || null,
-      whatsapp_instancias: getInstanciasSelecionadas()
+      hora_login_inicio_padrao: usaHorarioGeral ? null : (normTime(inpHoraInicio?.value) || null),
+      hora_login_fim_padrao: usaHorarioGeral ? null : (normTime(inpHoraFim?.value) || null)
     };
+
+    // Segurança de dados: só envia canais/instâncias quando essa tela foi aberta
+    // especificamente para editar canais. Assim editar nome, equipe ou horário
+    // nunca limpa vínculos de WhatsApp por acidente.
+    if ((state.modalMode || 'members') === 'instances') {
+      payload.whatsapp_instancias = getInstanciasSelecionadas();
+    }
+
+    return payload;
   }
 
   async function saveDepto(){
     if (!validateStep(1)) return;
+    if ((state.modalMode || 'members') === 'schedule' && state.modalStep === 2 && !validateStep(2)) return;
     const payload = getPayload();
     try {
       Loader.show('Salvando...');
@@ -1371,7 +1625,9 @@
         try { saved = await apiJSON(`/api/atendimento/clientes/departamentos/${state.editing.id}`, 'PUT', payload); }
         catch { saved = await apiJSON(`/api/departamentos/${state.editing.id}`, 'PUT', payload); }
         const id = Number(saved?.id || state.editing.id);
-        await saveDepartamentoMembros(id, getMembrosSelecionados());
+        if ((state.modalMode || 'members') === 'members') {
+          await saveDepartamentoMembros(id, getMembrosSelecionados());
+        }
         state.selectedId = id;
         toast('Departamento atualizado.');
       } else {
@@ -1379,7 +1635,9 @@
         catch { saved = await apiJSON('/api/departamentos', 'POST', payload); }
         const id = Number(saved?.id || 0);
         if (id) {
-          await saveDepartamentoMembros(id, getMembrosSelecionados());
+          if ((state.modalMode || 'members') === 'members') {
+            await saveDepartamentoMembros(id, getMembrosSelecionados());
+          }
           state.selectedId = id;
         }
         toast('Departamento criado.');
@@ -1453,6 +1711,11 @@
 
     btnX?.addEventListener('click', closeModal);
     btnCancel?.addEventListener('click', closeModal);
+    modalHelpToggle?.addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (!modalHelpPopover?.hidden && modalHelpPopover?.dataset.key === currentStepHelpKey()) closeHelpPopover();
+      else openHelpPopover(modalHelpToggle, currentStepHelpKey());
+    });
     btnBack?.addEventListener('click', () => setModalStep(state.modalStep - 1));
     btnNext?.addEventListener('click', async () => {
       if (!validateStep(state.modalStep)) return;
@@ -1479,8 +1742,16 @@
     txtDesc?.addEventListener('input', renderWizardPreview);
     chkAtivo?.addEventListener('change', renderWizardPreview);
     selParent?.addEventListener('change', () => { setParentUi(); renderWizardPreview(); });
-    inpHoraInicio?.addEventListener('input', renderWizardPreview);
-    inpHoraFim?.addEventListener('input', renderWizardPreview);
+    chkUsarHorarioGeral?.addEventListener('change', () => {
+      if (chkUsarHorarioGeral.checked) {
+        if (inpHoraInicio) inpHoraInicio.value = '';
+        if (inpHoraFim) inpHoraFim.value = '';
+      }
+      syncDisponibilidadeUi();
+      renderWizardPreview();
+    });
+    inpHoraInicio?.addEventListener('input', () => { if (chkUsarHorarioGeral && hasHorarioPersonalizado()) chkUsarHorarioGeral.checked = false; syncDisponibilidadeUi(); renderWizardPreview(); });
+    inpHoraFim?.addEventListener('input', () => { if (chkUsarHorarioGeral && hasHorarioPersonalizado()) chkUsarHorarioGeral.checked = false; syncDisponibilidadeUi(); renderWizardPreview(); });
 
     membrosSearch?.addEventListener('input', debounce(renderMembrosList, 120));
     membrosToggle?.addEventListener('click', () => {
@@ -1516,17 +1787,31 @@
         const action = actionBtn.dataset.action;
         const id = Number(actionBtn.dataset.id || 0);
         const item = findDept(id);
+
+        if (action === 'menu') {
+          ev.preventDefault();
+          ev.stopPropagation();
+          state.openMenuId = null;
+          state.sideMenuOpen = !state.sideMenuOpen;
+          renderSidePanel();
+          return;
+        }
+
         state.openMenuId = null;
+        state.sideMenuOpen = false;
         if (action === 'edit' && item) openModalEditar(item, 1);
         else if (action === 'add-child') openModalNovo(id || null, 1);
         else if (action === 'members') {
-          if (item) openModalEditar(item, 2);
-          else openModalNovo(null, 2);
+          if (item) openModalEditar(item, 2, 'members');
+          else openModalNovo(null, 2, 'members');
         }
+        else if (action === 'schedule' && item) openModalEditar(item, 2, 'schedule');
+        else if (action === 'instances' && item) openModalEditar(item, 2, 'instances');
         else if (action === 'transfer' && item) openModalEditar(item, 1);
         else if (action === 'del') deleteDepto(id);
         else if (action === 'fit') resetStage();
         else if (action === 'invite') toast('Convite fica para a tela de colaboradores. Aqui deixei apenas o atalho visual para facilitar.', 'warn');
+        renderSidePanel();
         renderOrg();
         return;
       }
@@ -1536,6 +1821,22 @@
           renderOrg();
         }
       }
+      if (!ev.target.closest('.side-action-menu,.side-icons')) {
+        if (state.sideMenuOpen) {
+          state.sideMenuOpen = false;
+          renderSidePanel();
+        }
+      }
+      const helpBtn = ev.target.closest('.field-help-icon');
+      if (helpBtn) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const key = helpBtn.dataset.helpKey || currentStepHelpKey();
+        if (!modalHelpPopover?.hidden && modalHelpPopover?.dataset.key === key) closeHelpPopover();
+        else openHelpPopover(helpBtn, key);
+        return;
+      }
+      if (!ev.target.closest('#modal-help-popover') && !ev.target.closest('.field-help-icon') && !ev.target.closest('#modal-help-toggle')) closeHelpPopover();
       if (!ev.target.closest('.parent-fi')) toggleParentPanel(false);
     });
 
@@ -1562,6 +1863,9 @@
     modalTitle = $('#modal-title');
     modalStepLabel = $('#modal-step-label');
     modalProgress = $('.modal-progress');
+    modalHelpToggle = $('#modal-help-toggle');
+    modalHelpPopover = $('#modal-help-popover');
+    modalHelpPopoverContent = $('#modal-help-popover-content');
     btnX = $('#modal-fechar');
     btnBack = $('#modal-voltar');
     btnNext = $('#modal-avancar');
@@ -1575,6 +1879,7 @@
     chkAtivo = $('#d-ativo');
     inpHoraInicio = $('#d-hora-inicio');
     inpHoraFim = $('#d-hora-fim');
+    chkUsarHorarioGeral = $('#d-usar-horario-geral');
     selParent = $('#d-parent');
     parentChip = $('#parent-chip');
     parentEdit = $('#parent-edit');

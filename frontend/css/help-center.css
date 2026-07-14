@@ -1,0 +1,10 @@
+/* Help Center global
+   Mantido separado porque o head-base carrega este arquivo em todas as páginas.
+   O visual principal fica nos arquivos /frontend/js/help/help-*.js, que injetam
+   o CSS do tour da página. Este CSS só garante pequenos ajustes globais seguros. */
+
+.zc-help-center-ready [data-help-center-open],
+.zc-help-center-ready [data-help-open],
+.zc-help-center-ready .js-help-open{
+  cursor:pointer;
+}

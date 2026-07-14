@@ -1167,6 +1167,17 @@ class Atendimento(Base):
         Index("ix_atendimentos_empresa_cli_inst", "empresa_id", "cliente_id", "instancia_id"),
         Index("ix_atendimentos_operador", "operador_id"),
         Index("ix_atendimentos_fila", "fila_id"),
+        Index(
+            "uq_atendimentos_um_aberto_conversa",
+            "empresa_id",
+            "cliente_id",
+            "instancia_id",
+            unique=True,
+            postgresql_where=text(
+                "instancia_id IS NOT NULL AND "
+                "status IN ('novo'::statusatendimento, 'aguardando'::statusatendimento, 'em_atendimento'::statusatendimento, 'pausado'::statusatendimento)"
+            ),
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -1285,6 +1296,13 @@ class AtendimentoParticipante(Base):
         Index("ix_atd_participante_atendimento", "empresa_id", "atendimento_id"),
         Index("ix_atd_participante_colaborador", "empresa_id", "colaborador_id"),
         Index("ix_atd_participante_ativo", "empresa_id", "is_ativo"),
+        Index(
+            "uq_atd_participante_um_ativo",
+            "empresa_id",
+            "atendimento_id",
+            unique=True,
+            postgresql_where=text("is_ativo IS TRUE"),
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -1602,11 +1620,12 @@ class DepartamentoMembro(Base):
     id = Column(Integer, primary_key=True, index=True)
     empresa_id      = Column(Integer, nullable=False, index=True)
     departamento_id = Column(Integer, ForeignKey("departamentos.id", ondelete="CASCADE"), nullable=False, index=True)
-    colaborador_id  = Column(Integer, nullable=False, index=True)
+    colaborador_id  = Column(Integer, ForeignKey("colaboradores.id", ondelete="CASCADE"), nullable=False, index=True)
     role            = Column(String(32), nullable=False, server_default="member")
     is_primary      = Column(Boolean, nullable=False, server_default="false")
 
     departamento = relationship("Departamento", backref=backref("membros", cascade="all, delete-orphan"))
+    colaborador = relationship("Colaborador", backref=backref("departamentos_membros", cascade="all, delete-orphan"))
 
     __table_args__ = (
         UniqueConstraint("empresa_id", "departamento_id", "colaborador_id", name="uq_dep_membro"),

@@ -82,6 +82,14 @@ function statusInfo(c){
     return { label:'Offline', cls:'offline' };
   }
 
+  if (c?.troca_senha_pendente) {
+    return { label:'Trocar senha', cls:'warn' };
+  }
+
+  if (c?.convite_pendente) {
+    return { label:'Convite pendente', cls:'warn' };
+  }
+
   if (c?.tem_usuario === false) {
     return { label:'Sem login', cls:'warn' };
   }
@@ -174,6 +182,9 @@ function syncSelectAllState(){
 
   const selectedEl = $('#overview-colab-selected');
   if (selectedEl) selectedEl.textContent = checked.length;
+
+  const selectedStatEl = $('#stat-colab-selected');
+  if (selectedStatEl) selectedStatEl.textContent = checked.length;
 }
 
 export function renderLista(){
@@ -181,6 +192,21 @@ export function renderLista(){
   const rows = filteredRows();
 
   if (countEl) countEl.textContent = rows.length;
+
+  const activeCount = rows.filter(c => statusInfo(c).cls === 'active').length;
+  const pendingCount = Math.max(0, rows.length - activeCount);
+
+  const statTotal = $('#stat-colab-total');
+  if (statTotal) statTotal.textContent = rows.length;
+
+  const statActive = $('#stat-colab-active');
+  if (statActive) statActive.textContent = activeCount;
+
+  const statPending = $('#stat-colab-pending');
+  if (statPending) statPending.textContent = pendingCount;
+
+  const securityText = $('#stat-security-text');
+  if (securityText) securityText.textContent = $('#chk-requer-token')?.checked ? 'Código ativo' : 'Segurança extra';
 
   const overviewTotal = $('#overview-colab-total');
   if (overviewTotal) overviewTotal.textContent = rows.length;
@@ -351,6 +377,8 @@ export function bindLista(){
 
   if (chkRequerToken){
     chkRequerToken.addEventListener('change', () => {
+      const securityText = $('#stat-security-text');
+      if (securityText) securityText.textContent = chkRequerToken.checked ? 'Código ativo' : 'Segurança extra';
       saveEmpresaLoginConfig(chkRequerToken.checked);
     });
   }

@@ -1,13 +1,20 @@
-#backend\routers\atendimento_conversas\participantes.py
+# backend/routers/atendimento_conversas/participantes.py
 from __future__ import annotations
 
 from typing import Optional, List, Dict, Any
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import literal
 
 from backend import models
+from backend.services.atendimento_claim_state import (
+    RESPONSAVEL_ROLE,
+    PARTICIPANTE_ROLE,
+    claim_exclusive_operator,
+    deactivate_all_participants,
+    release_to_queue,
+    repair_single_responsible,
+)
 
 from .utils import (
     _participant_feature_enabled,
@@ -25,8 +32,16 @@ from .colaborador_helpers import (
 
 
 # =========================================================
-# Participantes / aceite compartilhado
+# Participantes / responsável único
 # =========================================================
+def _role_is_responsavel(value: Any) -> bool:
+    return str(value or "").strip().lower() in {
+        RESPONSAVEL_ROLE,
+        "responsible",
+        "owner",
+    }
+
+
 def _list_active_participant_rows(
     db: Session,
     *,
@@ -45,6 +60,8 @@ def _list_active_participant_rows(
 
     if hasattr(AP, "is_ativo"):
         q = q.filter(AP.is_ativo.is_(True))
+    elif hasattr(AP, "saiu_em"):
+        q = q.filter(AP.saiu_em.is_(None))
 
     return q.order_by(AP.id.asc()).all()
 
@@ -55,56 +72,68 @@ def _active_participants_snapshot_map(
     empresa_id: int,
     atendimento_ids: List[int],
 ) -> Dict[int, List[Dict[str, Any]]]:
+    """
+    Snapshot somente do responsável efetivo.
+
+    Bancos antigos podem ter mais de um participante ativo. A tela não deve
+    interpretar isso como atendimento compartilhado: operador_id é a fonte de
+    verdade e, na ausência dele, escolhemos o vínculo responsável mais recente.
+    As ações aceitar/liberar/transferir e a migração de startup normalizam o banco.
+    """
     if not atendimento_ids or not _participant_feature_enabled(db):
         return {}
 
     AP = models.AtendimentoParticipante
     C = models.Colaborador
+    A = models.Atendimento
 
-    cols = [
-        AP.atendimento_id.label("atendimento_id"),
-        AP.colaborador_id.label("colaborador_id"),
-        C.nome.label("colaborador_nome"),
-        (AP.aceito_em if hasattr(AP, "aceito_em") else literal(None)).label("aceito_em"),
-        (AP.is_responsavel if hasattr(AP, "is_responsavel") else literal(False)).label("is_responsavel"),
-    ]
-
-    q = (
-        db.query(*cols)
+    rows = (
+        db.query(
+            AP.id.label("participante_id"),
+            AP.atendimento_id.label("atendimento_id"),
+            AP.colaborador_id.label("colaborador_id"),
+            AP.role.label("role"),
+            AP.entrou_em.label("entrou_em"),
+            C.nome.label("colaborador_nome"),
+            A.operador_id.label("operador_id"),
+        )
         .join(C, C.id == AP.colaborador_id)
+        .join(A, A.id == AP.atendimento_id)
         .filter(
             AP.empresa_id == int(empresa_id),
             AP.atendimento_id.in_([int(x) for x in atendimento_ids]),
+            AP.is_ativo.is_(True),
         )
+        .all()
     )
 
-    if hasattr(AP, "is_ativo"):
-        q = q.filter(AP.is_ativo.is_(True))
-
-    rows = q.all()
+    grouped: Dict[int, List[Any]] = {}
+    for row in rows:
+        grouped.setdefault(int(row.atendimento_id), []).append(row)
 
     out: Dict[int, List[Dict[str, Any]]] = {}
 
-    for r in rows:
-        aid = int(r.atendimento_id)
-
-        out.setdefault(aid, []).append(
-            {
-                "colaborador_id": int(r.colaborador_id),
-                "nome": r.colaborador_nome,
-                "aceito_em": _iso(getattr(r, "aceito_em", None)),
-                "is_responsavel": bool(getattr(r, "is_responsavel", False)),
-            }
-        )
-
-    for aid in out.keys():
-        out[aid].sort(
-            key=lambda x: (
-                0 if x.get("is_responsavel") else 1,
-                str(x.get("nome") or "").lower(),
-                int(x.get("colaborador_id") or 0),
+    for atendimento_id, candidates in grouped.items():
+        candidates.sort(
+            key=lambda r: (
+                0
+                if _to_int(getattr(r, "operador_id", None))
+                == _to_int(getattr(r, "colaborador_id", None))
+                else 1,
+                0 if _role_is_responsavel(getattr(r, "role", None)) else 1,
+                -int(getattr(r, "participante_id", 0) or 0),
             )
         )
+        chosen = candidates[0]
+        out[atendimento_id] = [
+            {
+                "colaborador_id": int(chosen.colaborador_id),
+                "nome": chosen.colaborador_nome,
+                "aceito_em": _iso(getattr(chosen, "entrou_em", None)),
+                "is_responsavel": True,
+                "role": RESPONSAVEL_ROLE,
+            }
+        ]
 
     return out
 
@@ -114,7 +143,14 @@ def _upsert_participante_ativo(
     *,
     atendimento,
     colaborador_id: int,
+    responsavel: bool = True,
 ):
+    """
+    Compatibilidade com callers antigos.
+
+    No modelo atual, participante ativo é sempre o responsável único. Quando
+    responsavel=False, apenas reativa o vínculo sem alterar operador, uso raro.
+    """
     if not _participant_feature_enabled(db):
         return None
 
@@ -131,8 +167,26 @@ def _upsert_participante_ativo(
             ),
         )
 
-    AP = models.AtendimentoParticipante
+    if responsavel:
+        locked = claim_exclusive_operator(
+            db,
+            atendimento=atendimento,
+            colaborador_id=int(colaborador_id),
+        )
+        if locked is None:
+            return None
 
+        return (
+            db.query(models.AtendimentoParticipante)
+            .filter(
+                models.AtendimentoParticipante.empresa_id == int(locked.empresa_id),
+                models.AtendimentoParticipante.atendimento_id == int(locked.id),
+                models.AtendimentoParticipante.colaborador_id == int(colaborador_id),
+            )
+            .first()
+        )
+
+    AP = models.AtendimentoParticipante
     row = (
         db.query(AP)
         .filter(
@@ -140,90 +194,59 @@ def _upsert_participante_ativo(
             AP.atendimento_id == int(atendimento.id),
             AP.colaborador_id == int(colaborador_id),
         )
-        .order_by(AP.id.desc())
+        .with_for_update()
         .first()
     )
-
     now = _now_utc()
-
     if row is None:
-        kwargs = {}
-
-        for field, value in (
-            ("empresa_id", int(atendimento.empresa_id)),
-            ("atendimento_id", int(atendimento.id)),
-            (
-                "cliente_id",
-                int(atendimento.cliente_id)
-                if getattr(atendimento, "cliente_id", None) is not None
-                else None,
-            ),
-            (
-                "instancia_id",
-                int(atendimento.instancia_id)
-                if getattr(atendimento, "instancia_id", None) is not None
-                else None,
-            ),
-            (
-                "departamento_id",
-                int(atendimento.departamento_id)
-                if getattr(atendimento, "departamento_id", None) is not None
-                else None,
-            ),
-            ("colaborador_id", int(colaborador_id)),
-        ):
-            if hasattr(AP, field):
-                kwargs[field] = value
-
-        row = AP(**kwargs)
-        db.add(row)
-        db.flush()
-
-    else:
-        for field, value in (
-            (
-                "cliente_id",
-                int(atendimento.cliente_id)
-                if getattr(atendimento, "cliente_id", None) is not None
-                else None,
-            ),
-            (
-                "instancia_id",
-                int(atendimento.instancia_id)
-                if getattr(atendimento, "instancia_id", None) is not None
-                else None,
-            ),
-            (
-                "departamento_id",
-                int(atendimento.departamento_id)
-                if getattr(atendimento, "departamento_id", None) is not None
-                else None,
-            ),
-        ):
-            if hasattr(row, field):
-                setattr(row, field, value)
-
-    if hasattr(row, "is_ativo"):
-        row.is_ativo = True
-
-    if hasattr(row, "saiu_em"):
-        row.saiu_em = None
-
-    if hasattr(row, "liberado_em"):
-        row.liberado_em = None
-
-    if hasattr(row, "aceito_em"):
-        row.aceito_em = now
-
-    if hasattr(row, "ultimo_evento_em"):
-        row.ultimo_evento_em = now
-
-    if hasattr(row, "ultimo_envio_em") and getattr(row, "ultimo_envio_em", None) is None:
-        row.ultimo_envio_em = None
-
+        row = AP(
+            empresa_id=int(atendimento.empresa_id),
+            atendimento_id=int(atendimento.id),
+            colaborador_id=int(colaborador_id),
+        )
+    row.is_ativo = True
+    row.role = PARTICIPANTE_ROLE
+    row.entrou_em = now
+    row.saiu_em = None
+    row.atualizado_em = now
     db.add(row)
-
+    db.flush()
     return row
+
+
+def _claim_exclusive_participant(
+    db: Session,
+    *,
+    atendimento,
+    colaborador_id: int,
+):
+    if not _participant_feature_enabled(db):
+        atendimento.operador_id = int(colaborador_id)
+        atendimento.status = models.StatusAtendimento.EM_ATENDIMENTO
+        db.add(atendimento)
+        db.flush()
+        return atendimento
+
+    return claim_exclusive_operator(
+        db,
+        atendimento=atendimento,
+        colaborador_id=int(colaborador_id),
+    )
+
+
+def _release_all_participants(db: Session, *, atendimento):
+    if not _participant_feature_enabled(db):
+        atendimento.operador_id = None
+        atendimento.status = (
+            models.StatusAtendimento.AGUARDANDO
+            if getattr(atendimento, "departamento_id", None) is not None
+            else models.StatusAtendimento.NOVO
+        )
+        db.add(atendimento)
+        db.flush()
+        return atendimento
+
+    return release_to_queue(db, atendimento=atendimento)
 
 
 def _release_participante(
@@ -232,44 +255,11 @@ def _release_participante(
     atendimento,
     colaborador_id: int,
 ) -> bool:
-    if not _participant_feature_enabled(db):
+    """Compatibilidade: a liberação agora limpa todos os vínculos ativos."""
+    operador_id = _to_int(getattr(atendimento, "operador_id", None))
+    if operador_id is not None and operador_id != int(colaborador_id):
         return False
-
-    AP = models.AtendimentoParticipante
-
-    row = (
-        db.query(AP)
-        .filter(
-            AP.empresa_id == int(atendimento.empresa_id),
-            AP.atendimento_id == int(atendimento.id),
-            AP.colaborador_id == int(colaborador_id),
-        )
-        .order_by(AP.id.desc())
-        .first()
-    )
-
-    if not row:
-        return False
-
-    now = _now_utc()
-
-    if hasattr(row, "is_ativo"):
-        row.is_ativo = False
-
-    if hasattr(row, "is_responsavel"):
-        row.is_responsavel = False
-
-    if hasattr(row, "liberado_em"):
-        row.liberado_em = now
-
-    if hasattr(row, "saiu_em"):
-        row.saiu_em = now
-
-    if hasattr(row, "ultimo_evento_em"):
-        row.ultimo_evento_em = now
-
-    db.add(row)
-
+    _release_all_participants(db, atendimento=atendimento)
     return True
 
 
@@ -280,68 +270,24 @@ def _sync_atendimento_from_participants(
     preferred_responsavel_id: Optional[int] = None,
 ) -> List[int]:
     """
-    Sincroniza operador_id/status a partir dos participantes ativos.
+    Repara legados para a regra de um único responsável.
+
+    preferred_responsavel_id, quando informado, vence e assume de forma
+    exclusiva. Sem preferência, operador_id vence; se não houver operador,
+    o vínculo ativo mais apropriado é mantido.
     """
-    if not _participant_feature_enabled(db):
-        return []
-
-    rows = _list_active_participant_rows(
-        db,
-        empresa_id=int(atendimento.empresa_id),
-        atendimento_id=int(atendimento.id),
-    )
-
-    active_ids: List[int] = []
-    chosen_id: Optional[int] = None
-
-    for r in rows:
-        cid = _to_int(getattr(r, "colaborador_id", None))
-
-        if cid and cid not in active_ids:
-            active_ids.append(cid)
-
-    if not active_ids:
-        atendimento.operador_id = None
-        atendimento.status = (
-            models.StatusAtendimento.AGUARDANDO
-            if getattr(atendimento, "departamento_id", None) is not None
-            else models.StatusAtendimento.NOVO
+    if preferred_responsavel_id is not None:
+        locked = _claim_exclusive_participant(
+            db,
+            atendimento=atendimento,
+            colaborador_id=int(preferred_responsavel_id),
         )
-        db.add(atendimento)
+    else:
+        locked = repair_single_responsible(db, atendimento=atendimento)
+
+    if locked is None or getattr(locked, "operador_id", None) is None:
         return []
-
-    if preferred_responsavel_id is not None and int(preferred_responsavel_id) in set(active_ids):
-        chosen_id = int(preferred_responsavel_id)
-
-    if chosen_id is None:
-        current_operator = _to_int(getattr(atendimento, "operador_id", None))
-
-        if current_operator is not None and current_operator in set(active_ids):
-            chosen_id = current_operator
-
-    if chosen_id is None:
-        for r in rows:
-            cid = _to_int(getattr(r, "colaborador_id", None))
-
-            if cid and bool(getattr(r, "is_responsavel", False)):
-                chosen_id = cid
-                break
-
-    if chosen_id is None:
-        chosen_id = int(active_ids[0])
-
-    if hasattr(models.AtendimentoParticipante, "is_responsavel"):
-        for r in rows:
-            cid = _to_int(getattr(r, "colaborador_id", None))
-            r.is_responsavel = bool(cid == chosen_id)
-            db.add(r)
-
-    atendimento.operador_id = int(chosen_id)
-    atendimento.status = models.StatusAtendimento.EM_ATENDIMENTO
-
-    db.add(atendimento)
-
-    return active_ids
+    return [int(locked.operador_id)]
 
 
 def _participacao_payload(
@@ -354,35 +300,53 @@ def _participacao_payload(
     fallback_operador_id: Optional[int] = None,
     fallback_operador_nome: Optional[str] = None,
 ) -> Dict[str, Any]:
+    operador_id = _to_int(
+        getattr(atendimento, "operador_id", None)
+        if atendimento is not None
+        else fallback_operador_id
+    )
+
+    operador_nome = (
+        _nome_colaborador(db, operador_id)
+        if operador_id is not None
+        else fallback_operador_nome
+    )
+
+    # Garante que o payload represente somente o responsável efetivo.
+    if operador_id is not None:
+        matching = [
+            p for p in participants
+            if _to_int(p.get("colaborador_id")) == int(operador_id)
+        ]
+        participants = matching or [
+            {
+                "colaborador_id": int(operador_id),
+                "nome": operador_nome,
+                "aceito_em": None,
+                "is_responsavel": True,
+                "role": RESPONSAVEL_ROLE,
+            }
+        ]
+    elif participants:
+        participants = [participants[0]]
+        operador_id = _to_int(participants[0].get("colaborador_id"))
+        operador_nome = participants[0].get("nome")
+
     participant_ids = [
         int(p["colaborador_id"])
         for p in participants
         if p.get("colaborador_id") is not None
     ]
 
-    aceita_por_mim = (
-        current_colab_id is not None
-        and int(current_colab_id) in set(participant_ids)
-    )
-
-    responsavel = next((p for p in participants if p.get("is_responsavel")), None)
-
-    if responsavel is None and participants:
-        responsavel = participants[0]
-
-    legacy_operator_id = _to_int(
-        getattr(atendimento, "operador_id", None)
-        if atendimento is not None
-        else fallback_operador_id
-    )
-
-    legacy_operator_nome = (
-        _nome_colaborador(db, legacy_operator_id)
-        if legacy_operator_id is not None
-        else fallback_operador_nome
+    current_id = _to_int(current_colab_id)
+    aceita_por_mim = bool(
+        current_id is not None
+        and operador_id is not None
+        and int(current_id) == int(operador_id)
     )
 
     exigir_aceite = bool(fila_state.get("exigir_aceite"))
+    waiting = operador_id is None
 
     if not exigir_aceite:
         pode_aceitar = False
@@ -390,29 +354,21 @@ def _participacao_payload(
         pode_responder = True
         aguardando_aceite = False
     else:
-        pode_aceitar = current_colab_id is not None and not bool(aceita_por_mim)
-        pode_liberar = current_colab_id is not None and bool(aceita_por_mim)
-        pode_responder = True if current_colab_id is None else bool(aceita_por_mim)
-        aguardando_aceite = bool(current_colab_id is not None and not bool(aceita_por_mim))
+        pode_aceitar = bool(current_id is not None and waiting)
+        pode_liberar = bool(aceita_por_mim)
+        pode_responder = True if current_id is None else bool(aceita_por_mim)
+        aguardando_aceite = bool(waiting or not aceita_por_mim)
 
     return {
         **fila_state,
-        "aguardando_aceite": aguardando_aceite,
+        "aguardando_aceite": bool(aguardando_aceite),
         "pode_responder": bool(pode_responder),
         "participantes": participants,
         "participantes_ids": participant_ids,
         "aceita_por_mim": bool(aceita_por_mim),
-        "tem_participantes": bool(participants),
-        "responsavel_id": (
-            int(responsavel["colaborador_id"])
-            if responsavel and responsavel.get("colaborador_id") is not None
-            else legacy_operator_id
-        ),
-        "responsavel_nome": (
-            responsavel.get("nome")
-            if responsavel
-            else legacy_operator_nome
-        ),
+        "tem_participantes": bool(operador_id is not None),
+        "responsavel_id": operador_id,
+        "responsavel_nome": operador_nome,
         "pode_aceitar": bool(pode_aceitar),
         "pode_liberar": bool(pode_liberar),
     }
@@ -468,7 +424,6 @@ def _attach_participacao_em_payloads(
         atd = atd_map.get(int(atd_id)) if atd_id is not None else None
         participants = snap_map.get(int(atd_id), []) if atd_id is not None else []
 
-        # fallback antigo: sem tabela de participantes, sintetiza pelo operador
         if not participants and item.get("operador_id") is not None:
             participants = [
                 {
@@ -476,6 +431,7 @@ def _attach_participacao_em_payloads(
                     "nome": item.get("operador_nome"),
                     "aceito_em": None,
                     "is_responsavel": True,
+                    "role": RESPONSAVEL_ROLE,
                 }
             ]
 
@@ -519,8 +475,9 @@ def _response_atendimento_estado(
             {
                 "colaborador_id": int(atendimento.operador_id),
                 "nome": _nome_colaborador(db, int(atendimento.operador_id)),
-                "aceito_em": None,
+                "aceito_em": _iso(getattr(atendimento, "aceito_em", None)),
                 "is_responsavel": True,
+                "role": RESPONSAVEL_ROLE,
             }
         ]
 

@@ -12,6 +12,7 @@ const GROUP_ORDER = [
   'Relatórios',
   'Equipe e acessos',
   'Configurações',
+  'Conta e e-mail',
   'Outros'
 ];
 
@@ -20,31 +21,45 @@ const QUICK_PROFILES = [
     id: 'atendente',
     label: 'Atendente',
     icon: 'fa-headset',
-    hint: 'Básico para responder clientes.'
+    hint: 'Atende e responde conversas.',
+    description: 'Atendimento básico'
   },
   {
     id: 'supervisor',
     label: 'Supervisor',
     icon: 'fa-user-check',
-    hint: 'Atendimento, equipe e relatórios.'
+    hint: 'Acompanha atendimento, equipe e relatórios.',
+    description: 'Equipe e operação'
   },
   {
     id: 'comercial',
     label: 'Comercial',
     icon: 'fa-chart-line',
-    hint: 'Clientes, leads e funil.'
+    hint: 'Clientes, contatos, campanhas e atendimento comercial.',
+    description: 'Vendas e clientes'
   },
   {
     id: 'financeiro',
     label: 'Financeiro',
     icon: 'fa-coins',
-    hint: 'Clientes e cobrança.'
+    hint: 'Clientes, cobrança e consultas financeiras.',
+    description: 'Cobrança e consulta'
   },
   {
     id: 'admin',
     label: 'Administrador',
     icon: 'fa-crown',
-    hint: 'Marca todas as permissões.'
+    hint: 'Acesso total ao sistema.',
+    description: 'Acesso completo',
+    dangerous: true
+  },
+  {
+    id: 'custom',
+    label: 'Personalizado',
+    icon: 'fa-sliders',
+    hint: 'Escolher permissão por permissão.',
+    description: 'Ajuste manual',
+    custom: true
   }
 ];
 
@@ -156,7 +171,11 @@ function inferGroup(p){
     'status atendimento',
     'responsavel atendimento',
     'transferir atendimento',
-    'assumir atendimento'
+    'assumir atendimento',
+    'midia',
+    'mídia',
+    'arquivo',
+    'arquivos'
   ])) {
     return 'Atendimento';
   }
@@ -239,6 +258,18 @@ function inferGroup(p){
     'cargo'
   ])) {
     return 'Equipe e acessos';
+  }
+
+  if (hasAny(text, [
+    'perfil',
+    'email',
+    'e-mail',
+    'conta',
+    'minha conta',
+    'usuario logado',
+    'usuário logado'
+  ])) {
+    return 'Conta e e-mail';
   }
 
   if (hasAny(text, [
@@ -329,10 +360,21 @@ function shouldSelectForProfile(profile, p){
   const view = isViewPermission(text);
 
   if (profile === 'atendente'){
-    if (dangerous || writeDanger) return false;
+    if (dangerous) return false;
 
-    if (group === 'Atendimento') return true;
+    if (group === 'Atendimento') {
+      return !hasAny(text, [
+        'apagar',
+        'excluir',
+        'gerenciar integração',
+        'gerenciar integracao',
+        'configurar chatbot',
+        'configurar disparo'
+      ]);
+    }
+
     if (group === 'CRM / Clientes' && view) return true;
+    if (group === 'Conta e e-mail' && view) return true;
 
     return hasAny(text, [
       'mensagem.enviar',
@@ -369,7 +411,8 @@ function shouldSelectForProfile(profile, p){
       'Atendimento',
       'CRM / Clientes',
       'Relatórios',
-      'Equipe e acessos'
+      'Equipe e acessos',
+      'Conta e e-mail'
     ].includes(group);
   }
 
@@ -380,7 +423,8 @@ function shouldSelectForProfile(profile, p){
       'Atendimento',
       'CRM / Clientes',
       'Campanhas e automações',
-      'Relatórios'
+      'Relatórios',
+      'Conta e e-mail'
     ].includes(group)) {
       return true;
     }
@@ -405,6 +449,8 @@ function shouldSelectForProfile(profile, p){
     if (group === 'Financeiro') return true;
     if (group === 'CRM / Clientes' && view) return true;
     if (group === 'Atendimento' && !writeDanger) return true;
+    if (group === 'Relatórios' && view) return true;
+    if (group === 'Conta e e-mail' && view) return true;
 
     return hasAny(text, [
       'cobranca',
@@ -431,7 +477,8 @@ function normalizePermissionItem(p){
     name,
     description,
     search: normalizeText(search),
-    group
+    group,
+    dangerous: isDangerousPermission(search)
   };
 }
 
@@ -453,24 +500,63 @@ function groupIconClass(groupName){
     'Relatórios': 'fa-solid fa-chart-simple',
     'Equipe e acessos': 'fa-solid fa-users-gear',
     'Configurações': 'fa-solid fa-gear',
+    'Conta e e-mail': 'fa-solid fa-user-shield',
     'Outros': 'fa-solid fa-layer-group'
   };
 
   return map[groupName] || 'fa-solid fa-layer-group';
 }
 
+function selectedCount(){
+  return document.querySelectorAll('#e-perms input[name="perm-edit"]:checked').length;
+}
+
+function totalCount(){
+  return document.querySelectorAll('#e-perms input[name="perm-edit"]').length;
+}
+
+function setAdvancedOpen(open, opts = {}){
+  const ePerms = document.getElementById('e-perms');
+  const toolbar = document.getElementById('perm-toolbar');
+  const actions = document.getElementById('perm-actions-panel');
+  const toggle = document.getElementById('perm-toggle-advanced');
+
+  const isOpen = !!open;
+
+  if (ePerms) {
+    ePerms.hidden = !isOpen;
+    ePerms.style.display = isOpen ? 'grid' : 'none';
+  }
+
+  if (actions) actions.hidden = !isOpen;
+  if (toolbar) toolbar.classList.toggle('advanced-open', isOpen);
+
+  if (toggle) {
+    toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    toggle.innerHTML = isOpen
+      ? '<i class="fa-solid fa-chevron-up" aria-hidden="true"></i><span>Ocultar permissões avançadas</span>'
+      : '<i class="fa-solid fa-sliders" aria-hidden="true"></i><span>Ajustar permissões avançadas</span>';
+  }
+
+  if (opts.activateCustom) {
+    document.querySelectorAll('.perm-profile-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.profile === 'custom');
+    });
+  }
+}
+
 function renderToolbar(container){
   const old = document.getElementById('perm-toolbar');
   if (old) old.remove();
 
-  const toolbar = createEl('div', 'perm-toolbar');
+  const toolbar = createEl('div', 'perm-toolbar perm-toolbar-profile-first');
   toolbar.id = 'perm-toolbar';
 
   const top = createEl('div', 'perm-toolbar-top');
 
   const titleWrap = createEl('div', 'perm-toolbar-title');
-  const title = createEl('strong', '', 'Perfil rápido');
-  const subtitle = createEl('span', '', 'Escolha um modelo e ajuste apenas o que precisar.');
+  const title = createEl('strong', '', 'Perfil de acesso');
+  const subtitle = createEl('span', '', 'Escolha um modelo. As permissões detalhadas ficam escondidas para não poluir.');
 
   titleWrap.appendChild(title);
   titleWrap.appendChild(subtitle);
@@ -482,12 +568,12 @@ function renderToolbar(container){
   top.appendChild(titleWrap);
   top.appendChild(summary);
 
-  const profiles = createEl('div', 'perm-profile-list');
+  const profiles = createEl('div', 'perm-profile-list perm-profile-list-main');
 
   QUICK_PROFILES.forEach(profile => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'perm-profile-btn';
+    btn.className = `perm-profile-btn${profile.custom ? ' perm-profile-custom' : ''}${profile.dangerous ? ' perm-profile-danger' : ''}`;
     btn.dataset.profile = profile.id;
     btn.title = profile.hint;
 
@@ -495,7 +581,16 @@ function renderToolbar(container){
     icon.className = `fa-solid ${profile.icon}`;
 
     const text = document.createElement('span');
-    text.textContent = profile.label;
+    text.className = 'perm-profile-copy';
+
+    const label = document.createElement('strong');
+    label.textContent = profile.label;
+
+    const small = document.createElement('small');
+    small.textContent = profile.description || profile.hint || '';
+
+    text.appendChild(label);
+    text.appendChild(small);
 
     btn.appendChild(icon);
     btn.appendChild(text);
@@ -503,7 +598,26 @@ function renderToolbar(container){
     profiles.appendChild(btn);
   });
 
+  const advanced = createEl('div', 'perm-advanced-box');
+
+  const advancedTop = createEl('div', 'perm-advanced-top');
+
+  const advancedCopy = createEl('div', 'perm-advanced-copy');
+  advancedCopy.innerHTML = '<strong>Precisa ajustar algo específico?</strong><span>Abra somente se quiser mexer permissão por permissão.</span>';
+
+  const advancedToggle = document.createElement('button');
+  advancedToggle.type = 'button';
+  advancedToggle.id = 'perm-toggle-advanced';
+  advancedToggle.className = 'btn btn-ghost perm-toggle-advanced';
+  advancedToggle.setAttribute('aria-expanded', 'false');
+  advancedToggle.innerHTML = '<i class="fa-solid fa-sliders" aria-hidden="true"></i><span>Ajustar permissões avançadas</span>';
+
+  advancedTop.appendChild(advancedCopy);
+  advancedTop.appendChild(advancedToggle);
+
   const actions = createEl('div', 'perm-actions');
+  actions.id = 'perm-actions-panel';
+  actions.hidden = true;
 
   const searchWrap = createEl('label', 'perm-search');
   const searchIcon = document.createElement('i');
@@ -534,9 +648,12 @@ function renderToolbar(container){
   actions.appendChild(selectAll);
   actions.appendChild(clearAll);
 
+  advanced.appendChild(advancedTop);
+  advanced.appendChild(actions);
+
   toolbar.appendChild(top);
   toolbar.appendChild(profiles);
-  toolbar.appendChild(actions);
+  toolbar.appendChild(advanced);
 
   container.insertBefore(toolbar, container.firstChild);
 
@@ -544,12 +661,14 @@ function renderToolbar(container){
 }
 
 function updateSummary(){
-  const total = document.querySelectorAll('#e-perms input[name="perm-edit"]').length;
-  const selected = document.querySelectorAll('#e-perms input[name="perm-edit"]:checked').length;
+  const total = totalCount();
+  const selected = selectedCount();
   const summary = document.getElementById('perm-summary');
 
   if (summary) {
-    summary.textContent = `${selected} de ${total} selecionadas`;
+    summary.textContent = total
+      ? `${selected} de ${total} selecionadas`
+      : 'Nenhuma permissão';
   }
 
   updateGroupStates();
@@ -559,21 +678,21 @@ function updateGroupStates(){
   document.querySelectorAll('.perm-group').forEach(group => {
     const inputs = [...group.querySelectorAll('input[name="perm-edit"]')];
     const groupToggle = group.querySelector('.perm-group-toggle-input');
-    const selectedCount = inputs.filter(i => i.checked).length;
-    const total = inputs.length;
+    const selectedCountGroup = inputs.filter(i => i.checked).length;
+    const totalGroup = inputs.length;
 
     const countEl = group.querySelector('.perm-group-selected-count');
     if (countEl) {
-      countEl.textContent = `${selectedCount}/${total}`;
+      countEl.textContent = `${selectedCountGroup}/${totalGroup}`;
     }
 
     if (groupToggle) {
-      groupToggle.checked = total > 0 && selectedCount === total;
-      groupToggle.indeterminate = selectedCount > 0 && selectedCount < total;
+      groupToggle.checked = totalGroup > 0 && selectedCountGroup === totalGroup;
+      groupToggle.indeterminate = selectedCountGroup > 0 && selectedCountGroup < totalGroup;
     }
 
-    group.classList.toggle('has-selection', selectedCount > 0);
-    group.classList.toggle('all-selected', total > 0 && selectedCount === total);
+    group.classList.toggle('has-selection', selectedCountGroup > 0);
+    group.classList.toggle('all-selected', totalGroup > 0 && selectedCountGroup === totalGroup);
   });
 }
 
@@ -586,6 +705,7 @@ function setAllPermissions(checked){
     btn.classList.remove('active');
   });
 
+  setAdvancedOpen(true, { activateCustom: true });
   updateSummary();
 }
 
@@ -600,10 +720,16 @@ function setGroupPermissions(groupEl, checked){
     btn.classList.remove('active');
   });
 
+  setAdvancedOpen(true, { activateCustom: true });
   updateSummary();
 }
 
 function applyQuickProfile(profile){
+  if (profile === 'custom') {
+    setAdvancedOpen(true, { activateCustom: true });
+    return;
+  }
+
   const inputs = document.querySelectorAll('#e-perms input[name="perm-edit"]');
 
   inputs.forEach(input => {
@@ -626,6 +752,7 @@ function applyQuickProfile(profile){
     btn.classList.toggle('active', btn.dataset.profile === profile);
   });
 
+  setAdvancedOpen(false);
   updateSummary();
 }
 
@@ -653,6 +780,10 @@ function filterPermissions(query){
 
     group.style.display = groupVisible ? '' : 'none';
 
+    if (q && groupVisible) {
+      group.classList.remove('is-collapsed');
+    }
+
     const countEl = group.querySelector('.perm-group-visible-count');
     if (countEl) {
       countEl.textContent = `${groupVisible}`;
@@ -674,6 +805,14 @@ function bindToolbarEvents(){
   const selectAll = document.getElementById('perm-select-all');
   const clearAll = document.getElementById('perm-clear-all');
   const search = document.getElementById('perm-search-input');
+  const advancedToggle = document.getElementById('perm-toggle-advanced');
+
+  if (advancedToggle) {
+    advancedToggle.onclick = () => {
+      const isOpen = advancedToggle.getAttribute('aria-expanded') === 'true';
+      setAdvancedOpen(!isOpen, { activateCustom: !isOpen });
+    };
+  }
 
   if (selectAll) {
     selectAll.onclick = () => {
@@ -707,9 +846,28 @@ function bindToolbarEvents(){
     });
   });
 
+  document.querySelectorAll('.perm-group-head').forEach(head => {
+    head.addEventListener('click', ev => {
+      if (ev.target.closest('button, label, input, .perm-group-controls')) return;
+      const group = head.closest('.perm-group');
+      group?.classList.toggle('is-collapsed');
+    });
+
+    head.addEventListener('keydown', ev => {
+      if (ev.key !== 'Enter' && ev.key !== ' ') return;
+      if (ev.target.closest('button, label, input, .perm-group-controls')) return;
+      ev.preventDefault();
+      const group = head.closest('.perm-group');
+      group?.classList.toggle('is-collapsed');
+    });
+  });
+
   document.querySelectorAll('#e-perms input[name="perm-edit"]').forEach(input => {
     input.addEventListener('change', () => {
-      document.querySelectorAll('.perm-profile-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.perm-profile-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.profile === 'custom');
+      });
+      setAdvancedOpen(true, { activateCustom: true });
       updateSummary();
     });
   });
@@ -745,7 +903,7 @@ function renderPermissionGroups(ePerms, rawItems){
 
   ePerms.innerHTML = '';
   ePerms.classList.add('perms-enhanced');
-  ePerms.style.display = 'block';
+  ePerms.style.display = 'grid';
 
   const frag = document.createDocumentFragment();
 
@@ -753,24 +911,32 @@ function renderPermissionGroups(ePerms, rawItems){
     const groupItems = grouped.get(groupName);
     if (!groupItems || !groupItems.length) return;
 
-    const group = createEl('section', 'perm-group');
+    const group = createEl('section', 'perm-group is-collapsed');
     group.dataset.group = groupName;
 
     const head = createEl('div', 'perm-group-head');
+    head.tabIndex = 0;
+    head.setAttribute('role', 'button');
+    head.setAttribute('aria-label', `Abrir permissões de ${groupName}`);
 
     const title = createEl('div', 'perm-group-title');
+
+    const chevron = document.createElement('i');
+    chevron.className = 'fa-solid fa-chevron-right perm-group-chevron';
+    chevron.setAttribute('aria-hidden', 'true');
 
     const icon = document.createElement('i');
     icon.className = groupIconClass(groupName);
 
     const label = createEl('span', '', groupName);
 
+    title.appendChild(chevron);
     title.appendChild(icon);
     title.appendChild(label);
 
     const controls = createEl('div', 'perm-group-controls');
 
-    const selectedCount = createEl('span', 'perm-group-selected-count', `0/${groupItems.length}`);
+    const selectedCountEl = createEl('span', 'perm-group-selected-count', `0/${groupItems.length}`);
 
     const toggleLabel = createEl('label', 'perm-group-toggle');
 
@@ -788,7 +954,7 @@ function renderPermissionGroups(ePerms, rawItems){
     clearBtn.className = 'perm-group-clear';
     clearBtn.textContent = 'Limpar';
 
-    controls.appendChild(selectedCount);
+    controls.appendChild(selectedCountEl);
     controls.appendChild(toggleLabel);
     controls.appendChild(clearBtn);
 
@@ -798,7 +964,7 @@ function renderPermissionGroups(ePerms, rawItems){
     const body = createEl('div', 'perm-group-body');
 
     groupItems.forEach(item => {
-      const lab = createEl('label', 'perm-item chk-line');
+      const lab = createEl('label', `perm-item chk-line${item.dangerous ? ' perm-item-danger' : ''}`);
       lab.dataset.search = item.search;
       lab.dataset.raw = item.search;
       lab.dataset.name = item.name;
@@ -827,6 +993,11 @@ function renderPermissionGroups(ePerms, rawItems){
         main.appendChild(desc);
       }
 
+      if (item.dangerous) {
+        const warn = createEl('small', 'perm-item-warn', 'Permissão sensível');
+        main.appendChild(warn);
+      }
+
       lab.appendChild(input);
       lab.appendChild(main);
 
@@ -849,6 +1020,7 @@ function renderPermissionGroups(ePerms, rawItems){
   ePerms.appendChild(frag);
 
   bindToolbarEvents();
+  setAdvancedOpen(false);
 }
 
 export async function ensurePermsEdit(){
@@ -863,7 +1035,8 @@ export async function ensurePermsEdit(){
   }
 
   ePerms.innerHTML = '';
-  ePerms.style.display = 'block';
+  ePerms.style.display = 'none';
+  ePerms.hidden = true;
   ePerms.classList.add('perms-enhanced');
 
   const loading = document.createElement('div');
@@ -878,6 +1051,7 @@ export async function ensurePermsEdit(){
     if (!items.length){
       ePerms.innerHTML = '<div class="perm-empty">Nenhuma permissão cadastrada.</div>';
       updateSummary();
+      setAdvancedOpen(false);
       return;
     }
 
@@ -886,6 +1060,7 @@ export async function ensurePermsEdit(){
     console.warn('[colaboradores] falha ao carregar permissões', e);
     ePerms.innerHTML = '<div class="perm-empty">Permissões indisponíveis.</div>';
     updateSummary();
+    setAdvancedOpen(false);
   }
 }
 

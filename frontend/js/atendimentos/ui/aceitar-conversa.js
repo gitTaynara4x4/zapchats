@@ -26,6 +26,16 @@
   const __metaInFlightByKey = new Map();
   const __metaAbortByKey = new Map();
 
+  /*
+    Controle de concorrência do /meta.
+
+    Sem isso, uma consulta iniciada antes de Atender/Liberar podia terminar
+    depois da ação e sobrescrever o cache com o estado antigo. O resultado
+    visual era a barra continuar em "Atendimento com você" até F5.
+  */
+  const __metaRequestVersionByKey = new Map();
+  const __metaMutationVersionByKey = new Map();
+
   function isAtendimentoLeaving() {
     try {
       return Boolean(
@@ -52,6 +62,8 @@
       __metaAbortByKey.clear();
     } catch {}
     try { __metaInFlightByKey.clear(); } catch {}
+    try { __metaRequestVersionByKey.clear(); } catch {}
+    try { __metaMutationVersionByKey.clear(); } catch {}
   }
 
   try {
@@ -620,6 +632,71 @@
     return window.__zcConversationMetaCache;
   }
 
+  function resolveMetaKey(convOrKey) {
+    if (typeof convOrKey === "string") {
+      return String(convOrKey || "").trim();
+    }
+
+    if (!convOrKey || typeof convOrKey !== "object") {
+      return "";
+    }
+
+    return String(
+      convOrKey.conversation_key ||
+      convOrKey.conversation_id ||
+      buildConversationKey(convOrKey) ||
+      ""
+    ).trim();
+  }
+
+  function abortMetaRequestForKey(key, reason = "meta-invalidated") {
+    if (!key) return;
+
+    const ctrl = __metaAbortByKey.get(key);
+    if (ctrl) {
+      try { ctrl.abort(reason); } catch {}
+    }
+
+    __metaAbortByKey.delete(key);
+    __metaInFlightByKey.delete(key);
+  }
+
+  function invalidateMetaCache(convOrKey, options = {}) {
+    const key = resolveMetaKey(convOrKey);
+    if (!key) return "";
+
+    const {
+      abort = true,
+      bumpMutation = true,
+      removeCache = true,
+      reason = "meta-invalidated"
+    } = options;
+
+    if (bumpMutation) {
+      const next = Number(__metaMutationVersionByKey.get(key) || 0) + 1;
+      __metaMutationVersionByKey.set(key, next);
+    }
+
+    // Invalida resultados de requisições que já estavam em andamento.
+    const nextRequestVersion = Number(__metaRequestVersionByKey.get(key) || 0) + 1;
+    __metaRequestVersionByKey.set(key, nextRequestVersion);
+
+    if (abort) {
+      abortMetaRequestForKey(key, reason);
+    }
+
+    if (removeCache) {
+      try { delete getMetaCache()[key]; } catch {}
+    }
+
+    return key;
+  }
+
+  // Disponível para módulos de realtime e diagnóstico, sem alterar o backend.
+  window.zcInvalidateConversationMeta = function (convOrKey, options = {}) {
+    return invalidateMetaCache(convOrKey, options);
+  };
+
   function normalizeMetaForComposer(conv, meta) {
     const conversation_key = buildConversationKey(conv);
 
@@ -666,6 +743,14 @@
       operadorId
     );
 
+    const adminCanIntervene = Boolean(meta?.admin_can_intervene === true);
+    const adminIntervening = Boolean(
+      adminCanIntervene &&
+      meta?.admin_intervening === true &&
+      operadorId &&
+      !acceptedByMe
+    );
+
     const canAccept = Boolean(
       exigirAceite &&
       (
@@ -675,7 +760,9 @@
       )
     );
 
-    const canSend = exigirAceite ? Boolean(podeResponder && acceptedByMe) : Boolean(podeResponder);
+    const canSend = adminIntervening
+      ? Boolean(podeResponder)
+      : (exigirAceite ? Boolean(podeResponder && acceptedByMe) : Boolean(podeResponder));
 
     const canRelease = Boolean(
       exigirAceite &&
@@ -718,6 +805,8 @@
 
       claim_mode: meta?.claim_mode || null,
       departamento_claim: Boolean(meta?.departamento_claim),
+      admin_can_intervene: adminCanIntervene,
+      admin_intervening: adminIntervening,
 
       raw: meta || null
     };
@@ -748,7 +837,8 @@
       return cached || null;
     }
 
-    if (cached && cached._cached_at) {
+    // force:true precisa realmente ignorar o TTL e qualquer GET antigo.
+    if (!force && cached && cached._cached_at) {
       const age = Date.now() - Number(cached._cached_at || 0);
 
       if (age >= 0 && age < META_CACHE_TTL_MS) {
@@ -757,19 +847,42 @@
     }
 
     if (!force && __metaInFlightByKey.has(key)) {
-      return await __metaInFlightByKey.get(key).catch(() => cached || null);
+      return await __metaInFlightByKey.get(key).catch(() => cache[key] || cached || null);
     }
+
+    if (force) {
+      abortMetaRequestForKey(key, "meta-force-refresh");
+    }
+
+    const requestVersion = Number(__metaRequestVersionByKey.get(key) || 0) + 1;
+    const mutationVersion = Number(__metaMutationVersionByKey.get(key) || 0);
+    __metaRequestVersionByKey.set(key, requestVersion);
 
     const promise = (async () => {
       try {
         const meta = await fetchMeta(conv);
-        if (!meta) return cached || null;
+        if (!meta) return cache[key] || cached || null;
+
+        // Uma ação (aceitar/liberar/transferir) aconteceu enquanto este GET
+        // estava em andamento: jamais deixa a resposta antiga sobrescrever.
+        if (Number(__metaRequestVersionByKey.get(key) || 0) !== requestVersion) {
+          return cache[key] || null;
+        }
+
+        if (Number(__metaMutationVersionByKey.get(key) || 0) !== mutationVersion) {
+          return cache[key] || null;
+        }
 
         const detail = saveMetaCache(conv, meta);
         emitMetaEvents(detail);
 
         return detail;
       } catch (err) {
+        if (err?.name === "AbortError") {
+          return cache[key] || null;
+        }
+
+        if (cache[key]) return cache[key];
         if (cached) return cached;
         throw err;
       }
@@ -780,7 +893,9 @@
     try {
       return await promise;
     } finally {
-      __metaInFlightByKey.delete(key);
+      if (__metaInFlightByKey.get(key) === promise) {
+        __metaInFlightByKey.delete(key);
+      }
     }
   }
 
@@ -1025,6 +1140,44 @@
       return;
     }
 
+    if (meta.admin_intervening === true && meta.admin_can_intervene === true) {
+      setBtnBase(aceitar, {
+        text: "Em atendimento",
+        icon: "fa-solid fa-user-check",
+        title: operadorNome
+          ? `Responsável atual: ${operadorNome}`
+          : words.otherTitle,
+        disabled: true,
+        hidden: false
+      });
+
+      setBtnBase(liberar, { hidden: true });
+
+      setBtnBase(transferir, {
+        text: "Transferir",
+        icon: "fa-solid fa-user-arrow-down",
+        title: "Transferir para outro colaborador",
+        disabled: false,
+        hidden: false
+      });
+
+      setClaimBarState({
+        open: true,
+        locked: false,
+        accepted: false,
+        busy: false,
+        canAccept: false,
+        canRelease: false,
+        canTransfer: true,
+        title: operadorNome
+          ? `Atendimento em andamento por ${operadorNome}`
+          : words.otherTitle,
+        subtitle: "Como administrador, você pode responder sem alterar o responsável atual."
+      });
+
+      return;
+    }
+
     setBtnBase(aceitar, {
       text: "Em atendimento",
       icon: "fa-solid fa-user-check",
@@ -1188,6 +1341,15 @@
 
       const isDeptClaim = isDepartmentClaim(data) || isDepartmentClaim(prevMeta);
 
+      // Cancela qualquer /meta iniciado antes do clique. Sem isso, uma
+      // resposta antiga podia desfazer visualmente o aceite recém-confirmado.
+      invalidateMetaCache(conv, {
+        abort: true,
+        bumpMutation: true,
+        removeCache: true,
+        reason: "claim-accepted"
+      });
+
       const optimisticMeta = saveMetaCache(conv, {
         ...data,
         claim_mode: isDeptClaim ? "departamento" : (data?.claim_mode || prevMeta?.claim_mode || null),
@@ -1305,19 +1467,49 @@
         }
       );
 
-      const exigeAceite = metaRequiresAcceptance(data);
-      const isDeptClaim = isDepartmentClaim(data);
+      const previousMeta = window.getConversationMeta
+        ? window.getConversationMeta(buildConversationKey(conv))
+        : null;
+
+      const isDeptClaim = Boolean(
+        isDepartmentClaim(data) ||
+        isDepartmentClaim(previousMeta) ||
+        data?.departamento_claim === true ||
+        toInt(data?.departamento_id)
+      );
+
+      // Ao liberar um atendimento de departamento, ele obrigatoriamente volta
+      // para a fila aguardando alguém clicar em Atender. Não depende do cache.
+      const exigeAceite = Boolean(metaRequiresAcceptance(data) || isDeptClaim);
+
+      invalidateMetaCache(conv, {
+        abort: true,
+        bumpMutation: true,
+        removeCache: true,
+        reason: "claim-released"
+      });
 
       const optimisticMeta = saveMetaCache(conv, {
         ...data,
-        claim_mode: isDeptClaim ? "departamento" : (data?.claim_mode || null),
+        claim_mode: isDeptClaim ? "departamento" : (data?.claim_mode || previousMeta?.claim_mode || null),
         departamento_claim: isDeptClaim,
+        exigir_aceite: exigeAceite,
+        aceite_obrigatorio: exigeAceite,
+        aguardando_aceite: exigeAceite,
+        fila_exigir_aceite: isDeptClaim ? false : Boolean(data?.fila_exigir_aceite),
         pode_aceitar: exigeAceite,
+        can_accept: exigeAceite,
         pode_liberar: false,
+        can_release: false,
         pode_responder: !exigeAceite,
+        can_send: !exigeAceite,
+        locked: exigeAceite,
         aceita_por_mim: false,
         accepted_by_me: false,
         accepted_by_anyone: false,
+        tem_participantes: false,
+        participantes: [],
+        participantes_ids: [],
         operador_id: null,
         responsavel_id: null,
         operador_nome: null,
@@ -1894,6 +2086,13 @@
       const exigeAceite = metaRequiresAcceptance(data);
       const assignedToMe = !!currentColabId && currentColabId === colaboradorId;
 
+      invalidateMetaCache(conv, {
+        abort: true,
+        bumpMutation: true,
+        removeCache: true,
+        reason: "claim-transferred"
+      });
+
       const optimisticMeta = saveMetaCache(conv, {
         ...data,
         pode_aceitar: exigeAceite && !assignedToMe,
@@ -2094,6 +2293,35 @@
         });
       });
 
+      window.addEventListener("zc:remote-claim-updated", (ev) => {
+        const detail = ev?.detail || {};
+        const key =
+          detail.conversation_key ||
+          detail.conversation_id ||
+          (
+            detail.cliente_id && detail.instancia_id
+              ? `c:${detail.cliente_id}:${detail.instancia_id}`
+              : ""
+          );
+
+        if (key) {
+          invalidateMetaCache(key, {
+            abort: true,
+            bumpMutation: true,
+            removeCache: true,
+            reason: "remote-claim-updated"
+          });
+        }
+
+        const current = getCurrentConversation();
+        const currentKey = buildConversationKey(current);
+
+        if (!current || !currentKey || (key && key !== currentKey)) return;
+
+        appendSystemEventToHistory(current, detail, "remote-claim-updated");
+        scheduleRefreshResponsavelButtons({ force: true });
+      });
+
       window.addEventListener("focus", () => {
         scheduleRefreshResponsavelButtons();
       });
@@ -2123,4 +2351,8 @@
   } else {
     init();
   }
+
+  try {
+    console.info("[ZapsChat][aceitar-conversa] carregado: zc-claim-cache-race-fix-v1");
+  } catch {}
 })();

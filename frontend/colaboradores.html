@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/frontend/css/base.css">
-  <link rel="stylesheet" href="/frontend/css/colaboradores.css?v=colab-css-pro-20260629">
+  <link rel="stylesheet" href="/frontend/css/colaboradores.css?v=colab-required-20260713">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 </head>
 
@@ -76,13 +76,56 @@
       </div>
     </section>
 
+    <section class="colab-stats" aria-label="Resumo rápido de colaboradores">
+      <article class="stat-card">
+        <span class="stat-icon"><i class="fa-regular fa-user" aria-hidden="true"></i></span>
+        <span class="stat-copy">
+          <small>Exibidos</small>
+          <strong id="stat-colab-total">0</strong>
+        </span>
+      </article>
+
+      <article class="stat-card">
+        <span class="stat-icon success"><i class="fa-regular fa-circle-check" aria-hidden="true"></i></span>
+        <span class="stat-copy">
+          <small>Ativos</small>
+          <strong id="stat-colab-active">0</strong>
+        </span>
+      </article>
+
+      <article class="stat-card">
+        <span class="stat-icon warn"><i class="fa-regular fa-clock" aria-hidden="true"></i></span>
+        <span class="stat-copy">
+          <small>Pendências</small>
+          <strong id="stat-colab-pending">0</strong>
+        </span>
+      </article>
+
+      <article class="stat-card">
+        <span class="stat-icon"><i class="fa-regular fa-square-check" aria-hidden="true"></i></span>
+        <span class="stat-copy">
+          <small>Selecionados</small>
+          <strong id="stat-colab-selected">0</strong>
+        </span>
+      </article>
+
+      <label class="stat-card stat-card-security" for="chk-requer-token">
+        <span class="stat-icon success"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i></span>
+        <span class="stat-copy">
+          <small>Código de login <span class="zc-help-icon" tabindex="0" role="button" aria-label="Ajuda sobre código de login" data-help="Quando ativado, o colaborador informa um código enviado por e-mail depois da senha."><i class="fa-regular fa-circle-question"></i></span></small>
+          <strong id="stat-security-text">Segurança extra</strong>
+        </span>
+        <input type="checkbox" id="chk-requer-token" aria-label="Exigir código de login por e-mail">
+      </label>
+    </section>
+
     <section class="colab-shell" aria-label="Gerenciador de colaboradores">
       <div class="colab-workspace">
         <section class="panel colab-table-panel" aria-labelledby="colab-list-title">
           <div class="panel-head files-head">
             <div>
-              <h2 id="colab-list-title">Equipe cadastrada</h2>
-              <p>Lista limpa com status, e-mail, departamentos e ações rápidas.</p>
+              <h2 id="colab-list-title">Equipe</h2>
+              <p>Acompanhe status, departamentos e acessos da equipe.</p>
             </div>
           </div>
 
@@ -110,76 +153,25 @@
         </section>
       </div>
 
-      <aside class="colab-aside" aria-label="Resumo e segurança">
-        <section class="side-card security-card" id="sec-login-config" aria-label="Segurança de login">
-          <div class="side-card-head">
-            <h2>Segurança</h2>
-            <button type="button" class="ghost-menu" aria-label="Mais opções"><i class="fa-solid fa-ellipsis-vertical"></i></button>
-          </div>
-
-          <label class="security-toggle" for="chk-requer-token">
-            <span class="toggle-copy">
-              <strong>Exigir código de login</strong>
-              <small>Após e-mail e senha, o colaborador informa um código enviado por e-mail.</small>
-            </span>
-            <input type="checkbox" id="chk-requer-token">
-          </label>
-        </section>
-
-        <section class="side-card overview-card">
-          <div class="side-card-head">
-            <h2>Resumo</h2>
-            <button type="button" class="ghost-menu" aria-label="Mais opções"><i class="fa-solid fa-ellipsis-vertical"></i></button>
-          </div>
-
-          <div class="overview-list">
-            <div class="overview-row">
-              <span><i class="fa-regular fa-user"></i> Usuários exibidos</span>
-              <strong id="overview-colab-total">0</strong>
-            </div>
-            <div class="overview-row">
-              <span><i class="fa-regular fa-circle-check"></i> Selecionados</span>
-              <strong id="overview-colab-selected">0</strong>
-            </div>
-            <div class="overview-row">
-              <span><i class="fa-regular fa-building"></i> Filtro</span>
-              <strong id="overview-colab-filter">Todos</strong>
-            </div>
-          </div>
-        </section>
-      </aside>
     </section>
   </main>
 
   <div id="modal-perfil" class="modal-back colab-wizard-modal zc-saas-modal" aria-hidden="true">
     <div class="modal-card perfil-modal-card" role="dialog" aria-modal="true" aria-labelledby="perfil-title">
-      <div class="modal-head">
-        <div class="title colab-modal-title">
-          <i class="fa-solid fa-user-plus"></i>
-          <div class="colab-modal-title-copy">
-            <span id="perfil-title">Novo colaborador</span>
-            <small id="perfil-subtitle">Convide alguém para acessar a plataforma</small>
-          </div>
+      <div class="modal-head colab-clean-head">
+        <div class="colab-modal-heading">
+          <span id="perfil-title">Novo colaborador</span>
+          <small id="perfil-subtitle">Convide alguém para acessar a plataforma</small>
         </div>
 
-        <!-- Mantidos para o JS atual não quebrar -->
-        <div class="modal-head-actions modal-head-actions-hidden">
-          <button id="perfil-salvar" class="btn btn-primary" style="display:none" type="button">
-            <span>Continuar</span><i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
-          </button>
-
-          <button id="perfil-cancelar" class="btn btn-ghost" style="display:none" type="button">
-            Cancelar
-          </button>
-
-          <button id="perfil-editar" class="btn btn-primary" type="button">
-            <i class="fa fa-pen"></i> Editar
-          </button>
+        <!-- Controles antigos mantidos apenas para compatibilidade com o módulo atual. -->
+        <div class="colab-legacy-controls" aria-hidden="true">
+          <button id="perfil-salvar" class="btn btn-primary" type="button" tabindex="-1">Continuar</button>
+          <button id="perfil-cancelar" class="btn btn-ghost" type="button" tabindex="-1">Cancelar</button>
         </div>
 
-        <button id="perfil-fechar" class="btn btn-ghost colab-close-btn" type="button">
-          <i class="fa-solid fa-xmark"></i>
-          <span>Fechar</span>
+        <button id="perfil-fechar" class="colab-close-btn" type="button" aria-label="Fechar">
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
         </button>
       </div>
 
@@ -189,7 +181,7 @@
             <span class="step-number">1</span>
             <span class="step-copy">
               <strong>Dados básicos</strong>
-              <small>Nome, e-mail e setor</small>
+              <small>Nome, e-mail e função</small>
             </span>
           </button>
 
@@ -210,61 +202,65 @@
           </button>
         </nav>
 
-        <div class="colab-layout">
-          <aside class="card profile-card colab-side">
-            <div class="avatar-wrap" id="avatar-wrap" title="Clique para alterar a foto">
-              <img id="p-avatar" alt="Avatar">
-              <div id="p-mono">AZ</div>
-            </div>
+        <div class="colab-legacy-compat" aria-hidden="true">
+          <span id="p-status"></span>
+          <span id="p-status-text">Disponível</span>
+          <span id="side-preview-name">Novo colaborador</span>
+          <span id="side-preview-role">Personalize o perfil do colaborador</span>
+          <span id="side-preview-company">Empresa atual</span>
+          <span id="side-preview-dept">Não definido</span>
+        </div>
 
-            <div class="side-preview">
-              <h2 class="side-preview-name" id="side-preview-name">Novo colaborador</h2>
-              <p class="side-preview-role" id="side-preview-role">Cadastro rápido da equipe</p>
-
-              <div class="side-preview-meta">
-                <div class="side-preview-pill">
-                  <i class="fa-solid fa-building"></i>
-                  <span id="side-preview-company">Empresa atual</span>
-                </div>
-
-                <div class="side-preview-pill">
-                  <i class="fa-solid fa-sitemap"></i>
-                  <span id="side-preview-dept">Não definido</span>
-                </div>
-              </div>
-            </div>
-
-            <div id="avatar-hint" class="avatar-hint" style="display:none">
-              <button id="btn-add-avatar" class="avatar-upload-btn" type="button">
-                <i class="fa-regular fa-image" aria-hidden="true"></i>
-                <span class="txt">
-                  <strong>Adicionar foto</strong>
-                  <small>Opcional, pode fazer depois</small>
-                </span>
-              </button>
-              <input id="p-avatar-input" type="file" accept="image/*,.svg,.webp,.avif,.heic,.heif" hidden />
-            </div>
-
-            <div class="status-left">
-              <span class="status-dot" id="p-status" title="Status"></span>
-              <span id="p-status-text">Disponível</span>
-            </div>
-          </aside>
-
+        <div class="colab-layout colab-layout-single">
           <section class="colab-main">
             <div class="colab-panel-card">
               <!-- ETAPA 1 -->
               <section class="colab-panel active" data-panel="perfil" role="tabpanel">
-                <div class="panel-title">
+                <div class="panel-title colab-form-heading">
+                  <span class="panel-title-icon" aria-hidden="true">
+                    <i class="fa-solid fa-user"></i>
+                  </span>
                   <div>
-                    <h3><i class="fa-solid fa-address-card"></i> Dados básicos</h3>
-                    <p>Preencha só o necessário para criar o colaborador rápido.</p>
+                    <h3>
+                      Informações do colaborador
+                      <span class="zc-help-icon" tabindex="0" role="button" aria-label="Ajuda sobre dados básicos" data-help="Preencha nome, e-mail, cargo e telefone se quiser. A empresa é preenchida automaticamente."><i class="fa-regular fa-circle-question"></i></span>
+                    </h3>
+                    <p class="panel-description">Preencha os dados básicos para convidar o colaborador.</p>
+                    <p class="required-fields-note"><span aria-hidden="true">*</span> Campos obrigatórios</p>
                   </div>
                 </div>
 
-                <dl class="details-grid" id="details-grid">
+                <div class="colab-photo-editor" id="colab-photo-editor">
+                  <button class="avatar-wrap colab-photo-preview" id="avatar-wrap" type="button"
+                          aria-label="Adicionar ou alterar foto de perfil">
+                    <img id="p-avatar" alt="Foto do colaborador">
+                    <span id="p-mono" aria-hidden="true">?</span>
+                    <span class="colab-photo-camera" aria-hidden="true">
+                      <i class="fa-solid fa-camera"></i>
+                    </span>
+                  </button>
+
+                  <div class="colab-photo-copy">
+                    <strong>Foto de perfil</strong>
+                    <span>Adicione uma foto para identificar o colaborador com mais facilidade.</span>
+
+                    <div id="avatar-hint" class="colab-photo-actions">
+                      <button id="btn-add-avatar" class="colab-photo-action" type="button">
+                        <i class="fa-regular fa-image" aria-hidden="true"></i>
+                        <span>
+                          <strong>Adicionar foto</strong>
+                          <small>JPG, PNG ou WEBP de até 5 MB</small>
+                        </span>
+                      </button>
+                      <input id="p-avatar-input" type="file" hidden
+                             accept="image/*,.svg,.webp,.avif,.heic,.heif">
+                    </div>
+                  </div>
+                </div>
+
+                <dl class="details-grid colab-basic-grid" id="details-grid">
                   <div class="full">
-                    <dt>Nome completo</dt>
+                    <dt>Nome completo <span class="required-mark" aria-hidden="true">*</span></dt>
                     <dd>
                       <div class="fieldbox" id="fb-nome">
                         <span id="v-nome">—</span>
@@ -273,7 +269,7 @@
                   </div>
 
                   <div class="half">
-                    <dt>E-mail</dt>
+                    <dt>E-mail <span class="required-mark" aria-hidden="true">*</span></dt>
                     <dd>
                       <div class="fieldbox" id="fb-email">
                         <a id="v-email" href="#">—</a>
@@ -282,7 +278,7 @@
                   </div>
 
                   <div class="half">
-                    <dt>Cargo</dt>
+                    <dt>Cargo <span class="required-mark" aria-hidden="true">*</span></dt>
                     <dd>
                       <div class="fieldbox" id="fb-cargo">
                         <span id="v-cargo">—</span>
@@ -290,17 +286,8 @@
                     </dd>
                   </div>
 
-                  <div class="full">
-                    <dt>Departamento principal</dt>
-                    <dd>
-                      <div class="fieldbox" id="fb-depto">
-                        <span id="v-depto">—</span>
-                      </div>
-                    </dd>
-                  </div>
-
                   <div class="half optional-field">
-                    <dt>Telefone <small>opcional</small></dt>
+                    <dt>Telefone <small>(opcional)</small></dt>
                     <dd>
                       <div class="fieldbox" id="fb-tel">
                         <a id="v-tel" href="#">—</a>
@@ -308,92 +295,126 @@
                     </dd>
                   </div>
 
-                  <div class="half optional-field">
+                  <div class="half optional-field company-field">
                     <dt>Empresa</dt>
                     <dd>
-                      <div class="fieldbox" id="fb-empresa">
+                      <div class="fieldbox company-readonly" id="fb-empresa">
                         <span id="v-empresa">—</span>
+                        <i class="fa-solid fa-lock" aria-hidden="true"></i>
                       </div>
-                    </dd>
-                  </div>
-
-                  <div class="full" id="row-exp-toggle">
-                    <dt>Expediente <small>opcional</small></dt>
-                    <dd>
-                      <div class="fieldbox advanced-card" id="fb-exp-info">
-                        <label class="chk-line">
-                          <input type="checkbox" id="e-exp-personalizar">
-                          <span>
-                            <strong>Personalizar horário para este colaborador</strong>
-                            <span class="muted" style="display:block;font-size:.86rem;margin-top:2px;">
-                              Desmarcado = usa automaticamente o horário padrão do departamento.
-                            </span>
-                          </span>
-                        </label>
-
-                        <small class="help-text" id="dept-exp-hint">
-                          Selecione um departamento para ver o horário padrão.
-                        </small>
-                      </div>
-                    </dd>
-                  </div>
-
-                  <div class="half" id="row-exp-ini">
-                    <dt>Entrada</dt>
-                    <dd>
-                      <div class="fieldbox" id="fb-exp-ini">
-                        <span id="v-exp-ini">—</span>
-                      </div>
-                    </dd>
-                  </div>
-
-                  <div class="half" id="row-exp-fim">
-                    <dt>Saída</dt>
-                    <dd>
-                      <div class="fieldbox" id="fb-exp-fim">
-                        <span id="v-exp-fim">—</span>
-                      </div>
+                      <small class="field-helper">Empresa definida automaticamente</small>
                     </dd>
                   </div>
                 </dl>
+
+                <section class="colab-schedule-block" aria-labelledby="colab-expediente-title">
+                  <h4 id="colab-expediente-title">Expediente</h4>
+
+                  <dl class="details-grid colab-schedule-grid">
+                    <div class="full" id="row-exp-toggle">
+                      <dd>
+                        <div class="fieldbox advanced-card schedule-card" id="fb-exp-info">
+                          <label class="schedule-toggle-card" for="e-exp-personalizar">
+                            <span class="schedule-leading-icon" aria-hidden="true">
+                              <i class="fa-regular fa-clock"></i>
+                            </span>
+                            <span class="schedule-toggle-copy">
+                              <strong>
+                                Personalizar horário para este colaborador
+                                <span class="zc-help-icon zc-help-icon-inline" tabindex="0" role="button" aria-label="Ajuda sobre expediente" data-help="Desmarcado, o colaborador usa automaticamente o horário padrão do departamento."><i class="fa-regular fa-circle-question"></i></span>
+                              </strong>
+                              <small class="schedule-static-help">Defina um horário de atendimento diferente para este colaborador.</small>
+                              <small class="help-text" id="dept-exp-hint"></small>
+                            </span>
+                            <span class="schedule-switch" aria-hidden="true">
+                              <input type="checkbox" id="e-exp-personalizar">
+                              <span class="schedule-switch-track"></span>
+                            </span>
+                          </label>
+                        </div>
+                      </dd>
+                    </div>
+
+                    <div class="half" id="row-exp-ini">
+                      <dt>Entrada</dt>
+                      <dd>
+                        <div class="fieldbox" id="fb-exp-ini">
+                          <span id="v-exp-ini">—</span>
+                        </div>
+                      </dd>
+                    </div>
+
+                    <div class="half" id="row-exp-fim">
+                      <dt>Saída</dt>
+                      <dd>
+                        <div class="fieldbox" id="fb-exp-fim">
+                          <span id="v-exp-fim">—</span>
+                        </div>
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
               </section>
 
               <!-- ETAPA 2 -->
               <section class="colab-panel" data-panel="acessos" role="tabpanel" hidden>
                 <div class="panel-title">
                   <div>
-                    <h3><i class="fa-solid fa-key"></i> Acesso</h3>
-                    <p>Configure login e limite os WhatsApps se necessário.</p>
+                    <h3><i class="fa-solid fa-key"></i> Acesso <span id="acesso-help-icon" class="zc-help-icon" tabindex="0" role="button" aria-label="Ajuda sobre acesso" data-help="O colaborador precisa ter acesso ao WhatsApp onde a mensagem chegou e ao departamento da conversa. Permissões definem o que ele pode fazer dentro do sistema."><i class="fa-regular fa-circle-question"></i></span></h3>
+                    <p class="panel-hint-sr">Configure o convite de login, departamentos e WhatsApps.</p>
                   </div>
                 </div>
 
                 <dl class="details-grid">
                   <div class="full">
-                    <dt>Senha de acesso <small>obrigatória</small></dt>
+                    <dt><span id="access-mode-title">Forma de acesso</span> <span id="access-mode-help" class="zc-help-icon zc-help-icon-tiny" tabindex="0" role="button" aria-label="Ajuda sobre forma de acesso" data-help="Convite por e-mail é o padrão recomendado. Senha manual é temporária e exige troca no primeiro acesso."><i class="fa-regular fa-circle-question"></i></span></dt>
                     <dd>
                       <div class="fieldbox advanced-card" id="fb-senha">
-                        <div id="wrap-senha" class="input-group" style="display:none">
-                          <input id="e-senha" class="input" type="password" autocomplete="new-password"
-                                 placeholder="Defina a senha inicial" minlength="6">
-                          <button id="toggle-senha" class="icon-btn" type="button" aria-label="Mostrar senha">
-                            <i class="fa fa-eye"></i>
-                          </button>
+                        <div class="access-mode-grid" id="access-mode-grid">
+                          <label class="chk-line access-mode-card" for="acesso-modo-convite">
+                            <input type="radio" name="acesso_modo" id="acesso-modo-convite" value="convite" checked>
+                            <span>
+                              <span class="access-mode-main"><strong id="access-email-label">Enviar convite por e-mail</strong><span id="access-email-help" class="zc-help-icon zc-help-icon-inline" tabindex="0" role="button" aria-label="Ajuda sobre acesso por e-mail" data-help="O colaborador recebe um convite no e-mail cadastrado e cria a própria senha."><i class="fa-regular fa-circle-question"></i></span></span>
+                              <small id="access-email-description" class="access-mode-description">O colaborador cria a própria senha pelo e-mail.</small>
+                            </span>
+                          </label>
+
+                          <label class="chk-line access-mode-card" for="acesso-modo-manual">
+                            <input type="radio" name="acesso_modo" id="acesso-modo-manual" value="manual">
+                            <span>
+                              <span class="access-mode-main"><strong id="access-manual-label">Definir senha manualmente</strong><span id="access-manual-help" class="zc-help-icon zc-help-icon-inline" tabindex="0" role="button" aria-label="Ajuda sobre senha manual" data-help="Use somente quando o colaborador não consegue acessar o e-mail agora. A senha é temporária e o sistema exige troca no primeiro acesso."><i class="fa-regular fa-circle-question"></i></span></span>
+                              <small id="access-manual-description" class="access-mode-description">Cria uma senha temporária e exige a troca depois.</small>
+                            </span>
+                          </label>
+                        </div>
+
+                        <div id="manual-senha-panel" style="display:none;margin-top:.75rem;">
+                          <label class="manual-password-label" for="e-senha">
+                            Senha temporária <span class="required-mark" aria-hidden="true">*</span>
+                          </label>
+                          <div id="wrap-senha" class="input-group" style="display:none">
+                            <input id="e-senha" class="input" type="password" autocomplete="new-password"
+                                   placeholder="Defina a senha temporária" minlength="6">
+                            <button id="toggle-senha" class="icon-btn" type="button" aria-label="Mostrar senha">
+                              <i class="fa fa-eye"></i>
+                            </button>
+                          </div>
                         </div>
 
                         <small class="help-text" id="senha-help" style="display:none">
-                          Informe uma senha inicial para o colaborador acessar a plataforma.
+                          Por padrão, o colaborador cria a própria senha pelo convite enviado ao e-mail cadastrado.
                         </small>
                       </div>
                     </dd>
                   </div>
 
                   <div class="full" id="deptos-full">
-                    <dt>Departamentos que atende <small>opcional</small></dt>
+                    <dt>Departamentos que atende</dt>
                     <dd>
                       <div id="deptos-wrap" class="fieldbox advanced-card">
                         <div class="dept-title-line">
-                          <span>Quais departamentos este colaborador pode atender?</span>
-                          <span class="muted">Pode deixar vazio e ajustar depois.</span>
+                          <span>Departamentos de atendimento</span>
+                          <span class="zc-help-icon" tabindex="0" role="button" aria-label="Ajuda sobre departamentos" data-help="Define de quais departamentos o colaborador poderá ver e atender conversas."><i class="fa-regular fa-circle-question"></i></span>
                         </div>
 
                         <div id="dept-actions" style="display:none">
@@ -408,17 +429,27 @@
                   </div>
 
                   <div class="full" id="insts-full">
-                    <dt>WhatsApps permitidos <small>opcional</small></dt>
+                    <dt>WhatsApps permitidos</dt>
                     <dd>
                       <div id="insts-wrap" class="fieldbox advanced-card">
                         <div class="inst-title-line">
-                          <span>Quais WhatsApps este atendente pode acessar?</span>
-                          <span class="muted">Se não marcar nenhum, ele vê todos.</span>
+                          <span>WhatsApps permitidos</span>
+                          <span class="zc-help-icon" tabindex="0" role="button" aria-label="Ajuda sobre WhatsApps permitidos" data-help="Marque explicitamente os números que este colaborador pode acessar. Se não marcar nenhum, ele não verá nem poderá atender conversas de WhatsApp."><i class="fa-regular fa-circle-question"></i></span>
                         </div>
+
+                        <p class="help-text" id="inst-access-help" style="margin:.45rem 0 .7rem;line-height:1.45;">
+                          Marque os números que este colaborador poderá visualizar e atender.
+                          Sem nenhuma seleção, ele ficará sem acesso aos atendimentos de WhatsApp.
+                        </p>
 
                         <div id="inst-actions" style="display:none">
                           <button type="button" id="inst-select-all" class="btn btn-ghost">Selecionar todos</button>
                           <button type="button" id="inst-clear" class="btn btn-ghost">Limpar</button>
+                        </div>
+
+                        <div id="inst-selection-warning" class="help-text" hidden
+                             style="margin:.55rem 0;color:#b45309;font-weight:600;">
+                          Nenhum WhatsApp selecionado. Este colaborador não verá conversas.
                         </div>
 
                         <div id="e-insts" style="display:none"></div>
@@ -433,8 +464,8 @@
               <section class="colab-panel" data-panel="permissoes" role="tabpanel" hidden>
                 <div class="panel-title">
                   <div>
-                    <h3><i class="fa-solid fa-shield-halved"></i> Permissões</h3>
-                    <p>Clique em um grupo para abrir as permissões. Assim a tela fica mais limpa.</p>
+                    <h3><i class="fa-solid fa-shield-halved"></i> Permissões <span class="zc-help-icon" tabindex="0" role="button" aria-label="Ajuda sobre permissões" data-help="Escolha um perfil rápido. As permissões avançadas só aparecem se você quiser ajustar manualmente."><i class="fa-regular fa-circle-question"></i></span></h3>
+                    <p class="panel-hint-sr">Escolha um perfil de acesso e ajuste manualmente só se precisar.</p>
                   </div>
                 </div>
 
@@ -451,26 +482,40 @@
             </div>
           </section>
         </div>
+
       </div>
 
-      <div class="foot">
-        <div class="foot-note">Cadastro rápido: os detalhes podem ser ajustados depois.</div>
+      <div id="perfil-save-status" class="colab-save-status" role="status" aria-live="polite" aria-atomic="true" hidden>
+        <span class="colab-save-status-icon" aria-hidden="true"></span>
+        <span class="colab-save-status-copy">
+          <strong id="perfil-save-status-title">Salvando colaborador...</strong>
+          <small id="perfil-save-status-detail">Aguarde enquanto concluímos o cadastro.</small>
+        </span>
+      </div>
 
-        <div class="foot-actions">
-          <button id="perfil-fechar2" class="btn btn-primary" type="button">Fechar</button>
+      <div class="foot colab-clean-foot">
+        <div class="foot-left-actions">
+          <button id="perfil-cancelar-foot" class="btn btn-ghost" type="button">Cancelar</button>
+          <button id="perfil-fechar2" class="btn btn-ghost" type="button">Fechar</button>
+        </div>
 
-          <div class="wizard-footer-nav">
-            <button id="perfil-cancelar-foot" class="btn btn-ghost" type="button">Cancelar</button>
-            <button id="perfil-voltar-step" class="btn btn-ghost" type="button">Voltar</button>
-            <button id="perfil-continuar-step" class="btn btn-primary" type="button">
-              Continuar
-              <i class="fa-solid fa-arrow-right"></i>
-            </button>
-            <button id="perfil-salvar-foot" class="btn btn-primary" type="button">
-              <i class="fa-solid fa-check"></i>
-              Criar colaborador
-            </button>
-          </div>
+        <div class="wizard-footer-nav">
+          <button id="perfil-voltar-step" class="btn btn-ghost" type="button">
+            <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+            Voltar
+          </button>
+          <button id="perfil-editar" class="btn btn-primary" type="button">
+            <i class="fa-solid fa-pen" aria-hidden="true"></i>
+            Editar
+          </button>
+          <button id="perfil-continuar-step" class="btn btn-primary" type="button">
+            Continuar
+            <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+          </button>
+          <button id="perfil-salvar-foot" class="btn btn-primary" type="button">
+            <i class="fa-solid fa-check" aria-hidden="true"></i>
+            Criar colaborador
+          </button>
         </div>
       </div>
     </div>
@@ -499,10 +544,11 @@
 
   <div id="toast" role="status" aria-live="polite"></div>
 
-  <script type="module" src="/frontend/js/pages/colaboradores/index.js?v=colab-wizard-final-click-fix-20260628"></script>
+  <script type="module" src="/frontend/js/pages/colaboradores/index.js?v=colab-required-20260713"></script>
 
   <!-- Wizard controlado por frontend/js/pages/colaboradores/modal.js para evitar eventos duplicados. -->
 
 
+  <script src="/frontend/js/help/help-colaboradores.js?v=20260708-colaboradores-tour-responsive-final" defer></script>
 </body>
 </html>

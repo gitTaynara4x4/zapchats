@@ -61,9 +61,22 @@ def _inst_from_payload(first: str, payload: dict | list) -> str:
     return str(first or "").strip()
 
 
-def _extract_qr_fields(payload: Any) -> tuple[str, str | None, int | None]:
+def _looks_like_pairing_code(value: str) -> bool:
+    raw = _safe_str(value).replace("-", "").replace(" ", "")
+    return bool(raw) and len(raw) <= 12 and raw.isalnum()
+
+
+def _extract_qr_fields(payload: Any) -> tuple[str, str | None, str | None, int | None]:
     """
-    Retorna: (base64, pairing_code, limit)
+    Retorna: (base64, qr_text, pairing_code, limit)
+
+    A Evolution pode mandar QR de formas diferentes:
+    - base64/image/codeBase64 = imagem pronta;
+    - qr/qrCode/code = texto bruto do QR;
+    - pairingCode/pairing_code = código de pareamento.
+
+    Importante: em QR Code, o campo `code` costuma ser o texto do QR,
+    não o código de telefone. Só tratamos `code` como pairing se ele for curto.
     """
     data = _as_dict(payload)
 
@@ -75,19 +88,36 @@ def _extract_qr_fields(payload: Any) -> tuple[str, str | None, int | None]:
     b64 = (
         _safe_str(q.get("base64"))
         or _safe_str(q.get("image"))
-        or _safe_str(q.get("qr"))
         or _safe_str(q.get("codeBase64"))
+        or _safe_str(q.get("qrBase64"))
     )
 
-    pairing_code = (
+    explicit_pairing = (
         _safe_str(q.get("pairingCode"))
-        or _safe_str(q.get("code"))
         or _safe_str(q.get("pairing_code"))
-        or None
+        or _safe_str(q.get("pairing"))
     )
+
+    raw_code = (
+        _safe_str(q.get("qrText"))
+        or _safe_str(q.get("qr_text"))
+        or _safe_str(q.get("qrCode"))
+        or _safe_str(q.get("qr_code"))
+        or _safe_str(q.get("qr"))
+        or _safe_str(q.get("code"))
+    )
+
+    pairing_code = explicit_pairing or None
+    qr_text = None
+
+    if raw_code:
+        if not pairing_code and _looks_like_pairing_code(raw_code):
+            pairing_code = raw_code
+        else:
+            qr_text = raw_code
 
     limit = None
-    raw_limit = q.get("count") or q.get("limit") or q.get("timeout")
+    raw_limit = q.get("count") or q.get("limit") or q.get("timeout") or q.get("qr_limit")
     try:
         if isinstance(raw_limit, str) and raw_limit.strip().isdigit():
             limit = int(raw_limit.strip())
@@ -96,24 +126,26 @@ def _extract_qr_fields(payload: Any) -> tuple[str, str | None, int | None]:
     except Exception:
         limit = None
 
-    return b64, pairing_code, limit
+    return b64, qr_text, pairing_code, limit
 
 
-async def _emit_qr(inst_id: str, b64: str | None, pairing_code: str | None, limit: int | None) -> None:
+async def _emit_qr(inst_id: str, b64: str | None, qr_text: str | None, pairing_code: str | None, limit: int | None) -> None:
     await emit_qrcode(
         inst_id,
         b64,
         pairing_code=pairing_code,
         qr_limit=limit,
+        qr_text=qr_text,
     )
+
 
 
 @handler(EvoEvent.QRCODE_UPDATED)
 async def on_qrcode_updated(first: str, payload: dict):
     inst_id = _inst_from_payload(first, payload)
-    b64, pairing_code, limit = _extract_qr_fields(payload)
+    b64, qr_text, pairing_code, limit = _extract_qr_fields(payload)
 
-    if not (b64 or pairing_code):
+    if not (b64 or qr_text or pairing_code):
         try:
             await emit_qrcode(
                 inst_id,
@@ -130,7 +162,7 @@ async def on_qrcode_updated(first: str, payload: dict):
     except Exception:
         pass
 
-    await _emit_qr(inst_id, b64, pairing_code, limit)
+    await _emit_qr(inst_id, b64, qr_text, pairing_code, limit)
 
 
 async def force_qr_now_async(inst_id: str):
@@ -144,13 +176,13 @@ async def force_qr_now_async(inst_id: str):
     try:
         js = await asyncio.to_thread(evo_connect, inst_id)
         if isinstance(js, dict):
-            b64, pairing_code, limit = _extract_qr_fields(js)
-            if b64 or pairing_code:
+            b64, qr_text, pairing_code, limit = _extract_qr_fields(js)
+            if b64 or qr_text or pairing_code:
                 try:
                     remember_qr_emitted(inst_id)
                 except Exception:
                     pass
-                await _emit_qr(inst_id, b64, pairing_code, limit)
+                await _emit_qr(inst_id, b64, qr_text, pairing_code, limit)
             else:
                 await emit_qrcode(inst_id, None, pairing_code=None, qr_limit=limit)
     except Exception as e:

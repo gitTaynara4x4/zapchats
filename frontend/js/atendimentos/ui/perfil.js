@@ -14,6 +14,8 @@
 //   quando a conversa atual for g:{grupo_id}:{instancia_id}
 // - CACHE LOCAL: abrir/fechar/abrir não fica batendo no banco toda hora
 // - Botão "Atualizar" ignora cache e consulta Evolution
+// - v12: ao trocar de cliente, limpa avatar/foto antiga antes de aplicar o novo perfil
+// - v13: mostra loading visual no avatar/drawer durante carregamento/atualização
 
 const $ = (s, r = document) => r.querySelector(s);
 const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
@@ -52,6 +54,13 @@ function safeJsonParse(raw) {
   } catch {
     return null;
   }
+}
+
+function isPerfilAbortLike(err) {
+  if (!err) return false;
+  if (err.name === 'AbortError') return true;
+  const msg = String(err.message || err.reason || err || '').toLowerCase();
+  return msg.includes('atendimento-fetch-timeout') || msg.includes('abortado');
 }
 
 function perfilCacheBucket(type, kind, id) {
@@ -257,6 +266,37 @@ function getPerfilConversationKey() {
   }
 
   return '';
+}
+
+function getPerfilInstanciaId() {
+  const hist = $('#historico');
+  const head = $('#chat-header');
+  const sel = getPerfilStateSelected();
+
+  const key = parsePerfilConversationKey(getPerfilConversationKey());
+  if (key?.instanciaId) return Number(key.instanciaId) || 0;
+
+  const candidates = [
+    hist?.dataset?.instanciaId,
+    hist?.dataset?.instanceId,
+    hist?.dataset?.instancia_id,
+    head?.dataset?.instanciaId,
+    head?.dataset?.instanceId,
+    head?.dataset?.instancia_id,
+    sel?.instancia_id,
+    sel?.instanciaId,
+    sel?.instance_id,
+    sel?.instanceId,
+    window.INSTANCIA_ID_ATUAL,
+    window.instanciaIdAtual,
+  ];
+
+  for (const v of candidates) {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  return 0;
 }
 
 function getPerfilSelectedKind(opts = {}) {
@@ -465,7 +505,16 @@ function perfilProfileUrl(kind, id, suffix = '') {
     ? `/api/atendimento/grupos/${encodeURIComponent(id)}/profile`
     : `/api/atendimento/clientes/${encodeURIComponent(id)}/profile`;
 
-  return `${base}${suffix}?empresa_id=${encodeURIComponent(EMPRESA_ID)}`;
+  const params = new URLSearchParams();
+  params.set('empresa_id', String(EMPRESA_ID || ''));
+
+  // A rota de perfil usa ACL por atendimento/instância. Sem a instância atual,
+  // alguns clientes da Entrada Geral ou com múltiplas instâncias podiam abrir no
+  // drawer, mas falhar ao clicar em Atualizar.
+  const instId = getPerfilInstanciaId();
+  if (instId > 0) params.set('instancia_id', String(instId));
+
+  return `${base}${suffix}?${params.toString()}`;
 }
 
 /* =========================
@@ -1282,6 +1331,9 @@ function ensureDrawer() {
             <div id="pf_avatar_fallback" class="zcPerfilAvatarFallback">
               <i class="fa-regular fa-user"></i>
             </div>
+            <div id="pf_avatar_loader" class="zcPerfilAvatarLoader" hidden aria-hidden="true">
+              <span></span>
+            </div>
           </div>
 
           <div class="zcPerfilHeroInfo">
@@ -1447,8 +1499,10 @@ function ensureDrawer() {
     cancel: $('#zcPerfilCancel', drawer),
     close: $('#zcPerfilClose', drawer),
 
+    avatarWrap: $('.zcPerfilAvatarWrap', drawer),
     avatar: $('#pf_avatar', drawer),
     avatarFallback: $('#pf_avatar_fallback', drawer),
+    avatarLoader: $('#pf_avatar_loader', drawer),
     displayName: $('#pf_display_name', drawer),
     displayPhone: $('#pf_display_phone', drawer),
     badgeBusiness: $('#pf_badge_business', drawer),
@@ -1568,6 +1622,7 @@ function bindDrawer() {
 
   const close = () => {
     abortPerfilRequests();
+    hardResetAvatar();
 
     PERFIL_CLIENTE_ID = 0;
     PERFIL_GRUPO_ID = 0;
@@ -1673,19 +1728,83 @@ function resetForm() {
   });
 }
 
+function setAvatarLoading(loading) {
+  const r = ensureDrawer();
+  const on = !!loading;
+
+  if (r.avatarWrap) {
+    r.avatarWrap.classList.toggle('is-loading-avatar', on);
+  }
+
+  if (r.avatarLoader) {
+    r.avatarLoader.hidden = !on;
+  }
+}
+
+function hardResetAvatar() {
+  const r = ensureDrawer();
+
+  if (r.avatar) {
+    // Limpeza forte: evita foto antiga ficar visível quando o próximo cliente
+    // ainda não tem avatar ou quando a imagem anterior termina de carregar atrasada.
+    r.avatar.onload = null;
+    r.avatar.onerror = null;
+    r.avatar.hidden = true;
+    r.avatar.alt = '';
+    r.avatar.dataset.owner = '';
+    r.avatar.style.display = 'none';
+    r.avatar.removeAttribute('src');
+    try { r.avatar.src = ''; } catch {}
+  }
+
+  if (r.avatarFallback) {
+    r.avatarFallback.hidden = false;
+    r.avatarFallback.style.display = 'grid';
+  }
+}
+
+function showAvatarUrl(avatarUrl, displayName, ownerKey) {
+  const r = ensureDrawer();
+
+  const url = String(avatarUrl || '').trim();
+  if (!url || !r.avatar) {
+    hardResetAvatar();
+    return;
+  }
+
+  const expectedOwner = String(ownerKey || '');
+
+  // Sempre limpa primeiro para não reaproveitar bitmap/src do cliente anterior.
+  hardResetAvatar();
+
+  r.avatar.dataset.owner = expectedOwner;
+  r.avatar.alt = displayName || '';
+
+  r.avatar.onload = () => {
+    if (String(r.avatar.dataset.owner || '') !== expectedOwner) return;
+    r.avatar.hidden = false;
+    r.avatar.style.display = 'block';
+    if (r.avatarFallback) {
+      r.avatarFallback.hidden = true;
+      r.avatarFallback.style.display = 'none';
+    }
+  };
+
+  r.avatar.onerror = () => {
+    if (String(r.avatar.dataset.owner || '') !== expectedOwner) return;
+    hardResetAvatar();
+  };
+
+  // Define o src só depois de registrar onload/onerror.
+  r.avatar.src = url;
+}
+
 function resetSummary() {
   const r = ensureDrawer();
 
   PERFIL_MEDIA_ITEMS = [];
 
-  if (r.avatar) {
-    r.avatar.hidden = true;
-    r.avatar.removeAttribute('src');
-  }
-
-  if (r.avatarFallback) {
-    r.avatarFallback.hidden = false;
-  }
+  hardResetAvatar();
 
   if (r.displayName) {
     r.displayName.textContent = PERFIL_KIND_ATUAL === 'grupo' ? 'Grupo' : 'Cliente';
@@ -1726,25 +1845,13 @@ function applyProfileToSummary(j = {}) {
   const isBusiness = !isGroup && !!j.is_business;
   const statusText = String(j.status_text || '').trim();
   const avatarUrl = j.avatar_url || '';
+  const ownerId = isGroup ? (j.grupo_id || j.id || PERFIL_GRUPO_ID) : (j.cliente_id || j.id || PERFIL_CLIENTE_ID);
+  const ownerKey = `${isGroup ? 'grupo' : 'cliente'}:${Number(ownerId || 0) || 0}`;
 
   if (r.displayName) r.displayName.textContent = displayName;
   if (r.displayPhone) r.displayPhone.textContent = phone || '';
 
-  if (avatarUrl) {
-    r.avatar.hidden = false;
-    r.avatar.src = avatarUrl;
-    r.avatar.alt = displayName;
-    r.avatarFallback.hidden = true;
-
-    r.avatar.onerror = () => {
-      r.avatar.hidden = true;
-      r.avatarFallback.hidden = false;
-    };
-  } else {
-    r.avatar.hidden = true;
-    r.avatar.removeAttribute('src');
-    r.avatarFallback.hidden = false;
-  }
+  showAvatarUrl(avatarUrl, displayName, ownerKey);
 
   if (r.badgeBusiness) {
     r.badgeBusiness.hidden = !isBusiness;
@@ -1840,6 +1947,8 @@ function applyProfile(j = {}, { syncForm = false, syncNote = '' } = {}) {
 function setLoadingState(loading, text = '') {
   const r = ensureDrawer();
 
+  setAvatarLoading(loading);
+
   if (r.refreshBtn) {
     r.refreshBtn.disabled = !!loading;
     r.refreshBtn.classList.toggle('is-loading', !!loading);
@@ -1888,6 +1997,13 @@ async function carregarPerfilBanco(explicitId = null, opts = {}) {
     }
   }
 
+  setLoadingState(
+    true,
+    kind === 'grupo'
+      ? 'Carregando dados do grupo…'
+      : 'Carregando dados do cliente…'
+  );
+
   const req = beginPerfilRequest(id);
 
   try {
@@ -1922,7 +2038,7 @@ async function carregarPerfilBanco(explicitId = null, opts = {}) {
 
     return j;
   } catch (err) {
-    if (err?.name === 'AbortError') return null;
+    if (isPerfilAbortLike(err)) return null;
 
     console.error('[perfil] carregar banco', err);
 
@@ -1947,6 +2063,10 @@ async function carregarPerfilBanco(explicitId = null, opts = {}) {
     });
 
     return null;
+  } finally {
+    if (isPerfilRequestStillValid(req.seq, id, kind)) {
+      setLoadingState(false, '');
+    }
   }
 }
 
@@ -1980,7 +2100,12 @@ async function refreshEvolutionProfile(explicitId = null) {
     );
 
     if (!resp.ok) {
-      throw new Error(`Falha no refresh (${resp.status})`);
+      let detail = '';
+      try {
+        const errJson = await resp.json();
+        detail = errJson?.detail || errJson?.message || '';
+      } catch {}
+      throw new Error(detail || `Falha no refresh (${resp.status})`);
     }
 
     const j = await resp.json();
@@ -2032,7 +2157,7 @@ async function refreshEvolutionProfile(explicitId = null) {
 
     return j;
   } catch (err) {
-    if (err?.name === 'AbortError') return null;
+    if (isPerfilAbortLike(err)) return null;
 
     console.warn('[perfil] refresh evolution', err);
 
@@ -2044,7 +2169,7 @@ async function refreshEvolutionProfile(explicitId = null) {
 
     toastLocal({
       title: 'Falha ao atualizar',
-      msg: 'Não foi possível consultar o WhatsApp agora.',
+      msg: err?.message || 'Não foi possível consultar o WhatsApp agora.',
       type: 'error',
     });
 

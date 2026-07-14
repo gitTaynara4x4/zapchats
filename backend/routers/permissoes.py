@@ -48,6 +48,7 @@ PERMISSOES_CATALOGO = [
     # ===== ATENDIMENTO =====
     {"id": "atendimento.ver",                "label": "Ver Atendimento"},
     {"id": "atendimento.enviar",             "label": "Enviar mensagens no Atendimento"},
+    {"id": "atendimento.transferir",         "label": "Transferir atendimentos"},
     {"id": "atendimento.apagar_mensagens",   "label": "Apagar mensagens do Atendimento"},
     {"id": "arquivos.ver",                   "label": "Ver Mídias/Arquivos"},
 

@@ -5,7 +5,7 @@
   if (window.__zcColaboradoresModuloShimLoaded) return;
   window.__zcColaboradoresModuloShimLoaded = true;
 
-  import('/frontend/js/pages/colaboradores/index.js?v=colab-wizard-final-click-fix-20260628')
+  import('/frontend/js/pages/colaboradores/index.js?v=colab-modal-clean-20260711')
     .then(mod => {
       if (mod && typeof mod.initColaboradoresPage === 'function') {
         mod.initColaboradoresPage();

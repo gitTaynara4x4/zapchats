@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -32,7 +33,6 @@ from ..repositories.instancias_repo import get_instancia_by_name
 
 SYNC_CONTACTS_ON_CONNECT = (os.getenv("SYNC_CONTACTS_ON_CONNECT", "true").lower() == "true")
 SYNC_CHATS_ON_CONNECT = (os.getenv("SYNC_CHATS_ON_CONNECT", "true").lower() == "true")
-ENABLE_MESSAGES_SET = (os.getenv("ENABLE_MESSAGES_SET", "true").lower() == "true")
 SYNC_ON_CONNECT_AFTER_QR = (os.getenv("SYNC_ON_CONNECT_AFTER_QR", "true").lower() == "true")
 QR_CONNECT_SYNC_WINDOW_MIN = int(os.getenv("QR_CONNECT_SYNC_WINDOW_MIN", "30") or "30")
 
@@ -52,6 +52,9 @@ def _bool_env_value(name: str, default: bool = False) -> bool:
         return False
 
     return bool(default)
+
+
+ENABLE_MESSAGES_SET = _bool_env_value("ENABLE_MESSAGES_SET", False)
 
 
 def _float_env_value(name: str, default: float) -> float:
@@ -89,6 +92,17 @@ HISTORY_SETTINGS_RETRY_DELAY_SEC = _float_env_value("EVO_HISTORY_SETTINGS_RETRY_
 HISTORY_WATCHDOG_ENABLED = _bool_env_value("EVO_HISTORY_WATCHDOG_ENABLED", True)
 HISTORY_WATCHDOG_WAIT_SEC = max(1.0, _float_env_value("EVO_HISTORY_WATCHDOG_WAIT_SEC", 20.0))
 HISTORY_WATCHDOG_REAPPLIES = max(0, _int_env_value("EVO_HISTORY_WATCHDOG_REAPPLIES", 2))
+
+# Fallback quando a Evolution sincroniza contatos/chats, mas não emite MESSAGES_SET.
+# Nesse caso buscamos mensagens já persistidas pela própria Evolution em /chat/findMessages
+# e enviamos para o mesmo handler do MESSAGES_SET.
+HISTORY_FINDMESSAGES_FALLBACK_ENABLED = _bool_env_value(
+    "EVO_HISTORY_FINDMESSAGES_FALLBACK_ENABLED",
+    True,
+)
+HISTORY_FINDMESSAGES_FALLBACK_LIMIT = max(1, _int_env_value("EVO_HISTORY_FINDMESSAGES_FALLBACK_LIMIT", 500))
+HISTORY_FINDMESSAGES_FALLBACK_TIMEOUT_SEC = max(5, _int_env_value("EVO_HISTORY_FINDMESSAGES_FALLBACK_TIMEOUT_SEC", 60))
+HISTORY_MANUAL_FALLBACK_DELAY_SEC = max(0.0, _float_env_value("EVO_HISTORY_MANUAL_FALLBACK_DELAY_SEC", 8.0))
 
 # Segurança contra avalanche depois de rebuild/restart da Evolution:
 # Por padrão, instância antiga que já estava conectada NÃO reconfigura Rabbit/WS de novo
@@ -537,17 +551,250 @@ def _get_inst_row(db, instance: str):
 
 def _historico_pede_sync(historico_opcao: str | None) -> bool:
     h = _normalize_historico_opcao(historico_opcao)
-    return h in {"24h", "7d", "30d", "all"}
+    return h in {"24h", "7d", "30d"}
 
 
 def _messages_set_deve_rodar(historico_opcao: str | None = None) -> bool:
-    """MESSAGES_SET pode ficar desligado globalmente, mas histórico escolhido no QR manda.
+    """MESSAGES_SET só roda quando existe importação pendente.
 
-    Produção normal continua leve quando historico_restaurar=none.
-    Se o usuário escolheu 24h/7d/30d, o sync precisa rodar mesmo com
-    ENABLE_MESSAGES_SET=false no ENV antigo.
+    A flag ENABLE_MESSAGES_SET é legada/informativa; ela não deve fazer o
+    backend aceitar histórico sem o usuário escolher 24h, 7d ou 30d.
     """
-    return bool(ENABLE_MESSAGES_SET or _historico_pede_sync(historico_opcao))
+    return _historico_pede_sync(historico_opcao)
+
+
+def _fallback_message_count(payload: Any) -> int:
+    try:
+        from ..parsers.base_extractors import extract_messages_any_shape
+
+        return len(extract_messages_any_shape(payload))
+    except Exception:
+        return 0
+
+
+def _evo_findmessages_body_candidates(*, limit: int) -> list[dict[str, Any]]:
+    # A Evolution mudou o formato aceito em algumas versões.
+    # Por isso tentamos variações seguras, sempre com limite/cap.
+    lim = max(1, int(limit or 500))
+    return [
+        {
+            "where": {},
+            "take": lim,
+            "skip": 0,
+            "orderBy": {"messageTimestamp": "desc"},
+        },
+        {
+            "where": {},
+            "take": lim,
+            "skip": 0,
+            "orderBy": {"createdAt": "desc"},
+        },
+        {
+            "where": {},
+            "limit": lim,
+            "offset": 0,
+            "orderBy": {"messageTimestamp": "desc"},
+        },
+        {
+            "where": {},
+            "page": 1,
+            "limit": lim,
+        },
+        {
+            "where": {},
+            "page": 1,
+            "offset": lim,
+        },
+        {
+            "where": {},
+            "take": lim,
+        },
+    ]
+
+
+def _evo_fetch_findmessages_fallback_sync(instance: str, *, historico_opcao: str) -> tuple[Any | None, int, str]:
+    if not (EVOLUTION_URL and HEADERS and instance):
+        return None, 0, "missing_config"
+
+    limit = max(1, int(HISTORY_FINDMESSAGES_FALLBACK_LIMIT or 500))
+    timeout = max(5, int(HISTORY_FINDMESSAGES_FALLBACK_TIMEOUT_SEC or 60))
+
+    endpoints = [
+        f"{EVOLUTION_URL}/chat/findMessages/{instance}",
+        f"{EVOLUTION_URL}/message/findMessages/{instance}",
+    ]
+
+    last_error = ""
+
+    for url in endpoints:
+        for body in _evo_findmessages_body_candidates(limit=limit):
+            try:
+                r = requests.post(
+                    url,
+                    headers=HEADERS,
+                    json=body,
+                    timeout=timeout,
+                )
+
+                if not r.ok:
+                    last_error = f"{url} status={r.status_code} body={str(r.text or '')[:300]}"
+                    continue
+
+                try:
+                    payload = r.json()
+                except Exception:
+                    last_error = f"{url} resposta_sem_json"
+                    continue
+
+                total = _fallback_message_count(payload)
+                LOG(
+                    f"[HISTORY][fallback-findMessages] resposta inst={instance} "
+                    f"historico={historico_opcao} endpoint={url} total={total} "
+                    f"body_keys={list(body.keys())}"
+                )
+
+                if total > 0:
+                    return payload, total, "ok"
+
+                # Guarda resposta vazia como fallback, mas continua tentando outros formatos.
+                if last_error == "":
+                    last_error = f"{url} ok_mas_total_0"
+
+            except Exception as e:
+                last_error = f"{url} erro={e}"
+
+    return None, 0, last_error or "empty"
+
+
+async def _history_findmessages_fallback(
+    *,
+    inst_id: str,
+    historico_opcao: str,
+    empresa_id: int | None,
+    reason: str = "watchdog",
+) -> bool:
+    h = _normalize_historico_opcao(historico_opcao)
+
+    if not HISTORY_FINDMESSAGES_FALLBACK_ENABLED:
+        LOG(f"[HISTORY][fallback-findMessages] desabilitado inst={inst_id} reason={reason}")
+        return False
+
+    if not _historico_pede_sync(h):
+        LOG(f"[HISTORY][fallback-findMessages] ignorado; histórico não pendente inst={inst_id} historico={h}")
+        return False
+
+    if _history_messages_set_arrived(inst_id):
+        LOG(f"[HISTORY][fallback-findMessages] ignorado; MESSAGES_SET já chegou inst={inst_id}")
+        return True
+
+    LOG(
+        f"[HISTORY][fallback-findMessages] iniciando inst={inst_id} "
+        f"historico={h} reason={reason} limit={HISTORY_FINDMESSAGES_FALLBACK_LIMIT}"
+    )
+
+    await _emit_history_watchdog_progress(
+        empresa_id,
+        inst_id=inst_id,
+        historico_opcao=h,
+        status="fallback_findmessages_start",
+        cycle=0,
+        reapply_result={"reason": reason, "limit": HISTORY_FINDMESSAGES_FALLBACK_LIMIT},
+    )
+
+    payload, total, status = await asyncio.to_thread(
+        _evo_fetch_findmessages_fallback_sync,
+        inst_id,
+        historico_opcao=h,
+    )
+
+    if not payload or total <= 0:
+        LOG(
+            f"[HISTORY][fallback-findMessages] sem mensagens para processar "
+            f"inst={inst_id} historico={h} status={status}"
+        )
+        await _emit_history_watchdog_progress(
+            empresa_id,
+            inst_id=inst_id,
+            historico_opcao=h,
+            status="fallback_findmessages_empty",
+            cycle=0,
+            reapply_result={"status": status},
+        )
+        return False
+
+    try:
+        from .messages_set import on_messages_set
+
+        LOG(
+            f"[HISTORY][fallback-findMessages] chamando handler MESSAGES_SET manualmente "
+            f"inst={inst_id} historico={h} total={total}"
+        )
+        await on_messages_set(inst_id, payload)
+
+        await _emit_history_watchdog_progress(
+            empresa_id,
+            inst_id=inst_id,
+            historico_opcao=h,
+            status="fallback_findmessages_processed",
+            cycle=0,
+            reapply_result={"total": total},
+        )
+        return True
+
+    except Exception as e:
+        LOG(f"[HISTORY][fallback-findMessages] erro ao processar inst={inst_id}: {e}")
+        await _emit_history_watchdog_progress(
+            empresa_id,
+            inst_id=inst_id,
+            historico_opcao=h,
+            status="fallback_findmessages_error",
+            cycle=0,
+            reapply_result={"error": str(e)[:300]},
+        )
+        return False
+
+
+def trigger_history_findmessages_fallback_later(
+    inst_id: str,
+    historico_opcao: str,
+    *,
+    empresa_id: int | None = None,
+    delay_sec: float | None = None,
+    reason: str = "manual",
+) -> bool:
+    inst = str(inst_id or "").strip()
+    if not inst:
+        return False
+
+    delay = HISTORY_MANUAL_FALLBACK_DELAY_SEC if delay_sec is None else max(0.0, float(delay_sec or 0.0))
+
+    async def _runner() -> None:
+        try:
+            if delay > 0:
+                await asyncio.sleep(delay)
+            if _history_messages_set_arrived(inst):
+                LOG(f"[HISTORY][fallback-findMessages] cancelado; MESSAGES_SET chegou antes inst={inst} reason={reason}")
+                return
+            await _history_findmessages_fallback(
+                inst_id=inst,
+                historico_opcao=historico_opcao,
+                empresa_id=empresa_id,
+                reason=reason,
+            )
+        except Exception as e:
+            LOG(f"[HISTORY][fallback-findMessages] task erro inst={inst}: {e}")
+
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_runner())
+    except RuntimeError:
+        threading.Thread(target=lambda: asyncio.run(_runner()), daemon=True).start()
+
+    LOG(
+        f"[HISTORY][fallback-findMessages] agendado inst={inst} "
+        f"historico={historico_opcao} delay={delay}s reason={reason}"
+    )
+    return True
 
 
 def _qr_recente(inst_id: str) -> bool:
@@ -792,50 +1039,54 @@ def _evo_expand_websocket(instance: str) -> bool:
         return False
 
 
-def _evo_expand_rabbit(instance: str) -> bool:
-    """
-    Reforça o Rabbit na Evolution com MESSAGES_SET ativo.
+def _evo_rabbit_payloads() -> list[dict[str, Any]]:
+    events = FULL_EVENTS_RABBIT
+    return [
+        {"rabbitmq": {"enabled": True, "events": events}},
+        {"enabled": True, "events": events},
+    ]
 
-    Isso é idempotente:
-    pode chamar várias vezes sem problema.
+
+def _evo_expand_rabbit(instance: str) -> bool:
+    """Reforça o Rabbit na Evolution com MESSAGES_SET ativo.
+
+    Não enviamos exchange/bindings aqui: no endpoint por instância da Evolution
+    esses campos não controlam a fila global do ZapsChat e podem quebrar algumas
+    versões. O exchange global precisa estar no .env da própria Evolution API.
     """
     if not (EVOLUTION_URL and HEADERS and instance):
         return False
 
-    body = {
-        "rabbitmq": {
-            "enabled": True,
-            "exchange": RABBIT_EXCHANGE,
-            "bindings": RABBIT_BINDINGS,
-            "events": FULL_EVENTS_RABBIT,
-        }
-    }
+    last_status = None
+    last_body = ""
 
-    try:
-        r = requests.post(
-            f"{EVOLUTION_URL}/rabbitmq/set/{instance}",
-            headers=HEADERS,
-            json=body,
-            timeout=20,
-        )
-
-        if not r.ok:
-            LOG(
-                f"[Rabbit] falha ao expandir inst={instance} "
-                f"status={r.status_code} body={str(r.text or '')[:500]}"
+    for body in _evo_rabbit_payloads():
+        try:
+            r = requests.post(
+                f"{EVOLUTION_URL}/rabbitmq/set/{instance}",
+                headers=HEADERS,
+                json=body,
+                timeout=20,
             )
-            return False
 
-        LOG(
-            f"[Rabbit] expandido para inst={instance} "
-            f"exchange={RABBIT_EXCHANGE} bindings={RABBIT_BINDINGS} "
-            f"events={len(FULL_EVENTS_RABBIT)}"
-        )
-        return True
+            last_status = r.status_code
+            last_body = str(r.text or "")[:500]
 
-    except Exception as e:
-        LOG(f"[Rabbit] falha ao expandir inst={instance}: {e}")
-        return False
+            if r.ok:
+                LOG(
+                    f"[Rabbit] expandido para inst={instance} "
+                    f"events={len(FULL_EVENTS_RABBIT)} payload={'wrapper' if 'rabbitmq' in body else 'flat'}"
+                )
+                return True
+
+        except Exception as e:
+            last_body = str(e)[:500]
+
+    LOG(
+        f"[Rabbit] falha ao expandir inst={instance} "
+        f"status={last_status} body={last_body}"
+    )
+    return False
 
 
 async def _evo_force_history_settings_after_open(instance: str, *, historico_opcao: str | None) -> dict[str, Any]:
@@ -1068,6 +1319,19 @@ async def _history_watchdog_wait_and_retry(
         f"inst={inst_id} historico={h} reapplies={reapplies} wait_sec={wait_sec} "
         f"count={history_messages_set_count(inst_id)} last_total={history_messages_set_last_total(inst_id)}"
     )
+
+    # Fallback real: algumas versões/configurações da Evolution sincronizam contatos/chats,
+    # mas não publicam messages.set. Como o histórico pode já estar no banco da Evolution,
+    # buscamos por /chat/findMessages e reaproveitamos o mesmo handler MESSAGES_SET.
+    fallback_ok = await _history_findmessages_fallback(
+        inst_id=inst_id,
+        historico_opcao=h,
+        empresa_id=empresa_id,
+        reason="watchdog_not_arrived",
+    )
+
+    if fallback_ok:
+        return True
 
     await _emit_history_watchdog_progress(
         empresa_id,

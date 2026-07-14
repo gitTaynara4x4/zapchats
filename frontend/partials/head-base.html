@@ -199,7 +199,33 @@
   }
 </style>
 
-<!-- 3) WebSocket GLOBAL da EMPRESA (badge, toasts, etc) -->
+<!-- 3) Help Center global -->
+<link rel="stylesheet" href="/frontend/css/help-center.css">
+
+<script type="module">
+  (function bootZCHelpCenter() {
+    if (window.__ZC_HELP_LOADER_BOOTED__) return;
+    window.__ZC_HELP_LOADER_BOOTED__ = true;
+
+    async function loadHelpCenter() {
+      try {
+        const ver = encodeURIComponent(window.__ASSET_VER__ || Date.now());
+        await import(`/frontend/js/help-content.js?_v=${ver}`);
+        await import(`/frontend/js/help-center.js?_v=${ver}`);
+      } catch (e) {
+        console.warn('[head-base] Help Center não carregou:', e);
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', loadHelpCenter, { once:true });
+    } else {
+      loadHelpCenter();
+    }
+  })();
+</script>
+
+<!-- 4) WebSocket GLOBAL da EMPRESA (badge, toasts, etc) -->
 <script type="module">
   async function getEmpresaId() {
     if (window.APP_EMPRESA_ID) return window.APP_EMPRESA_ID;
@@ -253,7 +279,7 @@
   })();
 </script>
 
-<!-- 4) Hidratar nome e avatar do usuário em TODAS as páginas
+<!-- 5) Hidratar nome e avatar do usuário em TODAS as páginas
      Use elementos como:
        <img data-user-avatar class="avatar hidden" alt="Minha foto">
        <span data-user-name></span>

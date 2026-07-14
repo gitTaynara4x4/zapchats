@@ -238,6 +238,113 @@
     });
   }
 
+  function trueFlag(value) {
+    if (value === true) return true;
+    if (value === 1) return true;
+
+    const s = String(value ?? '').trim().toLowerCase();
+    return ['1', 'true', 'sim', 'yes', 'on'].includes(s);
+  }
+
+  function getCurrentConversationMetaForMenu() {
+    const keys = [];
+
+    try {
+      const selectedKey = H.getSelectedConversationKey?.();
+      if (selectedKey) keys.push(String(selectedKey));
+    } catch {}
+
+    try {
+      const ref = H.resolveCurrentConversationRef?.();
+      if (ref?.key) keys.push(String(ref.key));
+    } catch {}
+
+    try {
+      const conv = window.state?.clienteSel || window.clienteSel || window.__zcCurrentConversation || null;
+      const convKey = conv?.conversation_key || conv?.conversation_id || conv?.id || null;
+      if (convKey) keys.push(String(convKey));
+
+      const ref = H.conversationRefOf?.(conv, conv);
+      if (ref?.key) keys.push(String(ref.key));
+    } catch {}
+
+    const uniqueKeys = Array.from(new Set(keys.filter(Boolean)));
+
+    for (const key of uniqueKeys) {
+      try {
+        if (typeof window.getConversationMeta === 'function') {
+          const meta = window.getConversationMeta(key);
+          if (meta) return meta;
+        }
+      } catch {}
+
+      try {
+        const meta = window.__zcConversationMetaCache?.[key];
+        if (meta) return meta;
+      } catch {}
+    }
+
+    return null;
+  }
+
+  function metaRequiresAttendanceFlow(meta) {
+    if (!meta) return false;
+
+    return Boolean(
+      trueFlag(meta.exigir_aceite) ||
+      trueFlag(meta.aceite_obrigatorio) ||
+      trueFlag(meta.fila_exigir_aceite) ||
+      trueFlag(meta.aguardando_aceite) ||
+      trueFlag(meta.departamento_claim) ||
+      String(meta.claim_mode || '').trim().toLowerCase() === 'departamento'
+    );
+  }
+
+  function canCloseAttendanceFromMenu() {
+    const meta = getCurrentConversationMetaForMenu();
+
+    if (!metaRequiresAttendanceFlow(meta)) {
+      return false;
+    }
+
+    return Boolean(
+      trueFlag(meta.pode_liberar) ||
+      trueFlag(meta.can_release) ||
+      trueFlag(meta.aceita_por_mim) ||
+      trueFlag(meta.accepted_by_me)
+    );
+  }
+
+  function canTransferAttendanceFromMenu() {
+    const meta = getCurrentConversationMetaForMenu();
+
+    // Transferir atendimento faz parte do mesmo fluxo de fila/aceite.
+    // Em conversa normal, sem chatbot/fila ativa, não deve aparecer.
+    if (!metaRequiresAttendanceFlow(meta)) {
+      return false;
+    }
+
+    // Quando o backend mandar flags explícitas, respeitamos.
+    if (
+      trueFlag(meta.pode_transferir) ||
+      trueFlag(meta.can_transfer) ||
+      trueFlag(meta.pode_transferir_departamento) ||
+      trueFlag(meta.can_transfer_department)
+    ) {
+      return true;
+    }
+
+    // Compatibilidade: conversa em fluxo de atendimento e assumida por mim.
+    return Boolean(
+      trueFlag(meta.aceita_por_mim) ||
+      trueFlag(meta.accepted_by_me) ||
+      trueFlag(meta.assumido_por_mim) ||
+      trueFlag(meta.claimed_by_me) ||
+      trueFlag(meta.atendimento_ativo) ||
+      trueFlag(meta.in_attendance)
+    );
+  }
+
   function menuItems() {
     const items = [];
 
@@ -260,18 +367,22 @@
         action() {
           openNotesFromMenu();
         },
-      },
-      {
+      }
+    );
+
+    if (canTransferAttendanceFromMenu()) {
+      items.push({
         label: 'Transferir atendimento',
         icon: 'fa-solid fa-arrow-right-arrow-left',
         action() {
           transferirDepartamentoFromMenu();
         },
-      },
-      {
-        divider: true,
-      }
-    );
+      });
+    }
+
+    items.push({
+      divider: true,
+    });
 
     /*
       No mobile, também colocamos aqui ações que ficam apertadas no topo.
@@ -302,7 +413,7 @@
         });
       }
 
-      if (isUsableButton(btnTransfer)) {
+      if (isUsableButton(btnTransfer) && canTransferAttendanceFromMenu()) {
         items.push({
           label: 'Transferir atendente',
           icon: 'fa-solid fa-user-plus',
@@ -359,15 +470,18 @@
       },
       {
         divider: true,
-      },
-      {
+      }
+    );
+
+    if (canCloseAttendanceFromMenu()) {
+      items.push({
         label: 'Encerrar atendimento',
         icon: 'fa-regular fa-circle-xmark',
         action() {
           closeCurrentChat();
         },
-      }
-    );
+      });
+    }
 
     return items;
   }
@@ -508,6 +622,7 @@
     openNotesOrIaFromMenu,
     transferirDepartamentoFromMenu,
 
+    canTransferAttendanceFromMenu,
     menuItems,
     ensureMenu,
     renderMenu,
@@ -517,5 +632,5 @@
     toggleMenu,
   });
 
-  console.log('[header-actions] menu carregado: zc-menu-limpo-v9-19');
+  console.log('[header-actions] menu carregado: zc-menu-limpo-v9-21-transfer-only-attendance-flow');
 })();

@@ -812,6 +812,41 @@ async function tryChromeSavePassword(email){
           return;
         }
 
+        if (res.status === 403) {
+          var forceChange = false;
+          var forceEmail = email;
+          var msg403 = 'Acesso não permitido.';
+
+          try {
+            var err403 = await res.json();
+            var detail403 = err403 && err403.detail;
+
+            if (detail403 && typeof detail403 === 'object') {
+              forceChange = !!detail403.force_password_change;
+              forceEmail = detail403.email || email;
+              msg403 = detail403.message || msg403;
+            } else if (typeof detail403 === 'string') {
+              msg403 = detail403;
+            }
+          } catch (e403) {}
+
+          if (forceChange) {
+            notifyWarn(msg403 + ' Enviamos um código para o seu e-mail.');
+
+            setTimeout(function(){
+              window.location.href = '/esqueci_senha.html?email='
+                + encodeURIComponent(forceEmail || email)
+                + '&convite=1';
+            }, 1300);
+
+            return;
+          }
+
+          notifyWarn(msg403);
+          enable();
+          return;
+        }
+
         if (res.status === 404){
           notifyWarn('E-mail não cadastrado.');
           enable();

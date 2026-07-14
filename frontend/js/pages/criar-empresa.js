@@ -556,6 +556,23 @@
         return;
       }
 
+      const data = await res.json().catch(() => ({}));
+
+      if (data?.access_token || data?.token) {
+        const token = data.access_token || data.token;
+        localStorage.setItem('access_token', token);
+        localStorage.setItem('token', token);
+      }
+
+      if (data?.empresa_id || data?.empresaId) {
+        const empresaId = data.empresa_id || data.empresaId;
+        localStorage.setItem('empresa_id', String(empresaId));
+        localStorage.setItem('EMPRESA_ID', String(empresaId));
+      }
+
+      if (data?.nome) localStorage.setItem('usuario_nome', data.nome);
+      if (data?.email) localStorage.setItem('usuario_email', data.email);
+
       await cacheFromMe();
       if (avatarUrl?.value) {
         localStorage.setItem('usuario_avatar', avatarUrl.value);

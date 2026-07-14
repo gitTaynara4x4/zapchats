@@ -36,6 +36,7 @@ export const state = {
   viewing: null,
   inlineEdit: false,
   showErrors: false,
+  saving: false,
 
   // =========================
   // Avatar

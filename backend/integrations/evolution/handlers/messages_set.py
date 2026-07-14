@@ -78,7 +78,7 @@ def _float_env_value(name: str, default: float) -> float:
         return float(default)
 
 
-ENABLE_MESSAGES_SET = (os.getenv("ENABLE_MESSAGES_SET", "true").lower() == "true")
+ENABLE_MESSAGES_SET = _bool_env_value("ENABLE_MESSAGES_SET", False)
 
 # =============================================================================
 # Histórico / janela de importação
@@ -219,13 +219,15 @@ def _normalize_historico_opcao(raw: str | None) -> str:
 
 
 def _messages_set_deve_processar(historico_opcao: str | None) -> bool:
-    """Processa MESSAGES_SET quando o ENV permitir ou quando há histórico escolhido.
+    """MESSAGES_SET só é importação manual/solicitada.
 
-    Assim 24h/7d/30d funcionam no QR mesmo em ambiente onde
-    ENABLE_MESSAGES_SET=false foi usado para deixar produção leve.
+    Regra do produto: processar apenas quando a instância estiver marcada
+    com historico_restaurar = 24h, 7d ou 30d.
+    A flag ENABLE_MESSAGES_SET fica apenas informativa/legada e não libera
+    importação sem escolha de período.
     """
     h = _normalize_historico_opcao(historico_opcao)
-    return bool(ENABLE_MESSAGES_SET or h in {"24h", "7d", "30d", "all"})
+    return h in {"24h", "7d", "30d"}
 
 
 def _get_runtime_lock(empresa_id: int, instancia_id: int) -> asyncio.Lock:
@@ -1325,10 +1327,10 @@ async def on_messages_set(inst_id: str, data):
             )
             return
 
-        if not ENABLE_MESSAGES_SET and historico_opcao != "none":
+        if ENABLE_MESSAGES_SET:
             LOG(
-                f"[MESSAGES_SET] ENABLE_MESSAGES_SET=false no ENV, mas vou processar porque "
-                f"historico_restaurar={historico_opcao} foi escolhido para inst={inst_id}"
+                f"[MESSAGES_SET] ENABLE_MESSAGES_SET=true está no ENV, mas a regra atual "
+                f"só processa porque historico_restaurar={historico_opcao} foi escolhido para inst={inst_id}"
             )
 
         if historico_opcao == "7d" and not ALLOW_HISTORY_7D:

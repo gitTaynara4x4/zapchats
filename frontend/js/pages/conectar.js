@@ -7,10 +7,10 @@ import {
 // ====== Config ======
 const PREP_LOTTIE_URL = '/frontend/js/pages/lottie.json';
 const PREP_OVERLAY_SECONDS = 20;
-const PRESENCE_REFRESH_INTERVAL_MS = 30000;
-const PRESENCE_COOLDOWN_MS = 15000;
-const PRESENCE_CONCURRENCY = 4;
-const CONNECTION_WATCH_INTERVAL_MS = 2500;
+const PRESENCE_REFRESH_INTERVAL_MS = 120000;
+const PRESENCE_COOLDOWN_MS = 60000;
+const PRESENCE_CONCURRENCY = 2;
+const CONNECTION_WATCH_INTERVAL_MS = 5000;
 const CONNECTION_WATCH_MAX_MS = 180000;
 
 // Tempo mínimo visual para a Saúde do Número.
@@ -38,13 +38,14 @@ let connectionWatchTimer = null;
 let connectionWatchStartedAt = 0;
 let connectionWatchInstance = null;
 let connectedHandledInstance = null;
-let lastHistoricoUsed = '24h';
+let lastHistoricoUsed = 'none';
 
 let lastWhatsPayload = null;
 let presenceInFlight = false;
 let presenceLoadTmr = null;
 let presenceIntervalId = null;
 const presenceCache = new Map();
+const reconnectingInstances = new Set();
 
 let saudeLoadingTmr = null;
 let saudeLoadingStepIdx = 0;
@@ -380,7 +381,9 @@ async function apiDelete(url){
   return { ok, status: r.status, data: js };
 }
 
-// ✅ Base do Status: ping setPresence
+// ✅ Base do Status: consulta real.
+// Antes o front considerava 200 OK do setPresence como "conectado".
+// Isso era falso em reconexão: a Evolution pode responder HTTP 200 mesmo com state=close/disconnected.
 async function pingSetPresence(instanceName, { force=false } = {}){
   if (!instanceName) return false;
 
@@ -390,7 +393,14 @@ async function pingSetPresence(instanceName, { force=false } = {}){
     return !!cache.ok;
   }
 
-  const ok = await apiPostSoft(`/instance/setPresence/${encodeURIComponent(instanceName)}`, {});
+  let ok = false;
+  try {
+    const js = await apiPost(`/instance/setPresence/${encodeURIComponent(instanceName)}`, {});
+    ok = isConnectedPayload(js);
+  } catch {
+    ok = false;
+  }
+
   presenceCache.set(instanceName, { ok: !!ok, ts: now });
   return !!ok;
 }
@@ -468,6 +478,8 @@ async function refreshPresenceStatuses({ force=false, onlyInstances=null } = {})
       }
       updateSummaryCards(allItems);
 
+      // Atualiza também pill/menu, não só a bolinha.
+      // Sem isso a tela podia ficar com "Conectado agora" visualmente atrasado.
       renderList(filterItemsByTab(allItems), lastPlanLabel);
     }
   } finally {
@@ -1756,7 +1768,7 @@ async function loadWhatsAppStatus(){
           instance_name: i.instance_name,
           apelido: i.apelido || '',
           numero_instancia: i.numero_instancia || '',
-          connected: isConnectedPayload(i),
+          connected: reconnectingInstances.has(String(i.instance_name || '')) ? false : isConnectedPayload(i),
           last_seen: i.last_seen || null,
 
           score: (i.score === null || typeof i.score === 'undefined') ? null : Number(i.score),
@@ -1783,14 +1795,17 @@ async function loadWhatsAppStatus(){
 
     renderList(filterItemsByTab(allItems), tier);
 
-    // Se a conexão foi feita por código, às vezes o WebSocket não chega no front.
-    // Quando o status já aparece conectado na listagem, fecha o modal e mostra sucesso.
+    // Durante reconexão, não confia só no connected vindo da lista/BD.
+    // A lista pode estar atrasada enquanto o QR ainda não foi lido.
     if (wantQR && currentInstance) {
-      const current = allItems.find(it => String(it?.instance_name || '') === String(currentInstance));
-      if (current?.connected) {
-        handleConnected(currentInstance);
-        return;
-      }
+      try {
+        const reallyConnected = await checkInstanceConnected(currentInstance);
+        if (reallyConnected) {
+          reconnectingInstances.delete(String(currentInstance));
+          handleConnected(currentInstance);
+          return;
+        }
+      } catch {}
     }
 
     schedulePresenceRefresh(150, { force:false });
@@ -1943,16 +1958,92 @@ function renderPairingCode(code, limit){
   return true;
 }
 
+function isShortPairingCandidate(value){
+  const raw = String(value || '').trim().replace(/[\s-]+/g, '');
+  return /^[A-Z0-9]{6,12}$/i.test(raw);
+}
+
+function firstNonEmpty(...values){
+  for (const v of values){
+    if (v === null || typeof v === 'undefined') continue;
+    const s = String(v).trim();
+    if (s) return s;
+  }
+  return '';
+}
+
+function renderQRWaiting(){
+  hideQR();
+  showIllustration();
+  els.qrLoader?.classList.remove('hidden');
+  if (els.qrInstru) {
+    els.qrInstru.innerHTML = '<span></span>Aguardando QR Code da Evolution...';
+    els.qrInstru.classList.remove('hidden');
+  }
+}
+
 function renderQRFromResponse(qr){
-  if (!qr || typeof qr !== 'object') return false;
-  if (qr.base64) {
-    renderQRFromBase64(qr.base64, qr.limit);
+  if (!qr) return false;
+
+  const obj = (typeof qr === 'object') ? qr : { code: qr };
+  const nested = (obj.qrcode && typeof obj.qrcode === 'object') ? obj.qrcode : obj;
+
+  const limit = nested.limit ?? nested.timeout ?? nested.count ?? nested.qr_limit ?? obj.limit ?? obj.timeout ?? obj.qr_limit;
+
+  const b64 = firstNonEmpty(
+    nested.base64,
+    nested.image,
+    nested.codeBase64,
+    nested.qrBase64,
+    obj.base64,
+    obj.image,
+    obj.codeBase64,
+    obj.qrBase64
+  );
+
+  if (b64) {
+    renderQRFromBase64(b64, limit);
     return true;
   }
-  if (qr.pairingCode) {
-    renderPairingCode(qr.pairingCode, qr.limit);
+
+  const explicitPairing = firstNonEmpty(
+    nested.pairingCode,
+    nested.pairing_code,
+    nested.pairing,
+    obj.pairingCode,
+    obj.pairing_code,
+    obj.pairing
+  );
+
+  if (explicitPairing) {
+    renderPairingCode(explicitPairing, limit);
     return true;
   }
+
+  const code = firstNonEmpty(
+    nested.qrText,
+    nested.qr_text,
+    nested.qrCode,
+    nested.qr_code,
+    nested.qr,
+    nested.code,
+    obj.qrText,
+    obj.qr_text,
+    obj.qrCode,
+    obj.qr_code,
+    obj.qr,
+    obj.code
+  );
+
+  if (code) {
+    if (currentConnectMethod === 'pairing' && isShortPairingCandidate(code)) {
+      renderPairingCode(code, limit);
+    } else {
+      renderQRFromText(code, limit);
+    }
+    return true;
+  }
+
   return false;
 }
 
@@ -1970,7 +2061,7 @@ async function checkInstanceConnected(instance){
 
   // 1) Primeiro tenta o endpoint novo, que consulta DB e também a Evolution.
   try {
-    const st = await apiGet(`/api/onboarding/empresas/connection/status/${encodeURIComponent(instance)}`);
+    const st = await apiGet(`/api/onboarding/empresas/connection/status/${encodeURIComponent(instance)}?force_evolution=1`);
     if (st?.connected === true || isConnectedPayload(st)) return true;
   } catch {}
 
@@ -2023,6 +2114,7 @@ function handleConnected(instanceFromMsg){
   if (connectedHandledInstance === handledKey) return;
   connectedHandledInstance = handledKey;
 
+  reconnectingInstances.delete(String(handledKey));
   stopConnectionWatch();
   setConnectWizardStep(4);
   clearInterval(timerId);
@@ -2055,14 +2147,11 @@ function attachEmpresaWS() {
     }
     if (m?.type === 'qrcode' && wantQR) {
       if (m.waiting) {
-        els.qrLoader?.classList.remove('hidden');
-        showIllustration();
-        hideQR();
+        renderQRWaiting();
         return;
       }
-      const ttl = m.qr_limit ?? m.expires_in ?? m.ttl ?? 60;
-      if (m.base64)           renderQRFromBase64(m.base64, ttl);
-      else if (m.pairingCode) renderPairingCode(m.pairingCode, ttl);
+      const rendered = renderQRFromResponse(m);
+      if (!rendered) renderQRWaiting();
       return;
     }
     if (m?.type === 'connection' || m?.type === 'connected' || m?.status || m?.state || m?.inst_status){
@@ -2083,20 +2172,17 @@ function attachEmpresaWS() {
 function attachInstWS(instance) {
   if (offInst) { try { offInst(); } catch {} offInst = null; }
   if (!instance) return;
-  ensureInstWS(instance);
+  ensureInstWS(instance, { wantQR: true });
   offInst = onInstMessage(instance, (evt) => {
     if (evt.type !== 'message') return;
     const m = evt.data || {};
     if (m?.type === 'qrcode' && wantQR) {
       if (m.waiting) {
-        els.qrLoader?.classList.remove('hidden');
-        showIllustration();
-        hideQR();
+        renderQRWaiting();
         return;
       }
-      const ttl = m.qr_limit ?? m.expires_in ?? m.ttl ?? 60;
-      if (m.base64)           renderQRFromBase64(m.base64, ttl);
-      else if (m.pairingCode) renderPairingCode(m.pairingCode, ttl);
+      const rendered = renderQRFromResponse(m);
+      if (!rendered) renderQRWaiting();
       return;
     }
     if (m?.type === 'connection' || m?.type === 'connected' || m?.status || m?.state) {
@@ -2119,7 +2205,7 @@ async function handleConnectSubmit(ev){
   showIllustration();
 
   const apelido = els.inApelido?.value?.trim() || '';
-  const historico = normalizeHistorico(els.selHist?.value || '24h');
+  const historico = normalizeHistorico(els.selHist?.value || 'none');
   const method = getConnectMethod();
   const usePairing = method === 'pairing';
   const numeroPairing = normalizePairingNumber(els.inNumero?.value || '');
@@ -2142,6 +2228,7 @@ async function handleConnectSubmit(ev){
   try{
     lastHistoricoUsed = historico || '24h';
     currentConnectMethod = method;
+    wantQR = true;
 
     const js = await apiPost('/api/onboarding/empresas/conectar', {
       empresa_id: empresaId,
@@ -2161,7 +2248,7 @@ async function handleConnectSubmit(ev){
     updateSummaryCards(allItems);
 
     const rendered = renderQRFromResponse(js?.qrcode || {});
-    els.qrLoader?.classList.add('hidden');
+    if (!rendered) renderQRWaiting();
 
     await loadWhatsAppStatus();
 
@@ -2219,6 +2306,14 @@ async function openReconnect(item){
   connectedHandledInstance = null;
 
   lastHistoricoUsed = 'none';
+  reconnectingInstances.add(String(currentInstance));
+  presenceCache.delete(String(currentInstance));
+  try {
+    const local = allItems.find(it => String(it?.instance_name || '') === String(currentInstance));
+    if (local) local.connected = false;
+    updateSummaryCards(allItems);
+    renderList(filterItemsByTab(allItems), lastPlanLabel);
+  } catch {}
 
   setModalTitle('Reconecte seu WhatsApp');
   const histRow = els.selHist?.closest('.form-row, .field, .mb-4, .mb-3, .grid, div') || null;
@@ -2234,6 +2329,7 @@ async function openReconnect(item){
   showQRError('');
   hideQR();
 
+  wantQR = true;
   attachInstWS(currentInstance);
 
   els.qrLoader?.classList.remove('hidden');
@@ -2250,10 +2346,9 @@ async function openReconnect(item){
       showIllustration();
       return;
     }
-    els.qrLoader?.classList.add('hidden');
     const ok = renderQRFromResponse(res?.qrcode || {});
     wantQR = true;
-    if (!ok) showIllustration();
+    if (!ok) renderQRWaiting();
   } catch {
     els.qrLoader?.classList.add('hidden');
     showIllustration();
@@ -2269,7 +2364,15 @@ async function openReconnect(item){
 
 async function refreshQR(){
   if (!window.currentInstance) return;
+  reconnectingInstances.add(String(window.currentInstance));
+  presenceCache.delete(String(window.currentInstance));
+  try {
+    const local = allItems.find(it => String(it?.instance_name || '') === String(window.currentInstance));
+    if (local) local.connected = false;
+    renderList(filterItemsByTab(allItems), lastPlanLabel);
+  } catch {}
   setConnectWizardStep(3);
+  wantQR = true;
   try{
     hideQR();
     els.qrLoader?.classList.remove('hidden');
@@ -2286,10 +2389,9 @@ async function refreshQR(){
       showIllustration();
       return;
     }
-    els.qrLoader?.classList.add('hidden');
     const ok = renderQRFromResponse(res?.qrcode || {});
     wantQR = true;
-    if (!ok) showIllustration();
+    if (!ok) renderQRWaiting();
 
     schedulePresenceRefresh(200, { force:true, onlyInstances:[window.currentInstance] });
     startConnectionWatch(window.currentInstance);
@@ -2321,8 +2423,8 @@ function openConnectModal(){
   setConnectMethod('qrcode');
 
   if (els.selHist) {
-    els.selHist.value = '24h';
-    updateHistoricoUI('24h');
+    els.selHist.value = 'none';
+    updateHistoricoUI('none');
   }
 
   const histRow = els.selHist?.closest('.form-row, .field, .mb-4, .mb-3, .grid, div') || null;
@@ -2507,7 +2609,7 @@ if (!empresaId){
   attachEmpresaWS();
 
   if (els.selHist) {
-    els.selHist.value = normalizeHistorico(els.selHist.value || '24h');
+    els.selHist.value = normalizeHistorico(els.selHist.value || 'none');
     updateHistoricoUI(els.selHist.value);
   }
 

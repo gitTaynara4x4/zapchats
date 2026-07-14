@@ -2322,6 +2322,7 @@ def atendimento_avatar(
 def get_cliente_profile(
     cliente_id: int,
     empresa_id: int | None = Query(None),
+    instancia_id: int | None = Query(None),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
@@ -2334,8 +2335,8 @@ def get_cliente_profile(
         identity=identity,
         empresa_id=empresa_id_eff,
         cliente_id=int(cliente_id),
-        instancia_id=None,
-        allow_unassigned_department=False,
+        instancia_id=instancia_id,
+        allow_unassigned_department=True,
     )
 
     return _build_profile_payload(db, cli, atd)
@@ -2345,6 +2346,7 @@ def get_cliente_profile(
 def refresh_cliente_profile(
     cliente_id: int,
     empresa_id: int | None = Query(None),
+    instancia_id: int | None = Query(None),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
@@ -2360,8 +2362,8 @@ def refresh_cliente_profile(
         identity=identity,
         empresa_id=empresa_id_eff,
         cliente_id=int(cliente_id),
-        instancia_id=None,
-        allow_unassigned_department=False,
+        instancia_id=instancia_id,
+        allow_unassigned_department=True,
     )
 
     acl_ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id_eff)
@@ -2393,6 +2395,7 @@ def merge_cliente_profile(
     cliente_id: int,
     payload: dict = Body(...),
     empresa_id: int | None = Query(None),
+    instancia_id: int | None = Query(None),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
@@ -2405,8 +2408,8 @@ def merge_cliente_profile(
         identity=identity,
         empresa_id=empresa_id_eff,
         cliente_id=int(cliente_id),
-        instancia_id=None,
-        allow_unassigned_department=False,
+        instancia_id=instancia_id,
+        allow_unassigned_department=True,
     )
 
     norm = dict(payload or {})

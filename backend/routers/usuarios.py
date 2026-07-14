@@ -90,6 +90,47 @@ def _assert_mesma_empresa(empresa_id: int, identity: Any):
         raise HTTPException(status_code=403, detail="Acesso negado (empresa)")
 
 
+def _sync_avatar_with_linked_profile(
+    db: Session,
+    *,
+    kind: str,
+    actor: Any,
+    data: bytes,
+    mime: str,
+) -> None:
+    """Mantém Usuario e Colaborador com a mesma foto quando estão vinculados."""
+    if kind == "usuario":
+        linked = (
+            db.query(models.Colaborador)
+            .filter(
+                models.Colaborador.usuario_id == int(actor.id),
+                models.Colaborador.empresa_id == int(actor.empresa_id),
+            )
+            .first()
+        )
+    else:
+        usuario_id = getattr(actor, "usuario_id", None)
+        linked = (
+            db.query(models.Usuario)
+            .filter(
+                models.Usuario.id == int(usuario_id),
+                models.Usuario.empresa_id == int(actor.empresa_id),
+            )
+            .first()
+            if usuario_id
+            else None
+        )
+
+    if linked is None:
+        return
+
+    if hasattr(linked, "avatar_data"):
+        linked.avatar_data = data
+    if hasattr(linked, "avatar_mime"):
+        linked.avatar_mime = mime
+    db.add(linked)
+
+
 async def _pick_upload(
     avatar: Optional[UploadFile],
     file: Optional[UploadFile],
@@ -260,6 +301,13 @@ async def upload_avatar_me(
     actor.avatar_data = data
     actor.avatar_mime = mime
     db.add(actor)
+    _sync_avatar_with_linked_profile(
+        db,
+        kind=kind,
+        actor=actor,
+        data=data,
+        mime=mime,
+    )
     db.commit()
 
     return {
@@ -322,6 +370,13 @@ async def upload_avatar_by_id(
     u.avatar_data = data
     u.avatar_mime = mime
     db.add(u)
+    _sync_avatar_with_linked_profile(
+        db,
+        kind="usuario",
+        actor=u,
+        data=data,
+        mime=mime,
+    )
     db.commit()
 
     return {

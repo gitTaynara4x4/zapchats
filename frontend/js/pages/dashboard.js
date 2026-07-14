@@ -1,11 +1,6 @@
 (function DashboardPage(){
   'use strict';
 
-  // ======== CONFIG: Evolution direto (VISÍVEL NO FRONT!) ========
-  const EVOLUTION_URL    = ""; // ex: "https://evolution.seu-dominio.com"
-  const EVOLUTION_APIKEY = ""; // ex: "xxxxx"
-  // ===============================================================
-
   // ===== helpers base =====
   const $  = (s, r=document)=> r.querySelector(s);
   const LS = localStorage;
@@ -19,32 +14,6 @@
       return Number(String(window.__INST_ID).replace(/\D/g,''));
     return '';
   }
-  function getInstName(){
-    const n = (window.__INST_NAME || '').trim();
-    return n || '';
-  }
-
-  // cache local do mapa id -> instance_name
-  let INST_MAP = null;
-
-  async function ensureInstMap(){
-    if (INST_MAP) return INST_MAP;
-    try{
-      // usa guardFetch/authFetch para respeitar 401/403
-      const F = (window.ZAuth?.guardFetch || window.ZAuth?.authFetch || fetch);
-      const r = await F(`/api/empresas/${EMPRESA_ID}/whatsapp`, { credentials:'include' });
-      const j = await r.json();
-      const arr = Array.isArray(j.instancias) ? j.instancias : [];
-      INST_MAP = {};
-      for (const it of arr){
-        const id  = Number(onlyDigits(it.instancia_id ?? it.id ?? it.instance_id ?? it.session ?? it.sessionName ?? ''));
-        const nm  = String(it.instance_name ?? it.instancia_slug ?? it.session ?? it.sessionName ?? it.apelido ?? it.nome ?? '').trim();
-        INST_MAP[id||0] = { instance_name: nm, raw: it };
-      }
-    }catch{ INST_MAP = {}; }
-    return INST_MAP;
-  }
-
   // chamado pelo dropdown ao selecionar manualmente
   window.setInstanciaAtivaDashboard = function(idOuSlug, instanceName){
     window.__INST_ID = idOuSlug ? Number(String(idOuSlug).replace(/\D/g,'')) : '';
@@ -463,29 +432,6 @@
     return { instancia_id: inst };
   }
 
-  // ===== Evolution direto (JS) =====
-  function canUseEvolutionDirect(){
-    return !!(EVOLUTION_URL && EVOLUTION_APIKEY);
-  }
-
-  async function fetchEvolutionState(instanceName){
-    if (!canUseEvolutionDirect() || !instanceName) return null;
-    try{
-      const base = EVOLUTION_URL.replace(/\/$/,'');
-      const url  = `${base}/instance/connectionState/${encodeURIComponent(instanceName)}`;
-      const r = await fetch(url, { headers:{ 'apikey': EVOLUTION_APIKEY }});
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const j = await r.json();
-      const data  = j.instance || j;
-      const state = String(data?.state || '').toLowerCase();
-      const connected = ['open','connected','online'].includes(state);
-      return { connected, state };
-    }catch(e){
-      console.warn('Evolution direct failed:', e);
-      return null;
-    }
-  }
-
   // ===== status WhatsApp (via BACKEND) =====
   async function fetchWppStatus(params){
     try { return await jfetch(withParams('/api/whatsapp/status', params)); }
@@ -507,24 +453,10 @@
   }
 
   async function updateWhatsappCard(){
-    let instName = getInstName();
-    if (!instName){
-      const map = await ensureInstMap();
-      const id = getInstAtiva();
-      if (id && map[id]?.instance_name) instName = map[id].instance_name;
-    }
-    let used = false;
-    if (instName){
-      const direct = await fetchEvolutionState(instName);
-      if (direct){
-        used = true;
-        renderWppStatus({ online: !!direct.connected, detalhes:[{ id:getInstAtiva(), connected: !!direct.connected }]});
-      }
-    }
-    if (!used){
-      const status = await fetchWppStatus({ empresa_id: EMPRESA_ID, ...instParams() });
-      if (status) renderWppStatus(status);
-    }
+    // O navegador consulta somente o backend autenticado.
+    // A URL e a chave da Evolution nunca são entregues ao frontend.
+    const status = await fetchWppStatus({ empresa_id: EMPRESA_ID, ...instParams() });
+    if (status) renderWppStatus(status);
   }
 
   async function loadAll(dateISO){

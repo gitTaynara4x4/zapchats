@@ -25,9 +25,6 @@
     <header class="dept-topbar" aria-label="Barra de departamentos">
       <div class="dept-topbar-title">
         <h1>Estrutura da empresa</h1>
-        <button class="topbar-star" type="button" aria-label="Favoritar tela" title="Favoritar">
-          <i class="fa-regular fa-star"></i>
-        </button>
       </div>
 
       <div class="dept-topbar-actions">
@@ -78,9 +75,13 @@
       </button>
 
       <div class="modal-head">
-        <span id="modal-step-label" class="modal-step-label">Etapa 1 de 3</span>
+        <div class="modal-head-topline">
+          <span id="modal-step-label" class="modal-step-label">Etapa 1 de 3</span>
+          <button id="modal-help-toggle" class="modal-help-icon" type="button" aria-expanded="false" aria-controls="modal-help-popover" title="Ajuda da etapa">
+            <span class="help-icon-fallback" aria-hidden="true">?</span>
+          </button>
+        </div>
         <h2 id="modal-title">Nome e descrição do departamento</h2>
-
         <div class="modal-progress wizard-stepper" aria-label="Etapas do cadastro">
           <div class="wizard-stepper-item is-active" data-step-index="1">
             <span class="step-dot">1</span>
@@ -89,7 +90,7 @@
           <span class="step-line" aria-hidden="true"></span>
           <div class="wizard-stepper-item" data-step-index="2">
             <span class="step-dot">2</span>
-            <span class="step-text">Horário, instâncias e colaboradores</span>
+            <span class="step-text">Equipe</span>
           </div>
           <span class="step-line" aria-hidden="true"></span>
           <div class="wizard-stepper-item" data-step-index="3">
@@ -99,6 +100,11 @@
         </div>
       </div>
 
+      <div id="modal-help-popover" class="modal-help-popover" hidden>
+        <div class="modal-help-popover__arrow"></div>
+        <div id="modal-help-popover-content" class="modal-help-popover__content"></div>
+      </div>
+
       <form id="form-depto" class="modal-form" autocomplete="off">
         <input type="hidden" name="id"/>
         <select id="d-parent" class="sr-only" aria-hidden="true" tabindex="-1">
@@ -106,9 +112,9 @@
         </select>
 
         <section class="wizard-step is-active" data-step="1">
-          <div class="step1-clean">
+          <div class="step1-clean compact-step">
             <div class="fi parent-fi">
-              <label>Departamento principal</label>
+              <label class="field-label-inline">Fica dentro de <button class="field-help-icon" type="button" data-help-key="parent" aria-label="Ajuda sobre onde o departamento fica"><span class="help-icon-fallback" aria-hidden="true">?</span></button></label>
               <div class="parent-picker">
                 <span id="parent-chip" class="parent-chip">
                   <i class="fa-solid fa-building"></i>
@@ -117,16 +123,16 @@
                 <button id="parent-edit" type="button">+ Editar</button>
               </div>
 
-              <div id="parent-panel" class="parent-panel" role="listbox" aria-label="Escolher departamento principal"></div>
+              <div id="parent-panel" class="parent-panel" role="listbox" aria-label="Escolher onde o departamento fica"></div>
             </div>
 
             <div class="fi">
-              <label for="d-nome">Nome</label>
-              <input id="d-nome" class="input" type="text" maxlength="120" placeholder="Digite o nome do departamento" required/>
+              <label for="d-nome" class="field-label-inline">Nome <button class="field-help-icon" type="button" data-help-key="nome" aria-label="Ajuda sobre nome"><span class="help-icon-fallback" aria-hidden="true">?</span></button></label>
+              <input id="d-nome" class="input" type="text" maxlength="80" placeholder="Digite o nome do departamento" required/>
             </div>
 
             <div class="fi">
-              <label for="d-desc">Descrição</label>
+              <label for="d-desc" class="field-label-inline">Descrição <button class="field-help-icon" type="button" data-help-key="descricao" aria-label="Ajuda sobre descrição"><span class="help-icon-fallback" aria-hidden="true">?</span></button></label>
               <textarea id="d-desc" class="input" rows="5" maxlength="300" placeholder="Digite a descrição do departamento"></textarea>
             </div>
 
@@ -140,7 +146,7 @@
               </label>
 
               <label class="compact-field code-field">
-                <span>Código</span>
+                <span class="field-label-inline">Código <button class="field-help-icon" type="button" data-help-key="codigo" aria-label="Ajuda sobre código"><span class="help-icon-fallback" aria-hidden="true">?</span></button></span>
                 <input id="d-codigo" class="input" type="text" maxlength="64" placeholder="Opcional"/>
               </label>
             </div>
@@ -150,85 +156,122 @@
         </section>
 
         <section class="wizard-step" data-step="2">
-          <div class="step2-clean">
-            <div class="step2-hero">
+          <div class="step2-clean step2-team-only" data-modal-mode="members">
+            <div class="step2-hero step2-team-hero">
               <div>
-                <span>Configuração rápida</span>
-                <h3>Horário e acesso do departamento</h3>
-                <p>Defina só o essencial: horário padrão, números vinculados e colaboradores.</p>
+                <span>Equipe</span>
+                <h3>Quem atende este departamento?</h3>
+                <p>Selecione os colaboradores que poderão visualizar e atender conversas deste departamento.</p>
               </div>
             </div>
 
-            <div class="config-grid-clean">
-              <article class="config-card-clean config-card-time">
-                <div class="config-card-head-clean">
-                  <span class="config-icon"><i class="fa-regular fa-clock"></i></span>
-                  <div>
-                    <h4>Horário padrão</h4>
-                    <p>Opcional para controle de login do setor.</p>
-                  </div>
+            <article class="config-card-clean config-card-members team-members-card">
+              <div class="config-card-head-clean with-actions team-card-head">
+                <span class="config-icon"><i class="fa-solid fa-users"></i></span>
+                <div>
+                  <h4>Colaboradores do departamento</h4>
+                  <p><strong id="d-membros-count">0 selecionados</strong></p>
+                </div>
+                <div class="mini-actions team-actions">
+                  <button id="d-membros-all" type="button">Selecionar todos</button>
+                  <button id="d-membros-clear" type="button">Limpar</button>
+                </div>
+              </div>
+
+              <div id="d-membros-summary" class="members-summary-clean">
+                Nenhum colaborador selecionado.
+              </div>
+
+              <div id="d-membros-panel" class="members-panel-clean">
+                <div class="members-toolbar clean-toolbar team-toolbar">
+                  <label class="members-search" for="d-membros-search">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input id="d-membros-search" type="search" placeholder="Buscar colaborador por nome, e-mail ou cargo" autocomplete="off" spellcheck="false"/>
+                  </label>
                 </div>
 
-                <div class="schedule-compact">
+                <div id="d-membros-list" class="members-list members-list-clean">
+                  <div class="members-empty">Carregando colaboradores...</div>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <div class="step2-clean step2-quick-only step2-schedule-only availability-modal" data-modal-mode="schedule">
+            <div class="availability-header">
+              <span class="availability-kicker">Disponibilidade</span>
+              <h3>
+                Disponibilidade do setor
+                <button class="field-help-icon availability-title-help" type="button" data-help-key="schedule" aria-label="Ajuda sobre disponibilidade do setor">
+                  <span class="help-icon-fallback" aria-hidden="true">?</span>
+                </button>
+              </h3>
+              <p>Defina quando este departamento pode receber novos atendimentos.</p>
+              <div class="availability-alert" role="note">
+                <span class="help-icon-fallback" aria-hidden="true">?</span>
+                <strong>Isso não altera o horário dos colaboradores.</strong>
+                <small>O horário de cada pessoa continua sendo configurado no cadastro do colaborador.</small>
+              </div>
+            </div>
+
+            <article class="availability-card availability-card-main">
+              <div class="availability-card-icon"><i class="fa-solid fa-clock"></i></div>
+              <div class="availability-card-copy">
+                <h4>Usar horário geral da empresa</h4>
+                <p>Recomendado. Este setor segue o horário padrão de atendimento da empresa.</p>
+              </div>
+              <label class="availability-switch" aria-label="Usar horário geral da empresa">
+                <input id="d-usar-horario-geral" type="checkbox" checked/>
+                <span></span>
+              </label>
+            </article>
+
+            <article class="availability-card availability-custom">
+              <div class="availability-card-icon muted"><i class="fa-regular fa-calendar"></i></div>
+              <div class="availability-card-copy">
+                <h4>Horário próprio do setor</h4>
+                <p>Use apenas se este departamento atender em horário diferente.</p>
+
+                <div class="schedule-compact quick-schedule-grid availability-time-grid">
                   <label class="time-mini-field">
                     <span>Entrada</span>
-                    <input id="d-hora-inicio" class="input" type="time" step="60" />
+                    <input id="d-hora-inicio" class="input" type="time"/>
                   </label>
                   <label class="time-mini-field">
                     <span>Saída</span>
-                    <input id="d-hora-fim" class="input" type="time" step="60" />
+                    <input id="d-hora-fim" class="input" type="time"/>
                   </label>
                 </div>
-              </article>
+              </div>
+            </article>
+          </div>
 
-              <article class="config-card-clean config-card-instances">
-                <div class="config-card-head-clean with-actions">
-                  <span class="config-icon"><i class="fa-brands fa-whatsapp"></i></span>
-                  <div>
-                    <h4>Instâncias</h4>
-                    <p><strong id="d-instancias-count">0 selecionadas</strong></p>
-                  </div>
-                  <div class="mini-actions">
-                    <button id="d-instancias-all" type="button">Todas</button>
-                    <button id="d-instancias-clear" type="button">Limpar</button>
-                  </div>
-                </div>
-
-                <div id="d-instancias-list" class="instancias-list instancias-pills">
-                  <div class="members-empty">Carregando instâncias...</div>
-                </div>
-              </article>
-
-              <article class="config-card-clean config-card-members">
-                <div class="config-card-head-clean with-actions">
-                  <span class="config-icon"><i class="fa-solid fa-users"></i></span>
-                  <div>
-                    <h4>Colaboradores</h4>
-                    <p><strong id="d-membros-count">0 selecionados</strong></p>
-                  </div>
-                  <button id="d-membros-toggle" class="manage-members-btn" type="button">Gerenciar</button>
-                </div>
-
-                <div id="d-membros-summary" class="members-summary-clean">
-                  Nenhum colaborador selecionado.
-                </div>
-
-                <div id="d-membros-panel" class="members-panel-clean" hidden>
-                  <div class="members-toolbar clean-toolbar">
-                    <label class="members-search" for="d-membros-search">
-                      <i class="fa-solid fa-magnifying-glass"></i>
-                      <input id="d-membros-search" type="search" placeholder="Buscar colaborador" autocomplete="off" spellcheck="false"/>
-                    </label>
-                    <button id="d-membros-all" type="button">Todos</button>
-                    <button id="d-membros-clear" type="button">Nenhum</button>
-                  </div>
-
-                  <div id="d-membros-list" class="members-list members-list-clean">
-                    <div class="members-empty">Carregando colaboradores...</div>
-                  </div>
-                </div>
-              </article>
+          <div class="step2-clean step2-quick-only step2-instances-only" data-modal-mode="instances">
+            <div class="step2-hero step2-team-hero">
+              <div>
+                <span>Canais de entrada</span>
+                <h3>WhatsApps que encaminham para este departamento</h3>
+                <p>Isso serve para roteamento/organização. O acesso dos colaboradores aos números continua sendo configurado em Colaboradores.</p>
+              </div>
             </div>
+
+            <article class="config-card-clean quick-config-card">
+              <div class="config-card-head-clean with-actions quick-card-head">
+                <span class="config-icon"><i class="fa-brands fa-whatsapp"></i></span>
+                <div>
+                  <h4>Canais de entrada</h4>
+                  <p><strong id="d-instancias-count">0 selecionadas</strong></p>
+                </div>
+                <div class="mini-actions team-actions">
+                  <button id="d-instancias-all" type="button">Todas</button>
+                  <button id="d-instancias-clear" type="button">Limpar</button>
+                </div>
+              </div>
+
+              <div id="d-instancias-list" class="instancias-list instancias-pills quick-instances-list">
+                <div class="members-empty">Carregando instâncias...</div>
+              </div>
+            </article>
           </div>
         </section>
 
@@ -237,15 +280,15 @@
             <div class="review-card">
               <span class="review-kicker">Etapa 3 de 3</span>
               <h3>Revisar e salvar</h3>
-              <p>Confira o nome, o departamento principal e os colaboradores antes de salvar.</p>
+              <p>Confira o nome, a posição na estrutura e os colaboradores antes de salvar.</p>
 
               <div class="review-list">
                 <div><span>Departamento</span><strong id="review-nome">—</strong></div>
-                <div><span>Principal</span><strong id="review-parent">Empresa</strong></div>
+                <div><span>Fica dentro de</span><strong id="review-parent">Empresa</strong></div>
                 <div><span>Colaboradores</span><strong id="review-colabs">0 selecionados</strong></div>
+                <div><span>Horário</span><strong id="review-horario">Não definido</strong></div>
+                <div><span>Canais</span><strong id="review-instancias">0 selecionados</strong></div>
                 <div><span>Status</span><strong id="review-status">Ativo</strong></div>
-                <div><span>Horário padrão</span><strong id="review-horario">Não definido</strong></div>
-                <div><span>Instâncias</span><strong id="review-instancias">0 selecionadas</strong></div>
               </div>
             </div>
 
@@ -272,5 +315,6 @@
 
   <script src="/frontend/js/page-guard.js" defer></script>
   <script src="/frontend/js/pages/departamentos.js" defer></script>
+  <script src="/frontend/js/help/help-departamentos.js?v=20260708-departamentos-tour-responsive-final" defer></script>
 </body>
 </html>

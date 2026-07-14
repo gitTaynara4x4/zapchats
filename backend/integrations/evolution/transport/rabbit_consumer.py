@@ -140,15 +140,43 @@ def _exchange_name() -> str:
 
 
 def _routing_key(queue_name: str) -> str:
-    return (
-        _env("RABBITMQ_ROUTING_KEY")
+    # Compatibilidade com código antigo: retorna a primeira binding efetiva.
+    keys = _routing_keys(queue_name)
+    return keys[0] if keys else "#"
+
+
+def _routing_keys(queue_name: str) -> list[str]:
+    """Lista de bindings do consumer.
+
+    Prioridade: RABBITMQ_BINDINGS > RABBITMQ_BINDING_KEY > RABBITMQ_ROUTING_KEY.
+    Isso corrige o caso em que RABBITMQ_BINDINGS tem vários eventos, mas o
+    consumer só bindava messages.set.
+    """
+    raw = (
+        _env("RABBITMQ_BINDINGS")
         or _env("RABBITMQ_BINDING_KEY")
-        or queue_name
-    ).strip()
+        or _env("RABBITMQ_ROUTING_KEY")
+        or "#"
+    )
+
+    out: list[str] = []
+    for part in str(raw or "#").split(","):
+        key = part.strip().strip('"').strip("'")
+        if key and key not in out:
+            out.append(key)
+
+    if not out:
+        out = ["#"]
+
+    # Se tiver wildcard total, não precisa bindar o resto.
+    if "#" in out:
+        return ["#"]
+
+    return out
 
 
 def _exchange_type() -> str:
-    return (_env("RABBITMQ_EXCHANGE_TYPE", "direct") or "direct").strip().lower()
+    return (_env("RABBITMQ_EXCHANGE_TYPE", "topic") or "topic").strip().lower()
 
 
 def _heartbeat() -> int:
@@ -657,7 +685,8 @@ async def start(
     rabbit_url = _rabbit_url()
     queue_name = _queue_name()
     exchange_name = _exchange_name()
-    routing_key = _routing_key(queue_name)
+    routing_keys = _routing_keys(queue_name)
+    routing_key = routing_keys[0] if routing_keys else "#"
     exchange_type = _exchange_type()
 
     try:
@@ -920,11 +949,12 @@ async def start(
                         _normalize_exchange_type(exchange_type),
                         durable=True,
                     )
-                    await queue.bind(exchange, routing_key=routing_key)
+                    for rk in routing_keys:
+                        await queue.bind(exchange, routing_key=rk)
 
                     print(
                         f"[RABBIT] Fila '{queue_name}' bindada na exchange "
-                        f"'{exchange_name}' com routing_key '{routing_key}'"
+                        f"'{exchange_name}' com routing_keys {routing_keys}"
                     )
                 else:
                     print(

@@ -21,7 +21,7 @@ from fastapi import (
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
-from sqlalchemy import text, func
+from sqlalchemy import text, func, or_, and_
 from dotenv import load_dotenv
 import pytz
 
@@ -95,6 +95,7 @@ FORGOT_WINDOW_SEC = int(os.getenv("FORGOT_WINDOW_SEC", "900"))
 
 RESET_MAX_ATTEMPTS = int(os.getenv("RESET_MAX_ATTEMPTS", "5"))
 RESET_ATTEMPT_WINDOW_SEC = int(os.getenv("RESET_ATTEMPT_WINDOW_SEC", "900"))
+FORCE_PASSWORD_CHANGE_MARKER = "FORCE_PASS_CHANGE"
 
 # Memória local
 _forgot_rate: dict[str, list[float]] = {}
@@ -720,6 +721,31 @@ def gerar_codigo_reset_5d() -> str:
     return f"{secrets.randbelow(90000) + 10000:05d}"
 
 
+def _unique_reset_token(db: Session) -> str:
+    for _ in range(10):
+        token = gerar_codigo_reset_5d()
+        exists = db.query(models.Usuario).filter_by(reset_token=token).first()
+        if not exists:
+            return token
+
+    raise HTTPException(status_code=500, detail="Erro ao gerar código. Tente novamente.")
+
+
+def _ensure_user_reset_token(db: Session, usuario: "models.Usuario") -> str:
+    expira = getattr(usuario, "reset_token_expira", None)
+    token_atual = getattr(usuario, "reset_token", None)
+
+    if token_atual and expira and expira.replace(tzinfo=None) > datetime.utcnow():
+        return str(token_atual)
+
+    token = _unique_reset_token(db)
+    usuario.reset_token = token
+    usuario.reset_token_expira = datetime.utcnow() + timedelta(minutes=RESET_CODE_TTL_MIN)
+    db.add(usuario)
+    db.flush()
+    return token
+
+
 def enviar_email_reset(email_destino: str, token: str):
     assunto = "[ZapsChat] Código para redefinir sua senha"
     corpo = f"""
@@ -1111,6 +1137,48 @@ def login(
 
         _ensure_empresa_exists_and_active(db, colaborador.empresa_id)
 
+        if str(getattr(colaborador, "login_token", "") or "") == FORCE_PASSWORD_CHANGE_MARKER:
+            usuario_vinculado = None
+
+            if getattr(colaborador, "usuario_id", None):
+                usuario_vinculado = (
+                    db.query(models.Usuario)
+                    .filter(models.Usuario.id == int(colaborador.usuario_id))
+                    .first()
+                )
+
+            if not usuario_vinculado:
+                usuario_vinculado = (
+                    db.query(models.Usuario)
+                    .filter(
+                        models.Usuario.empresa_id == int(colaborador.empresa_id),
+                        func.lower(models.Usuario.email) == func.lower(str(colaborador.email)),
+                    )
+                    .first()
+                )
+
+            if usuario_vinculado:
+                token_reset = _ensure_user_reset_token(db, usuario_vinculado)
+                db.commit()
+                try:
+                    enviar_email_reset(
+                        str(getattr(usuario_vinculado, "email", None) or colaborador.email).lower().strip(),
+                        token_reset,
+                    )
+                except Exception as e:
+                    print("[LOGIN FORCE CHANGE EMAIL] erro ao enviar código:", repr(e))
+            else:
+                db.commit()
+
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "force_password_change": True,
+                    "message": "Por segurança, troque sua senha inicial antes de acessar.",
+                    "email": colaborador.email,
+                },
+            )
+
         if not colab_login_allowed_now(db, colaborador):
             db.commit()
             raise HTTPException(
@@ -1318,6 +1386,48 @@ def refresh_token(
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Usuário não encontrado")
 
         _ensure_empresa_exists_and_active(db, colaborador.empresa_id)
+
+        if str(getattr(colaborador, "login_token", "") or "") == FORCE_PASSWORD_CHANGE_MARKER:
+            usuario_vinculado = None
+
+            if getattr(colaborador, "usuario_id", None):
+                usuario_vinculado = (
+                    db.query(models.Usuario)
+                    .filter(models.Usuario.id == int(colaborador.usuario_id))
+                    .first()
+                )
+
+            if not usuario_vinculado:
+                usuario_vinculado = (
+                    db.query(models.Usuario)
+                    .filter(
+                        models.Usuario.empresa_id == int(colaborador.empresa_id),
+                        func.lower(models.Usuario.email) == func.lower(str(colaborador.email)),
+                    )
+                    .first()
+                )
+
+            if usuario_vinculado:
+                token_reset = _ensure_user_reset_token(db, usuario_vinculado)
+                db.commit()
+                try:
+                    enviar_email_reset(
+                        str(getattr(usuario_vinculado, "email", None) or colaborador.email).lower().strip(),
+                        token_reset,
+                    )
+                except Exception as e:
+                    print("[LOGIN FORCE CHANGE EMAIL] erro ao enviar código:", repr(e))
+            else:
+                db.commit()
+
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "force_password_change": True,
+                    "message": "Por segurança, troque sua senha inicial antes de acessar.",
+                    "email": colaborador.email,
+                },
+            )
 
         if not colab_login_allowed_now(db, colaborador):
             raise HTTPException(
@@ -1600,15 +1710,7 @@ def forgot_password(
         print("[AUTH] forgot-password solicitado para e-mail não encontrado:", email_norm)
         return {"detail": "Se o e-mail estiver cadastrado, enviaremos um código de recuperação."}
 
-    token = None
-    for _ in range(10):
-        c = gerar_codigo_reset_5d()
-        existe = db.query(models.Usuario).filter_by(reset_token=c).first()
-        if not existe:
-            token = c
-            break
-    if not token:
-        raise HTTPException(status_code=500, detail="Erro ao gerar código. Tente novamente.")
+    token = _unique_reset_token(db)
 
     usuario.reset_token = token
     usuario.reset_token_expira = datetime.utcnow() + timedelta(minutes=RESET_CODE_TTL_MIN)
@@ -1668,6 +1770,35 @@ def reset_password(
             db.add(colab)
     except Exception as e:
         print("[RESET WARN] não foi possível sincronizar colaborador do admin:", repr(e))
+
+    try:
+        linked_colabs = (
+            db.query(models.Colaborador)
+            .filter(
+                or_(
+                    models.Colaborador.usuario_id == int(usuario.id),
+                    and_(
+                        models.Colaborador.empresa_id == int(usuario.empresa_id),
+                        func.lower(models.Colaborador.email) == func.lower(str(usuario.email)),
+                    ),
+                )
+            )
+            .all()
+        )
+
+        for colab in linked_colabs:
+            colab.senha = nova_hash
+
+            if str(getattr(colab, "login_token", "") or "") == FORCE_PASSWORD_CHANGE_MARKER:
+                colab.login_token = None
+                colab.login_token_expires_at = None
+
+            if getattr(colab, "usuario_id", None) is None:
+                colab.usuario_id = int(usuario.id)
+
+            db.add(colab)
+    except Exception as e:
+        print("[RESET WARN] não foi possível sincronizar colaborador comum:", repr(e))
 
     commit_or_block(db)
 

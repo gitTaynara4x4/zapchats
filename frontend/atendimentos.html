@@ -116,14 +116,35 @@
         nextInit.signal = ctrl.signal;
 
         var pathname = u.pathname || '';
-        var timeoutMs = 4500;
-        if (pathname.indexOf('/seen') >= 0) timeoutMs = 1200;
-        else if (pathname.indexOf('/meta') >= 0) timeoutMs = 1500;
-        else if (pathname.indexOf('/mensagens') >= 0) timeoutMs = 2500;
-        else if (pathname.indexOf('/conversas') >= 0) timeoutMs = 2500;
+        var customTimeout = 0;
+        try {
+          customTimeout = Number(
+            (init && (init.zcTimeoutMs || init.__zcTimeoutMs || init.timeoutMs)) ||
+            (input && (input.zcTimeoutMs || input.__zcTimeoutMs || input.timeoutMs)) ||
+            0
+          );
+        } catch(e) { customTimeout = 0; }
+
+        // Remove campos internos antes de entregar ao fetch nativo.
+        // Eles servem só para o guard do Atendimento.
+        try { delete nextInit.zcTimeoutMs; delete nextInit.__zcTimeoutMs; delete nextInit.timeoutMs; } catch(e){}
+
+        // v7: não matar abertura de conversa em 2.5s.
+        // O timeout curto causava a tela "Tentar novamente" ficar presa em clientes
+        // com histórico/mídia maior. A saída da tela continua abortando imediatamente.
+        var timeoutMs = 6000;
+        if (pathname.indexOf('/seen') >= 0) timeoutMs = 1800;
+        else if (pathname.indexOf('/meta') >= 0) timeoutMs = 8000;
+        else if (pathname.indexOf('/profile/refresh') >= 0) timeoutMs = 30000;
+        else if (pathname.indexOf('/profile') >= 0) timeoutMs = 18000;
+        else if (pathname.indexOf('/notas') >= 0 || pathname.indexOf('/notes') >= 0) timeoutMs = 12000;
+        else if (pathname.indexOf('/mensagens') >= 0) timeoutMs = 22000;
+        else if (pathname.indexOf('/conversas') >= 0) timeoutMs = 10000;
+        if (Number.isFinite(customTimeout) && customTimeout > 0) timeoutMs = Math.max(timeoutMs, Math.min(customTimeout, 45000));
 
         var timer = setTimeout(function(){
-          try { ctrl.abort('atendimento-fetch-timeout-v5'); } catch(e){}
+          try { ctrl.abort(new DOMException('atendimento-fetch-timeout-v7', 'AbortError')); }
+          catch(e){ try { ctrl.abort('atendimento-fetch-timeout-v7'); } catch(_){} }
         }, timeoutMs);
 
         active.set(id, { ctrl: ctrl, url: u.pathname + u.search, at: Date.now() });
@@ -935,15 +956,6 @@
       </footer>
     </main>
   </div>
-
-  <script>
-    window.ENV = window.ENV || {};
-    window.ENV.EVOLUTION = Object.assign({}, window.ENV.EVOLUTION, {
-      apiUrl: "{{ EVOLUTION_URL }}",
-      apiKey: "{{ EVOLUTION_APIKEY }}",
-      defaultInstance: "{{ EVOLUTION_DEFAULT_INSTANCE }}"
-    });
-  </script>
 
   <script>
     /*
@@ -1852,5 +1864,6 @@
     })();
   </script>
 
+  <script src="/frontend/js/help/help-atendimentos.js?v=20260708-atendimentos-tour-responsive-final" defer></script>
 </body>
 </html>

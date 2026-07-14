@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import re
@@ -24,6 +25,9 @@ from backend.utils.plans import (
 )
 from backend.integrations.evolution.repositories.atendimentos_repo import (
     update_open_atendimento_departamento_repo,
+)
+from backend.services.atendimento_claim_state import (
+    set_waiting_department,
 )
 
 router = APIRouter(prefix="/api", tags=["Chatbot (Triagem Setores)"])
@@ -432,18 +436,45 @@ def _fetch_primary_colab_id(db: Session, *, empresa_id: int, departamento_id: in
         return None
 
 
-def _send_text(db: Session, *, instancia_nome: str, remote_jid: str, text_msg: str) -> Optional[Dict[str, Any]]:
-    if not instancia_nome or not remote_jid or not text_msg:
+def _evolution_send_number(*, remote_jid: str, telefone_digits: str = "") -> str:
+    """Monta o destino aceito pelo endpoint /message/sendText da Evolution.
+
+    Para conversas individuais, o campo ``number`` deve receber somente o
+    telefone com DDI, sem o sufixo ``@s.whatsapp.net``. Sempre que disponível,
+    prioriza o telefone original do cliente porque o JID canônico do WhatsApp
+    pode remover o nono dígito de números brasileiros.
+    """
+    jid = str(remote_jid or "").strip()
+
+    # Grupos continuam usando o identificador completo.
+    if jid.endswith("@g.us"):
+        return jid
+
+    numero = _ensure_br_country(telefone_digits)
+    if numero:
+        return numero
+
+    numero_jid = jid.split("@", 1)[0].split(":", 1)[0]
+    return _ensure_br_country(numero_jid)
+
+
+def _send_text(
+    db: Session,
+    *,
+    instancia_nome: str,
+    remote_jid: str,
+    text_msg: str,
+    telefone_digits: str = "",
+) -> Optional[Dict[str, Any]]:
+    if not instancia_nome or not text_msg:
         return None
 
-    jid = str(remote_jid).strip()
-
-    if jid.endswith("@g.us"):
-        destino = jid
-    else:
-        numero = jid.split("@", 1)[0].split(":", 1)[0]
-        numero = _ensure_br_country(numero)
-        destino = f"{numero}@s.whatsapp.net"
+    destino = _evolution_send_number(
+        remote_jid=remote_jid,
+        telefone_digits=telefone_digits,
+    )
+    if not destino:
+        return None
 
     payload = {
         "number": destino,
@@ -656,9 +687,16 @@ def _send_and_persist_bot_message(
     instancia_nome: str,
     remote_jid: str,
     text_msg: str,
+    telefone_digits: str = "",
     ts_dt: Optional[datetime] = None,
 ) -> Optional[Dict[str, Any]]:
-    evo = _send_text(db, instancia_nome=instancia_nome, remote_jid=remote_jid, text_msg=text_msg)
+    evo = _send_text(
+        db,
+        instancia_nome=instancia_nome,
+        remote_jid=remote_jid,
+        text_msg=text_msg,
+        telefone_digits=telefone_digits,
+    )
 
     # Se algum helper anterior deixou a sessão em estado abortado, limpa antes
     # de salvar o registro da mensagem do Bot. As chamadas atuais chegam aqui
@@ -931,24 +969,55 @@ def _open_status_values() -> list[Any]:
 
 
 def _clear_active_participants_safe(db: Session, *, empresa_id: int, atendimento_id: int) -> None:
-    """Remove participantes ativos quando o bot recoloca a conversa em aguardando."""
+    """Compatibilidade: usa somente as colunas reais do modelo atual."""
+    AP = getattr(models, "AtendimentoParticipante", None)
+    if AP is None:
+        return
+
     try:
-        db.execute(
-            text(
-                """
-                UPDATE atendimento_participantes
-                   SET is_ativo = false,
-                       is_responsavel = false
-                 WHERE empresa_id = :empresa_id
-                   AND atendimento_id = :atendimento_id
-                   AND is_ativo IS TRUE
-                """
-            ),
-            {"empresa_id": int(empresa_id), "atendimento_id": int(atendimento_id)},
+        now = _now_utc()
+        rows = (
+            db.query(AP)
+            .filter(
+                AP.empresa_id == int(empresa_id),
+                AP.atendimento_id == int(atendimento_id),
+                AP.is_ativo.is_(True),
+            )
+            .with_for_update()
+            .all()
         )
-    except Exception:
-        # Compatível com banco sem tabela/colunas de participantes.
-        pass
+        for row in rows:
+            row.is_ativo = False
+            row.role = "participant"
+            row.saiu_em = now
+            row.atualizado_em = now
+            db.add(row)
+        db.flush()
+    except Exception as exc:
+        try:
+            print("[CHATBOT][triagem][participantes-skip]", repr(exc))
+        except Exception:
+            pass
+
+
+def _schedule_reload_clientes(empresa_id: int) -> None:
+    """Agenda uma atualização da lista sem bloquear o processamento do chatbot."""
+    try:
+        from backend.integrations.evolution.transport.websocket_emitters import (
+            emit_reload_clientes,
+        )
+
+        loop = asyncio.get_running_loop()
+        loop.create_task(emit_reload_clientes(int(empresa_id)))
+    except RuntimeError:
+        # O webhook legado também pode chamar este fluxo fora de um event loop.
+        # Nesse cenário, a próxima consulta da tela ainda encontra o banco correto.
+        return
+    except Exception as exc:
+        try:
+            print("[CHATBOT][triagem][reload-clientes][erro]", repr(exc))
+        except Exception:
+            pass
 
 
 def _ensure_waiting_atendimento_for_triage(
@@ -960,89 +1029,16 @@ def _ensure_waiting_atendimento_for_triage(
     departamento_id: int,
     ts_dt: datetime | None,
 ) -> Any | None:
-    """
-    Persistência direta e segura da escolha de departamento.
-
-    Motivo:
-    - O helper legado de atendimento pode dar rollback interno em alguns schemas.
-    - Esse rollback desfazia cliente.departamento_id antes do commit.
-    - Aqui o cliente já foi commitado antes; então, mesmo se o atendimento falhar,
-      a lista ainda consegue usar clientes.departamento_id.
-    """
-    Atendimento = getattr(models, "Atendimento", None)
-    if Atendimento is None:
-        return None
-
+    """Cria/atualiza o atendimento no estado aguardando sem responsável."""
     try:
-        q = db.query(Atendimento).filter(
-            Atendimento.empresa_id == int(empresa_id),
-            Atendimento.cliente_id == int(cliente_id),
+        return set_waiting_department(
+            db,
+            empresa_id=int(empresa_id),
+            cliente_id=int(cliente_id),
+            instancia_id=int(instancia_id),
+            departamento_id=int(departamento_id),
+            ts_dt=ts_dt,
         )
-
-        if hasattr(Atendimento, "instancia_id"):
-            q = q.filter(Atendimento.instancia_id == int(instancia_id))
-
-        if hasattr(Atendimento, "status"):
-            try:
-                q = q.filter(Atendimento.status.in_(_open_status_values()))
-            except Exception:
-                pass
-
-        atendimento = q.order_by(Atendimento.id.desc()).first()
-
-        if atendimento is None:
-            kwargs: dict[str, Any] = {
-                "empresa_id": int(empresa_id),
-                "cliente_id": int(cliente_id),
-            }
-            if hasattr(Atendimento, "instancia_id"):
-                kwargs["instancia_id"] = int(instancia_id)
-            if hasattr(Atendimento, "departamento_id"):
-                kwargs["departamento_id"] = int(departamento_id)
-            if hasattr(Atendimento, "operador_id"):
-                kwargs["operador_id"] = None
-            if hasattr(Atendimento, "status"):
-                kwargs["status"] = _status_aguardando_value()
-            if hasattr(Atendimento, "criado_em") and ts_dt is not None:
-                kwargs["criado_em"] = ts_dt
-            if hasattr(Atendimento, "atualizado_em") and ts_dt is not None:
-                kwargs["atualizado_em"] = ts_dt
-
-            atendimento = Atendimento(**kwargs)
-            db.add(atendimento)
-            db.flush()
-        else:
-            if hasattr(atendimento, "departamento_id"):
-                atendimento.departamento_id = int(departamento_id)
-            if hasattr(atendimento, "operador_id"):
-                atendimento.operador_id = None
-            if hasattr(atendimento, "status"):
-                atendimento.status = _status_aguardando_value()
-            if hasattr(atendimento, "fila_id"):
-                try:
-                    atendimento.fila_id = None
-                except Exception:
-                    pass
-            if hasattr(atendimento, "fila_escolhida_em"):
-                try:
-                    atendimento.fila_escolhida_em = None
-                except Exception:
-                    pass
-            if hasattr(atendimento, "atualizado_em") and ts_dt is not None:
-                atendimento.atualizado_em = ts_dt
-            db.add(atendimento)
-            db.flush()
-
-        atendimento_id = getattr(atendimento, "id", None)
-        if atendimento_id:
-            _clear_active_participants_safe(
-                db,
-                empresa_id=int(empresa_id),
-                atendimento_id=int(atendimento_id),
-            )
-
-        return atendimento
-
     except Exception as exc:
         try:
             print("[CHATBOT][triagem][persist-atendimento][erro]", repr(exc))
@@ -1168,6 +1164,7 @@ def auto_messages_handle_inbound(
             cliente_id=int(cliente.id),
             instancia_nome=instancia_nome,
             remote_jid=remote_jid,
+            telefone_digits=telefone_digits,
             text_msg=text_msg,
             ts_dt=_now_utc(),
         )
@@ -1188,6 +1185,7 @@ def auto_messages_handle_inbound(
             cliente_id=int(cliente.id),
             instancia_nome=instancia_nome,
             remote_jid=remote_jid,
+            telefone_digits=telefone_digits,
             text_msg=text_msg,
             ts_dt=_now_utc(),
         )
@@ -1353,6 +1351,7 @@ def triagem_handle_inbound(
             cliente_id=int(cliente.id),
             instancia_nome=instancia_nome,
             remote_jid=remote_jid,
+            telefone_digits=telefone_digits,
             text_msg=menu,
             ts_dt=now,
         )
@@ -1376,22 +1375,9 @@ def triagem_handle_inbound(
             now=now,
         )
 
-        # 2) Depois tenta sincronizar/criar o atendimento aguardando.
-        # Se algum helper legado falhar, o cliente já ficou com departamento_id salvo.
-        _sync_open_atendimento_departamento(
-            db,
-            empresa_id=empresa_id,
-            instancia_id=instancia_id,
-            cliente_id=int(cliente.id),
-            departamento_id=int(dep_id),
-            ts_dt=now,
-            operador_id=None,
-            status_aguardando=True,
-            clear_operador=True,
-            clear_participantes=True,
-        )
-
-        _ensure_waiting_atendimento_for_triage(
+        # 2) Cria ou atualiza o atendimento de forma direta. A triagem só está
+        # realmente concluída quando existe um atendimento aguardando, sem operador.
+        atendimento = _ensure_waiting_atendimento_for_triage(
             db,
             empresa_id=empresa_id,
             instancia_id=instancia_id,
@@ -1400,11 +1386,63 @@ def triagem_handle_inbound(
             ts_dt=now,
         )
 
-        try:
-            db.commit()
-        except Exception:
+        atendimento_id = None
+        if atendimento is not None:
             try:
-                db.rollback()
+                atendimento_id = int(getattr(atendimento, "id", 0) or 0) or None
+                db.commit()
+            except Exception as exc:
+                try:
+                    print("[CHATBOT][triagem][commit-atendimento][erro]", repr(exc))
+                except Exception:
+                    pass
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                atendimento = None
+                atendimento_id = None
+
+        # Retry limpo: cobre sessão que tenha sido invalidada por algum schema
+        # legado e evita deixar novamente cliente com departamento, mas sem atendimento.
+        if atendimento is None:
+            atendimento = _ensure_waiting_atendimento_for_triage(
+                db,
+                empresa_id=empresa_id,
+                instancia_id=instancia_id,
+                cliente_id=int(cliente.id),
+                departamento_id=int(dep_id),
+                ts_dt=now,
+            )
+            if atendimento is not None:
+                try:
+                    atendimento_id = int(getattr(atendimento, "id", 0) or 0) or None
+                    db.commit()
+                except Exception as exc:
+                    try:
+                        print("[CHATBOT][triagem][retry-atendimento][erro]", repr(exc))
+                    except Exception:
+                        pass
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                    atendimento = None
+                    atendimento_id = None
+
+        if atendimento_id is not None:
+            _schedule_reload_clientes(int(empresa_id))
+        else:
+            try:
+                print(
+                    "[CHATBOT][triagem][ATENCAO] departamento salvo, mas atendimento não foi persistido",
+                    {
+                        "empresa_id": int(empresa_id),
+                        "instancia_id": int(instancia_id),
+                        "cliente_id": int(cliente.id),
+                        "departamento_id": int(dep_id),
+                    },
+                )
             except Exception:
                 pass
 
@@ -1416,6 +1454,7 @@ def triagem_handle_inbound(
             cliente_id=int(cliente.id),
             instancia_nome=instancia_nome,
             remote_jid=remote_jid,
+            telefone_digits=telefone_digits,
             text_msg=ack,
             ts_dt=now,
         )
@@ -1427,6 +1466,8 @@ def triagem_handle_inbound(
             "departamento_nome": dep_nome,
             "status": "aguardando",
             "operador_id": None,
+            "atendimento_id": atendimento_id,
+            "atendimento_persistido": bool(atendimento_id),
         }
 
     tentativas_antes = int(cliente.triagem_tentativas or 0)
@@ -1462,6 +1503,7 @@ def triagem_handle_inbound(
             cliente_id=int(cliente.id),
             instancia_nome=instancia_nome,
             remote_jid=remote_jid,
+            telefone_digits=telefone_digits,
             text_msg=fallback_msg,
             ts_dt=now,
         )
@@ -1500,6 +1542,7 @@ def triagem_handle_inbound(
         cliente_id=int(cliente.id),
         instancia_nome=instancia_nome,
         remote_jid=remote_jid,
+        telefone_digits=telefone_digits,
         text_msg=menu,
         ts_dt=now,
     )

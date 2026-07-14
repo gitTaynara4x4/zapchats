@@ -9,6 +9,14 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend import models
+from backend.services.atendimento_claim_state import (
+    claim_exclusive_operator,
+    claim_if_available,
+    deactivate_all_participants,
+    ensure_open_atendimento_locked,
+    release_to_queue,
+    set_waiting_department,
+)
 
 
 def has_mensagem_atendimento_field() -> bool:
@@ -257,40 +265,9 @@ def _set_status_novo(atendimento) -> None:
 
 
 def _clear_active_participantes_for_triage(db: Session, *, atendimento) -> None:
-    """
-    Quando o robô só direciona para um departamento, ninguém assumiu ainda.
-    Então participantes antigos precisam ficar inativos para a conversa voltar para
-    a fila compartilhada do departamento.
-    """
-    AP = _get_participante_model()
-    if AP is None or not _participant_feature_enabled(db):
-        return
-
-    atendimento_id = _to_int(getattr(atendimento, "id", None))
-    empresa_id = _to_int(getattr(atendimento, "empresa_id", None))
-    if atendimento_id is None or empresa_id is None:
-        return
-
+    """Chatbot devolve a conversa para a fila sem nenhum responsável ativo."""
     try:
-        rows = _list_active_participantes(
-            db,
-            empresa_id=int(empresa_id),
-            atendimento_id=int(atendimento_id),
-        )
-        if not rows:
-            return
-
-        now = _now_utc()
-        for row in rows:
-            if hasattr(row, "is_ativo"):
-                row.is_ativo = False
-            if hasattr(row, "saiu_em"):
-                row.saiu_em = now
-            if hasattr(row, "atualizado_em"):
-                row.atualizado_em = now
-            if hasattr(row, "updated_at"):
-                row.updated_at = now
-            db.add(row)
+        deactivate_all_participants(db, atendimento=atendimento)
     except Exception:
         return
 
@@ -503,8 +480,8 @@ def _upsert_participante(
             data["is_ativo"] = True
         if hasattr(AP, "saiu_em"):
             data["saiu_em"] = None
-        if hasattr(AP, "is_responsavel"):
-            data["is_responsavel"] = bool(is_responsavel) if is_responsavel is not None else False
+        if hasattr(AP, "role"):
+            data["role"] = "responsavel" if bool(is_responsavel) else "participant"
 
         row = AP(**data)
         db.add(row)
@@ -519,8 +496,8 @@ def _upsert_participante(
         row.aceito_em = now
     if hasattr(row, "entrou_em") and getattr(row, "entrou_em", None) is None:
         row.entrou_em = now
-    if hasattr(row, "is_responsavel") and is_responsavel is not None:
-        row.is_responsavel = bool(is_responsavel)
+    if hasattr(row, "role") and is_responsavel is not None:
+        row.role = "responsavel" if bool(is_responsavel) else "participant"
 
     db.add(row)
     db.flush()
@@ -571,8 +548,11 @@ def ensure_participante_ativo_repo(
     preferir_responsavel_se_vazio: bool = True,
 ):
     """
-    Garante que o colaborador fique como participante ativo do atendimento.
-    Não remove ninguém; só adiciona/reativa.
+    Garante o vínculo sem permitir dois responsáveis ativos.
+
+    Se já existe outro operador, o caller não pode roubar o atendimento apenas
+    por receber/enviar uma mensagem. Se está livre ou já é do mesmo colaborador,
+    o vínculo é normalizado de forma exclusiva.
     """
     if atendimento is None:
         return None
@@ -581,42 +561,35 @@ def ensure_participante_ativo_repo(
     if colaborador_id_i is None:
         return None
 
-    if not _participant_feature_enabled(db):
-        if hasattr(atendimento, "operador_id") and getattr(atendimento, "operador_id", None) is None:
-            atendimento.operador_id = int(colaborador_id_i)
-            db.add(atendimento)
-            db.flush()
+    current_operator = _to_int(getattr(atendimento, "operador_id", None))
+    if current_operator is not None and current_operator != int(colaborador_id_i):
         return None
 
-    atendimento_id = _to_int(getattr(atendimento, "id", None))
-    empresa_id = _to_int(getattr(atendimento, "empresa_id", None))
+    if not preferir_responsavel_se_vazio and current_operator is None:
+        return _upsert_participante(
+            db,
+            atendimento=atendimento,
+            colaborador_id=int(colaborador_id_i),
+            is_responsavel=False,
+        )
 
-    if atendimento_id is None or empresa_id is None:
-        return None
-
-    _bootstrap_legacy_operador_as_participante(db, atendimento=atendimento)
-
-    active_ids = _list_active_participante_ids(
-        db,
-        empresa_id=int(empresa_id),
-        atendimento_id=int(atendimento_id),
-    )
-
-    is_responsavel = bool(preferir_responsavel_se_vazio and not active_ids)
-
-    row = _upsert_participante(
+    locked = claim_if_available(
         db,
         atendimento=atendimento,
         colaborador_id=int(colaborador_id_i),
-        is_responsavel=is_responsavel,
     )
+    if locked is None:
+        return None
 
-    if hasattr(atendimento, "operador_id") and getattr(atendimento, "operador_id", None) is None:
-        atendimento.operador_id = int(colaborador_id_i)
-        db.add(atendimento)
-        db.flush()
-
-    return row
+    return (
+        db.query(models.AtendimentoParticipante)
+        .filter(
+            models.AtendimentoParticipante.empresa_id == int(locked.empresa_id),
+            models.AtendimentoParticipante.atendimento_id == int(locked.id),
+            models.AtendimentoParticipante.colaborador_id == int(colaborador_id_i),
+        )
+        .first()
+    )
 
 
 def get_or_open_atendimento_repo(
@@ -633,25 +606,12 @@ def get_or_open_atendimento_repo(
     if not has_mensagem_atendimento_field():
         return None
 
-    Atendimento = _get_atendimento_model()
-    if Atendimento is None:
-        return None
-
     empresa_id_i = int(empresa_id)
     instancia_id_i = int(instancia_id)
     cliente_id_i = int(cliente_id)
     departamento_id_i = _to_int(departamento_id)
     operador_id_i = _to_int(operador_id)
 
-    if not _cliente_exists_for_empresa(
-        db,
-        empresa_id=empresa_id_i,
-        cliente_id=cliente_id_i,
-    ):
-        return None
-
-    # Se a instância não existir para a empresa, não abre atendimento.
-    # Isso evita atendimento solto quando a instância foi apagada/recriada.
     if not _instancia_exists_for_empresa(
         db,
         empresa_id=empresa_id_i,
@@ -660,123 +620,34 @@ def get_or_open_atendimento_repo(
         return None
 
     try:
-        if hasattr(db, "is_active") and not db.is_active:
-            _safe_rollback(db)
-    except Exception:
-        _safe_rollback(db)
-
-    atendimento = _query_open_atendimento(
-        db,
-        empresa_id=empresa_id_i,
-        instancia_id=instancia_id_i,
-        cliente_id=cliente_id_i,
-        departamento_id=departamento_id_i,
-    )
-
-    if atendimento is not None:
-        try:
-            _bootstrap_legacy_operador_as_participante(db, atendimento=atendimento)
-
-            if operador_id_i is not None:
-                ensure_participante_ativo_repo(
-                    db,
-                    atendimento=atendimento,
-                    colaborador_id=operador_id_i,
-                    preferir_responsavel_se_vazio=True,
-                )
-
-            if _atendimento_context_ok(
-                atendimento,
-                empresa_id=empresa_id_i,
-                instancia_id=instancia_id_i,
-                cliente_id=cliente_id_i,
-            ):
-                return atendimento
-
-            return None
-
-        except Exception:
-            _safe_rollback(db)
-            return _query_open_atendimento(
-                db,
-                empresa_id=empresa_id_i,
-                instancia_id=instancia_id_i,
-                cliente_id=cliente_id_i,
-                departamento_id=departamento_id_i,
-            )
-
-    try:
-        novo = Atendimento()
-    except Exception:
-        return None
-
-    try:
-        if not _cliente_exists_for_empresa(
+        atendimento = ensure_open_atendimento_locked(
             db,
             empresa_id=empresa_id_i,
             cliente_id=cliente_id_i,
-        ):
-            return None
-
-        if hasattr(novo, "empresa_id"):
-            novo.empresa_id = empresa_id_i
-
-        if hasattr(novo, "cliente_id"):
-            novo.cliente_id = cliente_id_i
-
-        if hasattr(novo, "instancia_id"):
-            novo.instancia_id = instancia_id_i
-
-        if hasattr(novo, "departamento_id"):
-            novo.departamento_id = departamento_id_i
-
-        _set_status_inicial(novo)
-
-        if hasattr(novo, "tipo"):
-            novo.tipo = direcao
-
-        if hasattr(novo, "direcao"):
-            novo.direcao = direcao
-
-        if hasattr(novo, "operador_id") and operador_id_i is not None:
-            novo.operador_id = operador_id_i
-
-        if hasattr(novo, "criado_em") and ts_dt is not None:
-            novo.criado_em = ts_dt
-
-        if hasattr(novo, "created_at") and ts_dt is not None:
-            novo.created_at = ts_dt
-
-        if hasattr(novo, "atualizado_em") and ts_dt is not None:
-            novo.atualizado_em = ts_dt
-
-        if hasattr(novo, "updated_at") and ts_dt is not None:
-            novo.updated_at = ts_dt
-
-        db.add(novo)
-        db.flush()
-
-        if not _atendimento_context_ok(
-            novo,
-            empresa_id=empresa_id_i,
             instancia_id=instancia_id_i,
-            cliente_id=cliente_id_i,
-        ):
+            departamento_id=departamento_id_i,
+            ts_dt=ts_dt,
+        )
+        if atendimento is None:
             return None
+
+        if departamento_id_i is not None:
+            atendimento.departamento_id = int(departamento_id_i)
 
         if operador_id_i is not None:
-            ensure_participante_ativo_repo(
-                db,
-                atendimento=novo,
-                colaborador_id=operador_id_i,
-                preferir_responsavel_se_vazio=True,
-            )
+            current_operator = _to_int(getattr(atendimento, "operador_id", None))
+            if current_operator is None or current_operator == int(operador_id_i):
+                atendimento = claim_if_available(
+                    db,
+                    atendimento=atendimento,
+                    colaborador_id=int(operador_id_i),
+                ) or atendimento
 
-        return novo
-
+        db.add(atendimento)
+        db.flush()
+        return atendimento
     except Exception:
         _safe_rollback(db)
-
         return _query_open_atendimento(
             db,
             empresa_id=empresa_id_i,
@@ -799,150 +670,51 @@ def update_open_atendimento_departamento_repo(
     clear_operador: bool = False,
     clear_participantes: bool = False,
 ) -> Any | None:
-    """
-    Atualiza o atendimento aberto mais recente da conversa para o departamento informado.
-    Se não existir atendimento aberto, cria um já no departamento correto.
-
-    Para triagem por departamento, use status_aguardando=True e clear_operador=True:
-    o robô só escolhe o departamento, mas nenhum colaborador assume ainda.
-    """
-    if not has_mensagem_atendimento_field():
-        return None
-
-    Atendimento = _get_atendimento_model()
-    if Atendimento is None:
-        return None
-
+    """Atualiza o atendimento aberto mantendo o invariável de um responsável."""
     empresa_id_i = int(empresa_id)
     instancia_id_i = int(instancia_id)
     cliente_id_i = int(cliente_id)
     departamento_id_i = _to_int(departamento_id)
     operador_id_i = _to_int(operador_id)
 
-    if not _cliente_exists_for_empresa(
-        db,
-        empresa_id=empresa_id_i,
-        cliente_id=cliente_id_i,
-    ):
-        return None
-
-    if not _instancia_exists_for_empresa(
-        db,
-        empresa_id=empresa_id_i,
-        instancia_id=instancia_id_i,
-    ):
-        return None
-
     try:
-        if hasattr(db, "is_active") and not db.is_active:
-            _safe_rollback(db)
-    except Exception:
-        _safe_rollback(db)
-
-    atendimento = _query_latest_open_atendimento_any_department(
-        db,
-        empresa_id=empresa_id_i,
-        instancia_id=instancia_id_i,
-        cliente_id=cliente_id_i,
-    )
-
-    if atendimento is None:
-        atendimento = get_or_open_atendimento_repo(
-            db,
-            empresa_id=empresa_id_i,
-            instancia_id=instancia_id_i,
-            cliente_id=cliente_id_i,
-            direcao="entrada",
-            ts_dt=ts_dt,
-            departamento_id=departamento_id_i,
-            operador_id=None if clear_operador else operador_id_i,
-        )
-
-        if atendimento is not None:
-            changed = False
-
-            if hasattr(atendimento, "operador_id") and clear_operador:
-                atendimento.operador_id = None
-                changed = True
-
-            if clear_participantes:
-                _clear_active_participantes_for_triage(db, atendimento=atendimento)
-                changed = True
-
-            if status_aguardando and departamento_id_i is not None:
-                _set_status_aguardando(atendimento)
-                changed = True
-            elif departamento_id_i is None and clear_operador:
-                _set_status_novo(atendimento)
-                changed = True
-
-            if changed:
-                db.add(atendimento)
-                db.flush()
-
-        return atendimento
-
-    try:
-        if not _atendimento_context_ok(
-            atendimento,
-            empresa_id=empresa_id_i,
-            instancia_id=instancia_id_i,
-            cliente_id=cliente_id_i,
-        ):
-            return None
-
-        changed = False
-
-        _bootstrap_legacy_operador_as_participante(db, atendimento=atendimento)
-
-        if hasattr(atendimento, "departamento_id"):
-            atual_dep = _to_int(getattr(atendimento, "departamento_id", None))
-            if atual_dep != departamento_id_i:
-                atendimento.departamento_id = departamento_id_i
-                changed = True
-
-        if hasattr(atendimento, "operador_id"):
-            atual_operador = _to_int(getattr(atendimento, "operador_id", None))
-
-            if clear_operador and atual_operador is not None:
-                atendimento.operador_id = None
-                changed = True
-            elif (not clear_operador) and operador_id_i is not None and atual_operador is None:
-                atendimento.operador_id = operador_id_i
-                changed = True
-
-        if clear_participantes:
-            _clear_active_participantes_for_triage(db, atendimento=atendimento)
-            changed = True
-
-        if status_aguardando and departamento_id_i is not None:
-            _set_status_aguardando(atendimento)
-            changed = True
-        elif departamento_id_i is None and clear_operador:
-            _set_status_novo(atendimento)
-            changed = True
-
-        if ts_dt is not None:
-            if hasattr(atendimento, "atualizado_em"):
-                atendimento.atualizado_em = ts_dt
-                changed = True
-            elif hasattr(atendimento, "updated_at"):
-                atendimento.updated_at = ts_dt
-                changed = True
-
-        if changed:
-            db.flush()
-
-        if (not clear_operador) and operador_id_i is not None:
-            ensure_participante_ativo_repo(
+        if status_aguardando or clear_operador or clear_participantes:
+            atendimento = set_waiting_department(
                 db,
-                atendimento=atendimento,
-                colaborador_id=operador_id_i,
-                preferir_responsavel_se_vazio=True,
+                empresa_id=empresa_id_i,
+                cliente_id=cliente_id_i,
+                instancia_id=instancia_id_i,
+                departamento_id=departamento_id_i,
+                ts_dt=ts_dt,
+            )
+        else:
+            atendimento = ensure_open_atendimento_locked(
+                db,
+                empresa_id=empresa_id_i,
+                cliente_id=cliente_id_i,
+                instancia_id=instancia_id_i,
+                departamento_id=departamento_id_i,
+                ts_dt=ts_dt,
             )
 
-        return atendimento
+        if atendimento is None:
+            return None
 
+        if departamento_id_i is not None:
+            atendimento.departamento_id = int(departamento_id_i)
+
+        if operador_id_i is not None and not clear_operador:
+            current_operator = _to_int(getattr(atendimento, "operador_id", None))
+            if current_operator is None or current_operator == int(operador_id_i):
+                atendimento = claim_if_available(
+                    db,
+                    atendimento=atendimento,
+                    colaborador_id=int(operador_id_i),
+                ) or atendimento
+
+        db.add(atendimento)
+        db.flush()
+        return atendimento
     except Exception:
         _safe_rollback(db)
         return _query_open_atendimento(
@@ -952,8 +724,6 @@ def update_open_atendimento_departamento_repo(
             cliente_id=cliente_id_i,
             departamento_id=departamento_id_i,
         )
-
-
 def get_atendimento_id_repo(
     db: Session,
     *,

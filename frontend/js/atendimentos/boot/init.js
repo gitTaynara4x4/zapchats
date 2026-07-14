@@ -855,6 +855,11 @@ function clearConversationLoading(ref = {}) {
   } catch {}
 }
 
+function isConversationTimeoutError(message = '') {
+  const m = String(message || '').toLowerCase();
+  return m.includes('atendimento-fetch-timeout') || m.includes('timeout') || m.includes('aborterror');
+}
+
 function showConversationLoadError(ref = {}, cliente = null, message = 'Não foi possível carregar a conversa.') {
   const hist = document.getElementById('historico');
   if (!hist || !ref?.key) return;
@@ -867,6 +872,13 @@ function showConversationLoadError(ref = {}, cliente = null, message = 'Não foi
 
   if (currentKey && currentKey !== ref.key) return;
 
+  const rawMessage = String(message || '').trim() || 'Não foi possível carregar a conversa.';
+  const isTimeout = isConversationTimeoutError(rawMessage);
+  const title = isTimeout ? 'A conversa demorou para carregar' : rawMessage;
+  const sub = isTimeout
+    ? 'A consulta ao histórico passou do tempo limite. Clique novamente para tentar com timeout maior.'
+    : 'Confira a conexão com o banco e tente novamente.';
+
   hist.style.display = 'flex';
   hist.removeAttribute('aria-busy');
   delete hist.dataset.loadingConversationKey;
@@ -874,15 +886,31 @@ function showConversationLoadError(ref = {}, cliente = null, message = 'Não foi
   hist.innerHTML = `
     <div class="hist-empty-state hist-empty-error">
       <div class="hist-empty-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
-      <div class="hist-empty-title">${escapeHtmlLite(message)}</div>
-      <div class="hist-empty-sub">Confira a conexão com o banco e tente novamente.</div>
+      <div class="hist-empty-title">${escapeHtmlLite(title)}</div>
+      <div class="hist-empty-sub">${escapeHtmlLite(sub)}</div>
       <button type="button" class="hist-retry-btn" data-retry-conversation="1">Tentar novamente</button>
     </div>
   `;
 
   try {
-    hist.querySelector('[data-retry-conversation="1"]')?.addEventListener('click', () => {
-      selecionarClienteObj(cliente || ref.key, { forceReload: true });
+    const btn = hist.querySelector('[data-retry-conversation="1"]');
+    btn?.addEventListener('click', async () => {
+      if (btn.dataset.loading === '1') return;
+      btn.dataset.loading = '1';
+      btn.disabled = true;
+      btn.textContent = 'Tentando…';
+
+      try {
+        const inst = getInstanciaForFetch(ref.key) || ref.instId || '';
+        try { __msgLoadState.delete(`${ref.key}|${inst || ''}`); } catch {}
+        try { showConversationLoading(ref, 'Tentando carregar conversa novamente…'); } catch {}
+        await selecionarClienteObj(cliente || ref.key, { forceReload: true, retry: true, timeoutMs: 30000 });
+      } catch (e) {
+        console.warn('[selecionarClienteObj] retry falhou:', e?.message || e);
+        btn.dataset.loading = '0';
+        btn.disabled = false;
+        btn.textContent = 'Tentar novamente';
+      }
     });
   } catch {}
 }
@@ -1388,9 +1416,35 @@ async function ensureMensagensCarregadas(conversationRef, opts = {}) {
 
     const url = `/api/atendimento/conversas/${encodeURIComponent(entityId)}/mensagens?${qs.toString()}`;
 
-    const r = await fetch(url, { credentials: 'include' });
-    if (!r.ok) throw new Error(`Falha ao carregar mensagens (${r.status})`);
-    const data = await r.json();
+    const r = await fetch(url, {
+      credentials: 'include',
+      cache: 'no-store',
+      // O histórico de alguns clientes demora mais por mídia/volume.
+      // O guard global do Atendimento respeita este timeout customizado.
+      zcTimeoutMs: Number(opts.timeoutMs || 30000),
+    });
+    let data = null;
+
+    try {
+      data = await r.json();
+    } catch {
+      data = null;
+    }
+
+    if (!r.ok) {
+      const detail =
+        data?.detail ||
+        data?.message ||
+        data?.erro ||
+        data?.error ||
+        `Falha ao carregar mensagens (${r.status})`;
+
+      const err = new Error(String(detail));
+      err.status = r.status;
+      err.data = data;
+      err.url = url;
+      throw err;
+    }
 
     const items = Array.isArray(data)
       ? data
@@ -2050,7 +2104,12 @@ async function selecionarClienteObj(id, opts = {}) {
 
       const hasAnyRenderedRows = !!hist?.querySelector?.('.msg-row, .bubble');
       if (!hasAnyRenderedRows) {
-        showConversationLoadError(ref, c, 'Não foi possível carregar a conversa');
+        const detail = String(e?.message || e?.name || '').trim();
+        const friendly = detail && !/^Falha ao carregar mensagens/i.test(detail)
+          ? detail
+          : 'Não foi possível carregar a conversa';
+
+        showConversationLoadError(ref, c, friendly);
       } else {
         clearConversationLoading(ref);
         zcHardHideLoaders('conversation-load-error-with-rows');

@@ -633,7 +633,8 @@ def _latest_atendimento_for_cliente_instancia(
     cliente_id: int,
     instancia_id: Optional[int],
 ):
-    q = (
+    """Prefere o atendimento aberto; usa o último fechado apenas como fallback."""
+    base = (
         db.query(models.Atendimento)
         .filter(
             models.Atendimento.empresa_id == int(empresa_id),
@@ -642,9 +643,27 @@ def _latest_atendimento_for_cliente_instancia(
     )
 
     if instancia_id is not None:
-        q = q.filter(models.Atendimento.instancia_id == int(instancia_id))
+        base = base.filter(models.Atendimento.instancia_id == int(instancia_id))
 
-    return q.order_by(models.Atendimento.id.desc()).first()
+    enum_cls = getattr(models, "StatusAtendimento", None)
+    if enum_cls is not None:
+        open_values = [
+            getattr(enum_cls, name)
+            for name in ("NOVO", "AGUARDANDO", "EM_ATENDIMENTO", "PAUSADO")
+            if hasattr(enum_cls, name)
+        ]
+    else:
+        open_values = ["novo", "aguardando", "em_atendimento", "pausado"]
+
+    opened = (
+        base.filter(models.Atendimento.status.in_(open_values))
+        .order_by(models.Atendimento.id.desc())
+        .first()
+    )
+    if opened is not None:
+        return opened
+
+    return base.order_by(models.Atendimento.id.desc()).first()
 
 
 def _expand_departamento_ids_with_descendants(

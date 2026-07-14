@@ -24,6 +24,7 @@ from backend.security.atendimento_acl import (
     assert_instancia_allowed,
     assert_cliente_access,
 )
+from backend.routers.atendimento_conversas.listagem import _allow_entrada_geral_colaborador
 
 # =========================================================
 # Router
@@ -886,7 +887,12 @@ def listar_mensagens_por_data(
             empresa_id=empresa_id_eff,
             cliente_id=int(cliente_id),
             instancia_id=resolved_inst_id,
-            allow_unassigned_department=False,
+            # Mesma regra da lista lateral de conversas.
+            # Antes a lista podia mostrar conversa da Entrada Geral/sem departamento,
+            # mas ao abrir o histórico esta rota negava com 403. O frontend mostrava
+            # "Não foi possível carregar a conversa" e o botão Tentar novamente
+            # caía no mesmo erro para alguns clientes.
+            allow_unassigned_department=_allow_entrada_geral_colaborador(identity),
         )
 
         instancia_filters = []
@@ -1285,7 +1291,12 @@ def listar_mensagens(
             empresa_id=empresa_id_eff,
             cliente_id=int(cliente_id),
             instancia_id=resolved_inst_id,
-            allow_unassigned_department=False,
+            # Mesma regra da lista lateral de conversas.
+            # Antes a lista podia mostrar conversa da Entrada Geral/sem departamento,
+            # mas ao abrir o histórico esta rota negava com 403. O frontend mostrava
+            # "Não foi possível carregar a conversa" e o botão Tentar novamente
+            # caía no mesmo erro para alguns clientes.
+            allow_unassigned_department=_allow_entrada_geral_colaborador(identity),
         )
 
         instancia_filters = []

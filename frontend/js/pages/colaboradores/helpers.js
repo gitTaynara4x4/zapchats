@@ -103,25 +103,47 @@ export function timeToMinutes(str){
 }
 
 export function initials(name){
-  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  const text = String(name || '').trim();
+  const firstValid = Array.from(text).find(char => /[A-Za-zÀ-ÖØ-öø-ÿ0-9]/.test(char));
 
-  if (!parts.length) return 'AZ';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return firstValid ? firstValid.toUpperCase() : '?';
+}
 
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+export function avatarTone(seed){
+  const palette = [
+    '#1A73E8',
+    '#188038',
+    '#9334E6',
+    '#D93025',
+    '#E37400',
+    '#007B83',
+    '#5F6368',
+    '#C5221F',
+    '#3F51B5',
+    '#00897B',
+    '#8E24AA',
+    '#F4511E'
+  ];
+
+  seed = String(seed || 'ZapsChat');
+
+  let hash = 0;
+
+  for (let i = 0; i < seed.length; i++){
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  }
+
+  const bg = palette[Math.abs(hash) % palette.length];
+
+  return {
+    bg,
+    fg: '#FFFFFF',
+    ring: bg
+  };
 }
 
 export function hashColor(seed){
-  seed = String(seed || '');
-
-  let h = 0;
-
-  for (let i = 0; i < seed.length; i++){
-    h = (h * 31 + seed.charCodeAt(i)) | 0;
-  }
-
-  const hue = Math.abs(h) % 360;
-  return `hsl(${hue} 35% 40%)`;
+  return avatarTone(seed).bg;
 }
 
 export function chip(text){
