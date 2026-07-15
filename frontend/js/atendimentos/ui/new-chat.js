@@ -964,6 +964,31 @@ import { state } from '../state/store.js';
     toast('Falha ao criar contato. Tente novamente.', false, 2600);
   }
 
+  const pickerState = {
+    cacheItems: [],
+    dbItems: [],
+    query: '',
+    offset: 0,
+    hasMore: true,
+    loading: false,
+    startedDb: false,
+    controller: null,
+    debounceTimer: null,
+    requestSeq: 0,
+    error: '',
+  };
+
+  function abortPickerRequest() {
+    try { pickerState.controller?.abort(); } catch {}
+    pickerState.controller = null;
+    pickerState.loading = false;
+
+    if (pickerState.debounceTimer) {
+      clearTimeout(pickerState.debounceTimer);
+      pickerState.debounceTimer = null;
+    }
+  }
+
   function buildUI() {
     if (document.getElementById('ncBackdrop')) return;
 
@@ -974,42 +999,31 @@ import { state } from '../state/store.js';
     dr.id = 'ncDrawer';
 
     dr.innerHTML = `
-      <div class="nc-drawer-header">
-        <div class="nc-drawer-title">Nova conversa</div>
-        <button id="ncClose" class="nc-close" type="button" aria-label="Fechar">✕</button>
-      </div>
-      <div id="ncBody">
-        <ul class="nc-list">
-          <li id="ncNewContact" class="nc-item" role="button" tabindex="0">
-            <div class="nc-icon-plus">+</div>
-            <div>
-              <div class="nc-item-title">Novo contato</div>
-              <div class="nc-item-sub">Criar contato manualmente</div>
-            </div>
-          </li>
-        </ul>
-        <div class="nc-sep"></div>
-        <div class="nc-tip">Dica: pesquise um nome/telefone na barra superior.</div>
-      </div>
+      <div id="ncBody" class="nc-body-shell"></div>
     `;
 
-    document.body.append(back, dr);
+    const asideHost = document.querySelector('.wpp-root > aside') || document.querySelector('aside');
+
+    if (asideHost) {
+      asideHost.append(back, dr);
+    } else {
+      document.body.append(back, dr);
+    }
 
     const close = () => {
+      abortPickerRequest();
       back.classList.remove('is-open');
       dr.classList.remove('is-open');
     };
 
     const open = () => {
+      buildRoot();
       back.classList.add('is-open');
       dr.classList.add('is-open');
+      setTimeout(() => $('#ncSearch')?.focus(), 40);
     };
 
-    $('#ncClose')?.addEventListener('click', close);
-
-    back.addEventListener('click', (e) => {
-      if (e.target === back) close();
-    });
+    back.addEventListener('click', () => close());
 
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') close();
@@ -1024,23 +1038,439 @@ import { state } from '../state/store.js';
         if (body) body.innerHTML = html;
       },
     };
+  }
+
+  function initialsFromName(name) {
+    const base = String(name || '').trim();
+
+    if (!base) return '??';
+
+    const parts = base.split(/\s+/).filter(Boolean).slice(0, 2);
+
+    return parts.map((p) => p[0]).join('').toUpperCase();
+  }
+
+  function escapeHtml(v) {
+    return String(v ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function normalizeSearch(v) {
+    return String(v || '')
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .trim();
+  }
+
+  function getContactPools() {
+    const pools = [];
+
+    try {
+      if (Array.isArray(window.todosContatosCache)) pools.push(window.todosContatosCache);
+    } catch {}
+
+    try {
+      if (Array.isArray(window.clientesCache)) pools.push(window.clientesCache);
+    } catch {}
+
+    try {
+      if (Array.isArray(state?.clientesCache)) pools.push(state.clientesCache);
+    } catch {}
+
+    return pools;
+  }
+
+  function normalizePickerItem(raw) {
+    const cliente = ensureClienteInstance(raw || {});
+    const id = Number(cliente?.id || cliente?.cliente_id || 0);
+    const telefone = onlyDigits(cliente?.telefone || cliente?.whatsapp || '');
+    const nome = resolveDisplayName(cliente);
+
+    if (!id && !telefone) return null;
+
+    return {
+      ...cliente,
+      id: id || cliente?.id,
+      cliente_id: id || cliente?.cliente_id,
+      nome_exibicao: nome,
+    };
+  }
+
+  function dedupePickerItems(items) {
+    const out = [];
+    const seen = new Set();
+
+    (Array.isArray(items) ? items : []).forEach((raw) => {
+      const cliente = normalizePickerItem(raw);
+
+      if (!cliente) return;
+
+      const id = Number(cliente?.id || cliente?.cliente_id || 0);
+      const telefone = onlyDigits(cliente?.telefone || cliente?.whatsapp || '');
+      const key = id ? `id:${id}` : `tel:${telefone}`;
+
+      if (!key || seen.has(key)) return;
+
+      seen.add(key);
+      out.push(cliente);
+    });
+
+    return out;
+  }
+
+  function collectLoadedContacts() {
+    const merged = [];
+
+    getContactPools().forEach((arr) => merged.push(...arr));
+
+    return dedupePickerItems(merged).sort((a, b) =>
+      resolveDisplayName(a).localeCompare(resolveDisplayName(b), 'pt-BR', { sensitivity: 'base' })
+    );
+  }
+
+  function combinedPickerContacts() {
+    return dedupePickerItems([
+      ...(pickerState.cacheItems || []),
+      ...(pickerState.dbItems || []),
+    ]).sort((a, b) =>
+      resolveDisplayName(a).localeCompare(resolveDisplayName(b), 'pt-BR', { sensitivity: 'base' })
+    );
+  }
+
+  function filterPickerContacts(items, searchTerm = '') {
+    const term = normalizeSearch(searchTerm);
+
+    if (!term) return items;
+
+    return items.filter((cliente) => {
+      const nome = normalizeSearch(resolveDisplayName(cliente));
+      const telefone = onlyDigits(cliente?.telefone || cliente?.whatsapp || '');
+      const telefoneFormatado = normalizeSearch(formatTelBR(telefone));
+
+      return nome.includes(term) || telefone.includes(term) || telefoneFormatado.includes(term);
+    });
+  }
+
+  function buildQuickActionsHtml() {
+    return `
+      <div class="nc-quick-list">
+        <button id="ncNewGroup" class="nc-quick-item" type="button">
+          <span class="nc-action-icon"><i class="fa fa-users"></i></span>
+          <span class="nc-quick-copy">
+            <span class="nc-quick-title">Novo grupo</span>
+            <span class="nc-quick-sub">Criar um grupo manualmente</span>
+          </span>
+        </button>
+
+        <button id="ncNewContact" class="nc-quick-item" type="button">
+          <span class="nc-action-icon"><i class="fa fa-user-plus"></i></span>
+          <span class="nc-quick-copy">
+            <span class="nc-quick-title">Novo contato</span>
+            <span class="nc-quick-sub">Criar contato manualmente</span>
+          </span>
+        </button>
+      </div>
+    `;
+  }
+
+  function renderPickerStatus() {
+    const host = document.getElementById('ncPickerStatus');
+
+    if (!host) return;
+
+    if (pickerState.loading) {
+      host.innerHTML = `
+        <div class="nc-loading-row">
+          <span class="nc-loading-spinner" aria-hidden="true"></span>
+          <span>Carregando mais contatos...</span>
+        </div>
+      `;
+      return;
+    }
+
+    if (pickerState.error) {
+      host.innerHTML = `<div class="nc-error-row">${escapeHtml(pickerState.error)}</div>`;
+      return;
+    }
+
+    if (pickerState.startedDb && !pickerState.hasMore) {
+      host.innerHTML = `<div class="nc-end-row">Todos os contatos foram carregados.</div>`;
+      return;
+    }
+
+    if (!pickerState.startedDb && !pickerState.query) {
+      host.innerHTML = `<div class="nc-end-row">Role até o final para carregar mais contatos do banco.</div>`;
+      return;
+    }
+
+    host.innerHTML = '';
+  }
+
+  function openPickerConversation(cliente) {
+    const safeCliente = normalizePickerItem(cliente);
+    const id = Number(safeCliente?.id || safeCliente?.cliente_id || 0);
+
+    if (!id) {
+      toast('Não foi possível abrir este contato.', false, 2600);
+      return;
+    }
+
+    try { forceSelectCliente(safeCliente); } catch {}
+
+    window.__NewChat?.close();
+
+    setTimeout(() => {
+      const opened = openById(id);
+
+      if (!opened) {
+        toast('Não foi possível abrir a conversa.', false, 2600);
+      }
+    }, 0);
+  }
+
+  function renderPickerContacts(searchTerm = '') {
+    const host = document.getElementById('ncContactResults');
+
+    if (!host) return;
+
+    const scrollHost = document.querySelector('#ncDrawer .nc-scroll-area');
+    const previousScrollTop = scrollHost?.scrollTop || 0;
+    const items = filterPickerContacts(combinedPickerContacts(), searchTerm);
+
+    if (!items.length) {
+      host.innerHTML = `
+        <div class="nc-empty-state">
+          <div class="nc-empty-title">Nenhum contato encontrado</div>
+          <div class="nc-empty-sub">Pesquise outro nome ou número.</div>
+        </div>
+      `;
+      renderPickerStatus();
+      return;
+    }
+
+    let html = '';
+    let currentLetter = '';
+
+    items.forEach((cliente) => {
+      const id = Number(cliente?.id || cliente?.cliente_id || 0);
+      const nome = resolveDisplayName(cliente);
+      const letra = normalizeSearch(nome).charAt(0).toUpperCase() || '#';
+      const telefone = onlyDigits(cliente?.telefone || cliente?.whatsapp || '');
+      const subtitulo = telefone ? formatTelBR(telefone) : 'Contato';
+      const avatar = String(cliente?.avatar_url || cliente?.foto || cliente?.picture || '').trim();
+
+      if (letra !== currentLetter) {
+        currentLetter = letra;
+        html += `<div class="nc-letter">${escapeHtml(currentLetter)}</div>`;
+      }
+
+      html += `
+        <button class="nc-contact-item" type="button" data-id="${escapeAttr(id)}">
+          <span class="nc-contact-avatar ${avatar ? 'has-image' : 'is-initials'}">
+            ${avatar
+              ? `<img src="${escapeAttr(avatar)}" alt="${escapeAttr(nome)}" loading="lazy">`
+              : `<span class="nc-contact-initials">${escapeHtml(initialsFromName(nome))}</span>`}
+          </span>
+          <span class="nc-contact-copy">
+            <span class="nc-contact-name">${escapeHtml(nome)}</span>
+            <span class="nc-contact-sub">${escapeHtml(subtitulo)}</span>
+          </span>
+        </button>
+      `;
+    });
+
+    host.innerHTML = html;
+
+    host.querySelectorAll('.nc-contact-item').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = Number(btn.dataset.id || 0);
+        const cliente = combinedPickerContacts().find((item) =>
+          Number(item?.id || item?.cliente_id || 0) === id
+        );
+
+        openPickerConversation(cliente || { id, cliente_id: id });
+      });
+    });
+
+    if (scrollHost) {
+      requestAnimationFrame(() => {
+        scrollHost.scrollTop = previousScrollTop;
+      });
+    }
+
+    renderPickerStatus();
+  }
+
+  function pickerApiUrl({ query = '', offset = 0, limit = 50 } = {}) {
+    const params = new URLSearchParams({
+      empresa_id: String(EMPRESA_ID),
+      limit: String(limit),
+      offset: String(offset),
+    });
+
+    const q = String(query || '').trim();
+
+    if (q) params.set('q', q);
+
+    const inst = getSelectedInstance();
+
+    if (/^\d+$/.test(inst)) params.set('instancia_id', inst);
+
+    return `/api/clientes?${params.toString()}`;
+  }
+
+  async function loadPickerPage({ reset = false, reason = 'scroll' } = {}) {
+    if (pickerState.loading) return;
+    if (!reset && !pickerState.hasMore) return;
+
+    if (reset) {
+      abortPickerRequest();
+      pickerState.dbItems = [];
+      pickerState.offset = 0;
+      pickerState.hasMore = true;
+      pickerState.startedDb = false;
+      pickerState.error = '';
+    }
+
+    const requestQuery = pickerState.query;
+    const requestOffset = pickerState.offset;
+    const requestSeq = ++pickerState.requestSeq;
+    const controller = new AbortController();
+
+    pickerState.controller = controller;
+    pickerState.loading = true;
+    pickerState.startedDb = true;
+    pickerState.error = '';
+    renderPickerStatus();
+
+    try {
+      const response = await fetch(
+        pickerApiUrl({ query: requestQuery, offset: requestOffset, limit: 50 }),
+        {
+          credentials: 'include',
+          signal: controller.signal,
+          zcTimeoutMs: 18000,
+        }
+      );
+
+      if (!response.ok) {
+        const error = new Error(`HTTP ${response.status}`);
+        error.status = response.status;
+        throw error;
+      }
+
+      const payload = await response.json().catch(() => ({}));
+
+      if (requestSeq !== pickerState.requestSeq) return;
+      if (requestQuery !== pickerState.query) return;
+
+      const received = Array.isArray(payload?.items) ? payload.items : [];
+
+      pickerState.dbItems = dedupePickerItems([
+        ...pickerState.dbItems,
+        ...received,
+      ]);
+      pickerState.offset = Number(payload?.next_offset ?? (requestOffset + received.length));
+      pickerState.hasMore = Boolean(payload?.has_more) && received.length > 0;
+
+      renderPickerContacts(pickerState.query);
+    } catch (err) {
+      if (err?.name === 'AbortError') return;
+
+      console.error('[new-chat] falha ao carregar contatos do banco', err, reason);
+
+      pickerState.error = Number(err?.status) === 403
+        ? 'Você não tem permissão para consultar os contatos.'
+        : 'Não foi possível carregar mais contatos. Role novamente para tentar.';
+    } finally {
+      if (requestSeq === pickerState.requestSeq) {
+        pickerState.loading = false;
+        pickerState.controller = null;
+        renderPickerStatus();
+      }
+    }
+  }
+
+  function schedulePickerSearch(value) {
+    const query = String(value || '').trim();
+
+    pickerState.query = query;
+    pickerState.dbItems = [];
+    pickerState.offset = 0;
+    pickerState.hasMore = true;
+    pickerState.startedDb = false;
+    pickerState.error = '';
+
+    abortPickerRequest();
+    renderPickerContacts(query);
+
+    if (!query) return;
+
+    pickerState.debounceTimer = setTimeout(() => {
+      pickerState.debounceTimer = null;
+      loadPickerPage({ reset: true, reason: 'search' });
+    }, 320);
+  }
+
+  function wireRootEvents() {
+    pickerState.cacheItems = collectLoadedContacts();
+    pickerState.dbItems = [];
+    pickerState.query = '';
+    pickerState.offset = 0;
+    pickerState.hasMore = true;
+    pickerState.loading = false;
+    pickerState.startedDb = false;
+    pickerState.error = '';
+
+    $('#ncCloseTop')?.addEventListener('click', () => window.__NewChat?.close());
 
     $('#ncNewContact')?.addEventListener('click', renderNewContactForm);
 
-    $('#ncNewContact')?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        renderNewContactForm();
-      }
+    $('#ncNewGroup')?.addEventListener('click', () => {
+      toast('Criação de grupo pelo painel entra em breve.', true, 2600);
     });
+
+    $('#ncSearch')?.addEventListener('input', (e) => {
+      schedulePickerSearch(e.target?.value || '');
+    });
+
+    const scrollHost = document.querySelector('#ncDrawer .nc-scroll-area');
+
+    scrollHost?.addEventListener('scroll', () => {
+      const distanceFromBottom = scrollHost.scrollHeight - scrollHost.scrollTop - scrollHost.clientHeight;
+
+      if (distanceFromBottom <= 140) {
+        loadPickerPage({ reset: false, reason: 'scroll' });
+      }
+    }, { passive: true });
+
+    scrollHost?.addEventListener('wheel', (event) => {
+      if (Number(event?.deltaY || 0) <= 0) return;
+
+      const distanceFromBottom = scrollHost.scrollHeight - scrollHost.scrollTop - scrollHost.clientHeight;
+
+      if (distanceFromBottom <= 140) {
+        loadPickerPage({ reset: false, reason: 'wheel-bottom' });
+      }
+    }, { passive: true });
+
+    renderPickerContacts('');
   }
 
   function renderNewContactForm() {
     const body = `
-      <div class="nc-drawer-header">
+      <div class="nc-wpp-head nc-wpp-head--form">
+        <button id="ncBack" class="nc-nav-btn" type="button" aria-label="Voltar">
+          <i class="fa fa-arrow-left"></i>
+        </button>
         <div class="nc-drawer-title">Novo contato</div>
-        <button id="ncBack" class="nc-back" type="button" aria-label="Voltar">←</button>
       </div>
+
       <form id="ncForm" class="nc-form">
         <input class="nc-input" id="ncName" placeholder="Nome completo" autocomplete="off">
         <input class="nc-input" id="ncPhone" placeholder="Telefone (DDI+DDD+Número, só dígitos)">
@@ -1064,29 +1494,29 @@ import { state } from '../state/store.js';
     if (!window.__NewChat) return;
 
     const html = `
-      <ul class="nc-list">
-        <li id="ncNewContact" class="nc-item" role="button" tabindex="0">
-          <div class="nc-icon-plus">+</div>
-          <div>
-            <div class="nc-item-title">Novo contato</div>
-            <div class="nc-item-sub">Criar contato manualmente</div>
-          </div>
-        </li>
-      </ul>
-      <div class="nc-sep"></div>
-      <div class="nc-tip">Dica: pesquise um nome/telefone na barra superior.</div>
+      <div class="nc-wpp-head">
+        <button id="ncCloseTop" class="nc-nav-btn" type="button" aria-label="Voltar">
+          <i class="fa fa-arrow-left"></i>
+        </button>
+        <div class="nc-drawer-title">Nova conversa</div>
+      </div>
+
+      <div class="nc-search-wrap">
+        <div class="nc-search-row">
+          <i class="fa fa-search"></i>
+          <input id="ncSearch" class="nc-search-input" type="text" placeholder="Pesquisar nome ou número" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="nc-scroll-area">
+        ${buildQuickActionsHtml()}
+        <div id="ncContactResults" class="nc-contact-results"></div>
+        <div id="ncPickerStatus" class="nc-picker-status" aria-live="polite"></div>
+      </div>
     `;
 
     window.__NewChat.setBody(html);
-
-    $('#ncNewContact')?.addEventListener('click', renderNewContactForm);
-
-    $('#ncNewContact')?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        renderNewContactForm();
-      }
-    });
+    wireRootEvents();
   }
 
   async function onSaveContact(ev) {

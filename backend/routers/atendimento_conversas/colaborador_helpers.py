@@ -11,6 +11,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from backend import models
+from backend.services.chatbot_claim_policy import department_acl_enabled
 
 from .utils import (
     _table_exists,
@@ -871,7 +872,10 @@ def _departamentos_permitidos_para_colaborador(
 
 
 def _assert_departamento_acl_for_row(
+    db: Session,
     *,
+    empresa_id: int,
+    instancia_id: Optional[int],
     allowed_dep_ids: Optional[List[int]],
     departamento_id: Optional[int],
 ) -> None:
@@ -886,6 +890,13 @@ def _assert_departamento_acl_for_row(
     Se tiver departamento, precisa estar permitido.
     """
     if allowed_dep_ids is None:
+        return
+
+    if not department_acl_enabled(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=instancia_id,
+    ):
         return
 
     if departamento_id is None:
@@ -948,6 +959,7 @@ def _departamento_permitido_para_colaborador(
     *,
     colaborador_id: int,
     empresa_id: int,
+    instancia_id: Optional[int],
     departamento_id: Optional[int],
 ) -> bool:
     """
@@ -957,6 +969,13 @@ def _departamento_permitido_para_colaborador(
     - departamento pai libera filhos.
     - fallback por setor_id antigo.
     """
+    if not department_acl_enabled(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=instancia_id,
+    ):
+        return True
+
     if departamento_id is None:
         return True
 

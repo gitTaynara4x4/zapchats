@@ -17,6 +17,7 @@ from backend.security.atendimento_acl import (
     resolve_acl_context,
     assert_instancia_allowed,
 )
+from backend.services.chatbot_claim_policy import department_acl_instancia_ids
 
 from .utils import (
     _resolve_instancia_id,
@@ -285,6 +286,17 @@ def listar_conversas(
             instancia_id=resolved_inst_id,
         )
 
+    department_acl_candidates = (
+        [int(resolved_inst_id)]
+        if resolved_inst_id is not None
+        else [int(x) for x in (allowed_inst_ids or []) if x is not None]
+    )
+    active_department_inst_ids = department_acl_instancia_ids(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_ids=department_acl_candidates,
+    )
+
     pinned_ids = _get_pinned_ids_usuario(
         db,
         empresa_id=int(empresa_id),
@@ -315,6 +327,7 @@ def listar_conversas(
         resolved_inst_id=resolved_inst_id,
         allowed_inst_ids=allowed_inst_ids,
         allowed_dep_ids=allowed_dep_ids,
+        department_acl_inst_ids=active_department_inst_ids,
         current_colab_id=current_colab_id,
         allow_unassigned_department=_allow_entrada_geral_colaborador(identity),
     )
@@ -381,20 +394,28 @@ def listar_conversas(
     # na lista quando o colaborador tinha acesso à instância, mesmo que o login
     # estivesse limitado a um departamento específico, exemplo: somente Cobrança.
     #
-    # Regra segura:
-    # - admin/gestor (allowed_dep_ids=None) continua vendo grupos;
-    # - colaborador restrito por departamento NÃO vê grupos por padrão;
-    # - se quiser liberar grupos para um colaborador restrito, dê uma permissão
-    #   explícita de grupos.
+    # Regra:
+    # - admin/gestor continua vendo grupos;
+    # - permissão explícita continua liberando grupos;
+    # - colaborador comum vê grupos quando o menu por departamentos está
+    #   desligado, pois nesse caso a restrição é somente pela instância.
+    has_group_permission = _identity_has_any_perm(
+        identity,
+        "atendimento.grupos",
+        "atendimento.grupos.ver",
+        "atendimento.ver_grupos",
+        "atendimento.grupos.gerenciar",
+    )
+    active_department_set = set(int(x) for x in active_department_inst_ids)
+    inactive_department_inst_ids = [
+        int(x)
+        for x in department_acl_candidates
+        if int(x) not in active_department_set
+    ]
     can_list_groups = (
         allowed_dep_ids is None
-        or _identity_has_any_perm(
-            identity,
-            "atendimento.grupos",
-            "atendimento.grupos.ver",
-            "atendimento.ver_grupos",
-            "atendimento.grupos.gerenciar",
-        )
+        or has_group_permission
+        or bool(inactive_department_inst_ids)
     )
 
     if cursor_last_msg_id is None and can_list_groups:
@@ -404,6 +425,22 @@ def listar_conversas(
             resolved_inst_id=resolved_inst_id,
             allowed_inst_ids=allowed_inst_ids,
         )
+
+        # Quando a tela reúne várias instâncias, não deixa grupos de uma
+        # instância com menu departamental ativo escaparem pelo bloco de uma
+        # instância com menu desligado.
+        if (
+            allowed_dep_ids is not None
+            and not has_group_permission
+            and active_department_inst_ids
+            and resolved_inst_id is None
+        ):
+            visible_group_inst_ids = list(inactive_department_inst_ids)
+
+            if visible_group_inst_ids:
+                q_grupos = q_grupos.filter(MG.instancia_id.in_(visible_group_inst_ids))
+            else:
+                q_grupos = q_grupos.filter(text("1 = 0"))
 
         rows_grupos = (
             q_grupos.order_by(func.to_timestamp(MG.timestamp).desc(), MG.id.desc())

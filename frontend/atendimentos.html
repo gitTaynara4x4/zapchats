@@ -334,7 +334,7 @@
     src="https://unpkg.com/@lottiefiles/dotlottie-wc@0.6.2/dist/dotlottie-wc.js"
     type="module"></script>
 
-  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260715-lista-retry-fix-1">
+  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260715-topbar-filter-1b8760-1">
 
   <link
     rel="stylesheet"
@@ -732,7 +732,7 @@
           <div class="zc-topbar-head">
             <div class="zc-topbar-left">
               <div class="zc-brand-wrap">
-                <span class="zc-brand-title">ZapsChat</span>
+                <span class="zc-brand-title">Conversas</span>
               </div>
 
               <div class="zc-inst-top">
@@ -770,14 +770,8 @@
             </div>
           </div>
 
-          <div class="zc-inst-row zc-inst-row--bottom">
-            <div class="zc-inst-meta">
-              <span class="dot"></span>
-              <span class="zc-inst-title">WhatsApps <span id="zc-inst-count">(0)</span></span>
-            </div>
-
-            <div id="inst-switch"></div>
-          </div>
+          <!-- Fonte invisível das instâncias. O dropdown acima espelha estes botões. -->
+          <div id="inst-switch" aria-hidden="true"></div>
         </div>
 
         <div class="wpp-header-search-row">
@@ -791,11 +785,11 @@
 
         <div id="search-results" class="search-results hidden"></div>
 
-        <div class="wpp-header-filtros-row">
-          <button class="wpp-header-filtro ativo">Tudo</button>
-          <button class="wpp-header-filtro">Não lidas</button>
-          <button class="wpp-header-filtro">Novas</button>
-          <button class="wpp-header-filtro">Grupos</button>
+        <div class="wpp-header-filtros-row" id="wpp-header-filtros" aria-label="Filtros de conversas">
+          <button class="wpp-header-filtro ativo" type="button">Tudo</button>
+          <button class="wpp-header-filtro" type="button">Novas</button>
+          <button class="wpp-header-filtro" type="button">Não lidas</button>
+          <button class="wpp-header-filtro" type="button">Grupos</button>
         </div>
 
         <select id="filtro-departamento" style="display:none"></select>

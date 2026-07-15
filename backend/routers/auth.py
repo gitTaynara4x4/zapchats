@@ -3,6 +3,7 @@ import os
 import time
 import smtplib
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from email.utils import formataddr
 import base64
 import re
@@ -686,6 +687,7 @@ class ForgotPasswordIn(BaseModel):
 class ResetPasswordIn(BaseModel):
     token: str
     nova_senha: str
+    email: EmailStr | None = None
 
 
 class LoginIn(BaseModel):
@@ -764,6 +766,7 @@ def _smtp_send(
     remetente: Optional[str] = None,
     senha: Optional[str] = None,
     nome_remetente: Optional[str] = None,
+    corpo_html: Optional[str] = None,
 ) -> None:
     destino = str(email_destino or "").strip()
     remetente_final = str(
@@ -789,7 +792,15 @@ def _smtp_send(
             code="email_not_configured",
         )
 
-    msg = MIMEText(corpo, "plain", "utf-8")
+    if corpo_html:
+        # multipart/alternative mantém uma versão simples para clientes antigos
+        # e entrega o layout HTML nos clientes modernos, como Gmail e Outlook.
+        msg = MIMEMultipart("alternative")
+        msg.attach(MIMEText(corpo, "plain", "utf-8"))
+        msg.attach(MIMEText(corpo_html, "html", "utf-8"))
+    else:
+        msg = MIMEText(corpo, "plain", "utf-8")
+
     msg["Subject"] = assunto
     msg["From"] = formataddr((nome_remetente_final, remetente_final))
     msg["To"] = destino
@@ -1891,15 +1902,23 @@ def reset_password(
             headers={"Retry-After": str(wait)},
         )
 
+    erro_invalido = "Link inválido ou expirado" if dados.email else "Código inválido ou expirado"
+
     usuario = db.query(models.Usuario).filter_by(reset_token=token_in).first()
     if not usuario:
         print("[AUTH] reset-password com token inválido")
-        raise HTTPException(status_code=400, detail="Token inválido ou expirado")
+        raise HTTPException(status_code=400, detail=erro_invalido)
+
+    # Nos convites de colaborador, o link leva token e e-mail. Validar os dois
+    # impede que um endereço alterado manualmente seja aceito por engano.
+    if dados.email and norm_email(str(dados.email)) != norm_email(str(usuario.email or "")):
+        print("[AUTH] reset-password com e-mail diferente do token")
+        raise HTTPException(status_code=400, detail=erro_invalido)
 
     expira = getattr(usuario, "reset_token_expira", None)
     if not expira or expira.replace(tzinfo=None) < datetime.utcnow():
         print("[AUTH] reset-password com token expirado para usuário ID=", getattr(usuario, "id", None))
-        raise HTTPException(status_code=400, detail="Token inválido ou expirado")
+        raise HTTPException(status_code=400, detail=erro_invalido)
 
     nova_hash = hash_pwd(dados.nova_senha)
 

@@ -83,6 +83,107 @@ def department_chatbot_active(
     )
 
 
+def department_acl_enabled(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: Optional[int],
+) -> bool:
+    """
+    Diz se a ACL por departamento deve ser aplicada naquela instância.
+
+    Diferença importante para ``department_chatbot_active``:
+    - para envio de mensagem, falhar deve significar NÃO enviar;
+    - para controle de acesso, falhar deve significar manter a restrição.
+
+    Assim, um erro temporário ao consultar a configuração nunca libera
+    conversas de outros departamentos por engano.
+    """
+    instancia_id_int = _to_int(instancia_id)
+    if instancia_id_int is None:
+        return False
+
+    try:
+        row = (
+            db.query(models.ChatbotConfig)
+            .filter(
+                models.ChatbotConfig.empresa_id == int(empresa_id),
+                models.ChatbotConfig.instancia_id == int(instancia_id_int),
+            )
+            .first()
+        )
+    except Exception:
+        return True
+
+    if row is None or not bool(getattr(row, "ativo", False)):
+        return False
+
+    feature = _department_feature(getattr(row, "config", None))
+    welcome = feature.get("welcome") or {}
+
+    return bool(
+        feature.get("enabled", False)
+        and isinstance(welcome, dict)
+        and welcome.get("enabled", False)
+    )
+
+
+def department_acl_instancia_ids(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_ids: Optional[List[int]],
+) -> List[int]:
+    """
+    Retorna, entre as instâncias informadas, quais estão com o menu por
+    departamentos realmente ligado.
+
+    É usado na listagem/busca para aplicar o filtro por departamento somente
+    nas instâncias em que o botão geral do menu está ativo.
+
+    Em erro de consulta, retorna todas as candidatas (fail closed).
+    """
+    candidates: List[int] = []
+    for raw in instancia_ids or []:
+        iid = _to_int(raw)
+        if iid is not None and int(iid) not in candidates:
+            candidates.append(int(iid))
+
+    if not candidates:
+        return []
+
+    try:
+        rows = (
+            db.query(models.ChatbotConfig)
+            .filter(
+                models.ChatbotConfig.empresa_id == int(empresa_id),
+                models.ChatbotConfig.instancia_id.in_(candidates),
+            )
+            .all()
+        )
+    except Exception:
+        return list(candidates)
+
+    active: List[int] = []
+
+    for row in rows:
+        iid = _to_int(getattr(row, "instancia_id", None))
+        if iid is None or not bool(getattr(row, "ativo", False)):
+            continue
+
+        feature = _department_feature(getattr(row, "config", None))
+        welcome = feature.get("welcome") or {}
+
+        if bool(
+            feature.get("enabled", False)
+            and isinstance(welcome, dict)
+            and welcome.get("enabled", False)
+        ):
+            active.append(int(iid))
+
+    return active
+
+
 def customer_has_department_triage_marker(
     cliente: Any,
     departamento_id: Optional[int],
@@ -308,6 +409,8 @@ def release_unassigned_department_claims(
 
 __all__ = [
     "customer_has_department_triage_marker",
+    "department_acl_enabled",
+    "department_acl_instancia_ids",
     "department_chatbot_active",
     "department_claim_required",
     "release_unassigned_department_claims",

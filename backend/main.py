@@ -1404,12 +1404,15 @@ for _name in PAGES:
 
 
 @app.get("/{page_name}.html", response_class=HTMLResponse, include_in_schema=False)
-async def legacy_html(page_name: str):
+async def legacy_html(page_name: str, request: Request):
     if page_name.lower().startswith("api"):
         raise HTTPException(status_code=404)
 
     if page_name in PAGES and _page_file(page_name).is_file():
-        return RedirectResponse(url=f"/{page_name}", status_code=307)
+        target = f"/{page_name}"
+        if request.url.query:
+            target = f"{target}?{request.url.query}"
+        return RedirectResponse(url=target, status_code=307)
 
     raise HTTPException(status_code=404)
 

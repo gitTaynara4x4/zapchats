@@ -32,6 +32,7 @@ from backend.security.atendimento_acl import (
     assert_instancia_allowed,
     assert_cliente_access,
 )
+from backend.services.chatbot_claim_policy import department_acl_instancia_ids
 
 from backend.routers.atendimento_conversas.query_helpers import (
     _query_clientes_ultima_por_conversa,
@@ -74,9 +75,9 @@ def _cliente_acl_ok(
     empresa_id: int,
     cliente_id: int,
     instancia_id: int | None = None,
-    cache: dict[int, bool] | None = None,
+    cache: dict[tuple[int, int | None], bool] | None = None,
 ) -> bool:
-    key = int(cliente_id)
+    key = (int(cliente_id), _to_int(instancia_id))
     if cache is not None and key in cache:
         return bool(cache[key])
 
@@ -2828,6 +2829,17 @@ def atendimento_search(
     if allowed_instancias is not None and not allowed_instancias:
         return {"contatos": [], "mensagens": []}
 
+    department_acl_candidates = (
+        [int(resolved_inst_id)]
+        if resolved_inst_id is not None
+        else [int(x) for x in (allowed_instancias or []) if x is not None]
+    )
+    active_department_inst_ids = department_acl_instancia_ids(
+        db,
+        empresa_id=int(empresa_id_eff),
+        instancia_ids=department_acl_candidates,
+    )
+
     M = models.Mensagem
     C = models.Cliente
 
@@ -2838,7 +2850,7 @@ def atendimento_search(
     mensagens: List[Dict[str, Any]] = []
     seen_contact_keys: set[str] = set()
     seen_msg_ids: set[str] = set()
-    acl_cache: dict[int, bool] = {}
+    acl_cache: dict[tuple[int, int | None], bool] = {}
 
     def _norm_payload_key(payload: Dict[str, Any]) -> str:
         return str(
@@ -2974,6 +2986,7 @@ def atendimento_search(
             resolved_inst_id=resolved_inst_id,
             allowed_inst_ids=allowed_instancias,
             allowed_dep_ids=allowed_departamentos,
+            department_acl_inst_ids=active_department_inst_ids,
             current_colab_id=current_colab_id,
             allow_unassigned_department=False,
         ).filter(or_(*visible_filters))

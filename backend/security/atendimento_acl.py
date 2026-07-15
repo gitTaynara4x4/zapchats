@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend import models
+from backend.services.chatbot_claim_policy import department_acl_enabled
 
 
 # =========================================================
@@ -617,6 +618,32 @@ def resolve_acl_context(
     }
 
 
+def _allowed_departamentos_for_instancia(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: Optional[int],
+    allowed_departamentos: Optional[List[int]],
+) -> Optional[List[int]]:
+    """
+    O departamento só restringe conversas quando o menu por departamentos
+    está ligado naquela instância.
+
+    Com o botão desligado, a ACL efetiva fica somente por WhatsApp/instância.
+    """
+    if allowed_departamentos is None:
+        return None
+
+    if not department_acl_enabled(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=instancia_id,
+    ):
+        return None
+
+    return allowed_departamentos
+
+
 def build_allowed_filters(
     *,
     allowed_instancias: Optional[List[int]],
@@ -832,9 +859,15 @@ def assert_atendimento_access(
             instancia_id=getattr(atendimento, "instancia_id", None),
         )
     else:
+        allowed_departamentos = _allowed_departamentos_for_instancia(
+            db,
+            empresa_id=int(ctx["empresa_id"]),
+            instancia_id=getattr(atendimento, "instancia_id", None),
+            allowed_departamentos=ctx["allowed_departamentos"],
+        )
         assert_atendimento_acl(
             allowed_instancias=ctx["allowed_instancias"],
-            allowed_departamentos=ctx["allowed_departamentos"],
+            allowed_departamentos=allowed_departamentos,
             instancia_id=getattr(atendimento, "instancia_id", None),
             departamento_id=getattr(atendimento, "departamento_id", None),
             allow_unassigned_department=allow_unassigned_department,
@@ -874,9 +907,15 @@ def assert_cliente_access(
                 instancia_id=getattr(atendimento, "instancia_id", None),
             )
         else:
+            allowed_departamentos = _allowed_departamentos_for_instancia(
+                db,
+                empresa_id=int(ctx["empresa_id"]),
+                instancia_id=getattr(atendimento, "instancia_id", None),
+                allowed_departamentos=ctx["allowed_departamentos"],
+            )
             assert_atendimento_acl(
                 allowed_instancias=ctx["allowed_instancias"],
-                allowed_departamentos=ctx["allowed_departamentos"],
+                allowed_departamentos=allowed_departamentos,
                 instancia_id=getattr(atendimento, "instancia_id", None),
                 departamento_id=getattr(atendimento, "departamento_id", None),
                 allow_unassigned_department=allow_unassigned_department,
@@ -889,9 +928,16 @@ def assert_cliente_access(
 
     fallback_departamento_id = getattr(cliente, "departamento_id", None)
 
+    allowed_departamentos = _allowed_departamentos_for_instancia(
+        db,
+        empresa_id=int(ctx["empresa_id"]),
+        instancia_id=fallback_instancia_id,
+        allowed_departamentos=ctx["allowed_departamentos"],
+    )
+
     assert_atendimento_acl(
         allowed_instancias=ctx["allowed_instancias"],
-        allowed_departamentos=ctx["allowed_departamentos"],
+        allowed_departamentos=allowed_departamentos,
         instancia_id=fallback_instancia_id,
         departamento_id=fallback_departamento_id,
         allow_unassigned_department=allow_unassigned_department,

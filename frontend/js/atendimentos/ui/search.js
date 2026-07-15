@@ -827,7 +827,7 @@
             q,
             contatos: local.contatos,
             mensagens: local.mensagens,
-            footerText: timedOut ? 'Mostrando resultados carregados na tela. O banco demorou e foi cancelado.' : 'Buscando histórico completo…',
+            footerText: timedOut ? 'Mostrando os resultados disponíveis enquanto concluímos a pesquisa.' : 'Buscando histórico completo…',
           });
         } else {
           srShowLoading('Buscando histórico completo…');
@@ -853,7 +853,7 @@
             q,
             contatos: merged.contatos,
             mensagens: merged.mensagens,
-            footerText: timedOut ? 'Histórico completo demorou. Rode o SQL de índice para ficar instantâneo.' : '',
+            footerText: timedOut ? 'Mostrando os resultados encontrados. A pesquisa completa demorou mais que o esperado.' : '',
           });
         } else {
           srRender('<div class="sr-empty">Nenhum resultado</div>');

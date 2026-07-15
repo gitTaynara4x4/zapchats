@@ -1480,3 +1480,58 @@ button#btnKebabHeader{
   visibility:visible !important;
   opacity:1 !important;
 }
+
+/* =========================
+   AJUSTE DO TOPO (LIGHT) — INTER + #111B21
+   ========================= */
+
+html[data-theme="light"] .wpp-header-externo,
+html:not(.dark)[data-theme="light"] .wpp-header-externo,
+html[data-theme="light"] .wpp-header-search,
+html:not(.dark)[data-theme="light"] .wpp-header-search,
+html[data-theme="light"] .wpp-header-search::placeholder,
+html:not(.dark)[data-theme="light"] .wpp-header-search::placeholder,
+html[data-theme="light"] .wpp-header-filtro,
+html:not(.dark)[data-theme="light"] .wpp-header-filtro,
+html[data-theme="light"] .zc-brand-title,
+html:not(.dark)[data-theme="light"] .zc-brand-title,
+html[data-theme="light"] .zc-inst-trigger,
+html:not(.dark)[data-theme="light"] .zc-inst-trigger,
+html[data-theme="light"] .zc-inst-trigger-text,
+html:not(.dark)[data-theme="light"] .zc-inst-trigger-text{
+  font-family:"Inter","Segoe UI","Helvetica Neue",Arial,sans-serif !important;
+  -webkit-font-smoothing:antialiased !important;
+  text-rendering:optimizeLegibility !important;
+}
+
+html[data-theme="light"] .wpp-header-filtro:hover,
+html:not(.dark)[data-theme="light"] .wpp-header-filtro:hover,
+html[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro:hover,
+html:not(.dark)[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro:hover{
+  background:#eef1f3;
+  color:#111B21;
+  border-color:#d9dee2;
+}
+
+html[data-theme="light"] .wpp-header-filtro.ativo,
+html:not(.dark)[data-theme="light"] .wpp-header-filtro.ativo,
+html[data-theme="light"] .wpp-header-filtro.active,
+html:not(.dark)[data-theme="light"] .wpp-header-filtro.active,
+html[data-theme="light"] .wpp-header-filtro[aria-current="true"],
+html:not(.dark)[data-theme="light"] .wpp-header-filtro[aria-current="true"],
+html[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro.ativo,
+html:not(.dark)[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro.ativo,
+html[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro.active,
+html:not(.dark)[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro.active,
+html[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro[aria-current="true"],
+html:not(.dark)[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro[aria-current="true"]{
+  background:#111B21;
+  color:#ffffff;
+  border-color:#111B21;
+  font-weight:600;
+}
+
+html[data-theme="light"] .wpp-header-filtro:focus-visible,
+html:not(.dark)[data-theme="light"] .wpp-header-filtro:focus-visible{
+  box-shadow:0 0 0 2px rgba(17,27,33,.14);
+}

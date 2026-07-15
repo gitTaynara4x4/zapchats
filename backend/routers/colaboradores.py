@@ -6,6 +6,7 @@ import os
 import re
 import json
 import secrets
+import html
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
@@ -92,8 +93,14 @@ def _norm_modo_acesso(modo: Optional[str], *, senha: Optional[str] = None) -> st
 
 
 def _new_reset_token(db: Session) -> str:
+    """Gera um token forte para links de convite de colaboradores.
+
+    A recuperação normal de senha continua usando o código curto de 5 dígitos.
+    Convites enviados por URL precisam de um token longo e imprevisível, pois o
+    usuário não vai digitá-lo manualmente.
+    """
     for _ in range(10):
-        token = gerar_codigo_reset_5d()
+        token = secrets.token_urlsafe(32)
         exists = db.query(models.Usuario).filter_by(reset_token=token).first()
         if not exists:
             return token
@@ -147,47 +154,170 @@ def _enviar_email_acesso_colaborador(
     modo: str = "convite",
     request: Optional[Request] = None,
 ) -> None:
-    empresa_txt = f" da {nome_empresa}" if nome_empresa else ""
     link = _public_url(
-        f"/esqueci_senha.html?email={quote(email_destino)}&convite=1",
+        "/esqueci_senha"
+        f"?convite=1&email={quote(email_destino, safe='')}"
+        f"&token={quote(token, safe='')}",
         request=request,
     )
 
+    nome_colaborador_limpo = str(nome_colaborador or "Colaborador").strip() or "Colaborador"
+    nome_empresa_limpo = str(nome_empresa or "ZapsChat").strip() or "ZapsChat"
+
     if modo == "manual":
-        assunto = f"[{nome_empresa or 'ZapsChat'}] Troque sua senha inicial"
-        intro = (
-            "Seu acesso foi criado com uma senha temporária. "
-            "Antes de usar a plataforma, crie uma nova senha pessoal."
+        assunto = f"[{nome_empresa_limpo}] Crie sua nova senha"
+        titulo = "Crie sua nova senha"
+        descricao = (
+            f"Seu acesso à empresa {nome_empresa_limpo} foi criado com uma senha temporária. "
+            "Defina agora uma senha pessoal para continuar."
         )
+        botao = "Criar nova senha"
     elif modo == "redefinicao":
-        assunto = f"[{nome_empresa or 'ZapsChat'}] Redefina sua senha"
-        intro = (
-            f"Foi solicitada uma redefinição da sua senha de acesso{empresa_txt}. "
-            "Use o código abaixo para criar uma nova senha pessoal."
+        assunto = f"[{nome_empresa_limpo}] Redefina sua senha"
+        titulo = "Redefina sua senha"
+        descricao = (
+            f"Recebemos uma solicitação para redefinir sua senha de acesso à empresa "
+            f"{nome_empresa_limpo}."
         )
+        botao = "Redefinir minha senha"
     else:
-        assunto = f"[{nome_empresa or 'ZapsChat'}] Convite para acessar a plataforma"
-        intro = (
-            f"Você foi convidado para acessar a plataforma{empresa_txt}. "
-            "Crie sua senha pessoal para começar."
+        assunto = f"[{nome_empresa_limpo}] Convite para acessar o ZapsChat"
+        titulo = "Você foi convidado para o ZapsChat"
+        descricao = (
+            f"Você recebeu um convite de {nome_empresa_limpo} para acessar a plataforma "
+            "ZapsChat. Crie sua senha para concluir o cadastro e começar a utilizar o sistema."
         )
+        botao = "Criar minha senha"
 
     corpo = f"""
-Olá {nome_colaborador or ''},
+Olá, {nome_colaborador_limpo}!
 
-{intro}
+{descricao}
 
-Código de confirmação:
-
-    {token}
-
-Abra este link e informe o código acima:
+Acesse o link abaixo para criar sua senha:
 {link}
 
-Por segurança, este código vence em {RESET_CODE_TTL_MIN} minutos.
+Este link é pessoal e expira em {RESET_CODE_TTL_MIN} minutos.
+Se você não esperava esta mensagem, pode ignorá-la.
 
 Equipe ZapsChat
-"""
+""".strip()
+
+    nome_html = html.escape(nome_colaborador_limpo)
+    empresa_html = html.escape(nome_empresa_limpo)
+    titulo_html = html.escape(titulo)
+    descricao_html = html.escape(descricao)
+    botao_html = html.escape(botao)
+    link_html = html.escape(link, quote=True)
+
+    corpo_html = f"""<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{titulo_html}</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f7f6;font-family:Inter,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#17212b;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+    Convite de {empresa_html} para criar sua senha no ZapsChat.
+  </div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f7f6;">
+    <tr>
+      <td align="center" style="padding:32px 14px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:680px;background:#ffffff;border:1px solid #e2e8e6;border-radius:18px;overflow:hidden;box-shadow:0 8px 28px rgba(15,40,30,.06);">
+          <tr>
+            <td align="center" style="padding:34px 28px 8px;">
+              <div style="font-size:26px;line-height:32px;font-weight:800;letter-spacing:-1px;color:#111827;">
+                <span style="color:#19c875;">Zap</span>Chats
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:18px 28px 0;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="center" width="88" height="88" style="width:88px;height:88px;border-radius:44px;background:#eafbf3;font-size:40px;line-height:88px;">✉️</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:24px 34px 0;">
+              <div style="font-size:28px;line-height:36px;font-weight:800;color:#142033;">{titulo_html}</div>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:14px 34px 0;">
+              <div style="font-size:18px;line-height:26px;font-weight:700;color:#243244;">
+                Olá, <span style="color:#0da968;">{nome_html}!</span>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:16px 44px 0;">
+              <div style="font-size:16px;line-height:26px;color:#617184;">{descricao_html}</div>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:28px 34px 0;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="center" bgcolor="#0aaa68" style="border-radius:11px;">
+                    <a href="{link_html}" target="_blank" style="display:inline-block;min-width:280px;padding:17px 28px;font-size:17px;line-height:22px;font-weight:800;color:#ffffff;text-decoration:none;border-radius:11px;">🔒&nbsp;&nbsp;{botao_html}</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:22px 34px 0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;background:#f1fcf7;border:1px solid #c9f0dd;border-radius:11px;">
+                <tr>
+                  <td align="center" style="padding:13px 16px;font-size:14px;line-height:21px;color:#526173;">
+                    ⏱️ Este link é pessoal e expira em <strong style="color:#0b9c61;">{RESET_CODE_TTL_MIN} minutos</strong>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:30px 40px 0;"><div style="height:1px;background:#e8eeec;"></div></td>
+          </tr>
+          <tr>
+            <td style="padding:26px 42px 0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td width="52" valign="top" style="font-size:29px;line-height:38px;">🛡️</td>
+                  <td valign="top">
+                    <div style="font-size:15px;line-height:22px;font-weight:800;color:#213044;">Segurança em primeiro lugar</div>
+                    <div style="padding-top:5px;font-size:14px;line-height:22px;color:#687789;">
+                      Se você não esperava esta mensagem, pode ignorá-la. Sua conta somente será ativada depois que você definir sua senha.
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:32px 28px 34px;">
+              <div style="font-size:14px;line-height:22px;color:#84919f;">Obrigado por confiar no ZapsChat.</div>
+              <div style="padding-top:4px;font-size:15px;line-height:22px;font-weight:800;color:#0da968;">Equipe ZapsChat</div>
+            </td>
+          </tr>
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:680px;">
+          <tr>
+            <td align="center" style="padding:16px 18px 0;font-size:11px;line-height:17px;color:#93a09d;">
+              Se o botão não funcionar, copie e cole este endereço no navegador:<br>
+              <a href="{link_html}" style="color:#0b9c61;text-decoration:none;word-break:break-all;">{link_html}</a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
 
     _smtp_send(
         email_destino,
@@ -196,6 +326,7 @@ Equipe ZapsChat
         remetente=EMAIL_CONVITE_REMETENTE,
         senha=EMAIL_CONVITE_SENHA,
         nome_remetente=EMAIL_CONVITE_NOME_REMETENTE,
+        corpo_html=corpo_html,
     )
 
 

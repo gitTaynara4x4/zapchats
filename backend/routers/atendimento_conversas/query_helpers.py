@@ -28,6 +28,7 @@ def _query_clientes_ultima_por_conversa(
     resolved_inst_id: Optional[int],
     allowed_inst_ids: Optional[List[int]],
     allowed_dep_ids: Optional[List[int]],
+    department_acl_inst_ids: Optional[List[int]] = None,
     current_colab_id: Optional[int] = None,
     allow_unassigned_department: bool = False,
 ):
@@ -316,7 +317,13 @@ def _query_clientes_ultima_por_conversa(
     # Importante:
     # depois que Amanda assume Financeiro, Luiza também pertence ao Financeiro,
     # mas NÃO deve continuar vendo aquela conversa na fila compartilhada.
-    if allowed_dep_ids is not None:
+    active_department_inst_ids = [
+        int(x)
+        for x in (department_acl_inst_ids or [])
+        if x is not None
+    ]
+
+    if allowed_dep_ids is not None and active_department_inst_ids:
         acl_conditions = []
 
         dep_ids = [int(x) for x in (allowed_dep_ids or []) if x is not None]
@@ -361,10 +368,23 @@ def _query_clientes_ultima_por_conversa(
             if allow_unassigned_department:
                 acl_conditions.append(acl_dep_expr.is_(None))
 
+        department_scope = M.instancia_id.in_(active_department_inst_ids)
+        outside_department_scope = or_(
+            M.instancia_id.is_(None),
+            M.instancia_id.notin_(active_department_inst_ids),
+        )
+
         if acl_conditions:
-            q = q.filter(or_(*acl_conditions))
+            q = q.filter(
+                or_(
+                    outside_department_scope,
+                    and_(department_scope, or_(*acl_conditions)),
+                )
+            )
         else:
-            q = q.filter(literal(False))
+            # Colaborador sem departamento continua vendo normalmente as
+            # instâncias cujo menu por departamentos está desligado.
+            q = q.filter(outside_department_scope)
 
     return q
 

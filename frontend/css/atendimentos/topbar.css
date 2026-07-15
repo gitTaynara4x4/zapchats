@@ -1398,3 +1398,373 @@ html:not(.dark)[data-theme="light"] #chat-footer .zc-claim-actions #btnLiberarCo
 .zc-claim-bar.is-open.is-can-accept #btnAceitarConversa .hdr-pill-btn-text{
   display:inline-block !important;
 }
+
+/* =========================================================
+   ZapsChat v10 — Cabeçalho "Conversas"
+   Ajuste somente do topo da lista lateral:
+   título, seletor de instância, nova conversa, busca e filtros.
+   A lista de conversas permanece inalterada.
+   ========================================================= */
+.wpp-header-externo{
+  padding:16px 14px 12px !important;
+}
+
+.zc-topbar{
+  gap:0 !important;
+}
+
+.zc-topbar-head{
+  min-height:36px !important;
+  align-items:center !important;
+}
+
+.zc-topbar-left{
+  gap:14px !important;
+}
+
+.zc-brand-title{
+  font-size:1.22rem !important;
+  font-weight:700 !important;
+  letter-spacing:-.36px !important;
+  line-height:1.1 !important;
+}
+
+.zc-inst-dropdown{
+  min-width:126px !important;
+  max-width:158px !important;
+}
+
+.zc-inst-trigger{
+  min-height:36px !important;
+  height:36px !important;
+  padding:0 11px !important;
+  border-radius:11px !important;
+  box-shadow:none !important;
+}
+
+.zc-inst-trigger::before{
+  width:8px !important;
+  height:8px !important;
+  box-shadow:0 0 0 4px rgba(37,211,102,.10) !important;
+}
+
+.wpp-header-icons{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:flex-end !important;
+}
+
+#btn-sidemodal-nova-conversa{
+  width:36px !important;
+  height:36px !important;
+  min-width:36px !important;
+  border:1px solid color-mix(in oklab, var(--border) 82%, transparent) !important;
+  border-radius:11px !important;
+  background:transparent !important;
+  color:var(--text-2) !important;
+  box-shadow:none !important;
+}
+
+#btn-sidemodal-nova-conversa i{
+  font-size:15px !important;
+}
+
+#btn-sidemodal-nova-conversa:hover{
+  background:color-mix(in oklab, var(--panel-2) 78%, transparent) !important;
+  border-color:color-mix(in oklab, var(--border) 96%, transparent) !important;
+  color:var(--accent) !important;
+}
+
+#btn-sidemodal-nova-conversa:focus-visible{
+  outline:none !important;
+  box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent) !important;
+}
+
+.wpp-header-search-row{
+  height:36px !important;
+  margin:12px 0 0 !important;
+  padding:0 12px !important;
+  border-radius:12px !important;
+  background:color-mix(in oklab, var(--search-bg) 94%, transparent) !important;
+  border-color:color-mix(in oklab, var(--border) 74%, transparent) !important;
+  transition:border-color .15s ease, box-shadow .15s ease, background .15s ease !important;
+}
+
+.wpp-header-search-row:focus-within{
+  background:var(--panel) !important;
+  border-color:color-mix(in oklab, var(--accent) 42%, var(--border)) !important;
+  box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 10%, transparent) !important;
+}
+
+.wpp-header-search-row .fa-search{
+  margin-right:9px !important;
+  font-size:.9rem !important;
+}
+
+.wpp-header-search{
+  font-size:.91rem !important;
+}
+
+.wpp-header-filtros-row{
+  gap:6px !important;
+  margin:8px 0 0 !important;
+  padding:0 !important;
+  min-height:28px !important;
+  scrollbar-width:none !important;
+}
+
+.wpp-header-filtros-row::-webkit-scrollbar{
+  display:none !important;
+}
+
+.wpp-header-filtro,
+.wpp-header-filtros-row .wpp-header-filtro,
+.wpp-header-filtros-row .wpp-header-filtro.btn,
+.wpp-header-filtros-row .wpp-header-filtro[class*="btn"]{
+  min-height:28px !important;
+  padding:6px 11px !important;
+  border-radius:999px !important;
+  border:1px solid transparent !important;
+  font-size:12.5px !important;
+  font-weight:500 !important;
+  line-height:1 !important;
+}
+
+.wpp-header-filtro:hover,
+.wpp-header-filtros-row .wpp-header-filtro:hover{
+  background:color-mix(in oklab, var(--panel-2) 76%, transparent) !important;
+  color:var(--text) !important;
+}
+
+.wpp-header-filtro.ativo,
+.wpp-header-filtro.active,
+.wpp-header-filtro[aria-current="true"],
+.wpp-header-filtros-row .wpp-header-filtro.ativo,
+.wpp-header-filtros-row .wpp-header-filtro.active,
+.wpp-header-filtros-row .wpp-header-filtro[aria-current="true"]{
+  background:color-mix(in oklab, var(--accent) 13%, transparent) !important;
+  color:var(--accent) !important;
+  border-color:color-mix(in oklab, var(--accent) 8%, transparent) !important;
+}
+
+/* A antiga segunda linha "WhatsApps (n)" foi removida do HTML. */
+.zc-inst-row--bottom,
+.zc-inst-meta{
+  display:none !important;
+}
+
+@media (max-width:920px){
+  .wpp-header-externo{
+    padding:12px 11px 10px !important;
+  }
+
+  .zc-topbar-left{
+    gap:10px !important;
+  }
+
+  .zc-brand-title{
+    font-size:1.08rem !important;
+  }
+
+  .zc-inst-dropdown{
+    min-width:112px !important;
+    max-width:142px !important;
+  }
+
+  .zc-inst-trigger{
+    min-height:33px !important;
+    height:33px !important;
+  }
+
+  #btn-sidemodal-nova-conversa{
+    width:33px !important;
+    height:33px !important;
+    min-width:33px !important;
+  }
+
+  .wpp-header-search-row{
+    height:34px !important;
+    margin-top:10px !important;
+  }
+
+  .wpp-header-filtros-row{
+    margin-top:7px !important;
+  }
+}
+
+@media (max-width:480px){
+  .wpp-header-externo{
+    padding:10px 9px 8px !important;
+  }
+
+  .zc-topbar-head{
+    gap:7px !important;
+  }
+
+  .zc-topbar-left{
+    gap:8px !important;
+  }
+
+  .zc-brand-title{
+    font-size:1rem !important;
+    letter-spacing:-.24px !important;
+  }
+
+  .zc-inst-dropdown{
+    min-width:106px !important;
+    max-width:126px !important;
+  }
+
+  .zc-inst-trigger{
+    min-height:32px !important;
+    height:32px !important;
+    padding:0 8px !important;
+  }
+
+  .zc-inst-trigger-text{
+    font-size:12px !important;
+  }
+
+  #btn-sidemodal-nova-conversa{
+    width:32px !important;
+    height:32px !important;
+    min-width:32px !important;
+  }
+
+  .wpp-header-search-row{
+    height:33px !important;
+    margin-top:9px !important;
+  }
+
+  .wpp-header-search{
+    font-size:.86rem !important;
+  }
+
+  .wpp-header-filtros-row{
+    gap:4px !important;
+  }
+
+  .wpp-header-filtro,
+  .wpp-header-filtros-row .wpp-header-filtro{
+    min-height:27px !important;
+    padding:5px 9px !important;
+    font-size:12px !important;
+  }
+}
+
+
+
+/* =========================================================
+   CORREÇÃO FINAL — PRESERVA "CONVERSAS" + INTER + #111B21
+   ========================================================= */
+html[data-theme="light"] .wpp-header-externo,
+html:not(.dark)[data-theme="light"] .wpp-header-externo,
+html[data-theme="light"] .zc-brand-title,
+html:not(.dark)[data-theme="light"] .zc-brand-title,
+html[data-theme="light"] .zc-inst-trigger,
+html:not(.dark)[data-theme="light"] .zc-inst-trigger,
+html[data-theme="light"] .zc-inst-trigger-text,
+html:not(.dark)[data-theme="light"] .zc-inst-trigger-text,
+html[data-theme="light"] .wpp-header-search,
+html:not(.dark)[data-theme="light"] .wpp-header-search,
+html[data-theme="light"] .wpp-header-search::placeholder,
+html:not(.dark)[data-theme="light"] .wpp-header-search::placeholder,
+html[data-theme="light"] .wpp-header-filtro,
+html:not(.dark)[data-theme="light"] .wpp-header-filtro{
+  font-family:"Inter","Segoe UI","Helvetica Neue",Arial,sans-serif !important;
+  -webkit-font-smoothing:antialiased !important;
+  -moz-osx-font-smoothing:grayscale !important;
+  text-rendering:optimizeLegibility !important;
+}
+
+html[data-theme="light"] .zc-brand-title,
+html:not(.dark)[data-theme="light"] .zc-brand-title{
+  color:#111B21 !important;
+  font-weight:600 !important;
+  letter-spacing:-.28px !important;
+}
+
+html[data-theme="light"] .wpp-header-filtro,
+html:not(.dark)[data-theme="light"] .wpp-header-filtro{
+  font-weight:500 !important;
+}
+
+html[data-theme="light"] .wpp-header-filtro:hover,
+html:not(.dark)[data-theme="light"] .wpp-header-filtro:hover,
+html[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro:hover,
+html:not(.dark)[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro:hover{
+  background:#EEF1F3 !important;
+  color:#111B21 !important;
+  border-color:#D9DEE2 !important;
+}
+
+html[data-theme="light"] .wpp-header-filtro.ativo,
+html:not(.dark)[data-theme="light"] .wpp-header-filtro.ativo,
+html[data-theme="light"] .wpp-header-filtro.active,
+html:not(.dark)[data-theme="light"] .wpp-header-filtro.active,
+html[data-theme="light"] .wpp-header-filtro[aria-current="true"],
+html:not(.dark)[data-theme="light"] .wpp-header-filtro[aria-current="true"],
+html[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro.ativo,
+html:not(.dark)[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro.ativo,
+html[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro.active,
+html:not(.dark)[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro.active,
+html[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro[aria-current="true"],
+html:not(.dark)[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro[aria-current="true"]{
+  background:#111B21 !important;
+  color:#FFFFFF !important;
+  border-color:#111B21 !important;
+  font-weight:500 !important;
+}
+
+html[data-theme="light"] .wpp-header-filtro:focus-visible,
+html:not(.dark)[data-theme="light"] .wpp-header-filtro:focus-visible{
+  box-shadow:0 0 0 2px rgba(17,27,33,.14) !important;
+}
+
+
+/* =========================
+   AJUSTE FINAL — FILTRO ATIVO #1B8760 (DARK + LIGHT)
+   ========================= */
+.wpp-header-filtro.ativo,
+.wpp-header-filtro.active,
+.wpp-header-filtro[aria-current="true"],
+.wpp-header-filtros-row .wpp-header-filtro.ativo,
+.wpp-header-filtros-row .wpp-header-filtro.active,
+.wpp-header-filtros-row .wpp-header-filtro[aria-current="true"]{
+  background:#1B8760 !important;
+  color:#ffffff !important;
+  border-color:#1B8760 !important;
+  font-weight:600 !important;
+  font-family:"Inter","Segoe UI","Helvetica Neue",Arial,sans-serif !important;
+  -webkit-font-smoothing:antialiased !important;
+  text-rendering:optimizeLegibility !important;
+}
+
+html[data-theme="light"] .wpp-header-filtro.ativo,
+html:not(.dark)[data-theme="light"] .wpp-header-filtro.ativo,
+html[data-theme="light"] .wpp-header-filtro.active,
+html:not(.dark)[data-theme="light"] .wpp-header-filtro.active,
+html[data-theme="light"] .wpp-header-filtro[aria-current="true"],
+html:not(.dark)[data-theme="light"] .wpp-header-filtro[aria-current="true"],
+html[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro.ativo,
+html:not(.dark)[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro.ativo,
+html[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro.active,
+html:not(.dark)[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro.active,
+html[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro[aria-current="true"],
+html:not(.dark)[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro[aria-current="true"]{
+  background:#1B8760 !important;
+  color:#ffffff !important;
+  border-color:#1B8760 !important;
+}
+
+.wpp-header-filtro:focus-visible,
+.wpp-header-filtros-row .wpp-header-filtro:focus-visible{
+  box-shadow:0 0 0 2px rgba(27,135,96,.16) !important;
+}
+
+html[data-theme="light"] .wpp-header-filtro:hover,
+html:not(.dark)[data-theme="light"] .wpp-header-filtro:hover,
+html[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro:hover,
+html:not(.dark)[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro:hover{
+  color:#111B21 !important;
+}

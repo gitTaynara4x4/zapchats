@@ -369,6 +369,9 @@ def obter_meta_conversa(
     )
 
     _assert_departamento_acl_for_row(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=resolved_inst_id,
         allowed_dep_ids=allowed_dep_ids,
         departamento_id=departamento_acl,
     )
@@ -523,6 +526,9 @@ def editar_nome_cliente_conversa(
     )
 
     _assert_departamento_acl_for_row(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=resolved_inst_id,
         allowed_dep_ids=allowed_dep_ids,
         departamento_id=departamento_acl,
     )
@@ -628,6 +634,9 @@ def listar_colaboradores_transferiveis(
     )
 
     _assert_departamento_acl_for_row(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=resolved_inst_id,
         allowed_dep_ids=allowed_dep_ids,
         departamento_id=departamento_acl,
     )
@@ -655,6 +664,7 @@ def listar_colaboradores_transferiveis(
             db,
             colaborador_id=int(c.id),
             empresa_id=int(empresa_id),
+            instancia_id=int(resolved_inst_id),
             departamento_id=departamento_acl,
         ):
             continue

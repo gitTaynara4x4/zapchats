@@ -414,6 +414,9 @@ def aceitar_conversa(
     )
 
     _assert_departamento_acl_for_row(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=resolved_inst_id,
         allowed_dep_ids=allowed_dep_ids,
         departamento_id=departamento_acl,
     )
@@ -641,6 +644,9 @@ def liberar_conversa(
     departamento_acl = getattr(atd, "departamento_id", None)
 
     _assert_departamento_acl_for_row(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=resolved_inst_id,
         allowed_dep_ids=allowed_dep_ids,
         departamento_id=departamento_acl,
     )
@@ -886,6 +892,9 @@ def transferir_colaborador(
     )
 
     _assert_departamento_acl_for_row(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=resolved_inst_id,
         allowed_dep_ids=allowed_dep_ids,
         departamento_id=departamento_acl,
     )
@@ -917,6 +926,7 @@ def transferir_colaborador(
         db,
         colaborador_id=int(target.id),
         empresa_id=int(empresa_id),
+        instancia_id=int(resolved_inst_id),
         departamento_id=departamento_acl,
     ):
         raise HTTPException(
