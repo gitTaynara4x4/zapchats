@@ -4251,3 +4251,34 @@ html.dark .saude-step.done{ background:rgba(34,197,94,.08) !important; color:#e5
 .dark .zc-pairing-code-box{
   background:rgba(0,139,50,.12);
 }
+
+
+/* =========================================================
+   Correção do widget flutuante de ajuda
+   Mantém o botão no canto inferior direito sem cobrir os
+   botões de ações (três pontinhos) da tabela.
+   ========================================================= */
+.zc-help-widget-safe{
+  position: fixed !important;
+  top: auto !important;
+  left: auto !important;
+  right: var(--zc-help-safe-right, 16px) !important;
+  bottom: var(--zc-help-safe-bottom, 14px) !important;
+  margin: 0 !important;
+  max-width: min(280px, calc(100vw - 32px)) !important;
+  z-index: 9998 !important;
+}
+
+/* A posição é calculada pelo conectar.js quando necessário. */
+.zc-help-widget-safe.is-positioning{
+  transition: none !important;
+}
+
+/* Em celular, deixa o widget acima da navegação inferior. */
+@media (max-width: 720px){
+  .zc-help-widget-safe{
+    right: 12px !important;
+    bottom: calc(var(--zc-help-safe-bottom-mobile, 82px) + env(safe-area-inset-bottom)) !important;
+    max-width: min(250px, calc(100vw - 24px)) !important;
+  }
+}

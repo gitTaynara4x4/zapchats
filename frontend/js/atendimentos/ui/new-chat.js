@@ -1085,9 +1085,54 @@ import { state } from '../state/store.js';
     return pools;
   }
 
+  function pickerClienteId(cliente = {}) {
+    /*
+      Na lista principal, `id` pode ser a chave canônica da conversa
+      (ex.: c:123:4), e não o ID numérico do cliente. Por isso não podemos
+      usar Number(cliente.id || cliente.cliente_id): a string composta vence
+      o `||` e vira NaN, mesmo quando cliente_id está correto.
+    */
+    const ref = refFromCliente(cliente || {});
+
+    if (ref?.kind !== 'g' && /^\d+$/.test(String(ref?.entityId || ''))) {
+      return Number(ref.entityId);
+    }
+
+    const candidates = [
+      cliente?.cliente_id,
+      cliente?.clienteId,
+      cliente?.entity_id,
+      cliente?.entityId,
+      cliente?.backend_id,
+      cliente?.backendClienteId,
+      cliente?.id_backend,
+      cliente?.id_cliente,
+      cliente?.idCliente,
+      cliente?.cid,
+      cliente?.api_id,
+      cliente?.apiClienteId,
+      cliente?.id_api,
+      cliente?.id,
+    ];
+
+    for (const raw of candidates) {
+      const value = String(raw ?? '').trim();
+
+      if (/^\d+$/.test(value)) return Number(value);
+
+      const parsed = parseConversationKey(value);
+
+      if (parsed?.kind === 'c' && /^\d+$/.test(String(parsed.entityId || ''))) {
+        return Number(parsed.entityId);
+      }
+    }
+
+    return 0;
+  }
+
   function normalizePickerItem(raw) {
     const cliente = ensureClienteInstance(raw || {});
-    const id = Number(cliente?.id || cliente?.cliente_id || 0);
+    const id = pickerClienteId(cliente);
     const telefone = onlyDigits(cliente?.telefone || cliente?.whatsapp || '');
     const nome = resolveDisplayName(cliente);
 
@@ -1095,8 +1140,10 @@ import { state } from '../state/store.js';
 
     return {
       ...cliente,
+      /* Mantém conversation_key em campo próprio e garante ID numérico. */
       id: id || cliente?.id,
       cliente_id: id || cliente?.cliente_id,
+      entity_id: id || cliente?.entity_id,
       nome_exibicao: nome,
     };
   }
@@ -1110,7 +1157,7 @@ import { state } from '../state/store.js';
 
       if (!cliente) return;
 
-      const id = Number(cliente?.id || cliente?.cliente_id || 0);
+      const id = pickerClienteId(cliente);
       const telefone = onlyDigits(cliente?.telefone || cliente?.whatsapp || '');
       const key = id ? `id:${id}` : `tel:${telefone}`;
 
@@ -1213,7 +1260,7 @@ import { state } from '../state/store.js';
 
   function openPickerConversation(cliente) {
     const safeCliente = normalizePickerItem(cliente);
-    const id = Number(safeCliente?.id || safeCliente?.cliente_id || 0);
+    const id = pickerClienteId(safeCliente);
 
     if (!id) {
       toast('Não foi possível abrir este contato.', false, 2600);
@@ -1257,7 +1304,7 @@ import { state } from '../state/store.js';
     let currentLetter = '';
 
     items.forEach((cliente) => {
-      const id = Number(cliente?.id || cliente?.cliente_id || 0);
+      const id = pickerClienteId(cliente);
       const nome = resolveDisplayName(cliente);
       const letra = normalizeSearch(nome).charAt(0).toUpperCase() || '#';
       const telefone = onlyDigits(cliente?.telefone || cliente?.whatsapp || '');
@@ -1290,7 +1337,7 @@ import { state } from '../state/store.js';
       btn.addEventListener('click', () => {
         const id = Number(btn.dataset.id || 0);
         const cliente = combinedPickerContacts().find((item) =>
-          Number(item?.id || item?.cliente_id || 0) === id
+          pickerClienteId(item) === id
         );
 
         openPickerConversation(cliente || { id, cliente_id: id });

@@ -2666,3 +2666,198 @@ function teardownConectar() {
 window.addEventListener('beforeunload', () => {
   teardownConectar();
 });
+
+// ===== Correção: widget flutuante de ajuda não pode cobrir os três pontinhos =====
+(function initHelpWidgetSafePosition(){
+  if (window.__ZC_CONNECT_HELP_WIDGET_SAFE__) return;
+  window.__ZC_CONNECT_HELP_WIDGET_SAFE__ = true;
+
+  const KNOWN_WIDGET_SELECTORS = [
+    '#zc-help-widget',
+    '#help-widget',
+    '#help-fab',
+    '#ajuda-widget',
+    '[data-help-widget]',
+    '.zc-help-widget',
+    '.help-widget',
+    '.help-fab',
+    '.floating-help',
+    '.floating-help-widget',
+    '.ajuda-widget'
+  ];
+
+  let widgetRoot = null;
+  let rafId = 0;
+  let observer = null;
+
+  function normalizeText(value){
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  }
+
+  function isVisible(el){
+    if (!(el instanceof HTMLElement)) return false;
+    const style = getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function fixedAncestor(el){
+    let current = el;
+    while (current && current !== document.body && current !== document.documentElement){
+      if (current instanceof HTMLElement && getComputedStyle(current).position === 'fixed') {
+        return current;
+      }
+      current = current.parentElement;
+    }
+    return null;
+  }
+
+  function findWidgetByKnownSelector(){
+    for (const selector of KNOWN_WIDGET_SELECTORS){
+      const candidates = Array.from(document.querySelectorAll(selector));
+      for (const candidate of candidates){
+        const root = getComputedStyle(candidate).position === 'fixed'
+          ? candidate
+          : fixedAncestor(candidate);
+        if (root && isVisible(root)) return root;
+      }
+    }
+    return null;
+  }
+
+  function findWidgetByContent(){
+    const candidates = Array.from(document.querySelectorAll(
+      'button, [role="button"], span, strong, p, div'
+    ));
+
+    for (const candidate of candidates){
+      const text = normalizeText(candidate.textContent);
+      if (!text.includes('precisa de ajuda')) continue;
+
+      const root = fixedAncestor(candidate);
+      if (!root || !isVisible(root)) continue;
+
+      // Não confundir com o modal de ajuda da própria página.
+      if (root.closest('#modal-ajuda-conectar') || root.id === 'modal-ajuda-conectar') continue;
+      return root;
+    }
+
+    return null;
+  }
+
+  function findWidget(){
+    if (widgetRoot && document.contains(widgetRoot)) return widgetRoot;
+    widgetRoot = findWidgetByKnownSelector() || findWidgetByContent();
+    return widgetRoot;
+  }
+
+  function rectsOverlap(a, b, gap = 8){
+    return !(
+      a.right + gap <= b.left ||
+      a.left >= b.right + gap ||
+      a.bottom + gap <= b.top ||
+      a.top >= b.bottom + gap
+    );
+  }
+
+  function visibleActionButtons(){
+    return Array.from(document.querySelectorAll('.kebab-btn'))
+      .filter(isVisible)
+      .map((el) => el.getBoundingClientRect())
+      .filter((rect) => (
+        rect.bottom >= 0 &&
+        rect.top <= window.innerHeight &&
+        rect.right >= 0 &&
+        rect.left <= window.innerWidth
+      ));
+  }
+
+  function applyBottom(root, bottom){
+    root.style.setProperty('--zc-help-safe-bottom', `${Math.max(10, Math.round(bottom))}px`);
+    root.style.bottom = `${Math.max(10, Math.round(bottom))}px`;
+    root.style.top = 'auto';
+  }
+
+  function placeWidget(){
+    rafId = 0;
+    const root = findWidget();
+    if (!root) return;
+
+    root.classList.add('zc-help-widget-safe', 'is-positioning');
+
+    const mobile = window.matchMedia('(max-width: 720px)').matches;
+    if (mobile){
+      root.style.removeProperty('bottom');
+      root.style.setProperty('--zc-help-safe-bottom-mobile', '82px');
+      root.classList.remove('is-positioning');
+      return;
+    }
+
+    root.style.setProperty('--zc-help-safe-right', '16px');
+
+    // Primeiro tenta deixar o widget realmente no canto inferior.
+    const baseBottom = 14;
+    applyBottom(root, baseBottom);
+
+    const actionRects = visibleActionButtons();
+    if (!actionRects.length){
+      root.classList.remove('is-positioning');
+      return;
+    }
+
+    const rootHeight = Math.max(56, root.getBoundingClientRect().height);
+    const maxBottom = Math.max(baseBottom, window.innerHeight - rootHeight - 12);
+    let selectedBottom = baseBottom;
+
+    // Procura a posição livre mais próxima do canto inferior.
+    for (let bottom = baseBottom; bottom <= maxBottom; bottom += 24){
+      applyBottom(root, bottom);
+      const widgetRect = root.getBoundingClientRect();
+      const collides = actionRects.some((actionRect) => rectsOverlap(widgetRect, actionRect, 10));
+      if (!collides){
+        selectedBottom = bottom;
+        break;
+      }
+    }
+
+    applyBottom(root, selectedBottom);
+    root.classList.remove('is-positioning');
+  }
+
+  function schedulePlace(){
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(() => requestAnimationFrame(placeWidget));
+  }
+
+  function start(){
+    schedulePlace();
+    window.addEventListener('load', schedulePlace, { once: true });
+    window.addEventListener('resize', schedulePlace, { passive: true });
+    window.addEventListener('scroll', schedulePlace, { passive: true });
+
+    observer = new MutationObserver((mutations) => {
+      const hasAddedNodes = mutations.some((mutation) => mutation.addedNodes.length > 0);
+      if (hasAddedNodes) schedulePlace();
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // O help-conectar.js é carregado depois do módulo desta página.
+    // Estas novas tentativas cobrem a criação assíncrona do widget.
+    setTimeout(schedulePlace, 150);
+    setTimeout(schedulePlace, 500);
+    setTimeout(schedulePlace, 1200);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();
