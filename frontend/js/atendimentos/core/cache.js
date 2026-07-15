@@ -49,8 +49,21 @@ export async function fetchWithCache(url, { ttlMs = 60000, key = url, bust = fal
     const hit = cacheGet(key);
     if (hit !== null) return hit;
   }
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+
+  const r = await fetch(url, {
+    credentials: 'include',
+    cache: 'no-store',
+  });
+
+  if (!r.ok) {
+    const err = new Error(`HTTP ${r.status}`);
+    err.name = 'HttpError';
+    err.status = r.status;
+    err.url = String(url || '');
+    err.retryAfter = r.headers.get('retry-after') || '';
+    throw err;
+  }
+
   const ct = r.headers.get('content-type') || '';
   let data;
   if (ct.includes('application/json')) data = await r.json();

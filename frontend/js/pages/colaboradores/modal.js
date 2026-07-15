@@ -1399,21 +1399,39 @@ export async function saveInline(){
       exitInlineEdit(false);
       await renderPerfilView(fresh);
 
-      const successDetail = acessoModo === 'manual'
-        ? 'A senha temporária foi criada e deverá ser alterada no primeiro acesso.'
-        : 'O convite de acesso foi enviado para o e-mail cadastrado.';
+      const conviteFalhou = acessoModo === 'convite'
+        && created?.convite_email_solicitado === true
+        && created?.convite_email_enviado === false;
 
-      finishModalSave({
-        type: 'success',
-        title: 'Colaborador criado com sucesso',
-        detail: successDetail
-      });
+      if (conviteFalhou) {
+        const detalheEmail = created?.convite_email_erro
+          || 'O convite não pôde ser enviado agora. Abra o perfil e use “Reenviar convite por e-mail”.';
 
-      toast(
-        acessoModo === 'manual'
-          ? 'Colaborador criado. Ele deverá trocar a senha no primeiro acesso.'
-          : 'Colaborador criado e convite enviado por e-mail.'
-      );
+        finishModalSave({
+          type: 'warning',
+          title: 'Colaborador criado, mas o e-mail não foi enviado',
+          detail: detalheEmail,
+          keepMs: 6500
+        });
+
+        toast(`Colaborador criado. ${detalheEmail}`, 'warn');
+      } else {
+        const successDetail = acessoModo === 'manual'
+          ? 'A senha temporária foi criada e deverá ser alterada no primeiro acesso.'
+          : 'O convite de acesso foi enviado para o e-mail cadastrado.';
+
+        finishModalSave({
+          type: 'success',
+          title: 'Colaborador criado com sucesso',
+          detail: successDetail
+        });
+
+        toast(
+          acessoModo === 'manual'
+            ? 'Colaborador criado. Ele deverá trocar a senha no primeiro acesso.'
+            : 'Colaborador criado e convite enviado por e-mail.'
+        );
+      }
     } catch (e) {
       console.error('[create error]', e?.status, e?.data || e);
 

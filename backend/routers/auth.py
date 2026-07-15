@@ -3,6 +3,7 @@ import os
 import time
 import smtplib
 from email.mime.text import MIMEText
+from email.utils import formataddr
 import base64
 import re
 import secrets
@@ -55,8 +56,40 @@ load_dotenv()
 ENV = (os.getenv("ENV") or os.getenv("APP_ENV") or "dev").strip().lower()
 IS_PROD = ENV in ("prod", "production")
 
-EMAIL_REMETENTE = os.getenv("EMAIL_REMETENTE", "recuperaZapsChat@gmail.com")
-EMAIL_SENHA = os.getenv("EMAIL_SENHA", "")
+# Conta usada pelos fluxos de recuperação de senha/login.
+# As variáveis antigas continuam como fallback para não quebrar instalações existentes.
+EMAIL_RECUPERACAO_REMETENTE = (
+    os.getenv("EMAIL_RECUPERACAO_REMETENTE")
+    or os.getenv("EMAIL_REMETENTE")
+    or "recuperaZapsChat@gmail.com"
+).strip()
+EMAIL_RECUPERACAO_SENHA = (
+    os.getenv("EMAIL_RECUPERACAO_SENHA")
+    or os.getenv("EMAIL_SENHA")
+    or ""
+).strip()
+EMAIL_RECUPERACAO_NOME_REMETENTE = (
+    os.getenv("EMAIL_RECUPERACAO_NOME_REMETENTE")
+    or os.getenv("EMAIL_NOME_REMETENTE")
+    or "ZapsChat"
+).strip()
+
+# Aliases legados usados internamente pelo fluxo de recuperação.
+EMAIL_REMETENTE = EMAIL_RECUPERACAO_REMETENTE
+EMAIL_SENHA = EMAIL_RECUPERACAO_SENHA
+EMAIL_NOME_REMETENTE = EMAIL_RECUPERACAO_NOME_REMETENTE
+
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com").strip() or "smtp.gmail.com"
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "20"))
+SMTP_USE_SSL = (
+    os.getenv("SMTP_USE_SSL", "true").strip().lower()
+    in ("1", "true", "yes", "on")
+)
+SMTP_STARTTLS = (
+    os.getenv("SMTP_STARTTLS", "false").strip().lower()
+    in ("1", "true", "yes", "on")
+)
 
 JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
 if not JWT_SECRET:
@@ -695,26 +728,131 @@ def _decode_token(token: str) -> dict:
 
 
 # ───────────────────────── E-mails auxiliares ─────────────────────────
-def _smtp_send(email_destino: str, assunto: str, corpo: str):
-    if not EMAIL_SENHA:
-        print("[EMAIL] EMAIL_SENHA não configurada. E-mail não enviado.")
-        return
+class EmailDeliveryError(RuntimeError):
+    """Falha de configuração, autenticação ou entrega do e-mail."""
 
-    msg = MIMEText(corpo)
+    def __init__(self, public_message: str, *, code: str = "email_delivery_failed"):
+        super().__init__(public_message)
+        self.public_message = public_message
+        self.code = code
+
+
+def _smtp_password(
+    password_value: Optional[str] = None,
+    smtp_host: Optional[str] = None,
+) -> str:
+    password = str(
+        EMAIL_SENHA if password_value is None else password_value
+    ).strip()
+    host = str(smtp_host or SMTP_HOST or "").strip().lower()
+
+    # O Google exibe senhas de app em quatro blocos. Se ela tiver sido copiada
+    # com espaços, o login SMTP falha mesmo que a senha esteja correta.
+    if host.endswith("gmail.com"):
+        compact = re.sub(r"\s+", "", password)
+        if len(compact) == 16 and compact.isalnum():
+            return compact
+
+    return password
+
+
+def _smtp_send(
+    email_destino: str,
+    assunto: str,
+    corpo: str,
+    *,
+    remetente: Optional[str] = None,
+    senha: Optional[str] = None,
+    nome_remetente: Optional[str] = None,
+) -> None:
+    destino = str(email_destino or "").strip()
+    remetente_final = str(
+        EMAIL_REMETENTE if remetente is None else remetente
+    ).strip()
+    senha_final = _smtp_password(
+        EMAIL_SENHA if senha is None else senha,
+        SMTP_HOST,
+    )
+    nome_remetente_final = str(
+        EMAIL_NOME_REMETENTE if nome_remetente is None else nome_remetente
+    ).strip() or "ZapsChat"
+
+    if not destino:
+        raise EmailDeliveryError(
+            "O e-mail do destinatário não foi informado.",
+            code="missing_recipient",
+        )
+
+    if not remetente_final or not senha_final:
+        raise EmailDeliveryError(
+            "O envio de e-mails ainda não está configurado no servidor.",
+            code="email_not_configured",
+        )
+
+    msg = MIMEText(corpo, "plain", "utf-8")
     msg["Subject"] = assunto
-    msg["From"] = EMAIL_REMETENTE
-    msg["To"] = email_destino
+    msg["From"] = formataddr((nome_remetente_final, remetente_final))
+    msg["To"] = destino
 
     try:
-        print("[EMAIL] Conectando em smtp.gmail.com:465...")
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(EMAIL_REMETENTE, EMAIL_SENHA)
-            server.sendmail(EMAIL_REMETENTE, email_destino, msg.as_string())
-        print(f"[EMAIL] Enviado com sucesso para {email_destino}")
-    except Exception as e:
+        print(f"[EMAIL] Conectando em {SMTP_HOST}:{SMTP_PORT}...")
+
+        if SMTP_USE_SSL:
+            server_ctx = smtplib.SMTP_SSL(
+                SMTP_HOST,
+                SMTP_PORT,
+                timeout=SMTP_TIMEOUT,
+            )
+        else:
+            server_ctx = smtplib.SMTP(
+                SMTP_HOST,
+                SMTP_PORT,
+                timeout=SMTP_TIMEOUT,
+            )
+
+        with server_ctx as server:
+            if SMTP_STARTTLS and not SMTP_USE_SSL:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+
+            server.login(remetente_final, senha_final)
+            recusados = server.sendmail(
+                remetente_final,
+                [destino],
+                msg.as_string(),
+            )
+
+            if recusados:
+                raise EmailDeliveryError(
+                    "O servidor de e-mail recusou o destinatário informado.",
+                    code="recipient_rejected",
+                )
+
+        print(f"[EMAIL] Enviado com sucesso para {destino}")
+    except EmailDeliveryError:
+        raise
+    except smtplib.SMTPAuthenticationError as exc:
+        print("[ERRO EMAIL] Falha de autenticação SMTP:", repr(exc))
+        raise EmailDeliveryError(
+            "O servidor recusou o login do e-mail remetente. Confira a senha de aplicativo configurada.",
+            code="smtp_auth_failed",
+        ) from exc
+    except smtplib.SMTPRecipientsRefused as exc:
+        print("[ERRO EMAIL] Destinatário recusado:", repr(exc))
+        raise EmailDeliveryError(
+            "O servidor de e-mail recusou o endereço do colaborador.",
+            code="recipient_rejected",
+        ) from exc
+    except (smtplib.SMTPException, OSError, TimeoutError) as exc:
         import traceback
-        print("[ERRO EMAIL]", repr(e))
+
+        print("[ERRO EMAIL]", repr(exc))
         traceback.print_exc()
+        raise EmailDeliveryError(
+            "Não foi possível conectar ao servidor de e-mail. Tente novamente em alguns instantes.",
+            code="smtp_unavailable",
+        ) from exc
 
 
 def gerar_codigo_reset_5d() -> str:
@@ -1717,7 +1855,13 @@ def forgot_password(
     commit_or_block(db)
 
     print(f"[AUTH] Código de reset gerado para usuário ID={usuario.id} expira em {RESET_CODE_TTL_MIN} min")
-    enviar_email_reset(email_norm, token)
+    try:
+        enviar_email_reset(email_norm, token)
+    except EmailDeliveryError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=exc.public_message,
+        ) from exc
 
     return {"detail": "Se o e-mail estiver cadastrado, enviaremos um código de recuperação."}
 

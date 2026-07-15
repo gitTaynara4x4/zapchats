@@ -329,10 +329,12 @@
     })();
   </script>
 
-  <!-- RAM SAFE: dotlottie desativado no painel de atendimento.
-       O atendimento não precisa carregar runtime externo de animação para abrir conversas. -->
+  <!-- Lottie da tela inicial. O script é type="module", então não bloqueia o carregamento das conversas. -->
+  <script
+    src="https://unpkg.com/@lottiefiles/dotlottie-wc@0.6.2/dist/dotlottie-wc.js"
+    type="module"></script>
 
-  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260517-chat-bg-wallpaper-fix-3">
+  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260715-lista-retry-fix-1">
 
   <link
     rel="stylesheet"

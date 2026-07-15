@@ -7,7 +7,7 @@ import logging
 import traceback
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, text
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -71,6 +71,14 @@ def _trace(e: Exception) -> str:
         return "".join(traceback.format_exception(type(e), e, e.__traceback__))
     except Exception:
         return f"{e.__class__.__name__}: {e}"
+
+
+def _lock_chatbot_instance(db: Session, *, empresa_id: int, instancia_id: int) -> None:
+    """Serializa o envio do bot e a alteração do botão geral nesta instância."""
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(:empresa_id, :instancia_id)"),
+        {"empresa_id": int(empresa_id), "instancia_id": int(instancia_id)},
+    )
 
 
 def _normalize_config_aliases(cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -369,32 +377,17 @@ def get_config(
 
     deps_rows = []
     try:
+        # O chatbot deve permitir escolher qualquer departamento ativo da empresa.
+        # O vínculo DepartamentoInstancia controla outras regras da instância, mas
+        # não deve esconder departamentos desta tela de configuração.
         deps_rows = db.execute(
             select(models.Departamento.id, models.Departamento.nome)
-            .join(
-                models.DepartamentoInstancia,
-                and_(
-                    models.DepartamentoInstancia.departamento_id == models.Departamento.id,
-                    models.DepartamentoInstancia.empresa_id == empresa_id,
-                    models.DepartamentoInstancia.instancia_id == instancia_id,
-                ),
-            )
             .where(
                 models.Departamento.empresa_id == empresa_id,
                 models.Departamento.ativo == True,
             )
             .order_by(models.Departamento.nome.asc())
         ).all()
-
-        if not deps_rows:
-            deps_rows = db.execute(
-                select(models.Departamento.id, models.Departamento.nome)
-                .where(
-                    models.Departamento.empresa_id == empresa_id,
-                    models.Departamento.ativo == True,
-                )
-                .order_by(models.Departamento.nome.asc())
-            ).all()
     except Exception as e:
         logger.warning("GET departamentos falhou: %s", _trace(e))
         deps_rows = []
@@ -483,6 +476,14 @@ def put_config(
         )
 
     computed_ativo = bool(auto_active or dept_active)
+
+    # Usa a mesma trava do disparo do chatbot. Assim, quando o PUT de
+    # desligamento terminar, não existe envio antigo ainda atravessando a fila.
+    _lock_chatbot_instance(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=int(instancia_id),
+    )
 
     row = _safe_select_chatbot_config(db, empresa_id, instancia_id)
     creating = row is None

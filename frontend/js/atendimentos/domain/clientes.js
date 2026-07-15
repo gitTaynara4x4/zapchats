@@ -37,7 +37,10 @@ const LIST_DEBOUNCE_MS = 700;
 const LIST_LOCAL_CACHE_VERSION = 'conversas:v5-loading-leve-sem-hist-prefetch';
 const LIST_LOADING_TEXT = 'Carregando suas conversas…';
 const LIST_EMPTY_TEXT = 'Nenhuma conversa encontrada.';
-const LIST_ERROR_TEXT = 'Não foi possível carregar suas conversas.';
+const LIST_ERROR_TEXT = 'Não conseguimos carregar suas conversas.';
+const LIST_ERROR_SUBTEXT = 'Verifique sua conexão com a internet e tente novamente.';
+const LIST_ERROR_SUPPORT_TEXT = 'Se o problema continuar, entre em contato com o suporte.';
+const LIST_AUTO_RETRY_DELAYS_MS = [650, 1400];
 
 let __loadingConversasPromise = null;
 let __lastConversasFetchAt = 0;
@@ -1768,29 +1771,148 @@ function renderListaEmpty() {
   `;
 }
 
-function renderListaError(onRetry = null) {
+function renderListaError(onRetry = null, options = {}) {
   const ul = getListaEl();
   if (!ul) return;
+
+  const title = String(options?.title || LIST_ERROR_TEXT);
+  const sub = String(options?.sub || LIST_ERROR_SUBTEXT);
+  const support = options?.support === false
+    ? ''
+    : String(options?.support || LIST_ERROR_SUPPORT_TEXT);
 
   clearListaLoading();
   ul.__zcLastRenderedHtml = '';
   ul.innerHTML = `
-    <li class="chat-list-state chat-list-error" data-list-state="error">
-      <div class="chat-list-state-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
-      <div class="chat-list-state-title">${escapeHtml(LIST_ERROR_TEXT)}</div>
-      <button type="button" class="chat-list-retry-btn">Tentar novamente</button>
+    <li class="chat-list-state chat-list-error" data-list-state="error" role="status" aria-live="polite">
+      <div class="chat-list-state-icon" aria-hidden="true"><i class="fa-solid fa-triangle-exclamation"></i></div>
+      <div class="chat-list-state-title">${escapeHtml(title)}</div>
+      <div class="chat-list-state-sub">${escapeHtml(sub)}</div>
+      ${support ? `<div class="chat-list-state-support">${escapeHtml(support)}</div>` : ''}
+      <button type="button" class="chat-list-retry-btn">
+        <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        <span>Tentar novamente</span>
+      </button>
     </li>
   `;
 
   try {
     const btn = ul.querySelector('.chat-list-retry-btn');
     if (btn) {
-      btn.addEventListener('click', () => {
-        if (typeof onRetry === 'function') onRetry();
-        else carregarClientes({ force: true, reason: 'retry-list-error' }).catch(() => {});
+      btn.addEventListener('click', async () => {
+        if (btn.dataset.loading === '1') return;
+
+        btn.dataset.loading = '1';
+        btn.disabled = true;
+        const label = btn.querySelector('span');
+        if (label) label.textContent = 'Tentando novamente…';
+
+        try {
+          const task = typeof onRetry === 'function'
+            ? onRetry()
+            : carregarClientes({ force: true, reason: 'retry-list-error' });
+          await Promise.resolve(task);
+        } catch (e) {
+          try { console.warn('[clientes] nova tentativa falhou:', e); } catch {}
+          btn.dataset.loading = '0';
+          btn.disabled = false;
+          if (label) label.textContent = 'Tentar novamente';
+        }
       });
     }
   } catch {}
+}
+
+function waitListaRetry(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function errorStatus(err) {
+  const direct = Number(err?.status || err?.statusCode || 0);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+
+  const match = String(err?.message || err || '').match(/HTTP\s+(\d{3})/i);
+  return match ? Number(match[1]) : 0;
+}
+
+function isTransientConversasError(err) {
+  const status = errorStatus(err);
+  if ([401, 403, 404, 422].includes(status)) return false;
+  if (status === 408 || status === 425 || status === 429 || status >= 500) return true;
+
+  const name = String(err?.name || '').toLowerCase();
+  const msg = String(err?.message || err || '').toLowerCase();
+
+  return (
+    !status ||
+    name === 'aborterror' ||
+    name === 'typeerror' ||
+    msg.includes('timeout') ||
+    msg.includes('network') ||
+    msg.includes('failed to fetch') ||
+    msg.includes('load failed') ||
+    msg.includes('atendimento-fetch-timeout')
+  );
+}
+
+function updateListaRetryProgress(attempt, total) {
+  const ul = getListaEl();
+  if (!ul) return;
+
+  const text = ul.querySelector('.chat-list-state-text');
+  if (text) {
+    text.textContent = `A conexão falhou. Tentando novamente (${attempt}/${total})…`;
+  }
+}
+
+async function fetchConversasComRetry(url, { ttlMs, key, bust } = {}) {
+  const totalAttempts = 1 + LIST_AUTO_RETRY_DELAYS_MS.length;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
+    try {
+      return await fetchWithCache(url, {
+        ttlMs,
+        key,
+        bust: Boolean(bust || attempt > 1),
+      });
+    } catch (err) {
+      lastError = err;
+
+      const errName = String(err?.name || '').toLowerCase();
+      const errMessage = String(err?.message || err || '').toLowerCase();
+      const isTimeoutLike =
+        errName === 'aborterror' ||
+        errMessage.includes('timeout') ||
+        errMessage.includes('atendimento-fetch-timeout');
+
+      // Timeout já consumiu até 10 s no guard global: nesse caso fazemos
+      // somente uma nova tentativa para não prender o usuário por muito tempo.
+      const maxAttemptsForThisError = isTimeoutLike ? 2 : totalAttempts;
+      const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
+
+      const canRetry =
+        attempt < maxAttemptsForThisError &&
+        isTransientConversasError(err) &&
+        isOnline;
+
+      if (!canRetry) throw err;
+
+      updateListaRetryProgress(attempt, maxAttemptsForThisError - 1);
+      await waitListaRetry(LIST_AUTO_RETRY_DELAYS_MS[attempt - 1]);
+    }
+  }
+
+  throw lastError || new Error('Falha ao carregar conversas');
+}
+
+function redirectToLoginAfterExpiredSession() {
+  try {
+    sessionStorage.setItem('zc:auth-expired-message', 'Sua sessão expirou. Entre novamente para continuar.');
+  } catch {}
+
+  const next = encodeURIComponent('/atendimentos');
+  location.replace(`/login.html?next=${next}&motivo=sessao-expirada`);
 }
 
 /* =========================================================
@@ -2137,14 +2259,11 @@ export async function carregarClientes({ force = false, reason = '', noLoading =
     const forceFlag = Boolean(force || forceSession);
 
     try {
-      const raw = await fetchWithCache(
-        url,
-        {
-          ttlMs: forceFlag ? 0 : LIST_CACHE_TTL_MS,
-          key: cacheKey,
-          bust: forceFlag,
-        }
-      );
+      const raw = await fetchConversasComRetry(url, {
+        ttlMs: forceFlag ? 0 : LIST_CACHE_TTL_MS,
+        key: cacheKey,
+        bust: forceFlag,
+      });
 
       let { items, next } = extractConversasPayload(raw);
       let usedFallback = false;
@@ -2241,13 +2360,32 @@ export async function carregarClientes({ force = false, reason = '', noLoading =
     } catch (e) {
       try { console.error('[clientes] carregarClientes erro:', e); } catch {}
 
+      const status = errorStatus(e);
+
+      if (status === 401) {
+        redirectToLoginAfterExpiredSession();
+        return [];
+      }
+
       if (hasCache) {
         renderListaClientes(state.clientesCache);
         return state.clientesCache;
       }
 
+      if (status === 403) {
+        renderListaError(
+          () => carregarClientes({ force: true, reason: 'retry-after-forbidden' }),
+          {
+            title: 'Você não tem acesso a estas conversas.',
+            sub: 'Verifique suas permissões ou fale com um administrador da empresa.',
+            support: LIST_ERROR_SUPPORT_TEXT,
+          }
+        );
+        return [];
+      }
+
       renderListaError(() => {
-        carregarClientes({ force: true, reason: 'retry-after-error' }).catch(() => {});
+        return carregarClientes({ force: true, reason: 'retry-after-error' });
       });
 
       return [];
@@ -3344,6 +3482,14 @@ syncLegacyRefs();
 try {
   window.renderListaClientes = renderListaClientes;
   window.carregarClientes = carregarClientes;
+  window.ZCRecarregarListaConversas = () => carregarClientes({
+    force: true,
+    reason: 'global-retry-list',
+  });
   window.loadMoreConversas = loadMoreConversas;
   window.scheduleCarregarClientes = scheduleCarregarClientes;
+
+  window.addEventListener('zc:retry-conversas', () => {
+    carregarClientes({ force: true, reason: 'event-retry-list' }).catch(() => {});
+  });
 } catch {}

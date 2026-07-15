@@ -314,6 +314,14 @@ def _triage_mode_is_active(cfg: Dict[str, Any]) -> bool:
     return bool(ad_cfg.get("enabled", False)) and bool(welcome_cfg.get("enabled", False))
 
 
+def _lock_chatbot_instance(db: Session, *, empresa_id: int, instancia_id: int) -> None:
+    """Evita corrida entre um disparo e o desligamento do botão geral."""
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(:empresa_id, :instancia_id)"),
+        {"empresa_id": int(empresa_id), "instancia_id": int(instancia_id)},
+    )
+
+
 def _fetch_triage_departamentos(
     db: Session,
     *,
@@ -720,6 +728,54 @@ def _send_and_persist_bot_message(
         ts_dt=ts_dt,
     )
     return evo
+
+
+def _send_and_persist_triage_message(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    cliente_id: int,
+    instancia_nome: str,
+    remote_jid: str,
+    text_msg: str,
+    telefone_digits: str = "",
+    ts_dt: Optional[datetime] = None,
+) -> Optional[Dict[str, Any]]:
+    """Última barreira antes de qualquer mensagem do menu por departamentos.
+
+    A trava é compartilhada com o PUT da configuração. Se o usuário desligar
+    o botão geral, o backend conclui o desligamento antes de permitir outro
+    disparo; depois a configuração é relida e o envio é barrado.
+    """
+    _lock_chatbot_instance(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=int(instancia_id),
+    )
+
+    cfg_now = _fetch_chatbot_config(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=int(instancia_id),
+    )
+
+    if not _triage_mode_is_active(cfg_now):
+        # Libera imediatamente a trava da transação sem enviar nem persistir.
+        db.commit()
+        return None
+
+    return _send_and_persist_bot_message(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=int(instancia_id),
+        cliente_id=int(cliente_id),
+        instancia_nome=instancia_nome,
+        remote_jid=remote_jid,
+        text_msg=text_msg,
+        telefone_digits=telefone_digits,
+        ts_dt=ts_dt,
+    )
 
 
 def _replace_tokens(template: str, *, empresa_nome: str, menu_departamentos: str) -> str:
@@ -1344,7 +1400,7 @@ def triagem_handle_inbound(
         menu = _build_menu_message(empresa_nome=empresa_nome, deps=deps, cfg=cfg)
         db.commit()
 
-        _send_and_persist_bot_message(
+        _send_and_persist_triage_message(
             db,
             empresa_id=empresa_id,
             instancia_id=instancia_id,
@@ -1447,7 +1503,7 @@ def triagem_handle_inbound(
                 pass
 
         ack = _build_assign_ack(empresa_nome=empresa_nome, dep=dep_obj)
-        _send_and_persist_bot_message(
+        _send_and_persist_triage_message(
             db,
             empresa_id=empresa_id,
             instancia_id=instancia_id,
@@ -1496,7 +1552,7 @@ def triagem_handle_inbound(
         db.commit()
 
         fallback_msg = _build_fallback_message(empresa_nome=empresa_nome, cfg=cfg)
-        _send_and_persist_bot_message(
+        _send_and_persist_triage_message(
             db,
             empresa_id=empresa_id,
             instancia_id=instancia_id,
@@ -1535,7 +1591,7 @@ def triagem_handle_inbound(
 
     db.commit()
 
-    _send_and_persist_bot_message(
+    _send_and_persist_triage_message(
         db,
         empresa_id=empresa_id,
         instancia_id=instancia_id,

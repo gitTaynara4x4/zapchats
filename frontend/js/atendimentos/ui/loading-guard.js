@@ -10,7 +10,7 @@
   const START = Date.now();
   const MAX_GLOBAL_LOADING_MS = 9000;
   const MAX_CHAT_LOADING_MS = 12000;
-  const MAX_LIST_LOADING_MS = 15000;
+  const MAX_LIST_LOADING_MS = 25000;
 
   function now() { return Date.now(); }
 
@@ -91,12 +91,39 @@
         window.renderListaClientes(arr);
       } else {
         ul.innerHTML = `
-          <li class="chat-list-state chat-list-error" data-list-state="error">
-            <div class="state-title">Não foi possível carregar suas conversas.</div>
-            <button type="button" class="state-retry" data-zc-retry-list="1">Tentar novamente</button>
+          <li class="chat-list-state chat-list-error" data-list-state="error" role="status" aria-live="polite">
+            <div class="chat-list-state-icon" aria-hidden="true"><i class="fa-solid fa-triangle-exclamation"></i></div>
+            <div class="chat-list-state-title">Não conseguimos carregar suas conversas.</div>
+            <div class="chat-list-state-sub">Verifique sua conexão com a internet e tente novamente.</div>
+            <div class="chat-list-state-support">Se o problema continuar, entre em contato com o suporte.</div>
+            <button type="button" class="chat-list-retry-btn" data-zc-retry-list="1">
+              <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+              <span>Tentar novamente</span>
+            </button>
           </li>`;
-        ul.querySelector('[data-zc-retry-list="1"]')?.addEventListener('click', () => {
-          /* v5: não força carregarClientes daqui para evitar loop de loading */
+
+        ul.querySelector('[data-zc-retry-list="1"]')?.addEventListener('click', async (event) => {
+          const btn = event.currentTarget;
+          if (!btn || btn.dataset.loading === '1') return;
+
+          btn.dataset.loading = '1';
+          btn.disabled = true;
+          const label = btn.querySelector('span');
+          if (label) label.textContent = 'Tentando novamente…';
+
+          try {
+            if (typeof window.ZCRecarregarListaConversas === 'function') {
+              await window.ZCRecarregarListaConversas();
+            } else if (typeof window.carregarClientes === 'function') {
+              await window.carregarClientes({ force: true, reason: 'loading-guard-retry' });
+            } else {
+              window.dispatchEvent(new CustomEvent('zc:retry-conversas'));
+            }
+          } catch (e) {
+            btn.dataset.loading = '0';
+            btn.disabled = false;
+            if (label) label.textContent = 'Tentar novamente';
+          }
         });
       }
     } catch {}

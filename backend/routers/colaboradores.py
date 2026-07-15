@@ -35,6 +35,7 @@ from backend.routers.auth import (
     gerar_codigo_reset_5d,
     RESET_CODE_TTL_MIN,
     _smtp_send,
+    EmailDeliveryError,
 )
 
 from backend.utils.entitlements import enforce_quota
@@ -44,6 +45,26 @@ router = APIRouter(prefix="/colaboradores", tags=["Colaboradores"])
 
 
 FORCE_PASSWORD_CHANGE_MARKER = "FORCE_PASS_CHANGE"
+
+# Conta exclusiva para convites e mensagens de acesso de colaboradores.
+# Se as variáveis novas ainda não existirem, usa as antigas como fallback.
+EMAIL_CONVITE_REMETENTE = (
+    os.getenv("EMAIL_CONVITE_REMETENTE")
+    or os.getenv("CONVITE_EMAIL_REMETENTE")
+    or os.getenv("EMAIL_REMETENTE")
+    or ""
+).strip()
+EMAIL_CONVITE_SENHA = (
+    os.getenv("EMAIL_CONVITE_SENHA")
+    or os.getenv("CONVITE_EMAIL_SENHA")
+    or os.getenv("EMAIL_SENHA")
+    or ""
+).strip()
+EMAIL_CONVITE_NOME_REMETENTE = (
+    os.getenv("EMAIL_CONVITE_NOME_REMETENTE")
+    or os.getenv("CONVITE_EMAIL_NOME_REMETENTE")
+    or "ZapsChat"
+).strip()
 
 
 def _boolish(value: Any) -> bool:
@@ -84,11 +105,30 @@ def _reset_token_expira() -> datetime:
     return datetime.utcnow() + timedelta(minutes=RESET_CODE_TTL_MIN)
 
 
-def _public_url(path: str) -> str:
+def _public_base_from_request(request: Optional[Request]) -> str:
+    if request is None:
+        return ""
+
+    forwarded_proto = str(request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip()
+    forwarded_host = str(request.headers.get("x-forwarded-host") or "").split(",", 1)[0].strip()
+    forwarded_prefix = str(request.headers.get("x-forwarded-prefix") or "").strip().rstrip("/")
+
+    scheme = forwarded_proto or request.url.scheme
+    host = forwarded_host or request.headers.get("host") or request.url.netloc
+
+    if not scheme or not host:
+        return ""
+
+    return f"{scheme}://{host}{forwarded_prefix}".rstrip("/")
+
+
+def _public_url(path: str, *, request: Optional[Request] = None) -> str:
     base = (
         os.getenv("APP_PUBLIC_URL")
         or os.getenv("FRONTEND_URL")
         or os.getenv("PUBLIC_URL")
+        or os.getenv("ZAPSCHAT_BASE_URL")
+        or _public_base_from_request(request)
         or ""
     ).strip().rstrip("/")
 
@@ -105,10 +145,12 @@ def _enviar_email_acesso_colaborador(
     nome_colaborador: str,
     nome_empresa: Optional[str] = None,
     modo: str = "convite",
+    request: Optional[Request] = None,
 ) -> None:
     empresa_txt = f" da {nome_empresa}" if nome_empresa else ""
     link = _public_url(
-        f"/esqueci_senha.html?email={quote(email_destino)}&convite=1"
+        f"/esqueci_senha.html?email={quote(email_destino)}&convite=1",
+        request=request,
     )
 
     if modo == "manual":
@@ -147,7 +189,14 @@ Por segurança, este código vence em {RESET_CODE_TTL_MIN} minutos.
 Equipe ZapsChat
 """
 
-    _smtp_send(email_destino, assunto, corpo)
+    _smtp_send(
+        email_destino,
+        assunto,
+        corpo,
+        remetente=EMAIL_CONVITE_REMETENTE,
+        senha=EMAIL_CONVITE_SENHA,
+        nome_remetente=EMAIL_CONVITE_NOME_REMETENTE,
+    )
 
 
 # =========================================================
@@ -851,6 +900,12 @@ class ColaboradorOut(BaseModel):
     avatar_url: Optional[str] = None
     is_admin: bool = False
 
+    # Preenchidos na resposta de criação. Nas listagens/leitura ficam nos
+    # valores padrão para manter compatibilidade com o restante da tela.
+    convite_email_solicitado: bool = False
+    convite_email_enviado: Optional[bool] = None
+    convite_email_erro: Optional[str] = None
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -1240,6 +1295,7 @@ async def criar_colaborador(
                 "nome_colaborador": str(nome).strip(),
                 "nome_empresa": getattr(emp, "nome", None),
                 "modo": modo_acesso_norm,
+                "request": request,
             }
 
         if avatar_bytes:
@@ -1335,12 +1391,6 @@ async def criar_colaborador(
 
         db.commit()
 
-        if convite_email_payload:
-            try:
-                _enviar_email_acesso_colaborador(**convite_email_payload)
-            except Exception as e:
-                print("[COLAB CONVITE EMAIL] erro ao enviar convite:", repr(e))
-
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="E-mail já cadastrado")
@@ -1348,18 +1398,56 @@ async def criar_colaborador(
         db.rollback()
         raise
 
+    convite_email_enviado: Optional[bool] = None
+    convite_email_erro: Optional[str] = None
+
+    # O cadastro já foi confirmado no banco. Se o provedor de e-mail estiver
+    # indisponível, devolvemos a pendência para a tela sem fingir que o convite
+    # foi entregue e sem causar uma segunda criação/duplicidade ao tentar salvar.
+    if convite_email_payload:
+        try:
+            _enviar_email_acesso_colaborador(**convite_email_payload)
+            convite_email_enviado = True
+        except EmailDeliveryError as exc:
+            convite_email_enviado = False
+            convite_email_erro = exc.public_message
+            print(
+                "[COLAB CONVITE EMAIL] erro ao enviar convite:",
+                exc.code,
+                repr(exc),
+            )
+        except Exception as exc:
+            convite_email_enviado = False
+            convite_email_erro = (
+                "O colaborador foi criado, mas o convite não pôde ser enviado. "
+                "Tente reenviar pelo perfil do colaborador."
+            )
+            print("[COLAB CONVITE EMAIL] erro inesperado:", repr(exc))
+
     c = (
         db.query(models.Colaborador)
         .options(joinedload(models.Colaborador.setor))
         .get(colab.id)
     )
 
-    return _to_out(db, c)
+    result = _to_out(db, c)
+
+    if convite_email_payload:
+        result = result.model_copy(
+            update={
+                "convite_email_solicitado": True,
+                "convite_email_enviado": convite_email_enviado,
+                "convite_email_erro": convite_email_erro,
+            }
+        )
+
+    return result
 
 
 @router.post("/{colab_id}/enviar-acesso-email")
 def enviar_acesso_colaborador_por_email(
     colab_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -1413,7 +1501,14 @@ def enviar_acesso_colaborador_por_email(
             nome_colaborador=str(colab.nome or "").strip(),
             nome_empresa=getattr(empresa, "nome", None),
             modo=modo_email,
+            request=request,
         )
+    except EmailDeliveryError as exc:
+        print("[COLAB ACESSO EMAIL] erro ao enviar:", exc.code, repr(exc))
+        raise HTTPException(
+            status_code=502,
+            detail=exc.public_message,
+        ) from exc
     except Exception as exc:
         print("[COLAB ACESSO EMAIL] erro ao enviar:", repr(exc))
         raise HTTPException(

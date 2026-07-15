@@ -408,10 +408,13 @@
   let cfg = null;
   let _lastLoadedSnapshot = null;
   let _filaCache = null;
+  let _filaDraftItems = null;
   let _empresaNome = (LS.getItem('empresa_nome') || '').trim() || null;
 
   let __persisting = false;
   let __persistTimer = null;
+  let __filaSafetyQueue = Promise.resolve();
+  let __filaSafetyPending = 0;
 
   const LOCAL_DEFAULTS = {
     timezone: FALLBACK_TZ,
@@ -576,6 +579,222 @@ Digite apenas o número da opção desejada.`
     }
 
     return f.items;
+  }
+
+  function cloneFilaItems(items) {
+    try {
+      return JSON.parse(JSON.stringify(items || {}));
+    } catch {
+      return {};
+    }
+  }
+
+  function resetFilaDraftItems() {
+    _filaDraftItems = cloneFilaItems(ensureFilaItems());
+    return _filaDraftItems;
+  }
+
+  function ensureFilaDraftItems() {
+    if (!_filaDraftItems || typeof _filaDraftItems !== 'object' || Array.isArray(_filaDraftItems)) {
+      return resetFilaDraftItems();
+    }
+
+    return _filaDraftItems;
+  }
+
+  function commitFilaDraftItems() {
+    const f = filaFeature();
+    f.items = cloneFilaItems(ensureFilaDraftItems());
+    return f.items;
+  }
+
+  function normalizePersistedFilaItems(config) {
+    ensureMasters(config);
+
+    const feature = config.features.auto_messages_departments;
+    const items = (feature.items && typeof feature.items === 'object' && !Array.isArray(feature.items))
+      ? feature.items
+      : {};
+
+    const legacyAllEnabled = Object.keys(items).length === 0;
+
+    (_filaCache || []).forEach(dep => {
+      const id = String(dep.id);
+      const nome = cleanLabel(dep.nome);
+
+      if (!items[id] || typeof items[id] !== 'object' || Array.isArray(items[id])) {
+        items[id] = { enabled: legacyAllEnabled, label: nome };
+        return;
+      }
+
+      items[id] = {
+        ...items[id],
+        enabled: !!items[id].enabled,
+        label: String(items[id].label || nome)
+      };
+    });
+
+    feature.items = items;
+    return items;
+  }
+
+  function persistedFilaEnabled(id) {
+    if (!cfg) return false;
+
+    const items = ensureFilaItems();
+    const keys = Object.keys(items);
+
+    // Configuração antiga sem "items" significava todos os departamentos ativos.
+    if (!keys.length) return true;
+
+    return !!items[String(id)]?.enabled;
+  }
+
+  async function persistFilaDisableNow(ids) {
+    if (!cfg) return false;
+
+    while (__persisting) {
+      await new Promise(resolve => setTimeout(resolve, 60));
+    }
+
+    const uniqueIds = [...new Set((ids || []).map(String).filter(Boolean))];
+    if (!uniqueIds.length) return true;
+
+    const payload = structuredClone(cfg);
+    const feature = payload.features.auto_messages_departments;
+    const items = normalizePersistedFilaItems(payload);
+
+    uniqueIds.forEach(id => {
+      const dep = (_filaCache || []).find(item => String(item.id) === id);
+      const nome = cleanLabel(dep?.nome || items[id]?.label || '');
+
+      items[id] = {
+        ...(items[id] || {}),
+        enabled: false,
+        label: String(items[id]?.label || nome)
+      };
+    });
+
+    const hasEnabledDepartment = Object.values(items).some(item => !!item?.enabled);
+
+    // Sem nenhum departamento ativo, desliga o modo inteiro para garantir
+    // que nenhuma mensagem de menu seja enviada ao cliente.
+    if (!hasEnabledDepartment) {
+      feature.enabled = false;
+      (feature.welcome ||= {}).enabled = false;
+    }
+
+    __persisting = true;
+    updateSaveButtons();
+
+    try {
+      await putConfig(payload);
+
+      cfg = payload;
+      _lastLoadedSnapshot = JSON.stringify(cfg);
+
+      if (!hasEnabledDepartment) {
+        setHeaderSwitch(swDeptHdr, pillDeptHdr, false);
+        setSwitch(swDeptWelcome, false, pillDeptWelcome);
+        syncSectionState();
+        toast('Menu de departamentos desativado imediatamente.');
+      } else {
+        toast(uniqueIds.length === 1
+          ? 'Departamento removido do menu imediatamente.'
+          : 'Departamentos removidos do menu imediatamente.');
+      }
+
+      renderFilaPicker();
+      renderFilaPreview();
+      scheduleSummaryRefresh();
+      return true;
+    } catch (_) {
+      // Se a gravação falhar, volta o checkbox ao estado realmente salvo.
+      const draft = ensureFilaDraftItems();
+      uniqueIds.forEach(id => {
+        if (!draft[id]) draft[id] = {};
+        draft[id].enabled = persistedFilaEnabled(id);
+      });
+
+      renderFilaPicker();
+      renderFilaPreview();
+      return false;
+    } finally {
+      __persisting = false;
+      updateSaveButtons();
+    }
+  }
+
+  function queueImmediateFilaDisable(ids) {
+    const uniqueIds = [...new Set((ids || []).map(String).filter(Boolean))];
+    if (!uniqueIds.length) return Promise.resolve(true);
+
+    __filaSafetyPending += 1;
+    updateSaveButtons();
+
+    const task = __filaSafetyQueue
+      .catch(() => false)
+      .then(() => persistFilaDisableNow(uniqueIds));
+
+    __filaSafetyQueue = task.finally(() => {
+      __filaSafetyPending = Math.max(0, __filaSafetyPending - 1);
+      updateSaveButtons();
+    });
+
+    return task;
+  }
+
+  async function persistDepartmentModeOffNow({ showToast = true } = {}) {
+    if (!cfg) return false;
+
+    clearTimeout(__persistTimer);
+
+    while (__persisting || __filaSafetyPending > 0) {
+      await new Promise(resolve => setTimeout(resolve, 60));
+    }
+
+    // A chave continua visualmente ligada durante a gravação. Ela só aparece
+    // desligada depois que o backend confirmar, evitando uma falsa sensação
+    // de segurança enquanto a configuração antiga ainda estiver ativa.
+    syncCfgFromUI();
+
+    const payload = structuredClone(cfg);
+    ensureMasters(payload);
+
+    const feature = payload.features.auto_messages_departments;
+    feature.enabled = false;
+    (feature.welcome ||= {}).enabled = false;
+
+    const input = swDeptHdr?.querySelector('input');
+    swDeptHdr?.classList.add('disabled');
+    if (input) input.disabled = true;
+
+    __persisting = true;
+    updateSaveButtons();
+
+    try {
+      await putConfig(payload);
+
+      cfg = payload;
+      _lastLoadedSnapshot = JSON.stringify(cfg);
+
+      setHeaderSwitch(swDeptHdr, pillDeptHdr, false);
+      setSwitch(swDeptWelcome, false, pillDeptWelcome);
+      setAccordionOpen(headAutoDept, bodyAutoDept, false);
+      syncSectionState();
+
+      if (showToast) toast('Menu de departamentos desligado. Nenhuma mensagem desse menu será enviada.');
+      return true;
+    } catch (_) {
+      // Em caso de falha, a chave permanece ligada, refletindo o estado real
+      // que ainda está salvo no servidor.
+      return false;
+    } finally {
+      __persisting = false;
+      swDeptHdr?.classList.remove('disabled');
+      if (input) input.disabled = false;
+      updateSaveButtons();
+    }
   }
 
   function insertAtCaret(ta, text) {
@@ -820,7 +1039,7 @@ Digite apenas o número da opção desejada.`
   function getSelectedFilas() {
     if (!cfg) return [];
 
-    const items = ensureFilaItems();
+    const items = ensureFilaDraftItems();
 
     const selectedIds = new Set(
       Object.entries(items)
@@ -899,7 +1118,7 @@ Digite apenas o número da opção desejada.`
     if (!cfg) return;
     if (!Array.isArray(_filaCache) || !_filaCache.length) return;
 
-    const items = ensureFilaItems();
+    const items = ensureFilaDraftItems();
 
     _filaCache.forEach(f => {
       const id = String(f.id);
@@ -918,7 +1137,7 @@ Digite apenas o número da opção desejada.`
 
   function countSelectedFilas() {
     if (!cfg) return 0;
-    const items = ensureFilaItems();
+    const items = ensureFilaDraftItems();
 
     return Object.values(items).reduce((acc, it) => acc + (it?.enabled ? 1 : 0), 0);
   }
@@ -977,7 +1196,7 @@ Digite apenas o número da opção desejada.`
       return;
     }
 
-    const items = ensureFilaItems();
+    const items = ensureFilaDraftItems();
     const q = String(deptSearch?.value || '').trim().toLowerCase();
 
     deptList.innerHTML = '';
@@ -1041,26 +1260,28 @@ Digite apenas o número da opção desejada.`
         refreshFilaTemplateIfDefaultLike();
         renderFilaPreview();
         updateSaveButtons();
-        schedulePersist(250, { silent: false });
         scheduleSummaryRefresh();
+
+        // Desmarcar é uma ação de segurança: grava imediatamente no backend.
+        // Marcar continua aguardando o clique em "Salvar".
+        if (!chk.checked) {
+          queueImmediateFilaDisable([f.id]);
+        }
       });
 
       const nameWrap = document.createElement('span');
-      nameWrap.style.display = 'flex';
-      nameWrap.style.flexDirection = 'column';
-      nameWrap.style.gap = '2px';
+      nameWrap.className = 'dept-copy';
 
       const name = document.createElement('span');
       name.className = 'dept-name';
       name.textContent = f.nome;
 
       const meta = document.createElement('small');
-      meta.style.color = 'var(--muted)';
-      meta.style.fontSize = '.78rem';
-      meta.textContent = [
-        f.prioridade ? `Prioridade: ${f.prioridade}` : '',
-        f.departamento_nome ? `Departamento: ${f.departamento_nome}` : '',
-      ].filter(Boolean).join(' • ');
+      meta.className = 'dept-meta';
+      const prioridade = cleanLabel(f.prioridade || 'normal');
+      meta.textContent = prioridade
+        ? `Prioridade ${prioridade.charAt(0).toUpperCase()}${prioridade.slice(1)}`
+        : '';
 
       nameWrap.appendChild(name);
       if (meta.textContent) nameWrap.appendChild(meta);
@@ -1250,15 +1471,15 @@ Digite apenas o número da opção desejada.`
   }
 
   async function persistUI({ silent = true } = {}) {
-    if (!cfg || __persisting) return;
+    if (!cfg || __persisting) return false;
 
     syncCfgFromUI();
 
     const autoOn = getSwitch(swAutoHdr);
     const filaOn = getSwitch(swDeptHdr);
 
-    if (autoOn && !validateBeforeSave('auto')) return;
-    if (filaOn && !validateBeforeSave('dept')) return;
+    if (autoOn && !validateBeforeSave('auto')) return false;
+    if (filaOn && !validateBeforeSave('dept')) return false;
 
     __persisting = true;
     updateSaveButtons();
@@ -1270,8 +1491,10 @@ Digite apenas o número da opção desejada.`
         toast('Configurações salvas com sucesso.');
         showRobotCelebration();
       }
+      return true;
     } catch (_) {
       // putConfig já mostra notify
+      return false;
     } finally {
       __persisting = false;
       updateSaveButtons();
@@ -1341,11 +1564,8 @@ Digite apenas o número da opção desejada.`
 
         if (!ok) return;
 
-        setHeaderSwitch(swDeptHdr, pillDeptHdr, false);
-        setSwitch(swDeptWelcome, false, pillDeptWelcome);
-
-        cfg.features.auto_messages_departments.enabled = false;
-        (cfg.features.auto_messages_departments.welcome ||= {}).enabled = false;
+        const disabled = await persistDepartmentModeOffNow({ showToast: false });
+        if (!disabled) return;
       }
 
       if (labelEl === swDeptHdr && newVal && getSwitch(swAutoHdr)) {
@@ -1392,6 +1612,13 @@ Digite apenas o número da opção desejada.`
           message: 'Desligue primeiro a resposta automática para ativar o menu de departamentos.',
           kind: 'warn'
         });
+        return;
+      }
+
+      // O botão principal do menu é uma trava geral. Ao desligar, grava primeiro
+      // no servidor e só depois mostra a chave desligada na tela.
+      if (labelEl === swDeptHdr && wasOn && !newVal) {
+        await persistDepartmentModeOffNow();
         return;
       }
 
@@ -1476,9 +1703,10 @@ Digite apenas o número da opção desejada.`
   }
 
   function updateSaveButtons() {
-    if (saveAuto) saveAuto.disabled = __persisting;
-    if (saveDept) saveDept.disabled = __persisting;
-    if (saveGlobal) saveGlobal.disabled = __persisting;
+    const busy = __persisting || __filaSafetyPending > 0;
+    if (saveAuto) saveAuto.disabled = busy;
+    if (saveDept) saveDept.disabled = busy;
+    if (saveGlobal) saveGlobal.disabled = busy;
   }
 
   async function getConfig() {
@@ -1768,6 +1996,7 @@ Digite apenas o número da opção desejada.`
   async function loadAll() {
     cfg = await getConfig();
     ensureMasters(cfg);
+    resetFilaDraftItems();
 
     await loadFilasPublicas();
 
@@ -1816,15 +2045,31 @@ Digite apenas o número da opção desejada.`
   }
 
   async function saveFilaBlock() {
-    await persistUI({ silent: false });
+    if (!cfg || __persisting || __filaSafetyPending > 0) return;
+
+    const previousItems = cloneFilaItems(ensureFilaItems());
+    commitFilaDraftItems();
+
+    const saved = await persistUI({ silent: false });
+
+    if (saved) {
+      resetFilaDraftItems();
+    } else {
+      filaFeature().items = previousItems;
+    }
+
+    renderFilaPicker();
   }
 
   function restoreSnapshot(showToast = true) {
     try {
       if (!_lastLoadedSnapshot) return;
 
+      clearTimeout(__persistTimer);
       cfg = JSON.parse(_lastLoadedSnapshot);
       ensureMasters(cfg);
+      resetFilaDraftItems();
+      seedFilaItemsDefault();
 
       setHeaderSwitch(swAutoHdr, pillAutoHdr, !!cfg.features.auto_messages.enabled);
       setHeaderSwitch(swDeptHdr, pillDeptHdr, !!cfg.features.auto_messages_departments.enabled);
@@ -2461,7 +2706,7 @@ Digite apenas o número da opção desejada.`
       deptAll?.addEventListener('click', () => {
         if (!cfg) return;
 
-        const items = ensureFilaItems();
+        const items = ensureFilaDraftItems();
 
         (_filaCache || []).forEach(f => {
           const id = String(f.id);
@@ -2478,14 +2723,13 @@ Digite apenas o número da opção desejada.`
         refreshFilaTemplateIfDefaultLike();
         renderFilaPreview();
         updateSaveButtons();
-        schedulePersist(250, { silent: false });
         scheduleSummaryRefresh();
       });
 
       deptNone?.addEventListener('click', () => {
         if (!cfg) return;
 
-        const items = ensureFilaItems();
+        const items = ensureFilaDraftItems();
 
         (_filaCache || []).forEach(f => {
           const id = String(f.id);
@@ -2502,8 +2746,10 @@ Digite apenas o número da opção desejada.`
         refreshFilaTemplateIfDefaultLike();
         renderFilaPreview();
         updateSaveButtons();
-        schedulePersist(250, { silent: false });
         scheduleSummaryRefresh();
+
+        // "Nenhuma" também precisa interromper o menu sem aguardar Salvar.
+        queueImmediateFilaDisable((_filaCache || []).map(f => String(f.id)));
       });
 
       saveAuto?.addEventListener('click', saveAutoBlock);
