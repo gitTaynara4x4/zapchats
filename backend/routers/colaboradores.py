@@ -1549,10 +1549,49 @@ async def criar_colaborador(
         )
         db.flush()
 
+        # O convite faz parte da criação. Ele é enviado antes do commit para que
+        # uma falha de SMTP cancele toda a transação e não deixe colaborador ou
+        # usuário gravado sem o e-mail de acesso ter sido entregue.
+        if convite_email_payload:
+            try:
+                _enviar_email_acesso_colaborador(**convite_email_payload)
+            except EmailDeliveryError as exc:
+                print(
+                    "[COLAB CONVITE EMAIL] erro ao enviar convite; cadastro cancelado:",
+                    exc.code,
+                    repr(exc),
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=exc.public_message,
+                ) from exc
+            except Exception as exc:
+                print(
+                    "[COLAB CONVITE EMAIL] erro inesperado; cadastro cancelado:",
+                    repr(exc),
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=(
+                        "Não foi possível enviar o convite por e-mail. "
+                        "O colaborador não foi criado. Tente novamente."
+                    ),
+                ) from exc
+
         # Materializa a resposta ainda dentro da transação. Assim, qualquer erro
-        # de serialização/consulta provoca rollback e nunca existe HTTP de erro
-        # depois de o colaborador ter sido confirmado no banco.
+        # de serialização/consulta provoca rollback. O commit só ocorre depois de
+        # todas as etapas obrigatórias terem sido concluídas com sucesso.
         result = _to_out(db, colab)
+
+        if convite_email_payload:
+            result = result.model_copy(
+                update={
+                    "convite_email_solicitado": True,
+                    "convite_email_enviado": True,
+                    "convite_email_erro": None,
+                }
+            )
+
         db.commit()
 
     except IntegrityError:
@@ -1561,41 +1600,6 @@ async def criar_colaborador(
     except Exception:
         db.rollback()
         raise
-
-    convite_email_enviado: Optional[bool] = None
-    convite_email_erro: Optional[str] = None
-
-    # O cadastro já foi confirmado no banco. Se o provedor de e-mail estiver
-    # indisponível, devolvemos a pendência para a tela sem fingir que o convite
-    # foi entregue e sem causar uma segunda criação/duplicidade ao tentar salvar.
-    if convite_email_payload:
-        try:
-            _enviar_email_acesso_colaborador(**convite_email_payload)
-            convite_email_enviado = True
-        except EmailDeliveryError as exc:
-            convite_email_enviado = False
-            convite_email_erro = exc.public_message
-            print(
-                "[COLAB CONVITE EMAIL] erro ao enviar convite:",
-                exc.code,
-                repr(exc),
-            )
-        except Exception as exc:
-            convite_email_enviado = False
-            convite_email_erro = (
-                "O colaborador foi criado, mas o convite não pôde ser enviado. "
-                "Tente reenviar pelo perfil do colaborador."
-            )
-            print("[COLAB CONVITE EMAIL] erro inesperado:", repr(exc))
-
-    if convite_email_payload:
-        result = result.model_copy(
-            update={
-                "convite_email_solicitado": True,
-                "convite_email_enviado": convite_email_enviado,
-                "convite_email_erro": convite_email_erro,
-            }
-        )
 
     return result
 
