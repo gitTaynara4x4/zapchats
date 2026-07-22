@@ -28,6 +28,7 @@ def _get_float(env: str, default: float) -> float:
 
 SEND_TIMEOUT = _get_float("WS_SEND_TIMEOUT", 2.5)            # segundos
 KEEPALIVE_SEC = _get_float("WS_KEEPALIVE_SEC", 25)           # segundos
+THREAD_BRIDGE_TIMEOUT = _get_float("WS_THREAD_BRIDGE_TIMEOUT", 3.5)
 SNAPSHOT_MAX_BYTES = int(float(os.getenv("WS_SNAPSHOT_MAX_BYTES", "1048576")))  # 1MB
 
 # IMPORTANTE:
@@ -212,6 +213,38 @@ class WebSocketManager:
         self.grupos: Dict[str, Dict[str, WebSocket]] = defaultdict(dict)
         self._snapshots: Dict[str, Any] = {}
         self._lock = asyncio.Lock()
+        # Event loop principal do FastAPI. O RabbitMQ pode rodar em outra
+        # thread, mas objetos WebSocket e o asyncio.Lock pertencem a este loop.
+        self._owner_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def bind_loop(self, loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
+        """Define explicitamente o loop que é dono dos WebSockets."""
+        if loop is None:
+            loop = asyncio.get_running_loop()
+        self._owner_loop = loop
+
+    async def _run_on_owner_loop(self, coro_factory):
+        """Executa uma coroutine no loop principal, mesmo vindo do Rabbit."""
+        current = asyncio.get_running_loop()
+        target = self._owner_loop
+
+        if target is None or target is current or target.is_closed():
+            return await coro_factory()
+
+        future = asyncio.run_coroutine_threadsafe(coro_factory(), target)
+        try:
+            wrapped = asyncio.wrap_future(future)
+            return await asyncio.wait_for(wrapped, timeout=THREAD_BRIDGE_TIMEOUT)
+        except asyncio.TimeoutError:
+            future.cancel()
+            log.warning(
+                "WS thread bridge timeout após %.2fs",
+                THREAD_BRIDGE_TIMEOUT,
+            )
+            return None
+        except Exception:
+            future.cancel()
+            raise
 
     @property
     def active_connections(self) -> Mapping[str, Dict[str, WebSocket]]:
@@ -338,7 +371,7 @@ class WebSocketManager:
                 pass
             return False
 
-    async def send_message(self, grupo: str, data: Any, *, cache_snapshot: bool = False) -> None:
+    async def _send_message_local(self, grupo: str, data: Any, *, cache_snapshot: bool = False) -> None:
         if cache_snapshot:
             self._maybe_store_snapshot(grupo, data)
 
@@ -379,17 +412,35 @@ class WebSocketManager:
                     if not live:
                         self.grupos.pop(grupo, None)
 
-    async def send_message_many(self, grupos: Iterable[str], data: Any, *, cache_snapshot: bool = False) -> None:
-        await asyncio.gather(
-            *(self.send_message(g, data, cache_snapshot=cache_snapshot) for g in grupos)
+    async def send_message(self, grupo: str, data: Any, *, cache_snapshot: bool = False) -> None:
+        await self._run_on_owner_loop(
+            lambda: self._send_message_local(
+                grupo,
+                data,
+                cache_snapshot=cache_snapshot,
+            )
         )
 
-    async def broadcast_all(self, data: Any, *, cache_snapshot: bool = False) -> None:
+    async def send_message_many(self, grupos: Iterable[str], data: Any, *, cache_snapshot: bool = False) -> None:
+        grupos_list = list(grupos)
+        await asyncio.gather(
+            *(self.send_message(g, data, cache_snapshot=cache_snapshot) for g in grupos_list)
+        )
+
+    async def _broadcast_all_local(self, data: Any, *, cache_snapshot: bool = False) -> None:
         async with self._lock:
             grupos = list(self.grupos.keys())
 
         await asyncio.gather(
-            *(self.send_message(g, data, cache_snapshot=cache_snapshot) for g in grupos)
+            *(self._send_message_local(g, data, cache_snapshot=cache_snapshot) for g in grupos)
+        )
+
+    async def broadcast_all(self, data: Any, *, cache_snapshot: bool = False) -> None:
+        await self._run_on_owner_loop(
+            lambda: self._broadcast_all_local(
+                data,
+                cache_snapshot=cache_snapshot,
+            )
         )
 
     async def broadcast(self, grupo: str, data: Any, *, cache_snapshot: bool = False) -> None:

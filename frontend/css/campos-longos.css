@@ -1,0 +1,19 @@
+/* Campos com conteúdo extenso: impede estouro e melhora leitura. */
+.long-field,
+[data-long-field],
+.form-group,
+.custom-field-item { min-width: 0; }
+
+.long-field input,
+.long-field select,
+.long-field textarea,
+[data-long-field] input,
+[data-long-field] select,
+[data-long-field] textarea { width: 100%; min-width: 0; }
+
+.field-value,
+.table-cell-long,
+.break-long-text { overflow-wrap: anywhere; word-break: break-word; }
+
+.valora-table td { max-width: 420px; }
+.valora-table td > * { max-width: 100%; }

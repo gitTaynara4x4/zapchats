@@ -1,0 +1,5 @@
+@import url("./legacy-admin-pages.css");
+.settings-col { display: flex; flex-direction: column; gap: 16px; }
+.logo-upload-box { display: flex; align-items: center; gap: 16px; padding: 16px; border: 1px dashed var(--border-hover); border-radius: 12px; background: var(--bg-soft); }
+.logo-preview { width: 72px; height: 72px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); color: var(--muted); }
+.avatar-actions { display: flex; flex-wrap: wrap; gap: 8px; }

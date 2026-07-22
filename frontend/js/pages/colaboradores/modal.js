@@ -1256,28 +1256,8 @@ export async function saveInline(){
   const deptosSel = getDepartamentosSelecionadosEdit();
   const permsSel = getPermsSelecionadasEdit();
 
-  const usaAtendimento = permsSel.some(perm => {
-    const idPerm = String(perm || '').trim().toLowerCase();
-    return idPerm === 'atendimento.ver' || idPerm === 'atendimento.enviar';
-  });
-
-  if (usaAtendimento && !instsSel.length) {
-    goWizardStep(perfilModal, 'acessos');
-
-    setTimeout(() => {
-      const warning = document.querySelector('#inst-selection-warning');
-      if (warning) warning.hidden = false;
-
-      document.querySelector('#inst-select-all')?.focus?.();
-    }, 80);
-
-    toast(
-      'Selecione pelo menos um WhatsApp para este colaborador atender. Para liberar todos, clique em “Selecionar todos”.',
-      'warn'
-    );
-    return;
-  }
-
+  // WhatsApp é opcional no cadastro do colaborador. Uma seleção vazia é válida:
+  // o colaborador é criado normalmente, mas não visualiza nem atende conversas.
   const departamentoPrincipalId = deptosSel.length ? deptosSel[0] : null;
   const horarioModo = buildHorarioModoPayload(departamentoPrincipalId, expOn);
   const acessoModo = getAcessoModo();

@@ -3843,3 +3843,978 @@ html[data-theme="dark"] .org-action-menu button.danger i{
     justify-self:flex-start!important;
   }
 }
+
+/* =========================================================
+   DARK FINAL — DEPARTAMENTOS
+   Paleta oficial ZapsChat:
+   página #212121 | superfícies #262626 / #2A2A2A
+   hover #303030 | bordas #383838
+   texto #ECECEC | secundário #B4B4B4
+   ========================================================= */
+
+/* Corrige o seletor antigo "html.dark :root", que nunca alcançava o próprio :root. */
+html.dark,
+html[data-theme="dark"]{
+  --dept-bg:#212121;
+  --dept-bg-2:#212121;
+  --dept-surface:#262626;
+  --dept-surface-2:#2a2a2a;
+  --dept-text:#ececec;
+  --dept-title:#f5f5f5;
+  --dept-muted:#b4b4b4;
+  --dept-soft:#8f8f8f;
+  --dept-border:#383838;
+  --dept-border-2:#323232;
+  --dept-brand:#10b981;
+  --dept-brand-2:#34d399;
+  --dept-brand-soft:rgba(16,185,129,.14);
+  --dept-blue:#7cb8ff;
+  --dept-blue-soft:rgba(124,184,255,.12);
+  --dept-danger:#fb7185;
+  --dept-warning:#fbbf24;
+  --dept-shadow:0 20px 54px rgba(0,0,0,.34);
+  --dept-shadow-soft:0 12px 32px rgba(0,0,0,.24);
+  color-scheme:dark;
+}
+
+html.dark body[data-page="departamentos"],
+html[data-theme="dark"] body[data-page="departamentos"]{
+  background:#212121!important;
+  color:#ececec!important;
+}
+
+/* Página, barra superior e área do organograma */
+html.dark body[data-page="departamentos"] .departments-page,
+html[data-theme="dark"] body[data-page="departamentos"] .departments-page{
+  background:
+    radial-gradient(circle at 18px 18px,rgba(255,255,255,.035) 0 1.5px,transparent 1.5px) 0 0/34px 34px,
+    #212121!important;
+}
+
+html.dark body[data-page="departamentos"] .dept-topbar,
+html[data-theme="dark"] body[data-page="departamentos"] .dept-topbar{
+  background:rgba(38,38,38,.96)!important;
+  border-color:#383838!important;
+  box-shadow:0 12px 32px rgba(0,0,0,.24)!important;
+}
+
+html.dark body[data-page="departamentos"] .dept-canvas,
+html[data-theme="dark"] body[data-page="departamentos"] .dept-canvas{
+  background:#242424!important;
+  border-color:#383838!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.025)!important;
+}
+
+html.dark body[data-page="departamentos"] .dept-topbar h1,
+html[data-theme="dark"] body[data-page="departamentos"] .dept-topbar h1{
+  color:#f5f5f5!important;
+}
+
+html.dark body[data-page="departamentos"] .topbar-icon,
+html.dark body[data-page="departamentos"] .topbar-search,
+html[data-theme="dark"] body[data-page="departamentos"] .topbar-icon,
+html[data-theme="dark"] body[data-page="departamentos"] .topbar-search{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+  color:#b4b4b4!important;
+}
+
+html.dark body[data-page="departamentos"] .topbar-icon:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .topbar-icon:hover{
+  background:#303030!important;
+  border-color:#474747!important;
+  color:#ececec!important;
+}
+
+html.dark body[data-page="departamentos"] .topbar-search:focus-within,
+html[data-theme="dark"] body[data-page="departamentos"] .topbar-search:focus-within{
+  background:#2a2a2a!important;
+  border-color:rgba(16,185,129,.72)!important;
+  box-shadow:0 0 0 4px rgba(16,185,129,.12)!important;
+}
+
+html.dark body[data-page="departamentos"] .topbar-search input,
+html[data-theme="dark"] body[data-page="departamentos"] .topbar-search input{
+  color:#ececec!important;
+}
+
+html.dark body[data-page="departamentos"] input::placeholder,
+html.dark body[data-page="departamentos"] textarea::placeholder,
+html[data-theme="dark"] body[data-page="departamentos"] input::placeholder,
+html[data-theme="dark"] body[data-page="departamentos"] textarea::placeholder{
+  color:#777!important;
+}
+
+/* Linhas do organograma */
+html.dark body[data-page="departamentos"] .org-link,
+html[data-theme="dark"] body[data-page="departamentos"] .org-link{
+  stroke:#505050!important;
+}
+
+html.dark body[data-page="departamentos"] .org-link.is-active,
+html[data-theme="dark"] body[data-page="departamentos"] .org-link.is-active{
+  stroke:#34d399!important;
+}
+
+html.dark body[data-page="departamentos"] .org-link-dot,
+html[data-theme="dark"] body[data-page="departamentos"] .org-link-dot{
+  fill:#262626!important;
+  stroke:#34d399!important;
+}
+
+/* Cards do organograma */
+html.dark body[data-page="departamentos"] .org-card,
+html.dark body[data-page="departamentos"] .org-card.is-root,
+html[data-theme="dark"] body[data-page="departamentos"] .org-card,
+html[data-theme="dark"] body[data-page="departamentos"] .org-card.is-root{
+  background:#262626!important;
+  border-color:#383838!important;
+  color:#ececec!important;
+  box-shadow:0 14px 34px rgba(0,0,0,.24)!important;
+}
+
+html.dark body[data-page="departamentos"] .org-card:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .org-card:hover{
+  background:#292929!important;
+  border-color:#464646!important;
+  box-shadow:0 20px 44px rgba(0,0,0,.34)!important;
+}
+
+html.dark body[data-page="departamentos"] .org-card.is-selected,
+html.dark body[data-page="departamentos"] .org-card-wrap.is-menu-open .org-card,
+html[data-theme="dark"] body[data-page="departamentos"] .org-card.is-selected,
+html[data-theme="dark"] body[data-page="departamentos"] .org-card-wrap.is-menu-open .org-card{
+  border-color:#10b981!important;
+  box-shadow:0 0 0 3px rgba(16,185,129,.16),0 20px 44px rgba(0,0,0,.34)!important;
+}
+
+html.dark body[data-page="departamentos"] .org-card.match,
+html[data-theme="dark"] body[data-page="departamentos"] .org-card.match{
+  border-color:#5696d6!important;
+  box-shadow:0 0 0 3px rgba(124,184,255,.14),0 18px 38px rgba(0,0,0,.30)!important;
+}
+
+html.dark body[data-page="departamentos"] .org-icon,
+html.dark body[data-page="departamentos"] .org-card.is-root .org-icon,
+html[data-theme="dark"] body[data-page="departamentos"] .org-icon,
+html[data-theme="dark"] body[data-page="departamentos"] .org-card.is-root .org-icon{
+  background:rgba(16,185,129,.14)!important;
+  border-color:rgba(16,185,129,.22)!important;
+  color:#6ee7b7!important;
+}
+
+html.dark body[data-page="departamentos"] .org-title,
+html[data-theme="dark"] body[data-page="departamentos"] .org-title{
+  color:#f5f5f5!important;
+}
+
+html.dark body[data-page="departamentos"] .org-sub,
+html.dark body[data-page="departamentos"] .org-count,
+html[data-theme="dark"] body[data-page="departamentos"] .org-sub,
+html[data-theme="dark"] body[data-page="departamentos"] .org-count{
+  color:#a7a7a7!important;
+}
+
+html.dark body[data-page="departamentos"] .org-footer,
+html[data-theme="dark"] body[data-page="departamentos"] .org-footer{
+  background:#26342f!important;
+  color:#9ff4d2!important;
+  border-color:#33463f!important;
+}
+
+html.dark body[data-page="departamentos"] .org-footer.is-empty,
+html[data-theme="dark"] body[data-page="departamentos"] .org-footer.is-empty{
+  background:#2a2a2a!important;
+  color:#909090!important;
+}
+
+html.dark body[data-page="departamentos"] .org-menu-btn,
+html[data-theme="dark"] body[data-page="departamentos"] .org-menu-btn{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+  color:#b4b4b4!important;
+}
+
+html.dark body[data-page="departamentos"] .org-menu-btn:hover,
+html.dark body[data-page="departamentos"] .org-menu-btn.is-open,
+html[data-theme="dark"] body[data-page="departamentos"] .org-menu-btn:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .org-menu-btn.is-open{
+  background:#303030!important;
+  border-color:#4a4a4a!important;
+  color:#ececec!important;
+}
+
+/* Menus do card e painel lateral */
+html.dark body[data-page="departamentos"] .org-action-menu,
+html.dark body[data-page="departamentos"] .side-action-menu,
+html.dark body[data-page="departamentos"] .parent-panel,
+html[data-theme="dark"] body[data-page="departamentos"] .org-action-menu,
+html[data-theme="dark"] body[data-page="departamentos"] .side-action-menu,
+html[data-theme="dark"] body[data-page="departamentos"] .parent-panel{
+  background:#262626!important;
+  border-color:#383838!important;
+  color:#ececec!important;
+  box-shadow:0 26px 70px rgba(0,0,0,.48)!important;
+}
+
+html.dark body[data-page="departamentos"] .org-action-menu::before,
+html[data-theme="dark"] body[data-page="departamentos"] .org-action-menu::before{
+  border-right-color:#262626!important;
+}
+
+html.dark body[data-page="departamentos"] .side-action-menu::before,
+html[data-theme="dark"] body[data-page="departamentos"] .side-action-menu::before{
+  background:#262626!important;
+  border-color:#383838!important;
+}
+
+html.dark body[data-page="departamentos"] .org-action-menu button,
+html.dark body[data-page="departamentos"] .side-action-menu button,
+html.dark body[data-page="departamentos"] .parent-item,
+html[data-theme="dark"] body[data-page="departamentos"] .org-action-menu button,
+html[data-theme="dark"] body[data-page="departamentos"] .side-action-menu button,
+html[data-theme="dark"] body[data-page="departamentos"] .parent-item{
+  background:transparent!important;
+  color:#ececec!important;
+}
+
+html.dark body[data-page="departamentos"] .org-action-menu button:hover,
+html.dark body[data-page="departamentos"] .side-action-menu button:hover,
+html.dark body[data-page="departamentos"] .parent-item:hover,
+html.dark body[data-page="departamentos"] .parent-item.selected,
+html[data-theme="dark"] body[data-page="departamentos"] .org-action-menu button:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .side-action-menu button:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .parent-item:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .parent-item.selected{
+  background:#303030!important;
+  color:#f5f5f5!important;
+}
+
+html.dark body[data-page="departamentos"] .org-action-menu strong,
+html.dark body[data-page="departamentos"] .side-action-menu strong,
+html[data-theme="dark"] body[data-page="departamentos"] .org-action-menu strong,
+html[data-theme="dark"] body[data-page="departamentos"] .side-action-menu strong{
+  color:#f5f5f5!important;
+}
+
+html.dark body[data-page="departamentos"] .org-action-menu span,
+html.dark body[data-page="departamentos"] .side-action-menu span,
+html[data-theme="dark"] body[data-page="departamentos"] .org-action-menu span,
+html[data-theme="dark"] body[data-page="departamentos"] .side-action-menu span{
+  color:#a3a3a3!important;
+}
+
+html.dark body[data-page="departamentos"] .org-action-menu button.danger:hover,
+html.dark body[data-page="departamentos"] .side-action-menu button.danger:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .org-action-menu button.danger:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .side-action-menu button.danger:hover{
+  background:rgba(251,113,133,.10)!important;
+}
+
+html.dark body[data-page="departamentos"] .org-action-menu button.danger strong,
+html.dark body[data-page="departamentos"] .side-action-menu button.danger strong,
+html[data-theme="dark"] body[data-page="departamentos"] .org-action-menu button.danger strong,
+html[data-theme="dark"] body[data-page="departamentos"] .side-action-menu button.danger strong{
+  color:#fda4af!important;
+}
+
+/* Controles de zoom e estados vazios */
+html.dark body[data-page="departamentos"] .org-controls,
+html.dark body[data-page="departamentos"] .org-empty-hint,
+html[data-theme="dark"] body[data-page="departamentos"] .org-controls,
+html[data-theme="dark"] body[data-page="departamentos"] .org-empty-hint{
+  background:rgba(42,42,42,.96)!important;
+  border-color:#383838!important;
+  color:#b4b4b4!important;
+  box-shadow:0 12px 30px rgba(0,0,0,.30)!important;
+}
+
+html.dark body[data-page="departamentos"] .org-controls button,
+html[data-theme="dark"] body[data-page="departamentos"] .org-controls button{
+  color:#b4b4b4!important;
+}
+
+html.dark body[data-page="departamentos"] .org-controls button:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .org-controls button:hover{
+  background:#303030!important;
+  color:#6ee7b7!important;
+}
+
+html.dark body[data-page="departamentos"] .org-controls span,
+html.dark body[data-page="departamentos"] .org-empty-hint,
+html[data-theme="dark"] body[data-page="departamentos"] .org-controls span,
+html[data-theme="dark"] body[data-page="departamentos"] .org-empty-hint{
+  color:#b4b4b4!important;
+}
+
+html.dark body[data-page="departamentos"] .org-empty-hint strong,
+html[data-theme="dark"] body[data-page="departamentos"] .org-empty-hint strong{
+  color:#f5f5f5!important;
+}
+
+/* Painel lateral */
+html.dark body[data-page="departamentos"] .dept-side-panel,
+html[data-theme="dark"] body[data-page="departamentos"] .dept-side-panel{
+  background:#262626!important;
+  border-color:#383838!important;
+  box-shadow:0 12px 32px rgba(0,0,0,.24)!important;
+}
+
+html.dark body[data-page="departamentos"] .side-head,
+html.dark body[data-page="departamentos"] .side-section,
+html[data-theme="dark"] body[data-page="departamentos"] .side-head,
+html[data-theme="dark"] body[data-page="departamentos"] .side-section{
+  background:#262626!important;
+  border-color:#383838!important;
+}
+
+html.dark body[data-page="departamentos"] .side-title h2,
+html.dark body[data-page="departamentos"] .section-head h3,
+html[data-theme="dark"] body[data-page="departamentos"] .side-title h2,
+html[data-theme="dark"] body[data-page="departamentos"] .section-head h3{
+  color:#f5f5f5!important;
+}
+
+html.dark body[data-page="departamentos"] .side-title small,
+html.dark body[data-page="departamentos"] .section-head h3 b,
+html[data-theme="dark"] body[data-page="departamentos"] .side-title small,
+html[data-theme="dark"] body[data-page="departamentos"] .section-head h3 b{
+  color:#a3a3a3!important;
+}
+
+html.dark body[data-page="departamentos"] .side-icons button,
+html.dark body[data-page="departamentos"] .section-action-btn,
+html[data-theme="dark"] body[data-page="departamentos"] .side-icons button,
+html[data-theme="dark"] body[data-page="departamentos"] .section-action-btn{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+  color:#b4b4b4!important;
+}
+
+html.dark body[data-page="departamentos"] .side-icons button:hover,
+html.dark body[data-page="departamentos"] .section-action-btn:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .side-icons button:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .section-action-btn:hover{
+  background:#303030!important;
+  border-color:#474747!important;
+  color:#ececec!important;
+}
+
+html.dark body[data-page="departamentos"] .summary-box,
+html.dark body[data-page="departamentos"] .info-box,
+html.dark body[data-page="departamentos"] .assign-box,
+html.dark body[data-page="departamentos"] .side-empty,
+html.dark body[data-page="departamentos"] .person-row,
+html.dark body[data-page="departamentos"] .mini-info-box,
+html[data-theme="dark"] body[data-page="departamentos"] .summary-box,
+html[data-theme="dark"] body[data-page="departamentos"] .info-box,
+html[data-theme="dark"] body[data-page="departamentos"] .assign-box,
+html[data-theme="dark"] body[data-page="departamentos"] .side-empty,
+html[data-theme="dark"] body[data-page="departamentos"] .person-row,
+html[data-theme="dark"] body[data-page="departamentos"] .mini-info-box{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+  color:#ececec!important;
+}
+
+html.dark body[data-page="departamentos"] .summary-box strong,
+html.dark body[data-page="departamentos"] .info-box strong,
+html.dark body[data-page="departamentos"] .person-main strong,
+html.dark body[data-page="departamentos"] .side-empty strong,
+html[data-theme="dark"] body[data-page="departamentos"] .summary-box strong,
+html[data-theme="dark"] body[data-page="departamentos"] .info-box strong,
+html[data-theme="dark"] body[data-page="departamentos"] .person-main strong,
+html[data-theme="dark"] body[data-page="departamentos"] .side-empty strong{
+  color:#f5f5f5!important;
+}
+
+html.dark body[data-page="departamentos"] .summary-box span,
+html.dark body[data-page="departamentos"] .info-box span,
+html.dark body[data-page="departamentos"] .person-main small,
+html.dark body[data-page="departamentos"] .side-empty,
+html[data-theme="dark"] body[data-page="departamentos"] .summary-box span,
+html[data-theme="dark"] body[data-page="departamentos"] .info-box span,
+html[data-theme="dark"] body[data-page="departamentos"] .person-main small,
+html[data-theme="dark"] body[data-page="departamentos"] .side-empty{
+  color:#a3a3a3!important;
+}
+
+html.dark body[data-page="departamentos"] .side-search,
+html[data-theme="dark"] body[data-page="departamentos"] .side-search{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+  color:#8f8f8f!important;
+}
+
+html.dark body[data-page="departamentos"] .side-search input,
+html[data-theme="dark"] body[data-page="departamentos"] .side-search input{
+  color:#ececec!important;
+}
+
+html.dark body[data-page="departamentos"] .side-search:focus-within,
+html[data-theme="dark"] body[data-page="departamentos"] .side-search:focus-within{
+  border-color:rgba(16,185,129,.72)!important;
+  box-shadow:0 0 0 4px rgba(16,185,129,.12)!important;
+}
+
+html.dark body[data-page="departamentos"] .dots,
+html[data-theme="dark"] body[data-page="departamentos"] .dots{
+  color:#8f8f8f!important;
+}
+
+html.dark body[data-page="departamentos"] .dots:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .dots:hover{
+  background:#303030!important;
+  color:#ececec!important;
+}
+
+/* Modal base */
+html.dark body[data-page="departamentos"] .modal-back,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-back{
+  background:rgba(0,0,0,.68)!important;
+}
+
+html.dark body[data-page="departamentos"] .modal-card,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-card{
+  background:#262626!important;
+  border-color:#383838!important;
+  color:#ececec!important;
+  box-shadow:0 34px 94px rgba(0,0,0,.58)!important;
+}
+
+html.dark body[data-page="departamentos"] .modal-head,
+html.dark body[data-page="departamentos"] .modal-card.modal-mode-schedule .modal-head,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-head,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-card.modal-mode-schedule .modal-head{
+  background:#262626!important;
+  border-color:#383838!important;
+}
+
+html.dark body[data-page="departamentos"] .modal-form,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-form{
+  background:#262626!important;
+  color:#ececec!important;
+}
+
+html.dark body[data-page="departamentos"] .modal-foot,
+html.dark body[data-page="departamentos"] .modal-card.modal-mode-schedule .modal-foot,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-foot,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-card.modal-mode-schedule .modal-foot{
+  background:#262626!important;
+  border-color:#383838!important;
+}
+
+html.dark body[data-page="departamentos"] .modal-close,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-close{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+  color:#b4b4b4!important;
+}
+
+html.dark body[data-page="departamentos"] .modal-close:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-close:hover{
+  background:rgba(251,113,133,.10)!important;
+  border-color:rgba(251,113,133,.32)!important;
+  color:#fda4af!important;
+}
+
+html.dark body[data-page="departamentos"] .modal-head h2,
+html.dark body[data-page="departamentos"] .step2-hero h3,
+html.dark body[data-page="departamentos"] .availability-header h3,
+html.dark body[data-page="departamentos"] .review-card h3,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-head h2,
+html[data-theme="dark"] body[data-page="departamentos"] .step2-hero h3,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-header h3,
+html[data-theme="dark"] body[data-page="departamentos"] .review-card h3{
+  color:#f5f5f5!important;
+}
+
+html.dark body[data-page="departamentos"] .modal-step-label,
+html.dark body[data-page="departamentos"] .availability-kicker,
+html.dark body[data-page="departamentos"] .review-kicker,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-step-label,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-kicker,
+html[data-theme="dark"] body[data-page="departamentos"] .review-kicker{
+  background:rgba(16,185,129,.14)!important;
+  border-color:rgba(16,185,129,.22)!important;
+  color:#86efc5!important;
+}
+
+/* Stepper */
+html.dark body[data-page="departamentos"] .wizard-stepper,
+html[data-theme="dark"] body[data-page="departamentos"] .wizard-stepper{
+  color:#8f8f8f!important;
+}
+
+html.dark body[data-page="departamentos"] .step-dot,
+html[data-theme="dark"] body[data-page="departamentos"] .step-dot{
+  background:#2a2a2a!important;
+  border-color:#444!important;
+  color:#a3a3a3!important;
+}
+
+html.dark body[data-page="departamentos"] .wizard-stepper-item.is-active .step-dot,
+html.dark body[data-page="departamentos"] .wizard-stepper-item.is-complete .step-dot,
+html[data-theme="dark"] body[data-page="departamentos"] .wizard-stepper-item.is-active .step-dot,
+html[data-theme="dark"] body[data-page="departamentos"] .wizard-stepper-item.is-complete .step-dot{
+  background:#10b981!important;
+  border-color:#10b981!important;
+  color:#fff!important;
+}
+
+html.dark body[data-page="departamentos"] .wizard-stepper-item.is-active .step-text,
+html.dark body[data-page="departamentos"] .wizard-stepper-item.is-complete .step-text,
+html[data-theme="dark"] body[data-page="departamentos"] .wizard-stepper-item.is-active .step-text,
+html[data-theme="dark"] body[data-page="departamentos"] .wizard-stepper-item.is-complete .step-text{
+  color:#ececec!important;
+}
+
+html.dark body[data-page="departamentos"] .step-line,
+html[data-theme="dark"] body[data-page="departamentos"] .step-line{
+  background:#414141!important;
+}
+
+/* Campos e seletores */
+html.dark body[data-page="departamentos"] .fi label,
+html.dark body[data-page="departamentos"] .field-label-inline,
+html.dark body[data-page="departamentos"] .compact-field > span,
+html.dark body[data-page="departamentos"] .time-mini-field > span,
+html.dark body[data-page="departamentos"] .toggle-copy strong,
+html[data-theme="dark"] body[data-page="departamentos"] .fi label,
+html[data-theme="dark"] body[data-page="departamentos"] .field-label-inline,
+html[data-theme="dark"] body[data-page="departamentos"] .compact-field > span,
+html[data-theme="dark"] body[data-page="departamentos"] .time-mini-field > span,
+html[data-theme="dark"] body[data-page="departamentos"] .toggle-copy strong{
+  color:#d7d7d7!important;
+}
+
+html.dark body[data-page="departamentos"] .input,
+html.dark body[data-page="departamentos"] .parent-picker,
+html.dark body[data-page="departamentos"] .members-search,
+html.dark body[data-page="departamentos"] .availability-time-grid input.input,
+html[data-theme="dark"] body[data-page="departamentos"] .input,
+html[data-theme="dark"] body[data-page="departamentos"] .parent-picker,
+html[data-theme="dark"] body[data-page="departamentos"] .members-search,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-time-grid input.input{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+  color:#ececec!important;
+  box-shadow:none!important;
+}
+
+html.dark body[data-page="departamentos"] .input:focus,
+html.dark body[data-page="departamentos"] .parent-fi:focus-within .parent-picker,
+html.dark body[data-page="departamentos"] .members-search:focus-within,
+html[data-theme="dark"] body[data-page="departamentos"] .input:focus,
+html[data-theme="dark"] body[data-page="departamentos"] .parent-fi:focus-within .parent-picker,
+html[data-theme="dark"] body[data-page="departamentos"] .members-search:focus-within{
+  border-color:rgba(16,185,129,.72)!important;
+  box-shadow:0 0 0 4px rgba(16,185,129,.12)!important;
+}
+
+html.dark body[data-page="departamentos"] .parent-chip,
+html.dark body[data-page="departamentos"] .parent-item-symbol,
+html[data-theme="dark"] body[data-page="departamentos"] .parent-chip,
+html[data-theme="dark"] body[data-page="departamentos"] .parent-item-symbol{
+  background:rgba(16,185,129,.14)!important;
+  color:#86efc5!important;
+}
+
+html.dark body[data-page="departamentos"] .refined-inline,
+html.dark body[data-page="departamentos"] .form-inline,
+html[data-theme="dark"] body[data-page="departamentos"] .refined-inline,
+html[data-theme="dark"] body[data-page="departamentos"] .form-inline{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+}
+
+html.dark body[data-page="departamentos"] .toggle-copy small,
+html.dark body[data-page="departamentos"] .field-help,
+html[data-theme="dark"] body[data-page="departamentos"] .toggle-copy small,
+html[data-theme="dark"] body[data-page="departamentos"] .field-help{
+  color:#a3a3a3!important;
+}
+
+/* Prévia e revisão */
+html.dark body[data-page="departamentos"] .preview-company-box,
+html.dark body[data-page="departamentos"] .preview-parent-box,
+html.dark body[data-page="departamentos"] .preview-dept-card,
+html.dark body[data-page="departamentos"] .review-card,
+html.dark body[data-page="departamentos"] .review-preview,
+html[data-theme="dark"] body[data-page="departamentos"] .preview-company-box,
+html[data-theme="dark"] body[data-page="departamentos"] .preview-parent-box,
+html[data-theme="dark"] body[data-page="departamentos"] .preview-dept-card,
+html[data-theme="dark"] body[data-page="departamentos"] .review-card,
+html[data-theme="dark"] body[data-page="departamentos"] .review-preview{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+  color:#ececec!important;
+  box-shadow:none!important;
+}
+
+html.dark body[data-page="departamentos"] .preview-dept-card::before,
+html[data-theme="dark"] body[data-page="departamentos"] .preview-dept-card::before{
+  border-color:#4a4a4a!important;
+}
+
+html.dark body[data-page="departamentos"] .preview-dept-title,
+html.dark body[data-page="departamentos"] .review-list strong,
+html[data-theme="dark"] body[data-page="departamentos"] .preview-dept-title,
+html[data-theme="dark"] body[data-page="departamentos"] .review-list strong{
+  color:#f5f5f5!important;
+}
+
+html.dark body[data-page="departamentos"] .preview-title,
+html.dark body[data-page="departamentos"] .preview-dept-meta,
+html.dark body[data-page="departamentos"] .review-card p,
+html.dark body[data-page="departamentos"] .review-list span,
+html[data-theme="dark"] body[data-page="departamentos"] .preview-title,
+html[data-theme="dark"] body[data-page="departamentos"] .preview-dept-meta,
+html[data-theme="dark"] body[data-page="departamentos"] .review-card p,
+html[data-theme="dark"] body[data-page="departamentos"] .review-list span{
+  color:#a3a3a3!important;
+}
+
+html.dark body[data-page="departamentos"] .review-list div,
+html.dark body[data-page="departamentos"] .review-list div:nth-last-child(-n+2),
+html[data-theme="dark"] body[data-page="departamentos"] .review-list div,
+html[data-theme="dark"] body[data-page="departamentos"] .review-list div:nth-last-child(-n+2){
+  background:transparent!important;
+  border-color:#383838!important;
+}
+
+html.dark body[data-page="departamentos"] .preview-mini-avatar,
+html[data-theme="dark"] body[data-page="departamentos"] .preview-mini-avatar{
+  background:#333!important;
+}
+
+html.dark body[data-page="departamentos"] .preview-mini-lines span,
+html[data-theme="dark"] body[data-page="departamentos"] .preview-mini-lines span{
+  background:#454545!important;
+}
+
+/* Etapa Equipe, cartões e listas */
+html.dark body[data-page="departamentos"] .step2-hero,
+html.dark body[data-page="departamentos"] .step2-team-hero,
+html.dark body[data-page="departamentos"] .config-card-clean,
+html.dark body[data-page="departamentos"] .team-members-card,
+html.dark body[data-page="departamentos"] .quick-config-card,
+html.dark body[data-page="departamentos"] .members-summary-clean,
+html.dark body[data-page="departamentos"] .members-panel-clean,
+html.dark body[data-page="departamentos"] .members-list,
+html.dark body[data-page="departamentos"] .members-list-clean,
+html.dark body[data-page="departamentos"] .instancias-list,
+html.dark body[data-page="departamentos"] .instancia-pill,
+html[data-theme="dark"] body[data-page="departamentos"] .step2-hero,
+html[data-theme="dark"] body[data-page="departamentos"] .step2-team-hero,
+html[data-theme="dark"] body[data-page="departamentos"] .config-card-clean,
+html[data-theme="dark"] body[data-page="departamentos"] .team-members-card,
+html[data-theme="dark"] body[data-page="departamentos"] .quick-config-card,
+html[data-theme="dark"] body[data-page="departamentos"] .members-summary-clean,
+html[data-theme="dark"] body[data-page="departamentos"] .members-panel-clean,
+html[data-theme="dark"] body[data-page="departamentos"] .members-list,
+html[data-theme="dark"] body[data-page="departamentos"] .members-list-clean,
+html[data-theme="dark"] body[data-page="departamentos"] .instancias-list,
+html[data-theme="dark"] body[data-page="departamentos"] .instancia-pill{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+  color:#ececec!important;
+  box-shadow:none!important;
+}
+
+html.dark body[data-page="departamentos"] .member-row,
+html[data-theme="dark"] body[data-page="departamentos"] .member-row{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+  color:#ececec!important;
+}
+
+html.dark body[data-page="departamentos"] .member-row:hover,
+html.dark body[data-page="departamentos"] .step2-team-only .members-list-clean .member-row:hover,
+html.dark body[data-page="departamentos"] .instancia-pill:hover,
+html.dark body[data-page="departamentos"] .quick-instances-list .instancia-pill:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .member-row:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .step2-team-only .members-list-clean .member-row:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .instancia-pill:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .quick-instances-list .instancia-pill:hover{
+  background:#303030!important;
+  border-color:#474747!important;
+}
+
+html.dark body[data-page="departamentos"] .member-main strong,
+html.dark body[data-page="departamentos"] .config-card-head-clean h4,
+html.dark body[data-page="departamentos"] .instancia-main strong,
+html[data-theme="dark"] body[data-page="departamentos"] .member-main strong,
+html[data-theme="dark"] body[data-page="departamentos"] .config-card-head-clean h4,
+html[data-theme="dark"] body[data-page="departamentos"] .instancia-main strong{
+  color:#f5f5f5!important;
+}
+
+html.dark body[data-page="departamentos"] .member-main small,
+html.dark body[data-page="departamentos"] .config-card-head-clean p,
+html.dark body[data-page="departamentos"] .members-summary-clean,
+html.dark body[data-page="departamentos"] .instancia-main small,
+html[data-theme="dark"] body[data-page="departamentos"] .member-main small,
+html[data-theme="dark"] body[data-page="departamentos"] .config-card-head-clean p,
+html[data-theme="dark"] body[data-page="departamentos"] .members-summary-clean,
+html[data-theme="dark"] body[data-page="departamentos"] .instancia-main small{
+  color:#a3a3a3!important;
+}
+
+html.dark body[data-page="departamentos"] .mini-actions button,
+html.dark body[data-page="departamentos"] .team-actions button,
+html.dark body[data-page="departamentos"] .manage-members-btn,
+html.dark body[data-page="departamentos"] .members-toolbar button,
+html.dark body[data-page="departamentos"] .instancias-toolbar button,
+html.dark body[data-page="departamentos"] .add-people-btn,
+html[data-theme="dark"] body[data-page="departamentos"] .mini-actions button,
+html[data-theme="dark"] body[data-page="departamentos"] .team-actions button,
+html[data-theme="dark"] body[data-page="departamentos"] .manage-members-btn,
+html[data-theme="dark"] body[data-page="departamentos"] .members-toolbar button,
+html[data-theme="dark"] body[data-page="departamentos"] .instancias-toolbar button,
+html[data-theme="dark"] body[data-page="departamentos"] .add-people-btn{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+  color:#d7d7d7!important;
+}
+
+html.dark body[data-page="departamentos"] .mini-actions button:hover,
+html.dark body[data-page="departamentos"] .team-actions button:hover,
+html.dark body[data-page="departamentos"] .manage-members-btn:hover,
+html.dark body[data-page="departamentos"] .members-toolbar button:hover,
+html.dark body[data-page="departamentos"] .instancias-toolbar button:hover,
+html.dark body[data-page="departamentos"] .add-people-btn:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .mini-actions button:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .team-actions button:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .manage-members-btn:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .members-toolbar button:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .instancias-toolbar button:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .add-people-btn:hover{
+  background:#303030!important;
+  border-color:#474747!important;
+  color:#ececec!important;
+}
+
+html.dark body[data-page="departamentos"] .member-avatar,
+html.dark body[data-page="departamentos"] .avatar,
+html[data-theme="dark"] body[data-page="departamentos"] .member-avatar,
+html[data-theme="dark"] body[data-page="departamentos"] .avatar{
+  background:rgba(16,185,129,.14)!important;
+  color:#86efc5!important;
+}
+
+/* Disponibilidade */
+html.dark body[data-page="departamentos"] .availability-alert,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-alert{
+  background:rgba(16,185,129,.10)!important;
+  border-color:rgba(16,185,129,.24)!important;
+  color:#baf7df!important;
+}
+
+html.dark body[data-page="departamentos"] .availability-card,
+html.dark body[data-page="departamentos"] .availability-card-main.is-active,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-card,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-card-main.is-active{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+  color:#ececec!important;
+  box-shadow:none!important;
+}
+
+html.dark body[data-page="departamentos"] .availability-card-main.is-active,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-card-main.is-active{
+  border-color:rgba(16,185,129,.42)!important;
+  box-shadow:0 0 0 3px rgba(16,185,129,.08)!important;
+}
+
+html.dark body[data-page="departamentos"] .availability-card-copy h4,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-card-copy h4{
+  color:#f5f5f5!important;
+}
+
+html.dark body[data-page="departamentos"] .availability-card-copy p,
+html.dark body[data-page="departamentos"] .availability-header p,
+html.dark body[data-page="departamentos"] .availability-alert small,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-card-copy p,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-header p,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-alert small{
+  color:#a3a3a3!important;
+}
+
+html.dark body[data-page="departamentos"] .availability-card-icon,
+html.dark body[data-page="departamentos"] .availability-card-icon.muted,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-card-icon,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-card-icon.muted{
+  background:#333!important;
+  color:#b4b4b4!important;
+}
+
+html.dark body[data-page="departamentos"] .availability-card-main.is-active .availability-card-icon,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-card-main.is-active .availability-card-icon{
+  background:rgba(16,185,129,.14)!important;
+  color:#86efc5!important;
+}
+
+html.dark body[data-page="departamentos"] .availability-switch span,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-switch span{
+  background:#444!important;
+  border-color:#555!important;
+}
+
+html.dark body[data-page="departamentos"] .availability-switch input:checked + span,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-switch input:checked + span{
+  background:#10b981!important;
+  border-color:#10b981!important;
+}
+
+html.dark body[data-page="departamentos"] .availability-switch span::after,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-switch span::after{
+  background:#f5f5f5!important;
+}
+
+html.dark body[data-page="departamentos"] .availability-custom.is-disabled,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-custom.is-disabled{
+  opacity:.58!important;
+}
+
+html.dark body[data-page="departamentos"] .availability-custom.is-disabled .availability-time-grid input.input,
+html[data-theme="dark"] body[data-page="departamentos"] .availability-custom.is-disabled .availability-time-grid input.input{
+  background:#252525!important;
+  color:#777!important;
+}
+
+/* Ajuda */
+html.dark body[data-page="departamentos"] .modal-help-icon,
+html.dark body[data-page="departamentos"] .field-help-icon,
+html.dark body[data-page="departamentos"] .modal-help-toggle,
+html.dark body[data-page="departamentos"] #modal-help-close,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-help-icon,
+html[data-theme="dark"] body[data-page="departamentos"] .field-help-icon,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-help-toggle,
+html[data-theme="dark"] body[data-page="departamentos"] #modal-help-close{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+  color:#b4b4b4!important;
+}
+
+html.dark body[data-page="departamentos"] .modal-help-icon:hover,
+html.dark body[data-page="departamentos"] .field-help-icon:hover,
+html.dark body[data-page="departamentos"] .modal-help-toggle:hover,
+html.dark body[data-page="departamentos"] .modal-help-toggle.is-open,
+html.dark body[data-page="departamentos"] #modal-help-close:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-help-icon:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .field-help-icon:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-help-toggle:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-help-toggle.is-open,
+html[data-theme="dark"] body[data-page="departamentos"] #modal-help-close:hover{
+  background:#303030!important;
+  border-color:#474747!important;
+  color:#ececec!important;
+}
+
+html.dark body[data-page="departamentos"] .modal-help-popover,
+html.dark body[data-page="departamentos"] .modal-help-panel,
+html.dark body[data-page="departamentos"] .help-topic-card,
+html.dark body[data-page="departamentos"] .step1-hero-clean,
+html.dark body[data-page="departamentos"] .step1-help-shortcut,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-help-popover,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-help-panel,
+html[data-theme="dark"] body[data-page="departamentos"] .help-topic-card,
+html[data-theme="dark"] body[data-page="departamentos"] .step1-hero-clean,
+html[data-theme="dark"] body[data-page="departamentos"] .step1-help-shortcut{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+  color:#ececec!important;
+}
+
+html.dark body[data-page="departamentos"] .modal-help-popover__arrow,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-help-popover__arrow{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+}
+
+html.dark body[data-page="departamentos"] .modal-help-popover__content strong,
+html.dark body[data-page="departamentos"] .help-topic-card strong,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-help-popover__content strong,
+html[data-theme="dark"] body[data-page="departamentos"] .help-topic-card strong{
+  color:#f5f5f5!important;
+}
+
+html.dark body[data-page="departamentos"] .modal-help-popover__content p,
+html.dark body[data-page="departamentos"] .help-topic-card p,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-help-popover__content p,
+html[data-theme="dark"] body[data-page="departamentos"] .help-topic-card p{
+  color:#a3a3a3!important;
+}
+
+/* Botões do modal */
+html.dark body[data-page="departamentos"] .btn-modal.ghost,
+html[data-theme="dark"] body[data-page="departamentos"] .btn-modal.ghost{
+  background:#2a2a2a!important;
+  border-color:#383838!important;
+  color:#d7d7d7!important;
+}
+
+html.dark body[data-page="departamentos"] .btn-modal.ghost:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .btn-modal.ghost:hover{
+  background:#303030!important;
+  border-color:#474747!important;
+  color:#ececec!important;
+}
+
+html.dark body[data-page="departamentos"] .btn-modal.secondary,
+html[data-theme="dark"] body[data-page="departamentos"] .btn-modal.secondary{
+  color:#b4b4b4!important;
+}
+
+html.dark body[data-page="departamentos"] .btn-modal.secondary:hover,
+html[data-theme="dark"] body[data-page="departamentos"] .btn-modal.secondary:hover{
+  color:#ececec!important;
+}
+
+/* Barras de rolagem */
+html.dark body[data-page="departamentos"] .side-body,
+html.dark body[data-page="departamentos"] .modal-form,
+html.dark body[data-page="departamentos"] .members-list,
+html.dark body[data-page="departamentos"] .members-list-clean,
+html.dark body[data-page="departamentos"] .org-action-menu,
+html.dark body[data-page="departamentos"] .parent-panel,
+html[data-theme="dark"] body[data-page="departamentos"] .side-body,
+html[data-theme="dark"] body[data-page="departamentos"] .modal-form,
+html[data-theme="dark"] body[data-page="departamentos"] .members-list,
+html[data-theme="dark"] body[data-page="departamentos"] .members-list-clean,
+html[data-theme="dark"] body[data-page="departamentos"] .org-action-menu,
+html[data-theme="dark"] body[data-page="departamentos"] .parent-panel{
+  scrollbar-color:#555 #262626!important;
+}
+
+html.dark body[data-page="departamentos"] ::-webkit-scrollbar-track,
+html[data-theme="dark"] body[data-page="departamentos"] ::-webkit-scrollbar-track{
+  background:#262626!important;
+}
+
+html.dark body[data-page="departamentos"] ::-webkit-scrollbar-thumb,
+html[data-theme="dark"] body[data-page="departamentos"] ::-webkit-scrollbar-thumb{
+  background:#555!important;
+  border-color:#262626!important;
+}
+
+/* Seleção nativa de data/hora e autocomplete */
+html.dark body[data-page="departamentos"] input,
+html.dark body[data-page="departamentos"] textarea,
+html.dark body[data-page="departamentos"] select,
+html[data-theme="dark"] body[data-page="departamentos"] input,
+html[data-theme="dark"] body[data-page="departamentos"] textarea,
+html[data-theme="dark"] body[data-page="departamentos"] select{
+  color-scheme:dark!important;
+}
+
+html.dark body[data-page="departamentos"] input:-webkit-autofill,
+html.dark body[data-page="departamentos"] input:-webkit-autofill:hover,
+html.dark body[data-page="departamentos"] input:-webkit-autofill:focus,
+html[data-theme="dark"] body[data-page="departamentos"] input:-webkit-autofill,
+html[data-theme="dark"] body[data-page="departamentos"] input:-webkit-autofill:hover,
+html[data-theme="dark"] body[data-page="departamentos"] input:-webkit-autofill:focus{
+  -webkit-text-fill-color:#ececec!important;
+  -webkit-box-shadow:0 0 0 1000px #2a2a2a inset!important;
+}

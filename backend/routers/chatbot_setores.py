@@ -241,6 +241,13 @@ def _fetch_chatbot_config(db: Session, *, empresa_id: int, instancia_id: int) ->
 
 
 def _fetch_departamentos(db: Session, *, empresa_id: int, instancia_id: int) -> List[Dict[str, Any]]:
+    # A tela de configuração permite selecionar qualquer departamento ativo
+    # da empresa. O envio real do menu precisa aplicar a mesma regra; caso
+    # contrário, o preview mostra departamentos que são removidos no runtime
+    # apenas por não estarem em departamentos_instancias para esta instância.
+    #
+    # instancia_id permanece na assinatura para compatibilidade com as chamadas
+    # existentes e para futuras regras, mas não limita a lista neste fluxo.
     rows = db.execute(
         text(
             """
@@ -248,25 +255,10 @@ def _fetch_departamentos(db: Session, *, empresa_id: int, instancia_id: int) -> 
             FROM departamentos d
             WHERE d.empresa_id = :empresa_id
               AND d.ativo IS TRUE
-              AND (
-                EXISTS (
-                  SELECT 1
-                  FROM departamentos_instancias di
-                  WHERE di.departamento_id = d.id
-                    AND di.empresa_id = :empresa_id
-                    AND di.instancia_id = :instancia_id
-                )
-                OR NOT EXISTS (
-                  SELECT 1
-                  FROM departamentos_instancias di2
-                  WHERE di2.empresa_id = :empresa_id
-                    AND di2.instancia_id = :instancia_id
-                )
-              )
             ORDER BY d.nome ASC, d.id ASC
             """
         ),
-        {"empresa_id": empresa_id, "instancia_id": instancia_id},
+        {"empresa_id": empresa_id},
     ).mappings().all()
 
     deps: List[Dict[str, Any]] = []

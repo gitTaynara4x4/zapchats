@@ -1,0 +1,10 @@
+@import url("./legacy-admin-pages.css");
+.monitoramento-filter-card { margin-bottom: 14px; }
+.monitoramento-detail-top { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.detail-tabs-card { padding: 8px; margin-bottom: 14px; }
+.detail-panel { padding: 16px; }
+.detail-summary-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.mini-list { display: flex; flex-direction: column; gap: 8px; }
+.mini-item { padding: 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-soft); }
+.mini-item-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+@media (max-width: 760px) { .monitoramento-detail-top { flex-direction: column; } .detail-summary-grid, .mini-item-grid { grid-template-columns: 1fr; } }

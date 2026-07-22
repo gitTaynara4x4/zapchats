@@ -9,7 +9,7 @@
 
   const START = Date.now();
   const MAX_GLOBAL_LOADING_MS = 9000;
-  const MAX_CHAT_LOADING_MS = 12000;
+  const MAX_CHAT_LOADING_MS = 52000;
   const MAX_LIST_LOADING_MS = 25000;
 
   function now() { return Date.now(); }
@@ -161,7 +161,7 @@
       hist.querySelector('[data-zc-retry-hist="1"]')?.addEventListener('click', () => {
         try {
           const key = hist.dataset.conversationKey || hist.dataset.conversationId || hist.dataset.convKey;
-          if (key && typeof window.selecionarClienteObj === 'function') window.selecionarClienteObj(key, { forceReload: true });
+          if (key && typeof window.selecionarClienteObj === 'function') window.selecionarClienteObj(key, { forceReload: true, retry: true, timeoutMs: 60000 });
         } catch {}
       });
     } catch {}

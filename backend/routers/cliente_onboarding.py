@@ -82,6 +82,13 @@ EVOLUTION_URL = (os.getenv("EVOLUTION_URL") or "").rstrip("/")
 EVOLUTION_KEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_KEY")
 HEADERS = {"apikey": EVOLUTION_KEY, "Content-Type": "application/json"} if EVOLUTION_KEY else {}
 
+# O histórico inicial é entregue exclusivamente ao n8n.
+# A URL é obrigatória no ambiente; não existe fallback fixo dentro do código.
+EVOLUTION_HISTORY_OWNER = (os.getenv("EVOLUTION_HISTORY_OWNER") or "n8n").strip().lower()
+EVOLUTION_HISTORY_WEBHOOK_URL = (os.getenv("EVOLUTION_HISTORY_WEBHOOK_URL") or "").strip()
+EVOLUTION_HISTORY_WEBHOOK_SECRET = (os.getenv("EVOLUTION_HISTORY_WEBHOOK_SECRET") or "").strip()
+_HISTORY_WEBHOOK_EVENTS = ["MESSAGES_SET"]
+
 
 # =============================
 # Helpers de plano
@@ -198,46 +205,85 @@ def _first_non_empty(*values):
 
 
 def _extract_qr_payload(js: dict | None, *, prefer_pairing: bool = False) -> dict:
+    """
+    Normaliza a resposta de /instance/connect.
+
+    Algumas versões da Evolution devolvem, na mesma resposta, `base64`, `code`
+    e `pairingCode`. Quando o usuário escolheu código no telefone, o código de
+    pareamento deve ter prioridade absoluta e nenhuma imagem QR deve ser
+    devolvida ao front.
+    """
     if not isinstance(js, dict):
         return {}
 
-    qrd = js.get("qrcode") or js.get("qr") or js
-    if not isinstance(qrd, dict):
-        if qrd:
-            return {"code": str(qrd)}
+    candidates: list[dict] = []
+    seen: set[int] = set()
+
+    def add_candidate(value: Any) -> None:
+        if not isinstance(value, dict):
+            return
+        ident = id(value)
+        if ident in seen:
+            return
+        seen.add(ident)
+        candidates.append(value)
+
+    # Procura tanto no nível principal quanto em `data`, `qrcode` e `qr`.
+    # O pairingCode frequentemente vem no topo enquanto o base64 vem aninhado.
+    add_candidate(js)
+    data = js.get("data")
+    add_candidate(data)
+
+    for container in tuple(candidates):
+        add_candidate(container.get("qrcode"))
+        add_candidate(container.get("qr"))
+
+    limit = ""
+    for item in reversed(candidates):
+        limit = _first_non_empty(
+            item.get("limit"),
+            item.get("timeout"),
+            item.get("count"),
+            item.get("qr_limit"),
+        )
+        if limit:
+            break
+
+    def first_from(keys: tuple[str, ...]) -> str:
+        for item in reversed(candidates):
+            value = _first_non_empty(*(item.get(key) for key in keys))
+            if value:
+                return value
+        return ""
+
+    explicit_pairing = first_from(("pairingCode", "pairing_code", "pairing"))
+
+    if prefer_pairing:
+        if explicit_pairing:
+            return {"pairingCode": explicit_pairing, "limit": limit or None}
+
+        # Em algumas versões, o código de pareamento vem apenas em `code`.
+        # Só aceitamos valores curtos para não confundir o texto longo do QR.
+        for item in reversed(candidates):
+            for key in ("code", "qrCode", "qr_code", "qrText", "qr_text", "qr"):
+                value = _first_non_empty(item.get(key))
+                if value and _looks_like_pairing_code(value):
+                    return {"pairingCode": value, "limit": limit or None}
+
+        # O modo escolhido foi pairing: nunca devolve base64/QR como fallback.
         return {}
 
-    limit = qrd.get("limit") or qrd.get("timeout") or qrd.get("count") or qrd.get("qr_limit")
-
-    b64 = _first_non_empty(
-        qrd.get("base64"),
-        qrd.get("image"),
-        qrd.get("codeBase64"),
-        qrd.get("qrBase64"),
-    )
+    b64 = first_from(("base64", "image", "codeBase64", "qrBase64"))
     if b64:
-        return {"base64": b64, "limit": limit}
+        return {"base64": b64, "limit": limit or None}
 
-    explicit_pairing = _first_non_empty(
-        qrd.get("pairingCode"),
-        qrd.get("pairing_code"),
-        qrd.get("pairing"),
-    )
-    if explicit_pairing:
-        return {"pairingCode": explicit_pairing, "limit": limit}
-
-    code = _first_non_empty(
-        qrd.get("qrText"),
-        qrd.get("qr_text"),
-        qrd.get("qrCode"),
-        qrd.get("qr_code"),
-        qrd.get("qr"),
-        qrd.get("code"),
-    )
+    code = first_from(("qrText", "qr_text", "qrCode", "qr_code", "qr", "code"))
     if code:
-        if prefer_pairing and _looks_like_pairing_code(code):
-            return {"pairingCode": code, "limit": limit}
-        return {"code": code, "qrText": code, "limit": limit}
+        return {"code": code, "qrText": code, "limit": limit or None}
+
+    # Mantém compatibilidade caso a Evolution devolva apenas pairingCode.
+    if explicit_pairing:
+        return {"pairingCode": explicit_pairing, "limit": limit or None}
 
     return {}
 
@@ -407,8 +453,8 @@ def _should_sync_full_history(historico_restaurar: str | None) -> bool:
 
     Importante:
     - Isso autoriza a Evolution/Baileys a gerar MESSAGES_SET.
-    - O filtro real por período fica no messages_set.py:
-      24h, 7d ou 30d.
+    - O evento é entregue exclusivamente ao webhook do n8n.
+    - O n8n fará posteriormente o filtro real por 24h, 7d ou 30d.
     """
     h = _normalize_historico_opcao(historico_restaurar)
     return h in {"24h", "7d", "30d"}
@@ -432,12 +478,87 @@ def _settings_payload(sync_full_history: bool) -> dict:
     }
 
 
+def _history_webhook_payloads() -> list[dict]:
+    """Payloads compatíveis com versões diferentes da Evolution API.
+
+    A versão exibida no painel usa o objeto ``webhook`` com ``byEvents`` e
+    ``base64``. Algumas versões antigas aceitam o corpo sem o wrapper e usam
+    nomes diferentes para os mesmos campos. Todos os payloads ativam somente
+    MESSAGES_SET e mantêm Base64/Webhook by Events desligados.
+    """
+    config = {
+        "enabled": True,
+        "url": EVOLUTION_HISTORY_WEBHOOK_URL,
+        "byEvents": False,
+        "base64": False,
+        "events": list(_HISTORY_WEBHOOK_EVENTS),
+    }
+
+    if EVOLUTION_HISTORY_WEBHOOK_SECRET:
+        config["headers"] = {
+            "X-ZapsChat-History-Secret": EVOLUTION_HISTORY_WEBHOOK_SECRET,
+        }
+
+    legacy_camel = {
+        "enabled": True,
+        "url": EVOLUTION_HISTORY_WEBHOOK_URL,
+        "webhookByEvents": False,
+        "webhookBase64": False,
+        "events": list(_HISTORY_WEBHOOK_EVENTS),
+    }
+    legacy_snake = {
+        "enabled": True,
+        "url": EVOLUTION_HISTORY_WEBHOOK_URL,
+        "webhook_by_events": False,
+        "webhook_base64": False,
+        "events": list(_HISTORY_WEBHOOK_EVENTS),
+    }
+    if EVOLUTION_HISTORY_WEBHOOK_SECRET:
+        legacy_camel["headers"] = dict(config["headers"])
+        legacy_snake["headers"] = dict(config["headers"])
+
+    return [
+        {"webhook": dict(config)},
+        dict(config),
+        legacy_camel,
+        legacy_snake,
+    ]
+
+
+def _evo_set_history_webhook_initial(instance: str) -> bool:
+    """Configura o webhook do n8n antes da geração do QR Code.
+
+    A função só retorna ``True`` após a Evolution aceitar um payload com HTTP
+    2xx. O fluxo de conexão com restauração de histórico não segue para o QR se
+    esta etapa falhar, evitando conectar o WhatsApp sem destino para o
+    MESSAGES_SET.
+    """
+    if not (EVOLUTION_URL and EVOLUTION_KEY and instance and EVOLUTION_HISTORY_WEBHOOK_URL):
+        return False
+
+    if not re.match(r"^https?://", EVOLUTION_HISTORY_WEBHOOK_URL, flags=re.IGNORECASE):
+        return False
+
+    s = _http()
+    url = f"{EVOLUTION_URL}/webhook/set/{instance}"
+
+    for body in _history_webhook_payloads():
+        try:
+            r = s.post(url, json=body, timeout=20)
+            if r.ok:
+                return True
+        except Exception:
+            continue
+
+    return False
+
+
 def _evo_set_settings_initial(instance: str, *, sync_full_history: bool) -> bool:
     """
     Configura settings antes do /instance/connect.
 
-    Sem isso, MESSAGES_SET pode estar marcado no Rabbit,
-    mas a Evolution/Baileys pode não gerar o pacote de histórico.
+    Sem isso, a Evolution/Baileys pode não gerar o pacote MESSAGES_SET
+    que será entregue ao webhook do n8n.
     """
     if not (EVOLUTION_URL and EVOLUTION_KEY and instance):
         return False
@@ -630,8 +751,12 @@ def _analisar_saude_mensagens(msgs: list[models.Mensagem]) -> dict:
 # Listas de eventos
 # =============================
 def _events_minimal() -> List[str]:
+    """Eventos em tempo real enviados ao RabbitMQ do ZapsChat.
+
+    MESSAGES_SET não entra nesta lista: o histórico inicial pertence
+    exclusivamente ao webhook do n8n.
+    """
     return [
-        "MESSAGES_SET",
         "MESSAGES_UPSERT",
         "MESSAGES_UPDATE",
         "MESSAGES_DELETE",
@@ -667,11 +792,12 @@ def _evo_create_instance(
     *,
     sync_full_history: bool = False,
 ) -> None:
-    """
-    Cria a instância já com Rabbit ouvindo os eventos mínimos.
+    """Cria a instância sem iniciar a sincronização de histórico.
 
-    Também envia syncFullHistory quando o usuário escolhe restaurar histórico.
-    Isso é necessário para a Evolution/Baileys gerar o pacote MESSAGES_SET.
+    O parâmetro ``sync_full_history`` é mantido por compatibilidade com as
+    chamadas existentes, mas a ativação acontece somente depois que a instância
+    estiver pronta e o webhook do n8n tiver sido configurado. Isso evita a
+    Evolution gerar MESSAGES_SET antes de existir um destino para o evento.
     """
     if not (EVOLUTION_URL and EVOLUTION_KEY):
         return
@@ -682,8 +808,9 @@ def _evo_create_instance(
         "integration": "WHATSAPP-BAILEYS",
         "qrcode": (not use_pairing),
 
-        # Essencial para histórico inicial:
-        "syncFullHistory": bool(sync_full_history),
+        # Nunca iniciar histórico durante /instance/create. Primeiro o fluxo
+        # configura /webhook/set e só depois ativa syncFullHistory em /settings/set.
+        "syncFullHistory": False,
 
         # A Evolution controla exchange/fila pelo modo global do próprio container.
         # No /instance/create e /rabbitmq/set, mande só enabled/events;
@@ -696,7 +823,7 @@ def _evo_create_instance(
             "enabled": True,
             "events": _ws_events_initial(),
         },
-        "settings": _settings_payload(sync_full_history),
+        "settings": _settings_payload(False),
     }
 
     try:
@@ -728,10 +855,10 @@ def _evo_rabbit_payloads() -> list[dict]:
 
 
 def _evo_set_rabbit_initial(instance: str) -> bool:
-    """Configura Rabbit por instância com MESSAGES_SET habilitado.
+    """Configura o Rabbit da instância sem MESSAGES_SET.
 
-    Observação importante: esse endpoint NÃO define a fila global do ZapsChat.
-    A fila/exchange global deve estar no .env da própria Evolution API.
+    O Rabbit continua responsável pelos eventos em tempo real do ZapsChat.
+    O histórico inicial é enviado somente ao webhook do n8n.
     """
     if not (EVOLUTION_URL and EVOLUTION_KEY and instance):
         return False
@@ -764,16 +891,50 @@ def _evo_set_websocket_initial(instance: str) -> None:
         pass
 
 
-def _evo_prepare_instance_before_connect(instance: str, *, sync_full_history: bool) -> None:
+def _evo_prepare_instance_before_connect(instance: str, *, sync_full_history: bool) -> dict:
+    """Prepara a instância antes de gerar o QR Code.
+
+    Ordem obrigatória do novo fluxo:
+    1. Webhook do n8n com somente MESSAGES_SET;
+    2. Settings com syncFullHistory;
+    3. Rabbit já utilizado pelo restante do ZapsChat;
+    4. WebSocket básico de QR/conexão.
+
+    O webhook é obrigatório para toda instância. Quando o usuário pediu
+    histórico, syncFullHistory também é obrigatório. Em caso de falha o QR
+    não é gerado.
     """
-    Ordem importante antes de gerar/conectar QR:
-    1. Settings com syncFullHistory
-    2. Rabbit com MESSAGES_SET
-    3. WebSocket básico para QR/conexão
-    """
-    _evo_set_settings_initial(instance, sync_full_history=sync_full_history)
-    _evo_set_rabbit_initial(instance)
+    webhook_ok = _evo_set_history_webhook_initial(instance)
+    if not webhook_ok:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Não foi possível configurar o webhook exclusivo de histórico do n8n na Evolution. "
+                "O QR Code não foi gerado para evitar que MESSAGES_SET seja perdido."
+            ),
+        )
+
+    settings_ok = _evo_set_settings_initial(
+        instance,
+        sync_full_history=sync_full_history,
+    )
+    if sync_full_history and not settings_ok:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Não foi possível ativar syncFullHistory na Evolution. "
+                "O QR Code não foi gerado."
+            ),
+        )
+
+    rabbit_ok = _evo_set_rabbit_initial(instance)
     _evo_set_websocket_initial(instance)
+
+    return {
+        "history_webhook": bool(webhook_ok),
+        "sync_full_history": bool(settings_ok and sync_full_history),
+        "rabbit": bool(rabbit_ok),
+    }
 
 
 def _evo_connect(instance: str, number_digits: str | None) -> dict:
@@ -1080,7 +1241,7 @@ def conectar(
         pendente.historico_restaurar = historico_restaurar
         db.commit()
 
-        _evo_prepare_instance_before_connect(
+        prep = _evo_prepare_instance_before_connect(
             pendente.instance_name,
             sync_full_history=sync_full_history,
         )
@@ -1100,6 +1261,7 @@ def conectar(
             "qrcode": qr or None,
             "numero": pendente.numero_instancia,
             "historico_restaurar": pendente.historico_restaurar,
+            "history_webhook_configured": bool(prep.get("history_webhook")),
         }
 
     # Só bloqueia duplicidade por número se o número foi informado.
@@ -1149,10 +1311,17 @@ def conectar(
         use_pairing,
         sync_full_history=sync_full_history,
     )
-    _evo_prepare_instance_before_connect(
-        inst,
-        sync_full_history=sync_full_history,
-    )
+
+    try:
+        prep = _evo_prepare_instance_before_connect(
+            inst,
+            sync_full_history=sync_full_history,
+        )
+    except HTTPException:
+        # A instância acabou de ser criada e ainda não foi salva no ZapsChat.
+        # Remove a órfã quando a preparação obrigatória do histórico falha.
+        _evo_delete_instance(inst)
+        raise
 
     inst_row = db.query(models.EmpresaInstancia).filter(
         models.EmpresaInstancia.instance_name == inst
@@ -1199,7 +1368,7 @@ def conectar(
             conflito.historico_restaurar = historico_restaurar
             db.commit()
 
-            _evo_prepare_instance_before_connect(
+            prep = _evo_prepare_instance_before_connect(
                 conflito.instance_name,
                 sync_full_history=sync_full_history,
             )
@@ -1219,6 +1388,7 @@ def conectar(
                 "qrcode": qr or None,
                 "numero": conflito.numero_instancia,
                 "historico_restaurar": conflito.historico_restaurar,
+                "history_webhook_configured": bool(prep.get("history_webhook")),
             }
 
         raise HTTPException(409, "Este número já está cadastrado em uma instância.")
@@ -1238,6 +1408,7 @@ def conectar(
         "qrcode": qr or None,
         "numero": inst_row.numero_instancia,
         "historico_restaurar": inst_row.historico_restaurar,
+        "history_webhook_configured": bool(prep.get("history_webhook")),
     }
 
 
@@ -1351,7 +1522,7 @@ def refresh_qr(
     historico_restaurar = _normalize_historico_opcao(getattr(row, "historico_restaurar", None))
     sync_full_history = _should_sync_full_history(historico_restaurar)
 
-    _evo_prepare_instance_before_connect(
+    prep = _evo_prepare_instance_before_connect(
         instance,
         sync_full_history=sync_full_history,
     )
@@ -1384,6 +1555,7 @@ def refresh_qr(
         "method": "pairing" if use_pairing else "qrcode",
         "numero": number_digits or getattr(row, "numero_instancia", None),
         "historico_restaurar": historico_restaurar,
+        "history_webhook_configured": bool(prep.get("history_webhook")),
     }
 
 
@@ -1442,10 +1614,10 @@ def importar_historico_instancia(
     db: Session = Depends(get_db),
     identity=Depends(require_admin),
 ):
-    """Solicita importação manual de histórico da instância selecionada.
+    """Solicita ao n8n uma nova entrega de histórico da instância.
 
-    Regra: o MESSAGES_SET só será processado quando esta rota marcar
-    historico_restaurar como 24h, 7d ou 30d para a instância.
+    A rota marca o período no banco, configura o webhook exclusivo do n8n e
+    ativa syncFullHistory. O ZapsChat não processa MESSAGES_SET localmente.
     """
     _assert_empresa_access(identity, int(payload.empresa_id))
 
@@ -1471,10 +1643,17 @@ def importar_historico_instancia(
     if not instance_name:
         raise HTTPException(status_code=400, detail="Instância sem nome válido.")
 
-    # Marca a janela escolhida. O handler messages_set.py só aceita MESSAGES_SET
-    # quando este campo estiver como 24h/7d/30d.
-    inst.historico_restaurar = periodo
+    # O histórico manual segue a mesma arquitetura do primeiro QR:
+    # webhook do n8n primeiro, período salvo no banco e syncFullHistory depois.
+    # Assim o n8n nunca recebe MESSAGES_SET sem conseguir consultar a janela pedida.
+    webhook_ok = _evo_set_history_webhook_initial(instance_name)
+    if not webhook_ok:
+        raise HTTPException(
+            status_code=502,
+            detail="Não foi possível configurar o webhook de histórico do n8n na Evolution.",
+        )
 
+    inst.historico_restaurar = periodo
     for attr in ("historico_status", "history_status"):
         if hasattr(inst, attr):
             try:
@@ -1486,50 +1665,20 @@ def importar_historico_instancia(
     db.commit()
     db.refresh(inst)
 
-    # Limpa watchdog antigo para não confundir MESSAGES_SET anterior com este pedido.
-    try:
-        from backend.integrations.evolution.handlers._state import (
-            history_clear_messages_set_state,
-            remember_qr_emitted,
+    settings_ok = _evo_set_settings_initial(instance_name, sync_full_history=True)
+    if not settings_ok:
+        raise HTTPException(
+            status_code=502,
+            detail="Não foi possível ativar syncFullHistory na Evolution.",
         )
 
-        history_clear_messages_set_state(instance_name)
-        # Se a Evolution emitir connection.update após o connect/settings, isso libera
-        # o fluxo de sync mesmo quando a instância já existia.
-        remember_qr_emitted(instance_name)
-    except Exception:
-        pass
-
-    # Reforça settings e Rabbit na Evolution.
-    # Isso não define fila global; só habilita o evento por instância.
+    # Mantém os eventos em tempo real do Rabbit, sem MESSAGES_SET.
     rabbit_ok = _evo_set_rabbit_initial(instance_name)
-    settings_ok = _evo_set_settings_initial(instance_name, sync_full_history=True)
 
-    # Tenta cutucar a Evolution para reaplicar o estado da instância.
-    # Se ela estiver desconectada, pode retornar QR; se já estiver conectada, normalmente
-    # apenas retorna o estado sem desconectar.
+    # Em instância conectada, esta chamada reaplica o estado e pode iniciar a
+    # emissão do MESSAGES_SET para o webhook já configurado.
     connect_json = _evo_connect(instance_name, None)
     qr = _extract_qr_payload(connect_json, prefer_pairing=False)
-
-    fallback_agendado = False
-    try:
-        # Importação manual em instância já conectada pode não gerar novo connection.update.
-        # Então agendamos um fallback: se não vier messages.set, busca /chat/findMessages
-        # e manda para o mesmo handler do MESSAGES_SET.
-        from backend.integrations.evolution.handlers.connection import (
-            trigger_history_findmessages_fallback_later,
-        )
-
-        fallback_agendado = bool(
-            trigger_history_findmessages_fallback_later(
-                instance_name,
-                periodo,
-                empresa_id=int(inst.empresa_id),
-                reason="manual_import_route",
-            )
-        )
-    except Exception:
-        fallback_agendado = False
 
     return {
         "ok": True,
@@ -1537,13 +1686,15 @@ def importar_historico_instancia(
         "instance": instance_name,
         "numero": inst.numero_instancia,
         "historico_restaurar": periodo,
+        "history_owner": "n8n",
+        "history_webhook_configured": True,
         "syncFullHistory": True,
         "rabbit_ok": bool(rabbit_ok),
-        "settings_ok": bool(settings_ok),
-        "fallback_findmessages_agendado": bool(fallback_agendado),
+        "settings_ok": True,
+        "fallback_findmessages_agendado": False,
         "connected": bool(getattr(inst, "connected", False)),
         "qrcode": qr or None,
-        "message": "Importação solicitada. O backend vai aceitar o próximo messages.set somente dentro do período escolhido.",
+        "message": "Importação solicitada. O próximo MESSAGES_SET será entregue exclusivamente ao n8n.",
     }
 
 

@@ -1977,7 +1977,10 @@ function renderQRWaiting(){
   showIllustration();
   els.qrLoader?.classList.remove('hidden');
   if (els.qrInstru) {
-    els.qrInstru.innerHTML = '<span></span>Aguardando QR Code da Evolution...';
+    const waitingText = currentConnectMethod === 'pairing'
+      ? 'Aguardando código de pareamento da Evolution...'
+      : 'Aguardando QR Code da Evolution...';
+    els.qrInstru.innerHTML = `<span></span>${waitingText}`;
     els.qrInstru.classList.remove('hidden');
   }
 }
@@ -1989,6 +1992,48 @@ function renderQRFromResponse(qr){
   const nested = (obj.qrcode && typeof obj.qrcode === 'object') ? obj.qrcode : obj;
 
   const limit = nested.limit ?? nested.timeout ?? nested.count ?? nested.qr_limit ?? obj.limit ?? obj.timeout ?? obj.qr_limit;
+
+  const explicitPairing = firstNonEmpty(
+    nested.pairingCode,
+    nested.pairing_code,
+    nested.pairing,
+    obj.pairingCode,
+    obj.pairing_code,
+    obj.pairing
+  );
+
+  const codeCandidates = [
+    nested.code,
+    obj.code,
+    nested.qrCode,
+    nested.qr_code,
+    obj.qrCode,
+    obj.qr_code,
+    nested.qrText,
+    nested.qr_text,
+    obj.qrText,
+    obj.qr_text,
+    nested.qr,
+    obj.qr
+  ];
+
+  // Código no telefone: aceita somente pairingCode ou um código curto.
+  // Base64 e texto longo de QR são ignorados para não trocar o modo escolhido.
+  if (currentConnectMethod === 'pairing') {
+    if (explicitPairing) {
+      return renderPairingCode(explicitPairing, limit);
+    }
+
+    const shortCode = codeCandidates
+      .map(value => firstNonEmpty(value))
+      .find(value => isShortPairingCandidate(value));
+
+    if (shortCode) {
+      return renderPairingCode(shortCode, limit);
+    }
+
+    return false;
+  }
 
   const b64 = firstNonEmpty(
     nested.base64,
@@ -2006,41 +2051,12 @@ function renderQRFromResponse(qr){
     return true;
   }
 
-  const explicitPairing = firstNonEmpty(
-    nested.pairingCode,
-    nested.pairing_code,
-    nested.pairing,
-    obj.pairingCode,
-    obj.pairing_code,
-    obj.pairing
-  );
+  const qrCode = codeCandidates
+    .map(value => firstNonEmpty(value))
+    .find(Boolean);
 
-  if (explicitPairing) {
-    renderPairingCode(explicitPairing, limit);
-    return true;
-  }
-
-  const code = firstNonEmpty(
-    nested.qrText,
-    nested.qr_text,
-    nested.qrCode,
-    nested.qr_code,
-    nested.qr,
-    nested.code,
-    obj.qrText,
-    obj.qr_text,
-    obj.qrCode,
-    obj.qr_code,
-    obj.qr,
-    obj.code
-  );
-
-  if (code) {
-    if (currentConnectMethod === 'pairing' && isShortPairingCandidate(code)) {
-      renderPairingCode(code, limit);
-    } else {
-      renderQRFromText(code, limit);
-    }
+  if (qrCode) {
+    renderQRFromText(qrCode, limit);
     return true;
   }
 

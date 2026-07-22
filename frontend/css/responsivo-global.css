@@ -1,0 +1,91 @@
+/* /frontend/css/responsivo-global.css
+   Responsividade compartilhada pelas páginas administrativas antigas. */
+
+img, video, canvas, svg { max-width: 100%; }
+.valora-table-wrapper,
+.financeiro-table-wrap,
+.contatos-table-wrapper,
+.proposal-table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+@media (max-width: 1100px) {
+  .filters-grid,
+  .financeiro-filters-grid,
+  .form-row.three-cols,
+  .three-cols { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+
+  .topbar { align-items: stretch; }
+  .topbar-actions { flex-wrap: wrap; justify-content: flex-start; }
+}
+
+@media (max-width: 760px) {
+  .main { padding: 78px 16px 24px !important; }
+  .topbar { flex-direction: column; gap: 14px; }
+  .topbar-actions,
+  .footer-actions,
+  .form-actions,
+  .modal-footer { width: 100%; }
+  .topbar-actions .btn,
+  .form-actions .btn { min-height: 40px; }
+
+  .filters-grid,
+  .financeiro-filters-grid,
+  .form-row,
+  .form-row.two-cols,
+  .form-row.three-cols,
+  .form-row.four-cols,
+  .two-cols,
+  .three-cols,
+  .four-cols,
+  .area-grid,
+  .contratos-grid,
+  .settings-layout,
+  .help-layout,
+  .financeiro-grid-2,
+  .financeiro-grid-3,
+  .financeiro-grid-4 { grid-template-columns: minmax(0, 1fr) !important; }
+
+  .span-2,
+  .span-3,
+  .span-4,
+  .span-all { grid-column: 1 / -1 !important; }
+
+  .panel-card,
+  .section-card,
+  .financeiro-panel,
+  .financeiro-card { border-radius: 10px; }
+
+  body .modal-overlay { padding: 10px !important; align-items: flex-end !important; }
+  body .modal-content,
+  body .modal-content-large,
+  body .modal-xl,
+  body .modal-lg,
+  body .modal-md,
+  body .proposal-modal-content,
+  body .cotacao-modal { width: 100% !important; max-width: none !important; max-height: calc(100dvh - 20px) !important; border-radius: 14px 14px 8px 8px !important; }
+
+  .cliente-modal-shell,
+  .produto-modal-shell,
+  .patrimonio-modal-shell,
+  .fornecedor-modal-shell,
+  .cotacao-modal-shell { grid-template-columns: 1fr !important; }
+
+  .cliente-modal-sidebar,
+  .produto-modal-sidebar,
+  .patrimonio-modal-sidebar,
+  .fornecedor-modal-sidebar,
+  .cotacao-modal-sidebar { display: none !important; }
+
+  .valora-table { min-width: 680px; }
+  .financeiro-tabs { overflow-x: auto; flex-wrap: nowrap !important; padding-bottom: 4px; }
+  .financeiro-tabs a { flex: 0 0 auto; }
+}
+
+@media (max-width: 480px) {
+  .main { padding-inline: 12px !important; }
+  .topbar h1, .topbar-title h1, .page-title { font-size: 20px !important; }
+  .topbar-actions { display: grid !important; grid-template-columns: 1fr 1fr; }
+  .topbar-actions .btn-primary:last-child { grid-column: 1 / -1; }
+  .search-row { align-items: stretch !important; flex-direction: column; }
+  .search-box { width: 100%; }
+  .modal-header, .modal-body, .modal-footer { padding-inline: 14px !important; }
+}

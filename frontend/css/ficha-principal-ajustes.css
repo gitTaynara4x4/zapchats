@@ -1,0 +1,19 @@
+.ficha-principal-code-field,
+.cliente-ficha-code-field,
+.produto-ficha-code-field,
+.patrimonio-ficha-code-field,
+.fornecedor-ficha-code-field,
+.cotacao-ficha-code-field,
+.ficha-principal-date-field { min-width: 0; }
+
+.ficha-principal-code-field input,
+.cliente-ficha-code-field input,
+.produto-ficha-code-field input,
+.patrimonio-ficha-code-field input,
+.fornecedor-ficha-code-field input,
+.cotacao-ficha-code-field input,
+.ficha-principal-date-field input { width: 100%; }
+
+@media (max-width: 640px) {
+  .ficha-principal-system-fields { grid-template-columns: 1fr; }
+}

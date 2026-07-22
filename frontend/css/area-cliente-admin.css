@@ -1,0 +1,10 @@
+@import url("./legacy-admin-pages.css");
+.area-intro { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; margin-bottom: 16px; }
+.intro-card-main { grid-column: span 1; }
+.area-content { display: flex; flex-direction: column; gap: 14px; }
+.cliente-resumo, .status-box, .acesso-head, .acesso-actions, .acesso-gerado-box { display: flex; align-items: center; gap: 12px; }
+.cliente-resumo-icon, .acesso-ativo-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 9px; background: var(--brand-soft); color: var(--brand); }
+.acesso-card, .dados-card, .historico-card { padding: 16px; }
+.gerar-acesso-box, .acesso-ativo-box { padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-soft); }
+.copy-control input { flex: 1; min-width: 0; }
+@media (max-width: 900px) { .area-intro { grid-template-columns: 1fr; } }

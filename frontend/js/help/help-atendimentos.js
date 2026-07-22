@@ -202,6 +202,58 @@
     document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') setOpen(false); });
   }
 
+  function bindHelpWidgetPosition(widget) {
+    if (!widget) return;
+
+    let frame = 0;
+    let footerObserver = null;
+
+    function syncPosition() {
+      frame = 0;
+
+      const footer = document.getElementById('chat-footer');
+      if (!footer) {
+        widget.style.removeProperty('--zc-help-widget-bottom');
+        return;
+      }
+
+      const style = window.getComputedStyle ? window.getComputedStyle(footer) : null;
+      const rect = footer.getBoundingClientRect();
+      const visible = rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight && (!style || (style.display !== 'none' && style.visibility !== 'hidden'));
+
+      if (!visible) {
+        widget.style.removeProperty('--zc-help-widget-bottom');
+        return;
+      }
+
+      // Mantém o botão de ajuda acima de todo o rodapé da conversa.
+      // Assim ele nunca cobre o botão de enviar, mesmo quando a barra de aceite aumenta.
+      const footerHeightInsideViewport = Math.max(0, window.innerHeight - Math.max(0, rect.top));
+      const gap = window.innerWidth <= 760 ? 10 : 14;
+      const bottom = Math.ceil(footerHeightInsideViewport + gap);
+
+      widget.style.setProperty('--zc-help-widget-bottom', `${bottom}px`);
+    }
+
+    function schedulePositionSync() {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(syncPosition);
+    }
+
+    const footer = document.getElementById('chat-footer');
+    if (footer && typeof ResizeObserver === 'function') {
+      footerObserver = new ResizeObserver(schedulePositionSync);
+      footerObserver.observe(footer);
+    }
+
+    window.addEventListener('resize', schedulePositionSync, { passive: true });
+    window.addEventListener('orientationchange', schedulePositionSync, { passive: true });
+
+    // Guarda a referência para evitar coleta prematura em navegadores mais agressivos.
+    widget.__zcHelpFooterObserver = footerObserver;
+    schedulePositionSync();
+  }
+
   function closeHelpWidgetMenu() {
     const widget = document.querySelector('.zc-help-widget');
     if (!widget) return;
@@ -601,7 +653,7 @@
       }
 
       .zc-help-widget{
-        position:fixed;right:24px;bottom:22px;z-index:99960;
+        position:fixed;right:24px;bottom:var(--zc-help-widget-bottom,22px);z-index:99960;
         display:flex;flex-direction:column;align-items:flex-end;gap:12px;
         font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
         opacity:1;transform:translateY(0);transition:opacity .16s ease,transform .16s ease;
@@ -643,8 +695,8 @@
       .zc-help-widget-toggle{width:60px;height:60px;border:0;border-radius:999px;display:grid;place-items:center;background:linear-gradient(145deg,#009b72 0%,#008169 62%,#006f5a 100%);color:#fff;box-shadow:0 18px 34px rgba(0,129,105,.30),0 6px 16px rgba(15,23,42,.18);cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;transition:transform .16s ease,box-shadow .16s ease,filter .16s ease;}
       .zc-help-widget-toggle:hover{transform:translateY(-2px);filter:saturate(1.08);box-shadow:0 22px 42px rgba(0,129,105,.36),0 8px 18px rgba(15,23,42,.20);}
       .zc-help-widget-toggle:active{transform:translateY(0) scale(.98);}.zc-help-widget-toggle svg{width:29px;height:29px;}
-      @media (max-width:760px){.zc-help-widget{right:14px;bottom:max(14px,env(safe-area-inset-bottom,0px));gap:10px}.zc-help-widget-toggle{width:56px;height:56px}.zc-help-widget-toggle svg{width:26px;height:26px}.zc-help-widget-menu{width:min(292px,calc(100vw - 28px));max-height:min(340px,calc(100vh - 108px));border-radius:20px}.zc-help-widget-item{min-height:64px;grid-template-columns:40px 1fr 18px;gap:10px}.zc-help-widget-item-icon{width:40px;height:40px;border-radius:14px}.zc-help-widget-bubble{font-size:11.5px;min-height:32px;padding:8px 10px}}
-      @media (max-width:480px){.zc-help-widget{right:12px;bottom:max(12px,env(safe-area-inset-bottom,0px))}.zc-help-widget-menu{width:min(286px,calc(100vw - 24px));padding:7px}.zc-help-widget-copy strong{font-size:13.5px}.zc-help-widget-copy small{font-size:12px}}
+      @media (max-width:760px){.zc-help-widget{right:14px;gap:10px}.zc-help-widget-toggle{width:56px;height:56px}.zc-help-widget-toggle svg{width:26px;height:26px}.zc-help-widget-menu{width:min(292px,calc(100vw - 28px));max-height:min(340px,calc(100vh - 108px));border-radius:20px}.zc-help-widget-item{min-height:64px;grid-template-columns:40px 1fr 18px;gap:10px}.zc-help-widget-item-icon{width:40px;height:40px;border-radius:14px}.zc-help-widget-bubble{font-size:11.5px;min-height:32px;padding:8px 10px}}
+      @media (max-width:480px){.zc-help-widget{right:12px}.zc-help-widget-menu{width:min(286px,calc(100vw - 24px));padding:7px}.zc-help-widget-copy strong{font-size:13.5px}.zc-help-widget-copy small{font-size:12px}}
 
 
       @media (max-width:1020px){
@@ -806,6 +858,7 @@
     document.body.appendChild(helpWidget);
 
     bindHelpWidget(helpWidget);
+    bindHelpWidgetPosition(helpWidget);
     shell.querySelector('[data-zc-tour-close]').addEventListener('click', closeTour);
     shell.querySelector('[data-zc-tour-done]').addEventListener('click', finishTour);
     shell.querySelector('[data-zc-tour-prev]').addEventListener('click', prevStep);

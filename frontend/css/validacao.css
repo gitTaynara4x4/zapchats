@@ -1,0 +1,30 @@
+/* Estados comuns de validação dos formulários. */
+.required-dot,
+label.required::after,
+.form-group.is-required > label::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: var(--danger, #ef4444);
+  vertical-align: middle;
+}
+
+.is-invalid,
+[aria-invalid="true"] {
+  border-color: var(--danger, #ef4444) !important;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, .12) !important;
+}
+
+.field-error,
+.validation-error {
+  display: block;
+  margin-top: 5px;
+  color: var(--danger, #ef4444);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.field-success { color: var(--success, #22c55e); }

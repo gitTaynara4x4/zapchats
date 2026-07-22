@@ -4,6 +4,7 @@ import os
 import re
 import secrets
 import asyncio
+import time
 from urllib.parse import quote_plus, urlsplit, urlunsplit, parse_qsl, urlencode
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,7 +31,7 @@ from backend.routers.disparos import router as disparos_router
 from backend.routers import chatbot_setores as chatbot_setores_router
 from backend.routers.atendimento_conversas import router as atendimento_conversas_router
 from backend.routers import internal_chat as internal_chat_router
-from backend.websocket_manager import router as ws_router
+from backend.websocket_manager import router as ws_router, conexoes_ativas
 from backend.routers import atendimentoia as atendimento_ia_router
 from backend.routers import atendimento_chat as atendimento_chat_router
 from backend.routers.clients_central import router as clients_central_router
@@ -318,6 +319,8 @@ def _html_response_from_file(
 DEV_ORIGINS = [
     "http://127.0.0.1:8000",
     "http://localhost:8000",
+    "http://127.0.0.1:8001",
+    "http://localhost:8001",
     "http://127.0.0.1:5500",
     "http://localhost:5500",
 ]
@@ -331,9 +334,14 @@ ALLOW_ORIGINS = DEV_ORIGINS if ENV == "dev" else PROD_ORIGINS
 
 # ---- Flags de integração Evolution/Rabbit ----
 RABBIT_ENABLED_BY_ENV = _env_bool("USE_RABBIT", True)
-USE_RABBIT = RABBIT_ENABLED_BY_ENV and any(
-    os.getenv(k)
-    for k in ("RABBITMQ_URI", "RABBITMQ_URL", "AMQP_URL")
+RABBIT_CONSUME_ENABLED = _env_bool("RABBITMQ_CONSUME_ENABLED", True)
+USE_RABBIT = (
+    RABBIT_ENABLED_BY_ENV
+    and RABBIT_CONSUME_ENABLED
+    and any(
+        os.getenv(k)
+        for k in ("RABBITMQ_URI", "RABBITMQ_URL", "AMQP_URL")
+    )
 )
 USE_EVO_WS = _env_bool("EVOLUTION_WS_SUBSCRIBE", True)
 
@@ -568,6 +576,22 @@ def _apply_billing_header(resp: StarletteResponse, locked: bool):
 # FastAPI app
 # =======================================
 app = FastAPI()
+
+
+@app.middleware("http")
+async def log_slow_requests(request: Request, call_next):
+    """Mostra no terminal qual rota realmente demorou."""
+    started = time.perf_counter()
+    try:
+        return await call_next(request)
+    finally:
+        elapsed = time.perf_counter() - started
+        threshold = float(os.getenv("SLOW_REQUEST_LOG_SEC", "2.0") or "2.0")
+        if elapsed >= threshold:
+            LOG(
+                f"[PERF][SLOW] {request.method} {request.url.path} "
+                f"levou {elapsed:.2f}s"
+            )
 
 # Middlewares
 app.add_middleware(GZipMiddleware, minimum_size=1024)
@@ -1453,6 +1477,9 @@ async def _start_integrations():
 
     loop = asyncio.get_running_loop()
     app.state.loop = loop
+    # WebSockets pertencem ao loop principal. O Rabbit dedicado usa a ponte
+    # thread-safe do WebSocketManager para emitir sem travar as páginas.
+    conexoes_ativas.bind_loop(loop)
     app.state.rabbit_task = None
     app.state.rabbit_stop = None
     app.state.evo_task = None
@@ -1469,6 +1496,8 @@ async def _start_integrations():
     else:
         if not RABBIT_ENABLED_BY_ENV:
             LOG("[STARTUP] RabbitMQ desabilitado (USE_RABBIT=false).")
+        elif not RABBIT_CONSUME_ENABLED:
+            LOG("[STARTUP] RabbitMQ desabilitado (RABBITMQ_CONSUME_ENABLED=false).")
         else:
             LOG("[STARTUP] RabbitMQ desabilitado (sem RABBITMQ_URI/RABBITMQ_URL/AMQP_URL).")
 

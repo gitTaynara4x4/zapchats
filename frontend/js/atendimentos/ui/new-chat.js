@@ -808,113 +808,99 @@ import { state } from '../state/store.js';
     }
   }
 
-  function openById(id) {
-    id = Number(id);
+  async function openById(input) {
+    const seed = normalizePickerItem(
+      input && typeof input === 'object'
+        ? input
+        : { id: input, cliente_id: input, entity_id: input }
+    );
 
-    if (!Number.isFinite(id)) return false;
+    const id = pickerClienteId(seed || input || {});
 
-    let ok = false;
+    if (!id) return false;
 
     const inst = getSelectedInstance();
-
-    const baseCliente = ensureClienteInstance({
+    let cliente = ensureClienteInstance({
+      ...(seed || {}),
       id,
       cliente_id: id,
-      instancia_id: /^\d+$/.test(inst) ? Number(inst) : undefined,
-      instancia: /^\d+$/.test(inst) ? undefined : inst || undefined,
+      entity_id: id,
+      instancia_id: /^\d+$/.test(inst) ? Number(inst) : (seed?.instancia_id || undefined),
+      instancia: /^\d+$/.test(inst) ? (seed?.instancia || undefined) : (inst || seed?.instancia || undefined),
+      instance_name: /^\d+$/.test(inst) ? (seed?.instance_name || undefined) : (inst || seed?.instance_name || undefined),
     });
+
+    /*
+      Busca o cadastro completo antes de abrir. Assim o fluxo oficial recebe
+      telefone, nome, conversation_key e instância corretos de uma vez só.
+      Antes este arquivo disparava selecionarClienteObj, selecionarClienteId e
+      três eventos diferentes para o mesmo clique. Isso iniciava carregamentos
+      duplicados do histórico e podia terminar na tela de timeout.
+    */
+    try {
+      const detalhe = await getClienteDetalhe(id);
+      cliente = ensureClienteInstance({
+        ...cliente,
+        ...(detalhe || {}),
+        id,
+        cliente_id: id,
+        entity_id: id,
+        instancia_id:
+          detalhe?.instancia_id ??
+          cliente?.instancia_id ??
+          (/^\d+$/.test(inst) ? Number(inst) : undefined),
+        instancia:
+          detalhe?.instancia ??
+          cliente?.instancia ??
+          (!/^\d+$/.test(inst) ? (inst || undefined) : undefined),
+        instance_name:
+          detalhe?.instance_name ??
+          cliente?.instance_name ??
+          (!/^\d+$/.test(inst) ? (inst || undefined) : undefined),
+      });
+    } catch (e) {
+      console.warn('[new-chat] detalhe do contato não carregou; usando dados da lista:', e?.message || e);
+    }
+
+    const finalRef = refFromCliente(cliente);
+
+    if (!finalRef?.key || !finalRef?.instId) {
+      toast('Não foi possível identificar a instância deste contato.', false, 3000);
+      return false;
+    }
+
+    cliente.conversation_key = finalRef.key;
+    cliente.conversation_id = finalRef.key;
+    cliente.kind = 'c';
+    cliente.entity_id = id;
 
     try {
       window.__CURRENT_CHAT_ID = id;
+      forceSelectCliente(cliente);
+      setHeaderAvatarDefault(cliente);
     } catch {}
 
-    /*
-      Evita mostrar foto antiga enquanto o detalhe do cliente ainda carrega.
-    */
-    try {
-      setHeaderAvatarDefault(baseCliente);
-    } catch {}
-
-    try {
-      if (typeof window.selecionarClienteObj === 'function') {
-        window.selecionarClienteObj(baseCliente);
-        ok = true;
-      }
-    } catch {}
+    if (typeof window.selecionarClienteObj !== 'function') {
+      toast('A tela de conversas ainda está carregando. Tente novamente.', false, 2600);
+      return false;
+    }
 
     try {
-      if (typeof window.selecionarClienteId === 'function') {
-        window.selecionarClienteId(id);
-        ok = true;
-      }
-    } catch {}
+      /* Um clique = uma única abertura oficial. */
+      await Promise.resolve(
+        window.selecionarClienteObj(cliente, {
+          forceReload: true,
+          timeoutMs: 45000,
+          source: 'new-chat-picker',
+        })
+      );
 
-    try {
-      document.dispatchEvent(new CustomEvent('cliente:selecionar', {
-        detail: {
-          id,
-          cliente_id: id,
-          instancia_id: /^\d+$/.test(inst) ? Number(inst) : undefined,
-          instancia: /^\d+$/.test(inst) ? undefined : inst || undefined,
-        },
-      }));
-
-      ok = true;
-    } catch {}
-
-    try {
-      document.dispatchEvent(new CustomEvent('zc:open_chat', {
-        detail: {
-          id,
-          cliente_id: id,
-          instancia_id: /^\d+$/.test(inst) ? Number(inst) : undefined,
-          instancia: /^\d+$/.test(inst) ? undefined : inst || undefined,
-        },
-      }));
-
-      ok = true;
-    } catch {}
-
-    try {
-      document.dispatchEvent(new CustomEvent('chat:open', {
-        detail: {
-          id,
-          cliente_id: id,
-          instancia_id: /^\d+$/.test(inst) ? Number(inst) : undefined,
-          instancia: /^\d+$/.test(inst) ? undefined : inst || undefined,
-        },
-      }));
-
-      ok = true;
-    } catch {}
-
-    try {
-      window.location.hash = `#cliente-${id}`;
-      ok = true;
-    } catch {}
-
-    getClienteDetalhe(id)
-      .then((c) => {
-        if (Number(window.__CURRENT_CHAT_ID) !== Number(id)) return;
-
-        const safeCliente = ensureClienteInstance({
-          ...baseCliente,
-          ...(c || {}),
-          id: c?.id || id,
-          cliente_id: c?.cliente_id || c?.id || id,
-        });
-
-        setHeaderFromDB(safeCliente);
-        forceSelectCliente(safeCliente);
-
-        return tryEvolutionPictureIfMissing(safeCliente);
-      })
-      .catch(() => {
-        if (Number(window.__CURRENT_CHAT_ID) !== Number(id)) return;
-        setHeaderAvatarDefault(baseCliente);
-      });
-
-    return ok;
+      return true;
+    } catch (e) {
+      console.error('[new-chat] falha ao abrir conversa:', e);
+      toast('Não foi possível carregar esta conversa. Tente novamente.', false, 3000);
+      return false;
+    }
   }
 
   function validatePhoneOrExplain(rawDigits) {
@@ -1258,7 +1244,7 @@ import { state } from '../state/store.js';
     host.innerHTML = '';
   }
 
-  function openPickerConversation(cliente) {
+  async function openPickerConversation(cliente) {
     const safeCliente = normalizePickerItem(cliente);
     const id = pickerClienteId(safeCliente);
 
@@ -1267,17 +1253,13 @@ import { state } from '../state/store.js';
       return;
     }
 
-    try { forceSelectCliente(safeCliente); } catch {}
-
     window.__NewChat?.close();
 
-    setTimeout(() => {
-      const opened = openById(id);
+    const opened = await openById(safeCliente || { id, cliente_id: id, entity_id: id });
 
-      if (!opened) {
-        toast('Não foi possível abrir a conversa.', false, 2600);
-      }
-    }, 0);
+    if (!opened) {
+      toast('Não foi possível abrir a conversa.', false, 2600);
+    }
   }
 
   function renderPickerContacts(searchTerm = '') {
@@ -1590,7 +1572,7 @@ import { state } from '../state/store.js';
 
       if (found1?.id) {
         window.__NewChat?.close();
-        setTimeout(() => openById(found1.id), 0);
+        setTimeout(() => openById(found1), 0);
         return;
       }
 
@@ -1601,7 +1583,7 @@ import { state } from '../state/store.js';
 
         if (found2?.id) {
           window.__NewChat?.close();
-          setTimeout(() => openById(found2.id), 0);
+          setTimeout(() => openById(found2), 0);
           return;
         }
       }
@@ -1654,7 +1636,7 @@ import { state } from '../state/store.js';
 
         forceSelectCliente(simpleCliente);
         window.__NewChat?.close();
-        openById(newId);
+        openById(simpleCliente);
 
         try {
           const prof = await evoFetchProfileByNumber(canonical);

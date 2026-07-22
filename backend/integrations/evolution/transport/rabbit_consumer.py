@@ -78,18 +78,21 @@ def _trace_history_enabled() -> bool:
     return _bool_env("EVO_TRACE_HISTORY", "RABBIT_TRACE_HISTORY", default=False)
 
 
+def _history_managed_externally() -> bool:
+    owner = (_env("EVOLUTION_HISTORY_OWNER", "n8n") or "n8n").strip().lower()
+    return owner in {"n8n", "external", "webhook"}
+
+
 def _trace_all_enabled() -> bool:
     return _bool_env("EVO_TRACE_RABBIT_ALL", "RABBIT_TRACE_ALL", default=False)
 
 
 def _rabbit_enabled() -> bool:
-    flag = (_env("USE_RABBIT", "") or _env("RABBITMQ_CONSUME_ENABLED", "")).strip().lower()
+    use_rabbit = _bool_env("USE_RABBIT", default=True)
+    consume_enabled = _bool_env("RABBITMQ_CONSUME_ENABLED", default=True)
 
-    if flag in {"0", "false", "no", "off"}:
+    if not use_rabbit or not consume_enabled:
         return False
-
-    if flag in {"1", "true", "yes", "on"}:
-        return True
 
     return bool(_env("RABBITMQ_URI") or _env("RABBITMQ_URL") or _env("AMQP_URL"))
 
@@ -694,7 +697,26 @@ async def start(
     except Exception:
         prefetch = 25
 
+    ephemeral_queue = _bool_env("RABBITMQ_EPHEMERAL_QUEUE", default=False)
+    queue_auto_delete = _bool_env(
+        "RABBITMQ_QUEUE_AUTO_DELETE",
+        default=ephemeral_queue,
+    )
+    queue_exclusive = _bool_env(
+        "RABBITMQ_QUEUE_EXCLUSIVE",
+        default=ephemeral_queue,
+    )
+    delete_stale_dev_queue = _bool_env(
+        "RABBITMQ_DELETE_STALE_DEV_QUEUE_ON_START",
+        default=False,
+    )
+
     durable = (_env("RABBITMQ_QUEUE_DURABLE", "true").lower() == "true")
+    if ephemeral_queue:
+        durable = False
+        queue_auto_delete = True
+        queue_exclusive = True
+
     heartbeat = _heartbeat()
 
     _monitor_set(
@@ -724,6 +746,18 @@ async def start(
         started_at = time.perf_counter()
 
         key = _normalize_event_key(evt_name)
+
+        # Defesa adicional: mesmo que uma fila antiga ainda esteja bindada em
+        # messages.set, o ZapsChat não processa o histórico quando o n8n é o
+        # responsável exclusivo por ele.
+        if key == "MESSAGES_SET" and _history_managed_externally():
+            if _should_trace(evt_name):
+                print(
+                    "[RABBIT][TRACE][dispatch-skip] "
+                    "motivo=history_owned_by_n8n evt_key=MESSAGES_SET"
+                )
+            return
+
         inst = _extract_instance(body, default=None)
         shape = _payload_shape(body)
         data_debug = _payload_data_debug(body)
@@ -938,10 +972,31 @@ async def start(
                 channel = await connection.channel()
                 await channel.set_qos(prefetch_count=prefetch)
 
+                # A fila local antiga era não-durável, porém não era auto-delete.
+                # Assim ela continuava acumulando mensagens enquanto o PC estava desligado.
+                # Só removemos automaticamente nomes claramente de desenvolvimento.
+                if (
+                    ephemeral_queue
+                    and delete_stale_dev_queue
+                    and queue_name
+                    and ".dev." in queue_name.lower()
+                ):
+                    try:
+                        stale_queue = await channel.get_queue(queue_name, ensure=False)
+                        await stale_queue.delete(if_unused=False, if_empty=False)
+                        print(f"[RABBIT] fila local antiga removida: {queue_name}")
+                    except Exception:
+                        pass
+
+                requested_queue_name = "" if ephemeral_queue else queue_name
                 queue = await channel.declare_queue(
-                    queue_name,
+                    requested_queue_name,
                     durable=durable,
+                    auto_delete=queue_auto_delete,
+                    exclusive=queue_exclusive,
                 )
+                active_queue_name = str(queue.name or queue_name)
+                _monitor_set(queue_name=active_queue_name)
 
                 if exchange_name:
                     exchange = await channel.declare_exchange(
@@ -953,12 +1008,12 @@ async def start(
                         await queue.bind(exchange, routing_key=rk)
 
                     print(
-                        f"[RABBIT] Fila '{queue_name}' bindada na exchange "
+                        f"[RABBIT] Fila '{active_queue_name}' bindada na exchange "
                         f"'{exchange_name}' com routing_keys {routing_keys}"
                     )
                 else:
                     print(
-                        f"[RABBIT] Sem exchange configurada; consumindo fila direta '{queue_name}'."
+                        f"[RABBIT] Sem exchange configurada; consumindo fila direta '{active_queue_name}'."
                     )
 
                 _monitor_set(
@@ -967,8 +1022,9 @@ async def start(
                 )
 
                 print(
-                    f"[RABBIT] Consumindo fila: {queue_name} "
+                    f"[RABBIT] Consumindo fila: {active_queue_name} "
                     f"prefetch={prefetch} heartbeat={heartbeat} durable={durable} "
+                    f"auto_delete={queue_auto_delete} exclusive={queue_exclusive} "
                     f"trace_history={_trace_history_enabled()} trace_all={_trace_all_enabled()}"
                 )
 

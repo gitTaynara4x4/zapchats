@@ -876,7 +876,7 @@ function showConversationLoadError(ref = {}, cliente = null, message = 'Não foi
   const isTimeout = isConversationTimeoutError(rawMessage);
   const title = isTimeout ? 'A conversa demorou para carregar' : rawMessage;
   const sub = isTimeout
-    ? 'A consulta ao histórico passou do tempo limite. Clique novamente para tentar com timeout maior.'
+    ? 'O histórico ainda não respondeu. Clique novamente para fazer uma nova tentativa com mais tempo.'
     : 'Confira a conexão com o banco e tente novamente.';
 
   hist.style.display = 'flex';
@@ -904,7 +904,7 @@ function showConversationLoadError(ref = {}, cliente = null, message = 'Não foi
         const inst = getInstanciaForFetch(ref.key) || ref.instId || '';
         try { __msgLoadState.delete(`${ref.key}|${inst || ''}`); } catch {}
         try { showConversationLoading(ref, 'Tentando carregar conversa novamente…'); } catch {}
-        await selecionarClienteObj(cliente || ref.key, { forceReload: true, retry: true, timeoutMs: 30000 });
+        await selecionarClienteObj(cliente || ref.key, { forceReload: true, retry: true, timeoutMs: 60000 });
       } catch (e) {
         console.warn('[selecionarClienteObj] retry falhou:', e?.message || e);
         btn.dataset.loading = '0';
@@ -1421,7 +1421,7 @@ async function ensureMensagensCarregadas(conversationRef, opts = {}) {
       cache: 'no-store',
       // O histórico de alguns clientes demora mais por mídia/volume.
       // O guard global do Atendimento respeita este timeout customizado.
-      zcTimeoutMs: Number(opts.timeoutMs || 30000),
+      zcTimeoutMs: Number(opts.timeoutMs || 45000),
     });
     let data = null;
 
@@ -2063,7 +2063,10 @@ async function selecionarClienteObj(id, opts = {}) {
         await nextPaint();
       }
 
-      await ensureMensagensCarregadas(convKey, { force: forceReload });
+      await ensureMensagensCarregadas(convKey, {
+        force: forceReload,
+        timeoutMs: Number(opts?.timeoutMs || (opts?.retry ? 60000 : 45000)),
+      });
 
       if (mySeq !== selecionarClienteSeq) return false;
 

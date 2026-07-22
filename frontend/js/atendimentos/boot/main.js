@@ -397,7 +397,7 @@
     await importIfMissing('__ZC_PERFIL_INSTANCIA_LOADED__', '../ui/perfil-instancia.js');
     await import('../ui/notes-drawer.js');
     await import('../ui/ia.js');
-    await import('../ui/new-chat.js?v=20260715-db-lazy-picker-open-fix-2');
+    await import('../ui/new-chat.js?v=20260715-db-lazy-picker-open-fix-3');
     await import('../ui/context-menu.js');
     await import('../ui/apagar.js');
 
@@ -517,7 +517,7 @@
     await import('../ui/filtros.js');
 
     await import('../ui/context-menu.js');
-    await import('../ui/new-chat.js?v=20260715-db-lazy-picker-open-fix-2');
+    await import('../ui/new-chat.js?v=20260715-db-lazy-picker-open-fix-3');
 
     /*
       Mantém a conversa aberta marcada na lista lateral.

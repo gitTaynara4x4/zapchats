@@ -1,0 +1,5 @@
+.valora-form { display: flex; flex-direction: column; gap: 16px; }
+.valora-form .form-row { gap: 14px; }
+.valora-form .section-card + .section-card { margin-top: 4px; }
+.valora-form textarea { min-height: 92px; resize: vertical; }
+.valora-form .form-actions { margin-top: 4px; }

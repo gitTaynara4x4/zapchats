@@ -4282,3 +4282,537 @@ html.dark .saude-step.done{ background:rgba(34,197,94,.08) !important; color:#e5
     max-width: min(250px, calc(100vw - 24px)) !important;
   }
 }
+
+/* =========================================================
+   ZAPSCHAT — CONECTAR WHATSAPP / DARK FINAL OFICIAL
+   Aplicado por último para neutralizar regras claras legadas.
+   O miolo do QR Code permanece branco para garantir leitura.
+   ========================================================= */
+html.dark,
+html[data-theme="dark"]{
+  color-scheme:dark;
+  --accent:#10b981;
+  --ok:#10b981;
+  --accent-fg:#ffffff;
+  --bg:#212121;
+  --fg:#ececec;
+  --muted:#b4b4b4;
+  --card:#262626;
+  --hover:#303030;
+  --hover-strong:#2a2a2a;
+  --border:#383838;
+  --ring:rgba(16,185,129,.35);
+}
+
+:is(html.dark,html[data-theme="dark"]) body{
+  background:#212121 !important;
+  color:#ececec !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .main{
+  background:#212121 !important;
+  color:#ececec !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .section-title h1,
+:is(html.dark,html[data-theme="dark"]) .top-total{
+  color:#ececec !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .box{
+  background:#262626 !important;
+  color:#ececec !important;
+  border:1px solid #383838 !important;
+  box-shadow:0 14px 34px rgba(0,0,0,.30) !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .tabs{
+  border-bottom-color:#383838 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .tab-btn{
+  color:#b4b4b4 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .tab-btn:hover{
+  background:#303030 !important;
+  color:#ececec !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .tab-btn[aria-selected="true"]{
+  color:#ececec !important;
+  border-color:#10b981 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .btn,
+:is(html.dark,html[data-theme="dark"]) .kebab-btn,
+:is(html.dark,html[data-theme="dark"]) .zc-btn-help,
+:is(html.dark,html[data-theme="dark"]) .zc-btn-cancel,
+:is(html.dark,html[data-theme="dark"]) .zc-btn-outline,
+:is(html.dark,html[data-theme="dark"]) .zc-icon-btn{
+  background:#2a2a2a !important;
+  color:#ececec !important;
+  border-color:#383838 !important;
+  box-shadow:none !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .btn:hover:not([disabled]),
+:is(html.dark,html[data-theme="dark"]) .kebab-btn:hover,
+:is(html.dark,html[data-theme="dark"]) .zc-btn-help:hover:not([disabled]),
+:is(html.dark,html[data-theme="dark"]) .zc-btn-cancel:hover:not([disabled]),
+:is(html.dark,html[data-theme="dark"]) .zc-btn-outline:hover:not([disabled]),
+:is(html.dark,html[data-theme="dark"]) .zc-icon-btn:hover{
+  background:#303030 !important;
+  border-color:#4a4a4a !important;
+  color:#ffffff !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .btn--primary,
+:is(html.dark,html[data-theme="dark"]) .btn--ok,
+:is(html.dark,html[data-theme="dark"]) #btn-open-modal,
+:is(html.dark,html[data-theme="dark"]) .zc-btn-main,
+:is(html.dark,html[data-theme="dark"]) .zc-empty-cta{
+  background:#10b981 !important;
+  border-color:#10b981 !important;
+  color:#ffffff !important;
+  box-shadow:0 12px 26px rgba(16,185,129,.20) !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .btn--primary:hover:not([disabled]),
+:is(html.dark,html[data-theme="dark"]) .btn--ok:hover:not([disabled]),
+:is(html.dark,html[data-theme="dark"]) #btn-open-modal:hover:not([disabled]),
+:is(html.dark,html[data-theme="dark"]) .zc-btn-main:hover:not([disabled]),
+:is(html.dark,html[data-theme="dark"]) .zc-empty-cta:hover:not([disabled]){
+  background:#34d399 !important;
+  border-color:#34d399 !important;
+  color:#111111 !important;
+}
+
+/* Resumo e tabela */
+:is(html.dark,html[data-theme="dark"]) .zc-smart-card{
+  background:#2a2a2a !important;
+  border-color:#383838 !important;
+  color:#ececec !important;
+  box-shadow:none !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-smart-card span{
+  color:#b4b4b4 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-smart-card strong{
+  color:#ffffff !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) table,
+:is(html.dark,html[data-theme="dark"]) tbody,
+:is(html.dark,html[data-theme="dark"]) tbody tr{
+  background:#262626 !important;
+  color:#ececec !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) thead,
+:is(html.dark,html[data-theme="dark"]) thead tr,
+:is(html.dark,html[data-theme="dark"]) thead th{
+  background:#2a2a2a !important;
+  color:#b4b4b4 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) th,
+:is(html.dark,html[data-theme="dark"]) td{
+  color:#ececec !important;
+  border-bottom-color:#383838 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) tbody tr:hover{
+  background:#303030 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .plan-pill,
+:is(html.dark,html[data-theme="dark"]) .zc-status-smart,
+:is(html.dark,html[data-theme="dark"]) .zc-number-status,
+:is(html.dark,html[data-theme="dark"]) .zc-table-foot{
+  background:#2a2a2a !important;
+  color:#ececec !important;
+  border-color:#383838 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-number-name,
+:is(html.dark,html[data-theme="dark"]) .zc-number-phone{
+  color:#ececec !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-number-meta,
+:is(html.dark,html[data-theme="dark"]) .zc-status-smart small,
+:is(html.dark,html[data-theme="dark"]) .muted{
+  color:#b4b4b4 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .kebab-menu{
+  background:#2a2a2a !important;
+  border-color:#383838 !important;
+  color:#ececec !important;
+  box-shadow:0 20px 50px rgba(0,0,0,.48) !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .kebab-item{
+  color:#ececec !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .kebab-item:hover{
+  background:#303030 !important;
+}
+
+/* Estados vazios */
+:is(html.dark,html[data-theme="dark"]) .zc-empty-state{
+  background:
+    radial-gradient(circle at 50% 12%,rgba(16,185,129,.10),transparent 34%),
+    linear-gradient(180deg,#262626,#242424) !important;
+  border-color:#383838 !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.025) !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-empty-card h2,
+:is(html.dark,html[data-theme="dark"]) .zc-tab-empty strong{
+  color:#ececec !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-empty-card p,
+:is(html.dark,html[data-theme="dark"]) .zc-empty-divider,
+:is(html.dark,html[data-theme="dark"]) .zc-tab-empty{
+  color:#b4b4b4 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-tab-empty{
+  background:#2a2a2a !important;
+  border-color:#444444 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-empty-divider span{
+  background:linear-gradient(90deg,transparent,#555555,transparent) !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-empty-link{
+  color:#34d399 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-empty-link:hover{
+  background:rgba(16,185,129,.11) !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-empty-link i,
+:is(html.dark,html[data-theme="dark"]) .zc-tab-empty-icon{
+  background:rgba(16,185,129,.12) !important;
+  border-color:rgba(52,211,153,.24) !important;
+  color:#34d399 !important;
+}
+
+/* Modal principal de conexão */
+:is(html.dark,html[data-theme="dark"]) #modal .zc-modal-backdrop,
+:is(html.dark,html[data-theme="dark"]) .zc-help-backdrop{
+  background:rgba(0,0,0,.72) !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-connect-modal,
+:is(html.dark,html[data-theme="dark"]) .zc-connect-modal--wizard,
+:is(html.dark,html[data-theme="dark"]) #modal-remover-numero .card,
+:is(html.dark,html[data-theme="dark"]) #modal-editar-apelido .card,
+:is(html.dark,html[data-theme="dark"]) #modal-saude-numero .card{
+  background:#262626 !important;
+  color:#ececec !important;
+  border-color:#383838 !important;
+  box-shadow:0 32px 90px rgba(0,0,0,.56) !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-connect-head,
+:is(html.dark,html[data-theme="dark"]) .zc-wizard-head,
+:is(html.dark,html[data-theme="dark"]) .zc-connect-footer,
+:is(html.dark,html[data-theme="dark"]) .zc-wizard-actions{
+  background:#262626 !important;
+  border-color:#383838 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-connect-head h2,
+:is(html.dark,html[data-theme="dark"]) .zc-wizard-head h2,
+:is(html.dark,html[data-theme="dark"]) .zc-field label,
+:is(html.dark,html[data-theme="dark"]) .zc-method-option b,
+:is(html.dark,html[data-theme="dark"]) .zc-scan-help strong,
+:is(html.dark,html[data-theme="dark"]) .zc-connect-problems>strong,
+:is(html.dark,html[data-theme="dark"]) .zc-connect-problem b{
+  color:#ececec !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-connect-head p,
+:is(html.dark,html[data-theme="dark"]) .zc-wizard-head p,
+:is(html.dark,html[data-theme="dark"]) .zc-wizard-subtitle,
+:is(html.dark,html[data-theme="dark"]) .zc-field small,
+:is(html.dark,html[data-theme="dark"]) #historico-help,
+:is(html.dark,html[data-theme="dark"]) .zc-method-option small,
+:is(html.dark,html[data-theme="dark"]) .zc-scan-help ol,
+:is(html.dark,html[data-theme="dark"]) .zc-connect-problem small{
+  color:#b4b4b4 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-wizard-steps{
+  background:#242424 !important;
+  border-color:#383838 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-wizard-step{
+  color:#777777 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-wizard-step span{
+  background:#303030 !important;
+  border-color:#444444 !important;
+  color:#b4b4b4 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-wizard-step.is-active,
+:is(html.dark,html[data-theme="dark"]) .zc-wizard-step.is-done{
+  color:#ececec !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-wizard-step.is-active span,
+:is(html.dark,html[data-theme="dark"]) .zc-wizard-step.is-done span{
+  background:#10b981 !important;
+  border-color:#10b981 !important;
+  color:#ffffff !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-wizard-card,
+:is(html.dark,html[data-theme="dark"]) .zc-connect-problems,
+:is(html.dark,html[data-theme="dark"]) .zc-method-option,
+:is(html.dark,html[data-theme="dark"]) .zc-history-tip,
+:is(html.dark,html[data-theme="dark"]) .zc-scan-help,
+:is(html.dark,html[data-theme="dark"]) .zc-connect-problem{
+  background:#2a2a2a !important;
+  color:#ececec !important;
+  border-color:#383838 !important;
+  box-shadow:none !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-method-option:hover{
+  background:#303030 !important;
+  border-color:#4a4a4a !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-method-option.is-selected{
+  background:rgba(16,185,129,.12) !important;
+  border-color:rgba(52,211,153,.48) !important;
+  box-shadow:0 0 0 3px rgba(16,185,129,.08) !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-method-icon{
+  background:rgba(16,185,129,.12) !important;
+  color:#34d399 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-field input,
+:is(html.dark,html[data-theme="dark"]) .zc-field select,
+:is(html.dark,html[data-theme="dark"]) .zc-input-with-icon input,
+:is(html.dark,html[data-theme="dark"]) #editar-apelido-input{
+  background:#212121 !important;
+  color:#ececec !important;
+  border-color:#444444 !important;
+  color-scheme:dark;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-field input::placeholder,
+:is(html.dark,html[data-theme="dark"]) .zc-input-with-icon input::placeholder,
+:is(html.dark,html[data-theme="dark"]) #editar-apelido-input::placeholder{
+  color:#777777 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-field input:focus,
+:is(html.dark,html[data-theme="dark"]) .zc-field select:focus,
+:is(html.dark,html[data-theme="dark"]) .zc-input-with-icon input:focus,
+:is(html.dark,html[data-theme="dark"]) #editar-apelido-input:focus{
+  border-color:#10b981 !important;
+  box-shadow:0 0 0 4px rgba(16,185,129,.12) !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-input-with-icon i{
+  color:#777777 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-warning{
+  background:rgba(245,158,11,.10) !important;
+  border-color:rgba(245,158,11,.28) !important;
+  color:#fbbf24 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-error{
+  background:rgba(239,68,68,.10) !important;
+  border-color:rgba(239,68,68,.28) !important;
+  color:#fca5a5 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-pairing-code-box{
+  background:rgba(16,185,129,.10) !important;
+  border-color:rgba(52,211,153,.28) !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-pairing-code-box strong{
+  color:#ececec !important;
+}
+
+/* O quadro externo é dark, somente o papel do QR fica branco. */
+:is(html.dark,html[data-theme="dark"]) #qr-area,
+:is(html.dark,html[data-theme="dark"]) .zc-qr-area,
+:is(html.dark,html[data-theme="dark"]) .zc-wizard-qr-panel{
+  background:#2a2a2a !important;
+  border-color:#383838 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-qr-box{
+  background:#ffffff !important;
+  border-color:#d8d8d8 !important;
+  box-shadow:0 12px 30px rgba(0,0,0,.30) !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-qr-status,
+:is(html.dark,html[data-theme="dark"]) .zc-qr-timer{
+  color:#b4b4b4 !important;
+}
+
+/* Ajuda lateral */
+:is(html.dark,html[data-theme="dark"]) .zc-help-drawer{
+  background:#262626 !important;
+  color:#ececec !important;
+  border-left-color:#383838 !important;
+  box-shadow:-24px 0 70px rgba(0,0,0,.48) !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-help-head,
+:is(html.dark,html[data-theme="dark"]) .zc-help-footer{
+  background:#262626 !important;
+  border-color:#383838 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-help-head h2,
+:is(html.dark,html[data-theme="dark"]) .zc-help-step-head strong,
+:is(html.dark,html[data-theme="dark"]) .zc-help-problems-title strong,
+:is(html.dark,html[data-theme="dark"]) .zc-problem-item strong{
+  color:#ececec !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-help-head p,
+:is(html.dark,html[data-theme="dark"]) .zc-help-step-head small,
+:is(html.dark,html[data-theme="dark"]) .zc-help-problems-title span,
+:is(html.dark,html[data-theme="dark"]) .zc-problem-item span,
+:is(html.dark,html[data-theme="dark"]) .zc-help-support{
+  color:#b4b4b4 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-help-step-card,
+:is(html.dark,html[data-theme="dark"]) .zc-help-problems,
+:is(html.dark,html[data-theme="dark"]) .zc-problem-item{
+  background:#2a2a2a !important;
+  border-color:#383838 !important;
+  box-shadow:none !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-phone,
+:is(html.dark,html[data-theme="dark"]) .zc-phone-screen{
+  background:#212121 !important;
+  color:#ececec !important;
+  border-color:#444444 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-phone-top,
+:is(html.dark,html[data-theme="dark"]) .zc-settings-title,
+:is(html.dark,html[data-theme="dark"]) .zc-phone-tabs,
+:is(html.dark,html[data-theme="dark"]) .zc-chat-line,
+:is(html.dark,html[data-theme="dark"]) .zc-profile-line,
+:is(html.dark,html[data-theme="dark"]) .zc-settings-list span{
+  color:#ececec !important;
+  border-color:#383838 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .zc-settings-list .is-highlight,
+:is(html.dark,html[data-theme="dark"]) .zc-device-btn{
+  background:rgba(16,185,129,.12) !important;
+  color:#34d399 !important;
+}
+
+/* Saúde do número e sincronização */
+:is(html.dark,html[data-theme="dark"]) .saude-modal-card,
+:is(html.dark,html[data-theme="dark"]) .saude-modal-card--pro,
+:is(html.dark,html[data-theme="dark"]) .saude-overview-main,
+:is(html.dark,html[data-theme="dark"]) .saude-score-box,
+:is(html.dark,html[data-theme="dark"]) .saude-section,
+:is(html.dark,html[data-theme="dark"]) .saude-section--pro,
+:is(html.dark,html[data-theme="dark"]) .saude-metrics-panel,
+:is(html.dark,html[data-theme="dark"]) .saude-metrica-item,
+:is(html.dark,html[data-theme="dark"]) .saude-resumo,
+:is(html.dark,html[data-theme="dark"]) .saude-score-card,
+:is(html.dark,html[data-theme="dark"]) .saude-step{
+  background:#2a2a2a !important;
+  color:#ececec !important;
+  border-color:#383838 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .saude-modal-header,
+:is(html.dark,html[data-theme="dark"]) .saude-modal-footer,
+:is(html.dark,html[data-theme="dark"]) .saude-modal-body{
+  background:#262626 !important;
+  border-color:#383838 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .saude-loading-title,
+:is(html.dark,html[data-theme="dark"]) .saude-risk-title,
+:is(html.dark,html[data-theme="dark"]) .saude-status-title,
+:is(html.dark,html[data-theme="dark"]) .saude-section h3,
+:is(html.dark,html[data-theme="dark"]) .saude-section--pro h3,
+:is(html.dark,html[data-theme="dark"]) .saude-metrica-value{
+  color:#ececec !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) .saude-loading-text,
+:is(html.dark,html[data-theme="dark"]) .saude-score-line,
+:is(html.dark,html[data-theme="dark"]) .saude-metrica-label,
+:is(html.dark,html[data-theme="dark"]) .saude-list li,
+:is(html.dark,html[data-theme="dark"]) .saude-footer-note{
+  color:#b4b4b4 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) #sync-banner{
+  background:#262626 !important;
+  color:#ececec !important;
+  border:1px solid #383838 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) #sync-bar{
+  background:#383838 !important;
+}
+
+:is(html.dark,html[data-theme="dark"]) #sync-overlay .sync-card{
+  background:#262626 !important;
+  color:#ececec !important;
+  border-color:#444444 !important;
+}
+
+/* Scrollbars */
+:is(html.dark,html[data-theme="dark"]) *{
+  scrollbar-color:#555555 #262626;
+}
+
+:is(html.dark,html[data-theme="dark"]) *::-webkit-scrollbar{
+  width:10px;
+  height:10px;
+}
+
+:is(html.dark,html[data-theme="dark"]) *::-webkit-scrollbar-track{
+  background:#262626;
+}
+
+:is(html.dark,html[data-theme="dark"]) *::-webkit-scrollbar-thumb{
+  background:#555555;
+  border:2px solid #262626;
+  border-radius:999px;
+}
+
+:is(html.dark,html[data-theme="dark"]) *::-webkit-scrollbar-thumb:hover{
+  background:#686868;
+}

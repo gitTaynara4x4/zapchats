@@ -1,0 +1,32 @@
+.ficha-principal-toggle,
+.cliente-ficha-toggle,
+.produto-ficha-toggle,
+.patrimonio-ficha-toggle,
+.fornecedor-ficha-toggle,
+.cotacao-ficha-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border, #e5eaf0);
+  border-radius: 10px;
+  background: var(--panel, #fff);
+}
+
+.ficha-principal-toggle input { margin-top: 2px; }
+.ficha-principal-toggle strong { display: block; color: var(--text, #172033); font-size: 12px; }
+.ficha-principal-toggle small { display: block; margin-top: 2px; color: var(--muted, #64748b); font-size: 11px; }
+
+.ficha-principal-code-card,
+.cliente-ficha-code-card,
+.produto-ficha-code-card,
+.patrimonio-ficha-code-card,
+.fornecedor-ficha-code-card,
+.cotacao-ficha-code-card {
+  border: 1px solid var(--border, #e5eaf0);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--panel, #fff);
+}
+
+.ficha-principal-system-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 14px; }

@@ -1,0 +1,72 @@
+/* /frontend/css/dark-chatgpt-fix.css
+   Camada final de compatibilidade do tema. O estado é aplicado por theme.js. */
+
+:root {
+  --zc-page-bg: var(--bg, #f5f7fa);
+  --zc-surface: var(--panel, #ffffff);
+  --zc-surface-hover: var(--panel-hover, #f8fafc);
+  --zc-border-color: var(--border, #e5eaf0);
+  --zc-text-color: var(--text, #172033);
+  --zc-muted-color: var(--muted, #64748b);
+  color-scheme: light;
+}
+
+html.dark,
+html[data-theme="dark"] {
+  --zc-page-bg: #212121;
+  --zc-surface: #2f2f2f;
+  --zc-surface-hover: #383838;
+  --zc-border-color: rgba(255, 255, 255, 0.12);
+  --zc-text-color: #ececec;
+  --zc-muted-color: #b4b4b4;
+  color-scheme: dark;
+}
+
+html.dark body,
+html[data-theme="dark"] body {
+  background-color: var(--zc-page-bg);
+  color: var(--zc-text-color);
+}
+
+html.dark input,
+html.dark select,
+html.dark textarea,
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea {
+  color-scheme: dark;
+}
+
+html:not(.dark)[data-theme="light"] input,
+html:not(.dark)[data-theme="light"] select,
+html:not(.dark)[data-theme="light"] textarea {
+  color-scheme: light;
+}
+
+html.dark .main,
+html[data-theme="dark"] .main {
+  background-color: var(--zc-page-bg);
+  color: var(--zc-text-color);
+}
+
+html.dark .sidebar-frame,
+html[data-theme="dark"] .sidebar-frame {
+  background: #212121;
+}
+
+/* Evita transição visível durante a aplicação inicial do tema. */
+html:not([data-theme]) *,
+html.prepaint * {
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html *,
+  html *::before,
+  html *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

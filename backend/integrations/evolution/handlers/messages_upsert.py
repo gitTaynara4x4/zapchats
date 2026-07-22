@@ -109,6 +109,24 @@ EVO_CHATBOT_BURST_DEBOUNCE_MS = max(
 # WS_EMIT_MESSAGES=true
 WS_EMIT_MESSAGES = _bool_env_value("WS_EMIT_MESSAGES", False)
 
+# Ambiente local usando o mesmo banco da produção:
+# a produção pode salvar primeiro e este processo encontra a mensagem como existente.
+# Quando true, o processo local ainda envia o evento ao WebSocket do navegador,
+# sem inserir a mensagem novamente no banco. Em produção, deixe false.
+WS_EMIT_EXISTING_MESSAGES = _bool_env_value("WS_EMIT_EXISTING_MESSAGES", False)
+
+# Em desenvolvimento conectado à infraestrutura real, desligue todo o processamento
+# de chatbot para impedir respostas automáticas saindo do computador local.
+EVO_CHATBOT_PROCESS_ENABLED = _bool_env_value("EVO_CHATBOT_PROCESS_ENABLED", True)
+
+# O replay de chatbot para mensagens já existentes é útil quando há apenas um consumer,
+# mas pode responder duas vezes quando produção e desenvolvimento têm filas separadas
+# apontando para o mesmo banco. No local, deixe false.
+EVO_CHATBOT_REPLAY_RESCUE_ENABLED = _bool_env_value(
+    "EVO_CHATBOT_REPLAY_RESCUE_ENABLED",
+    True,
+)
+
 # V11: o log mostrou atraso entre [ws-live][skip] e [commit-final].
 # O ponto nessa janela é invalidate_emp_cache(), que pode fazer scan/delete em Redis remoto
 # e travar a finalização do processamento. Por padrão, NÃO invalida cache no fluxo
@@ -2091,12 +2109,12 @@ async def on_messages_upsert(inst_id: str, data):
 
                 should_run_chatbot = False
 
-                if (not from_me) and direcao == "entrada" and conteudo:
+                if EVO_CHATBOT_PROCESS_ENABLED and (not from_me) and direcao == "entrada" and conteudo:
                     if msg_id:
                         if chatbot_should_process_msg(empresa_id, inst.id, str(msg_id)):
                             if inserted_11 and msg_db_id:
                                 should_run_chatbot = True
-                            elif replay_existing_msg_id:
+                            elif replay_existing_msg_id and EVO_CHATBOT_REPLAY_RESCUE_ENABLED:
                                 replay_key = (int(replay_existing_msg_id), str(msg_id))
                                 if replay_key not in chatbot_replay_batch_seen:
                                     chatbot_replay_batch_seen.add(replay_key)
@@ -2110,6 +2128,15 @@ async def on_messages_upsert(inst_id: str, data):
                                         existing_id=msg_db_id,
                                         status=status,
                                     )
+                            elif replay_existing_msg_id:
+                                _log_ctx(
+                                    "[UPsert][chatbot-replay-skip-local]",
+                                    idx=idx,
+                                    msg_id=msg_id,
+                                    cliente_id=cli_id,
+                                    existing_id=replay_existing_msg_id,
+                                    status=status,
+                                )
                         else:
                             _log_ctx(
                                 "[UPsert][chatbot-skip-global-ttl]",
@@ -2123,6 +2150,14 @@ async def on_messages_upsert(inst_id: str, data):
                     else:
                         if inserted_11 and msg_db_id:
                             should_run_chatbot = True
+                elif (not from_me) and direcao == "entrada" and conteudo:
+                    _log_ctx(
+                        "[UPsert][chatbot-skip-env]",
+                        idx=idx,
+                        msg_id=msg_id,
+                        cliente_id=cli_id,
+                        status=status,
+                    )
 
                 if should_run_chatbot:
                     await _run_or_schedule_triagem_pos_commit(
@@ -2153,8 +2188,28 @@ async def on_messages_upsert(inst_id: str, data):
                             atendimento_id=atendimento_id,
                         )
 
-                if inserted_11 and msg_db_id:
-                    if media_meta:
+                should_emit_ws_message = bool(
+                    msg_db_id
+                    and (
+                        inserted_11
+                        or (replay_existing_msg_id and WS_EMIT_EXISTING_MESSAGES)
+                    )
+                )
+
+                if should_emit_ws_message:
+                    if replay_existing_msg_id and not inserted_11:
+                        _log_ctx(
+                            "[UPsert][ws-existing-replay]",
+                            idx=idx,
+                            msg_id=msg_id,
+                            cliente_id=cli_id,
+                            existing_id=msg_db_id,
+                            instancia_id=inst.id,
+                        )
+
+                    # Mídia só precisa ser persistida por quem realmente inseriu a mensagem.
+                    # No replay local, a produção já é responsável pelo registro no banco.
+                    if inserted_11 and media_meta:
                         await save_media_pos_commit_11(
                             inst_id=inst_id,
                             empresa_id=empresa_id,

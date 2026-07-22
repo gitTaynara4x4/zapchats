@@ -1,0 +1,430 @@
+/*
+ * ZAPSCHAT — PADRÃO VISUAL OFICIAL
+ * Etapa 2: paleta, superfícies e cores semânticas.
+ * Este arquivo deve ser carregado por último.
+ */
+
+:root {
+  /* Paleta oficial */
+  --zc-bg-main: #F5F6F7;
+  --zc-panel: #FFFFFF;
+  --zc-card: #FFFFFF;
+  --zc-field: #FFFFFF;
+  --zc-hover-bg: #F0F2F3;
+  --zc-border-official: #D9DEE3;
+  --zc-text-main: #182026;
+  --zc-text-secondary: #667085;
+  --zc-text-disabled: #98A2B3;
+
+  --zc-primary: #00A884;
+  --zc-primary-hover: #008F72;
+  --zc-primary-active: #007A62;
+  --zc-primary-soft: rgba(0, 168, 132, 0.13);
+  --zc-primary-contrast: #FFFFFF;
+
+  --zc-danger-official: #EF4444;
+  --zc-danger-hover: #DC2626;
+  --zc-danger-soft-official: rgba(239, 68, 68, 0.14);
+
+  --zc-warning-official: #F59E0B;
+  --zc-warning-soft-official: rgba(245, 158, 11, 0.14);
+
+  color-scheme: light;
+
+  /* Compatibilidade com nomes antigos */
+  --bg: var(--zc-bg-main);
+  --bg-soft: var(--zc-hover-bg);
+  --page-bg: var(--zc-bg-main);
+  --panel: var(--zc-panel);
+  --panel-2: var(--zc-card);
+  --panel-3: var(--zc-hover-bg);
+  --surface: var(--zc-panel);
+  --surface-hover: var(--zc-hover-bg);
+  --card: var(--zc-card);
+  --card-bg: var(--zc-card);
+  --input-bg: var(--zc-field);
+  --hover: var(--zc-hover-bg);
+  --hover-strong: var(--zc-hover-bg);
+  --border: var(--zc-border-official);
+  --border-color: var(--zc-border-official);
+  --border-hover: color-mix(in srgb, var(--zc-border-official) 70%, var(--zc-text-secondary));
+  --fg: var(--zc-text-main);
+  --text: var(--zc-text-main);
+  --text-main: var(--zc-text-main);
+  --text-primary: var(--zc-text-main);
+  --text-soft: var(--zc-text-secondary);
+  --text-secondary: var(--zc-text-secondary);
+  --zc-title: var(--zc-text-main);
+  --zc-soft: var(--zc-text-disabled);
+  --primary: var(--zc-primary);
+  --primary-hover: var(--zc-primary-hover);
+  --brand-primary: var(--zc-primary);
+  --brand-secondary: var(--zc-primary-active);
+  --muted: var(--zc-text-secondary);
+  --muted-soft: var(--zc-text-disabled);
+
+  --brand: var(--zc-primary);
+  --brand-2: var(--zc-primary-hover);
+  --brand-3: var(--zc-primary);
+  --brand-hover: var(--zc-primary-hover);
+  --brand-dark: var(--zc-primary-active);
+  --brand-soft: var(--zc-primary-soft);
+  --primary-color: var(--zc-primary);
+  --primary-hover: var(--zc-primary-hover);
+  --accent: var(--zc-primary);
+  --accent-2: var(--zc-primary-hover);
+  --ring: color-mix(in srgb, var(--zc-primary) 42%, transparent);
+  --blue: var(--zc-primary);
+  --blue-hover: var(--zc-primary-hover);
+  --blue-soft: var(--zc-primary-soft);
+  --info: var(--zc-primary);
+  --ok: var(--zc-primary);
+  --success: var(--zc-primary);
+  --success-soft: var(--zc-primary-soft);
+  --danger: var(--zc-danger-official);
+  --danger-hover: var(--zc-danger-hover);
+  --danger-soft: var(--zc-danger-soft-official);
+}
+
+html.dark,
+html[data-theme="dark"] {
+  --zc-bg-main: #212121;
+  --zc-panel: #262626;
+  --zc-card: #2A2A2A;
+  --zc-field: #2A2A2A;
+  --zc-hover-bg: #303030;
+  --zc-border-official: #383838;
+  --zc-text-main: #ECECEC;
+  --zc-text-secondary: #B4B4B4;
+  --zc-text-disabled: #777777;
+
+  --zc-primary: #00A884;
+  --zc-primary-hover: #00BC96;
+  --zc-primary-active: #008F72;
+  --zc-primary-soft: rgba(0, 168, 132, 0.14);
+  --zc-primary-contrast: #FFFFFF;
+
+  --zc-danger-official: #EF4444;
+  --zc-danger-hover: #F05A5A;
+  --zc-danger-soft-official: rgba(239, 68, 68, 0.15);
+
+  color-scheme: dark;
+
+  /* Pontes para temas antigos das páginas */
+  --navy: var(--zc-panel);
+  --navy-dark: var(--zc-bg-main);
+  --navy-soft: var(--zc-card);
+
+  --zc-bg: var(--zc-bg-main);
+  --zc-page-bg: var(--zc-bg-main);
+  --zc-surface: var(--zc-card);
+  --zc-surface-2: var(--zc-panel);
+  --zc-surface-hover: var(--zc-hover-bg);
+  --zc-hover: var(--zc-hover-bg);
+  --zc-border: var(--zc-border-official);
+  --zc-border-2: color-mix(in srgb, var(--zc-border-official) 80%, var(--zc-text-secondary));
+  --zc-border-color: var(--zc-border-official);
+  --zc-text: var(--zc-text-main);
+  --zc-text-color: var(--zc-text-main);
+  --zc-muted: var(--zc-text-secondary);
+  --zc-muted-color: var(--zc-text-secondary);
+  --zc-green: var(--zc-primary);
+  --zc-green-soft: var(--zc-primary-soft);
+  --zc-brand: var(--zc-primary);
+  --zc-brand-2: var(--zc-primary-hover);
+  --zc-brand-soft: var(--zc-primary-soft);
+  --zc-blue: var(--zc-primary);
+  --zc-blue-soft: var(--zc-primary-soft);
+  --zc-danger: var(--zc-danger-official);
+  --zc-danger-soft: var(--zc-danger-soft-official);
+
+  --dash-bg: var(--zc-bg-main);
+  --dash-card: var(--zc-panel);
+  --dash-card-soft: var(--zc-card);
+  --dash-hover: var(--zc-hover-bg);
+  --dash-border: var(--zc-border-official);
+  --dash-border-strong: var(--zc-border-official);
+  --dash-text: var(--zc-text-main);
+  --dash-muted: var(--zc-text-secondary);
+  --dash-primary: var(--zc-primary);
+  --dash-green: var(--zc-primary);
+  --dash-purple: var(--zc-primary);
+  --dash-primary-soft: var(--zc-primary-soft);
+  --dash-green-soft: var(--zc-primary-soft);
+  --dash-purple-soft: var(--zc-primary-soft);
+
+  --ci-app-bg: var(--zc-bg-main);
+  --ci-surface: var(--zc-card);
+  --ci-border: var(--zc-border-official);
+  --ci-border-2: var(--zc-border-official);
+  --ci-text: var(--zc-text-main);
+  --ci-muted: var(--zc-text-secondary);
+  --ci-brand: var(--zc-primary);
+  --ci-brand-2: var(--zc-primary-hover);
+  --ci-brand-soft: var(--zc-primary-soft);
+  --ci-danger: var(--zc-danger-official);
+
+  --colab-bg: var(--zc-bg-main);
+  --colab-card: var(--zc-panel);
+  --colab-card-2: var(--zc-card);
+  --colab-card-3: var(--zc-hover-bg);
+  --colab-text: var(--zc-text-main);
+  --colab-muted: var(--zc-text-secondary);
+  --colab-muted-2: var(--zc-text-disabled);
+  --colab-brand: var(--zc-primary);
+  --colab-brand-2: var(--zc-primary-hover);
+  --colab-brand-dark: var(--zc-primary-active);
+  --colab-brand-soft: var(--zc-primary-soft);
+  --colab-brand-soft-2: var(--zc-primary-soft);
+  --colab-primary: var(--zc-primary);
+  --colab-primary-hover: var(--zc-primary-hover);
+  --colab-danger: var(--zc-danger-official);
+  --colab-danger-soft: var(--zc-danger-soft-official);
+
+  --dept-bg: var(--zc-bg-main);
+  --dept-bg-2: var(--zc-bg-main);
+  --dept-surface: var(--zc-panel);
+  --dept-surface-2: var(--zc-card);
+  --dept-border: var(--zc-border-official);
+  --dept-border-2: var(--zc-border-official);
+  --dept-text: var(--zc-text-main);
+  --dept-muted: var(--zc-text-secondary);
+  --dept-brand: var(--zc-primary);
+  --dept-brand-2: var(--zc-primary-hover);
+  --dept-brand-soft: var(--zc-primary-soft);
+  --dept-blue: var(--zc-primary);
+  --dept-blue-soft: var(--zc-primary-soft);
+  --dept-danger: var(--zc-danger-official);
+
+  --cp-panel: var(--zc-panel);
+  --cp-text: var(--zc-text-main);
+  --cp-muted: var(--zc-text-secondary);
+  --cp-green: var(--zc-primary);
+  --cp-green-dark: var(--zc-primary-active);
+  --cp-green-soft: var(--zc-primary-soft);
+  --cp-green-line: color-mix(in srgb, var(--zc-primary) 35%, var(--zc-border-official));
+
+  --leftbar-bg: var(--zc-panel);
+  --leftbar-border: var(--zc-border-official);
+  --bubble-in-bg: var(--zc-card);
+  --bubble-in-border: var(--zc-border-official);
+  --bubble-in-text: var(--zc-text-main);
+  --input-bg: var(--zc-field);
+  --search-bg: var(--zc-card);
+  --scroll-track: var(--zc-bg-main);
+  --scroll-thumb: var(--zc-border-official);
+  --ack-grey: var(--zc-text-disabled);
+
+  /* Tailwind/legados: nomes azuis e roxos passam a usar o verde oficial. */
+  --color-blue-50: #EAF8F5;
+  --color-blue-100: #D6F2EB;
+  --color-blue-400: #00BC96;
+  --color-blue-500: #00A884;
+  --color-blue-600: #008F72;
+  --color-blue-700: #007A62;
+  --color-blue-800: #006B56;
+  --color-blue-900: #005C4B;
+  --color-indigo-50: #EAF8F5;
+  --color-indigo-100: #D6F2EB;
+  --color-indigo-400: #00BC96;
+  --color-indigo-500: #00A884;
+  --color-indigo-600: #008F72;
+  --color-indigo-700: #007A62;
+  --color-purple-50: #EAF8F5;
+  --color-purple-100: #D6F2EB;
+  --color-purple-400: #00BC96;
+  --color-purple-500: #00A884;
+  --color-purple-600: #008F72;
+  --color-purple-700: #007A62;
+}
+
+/* Base de superfície */
+html.dark body,
+html[data-theme="dark"] body {
+  background-color: var(--zc-bg-main) !important;
+  color: var(--zc-text-main);
+}
+
+html.dark :where(main, .main, .page, .page-content, .content, .app-content),
+html[data-theme="dark"] :where(main, .main, .page, .page-content, .content, .app-content) {
+  background-color: var(--zc-bg-main);
+  color: var(--zc-text-main);
+}
+
+html.dark :where(#sidebar, .sidebar, .app-sidebar, .sidebar-shell, .leftbar, .side-panel),
+html[data-theme="dark"] :where(#sidebar, .sidebar, .app-sidebar, .sidebar-shell, .leftbar, .side-panel) {
+  background-color: var(--zc-panel) !important;
+  border-color: var(--zc-border-official) !important;
+}
+
+/* Cards e painéis: superfícies chapadas, sem azul/roxo decorativo */
+html.dark :where(
+  .card, .box, .panel, .surface, .widget, .tile,
+  [class$="-card"], [class*="-card "],
+  [class$="-panel"], [class*="-panel "]
+):not(.message):not(.msg):not(.bubble):not(.whatsapp-preview):not(.qr-code),
+html[data-theme="dark"] :where(
+  .card, .box, .panel, .surface, .widget, .tile,
+  [class$="-card"], [class*="-card "],
+  [class$="-panel"], [class*="-panel "]
+):not(.message):not(.msg):not(.bubble):not(.whatsapp-preview):not(.qr-code) {
+  border-color: var(--zc-border-official) !important;
+  color: var(--zc-text-main);
+}
+
+html.dark :where(.card, .box, .widget, .tile, [class$="-card"], [class*="-card "]):not(.message):not(.msg):not(.bubble),
+html[data-theme="dark"] :where(.card, .box, .widget, .tile, [class$="-card"], [class*="-card "]):not(.message):not(.msg):not(.bubble) {
+  background-color: var(--zc-card) !important;
+}
+
+html.dark :where(.panel, [class$="-panel"], [class*="-panel "]):not(.message-panel),
+html[data-theme="dark"] :where(.panel, [class$="-panel"], [class*="-panel "]):not(.message-panel) {
+  background-color: var(--zc-panel) !important;
+}
+
+/* Campos */
+html.dark :where(input, select, textarea, .input, .select, .form-control, [contenteditable="true"]),
+html[data-theme="dark"] :where(input, select, textarea, .input, .select, .form-control, [contenteditable="true"]) {
+  background-color: var(--zc-field) !important;
+  border-color: var(--zc-border-official) !important;
+  color: var(--zc-text-main) !important;
+  background-image: none !important;
+}
+
+html.dark :where(input, textarea)::placeholder,
+html[data-theme="dark"] :where(input, textarea)::placeholder {
+  color: var(--zc-text-disabled) !important;
+  opacity: 1;
+}
+
+html.dark :where(input, select, textarea, button):disabled,
+html.dark :where(.disabled, [aria-disabled="true"]),
+html[data-theme="dark"] :where(input, select, textarea, button):disabled,
+html[data-theme="dark"] :where(.disabled, [aria-disabled="true"]) {
+  color: var(--zc-text-disabled) !important;
+  border-color: var(--zc-border-official) !important;
+  opacity: .68;
+}
+
+/* Botão principal: verde único */
+:where(
+  .btn-primary, .button-primary, .primary-button, .btn--primary,
+  .btn-success, .btn--ok, .button-success,
+  button.primary, button[data-variant="primary"],
+  [class*="btn-primary"], [class*="button-primary"]
+) {
+  background: var(--zc-primary) !important;
+  background-image: none !important;
+  border-color: var(--zc-primary) !important;
+  color: var(--zc-primary-contrast) !important;
+}
+
+:where(
+  .btn-primary, .button-primary, .primary-button, .btn--primary,
+  .btn-success, .btn--ok, .button-success,
+  button.primary, button[data-variant="primary"],
+  [class*="btn-primary"], [class*="button-primary"]
+):hover:not(:disabled) {
+  background: var(--zc-primary-hover) !important;
+  border-color: var(--zc-primary-hover) !important;
+}
+
+/* Perigo: vermelho reservado a excluir, erro e ações destrutivas */
+:where(
+  .btn-danger, .button-danger, .danger-button, .btn--danger,
+  .delete, .delete-button, .btn-delete, .remove-button,
+  button[data-variant="danger"], [data-action="delete"], [data-action="remove"]
+) {
+  background: var(--zc-danger-official) !important;
+  background-image: none !important;
+  border-color: var(--zc-danger-official) !important;
+  color: #FFFFFF !important;
+}
+
+:where(
+  .btn-danger, .button-danger, .danger-button, .btn--danger,
+  .delete, .delete-button, .btn-delete, .remove-button,
+  button[data-variant="danger"], [data-action="delete"], [data-action="remove"]
+):hover:not(:disabled) {
+  background: var(--zc-danger-hover) !important;
+  border-color: var(--zc-danger-hover) !important;
+}
+
+/* Links e focos deixam de usar azul/roxo */
+:where(a.link, .link, .text-link, [class*="link-primary"]) {
+  color: var(--zc-primary) !important;
+}
+
+:where(button, input, select, textarea, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--zc-primary) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--zc-primary-soft) !important;
+}
+
+/* Hover neutro para navegação e linhas */
+html.dark :where(
+  nav a, .nav-item, .menu-item, .dropdown-item,
+  tbody tr, .list-item, [role="option"]
+):hover,
+html[data-theme="dark"] :where(
+  nav a, .nav-item, .menu-item, .dropdown-item,
+  tbody tr, .list-item, [role="option"]
+):hover {
+  background-color: var(--zc-hover-bg) !important;
+}
+
+/* Item ativo: verde discreto, sem azul */
+html.dark :where(nav a.active, nav a[aria-current="page"], .nav-item.active, .menu-item.active),
+html[data-theme="dark"] :where(nav a.active, nav a[aria-current="page"], .nav-item.active, .menu-item.active) {
+  background-color: var(--zc-primary-soft) !important;
+  color: var(--zc-text-main) !important;
+  border-color: color-mix(in srgb, var(--zc-primary) 48%, var(--zc-border-official)) !important;
+  background-image: none !important;
+}
+
+/* Textos */
+html.dark :where(h1, h2, h3, h4, h5, h6, strong, .title, .heading),
+html[data-theme="dark"] :where(h1, h2, h3, h4, h5, h6, strong, .title, .heading) {
+  color: var(--zc-text-main);
+}
+
+html.dark :where(.muted, .subtitle, .description, .helper, .hint, small, .text-secondary),
+html[data-theme="dark"] :where(.muted, .subtitle, .description, .helper, .hint, small, .text-secondary) {
+  color: var(--zc-text-secondary);
+}
+
+/* Retira gradientes decorativos dos componentes estruturais.
+   Prévias de conversa, QR, loaders e gráficos continuam preservados. */
+:where(
+  button, .btn, .button,
+  .card, .box, .panel, .widget, .tile,
+  .topbar, .page-header, .section-header,
+  .modal, .dialog, .dropdown, .popover,
+  [class$="-card"], [class*="-card "],
+  [class$="-panel"], [class*="-panel "]
+):not(.whatsapp-preview):not(.chat-preview):not(.message):not(.msg):not(.bubble):not(.qr-code):not(.loader):not(.skeleton) {
+  background-image: none !important;
+}
+
+/* Evita que utilitários antigos reintroduzam azul ou roxo */
+:where(
+  .text-blue, .text-indigo, .text-purple, .text-violet,
+  [class*="text-blue-"], [class*="text-indigo-"], [class*="text-purple-"], [class*="text-violet-"]
+) {
+  color: var(--zc-primary) !important;
+}
+
+:where(
+  .bg-blue, .bg-indigo, .bg-purple, .bg-violet,
+  [class*="bg-blue-"], [class*="bg-indigo-"], [class*="bg-purple-"], [class*="bg-violet-"]
+) {
+  background-color: var(--zc-primary-soft) !important;
+  background-image: none !important;
+}
+
+:where(
+  .border-blue, .border-indigo, .border-purple, .border-violet,
+  [class*="border-blue-"], [class*="border-indigo-"], [class*="border-purple-"], [class*="border-violet-"]
+) {
+  border-color: var(--zc-primary) !important;
+}

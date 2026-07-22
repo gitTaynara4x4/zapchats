@@ -55,6 +55,8 @@ def _bool_env_value(name: str, default: bool = False) -> bool:
 
 
 ENABLE_MESSAGES_SET = _bool_env_value("ENABLE_MESSAGES_SET", False)
+EVOLUTION_HISTORY_OWNER = (os.getenv("EVOLUTION_HISTORY_OWNER") or "n8n").strip().lower()
+HISTORY_MANAGED_BY_N8N = EVOLUTION_HISTORY_OWNER in {"n8n", "external", "webhook"}
 
 
 def _float_env_value(name: str, default: float) -> float:
@@ -141,7 +143,7 @@ FULL_EVENTS_WS = [
 # A Evolution aceita GROUP_UPDATE, sem "S".
 # Se mandar GROUPS_UPDATE, /rabbitmq/set retorna 400 e o histórico MESSAGES_SET não chega.
 FULL_EVENTS_RABBIT = [
-    "MESSAGES_SET",
+    # MESSAGES_SET é exclusivo do webhook do n8n.
     "MESSAGES_UPSERT",
     "MESSAGES_UPDATE",
     "MESSAGES_DELETE",
@@ -555,11 +557,13 @@ def _historico_pede_sync(historico_opcao: str | None) -> bool:
 
 
 def _messages_set_deve_rodar(historico_opcao: str | None = None) -> bool:
-    """MESSAGES_SET só roda quando existe importação pendente.
+    """Informa se o backend local pode processar MESSAGES_SET.
 
-    A flag ENABLE_MESSAGES_SET é legada/informativa; ela não deve fazer o
-    backend aceitar histórico sem o usuário escolher 24h, 7d ou 30d.
+    No modo n8n, retorna sempre False: o histórico é entregue e controlado
+    exclusivamente pelo webhook externo.
     """
+    if HISTORY_MANAGED_BY_N8N:
+        return False
     return _historico_pede_sync(historico_opcao)
 
 
@@ -673,6 +677,10 @@ async def _history_findmessages_fallback(
     empresa_id: int | None,
     reason: str = "watchdog",
 ) -> bool:
+    if HISTORY_MANAGED_BY_N8N:
+        LOG(f"[HISTORY] fallback local ignorado; histórico pertence ao n8n inst={inst_id}")
+        return False
+
     h = _normalize_historico_opcao(historico_opcao)
 
     if not HISTORY_FINDMESSAGES_FALLBACK_ENABLED:
@@ -762,6 +770,9 @@ def trigger_history_findmessages_fallback_later(
     delay_sec: float | None = None,
     reason: str = "manual",
 ) -> bool:
+    if HISTORY_MANAGED_BY_N8N:
+        return False
+
     inst = str(inst_id or "").strip()
     if not inst:
         return False
@@ -1100,6 +1111,13 @@ async def _evo_force_history_settings_after_open(instance: str, *, historico_opc
 
     Isso não importa mensagens diretamente; só força a Evolution a emitir MESSAGES_SET.
     """
+    if HISTORY_MANAGED_BY_N8N:
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": "history_owned_by_n8n",
+        }
+
     h = _normalize_historico_opcao(historico_opcao)
     should_sync = _historico_pede_sync(h)
 
@@ -1231,6 +1249,10 @@ async def _history_watchdog_wait_and_retry(
     mas não entrega MESSAGES_SET válido na primeira tentativa.
     """
     h = _normalize_historico_opcao(historico_opcao)
+
+    if HISTORY_MANAGED_BY_N8N:
+        LOG(f"[HISTORY][watchdog] ignorado; histórico pertence ao n8n inst={inst_id}")
+        return False
 
     if not HISTORY_WATCHDOG_ENABLED:
         LOG(
@@ -1434,6 +1456,13 @@ async def _run_connect_sync_safe(inst_id: str) -> None:
         from .contacts import sync_contatos_completos, sync_chats_completos
 
         historico_opcao, historico_pendente, empresa_id = _read_history_option_for_instance(inst_id)
+
+        if HISTORY_MANAGED_BY_N8N and historico_pendente:
+            LOG(
+                f"[SYNC][connect] histórico pendente entregue ao n8n; "
+                f"nenhum processamento local será iniciado inst={inst_id} historico={historico_opcao}"
+            )
+            return
 
         LOG(
             "[SYNC][connect] início "
@@ -1760,7 +1789,14 @@ async def on_conn_update(first: str, payload: dict):
     if conectado and inst_id not in INSTANCIAS_SYNC:
         do_sync = False
 
-        if historico_pendente and historico_primeiro_login:
+        if HISTORY_MANAGED_BY_N8N and historico_pendente:
+            do_sync = False
+            LOG(
+                f"[SYNC][connect] processamento local ignorado; histórico pertence ao n8n "
+                f"inst={inst_id} historico={historico_opcao}"
+            )
+
+        elif historico_pendente and historico_primeiro_login:
             do_sync = True
             LOG(
                 f"[SYNC][connect] permitido por histórico pendente de primeiro login "

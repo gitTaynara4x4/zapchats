@@ -138,9 +138,9 @@
         else if (pathname.indexOf('/profile/refresh') >= 0) timeoutMs = 30000;
         else if (pathname.indexOf('/profile') >= 0) timeoutMs = 18000;
         else if (pathname.indexOf('/notas') >= 0 || pathname.indexOf('/notes') >= 0) timeoutMs = 12000;
-        else if (pathname.indexOf('/mensagens') >= 0) timeoutMs = 22000;
+        else if (pathname.indexOf('/mensagens') >= 0) timeoutMs = 45000;
         else if (pathname.indexOf('/conversas') >= 0) timeoutMs = 10000;
-        if (Number.isFinite(customTimeout) && customTimeout > 0) timeoutMs = Math.max(timeoutMs, Math.min(customTimeout, 45000));
+        if (Number.isFinite(customTimeout) && customTimeout > 0) timeoutMs = Math.max(timeoutMs, Math.min(customTimeout, 65000));
 
         var timer = setTimeout(function(){
           try { ctrl.abort(new DOMException('atendimento-fetch-timeout-v7', 'AbortError')); }
@@ -334,7 +334,7 @@
     src="https://unpkg.com/@lottiefiles/dotlottie-wc@0.6.2/dist/dotlottie-wc.js"
     type="module"></script>
 
-  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260715-topbar-filter-1b8760-1">
+  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260715-newchat-open-timeout-fix-1">
 
   <link
     rel="stylesheet"

@@ -5856,3 +5856,619 @@ html.dark body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-sa
 html[data-theme="dark"] body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .colab-tab.has-error .step-number{
   background:rgba(217,45,32,.16)!important;
 }
+
+/* =========================================================
+   COLABORADORES — DARK FINAL OFICIAL ZAPSCHAT
+   Correção consolidada: elimina fundos brancos fixos sem
+   alterar estrutura, espaçamentos ou comportamento da página.
+   Paleta: #212121 / #262626 / #2A2A2A / #303030 / #383838
+   ========================================================= */
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"]{
+  --colab-bg:#212121;
+  --colab-page:#212121;
+  --colab-card:#262626;
+  --colab-card-2:#2A2A2A;
+  --colab-card-3:#303030;
+  --colab-line:#383838;
+  --colab-line-2:#484848;
+  --colab-text:#ECECEC;
+  --colab-title:#F5F5F5;
+  --colab-muted:#B4B4B4;
+  --colab-muted-2:#777777;
+  --colab-brand:#22C58B;
+  --colab-brand-2:#18B77D;
+  --colab-brand-dark:#4ADEA7;
+  --colab-brand-soft:rgba(34,197,139,.14);
+  --colab-brand-soft-2:rgba(34,197,139,.10);
+  --colab-primary:#18B77D;
+  --colab-primary-hover:#22C58B;
+  --colab-danger:#FF6B78;
+  --colab-danger-soft:rgba(255,107,120,.12);
+  --colab-warn:#F6C453;
+  --colab-warn-soft:rgba(246,196,83,.12);
+  --colab-info:#8AB4F8;
+  --colab-info-soft:rgba(138,180,248,.12);
+  --colab-shadow:0 24px 64px rgba(0,0,0,.38);
+  --colab-shadow-sm:0 10px 28px rgba(0,0,0,.24);
+  background:#212121!important;
+  color:#ECECEC!important;
+  color-scheme:dark!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .main.colab-midias-page{
+  background:#212121!important;
+  color:var(--colab-text)!important;
+}
+
+/* Cabeçalho, busca, métricas e área principal */
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] :is(
+  .colab-total-pill,
+  .colab-searchbar,
+  .stat-card,
+  .panel,
+  .side-card,
+  .empty
+){
+  background:#262626!important;
+  border-color:#383838!important;
+  color:var(--colab-text)!important;
+  box-shadow:none!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .colab-searchbar{
+  background:#262626!important;
+  backdrop-filter:none!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .panel.colab-table-panel{
+  background:#262626!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] :is(
+  .title-folder,
+  .stat-icon,
+  .td-avatar,
+  .avatar-mini
+){
+  background:#2A2A2A!important;
+  border-color:#383838!important;
+  box-shadow:none!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .title-folder{
+  background:rgba(34,197,139,.12)!important;
+  color:#4ADEA7!important;
+  border-color:rgba(74,222,167,.24)!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .stat-icon.success{
+  background:rgba(34,197,139,.12)!important;
+  color:#4ADEA7!important;
+  border-color:rgba(74,222,167,.22)!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .stat-icon.warn{
+  background:rgba(246,196,83,.11)!important;
+  color:#F6C453!important;
+  border-color:rgba(246,196,83,.24)!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] :is(
+  .colab-breadcrumb,
+  .panel-head p,
+  .stat-copy small,
+  .member-user,
+  .empty,
+  .help-text,
+  .muted
+){
+  color:var(--colab-muted)!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] :is(
+  .colab-breadcrumb strong,
+  .colab-top h1,
+  .colab-total-pill strong,
+  .panel-head h2,
+  .stat-copy strong,
+  .member-name
+){
+  color:var(--colab-title)!important;
+}
+
+/* Botões e campos */
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] :is(
+  .btn:not(.btn-primary),
+  .btn-soft,
+  .btn-ghost,
+  .ghost-menu
+){
+  background:#2A2A2A!important;
+  border-color:#383838!important;
+  color:#ECECEC!important;
+  box-shadow:none!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] :is(
+  .btn:not(.btn-primary),
+  .btn-soft,
+  .btn-ghost,
+  .ghost-menu
+):hover{
+  background:#303030!important;
+  border-color:#484848!important;
+  color:#FFFFFF!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] :is(
+  .btn-primary,
+  #btn-add-colaborador
+){
+  background:#18B77D!important;
+  border-color:#18B77D!important;
+  color:#FFFFFF!important;
+  box-shadow:0 8px 22px rgba(24,183,125,.18)!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] :is(
+  .btn-primary,
+  #btn-add-colaborador
+):hover{
+  background:#22C58B!important;
+  border-color:#22C58B!important;
+  color:#FFFFFF!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] :is(
+  .input,
+  .select,
+  input[type="search"],
+  input[type="text"],
+  input[type="email"],
+  input[type="tel"],
+  input[type="password"],
+  input[type="time"],
+  textarea,
+  .x-sel-btn
+){
+  background:#2A2A2A!important;
+  border-color:#383838!important;
+  color:#ECECEC!important;
+  caret-color:#ECECEC!important;
+  box-shadow:none!important;
+  color-scheme:dark!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] :is(
+  input,
+  textarea
+)::placeholder{
+  color:#777777!important;
+  opacity:1!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] select option{
+  background:#2A2A2A!important;
+  color:#ECECEC!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] :is(
+  .input,
+  .select,
+  input[type="search"],
+  input[type="text"],
+  input[type="email"],
+  input[type="tel"],
+  input[type="password"],
+  input[type="time"],
+  textarea,
+  .x-sel-btn
+):focus{
+  background:#2A2A2A!important;
+  border-color:rgba(74,222,167,.62)!important;
+  box-shadow:0 0 0 3px rgba(34,197,139,.12)!important;
+}
+
+/* Tabela */
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] table.colabs th{
+  background:#2A2A2A!important;
+  color:#B4B4B4!important;
+  border-color:#383838!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] table.colabs td{
+  color:#ECECEC!important;
+  border-color:#383838!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] table.colabs tbody tr{
+  background:#262626!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] table.colabs tbody tr:hover{
+  background:#303030!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .email-link,
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil .fieldbox a{
+  color:#8AB4F8!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] :is(
+  .team-chip,
+  .chip,
+  .status-pill
+){
+  background:#2A2A2A!important;
+  border-color:#383838!important;
+  color:#ECECEC!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .status-pill.active,
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .tone-1{
+  background:rgba(34,197,139,.12)!important;
+  border-color:rgba(74,222,167,.22)!important;
+  color:#4ADEA7!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .status-pill.offline,
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .tone-muted{
+  background:#2A2A2A!important;
+  border-color:#383838!important;
+  color:#B4B4B4!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .status-pill.warn{
+  background:rgba(246,196,83,.11)!important;
+  border-color:rgba(246,196,83,.24)!important;
+  color:#F6C453!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .tone-2{
+  background:rgba(138,180,248,.11)!important;
+  border-color:rgba(138,180,248,.22)!important;
+  color:#AECBFA!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .tone-3{
+  background:rgba(196,138,255,.11)!important;
+  border-color:rgba(196,138,255,.22)!important;
+  color:#D7AEFB!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .tone-4{
+  background:rgba(255,170,90,.11)!important;
+  border-color:rgba(255,170,90,.22)!important;
+  color:#FFB86B!important;
+}
+
+/* Modal e wizard */
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .modal-back{
+  background:rgba(0,0,0,.72)!important;
+  backdrop-filter:blur(7px)!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .perfil-modal-card{
+  --cp-ink:#F5F5F5;
+  --cp-text:#ECECEC;
+  --cp-muted:#B4B4B4;
+  --cp-line:#383838;
+  --cp-panel:#262626;
+  --cp-page:#212121;
+  background:#262626!important;
+  border-color:#383838!important;
+  box-shadow:0 28px 80px rgba(0,0,0,.48)!important;
+  color:#ECECEC!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .perfil-modal-card::before{
+  background:radial-gradient(circle,rgba(34,197,139,.13),transparent 68%)!important;
+  opacity:.75!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal :is(
+  .modal-head,
+  .colab-clean-head,
+  .colab-clean-foot,
+  .colab-panel-card,
+  .colab-side,
+  .fieldbox,
+  .advanced-card,
+  .access-mode-card,
+  .company-field,
+  .company-readonly,
+  .schedule-card,
+  .colab-schedule-block,
+  .schedule-toggle-card,
+  .colab-photo-editor,
+  .colab-photo-action,
+  .perm-toolbar,
+  .perm-group,
+  .perm-profile-btn,
+  .colab-benefits-strip
+){
+  background:#262626!important;
+  border-color:#383838!important;
+  color:#ECECEC!important;
+  box-shadow:none!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .modal-body{
+  background:#212121!important;
+  color:#ECECEC!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal :is(
+  .colab-wizard-steps,
+  .perm-group-head,
+  .side-preview-pill,
+  .avatar-upload-btn,
+  .colab-photo-preview,
+  .schedule-static-help,
+  .colab-save-status
+){
+  background:#2A2A2A!important;
+  border-color:#383838!important;
+  color:#ECECEC!important;
+  box-shadow:none!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .colab-tab{
+  background:transparent!important;
+  border-color:transparent!important;
+  color:#B4B4B4!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .colab-tab:hover{
+  background:#303030!important;
+  border-color:#383838!important;
+  color:#ECECEC!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .colab-tab.active{
+  background:rgba(34,197,139,.12)!important;
+  border-color:rgba(74,222,167,.24)!important;
+  color:#4ADEA7!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .step-number{
+  background:#262626!important;
+  border-color:#484848!important;
+  color:#B4B4B4!important;
+  box-shadow:none!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .colab-tab.active .step-number{
+  background:#18B77D!important;
+  border-color:#18B77D!important;
+  color:#FFFFFF!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal :is(
+  #perfil-title,
+  .colab-modal-heading>span,
+  .panel-title h3,
+  .details-grid dt,
+  .details-grid dd,
+  .fieldbox,
+  .chk-line,
+  .chk-line strong,
+  .access-mode-main,
+  .dept-title-line,
+  .inst-title-line,
+  .perm-toolbar-title strong,
+  .perm-group-title,
+  .perm-item-name,
+  .manual-password-label,
+  .side-preview-name,
+  .avatar-upload-btn,
+  .colab-save-status-copy strong
+){
+  color:#ECECEC!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal :is(
+  #perfil-subtitle,
+  .panel-title p,
+  .panel-description,
+  .panel-hint-sr,
+  .step-copy small,
+  .access-mode-description,
+  .field-helper,
+  .help-text,
+  .required-fields-note,
+  .side-preview-role,
+  .avatar-upload-btn small,
+  .perm-toolbar-title span,
+  .perm-item-desc,
+  .colab-save-status-copy small
+){
+  color:#B4B4B4!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .fieldbox.is-editing :is(.input,.select),
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .perm-search input{
+  background:#2A2A2A!important;
+  border-color:#383838!important;
+  color:#ECECEC!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal :is(
+  #e-deptos .chk-line,
+  #e-insts .chk-line,
+  #e-perms .chk-line,
+  .perm-group-body .chk-line
+){
+  background:#2A2A2A!important;
+  border-color:#383838!important;
+  color:#ECECEC!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal :is(
+  #e-deptos .chk-line,
+  #e-insts .chk-line,
+  #e-perms .chk-line,
+  .perm-group-body .chk-line
+):hover{
+  background:#303030!important;
+  border-color:rgba(74,222,167,.30)!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal :is(
+  .perm-summary,
+  .perm-profile-btn.active,
+  .perm-profile-btn:hover,
+  .perm-group-title i,
+  #dept-exp-hint
+){
+  background:rgba(34,197,139,.12)!important;
+  border-color:rgba(74,222,167,.24)!important;
+  color:#4ADEA7!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .avatar-wrap{
+  background:#2A2A2A!important;
+  border-color:#383838!important;
+  color:#4ADEA7!important;
+  box-shadow:none!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .chip-admin{
+  background:#303030!important;
+  border-color:#484848!important;
+  color:#ECECEC!important;
+}
+
+/* Select customizado */
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .x-sel-list{
+  background:#2A2A2A!important;
+  border-color:#383838!important;
+  box-shadow:0 18px 42px rgba(0,0,0,.42)!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .x-sel-opt{
+  color:#ECECEC!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .x-sel-opt:hover,
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .x-sel-opt[aria-selected="true"]{
+  background:#303030!important;
+  color:#4ADEA7!important;
+}
+
+/* Confirmação, feedback e validação */
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .zc-confirm .modal-card,
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .zc-confirm :is(.modal-head,.modal-body,.foot){
+  background:#262626!important;
+  border-color:#383838!important;
+  color:#ECECEC!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #toast{
+  background:#2A2A2A!important;
+  border-color:#383838!important;
+  color:#ECECEC!important;
+  box-shadow:0 18px 48px rgba(0,0,0,.42)!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #toast.toast-ok,
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .colab-save-status.is-success{
+  background:rgba(34,197,139,.12)!important;
+  border-color:rgba(74,222,167,.24)!important;
+  color:#4ADEA7!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #toast.toast-warn,
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .colab-save-status.is-warning{
+  background:rgba(246,196,83,.12)!important;
+  border-color:rgba(246,196,83,.24)!important;
+  color:#F6C453!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #toast.toast-err,
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .colab-save-status.is-error{
+  background:rgba(255,107,120,.12)!important;
+  border-color:rgba(255,107,120,.24)!important;
+  color:#FF8893!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .colab-tab.has-error .step-number{
+  background:rgba(255,107,120,.14)!important;
+  border-color:rgba(255,107,120,.42)!important;
+  color:#FF8893!important;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .colab-tab.has-error .step-copy strong,
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .required-mark,
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .required-fields-note>span,
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .field-error{
+  color:#FF8893!important;
+}
+
+/* Barras de rolagem no tema escuro */
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] *{
+  scrollbar-color:#484848 #262626;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] *::-webkit-scrollbar{
+  width:10px;
+  height:10px;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] *::-webkit-scrollbar-track{
+  background:#262626;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] *::-webkit-scrollbar-thumb{
+  background:#484848;
+  border:2px solid #262626;
+  border-radius:999px;
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] *::-webkit-scrollbar-thumb:hover{
+  background:#5A5A5A;
+}
+
+
+/* Complemento dark: ícones de ajuda, radios, checkboxes e switches */
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .zc-help-icon{
+  background:#2A2A2A!important;
+  border-color:#484848!important;
+  color:#B4B4B4!important;
+  box-shadow:none!important;
+}
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .zc-help-icon:hover,
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .zc-help-icon:focus{
+  background:#303030!important;
+  border-color:rgba(74,222,167,.36)!important;
+  color:#4ADEA7!important;
+}
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .zc-help-icon::after{
+  background:#303030!important;
+  border-color:#484848!important;
+  color:#ECECEC!important;
+  box-shadow:0 14px 36px rgba(0,0,0,.42)!important;
+}
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] .zc-help-icon::before{
+  border-top-color:#303030!important;
+}
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] input[type="checkbox"],
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] input[type="radio"]{
+  accent-color:#18B77D!important;
+  color-scheme:dark!important;
+}
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .schedule-switch-track{
+  background:#484848!important;
+  border-color:#555!important;
+}
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .schedule-switch-track::after{
+  background:#B4B4B4!important;
+  box-shadow:none!important;
+}
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .schedule-switch input:checked + .schedule-switch-track{
+  background:#18B77D!important;
+  border-color:#18B77D!important;
+}
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil.zc-saas-modal .schedule-switch input:checked + .schedule-switch-track::after{
+  background:#FFFFFF!important;
+}

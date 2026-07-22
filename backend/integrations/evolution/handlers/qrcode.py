@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 
 from ._state import remember_qr_emitted
@@ -15,7 +16,9 @@ from ..utils.time_utils import _server_ts_ms
 from .shared import EvoEvent, handler
 
 
-EVOLUTION_FORCE_QR_ON_WS = True
+EVOLUTION_FORCE_QR_ON_WS = str(
+    os.getenv("EVOLUTION_FORCE_QR_ON_WS", "false")
+).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _safe_str(v: Any) -> str:

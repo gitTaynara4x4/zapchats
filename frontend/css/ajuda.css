@@ -1,0 +1,10 @@
+@import url("./legacy-admin-pages.css");
+.faq-accordion { display: flex; flex-direction: column; gap: 8px; }
+.faq-item { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.faq-question { width: 100%; min-height: 46px; padding: 11px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 0; background: transparent; color: var(--text); text-align: left; font: inherit; font-weight: 500; }
+.faq-question:hover { background: var(--panel-hover); }
+.faq-answer { display: none; padding: 0 14px 14px; color: var(--muted); font-size: 12px; }
+.faq-item.active .faq-answer, .faq-item.is-open .faq-answer { display: block; }
+.support-card { padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+.support-detail { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 11.5px; }
+.btn-whatsapp { background: #25d366; color: #07160c; border-color: #25d366; }

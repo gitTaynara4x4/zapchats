@@ -1,0 +1,9 @@
+@import url("./legacy-admin-pages.css");
+.contratos-intro { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; margin-bottom: 16px; }
+.contratos-list-card, .contratos-content { min-width: 0; }
+.contratos-filtros { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.contratos-list { padding: 12px; max-height: 680px; overflow: auto; }
+.selected-contract-card { padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-soft); }
+.contrato-form-card, .anexos-card, .historico-card { padding: 16px; margin-top: 14px; }
+.proposta-preview, .anexo-upload-box, .helper-box { padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-soft); }
+@media (max-width: 900px) { .contratos-intro { grid-template-columns: 1fr; } }
