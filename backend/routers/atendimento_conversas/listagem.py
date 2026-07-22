@@ -192,6 +192,16 @@ def _group_avatar_proxy_url(grupo_id: int, raw_avatar_url: Optional[str]) -> Opt
     return f"/api/atendimento/avatar/{gid}?kind=grupo"
 
 
+def _get_deleted_cliente_ids(db: Session, *, empresa_id: int) -> set[int]:
+    """Retorna os clientes ocultados da lista lateral para a empresa."""
+    rows = (
+        db.query(models.AtendimentoDeletedConversa.cliente_id)
+        .filter(models.AtendimentoDeletedConversa.empresa_id == int(empresa_id))
+        .all()
+    )
+    return {int(r[0]) for r in rows if r and r[0] is not None}
+
+
 def _get_pinned_ids_usuario(
     db: Session,
     *,
@@ -304,6 +314,11 @@ def listar_conversas(
         instancia_id=resolved_inst_id,
     )
 
+    deleted_cliente_ids = _get_deleted_cliente_ids(
+        db,
+        empresa_id=int(empresa_id),
+    )
+
     cursor_ts = None
     cursor_id = None
 
@@ -331,6 +346,11 @@ def listar_conversas(
         current_colab_id=current_colab_id,
         allow_unassigned_department=_allow_entrada_geral_colaborador(identity),
     )
+
+    if deleted_cliente_ids:
+        q_clientes = q_clientes.filter(
+            ~M.cliente_id.in_([int(x) for x in deleted_cliente_ids])
+        )
 
     if cursor_id is not None and cursor_ts is not None:
         q_clientes = q_clientes.filter(

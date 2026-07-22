@@ -142,6 +142,25 @@ def _k_labels(empresa_id: int, cliente_id: int) -> str:
     return _k("conv", "labels", "emp", str(int(empresa_id)), "cli", str(int(cliente_id)))
 
 
+def _deleted_cliente_ids(db: Session, empresa_id: int) -> set[int]:
+    """Fonte oficial das conversas ocultadas, com compatibilidade do cache antigo."""
+    rows = (
+        db.query(models.AtendimentoDeletedConversa.cliente_id)
+        .filter(models.AtendimentoDeletedConversa.empresa_id == int(empresa_id))
+        .all()
+    )
+
+    ids = {int(r[0]) for r in rows if r and r[0] is not None}
+
+    # Compatibilidade temporária com exclusões feitas antes da tabela persistente.
+    try:
+        ids.update(int(x) for x in (_cache_get_json(_k_deleted(empresa_id)) or []))
+    except Exception:
+        pass
+
+    return ids
+
+
 def _ensure_list(x):
     return x if isinstance(x, list) else (list(x) if isinstance(x, (set, tuple)) else [])
 
@@ -1243,7 +1262,7 @@ def listar_clientes(
     cached = _cache_get_json(cache_key)
 
     if cached:
-        deleted_set = set(_cache_get_json(_k_deleted(empresa_id)) or [])
+        deleted_set = _deleted_cliente_ids(db, empresa_id)
         if deleted_set:
             cached = [it for it in cached if int(it.get("id")) not in deleted_set]
 
@@ -1283,7 +1302,7 @@ def listar_clientes(
 
     q = q.order_by(subq.c.ultima_data.desc().nullslast())
 
-    deleted_set = set(_cache_get_json(_k_deleted(empresa_id)) or [])
+    deleted_set = _deleted_cliente_ids(db, empresa_id)
 
     resultado = []
 
@@ -1723,14 +1742,14 @@ def fixar_conversa(
 @router.get("/conversas/deleted")
 def listar_deletados(
     empresa_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
     empresa_id = _assert_empresa_user(identity, empresa_id)
     _ensure_perm(identity, "atendimento.ver")
 
-    deleted = _cache_get_json(_k_deleted(empresa_id)) or []
-
-    return {"deleted": _ensure_list(deleted)}
+    deleted = sorted(_deleted_cliente_ids(db, empresa_id))
+    return {"deleted": deleted}
 
 
 @router.delete("/conversas/{cliente_id}")
@@ -1770,23 +1789,39 @@ def apagar_conversa(
         allowed=allowed,
     )
 
-    deleted = set(_cache_get_json(_k_deleted(empresa_id)) or [])
-    deleted.add(int(cliente_pk))
-    _cache_set_json(_k_deleted(empresa_id), list(deleted), ttl=7 * 24 * 3600)
-
     try:
+        db.merge(
+            models.AtendimentoDeletedConversa(
+                empresa_id=int(empresa_id),
+                cliente_id=int(cliente_pk),
+                deleted_by_user_id=_to_int(identity.get("id")) if isinstance(identity, dict) else None,
+            )
+        )
+
         if _has_model_pinned(db):
             db.query(models.AtendimentoPinnedConversa).filter(
                 models.AtendimentoPinnedConversa.empresa_id == int(empresa_id),
                 models.AtendimentoPinnedConversa.conversa_id == int(cliente_pk),
             ).delete(synchronize_session=False)
-            db.commit()
-            _cache_del_pattern(_k("conv", "pin", "emp", str(empresa_id)))
-    except Exception:
+
+        db.commit()
+    except Exception as e:
         try:
             db.rollback()
         except Exception:
             pass
+        LOG("[/conversas/{cliente_id}][ERRO_PERSISTENCIA]", repr(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Não foi possível remover a conversa da lista.",
+        )
+
+    # Mantém o cache antigo sincronizado durante a transição, mas ele não é mais
+    # a fonte de verdade. Falha no Redis não altera o sucesso gravado no banco.
+    deleted = set(_cache_get_json(_k_deleted(empresa_id)) or [])
+    deleted.add(int(cliente_pk))
+    _cache_set_json(_k_deleted(empresa_id), sorted(deleted), ttl=7 * 24 * 3600)
+    _cache_del_pattern(_k("conv", "pin", "emp", str(empresa_id)))
 
     _invalidate_conversas_cache(int(empresa_id))
     _cache_del(_k("clientes", LIST_CACHE_VERSION, "emp", str(empresa_id), "dep", ""))
@@ -1868,6 +1903,13 @@ def apagar_conversa_permanente(
             ).delete(synchronize_session=False)
     except Exception:
         pass
+
+    # Remove explicitamente o tombstone antes do cliente. Isso evita depender
+    # do ON DELETE CASCADE em bancos/ambientes onde a FK possa estar desativada.
+    db.query(models.AtendimentoDeletedConversa).filter(
+        models.AtendimentoDeletedConversa.empresa_id == int(empresa_id),
+        models.AtendimentoDeletedConversa.cliente_id == int(cliente_pk),
+    ).delete(synchronize_session=False)
 
     db.delete(cliente)
     db.commit()

@@ -36,23 +36,82 @@ export function authFetch(url, opt = {}){
   });
 }
 
+function statusFallback(status){
+  const code = Number(status) || 0;
+
+  if (code === 401) return 'Sua sessão expirou. Entre novamente para continuar.';
+  if (code === 403) return 'Você não possui permissão para realizar esta ação.';
+  if (code === 404) return 'O recurso solicitado não foi encontrado.';
+  if (code === 409) return 'Já existe um cadastro com estes dados.';
+  if (code === 422) return 'Confira os dados informados.';
+  if (code === 429) return 'Muitas tentativas em pouco tempo. Aguarde e tente novamente.';
+  if ([502, 503, 504].includes(code)) {
+    return 'O servidor está temporariamente indisponível. Tente novamente em alguns instantes.';
+  }
+  if (code >= 500) return 'O servidor encontrou um erro e não concluiu a operação.';
+
+  return 'Não foi possível concluir a operação.';
+}
+
+function looksLikeHTML(text, contentType = ''){
+  const value = String(text || '').trim().toLowerCase();
+  const type = String(contentType || '').toLowerCase();
+
+  return type.includes('text/html')
+    || value.startsWith('<!doctype html')
+    || value.startsWith('<html')
+    || /<(html|head|body|style|script|svg)\b/.test(value);
+}
+
+function cleanPlainError(text){
+  const cleaned = String(text || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned || cleaned.length > 320) return '';
+  return cleaned;
+}
+
 export async function parseMaybeJSON(res){
   const txt = await res.text().catch(() => '');
+  const contentType = res.headers?.get?.('content-type') || '';
+
+  if (!txt) return null;
 
   try {
-    return txt ? JSON.parse(txt) : null;
+    return JSON.parse(txt);
   } catch {
-    return txt || null;
+    // Respostas de erro do proxy (por exemplo, a página HTML do EasyPanel)
+    // nunca devem ser despejadas dentro do modal.
+    if (!res.ok) {
+      if (looksLikeHTML(txt, contentType)) {
+        return {
+          detail: statusFallback(res.status),
+          code: 'upstream_html_error'
+        };
+      }
+
+      return {
+        detail: cleanPlainError(txt) || statusFallback(res.status),
+        code: 'non_json_error'
+      };
+    }
+
+    return txt;
   }
 }
 
 export function throwHTTP(res, data){
-  const err = new Error(
-    (data && (data.detail || data.message)) ||
-    res.statusText ||
-    'Erro'
-  );
+  const detail = data && typeof data === 'object'
+    ? (data.detail || data.message)
+    : null;
 
+  const err = new Error(detail || statusFallback(res.status) || res.statusText || 'Erro');
   err.status = res.status;
   err.data = data;
 

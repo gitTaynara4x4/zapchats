@@ -976,6 +976,62 @@ class FilaInstancia(Base):
         return f"<FilaInstancia emp={self.empresa_id} fila={self.fila_id} inst={self.instancia_id}>"
 
 
+class AtendimentoDeletedConversa(Base):
+    """
+    Conversa removida apenas da lista lateral.
+
+    O cliente e o histórico continuam no banco; esta tabela funciona como
+    tombstone persistente para a conversa não voltar após F5, reinício do
+    backend ou expiração do Redis. A remoção é global para a empresa, igual ao
+    comportamento anterior do cache `conv:deleted`.
+    """
+
+    __tablename__ = "atendimento_deleted_conversas"
+    __table_args__ = (
+        UniqueConstraint(
+            "empresa_id",
+            "cliente_id",
+            name="uq_atd_deleted_emp_cliente",
+        ),
+        Index(
+            "ix_atd_deleted_emp_cliente",
+            "empresa_id",
+            "cliente_id",
+        ),
+    )
+
+    empresa_id = Column(
+        Integer,
+        ForeignKey("empresas.id", ondelete="CASCADE"),
+        nullable=False,
+        primary_key=True,
+    )
+
+    cliente_id = Column(
+        Integer,
+        ForeignKey("clientes.id", ondelete="CASCADE"),
+        nullable=False,
+        primary_key=True,
+    )
+
+    deleted_by_user_id = Column(Integer, nullable=True)
+
+    deleted_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    empresa = relationship("Empresa")
+    cliente = relationship("Cliente")
+
+    def __repr__(self) -> str:
+        return (
+            f"<DeletedConversa emp={self.empresa_id} cliente={self.cliente_id} "
+            f"by={self.deleted_by_user_id}>"
+        )
+
+
 class AtendimentoPinnedConversa(Base):
     __tablename__ = "atendimento_pinned_conversas"
     __table_args__ = (

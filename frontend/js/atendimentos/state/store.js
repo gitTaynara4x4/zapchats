@@ -1770,6 +1770,68 @@ export function replaceOrInsertConversa(item, instanciaKey = null) {
   persist();
 }
 
+export function removeClienteConversas(cliente_id) {
+  const targetId = idKey(cliente_id);
+  if (!targetId) return;
+
+  const isTarget = (c) => {
+    try {
+      return kindOf(c) === 'c' && entityIdOf(c) === targetId;
+    } catch {
+      return false;
+    }
+  };
+
+  try {
+    for (const [boxKey, boxRaw] of Object.entries(state.convsByInst || {})) {
+      const box = boxRaw || { items: [], nextCursor: null, ts: 0 };
+      const items = Array.isArray(box.items) ? box.items : [];
+
+      state.convsByInst[boxKey] = {
+        ...box,
+        items: compactConversas(items.filter((c) => !isTarget(c))),
+        ts: Date.now(),
+      };
+    }
+  } catch {}
+
+  try {
+    state.clientesCache = compactConversas(
+      (state.clientesCache || []).filter((c) => !isTarget(c))
+    );
+
+    state.todosContatosCache = compactConversas(
+      (state.todosContatosCache || []).filter((c) => !isTarget(c))
+    );
+  } catch {}
+
+  try {
+    const selected = state.clienteSel;
+    if (selected && isTarget(selected)) {
+      state.clienteSel = null;
+    }
+  } catch {}
+
+  try {
+    for (const key of Object.keys(state.cacheHistoricos || {})) {
+      const ref = parseConversationRef(key);
+      if (ref.kind === 'c' && ref.entityId === targetId) {
+        delete state.cacheHistoricos[key];
+      }
+    }
+
+    for (const key of Object.keys(state.histByKey || {})) {
+      const parts = String(key || '').split(':');
+      if (parts.includes('c') && parts.includes(targetId)) {
+        delete state.histByKey[key];
+      }
+    }
+  } catch {}
+
+  persist();
+}
+
+
 export function removeConversa(conversation_id, instanciaKey = null) {
   const cid = resolveConversationKeyLoose(conversation_id, null, instanciaKey);
   if (!cid) return;

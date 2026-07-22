@@ -26,6 +26,7 @@ from pydantic import BaseModel, EmailStr, ConfigDict, Field
 from sqlalchemy import or_, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
+from starlette.concurrency import run_in_threadpool
 
 from passlib.hash import bcrypt
 
@@ -1554,7 +1555,14 @@ async def criar_colaborador(
         # usuário gravado sem o e-mail de acesso ter sido entregue.
         if convite_email_payload:
             try:
-                _enviar_email_acesso_colaborador(**convite_email_payload)
+                # O envio SMTP é bloqueante. Executá-lo diretamente dentro desta
+                # rota async trava o event loop do Uvicorn e pode fazer o proxy do
+                # EasyPanel considerar todo o serviço indisponível. A thread mantém
+                # a API responsiva enquanto a transação permanece sem commit.
+                await run_in_threadpool(
+                    _enviar_email_acesso_colaborador,
+                    **convite_email_payload,
+                )
             except EmailDeliveryError as exc:
                 print(
                     "[COLAB CONVITE EMAIL] erro ao enviar convite; cadastro cancelado:",

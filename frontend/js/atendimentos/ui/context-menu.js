@@ -4,6 +4,8 @@
 // empresa_id + user_id + conversa_id + instancia_id
 // ✅ SEM injetar CSS. O visual fica no atendimentos.css.
 
+import { removeClienteConversas } from '../state/store.js';
+
 (function () {
   if (window.__ATD_CTXMENU_INIT__) return;
   window.__ATD_CTXMENU_INIT__ = true;
@@ -1296,6 +1298,10 @@ O que você deseja fazer com esta conversa?
     if (!choice) return;
 
     const removeFromUI = () => {
+      // Remove da DOM e também do store persistido. Antes apenas o <li> era
+      // apagado; ao dar F5, o localStorage reconstruía a conversa excluída.
+      try { removeClienteConversas(clienteId); } catch {}
+
       if (li && li.remove) li.remove();
 
       try {
@@ -1310,6 +1316,10 @@ O que você deseja fazer com esta conversa?
           delete obj[String(clienteId)];
           localStorage.setItem(key, JSON.stringify(obj));
         }
+      } catch {}
+
+      try {
+        sessionStorage.setItem('convForceReload', '1');
       } catch {}
     };
 
@@ -1338,6 +1348,10 @@ O que você deseja fazer com esta conversa?
           title: 'Conversa removida da lista',
           type: 'ok'
         });
+
+        try {
+          await window.carregarClientes?.({ force: true, reason: 'conversation-soft-delete' });
+        } catch {}
       } catch (e) {
         notify({
           title: 'Falha ao apagar da lista',
@@ -1384,6 +1398,10 @@ O que você deseja fazer com esta conversa?
           title: 'Conversa apagada permanentemente',
           type: 'ok'
         });
+
+        try {
+          await window.carregarClientes?.({ force: true, reason: 'conversation-hard-delete' });
+        } catch {}
       } catch (e) {
         notify({
           title: 'Falha ao apagar permanentemente',

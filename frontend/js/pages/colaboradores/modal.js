@@ -1,7 +1,7 @@
 // frontend/js/pages/colaboradores/modal.js
 
 import { state, EDIT_PERM } from './state.js';
-import { apiGet, apiForm, apiJSON } from './api.js';
+import { apiGet, apiForm, apiJSON } from './api.js?v=colab-safe-errors-20260722';
 import { $, els } from './dom.js';
 import { toast } from './feedback.js';
 import {
@@ -58,6 +58,63 @@ import {
 import { loadColaboradores, renderLista } from './lista.js';
 
 let saveStatusTimer = null;
+
+function safeErrorText(value){
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const looksHtml = raw.startsWith('<!DOCTYPE')
+    || raw.startsWith('<!doctype')
+    || raw.startsWith('<html')
+    || /<(html|head|body|style|script|svg)\b/i.test(raw);
+
+  if (looksHtml || raw.length > 500) return '';
+
+  return raw
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function createErrorMessage(error){
+  const status = Number(error?.status) || 0;
+  const data = error?.data;
+  const candidate = data && typeof data === 'object'
+    ? (data.detail || data.message)
+    : data;
+  const safeMessage = safeErrorText(candidate);
+
+  const markNotCreated = (message, retry = false) => {
+    let result = String(message || '').replace(/[.\s]+$/, '');
+
+    if (!/colaborador não foi criado/i.test(result)) {
+      result += '. O colaborador não foi criado';
+    }
+
+    if (retry && !/tente novamente/i.test(result)) {
+      result += '. Tente novamente em alguns instantes';
+    }
+
+    return result.replace(/[.\s]+$/, '') + '.';
+  };
+
+  if (status === 409) return 'Este e-mail já está cadastrado.';
+  if (status === 422) return safeMessage || 'Confira os dados informados.';
+  if ([502, 503, 504].includes(status)) {
+    return markNotCreated(
+      safeMessage || 'O serviço de e-mail ou o servidor está temporariamente indisponível.',
+      true
+    );
+  }
+  if (status >= 500) {
+    return markNotCreated(safeMessage || 'O servidor não concluiu a operação.');
+  }
+  if (!status) {
+    return 'Não foi possível conectar ao servidor. O colaborador não foi criado. Verifique a conexão e tente novamente.';
+  }
+
+  return safeMessage || 'Não foi possível concluir o cadastro. O colaborador não foi criado.';
+}
 
 function getSaveStatusElements(modal = els().perfilModal){
   return {
@@ -1347,11 +1404,12 @@ export async function saveInline(){
 
     try {
       const created = await apiForm('/api/colaboradores/', 'POST', fd);
-      createConfirmed = true;
 
       if (!created?.id) {
         throw new Error('A API não retornou o colaborador criado.');
       }
+
+      createConfirmed = true;
 
       updateModalSave(
         'Atualizando a equipe...',
@@ -1439,16 +1497,7 @@ export async function saveInline(){
         return;
       }
 
-      const apiMessage = (e?.data && (
-        e.data.detail ||
-        e.data.message ||
-        (typeof e.data === 'string' ? e.data : '')
-      )) || null;
-
-      let userMessage = apiMessage || 'Tente novamente em alguns instantes.';
-
-      if (e?.status === 409) userMessage = 'Este e-mail já está cadastrado.';
-      if (e?.status === 422) userMessage = apiMessage || 'Confira os dados informados.';
+      const userMessage = createErrorMessage(e);
 
       finishModalSave({
         type: 'error',

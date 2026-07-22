@@ -834,28 +834,6 @@
     font-weight:700;
   }
 
-  .zc-wa-settings-avatar{
-    width:128px;
-    height:128px;
-    border-radius:999px;
-    overflow:hidden;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    background:rgba(37,211,102,.14);
-    color:var(--zc-wa-accent);
-    font-size:34px;
-    font-weight:800;
-    box-shadow:0 8px 28px rgba(0,0,0,.18);
-  }
-
-  .zc-wa-settings-avatar img{
-    width:100%;
-    height:100%;
-    object-fit:cover;
-    display:none;
-  }
-
   .zc-wa-settings-user-meta{
     width:100%;
     min-width:0;
@@ -884,6 +862,17 @@
     overflow:hidden;
     text-overflow:ellipsis;
     white-space:nowrap;
+  }
+
+  .zc-wa-settings-user-meta span.is-instance-required{
+    max-width:330px;
+    color:var(--zc-wa-accent-2);
+    font-weight:650;
+    white-space:normal;
+  }
+
+  .zc-wa-settings-user-meta span.is-loading{
+    opacity:.72;
   }
 
   .zc-wa-settings-menu{
@@ -1413,14 +1402,9 @@
       <div class="zc-wa-settings-user-card">
         <div class="zc-wa-settings-quote">Painel de atendimento ZapsChat</div>
 
-        <div class="zc-wa-settings-avatar">
-          <img id="zcWaSettingsAvatarImg" alt="Avatar do usuário" referrerpolicy="no-referrer">
-          <span id="zcWaSettingsInitials">U</span>
-        </div>
-
         <div class="zc-wa-settings-user-meta">
           <strong id="zcWaSettingsName">Usuário</strong>
-          <span id="zcWaSettingsEmail">email@empresa.com</span>
+          <span id="zcWaSettingsInstanceNumber">Selecione uma instância própria no topo</span>
         </div>
       </div>
 
@@ -1431,7 +1415,7 @@
           </span>
           <span class="zc-wa-settings-item-copy">
             <strong>Perfil</strong>
-            <span>Nome, foto e informações do WhatsApp</span>
+            <span>Nome, número e informações do WhatsApp</span>
           </span>
         </button>
 
@@ -1789,6 +1773,153 @@
     img.src = src;
   }
 
+  var settingsInstanceRequestSeq = 0;
+
+  function onlyDigits(value) {
+    return cleanText(value).replace(/\D+/g, '');
+  }
+
+  function formatWhatsappNumber(value) {
+    var raw = cleanText(value);
+    var digits = onlyDigits(raw);
+
+    if (!digits) return '';
+
+    if (digits.length === 13 && digits.indexOf('55') === 0) {
+      return '+55 ' + digits.slice(2, 4) + ' ' + digits.slice(4, 9) + '-' + digits.slice(9);
+    }
+
+    if (digits.length === 12 && digits.indexOf('55') === 0) {
+      return '+55 ' + digits.slice(2, 4) + ' ' + digits.slice(4, 8) + '-' + digits.slice(8);
+    }
+
+    if (digits.length === 11) {
+      return '+55 ' + digits.slice(0, 2) + ' ' + digits.slice(2, 7) + '-' + digits.slice(7);
+    }
+
+    if (digits.length === 10) {
+      return '+55 ' + digits.slice(0, 2) + ' ' + digits.slice(2, 6) + '-' + digits.slice(6);
+    }
+
+    return raw.charAt(0) === '+' ? raw : digits;
+  }
+
+  function getSelectedInstanceValue() {
+    try {
+      if (typeof window.getInstanciaAtiva === 'function') {
+        var active = cleanText(window.getInstanciaAtiva());
+        if (active) return active;
+      }
+    } catch (e) {}
+
+    var globalActive = cleanText(window.INSTANCIA_ATIVA);
+    if (globalActive) return globalActive;
+
+    var activeButton = document.querySelector('#inst-switch .inst-pill.is-active, #inst-switch .inst-pill[aria-selected="true"], #inst-switch .inst-pill[aria-pressed="true"]');
+    return cleanText(activeButton && activeButton.getAttribute('data-value'));
+  }
+
+  function getSelectedInstanceRow(value) {
+    var wanted = cleanText(value);
+    if (!wanted) return null;
+
+    var lists = [
+      window.ZC_INSTANCIAS,
+      window.INSTANCIAS,
+      window.state && window.state.instancias
+    ];
+
+    for (var i = 0; i < lists.length; i++) {
+      var list = lists[i];
+      if (!Array.isArray(list)) continue;
+
+      for (var j = 0; j < list.length; j++) {
+        var row = list[j] || {};
+        var rowValue = cleanText(
+          row.instancia_id != null ? row.instancia_id :
+          row.id != null ? row.id :
+          row.instance_id != null ? row.instance_id :
+          row.instancia != null ? row.instancia :
+          row.instance_name
+        );
+
+        if (rowValue === wanted) return row;
+      }
+    }
+
+    return null;
+  }
+
+  function getInstancePhoneFromObject(obj) {
+    obj = obj && typeof obj === 'object' ? obj : {};
+
+    return formatWhatsappNumber(
+      obj.telefone_fmt ||
+      obj.telefone_e164 ||
+      obj.numero_instancia ||
+      obj.numero ||
+      obj.telefone ||
+      obj.phone ||
+      obj.whatsapp_number ||
+      obj.whatsapp ||
+      obj.wuid ||
+      ''
+    );
+  }
+
+  function setSettingsInstanceText(text, stateClass) {
+    var el = document.getElementById('zcWaSettingsInstanceNumber');
+    if (!el) return;
+
+    el.textContent = text;
+    el.classList.remove('is-instance-required', 'is-loading');
+
+    if (stateClass) el.classList.add(stateClass);
+  }
+
+  async function syncSettingsInstanceNumber() {
+    var requestSeq = ++settingsInstanceRequestSeq;
+    var selected = getSelectedInstanceValue();
+
+    if (!selected) {
+      setSettingsInstanceText('Selecione uma instância própria no topo', 'is-instance-required');
+      return;
+    }
+
+    var row = getSelectedInstanceRow(selected);
+    var directPhone = getInstancePhoneFromObject(row);
+
+    if (directPhone) {
+      setSettingsInstanceText(directPhone, '');
+      return;
+    }
+
+    setSettingsInstanceText('Carregando número do WhatsApp…', 'is-loading');
+
+    try {
+      var response = await fetch(
+        '/api/atendimento/instancias/' + encodeURIComponent(selected) + '/perfil?refresh=0',
+        {
+          method: 'GET',
+          credentials: 'include',
+          cache: 'no-store',
+          headers: { Accept: 'application/json' }
+        }
+      );
+
+      if (requestSeq !== settingsInstanceRequestSeq) return;
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+
+      var data = await response.json();
+      var phone = getInstancePhoneFromObject(data);
+
+      setSettingsInstanceText(phone || 'Número do WhatsApp não informado', '');
+    } catch (e) {
+      if (requestSeq !== settingsInstanceRequestSeq) return;
+      setSettingsInstanceText('Número do WhatsApp não disponível', '');
+    }
+  }
+
   function syncUser() {
     var user = getUser();
     var ini = initials(user.nome || user.email);
@@ -1797,15 +1928,10 @@
     if (userEmailEl) userEmailEl.textContent = user.email;
 
     var panelName = document.getElementById('zcWaSettingsName');
-    var panelEmail = document.getElementById('zcWaSettingsEmail');
-    var panelAvatar = document.getElementById('zcWaSettingsAvatarImg');
-    var panelInitials = document.getElementById('zcWaSettingsInitials');
-
     if (panelName) panelName.textContent = user.nome;
-    if (panelEmail) panelEmail.textContent = user.email;
 
     setAvatar(avatarImg, initialsEl, user.avatar, ini);
-    setAvatar(panelAvatar, panelInitials, user.avatar, ini);
+    syncSettingsInstanceNumber();
   }
 
   function currentMenu() {
@@ -2268,6 +2394,8 @@
   window.ZCOpenPerfilInstanciaFromSidebar = openProfilePage;
 
   window.addEventListener('storage', syncUser);
+  document.addEventListener('inst:change', syncSettingsInstanceNumber);
+  document.addEventListener('inst:list', syncSettingsInstanceNumber);
   window.addEventListener('zc:settings-page-helper-ready', function () {
     try {
       if (overlay.classList.contains('is-open')) {
