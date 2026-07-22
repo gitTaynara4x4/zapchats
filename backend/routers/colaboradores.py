@@ -76,6 +76,45 @@ def _boolish(value: Any) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "sim", "on")
 
 
+def _assert_email_disponivel(
+    db: Session,
+    email: str,
+    *,
+    ignorar_colaborador_id: Optional[int] = None,
+    ignorar_usuario_id: Optional[int] = None,
+) -> str:
+    """Valida a unicidade global do e-mail antes de qualquer gravação.
+
+    O banco já possui índices únicos em colaboradores e usuários. Esta validação
+    antecipada melhora a mensagem de erro; o IntegrityError continua sendo a
+    proteção final contra concorrência.
+    """
+    email_norm = str(email or "").strip().lower()
+
+    if not email_norm:
+        raise HTTPException(status_code=422, detail="E-mail é obrigatório")
+
+    q_colab = db.query(models.Colaborador.id).filter(
+        func.lower(models.Colaborador.email) == email_norm
+    )
+    if ignorar_colaborador_id is not None:
+        q_colab = q_colab.filter(models.Colaborador.id != int(ignorar_colaborador_id))
+
+    if q_colab.first():
+        raise HTTPException(status_code=409, detail="E-mail já cadastrado")
+
+    q_user = db.query(models.Usuario.id).filter(
+        func.lower(models.Usuario.email) == email_norm
+    )
+    if ignorar_usuario_id is not None:
+        q_user = q_user.filter(models.Usuario.id != int(ignorar_usuario_id))
+
+    if q_user.first():
+        raise HTTPException(status_code=409, detail="E-mail já cadastrado")
+
+    return email_norm
+
+
 def _norm_modo_acesso(modo: Optional[str], *, senha: Optional[str] = None) -> str:
     s = str(modo or "").strip().lower()
 
@@ -1350,20 +1389,7 @@ async def criar_colaborador(
 
     telefone_norm = normalize_phone_e164_br(telefone)
 
-    email_norm = str(email).lower().strip()
-
-    if (
-        db.query(models.Colaborador)
-        .filter(
-            models.Colaborador.empresa_id == int(empresa_id),
-            models.Colaborador.email == email_norm,
-        )
-        .first()
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail="E-mail já cadastrado em colaboradores",
-        )
+    email_norm = _assert_email_disponivel(db, str(email))
 
     avatar_bytes = None
     avatar_mime = None
@@ -1373,6 +1399,36 @@ async def criar_colaborador(
 
         if avatar_bytes:
             avatar_mime = avatar.content_type or "application/octet-stream"
+
+    hi_norm = _norm_hora(hora_login_inicio)
+    hf_norm = _norm_hora(hora_login_fim)
+
+    horario_modo_norm = _norm_horario_modo(horario_modo, default=None)
+
+    if not horario_modo_norm:
+        if hi_norm or hf_norm:
+            horario_modo_norm = "personalizado"
+        elif setor is not None:
+            horario_modo_norm = "departamento"
+        else:
+            horario_modo_norm = "livre"
+
+    # Valida os acessos antes de criar usuário/colaborador. WhatsApp vazio é
+    # válido e significa apenas que o colaborador não verá conversas.
+    instancias_ids_norm = _validate_instancias_ids_empresa(
+        db,
+        empresa_id=int(empresa_id),
+        instancias_ids=_normalize_int_list(raw_instancias_ids),
+    )
+
+    departamentos_ids_norm = _normalize_int_list(raw_departamentos_ids)
+
+    if not departamentos_ids_norm and setor is not None:
+        departamentos_ids_norm = _departamentos_from_setor_fallback(
+            db,
+            empresa_id=int(empresa_id),
+            setor_id=setor.id,
+        )
 
     usuario_id = None
     convite_email_payload: Optional[dict[str, Any]] = None
@@ -1447,34 +1503,6 @@ async def criar_colaborador(
         # Colaborador sem login: hash aleatório impossível de saber.
         senha_colab_hash = bcrypt.hash(secrets.token_urlsafe(32))
 
-    hi_norm = _norm_hora(hora_login_inicio)
-    hf_norm = _norm_hora(hora_login_fim)
-
-    horario_modo_norm = _norm_horario_modo(horario_modo, default=None)
-
-    if not horario_modo_norm:
-        if hi_norm or hf_norm:
-            horario_modo_norm = "personalizado"
-        elif setor is not None:
-            horario_modo_norm = "departamento"
-        else:
-            horario_modo_norm = "livre"
-
-    instancias_ids_norm = _validate_instancias_ids_empresa(
-        db,
-        empresa_id=int(empresa_id),
-        instancias_ids=_normalize_int_list(raw_instancias_ids),
-    )
-
-    departamentos_ids_norm = _normalize_int_list(raw_departamentos_ids)
-
-    if not departamentos_ids_norm and setor is not None:
-        departamentos_ids_norm = _departamentos_from_setor_fallback(
-            db,
-            empresa_id=int(empresa_id),
-            setor_id=setor.id,
-        )
-
     colab = models.Colaborador(
         empresa_id=int(empresa_id),
         setor_id=(setor.id if setor else None),
@@ -1519,7 +1547,12 @@ async def criar_colaborador(
             departamentos_ids=departamentos_ids_norm,
             primary_departamento_id=colab.setor_id,
         )
+        db.flush()
 
+        # Materializa a resposta ainda dentro da transação. Assim, qualquer erro
+        # de serialização/consulta provoca rollback e nunca existe HTTP de erro
+        # depois de o colaborador ter sido confirmado no banco.
+        result = _to_out(db, colab)
         db.commit()
 
     except IntegrityError:
@@ -1554,14 +1587,6 @@ async def criar_colaborador(
                 "Tente reenviar pelo perfil do colaborador."
             )
             print("[COLAB CONVITE EMAIL] erro inesperado:", repr(exc))
-
-    c = (
-        db.query(models.Colaborador)
-        .options(joinedload(models.Colaborador.setor))
-        .get(colab.id)
-    )
-
-    result = _to_out(db, c)
 
     if convite_email_payload:
         result = result.model_copy(
@@ -1675,6 +1700,14 @@ def atualizar_colaborador(
     _assert_mesma_empresa(colab.empresa_id, empresa_id)
 
     data = payload.model_dump(exclude_unset=True)
+
+    if "email" in data and data["email"] is not None:
+        data["email"] = _assert_email_disponivel(
+            db,
+            str(data["email"]),
+            ignorar_colaborador_id=int(colab.id),
+            ignorar_usuario_id=(int(colab.usuario_id) if colab.usuario_id else None),
+        )
 
     if "senha" in data and data.get("senha"):
         _assert_pode_redefinir_senha(db, user)
@@ -1804,6 +1837,8 @@ def atualizar_colaborador(
                 primary_departamento_id=colab.setor_id,
             )
 
+        db.flush()
+        result = _to_out(db, colab)
         db.commit()
 
     except IntegrityError:
@@ -1813,13 +1848,7 @@ def atualizar_colaborador(
         db.rollback()
         raise
 
-    c = (
-        db.query(models.Colaborador)
-        .options(joinedload(models.Colaborador.setor))
-        .get(colab.id)
-    )
-
-    return _to_out(db, c)
+    return result
 
 
 @router.put("/{colab_id}/instancias", response_model=ColaboradorOut)

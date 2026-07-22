@@ -1256,8 +1256,11 @@ export async function saveInline(){
   const deptosSel = getDepartamentosSelecionadosEdit();
   const permsSel = getPermsSelecionadasEdit();
 
-  // WhatsApp é opcional no cadastro do colaborador. Uma seleção vazia é válida:
-  // o colaborador é criado normalmente, mas não visualiza nem atende conversas.
+  // WhatsApp é opcional no cadastro. Sem seleção, o colaborador é salvo
+  // normalmente e permanece sem acesso às conversas até receber uma instância.
+  const instWarning = document.querySelector('#inst-selection-warning');
+  if (instWarning) instWarning.hidden = instsSel.length > 0;
+
   const departamentoPrincipalId = deptosSel.length ? deptosSel[0] : null;
   const horarioModo = buildHorarioModoPayload(departamentoPrincipalId, expOn);
   const acessoModo = getAcessoModo();
@@ -1340,8 +1343,11 @@ export async function saveInline(){
       detail: 'Salvando dados, acessos, permissões e foto de perfil.'
     })) return;
 
+    let createConfirmed = false;
+
     try {
       const created = await apiForm('/api/colaboradores/', 'POST', fd);
+      createConfirmed = true;
 
       if (!created?.id) {
         throw new Error('A API não retornou o colaborador criado.');
@@ -1415,6 +1421,24 @@ export async function saveInline(){
     } catch (e) {
       console.error('[create error]', e?.status, e?.data || e);
 
+      // A API de criação já confirmou o cadastro. Qualquer falha daqui para
+      // frente é apenas de atualização da interface e não pode ser apresentada
+      // como falha de gravação, pois isso induziria um cadastro duplicado.
+      if (createConfirmed) {
+        const refreshMessage =
+          'O colaborador foi criado, mas a tela não conseguiu concluir a atualização. Atualize a página antes de tentar novamente.';
+
+        finishModalSave({
+          type: 'warning',
+          title: 'Colaborador criado; atualização da tela pendente',
+          detail: refreshMessage,
+          keepMs: 6500
+        });
+
+        toast(refreshMessage, 'warn');
+        return;
+      }
+
       const apiMessage = (e?.data && (
         e.data.detail ||
         e.data.message ||
@@ -1468,9 +1492,11 @@ export async function saveInline(){
   let accessEmailSent = false;
   let accessEmailFailed = false;
   let avatarUploadFailed = false;
+  let updateConfirmed = false;
 
   try {
     const updated = await apiJSON(`/api/colaboradores/${id}`, 'PUT', payload);
+    updateConfirmed = true;
 
     if (acessoModo === 'convite') {
       updateModalSave(
@@ -1562,6 +1588,21 @@ export async function saveInline(){
     }
   } catch (e) {
     console.error('[colaboradores/save]', e);
+
+    if (updateConfirmed) {
+      const refreshMessage =
+        'As alterações foram salvas, mas a tela não conseguiu concluir a atualização. Atualize a página antes de salvar novamente.';
+
+      finishModalSave({
+        type: 'warning',
+        title: 'Alterações salvas; atualização da tela pendente',
+        detail: refreshMessage,
+        keepMs: 6500
+      });
+
+      toast(refreshMessage, 'warn');
+      return;
+    }
 
     let userMessage = 'Tente novamente em alguns instantes.';
 
