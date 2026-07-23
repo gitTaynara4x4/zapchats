@@ -580,6 +580,11 @@
     background:var(--zc-wa-bg) !important;
     color:var(--zc-wa-text);
     font-family:var(--zc-font, "Inter", "Segoe UI", Arial, sans-serif) !important;
+    font-weight:400;
+    font-synthesis:none;
+    -webkit-font-smoothing:antialiased;
+    -moz-osx-font-smoothing:grayscale;
+    text-rendering:optimizeLegibility;
   }
 
   .zc-wa-settings-overlay.is-open{
@@ -632,7 +637,7 @@
   .zc-wa-settings-title strong{
     font-size:19px;
     line-height:1.2;
-    font-weight:700;
+    font-weight:600;
     color:var(--zc-wa-text);
     white-space:nowrap;
     overflow:hidden;
@@ -708,7 +713,7 @@
     outline:0;
     background:transparent;
     color:var(--zc-wa-text);
-    font:500 14px/1 var(--zc-font, "Inter", sans-serif);
+    font:400 14px/1 var(--zc-font, "Inter", sans-serif);
   }
 
   .zc-wa-settings-searchbox input::placeholder{
@@ -769,7 +774,7 @@
     margin-bottom:4px;
     font-size:14px;
     line-height:1.2;
-    font-weight:700;
+    font-weight:600;
     color:var(--zc-wa-text);
   }
 
@@ -777,13 +782,13 @@
     display:block;
     font-size:12.5px;
     line-height:1.35;
-    font-weight:600;
+    font-weight:400;
     color:var(--zc-wa-muted);
   }
 
   .zc-wa-settings-notice-copy b{
     color:var(--zc-wa-accent-2);
-    font-weight:800;
+    font-weight:600;
   }
 
   .zc-wa-settings-notice-close{
@@ -831,7 +836,7 @@
     text-align:center;
     font-size:12px;
     line-height:1.22;
-    font-weight:700;
+    font-weight:500;
   }
 
   .zc-wa-settings-user-meta{
@@ -846,7 +851,7 @@
     margin:0 auto;
     color:var(--zc-wa-text);
     font-size:15px;
-    font-weight:700;
+    font-weight:600;
     overflow:hidden;
     text-overflow:ellipsis;
     white-space:nowrap;
@@ -858,7 +863,7 @@
     margin:3px auto 0;
     color:var(--zc-wa-muted);
     font-size:12px;
-    font-weight:500;
+    font-weight:400;
     overflow:hidden;
     text-overflow:ellipsis;
     white-space:nowrap;
@@ -867,7 +872,7 @@
   .zc-wa-settings-user-meta span.is-instance-required{
     max-width:330px;
     color:var(--zc-wa-accent-2);
-    font-weight:650;
+    font-weight:500;
     white-space:normal;
   }
 
@@ -895,6 +900,7 @@
     text-align:left;
     cursor:pointer;
     font-family:var(--zc-font, "Inter", sans-serif) !important;
+    font-weight:400;
   }
 
   .zc-wa-settings-item:hover,
@@ -931,14 +937,14 @@
   .zc-wa-settings-item-copy strong{
     font-size:15px;
     line-height:1.2;
-    font-weight:650;
+    font-weight:600;
     color:var(--zc-wa-text);
   }
 
   .zc-wa-settings-item-copy span{
     font-size:13px;
     line-height:1.25;
-    font-weight:500;
+    font-weight:400;
     color:var(--zc-wa-muted);
     white-space:nowrap;
     overflow:hidden;
@@ -1001,7 +1007,7 @@
     color:var(--zc-wa-text);
     font-size:20px;
     line-height:1.2;
-    font-weight:750;
+    font-weight:600;
   }
 
   .zc-wa-settings-card p{
@@ -1009,7 +1015,7 @@
     color:var(--zc-wa-muted);
     font-size:13px;
     line-height:1.45;
-    font-weight:500;
+    font-weight:400;
   }
 
   #zcWaSettingsDetail{
@@ -1345,7 +1351,7 @@
   <div class="wpp-leftbar-user-wrap">
     <button class="wpp-leftbar-user-btn" type="button" id="wppUserMenuBtn" aria-haspopup="dialog" aria-expanded="false">
       <div class="wpp-leftbar-avatar">
-        <img id="wppUserAvatarImg" alt="Avatar do usuário" referrerpolicy="no-referrer">
+        <img id="wppUserAvatarImg" alt="Foto do WhatsApp selecionado" referrerpolicy="no-referrer">
         <span id="wppUserInitials">U</span>
       </div>
 
@@ -1698,11 +1704,14 @@
     var email =
       obj.email ||
       jwt.email ||
-      jwt.preferred_username ||
-      jwt.sub ||
       localStorage.getItem('usuario_email') ||
       localStorage.getItem('email') ||
+      jwt.preferred_username ||
       '';
+
+    // O claim `sub` do JWT é o ID interno do usuário (ex.: 20), não um e-mail.
+    // Também evita que outro identificador puramente numérico apareça como contato.
+    if (/^\d+$/.test(cleanText(email))) email = '';
 
     var departamento =
       obj.departamento ||
@@ -1739,13 +1748,22 @@
     return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
   }
 
-  function setAvatar(img, initialsSpan, avatarUrl, ini) {
+  function setAvatar(img, initialsSpan, avatarUrl, ini, options) {
+    options = options || {};
+
     if (initialsSpan) {
       initialsSpan.textContent = ini || 'U';
       initialsSpan.style.display = '';
     }
 
     if (!img) return;
+
+    img.dataset.avatarKind = cleanText(options.kind || '');
+    img.dataset.instanciaId = cleanText(options.instanciaId || '');
+
+    if (options.alt) {
+      img.alt = cleanText(options.alt);
+    }
 
     if (!avatarUrl) {
       img.removeAttribute('src');
@@ -1763,6 +1781,12 @@
       img.removeAttribute('src');
       img.style.display = 'none';
       if (initialsSpan) initialsSpan.style.display = '';
+
+      if (typeof options.onError === 'function') {
+        try {
+          options.onError(avatarUrl);
+        } catch (e) {}
+      }
     };
 
     img.onload = function () {
@@ -1774,6 +1798,9 @@
   }
 
   var settingsInstanceRequestSeq = 0;
+  var sidebarAvatarRequestSeq = 0;
+  var sidebarAvatarRefreshInFlight = {};
+  var sidebarAvatarRefreshTriedAt = {};
 
   function onlyDigits(value) {
     return cleanText(value).replace(/\D+/g, '');
@@ -1867,6 +1894,274 @@
     );
   }
 
+  function getInstanceId(value, row) {
+    row = row && typeof row === 'object' ? row : {};
+
+    var candidates = [
+      row.instancia_id,
+      row.id,
+      row.instance_id,
+      row.whatsapp_id,
+      value
+    ];
+
+    for (var i = 0; i < candidates.length; i++) {
+      var candidate = cleanText(candidates[i]);
+      if (/^\d+$/.test(candidate) && Number(candidate) > 0) {
+        return candidate;
+      }
+    }
+
+    try {
+      var debug = window.ZCPerfilInstancia &&
+        typeof window.ZCPerfilInstancia.getSelectedInstanceDebugInfo === 'function'
+        ? window.ZCPerfilInstancia.getSelectedInstanceDebugInfo()
+        : null;
+
+      var debugId = cleanText(debug && debug.instanciaId);
+      if (/^\d+$/.test(debugId) && Number(debugId) > 0) return debugId;
+    } catch (e) {}
+
+    return '';
+  }
+
+  function getInstanceLabel(value, row) {
+    row = row && typeof row === 'object' ? row : {};
+
+    return cleanText(
+      row.apelido ||
+      row.nome_exibicao ||
+      row.display_name ||
+      row.nome ||
+      row.name ||
+      row.instance_name ||
+      value ||
+      'WhatsApp'
+    );
+  }
+
+  function getInstanceAvatarFromObject(obj) {
+    obj = obj && typeof obj === 'object' ? obj : {};
+
+    var profile = obj.profile && typeof obj.profile === 'object' ? obj.profile : {};
+    var perfil = obj.perfil && typeof obj.perfil === 'object' ? obj.perfil : {};
+    var raw = obj.raw && typeof obj.raw === 'object' ? obj.raw : {};
+
+    var avatar = cleanText(
+      obj.perfil_avatar_url ||
+      obj.avatar_url ||
+      obj.avatar ||
+      obj.avatar_remote_url ||
+      obj.profilePictureUrl ||
+      obj.profile_picture_url ||
+      obj.picture ||
+      profile.perfil_avatar_url ||
+      profile.avatar_url ||
+      profile.avatar ||
+      profile.profilePictureUrl ||
+      perfil.perfil_avatar_url ||
+      perfil.avatar_url ||
+      perfil.avatar ||
+      raw.perfil_avatar_url ||
+      raw.avatar_url ||
+      raw.avatar ||
+      raw.profilePictureUrl ||
+      ''
+    );
+
+    if (!avatar || avatar === 'null' || avatar === 'undefined') return '';
+    return avatar;
+  }
+
+  function readInstanceProfileCache(instanciaId) {
+    var id = cleanText(instanciaId);
+    if (!/^\d+$/.test(id)) return null;
+
+    try {
+      var payload = readJson('zc:perfil-instancia:v2:' + id);
+      if (!payload || typeof payload !== 'object') return null;
+
+      if (payload.user && typeof payload.user === 'object') {
+        return payload.user;
+      }
+
+      return payload;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function getSelectedInstanceMeta() {
+    var value = getSelectedInstanceValue();
+    if (!value) return null;
+
+    var row = getSelectedInstanceRow(value);
+    var id = getInstanceId(value, row);
+    if (!id) return null;
+
+    return {
+      value: value,
+      id: id,
+      row: row || {},
+      label: getInstanceLabel(value, row)
+    };
+  }
+
+  function renderSidebarUserAvatar(user) {
+    user = user && typeof user === 'object' ? user : getUser();
+
+    setAvatar(
+      avatarImg,
+      initialsEl,
+      user.avatar,
+      initials(user.nome || user.email),
+      {
+        kind: 'user',
+        instanciaId: '',
+        alt: 'Avatar do usuário'
+      }
+    );
+  }
+
+  function renderSidebarInstanceAvatar(meta, avatarUrl, onError) {
+    if (!meta) return;
+
+    setAvatar(
+      avatarImg,
+      initialsEl,
+      avatarUrl,
+      initials(meta.label || 'WhatsApp'),
+      {
+        kind: 'instance',
+        instanciaId: meta.id,
+        alt: 'Foto do WhatsApp ' + (meta.label || 'selecionado'),
+        onError: onError
+      }
+    );
+  }
+
+  async function refreshSidebarInstanceAvatarAfterError(meta, requestSeq, brokenAvatar) {
+    if (!meta || !meta.id) return;
+    if (requestSeq !== sidebarAvatarRequestSeq) return;
+
+    var current = getSelectedInstanceMeta();
+    if (!current || current.id !== meta.id) return;
+
+    var now = Date.now();
+    var lastTry = Number(sidebarAvatarRefreshTriedAt[meta.id] || 0);
+
+    if (sidebarAvatarRefreshInFlight[meta.id]) return;
+    if (lastTry && now - lastTry < 60000) return;
+
+    sidebarAvatarRefreshTriedAt[meta.id] = now;
+    sidebarAvatarRefreshInFlight[meta.id] = true;
+
+    try {
+      var response = await fetch(
+        '/api/atendimento/instancias/' + encodeURIComponent(meta.id) + '/perfil?refresh=1',
+        {
+          method: 'GET',
+          credentials: 'include',
+          cache: 'no-store',
+          headers: {
+            Accept: 'application/json',
+            'Cache-Control': 'no-cache'
+          }
+        }
+      );
+
+      if (!response.ok) return;
+
+      var data = await response.json();
+      var freshAvatar = getInstanceAvatarFromObject(data);
+
+      current = getSelectedInstanceMeta();
+      if (requestSeq !== sidebarAvatarRequestSeq || !current || current.id !== meta.id) return;
+      if (!freshAvatar || freshAvatar === brokenAvatar) return;
+
+      renderSidebarInstanceAvatar(meta, freshAvatar, null);
+    } catch (e) {
+      // Mantém as iniciais da instância. Nunca volta para a foto da empresa.
+    } finally {
+      delete sidebarAvatarRefreshInFlight[meta.id];
+    }
+  }
+
+  async function syncSidebarAvatar(options) {
+    options = options || {};
+
+    var requestSeq = ++sidebarAvatarRequestSeq;
+    var user = options.user && typeof options.user === 'object'
+      ? options.user
+      : getUser();
+    var meta = getSelectedInstanceMeta();
+
+    if (!meta) {
+      renderSidebarUserAvatar(user);
+      return;
+    }
+
+    // Com uma instância específica selecionada, nunca exibe a foto da empresa/usuário.
+    // Enquanto carrega ou se a instância não tiver foto, mostra apenas as iniciais dela.
+    renderSidebarInstanceAvatar(meta, '', null);
+
+    var eventData = options.profile && typeof options.profile === 'object'
+      ? options.profile
+      : null;
+    var eventAvatar = getInstanceAvatarFromObject(eventData);
+
+    if (eventAvatar) {
+      renderSidebarInstanceAvatar(meta, eventAvatar, function (brokenAvatar) {
+        refreshSidebarInstanceAvatarAfterError(meta, requestSeq, brokenAvatar);
+      });
+      return;
+    }
+
+    var rowAvatar = getInstanceAvatarFromObject(meta.row);
+    if (rowAvatar) {
+      renderSidebarInstanceAvatar(meta, rowAvatar, function (brokenAvatar) {
+        refreshSidebarInstanceAvatarAfterError(meta, requestSeq, brokenAvatar);
+      });
+    }
+
+    var cached = readInstanceProfileCache(meta.id);
+    var cachedAvatar = getInstanceAvatarFromObject(cached);
+
+    if (cachedAvatar) {
+      renderSidebarInstanceAvatar(meta, cachedAvatar, function (brokenAvatar) {
+        refreshSidebarInstanceAvatarAfterError(meta, requestSeq, brokenAvatar);
+      });
+    }
+
+    try {
+      var response = await fetch(
+        '/api/atendimento/instancias/' + encodeURIComponent(meta.id) + '/perfil?refresh=0',
+        {
+          method: 'GET',
+          credentials: 'include',
+          cache: 'no-store',
+          headers: { Accept: 'application/json' }
+        }
+      );
+
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+
+      var data = await response.json();
+      var avatar = getInstanceAvatarFromObject(data);
+      var current = getSelectedInstanceMeta();
+
+      if (requestSeq !== sidebarAvatarRequestSeq || !current || current.id !== meta.id) return;
+
+      if (avatar) {
+        renderSidebarInstanceAvatar(meta, avatar, function (brokenAvatar) {
+          refreshSidebarInstanceAvatarAfterError(meta, requestSeq, brokenAvatar);
+        });
+      }
+    } catch (e) {
+      // Mantém a foto já encontrada no cache ou as iniciais da instância.
+    }
+  }
+
   function setSettingsInstanceText(text, stateClass) {
     var el = document.getElementById('zcWaSettingsInstanceNumber');
     if (!el) return;
@@ -1877,28 +2172,47 @@
     if (stateClass) el.classList.add(stateClass);
   }
 
+  function setSidebarInstanceText(text) {
+    if (!userEmailEl) return;
+
+    var value = cleanText(text) || 'Selecione uma instância própria no topo';
+    userEmailEl.textContent = value;
+    userEmailEl.title = value;
+  }
+
+  function setInstanceNumberTexts(text, stateClass) {
+    setSettingsInstanceText(text, stateClass);
+    setSidebarInstanceText(text);
+  }
+
   async function syncSettingsInstanceNumber() {
     var requestSeq = ++settingsInstanceRequestSeq;
     var selected = getSelectedInstanceValue();
 
     if (!selected) {
-      setSettingsInstanceText('Selecione uma instância própria no topo', 'is-instance-required');
+      setInstanceNumberTexts('Selecione uma instância própria no topo', 'is-instance-required');
       return;
     }
 
     var row = getSelectedInstanceRow(selected);
+    var instanceId = getInstanceId(selected, row);
     var directPhone = getInstancePhoneFromObject(row);
 
     if (directPhone) {
-      setSettingsInstanceText(directPhone, '');
+      setInstanceNumberTexts(directPhone, '');
       return;
     }
 
-    setSettingsInstanceText('Carregando número do WhatsApp…', 'is-loading');
+    if (!instanceId) {
+      setInstanceNumberTexts('Número do WhatsApp não disponível', '');
+      return;
+    }
+
+    setInstanceNumberTexts('Carregando número do WhatsApp…', 'is-loading');
 
     try {
       var response = await fetch(
-        '/api/atendimento/instancias/' + encodeURIComponent(selected) + '/perfil?refresh=0',
+        '/api/atendimento/instancias/' + encodeURIComponent(instanceId) + '/perfil?refresh=0',
         {
           method: 'GET',
           credentials: 'include',
@@ -1913,24 +2227,22 @@
       var data = await response.json();
       var phone = getInstancePhoneFromObject(data);
 
-      setSettingsInstanceText(phone || 'Número do WhatsApp não informado', '');
+      setInstanceNumberTexts(phone || 'Número do WhatsApp não informado', '');
     } catch (e) {
       if (requestSeq !== settingsInstanceRequestSeq) return;
-      setSettingsInstanceText('Número do WhatsApp não disponível', '');
+      setInstanceNumberTexts('Número do WhatsApp não disponível', '');
     }
   }
 
   function syncUser() {
     var user = getUser();
-    var ini = initials(user.nome || user.email);
 
     if (userNameEl) userNameEl.textContent = user.nome;
-    if (userEmailEl) userEmailEl.textContent = user.email;
 
     var panelName = document.getElementById('zcWaSettingsName');
     if (panelName) panelName.textContent = user.nome;
 
-    setAvatar(avatarImg, initialsEl, user.avatar, ini);
+    syncSidebarAvatar({ user: user });
     syncSettingsInstanceNumber();
   }
 
@@ -2394,8 +2706,31 @@
   window.ZCOpenPerfilInstanciaFromSidebar = openProfilePage;
 
   window.addEventListener('storage', syncUser);
-  document.addEventListener('inst:change', syncSettingsInstanceNumber);
-  document.addEventListener('inst:list', syncSettingsInstanceNumber);
+
+  document.addEventListener('inst:change', function () {
+    syncSettingsInstanceNumber();
+    syncSidebarAvatar();
+  });
+
+  document.addEventListener('inst:list', function () {
+    syncSettingsInstanceNumber();
+    syncSidebarAvatar();
+  });
+
+  window.addEventListener('zc:perfil-instancia-updated', function (event) {
+    var detail = event && event.detail && typeof event.detail === 'object'
+      ? event.detail
+      : {};
+    var selected = getSelectedInstanceMeta();
+    var updatedId = cleanText(detail.instancia_id || detail.id || '');
+
+    if (!selected || (updatedId && selected.id !== updatedId)) return;
+
+    syncSidebarAvatar({
+      profile: detail.user || detail.profile || detail.data || detail
+    });
+  });
+
   window.addEventListener('zc:settings-page-helper-ready', function () {
     try {
       if (overlay.classList.contains('is-open')) {

@@ -4,7 +4,7 @@
 // empresa_id + user_id + conversa_id + instancia_id
 // ✅ SEM injetar CSS. O visual fica no atendimentos.css.
 
-import { removeClienteConversas } from '../state/store.js';
+import { markClienteDeletedLocally, removeClienteConversas } from '../state/store.js';
 
 (function () {
   if (window.__ATD_CTXMENU_INIT__) return;
@@ -1284,6 +1284,71 @@ O que você deseja fazer com esta conversa?
     }
   }
 
+  function selectedClienteId() {
+    try {
+      const selected = window.state?.clienteSel || window.clienteSel || null;
+      if (!selected) return null;
+
+      const candidates = [
+        selected.cliente_id,
+        selected.clienteId,
+        selected.entity_id,
+        selected.backend_id,
+        selected.conversation_key,
+        selected.conversation_id,
+        selected.id,
+      ];
+
+      for (const value of candidates) {
+        const id = extractNumericId(value);
+        if (id) return Number(id);
+      }
+    } catch {}
+
+    return null;
+  }
+
+  function clearDeletedConversationView(clienteId, wasSelected) {
+    if (!wasSelected) return;
+
+    try {
+      const title = document.getElementById('chat-title');
+      const avatar = document.getElementById('chat-avatar');
+      const battery = document.getElementById('status-bateria');
+      const header = document.getElementById('chat-header');
+      const history = document.getElementById('historico');
+      const footer = document.getElementById('chat-footer');
+      const welcome = document.getElementById('welcome-screen');
+      const loading = document.getElementById('chat-loading');
+
+      if (title) title.textContent = '';
+      if (avatar) avatar.innerHTML = '';
+      if (battery) battery.textContent = '';
+      if (header) header.style.display = 'none';
+
+      if (history) {
+        history.innerHTML = '';
+        history.style.display = 'none';
+        delete history.dataset.clienteId;
+        delete history.dataset.conversationKey;
+        delete history.dataset.instanciaId;
+      }
+
+      if (footer) footer.style.display = 'none';
+      if (welcome) welcome.style.display = '';
+      if (loading) loading.classList.add('hidden');
+
+      document.body.classList.remove('chat-open', 'conversation-open');
+      document.documentElement.classList.remove('chat-open', 'conversation-open');
+    } catch {}
+
+    try {
+      window.dispatchEvent(new CustomEvent('zc:conversation-deleted', {
+        detail: { cliente_id: Number(clienteId) }
+      }));
+    } catch {}
+  }
+
   async function doDelete(clienteId, li) {
     if (!CAN_DELETE_CONVERSA) {
       notify({
@@ -1298,11 +1363,31 @@ O que você deseja fazer com esta conversa?
     if (!choice) return;
 
     const removeFromUI = () => {
-      // Remove da DOM e também do store persistido. Antes apenas o <li> era
-      // apagado; ao dar F5, o localStorage reconstruía a conversa excluída.
+      const wasSelected =
+        Number(selectedClienteId()) === Number(clienteId) ||
+        !!li?.classList?.contains('active') ||
+        !!li?.classList?.contains('selected') ||
+        !!li?.classList?.contains('is-active');
+
+      /*
+        Marca primeiro para bloquear respostas antigas da lista que estejam
+        em voo. Sem este tombstone, uma requisição iniciada antes do DELETE
+        podia terminar depois e recolocar a conversa apagada no localStorage.
+      */
+      try { markClienteDeletedLocally(clienteId); } catch {}
       try { removeClienteConversas(clienteId); } catch {}
 
-      if (li && li.remove) li.remove();
+      try {
+        const selector = '#lista-clientes .chat-item, #lista-clientes [data-entity-id], #lista-clientes [data-conversation-key]';
+        document.querySelectorAll(selector).forEach((row) => {
+          const info = resolveConversationInfo(row);
+          if (!info.isGroup && Number(info.clienteId) === Number(clienteId)) {
+            row.remove();
+          }
+        });
+      } catch {
+        if (li && li.remove) li.remove();
+      }
 
       try {
         if (window.cacheHistoricos) delete window.cacheHistoricos[String(clienteId)];
@@ -1317,6 +1402,8 @@ O que você deseja fazer com esta conversa?
           localStorage.setItem(key, JSON.stringify(obj));
         }
       } catch {}
+
+      clearDeletedConversationView(clienteId, wasSelected);
 
       try {
         sessionStorage.setItem('convForceReload', '1');

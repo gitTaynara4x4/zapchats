@@ -232,7 +232,8 @@
       // Fotos de perfil voltam, mas sem refresh em massa/observer pesado.
       window.ZC_MODO_ULTRA_LEVE_RAM = false;
       window.ZC_SKIP_QUICK_PROFILE_OBSERVERS = true;
-      window.ZC_DISABLE_AUDIO_AVATAR = true;
+      // Mantém o avatar nos players de áudio recebidos sem reativar observers pesados.
+      window.ZC_DISABLE_AUDIO_AVATAR = false;
       window.AVATAR_DAILY_REFRESH = false;
       window.AVATAR_DAILY_LIMIT = 0;
       window.AVATAR_DAILY_CONCURRENCY = 1;

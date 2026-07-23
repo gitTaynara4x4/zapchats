@@ -23,6 +23,7 @@ import {
   getConversationKey,
   getConversationEntityId,
   getConversationKind,
+  isClienteDeletedLocally,
 } from '../state/store.js';
 import { tsToMillis, formatChatTime } from '../core/time.js';
 import { escapeHtml, formatarNumeroBR, badge } from '../core/format.js';
@@ -34,7 +35,7 @@ import { primeWith, getHist } from './hist-cache.js';
 const LIST_CACHE_TTL_MS = 8_000;
 const LIST_FORCE_MIN_INTERVAL_MS = 2_500;
 const LIST_DEBOUNCE_MS = 700;
-const LIST_LOCAL_CACHE_VERSION = 'conversas:v5-loading-leve-sem-hist-prefetch';
+const LIST_LOCAL_CACHE_VERSION = 'conversas:v6-delete-ghost-safe';
 const LIST_LOADING_TEXT = 'Carregando suas conversas…';
 const LIST_EMPTY_TEXT = 'Nenhuma conversa encontrada.';
 const LIST_ERROR_TEXT = 'Não conseguimos carregar suas conversas.';
@@ -2120,7 +2121,8 @@ function matchInstanciaSafe(c) {
 function normalizeAndFilterConversas(items, reason = '') {
   const normalized = (Array.isArray(items) ? items : [])
     .map(normalizeCliente)
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((c) => !isClienteDeletedLocally(c));
 
   if (!normalized.length) return [];
 
@@ -2303,7 +2305,7 @@ export async function carregarClientes({ force = false, reason = '', noLoading =
       let cs = normalizeAndFilterConversas(items, 'carregarClientes');
 
       const antigo = Array.isArray(state.clientesCache)
-        ? state.clientesCache.map(normalizeCliente)
+        ? state.clientesCache.map(normalizeCliente).filter((c) => !isClienteDeletedLocally(c))
         : [];
 
       const antigoMap = new Map();
@@ -2322,12 +2324,20 @@ export async function carregarClientes({ force = false, reason = '', noLoading =
 
       const selKey = convKeyOf(state?.clienteSel);
 
-      if (selKey && !all.some((x) => convKeyOf(x) === selKey)) {
+      /*
+        Nunca recoloca a conversa selecionada durante uma carga forçada.
+        O comportamento antigo reintroduzia no cache/localStorage uma conversa
+        que o backend já havia apagado, principalmente quando uma requisição
+        antiga terminava depois do DELETE.
+      */
+      if (!forceFlag && selKey && !all.some((x) => convKeyOf(x) === selKey)) {
         const sel = antigoMap.get(selKey) || state?.clienteSel || null;
 
-        if (sel) {
+        if (sel && !isClienteDeletedLocally(sel)) {
           const normSel = normalizeCliente(sel);
-          all = dedupeConversas([...all, normSel]);
+          if (normSel && !isClienteDeletedLocally(normSel)) {
+            all = dedupeConversas([...all, normSel]);
+          }
         }
       }
 
@@ -2368,8 +2378,12 @@ export async function carregarClientes({ force = false, reason = '', noLoading =
       }
 
       if (hasCache) {
-        renderListaClientes(state.clientesCache);
-        return state.clientesCache;
+        const visibleCache = (state.clientesCache || []).filter((c) => !isClienteDeletedLocally(c));
+        if (visibleCache.length !== (state.clientesCache || []).length) {
+          syncActiveConvs(visibleCache, state.nextCursor ?? null);
+        }
+        renderListaClientes(visibleCache);
+        return visibleCache;
       }
 
       if (status === 403) {

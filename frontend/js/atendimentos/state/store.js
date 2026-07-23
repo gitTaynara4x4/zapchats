@@ -36,6 +36,7 @@ const LS_HIST_LEGACY = `cacheHistoricos:${EID}`;
 // novo
 const LS_CONVS_V2 = `zc:convs:v2:${EID}`;
 const LS_HIST_V2 = `zc:hist:v2:${EID}`;
+const LS_DELETED_LOCAL = `zc:deleted-local:v1:${EID}`;
 
 /* =========================
    Performance config
@@ -625,6 +626,115 @@ function kindOf(item) {
   return ref.kind || 'c';
 }
 
+/* =========================
+   Tombstone local anti-corrida
+   ========================= */
+const LOCAL_DELETE_TTL_MS = Number(window.ZC_LOCAL_DELETE_TTL_MS || (5 * 60 * 1000));
+let __localDeletedClienteMap = null;
+
+function readLocalDeletedClienteMap() {
+  if (__localDeletedClienteMap && typeof __localDeletedClienteMap === 'object') {
+    return __localDeletedClienteMap;
+  }
+
+  const raw = safeJsonParse(getLSBounded(LS_DELETED_LOCAL, '{}', 120000), {});
+  __localDeletedClienteMap = raw && typeof raw === 'object' ? raw : {};
+  return __localDeletedClienteMap;
+}
+
+function persistLocalDeletedClienteMap() {
+  try {
+    const map = readLocalDeletedClienteMap();
+    const now = Date.now();
+
+    for (const [id, expiresAt] of Object.entries(map)) {
+      if (!/^\d+$/.test(String(id || '')) || Number(expiresAt || 0) <= now) {
+        delete map[id];
+      }
+    }
+
+    if (Object.keys(map).length) setLS(LS_DELETED_LOCAL, JSON.stringify(map));
+    else delLS(LS_DELETED_LOCAL);
+  } catch {}
+}
+
+function deletedClienteEntityId(value) {
+  if (value && typeof value === 'object') {
+    const direct =
+      entityIdOf(value) ||
+      idKey(value?.cliente_id) ||
+      idKey(value?.clienteId) ||
+      idKey(value?.entity_id) ||
+      idKey(value?.backend_id) ||
+      null;
+
+    return direct && /^\d+$/.test(String(direct)) ? String(direct) : null;
+  }
+
+  const raw = idKey(value);
+  if (!raw) return null;
+  if (/^\d+$/.test(raw)) return raw;
+
+  const m = raw.match(/^c:(\d+)(?::|$)/i);
+  return m ? String(m[1]) : null;
+}
+
+function purgeConversationListFetchCaches() {
+  try {
+    const prefix = `atend:${EID}:`;
+
+    for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+      const key = String(localStorage.key(i) || '');
+      if (!key.startsWith(prefix)) continue;
+      if (!key.includes('conversas:')) continue;
+      localStorage.removeItem(key);
+    }
+  } catch {}
+
+  try { sessionStorage.setItem('convForceReload', '1'); } catch {}
+}
+
+export function isClienteDeletedLocally(value) {
+  const entityId = deletedClienteEntityId(value);
+  if (!entityId) return false;
+
+  const map = readLocalDeletedClienteMap();
+  const expiresAt = Number(map[entityId] || 0);
+
+  if (!expiresAt || expiresAt <= Date.now()) {
+    if (Object.prototype.hasOwnProperty.call(map, entityId)) {
+      delete map[entityId];
+      persistLocalDeletedClienteMap();
+    }
+    return false;
+  }
+
+  return true;
+}
+
+export function markClienteDeletedLocally(value, { ttlMs = LOCAL_DELETE_TTL_MS } = {}) {
+  const entityId = deletedClienteEntityId(value);
+  if (!entityId) return null;
+
+  const ttl = Math.max(30_000, Number(ttlMs) || LOCAL_DELETE_TTL_MS);
+  const map = readLocalDeletedClienteMap();
+  map[entityId] = Date.now() + ttl;
+  persistLocalDeletedClienteMap();
+  purgeConversationListFetchCaches();
+  return entityId;
+}
+
+export function clearClienteDeletedLocalMarker(value) {
+  const entityId = deletedClienteEntityId(value);
+  if (!entityId) return;
+
+  const map = readLocalDeletedClienteMap();
+  if (Object.prototype.hasOwnProperty.call(map, entityId)) {
+    delete map[entityId];
+    persistLocalDeletedClienteMap();
+  }
+}
+
 function tsToMillisAny(x) {
   if (!x) return 0;
   if (typeof x === 'number') return x;
@@ -670,7 +780,8 @@ function sortConversasDesc(arr) {
 }
 
 function compactConversas(arr) {
-  const sorted = sortConversasDesc(Array.isArray(arr) ? arr : []);
+  const visible = (Array.isArray(arr) ? arr : []).filter((c) => !isClienteDeletedLocally(c));
+  const sorted = sortConversasDesc(visible);
 
   /*
     Mantém as mais recentes/fixadas.
@@ -1771,12 +1882,26 @@ export function replaceOrInsertConversa(item, instanciaKey = null) {
 }
 
 export function removeClienteConversas(cliente_id) {
-  const targetId = idKey(cliente_id);
+  const targetId = deletedClienteEntityId(cliente_id) || idKey(cliente_id);
   if (!targetId) return;
 
   const isTarget = (c) => {
     try {
-      return kindOf(c) === 'c' && entityIdOf(c) === targetId;
+      const kind = kindOf(c);
+      if (kind !== 'c') return false;
+
+      const candidates = [
+        entityIdOf(c),
+        c?.cliente_id,
+        c?.clienteId,
+        c?.entity_id,
+        c?.backend_id,
+        c?.conversation_entity_id,
+      ]
+        .map(idKey)
+        .filter(Boolean);
+
+      return candidates.includes(String(targetId));
     } catch {
       return false;
     }
@@ -1815,19 +1940,26 @@ export function removeClienteConversas(cliente_id) {
   try {
     for (const key of Object.keys(state.cacheHistoricos || {})) {
       const ref = parseConversationRef(key);
-      if (ref.kind === 'c' && ref.entityId === targetId) {
+      if (ref.kind === 'c' && ref.entityId === String(targetId)) {
         delete state.cacheHistoricos[key];
       }
     }
 
     for (const key of Object.keys(state.histByKey || {})) {
-      const parts = String(key || '').split(':');
-      if (parts.includes('c') && parts.includes(targetId)) {
+      const refMatch = String(key || '').match(/(?:^|:)c:(\d+)(?::|$)/i);
+      if (refMatch && String(refMatch[1]) === String(targetId)) {
         delete state.histByKey[key];
       }
     }
   } catch {}
 
+  try {
+    if (Array.isArray(window.__zcListaConversas)) {
+      window.__zcListaConversas = window.__zcListaConversas.filter((c) => !isTarget(c));
+    }
+  } catch {}
+
+  purgeConversationListFetchCaches();
   persist();
 }
 

@@ -14,12 +14,13 @@
  * - Botão Atualizar força Evolution.
  * - Atualizar não apaga cache bom antes de saber se deu certo.
  * - Perfil da conversa continua funcionando em drawer próprio.
+ * - Ícones dos badges usam SVG inline e não dependem do Font Awesome.
  * ==================================================================== */
 
 (function () {
   'use strict';
 
-  const VERSION = 'zc-perfil-instancia-v11-no-chat-header-click';
+  const VERSION = 'zc-perfil-instancia-v13-inline-badge-icons';
   const LS_PREFIX = 'zc:perfil-instancia:v2:';
   const PERFIL_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
 
@@ -733,6 +734,16 @@
     perfilUsuarioCache = cleanUser;
 
     savePerfilLocalStorage(key, cleanUser);
+
+    try {
+      window.dispatchEvent(new CustomEvent('zc:perfil-instancia-updated', {
+        detail: {
+          instancia_id: key,
+          user: cleanUser,
+          source: cleanUser.source || cleanUser.profile_source || 'cache'
+        }
+      }));
+    } catch {}
   }
 
   function removePerfilLocalStorage(instanciaId) {
@@ -1057,8 +1068,17 @@
         line-height:1;
       }
 
-      .zc-meu-perfil-badge i{
-        font-size:8px;
+      .zc-meu-perfil-badge-icon{
+        display:block;
+        flex:0 0 auto;
+        width:11px;
+        height:11px;
+        overflow:visible;
+      }
+
+      .zc-meu-perfil-badge-icon.is-status{
+        width:7px;
+        height:7px;
       }
 
       .zc-meu-perfil-badge.is-off{
@@ -1340,12 +1360,18 @@
 
             <div class="zc-meu-perfil-inline-badges">
               <span class="zc-meu-perfil-badge${statusClass}">
-                <i class="fa-solid fa-circle"></i>
+                <svg class="zc-meu-perfil-badge-icon is-status" viewBox="0 0 8 8" aria-hidden="true" focusable="false">
+                  <circle cx="4" cy="4" r="3.25" fill="currentColor"></circle>
+                </svg>
                 ${escapeHtml(statusText)}
               </span>
 
               <span class="zc-meu-perfil-badge is-muted">
-                <i class="fa-solid fa-database"></i>
+                <svg class="zc-meu-perfil-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                  <ellipse cx="12" cy="5" rx="8" ry="3"></ellipse>
+                  <path d="M4 5v7c0 1.66 3.58 3 8 3s8-1.34 8-3V5"></path>
+                  <path d="M4 12v7c0 1.66 3.58 3 8 3s8-1.34 8-3v-7"></path>
+                </svg>
                 ${escapeHtml(sourceText)}
               </span>
             </div>
