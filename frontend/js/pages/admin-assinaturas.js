@@ -413,7 +413,7 @@ function renderDetail(item) {
   if (els.planSelect) els.planSelect.value = emp.assinatura || "FREE";
   if (els.expiresAtInput) els.expiresAtInput.value = toDatetimeLocalValue(emp.plano_expira_em);
   if (els.trialPlanSelect) els.trialPlanSelect.value = emp.trial?.tier || "START";
-  if (els.trialDaysInput) els.trialDaysInput.value = emp.trial?.days_left || 7;
+  if (els.trialDaysInput) els.trialDaysInput.value = emp.trial?.days_left || 14;
 
   if (els.ovWhatsappInstances) els.ovWhatsappInstances.value = nullableInput(overrides.whatsapp_instances_max);
   if (els.ovUsersMax) els.ovUsersMax.value = nullableInput(overrides.users_max);
@@ -581,7 +581,7 @@ async function startTrial() {
       method: "POST",
       body: JSON.stringify({
         tier: els.trialPlanSelect.value,
-        days: Number(els.trialDaysInput.value || 7)
+        days: Number(els.trialDaysInput.value || 14)
       })
     });
     showToast("Trial iniciado.");
@@ -671,13 +671,13 @@ if (els.bulkAddTrialBtn) {
         body: JSON.stringify({
           empresa_ids: Array.from(state.selectedBulkIds),
           action: "add_trial",
-          days: 7
+          days: 14
         })
       });
       state.selectedBulkIds.clear();
       updateBulkBar();
       await loadCompanies();
-      showToast("+7 dias de trial adicionados em massa!");
+      showToast("+14 dias de trial adicionados em massa!");
     } catch (e) {
       showToast(e.message, true);
     }

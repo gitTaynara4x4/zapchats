@@ -181,7 +181,7 @@ class AsaasClient:
         return self._request("GET", f"/v3/customers/{customer_id}")
 
     def update_customer(self, customer_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return self._request("POST", f"/v3/customers/{customer_id}", payload=payload)
+        return self._request("PUT", f"/v3/customers/{customer_id}", payload=payload)
 
     def list_customers(
         self,
@@ -226,8 +226,29 @@ class AsaasClient:
     def get_subscription(self, subscription_id: str) -> Dict[str, Any]:
         return self._request("GET", f"/v3/subscriptions/{subscription_id}")
 
+    def list_subscriptions(
+        self,
+        *,
+        customer: Optional[str] = None,
+        external_reference: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        query: Dict[str, Any] = {
+            "limit": max(1, min(int(limit), 100)),
+            "offset": max(0, int(offset)),
+        }
+        if customer:
+            query["customer"] = customer
+        if external_reference:
+            query["externalReference"] = external_reference
+        if status:
+            query["status"] = status
+        return self._request("GET", "/v3/subscriptions", query=query)
+
     def update_subscription(self, subscription_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return self._request("POST", f"/v3/subscriptions/{subscription_id}", payload=payload)
+        return self._request("PUT", f"/v3/subscriptions/{subscription_id}", payload=payload)
 
     def delete_subscription(self, subscription_id: str) -> Dict[str, Any]:
         return self._request("DELETE", f"/v3/subscriptions/{subscription_id}")
@@ -309,6 +330,22 @@ class AsaasClient:
             "GET",
             f"{self.payments_path}/{payment_id}/identificationField",
         )
+
+    # =========================
+    # Webhooks
+    # =========================
+    def list_webhooks(self, limit: int = 100, offset: int = 0) -> Dict[str, Any]:
+        return self._request(
+            "GET",
+            "/v3/webhooks",
+            query={"limit": max(1, min(int(limit), 100)), "offset": max(0, int(offset))},
+        )
+
+    def create_webhook(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self._request("POST", "/v3/webhooks", payload=payload)
+
+    def update_webhook(self, webhook_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self._request("PUT", f"/v3/webhooks/{webhook_id}", payload=payload)
 
     # =========================
     # Utilitários

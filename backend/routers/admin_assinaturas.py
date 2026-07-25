@@ -21,6 +21,7 @@ from backend.utils.plans import (
     PLAN_ENTERPRISE,
     effective_plan,
     is_trial_active,
+    is_trial_expired,
     normalize_plan,
     plan_catalog_item,
     plan_limits,
@@ -64,7 +65,7 @@ class ApplyPlanIn(BaseModel):
 
 class StartTrialIn(BaseModel):
     tier: str = PLAN_START
-    days: int = Field(default=7, ge=1, le=365)
+    days: int = Field(default=14, ge=1, le=365)
 
 
 class OverrideLimitsIn(BaseModel):
@@ -351,6 +352,9 @@ def _plan_status(emp: models.Empresa, is_suspended: bool = False) -> str:
 
     if is_trial_active(emp):
         return "trial"
+
+    if is_trial_expired(emp):
+        return "past_due"
 
     return "free"
 

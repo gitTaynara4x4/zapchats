@@ -452,5 +452,9 @@ async def transferir_conversa_departamento(
         "departamento_anterior_id": dep_anterior_id,
         "departamento_anterior_nome": dep_anterior_nome,
         "colaborador_id": getattr(cliente, "colaborador_id", None),
-        "atendimentos_atualizados": len(atendimentos_abertos),
+        # Esta rota altera exatamente um atendimento aberto por conversa.
+        # A variável antiga ``atendimentos_abertos`` não existia e causava
+        # NameError depois do commit, fazendo o frontend informar falha mesmo
+        # com a transferência já gravada no banco.
+        "atendimentos_atualizados": 1,
     }

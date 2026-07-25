@@ -1468,8 +1468,10 @@
       } catch (_) {}
     }
 
-    async function loadStatus() {
-      const data = await apiGet("/api/billing/asaas/status");
+    async function loadStatus(synchronize = false) {
+      const data = synchronize
+        ? await apiPost("/api/billing/asaas/sync", {})
+        : await apiGet("/api/billing/asaas/status");
       state.status = data;
       return data;
     }
@@ -1477,11 +1479,12 @@
     function renderStatus(data) {
       const planStatus = data?.plan_status || {};
       const paid = planStatus?.paid || {};
+      const trial = planStatus?.trial || {};
       const usage = planStatus?.usage || {};
       const limits = planStatus?.limits || {};
       const billing = data?.billing || {};
 
-      const currentCode = data?.assinatura || planStatus?.effective_tier || "FREE";
+      const currentCode = planStatus?.effective_tier || data?.assinatura || "FREE";
       const plan = getPlan(currentCode);
 
       $("#currentPlanName").textContent = plan.name || currentCode;
@@ -1489,12 +1492,16 @@
       $("#currentPlanDescription").textContent = plan.description || "Plano atual da empresa.";
 
       const locked = Boolean(planStatus?.billing_locked);
-      const active = Boolean(paid?.active) || String(currentCode).toUpperCase() !== "FREE";
+      const active = Boolean(paid?.active);
+      const trialActive = Boolean(trial?.active);
 
       const pill = $("#currentStatusPill");
       if (locked) {
         pill.className = "pill danger";
-        pill.textContent = "Bloqueado";
+        pill.textContent = trial?.expired ? "Teste encerrado" : "Bloqueado";
+      } else if (trialActive) {
+        pill.className = "pill info";
+        pill.textContent = "Teste grátis";
       } else if (active) {
         pill.className = "pill ok";
         pill.textContent = "Ativo";
@@ -1503,9 +1510,11 @@
         pill.textContent = "Sem plano ativo";
       }
 
-      $("#planExpiresAt").textContent = formatDate(data?.plano_expira_em || paid?.expires_at);
-      $("#planDaysLeft").textContent = paid?.days_left !== undefined && paid?.days_left !== null
-        ? `${paid.days_left} dias`
+      const accessExpiresAt = paid?.active ? paid?.expires_at : trial?.expires_at;
+      const accessDaysLeft = paid?.active ? paid?.days_left : trial?.days_left;
+      $("#planExpiresAt").textContent = formatDate(accessExpiresAt);
+      $("#planDaysLeft").textContent = accessDaysLeft !== undefined && accessDaysLeft !== null
+        ? `${accessDaysLeft} dias`
         : "--";
 
       const instUse = usage?.whatsapp_instances ?? planStatus?.quantidade_instancias ?? 0;
@@ -1520,6 +1529,11 @@
 
       renderUsage(usage, limits);
       renderPlans(currentCode, billing);
+
+      if (String(billing?.billing_status || "").toLowerCase() === "active" && state.polling) {
+        clearInterval(state.polling);
+        state.polling = null;
+      }
     }
 
     function renderUsage(usage, limits) {
@@ -1585,7 +1599,7 @@
 
       $("#plansGrid").innerHTML = Object.values(PLANS).map((plan) => {
         const isCurrent = plan.code === current;
-        const isPending = plan.code === pending && billingStatus === "pending";
+        const isPending = plan.code === pending && ["pending", "past_due", "refused"].includes(billingStatus);
 
         return `
           <article class="plan-card ${plan.popular ? "popular" : ""}">
@@ -1606,10 +1620,10 @@
             <div class="plan-actions">
               ${
                 isPending
-                  ? `<button class="btn btn-primary" data-plan="${plan.code}">Ver pagamento pendente</button>`
-                  : `<button class="btn ${isCurrent ? "btn-soft" : "btn-primary"}" data-plan="${plan.code}">
-                      ${isCurrent ? "Renovar plano" : "Assinar " + escapeHtml(plan.name)}
-                    </button>`
+                  ? `<button class="btn btn-primary" data-plan="${plan.code}" data-pending="1">Ver pagamento pendente</button>`
+                  : isCurrent && billingStatus === "active"
+                    ? `<button class="btn btn-soft" type="button" disabled>Assinatura ativa</button>`
+                    : `<button class="btn btn-primary" data-plan="${plan.code}">Assinar ${escapeHtml(plan.name)}</button>`
               }
               ${isCurrent ? `<span class="pill ok" style="justify-content:center;">Plano atual</span>` : ""}
             </div>
@@ -1618,7 +1632,14 @@
       }).join("");
 
       $$("[data-plan]").forEach((btn) => {
-        btn.addEventListener("click", () => openCheckout(btn.getAttribute("data-plan")));
+        btn.addEventListener("click", () => {
+          const planCode = btn.getAttribute("data-plan");
+          if (btn.getAttribute("data-pending") === "1") {
+            openPendingCheckout(planCode);
+          } else {
+            openCheckout(planCode);
+          }
+        });
       });
     }
 
@@ -1660,6 +1681,31 @@
 
       $("#checkoutModal").classList.add("open");
       $("#checkoutModal").setAttribute("aria-hidden", "false");
+    }
+
+    async function openPendingCheckout(planCode) {
+      openCheckout(planCode);
+      setPaymentAlert("", "");
+      try {
+        const data = await loadStatus(true);
+        renderStatus(data);
+        if (data?.payment) {
+          renderPaymentResult({
+            ...data,
+            plan: data?.billing?.billing_plan_pending || planCode,
+            plan_name: getPlan(data?.billing?.billing_plan_pending || planCode).name,
+            amount: data?.payment?.value || getPlan(planCode).price,
+            subscription_id: data?.billing?.asaas_subscription_id
+          });
+          if (String(data?.billing?.billing_status || "").toLowerCase() !== "active") {
+            startPolling();
+          }
+        } else {
+          setPaymentAlert("warn", data?.message || "A cobrança ainda está sendo preparada pelo Asaas.");
+        }
+      } catch (err) {
+        setPaymentAlert("error", err.message || "Não foi possível recuperar a cobrança pendente.");
+      }
     }
 
     function closeCheckout() {
@@ -1767,8 +1813,10 @@
 
         renderPaymentResult(data);
 
-        await refreshStatus(false);
-        startPolling();
+        const statusData = await refreshStatus(false);
+        if (String(statusData?.billing?.billing_status || "").toLowerCase() !== "active") {
+          startPolling();
+        }
 
       } catch (err) {
         console.error(err);
@@ -1784,6 +1832,17 @@
 
       const invoiceUrl = data?.payment?.invoiceUrl || data?.subscription?.invoiceUrl || "";
       const bankSlipUrl = data?.payment?.bankSlipUrl || "";
+
+      if (data?.credited || data?.already_active || String(data?.billing?.billing_status || "").toLowerCase() === "active") {
+        result.innerHTML = `
+          <div class="card-result">
+            <div class="alert ok">
+              Pagamento confirmado. Seu plano está ativo e o acesso foi liberado por 30 dias.
+            </div>
+          </div>
+        `;
+        return;
+      }
 
       if (data?.pix?.encodedImage || data?.pix?.payload) {
         const imgSrc = data?.pix?.encodedImage
@@ -1853,7 +1912,7 @@
             </div>
             <div class="billing-row">
               <span>Valor</span>
-              <strong>${formatMoney(data?.amount || 0)}</strong>
+              <strong>${formatMoney(data?.amount || data?.payment?.value || 0)}</strong>
             </div>
             <div class="billing-row">
               <span>Assinatura</span>
@@ -1870,10 +1929,20 @@
       `;
     }
 
-    async function refreshStatus(showToast = true) {
-      const data = await loadStatus();
+    async function refreshStatus(showToast = true, synchronize = true) {
+      const data = await loadStatus(synchronize);
       renderStatus(data);
-      if (showToast) toast("Status atualizado");
+      if (data?.payment && String(data?.billing?.billing_status || "").toLowerCase() !== "active") {
+        renderPaymentResult({
+          ...data,
+          plan: data?.billing?.billing_plan_pending,
+          plan_name: getPlan(data?.billing?.billing_plan_pending).name,
+          amount: data?.payment?.value,
+          subscription_id: data?.billing?.asaas_subscription_id
+        });
+      }
+      if (showToast) toast(data?.credited ? "Pagamento confirmado e plano liberado" : "Status atualizado");
+      return data;
     }
 
     function startPolling() {
@@ -1881,7 +1950,7 @@
 
       state.polling = setInterval(async () => {
         try {
-          await refreshStatus(false);
+          await refreshStatus(false, true);
         } catch (_) {}
       }, 10000);
     }
@@ -1891,9 +1960,13 @@
 
       try {
         setLoading(true);
-        const data = await loadStatus();
+        const data = await loadStatus(false);
         renderStatus(data);
         setLoading(false);
+
+        if (["pending", "past_due"].includes(String(data?.billing?.billing_status || "").toLowerCase())) {
+          startPolling();
+        }
 
         const urlPlan = new URLSearchParams(location.search).get("plano");
         if (urlPlan && PLANS[String(urlPlan).toUpperCase()]) {

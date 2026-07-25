@@ -29,6 +29,9 @@ from backend.integrations.evolution.repositories.atendimentos_repo import (
 from backend.services.atendimento_claim_state import (
     set_waiting_department,
 )
+from backend.services.chatbot_claim_policy import (
+    customer_has_department_triage_marker,
+)
 
 router = APIRouter(prefix="/api", tags=["Chatbot (Triagem Setores)"])
 
@@ -1313,14 +1316,43 @@ def triagem_handle_inbound(
     ttl = timedelta(hours=max(1, int(ttl_hours)))
     ttl_expired = False
 
+    # O departamento salvo no cliente não pode bloquear o menu para sempre.
+    # Primeiro verificamos se ainda existe um atendimento aberto nessa conversa.
+    # Enquanto houver atendimento aberto, nunca reiniciamos a triagem por TTL.
+    open_atendimento_id = _latest_open_atendimento_id(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=int(instancia_id),
+        cliente_id=int(cliente.id),
+    )
+    has_open_atendimento = open_atendimento_id is not None
+
     last = _as_aware_utc(cliente.triagem_ultima_msg_em)
-    if last and (now - last) > ttl:
+    if last and (now - last) > ttl and not has_open_atendimento:
         cliente.departamento_id = None
         cliente.colaborador_id = None
         cliente.triagem_ativa = True
         cliente.triagem_tentativas = 0
         cliente.triagem_iniciada_em = now
         ttl_expired = True
+
+    # Novo ciclo: o cliente já escolheu departamento pelo chatbot no passado,
+    # mas o atendimento anterior foi resolvido/transferido e não existe mais
+    # atendimento aberto. A próxima mensagem volta a apresentar a triagem.
+    if (
+        cliente.departamento_id is not None
+        and not bool(cliente.triagem_ativa)
+        and not has_open_atendimento
+        and customer_has_department_triage_marker(
+            cliente,
+            int(cliente.departamento_id),
+        )
+    ):
+        cliente.departamento_id = None
+        cliente.colaborador_id = None
+        cliente.triagem_ativa = True
+        cliente.triagem_tentativas = 0
+        cliente.triagem_iniciada_em = now
 
     cliente.triagem_ultima_msg_em = now
 

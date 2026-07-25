@@ -498,7 +498,44 @@
       showToast(`Conversa transferida para ${data.departamento_nome || "o novo departamento"}.`, "success");
       closeModal();
 
-      window.dispatchEvent(new CustomEvent("zc:conversation-transferred", { detail: data }));
+      const conversationKey =
+        data?.conversation_key ||
+        data?.conversation_id ||
+        conv.conversation_id ||
+        `c:${conv.id}:${conv.instancia_id || 0}`;
+
+      // O cache antigo fazia Atender/Liberar/Transferir continuarem no estado
+      // anterior até expirar ou dar F5. Invalida e relê /meta imediatamente.
+      try {
+        if (typeof window.zcInvalidateConversationMeta === "function") {
+          window.zcInvalidateConversationMeta(conversationKey, {
+            abort: true,
+            bumpMutation: true,
+            removeCache: true,
+            reason: "department-transferred",
+          });
+        }
+      } catch (_) {}
+
+      try {
+        if (typeof window.refreshConversationMeta === "function") {
+          await window.refreshConversationMeta(conversationKey);
+        }
+      } catch (_) {}
+
+      window.dispatchEvent(new CustomEvent("zc:conversation-transferred", {
+        detail: {
+          ...data,
+          conversation_key: conversationKey,
+          conversation_id: conversationKey,
+        },
+      }));
+
+      try {
+        if (typeof window.zcRefreshResponsavelButtons === "function") {
+          await window.zcRefreshResponsavelButtons({ force: true });
+        }
+      } catch (_) {}
 
       if (typeof window.carregarClientes === "function") {
         try { await window.carregarClientes(); } catch (_) {}

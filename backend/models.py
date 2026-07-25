@@ -397,6 +397,14 @@ class Cliente(Base):
     is_business     = Column(Boolean, default=False)
     status_whatsapp = Column(String)
 
+    # Presença em tempo real do contato recebida da Evolution/Baileys.
+    # whatsapp_last_seen guarda o último momento em que o contato foi
+    # observado online (ou o lastSeen oficial, quando o WhatsApp o envia).
+    whatsapp_presence = Column(String(32), nullable=True)
+    whatsapp_online = Column(Boolean, nullable=False, server_default="false")
+    whatsapp_last_seen = Column(TIMESTAMP(timezone=True), nullable=True)
+    whatsapp_presence_updated_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
     sobre_cliente = Column(Text)
     descricao     = Column(Text)
     website       = Column(String)

@@ -48,6 +48,8 @@
     getCurrentInstanceText,
   } = H;
 
+  let menuMetaRefreshSerial = 0;
+
   function clickExistingButton(selector, fallbackTitle = 'Ação não encontrada') {
     const btn = $(selector);
 
@@ -287,16 +289,82 @@
     return null;
   }
 
+  function readMetaValue(meta, keys) {
+    const sources = [meta, meta?.raw].filter(Boolean);
+
+    for (const source of sources) {
+      for (const key of keys) {
+        if (Object.prototype.hasOwnProperty.call(source, key)) {
+          return source[key];
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  function metaFlag(meta, keys) {
+    const value = readMetaValue(meta, keys);
+    return value === undefined ? undefined : trueFlag(value);
+  }
+
+  function currentConversationKeyForMenu() {
+    try {
+      const selectedKey = H.getSelectedConversationKey?.();
+      if (selectedKey) return String(selectedKey);
+    } catch {}
+
+    try {
+      const ref = H.resolveCurrentConversationRef?.();
+      if (ref?.key) return String(ref.key);
+    } catch {}
+
+    return '';
+  }
+
+  async function refreshCurrentConversationMetaForMenu() {
+    const key = currentConversationKeyForMenu();
+    if (!key) return null;
+
+    try {
+      if (typeof window.refreshConversationMeta === 'function') {
+        return await window.refreshConversationMeta(key);
+      }
+    } catch (err) {
+      console.warn('[header-actions][menu] refreshConversationMeta falhou:', err);
+    }
+
+    try {
+      if (typeof window.zcRefreshResponsavelButtons === 'function') {
+        await window.zcRefreshResponsavelButtons({ force: true });
+        return getCurrentConversationMetaForMenu();
+      }
+    } catch (err) {
+      console.warn('[header-actions][menu] refresh de atendimento falhou:', err);
+    }
+
+    return getCurrentConversationMetaForMenu();
+  }
+
   function metaRequiresAttendanceFlow(meta) {
     if (!meta) return false;
 
     return Boolean(
-      trueFlag(meta.exigir_aceite) ||
-      trueFlag(meta.aceite_obrigatorio) ||
-      trueFlag(meta.fila_exigir_aceite) ||
-      trueFlag(meta.aguardando_aceite) ||
-      trueFlag(meta.departamento_claim) ||
-      String(meta.claim_mode || '').trim().toLowerCase() === 'departamento'
+      metaFlag(meta, ['exigir_aceite']) ||
+      metaFlag(meta, ['aceite_obrigatorio']) ||
+      metaFlag(meta, ['fila_exigir_aceite']) ||
+      metaFlag(meta, ['aguardando_aceite']) ||
+      metaFlag(meta, ['departamento_claim']) ||
+      String(readMetaValue(meta, ['claim_mode']) || '').trim().toLowerCase() === 'departamento'
+    );
+  }
+
+  function metaIsDepartmentChatbotFlow(meta) {
+    if (!meta) return false;
+
+    return Boolean(
+      metaFlag(meta, ['departamento_claim']) ||
+      String(readMetaValue(meta, ['claim_mode']) || '').trim().toLowerCase() === 'departamento'
     );
   }
 
@@ -308,40 +376,38 @@
     }
 
     return Boolean(
-      trueFlag(meta.pode_liberar) ||
-      trueFlag(meta.can_release) ||
-      trueFlag(meta.aceita_por_mim) ||
-      trueFlag(meta.accepted_by_me)
+      metaFlag(meta, ['pode_liberar', 'can_release']) ||
+      metaFlag(meta, ['aceita_por_mim', 'accepted_by_me'])
     );
   }
 
   function canTransferAttendanceFromMenu() {
     const meta = getCurrentConversationMetaForMenu();
 
-    // Transferir atendimento faz parte do mesmo fluxo de fila/aceite.
-    // Em conversa normal, sem chatbot/fila ativa, não deve aparecer.
-    if (!metaRequiresAttendanceFlow(meta)) {
+    // Esta ação é exclusiva do menu de departamentos do chatbot. Conversa
+    // comum, departamento apenas cadastral e fila sem chatbot não exibem.
+    if (!metaIsDepartmentChatbotFlow(meta)) {
       return false;
     }
 
-    // Quando o backend mandar flags explícitas, respeitamos.
-    if (
-      trueFlag(meta.pode_transferir) ||
-      trueFlag(meta.can_transfer) ||
-      trueFlag(meta.pode_transferir_departamento) ||
-      trueFlag(meta.can_transfer_department)
-    ) {
-      return true;
+    // O backend atual manda uma permissão própria para departamento. Quando a
+    // flag existe, ela é a verdade (inclusive quando for false).
+    const explicitDepartmentPermission = metaFlag(meta, [
+      'pode_transferir_departamento',
+      'can_transfer_department',
+    ]);
+
+    if (explicitDepartmentPermission !== undefined) {
+      return explicitDepartmentPermission;
     }
 
-    // Compatibilidade: conversa em fluxo de atendimento e assumida por mim.
+    // Compatibilidade com metadados antigos: permite trocar de departamento
+    // enquanto aguarda Atender e também depois que foi assumido por mim.
     return Boolean(
-      trueFlag(meta.aceita_por_mim) ||
-      trueFlag(meta.accepted_by_me) ||
-      trueFlag(meta.assumido_por_mim) ||
-      trueFlag(meta.claimed_by_me) ||
-      trueFlag(meta.atendimento_ativo) ||
-      trueFlag(meta.in_attendance)
+      metaFlag(meta, ['pode_aceitar', 'can_accept']) ||
+      metaFlag(meta, ['aceita_por_mim', 'accepted_by_me']) ||
+      metaFlag(meta, ['assumido_por_mim', 'claimed_by_me']) ||
+      metaFlag(meta, ['admin_intervening'])
     );
   }
 
@@ -372,7 +438,7 @@
 
     if (canTransferAttendanceFromMenu()) {
       items.push({
-        label: 'Transferir atendimento',
+        label: 'Transferir departamento',
         icon: 'fa-solid fa-arrow-right-arrow-left',
         action() {
           transferirDepartamentoFromMenu();
@@ -591,14 +657,25 @@
 
     H.state.menuOpen = true;
     menu.hidden = false;
-
     positionMenu();
+
+    // O menu abre imediatamente com o cache atual e, em seguida, força /meta.
+    // Assim ações do chatbot aparecem sem F5 e sem depender do tempo do cache.
+    const serial = ++menuMetaRefreshSerial;
+    Promise.resolve(refreshCurrentConversationMetaForMenu())
+      .then(() => {
+        if (!H.state.menuOpen || serial !== menuMetaRefreshSerial) return;
+        renderMenu();
+        positionMenu();
+      })
+      .catch(() => {});
   }
 
   function closeMenu() {
     const menu = document.getElementById('zc-chat-more-menu');
 
     H.state.menuOpen = false;
+    menuMetaRefreshSerial += 1;
 
     if (!menu) return;
 
@@ -622,6 +699,7 @@
     openNotesOrIaFromMenu,
     transferirDepartamentoFromMenu,
 
+    refreshCurrentConversationMetaForMenu,
     canTransferAttendanceFromMenu,
     menuItems,
     ensureMenu,
@@ -632,5 +710,5 @@
     toggleMenu,
   });
 
-  console.log('[header-actions] menu carregado: zc-menu-limpo-v9-21-transfer-only-attendance-flow');
+  console.log('[header-actions] menu carregado: zc-menu-v11-chatbot-department-only');
 })();

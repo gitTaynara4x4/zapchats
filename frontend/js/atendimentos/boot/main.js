@@ -394,6 +394,7 @@
     // Mantemos fora apenas observers pesados/duplicados da lista.
     await import('../ui/perfil.js');
     await import('../ui/perfil_quick.js');
+    await import('../ui/presenca-contato.js?v=20260725-presence-v1');
     await importIfMissing('__ZC_PERFIL_INSTANCIA_LOADED__', '../ui/perfil-instancia.js');
     await import('../ui/notes-drawer.js');
     await import('../ui/ia.js');
@@ -405,7 +406,7 @@
     await import('../ui/lista-active-sync.js');
     await import('../ui/avatar-lazy-safe.js');
 
-    await import('../ui/transferir-departamento.js');
+    await import('../ui/transferir-departamento.js?v=20260723-chatbot-actions-v1');
 
     // Header actions dividido: volta lupa/calendário/3 pontinhos sem reativar o loop.
     await import('../ui/header-actions/core.js');
@@ -417,14 +418,14 @@
     await import('../ui/header-actions/search.js');
     await import('../ui/header-actions/select-mode.js');
     await import('../ui/header-actions/forward.js');
-    await import('../ui/header-actions/menu.js');
+    await import('../ui/header-actions/menu.js?v=20260723-chatbot-actions-v1');
     await import('../ui/header-actions/boot.js');
 
     // Editar nome do cliente: isolado, sem desligar 3 pontinhos/menu.
     await import('../ui/editar-nome-cliente.js');
 
     await import('../ui/message-actions.js');
-    await import('../ui/aceitar-conversa.js');
+    await import('../ui/aceitar-conversa.js?v=20260723-claim-confirmed-v2');
     await import('../ui/message-selection.js');
     await import('../ui/forward-picker.js');
     await import('../ui/loading-guard.js');
@@ -483,6 +484,7 @@
     */
     await import('../ui/perfil.js');
     await import('../ui/perfil_quick.js');
+    await import('../ui/presenca-contato.js?v=20260725-presence-v1');
 
     /*
       Esses abaixo eram os principais duplicados no log:
@@ -534,7 +536,7 @@
       Transferência precisa vir ANTES do menu dos 3 pontinhos,
       porque o menu chama o botão original #btnTransferirDepartamento.
     */
-    await import('../ui/transferir-departamento.js');
+    await import('../ui/transferir-departamento.js?v=20260723-chatbot-actions-v1');
 
     /*
       Header actions dividido.
@@ -551,14 +553,14 @@
     await import('../ui/header-actions/search.js');
     await import('../ui/header-actions/select-mode.js');
     await import('../ui/header-actions/forward.js');
-    await import('../ui/header-actions/menu.js');
+    await import('../ui/header-actions/menu.js?v=20260723-chatbot-actions-v1');
     await import('../ui/header-actions/boot.js');
 
     // Editar nome do cliente: isolado, sem desligar 3 pontinhos/menu.
     await import('../ui/editar-nome-cliente.js');
 
     await import('../ui/message-actions.js');
-    await import('../ui/aceitar-conversa.js');
+    await import('../ui/aceitar-conversa.js?v=20260723-claim-confirmed-v2');
     await import('../ui/message-selection.js');
     await import('../ui/forward-picker.js');
 
@@ -601,7 +603,7 @@
                 window.dispatchEvent(new CustomEvent('zc:atendimentos-runtime-ready'));
 
                 // Importa e liga o WS somente agora, depois de carregar a lista inicial.
-                await import('../realtime/ws-empresa.js');
+                await import('../realtime/ws-empresa.js?v=20260725-presence-v1');
                 try {
                   window.dispatchEvent(new CustomEvent('zc:start-empresa-ws'));
                 } catch (_) {}

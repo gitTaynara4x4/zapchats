@@ -68,6 +68,7 @@ from backend.routers import filas as filas_router
 from backend.database import Base, engine, SessionLocal
 from backend import models
 from backend.migrations.atendimento_claim_state import normalize_atendimento_claim_state
+from backend.migrations.cliente_whatsapp_presence import ensure_cliente_whatsapp_presence
 
 # Integrações Evolution
 from backend.integrations.evolution.api.remove_instance import router as remove_instance_router
@@ -380,6 +381,18 @@ if ENV == "dev" and "*" not in ALLOWED_HOSTS:
 
 # Billing: páginas premium para redirecionar quando vencido
 BILLING_BLOCKED_HTML_PATHS = {
+    "/dashboard",
+    "/clientes",
+    "/departamentos",
+    "/colaboradores",
+    "/colaboradores/novo",
+    "/colaborador-perfil",
+    "/usuarios",
+    "/chat-interno",
+    "/atendimentos",
+    "/filas",
+    "/midias",
+    "/email",
     "/conectar",
     "/disparos",
     "/chatbot",
@@ -387,10 +400,6 @@ BILLING_BLOCKED_HTML_PATHS = {
 }
 
 BILLING_ALLOWED_WHEN_LOCKED = {
-    "/dashboard",
-    "/clientes",
-    "/atendimentos",
-    "/filas",
     "/meu-plano",
     "/perfil",
     "/configuracoes",
@@ -576,6 +585,67 @@ def _apply_billing_header(resp: StarletteResponse, locked: bool):
 # FastAPI app
 # =======================================
 app = FastAPI()
+
+
+BILLING_ALLOWED_API_PREFIXES = (
+    "/api/billing/asaas",
+    "/api/meu-plano",
+    "/api/perfil",
+    "/api/admin",
+    "/api/admin-saas",
+    "/api/empresas",
+    "/api/empresa/atual",
+    "/api/planos",
+    "/api/configuracoes",
+    "/api/public",
+    "/api/health",
+)
+
+
+def _request_access_token(request: Request) -> str | None:
+    token = request.cookies.get(ACCESS_COOKIE_NAME)
+    if token:
+        return token
+    authorization = str(request.headers.get("Authorization") or "").strip()
+    if authorization.lower().startswith("bearer "):
+        return authorization.split(" ", 1)[1].strip() or None
+    return None
+
+
+@app.middleware("http")
+async def billing_api_gate(request: Request, call_next):
+    path = request.url.path or ""
+    if (
+        request.method == "OPTIONS"
+        or not path.startswith("/api/")
+        or any(path.startswith(prefix) for prefix in BILLING_ALLOWED_API_PREFIXES)
+    ):
+        return await call_next(request)
+
+    token = _request_access_token(request)
+    if not token:
+        return await call_next(request)
+
+    try:
+        payload = auth_router._decode_token(token)
+        empresa_id = _int_or_none(payload.get("empresa_id"))
+    except Exception:
+        return await call_next(request)
+
+    if empresa_id and _billing_locked_for_empresa_id(empresa_id):
+        return JSONResponse(
+            status_code=402,
+            content={
+                "detail": "Seu período de acesso terminou. Escolha um plano e pague para continuar usando a plataforma.",
+                "billing_locked": True,
+                "redirect": "/meu-plano?billing=locked",
+            },
+            headers={"X-Billing-Locked": "1", "Cache-Control": "no-store"},
+        )
+
+    response = await call_next(request)
+    response.headers["X-Billing-Locked"] = "0"
+    return response
 
 
 @app.middleware("http")
@@ -870,7 +940,7 @@ async def auth_html_gate(request: Request, call_next):
         return _html_billing_redirect(
             path,
             request.url.query,
-            "Seu plano está vencido. Renove para continuar usando este módulo.",
+            "Seu período de acesso terminou. Escolha um plano e pague para continuar usando a plataforma.",
         )
 
     if not required:
@@ -1465,6 +1535,7 @@ async def _start_integrations():
                 conn.exec_driver_sql("SELECT 1")
                 Base.metadata.create_all(bind=conn)
             normalize_atendimento_claim_state(engine, LOG)
+            ensure_cliente_whatsapp_presence(engine, LOG)
             db_ok = True
             LOG("[STARTUP] DB ok e tabelas garantidas.")
             break

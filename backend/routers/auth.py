@@ -101,7 +101,7 @@ if not JWT_SECRET:
 JWT_EXP_MINUTES = int(os.getenv("JWT_EXP_MINUTES", str(60 * 24)))  # fallback 24h
 ALGORITHM = "HS256"
 
-TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "7"))  # 7 por padrão
+TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "14"))  # 14 por padrão
 
 # Cookies/CSRF (devem bater com main.py)
 ACCESS_COOKIE_NAME = os.getenv("ACCESS_COOKIE_NAME", "access_token")

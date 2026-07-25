@@ -335,7 +335,7 @@
     src="https://unpkg.com/@lottiefiles/dotlottie-wc@0.6.2/dist/dotlottie-wc.js"
     type="module"></script>
 
-  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260715-newchat-open-timeout-fix-1">
+  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260725-presence-v1">
 
   <link
     rel="stylesheet"
@@ -803,7 +803,7 @@
       <header id="chat-header"
               class="h-16 flex items-center px-4 gap-3 shadow-sm"
               style="display:none;">
-        <div class="flex items-center gap-2 relative">
+        <div class="flex items-center gap-2 relative chat-contact-main">
           <button
             id="chat-back-mobile"
             type="button"
@@ -815,7 +815,13 @@
           </button>
 
           <span id="chat-avatar"></span>
-          <h2 id="chat-title" class="font-medium truncate text-[1.09em]"></h2>
+
+          <div class="chat-contact-text">
+            <div class="chat-contact-title-row">
+              <h2 id="chat-title" class="font-medium truncate text-[1.09em]"></h2>
+            </div>
+            <span id="chat-presenca" aria-live="polite" hidden></span>
+          </div>
 
           <button
             id="btn-sobre"
@@ -1802,7 +1808,9 @@
 
         setHidden(btnAccept, true);
         setHidden(btnRelease, !st.podeLiberar);
-        setHidden(btnTransfer, true);
+        // Depois de assumir, a transferência para outro colaborador precisa
+        // permanecer visível. O guard antigo escondia o botão novamente.
+        setHidden(btnTransfer, !st.aceitaPorMim);
       }
 
       function scheduleSync() {

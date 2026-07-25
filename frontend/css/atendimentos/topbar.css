@@ -24,6 +24,87 @@ main.whatsapp-bg-light #historico{
     url("https://static.whatsapp.net/rsrc.php/yx/r/voSdkk88H7C.svg") !important;
 }
 
+
+/* ================= Presença do contato no cabeçalho ================= */
+#chat-header .chat-contact-main{
+  flex:1 1 auto;
+  min-width:0;
+  overflow:hidden;
+}
+
+#chat-header .chat-contact-text{
+  display:flex;
+  flex:1 1 auto;
+  min-width:0;
+  max-width:100%;
+  flex-direction:column;
+  align-items:flex-start;
+  justify-content:center;
+  gap:1px;
+  line-height:1.1;
+  overflow:hidden;
+}
+
+#chat-header .chat-contact-title-row{
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  gap:7px;
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  overflow:hidden;
+}
+
+#chat-header .chat-contact-text #chat-title{
+  flex:0 1 auto;
+  min-width:0;
+  width:auto;
+  max-width:min(42vw,520px);
+  margin:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+#chat-presenca{
+  display:block;
+  width:100%;
+  max-width:100%;
+  margin:0;
+  padding:0;
+  color:var(--text-2,#667781);
+  font-family:"Inter","Segoe UI","Helvetica Neue",Helvetica,Arial,sans-serif;
+  font-size:11.5px;
+  font-weight:400;
+  line-height:1.2;
+  letter-spacing:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+#chat-presenca[hidden]{
+  display:none !important;
+}
+
+#chat-presenca.is-online,
+#chat-presenca.is-activity{
+  color:#00a884;
+}
+
+html[data-theme="dark"] #chat-presenca,
+html.dark #chat-presenca{
+  color:#aebac1;
+}
+
+html[data-theme="dark"] #chat-presenca.is-online,
+html[data-theme="dark"] #chat-presenca.is-activity,
+html.dark #chat-presenca.is-online,
+html.dark #chat-presenca.is-activity{
+  color:#25d366;
+}
+
 #chat-back-mobile{
   display:none;
 }
@@ -1005,7 +1086,7 @@ html:not(.dark)[data-theme="light"] #chat-footer .zc-claim-actions #btnLiberarCo
     color:var(--text,#e9edef) !important;
   }
 
-  #chat-header > div:first-child > :not(#chat-back-mobile):not(#chat-avatar):not(#chat-title):not(.zc-chat-actions):not(.zc-chat-header-actions){
+  #chat-header > div:first-child > :not(#chat-back-mobile):not(#chat-avatar):not(#chat-title):not(.chat-contact-text):not(.zc-chat-actions):not(.zc-chat-header-actions){
     display:none !important;
     visibility:hidden !important;
     opacity:0 !important;
@@ -1767,4 +1848,30 @@ html:not(.dark)[data-theme="light"] .wpp-header-filtro:hover,
 html[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro:hover,
 html:not(.dark)[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro:hover{
   color:#111B21 !important;
+}
+
+@media (max-width:920px){
+  #chat-header .chat-contact-text{
+    flex:1 1 auto !important;
+    min-width:0 !important;
+    max-width:100% !important;
+    display:flex !important;
+    visibility:visible !important;
+    opacity:1 !important;
+    pointer-events:auto !important;
+    width:auto !important;
+    height:auto !important;
+    margin:0 !important;
+    overflow:hidden !important;
+  }
+
+  #chat-presenca{
+    font-size:11px !important;
+    line-height:1.15 !important;
+  }
+
+  #chat-header .chat-contact-title-row #btnEditarNomeCliente,
+  #chat-header .chat-contact-title-row #inst-badge{
+    display:none !important;
+  }
 }

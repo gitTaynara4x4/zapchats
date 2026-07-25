@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any, Union
 # ============================================================
 # Config
 # ============================================================
-DEFAULT_TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "7") or "7")
+DEFAULT_TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "14") or "14")
 DEFAULT_PLAN_CYCLE_DAYS = int(os.getenv("PLAN_CYCLE_DAYS", "30") or "30")
 PLAN_DUE_WARNING_DAYS = int(os.getenv("PLAN_DUE_WARNING_DAYS", "5") or "5")
 
@@ -153,7 +153,7 @@ PLAN_CATALOG: Dict[str, Dict[str, Any]] = {
         "name": "Enterprise",
         "public_name": "Enterprise",
         "public": True,
-        "price_monthly": 347,
+        "price_monthly": 497,
         "trial_days": DEFAULT_TRIAL_DAYS,
         "billing_cycle_days": DEFAULT_PLAN_CYCLE_DAYS,
         "limits": {
@@ -303,6 +303,15 @@ def trial_days_left(empresa) -> int:
     return _days_left_until(getattr(empresa, "trial_expires_at", None))
 
 
+def is_trial_expired(empresa) -> bool:
+    """Retorna True quando a empresa já teve trial e ele terminou."""
+    trial_tier = getattr(empresa, "trial_tier", None)
+    trial_expires_at = _as_aware_utc(getattr(empresa, "trial_expires_at", None))
+    if not trial_tier or not trial_expires_at:
+        return False
+    return now_utc() >= trial_expires_at
+
+
 # ============================================================
 # Plano pago / vencimento
 # ============================================================
@@ -444,6 +453,7 @@ def is_billing_locked(empresa) -> bool:
     - FREE puro: não bloqueia por billing
     - trial ativo: não bloqueia
     - plano pago ativo: não bloqueia
+    - trial expirado sem plano pago ativo: bloqueia
     - plano pago vencido e sem trial ativo: bloqueia
     """
     if is_trial_active(empresa):
@@ -451,6 +461,9 @@ def is_billing_locked(empresa) -> bool:
 
     if is_paid_active(empresa):
         return False
+
+    if is_trial_expired(empresa):
+        return True
 
     paid_code = configured_paid_plan_code(empresa)
     if paid_code and is_paid_expired(empresa):
@@ -612,6 +625,7 @@ def plan_status_payload(
         # trial
         "trial": {
             "active": is_trial_active(empresa),
+            "expired": is_trial_expired(empresa),
             "tier": normalize_plan(getattr(empresa, "trial_tier", None))
             if getattr(empresa, "trial_tier", None)
             else None,
@@ -681,6 +695,7 @@ __all__ = [
     "is_billing_locked",
 
     "is_trial_active",
+    "is_trial_expired",
     "is_paid_active",
     "effective_tier",
     "effective_plan",

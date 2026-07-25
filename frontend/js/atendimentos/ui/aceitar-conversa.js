@@ -18,6 +18,12 @@
   const META_CACHE_TTL_MS = Number(window.ZC_META_CACHE_TTL_MS || 30000);
   const META_FETCH_TIMEOUT_MS = Number(window.ZC_META_FETCH_TIMEOUT_MS || 2500);
   const REFRESH_DEBOUNCE_MS = 180;
+  // Após o backend confirmar Atender/Liberar/Transferir, preserva o estado
+  // retornado pela própria ação. Isso impede que um GET /meta ou o eco do
+  // WebSocket, iniciado logo em seguida, recoloque na tela o estado anterior.
+  const OPTIMISTIC_MUTATION_HOLD_MS = Number(
+    window.ZC_CLAIM_OPTIMISTIC_HOLD_MS || 12000
+  );
 
   let __refreshTimer = null;
   let __lastRenderedConversationKey = "";
@@ -649,6 +655,27 @@
     ).trim();
   }
 
+  function markOptimisticMutation(meta, action) {
+    if (!meta || typeof meta !== "object") return meta;
+
+    const now = Date.now();
+    meta._mutation_action = String(action || "claim-action");
+    meta._mutation_confirmed_at = now;
+    meta._mutation_hold_until = now + Math.max(1000, OPTIMISTIC_MUTATION_HOLD_MS);
+    return meta;
+  }
+
+  function hasActiveOptimisticMutation(meta) {
+    if (!meta || typeof meta !== "object") return false;
+
+    const until = Number(meta._mutation_hold_until || 0);
+    if (!Number.isFinite(until) || until <= Date.now()) {
+      return false;
+    }
+
+    return true;
+  }
+
   function abortMetaRequestForKey(key, reason = "meta-invalidated") {
     if (!key) return;
 
@@ -773,6 +800,26 @@
       )
     );
 
+    const canTransferDepartment = Boolean(
+      exigirAceite &&
+      (
+        meta?.pode_transferir_departamento ??
+        meta?.can_transfer_department ??
+        (isDepartmentClaim(meta) && (canAccept || acceptedByMe || adminIntervening))
+      )
+    );
+
+    const canTransferCollaborator = Boolean(
+      exigirAceite &&
+      (
+        meta?.pode_transferir_colaborador ??
+        meta?.can_transfer_collaborator ??
+        meta?.pode_transferir ??
+        meta?.can_transfer ??
+        (acceptedByMe || adminIntervening)
+      )
+    );
+
     return {
       conversation_key,
       conversation_id: conversation_key,
@@ -788,6 +835,12 @@
       pode_aceitar: canAccept,
       pode_liberar: canRelease,
       pode_responder: canSend,
+      pode_transferir_departamento: canTransferDepartment,
+      can_transfer_department: canTransferDepartment,
+      pode_transferir_colaborador: canTransferCollaborator,
+      can_transfer_collaborator: canTransferCollaborator,
+      pode_transferir: canTransferCollaborator,
+      can_transfer: canTransferCollaborator,
       aceita_por_mim: exigirAceite ? acceptedByMe : false,
 
       operador_id: operadorId,
@@ -835,6 +888,13 @@
 
     if (isAtendimentoLeaving()) {
       return cached || null;
+    }
+
+    // A própria resposta do POST é a confirmação mais recente da mutação.
+    // Durante uma janela curta, nem force:true pode trocar esse estado por um
+    // /meta atrasado ou pelo eco do WebSocket da mesma ação.
+    if (hasActiveOptimisticMutation(cached)) {
+      return cached;
     }
 
     // force:true precisa realmente ignorar o TTL e qualquer GET antigo.
@@ -1350,6 +1410,12 @@
         reason: "claim-accepted"
       });
 
+      const claimedOperatorId =
+        currentColabId ||
+        toInt(data?.responsavel_id) ||
+        toInt(data?.operador_id) ||
+        null;
+
       const optimisticMeta = saveMetaCache(conv, {
         ...data,
         claim_mode: isDeptClaim ? "departamento" : (data?.claim_mode || prevMeta?.claim_mode || null),
@@ -1363,8 +1429,8 @@
         aceita_por_mim: true,
         accepted_by_me: true,
         accepted_by_anyone: true,
-        operador_id: currentColabId,
-        responsavel_id: currentColabId,
+        operador_id: claimedOperatorId,
+        responsavel_id: claimedOperatorId,
         operador_nome:
           data?.operador_nome ||
           data?.responsavel_nome ||
@@ -1375,6 +1441,7 @@
           null
       });
 
+      markOptimisticMutation(optimisticMeta, "claim-accepted");
       emitMetaEvents(optimisticMeta);
 
       renderClaimFromMeta(conv, optimisticMeta);
@@ -1516,6 +1583,7 @@
         responsavel_nome: null
       });
 
+      markOptimisticMutation(optimisticMeta, "claim-released");
       emitMetaEvents(optimisticMeta);
       renderClaimFromMeta(conv, optimisticMeta);
       appendSystemEventToHistory(conv, data, "claim-released");
@@ -2107,6 +2175,7 @@
         responsavel_nome: data?.operador_nome || null
       });
 
+      markOptimisticMutation(optimisticMeta, "claim-transferred");
       emitMetaEvents(optimisticMeta);
       renderClaimFromMeta(conv, optimisticMeta);
 
@@ -2122,7 +2191,12 @@
         })
       );
 
-      await refreshAfterAction();
+      await refreshAfterAction({
+        light: true,
+        conv,
+        data,
+        reason: "claim-transferred"
+      });
     } catch (err) {
       setError(err?.message || "Falha ao transferir a conversa.");
       if (submit) submit.disabled = false;
@@ -2135,15 +2209,18 @@
     const reason = options.reason || "claim-action";
 
     if (light) {
-      // Modo leve: não recarrega lista inteira nem histórico inteiro.
-      // O backend já confirmou; aqui só sincronizamos o meta/card atual.
+      // Modo leve: a resposta do POST já confirmou a ação e já foi colocada
+      // no cache acima. Não faz GET /meta forçado imediatamente, pois esse GET
+      // pode chegar com o estado anterior e desfazer o botão Atender na tela.
       if (conv) {
         try {
-          await fetchAndCacheMeta(conv, { force: true });
+          const cached = window.getConversationMeta?.(buildConversationKey(conv));
+          if (cached) renderClaimFromMeta(conv, cached);
+          else await fetchAndCacheMeta(conv, { force: false });
         } catch {}
       }
 
-      try { await refreshResponsavelButtons({ force: true }); } catch {}
+      try { await refreshResponsavelButtons({ force: false }); } catch {}
 
       try {
         window.dispatchEvent(new CustomEvent("zc:conversation-light-refresh", {
@@ -2304,6 +2381,23 @@
               : ""
           );
 
+        const current = getCurrentConversation();
+        const currentKey = buildConversationKey(current);
+        const cachedCurrent = key ? getMetaCache()[key] : null;
+
+        // O backend ecoa a própria ação pelo WebSocket. Se esta aba acabou de
+        // confirmar a mesma mutação, mantém o estado otimista já confirmado em
+        // vez de apagar o cache e consultar /meta cedo demais. Outras abas, que
+        // não possuem esse marcador, continuam atualizando normalmente.
+        if (key && hasActiveOptimisticMutation(cachedCurrent)) {
+          if (current && currentKey === key) {
+            appendSystemEventToHistory(current, detail, "remote-claim-updated");
+            renderClaimFromMeta(current, cachedCurrent);
+            scheduleRefreshResponsavelButtons();
+          }
+          return;
+        }
+
         if (key) {
           invalidateMetaCache(key, {
             abort: true,
@@ -2312,9 +2406,6 @@
             reason: "remote-claim-updated"
           });
         }
-
-        const current = getCurrentConversation();
-        const currentKey = buildConversationKey(current);
 
         if (!current || !currentKey || (key && key !== currentKey)) return;
 
@@ -2353,6 +2444,6 @@
   }
 
   try {
-    console.info("[ZapsChat][aceitar-conversa] carregado: zc-claim-cache-race-fix-v1");
+    console.info("[ZapsChat][aceitar-conversa] carregado: zc-claim-post-confirmed-state-v2");
   } catch {}
 })();

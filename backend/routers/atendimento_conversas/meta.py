@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
 from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -177,6 +178,12 @@ def _merge_department_claim_state(
     if departamento_id is None or not _is_status_aberto_para_claim(status_atd):
         out["claim_mode"] = None
         out["departamento_claim"] = False
+        out["pode_transferir_departamento"] = False
+        out["can_transfer_department"] = False
+        out["pode_transferir_colaborador"] = False
+        out["can_transfer_collaborator"] = False
+        out["pode_transferir"] = False
+        out["can_transfer"] = False
         return out
 
     fila_id = None
@@ -211,6 +218,12 @@ def _merge_department_claim_state(
         out["pode_aceitar"] = False
         out["pode_liberar"] = False
         out["pode_responder"] = True
+        out["pode_transferir_departamento"] = False
+        out["can_transfer_department"] = False
+        out["pode_transferir_colaborador"] = False
+        out["can_transfer_collaborator"] = False
+        out["pode_transferir"] = False
+        out["can_transfer"] = False
         return out
 
     operador_int = None
@@ -232,15 +245,35 @@ def _merge_department_claim_state(
     waiting = bool(operador_int is None)
     admin_intervening = bool(admin_can_intervene and assigned_to_other)
 
+    # Transferência de departamento é exclusiva da triagem do chatbot.
+    # Uma fila com aceite obrigatório continua com Atender/Liberar, mas não é
+    # marcada como fluxo de departamentos e não exibe essa ação por engano.
+    is_department_claim = bool(triagem_por_departamento)
+    can_transfer_department = bool(
+        is_department_claim
+        and (
+            assigned_to_me
+            or admin_intervening
+            or (waiting and (colab_int is not None or admin_can_intervene))
+        )
+    )
+    can_transfer_collaborator = bool(assigned_to_me or admin_intervening)
+
     out.update({
-        "claim_mode": "departamento",
-        "departamento_claim": True,
+        "claim_mode": "departamento" if is_department_claim else "fila",
+        "departamento_claim": is_department_claim,
         "exigir_aceite": True,
         "aceite_obrigatorio": True,
         "aguardando_aceite": bool(waiting or assigned_to_other),
         "pode_aceitar": bool(colab_int is not None and waiting),
         "pode_liberar": bool(assigned_to_me),
         "pode_responder": bool(assigned_to_me or colab_int is None or admin_intervening),
+        "pode_transferir_departamento": can_transfer_department,
+        "can_transfer_department": can_transfer_department,
+        "pode_transferir_colaborador": can_transfer_collaborator,
+        "can_transfer_collaborator": can_transfer_collaborator,
+        "pode_transferir": can_transfer_collaborator,
+        "can_transfer": can_transfer_collaborator,
         "aceita_por_mim": bool(assigned_to_me),
         "accepted_by_me": bool(assigned_to_me),
         "accepted_by_anyone": bool(operador_int is not None),
@@ -255,6 +288,57 @@ def _merge_department_claim_state(
     })
 
     return out
+
+
+def _presence_ttl_seconds() -> int:
+    try:
+        value = int(float(str(os.getenv("ZC_CONTACT_PRESENCE_TTL_SECONDS", "120")).strip()))
+    except Exception:
+        value = 120
+    return max(30, min(value, 900))
+
+
+def _as_aware_utc(value: Any) -> Optional[datetime]:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _iso_utc(value: Any) -> Optional[str]:
+    parsed = _as_aware_utc(value)
+    return parsed.isoformat() if parsed is not None else None
+
+
+def _presence_payload(cliente) -> Dict[str, Any]:
+    """Retorna a presença sem deixar um estado online antigo preso na tela."""
+    ttl_seconds = _presence_ttl_seconds()
+    updated_at = _as_aware_utc(getattr(cliente, "whatsapp_presence_updated_at", None))
+    last_seen = _as_aware_utc(getattr(cliente, "whatsapp_last_seen", None))
+    status = str(getattr(cliente, "whatsapp_presence", None) or "").strip().lower() or None
+    stored_online = bool(getattr(cliente, "whatsapp_online", False))
+
+    effective_online = False
+    if stored_online and updated_at is not None:
+        try:
+            effective_online = (datetime.now(timezone.utc) - updated_at).total_seconds() <= ttl_seconds
+        except Exception:
+            effective_online = False
+
+    # Se o evento de offline não chegou, o último instante em que vimos o
+    # contato online ainda é uma informação útil e evita mostrar online eterno.
+    if not effective_online and updated_at is not None:
+        if last_seen is None or updated_at > last_seen:
+            last_seen = updated_at
+
+    return {
+        "presence_status": status,
+        "presence_online": bool(effective_online),
+        "presence_last_seen": _iso_utc(last_seen),
+        "presence_updated_at": _iso_utc(updated_at),
+        "presence_ttl_seconds": ttl_seconds,
+    }
 
 
 def _empresa_id_segura(identity, empresa_id_payload: Optional[int] = None) -> int:
@@ -419,6 +503,7 @@ def obter_meta_conversa(
         "tem_participantes": part_info["tem_participantes"],
         "is_group": False,
     }
+    meta_payload.update(_presence_payload(cliente))
 
     return _merge_department_claim_state(
         db,
