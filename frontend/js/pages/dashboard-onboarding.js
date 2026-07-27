@@ -1,6 +1,9 @@
 (function ZapsChatOnboarding() {
   'use strict';
 
+  if (window.__ZAPSCHAT_ONBOARDING_V2__) return;
+  window.__ZAPSCHAT_ONBOARDING_V2__ = true;
+
   const STATUS_URL = '/api/usuarios/me/onboarding';
   const COMPLETE_URL = '/api/usuarios/me/onboarding/complete';
   const LOCAL_SEEN_PREFIX = 'zapschat:onboarding:v1:seen';
@@ -43,6 +46,7 @@
   let firstOpenRecorded = false;
   let currentIdentityKey = '';
   let autoOpenTimer = 0;
+  let pendingFirstVisitCompletion = false;
 
   function authFetch(url, options) {
     const fetcher = window.ZAuth?.guardFetch || window.ZAuth?.authFetch || window.fetch;
@@ -176,8 +180,7 @@
         renderStep();
         return;
       }
-      closeOnboarding();
-      window.location.href = '/atendimentos';
+      closeOnboarding({ redirectTo: '/atendimentos' });
     });
 
     root.addEventListener('keydown', (event) => {
@@ -272,11 +275,17 @@
       root.querySelector('[data-zc-onboarding-next]')?.focus({ preventScroll: true });
     });
 
-    if (options?.firstVisit) recordFirstOpen();
+    pendingFirstVisitCompletion = !!options?.firstVisit;
   }
 
-  function closeOnboarding() {
-    if (!shell || shell.hidden) return;
+  function closeOnboarding(options) {
+    if (!shell || shell.hidden) {
+      if (options?.redirectTo) window.location.href = options.redirectTo;
+      return Promise.resolve();
+    }
+
+    const shouldComplete = pendingFirstVisitCompletion;
+    pendingFirstVisitCompletion = false;
 
     shell.classList.remove('is-open');
     shell.setAttribute('aria-hidden', 'true');
@@ -288,6 +297,14 @@
         try { lastFocused.focus({ preventScroll: true }); } catch (_) {}
       }
     }, 180);
+
+    const completion = shouldComplete ? recordFirstOpen() : Promise.resolve();
+    if (options?.redirectTo) {
+      completion.finally(() => {
+        window.location.href = options.redirectTo;
+      });
+    }
+    return completion;
   }
 
   async function recordFirstOpen() {
@@ -297,7 +314,7 @@
     if (seenKey) safeLocalSet(seenKey, '1');
 
     try {
-      const response = await authFetch(COMPLETE_URL, { method: 'POST' });
+      const response = await authFetch(COMPLETE_URL, { method: 'POST', keepalive: true });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
     } catch (error) {
       console.warn('[onboarding] Não foi possível salvar a conclusão no servidor.', error);
