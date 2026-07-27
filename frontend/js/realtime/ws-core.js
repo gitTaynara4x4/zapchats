@@ -15,10 +15,16 @@ const ROOT = window.__ZC_WS_CORE__ || (window.__ZC_WS_CORE__ = {
 });
 
 const _topics = ROOT.topics;
+const PRESENCE = ROOT.presence || (ROOT.presence = {
+  lastActivityAt: Date.now(),
+  lastState: 'online',
+  listenersBound: false,
+});
 
 const _baseRetry = 800;
 const _maxRetry = 10000;
 const _pingEach = 30000;
+const _awayAfter = 5 * 60 * 1000;
 
 function _debug(...args) {
   try {
@@ -78,6 +84,8 @@ function _topicState(topic) {
       hbTimer: null,
       reopenTimer: null,
       openSeq: 0,
+      lastPresenceState: null,
+      presenceSnapshotRequested: false,
       _opts: {},
     };
 
@@ -277,6 +285,82 @@ function _emit(topic, payload) {
   } catch {}
 }
 
+function _isEmpresaTopic(topic) {
+  return /^emp:\d+$/i.test(String(topic || '').trim());
+}
+
+function _presenceState() {
+  try {
+    if (document.visibilityState === 'hidden') return 'away';
+  } catch {}
+
+  return (Date.now() - Number(PRESENCE.lastActivityAt || 0)) >= _awayAfter
+    ? 'away'
+    : 'online';
+}
+
+function _sendPresence(topic, { force = false } = {}) {
+  if (!_isEmpresaTopic(topic)) return false;
+
+  const st = _topicState(topic);
+  if (!st.ws || st.ws.readyState !== WebSocket.OPEN) return false;
+
+  const state = _presenceState();
+  const wantSnapshot = Boolean(
+    st._opts?.presenceSnapshot && !st.presenceSnapshotRequested
+  );
+  if (!force && st.lastPresenceState === state && !wantSnapshot) return false;
+
+  try {
+    st.ws.send(JSON.stringify({
+      type: 'presence',
+      state,
+      activity_at: new Date(Number(PRESENCE.lastActivityAt || Date.now())).toISOString(),
+      ...(wantSnapshot ? { want_snapshot: true } : {}),
+    }));
+    st.lastPresenceState = state;
+    if (wantSnapshot) st.presenceSnapshotRequested = true;
+    PRESENCE.lastState = state;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function _sendPresenceAll(force = false) {
+  _topics.forEach((st, topic) => {
+    try { _sendPresence(topic, { force }); } catch {}
+  });
+}
+
+function _bindPresenceActivity() {
+  if (PRESENCE.listenersBound) return;
+  PRESENCE.listenersBound = true;
+
+  const markActive = () => {
+    const was = _presenceState();
+    PRESENCE.lastActivityAt = Date.now();
+    const nowState = _presenceState();
+    if (was !== nowState || PRESENCE.lastState === 'away') {
+      _sendPresenceAll(false);
+    }
+    PRESENCE.lastState = nowState;
+  };
+
+  ['pointerdown', 'keydown', 'touchstart', 'focus'].forEach((name) => {
+    window.addEventListener(name, markActive, { capture: true, passive: true });
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      PRESENCE.lastActivityAt = Date.now();
+    }
+    _sendPresenceAll(true);
+  }, true);
+}
+
+_bindPresenceActivity();
+
 function _startHB(topic) {
   const st = _topicState(topic);
 
@@ -285,7 +369,11 @@ function _startHB(topic) {
   st.hbTimer = setInterval(() => {
     try {
       if (st.ws && st.ws.readyState === WebSocket.OPEN) {
-        st.ws.send('ping');
+        if (_isEmpresaTopic(topic)) {
+          _sendPresence(topic, { force: true });
+        } else {
+          st.ws.send('ping');
+        }
       }
     } catch {}
   }, _pingEach);
@@ -342,8 +430,10 @@ function _open(topic, opts = {}) {
     if (st.ws !== ws || st.openSeq !== seq) return;
 
     st.retries = 0;
+    st.presenceSnapshotRequested = false;
     _clearReopen(topic);
     _startHB(topic);
+    _sendPresence(topic, { force: true });
 
     _debug('open', { topic, seq });
 
@@ -358,6 +448,7 @@ function _open(topic, opts = {}) {
     if (st.ws !== ws || st.openSeq !== seq) return;
 
     _stopHB(topic);
+    st.presenceSnapshotRequested = false;
 
     _warn('close', {
       topic,
@@ -438,7 +529,7 @@ function _ensure(topic, opts = {}) {
   const st = _topicState(topic);
 
   st.wantOpen = true;
-  st._opts = opts;
+  st._opts = { ...(st._opts || {}), ...(opts || {}) };
 
   if (
     st.ws &&
@@ -447,6 +538,9 @@ function _ensure(topic, opts = {}) {
       st.ws.readyState === WebSocket.OPEN
     )
   ) {
+    if (st.ws.readyState === WebSocket.OPEN && opts?.presenceSnapshot) {
+      _sendPresence(topic, { force: true });
+    }
     return;
   }
 
@@ -461,7 +555,7 @@ function _ensure(topic, opts = {}) {
     return;
   }
 
-  _open(topic, opts);
+  _open(topic, st._opts);
 }
 
 function _close(topic) {
@@ -497,7 +591,7 @@ function _on(topic, fn) {
 
 /* ====== API pública ====== */
 
-export function ensureEmpresaWS(empresaId) {
+export function ensureEmpresaWS(empresaId, opts = {}) {
   const id = String(empresaId || '').trim();
   if (!id) return;
 
@@ -507,7 +601,7 @@ export function ensureEmpresaWS(empresaId) {
     _setCookie('empresa_id', id);
   } catch {}
 
-  _ensure(`emp:${id}`);
+  _ensure(`emp:${id}`, opts);
 }
 
 export function closeEmpresaWS(empresaId) {

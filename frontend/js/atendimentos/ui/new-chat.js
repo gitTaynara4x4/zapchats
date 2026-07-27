@@ -180,31 +180,6 @@ import { state } from '../state/store.js';
     return await r.json();
   }
 
-  async function findClienteByTelefone(e164Digits) {
-    const qs = new URLSearchParams({
-      empresa_id: String(EMPRESA_ID),
-      q: e164Digits,
-      limit: '5',
-      offset: '0',
-    });
-
-    const r = await fetch(`/api/clientes?${qs.toString()}`, { credentials: 'include' });
-
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-
-    const list = await r.json().catch(() => ({}));
-    const items = Array.isArray(list?.items) ? list.items : [];
-    const normalize = (s) => String(s || '').replace(/\D/g, '');
-    const without55 = e164Digits.startsWith('55') ? e164Digits.slice(2) : e164Digits;
-
-    return (
-      items.find((i) => {
-        const tel = normalize(i?.telefone || '');
-        return tel === e164Digits || tel === without55;
-      }) || null
-    );
-  }
-
   const TITLE_SELS = [
     '#chat-title',
     '#chat-header .title',
@@ -942,7 +917,9 @@ import { state } from '../state/store.js';
 
     if (status === 400) return toast(msg || 'Dados inválidos (nome/telefone). Corrija e tente novamente.', false, 3200);
     if (status === 401) return toast('Sessão expirada. Faça login novamente.', false, 2800);
-    if (status === 403) return toast('Você não tem permissão para criar contatos.', false, 2800);
+    if (status === 402) return toast(msg || 'Seu plano não permite criar mais contatos.', false, 3200);
+    if (status === 403) return toast(msg || 'Você não tem permissão para criar contatos.', false, 3000);
+    if (status === 404) return toast(msg || 'O WhatsApp selecionado não foi encontrado.', false, 3000);
     if (status === 409) return toast('Já existe um contato com este telefone.', false, 2800);
     if (status === 422) return toast(msg || 'Campos obrigatórios ausentes ou inválidos.', false, 3000);
     if (status === 429) return toast('Limite de criação atingido no seu plano. Tente mais tarde ou atualize o plano.', false, 3200);
@@ -1500,12 +1477,77 @@ import { state } from '../state/store.js';
         <div class="nc-drawer-title">Novo contato</div>
       </div>
 
-      <form id="ncForm" class="nc-form">
-        <input class="nc-input" id="ncName" placeholder="Nome completo" autocomplete="off">
-        <input class="nc-input" id="ncPhone" placeholder="Telefone (DDI+DDD+Número, só dígitos)">
+      <form id="ncForm" class="nc-form nc-contact-form" novalidate>
+        <div class="nc-contact-form-content">
+          <div class="nc-form-group nc-form-group--person">
+            <div class="nc-form-icon" aria-hidden="true">
+              <i class="fa fa-user"></i>
+            </div>
+
+            <div class="nc-form-fields">
+              <label class="nc-line-field" for="ncName">
+                <span class="nc-sr-only">Nome</span>
+                <input
+                  class="nc-line-input"
+                  id="ncName"
+                  type="text"
+                  placeholder="Nome"
+                  autocomplete="given-name"
+                  maxlength="80"
+                >
+              </label>
+
+              <label class="nc-line-field" for="ncSurname">
+                <span class="nc-sr-only">Sobrenome</span>
+                <input
+                  class="nc-line-input"
+                  id="ncSurname"
+                  type="text"
+                  placeholder="Sobrenome"
+                  autocomplete="family-name"
+                  maxlength="100"
+                >
+              </label>
+            </div>
+          </div>
+
+          <div class="nc-form-group nc-form-group--phone">
+            <div class="nc-form-icon" aria-hidden="true">
+              <i class="fa fa-phone"></i>
+            </div>
+
+            <div class="nc-phone-fields">
+              <label class="nc-country-field" for="ncCountry">
+                <span class="nc-field-caption">País</span>
+                <span class="nc-country-select-wrap">
+                  <select id="ncCountry" class="nc-country-select" autocomplete="country">
+                    <option value="55" selected>BR +55</option>
+                  </select>
+                  <i class="fa fa-caret-down" aria-hidden="true"></i>
+                </span>
+              </label>
+
+              <label class="nc-line-field nc-phone-number-field" for="ncPhone">
+                <span class="nc-field-caption">Número de telefone</span>
+                <input
+                  class="nc-line-input"
+                  id="ncPhone"
+                  type="tel"
+                  inputmode="numeric"
+                  placeholder="DDD + número"
+                  autocomplete="tel-national"
+                  maxlength="16"
+                >
+              </label>
+            </div>
+          </div>
+
+          <p class="nc-phone-hint">Digite somente o DDD e o número. O código do Brasil (+55) será adicionado automaticamente.</p>
+        </div>
+
         <div class="nc-form-actions">
-          <button class="nc-save" id="ncSave" type="submit">Salvar contato</button>
           <button type="button" class="nc-cancel" id="ncCancel">Cancelar</button>
+          <button class="nc-save" id="ncSave" type="submit">Salvar contato</button>
         </div>
       </form>
     `;
@@ -1515,6 +1557,13 @@ import { state } from '../state/store.js';
     $('#ncCancel')?.addEventListener('click', () => window.__NewChat?.close());
     $('#ncBack')?.addEventListener('click', buildRoot);
     $('#ncForm')?.addEventListener('submit', onSaveContact);
+
+    $('#ncPhone')?.addEventListener('input', (event) => {
+      const input = event.currentTarget;
+      const digits = onlyDigits(input?.value || '').slice(0, 13);
+
+      if (input && input.value !== digits) input.value = digits;
+    });
 
     $('#ncName')?.focus();
   }
@@ -1556,55 +1605,76 @@ import { state } from '../state/store.js';
       return;
     }
 
-    const nomeManual = String($('#ncName')?.value || '').trim();
-    const raw = onlyDigits($('#ncPhone')?.value || '');
-
+    const nome = String($('#ncName')?.value || '').trim();
+    const sobrenome = String($('#ncSurname')?.value || '').trim();
+    const nomeManual = [nome, sobrenome].filter(Boolean).join(' ').trim();
+    const countryCode = onlyDigits($('#ncCountry')?.value || '55') || '55';
+    const phoneDigits = onlyDigits($('#ncPhone')?.value || '');
+    const raw = phoneDigits.startsWith(countryCode) && phoneDigits.length >= 12
+      ? phoneDigits
+      : `${countryCode}${phoneDigits}`;
     const e164 = validatePhoneOrExplain(raw);
 
     if (!e164) return;
 
     const btnSave = $('#ncSave');
+    const originalLabel = String(btnSave?.textContent || 'Salvar contato');
+    const canonical = insert9IfNeeded(e164);
+    const inst = getSelectedInstance();
+    const controller = new AbortController();
+    let timeoutId = setTimeout(() => controller.abort(), 20000);
+    const token =
+      localStorage.getItem('token') ||
+      localStorage.getItem('access_token') ||
+      localStorage.getItem('auth_token') ||
+      '';
 
     btnSave?.setAttribute('disabled', 'disabled');
+    btnSave?.setAttribute('aria-busy', 'true');
+    if (btnSave) btnSave.textContent = 'Salvando…';
 
     try {
-      const found1 = await findClienteByTelefone(e164);
+      /*
+        O backend de /clientes/novo já trata telefone duplicado e devolve o ID
+        existente. Fazer uma busca completa antes do POST deixava o botão parado
+        quando /api/clientes demorava, dando a impressão de que nada aconteceu.
+      */
+      const payload = {
+        nome: nomeManual || 'Cliente',
+        nome_completo: nomeManual || null,
+        telefone: canonical,
+      };
 
-      if (found1?.id) {
-        window.__NewChat?.close();
-        setTimeout(() => openById(found1), 0);
-        return;
+      if (/^\d+$/.test(inst)) {
+        payload.instancia_id = Number(inst);
+      } else if (inst) {
+        payload.instance_name = inst;
       }
 
-      const with9 = insert9IfNeeded(e164);
+      const headers = {
+        'Content-Type': 'application/json',
+        'X-Empresa-Id': String(EMPRESA_ID),
+      };
 
-      if (with9 !== e164) {
-        const found2 = await findClienteByTelefone(with9);
+      if (token) headers.Authorization = `Bearer ${token}`;
 
-        if (found2?.id) {
-          window.__NewChat?.close();
-          setTimeout(() => openById(found2), 0);
-          return;
-        }
-      }
-
-      const canonical = insert9IfNeeded(e164);
       const url = '/api/clientes/novo';
-
       const rCreate = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Empresa-Id': String(EMPRESA_ID),
-        },
+        headers,
         credentials: 'include',
-        body: JSON.stringify({
-          nome: nomeManual || 'Cliente',
-          telefone: canonical,
-        }),
+        signal: controller.signal,
+        body: JSON.stringify(payload),
       });
 
       const text = await rCreate.text();
+
+      // O limite de 20 s vale somente para o POST de criação.
+      // Depois que o servidor respondeu, não podemos abortar a abertura da conversa.
+      if (timeoutId) {
+        if (timeoutId) clearTimeout(timeoutId);
+        timeoutId = null;
+      }
 
       let data = null;
 
@@ -1622,45 +1692,71 @@ import { state } from '../state/store.js';
 
       const newId = Number(data?.id) || null;
 
-      if (newId) {
-        const inst = getSelectedInstance();
-
-        const simpleCliente = ensureClienteInstance({
-          id: newId,
-          cliente_id: newId,
-          nome: nomeManual || 'Cliente',
-          telefone: canonical,
-          instancia_id: /^\d+$/.test(inst) ? Number(inst) : undefined,
-          instancia: /^\d+$/.test(inst) ? undefined : inst || undefined,
-        });
-
-        forceSelectCliente(simpleCliente);
-        window.__NewChat?.close();
-        openById(simpleCliente);
-
-        try {
-          const prof = await evoFetchProfileByNumber(canonical);
-
-          if (prof?.picture) {
-            updateHeaderPicture(prof.picture, simpleCliente);
-          }
-        } catch {}
-
+      if (!newId) {
+        toast('O servidor não devolveu o contato criado.', false, 2800);
         return;
       }
 
-      toast('Não foi possível criar/abrir o contato.', false, 2600);
+      const resolvedInstanceId = /^\d+$/.test(inst)
+        ? Number(inst)
+        : (Number(data?.instancia_id) || undefined);
+      const resolvedInstanceName = !/^\d+$/.test(inst)
+        ? (inst || data?.instance_name || undefined)
+        : (data?.instance_name || undefined);
+
+      const simpleCliente = ensureClienteInstance({
+        id: newId,
+        cliente_id: newId,
+        entity_id: newId,
+        nome: nomeManual || 'Cliente',
+        telefone: canonical,
+        instancia_id: resolvedInstanceId,
+        instancia: resolvedInstanceName,
+        instance_name: resolvedInstanceName,
+      });
+
+      forceSelectCliente(simpleCliente);
+      window.__NewChat?.close();
+
+      let opened = false;
+
+      try {
+        opened = await openById(simpleCliente);
+      } catch (openError) {
+        console.warn('[new-chat] contato salvo, mas falhou ao abrir conversa', openError);
+      }
+
+      if (!opened) {
+        toast('Contato salvo, mas a conversa não conseguiu abrir.', false, 3200);
+        return;
+      }
+
+      try {
+        const prof = await evoFetchProfileByNumber(canonical);
+
+        if (prof?.picture) {
+          updateHeaderPicture(prof.picture, simpleCliente);
+        }
+      } catch {}
     } catch (e) {
       console.error('[new-chat] create failed', e);
+
+      if (e?.name === 'AbortError') {
+        toast('O servidor demorou para salvar. Tente novamente.', false, 3200);
+        return;
+      }
 
       if (e?.status) {
         explainCreateError(e);
         return;
       }
 
-      toast('Falha ao criar contato.', false, 2400);
+      toast('Falha ao criar contato. Verifique a conexão e tente novamente.', false, 3000);
     } finally {
+      if (timeoutId) clearTimeout(timeoutId);
       btnSave?.removeAttribute('disabled');
+      btnSave?.removeAttribute('aria-busy');
+      if (btnSave) btnSave.textContent = originalLabel;
     }
   }
 

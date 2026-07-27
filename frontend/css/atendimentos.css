@@ -3,7 +3,7 @@
 @import url("/frontend/css/atendimentos/conversas.css");
 @import url("/frontend/css/atendimentos/chat.css");
 @import url("/frontend/css/atendimentos/media.css");
-@import url("/frontend/css/atendimentos/drawers.css?v=20260715-db-lazy-picker-1");
+@import url("/frontend/css/atendimentos/drawers.css?v=20260726-new-contact-wpp-design-v1");
 @import url("/frontend/css/atendimentos/modals.css");
 @import url("/frontend/css/atendimentos/composer.css");
 @import url("/frontend/css/atendimentos/perfil.css");
@@ -11,4 +11,4 @@
 @import url("/frontend/css/atendimentos/splash.css");
 @import url("/frontend/css/atendimentos/responsive.css");
 @import url("/frontend/css/atendimentos/message-actions.css");
-@import url("/frontend/css/atendimentos/topbar.css?v=20260725-presence-v1");
+@import url("/frontend/css/atendimentos/topbar.css?v=20260726-no-contact-presence-v1");

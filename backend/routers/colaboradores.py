@@ -23,7 +23,7 @@ from fastapi import (
     Response,
 )
 from pydantic import BaseModel, EmailStr, ConfigDict, Field
-from sqlalchemy import or_, func
+from sqlalchemy import or_, func, and_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from starlette.concurrency import run_in_threadpool
@@ -42,6 +42,10 @@ from backend.routers.auth import (
 
 from backend.utils.entitlements import enforce_quota
 from backend.utils.usage import usage_counts
+from backend.services.zapschat_presence import (
+    get_colaborador_presence,
+    list_company_presence,
+)
 
 router = APIRouter(prefix="/colaboradores", tags=["Colaboradores"])
 
@@ -1060,6 +1064,12 @@ class ColaboradorOut(BaseModel):
     hora_login_inicio: Optional[str] = None
     hora_login_fim: Optional[str] = None
     horario_modo: Optional[str] = None
+    last_access_at: Optional[datetime] = None
+    presence_status: str = "offline"
+    presence_updated_at: Optional[str] = None
+    presence_expires_at: Optional[str] = None
+    presence_activity_at: Optional[str] = None
+    presence_session_count: int = 0
 
     instancias_ids: list[int] = Field(default_factory=list)
     departamentos_ids: list[int] = Field(default_factory=list)
@@ -1110,7 +1120,11 @@ class ColaboradorDepartamentosUpdate(BaseModel):
 # =========================================================
 # Serialização
 # =========================================================
-def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
+def _to_out(
+    db: Session,
+    c: models.Colaborador,
+    presence: Optional[dict[str, Any]] = None,
+) -> ColaboradorOut:
     setor_nome: Optional[str] = None
 
     if getattr(c, "setor", None) is not None:
@@ -1204,8 +1218,213 @@ def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
         hora_login_inicio=c.hora_login_inicio,
         hora_login_fim=c.hora_login_fim,
         horario_modo=horario_modo_out,
+        last_access_at=getattr(c, "last_access_at", None),
+        presence_status=str((presence or {}).get("presence_status") or "offline"),
+        presence_updated_at=(presence or {}).get("presence_updated_at"),
+        presence_expires_at=(presence or {}).get("presence_expires_at"),
+        presence_activity_at=(presence or {}).get("presence_activity_at"),
+        presence_session_count=int((presence or {}).get("presence_session_count") or 0),
     )
 
+
+
+
+def _listar_departamentos_por_colaborador(
+    db: Session,
+    *,
+    empresa_id: int,
+    colaborador_ids: list[int],
+) -> dict[int, list[int]]:
+    """Busca todos os vínculos de departamentos da lista em uma única consulta."""
+    ids = [int(cid) for cid in colaborador_ids if cid is not None]
+    if not ids:
+        return {}
+
+    rows = (
+        db.query(
+            models.DepartamentoMembro.colaborador_id,
+            models.DepartamentoMembro.departamento_id,
+        )
+        .filter(
+            models.DepartamentoMembro.empresa_id == int(empresa_id),
+            models.DepartamentoMembro.colaborador_id.in_(ids),
+        )
+        .order_by(
+            models.DepartamentoMembro.colaborador_id.asc(),
+            models.DepartamentoMembro.is_primary.desc(),
+            models.DepartamentoMembro.departamento_id.asc(),
+        )
+        .all()
+    )
+
+    out: dict[int, list[int]] = {}
+    for colaborador_id, departamento_id in rows:
+        if colaborador_id is None or departamento_id is None:
+            continue
+        out.setdefault(int(colaborador_id), []).append(int(departamento_id))
+    return out
+
+
+def _listar_nomes_departamentos_fallback(
+    db: Session,
+    *,
+    empresa_id: int,
+    departamento_ids: list[int],
+) -> dict[int, str]:
+    """Resolve IDs antigos gravados em setor_id que apontam para departamentos."""
+    ids = sorted({int(dep_id) for dep_id in departamento_ids if dep_id is not None})
+    if not ids:
+        return {}
+
+    rows = (
+        db.query(models.Departamento.id, models.Departamento.nome)
+        .filter(
+            models.Departamento.empresa_id == int(empresa_id),
+            models.Departamento.id.in_(ids),
+        )
+        .all()
+    )
+    return {
+        int(dep_id): str(nome or '').strip()
+        for dep_id, nome in rows
+        if dep_id is not None and str(nome or '').strip()
+    }
+
+
+def _to_out_list_row(
+    row: Any,
+    *,
+    departamentos_ids: list[int],
+    departamento_nome_fallback: Optional[str],
+    presence: Optional[dict[str, Any]] = None,
+) -> ColaboradorOut:
+    """Serializa a listagem sem disparar consultas adicionais por colaborador."""
+    values = row._mapping if hasattr(row, '_mapping') else row
+
+    colaborador_id = int(values['id'])
+    usuario_id = values['usuario_id']
+    nome = values['colaborador_nome'] or values['usuario_nome'] or ''
+    email = values['colaborador_email'] or values['usuario_email'] or 'no-reply@local.invalid'
+    telefone = values['colaborador_telefone']
+    cargo = values['colaborador_cargo'] or values['usuario_cargo']
+
+    setor_nome = values['setor_nome'] or departamento_nome_fallback
+
+    if bool(values['colaborador_tem_avatar']):
+        avatar_url = f"/api/colaboradores/{colaborador_id}/avatar"
+    elif usuario_id and bool(values['usuario_tem_avatar']):
+        avatar_url = f"/api/usuarios/{int(usuario_id)}/avatar"
+    else:
+        avatar_url = build_avatar_url(nome, email)
+
+    force_change = str(values['login_token'] or '') == FORCE_PASSWORD_CHANGE_MARKER
+    reset_pendente = bool(values['usuario_reset_token'])
+
+    horario_modo_out = _norm_horario_modo(values['horario_modo'], default=None)
+    if not horario_modo_out:
+        if values['hora_login_inicio'] and values['hora_login_fim']:
+            horario_modo_out = 'personalizado'
+        else:
+            horario_modo_out = 'livre'
+
+    presence_value = presence or {}
+
+    return ColaboradorOut(
+        id=colaborador_id,
+        empresa_id=int(values['empresa_id']),
+        setor_id=values['setor_id'],
+        usuario_id=usuario_id,
+        nome=str(nome or ''),
+        email=str(email or 'no-reply@local.invalid'),
+        telefone=telefone,
+        cargo=cargo,
+        instancias_ids=list(values['instancias_ver'] or []),
+        departamentos_ids=list(departamentos_ids or []),
+        setor_nome=setor_nome,
+        tem_usuario=bool(usuario_id),
+        convite_pendente=bool(reset_pendente and not force_change),
+        troca_senha_pendente=bool(force_change),
+        avatar_url=avatar_url,
+        is_admin=bool(values['usuario_is_admin']),
+        hora_login_inicio=values['hora_login_inicio'],
+        hora_login_fim=values['hora_login_fim'],
+        horario_modo=horario_modo_out,
+        last_access_at=values['last_access_at'],
+        presence_status=str(presence_value.get('presence_status') or 'offline'),
+        presence_updated_at=presence_value.get('presence_updated_at'),
+        presence_expires_at=presence_value.get('presence_expires_at'),
+        presence_activity_at=presence_value.get('presence_activity_at'),
+        presence_session_count=int(presence_value.get('presence_session_count') or 0),
+    )
+
+
+def _query_lista_colaboradores(
+    db: Session,
+    *,
+    empresa_id: int,
+    q: Optional[str] = None,
+):
+    """Consulta enxuta para a tabela de equipe.
+
+    Não carrega avatar binário, permissões ou relacionamentos joined. Isso evita
+    multiplicação de linhas e reduz bastante o tráfego entre PostgreSQL e API.
+    """
+    C = models.Colaborador
+    U = models.Usuario
+    S = models.Setor
+
+    base = (
+        db.query(
+            C.id.label('id'),
+            C.empresa_id.label('empresa_id'),
+            C.setor_id.label('setor_id'),
+            C.usuario_id.label('usuario_id'),
+            C.nome.label('colaborador_nome'),
+            C.email.label('colaborador_email'),
+            C.telefone.label('colaborador_telefone'),
+            C.cargo.label('colaborador_cargo'),
+            C.instancias_ver.label('instancias_ver'),
+            C.hora_login_inicio.label('hora_login_inicio'),
+            C.hora_login_fim.label('hora_login_fim'),
+            C.horario_modo.label('horario_modo'),
+            C.login_token.label('login_token'),
+            C.last_access_at.label('last_access_at'),
+            C.avatar_data.isnot(None).label('colaborador_tem_avatar'),
+            U.nome.label('usuario_nome'),
+            U.email.label('usuario_email'),
+            U.cargo.label('usuario_cargo'),
+            U.is_admin.label('usuario_is_admin'),
+            U.reset_token.label('usuario_reset_token'),
+            U.avatar_data.isnot(None).label('usuario_tem_avatar'),
+            S.nome.label('setor_nome'),
+        )
+        .outerjoin(U, U.id == C.usuario_id)
+        .outerjoin(
+            S,
+            and_(
+                S.id == C.setor_id,
+                S.empresa_id == C.empresa_id,
+            ),
+        )
+        .filter(C.empresa_id == int(empresa_id))
+    )
+
+    term = str(q or '').strip()
+    if term:
+        like = f"%{term}%"
+        base = base.filter(
+            or_(
+                C.nome.ilike(like),
+                C.email.ilike(like),
+                C.telefone.ilike(like),
+                C.cargo.ilike(like),
+                U.nome.ilike(like),
+                U.email.ilike(like),
+                U.cargo.ilike(like),
+            )
+        )
+
+    return base.order_by(func.lower(C.nome)).all()
 
 # =========================================================
 # Rotas
@@ -1213,32 +1432,75 @@ def _to_out(db: Session, c: models.Colaborador) -> ColaboradorOut:
 @router.get("", response_model=List[ColaboradorOut])
 @router.get("/", response_model=List[ColaboradorOut])
 def listar_colaboradores(
+    response: Response,
     q: Optional[str] = None,
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
     empresa_id = _user_empresa_id(user)
 
-    base = (
-        db.query(models.Colaborador)
-        .options(joinedload(models.Colaborador.setor))
-        .filter(models.Colaborador.empresa_id == int(empresa_id))
+    started_at = datetime.now()
+    rows = _query_lista_colaboradores(
+        db,
+        empresa_id=int(empresa_id),
+        q=q,
+    )
+    after_main_query = datetime.now()
+
+    colaborador_ids = [int(row._mapping['id']) for row in rows]
+    departamentos_map = _listar_departamentos_por_colaborador(
+        db,
+        empresa_id=int(empresa_id),
+        colaborador_ids=colaborador_ids,
     )
 
-    if q:
-        like = f"%{q}%"
-        base = base.filter(
-            or_(
-                models.Colaborador.nome.ilike(like),
-                models.Colaborador.email.ilike(like),
-                models.Colaborador.telefone.ilike(like),
-                models.Colaborador.cargo.ilike(like),
-            )
+    fallback_ids = [
+        int(row._mapping['setor_id'])
+        for row in rows
+        if row._mapping['setor_id'] is not None and not row._mapping['setor_nome']
+    ]
+    departamento_nomes = _listar_nomes_departamentos_fallback(
+        db,
+        empresa_id=int(empresa_id),
+        departamento_ids=fallback_ids,
+    )
+    after_db = datetime.now()
+
+    # Uma única leitura em lote no Redis. A rota nunca faz SCAN nem uma
+    # consulta de presença por colaborador.
+    presence_map = list_company_presence(
+        int(empresa_id),
+        colaborador_ids,
+        include_offline=True,
+    )
+    after_presence = datetime.now()
+
+    output = [
+        _to_out_list_row(
+            row,
+            departamentos_ids=departamentos_map.get(int(row._mapping['id']), []),
+            departamento_nome_fallback=departamento_nomes.get(
+                int(row._mapping['setor_id'])
+            ) if row._mapping['setor_id'] is not None else None,
+            presence=presence_map.get(int(row._mapping['id'])),
         )
+        for row in rows
+    ]
 
-    rows = base.order_by(func.lower(models.Colaborador.nome)).all()
+    # Ajuda a diagnosticar proxy, banco e Redis pelo DevTools sem poluir a tela.
+    db_main_ms = (after_main_query - started_at).total_seconds() * 1000
+    db_batch_ms = (after_db - after_main_query).total_seconds() * 1000
+    presence_ms = (after_presence - after_db).total_seconds() * 1000
+    serialize_ms = (datetime.now() - after_presence).total_seconds() * 1000
+    response.headers['Server-Timing'] = (
+        f"colab_main;dur={db_main_ms:.1f}, "
+        f"colab_batch;dur={db_batch_ms:.1f}, "
+        f"presence;dur={presence_ms:.1f}, "
+        f"serialize;dur={serialize_ms:.1f}"
+    )
+    response.headers['X-ZapsChat-Colaboradores-Count'] = str(len(output))
 
-    return [_to_out(db, c) for c in rows]
+    return output
 
 
 @router.get("/{colab_id}", response_model=ColaboradorOut)
@@ -1260,7 +1522,11 @@ def obter_colaborador(
 
     _assert_mesma_empresa(c.empresa_id, empresa_id)
 
-    return _to_out(db, c)
+    return _to_out(
+        db,
+        c,
+        get_colaborador_presence(int(empresa_id), int(c.id)),
+    )
 
 
 @router.post("", response_model=ColaboradorOut, status_code=status.HTTP_201_CREATED)

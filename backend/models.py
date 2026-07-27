@@ -5,9 +5,8 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column, Integer, String, Text, DateTime, TIMESTAMP, func,
-    ForeignKey, UniqueConstraint, Boolean, LargeBinary, Index, BigInteger, text
+    ForeignKey, UniqueConstraint, Boolean, LargeBinary, Index, BigInteger, text, Computed
 )
-from sqlalchemy.schema import FetchedValue
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID, ARRAY as PG_ARRAY
 from sqlalchemy.orm import relationship, backref
 from sqlalchemy import Enum as SqlEnum
@@ -382,11 +381,15 @@ class Cliente(Base):
     nome          = Column(String, default="Cliente")
     telefone      = Column(String, nullable=False)
 
+    # Coluna GENERATED ALWAYS no PostgreSQL. O valor vem exclusivamente
+    # de ``telefone`` e nunca deve ser enviado em INSERT/UPDATE pelo ORM.
     telefone_norm = Column(
         String,
+        Computed(
+            "regexp_replace(COALESCE(telefone, ''), '\\D', '', 'g')",
+            persisted=True,
+        ),
         nullable=False,
-        server_default=FetchedValue(),
-        server_onupdate=FetchedValue(),
     )
 
     departamento  = Column(String)
@@ -396,14 +399,6 @@ class Cliente(Base):
     nome_whatsapp   = Column(String)
     is_business     = Column(Boolean, default=False)
     status_whatsapp = Column(String)
-
-    # Presença em tempo real do contato recebida da Evolution/Baileys.
-    # whatsapp_last_seen guarda o último momento em que o contato foi
-    # observado online (ou o lastSeen oficial, quando o WhatsApp o envia).
-    whatsapp_presence = Column(String(32), nullable=True)
-    whatsapp_online = Column(Boolean, nullable=False, server_default="false")
-    whatsapp_last_seen = Column(TIMESTAMP(timezone=True), nullable=True)
-    whatsapp_presence_updated_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     sobre_cliente = Column(Text)
     descricao     = Column(Text)
@@ -1158,6 +1153,10 @@ class Colaborador(Base):
 
     login_token = Column(String(20), nullable=True)
     login_token_expires_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Última vez em que o colaborador acessou o próprio ZapsChat.
+    # Não tem relação com presença/visto por último do WhatsApp.
+    last_access_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     permissoes = relationship(
         "Permissao",

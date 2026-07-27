@@ -2,249 +2,398 @@
 <html lang="pt-BR" class="has-sidebar prepaint">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Clientes – ZapsChat</title>
 
-  <!-- Shell global + auth -->
+  <script>
+    (function () {
+      try {
+        const saved = localStorage.getItem('zapschat_theme') || localStorage.getItem('theme');
+        if (saved === 'dark' || saved === 'light') {
+          document.documentElement.classList.toggle('dark', saved === 'dark');
+          document.documentElement.setAttribute('data-theme', saved);
+        }
+      } catch (_) {}
+    })();
+  </script>
+
   <script src="/frontend/js/app-base.js" defer></script>
   <script src="/frontend/js/auth.js" defer></script>
+  <script src="/frontend/js/page-guard.js" defer></script>
 
-  <!-- Ícones (FA v6) -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 
-  <!-- Anti-flash -->
   <style>
-    html.prepaint body{visibility:hidden}
-    html.prepaint[data-head-ready][data-loader-ready] body{visibility:visible}
+    html.prepaint body { visibility: hidden; }
+    html.prepaint[data-head-ready][data-loader-ready] body { visibility: visible; }
   </style>
 
-  <!-- CSS da página -->
-  <link rel="stylesheet" href="/frontend/css/clientes.css" />
+  <link rel="stylesheet" href="/frontend/css/clientes.css?v=20260726-clientes-drawer-v1" />
 </head>
-<body data-page="clientes">
-  <!-- Sidebar -->
-  <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
 
-  <main class="main">
-    <div class="section-title">
-      <h1><i class="fa fa-users title-ico"></i> Clientes</h1>
-      <div class="top-meta"><strong id="totalClientes">--</strong> clientes</div>
-    </div>
+<body data-page="clientes" class="clients-zapschat">
+  <aside id="sidebar"
+         data-src="/frontend/partials/sidebar.html"
+         data-src-mobile="/frontend/partials/sidebar-mobile.html"></aside>
 
-    <section class="filters" aria-label="Filtros de clientes">
-      <div class="row">
-        <label for="busca">Buscar:</label>
-        <input id="busca" class="input" type="search" placeholder="Nome, telefone ou tag…" autocomplete="off" />
+  <main class="main clients-page">
+    <header class="clients-top" aria-label="Cabeçalho de clientes">
+      <div class="clients-title-block">
+        <div class="clients-breadcrumb" aria-label="Caminho">
+          <strong>ZapsChat</strong>
+          <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+          <span>Relacionamento</span>
+        </div>
+
+        <h1>
+          <span class="title-folder" aria-hidden="true"><i class="fa-solid fa-address-book"></i></span>
+          <span>Clientes</span>
+        </h1>
       </div>
 
-      <div class="row">
-        <label for="select-depto">Departamento:</label>
-        <select id="select-depto" class="select">
-          <option value="">Todos</option>
-        </select>
-      </div>
+      <div class="clients-top-actions">
+        <div class="clients-total-pill" aria-label="Total de clientes exibidos">
+          <strong id="totalClientes">--</strong>
+          <span>clientes</span>
+        </div>
 
-      <div class="row">
-        <label for="select-resp">Responsável:</label>
-        <select id="select-resp" class="select">
-          <!-- preenchido via JS -->
-        </select>
-      </div>
-
-      <div class="row row-dates">
-        <label for="data_inicio">De:</label>
-        <span class="date-wrap">
-          <input type="date" id="data_inicio" class="input" />
-          <button type="button" class="chip" id="ico_data_inicio" title="Abrir calendário">
-            <i class="fa fa-calendar"></i>
-          </button>
-        </span>
-
-        <label for="data_fim">Até:</label>
-        <span class="date-wrap">
-          <input type="date" id="data_fim" class="input" />
-          <button type="button" class="chip" id="ico_data_fim" title="Abrir calendário">
-            <i class="fa fa-calendar"></i>
-          </button>
-        </span>
-
-        <button id="btn-filtrar" class="btn ghost btn-filtrar-inline" type="button">
-          <i class="fa fa-filter"></i> Filtrar
+        <button id="btnImportar" class="btn btn-soft" type="button">
+          <i class="fa-solid fa-file-import" aria-hidden="true"></i>
+          <span>Importar</span>
         </button>
 
-        <span class="spacer"></span>
+        <button id="btnExportar" class="btn btn-soft" type="button">
+          <i class="fa-solid fa-download" aria-hidden="true"></i>
+          <span>Exportar</span>
+        </button>
 
-        <div class="bulk-info" id="bulkInfo" hidden>
-          <span class="chip chip-slim">Sel.: <b id="selCount">0</b></span>
-          <button id="btnClearSel" class="btn ghost" type="button" title="Limpar seleção">Limpar</button>
+        <button id="btn-add-cliente" class="btn btn-primary" type="button">
+          <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+          <span>Novo cliente</span>
+        </button>
+      </div>
+    </header>
 
-          <button id="btnRespBulk" class="btn ghost" type="button" disabled title="Definir responsável nos selecionados">
-            <i class="fa fa-user-check"></i> Definir responsável
-          </button>
+    <section class="clients-searchbar" aria-label="Busca e filtros principais">
+      <label class="search-wrap" for="busca">
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+        <input id="busca" class="input" type="search" placeholder="Buscar por nome ou telefone..." autocomplete="off" />
+      </label>
 
-          <button id="btnDeptoBulk" class="btn ghost" type="button" disabled title="Definir departamento nos selecionados">
-            <i class="fa fa-sitemap"></i> Definir departamento
-          </button>
-        </div>
+      <div class="clients-quick-filters">
+        <select id="select-depto" class="select" aria-label="Filtrar por departamento">
+          <option value="">Todos os departamentos</option>
+        </select>
 
-        <div class="btn-group actions-right">
-          <button id="btn-add-cliente" class="btn" type="button"><i class="fa fa-user-plus"></i> Novo cliente</button>
-          <button id="btnExportar" class="btn ghost" type="button"><i class="fa fa-download"></i> Exportar</button>
-          <button id="btnImportar" class="btn ghost" type="button"><i class="fa fa-upload"></i> Importar</button>
-        </div>
+        <select id="select-resp" class="select" aria-label="Filtrar por responsável">
+          <option value="">Carregando responsáveis…</option>
+        </select>
       </div>
     </section>
 
-    <section class="box">
+    <section class="clients-filter-strip" aria-label="Período e ações de filtro">
+      <div class="period-fields">
+        <label class="compact-field" for="data_inicio">
+          <span>Cadastro de</span>
+          <span class="date-wrap">
+            <input type="date" id="data_inicio" class="input" />
+            <button type="button" class="date-trigger" id="ico_data_inicio" title="Abrir calendário" aria-label="Abrir calendário da data inicial">
+              <i class="fa-regular fa-calendar" aria-hidden="true"></i>
+            </button>
+          </span>
+        </label>
+
+        <label class="compact-field" for="data_fim">
+          <span>Até</span>
+          <span class="date-wrap">
+            <input type="date" id="data_fim" class="input" />
+            <button type="button" class="date-trigger" id="ico_data_fim" title="Abrir calendário" aria-label="Abrir calendário da data final">
+              <i class="fa-regular fa-calendar" aria-hidden="true"></i>
+            </button>
+          </span>
+        </label>
+      </div>
+
+      <div class="filter-strip-actions">
+        <button id="btn-limpar-filtros" class="btn btn-soft" type="button">
+          <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+          <span>Limpar</span>
+        </button>
+
+        <button id="btn-filtrar" class="btn btn-primary" type="button">
+          <i class="fa-solid fa-filter" aria-hidden="true"></i>
+          <span>Filtrar</span>
+        </button>
+      </div>
+
+      <div class="bulk-info" id="bulkInfo" hidden>
+        <span class="selection-pill">
+          <i class="fa-solid fa-check" aria-hidden="true"></i>
+          <b id="selCount">0</b> selecionados
+        </span>
+
+        <button id="btnClearSel" class="btn btn-quiet btn-sm" type="button" title="Limpar seleção">Limpar seleção</button>
+
+        <button id="btnRespBulk" class="btn btn-soft btn-sm" type="button" disabled title="Definir responsável nos selecionados">
+          <i class="fa-solid fa-user-check" aria-hidden="true"></i>
+          <span>Responsável</span>
+        </button>
+
+        <button id="btnDeptoBulk" class="btn btn-soft btn-sm" type="button" disabled title="Definir departamento nos selecionados">
+          <i class="fa-solid fa-sitemap" aria-hidden="true"></i>
+          <span>Departamento</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="panel clients-list-panel" aria-labelledby="clients-list-title">
+      <div class="panel-head">
+        <div>
+          <h2 id="clients-list-title">Lista de clientes</h2>
+          <p>Selecione um contato para abrir os detalhes ou use as ações rápidas.</p>
+        </div>
+      </div>
+
       <div class="table-wrap">
-        <table>
+        <table class="clients-table" aria-label="Lista de clientes">
           <thead>
             <tr>
-              <th class="col-select" style="width:38px">
-                <label for="checkAll" class="sr-only">Selecionar todos</label>
+              <th class="col-select">
+                <label for="checkAll" class="sr-only">Selecionar todos os clientes carregados</label>
                 <input type="checkbox" id="checkAll" />
               </th>
               <th>Nome</th>
               <th>Telefone</th>
               <th>Departamento</th>
               <th>Responsável</th>
-              <th>Data Cadastro</th>
-              <th style="width:200px">Ações</th>
+              <th>Cadastro</th>
+              <th class="col-actions">Ações</th>
             </tr>
           </thead>
           <tbody id="corpo-tabela-clientes"></tbody>
         </table>
       </div>
 
-      <div id="empty-state" class="empty">
-        <span><i class="fa fa-inbox" style="margin-right:.5rem"></i>Nenhum cliente encontrado para os filtros.</span>
+      <div id="empty-state" class="empty-state">
+        <span class="empty-state-icon"><i class="fa-regular fa-address-book" aria-hidden="true"></i></span>
+        <strong>Nenhum cliente encontrado</strong>
+        <p>Altere os filtros ou cadastre o primeiro cliente.</p>
       </div>
 
       <div class="loadmore-wrap">
-        <button id="btnMore" class="btn ghost" type="button">
-          <i class="fa fa-chevron-down" aria-hidden="true"></i>
-          Carregar mais
+        <button id="btnMore" class="btn btn-soft" type="button">
+          <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+          <span>Carregar mais</span>
         </button>
       </div>
     </section>
   </main>
 
-  <!-- Modal Exportar -->
+  <!-- Modal: Exportar -->
   <div id="exp-backdrop" class="modal-backdrop" aria-hidden="true">
-    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="exp-title">
-      <header id="exp-title">Formato do download</header>
-      <div class="body">
-        <div class="row">
-          <label><input type="radio" name="expfmt" value="csv" checked> CSV (Excel/Google Sheets)</label>
-          <label><input type="radio" name="expfmt" value="xlsx"> Excel (.xlsx)</label>
-          <label><input type="radio" name="expfmt" value="pdf"> PDF (relatório)</label>
+    <section class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="exp-title">
+      <header class="modal-head">
+        <div>
+          <span class="modal-kicker">Exportação</span>
+          <h2 id="exp-title">Formato do download</h2>
+          <p>Escolha o tipo de arquivo que deseja gerar.</p>
         </div>
-        <div class="row">
-          <label class="check">
-            <input type="checkbox" id="expOnlySel" disabled>
-            <span>Exportar apenas os selecionados (<b id="selCount2">0</b>)</span>
+        <button class="modal-close" id="expClose" aria-label="Fechar" type="button">
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+      </header>
+
+      <div class="modal-body">
+        <div class="option-list" role="radiogroup" aria-label="Formato da exportação">
+          <label class="option-card">
+            <input type="radio" name="expfmt" value="csv" checked>
+            <span class="option-icon"><i class="fa-solid fa-file-csv" aria-hidden="true"></i></span>
+            <span><strong>CSV</strong><small>Compatível com Excel e Google Sheets</small></span>
+          </label>
+
+          <label class="option-card">
+            <input type="radio" name="expfmt" value="xlsx">
+            <span class="option-icon"><i class="fa-solid fa-file-excel" aria-hidden="true"></i></span>
+            <span><strong>Excel</strong><small>Planilha no formato .xlsx</small></span>
+          </label>
+
+          <label class="option-card">
+            <input type="radio" name="expfmt" value="pdf">
+            <span class="option-icon"><i class="fa-solid fa-file-pdf" aria-hidden="true"></i></span>
+            <span><strong>PDF</strong><small>Relatório pronto para consulta ou impressão</small></span>
           </label>
         </div>
+
+        <label class="check-line">
+          <input type="checkbox" id="expOnlySel" disabled>
+          <span>Exportar somente os clientes selecionados (<b id="selCount2">0</b>)</span>
+        </label>
       </div>
-      <footer>
-        <button class="btn ghost" id="expCancel" type="button">Fechar</button>
-        <button class="btn" id="expOk" type="button"><i class="fa fa-download"></i> Baixar</button>
+
+      <footer class="modal-foot">
+        <button class="btn btn-secondary" id="expCancel" type="button">Cancelar</button>
+        <button class="btn btn-primary" id="expOk" type="button">
+          <i class="fa-solid fa-download" aria-hidden="true"></i>
+          Baixar arquivo
+        </button>
       </footer>
-      <button class="modal-close" id="expClose" aria-label="Fechar" type="button">&times;</button>
     </section>
   </div>
 
-  <!-- Modal Importar -->
+  <!-- Modal: Importar -->
   <div id="imp-backdrop" class="modal-backdrop" aria-hidden="true">
-    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="imp-title">
-      <header id="imp-title">Importar clientes</header>
-      <div class="body">
-        <p class="muted">Aceita <b>.csv</b>, <b>.xlsx</b> ou <b>.txt</b> (um telefone por linha).</p>
-        <div class="row">
-          <div class="pill-note">
-            <span>Cabeçalho opcional:</span>
-            <code>nome;telefone;departamento;sobre_cliente</code>
+    <section class="modal modal-md" role="dialog" aria-modal="true" aria-labelledby="imp-title">
+      <header class="modal-head">
+        <div>
+          <span class="modal-kicker">Importação</span>
+          <h2 id="imp-title">Importar clientes</h2>
+          <p>Envie uma planilha ou uma lista de telefones para criar vários clientes.</p>
+        </div>
+        <button class="modal-close" id="impClose" aria-label="Fechar" type="button">
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+      </header>
+
+      <div class="modal-body">
+        <div class="import-note">
+          <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+          <div>
+            <strong>Formatos aceitos</strong>
+            <p>Arquivos <b>.csv</b>, <b>.xlsx</b> ou <b>.txt</b>. Em TXT, use um telefone por linha.</p>
           </div>
         </div>
-        <div class="row">
+
+        <div class="template-note">
+          <span>Cabeçalho opcional</span>
+          <code>nome;telefone;departamento;sobre_cliente</code>
+        </div>
+
+        <div class="file-picker-row">
           <input type="file" id="impFile" accept=".csv,.xlsx,.txt" hidden>
-          <button id="impPick" class="btn" type="button"><i class="fa-solid fa-file-arrow-up"></i> Escolher arquivo</button>
+          <button id="impPick" class="btn btn-secondary" type="button">
+            <i class="fa-solid fa-file-arrow-up" aria-hidden="true"></i>
+            Escolher arquivo
+          </button>
           <span id="impFileName" class="file-name">Nenhum arquivo escolhido</span>
         </div>
-        <div class="row check-row">
-          <label class="check">
-            <input type="checkbox" id="impSobrescrever">
-            <span>Atualizar dados se o telefone já existir</span>
-          </label>
-        </div>
-        <div class="row">
-          <span class="muted">Baixar modelo:</span>
+
+        <label class="check-line">
+          <input type="checkbox" id="impSobrescrever">
+          <span>Atualizar os dados quando o telefone já existir</span>
+        </label>
+
+        <div class="download-models">
+          <span>Baixar modelo:</span>
           <div class="btn-group">
-            <button type="button" class="btn ghost" data-modelo="csv">CSV</button>
-            <button type="button" class="btn ghost" data-modelo="xlsx">XLSX</button>
-            <button type="button" class="btn ghost" data-modelo="txt">TXT</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-modelo="csv">CSV</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-modelo="xlsx">XLSX</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-modelo="txt">TXT</button>
           </div>
         </div>
       </div>
-      <footer>
-        <button class="btn ghost" id="impCancel" type="button">Fechar</button>
-        <button class="btn" id="impOk" type="button"><i class="fa fa-upload"></i> Enviar</button>
+
+      <footer class="modal-foot">
+        <button class="btn btn-secondary" id="impCancel" type="button">Cancelar</button>
+        <button class="btn btn-primary" id="impOk" type="button">
+          <i class="fa-solid fa-upload" aria-hidden="true"></i>
+          Enviar arquivo
+        </button>
       </footer>
-      <button class="modal-close" id="impClose" aria-label="Fechar" type="button">&times;</button>
     </section>
   </div>
 
-  <!-- Modal Definir Responsável -->
+  <!-- Modal: Responsável em massa -->
   <div id="resp-backdrop" class="modal-backdrop" aria-hidden="true">
-    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="resp-title">
-      <header id="resp-title">Definir responsável</header>
-      <div class="body">
-        <p class="muted">Escolha um colaborador para ser o responsável dos clientes selecionados ou deixe vazio para <b>remover</b> o responsável.</p>
-        <div class="row">
-          <label for="selectRespModal">Responsável:</label>
+    <section class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="resp-title">
+      <header class="modal-head">
+        <div>
+          <span class="modal-kicker">Ação em massa</span>
+          <h2 id="resp-title">Definir responsável</h2>
+          <p>A alteração será aplicada a todos os clientes selecionados.</p>
+        </div>
+        <button class="modal-close" id="respClose" aria-label="Fechar" type="button">
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+      </header>
+
+      <div class="modal-body">
+        <p class="modal-helper">Deixe o campo vazio para remover o responsável atual.</p>
+        <div class="field-group">
+          <label for="selectRespModal">Responsável</label>
           <select id="selectRespModal" class="select"></select>
         </div>
       </div>
-      <footer>
-        <button class="btn ghost" id="respCancel" type="button">Fechar</button>
-        <button class="btn" id="respOk" type="button"><i class="fa fa-user-check"></i> Aplicar</button>
+
+      <footer class="modal-foot">
+        <button class="btn btn-secondary" id="respCancel" type="button">Cancelar</button>
+        <button class="btn btn-primary" id="respOk" type="button">
+          <i class="fa-solid fa-user-check" aria-hidden="true"></i>
+          Aplicar
+        </button>
       </footer>
-      <button class="modal-close" id="respClose" aria-label="Fechar" type="button">&times;</button>
     </section>
   </div>
 
-  <!-- Modal Definir Departamento -->
+  <!-- Modal: Departamento em massa -->
   <div id="depto-backdrop" class="modal-backdrop" aria-hidden="true">
-    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="depto-title">
-      <header id="depto-title">Definir departamento</header>
-      <div class="body">
-        <p class="muted">Escolha um departamento para os clientes selecionados ou deixe vazio para <b>remover</b> o departamento.</p>
-        <div class="row">
-          <label for="selectDeptoModal">Departamento:</label>
+    <section class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="depto-title">
+      <header class="modal-head">
+        <div>
+          <span class="modal-kicker">Ação em massa</span>
+          <h2 id="depto-title">Definir departamento</h2>
+          <p>A alteração será aplicada a todos os clientes selecionados.</p>
+        </div>
+        <button class="modal-close" id="deptoClose" aria-label="Fechar" type="button">
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+      </header>
+
+      <div class="modal-body">
+        <p class="modal-helper">Deixe o campo vazio para remover o departamento atual.</p>
+        <div class="field-group">
+          <label for="selectDeptoModal">Departamento</label>
           <select id="selectDeptoModal" class="select"></select>
         </div>
       </div>
-      <footer>
-        <button class="btn ghost" id="deptoCancel" type="button">Fechar</button>
-        <button class="btn" id="deptoOk" type="button"><i class="fa fa-sitemap"></i> Aplicar</button>
+
+      <footer class="modal-foot">
+        <button class="btn btn-secondary" id="deptoCancel" type="button">Cancelar</button>
+        <button class="btn btn-primary" id="deptoOk" type="button">
+          <i class="fa-solid fa-sitemap" aria-hidden="true"></i>
+          Aplicar
+        </button>
       </footer>
-      <button class="modal-close" id="deptoClose" aria-label="Fechar" type="button">&times;</button>
     </section>
   </div>
 
-  <!-- Modal Novo Cliente -->
+  <!-- Modal: Novo / visualizar / editar cliente -->
   <div id="novo-backdrop" class="modal-backdrop" aria-hidden="true">
-    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="novo-title">
-      <header id="novo-title">Novo cliente</header>
+    <section class="modal modal-client" role="dialog" aria-modal="true" aria-labelledby="novo-title">
+      <header class="modal-head client-modal-head">
+        <div>
+          <span class="modal-kicker">Cadastro de cliente</span>
+          <h2 id="novo-title">Novo cliente</h2>
+          <p>Preencha os dados principais e, quando necessário, complete as demais informações.</p>
+        </div>
+        <button class="modal-close" id="novoClose" aria-label="Fechar" type="button">
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+      </header>
 
-      <div class="body">
+      <div class="modal-body client-modal-body">
         <div class="cli-sections">
-
-          <section class="cli-section">
-            <button type="button" class="cli-section-header cli-section-toggle">
-              <span>Dados principais</span>
-              <i class="fa fa-chevron-down cli-section-icon" aria-hidden="true"></i>
+          <section class="cli-section cli-section--wide">
+            <button type="button" class="cli-section-header cli-section-toggle" aria-expanded="false">
+              <span class="cli-section-title">
+                <i class="fa-regular fa-user" aria-hidden="true"></i>
+                <span><strong>Dados principais</strong><small>Identificação, atendimento e observações</small></span>
+              </span>
+              <i class="fa-solid fa-chevron-down cli-section-icon" aria-hidden="true"></i>
             </button>
+
             <div class="cli-section-body">
               <div class="row">
                 <label for="novoNome">Nome</label>
@@ -258,8 +407,9 @@
 
               <div class="row">
                 <label for="novoDepto">Departamento</label>
-                <input id="novoDepto" class="input" type="text" placeholder="Ex.: Comercial" list="novoDeptoList" autocomplete="off">
-                <datalist id="novoDeptoList"></datalist>
+                <select id="novoDepto" class="select">
+                  <option value="">— Sem departamento —</option>
+                </select>
               </div>
 
               <div class="row">
@@ -267,20 +417,24 @@
                 <select id="novoColab" class="select"></select>
               </div>
 
-              <div class="row">
+              <div class="row field-wide">
                 <label for="novoSobre">Sobre o cliente</label>
-                <textarea id="novoSobre" class="input" rows="3" placeholder="Observações importantes, preferências, etc."></textarea>
+                <textarea id="novoSobre" class="input" rows="3" placeholder="Observações importantes, preferências e informações de atendimento."></textarea>
               </div>
             </div>
           </section>
 
           <section class="cli-section">
-            <button type="button" class="cli-section-header cli-section-toggle">
-              <span>Documentos e contato</span>
-              <i class="fa fa-chevron-down cli-section-icon" aria-hidden="true"></i>
+            <button type="button" class="cli-section-header cli-section-toggle" aria-expanded="false">
+              <span class="cli-section-title">
+                <i class="fa-regular fa-id-card" aria-hidden="true"></i>
+                <span><strong>Documentos e contato</strong><small>Dados pessoais e canais adicionais</small></span>
+              </span>
+              <i class="fa-solid fa-chevron-down cli-section-icon" aria-hidden="true"></i>
             </button>
+
             <div class="cli-section-body">
-              <div class="row">
+              <div class="row field-wide">
                 <label for="cliNomeCompleto">Nome completo</label>
                 <input id="cliNomeCompleto" class="input" type="text" placeholder="Nome completo do cliente">
               </div>
@@ -295,12 +449,12 @@
                 <input id="cliRg" class="input" type="text" placeholder="RG">
               </div>
 
-              <div class="row">
+              <div class="row field-wide">
                 <label for="cliEmail">E-mail</label>
                 <input id="cliEmail" class="input" type="email" placeholder="email@exemplo.com">
               </div>
 
-              <div class="row">
+              <div class="row field-wide">
                 <label for="cliWebsite">Website</label>
                 <input id="cliWebsite" class="input" type="url" placeholder="https://...">
               </div>
@@ -308,42 +462,45 @@
           </section>
 
           <section class="cli-section">
-            <button type="button" class="cli-section-header cli-section-toggle">
-              <span>WhatsApp</span>
-              <i class="fa fa-chevron-down cli-section-icon" aria-hidden="true"></i>
+            <button type="button" class="cli-section-header cli-section-toggle" aria-expanded="false">
+              <span class="cli-section-title">
+                <i class="fa-brands fa-whatsapp" aria-hidden="true"></i>
+                <span><strong>WhatsApp</strong><small>Informações sincronizadas do contato</small></span>
+              </span>
+              <i class="fa-solid fa-chevron-down cli-section-icon" aria-hidden="true"></i>
             </button>
+
             <div class="cli-section-body">
-              <div class="row">
+              <div class="row field-wide">
                 <label for="cliNomeWhatsapp">Nome no WhatsApp</label>
-                <input id="cliNomeWhatsapp" class="input" type="text" placeholder="Nome que aparece no WhatsApp">
+                <input id="cliNomeWhatsapp" class="input" type="text" placeholder="Nome exibido no WhatsApp">
               </div>
 
-              <div class="row">
+              <div class="row field-wide">
                 <label for="cliStatusWhatsapp">Status no WhatsApp</label>
-                <input id="cliStatusWhatsapp" class="input" type="text" placeholder="Ex.: Disponível, Em atendimento, etc.">
+                <input id="cliStatusWhatsapp" class="input" type="text" placeholder="Ex.: Disponível">
               </div>
 
-              <div class="row">
+              <div class="row field-wide">
                 <label for="cliDescricao">Descrição / observações gerais</label>
-                <textarea id="cliDescricao" class="input" rows="3" placeholder="Descrição mais longa, notas internas, etc."></textarea>
+                <textarea id="cliDescricao" class="input" rows="3" placeholder="Descrição mais longa e notas internas."></textarea>
               </div>
             </div>
           </section>
 
-          <section class="cli-section">
-            <button type="button" class="cli-section-header cli-section-toggle">
-              <span>Endereço</span>
-              <i class="fa fa-chevron-down cli-section-icon" aria-hidden="true"></i>
+          <section class="cli-section cli-section--wide">
+            <button type="button" class="cli-section-header cli-section-toggle" aria-expanded="false">
+              <span class="cli-section-title">
+                <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+                <span><strong>Endereço</strong><small>Localização e dados de entrega</small></span>
+              </span>
+              <i class="fa-solid fa-chevron-down cli-section-icon" aria-hidden="true"></i>
             </button>
-            <div class="cli-section-body">
+
+            <div class="cli-section-body address-grid">
               <div class="row">
                 <label for="cliCep">CEP</label>
                 <input id="cliCep" class="input" type="text" placeholder="Somente números">
-              </div>
-
-              <div class="row">
-                <label for="cliEndereco">Endereço</label>
-                <input id="cliEndereco" class="input" type="text" placeholder="Rua, avenida, etc.">
               </div>
 
               <div class="row">
@@ -351,9 +508,14 @@
                 <input id="cliNumero" class="input" type="text" placeholder="Número">
               </div>
 
+              <div class="row field-wide">
+                <label for="cliEndereco">Endereço</label>
+                <input id="cliEndereco" class="input" type="text" placeholder="Rua, avenida, praça...">
+              </div>
+
               <div class="row">
                 <label for="cliComplemento">Complemento</label>
-                <input id="cliComplemento" class="input" type="text" placeholder="Apto, bloco, sala, etc.">
+                <input id="cliComplemento" class="input" type="text" placeholder="Apto, bloco ou sala">
               </div>
 
               <div class="row">
@@ -368,29 +530,33 @@
 
               <div class="row">
                 <label for="cliEstado">Estado</label>
-                <input id="cliEstado" class="input" type="text" placeholder="UF">
+                <input id="cliEstado" class="input" type="text" placeholder="UF" maxlength="2">
               </div>
             </div>
           </section>
 
           <section class="cli-section">
-            <button type="button" class="cli-section-header cli-section-toggle">
-              <span>Dados pessoais</span>
-              <i class="fa fa-chevron-down cli-section-icon" aria-hidden="true"></i>
+            <button type="button" class="cli-section-header cli-section-toggle" aria-expanded="false">
+              <span class="cli-section-title">
+                <i class="fa-regular fa-calendar" aria-hidden="true"></i>
+                <span><strong>Dados pessoais</strong><small>Informações complementares do contato</small></span>
+              </span>
+              <i class="fa-solid fa-chevron-down cli-section-icon" aria-hidden="true"></i>
             </button>
+
             <div class="cli-section-body">
-              <div class="row">
+              <div class="row field-wide">
                 <label for="cliGenero">Gênero</label>
-                <input id="cliGenero" class="input" type="text" placeholder="Ex.: Masculino, Feminino, Outro...">
+                <input id="cliGenero" class="input" type="text" placeholder="Ex.: Feminino, masculino, outro...">
               </div>
 
-              <div class="row">
+              <div class="row field-wide">
                 <label for="cliDataNascimento">Data de nascimento</label>
                 <input id="cliDataNascimento" class="input" type="date">
               </div>
 
-              <div class="row check-row">
-                <label class="check" for="cliIsBusiness">
+              <div class="row check-row field-wide">
+                <label class="check-line" for="cliIsBusiness">
                   <input type="checkbox" id="cliIsBusiness">
                   <span>Conta comercial / empresa</span>
                 </label>
@@ -399,39 +565,43 @@
           </section>
 
           <section class="cli-section">
-            <button type="button" class="cli-section-header cli-section-toggle">
-              <span>Informações do sistema</span>
-              <i class="fa fa-chevron-down cli-section-icon" aria-hidden="true"></i>
+            <button type="button" class="cli-section-header cli-section-toggle" aria-expanded="false">
+              <span class="cli-section-title">
+                <i class="fa-solid fa-database" aria-hidden="true"></i>
+                <span><strong>Informações do sistema</strong><small>Identificador e data de criação</small></span>
+              </span>
+              <i class="fa-solid fa-chevron-down cli-section-icon" aria-hidden="true"></i>
             </button>
+
             <div class="cli-section-body">
-              <div class="row">
+              <div class="row field-wide">
                 <label for="cliId">ID do cliente</label>
                 <input id="cliId" class="input" type="text" readonly>
               </div>
 
-              <div class="row">
+              <div class="row field-wide">
                 <label for="cliDataCadastro">Data de cadastro</label>
                 <input id="cliDataCadastro" class="input" type="text" readonly>
               </div>
             </div>
           </section>
-
         </div>
       </div>
 
-      <footer>
-        <button class="btn ghost" id="novoCancel" type="button">Fechar</button>
-        <button class="btn" id="novoOk" type="button"><i class="fa fa-floppy-disk"></i> Criar</button>
+      <footer class="modal-foot">
+        <button class="btn btn-secondary" id="novoCancel" type="button">Cancelar</button>
+        <button class="btn btn-primary" id="novoOk" type="button">
+          <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+          Criar cliente
+        </button>
       </footer>
-
-      <button class="modal-close" id="novoClose" aria-label="Fechar" type="button">&times;</button>
     </section>
   </div>
 
   <div id="toast" role="status" aria-live="polite"></div>
 
-  <script type="module" src="/frontend/js/pages/clientes.js" defer></script>
-  <script src="/frontend/js/pages/cliente-editar.js" defer></script>
+  <script type="module" src="/frontend/js/pages/clientes.js?v=20260726-clientes-fast-load-v1" defer></script>
+  <script src="/frontend/js/pages/cliente-editar.js?v=20260726-clientes-drawer-v1" defer></script>
   <script src="/frontend/js/help/help-clientes.js?v=20260708-clientes-tour-responsive-final" defer></script>
 </body>
 </html>

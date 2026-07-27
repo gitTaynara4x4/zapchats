@@ -14,7 +14,10 @@
   const EMPRESA_ID = Number(LS.getItem('empresa_id') || '') || null;
 
   const MAX_LOCAL = 400;
-  const PAGE = { limit: 20, offset: 0, loading: false, done: false };
+  const CLIENT_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+  const META_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+  const PAGE = { limit: 20, offset: 0, loading: false, done: false, total: 0, totalExact: false };
+  let totalRefreshSeq = 0;
 
   let _editorLoading = null;
   function ensureClienteEditorLoaded(){
@@ -23,7 +26,7 @@
 
     _editorLoading = new Promise((resolve)=>{
       const s = document.createElement('script');
-      s.src = '/frontend/js/pages/cliente-editar.js';
+      s.src = '/frontend/js/pages/cliente-editar.js?v=20260726-clientes-funcional-v3';
       s.async = true;
       s.onload = ()=> resolve(true);
       s.onerror = ()=> {
@@ -92,13 +95,52 @@
     return data;
   }
 
+  async function apiUpload(path, formData){
+    const r = await authFetch(withEmpresaIdQuery(path), {
+      method:'POST',
+      body: formData
+    });
+    const data = await parseMaybeJSON(r);
+    if (!r.ok) throwHTTP(r, data);
+    return data;
+  }
+
+  function filenameFromDisposition(value, fallback){
+    const raw = String(value || '');
+    const utf = raw.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf?.[1]){
+      try { return decodeURIComponent(utf[1].replace(/["']/g, '')); } catch {}
+    }
+    const normal = raw.match(/filename="?([^";]+)"?/i);
+    return normal?.[1]?.trim() || fallback;
+  }
+
+  async function downloadApiFile(path, fallbackName){
+    const r = await authFetch(withEmpresaIdQuery(path));
+    if (!r.ok){
+      const data = await parseMaybeJSON(r);
+      throwHTTP(r, data);
+    }
+    const blob = await r.blob();
+    const name = filenameFromDisposition(r.headers.get('content-disposition'), fallbackName);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=> URL.revokeObjectURL(url), 1500);
+  }
+
   const busca        = $('#busca');
   const selectDepto  = $('#select-depto');
   const selectResp   = $('#select-resp');
   const dataInicio   = $('#data_inicio');
   const dataFim      = $('#data_fim');
-  const btnFiltrar   = $('#btn-filtrar');
-  const btnAdd       = $('#btn-add-cliente');
+  const btnFiltrar      = $('#btn-filtrar');
+  const btnLimparFiltros = $('#btn-limpar-filtros');
+  const btnAdd          = $('#btn-add-cliente');
   const btnExp       = $('#btnExportar');
   const btnImp       = $('#btnImportar');
 
@@ -128,6 +170,7 @@
   const impFile      = $('#impFile');
   const impPick      = $('#impPick');
   const impFileName  = $('#impFileName');
+  const impSobrescrever = $('#impSobrescrever');
 
   const respModal       = $('#resp-backdrop');
   const respOk          = $('#respOk');
@@ -145,12 +188,34 @@
   const novoNome      = $('#novoNome');
   const novoTel       = $('#novoTel');
   const novoDepto     = $('#novoDepto');
-  const novoDeptoList = $('#novoDeptoList');
   const novoColab     = $('#novoColab');
   const novoSobre     = $('#novoSobre');
   const novoOk        = $('#novoOk');
   const novoCancel    = $('#novoCancel');
   const novoClose     = $('#novoClose');
+  const cliId          = $('#cliId');
+  const cliDataCadastro = $('#cliDataCadastro');
+
+  const extraFields = {
+    cpf_cnpj:        $('#cliCpfCnpj'),
+    rg:              $('#cliRg'),
+    email:           $('#cliEmail'),
+    nome_whatsapp:   $('#cliNomeWhatsapp'),
+    status_whatsapp: $('#cliStatusWhatsapp'),
+    descricao:       $('#cliDescricao'),
+    website:         $('#cliWebsite'),
+    nome_completo:   $('#cliNomeCompleto'),
+    cep:             $('#cliCep'),
+    endereco:        $('#cliEndereco'),
+    numero:          $('#cliNumero'),
+    complemento:     $('#cliComplemento'),
+    bairro:          $('#cliBairro'),
+    cidade:          $('#cliCidade'),
+    estado:          $('#cliEstado'),
+    genero:          $('#cliGenero'),
+    data_nascimento: $('#cliDataNascimento'),
+    is_business:     $('#cliIsBusiness')
+  };
 
   const toastEl = $('#toast');
 
@@ -251,9 +316,14 @@
 
   function loadCache(){
     try{
-      const raw = LS.getItem(cacheKey());
+      const key = cacheKey();
+      const raw = LS.getItem(key);
       if (!raw) return null;
-      const { items } = JSON.parse(raw);
+      const { items, at } = JSON.parse(raw);
+      if (!Number(at) || (Date.now() - Number(at)) > CLIENT_CACHE_MAX_AGE_MS){
+        LS.removeItem(key);
+        return null;
+      }
       return Array.isArray(items) ? items : null;
     }catch{
       return null;
@@ -269,6 +339,50 @@
       }
       rm.forEach(k => LS.removeItem(k));
     }catch{}
+  }
+
+  function metaCacheKey(kind){
+    return `clientes:meta:v1:${EMPRESA_ID || 0}:${kind}`;
+  }
+
+  function saveMetaCache(kind, items){
+    try{
+      LS.setItem(metaCacheKey(kind), JSON.stringify({ at: Date.now(), items }));
+    }catch{}
+  }
+
+  function loadMetaCache(kind){
+    try{
+      const raw = LS.getItem(metaCacheKey(kind));
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Number(parsed?.at) || (Date.now() - Number(parsed.at)) > META_CACHE_MAX_AGE_MS){
+        LS.removeItem(metaCacheKey(kind));
+        return [];
+      }
+      return Array.isArray(parsed?.items) ? parsed.items : [];
+    }catch{
+      return [];
+    }
+  }
+
+  function primeMetadataFromCache(){
+    const setores = loadMetaCache('setores');
+    const responsaveis = loadMetaCache('responsaveis');
+
+    if (setores.length){
+      state.setores = setores
+        .map(s => ({ id: Number(s.id), nome: String(s.nome || '').trim() }))
+        .filter(s => Number.isFinite(s.id) && s.id > 0 && s.nome);
+      renderSetores();
+    }
+
+    if (responsaveis.length){
+      state.responsaveis = responsaveis
+        .map(r => ({ id: Number(r.id), nome: String(r.nome || '').trim() || '(sem nome)' }))
+        .filter(r => Number.isFinite(r.id) && r.id > 0);
+      renderResponsaveis();
+    }
   }
 
   function hydrateDepartamentoNome(arr){
@@ -302,13 +416,18 @@
   }
 
   async function loadSetores(){
-    const tries = ['/api/atendimento/clientes/departamentos', '/api/departamentos'];
+    const tries = [
+      '/api/clientes/departamentos-resumo',
+      '/api/atendimento/clientes/departamentos',
+      '/api/departamentos'
+    ];
 
     for (const url of tries){
       try{
         const data = await apiGet(url);
+        const hasCollection = Array.isArray(data) || Array.isArray(data?.items) || Array.isArray(data?.data);
+        if (!hasCollection) continue;
         const arr = Array.isArray(data) ? data : (data?.items || data?.data || []);
-        if (!arr?.length) continue;
 
         state.setores = arr.map(s => ({
           id: Number(s.id ?? s.dep_id ?? s.depto_id ?? s.value ?? s.ID),
@@ -316,6 +435,7 @@
         })).filter(s => s.id != null && s.nome);
 
         renderSetores();
+        saveMetaCache('setores', state.setores);
 
         if (state.clientes.length){
           hydrateDepartamentoNome(state.clientes);
@@ -335,6 +455,7 @@
       const items = Array.isArray(data) ? data : (data?.items || []);
       state.responsaveis = items.map(x => ({ id: Number(x.id), nome: x.nome || '(sem nome)' }));
       renderResponsaveis();
+      saveMetaCache('responsaveis', state.responsaveis);
 
       if (state.clientes.length){
         hydrateColaboradorNome(state.clientes);
@@ -361,13 +482,12 @@
       state.setores.forEach(s => selectDeptoModal.appendChild(new Option(s.nome, String(s.id))));
     }
 
-    if (novoDeptoList){
-      novoDeptoList.innerHTML = '';
-      state.setores.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = s.nome;
-        novoDeptoList.appendChild(opt);
-      });
+    if (novoDepto){
+      const current = String(novoDepto.value || '');
+      novoDepto.innerHTML = '';
+      novoDepto.appendChild(new Option('— Sem departamento —', ''));
+      state.setores.forEach(s => novoDepto.appendChild(new Option(s.nome, String(s.id))));
+      novoDepto.value = current;
     }
   }
 
@@ -392,17 +512,69 @@
     }
   }
 
-  function apiUrlForPage(){
+  function apiUrlForPage({
+    limit = PAGE.limit,
+    offset = PAGE.offset,
+    includeTotal = false
+  } = {}){
     const p = new URLSearchParams();
     if (state.filtro.q)  p.set('q', state.filtro.q);
+    if (state.filtro.deptoId) p.set('departamento_id', String(state.filtro.deptoId));
     if (state.filtro.di) p.set('data_inicio', state.filtro.di);
     if (state.filtro.df) p.set('data_fim', state.filtro.df);
     if (state.filtro.respId !== '' && state.filtro.respId != null){
       p.set('colaborador_id', String(state.filtro.respId));
     }
-    p.set('limit', String(PAGE.limit));
-    p.set('offset', String(PAGE.offset));
+    p.set('limit', String(limit));
+    p.set('offset', String(offset));
+    p.set('include_total', includeTotal ? 'true' : 'false');
     return '/api/clientes' + (p.toString() ? `?${p}` : '');
+  }
+
+  function currentFilterSignature(){
+    return JSON.stringify({
+      q: state.filtro.q || '',
+      d: state.filtro.deptoId || '',
+      di: state.filtro.di || '',
+      df: state.filtro.df || '',
+      r: state.filtro.respId ?? ''
+    });
+  }
+
+  async function refreshExactTotal(){
+    const seq = ++totalRefreshSeq;
+    const signature = currentFilterSignature();
+
+    try{
+      const res = await apiGet(apiUrlForPage({ limit: 1, offset: 0, includeTotal: true }));
+      if (seq !== totalRefreshSeq || signature !== currentFilterSignature()) return;
+
+      const total = Number(res?.total);
+      if (!Number.isFinite(total) || total < 0) return;
+
+      PAGE.total = total;
+      PAGE.totalExact = true;
+      if (totalEl) totalEl.textContent = String(total);
+    }catch(e){
+      // A contagem exata é secundária: a lista já está disponível para uso.
+      console.debug('Contagem total de clientes não atualizada.', e);
+    }
+  }
+
+  function showTableLoading(){
+    if (!tbody || PAGE.offset !== 0 || state.clientes.length) return;
+    if (emptyState) emptyState.style.display = 'none';
+    tbody.innerHTML = `
+      <tr class="clients-loading-row" aria-live="polite">
+        <td colspan="7">
+          <span class="clients-loading-spinner" aria-hidden="true"></span>
+          <span>Carregando clientes…</span>
+        </td>
+      </tr>`;
+  }
+
+  function clearTableLoading(){
+    tbody?.querySelector('.clients-loading-row')?.remove();
   }
 
   function updateLoadMore(){
@@ -420,12 +592,25 @@
 
     PAGE.loading = true;
     btnMore?.classList.add('is-loading');
+    showTableLoading();
 
     try{
-      const url = apiUrlForPage();
+      const requestOffset = PAGE.offset;
+      const url = apiUrlForPage({ includeTotal: false });
       const res = await apiGet(url);
+      clearTableLoading();
       const items = Array.isArray(res) ? res : (res?.items || []);
       const has_more = Array.isArray(res) ? (items.length === PAGE.limit) : !!res?.has_more;
+      const responseTotal = Array.isArray(res) ? null : res?.total;
+      const parsedTotal = Number(responseTotal);
+      if (responseTotal !== null && responseTotal !== undefined && Number.isFinite(parsedTotal)){
+        PAGE.total = parsedTotal;
+        PAGE.totalExact = true;
+      } else {
+        const visibleMinimum = PAGE.offset + items.length + (has_more ? 1 : 0);
+        PAGE.total = Math.max(PAGE.total, visibleMinimum);
+        PAGE.totalExact = false;
+      }
       const next_offset = Array.isArray(res)
         ? (PAGE.offset + items.length)
         : (res?.next_offset ?? (PAGE.offset + items.length));
@@ -435,16 +620,24 @@
 
       let touchedExisting = false;
 
-      for (const c of items){
-        if (!c || c.id == null) continue;
+      if (requestOffset === 0){
+        // O cache serve apenas como prévia visual. A primeira resposta real
+        // substitui a prévia para não pular novos clientes nem manter excluídos.
+        state.clientes = items.filter(c => c && c.id != null);
+        state.seen = new Set(state.clientes.map(c => c.id));
+        touchedExisting = true;
+      } else {
+        for (const c of items){
+          if (!c || c.id == null) continue;
 
-        const idx = state.clientes.findIndex(x => x.id === c.id);
-        if (idx >= 0){
-          state.clientes[idx] = c;
-          touchedExisting = true;
-        } else {
-          state.clientes.push(c);
-          state.seen.add(c.id);
+          const idx = state.clientes.findIndex(x => x.id === c.id);
+          if (idx >= 0){
+            state.clientes[idx] = c;
+            touchedExisting = true;
+          } else {
+            state.clientes.push(c);
+            state.seen.add(c.id);
+          }
         }
       }
 
@@ -460,10 +653,21 @@
       if (touchedExisting) renderFromScratch();
       else renderAppend(items);
 
-      totalEl.textContent = String(state.clientes.filter(rowMatchesDept).length);
+      totalEl.textContent = String(PAGE.total);
       saveCache();
+
+      if (requestOffset === 0){
+        const runTotal = ()=> refreshExactTotal();
+        if (typeof window.requestIdleCallback === 'function'){
+          window.requestIdleCallback(runTotal, { timeout: 3000 });
+        } else {
+          setTimeout(runTotal, 1200);
+        }
+      }
     }catch(e){
+      clearTableLoading();
       console.error(e);
+      if (!state.clientes.length && emptyState) emptyState.style.display = 'flex';
       toast('Erro ao carregar clientes.', 'err');
     }finally{
       PAGE.loading = false;
@@ -479,11 +683,9 @@
   function rowMatchesDept(c){
     const depId = String(state.filtro.deptoId || '');
     if (!depId) return true;
-
+    if (c?.departamento_id != null) return String(c.departamento_id) === depId;
     const nomeDoId = state.setores.find(s => String(s.id) === depId)?.nome;
-    if (!nomeDoId) return true;
-
-    return (renderSetDeptName(c) || '').toLowerCase() === String(nomeDoId).toLowerCase();
+    return !!nomeDoId && (renderSetDeptName(c) || '').toLowerCase() === String(nomeDoId).toLowerCase();
   }
 
   function makeRow(c){
@@ -516,11 +718,11 @@
       <td data-th="Responsável" class="td-colab">${escapeHtml(resp)}</td>
       <td data-th="Data Cadastro">${escapeHtml(dt || '-')}</td>
       <td data-th="Ações" class="td-actions">
-        <button class="btn secondary" type="button" data-action="custom" data-id="${c.id}">
-          <i class="fa fa-list"></i> Campos personalizados
+        <button class="btn btn-secondary btn-sm" type="button" data-action="edit" data-id="${c.id}" title="Abrir e editar a ficha completa do cliente">
+          <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> Editar ficha
         </button>
-        <button class="btn secondary" type="button" data-action="msg" data-id="${c.id}">
-          <i class="fa fa-paper-plane"></i> Mensagem
+        <button class="btn btn-secondary btn-sm" type="button" data-action="msg" data-id="${c.id}" title="Abrir conversa com o cliente">
+          <i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Mensagem
         </button>
       </td>
     `.trim();
@@ -547,7 +749,7 @@
     rows.forEach(c => frag.appendChild(makeRow(c)));
     tbody.appendChild(frag);
 
-    totalEl.textContent = String(state.clientes.filter(rowMatchesDept).length);
+    totalEl.textContent = String(PAGE.total);
     updateCheckAllUI();
   }
 
@@ -569,7 +771,7 @@
     rows.forEach(c => frag.appendChild(makeRow(c)));
     tbody.appendChild(frag);
 
-    totalEl.textContent = String(rows.length);
+    totalEl.textContent = String(PAGE.total || rows.length);
     updateCheckAllUI();
   }
 
@@ -676,6 +878,51 @@
     if (novoDepto) novoDepto.value = '';
     if (novoSobre) novoSobre.value = '';
     if (novoColab) novoColab.value = '';
+    Object.values(extraFields).forEach(el => {
+      if (!el) return;
+      if (el.type === 'checkbox') el.checked = false;
+      else el.value = '';
+    });
+    if (cliId) cliId.value = '';
+    if (cliDataCadastro) cliDataCadastro.value = '';
+  }
+
+  function nullableInput(el){
+    return el ? ((el.value || '').trim() || null) : null;
+  }
+
+  function buildCreatePayload(telDigits){
+    const depRaw = String(novoDepto?.value || '');
+    const depId = depRaw === '' ? null : Number(depRaw);
+    const depNome = depId == null ? null : (state.setores.find(s => Number(s.id) === depId)?.nome || null);
+    const colabRaw = String(novoColab?.value || '');
+
+    return {
+      telefone: telDigits,
+      nome: nullableInput(novoNome),
+      departamento_id: depId,
+      departamento: depNome,
+      colaborador_id: colabRaw === '' ? null : Number(colabRaw),
+      sobre_cliente: nullableInput(novoSobre),
+      cpf_cnpj: nullableInput(extraFields.cpf_cnpj),
+      rg: nullableInput(extraFields.rg),
+      email: nullableInput(extraFields.email),
+      nome_whatsapp: nullableInput(extraFields.nome_whatsapp),
+      status_whatsapp: nullableInput(extraFields.status_whatsapp),
+      descricao: nullableInput(extraFields.descricao),
+      website: nullableInput(extraFields.website),
+      nome_completo: nullableInput(extraFields.nome_completo),
+      cep: nullableInput(extraFields.cep),
+      endereco: nullableInput(extraFields.endereco),
+      numero: nullableInput(extraFields.numero),
+      complemento: nullableInput(extraFields.complemento),
+      bairro: nullableInput(extraFields.bairro),
+      cidade: nullableInput(extraFields.cidade),
+      estado: nullableInput(extraFields.estado),
+      genero: nullableInput(extraFields.genero),
+      data_nascimento: nullableInput(extraFields.data_nascimento),
+      is_business: !!extraFields.is_business?.checked
+    };
   }
 
   function openNovoModal(){
@@ -685,8 +932,12 @@
     renderResponsaveis();
     resetNovoForm();
 
-    const secs = novoModal.querySelectorAll('.cli-section');
-    secs.forEach(sec => sec.classList.remove('is-open'));
+    const secs = [...novoModal.querySelectorAll('.cli-section')];
+    secs.forEach((sec, index) => {
+      const isOpen = index === 0;
+      sec.classList.toggle('is-open', isOpen);
+      sec.querySelector('.cli-section-toggle')?.setAttribute('aria-expanded', String(isOpen));
+    });
 
     openModal(novoModal);
     safeFocus(novoTel || novoNome);
@@ -707,19 +958,7 @@
       return;
     }
 
-    const nome = (novoNome?.value || '').trim();
-    const depto = (novoDepto?.value || '').trim();
-    const sobre = (novoSobre?.value || '').trim();
-    const colabRaw = (novoColab?.value ?? '');
-    const colaborador_id = (colabRaw === '' ? null : Number(colabRaw));
-
-    const payload = {
-      telefone: telDigits,
-      nome: nome || null,
-      departamento: depto || null,
-      sobre_cliente: sobre || null,
-      colaborador_id
-    };
+    const payload = buildCreatePayload(telDigits);
 
     const oldHtml = novoOk?.innerHTML;
     if (novoOk){
@@ -748,33 +987,11 @@
         return;
       }
 
-      if (cli){
-        upsertClienteLocal(cli, true);
-      } else {
-        const now = new Date().toISOString();
-        upsertClienteLocal({
-          id,
-          nome: nome || 'Cliente',
-          telefone: telDigits,
-          departamento: depto || null,
-          sobre: sobre || null,
-          colaborador_id: colaborador_id ?? null,
-          colaborador_nome: (
-            colaborador_id
-              ? (state.responsaveis.find(r => r.id === colaborador_id)?.nome || '-')
-              : null
-          ),
-          timestamp: now,
-          data_cadastro: now
-        }, true);
-      }
-
+      if (cli) upsertClienteLocal(cli, true);
       clearClientesCaches();
-      renderFromScratch();
-      totalEl.textContent = String(state.clientes.filter(rowMatchesDept).length);
-
       closeModal(novoModal);
       toast('Cliente criado!');
+      resetAndLoad();
     }catch(e){
       console.error(e);
       toast(e?.data?.detail || 'Falha ao criar cliente.', 'err');
@@ -822,7 +1039,7 @@
 
     selectDepto?.addEventListener('change', ()=>{
       state.filtro.deptoId = selectDepto.value;
-      renderFromScratch();
+      resetAndLoad();
     });
 
     selectResp?.addEventListener('change', ()=>{
@@ -833,6 +1050,20 @@
     dataInicio?.addEventListener('change', ()=>{ state.filtro.di = dataInicio.value; });
     dataFim?.addEventListener('change', ()=>{ state.filtro.df = dataFim.value; });
     btnFiltrar?.addEventListener('click', ()=> resetAndLoad());
+
+    btnLimparFiltros?.addEventListener('click', ()=>{
+      if (busca) busca.value = '';
+      if (selectDepto) selectDepto.value = '';
+      if (selectResp) selectResp.value = '';
+      if (dataInicio) dataInicio.value = '';
+      if (dataFim) dataFim.value = '';
+
+      state.filtro = { q:'', deptoId:'', di:'', df:'', respId:'' };
+      state.selected.clear();
+      updateSelUI();
+      resetAndLoad();
+      safeFocus(busca);
+    });
 
     document.addEventListener('change', (e)=>{
       const chk = e.target?.closest?.('.row-check');
@@ -991,7 +1222,7 @@
     expCancel?.addEventListener('click', ()=> closeModal(expModal));
     expClose?.addEventListener('click', ()=> closeModal(expModal));
 
-    expOk?.addEventListener('click', ()=>{
+    expOk?.addEventListener('click', async ()=>{
       if (!hasPerm(PERM_IMP_EXP)){
         toast('Você não tem permissão para exportar clientes.', 'err');
         return;
@@ -999,19 +1230,25 @@
 
       const fmt = (document.querySelector('input[name="expfmt"]:checked')?.value || 'csv');
       let url = `/api/clientes/export?fmt=${encodeURIComponent(fmt)}`;
-
       if (expOnlySel && expOnlySel.checked && state.selected.size){
         const ids = Array.from(state.selected).join(',');
         url += `&ids=${encodeURIComponent(ids)}`;
       }
 
-      closeModal(expModal);
-
-      const a = document.createElement('a');
-      a.href = withEmpresaIdQuery(url);
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      const oldHtml = expOk.innerHTML;
+      expOk.disabled = true;
+      expOk.textContent = 'Gerando…';
+      try{
+        await downloadApiFile(url, `clientes.${fmt}`);
+        closeModal(expModal);
+        toast('Arquivo gerado!');
+      }catch(e){
+        console.error(e);
+        toast(e?.data?.detail || 'Falha ao exportar clientes.', 'err');
+      }finally{
+        expOk.disabled = false;
+        expOk.innerHTML = oldHtml;
+      }
     });
 
     btnImp?.addEventListener('click', ()=>{
@@ -1032,13 +1269,68 @@
       }
     });
 
-    impOk?.addEventListener('click', ()=>{
+    document.querySelectorAll('[data-modelo]').forEach(btn => {
+      btn.addEventListener('click', async ()=>{
+        if (!hasPerm(PERM_IMP_EXP)){
+          toast('Você não tem permissão para baixar modelos.', 'err');
+          return;
+        }
+        const fmt = String(btn.dataset.modelo || 'csv').toLowerCase();
+        const old = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Baixando…';
+        try{
+          await downloadApiFile(`/api/clientes/modelo-importacao?fmt=${encodeURIComponent(fmt)}`, `modelo-clientes.${fmt}`);
+        }catch(e){
+          console.error(e);
+          toast(e?.data?.detail || 'Falha ao baixar o modelo.', 'err');
+        }finally{
+          btn.disabled = false;
+          btn.textContent = old;
+        }
+      });
+    });
+
+    impOk?.addEventListener('click', async ()=>{
       if (!hasPerm(PERM_IMP_EXP)){
         toast('Você não tem permissão para importar clientes.', 'err');
         return;
       }
-      closeModal(impModal);
-      toast('Importando…');
+      const file = impFile?.files?.[0];
+      if (!file){
+        toast('Escolha um arquivo para importar.', 'warn');
+        impPick?.focus();
+        return;
+      }
+
+      const ext = String(file.name || '').toLowerCase().split('.').pop();
+      if (!['csv','xlsx','txt'].includes(ext)){
+        toast('Formato inválido. Use CSV, XLSX ou TXT.', 'warn');
+        return;
+      }
+
+      const form = new FormData();
+      form.append('arquivo', file, file.name);
+      const sobrescrever = !!impSobrescrever?.checked;
+      const oldHtml = impOk.innerHTML;
+      impOk.disabled = true;
+      impOk.textContent = 'Importando…';
+      try{
+        const result = await apiUpload(`/api/clientes/import?sobrescrever=${sobrescrever ? 'true' : 'false'}`, form);
+        clearClientesCaches();
+        closeModal(impModal);
+        if (impFile) impFile.value = '';
+        if (impFileName) impFileName.textContent = 'Nenhum arquivo escolhido';
+        if (impSobrescrever) impSobrescrever.checked = false;
+        toast(`Importação concluída: ${Number(result?.inseridos || 0)} inseridos, ${Number(result?.atualizados || 0)} atualizados e ${Number(result?.ignorados || 0)} ignorados.`);
+        resetAndLoad();
+      }catch(e){
+        console.error(e);
+        toast(e?.data?.detail || 'Falha ao importar clientes.', 'err');
+      }finally{
+        impOk.disabled = false;
+        impOk.innerHTML = oldHtml;
+      }
     });
 
     document.addEventListener('click', async (e)=>{
@@ -1155,13 +1447,6 @@
       saveCache();
     });
 
-    $$('.cli-section-toggle', novoModal || document).forEach(btn => {
-      btn.addEventListener('click', ()=>{
-        const sec = btn.closest('.cli-section');
-        if (!sec) return;
-        sec.classList.toggle('is-open');
-      });
-    });
   }
 
   function openModal(el){
@@ -1174,6 +1459,13 @@
 
   function closeModal(el){
     if (!el) return;
+
+    const isEditorMode = el === novoModal && el.dataset.mode && el.dataset.mode !== 'new';
+    if (isEditorMode && window.ClienteEditor?.close){
+      window.ClienteEditor.close();
+      return;
+    }
+
     el.style.display = 'none';
     el.classList.remove('show');
     el.setAttribute('aria-hidden', 'true');
@@ -1188,6 +1480,9 @@
     PAGE.offset = 0;
     PAGE.done = false;
     PAGE.loading = false;
+    PAGE.total = 0;
+    PAGE.totalExact = false;
+    totalRefreshSeq++;
 
     state.clientes = [];
     state.seen = new Set();
@@ -1207,7 +1502,9 @@
       hydrateDepartamentoNome(state.clientes);
       renderFromScratch();
       totalEl.textContent = String(state.clientes.filter(rowMatchesDept).length);
-      PAGE.offset = state.clientes.length - (state.clientes.length % PAGE.limit);
+      PAGE.total = state.clientes.filter(rowMatchesDept).length;
+      // Sempre revalida a primeira página no servidor.
+      PAGE.offset = 0;
     } else {
       totalEl.textContent = '0';
     }
@@ -1269,9 +1566,15 @@
 
     bindEvents();
     applyPermsUI();
-    await Promise.all([loadSetores(), loadResponsaveis()]);
+
+    // Mostra imediatamente o último estado conhecido e busca a primeira página
+    // sem esperar departamentos/responsáveis. Esses metadados atualizam a tela
+    // silenciosamente quando chegarem.
+    primeMetadataFromCache();
     resetAndLoad();
     updateSelUI();
+
+    Promise.allSettled([loadSetores(), loadResponsaveis()]).catch(()=>{});
   }
 
   function normPerm(p){

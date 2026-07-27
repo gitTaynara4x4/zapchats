@@ -13,6 +13,12 @@ from typing import Dict, Mapping, List, Iterable, Any, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
 import backend.routers.auth as auth_router  # 🔒 para validar token
+from backend.services.zapschat_presence import (
+    list_company_presence,
+    public_presence_payload,
+    remove_presence_session,
+    touch_presence_session,
+)
 
 log = logging.getLogger("ws")
 
@@ -28,6 +34,10 @@ def _get_float(env: str, default: float) -> float:
 
 SEND_TIMEOUT = _get_float("WS_SEND_TIMEOUT", 2.5)            # segundos
 KEEPALIVE_SEC = _get_float("WS_KEEPALIVE_SEC", 25)           # segundos
+PRESENCE_DISCONNECT_GRACE_SEC = max(
+    0.0,
+    _get_float("ZAPSCHAT_PRESENCE_DISCONNECT_GRACE_SECONDS", 6.0),
+)
 THREAD_BRIDGE_TIMEOUT = _get_float("WS_THREAD_BRIDGE_TIMEOUT", 3.5)
 SNAPSHOT_MAX_BYTES = int(float(os.getenv("WS_SNAPSHOT_MAX_BYTES", "1048576")))  # 1MB
 
@@ -157,6 +167,38 @@ def _decode_token_safe(token: str | None) -> Optional[dict]:
         return {}
     except Exception:
         return None
+
+
+def _colaborador_id_from_token(decoded: dict | None) -> Optional[int]:
+    if not isinstance(decoded, dict):
+        return None
+
+    for key in (
+        "colaborador_id",
+        "id_colab",
+        "id_colaborador",
+        "colab_id",
+        "cid",
+    ):
+        try:
+            value = decoded.get(key)
+            if value is None:
+                continue
+            parsed = int(value)
+            if parsed > 0:
+                return parsed
+        except Exception:
+            continue
+
+    sub = str(decoded.get("sub") or "").strip().lower()
+    if sub.startswith("colab-"):
+        try:
+            parsed = int(sub.split("colab-", 1)[1])
+            return parsed if parsed > 0 else None
+        except Exception:
+            pass
+
+    return None
 
 
 def _empresa_id_from_token(decoded: dict | None) -> Optional[int]:
@@ -316,6 +358,11 @@ class WebSocketManager:
             log.info("WS disconnected grp=%s cid=%s", grupo, cid or "-")
         except Exception as e:
             log.debug("WS disconnect erro grp=%s cid=%s: %s", grupo, cid or "-", e)
+
+    async def has_connection(self, grupo: str, cid: str) -> bool:
+        async with self._lock:
+            bucket = self.grupos.get(grupo) or {}
+            return bool(cid and cid in bucket)
 
     def _maybe_store_snapshot(self, grupo: str, data: Any) -> None:
         # Replay/snapshot desligado por padrão. O antigo comportamento reenviava
@@ -492,6 +539,9 @@ async def ws_topic(
       - Isso resolve o caso do front abrir /ws/emp%3A5?empresa_id=5&token=...
     """
 
+    presence_empresa_id: Optional[int] = None
+    presence_colaborador_id: Optional[int] = None
+
     # =========================
     # Autenticação para canal da empresa
     # =========================
@@ -562,8 +612,45 @@ async def ws_topic(
             await ws.close(code=4403)
             return
 
+        presence_empresa_id = int(emp_from_topic)
+        presence_colaborador_id = _colaborador_id_from_token(decoded)
+
+        if not presence_colaborador_id:
+            # Tokens emitidos antes desta atualização podem não ter o ID operacional.
+            # Mantemos o WebSocket funcionando e apenas pulamos a presença até o próximo login.
+            log.debug("WS presence skip topic=%s motivo=sem_colaborador", topic)
+
     # Conecta.
     cid_eff = await conexoes_ativas.connect(ws, topic, cid=cid)
+
+    # Presença do usuário dentro do próprio ZapsChat. Usa a mesma conexão WS
+    # já aberta pela aplicação; não cria polling HTTP nem grava heartbeat no banco.
+    if presence_empresa_id and presence_colaborador_id:
+        try:
+            presence = await asyncio.to_thread(
+                touch_presence_session,
+                presence_empresa_id,
+                presence_colaborador_id,
+                cid_eff,
+                "online",
+            )
+
+            if presence.get("presence_changed"):
+                await conexoes_ativas.broadcast(
+                    topic,
+                    {
+                        "type": "ZAPSCHAT_PRESENCE",
+                        **public_presence_payload(presence),
+                    },
+                )
+
+        except Exception as e:
+            log.debug(
+                "WS presence connect skip emp=%s colab=%s: %s",
+                presence_empresa_id,
+                presence_colaborador_id,
+                e,
+            )
 
     # Só força QR quando o cliente pedir explicitamente.
     if topic.startswith("inst:") and want_qr:
@@ -632,6 +719,60 @@ async def ws_topic(
                 elif txt_l == "pong":
                     pass
 
+                elif presence_empresa_id and presence_colaborador_id:
+                    try:
+                        payload = json.loads(txt)
+                    except Exception:
+                        payload = None
+
+                    if isinstance(payload, dict) and str(payload.get("type") or "").lower() == "presence":
+                        try:
+                            presence = await asyncio.to_thread(
+                                touch_presence_session,
+                                presence_empresa_id,
+                                presence_colaborador_id,
+                                cid_eff,
+                                payload.get("state") or "online",
+                                activity_at=payload.get("activity_at"),
+                            )
+
+                            if presence.get("presence_changed"):
+                                await conexoes_ativas.broadcast(
+                                    topic,
+                                    {
+                                        "type": "ZAPSCHAT_PRESENCE",
+                                        **public_presence_payload(presence),
+                                    },
+                                )
+
+                            if payload.get("want_snapshot"):
+                                snapshot = await asyncio.to_thread(
+                                    list_company_presence,
+                                    presence_empresa_id,
+                                )
+                                await ws.send_json(
+                                    {
+                                        "type": "ZAPSCHAT_PRESENCE_SNAPSHOT",
+                                        "empresa_id": presence_empresa_id,
+                                        "items": [
+                                            public_presence_payload(item)
+                                            for item in snapshot.values()
+                                        ],
+                                    }
+                                )
+
+                            try:
+                                await ws.send_text("pong")
+                            except Exception:
+                                break
+                        except Exception as e:
+                            log.debug(
+                                "WS presence heartbeat skip emp=%s colab=%s: %s",
+                                presence_empresa_id,
+                                presence_colaborador_id,
+                                e,
+                            )
+
     except Exception as e:
         log.warning("WS error topic=%s cid=%s: %s", topic, cid_eff, e)
 
@@ -646,5 +787,40 @@ async def ws_topic(
                     pass
 
             await conexoes_ativas.disconnect(ws, topic, cid=cid_eff)
+
+            if presence_empresa_id and presence_colaborador_id:
+                async def _remove_presence_after_grace() -> None:
+                    try:
+                        if PRESENCE_DISCONNECT_GRACE_SEC > 0:
+                            await asyncio.sleep(PRESENCE_DISCONNECT_GRACE_SEC)
+
+                        # Reconexões do ws-core reutilizam o mesmo cid. A conexão antiga
+                        # não pode apagar a sessão da nova conexão após o tempo de graça.
+                        if await conexoes_ativas.has_connection(topic, cid_eff):
+                            return
+
+                        presence = await asyncio.to_thread(
+                            remove_presence_session,
+                            presence_empresa_id,
+                            presence_colaborador_id,
+                            cid_eff,
+                        )
+                        if presence.get("presence_changed"):
+                            await conexoes_ativas.broadcast(
+                                topic,
+                                {
+                                    "type": "ZAPSCHAT_PRESENCE",
+                                    **public_presence_payload(presence),
+                                },
+                            )
+                    except Exception as e:
+                        log.debug(
+                            "WS presence disconnect skip emp=%s colab=%s: %s",
+                            presence_empresa_id,
+                            presence_colaborador_id,
+                            e,
+                        )
+
+                asyncio.create_task(_remove_presence_after_grace())
         except Exception:
             pass

@@ -1262,6 +1262,111 @@
       display:none !important;
     }
   }
+
+
+  /*
+   * Atendimento: compacto quando parado e expandido ao passar o mouse.
+   * Mantém o tamanho visual alinhado ao sidebar principal sem deixar
+   * o menu aberto o tempo todo.
+   */
+  @media (min-width: 921px) {
+    .wpp-leftbar {
+      width: 76px !important;
+      min-width: 76px !important;
+      max-width: 76px !important;
+      box-shadow: none !important;
+    }
+
+    .wpp-leftbar:hover {
+      width: 250px !important;
+      min-width: 250px !important;
+      max-width: 250px !important;
+      box-shadow: var(--zc-leftbar-shadow) !important;
+    }
+
+    .wpp-leftbar-logo-link {
+      width: 76px !important;
+      min-width: 76px !important;
+    }
+
+    .wpp-leftbar:hover .wpp-leftbar-logo-link {
+      width: 100% !important;
+      min-width: 0 !important;
+    }
+
+    .zc-wa-settings-overlay {
+      left: 76px !important;
+      width: calc(100vw - 76px) !important;
+    }
+
+    .wpp-leftbar:hover ~ .zc-wa-settings-overlay {
+      left: 250px !important;
+      width: calc(100vw - 250px) !important;
+    }
+
+    .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon {
+      width: calc(100% - 12px) !important;
+      min-width: 0 !important;
+      min-height: 42px !important;
+      height: 42px !important;
+      margin: 0 6px !important;
+      padding: 0 !important;
+      justify-content: center !important;
+      gap: 0 !important;
+      border: 0 !important;
+      border-radius: 10px !important;
+      color: #475569 !important;
+      font-size: 13px !important;
+      font-weight: 400 !important;
+    }
+
+    .wpp-leftbar:hover .wpp-leftbar-icons > .wpp-leftbar-icon {
+      width: calc(100% - 16px) !important;
+      margin: 0 8px !important;
+      padding: 0 11px !important;
+      justify-content: flex-start !important;
+      gap: 10px !important;
+    }
+
+    .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon svg {
+      width: 19px !important;
+      height: 19px !important;
+      min-width: 19px !important;
+    }
+
+    .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon .wpp-label {
+      font-size: 13px !important;
+      font-weight: 400 !important;
+    }
+
+    .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon[aria-current="page"],
+    .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon.is-active {
+      background: #eafaf1 !important;
+      color: #101828 !important;
+      border-color: transparent !important;
+    }
+
+    html.dark .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon,
+    html[data-theme="dark"] .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon {
+      color: #b4b4b4 !important;
+    }
+
+    html.dark .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon[aria-current="page"],
+    html.dark .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon.is-active,
+    html[data-theme="dark"] .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon[aria-current="page"],
+    html[data-theme="dark"] .wpp-leftbar .wpp-leftbar-icons > .wpp-leftbar-icon.is-active {
+      background: rgba(34, 197, 94, 0.14) !important;
+      color: #f5f5f5 !important;
+    }
+
+    .wpp-leftbar-avatar {
+      width: 34px !important;
+      height: 34px !important;
+      min-width: 34px !important;
+      font-size: 12px !important;
+    }
+  }
+
 </style>
 
 <button type="button" class="wpp-mobile-float-toggle" id="wppMobileToggle" aria-label="Abrir menu" aria-expanded="false">

@@ -33,6 +33,7 @@
   const profileAvatarEl = $('#profileAvatar');
   const profileNameEl = $('#profileName');
   const profileRoleEl = $('#profileRole');
+  const profileLastAccessEl = $('#profileLastAccess');
   const profilePhoneEl = $('#profilePhone');
   const profileEmailEl = $('#profileEmail');
   const profileFullNameEl = $('#profileFullName');
@@ -63,6 +64,7 @@
   let ws = null;
   let wsPing = null;
   let wsTries = 0;
+  let offCompanyWS = null;
   let filterMenu = null;
   let mentionMenu = null;
 
@@ -212,6 +214,94 @@
     return d.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
   }
 
+  function fmtLastAccess(iso) {
+    if (!iso) return 'Nunca acessou o ZapsChat';
+
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return 'Nunca acessou o ZapsChat';
+
+    const now = new Date();
+    const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const diffDays = Math.round((today.getTime() - day.getTime()) / 86400000);
+    const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    if (diffDays === 0) return `Último acesso hoje às ${time}`;
+    if (diffDays === 1) return `Último acesso ontem às ${time}`;
+
+    const date = d.toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      ...(d.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' })
+    });
+    return `Último acesso em ${date} às ${time}`;
+  }
+
+  function normalizedPresenceStatus(value) {
+    const status = String(value || '').trim().toLowerCase();
+    return ['online', 'away'].includes(status) ? status : 'offline';
+  }
+
+  function fmtPresence(colab) {
+    const status = normalizedPresenceStatus(colab?.presence_status);
+    if (status === 'online') return 'Online agora';
+    if (status === 'away') return 'Ausente';
+    return fmtLastAccess(colab?.last_access_at);
+  }
+
+  function applyPresenceItem(item, { render = true } = {}) {
+    if (!item || typeof item !== 'object') return false;
+    const id = Number(item.colaborador_id || item.id || 0);
+    if (!id) return false;
+
+    const colab = COLABS.get(id);
+    if (!colab) return false;
+
+    colab.presence_status = normalizedPresenceStatus(item.presence_status);
+    colab.presence_updated_at = item.presence_updated_at || null;
+    colab.presence_expires_at = item.presence_expires_at || null;
+    colab.presence_activity_at = item.presence_activity_at || null;
+
+    if (colab.presence_status === 'offline' && item.presence_updated_at) {
+      colab.last_access_at = item.presence_updated_at;
+    }
+
+    COLABS.set(id, colab);
+    if (render) {
+      cacheSet(rosterCacheKeys(), [...COLABS.values()]);
+      renderAll();
+      if (document.body.classList.contains('profile-open') && ACTIVE) {
+        updateProfile(CONVS.get(ACTIVE));
+      }
+    }
+    return true;
+  }
+
+  function applyPresenceSnapshot(items) {
+    const active = new Map();
+    (Array.isArray(items) ? items : []).forEach((item) => {
+      const id = Number(item?.colaborador_id || item?.id || 0);
+      if (id) active.set(id, item);
+    });
+
+    COLABS.forEach((colab, id) => {
+      const item = active.get(Number(id));
+      if (item) {
+        applyPresenceItem(item, { render: false });
+      } else {
+        colab.presence_status = 'offline';
+        colab.presence_expires_at = null;
+        COLABS.set(Number(id), colab);
+      }
+    });
+
+    cacheSet(rosterCacheKeys(), [...COLABS.values()]);
+    renderAll();
+    if (document.body.classList.contains('profile-open') && ACTIVE) {
+      updateProfile(CONVS.get(ACTIVE));
+    }
+  }
+
   function toast(msg, type = 'ok', ms = 2600) {
     let stack = $('.toaststack');
     if (!stack) {
@@ -257,6 +347,11 @@
       telefone: c?.telefone || c?.phone || '',
       cargo: c?.cargo || '',
       created_at: c?.created_at || c?.timestamp || '',
+      last_access_at: c?.last_access_at || c?.ultimo_acesso || '',
+      presence_status: normalizedPresenceStatus(c?.presence_status),
+      presence_updated_at: c?.presence_updated_at || '',
+      presence_expires_at: c?.presence_expires_at || '',
+      presence_activity_at: c?.presence_activity_at || '',
       avatar_url: c?.avatar_url || (id ? `/api/colaboradores/${id}/avatar` : '')
     };
   }
@@ -486,9 +581,10 @@
     }
 
     rosterListEl.innerHTML = list.map((c) => `
-      <button type="button" class="roster-item" data-colab-id="${Number(c.id)}" title="${esc(c.nome)}">
+      <button type="button" class="roster-item" data-colab-id="${Number(c.id)}" title="${esc(c.nome)} — ${esc(fmtPresence(c))}">
         <span class="avatar mini-avatar has-user-icon"><i class="fa-solid fa-user" aria-hidden="true"></i></span>
         <strong>${esc(c.nome)}</strong>
+        <span class="roster-dot ${esc(normalizedPresenceStatus(c.presence_status))}" aria-label="${esc(fmtPresence(c))}"></span>
         ${FAVORITES.has(Number(c.id)) ? '<small><i class="fa-solid fa-star"></i></small>' : ''}
       </button>
     `).join('');
@@ -634,7 +730,11 @@
   function updatePeerHeader(c) {
     if (!c) {
       if (peerNameEl) peerNameEl.textContent = 'Selecionar conversa';
-      if (peerStatusEl) peerStatusEl.textContent = 'Escolha uma conversa para começar';
+      if (peerStatusEl) {
+        peerStatusEl.textContent = 'Escolha uma conversa para começar';
+        peerStatusEl.title = '';
+        delete peerStatusEl.dataset.presence;
+      }
       setIconAvatar(peerAvatarEl, 'user');
       return;
     }
@@ -642,10 +742,15 @@
     const group = isGroupConv(c);
     if (peerNameEl) peerNameEl.textContent = getConvDisplayName(c);
     if (peerStatusEl) {
-      if (group) peerStatusEl.textContent = `${c.participantes.length} participantes`;
-      else {
+      if (group) {
+        peerStatusEl.textContent = `${c.participantes.length} participantes`;
+        peerStatusEl.title = 'Grupo interno';
+        delete peerStatusEl.dataset.presence;
+      } else {
         const peer = getPeerColab(c);
-        peerStatusEl.textContent = peer?.setor_nome || peer?.cargo || 'Conversa interna';
+        peerStatusEl.textContent = fmtPresence(peer);
+        peerStatusEl.dataset.presence = normalizedPresenceStatus(peer?.presence_status);
+        peerStatusEl.title = peer?.cargo || peer?.setor_nome || 'Colaborador';
       }
     }
     setIconAvatar(peerAvatarEl, group ? 'group' : 'user');
@@ -654,6 +759,11 @@
   function resetProfile() {
     if (profileNameEl) profileNameEl.textContent = 'Nenhuma conversa';
     if (profileRoleEl) profileRoleEl.textContent = 'Selecione um colaborador';
+    if (profileLastAccessEl) {
+      profileLastAccessEl.textContent = '';
+      profileLastAccessEl.hidden = true;
+      delete profileLastAccessEl.dataset.presence;
+    }
     if (profilePhoneEl) profilePhoneEl.textContent = '—';
     if (profileEmailEl) profileEmailEl.textContent = '—';
     if (profileFullNameEl) profileFullNameEl.textContent = '—';
@@ -669,6 +779,10 @@
     if (isGroupConv(c)) {
       if (profileNameEl) profileNameEl.textContent = getConvDisplayName(c);
       if (profileRoleEl) profileRoleEl.textContent = `${c.participantes.length} participantes`;
+      if (profileLastAccessEl) {
+        profileLastAccessEl.textContent = '';
+        profileLastAccessEl.hidden = true;
+      }
       if (profilePhoneEl) profilePhoneEl.textContent = '—';
       if (profileEmailEl) profileEmailEl.textContent = '—';
       if (profileFullNameEl) profileFullNameEl.textContent = c.participantes.map(colabNameById).join(', ');
@@ -684,6 +798,11 @@
 
     if (profileNameEl) profileNameEl.textContent = peer.nome || 'Colaborador';
     if (profileRoleEl) profileRoleEl.textContent = peer.cargo || peer.setor_nome || 'Colaborador';
+    if (profileLastAccessEl) {
+      profileLastAccessEl.textContent = fmtPresence(peer);
+      profileLastAccessEl.dataset.presence = normalizedPresenceStatus(peer?.presence_status);
+      profileLastAccessEl.hidden = false;
+    }
     if (profilePhoneEl) profilePhoneEl.textContent = peer.telefone || '—';
     if (profileEmailEl) profileEmailEl.textContent = peer.email || '—';
     if (profileFullNameEl) profileFullNameEl.textContent = peer.nome_completo || peer.nome || '—';
@@ -1115,13 +1234,15 @@
   }
 
   // ===== WebSocket =====
+  // O Chat Interno usa o mesmo ws-core das demais telas. Assim, mensagens,
+  // notificações e presença compartilham uma única conexão da empresa.
   function wsUrl() {
     if (!EMPRESA_ID) return null;
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     return `${proto}://${location.host}${API}/ws/${EMPRESA_ID}`;
   }
 
-  function openWS() {
+  function openLegacyWS() {
     const url = wsUrl();
     if (!url) return;
 
@@ -1146,7 +1267,7 @@
       clearInterval(wsPing);
       wsPing = null;
       const delay = Math.min(30000, 1000 * Math.pow(2, wsTries++)) + Math.floor(Math.random() * 500);
-      setTimeout(openWS, delay);
+      setTimeout(openLegacyWS, delay);
     });
 
     ws.addEventListener('error', () => {
@@ -1154,8 +1275,33 @@
     });
   }
 
+  async function openWS() {
+    if (!EMPRESA_ID || offCompanyWS) return;
+
+    try {
+      const core = await import('/frontend/js/realtime/ws-core.js?v=chat-presence-20260725-1');
+      core.ensureEmpresaWS(EMPRESA_ID, { presenceSnapshot: true });
+      offCompanyWS = core.onEmpresaMessage(EMPRESA_ID, (evt) => {
+        if (evt?.type === 'message') handleWS(evt.data);
+      });
+    } catch (err) {
+      console.warn('[chat-interno] ws-core indisponível; usando conexão compatível.', err);
+      openLegacyWS();
+    }
+  }
+
   function handleWS(msg) {
     if (!msg || typeof msg !== 'object') return;
+
+    if (msg.type === 'ZAPSCHAT_PRESENCE') {
+      applyPresenceItem(msg);
+      return;
+    }
+
+    if (msg.type === 'ZAPSCHAT_PRESENCE_SNAPSHOT') {
+      applyPresenceSnapshot(msg.items || []);
+      return;
+    }
 
     if (msg.type === 'thread.created') {
       const c = normConv({

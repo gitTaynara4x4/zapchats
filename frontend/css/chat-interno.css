@@ -632,6 +632,13 @@ body.profile-open .profile-pane{display:flex}
   font-size:12px;
   font-weight:450;
 }
+.profile-main .profile-last-access{
+  margin-top:7px;
+  color:var(--ci-brand);
+  font-size:11.5px;
+  font-weight:600;
+}
+.profile-main .profile-last-access[hidden]{display:none}
 .profile-actions{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:18px}
 .profile-actions button{
   width:38px;
@@ -1972,3 +1979,25 @@ html.dark .conv[aria-selected="true"]{background:rgba(94,230,173,.08)!important}
 @media (max-width:1280px){
   :root{--ci-list-w:370px}
 }
+
+/* Presença dos usuários dentro do próprio ZapsChat */
+.roster-item .roster-dot.online{
+  background:#12b76a;
+  box-shadow:0 0 0 3px rgba(18,183,106,.14);
+}
+.roster-item .roster-dot.away{
+  background:#f79009;
+  box-shadow:0 0 0 3px rgba(247,144,9,.14);
+}
+.roster-item .roster-dot.offline{
+  background:#98a2b3;
+  box-shadow:none;
+}
+.who .status[data-presence="online"],
+.profile-main .profile-last-access[data-presence="online"]{color:#078a55}
+.who .status[data-presence="away"],
+.profile-main .profile-last-access[data-presence="away"]{color:#b54708}
+html.dark .who .status[data-presence="online"],
+html.dark .profile-main .profile-last-access[data-presence="online"]{color:#6ce9a6}
+html.dark .who .status[data-presence="away"],
+html.dark .profile-main .profile-last-access[data-presence="away"]{color:#fec84b}

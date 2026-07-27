@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/frontend/css/base.css">
-  <link rel="stylesheet" href="/frontend/css/colaboradores.css?v=colab-required-20260713">
+  <link rel="stylesheet" href="/frontend/css/colaboradores.css?v=colab-owner-protection-20260726-1">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 </head>
 
@@ -129,26 +129,75 @@
             </div>
           </div>
 
-          <div class="table-wrap">
-            <table class="colabs" aria-label="Lista de colaboradores">
-              <thead>
-                <tr>
-                  <th class="check-col">
-                    <input id="colab-select-all" type="checkbox" aria-label="Selecionar todos os colaboradores">
-                  </th>
-                  <th>Nome</th>
-                  <th>Status</th>
-                  <th>E-mail</th>
-                  <th>Departamentos</th>
-                  <th class="actions-col">Ações</th>
-                </tr>
-              </thead>
-              <tbody id="tabela-colaboradores"></tbody>
-            </table>
-          </div>
+          <div id="colab-list-region" class="colab-list-region is-loading" aria-busy="true">
+            <div id="colab-loading-state" class="colab-list-feedback colab-loading-state" role="status" aria-live="polite">
+              <span class="colab-loading-spinner" aria-hidden="true"></span>
+              <span class="colab-feedback-copy">
+                <strong id="colab-loading-title">Carregando equipe...</strong>
+                <small id="colab-loading-detail">Buscando os colaboradores da empresa.</small>
+              </span>
+            </div>
 
-          <div id="empty-state" class="empty empty-bordered">
-            <span><i class="fa fa-inbox" aria-hidden="true"></i> Nenhum colaborador encontrado.</span>
+            <div id="colab-error-state" class="colab-list-feedback colab-error-state" role="alert" hidden>
+              <span class="colab-feedback-icon" aria-hidden="true">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+              </span>
+              <span class="colab-feedback-copy">
+                <strong>Não foi possível carregar a equipe</strong>
+                <small id="colab-error-detail">Confira a conexão e tente novamente.</small>
+              </span>
+              <button id="btn-retry-colaboradores" class="btn btn-soft" type="button">
+                <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+                <span>Tentar novamente</span>
+              </button>
+            </div>
+
+            <div class="table-wrap">
+              <table class="colabs" aria-label="Lista de colaboradores">
+                <thead>
+                  <tr>
+                    <th class="check-col">
+                      <input id="colab-select-all" type="checkbox" aria-label="Selecionar todos os colaboradores" disabled>
+                    </th>
+                    <th>Nome</th>
+                    <th>Status</th>
+                    <th>E-mail</th>
+                    <th>Departamentos</th>
+                    <th class="actions-col">Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="tabela-colaboradores">
+                  <tr class="colab-skeleton-row" aria-hidden="true">
+                    <td class="check-col"><span class="colab-skeleton sk-check"></span></td>
+                    <td><span class="colab-skeleton sk-member"></span></td>
+                    <td><span class="colab-skeleton sk-status"></span></td>
+                    <td><span class="colab-skeleton sk-email"></span></td>
+                    <td><span class="colab-skeleton sk-teams"></span></td>
+                    <td><span class="colab-skeleton sk-actions"></span></td>
+                  </tr>
+                  <tr class="colab-skeleton-row" aria-hidden="true">
+                    <td class="check-col"><span class="colab-skeleton sk-check"></span></td>
+                    <td><span class="colab-skeleton sk-member"></span></td>
+                    <td><span class="colab-skeleton sk-status"></span></td>
+                    <td><span class="colab-skeleton sk-email"></span></td>
+                    <td><span class="colab-skeleton sk-teams"></span></td>
+                    <td><span class="colab-skeleton sk-actions"></span></td>
+                  </tr>
+                  <tr class="colab-skeleton-row" aria-hidden="true">
+                    <td class="check-col"><span class="colab-skeleton sk-check"></span></td>
+                    <td><span class="colab-skeleton sk-member"></span></td>
+                    <td><span class="colab-skeleton sk-status"></span></td>
+                    <td><span class="colab-skeleton sk-email"></span></td>
+                    <td><span class="colab-skeleton sk-teams"></span></td>
+                    <td><span class="colab-skeleton sk-actions"></span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div id="empty-state" class="empty empty-bordered">
+              <span><i class="fa fa-inbox" aria-hidden="true"></i> Nenhum colaborador encontrado.</span>
+            </div>
           </div>
         </section>
       </div>
@@ -544,7 +593,7 @@
 
   <div id="toast" role="status" aria-live="polite"></div>
 
-  <script type="module" src="/frontend/js/pages/colaboradores/index.js?v=colab-safe-errors-20260722"></script>
+  <script type="module" src="/frontend/js/pages/colaboradores/index.js?v=colab-session-cache-20260726-1"></script>
 
   <!-- Wizard controlado por frontend/js/pages/colaboradores/modal.js para evitar eventos duplicados. -->
 

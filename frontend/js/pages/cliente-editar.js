@@ -60,7 +60,6 @@
   const novoNome       = $('#novoNome');
   const novoTel        = $('#novoTel');
   const novoDepto      = $('#novoDepto');
-  const novoDeptoList  = $('#novoDeptoList');
   const novoColab      = $('#novoColab');
   const novoSobre      = $('#novoSobre');
   const novoOkOriginal = $('#novoOk');
@@ -138,6 +137,9 @@
   }
   function isoToInputDate(iso){
     if (!iso) return '';
+    const raw = String(iso);
+    const direct = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (direct) return direct[1];
     const d = new Date(iso);
     if (Number.isNaN(+d)) return '';
     return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
@@ -152,20 +154,28 @@
   // ==============================
   // Acordeon das seções do cliente
   // ==============================
-  function resetSectionsCollapsed(){
+  function resetSectionsCollapsed(openIndex = 0){
     if (!novoModal) return;
-    const secs = novoModal.querySelectorAll('.cli-section');
-    secs.forEach(sec => sec.classList.remove('is-open'));
+    const secs = [...novoModal.querySelectorAll('.cli-section')];
+    secs.forEach((sec, index) => {
+      const isOpen = index === openIndex;
+      sec.classList.toggle('is-open', isOpen);
+      sec.querySelector('.cli-section-toggle')?.setAttribute('aria-expanded', String(isOpen));
+    });
   }
 
   function bindCliSectionsAccordion(){
-    if (!novoModal) return;
+    if (!novoModal || novoModal.dataset.accordionBound === '1') return;
+    novoModal.dataset.accordionBound = '1';
+
     novoModal.addEventListener('click', (e) => {
       const btn = e.target.closest('.cli-section-toggle');
       if (!btn) return;
       const sec = btn.closest('.cli-section');
       if (!sec) return;
-      sec.classList.toggle('is-open');
+
+      const isOpen = sec.classList.toggle('is-open');
+      btn.setAttribute('aria-expanded', String(isOpen));
     });
   }
 
@@ -206,13 +216,12 @@
     renderResponsaveis();
   }
   function renderSetores(){
-    if (!novoDeptoList) return;
-    novoDeptoList.innerHTML = '';
-    STATE.setores.forEach(s => {
-      const opt = document.createElement('option');
-      opt.value = s.nome;
-      novoDeptoList.appendChild(opt);
-    });
+    if (!novoDepto) return;
+    const current = String(novoDepto.value || '');
+    novoDepto.innerHTML = '';
+    novoDepto.appendChild(new Option('— Sem departamento —', ''));
+    STATE.setores.forEach(s => novoDepto.appendChild(new Option(s.nome, String(s.id))));
+    novoDepto.value = current;
   }
   function renderResponsaveis(){
     if (!novoColab) return;
@@ -248,8 +257,8 @@
     Object.values(extraFields).forEach(el => { if (el) el.disabled = !!disabled; });
   }
   function setModalTitle(t){
-    const hdr = novoModal?.querySelector('header');
-    if (hdr) hdr.textContent = t || 'Cliente';
+    const title = novoModal?.querySelector('#novo-title, .modal-head h2');
+    if (title) title.textContent = t || 'Cliente';
   }
 
   function normalizeCliente(cli){
@@ -266,11 +275,28 @@
 
     if (novoNome)  novoNome.value  = (cli.nome || '').trim();
     if (novoTel)   novoTel.value   = formatTelBR(cli.telefone || '');
-    if (novoDepto) novoDepto.value = (cli.setor_nome || cli.departamento || '').trim();
+    if (novoDepto){
+      const depId = cli.departamento_id ?? cli.depto_id ?? cli.setor_id ?? null;
+      if (depId != null){
+        const value = String(depId);
+        if (![...novoDepto.options].some(opt => opt.value === value)){
+          novoDepto.appendChild(new Option(cli.departamento || `Departamento #${value}`, value));
+        }
+        novoDepto.value = value;
+      } else {
+        const depNome = String(cli.setor_nome || cli.departamento || '').trim().toLowerCase();
+        const found = STATE.setores.find(s => String(s.nome || '').trim().toLowerCase() === depNome);
+        novoDepto.value = found ? String(found.id) : '';
+      }
+    }
     if (novoSobre) novoSobre.value = (cli.sobre_cliente || cli.sobre || '').trim();
     if (novoColab) {
       const id = cli.colaborador_id ?? cli.responsavel_id ?? null;
-      novoColab.value = (id == null ? '' : String(id));
+      const value = id == null ? '' : String(id);
+      if (value && ![...novoColab.options].some(opt => opt.value === value)){
+        novoColab.appendChild(new Option(cli.colaborador_nome || cli.responsavel_nome || `Responsável #${value}`, value));
+      }
+      novoColab.value = value;
     }
 
     if (extraFields.cpf_cnpj)        extraFields.cpf_cnpj.value        = cli.cpf_cnpj || '';
@@ -307,7 +333,14 @@
 
     if (novoNome)  payload.nome          = (novoNome.value || '').trim() || null;
     if (novoTel)   payload.telefone      = digits(novoTel.value || '') || null;
-    if (novoDepto) payload.departamento  = (novoDepto.value || '').trim() || null;
+    if (novoDepto){
+      const depRaw = String(novoDepto.value || '');
+      const depId = depRaw === '' ? null : Number(depRaw);
+      payload.departamento_id = depId;
+      payload.departamento = depId == null
+        ? null
+        : (STATE.setores.find(s => Number(s.id) === depId)?.nome || null);
+    }
     if (novoSobre) payload.sobre_cliente = (novoSobre.value || '').trim() || null;
     if (novoColab){
       payload.colaborador_id =
@@ -373,13 +406,22 @@
   // Helpers de modal p/ reaproveitar o botão "Criar"
   // ==============================
   function hideCreateButton(){
-    if (!novoOkOriginal) return;
-    novoOkOriginal.dataset._origDisplay = novoOkOriginal.dataset._origDisplay || novoOkOriginal.style.display || '';
-    novoOkOriginal.style.display = 'none';
+    if (novoOkOriginal){
+      novoOkOriginal.dataset._origDisplay = novoOkOriginal.dataset._origDisplay || novoOkOriginal.style.display || '';
+      novoOkOriginal.style.display = 'none';
+    }
+    if (novoCancel){
+      novoCancel.dataset._origDisplay = novoCancel.dataset._origDisplay || novoCancel.style.display || '';
+      novoCancel.style.display = 'none';
+    }
   }
   function restoreCreateButton(){
-    if (!novoOkOriginal) return;
-    novoOkOriginal.style.display = novoOkOriginal.dataset._origDisplay || '';
+    if (novoOkOriginal){
+      novoOkOriginal.style.display = novoOkOriginal.dataset._origDisplay || '';
+    }
+    if (novoCancel){
+      novoCancel.style.display = novoCancel.dataset._origDisplay || '';
+    }
   }
   function removeDynamicButtons(){
     if (!novoModal) return;
@@ -391,21 +433,30 @@
     clienteModalMode = mode || 'new';
     novoModal.dataset.mode = clienteModalMode;
     novoModal.style.display = 'grid';
+    novoModal.classList.add('show');
+    novoModal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('has-modal');
   }
   function closeEditorModal(){
     if (!novoModal) return;
     const mode = novoModal.dataset.mode;
 
-    if (!mode || mode === 'new'){
-      novoModal.style.display = 'none';
-      return;
+    novoModal.style.display = 'none';
+    novoModal.classList.remove('show');
+    novoModal.setAttribute('aria-hidden', 'true');
+
+    if (!document.querySelector('.modal-backdrop.show')){
+      document.body.classList.remove('has-modal');
     }
 
-    novoModal.style.display = 'none';
+    if (!mode || mode === 'new') return;
+
     clienteModalMode = 'new';
     delete novoModal.dataset.mode;
     removeDynamicButtons();
     restoreCreateButton();
+    setFormDisabled(false);
+    resetSectionsCollapsed();
     setModalTitle('Novo cliente');
   }
 
@@ -437,13 +488,13 @@
       if (footer){
         const btnFechar = document.createElement('button');
         btnFechar.type = 'button';
-        btnFechar.className = 'btn ghost cli-dyn-btn';
+        btnFechar.className = 'btn btn-secondary cli-dyn-btn';
         btnFechar.textContent = 'Fechar';
         btnFechar.addEventListener('click', closeEditorModal);
 
         const btnEditar = document.createElement('button');
         btnEditar.type = 'button';
-        btnEditar.className = 'btn cli-dyn-btn';
+        btnEditar.className = 'btn btn-primary cli-dyn-btn';
         btnEditar.textContent = 'Editar';
         btnEditar.addEventListener('click', ()=> openClienteEdit(id));
 
@@ -478,13 +529,13 @@
       if (footer){
         const btnCancelar = document.createElement('button');
         btnCancelar.type = 'button';
-        btnCancelar.className = 'btn ghost cli-dyn-btn';
+        btnCancelar.className = 'btn btn-secondary cli-dyn-btn';
         btnCancelar.textContent = 'Cancelar';
         btnCancelar.addEventListener('click', closeEditorModal);
 
         const btnSalvar = document.createElement('button');
         btnSalvar.type = 'button';
-        btnSalvar.className = 'btn cli-dyn-btn';
+        btnSalvar.className = 'btn btn-primary cli-dyn-btn';
         btnSalvar.textContent = 'Salvar';
         btnSalvar.addEventListener('click', handleEditSave);
 
@@ -505,9 +556,9 @@
 
     await openClienteEdit(id);
 
-    setModalTitle('Campos personalizados');
+    setModalTitle('Editar ficha do cliente');
 
-    resetSectionsCollapsed();
+    resetSectionsCollapsed(1);
 
     const headers = novoModal.querySelectorAll('.cli-section-header');
     if (headers[1]) safeFocus(headers[1]);
@@ -539,7 +590,7 @@
     if (btnSalvar){ btnSalvar.disabled = true; btnSalvar.textContent = 'Salvando…'; }
 
     try{
-      await apiPatch(`/api/clientes/${id}`, payload).catch(()=>null);
+      await apiPatch(`/api/clientes/${id}/profile`, payload);
 
       let cli = null;
       try{ cli = await apiGet(`/api/clientes/${id}`); }catch{}
@@ -567,28 +618,66 @@
   // ======== INSTÂNCIA =========== (para botão "Mensagem")
   // ==============================
   function setActiveInstance({ id, slug }){
-    if (!id && !slug) return;
-    window.INSTANCIA_ATIVA      = id ?? slug;
-    window.INSTANCIA_ATIVA_ID   = id ?? null;
-    window.INSTANCIA_ATIVA_SLUG = slug ?? null;
-    try{ LS.setItem('INSTANCIA_ATIVA', String(window.INSTANCIA_ATIVA)); }catch{}
-    try{ if (id!=null) LS.setItem('INSTANCIA_ATIVA_ID', String(id)); }catch{}
-    try{ if (slug)     LS.setItem('INSTANCIA_ATIVA_SLUG', String(slug)); }catch{}
+    const normalizedId = normalizeInstanceId(id);
+    const normalizedSlug = String(slug || '').trim() || null;
+    if (normalizedId == null && !normalizedSlug) return;
+
+    const activeValue = normalizedId ?? normalizedSlug;
+    window.INSTANCIA_ATIVA      = activeValue;
+    window.INSTANCIA_ATIVA_ID   = normalizedId;
+    window.INSTANCIA_ATIVA_SLUG = normalizedSlug;
+
+    try{ LS.setItem('INSTANCIA_ATIVA', String(activeValue)); }catch{}
     try{
-      document.cookie = `INSTANCIA_ATIVA=${encodeURIComponent(String(window.INSTANCIA_ATIVA))}; path=/; max-age=${60*60*24*30}`;
+      if (normalizedId != null) LS.setItem('INSTANCIA_ATIVA_ID', String(normalizedId));
+      else LS.removeItem('INSTANCIA_ATIVA_ID');
     }catch{}
+    try{
+      if (normalizedSlug) LS.setItem('INSTANCIA_ATIVA_SLUG', normalizedSlug);
+      else LS.removeItem('INSTANCIA_ATIVA_SLUG');
+    }catch{}
+    try{
+      document.cookie = `INSTANCIA_ATIVA=${encodeURIComponent(String(activeValue))}; path=/; max-age=${60*60*24*30}`;
+    }catch{}
+  }
+
+  function normalizeInstanceId(value){
+    if (value == null || value === '') return null;
+    const raw = String(value).trim();
+    if (!/^\d+$/.test(raw)) return null;
+    const id = Number(raw);
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
   }
 
   function normInstances(items){
     if (!Array.isArray(items)) return [];
-    return items.map(x=>{
-      const id   = (x.id!=null) ? Number(x.id)
-                : (x.instancia_id!=null ? Number(x.instancia_id) : null);
-      const slug = String(x.instance_name ?? x.slug ?? x.nome ?? '').trim();
-      const name = String((x.apelido ?? x.name ?? x.nome ?? slug) || "").trim();
-      const number = x.numero_instancia ?? x.numero ?? null;
-      const connected = !!x.connected || !!x.online || (String(x.status||'').toLowerCase()==='connected');
-      return (id || slug) ? { id, slug, name: name || slug, number, connected } : null;
+
+    return items.map((x, index)=>{
+      const rawId = x?.id ?? x?.instancia_id ?? x?.instance_id ?? null;
+      const id = normalizeInstanceId(rawId);
+      const slug = String(
+        x?.instance_name ??
+        x?.instanceName ??
+        x?.slug ??
+        x?.instancia ??
+        x?.nome_instancia ??
+        ''
+      ).trim();
+      const name = String(
+        x?.apelido ??
+        x?.name ??
+        x?.nome ??
+        x?.display_name ??
+        slug
+      ).trim();
+      const number = x?.numero_instancia ?? x?.numero ?? x?.telefone ?? null;
+      const status = String(x?.status ?? x?.connectionStatus ?? '').toLowerCase();
+      const connected = x?.connected === true || x?.online === true || ['connected', 'open', 'online'].includes(status);
+      const key = id != null ? `id:${id}` : (slug ? `slug:${slug}` : `idx:${index}`);
+
+      return (id != null || slug)
+        ? { id, slug, key, name: name || slug || `Instância ${index + 1}`, number, connected }
+        : null;
     }).filter(Boolean);
   }
 
@@ -604,12 +693,32 @@
     for (const url of fallbacks){
       try{
         const d = await apiGet(url);
-        const items = Array.isArray(d?.items) ? d.items : (Array.isArray(d) ? d : []);
+        const items = Array.isArray(d?.items)
+          ? d.items
+          : (Array.isArray(d?.instancias) ? d.instancias : (Array.isArray(d) ? d : []));
         const arr = normInstances(items);
         if (arr.length) return arr;
       }catch{}
     }
     return [];
+  }
+
+  function showInstanciaModal(back){
+    if (!back) return;
+    back.style.display = 'grid';
+    back.classList.add('show');
+    back.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('has-modal');
+  }
+
+  function hideInstanciaModal(back){
+    if (!back) return;
+    back.style.display = 'none';
+    back.classList.remove('show');
+    back.setAttribute('aria-hidden', 'true');
+    if (!document.querySelector('.modal-backdrop.show')){
+      document.body.classList.remove('has-modal');
+    }
   }
 
   function ensureInstanciaModal(){
@@ -619,30 +728,38 @@
     back = document.createElement('div');
     back.id = 'instancia-backdrop';
     back.className = 'modal-backdrop';
+    back.setAttribute('aria-hidden', 'true');
     back.innerHTML = `
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="instTitle">
-        <button class="modal-close" id="instClose" aria-label="Fechar">×</button>
-        <header id="instTitle">Escolher instância</header>
-        <div class="body">
-          <div class="row">
-            <div id="instList" class="inst-list" style="display:grid;gap:.5rem"></div>
-            <div class="muted" id="instInfo" style="margin-top:.25rem"></div>
+      <section class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="instTitle">
+        <header class="modal-head">
+          <div>
+            <span class="modal-kicker">Atendimento</span>
+            <h2 id="instTitle">Escolher instância</h2>
+            <p>Clique no número do WhatsApp que será usado para abrir a conversa.</p>
           </div>
+          <button class="modal-close" id="instClose" type="button" aria-label="Fechar">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </header>
+        <div class="modal-body">
+          <div id="instList" class="inst-list"></div>
+          <div class="modal-helper" id="instInfo"></div>
         </div>
-        <footer>
-          <button class="btn ghost" id="instCancel">Cancelar</button>
-          <button class="btn" id="instOk">Continuar</button>
+        <footer class="modal-foot">
+          <button class="btn btn-secondary" id="instCancel" type="button">Cancelar</button>
+          <button class="btn btn-primary" id="instOk" type="button">Abrir conversa</button>
         </footer>
-      </div>`;
+      </section>`;
     document.body.appendChild(back);
 
-    back.addEventListener('mousedown', e => { if (e.target === back) back.style.display='none'; });
-    back.querySelector('#instClose').addEventListener('click', ()=> back.style.display='none');
-    back.querySelector('#instCancel').addEventListener('click', ()=> back.style.display='none');
+    const cancel = () => back.__cancel?.();
+    back.addEventListener('mousedown', e => { if (e.target === back) cancel(); });
+    back.querySelector('#instClose').addEventListener('click', cancel);
+    back.querySelector('#instCancel').addEventListener('click', cancel);
 
     document.addEventListener('keydown', e=>{
-      if (back.style.display !== 'grid') return;
-      if (e.key === 'Escape') back.style.display='none';
+      if (!back.classList.contains('show')) return;
+      if (e.key === 'Escape') cancel();
       if (e.key === 'Enter'){
         const ok = back.querySelector('#instOk');
         if (ok && !ok.disabled) ok.click();
@@ -651,7 +768,15 @@
     return back;
   }
 
-  function renderInstanciasList(back, insts){
+  function getSelectedInstance(back){
+    const radio = back?.querySelector('input[name="instRadio"]:checked');
+    if (!radio) return null;
+    const id = normalizeInstanceId(radio.dataset.id || radio.value);
+    const slug = String(radio.dataset.slug || '').trim() || null;
+    return (id != null || slug) ? { id, slug } : null;
+  }
+
+  function renderInstanciasList(back, insts, onChoose){
     const list = back.querySelector('#instList');
     const info = back.querySelector('#instInfo');
     list.innerHTML = '';
@@ -661,48 +786,60 @@
       return String(a.name).localeCompare(String(b.name),'pt-BR');
     });
 
-    const ativa = (LS.getItem('INSTANCIA_ATIVA_ID') || LS.getItem('INSTANCIA_ATIVA') || '').trim();
+    const ativaId = String(LS.getItem('INSTANCIA_ATIVA_ID') || '').trim();
+    const ativaSlug = String(LS.getItem('INSTANCIA_ATIVA_SLUG') || LS.getItem('INSTANCIA_ATIVA') || '').trim();
 
-    insts.forEach((i, idx) => {
-      const id = `inst-opt-${i.id ?? i.slug ?? idx}`;
+    insts.forEach((inst, idx) => {
+      const domId = `inst-opt-${idx}`;
       const label = [
-        i.name || i.slug,
-        i.number ? ` • ${i.number}` : '',
-        i.connected ? '' : ' • offline'
+        inst.name || inst.slug,
+        inst.number ? ` • ${inst.number}` : '',
+        inst.connected ? '' : ' • offline'
       ].join('');
 
       const row = document.createElement('label');
-      row.setAttribute('for', id);
-      row.className = 'chip';
-      row.style.display = 'inline-flex';
-      row.style.alignItems = 'center';
-      row.style.gap = '.5rem';
-      row.style.cursor = 'pointer';
-      row.style.userSelect = 'none';
+      row.setAttribute('for', domId);
+      row.className = 'chip inst-option';
+      row.dataset.instanceKey = inst.key;
 
-      row.innerHTML = `
-        <input type="radio" name="instRadio" id="${id}" value="${i.id ?? ''}" data-slug="${i.slug||''}">
-        <span>${label}</span>
-      `;
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'instRadio';
+      radio.id = domId;
+      radio.value = inst.id == null ? '' : String(inst.id);
+      radio.dataset.id = inst.id == null ? '' : String(inst.id);
+      radio.dataset.slug = inst.slug || '';
+
+      const text = document.createElement('span');
+      text.textContent = label;
+
+      row.append(radio, text);
       list.appendChild(row);
-
-      const r = row.querySelector('input[type="radio"]');
-      if (ativa && (ativa === String(i.id) || ativa === String(i.slug))) {
-        r.checked = true;
+      if ((ativaId && ativaId === String(inst.id)) || (ativaSlug && ativaSlug === String(inst.slug))) {
+        radio.checked = true;
       }
+
+      row.addEventListener('click', (event)=>{
+        event.preventDefault();
+        radio.checked = true;
+        info.textContent = `Instância selecionada: ${inst.name || inst.slug}. Abrindo conversa…`;
+        onChoose?.({ id: inst.id, slug: inst.slug });
+      });
     });
 
     if (!list.querySelector('input[type="radio"]:checked')){
-      (list.querySelector('input[type="radio"]') || {}).checked = true;
+      const first = list.querySelector('input[type="radio"]');
+      if (first) first.checked = true;
     }
 
-    info.textContent = insts.length ? `Instâncias encontradas: ${insts.length}` : 'Nenhuma instância encontrada.';
+    info.textContent = insts.length
+      ? `Instâncias encontradas: ${insts.length}. Clique em uma opção para abrir.`
+      : 'Nenhuma instância encontrada.';
   }
 
-  async function chooseInstanceId(){
-    if (!STATE.instancias){
-      STATE.instancias = await fetchInstances().catch(()=>[]);
-    }
+  async function chooseInstance(){
+    // Atualiza a lista a cada abertura para não manter instâncias antigas em cache.
+    STATE.instancias = await fetchInstances().catch(()=>[]);
     const insts = STATE.instancias || [];
 
     if (insts.length === 0){
@@ -712,41 +849,67 @@
     if (insts.length === 1){
       const one = insts[0];
       setActiveInstance({ id: one.id, slug: one.slug });
-      return one.id ?? null;
+      return { id: one.id, slug: one.slug };
     }
 
     const back = ensureInstanciaModal();
-    renderInstanciasList(back, insts);
 
     return await new Promise(resolve=>{
-      back.style.display = 'grid';
+      let settled = false;
+      let autoOpenTimer = null;
+
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        if (autoOpenTimer) clearTimeout(autoOpenTimer);
+        back.__cancel = null;
+        hideInstanciaModal(back);
+        resolve(value);
+      };
+
+      const choose = (selected) => {
+        if (!selected || (selected.id == null && !selected.slug)) return;
+        setActiveInstance(selected);
+        // Pequeno atraso para o clique marcar visualmente antes da navegação.
+        if (autoOpenTimer) clearTimeout(autoOpenTimer);
+        autoOpenTimer = setTimeout(()=> finish(selected), 80);
+      };
+
+      back.__cancel = () => finish(null);
+      renderInstanciasList(back, insts, choose);
+      showInstanciaModal(back);
+
       const ok = back.querySelector('#instOk');
       ok.onclick = ()=>{
-        const r = back.querySelector('input[name="instRadio"]:checked');
-        back.style.display='none';
-        if (!r){ resolve(null); return; }
-        const id = r.value ? Number(r.value) : null;
-        const slug = r.dataset.slug || null;
-        setActiveInstance({ id, slug });
-        resolve(id);
+        const selected = getSelectedInstance(back);
+        if (!selected){
+          toast('Selecione uma instância.','warn');
+          return;
+        }
+        choose(selected);
       };
-      back.querySelector('#instCancel').onclick = ()=>{ back.style.display='none'; resolve(null); };
+
       setTimeout(()=> back.querySelector('input[name="instRadio"]:checked')?.focus?.(), 0);
     });
   }
 
   async function openClienteMensagem(clienteId){
-    const instancia_id = await chooseInstanceId();
-    if (!instancia_id){
-      toast('Nenhuma instância selecionada.','warn');
-      return;
+    const selected = await chooseInstance();
+    if (!selected || (selected.id == null && !selected.slug)){
+      return false;
     }
 
-    // 👉 rota nova do painel de atendimento
     const u = new URL('/atendimentos', location.origin);
     u.searchParams.set('cliente_id', String(clienteId));
-    u.searchParams.set('instancia_id', String(instancia_id));
-    location.href = u.toString();
+
+    if (selected.id != null){
+      u.searchParams.set('instancia_id', String(selected.id));
+    } else {
+      u.searchParams.set('instancia', String(selected.slug));
+    }
+
+    location.assign(u.toString());
+    return true;
   }
 
   // ==============================
@@ -763,7 +926,8 @@
     openView:         openClienteView,
     openEdit:         openClienteEdit,
     openMessage:      openClienteMensagem,
-    openCustomFields: openClienteCustomFields
+    openCustomFields: openClienteCustomFields,
+    close:            closeEditorModal
   });
 
   window.ClienteEditor = api;

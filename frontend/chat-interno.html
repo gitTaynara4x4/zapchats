@@ -25,12 +25,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
-  <link rel="stylesheet" href="/frontend/css/chat-interno.css?v=20260620-chat-fast"/>
+  <link rel="stylesheet" href="/frontend/css/chat-interno.css?v=20260725-presence-v1"/>
 
   <script src="/frontend/js/app-base.js" defer></script>
   <script src="/frontend/js/auth.js" defer></script>
   <script src="/frontend/js/page-guard.js" defer></script>
-  <script src="/frontend/js/pages/chat-interno.js?v=20260620-chat-fast" defer></script>
+  <script src="/frontend/js/pages/chat-interno.js?v=20260725-presence-v1" defer></script>
 </head>
 <body data-pane="list">
   <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
@@ -146,6 +146,7 @@
           <div class="profile-avatar avatar has-user-icon" id="profileAvatar" aria-hidden="true"><i class="fa-solid fa-user"></i></div>
           <strong id="profileName">Nenhuma conversa</strong>
           <small id="profileRole">Selecione um colaborador</small>
+          <small id="profileLastAccess" class="profile-last-access" hidden></small>
 
           <div class="profile-actions">
             <button type="button" title="Mensagem"><i class="fa-regular fa-comment-dots"></i></button>

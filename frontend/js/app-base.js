@@ -672,7 +672,55 @@
   })();
 
   // =========================================================
-  // 6) Fallback duro: se algo travar, libera após 2.5s
+  // 6) Presença global do usuário no próprio ZapsChat
+  // =========================================================
+  (function bootZapsChatPresence() {
+    if (isPublicLikePage()) return;
+
+    var tries = 0;
+    var maxTries = 20;
+
+    function readEmpresaId() {
+      var candidates = [];
+      try { candidates.push(window.APP_EMPRESA_ID, window.EMPRESA_ID); } catch (e) {}
+      try { candidates.push(localStorage.getItem('empresa_id')); } catch (e) {}
+      try { candidates.push(getCookie('empresa_id'), getCookie('EMPRESA_ID')); } catch (e) {}
+
+      for (var i = 0; i < candidates.length; i++) {
+        var value = Number(candidates[i] || 0);
+        if (Number.isFinite(value) && value > 0) return value;
+      }
+      return 0;
+    }
+
+    function startPresence() {
+      var empresaId = readEmpresaId();
+      if (!empresaId) {
+        tries += 1;
+        if (tries < maxTries) setTimeout(startPresence, 500);
+        return;
+      }
+
+      import('/frontend/js/realtime/ws-core.js?v=global-presence-20260725-1')
+        .then(function(core) {
+          if (core && typeof core.ensureEmpresaWS === 'function') {
+            core.ensureEmpresaWS(empresaId);
+          }
+        })
+        .catch(function(err) {
+          console.warn('[app-base] presença em tempo real indisponível', err);
+        });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', startPresence, { once: true });
+    } else {
+      startPresence();
+    }
+  })();
+
+  // =========================================================
+  // 7) Fallback duro: se algo travar, libera após 2.5s
   // =========================================================
   setTimeout(markShellReady, 2500);
 

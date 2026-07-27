@@ -6,10 +6,30 @@ REDIS_URL   = os.getenv("REDIS_URL")
 REDIS_PREF  = os.getenv("REDIS_PREFIX", "zap")
 REDIS_TTL_S = int(os.getenv("REDIS_TTL_SECONDS", "120"))
 
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return max(0.1, float(str(os.getenv(name, default)).strip()))
+    except Exception:
+        return default
+
+
+# Redis é complementar para presença/cache. Ele nunca pode segurar uma rota
+# HTTP por dezenas de segundos caso a rede ou o serviço estejam indisponíveis.
+REDIS_CONNECT_TIMEOUT_S = _env_float("REDIS_CONNECT_TIMEOUT_SECONDS", 0.8)
+REDIS_COMMAND_TIMEOUT_S = _env_float("REDIS_COMMAND_TIMEOUT_SECONDS", 1.0)
+
 r = None
 if REDIS_URL:
     try:
-        r = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+        r = redis.Redis.from_url(
+            REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=REDIS_CONNECT_TIMEOUT_S,
+            socket_timeout=REDIS_COMMAND_TIMEOUT_S,
+            retry_on_timeout=False,
+            health_check_interval=30,
+        )
     except Exception:
         r = None
 

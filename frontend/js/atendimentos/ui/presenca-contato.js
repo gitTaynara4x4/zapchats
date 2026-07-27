@@ -8,14 +8,17 @@
   if (window.__ZC_CONTACT_PRESENCE_LOADED__) return;
   window.__ZC_CONTACT_PRESENCE_LOADED__ = true;
 
-  const VERSION = 'zc-contact-presence-v1';
+  const VERSION = 'zc-contact-presence-v2-active-subscribe';
   const DEFAULT_TTL_SECONDS = 120;
   const ACTIVITY_TTL_SECONDS = 10;
+  const SUBSCRIBE_COOLDOWN_MS = 45000;
 
   let current = null;
   let currentPresence = null;
   let requestSeq = 0;
   let requestController = null;
+  let subscribeController = null;
+  const lastSubscribeAtByKey = new Map();
 
   function asInt(value) {
     const n = Number(value);
@@ -200,6 +203,56 @@
     return clienteId === current.entityId && instanciaId === current.instanciaId;
   }
 
+  async function subscribeCurrentPresence(options = {}) {
+    if (!current || current.kind !== 'c') return false;
+
+    const force = options?.force === true;
+    const ref = { ...current };
+    const lastAt = Number(lastSubscribeAtByKey.get(ref.key) || 0);
+    if (!force && Date.now() - lastAt < SUBSCRIBE_COOLDOWN_MS) return true;
+
+    lastSubscribeAtByKey.set(ref.key, Date.now());
+    try { subscribeController?.abort(); } catch (_) {}
+    subscribeController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+
+    const url =
+      `/api/atendimento/conversas/${encodeURIComponent(ref.entityId)}/presenca/assinar` +
+      `?instancia_id=${encodeURIComponent(ref.instanciaId)}`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+        signal: subscribeController?.signal,
+      });
+
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        console.debug('[ZapsChat][presenca] assinatura recusada', {
+          status: response.status,
+          detail: detail.slice(0, 240),
+        });
+        if (response.status >= 500) lastSubscribeAtByKey.delete(ref.key);
+        return false;
+      }
+
+      // A Evolution executa a chamada em segundo plano. Esta leitura cobre o
+      // caso em que o evento chegou ao backend, mas o WebSocket da aba perdeu
+      // a primeira atualização durante a troca de conversa.
+      window.setTimeout(() => {
+        if (current?.key === ref.key) fetchCurrentPresence();
+      }, 1600);
+      return true;
+    } catch (error) {
+      if (error?.name !== 'AbortError') {
+        lastSubscribeAtByKey.delete(ref.key);
+        console.debug('[ZapsChat][presenca] falha ao assinar contato', error);
+      }
+      return false;
+    }
+  }
+
   async function fetchCurrentPresence() {
     if (!current || current.kind !== 'c') return;
 
@@ -241,6 +294,7 @@
     hide();
 
     if (current?.kind === 'c') {
+      subscribeCurrentPresence();
       fetchCurrentPresence();
     }
   }
@@ -260,6 +314,7 @@
 
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && current?.kind === 'c') {
+      subscribeCurrentPresence();
       fetchCurrentPresence();
     }
   });
@@ -271,6 +326,7 @@
   window.ZCContactPresence = Object.freeze({
     version: VERSION,
     refresh: fetchCurrentPresence,
+    subscribe: subscribeCurrentPresence,
     render,
     current: () => (current ? { ...current } : null),
     state: () => (currentPresence ? { ...currentPresence } : null),

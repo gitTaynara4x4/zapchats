@@ -3127,20 +3127,6 @@ function handleMessageImmediate(ev) {
   const sTs = Number(data.serverTimestamp ?? 0);
   if (Number.isFinite(sTs) && sTs > 0) lastServerTs = sTs;
 
-  if (data.type === 'presence_update') {
-    const detail = { ...data };
-
-    try {
-      window.dispatchEvent(new CustomEvent('zc:presence-update', { detail }));
-    } catch {}
-
-    try {
-      document.dispatchEvent(new CustomEvent('ws:presence_update', { detail }));
-    } catch {}
-
-    return;
-  }
-
   if (data.type === 'history_sync_start') {
     document.dispatchEvent(new CustomEvent('ws:history_sync_start'));
     return;

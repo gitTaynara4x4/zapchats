@@ -1,6 +1,6 @@
 // frontend/js/pages/colaboradores/lista.js
 
-import { state, EDIT_PERM } from './state.js';
+import { state, EDIT_PERM, EMPRESA_ID } from './state.js';
 import { apiGet, authFetch, withEmpresa, parseMaybeJSON, throwHTTP } from './api.js';
 import { els, $ } from './dom.js';
 import { debounce, normStr } from './helpers.js';
@@ -10,27 +10,246 @@ import {
   coalescePhone,
   coalesceCargo,
   coalesceDeptId,
-  coalesceDeptName
+  coalesceDeptName,
+  isAdminFlag
 } from './coalesce.js';
 import { invalidateAvatarThumb, mountMiniAvatarInto } from './avatar.js';
 import { toast, showConfirm } from './feedback.js';
 import { hasPerm } from './permissions.js';
 import { saveEmpresaLoginConfig } from './empresa.js';
 
-export async function loadColaboradores(){
+
+const LIST_SLOW_NOTICE_MS = 4500;
+const LIST_CACHE_VERSION = 'v1';
+const LIST_CACHE_FRESH_MS = 2 * 60 * 1000;
+const LIST_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
+let listLoading = false;
+let listLoadError = null;
+let listSlowTimer = null;
+let activeLoadId = 0;
+
+function listCacheKey(){
+  const empresaId = Number(
+    EMPRESA_ID ||
+    window.APP_EMPRESA_ID ||
+    localStorage.getItem('empresa_id') ||
+    0
+  );
+
+  const userScope = String(
+    localStorage.getItem('usuario_id') ||
+    localStorage.getItem('usuario_email') ||
+    'usuario'
+  ).trim();
+
+  return empresaId
+    ? `zc:colaboradores:${LIST_CACHE_VERSION}:empresa:${empresaId}:user:${encodeURIComponent(userScope)}`
+    : '';
+}
+
+function readListCache(){
+  const key = listCacheKey();
+  if (!key) return null;
+
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    const savedAt = Number(parsed?.savedAt || 0);
+    const items = Array.isArray(parsed?.items) ? parsed.items : null;
+    const ageMs = Date.now() - savedAt;
+
+    if (!items || !savedAt || ageMs < 0 || ageMs > LIST_CACHE_MAX_AGE_MS) {
+      sessionStorage.removeItem(key);
+      return null;
+    }
+
+    return { items, savedAt, ageMs };
+  } catch (e) {
+    console.warn('[colaboradores/cache] leitura inválida', e);
+    try { sessionStorage.removeItem(key); } catch {}
+    return null;
+  }
+}
+
+function writeListCache(items){
+  const key = listCacheKey();
+  if (!key || !Array.isArray(items)) return;
+
+  try {
+    sessionStorage.setItem(key, JSON.stringify({
+      savedAt: Date.now(),
+      items
+    }));
+  } catch (e) {
+    console.warn('[colaboradores/cache] não foi possível salvar', e);
+  }
+}
+
+function listUI(){
+  return {
+    region: document.querySelector('#colab-list-region'),
+    loading: document.querySelector('#colab-loading-state'),
+    loadingTitle: document.querySelector('#colab-loading-title'),
+    loadingDetail: document.querySelector('#colab-loading-detail'),
+    error: document.querySelector('#colab-error-state'),
+    errorDetail: document.querySelector('#colab-error-detail'),
+    selectAll: document.querySelector('#colab-select-all')
+  };
+}
+
+function loadingRowsHTML(count = 4){
+  const row = `
+    <tr class="colab-skeleton-row" aria-hidden="true">
+      <td class="check-col"><span class="colab-skeleton sk-check"></span></td>
+      <td><span class="colab-skeleton sk-member"></span></td>
+      <td><span class="colab-skeleton sk-status"></span></td>
+      <td><span class="colab-skeleton sk-email"></span></td>
+      <td><span class="colab-skeleton sk-teams"></span></td>
+      <td><span class="colab-skeleton sk-actions"></span></td>
+    </tr>`;
+  return Array.from({ length: count }, () => row).join('');
+}
+
+function setListStatsLoading(){
+  ['#count-colaboradores', '#stat-colab-total', '#stat-colab-active', '#stat-colab-pending', '#overview-colab-total']
+    .forEach(selector => {
+      const el = document.querySelector(selector);
+      if (el) el.textContent = '…';
+    });
+}
+
+function beginListLoading(){
+  listLoading = true;
+  listLoadError = null;
+
+  clearTimeout(listSlowTimer);
+
+  const { region, loading, loadingTitle, loadingDetail, error, selectAll } = listUI();
+  const { tbody, emptyState } = els();
+
+  region?.classList.add('is-loading');
+  region?.classList.remove('has-error');
+  region?.setAttribute('aria-busy', 'true');
+
+  if (loading) loading.hidden = false;
+  if (error) error.hidden = true;
+  if (loadingTitle) loadingTitle.textContent = 'Carregando equipe...';
+  if (loadingDetail) loadingDetail.textContent = 'Buscando os colaboradores da empresa.';
+  if (emptyState) emptyState.style.display = 'none';
+  if (selectAll) {
+    selectAll.checked = false;
+    selectAll.indeterminate = false;
+    selectAll.disabled = true;
+  }
+  if (tbody) tbody.innerHTML = loadingRowsHTML();
+
+  setListStatsLoading();
+
+  listSlowTimer = window.setTimeout(() => {
+    if (!listLoading) return;
+    const ui = listUI();
+    if (ui.loadingTitle) ui.loadingTitle.textContent = 'A equipe ainda está carregando...';
+    if (ui.loadingDetail) {
+      ui.loadingDetail.textContent = 'A API está demorando mais que o normal, mas o ZapsChat continua tentando.';
+    }
+  }, LIST_SLOW_NOTICE_MS);
+}
+
+function finishListLoading(){
+  listLoading = false;
+  clearTimeout(listSlowTimer);
+  listSlowTimer = null;
+
+  const { region, loading, error, selectAll } = listUI();
+  region?.classList.remove('is-loading', 'has-error');
+  region?.setAttribute('aria-busy', 'false');
+  if (loading) loading.hidden = true;
+  if (error) error.hidden = true;
+  if (selectAll) selectAll.disabled = false;
+}
+
+function failListLoading(error){
+  listLoading = false;
+  listLoadError = error || new Error('Falha ao carregar colaboradores.');
+  clearTimeout(listSlowTimer);
+  listSlowTimer = null;
+
+  const { region, loading, error: errorBox, errorDetail, selectAll } = listUI();
+  const { tbody, emptyState } = els();
+
+  region?.classList.remove('is-loading');
+  region?.classList.add('has-error');
+  region?.setAttribute('aria-busy', 'false');
+  if (loading) loading.hidden = true;
+  if (errorBox) errorBox.hidden = false;
+  if (errorDetail) {
+    const status = Number(listLoadError?.status || 0);
+    errorDetail.textContent = status === 401
+      ? 'Sua sessão expirou. Entre novamente e tente carregar a equipe.'
+      : 'A lista não foi perdida. Confira a conexão e tente novamente.';
+  }
+  if (selectAll) selectAll.disabled = !state.colaboradores.length;
+  if (emptyState) emptyState.style.display = 'none';
+  if (tbody && !state.colaboradores.length) tbody.innerHTML = '';
+}
+
+export async function loadColaboradores({ preferCache = false } = {}){
+  const loadId = ++activeLoadId;
   const p = new URLSearchParams();
 
   if (state.filtroTexto) p.set('q', state.filtroTexto);
 
-  const url = '/api/colaboradores' + (p.toString() ? `?${p}` : '');
+  const hasServerFilter = p.toString().length > 0;
+  const url = '/api/colaboradores' + (hasServerFilter ? `?${p}` : '');
+  const cached = preferCache && !hasServerFilter ? readListCache() : null;
+  const hasCachedList = !!cached;
+
+  if (cached) {
+    state.colaboradores = cached.items;
+    listLoadError = null;
+    finishListLoading();
+    renderLista();
+
+    // Ao voltar para a página logo depois do primeiro acesso, usa somente o
+    // cache da sessão. A presença online continua atualizada pelo WebSocket.
+    if (cached.ageMs <= LIST_CACHE_FRESH_MS) {
+      return true;
+    }
+  } else {
+    beginListLoading();
+  }
 
   try {
     const res = await apiGet(url);
+    if (loadId !== activeLoadId) return false;
+
     state.colaboradores = Array.isArray(res) ? res : (res?.items || []);
+    listLoadError = null;
+
+    if (!hasServerFilter) {
+      writeListCache(state.colaboradores);
+    }
+
+    finishListLoading();
+    renderLista();
+    return true;
   } catch (e) {
+    if (loadId !== activeLoadId) return false;
+
     console.error('[colaboradores] erro ao carregar colaboradores:', e);
-    state.colaboradores = [];
-    toast('Erro ao carregar colaboradores.', 'err');
+
+    // Se a lista já apareceu pelo cache, não substitui tudo por uma tela de
+    // erro. Mantém os dados visíveis e tenta novamente na próxima entrada.
+    if (hasCachedList) {
+      finishListLoading();
+      return true;
+    }
+
+    failListLoading(e);
+    toast('Não foi possível carregar os colaboradores.', 'err');
+    return false;
   }
 }
 
@@ -59,6 +278,145 @@ function handleFrom(name, email){
     .slice(0, 24);
 
   return '@' + (cleaned || 'colaborador');
+}
+
+function formatLastAccess(value){
+  if (!value) return 'Nunca acessou o ZapsChat';
+
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return 'Nunca acessou o ZapsChat';
+
+  const now = new Date();
+  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = Math.round((today.getTime() - day.getTime()) / 86400000);
+  const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  if (diffDays === 0) return `Último acesso hoje às ${time}`;
+  if (diffDays === 1) return `Último acesso ontem às ${time}`;
+
+  const date = d.toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    ...(d.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' })
+  });
+
+  return `Último acesso em ${date} às ${time}`;
+}
+
+function normalizedPresenceStatus(value){
+  const status = String(value || '').trim().toLowerCase();
+  return ['online', 'away'].includes(status) ? status : 'offline';
+}
+
+function presenceInfo(c){
+  const status = normalizedPresenceStatus(c?.presence_status);
+
+  if (status === 'online') {
+    return {
+      status,
+      label: 'Online agora',
+      cls: 'online',
+      title: 'Esta pessoa está usando o ZapsChat agora.'
+    };
+  }
+
+  if (status === 'away') {
+    return {
+      status,
+      label: 'Ausente',
+      cls: 'away',
+      title: 'O ZapsChat está aberto, mas a pessoa está ausente ou em outra aba.'
+    };
+  }
+
+  const label = formatLastAccess(c?.last_access_at);
+  return {
+    status: 'offline',
+    label,
+    cls: 'offline',
+    title: label
+  };
+}
+
+function updateOpenProfilePresence(c){
+  if (!c || Number(state.viewing?.id || 0) !== Number(c.id || 0)) return;
+
+  const presence = presenceInfo(c);
+  const subtitle = document.querySelector('#perfil-subtitle');
+  if (subtitle) subtitle.textContent = presence.label;
+
+  const statusText = document.querySelector('#p-status-text');
+  const statusDot = document.querySelector('#p-status');
+  if (statusText) statusText.textContent = presence.label;
+  if (statusDot) {
+    statusDot.dataset.presence = presence.status;
+    statusDot.style.background = presence.status === 'online'
+      ? '#16a34a'
+      : (presence.status === 'away' ? '#f59e0b' : '#98a2b3');
+  }
+}
+
+export function applyPresenceUpdate(payload){
+  if (!payload || typeof payload !== 'object') return false;
+
+  const id = Number(payload.colaborador_id || payload.id || 0);
+  if (!id) return false;
+
+  const colaborador = state.colaboradores.find(c => Number(c?.id || 0) === id);
+  if (!colaborador) return false;
+
+  colaborador.presence_status = normalizedPresenceStatus(payload.presence_status);
+  colaborador.presence_updated_at = payload.presence_updated_at || null;
+  colaborador.presence_expires_at = payload.presence_expires_at || null;
+  colaborador.presence_activity_at = payload.presence_activity_at || null;
+  colaborador.presence_session_count = Number(payload.presence_session_count || 0);
+
+  if (colaborador.presence_status === 'offline' && payload.presence_updated_at) {
+    colaborador.last_access_at = payload.presence_updated_at;
+  }
+
+  if (Number(state.viewing?.id || 0) === id) {
+    Object.assign(state.viewing, colaborador);
+    updateOpenProfilePresence(colaborador);
+  }
+
+  renderLista();
+  return true;
+}
+
+export function applyPresenceSnapshot(items){
+  const active = new Map();
+  (Array.isArray(items) ? items : []).forEach(item => {
+    const id = Number(item?.colaborador_id || item?.id || 0);
+    if (id) active.set(id, item);
+  });
+
+  state.colaboradores.forEach(c => {
+    const id = Number(c?.id || 0);
+    const item = active.get(id);
+    if (item) {
+      c.presence_status = normalizedPresenceStatus(item.presence_status);
+      c.presence_updated_at = item.presence_updated_at || null;
+      c.presence_expires_at = item.presence_expires_at || null;
+      c.presence_activity_at = item.presence_activity_at || null;
+      c.presence_session_count = Number(item.presence_session_count || 0);
+    } else {
+      c.presence_status = 'offline';
+      c.presence_expires_at = null;
+      c.presence_session_count = 0;
+    }
+  });
+
+  if (state.viewing?.id) {
+    const current = state.colaboradores.find(c => Number(c?.id || 0) === Number(state.viewing.id));
+    if (current) {
+      Object.assign(state.viewing, current);
+      updateOpenProfilePresence(current);
+    }
+  }
+
+  renderLista();
 }
 
 function isInactive(c){
@@ -118,7 +476,7 @@ function teamTagsFor(c){
     c.departamentos_ids.forEach(id => add(setorNameById(id)));
   }
 
-  if (c?.is_admin) add('Admin');
+  if (isAdminFlag(c)) add('Proprietário');
 
   if (!out.length) out.push('Sem departamento');
 
@@ -172,7 +530,7 @@ function filteredRows(){
 
 function syncSelectAllState(){
   const selectAll = $('#colab-select-all');
-  const checks = Array.from(document.querySelectorAll('#tabela-colaboradores .row-select'));
+  const checks = Array.from(document.querySelectorAll('#tabela-colaboradores .row-select:not(:disabled)'));
   const checked = checks.filter(c => c.checked);
 
   if (selectAll) {
@@ -189,6 +547,23 @@ function syncSelectAllState(){
 
 export function renderLista(){
   const { tbody, emptyState, countEl } = els();
+
+  if (listLoading) {
+    if (emptyState) emptyState.style.display = 'none';
+    if (tbody && !tbody.querySelector('.colab-skeleton-row')) {
+      tbody.innerHTML = loadingRowsHTML();
+    }
+    syncSelectAllState();
+    return;
+  }
+
+  if (listLoadError && !state.colaboradores.length) {
+    if (tbody) tbody.innerHTML = '';
+    if (emptyState) emptyState.style.display = 'none';
+    syncSelectAllState();
+    return;
+  }
+
   const rows = filteredRows();
 
   if (countEl) countEl.textContent = rows.length;
@@ -237,12 +612,17 @@ export function renderLista(){
     const id = c?.id ?? '';
     const status = statusInfo(c);
     const teams = teamTagsFor(c);
+    const presence = presenceInfo(c);
+    const isOwner = isAdminFlag(c);
 
     const tr = document.createElement('tr');
     tr.dataset.id = String(id || '');
+    tr.dataset.owner = isOwner ? 'true' : 'false';
 
     const teamHTML = teams.slice(0, 4).map((team, idx) => {
-      const tone = team === 'Sem departamento' ? 'tone-muted' : `tone-${(idx % 4) + 1}`;
+      const tone = team === 'Proprietário'
+        ? 'tone-owner'
+        : (team === 'Sem departamento' ? 'tone-muted' : `tone-${(idx % 4) + 1}`);
       return `<span class="team-chip ${tone}">${escapeHTML(team)}</span>`;
     }).join('');
 
@@ -252,14 +632,21 @@ export function renderLista(){
 
     tr.innerHTML = `
       <td class="check-col">
-        <input class="row-select" type="checkbox" aria-label="Selecionar ${escapeHTML(name)}">
+        <input class="row-select" type="checkbox" aria-label="Selecionar ${escapeHTML(name)}" ${isOwner ? 'disabled title="O proprietário da empresa é protegido"' : ''}>
       </td>
       <td>
         <div class="member-cell">
           <div class="td-avatar"></div>
           <div class="member-copy">
-            <span class="member-name" title="${escapeHTML(name)}">${escapeHTML(name)}</span>
+            <span class="member-name-line">
+              <span class="member-name" title="${escapeHTML(name)}">${escapeHTML(name)}</span>
+              ${isOwner ? '<span class="owner-badge" title="Criador e administrador principal da empresa"><i class="fa-solid fa-crown" aria-hidden="true"></i> Proprietário</span>' : ''}
+            </span>
             <span class="member-user" title="${escapeHTML(cargo || handleFrom(name, email))}">${escapeHTML(handleFrom(name, email))}</span>
+            <span class="member-presence ${escapeHTML(presence.cls)}" title="${escapeHTML(presence.title)}">
+              <span class="presence-dot" aria-hidden="true"></span>
+              <span>${escapeHTML(presence.label)}</span>
+            </span>
           </div>
         </div>
       </td>
@@ -276,9 +663,10 @@ export function renderLista(){
         <button class="btn btn-ghost" data-action="view" data-id="${escapeHTML(id)}" title="Editar perfil" aria-label="Editar ${escapeHTML(name)}">
           <i class="fa fa-pen"></i>
         </button>
+        ${isOwner ? '' : `
         <button class="btn btn-ghost" data-action="del" data-id="${escapeHTML(id)}" title="Remover" aria-label="Remover ${escapeHTML(name)}">
           <i class="fa fa-trash"></i>
-        </button>
+        </button>`}
       </td>
     `.trim();
 
@@ -361,9 +749,13 @@ export function bindLista(){
 
   $('#btn-export-colaboradores')?.addEventListener('click', exportCSV);
 
+  $('#btn-retry-colaboradores')?.addEventListener('click', async () => {
+    await loadColaboradores();
+  });
+
   $('#colab-select-all')?.addEventListener('change', e => {
     const checked = !!e.currentTarget.checked;
-    document.querySelectorAll('#tabela-colaboradores .row-select').forEach(cb => {
+    document.querySelectorAll('#tabela-colaboradores .row-select:not(:disabled)').forEach(cb => {
       cb.checked = checked;
     });
     syncSelectAllState();
@@ -402,6 +794,13 @@ export function bindLista(){
     }
 
     if (b.dataset.action === 'del'){
+      const colaborador = state.colaboradores.find(item => Number(item?.id || 0) === id);
+      if (isAdminFlag(colaborador)) {
+        toast('O proprietário da empresa não pode ser removido.', 'warn');
+        renderLista();
+        return;
+      }
+
       if (!hasPerm(EDIT_PERM)) {
         toast('Sem permissão para remover.', 'warn');
         return;
@@ -432,7 +831,8 @@ export function bindLista(){
         renderLista();
       } catch (err) {
         console.error(err);
-        toast('Não foi possível remover.', 'err');
+        const detail = String(err?.data?.detail || err?.message || '').trim();
+        toast(detail || 'Não foi possível remover.', 'err');
       }
     }
   }, { capture:true });

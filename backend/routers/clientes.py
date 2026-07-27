@@ -42,6 +42,7 @@ from backend.utils.entitlements import (
     enforce_feature,
 )
 from backend.security.instancias import instancias_visiveis
+from backend.migrations.clientes_sequence import sync_clientes_id_sequence
 from backend.cache.redis_client import (
     get_json as cache_get_json,
     set_json as cache_set_json,
@@ -52,15 +53,17 @@ from backend.cache.redis_client import (
 router = APIRouter(prefix="/clientes", tags=["Clientes"])
 
 
-class PatchClienteProfile(BaseModel):
-    departamento: Optional[str] = None
-    sobre_cliente: Optional[str] = None
+class ClienteWriteFields(BaseModel):
     nome: Optional[str] = None
     telefone: Optional[str] = None
+    departamento: Optional[str] = None
+    departamento_id: Optional[int] = None
+    colaborador_id: Optional[int] = None
+    sobre_cliente: Optional[str] = None
     cpf_cnpj: Optional[str] = None
     rg: Optional[str] = None
     email: Optional[str] = None
-    data_nascimento: Optional[datetime] = None
+    data_nascimento: Optional[date | datetime] = None
     genero: Optional[str] = None
     cep: Optional[str] = None
     endereco: Optional[str] = None
@@ -72,14 +75,19 @@ class PatchClienteProfile(BaseModel):
     nome_completo: Optional[str] = None
     website: Optional[str] = None
     descricao: Optional[str] = None
+    nome_whatsapp: Optional[str] = None
+    status_whatsapp: Optional[str] = None
+    is_business: Optional[bool] = None
 
 
-class PostNovoCliente(BaseModel):
-    nome: Optional[str] = None
+class PatchClienteProfile(ClienteWriteFields):
+    pass
+
+
+class PostNovoCliente(ClienteWriteFields):
     telefone: str
-    departamento: Optional[str] = None
-    sobre_cliente: Optional[str] = None
-    colaborador_id: Optional[int] = None
+    instancia_id: Optional[int] = None
+    instance_name: Optional[str] = None
 
 
 class BulkColaboradorIn(BaseModel):
@@ -122,6 +130,85 @@ def _get_empresa_or_404(db: Session, empresa_id: int) -> models.Empresa:
 
 def _digits(s: str) -> str:
     return "".join(ch for ch in (s or "") if ch.isdigit())
+
+
+def _phone_variants(raw_phone: Optional[str]) -> Set[str]:
+    """Variações seguras para localizar o mesmo número com ou sem DDI 55."""
+    digits = _digits(raw_phone or "")
+    if not digits:
+        return set()
+
+    variants: Set[str] = {digits}
+    national = digits[2:] if digits.startswith("55") and len(digits) in (12, 13) else digits
+
+    if len(national) in (10, 11):
+        variants.add(national)
+        variants.add(f"55{national}")
+
+    # Compatibilidade com contatos brasileiros antigos salvos sem o nono dígito.
+    if len(national) == 11 and national[2:3] == "9":
+        old_national = f"{national[:2]}{national[3:]}"
+        variants.add(old_national)
+        variants.add(f"55{old_national}")
+    elif len(national) == 10:
+        with_nine = f"{national[:2]}9{national[2:]}"
+        variants.add(with_nine)
+        variants.add(f"55{with_nine}")
+
+    return {value for value in variants if value}
+
+
+def _find_cliente_by_phone(
+    db: Session,
+    *,
+    empresa_id: int,
+    raw_phone: Optional[str],
+) -> Optional[models.Cliente]:
+    variants = sorted(_phone_variants(raw_phone), key=len, reverse=True)
+    if not variants:
+        return None
+
+    national_variants = [value for value in variants if len(value) in (10, 11)]
+    clauses = [models.Cliente.telefone_norm.in_(variants)]
+    clauses.extend(
+        func.right(models.Cliente.telefone_norm, len(value)) == value
+        for value in national_variants
+    )
+
+    return (
+        db.query(models.Cliente)
+        .filter(
+            models.Cliente.empresa_id == int(empresa_id),
+            or_(*clauses),
+        )
+        .order_by(models.Cliente.id.asc())
+        .first()
+    )
+
+
+def _integrity_info(exc: IntegrityError) -> tuple[Optional[str], Optional[str], str]:
+    orig = getattr(exc, "orig", None)
+    diag = getattr(orig, "diag", None)
+    constraint = getattr(diag, "constraint_name", None)
+    pgcode = getattr(orig, "pgcode", None)
+    first_line = str(orig or exc).splitlines()[0][:500]
+    return constraint, pgcode, first_line
+
+
+def _is_clientes_pkey_error(exc: IntegrityError) -> bool:
+    constraint, pgcode, message = _integrity_info(exc)
+    return bool(
+        constraint == "clientes_pkey"
+        or (pgcode == "23505" and "clientes_pkey" in message)
+    )
+
+
+def _log_integrity_error(context: str, exc: IntegrityError) -> None:
+    constraint, pgcode, message = _integrity_info(exc)
+    print(
+        f"[CLIENTES][{context}][INTEGRITY] "
+        f"constraint={constraint or '-'} pgcode={pgcode or '-'} error={message}"
+    )
 
 
 def _iso(dt):
@@ -201,6 +288,36 @@ def _assert_instancia_acl(identity: Any, db: Session, instancia_id: Optional[int
         raise HTTPException(status_code=403, detail="Sem acesso a esta instância")
 
 
+def _resolve_create_instancia(
+    db: Session,
+    *,
+    empresa_id: int,
+    identity: Any,
+    instancia_id: Optional[int],
+    instance_name: Optional[str],
+) -> Optional[models.EmpresaInstancia]:
+    iid = int(instancia_id) if instancia_id is not None else None
+    name = (instance_name or "").strip()
+
+    if iid is None and not name:
+        return None
+
+    query = db.query(models.EmpresaInstancia).filter(
+        models.EmpresaInstancia.empresa_id == int(empresa_id),
+    )
+
+    if iid is not None:
+        row = query.filter(models.EmpresaInstancia.id == iid).first()
+    else:
+        row = query.filter(models.EmpresaInstancia.instance_name == name).first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="WhatsApp selecionado não foi encontrado.")
+
+    _assert_instancia_acl(identity, db, int(row.id))
+    return row
+
+
 def _apply_instancias_filter(identity: Any, db: Session, query):
     vis = instancias_visiveis(identity, db)
     if vis is None:
@@ -228,6 +345,184 @@ COLUMNS = ["nome", "telefone", "departamento", "sobre_cliente"]
 
 def _clean_text(x: str | None) -> str:
     return (x or "").replace("\r", "").strip()
+
+
+def _nullable_text(value: Any) -> Optional[str]:
+    cleaned = str(value or "").replace("\r", "").strip()
+    return cleaned or None
+
+
+def _birth_datetime(value: date | datetime | None) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    return datetime.combine(value, time.min)
+
+
+def _validate_colaborador_id(
+    db: Session,
+    *,
+    empresa_id: int,
+    colaborador_id: Optional[int],
+) -> Optional[int]:
+    if colaborador_id is None:
+        return None
+    row = (
+        db.query(models.Colaborador.id)
+        .filter(
+            models.Colaborador.id == int(colaborador_id),
+            models.Colaborador.empresa_id == int(empresa_id),
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(
+            status_code=400,
+            detail="colaborador_id inválido para esta empresa",
+        )
+    return int(colaborador_id)
+
+
+def _resolve_departamento(
+    db: Session,
+    *,
+    empresa_id: int,
+    departamento_id: Optional[int],
+    departamento: Optional[str],
+) -> tuple[Optional[int], Optional[str]]:
+    if departamento_id is not None:
+        row = (
+            db.query(models.Departamento.id, models.Departamento.nome)
+            .filter(
+                models.Departamento.id == int(departamento_id),
+                models.Departamento.empresa_id == int(empresa_id),
+            )
+            .first()
+        )
+        if not row:
+            raise HTTPException(
+                status_code=400,
+                detail="departamento_id inválido para esta empresa",
+            )
+        return int(row.id), _nullable_text(row.nome)
+
+    nome = _nullable_text(departamento)
+    if not nome:
+        return None, None
+
+    row = (
+        db.query(models.Departamento.id, models.Departamento.nome)
+        .filter(
+            models.Departamento.empresa_id == int(empresa_id),
+            func.lower(func.trim(models.Departamento.nome)) == nome.lower(),
+        )
+        .first()
+    )
+    if row:
+        return int(row.id), _nullable_text(row.nome)
+
+    # Mantém compatibilidade com cadastros antigos que usavam texto livre,
+    # mas não associa um ID incorreto a filas/triagem.
+    return None, nome
+
+
+def _normalize_unique_phone(
+    db: Session,
+    *,
+    empresa_id: int,
+    raw_phone: Optional[str],
+    exclude_cliente_id: Optional[int] = None,
+) -> str:
+    telefone = _digits(raw_phone or "")
+    if len(telefone) < 8:
+        raise HTTPException(status_code=400, detail="Telefone inválido")
+
+    query = db.query(models.Cliente.id).filter(
+        models.Cliente.empresa_id == int(empresa_id),
+        models.Cliente.telefone_norm == telefone,
+    )
+    if exclude_cliente_id is not None:
+        query = query.filter(models.Cliente.id != int(exclude_cliente_id))
+    if query.first():
+        raise HTTPException(
+            status_code=400,
+            detail="Já existe um cliente com esse telefone.",
+        )
+    return telefone
+
+
+CLIENTE_TEXT_FIELDS = (
+    "sobre_cliente",
+    "cpf_cnpj",
+    "rg",
+    "email",
+    "genero",
+    "cep",
+    "endereco",
+    "numero",
+    "complemento",
+    "bairro",
+    "cidade",
+    "estado",
+    "nome_completo",
+    "website",
+    "descricao",
+    "nome_whatsapp",
+    "status_whatsapp",
+)
+
+
+def _apply_cliente_payload(
+    db: Session,
+    *,
+    cliente: models.Cliente,
+    payload: ClienteWriteFields,
+    empresa_id: int,
+    creating: bool = False,
+) -> None:
+    fields = set(payload.model_fields_set)
+
+    if creating or "nome" in fields:
+        cliente.nome = _nullable_text(payload.nome) or "Cliente"
+
+    if "telefone" in fields:
+        telefone = _normalize_unique_phone(
+            db,
+            empresa_id=empresa_id,
+            raw_phone=payload.telefone,
+            exclude_cliente_id=(None if creating else int(cliente.id)),
+        )
+        # telefone_norm é GENERATED ALWAYS no PostgreSQL e será
+        # recalculado automaticamente a partir de telefone.
+        cliente.telefone = telefone
+
+    if "colaborador_id" in fields:
+        cliente.colaborador_id = _validate_colaborador_id(
+            db,
+            empresa_id=empresa_id,
+            colaborador_id=payload.colaborador_id,
+        )
+
+    if "departamento_id" in fields or "departamento" in fields:
+        dep_id, dep_nome = _resolve_departamento(
+            db,
+            empresa_id=empresa_id,
+            departamento_id=payload.departamento_id,
+            departamento=payload.departamento,
+        )
+        cliente.departamento_id = dep_id
+        cliente.departamento = dep_nome
+
+    for field in CLIENTE_TEXT_FIELDS:
+        if field in fields:
+            setattr(cliente, field, _nullable_text(getattr(payload, field)))
+
+    if "data_nascimento" in fields:
+        cliente.data_nascimento = _birth_datetime(payload.data_nascimento)
+
+    if "is_business" in fields:
+        cliente.is_business = bool(payload.is_business)
 
 
 def _auto_sep(sample: str) -> str:
@@ -259,12 +554,17 @@ def listar_clientes(
     empresa_id: int = Depends(get_empresa_autorizada),
     q: Optional[str] = Query(None),
     departamento: Optional[str] = Query(None),
+    departamento_id: Optional[int] = Query(None),
     data_inicio: Optional[date] = Query(None),
     data_fim: Optional[date] = Query(None),
     instancia_id: Optional[int] = Query(None),
     colaborador_id: Optional[int] = Query(None),
     limit: int = Query(20, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    include_total: bool = Query(
+        True,
+        description="Quando false, evita COUNT(*) e prioriza a primeira renderização.",
+    ),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
@@ -284,12 +584,14 @@ def listar_clientes(
             "emp": empresa_id,
             "q": (q or "").strip(),
             "departamento": (departamento or "").strip(),
+            "departamento_id": departamento_id,
             "di": str(data_inicio) if data_inicio else "",
             "df": str(data_fim) if data_fim else "",
             "inst": instancia_id,
             "colab": colaborador_id,
             "limit": limit,
             "offset": offset,
+            "include_total": bool(include_total),
             "acl": instancias_visiveis(identity, db),
         },
         sort_keys=True,
@@ -356,8 +658,10 @@ def listar_clientes(
             conds.append(models.Cliente.telefone_norm.ilike(f"%{dq}%"))
         base = base.filter(or_(*conds))
 
-    if departamento:
-        base = base.filter(models.Cliente.departamento == departamento)
+    if departamento_id is not None:
+        base = base.filter(models.Cliente.departamento_id == int(departamento_id))
+    elif departamento:
+        base = base.filter(func.lower(models.Cliente.departamento) == departamento.strip().lower())
 
     if colaborador_id is not None:
         if colaborador_id == 0:
@@ -375,8 +679,20 @@ def listar_clientes(
         fim_utc = fim_local.astimezone(timezone.utc)
         base = base.filter(models.Cliente.timestamp <= fim_utc)
 
-    base = base.order_by(desc(models.Cliente.timestamp), desc(models.Cliente.id)).offset(offset).limit(limit)
-    rows = base.all()
+    ordered = base.order_by(desc(models.Cliente.timestamp), desc(models.Cliente.id))
+
+    if include_total:
+        total: Optional[int] = int(base.order_by(None).count())
+        rows = ordered.offset(offset).limit(limit).all()
+        has_more = (offset + len(rows)) < total
+    else:
+        # A tela precisa dos registros antes da contagem exata. Buscar um item
+        # extra permite descobrir se existe próxima página sem executar COUNT(*),
+        # que pode ser caro em empresas com muitos clientes e filtros.
+        rows_plus_one = ordered.offset(offset).limit(limit + 1).all()
+        has_more = len(rows_plus_one) > limit
+        rows = rows_plus_one[:limit]
+        total = None
 
     items = []
     for rrow in rows:
@@ -410,9 +726,9 @@ def listar_clientes(
             }
         )
 
-    has_more = len(items) == limit
     out = {
         "items": items,
+        "total": total,
         "has_more": has_more,
         "next_offset": (offset + len(items)) if has_more else None,
         "limit": limit,
@@ -517,6 +833,39 @@ def buscar_clientes_leve(
         })
 
     return {"items": items}
+
+
+@router.get("/departamentos-resumo")
+def listar_departamentos_resumo(
+    empresa_id: int = Depends(get_empresa_autorizada),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    """Lista mínima para filtros e ficha de clientes.
+
+    A rota completa de Departamentos também calcula membros, instâncias e outros
+    dados por departamento. A tela de Clientes precisa apenas de id e nome.
+    """
+    perms = _get_perms(identity)
+    if "clientes.ver" not in perms and "clientes.editar" not in perms:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem permissão para listar departamentos para clientes.",
+        )
+
+    rows = (
+        db.query(models.Departamento.id, models.Departamento.nome)
+        .filter(models.Departamento.empresa_id == int(empresa_id))
+        .order_by(func.lower(models.Departamento.nome).asc())
+        .all()
+    )
+
+    return {
+        "items": [
+            {"id": int(row.id), "nome": row.nome or "Departamento"}
+            for row in rows
+        ]
+    }
 
 
 @router.get("/colaboradores")
@@ -648,6 +997,65 @@ def exportar_clientes(
     )
 
 
+@router.get("/modelo-importacao")
+def baixar_modelo_importacao(
+    fmt: str = Query("csv", pattern="^(csv|xlsx|txt)$"),
+    empresa_id: int = Depends(get_empresa_autorizada),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    perms = _get_perms(identity)
+    if "clientes.importar_exportar" not in perms:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem permissão para baixar o modelo de importação.",
+        )
+
+    empresa = _get_empresa_or_404(db, empresa_id)
+    enforce_feature(
+        empresa,
+        "feature_import",
+        message="Seu plano não permite importação de clientes ou está vencido.",
+    )
+
+    headers = ["nome", "telefone", "departamento", "sobre_cliente"]
+    example = ["Maria Souza", "5511999999999", "Comercial", "Cliente preferencial"]
+
+    if fmt == "xlsx":
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Clientes"
+        ws.append(headers)
+        ws.append(example)
+        out = io.BytesIO()
+        wb.save(out)
+        out.seek(0)
+        return StreamingResponse(
+            out,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": 'attachment; filename="modelo-clientes.xlsx"'},
+        )
+
+    if fmt == "txt":
+        data = "5511999999999\n5511888888888\n".encode("utf-8")
+        return StreamingResponse(
+            io.BytesIO(data),
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="modelo-clientes.txt"'},
+        )
+
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=";")
+    writer.writerow(headers)
+    writer.writerow(example)
+    data = buf.getvalue().encode("utf-8-sig")
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="modelo-clientes.csv"'},
+    )
+
+
 @router.get("/{cliente_id}")
 def obter_cliente(
     cliente_id: int,
@@ -767,6 +1175,7 @@ def obter_cliente(
     }
 
 
+@router.patch("/{cliente_id}", include_in_schema=False)
 @router.patch("/{cliente_id}/profile")
 def patch_cliente_profile(
     cliente_id: int,
@@ -792,73 +1201,26 @@ def patch_cliente_profile(
 
     _assert_instancia_acl(identity, db, getattr(c, "instancia_id", None))
 
-    if payload.departamento is not None:
-        c.departamento = payload.departamento or None
-    if payload.sobre_cliente is not None:
-        c.sobre_cliente = payload.sobre_cliente or None
-
-    if payload.nome is not None:
-        c.nome = payload.nome or "Cliente"
-
-    if payload.telefone is not None:
-        tel = _digits(payload.telefone)
-        if not tel:
-            raise HTTPException(status_code=400, detail="Telefone inválido")
-        dup = (
-            db.query(models.Cliente)
-            .filter(
-                models.Cliente.empresa_id == empresa_id,
-                models.Cliente.telefone_norm == tel,
-                models.Cliente.id != cliente_id,
-            )
-            .first()
-        )
-        if dup:
-            raise HTTPException(status_code=400, detail="Já existe um cliente com esse telefone.")
-        c.telefone = tel
-        try:
-            c.telefone_norm = tel
-        except Exception:
-            pass
-
-    if payload.cpf_cnpj is not None:
-        c.cpf_cnpj = payload.cpf_cnpj or None
-    if payload.rg is not None:
-        c.rg = payload.rg or None
-    if payload.email is not None:
-        c.email = payload.email or None
-    if payload.data_nascimento is not None:
-        c.data_nascimento = payload.data_nascimento
-    if payload.genero is not None:
-        c.genero = payload.genero or None
-
-    if payload.cep is not None:
-        c.cep = payload.cep or None
-    if payload.endereco is not None:
-        c.endereco = payload.endereco or None
-    if payload.numero is not None:
-        c.numero = payload.numero or None
-    if payload.complemento is not None:
-        c.complemento = payload.complemento or None
-    if payload.bairro is not None:
-        c.bairro = payload.bairro or None
-    if payload.cidade is not None:
-        c.cidade = payload.cidade or None
-    if payload.estado is not None:
-        c.estado = payload.estado or None
-
-    if payload.nome_completo is not None:
-        c.nome_completo = payload.nome_completo or None
-    if payload.website is not None:
-        c.website = payload.website or None
-    if payload.descricao is not None:
-        c.descricao = payload.descricao or None
+    _apply_cliente_payload(
+        db,
+        cliente=c,
+        payload=payload,
+        empresa_id=empresa_id,
+        creating=False,
+    )
 
     db.add(c)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Já existe um cliente com esse telefone.",
+        ) from exc
 
     cache_delete_prefix(cache_k("clientes", "list", str(empresa_id)))
-    return {"ok": True}
+    return {"ok": True, "id": int(c.id)}
 
 
 @router.post("/novo")
@@ -876,18 +1238,22 @@ def criar_cliente(
         )
 
     empresa = _get_empresa_or_404(db, empresa_id)
+    instancia = _resolve_create_instancia(
+        db,
+        empresa_id=empresa_id,
+        identity=identity,
+        instancia_id=body.instancia_id,
+        instance_name=body.instance_name,
+    )
 
     tel = _digits(body.telefone)
     if not tel:
         raise HTTPException(status_code=400, detail="Telefone inválido")
 
-    dup = (
-        db.query(models.Cliente)
-        .filter(
-            models.Cliente.empresa_id == empresa_id,
-            models.Cliente.telefone_norm == tel,
-        )
-        .first()
+    dup = _find_cliente_by_phone(
+        db,
+        empresa_id=empresa_id,
+        raw_phone=tel,
     )
     if dup:
         fields = _cliente_conversation_fields(
@@ -915,44 +1281,30 @@ def criar_cliente(
         message="Seu plano está vencido ou no limite. Renove para cadastrar novos clientes.",
     )
 
-    colab_id = body.colaborador_id
-    if colab_id is not None:
-        exists = (
-            db.query(models.Colaborador)
-            .filter(models.Colaborador.id == colab_id, models.Colaborador.empresa_id == empresa_id)
-            .first()
-        )
-        if not exists:
-            raise HTTPException(status_code=400, detail="colaborador_id inválido para esta empresa")
-
     c = models.Cliente(
         empresa_id=empresa_id,
-        nome=(body.nome or "Cliente"),
-        telefone=tel,
-        departamento=(body.departamento or None),
-        colaborador_id=colab_id,
+        instancia_id=(int(instancia.id) if instancia is not None else None),
         timestamp=datetime.now(timezone.utc),
     )
-    try:
-        c.telefone_norm = tel
-    except Exception:
-        pass
-
-    if body.sobre_cliente is not None:
-        c.sobre_cliente = body.sobre_cliente
+    _apply_cliente_payload(
+        db,
+        cliente=c,
+        payload=body,
+        empresa_id=empresa_id,
+        creating=True,
+    )
 
     db.add(c)
     try:
         db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         db.rollback()
-        dup2 = (
-            db.query(models.Cliente)
-            .filter(
-                models.Cliente.empresa_id == empresa_id,
-                models.Cliente.telefone_norm == tel,
-            )
-            .first()
+        _log_integrity_error("CRIAR", exc)
+
+        dup2 = _find_cliente_by_phone(
+            db,
+            empresa_id=empresa_id,
+            raw_phone=tel,
         )
         if dup2:
             fields = _cliente_conversation_fields(
@@ -965,7 +1317,60 @@ def criar_cliente(
                 "instancia_id": getattr(dup2, "instancia_id", None),
                 "exists": True,
             }
-        raise HTTPException(status_code=400, detail="Erro de integridade ao criar cliente")
+
+        # Bancos restaurados/importados podem ficar com clientes_id_seq atrás
+        # do maior clientes.id. Nesse caso o INSERT recebe um ID já ocupado.
+        if _is_clientes_pkey_error(exc):
+            try:
+                sync_clientes_id_sequence(db)
+                db.commit()
+
+                retry_c = models.Cliente(
+                    empresa_id=empresa_id,
+                    instancia_id=(int(instancia.id) if instancia is not None else None),
+                    timestamp=datetime.now(timezone.utc),
+                )
+                _apply_cliente_payload(
+                    db,
+                    cliente=retry_c,
+                    payload=body,
+                    empresa_id=empresa_id,
+                    creating=True,
+                )
+                db.add(retry_c)
+                db.commit()
+                c = retry_c
+            except IntegrityError as retry_exc:
+                db.rollback()
+                _log_integrity_error("CRIAR_RETRY", retry_exc)
+                raise HTTPException(
+                    status_code=409,
+                    detail="Não foi possível gerar um novo código para o contato.",
+                ) from retry_exc
+            except Exception as retry_exc:
+                db.rollback()
+                print(f"[CLIENTES][CRIAR_RETRY] error={retry_exc}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Falha ao corrigir a sequência de clientes.",
+                ) from retry_exc
+        else:
+            constraint, pgcode, _ = _integrity_info(exc)
+            if pgcode == "23503":
+                raise HTTPException(
+                    status_code=409,
+                    detail="O WhatsApp ou vínculo selecionado não existe mais. Atualize a página e tente novamente.",
+                ) from exc
+            if pgcode == "23502":
+                raise HTTPException(
+                    status_code=400,
+                    detail="O banco exige um campo obrigatório que não foi preenchido.",
+                ) from exc
+
+            raise HTTPException(
+                status_code=409,
+                detail=f"Não foi possível criar o contato por uma regra do banco ({constraint or 'integridade'}).",
+            ) from exc
 
     db.refresh(c)
     cache_delete_prefix(cache_k("clientes", "list", str(empresa_id)))
@@ -978,6 +1383,7 @@ def criar_cliente(
         "id": c.id,
         **fields,
         "instancia_id": getattr(c, "instancia_id", None),
+        "instance_name": getattr(instancia, "instance_name", None),
         "created": True,
     }
 
@@ -1009,12 +1415,17 @@ def importar_clientes(
     content = arquivo.file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Arquivo vazio.")
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Arquivo muito grande. O limite é 10 MB.")
 
     parsed_rows: List[Dict[str, str]] = []
     if name.endswith(".xlsx"):
-        wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-        ws = wb.active
-        parsed_rows = _xlsx_rows_to_dicts(ws)
+        try:
+            wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+            ws = wb.active
+            parsed_rows = _xlsx_rows_to_dicts(ws)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Arquivo XLSX inválido ou corrompido.") from exc
     elif name.endswith(".csv") or name.endswith(".txt"):
         data = content.decode("utf-8-sig", errors="ignore")
         sep = _auto_sep(data)
@@ -1036,6 +1447,11 @@ def importar_clientes(
                 parsed_rows.append({"nome": v[0], "telefone": v[1], "departamento": v[2], "sobre_cliente": v[3]})
     else:
         raise HTTPException(status_code=400, detail="Formato não suportado. Use CSV, XLSX ou TXT.")
+
+    if not parsed_rows:
+        raise HTTPException(status_code=400, detail="Arquivo sem clientes para importar.")
+    if len(parsed_rows) > 50_000:
+        raise HTTPException(status_code=413, detail="O arquivo ultrapassa o limite de 50.000 linhas.")
 
     phones: List[str] = []
     seen: Set[str] = set()
@@ -1074,52 +1490,94 @@ def importar_clientes(
         )
 
     inseridos = atualizados = ignorados = 0
+    processados_no_arquivo: Set[str] = set()
+
+    departamentos = (
+        db.query(models.Departamento.id, models.Departamento.nome)
+        .filter(models.Departamento.empresa_id == empresa_id)
+        .all()
+    )
+    departamentos_por_nome = {
+        str(row.nome or "").strip().lower(): (int(row.id), _nullable_text(row.nome))
+        for row in departamentos
+        if str(row.nome or "").strip()
+    }
+
+    def departamento_values(raw: Optional[str]) -> tuple[Optional[int], Optional[str]]:
+        nome = _nullable_text(raw)
+        if not nome:
+            return None, None
+        found = departamentos_por_nome.get(nome.lower())
+        if found:
+            return found
+        return None, nome
 
     def upsert(nome, telefone, departamento, sobre):
         nonlocal inseridos, atualizados, ignorados
         tel = _digits(telefone or "")
-        if not tel:
+        if len(tel) < 8 or tel in processados_no_arquivo:
             ignorados += 1
             return
+        processados_no_arquivo.add(tel)
+
+        dep_id, dep_nome = departamento_values(departamento)
         cli = (
             db.query(models.Cliente)
-            .filter(models.Cliente.empresa_id == empresa_id, models.Cliente.telefone_norm == tel)
+            .filter(
+                models.Cliente.empresa_id == empresa_id,
+                models.Cliente.telefone_norm == tel,
+            )
             .first()
         )
         if cli:
             _assert_instancia_acl(identity, db, getattr(cli, "instancia_id", None))
-            if sobrescrever:
-                if nome:
-                    cli.nome = nome
-                cli.departamento = (departamento or None)
-                cli.sobre_cliente = (sobre or None)
-                db.add(cli)
-                atualizados += 1
-        else:
-            novo = models.Cliente(
-                empresa_id=empresa_id,
-                nome=(nome or "Cliente"),
-                telefone=tel,
-                departamento=(departamento or None),
-                sobre_cliente=(sobre or None),
-                timestamp=datetime.now(timezone.utc),
-            )
-            try:
-                novo.telefone_norm = tel
-            except Exception:
-                pass
+            if not sobrescrever:
+                ignorados += 1
+                return
+            nome_limpo = _nullable_text(nome)
+            if nome_limpo:
+                cli.nome = nome_limpo
+            cli.departamento_id = dep_id
+            cli.departamento = dep_nome
+            cli.sobre_cliente = _nullable_text(sobre)
+            db.add(cli)
+            atualizados += 1
+            return
 
-            db.add(novo)
-            inseridos += 1
+        novo = models.Cliente(
+            empresa_id=empresa_id,
+            nome=_nullable_text(nome) or "Cliente",
+            telefone=tel,
+            departamento_id=dep_id,
+            departamento=dep_nome,
+            sobre_cliente=_nullable_text(sobre),
+            timestamp=datetime.now(timezone.utc),
+        )
+        db.add(novo)
+        inseridos += 1
 
     for row in parsed_rows:
-        upsert(row.get("nome"), row.get("telefone"), row.get("departamento"), row.get("sobre_cliente"))
+        upsert(
+            row.get("nome"),
+            row.get("telefone"),
+            row.get("departamento"),
+            row.get("sobre_cliente"),
+        )
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Não foi possível importar porque existem telefones duplicados ou dados inválidos.",
+        ) from exc
+
     cache_delete_prefix(cache_k("clientes", "list", str(empresa_id)))
 
     return {
         "ok": True,
+        "linhas_lidas": len(parsed_rows),
         "inseridos": inseridos,
         "atualizados": atualizados,
         "ignorados": ignorados,

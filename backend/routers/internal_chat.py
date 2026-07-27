@@ -22,6 +22,7 @@ from backend.database import get_db
 from backend.routers.auth import get_current_identity
 from backend import models
 from backend.websocket_manager import conexoes_ativas  # usa os mesmos grupos do main.py
+from backend.services.zapschat_presence import list_company_presence
 
 router = APIRouter(prefix="/api/internal-chat", tags=["Chat Interno"])
 
@@ -175,6 +176,11 @@ class ChatColabOut(TypedDict, total=False):
     telefone: Optional[str]
     cargo: Optional[str]
     created_at: Optional[str]
+    last_access_at: Optional[str]
+    presence_status: Optional[str]
+    presence_updated_at: Optional[str]
+    presence_expires_at: Optional[str]
+    presence_activity_at: Optional[str]
     avatar_url: Optional[str]
 
 
@@ -217,6 +223,12 @@ def chat_roster(
         .all()
     )
 
+    presence_map = list_company_presence(
+        emp_id,
+        [int(c.id) for c in rows],
+        include_offline=True,
+    )
+
     out: List[ChatColabOut] = []
     for c in rows:
         setor_nome: Optional[str] = None
@@ -249,6 +261,17 @@ def chat_roster(
                 "telefone": getattr(c, "telefone", None),
                 "cargo": getattr(c, "cargo", None),
                 "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else None,
+                "last_access_at": (
+                    c.last_access_at.isoformat()
+                    if hasattr(getattr(c, "last_access_at", None), "isoformat")
+                    else None
+                ),
+                "presence_status": str(
+                    presence_map.get(int(c.id), {}).get("presence_status") or "offline"
+                ),
+                "presence_updated_at": presence_map.get(int(c.id), {}).get("presence_updated_at"),
+                "presence_expires_at": presence_map.get(int(c.id), {}).get("presence_expires_at"),
+                "presence_activity_at": presence_map.get(int(c.id), {}).get("presence_activity_at"),
                 "avatar_url": f"/api/colaboradores/{int(c.id)}/avatar",
             }
         )

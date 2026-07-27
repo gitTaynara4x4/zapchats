@@ -2208,13 +2208,26 @@ function getValoraOpenParams() {
 
     const erro = qs.get('abrir_erro') || '';
 
-    if (!telefone && !conversa && !erro) return null;
+    // Fluxo interno Clientes -> Atendimentos.
+    // A tela de Clientes envia o id do cliente e a instância escolhida.
+    const clienteId = qs.get('cliente_id') || '';
+    const instanciaId =
+      qs.get('instancia_id') ||
+      qs.get('instance_id') ||
+      qs.get('instance') ||
+      '';
+
+    const hasDirectCliente = Boolean(idKey(clienteId) && instKey(instanciaId));
+
+    if (!telefone && !conversa && !erro && !hasDirectCliente) return null;
 
     return {
       telefone: digitsOnly(telefone),
       conversa: String(conversa || '').trim(),
-      origem: qs.get('origem') || 'valora',
-      valoraClienteId: qs.get('valora_cliente_id') || qs.get('cliente_id') || '',
+      origem: qs.get('origem') || (hasDirectCliente ? 'clientes' : 'valora'),
+      valoraClienteId: qs.get('valora_cliente_id') || '',
+      clienteId: idKey(clienteId) || '',
+      instanciaId: instKey(instanciaId) || '',
       erro,
     };
   } catch {
@@ -2235,11 +2248,79 @@ function clearValoraOpenParamsFromUrl() {
       'origem',
       'valora_cliente_id',
       'cliente_id',
+      'instancia_id',
+      'instance_id',
+      'instance',
       'abrir_erro',
     ].forEach((key) => url.searchParams.delete(key));
 
     history.replaceState(history.state || {}, '', url.pathname + (url.search ? url.search : '') + url.hash);
   } catch {}
+}
+
+async function openClienteDirectDeepLink(clienteIdRaw, instanciaIdRaw) {
+  const clienteId = idKey(clienteIdRaw);
+  const instanciaId = instKey(instanciaIdRaw);
+
+  if (!clienteId || !instanciaId) {
+    throw new Error('Cliente ou instância inválidos para abrir a conversa.');
+  }
+
+  const conversationKey = buildConversationKey('c', clienteId, instanciaId);
+  if (!conversationKey) {
+    throw new Error('Não foi possível montar a referência da conversa.');
+  }
+
+  // Primeiro tenta a conversa já carregada na lista atual.
+  const cached = findConversation(conversationKey);
+  if (cached) {
+    await selecionarClienteObj(cached, { forceReload: true });
+    return;
+  }
+
+  // A listagem inicial traz somente as conversas mais recentes (normalmente 20).
+  // Quando o cliente está fora dessa primeira página, busca o perfil diretamente
+  // e cria uma referência segura para o mesmo fluxo oficial de abertura.
+  const profileUrl = new URL(
+    `/api/atendimento/clientes/${encodeURIComponent(clienteId)}/profile`,
+    window.location.origin
+  );
+
+  if (EMPRESA_ID) profileUrl.searchParams.set('empresa_id', String(EMPRESA_ID));
+  if (/^\d+$/.test(String(instanciaId))) {
+    profileUrl.searchParams.set('instancia_id', String(instanciaId));
+  }
+
+  const resp = await fetch(profileUrl.toString(), {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+
+  const profile = await resp.json().catch(() => null);
+
+  if (!resp.ok) {
+    throw new Error(
+      profile?.detail ||
+      profile?.message ||
+      'Não foi possível carregar esse cliente no atendimento.'
+    );
+  }
+
+  const numericClienteId = /^\d+$/.test(String(clienteId)) ? Number(clienteId) : clienteId;
+  const numericInstanciaId = /^\d+$/.test(String(instanciaId)) ? Number(instanciaId) : instanciaId;
+
+  const directConversation = {
+    ...(profile && typeof profile === 'object' ? profile : {}),
+    id: numericClienteId,
+    cliente_id: numericClienteId,
+    entity_id: numericClienteId,
+    kind: 'c',
+    instancia_id: numericInstanciaId,
+    conversation_key: conversationKey,
+    conversation_id: conversationKey,
+  };
+
+  await selecionarClienteObj(directConversation, { forceReload: true });
 }
 
 async function handleValoraOpenConversationDeepLink() {
@@ -2254,6 +2335,11 @@ async function handleValoraOpenConversationDeepLink() {
 
     if (params.conversa) {
       await selecionarClienteObj(params.conversa, { forceReload: true });
+      return;
+    }
+
+    if (params.clienteId && params.instanciaId) {
+      await openClienteDirectDeepLink(params.clienteId, params.instanciaId);
       return;
     }
 

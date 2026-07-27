@@ -17,7 +17,6 @@ if _HISTORY_OWNER not in {"n8n", "external", "webhook"}:
     from . import messages_set  # noqa: F401
 from . import messages_delete  # noqa: F401
 from . import contacts  # noqa: F401
-from . import presence  # noqa: F401
 
 from .qrcode import force_qr_for_instance
 

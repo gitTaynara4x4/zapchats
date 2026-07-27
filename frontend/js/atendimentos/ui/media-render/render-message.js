@@ -510,43 +510,29 @@
       url,
     });
 
-    const sizeTxt =
-      humanSize(a?.size || a?.bytes || a?.length) ||
-      '';
+    const safeExtUp = String(extUp || 'ARQ').trim() || 'ARQ';
+    const sizeTxt = humanSize(a?.size || a?.bytes || a?.length) || '';
+    const metaText = [safeExtUp, sizeTxt].filter(Boolean).join(' • ') || 'arquivo';
 
-    return `<div class="doc-card">
-      <div class="doc-ico" data-ext="${escapeHtml(extLower)}">
-        <span class="ext">${escapeHtml(extUp)}</span>
-      </div>
+    return `<a
+      class="doc-card"
+      href="${escapeHtml(url)}"
+      target="_blank"
+      rel="noopener"
+      download="${escapeHtml(fileName)}"
+      title="${escapeHtml(fileName)}"
+    >
+      <span class="doc-ico" data-ext="${escapeHtml(extLower)}">
+        <span class="ext">${escapeHtml(safeExtUp)}</span>
+      </span>
 
-      <div class="doc-body">
-        <a
-          class="doc-name"
-          href="${escapeHtml(url)}"
-          target="_blank"
-          rel="noopener"
-          download="${escapeHtml(fileName)}"
-          title="${escapeHtml(fileName)}"
-        >${escapeHtml(fileName)}</a>
+      <span class="doc-body">
+        <span class="doc-name">${escapeHtml(fileName)}</span>
+        <span class="doc-meta">${escapeHtml(metaText)}</span>
+      </span>
 
-        <div class="doc-meta">${escapeHtml(sizeTxt || 'arquivo')}</div>
-      </div>
-
-      <div class="doc-actions">
-        <a
-          class="doc-btn"
-          href="${escapeHtml(url)}"
-          target="_blank"
-          rel="noopener"
-        >Abrir</a>
-
-        <a
-          class="doc-btn"
-          href="${escapeHtml(url)}"
-          download="${escapeHtml(fileName)}"
-        >Salvar</a>
-      </div>
-    </div>`;
+      <span class="doc-open" aria-hidden="true">↗</span>
+    </a>`;
   }
 
   function renderAttachment(m, a, dir) {

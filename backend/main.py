@@ -68,7 +68,8 @@ from backend.routers import filas as filas_router
 from backend.database import Base, engine, SessionLocal
 from backend import models
 from backend.migrations.atendimento_claim_state import normalize_atendimento_claim_state
-from backend.migrations.cliente_whatsapp_presence import ensure_cliente_whatsapp_presence
+from backend.migrations.colaborador_last_access import ensure_colaborador_last_access
+from backend.migrations.clientes_sequence import ensure_clientes_id_sequence
 
 # Integrações Evolution
 from backend.integrations.evolution.api.remove_instance import router as remove_instance_router
@@ -1535,7 +1536,8 @@ async def _start_integrations():
                 conn.exec_driver_sql("SELECT 1")
                 Base.metadata.create_all(bind=conn)
             normalize_atendimento_claim_state(engine, LOG)
-            ensure_cliente_whatsapp_presence(engine, LOG)
+            ensure_colaborador_last_access(engine, LOG)
+            ensure_clientes_id_sequence(engine, LOG)
             db_ok = True
             LOG("[STARTUP] DB ok e tabelas garantidas.")
             break

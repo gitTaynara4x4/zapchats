@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import time
 import smtplib
@@ -549,6 +549,38 @@ def _colab_token_payload(colaborador: "models.Colaborador") -> dict:
         "colab_id": colab_id,
         "cid": colab_id,
     }
+
+
+def _aware_utc(value: Any) -> Optional[datetime]:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _touch_colaborador_access(
+    db: Session,
+    colaborador: Optional["models.Colaborador"],
+    *,
+    force: bool = False,
+    min_interval_seconds: int = 60,
+) -> bool:
+    """Atualiza o último acesso ao ZapsChat sem misturar presença do WhatsApp."""
+    if colaborador is None or not hasattr(colaborador, "last_access_at"):
+        return False
+
+    now = datetime.now(timezone.utc)
+    current = _aware_utc(getattr(colaborador, "last_access_at", None))
+
+    if not force and current is not None:
+        elapsed = (now - current).total_seconds()
+        if elapsed < max(0, int(min_interval_seconds)):
+            return False
+
+    colaborador.last_access_at = now
+    db.add(colaborador)
+    return True
 
 
 # ───────────────────────── Helpers de Cookie ─────────────────────────
@@ -1207,6 +1239,52 @@ def me(identity=Depends(get_current_identity)):
     return identity
 
 
+@router.post("/access")
+def registrar_acesso_zapschat(
+    identity=Depends(get_current_identity),
+    db: Session = Depends(get_db_session),
+):
+    """Registra que a pessoa abriu uma área autenticada do ZapsChat."""
+    raw_id = (
+        identity.get("colaborador_id")
+        or identity.get("id_colab")
+        or identity.get("id_colaborador")
+        or identity.get("colab_id")
+        or identity.get("cid")
+    )
+
+    try:
+        colaborador_id = int(raw_id)
+    except (TypeError, ValueError):
+        colaborador_id = 0
+
+    colaborador = None
+    if colaborador_id > 0:
+        colaborador = (
+            db.query(models.Colaborador)
+            .filter(
+                models.Colaborador.id == colaborador_id,
+                models.Colaborador.empresa_id == int(identity["empresa_id"]),
+            )
+            .first()
+        )
+
+    changed = _touch_colaborador_access(
+        db,
+        colaborador,
+        min_interval_seconds=60,
+    )
+    if changed:
+        db.commit()
+        db.refresh(colaborador)
+
+    value = getattr(colaborador, "last_access_at", None) if colaborador else None
+    return {
+        "ok": True,
+        "last_access_at": value.isoformat() if hasattr(value, "isoformat") else None,
+    }
+
+
 @router.get("/readonly")
 def readonly_status():
     return {
@@ -1245,6 +1323,7 @@ def login(
 
         try:
             admin_colab = _ensure_admin_colaborador(db, user)
+            _touch_colaborador_access(db, admin_colab, force=True)
         except Exception as e:
             try:
                 db.rollback()
@@ -1374,6 +1453,7 @@ def login(
                 ),
             }
 
+        _touch_colaborador_access(db, colaborador, force=True)
         db.commit()
 
         token = create_access_token(_colab_token_payload(colaborador))
@@ -1472,6 +1552,7 @@ def confirmar_login_token(
             detail="Fora do horário permitido de acesso para este colaborador.",
         )
 
+    _touch_colaborador_access(db, colaborador, force=True)
     db.commit()
 
     token = create_access_token(_colab_token_payload(colaborador))
@@ -1778,6 +1859,7 @@ def register(
 
         # garante o colaborador operacional do admin já no cadastro
         admin_colab = _ensure_admin_colaborador(db, usuario)
+        _touch_colaborador_access(db, admin_colab, force=True)
 
         commit_or_block(db)
 

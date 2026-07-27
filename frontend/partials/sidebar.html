@@ -1,6 +1,9 @@
 <!-- /frontend/partials/sidebar.html -->
 
 <link rel="preload" as="image" href="/img/fav-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
 <script>
   (function () {
@@ -36,8 +39,8 @@
     --zc-muted: #667085;
     --zc-soft: #98a2b3;
 
-    --zc-active: #2563eb;
-    --zc-active-bg: #edf5ff;
+    --zc-active: #111827;
+    --zc-active-bg: #eafaf1;
 
     --zc-hover: #f6f8fb;
     --zc-dropdown-bg: #ffffff;
@@ -47,7 +50,7 @@
     --zc-danger-bg: #fff1f2;
 
     --zc-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
-    --zc-font: "Poppins", Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --zc-sidebar-font: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 
   html.dark,
@@ -59,8 +62,8 @@
     --zc-muted: #b4b4b4;
     --zc-soft: #8f8f8f;
 
-    --zc-active: #ffffff;
-    --zc-active-bg: #303030;
+    --zc-active: #f5f5f5;
+    --zc-active-bg: rgba(34, 197, 94, 0.14);
 
     --zc-hover: #2a2a2a;
     --zc-dropdown-bg: #262626;
@@ -120,7 +123,7 @@
     flex-direction: column;
     padding: 18px 14px 16px;
     box-sizing: border-box;
-    font-family: var(--zc-font);
+    font-family: var(--zc-sidebar-font);
     overflow: hidden;
     transition:
       width .22s ease,
@@ -226,8 +229,9 @@
     padding: 0 11px;
     box-sizing: border-box;
     font-size: 13px;
-    font-weight: 500;
+    font-weight: 400;
     line-height: 1;
+    letter-spacing: 0;
     transition: background .16s ease, color .16s ease, transform .16s ease;
     position: relative;
     -webkit-tap-highlight-color: transparent;
@@ -242,7 +246,7 @@
   .zc-nav-item[aria-current="page"] {
     background: var(--zc-active-bg);
     color: var(--zc-active);
-    font-weight: 600;
+    font-weight: 500;
   }
 
   .zc-nav-icon {
@@ -260,6 +264,7 @@
     height: 19px;
     display: block;
     stroke: currentColor;
+    fill: currentColor;
   }
 
   .zc-nav-label {
@@ -336,7 +341,7 @@
     gap: 10px;
     cursor: pointer;
     color: var(--zc-text);
-    font-family: var(--zc-font);
+    font-family: var(--zc-sidebar-font);
     text-align: left;
     position: relative;
     transition: background .16s ease;
@@ -380,7 +385,7 @@
 
   .zc-user-info strong {
     font-size: 12px;
-    font-weight: 600;
+    font-weight: 500;
     color: var(--zc-title);
     white-space: nowrap;
     overflow: hidden;
@@ -389,7 +394,7 @@
 
   .zc-user-info span {
     font-size: 10px;
-    font-weight: 500;
+    font-weight: 400;
     color: var(--zc-muted);
     white-space: nowrap;
     overflow: hidden;
@@ -469,8 +474,8 @@
     align-items: center;
     gap: 9px;
     font-size: 12px;
-    font-weight: 500;
-    font-family: var(--zc-font);
+    font-weight: 400;
+    font-family: var(--zc-sidebar-font);
     cursor: pointer;
     text-decoration: none;
     box-sizing: border-box;
@@ -531,8 +536,8 @@
     align-items: center;
     gap: 12px;
     font-size: 12px;
-    font-weight: 600;
-    font-family: var(--zc-font);
+    font-weight: 400;
+    font-family: var(--zc-sidebar-font);
     cursor: pointer;
     position: relative;
     transition: background .16s ease, color .16s ease;
@@ -581,6 +586,101 @@
     overflow: hidden;
   }
 
+  /*
+   * Isolamento tipográfico do menu.
+   * O sidebar é injetado em páginas com folhas de estilo diferentes; os IDs
+   * abaixo dão prioridade ao próprio componente e impedem que regras globais
+   * de links, botões, strong ou span mudem sua fonte e seus pesos.
+   */
+  #ZcSidebar,
+  #ZcSidebar *,
+  #ZcMobileTopbar,
+  #ZcMobileTopbar * {
+    font-family: var(--zc-sidebar-font) !important;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  #ZcSidebar,
+  #ZcMobileTopbar {
+    --zc-sidebar-font: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  }
+
+  #ZcSidebar .zc-brand {
+    color: var(--zc-text) !important;
+    text-decoration: none !important;
+  }
+
+  #ZcSidebar .zc-brand-name {
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    line-height: 1 !important;
+    letter-spacing: -.01em !important;
+  }
+
+  #ZcSidebar .zc-nav-item {
+    color: var(--zc-muted) !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+    line-height: 1 !important;
+    letter-spacing: 0 !important;
+    text-decoration: none !important;
+    text-transform: none !important;
+  }
+
+  #ZcSidebar .zc-nav-item:hover {
+    background: var(--zc-hover) !important;
+    color: var(--zc-text) !important;
+  }
+
+  #ZcSidebar .zc-nav-item.is-active,
+  #ZcSidebar .zc-nav-item[aria-current="page"] {
+    background: var(--zc-active-bg) !important;
+    color: var(--zc-active) !important;
+    font-weight: 500 !important;
+  }
+
+  #ZcSidebar .zc-user-button,
+  #ZcSidebar .zc-dropdown-item,
+  #ZcSidebar .zc-collapse-btn {
+    appearance: none;
+    -webkit-appearance: none;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
+  }
+
+  #ZcSidebar .zc-user-info strong {
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    line-height: 1.2 !important;
+  }
+
+  #ZcSidebar .zc-user-info span {
+    font-size: 10px !important;
+    font-weight: 400 !important;
+    line-height: 1.2 !important;
+  }
+
+  #ZcSidebar .zc-dropdown-item,
+  #ZcSidebar .zc-collapse-btn {
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    line-height: 1 !important;
+  }
+
+  #ZcMobileTopbar .zc-mobile-title strong {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    line-height: 1.1 !important;
+  }
+
+  #ZcMobileTopbar .zc-mobile-title span {
+    font-size: 11px !important;
+    font-weight: 400 !important;
+    line-height: 1.1 !important;
+  }
+
   @media (max-width: 920px) {
     body.zc-sidebar-ready,
     body.zc-sidebar-collapsed {
@@ -602,7 +702,7 @@
       padding: 0 14px;
       z-index: 1210;
       box-sizing: border-box;
-      font-family: var(--zc-font);
+      font-family: var(--zc-sidebar-font);
     }
 
     .zc-mobile-toggle {
@@ -628,14 +728,14 @@
     .zc-mobile-title strong {
       font-size: 13px;
       color: var(--zc-title);
-      font-weight: 700;
+      font-weight: 600;
       line-height: 1.1;
     }
 
     .zc-mobile-title span {
       font-size: 11px;
       color: var(--zc-muted);
-      font-weight: 500;
+      font-weight: 400;
       line-height: 1.1;
     }
 
@@ -727,68 +827,44 @@
 
 <aside class="zc-sidebar" id="ZcSidebar" aria-label="Menu lateral">
   <svg class="zc-svg-sprite" aria-hidden="true">
-    <symbol id="zc-i-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M3 10.8 12 3l9 7.8"></path>
-      <path d="M5.5 9.6V21h13V9.6"></path>
-      <path d="M9.5 21v-6h5v6"></path>
+    <symbol id="zc-i-home" viewBox="0 0 256 256">
+      <path fill="currentColor" d="M224,98H182V56a6,6,0,0,0-6-6H54V40a6,6,0,0,0-12,0V216a6,6,0,0,0,12,0V206h90a6,6,0,0,0,6-6V158h74a6,6,0,0,0,6-6V104A6,6,0,0,0,224,98ZM170,62V98H54V62ZM138,194H54V158h84Zm80-48H54V110H218Z"></path>
     </symbol>
 
-    <symbol id="zc-i-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M4 5h16v12.5A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5V5Z"></path>
-      <path d="M4 13h4l2 3h4l2-3h4"></path>
+    <symbol id="zc-i-inbox" viewBox="0 0 256 256">
+      <path fill="currentColor" d="M225.88,30.12a13.83,13.83,0,0,0-13.7-3.58l-.11,0L20.14,84.77A14,14,0,0,0,18,110.85l85.56,41.64L145.12,238a13.87,13.87,0,0,0,12.61,8c.4,0,.81,0,1.21-.05a13.9,13.9,0,0,0,12.29-10.09l58.2-191.93,0-.11A13.83,13.83,0,0,0,225.88,30.12Zm-8,10.4L159.73,232.43l0,.11a2,2,0,0,1-3.76.26l-40.68-83.58,49-49a6,6,0,1,0-8.49-8.49l-49,49L23.15,100a2,2,0,0,1,.31-3.74l.11,0L215.48,38.08a1.94,1.94,0,0,1,1.92.52A2,2,0,0,1,217.92,40.52Z"></path>
     </symbol>
 
-    <symbol id="zc-i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M16 19.5c0-2.2-1.8-4-4-4s-4 1.8-4 4"></path>
-      <circle cx="12" cy="9" r="3.2"></circle>
-      <path d="M20.5 18.5c0-1.8-1.2-3.2-3-3.7"></path>
-      <path d="M16.8 6.2a2.7 2.7 0 0 1 0 5.2"></path>
-      <path d="M3.5 18.5c0-1.8 1.2-3.2 3-3.7"></path>
-      <path d="M7.2 6.2a2.7 2.7 0 0 0 0 5.2"></path>
+    <symbol id="zc-i-users" viewBox="0 0 256 256">
+      <path fill="currentColor" d="M243.6,148.8a6,6,0,0,1-8.4-1.2A53.58,53.58,0,0,0,192,126a6,6,0,0,1,0-12,26,26,0,1,0-25.18-32.5,6,6,0,0,1-11.62-3,38,38,0,1,1,59.91,39.63A65.69,65.69,0,0,1,244.8,140.4,6,6,0,0,1,243.6,148.8ZM189.19,213a6,6,0,0,1-2.19,8.2,5.9,5.9,0,0,1-3,.81,6,6,0,0,1-5.2-3,59,59,0,0,0-101.62,0,6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"></path>
     </symbol>
 
-    <symbol id="zc-i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M3.5 6.5A2.5 2.5 0 0 1 6 4h4l2 2.5h6A2.5 2.5 0 0 1 20.5 9v8.5A2.5 2.5 0 0 1 18 20h-12a2.5 2.5 0 0 1-2.5-2.5v-11Z"></path>
+    <symbol id="zc-i-clients" viewBox="0 0 256 256">
+      <path fill="currentColor" d="M154,80a6,6,0,0,1,6-6h88a6,6,0,0,1,0,12H160A6,6,0,0,1,154,80Zm94,42H160a6,6,0,0,0,0,12h88a6,6,0,0,0,0-12Zm0,48H184a6,6,0,0,0,0,12h64a6,6,0,0,0,0-12Zm-98.19,20.5a6,6,0,1,1-11.62,3C131.7,168.29,107.23,150,80,150s-51.7,18.29-58.19,43.49a6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"></path>
     </symbol>
 
-    <symbol id="zc-i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M5 18.5 3.8 22l3.7-1.1A9.2 9.2 0 1 0 5 18.5Z"></path>
-      <path d="M8 11h8"></path>
-      <path d="M8 14h5"></path>
+    <symbol id="zc-i-folder" viewBox="0 0 256 256">
+      <path fill="currentColor" d="M243.36,111.81A14,14,0,0,0,232,106H214V88a14,14,0,0,0-14-14H130L101.74,52.8a14.06,14.06,0,0,0-8.4-2.8H40A14,14,0,0,0,26,64V208a6,6,0,0,0,6,6H211.1a6,6,0,0,0,5.69-4.1l28.49-85.47A14,14,0,0,0,243.36,111.81ZM40,62H93.34a2,2,0,0,1,1.2.4L124.4,84.8A6,6,0,0,0,128,86h72a2,2,0,0,1,2,2v18H69.77a14,14,0,0,0-13.28,9.57L38,171V64A2,2,0,0,1,40,62Zm193.9,58.63L206.78,202H40.33l27.54-82.63a2,2,0,0,1,1.9-1.37H232a2,2,0,0,1,1.9,2.63Z"></path>
     </symbol>
 
-    <symbol id="zc-i-building" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M4.5 21h15"></path>
-      <path d="M6 21V5.5A2.5 2.5 0 0 1 8.5 3h7A2.5 2.5 0 0 1 18 5.5V21"></path>
-      <path d="M9 7h1"></path>
-      <path d="M14 7h1"></path>
-      <path d="M9 11h1"></path>
-      <path d="M14 11h1"></path>
-      <path d="M9 15h1"></path>
-      <path d="M14 15h1"></path>
+    <symbol id="zc-i-chat" viewBox="0 0 256 256">
+      <path fill="currentColor" d="M229.93,186.58A78,78,0,0,0,168.16,74.42,78,78,0,1,0,26.07,138.58L18.58,164A14,14,0,0,0,36,181.42l25.46-7.49a78,78,0,0,0,26.39,7.63,78,78,0,0,0,106.77,40.37L220,229.42A14,14,0,0,0,237.42,212ZM62,161.5a6.05,6.05,0,0,0-1.69.24l-27.77,8.17a2,2,0,0,1-2.48-2.48l8.17-27.77a6.05,6.05,0,0,0-.47-4.53,66,66,0,1,1,27.08,27.08A6,6,0,0,0,62,161.5Zm155.71,26.16,8.17,27.77a2,2,0,0,1-2.48,2.48l-27.77-8.17a6.06,6.06,0,0,0-4.53.47,66,66,0,0,1-90-28.4,77.92,77.92,0,0,0,71-94.68,66,66,0,0,1,46.07,96A6.05,6.05,0,0,0,217.74,187.66Z"></path>
     </symbol>
 
-    <symbol id="zc-i-bot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="5" y="7" width="14" height="11" rx="3"></rect>
-      <path d="M12 7V4"></path>
-      <path d="M8.5 12h.01"></path>
-      <path d="M15.5 12h.01"></path>
-      <path d="M9 15h6"></path>
+    <symbol id="zc-i-building" viewBox="0 0 256 256">
+      <path fill="currentColor" d="M248,210H230V94h2a6,6,0,0,0,0-12H182V46h2a6,6,0,0,0,0-12H40a6,6,0,0,0,0,12h2V210H24a6,6,0,0,0,0,12H248a6,6,0,0,0,0-12ZM218,94V210H182V94ZM54,46H170V210H142V160a6,6,0,0,0-6-6H88a6,6,0,0,0-6,6v50H54Zm76,164H94V166h36ZM74,80a6,6,0,0,1,6-6H96a6,6,0,0,1,0,12H80A6,6,0,0,1,74,80Zm48,0a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,80ZM80,126a6,6,0,0,1,0-12H96a6,6,0,0,1,0,12Zm42-6a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,120Z"></path>
     </symbol>
 
-    <symbol id="zc-i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M21 3 10 14"></path>
-      <path d="M21 3 14 21l-4-7-7-4 18-7Z"></path>
+    <symbol id="zc-i-bot" viewBox="0 0 256 256">
+      <path fill="currentColor" d="M222,114.56a54,54,0,0,0-58.67-74.73,54,54,0,0,0-94,13.46A54,54,0,0,0,34,141.44a54,54,0,0,0,35.56,73.65A54.54,54.54,0,0,0,83.59,217a52.86,52.86,0,0,0,9.06-.78,54,54,0,0,0,94-13.46A54,54,0,0,0,222,114.56ZM183.37,52.5a42,42,0,0,1,29.21,53.14,54.84,54.84,0,0,0-5.08-3.33L163,76.62a6,6,0,0,0-6,0l-47,27.13V80.66l41.5-24A41.73,41.73,0,0,1,183.37,52.5ZM78,72a42,42,0,0,1,72.92-28.43,56.18,56.18,0,0,0-5.42,2.74L101,72a6,6,0,0,0-3,5.19v54.27L78,119.92ZM39.13,85.93a41.75,41.75,0,0,1,27.22-20A55.09,55.09,0,0,0,66,72v51.38a6,6,0,0,0,3,5.2l47,27.13L96,167.26l-41.5-24A42,42,0,0,1,39.13,85.93ZM72.63,203.5a42,42,0,0,1-29.21-53.14,54.84,54.84,0,0,0,5.08,3.33L93,179.38a6,6,0,0,0,6,0l47-27.13v23.09l-41.5,24A41.73,41.73,0,0,1,72.63,203.5ZM178,184a42,42,0,0,1-72.92,28.43,56.18,56.18,0,0,0,5.42-2.74L155,184a6,6,0,0,0,3-5.19V124.54l20,11.54Zm38.87-13.93a41.75,41.75,0,0,1-27.22,20A55.09,55.09,0,0,0,190,184V132.62a6,6,0,0,0-3-5.2l-47-27.13,20-11.55,41.5,24A42,42,0,0,1,216.87,170.07Z"></path>
     </symbol>
 
-    <symbol id="zc-i-qr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M4 4h6v6H4V4Z"></path>
-      <path d="M14 4h6v6h-6V4Z"></path>
-      <path d="M4 14h6v6H4v-6Z"></path>
-      <path d="M14 14h2"></path>
-      <path d="M20 14v2"></path>
-      <path d="M14 18h6v2"></path>
-      <path d="M18 16v4"></path>
+    <symbol id="zc-i-send" viewBox="0 0 256 256">
+      <path fill="currentColor" d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z"></path>
+    </symbol>
+
+    <symbol id="zc-i-qr" viewBox="0 0 256 256">
+      <path fill="currentColor" d="M104,42H56A14,14,0,0,0,42,56v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,104,42Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-2,34H56a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V152A14,14,0,0,0,104,138Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V152a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2ZM200,42H152a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,200,42Zm2,62a2,2,0,0,1-2,2H152a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-64,72V144a6,6,0,0,1,12,0v32a6,6,0,0,1-12,0Zm76-16a6,6,0,0,1-6,6H182v42a6,6,0,0,1-6,6H144a6,6,0,0,0,0,12h26V144a6,6,0,0,1,12,0v10h26A6,6,0,0,1,214,160Zm0,32v16a6,6,0,0,1-12,0V192a6,6,0,0,1,12,0Z"></path>
     </symbol>
 
     <symbol id="zc-i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
@@ -881,7 +957,7 @@
       </a>
 
       <a class="zc-nav-item" data-menu="clientes" data-tooltip="Clientes" href="/clientes" title="Clientes">
-        <span class="zc-nav-icon"><svg class="zc-icon" aria-hidden="true"><use href="#zc-i-users"></use></svg></span>
+        <span class="zc-nav-icon"><svg class="zc-icon" aria-hidden="true"><use href="#zc-i-clients"></use></svg></span>
         <span class="zc-nav-label">Clientes</span>
       </a>
 

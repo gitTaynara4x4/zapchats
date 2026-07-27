@@ -497,7 +497,7 @@ html[data-theme="light"] #historico .hist-latest-notice{
 }
 
 .linha-mensagem.direita .bolha-mensagem{
-  background:#144d37;
+  background:#154E37;
   color:#fafafa;
   border:none;
 }
@@ -534,9 +534,37 @@ html[data-theme="light"] #historico .hist-latest-notice{
 
 .bubble-out{
   align-self:flex-end;
-  background-color:#144d37;
+  background-color:#154E37;
   color:#fafafa;
   border-top-right-radius:4px;
+  border:none;
+}
+
+html[data-theme="light"] .linha-mensagem.esquerda .bolha-mensagem,
+html[data-theme="light"] .bubble-in{
+  background-color:#FFFFFF;
+  color:#111b21;
+  border:1px solid rgba(17,27,33,.10);
+}
+
+html[data-theme="light"] .linha-mensagem.direita .bolha-mensagem,
+html[data-theme="light"] .bubble-out{
+  background-color:#D9FDD3;
+  color:#111b21;
+  border:none;
+}
+
+html[data-theme="dark"] .linha-mensagem.esquerda .bolha-mensagem,
+html[data-theme="dark"] .bubble-in{
+  background-color:#242626;
+  color:#fafafa;
+  border:1px solid #242626;
+}
+
+html[data-theme="dark"] .linha-mensagem.direita .bolha-mensagem,
+html[data-theme="dark"] .bubble-out{
+  background-color:#154E37;
+  color:#fafafa;
   border:none;
 }
 
@@ -618,6 +646,20 @@ html[data-theme="light"] #historico .hist-latest-notice{
 .bubble-in .time,
 .bubble-in .tempo-mensagem{
   color:#d9d9d9;
+}
+
+html[data-theme="light"] .bubble-in .msg-time,
+html[data-theme="light"] .bubble-in .time,
+html[data-theme="light"] .bubble-in .tempo-mensagem,
+html[data-theme="light"] .linha-mensagem.esquerda .tempo-mensagem{
+  color:#667781;
+}
+
+html[data-theme="light"] .bubble-out .msg-time,
+html[data-theme="light"] .bubble-out .time,
+html[data-theme="light"] .bubble-out .tempo-mensagem,
+html[data-theme="light"] .linha-mensagem.direita .tempo-mensagem{
+  color:#667781;
 }
 
 .bubble .meta,
@@ -1509,11 +1551,11 @@ html[data-theme="light"] .zc-chat-menu-divider{
 
 html[data-theme="light"] #historico .bubble-in .zc-quoted-bubble,
 html[data-theme="light"] #historico .bolha-mensagem .zc-quoted-bubble{
-  background:rgba(0,0,0,.07);
+  background:rgba(17,27,33,.05);
 }
 
 html[data-theme="light"] #historico .bubble-out .zc-quoted-bubble{
-  background:rgba(0,0,0,.10);
+  background:rgba(17,27,33,.08);
 }
 
 html[data-theme="light"] #historico .zc-quoted-text{

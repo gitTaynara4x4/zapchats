@@ -2,152 +2,274 @@
 <html lang="pt-BR" class="has-sidebar prepaint">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light dark" />
   <title>Meu Perfil – ZapsChat</title>
 
-  <script src="/frontend/js/app-base.js" defer></script>
+  <script src="/frontend/js/app-base.js?v=20260726-perfil-completo" defer></script>
   <script src="/frontend/js/auth.js" defer></script>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-
-  <link rel="stylesheet" href="/frontend/css/perfil.css" />
+  <link rel="stylesheet" href="/frontend/css/perfil.css?v=20260726-perfil-loader-presenca-fix" />
 </head>
 <body>
   <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
 
-  <main class="main">
-    <div class="profile-container">
-      <header class="section-title">
-        <h1>
-          <span class="title-ico is-active" aria-hidden="true">
-            <svg class="title-ico-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-              <path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,48a40,40,0,1,1-40,40A40,40,0,0,1,128,72Zm0,136a79.65,79.65,0,0,1-57.16-24.09,64,64,0,0,1,114.32,0A79.65,79.65,0,0,1,128,208Z"/>
-            </svg>
-          </span>
-          Configurações de Perfil
-        </h1>
-        <div class="top-total">
-          <span>Gerencie sua conta e segurança</span>
+  <main class="profile-main" id="profileMain" aria-busy="true">
+    <div class="profile-shell">
+      <header class="profile-page-header">
+        <div>
+          <div class="profile-eyebrow">CONTA E SEGURANÇA</div>
+          <h1>Meu perfil</h1>
+          <p>Gerencie seus dados, sua foto e a segurança da sua conta no ZapsChat.</p>
         </div>
+        <button type="button" class="profile-icon-button" id="btnAtualizarPagina" title="Atualizar dados" aria-label="Atualizar dados">
+          <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
       </header>
 
-      <section class="perfil-grid" aria-label="Dados do perfil">
-        
-        <div class="grid-col-left">
-          <article class="box box--hero">
-            <div class="box-head">
-              <h2>Foto de Perfil</h2>
-              <p class="muted">Esta imagem aparecerá no menu lateral.</p>
+      <div class="profile-loading" id="profileLoading" role="status" aria-live="polite">
+        <span class="profile-spinner" aria-hidden="true"></span>
+        <span>Carregando seu perfil...</span>
+      </div>
+
+      <section class="profile-layout" id="profileContent" hidden>
+        <div class="profile-column profile-column--summary">
+          <article class="profile-card profile-identity-card">
+            <div class="profile-avatar-wrap">
+              <div class="profile-avatar" id="avatarPreviewBox">
+                <img id="avatarImage" alt="Foto do perfil" hidden />
+                <span id="avatarInitials">US</span>
+                <button type="button" class="profile-avatar-edit" id="btnUploadAvatar" aria-label="Alterar foto de perfil" title="Alterar foto">
+                  <i class="fa-solid fa-camera" aria-hidden="true"></i>
+                </button>
+              </div>
+              <span class="profile-presence-dot is-offline" id="presenceDot" aria-hidden="true"></span>
             </div>
 
-            <div class="avatar-area">
-              <div class="avatar-preview-wrapper">
-                <div class="avatar-preview" id="avatarPreviewBox" title="Clique para alterar a foto">
-                  <span id="avatarInitials">Z</span>
-                  <div class="avatar-overlay">
-                    <i class="fa-solid fa-camera"></i>
+            <h2 id="profileDisplayName">Usuário</h2>
+            <p class="profile-display-email" id="profileDisplayEmail">—</p>
+
+            <div class="profile-badges">
+              <span class="profile-badge" id="accountBadge">
+                <i class="fa-solid fa-user-shield" aria-hidden="true"></i>
+                <span>Conta</span>
+              </span>
+              <span class="profile-badge profile-badge--presence is-offline" id="presenceBadge">
+                <span class="profile-badge-dot" aria-hidden="true"></span>
+                <span id="presenceText">Offline</span>
+              </span>
+            </div>
+
+            <p class="profile-last-access" id="lastAccessText">Último acesso não informado</p>
+
+            <input type="file" id="avatarInput" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+            <div class="profile-avatar-actions">
+              <button type="button" class="profile-btn profile-btn--secondary" id="btnEscolherFoto">
+                <i class="fa-regular fa-image" aria-hidden="true"></i>
+                Alterar foto
+              </button>
+              <button type="button" class="profile-btn profile-btn--ghost-danger" id="btnRemoveAvatar">
+                Remover
+              </button>
+            </div>
+            <small class="profile-hint">JPG, PNG, WEBP ou GIF, com no máximo 4 MB.</small>
+          </article>
+
+          <article class="profile-card">
+            <div class="profile-card-head">
+              <div>
+                <h2>Informações da conta</h2>
+                <p>Dados definidos pela empresa e pela sua permissão de acesso.</p>
+              </div>
+            </div>
+
+            <dl class="profile-info-list">
+              <div>
+                <dt><i class="fa-regular fa-building" aria-hidden="true"></i> Empresa</dt>
+                <dd id="infoEmpresa">—</dd>
+              </div>
+              <div>
+                <dt><i class="fa-regular fa-id-badge" aria-hidden="true"></i> Tipo de conta</dt>
+                <dd id="infoTipoConta">—</dd>
+              </div>
+              <div>
+                <dt><i class="fa-solid fa-sitemap" aria-hidden="true"></i> Departamento / setor</dt>
+                <dd id="infoDepartamento">—</dd>
+              </div>
+              <div>
+                <dt><i class="fa-regular fa-clock" aria-hidden="true"></i> Horário permitido</dt>
+                <dd id="infoHorario">Sem restrição cadastrada</dd>
+              </div>
+              <div>
+                <dt><i class="fa-solid fa-key" aria-hidden="true"></i> Permissões</dt>
+                <dd id="infoPermissoes">—</dd>
+              </div>
+              <div>
+                <dt><i class="fa-solid fa-hashtag" aria-hidden="true"></i> Identificação</dt>
+                <dd id="infoIdentificacao">—</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="profile-card">
+            <div class="profile-card-head">
+              <div>
+                <h2>Sessão atual</h2>
+                <p>Este é o dispositivo que está usando o ZapsChat agora.</p>
+              </div>
+              <span class="profile-live-pill"><span></span> Ativa</span>
+            </div>
+
+            <div class="profile-session">
+              <div class="profile-session-icon"><i class="fa-solid fa-desktop" aria-hidden="true"></i></div>
+              <div>
+                <strong id="sessionBrowser">Navegador atual</strong>
+                <span id="sessionSystem">Dispositivo atual</span>
+              </div>
+            </div>
+
+            <button type="button" class="profile-btn profile-btn--secondary profile-btn--full" id="btnLogoutCurrent">
+              <i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i>
+              Sair desta conta
+            </button>
+          </article>
+        </div>
+
+        <div class="profile-column profile-column--forms">
+          <article class="profile-card">
+            <div class="profile-card-head">
+              <div>
+                <h2>Dados pessoais</h2>
+                <p>Essas informações identificam você dentro do ZapsChat.</p>
+              </div>
+              <span class="profile-save-state" id="profileSaveState" hidden>Alterações não salvas</span>
+            </div>
+
+            <form id="formPerfil" class="profile-form" autocomplete="on" novalidate>
+              <div class="profile-field profile-field--full">
+                <label for="nome">Nome completo <span aria-hidden="true">*</span></label>
+                <div class="profile-input-wrap">
+                  <i class="fa-regular fa-user" aria-hidden="true"></i>
+                  <input type="text" id="nome" name="nome" minlength="2" maxlength="80" required autocomplete="name" placeholder="Seu nome completo" />
+                </div>
+                <small class="profile-field-error" data-error-for="nome"></small>
+              </div>
+
+              <div class="profile-field profile-field--full">
+                <label for="email">E-mail de acesso <span aria-hidden="true">*</span></label>
+                <div class="profile-input-wrap">
+                  <i class="fa-regular fa-envelope" aria-hidden="true"></i>
+                  <input type="email" id="email" name="email" maxlength="120" required autocomplete="email" placeholder="voce@empresa.com" />
+                </div>
+                <small class="profile-field-note">A alteração deste e-mail também altera seu login.</small>
+                <small class="profile-field-error" data-error-for="email"></small>
+              </div>
+
+              <div class="profile-form-row">
+                <div class="profile-field">
+                  <label for="telefone">Telefone</label>
+                  <div class="profile-input-wrap">
+                    <i class="fa-solid fa-phone" aria-hidden="true"></i>
+                    <input type="tel" id="telefone" name="telefone" maxlength="16" autocomplete="tel" placeholder="(12) 99999-9999" inputmode="tel" />
+                  </div>
+                </div>
+
+                <div class="profile-field">
+                  <label for="cargo">Cargo</label>
+                  <div class="profile-input-wrap">
+                    <i class="fa-solid fa-briefcase" aria-hidden="true"></i>
+                    <input type="text" id="cargo" name="cargo" maxlength="50" autocomplete="organization-title" placeholder="Ex.: Atendimento" />
                   </div>
                 </div>
               </div>
 
-              <div class="avatar-meta">
-                <p class="muted">JPG, GIF ou PNG. Máximo de 4 MB.</p>
-                <div class="avatar-actions">
-                  <input
-                    type="file"
-                    id="avatarInput"
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                    hidden
-                  />
-                  <button type="button" class="btn btn--outline" id="btnUploadAvatar">
-                    Alterar foto
-                  </button>
-                  <button type="button" class="btn btn--ghost-danger" id="btnRemoveAvatar">
-                    Remover
+              <div class="profile-form-actions">
+                <button type="button" class="profile-btn profile-btn--secondary" id="btnCancelarPerfil" disabled>Descartar</button>
+                <button type="submit" class="profile-btn profile-btn--primary" id="btnSalvarPerfil">
+                  <i class="fa-regular fa-floppy-disk" aria-hidden="true"></i>
+                  Salvar alterações
+                </button>
+              </div>
+            </form>
+          </article>
+
+          <article class="profile-card">
+            <div class="profile-card-head">
+              <div>
+                <h2>Alterar senha</h2>
+                <p>Use uma senha exclusiva para proteger sua conta.</p>
+              </div>
+              <div class="profile-security-icon"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i></div>
+            </div>
+
+            <form id="formSenha" class="profile-form" autocomplete="off" novalidate>
+              <div class="profile-field profile-field--full">
+                <label for="senha_atual">Senha atual</label>
+                <div class="profile-input-wrap profile-input-wrap--password">
+                  <i class="fa-solid fa-lock" aria-hidden="true"></i>
+                  <input type="password" id="senha_atual" name="senha_atual" required autocomplete="current-password" placeholder="Digite sua senha atual" />
+                  <button type="button" class="profile-password-toggle" data-toggle-password="senha_atual" aria-label="Mostrar senha">
+                    <i class="fa-regular fa-eye" aria-hidden="true"></i>
                   </button>
                 </div>
               </div>
-            </div>
-          </article>
 
-          <article class="box box--security">
-            <div class="box-head">
-              <h2>Segurança</h2>
-              <p class="muted">Atualize sua senha de acesso.</p>
-            </div>
+              <div class="profile-form-row">
+                <div class="profile-field">
+                  <label for="nova_senha">Nova senha</label>
+                  <div class="profile-input-wrap profile-input-wrap--password">
+                    <i class="fa-solid fa-key" aria-hidden="true"></i>
+                    <input type="password" id="nova_senha" name="nova_senha" minlength="8" required autocomplete="new-password" placeholder="Mínimo de 8 caracteres" />
+                    <button type="button" class="profile-password-toggle" data-toggle-password="nova_senha" aria-label="Mostrar senha">
+                      <i class="fa-regular fa-eye" aria-hidden="true"></i>
+                    </button>
+                  </div>
+                </div>
 
-            <form id="formSenha" class="form-grid" autocomplete="off">
-              <div class="field field--full">
-                <label for="senha_atual">Senha atual</label>
-                <input type="password" id="senha_atual" name="senha_atual" required placeholder="••••••••" />
+                <div class="profile-field">
+                  <label for="confirma_senha">Confirmar nova senha</label>
+                  <div class="profile-input-wrap profile-input-wrap--password">
+                    <i class="fa-solid fa-check" aria-hidden="true"></i>
+                    <input type="password" id="confirma_senha" name="confirma_senha" minlength="8" required autocomplete="new-password" placeholder="Repita a nova senha" />
+                    <button type="button" class="profile-password-toggle" data-toggle-password="confirma_senha" aria-label="Mostrar senha">
+                      <i class="fa-regular fa-eye" aria-hidden="true"></i>
+                    </button>
+                  </div>
+                </div>
               </div>
 
-              <div class="field field--full">
-                <label for="nova_senha">Nova senha</label>
-                <input type="password" id="nova_senha" name="nova_senha" required placeholder="••••••••" />
+              <div class="profile-password-strength" aria-live="polite">
+                <div class="profile-strength-track"><span id="passwordStrengthBar"></span></div>
+                <span id="passwordStrengthText">Digite uma nova senha</span>
               </div>
 
-              <div class="field field--full">
-                <label for="confirma_senha">Confirmar nova senha</label>
-                <input type="password" id="confirma_senha" name="confirma_senha" required placeholder="••••••••" />
-              </div>
+              <ul class="profile-password-rules" id="passwordRules">
+                <li data-rule="length"><i class="fa-solid fa-circle" aria-hidden="true"></i> Pelo menos 8 caracteres</li>
+                <li data-rule="letter"><i class="fa-solid fa-circle" aria-hidden="true"></i> Pelo menos uma letra</li>
+                <li data-rule="number"><i class="fa-solid fa-circle" aria-hidden="true"></i> Pelo menos um número</li>
+                <li data-rule="match"><i class="fa-solid fa-circle" aria-hidden="true"></i> As duas novas senhas devem ser iguais</li>
+              </ul>
 
-              <div class="form-actions field--full">
-                <button type="submit" class="btn btn--primary" id="btnSalvarSenha">
+              <div class="profile-form-actions">
+                <button type="submit" class="profile-btn profile-btn--primary" id="btnSalvarSenha">
+                  <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
                   Atualizar senha
                 </button>
               </div>
             </form>
           </article>
         </div>
-
-        <div class="grid-col-right">
-          <article class="box box--info">
-            <div class="box-head">
-              <h2>Informações Pessoais</h2>
-              <p class="muted">Atualize seus dados básicos de contato e identificação.</p>
-            </div>
-
-            <form id="formPerfil" class="form-grid" autocomplete="on">
-              <div class="field field--full">
-                <label for="nome">Nome completo</label>
-                <input type="text" id="nome" name="nome" required placeholder="Ex: João Silva" />
-              </div>
-
-              <div class="field field--full">
-                <label for="email">Endereço de e-mail</label>
-                <input type="email" id="email" name="email" required placeholder="joao@exemplo.com" />
-              </div>
-
-              <div class="field field--full">
-                <label for="telefone">Telefone</label>
-                <input type="tel" id="telefone" name="telefone" placeholder="(00) 00000-0000" />
-              </div>
-
-              <div class="field field--full">
-                <label for="cargo">Cargo</label>
-                <input type="text" id="cargo" name="cargo" placeholder="Ex: Desenvolvedor Front-end" />
-              </div>
-
-              <div class="form-actions form-actions--end field--full pt-4">
-                <button type="submit" class="btn btn--primary" id="btnSalvarPerfil">
-                  Salvar alterações
-                </button>
-              </div>
-            </form>
-          </article>
-        </div>
-
       </section>
     </div>
-
-    <div id="global-msg" role="status" aria-live="polite" aria-atomic="true"></div>
   </main>
 
+  <div class="profile-toast-host" id="profileToastHost" aria-live="polite" aria-atomic="true"></div>
+
   <script src="/frontend/js/page-guard.js" defer></script>
-  <script src="/frontend/js/pages/perfil.js" defer></script>
+  <script src="/frontend/js/pages/perfil.js?v=20260726-perfil-loader-presenca-fix" defer></script>
 </body>
 </html>

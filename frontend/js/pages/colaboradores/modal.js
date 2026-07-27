@@ -447,6 +447,45 @@ function restoreFieldbox(boxId){
   }
 }
 
+function formatLastAccess(value){
+  if (!value) return 'Nunca acessou o ZapsChat';
+
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return 'Nunca acessou o ZapsChat';
+
+  const now = new Date();
+  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = Math.round((today.getTime() - day.getTime()) / 86400000);
+  const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  if (diffDays === 0) return `Último acesso hoje às ${time}`;
+  if (diffDays === 1) return `Último acesso ontem às ${time}`;
+
+  const date = d.toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    ...(d.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' })
+  });
+
+  return `Último acesso em ${date} às ${time}`;
+}
+
+function formatPresence(colab){
+  const status = String(colab?.presence_status || '').trim().toLowerCase();
+  if (status === 'online') {
+    return { status, label: 'Online agora', color: '#16a34a' };
+  }
+  if (status === 'away') {
+    return { status, label: 'Ausente', color: '#f59e0b' };
+  }
+  return {
+    status: 'offline',
+    label: formatLastAccess(colab?.last_access_at),
+    color: '#98a2b3'
+  };
+}
+
 function updateProfilePreview({ nome = '', cargo = '', empresa = '', departamento = '' } = {}){
   const nameEl = document.querySelector('#side-preview-name');
   const roleEl = document.querySelector('#side-preview-role');
@@ -501,18 +540,22 @@ export async function renderPerfilView(colab){
       : (coalesceName(colab) || 'Perfil do colaborador');
   }
 
+  const presence = formatPresence(colab);
   const pSubtitle = document.querySelector('#perfil-subtitle');
   if (pSubtitle) {
     pSubtitle.textContent = perfilModal?.dataset.mode === 'create'
       ? 'Convide alguém para acessar a plataforma'
-      : 'Gerencie dados, acesso e permissões deste colaborador';
+      : presence.label;
   }
 
   const photoURL = await fetchAvatarURLFor(colab);
   setPerfilAvatar(coalesceName(colab), photoURL);
 
-  if (dStatus) dStatus.style.background = '#008b32';
-  if (dStatusText) dStatusText.textContent = 'Disponível';
+  if (dStatus) {
+    dStatus.dataset.presence = presence.status;
+    dStatus.style.background = presence.color;
+  }
+  if (dStatusText) dStatusText.textContent = presence.label;
 
   const nome = coalesceName(colab);
   const email = coalesceEmail(colab);

@@ -67,6 +67,26 @@
   function getUserName()  { return LS.getItem('usuario_nome') || LS.getItem('nome'); }
   function authHeader()   { var t = getToken(); return t ? { Authorization: 'Bearer ' + t } : {}; }
 
+  function touchAccess() {
+    try {
+      var now = Date.now();
+      var last = Number(sessionStorage.getItem('zapschat_last_access_touch') || '0');
+      if (now - last < 45000) return;
+
+      var token = getToken();
+      var empresa = getEmpresaId();
+      if (!token && !empresa) return;
+
+      sessionStorage.setItem('zapschat_last_access_touch', String(now));
+
+      fetch('/api/auth/access', {
+        method: 'POST',
+        credentials: 'include',
+        headers: authHeader()
+      }).catch(function(){});
+    } catch (e) {}
+  }
+
   async function fetchMeWithCookie() {
     try {
       var r = await fetch(ME_URL, { credentials: 'include' });
@@ -79,6 +99,7 @@
       if (T(me.email) && !LS.getItem('usuario_email')) LS.setItem('usuario_email', me.email);
       try { LS.setItem('usuario', JSON.stringify(me)); } catch (e) {}
       _dispatchAuthChange();
+      touchAccess();
       return me;
     } catch (e) { return null; }
   }
@@ -300,11 +321,17 @@
     requireAuth: requireAuth, softEnsureAuth: softEnsureAuth,
     authFetch: authFetch, authHeader: authHeader,
     getToken: getToken, getEmpresaId: getEmpresaId, getUserName: getUserName,
-    logout: logout, fetchMeWithCookie: fetchMeWithCookie, tryFetchAndCacheAvatar: tryFetchAndCacheAvatar,
+    logout: logout, fetchMeWithCookie: fetchMeWithCookie, tryFetchAndCacheAvatar: tryFetchAndCacheAvatar, touchAccess: touchAccess,
     ensurePerm: ensurePerm, guardFetch: guardFetch, denyAndExit: denyAndExit, firstAllowedRoute: firstAllowedRoute, routeAfterLogin: routeAfterLogin,
     consts: { LOGIN_URL: LOGIN_URL, INICIO_URL: INICIO_URL, ME_URL: ME_URL, LOGOUT_URL: LOGOUT_URL },
     _internals: { _fetchMinhasPerms: _fetchMinhasPerms, _pickFirstAllowed: _pickFirstAllowed, ROUTES_BY_PERM: ROUTES_BY_PERM }
   };
+
+  // Registra a abertura de uma área autenticada sem bloquear a página.
+  setTimeout(touchAccess, 0);
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden) touchAccess();
+  });
 
   // Alias compatível
   window.Auth = window.ZAuth;

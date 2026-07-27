@@ -1,1027 +1,624 @@
-// /frontend/js/atendimentos/ui/perfil.js
-// Drawer “Campos do cliente”
-// - sem CSS inline
-// - cria o drawer automaticamente
-// - máscaras + CEP (BrasilAPI)
-// - botão no header (#btn-perfil)
-// - exporta abrirPerfilAtual()
-// ✅ alinhado com conversation_key canônica:
-//    c:<cliente_id>:<instancia_id> e g:<grupo_id>:<instancia_id>
-// ✅ só abre para contato individual (kind = c)
-// ✅ nunca usa Number(...) no id composto da conversa
+(() => {
+  'use strict';
 
-const $ = (s, r = document) => r.querySelector(s);
-const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
+  const $ = (selector, root = document) => root.querySelector(selector);
+  const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
-const EMPRESA_ID = Number(window.EMPRESA_ID || localStorage.getItem('empresa_id') || 0);
-
-/* =========================
-   HELPERS DE CONVERSA
-   ========================= */
-
-function idKey(v) {
-  const s = String(v ?? '').trim();
-  if (!s || s === 'null' || s === 'undefined' || s === 'NaN') return null;
-  return s;
-}
-
-function instKey(v) {
-  const s = String(v ?? '').trim();
-  if (!s) return null;
-  if (['null', 'undefined', 'nan', '0', 'all', '*', '-'].includes(s.toLowerCase())) return null;
-  return s;
-}
-
-function parseConversationKey(raw) {
-  const s = idKey(raw);
-  if (!s) return null;
-
-  const m = s.match(/^([cg]):(\d+):([^:]+)$/i);
-  if (!m) return null;
-
-  return {
-    key: `${m[1].toLowerCase()}:${m[2]}:${m[3]}`,
-    kind: m[1].toLowerCase(),
-    entityId: m[2],
-    instId: instKey(m[3]),
+  const state = {
+    profile: null,
+    initialForm: '',
+    avatarObjectUrl: '',
+    loading: false,
   };
-}
 
-function buildConversationKey(kind, entityId, instId) {
-  const k = String(kind || '').toLowerCase() === 'g' ? 'g' : 'c';
-  const eid = idKey(entityId);
-  const iid = instKey(instId);
-  if (!eid) return null;
-  return `${k}:${eid}:${iid ?? '0'}`;
-}
+  const els = {};
 
-function kindFromObject(obj) {
-  if (!obj || typeof obj !== 'object') return 'c';
-
-  const explicit =
-    obj.kind ??
-    obj.conversation_kind ??
-    obj.tipo_conversa ??
-    null;
-
-  const e = String(explicit || '').trim().toLowerCase();
-  if (e === 'g' || e === 'grupo' || e === 'group') return 'g';
-  if (e === 'c' || e === 'cliente' || e === 'contato') return 'c';
-
-  if (obj.is_group === true || obj.grupo === true || obj.isGroup === true || obj.grupo_id != null) {
-    return 'g';
+  function cacheElements() {
+    [
+      'profileMain', 'profileLoading', 'profileContent', 'btnAtualizarPagina',
+      'avatarPreviewBox', 'avatarImage', 'avatarInitials', 'avatarInput',
+      'btnUploadAvatar', 'btnEscolherFoto', 'btnRemoveAvatar',
+      'profileDisplayName', 'profileDisplayEmail', 'accountBadge',
+      'presenceBadge', 'presenceDot', 'presenceText', 'lastAccessText',
+      'infoEmpresa', 'infoTipoConta', 'infoDepartamento', 'infoHorario',
+      'infoPermissoes', 'infoIdentificacao', 'sessionBrowser', 'sessionSystem',
+      'btnLogoutCurrent', 'formPerfil', 'nome', 'email', 'telefone', 'cargo',
+      'btnSalvarPerfil', 'btnCancelarPerfil', 'profileSaveState',
+      'formSenha', 'senha_atual', 'nova_senha', 'confirma_senha',
+      'btnSalvarSenha', 'passwordStrengthBar', 'passwordStrengthText',
+      'passwordRules', 'profileToastHost',
+    ].forEach((id) => { els[id] = document.getElementById(id); });
   }
 
-  return 'c';
-}
-
-function entityIdFromAny(raw, row = null) {
-  const parsed = parseConversationKey(raw);
-  if (parsed?.entityId) return parsed.entityId;
-
-  if (row && typeof row === 'object') {
-    const direct =
-      row.entity_id ??
-      row.backend_id ??
-      row.api_id ??
-      (kindFromObject(row) === 'g' ? row.grupo_id : row.cliente_id) ??
-      row.id_backend ??
-      null;
-
-    const d = idKey(direct);
-    if (d && /^\d+$/.test(d)) return d;
+  function clean(value) {
+    return String(value ?? '').trim();
   }
 
-  const s = idKey(raw);
-  if (s && /^\d+$/.test(s)) return s;
-
-  return null;
-}
-
-function instIdFromAny(raw, row = null) {
-  const parsed = parseConversationKey(raw);
-  if (parsed?.instId) return parsed.instId;
-
-  if (row && typeof row === 'object') {
-    return (
-      instKey(row.instancia_id) ||
-      instKey(row.instancia) ||
-      instKey(row.instance_name) ||
-      instKey(row.instance) ||
-      null
-    );
+  function initials(name) {
+    const parts = clean(name).replace(/[@._-]+/g, ' ').split(/\s+/).filter(Boolean);
+    if (!parts.length) return 'US';
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
   }
 
-  return null;
-}
+  async function api(path, options = {}) {
+    const response = await fetch(path, {
+      credentials: 'include',
+      ...options,
+      headers: {
+        Accept: 'application/json',
+        ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+        ...(options.headers || {}),
+      },
+    });
 
-function conversationRefOf(raw, row = null) {
-  if (raw && typeof raw === 'object') {
-    const obj = raw;
-
-    const fromStoreHelper = typeof window.getConversationKey === 'function'
-      ? window.getConversationKey(
-          obj.conversation_key ?? obj.conversation_id ?? obj.id ?? obj.cliente_id ?? obj.grupo_id ?? null,
-          obj,
-          obj.instancia_id ?? obj.instancia ?? obj.instance_name ?? null
-        )
-      : null;
-
-    const parsedStore = parseConversationKey(fromStoreHelper);
-    if (parsedStore) return parsedStore;
-
-    const directRaw =
-      obj.conversation_key ??
-      obj.conversation_id ??
-      obj.id ??
-      null;
-
-    const parsedDirect = parseConversationKey(directRaw);
-    if (parsedDirect) return parsedDirect;
-
-    const kind = kindFromObject(obj);
-    const entityId = entityIdFromAny(directRaw, obj);
-    const instId = instIdFromAny(directRaw, obj);
-
-    const built = buildConversationKey(kind, entityId, instId) || idKey(directRaw);
-    const parsedBuilt = parseConversationKey(built);
-
-    return parsedBuilt || {
-      key: built,
-      kind,
-      entityId,
-      instId,
-    };
-  }
-
-  const fromStoreHelper = typeof window.getConversationKey === 'function'
-    ? window.getConversationKey(raw, row || null, row?.instancia_id ?? row?.instancia ?? null)
-    : null;
-
-  const parsedStore = parseConversationKey(fromStoreHelper);
-  if (parsedStore) return parsedStore;
-
-  const parsed = parseConversationKey(raw);
-  if (parsed) return parsed;
-
-  const kind = row && typeof row === 'object' ? kindFromObject(row) : 'c';
-  const entityId = entityIdFromAny(raw, row);
-  const instId = instIdFromAny(raw, row);
-
-  const built = buildConversationKey(kind, entityId, instId) || idKey(raw);
-
-  return parseConversationKey(built) || {
-    key: built,
-    kind,
-    entityId,
-    instId,
-  };
-}
-
-function getSelectedConversationRef() {
-  const hist = $('#historico');
-  const head = $('#chat-header');
-  const row = window.state?.clienteSel || window.clienteSel || null;
-
-  const raw =
-    idKey(hist?.dataset?.conversationKey) ||
-    idKey(hist?.dataset?.clienteId) ||
-    idKey(head?.dataset?.conversationKey) ||
-    idKey(row?.conversation_key) ||
-    idKey(row?.conversation_id) ||
-    idKey(row?.id) ||
-    null;
-
-  return conversationRefOf(raw, row);
-}
-
-function getSelectedKind() {
-  const hist = $('#historico');
-  const head = $('#chat-header');
-  const row = window.state?.clienteSel || window.clienteSel || null;
-
-  const direct =
-    idKey(hist?.dataset?.kind) ||
-    idKey(head?.dataset?.kind) ||
-    idKey(row?.kind) ||
-    null;
-
-  if (direct && /^(c|g)$/i.test(direct)) return direct.toLowerCase();
-
-  return getSelectedConversationRef().kind || 'c';
-}
-
-function getClienteId() {
-  const hist = $('#historico');
-  const head = $('#chat-header');
-  const row = window.state?.clienteSel || window.clienteSel || null;
-
-  const direct =
-    idKey(hist?.dataset?.entityId) ||
-    idKey(head?.dataset?.entityId) ||
-    idKey(row?.entity_id) ||
-    idKey(row?.backend_id) ||
-    idKey(row?.api_id) ||
-    null;
-
-  if (direct && /^\d+$/.test(direct)) {
-    return getSelectedKind() === 'c' ? direct : null;
-  }
-
-  const ref = getSelectedConversationRef();
-  if (ref.kind !== 'c') return null;
-
-  return ref.entityId || null;
-}
-
-/* =========================
-   TEMA / ÍCONES
-   ========================= */
-
-function getTheme() {
-  try {
-    const t = document.documentElement.getAttribute('data-theme');
-    if (t) return t;
-  } catch {}
-  try {
-    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  } catch {}
-  return 'dark';
-}
-
-function iconSvg(theme) {
-  const fill = theme === 'light' ? '#080808' : '#ffffff';
-  return `
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
-         class="perfil-ico" fill="${fill}" viewBox="0 0 256 256" aria-hidden="true">
-      <path d="M154,80a6,6,0,0,1,6-6h88a6,6,0,0,1,0,12H160A6,6,0,0,1,154,80Zm94,42H160a6,6,0,0,0,0,12h88a6,6,0,0,0,0-12Zm0,48H184a6,6,0,0,0,0,12h64a6,6,0,0,0,0-12Zm-98.19,20.5a6,6,0,1,1-11.62,3C131.7,168.29,107.23,150,80,150s-51.7,18.29-58.19,43.49a6,6,0,1,1-11.62-3c5.74-22.28,23-40.07,44.67-48a46,46,0,1,1,50.28,0C126.79,150.43,144.08,168.22,149.81,190.5ZM80,138a34,34,0,1,0-34-34A34,34,0,0,0,80,138Z"></path>
-    </svg>
-  `;
-}
-
-function bannerSvg(theme) {
-  const fill = theme === 'light' ? '#080808' : '#ffffff';
-  return `
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="${fill}" viewBox="0 0 256 256" aria-hidden="true">
-      <path d="M222,114.56a54,54,0,0,0-58.67-74.73,54,54,0,0,0-94,13.46A54,54,0,0,0,34,141.44a54,54,0,0,0,35.56,73.65A54.54,54.54,0,0,0,83.59,217a52.86,52.86,0,0,0,9.06-.78,54,54,0,0,0,94-13.46A54,54,0,0,0,222,114.56ZM183.37,52.5a42,42,0,0,1,29.21,53.14,54.84,54.84,0,0,0-5.08-3.33L163,76.62a6,6,0,0,0-6,0l-47,27.13V80.66l41.5-24A41.73,41.73,0,0,1,183.37,52.5ZM78,72a42,42,0,0,1,72.92-28.43,56.18,56.18,0,0,0-5.42,2.74L101,72a6,6,0,0,0-3,5.19v54.27L78,119.92ZM39.13,85.93a41.75,41.75,0,0,1,27.22-20A55.09,55.09,0,0,0,66,72v51.38a6,6,0,0,0,3,5.2l47,27.13L96,167.26l-41.5-24A42,42,0,0,1,39.13,85.93ZM72.63,203.5a42,42,0,0,1-29.21-53.14,54.84,54.84,0,0,0,5.08,3.33L93,179.38a6,6,0,0,0,6,0l47-27.13v23.09l-41.5,24A41.73,41.73,0,0,1,72.63,203.5ZM178,184a42,42,0,0,1-72.92,28.43,56.18,56.18,0,0,0,5.42-2.74L155,184a6,6,0,0,0,3-5.19V124.54l20,11.54Zm38.87-13.93a41.75,41.75,0,0,1-27.22,20A55.09,55.09,0,0,0,190,184V132.62a6,6,0,0,0-3-5.2l-47-27.13,20-11.55,41.5,24A42,42,0,0,1,216.87,170.07Z"></path>
-    </svg>
-  `;
-}
-
-/* =========================
-   TOAST
-   ========================= */
-
-function ensureToastHost() {
-  let host = document.getElementById('zcToastHost');
-  if (!host) {
-    host = document.createElement('div');
-    host.id = 'zcToastHost';
-    host.className = 'zcToastHost';
-    document.body.appendChild(host);
-  }
-  return host;
-}
-
-function toast({ title = 'Pronto', msg = '', type = 'ok', timeout = 2800 } = {}) {
-  if (typeof window.toast === 'function') {
+    let data = null;
+    const contentType = response.headers.get('content-type') || '';
     try {
-      window.toast({ title, msg, type, timeout });
-      return;
+      data = contentType.includes('application/json') ? await response.json() : await response.text();
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        setTimeout(() => { window.location.href = '/login.html?next=/perfil.html'; }, 700);
+      }
+      const message = typeof data === 'object' && data
+        ? (data.detail || data.message || data.erro)
+        : data;
+      throw new Error(clean(message) || `Erro ${response.status} ao processar a solicitação.`);
+    }
+    return data;
+  }
+
+  function toast(title, message = '', type = 'success') {
+    const host = els.profileToastHost || document.body;
+    const node = document.createElement('div');
+    node.className = `profile-toast${type === 'error' ? ' is-error' : ''}`;
+    node.innerHTML = `
+      <div class="profile-toast-icon"><i class="fa-solid ${type === 'error' ? 'fa-triangle-exclamation' : 'fa-check'}"></i></div>
+      <div><strong></strong><span></span></div>
+      <button type="button" class="profile-toast-close" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
+    `;
+    $('strong', node).textContent = title;
+    $('span', node).textContent = message;
+    const close = () => {
+      node.classList.remove('is-visible');
+      setTimeout(() => node.remove(), 180);
+    };
+    $('.profile-toast-close', node).addEventListener('click', close);
+    host.appendChild(node);
+    requestAnimationFrame(() => node.classList.add('is-visible'));
+    setTimeout(close, type === 'error' ? 5200 : 3400);
+  }
+
+  function setBusy(button, busy, busyText = 'Salvando...') {
+    if (!button) return;
+    if (!button.dataset.originalHtml) button.dataset.originalHtml = button.innerHTML;
+    button.disabled = Boolean(busy);
+    button.classList.toggle('is-loading', Boolean(busy));
+    button.innerHTML = busy
+      ? `<i class="fa-solid fa-spinner"></i><span>${busyText}</span>`
+      : button.dataset.originalHtml;
+  }
+
+  function formatPhone(value) {
+    const digits = String(value || '').replace(/\D/g, '').slice(0, 11);
+    if (!digits) return '';
+    if (digits.length <= 2) return `(${digits}`;
+    if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+    if (digits.length <= 10) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+    }
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  }
+
+  function parseDate(value) {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function sameLocalDay(a, b) {
+    return a.getFullYear() === b.getFullYear()
+      && a.getMonth() === b.getMonth()
+      && a.getDate() === b.getDate();
+  }
+
+  function formatLastAccess(value) {
+    const date = parseDate(value);
+    if (!date) return 'Último acesso ainda não registrado';
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const time = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(date);
+    if (sameLocalDay(date, now)) return `Último acesso hoje às ${time}`;
+    if (sameLocalDay(date, yesterday)) return `Último acesso ontem às ${time}`;
+    const day = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date);
+    return `Último acesso em ${day} às ${time}`;
+  }
+
+  function formatAccessSchedule(profile) {
+    const start = clean(profile.hora_login_inicio);
+    const end = clean(profile.hora_login_fim);
+    const mode = clean(profile.horario_modo).toLowerCase();
+    if (mode === 'livre' || mode === 'sem_restricao' || (!start && !end)) return 'Sem restrição cadastrada';
+    if (start && end) return `${start} às ${end}`;
+    if (start) return `A partir das ${start}`;
+    if (end) return `Até ${end}`;
+    return 'Sem restrição cadastrada';
+  }
+
+  function avatarSource(profile) {
+    return clean(profile?.avatar_url) || `/api/perfil/avatar?v=${Date.now()}`;
+  }
+
+  function renderAvatar(profile, forcedUrl = '') {
+    const name = clean(profile?.nome) || 'Usuário';
+    els.avatarInitials.textContent = initials(name);
+    const url = clean(forcedUrl) || avatarSource(profile);
+
+    els.avatarImage.hidden = true;
+    els.avatarInitials.hidden = false;
+    els.avatarImage.onload = () => {
+      els.avatarImage.hidden = false;
+      els.avatarInitials.hidden = true;
+    };
+    els.avatarImage.onerror = () => {
+      els.avatarImage.removeAttribute('src');
+      els.avatarImage.hidden = true;
+      els.avatarInitials.hidden = false;
+    };
+    els.avatarImage.src = url;
+    els.btnRemoveAvatar.disabled = !clean(profile?.avatar_url);
+  }
+
+  function normalizePresence(status) {
+    const value = clean(status).toLowerCase();
+    return ['online', 'away', 'offline'].includes(value) ? value : 'offline';
+  }
+
+  function renderPresence(status, payload = {}) {
+    const value = normalizePresence(status);
+    const labels = { online: 'Online agora', away: 'Ausente', offline: 'Offline' };
+    [els.presenceBadge, els.presenceDot].forEach((node) => {
+      if (!node) return;
+      node.classList.remove('is-online', 'is-away', 'is-offline');
+      node.classList.add(`is-${value}`);
+    });
+    els.presenceText.textContent = labels[value];
+
+    if (value === 'online') {
+      const sessions = Number(payload.presence_session_count || state.profile?.presence_session_count || 0);
+      els.lastAccessText.textContent = sessions > 1
+        ? `Online em ${sessions} sessões do ZapsChat`
+        : 'Você está usando o ZapsChat agora';
+    } else if (value === 'away') {
+      els.lastAccessText.textContent = 'Ausente por inatividade ou página em segundo plano';
+    } else {
+      els.lastAccessText.textContent = formatLastAccess(payload.last_access_at || state.profile?.last_access_at);
+    }
+  }
+
+  function serializeProfileForm() {
+    return JSON.stringify({
+      nome: clean(els.nome.value),
+      email: clean(els.email.value).toLowerCase(),
+      telefone: clean(els.telefone.value),
+      cargo: clean(els.cargo.value),
+    });
+  }
+
+  function updateDirtyState() {
+    const dirty = Boolean(state.initialForm) && serializeProfileForm() !== state.initialForm;
+    els.profileSaveState.hidden = !dirty;
+    els.btnCancelarPerfil.disabled = !dirty;
+    return dirty;
+  }
+
+  function renderProfile(profile) {
+    state.profile = profile;
+
+    els.profileDisplayName.textContent = clean(profile.nome) || 'Usuário';
+    els.profileDisplayEmail.textContent = clean(profile.email) || 'Sem e-mail';
+    els.accountBadge.innerHTML = `<i class="fa-solid ${profile.is_admin ? 'fa-user-shield' : 'fa-headset'}" aria-hidden="true"></i><span></span>`;
+    $('span', els.accountBadge).textContent = clean(profile.account_label) || (profile.is_admin ? 'Administrador' : 'Colaborador');
+
+    els.nome.value = clean(profile.nome);
+    els.email.value = clean(profile.email);
+    els.telefone.value = formatPhone(profile.telefone);
+    els.cargo.value = clean(profile.cargo);
+
+    els.infoEmpresa.textContent = clean(profile.empresa_nome) || 'Empresa não informada';
+    els.infoTipoConta.textContent = clean(profile.account_label) || 'Colaborador';
+    els.infoDepartamento.textContent = clean(profile.departamento || profile.setor) || 'Não informado';
+    els.infoHorario.textContent = formatAccessSchedule(profile);
+    els.infoPermissoes.textContent = profile.is_admin
+      ? 'Acesso administrativo completo'
+      : `${Number(profile.permissoes_count || 0)} permissões liberadas`;
+    els.infoIdentificacao.textContent = profile.colaborador_id
+      ? `Conta #${profile.id} · Colaborador #${profile.colaborador_id}`
+      : `Conta #${profile.id}`;
+
+    renderAvatar(profile);
+    renderPresence(profile.presence_status, profile);
+
+    state.initialForm = serializeProfileForm();
+    updateDirtyState();
+    syncLocalProfile(profile);
+  }
+
+  function syncLocalProfile(profile) {
+    try {
+      localStorage.setItem('usuario_nome', clean(profile.nome));
+      localStorage.setItem('usuario_email', clean(profile.email));
+      if (profile.avatar_url) {
+        localStorage.setItem('usuario_avatar', profile.avatar_url);
+        localStorage.setItem('avatar_url', profile.avatar_url);
+      } else {
+        localStorage.removeItem('usuario_avatar');
+        localStorage.removeItem('avatar_url');
+      }
+      localStorage.setItem('usuario_avatar_v', String(Date.now()));
+    } catch {}
+
+    try {
+      window.dispatchEvent(new CustomEvent('zapschat-profile-updated', { detail: profile }));
+      window.dispatchEvent(new CustomEvent('usuario-atualizado', { detail: profile }));
     } catch {}
   }
 
-  const host = ensureToastHost();
-  const el = document.createElement('div');
-  el.className = `zcToast ${type === 'error' ? 'err' : 'ok'}`;
-  el.innerHTML = `
-    <div>
-      <div class="t-title">${title}</div>
-      ${msg ? `<div class="t-msg">${msg}</div>` : ''}
-    </div>
-    <button class="t-close" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
-  `;
-  host.appendChild(el);
-  requestAnimationFrame(() => el.classList.add('on'));
-  el.querySelector('.t-close')?.addEventListener('click', () => el.remove());
-  if (timeout) setTimeout(() => el.remove(), timeout);
-}
-
-/* =========================
-   MÁSCARAS / VALIDAÇÃO
-   ========================= */
-
-const UF_LIST = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
-const UF_SET = new Set(UF_LIST);
-
-const onlyDigits = s => String(s || '').replace(/\D+/g, '');
-const keepRGChars = s => String(s || '').replace(/[^0-9xX]/g, '').toUpperCase();
-
-function fmtCPF(d) {
-  d = onlyDigits(d).slice(0, 11);
-  return d
-    .replace(/^(\d{3})(\d)/, '$1.$2')
-    .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
-    .replace(/^(\d{3})\.(\d{3})\.(\d{3})(\d)/, '$1.$2.$3-$4');
-}
-
-function fmtCNPJ(d) {
-  d = onlyDigits(d).slice(0, 14);
-  return d
-    .replace(/^(\d{2})(\d)/, '$1.$2')
-    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
-    .replace(/^(\d{2})\.(\d{3})\.(\d{3})(\d)/, '$1.$2.$3/$4')
-    .replace(/^(\d{2})\.(\d{3})\.(\d{3})\/(\d{4})(\d)/, '$1.$2.$3/$4-$5');
-}
-
-function fmtCPForCNPJ(v) {
-  const d = onlyDigits(v);
-  return d.length <= 11 ? fmtCPF(d) : fmtCNPJ(d);
-}
-
-function fmtRG(v) {
-  let s = keepRGChars(v).slice(0, 10);
-  let body = s;
-  let dv = '';
-  if (s.length === 10) {
-    body = s.slice(0, 9);
-    dv = s.slice(9);
-  }
-  body = body
-    .replace(/^(\d{2})(\d)/, '$1.$2')
-    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3');
-  return dv ? `${body}-${dv}` : body;
-}
-
-function fmtCEP(v) {
-  let d = onlyDigits(v).slice(0, 8);
-  if (d.length > 5) d = d.replace(/^(\d{5})(\d{1,3})$/, '$1-$2');
-  return d;
-}
-
-function fmtNumero(v) {
-  return onlyDigits(v).slice(0, 8);
-}
-
-function fmtComplemento(v) {
-  return String(v || '')
-    .replace(/[^0-9A-Za-zÀ-ÿ\s#\/\-\.\º°]/g, '')
-    .replace(/\s{2,}/g, ' ')
-    .slice(0, 40);
-}
-
-function fmtCidade(v) {
-  return String(v || '')
-    .replace(/[^A-Za-zÀ-ÿ\s\-']/g, '')
-    .replace(/\s{2,}/g, ' ')
-    .slice(0, 50);
-}
-
-function fmtUF(v) {
-  return String(v || '')
-    .replace(/[^A-Za-z]/g, '')
-    .toUpperCase()
-    .slice(0, 2);
-}
-
-function fmtDataBR(v) {
-  const d = onlyDigits(v).slice(0, 8);
-  if (d.length <= 2) return d;
-  if (d.length <= 4) return d.replace(/^(\d{2})(\d{0,2})$/, '$1/$2');
-  return d.replace(/^(\d{2})(\d{2})(\d{0,4}).*$/, '$1/$2/$3');
-}
-
-function isValidDataBR(v) {
-  const m = String(v || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (!m) return false;
-
-  const dd = Number(m[1]);
-  const mm = Number(m[2]);
-  const yyyy = Number(m[3]);
-
-  if (yyyy < 1900) return false;
-  if (mm < 1 || mm > 12) return false;
-
-  const dt = new Date(yyyy, mm - 1, dd);
-  if (
-    dt.getFullYear() !== yyyy ||
-    dt.getMonth() + 1 !== mm ||
-    dt.getDate() !== dd
-  ) return false;
-
-  if (dt.getTime() > Date.now()) return false;
-  return true;
-}
-
-function toISOFromDataBR(v) {
-  if (!isValidDataBR(v)) return '';
-  const [dd, mm, yyyy] = v.split('/');
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function toDataBRFromAny(x) {
-  if (!x) return '';
-  const s = String(x);
-
-  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
-
-  m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
-  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
-
-  m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (m) return s;
-
-  return '';
-}
-
-function isValidEmail(v) {
-  if (!v) return true;
-  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v);
-}
-
-function isValidCEP(v) {
-  return onlyDigits(v).length === 8;
-}
-
-function isValidCPF(d) {
-  d = onlyDigits(d);
-  if (d.length !== 11 || /^(\d)\1+$/.test(d)) return false;
-
-  let s = 0;
-  for (let i = 0; i < 9; i++) s += Number(d[i]) * (10 - i);
-  let dg = (s * 10) % 11;
-  if (dg === 10) dg = 0;
-  if (dg !== Number(d[9])) return false;
-
-  s = 0;
-  for (let i = 0; i < 10; i++) s += Number(d[i]) * (11 - i);
-  dg = (s * 10) % 11;
-  if (dg === 10) dg = 0;
-
-  return dg === Number(d[10]);
-}
-
-function isValidCNPJ(c) {
-  c = onlyDigits(c);
-  if (c.length !== 14 || /^(\d)\1+$/.test(c)) return false;
-
-  const calc = (base) => {
-    const seq = [5,4,3,2,9,8,7,6,5,4,3,2].slice(12 - base.length);
-    const sum = base.split('').reduce((acc, ch, i) => acc + Number(ch) * seq[i], 0);
-    const r = sum % 11;
-    return r < 2 ? 0 : 11 - r;
-  };
-
-  const b1 = c.substring(0, 12);
-  const d1 = calc(b1);
-  const d2 = calc(b1 + String(d1));
-  return c === b1 + String(d1) + String(d2);
-}
-
-function validCPForCNPJ(v) {
-  const d = onlyDigits(v);
-  if (!d.length) return true;
-  return d.length <= 11 ? isValidCPF(d) : isValidCNPJ(d);
-}
-
-function maskInput(el, formatter, validator) {
-  if (!el) return;
-
-  const apply = () => {
-    el.value = formatter(el.value);
-    if (validator) {
-      const ok = validator(el.value);
-      el.classList.toggle('is-invalid', !ok);
-      el.title = ok ? '' : 'Valor inválido';
+  async function loadProfile({ silent = false } = {}) {
+    if (state.loading) return;
+    state.loading = true;
+    els.profileMain.setAttribute('aria-busy', 'true');
+    if (!silent) {
+      els.profileLoading.hidden = false;
+      els.profileContent.hidden = true;
     }
-  };
+    els.btnAtualizarPagina.classList.add('is-loading');
+    els.btnAtualizarPagina.disabled = true;
 
-  on(el, 'input', apply);
-  on(el, 'blur', apply);
-  apply();
-}
-
-/* =========================
-   BRASILAPI
-   ========================= */
-
-async function preencherPorCEP(cep) {
-  const d = onlyDigits(cep);
-  if (d.length !== 8) return false;
-
-  try {
-    const r = await fetch(`https://brasilapi.com.br/api/cep/v2/${d}`);
-    if (!r.ok) return false;
-
-    const j = await r.json();
-    const est = String(j.state || '').toUpperCase();
-
-    if ($('#pf_estado') && UF_SET.has(est)) $('#pf_estado').value = est;
-    if ($('#pf_cidade')) $('#pf_cidade').value = j.city || '';
-    if ($('#pf_bairro')) $('#pf_bairro').value = j.neighborhood || '';
-    if ($('#pf_endereco')) $('#pf_endereco').value = j.street || '';
-
-    setBannerTip('Endereço sugerido a partir do CEP. Confira antes de salvar.');
-    return true;
-  } catch (e) {
-    console.warn('[CEP] BrasilAPI erro', e);
-    return false;
-  }
-}
-
-/* =========================
-   DRAWER
-   ========================= */
-
-let drawerRefs = null;
-let drawerBound = false;
-
-function refreshBannerIcon(container) {
-  const slot = container?.querySelector('.b-ico');
-  if (slot) slot.innerHTML = bannerSvg(getTheme());
-}
-
-function setBanner(msg, tip = '') {
-  const banner = $('#zcPerfilBanner');
-  if (!banner) return;
-
-  const msgEl = banner.querySelector('.b-msg');
-  const tipEl = banner.querySelector('.b-tip');
-
-  if (msgEl) msgEl.innerHTML = msg || '';
-  if (tipEl) tipEl.textContent = tip;
-
-  refreshBannerIcon(banner);
-}
-
-function setBannerTip(tip) {
-  const tipEl = $('#zcPerfilBanner .b-tip');
-  if (!tipEl) return;
-  tipEl.textContent = tip || '';
-  try {
-    tipEl.animate([{ opacity: .25 }, { opacity: 1 }], { duration: 160, fill: 'forwards' });
-  } catch {}
-}
-
-function ensureDrawer() {
-  if (drawerRefs) return drawerRefs;
-
-  const UF_OPTIONS = UF_LIST.map((uf) => `<option value="${uf}">${uf}</option>`).join('');
-
-  const backdrop = document.createElement('div');
-  backdrop.id = 'zcPerfilBackdrop';
-  backdrop.className = 'zcPerfil-backdrop';
-
-  const drawer = document.createElement('aside');
-  drawer.id = 'zcPerfilDrawer';
-  drawer.className = 'zcPerfil-drawer';
-  drawer.setAttribute('role', 'dialog');
-  drawer.setAttribute('aria-modal', 'true');
-
-  drawer.innerHTML = `
-    <div class="zcPerfil-head">
-      <div class="zcPerfil-title" id="zcPerfilTitle">
-        ${iconSvg(getTheme())}
-        <span>Campos do cliente</span>
-      </div>
-      <button class="zcPerfil-close" id="zcPerfilClose" title="Fechar" aria-label="Fechar">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true">
-          <path fill="currentColor" d="M205.66 194.34a8 8 0 0 1-11.32 11.32L128 139.31l-66.34 66.35a8 8 0 0 1-11.32-11.32L116.69 128 50.34 61.66A8 8 0 0 1 61.66 50.34L128 116.69l66.34-66.35a8 8 0 0 1 11.32 11.32L139.31 128z"/>
-        </svg>
-      </button>
-    </div>
-
-    <div class="zcPerfil-body">
-      <div class="zcPerfil-banner" id="zcPerfilBanner" aria-live="polite">
-        <span class="b-ico"></span>
-        <div>
-          <div class="b-msg"></div>
-          <div class="b-tip"></div>
-        </div>
-      </div>
-
-      <div class="zcPerfil-stack">
-        <div class="zcPerfil-field">
-          <label>Nome completo</label>
-          <input id="pf_nome_completo" autocomplete="off" maxlength="120">
-        </div>
-
-        <div class="zcPerfil-field">
-          <label>CPF/CNPJ</label>
-          <input id="pf_cpf_cnpj" autocomplete="off" inputmode="numeric" maxlength="18" placeholder="CPF ou CNPJ">
-        </div>
-
-        <div class="zcPerfil-field">
-          <label>RG</label>
-          <input id="pf_rg" autocomplete="off" maxlength="12" placeholder="00.000.000-X">
-        </div>
-
-        <div class="zcPerfil-field">
-          <label>E-mail</label>
-          <input id="pf_email" type="email" autocomplete="off" maxlength="120" placeholder="email@dominio.com">
-        </div>
-
-        <div class="zcPerfil-row zcPerfil-row--datagen">
-          <div class="zcPerfil-field field--dob">
-            <label>Data de nascimento</label>
-            <input id="pf_data_nasc" autocomplete="off" inputmode="numeric" maxlength="10" placeholder="DD/MM/AAAA">
-          </div>
-
-          <div class="zcPerfil-field field--genero">
-            <label>Gênero</label>
-            <div class="zcPerfil-selectWrap">
-              <select id="pf_genero">
-                <option value="">Selecione…</option>
-                <option value="Masculino">Masculino</option>
-                <option value="Feminino">Feminino</option>
-                <option value="Outro">Outro</option>
-                <option value="Prefiro não dizer">Prefiro não dizer</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div class="zcPerfil-row zcPerfil-row--cepuf">
-          <div class="zcPerfil-field field--cep">
-            <label>CEP</label>
-            <input id="pf_cep" autocomplete="off" inputmode="numeric" maxlength="9" placeholder="00000-000">
-          </div>
-
-          <div class="zcPerfil-field field--uf">
-            <label>Estado (UF)</label>
-            <div class="zcPerfil-selectWrap">
-              <select id="pf_estado">
-                <option value="">UF</option>
-                ${UF_OPTIONS}
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div class="zcPerfil-field">
-          <label>Endereço</label>
-          <input id="pf_endereco" autocomplete="off" maxlength="80" placeholder="Rua, Av., Travessa…">
-        </div>
-
-        <div class="zcPerfil-row zcPerfil-row--numcomp">
-          <div class="zcPerfil-field field--numero">
-            <label>Número</label>
-            <input id="pf_numero" autocomplete="off" inputmode="numeric" maxlength="8">
-          </div>
-
-          <div class="zcPerfil-field field--complemento">
-            <label>Complemento</label>
-            <input id="pf_complemento" autocomplete="off" maxlength="40" placeholder="Apto, Bloco, Casa, Sala…">
-          </div>
-        </div>
-
-        <div class="zcPerfil-field">
-          <label>Bairro</label>
-          <input id="pf_bairro" autocomplete="off" maxlength="50">
-        </div>
-
-        <div class="zcPerfil-field">
-          <label>Cidade</label>
-          <input id="pf_cidade" autocomplete="off" maxlength="50">
-        </div>
-      </div>
-
-      <div class="zcPerfil-actions">
-        <button class="zcPerfil-btnPrimary" id="zcPerfilSave" type="button">Salvar</button>
-        <button class="zcPerfil-btnGhost" id="zcPerfilCancel" type="button">Cancelar</button>
-      </div>
-    </div>
-  `;
-
-  document.body.append(backdrop, drawer);
-
-  drawerRefs = {
-    backdrop,
-    drawer,
-    title: $('#zcPerfilTitle', drawer),
-    banner: $('#zcPerfilBanner', drawer),
-    save: $('#zcPerfilSave', drawer),
-    cancel: $('#zcPerfilCancel', drawer),
-    close: $('#zcPerfilClose', drawer),
-    nome: $('#pf_nome_completo', drawer),
-    cpfCnpj: $('#pf_cpf_cnpj', drawer),
-    rg: $('#pf_rg', drawer),
-    email: $('#pf_email', drawer),
-    dataNasc: $('#pf_data_nasc', drawer),
-    genero: $('#pf_genero', drawer),
-    cep: $('#pf_cep', drawer),
-    endereco: $('#pf_endereco', drawer),
-    numero: $('#pf_numero', drawer),
-    complemento: $('#pf_complemento', drawer),
-    bairro: $('#pf_bairro', drawer),
-    cidade: $('#pf_cidade', drawer),
-    estado: $('#pf_estado', drawer),
-  };
-
-  bindDrawer();
-  refreshDrawerIcons();
-
-  return drawerRefs;
-}
-
-function refreshDrawerIcons() {
-  if (!drawerRefs) return;
-  if (drawerRefs.title) {
-    drawerRefs.title.innerHTML = `${iconSvg(getTheme())}<span>Campos do cliente</span>`;
-  }
-  refreshBannerIcon(drawerRefs.drawer);
-}
-
-function bindDrawer() {
-  if (!drawerRefs || drawerBound) return;
-  drawerBound = true;
-
-  const r = drawerRefs;
-
-  const close = () => {
-    r.backdrop.classList.remove('is-open');
-    r.drawer.classList.remove('is-open');
-  };
-
-  on(r.close, 'click', close);
-  on(r.cancel, 'click', close);
-  on(r.backdrop, 'click', (e) => {
-    if (e.target === r.backdrop) close();
-  });
-
-  on(document, 'keydown', (e) => {
-    if (e.key === 'Escape' && r.drawer.classList.contains('is-open')) close();
-  });
-
-  maskInput(r.cpfCnpj, fmtCPForCNPJ, validCPForCNPJ);
-  maskInput(r.rg, fmtRG, null);
-  maskInput(r.cep, fmtCEP, (v) => isValidCEP(v) || v === '');
-  maskInput(r.numero, fmtNumero, null);
-  maskInput(r.complemento, fmtComplemento, null);
-  maskInput(r.cidade, fmtCidade, null);
-  maskInput(r.dataNasc, fmtDataBR, (v) => isValidDataBR(v) || v === '');
-
-  if (r.email) {
-    const applyEmail = () => {
-      r.email.value = String(r.email.value || '').trim().toLowerCase();
-      const ok = isValidEmail(r.email.value);
-      r.email.classList.toggle('is-invalid', !ok);
-      r.email.title = ok ? '' : 'E-mail inválido';
-    };
-    on(r.email, 'blur', applyEmail);
-    applyEmail();
-  }
-
-  on(r.cep, 'blur', async () => {
-    const ok = await preencherPorCEP(r.cep.value);
-    if (!ok && onlyDigits(r.cep.value).length === 8) {
-      setBannerTip('Não foi possível sugerir o endereço para este CEP.');
+    try {
+      const profile = await api('/api/perfil');
+      renderProfile(profile);
+      els.profileLoading.hidden = true;
+      els.profileContent.hidden = false;
+      ensureProfilePresence();
+      if (silent) toast('Perfil atualizado', 'Os dados foram recarregados.');
+    } catch (error) {
+      els.profileLoading.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i><span>${error.message}</span>`;
+      toast('Não foi possível carregar o perfil', error.message, 'error');
+    } finally {
+      state.loading = false;
+      els.profileMain.setAttribute('aria-busy', 'false');
+      els.btnAtualizarPagina.classList.remove('is-loading');
+      els.btnAtualizarPagina.disabled = false;
     }
-  });
-
-  on(r.save, 'click', salvarPerfil);
-}
-
-function openDrawer() {
-  const r = ensureDrawer();
-  r.backdrop.classList.add('is-open');
-  r.drawer.classList.add('is-open');
-  setTimeout(() => r.nome?.focus(), 0);
-}
-
-function resetForm() {
-  const r = ensureDrawer();
-  [
-    r.nome, r.cpfCnpj, r.rg, r.email, r.dataNasc, r.cep, r.endereco,
-    r.numero, r.complemento, r.bairro, r.cidade
-  ].forEach((el) => { if (el) el.value = ''; });
-
-  if (r.estado) r.estado.value = '';
-  if (r.genero) r.genero.value = '';
-
-  [r.cpfCnpj, r.email, r.dataNasc].forEach((el) => {
-    el?.classList.remove('is-invalid');
-    if (el) el.title = '';
-  });
-
-  setBanner(
-    'Usamos inteligência artificial para <strong>montar o endereço</strong> a partir do CEP e para <strong>validar CPF/CNPJ</strong>. Confira os dados antes de salvar.',
-    ''
-  );
-}
-
-async function carregarPerfil() {
-  const cid = getClienteId();
-  if (!cid || !EMPRESA_ID) {
-    toast({ title: 'Selecione um cliente', type: 'error' });
-    return;
   }
 
-  const r = ensureDrawer();
-  resetForm();
+  function validateProfileForm() {
+    $$('[data-error-for]').forEach((node) => { node.textContent = ''; });
+    $$('#formPerfil input').forEach((node) => node.classList.remove('is-invalid'));
 
-  try {
-    const resp = await fetch(
-      `/api/atendimento/clientes/${encodeURIComponent(cid)}/profile?empresa_id=${EMPRESA_ID}`,
-      { credentials: 'include' }
-    );
+    const name = clean(els.nome.value);
+    const email = clean(els.email.value);
+    let valid = true;
 
-    if (!resp.ok) throw new Error('Falha ao buscar perfil');
-
-    const j = await resp.json();
-
-    r.nome.value = j.nome_completo || '';
-    r.cpfCnpj.value = fmtCPForCNPJ(j.cpf_cnpj || '');
-    r.rg.value = fmtRG(j.rg || '');
-    r.email.value = String(j.email || '').trim().toLowerCase();
-
-    const nascRaw = j.data_nascimento || j.nascimento || j.dataNascimento || '';
-    r.dataNasc.value = toDataBRFromAny(nascRaw);
-
-    r.genero.value = j.genero || j.sexo || '';
-    r.cep.value = fmtCEP(j.cep || '');
-    r.endereco.value = j.endereco || '';
-    r.numero.value = fmtNumero(j.numero || '');
-    r.complemento.value = fmtComplemento(j.complemento || '');
-    r.bairro.value = j.bairro || '';
-    r.cidade.value = fmtCidade(j.cidade || '');
-
-    const uf = fmtUF(j.estado || '');
-    if (UF_SET.has(uf)) r.estado.value = uf;
-  } catch (err) {
-    console.error('[perfil] carregar()', err);
-    toast({ title: 'Não foi possível carregar o perfil', type: 'error' });
-  }
-}
-
-async function salvarPerfil() {
-  const cid = getClienteId();
-  if (!cid || !EMPRESA_ID) {
-    toast({ title: 'Selecione um cliente', type: 'error' });
-    return;
+    if (name.length < 2) {
+      els.nome.classList.add('is-invalid');
+      $('[data-error-for="nome"]').textContent = 'Informe seu nome completo.';
+      valid = false;
+    }
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      els.email.classList.add('is-invalid');
+      $('[data-error-for="email"]').textContent = 'Informe um e-mail válido.';
+      valid = false;
+    }
+    return valid;
   }
 
-  const r = ensureDrawer();
+  async function saveProfile(event) {
+    event.preventDefault();
+    if (!validateProfileForm()) return;
 
-  const email = String(r.email.value || '').trim().toLowerCase();
-  const cpfcnpj = r.cpfCnpj.value || '';
-  const cep = r.cep.value || '';
-  const ufSel = r.estado.value || '';
-  const dnBr = r.dataNasc.value || '';
-  const generoSel = String(r.genero.value || '').trim();
-
-  const invalids = [];
-  if (!isValidEmail(email)) invalids.push('E-mail inválido');
-  if (!validCPForCNPJ(cpfcnpj)) invalids.push('CPF/CNPJ inválido');
-  if (cep && !isValidCEP(cep)) invalids.push('CEP inválido');
-  if (ufSel && !UF_SET.has(ufSel)) invalids.push('UF inválida');
-  if (dnBr && !isValidDataBR(dnBr)) invalids.push('Data de nascimento inválida');
-
-  if (invalids.length) {
-    toast({
-      title: 'Verifique os campos',
-      msg: invalids.join(' · '),
-      type: 'error',
-    });
-    return;
-  }
-
-  const payload = {
-    nome_completo: String(r.nome.value || '').trim() || undefined,
-    cpf_cnpj: onlyDigits(cpfcnpj) || undefined,
-    rg: String(r.rg.value || '').replace(/\./g, '').toUpperCase() || undefined,
-    email: email || undefined,
-    data_nascimento: dnBr ? toISOFromDataBR(dnBr) : undefined,
-    genero: generoSel || undefined,
-    cep: onlyDigits(cep) || undefined,
-    endereco: String(r.endereco.value || '').trim() || undefined,
-    numero: onlyDigits(r.numero.value || '') || undefined,
-    complemento: String(r.complemento.value || '').trim() || undefined,
-    bairro: String(r.bairro.value || '').trim() || undefined,
-    cidade: String(r.cidade.value || '').trim() || undefined,
-    estado: String(ufSel || '').toUpperCase() || undefined,
-  };
-
-  r.save.disabled = true;
-  r.save.textContent = 'Salvando…';
-
-  try {
-    const resp = await fetch(
-      `/api/atendimento/clientes/${encodeURIComponent(cid)}/profile?empresa_id=${EMPRESA_ID}`,
-      {
+    setBusy(els.btnSalvarPerfil, true);
+    try {
+      const payload = JSON.parse(serializeProfileForm());
+      const profile = await api('/api/perfil', {
         method: 'PUT',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+      });
+      renderProfile(profile);
+      toast('Perfil salvo', 'Seus dados foram atualizados com sucesso.');
+    } catch (error) {
+      toast('Não foi possível salvar', error.message, 'error');
+    } finally {
+      setBusy(els.btnSalvarPerfil, false);
+    }
+  }
+
+  function discardProfileChanges() {
+    if (!state.profile) return;
+    els.nome.value = clean(state.profile.nome);
+    els.email.value = clean(state.profile.email);
+    els.telefone.value = formatPhone(state.profile.telefone);
+    els.cargo.value = clean(state.profile.cargo);
+    updateDirtyState();
+  }
+
+  async function uploadAvatar(file) {
+    if (!file) return;
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowed.includes(file.type)) {
+      toast('Imagem inválida', 'Use um arquivo JPG, PNG, WEBP ou GIF.', 'error');
+      return;
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      toast('Imagem muito grande', 'A foto deve ter no máximo 4 MB.', 'error');
+      return;
+    }
+
+    if (state.avatarObjectUrl) URL.revokeObjectURL(state.avatarObjectUrl);
+    state.avatarObjectUrl = URL.createObjectURL(file);
+    renderAvatar(state.profile, state.avatarObjectUrl);
+    els.avatarPreviewBox.classList.add('is-loading');
+    els.btnEscolherFoto.disabled = true;
+    els.btnUploadAvatar.disabled = true;
+
+    const form = new FormData();
+    form.append('file', file, file.name);
+
+    try {
+      const result = await api('/api/perfil/avatar', { method: 'POST', body: form });
+      const profile = { ...state.profile, avatar_url: result.avatar_url || '' };
+      state.profile = profile;
+      renderAvatar(profile, result.avatar_url || `/api/perfil/avatar?v=${Date.now()}`);
+      syncLocalProfile(profile);
+      toast('Foto atualizada', 'Sua nova foto já está sendo usada no ZapsChat.');
+    } catch (error) {
+      renderAvatar(state.profile);
+      toast('Não foi possível alterar a foto', error.message, 'error');
+    } finally {
+      els.avatarPreviewBox.classList.remove('is-loading');
+      els.btnEscolherFoto.disabled = false;
+      els.btnUploadAvatar.disabled = false;
+      els.avatarInput.value = '';
+      if (state.avatarObjectUrl) {
+        URL.revokeObjectURL(state.avatarObjectUrl);
+        state.avatarObjectUrl = '';
       }
+    }
+  }
+
+  async function removeAvatar() {
+    if (!state.profile?.avatar_url) return;
+    const ok = window.confirm('Remover sua foto de perfil? O ZapsChat passará a mostrar suas iniciais.');
+    if (!ok) return;
+
+    els.avatarPreviewBox.classList.add('is-loading');
+    els.btnRemoveAvatar.disabled = true;
+    try {
+      await api('/api/perfil/avatar', { method: 'DELETE' });
+      state.profile = { ...state.profile, avatar_url: null };
+      renderAvatar(state.profile, `/api/perfil/avatar?v=${Date.now()}`);
+      syncLocalProfile(state.profile);
+      toast('Foto removida', 'Agora suas iniciais serão exibidas no perfil.');
+    } catch (error) {
+      toast('Não foi possível remover a foto', error.message, 'error');
+    } finally {
+      els.avatarPreviewBox.classList.remove('is-loading');
+      els.btnRemoveAvatar.disabled = !state.profile?.avatar_url;
+    }
+  }
+
+  function passwordChecks() {
+    const password = els.nova_senha.value || '';
+    const confirmation = els.confirma_senha.value || '';
+    return {
+      length: password.length >= 8,
+      letter: /[A-Za-zÀ-ÿ]/.test(password),
+      number: /\d/.test(password),
+      match: Boolean(password) && password === confirmation,
+    };
+  }
+
+  function renderPasswordStrength() {
+    const checks = passwordChecks();
+    const password = els.nova_senha.value || '';
+    Object.entries(checks).forEach(([rule, ok]) => {
+      const node = $(`[data-rule="${rule}"]`, els.passwordRules);
+      if (!node) return;
+      node.classList.toggle('is-ok', ok);
+      const icon = $('i', node);
+      icon.className = `fa-solid ${ok ? 'fa-check' : 'fa-circle'}`;
+    });
+
+    let score = Object.values(checks).filter(Boolean).length;
+    if (password.length >= 12) score += 1;
+    if (/[^A-Za-zÀ-ÿ0-9]/.test(password)) score += 1;
+
+    let width = 0;
+    let text = 'Digite uma nova senha';
+    let color = 'var(--pf-danger)';
+    if (password) {
+      width = Math.min(100, Math.max(18, score * 18));
+      if (score <= 2) text = 'Senha fraca';
+      else if (score <= 4) { text = 'Senha razoável'; color = 'var(--pf-warning)'; }
+      else { text = 'Senha forte'; color = 'var(--pf-success)'; }
+    }
+    els.passwordStrengthBar.style.width = `${width}%`;
+    els.passwordStrengthBar.style.background = color;
+    els.passwordStrengthText.textContent = text;
+    return checks;
+  }
+
+  async function savePassword(event) {
+    event.preventDefault();
+    const checks = renderPasswordStrength();
+    if (!els.senha_atual.value) {
+      toast('Informe a senha atual', 'Digite sua senha atual antes de continuar.', 'error');
+      els.senha_atual.focus();
+      return;
+    }
+    if (!checks.length || !checks.letter || !checks.number || !checks.match) {
+      toast('Revise a nova senha', 'Ela precisa atender a todos os requisitos exibidos.', 'error');
+      return;
+    }
+
+    setBusy(els.btnSalvarSenha, true, 'Atualizando...');
+    try {
+      await api('/api/perfil/senha', {
+        method: 'PUT',
+        body: JSON.stringify({
+          senha_atual: els.senha_atual.value,
+          nova_senha: els.nova_senha.value,
+          confirma_senha: els.confirma_senha.value,
+        }),
+      });
+      els.formSenha.reset();
+      renderPasswordStrength();
+      toast('Senha atualizada', 'Sua nova senha já está ativa.');
+    } catch (error) {
+      toast('Não foi possível alterar a senha', error.message, 'error');
+    } finally {
+      setBusy(els.btnSalvarSenha, false);
+    }
+  }
+
+  function togglePassword(button) {
+    const id = button.dataset.togglePassword;
+    const input = document.getElementById(id);
+    if (!input) return;
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    button.setAttribute('aria-label', showing ? 'Mostrar senha' : 'Ocultar senha');
+    const icon = $('i', button);
+    icon.className = `fa-regular ${showing ? 'fa-eye' : 'fa-eye-slash'}`;
+  }
+
+  function detectSession() {
+    const ua = navigator.userAgent || '';
+    let browser = 'Navegador atual';
+    if (/Edg\//.test(ua)) browser = 'Microsoft Edge';
+    else if (/OPR\//.test(ua)) browser = 'Opera';
+    else if (/Firefox\//.test(ua)) browser = 'Mozilla Firefox';
+    else if (/Chrome\//.test(ua)) browser = 'Google Chrome';
+    else if (/Safari\//.test(ua)) browser = 'Safari';
+
+    let system = 'Dispositivo atual';
+    if (/Windows NT 10/.test(ua)) system = 'Windows 10 ou 11';
+    else if (/Windows/.test(ua)) system = 'Windows';
+    else if (/Android/.test(ua)) system = 'Android';
+    else if (/iPhone|iPad/.test(ua)) system = 'iPhone ou iPad';
+    else if (/Mac OS X/.test(ua)) system = 'macOS';
+    else if (/Linux/.test(ua)) system = 'Linux';
+
+    els.sessionBrowser.textContent = browser;
+    els.sessionSystem.textContent = `${system} · sessão atual`;
+  }
+
+  async function logoutCurrent() {
+    els.btnLogoutCurrent.disabled = true;
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch {}
+    try {
+      ['access_token', 'token', 'auth_token'].forEach((key) => localStorage.removeItem(key));
+      sessionStorage.clear();
+    } catch {}
+    window.location.replace('/login.html');
+  }
+
+  function handlePresenceEvent(event) {
+    const detail = event?.detail || {};
+    const envelope = detail.payload || detail;
+    const payload = clean(envelope?.type).toLowerCase() === 'message'
+      ? envelope?.data
+      : envelope;
+    if (!payload || typeof payload !== 'object' || !state.profile?.colaborador_id) return;
+
+    const type = clean(payload.type).toUpperCase();
+    if (type === 'ZAPSCHAT_PRESENCE') {
+      if (Number(payload.colaborador_id) !== Number(state.profile.colaborador_id)) return;
+      state.profile = { ...state.profile, ...payload };
+      renderPresence(payload.presence_status, state.profile);
+      return;
+    }
+
+    if (type === 'ZAPSCHAT_PRESENCE_SNAPSHOT' && Array.isArray(payload.items)) {
+      const item = payload.items.find((row) => Number(row.colaborador_id) === Number(state.profile.colaborador_id));
+      if (!item) return;
+      state.profile = { ...state.profile, ...item };
+      renderPresence(item.presence_status, state.profile);
+    }
+  }
+
+  async function ensureProfilePresence() {
+    const empresaId = Number(
+      state.profile?.empresa_id
+      || window.APP_EMPRESA_ID
+      || window.EMPRESA_ID
+      || localStorage.getItem('empresa_id')
+      || 0
     );
+    if (!empresaId || !state.profile?.colaborador_id) return;
 
-    if (!resp.ok) throw new Error('Falha ao salvar');
+    try {
+      const core = await import('/frontend/js/realtime/ws-core.js?v=profile-presence-20260726-2');
+      if (typeof core.ensureEmpresaWS === 'function') {
+        core.ensureEmpresaWS(empresaId, { presenceSnapshot: true });
+      }
+    } catch (error) {
+      console.warn('[perfil] presença em tempo real indisponível', error);
+    }
+  }
 
-    setBannerTip('Dados salvos com sucesso.');
-    toast({
-      title: 'Salvo',
-      msg: 'Informações do cliente atualizadas.',
-      type: 'ok',
+  function bindEvents() {
+    els.btnAtualizarPagina.addEventListener('click', () => loadProfile({ silent: true }));
+    els.formPerfil.addEventListener('submit', saveProfile);
+    els.formPerfil.addEventListener('input', updateDirtyState);
+    els.btnCancelarPerfil.addEventListener('click', discardProfileChanges);
+
+    els.telefone.addEventListener('input', () => {
+      const cursorAtEnd = els.telefone.selectionStart === els.telefone.value.length;
+      els.telefone.value = formatPhone(els.telefone.value);
+      if (cursorAtEnd) els.telefone.setSelectionRange(els.telefone.value.length, els.telefone.value.length);
+      updateDirtyState();
     });
-  } catch (err) {
-    console.error('[perfil] salvar()', err);
-    toast({
-      title: 'Erro ao salvar',
-      msg: 'Não foi possível atualizar o cliente.',
-      type: 'error',
+
+    [els.btnUploadAvatar, els.btnEscolherFoto].forEach((button) => {
+      button.addEventListener('click', () => els.avatarInput.click());
     });
-  } finally {
-    r.save.disabled = false;
-    r.save.textContent = 'Salvar';
-  }
-}
+    els.avatarInput.addEventListener('change', () => uploadAvatar(els.avatarInput.files?.[0]));
+    els.btnRemoveAvatar.addEventListener('click', removeAvatar);
 
-/* =========================
-   API
-   ========================= */
+    els.formSenha.addEventListener('submit', savePassword);
+    [els.nova_senha, els.confirma_senha].forEach((input) => input.addEventListener('input', renderPasswordStrength));
+    $$('[data-toggle-password]').forEach((button) => button.addEventListener('click', () => togglePassword(button)));
 
-export async function abrirPerfilAtual() {
-  const kind = getSelectedKind();
-  if (kind !== 'c') {
-    toast({
-      title: 'Perfil indisponível',
-      msg: 'Os campos do cliente estão disponíveis apenas para conversas individuais.',
-      type: 'error',
+    els.btnLogoutCurrent.addEventListener('click', logoutCurrent);
+    window.addEventListener('zc:ws-core', handlePresenceEvent);
+
+    window.addEventListener('beforeunload', (event) => {
+      if (!updateDirtyState()) return;
+      event.preventDefault();
+      event.returnValue = '';
     });
-    return;
   }
 
-  const cid = getClienteId();
-  if (!cid) {
-    toast({ title: 'Selecione um cliente', type: 'error' });
-    return;
+  function init() {
+    cacheElements();
+    detectSession();
+    bindEvents();
+    renderPasswordStrength();
+    loadProfile();
   }
 
-  ensureDrawer();
-  openDrawer();
-  await carregarPerfil();
-}
-
-window.abrirPerfilAtual = abrirPerfilAtual;
-
-/* =========================
-   BOTÃO NO HEADER
-   ========================= */
-
-function ensureHeaderButton() {
-  if (document.getElementById('btn-perfil')) return;
-
-  const hdr =
-    $('#chat-header .flex.items-center.gap-2.relative') ||
-    $('#chat-header .flex.items-center.gap-2') ||
-    $('#chat-header');
-
-  if (!hdr) return;
-
-  const btn = document.createElement('button');
-  btn.id = 'btn-perfil';
-  btn.className = 'hdr-icon-btn';
-  btn.type = 'button';
-  btn.title = 'Campos do cliente';
-  btn.setAttribute('aria-label', 'Campos do cliente');
-  btn.innerHTML = iconSvg(getTheme());
-
-  on(btn, 'click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    abrirPerfilAtual();
-  });
-
-  hdr.appendChild(btn);
-
-  const refresh = () => {
-    const el = document.getElementById('btn-perfil');
-    if (el) el.innerHTML = iconSvg(getTheme());
-    refreshDrawerIcons();
-  };
-
-  try {
-    const mq = matchMedia('(prefers-color-scheme: dark)');
-    mq.addEventListener ? mq.addEventListener('change', refresh) : mq.addListener(refresh);
-  } catch {}
-
-  new MutationObserver(refresh).observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme'],
-  });
-
-  addEventListener('storage', (e) => {
-    if (e && e.key === 'zc:theme') refresh();
-  });
-}
-
-(function watchHeader() {
-  const hdrEl = document.getElementById('chat-header');
-  if (hdrEl) {
-    const mo = new MutationObserver(() => ensureHeaderButton());
-    mo.observe(hdrEl, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    init();
   }
-  ensureHeaderButton();
 })();

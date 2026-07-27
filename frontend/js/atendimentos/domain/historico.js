@@ -770,12 +770,25 @@ function showEmptyMessage() {
   if (!hist) return;
 
   hist.style.display = 'flex';
-
   hist.innerHTML = `
-    <div class="hist-empty-state">
-      <div class="hist-empty-icon"><i class="fa-regular fa-comments"></i></div>
-      <div class="hist-empty-title">Nenhuma mensagem encontrada</div>
-      <div class="hist-empty-sub">Quando houver mensagens, elas aparecerão aqui.</div>
+    <div class="hist-empty-state hist-empty-chat-start">
+      <div class="hist-empty-hero">
+        <div class="hist-empty-icon hist-empty-icon-custom">
+          <img
+            src="/frontend/img/atendimentos/empty-chat-icon.png?v=20260726-empty-chat-icon-balanced"
+            alt=""
+            class="hist-empty-icon-img"
+            loading="eager"
+            decoding="async"
+          >
+        </div>
+      </div>
+      <div class="hist-empty-title">Nenhuma mensagem ainda</div>
+      <div class="hist-empty-sub">Esta conversa acabou de ser criada. Envie a primeira mensagem para iniciar o atendimento.</div>
+      <div class="hist-empty-foot">
+        <i class="fa-solid fa-lock" aria-hidden="true"></i>
+        <span>Suas mensagens são protegidas com a criptografia de ponta a ponta</span>
+      </div>
     </div>
   `;
 }
@@ -1754,6 +1767,15 @@ export function renderHistoricoDoCache(clienteId, append = false) {
     if (!isHistoricoStillOpenFor(convKey, hist)) return;
 
     hist.innerHTML = '';
+
+    if (!msgs.length) {
+      showEmptyMessage();
+      setHistLastDayKey(hist, null);
+      removeLatestNotice(hist);
+      setTimeout(() => armHistoricoScrollGuard(), 60);
+      return;
+    }
+
     ensureTopNotice();
 
     if (hist.dataset.noMore === '1') setTopNoticeState('done');

@@ -331,49 +331,97 @@
       .doc-card{
         display:flex;
         align-items:center;
-        gap:10px;
-        min-width:240px;
-        max-width:330px;
-        padding:10px;
-        border-radius:9px;
-        background:rgba(0,0,0,.18);
+        gap:12px;
+        width:min(330px, 70vw);
+        min-width:250px;
+        max-width:100%;
+        padding:12px 13px;
+        border-radius:10px;
+        text-decoration:none;
+        color:inherit;
+        background:rgba(0,0,0,.16);
+        border:1px solid rgba(255,255,255,.06);
+        box-shadow:none;
+        cursor:pointer;
+      }
+
+      .bubble-out .doc-card{
+        background:rgba(0,0,0,.14);
+        border-color:rgba(255,255,255,.05);
       }
 
       html[data-theme="light"] .doc-card{
-        background:rgba(0,0,0,.06);
+        background:rgba(255,255,255,.58);
+        border-color:rgba(17,27,33,.08);
+      }
+
+      html[data-theme="light"] .bubble-out .doc-card{
+        background:rgba(255,255,255,.44);
+        border-color:rgba(17,27,33,.06);
+      }
+
+      .doc-card:hover{
+        filter:brightness(1.02);
       }
 
       .doc-ico{
-        width:42px;
-        height:48px;
-        border-radius:8px;
+        width:44px;
+        height:54px;
+        border-radius:9px;
         display:flex;
         align-items:center;
         justify-content:center;
-        background:rgba(255,255,255,.12);
+        background:#59666f;
+        color:#fff;
         flex:0 0 auto;
+        position:relative;
+        overflow:hidden;
       }
 
-      html[data-theme="light"] .doc-ico{
-        background:rgba(0,0,0,.08);
+      .doc-ico::before{
+        content:'';
+        position:absolute;
+        top:0;
+        right:0;
+        width:12px;
+        height:12px;
+        background:rgba(255,255,255,.30);
+        clip-path:polygon(0 0, 100% 0, 100% 100%);
       }
+
+      .doc-ico[data-ext="pdf"]{ background:#e53935; }
+      .doc-ico[data-ext="doc"],
+      .doc-ico[data-ext="docx"]{ background:#2563eb; }
+      .doc-ico[data-ext="xls"],
+      .doc-ico[data-ext="xlsx"],
+      .doc-ico[data-ext="csv"]{ background:#1f8f55; }
+      .doc-ico[data-ext="ppt"],
+      .doc-ico[data-ext="pptx"]{ background:#f97316; }
+      .doc-ico[data-ext="zip"],
+      .doc-ico[data-ext="rar"],
+      .doc-ico[data-ext="7z"]{ background:#b7791f; }
 
       .doc-ico .ext{
         font-size:10px;
         font-weight:800;
-        letter-spacing:.4px;
+        letter-spacing:.5px;
+        text-transform:uppercase;
       }
 
       .doc-body{
         min-width:0;
         flex:1 1 auto;
+        display:flex;
+        flex-direction:column;
+        justify-content:center;
       }
 
       .doc-name{
         display:block;
         color:inherit;
-        font-size:13px;
+        font-size:14px;
         font-weight:600;
+        line-height:1.25;
         text-decoration:none;
         overflow:hidden;
         white-space:nowrap;
@@ -381,34 +429,36 @@
       }
 
       .doc-meta{
-        margin-top:3px;
-        font-size:11px;
-        opacity:.68;
+        display:block;
+        margin-top:4px;
+        font-size:12px;
+        opacity:.78;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
       }
 
-      .doc-actions{
-        display:flex;
-        flex-direction:column;
-        gap:4px;
+      .doc-open{
         flex:0 0 auto;
-      }
-
-      .doc-btn{
-        display:inline-flex;
+        width:28px;
+        height:28px;
+        display:flex;
         align-items:center;
         justify-content:center;
-        min-width:48px;
-        height:24px;
-        padding:0 8px;
         border-radius:999px;
-        font-size:11px;
+        font-size:13px;
+        font-weight:700;
+        background:rgba(255,255,255,.12);
         color:inherit;
-        text-decoration:none;
-        background:rgba(255,255,255,.10);
       }
 
-      html[data-theme="light"] .doc-btn{
-        background:rgba(0,0,0,.07);
+      html[data-theme="light"] .doc-open{
+        background:rgba(17,27,33,.08);
+      }
+
+      .doc-actions,
+      .doc-btn{
+        display:none !important;
       }
 
       .wa-audio{

@@ -68,11 +68,6 @@ header,
   color:var(--text);
 }
 
-#chat-presenca{
-  font-size:.82rem;
-  color:var(--muted);
-}
-
 #welcome-screen{
   background:var(--bg);
 }

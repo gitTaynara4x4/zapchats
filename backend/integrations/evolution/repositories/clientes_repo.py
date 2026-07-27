@@ -624,12 +624,8 @@ def _create_cliente_orm_fallback(
             instancia_id=(int(instancia_id) if instancia_id is not None else None),
         )
 
-        if hasattr(cli, "telefone_norm"):
-            try:
-                setattr(cli, "telefone_norm", telefone_norm)
-            except Exception:
-                pass
-
+        # telefone_norm é uma coluna GENERATED ALWAYS; o PostgreSQL
+        # calcula o valor a partir de telefone durante o INSERT.
         db.add(cli)
         db.flush()
 

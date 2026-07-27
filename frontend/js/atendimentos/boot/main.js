@@ -394,11 +394,10 @@
     // Mantemos fora apenas observers pesados/duplicados da lista.
     await import('../ui/perfil.js');
     await import('../ui/perfil_quick.js');
-    await import('../ui/presenca-contato.js?v=20260725-presence-v1');
     await importIfMissing('__ZC_PERFIL_INSTANCIA_LOADED__', '../ui/perfil-instancia.js');
     await import('../ui/notes-drawer.js');
     await import('../ui/ia.js');
-    await import('../ui/new-chat.js?v=20260715-db-lazy-picker-open-fix-3');
+    await import('../ui/new-chat.js?v=20260725-create-contact-save-fix-1');
     await import('../ui/context-menu.js');
     await import('../ui/apagar.js');
 
@@ -430,7 +429,7 @@
     await import('../ui/forward-picker.js');
     await import('../ui/loading-guard.js');
 
-    return import('./init.js');
+    return import('./init.js?v=20260726-clientes-deeplink-v1');
   }
 
   async function importarModulos() {
@@ -484,7 +483,6 @@
     */
     await import('../ui/perfil.js');
     await import('../ui/perfil_quick.js');
-    await import('../ui/presenca-contato.js?v=20260725-presence-v1');
 
     /*
       Esses abaixo eram os principais duplicados no log:
@@ -519,7 +517,7 @@
     await import('../ui/filtros.js');
 
     await import('../ui/context-menu.js');
-    await import('../ui/new-chat.js?v=20260715-db-lazy-picker-open-fix-3');
+    await import('../ui/new-chat.js?v=20260725-create-contact-save-fix-1');
 
     /*
       Mantém a conversa aberta marcada na lista lateral.
@@ -565,7 +563,7 @@
     await import('../ui/forward-picker.js');
 
     // -------- BOOT ----------------------------------------------------
-    return import('./init.js');
+    return import('./init.js?v=20260726-clientes-deeplink-v1');
   }
 
   async function start() {
@@ -603,7 +601,7 @@
                 window.dispatchEvent(new CustomEvent('zc:atendimentos-runtime-ready'));
 
                 // Importa e liga o WS somente agora, depois de carregar a lista inicial.
-                await import('../realtime/ws-empresa.js?v=20260725-presence-v1');
+                await import('../realtime/ws-empresa.js?v=20260726-no-contact-presence-v1');
                 try {
                   window.dispatchEvent(new CustomEvent('zc:start-empresa-ws'));
                 } catch (_) {}

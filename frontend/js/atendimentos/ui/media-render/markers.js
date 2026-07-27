@@ -54,7 +54,28 @@
   }
 
   function isPureMarkerText(txt) {
-    return /^\[[^\]]+\]$/i.test(String(txt || '').trim());
+    const value = String(txt || '').trim();
+
+    // Documento com nome no texto, por exemplo:
+    // [Documento] SantanderComprovantes.pdf
+    // O nome já será exibido dentro do card e não deve aparecer duplicado abaixo.
+    if (/^\[Documento\]\s*.+$/i.test(value)) return true;
+
+    return /^\[[^\]]+\]$/i.test(value);
+  }
+
+  function markerDocumentName(txt) {
+    const value = String(txt || '').trim();
+    const match = value.match(/^\[Documento\]\s*(.+)$/i);
+    const raw = String(match?.[1] || '').trim();
+    return raw || 'arquivo.bin';
+  }
+
+  function markerDocumentExt(fileName) {
+    const clean = String(fileName || '').split(/[?#]/)[0];
+    const parts = clean.split('.');
+    if (parts.length < 2) return 'bin';
+    return String(parts.pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
   }
 
   function hasRenderedMediaInsideBubble(bubble) {
@@ -110,45 +131,33 @@
     ></video>`;
   }
 
-  function renderMarkerDocument(src) {
-    const fname = 'arquivo.bin';
+  function renderMarkerDocument(src, markerText = '') {
+    const fname = markerDocumentName(markerText);
+    const ext = markerDocumentExt(fname);
+    const extLabel = ext === 'bin' ? 'ARQ' : ext.toUpperCase();
 
-    return `<div class="doc-card">
-      <div class="doc-ico" data-ext="bin">
-        <span class="ext">FILE</span>
-      </div>
+    return `<a
+      class="doc-card doc-card--marker"
+      href="${escapeHtml(src)}"
+      target="_blank"
+      rel="noopener"
+      download="${escapeHtml(fname)}"
+      title="${escapeHtml(fname)}"
+    >
+      <span class="doc-ico" data-ext="${escapeHtml(ext)}">
+        <span class="ext">${escapeHtml(extLabel)}</span>
+      </span>
 
-      <div class="doc-body">
-        <a
-          class="doc-name"
-          href="${escapeHtml(src)}"
-          target="_blank"
-          rel="noopener"
-          download="${escapeHtml(fname)}"
-          title="${escapeHtml(fname)}"
-        >${escapeHtml(fname)}</a>
+      <span class="doc-body">
+        <span class="doc-name">${escapeHtml(fname)}</span>
+        <span class="doc-meta">${escapeHtml(extLabel)}</span>
+      </span>
 
-        <div class="doc-meta">arquivo</div>
-      </div>
-
-      <div class="doc-actions">
-        <a
-          class="doc-btn"
-          href="${escapeHtml(src)}"
-          target="_blank"
-          rel="noopener"
-        >Abrir</a>
-
-        <a
-          class="doc-btn"
-          href="${escapeHtml(src)}"
-          download="${escapeHtml(fname)}"
-        >Salvar</a>
-      </div>
-    </div>`;
+      <span class="doc-open" aria-hidden="true">↗</span>
+    </a>`;
   }
 
-  function renderHtmlForMarkerKind(kind, src, dir) {
+  function renderHtmlForMarkerKind(kind, src, dir, markerText = '') {
     const k = String(kind || '');
 
     if (k.startsWith('imagem') || k.startsWith('midia')) {
@@ -181,7 +190,7 @@
 
     if (k.startsWith('documento')) {
       return {
-        html: renderMarkerDocument(src),
+        html: renderMarkerDocument(src, markerText),
         className: '',
       };
     }
@@ -191,7 +200,7 @@
       porque pelo msg_id a rota canônica pode devolver o arquivo/conteúdo.
     */
     return {
-      html: renderMarkerDocument(src),
+      html: renderMarkerDocument(src, markerText),
       className: '',
     };
   }
@@ -230,7 +239,7 @@
       const kind = markerKind(txt);
       const dir = bubble.classList.contains('bubble-out') ? 'out' : 'in';
 
-      const rendered = renderHtmlForMarkerKind(kind, src, dir);
+      const rendered = renderHtmlForMarkerKind(kind, src, dir, txt);
 
       if (!rendered.html) {
         return;
@@ -266,7 +275,7 @@
 
     const src = buildCanonUrlByMsgId(msgId);
     const kind = markerKind(txt);
-    const rendered = renderHtmlForMarkerKind(kind, src, dir);
+    const rendered = renderHtmlForMarkerKind(kind, src, dir, txt);
 
     return rendered.html || '';
   }
@@ -276,6 +285,8 @@
 
     markerKind,
     isPureMarkerText,
+    markerDocumentName,
+    markerDocumentExt,
     hasRenderedMediaInsideBubble,
     getMsgIdFromRow,
 

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import os
 from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -44,7 +43,6 @@ from backend.services.chatbot_claim_policy import (
     department_chatbot_active,
     department_claim_required,
 )
-
 from .schemas import EditarNomeClienteIn
 
 router = APIRouter(tags=["Atendimento – Conversas"])
@@ -290,57 +288,6 @@ def _merge_department_claim_state(
     return out
 
 
-def _presence_ttl_seconds() -> int:
-    try:
-        value = int(float(str(os.getenv("ZC_CONTACT_PRESENCE_TTL_SECONDS", "120")).strip()))
-    except Exception:
-        value = 120
-    return max(30, min(value, 900))
-
-
-def _as_aware_utc(value: Any) -> Optional[datetime]:
-    if not isinstance(value, datetime):
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
-
-def _iso_utc(value: Any) -> Optional[str]:
-    parsed = _as_aware_utc(value)
-    return parsed.isoformat() if parsed is not None else None
-
-
-def _presence_payload(cliente) -> Dict[str, Any]:
-    """Retorna a presença sem deixar um estado online antigo preso na tela."""
-    ttl_seconds = _presence_ttl_seconds()
-    updated_at = _as_aware_utc(getattr(cliente, "whatsapp_presence_updated_at", None))
-    last_seen = _as_aware_utc(getattr(cliente, "whatsapp_last_seen", None))
-    status = str(getattr(cliente, "whatsapp_presence", None) or "").strip().lower() or None
-    stored_online = bool(getattr(cliente, "whatsapp_online", False))
-
-    effective_online = False
-    if stored_online and updated_at is not None:
-        try:
-            effective_online = (datetime.now(timezone.utc) - updated_at).total_seconds() <= ttl_seconds
-        except Exception:
-            effective_online = False
-
-    # Se o evento de offline não chegou, o último instante em que vimos o
-    # contato online ainda é uma informação útil e evita mostrar online eterno.
-    if not effective_online and updated_at is not None:
-        if last_seen is None or updated_at > last_seen:
-            last_seen = updated_at
-
-    return {
-        "presence_status": status,
-        "presence_online": bool(effective_online),
-        "presence_last_seen": _iso_utc(last_seen),
-        "presence_updated_at": _iso_utc(updated_at),
-        "presence_ttl_seconds": ttl_seconds,
-    }
-
-
 def _empresa_id_segura(identity, empresa_id_payload: Optional[int] = None) -> int:
     """
     Segurança multiempresa:
@@ -503,8 +450,6 @@ def obter_meta_conversa(
         "tem_participantes": part_info["tem_participantes"],
         "is_group": False,
     }
-    meta_payload.update(_presence_payload(cliente))
-
     return _merge_department_claim_state(
         db,
         meta_payload,

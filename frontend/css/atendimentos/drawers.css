@@ -378,58 +378,208 @@ html[data-theme="light"] .ag-skel .line{
 }
 
 #ncDrawer .nc-form{
+  flex:1 1 auto;
+  min-height:0;
   display:flex;
   flex-direction:column;
-  gap:10px;
-  padding:14px 12px;
 }
 
-#ncDrawer .nc-input{
-  height:42px;
-  padding:0 12px;
-  border:1px solid #223038;
-  border-radius:10px;
-  background:#0b141a;
-  color:#e9edef;
-  outline:none;
-  font:400 .95rem/1.2 "Inter","Segoe UI","Helvetica Neue",Arial,sans-serif;
+#ncDrawer .nc-contact-form-content{
+  flex:1 1 auto;
+  min-height:0;
+  overflow-y:auto;
+  padding:30px 22px 24px;
 }
-#ncDrawer .nc-input:focus{
-  border-color:#1b8760;
-  box-shadow:0 0 0 2px rgba(27,135,96,.18);
+
+#ncDrawer .nc-form-group{
+  display:grid;
+  grid-template-columns:32px minmax(0,1fr);
+  column-gap:16px;
+  align-items:start;
+}
+
+#ncDrawer .nc-form-group + .nc-form-group{
+  margin-top:28px;
+}
+
+#ncDrawer .nc-form-icon{
+  width:32px;
+  min-height:48px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:#8696a0;
+  font-size:1rem;
+}
+
+#ncDrawer .nc-form-fields{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:25px;
+}
+
+#ncDrawer .nc-line-field,
+#ncDrawer .nc-country-field{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+}
+
+#ncDrawer .nc-line-field{
+  position:relative;
+  border-bottom:1px solid #667781;
+  transition:border-color .15s ease;
+}
+
+#ncDrawer .nc-line-field:focus-within{
+  border-bottom-color:#00a884;
+  box-shadow:0 1px 0 #00a884;
+}
+
+#ncDrawer .nc-line-input{
+  width:100%;
+  height:45px;
+  padding:7px 0 5px;
+  border:0;
+  outline:0;
+  background:transparent;
+  color:#e9edef;
+  caret-color:#00a884;
+  font:400 .95rem/1.25 "Inter","Segoe UI","Helvetica Neue",Arial,sans-serif;
+}
+
+#ncDrawer .nc-line-input::placeholder{
+  color:#8696a0;
+  opacity:1;
+}
+
+#ncDrawer .nc-phone-fields{
+  min-width:0;
+  display:grid;
+  grid-template-columns:112px minmax(0,1fr);
+  gap:16px;
+  align-items:end;
+}
+
+#ncDrawer .nc-field-caption{
+  min-height:18px;
+  margin-bottom:2px;
+  color:#8696a0;
+  font:400 .7rem/1.2 "Inter","Segoe UI","Helvetica Neue",Arial,sans-serif;
+}
+
+#ncDrawer .nc-country-select-wrap{
+  position:relative;
+  height:45px;
+  display:flex;
+  align-items:center;
+  border-bottom:1px solid #667781;
+  transition:border-color .15s ease;
+}
+
+#ncDrawer .nc-country-select-wrap:focus-within{
+  border-bottom-color:#00a884;
+  box-shadow:0 1px 0 #00a884;
+}
+
+#ncDrawer .nc-country-select{
+  width:100%;
+  height:100%;
+  padding:7px 22px 5px 0;
+  border:0;
+  outline:0;
+  appearance:none;
+  -webkit-appearance:none;
+  background:transparent;
+  color:#e9edef;
+  cursor:pointer;
+  font:500 .95rem/1.2 "Inter","Segoe UI","Helvetica Neue",Arial,sans-serif;
+}
+
+#ncDrawer .nc-country-select option{
+  background:#202c33;
+  color:#e9edef;
+}
+
+#ncDrawer .nc-country-select-wrap > i{
+  position:absolute;
+  right:3px;
+  top:50%;
+  transform:translateY(-50%);
+  color:#8696a0;
+  font-size:.72rem;
+  pointer-events:none;
+}
+
+#ncDrawer .nc-phone-number-field .nc-line-input{
+  height:45px;
+  padding-top:7px;
+}
+
+#ncDrawer .nc-phone-hint{
+  margin:15px 0 0 48px;
+  color:#8696a0;
+  font:400 .75rem/1.45 "Inter","Segoe UI","Helvetica Neue",Arial,sans-serif;
 }
 
 #ncDrawer .nc-form-actions{
+  flex:0 0 auto;
   display:flex;
   align-items:center;
+  justify-content:flex-end;
   gap:8px;
-  padding-top:4px;
+  padding:14px 18px 18px;
+  border-top:1px solid rgba(134,150,160,.18);
+  background:#111b21;
+}
+
+#ncDrawer .nc-save,
+#ncDrawer .nc-cancel{
+  min-width:108px;
+  height:40px;
+  padding:0 16px;
+  border-radius:8px;
+  font:600 .86rem/1 "Inter","Segoe UI","Helvetica Neue",Arial,sans-serif;
+  cursor:pointer;
+  transition:background .15s ease,color .15s ease,opacity .15s ease;
 }
 
 #ncDrawer .nc-save{
-  height:40px;
-  padding:0 14px;
   border:0;
-  border-radius:10px;
-  background:#1b8760;
+  background:#00a884;
   color:#ffffff;
-  font:600 .9rem/1 "Inter","Segoe UI","Helvetica Neue",Arial,sans-serif;
-  cursor:pointer;
 }
+
+#ncDrawer .nc-save:hover{
+  background:#06cf9c;
+}
+
 #ncDrawer .nc-save:disabled{
-  opacity:.6;
+  opacity:.58;
   cursor:not-allowed;
 }
 
 #ncDrawer .nc-cancel{
-  height:40px;
-  padding:0 10px;
-  border:0;
-  border-radius:10px;
+  border:1px solid #667781;
   background:transparent;
-  color:#9aaeb5;
-  font:500 .9rem/1 "Inter","Segoe UI","Helvetica Neue",Arial,sans-serif;
-  cursor:pointer;
+  color:#e9edef;
+}
+
+#ncDrawer .nc-cancel:hover{
+  background:rgba(255,255,255,.06);
+}
+
+#ncDrawer .nc-sr-only{
+  position:absolute !important;
+  width:1px !important;
+  height:1px !important;
+  padding:0 !important;
+  margin:-1px !important;
+  overflow:hidden !important;
+  clip:rect(0,0,0,0) !important;
+  white-space:nowrap !important;
+  border:0 !important;
 }
 
 #btn-sidemodal-nova-conversa{
@@ -559,6 +709,49 @@ html:not(.dark)[data-theme="light"] #ncDrawer .nc-input{
   border-color:#d9e1e6;
   color:#111b21;
 }
+html[data-theme="light"] #ncDrawer .nc-form-icon,
+html:not(.dark)[data-theme="light"] #ncDrawer .nc-form-icon,
+html[data-theme="light"] #ncDrawer .nc-field-caption,
+html:not(.dark)[data-theme="light"] #ncDrawer .nc-field-caption,
+html[data-theme="light"] #ncDrawer .nc-phone-hint,
+html:not(.dark)[data-theme="light"] #ncDrawer .nc-phone-hint{
+  color:#667781;
+}
+html[data-theme="light"] #ncDrawer .nc-line-field,
+html:not(.dark)[data-theme="light"] #ncDrawer .nc-line-field,
+html[data-theme="light"] #ncDrawer .nc-country-select-wrap,
+html:not(.dark)[data-theme="light"] #ncDrawer .nc-country-select-wrap{
+  border-bottom-color:#aebac1;
+}
+html[data-theme="light"] #ncDrawer .nc-line-input,
+html:not(.dark)[data-theme="light"] #ncDrawer .nc-line-input,
+html[data-theme="light"] #ncDrawer .nc-country-select,
+html:not(.dark)[data-theme="light"] #ncDrawer .nc-country-select{
+  color:#111b21;
+}
+html[data-theme="light"] #ncDrawer .nc-line-input::placeholder,
+html:not(.dark)[data-theme="light"] #ncDrawer .nc-line-input::placeholder{
+  color:#667781;
+}
+html[data-theme="light"] #ncDrawer .nc-country-select option,
+html:not(.dark)[data-theme="light"] #ncDrawer .nc-country-select option{
+  background:#ffffff;
+  color:#111b21;
+}
+html[data-theme="light"] #ncDrawer .nc-form-actions,
+html:not(.dark)[data-theme="light"] #ncDrawer .nc-form-actions{
+  border-top-color:#edf1f4;
+  background:#ffffff;
+}
+html[data-theme="light"] #ncDrawer .nc-cancel,
+html:not(.dark)[data-theme="light"] #ncDrawer .nc-cancel{
+  border-color:#aebac1;
+  color:#34434b;
+}
+html[data-theme="light"] #ncDrawer .nc-cancel:hover,
+html:not(.dark)[data-theme="light"] #ncDrawer .nc-cancel:hover{
+  background:#f0f2f5;
+}
 html[data-theme="light"] #btn-sidemodal-nova-conversa,
 html:not(.dark)[data-theme="light"] #btn-sidemodal-nova-conversa{
   border-color:#d3dbe1;
@@ -581,6 +774,40 @@ html:not(.dark)[data-theme="light"] #btn-sidemodal-nova-conversa:hover{
 
   #ncBackdrop{
     width:100vw;
+  }
+}
+
+@media (max-width:480px){
+  #ncDrawer .nc-contact-form-content{
+    padding:24px 16px 20px;
+  }
+
+  #ncDrawer .nc-form-group{
+    grid-template-columns:28px minmax(0,1fr);
+    column-gap:13px;
+  }
+
+  #ncDrawer .nc-form-icon{
+    width:28px;
+  }
+
+  #ncDrawer .nc-phone-fields{
+    grid-template-columns:100px minmax(0,1fr);
+    gap:13px;
+  }
+
+  #ncDrawer .nc-phone-hint{
+    margin-left:41px;
+  }
+
+  #ncDrawer .nc-form-actions{
+    padding:12px 14px 14px;
+  }
+
+  #ncDrawer .nc-save,
+  #ncDrawer .nc-cancel{
+    min-width:0;
+    flex:1 1 0;
   }
 }
 

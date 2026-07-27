@@ -764,7 +764,6 @@ def _events_minimal() -> List[str]:
         "CONTACTS_SET",
         "CONTACTS_UPSERT",
         "CONTACTS_UPDATE",
-        "PRESENCE_UPDATE",
         "GROUPS_UPSERT",
         "GROUP_UPDATE",
         "GROUP_PARTICIPANTS_UPDATE",
