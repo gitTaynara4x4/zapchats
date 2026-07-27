@@ -1,6 +1,7 @@
 .wpp-root{
   display:grid;
   grid-template-columns:64px var(--aside-w) 1fr;
+  column-gap:12px;
   height:100vh;
   min-height:0;
   min-width:0;
@@ -183,6 +184,7 @@ body.is-chat-open #welcome-screen{
 @media (max-width:920px){
   .wpp-root{
     grid-template-columns:1fr !important;
+    column-gap:0 !important;
     width:100vw !important;
     max-width:100vw !important;
   }
