@@ -31,8 +31,7 @@
     html.prepaint[data-head-ready][data-loader-ready] body { visibility: visible; }
   </style>
 
-  <link rel="stylesheet" href="/frontend/css/clientes.css?v=20260726-clientes-drawer-v1" />
-  <link rel="stylesheet" href="/frontend/css/dashboard-onboarding.css?v=20260727-onboarding-v2">
+  <link rel="stylesheet" href="/frontend/css/clientes.css?v=20260727-clientes-whatsapp-filter-v1" />
 </head>
 
 <body data-page="clientes" class="clients-zapschat">
@@ -85,6 +84,26 @@
       </label>
 
       <div class="clients-quick-filters">
+        <div class="client-inst-wrap" id="clientInstWrap">
+          <button id="clientInstBtn" class="client-inst-trigger" type="button"
+                  aria-haspopup="listbox" aria-expanded="false" aria-controls="clientInstMenu">
+            <span class="client-inst-icon" aria-hidden="true"><i class="fa-brands fa-whatsapp"></i></span>
+            <span class="client-inst-copy">
+              <strong id="clientInstLabel">Carregando WhatsApps…</strong>
+              <small id="clientInstSubtitle">Verificando suas permissões</small>
+            </span>
+            <span class="client-inst-chevron" aria-hidden="true"><i class="fa-solid fa-chevron-down"></i></span>
+          </button>
+
+          <div id="clientInstMenu" class="client-inst-menu" role="listbox" aria-hidden="true" aria-label="Filtrar clientes por WhatsApp">
+            <div class="client-inst-menu-head">
+              <span>WhatsApps disponíveis</span>
+              <small id="clientInstCount">0</small>
+            </div>
+            <div id="clientInstList" class="client-inst-list"></div>
+          </div>
+        </div>
+
         <select id="select-depto" class="select" aria-label="Filtrar por departamento">
           <option value="">Todos os departamentos</option>
         </select>
@@ -601,9 +620,8 @@
 
   <div id="toast" role="status" aria-live="polite"></div>
 
-  <script type="module" src="/frontend/js/pages/clientes.js?v=20260726-clientes-fast-load-v1" defer></script>
+  <script type="module" src="/frontend/js/pages/clientes.js?v=20260727-clientes-whatsapp-filter-v1" defer></script>
   <script src="/frontend/js/pages/cliente-editar.js?v=20260726-clientes-drawer-v1" defer></script>
   <script src="/frontend/js/help/help-clientes.js?v=20260708-clientes-tour-responsive-final" defer></script>
-  <script src="/frontend/js/pages/dashboard-onboarding.js?v=20260727-onboarding-v2" defer></script>
 </body>
 </html>

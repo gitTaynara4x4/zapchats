@@ -356,6 +356,248 @@ body[data-page="clientes"] .clients-quick-filters {
   flex-wrap: wrap;
 }
 
+
+/* Seletor de WhatsApp da lista de clientes */
+body[data-page="clientes"] .client-inst-wrap {
+  position: relative;
+  flex: 0 1 260px;
+  min-width: 230px;
+}
+
+body[data-page="clientes"] .client-inst-trigger {
+  width: 100%;
+  min-width: 0;
+  height: 48px;
+  padding: 0 11px;
+  border: 1px solid var(--clients-line);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--clients-surface);
+  color: var(--clients-title);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+
+body[data-page="clientes"] .client-inst-trigger:hover {
+  border-color: color-mix(in srgb, var(--clients-primary) 35%, var(--clients-line));
+  background: var(--clients-surface-2);
+}
+
+body[data-page="clientes"] .client-inst-trigger[aria-expanded="true"] {
+  border-color: var(--clients-primary);
+  box-shadow: 0 0 0 3px var(--clients-primary-soft);
+}
+
+body[data-page="clientes"] .client-inst-trigger:disabled {
+  cursor: not-allowed;
+  opacity: .72;
+}
+
+body[data-page="clientes"] .client-inst-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 30px;
+  background: var(--clients-primary-soft);
+  color: var(--clients-primary);
+  font-size: 16px;
+}
+
+body[data-page="clientes"] .client-inst-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  line-height: 1.05;
+}
+
+body[data-page="clientes"] .client-inst-copy strong,
+body[data-page="clientes"] .client-inst-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body[data-page="clientes"] .client-inst-copy strong {
+  color: var(--clients-title);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+body[data-page="clientes"] .client-inst-copy small {
+  color: var(--clients-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+body[data-page="clientes"] .client-inst-chevron {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--clients-muted);
+  font-size: 10px;
+  transition: transform .16s ease;
+}
+
+body[data-page="clientes"] .client-inst-trigger[aria-expanded="true"] .client-inst-chevron {
+  transform: rotate(180deg);
+}
+
+body[data-page="clientes"] .client-inst-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 90;
+  width: min(330px, calc(100vw - 32px));
+  max-height: 360px;
+  overflow: auto;
+  padding: 7px;
+  border: 1px solid var(--clients-line);
+  border-radius: 14px;
+  background: var(--clients-surface);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, .16);
+  display: none;
+}
+
+body[data-page="clientes"] .client-inst-menu[aria-hidden="false"] {
+  display: block;
+}
+
+body[data-page="clientes"] .client-inst-menu-head {
+  min-height: 38px;
+  padding: 0 9px 7px;
+  border-bottom: 1px solid var(--clients-line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--clients-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+body[data-page="clientes"] .client-inst-menu-head small {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--clients-surface-2);
+  color: var(--clients-title);
+  font-size: 11px;
+}
+
+body[data-page="clientes"] .client-inst-list {
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+body[data-page="clientes"] .client-inst-option {
+  width: 100%;
+  min-height: 48px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  color: var(--clients-title);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+body[data-page="clientes"] .client-inst-option:hover {
+  background: var(--clients-surface-2);
+}
+
+body[data-page="clientes"] .client-inst-option[aria-selected="true"] {
+  background: var(--clients-primary-soft);
+  color: var(--clients-primary);
+}
+
+body[data-page="clientes"] .client-inst-radio {
+  width: 17px;
+  height: 17px;
+  border: 2px solid var(--clients-line);
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 17px;
+}
+
+body[data-page="clientes"] .client-inst-option[aria-selected="true"] .client-inst-radio {
+  border-color: currentColor;
+}
+
+body[data-page="clientes"] .client-inst-option[aria-selected="true"] .client-inst-radio::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+body[data-page="clientes"] .client-inst-option-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+body[data-page="clientes"] .client-inst-option-copy strong,
+body[data-page="clientes"] .client-inst-option-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body[data-page="clientes"] .client-inst-option-copy strong {
+  color: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+body[data-page="clientes"] .client-inst-option-copy small {
+  color: var(--clients-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+body[data-page="clientes"] .client-inst-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: 0 0 8px;
+  background: #cbd5e1;
+}
+
+body[data-page="clientes"] .client-inst-status.is-online {
+  background: var(--clients-primary);
+  box-shadow: 0 0 0 3px var(--clients-primary-soft);
+}
+
+body[data-page="clientes"] .client-inst-empty {
+  padding: 14px 10px;
+  color: var(--clients-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
 body[data-page="clientes"] .clients-filter-strip {
   min-height: 60px;
   padding: 10px 12px;
@@ -1210,6 +1452,10 @@ body[data-page="clientes"] .sr-only {
     max-width: none;
     flex: 1 1 220px;
   }
+
+  body[data-page="clientes"] .client-inst-wrap {
+    flex: 1 1 260px;
+  }
 }
 
 @media (max-width: 960px) {
@@ -1274,10 +1520,17 @@ body[data-page="clientes"] .sr-only {
   }
 
   body[data-page="clientes"] .clients-searchbar .select,
+  body[data-page="clientes"] .client-inst-wrap,
   body[data-page="clientes"] .compact-field,
   body[data-page="clientes"] .date-wrap {
     width: 100%;
     max-width: none;
+  }
+
+  body[data-page="clientes"] .client-inst-menu {
+    left: 0;
+    right: auto;
+    width: 100%;
   }
 
   body[data-page="clientes"] .compact-field {

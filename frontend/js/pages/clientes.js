@@ -17,7 +17,9 @@
   const CLIENT_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
   const META_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
   const PAGE = { limit: 20, offset: 0, loading: false, done: false, total: 0, totalExact: false };
+  const CLIENT_INSTANCE_STORAGE_KEY = `clientes:instancia:${EMPRESA_ID || 0}`;
   let totalRefreshSeq = 0;
+  let clientsLoadSeq = 0;
 
   let _editorLoading = null;
   function ensureClienteEditorLoaded(){
@@ -136,6 +138,13 @@
   const busca        = $('#busca');
   const selectDepto  = $('#select-depto');
   const selectResp   = $('#select-resp');
+  const clientInstWrap = $('#clientInstWrap');
+  const clientInstBtn = $('#clientInstBtn');
+  const clientInstMenu = $('#clientInstMenu');
+  const clientInstList = $('#clientInstList');
+  const clientInstLabel = $('#clientInstLabel');
+  const clientInstSubtitle = $('#clientInstSubtitle');
+  const clientInstCount = $('#clientInstCount');
   const dataInicio   = $('#data_inicio');
   const dataFim      = $('#data_fim');
   const btnFiltrar      = $('#btn-filtrar');
@@ -228,10 +237,11 @@
   const state = {
     setores: [],
     responsaveis: [],
+    instancias: [],
     clientes: [],
     seen: new Set(),
     selected: new Set(),
-    filtro: { q:'', deptoId:'', di:'', df:'', respId:'' }
+    filtro: { q:'', deptoId:'', di:'', df:'', respId:'', instanciaId:'' }
   };
 
   function digits(s){ return String(s || '').replace(/\D+/g, ''); }
@@ -301,7 +311,8 @@
       d:  String(state.filtro.deptoId || ''),
       di: String(state.filtro.di || ''),
       df: String(state.filtro.df || ''),
-      r:  String(state.filtro.respId || '')
+      r:  String(state.filtro.respId || ''),
+      i:  String(state.filtro.instanciaId || '')
     };
     return 'clientes:v5:' + btoa(unescape(encodeURIComponent(JSON.stringify(k))));
   }
@@ -512,6 +523,251 @@
     }
   }
 
+  function normalizeInstance(raw){
+    const id = Number(
+      raw?.id ??
+      raw?.instancia_id ??
+      raw?.instance_id ??
+      raw?.whatsapp_id ??
+      0
+    );
+
+    if (!Number.isFinite(id) || id <= 0) return null;
+
+    const name = String(
+      raw?.apelido ||
+      raw?.nome_exibicao ||
+      raw?.display_name ||
+      raw?.nome ||
+      raw?.name ||
+      raw?.instance_name ||
+      `WhatsApp ${id}`
+    ).trim();
+
+    return {
+      ...raw,
+      id,
+      label: name || `WhatsApp ${id}`,
+      connected: !!(raw?.connected ?? raw?.conectada ?? raw?.online)
+    };
+  }
+
+  function closeClientInstanceMenu(){
+    if (!clientInstMenu || !clientInstBtn) return;
+    clientInstMenu.setAttribute('aria-hidden', 'true');
+    clientInstBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function openClientInstanceMenu(){
+    if (!clientInstMenu || !clientInstBtn || clientInstBtn.disabled) return;
+    clientInstMenu.setAttribute('aria-hidden', 'false');
+    clientInstBtn.setAttribute('aria-expanded', 'true');
+  }
+
+  function toggleClientInstanceMenu(){
+    const isOpen = clientInstMenu?.getAttribute('aria-hidden') === 'false';
+    if (isOpen) closeClientInstanceMenu();
+    else openClientInstanceMenu();
+  }
+
+  function selectedInstance(){
+    const id = Number(state.filtro.instanciaId || 0);
+    return state.instancias.find(inst => Number(inst.id) === id) || null;
+  }
+
+  function updateClientInstanceTrigger(){
+    if (!clientInstLabel || !clientInstSubtitle || !clientInstBtn) return;
+
+    const selected = selectedInstance();
+    const total = state.instancias.length;
+
+    if (!total){
+      clientInstLabel.textContent = 'Nenhum WhatsApp liberado';
+      clientInstSubtitle.textContent = 'Solicite acesso ao administrador';
+      clientInstBtn.disabled = true;
+      return;
+    }
+
+    clientInstBtn.disabled = false;
+
+    if (selected){
+      clientInstLabel.textContent = selected.label;
+      clientInstSubtitle.textContent = selected.connected
+        ? 'WhatsApp conectado'
+        : 'WhatsApp desconectado';
+      return;
+    }
+
+    clientInstLabel.textContent = total === 1 ? state.instancias[0].label : 'Todos os WhatsApps';
+    clientInstSubtitle.textContent = total === 1
+      ? (state.instancias[0].connected ? 'WhatsApp conectado' : 'WhatsApp desconectado')
+      : `${total} WhatsApps liberados`;
+  }
+
+  function renderClientInstanceMenu(){
+    if (!clientInstList) return;
+
+    clientInstList.innerHTML = '';
+    if (clientInstCount) clientInstCount.textContent = String(state.instancias.length);
+
+    if (!state.instancias.length){
+      clientInstList.innerHTML = `
+        <div class="client-inst-empty">
+          Você possui a permissão <b>Ver clientes</b>, mas nenhum WhatsApp foi liberado para este acesso.
+        </div>`;
+      updateClientInstanceTrigger();
+      return;
+    }
+
+    const current = String(state.filtro.instanciaId || '');
+    const options = [{
+      id: '',
+      label: 'Todos os WhatsApps',
+      subtitle: `${state.instancias.length} liberados para este acesso`,
+      connected: state.instancias.some(inst => inst.connected)
+    }, ...state.instancias.map(inst => ({
+      id: String(inst.id),
+      label: inst.label,
+      subtitle: inst.connected ? 'Conectado' : 'Desconectado',
+      connected: inst.connected
+    }))];
+
+    const frag = document.createDocumentFragment();
+
+    options.forEach(item => {
+      const button = document.createElement('button');
+      const active = String(item.id) === current;
+      button.type = 'button';
+      button.className = 'client-inst-option';
+      button.dataset.instanceId = String(item.id);
+      button.setAttribute('role', 'option');
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+      button.innerHTML = `
+        <span class="client-inst-radio" aria-hidden="true"></span>
+        <span class="client-inst-option-copy">
+          <strong>${escapeHtml(item.label)}</strong>
+          <small>${escapeHtml(item.subtitle)}</small>
+        </span>
+        <span class="client-inst-status${item.connected ? ' is-online' : ''}" aria-hidden="true"></span>`;
+      frag.appendChild(button);
+    });
+
+    clientInstList.appendChild(frag);
+    updateClientInstanceTrigger();
+  }
+
+  function setClientInstanceEmptyState(){
+    const title = emptyState?.querySelector('strong');
+    const description = emptyState?.querySelector('p');
+    if (!title || !description) return;
+
+    if (!state.instancias.length){
+      title.textContent = 'Nenhum WhatsApp liberado';
+      description.textContent = 'Você pode acessar Clientes, mas precisa receber permissão em pelo menos um WhatsApp.';
+      return;
+    }
+
+    title.textContent = 'Nenhum cliente encontrado';
+    description.textContent = state.filtro.instanciaId
+      ? 'Este WhatsApp não possui clientes com os filtros selecionados.'
+      : 'Altere os filtros ou cadastre o primeiro cliente.';
+  }
+
+  async function instanceAllowedForClients(instanciaId){
+    const path = `/api/clientes?instancia_id=${encodeURIComponent(instanciaId)}` +
+      `&limit=1&offset=0&include_total=false&__acl_ts=${Date.now()}`;
+
+    try{
+      const r = await authFetch(withEmpresaIdQuery(path), { cache:'no-store' });
+      return r.ok;
+    }catch{
+      return false;
+    }
+  }
+
+  async function loadClientInstances(){
+    if (!clientInstBtn || !EMPRESA_ID) return;
+
+    clientInstBtn.disabled = true;
+    if (clientInstLabel) clientInstLabel.textContent = 'Carregando WhatsApps…';
+    if (clientInstSubtitle) clientInstSubtitle.textContent = 'Verificando suas permissões';
+
+    try{
+      const data = await apiGet(`/api/empresas/${EMPRESA_ID}/whatsapp?__ts=${Date.now()}`);
+      const raw = Array.isArray(data?.instancias)
+        ? data.instancias
+        : (Array.isArray(data?.status?.instancias)
+          ? data.status.instancias
+          : (Array.isArray(data) ? data : []));
+
+      const unique = [];
+      const seen = new Set();
+
+      raw.forEach(item => {
+        const inst = normalizeInstance(item);
+        if (!inst || seen.has(inst.id)) return;
+        seen.add(inst.id);
+        unique.push(inst);
+      });
+
+      const checks = await Promise.all(
+        unique.map(async inst => ({ inst, allowed: await instanceAllowedForClients(inst.id) }))
+      );
+
+      state.instancias = checks
+        .filter(result => result.allowed)
+        .map(result => result.inst);
+
+      const saved = String(LS.getItem(CLIENT_INSTANCE_STORAGE_KEY) || '');
+      const savedAllowed = state.instancias.some(inst => String(inst.id) === saved);
+      const previous = String(state.filtro.instanciaId || '');
+
+      if (saved && savedAllowed){
+        state.filtro.instanciaId = saved;
+      } else if (state.instancias.length === 1){
+        state.filtro.instanciaId = String(state.instancias[0].id);
+        LS.setItem(CLIENT_INSTANCE_STORAGE_KEY, state.filtro.instanciaId);
+      } else {
+        state.filtro.instanciaId = '';
+        LS.removeItem(CLIENT_INSTANCE_STORAGE_KEY);
+      }
+
+      renderClientInstanceMenu();
+      setClientInstanceEmptyState();
+
+      if (previous !== String(state.filtro.instanciaId || '')){
+        state.selected.clear();
+        updateSelUI();
+        resetAndLoad();
+      }
+    }catch(e){
+      console.warn('Falha ao carregar WhatsApps permitidos para clientes.', e);
+      state.instancias = [];
+      state.filtro.instanciaId = '';
+      renderClientInstanceMenu();
+      setClientInstanceEmptyState();
+    }
+  }
+
+  function selectClientInstance(value){
+    const id = String(value || '');
+    const allowed = !id || state.instancias.some(inst => String(inst.id) === id);
+    if (!allowed) return;
+
+    state.filtro.instanciaId = id;
+
+    if (id) LS.setItem(CLIENT_INSTANCE_STORAGE_KEY, id);
+    else LS.removeItem(CLIENT_INSTANCE_STORAGE_KEY);
+
+    renderClientInstanceMenu();
+    setClientInstanceEmptyState();
+    closeClientInstanceMenu();
+
+    state.selected.clear();
+    updateSelUI();
+    resetAndLoad();
+  }
+
   function apiUrlForPage({
     limit = PAGE.limit,
     offset = PAGE.offset,
@@ -525,6 +781,9 @@
     if (state.filtro.respId !== '' && state.filtro.respId != null){
       p.set('colaborador_id', String(state.filtro.respId));
     }
+    if (state.filtro.instanciaId){
+      p.set('instancia_id', String(state.filtro.instanciaId));
+    }
     p.set('limit', String(limit));
     p.set('offset', String(offset));
     p.set('include_total', includeTotal ? 'true' : 'false');
@@ -537,7 +796,8 @@
       d: state.filtro.deptoId || '',
       di: state.filtro.di || '',
       df: state.filtro.df || '',
-      r: state.filtro.respId ?? ''
+      r: state.filtro.respId ?? '',
+      i: state.filtro.instanciaId || ''
     });
   }
 
@@ -590,6 +850,7 @@
   async function fetchNextPage(){
     if (PAGE.loading || PAGE.done) return;
 
+    const loadSeq = clientsLoadSeq;
     PAGE.loading = true;
     btnMore?.classList.add('is-loading');
     showTableLoading();
@@ -598,6 +859,7 @@
       const requestOffset = PAGE.offset;
       const url = apiUrlForPage({ includeTotal: false });
       const res = await apiGet(url);
+      if (loadSeq !== clientsLoadSeq) return;
       clearTableLoading();
       const items = Array.isArray(res) ? res : (res?.items || []);
       const has_more = Array.isArray(res) ? (items.length === PAGE.limit) : !!res?.has_more;
@@ -665,14 +927,17 @@
         }
       }
     }catch(e){
+      if (loadSeq !== clientsLoadSeq) return;
       clearTableLoading();
       console.error(e);
       if (!state.clientes.length && emptyState) emptyState.style.display = 'flex';
       toast('Erro ao carregar clientes.', 'err');
     }finally{
-      PAGE.loading = false;
-      btnMore?.classList.remove('is-loading');
-      updateLoadMore();
+      if (loadSeq === clientsLoadSeq){
+        PAGE.loading = false;
+        btnMore?.classList.remove('is-loading');
+        updateLoadMore();
+      }
     }
   }
 
@@ -903,6 +1168,7 @@
       departamento_id: depId,
       departamento: depNome,
       colaborador_id: colabRaw === '' ? null : Number(colabRaw),
+      instancia_id: state.filtro.instanciaId ? Number(state.filtro.instanciaId) : null,
       sobre_cliente: nullableInput(novoSobre),
       cpf_cnpj: nullableInput(extraFields.cpf_cnpj),
       rg: nullableInput(extraFields.rg),
@@ -1029,6 +1295,21 @@
   function bindEvents(){
     let t = null;
 
+    clientInstBtn?.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      toggleClientInstanceMenu();
+    });
+
+    clientInstList?.addEventListener('click', (e)=>{
+      const option = e.target.closest?.('.client-inst-option');
+      if (!option) return;
+      selectClientInstance(option.dataset.instanceId || '');
+    });
+
+    document.addEventListener('click', (e)=>{
+      if (!clientInstWrap?.contains(e.target)) closeClientInstanceMenu();
+    });
+
     busca?.addEventListener('input', ()=>{
       clearTimeout(t);
       t = setTimeout(()=>{
@@ -1058,7 +1339,10 @@
       if (dataInicio) dataInicio.value = '';
       if (dataFim) dataFim.value = '';
 
-      state.filtro = { q:'', deptoId:'', di:'', df:'', respId:'' };
+      state.filtro = { q:'', deptoId:'', di:'', df:'', respId:'', instanciaId:'' };
+      LS.removeItem(CLIENT_INSTANCE_STORAGE_KEY);
+      renderClientInstanceMenu();
+      setClientInstanceEmptyState();
       state.selected.clear();
       updateSelUI();
       resetAndLoad();
@@ -1430,6 +1714,7 @@
 
     document.addEventListener('keydown', (e)=>{
       if (e.key !== 'Escape') return;
+      closeClientInstanceMenu();
       const openBacks = backs.filter(b => b.classList.contains('show'));
       openBacks.forEach(b => closeModal(b));
     });
@@ -1477,6 +1762,7 @@
   }
 
   function resetAndLoad(){
+    clientsLoadSeq++;
     PAGE.offset = 0;
     PAGE.done = false;
     PAGE.loading = false;
@@ -1574,7 +1860,7 @@
     resetAndLoad();
     updateSelUI();
 
-    Promise.allSettled([loadSetores(), loadResponsaveis()]).catch(()=>{});
+    Promise.allSettled([loadSetores(), loadResponsaveis(), loadClientInstances()]).catch(()=>{});
   }
 
   function normPerm(p){
