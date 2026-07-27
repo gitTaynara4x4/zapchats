@@ -102,6 +102,11 @@
           <span class="zc-help-widget-copy"><strong>Ajuda</strong><small>Iniciar guia da página</small></span>
           <span class="zc-help-widget-chevron">${helpWidgetIcon('chevron')}</span>
         </button>
+        <button type="button" class="zc-help-widget-item" data-zc-help-onboarding role="menuitem">
+          <span class="zc-help-widget-item-icon">${icon('grid')}</span>
+          <span class="zc-help-widget-copy"><strong>Conhecer o ZapsChat</strong><small>Rever apresentação inicial</small></span>
+          <span class="zc-help-widget-chevron">${helpWidgetIcon('chevron')}</span>
+        </button>
         <button type="button" class="zc-help-widget-item" data-zc-help-whatsapp role="menuitem">
           <span class="zc-help-widget-item-icon is-whatsapp">${helpWidgetIcon('whatsapp')}</span>
           <span class="zc-help-widget-copy"><strong>WhatsApp</strong><small>Falar com suporte</small></span>
@@ -119,6 +124,7 @@
     const bubble = widget.querySelector('.zc-help-widget-bubble');
     const menu = widget.querySelector('.zc-help-widget-menu');
     const start = widget.querySelector('[data-zc-help-start]');
+    const onboarding = widget.querySelector('[data-zc-help-onboarding]');
     const whatsapp = widget.querySelector('[data-zc-help-whatsapp]');
     let lastTouchAt = 0;
 
@@ -156,6 +162,12 @@
     bindWidgetActivator(toggle);
     bindWidgetActivator(bubble);
     start?.addEventListener('click', function (ev) { ev.preventDefault(); ev.stopPropagation(); setOpen(false); openTour(0); });
+    onboarding?.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      setOpen(false);
+      window.dispatchEvent(new CustomEvent('zapschat:onboarding:open', { detail: { source: 'help' } }));
+    });
     whatsapp?.addEventListener('click', function (ev) { ev.preventDefault(); ev.stopPropagation(); setOpen(false); openSupportWhatsApp(); });
     document.addEventListener('click', function (ev) { if (widget.classList.contains('is-menu-open') && !widget.contains(ev.target)) setOpen(false); });
     document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') setOpen(false); });

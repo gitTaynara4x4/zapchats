@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Optional, Tuple, Literal, Any
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response, status
@@ -33,6 +34,14 @@ class UsuarioUpdateMe(BaseModel):
     nome: Optional[str] = None
     cargo: Optional[str] = None
     departamento_id: Optional[int] = None
+
+
+class OnboardingStatusOut(BaseModel):
+    completed: bool
+    completed_at: Optional[datetime] = None
+    actor_kind: Literal["usuario", "colaborador"]
+    actor_id: int
+    version: int = 1
 
 
 # =========================
@@ -276,6 +285,48 @@ def atualizar_me(
             pass
 
     return _actor_to_out(kind, actor, identity)
+
+
+# =========================
+# Guia inicial do ZapsChat
+# =========================
+@router.get("/me/onboarding", response_model=OnboardingStatusOut)
+def obter_onboarding_me(
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    kind, actor = _load_me_actor(db, identity)
+    completed_at = getattr(actor, "onboarding_completed_at", None)
+    return OnboardingStatusOut(
+        completed=completed_at is not None,
+        completed_at=completed_at,
+        actor_kind=kind,
+        actor_id=int(actor.id),
+    )
+
+
+@router.post("/me/onboarding/complete", response_model=OnboardingStatusOut)
+def concluir_onboarding_me(
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    kind, actor = _load_me_actor(db, identity)
+
+    completed_at = getattr(actor, "onboarding_completed_at", None)
+    if completed_at is None:
+        completed_at = datetime.now(timezone.utc)
+        actor.onboarding_completed_at = completed_at
+        db.add(actor)
+        db.commit()
+        db.refresh(actor)
+        completed_at = getattr(actor, "onboarding_completed_at", completed_at)
+
+    return OnboardingStatusOut(
+        completed=True,
+        completed_at=completed_at,
+        actor_kind=kind,
+        actor_id=int(actor.id),
+    )
 
 
 # =========================

@@ -1158,6 +1158,9 @@ class Colaborador(Base):
     # Não tem relação com presença/visto por último do WhatsApp.
     last_access_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
+    # Marca quando o guia inicial do ZapsChat já foi apresentado para este colaborador.
+    onboarding_completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
     permissoes = relationship(
         "Permissao",
         secondary="colaboradores_permissoes",
@@ -1205,6 +1208,9 @@ class Usuario(Base):
 
     reset_token        = Column(String, nullable=True)
     reset_token_expira = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    # Marca quando o guia inicial do ZapsChat já foi apresentado para este usuário.
+    onboarding_completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     empresa      = relationship("Empresa", back_populates="usuarios")
     departamento = relationship("Departamento", back_populates="usuarios")
