@@ -41,16 +41,18 @@
       }
 
       .zc-msg-author-out{
-        color:#baf0a6;
+        color:#0b6b4f;
       }
 
       .bubble-out .zc-msg-author-out{
-        color:#baf0a6;
-        text-shadow:0 1px 0 rgba(0,0,0,.10);
+        color:#0b6b4f;
+        font-weight:700;
+        text-shadow:none;
       }
 
       html[data-theme="dark"] .bubble-out .zc-msg-author-out{
         color:#c7f7b7;
+        font-weight:600;
       }
 
       .bubble.zc-author-hidden .zc-msg-author,
