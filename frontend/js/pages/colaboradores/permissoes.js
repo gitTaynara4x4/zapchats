@@ -21,44 +21,86 @@ const QUICK_PROFILES = [
     id: 'atendente',
     label: 'Atendente',
     icon: 'fa-headset',
-    hint: 'Atende e responde conversas.',
-    description: 'Atendimento básico'
+    hint: 'Atende e responde conversas liberadas para ele.',
+    description: 'Atendimento do dia a dia',
+    details: [
+      'Visualizar e responder atendimentos',
+      'Enviar mensagens, mídias e arquivos',
+      'Assumir e transferir conversas permitidas',
+      'Consultar clientes e o próprio perfil'
+    ],
+    note: 'O acesso continua limitado aos departamentos e números de WhatsApp selecionados para o colaborador.'
   },
   {
     id: 'supervisor',
     label: 'Supervisor',
     icon: 'fa-user-check',
-    hint: 'Acompanha atendimento, equipe e relatórios.',
-    description: 'Equipe e operação'
+    hint: 'Acompanha a equipe e controla a operação de atendimento.',
+    description: 'Equipe e operação',
+    details: [
+      'Tudo o que o Atendente pode fazer',
+      'Acompanhar e assumir conversas da equipe',
+      'Transferir atendimentos e organizar responsáveis',
+      'Consultar relatórios e dados operacionais'
+    ],
+    note: 'Não libera configurações críticas da empresa, integrações, planos ou gerenciamento geral de permissões.'
   },
   {
     id: 'comercial',
     label: 'Comercial',
     icon: 'fa-chart-line',
-    hint: 'Clientes, contatos, campanhas e atendimento comercial.',
-    description: 'Vendas e clientes'
+    hint: 'Trabalha clientes, contatos, campanhas e atendimento comercial.',
+    description: 'Vendas e clientes',
+    details: [
+      'Visualizar e atender contatos comerciais',
+      'Consultar e atualizar clientes',
+      'Acessar campanhas e automações comerciais',
+      'Consultar relatórios ligados à operação comercial'
+    ],
+    note: 'Não libera configurações administrativas ou permissões sensíveis da empresa.'
   },
   {
     id: 'financeiro',
     label: 'Financeiro',
     icon: 'fa-coins',
-    hint: 'Clientes, cobrança e consultas financeiras.',
-    description: 'Cobrança e consulta'
+    hint: 'Cuida de cobranças, pagamentos e consultas financeiras.',
+    description: 'Cobrança e consulta',
+    details: [
+      'Acessar os recursos financeiros liberados',
+      'Consultar clientes para cobrança',
+      'Acompanhar pagamentos e informações financeiras',
+      'Consultar relatórios financeiros permitidos'
+    ],
+    note: 'O perfil evita permissões administrativas perigosas e ações fora da rotina financeira.'
   },
   {
     id: 'admin',
     label: 'Administrador',
     icon: 'fa-crown',
-    hint: 'Acesso total ao sistema.',
+    hint: 'Acesso completo à empresa e a todas as configurações.',
     description: 'Acesso completo',
+    details: [
+      'Acesso a todos os módulos e atendimentos',
+      'Gerenciar colaboradores e permissões',
+      'Configurar WhatsApp, integrações e automações',
+      'Alterar configurações gerais da empresa'
+    ],
+    note: 'Use apenas para pessoas de confiança. Este perfil marca todas as permissões disponíveis.',
     dangerous: true
   },
   {
     id: 'custom',
     label: 'Personalizado',
     icon: 'fa-sliders',
-    hint: 'Escolher permissão por permissão.',
+    hint: 'Escolha manualmente cada permissão.',
     description: 'Ajuste manual',
+    details: [
+      'Escolher permissão por permissão',
+      'Combinar acessos de diferentes áreas',
+      'Pesquisar e ajustar grupos específicos',
+      'Criar um acesso sob medida para o colaborador'
+    ],
+    note: 'Ao alterar qualquer permissão manualmente, o perfil passa a ser considerado Personalizado.',
     custom: true
   }
 ];
@@ -491,6 +533,82 @@ function createEl(tag, className, text){
   return el;
 }
 
+function getQuickProfile(profileId){
+  return QUICK_PROFILES.find(profile => profile.id === profileId) || null;
+}
+
+function createProfileTooltip(profile){
+  const tooltip = createEl('span', 'perm-profile-tooltip');
+  tooltip.id = `perm-profile-tooltip-${profile.id}`;
+  tooltip.setAttribute('role', 'tooltip');
+
+  const title = createEl('span', 'perm-profile-tooltip-title', `${profile.label} poderá:`);
+  const items = createEl('span', 'perm-profile-tooltip-items');
+
+  (profile.details || []).forEach(detail => {
+    const item = createEl('span', 'perm-profile-tooltip-item');
+    const check = document.createElement('i');
+    check.className = 'fa-solid fa-check';
+    check.setAttribute('aria-hidden', 'true');
+    item.appendChild(check);
+    item.appendChild(document.createTextNode(detail));
+    items.appendChild(item);
+  });
+
+  const note = createEl('span', 'perm-profile-tooltip-note', profile.note || '');
+
+  tooltip.appendChild(title);
+  tooltip.appendChild(items);
+  if (profile.note) tooltip.appendChild(note);
+
+  return tooltip;
+}
+
+function updateProfileExplanation(profileId){
+  const panel = document.getElementById('perm-profile-selected');
+  const profile = getQuickProfile(profileId);
+
+  if (!panel || !profile) {
+    if (panel) panel.hidden = true;
+    return;
+  }
+
+  panel.hidden = false;
+  panel.dataset.profile = profile.id;
+
+  const icon = panel.querySelector('.perm-profile-selected-icon i');
+  const kicker = panel.querySelector('.perm-profile-selected-kicker');
+  const title = panel.querySelector('.perm-profile-selected-title');
+  const description = panel.querySelector('.perm-profile-selected-description');
+  const list = panel.querySelector('.perm-profile-selected-list');
+  const note = panel.querySelector('.perm-profile-selected-note span');
+  const count = panel.querySelector('.perm-profile-selected-count');
+
+  if (icon) icon.className = `fa-solid ${profile.icon}`;
+  if (kicker) kicker.textContent = profile.custom ? 'Ajuste manual ativo' : 'Perfil selecionado';
+  if (title) title.textContent = profile.label;
+  if (description) description.textContent = profile.hint;
+  if (note) note.textContent = profile.note || '';
+  if (count) {
+    count.textContent = profile.custom
+      ? `${selectedCount()} permissões selecionadas`
+      : `${selectedCount()} permissões marcadas automaticamente`;
+  }
+
+  if (list) {
+    list.innerHTML = '';
+    (profile.details || []).forEach(detail => {
+      const li = document.createElement('li');
+      const check = document.createElement('i');
+      check.className = 'fa-solid fa-check';
+      check.setAttribute('aria-hidden', 'true');
+      li.appendChild(check);
+      li.appendChild(document.createTextNode(detail));
+      list.appendChild(li);
+    });
+  }
+}
+
 function groupIconClass(groupName){
   const map = {
     'Atendimento': 'fa-solid fa-headset',
@@ -542,6 +660,7 @@ function setAdvancedOpen(open, opts = {}){
     document.querySelectorAll('.perm-profile-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.profile === 'custom');
     });
+    updateProfileExplanation('custom');
   }
 }
 
@@ -556,7 +675,7 @@ function renderToolbar(container){
 
   const titleWrap = createEl('div', 'perm-toolbar-title');
   const title = createEl('strong', '', 'Perfil de acesso');
-  const subtitle = createEl('span', '', 'Escolha um modelo. As permissões detalhadas ficam escondidas para não poluir.');
+  const subtitle = createEl('span', '', 'Passe o mouse para entender cada perfil. Ao clicar, as permissões são marcadas automaticamente.');
 
   titleWrap.appendChild(title);
   titleWrap.appendChild(subtitle);
@@ -575,10 +694,12 @@ function renderToolbar(container){
     btn.type = 'button';
     btn.className = `perm-profile-btn${profile.custom ? ' perm-profile-custom' : ''}${profile.dangerous ? ' perm-profile-danger' : ''}`;
     btn.dataset.profile = profile.id;
-    btn.title = profile.hint;
+    btn.setAttribute('aria-describedby', `perm-profile-tooltip-${profile.id}`);
+    btn.setAttribute('aria-label', `${profile.label}: ${profile.hint}`);
 
     const icon = document.createElement('i');
     icon.className = `fa-solid ${profile.icon}`;
+    icon.setAttribute('aria-hidden', 'true');
 
     const text = document.createElement('span');
     text.className = 'perm-profile-copy';
@@ -589,14 +710,53 @@ function renderToolbar(container){
     const small = document.createElement('small');
     small.textContent = profile.description || profile.hint || '';
 
+    const info = createEl('span', 'perm-profile-info');
+    info.setAttribute('aria-hidden', 'true');
+    info.innerHTML = '<i class="fa-regular fa-circle-question"></i>';
+
     text.appendChild(label);
     text.appendChild(small);
 
     btn.appendChild(icon);
     btn.appendChild(text);
+    btn.appendChild(info);
+    btn.appendChild(createProfileTooltip(profile));
 
     profiles.appendChild(btn);
   });
+
+  const selectedProfile = createEl('section', 'perm-profile-selected');
+  selectedProfile.id = 'perm-profile-selected';
+  selectedProfile.hidden = true;
+  selectedProfile.setAttribute('aria-live', 'polite');
+
+  const selectedIcon = createEl('div', 'perm-profile-selected-icon');
+  selectedIcon.innerHTML = '<i class="fa-solid fa-shield-halved" aria-hidden="true"></i>';
+
+  const selectedBody = createEl('div', 'perm-profile-selected-body');
+  const selectedHead = createEl('div', 'perm-profile-selected-head');
+  const selectedHeadCopy = createEl('div', 'perm-profile-selected-head-copy');
+  const selectedKicker = createEl('span', 'perm-profile-selected-kicker', 'Perfil selecionado');
+  const selectedTitle = createEl('strong', 'perm-profile-selected-title', '');
+  const selectedDescription = createEl('p', 'perm-profile-selected-description', '');
+  const selectedCount = createEl('span', 'perm-profile-selected-count', '');
+
+  selectedHeadCopy.appendChild(selectedKicker);
+  selectedHeadCopy.appendChild(selectedTitle);
+  selectedHead.appendChild(selectedHeadCopy);
+  selectedHead.appendChild(selectedCount);
+
+  const selectedList = createEl('ul', 'perm-profile-selected-list');
+  const selectedNote = createEl('div', 'perm-profile-selected-note');
+  selectedNote.innerHTML = '<i class="fa-solid fa-circle-info" aria-hidden="true"></i><span></span>';
+
+  selectedBody.appendChild(selectedHead);
+  selectedBody.appendChild(selectedDescription);
+  selectedBody.appendChild(selectedList);
+  selectedBody.appendChild(selectedNote);
+
+  selectedProfile.appendChild(selectedIcon);
+  selectedProfile.appendChild(selectedBody);
 
   const advanced = createEl('div', 'perm-advanced-box');
 
@@ -653,6 +813,7 @@ function renderToolbar(container){
 
   toolbar.appendChild(top);
   toolbar.appendChild(profiles);
+  toolbar.appendChild(selectedProfile);
   toolbar.appendChild(advanced);
 
   container.insertBefore(toolbar, container.firstChild);
@@ -672,6 +833,9 @@ function updateSummary(){
   }
 
   updateGroupStates();
+
+  const activeProfile = document.querySelector('.perm-profile-btn.active')?.dataset.profile;
+  if (activeProfile) updateProfileExplanation(activeProfile);
 }
 
 function updateGroupStates(){

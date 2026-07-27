@@ -8,7 +8,7 @@ import json
 import secrets
 import html
 from datetime import datetime, timedelta
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from fastapi import (
     APIRouter,
@@ -71,6 +71,10 @@ EMAIL_CONVITE_NOME_REMETENTE = (
     or os.getenv("CONVITE_EMAIL_NOME_REMETENTE")
     or "ZapsChat"
 ).strip()
+
+# Domínio canônico usado nos links enviados por e-mail.
+# Mesmo em desenvolvimento local, convites devem abrir o site público.
+ZAPSCHAT_PUBLIC_URL_PADRAO = "https://zapschat.com.br"
 
 
 def _boolish(value: Any) -> bool:
@@ -173,20 +177,47 @@ def _public_base_from_request(request: Optional[Request]) -> str:
     return f"{scheme}://{host}{forwarded_prefix}".rstrip("/")
 
 
+def _is_local_public_url(value: str) -> bool:
+    """Indica URLs que só funcionam na máquina que abriu o e-mail."""
+    raw = str(value or "").strip()
+    if not raw:
+        return False
+
+    try:
+        hostname = (urlparse(raw).hostname or "").strip().lower()
+    except ValueError:
+        return False
+
+    return hostname in {"127.0.0.1", "localhost", "0.0.0.0", "::1"} or hostname.endswith(".localhost")
+
+
 def _public_url(path: str, *, request: Optional[Request] = None) -> str:
-    base = (
-        os.getenv("APP_PUBLIC_URL")
-        or os.getenv("FRONTEND_URL")
-        or os.getenv("PUBLIC_URL")
-        or os.getenv("ZAPSCHAT_BASE_URL")
-        or _public_base_from_request(request)
-        or ""
-    ).strip().rstrip("/")
+    """Monta links externos sem deixar localhost vazar para os e-mails."""
+    configured_candidates = (
+        os.getenv("ZAPSCHAT_CANONICAL_URL"),
+        os.getenv("APP_PUBLIC_URL"),
+        os.getenv("FRONTEND_URL"),
+        os.getenv("PUBLIC_URL"),
+        os.getenv("ZAPSCHAT_BASE_URL"),
+    )
 
+    base = ""
+    for candidate in configured_candidates:
+        normalized = str(candidate or "").strip().rstrip("/")
+        if normalized and not _is_local_public_url(normalized):
+            base = normalized
+            break
+
+    request_base = _public_base_from_request(request)
+    if not base and request_base and not _is_local_public_url(request_base):
+        base = request_base.rstrip("/")
+
+    # Convites criados pelo ambiente local também precisam abrir o domínio real.
     if not base:
-        return path
+        base = ZAPSCHAT_PUBLIC_URL_PADRAO
 
-    return f"{base}{path if path.startswith('/') else '/' + path}"
+    normalized_path = path if path.startswith("/") else f"/{path}"
+    return f"{base}{normalized_path}"
 
 
 def _enviar_email_acesso_colaborador(
@@ -254,87 +285,128 @@ Equipe ZapsChat
     botao_html = html.escape(botao)
     link_html = html.escape(link, quote=True)
 
+    preheader_html = html.escape(
+        f"{titulo}. Link pessoal válido por {RESET_CODE_TTL_MIN} minutos."
+    )
+
     corpo_html = f"""<!doctype html>
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="x-apple-disable-message-reformatting">
+  <meta name="color-scheme" content="dark">
+  <meta name="supported-color-schemes" content="dark">
   <title>{titulo_html}</title>
+  <style>
+    html,body{{margin:0!important;padding:0!important;width:100%!important;background:#0b0e0d!important;}}
+    table{{border-collapse:collapse!important;border-spacing:0!important;}}
+    img{{border:0;outline:none;text-decoration:none;}}
+    a{{text-decoration:none;}}
+    @media only screen and (max-width:640px){{
+      .email-shell{{padding:18px 10px!important;}}
+      .email-card{{border-radius:16px!important;}}
+      .content-pad{{padding-left:24px!important;padding-right:24px!important;}}
+      .title{{font-size:29px!important;line-height:36px!important;}}
+      .body-copy{{font-size:15px!important;line-height:24px!important;}}
+      .cta-link{{display:block!important;min-width:0!important;padding-left:18px!important;padding-right:18px!important;}}
+      .security-icon-cell{{width:48px!important;}}
+    }}
+  </style>
 </head>
-<body style="margin:0;padding:0;background:#f4f7f6;font-family:Inter,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#17212b;">
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
-    Convite de {empresa_html} para criar sua senha no ZapsChat.
-  </div>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f7f6;">
+<body style="margin:0;padding:0;background:#0b0e0d;color:#f5f7f6;font-family:Inter,Arial,Helvetica,sans-serif;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">{preheader_html}</div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#0b0e0d;">
     <tr>
-      <td align="center" style="padding:32px 14px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:680px;background:#ffffff;border:1px solid #e2e8e6;border-radius:18px;overflow:hidden;box-shadow:0 8px 28px rgba(15,40,30,.06);">
+      <td class="email-shell" align="center" style="padding:28px 14px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="email-card" style="width:100%;max-width:600px;background:#121514;border:1px solid #303633;border-radius:20px;overflow:hidden;box-shadow:0 18px 48px rgba(0,0,0,.30);">
           <tr>
-            <td align="center" style="padding:34px 28px 8px;">
-              <div style="font-size:26px;line-height:32px;font-weight:800;letter-spacing:-1px;color:#111827;">
-                <span style="color:#19c875;">Zap</span>Chats
+            <td align="center" class="content-pad" style="padding:30px 34px 0;">
+              <div style="font-size:29px;line-height:34px;font-weight:800;letter-spacing:-1.2px;color:#f8faf9;">
+                <span style="color:#14b86f;">Zap</span>Chats
               </div>
             </td>
           </tr>
+
           <tr>
-            <td align="center" style="padding:18px 28px 0;">
+            <td align="center" style="padding:20px 34px 0;">
               <table role="presentation" cellpadding="0" cellspacing="0" border="0">
                 <tr>
-                  <td align="center" width="88" height="88" style="width:88px;height:88px;border-radius:44px;background:#eafbf3;font-size:40px;line-height:88px;">✉️</td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding:24px 34px 0;">
-              <div style="font-size:28px;line-height:36px;font-weight:800;color:#142033;">{titulo_html}</div>
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding:14px 34px 0;">
-              <div style="font-size:18px;line-height:26px;font-weight:700;color:#243244;">
-                Olá, <span style="color:#0da968;">{nome_html}!</span>
-              </div>
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding:16px 44px 0;">
-              <div style="font-size:16px;line-height:26px;color:#617184;">{descricao_html}</div>
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding:28px 34px 0;">
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td align="center" bgcolor="#0aaa68" style="border-radius:11px;">
-                    <a href="{link_html}" target="_blank" style="display:inline-block;min-width:280px;padding:17px 28px;font-size:17px;line-height:22px;font-weight:800;color:#ffffff;text-decoration:none;border-radius:11px;">🔒&nbsp;&nbsp;{botao_html}</a>
+                  <td align="center" width="48" height="48" style="width:48px;height:48px;">
+                    <div style="width:48px;height:48px;border-radius:50%;background:#18251f;border:1px solid #243b30;color:#35d58a;font-family:Arial,Helvetica,sans-serif;font-size:22px;line-height:48px;text-align:center;">&#9993;&#65038;</div>
                   </td>
                 </tr>
               </table>
             </td>
           </tr>
+
           <tr>
-            <td align="center" style="padding:22px 34px 0;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;background:#f1fcf7;border:1px solid #c9f0dd;border-radius:11px;">
+            <td align="center" class="content-pad" style="padding:18px 38px 0;">
+              <div class="title" style="font-size:34px;line-height:42px;font-weight:800;letter-spacing:-1.1px;color:#f7f8f8;">{titulo_html}</div>
+            </td>
+          </tr>
+
+          <tr>
+            <td align="center" class="content-pad" style="padding:14px 38px 0;">
+              <div style="font-size:17px;line-height:25px;font-weight:600;color:#d8ddda;">
+                Olá, <span style="color:#18bf73;font-weight:800;">{nome_html}!</span>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td align="center" class="content-pad" style="padding:14px 48px 0;">
+              <div class="body-copy" style="font-size:16px;line-height:25px;color:#aeb8b3;">{descricao_html}</div>
+            </td>
+          </tr>
+
+          <tr>
+            <td align="center" class="content-pad" style="padding:24px 46px 0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:460px;">
                 <tr>
-                  <td align="center" style="padding:13px 16px;font-size:14px;line-height:21px;color:#526173;">
-                    ⏱️ Este link é pessoal e expira em <strong style="color:#0b9c61;">{RESET_CODE_TTL_MIN} minutos</strong>
+                  <td align="center" bgcolor="#14b86f" style="background:#14b86f;border-radius:11px;box-shadow:0 8px 20px rgba(20,184,111,.17);">
+                    <a class="cta-link" href="{link_html}" target="_blank" rel="noopener" style="display:inline-block;min-width:330px;padding:16px 24px;border-radius:11px;font-size:16px;line-height:22px;font-weight:800;color:#ffffff;text-decoration:none;">&#128274;&#65038;&nbsp;&nbsp;{botao_html}</a>
                   </td>
                 </tr>
               </table>
             </td>
           </tr>
+
           <tr>
-            <td style="padding:30px 40px 0;"><div style="height:1px;background:#e8eeec;"></div></td>
+            <td align="center" class="content-pad" style="padding:16px 46px 0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:460px;background:#191d1b;border:1px solid #303633;border-radius:10px;">
+                <tr>
+                  <td align="center" style="padding:12px 16px;font-size:14px;line-height:21px;color:#c5ccc8;">
+                    <span style="color:#aab4af;">&#9719;</span>&nbsp;&nbsp;Este link é pessoal e expira em <strong style="color:#2ad486;">{RESET_CODE_TTL_MIN} minutos</strong>
+                  </td>
+                </tr>
+              </table>
+            </td>
           </tr>
+
           <tr>
-            <td style="padding:26px 42px 0;">
+            <td class="content-pad" style="padding:26px 36px 0;">
+              <div style="height:1px;background:#2a2f2d;font-size:0;line-height:0;">&nbsp;</div>
+            </td>
+          </tr>
+
+          <tr>
+            <td class="content-pad" style="padding:24px 38px 0;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
-                  <td width="52" valign="top" style="font-size:29px;line-height:38px;">🛡️</td>
+                  <td class="security-icon-cell" width="58" valign="top" style="width:58px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td align="center" width="42" height="42" style="width:42px;height:42px;">
+                          <div style="width:42px;height:42px;border-radius:50%;background:#18211d;border:1px solid #29352f;color:#2bd183;font-size:20px;line-height:42px;font-weight:800;text-align:center;">&#10003;</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
                   <td valign="top">
-                    <div style="font-size:15px;line-height:22px;font-weight:800;color:#213044;">Segurança em primeiro lugar</div>
-                    <div style="padding-top:5px;font-size:14px;line-height:22px;color:#687789;">
+                    <div style="font-size:16px;line-height:22px;font-weight:800;color:#f0f3f1;">Segurança em primeiro lugar</div>
+                    <div style="padding-top:6px;font-size:14px;line-height:22px;color:#a9b3ae;">
                       Se você não esperava esta mensagem, pode ignorá-la. Sua conta somente será ativada depois que você definir sua senha.
                     </div>
                   </td>
@@ -342,18 +414,30 @@ Equipe ZapsChat
               </table>
             </td>
           </tr>
+
           <tr>
-            <td align="center" style="padding:32px 28px 34px;">
-              <div style="font-size:14px;line-height:22px;color:#84919f;">Obrigado por confiar no ZapsChat.</div>
-              <div style="padding-top:4px;font-size:15px;line-height:22px;font-weight:800;color:#0da968;">Equipe ZapsChat</div>
+            <td align="center" class="content-pad" style="padding:26px 34px 24px;">
+              <div style="font-size:14px;line-height:21px;color:#98a39d;">Obrigado por confiar no ZapChats.</div>
+              <div style="padding-top:4px;font-size:15px;line-height:21px;font-weight:800;color:#18bf73;">Equipe ZapChats</div>
             </td>
           </tr>
-        </table>
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:680px;">
+
           <tr>
-            <td align="center" style="padding:16px 18px 0;font-size:11px;line-height:17px;color:#93a09d;">
-              Se o botão não funcionar, copie e cole este endereço no navegador:<br>
-              <a href="{link_html}" style="color:#0b9c61;text-decoration:none;word-break:break-all;">{link_html}</a>
+            <td class="content-pad" style="padding:0 30px;">
+              <div style="height:1px;background:#292e2c;font-size:0;line-height:0;">&nbsp;</div>
+            </td>
+          </tr>
+
+          <tr>
+            <td align="center" class="content-pad" style="padding:18px 30px 24px;">
+              <div style="font-size:11px;line-height:17px;color:#727c77;">Se o botão não funcionar, copie e cole este endereço no navegador:</div>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:9px;width:100%;background:#151817;border:1px solid #252a28;border-radius:8px;">
+                <tr>
+                  <td align="left" style="padding:10px 12px;font-size:10px;line-height:15px;color:#67716c;word-break:break-all;">
+                    <a href="{link_html}" target="_blank" rel="noopener" style="color:#74807a;text-decoration:none;word-break:break-all;">{link_html}</a>
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
         </table>

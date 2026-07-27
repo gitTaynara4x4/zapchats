@@ -49,7 +49,7 @@ import {
 import {
   ensurePermsEdit,
   getPermsSelecionadasEdit
-} from './permissoes.js';
+} from './permissoes.js?v=colab-profile-help-20260727-1';
 import {
   clearValidationErrors,
   validateFormLive,
