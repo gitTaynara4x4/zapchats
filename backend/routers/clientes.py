@@ -42,6 +42,11 @@ from backend.utils.entitlements import (
     enforce_feature,
 )
 from backend.security.instancias import instancias_visiveis
+from backend.security.atendimento_acl import (
+    VISIBILIDADE_ATENDIMENTOS_PROPRIOS,
+    assert_cliente_access,
+    get_atendimento_visibility_scope,
+)
 from backend.migrations.clientes_sequence import sync_clientes_id_sequence
 from backend.cache.redis_client import (
     get_json as cache_get_json,
@@ -88,6 +93,9 @@ class PostNovoCliente(ClienteWriteFields):
     telefone: str
     instancia_id: Optional[int] = None
     instance_name: Optional[str] = None
+    # Marcador explícito para diferenciar o cadastro completo de clientes
+    # da criação mínima feita pelo botão "Nova conversa" no atendimento.
+    origem_atendimento: bool = False
 
 
 class BulkColaboradorIn(BaseModel):
@@ -225,6 +233,32 @@ def _iso(dt):
 
 def _get_perms(identity) -> set[str]:
     return set(_id_get(identity, "permissoes", []) or [])
+
+
+def _has_any_perm(identity: Any, *wanted: str) -> bool:
+    perms = {str(p).strip().lower() for p in _get_perms(identity)}
+    return any(str(perm).strip().lower() in perms for perm in wanted)
+
+
+def _identity_colaborador_id(identity: Any) -> Optional[int]:
+    for key in ("colaborador_id", "id_colab", "id_colaborador", "colab_id", "cid"):
+        raw = _id_get(identity, key)
+        try:
+            value = int(raw) if raw is not None else None
+        except Exception:
+            value = None
+        if value and value > 0:
+            return value
+
+    sub = str(_id_get(identity, "sub") or "").strip().lower()
+    if sub.startswith("colab-"):
+        try:
+            value = int(sub.split("-", 1)[1])
+            return value if value > 0 else None
+        except Exception:
+            return None
+
+    return None
 
 
 def _conv_ref_cliente(cliente_id: int, instancia_id: Optional[int]) -> str:
@@ -1230,11 +1264,28 @@ def criar_cliente(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
-    perms = _get_perms(identity)
-    if "clientes.criar" not in perms:
+    pode_cadastrar_cliente = _has_any_perm(
+        identity,
+        "clientes.criar",
+        "clientes.gerenciar",
+        "admin",
+        "root",
+    )
+    pode_iniciar_atendimento = bool(body.origem_atendimento) and _has_any_perm(
+        identity,
+        "atendimento.enviar",
+        "atendimento.gerenciar",
+        "admin",
+        "root",
+    )
+
+    if not pode_cadastrar_cliente and not pode_iniciar_atendimento:
         raise HTTPException(
             status_code=403,
-            detail="Sem permissão para criar clientes (clientes.criar).",
+            detail=(
+                "Sem permissão para criar clientes (clientes.criar) ou "
+                "iniciar uma conversa (atendimento.enviar)."
+            ),
         )
 
     empresa = _get_empresa_or_404(db, empresa_id)
@@ -1244,6 +1295,18 @@ def criar_cliente(
         identity=identity,
         instancia_id=body.instancia_id,
         instance_name=body.instance_name,
+    )
+
+    visibility_scope = get_atendimento_visibility_scope(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id),
+    )
+    current_colab_id = _identity_colaborador_id(identity)
+    own_conversations_mode = (
+        bool(body.origem_atendimento)
+        and visibility_scope == VISIBILIDADE_ATENDIMENTOS_PROPRIOS
+        and current_colab_id is not None
     )
 
     tel = _digits(body.telefone)
@@ -1256,14 +1319,54 @@ def criar_cliente(
         raw_phone=tel,
     )
     if dup:
+        selected_instancia_id = (
+            int(instancia.id)
+            if instancia is not None
+            else getattr(dup, "instancia_id", None)
+        )
+
+        if own_conversations_mode:
+            # Pode reutilizar um contato já cadastrado somente quando a conversa
+            # já for dele ou quando o contato ainda estiver realmente livre e
+            # sem histórico. A ACL também impede assumir contato de outro atendente.
+            assert_cliente_access(
+                db,
+                identity=identity,
+                empresa_id=int(empresa_id),
+                cliente_id=int(dup.id),
+                instancia_id=(
+                    int(selected_instancia_id)
+                    if selected_instancia_id is not None
+                    else None
+                ),
+                allow_unassigned_department=True,
+                allow_unowned_if_no_history=True,
+            )
+
+            changed = False
+            if getattr(dup, "colaborador_id", None) is None:
+                dup.colaborador_id = int(current_colab_id)
+                changed = True
+
+            if instancia is not None and getattr(dup, "instancia_id", None) is None:
+                dup.instancia_id = int(instancia.id)
+                selected_instancia_id = int(instancia.id)
+                changed = True
+
+            if changed:
+                db.add(dup)
+                db.commit()
+                db.refresh(dup)
+
         fields = _cliente_conversation_fields(
             cliente_id=int(dup.id),
-            instancia_id=getattr(dup, "instancia_id", None),
+            instancia_id=selected_instancia_id,
         )
         return {
             "id": dup.id,
             **fields,
-            "instancia_id": getattr(dup, "instancia_id", None),
+            "instancia_id": selected_instancia_id,
+            "instance_name": getattr(instancia, "instance_name", None),
             "exists": True,
         }
 
@@ -1293,6 +1396,12 @@ def criar_cliente(
         empresa_id=empresa_id,
         creating=True,
     )
+
+    # No modo "somente minhas conversas", o contato criado no atendimento
+    # já nasce vinculado ao colaborador. Assim ele aparece imediatamente e não
+    # pode ser aberto por outro atendente com o mesmo escopo.
+    if own_conversations_mode:
+        c.colaborador_id = int(current_colab_id)
 
     db.add(c)
     try:
@@ -1337,6 +1446,8 @@ def criar_cliente(
                     empresa_id=empresa_id,
                     creating=True,
                 )
+                if own_conversations_mode:
+                    retry_c.colaborador_id = int(current_colab_id)
                 db.add(retry_c)
                 db.commit()
                 c = retry_c

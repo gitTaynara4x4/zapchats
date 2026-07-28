@@ -1643,6 +1643,9 @@ import { state } from '../state/store.js';
         nome: nomeManual || 'Cliente',
         nome_completo: nomeManual || null,
         telefone: canonical,
+        // Permite criar o contato mínimo usando atendimento.enviar, sem liberar
+        // o módulo completo de cadastro de clientes para o colaborador.
+        origem_atendimento: true,
       };
 
       if (/^\d+$/.test(inst)) {

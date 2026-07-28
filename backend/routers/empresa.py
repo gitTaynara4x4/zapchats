@@ -16,6 +16,7 @@ from backend.utils.plans import (
     normalize_plan,
 )
 from backend.routers.auth import get_current_identity
+from backend.security.instancias import instancias_visiveis
 
 router = APIRouter(prefix="/api/empresas", tags=["Empresas"])
 
@@ -259,7 +260,17 @@ def info_whatsapp(
     insts: List[Dict[str, Any]] = []
     ativos = 0
 
-    for i in (emp.instancias or []):
+    all_instances = list(emp.instancias or [])
+    visible_ids = instancias_visiveis(identity, db)
+    visible_set = (
+        None
+        if visible_ids is None
+        else {int(value) for value in visible_ids if value is not None}
+    )
+
+    for i in all_instances:
+        if visible_set is not None and int(i.id) not in visible_set:
+            continue
         item = {
             "id": int(i.id),
             "instancia_id": int(i.id),
@@ -286,14 +297,18 @@ def info_whatsapp(
         if i.connected:
             ativos += 1
 
-    total = len(insts)
+    total_visivel = len(insts)
+    total_empresa = len(all_instances)
 
-    status = plan_status_payload(emp, current_instances=total)
+    status = plan_status_payload(emp, current_instances=total_empresa)
     status.update(
         {
             "ativos": ativos,
-            "inativos": total - ativos,
+            "inativos": total_visivel - ativos,
             "instancias": insts,
+            "instancias_visiveis": total_visivel,
+            "instancias_total_empresa": total_empresa,
+            "instancias_filtradas_por_acl": visible_set is not None,
         }
     )
     return status

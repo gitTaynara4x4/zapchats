@@ -1053,8 +1053,11 @@ def assert_cliente_access(
             if atendimento is not None
             else None
         )
+        cliente_colaborador_id = _to_int(getattr(cliente, "colaborador_id", None))
         can_start_unowned_conversation = (
-            not has_history and atendimento_operador_id is None
+            not has_history
+            and atendimento_operador_id is None
+            and cliente_colaborador_id is None
         )
 
     if atendimento is not None:
