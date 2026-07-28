@@ -85,6 +85,21 @@ def _boolish(value: Any) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "sim", "on")
 
 
+VISIBILIDADE_ATENDIMENTOS_TODOS = "todos"
+VISIBILIDADE_ATENDIMENTOS_PROPRIOS = "proprios"
+
+
+def _norm_visibilidade_atendimentos(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    aliases_proprios = {
+        "proprios", "proprias", "somente_meus", "somente_minhas",
+        "meus", "minhas", "own", "only_own",
+    }
+    if raw in aliases_proprios:
+        return VISIBILIDADE_ATENDIMENTOS_PROPRIOS
+    return VISIBILIDADE_ATENDIMENTOS_TODOS
+
+
 def _assert_email_disponivel(
     db: Session,
     email: str,
@@ -1157,6 +1172,7 @@ class ColaboradorOut(BaseModel):
 
     instancias_ids: list[int] = Field(default_factory=list)
     departamentos_ids: list[int] = Field(default_factory=list)
+    visibilidade_atendimentos: str = VISIBILIDADE_ATENDIMENTOS_TODOS
 
     setor_nome: Optional[str] = None
     tem_usuario: bool = False
@@ -1191,6 +1207,7 @@ class ColaboradorUpdate(BaseModel):
     permissoes: Optional[List[str]] = None
     instancias_ids: Optional[List[int]] = None
     departamentos_ids: Optional[List[int]] = None
+    visibilidade_atendimentos: Optional[str] = None
 
 
 class ColaboradorInstanciasUpdate(BaseModel):
@@ -1288,6 +1305,9 @@ def _to_out(
         telefone=telefone_plano,
         cargo=cargo_plano,
         instancias_ids=list(c.instancias_ver or []),
+        visibilidade_atendimentos=_norm_visibilidade_atendimentos(
+            getattr(c, "visibilidade_atendimentos", None)
+        ),
         departamentos_ids=_get_departamentos_ids_colaborador(
             db,
             empresa_id=int(c.empresa_id),
@@ -1424,6 +1444,9 @@ def _to_out_list_row(
         cargo=cargo,
         instancias_ids=list(values['instancias_ver'] or []),
         departamentos_ids=list(departamentos_ids or []),
+        visibilidade_atendimentos=_norm_visibilidade_atendimentos(
+            values['visibilidade_atendimentos']
+        ),
         setor_nome=setor_nome,
         tem_usuario=bool(usuario_id),
         convite_pendente=bool(reset_pendente and not force_change),
@@ -1468,6 +1491,7 @@ def _query_lista_colaboradores(
             C.telefone.label('colaborador_telefone'),
             C.cargo.label('colaborador_cargo'),
             C.instancias_ver.label('instancias_ver'),
+            C.visibilidade_atendimentos.label('visibilidade_atendimentos'),
             C.hora_login_inicio.label('hora_login_inicio'),
             C.hora_login_fim.label('hora_login_fim'),
             C.horario_modo.label('horario_modo'),
@@ -1627,6 +1651,7 @@ async def criar_colaborador(
     hora_login_inicio: Optional[str] = Form(None),
     hora_login_fim: Optional[str] = Form(None),
     horario_modo: Optional[str] = Form(None),
+    visibilidade_atendimentos: Optional[str] = Form(None),
     criar_usuario: Optional[bool] = Form(False),
     senha: Optional[str] = Form(None),
     modo_acesso: Optional[str] = Form(None),
@@ -1661,6 +1686,10 @@ async def criar_colaborador(
             hora_login_inicio = payload.get("hora_login_inicio", hora_login_inicio)
             hora_login_fim = payload.get("hora_login_fim", hora_login_fim)
             horario_modo = payload.get("horario_modo", horario_modo)
+            visibilidade_atendimentos = payload.get(
+                "visibilidade_atendimentos",
+                payload.get("escopo_conversas", visibilidade_atendimentos),
+            )
 
             raw_permissoes = (
                 payload.get("permissoes", raw_permissoes)
@@ -1689,6 +1718,10 @@ async def criar_colaborador(
             form_perms = form.getlist("permissoes[]") or form.getlist("permissoes")
             form_insts = form.getlist("instancias_ids[]") or form.getlist("instancias_ids")
             form_deptos = form.getlist("departamentos_ids[]") or form.getlist("departamentos_ids")
+            form_visibility = form.get("visibilidade_atendimentos") or form.get("escopo_conversas")
+
+            if form_visibility is not None:
+                visibilidade_atendimentos = str(form_visibility)
 
             if form_perms:
                 raw_permissoes = form_perms
@@ -1868,6 +1901,9 @@ async def criar_colaborador(
         avatar_data=avatar_bytes if avatar_bytes else None,
         avatar_mime=avatar_mime if avatar_bytes else None,
         instancias_ver=instancias_ids_norm,
+        visibilidade_atendimentos=_norm_visibilidade_atendimentos(
+            visibilidade_atendimentos
+        ),
     )
 
     if modo_acesso_norm == "manual" and forcar_troca:
@@ -2158,6 +2194,11 @@ def atualizar_colaborador(
                 u.cargo = data["cargo"] or None
 
             db.add(u)
+
+    if "visibilidade_atendimentos" in data:
+        colab.visibilidade_atendimentos = _norm_visibilidade_atendimentos(
+            data.get("visibilidade_atendimentos")
+        )
 
     if "permissoes" in data:
         perm_ids = [str(x) for x in (data["permissoes"] or [])]

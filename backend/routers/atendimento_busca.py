@@ -31,6 +31,8 @@ from backend.security.atendimento_acl import (
     resolve_acl_context,
     assert_instancia_allowed,
     assert_cliente_access,
+    get_atendimento_visibility_scope,
+    VISIBILIDADE_ATENDIMENTOS_PROPRIOS,
 )
 from backend.services.chatbot_claim_policy import department_acl_instancia_ids
 
@@ -2812,6 +2814,13 @@ def atendimento_search(
     allowed_instancias = acl_ctx["allowed_instancias"]
     allowed_departamentos = acl_ctx.get("allowed_departamentos")
     current_colab_id = _identity_colab_id(identity)
+    only_own_conversations = (
+        get_atendimento_visibility_scope(
+            db,
+            identity=identity,
+            empresa_id=int(empresa_id_eff),
+        ) == VISIBILIDADE_ATENDIMENTOS_PROPRIOS
+    )
 
     resolved_inst_id, _resolved_inst_name = _resolve_instancia_id(
         db,
@@ -2989,6 +2998,7 @@ def atendimento_search(
             department_acl_inst_ids=active_department_inst_ids,
             current_colab_id=current_colab_id,
             allow_unassigned_department=False,
+            only_own_conversations=only_own_conversations,
         ).filter(or_(*visible_filters))
 
         rows_visible = (

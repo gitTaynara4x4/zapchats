@@ -31,6 +31,7 @@ def _query_clientes_ultima_por_conversa(
     department_acl_inst_ids: Optional[List[int]] = None,
     current_colab_id: Optional[int] = None,
     allow_unassigned_department: bool = False,
+    only_own_conversations: bool = False,
 ):
     M = models.Mensagem
     C = models.Cliente
@@ -304,6 +305,44 @@ def _query_clientes_ultima_por_conversa(
             .outerjoin(EI, EI.id == M.instancia_id)
             .filter(C.empresa_id == int(empresa_id))
         )
+
+    # Escopo opcional "somente minhas conversas". A conversa fica visível
+    # quando o colaborador é o operador atual, participante ativo compatível,
+    # ou responsável direto pelo cliente antes de existir um atendimento.
+    if only_own_conversations:
+        if current_colab_id is None:
+            q = q.filter(literal(False))
+        elif caps["usable"] and caps.get("has_operador_id"):
+            own_conditions = [A.operador_id == int(current_colab_id)]
+
+            AP = getattr(models, "AtendimentoParticipante", None)
+            if AP is not None:
+                active_participant = (
+                    db.query(AP.id)
+                    .filter(
+                        AP.empresa_id == int(empresa_id),
+                        AP.atendimento_id == A.id,
+                        AP.colaborador_id == int(current_colab_id),
+                        AP.is_ativo.is_(True),
+                    )
+                    .correlate(A)
+                    .exists()
+                )
+                own_conditions.append(active_participant)
+
+            if hasattr(C, "colaborador_id"):
+                own_conditions.append(
+                    and_(
+                        A.id.is_(None),
+                        C.colaborador_id == int(current_colab_id),
+                    )
+                )
+
+            q = q.filter(or_(*own_conditions))
+        elif hasattr(C, "colaborador_id"):
+            q = q.filter(C.colaborador_id == int(current_colab_id))
+        else:
+            q = q.filter(literal(False))
 
     # ACL por departamento na lista de atendimento.
     #

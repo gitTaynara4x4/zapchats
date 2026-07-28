@@ -16,6 +16,8 @@ from backend.security.atendimento_acl import (
     ensure_perm,
     resolve_acl_context,
     assert_instancia_allowed,
+    get_atendimento_visibility_scope,
+    VISIBILIDADE_ATENDIMENTOS_PROPRIOS,
 )
 from backend.services.chatbot_claim_policy import department_acl_instancia_ids
 
@@ -277,6 +279,15 @@ def listar_conversas(
         required=False,
     )
 
+    visibility_scope = get_atendimento_visibility_scope(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id),
+    )
+    only_own_conversations = (
+        visibility_scope == VISIBILIDADE_ATENDIMENTOS_PROPRIOS
+    )
+
     M = models.Mensagem
     MG = models.MensagemGrupo
 
@@ -345,6 +356,7 @@ def listar_conversas(
         department_acl_inst_ids=active_department_inst_ids,
         current_colab_id=current_colab_id,
         allow_unassigned_department=_allow_entrada_geral_colaborador(identity),
+        only_own_conversations=only_own_conversations,
     )
 
     if deleted_cliente_ids:
@@ -433,9 +445,12 @@ def listar_conversas(
         if int(x) not in active_department_set
     ]
     can_list_groups = (
-        allowed_dep_ids is None
-        or has_group_permission
-        or bool(inactive_department_inst_ids)
+        not only_own_conversations
+        and (
+            allowed_dep_ids is None
+            or has_group_permission
+            or bool(inactive_department_inst_ids)
+        )
     )
 
     if cursor_last_msg_id is None and can_list_groups:

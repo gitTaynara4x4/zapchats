@@ -13,7 +13,7 @@ import {
   applyPresenceUpdate,
   applyPresenceSnapshot
 } from './lista.js?v=colab-session-cache-20260726-1';
-import { bindModal } from './modal.js?v=colab-profile-help-20260727-1';
+import { bindModal } from './modal.js?v=colab-visibility-20260728-1';
 
 import { initColaboradoresTabs } from './ui/tabs.js?v=colab-required-20260713';
 import { initColaboradoresSelects } from './ui/selects.js?v=colab-select-fix-1';

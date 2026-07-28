@@ -486,6 +486,54 @@ function formatPresence(colab){
   };
 }
 
+const VISIBILIDADE_ATENDIMENTOS_TODOS = 'todos';
+const VISIBILIDADE_ATENDIMENTOS_PROPRIOS = 'proprios';
+
+function normalizeConversationVisibility(value){
+  const raw = String(value || '').trim().toLowerCase();
+  return [
+    'proprios', 'proprias', 'somente_meus', 'somente_minhas',
+    'meus', 'minhas', 'own', 'only_own'
+  ].includes(raw)
+    ? VISIBILIDADE_ATENDIMENTOS_PROPRIOS
+    : VISIBILIDADE_ATENDIMENTOS_TODOS;
+}
+
+function renderConversationVisibility(colab = state.viewing, editable = false){
+  const value = normalizeConversationVisibility(colab?.visibilidade_atendimentos);
+  const inputs = Array.from(
+    document.querySelectorAll('input[name="visibilidade_atendimentos"]')
+  );
+  const summary = document.querySelector('#conversation-visibility-summary');
+
+  inputs.forEach(input => {
+    input.checked = input.value === value;
+    input.disabled = !editable;
+    input.onchange = () => {
+      if (!input.checked) return;
+      renderConversationVisibility(
+        { visibilidade_atendimentos: input.value },
+        true
+      );
+    };
+  });
+
+  if (summary) {
+    summary.textContent = value === VISIBILIDADE_ATENDIMENTOS_PROPRIOS
+      ? 'Este colaborador poderá usar os WhatsApps permitidos, mas verá apenas conversas que estejam atribuídas a ele.'
+      : 'Este colaborador verá todas as conversas dentro dos WhatsApps e departamentos permitidos.';
+  }
+}
+
+function getConversationVisibilityEdit(){
+  const selected = document.querySelector(
+    'input[name="visibilidade_atendimentos"]:checked'
+  );
+  return normalizeConversationVisibility(
+    selected?.value || state.viewing?.visibilidade_atendimentos
+  );
+}
+
 function updateProfilePreview({ nome = '', cargo = '', empresa = '', departamento = '' } = {}){
   const nameEl = document.querySelector('#side-preview-name');
   const roleEl = document.querySelector('#side-preview-role');
@@ -650,6 +698,7 @@ export async function renderPerfilView(colab){
   }
 
   ensureAccessExplanationBox();
+  renderConversationVisibility(colab, false);
 
   const isCreate = perfilModal?.dataset.mode === 'create';
 
@@ -1024,6 +1073,7 @@ export function enterInlineEdit(){
   }
 
   perfilModal?.classList.add('editing');
+  renderConversationVisibility(state.viewing, true);
 
   // Exibe o editor de foto somente quando o perfil está realmente em edição.
   // A sidebar estava escondida pelo CSS final da página e o hint também era
@@ -1355,6 +1405,7 @@ export async function saveInline(){
   const instsSel = getInstsSelecionadasEdit();
   const deptosSel = getDepartamentosSelecionadosEdit();
   const permsSel = getPermsSelecionadasEdit();
+  const visibilitySel = getConversationVisibilityEdit();
 
   // WhatsApp é opcional no cadastro. Sem seleção, o colaborador é salvo
   // normalmente e permanece sem acesso às conversas até receber uma instância.
@@ -1400,6 +1451,7 @@ export async function saveInline(){
     fd.append('cargo', (cargo || '').trim());
     fd.append('horario_modo', horarioModo);
     fd.append('modo_acesso', acessoModo);
+    fd.append('visibilidade_atendimentos', visibilitySel);
 
     // Cria também o usuário de login vinculado ao colaborador.
     // Convite por e-mail é o padrão; senha manual vira senha temporária.
@@ -1468,6 +1520,7 @@ export async function saveInline(){
         instancias_ids: instsSel,
         departamentos_ids: deptosSel,
         permissoes: permsSel,
+        visibilidade_atendimentos: visibilitySel,
         hora_login_inicio: expOn ? (hIni || null) : null,
         hora_login_fim: expOn ? (hFim || null) : null,
         horario_modo: horarioModo
@@ -1562,6 +1615,7 @@ export async function saveInline(){
     instancias_ids: instsSel,
     departamentos_ids: deptosSel,
     permissoes: permsSel,
+    visibilidade_atendimentos: visibilitySel,
     atualizar_usuario: !!state.viewing?.usuario_id,
     horario_modo: horarioModo,
     setor_id: departamentoPrincipalId ? Number(departamentoPrincipalId) : null,
@@ -1641,6 +1695,7 @@ export async function saveInline(){
       instancias_ids: instsSel,
       departamentos_ids: deptosSel,
       permissoes: permsSel,
+      visibilidade_atendimentos: visibilitySel,
       hora_login_inicio: expOn ? (hIni || null) : null,
       hora_login_fim: expOn ? (hFim || null) : null,
       horario_modo: horarioModo
@@ -1801,6 +1856,7 @@ export async function openNovo(){
     permissoes: [],
     instancias_ids: [],
     departamentos_ids: [],
+    visibilidade_atendimentos: VISIBILIDADE_ATENDIMENTOS_TODOS,
     hora_login_inicio: null,
     hora_login_fim: null,
     horario_modo: 'livre'

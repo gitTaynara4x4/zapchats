@@ -1170,6 +1170,16 @@ class Colaborador(Base):
 
     instancias_ver = Column(PG_ARRAY(Integer), nullable=True)
 
+    # Define o escopo de conversas visíveis no atendimento.
+    # 'todos' mantém o comportamento anterior; 'proprios' limita às conversas
+    # iniciadas, assumidas, atribuídas ou atendidas pelo colaborador.
+    visibilidade_atendimentos = Column(
+        String(20),
+        nullable=False,
+        default="todos",
+        server_default="todos",
+    )
+
     atendimentos_operados = relationship(
         "Atendimento",
         foreign_keys="Atendimento.operador_id",

@@ -2024,6 +2024,7 @@ async def _send_core(
             cliente_id=int(body.cliente_id),
             instancia_id=int(inst_id_checked),
             allow_unassigned_department=False,
+            allow_unowned_if_no_history=True,
         )
 
         _assert_number_matches_cliente(
@@ -2047,6 +2048,7 @@ async def _send_core(
                 cliente_id=int(cliente_existing_by_number.id),
                 instancia_id=int(inst_id_checked),
                 allow_unassigned_department=False,
+            allow_unowned_if_no_history=True,
             )
 
     cliente_para_regra = cliente_acl or cliente_existing_by_number

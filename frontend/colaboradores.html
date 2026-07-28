@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/frontend/css/base.css">
-  <link rel="stylesheet" href="/frontend/css/colaboradores.css?v=colab-profile-help-20260727-1">
+  <link rel="stylesheet" href="/frontend/css/colaboradores.css?v=colab-visibility-20260728-1">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
   <link rel="stylesheet" href="/frontend/css/dashboard-onboarding.css?v=20260727-onboarding-v2">
 </head>
@@ -507,6 +507,42 @@
                       </div>
                     </dd>
                   </div>
+
+                  <div class="full" id="conversation-visibility-full">
+                    <dt>Visibilidade das conversas</dt>
+                    <dd>
+                      <div id="conversation-visibility-wrap" class="fieldbox advanced-card conversation-visibility-card">
+                        <div class="conversation-visibility-title-line">
+                          <span>Quais conversas este colaborador pode visualizar?</span>
+                          <span class="zc-help-icon" tabindex="0" role="button" aria-label="Ajuda sobre visibilidade das conversas" data-help="O acesso ao número do WhatsApp e a visibilidade das conversas são configurações separadas. Você pode permitir o uso de um número sem liberar as conversas dos outros colaboradores."><i class="fa-regular fa-circle-question"></i></span>
+                        </div>
+
+                        <div class="conversation-visibility-grid" id="conversation-visibility-grid">
+                          <label class="conversation-visibility-option" for="visibilidade-atendimentos-todos">
+                            <input type="radio" name="visibilidade_atendimentos" id="visibilidade-atendimentos-todos" value="todos" checked>
+                            <span class="conversation-visibility-icon" aria-hidden="true"><i class="fa-solid fa-inbox"></i></span>
+                            <span class="conversation-visibility-copy">
+                              <strong>Todas as conversas permitidas</strong>
+                              <small>Vê as conversas dos WhatsApps e departamentos liberados para o perfil.</small>
+                            </span>
+                          </label>
+
+                          <label class="conversation-visibility-option" for="visibilidade-atendimentos-proprios">
+                            <input type="radio" name="visibilidade_atendimentos" id="visibilidade-atendimentos-proprios" value="proprios">
+                            <span class="conversation-visibility-icon" aria-hidden="true"><i class="fa-solid fa-user-lock"></i></span>
+                            <span class="conversation-visibility-copy">
+                              <strong>Somente minhas conversas</strong>
+                              <small>Vê apenas conversas iniciadas, assumidas, atribuídas ou transferidas para ela.</small>
+                            </span>
+                          </label>
+                        </div>
+
+                        <p id="conversation-visibility-summary" class="help-text conversation-visibility-summary">
+                          Este colaborador verá todas as conversas dentro dos acessos permitidos.
+                        </p>
+                      </div>
+                    </dd>
+                  </div>
                 </dl>
               </section>
 
@@ -594,7 +630,7 @@
 
   <div id="toast" role="status" aria-live="polite"></div>
 
-  <script type="module" src="/frontend/js/pages/colaboradores/index.js?v=colab-profile-help-20260727-1"></script>
+  <script type="module" src="/frontend/js/pages/colaboradores/index.js?v=colab-visibility-20260728-1"></script>
 
   <!-- Wizard controlado por frontend/js/pages/colaboradores/modal.js para evitar eventos duplicados. -->
 

@@ -15,6 +15,7 @@ from backend.security.atendimento_acl import (
     ensure_perm,
     resolve_acl_context,
     assert_instancia_allowed,
+    assert_cliente_conversation_visibility,
 )
 
 from .utils import (
@@ -393,6 +394,14 @@ def obter_meta_conversa(
             instancia_id=resolved_inst_id,
         )
 
+    assert_cliente_conversation_visibility(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id),
+        cliente=cliente,
+        atendimento=atd,
+    )
+
     departamento_acl = (
         getattr(atd, "departamento_id", None)
         if atd is not None and hasattr(atd, "departamento_id")
@@ -549,6 +558,14 @@ def editar_nome_cliente_conversa(
         instancia_id=resolved_inst_id,
     )
 
+    assert_cliente_conversation_visibility(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id),
+        cliente=cliente,
+        atendimento=atd,
+    )
+
     departamento_acl = (
         getattr(atd, "departamento_id", None)
         if atd is not None and hasattr(atd, "departamento_id")
@@ -655,6 +672,14 @@ def listar_colaboradores_transferiveis(
         empresa_id=empresa_id,
         cliente_id=int(cliente_id),
         instancia_id=resolved_inst_id,
+    )
+
+    assert_cliente_conversation_visibility(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id),
+        cliente=cliente,
+        atendimento=atd,
     )
 
     departamento_acl = (

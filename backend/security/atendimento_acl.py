@@ -124,6 +124,133 @@ def _get_empresa_id(identity: Any) -> Optional[int]:
     return _to_int(_id_get(identity, "empresa_id"))
 
 
+VISIBILIDADE_ATENDIMENTOS_TODOS = "todos"
+VISIBILIDADE_ATENDIMENTOS_PROPRIOS = "proprios"
+
+
+def _norm_visibilidade_atendimentos(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in {
+        "proprios", "proprias", "somente_meus", "somente_minhas",
+        "meus", "minhas", "own", "only_own",
+    }:
+        return VISIBILIDADE_ATENDIMENTOS_PROPRIOS
+    return VISIBILIDADE_ATENDIMENTOS_TODOS
+
+
+def get_atendimento_visibility_scope(
+    db: Session,
+    *,
+    identity: Any,
+    empresa_id: int,
+) -> str:
+    """Retorna 'todos' ou 'proprios' para a identidade atual.
+
+    Administradores/usuários master mantêm acesso total. O valor padrão também
+    é total para preservar o comportamento dos colaboradores já existentes.
+    """
+    # Usuários da empresa (conta principal) continuam com visão total. Para
+    # colaboradores, respeitamos a configuração mesmo quando o perfil possui
+    # permissões amplas, como atendimento.gerenciar.
+    if _infer_kind(identity) != "colaborador":
+        return VISIBILIDADE_ATENDIMENTOS_TODOS
+
+    role = str(_id_get(identity, "role") or "").strip().lower()
+    if bool(_id_get(identity, "is_admin") or _id_get(identity, "admin")) or role == "admin":
+        return VISIBILIDADE_ATENDIMENTOS_TODOS
+
+    colab_id = _get_colab_id(identity)
+    if not colab_id:
+        return VISIBILIDADE_ATENDIMENTOS_TODOS
+
+    try:
+        # SAVEPOINT evita deixar a sessão inteira em estado de erro durante um
+        # deploy rolling em que a aplicação subiu antes da nova coluna existir.
+        with db.begin_nested():
+            value = (
+                db.query(models.Colaborador.visibilidade_atendimentos)
+                .filter(
+                    models.Colaborador.id == int(colab_id),
+                    models.Colaborador.empresa_id == int(empresa_id),
+                )
+                .scalar()
+            )
+        return _norm_visibilidade_atendimentos(value)
+    except Exception:
+        # O padrão seguro para compatibilidade é preservar o comportamento
+        # anterior até a migração automática terminar.
+        return VISIBILIDADE_ATENDIMENTOS_TODOS
+
+
+def is_own_atendimento_conversation(
+    db: Session,
+    *,
+    identity: Any,
+    empresa_id: int,
+    cliente: Any = None,
+    atendimento: Any = None,
+) -> bool:
+    """Verifica se a conversa pertence atualmente ao colaborador.
+
+    Fontes de verdade, em ordem:
+    - operador atual do atendimento;
+    - participante ativo (compatibilidade);
+    - colaborador responsável diretamente no cliente, quando ainda não há
+      atendimento criado.
+    """
+    if get_atendimento_visibility_scope(
+        db, identity=identity, empresa_id=int(empresa_id)
+    ) != VISIBILIDADE_ATENDIMENTOS_PROPRIOS:
+        return True
+
+    colab_id = _get_colab_id(identity)
+    if not colab_id:
+        return False
+
+    if atendimento is not None:
+        operador_id = _to_int(getattr(atendimento, "operador_id", None))
+        if operador_id is not None and int(operador_id) == int(colab_id):
+            return True
+
+        atendimento_id = _to_int(getattr(atendimento, "id", None))
+        if atendimento_id is not None and is_atendimento_participante_ativo(
+            db,
+            empresa_id=int(empresa_id),
+            atendimento_id=int(atendimento_id),
+            colaborador_id=int(colab_id),
+        ):
+            return True
+
+    cliente_colab_id = _to_int(getattr(cliente, "colaborador_id", None))
+    atendimento_sem_operador = (
+        atendimento is None
+        or _to_int(getattr(atendimento, "operador_id", None)) is None
+    )
+    if atendimento_sem_operador and cliente_colab_id is not None:
+        return int(cliente_colab_id) == int(colab_id)
+
+    return False
+
+
+def assert_cliente_conversation_visibility(
+    db: Session,
+    *,
+    identity: Any,
+    empresa_id: int,
+    cliente: Any,
+    atendimento: Any = None,
+    detail: str = "Esta conversa pertence a outro colaborador",
+) -> None:
+    if not is_own_atendimento_conversation(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id),
+        cliente=cliente,
+        atendimento=atendimento,
+    ):
+        raise HTTPException(status_code=403, detail=detail)
+
+
 def _norm_dept_name(value: Any) -> str:
     """
     Normaliza nomes antigos como "02 - Financeiro" para comparar com
@@ -853,6 +980,14 @@ def assert_atendimento_access(
         atendimento_id=int(atendimento_id),
     )
 
+    assert_cliente_conversation_visibility(
+        db,
+        identity=identity,
+        empresa_id=int(ctx["empresa_id"]),
+        cliente=getattr(atendimento, "cliente", None),
+        atendimento=atendimento,
+    )
+
     if _atendimento_is_owned_by_identity(identity, atendimento):
         assert_instancia_allowed(
             allowed_instancias=ctx["allowed_instancias"],
@@ -884,6 +1019,7 @@ def assert_cliente_access(
     cliente_id: int,
     instancia_id: int | None = None,
     allow_unassigned_department: bool = True,
+    allow_unowned_if_no_history: bool = False,
 ):
     ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id)
 
@@ -900,7 +1036,37 @@ def assert_cliente_access(
         instancia_id=instancia_id,
     )
 
+    can_start_unowned_conversation = False
+    if allow_unowned_if_no_history:
+        history_query = db.query(models.Mensagem.id).filter(
+            models.Mensagem.empresa_id == int(ctx["empresa_id"]),
+            models.Mensagem.cliente_id == int(cliente_id),
+        )
+        if instancia_id is not None:
+            history_query = history_query.filter(
+                models.Mensagem.instancia_id == int(instancia_id)
+            )
+
+        has_history = history_query.first() is not None
+        atendimento_operador_id = (
+            _to_int(getattr(atendimento, "operador_id", None))
+            if atendimento is not None
+            else None
+        )
+        can_start_unowned_conversation = (
+            not has_history and atendimento_operador_id is None
+        )
+
     if atendimento is not None:
+        if not can_start_unowned_conversation:
+            assert_cliente_conversation_visibility(
+                db,
+                identity=identity,
+                empresa_id=int(ctx["empresa_id"]),
+                cliente=cliente,
+                atendimento=atendimento,
+            )
+
         if _atendimento_is_owned_by_identity(identity, atendimento):
             assert_instancia_allowed(
                 allowed_instancias=ctx["allowed_instancias"],
@@ -921,6 +1087,15 @@ def assert_cliente_access(
                 allow_unassigned_department=allow_unassigned_department,
             )
         return cliente, atendimento
+
+    if not can_start_unowned_conversation:
+        assert_cliente_conversation_visibility(
+            db,
+            identity=identity,
+            empresa_id=int(ctx["empresa_id"]),
+            cliente=cliente,
+            atendimento=None,
+        )
 
     fallback_instancia_id = instancia_id
     if fallback_instancia_id is None:
@@ -1023,6 +1198,9 @@ __all__ = [
     "assert_instancia_allowed",
     "assert_departamento_allowed",
     "assert_atendimento_acl",
+    "get_atendimento_visibility_scope",
+    "is_own_atendimento_conversation",
+    "assert_cliente_conversation_visibility",
     "resolve_acl_context",
     "build_allowed_filters",
     "get_atendimento_or_404",

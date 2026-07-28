@@ -7164,3 +7164,120 @@ html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page=
     transition:none!important;
   }
 }
+
+/* =========================================================
+   Visibilidade das conversas por colaborador
+   ========================================================= */
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-title-line{
+  display:flex;
+  align-items:center;
+  gap:.65rem;
+  margin-bottom:.8rem;
+  font-size:13px;
+  font-weight:650;
+  color:var(--colab-text, #172033);
+}
+
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-title-line .zc-help-icon{
+  margin-left:auto;
+}
+
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-grid{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+  gap:.75rem;
+}
+
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-option{
+  position:relative;
+  display:grid;
+  grid-template-columns:38px minmax(0, 1fr);
+  align-items:start;
+  gap:.75rem;
+  min-height:104px;
+  padding:.9rem;
+  border:1px solid var(--colab-line, #e5e9f0);
+  border-radius:14px;
+  background:var(--colab-card, #fff);
+  cursor:pointer;
+  transition:border-color .18s ease, background .18s ease, box-shadow .18s ease;
+}
+
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-option:hover{
+  border-color:var(--colab-line-2, #cfd7e3);
+}
+
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-option:has(input:checked){
+  border-color:var(--colab-brand, #22a06b);
+  background:var(--colab-brand-soft-2, #eefbf5);
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--colab-brand, #22a06b) 12%, transparent);
+}
+
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-option:has(input:disabled){
+  cursor:default;
+}
+
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-option input{
+  position:absolute;
+  opacity:0;
+  pointer-events:none;
+}
+
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-icon{
+  display:grid;
+  place-items:center;
+  width:38px;
+  height:38px;
+  border-radius:11px;
+  background:var(--colab-soft, #f3f6f9);
+  color:var(--colab-muted, #667085);
+  font-size:15px;
+}
+
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-option:has(input:checked) .conversation-visibility-icon{
+  background:var(--colab-brand, #22a06b);
+  color:#fff;
+}
+
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-copy{
+  display:grid;
+  gap:.3rem;
+  min-width:0;
+}
+
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-copy strong{
+  font-size:13px;
+  line-height:1.35;
+  color:var(--colab-text, #172033);
+}
+
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-copy small{
+  font-size:12px;
+  line-height:1.45;
+  color:var(--colab-muted, #667085);
+}
+
+body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-summary{
+  margin:.8rem 0 0;
+  padding:.7rem .8rem;
+  border-radius:10px;
+  background:var(--colab-soft, #f6f8fa);
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-option{
+  background:var(--colab-card, #242626);
+}
+
+html:is(.dark,.dark-mode,[data-theme="dark"]) body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-option:has(input:checked){
+  background:color-mix(in srgb, var(--colab-brand, #22a06b) 16%, var(--colab-card, #242626));
+}
+
+@media (max-width:760px){
+  body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-grid{
+    grid-template-columns:1fr;
+  }
+
+  body.colab-midias-match[data-page="colaboradores"] #modal-perfil .conversation-visibility-option{
+    min-height:auto;
+  }
+}

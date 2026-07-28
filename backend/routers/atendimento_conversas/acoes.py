@@ -16,6 +16,7 @@ from backend.security.atendimento_acl import (
     ensure_perm,
     resolve_acl_context,
     assert_instancia_allowed,
+    assert_cliente_conversation_visibility,
 )
 
 from .schemas import (
@@ -407,6 +408,14 @@ def aceitar_conversa(
         instancia_id=int(resolved_inst_id),
     )
 
+    assert_cliente_conversation_visibility(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id),
+        cliente=cliente,
+        atendimento=atd,
+    )
+
     departamento_acl = (
         getattr(atd, "departamento_id", None)
         if atd is not None and hasattr(atd, "departamento_id")
@@ -640,6 +649,14 @@ def liberar_conversa(
             status_code=404,
             detail="Atendimento não encontrado para essa conversa",
         )
+
+    assert_cliente_conversation_visibility(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id),
+        cliente=cliente,
+        atendimento=atd,
+    )
 
     departamento_acl = getattr(atd, "departamento_id", None)
 
@@ -884,6 +901,14 @@ def transferir_colaborador(
                 status_code=500,
                 detail="Não foi possível criar o atendimento da conversa",
             )
+
+    assert_cliente_conversation_visibility(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id),
+        cliente=cliente,
+        atendimento=atd,
+    )
 
     departamento_acl = (
         getattr(atd, "departamento_id", None)
