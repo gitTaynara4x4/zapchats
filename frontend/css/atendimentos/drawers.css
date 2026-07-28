@@ -454,6 +454,20 @@ html[data-theme="light"] .ag-skel .line{
   opacity:1;
 }
 
+/* Impede o preenchimento automático do navegador de criar caixas azuis
+   dentro do formulário escuro de novo contato. */
+#ncDrawer .nc-line-input:-webkit-autofill,
+#ncDrawer .nc-line-input:-webkit-autofill:hover,
+#ncDrawer .nc-line-input:-webkit-autofill:focus,
+#ncDrawer .nc-line-input:-webkit-autofill:active{
+  -webkit-text-fill-color:#e9edef !important;
+  caret-color:#00a884;
+  -webkit-box-shadow:0 0 0 1000px #111b21 inset !important;
+  box-shadow:0 0 0 1000px #111b21 inset !important;
+  border-radius:0;
+  transition:background-color 9999s ease-out 0s;
+}
+
 #ncDrawer .nc-phone-fields{
   min-width:0;
   display:grid;
@@ -732,6 +746,19 @@ html:not(.dark)[data-theme="light"] #ncDrawer .nc-country-select{
 html[data-theme="light"] #ncDrawer .nc-line-input::placeholder,
 html:not(.dark)[data-theme="light"] #ncDrawer .nc-line-input::placeholder{
   color:#667781;
+}
+html[data-theme="light"] #ncDrawer .nc-line-input:-webkit-autofill,
+html[data-theme="light"] #ncDrawer .nc-line-input:-webkit-autofill:hover,
+html[data-theme="light"] #ncDrawer .nc-line-input:-webkit-autofill:focus,
+html[data-theme="light"] #ncDrawer .nc-line-input:-webkit-autofill:active,
+html:not(.dark)[data-theme="light"] #ncDrawer .nc-line-input:-webkit-autofill,
+html:not(.dark)[data-theme="light"] #ncDrawer .nc-line-input:-webkit-autofill:hover,
+html:not(.dark)[data-theme="light"] #ncDrawer .nc-line-input:-webkit-autofill:focus,
+html:not(.dark)[data-theme="light"] #ncDrawer .nc-line-input:-webkit-autofill:active{
+  -webkit-text-fill-color:#111b21 !important;
+  caret-color:#00a884;
+  -webkit-box-shadow:0 0 0 1000px #ffffff inset !important;
+  box-shadow:0 0 0 1000px #ffffff inset !important;
 }
 html[data-theme="light"] #ncDrawer .nc-country-select option,
 html:not(.dark)[data-theme="light"] #ncDrawer .nc-country-select option{
