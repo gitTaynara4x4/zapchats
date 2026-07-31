@@ -206,6 +206,13 @@ def _prune_for_storage(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 pass
         if "fallback_text" in ad:
             ad_store["fallback_text"] = str(ad.get("fallback_text") or "")
+        if "fallback_department_id" in ad:
+            try:
+                fallback_department_id = int(ad.get("fallback_department_id") or 0)
+                if fallback_department_id > 0:
+                    ad_store["fallback_department_id"] = fallback_department_id
+            except Exception:
+                pass
 
         features["auto_messages_departments"] = ad_store
 

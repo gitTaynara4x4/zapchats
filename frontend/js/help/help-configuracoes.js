@@ -5,79 +5,48 @@
     "key": "configuracoes",
     "page": "Configurações",
     "title": "Entenda as Configurações",
-    "intro": "Vou te mostrar onde alterar aparência, enviar relatos e entender os módulos em preparação.",
+    "intro": "Vou mostrar como personalizar a interface, os avisos, a segurança e como registrar um relato.",
     "robotName": "Zappy",
     "robotSrc": "/frontend/img/help/zc-robot-floating.png",
-    "storageKey": "zaps_help_configuracoes_robot_tour_seen_v1",
+    "storageKey": "zaps_help_configuracoes_robot_tour_seen_v2",
     "steps": [
-        {
-            "title": "Resumo da página",
-            "say": "Aqui ficam as preferências gerais do sistema.",
-            "desc": "A página de configurações concentra ajustes visuais, envio de relatos e módulos que ainda serão liberados.",
-            "icon": "grid",
-            "selectors": [
-                ".section-title",
-                ".settings-container",
-                "main.main"
-            ]
-        },
-        {
-            "title": "Aparência",
-            "say": "Esse card controla como o sistema aparece para o usuário.",
-            "desc": "Use esta área para ajustar o tema visual do ZapsChat conforme a preferência do usuário ou dispositivo.",
-            "icon": "filter",
-            "selectors": [
-                ".settings-grid .settings-col:nth-child(1) article.box:nth-child(1)",
-                "#select-tema",
-                ".select-wrap"
-            ]
-        },
-        {
-            "title": "Tema do sistema",
-            "say": "Aqui você troca entre tema escuro e claro.",
-            "desc": "A escolha do tema muda a aparência do sistema e ajuda a deixar a operação mais confortável no dia a dia.",
-            "icon": "check",
-            "selectors": [
-                "#select-tema",
-                ".select-wrap",
-                ".form-group.field--full"
-            ]
-        },
-        {
-            "title": "Relatar bug ou sugestão",
-            "say": "Use esse formulário quando encontrar erro ou tiver uma melhoria para enviar.",
-            "desc": "Descreva o problema com clareza e envie para análise. Isso ajuda a registrar ajustes importantes do sistema.",
-            "icon": "file",
-            "selectors": [
-                "#form-bug",
-                "#bug-descricao",
-                "#btn-enviar-bug"
-            ]
-        },
-        {
-            "title": "Empresa",
-            "say": "Esse módulo está reservado para dados corporativos e identidade visual.",
-            "desc": "Quando liberado, aqui ficarão configurações como empresa, logotipo, nome exibido e preferências globais.",
-            "icon": "users",
-            "selectors": [
-                ".settings-grid .settings-col:nth-child(2) article.box:nth-child(1)",
-                ".box.is-disabled",
-                ".empty-config"
-            ]
-        },
-        {
-            "title": "Atendimento e automações",
-            "say": "Esse espaço vai concentrar regras gerais de atendimento.",
-            "desc": "A ideia é reunir preferências de fila, roteamento, horários, notificações e comportamento automático do sistema.",
-            "icon": "chat",
-            "selectors": [
-                ".settings-grid .settings-col:nth-child(2) article.box:nth-child(2)",
-                "article.box.is-disabled:nth-of-type(2)",
-                ".settings-grid"
-            ]
-        }
+      {
+        "title": "Resumo da página",
+        "say": "Aqui você acompanha as preferências e os dados da empresa conectada.",
+        "desc": "Os cartões mostram tema, notificações, WhatsApps ativos e o plano da empresa.",
+        "icon": "grid",
+        "selectors": [".settings-top", ".settings-metrics", "main.settings-page"]
+      },
+      {
+        "title": "Aparência",
+        "say": "Escolha o tema claro ou escuro.",
+        "desc": "A alteração é aplicada imediatamente e fica salva neste navegador.",
+        "icon": "filter",
+        "selectors": ["#appearance-panel", ".theme-options", "[data-theme-option]"]
+      },
+      {
+        "title": "Notificações",
+        "say": "Defina como o ZapsChat avisa sobre novas mensagens.",
+        "desc": "Você pode controlar o som, os avisos do navegador e o alerta com a conversa aberta.",
+        "icon": "check",
+        "selectors": ["#notifications-panel", ".setting-list", "#toggle-desktop"]
+      },
+      {
+        "title": "Segurança de acesso",
+        "say": "Administradores podem exigir um token extra no login.",
+        "desc": "Essa proteção vale para os colaboradores da empresa e só pode ser alterada pelo administrador.",
+        "icon": "users",
+        "selectors": ["#security-panel", "#toggle-login-token", ".security-note"]
+      },
+      {
+        "title": "Relatar problema ou sugestão",
+        "say": "Seu relato agora fica realmente registrado.",
+        "desc": "Informe um título e descreva o ocorrido. O histórico recente aparece ao lado para acompanhamento.",
+        "icon": "file",
+        "selectors": ["#report-panel", "#form-report", "#btn-send-report"]
+      }
     ]
-};
+  };
 
   const NS = 'zc-robot-tour-configuracoes';
   let stepIndex = 0;

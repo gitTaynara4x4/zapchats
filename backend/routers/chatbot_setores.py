@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import os
 import re
 import unicodedata
@@ -9,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import and_, select, text
 from sqlalchemy.orm import Session
@@ -44,6 +45,13 @@ AUTO_MESSAGE_DEDUP_MINUTES = int(os.getenv("AUTO_MESSAGE_DEDUP_MINUTES", "60"))
 CHATBOT_MENU_REPEAT_BLOCK_MINUTES = int(
     os.getenv("CHATBOT_MENU_REPEAT_BLOCK_MINUTES", str(max(60, TRIAGEM_TTL_HOURS * 60)))
 )
+
+# Marcador estrutural do disparo. Não depende do texto configurado pelo cliente.
+CHATBOT_DISPATCH_EVENT_TRIAGE_MENU = "triage_department_menu"
+
+# A rota HTTP legada /api/chatbot/setores é opcional. O fluxo normal do
+# Evolution chama triagem_handle_inbound diretamente e não depende dela.
+CHATBOT_WEBHOOK_SECRET = str(os.getenv("CHATBOT_WEBHOOK_SECRET") or "").strip()
 
 
 def _now_utc() -> datetime:
@@ -637,6 +645,109 @@ def _persist_bot_saida_message(
         return None
 
 
+def _recent_bot_dispatch_sent(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    cliente_id: int,
+    event_key: str,
+    now: Optional[datetime] = None,
+    block_minutes: Optional[int] = None,
+) -> bool:
+    """Consulta o marcador persistente de disparo do chatbot.
+
+    O bloqueio não procura frases no conteúdo da mensagem. Assim o usuário pode
+    personalizar completamente o texto do menu sem perder a proteção contra
+    repetição.
+    """
+    try:
+        minutes = int(
+            block_minutes
+            if block_minutes is not None
+            else CHATBOT_MENU_REPEAT_BLOCK_MINUTES
+        )
+    except Exception:
+        minutes = CHATBOT_MENU_REPEAT_BLOCK_MINUTES
+
+    if minutes <= 0:
+        return False
+
+    try:
+        marker = (
+            db.query(models.ChatbotDispatchMarker)
+            .filter(
+                models.ChatbotDispatchMarker.empresa_id == int(empresa_id),
+                models.ChatbotDispatchMarker.instancia_id == int(instancia_id),
+                models.ChatbotDispatchMarker.cliente_id == int(cliente_id),
+                models.ChatbotDispatchMarker.event_key == str(event_key),
+            )
+            .first()
+        )
+        if marker is None:
+            return False
+
+        sent_at = _as_aware_utc(getattr(marker, "sent_at", None))
+        if sent_at is None:
+            return False
+
+        since = (_as_aware_utc(now) or _now_utc()) - timedelta(minutes=minutes)
+        return sent_at >= since
+    except Exception as exc:
+        try:
+            print("[CHATBOT][dispatch-marker][read][erro]", repr(exc))
+        except Exception:
+            pass
+        return False
+
+
+def _mark_bot_dispatch_sent(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    cliente_id: int,
+    event_key: str,
+    sent_at: Optional[datetime] = None,
+) -> bool:
+    """Cria/atualiza atomicamente o marcador persistente do disparo."""
+    if not empresa_id or not instancia_id or not cliente_id or not str(event_key or "").strip():
+        return False
+
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO chatbot_dispatch_markers
+                    (empresa_id, instancia_id, cliente_id, event_key, sent_at, created_at)
+                VALUES
+                    (:empresa_id, :instancia_id, :cliente_id, :event_key, :sent_at, :sent_at)
+                ON CONFLICT (empresa_id, instancia_id, cliente_id, event_key)
+                DO UPDATE SET sent_at = EXCLUDED.sent_at
+                """
+            ),
+            {
+                "empresa_id": int(empresa_id),
+                "instancia_id": int(instancia_id),
+                "cliente_id": int(cliente_id),
+                "event_key": str(event_key).strip(),
+                "sent_at": _as_aware_utc(sent_at) or _now_utc(),
+            },
+        )
+        db.commit()
+        return True
+    except Exception as exc:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        try:
+            print("[CHATBOT][dispatch-marker][write][erro]", repr(exc))
+        except Exception:
+            pass
+        return False
+
+
 def _recent_bot_menu_sent(
     db: Session,
     *,
@@ -646,39 +757,15 @@ def _recent_bot_menu_sent(
     now: Optional[datetime] = None,
     block_minutes: Optional[int] = None,
 ) -> bool:
-    """Retorna True se o menu da triagem já foi enviado recentemente.
-
-    O menu automático tem que aparecer no histórico, mas não pode ser disparado
-    várias vezes para o cliente quando o servidor volta e recebe backlog/replay.
-    """
-    try:
-        minutes = int(block_minutes if block_minutes is not None else CHATBOT_MENU_REPEAT_BLOCK_MINUTES)
-    except Exception:
-        minutes = CHATBOT_MENU_REPEAT_BLOCK_MINUTES
-
-    if minutes <= 0:
-        return False
-
-    try:
-        since = (_as_aware_utc(now) or _now_utc()) - timedelta(minutes=minutes)
-        q = (
-            db.query(models.Mensagem.id)
-            .filter(
-                models.Mensagem.empresa_id == int(empresa_id),
-                models.Mensagem.cliente_id == int(cliente_id),
-                models.Mensagem.instancia_id == int(instancia_id),
-                models.Mensagem.tipo == "saida",
-                models.Mensagem.timestamp >= since,
-                models.Mensagem.conteudo.ilike("%Digite apenas o número da opção desejada%"),
-            )
-        )
-
-        if hasattr(models.Mensagem, "colaborador_id"):
-            q = q.filter(models.Mensagem.colaborador_id.is_(None))
-
-        return q.order_by(models.Mensagem.id.desc()).first() is not None
-    except Exception:
-        return False
+    return _recent_bot_dispatch_sent(
+        db,
+        empresa_id=empresa_id,
+        instancia_id=instancia_id,
+        cliente_id=cliente_id,
+        event_key=CHATBOT_DISPATCH_EVENT_TRIAGE_MENU,
+        now=now,
+        block_minutes=block_minutes,
+    )
 
 
 def _send_and_persist_bot_message(
@@ -736,6 +823,7 @@ def _send_and_persist_triage_message(
     text_msg: str,
     telefone_digits: str = "",
     ts_dt: Optional[datetime] = None,
+    dispatch_event_key: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Última barreira antes de qualquer mensagem do menu por departamentos.
 
@@ -760,7 +848,15 @@ def _send_and_persist_triage_message(
         db.commit()
         return None
 
-    return _send_and_persist_bot_message(
+    schedule = _triage_schedule_status(cfg_now)
+    if not bool(schedule["in_window"]):
+        # O horário pode ter sido alterado enquanto a mensagem estava sendo
+        # processada. A releitura sob a mesma trava do PUT impede um envio
+        # atrasado depois do encerramento do expediente.
+        db.commit()
+        return None
+
+    evo = _send_and_persist_bot_message(
         db,
         empresa_id=int(empresa_id),
         instancia_id=int(instancia_id),
@@ -771,6 +867,20 @@ def _send_and_persist_triage_message(
         telefone_digits=telefone_digits,
         ts_dt=ts_dt,
     )
+
+    # Marca somente depois que a Evolution aceitou o envio. Se o envio falhar,
+    # não bloqueamos uma nova tentativa legítima.
+    if evo is not None and str(dispatch_event_key or "").strip():
+        _mark_bot_dispatch_sent(
+            db,
+            empresa_id=int(empresa_id),
+            instancia_id=int(instancia_id),
+            cliente_id=int(cliente_id),
+            event_key=str(dispatch_event_key),
+            sent_at=_evo_timestamp_dt(evo, fallback=ts_dt),
+        )
+
+    return evo
 
 
 def _replace_tokens(template: str, *, empresa_nome: str, menu_departamentos: str) -> str:
@@ -842,6 +952,67 @@ def _build_fallback_message(
     )
 
 
+def _resolve_manual_fallback_department(
+    *,
+    deps: List[Dict[str, Any]],
+    cfg: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Escolhe um departamento real para o fallback de atendimento manual.
+
+    Prioridade:
+    1. ``fallback_department_id`` configurado no modo de departamentos;
+    2. um departamento com nome típico de recepção/atendimento geral;
+    3. o primeiro departamento habilitado no menu.
+
+    O último passo mantém compatibilidade com configurações antigas, que já
+    possuíam ``max_attempts``/``fallback_text`` mas não guardavam um destino.
+    """
+    if not deps:
+        return None
+
+    ad, _, _ = _get_triage_cfg_parts(cfg)
+    raw_id = ad.get("fallback_department_id")
+    try:
+        configured_id = int(raw_id) if raw_id not in (None, "") else None
+    except Exception:
+        configured_id = None
+
+    if configured_id is not None:
+        configured = next(
+            (d for d in deps if int(d.get("id") or 0) == configured_id),
+            None,
+        )
+        if configured is not None:
+            return configured
+
+    preferred_exact = (
+        "atendimento geral",
+        "atendimento",
+        "recepcao",
+        "geral",
+        "suporte",
+    )
+    normalized = [
+        (d, _norm_txt(str(d.get("label") or d.get("nome") or "")))
+        for d in deps
+    ]
+
+    for wanted in preferred_exact:
+        found = next((d for d, name in normalized if name == wanted), None)
+        if found is not None:
+            return found
+
+    for wanted in ("atendimento", "recepcao", "geral", "suporte"):
+        found = next(
+            (d for d, name in normalized if re.search(rf"\b{re.escape(wanted)}\b", name)),
+            None,
+        )
+        if found is not None:
+            return found
+
+    return deps[0]
+
+
 def _build_assign_ack(
     *,
     empresa_nome: str,
@@ -901,6 +1072,37 @@ def _window_contains(now_local: datetime, start_hhmm: str, end_hhmm: str) -> boo
         return start_min <= now_min < end_min
 
     return now_min >= start_min or now_min < end_min
+
+
+def _triage_schedule_status(
+    cfg: Dict[str, Any],
+    *,
+    now_utc: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Retorna o estado do horário configurado para o menu de departamentos.
+
+    O frontend salva o expediente em
+    ``features.auto_messages_departments.welcome.start/end``. Antes desta
+    validação, esses campos eram persistidos, mas o runtime da triagem não os
+    consultava e o menu podia responder 24 horas por dia.
+    """
+    _, welcome_cfg, _ = _get_triage_cfg_parts(cfg)
+
+    tz_name = str(cfg.get("timezone") or "America/Sao_Paulo").strip() or "America/Sao_Paulo"
+    tz = _safe_zoneinfo(tz_name)
+    current_utc = _as_aware_utc(now_utc) or _now_utc()
+    now_local = current_utc.astimezone(tz)
+
+    start = str(welcome_cfg.get("start") or "08:00").strip() or "08:00"
+    end = str(welcome_cfg.get("end") or "18:00").strip() or "18:00"
+
+    return {
+        "timezone": tz_name,
+        "now_local": now_local,
+        "start": start,
+        "end": end,
+        "in_window": _window_contains(now_local, start, end),
+    }
 
 
 def _fetch_last_conversation_message_time(
@@ -1305,6 +1507,17 @@ def triagem_handle_inbound(
     if not bool(welcome_cfg.get("enabled", False)):
         return {"ok": True, "action": "noop_triagem_welcome_disabled"}
 
+    schedule = _triage_schedule_status(cfg)
+    if not bool(schedule["in_window"]):
+        return {
+            "ok": True,
+            "action": "noop_triagem_outside_window",
+            "timezone": str(schedule["timezone"]),
+            "now_local": schedule["now_local"].isoformat(),
+            "start": str(schedule["start"]),
+            "end": str(schedule["end"]),
+        }
+
     cliente = _get_or_create_cliente(
         db,
         empresa_id=empresa_id,
@@ -1434,6 +1647,7 @@ def triagem_handle_inbound(
             telefone_digits=telefone_digits,
             text_msg=menu,
             ts_dt=now,
+            dispatch_event_key=CHATBOT_DISPATCH_EVENT_TRIAGE_MENU,
         )
         return {
             "ok": True,
@@ -1572,8 +1786,92 @@ def triagem_handle_inbound(
         max_attempts = 0
 
     if max_attempts > 0 and int(cliente.triagem_tentativas or 0) >= max_attempts:
+        fallback_dep = _resolve_manual_fallback_department(deps=deps, cfg=cfg)
+
+        # ``deps`` já foi validado acima, mas mantemos uma saída segura caso a
+        # configuração seja alterada no meio da transação. Nesse cenário, não
+        # prometemos encaminhamento manual sem ter um destino persistível.
+        if fallback_dep is None:
+            cliente.triagem_ativa = True
+            db.commit()
+            return {
+                "ok": True,
+                "action": "fallback_without_department",
+                "reason": "no_enabled_department",
+                "attempts": int(cliente.triagem_tentativas or 0),
+                "max_attempts": max_attempts,
+            }
+
+        fallback_dep_id = int(fallback_dep["id"])
+        fallback_dep_nome = str(
+            fallback_dep.get("label") or fallback_dep.get("nome") or ""
+        ).strip()
+
+        # Primeiro grava o destino no cliente. A lista de conversas usa o
+        # departamento do atendimento e, como fallback, o departamento do
+        # cliente; assim a conversa não volta para a Entrada geral mesmo se
+        # houver uma falha temporária ao criar o atendimento.
+        cliente.departamento_id = fallback_dep_id
+        cliente.colaborador_id = None
         cliente.triagem_ativa = False
+        cliente.triagem_ultima_msg_em = now
+        db.add(cliente)
+        db.flush()
         db.commit()
+
+        # Cria/atualiza o atendimento como aguardando e sem responsável, igual
+        # ao fluxo de uma escolha válida feita pelo cliente.
+        atendimento = _ensure_waiting_atendimento_for_triage(
+            db,
+            empresa_id=empresa_id,
+            instancia_id=instancia_id,
+            cliente_id=int(cliente.id),
+            departamento_id=fallback_dep_id,
+            ts_dt=now,
+        )
+
+        atendimento_id = None
+        if atendimento is not None:
+            try:
+                atendimento_id = int(getattr(atendimento, "id", 0) or 0) or None
+                db.commit()
+            except Exception as exc:
+                try:
+                    print("[CHATBOT][fallback][commit-atendimento][erro]", repr(exc))
+                except Exception:
+                    pass
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                atendimento = None
+
+        # Retry limpo, seguindo a mesma proteção usada na escolha normal.
+        if atendimento is None:
+            atendimento = _ensure_waiting_atendimento_for_triage(
+                db,
+                empresa_id=empresa_id,
+                instancia_id=instancia_id,
+                cliente_id=int(cliente.id),
+                departamento_id=fallback_dep_id,
+                ts_dt=now,
+            )
+            if atendimento is not None:
+                try:
+                    atendimento_id = int(getattr(atendimento, "id", 0) or 0) or None
+                    db.commit()
+                except Exception as exc:
+                    try:
+                        print("[CHATBOT][fallback][retry-atendimento][erro]", repr(exc))
+                    except Exception:
+                        pass
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                    atendimento_id = None
+
+        _schedule_reload_clientes(int(empresa_id))
 
         fallback_msg = _build_fallback_message(empresa_nome=empresa_nome, cfg=cfg)
         _send_and_persist_triage_message(
@@ -1589,9 +1887,15 @@ def triagem_handle_inbound(
         )
         return {
             "ok": True,
-            "action": "fallback",
+            "action": "fallback_assign_department_waiting",
             "attempts": int(cliente.triagem_tentativas or 0),
             "max_attempts": max_attempts,
+            "departamento_id": fallback_dep_id,
+            "departamento_nome": fallback_dep_nome,
+            "status": "aguardando",
+            "operador_id": None,
+            "atendimento_id": atendimento_id,
+            "atendimento_persistido": bool(atendimento_id),
         }
 
     if tentativas_antes == 0:
@@ -1625,6 +1929,11 @@ def triagem_handle_inbound(
         telefone_digits=telefone_digits,
         text_msg=menu,
         ts_dt=now,
+        dispatch_event_key=(
+            CHATBOT_DISPATCH_EVENT_TRIAGE_MENU
+            if tentativas_antes == 0
+            else None
+        ),
     )
     return {
         "ok": True,
@@ -1634,8 +1943,44 @@ def triagem_handle_inbound(
     }
 
 
+def _require_chatbot_webhook_secret(
+    x_chatbot_secret: Optional[str] = Header(
+        default=None,
+        alias="X-ZapsChat-Chatbot-Secret",
+    ),
+) -> bool:
+    """Protege a rota HTTP legada usada por integrações externas.
+
+    O processamento normal do Evolution ocorre por chamada interna de função e
+    não precisa deste header. Quando a rota externa for usada, configure
+    CHATBOT_WEBHOOK_SECRET e envie o mesmo valor no header.
+    """
+    expected = CHATBOT_WEBHOOK_SECRET
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Webhook do chatbot desativado: configure CHATBOT_WEBHOOK_SECRET "
+                "no servidor."
+            ),
+        )
+
+    candidate = str(x_chatbot_secret or "").strip()
+    if not candidate or not hmac.compare_digest(candidate, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credencial inválida para o webhook do chatbot.",
+        )
+
+    return True
+
+
 @router.post("/chatbot/setores")
-def webhook_chatbot_setores(payload: Dict[str, Any], db: Session = Depends(get_db)):
+def webhook_chatbot_setores(
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db),
+    _authorized: bool = Depends(_require_chatbot_webhook_secret),
+):
     empresa_id = int(payload.get("empresa_id") or 0)
     instancia_id = int(payload.get("instancia_id") or 0)
 

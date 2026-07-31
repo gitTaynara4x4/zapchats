@@ -381,10 +381,26 @@
   }
 
   /* ==================== Som ==================== */
-  const ALWAYS_BEEP = localStorage.getItem('zc:notify:always_beep') === '1';
+  function notificationSoundEnabled() {
+    try {
+      return localStorage.getItem('zc:notify:sound_enabled') !== '0';
+    } catch {
+      return true;
+    }
+  }
+
+  function alwaysBeepEnabled() {
+    try {
+      return localStorage.getItem('zc:notify:always_beep') === '1';
+    } catch {
+      return false;
+    }
+  }
 
   function tocarNotificacao(clienteId) {
-    if (ALWAYS_BEEP || document.hidden || !isChatActive(clienteId)) {
+    if (!notificationSoundEnabled()) return;
+
+    if (alwaysBeepEnabled() || document.hidden || !isChatActive(clienteId)) {
       try {
         audioNotificacao.currentTime = 0;
       } catch {}
@@ -415,7 +431,18 @@
     }
   }
 
+  function desktopNotificationsEnabled() {
+    try {
+      const raw = localStorage.getItem('zc:notify:desktop_enabled');
+      if (raw === '1') return true;
+      if (raw === '0') return false;
+    } catch {}
+
+    return canNotifyDesktop() && Notification.permission === 'granted';
+  }
+
   async function showDesktopNotification({ title, body, icon, tag, data } = {}) {
+    if (!desktopNotificationsEnabled()) return;
     if (data?.clienteId && isChatActive(data.clienteId) && !document.hidden) return;
     if (!(await ensureNotifPermission())) return;
 

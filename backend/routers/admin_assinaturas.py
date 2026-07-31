@@ -414,14 +414,33 @@ def _counts_for_empresa(db: Session, empresa_id: int) -> Dict[str, int]:
     else:
         month_end = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
 
-    disparos_mes = (
-        db.query(func.count(models.Disparo.id))
+    disparos_reservados = (
+        db.query(func.coalesce(func.sum(models.Disparo.total_destinatarios), 0))
         .filter(models.Disparo.empresa_id == empresa_id)
         .filter(models.Disparo.criado_em >= month_start)
         .filter(models.Disparo.criado_em < month_end)
+        .filter(models.Disparo.status != "cancelado")
         .scalar()
         or 0
     )
+    disparos_cancelados_processados = (
+        db.query(
+            func.coalesce(
+                func.sum(
+                    func.coalesce(models.Disparo.enviados_sucesso, 0)
+                    + func.coalesce(models.Disparo.enviados_erro, 0)
+                ),
+                0,
+            )
+        )
+        .filter(models.Disparo.empresa_id == empresa_id)
+        .filter(models.Disparo.criado_em >= month_start)
+        .filter(models.Disparo.criado_em < month_end)
+        .filter(models.Disparo.status == "cancelado")
+        .scalar()
+        or 0
+    )
+    disparos_mes = int(disparos_reservados) + int(disparos_cancelados_processados)
 
     campanhas_ativas = (
         db.query(func.count(models.Disparo.id))

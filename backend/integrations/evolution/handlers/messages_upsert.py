@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
+import uuid
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -11,6 +13,14 @@ from sqlalchemy.exc import IntegrityError
 from backend import models
 from backend.database import SessionLocal
 from backend.websocket_manager import conexoes_ativas
+
+try:
+    from backend.cache.redis_client import k as _redis_key, r as _redis_client
+except Exception:
+    _redis_client = None
+
+    def _redis_key(*parts: str) -> str:
+        return ":".join(str(part) for part in parts if part is not None and part != "")
 
 from ..parsers.base_extractors import (
     extract_media_meta,
@@ -100,6 +110,19 @@ EVO_CHATBOT_BURST_DEBOUNCE_MS = max(
     _int_env_value("EVO_CHATBOT_BURST_DEBOUNCE_MS", 2200),
 )
 
+# Quando o servidor volta, mensagens antigas podem chegar em vários lotes. O
+# debounce acima une o lote atual; este cooldown compartilhado impede que cada
+# lote atrasado gere uma nova resposta. Mensagens realmente novas não são
+# bloqueadas por essa regra.
+EVO_CHATBOT_BACKLOG_MIN_AGE_SECONDS = max(
+    0,
+    _int_env_value("EVO_CHATBOT_BACKLOG_MIN_AGE_SECONDS", 15),
+)
+EVO_CHATBOT_BACKLOG_COOLDOWN_SECONDS = max(
+    1,
+    _int_env_value("EVO_CHATBOT_BACKLOG_COOLDOWN_SECONDS", 120),
+)
+
 # V23 modo seguro:
 # O log mostrou que a mensagem salva no banco, mas o navegador trava exatamente
 # depois do backend empurrar o payload pelo WebSocket.
@@ -156,6 +179,95 @@ def _ws_emit_messages_enabled() -> bool:
 
 _CHATBOT_BURST_TASKS: dict[tuple[int, int, str], asyncio.Task] = {}
 
+# O debounce local já junta mensagens recebidas pelo mesmo processo. O marcador
+# no Redis estende a mesma proteção para vários workers/consumers: somente a
+# última mensagem da enxurrada ganha o direito de executar o chatbot.
+_CHATBOT_BURST_REDIS_MIN_TTL_SECONDS = 30
+_CHATBOT_BURST_REDIS_RELEASE_SCRIPT = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+  return redis.call('del', KEYS[1])
+end
+return 0
+"""
+
+
+def _chatbot_burst_redis_keys(
+    *,
+    empresa_id: int,
+    instancia_id: int,
+    telefone: str,
+) -> tuple[str, str, str]:
+    phone_hash = hashlib.sha256(str(telefone or "").encode("utf-8")).hexdigest()[:24]
+    base = _redis_key(
+        "chatbot",
+        "burst",
+        str(int(empresa_id)),
+        str(int(instancia_id)),
+        phone_hash,
+    )
+    return f"{base}:latest", f"{base}:run", f"{base}:backlog"
+
+
+def _chatbot_message_age_seconds(message_ts) -> float:
+    if message_ts is None:
+        return 0.0
+    try:
+        now_dt = _to_dt_utc(None)
+        msg_dt = _to_dt_utc(message_ts)
+        return max(0.0, float((now_dt - msg_dt).total_seconds()))
+    except Exception:
+        return 0.0
+
+
+def _chatbot_burst_register_latest(key: str, token: str, ttl_seconds: int) -> bool:
+    if _redis_client is None:
+        return False
+    try:
+        return bool(_redis_client.set(key, token, ex=max(1, int(ttl_seconds))))
+    except Exception:
+        return False
+
+
+def _chatbot_burst_token_matches(key: str, token: str) -> bool | None:
+    """True/False quando o Redis respondeu; None quando está indisponível."""
+    if _redis_client is None:
+        return None
+    try:
+        return str(_redis_client.get(key) or "") == str(token)
+    except Exception:
+        return None
+
+
+def _chatbot_burst_try_run_lock(key: str, token: str, ttl_seconds: int) -> bool | None:
+    """Adquire uma trava global; None mantém o fallback local se o Redis falhar."""
+    if _redis_client is None:
+        return None
+    try:
+        return bool(
+            _redis_client.set(
+                key,
+                token,
+                nx=True,
+                ex=max(1, int(ttl_seconds)),
+            )
+        )
+    except Exception:
+        return None
+
+
+def _chatbot_burst_release_if_owner(key: str, token: str) -> None:
+    if _redis_client is None:
+        return
+    try:
+        _redis_client.eval(
+            _CHATBOT_BURST_REDIS_RELEASE_SCRIPT,
+            1,
+            key,
+            token,
+        )
+    except Exception:
+        pass
+
 
 async def _run_or_schedule_triagem_pos_commit(
     *,
@@ -186,9 +298,78 @@ async def _run_or_schedule_triagem_pos_commit(
     if old_task and not old_task.done():
         old_task.cancel()
 
+    latest_key, run_key, backlog_key = _chatbot_burst_redis_keys(
+        empresa_id=empresa_id,
+        instancia_id=instancia_id,
+        telefone=telefone,
+    )
+    latest_token = uuid.uuid4().hex
+    redis_ttl = max(
+        _CHATBOT_BURST_REDIS_MIN_TTL_SECONDS,
+        int(delay) + 30,
+    )
+    redis_registered = _chatbot_burst_register_latest(
+        latest_key,
+        latest_token,
+        redis_ttl,
+    )
+
     async def _runner():
+        run_token = ""
+        run_lock_acquired = False
         try:
             await asyncio.sleep(delay)
+
+            # Outro worker recebeu uma mensagem mais nova do mesmo cliente.
+            # Esta tarefa fica silenciosa e somente a mais recente continua.
+            if redis_registered:
+                latest_matches = _chatbot_burst_token_matches(latest_key, latest_token)
+                if latest_matches is False:
+                    LOG(
+                        f"[CHATBOT][burst-debounce][global-skip] emp={empresa_id} "
+                        f"inst={instancia_id} telefone={telefone}"
+                    )
+                    return
+
+                run_token = uuid.uuid4().hex
+                lock_result = _chatbot_burst_try_run_lock(
+                    run_key,
+                    run_token,
+                    redis_ttl,
+                )
+                if lock_result is False:
+                    LOG(
+                        f"[CHATBOT][burst-debounce][global-lock-busy] emp={empresa_id} "
+                        f"inst={instancia_id} telefone={telefone}"
+                    )
+                    return
+                run_lock_acquired = lock_result is True
+
+                # Fecha a janela entre a primeira checagem e a obtenção da trava.
+                latest_matches = _chatbot_burst_token_matches(latest_key, latest_token)
+                if latest_matches is False:
+                    return
+
+                message_age_seconds = _chatbot_message_age_seconds(message_ts)
+                is_backlog = (
+                    EVO_CHATBOT_BACKLOG_MIN_AGE_SECONDS > 0
+                    and message_age_seconds >= EVO_CHATBOT_BACKLOG_MIN_AGE_SECONDS
+                )
+                if is_backlog:
+                    backlog_token = uuid.uuid4().hex
+                    backlog_claim = _chatbot_burst_try_run_lock(
+                        backlog_key,
+                        backlog_token,
+                        EVO_CHATBOT_BACKLOG_COOLDOWN_SECONDS,
+                    )
+                    if backlog_claim is False:
+                        LOG(
+                            f"[CHATBOT][burst-debounce][backlog-skip] emp={empresa_id} "
+                            f"inst={instancia_id} telefone={telefone} "
+                            f"age_s={int(message_age_seconds)}"
+                        )
+                        return
+
             await run_triagem_pos_commit(
                 empresa_id=empresa_id,
                 instancia_id=instancia_id,
@@ -206,6 +387,10 @@ async def _run_or_schedule_triagem_pos_commit(
                 f"inst={instancia_id} telefone={telefone} err={e}"
             )
         finally:
+            if run_lock_acquired and run_token:
+                _chatbot_burst_release_if_owner(run_key, run_token)
+            if redis_registered:
+                _chatbot_burst_release_if_owner(latest_key, latest_token)
             if _CHATBOT_BURST_TASKS.get(key) is task:
                 _CHATBOT_BURST_TASKS.pop(key, None)
 
@@ -213,7 +398,8 @@ async def _run_or_schedule_triagem_pos_commit(
     _CHATBOT_BURST_TASKS[key] = task
     LOG(
         f"[CHATBOT][burst-debounce] agendado emp={empresa_id} inst={instancia_id} "
-        f"telefone={telefone} delay_ms={EVO_CHATBOT_BURST_DEBOUNCE_MS}"
+        f"telefone={telefone} delay_ms={EVO_CHATBOT_BURST_DEBOUNCE_MS} "
+        f"redis_global={redis_registered}"
     )
 
 

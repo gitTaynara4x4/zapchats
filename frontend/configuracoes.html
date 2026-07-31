@@ -5,6 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Configurações – ZapsChat</title>
 
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('zapschat_theme');
+        if (saved !== 'dark' && saved !== 'light') saved = 'light';
+        document.documentElement.classList.toggle('dark', saved === 'dark');
+        document.documentElement.setAttribute('data-theme', saved);
+      } catch (_) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
+
   <script src="/frontend/js/app-base.js" defer></script>
   <script src="/frontend/js/auth.js" defer></script>
 
@@ -13,135 +26,286 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
-  <link rel="stylesheet" href="/frontend/css/configuracoes.css" />
+  <link rel="stylesheet" href="/frontend/css/configuracoes.css?v=20260731-configuracoes-v3" />
   <link rel="stylesheet" href="/frontend/css/dashboard-onboarding.css?v=20260727-onboarding-v2">
 </head>
 <body>
   <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
 
-  <main class="main">
-    <div class="settings-container">
-      <header class="section-title">
+  <main class="main settings-page">
+    <header class="settings-top" aria-label="Cabeçalho das configurações">
+      <div class="settings-title-block">
+        <div class="settings-breadcrumb">
+          <span>Sistema</span>
+          <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+          <strong>Configurações</strong>
+        </div>
         <h1>
-          <span class="title-ico is-active" aria-hidden="true">
-            <svg class="title-ico-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-              <path d="M224,136a96,96,0,0,1-192,0,96.34,96.34,0,0,1,6.12-34,8,8,0,0,1,10.87-4.39l22,9.43a8,8,0,0,1,4.27,9.95A48,48,0,1,0,128,88a47.52,47.52,0,0,0-9.81,1,8,8,0,0,1-8.81-5.2L101.5,61a8,8,0,0,1,5.72-10.38A95.5,95.5,0,0,1,128,48,96.11,96.11,0,0,1,224,136Zm-96-24a24,24,0,1,0,24,24A24,24,0,0,0,128,112Z"/>
-            </svg>
-          </span>
+          <span class="title-settings" aria-hidden="true"><i class="fa-solid fa-sliders"></i></span>
           Configurações
         </h1>
+        <p>Personalize a interface, os avisos e a segurança de acesso do ZapsChat.</p>
+      </div>
 
-        <div class="top-total">
-          <span>Preferências do sistema</span>
+      <div class="settings-top-actions">
+        <span class="save-state" id="save-state">
+          <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+          <span class="save-state-text">Preferências locais salvas</span>
+        </span>
+      </div>
+    </header>
+
+    <section class="settings-metrics" aria-label="Resumo das configurações">
+      <article class="metric-card">
+        <span class="metric-icon is-purple"><i class="fa-solid fa-palette"></i></span>
+        <div>
+          <small>Tema atual</small>
+          <strong id="metric-theme">Claro</strong>
+          <span>Neste dispositivo</span>
         </div>
-      </header>
+      </article>
 
-      <section class="settings-grid" aria-label="Painel de configurações">
-        
-        <div class="settings-col">
-          <article class="box">
-            <div class="card-head">
-              <div>
-                <h2>Aparência</h2>
-                <p class="muted">Defina como o sistema será exibido no seu dispositivo.</p>
+      <article class="metric-card">
+        <span class="metric-icon is-green"><i class="fa-regular fa-bell"></i></span>
+        <div>
+          <small>Notificações</small>
+          <strong id="metric-notifications">Ativas</strong>
+          <span id="metric-notifications-detail">Som e desktop</span>
+        </div>
+      </article>
+
+      <article class="metric-card">
+        <span class="metric-icon is-blue"><i class="fa-brands fa-whatsapp"></i></span>
+        <div>
+          <small>WhatsApps</small>
+          <strong id="metric-instances">—</strong>
+          <span id="metric-instances-detail">Carregando conexões</span>
+        </div>
+      </article>
+
+      <article class="metric-card">
+        <span class="metric-icon is-amber"><i class="fa-regular fa-building"></i></span>
+        <div>
+          <small>Empresa</small>
+          <strong id="metric-company">Carregando…</strong>
+          <span id="metric-plan">Plano —</span>
+        </div>
+      </article>
+    </section>
+
+    <section class="settings-shell" aria-label="Painel de configurações">
+      <div class="settings-workspace">
+        <article class="panel settings-panel" id="appearance-panel">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">Interface</span>
+              <h2>Aparência</h2>
+              <p>Escolha como o ZapsChat será exibido neste navegador.</p>
+            </div>
+            <span class="panel-badge">Dispositivo atual</span>
+          </div>
+
+          <fieldset class="theme-options" aria-label="Escolher tema">
+            <legend class="sr-only">Tema do sistema</legend>
+
+            <label class="theme-card" data-theme-option="light">
+              <input type="radio" name="theme" value="light" />
+              <span class="theme-preview is-light" aria-hidden="true">
+                <span class="preview-sidebar"></span>
+                <span class="preview-main">
+                  <i></i><i></i><i></i>
+                </span>
+              </span>
+              <span class="theme-card-copy">
+                <strong>Claro</strong>
+                <small>Visual limpo para ambientes iluminados.</small>
+              </span>
+              <span class="theme-check"><i class="fa-solid fa-check"></i></span>
+            </label>
+
+            <label class="theme-card" data-theme-option="dark">
+              <input type="radio" name="theme" value="dark" />
+              <span class="theme-preview is-dark" aria-hidden="true">
+                <span class="preview-sidebar"></span>
+                <span class="preview-main">
+                  <i></i><i></i><i></i>
+                </span>
+              </span>
+              <span class="theme-card-copy">
+                <strong>Escuro</strong>
+                <small>Menos brilho para uso prolongado.</small>
+              </span>
+              <span class="theme-check"><i class="fa-solid fa-check"></i></span>
+            </label>
+          </fieldset>
+        </article>
+
+        <article class="panel settings-panel" id="notifications-panel">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">Alertas</span>
+              <h2>Notificações de atendimento</h2>
+              <p>Controle quando o navegador deve avisar sobre novas mensagens.</p>
+            </div>
+          </div>
+
+          <div class="setting-list">
+            <div class="setting-row">
+              <div class="setting-row-icon"><i class="fa-solid fa-volume-high"></i></div>
+              <div class="setting-row-copy">
+                <strong>Som de nova mensagem</strong>
+                <span>Toca o alerta quando uma nova mensagem chegar.</span>
               </div>
+              <label class="switch" aria-label="Ativar som de nova mensagem">
+                <input type="checkbox" id="toggle-sound" />
+                <span></span>
+              </label>
             </div>
 
-            <div class="form-grid">
-              <div class="form-group field--full">
-                <label for="select-tema">Tema do sistema</label>
+            <div class="setting-row">
+              <div class="setting-row-icon"><i class="fa-regular fa-window-restore"></i></div>
+              <div class="setting-row-copy">
+                <strong>Notificação na área de trabalho</strong>
+                <span>Mostra o cliente e a mensagem mesmo com outra aba aberta.</span>
+                <small id="desktop-permission-hint"></small>
+              </div>
+              <label class="switch" aria-label="Ativar notificações na área de trabalho">
+                <input type="checkbox" id="toggle-desktop" />
+                <span></span>
+              </label>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-row-icon"><i class="fa-solid fa-bell"></i></div>
+              <div class="setting-row-copy">
+                <strong>Tocar mesmo com a conversa aberta</strong>
+                <span>Mantém o aviso sonoro enquanto você estiver lendo o mesmo atendimento.</span>
+              </div>
+              <label class="switch" aria-label="Tocar mesmo com a conversa aberta">
+                <input type="checkbox" id="toggle-always-beep" />
+                <span></span>
+              </label>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel settings-panel" id="report-panel">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">Suporte</span>
+              <h2>Relatar problema ou sugestão</h2>
+              <p>O relato fica registrado com a empresa e a página atual para acompanhamento.</p>
+            </div>
+          </div>
+
+          <form id="form-report" class="report-form" novalidate>
+            <div class="form-row two-cols">
+              <label class="field-group">
+                <span>Tipo do relato</span>
                 <div class="select-wrap">
-                  <select id="select-tema" class="field" aria-label="Selecione o tema do sistema">
-                    <option value="dark">Escuro (Padrão)</option>
-                    <option value="light">Claro</option>
+                  <select id="report-type" class="field">
+                    <option value="bug">Problema / erro</option>
+                    <option value="sugestao">Sugestão de melhoria</option>
                   </select>
-                  <span class="select-icon" aria-hidden="true">
-                    <i class="fa-solid fa-chevron-down"></i>
-                  </span>
+                  <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
                 </div>
-              </div>
-            </div>
-          </article>
+              </label>
 
-          <article class="box">
-            <div class="card-head">
-              <div>
-                <h2>Relatar bug ou sugestão</h2>
-                <p class="muted">Encontrou um erro ou tem uma melhoria? Envie para análise.</p>
-              </div>
+              <label class="field-group">
+                <span>Título</span>
+                <input id="report-title" class="field" maxlength="120" placeholder="Ex: Botão de atender não responde" />
+              </label>
             </div>
 
-            <form id="form-bug" class="form-grid">
-              <div class="form-group field--full">
-                <label for="bug-descricao">Descrição do problema</label>
-                <textarea
-                  id="bug-descricao"
-                  class="field field-textarea"
-                  rows="4"
-                  placeholder="Ex: Ao abrir a conversa, o botão de responder ficou carregando infinitamente..."
-                  required
-                ></textarea>
-              </div>
+            <label class="field-group">
+              <span>Descrição</span>
+              <textarea id="report-description" class="field field-textarea" maxlength="4000" rows="6" placeholder="Conte o que aconteceu, o que você esperava e como reproduzir o problema."></textarea>
+              <small class="field-counter"><span id="report-counter">0</span>/4000</small>
+            </label>
 
-              <div class="form-actions field--full pt-2">
-                <button type="submit" class="btn btn--primary" id="btn-enviar-bug">
-                  <i class="fa-solid fa-paper-plane"></i>
-                  <span>Enviar relato</span>
-                </button>
-              </div>
-            </form>
-          </article>
-        </div>
+            <input type="hidden" id="report-page" value="/configuracoes" />
 
-        <div class="settings-col">
-          <article class="box is-disabled">
-            <div class="card-head card-head-between">
-              <div>
-                <h2>Empresa</h2>
-                <p class="muted">Dados corporativos, identidade visual e preferências.</p>
-              </div>
-              <span class="coming-pill">Em breve</span>
+            <div class="form-actions">
+              <span class="form-note"><i class="fa-solid fa-lock"></i> O relato é visível apenas dentro da sua empresa e para o suporte.</span>
+              <button type="submit" class="btn btn-primary" id="btn-send-report">
+                <i class="fa-regular fa-paper-plane"></i>
+                <span>Enviar relato</span>
+              </button>
             </div>
+          </form>
+        </article>
+      </div>
 
-            <div class="empty-config">
-              <i class="fa-solid fa-building" aria-hidden="true"></i>
-              <div>
-                <strong>Configuração ainda não disponível</strong>
-                <p class="muted">Aqui ficarão dados da empresa, logotipo, nome exibido e integrações globais.</p>
-              </div>
+      <aside class="settings-side" aria-label="Informações da empresa">
+        <article class="side-card company-card">
+          <div class="company-avatar" id="company-avatar">Z</div>
+          <div class="company-copy">
+            <span>Empresa conectada</span>
+            <h2 id="company-name">Carregando…</h2>
+            <p id="company-plan">Plano —</p>
+          </div>
+          <div class="company-stats">
+            <div>
+              <strong id="company-connected">—</strong>
+              <span>conectados</span>
             </div>
-          </article>
-
-          <article class="box is-disabled">
-            <div class="card-head card-head-between">
-              <div>
-                <h2>Atendimento e automações</h2>
-                <p class="muted">Regras gerais de fila e comportamento do sistema.</p>
-              </div>
-              <span class="coming-pill">Em breve</span>
+            <div>
+              <strong id="company-total">—</strong>
+              <span>WhatsApps</span>
             </div>
+          </div>
+        </article>
 
-            <div class="empty-config">
-              <i class="fa-solid fa-robot" aria-hidden="true"></i>
-              <div>
-                <strong>Módulo em preparação</strong>
-                <p class="muted">Preferências de atendimento automático, roteamento, horários e notificações.</p>
-              </div>
+        <article class="side-card security-card" id="security-panel">
+          <div class="side-card-head">
+            <div>
+              <span class="panel-kicker">Segurança</span>
+              <h2>Acesso de colaboradores</h2>
             </div>
-          </article>
-        </div>
-      </section>
-    </div>
+            <i class="fa-solid fa-shield-halved side-head-icon" aria-hidden="true"></i>
+          </div>
 
-    <div id="ZapsChat-toast" class="toast-message" role="alert" aria-live="assertive" aria-atomic="true">
-      <i class="toast-icon fa-solid"></i>
-      <span class="toast-text"></span>
-    </div>
+          <div class="security-setting">
+            <div>
+              <strong>Exigir token no login</strong>
+              <p>Adiciona uma confirmação extra ao acesso dos colaboradores.</p>
+            </div>
+            <label class="switch" aria-label="Exigir token no login">
+              <input type="checkbox" id="toggle-login-token" disabled />
+              <span></span>
+            </label>
+          </div>
+          <p class="security-note" id="security-note">Carregando permissão…</p>
+        </article>
+
+        <article class="side-card reports-card">
+          <div class="side-card-head">
+            <div>
+              <span class="panel-kicker">Acompanhamento</span>
+              <h2>Relatos recentes</h2>
+            </div>
+            <span class="report-count" id="report-count">0</span>
+          </div>
+
+          <div class="report-history" id="report-history">
+            <div class="history-loading">
+              <i class="fa-solid fa-spinner fa-spin"></i>
+              Carregando relatos…
+            </div>
+          </div>
+        </article>
+      </aside>
+    </section>
   </main>
 
+  <div id="ZapsChat-toast" class="toast-message" role="status" aria-live="polite" aria-atomic="true">
+    <i class="toast-icon fa-solid"></i>
+    <span class="toast-text"></span>
+  </div>
+
   <script src="/frontend/js/page-guard.js" defer></script>
-  <script src="/frontend/js/pages/configuracoes.js" defer></script>
-  <script src="/frontend/js/help/help-configuracoes.js?v=20260708-configuracoes-tour-responsive-final" defer></script>
+  <script src="/frontend/js/pages/configuracoes.js?v=20260731-configuracoes-v3" defer></script>
+  <script src="/frontend/js/help/help-configuracoes.js?v=20260731-configuracoes-v3" defer></script>
   <script src="/frontend/js/pages/dashboard-onboarding.js?v=20260727-onboarding-v2" defer></script>
 </body>
 </html>

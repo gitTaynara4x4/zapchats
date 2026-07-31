@@ -5,298 +5,252 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Disparos – ZapsChat</title>
 
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('zapschat_theme');
+        if (saved !== 'dark' && saved !== 'light') saved = 'light';
+        document.documentElement.classList.toggle('dark', saved === 'dark');
+        document.documentElement.setAttribute('data-theme', saved);
+      } catch (_) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
+
   <script src="/frontend/js/app-base.js" defer></script>
   <script src="/frontend/js/auth.js" defer></script>
   <script src="/frontend/js/page-guard.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
 
-  <style>
-    html.prepaint body{visibility:hidden}
-    html.prepaint[data-head-ready][data-loader-ready] body{visibility:visible}
-  </style>
-
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
-  <link rel="stylesheet" href="/frontend/css/disparos.css"/>
+  <link rel="stylesheet" href="/frontend/css/disparos.css?v=20260731-fila-segura-v1"/>
   <link rel="stylesheet" href="/frontend/css/dashboard-onboarding.css?v=20260727-onboarding-v2">
 </head>
 <body data-page="disparos">
   <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
 
-  <main class="main">
-    <div class="section-title">
-      <div class="title-wrap">
+  <main class="main disparos-page">
+    <section class="disparos-top" aria-label="Cabeçalho de disparos">
+      <div class="disparos-title-block">
+        <div class="disparos-breadcrumb">
+          <span>Painel</span><i class="fa-solid fa-chevron-right" aria-hidden="true"></i><strong>Disparos</strong>
+        </div>
         <h1>
-          <i class="fa-solid fa-bullhorn title-ico"></i>
-          <span class="title-text">Disparos</span>
+          <span class="title-badge"><i class="fa-solid fa-paper-plane"></i></span>
+          Disparos
         </h1>
-        <p class="page-subtitle">
-          Envie mensagens em fila, com intervalo entre envios e acompanhamento do histórico.
-        </p>
+        <p>Crie campanhas em uma fila segura, acompanhe o progresso e controle cada envio.</p>
       </div>
 
-      <div class="top-meta">
-        <strong id="topMetaDisparos">0</strong> disparos encontrados
-      </div>
-    </div>
-
-    <section class="box box-hero" aria-label="Selecionar WhatsApp de envio">
-      <div class="hero-grid">
-        <div class="hero-main">
-          <div class="hero-kicker">Passo 1</div>
-          <h2>Escolha o WhatsApp que vai enviar</h2>
-          <p>
-            Antes de iniciar o disparo, selecione a instância/WhatsApp que será usada.
-          </p>
-        </div>
-
-        <div class="hero-side">
-          <label class="hero-label" for="instMenuBtn">WhatsApp de envio</label>
-
-          <button id="instMenuBtn"
-                  type="button"
-                  class="inst-trigger inst-trigger--hero"
-                  aria-haspopup="listbox"
-                  aria-expanded="false"
-                  aria-controls="inst-menu">
-            <span class="inst-trigger__main">
-              <span class="inst-trigger__caption">Instância selecionada</span>
-              <span id="instMenuLabel">Selecione uma instância</span>
-            </span>
-            <span class="chev">▾</span>
-          </button>
-
-          <small class="hero-help" id="heroInstHelp">
-            Escolha a instância no botão acima para habilitar o disparo.
-          </small>
-        </div>
+      <div class="disparos-top-actions">
+        <div class="top-meta"><strong id="topMetaDisparos">0</strong><span>campanhas</span></div>
+        <button type="button" id="btnAtualizarHistorico" class="btn btn-soft">
+          <i class="fa-solid fa-rotate-right"></i><span>Atualizar</span>
+        </button>
+        <button id="instMenuBtn" type="button" class="inst-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="inst-menu">
+          <span class="inst-dot" aria-hidden="true"></span>
+          <span class="inst-trigger__main">
+            <small>WhatsApp de envio</small>
+            <span id="instMenuLabel">Selecionar instância</span>
+          </span>
+          <span class="chev"><i class="fa-solid fa-chevron-down"></i></span>
+        </button>
       </div>
 
-      <div id="inst-menu"
-           class="inst-menu"
-           role="listbox"
-           aria-hidden="true"
-           aria-label="Selecionar instância">
+      <div id="inst-menu" class="inst-menu" role="listbox" aria-hidden="true" aria-label="Selecionar instância">
         <div class="head">WhatsApps disponíveis</div>
         <ul id="instMenuList"></ul>
       </div>
     </section>
 
-    <section class="box box-config" aria-label="Configurar disparo">
-      <header class="box-header">
-        <div>
-          <div class="box-step">Passo 2</div>
-          <h2>Monte seu disparo</h2>
-          <p>
-            Escreva a mensagem, adicione os contatos e revise o resumo antes de iniciar.
-          </p>
-        </div>
-
-        <div class="guide-inline">
-          <span><i class="fa-solid fa-circle-check"></i> Escolha a instância</span>
-          <span><i class="fa-solid fa-pen"></i> Escreva a mensagem</span>
-          <span><i class="fa-solid fa-users"></i> Adicione os contatos</span>
-          <span><i class="fa-solid fa-paper-plane"></i> Inicie o envio</span>
-        </div>
-      </header>
-
-      <div class="config-grid">
-        <div class="config-main">
-          <div class="field">
-            <label for="msgDisparo">Mensagem do disparo</label>
-
-            <div class="template-bar">
-              <span class="template-bar__label">Modelos rápidos:</span>
-              <div class="template-chips">
-                <button type="button" class="tpl-chip" data-template="cobranca">Cobrança</button>
-                <button type="button" class="tpl-chip" data-template="pos_venda">Pós-venda</button>
-                <button type="button" class="tpl-chip" data-template="reativacao">Reativação</button>
-                <button type="button" class="tpl-chip" data-template="promocao">Promoção</button>
-                <button type="button" class="tpl-chip" data-template="lembrete">Lembrete</button>
-              </div>
-            </div>
-
-            <textarea id="msgDisparo"
-                      class="input input--multiline"
-                      rows="5"
-                      placeholder="Digite aqui a mensagem que será enviada por WhatsApp..."></textarea>
-
-            <small class="hint">
-              Você pode usar uma mensagem mais natural e curta para melhorar a taxa de resposta.
-            </small>
-
-            <div class="field-tools field-tools--msg">
-              <div class="field-tools__left">
-                <button type="button" id="btnIaMelhorar" class="btn btn-sm">
-                  <i class="fa-solid fa-wand-magic-sparkles"></i>
-                  <span>Melhorar com IA</span>
-                </button>
-
-                <button type="button" id="btnPreencherExemplo" class="btn btn-sm">
-                  <i class="fa-solid fa-bolt"></i>
-                  <span>Preencher exemplo</span>
-                </button>
-
-                <button type="button" id="btnLimparRascunho" class="btn btn-sm">
-                  <i class="fa-solid fa-trash-can"></i>
-                  <span>Limpar rascunho</span>
-                </button>
-              </div>
-
-              <div class="field-tools__right">
-                <label class="check check--inline">
-                  <input type="checkbox" id="chkIaVariar">
-                  <span>Gerar pequenas variações por contato (em breve)</span>
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="numsDisparos">Contatos de destino</label>
-            <textarea id="numsDisparos"
-                      class="input input--multiline numbers-area"
-                      rows="7"
-                      placeholder="Cole um número por linha, ou separados por vírgula e ponto e vírgula..."></textarea>
-
-            <small class="hint">
-              Ex.: <code>11999999999</code>, <code>+5511999999999</code> ou uma lista com vários números.
-            </small>
-
-            <div class="field-tools">
-              <div class="field-tools__left">
-                <label class="file-label">
-                  <i class="fa-solid fa-file-arrow-up"></i>
-                  <span>Importar arquivo</span>
-                  <input type="file"
-                         id="fileNumeros"
-                         accept=".txt,.csv,.xlsx,.xls,.ods,.doc,.docx"
-                         hidden>
-                </label>
-                <span id="importStatus" class="import-status" aria-live="polite"></span>
-              </div>
-
-              <div class="field-tools__right">
-                <button type="button" id="btnAddFromClientes" class="btn btn-sm">
-                  <i class="fa-solid fa-address-book"></i>
-                  <span>Adicionar da lista de clientes</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div class="field field-inline">
-            <label class="check">
-              <input type="checkbox" id="optDedup" checked>
-              <span>Remover números duplicados automaticamente</span>
-            </label>
-          </div>
-
-          <div class="field field-inline field-delay">
-            <div class="field-delay__head">
-              <label for="delaySegundos">Intervalo entre envios</label>
-              <span class="delay-badge" id="delayRiskBadge">Seguro</span>
-            </div>
-
-            <select id="delaySegundos" class="input input--select">
-              <option value="5">5 segundos</option>
-              <option value="10">10 segundos</option>
-              <option value="20" selected>20 segundos</option>
-              <option value="30">30 segundos</option>
-              <option value="60">1 minuto</option>
-              <option value="120">2 minutos</option>
-              <option value="300">5 minutos</option>
-            </select>
-
-            <details class="help-details">
-              <summary class="help-summary">
-                <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
-                <span>Entender o intervalo entre envios</span>
-              </summary>
-
-              <div class="help-box" role="note" aria-label="Ajuda: Intervalo entre envios">
-                <p>Esse intervalo é o <strong>tempo que o sistema espera entre uma mensagem e outra</strong>.</p>
-                <p>Quanto menor o intervalo, mais rápido o disparo. Quanto maior, mais seguro para a conta.</p>
-
-                <div class="help-example">
-                  Exemplo: 10 contatos com intervalo de 20s → o sistema envia 1, espera 20s, envia o próximo, e assim por diante.
-                </div>
-
-                <ul>
-                  <li><strong>5s e 10s:</strong> mais rápido, porém com mais risco</li>
-                  <li><strong>20s e 30s:</strong> bom equilíbrio</li>
-                  <li><strong>1 min ou mais:</strong> mais conservador</li>
-                </ul>
-              </div>
-            </details>
-          </div>
-        </div>
-
-        <aside class="config-side">
-          <div class="resume-card">
-            <div class="resume-card__head">
-              <div>
-                <div class="box-step">Passo 3</div>
-                <h3>Revisão do disparo</h3>
-              </div>
-              <span class="resume-state" id="resumeState">Aguardando dados</span>
-            </div>
-
-            <ul class="summary">
-              <li><span>Instância:</span><strong id="resInstancia">Não selecionada</strong></li>
-              <li><span>Total informado:</span><strong id="resTotal">0</strong></li>
-              <li><span>Válidos:</span><strong id="resValidos">0</strong></li>
-              <li><span>Suspeitos/curtos:</span><strong id="resInvalidos">0</strong></li>
-              <li><span>Intervalo:</span><strong id="resDelay">20s</strong></li>
-              <li><span>Tempo estimado:</span><strong id="resEstimativa">—</strong></li>
-            </ul>
-
-            <div class="summary-note-box">
-              <div class="summary-note-box__title">
-                <i class="fa-solid fa-shield-halved"></i>
-                <span>Antes de enviar</span>
-              </div>
-              <p id="summaryAdvice">
-                Selecione uma instância, escreva a mensagem e adicione pelo menos um número válido.
-              </p>
-            </div>
-
-            <button id="btnDisparar" class="btn primary btn-lg" type="button">
-              <i class="fa fa-paper-plane"></i>
-              <span>Iniciar disparo</span>
-            </button>
-
-            <div id="statusDisparos" class="status-line" aria-live="polite"></div>
-          </div>
-        </aside>
-      </div>
+    <section class="metrics-grid" aria-label="Resumo das campanhas">
+      <article class="metric-card">
+        <div class="metric-icon"><i class="fa-solid fa-layer-group"></i></div>
+        <div><span>Campanhas ativas</span><strong id="metricAtivas">0</strong><small>na fila ou enviando</small></div>
+      </article>
+      <article class="metric-card">
+        <div class="metric-icon"><i class="fa-solid fa-users"></i></div>
+        <div><span>Contatos na fila</span><strong id="metricPendentes">0</strong><small>ainda não processados</small></div>
+      </article>
+      <article class="metric-card">
+        <div class="metric-icon success"><i class="fa-solid fa-circle-check"></i></div>
+        <div><span>Enviados</span><strong id="metricEnviados">0</strong><small>no histórico carregado</small></div>
+      </article>
+      <article class="metric-card">
+        <div class="metric-icon danger"><i class="fa-solid fa-triangle-exclamation"></i></div>
+        <div><span>Falhas</span><strong id="metricErros">0</strong><small>mensagens não enviadas</small></div>
+      </article>
     </section>
 
-    <section class="box box-historico" aria-label="Histórico de disparos">
-      <header class="box-header box-header--split">
-        <div>
-          <div class="box-step">Passo 4</div>
-          <h2>Histórico de disparos</h2>
-          <p>
-            Acompanhe os disparos criados e reaproveite mensagem e intervalo com um clique.
-          </p>
+    <section class="connection-strip" aria-label="Status da instância selecionada">
+      <div class="connection-strip__icon"><i class="fa-brands fa-whatsapp"></i></div>
+      <div>
+        <strong id="connectionTitle">Selecione o WhatsApp de envio</strong>
+        <span id="heroInstHelp">Escolha uma instância conectada para liberar a criação da campanha.</span>
+      </div>
+      <span class="connection-chip" id="connectionChip">Aguardando seleção</span>
+    </section>
+
+    <section class="campaign-shell" aria-label="Criar campanha">
+      <section class="panel campaign-editor">
+        <header class="panel-head">
+          <div>
+            <span class="panel-eyebrow">Nova campanha</span>
+            <h2>Configurar disparo</h2>
+            <p>Escreva a mensagem, adicione os contatos e defina um intervalo entre os envios.</p>
+          </div>
+          <span class="queue-badge"><i class="fa-solid fa-shield-halved"></i> Fila por WhatsApp</span>
+        </header>
+
+        <div class="field">
+          <div class="field-label-row">
+            <label for="msgDisparo">Mensagem</label>
+            <span id="messageCounter">0 / 4096</span>
+          </div>
+
+          <div class="template-bar">
+            <span>Modelos rápidos</span>
+            <div class="template-chips">
+              <button type="button" class="tpl-chip" data-template="cobranca">Cobrança</button>
+              <button type="button" class="tpl-chip" data-template="pos_venda">Pós-venda</button>
+              <button type="button" class="tpl-chip" data-template="reativacao">Reativação</button>
+              <button type="button" class="tpl-chip" data-template="promocao">Promoção</button>
+              <button type="button" class="tpl-chip" data-template="lembrete">Lembrete</button>
+            </div>
+          </div>
+
+          <textarea id="msgDisparo" class="input input--multiline" rows="6" maxlength="4096" placeholder="Digite a mensagem que será enviada pelo WhatsApp..."></textarea>
+
+          <div class="field-tools">
+            <div class="field-tools__left">
+              <button type="button" id="btnIaMelhorar" class="btn btn-soft btn-sm"><i class="fa-solid fa-wand-magic-sparkles"></i><span>Melhorar com IA</span></button>
+              <button type="button" id="btnPreencherExemplo" class="btn btn-soft btn-sm"><i class="fa-solid fa-bolt"></i><span>Usar exemplo</span></button>
+              <button type="button" id="btnLimparRascunho" class="btn btn-quiet btn-sm"><i class="fa-regular fa-trash-can"></i><span>Limpar</span></button>
+            </div>
+            <label class="check check--inline disabled-option">
+              <input type="checkbox" id="chkIaVariar"><span>Variações por contato <em>em breve</em></span>
+            </label>
+          </div>
         </div>
 
-        <button type="button" id="btnAtualizarHistorico" class="btn btn-sm">
-          <i class="fa-solid fa-rotate-right"></i>
-          <span>Atualizar</span>
+        <div class="field">
+          <div class="field-label-row">
+            <label for="numsDisparos">Contatos de destino</label>
+            <span>Brasil: DDD + número</span>
+          </div>
+          <textarea id="numsDisparos" class="input input--multiline numbers-area" rows="8" placeholder="11999999999&#10;11988888888&#10;11977777777"></textarea>
+          <small class="hint">Um número por linha, ou separados por vírgula e ponto e vírgula. O sistema remove o +55 repetido e números duplicados.</small>
+
+          <div class="import-row">
+            <label class="file-label">
+              <i class="fa-solid fa-file-arrow-up"></i><span>Importar TXT, CSV ou XLSX</span>
+              <input type="file" id="fileNumeros" accept=".txt,.csv,.xlsx,text/plain,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+            </label>
+            <button type="button" id="btnAddFromClientes" class="btn btn-soft btn-sm"><i class="fa-solid fa-address-book"></i><span>Selecionar clientes</span></button>
+            <span id="importStatus" class="import-status" aria-live="polite"></span>
+          </div>
+        </div>
+
+        <div class="campaign-options">
+          <label class="check option-card">
+            <input type="checkbox" id="optDedup" checked>
+            <span><strong>Remover duplicados</strong><small>Evita enviar duas vezes para o mesmo número.</small></span>
+          </label>
+
+          <div class="option-card delay-option">
+            <div>
+              <strong>Intervalo entre envios</strong>
+              <small>A fila respeita esse tempo também entre campanhas da mesma instância.</small>
+            </div>
+            <div class="delay-control">
+              <span class="delay-badge" id="delayRiskBadge">Seguro</span>
+              <select id="delaySegundos" class="input input--select">
+                <option value="5">5 segundos</option>
+                <option value="10">10 segundos</option>
+                <option value="20" selected>20 segundos</option>
+                <option value="30">30 segundos</option>
+                <option value="60">1 minuto</option>
+                <option value="120">2 minutos</option>
+                <option value="300">5 minutos</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <details class="help-details">
+          <summary><i class="fa-regular fa-circle-question"></i> Como funciona a fila segura?</summary>
+          <div class="help-box">
+            Cada WhatsApp processa uma mensagem por vez. Se existirem duas campanhas usando a mesma instância, a segunda aguarda a primeira terminar. A fila é retomada automaticamente após reinício do servidor.
+          </div>
+        </details>
+      </section>
+
+      <aside class="panel campaign-review">
+        <header class="review-head">
+          <div><span class="panel-eyebrow">Revisão</span><h2>Resumo da campanha</h2></div>
+          <span class="resume-state" id="resumeState">Aguardando dados</span>
+        </header>
+
+        <div class="review-instance">
+          <span>WhatsApp selecionado</span>
+          <strong id="resInstancia">Não selecionada</strong>
+        </div>
+
+        <div class="review-stats">
+          <div><span>Informados</span><strong id="resTotal">0</strong></div>
+          <div><span>Válidos</span><strong id="resValidos">0</strong></div>
+          <div><span>Inválidos</span><strong id="resInvalidos">0</strong></div>
+          <div><span>Intervalo</span><strong id="resDelay">20s</strong></div>
+        </div>
+
+        <div class="estimate-card">
+          <span>Tempo estimado</span>
+          <strong id="resEstimativa">—</strong>
+          <small>Considerando uma mensagem por contato.</small>
+        </div>
+
+        <div class="summary-note-box">
+          <i class="fa-solid fa-circle-info"></i>
+          <p id="summaryAdvice">Selecione uma instância, escreva a mensagem e adicione pelo menos um contato válido.</p>
+        </div>
+
+        <button id="btnDisparar" class="btn btn-primary btn-lg" type="button">
+          <i class="fa-solid fa-paper-plane"></i><span>Iniciar campanha</span>
         </button>
+        <div id="statusDisparos" class="status-line" aria-live="polite"></div>
+      </aside>
+    </section>
+
+    <section class="panel history-panel" aria-label="Histórico de disparos">
+      <header class="panel-head history-head">
+        <div>
+          <span class="panel-eyebrow">Acompanhamento</span>
+          <h2>Histórico de campanhas</h2>
+          <p>Veja o progresso real, mensagens enviadas, falhas e campanhas que ainda estão na fila.</p>
+        </div>
+        <div class="history-legend">
+          <span><i class="dot queued"></i>Na fila</span>
+          <span><i class="dot sending"></i>Enviando</span>
+          <span><i class="dot done"></i>Finalizado</span>
+        </div>
       </header>
 
       <div class="table-wrap">
         <table id="tblDisparos" aria-label="Histórico de disparos">
           <thead>
             <tr>
-              <th>Mensagem</th>
-              <th>Contatos</th>
-              <th>Instância</th>
+              <th>Campanha</th>
+              <th>Progresso</th>
+              <th>WhatsApp</th>
               <th>Criado por</th>
               <th>Status</th>
               <th>Criado em</th>
-              <th>Ação</th>
+              <th>Ações</th>
             </tr>
           </thead>
           <tbody id="tbodyDisparos"></tbody>
@@ -304,8 +258,9 @@
       </div>
 
       <div id="emptyDisparos" class="empty">
-        <p>Nenhum disparo encontrado.</p>
-        <small>Crie seu primeiro disparo ou use um modelo pronto para começar mais rápido.</small>
+        <span class="empty-icon"><i class="fa-regular fa-paper-plane"></i></span>
+        <strong>Nenhuma campanha encontrada</strong>
+        <small>Crie sua primeira campanha usando o formulário acima.</small>
       </div>
     </section>
   </main>
@@ -313,52 +268,26 @@
   <div id="clientesModal" class="cli-modal" aria-hidden="true">
     <div class="cli-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="cliModalTitle">
       <header class="cli-modal__header">
-        <h2 id="cliModalTitle">
-          <i class="fa-solid fa-address-book"></i>
-          <span>Adicionar da lista de clientes</span>
-        </h2>
-        <button type="button" id="btnClientesClose" class="cli-modal__close" aria-label="Fechar">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
+        <div><span class="modal-eyebrow">Contatos</span><h2 id="cliModalTitle">Selecionar clientes</h2></div>
+        <button type="button" id="btnClientesClose" class="modal-close" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
       </header>
-
       <div class="cli-modal__body">
         <div class="cli-modal__toolbar">
-          <input id="clientesSearch"
-                 class="input cli-modal__search"
-                 type="search"
-                 placeholder="Buscar cliente por nome, telefone...">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input id="clientesSearch" class="input cli-modal__search" type="search" placeholder="Buscar por nome ou telefone...">
         </div>
-
         <div class="cli-modal__table-wrap">
           <table class="cli-modal__table">
-            <thead>
-              <tr>
-                <th class="cli-col-check">
-                  <input type="checkbox" id="cliCheckAll">
-                </th>
-                <th class="cli-col-nome">Cliente</th>
-                <th>Telefone</th>
-                <th>Departamento</th>
-              </tr>
-            </thead>
+            <thead><tr><th class="cli-col-check"><input type="checkbox" id="cliCheckAll"></th><th>Cliente</th><th>Telefone</th><th>Departamento</th></tr></thead>
             <tbody id="clientesList"></tbody>
           </table>
-
-          <div id="clientesEmpty" class="cli-modal__empty">
-            Nenhum cliente encontrado.
-          </div>
+          <div id="clientesEmpty" class="cli-modal__empty">Nenhum cliente encontrado.</div>
         </div>
       </div>
-
       <footer class="cli-modal__footer">
-        <button type="button" id="btnClientesLoadMore" class="btn btn-sm">
-          Carregar mais
-        </button>
+        <button type="button" id="btnClientesLoadMore" class="btn btn-soft btn-sm">Carregar mais</button>
         <span class="cli-modal__spacer"></span>
-        <button type="button" id="btnClientesApply" class="btn primary btn-sm">
-          Adicionar selecionados
-        </button>
+        <button type="button" id="btnClientesApply" class="btn btn-primary btn-sm">Adicionar selecionados</button>
       </footer>
     </div>
   </div>
@@ -366,48 +295,27 @@
   <div id="iaModal" class="ia-modal" aria-hidden="true">
     <div class="ia-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="iaModalTitle">
       <header class="ia-modal__header">
-        <h2 id="iaModalTitle">
-          <i class="fa-solid fa-wand-magic-sparkles"></i>
-          <span>Melhorar mensagem com IA</span>
-        </h2>
-        <button type="button" id="btnIaClose" class="ia-modal__close" aria-label="Fechar">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
+        <div><span class="modal-eyebrow">Assistente de texto</span><h2 id="iaModalTitle">Melhorar mensagem com IA</h2></div>
+        <button type="button" id="btnIaClose" class="modal-close" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
       </header>
-
       <div class="ia-modal__body">
         <div class="ia-cols">
-          <div class="ia-col">
-            <div class="ia-col-title">Original</div>
-            <textarea id="iaOriginal" class="input input--multiline ia-text" readonly></textarea>
-          </div>
-
-          <div class="ia-col">
-            <div class="ia-col-title">Sugestão da IA (editável)</div>
-            <textarea id="iaSugestao" class="input input--multiline ia-text"></textarea>
-          </div>
+          <div class="ia-col"><div class="ia-col-title">Mensagem original</div><textarea id="iaOriginal" class="input input--multiline ia-text" readonly></textarea></div>
+          <div class="ia-col"><div class="ia-col-title">Sugestão da IA</div><textarea id="iaSugestao" class="input input--multiline ia-text"></textarea></div>
         </div>
-
         <div id="iaStatus" class="ia-status" aria-live="polite"></div>
       </div>
-
       <footer class="ia-modal__footer">
-        <button type="button" id="btnIaRegerar" class="btn btn-sm">
-          <i class="fa-solid fa-rotate"></i>
-          <span>Gerar outra variação</span>
-        </button>
+        <button type="button" id="btnIaRegerar" class="btn btn-soft btn-sm"><i class="fa-solid fa-rotate"></i><span>Gerar outra</span></button>
         <span class="ia-modal__spacer"></span>
-        <button type="button" id="btnIaAplicar" class="btn primary btn-sm">
-          <i class="fa-solid fa-check"></i>
-          <span>Usar esta versão</span>
-        </button>
+        <button type="button" id="btnIaAplicar" class="btn btn-primary btn-sm"><i class="fa-solid fa-check"></i><span>Usar esta versão</span></button>
       </footer>
     </div>
   </div>
 
   <div id="toast" role="status" aria-live="polite"></div>
 
-  <script src="/frontend/js/pages/disparos.js" defer></script>
+  <script src="/frontend/js/pages/disparos.js?v=20260731-fila-segura-v1" defer></script>
   <script src="/frontend/js/help/help-disparador.js?v=20260708-disparador-tour-responsive-final" defer></script>
   <script src="/frontend/js/pages/dashboard-onboarding.js?v=20260727-onboarding-v2" defer></script>
 </body>

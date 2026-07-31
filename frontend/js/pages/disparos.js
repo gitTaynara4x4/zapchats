@@ -24,6 +24,14 @@
   const delayRiskBadgeEl = $('#delayRiskBadge');
   const topMetaEl        = $('#topMetaDisparos');
   const heroInstHelpEl   = $('#heroInstHelp');
+  const connectionTitleEl= $('#connectionTitle');
+  const connectionChipEl = $('#connectionChip');
+  const instMenuBtnEl     = $('#instMenuBtn');
+  const messageCounterEl  = $('#messageCounter');
+  const metricAtivasEl    = $('#metricAtivas');
+  const metricPendentesEl = $('#metricPendentes');
+  const metricEnviadosEl  = $('#metricEnviados');
+  const metricErrosEl     = $('#metricErros');
   const btnAtualizarHist = $('#btnAtualizarHistorico');
 
   const tbodyHist        = $('#tbodyDisparos');
@@ -60,6 +68,7 @@
   const API_LIST        = `${API_BASE}?limit=50`;
   const API_CLIENTES    = '/api/clientes';
   const API_IA_MELHORAR = `${API_BASE}/ia-melhorar`;
+  const MAX_CONTACTS = 5000;
 
   const F = (window.ZAuth?.guardFetch || window.ZAuth?.authFetch || fetch);
 
@@ -74,6 +83,8 @@
   const DRAFT_KEY = 'zc:disparos:draft:v3';
   let toastTimer = null;
   let autoRefreshTimer = null;
+  let pendingRequestId = null;
+  let pendingRequestFingerprint = null;
 
   const TEMPLATES = {
     cobranca: 'Olá! Tudo bem? Passando para lembrar sobre sua pendência em aberto. Se quiser, posso te enviar os detalhes e as formas de pagamento por aqui.',
@@ -145,7 +156,8 @@
     if (s === 'pendente') return { label: 'Na fila', cls: 'pending' };
     if (s === 'processando') return { label: 'Enviando', cls: 'processing' };
     if (s === 'concluido') return { label: 'Finalizado', cls: 'success' };
-    if (s === 'erro') return { label: 'Com erro', cls: 'error' };
+    if (s === 'parcial') return { label: 'Finalizado com falhas', cls: 'partial' };
+    if (s === 'erro') return { label: 'Falhou', cls: 'error' };
     if (s === 'cancelado') return { label: 'Cancelado', cls: 'muted' };
     return { label: status || '—', cls: 'muted' };
   }
@@ -209,6 +221,21 @@
     }
   }
 
+  function normalizeBrazilPhone(value) {
+    let digits = String(value || '').replace(/\D+/g, '');
+    if (digits.startsWith('00')) digits = digits.slice(2);
+    let local = digits;
+    if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) local = digits.slice(2);
+    else if (digits.length !== 10 && digits.length !== 11) return null;
+
+    const ddd = local.slice(0, 2);
+    const number = local.slice(2);
+    if (ddd.length !== 2 || ddd.includes('0')) return null;
+    if (number.length === 9 && number[0] !== '9') return null;
+    if (number.length === 8 && !'2345'.includes(number[0])) return null;
+    return '55' + local;
+  }
+
   function parseNumeros() {
     const raw = (numsEl?.value || '');
     const parts = raw.split(/[\n,;]+/);
@@ -217,25 +244,18 @@
     const invalid = [];
 
     for (const part of parts) {
-      const s = part.trim();
-      if (!s) continue;
-      const digits = s.replace(/\D+/g, '');
-      if (!digits) continue;
-
-      if (dedupEl?.checked) {
-        if (seen.has(digits)) continue;
-        seen.add(digits);
-      }
-
-      const obj = { raw: s, digits };
-      if (digits.length >= 10) valid.push(obj);
-      else invalid.push(obj);
+      const value = part.trim();
+      if (!value) continue;
+      const normalized = normalizeBrazilPhone(value);
+      if (!normalized) { invalid.push({ raw: value, digits: value.replace(/\D+/g, '') }); continue; }
+      if (dedupEl?.checked && seen.has(normalized)) continue;
+      seen.add(normalized);
+      valid.push({ raw: value, digits: normalized });
     }
 
     if (resTotalEl) resTotalEl.textContent = String(valid.length + invalid.length);
     if (resValidosEl) resValidosEl.textContent = String(valid.length);
     if (resInvalidosEl) resInvalidosEl.textContent = String(invalid.length);
-
     return { valid, invalid };
   }
 
@@ -294,14 +314,21 @@
     if (resDelayEl) resDelayEl.textContent = getDelayLabel(delay);
     if (resEstimativaEl) resEstimativaEl.textContent = valid.length ? formatTempo(totalSeg) : '—';
 
+    const messageLength = (msgEl?.value || '').length;
+    if (messageCounterEl) messageCounterEl.textContent = `${messageLength} / 4096`;
     const hasMsg = !!(msgEl?.value || '').trim();
     const hasInst = !!window.__INST_ID;
+    const isConnected = window.__INST_CONNECTED !== false;
     const hasValid = valid.length > 0;
 
     if (!hasInst) {
       resumeStateEl.textContent = 'Falta escolher instância';
       resumeStateEl.dataset.kind = 'warn';
       summaryAdviceEl.textContent = 'Escolha primeiro o WhatsApp de envio. Sem isso o disparo não pode começar.';
+    } else if (!isConnected) {
+      resumeStateEl.textContent = 'WhatsApp desconectado';
+      resumeStateEl.dataset.kind = 'warn';
+      summaryAdviceEl.textContent = 'Reconecte esta instância antes de iniciar a campanha.';
     } else if (!hasMsg) {
       resumeStateEl.textContent = 'Falta escrever a mensagem';
       resumeStateEl.dataset.kind = 'warn';
@@ -310,6 +337,10 @@
       resumeStateEl.textContent = 'Faltam contatos válidos';
       resumeStateEl.dataset.kind = 'warn';
       summaryAdviceEl.textContent = 'Adicione pelo menos um número válido para iniciar o disparo.';
+    } else if (valid.length > MAX_CONTACTS) {
+      resumeStateEl.textContent = 'Muitos contatos';
+      resumeStateEl.dataset.kind = 'warn';
+      summaryAdviceEl.textContent = `O limite por campanha é de ${MAX_CONTACTS.toLocaleString('pt-BR')} contatos.`;
     } else if (invalid.length > 0) {
       resumeStateEl.textContent = 'Revisão recomendada';
       resumeStateEl.dataset.kind = 'soft';
@@ -321,10 +352,20 @@
     }
 
     if (heroInstHelpEl) {
-      heroInstHelpEl.textContent = hasInst
-        ? `Instância pronta para uso: ${instName}.`
-        : 'Escolha a instância no botão acima para habilitar o disparo.';
+      heroInstHelpEl.textContent = !hasInst
+        ? 'Escolha uma instância conectada para liberar a criação da campanha.'
+        : (isConnected ? 'A fila está pronta e continuará após reinícios do servidor.' : 'Esta instância está desconectada e não pode iniciar campanhas.');
     }
+    if (connectionTitleEl) connectionTitleEl.textContent = hasInst ? instName : 'Selecione o WhatsApp de envio';
+    if (connectionChipEl) {
+      connectionChipEl.textContent = !hasInst ? 'Aguardando seleção' : (isConnected ? 'Conectado' : 'Desconectado');
+      connectionChipEl.dataset.kind = !hasInst ? '' : (isConnected ? 'ok' : 'error');
+    }
+    if (instMenuBtnEl) {
+      instMenuBtnEl.classList.toggle('is-connected', hasInst && isConnected);
+      instMenuBtnEl.classList.toggle('is-disconnected', hasInst && !isConnected);
+    }
+    if (btnDisparar) btnDisparar.disabled = !(hasInst && isConnected && hasMsg && hasValid && valid.length <= MAX_CONTACTS);
 
     updateDelayRisk();
     saveDraft();
@@ -492,46 +533,46 @@
     }
   }
 
-  function handleFileChange(ev) {
+  async function handleFileChange(ev) {
     const input = ev.target;
     const file = input?.files?.[0];
     if (!file) return;
-
     setImportStatus(`Lendo arquivo "${file.name}"...`, 'info');
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const text = String(reader.result || '');
-        if (!text.trim()) {
-          setImportStatus('Arquivo vazio ou sem conteúdo legível.', 'error');
-          input.value = '';
-          return;
-        }
-
-        const atual = numsEl?.value || '';
-        const combined = atual ? (atual.trimEnd() + '\n' + text.trim()) : text.trim();
-
-        if (numsEl) numsEl.value = combined;
-        updateResumo();
-        setImportStatus(`Arquivo importado: ${file.name}.`, 'success');
-        showToast('Contatos importados com sucesso.', 'success');
-      } catch (e) {
-        console.error('Erro ao importar', e);
-        setImportStatus('Erro ao processar o arquivo.', 'error');
-        showToast('Erro ao processar o arquivo.', 'error');
-      } finally {
-        input.value = '';
+    try {
+      const ext = String(file.name || '').split('.').pop().toLowerCase();
+      let text = '';
+      if (ext === 'xlsx') {
+        if (!window.XLSX) throw new Error('Leitor XLSX não carregado. Tente novamente.');
+        const buffer = await file.arrayBuffer();
+        const workbook = window.XLSX.read(buffer, { type: 'array' });
+        const rows = [];
+        workbook.SheetNames.forEach((name) => {
+          const sheet = workbook.Sheets[name];
+          const data = window.XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+          data.forEach((row) => row.forEach((cell) => { if (String(cell).trim()) rows.push(String(cell).trim()); }));
+        });
+        text = rows.join('\n');
+      } else if (ext === 'txt' || ext === 'csv') {
+        text = await file.text();
+      } else {
+        throw new Error('Formato não suportado. Use TXT, CSV ou XLSX.');
       }
-    };
 
-    reader.onerror = () => {
-      setImportStatus('Erro ao ler arquivo. Tente novamente.', 'error');
-      showToast('Erro ao ler arquivo.', 'error');
+      if (!text.trim()) throw new Error('Arquivo vazio ou sem números legíveis.');
+      const atual = numsEl?.value || '';
+      if (numsEl) numsEl.value = atual ? `${atual.trimEnd()}\n${text.trim()}` : text.trim();
+      updateResumo();
+      const { valid, invalid } = parseNumeros();
+      setImportStatus(`${valid.length} válido(s) importado(s)${invalid.length ? `; ${invalid.length} inválido(s)` : ''}.`, invalid.length ? 'info' : 'success');
+      showToast('Arquivo importado.', 'success');
+    } catch (e) {
+      const message = e?.message || 'Erro ao processar o arquivo.';
+      setImportStatus(message, 'error');
+      showToast(message, 'error');
+    } finally {
       input.value = '';
-    };
-
-    reader.readAsText(file, 'utf-8');
+    }
   }
 
   function buildClientesUrl(q, offset) {
@@ -630,6 +671,7 @@
       const url = buildClientesUrl(q, offset);
       const res = await F(url, { credentials: 'include' });
       const txt = await res.text();
+      if (!res.ok) throw new Error(`Erro HTTP ${res.status}`);
 
       let data;
       try { data = txt ? JSON.parse(txt) : {}; }
@@ -765,6 +807,11 @@
       return null;
     }
 
+    if (window.__INST_CONNECTED === false) {
+      showToast('O WhatsApp selecionado está desconectado.', 'error');
+      return null;
+    }
+
     if (!mensagem) {
       showToast('Digite a mensagem do disparo.', 'error');
       msgEl?.focus();
@@ -777,6 +824,11 @@
       return null;
     }
 
+    if (valid.length > MAX_CONTACTS) {
+      showToast(`O limite por campanha é de ${MAX_CONTACTS.toLocaleString('pt-BR')} contatos.`, 'error');
+      return null;
+    }
+
     const delaySegundos = getDelayValue();
     const instId = Number(String(window.__INST_ID).replace(/\D/g, ''));
 
@@ -785,13 +837,21 @@
       return null;
     }
 
+    const numeros = valid.map(v => v.raw);
+    const fingerprint = JSON.stringify([instId, delaySegundos, mensagem, numeros]);
+    if (!pendingRequestId || pendingRequestFingerprint !== fingerprint) {
+      pendingRequestId = window.crypto?.randomUUID?.() || `disp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      pendingRequestFingerprint = fingerprint;
+    }
+
     return {
       mensagem,
-      numeros: valid.map(v => v.raw),
+      numeros,
       instancia_id: instId,
       delay_segundos: delaySegundos,
       tipo_conteudo: 'text',
-      midia_id: null
+      midia_id: null,
+      request_id: pendingRequestId
     };
   }
 
@@ -836,10 +896,13 @@
       const qtd = Array.isArray(payload.numeros) ? payload.numeros.length : 0;
       const inst = window.__INST_NAME || `Instância ${payload.instancia_id}`;
 
-      setStatus(`Disparo criado com sucesso. ${qtd} contato(s) entrarão em fila pela instância ${inst}.`, 'success');
-      showToast('Disparo iniciado com sucesso.', 'success');
-
+      setStatus(`Campanha criada. ${qtd} contato(s) entraram na fila segura de ${inst}.`, 'success');
+      showToast('Campanha adicionada à fila.', 'success');
+      pendingRequestId = null;
+      pendingRequestFingerprint = null;
+      if (numsEl) numsEl.value = '';
       clearDraft();
+      updateResumo();
       carregarHistorico();
     } catch (e) {
       console.error('Erro ao enviar disparo', e);
@@ -847,10 +910,8 @@
       setStatus(msg, 'error');
       showToast(`Erro ao enviar disparo: ${msg}`, 'error');
     } finally {
-      if (btnDisparar) {
-        btnDisparar.disabled = false;
-        btnDisparar.classList.remove('loading');
-      }
+      if (btnDisparar) btnDisparar.classList.remove('loading');
+      updateResumo();
     }
   }
 
@@ -877,86 +938,126 @@
     return `<td data-label="${escapeHTML(label)}"${extraStyle ? ` style="${extraStyle}"` : ''}>${value}</td>`;
   }
 
-  function buildQtdCell(item) {
-    const total =
-      item?.qtd_numeros ??
-      item?.total_numeros ??
-      item?.total_destinatarios ??
-      0;
-
+  function buildProgressCell(item) {
+    const total = Number(item?.qtd_numeros ?? item?.total_destinatarios ?? 0) || 0;
+    const sent = Number(item?.enviados_sucesso ?? 0) || 0;
+    const errors = Number(item?.enviados_erro ?? 0) || 0;
+    const processed = Math.min(total, sent + errors);
+    const pct = Number.isFinite(Number(item?.progresso_pct)) ? Number(item.progresso_pct) : (total ? Math.round((processed / total) * 100) : 0);
     return `
-      <div class="hist-qty">
-        <strong>${escapeHTML(total)}</strong>
-        <small>contato(s)</small>
-      </div>
-    `;
+      <div class="progress-cell">
+        <div class="progress-row"><strong>${escapeHTML(processed)} de ${escapeHTML(total)}</strong><span>${escapeHTML(pct)}%</span></div>
+        <div class="progress-track"><i style="width:${Math.max(0, Math.min(100, pct))}%"></i></div>
+        <div class="progress-meta"><span class="ok">${escapeHTML(sent)} enviados</span><span class="bad">${escapeHTML(errors)} falhas</span></div>
+      </div>`;
   }
 
   function reuseHistorico(item) {
     if (!item) return;
-
     const mensagem = String(item.mensagem || '').trim();
     const delay = item.delay_segundos ?? item.delay ?? item.intervalo_segundos ?? null;
-
     if (msgEl && mensagem) msgEl.value = mensagem;
     if (delayEl && delay != null) delayEl.value = String(delay);
-
     updateResumo();
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    showToast('Mensagem e intervalo reaproveitados do histórico.', 'success');
+    showToast('Mensagem e intervalo reaproveitados.', 'success');
   }
 
-  function renderHistorico(itens) {
+  async function cancelarHistorico(item, button) {
+    if (!item?.id) return;
+    if (!window.confirm('Cancelar esta campanha? As mensagens já enviadas não serão desfeitas.')) return;
+    if (button) button.disabled = true;
+    try {
+      const res = await F(`${API_BASE}/${encodeURIComponent(item.id)}/cancelar`, { method: 'POST', credentials: 'include' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.detail || 'Não foi possível cancelar a campanha.');
+      showToast('Campanha cancelada.', 'success');
+      carregarHistorico();
+    } catch (e) {
+      showToast(e?.message || 'Erro ao cancelar campanha.', 'error');
+      if (button) button.disabled = false;
+    }
+  }
+
+  function updateMetrics(items) {
+    const list = Array.isArray(items) ? items : [];
+    const active = list.filter((it) => ['pendente','processando'].includes(String(it?.status || '').toLowerCase())).length;
+    const pending = list.reduce((sum,it) => sum + (Number(it?.pendentes) || 0), 0);
+    const sent = list.reduce((sum,it) => sum + (Number(it?.enviados_sucesso) || 0), 0);
+    const errors = list.reduce((sum,it) => sum + (Number(it?.enviados_erro) || 0), 0);
+    if (metricAtivasEl) metricAtivasEl.textContent = active.toLocaleString('pt-BR');
+    if (metricPendentesEl) metricPendentesEl.textContent = pending.toLocaleString('pt-BR');
+    if (metricEnviadosEl) metricEnviadosEl.textContent = sent.toLocaleString('pt-BR');
+    if (metricErrosEl) metricErrosEl.textContent = errors.toLocaleString('pt-BR');
+  }
+
+  function renderHistorico(itens, options = {}) {
     if (!tbodyHist) return;
-
     tbodyHist.innerHTML = '';
+    const list = Array.isArray(itens) ? itens : [];
+    updateMetrics(list);
 
-    if (!Array.isArray(itens) || !itens.length) {
-      if (emptyHist) emptyHist.style.display = '';
+    if (!list.length) {
+      if (emptyHist) {
+        emptyHist.style.display = 'flex';
+        const strong = emptyHist.querySelector('strong');
+        const small = emptyHist.querySelector('small');
+        if (options.error) {
+          if (strong) strong.textContent = 'Não foi possível carregar o histórico';
+          if (small) small.textContent = 'Verifique a conexão e clique em Atualizar.';
+        } else {
+          if (strong) strong.textContent = 'Nenhuma campanha encontrada';
+          if (small) small.textContent = 'Crie sua primeira campanha usando o formulário acima.';
+        }
+      }
       if (topMetaEl) topMetaEl.textContent = '0';
+      tbodyHist.__items = [];
       return;
     }
 
     if (emptyHist) emptyHist.style.display = 'none';
-    if (topMetaEl) topMetaEl.textContent = String(itens.length);
+    if (topMetaEl) topMetaEl.textContent = String(list.length);
 
-    itens.forEach((item, idx) => {
+    list.forEach((item, idx) => {
       const tr = document.createElement('tr');
-
-      const msg = (item.mensagem || '').toString();
-      const preview = msg.length > 110 ? msg.slice(0, 110) + '…' : msg;
+      const msg = String(item.mensagem || '');
+      const preview = msg.length > 92 ? msg.slice(0, 92) + '…' : msg;
       const inst = item.instancia_nome || item.instance_name || item.instancia_id || '—';
       const por = resolveAutor(item);
       const statusObj = normalizeStatusHuman(item.status || 'pendente');
       const criado = fmtDate(item.criado_em || item.created_at || item.created);
-
+      const total = Number(item.qtd_numeros || 0);
+      const canCancel = item.pode_cancelar === true || ['pendente','processando'].includes(String(item.status || '').toLowerCase());
+      const actions = `
+        <div class="action-group">
+          <button type="button" class="btn btn-soft btn-icon" title="Reusar mensagem" data-action="reusar" data-index="${idx}"><i class="fa-regular fa-copy"></i></button>
+          ${canCancel ? `<button type="button" class="btn btn-danger btn-icon" title="Cancelar campanha" data-action="cancelar" data-index="${idx}"><i class="fa-solid fa-xmark"></i></button>` : ''}
+        </div>`;
       tr.innerHTML = [
-        tdCell('Mensagem', `<div class="hist-msg"><strong>${escapeHTML(preview || '—')}</strong></div>`),
-        tdCell('Contatos', buildQtdCell(item)),
-        tdCell('Instância', `<span class="hist-inst">${escapeHTML(inst)}</span>`),
+        tdCell('Campanha', `<div class="hist-msg"><strong>${escapeHTML(preview || '—')}</strong><small>${escapeHTML(total)} contato(s) · intervalo ${escapeHTML(getDelayLabel(item.delay_segundos || 20))}</small></div>`),
+        tdCell('Progresso', buildProgressCell(item)),
+        tdCell('WhatsApp', `<span class="hist-inst">${escapeHTML(inst)}</span>`),
         tdCell('Criado por', escapeHTML(por)),
         tdCell('Status', `<span class="status-pill ${escapeHTML(statusObj.cls)}">${escapeHTML(statusObj.label)}</span>`),
         tdCell('Criado em', escapeHTML(criado)),
-        tdCell('Ação', `<button type="button" class="btn btn-sm btn-ghost-action" data-action="reusar" data-index="${idx}"><i class="fa-solid fa-copy"></i><span>Reusar</span></button>`)
+        tdCell('Ações', actions)
       ].join('');
+      tbodyHist.appendChild(tr);
     });
-
-    tbodyHist.__items = itens;
+    tbodyHist.__items = list;
   }
 
   function bindHistoricoActions() {
     if (!tbodyHist) return;
-
     tbodyHist.addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-action="reusar"]');
+      const btn = e.target.closest('[data-action]');
       if (!btn) return;
-
       const idx = Number(btn.dataset.index);
       const items = Array.isArray(tbodyHist.__items) ? tbodyHist.__items : [];
       const item = items[idx];
       if (!item) return;
-
-      reuseHistorico(item);
+      if (btn.dataset.action === 'reusar') reuseHistorico(item);
+      if (btn.dataset.action === 'cancelar') cancelarHistorico(item, btn);
     });
   }
 
@@ -991,17 +1092,16 @@
     try {
       const res = await F(url, { credentials: 'include' });
       const txt = await res.text();
-
+      if (!res.ok) throw new Error(`Erro HTTP ${res.status}`);
       let data;
       try { data = txt ? JSON.parse(txt) : []; }
-      catch { data = []; }
-
+      catch { throw new Error('Resposta inválida do servidor.'); }
       const itens = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
       renderHistorico(itens);
       startAutoRefreshIfNeeded(itens);
     } catch (e) {
       console.error('Erro ao carregar histórico', e);
-      renderHistorico([]);
+      renderHistorico([], { error: true });
       showToast('Erro ao carregar histórico.', 'error');
     }
   }
@@ -1080,7 +1180,7 @@
         const a = document.activeElement;
         if (a && a.classList.contains('inst-item')) {
           e.preventDefault();
-          selectValue(a.dataset.value, a.dataset.label);
+          selectValue(a.dataset.value, a.dataset.label, a.dataset.connected !== 'false');
         }
       }
     }
@@ -1089,8 +1189,15 @@
 
     const instValue = i => i.instancia_id ?? i.id ?? i.instance_id ?? i.session ?? i.sessionName ?? '';
     const instLabel = (i, v) => i.apelido || i.nome || i.instance_name || String(v) || 'Instância';
+    const instConnected = (i) => {
+      if (!i || !Object.keys(i).length) return true;
+      if (i.connected === false || i.conectado === false || i.is_connected === false) return false;
+      const state = String(i.status || i.state || i.connectionStatus || '').toLowerCase();
+      if (['close','closed','disconnected','desconectado','offline'].includes(state)) return false;
+      return true;
+    };
 
-    function makeItem(text, value, selected) {
+    function makeItem(text, value, selected, connected = true) {
       const li = document.createElement('li');
       const b = document.createElement('button');
       b.type = 'button';
@@ -1100,11 +1207,13 @@
       b.tabIndex = -1;
       b.dataset.value = String(value ?? '');
       b.dataset.label = text;
+      b.dataset.connected = connected ? 'true' : 'false';
+      b.disabled = !!value && !connected;
       b.innerHTML = `
         <span class="radio" aria-hidden="true"></span>
-        <span>${escapeHTML(text)}</span>
+        <span class="inst-copy"><span>${escapeHTML(text)}</span><small>${value ? (connected ? 'Conectado' : 'Desconectado') : 'Escolha um WhatsApp'}</small></span>
       `;
-      b.addEventListener('click', () => selectValue(String(value ?? ''), text));
+      b.addEventListener('click', () => selectValue(String(value ?? ''), text, connected));
       li.appendChild(b);
       return li;
     }
@@ -1124,15 +1233,17 @@
       updateResumo();
     }
 
-    function applyInstancia(value, text) {
+    function applyInstancia(value, text, connected = true) {
       window.__INST_ID = value ? Number(String(value).replace(/\D/g, '')) : '';
       window.__INST_NAME = (text || '').trim();
+      window.__INST_CONNECTED = value ? connected !== false : undefined;
       setActiveUI(value, text);
       if (typeof window.onInstanciaChange === 'function') window.onInstanciaChange(value, text);
     }
 
-    function selectValue(value, text) {
-      applyInstancia(value, text);
+    function selectValue(value, text, connected = true) {
+      if (value && connected === false) { showToast('Este WhatsApp está desconectado.', 'error'); return; }
+      applyInstancia(value, text, connected);
       closeMenu();
       btn.focus();
       showToast(text ? `Instância selecionada: ${text}` : 'Filtro de instância limpo.', 'success');
@@ -1140,7 +1251,7 @@
 
     async function loadList() {
       listEl.innerHTML = '';
-      listEl.appendChild(makeItem('Selecione uma instância', '', false));
+      listEl.appendChild(makeItem('Selecione uma instância', '', false, true));
 
       let items = [];
 
@@ -1167,10 +1278,11 @@
       items.forEach(i => {
         const v = String(instValue(i) ?? '');
         const t = instLabel(i, v);
-        listEl.appendChild(makeItem(t, v, false));
+        const connected = instConnected(i);
+        listEl.appendChild(makeItem(t, v, false, connected));
       });
 
-      applyInstancia('', 'Selecione uma instância');
+      applyInstancia('', 'Selecione uma instância', true);
     }
 
     loadList();

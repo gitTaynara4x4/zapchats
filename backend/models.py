@@ -1632,6 +1632,64 @@ class ChatbotConfig(Base):
     )
 
 
+class ChatbotDispatchMarker(Base):
+    """Marcador persistente de eventos enviados pelo chatbot.
+
+    Evita usar o texto da mensagem como regra de negócio. O conteúdo do menu
+    pode ser personalizado sem desativar a proteção contra reenvio.
+    """
+
+    __tablename__ = "chatbot_dispatch_markers"
+    __table_args__ = (
+        UniqueConstraint(
+            "empresa_id",
+            "instancia_id",
+            "cliente_id",
+            "event_key",
+            name="uq_chatbot_dispatch_emp_inst_cli_event",
+        ),
+        Index(
+            "ix_chatbot_dispatch_lookup",
+            "empresa_id",
+            "instancia_id",
+            "cliente_id",
+            "event_key",
+            "sent_at",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(
+        Integer,
+        ForeignKey("empresas.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    instancia_id = Column(
+        Integer,
+        ForeignKey("empresas_instancias.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    cliente_id = Column(
+        Integer,
+        ForeignKey("clientes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_key = Column(String(64), nullable=False)
+    sent_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
 # =======================================================
 # Chat Interno
 # =======================================================
@@ -1881,3 +1939,51 @@ class BillingAsaasEvent(Base):
             f"<BillingAsaasEvent id={self.id} emp={self.empresa_id} "
             f"event={self.event!r} payment={self.payment_id!r}>"
         )
+
+# =========================
+# Configurações - Relatos de suporte
+# =========================
+class RelatoSuporte(Base):
+    __tablename__ = "relatos_suporte"
+    __table_args__ = (
+        Index("ix_relatos_suporte_empresa_created", "empresa_id", "created_at"),
+        Index("ix_relatos_suporte_status", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    empresa_id = Column(
+        Integer,
+        ForeignKey("empresas.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    usuario_id = Column(
+        Integer,
+        ForeignKey("usuarios.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    colaborador_id = Column(
+        Integer,
+        ForeignKey("colaboradores.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    tipo = Column(String(20), nullable=False, server_default="bug")
+    titulo = Column(String(120), nullable=False)
+    descricao = Column(Text, nullable=False)
+    pagina = Column(String(255), nullable=True)
+    status = Column(String(20), nullable=False, server_default="aberto")
+
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

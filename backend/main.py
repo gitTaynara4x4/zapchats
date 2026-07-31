@@ -27,7 +27,11 @@ from sqlalchemy import text
 # Routers
 from backend.routers.seo_landing import router as seo_landing_router
 from backend.routers.email import router as email_router
-from backend.routers.disparos import router as disparos_router
+from backend.routers.disparos import (
+    router as disparos_router,
+    start_disparos_dispatcher,
+    stop_disparos_dispatcher,
+)
 from backend.routers import chatbot_setores as chatbot_setores_router
 from backend.routers.atendimento_conversas import router as atendimento_conversas_router
 from backend.routers import internal_chat as internal_chat_router
@@ -59,6 +63,7 @@ from backend.routers import chatbot_config as chatbot_config_router
 from backend.routers import admin_planos
 from backend.routers.perfil import router as perfil_router
 from backend.routers.meu_plano import router as meu_plano_router
+from backend.routers.configuracoes import router as configuracoes_router
 from backend.routers.integracoes_valora import router as integracoes_valora_router
 
 # ✅ Router de filas
@@ -1159,6 +1164,7 @@ app.include_router(evolution_router)
 
 app.include_router(perfil_router)
 app.include_router(meu_plano_router)
+app.include_router(configuracoes_router)
 app.include_router(atendimento_transferencia_router)
 app.include_router(billing_asaas_router)
 
@@ -1561,6 +1567,13 @@ async def _start_integrations():
     app.state.rabbit_stop = None
     app.state.evo_task = None
     app.state.evo_stop = None
+    app.state.disparos_task = None
+
+    try:
+        app.state.disparos_task = await start_disparos_dispatcher()
+        LOG("[STARTUP] Fila persistente de disparos ligada.")
+    except Exception as e:
+        LOG(f"[STARTUP][Disparos] falha ao iniciar dispatcher: {e}")
 
     if USE_RABBIT:
         try:
@@ -1640,6 +1653,16 @@ async def _stop_named_task(task, *, name: str, timeout: float = 3.0) -> None:
 @app.on_event("shutdown")
 async def _stop_integrations():
     LOG("[SHUTDOWN] encerrando integrações...")
+
+    try:
+        await stop_disparos_dispatcher()
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        LOG(f"[SHUTDOWN][Disparos] erro no stop: {e}")
+
+    disparos_task = getattr(app.state, "disparos_task", None)
+    await _stop_named_task(disparos_task, name="Disparos", timeout=3.0)
 
     stop = getattr(app.state, "rabbit_stop", None)
     if stop:

@@ -222,8 +222,14 @@ def update_login_config(
 ):
     """
     Atualiza configurações relacionadas ao login da empresa.
+    Somente o administrador pode alterar esta proteção global.
     """
     _assert_empresa_access(empresa_id, identity)
+    if not bool(identity.get("is_admin") if isinstance(identity, dict) else getattr(identity, "is_admin", False)):
+        raise HTTPException(
+            status_code=403,
+            detail="Somente o administrador pode alterar a segurança de acesso",
+        )
 
     emp = db.query(models.Empresa).filter(models.Empresa.id == int(empresa_id)).first()
     if not emp:
