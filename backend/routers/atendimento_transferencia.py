@@ -378,15 +378,17 @@ async def transferir_conversa_departamento(
         atd.fila_escolhida_em = None
 
     if payload.limpar_operador_atual:
+        # Transferência de departamento é uma troca de contexto: participantes
+        # do departamento anterior não devem continuar respondendo por acidente.
+        atd = release_to_queue(db, atendimento=atd) or atd
         if primary_colab_id is not None:
             atd = claim_exclusive_operator(
                 db,
                 atendimento=atd,
                 colaborador_id=int(primary_colab_id),
-            )
+            ) or atd
             cliente.colaborador_id = int(primary_colab_id)
         else:
-            atd = release_to_queue(db, atendimento=atd)
             cliente.colaborador_id = None
     elif primary_colab_id is not None and getattr(atd, "operador_id", None) is None:
         atd = claim_if_available(

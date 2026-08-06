@@ -548,11 +548,10 @@ def ensure_participante_ativo_repo(
     preferir_responsavel_se_vazio: bool = True,
 ):
     """
-    Garante o vínculo sem permitir dois responsáveis ativos.
+    Garante o vínculo do colaborador sem roubar a responsabilidade principal.
 
-    Se já existe outro operador, o caller não pode roubar o atendimento apenas
-    por receber/enviar uma mensagem. Se está livre ou já é do mesmo colaborador,
-    o vínculo é normalizado de forma exclusiva.
+    Se já existe outro operador, o colaborador entra como participante. Se a
+    conversa está livre (ou já é dele), o vínculo principal é normalizado.
     """
     if atendimento is None:
         return None
@@ -563,7 +562,12 @@ def ensure_participante_ativo_repo(
 
     current_operator = _to_int(getattr(atendimento, "operador_id", None))
     if current_operator is not None and current_operator != int(colaborador_id_i):
-        return None
+        return _upsert_participante(
+            db,
+            atendimento=atendimento,
+            colaborador_id=int(colaborador_id_i),
+            is_responsavel=False,
+        )
 
     if not preferir_responsavel_se_vazio and current_operator is None:
         return _upsert_participante(

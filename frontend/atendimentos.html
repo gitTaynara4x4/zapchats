@@ -1699,6 +1699,12 @@
         const aceitaPorMim = aceitaRaw !== undefined
           ? boolish(aceitaRaw)
           : Boolean(operadorId && colabId && operadorId === colabId);
+        const responsavelRaw = readFirst(['responsavel_por_mim','responsavelPorMim']);
+        const responsavelPorMim = responsavelRaw !== undefined
+          ? boolish(responsavelRaw)
+          : Boolean(operadorId && colabId && operadorId === colabId);
+        const alguemRaw = readFirst(['accepted_by_anyone','acceptedByAnyone','tem_participantes','temParticipantes']);
+        const temParticipantes = alguemRaw !== undefined ? boolish(alguemRaw) : Boolean(operadorId);
 
         const podeAceitarRaw = readFirst(['pode_aceitar','podeAceitar','can_accept','canAccept']);
         const podeLiberarRaw = readFirst(['pode_liberar','podeLiberar','can_release','canRelease']);
@@ -1716,7 +1722,10 @@
           podeLiberarRaw === undefined ? aceitaPorMim : boolish(podeLiberarRaw)
         );
 
-        return { exigir, aceitaPorMim, podeAceitar, podeLiberar, aguardando };
+        return {
+          exigir, aceitaPorMim, responsavelPorMim, temParticipantes,
+          podeAceitar, podeLiberar, aguardando
+        };
       }
 
       function setBtnText(btn, text) {
@@ -1759,11 +1768,11 @@
 
         if (!footer || !bar) return;
 
-        setBtnText(btnAccept, 'Atender');
-        setBtnText(btnRelease, 'Liberar');
-        setBtnText(btnTransfer, 'Transferir');
-
         const st = currentClaimState();
+
+        setBtnText(btnAccept, st.temParticipantes ? 'Participar' : 'Atender');
+        setBtnText(btnRelease, st.responsavelPorMim ? 'Liberar' : 'Sair');
+        setBtnText(btnTransfer, 'Transferir');
 
         if (!st.exigir) {
           setDataset(footer, 'sendLocked', '0');
@@ -1786,8 +1795,10 @@
           setDataset(bar, 'canAccept', st.podeAceitar ? '1' : '0');
           setDataset(bar, 'podeLiberar', '0');
 
-          if (title && !title.textContent.trim()) title.textContent = 'Atenda para responder';
-          if (subtitle && !subtitle.textContent.trim()) subtitle.textContent = 'Clique em Atender para assumir este atendimento.';
+          if (title) title.textContent = st.temParticipantes ? 'Atendimento em andamento' : 'Atenda para responder';
+          if (subtitle) subtitle.textContent = st.temParticipantes
+            ? 'Clique em Participar para responder junto sem trocar o responsável principal.'
+            : 'Clique em Atender para assumir este atendimento.';
 
           setHidden(btnAccept, !st.podeAceitar);
           setHidden(btnRelease, true);
@@ -1803,14 +1814,16 @@
         setDataset(bar, 'canAccept', '0');
         setDataset(bar, 'podeLiberar', st.podeLiberar ? '1' : '0');
 
-        if (title && !title.textContent.trim()) title.textContent = 'Atendimento com você';
-        if (subtitle && !subtitle.textContent.trim()) subtitle.textContent = 'Agora você pode responder normalmente.';
+        if (title) title.textContent = st.responsavelPorMim ? 'Atendimento com você' : 'Você está participando';
+        if (subtitle) subtitle.textContent = st.responsavelPorMim
+          ? 'Você é o responsável principal e pode responder normalmente.'
+          : 'Você pode responder junto sem alterar o responsável principal.';
 
         setHidden(btnAccept, true);
         setHidden(btnRelease, !st.podeLiberar);
-        // Depois de assumir, a transferência para outro colaborador precisa
-        // permanecer visível. O guard antigo escondia o botão novamente.
-        setHidden(btnTransfer, !st.aceitaPorMim);
+        // Transferir colaborador é ação do responsável principal (ou admin,
+        // tratado pelo módulo completo). Participante secundário apenas sai.
+        setHidden(btnTransfer, !st.responsavelPorMim);
       }
 
       function scheduleSync() {

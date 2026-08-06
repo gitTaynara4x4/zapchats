@@ -34,6 +34,7 @@ from .utils import (
 
 from .colaborador_helpers import (
     _resolve_identity_colab_id,
+    _is_admin_identity,
     _cliente_instancia_mais_recente,
     _assert_departamento_acl_for_row,
     _instancia_permitida_para_colaborador,
@@ -43,7 +44,8 @@ from .colaborador_helpers import (
 
 from .participantes import (
     _claim_exclusive_participant,
-    _release_all_participants,
+    _join_participant,
+    _release_participante,
     _response_atendimento_estado,
 )
 
@@ -313,21 +315,27 @@ def _claim_mode_payload(
 
     operador_id = _to_int(getattr(atendimento, "operador_id", None))
     colab_id = _to_int(current_colab_id)
-    assigned_to_me = bool(operador_id is not None and colab_id is not None and operador_id == colab_id)
-    waiting = operador_id is None
+    participant_ids = {
+        int(x) for x in (part_info.get("participantes_ids") or []) if x is not None
+    }
+    participating = bool(colab_id is not None and int(colab_id) in participant_ids)
+    responsavel_por_mim = bool(
+        operador_id is not None and colab_id is not None and operador_id == colab_id
+    )
 
     return {
         "claim_mode": "departamento",
         "departamento_claim": True,
         "exigir_aceite": True,
         "aceite_obrigatorio": True,
-        "aguardando_aceite": bool(waiting or not assigned_to_me),
-        "pode_aceitar": bool(waiting and colab_id is not None),
-        "pode_liberar": bool(assigned_to_me),
-        "pode_responder": bool(assigned_to_me or colab_id is None),
-        "aceita_por_mim": bool(assigned_to_me),
-        "accepted_by_me": bool(assigned_to_me),
-        "accepted_by_anyone": bool(operador_id is not None),
+        "aguardando_aceite": bool(colab_id is not None and not participating),
+        "pode_aceitar": bool(colab_id is not None and not participating),
+        "pode_liberar": bool(participating),
+        "pode_responder": bool(participating or colab_id is None),
+        "aceita_por_mim": bool(participating),
+        "accepted_by_me": bool(participating),
+        "accepted_by_anyone": bool(participant_ids or operador_id is not None),
+        "responsavel_por_mim": bool(responsavel_por_mim),
     }
 
 # =========================================================
@@ -408,14 +416,6 @@ def aceitar_conversa(
         instancia_id=int(resolved_inst_id),
     )
 
-    assert_cliente_conversation_visibility(
-        db,
-        identity=identity,
-        empresa_id=int(empresa_id),
-        cliente=cliente,
-        atendimento=atd,
-    )
-
     departamento_acl = (
         getattr(atd, "departamento_id", None)
         if atd is not None and hasattr(atd, "departamento_id")
@@ -461,25 +461,25 @@ def aceitar_conversa(
         else None
     )
 
-    status_atual = (
-        _status_to_str(getattr(atd, "status", None))
-        if hasattr(atd, "status")
-        else None
+    before_info = _response_atendimento_estado(
+        db,
+        atendimento=atd,
+        current_colab_id=int(colab_id),
     )
+    already_accepted = bool(before_info.get("aceita_por_mim"))
+    became_responsavel = bool(operador_atual is None and not already_accepted)
 
-    if operador_atual is not None and int(operador_atual) != int(colab_id):
+    if (
+        not _participant_feature_enabled(db)
+        and operador_atual is not None
+        and int(operador_atual) != int(colab_id)
+    ):
         raise HTTPException(
             status_code=409,
             detail="Esse atendimento já foi assumido por outro colaborador",
         )
 
-    already_accepted = (
-        operador_atual is not None
-        and int(operador_atual) == int(colab_id)
-        and status_atual == "em_atendimento"
-    )
-
-    atd = _claim_exclusive_participant(
+    atd = _join_participant(
         db,
         atendimento=atd,
         colaborador_id=int(colab_id),
@@ -493,13 +493,18 @@ def aceitar_conversa(
 
     if not already_accepted:
         colab_nome = _nome_colaborador(db, int(colab_id)) or "Atendente"
+        texto_evento = (
+            f"{colab_nome} assumiu este atendimento."
+            if became_responsavel
+            else f"{colab_nome} entrou neste atendimento para colaborar."
+        )
         evento_sistema = _criar_evento_sistema_atendimento(
             db,
             empresa_id=int(empresa_id),
             cliente_id=int(cliente.id),
             instancia_id=int(resolved_inst_id),
             atendimento_id=int(getattr(atd, "id", 0) or 0),
-            texto=f"{colab_nome} assumiu este atendimento.",
+            texto=texto_evento,
         )
         db.flush()
 
@@ -515,6 +520,8 @@ def aceitar_conversa(
     response = {
         "ok": True,
         "already_accepted": already_accepted,
+        "joined_as_participant": bool(not already_accepted and not became_responsavel),
+        "became_responsavel": bool(became_responsavel),
         "cliente_id": int(cliente.id),
         "instancia_id": int(resolved_inst_id),
         "atendimento_id": int(atd.id),
@@ -671,6 +678,8 @@ def liberar_conversa(
     operador_atual_inicial = _to_int(getattr(atd, "operador_id", None))
     liberado_de_verdade = False
     ja_estava_liberado = False
+    released_to_queue = False
+    promoted_responsavel_id = None
 
     if _participant_feature_enabled(db):
         active_info_before = _response_atendimento_estado(
@@ -678,28 +687,22 @@ def liberar_conversa(
             atendimento=atd,
             current_colab_id=int(colab_id),
         )
+        participa_antes = bool(active_info_before.get("aceita_por_mim"))
 
-        aceita_por_mim_antes = bool(active_info_before.get("aceita_por_mim"))
-        sou_operador_atual = bool(
-            operador_atual_inicial is not None
-            and int(operador_atual_inicial) == int(colab_id)
-        )
-
-        if operador_atual_inicial is not None and not sou_operador_atual:
-            raise HTTPException(
-                status_code=409,
-                detail="Somente o responsável atual pode liberar a conversa",
-            )
-
-        if operador_atual_inicial is None and not aceita_por_mim_antes:
+        if not participa_antes:
             ja_estava_liberado = True
         else:
-            liberado_de_verdade = True
-
-        atd = _release_all_participants(db, atendimento=atd)
-        if atd is None:
-            raise HTTPException(status_code=404, detail="Atendimento não encontrado")
-
+            release_result = _release_participante(
+                db,
+                atendimento=atd,
+                colaborador_id=int(colab_id),
+            )
+            atd = release_result.get("atendimento")
+            if atd is None:
+                raise HTTPException(status_code=404, detail="Atendimento não encontrado")
+            liberado_de_verdade = bool(release_result.get("removed"))
+            released_to_queue = bool(release_result.get("released_to_queue"))
+            promoted_responsavel_id = _to_int(release_result.get("promoted_responsavel_id"))
     else:
         operador_atual = operador_atual_inicial
 
@@ -712,20 +715,23 @@ def liberar_conversa(
             )
         else:
             liberado_de_verdade = True
+            released_to_queue = True
 
-        atd.operador_id = None
-        atd.status = (
-            models.StatusAtendimento.AGUARDANDO
-            if getattr(atd, "departamento_id", None) is not None
-            else models.StatusAtendimento.NOVO
-        )
-        if hasattr(atd, "aceito_em"):
-            atd.aceito_em = None
+        if liberado_de_verdade:
+            atd.operador_id = None
+            atd.status = (
+                models.StatusAtendimento.AGUARDANDO
+                if getattr(atd, "departamento_id", None) is not None
+                else models.StatusAtendimento.NOVO
+            )
+            if hasattr(atd, "aceito_em"):
+                atd.aceito_em = None
 
     # Se o menu de departamentos está desligado, liberar significa devolver
     # a conversa ao atendimento manual, não colocá-la novamente em aceite.
     if (
-        getattr(atd, "fila_id", None) is None
+        released_to_queue
+        and getattr(atd, "fila_id", None) is None
         and customer_has_department_triage_marker(
             cliente, getattr(atd, "departamento_id", None)
         )
@@ -743,14 +749,22 @@ def liberar_conversa(
 
     if liberado_de_verdade and not ja_estava_liberado:
         colab_nome = _nome_colaborador(db, int(colab_id)) or "Atendente"
-        dep_nome = _nome_departamento(db, getattr(atd, "departamento_id", None)) or "o departamento"
+        if released_to_queue:
+            dep_nome = _nome_departamento(db, getattr(atd, "departamento_id", None)) or "o departamento"
+            texto_evento = f"{colab_nome} liberou este atendimento para {dep_nome}."
+        elif promoted_responsavel_id is not None:
+            promoted_nome = _nome_colaborador(db, int(promoted_responsavel_id)) or "Outro atendente"
+            texto_evento = f"{colab_nome} saiu deste atendimento. {promoted_nome} assumiu como responsável."
+        else:
+            texto_evento = f"{colab_nome} saiu deste atendimento."
+
         evento_sistema = _criar_evento_sistema_atendimento(
             db,
             empresa_id=int(empresa_id),
             cliente_id=int(cliente.id),
             instancia_id=int(resolved_inst_id),
             atendimento_id=int(getattr(atd, "id", 0) or 0),
-            texto=f"{colab_nome} liberou este atendimento para {dep_nome}.",
+            texto=texto_evento,
         )
         db.flush()
 
@@ -767,6 +781,9 @@ def liberar_conversa(
         "ok": True,
         "already_released": bool(ja_estava_liberado),
         "released": bool(liberado_de_verdade),
+        "left_participation": bool(liberado_de_verdade and not released_to_queue),
+        "released_to_queue": bool(released_to_queue),
+        "promoted_responsavel_id": promoted_responsavel_id,
         "cliente_id": int(cliente.id),
         "instancia_id": int(resolved_inst_id),
         "atendimento_id": int(atd.id),
@@ -924,6 +941,23 @@ def transferir_colaborador(
         departamento_id=departamento_acl,
     )
 
+    current_colab_id = _resolve_identity_colab_id(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id),
+        required=False,
+    )
+    operador_atual = _to_int(getattr(atd, "operador_id", None))
+    if (
+        not _is_admin_identity(identity)
+        and operador_atual is not None
+        and _to_int(current_colab_id) != operador_atual
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Somente o responsável principal pode transferir este atendimento",
+        )
+
     target = (
         db.query(models.Colaborador)
         .filter(
@@ -978,13 +1012,6 @@ def transferir_colaborador(
     db.add(atd)
     db.commit()
     db.refresh(atd)
-
-    current_colab_id = _resolve_identity_colab_id(
-        db,
-        identity=identity,
-        empresa_id=int(empresa_id),
-        required=False,
-    )
 
     part_info = _response_atendimento_estado(
         db,

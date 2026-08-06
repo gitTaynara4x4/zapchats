@@ -1376,11 +1376,11 @@ class AtendimentoParticipante(Base):
         Index("ix_atd_participante_colaborador", "empresa_id", "colaborador_id"),
         Index("ix_atd_participante_ativo", "empresa_id", "is_ativo"),
         Index(
-            "uq_atd_participante_um_ativo",
+            "uq_atd_participante_um_responsavel_ativo",
             "empresa_id",
             "atendimento_id",
             unique=True,
-            postgresql_where=text("is_ativo IS TRUE"),
+            postgresql_where=text("is_ativo IS TRUE AND role = 'responsavel'"),
         ),
     )
 

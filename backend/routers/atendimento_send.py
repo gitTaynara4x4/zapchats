@@ -518,35 +518,38 @@ def _ensure_sender_can_send_existing_cliente(
     if not exige_aceite:
         return
 
-    if departamento_id is not None and _is_department_claim_atendimento(
-        db, atendimento=atendimento, cliente=cliente
-    ):
-        if operador_id is None or status_atd in {"novo", "aguardando", "pendente"}:
-            raise HTTPException(409, "Clique em Atender antes de responder.")
-
-        if int(operador_id) != int(current_colab_id):
-            raise HTTPException(409, "Esse atendimento está com outro responsável.")
-
-        return
-
-    # PONTO PRINCIPAL legado:
-    # só exige aceite se a fila escolhida exigir.
-
     participant_ids = _active_participant_ids(
         db,
         empresa_id=int(empresa_id),
         atendimento_id=getattr(atendimento, "id", None),
     )
+    participating = int(current_colab_id) in set(int(x) for x in participant_ids)
+
+    if departamento_id is not None and _is_department_claim_atendimento(
+        db, atendimento=atendimento, cliente=cliente
+    ):
+        if participating:
+            return
+
+        if operador_id is None or status_atd in {"novo", "aguardando", "pendente"}:
+            raise HTTPException(409, "Clique em Atender antes de responder.")
+
+        raise HTTPException(
+            409,
+            "Clique em Participar para responder junto com o responsável atual.",
+        )
+
+    # Fila com aceite obrigatório: qualquer participante ativo pode responder.
 
     if participant_ids:
         if int(current_colab_id) not in set(int(x) for x in participant_ids):
-            raise HTTPException(409, "Você precisa aceitar a conversa antes de responder.")
+            raise HTTPException(409, "Clique em Participar antes de responder.")
         return
 
     operador_id = _to_int(getattr(atendimento, "operador_id", None))
     if operador_id is not None:
         if int(operador_id) != int(current_colab_id):
-            raise HTTPException(409, "Essa conversa está com outro responsável.")
+            raise HTTPException(409, "Clique em Participar para responder junto com o responsável atual.")
         return
 
     raise HTTPException(409, "Aceite a conversa antes de responder.")
@@ -560,8 +563,8 @@ def _sync_sender_as_participant_if_needed(
 ):
     """
     Normaliza o remetente como responsável somente quando o atendimento está
-    livre ou já pertence a ele. Nunca cria um segundo participante ativo e
-    nunca toma o atendimento de outro colaborador.
+    livre ou já pertence a ele. Participantes secundários permanecem ativos e
+    nunca tomam a responsabilidade principal de outro colaborador.
     """
     if atendimento is None or colaborador_id is None:
         return None

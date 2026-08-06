@@ -47,6 +47,11 @@ from backend.security.atendimento_acl import (
     assert_cliente_access,
     get_atendimento_visibility_scope,
 )
+from backend.services.atendimento_claim_state import (
+    ensure_open_atendimento_locked,
+    get_open_atendimento_locked,
+    join_participant,
+)
 from backend.migrations.clientes_sequence import sync_clientes_id_sequence
 from backend.cache.redis_client import (
     get_json as cache_get_json,
@@ -1325,10 +1330,10 @@ def criar_cliente(
             else getattr(dup, "instancia_id", None)
         )
 
-        if own_conversations_mode:
-            # Pode reutilizar um contato já cadastrado somente quando a conversa
-            # já for dele ou quando o contato ainda estiver realmente livre e
-            # sem histórico. A ACL também impede assumir contato de outro atendente.
+        if bool(body.origem_atendimento) and current_colab_id is not None:
+            # Reutiliza o contato existente sem duplicar cadastro. A ACL mantém
+            # instância/departamento protegidos; a posse individual não bloqueia
+            # a entrada porque o colaborador será adicionado como participante.
             assert_cliente_access(
                 db,
                 identity=identity,
@@ -1341,10 +1346,11 @@ def criar_cliente(
                 ),
                 allow_unassigned_department=True,
                 allow_unowned_if_no_history=True,
+                allow_join_existing=True,
             )
 
             changed = False
-            if getattr(dup, "colaborador_id", None) is None:
+            if own_conversations_mode and getattr(dup, "colaborador_id", None) is None:
                 dup.colaborador_id = int(current_colab_id)
                 changed = True
 
@@ -1352,6 +1358,31 @@ def criar_cliente(
                 dup.instancia_id = int(instancia.id)
                 selected_instancia_id = int(instancia.id)
                 changed = True
+
+            # "Nova conversa" com um contato já em atendimento não toma a
+            # responsabilidade de ninguém: o colaborador entra como participante.
+            if selected_instancia_id is not None:
+                open_atd = get_open_atendimento_locked(
+                    db,
+                    empresa_id=int(empresa_id),
+                    cliente_id=int(dup.id),
+                    instancia_id=int(selected_instancia_id),
+                )
+                if open_atd is None:
+                    open_atd = ensure_open_atendimento_locked(
+                        db,
+                        empresa_id=int(empresa_id),
+                        cliente_id=int(dup.id),
+                        instancia_id=int(selected_instancia_id),
+                        departamento_id=getattr(dup, "departamento_id", None),
+                    )
+                if open_atd is not None:
+                    join_participant(
+                        db,
+                        atendimento=open_atd,
+                        colaborador_id=int(current_colab_id),
+                    )
+                    changed = True
 
             if changed:
                 db.add(dup)
@@ -1416,14 +1447,60 @@ def criar_cliente(
             raw_phone=tel,
         )
         if dup2:
+            # Corrida de criação: outro request cadastrou o telefone entre a
+            # consulta e o INSERT. Aplica a mesma regra de participação usada
+            # no caminho normal de contato duplicado.
+            selected_instancia_id = (
+                int(instancia.id)
+                if instancia is not None
+                else getattr(dup2, "instancia_id", None)
+            )
+            if bool(body.origem_atendimento) and current_colab_id is not None:
+                assert_cliente_access(
+                    db,
+                    identity=identity,
+                    empresa_id=int(empresa_id),
+                    cliente_id=int(dup2.id),
+                    instancia_id=(
+                        int(selected_instancia_id)
+                        if selected_instancia_id is not None
+                        else None
+                    ),
+                    allow_unassigned_department=True,
+                    allow_unowned_if_no_history=True,
+                    allow_join_existing=True,
+                )
+                if selected_instancia_id is not None:
+                    open_atd = get_open_atendimento_locked(
+                        db,
+                        empresa_id=int(empresa_id),
+                        cliente_id=int(dup2.id),
+                        instancia_id=int(selected_instancia_id),
+                    )
+                    if open_atd is None:
+                        open_atd = ensure_open_atendimento_locked(
+                            db,
+                            empresa_id=int(empresa_id),
+                            cliente_id=int(dup2.id),
+                            instancia_id=int(selected_instancia_id),
+                            departamento_id=getattr(dup2, "departamento_id", None),
+                        )
+                    if open_atd is not None:
+                        join_participant(
+                            db,
+                            atendimento=open_atd,
+                            colaborador_id=int(current_colab_id),
+                        )
+                        db.commit()
+
             fields = _cliente_conversation_fields(
                 cliente_id=int(dup2.id),
-                instancia_id=getattr(dup2, "instancia_id", None),
+                instancia_id=selected_instancia_id,
             )
             return {
                 "id": dup2.id,
                 **fields,
-                "instancia_id": getattr(dup2, "instancia_id", None),
+                "instancia_id": selected_instancia_id,
                 "exists": True,
             }
 

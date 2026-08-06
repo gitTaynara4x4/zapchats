@@ -210,12 +210,18 @@ def deactivate_all_participants(db: Session, *, atendimento) -> None:
     db.flush()
 
 
-def _activate_exclusive_participant(
+def _activate_participant(
     db: Session,
     *,
     atendimento,
     colaborador_id: int,
+    responsavel: bool = False,
 ):
+    """Ativa um colaborador sem remover os demais participantes.
+
+    O atendimento pode ter vários participantes ativos, mas somente um deles
+    permanece com role=responsavel e espelha atendimentos.operador_id.
+    """
     AP = getattr(models, "AtendimentoParticipante", None)
     if AP is None:
         return None
@@ -235,14 +241,15 @@ def _activate_exclusive_participant(
     for row in rows:
         if _to_int(getattr(row, "colaborador_id", None)) == colaborador_id:
             target = row
-        elif _row_is_active(row):
-            _deactivate_row(row, now=now)
+            continue
+
+        if responsavel and _row_is_active(row) and str(getattr(row, "role", "") or "").lower() == RESPONSAVEL_ROLE:
+            row.role = PARTICIPANTE_ROLE
+            if hasattr(row, "atualizado_em"):
+                row.atualizado_em = now
             db.add(row)
 
-    # O índice parcial permite somente um ativo. Primeiro confirma as
-    # desativações, depois ativa o novo responsável.
-    db.flush()
-
+    was_active = bool(target is not None and _row_is_active(target))
     if target is None:
         target = AP(
             empresa_id=empresa_id,
@@ -255,8 +262,8 @@ def _activate_exclusive_participant(
     if hasattr(target, "is_ativo"):
         target.is_ativo = True
     if hasattr(target, "role"):
-        target.role = RESPONSAVEL_ROLE
-    if hasattr(target, "entrou_em"):
+        target.role = RESPONSAVEL_ROLE if responsavel else PARTICIPANTE_ROLE
+    if hasattr(target, "entrou_em") and (not was_active or getattr(target, "entrou_em", None) is None):
         target.entrou_em = now
     if hasattr(target, "saiu_em"):
         target.saiu_em = None
@@ -274,7 +281,12 @@ def claim_exclusive_operator(
     atendimento,
     colaborador_id: int,
 ):
-    """Deixa exatamente um responsável ativo e sincroniza o atendimento."""
+    """Define o responsável principal preservando participantes ativos.
+
+    O nome da função é mantido por compatibilidade com callers antigos. A
+    exclusividade agora vale somente para o papel de responsável, não para a
+    participação na conversa.
+    """
     locked = (
         db.query(models.Atendimento)
         .filter(
@@ -287,17 +299,64 @@ def claim_exclusive_operator(
     if locked is None:
         return None
 
-    _activate_exclusive_participant(
+    _activate_participant(
         db,
         atendimento=locked,
         colaborador_id=int(colaborador_id),
+        responsavel=True,
     )
 
     now = _now_utc()
     locked.operador_id = int(colaborador_id)
     locked.status = _status_em_atendimento()
     if hasattr(locked, "aceito_em"):
-        locked.aceito_em = now
+        locked.aceito_em = getattr(locked, "aceito_em", None) or now
+    if hasattr(locked, "atualizado_em"):
+        locked.atualizado_em = now
+    db.add(locked)
+    db.flush()
+    return locked
+
+
+def join_participant(
+    db: Session,
+    *,
+    atendimento,
+    colaborador_id: int,
+):
+    """Entra no atendimento sem tomar a responsabilidade de outra pessoa.
+
+    Se a conversa ainda não possui responsável, quem entra primeiro vira o
+    responsável principal. Caso contrário, entra apenas como participante.
+    """
+    locked = (
+        db.query(models.Atendimento)
+        .filter(
+            models.Atendimento.id == int(atendimento.id),
+            models.Atendimento.empresa_id == int(atendimento.empresa_id),
+        )
+        .with_for_update()
+        .first()
+    )
+    if locked is None:
+        return None
+
+    current = _to_int(getattr(locked, "operador_id", None))
+    become_responsavel = current is None or current == int(colaborador_id)
+
+    _activate_participant(
+        db,
+        atendimento=locked,
+        colaborador_id=int(colaborador_id),
+        responsavel=bool(become_responsavel),
+    )
+
+    now = _now_utc()
+    if current is None:
+        locked.operador_id = int(colaborador_id)
+        if hasattr(locked, "aceito_em"):
+            locked.aceito_em = now
+    locked.status = _status_em_atendimento()
     if hasattr(locked, "atualizado_em"):
         locked.atualizado_em = now
     db.add(locked)
@@ -312,9 +371,8 @@ def claim_if_available(
     colaborador_id: int,
 ):
     """
-    Assume somente se o atendimento estiver livre ou já pertencer ao mesmo
-    colaborador. A checagem ocorre depois do FOR UPDATE, evitando que duas
-    requisições concorrentes se sobreponham.
+    Assume somente se o atendimento estiver livre ou já tiver esse responsável.
+    Nunca toma a responsabilidade principal de outro colaborador.
     """
     locked = (
         db.query(models.Atendimento)
@@ -339,8 +397,126 @@ def claim_if_available(
     )
 
 
+def release_participant(
+    db: Session,
+    *,
+    atendimento,
+    colaborador_id: int,
+) -> dict[str, Any]:
+    """Remove somente um participante e mantém a conversa ativa se possível.
+
+    Se quem sair for o responsável principal, outro participante ativo é
+    promovido. A conversa só volta para a fila quando não restar ninguém.
+    """
+    locked = (
+        db.query(models.Atendimento)
+        .filter(
+            models.Atendimento.id == int(atendimento.id),
+            models.Atendimento.empresa_id == int(atendimento.empresa_id),
+        )
+        .with_for_update()
+        .first()
+    )
+    if locked is None:
+        return {
+            "atendimento": None,
+            "removed": False,
+            "released_to_queue": False,
+            "promoted_responsavel_id": None,
+        }
+
+    rows = _lock_all_participants(
+        db,
+        atendimento_id=int(locked.id),
+        empresa_id=int(locked.empresa_id),
+    )
+    target = next(
+        (
+            r
+            for r in rows
+            if _to_int(getattr(r, "colaborador_id", None)) == int(colaborador_id)
+            and _row_is_active(r)
+        ),
+        None,
+    )
+
+    if target is None:
+        return {
+            "atendimento": locked,
+            "removed": False,
+            "released_to_queue": getattr(locked, "operador_id", None) is None,
+            "promoted_responsavel_id": None,
+        }
+
+    now = _now_utc()
+    was_responsavel = (
+        _to_int(getattr(locked, "operador_id", None)) == int(colaborador_id)
+        or str(getattr(target, "role", "") or "").lower() == RESPONSAVEL_ROLE
+    )
+    _deactivate_row(target, now=now)
+    db.add(target)
+    db.flush()
+
+    remaining = [
+        r
+        for r in rows
+        if r is not target and _row_is_active(r)
+    ]
+
+    promoted_id = None
+    if remaining:
+        current_operator = _to_int(getattr(locked, "operador_id", None))
+        chosen = None
+        if not was_responsavel and current_operator is not None:
+            chosen = next(
+                (r for r in remaining if _to_int(getattr(r, "colaborador_id", None)) == current_operator),
+                None,
+            )
+
+        if chosen is None:
+            chosen = sorted(
+                remaining,
+                key=lambda r: (
+                    0 if str(getattr(r, "role", "") or "").lower() == RESPONSAVEL_ROLE else 1,
+                    int(getattr(r, "id", 0) or 0),
+                ),
+            )[0]
+
+        chosen_colab_id = _to_int(getattr(chosen, "colaborador_id", None))
+        for row in remaining:
+            if hasattr(row, "role"):
+                row.role = RESPONSAVEL_ROLE if row is chosen else PARTICIPANTE_ROLE
+            if hasattr(row, "atualizado_em"):
+                row.atualizado_em = now
+            db.add(row)
+
+        if chosen_colab_id is not None:
+            locked.operador_id = int(chosen_colab_id)
+            locked.status = _status_em_atendimento()
+            if was_responsavel:
+                promoted_id = int(chosen_colab_id)
+    else:
+        locked.operador_id = None
+        locked.status = _status_aguardando() if locked.departamento_id is not None else _status_novo()
+        if hasattr(locked, "aceito_em"):
+            locked.aceito_em = None
+
+    if hasattr(locked, "atualizado_em"):
+        locked.atualizado_em = now
+    db.add(locked)
+    db.flush()
+
+    return {
+        "atendimento": locked,
+        "removed": True,
+        "was_responsavel": bool(was_responsavel),
+        "released_to_queue": not bool(remaining),
+        "promoted_responsavel_id": promoted_id,
+    }
+
+
 def release_to_queue(db: Session, *, atendimento):
-    """Remove todos os responsáveis ativos e devolve a conversa para a fila."""
+    """Remove todos os participantes e devolve a conversa para a fila."""
     locked = (
         db.query(models.Atendimento)
         .filter(
@@ -403,11 +579,12 @@ def set_waiting_department(
 
 
 def repair_single_responsible(db: Session, *, atendimento):
-    """
-    Repara estado legado sem mudar a intenção principal:
-    - operador existente vence;
-    - sem operador, mantém no máximo um participante ativo;
-    - sem ninguém, volta para aguardando/novo.
+    """Repara a responsabilidade sem apagar participantes válidos.
+
+    - operador_id existente vence e vira o único role=responsavel;
+    - sem operador, escolhe um participante ativo para ser responsável;
+    - os demais continuam ativos como participant;
+    - sem participantes, a conversa volta para aguardando/novo.
     """
     locked = (
         db.query(models.Atendimento)
@@ -426,76 +603,70 @@ def repair_single_responsible(db: Session, *, atendimento):
         atendimento_id=int(locked.id),
         empresa_id=int(locked.empresa_id),
     )
-    active = [r for r in rows if bool(getattr(r, "is_ativo", True))]
+    active = [r for r in rows if _row_is_active(r)]
     operador_id = _to_int(getattr(locked, "operador_id", None))
 
     chosen = None
     if operador_id is not None:
         chosen = next(
-            (r for r in active if _to_int(getattr(r, "colaborador_id", None)) == operador_id),
+            (r for r in rows if _to_int(getattr(r, "colaborador_id", None)) == operador_id),
             None,
         )
         if chosen is None:
-            chosen = next(
-                (r for r in rows if _to_int(getattr(r, "colaborador_id", None)) == operador_id),
-                None,
-            )
-            if chosen is None:
-                AP = getattr(models, "AtendimentoParticipante", None)
-                if AP is not None:
-                    chosen = AP(
-                        empresa_id=int(locked.empresa_id),
-                        atendimento_id=int(locked.id),
-                        colaborador_id=int(operador_id),
-                    )
-                    db.add(chosen)
-                    db.flush()
+            AP = getattr(models, "AtendimentoParticipante", None)
+            if AP is not None:
+                chosen = AP(
+                    empresa_id=int(locked.empresa_id),
+                    atendimento_id=int(locked.id),
+                    colaborador_id=int(operador_id),
+                )
+                db.add(chosen)
+                db.flush()
+                rows.append(chosen)
+        if chosen is not None and chosen not in active:
+            active.append(chosen)
     elif active:
         chosen = sorted(
             active,
             key=lambda r: (
-                0 if str(getattr(r, "role", "")).lower() == RESPONSAVEL_ROLE else 1,
+                0 if str(getattr(r, "role", "") or "").lower() == RESPONSAVEL_ROLE else 1,
                 -int(getattr(r, "id", 0) or 0),
             ),
         )[0]
         operador_id = _to_int(getattr(chosen, "colaborador_id", None))
 
     now = _now_utc()
-    chosen_id = int(getattr(chosen, "id", 0) or 0) if chosen is not None else 0
 
-    # Fase 1: desativa todos os demais e confirma no banco.
-    for row in rows:
-        if chosen_id and int(getattr(row, "id", 0) or 0) == chosen_id:
-            continue
-        if _row_is_active(row):
-            _deactivate_row(row, now=now)
-            db.add(row)
-    db.flush()
-
-    # Fase 2: ativa apenas o escolhido.
-    if chosen is not None:
+    if chosen is not None and operador_id is not None:
         if hasattr(chosen, "is_ativo"):
             chosen.is_ativo = True
-        if hasattr(chosen, "role"):
-            chosen.role = RESPONSAVEL_ROLE
-        if hasattr(chosen, "entrou_em") and getattr(chosen, "entrou_em", None) is None:
-            chosen.entrou_em = now
         if hasattr(chosen, "saiu_em"):
             chosen.saiu_em = None
-        if hasattr(chosen, "atualizado_em"):
-            chosen.atualizado_em = now
-        db.add(chosen)
-        db.flush()
+        if hasattr(chosen, "entrou_em") and getattr(chosen, "entrou_em", None) is None:
+            chosen.entrou_em = now
 
-    if operador_id is None:
-        locked.operador_id = None
-        locked.status = _status_aguardando() if locked.departamento_id is not None else _status_novo()
-    else:
+        for row in rows:
+            if not _row_is_active(row) and row is not chosen:
+                continue
+            if hasattr(row, "role"):
+                row.role = RESPONSAVEL_ROLE if row is chosen else PARTICIPANTE_ROLE
+            if hasattr(row, "atualizado_em"):
+                row.atualizado_em = now
+            db.add(row)
+
         locked.operador_id = int(operador_id)
         locked.status = _status_em_atendimento()
+        if hasattr(locked, "aceito_em"):
+            locked.aceito_em = getattr(locked, "aceito_em", None) or now
+    else:
+        locked.operador_id = None
+        locked.status = _status_aguardando() if locked.departamento_id is not None else _status_novo()
+        if hasattr(locked, "aceito_em"):
+            locked.aceito_em = None
 
     if hasattr(locked, "atualizado_em"):
         locked.atualizado_em = now
     db.add(locked)
     db.flush()
     return locked
+

@@ -348,14 +348,11 @@ def _query_clientes_ultima_por_conversa(
     #
     # Regra do modelo por departamento + assumir atendimento:
     # - Admin/gestor => allowed_dep_ids=None => vê tudo.
-    # - Colaborador restrito vê:
-    #     1) conversas do(s) departamento(s) dele que ainda NÃO foram assumidas;
-    #     2) conversas já atribuídas a ele;
-    #     3) sem departamento APENAS se allow_unassigned_department=True.
-    #
-    # Importante:
-    # depois que Amanda assume Financeiro, Luiza também pertence ao Financeiro,
-    # mas NÃO deve continuar vendo aquela conversa na fila compartilhada.
+    # - Colaborador restrito vê conversas dos departamentos permitidos mesmo
+    #   quando já existe um responsável. Isso permite entrar como participante
+    #   e colaborar sem tomar a responsabilidade principal.
+    # - O filtro opcional "somente minhas conversas" continua sendo aplicado
+    #   acima e restringe a lista ao responsável/participante atual.
     active_department_inst_ids = [
         int(x)
         for x in (department_acl_inst_ids or [])
@@ -379,19 +376,26 @@ def _query_clientes_ultima_por_conversa(
                     owner_is_me = literal(False)
 
             if dep_ids:
-                acl_conditions.append(
-                    and_(
-                        acl_dep_expr.in_(dep_ids),
-                        or_(owner_is_empty, owner_is_me),
-                    )
-                )
+                acl_conditions.append(acl_dep_expr.in_(dep_ids))
 
             if allow_unassigned_department:
-                acl_conditions.append(
-                    and_(
-                        acl_dep_expr.is_(None),
-                        owner_is_empty,
+                unassigned_conditions = [owner_is_empty, owner_is_me]
+                AP = getattr(models, "AtendimentoParticipante", None)
+                if AP is not None and current_colab_id is not None:
+                    active_participant = (
+                        db.query(AP.id)
+                        .filter(
+                            AP.empresa_id == int(empresa_id),
+                            AP.atendimento_id == A.id,
+                            AP.colaborador_id == int(current_colab_id),
+                            AP.is_ativo.is_(True),
+                        )
+                        .correlate(A)
+                        .exists()
                     )
+                    unassigned_conditions.append(active_participant)
+                acl_conditions.append(
+                    and_(acl_dep_expr.is_(None), or_(*unassigned_conditions))
                 )
 
             if current_colab_id is not None:

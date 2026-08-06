@@ -581,9 +581,10 @@
           waitingSubtitle: "Clique em Atender para assumir este atendimento.",
           acceptedSubtitle: "Agora você pode responder normalmente.",
           otherTitle: "Atendimento em andamento",
-          otherSubtitle: "Esse atendimento já foi assumido por outro colaborador.",
+          otherSubtitle: "Você pode participar sem alterar o responsável principal.",
           success: "Atendimento assumido com sucesso.",
-          already: "Esse atendimento já estava com você."
+          joined: "Você entrou no atendimento para colaborar.",
+          already: "Você já participa deste atendimento."
         }
       : {
           accept: "Aceitar",
@@ -595,9 +596,10 @@
           waitingSubtitle: "Enquanto você não aceitar, o envio fica bloqueado.",
           acceptedSubtitle: "Agora você já pode responder normalmente.",
           otherTitle: "Conversa em atendimento",
-          otherSubtitle: "Você não pode responder enquanto a conversa estiver em atendimento.",
+          otherSubtitle: "Você pode participar da conversa junto com o responsável atual.",
           success: "Conversa aceita com sucesso.",
-          already: "Essa conversa já estava com você."
+          joined: "Você entrou na conversa para colaborar.",
+          already: "Você já participa desta conversa."
         };
   }
 
@@ -1116,6 +1118,23 @@
       toInt(meta.responsavel_id) ??
       toInt(meta.operador_id);
 
+    const responsavelPorMim = meta.responsavel_por_mim != null
+      ? Boolean(meta.responsavel_por_mim)
+      : Boolean(operadorId && currentColabId && operadorId === currentColabId);
+    const temParticipantes = Boolean(
+      meta.accepted_by_anyone ||
+      meta.tem_participantes ||
+      (Array.isArray(meta.participantes) && meta.participantes.length > 0) ||
+      operadorId
+    );
+    const podeTransferir = Boolean(
+      meta.pode_transferir_colaborador ??
+      meta.can_transfer_collaborator ??
+      meta.pode_transferir ??
+      meta.can_transfer ??
+      responsavelPorMim
+    );
+
     const operadorNome =
       meta.responsavel_nome ||
       meta.operador_nome ||
@@ -1123,10 +1142,13 @@
 
     if (podeAceitar) {
       const depClaim = isDepartmentClaim(meta);
+      const joiningExisting = Boolean(temParticipantes || operadorId);
       setBtnBase(aceitar, {
-        text: depClaim ? "Atender" : words.accept,
-        icon: "fa-solid fa-headset",
-        title: depClaim ? "Atender conversa" : words.acceptTitle,
+        text: joiningExisting ? "Participar" : (depClaim ? "Atender" : words.accept),
+        icon: joiningExisting ? "fa-solid fa-user-plus" : "fa-solid fa-headset",
+        title: joiningExisting
+          ? "Participar deste atendimento"
+          : (depClaim ? "Atender conversa" : words.acceptTitle),
         disabled: false,
         hidden: false
       });
@@ -1137,8 +1159,8 @@
         text: "Transferir",
         icon: "fa-solid fa-user-arrow-down",
         title: "Transferir para outro colaborador",
-        disabled: false,
-        hidden: isDepartmentClaim(meta)
+        disabled: !podeTransferir,
+        hidden: !podeTransferir
       });
 
       setClaimBarState({
@@ -1148,9 +1170,13 @@
         busy: false,
         canAccept: true,
         canRelease: false,
-        canTransfer: !isDepartmentClaim(meta),
-        title: words.waitingTitle,
-        subtitle: words.waitingSubtitle
+        canTransfer: podeTransferir,
+        title: joiningExisting
+          ? (operadorNome ? `Atendimento com ${operadorNome}` : words.otherTitle)
+          : words.waitingTitle,
+        subtitle: joiningExisting
+          ? "Clique em Participar para responder junto sem trocar o responsável principal."
+          : words.waitingSubtitle
       });
 
       return;
@@ -1170,9 +1196,9 @@
       });
 
       setBtnBase(liberar, {
-        text: "Liberar",
-        icon: "fa-solid fa-unlock",
-        title: "Liberar atendimento",
+        text: responsavelPorMim ? "Liberar" : "Sair",
+        icon: responsavelPorMim ? "fa-solid fa-unlock" : "fa-solid fa-right-from-bracket",
+        title: responsavelPorMim ? "Sair e liberar/promover outro participante" : "Sair deste atendimento",
         disabled: !podeLiberar,
         hidden: false
       });
@@ -1181,8 +1207,8 @@
         text: "Transferir",
         icon: "fa-solid fa-user-arrow-down",
         title: "Transferir para outro colaborador",
-        disabled: false,
-        hidden: false
+        disabled: !podeTransferir,
+        hidden: !podeTransferir
       });
 
       setClaimBarState({
@@ -1192,9 +1218,13 @@
         busy: false,
         canAccept: false,
         canRelease: podeLiberar || aceitaPorMim || (operadorId && currentColabId && operadorId === currentColabId),
-        canTransfer: true,
-        title: words.acceptedByYou,
-        subtitle: words.acceptedSubtitle
+        canTransfer: podeTransferir,
+        title: responsavelPorMim
+          ? words.acceptedByYou
+          : (operadorNome ? `Participando com ${operadorNome}` : "Você está participando"),
+        subtitle: responsavelPorMim
+          ? words.acceptedSubtitle
+          : "Você pode responder normalmente. O responsável principal não foi alterado."
       });
 
       return;
@@ -1411,9 +1441,9 @@
       });
 
       const claimedOperatorId =
-        currentColabId ||
         toInt(data?.responsavel_id) ||
         toInt(data?.operador_id) ||
+        currentColabId ||
         null;
 
       const optimisticMeta = saveMetaCache(conv, {
@@ -1431,6 +1461,7 @@
         accepted_by_anyone: true,
         operador_id: claimedOperatorId,
         responsavel_id: claimedOperatorId,
+        responsavel_por_mim: Boolean(currentColabId && claimedOperatorId === currentColabId),
         operador_nome:
           data?.operador_nome ||
           data?.responsavel_nome ||
@@ -1450,7 +1481,7 @@
       showToast(
         data?.already_accepted
           ? words.already
-          : words.success,
+          : (data?.joined_as_participant ? words.joined : words.success),
         "success"
       );
 
@@ -1545,10 +1576,6 @@
         toInt(data?.departamento_id)
       );
 
-      // Ao liberar um atendimento de departamento, ele obrigatoriamente volta
-      // para a fila aguardando alguém clicar em Atender. Não depende do cache.
-      const exigeAceite = Boolean(metaRequiresAcceptance(data) || isDeptClaim);
-
       invalidateMetaCache(conv, {
         abort: true,
         bumpMutation: true,
@@ -1556,31 +1583,19 @@
         reason: "claim-released"
       });
 
+      // O backend já devolve o estado final completo. Se havia outros
+      // participantes, eles permanecem e um deles pode ter sido promovido.
       const optimisticMeta = saveMetaCache(conv, {
+        ...(previousMeta || {}),
         ...data,
         claim_mode: isDeptClaim ? "departamento" : (data?.claim_mode || previousMeta?.claim_mode || null),
         departamento_claim: isDeptClaim,
-        exigir_aceite: exigeAceite,
-        aceite_obrigatorio: exigeAceite,
-        aguardando_aceite: exigeAceite,
-        fila_exigir_aceite: isDeptClaim ? false : Boolean(data?.fila_exigir_aceite),
-        pode_aceitar: exigeAceite,
-        can_accept: exigeAceite,
-        pode_liberar: false,
-        can_release: false,
-        pode_responder: !exigeAceite,
-        can_send: !exigeAceite,
-        locked: exigeAceite,
-        aceita_por_mim: false,
-        accepted_by_me: false,
-        accepted_by_anyone: false,
-        tem_participantes: false,
-        participantes: [],
-        participantes_ids: [],
-        operador_id: null,
-        responsavel_id: null,
-        operador_nome: null,
-        responsavel_nome: null
+        can_accept: Boolean(data?.pode_aceitar),
+        can_release: Boolean(data?.pode_liberar),
+        can_send: Boolean(data?.pode_responder),
+        accepted_by_me: Boolean(data?.aceita_por_mim),
+        accepted_by_anyone: Boolean(data?.tem_participantes),
+        locked: data?.pode_responder === false
       });
 
       markOptimisticMutation(optimisticMeta, "claim-released");
@@ -1588,7 +1603,12 @@
       renderClaimFromMeta(conv, optimisticMeta);
       appendSystemEventToHistory(conv, data, "claim-released");
 
-      showToast("Atendimento liberado para o departamento.", "success");
+      const releaseMessage = data?.released_to_queue
+        ? "Atendimento liberado para o departamento."
+        : (data?.promoted_responsavel_id
+            ? "Você saiu do atendimento e outro participante assumiu como responsável."
+            : "Você saiu deste atendimento.");
+      showToast(releaseMessage, "success");
 
       window.dispatchEvent(
         new CustomEvent("zc:conversation-released", {
@@ -2152,7 +2172,7 @@
       );
 
       const exigeAceite = metaRequiresAcceptance(data);
-      const assignedToMe = !!currentColabId && currentColabId === colaboradorId;
+      const assignedToMe = Boolean(data?.aceita_por_mim);
 
       invalidateMetaCache(conv, {
         abort: true,
@@ -2163,12 +2183,13 @@
 
       const optimisticMeta = saveMetaCache(conv, {
         ...data,
-        pode_aceitar: exigeAceite && !assignedToMe,
-        pode_liberar: exigeAceite && assignedToMe,
-        pode_responder: !exigeAceite || assignedToMe,
-        aceita_por_mim: exigeAceite && assignedToMe,
-        accepted_by_me: exigeAceite && assignedToMe,
-        accepted_by_anyone: exigeAceite,
+        pode_aceitar: Boolean(data?.pode_aceitar),
+        pode_liberar: Boolean(data?.pode_liberar),
+        pode_responder: Boolean(data?.pode_responder),
+        aceita_por_mim: assignedToMe,
+        accepted_by_me: assignedToMe,
+        accepted_by_anyone: Boolean(data?.tem_participantes),
+        responsavel_por_mim: Boolean(currentColabId && currentColabId === colaboradorId),
         operador_id: colaboradorId,
         responsavel_id: colaboradorId,
         operador_nome: data?.operador_nome || null,
@@ -2444,6 +2465,6 @@
   }
 
   try {
-    console.info("[ZapsChat][aceitar-conversa] carregado: zc-claim-post-confirmed-state-v2");
+    console.info("[ZapsChat][aceitar-conversa] carregado: zc-claim-shared-participants-v3");
   } catch {}
 })();

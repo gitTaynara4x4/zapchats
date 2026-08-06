@@ -461,8 +461,8 @@
 
       if (isUsableButton(btnAccept)) {
         items.push({
-          label: 'Atender conversa',
-          icon: 'fa-solid fa-check',
+          label: (btnAccept.textContent || '').trim() || 'Atender conversa',
+          icon: 'fa-solid fa-user-plus',
           action() {
             clickExistingButton('#btnAceitarConversa', 'Atendimento não encontrado');
           },
@@ -471,8 +471,8 @@
 
       if (isUsableButton(btnRelease)) {
         items.push({
-          label: 'Liberar atendimento',
-          icon: 'fa-solid fa-unlock',
+          label: (btnRelease.textContent || '').trim() || 'Liberar atendimento',
+          icon: 'fa-solid fa-right-from-bracket',
           action() {
             clickExistingButton('#btnLiberarConversa', 'Liberação não encontrada');
           },
@@ -710,5 +710,5 @@
     toggleMenu,
   });
 
-  console.log('[header-actions] menu carregado: zc-menu-v11-chatbot-department-only');
+  console.log('[header-actions] menu carregado: zc-menu-v12-shared-participants');
 })();

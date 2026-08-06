@@ -2279,7 +2279,7 @@ function afterSuccessfulOptimisticTextSend(conversationKey = null, reason = 'sen
     if (m.is_group) return '';
 
     if (m.accepted_by_me) return '';
-    if (m.accepted_by_anyone) return 'Aceite a conversa para também responder';
+    if (m.accepted_by_anyone) return 'Clique em Participar para responder junto';
     return 'Aceite a conversa para responder';
   }
 

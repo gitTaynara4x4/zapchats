@@ -379,7 +379,7 @@
     await import('../domain/historico.js');
 
     await import('../ui/splash.js');
-    await import('../ui/envio.js');
+    await import('../ui/envio.js?v=20260806-shared-participants-v1');
     await import('../ui/notif.js');
 
     // Abre conversa e mantém RAM baixa.
@@ -417,14 +417,14 @@
     await import('../ui/header-actions/search.js');
     await import('../ui/header-actions/select-mode.js');
     await import('../ui/header-actions/forward.js');
-    await import('../ui/header-actions/menu.js?v=20260723-chatbot-actions-v1');
+    await import('../ui/header-actions/menu.js?v=20260806-shared-participants-v1');
     await import('../ui/header-actions/boot.js');
 
     // Editar nome do cliente: isolado, sem desligar 3 pontinhos/menu.
     await import('../ui/editar-nome-cliente.js');
 
     await import('../ui/message-actions.js');
-    await import('../ui/aceitar-conversa.js?v=20260723-claim-confirmed-v2');
+    await import('../ui/aceitar-conversa.js?v=20260806-shared-participants-v1');
     await import('../ui/message-selection.js');
     await import('../ui/forward-picker.js');
     await import('../ui/loading-guard.js');
@@ -475,7 +475,7 @@
 
     // -------- UI BASE -------------------------------------------------
     await import('../ui/splash.js');
-    await import('../ui/envio.js');
+    await import('../ui/envio.js?v=20260806-shared-participants-v1');
     await import('../ui/notif.js');
 
     /*
@@ -551,14 +551,14 @@
     await import('../ui/header-actions/search.js');
     await import('../ui/header-actions/select-mode.js');
     await import('../ui/header-actions/forward.js');
-    await import('../ui/header-actions/menu.js?v=20260723-chatbot-actions-v1');
+    await import('../ui/header-actions/menu.js?v=20260806-shared-participants-v1');
     await import('../ui/header-actions/boot.js');
 
     // Editar nome do cliente: isolado, sem desligar 3 pontinhos/menu.
     await import('../ui/editar-nome-cliente.js');
 
     await import('../ui/message-actions.js');
-    await import('../ui/aceitar-conversa.js?v=20260723-claim-confirmed-v2');
+    await import('../ui/aceitar-conversa.js?v=20260806-shared-participants-v1');
     await import('../ui/message-selection.js');
     await import('../ui/forward-picker.js');
 

@@ -239,44 +239,51 @@ def _merge_department_claim_state(
     except Exception:
         colab_int = None
 
-    assigned_to_me = bool(operador_int is not None and colab_int is not None and operador_int == colab_int)
-    assigned_to_other = bool(operador_int is not None and not assigned_to_me)
-    waiting = bool(operador_int is None)
-    admin_intervening = bool(admin_can_intervene and assigned_to_other)
+    participantes_ids = {
+        int(x)
+        for x in (out.get("participantes_ids") or [])
+        if x is not None
+    }
+    participating = bool(colab_int is not None and int(colab_int) in participantes_ids)
+    responsavel_por_mim = bool(
+        operador_int is not None and colab_int is not None and operador_int == colab_int
+    )
+    tem_participantes = bool(participantes_ids or out.get("tem_participantes") or operador_int is not None)
+    admin_intervening = bool(admin_can_intervene and operador_int is not None and not participating)
 
-    # Transferência de departamento é exclusiva da triagem do chatbot.
-    # Uma fila com aceite obrigatório continua com Atender/Liberar, mas não é
-    # marcada como fluxo de departamentos e não exibe essa ação por engano.
+    # Transferir responsabilidade continua sendo ação do responsável principal
+    # (ou administrador). Participar não altera quem responde pelo atendimento.
     is_department_claim = bool(triagem_por_departamento)
     can_transfer_department = bool(
         is_department_claim
         and (
-            assigned_to_me
+            responsavel_por_mim
             or admin_intervening
-            or (waiting and (colab_int is not None or admin_can_intervene))
+            or (not tem_participantes and (colab_int is not None or admin_can_intervene))
         )
     )
-    can_transfer_collaborator = bool(assigned_to_me or admin_intervening)
+    can_transfer_collaborator = bool(responsavel_por_mim or admin_intervening)
 
     out.update({
         "claim_mode": "departamento" if is_department_claim else "fila",
         "departamento_claim": is_department_claim,
         "exigir_aceite": True,
         "aceite_obrigatorio": True,
-        "aguardando_aceite": bool(waiting or assigned_to_other),
-        "pode_aceitar": bool(colab_int is not None and waiting),
-        "pode_liberar": bool(assigned_to_me),
-        "pode_responder": bool(assigned_to_me or colab_int is None or admin_intervening),
+        "aguardando_aceite": bool(colab_int is not None and not participating),
+        "pode_aceitar": bool(colab_int is not None and not participating),
+        "pode_liberar": bool(participating),
+        "pode_responder": bool(participating or colab_int is None or admin_intervening),
         "pode_transferir_departamento": can_transfer_department,
         "can_transfer_department": can_transfer_department,
         "pode_transferir_colaborador": can_transfer_collaborator,
         "can_transfer_collaborator": can_transfer_collaborator,
         "pode_transferir": can_transfer_collaborator,
         "can_transfer": can_transfer_collaborator,
-        "aceita_por_mim": bool(assigned_to_me),
-        "accepted_by_me": bool(assigned_to_me),
-        "accepted_by_anyone": bool(operador_int is not None),
-        "tem_participantes": bool(operador_int is not None or out.get("tem_participantes")),
+        "aceita_por_mim": bool(participating),
+        "accepted_by_me": bool(participating),
+        "accepted_by_anyone": bool(tem_participantes),
+        "tem_participantes": bool(tem_participantes),
+        "responsavel_por_mim": bool(responsavel_por_mim),
         "responsavel_id": operador_int,
         "responsavel_nome": operador_nome or out.get("responsavel_nome"),
         "operador_id": operador_int,

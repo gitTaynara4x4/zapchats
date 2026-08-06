@@ -11,7 +11,8 @@ from backend.services.atendimento_claim_state import (
     RESPONSAVEL_ROLE,
     PARTICIPANTE_ROLE,
     claim_exclusive_operator,
-    deactivate_all_participants,
+    join_participant,
+    release_participant,
     release_to_queue,
     repair_single_responsible,
 )
@@ -32,7 +33,7 @@ from .colaborador_helpers import (
 
 
 # =========================================================
-# Participantes / responsável único
+# Participantes / responsável principal compartilhado
 # =========================================================
 def _role_is_responsavel(value: Any) -> bool:
     return str(value or "").strip().lower() in {
@@ -72,14 +73,7 @@ def _active_participants_snapshot_map(
     empresa_id: int,
     atendimento_ids: List[int],
 ) -> Dict[int, List[Dict[str, Any]]]:
-    """
-    Snapshot somente do responsável efetivo.
-
-    Bancos antigos podem ter mais de um participante ativo. A tela não deve
-    interpretar isso como atendimento compartilhado: operador_id é a fonte de
-    verdade e, na ausência dele, escolhemos o vínculo responsável mais recente.
-    As ações aceitar/liberar/transferir e a migração de startup normalizam o banco.
-    """
+    """Retorna todos os participantes ativos, com o responsável primeiro."""
     if not atendimento_ids or not _participant_feature_enabled(db):
         return {}
 
@@ -112,7 +106,6 @@ def _active_participants_snapshot_map(
         grouped.setdefault(int(row.atendimento_id), []).append(row)
 
     out: Dict[int, List[Dict[str, Any]]] = {}
-
     for atendimento_id, candidates in grouped.items():
         candidates.sort(
             key=lambda r: (
@@ -121,18 +114,26 @@ def _active_participants_snapshot_map(
                 == _to_int(getattr(r, "colaborador_id", None))
                 else 1,
                 0 if _role_is_responsavel(getattr(r, "role", None)) else 1,
-                -int(getattr(r, "participante_id", 0) or 0),
+                int(getattr(r, "participante_id", 0) or 0),
             )
         )
-        chosen = candidates[0]
+        operador_id = _to_int(getattr(candidates[0], "operador_id", None))
         out[atendimento_id] = [
             {
-                "colaborador_id": int(chosen.colaborador_id),
-                "nome": chosen.colaborador_nome,
-                "aceito_em": _iso(getattr(chosen, "entrou_em", None)),
-                "is_responsavel": True,
-                "role": RESPONSAVEL_ROLE,
+                "colaborador_id": int(row.colaborador_id),
+                "nome": row.colaborador_nome,
+                "aceito_em": _iso(getattr(row, "entrou_em", None)),
+                "is_responsavel": bool(
+                    operador_id is not None
+                    and int(row.colaborador_id) == int(operador_id)
+                ),
+                "role": (
+                    RESPONSAVEL_ROLE
+                    if operador_id is not None and int(row.colaborador_id) == int(operador_id)
+                    else PARTICIPANTE_ROLE
+                ),
             }
+            for row in candidates
         ]
 
     return out
@@ -145,12 +146,7 @@ def _upsert_participante_ativo(
     colaborador_id: int,
     responsavel: bool = True,
 ):
-    """
-    Compatibilidade com callers antigos.
-
-    No modelo atual, participante ativo é sempre o responsável único. Quando
-    responsavel=False, apenas reativa o vínculo sem alterar operador, uso raro.
-    """
+    """Ativa o colaborador preservando os demais participantes."""
     if not _participant_feature_enabled(db):
         return None
 
@@ -167,51 +163,52 @@ def _upsert_participante_ativo(
             ),
         )
 
-    if responsavel:
-        locked = claim_exclusive_operator(
+    locked = (
+        claim_exclusive_operator(
             db,
             atendimento=atendimento,
             colaborador_id=int(colaborador_id),
         )
-        if locked is None:
-            return None
-
-        return (
-            db.query(models.AtendimentoParticipante)
-            .filter(
-                models.AtendimentoParticipante.empresa_id == int(locked.empresa_id),
-                models.AtendimentoParticipante.atendimento_id == int(locked.id),
-                models.AtendimentoParticipante.colaborador_id == int(colaborador_id),
-            )
-            .first()
-        )
-
-    AP = models.AtendimentoParticipante
-    row = (
-        db.query(AP)
-        .filter(
-            AP.empresa_id == int(atendimento.empresa_id),
-            AP.atendimento_id == int(atendimento.id),
-            AP.colaborador_id == int(colaborador_id),
-        )
-        .with_for_update()
-        .first()
-    )
-    now = _now_utc()
-    if row is None:
-        row = AP(
-            empresa_id=int(atendimento.empresa_id),
-            atendimento_id=int(atendimento.id),
+        if responsavel
+        else join_participant(
+            db,
+            atendimento=atendimento,
             colaborador_id=int(colaborador_id),
         )
-    row.is_ativo = True
-    row.role = PARTICIPANTE_ROLE
-    row.entrou_em = now
-    row.saiu_em = None
-    row.atualizado_em = now
-    db.add(row)
-    db.flush()
-    return row
+    )
+    if locked is None:
+        return None
+
+    return (
+        db.query(models.AtendimentoParticipante)
+        .filter(
+            models.AtendimentoParticipante.empresa_id == int(locked.empresa_id),
+            models.AtendimentoParticipante.atendimento_id == int(locked.id),
+            models.AtendimentoParticipante.colaborador_id == int(colaborador_id),
+        )
+        .first()
+    )
+
+
+def _join_participant(
+    db: Session,
+    *,
+    atendimento,
+    colaborador_id: int,
+):
+    if not _participant_feature_enabled(db):
+        if getattr(atendimento, "operador_id", None) is None:
+            atendimento.operador_id = int(colaborador_id)
+        atendimento.status = models.StatusAtendimento.EM_ATENDIMENTO
+        db.add(atendimento)
+        db.flush()
+        return atendimento
+
+    return join_participant(
+        db,
+        atendimento=atendimento,
+        colaborador_id=int(colaborador_id),
+    )
 
 
 def _claim_exclusive_participant(
@@ -254,13 +251,30 @@ def _release_participante(
     *,
     atendimento,
     colaborador_id: int,
-) -> bool:
-    """Compatibilidade: a liberação agora limpa todos os vínculos ativos."""
-    operador_id = _to_int(getattr(atendimento, "operador_id", None))
-    if operador_id is not None and operador_id != int(colaborador_id):
-        return False
-    _release_all_participants(db, atendimento=atendimento)
-    return True
+) -> Dict[str, Any]:
+    """Sai somente o colaborador atual; promove outro se necessário."""
+    if not _participant_feature_enabled(db):
+        operador_id = _to_int(getattr(atendimento, "operador_id", None))
+        if operador_id is not None and operador_id != int(colaborador_id):
+            return {
+                "atendimento": atendimento,
+                "removed": False,
+                "released_to_queue": False,
+                "promoted_responsavel_id": None,
+            }
+        atd = _release_all_participants(db, atendimento=atendimento)
+        return {
+            "atendimento": atd,
+            "removed": operador_id is not None,
+            "released_to_queue": True,
+            "promoted_responsavel_id": None,
+        }
+
+    return release_participant(
+        db,
+        atendimento=atendimento,
+        colaborador_id=int(colaborador_id),
+    )
 
 
 def _sync_atendimento_from_participants(
@@ -269,13 +283,7 @@ def _sync_atendimento_from_participants(
     atendimento,
     preferred_responsavel_id: Optional[int] = None,
 ) -> List[int]:
-    """
-    Repara legados para a regra de um único responsável.
-
-    preferred_responsavel_id, quando informado, vence e assume de forma
-    exclusiva. Sem preferência, operador_id vence; se não houver operador,
-    o vínculo ativo mais apropriado é mantido.
-    """
+    """Garante um responsável principal sem remover participantes ativos."""
     if preferred_responsavel_id is not None:
         locked = _claim_exclusive_participant(
             db,
@@ -285,9 +293,17 @@ def _sync_atendimento_from_participants(
     else:
         locked = repair_single_responsible(db, atendimento=atendimento)
 
-    if locked is None or getattr(locked, "operador_id", None) is None:
+    if locked is None:
         return []
-    return [int(locked.operador_id)]
+    return [
+        int(getattr(row, "colaborador_id"))
+        for row in _list_active_participant_rows(
+            db,
+            empresa_id=int(locked.empresa_id),
+            atendimento_id=int(locked.id),
+        )
+        if getattr(row, "colaborador_id", None) is not None
+    ]
 
 
 def _participacao_payload(
@@ -305,48 +321,53 @@ def _participacao_payload(
         if atendimento is not None
         else fallback_operador_id
     )
-
     operador_nome = (
         _nome_colaborador(db, operador_id)
         if operador_id is not None
         else fallback_operador_nome
     )
 
-    # Garante que o payload represente somente o responsável efetivo.
-    if operador_id is not None:
-        matching = [
-            p for p in participants
-            if _to_int(p.get("colaborador_id")) == int(operador_id)
-        ]
-        participants = matching or [
-            {
-                "colaborador_id": int(operador_id),
-                "nome": operador_nome,
-                "aceito_em": None,
-                "is_responsavel": True,
-                "role": RESPONSAVEL_ROLE,
-            }
-        ]
-    elif participants:
-        participants = [participants[0]]
-        operador_id = _to_int(participants[0].get("colaborador_id"))
-        operador_nome = participants[0].get("nome")
+    participant_ids = []
+    normalized: List[Dict[str, Any]] = []
+    for p in participants or []:
+        cid = _to_int(p.get("colaborador_id"))
+        if cid is None or cid in participant_ids:
+            continue
+        participant_ids.append(int(cid))
+        item = dict(p)
+        item["colaborador_id"] = int(cid)
+        item["is_responsavel"] = bool(operador_id is not None and int(cid) == int(operador_id))
+        item["role"] = RESPONSAVEL_ROLE if item["is_responsavel"] else PARTICIPANTE_ROLE
+        normalized.append(item)
 
-    participant_ids = [
-        int(p["colaborador_id"])
-        for p in participants
-        if p.get("colaborador_id") is not None
-    ]
+    if operador_id is not None and int(operador_id) not in participant_ids:
+        participant_ids.insert(0, int(operador_id))
+        normalized.insert(0, {
+            "colaborador_id": int(operador_id),
+            "nome": operador_nome,
+            "aceito_em": None,
+            "is_responsavel": True,
+            "role": RESPONSAVEL_ROLE,
+        })
+
+    normalized.sort(
+        key=lambda p: (
+            0 if p.get("is_responsavel") else 1,
+            int(p.get("colaborador_id") or 0),
+        )
+    )
+    participant_ids = [int(p["colaborador_id"]) for p in normalized]
 
     current_id = _to_int(current_colab_id)
-    aceita_por_mim = bool(
+    aceita_por_mim = bool(current_id is not None and int(current_id) in set(participant_ids))
+    responsavel_por_mim = bool(
         current_id is not None
         and operador_id is not None
         and int(current_id) == int(operador_id)
     )
 
     exigir_aceite = bool(fila_state.get("exigir_aceite"))
-    waiting = operador_id is None
+    tem_participantes = bool(participant_ids)
 
     if not exigir_aceite:
         pode_aceitar = False
@@ -354,21 +375,24 @@ def _participacao_payload(
         pode_responder = True
         aguardando_aceite = False
     else:
-        pode_aceitar = bool(current_id is not None and waiting)
+        pode_aceitar = bool(current_id is not None and not aceita_por_mim)
         pode_liberar = bool(aceita_por_mim)
         pode_responder = True if current_id is None else bool(aceita_por_mim)
-        aguardando_aceite = bool(waiting or not aceita_por_mim)
+        aguardando_aceite = bool(not aceita_por_mim) if current_id is not None else not tem_participantes
 
     return {
         **fila_state,
         "aguardando_aceite": bool(aguardando_aceite),
         "pode_responder": bool(pode_responder),
-        "participantes": participants,
+        "participantes": normalized,
         "participantes_ids": participant_ids,
         "aceita_por_mim": bool(aceita_por_mim),
-        "tem_participantes": bool(operador_id is not None),
+        "accepted_by_me": bool(aceita_por_mim),
+        "accepted_by_anyone": bool(tem_participantes),
+        "tem_participantes": bool(tem_participantes),
         "responsavel_id": operador_id,
         "responsavel_nome": operador_nome,
+        "responsavel_por_mim": bool(responsavel_por_mim),
         "pode_aceitar": bool(pode_aceitar),
         "pode_liberar": bool(pode_liberar),
     }

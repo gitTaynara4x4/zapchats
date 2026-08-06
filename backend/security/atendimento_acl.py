@@ -1020,6 +1020,7 @@ def assert_cliente_access(
     instancia_id: int | None = None,
     allow_unassigned_department: bool = True,
     allow_unowned_if_no_history: bool = False,
+    allow_join_existing: bool = False,
 ):
     ctx = resolve_acl_context(db, identity=identity, empresa_id=empresa_id)
 
@@ -1035,6 +1036,13 @@ def assert_cliente_access(
         cliente_id=int(cliente_id),
         instancia_id=instancia_id,
     )
+
+    # Para "Nova conversa"/participação, um atendimento histórico já fechado
+    # não deve bloquear a conversa nova com a ACL do responsável antigo.
+    if allow_join_existing and atendimento is not None:
+        status_atd = str(getattr(atendimento, "status", "") or "").split(".")[-1].strip().lower()
+        if status_atd not in {"novo", "aguardando", "em_atendimento", "pausado"}:
+            atendimento = None
 
     can_start_unowned_conversation = False
     if allow_unowned_if_no_history:
@@ -1061,7 +1069,7 @@ def assert_cliente_access(
         )
 
     if atendimento is not None:
-        if not can_start_unowned_conversation:
+        if not can_start_unowned_conversation and not allow_join_existing:
             assert_cliente_conversation_visibility(
                 db,
                 identity=identity,
@@ -1091,7 +1099,7 @@ def assert_cliente_access(
             )
         return cliente, atendimento
 
-    if not can_start_unowned_conversation:
+    if not can_start_unowned_conversation and not allow_join_existing:
         assert_cliente_conversation_visibility(
             db,
             identity=identity,
